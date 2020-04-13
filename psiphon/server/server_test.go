@@ -688,6 +688,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Exercise this option.
 	serverConfig["PeriodicGarbageCollectionSeconds"] = 1
 
+	// Allow port forwards to local test web server.
+	serverConfig["AllowBogons"] = true
+
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	serverConnectedLog := make(chan map[string]interface{}, 1)
@@ -2294,5 +2297,29 @@ func (v verifyTestCasesStoredLookup) isStored(s string) {
 func (v verifyTestCasesStoredLookup) checkStored(t *testing.T, errMessage string) {
 	if len(v) != 0 {
 		t.Fatalf("%s: %+v", errMessage, v)
+	}
+}
+
+func TestIsBogon(t *testing.T) {
+	if IsBogon(net.ParseIP("8.8.8.8")) {
+		t.Errorf("unexpected bogon")
+	}
+	if !IsBogon(net.ParseIP("127.0.0.1")) {
+		t.Errorf("unexpected non-bogon")
+	}
+	if !IsBogon(net.ParseIP("192.168.0.1")) {
+		t.Errorf("unexpected non-bogon")
+	}
+	if !IsBogon(net.ParseIP("::1")) {
+		t.Errorf("unexpected non-bogon")
+	}
+	if !IsBogon(net.ParseIP("fc00::")) {
+		t.Errorf("unexpected non-bogon")
+	}
+}
+
+func BenchmarkIsBogon(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		IsBogon(net.ParseIP("8.8.8.8"))
 	}
 }

@@ -22,8 +22,11 @@ package server
 import (
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"sync/atomic"
+
+	"github.com/wader/filtertransport"
 )
 
 // IntentionalPanicError is an error type that is used
@@ -119,4 +122,11 @@ func isExpectedTunnelIOError(err error) bool {
 		}
 	}
 	return false
+}
+
+// IsBogon checks if the specified IP is a bogon (loopback, private addresses,
+// link-local addresses, etc.)
+func IsBogon(IP net.IP) bool {
+	return filtertransport.FindIPNet(
+		filtertransport.DefaultFilteredNetworks, IP)
 }
