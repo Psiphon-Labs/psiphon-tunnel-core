@@ -214,6 +214,19 @@ func (c *Conn) GetMetrics() common.LogFields {
 	return logFields
 }
 
+var upstreamMetricsNames = []string{
+	"upstream_bytes_fragmented",
+	"upstream_min_bytes_written",
+	"upstream_max_bytes_written",
+	"upstream_min_delayed",
+	"upstream_max_delayed",
+}
+
+// GetUpstreamMetricsNames returns the upstream metrics parameter names.
+func GetUpstreamMetricsNames() []string {
+	return upstreamMetricsNames
+}
+
 // SetPRNG sets the PRNG to be used by the fragmentor. Specifying a PRNG
 // allows for optional replay of a fragmentor sequence. SetPRNG is intended to
 // be used with obfuscator.GetDerivedPRNG and allows for setting the PRNG

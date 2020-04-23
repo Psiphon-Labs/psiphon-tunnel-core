@@ -56,7 +56,6 @@ type Controller struct {
 	establishedOnce                         bool
 	tunnels                                 []*Tunnel
 	nextTunnel                              int
-	startedConnectedReporter                bool
 	isEstablishing                          bool
 	protocolSelectionConstraints            *protocolSelectionConstraints
 	concurrentEstablishTunnelsMutex         sync.Mutex
@@ -111,13 +110,12 @@ func NewController(config *Config) (controller *Controller, err error) {
 		runWaitGroup: new(sync.WaitGroup),
 		// connectedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		connectedTunnels:         make(chan *Tunnel, config.TunnelPoolSize),
-		failedTunnels:            make(chan *Tunnel, config.TunnelPoolSize),
-		tunnels:                  make([]*Tunnel, 0),
-		establishedOnce:          false,
-		startedConnectedReporter: false,
-		isEstablishing:           false,
-		untunneledDialConfig:     untunneledDialConfig,
+		connectedTunnels:     make(chan *Tunnel, config.TunnelPoolSize),
+		failedTunnels:        make(chan *Tunnel, config.TunnelPoolSize),
+		tunnels:              make([]*Tunnel, 0),
+		establishedOnce:      false,
+		isEstablishing:       false,
+		untunneledDialConfig: untunneledDialConfig,
 		// TODO: Add a buffer of 1 so we don't miss a signal while receiver is
 		// starting? Trade-off is potential back-to-back fetch remotes. As-is,
 		// establish will eventually signal another fetch remote.
@@ -238,8 +236,8 @@ func (controller *Controller) Run(ctx context.Context) {
 		go controller.upgradeDownloader()
 	}
 
-	/// Note: the connected reporter isn't started until a tunnel is
-	// established
+	controller.runWaitGroup.Add(1)
+	go controller.connectedReporter()
 
 	controller.runWaitGroup.Add(1)
 	go controller.runTunnels()
@@ -444,18 +442,38 @@ func (controller *Controller) establishTunnelWatcher() {
 // connectedReporter sends periodic "connected" requests to the Psiphon API.
 // These requests are for server-side unique user stats calculation. See the
 // comment in DoConnectedRequest for a description of the request mechanism.
-// To ensure we don't over- or under-count unique users, only one connected
-// request is made across all simultaneous multi-tunnels; and the connected
-// request is repeated periodically for very long-lived tunnels.
-// The signalReportConnected mechanism is used to trigger another connected
-// request immediately after a reconnect.
+//
+// To correctly count daily unique users, only one connected request is made
+// across all simultaneous multi-tunnels; and the connected request is
+// repeated every 24h.
+//
+// The signalReportConnected mechanism is used to trigger a connected request
+// immediately after a reconnect. While strictly only one connected request
+// per 24h is required in order to count daily unique users, the connected
+// request also delivers the establishment duration metric (which includes
+// time elapsed performing the handshake request) and additional fragmentation
+// metrics; these metrics are measured for each tunnel.
 func (controller *Controller) connectedReporter() {
 	defer controller.runWaitGroup.Done()
+
+	// session is nil when DisableApi is set
+	if controller.config.DisableApi {
+		return
+	}
+
 loop:
 	for {
 
-		// Pick any active tunnel and make the next connected request. No error
-		// is logged if there's no active tunnel, as that's not an unexpected condition.
+		select {
+		case <-controller.signalReportConnected:
+			// Make the initial connected request
+		case <-controller.runCtx.Done():
+			break loop
+		}
+
+		// Pick any active tunnel and make the next connected request. No error is
+		// logged if there's no active tunnel, as that's not an unexpected
+		// condition.
 		reported := false
 		tunnel := controller.getNextActiveTunnel()
 		if tunnel != nil {
@@ -467,11 +485,9 @@ loop:
 			}
 		}
 
-		// Schedule the next connected request and wait.
-		// Note: this duration is not a dynamic ClientParameter as
-		// the daily unique user stats logic specifically requires
-		// a "connected" request no more or less often than every
-		// 24 hours.
+		// Schedule the next connected request and wait. This duration is not a
+		// dynamic ClientParameter as the daily unique user stats logic specifically
+		// requires a "connected" request no more or less often than every 24h.
 		var duration time.Duration
 		if reported {
 			duration = 24 * time.Hour
@@ -497,23 +513,16 @@ loop:
 	NoticeInfo("exiting connected reporter")
 }
 
-func (controller *Controller) startOrSignalConnectedReporter() {
+func (controller *Controller) signalConnectedReporter() {
+
 	// session is nil when DisableApi is set
 	if controller.config.DisableApi {
 		return
 	}
 
-	// Start the connected reporter after the first tunnel is established.
-	// Concurrency note: only the runTunnels goroutine may access startedConnectedReporter.
-	if !controller.startedConnectedReporter {
-		controller.startedConnectedReporter = true
-		controller.runWaitGroup.Add(1)
-		go controller.connectedReporter()
-	} else {
-		select {
-		case controller.signalReportConnected <- struct{}{}:
-		default:
-		}
+	select {
+	case controller.signalReportConnected <- struct{}{}:
+	default:
 	}
 }
 
@@ -758,7 +767,7 @@ loop:
 				// Signal a connected request on each 1st tunnel establishment. For
 				// multi-tunnels, the session is connected as long as at least one
 				// tunnel is established.
-				controller.startOrSignalConnectedReporter()
+				controller.signalConnectedReporter()
 
 				// If the handshake indicated that a new client version is available,
 				// trigger an upgrade download.
@@ -1610,7 +1619,8 @@ func (controller *Controller) doFetchTactics(
 	}
 	defer meekConn.Close()
 
-	apiParams := getBaseAPIParameters(controller.config, dialParams)
+	apiParams := getBaseAPIParameters(
+		baseParametersAll, controller.config, dialParams)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,

@@ -178,7 +178,7 @@ func convertHTTPRequestToAPIRequest(
 
 			// TODO: faster lookup?
 			isArray := false
-			for _, paramSpec := range baseRequestParams {
+			for _, paramSpec := range baseSessionAndDialParams {
 				if paramSpec.name == name {
 					isArray = (paramSpec.flags&requestParamArray != 0)
 					break
