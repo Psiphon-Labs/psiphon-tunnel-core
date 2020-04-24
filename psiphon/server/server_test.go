@@ -924,12 +924,22 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	defer psiphon.CloseDataStore()
 
-	// Force reset the client last_connected to exercise unique user counting. We
-	// also exercise the non-unique user case.
-	expectUniqueUser := false
-	if serverRuns%2 == 1 {
+	// Test unique user counting cases.
+	var expectUniqueUser bool
+	switch serverRuns % 3 {
+	case 0:
+		// Mock no last_connected.
 		psiphon.SetKeyValue("lastConnected", "")
 		expectUniqueUser = true
+	case 1:
+		// Mock previous day last_connected.
+		psiphon.SetKeyValue(
+			"lastConnected",
+			time.Now().UTC().AddDate(0, 0, -1).Truncate(1*time.Hour).Format(time.RFC3339))
+		expectUniqueUser = true
+	case 2:
+		// Leave previous last_connected.
+		expectUniqueUser = false
 	}
 
 	// Clear SLOKs from previous test runs.
