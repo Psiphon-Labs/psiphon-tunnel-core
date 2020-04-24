@@ -1035,27 +1035,6 @@ func getRequestLogFields(
 				// the field in this case.
 
 			default:
-
-				// Add a distinct app ID field when the value is present in
-				// client_platform.
-				if expectedParam.name == "client_platform" {
-					index := -1
-					clientPlatform := strValue
-					if strings.HasPrefix(clientPlatform, "iOS") {
-						index = 3
-					} else if strings.HasPrefix(clientPlatform, "Android") {
-						index = 2
-						clientPlatform = strings.TrimSuffix(clientPlatform, "_playstore")
-						clientPlatform = strings.TrimSuffix(clientPlatform, "_rooted")
-					}
-					if index > 0 {
-						components := strings.Split(clientPlatform, "_")
-						if index < len(components) {
-							logFields["client_app_id"] = components[index]
-						}
-					}
-				}
-
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
 					logFields[expectedParam.name] = intValue

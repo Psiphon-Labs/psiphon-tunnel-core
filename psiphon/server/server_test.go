@@ -544,7 +544,6 @@ var (
 	testSSHClientVersions = []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
 	testUserAgents        = []string{"ua1", "ua2", "ua3"}
 	testNetworkType       = "WIFI"
-	testAppID             = "com.test.app"
 )
 
 var serverRuns = 0
@@ -827,7 +826,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	clientConfigJSON := fmt.Sprintf(`
     {
-        "ClientPlatform" : "Android_10_%s",
+        "ClientPlatform" : "Android_10_com.test.app",
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
@@ -839,7 +838,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "LimitTunnelProtocols" : ["%s"]
         %s
         %s
-    }`, testAppID, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
+    }`, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
 
 	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
 	if err != nil {
@@ -1222,7 +1221,6 @@ func checkExpectedServerTunnelLogFields(
 		"established_tunnels_count",
 		"network_latency_multiplier",
 		"network_type",
-		"client_app_id",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -1374,10 +1372,6 @@ func checkExpectedServerTunnelLogFields(
 		return fmt.Errorf("unexpected network_type '%s'", fields["network_type"])
 	}
 
-	if fields["client_app_id"].(string) != testAppID {
-		return fmt.Errorf("unexpected client_app_id '%s'", fields["client_app_id"])
-	}
-
 	return nil
 }
 
@@ -1393,7 +1387,6 @@ func checkExpectedUniqueUserLogFields(
 		"client_platform",
 		"tunnel_whole_device",
 		"device_region",
-		"client_app_id",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
