@@ -37,6 +37,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -114,7 +115,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 func (serverContext *ServerContext) doHandshakeRequest(
 	ignoreStatsRegexps bool) error {
 
-	params := serverContext.getBaseAPIParameters()
+	params := serverContext.getBaseAPIParameters(baseParametersAll)
 
 	// The server will return a signed copy of its own server entry when the
 	// client specifies this 'missing_server_entry_signature' parameter.
@@ -332,14 +333,45 @@ func (serverContext *ServerContext) doHandshakeRequest(
 }
 
 // DoConnectedRequest performs the "connected" API request. This request is
-// used for statistics. The server returns a last_connected token for
-// the client to store and send next time it connects. This token is
-// a timestamp (using the server clock, and should be rounded to the
-// nearest hour) which is used to determine when a connection represents
-// a unique user for a time period.
+// used for statistics, including unique user counting; reporting the full
+// tunnel establishment duration including the handshake request; and updated
+// fragmentor metrics.
+//
+// Users are not assigned identifiers. Instead, daily unique users are
+// calculated by having clients submit their last connected timestamp
+// (truncated to an hour, as a privacy measure). As client clocks are
+// unreliable, the server returns new last_connected values for the client to
+// store and send next time it connects.
 func (serverContext *ServerContext) DoConnectedRequest() error {
 
-	params := serverContext.getBaseAPIParameters()
+	// Limitation: as currently implemented, the last_connected exchange isn't a
+	// distributed, atomic operation. When clients send the connected request,
+	// the server may receive the request, count a unique user based on the
+	// client's last_connected, and then the tunnel fails before the client
+	// receives the response, so the client will not update its last_connected
+	// value and submit the same one again, resulting in an inflated unique user
+	// count.
+	//
+	// The SetInFlightConnectedRequest mechanism mitigates one class of connected
+	// request interruption, a commanded shutdown in the middle of a connected
+	// request, by allowing some time for the request to complete before
+	// terminating the tunnel.
+	//
+	// TODO: consider extending the connected request protocol with additional
+	// "acknowledgment" messages so that the server does not commit its unique
+	// user count until after the client has acknowledged receipt and durable
+	// storage of the new last_connected value.
+
+	requestDone := make(chan struct{})
+	defer close(requestDone)
+
+	if !serverContext.tunnel.SetInFlightConnectedRequest(requestDone) {
+		return errors.TraceNew("tunnel is closing")
+	}
+	defer serverContext.tunnel.SetInFlightConnectedRequest(nil)
+
+	params := serverContext.getBaseAPIParameters(
+		baseParametersOnlyUpstreamFragmentorDialParameters)
 
 	lastConnected, err := getLastConnected()
 	if err != nil {
@@ -411,7 +443,7 @@ func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
 // DoStatusRequest makes a "status" API request to the server, sending session stats.
 func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
-	params := serverContext.getStatusParams(true)
+	params := serverContext.getBaseAPIParameters(baseParametersNoDialParameters)
 
 	// Note: ensure putBackStatusRequestPayload is called, to replace
 	// payload for future attempt, in all failure cases.
@@ -476,28 +508,6 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 	}
 
 	return nil
-}
-
-func (serverContext *ServerContext) getStatusParams(
-	isTunneled bool) common.APIParameters {
-
-	params := serverContext.getBaseAPIParameters()
-
-	// Legacy clients set "connected" to "0" when disconnecting, and this value
-	// is used to calculate session duration estimates. This is now superseded
-	// by explicit tunnel stats duration reporting.
-	// The legacy method of reconstructing session durations is not compatible
-	// with this client's connected request retries and asynchronous final
-	// status request attempts. So we simply set this "connected" flag to reflect
-	// whether the request is sent tunneled or not.
-
-	connected := "1"
-	if !isTunneled {
-		connected = "0"
-	}
-	params["connected"] = connected
-
-	return params
 }
 
 // statusRequestPayloadInfo is a temporary structure for data used to
@@ -680,7 +690,7 @@ func RecordFailedTunnelStat(
 		return errors.Trace(err)
 	}
 
-	params := getBaseAPIParameters(config, dialParams)
+	params := getBaseAPIParameters(baseParametersAll, config, dialParams)
 
 	delete(params, "server_secret")
 	params["server_entry_tag"] = dialParams.ServerEntry.Tag
@@ -782,9 +792,19 @@ func (serverContext *ServerContext) makeSSHAPIRequestPayload(
 	return jsonPayload, nil
 }
 
-func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters {
+type baseParametersFilter int
+
+const (
+	baseParametersAll baseParametersFilter = iota
+	baseParametersOnlyUpstreamFragmentorDialParameters
+	baseParametersNoDialParameters
+)
+
+func (serverContext *ServerContext) getBaseAPIParameters(
+	filter baseParametersFilter) common.APIParameters {
 
 	params := getBaseAPIParameters(
+		filter,
 		serverContext.tunnel.config,
 		serverContext.tunnel.dialParams)
 
@@ -815,6 +835,7 @@ func (serverContext *ServerContext) getBaseAPIParameters() common.APIParameters 
 // included with each Psiphon API request. These common parameters are used
 // for metrics.
 func getBaseAPIParameters(
+	filter baseParametersFilter,
 	config *Config,
 	dialParams *DialParameters) common.APIParameters {
 
@@ -826,140 +847,156 @@ func getBaseAPIParameters(
 	params["propagation_channel_id"] = config.PropagationChannelId
 	params["sponsor_id"] = config.GetSponsorID()
 	params["client_version"] = config.ClientVersion
-	params["relay_protocol"] = dialParams.TunnelProtocol
 	params["client_platform"] = config.ClientPlatform
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
 	params["tunnel_whole_device"] = strconv.Itoa(config.TunnelWholeDevice)
-	params["network_type"] = dialParams.GetNetworkType()
 
-	// The following parameters may be blank and must
-	// not be sent to the server if blank.
+	// Blank parameters must be omitted.
 
 	if config.DeviceRegion != "" {
 		params["device_region"] = config.DeviceRegion
 	}
 
-	if dialParams.BPFProgramName != "" {
-		params["client_bpf"] = dialParams.BPFProgramName
-	}
+	if filter == baseParametersAll {
 
-	if dialParams.SelectedSSHClientVersion {
-		params["ssh_client_version"] = dialParams.SSHClientVersion
-	}
+		params["relay_protocol"] = dialParams.TunnelProtocol
+		params["network_type"] = dialParams.GetNetworkType()
 
-	if dialParams.UpstreamProxyType != "" {
-		params["upstream_proxy_type"] = dialParams.UpstreamProxyType
-	}
-
-	if dialParams.UpstreamProxyCustomHeaderNames != nil {
-		params["upstream_proxy_custom_header_names"] = dialParams.UpstreamProxyCustomHeaderNames
-	}
-
-	if dialParams.FrontingProviderID != "" {
-		params["fronting_provider_id"] = dialParams.FrontingProviderID
-	}
-
-	if dialParams.MeekDialAddress != "" {
-		params["meek_dial_address"] = dialParams.MeekDialAddress
-	}
-
-	meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
-	if meekResolvedIPAddress != "" {
-		params["meek_resolved_ip_address"] = meekResolvedIPAddress
-	}
-
-	if dialParams.MeekSNIServerName != "" {
-		params["meek_sni_server_name"] = dialParams.MeekSNIServerName
-	}
-
-	if dialParams.MeekHostHeader != "" {
-		params["meek_host_header"] = dialParams.MeekHostHeader
-	}
-
-	// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
-	if dialParams.MeekDialAddress != "" {
-		transformedHostName := "0"
-		if dialParams.MeekTransformedHostName {
-			transformedHostName = "1"
+		if dialParams.BPFProgramName != "" {
+			params["client_bpf"] = dialParams.BPFProgramName
 		}
-		params["meek_transformed_host_name"] = transformedHostName
-	}
 
-	if dialParams.SelectedUserAgent {
-		params["user_agent"] = dialParams.UserAgent
-	}
-
-	if dialParams.SelectedTLSProfile {
-		params["tls_profile"] = dialParams.TLSProfile
-		params["tls_version"] = dialParams.GetTLSVersionForMetrics()
-	}
-
-	if dialParams.ServerEntry.Region != "" {
-		params["server_entry_region"] = dialParams.ServerEntry.Region
-	}
-
-	if dialParams.ServerEntry.LocalSource != "" {
-		params["server_entry_source"] = dialParams.ServerEntry.LocalSource
-	}
-
-	// As with last_connected, this timestamp stat, which may be
-	// a precise handshake request server timestamp, is truncated
-	// to hour granularity to avoid introducing a reconstructable
-	// cross-session user trace into server logs.
-	localServerEntryTimestamp := common.TruncateTimestampToHour(
-		dialParams.ServerEntry.LocalTimestamp)
-	if localServerEntryTimestamp != "" {
-		params["server_entry_timestamp"] = localServerEntryTimestamp
-	}
-
-	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] =
-		config.GetClientParameters().Get().Tag()
-
-	if dialParams.DialPortNumber != "" {
-		params["dial_port_number"] = dialParams.DialPortNumber
-	}
-
-	if dialParams.QUICVersion != "" {
-		params["quic_version"] = dialParams.QUICVersion
-	}
-
-	if dialParams.QUICDialSNIAddress != "" {
-		params["quic_dial_sni_address"] = dialParams.QUICDialSNIAddress
-	}
-
-	isReplay := "0"
-	if dialParams.IsReplay {
-		isReplay = "1"
-	}
-	params["is_replay"] = isReplay
-
-	if config.EgressRegion != "" {
-		params["egress_region"] = config.EgressRegion
-	}
-
-	// dialParams.DialDuration is nanoseconds; divide to get to milliseconds
-	params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/1000000)
-
-	params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
-
-	params["established_tunnels_count"] = strconv.Itoa(dialParams.EstablishedTunnelsCount)
-
-	if dialParams.NetworkLatencyMultiplier != 0.0 {
-		params["network_latency_multiplier"] =
-			fmt.Sprintf("%f", dialParams.NetworkLatencyMultiplier)
-	}
-
-	if dialParams.DialConnMetrics != nil {
-		metrics := dialParams.DialConnMetrics.GetMetrics()
-		for name, value := range metrics {
-			params[name] = fmt.Sprintf("%v", value)
+		if dialParams.SelectedSSHClientVersion {
+			params["ssh_client_version"] = dialParams.SSHClientVersion
 		}
-	}
 
-	if dialParams.ObfuscatedSSHConnMetrics != nil {
-		metrics := dialParams.ObfuscatedSSHConnMetrics.GetMetrics()
-		for name, value := range metrics {
-			params[name] = fmt.Sprintf("%v", value)
+		if dialParams.UpstreamProxyType != "" {
+			params["upstream_proxy_type"] = dialParams.UpstreamProxyType
+		}
+
+		if dialParams.UpstreamProxyCustomHeaderNames != nil {
+			params["upstream_proxy_custom_header_names"] = dialParams.UpstreamProxyCustomHeaderNames
+		}
+
+		if dialParams.FrontingProviderID != "" {
+			params["fronting_provider_id"] = dialParams.FrontingProviderID
+		}
+
+		if dialParams.MeekDialAddress != "" {
+			params["meek_dial_address"] = dialParams.MeekDialAddress
+		}
+
+		meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
+		if meekResolvedIPAddress != "" {
+			params["meek_resolved_ip_address"] = meekResolvedIPAddress
+		}
+
+		if dialParams.MeekSNIServerName != "" {
+			params["meek_sni_server_name"] = dialParams.MeekSNIServerName
+		}
+
+		if dialParams.MeekHostHeader != "" {
+			params["meek_host_header"] = dialParams.MeekHostHeader
+		}
+
+		// MeekTransformedHostName is meaningful when meek is used, which is when
+		// MeekDialAddress != ""
+		if dialParams.MeekDialAddress != "" {
+			transformedHostName := "0"
+			if dialParams.MeekTransformedHostName {
+				transformedHostName = "1"
+			}
+			params["meek_transformed_host_name"] = transformedHostName
+		}
+
+		if dialParams.SelectedUserAgent {
+			params["user_agent"] = dialParams.UserAgent
+		}
+
+		if dialParams.SelectedTLSProfile {
+			params["tls_profile"] = dialParams.TLSProfile
+			params["tls_version"] = dialParams.GetTLSVersionForMetrics()
+		}
+
+		if dialParams.ServerEntry.Region != "" {
+			params["server_entry_region"] = dialParams.ServerEntry.Region
+		}
+
+		if dialParams.ServerEntry.LocalSource != "" {
+			params["server_entry_source"] = dialParams.ServerEntry.LocalSource
+		}
+
+		// As with last_connected, this timestamp stat, which may be a precise
+		// handshake request server timestamp, is truncated to hour granularity to
+		// avoid introducing a reconstructable cross-session user trace into server
+		// logs.
+		localServerEntryTimestamp := common.TruncateTimestampToHour(
+			dialParams.ServerEntry.LocalTimestamp)
+		if localServerEntryTimestamp != "" {
+			params["server_entry_timestamp"] = localServerEntryTimestamp
+		}
+
+		params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] =
+			config.GetClientParameters().Get().Tag()
+
+		if dialParams.DialPortNumber != "" {
+			params["dial_port_number"] = dialParams.DialPortNumber
+		}
+
+		if dialParams.QUICVersion != "" {
+			params["quic_version"] = dialParams.QUICVersion
+		}
+
+		if dialParams.QUICDialSNIAddress != "" {
+			params["quic_dial_sni_address"] = dialParams.QUICDialSNIAddress
+		}
+
+		isReplay := "0"
+		if dialParams.IsReplay {
+			isReplay = "1"
+		}
+		params["is_replay"] = isReplay
+
+		if config.EgressRegion != "" {
+			params["egress_region"] = config.EgressRegion
+		}
+
+		// dialParams.DialDuration is nanoseconds; divide to get to milliseconds
+		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/1000000)
+
+		params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
+
+		params["established_tunnels_count"] = strconv.Itoa(dialParams.EstablishedTunnelsCount)
+
+		if dialParams.NetworkLatencyMultiplier != 0.0 {
+			params["network_latency_multiplier"] =
+				fmt.Sprintf("%f", dialParams.NetworkLatencyMultiplier)
+		}
+
+		if dialParams.DialConnMetrics != nil {
+			metrics := dialParams.DialConnMetrics.GetMetrics()
+			for name, value := range metrics {
+				params[name] = fmt.Sprintf("%v", value)
+			}
+		}
+
+		if dialParams.ObfuscatedSSHConnMetrics != nil {
+			metrics := dialParams.ObfuscatedSSHConnMetrics.GetMetrics()
+			for name, value := range metrics {
+				params[name] = fmt.Sprintf("%v", value)
+			}
+		}
+
+	} else if filter == baseParametersOnlyUpstreamFragmentorDialParameters {
+
+		if dialParams.DialConnMetrics != nil {
+			names := fragmentor.GetUpstreamMetricsNames()
+			metrics := dialParams.DialConnMetrics.GetMetrics()
+			for name, value := range metrics {
+				if common.Contains(names, name) {
+					params[name] = fmt.Sprintf("%v", value)
+				}
+			}
 		}
 	}
 

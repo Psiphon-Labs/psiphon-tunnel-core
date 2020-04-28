@@ -544,10 +544,13 @@ var (
 	testSSHClientVersions = []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
 	testUserAgents        = []string{"ua1", "ua2", "ua3"}
 	testNetworkType       = "WIFI"
-	testAppID             = "com.test.app"
 )
 
+var serverRuns = 0
+
 func runServer(t *testing.T, runConfig *runServerConfig) {
+
+	serverRuns += 1
 
 	// configure authorized access
 
@@ -693,8 +696,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
-	serverConnectedLog := make(chan map[string]interface{}, 1)
 	serverTunnelLog := make(chan map[string]interface{}, 1)
+	uniqueUserLog := make(chan map[string]interface{}, 1)
 
 	setLogCallback(func(log []byte) {
 
@@ -710,9 +713,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		switch logFields["event_name"].(string) {
-		case "connected":
+		case "unique_user":
 			select {
-			case serverConnectedLog <- logFields:
+			case uniqueUserLog <- logFields:
 			default:
 			}
 		case "server_tunnel":
@@ -811,9 +814,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	localSOCKSProxyPort := 1081
 	localHTTPProxyPort := 8081
 
-	// Use a distinct suffix for network ID for each test run to
-	// ensure tactics from different runs don't apply; this is
-	// a workaround for the singleton datastore.
+	// Use a distinct suffix for network ID for each test run to ensure tactics
+	// from different runs don't apply; this is a workaround for the singleton
+	// datastore.
 	jsonNetworkID := fmt.Sprintf(`,"NetworkID" : "WIFI-%s"`, time.Now().String())
 
 	jsonLimitTLSProfiles := ""
@@ -823,7 +826,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	clientConfigJSON := fmt.Sprintf(`
     {
-        "ClientPlatform" : "Android_10_%s",
+        "ClientPlatform" : "Android_10_com.test.app",
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
@@ -835,7 +838,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "LimitTunnelProtocols" : ["%s"]
         %s
         %s
-    }`, testAppID, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
+    }`, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
 
 	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
 	if err != nil {
@@ -919,6 +922,24 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error initializing client datastore: %s", err)
 	}
 	defer psiphon.CloseDataStore()
+
+	// Test unique user counting cases.
+	var expectUniqueUser bool
+	switch serverRuns % 3 {
+	case 0:
+		// Mock no last_connected.
+		psiphon.SetKeyValue("lastConnected", "")
+		expectUniqueUser = true
+	case 1:
+		// Mock previous day last_connected.
+		psiphon.SetKeyValue(
+			"lastConnected",
+			time.Now().UTC().AddDate(0, 0, -1).Truncate(1*time.Hour).Format(time.RFC3339))
+		expectUniqueUser = true
+	case 2:
+		// Leave previous last_connected.
+		expectUniqueUser = false
+	}
 
 	// Clear SLOKs from previous test runs.
 	psiphon.DeleteSLOKs()
@@ -1131,22 +1152,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// without this delay.
 	time.Sleep(100 * time.Millisecond)
 
-	select {
-	case logFields := <-serverConnectedLog:
-		err := checkExpectedLogFields(runConfig, false, false, logFields)
-		if err != nil {
-			t.Fatalf("invalid server connected log fields: %s", err)
-		}
-	default:
-		t.Fatalf("missing server connected log")
-	}
-
 	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics
 	expectServerBPFField := ServerBPFEnabled() && doServerTactics
 
 	select {
 	case logFields := <-serverTunnelLog:
-		err := checkExpectedLogFields(runConfig, expectClientBPFField, expectServerBPFField, logFields)
+		err := checkExpectedServerTunnelLogFields(
+			runConfig, expectClientBPFField, expectServerBPFField, logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
 		}
@@ -1154,11 +1166,29 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("missing server tunnel log")
 	}
 
+	if expectUniqueUser {
+		select {
+		case logFields := <-uniqueUserLog:
+			err := checkExpectedUniqueUserLogFields(runConfig, logFields)
+			if err != nil {
+				t.Fatalf("invalid unique user log fields: %s", err)
+			}
+		default:
+			t.Fatalf("missing unique user log")
+		}
+	} else {
+		select {
+		case <-uniqueUserLog:
+			t.Fatalf("unexpected unique user log")
+		default:
+		}
+	}
+
 	// Check that datastore had retained/pruned server entries as expected.
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
 }
 
-func checkExpectedLogFields(
+func checkExpectedServerTunnelLogFields(
 	runConfig *runServerConfig,
 	expectClientBPFField bool,
 	expectServerBPFField bool,
@@ -1191,7 +1221,6 @@ func checkExpectedLogFields(
 		"established_tunnels_count",
 		"network_latency_multiplier",
 		"network_type",
-		"client_app_id",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -1343,8 +1372,25 @@ func checkExpectedLogFields(
 		return fmt.Errorf("unexpected network_type '%s'", fields["network_type"])
 	}
 
-	if fields["client_app_id"].(string) != testAppID {
-		return fmt.Errorf("unexpected client_app_id '%s'", fields["client_app_id"])
+	return nil
+}
+
+func checkExpectedUniqueUserLogFields(
+	runConfig *runServerConfig,
+	fields map[string]interface{}) error {
+
+	for _, name := range []string{
+		"session_id",
+		"last_connected",
+		"propagation_channel_id",
+		"sponsor_id",
+		"client_platform",
+		"tunnel_whole_device",
+		"device_region",
+	} {
+		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
 	}
 
 	return nil
