@@ -21,6 +21,7 @@ package server
 
 import (
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	std_errors "errors"
 	"net"
@@ -28,10 +29,12 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 )
@@ -137,7 +140,7 @@ func dispatchAPIRequestHandler(
 		// applies here.
 		sessionID, err := getStringRequestParam(params, "client_session_id")
 		if err == nil {
-			// Note: follows/duplicates baseRequestParams validation
+			// Note: follows/duplicates baseParams validation
 			if !isHexDigits(support.Config, sessionID) {
 				err = std_errors.New("invalid param: client_session_id")
 			}
@@ -174,12 +177,12 @@ func dispatchAPIRequestHandler(
 
 var handshakeRequestParams = append(
 	append(
-		// Note: legacy clients may not send "session_id" in handshake
 		[]requestParamSpec{
+			// Legacy clients may not send "session_id" in handshake
 			{"session_id", isHexDigits, requestParamOptional},
-			{"missing_server_entry_signature", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool}},
+			{"missing_server_entry_signature", isBase64String, requestParamOptional}},
 		tacticsParams...),
-	baseRequestParams...)
+	baseSessionAndDialParams...)
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
 // Clients make the handshake immediately after establishing a tunnel
@@ -191,9 +194,9 @@ func handshakeAPIRequestHandler(
 	geoIPData GeoIPData,
 	params common.APIParameters) ([]byte, error) {
 
-	// Note: ignoring "known_servers" params
+	// Note: ignoring legacy "known_servers" params
 
-	err := validateRequestParams(support.Config, params, baseRequestParams)
+	err := validateRequestParams(support.Config, params, handshakeRequestParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -233,7 +236,7 @@ func handshakeAPIRequestHandler(
 		handshakeState{
 			completed:               true,
 			apiProtocol:             apiProtocol,
-			apiParams:               copyBaseRequestParams(params),
+			apiParams:               copyBaseSessionAndDialParams(params),
 			expectDomainBytes:       len(httpsRequestRegexes) > 0,
 			establishedTunnelsCount: establishedTunnelsCount,
 		},
@@ -291,7 +294,7 @@ func handshakeAPIRequestHandler(
 			geoIPData,
 			handshakeStateInfo.authorizedAccessTypes,
 			params,
-			baseRequestParams)).Debug("handshake")
+			handshakeRequestParams)).Debug("handshake")
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
@@ -339,31 +342,33 @@ func handshakeAPIRequestHandler(
 	return responsePayload, nil
 }
 
+// uniqueUserParams are the connected request parameters which are logged for
+// unique_user events.
+var uniqueUserParams = append(
+	[]requestParamSpec{
+		{"last_connected", isLastConnected, 0}},
+	baseSessionParams...)
+
 var connectedRequestParams = append(
 	[]requestParamSpec{
-		{"session_id", isHexDigits, 0},
-		{"last_connected", isLastConnected, 0},
 		{"establishment_duration", isIntString, requestParamOptional | requestParamLogStringAsInt}},
-	baseRequestParams...)
+	uniqueUserParams...)
 
 // updateOnConnectedParamNames are connected request parameters which are
 // copied to update data logged with server_tunnel: these fields either only
 // ship with or ship newer data with connected requests.
-var updateOnConnectedParamNames = []string{
-	"last_connected",
-	"establishment_duration",
-	"upstream_bytes_fragmented",
-	"upstream_min_bytes_written",
-	"upstream_max_bytes_written",
-	"upstream_min_delayed",
-	"upstream_max_delayed",
-}
+var updateOnConnectedParamNames = append(
+	[]string{
+		"last_connected",
+		"establishment_duration",
+	},
+	fragmentor.GetUpstreamMetricsNames()...)
 
-// connectedAPIRequestHandler implements the "connected" API request.
-// Clients make the connected request once a tunnel connection has been
-// established and at least once per day. The last_connected input value,
-// which should be a connected_timestamp output from a previous connected
-// response, is used to calculate unique user stats.
+// connectedAPIRequestHandler implements the "connected" API request. Clients
+// make the connected request once a tunnel connection has been established
+// and at least once per 24h for long-running tunnels. The last_connected
+// input value, which should be a connected_timestamp output from a previous
+// connected response, is used to calculate unique user stats.
 // connected_timestamp is truncated as a privacy measure.
 func connectedAPIRequestHandler(
 	support *SupportServices,
@@ -376,21 +381,58 @@ func connectedAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
+	sessionID, _ := getStringRequestParam(params, "client_session_id")
+	lastConnected, _ := getStringRequestParam(params, "last_connected")
+
 	// Update, for server_tunnel logging, upstream fragmentor metrics, as the
-	// client may have performed more upstream fragmentation since the
-	// previous metrics reported by the handshake request. Also, additional
-	// fields reported only in the connected request, are added to
-	// server_tunnel here.
+	// client may have performed more upstream fragmentation since the previous
+	// metrics reported by the handshake request. Also, additional fields that
+	// are reported only in the connected request are added to server_tunnel
+	// here.
 
 	// TODO: same session-ID-lookup TODO in handshakeAPIRequestHandler
 	// applies here.
-	sessionID, _ := getStringRequestParam(params, "client_session_id")
 	err = support.TunnelServer.UpdateClientAPIParameters(
 		sessionID, copyUpdateOnConnectedParams(params))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
+	connectedTimestamp := common.TruncateTimestampToHour(common.GetCurrentTimestamp())
+
+	// The finest required granularity for unique users is daily. To save space,
+	// only record a "unique_user" log event when the client's last_connected is
+	// in the previous day relative to the new connected_timestamp.
+
+	logUniqueUser := false
+	if lastConnected == "None" {
+		logUniqueUser = true
+	} else {
+
+		t1, _ := time.Parse(time.RFC3339, lastConnected)
+		year, month, day := t1.Date()
+		d1 := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+
+		t2, _ := time.Parse(time.RFC3339, connectedTimestamp)
+		year, month, day = t2.Date()
+		d2 := time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+
+		if t1.Before(t2) && d1 != d2 {
+			logUniqueUser = true
+		}
+	}
+
+	if logUniqueUser {
+		log.LogRawFieldsWithTimestamp(
+			getRequestLogFields(
+				"unique_user",
+				geoIPData,
+				authorizedAccessTypes,
+				params,
+				uniqueUserParams))
+	}
+
+	// TODO: retire the legacy "connected" log event
 	log.LogRawFieldsWithTimestamp(
 		getRequestLogFields(
 			"connected",
@@ -402,7 +444,7 @@ func connectedAPIRequestHandler(
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
 	connectedResponse := protocol.ConnectedResponse{
-		ConnectedTimestamp: common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
+		ConnectedTimestamp: connectedTimestamp,
 		Padding:            strings.Repeat(" ", pad_response),
 	}
 
@@ -414,26 +456,16 @@ func connectedAPIRequestHandler(
 	return responsePayload, nil
 }
 
-var statusRequestParams = append(
-	[]requestParamSpec{
-		{"session_id", isHexDigits, 0},
-		{"connected", isBooleanFlag, requestParamLogFlagAsBool}},
-	baseRequestParams...)
+var statusRequestParams = baseSessionParams
 
-var remoteServerListStatParams = []requestParamSpec{
-	{"session_id", isHexDigits, 0},
-	{"propagation_channel_id", isHexDigits, 0},
-	{"sponsor_id", isHexDigits, 0},
-	{"client_version", isIntString, requestParamLogStringAsInt},
-	{"client_platform", isAnyString, 0},
-	{"client_build_rev", isAnyString, requestParamOptional},
-	{"device_region", isAnyString, requestParamOptional},
-	{"client_download_timestamp", isISO8601Date, 0},
-	{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-	{"url", isAnyString, 0},
-	{"etag", isAnyString, 0},
-	{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-}
+var remoteServerListStatParams = append(
+	[]requestParamSpec{
+		{"client_download_timestamp", isISO8601Date, 0},
+		{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+		{"url", isAnyString, 0},
+		{"etag", isAnyString, 0},
+		{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool}},
+	baseSessionParams...)
 
 // Backwards compatibility case: legacy clients do not include these fields in
 // the remote_server_list_stats entries. Use the values from the outer status
@@ -464,7 +496,7 @@ var failedTunnelStatParams = append(
 		{"bytes_up", isIntString, requestParamOptional},
 		{"bytes_down", isIntString, requestParamOptional},
 		{"tunnel_error", isAnyString, 0}},
-	baseRequestParams...)
+	baseSessionAndDialParams...)
 
 // statusAPIRequestHandler implements the "status" API request.
 // Clients make periodic status requests which deliver client-side
@@ -552,6 +584,8 @@ func statusAPIRequestHandler(
 				}
 			}
 
+			remoteServerListStat["server_secret"] = params["server_secret"]
+
 			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
 			if err != nil {
 				return nil, errors.Trace(err)
@@ -586,9 +620,8 @@ func statusAPIRequestHandler(
 		}
 		for _, failedTunnelStat := range failedTunnelStats {
 
-			// failed_tunnel supplies a full set of common params, but the
-			// server secret must use the correct value from the outer
-			// statusRequestParams
+			// failed_tunnel supplies a full set of base params, but the server secret
+			// must use the correct value from the outer statusRequestParams.
 			failedTunnelStat["server_secret"] = params["server_secret"]
 
 			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
@@ -684,10 +717,8 @@ var tacticsParams = []requestParamSpec{
 }
 
 var tacticsRequestParams = append(
-	append(
-		[]requestParamSpec{{"session_id", isHexDigits, 0}},
-		tacticsParams...),
-	baseRequestParams...)
+	append([]requestParamSpec(nil), tacticsParams...),
+	baseSessionAndDialParams...)
 
 func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidator {
 	return func(params common.APIParameters) error {
@@ -710,6 +741,9 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 	}
 }
 
+// requestParamSpec defines a request parameter. Each param is expected to be
+// a string, unless requestParamArray is specified, in which case an array of
+// strings is expected.
 type requestParamSpec struct {
 	name      string
 	validator func(*Config, string) bool
@@ -729,12 +763,9 @@ const (
 	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 9
 )
 
-// baseRequestParams is the list of required and optional
-// request parameters; derived from COMMON_INPUTS and
-// OPTIONAL_COMMON_INPUTS in psi_web.
-// Each param is expected to be a string, unless requestParamArray
-// is specified, in which case an array of string is expected.
-var baseRequestParams = []requestParamSpec{
+// baseParams are the basic request parameters that are expected for all API
+// requests and log events.
+var baseParams = []requestParamSpec{
 	{"server_secret", isServerSecret, requestParamNotLogged},
 	{"client_session_id", isHexDigits, requestParamNotLogged},
 	{"propagation_channel_id", isHexDigits, 0},
@@ -742,48 +773,63 @@ var baseRequestParams = []requestParamSpec{
 	{"client_version", isIntString, requestParamLogStringAsInt},
 	{"client_platform", isClientPlatform, 0},
 	{"client_build_rev", isHexDigits, requestParamOptional},
-	{"relay_protocol", isRelayProtocol, 0},
 	{"tunnel_whole_device", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"device_region", isAnyString, requestParamOptional},
-	{"ssh_client_version", isAnyString, requestParamOptional},
-	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
-	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
-	{"fronting_provider_id", isAnyString, requestParamOptional},
-	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
-	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
-	{"meek_sni_server_name", isDomain, requestParamOptional},
-	{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
-	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-	{"user_agent", isAnyString, requestParamOptional},
-	{"tls_profile", isAnyString, requestParamOptional},
-	{"tls_version", isAnyString, requestParamOptional},
-	{"server_entry_region", isRegionCode, requestParamOptional},
-	{"server_entry_source", isServerEntrySource, requestParamOptional},
-	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
-	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
-	{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"quic_version", isAnyString, requestParamOptional},
-	{"quic_dial_sni_address", isAnyString, requestParamOptional},
-	{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
-	{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-	{"egress_region", isRegionCode, requestParamOptional},
-	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
-	{"client_bpf", isAnyString, requestParamOptional},
-	{"network_type", isAnyString, requestParamOptional},
 }
+
+// baseSessionParams adds the required session_id parameter. For all requests
+// except handshake, all existing clients are expected to send session_id.
+// Legacy clients may not send "session_id" in handshake.
+var baseSessionParams = append(
+	[]requestParamSpec{
+		{"session_id", isHexDigits, 0}},
+	baseParams...)
+
+// baseSessionAndDialParams adds the dial parameters, per-tunnel network
+// protocol and obfuscation metrics which are logged with server_tunnel,
+// failed_tunnel, and tactics.
+var baseSessionAndDialParams = append(
+	[]requestParamSpec{
+		{"relay_protocol", isRelayProtocol, 0},
+		{"ssh_client_version", isAnyString, requestParamOptional},
+		{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
+		{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
+		{"fronting_provider_id", isAnyString, requestParamOptional},
+		{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
+		{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
+		{"meek_sni_server_name", isDomain, requestParamOptional},
+		{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
+		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+		{"user_agent", isAnyString, requestParamOptional},
+		{"tls_profile", isAnyString, requestParamOptional},
+		{"tls_version", isAnyString, requestParamOptional},
+		{"server_entry_region", isRegionCode, requestParamOptional},
+		{"server_entry_source", isServerEntrySource, requestParamOptional},
+		{"server_entry_timestamp", isISO8601Date, requestParamOptional},
+		{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+		{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"quic_version", isAnyString, requestParamOptional},
+		{"quic_dial_sni_address", isAnyString, requestParamOptional},
+		{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
+		{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+		{"egress_region", isRegionCode, requestParamOptional},
+		{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
+		{"client_bpf", isAnyString, requestParamOptional},
+		{"network_type", isAnyString, requestParamOptional}},
+	baseSessionParams...)
 
 func validateRequestParams(
 	config *Config,
@@ -822,14 +868,14 @@ func validateRequestParams(
 	return nil
 }
 
-// copyBaseRequestParams makes a copy of the params which
-// includes only the baseRequestParams.
-func copyBaseRequestParams(params common.APIParameters) common.APIParameters {
+// copyBaseSessionAndDialParams makes a copy of the params which includes only
+// the baseSessionAndDialParams.
+func copyBaseSessionAndDialParams(params common.APIParameters) common.APIParameters {
 
-	// Note: not a deep copy; assumes baseRequestParams values
-	// are all scalar types (int, string, etc.)
+	// Note: not a deep copy; assumes baseSessionAndDialParams values are all
+	// scalar types (int, string, etc.)
 	paramsCopy := make(common.APIParameters)
-	for _, baseParam := range baseRequestParams {
+	for _, baseParam := range baseSessionAndDialParams {
 		value := params[baseParam.name]
 		if value == nil {
 			continue
@@ -989,27 +1035,6 @@ func getRequestLogFields(
 				// the field in this case.
 
 			default:
-
-				// Add a distinct app ID field when the value is present in
-				// client_platform.
-				if expectedParam.name == "client_platform" {
-					index := -1
-					clientPlatform := strValue
-					if strings.HasPrefix(clientPlatform, "iOS") {
-						index = 3
-					} else if strings.HasPrefix(clientPlatform, "Android") {
-						index = 2
-						clientPlatform = strings.TrimSuffix(clientPlatform, "_playstore")
-						clientPlatform = strings.TrimSuffix(clientPlatform, "_rooted")
-					}
-					if index > 0 {
-						components := strings.Split(clientPlatform, "_")
-						if index < len(components) {
-							logFields["client_app_id"] = components[index]
-						}
-					}
-				}
-
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
 					logFields[expectedParam.name] = intValue
@@ -1252,6 +1277,11 @@ func isHexDigits(_ *Config, value string) bool {
 	})
 }
 
+func isBase64String(_ *Config, value string) bool {
+	_, err := base64.StdEncoding.DecodeString(value)
+	return err == nil
+}
+
 func isDigits(_ *Config, value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return c < '0' || c > '9'
@@ -1369,5 +1399,5 @@ func isISO8601Date(_ *Config, value string) bool {
 }
 
 func isLastConnected(_ *Config, value string) bool {
-	return value == "None" || value == "Unknown" || isISO8601Date(nil, value)
+	return value == "None" || isISO8601Date(nil, value)
 }

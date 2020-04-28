@@ -82,26 +82,27 @@ type TunnelOwner interface {
 // tunnel includes a network connection to the specified server
 // and an SSH session built on top of that transport.
 type Tunnel struct {
-	mutex                      *sync.Mutex
-	config                     *Config
-	isActivated                bool
-	isDiscarded                bool
-	isClosed                   bool
-	dialParams                 *DialParameters
-	livenessTestMetrics        *livenessTestMetrics
-	serverContext              *ServerContext
-	conn                       *common.ActivityMonitoredConn
-	sshClient                  *ssh.Client
-	sshServerRequests          <-chan *ssh.Request
-	operateWaitGroup           *sync.WaitGroup
-	operateCtx                 context.Context
-	stopOperate                context.CancelFunc
-	signalPortForwardFailure   chan struct{}
-	totalPortForwardFailures   int
-	adjustedEstablishStartTime time.Time
-	establishDuration          time.Duration
-	establishedTime            time.Time
-	handledSSHKeepAliveFailure int32
+	mutex                          *sync.Mutex
+	config                         *Config
+	isActivated                    bool
+	isDiscarded                    bool
+	isClosed                       bool
+	dialParams                     *DialParameters
+	livenessTestMetrics            *livenessTestMetrics
+	serverContext                  *ServerContext
+	conn                           *common.ActivityMonitoredConn
+	sshClient                      *ssh.Client
+	sshServerRequests              <-chan *ssh.Request
+	operateWaitGroup               *sync.WaitGroup
+	operateCtx                     context.Context
+	stopOperate                    context.CancelFunc
+	signalPortForwardFailure       chan struct{}
+	totalPortForwardFailures       int
+	adjustedEstablishStartTime     time.Time
+	establishDuration              time.Duration
+	establishedTime                time.Time
+	handledSSHKeepAliveFailure     int32
+	inFlightConnectedRequestSignal chan struct{}
 }
 
 // getCustomClientParameters helpers wrap the verbose function call chain
@@ -332,6 +333,55 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		if err != nil {
 			NoticeWarning("close tunnel ssh error: %s", err)
 		}
+	}
+}
+
+// SetInFlightConnectedRequest checks if a connected request can begin and
+// sets the channel used to signal that the request is complete.
+//
+// The caller must not initiate a connected request when
+// SetInFlightConnectedRequest returns false. When SetInFlightConnectedRequest
+// returns true, the caller must call SetInFlightConnectedRequest(nil) when
+// the connected request completes.
+func (tunnel *Tunnel) SetInFlightConnectedRequest(requestSignal chan struct{}) bool {
+	tunnel.mutex.Lock()
+	defer tunnel.mutex.Unlock()
+
+	// If already closing, don't start a connected request: the
+	// TunnelOperateShutdownTimeout period may be nearly expired.
+	if tunnel.isClosed {
+		return false
+	}
+
+	if requestSignal == nil {
+		// Not already in-flight (not expected)
+		if tunnel.inFlightConnectedRequestSignal == nil {
+			return false
+		}
+	} else {
+		// Already in-flight (not expected)
+		if tunnel.inFlightConnectedRequestSignal != nil {
+			return false
+		}
+	}
+
+	tunnel.inFlightConnectedRequestSignal = requestSignal
+
+	return true
+}
+
+// AwaitInFlightConnectedRequest waits for the signal that any in-flight
+// connected request is complete.
+//
+// AwaitInFlightConnectedRequest may block until the connected request is
+// aborted by terminating the tunnel.
+func (tunnel *Tunnel) AwaitInFlightConnectedRequest() {
+	tunnel.mutex.Lock()
+	requestSignal := tunnel.inFlightConnectedRequestSignal
+	tunnel.mutex.Unlock()
+
+	if requestSignal != nil {
+		<-requestSignal
 	}
 }
 
@@ -1273,18 +1323,34 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 		tunnel.dialParams.ServerEntry.GetDiagnosticID(), bytesUp, bytesDown)
 
 	if err == nil {
+
 		NoticeInfo("shutdown operate tunnel")
 
-		// Send a final status request in order to report any outstanding
-		// domain bytes transferred stats as well as to report session stats
-		// as soon as possible.
-		// This request will be interrupted when the tunnel is closed after
-		// an operate shutdown timeout.
+		// This commanded shutdown case is initiated by Tunnel.Close, which will
+		// wait up to parameters.TunnelOperateShutdownTimeout to allow the following
+		// requests to complete.
+
+		// Send a final status request in order to report any outstanding persistent
+		// stats and domain bytes transferred as soon as possible.
+
 		sendStats(tunnel)
 
+		// The controller connectedReporter may have initiated a connected request
+		// concurrent to this commanded shutdown. SetInFlightConnectedRequest
+		// ensures that a connected request doesn't start after the commanded
+		// shutdown. AwaitInFlightConnectedRequest blocks until any in flight
+		// request completes or is aborted after TunnelOperateShutdownTimeout.
+		//
+		// As any connected request is performed by a concurrent goroutine,
+		// sendStats is called first and AwaitInFlightConnectedRequest second.
+
+		tunnel.AwaitInFlightConnectedRequest()
+
 	} else {
+
 		NoticeWarning("operate tunnel error for %s: %s",
 			tunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
+
 		tunnelOwner.SignalTunnelFailure(tunnel)
 	}
 }

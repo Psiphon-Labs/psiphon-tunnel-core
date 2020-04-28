@@ -370,7 +370,7 @@ func (set *TrafficRulesSet) Validate() error {
 
 		for paramName := range filteredRule.Filter.HandshakeParameters {
 			validParamName := false
-			for _, paramSpec := range baseRequestParams {
+			for _, paramSpec := range handshakeRequestParams {
 				if paramSpec.name == paramName {
 					validParamName = true
 					break

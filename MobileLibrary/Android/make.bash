@@ -51,8 +51,23 @@ echo " Gomobile version: ${GOMOBILEVERSION}"
 echo " Dependencies: ${DEPENDENCIES}"
 echo ""
 
-# Note: android/386 is x86 and android/amd64 is x86_64
-gomobile bind -v -x -target=android/arm,android/arm64,android/386,android/amd64 -tags="${BUILD_TAGS}" -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
+# Note: android/386 is x86, which is used on both x86 and x86_64 Android
+# devices. We are excluding the android/amd64, x86_64, ABI as it causes a
+# crash in Android x86_64 emulators: "seccomp prevented call to disallowed
+# x86_64 system call 22". x86/linux syscall 22 is pipe.
+#
+# In Android seccomp config, pipe is permitted only for 32-bit platforms:
+# https://android.googlesource.com/platform/bionic/+/2b499046f10487802bfbaaf4429160595d08b22c/libc/SECCOMP_WHITELIST_APP.TXT#7.
+#
+# The Go syscall.Pipe on linux(android)/amd64 is the disallowed pipe:
+# https://github.com/golang/go/blob/release-branch.go1.14/src/syscall/syscall_linux_amd64.go#L115-L126
+#
+# A potential future fix is to use the allowed pipe2,
+# https://android.googlesource.com/platform/bionic/+/2b499046f10487802bfbaaf4429160595d08b22c/libc/SYSCALLS.TXT#129,
+# which is what linux(android)/arm64 uses, for example:
+# https://github.com/golang/go/blob/release-branch.go1.14/src/syscall/syscall_linux_arm64.go#L150-L159.
+
+gomobile bind -v -x -target=android/arm,android/arm64,android/386 -tags="${BUILD_TAGS}" -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 if [ $? != 0 ]; then
   echo "..'gomobile bind' failed, exiting"
   exit $?
@@ -64,7 +79,6 @@ yes | cp -f PsiphonTunnel/AndroidManifest.xml build-tmp/psi/AndroidManifest.xml
 yes | cp -f PsiphonTunnel/libs/armeabi-v7a/libtun2socks.so build-tmp/psi/jni/armeabi-v7a/libtun2socks.so
 yes | cp -f PsiphonTunnel/libs/arm64-v8a/libtun2socks.so build-tmp/psi/jni/arm64-v8a/libtun2socks.so
 yes | cp -f PsiphonTunnel/libs/x86/libtun2socks.so build-tmp/psi/jni/x86/libtun2socks.so
-yes | cp -f PsiphonTunnel/libs/x86_64/libtun2socks.so build-tmp/psi/jni/x86_64/libtun2socks.so
 mkdir -p build-tmp/psi/res/xml
 yes | cp -f PsiphonTunnel/ca_psiphon_psiphontunnel_backup_rules.xml build-tmp/psi/res/xml/ca_psiphon_psiphontunnel_backup_rules.xml
 
