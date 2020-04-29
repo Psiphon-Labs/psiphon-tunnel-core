@@ -177,12 +177,14 @@ func dispatchAPIRequestHandler(
 
 var handshakeRequestParams = append(
 	append(
-		[]requestParamSpec{
-			// Legacy clients may not send "session_id" in handshake
-			{"session_id", isHexDigits, requestParamOptional},
-			{"missing_server_entry_signature", isBase64String, requestParamOptional}},
-		tacticsParams...),
-	baseSessionAndDialParams...)
+		append(
+			[]requestParamSpec{
+				// Legacy clients may not send "session_id" in handshake
+				{"session_id", isHexDigits, requestParamOptional},
+				{"missing_server_entry_signature", isBase64String, requestParamOptional}},
+			baseParams...),
+		baseDialParams...),
+	tacticsParams...)
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
 // Clients make the handshake immediately after establishing a tunnel
@@ -584,7 +586,10 @@ func statusAPIRequestHandler(
 				}
 			}
 
+			// For validation, copy expected fields from the outer
+			// statusRequestParams.
 			remoteServerListStat["server_secret"] = params["server_secret"]
+			remoteServerListStat["client_session_id"] = params["client_session_id"]
 
 			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
 			if err != nil {
@@ -777,59 +782,65 @@ var baseParams = []requestParamSpec{
 	{"device_region", isAnyString, requestParamOptional},
 }
 
-// baseSessionParams adds the required session_id parameter. For all requests
-// except handshake, all existing clients are expected to send session_id.
-// Legacy clients may not send "session_id" in handshake.
+// baseSessionParams adds to baseParams the required session_id parameter. For
+// all requests except handshake, all existing clients are expected to send
+// session_id. Legacy clients may not send "session_id" in handshake.
 var baseSessionParams = append(
 	[]requestParamSpec{
 		{"session_id", isHexDigits, 0}},
 	baseParams...)
 
-// baseSessionAndDialParams adds the dial parameters, per-tunnel network
-// protocol and obfuscation metrics which are logged with server_tunnel,
-// failed_tunnel, and tactics.
+// baseDialParams are the dial parameters, per-tunnel network protocol and
+// obfuscation metrics which are logged with server_tunnel, failed_tunnel, and
+// tactics.
+var baseDialParams = []requestParamSpec{
+	{"relay_protocol", isRelayProtocol, 0},
+	{"ssh_client_version", isAnyString, requestParamOptional},
+	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
+	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
+	{"fronting_provider_id", isAnyString, requestParamOptional},
+	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
+	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
+	{"meek_sni_server_name", isDomain, requestParamOptional},
+	{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
+	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"user_agent", isAnyString, requestParamOptional},
+	{"tls_profile", isAnyString, requestParamOptional},
+	{"tls_version", isAnyString, requestParamOptional},
+	{"server_entry_region", isRegionCode, requestParamOptional},
+	{"server_entry_source", isServerEntrySource, requestParamOptional},
+	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
+	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+	{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"quic_version", isAnyString, requestParamOptional},
+	{"quic_dial_sni_address", isAnyString, requestParamOptional},
+	{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
+	{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"egress_region", isRegionCode, requestParamOptional},
+	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
+	{"client_bpf", isAnyString, requestParamOptional},
+	{"network_type", isAnyString, requestParamOptional},
+}
+
+// baseSessionAndDialParams adds baseDialParams to baseSessionParams.
 var baseSessionAndDialParams = append(
-	[]requestParamSpec{
-		{"relay_protocol", isRelayProtocol, 0},
-		{"ssh_client_version", isAnyString, requestParamOptional},
-		{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
-		{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
-		{"fronting_provider_id", isAnyString, requestParamOptional},
-		{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
-		{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
-		{"meek_sni_server_name", isDomain, requestParamOptional},
-		{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
-		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-		{"user_agent", isAnyString, requestParamOptional},
-		{"tls_profile", isAnyString, requestParamOptional},
-		{"tls_version", isAnyString, requestParamOptional},
-		{"server_entry_region", isRegionCode, requestParamOptional},
-		{"server_entry_source", isServerEntrySource, requestParamOptional},
-		{"server_entry_timestamp", isISO8601Date, requestParamOptional},
-		{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
-		{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"quic_version", isAnyString, requestParamOptional},
-		{"quic_dial_sni_address", isAnyString, requestParamOptional},
-		{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"upstream_min_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
-		{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-		{"egress_region", isRegionCode, requestParamOptional},
-		{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
-		{"client_bpf", isAnyString, requestParamOptional},
-		{"network_type", isAnyString, requestParamOptional}},
-	baseSessionParams...)
+	append(
+		[]requestParamSpec{},
+		baseSessionParams...),
+	baseDialParams...)
 
 func validateRequestParams(
 	config *Config,
@@ -1339,11 +1350,12 @@ func isDialAddress(_ *Config, value string) bool {
 	if !isDigits(nil, parts[1]) {
 		return false
 	}
-	port, err := strconv.Atoi(parts[1])
+	_, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return false
 	}
-	return port > 0 && port < 65536
+	// Allow port numbers outside [0,65535] to accommodate failed_tunnel cases.
+	return true
 }
 
 func isIPAddress(_ *Config, value string) bool {
