@@ -593,7 +593,10 @@ func statusAPIRequestHandler(
 
 			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
 			if err != nil {
-				return nil, errors.Trace(err)
+				// Occasionally, clients may send corrupt persistent stat data. Do not
+				// fail the status request, as this will lead to endless retries.
+				log.WithTraceFields(LogFields{"error": err}).Warning("remote_server_list_stats entry dropped")
+				continue
 			}
 
 			remoteServerListFields := getRequestLogFields(
@@ -631,7 +634,13 @@ func statusAPIRequestHandler(
 
 			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
 			if err != nil {
-				return nil, errors.Trace(err)
+				// Occasionally, clients may send corrupt persistent stat data. Do not
+				// fail the status request, as this will lead to endless retries.
+				//
+				// TODO: trigger pruning if the data corruption indicates corrupt server
+				// entry storage?
+				log.WithTraceFields(LogFields{"error": err}).Warning("failed_tunnel_stats entry dropped")
+				continue
 			}
 
 			failedTunnelFields := getRequestLogFields(

@@ -1596,7 +1596,7 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 
 	if err != nil {
 
-		if method == "none" && err.Error() == "no auth passed yet" {
+		if method == "none" && err.Error() == "ssh: no auth passed yet" {
 			// In this case, the callback invocation is noise from auth negotiation
 			return
 		}
