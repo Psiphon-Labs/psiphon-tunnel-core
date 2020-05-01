@@ -26,8 +26,8 @@ import (
 	"testing/iotest"
 	"time"
 
-	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/goarista/monotime"
+	"github.com/miekg/dns"
 )
 
 type dummyConn struct {
