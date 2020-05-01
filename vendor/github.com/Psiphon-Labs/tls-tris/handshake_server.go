@@ -89,7 +89,7 @@ func (c *Conn) serverHandshake() error {
 	// changes, in the passthrough case the ownership of Conn.conn, the client
 	// TCP conn, is transferred to the passthrough relay and a closedConn is
 	// substituted for Conn.conn. This allows the remaining `tls` code paths to
-	// continue reference a net.Conn, albiet one that is closed, so Reads and
+	// continue reference a net.Conn, albeit one that is closed, so Reads and
 	// Writes will fail.
 
 	if c.config.PassthroughAddress != "" {

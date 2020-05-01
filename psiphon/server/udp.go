@@ -145,9 +145,30 @@ func (mux *udpPortForwardMultiplexer) run() {
 			dialIP := net.IP(message.remoteIP)
 			dialPort := int(message.remotePort)
 
+			// Validate DNS packets and check the domain blocklist both when the client
+			// indicates DNS or when DNS is _not_ indicated and the destination port is
+			// 53.
+			if message.forwardDNS || message.remotePort == 53 {
+
+				domain, err := common.ParseDNSQuestion(message.packet)
+				if err != nil {
+					log.WithTraceFields(LogFields{"error": err}).Debug("ParseDNSQuestion failed")
+					// Drop packet
+					continue
+				}
+
+				if domain != "" {
+					ok, _ := mux.sshClient.isDomainPermitted(domain)
+					if !ok {
+						// Drop packet
+						continue
+					}
+				}
+			}
+
 			if message.forwardDNS {
-				// Transparent DNS forwarding. In this case, traffic rules
-				// checks are bypassed, since DNS is essential.
+				// Transparent DNS forwarding. In this case, isPortForwardPermitted
+				// traffic rules checks are bypassed, since DNS is essential.
 				dialIP = mux.sshClient.sshServer.support.DNSResolver.Get()
 				dialPort = DNS_RESOLVER_PORT
 

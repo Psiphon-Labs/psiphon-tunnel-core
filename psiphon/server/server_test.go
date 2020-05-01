@@ -2345,27 +2345,3 @@ func (v verifyTestCasesStoredLookup) checkStored(t *testing.T, errMessage string
 		t.Fatalf("%s: %+v", errMessage, v)
 	}
 }
-
-func TestIsBogon(t *testing.T) {
-	if IsBogon(net.ParseIP("8.8.8.8")) {
-		t.Errorf("unexpected bogon")
-	}
-	if !IsBogon(net.ParseIP("127.0.0.1")) {
-		t.Errorf("unexpected non-bogon")
-	}
-	if !IsBogon(net.ParseIP("192.168.0.1")) {
-		t.Errorf("unexpected non-bogon")
-	}
-	if !IsBogon(net.ParseIP("::1")) {
-		t.Errorf("unexpected non-bogon")
-	}
-	if !IsBogon(net.ParseIP("fc00::")) {
-		t.Errorf("unexpected non-bogon")
-	}
-}
-
-func BenchmarkIsBogon(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		IsBogon(net.ParseIP("8.8.8.8"))
-	}
-}
