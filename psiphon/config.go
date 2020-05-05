@@ -544,7 +544,7 @@ type Config struct {
 	// ApplicationParameters is for testing purposes.
 	ApplicationParameters parameters.KeyValues
 
-	// MigrateHompageNoticesFilename migrates a homepage file from the path
+	// MigrateHomepageNoticesFilename migrates a homepage file from the path
 	// previously configured with setNoticeFiles to the new path for homepage
 	// files under the data root directory. The file specified by this config
 	// value will be moved to config.GetHomePageFilename().
@@ -553,7 +553,7 @@ type Config struct {
 	// migrations are performed.
 	//
 	// If not set, no migration operation will be performed.
-	MigrateHompageNoticesFilename string
+	MigrateHomepageNoticesFilename string
 
 	// MigrateRotatingNoticesFilename migrates notice files from the path
 	// previously configured with setNoticeFiles to the new path for notice
@@ -1796,9 +1796,9 @@ func (n *loggingNetworkIDGetter) GetNetworkID() string {
 func migrationsFromLegacyNoticeFilePaths(config *Config) []common.FileMigration {
 	var noticeMigrations []common.FileMigration
 
-	if config.MigrateHompageNoticesFilename != "" {
+	if config.MigrateHomepageNoticesFilename != "" {
 		noticeMigrations = append(noticeMigrations, common.FileMigration{
-			OldPath: config.MigrateHompageNoticesFilename,
+			OldPath: config.MigrateHomepageNoticesFilename,
 			NewPath: config.GetHomePageFilename(),
 		})
 	}

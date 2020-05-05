@@ -390,7 +390,7 @@ func LoadConfigMigrateTest(oslDirChildrenPreMigration []FileTree, oslDirChildren
 	config := &Config{
 		DataRootDirectory:                            testDataRootDirectory,
 		MigrateRotatingNoticesFilename:               filepath.Join(testDirectory, oldRotatingNoticesFilename),
-		MigrateHompageNoticesFilename:                filepath.Join(testDirectory, oldHomepageNoticeFilename),
+		MigrateHomepageNoticesFilename:                filepath.Join(testDirectory, oldHomepageNoticeFilename),
 		MigrateDataStoreDirectory:                    oldDataStoreDirectory,
 		PropagationChannelId:                         "ABCDEFGH",
 		SponsorId:                                    "12345678",
