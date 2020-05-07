@@ -59,7 +59,7 @@ Create a client config file, copying the contents of `server-entry.dat` to the `
 
 ```
 $ cat server-entry.dat 
-3132372e302e302e31202020207b22746167223a22222c22697041646472657373223a223132372e302e302e31222c227[...]4696f6e56657273696f6e223a312c227369676e6174757265223a22227d
+3132372e302e302e31202020207b22746167223a22222c2269[...]
 
 $ cat client.config
 {
@@ -69,7 +69,7 @@ $ cat client.config
     "PropagationChannelId" : "24BCA4EE20BEB92C",
     "SponsorId" : "721AE60D76700F5A",
 
-    "TargetServerEntry" : "3132372e302e302e31202020207b22746167223a22222c22697041646472657373223a223132372e302e302e31222c227[...]4696f6e56657273696f6e223a312c227369676e6174757265223a22227d"
+    "TargetServerEntry" : "3132372e302e302e31202020207b22746167223a22222c2269[...]"
 }
 ```
 
@@ -77,9 +77,8 @@ $ cat client.config
 
 ```
 $ ./psiphond run
-{"buildDate":"","buildRepo":"","buildRev":"","build_rev":"","context":"server.RunServices#68","dependencies":{},"goVersion":"","host_id":"example-host-id","level":"info","msg":"startup","timestamp":"2019-08-09T11:14:10-04:00"}
-{"build_rev":"","context":"server.(*TunnelServer).Run#194","host_id":"example-host-id","level":"info","localAddress":"127.0.0.1:9999","msg":"listening","timestamp":"2019-08-09T11:14:10-04:00","tunnelProtocol":"OSSH"}
-{"build_rev":"","context":"server.(*TunnelServer).Run.func2#214","host_id":"example-host-id","level":"info","localAddress":"127.0.0.1:9999","msg":"running","timestamp":"2019-08-09T11:14:10-04:00","tunnelProtocol":"OSSH"}
+{"localAddress":"127.0.0.1:9999","msg":"listening","tunnelProtocol":"OSSH",[...]}
+{"localAddress":"127.0.0.1:9999","msg":"running","tunnelProtocol":"OSSH",[...]}
 [...]
 ```
 
@@ -87,10 +86,10 @@ $ ./psiphond run
 
 ```
 $ ./ConsoleClient -config ./client.config
-{"data":{"port":1080},"noticeType":"ListeningSocksProxyPort","showUser":false,"timestamp":"2019-08-09T15:14:54.800Z"}
-{"data":{"port":8080},"noticeType":"ListeningHttpProxyPort","showUser":false,"timestamp":"2019-08-09T15:14:54.801Z"}
+{"data":{"port":1080},"noticeType":"ListeningSocksProxyPort",[...]}
+{"data":{"port":8080},"noticeType":"ListeningHttpProxyPort",[...]}
 [...]
-{"data":{"count":1},"noticeType":"Tunnels","showUser":false,"timestamp":"2019-08-09T15:14:54.995Z"}
+{"data":{"count":1},"noticeType":"Tunnels",[...]}
 ```
 
 ### Tunnel traffic through Psiphon
