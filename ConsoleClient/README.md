@@ -42,11 +42,3 @@ bin
     └── psiphon-tunnel-core-x86_64.exe
 
 ```
-
-### Building without Docker
-
-See the [main README build section](../README.md#build)
-
-### Creating a configuration file
-
-See the [main README configuration section](../README.md#configure)

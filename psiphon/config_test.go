@@ -25,18 +25,11 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/stretchr/testify/suite"
-)
-
-const (
-	_README              = "../README.md"
-	_README_CONFIG_BEGIN = "<!--BEGIN-SAMPLE-CONFIG-->"
-	_README_CONFIG_END   = "<!--END-SAMPLE-CONFIG-->"
 )
 
 type ConfigTestSuite struct {
@@ -48,13 +41,14 @@ type ConfigTestSuite struct {
 }
 
 func (suite *ConfigTestSuite) SetupSuite() {
-	readmeBlob, _ := ioutil.ReadFile(_README)
-	readmeString := string(readmeBlob)
-	readmeString = readmeString[strings.Index(readmeString, _README_CONFIG_BEGIN)+len(_README_CONFIG_BEGIN) : strings.Index(readmeString, _README_CONFIG_END)]
-	readmeString = strings.TrimSpace(readmeString)
-	readmeString = strings.Trim(readmeString, "`")
-
-	suite.confStubBlob = []byte(readmeString)
+	suite.confStubBlob = []byte(`
+	{
+	    "PropagationChannelId" : "<placeholder>",
+	    "SponsorId" : "<placeholder>",
+	    "LocalHttpProxyPort" : 8080,
+	    "LocalSocksProxyPort" : 1080
+	}
+	`)
 
 	var obj map[string]interface{}
 	json.Unmarshal(suite.confStubBlob, &obj)
@@ -390,7 +384,7 @@ func LoadConfigMigrateTest(oslDirChildrenPreMigration []FileTree, oslDirChildren
 	config := &Config{
 		DataRootDirectory:                            testDataRootDirectory,
 		MigrateRotatingNoticesFilename:               filepath.Join(testDirectory, oldRotatingNoticesFilename),
-		MigrateHomepageNoticesFilename:                filepath.Join(testDirectory, oldHomepageNoticeFilename),
+		MigrateHomepageNoticesFilename:               filepath.Join(testDirectory, oldHomepageNoticeFilename),
 		MigrateDataStoreDirectory:                    oldDataStoreDirectory,
 		PropagationChannelId:                         "ABCDEFGH",
 		SponsorId:                                    "12345678",
