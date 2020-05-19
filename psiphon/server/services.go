@@ -94,6 +94,7 @@ func RunServices(configJSON []byte) error {
 			EgressInterface:             config.PacketTunnelEgressInterface,
 			DownstreamPacketQueueSize:   config.PacketTunnelDownstreamPacketQueueSize,
 			SessionIdleExpirySeconds:    config.PacketTunnelSessionIdleExpirySeconds,
+			AllowBogons:                 config.AllowBogons,
 		})
 		if err != nil {
 			log.WithTraceFields(LogFields{"error": err}).Error("init packet tunnel failed")

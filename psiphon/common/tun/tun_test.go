@@ -390,12 +390,14 @@ func (server *testServer) run() {
 			sessionID := prng.HexString(SESSION_ID_LENGTH)
 
 			checkAllowedPortFunc := func(net.IP, int) bool { return true }
+			checkAllowedDomainFunc := func(string) bool { return true }
 
 			server.tunServer.ClientConnected(
 				sessionID,
 				signalConn,
 				checkAllowedPortFunc,
 				checkAllowedPortFunc,
+				checkAllowedDomainFunc,
 				server.updaterMaker,
 				server.metricsUpdater)
 
