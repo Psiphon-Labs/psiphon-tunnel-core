@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/goarista/monotime"
+	"github.com/miekg/dns"
 )
 
 type dummyConn struct {
@@ -271,5 +272,71 @@ func TestLRUConns(t *testing.T) {
 
 	if dummy1.IsClosed() || !dummy2.IsClosed() || !dummy3.IsClosed() {
 		t.Fatalf("unexpected IsClosed state")
+	}
+}
+
+func TestIsBogon(t *testing.T) {
+	if IsBogon(net.ParseIP("8.8.8.8")) {
+		t.Errorf("unexpected bogon")
+	}
+	if !IsBogon(net.ParseIP("127.0.0.1")) {
+		t.Errorf("unexpected non-bogon")
+	}
+	if !IsBogon(net.ParseIP("192.168.0.1")) {
+		t.Errorf("unexpected non-bogon")
+	}
+	if !IsBogon(net.ParseIP("::1")) {
+		t.Errorf("unexpected non-bogon")
+	}
+	if !IsBogon(net.ParseIP("fc00::")) {
+		t.Errorf("unexpected non-bogon")
+	}
+}
+
+func BenchmarkIsBogon(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		IsBogon(net.ParseIP("8.8.8.8"))
+	}
+}
+
+func makeDNSQuery(domain string) ([]byte, error) {
+	query := new(dns.Msg)
+	query.SetQuestion(domain, dns.TypeA)
+	query.RecursionDesired = true
+	msg, err := query.Pack()
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+func TestParseDNSQuestion(t *testing.T) {
+
+	domain := dns.Fqdn("www.example.com")
+	msg, err := makeDNSQuery(domain)
+	if err != nil {
+		t.Fatalf("makeDNSQuery failed: %s", err)
+	}
+
+	checkDomain, err := ParseDNSQuestion(msg)
+	if err != nil {
+		t.Fatalf("ParseDNSQuestion failed: %s", err)
+	}
+
+	if checkDomain != domain {
+		t.Fatalf("unexpected domain")
+	}
+}
+
+func BenchmarkParseDNSQuestion(b *testing.B) {
+
+	domain := dns.Fqdn("www.example.com")
+	msg, err := makeDNSQuery(domain)
+	if err != nil {
+		b.Fatalf("makeDNSQuery failed: %s", err)
+	}
+
+	for i := 0; i < b.N; i++ {
+		ParseDNSQuestion(msg)
 	}
 }

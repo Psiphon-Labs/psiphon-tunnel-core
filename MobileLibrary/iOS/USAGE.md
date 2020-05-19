@@ -9,10 +9,6 @@ blocked by censors.
 The Psiphon Library is available as a `.framework` that can be easily included
 in your project using these instructions.
 
-## Using the Psiphon network
-
-In order to use a Psiphon library over the Psiphon network, you need to contact Psiphon to obtain connection parameters to use with your application. Please email us at [info@psiphon.ca](mailto:info@psiphon.ca).
-
 ## Using the Library in your App
 
 **First step:** Review the sample app, located under `SampleApps`.

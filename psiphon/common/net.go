@@ -31,6 +31,8 @@ import (
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/miekg/dns"
+	"github.com/wader/filtertransport"
 )
 
 // NetDialer mimicks the net.Dialer interface.
@@ -385,4 +387,33 @@ func (conn *ActivityMonitoredConn) IsClosed() bool {
 		return false
 	}
 	return closer.IsClosed()
+}
+
+// IsBogon checks if the specified IP is a bogon (loopback, private addresses,
+// link-local addresses, etc.)
+func IsBogon(IP net.IP) bool {
+	return filtertransport.FindIPNet(
+		filtertransport.DefaultFilteredNetworks, IP)
+}
+
+// ParseDNSQuestion parses a DNS message. When the message is a query,
+// the first question, a fully-qualified domain name, is returned.
+//
+// For other valid DNS messages, "" is returned. An error is returned only
+// for invalid DNS messages.
+//
+// Limitations:
+// - Only the first Question field is extracted.
+// - ParseDNSQuestion only functions for plaintext DNS and cannot
+//   extract domains from DNS-over-TLS/HTTPS, etc.
+func ParseDNSQuestion(request []byte) (string, error) {
+	m := new(dns.Msg)
+	err := m.Unpack(request)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	if len(m.Question) > 0 {
+		return m.Question[0].Name, nil
+	}
+	return "", nil
 }

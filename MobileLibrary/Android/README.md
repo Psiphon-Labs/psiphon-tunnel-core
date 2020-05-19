@@ -3,8 +3,36 @@
 ### Overview
 
 Psiphon Library for Android enables you to easily embed Psiphon in your Android
-app. The Psiphon Library for Android is implemented in Go and follows the standard
-conventions for using a Go library in an Android app.
+app.
+
+### Using the Library
+
+#### If building from source
+
+ 1. Build `ca.psiphon.aar` from via the docker container.
+ 2. Add `ca.psiphon.aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
+
+#### If using Maven based binary distribution
+
+1. Add maven repo to your app build.gradle
+```
+repositories {
+    ...
+    maven {
+        url "https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master"
+    }
+}
+```
+then add PsiphonTunnel dependency like following
+```
+dependencies {
+    ...
+    implementation 'ca.psiphon:psiphontunnel:x.y.z'
+}
+```
+Where x.y.z is the target version. Latest available release version can be found at https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library
+
+See example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
 
 ### Building with Docker
 
@@ -46,44 +74,3 @@ When that command completes, the compiled `.aar` files (suitable for use in an A
 
  1. Follow Go Android documentation ([gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile))
  2. Run `make.bash`
-
-### Using the Library
-
-#### If building from source
-
- 1. Build `ca.psiphon.aar` from via the docker container.
- 2. Add `ca.psiphon.aar` to your Android Studio project as described in the [gomobile documentation](https://godoc.org/golang.org/x/mobile/cmd/gomobile)
-
-#### If using Maven based binary distribution
-
-1. Add maven repo to your app build.gradle
-```
-repositories {
-    ...
-    maven {
-        url "https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master"
-    }
-}
-```
-then add PsiphonTunnel dependency like following
-```
-dependencies {
-    ...
-    implementation 'ca.psiphon:psiphontunnel:2.0.2'
-}
-```
-Where 2.0.2 is the target version. Latest available release version can be found at https://github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library
-
-See example usage in [TunneledWebView sample app](./SampleApps/TunneledWebView/README.md)
-
----
-
-**NOTE**
-
-The maven repo at `https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master/releases` which contains releases up to v2.0.2 is deprecated and will not be updated. All new releases starting with v2.0.2 will be deployed to maven repo at  `https://raw.github.com/Psiphon-Labs/psiphon-tunnel-core-Android-library/master`
-
----
-
-##### Limitations
-
- - Only supports one concurrent instance of Psiphon.

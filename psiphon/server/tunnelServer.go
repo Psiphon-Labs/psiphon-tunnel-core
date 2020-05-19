@@ -2084,6 +2084,11 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 		return sshClient.isPortForwardPermitted(portForwardTypeUDP, upstreamIPAddress, port)
 	}
 
+	checkAllowedDomainFunc := func(domain string) bool {
+		ok, _ := sshClient.isDomainPermitted(domain)
+		return ok
+	}
+
 	flowActivityUpdaterMaker := func(
 		upstreamHostname string, upstreamIPAddress net.IP) []tun.FlowActivityUpdater {
 
@@ -2112,6 +2117,7 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 		packetTunnelChannel,
 		checkAllowedTCPPortFunc,
 		checkAllowedUDPPortFunc,
+		checkAllowedDomainFunc,
 		flowActivityUpdaterMaker,
 		metricUpdater)
 	if err != nil {
@@ -2887,7 +2893,7 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	// This check also avoids spurious disallowed traffic alerts for destinations
 	// that are impossible to reach.
 
-	if !sshClient.sshServer.support.Config.AllowBogons && IsBogon(remoteIP) {
+	if !sshClient.sshServer.support.Config.AllowBogons && common.IsBogon(remoteIP) {
 		return false
 	}
 
@@ -2958,6 +2964,34 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		}).Debug("port forward denied by traffic rules")
 
 	return false
+}
+
+// isDomainPermitted returns true when the specified domain may be resolved
+// and returns false and a reject reason otherwise.
+func (sshClient *sshClient) isDomainPermitted(domain string) (bool, string) {
+
+	// We're not doing comprehensive validation, to avoid overhead per port
+	// forward. This is a simple sanity check to ensure we don't process
+	// blantantly invalid input.
+	//
+	// TODO: validate with dns.IsDomainName?
+	if len(domain) > 255 {
+		return false, "invalid domain name"
+	}
+
+	tags := sshClient.sshServer.support.Blocklist.LookupDomain(domain)
+	if len(tags) > 0 {
+
+		sshClient.logBlocklistHits(nil, domain, tags)
+
+		if sshClient.sshServer.support.Config.BlocklistActive {
+			// Actively alert and block
+			sshClient.enqueueUnsafeTrafficAlertRequest(tags)
+			return false, "port forward not permitted"
+		}
+	}
+
+	return true, ""
 }
 
 func (sshClient *sshClient) isTCPDialingPortForwardLimitExceeded() bool {
@@ -3245,36 +3279,19 @@ func (sshClient *sshClient) handleTCPChannel(
 	// performs no actions and next immediate step is the isPortForwardPermitted
 	// check.
 	//
-	// Limitation: at this time, only clients that send domains in hostToConnect
-	// are subject to domain blocklist checks. Both the udpgw and packet tunnel
-	// modes perform tunneled DNS and send only IPs in hostToConnect.
+	// Limitation: this case handles port forwards where the client sends the
+	// destination domain in the SSH port forward request but does not currently
+	// handle DNS-over-TCP; in the DNS-over-TCP case, a client may bypass the
+	// block list check.
 
 	if !isWebServerPortForward &&
 		net.ParseIP(hostToConnect) == nil {
 
-		// We're not doing comprehensive validation, to avoid overhead per port
-		// forward. This is a simple sanity check to ensure we don't process
-		// blantantly invalid input.
-		//
-		// TODO: validate with dns.IsDomainName?
-		if len(hostToConnect) > 255 {
+		ok, rejectMessage := sshClient.isDomainPermitted(hostToConnect)
+		if !ok {
 			// Note: not recording a port forward failure in this case
-			sshClient.rejectNewChannel(newChannel, "invalid domain name")
+			sshClient.rejectNewChannel(newChannel, rejectMessage)
 			return
-		}
-
-		tags := sshClient.sshServer.support.Blocklist.LookupDomain(hostToConnect)
-		if len(tags) > 0 {
-
-			sshClient.logBlocklistHits(nil, hostToConnect, tags)
-
-			if sshClient.sshServer.support.Config.BlocklistActive {
-				// Actively alert and block
-				// Note: not recording a port forward failure in this case
-				sshClient.enqueueUnsafeTrafficAlertRequest(tags)
-				sshClient.rejectNewChannel(newChannel, "port forward not permitted")
-				return
-			}
 		}
 	}
 
