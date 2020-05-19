@@ -141,10 +141,10 @@
 			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
-			"checksumSHA1": "CcrIyMnOlnDAZnt6c9KAzy/IndQ=",
+			"checksumSHA1": "vK+EtAIPYfEe9M9rSoGZYffUsxo=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
-			"revision": "28577248f5cb7f01bf0570a8f5bd7777359f07da",
-			"revisionTime": "2020-05-01T12:56:31Z"
+			"revision": "16ab4b2ea797315638cb1ee75f438ef9502b617c",
+			"revisionTime": "2020-05-04T18:37:24Z"
 		},
 		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",

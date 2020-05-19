@@ -4,9 +4,12 @@
 
 If you are planning to embed Psiphon in a mobile application, please use the [MobileLibrary](../MobileLibrary).
 
-## Usage
+## Using the Library in your App
 
-If you are using the Library in your app, please read the [USAGE.md](USAGE.md) instructions.
+**First step:** Review the sample code, located under `example`.
+This code provides an example of how to correctly use the client library.
+
+**Second step:** Review the comments for `Start` and `Stop` in [`PsiphonTunnel.go`](PsiphonTunnel.go). They describe the client interface.
 
 ## Building for Darwin (iOS, MacOS)
 

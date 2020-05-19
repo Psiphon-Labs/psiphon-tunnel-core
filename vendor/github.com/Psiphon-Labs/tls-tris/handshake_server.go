@@ -105,16 +105,9 @@ func (c *Conn) serverHandshake() error {
 			if !obfuscator.VerifyTLSPassthroughMessage(
 				c.config.PassthroughKey, hs.clientHello.random) {
 
-				// Legitimate, older clients that don't use passthrough messages will hit
-				// this case. Reduce false positive event logs with this heuristic: if
-				// isResume, the client sent a valid session ticket, so either the client
-				// sent a valid obfuscated session ticket proving knowledge of the
-				// obfuscation key, or the client previously connected and obtained a
-				// server-issued session ticket (this latter case shouldn't happen as the
-				// passthough message is now required for all connections; but isResume
-				// doesn't strictly mean the session ticket was _obfuscated_).
-				c.config.PassthroughLogInvalidMessage(
-					c.conn.RemoteAddr().String())
+				clientAddr := c.conn.RemoteAddr().String()
+				clientIP, _, _ := net.SplitHostPort(clientAddr)
+				c.config.PassthroughLogInvalidMessage(clientIP)
 
 				doPassthrough = true
 				err = errors.New("passthrough: invalid client random")
