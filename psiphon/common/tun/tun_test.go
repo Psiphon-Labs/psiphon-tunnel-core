@@ -334,6 +334,7 @@ func startTestServer(
 		GetDNSResolverIPv4Addresses:     noDNSResolvers,
 		GetDNSResolverIPv6Addresses:     noDNSResolvers,
 		MTU:                             MTU,
+		AllowBogons:                     true,
 	}
 
 	tunServer, err := NewServer(config)
