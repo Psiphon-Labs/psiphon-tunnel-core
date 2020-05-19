@@ -2452,7 +2452,7 @@ func processPacket(
 
 		// Enforce no localhost, multicast or broadcast packets; and
 		// no client-to-client packets.
-		if (!session.allowBogons && common.IsBogon(destinationIPAddress)) ||
+		if (isServer && !session.allowBogons && common.IsBogon(destinationIPAddress)) ||
 
 			// The following are disallowed even when other bogons are allowed.
 			(direction == packetDirectionServerUpstream &&
