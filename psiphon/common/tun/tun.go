@@ -2192,7 +2192,7 @@ func processPacket(
 				return false
 			}
 		} else if protocol == internetProtocolUDP {
-			dataOffset := 28
+			dataOffset = 28
 			if len(packet) < dataOffset {
 				metrics.rejectedPacket(direction, packetRejectUDPProtocolLength)
 				return false
@@ -2246,7 +2246,7 @@ func processPacket(
 				return false
 			}
 		} else if protocol == internetProtocolUDP {
-			dataOffset := 48
+			dataOffset = 48
 			if len(packet) < dataOffset {
 				metrics.rejectedPacket(direction, packetRejectUDPProtocolLength)
 				return false
@@ -2323,7 +2323,7 @@ func processPacket(
 				// Limitation: checkAllowedDomainFunc is applied only to DNS queries in
 				// UDP; currently DNS-over-TCP will bypass the domain block list check.
 
-				if protocol == internetProtocolUDP {
+				if doTransparentDNS && protocol == internetProtocolUDP {
 
 					domain, err := common.ParseDNSQuestion(applicationData)
 					if err != nil {
@@ -2452,7 +2452,7 @@ func processPacket(
 
 		// Enforce no localhost, multicast or broadcast packets; and
 		// no client-to-client packets.
-		if (!session.allowBogons && common.IsBogon(destinationIPAddress)) ||
+		if (isServer && !session.allowBogons && common.IsBogon(destinationIPAddress)) ||
 
 			// The following are disallowed even when other bogons are allowed.
 			(direction == packetDirectionServerUpstream &&

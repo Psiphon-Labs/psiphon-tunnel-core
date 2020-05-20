@@ -37,6 +37,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
+	"github.com/miekg/dns"
 )
 
 const (
@@ -55,10 +56,6 @@ func TestTunneledTCPIPv4(t *testing.T) {
 
 func TestTunneledTCPIPv6(t *testing.T) {
 	testTunneledTCP(t, true)
-}
-
-func TestTunneledDNS(t *testing.T) {
-	t.Skip("TODO: test DNS tunneling")
 }
 
 func TestSessionExpiry(t *testing.T) {
@@ -81,7 +78,8 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 	// - starts a packet tunnel server that uses a unix domain socket for client channels
 	// - starts CONCURRENT_CLIENT_COUNT concurrent clients
 	// - each client runs a packet tunnel client connected to the server unix domain socket
-	//   and establishes a TCP client connection to the TCP through the packet tunnel
+	// - one client first performs a tunneled DNS query against an external DNS server
+	// - clients establish a TCP client connection to the TCP server through the packet tunnel
 	// - each TCP client transfers TCP_RELAY_TOTAL_SIZE bytes to the TCP server
 	// - the test checks that all data echoes back correctly and that the server packet
 	//   metrics reflects the expected amount of data transferred through the tunnel
@@ -136,13 +134,25 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 	results := make(chan error, CONCURRENT_CLIENT_COUNT)
 
 	for i := 0; i < CONCURRENT_CLIENT_COUNT; i++ {
-		go func() {
+		go func(clientNum int) {
 
 			testClient, err := startTestClient(
 				useIPv6, MTU, []string{testTCPServer.getListenerIPAddress()})
 			if err != nil {
 				results <- fmt.Errorf("startTestClient failed: %s", err)
 				return
+			}
+
+			// Test one tunneled DNS query.
+
+			if clientNum == 0 {
+				err = testDNSClient(
+					useIPv6,
+					testClient.tunClient.device.Name())
+				if err != nil {
+					results <- fmt.Errorf("testDNSClient failed: %s", err)
+					return
+				}
 			}
 
 			// The TCP client will bind to the packet tunnel client tun
@@ -244,7 +254,7 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 			}
 
 			results <- nil
-		}()
+		}(i)
 	}
 
 	for i := 0; i < CONCURRENT_CLIENT_COUNT; i++ {
@@ -325,15 +335,22 @@ func startTestServer(
 
 	logger := newTestLogger(true)
 
-	noDNSResolvers := func() []net.IP { return make([]net.IP, 0) }
+	getDNSResolverIPv4Addresses := func() []net.IP {
+		return []net.IP{net.ParseIP("8.8.8.8")}
+	}
+
+	getDNSResolverIPv6Addresses := func() []net.IP {
+		return []net.IP{net.ParseIP("2001:4860:4860::8888")}
+	}
 
 	config := &ServerConfig{
 		Logger:                          logger,
 		SudoNetworkConfigCommands:       os.Getenv("TUN_TEST_SUDO") != "",
 		AllowNoIPv6NetworkConfiguration: !useIPv6,
-		GetDNSResolverIPv4Addresses:     noDNSResolvers,
-		GetDNSResolverIPv6Addresses:     noDNSResolvers,
+		GetDNSResolverIPv4Addresses:     getDNSResolverIPv4Addresses,
+		GetDNSResolverIPv6Addresses:     getDNSResolverIPv6Addresses,
 		MTU:                             MTU,
+		AllowBogons:                     true,
 	}
 
 	tunServer, err := NewServer(config)
@@ -475,6 +492,8 @@ func startTestClient(
 	logger := newTestLogger(false)
 
 	// Assumes IP addresses are available on test host
+
+	// TODO: assign unique IP to each testClient?
 
 	config := &ClientConfig{
 		Logger:                          logger,
@@ -684,6 +703,63 @@ func (client *testTCPClient) Write(p []byte) (n int, err error) {
 
 func (client *testTCPClient) stop() {
 	client.conn.Close()
+}
+
+func testDNSClient(useIPv6 bool, tunDeviceName string) error {
+
+	var ipv4 [4]byte
+	var ipv6 [16]byte
+	var domain int
+	var sockAddr syscall.Sockaddr
+
+	if !useIPv6 {
+		copy(ipv4[:], transparentDNSResolverIPv4Address)
+		domain = syscall.AF_INET
+		sockAddr = &syscall.SockaddrInet4{Addr: ipv4, Port: portNumberDNS}
+	} else {
+		copy(ipv6[:], transparentDNSResolverIPv6Address)
+		domain = syscall.AF_INET6
+		sockAddr = &syscall.SockaddrInet6{Addr: ipv6, Port: portNumberDNS}
+	}
+
+	socketFd, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
+	if err != nil {
+		return err
+	}
+	defer syscall.Close(socketFd)
+
+	err = BindToDevice(socketFd, tunDeviceName)
+	if err != nil {
+		return err
+	}
+
+	err = syscall.Connect(socketFd, sockAddr)
+	if err != nil {
+		return err
+	}
+
+	file := os.NewFile(uintptr(socketFd), "")
+	conn, err := net.FileConn(file)
+	file.Close()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	dnsConn := &dns.Conn{Conn: conn}
+	defer dnsConn.Close()
+
+	query := new(dns.Msg)
+	query.SetQuestion(dns.Fqdn("www.example.org"), dns.TypeA)
+	query.RecursionDesired = true
+
+	dnsConn.WriteMsg(query)
+	_, err = dnsConn.ReadMsg()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type testLogger struct {
