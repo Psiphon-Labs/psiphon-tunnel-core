@@ -2450,11 +2450,20 @@ func processPacket(
 			}
 		}
 
-		// Enforce no localhost, multicast or broadcast packets; and
-		// no client-to-client packets.
-		if (isServer && !session.allowBogons && common.IsBogon(destinationIPAddress)) ||
+		// Enforce no localhost, multicast or broadcast packets; and no
+		// client-to-client packets.
+		//
+		// TODO: a client-side check could check that destination IP
+		// is strictly a tun device IP address.
 
-			// The following are disallowed even when other bogons are allowed.
+		if !destinationIPAddress.IsGlobalUnicast() ||
+
+			(direction == packetDirectionServerUpstream &&
+				!session.allowBogons &&
+				common.IsBogon(destinationIPAddress)) ||
+
+			// Client-to-client packets are disallowed even when other bogons are
+			// allowed.
 			(direction == packetDirectionServerUpstream &&
 				((version == 4 &&
 					!destinationIPAddress.Equal(transparentDNSResolverIPv4Address) &&
