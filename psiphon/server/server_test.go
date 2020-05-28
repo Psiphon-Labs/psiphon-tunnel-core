@@ -2010,6 +2010,7 @@ type pruneServerEntryTestCase struct {
 	PsinetValid       bool
 	ExpectPrune       bool
 	IsEmbedded        bool
+	DialPort0         bool
 	ServerEntryFields protocol.ServerEntryFields
 }
 
@@ -2031,6 +2032,7 @@ func initializePruneServerEntriesTest(
 	// - ExpectPrune: prune outcome based on flags above
 	// - IsEmbedded: pruned embedded server entries leave a tombstone and cannot
 	//   be reimported
+	// - DialPort0: set dial port to 0, a special prune case (see statusAPIRequestHandler)
 
 	pruneServerEntryTestCases := []*pruneServerEntryTestCase{
 		&pruneServerEntryTestCase{IPAddress: "192.0.2.1", ExplicitTag: true, LocalTimestamp: newTimeStamp, PsinetValid: true, ExpectPrune: false},
@@ -2043,15 +2045,23 @@ func initializePruneServerEntriesTest(
 		&pruneServerEntryTestCase{IPAddress: "192.0.2.8", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: false},
 		&pruneServerEntryTestCase{IPAddress: "192.0.2.9", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: true},
 		&pruneServerEntryTestCase{IPAddress: "192.0.2.10", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: true},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.11", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: false, DialPort0: true},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.12", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: true, DialPort0: true},
+		&pruneServerEntryTestCase{IPAddress: "192.0.2.13", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: true, DialPort0: true},
 	}
 
 	for _, testCase := range pruneServerEntryTestCases {
+
+		dialPort := 4000
+		if testCase.DialPort0 {
+			dialPort = 0
+		}
 
 		_, _, _, _, encodedServerEntry, err := GenerateConfig(
 			&GenerateConfigParams{
 				ServerIPAddress:     testCase.IPAddress,
 				WebServerPort:       8000,
-				TunnelProtocolPorts: map[string]int{runConfig.tunnelProtocol: 4000},
+				TunnelProtocolPorts: map[string]int{runConfig.tunnelProtocol: dialPort},
 			})
 		if err != nil {
 			t.Fatalf("GenerateConfig failed: %s", err)
