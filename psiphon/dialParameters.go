@@ -329,6 +329,17 @@ func MakeDialParameters(
 		dialParams.TunnelProtocol = selectedProtocol
 	}
 
+	if config.UseUpstreamProxy() &&
+		!protocol.TunnelProtocolSupportsUpstreamProxy(dialParams.TunnelProtocol) {
+
+		// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
+		// called via selectProtocol, will filter out protocols such that will not
+		// select a protocol incompatible with UpstreamProxy. This additional check
+		// will catch cases where selectProtocol does not apply this filter.
+		return nil, errors.Tracef(
+			"protocol does not support upstream proxy: %s", dialParams.TunnelProtocol)
+	}
+
 	if (!isReplay || !replayBPF) &&
 		ClientBPFEnabled() &&
 		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {

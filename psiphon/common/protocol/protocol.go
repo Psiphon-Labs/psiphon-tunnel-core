@@ -220,6 +220,14 @@ func TunnelProtocolSupportsPassthrough(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
+func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
+
+	// TODO: Marionette UDP formats are incompatible with
+	// UpstreamProxy, but not currently supported.
+
+	return !TunnelProtocolUsesQUIC(protocol)
+}
+
 func UseClientTunnelProtocol(
 	clientProtocol string,
 	serverProtocols TunnelProtocols) bool {
