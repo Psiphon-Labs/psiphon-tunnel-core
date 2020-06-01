@@ -50,6 +50,10 @@ func NewUDPConn(
 		return nil, nil, errors.Trace(err)
 	}
 
+	if port <= 0 || port >= 65536 {
+		return nil, nil, errors.Tracef("invalid destination port: %d", port)
+	}
+
 	ipAddrs, err := LookupIP(ctx, host, config)
 	if err != nil {
 		return nil, nil, errors.Trace(err)

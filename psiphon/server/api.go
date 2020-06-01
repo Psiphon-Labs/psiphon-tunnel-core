@@ -663,18 +663,30 @@ func statusAPIRequestHandler(
 			//
 			// IsValidServerEntryTag ensures that the local copy of psinet is not stale
 			// before returning a negative result, to mitigate accidental pruning.
+			//
+			// In addition, when the reported dial port number is 0, flag the server
+			// entry as invalid to trigger client pruning. This covers a class of
+			// invalid/semi-functional server entries, found in practice to be stored
+			// by clients, where some protocol port number has been omitted -- due to
+			// historical bugs in various server entry handling implementations. When
+			// missing from a server entry loaded by a client, the port number
+			// evaluates to 0, the zero value, which is not a valid port number even if
+			// were not missing.
 
-			var serverEntryTagStr string
+			serverEntryTag, ok := getOptionalStringRequestParam(failedTunnelStat, "server_entry_tag")
 
-			serverEntryTag, ok := failedTunnelStat["server_entry_tag"]
 			if ok {
-				serverEntryTagStr, ok = serverEntryTag.(string)
-			}
+				serverEntryValid := db.IsValidServerEntryTag(serverEntryTag)
 
-			if ok {
-				serverEntryValid := db.IsValidServerEntryTag(serverEntryTagStr)
+				if serverEntryValid {
+					dialPortNumber, err := getIntStringRequestParam(failedTunnelStat, "dial_port_number")
+					if err == nil && dialPortNumber == 0 {
+						serverEntryValid = false
+					}
+				}
+
 				if !serverEntryValid {
-					invalidServerEntryTags[serverEntryTagStr] = true
+					invalidServerEntryTags[serverEntryTag] = true
 				}
 
 				// Add a field to the failed_tunnel log indicating if the server entry is
