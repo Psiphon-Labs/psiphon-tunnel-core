@@ -739,6 +739,8 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 					NoticeWarning(
 						"ServerEntryIterator.Next: unmarshal failed: %s",
 						errors.Trace(err))
+
+					// Do not stop iterating.
 					return nil
 				}
 
@@ -750,6 +752,8 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 						NoticeWarning(
 							"ServerEntryIterator.Next: verify signature failed: %s",
 							errors.Trace(err))
+
+						// Do not stop iterating.
 						return nil
 					}
 				}
@@ -759,13 +763,14 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 			err = json.Unmarshal(value, &serverEntry)
 
 			if err != nil {
-				// In case of data corruption or a bug causing this condition,
-				// do not stop iterating.
 				serverEntry = nil
 				doDeleteServerEntry = true
 				NoticeWarning(
 					"ServerEntryIterator.Next: unmarshal failed: %s",
 					errors.Trace(err))
+
+				// Do not stop iterating.
+				return nil
 			}
 
 			return nil
