@@ -483,9 +483,7 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 
 	for _, protocol := range SupportedTunnelProtocols {
 
-		// TODO: Marionette UDP formats are incompatible with
-		// useUpstreamProxy, but not currently supported
-		if useUpstreamProxy && TunnelProtocolUsesQUIC(protocol) {
+		if useUpstreamProxy && !TunnelProtocolSupportsUpstreamProxy(protocol) {
 			continue
 		}
 
