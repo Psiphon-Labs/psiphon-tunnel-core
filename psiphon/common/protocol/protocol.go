@@ -220,6 +220,14 @@ func TunnelProtocolSupportsPassthrough(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
+func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
+
+	// TODO: Marionette UDP formats are incompatible with
+	// UpstreamProxy, but not currently supported.
+
+	return !TunnelProtocolUsesQUIC(protocol)
+}
+
 func UseClientTunnelProtocol(
 	clientProtocol string,
 	serverProtocols TunnelProtocols) bool {
@@ -256,6 +264,7 @@ const (
 	TLS_PROFILE_CHROME_62  = "Chrome-62"
 	TLS_PROFILE_CHROME_70  = "Chrome-70"
 	TLS_PROFILE_CHROME_72  = "Chrome-72"
+	TLS_PROFILE_CHROME_83  = "Chrome-83"
 	TLS_PROFILE_FIREFOX_55 = "Firefox-55"
 	TLS_PROFILE_FIREFOX_56 = "Firefox-56"
 	TLS_PROFILE_FIREFOX_65 = "Firefox-65"
@@ -269,6 +278,7 @@ var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_CHROME_62,
 	TLS_PROFILE_CHROME_70,
 	TLS_PROFILE_CHROME_72,
+	TLS_PROFILE_CHROME_83,
 	TLS_PROFILE_FIREFOX_55,
 	TLS_PROFILE_FIREFOX_56,
 	TLS_PROFILE_FIREFOX_65,

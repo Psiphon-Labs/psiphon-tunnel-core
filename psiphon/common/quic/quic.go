@@ -202,6 +202,13 @@ func Dial(
 		return nil, errors.Tracef("unsupported version: %s", negotiateQUICVersion)
 	}
 
+	// Fail if the destination port is invalid. Network operations should fail
+	// quickly in this case, but IETF quic-go has been observed to timeout,
+	// instead of failing quickly, in the case of invalid destination port 0.
+	if remoteAddr.Port <= 0 || remoteAddr.Port >= 65536 {
+		return nil, errors.Tracef("invalid destination port: %d", remoteAddr.Port)
+	}
+
 	if isObfuscated(negotiateQUICVersion) {
 		var err error
 		packetConn, err = NewObfuscatedPacketConn(

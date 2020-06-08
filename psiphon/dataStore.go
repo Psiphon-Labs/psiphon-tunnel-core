@@ -51,7 +51,7 @@ var (
 	datastoreAffinityServerEntryIDKey           = []byte("affinityServerEntryID")
 	datastorePersistentStatTypeRemoteServerList = string(datastoreRemoteServerListStatsBucket)
 	datastorePersistentStatTypeFailedTunnel     = string(datastoreFailedTunnelStatsBucket)
-	datastoreServerEntryFetchGCThreshold        = 20
+	datastoreServerEntryFetchGCThreshold        = 10
 
 	datastoreMutex    sync.RWMutex
 	activeDatastoreDB *datastoreDB
@@ -711,6 +711,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 		iterator.serverEntryIndex += 1
 
 		serverEntry = nil
+		doDeleteServerEntry := false
 
 		err = datastoreView(func(tx *datastoreTx) error {
 			serverEntries := tx.bucket(datastoreServerEntriesBucket)
@@ -719,22 +720,68 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 				return nil
 			}
 
+			// When the server entry has a signature and the signature verification
+			// public key is configured, perform a signature verification, which will
+			// detect data corruption of most server entry fields. When the check
+			// fails, the server entry is deleted and skipped and iteration continues.
+			//
+			// This prevents wasteful, time-consuming dials in cases where the server
+			// entry is intact except for a bit flip in the obfuscation key, for
+			// example. A delete is triggered also in the case where the server entry
+			// record fails to unmarshal.
+
+			if iterator.config.ServerEntrySignaturePublicKey != "" {
+
+				var serverEntryFields protocol.ServerEntryFields
+				err = json.Unmarshal(value, &serverEntryFields)
+				if err != nil {
+					doDeleteServerEntry = true
+					NoticeWarning(
+						"ServerEntryIterator.Next: unmarshal failed: %s",
+						errors.Trace(err))
+
+					// Do not stop iterating.
+					return nil
+				}
+
+				if serverEntryFields.HasSignature() {
+					err = serverEntryFields.VerifySignature(
+						iterator.config.ServerEntrySignaturePublicKey)
+					if err != nil {
+						doDeleteServerEntry = true
+						NoticeWarning(
+							"ServerEntryIterator.Next: verify signature failed: %s",
+							errors.Trace(err))
+
+						// Do not stop iterating.
+						return nil
+					}
+				}
+			}
+
 			// Must unmarshal here as slice is only valid within transaction.
 			err = json.Unmarshal(value, &serverEntry)
 
 			if err != nil {
-				// In case of data corruption or a bug causing this condition,
-				// do not stop iterating.
 				serverEntry = nil
+				doDeleteServerEntry = true
 				NoticeWarning(
-					"ServerEntryIterator.Next: json.Unmarshal failed: %s",
+					"ServerEntryIterator.Next: unmarshal failed: %s",
 					errors.Trace(err))
+
+				// Do not stop iterating.
+				return nil
 			}
 
 			return nil
 		})
 		if err != nil {
 			return nil, errors.Trace(err)
+		}
+
+		if doDeleteServerEntry {
+			deleteServerEntry(iterator.config, serverEntryID)
+			continue
 		}
 
 		if serverEntry == nil {
@@ -916,47 +963,23 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 		// refer to the same server IP. Only delete the server entry record when its
 		// tag matches the pruned tag. Otherwise, the server entry record is
 		// associated with another tag. The pruned tag is still deleted.
-		deleteServerEntry := (serverEntry.Tag == serverEntryTag)
+		doDeleteServerEntry := (serverEntry.Tag == serverEntryTag)
 
 		err = serverEntryTags.delete(serverEntryTagBytes)
 		if err != nil {
 			errors.Trace(err)
 		}
 
-		if deleteServerEntry {
+		if doDeleteServerEntry {
 
-			err = serverEntries.delete(serverEntryID)
+			err = deleteServerEntryHelper(
+				config,
+				serverEntryID,
+				serverEntries,
+				keyValues,
+				dialParameters)
 			if err != nil {
 				errors.Trace(err)
-			}
-
-			affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
-			if bytes.Equal(affinityServerEntryID, serverEntryID) {
-				err = keyValues.delete(datastoreAffinityServerEntryIDKey)
-				if err != nil {
-					return errors.Trace(err)
-				}
-				err = keyValues.delete(datastoreLastServerEntryFilterKey)
-				if err != nil {
-					return errors.Trace(err)
-				}
-			}
-
-			// TODO: expose boltdb Seek functionality to skip to first matching record.
-			cursor := dialParameters.cursor()
-			defer cursor.close()
-			foundFirstMatch := false
-			for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
-				// Dial parameters key has serverID as a prefix; see makeDialParametersKey.
-				if bytes.HasPrefix(key, serverEntryID) {
-					foundFirstMatch = true
-					err := dialParameters.delete(key)
-					if err != nil {
-						return errors.Trace(err)
-					}
-				} else if foundFirstMatch {
-					break
-				}
 			}
 		}
 
@@ -978,6 +1001,102 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 
 		return nil
 	})
+}
+
+// DeleteServerEntry deletes the specified server entry and associated data.
+func DeleteServerEntry(config *Config, ipAddress string) {
+
+	serverEntryID := []byte(ipAddress)
+
+	// For notices, we cannot assume we have a valid server entry tag value to
+	// log, as DeleteServerEntry is called when a server entry fails to unmarshal
+	// or fails signature verification.
+
+	err := deleteServerEntry(config, serverEntryID)
+	if err != nil {
+		NoticeWarning("DeleteServerEntry failed: %s", errors.Trace(err))
+		return
+	}
+	NoticeInfo("Server entry deleted")
+}
+
+func deleteServerEntry(config *Config, serverEntryID []byte) error {
+
+	return datastoreUpdate(func(tx *datastoreTx) error {
+
+		serverEntries := tx.bucket(datastoreServerEntriesBucket)
+		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
+		keyValues := tx.bucket(datastoreKeyValueBucket)
+		dialParameters := tx.bucket(datastoreDialParametersBucket)
+
+		err := deleteServerEntryHelper(
+			config,
+			serverEntryID,
+			serverEntries,
+			keyValues,
+			dialParameters)
+		if err != nil {
+			errors.Trace(err)
+		}
+
+		// Remove any tags pointing to the deleted server entry.
+		cursor := serverEntryTags.cursor()
+		defer cursor.close()
+		for key, value := cursor.first(); key != nil; key, value = cursor.next() {
+			if bytes.Equal(value, serverEntryID) {
+				err := serverEntryTags.delete(key)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+		}
+
+		return nil
+	})
+}
+
+func deleteServerEntryHelper(
+	config *Config,
+	serverEntryID []byte,
+	serverEntries *datastoreBucket,
+	keyValues *datastoreBucket,
+	dialParameters *datastoreBucket) error {
+
+	err := serverEntries.delete(serverEntryID)
+	if err != nil {
+		errors.Trace(err)
+	}
+
+	affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
+	if bytes.Equal(affinityServerEntryID, serverEntryID) {
+		err = keyValues.delete(datastoreAffinityServerEntryIDKey)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = keyValues.delete(datastoreLastServerEntryFilterKey)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	// TODO: expose boltdb Seek functionality to skip to first matching record.
+	cursor := dialParameters.cursor()
+	defer cursor.close()
+	foundFirstMatch := false
+	for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
+		// Dial parameters key has serverID as a prefix; see makeDialParametersKey.
+		if bytes.HasPrefix(key, serverEntryID) {
+			foundFirstMatch = true
+			err := dialParameters.delete(key)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		} else if foundFirstMatch {
+			break
+		}
+	}
+
+	return nil
 }
 
 func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
@@ -1626,6 +1745,11 @@ func GetDialParameters(serverIPAddress, networkID string) (*DialParameters, erro
 	if data == nil {
 		return nil, nil
 	}
+
+	// Note: unlike with server entries, this record is not deleted when the
+	// unmarshal fails, as the caller should proceed with the dial without dial
+	// parameters; and when when the dial succeeds, new dial parameters will be
+	// written over this record.
 
 	var dialParams *DialParameters
 	err = json.Unmarshal(data, &dialParams)

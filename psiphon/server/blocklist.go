@@ -27,9 +27,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Psiphon-Labs/dns"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/miekg/dns"
 )
 
 // Blocklist provides a fast lookup of IP addresses and domains that are
@@ -133,6 +133,12 @@ func (b *Blocklist) LookupDomain(domain string) []BlocklistTag {
 
 	if atomic.LoadInt32(&b.loaded) != 1 {
 		return nil
+	}
+
+	// Domains parsed out of DNS queries will be fully-qualified domain names,
+	// while list entries do not end in a dot.
+	if len(domain) > 0 && domain[len(domain)-1] == '.' {
+		domain = domain[:len(domain)-1]
 	}
 
 	tags, ok := b.data.Load().(*blocklistData).lookupDomain[domain]

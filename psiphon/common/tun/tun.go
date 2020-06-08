@@ -238,6 +238,10 @@ type ServerConfig struct {
 	// SessionIdleExpirySeconds is also, effectively, the lease
 	// time for assigned IP addresses.
 	SessionIdleExpirySeconds int
+
+	// AllowBogons disables bogon checks. This should be used only
+	// for testing.
+	AllowBogons bool
 }
 
 // Server is a packet tunnel server. A packet tunnel server
@@ -330,6 +334,10 @@ func (server *Server) Stop() {
 // and/or port.
 type AllowedPortChecker func(upstreamIPAddress net.IP, port int) bool
 
+// AllowedDomainChecker is a function which returns true when it is
+// permitted to resolve the specified domain name.
+type AllowedDomainChecker func(string) bool
+
 // FlowActivityUpdater defines an interface for receiving updates for
 // flow activity. Values passed to UpdateProgress are bytes transferred
 // and flow duration since the previous UpdateProgress.
@@ -357,9 +365,11 @@ type MetricsUpdater func(
 // transport provides the channel for relaying packets to and from
 // the client.
 //
-// checkAllowedTCPPortFunc/checkAllowedUDPPortFunc are callbacks used
-// to enforce traffic rules. For each TCP/UDP packet, the corresponding
-// function is called to check if traffic to the packet's port is
+// checkAllowedTCPPortFunc/checkAllowedUDPPortFunc/checkAllowedDomainFunc
+// are callbacks used to enforce traffic rules. For each TCP/UDP flow, the
+// corresponding AllowedPort function is called to check if traffic to the
+// packet's port is permitted. For upstream DNS query packets,
+// checkAllowedDomainFunc is called to check if domain resolution is
 // permitted. These callbacks must be efficient and safe for concurrent
 // calls.
 //
@@ -382,6 +392,7 @@ func (server *Server) ClientConnected(
 	sessionID string,
 	transport io.ReadWriteCloser,
 	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
+	checkAllowedDomainFunc AllowedDomainChecker,
 	flowActivityUpdaterMaker FlowActivityUpdaterMaker,
 	metricsUpdater MetricsUpdater) error {
 
@@ -437,6 +448,7 @@ func (server *Server) ClientConnected(
 		}
 
 		clientSession = &session{
+			allowBogons:              server.config.AllowBogons,
 			lastActivity:             int64(monotime.Now()),
 			sessionID:                sessionID,
 			metrics:                  new(packetMetrics),
@@ -465,6 +477,7 @@ func (server *Server) ClientConnected(
 		NewChannel(transport, MTU),
 		checkAllowedTCPPortFunc,
 		checkAllowedUDPPortFunc,
+		checkAllowedDomainFunc,
 		flowActivityUpdaterMaker,
 		metricsUpdater)
 
@@ -503,6 +516,7 @@ func (server *Server) resumeSession(
 	session *session,
 	channel *Channel,
 	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
+	checkAllowedDomainFunc AllowedDomainChecker,
 	flowActivityUpdaterMaker FlowActivityUpdaterMaker,
 	metricsUpdater MetricsUpdater) {
 
@@ -539,6 +553,8 @@ func (server *Server) resumeSession(
 	session.setCheckAllowedTCPPortFunc(&checkAllowedTCPPortFunc)
 
 	session.setCheckAllowedUDPPortFunc(&checkAllowedUDPPortFunc)
+
+	session.setCheckAllowedDomainFunc(&checkAllowedDomainFunc)
 
 	session.setFlowActivityUpdaterMaker(&flowActivityUpdaterMaker)
 
@@ -615,6 +631,8 @@ func (server *Server) interruptSession(session *session) {
 	session.setCheckAllowedTCPPortFunc(nil)
 
 	session.setCheckAllowedUDPPortFunc(nil)
+
+	session.setCheckAllowedDomainFunc(nil)
 
 	session.setFlowActivityUpdaterMaker(nil)
 
@@ -948,7 +966,7 @@ func (server *Server) allocateIndex(newSession *session) error {
 		//   address (10.255.255.255) respectively
 		// - 1 is reserved as the server tun device address,
 		//   (10.0.0.1, and IPv6 equivalent)
-		// - 2 is reserver as the transparent DNS target
+		// - 2 is reserved as the transparent DNS target
 		//   address (10.0.0.2, and IPv6 equivalent)
 
 		if index <= 2 {
@@ -1055,10 +1073,12 @@ type session struct {
 	lastFlowReapIndex        int64
 	checkAllowedTCPPortFunc  unsafe.Pointer
 	checkAllowedUDPPortFunc  unsafe.Pointer
+	checkAllowedDomainFunc   unsafe.Pointer
 	flowActivityUpdaterMaker unsafe.Pointer
 	metricsUpdater           unsafe.Pointer
 	downstreamPackets        unsafe.Pointer
 
+	allowBogons              bool
 	metrics                  *packetMetrics
 	sessionID                string
 	index                    int32
@@ -1136,6 +1156,18 @@ func (session *session) setCheckAllowedUDPPortFunc(p *AllowedPortChecker) {
 
 func (session *session) getCheckAllowedUDPPortFunc() AllowedPortChecker {
 	p := (*AllowedPortChecker)(atomic.LoadPointer(&session.checkAllowedUDPPortFunc))
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func (session *session) setCheckAllowedDomainFunc(p *AllowedDomainChecker) {
+	atomic.StorePointer(&session.checkAllowedDomainFunc, unsafe.Pointer(p))
+}
+
+func (session *session) getCheckAllowedDomainFunc() AllowedDomainChecker {
+	p := (*AllowedDomainChecker)(atomic.LoadPointer(&session.checkAllowedDomainFunc))
 	if p == nil {
 		return nil
 	}
@@ -1995,9 +2027,11 @@ const (
 	packetRejectUDPPort            = 9
 	packetRejectNoOriginalAddress  = 10
 	packetRejectNoDNSResolvers     = 11
-	packetRejectNoClient           = 12
-	packetRejectReasonCount        = 13
-	packetOk                       = 13
+	packetRejectInvalidDNSMessage  = 12
+	packetRejectDisallowedDomain   = 13
+	packetRejectNoClient           = 14
+	packetRejectReasonCount        = 15
+	packetOk                       = 15
 )
 
 type packetDirection int
@@ -2034,6 +2068,10 @@ func packetRejectReasonDescription(reason packetRejectReason) string {
 		return "no_original_address"
 	case packetRejectNoDNSResolvers:
 		return "no_dns_resolvers"
+	case packetRejectInvalidDNSMessage:
+		return "invalid_dns_message"
+	case packetRejectDisallowedDomain:
+		return "disallowed_domain"
 	case packetRejectNoClient:
 		return "no_client"
 	}
@@ -2154,7 +2192,7 @@ func processPacket(
 				return false
 			}
 		} else if protocol == internetProtocolUDP {
-			dataOffset := 28
+			dataOffset = 28
 			if len(packet) < dataOffset {
 				metrics.rejectedPacket(direction, packetRejectUDPProtocolLength)
 				return false
@@ -2208,7 +2246,7 @@ func processPacket(
 				return false
 			}
 		} else if protocol == internetProtocolUDP {
-			dataOffset := 48
+			dataOffset = 48
 			if len(packet) < dataOffset {
 				metrics.rejectedPacket(direction, packetRejectUDPProtocolLength)
 				return false
@@ -2279,6 +2317,25 @@ func processPacket(
 					} else {
 						metrics.rejectedPacket(direction, packetRejectNoDNSResolvers)
 						return false
+					}
+				}
+
+				// Limitation: checkAllowedDomainFunc is applied only to DNS queries in
+				// UDP; currently DNS-over-TCP will bypass the domain block list check.
+
+				if doTransparentDNS && protocol == internetProtocolUDP {
+
+					domain, err := common.ParseDNSQuestion(applicationData)
+					if err != nil {
+						metrics.rejectedPacket(direction, packetRejectInvalidDNSMessage)
+						return false
+					}
+					if domain != "" {
+						checkAllowedDomainFunc := session.getCheckAllowedDomainFunc()
+						if !checkAllowedDomainFunc(domain) {
+							metrics.rejectedPacket(direction, packetRejectDisallowedDomain)
+							return false
+						}
 					}
 				}
 			}
@@ -2393,11 +2450,20 @@ func processPacket(
 			}
 		}
 
-		// Enforce no localhost, multicast or broadcast packets; and
-		// no client-to-client packets.
+		// Enforce no localhost, multicast or broadcast packets; and no
+		// client-to-client packets.
+		//
+		// TODO: a client-side check could check that destination IP
+		// is strictly a tun device IP address.
 
 		if !destinationIPAddress.IsGlobalUnicast() ||
 
+			(direction == packetDirectionServerUpstream &&
+				!session.allowBogons &&
+				common.IsBogon(destinationIPAddress)) ||
+
+			// Client-to-client packets are disallowed even when other bogons are
+			// allowed.
 			(direction == packetDirectionServerUpstream &&
 				((version == 4 &&
 					!destinationIPAddress.Equal(transparentDNSResolverIPv4Address) &&
