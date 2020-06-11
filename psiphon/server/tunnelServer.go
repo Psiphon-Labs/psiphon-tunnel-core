@@ -2623,7 +2623,7 @@ func (sshClient *sshClient) setHandshakeState(
 			sshClient.geoIPData.SetLogFields(logFields)
 			duplicateGeoIPData := sshClient.sshServer.support.GeoIPService.GetSessionCache(sessionID)
 			if duplicateGeoIPData != sshClient.geoIPData {
-				duplicateGeoIPData.SetLogFieldsWithPrefix("duplicate_authentication_", logFields)
+				duplicateGeoIPData.SetLogFieldsWithPrefix("duplicate_authorization_", logFields)
 			}
 			log.LogRawFieldsWithTimestamp(logFields)
 
