@@ -80,7 +80,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     _Atomic NetworkStatus currentNetworkStatus;
 
     BOOL tunnelWholeDevice;
-    _Atomic BOOL usingRotatingNotices;
+    _Atomic BOOL usingNoticeFiles;
 
     // DNS
     NSString *primaryGoogleDNS;
@@ -107,7 +107,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     self->reachability = [Reachability reachabilityForInternetConnection];
     atomic_init(&self->currentNetworkStatus, NotReachable);
     self->tunnelWholeDevice = FALSE;
-    atomic_init(&self->usingRotatingNotices, FALSE);
+    atomic_init(&self->usingNoticeFiles, FALSE);
 
     // Randomize order of Google DNS servers on start,
     // and consistently return in that fixed order.
@@ -248,8 +248,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         // Must always use IPv6Synthesizer for iOS
         const BOOL useIPv6Synthesizer = TRUE;
+
+        BOOL usingNoticeFiles = FALSE;
         
-        NSString *configStr = [self getConfig];
+        NSString *configStr = [self getConfig: &usingNoticeFiles];
         if (configStr == nil) {
             [self logMessage:@"Error getting config"];
             return FALSE;
@@ -301,6 +303,18 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                 [self logMessage:[NSString stringWithFormat: @"Psiphon library start failed: %@", e.localizedDescription]];
                 [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
                 return FALSE;
+            }
+
+            // self->usingNoticeFiles determines whether to invoke the
+            // onDiagnosticMessage callback for tunnel-core notices and
+            // whether to send logMessage messages to the notice files. Only
+            // enable once GoPsiStart had succeeded, at which point the notice
+            // files are initialized.
+            //
+            // Note that any tunnel-core notices received during GoPsiStart
+            // will invoke the onDiagnosticMessage callback.
+            if (usingNoticeFiles) {
+                atomic_store(&self->usingNoticeFiles, TRUE);
             }
         }
         @catch(NSException *exception) {
@@ -417,7 +431,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         uploadServer:(NSString * _Nonnull)uploadServer
  uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders {
     dispatch_async(self->workQueue, ^{
-        NSString *connectionConfigJson = [self getConfig];
+
+        BOOL usingNoticeFiles = FALSE;
+
+        NSString *connectionConfigJson = [self getConfig: &usingNoticeFiles];
         if (connectionConfigJson == nil) {
            [self logMessage:@"Error getting config for feedback upload"];
         }
@@ -473,7 +490,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
  Build the config string for the tunnel.
  @returns String containing the JSON config. `nil` on error.
  */
-- (NSString * _Nullable)getConfig {
+- (NSString * _Nullable)getConfig:(BOOL * _Nonnull)usingNoticeFiles {
     // tunneledAppDelegate is a weak reference, so check it.
     if (self.tunneledAppDelegate == nil) {
         [self logMessage:@"tunneledApp delegate lost"];
@@ -749,6 +766,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     config[@"UpgradeDownloadFilename"] = nil;
 
     config[@"SessionID"] = self.sessionID;
+
+    // Indicate whether UseNoticeFiles is set
+    *usingNoticeFiles = (config[@"UseNoticeFiles"] != nil);
 
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
@@ -1044,10 +1064,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // failed to log a notice. In this case, the user app receives
     // onDiagnosticMessage and a chance to report the error.
     //
-    // Otherwise, when tunnel-core is not managing diagnosrics, pass
+    // Otherwise, when tunnel-core is not managing diagnostics, pass
     // diagnostic messages to onDiagnosticMessage.
     if (diagnostic &&
-        (atomic_load(&self->usingRotatingNotices) == FALSE || internalError == TRUE)) {
+        (atomic_load(&self->usingNoticeFiles) == FALSE || internalError == TRUE)) {
 
         NSDictionary *data = notice[@"data"];
         if (data == nil) {
@@ -1069,7 +1089,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Otherwise, they are posted to onDiagnosticMessage for
     // the user app to manage.
 
-    if (atomic_load(&self->usingRotatingNotices) == TRUE) {
+    if (atomic_load(&self->usingNoticeFiles) == TRUE) {
         GoPsiNoticeUserLog(message);
     } else {
         NSString *timestamp = [rfc3339Formatter stringFromDate:[NSDate date]];
