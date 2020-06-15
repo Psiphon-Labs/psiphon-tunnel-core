@@ -152,14 +152,21 @@ type TrafficRulesFilter struct {
 	// AuthorizedAccessTypes is ignored when AuthorizationsRevoked is true.
 	AuthorizedAccessTypes []string
 
+	// ActiveAuthorizationIDs specifies a list of authorization IDs, at least
+	// one of which the client must have presented an active authorization
+	// for and which must not be revoked.
+	// ActiveAuthorizationIDs is ignored when AuthorizationsRevoked is true.
+	ActiveAuthorizationIDs []string
+
 	// AuthorizationsRevoked indicates whether the client's authorizations
 	// must have been revoked. When true, authorizations must have been
 	// revoked. When omitted or false, this field is ignored.
 	AuthorizationsRevoked bool
 
-	regionLookup map[string]bool
-	ispLookup    map[string]bool
-	cityLookup   map[string]bool
+	regionLookup                map[string]bool
+	ispLookup                   map[string]bool
+	cityLookup                  map[string]bool
+	activeAuthorizationIDLookup map[string]bool
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -451,6 +458,13 @@ func (set *TrafficRulesSet) initLookups() {
 				filter.cityLookup[city] = true
 			}
 		}
+
+		if len(filter.ActiveAuthorizationIDs) >= stringLookupThreshold {
+			filter.activeAuthorizationIDLookup = make(map[string]bool)
+			for _, ID := range filter.ActiveAuthorizationIDs {
+				filter.activeAuthorizationIDLookup[ID] = true
+			}
+		}
 	}
 
 	initTrafficRulesLookups(&set.DefaultRules)
@@ -646,17 +660,46 @@ func (set *TrafficRulesSet) GetTrafficRules(
 				continue
 			}
 
-		} else if len(filteredRules.Filter.AuthorizedAccessTypes) > 0 {
-			if !state.completed {
-				continue
-			}
+		} else {
+			if len(filteredRules.Filter.ActiveAuthorizationIDs) > 0 {
+				if !state.completed {
+					continue
+				}
 
-			if state.authorizationsRevoked {
-				continue
-			}
+				if state.authorizationsRevoked {
+					continue
+				}
 
-			if !common.ContainsAny(filteredRules.Filter.AuthorizedAccessTypes, state.authorizedAccessTypes) {
-				continue
+				if filteredRules.Filter.activeAuthorizationIDLookup != nil {
+					found := false
+					for _, ID := range state.activeAuthorizationIDs {
+						if filteredRules.Filter.activeAuthorizationIDLookup[ID] {
+							found = true
+							break
+						}
+					}
+					if !found {
+						continue
+					}
+				} else {
+					if !common.ContainsAny(filteredRules.Filter.ActiveAuthorizationIDs, state.activeAuthorizationIDs) {
+						continue
+					}
+				}
+
+			}
+			if len(filteredRules.Filter.AuthorizedAccessTypes) > 0 {
+				if !state.completed {
+					continue
+				}
+
+				if state.authorizationsRevoked {
+					continue
+				}
+
+				if !common.ContainsAny(filteredRules.Filter.AuthorizedAccessTypes, state.authorizedAccessTypes) {
+					continue
+				}
 			}
 		}
 
