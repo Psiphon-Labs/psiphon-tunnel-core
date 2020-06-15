@@ -1228,6 +1228,7 @@ type handshakeState struct {
 	completed               bool
 	apiProtocol             string
 	apiParams               common.APIParameters
+	activeAuthorizationIDs  []string
 	authorizedAccessTypes   []string
 	authorizationsRevoked   bool
 	expectDomainBytes       bool
@@ -2641,6 +2642,7 @@ func (sshClient *sshClient) setHandshakeState(
 
 		// Make the authorizedAccessTypes available for traffic rules filtering.
 
+		sshClient.handshakeState.activeAuthorizationIDs = authorizationIDs
 		sshClient.handshakeState.authorizedAccessTypes = authorizedAccessTypes
 
 		// On exit, sshClient.runTunnel will call releaseAuthorizations, which
