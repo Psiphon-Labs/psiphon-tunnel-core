@@ -21,6 +21,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -565,15 +566,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		Keys: []*accesscontrol.VerificationKey{accessControlVerificationKey},
 	}
 
-	var authorizationID [32]byte
+	var seedAuthorizationID [32]byte
 
-	clientAuthorization, _, err := accesscontrol.IssueAuthorization(
+	clientAuthorization, authorizationID, err := accesscontrol.IssueAuthorization(
 		accessControlSigningKey,
-		authorizationID[:],
+		seedAuthorizationID[:],
 		time.Now().Add(1*time.Hour))
 	if err != nil {
 		t.Fatalf("error issuing authorization: %s", err)
 	}
+
+	authorizationIDStr := base64.StdEncoding.EncodeToString(authorizationID)
 
 	// Enable tactics when the test protocol is meek. Both the client and the
 	// server will be configured to support tactics. The client config will be
@@ -648,8 +651,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// requests.
 	trafficRulesFilename := filepath.Join(testDataDirName, "traffic_rules.json")
 	paveTrafficRulesFile(
-		t, trafficRulesFilename, propagationChannelID, accessType,
-		runConfig.requireAuthorization, runConfig.denyTrafficRules, livenessTestSize)
+		t,
+		trafficRulesFilename,
+		propagationChannelID,
+		accessType,
+		authorizationIDStr,
+		runConfig.requireAuthorization,
+		runConfig.denyTrafficRules,
+		livenessTestSize)
 
 	var tacticsConfigFilename string
 
@@ -658,8 +667,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if doServerTactics {
 		tacticsConfigFilename = filepath.Join(testDataDirName, "tactics_config.json")
 		paveTacticsConfigFile(
-			t, tacticsConfigFilename,
-			tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+			t,
+			tacticsConfigFilename,
+			tacticsRequestPublicKey,
+			tacticsRequestPrivateKey,
+			tacticsRequestObfuscatedKey,
 			runConfig.tunnelProtocol,
 			propagationChannelID,
 			livenessTestSize)
@@ -784,8 +796,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		propagationChannelID = paveOSLConfigFile(t, oslConfigFilename)
 
 		paveTrafficRulesFile(
-			t, trafficRulesFilename, propagationChannelID, accessType,
-			runConfig.requireAuthorization, runConfig.denyTrafficRules,
+			t,
+			trafficRulesFilename,
+			propagationChannelID,
+			accessType,
+			authorizationIDStr,
+			runConfig.requireAuthorization,
+			runConfig.denyTrafficRules,
 			livenessTestSize)
 
 		p, _ := os.FindProcess(os.Getpid())
@@ -1696,8 +1713,13 @@ func pavePsinetDatabaseFile(
 }
 
 func paveTrafficRulesFile(
-	t *testing.T, trafficRulesFilename, propagationChannelID, accessType string,
-	requireAuthorization, deny bool,
+	t *testing.T,
+	trafficRulesFilename string,
+	propagationChannelID string,
+	accessType string,
+	authorizationID string,
+	requireAuthorization bool,
+	deny bool,
 	livenessTestSize int) {
 
 	// Test both default and fast lookups
@@ -1721,12 +1743,14 @@ func paveTrafficRulesFile(
 	}
 
 	authorizationFilterFormat := `,
-                    "AuthorizedAccessTypes" : ["%s"]
+                    "AuthorizedAccessTypes" : ["%s"],
+                    "ActiveAuthorizationIDs" : ["%s"]
 	`
 
 	authorizationFilter := ""
 	if requireAuthorization {
-		authorizationFilter = fmt.Sprintf(authorizationFilterFormat, accessType)
+		authorizationFilter = fmt.Sprintf(
+			authorizationFilterFormat, accessType, authorizationID)
 	}
 
 	// Supports two traffic rule test cases:
