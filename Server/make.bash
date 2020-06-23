@@ -15,7 +15,7 @@ if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
 prepare_build () {
   BUILDINFOFILE="psiphond_buildinfo.txt"
-  #BUILDDATE=$(date -Iseconds)
+  BUILDDATE=$(date -Iseconds)
   BUILDREPO=$(git config --get remote.origin.url)
   BUILDREV=$(git rev-parse --short HEAD)
   GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
