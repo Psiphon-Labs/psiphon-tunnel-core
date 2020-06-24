@@ -1,5 +1,5 @@
 /*
-Package bolt implements a low-level key/value store in pure Go. It supports
+package bolt implements a low-level key/value store in pure Go. It supports
 fully serializable transactions, ACID semantics, and lock-free MVCC with
 multiple readers and a single writer. Bolt can be used for projects that
 want a simple data store without the need to add large dependencies such as

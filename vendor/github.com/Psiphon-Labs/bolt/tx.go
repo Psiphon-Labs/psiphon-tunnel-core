@@ -126,10 +126,7 @@ func (tx *Tx) DeleteBucket(name []byte) error {
 // the error is returned to the caller.
 func (tx *Tx) ForEach(fn func(name []byte, b *Bucket) error) error {
 	return tx.root.ForEach(func(k, v []byte) error {
-		if err := fn(k, tx.root.Bucket(k)); err != nil {
-			return err
-		}
-		return nil
+		return fn(k, tx.root.Bucket(k))
 	})
 }
 
@@ -169,28 +166,18 @@ func (tx *Tx) Commit() error {
 	// Free the old root bucket.
 	tx.meta.root.root = tx.root.root
 
-	opgid := tx.meta.pgid
-
-	// Free the freelist and allocate new pages for it. This will overestimate
-	// the size of the freelist but not underestimate the size (which would be bad).
-	tx.db.freelist.free(tx.meta.txid, tx.db.page(tx.meta.freelist))
-	p, err := tx.allocate((tx.db.freelist.size() / tx.db.pageSize) + 1)
-	if err != nil {
-		tx.rollback()
-		return err
+	// Free the old freelist because commit writes out a fresh freelist.
+	if tx.meta.freelist != pgidNoFreelist {
+		tx.db.freelist.free(tx.meta.txid, tx.db.page(tx.meta.freelist))
 	}
-	if err := tx.db.freelist.write(p); err != nil {
-		tx.rollback()
-		return err
-	}
-	tx.meta.freelist = p.id
 
-	// If the high water mark has moved up then attempt to grow the database.
-	if tx.meta.pgid > opgid {
-		if err := tx.db.grow(int(tx.meta.pgid+1) * tx.db.pageSize); err != nil {
-			tx.rollback()
+	if !tx.db.NoFreelistSync {
+		err := tx.commitFreelist()
+		if err != nil {
 			return err
 		}
+	} else {
+		tx.meta.freelist = pgidNoFreelist
 	}
 
 	// Write dirty pages to disk.
@@ -235,6 +222,31 @@ func (tx *Tx) Commit() error {
 	return nil
 }
 
+func (tx *Tx) commitFreelist() error {
+	// Allocate new pages for the new free list. This will overestimate
+	// the size of the freelist but not underestimate the size (which would be bad).
+	opgid := tx.meta.pgid
+	p, err := tx.allocate((tx.db.freelist.size() / tx.db.pageSize) + 1)
+	if err != nil {
+		tx.rollback()
+		return err
+	}
+	if err := tx.db.freelist.write(p); err != nil {
+		tx.rollback()
+		return err
+	}
+	tx.meta.freelist = p.id
+	// If the high water mark has moved up then attempt to grow the database.
+	if tx.meta.pgid > opgid {
+		if err := tx.db.grow(int(tx.meta.pgid+1) * tx.db.pageSize); err != nil {
+			tx.rollback()
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Rollback closes the transaction and ignores all previous updates. Read-only
 // transactions must be rolled back and not committed.
 func (tx *Tx) Rollback() error {
@@ -242,10 +254,22 @@ func (tx *Tx) Rollback() error {
 	if tx.db == nil {
 		return ErrTxClosed
 	}
-	tx.rollback()
+	tx.nonPhysicalRollback()
 	return nil
 }
 
+// nonPhysicalRollback is called when user calls Rollback directly, in this case we do not need to reload the free pages from disk.
+func (tx *Tx) nonPhysicalRollback() {
+	if tx.db == nil {
+		return
+	}
+	if tx.writable {
+		tx.db.freelist.rollback(tx.meta.txid)
+	}
+	tx.close()
+}
+
+// rollback needs to reload the free pages from disk in case some system error happens like fsync error.
 func (tx *Tx) rollback() {
 	if tx.db == nil {
 		return
@@ -261,7 +285,14 @@ func (tx *Tx) rollback() {
 
 	if tx.writable {
 		tx.db.freelist.rollback(tx.meta.txid)
-		tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
+		if !tx.db.hasSyncedFreelist() {
+			// Reconstruct free page list by scanning the DB to get the whole free page list.
+			// Note: scaning the whole db is heavy if your db size is large in NoSyncFreeList mode.
+			tx.db.freelist.noSyncReload(tx.db.freepages())
+		} else {
+			// Read free page list from freelist page.
+			tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
+		}
 	}
 	tx.close()
 }
@@ -300,7 +331,9 @@ func (tx *Tx) close() {
 }
 
 // Copy writes the entire database to a writer.
-// This function exists for backwards compatibility. Use WriteTo() instead.
+// This function exists for backwards compatibility.
+//
+// Deprecated; Use WriteTo() instead.
 func (tx *Tx) Copy(w io.Writer) error {
 	_, err := tx.WriteTo(w)
 	return err
@@ -310,11 +343,15 @@ func (tx *Tx) Copy(w io.Writer) error {
 // If err == nil then exactly tx.Size() bytes will be written into the writer.
 func (tx *Tx) WriteTo(w io.Writer) (n int64, err error) {
 	// Attempt to open reader with WriteFlag
-	f, err := os.OpenFile(tx.db.path, os.O_RDONLY|tx.WriteFlag, 0)
+	f, err := tx.db.openFile(tx.db.path, os.O_RDONLY|tx.WriteFlag, 0)
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	// Generate a meta page. We use the same page data for both meta pages.
 	buf := make([]byte, tx.db.pageSize)
@@ -342,7 +379,7 @@ func (tx *Tx) WriteTo(w io.Writer) (n int64, err error) {
 	}
 
 	// Move past the meta pages in the file.
-	if _, err := f.Seek(int64(tx.db.pageSize*2), os.SEEK_SET); err != nil {
+	if _, err := f.Seek(int64(tx.db.pageSize*2), io.SeekStart); err != nil {
 		return n, fmt.Errorf("seek: %s", err)
 	}
 
@@ -353,14 +390,14 @@ func (tx *Tx) WriteTo(w io.Writer) (n int64, err error) {
 		return n, err
 	}
 
-	return n, f.Close()
+	return n, nil
 }
 
 // CopyFile copies the entire database to file at the given path.
 // A reader transaction is maintained during the copy so it is safe to continue
 // using the database while a copy is in progress.
 func (tx *Tx) CopyFile(path string, mode os.FileMode) error {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
+	f, err := tx.db.openFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
@@ -410,6 +447,10 @@ func (tx *Tx) SynchronousCheck() error {
 // Psiphon will recover by resetting (deleting) the datastore on any error,
 // more than one error is not useful information in our case.
 func (tx *Tx) check() error {
+
+	// Force loading free list if opened in ReadOnly mode.
+	tx.db.loadFreelist()
+
 	// Check if any pages are double freed.
 	freed := make(map[pgid]bool)
 	all := make([]pgid, tx.db.freelist.count())
@@ -425,8 +466,10 @@ func (tx *Tx) check() error {
 	reachable := make(map[pgid]*page)
 	reachable[0] = tx.page(0) // meta0
 	reachable[1] = tx.page(1) // meta1
-	for i := uint32(0); i <= tx.page(tx.meta.freelist).overflow; i++ {
-		reachable[tx.meta.freelist+pgid(i)] = tx.page(tx.meta.freelist)
+	if tx.meta.freelist != pgidNoFreelist {
+		for i := uint32(0); i <= tx.page(tx.meta.freelist).overflow; i++ {
+			reachable[tx.meta.freelist+pgid(i)] = tx.page(tx.meta.freelist)
+		}
 	}
 
 	// Recursively check buckets.
@@ -501,7 +544,7 @@ func (tx *Tx) checkBucket(b *Bucket, reachable map[pgid]*page, freed map[pgid]bo
 
 // allocate returns a contiguous block of memory starting at a given page.
 func (tx *Tx) allocate(count int) (*page, error) {
-	p, err := tx.db.allocate(count)
+	p, err := tx.db.allocate(tx.meta.txid, count)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +553,7 @@ func (tx *Tx) allocate(count int) (*page, error) {
 	tx.pages[p.id] = p
 
 	// Update statistics.
-	tx.stats.PageCount++
+	tx.stats.PageCount += count
 	tx.stats.PageAlloc += count * tx.db.pageSize
 
 	return p, nil
@@ -529,20 +572,18 @@ func (tx *Tx) write() error {
 
 	// Write pages to disk in order.
 	for _, p := range pages {
-		size := (int(p.overflow) + 1) * tx.db.pageSize
+		rem := (uint64(p.overflow) + 1) * uint64(tx.db.pageSize)
 		offset := int64(p.id) * int64(tx.db.pageSize)
+		var written uintptr
 
 		// Write out page in "max allocation" sized chunks.
-		ptr := (*[maxAllocSize]byte)(unsafe.Pointer(p))
 		for {
-			// Limit our write to our max allocation size.
-			sz := size
+			sz := rem
 			if sz > maxAllocSize-1 {
 				sz = maxAllocSize - 1
 			}
+			buf := unsafeByteSlice(unsafe.Pointer(p), written, 0, int(sz))
 
-			// Write chunk to disk.
-			buf := ptr[:sz]
 			if _, err := tx.db.ops.writeAt(buf, offset); err != nil {
 				return err
 			}
@@ -551,14 +592,14 @@ func (tx *Tx) write() error {
 			tx.stats.Write++
 
 			// Exit inner for loop if we've written all the chunks.
-			size -= sz
-			if size == 0 {
+			rem -= sz
+			if rem == 0 {
 				break
 			}
 
 			// Otherwise move offset forward and move pointer to next chunk.
 			offset += int64(sz)
-			ptr = (*[maxAllocSize]byte)(unsafe.Pointer(&ptr[sz]))
+			written += uintptr(sz)
 		}
 	}
 
@@ -577,7 +618,7 @@ func (tx *Tx) write() error {
 			continue
 		}
 
-		buf := (*[maxAllocSize]byte)(unsafe.Pointer(p))[:tx.db.pageSize]
+		buf := unsafeByteSlice(unsafe.Pointer(p), 0, 0, tx.db.pageSize)
 
 		// See https://go.googlesource.com/go/+/f03c9202c43e0abb130669852082117ca50aa9b1
 		for i := range buf {
