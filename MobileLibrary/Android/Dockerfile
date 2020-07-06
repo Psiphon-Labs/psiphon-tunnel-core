@@ -55,6 +55,7 @@ RUN mkdir -p $GOPATH/pkg/gomobile/dl \
   && git clone https://github.com/golang/mobile \
   && cd mobile \
   && git checkout -b pinned $GOMOBILE_PINNED_REV \
+  && git format-patch --stdout -1 e6f31964531b3d6b76d334ba0d313b64c9687146 | git apply \
   && mv ./cmd/gomobile/build.go ./cmd/gomobile/build.go.orig \
   && sed -e 's/"-tags="+strconv.Quote(strings.Join(ctx.BuildTags, ",")),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./cmd/gomobile/build.go.orig > ./cmd/gomobile/build.go \
   && mv ./cmd/gomobile/build.go ./cmd/gomobile/build.go.orig \

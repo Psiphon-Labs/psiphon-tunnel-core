@@ -1,4 +1,4 @@
-// +build ppc64
+// +build riscv64
 
 package bolt
 

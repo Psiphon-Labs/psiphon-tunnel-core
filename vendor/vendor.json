@@ -15,10 +15,10 @@
 			"revisionTime": "2017-02-28T16:03:01Z"
 		},
 		{
-			"checksumSHA1": "I0Gc6+Xq9KQF6ifkVEet1leubD4=",
+			"checksumSHA1": "okYVKU03vmD+0tpqfhvXEubcaCw=",
 			"path": "github.com/Psiphon-Labs/bolt",
-			"revision": "94750aa2185e6ee4217105064949acace0156564",
-			"revisionTime": "2019-07-31T17:17:12Z"
+			"revision": "23cedaef7ad7addf9dde5f6b026b0b1fed566664",
+			"revisionTime": "2020-06-24T19:15:37Z"
 		},
 		{
 			"checksumSHA1": "C5OwxfDa6nvLoxP3WBaCp7ufW60=",
@@ -141,10 +141,10 @@
 			"revisionTime": "2020-01-16T02:28:06Z"
 		},
 		{
-			"checksumSHA1": "vK+EtAIPYfEe9M9rSoGZYffUsxo=",
+			"checksumSHA1": "udq1ER8m9FUb3+G39Li2Q3bBi7g=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
-			"revision": "16ab4b2ea797315638cb1ee75f438ef9502b617c",
-			"revisionTime": "2020-05-04T18:37:24Z"
+			"revision": "7d791789810f0e7bd780cd3846e419171739dbf8",
+			"revisionTime": "2020-06-10T16:11:56Z"
 		},
 		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",

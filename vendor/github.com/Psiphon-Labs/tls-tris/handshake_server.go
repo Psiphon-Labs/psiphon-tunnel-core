@@ -101,12 +101,13 @@ func (c *Conn) serverHandshake() error {
 			err = fmt.Errorf("passthrough: %s", err)
 		}
 
+		clientAddr := c.conn.RemoteAddr().String()
+		clientIP, _, _ := net.SplitHostPort(clientAddr)
+
 		if !doPassthrough {
 			if !obfuscator.VerifyTLSPassthroughMessage(
 				c.config.PassthroughKey, hs.clientHello.random) {
 
-				clientAddr := c.conn.RemoteAddr().String()
-				clientIP, _, _ := net.SplitHostPort(clientAddr)
 				c.config.PassthroughLogInvalidMessage(clientIP)
 
 				doPassthrough = true
@@ -116,12 +117,17 @@ func (c *Conn) serverHandshake() error {
 
 		if !doPassthrough {
 			if !c.config.PassthroughHistoryAddNew(
-				c.conn.RemoteAddr().String(), hs.clientHello.random) {
+				clientIP, hs.clientHello.random) {
 
 				doPassthrough = true
 				err = errors.New("passthrough: duplicate client random")
 			}
 		}
+
+		// Call GetReadBuffer, in both passthrough and non-passthrough cases, to
+		// stop buffering all read bytes.
+
+		passthroughReadBuffer := c.conn.(*recorderConn).GetReadBuffer().Bytes()
 
 		if doPassthrough {
 
@@ -130,8 +136,6 @@ func (c *Conn) serverHandshake() error {
 			if err == nil {
 				err = errors.New("passthrough: missing error")
 			}
-
-			passthroughReadBuffer := c.conn.(*recorderConn).GetReadBuffer().Bytes()
 
 			// Modifying c.conn directly is safe only because Conn.Handshake, which
 			// calls Conn.serverHandshake, is holding c.handshakeMutex and c.in locks,

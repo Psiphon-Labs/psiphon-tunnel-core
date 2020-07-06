@@ -54,6 +54,7 @@ script:
 - go test -v -covermode=count -coverprofile=psiphon.coverprofile
 - go test -v ./memory_test -run TestReconnectTunnel
 - go test -v ./memory_test -run TestRestartController
+after_script:
 - $HOME/gopath/bin/gover
 - $HOME/gopath/bin/goveralls -coverprofile=gover.coverprofile -service=travis-ci -repotoken $COVERALLS_TOKEN
 before_install:
