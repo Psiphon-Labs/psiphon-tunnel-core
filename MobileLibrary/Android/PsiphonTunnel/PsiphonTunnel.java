@@ -292,6 +292,15 @@ public class PsiphonTunnel {
         return Psi.importExchangePayload(payload);
     }
 
+    public static void sendFeedback(String configJson, String diagnosticsJson, String b64EncodedPublicKey, String uploadServer,
+                             String uploadPath, String uploadServerHeaders) throws Exception {
+        try {
+            Psi.sendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders);
+        } catch (java.lang.Exception e) {
+            throw new Exception("failed to send feedback", e);
+        }
+    }
+
     // Writes Go runtime profile information to a set of files in the specifiec output directory.
     // cpuSampleDurationSeconds and blockSampleDurationSeconds determines how to long to wait and
     // sample profiles that require active sampling. When set to 0, these profiles are skipped.
