@@ -9,8 +9,8 @@ if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 # Note:
 #   clangwrap.sh needs to be updated when the Go version changes.
 #   The last version was:
-#   https://github.com/golang/go/blob/go1.13.7/misc/ios/clangwrap.sh.
-GO_VERSION_REQUIRED="1.13.7"
+#   https://github.com/golang/go/blob/go1.14.4/misc/ios/clangwrap.sh.
+GO_VERSION_REQUIRED="1.14.4"
 
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
@@ -82,7 +82,7 @@ prepare_build () {
 
   # see DEPENDENCIES comment in MobileLibrary/Android/make.bash
   cd ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary
-  DEPENDENCIES=$(echo -n "{" && GOOS=$1 go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=$1 xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'PKG=pkg && cd $GOPATH/src/$PKG && echo -n "\"$PKG\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/')
+  DEPENDENCIES=$(echo -n "{" && GOOS=$1 go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=$1 xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/$0 && if echo -n "$0" | grep -vEq "^github.com/Psiphon-Labs/psiphon-tunnel-core/" ; then echo -n "\"$0\":\"$(git rev-parse --short HEAD)\"," ; fi' pkg | sed 's/,$//' | tr -d '\n' && echo -n "}")
 
   LDFLAGS="\
   -s \
