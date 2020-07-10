@@ -106,9 +106,8 @@ func (t TransferURLs) Select(attempt int) (string, string, bool) {
 	}
 
 	if len(candidates) < 1 {
-		// This case is not expected, as decodeAndValidateTransferURLs
-		// should reject configs that would have no candidates for
-		// 0 attempts.
+		// This case is not expected, as DecodeAndValidate should reject configs
+		// that would have no candidates for 0 attempts.
 		return "", "", true
 	}
 
