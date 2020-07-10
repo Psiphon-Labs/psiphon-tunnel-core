@@ -372,8 +372,8 @@ var defaultClientParameters = map[string]struct {
 	FetchRemoteServerListRetryPeriod:   {value: 30 * time.Second, minimum: 1 * time.Millisecond},
 	FetchRemoteServerListStalePeriod:   {value: 6 * time.Hour, minimum: 1 * time.Hour},
 	RemoteServerListSignaturePublicKey: {value: ""},
-	RemoteServerListURLs:               {value: DownloadURLs{}},
-	ObfuscatedServerListRootURLs:       {value: DownloadURLs{}},
+	RemoteServerListURLs:               {value: TransferURLs{}},
+	ObfuscatedServerListRootURLs:       {value: TransferURLs{}},
 
 	PsiphonAPIRequestTimeout: {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
@@ -399,7 +399,7 @@ var defaultClientParameters = map[string]struct {
 	FetchUpgradeTimeout:                {value: 60 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	FetchUpgradeRetryPeriod:            {value: 30 * time.Second, minimum: 1 * time.Millisecond},
 	FetchUpgradeStalePeriod:            {value: 6 * time.Hour, minimum: 1 * time.Hour},
-	UpgradeDownloadURLs:                {value: DownloadURLs{}},
+	UpgradeDownloadURLs:                {value: TransferURLs{}},
 	UpgradeDownloadClientVersionHeader: {value: ""},
 
 	TotalBytesTransferredNoticePeriod: {value: 5 * time.Minute, minimum: 1 * time.Second},
@@ -655,7 +655,7 @@ func (p *ClientParameters) Set(
 			// RemoteServerListURLs is set?
 
 			switch v := newValue.(type) {
-			case DownloadURLs:
+			case TransferURLs:
 				err := v.DecodeAndValidate()
 				if err != nil {
 					if skipOnError {
@@ -1079,9 +1079,9 @@ func (p ClientParametersAccessor) LabeledQUICVersions(name, label string) protoc
 	return value[label]
 }
 
-// DownloadURLs returns a DownloadURLs parameter value.
-func (p ClientParametersAccessor) DownloadURLs(name string) DownloadURLs {
-	value := DownloadURLs{}
+// TransferURLs returns a TransferURLs parameter value.
+func (p ClientParametersAccessor) TransferURLs(name string) TransferURLs {
+	value := TransferURLs{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

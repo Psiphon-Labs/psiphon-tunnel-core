@@ -24,7 +24,7 @@ import (
 	"testing"
 )
 
-func TestDownloadURLs(t *testing.T) {
+func TestTransferURLs(t *testing.T) {
 
 	decodedA := "a.example.com"
 	encodedA := base64.StdEncoding.EncodeToString([]byte(decodedA))
@@ -33,7 +33,7 @@ func TestDownloadURLs(t *testing.T) {
 
 	testCases := []struct {
 		description                string
-		downloadURLs               DownloadURLs
+		transferURLs               TransferURLs
 		attempts                   int
 		expectedValid              bool
 		expectedCanonicalURL       string
@@ -41,7 +41,7 @@ func TestDownloadURLs(t *testing.T) {
 	}{
 		{
 			"missing OnlyAfterAttempts = 0",
-			DownloadURLs{
+			TransferURLs{
 				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 1,
@@ -54,7 +54,7 @@ func TestDownloadURLs(t *testing.T) {
 		},
 		{
 			"single URL, multiple attempts",
-			DownloadURLs{
+			TransferURLs{
 				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 0,
@@ -67,7 +67,7 @@ func TestDownloadURLs(t *testing.T) {
 		},
 		{
 			"multiple URLs, single attempt",
-			DownloadURLs{
+			TransferURLs{
 				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 0,
@@ -88,7 +88,7 @@ func TestDownloadURLs(t *testing.T) {
 		},
 		{
 			"multiple URLs, multiple attempts",
-			DownloadURLs{
+			TransferURLs{
 				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 0,
@@ -109,7 +109,7 @@ func TestDownloadURLs(t *testing.T) {
 		},
 		{
 			"multiple URLs, multiple attempts",
-			DownloadURLs{
+			TransferURLs{
 				{
 					URL:               encodedA,
 					OnlyAfterAttempts: 0,
@@ -133,7 +133,7 @@ func TestDownloadURLs(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.description, func(t *testing.T) {
 
-			err := testCase.downloadURLs.DecodeAndValidate()
+			err := testCase.transferURLs.DecodeAndValidate()
 
 			if testCase.expectedValid {
 				if err != nil {
@@ -159,7 +159,7 @@ func TestDownloadURLs(t *testing.T) {
 
 			attempt := 0
 			for i := 0; i < runs; i++ {
-				url, canonicalURL, skipVerify := testCase.downloadURLs.Select(attempt)
+				url, canonicalURL, skipVerify := testCase.transferURLs.Select(attempt)
 				if canonicalURL != testCase.expectedCanonicalURL {
 					t.Fatalf("unexpected canonical URL: %s", canonicalURL)
 				}
