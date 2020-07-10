@@ -55,7 +55,7 @@ func FetchCommonRemoteServerList(
 
 	p := config.GetClientParameters().Get()
 	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
-	urls := p.DownloadURLs(parameters.RemoteServerListURLs)
+	urls := p.TransferURLs(parameters.RemoteServerListURLs)
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
 	p.Close()
 
@@ -146,7 +146,7 @@ func FetchObfuscatedServerLists(
 
 	p := config.GetClientParameters().Get()
 	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
-	urls := p.DownloadURLs(parameters.ObfuscatedServerListRootURLs)
+	urls := p.TransferURLs(parameters.ObfuscatedServerListRootURLs)
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
 	p.Close()
 
