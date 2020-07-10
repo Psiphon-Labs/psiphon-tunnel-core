@@ -34,7 +34,7 @@ import (
 
 // GetTactics attempts to apply tactics, for the current network, to the given
 // config. GetTactics first checks for unexpired stored tactics, which it will
-// immediately reply. If no unexpired stored tactics are found, tactics
+// immediately return. If no unexpired stored tactics are found, tactics
 // requests are attempted until the input context is cancelled.
 //
 // Callers are responsible for ensuring that the input context eventually
