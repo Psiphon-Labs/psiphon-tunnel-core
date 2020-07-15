@@ -320,7 +320,7 @@ type Config struct {
 	// be established to known servers. This value is supplied by and depends
 	// on the Psiphon Network, and is typically embedded in the client binary.
 	// All URLs must point to the same entity with the same ETag. At least one
-	// DownloadURL must have OnlyAfterAttempts = 0.
+	// TransferURL must have OnlyAfterAttempts = 0.
 	RemoteServerListURLs parameters.TransferURLs
 
 	// RemoteServerListSignaturePublicKey specifies a public key that's used
@@ -702,6 +702,14 @@ type Config struct {
 	// Deprecated: Use UpgradeDownloadURLs. When UpgradeDownloadURLs is not
 	// nil, this parameter is ignored.
 	UpgradeDownloadUrl string
+
+	// FeedbackUploadURLs is a list of SecureTransferURLs which specify
+	// locations where feedback data can be uploaded, pairing with each
+	// location a public key with which to encrypt the feedback data. This
+	// value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary. At least one TransferURL must
+	// have OnlyAfterAttempts = 0.
+	FeedbackUploadURLs parameters.SecureTransferURLs
 
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
@@ -1160,7 +1168,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	return nil
 }
 
-// GetClientParameters returns a the current client parameters.
+// GetClientParameters returns the current client parameters.
 func (config *Config) GetClientParameters() *parameters.ClientParameters {
 	return config.clientParameters
 }
@@ -1562,6 +1570,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ApplicationParameters != nil {
 		applyParameters[parameters.ApplicationParameters] = config.ApplicationParameters
+	}
+
+	if len(config.FeedbackUploadURLs) > 0 {
+		applyParameters[parameters.FeedbackUploadURLs] = config.FeedbackUploadURLs
 	}
 
 	return applyParameters

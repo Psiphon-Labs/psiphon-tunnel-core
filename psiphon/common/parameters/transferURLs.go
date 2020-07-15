@@ -34,7 +34,7 @@ type TransferURL struct {
 	// with base64 encoding to mitigate trivial binary executable string scanning.
 	URL string
 
-	// SkipVerify indicates whether to verify HTTPS certificates. It some
+	// SkipVerify indicates whether to verify HTTPS certificates. In some
 	// circumvention scenarios, verification is not possible. This must
 	// only be set to true when the resource has its own verification mechanism.
 	SkipVerify bool
@@ -49,7 +49,7 @@ type TransferURL struct {
 // TransferURLs is a list of transfer URLs.
 type TransferURLs []*TransferURL
 
-// DecodeAndValidate validates a list of download URLs.
+// DecodeAndValidate validates a list of transfer URLs.
 //
 // At least one TransferURL in the list must have OnlyAfterAttempts of 0,
 // or no TransferURL would be selected on the first attempt.
@@ -115,4 +115,68 @@ func (t TransferURLs) Select(attempt int) (string, string, bool) {
 	transferURL := t[candidates[selection]]
 
 	return transferURL.URL, canonicalURL, transferURL.SkipVerify
+}
+
+// SecureTransferURL specifies a URL for uploading or downloading a resource
+// along with a public key for encrypting the resource, when uploading, or
+// for verifying a signature of the resource, when downloading.
+type SecureTransferURL struct {
+	B64EncodedPublicKey string
+	RequestHeaders      map[string]string
+	TransferURL         TransferURL
+}
+
+// SecureTransferURLs is a list of secure transfer URLs.
+type SecureTransferURLs []*SecureTransferURL
+
+// TransferURLs returns the underlying TransferURLs with ordering preserved.
+func (t SecureTransferURLs) TransferURLs() (TransferURLs, error) {
+	transferURLs := make(TransferURLs, len(t))
+	for i, secureTransferURL := range t {
+		if secureTransferURL == nil {
+			return nil, errors.TraceNew("unexpected nil SecureTransferURL")
+		}
+		transferURLs[i] = &secureTransferURL.TransferURL
+	}
+	return transferURLs, nil
+}
+
+// DecodeAndValidate validates a list of secure transfer URLs.
+func (t SecureTransferURLs) DecodeAndValidate() error {
+	transferURLs, err := t.TransferURLs()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	err = transferURLs.DecodeAndValidate()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return nil
+}
+
+// Select chooses a SecureTransferURL from the list.
+//
+// The secure transfer URL is selected based at random from the candidates
+// allowed in the specified attempt.
+func (t SecureTransferURLs) Select(attempt int) (*SecureTransferURL, error) {
+	candidates := make([]int, 0)
+	for index, secureTransferURL := range t {
+		if secureTransferURL == nil {
+			return nil, errors.TraceNew("unexpected nil SecureTransferURL")
+		}
+		if attempt >= secureTransferURL.TransferURL.OnlyAfterAttempts {
+			candidates = append(candidates, index)
+		}
+	}
+
+	if len(candidates) < 1 {
+		// This case is not expected, as DecodeAndValidate should reject configs
+		// that would have no candidates for 0 attempts.
+		return nil, errors.TraceNew("no candiates found")
+	}
+
+	selection := prng.Intn(len(candidates))
+	transferURL := t[candidates[selection]]
+
+	return transferURL, nil
 }

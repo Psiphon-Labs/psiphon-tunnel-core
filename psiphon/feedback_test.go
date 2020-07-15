@@ -73,7 +73,7 @@ func TestFeedbackUpload(t *testing.T) {
 		t.FailNow()
 	}
 
-	err = SendFeedback(string(configFileContents), string(diagnosticData), config["ENCRYPTION_PUBLIC_KEY"].(string), config["UPLOAD_SERVER"].(string), config["UPLOAD_PATH"].(string), config["UPLOAD_SERVER_HEADERS"].(string))
+	err = SendFeedback(string(configFileContents), string(diagnosticData), "")
 	if err != nil {
 		t.Error(err.Error())
 		t.FailNow()

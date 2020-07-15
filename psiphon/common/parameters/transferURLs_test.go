@@ -164,9 +164,287 @@ func TestTransferURLs(t *testing.T) {
 					t.Fatalf("unexpected canonical URL: %s", canonicalURL)
 				}
 				if skipVerify {
-					t.Fatalf("expected skipVerify")
+					t.Fatalf("unexpected skipVerify")
 				}
 				attemptDistinctSelections[attempt][url] += 1
+				attempt = (attempt + 1) % testCase.attempts
+			}
+
+			maxDistinctSelections := 0
+			for _, m := range attemptDistinctSelections {
+				if len(m) > maxDistinctSelections {
+					maxDistinctSelections = len(m)
+				}
+			}
+
+			if maxDistinctSelections != testCase.expectedDistinctSelections {
+				t.Fatalf("got %d distinct selections, expected %d",
+					maxDistinctSelections,
+					testCase.expectedDistinctSelections)
+			}
+		})
+	}
+
+}
+
+func TestSecureTransferURLs(t *testing.T) {
+
+	decodedA := "a.example.com"
+	encodedA := base64.StdEncoding.EncodeToString([]byte(decodedA))
+	decodedB := "b.example.com"
+	encodedB := base64.StdEncoding.EncodeToString([]byte(decodedB))
+	decodedC := "c.example.com"
+	encodedC := base64.StdEncoding.EncodeToString([]byte(decodedC))
+
+	type secureTransferURLSubTest struct {
+		secureTransferURL  *SecureTransferURL
+		expectedDecodedURL string
+	}
+
+	testCases := []struct {
+		description                string
+		secureTransferURLs         []secureTransferURLSubTest
+		attempts                   int
+		expectedValid              bool
+		expectedDistinctSelections int
+	}{
+		{
+			"missing OnlyAfterAttempts = 0",
+			[]secureTransferURLSubTest{
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedA,
+							OnlyAfterAttempts: 1,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedA,
+				},
+			},
+			1,
+			false,
+			0,
+		},
+		{
+			"contains nil SecureTransferURL",
+			[]secureTransferURLSubTest{
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedA,
+							OnlyAfterAttempts: 0,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedA,
+				},
+				{
+					nil,
+					decodedA,
+				},
+			},
+			1,
+			false,
+			0,
+		},
+		{
+			"single URL, multiple attempts",
+			[]secureTransferURLSubTest{
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedA,
+							OnlyAfterAttempts: 0,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedA,
+				},
+			},
+			2,
+			true,
+			1,
+		},
+		{
+			"multiple URLs, single attempt",
+			[]secureTransferURLSubTest{
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedA,
+							OnlyAfterAttempts: 0,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedA,
+				},
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedB,
+							OnlyAfterAttempts: 1,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedB,
+				},
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedC,
+							OnlyAfterAttempts: 1,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedC,
+				},
+			},
+			1,
+			true,
+			1,
+		},
+		{
+			"multiple URLs, multiple attempts",
+			[]secureTransferURLSubTest{
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedA,
+							OnlyAfterAttempts: 0,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedA,
+				},
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedB,
+							OnlyAfterAttempts: 1,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedB,
+				},
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedC,
+							OnlyAfterAttempts: 1,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedC,
+				},
+			},
+			2,
+			true,
+			3,
+		},
+		{
+			"multiple URLs, multiple attempts",
+			[]secureTransferURLSubTest{
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedA,
+							OnlyAfterAttempts: 0,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedA,
+				},
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedB,
+							OnlyAfterAttempts: 1,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedB,
+				},
+				{
+					&SecureTransferURL{
+						TransferURL: TransferURL{
+							URL:               encodedC,
+							OnlyAfterAttempts: 3,
+						},
+						RequestHeaders:      nil,
+						B64EncodedPublicKey: "",
+					},
+					decodedC,
+				},
+			},
+			4,
+			true,
+			3,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.description, func(t *testing.T) {
+
+			// Construct list of SecureTransferURLs.
+			secureTransferURLs := make(SecureTransferURLs, len(testCase.secureTransferURLs))
+			for i, subTest := range testCase.secureTransferURLs {
+				secureTransferURLs[i] = subTest.secureTransferURL
+			}
+
+			err := secureTransferURLs.DecodeAndValidate()
+
+			if testCase.expectedValid {
+				if err != nil {
+					t.Fatalf("unexpected validation error: %s", err)
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("expected validation error")
+				}
+				return
+			}
+
+			// Check URLs are decoded as expected.
+			for _, subTest := range testCase.secureTransferURLs {
+				if subTest.expectedDecodedURL != subTest.secureTransferURL.TransferURL.URL {
+					t.Fatalf("unexpected URL: %s", subTest.secureTransferURL.TransferURL.URL)
+				}
+			}
+
+			// Track distinct selections for each attempt; the
+			// expected number of distinct should be for at least
+			// one particular attempt.
+			attemptDistinctSelections := make(map[int]map[string]int)
+			for i := 0; i < testCase.attempts; i++ {
+				attemptDistinctSelections[i] = make(map[string]int)
+			}
+
+			// Perform enough runs to account for random selection.
+			runs := 1000
+
+			attempt := 0
+			for i := 0; i < runs; i++ {
+				secureTransferURL, err := secureTransferURLs.Select(attempt)
+				if err != nil {
+					// Error should have been caught by DecodeAndVerify.
+					t.Fatalf("unexpected Select error")
+				}
+				if secureTransferURL.TransferURL.SkipVerify {
+					t.Fatalf("unexpected skipVerify")
+				}
+				attemptDistinctSelections[attempt][secureTransferURL.TransferURL.URL] += 1
 				attempt = (attempt + 1) % testCase.attempts
 			}
 

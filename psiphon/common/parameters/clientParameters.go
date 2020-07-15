@@ -237,6 +237,11 @@ const (
 	BPFServerTCPProbability                          = "BPFServerTCPProbability"
 	BPFClientTCPProgram                              = "BPFClientTCPProgram"
 	BPFClientTCPProbability                          = "BPFClientTCPProbability"
+	FeedbackUploadURLs                               = "FeedbackUploadURLs"
+	FeedbackTacticsWaitPeriod                        = "FeedbackTacticsWaitPeriod"
+	FeedbackUploadMaxRetries                         = "FeedbackUploadMaxRetries"
+	FeedbackUploadRetryDelaySeconds                  = "FeedbackUploadRetryDelaySeconds"
+	FeedbackUploadTimeoutSeconds                     = "FeedbackUploadTimeoutSeconds"
 )
 
 const (
@@ -491,6 +496,12 @@ var defaultClientParameters = map[string]struct {
 	BPFServerTCPProbability: {value: 0.5, minimum: 0.0},
 	BPFClientTCPProgram:     {value: (*BPFProgramSpec)(nil)},
 	BPFClientTCPProbability: {value: 0.5, minimum: 0.0},
+
+	FeedbackUploadURLs:              {value: SecureTransferURLs{}},
+	FeedbackTacticsWaitPeriod:       {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
+	FeedbackUploadMaxRetries:        {value: 5, minimum: 0},
+	FeedbackUploadRetryDelaySeconds: {value: 300 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
+	FeedbackUploadTimeoutSeconds:    {value: 30 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -656,6 +667,14 @@ func (p *ClientParameters) Set(
 
 			switch v := newValue.(type) {
 			case TransferURLs:
+				err := v.DecodeAndValidate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case SecureTransferURLs:
 				err := v.DecodeAndValidate()
 				if err != nil {
 					if skipOnError {
@@ -1082,6 +1101,13 @@ func (p ClientParametersAccessor) LabeledQUICVersions(name, label string) protoc
 // TransferURLs returns a TransferURLs parameter value.
 func (p ClientParametersAccessor) TransferURLs(name string) TransferURLs {
 	value := TransferURLs{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// SecureTransferURLs returns a SecureTransferURLs parameter value.
+func (p ClientParametersAccessor) SecureTransferURLs(name string) SecureTransferURLs {
+	value := SecureTransferURLs{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

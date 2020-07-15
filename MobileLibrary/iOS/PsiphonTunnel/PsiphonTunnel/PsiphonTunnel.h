@@ -54,6 +54,20 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
     PsiphonConnectionStateWaitingForNetwork
 };
 
+@protocol TunneledAppDelegateLogger <NSObject>
+
+@optional
+
+/*!
+ Gets runtime errors info that may be useful for debugging.
+ @param message  The diagnostic message string.
+ @param timestamp RFC3339 encoded timestamp.
+ Swift: @code func onDiagnosticMessage(_ message: String, withTimestamp timestamp: String) @endcode
+ */
+- (void)onDiagnosticMessage:(NSString * _Nonnull)message withTimestamp:(NSString * _Nonnull)timestamp;
+
+@end
+
 
 /*!
  @protocol TunneledAppDelegate
@@ -62,7 +76,7 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 
  All delegate methods will be called on a single serial dispatch queue. They will be made asynchronously unless otherwise noted (specifically when calling getPsiphonConfig and getEmbeddedServerEntries).
  */
-@protocol TunneledAppDelegate <NSObject>
+@protocol TunneledAppDelegate <NSObject, TunneledAppDelegateLogger>
 
 //
 // Required delegate methods
@@ -138,14 +152,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
   @return Optional path where embedded server entries file is located. This file should be readable by the library.
  */
 - (NSString * _Nullable)getEmbeddedServerEntriesPath;
-
-/*!
- Gets runtime errors info that may be useful for debugging.
- @param message  The diagnostic message string.
- @param timestamp RFC3339 encoded timestamp.
- Swift: @code func onDiagnosticMessage(_ message: String) @endcode
- */
-- (void)onDiagnosticMessage:(NSString * _Nonnull)message withTimestamp:(NSString * _Nonnull)timestamp;
 
 /*!
  Called when the tunnel is in the process of connecting.
@@ -452,17 +458,19 @@ Returns the path where the rotated notices file will be created.
 
 /*!
  Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.
- @note The key, server, path, and headers must be provided by Psiphon Inc.
- @param feedbackJson  The feedback and diagnostics data to upload.
- @param b64EncodedPublicKey  The key that will be used to encrypt the payload before uploading.
- @param uploadServer  The server and path to which the data will be uploaded.
- @param uploadServerHeaders  The request headers that will be used when uploading.
- Swift: @code func sendFeedback(_ feedbackJson: String, publicKey b64EncodedPublicKey: String, uploadServer: String, uploadServerHeaders: String) @endcode
+ @param feedbackJson  The feedback data to upload.
+ @param feedbackConfigJson  The feedback compatible config. Must be an NSDictionary or NSString. Must be provided by Psiphon Inc.
+ @param uploadPath  The path at which to upload the diagnostic data. Must be provided by Psiphon Inc.
+ @param logger  The logger which will be used to log informational notices including warnings.
+ @param outError  Any error encountered while sending feedback. If set, then sending feedback failed.
+ Swift: @code func sendFeedback(_ feedbackJson: String, feedbackConfigJson: Any, uploadPath: String, logger: TunneledAppDelegateLogger?, error outError: NSErrorPointer) @endcode
  */
-- (void)sendFeedback:(NSString * _Nonnull)feedbackJson
-           publicKey:(NSString * _Nonnull)b64EncodedPublicKey
-        uploadServer:(NSString * _Nonnull)uploadServer
- uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders;
+// See comment in header.
++ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
+  feedbackConfigJson:(id _Nonnull)feedbackConfigJson
+          uploadPath:(NSString * _Nonnull)uploadPath
+              logger:(id<TunneledAppDelegateLogger> _Nullable)logger
+               error:(NSError * _Nullable * _Nonnull)outError;
 
 /*!
  Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.

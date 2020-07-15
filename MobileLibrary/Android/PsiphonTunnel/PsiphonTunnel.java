@@ -69,7 +69,11 @@ import psi.PsiphonProvider;
 
 public class PsiphonTunnel {
 
-    public interface HostService {
+    public interface HostServiceLogger {
+        default public void onDiagnosticMessage(String message) {}
+    }
+
+    public interface HostService extends HostServiceLogger {
 
         public String getAppName();
         public Context getContext();
@@ -77,7 +81,6 @@ public class PsiphonTunnel {
 
         default public Object getVpnService() {return null;} // Object must be a VpnService (Android < 4 cannot reference this class name)
         default public Object newVpnServiceBuilder() {return null;} // Object must be a VpnService.Builder (Android < 4 cannot reference this class name)
-        default public void onDiagnosticMessage(String message) {}
         default public void onAvailableEgressRegions(List<String> regions) {}
         default public void onSocksProxyPortInUse(int port) {}
         default public void onHttpProxyPortInUse(int port) {}
@@ -292,12 +295,21 @@ public class PsiphonTunnel {
         return Psi.importExchangePayload(payload);
     }
 
-    public static void sendFeedback(String configJson, String diagnosticsJson, String b64EncodedPublicKey, String uploadServer,
-                             String uploadPath, String uploadServerHeaders) throws Exception {
+    // Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics
+    // information in a particular format, then calls this function to upload it for later
+    // investigation. The feedback compatible config and upload path must be provided by
+    // Psiphon Inc.
+    public static void sendFeedback(Context context, HostServiceLogger logger, String feedbackConfigJson,
+                                    String diagnosticsJson, String uploadPath,
+                                    String clientPlatformPrefix, String clientPlatformSuffix) throws Exception {
+
         try {
-            Psi.sendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders);
+            // Adds fields used in feedback upload, e.g. client platform.
+            String psiphonConfig = buildPsiphonConfig(context, logger, feedbackConfigJson,
+                    clientPlatformPrefix, clientPlatformSuffix, false, 0);
+            Psi.sendFeedback(psiphonConfig, diagnosticsJson, uploadPath);
         } catch (java.lang.Exception e) {
-            throw new Exception("failed to send feedback", e);
+            throw new Exception("Error sending feedback", e);
         }
     }
 
@@ -624,9 +636,19 @@ public class PsiphonTunnel {
     private String loadPsiphonConfig(Context context)
             throws IOException, JSONException, Exception {
 
+        return buildPsiphonConfig(context, mHostService, mHostService.getPsiphonConfig(),
+                mClientPlatformPrefix.get(), mClientPlatformSuffix.get(), isVpnMode(),
+                mLocalSocksProxyPort.get());
+    }
+
+    private static String buildPsiphonConfig(Context context, HostServiceLogger logger, String psiphonConfig,
+                                             String clientPlatformPrefix, String clientPlatformSuffix,
+                                             boolean isVpnMode, Integer localSocksProxyPort)
+            throws IOException, JSONException, Exception {
+
         // Load settings from the raw resource JSON config file and
         // update as necessary. Then write JSON to disk for the Go client.
-        JSONObject json = new JSONObject(mHostService.getPsiphonConfig());
+        JSONObject json = new JSONObject(psiphonConfig);
 
         // On Android, this directory must be set to the app private storage area.
         // The Psiphon library won't be able to use its current working directory
@@ -667,46 +689,44 @@ public class PsiphonTunnel {
 
         // This parameter is for stats reporting
         if (!json.has("TunnelWholeDevice")) {
-            json.put("TunnelWholeDevice", isVpnMode() ? 1 : 0);
+            json.put("TunnelWholeDevice", isVpnMode ? 1 : 0);
         }
 
         json.put("EmitBytesTransferred", true);
 
-        if (mLocalSocksProxyPort.get() != 0 && (!json.has("LocalSocksProxyPort") || json.getInt("LocalSocksProxyPort") == 0)) {
+        if (localSocksProxyPort != 0 && (!json.has("LocalSocksProxyPort") || json.getInt("LocalSocksProxyPort") == 0)) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
             // A side-effect of this is that changing the SOCKS port preference
             // has no effect with restartPsiphon(), a full stop() is necessary.
-            json.put("LocalSocksProxyPort", mLocalSocksProxyPort);
+            json.put("LocalSocksProxyPort", localSocksProxyPort);
         }
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
             try {
                 json.put(
                         "TrustedCACertificatesFilename",
-                        setupTrustedCertificates(mHostService.getContext()));
+                        setupTrustedCertificates(context, logger));
             } catch (Exception e) {
-                mHostService.onDiagnosticMessage(e.getMessage());
+                logger.onDiagnosticMessage(e.getMessage());
             }
         }
 
-        json.put("DeviceRegion", getDeviceRegion(mHostService.getContext()));
+        json.put("DeviceRegion", getDeviceRegion(context));
 
         StringBuilder clientPlatform = new StringBuilder();
 
-        String prefix = mClientPlatformPrefix.get();
-        if (prefix.length() > 0) {
-            clientPlatform.append(prefix);
+        if (clientPlatformPrefix.length() > 0) {
+            clientPlatform.append(clientPlatformPrefix);
         }
 
         clientPlatform.append("Android_");
         clientPlatform.append(Build.VERSION.RELEASE);
         clientPlatform.append("_");
-        clientPlatform.append(mHostService.getContext().getPackageName());
+        clientPlatform.append(context.getPackageName());
 
-        String suffix = mClientPlatformSuffix.get();
-        if (suffix.length() > 0) {
-            clientPlatform.append(suffix);
+        if (clientPlatformSuffix.length() > 0) {
+            clientPlatform.append(clientPlatformSuffix);
         }
 
         json.put("ClientPlatform", clientPlatform.toString().replaceAll("[^\\w\\-\\.]", "_"));
@@ -811,7 +831,7 @@ public class PsiphonTunnel {
         }
     }
 
-    private String setupTrustedCertificates(Context context) throws Exception {
+    private static String setupTrustedCertificates(Context context, HostServiceLogger logger) throws Exception {
 
         // Copy the Android system CA store to a local, private cert bundle file.
         //
@@ -872,7 +892,7 @@ public class PsiphonTunnel {
                     output.println("-----END CERTIFICATE-----");
                 }
 
-                mHostService.onDiagnosticMessage("prepared PsiphonCAStore");
+                logger.onDiagnosticMessage("prepared PsiphonCAStore");
 
                 return file.getAbsolutePath();
 

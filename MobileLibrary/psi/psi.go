@@ -291,8 +291,8 @@ func ImportExchangePayload(payload string) bool {
 }
 
 // Encrypt and upload feedback.
-func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) error {
-	return psiphon.SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders)
+func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
+	return psiphon.SendFeedback(configJson, diagnosticsJson, uploadPath)
 }
 
 // Get build info from tunnel-core

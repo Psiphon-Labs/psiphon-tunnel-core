@@ -47,13 +47,43 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     PsiphonTunnelErrorCodeUnknown = -1,
 
     /*!
-     * An error was encountered either obtaining the default library directory.
+     * An error was encountered obtaining the default library directory.
      * @code
      * // Underlying error will be set with more information
      * [error.userInfo objectForKey:NSUnderlyingErrorKey]
      * @endcode
      */
     PsiphonTunnelErrorCodeLibraryDirectoryError,
+
+    /*!
+     * An error was encountered with the provided config.
+     * @code
+     * // Localized description will be set with more information.
+     * // Underlying error may be set with more information.
+     * [error.userInfo objectForKey:NSUnderlyingErrorKey]
+     * error.localizedDescription
+     * @endcode
+     */
+    PsiphonTunnelErrorCodeConfigError,
+
+    /*!
+     * An error was encountered while generating the session ID.
+     * @code
+     * // Localized description will be set with more information.
+     * error.localizedDescription
+     * @endcode
+     */
+    PsiphonTunnelErrorCodeGenerateSessionIDError,
+
+    /*!
+     * An error was encountered while sending feedback.
+     * @code
+     * // Localized description and underlying error will be set with more information.
+     * [error.userInfo objectForKey:NSUnderlyingErrorKey]
+     * error.localizedDescription
+     * @endcode
+     */
+    PsiphonTunnelErrorCodeSendFeedbackError,
 };
 
 @interface PsiphonTunnel () <GoPsiPsiphonProvider>
@@ -122,14 +152,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     self->initialDNSCache = [self getDNSServers];
     atomic_init(&self->useInitialDNS, [self->initialDNSCache count] > 0);
 
-    // RFC3339 formatter.
-    NSLocale *enUSPOSIXLocale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
-    rfc3339Formatter = [[NSDateFormatter alloc] init];
-    [rfc3339Formatter setLocale:enUSPOSIXLocale];
-    
-    // Example: notice time format from Go code: "2006-01-02T15:04:05.999Z07:00"
-    [rfc3339Formatter setDateFormat:@"yyyy'-'MM'-'dd'T'HH':'mm':'ss.SSSZZZZZ"];
-    [rfc3339Formatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
+    rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
     
     return self;
 }
@@ -186,9 +209,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 - (BOOL)start:(BOOL)ifNeeded {
 
     // Set a new session ID, as this is a user-initiated session start.
-    NSString *sessionID = [self generateSessionID];
-    if (sessionID == nil) {
-        // generateSessionID logs error message
+    NSError *err;
+    NSString *sessionID = [PsiphonTunnel generateSessionID:&err];
+    if (err != nil) {
+        [self logMessage:[NSString stringWithFormat:@"%@", err.localizedDescription]];
         return FALSE;
     }
     self.sessionID = sessionID;
@@ -250,9 +274,14 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         const BOOL useIPv6Synthesizer = TRUE;
 
         BOOL usingNoticeFiles = FALSE;
-        
-        NSString *configStr = [self getConfig: &usingNoticeFiles];
-        if (configStr == nil) {
+
+        NSError *err;
+        NSString *configStr = [self getConfig:&usingNoticeFiles error:&err];
+        if (err != nil) {
+            [self logMessage:[NSString stringWithFormat:@"Error getting config: %@", err.localizedDescription]];
+            return FALSE;
+        } else if (configStr == nil) {
+            // Should never happen.
             [self logMessage:@"Error getting config"];
             return FALSE;
         }
@@ -270,7 +299,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                 }
             });
         }
-        
+
         // If getEmbeddedServerEntriesPath returns an empty string,
         // call getEmbeddedServerEntries
         if ([embeddedServerEntriesPath length] == 0) {
@@ -426,29 +455,59 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 // See comment in header.
-- (void)sendFeedback:(NSString * _Nonnull)feedbackJson
-           publicKey:(NSString * _Nonnull)b64EncodedPublicKey
-        uploadServer:(NSString * _Nonnull)uploadServer
- uploadServerHeaders:(NSString * _Nonnull)uploadServerHeaders {
-    dispatch_async(self->workQueue, ^{
++ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
+  feedbackConfigJson:(id _Nonnull)feedbackConfigJson
+          uploadPath:(NSString * _Nonnull)uploadPath
+              logger:(id<TunneledAppDelegateLogger> _Nullable)logger
+               error:(NSError * _Nullable * _Nonnull)outError {
 
-        BOOL usingNoticeFiles = FALSE;
+    *outError = nil;
 
-        NSString *connectionConfigJson = [self getConfig: &usingNoticeFiles];
-        if (connectionConfigJson == nil) {
-           [self logMessage:@"Error getting config for feedback upload"];
+    void (^logMessage)(NSString * _Nonnull) = ^void(NSString * _Nonnull message) {
+        if (logger != nil && [logger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+            NSString *timestamp = [[PsiphonTunnel rfc3339Formatter] stringFromDate:[NSDate date]];
+            [logger onDiagnosticMessage:message withTimestamp:timestamp];
         }
+    };
 
-        NSError *e;
+    NSError *err;
+    NSString *sessionID = [PsiphonTunnel generateSessionID:&err];
+    if (err != nil) {
+        *outError = err;
+        return;
+    }
 
-        GoPsiSendFeedback(connectionConfigJson, feedbackJson, b64EncodedPublicKey, uploadServer, @"", uploadServerHeaders, &e);
+    BOOL usingNoticeFiles = FALSE;
+    BOOL tunnelWholeDevice = FALSE;
+    NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:feedbackConfigJson
+                                               usingNoticeFiles:&usingNoticeFiles
+                                              tunnelWholeDevice:&tunnelWholeDevice
+                                                      sessionID:sessionID
+                                                     logMessage:logMessage
+                                                          error:&err];
+    if (err != nil) {
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"Error building config",
+                                               NSUnderlyingErrorKey:err}];
+        return;
+    } else if (psiphonConfig == nil) {
+        // Should never happen.
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"Error built config nil"}];
+        return;
+    }
 
-        if (e != nil) {
-            [self logMessage:[NSString stringWithFormat: @"Feedback upload error: %@", e.localizedDescription]];
-        } else {
-            [self logMessage:@"Feedback upload successful"];
-        }
-    });
+    GoPsiSendFeedback(psiphonConfig, feedbackJson, uploadPath, &err);
+
+    if (err != nil) {
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeSendFeedbackError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"Error sending feedback",
+                                               NSUnderlyingErrorKey:err}];
+        return;
+    }
 }
 
 // See comment in header.
@@ -490,7 +549,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
  Build the config string for the tunnel.
  @returns String containing the JSON config. `nil` on error.
  */
-- (NSString * _Nullable)getConfig:(BOOL * _Nonnull)usingNoticeFiles {
+- (NSString * _Nullable)getConfig:(BOOL * _Nonnull)usingNoticeFiles
+                            error:(NSError *_Nullable *_Nonnull)outError {
+
+    *outError = nil;
+
     // tunneledAppDelegate is a weak reference, so check it.
     if (self.tunneledAppDelegate == nil) {
         [self logMessage:@"tunneledApp delegate lost"];
@@ -501,11 +564,45 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     dispatch_sync(self->callbackQueue, ^{
         configObject = [self.tunneledAppDelegate getPsiphonConfig];
     });
-    
+
+    __weak PsiphonTunnel *weakSelf = self;
+    void (^logMessage)(NSString * _Nonnull) = ^void(NSString * _Nonnull message) {
+        __strong PsiphonTunnel *strongSelf = weakSelf;
+        if (strongSelf != nil) {
+            [strongSelf logMessage:message];
+        }
+    };
+
     if (configObject == nil) {
-        [self logMessage:@"Error getting config from delegate"];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"Error config object nil"}];
         return nil;
     }
+
+    NSError *err;
+    NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:configObject
+                                               usingNoticeFiles:usingNoticeFiles
+                                              tunnelWholeDevice:&self->tunnelWholeDevice
+                                                      sessionID:self.sessionID
+                                                     logMessage:logMessage
+                                                          error:&err];
+    if (err != nil) {
+        *outError = err;
+        return nil;
+    }
+
+    return psiphonConfig;
+}
+
++ (NSString * _Nullable)buildPsiphonConfig:(id _Nonnull)configObject
+                          usingNoticeFiles:(BOOL * _Nonnull)usingNoticeFiles
+                         tunnelWholeDevice:(BOOL * _Nonnull)tunnelWholeDevice
+                                 sessionID:(NSString * _Nonnull)sessionID
+                                logMessage:(void (^)(NSString * _Nonnull))logMessage
+                                     error:(NSError *_Nullable *_Nonnull)outError {
+
+    *outError = nil;
     
     __block NSDictionary *initialConfig = nil;
     
@@ -520,7 +617,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         
         id eh = ^(NSError *err) {
             initialConfig = nil;
-            [self logMessage:[NSString stringWithFormat: @"Config JSON parse failed: %@", err.description]];
+            logMessage([NSString stringWithFormat: @"Config JSON parse failed: %@", err.description]);
         };
         
         id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
@@ -528,13 +625,14 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         
     } else if ([configObject isKindOfClass:[NSDictionary class]]) {
         
-        initialConfig = (NSDictionary *) configObject;
+        initialConfig = (NSDictionary *)configObject;
         
     } else {
-        [self logMessage:@"getPsiphonConfig should either return an NSDictionary object or an NSString object"];
-    }
-    
-    if (initialConfig == nil) {
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:
+                                                   @"getPsiphonConfig should either return an "
+                                                    "NSDictionary object or an NSString object"}];
         return nil;
     }
     
@@ -545,12 +643,18 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     //
     
     if (config[@"PropagationChannelId"] == nil) {
-        [self logMessage:@"Config missing PropagationChannelId"];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:
+                                                   @"Config missing PropagationChannelId"}];
         return nil;
     }
 
     if (config[@"SponsorId"] == nil) {
-        [self logMessage:@"Config missing SponsorId"];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:
+                                                   @"Config missing SponsorId"}];
         return nil;
     }
     
@@ -575,8 +679,12 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Note: this deprecates the "DataStoreDirectory" config field.
     NSURL *defaultDataRootDirectoryURL = [PsiphonTunnel defaultDataRootDirectoryWithError:&err];
     if (err != nil) {
-       [self logMessage:[NSString stringWithFormat:@"Unable to get defaultDataRootDirectoryURL: %@", err.localizedDescription]];
-       return nil;
+        NSString *s = [NSString stringWithFormat:@"Unable to get defaultDataRootDirectoryURL: %@",
+                       err.localizedDescription];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:s}];
+        return nil;
     }
 
     if (config[@"DataRootDirectory"] == nil) {
@@ -588,14 +696,18 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                                attributes:nil
                                     error:&err];
         if (err != nil) {
-           [self logMessage:[NSString stringWithFormat: @"Unable to create defaultRootDirectoryURL '%@': %@", defaultDataRootDirectoryURL, err.localizedDescription]];
-           return nil;
+            NSString *s = [NSString stringWithFormat: @"Unable to create defaultRootDirectoryURL '%@': %@",
+                           defaultDataRootDirectoryURL, err.localizedDescription];
+            *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                            code:PsiphonTunnelErrorCodeConfigError
+                                        userInfo:@{NSLocalizedDescriptionKey:s}];
+            return nil;
         }
 
         config[@"DataRootDirectory"] = defaultDataRootDirectoryURL.path;
     }
     else {
-        [self logMessage:[NSString stringWithFormat:@"DataRootDirectory overridden from '%@' to '%@'", defaultDataRootDirectoryURL.path, config[@"DataRootDirectory"]]];
+        logMessage([NSString stringWithFormat:@"DataRootDirectory overridden from '%@' to '%@'", defaultDataRootDirectoryURL.path, config[@"DataRootDirectory"]]);
     }
 
     // Ensure that the configured data root directory is not backed up to iCloud or iTunes.
@@ -603,10 +715,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     BOOL succeeded = [Backups excludeFileFromBackup:dataRootDirectory.path err:&err];
     if (!succeeded) {
-        NSString *msg = [NSString stringWithFormat:@"Failed to exclude data root directory from backup: %@", err.localizedDescription];
-        [self logMessage:msg];
+        logMessage([NSString stringWithFormat:@"Failed to exclude data root directory from backup: %@", err.localizedDescription]);
     } else {
-        [self logMessage:@"Excluded data root directory from backup"];
+        logMessage(@"Excluded data root directory from backup");
     }
 
     //
@@ -615,7 +726,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     NSURL *libraryURL = [PsiphonTunnel libraryURLWithError:&err];
     if (err != nil) {
-        [self logMessage:[NSString stringWithFormat: @"Unable to get Library URL: %@", err.localizedDescription]];
+        NSString *s = [NSString stringWithFormat: @"Unable to get Library URL: %@", err.localizedDescription];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:s}];
         return nil;
     }
 
@@ -631,7 +745,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                                                                       isDirectory:YES];
     
     if (defaultDataStoreDirectoryURL == nil) {
-        [self logMessage:@"Unable to create defaultDataStoreDirectoryURL"];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"Unable to create defaultDataStoreDirectoryURL"}];
         return nil;
     }
     
@@ -639,7 +755,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         config[@"MigrateDataStoreDirectory"] = defaultDataStoreDirectoryURL.path;
     }
     else {
-        [self logMessage:[NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]];
+        logMessage([NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]);
     }
 
     //
@@ -654,7 +770,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // explict new field "MigrateRemoteServerListDownloadFilename".
     NSString *defaultRemoteServerListFilename = [[libraryURL URLByAppendingPathComponent:@"remote_server_list" isDirectory:NO] path];
     if (defaultRemoteServerListFilename == nil) {
-        [self logMessage:@"Unable to create defaultRemoteServerListFilename"];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"Unable to create defaultRemoteServerListFilename"}];
         return nil;
     }
     
@@ -662,14 +780,15 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         config[@"MigrateRemoteServerListDownloadFilename"] = defaultRemoteServerListFilename;
     }
     else {
-        [self logMessage:[NSString stringWithFormat: @"RemoteServerListDownloadFilename overridden from '%@' to '%@'", defaultRemoteServerListFilename, config[@"RemoteServerListDownloadFilename"]]];
+        logMessage([NSString stringWithFormat: @"RemoteServerListDownloadFilename overridden from '%@' to '%@'",
+                defaultRemoteServerListFilename, config[@"RemoteServerListDownloadFilename"]]);
     }
     
     // If RemoteServerListUrl/RemoteServerListURLs and RemoteServerListSignaturePublicKey
     // are absent, we'll just leave them out, but we'll log about it.
     if ((config[@"RemoteServerListUrl"] == nil && config[@"RemoteServerListURLs"] == nil) ||
         config[@"RemoteServerListSignaturePublicKey"] == nil) {
-        [self logMessage:@"Remote server list functionality will be disabled"];
+        logMessage(@"Remote server list functionality will be disabled");
     }
     
     //
@@ -684,20 +803,23 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // more explict new field "MigrateObfuscatedServerListDownloadDirectory".
     NSURL *defaultOSLDirectoryURL = [libraryURL URLByAppendingPathComponent:@"osl" isDirectory:YES];
     if (defaultOSLDirectoryURL == nil) {
-        [self logMessage:@"Unable to create defaultOSLDirectory"];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"Unable to create defaultOSLDirectory"}];
         return nil;
     }
     if (config[@"ObfuscatedServerListDownloadDirectory"] == nil) {
         config[@"MigrateObfuscatedServerListDownloadDirectory"] = defaultOSLDirectoryURL.path;
     }
     else {
-        [self logMessage:[NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'", [defaultOSLDirectoryURL path], config[@"ObfuscatedServerListDownloadDirectory"]]];
+        logMessage([NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'",
+                [defaultOSLDirectoryURL path], config[@"ObfuscatedServerListDownloadDirectory"]]);
     }
     
     // If ObfuscatedServerListRootURL/ObfuscatedServerListRootURLs is absent,
     // we'll leave it out, but log the absence.
     if (config[@"ObfuscatedServerListRootURL"] == nil && config[@"ObfuscatedServerListRootURLs"] == nil) {
-        [self logMessage:@"Obfuscated server list functionality will be disabled"];
+        logMessage(@"Obfuscated server list functionality will be disabled");
     }
 
     //
@@ -705,7 +827,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     //
 
     // We'll record our state about what mode we're in.
-    self->tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
+    *tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
 
     // Other optional fields not being altered. If not set, their defaults will be used:
     // * TunnelWholeDevice
@@ -765,7 +887,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     config[@"UpgradeDownloadClientVersionHeader"] = nil;
     config[@"UpgradeDownloadFilename"] = nil;
 
-    config[@"SessionID"] = self.sessionID;
+    config[@"SessionID"] = sessionID;
 
     // Indicate whether UseNoticeFiles is set
     *usingNoticeFiles = (config[@"UseNoticeFiles"] != nil);
@@ -773,7 +895,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
     if (finalConfigStr == nil) {
-        [self logMessage:@"Failed to convert config to JSON string"];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"Failed to convert config to JSON string"}];
         return nil;
     }
 
@@ -1512,15 +1636,35 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return @"US";
 }
 
+// RFC3339 formatter.
++ (NSDateFormatter*)rfc3339Formatter {
+
+    NSDateFormatter *rfc3339Formatter = [[NSDateFormatter alloc] init];
+    NSLocale *enUSPOSIXLocale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    [rfc3339Formatter setLocale:enUSPOSIXLocale];
+
+    // Example: notice time format from Go code: "2006-01-02T15:04:05.999Z07:00"
+    [rfc3339Formatter setDateFormat:@"yyyy'-'MM'-'dd'T'HH':'mm':'ss.SSSZZZZZ"];
+    [rfc3339Formatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
+
+    return rfc3339Formatter;
+}
+
 /*!
  generateSessionID generates a session ID suitable for use with the Psiphon API.
  */
-- (NSString *)generateSessionID {
++ (NSString *)generateSessionID:(NSError *_Nullable *_Nonnull)outError {
+
+    *outError = nil;
+
     const int sessionIDLen = 16;
     uint8_t sessionID[sessionIDLen];
     int result = SecRandomCopyBytes(kSecRandomDefault, sessionIDLen, sessionID);
     if (result != errSecSuccess) {
-        [self logMessage:[NSString stringWithFormat: @"Error generating session ID: %d", result]];
+        NSString *errorDescription = [NSString stringWithFormat:@"Error generating session ID: %d", result];
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeGenerateSessionIDError
+                                    userInfo:@{NSLocalizedDescriptionKey:errorDescription}];
         return nil;
     }
     NSMutableString *hexEncodedSessionID = [NSMutableString stringWithCapacity:(sessionIDLen*2)];
