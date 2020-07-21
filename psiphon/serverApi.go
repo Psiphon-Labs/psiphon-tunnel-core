@@ -153,7 +153,10 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		networkID = serverContext.tunnel.config.GetNetworkID()
 
 		err := tactics.SetTacticsAPIParameters(
-			serverContext.tunnel.config.clientParameters, GetTacticsStorer(), networkID, params)
+			serverContext.tunnel.config.clientParameters,
+			GetTacticsStorer(serverContext.tunnel.config),
+			networkID,
+			params)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -307,7 +310,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		if payload != nil {
 
 			tacticsRecord, err := tactics.HandleTacticsPayload(
-				GetTacticsStorer(),
+				GetTacticsStorer(serverContext.tunnel.config),
 				networkID,
 				payload)
 			if err != nil {

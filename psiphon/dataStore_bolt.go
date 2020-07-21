@@ -195,7 +195,7 @@ func (db *datastoreDB) close() error {
 
 func (db *datastoreDB) view(fn func(tx *datastoreTx) error) (reterr error) {
 
-	// Any bolt function that performs mmap buffer accesses can raise SIGBUS  due
+	// Any bolt function that performs mmap buffer accesses can raise SIGBUS due
 	// to underlying storage changes, such as a truncation of the datastore file
 	// or removal or network attached storage, etc.
 	//

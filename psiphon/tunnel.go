@@ -1454,7 +1454,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(
 
 			err = tactics.AddSpeedTestSample(
 				tunnel.config.GetClientParameters(),
-				GetTacticsStorer(),
+				GetTacticsStorer(tunnel.config),
 				tunnel.config.GetNetworkID(),
 				tunnel.dialParams.ServerEntry.Region,
 				tunnel.dialParams.TunnelProtocol,
