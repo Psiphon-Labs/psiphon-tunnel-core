@@ -40,6 +40,13 @@ import (
 // Callers are responsible for ensuring that the input context eventually
 // cancels, and should synchronize GetTactics calls to ensure no unintended
 // concurrent fetch attempts occur.
+//
+// GetTactics implements a limited workaround for multiprocess datastore
+// synchronization, enabling, for example, SendFeedback in one process to
+// access tactics as long as a Controller is not running in another process;
+// and without blocking the Controller from starting. Accessing tactics is
+// most critical for untunneled network operations; when a Controller is
+// running, a tunnel may be used. See TacticsStorer for more details.
 func GetTactics(ctx context.Context, config *Config) {
 
 	// Limitation: GetNetworkID may not account for device VPN status, so
@@ -53,7 +60,7 @@ func GetTactics(ctx context.Context, config *Config) {
 	//    remote egress region/ISP, not the local region/ISP.
 
 	tacticsRecord, err := tactics.UseStoredTactics(
-		GetTacticsStorer(),
+		GetTacticsStorer(config),
 		config.GetNetworkID())
 	if err != nil {
 		NoticeWarning("get stored tactics failed: %s", err)
@@ -230,7 +237,7 @@ func fetchTactics(
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,
 		config.clientParameters,
-		GetTacticsStorer(),
+		GetTacticsStorer(config),
 		config.GetNetworkID,
 		apiParams,
 		serverEntry.Region,

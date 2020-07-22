@@ -216,7 +216,6 @@ func TestBoltResiliency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDataStore failed: %s", err)
 	}
-	defer CloseDataStore()
 
 	paveServerEntries()
 
@@ -241,7 +240,6 @@ func TestBoltResiliency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDataStore failed: %s", err)
 	}
-	defer CloseDataStore()
 
 	<-noticeResetDatastore
 
@@ -277,7 +275,6 @@ func TestBoltResiliency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDataStore failed: %s", err)
 	}
-	defer CloseDataStore()
 
 	<-noticeResetDatastore
 

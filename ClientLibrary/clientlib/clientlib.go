@@ -118,7 +118,7 @@ var ErrTimeout = std_errors.New("clientlib: tunnel establishment timeout")
 func StartTunnel(ctx context.Context,
 	configJSON []byte, embeddedServerEntryList string,
 	params Parameters, paramsDelta ClientParametersDelta,
-	noticeReceiver func(NoticeEvent)) (tunnel *PsiphonTunnel, err error) {
+	noticeReceiver func(NoticeEvent)) (tunnel *PsiphonTunnel, retErr error) {
 
 	config, err := psiphon.LoadConfig(configJSON)
 	if err != nil {
@@ -176,7 +176,7 @@ func StartTunnel(ctx context.Context,
 	}
 	// Make sure we close the datastore in case of error
 	defer func() {
-		if err != nil {
+		if retErr != nil {
 			psiphon.CloseDataStore()
 		}
 	}()
@@ -287,6 +287,7 @@ func StartTunnel(ctx context.Context,
 }
 
 // Stop stops/disconnects/shuts down the tunnel. It is safe to call when not connected.
+// Not safe to call concurrently with Start.
 func (tunnel *PsiphonTunnel) Stop() {
 	if tunnel.stopController != nil {
 		tunnel.stopController()
