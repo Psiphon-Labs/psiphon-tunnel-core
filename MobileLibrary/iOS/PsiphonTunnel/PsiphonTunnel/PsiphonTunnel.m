@@ -303,14 +303,16 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         // If getEmbeddedServerEntriesPath returns an empty string,
         // call getEmbeddedServerEntries
         if ([embeddedServerEntriesPath length] == 0) {
-            
-            dispatch_sync(self->callbackQueue, ^{
-                embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
-            });
-            
-            if (embeddedServerEntries == nil) {
-                [self logMessage:@"Error getting embedded server entries from delegate"];
-                return FALSE;
+            // getEmbeddedServerEntries is optional in the protocol
+            if ([self.tunneledAppDelegate respondsToSelector:@selector(getEmbeddedServerEntries)]) {
+                dispatch_sync(self->callbackQueue, ^{
+                    embeddedServerEntries = [self.tunneledAppDelegate getEmbeddedServerEntries];
+                });
+
+                if (embeddedServerEntries == nil) {
+                    [self logMessage:@"Error getting embedded server entries from delegate"];
+                    return FALSE;
+                }
             }
         }
 
