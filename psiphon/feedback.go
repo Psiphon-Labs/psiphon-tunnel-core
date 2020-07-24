@@ -33,6 +33,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"path"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -118,10 +120,11 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 
 	// Get the latest client parameters
 	p = config.GetClientParameters().Get()
-	feedbackUploadRetryDelay := p.Duration(parameters.FeedbackUploadRetryDelaySeconds)
+	feedbackUploadMinRetryDelay := p.Duration(parameters.FeedbackUploadRetryMinDelaySeconds)
+	feedbackUploadMaxRetryDelay := p.Duration(parameters.FeedbackUploadRetryMaxDelaySeconds)
 	feedbackUploadTimeout := p.Duration(parameters.FeedbackUploadTimeoutSeconds)
 	feedbackUploadMaxRetries := p.Int(parameters.FeedbackUploadMaxRetries)
-	secureTransferURLs := p.SecureTransferURLs(parameters.FeedbackUploadURLs)
+	transferURLs := p.TransferURLs(parameters.FeedbackUploadURLs)
 	p.Close()
 
 	untunneledDialConfig := &DialConfig{
@@ -134,15 +137,27 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 	}
 
 	uploadId := prng.HexString(8)
+	PRNG, err := prng.NewPRNG()
+	if err != nil {
+		return errors.TraceMsg(err, "failed to create PRNG")
+	}
 
 	for i := 0; i < feedbackUploadMaxRetries; i++ {
 
-		secureTransferURL, err := secureTransferURLs.Select(i)
-		if err != nil {
-			return errors.Tracef("Error selecting feedback transfer URL: %s", err)
+		uploadURL := transferURLs.Select(i)
+		if uploadURL == nil {
+			return errors.TraceNew("error no feedback upload URL selected")
 		}
 
-		secureFeedback, err := encryptFeedback(diagnosticsJson, secureTransferURL.B64EncodedPublicKey)
+		b64PublicKey := uploadURL.B64EncodedPublicKey
+		if b64PublicKey == "" {
+			if config.FeedbackEncryptionPublicKey == "" {
+				return errors.TraceNew("error no default encryption key")
+			}
+			b64PublicKey = config.FeedbackEncryptionPublicKey
+		}
+
+		secureFeedback, err := encryptFeedback(diagnosticsJson, b64PublicKey)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -157,28 +172,35 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 			config,
 			untunneledDialConfig,
 			nil,
-			secureTransferURL.TransferURL.SkipVerify)
+			uploadURL.SkipVerify)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		url := secureTransferURL.TransferURL.URL + uploadPath + uploadId
+		parsedURL, err := url.Parse(uploadURL.URL)
+		if err != nil {
+			return errors.TraceMsg(err, "failed to parse feedback upload URL")
+		}
 
-		req, err := http.NewRequest("PUT", url, bytes.NewBuffer(secureFeedback))
+		parsedURL.Path = path.Join(parsedURL.Path, uploadPath, uploadId)
+
+		request, err := http.NewRequestWithContext(ctx, "PUT", parsedURL.String(), bytes.NewBuffer(secureFeedback))
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		for k, v := range secureTransferURL.RequestHeaders {
-			req.Header.Set(k, v)
+		for k, v := range uploadURL.RequestHeaders {
+			request.Header.Set(k, v)
 		}
-		req.Header.Set("User-Agent", MakePsiphonUserAgent(config))
+		request.Header.Set("User-Agent", MakePsiphonUserAgent(config))
 
-		err = uploadFeedback(client, req)
+		err = uploadFeedback(client, request)
+		cancelFunc()
 		if err != nil {
 			// Do not sleep after the last attempt
 			if i+1 < feedbackUploadMaxRetries {
-				time.Sleep(feedbackUploadRetryDelay)
+				retryDelay := PRNG.Period(feedbackUploadMinRetryDelay, feedbackUploadMaxRetryDelay)
+				time.Sleep(retryDelay)
 			}
 		} else {
 			break
@@ -199,7 +221,7 @@ func uploadFeedback(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return errors.TraceNew("Unexpected HTTP status: " + resp.Status)
+		return errors.TraceNew("unexpected HTTP status: " + resp.Status)
 	}
 
 	return nil

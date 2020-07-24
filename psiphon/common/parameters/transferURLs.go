@@ -44,6 +44,16 @@ type TransferURL struct {
 	// candidate locations. For a value of N, this URL is only a candidate
 	// after N rounds of attempting the transfer to or from other URLs.
 	OnlyAfterAttempts int
+
+	// B64EncodedPublicKey is a base64-encoded RSA public key to be used for
+	// encrypting the resource, when uploading, or for verifying a signature of
+	// the resource, when downloading. Required by some operations, such as
+	// uploading feedback.
+	B64EncodedPublicKey string `json:",omitempty"`
+
+	// RequestHeaders are optional HTTP headers to set on any requests made to
+	// the destination.
+	RequestHeaders map[string]string `json:",omitempty"`
 }
 
 // TransferURLs is a list of transfer URLs.
@@ -75,28 +85,28 @@ func (t TransferURLs) DecodeAndValidate() error {
 	return nil
 }
 
-// Select chooses a TransferURL from the list.
-//
-// The first return value is the canonical URL, to be used
-// as a key when storing information related to the TransferURLs,
-// such as an ETag.
-//
-// The second return value is the chosen transfer URL, which is
-// selected based at random from the candidates allowed in the
-// specified attempt.
-func (t TransferURLs) Select(attempt int) (string, string, bool) {
+// CanonicalURL returns the canonical URL, to be used as a key when storing
+// information related to the TransferURLs, such as an ETag.
+func (t TransferURLs) CanonicalURL() string {
 
 	// The first OnlyAfterAttempts = 0 URL is the canonical URL. This
 	// is the value used as the key for SetUrlETag when multiple download
 	// URLs can be used to fetch a single entity.
 
-	canonicalURL := ""
 	for _, transferURL := range t {
 		if transferURL.OnlyAfterAttempts == 0 {
-			canonicalURL = transferURL.URL
-			break
+			return transferURL.URL
 		}
 	}
+
+	return ""
+}
+
+// Select chooses a TransferURL from the list.
+//
+// The TransferURL is selected based at random from the candidates allowed in
+// the specified attempt.
+func (t TransferURLs) Select(attempt int) *TransferURL {
 
 	candidates := make([]int, 0)
 	for index, URL := range t {
@@ -108,75 +118,11 @@ func (t TransferURLs) Select(attempt int) (string, string, bool) {
 	if len(candidates) < 1 {
 		// This case is not expected, as DecodeAndValidate should reject configs
 		// that would have no candidates for 0 attempts.
-		return "", "", true
+		return nil
 	}
 
 	selection := prng.Intn(len(candidates))
 	transferURL := t[candidates[selection]]
 
-	return transferURL.URL, canonicalURL, transferURL.SkipVerify
-}
-
-// SecureTransferURL specifies a URL for uploading or downloading a resource
-// along with a public key for encrypting the resource, when uploading, or
-// for verifying a signature of the resource, when downloading.
-type SecureTransferURL struct {
-	B64EncodedPublicKey string
-	RequestHeaders      map[string]string
-	TransferURL         TransferURL
-}
-
-// SecureTransferURLs is a list of secure transfer URLs.
-type SecureTransferURLs []*SecureTransferURL
-
-// TransferURLs returns the underlying TransferURLs with ordering preserved.
-func (t SecureTransferURLs) TransferURLs() (TransferURLs, error) {
-	transferURLs := make(TransferURLs, len(t))
-	for i, secureTransferURL := range t {
-		if secureTransferURL == nil {
-			return nil, errors.TraceNew("unexpected nil SecureTransferURL")
-		}
-		transferURLs[i] = &secureTransferURL.TransferURL
-	}
-	return transferURLs, nil
-}
-
-// DecodeAndValidate validates a list of secure transfer URLs.
-func (t SecureTransferURLs) DecodeAndValidate() error {
-	transferURLs, err := t.TransferURLs()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	err = transferURLs.DecodeAndValidate()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	return nil
-}
-
-// Select chooses a SecureTransferURL from the list.
-//
-// The secure transfer URL is selected based at random from the candidates
-// allowed in the specified attempt.
-func (t SecureTransferURLs) Select(attempt int) (*SecureTransferURL, error) {
-	candidates := make([]int, 0)
-	for index, secureTransferURL := range t {
-		if secureTransferURL == nil {
-			return nil, errors.TraceNew("unexpected nil SecureTransferURL")
-		}
-		if attempt >= secureTransferURL.TransferURL.OnlyAfterAttempts {
-			candidates = append(candidates, index)
-		}
-	}
-
-	if len(candidates) < 1 {
-		// This case is not expected, as DecodeAndValidate should reject configs
-		// that would have no candidates for 0 attempts.
-		return nil, errors.TraceNew("no candiates found")
-	}
-
-	selection := prng.Intn(len(candidates))
-	transferURL := t[candidates[selection]]
-
-	return transferURL, nil
+	return transferURL
 }

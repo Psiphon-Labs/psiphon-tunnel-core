@@ -709,7 +709,13 @@ type Config struct {
 	// value is supplied by and depends on the Psiphon Network, and is
 	// typically embedded in the client binary. At least one TransferURL must
 	// have OnlyAfterAttempts = 0.
-	FeedbackUploadURLs parameters.SecureTransferURLs
+	FeedbackUploadURLs parameters.TransferURLs
+
+	// FeedbackEncryptionPublicKey is a default base64-encoded, RSA public key
+	// value used to encrypt feedback data. Used when uploading feedback with a
+	// TransferURL which has no public key value configured, i.e.
+	// B64EncodedPublicKey = "".
+	FeedbackEncryptionPublicKey string
 
 	// clientParameters is the active ClientParameters with defaults, config
 	// values, and, optionally, tactics applied.
@@ -1024,6 +1030,12 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	if config.UpgradeDownloadURLs != nil {
 		if config.UpgradeDownloadClientVersionHeader == "" {
 			return errors.TraceNew("missing UpgradeDownloadClientVersionHeader")
+		}
+	}
+
+	if config.FeedbackUploadURLs != nil {
+		if config.FeedbackEncryptionPublicKey == "" {
+			return errors.TraceNew("missing FeedbackEncryptionPublicKey")
 		}
 	}
 
@@ -1574,6 +1586,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if len(config.FeedbackUploadURLs) > 0 {
 		applyParameters[parameters.FeedbackUploadURLs] = config.FeedbackUploadURLs
+	}
+
+	if config.FeedbackEncryptionPublicKey != "" {
+		applyParameters[parameters.FeedbackEncryptionPublicKey] = config.FeedbackEncryptionPublicKey
 	}
 
 	return applyParameters

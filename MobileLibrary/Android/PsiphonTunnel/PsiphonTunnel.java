@@ -69,11 +69,11 @@ import psi.PsiphonProvider;
 
 public class PsiphonTunnel {
 
-    public interface HostServiceLogger {
+    public interface HostLogger {
         default public void onDiagnosticMessage(String message) {}
     }
 
-    public interface HostService extends HostServiceLogger {
+    public interface HostService extends HostLogger {
 
         public String getAppName();
         public Context getContext();
@@ -299,7 +299,7 @@ public class PsiphonTunnel {
     // information in a particular format, then calls this function to upload it for later
     // investigation. The feedback compatible config and upload path must be provided by
     // Psiphon Inc.
-    public static void sendFeedback(Context context, HostServiceLogger logger, String feedbackConfigJson,
+    public static void sendFeedback(Context context, HostLogger logger, String feedbackConfigJson,
                                     String diagnosticsJson, String uploadPath,
                                     String clientPlatformPrefix, String clientPlatformSuffix) throws Exception {
 
@@ -641,7 +641,7 @@ public class PsiphonTunnel {
                 mLocalSocksProxyPort.get());
     }
 
-    private static String buildPsiphonConfig(Context context, HostServiceLogger logger, String psiphonConfig,
+    private static String buildPsiphonConfig(Context context, HostLogger logger, String psiphonConfig,
                                              String clientPlatformPrefix, String clientPlatformSuffix,
                                              boolean isVpnMode, Integer localSocksProxyPort)
             throws IOException, JSONException, Exception {
@@ -831,7 +831,7 @@ public class PsiphonTunnel {
         }
     }
 
-    private static String setupTrustedCertificates(Context context, HostServiceLogger logger) throws Exception {
+    private static String setupTrustedCertificates(Context context, HostLogger logger) throws Exception {
 
         // Copy the Android system CA store to a local, private cert bundle file.
         //

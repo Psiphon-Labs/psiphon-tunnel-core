@@ -619,7 +619,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         
         id eh = ^(NSError *err) {
             initialConfig = nil;
-            logMessage([NSString stringWithFormat: @"Config JSON parse failed: %@", err.description]);
+            NSString *s = [NSString stringWithFormat:@"Config JSON parse failed: %@", err.description];
+            *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                            code:PsiphonTunnelErrorCodeConfigError
+                                        userInfo:@{NSLocalizedDescriptionKey:s}];
         };
         
         id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
@@ -633,11 +636,21 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                         code:PsiphonTunnelErrorCodeConfigError
                                     userInfo:@{NSLocalizedDescriptionKey:
-                                                   @"getPsiphonConfig should either return an "
+                                                   @"configObject should reference either an "
                                                     "NSDictionary object or an NSString object"}];
         return nil;
     }
-    
+
+    if (*outError != nil) {
+        return nil;
+    } else if (initialConfig == nil) {
+        // Should never happen.
+        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                        code:PsiphonTunnelErrorCodeConfigError
+                                    userInfo:@{NSLocalizedDescriptionKey:@"initialConfig nil"}];
+        return nil;
+    }
+
     NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:initialConfig];
     
     //

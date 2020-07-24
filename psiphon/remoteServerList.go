@@ -59,7 +59,8 @@ func FetchCommonRemoteServerList(
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
 	p.Close()
 
-	downloadURL, canonicalURL, skipVerify := urls.Select(attempt)
+	downloadURL := urls.Select(attempt)
+	canonicalURL := urls.CanonicalURL()
 
 	newETag, downloadStatRecorder, err := downloadRemoteServerListFile(
 		ctx,
@@ -67,9 +68,9 @@ func FetchCommonRemoteServerList(
 		tunnel,
 		untunneledDialConfig,
 		downloadTimeout,
-		downloadURL,
+		downloadURL.URL,
 		canonicalURL,
-		skipVerify,
+		downloadURL.SkipVerify,
 		"",
 		config.GetRemoteServerListDownloadFilename())
 	if err != nil {
@@ -150,8 +151,9 @@ func FetchObfuscatedServerLists(
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
 	p.Close()
 
-	rootURL, canonicalRootURL, skipVerify := urls.Select(attempt)
-	downloadURL := osl.GetOSLRegistryURL(rootURL)
+	rootURL := urls.Select(attempt)
+	canonicalRootURL := urls.CanonicalURL()
+	downloadURL := osl.GetOSLRegistryURL(rootURL.URL)
 	canonicalURL := osl.GetOSLRegistryURL(canonicalRootURL)
 
 	downloadFilename := osl.GetOSLRegistryFilename(config.GetObfuscatedServerListDownloadDirectory())
@@ -185,7 +187,7 @@ func FetchObfuscatedServerLists(
 		downloadTimeout,
 		downloadURL,
 		canonicalURL,
-		skipVerify,
+		rootURL.SkipVerify,
 		"",
 		downloadFilename)
 	if err != nil {
@@ -261,9 +263,9 @@ func FetchObfuscatedServerLists(
 			tunnel,
 			untunneledDialConfig,
 			downloadTimeout,
-			rootURL,
+			rootURL.URL,
 			canonicalRootURL,
-			skipVerify,
+			rootURL.SkipVerify,
 			publicKey,
 			lookupSLOKs,
 			oslFileSpec) {
