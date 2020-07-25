@@ -873,7 +873,7 @@ func NoticeServerAlert(alert protocol.AlertRequest) {
 	repetitionKey := fmt.Sprintf("ServerAlert-%+v", alert)
 	outputRepetitiveNotice(
 		repetitionKey, "", 0,
-		"ServerAlert", noticeIsDiagnostic, "reason", alert.Reason, "subject", alert.Subject)
+		"ServerAlert", 0, "reason", alert.Reason, "subject", alert.Subject)
 }
 
 type repetitiveNoticeState struct {
