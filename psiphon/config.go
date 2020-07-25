@@ -321,7 +321,7 @@ type Config struct {
 	// on the Psiphon Network, and is typically embedded in the client binary.
 	// All URLs must point to the same entity with the same ETag. At least one
 	// DownloadURL must have OnlyAfterAttempts = 0.
-	RemoteServerListURLs parameters.DownloadURLs
+	RemoteServerListURLs parameters.TransferURLs
 
 	// RemoteServerListSignaturePublicKey specifies a public key that's used
 	// to authenticate the remote server list payload. This value is supplied
@@ -344,7 +344,7 @@ type Config struct {
 	// embedded in the client binary. All URLs must point to the same entity
 	// with the same ETag. At least one DownloadURL must have
 	// OnlyAfterAttempts = 0.
-	ObfuscatedServerListRootURLs parameters.DownloadURLs
+	ObfuscatedServerListRootURLs parameters.TransferURLs
 
 	// SplitTunnelRoutesURLFormat is a URL which specifies the location of a
 	// routes file to use for split tunnel mode. The URL must include a
@@ -375,7 +375,7 @@ type Config struct {
 	// embedded in the client binary. All URLs must point to the same entity
 	// with the same ETag. At least one DownloadURL must have
 	// OnlyAfterAttempts = 0.
-	UpgradeDownloadURLs parameters.DownloadURLs
+	UpgradeDownloadURLs parameters.TransferURLs
 
 	// UpgradeDownloadClientVersionHeader specifies the HTTP header name for
 	// the entity at UpgradeDownloadURLs which specifies the client version
@@ -896,15 +896,15 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	}
 
 	if config.RemoteServerListUrl != "" && config.RemoteServerListURLs == nil {
-		config.RemoteServerListURLs = promoteLegacyDownloadURL(config.RemoteServerListUrl)
+		config.RemoteServerListURLs = promoteLegacyTransferURL(config.RemoteServerListUrl)
 	}
 
 	if config.ObfuscatedServerListRootURL != "" && config.ObfuscatedServerListRootURLs == nil {
-		config.ObfuscatedServerListRootURLs = promoteLegacyDownloadURL(config.ObfuscatedServerListRootURL)
+		config.ObfuscatedServerListRootURLs = promoteLegacyTransferURL(config.ObfuscatedServerListRootURL)
 	}
 
 	if config.UpgradeDownloadUrl != "" && config.UpgradeDownloadURLs == nil {
-		config.UpgradeDownloadURLs = promoteLegacyDownloadURL(config.UpgradeDownloadUrl)
+		config.UpgradeDownloadURLs = promoteLegacyTransferURL(config.UpgradeDownloadUrl)
 	}
 
 	if config.TunnelProtocol != "" && len(config.LimitTunnelProtocols) == 0 {
@@ -1723,14 +1723,14 @@ func (config *Config) setDialParametersHash() {
 	config.dialParametersHash = hash.Sum(nil)
 }
 
-func promoteLegacyDownloadURL(URL string) parameters.DownloadURLs {
-	downloadURLs := make(parameters.DownloadURLs, 1)
-	downloadURLs[0] = &parameters.DownloadURL{
+func promoteLegacyTransferURL(URL string) parameters.TransferURLs {
+	transferURLs := make(parameters.TransferURLs, 1)
+	transferURLs[0] = &parameters.TransferURL{
 		URL:               base64.StdEncoding.EncodeToString([]byte(URL)),
 		SkipVerify:        false,
 		OnlyAfterAttempts: 0,
 	}
-	return downloadURLs
+	return transferURLs
 }
 
 type loggingDeviceBinder struct {

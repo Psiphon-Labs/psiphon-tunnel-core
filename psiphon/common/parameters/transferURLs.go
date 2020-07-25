@@ -26,9 +26,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
-// DownloadURL specifies a URL for downloading resources along with parameters
-// for the download strategy.
-type DownloadURL struct {
+// TransferURL specifies a URL for uploading or downloading resources along
+// with parameters for the transfer strategy.
+type TransferURL struct {
 
 	// URL is the location of the resource. This string is slightly obfuscated
 	// with base64 encoding to mitigate trivial binary executable string scanning.
@@ -39,81 +39,80 @@ type DownloadURL struct {
 	// only be set to true when the resource has its own verification mechanism.
 	SkipVerify bool
 
-	// OnlyAfterAttempts specifies how to schedule this URL when downloading
+	// OnlyAfterAttempts specifies how to schedule this URL when transferring
 	// the same resource (same entity, same ETag) from multiple different
 	// candidate locations. For a value of N, this URL is only a candidate
-	// after N rounds of attempting the download from other URLs.
+	// after N rounds of attempting the transfer to or from other URLs.
 	OnlyAfterAttempts int
 }
 
-// DownloadURLs is a list of download URLs.
-type DownloadURLs []*DownloadURL
+// TransferURLs is a list of transfer URLs.
+type TransferURLs []*TransferURL
 
 // DecodeAndValidate validates a list of download URLs.
 //
-// At least one DownloadURL in the list must have OnlyAfterAttempts of 0,
-// or no DownloadURL would be selected on the first attempt.
-func (d DownloadURLs) DecodeAndValidate() error {
+// At least one TransferURL in the list must have OnlyAfterAttempts of 0,
+// or no TransferURL would be selected on the first attempt.
+func (t TransferURLs) DecodeAndValidate() error {
 
 	hasOnlyAfterZero := false
-	for _, downloadURL := range d {
-		if downloadURL.OnlyAfterAttempts == 0 {
+	for _, transferURL := range t {
+		if transferURL.OnlyAfterAttempts == 0 {
 			hasOnlyAfterZero = true
 		}
-		decodedURL, err := base64.StdEncoding.DecodeString(downloadURL.URL)
+		decodedURL, err := base64.StdEncoding.DecodeString(transferURL.URL)
 		if err != nil {
 			return errors.Tracef("failed to decode URL: %s", err)
 		}
 
-		downloadURL.URL = string(decodedURL)
+		transferURL.URL = string(decodedURL)
 	}
 
 	if !hasOnlyAfterZero {
-		return errors.Tracef("must be at least one DownloadURL with OnlyAfterAttempts = 0")
+		return errors.Tracef("must be at least one TransferURL with OnlyAfterAttempts = 0")
 	}
 
 	return nil
 }
 
-// Select chooses a DownloadURL from the list.
+// Select chooses a TransferURL from the list.
 //
 // The first return value is the canonical URL, to be used
-// as a key when storing information related to the DownloadURLs,
+// as a key when storing information related to the TransferURLs,
 // such as an ETag.
 //
-// The second return value is the chosen download URL, which is
+// The second return value is the chosen transfer URL, which is
 // selected based at random from the candidates allowed in the
 // specified attempt.
-func (d DownloadURLs) Select(attempt int) (string, string, bool) {
+func (t TransferURLs) Select(attempt int) (string, string, bool) {
 
 	// The first OnlyAfterAttempts = 0 URL is the canonical URL. This
 	// is the value used as the key for SetUrlETag when multiple download
 	// URLs can be used to fetch a single entity.
 
 	canonicalURL := ""
-	for _, downloadURL := range d {
-		if downloadURL.OnlyAfterAttempts == 0 {
-			canonicalURL = downloadURL.URL
+	for _, transferURL := range t {
+		if transferURL.OnlyAfterAttempts == 0 {
+			canonicalURL = transferURL.URL
 			break
 		}
 	}
 
 	candidates := make([]int, 0)
-	for index, URL := range d {
+	for index, URL := range t {
 		if attempt >= URL.OnlyAfterAttempts {
 			candidates = append(candidates, index)
 		}
 	}
 
 	if len(candidates) < 1 {
-		// This case is not expected, as decodeAndValidateDownloadURLs
-		// should reject configs that would have no candidates for
-		// 0 attempts.
+		// This case is not expected, as DecodeAndValidate should reject configs
+		// that would have no candidates for 0 attempts.
 		return "", "", true
 	}
 
 	selection := prng.Intn(len(candidates))
-	downloadURL := d[candidates[selection]]
+	transferURL := t[candidates[selection]]
 
-	return downloadURL.URL, canonicalURL, downloadURL.SkipVerify
+	return transferURL.URL, canonicalURL, transferURL.SkipVerify
 }

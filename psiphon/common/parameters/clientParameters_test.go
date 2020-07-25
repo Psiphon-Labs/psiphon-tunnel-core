@@ -93,10 +93,10 @@ func TestGetDefaultParameters(t *testing.T) {
 					t.Fatalf("LabeledQUICVersions returned %+v expected %+v", g, versions)
 				}
 			}
-		case DownloadURLs:
-			g := p.Get().DownloadURLs(name)
+		case TransferURLs:
+			g := p.Get().TransferURLs(name)
 			if !reflect.DeepEqual(v, g) {
-				t.Fatalf("DownloadURLs returned %+v expected %+v", g, v)
+				t.Fatalf("TransferURLs returned %+v expected %+v", g, v)
 			}
 		case common.RateLimits:
 			g := p.Get().RateLimits(name)

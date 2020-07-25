@@ -25,7 +25,6 @@ package psiphon
 
 import (
 	"context"
-	std_errors "errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -38,7 +37,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
@@ -1263,7 +1261,11 @@ func (controller *Controller) launchEstablishing() {
 		defer tacticsWaitPeriod.Stop()
 
 		controller.establishWaitGroup.Add(1)
-		go controller.getTactics(tacticsDone)
+		go func() {
+			defer controller.establishWaitGroup.Done()
+			defer close(tacticsDone)
+			GetTactics(controller.establishCtx, controller.config)
+		}()
 
 		select {
 		case <-tacticsDone:
@@ -1430,216 +1432,6 @@ func (controller *Controller) stopEstablishing() {
 
 	emitMemoryMetrics()
 	DoGarbageCollection()
-}
-
-func (controller *Controller) getTactics(done chan struct{}) {
-	defer controller.establishWaitGroup.Done()
-	defer close(done)
-
-	// Limitation: GetNetworkID may not account for device VPN status, so
-	// Psiphon-over-Psiphon or Psiphon-over-other-VPN scenarios can encounter
-	// this issue:
-	//
-	// 1. Tactics are established when tunneling through a VPN and egressing
-	//    through a remote region/ISP.
-	// 2. Psiphon is next run when _not_ tunneling through the VPN. Yet the
-	//    network ID remains the same. Initial applied tactics will be for the
-	//    remote egress region/ISP, not the local region/ISP.
-
-	tacticsRecord, err := tactics.UseStoredTactics(
-		GetTacticsStorer(),
-		controller.config.GetNetworkID())
-	if err != nil {
-		NoticeWarning("get stored tactics failed: %s", err)
-
-		// The error will be due to a local datastore problem.
-		// While we could proceed with the tactics request, this
-		// could result in constant tactics requests. So, abort.
-		return
-	}
-
-	if tacticsRecord == nil {
-
-		iterator, err := NewTacticsServerEntryIterator(
-			controller.config)
-		if err != nil {
-			NoticeWarning("tactics iterator failed: %s", err)
-			return
-		}
-		defer iterator.Close()
-
-		for iteration := 0; ; iteration++ {
-
-			if !WaitForNetworkConnectivity(
-				controller.runCtx,
-				controller.config.NetworkConnectivityChecker) {
-				return
-			}
-
-			serverEntry, err := iterator.Next()
-			if err != nil {
-				NoticeWarning("tactics iterator failed: %s", err)
-				return
-			}
-
-			if serverEntry == nil {
-				if iteration == 0 {
-					NoticeWarning("tactics request skipped: no capable servers")
-					return
-				}
-
-				iterator.Reset()
-				continue
-			}
-
-			tacticsRecord, err = controller.doFetchTactics(serverEntry)
-			if err == nil {
-				break
-			}
-
-			NoticeWarning("tactics request failed: %s", err)
-
-			// On error, proceed with a retry, as the error is likely
-			// due to a network failure.
-			//
-			// TODO: distinguish network and local errors and abort
-			// on local errors.
-
-			p := controller.config.GetClientParameters().Get()
-			timeout := prng.JitterDuration(
-				p.Duration(parameters.TacticsRetryPeriod),
-				p.Float(parameters.TacticsRetryPeriodJitter))
-			p.Close()
-
-			tacticsRetryDelay := time.NewTimer(timeout)
-
-			select {
-			case <-controller.establishCtx.Done():
-				return
-			case <-tacticsRetryDelay.C:
-			}
-
-			tacticsRetryDelay.Stop()
-		}
-	}
-
-	if tacticsRecord != nil &&
-		prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
-
-		err := controller.config.SetClientParameters(
-			tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
-		if err != nil {
-			NoticeWarning("apply tactics failed: %s", err)
-
-			// The error will be due to invalid tactics values from
-			// the server. When ApplyClientParameters fails, all
-			// previous tactics values are left in place. Abort
-			// without retry since the server is highly unlikely
-			// to return different values immediately.
-			return
-		}
-	}
-
-	// Reclaim memory from the completed tactics request as we're likely
-	// to be proceeding to the memory-intensive tunnel establishment phase.
-	DoGarbageCollection()
-	emitMemoryMetrics()
-}
-
-func (controller *Controller) doFetchTactics(
-	serverEntry *protocol.ServerEntry) (*tactics.Record, error) {
-
-	canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
-		return common.Contains(
-			serverEntry.GetSupportedTacticsProtocols(), replayProtocol)
-	}
-
-	selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
-		tacticsProtocols := serverEntry.GetSupportedTacticsProtocols()
-		if len(tacticsProtocols) == 0 {
-			return "", false
-		}
-		index := prng.Intn(len(tacticsProtocols))
-		return tacticsProtocols[index], true
-	}
-
-	dialParams, err := MakeDialParameters(
-		controller.config,
-		canReplay,
-		selectProtocol,
-		serverEntry,
-		true,
-		0,
-		0)
-	if dialParams == nil {
-		// MakeDialParameters may return nil, nil when the server entry can't
-		// satisfy protocol selection criteria. This case in not expected
-		// since NewTacticsServerEntryIterator should only return tactics-
-		// capable server entries and selectProtocol will select any tactics
-		// protocol.
-		err = std_errors.New("failed to make dial parameters")
-	}
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	NoticeRequestingTactics(dialParams)
-
-	// TacticsTimeout should be a very long timeout, since it's not
-	// adjusted by tactics in a new network context, and so clients
-	// with very slow connections must be accomodated. This long
-	// timeout will not entirely block the beginning of tunnel
-	// establishment, which beings after the shorter TacticsWaitPeriod.
-	//
-	// Using controller.establishCtx will cancel FetchTactics
-	// if tunnel establishment completes first.
-
-	timeout := controller.config.GetClientParameters().Get().Duration(
-		parameters.TacticsTimeout)
-
-	ctx, cancelFunc := context.WithTimeout(
-		controller.establishCtx,
-		timeout)
-	defer cancelFunc()
-
-	// DialMeek completes the TCP/TLS handshakes for HTTPS
-	// meek protocols but _not_ for HTTP meek protocols.
-	//
-	// TODO: pre-dial HTTP protocols to conform with speed
-	// test RTT spec.
-	//
-	// TODO: ensure that meek in round trip mode will fail
-	// the request when the pre-dial connection is broken,
-	// to minimize the possibility of network ID mismatches.
-
-	meekConn, err := DialMeek(
-		ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	defer meekConn.Close()
-
-	apiParams := getBaseAPIParameters(
-		baseParametersAll, controller.config, dialParams)
-
-	tacticsRecord, err := tactics.FetchTactics(
-		ctx,
-		controller.config.clientParameters,
-		GetTacticsStorer(),
-		controller.config.GetNetworkID,
-		apiParams,
-		serverEntry.Region,
-		dialParams.TunnelProtocol,
-		serverEntry.TacticsRequestPublicKey,
-		serverEntry.TacticsRequestObfuscatedKey,
-		meekConn.RoundTrip)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	NoticeRequestedTactics(dialParams)
-
-	return tacticsRecord, nil
 }
 
 // establishCandidateGenerator populates the candidate queue with server entries
