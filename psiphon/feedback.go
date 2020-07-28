@@ -137,10 +137,6 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 	}
 
 	uploadId := prng.HexString(8)
-	PRNG, err := prng.NewPRNG()
-	if err != nil {
-		return errors.TraceMsg(err, "failed to create PRNG")
-	}
 
 	for i := 0; i < feedbackUploadMaxRetries; i++ {
 
@@ -199,8 +195,9 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 		if err != nil {
 			// Do not sleep after the last attempt
 			if i+1 < feedbackUploadMaxRetries {
-				retryDelay := PRNG.Period(feedbackUploadMinRetryDelay, feedbackUploadMaxRetryDelay)
-				time.Sleep(retryDelay)
+				time.Sleep(
+					prng.Period(
+						feedbackUploadMinRetryDelay, feedbackUploadMaxRetryDelay))
 			}
 		} else {
 			break
