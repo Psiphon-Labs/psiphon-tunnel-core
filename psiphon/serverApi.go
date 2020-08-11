@@ -33,6 +33,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
@@ -383,9 +384,9 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 	params["last_connected"] = lastConnected
 
-	// serverContext.tunnel.establishDuration is nanoseconds; divide to get to milliseconds
+	// serverContext.tunnel.establishDuration is nanoseconds; report milliseconds
 	params["establishment_duration"] =
-		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/1000000)
+		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/time.Millisecond)
 
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
@@ -628,6 +629,8 @@ func RecordRemoteServerListStat(
 	tunneled bool,
 	url string,
 	etag string,
+	bytes int64,
+	duration time.Duration,
 	authenticated bool) error {
 
 	if !config.GetClientParameters().Get().WeightedCoinFlip(
@@ -655,6 +658,11 @@ func RecordRemoteServerListStat(
 	params["tunneled"] = tunneledStr
 	params["url"] = url
 	params["etag"] = etag
+	params["bytes"] = fmt.Sprintf("%d", bytes)
+
+	// duration is nanoseconds; report milliseconds
+	params["duration"] = fmt.Sprintf("%d", duration/time.Millisecond)
+
 	authenticatedStr := "0"
 	if authenticated {
 		authenticatedStr = "1"
@@ -964,8 +972,8 @@ func getBaseAPIParameters(
 			params["egress_region"] = config.EgressRegion
 		}
 
-		// dialParams.DialDuration is nanoseconds; divide to get to milliseconds
-		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/1000000)
+		// dialParams.DialDuration is nanoseconds; report milliseconds
+		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/time.Millisecond)
 
 		params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
 

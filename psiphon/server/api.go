@@ -466,6 +466,8 @@ var remoteServerListStatParams = append(
 		{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"url", isAnyString, 0},
 		{"etag", isAnyString, 0},
+		{"bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool}},
 	baseSessionParams...)
 
@@ -491,12 +493,12 @@ var failedTunnelStatParams = append(
 		{"session_id", isHexDigits, 0},
 		{"last_connected", isLastConnected, 0},
 		{"client_failed_timestamp", isISO8601Date, 0},
-		{"liveness_test_upstream_bytes", isIntString, requestParamOptional},
-		{"liveness_test_sent_upstream_bytes", isIntString, requestParamOptional},
-		{"liveness_test_downstream_bytes", isIntString, requestParamOptional},
-		{"liveness_test_received_downstream_bytes", isIntString, requestParamOptional},
-		{"bytes_up", isIntString, requestParamOptional},
-		{"bytes_down", isIntString, requestParamOptional},
+		{"liveness_test_upstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"liveness_test_sent_upstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"liveness_test_downstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"liveness_test_received_downstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"bytes_up", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"bytes_down", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"tunnel_error", isAnyString, 0}},
 	baseSessionAndDialParams...)
 
