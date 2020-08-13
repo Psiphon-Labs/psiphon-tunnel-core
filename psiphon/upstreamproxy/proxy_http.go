@@ -54,6 +54,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/net/proxy"
 )
 
@@ -131,7 +132,7 @@ type proxyConn struct {
 func (pc *proxyConn) handshake(addr, username, password string) error {
 	// HACK: prefix addr of the form 'hostname:port' with a 'http' scheme
 	// so it could be parsed by url.Parse
-	reqURL, err := url.Parse("http://" + addr)
+	reqURL, err := common.SafeParseURL("http://" + addr)
 	if err != nil {
 		pc.httpClientConn.Close()
 		pc.authState = HTTP_AUTH_STATE_FAILURE

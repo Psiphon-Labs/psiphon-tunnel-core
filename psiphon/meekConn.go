@@ -445,7 +445,7 @@ func DialMeek(
 			(meekConfig.DialAddress == meekConfig.HostHeader ||
 				meekConfig.DialAddress == meekConfig.HostHeader+":80") {
 
-			url, err := url.Parse(dialConfig.UpstreamProxyURL)
+			url, err := common.SafeParseURL(dialConfig.UpstreamProxyURL)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
