@@ -22,7 +22,9 @@ package common
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +90,55 @@ func TestFormatByteCount(t *testing.T) {
 				t.Errorf("unexpected output: %s", output)
 			}
 		})
+	}
+}
+
+func TestSafeParseURL(t *testing.T) {
+
+	invalidURL := "https://invalid url"
+
+	_, err := url.Parse(invalidURL)
+
+	if err == nil {
+		t.Error("unexpected parse success")
+	}
+
+	if strings.Index(err.Error(), invalidURL) == -1 {
+		t.Error("URL not in error string")
+	}
+
+	_, err = SafeParseURL(invalidURL)
+
+	if err == nil {
+		t.Error("unexpected parse success")
+	}
+
+	if strings.Index(err.Error(), invalidURL) != -1 {
+		t.Error("URL in error string")
+	}
+}
+
+func TestSafeParseRequestURI(t *testing.T) {
+
+	invalidURL := "https://invalid url"
+
+	_, err := url.ParseRequestURI(invalidURL)
+
+	if err == nil {
+		t.Error("unexpected parse success")
+	}
+
+	if strings.Index(err.Error(), invalidURL) == -1 {
+		t.Error("URL not in error string")
+	}
+
+	_, err = SafeParseRequestURI(invalidURL)
+
+	if err == nil {
+		t.Error("unexpected parse success")
+	}
+
+	if strings.Index(err.Error(), invalidURL) != -1 {
+		t.Error("URL in error string")
 	}
 }

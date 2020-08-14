@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/net/proxy"
 )
 
@@ -58,17 +58,17 @@ func NewProxyDialFunc(config *UpstreamProxyConfig) DialFunc {
 	if config.ProxyURIString == "" {
 		return config.ForwardDialFunc
 	}
-	proxyURI, err := url.Parse(config.ProxyURIString)
+	proxyURI, err := common.SafeParseURL(config.ProxyURIString)
 	if err != nil {
 		return func(network, addr string) (net.Conn, error) {
-			return nil, proxyError(fmt.Errorf("proxyURI url.Parse: %v", err))
+			return nil, proxyError(fmt.Errorf("NewProxyDialFunc: SafeParseURL failed: %v", err))
 		}
 	}
 
 	dialer, err := proxy.FromURL(proxyURI, config)
 	if err != nil {
 		return func(network, addr string) (net.Conn, error) {
-			return nil, proxyError(fmt.Errorf("proxy.FromURL: %v", err))
+			return nil, proxyError(fmt.Errorf("NewProxyDialFunc: proxy.FromURL: %v", err))
 		}
 	}
 	return dialer.Dial
