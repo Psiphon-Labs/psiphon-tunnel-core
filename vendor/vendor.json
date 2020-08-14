@@ -490,10 +490,10 @@
 			"revisionTime": "2019-09-09T20:29:46Z"
 		},
 		{
-			"checksumSHA1": "1HFgQE+SHogT82ebPmvCUnGwrxo=",
+			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",
 			"path": "github.com/refraction-networking/utls",
-			"revision": "ada0bb9b38a0975b15bb4591cd4a939fe74d1a1b",
-			"revisionTime": "2020-06-01T20:02:09Z"
+			"revision": "186025ac7b77465439618d1aeb2a5e444714d1cc",
+			"revisionTime": "2020-07-29T01:25:36Z"
 		},
 		{
 			"checksumSHA1": "Fn9JW8u40ABN9Uc9wuvquuyOB+8=",

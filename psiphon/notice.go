@@ -745,14 +745,15 @@ func NoticeExiting() {
 }
 
 // NoticeRemoteServerListResourceDownloadedBytes reports remote server list download progress.
-func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
+func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64, duration time.Duration) {
 	if !GetEmitNetworkParameters() {
 		url = "[redacted]"
 	}
 	singletonNoticeLogger.outputNotice(
 		"RemoteServerListResourceDownloadedBytes", noticeIsDiagnostic,
 		"url", url,
-		"bytes", bytes)
+		"bytes", bytes,
+		"duration", duration.String())
 }
 
 // NoticeRemoteServerListResourceDownloaded indicates that a remote server list download
@@ -843,7 +844,7 @@ func NoticePruneServerEntry(serverEntryTag string) {
 func NoticeEstablishTunnelTimeout(timeout time.Duration) {
 	singletonNoticeLogger.outputNotice(
 		"EstablishTunnelTimeout", 0,
-		"timeout", timeout)
+		"timeout", timeout.String())
 }
 
 func NoticeFragmentor(diagnosticID string, message string) {
@@ -873,7 +874,7 @@ func NoticeServerAlert(alert protocol.AlertRequest) {
 	repetitionKey := fmt.Sprintf("ServerAlert-%+v", alert)
 	outputRepetitiveNotice(
 		repetitionKey, "", 0,
-		"ServerAlert", noticeIsDiagnostic, "reason", alert.Reason, "subject", alert.Subject)
+		"ServerAlert", 0, "reason", alert.Reason, "subject", alert.Subject)
 }
 
 type repetitiveNoticeState struct {

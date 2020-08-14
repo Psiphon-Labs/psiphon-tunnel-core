@@ -183,6 +183,7 @@ func Start(
 
 	controller, err = psiphon.NewController(config)
 	if err != nil {
+		psiphon.CloseDataStore()
 		return fmt.Errorf("error initializing controller: %s", err)
 	}
 

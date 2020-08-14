@@ -55,7 +55,7 @@ func FetchCommonRemoteServerList(
 
 	p := config.GetClientParameters().Get()
 	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
-	urls := p.DownloadURLs(parameters.RemoteServerListURLs)
+	urls := p.TransferURLs(parameters.RemoteServerListURLs)
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
 	p.Close()
 
@@ -146,7 +146,7 @@ func FetchObfuscatedServerLists(
 
 	p := config.GetClientParameters().Get()
 	publicKey := p.String(parameters.RemoteServerListSignaturePublicKey)
-	urls := p.DownloadURLs(parameters.ObfuscatedServerListRootURLs)
+	urls := p.TransferURLs(parameters.ObfuscatedServerListRootURLs)
 	downloadTimeout := p.Duration(parameters.FetchRemoteServerListTimeout)
 	p.Close()
 
@@ -460,7 +460,9 @@ func downloadRemoteServerListFile(
 		return "", nil, errors.Trace(err)
 	}
 
-	n, responseETag, err := ResumeDownload(
+	startTime := time.Now()
+
+	bytes, responseETag, err := ResumeDownload(
 		ctx,
 		httpClient,
 		sourceURL,
@@ -468,7 +470,9 @@ func downloadRemoteServerListFile(
 		destinationFilename,
 		lastETag)
 
-	NoticeRemoteServerListResourceDownloadedBytes(sourceURL, n)
+	duration := time.Since(startTime)
+
+	NoticeRemoteServerListResourceDownloadedBytes(sourceURL, bytes, duration)
 
 	if err != nil {
 		return "", nil, errors.Trace(err)
@@ -482,7 +486,7 @@ func downloadRemoteServerListFile(
 
 	downloadStatRecorder := func(authenticated bool) {
 		_ = RecordRemoteServerListStat(
-			config, tunneled, sourceURL, responseETag, authenticated)
+			config, tunneled, sourceURL, responseETag, bytes, duration, authenticated)
 	}
 
 	return responseETag, downloadStatRecorder, nil
