@@ -1068,6 +1068,18 @@ func getRequestLogFields(
 				// value for speed_test_samples via the web API protocol. Omit
 				// the field in this case.
 
+			case "tunnel_error":
+				// net/url.Error, returned from net/url.Parse, contains the original input
+				// URL, which may contain PII. New clients strip this out by using
+				// common.SafeParseURL. Legacy clients will still send the full error
+				// message, so strip it out here. The target substring should be unique to
+				// legacy clients.
+				target := "upstreamproxy error: proxyURI url.Parse: parse "
+				index := strings.Index(strValue, target)
+				if index != -1 {
+					strValue = strValue[:index+len(target)] + "<redacted>"
+				}
+
 			default:
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
