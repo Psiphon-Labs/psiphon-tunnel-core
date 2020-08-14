@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -618,7 +617,7 @@ func MakeDialParameters(
 
 	if config.UseUpstreamProxy() {
 		// Note: UpstreamProxyURL will be validated in the dial
-		proxyURL, err := url.Parse(config.UpstreamProxyURL)
+		proxyURL, err := common.SafeParseURL(config.UpstreamProxyURL)
 		if err == nil {
 			dialParams.UpstreamProxyType = proxyURL.Scheme
 		}

@@ -33,6 +33,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
@@ -383,9 +384,9 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 
 	params["last_connected"] = lastConnected
 
-	// serverContext.tunnel.establishDuration is nanoseconds; divide to get to milliseconds
+	// serverContext.tunnel.establishDuration is nanoseconds; report milliseconds
 	params["establishment_duration"] =
-		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/1000000)
+		fmt.Sprintf("%d", serverContext.tunnel.establishDuration/time.Millisecond)
 
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
@@ -601,33 +602,38 @@ func confirmStatusRequestPayload(payloadInfo *statusRequestPayloadInfo) {
 	}
 }
 
-// RecordRemoteServerListStat records a completed common or OSL
-// remote server list resource download.
+// RecordRemoteServerListStat records a completed common or OSL remote server
+// list resource download.
 //
-// The RSL download event could occur when the client is unable
-// to immediately send a status request to a server, so these
-// records are stored in the persistent datastore and reported
-// via subsequent status requests sent to any Psiphon server.
+// The RSL download event could occur when the client is unable to immediately
+// send a status request to a server, so these records are stored in the
+// persistent datastore and reported via subsequent status requests sent to
+// any Psiphon server.
 //
-// Note that some common event field values may change between the
-// stat recording and reporting, including client geolocation and
-// host_id.
+// Note that some common event field values may change between the stat
+// recording and reporting, including client geolocation and host_id.
 //
-// Multiple "status" requests may be in flight at once (due
-// to multi-tunnel, asynchronous final status retry, and
-// aggressive status requests for pre-registered tunnels),
-// To avoid duplicate reporting, persistent stats records are
-// "taken-out" by a status request and then "put back" in
-// case the request fails.
+// The bytes/duration fields reflect the size and download time for the _last
+// chunk only_ in the case of a resumed download. The purpose of these fields
+// is to calculate rough data transfer rates. Both bytes and duration are
+// included in the log, to allow for filtering out of small transfers which
+// may not produce accurate rate numbers.
 //
-// Duplicate reporting may also occur when a server receives and
-// processes a status request but the client fails to receive
-// the response.
+// Multiple "status" requests may be in flight at once (due to multi-tunnel,
+// asynchronous final status retry, and aggressive status requests for
+// pre-registered tunnels), To avoid duplicate reporting, persistent stats
+// records are "taken-out" by a status request and then "put back" in case the
+// request fails.
+//
+// Duplicate reporting may also occur when a server receives and processes a
+// status request but the client fails to receive the response.
 func RecordRemoteServerListStat(
 	config *Config,
 	tunneled bool,
 	url string,
 	etag string,
+	bytes int64,
+	duration time.Duration,
 	authenticated bool) error {
 
 	if !config.GetClientParameters().Get().WeightedCoinFlip(
@@ -655,6 +661,11 @@ func RecordRemoteServerListStat(
 	params["tunneled"] = tunneledStr
 	params["url"] = url
 	params["etag"] = etag
+	params["bytes"] = fmt.Sprintf("%d", bytes)
+
+	// duration is nanoseconds; report milliseconds
+	params["duration"] = fmt.Sprintf("%d", duration/time.Millisecond)
+
 	authenticatedStr := "0"
 	if authenticated {
 		authenticatedStr = "1"
@@ -964,8 +975,8 @@ func getBaseAPIParameters(
 			params["egress_region"] = config.EgressRegion
 		}
 
-		// dialParams.DialDuration is nanoseconds; divide to get to milliseconds
-		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/1000000)
+		// dialParams.DialDuration is nanoseconds; report milliseconds
+		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/time.Millisecond)
 
 		params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
 

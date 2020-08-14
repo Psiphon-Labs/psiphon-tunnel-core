@@ -316,7 +316,7 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 	}
 
 	// Origin URL must be well-formed, absolute, and have a scheme of "http" or "https"
-	originURL, err := url.ParseRequestURI(originURLString)
+	originURL, err := common.SafeParseRequestURI(originURLString)
 	if err != nil {
 		NoticeWarning("%s", errors.Trace(FilterUrlError(err)))
 		forceClose(responseWriter)
@@ -678,7 +678,7 @@ func (proxy *HttpProxy) serve() {
 
 // toAbsoluteURL takes a base URL and a relative URL and constructs an appropriate absolute URL.
 func toAbsoluteURL(baseURL *url.URL, relativeURLString string) string {
-	relativeURL, err := url.Parse(relativeURLString)
+	relativeURL, err := common.SafeParseURL(relativeURLString)
 
 	if err != nil {
 		return ""
