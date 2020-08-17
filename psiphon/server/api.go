@@ -1079,6 +1079,7 @@ func getRequestLogFields(
 				if index != -1 {
 					strValue = strValue[:index+len(target)] + "<redacted>"
 				}
+				logFields[expectedParam.name] = strValue
 
 			default:
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
