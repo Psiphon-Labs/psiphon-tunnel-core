@@ -898,7 +898,7 @@ func outputRepetitiveNotice(
 
 	state, keyFound := repetitiveNoticeStates[repetitionKey]
 	if !keyFound {
-		state = new(repetitiveNoticeState)
+		state = &repetitiveNoticeState{message: repetitionMessage}
 		repetitiveNoticeStates[repetitionKey] = state
 	}
 
