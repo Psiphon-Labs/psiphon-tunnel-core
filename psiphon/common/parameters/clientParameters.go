@@ -86,6 +86,7 @@ const (
 	StaggerConnectionWorkersPeriod                   = "StaggerConnectionWorkersPeriod"
 	StaggerConnectionWorkersJitter                   = "StaggerConnectionWorkersJitter"
 	LimitIntensiveConnectionWorkers                  = "LimitIntensiveConnectionWorkers"
+	UpstreamProxyErrorWaitDuration                   = "UpstreamProxyErrorWaitDuration"
 	IgnoreHandshakeStatsRegexps                      = "IgnoreHandshakeStatsRegexps"
 	PrioritizeTunnelProtocolsProbability             = "PrioritizeTunnelProtocolsProbability"
 	PrioritizeTunnelProtocols                        = "PrioritizeTunnelProtocols"
@@ -281,6 +282,7 @@ var defaultClientParameters = map[string]struct {
 	StaggerConnectionWorkersPeriod:           {value: time.Duration(0), minimum: time.Duration(0)},
 	StaggerConnectionWorkersJitter:           {value: 0.1, minimum: 0.0},
 	LimitIntensiveConnectionWorkers:          {value: 0, minimum: 0},
+	UpstreamProxyErrorWaitDuration:           {value: 30 * time.Second, minimum: time.Duration(0)},
 	IgnoreHandshakeStatsRegexps:              {value: false},
 	TunnelOperateShutdownTimeout:             {value: 1 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
