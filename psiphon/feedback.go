@@ -193,6 +193,7 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 		err = uploadFeedback(client, request)
 		cancelFunc()
 		if err != nil {
+			NoticeWarning("uploadFeedback failed: %s", errors.Trace(err))
 			// Do not sleep after the last attempt
 			if i+1 < feedbackUploadMaxRetries {
 				time.Sleep(

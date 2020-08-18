@@ -40,8 +40,12 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
-type PsiphonProvider interface {
+type PsiphonProviderNoticeHandler interface {
 	Notice(noticeJSON string)
+}
+
+type PsiphonProvider interface {
+	PsiphonProviderNoticeHandler
 	HasNetworkConnectivity() int
 	BindToDevice(fileDescriptor int) (string, error)
 	IPv6Synthesize(IPv4Addr string) string
@@ -291,7 +295,17 @@ func ImportExchangePayload(payload string) bool {
 }
 
 // Encrypt and upload feedback.
-func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
+func SendFeedback(
+	configJson,
+	diagnosticsJson,
+	uploadPath string,
+	noticeHandler PsiphonProviderNoticeHandler) error {
+
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+		func(notice []byte) {
+			noticeHandler.Notice(string(notice))
+		}))
+
 	return psiphon.SendFeedback(configJson, diagnosticsJson, uploadPath)
 }
 

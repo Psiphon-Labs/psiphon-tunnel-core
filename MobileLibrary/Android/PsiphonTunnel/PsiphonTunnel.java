@@ -66,6 +66,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import psi.Psi;
 import psi.PsiphonProvider;
+import psi.PsiphonProviderNoticeHandler;
 
 public class PsiphonTunnel {
 
@@ -307,7 +308,8 @@ public class PsiphonTunnel {
             // Adds fields used in feedback upload, e.g. client platform.
             String psiphonConfig = buildPsiphonConfig(context, logger, feedbackConfigJson,
                     clientPlatformPrefix, clientPlatformSuffix, false, 0);
-            Psi.sendFeedback(psiphonConfig, diagnosticsJson, uploadPath);
+            PsiphonProviderNoticeHandlerShim noticeHandler = new PsiphonProviderNoticeHandlerShim(logger);
+            Psi.sendFeedback(psiphonConfig, diagnosticsJson, uploadPath, noticeHandler);
         } catch (java.lang.Exception e) {
             throw new Exception("Error sending feedback", e);
         }
@@ -490,6 +492,46 @@ public class PsiphonTunnel {
         @Override
         public String getNetworkID() {
             return mPsiphonTunnel.getNetworkID();
+        }
+    }
+
+    //----------------------------------------------------------------------------------------------
+    // PsiphonProviderNoticeHandler (Core support) interface implementation
+    //----------------------------------------------------------------------------------------------
+
+    // The PsiphonProviderNoticeHandler function is called from Go, and must be public to be
+    // accessible via the gobind mechanim. To avoid making internal implementation functions public,
+    // PsiphonProviderNoticeHandlerShim is used as a wrapper.
+
+    private static class PsiphonProviderNoticeHandlerShim implements PsiphonProviderNoticeHandler {
+
+        private HostLogger mLogger;
+
+        public PsiphonProviderNoticeHandlerShim(HostLogger logger) {
+            mLogger = logger;
+        }
+
+        @Override
+        public void notice(String noticeJSON) {
+
+            try {
+                JSONObject notice = new JSONObject(noticeJSON);
+
+                String noticeType = notice.getString("noticeType");
+                if (noticeType == null) {
+                    return;
+                }
+
+                JSONObject data = notice.getJSONObject("data");
+                if (data == null) {
+                    return;
+                }
+
+                String diagnosticMessage = noticeType + ": " + data.toString();
+                mLogger.onDiagnosticMessage(diagnosticMessage);
+            } catch (java.lang.Exception e) {
+                mLogger.onDiagnosticMessage("Error handling notice " + e.toString());
+            }
         }
     }
 

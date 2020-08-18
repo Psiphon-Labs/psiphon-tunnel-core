@@ -25,6 +25,7 @@
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import "LookupIPv6.h"
 #import "Psi-meta.h"
+#import "PsiphonNoticeHandler.h"
 #import "PsiphonTunnel.h"
 #import "Backups.h"
 #import "json-framework/SBJson4.h"
@@ -501,7 +502,56 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         return;
     }
 
-    GoPsiSendFeedback(psiphonConfig, feedbackJson, uploadPath, &err);
+    // Convert notice to a diagnostic message and then log it.
+    void (^logNotice)(NSString * _Nonnull) = ^void(NSString * _Nonnull noticeJSON) {
+
+        if (logger != nil && [logger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+
+            __block NSDictionary *notice = nil;
+            id block = ^(id obj, BOOL *ignored) {
+                if (ignored == nil || *ignored == YES) {
+                    return;
+                }
+                notice = (NSDictionary *)obj;
+            };
+
+            id eh = ^(NSError *err) {
+                notice = nil;
+                logMessage([NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]);
+            };
+
+            id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
+            [parser parse:[noticeJSON dataUsingEncoding:NSUTF8StringEncoding]];
+
+            if (notice == nil) {
+                return;
+            }
+
+            NSString *noticeType = notice[@"noticeType"];
+            if (noticeType == nil) {
+                logMessage(@"Notice missing noticeType");
+                return;
+            }
+
+            NSDictionary *data = notice[@"data"];
+            if (data == nil) {
+                return;
+            }
+
+            NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
+            NSString *timestampStr = notice[@"timestamp"];
+            if (timestampStr == nil) {
+                return;
+            }
+
+            NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
+            [logger onDiagnosticMessage:diagnosticMessage withTimestamp:timestampStr];
+        }
+    };
+
+    PsiphonNoticeHandler *noticeHandler = [[PsiphonNoticeHandler alloc] initWithLogger:logNotice];
+
+    GoPsiSendFeedback(psiphonConfig, feedbackJson, uploadPath, noticeHandler, &err);
 
     if (err != nil) {
         *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
@@ -1215,6 +1265,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         
         NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
         NSString *timestampStr = notice[@"timestamp"];
+        if (timestampStr == nil) {
+            return;
+        }
 
         NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
         [self postDiagnosticMessage:diagnosticMessage withTimestamp:timestampStr];
