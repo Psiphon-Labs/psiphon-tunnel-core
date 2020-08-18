@@ -667,9 +667,11 @@ func NoticeSplitTunnelRegion(region string) {
 // NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
 // user may have input, for example, an incorrect address or incorrect credentials.
 func NoticeUpstreamProxyError(err error) {
-	singletonNoticeLogger.outputNotice(
+	message := err.Error()
+	outputRepetitiveNotice(
+		"UpstreamProxyError", message, 0,
 		"UpstreamProxyError", 0,
-		"message", err.Error())
+		"message", message)
 }
 
 // NoticeClientUpgradeDownloadedBytes reports client upgrade download progress.
