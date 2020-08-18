@@ -42,8 +42,8 @@
 		66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BDB0591DC26CCC0079384C /* SBJson4Writer.m */; };
 		CE3D1DA523906003009A4AF6 /* Backups.h in Headers */ = {isa = PBXBuildFile; fileRef = CE3D1DA323906003009A4AF6 /* Backups.h */; };
 		CE3D1DA623906003009A4AF6 /* Backups.m in Sources */ = {isa = PBXBuildFile; fileRef = CE3D1DA423906003009A4AF6 /* Backups.m */; };
-		CEDE547924EBF5980053566E /* PsiphonNoticeHandler.h in Headers */ = {isa = PBXBuildFile; fileRef = CEDE547724EBF5980053566E /* PsiphonNoticeHandler.h */; };
-		CEDE547A24EBF5980053566E /* PsiphonNoticeHandler.m in Sources */ = {isa = PBXBuildFile; fileRef = CEDE547824EBF5980053566E /* PsiphonNoticeHandler.m */; };
+		CEDE547924EBF5980053566E /* PsiphonProviderNoticeHandlerShim.h in Headers */ = {isa = PBXBuildFile; fileRef = CEDE547724EBF5980053566E /* PsiphonProviderNoticeHandlerShim.h */; };
+		CEDE547A24EBF5980053566E /* PsiphonProviderNoticeHandlerShim.m in Sources */ = {isa = PBXBuildFile; fileRef = CEDE547824EBF5980053566E /* PsiphonProviderNoticeHandlerShim.m */; };
 		EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = EFED7EBE1F587F6E0078980F /* libresolv.tbd */; };
 /* End PBXBuildFile section */
 
@@ -108,8 +108,8 @@
 		66BDB0591DC26CCC0079384C /* SBJson4Writer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SBJson4Writer.m; sourceTree = "<group>"; };
 		CE3D1DA323906003009A4AF6 /* Backups.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Backups.h; sourceTree = "<group>"; };
 		CE3D1DA423906003009A4AF6 /* Backups.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Backups.m; sourceTree = "<group>"; };
-		CEDE547724EBF5980053566E /* PsiphonNoticeHandler.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = PsiphonNoticeHandler.h; path = ../PsiphonNoticeHandler.h; sourceTree = "<group>"; };
-		CEDE547824EBF5980053566E /* PsiphonNoticeHandler.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PsiphonNoticeHandler.m; path = ../PsiphonNoticeHandler.m; sourceTree = "<group>"; };
+		CEDE547724EBF5980053566E /* PsiphonProviderNoticeHandlerShim.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = PsiphonProviderNoticeHandlerShim.h; path = ../PsiphonProviderNoticeHandlerShim.h; sourceTree = "<group>"; };
+		CEDE547824EBF5980053566E /* PsiphonProviderNoticeHandlerShim.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PsiphonProviderNoticeHandlerShim.m; path = ../PsiphonProviderNoticeHandlerShim.m; sourceTree = "<group>"; };
 		EFED7EBE1F587F6E0078980F /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -255,8 +255,8 @@
 		CEDE547B24EBF5A00053566E /* Psiphon */ = {
 			isa = PBXGroup;
 			children = (
-				CEDE547724EBF5980053566E /* PsiphonNoticeHandler.h */,
-				CEDE547824EBF5980053566E /* PsiphonNoticeHandler.m */,
+				CEDE547724EBF5980053566E /* PsiphonProviderNoticeHandlerShim.h */,
+				CEDE547824EBF5980053566E /* PsiphonProviderNoticeHandlerShim.m */,
 			);
 			path = Psiphon;
 			sourceTree = "<group>";
@@ -289,7 +289,7 @@
 				6685BDCA1E2E882800F0E414 /* Psi.h in Headers */,
 				66BDB0651DC26CCC0079384C /* SBJson4StreamWriterState.h in Headers */,
 				66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */,
-				CEDE547924EBF5980053566E /* PsiphonNoticeHandler.h in Headers */,
+				CEDE547924EBF5980053566E /* PsiphonProviderNoticeHandlerShim.h in Headers */,
 				6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */,
 				66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */,
 				66BDB0611DC26CCC0079384C /* SBJson4StreamTokeniser.h in Headers */,
@@ -421,7 +421,7 @@
 			files = (
 				66BDB05E1DC26CCC0079384C /* SBJson4StreamParser.m in Sources */,
 				66BDB0641DC26CCC0079384C /* SBJson4StreamWriter.m in Sources */,
-				CEDE547A24EBF5980053566E /* PsiphonNoticeHandler.m in Sources */,
+				CEDE547A24EBF5980053566E /* PsiphonProviderNoticeHandlerShim.m in Sources */,
 				66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */,
 				66BDB05C1DC26CCC0079384C /* SBJson4Parser.m in Sources */,
 				4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */,

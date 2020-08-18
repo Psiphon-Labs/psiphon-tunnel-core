@@ -22,9 +22,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// PsiphonNoticeHandler passes along notice events to the configured logger.
+/// PsiphonProviderNoticeHandlerShim provides a shim between GoPsiPsiphonProviderNoticeHandler and a block which logs notices.
 /// @note This indirection is required because gomobile does not support Objective-C blocks.
-@interface PsiphonNoticeHandler : NSObject <GoPsiPsiphonProviderNoticeHandler>
+@interface PsiphonProviderNoticeHandlerShim : NSObject <GoPsiPsiphonProviderNoticeHandler>
 
 /// Initialize the notice handler with a given logger.
 /// @param logger Logger which will receive notices.

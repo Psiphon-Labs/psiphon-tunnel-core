@@ -17,9 +17,9 @@
  *
  */
 
-#import "PsiphonNoticeHandler.h"
+#import "PsiphonProviderNoticeHandlerShim.h"
 
-@implementation PsiphonNoticeHandler {
+@implementation PsiphonProviderNoticeHandlerShim {
     void (^logger) (NSString *_Nonnull);
 }
 

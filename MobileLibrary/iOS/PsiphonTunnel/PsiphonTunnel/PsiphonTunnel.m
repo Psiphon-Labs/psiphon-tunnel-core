@@ -25,7 +25,7 @@
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import "LookupIPv6.h"
 #import "Psi-meta.h"
-#import "PsiphonNoticeHandler.h"
+#import "PsiphonProviderNoticeHandlerShim.h"
 #import "PsiphonTunnel.h"
 #import "Backups.h"
 #import "json-framework/SBJson4.h"
@@ -549,7 +549,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         }
     };
 
-    PsiphonNoticeHandler *noticeHandler = [[PsiphonNoticeHandler alloc] initWithLogger:logNotice];
+    PsiphonProviderNoticeHandlerShim *noticeHandler = [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
 
     GoPsiSendFeedback(psiphonConfig, feedbackJson, uploadPath, noticeHandler, &err);
 
