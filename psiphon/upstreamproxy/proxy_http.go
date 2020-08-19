@@ -207,7 +207,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 		if username == "" {
 			pc.httpClientConn.Close()
 			pc.authState = HTTP_AUTH_STATE_FAILURE
-			return proxyError(fmt.Errorf("ho username credentials provided for proxy auth"))
+			return proxyError(fmt.Errorf("no username credentials provided for proxy auth"))
 		}
 		if err == errPersistEOF {
 			// The server may send Connection: close,

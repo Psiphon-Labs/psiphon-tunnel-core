@@ -2199,6 +2199,7 @@ func storePruneServerEntriesTest(
 
 		dialParams, err := psiphon.MakeDialParameters(
 			clientConfig,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
 			func(serverEntry *protocol.ServerEntry) (string, bool) {
 				return runConfig.tunnelProtocol, true

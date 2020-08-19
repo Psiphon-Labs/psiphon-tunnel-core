@@ -177,8 +177,15 @@ func fetchTactics(
 		return tacticsProtocols[index], true
 	}
 
+	// No upstreamProxyErrorCallback is set: for tunnel establishment, the
+	// tactics head start is short, and tunnel connections will eventually post
+	// NoticeUpstreamProxyError for any persistent upstream proxy error
+	// conditions. Non-tunnel establishment cases, such as SendFeedback, which
+	// use tactics are not currently expected to post NoticeUpstreamProxyError.
+
 	dialParams, err := MakeDialParameters(
 		config,
+		nil,
 		canReplay,
 		selectProtocol,
 		serverEntry,

@@ -136,7 +136,9 @@ func proxiedTcpDial(
 	go func() {
 		conn, err := upstreamDialer("tcp", addr)
 		if _, ok := err.(*upstreamproxy.Error); ok {
-			NoticeUpstreamProxyError(err)
+			if config.UpstreamProxyErrorCallback != nil {
+				config.UpstreamProxyErrorCallback(err)
+			}
 		}
 		resultChannel <- upstreamDialResult{
 			conn: conn,

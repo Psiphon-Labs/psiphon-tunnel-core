@@ -1664,6 +1664,55 @@ loop:
 			continue
 		}
 
+		// upstreamProxyErrorCallback will post NoticeUpstreamProxyError when the
+		// tunnel dial fails due to an upstream proxy error. As the upstream proxy
+		// is user configured, the error message may need to be relayed to the user.
+
+		upstreamProxyErrorCallback := func(err error) {
+
+			// Do not post the notice when overall context is canceled or timed-out:
+			// the upstream proxy connection error is likely a result of the
+			// cancellation, and not a condition to be fixed by the user.
+			//
+			// Concurrency note: due to accessing controller.establishCtx,
+			// upstreamProxyErrorCallback must only be called while establishing;
+			// specifically, from the following ConnectTunnel call.
+
+			if controller.establishCtx.Err() != nil {
+				return
+			}
+
+			// Another class of non-fatal upstream proxy error arises from proxies
+			// which limit permitted proxied ports. In this case, some tunnels may fail
+			// due to dial port, while others may eventually succeed. To avoid this
+			// class of errors, delay posting the notice. If the upstream proxy works,
+			// _some_ tunnel should connect. If the upstream proxy configuration is
+			// broken, the error should persist and eventually get posted.
+
+			p := controller.config.GetClientParameters().Get()
+			workerPoolSize := p.Int(parameters.ConnectionWorkerPoolSize)
+			waitDuration := p.Duration(parameters.UpstreamProxyErrorWaitDuration)
+			p.Close()
+
+			controller.concurrentEstablishTunnelsMutex.Lock()
+			establishConnectTunnelCount := controller.establishConnectTunnelCount
+			controller.concurrentEstablishTunnelsMutex.Unlock()
+
+			// Delay until either UpstreamProxyErrorWaitDuration has elapsed (excluding
+			// time spent waiting for network connectivity) or, to post sooner if many
+			// candidates are failing, at least workerPoolSize tunnel connection
+			// attempts have completed. We infer that at least workerPoolSize
+			// candidates have completed by checking that at least 2*workerPoolSize
+			// candidates have started.
+
+			if time.Since(candidateServerEntry.adjustedEstablishStartTime) < waitDuration &&
+				establishConnectTunnelCount < 2*workerPoolSize {
+				return
+			}
+
+			NoticeUpstreamProxyError(err)
+		}
+
 		// Select the tunnel protocol. The selection will be made at random
 		// from protocols supported by the server entry, optionally limited by
 		// LimitTunnelProtocols.
@@ -1727,6 +1776,7 @@ loop:
 
 		dialParams, err := MakeDialParameters(
 			controller.config,
+			upstreamProxyErrorCallback,
 			canReplay,
 			selectProtocol,
 			candidateServerEntry.serverEntry,

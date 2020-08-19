@@ -162,6 +162,7 @@ func TestDuplicateSessionID(t *testing.T) {
 
 		dialParams, err := psiphon.MakeDialParameters(
 			clientConfig,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return false },
 			func(_ *protocol.ServerEntry) (string, bool) { return "OSSH", true },
 			serverEntry,
