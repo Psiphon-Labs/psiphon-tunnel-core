@@ -26,7 +26,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// @note This indirection is required because gomobile does not support Objective-C blocks.
 @interface PsiphonProviderNoticeHandlerShim : NSObject <GoPsiPsiphonProviderNoticeHandler>
 
-/// Initialize the notice handler with a given logger.
+/// Initialize the notice handler with the given logger.
 /// @param logger Logger which will receive notices.
 - (id)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger;
 

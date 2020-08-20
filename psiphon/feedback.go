@@ -32,6 +32,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	stdlibErrors "errors"
 	"net/http"
 	"net/url"
 	"path"
@@ -97,7 +98,7 @@ func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error
 
 // Encrypt feedback and upload to server. If upload fails
 // the routine will sleep and retry multiple times.
-func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
+func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath string) error {
 
 	config, err := LoadConfig([]byte(configJson))
 	if err != nil {
@@ -112,11 +113,11 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 	p := config.GetClientParameters().Get()
 	timeout := p.Duration(parameters.FeedbackTacticsWaitPeriod)
 	p.Close()
-	ctx, cancelFunc := context.WithTimeout(context.Background(), timeout)
+	getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 	// Note: GetTactics will fail silently if the datastore used for retrieving
 	// and storing tactics is opened by another process.
-	GetTactics(ctx, config)
+	GetTactics(getTacticsCtx, config)
 
 	// Get the latest client parameters
 	p = config.GetClientParameters().Get()
@@ -158,13 +159,13 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 			return errors.Trace(err)
 		}
 
-		ctx, cancelFunc := context.WithTimeout(
-			context.Background(),
+		feedbackUploadCtx, cancelFunc := context.WithTimeout(
+			ctx,
 			feedbackUploadTimeout)
 		defer cancelFunc()
 
 		client, err := MakeUntunneledHTTPClient(
-			ctx,
+			feedbackUploadCtx,
 			config,
 			untunneledDialConfig,
 			nil,
@@ -180,7 +181,7 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 
 		parsedURL.Path = path.Join(parsedURL.Path, uploadPath, uploadId)
 
-		request, err := http.NewRequestWithContext(ctx, "PUT", parsedURL.String(), bytes.NewBuffer(secureFeedback))
+		request, err := http.NewRequestWithContext(feedbackUploadCtx, "PUT", parsedURL.String(), bytes.NewBuffer(secureFeedback))
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -193,12 +194,18 @@ func SendFeedback(configJson, diagnosticsJson, uploadPath string) error {
 		err = uploadFeedback(client, request)
 		cancelFunc()
 		if err != nil {
-			NoticeWarning("uploadFeedback failed: %s", errors.Trace(err))
+			if stdlibErrors.Is(err, context.Canceled) {
+				return errors.TraceMsg(err, "feedback upload interrupted")
+			}
 			// Do not sleep after the last attempt
 			if i+1 < feedbackUploadMaxRetries {
-				time.Sleep(
-					prng.Period(
-						feedbackUploadMinRetryDelay, feedbackUploadMaxRetryDelay))
+				timeUntilRetry := prng.Period(feedbackUploadMinRetryDelay, feedbackUploadMaxRetryDelay)
+				NoticeWarning("uploadFeedback failed: %s, retry in %.0fs", errors.Trace(err), timeUntilRetry.Seconds())
+				select {
+				case <-ctx.Done():
+					return errors.TraceNew("feedback upload interrupted")
+				case <-time.After(timeUntilRetry):
+				}
 			}
 		} else {
 			break

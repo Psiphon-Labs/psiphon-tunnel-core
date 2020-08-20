@@ -25,6 +25,7 @@
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import "LookupIPv6.h"
 #import "Psi-meta.h"
+#import "PsiphonProviderFeedbackHandlerShim.h"
 #import "PsiphonProviderNoticeHandlerShim.h"
 #import "PsiphonTunnel.h"
 #import "Backups.h"
@@ -455,111 +456,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 // See comment in header.
 - (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address {
     return GoPsiGetPacketTunnelDNSResolverIPv6Address();
-}
-
-// See comment in header.
-+ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
-  feedbackConfigJson:(id _Nonnull)feedbackConfigJson
-          uploadPath:(NSString * _Nonnull)uploadPath
-              logger:(id<TunneledAppDelegateLogger> _Nullable)logger
-               error:(NSError * _Nullable * _Nonnull)outError {
-
-    *outError = nil;
-
-    void (^logMessage)(NSString * _Nonnull) = ^void(NSString * _Nonnull message) {
-        if (logger != nil && [logger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
-            NSString *timestamp = [[PsiphonTunnel rfc3339Formatter] stringFromDate:[NSDate date]];
-            [logger onDiagnosticMessage:message withTimestamp:timestamp];
-        }
-    };
-
-    NSError *err;
-    NSString *sessionID = [PsiphonTunnel generateSessionID:&err];
-    if (err != nil) {
-        *outError = err;
-        return;
-    }
-
-    BOOL usingNoticeFiles = FALSE;
-    BOOL tunnelWholeDevice = FALSE;
-    NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:feedbackConfigJson
-                                               usingNoticeFiles:&usingNoticeFiles
-                                              tunnelWholeDevice:&tunnelWholeDevice
-                                                      sessionID:sessionID
-                                                     logMessage:logMessage
-                                                          error:&err];
-    if (err != nil) {
-        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
-                                        code:PsiphonTunnelErrorCodeConfigError
-                                    userInfo:@{NSLocalizedDescriptionKey:@"Error building config",
-                                               NSUnderlyingErrorKey:err}];
-        return;
-    } else if (psiphonConfig == nil) {
-        // Should never happen.
-        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
-                                        code:PsiphonTunnelErrorCodeConfigError
-                                    userInfo:@{NSLocalizedDescriptionKey:@"Error built config nil"}];
-        return;
-    }
-
-    // Convert notice to a diagnostic message and then log it.
-    void (^logNotice)(NSString * _Nonnull) = ^void(NSString * _Nonnull noticeJSON) {
-
-        if (logger != nil && [logger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
-
-            __block NSDictionary *notice = nil;
-            id block = ^(id obj, BOOL *ignored) {
-                if (ignored == nil || *ignored == YES) {
-                    return;
-                }
-                notice = (NSDictionary *)obj;
-            };
-
-            id eh = ^(NSError *err) {
-                notice = nil;
-                logMessage([NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]);
-            };
-
-            id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
-            [parser parse:[noticeJSON dataUsingEncoding:NSUTF8StringEncoding]];
-
-            if (notice == nil) {
-                return;
-            }
-
-            NSString *noticeType = notice[@"noticeType"];
-            if (noticeType == nil) {
-                logMessage(@"Notice missing noticeType");
-                return;
-            }
-
-            NSDictionary *data = notice[@"data"];
-            if (data == nil) {
-                return;
-            }
-
-            NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
-            NSString *timestampStr = notice[@"timestamp"];
-            if (timestampStr == nil) {
-                return;
-            }
-
-            NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
-            [logger onDiagnosticMessage:diagnosticMessage withTimestamp:timestampStr];
-        }
-    };
-
-    PsiphonProviderNoticeHandlerShim *noticeHandler = [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
-
-    GoPsiSendFeedback(psiphonConfig, feedbackJson, uploadPath, noticeHandler, &err);
-
-    if (err != nil) {
-        *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
-                                        code:PsiphonTunnelErrorCodeSendFeedbackError
-                                    userInfo:@{NSLocalizedDescriptionKey:@"Error sending feedback",
-                                               NSUnderlyingErrorKey:err}];
-        return;
-    }
 }
 
 // See comment in header.
@@ -1740,6 +1636,185 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         [hexEncodedSessionID appendFormat:@"%02x", sessionID[i]];
     }
     return hexEncodedSessionID;
+}
+
+@end
+
+// See comment in header.
+@implementation PsiphonTunnelFeedback {
+    dispatch_queue_t workQueue;
+    dispatch_queue_t callbackQueue;
+}
+
+- (id)init {
+    self = [super init];
+    if (self) {
+        self->workQueue = dispatch_queue_create("com.psiphon3.library.feedback.WorkQueue", DISPATCH_QUEUE_SERIAL);
+        self->callbackQueue = dispatch_queue_create("com.psiphon3.library.feedback.CallbackQueue", DISPATCH_QUEUE_SERIAL);
+    }
+    return self;
+}
+
+// See comment in header.
+- (void)startSendFeedback:(NSString * _Nonnull)feedbackJson
+       feedbackConfigJson:(id _Nonnull)feedbackConfigJson
+               uploadPath:(NSString * _Nonnull)uploadPath
+           loggerDelegate:(id<PsiphonTunnelLoggerDelegate> _Nullable)loggerDelegate
+         feedbackDelegate:(id<PsiphonTunnelFeedbackDelegate> _Nonnull)feedbackDelegate {
+
+    dispatch_async(self->workQueue, ^{
+
+        __weak PsiphonTunnelFeedback *weakSelf = self;
+        __weak id<PsiphonTunnelLoggerDelegate> weakLogger = loggerDelegate;
+        __weak id<PsiphonTunnelFeedbackDelegate> weakFeedbackDelegate = feedbackDelegate;
+
+        void (^logMessage)(NSString * _Nonnull) = ^void(NSString * _Nonnull message) {
+            __strong PsiphonTunnelFeedback *strongSelf = weakSelf;
+            if (strongSelf == nil) {
+                return;
+            }
+            __strong id<PsiphonTunnelLoggerDelegate> strongLogger = weakLogger;
+            if (strongLogger == nil) {
+                return;
+            }
+            if ([strongLogger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+                NSString *timestamp = [[PsiphonTunnel rfc3339Formatter] stringFromDate:[NSDate date]];
+                dispatch_sync(strongSelf->callbackQueue, ^{
+                    [strongLogger onDiagnosticMessage:message withTimestamp:timestamp];
+                });
+            }
+        };
+
+        NSError *err;
+        NSString *sessionID = [PsiphonTunnel generateSessionID:&err];
+        if (err != nil) {
+            [feedbackDelegate sendFeedbackCompleted:err];
+            return;
+        }
+
+        BOOL usingNoticeFiles = FALSE;
+        BOOL tunnelWholeDevice = FALSE;
+
+        NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:feedbackConfigJson
+                                                   usingNoticeFiles:&usingNoticeFiles
+                                                  tunnelWholeDevice:&tunnelWholeDevice
+                                                          sessionID:sessionID
+                                                         logMessage:logMessage
+                                                              error:&err];
+        if (err != nil) {
+            NSError *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                                    code:PsiphonTunnelErrorCodeConfigError
+                                                userInfo:@{NSLocalizedDescriptionKey:@"Error building config",
+                                                           NSUnderlyingErrorKey:err}];
+            dispatch_sync(self->callbackQueue, ^{
+                [feedbackDelegate sendFeedbackCompleted:outError];
+            });
+            return;
+        } else if (psiphonConfig == nil) {
+            // Should never happen.
+            NSError *err = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                               code:PsiphonTunnelErrorCodeConfigError
+                                           userInfo:@{NSLocalizedDescriptionKey:@"Error built config nil"}];
+            dispatch_sync(self->callbackQueue, ^{
+                [feedbackDelegate sendFeedbackCompleted:err];
+            });
+            return;
+        }
+
+        void (^sendFeedbackCompleted)(NSError * _Nonnull) = ^void(NSError * _Nonnull err) {
+            __strong PsiphonTunnelFeedback *strongSelf = weakSelf;
+            if (strongSelf == nil) {
+                return;
+            }
+            __strong id<PsiphonTunnelFeedbackDelegate> strongFeedbackDelegate = weakFeedbackDelegate;
+            if (strongFeedbackDelegate == nil) {
+                return;
+            }
+
+            NSError *outError = nil;
+
+            if (err != nil) {
+                outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                               code:PsiphonTunnelErrorCodeSendFeedbackError
+                                           userInfo:@{NSLocalizedDescriptionKey:@"Error sending feedback",
+                                                      NSUnderlyingErrorKey:err}];
+            }
+            dispatch_sync(strongSelf->callbackQueue, ^{
+                [strongFeedbackDelegate sendFeedbackCompleted:outError];
+            });
+        };
+
+        PsiphonProviderFeedbackHandlerShim *innerFeedbackHandler =
+            [[PsiphonProviderFeedbackHandlerShim alloc] initWithHandler:sendFeedbackCompleted];
+
+        // Convert notice to a diagnostic message and then log it.
+        void (^logNotice)(NSString * _Nonnull) = ^void(NSString * _Nonnull noticeJSON) {
+            __strong PsiphonTunnelFeedback *strongSelf = weakSelf;
+            if (strongSelf == nil) {
+                return;
+            }
+            __strong id<PsiphonTunnelLoggerDelegate> strongLogger = weakLogger;
+            if (strongLogger == nil) {
+                return;
+            }
+            if ([strongLogger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+
+                __block NSDictionary *notice = nil;
+                id block = ^(id obj, BOOL *ignored) {
+                    if (ignored == nil || *ignored == YES) {
+                        return;
+                    }
+                    notice = (NSDictionary *)obj;
+                };
+
+                id eh = ^(NSError *err) {
+                    notice = nil;
+                    logMessage([NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]);
+                };
+
+                id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
+                [parser parse:[noticeJSON dataUsingEncoding:NSUTF8StringEncoding]];
+
+                if (notice == nil) {
+                    return;
+                }
+
+                NSString *noticeType = notice[@"noticeType"];
+                if (noticeType == nil) {
+                    logMessage(@"Notice missing noticeType");
+                    return;
+                }
+
+                NSDictionary *data = notice[@"data"];
+                if (data == nil) {
+                    return;
+                }
+
+                NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
+                NSString *timestampStr = notice[@"timestamp"];
+                if (timestampStr == nil) {
+                    return;
+                }
+
+                NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
+                dispatch_sync(strongSelf->callbackQueue, ^{
+                    [strongLogger onDiagnosticMessage:diagnosticMessage withTimestamp:timestampStr];
+                });
+            }
+        };
+
+        PsiphonProviderNoticeHandlerShim *noticeHandler =
+            [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
+
+        GoPsiStartSendFeedback(psiphonConfig, feedbackJson, uploadPath, innerFeedbackHandler, noticeHandler);
+    });
+}
+
+// See comment in header.
+- (void)stopSendFeedback {
+    dispatch_async(self->workQueue, ^{
+        GoPsiStopSendFeedback();
+    });
 }
 
 @end

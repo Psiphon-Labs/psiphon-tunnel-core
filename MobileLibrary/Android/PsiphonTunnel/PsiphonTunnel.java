@@ -63,15 +63,26 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 
 import psi.Psi;
 import psi.PsiphonProvider;
 import psi.PsiphonProviderNoticeHandler;
+import psi.PsiphonProviderFeedbackHandler;
 
 public class PsiphonTunnel {
 
     public interface HostLogger {
         default public void onDiagnosticMessage(String message) {}
+    }
+
+    // Protocol used to communicate the outcome of feedback upload operations to the application
+    // using PsiphonTunnelFeedback.
+    public interface HostFeedbackHandler {
+        // Callback which is invoked once the feedback upload has completed.
+        // If the exception is non-null, then the upload failed.
+        default public void sendFeedbackCompleted(java.lang.Exception e) {}
     }
 
     public interface HostService extends HostLogger {
@@ -296,30 +307,109 @@ public class PsiphonTunnel {
         return Psi.importExchangePayload(payload);
     }
 
-    // Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics
-    // information in a particular format, then calls this function to upload it for later
-    // investigation. The feedback compatible config and upload path must be provided by
-    // Psiphon Inc.
-    public static void sendFeedback(Context context, HostLogger logger, String feedbackConfigJson,
-                                    String diagnosticsJson, String uploadPath,
-                                    String clientPlatformPrefix, String clientPlatformSuffix) throws Exception {
-
-        try {
-            // Adds fields used in feedback upload, e.g. client platform.
-            String psiphonConfig = buildPsiphonConfig(context, logger, feedbackConfigJson,
-                    clientPlatformPrefix, clientPlatformSuffix, false, 0);
-            PsiphonProviderNoticeHandlerShim noticeHandler = new PsiphonProviderNoticeHandlerShim(logger);
-            Psi.sendFeedback(psiphonConfig, diagnosticsJson, uploadPath, noticeHandler);
-        } catch (java.lang.Exception e) {
-            throw new Exception("Error sending feedback", e);
-        }
-    }
-
     // Writes Go runtime profile information to a set of files in the specifiec output directory.
     // cpuSampleDurationSeconds and blockSampleDurationSeconds determines how to long to wait and
     // sample profiles that require active sampling. When set to 0, these profiles are skipped.
     public void writeRuntimeProfiles(String outputDirectory, int cpuSampleDurationSeconnds, int blockSampleDurationSeconds) {
         Psi.writeRuntimeProfiles(outputDirectory, cpuSampleDurationSeconnds, blockSampleDurationSeconds);
+    }
+
+    // The interface for managing the Psiphon feedback upload operations.
+    // Warning: should not be used in the same process as PsiphonTunnel.
+    public static class PsiphonTunnelFeedback {
+
+        final private ExecutorService workQueue;
+        final private ExecutorService callbackQueue;
+
+        public PsiphonTunnelFeedback() {
+            workQueue = Executors.newSingleThreadExecutor();
+            callbackQueue = Executors.newSingleThreadExecutor();
+        }
+
+        // Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics
+        // information in a particular format, then calls this function to upload it for later
+        // investigation. The feedback compatible config and upload path must be provided by
+        // Psiphon Inc. This call is asynchronous and returns before the upload completes. The
+        // operation has completed when sendFeedbackCompleted() is called on the provided
+        // HostFeedbackHandler. The provided HostLogger will be called to log informational notices,
+        // including warnings.
+        //
+        // Warning: only one active upload is supported at a time. An ongoing upload will be
+        // cancelled if this function is called again before it completes.
+        public void startSendFeedback(Context context, HostFeedbackHandler feedbackHandler, HostLogger logger,
+                                      String feedbackConfigJson, String diagnosticsJson, String uploadPath,
+                                      String clientPlatformPrefix, String clientPlatformSuffix) {
+
+            workQueue.submit(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        // Adds fields used in feedback upload, e.g. client platform.
+                        String psiphonConfig = buildPsiphonConfig(context, logger, feedbackConfigJson,
+                                clientPlatformPrefix, clientPlatformSuffix, false, 0);
+
+                        Psi.startSendFeedback(psiphonConfig, diagnosticsJson, uploadPath,
+                                new PsiphonProviderFeedbackHandler() {
+                                    @Override
+                                    public void sendFeedbackCompleted(java.lang.Exception e) {
+                                        callbackQueue.submit(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                feedbackHandler.sendFeedbackCompleted(e);
+                                            }
+                                        });
+                                    }
+                                },
+                                new PsiphonProviderNoticeHandler() {
+                                    @Override
+                                    public void notice(String noticeJSON) {
+
+                                        try {
+                                            JSONObject notice = new JSONObject(noticeJSON);
+
+                                            String noticeType = notice.getString("noticeType");
+                                            if (noticeType == null) {
+                                                return;
+                                            }
+
+                                            JSONObject data = notice.getJSONObject("data");
+                                            if (data == null) {
+                                                return;
+                                            }
+
+                                            String diagnosticMessage = noticeType + ": " + data.toString();
+                                            callbackQueue.submit(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    logger.onDiagnosticMessage(diagnosticMessage);
+                                                }
+                                            });
+                                        } catch (java.lang.Exception e) {
+                                            callbackQueue.submit(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    logger.onDiagnosticMessage("Error handling notice " + e.toString());
+                                                }
+                                            });
+                                        }
+                                    }
+                                });
+                    } catch (java.lang.Exception e) {
+                        feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
+                    }
+                }
+            });
+        }
+
+        // Interrupt an in-progress feedback upload operation started with startSendFeedback.
+        public void stopSendFeedback() {
+            workQueue.submit(new Runnable() {
+                @Override
+                public void run() {
+                    Psi.stopSendFeedback();
+                }
+            });
+        }
     }
 
     //----------------------------------------------------------------------------------------------
@@ -492,46 +582,6 @@ public class PsiphonTunnel {
         @Override
         public String getNetworkID() {
             return mPsiphonTunnel.getNetworkID();
-        }
-    }
-
-    //----------------------------------------------------------------------------------------------
-    // PsiphonProviderNoticeHandler (Core support) interface implementation
-    //----------------------------------------------------------------------------------------------
-
-    // The PsiphonProviderNoticeHandler function is called from Go, and must be public to be
-    // accessible via the gobind mechanim. To avoid making internal implementation functions public,
-    // PsiphonProviderNoticeHandlerShim is used as a wrapper.
-
-    private static class PsiphonProviderNoticeHandlerShim implements PsiphonProviderNoticeHandler {
-
-        private HostLogger mLogger;
-
-        public PsiphonProviderNoticeHandlerShim(HostLogger logger) {
-            mLogger = logger;
-        }
-
-        @Override
-        public void notice(String noticeJSON) {
-
-            try {
-                JSONObject notice = new JSONObject(noticeJSON);
-
-                String noticeType = notice.getString("noticeType");
-                if (noticeType == null) {
-                    return;
-                }
-
-                JSONObject data = notice.getJSONObject("data");
-                if (data == null) {
-                    return;
-                }
-
-                String diagnosticMessage = noticeType + ": " + data.toString();
-                mLogger.onDiagnosticMessage(diagnosticMessage);
-            } catch (java.lang.Exception e) {
-                mLogger.onDiagnosticMessage("Error handling notice " + e.toString());
-            }
         }
     }
 

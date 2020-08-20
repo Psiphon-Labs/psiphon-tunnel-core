@@ -54,7 +54,11 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
     PsiphonConnectionStateWaitingForNetwork
 };
 
-@protocol TunneledAppDelegateLogger <NSObject>
+/*!
+ @protocol PsiphonTunnelLoggerDelegate
+ Used to communicate diagnostic logs to the application that is using the PsiphonTunnel framework.
+ */
+@protocol PsiphonTunnelLoggerDelegate <NSObject>
 
 @optional
 
@@ -68,7 +72,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 
 @end
 
-
 /*!
  @protocol TunneledAppDelegate
  Used to communicate with the application that is using the PsiphonTunnel framework,
@@ -76,7 +79,7 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 
  All delegate methods will be called on a single serial dispatch queue. They will be made asynchronously unless otherwise noted (specifically when calling getPsiphonConfig and getEmbeddedServerEntries).
  */
-@protocol TunneledAppDelegate <NSObject, TunneledAppDelegateLogger>
+@protocol TunneledAppDelegate <NSObject, PsiphonTunnelLoggerDelegate>
 
 //
 // Required delegate methods
@@ -457,22 +460,6 @@ Returns the path where the rotated notices file will be created.
 - (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address;
 
 /*!
- Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format, then calls this function to upload it for later investigation.
- @param feedbackJson  The feedback data to upload.
- @param feedbackConfigJson  The feedback compatible config. Must be an NSDictionary or NSString. Must be provided by Psiphon Inc.
- @param uploadPath  The path at which to upload the diagnostic data. Must be provided by Psiphon Inc.
- @param logger  The logger which will be used to log informational notices including warnings.
- @param outError  Any error encountered while sending feedback. If set, then sending feedback failed.
- Swift: @code func sendFeedback(_ feedbackJson: String, feedbackConfigJson: Any, uploadPath: String, logger: TunneledAppDelegateLogger?, error outError: NSErrorPointer) @endcode
- */
-// See comment in header.
-+ (void)sendFeedback:(NSString * _Nonnull)feedbackJson
-  feedbackConfigJson:(id _Nonnull)feedbackConfigJson
-          uploadPath:(NSString * _Nonnull)uploadPath
-              logger:(id<TunneledAppDelegateLogger> _Nullable)logger
-               error:(NSError * _Nullable * _Nonnull)outError;
-
-/*!
  Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.
  @return  The build info json as a string.
  Swift: @code func getBuildInfo() -> String @endcode
@@ -490,3 +477,48 @@ Returns the path where the rotated notices file will be created.
 - (void)writeRuntimeProfilesTo:(NSString * _Nonnull)outputDirectory withCPUSampleDurationSeconds:(int)cpuSampleDurationSeconds withBlockSampleDurationSeconds:(int)blockSampleDurationSeconds;
 
  @end
+
+/*!
+ @protocol PsiphonTunnelFeedbackDelegate
+ Used to communicate the outcome of feedback upload operations to the application using the PsiphonTunnel framework.
+ */
+@protocol PsiphonTunnelFeedbackDelegate <NSObject>
+
+/// Called once the feedback upload has completed.
+/// @param err If non-nil, then the upload failed.
+- (void)sendFeedbackCompleted:(NSError * _Nullable)err;
+
+@end
+
+/*!
+ The interface for managing the Psiphon tunnel feedback upload operations.
+ @warning Should not be used in the same process as PsiphonTunnel.
+ */
+@interface PsiphonTunnelFeedback : NSObject
+
+/*!
+ Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics information in a particular format and then calls this
+ function to upload it for later investigation. This call is asynchronous and returns before the upload completes. The operation has
+ completed when `sendFeedbackCompleted:` is called on the provided `PsiphonTunnelFeedbackDelegate`.
+ @param feedbackJson The feedback data to upload.
+ @param feedbackConfigJson The feedback compatible config. Must be an NSDictionary or NSString. Config must be provided by
+ Psiphon Inc.
+ @param uploadPath The path at which to upload the diagnostic data. Must be provided by Psiphon Inc.
+ @param loggerDelegate Optional delegate which will be called to log informational notices, including warnings. Stored as a weak
+ reference; the caller is responsible for holding a strong reference.
+ @param feedbackDelegate Delegate which `sendFeedbackCompleted(error)` is called on once when the operation completes; if
+ error is non-nil, then the operation failed. Stored as a weak reference; the caller is responsible for holding a strong reference.
+ @warning Only one active upload is supported at a time. An ongoing upload will be cancelled if this function is called again before it
+ completes.
+ Swift: @code func sendFeedback(_ feedbackJson: String, feedbackConfigJson: Any, uploadPath: String, loggerDelegate: PsiphonTunnelLoggerDelegate?, feedbackDelegate: PsiphonTunnelSendFeedbackDelegate) @endcode
+ */
+- (void)startSendFeedback:(NSString * _Nonnull)feedbackJson
+       feedbackConfigJson:(id _Nonnull)feedbackConfigJson
+               uploadPath:(NSString * _Nonnull)uploadPath
+           loggerDelegate:(id<PsiphonTunnelLoggerDelegate> _Nullable)loggerDelegate
+         feedbackDelegate:(id<PsiphonTunnelFeedbackDelegate> _Nonnull)feedbackDelegate;
+
+/// Interrupt an in-progress feedback upload operation started with `startSendFeedback:`.
+- (void)stopSendFeedback;
+
+@end
