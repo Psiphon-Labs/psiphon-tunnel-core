@@ -301,6 +301,10 @@ func SendFeedback(
 	uploadPath string,
 	noticeHandler PsiphonProviderNoticeHandler) error {
 
+	// Unlike in Start, the provider is not wrapped in a newMutexPsiphonProvider
+	// or equivilent, as SendFeedback is not expected to be used in a memory
+	// constrained environment.
+
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			noticeHandler.Notice(string(notice))
