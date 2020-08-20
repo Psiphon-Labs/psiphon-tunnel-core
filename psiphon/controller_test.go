@@ -566,11 +566,6 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
-	// Enable tactics requests. This will passively exercise the code
-	// paths. server_test runs a more comprehensive test that checks
-	// that the tactics request succeeds.
-	config.NetworkID = "NETWORK1"
-
 	err = OpenDataStore(config)
 	if err != nil {
 		t.Fatalf("error initializing datastore: %s", err)

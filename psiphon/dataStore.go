@@ -600,6 +600,16 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		return nil
 	}
 
+	// Support stand-alone GetTactics operation. See TacticsStorer for more
+	// details.
+	if iterator.isTacticsServerEntryIterator {
+		err := OpenDataStore(iterator.config)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		defer CloseDataStore()
+	}
+
 	// BoltDB implementation note:
 	// We don't keep a transaction open for the duration of the iterator
 	// because this would expose the following semantics to consumer code:
@@ -738,6 +748,16 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 			return MakeCompatibleServerEntry(iterator.targetServerEntry), nil
 		}
 		return nil, nil
+	}
+
+	// Support stand-alone GetTactics operation. See TacticsStorer for more
+	// details.
+	if iterator.isTacticsServerEntryIterator {
+		err := OpenDataStore(iterator.config)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		defer CloseDataStore()
 	}
 
 	// There are no region/protocol indexes for the server entries bucket.
