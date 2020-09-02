@@ -129,7 +129,7 @@ func NewManipulator(config *Config) (*Manipulator, error) {
 // the case of initialization failure, Start will undo any partial
 // initialization. When Start succeeds, the caller must call Stop to free
 // resources and restore networking state.
-func (m *Manipulator) Start(ctx context.Context) (retErr error) {
+func (m *Manipulator) Start() (retErr error) {
 
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -225,7 +225,7 @@ func (m *Manipulator) Start(ctx context.Context) (retErr error) {
 		}
 	}()
 
-	runContext, stopRunning := context.WithCancel(ctx)
+	runContext, stopRunning := context.WithCancel(context.Background())
 	defer func() {
 		if retErr != nil {
 			stopRunning()
@@ -632,7 +632,7 @@ func (m *Manipulator) configureIPTables(addRules bool) error {
 	_ = execCommands("-D")
 
 	if addRules {
-		err := execCommands("-A")
+		err := execCommands("-I")
 		if err != nil {
 			_ = execCommands("-D")
 		}

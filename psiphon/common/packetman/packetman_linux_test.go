@@ -94,10 +94,7 @@ func testPacketManipulator(useIPv6 bool, t *testing.T) {
 		t.Fatalf("NewManipulator failed: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	err = m.Start(ctx)
+	err = m.Start()
 	if err != nil {
 		t.Fatalf("Manipulator.Start failed: %v", err)
 	}
