@@ -489,8 +489,8 @@ var defaultClientParameters = map[string]struct {
 	ApplicationParametersProbability: {value: 1.0, minimum: 0.0},
 	ApplicationParameters:            {value: KeyValues{}},
 
-	BPFServerTCPProgram:     {value: (*BPFProgramSpec)(nil)},
-	BPFServerTCPProbability: {value: 0.5, minimum: 0.0},
+	BPFServerTCPProgram:     {value: (*BPFProgramSpec)(nil), flags: serverSideOnly},
+	BPFServerTCPProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
 	BPFClientTCPProgram:     {value: (*BPFProgramSpec)(nil)},
 	BPFClientTCPProbability: {value: 0.5, minimum: 0.0},
 }
