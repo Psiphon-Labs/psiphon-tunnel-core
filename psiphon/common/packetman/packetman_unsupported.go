@@ -22,7 +22,6 @@
 package packetman
 
 import (
-	"context"
 	std_errors "errors"
 	"net"
 
@@ -42,7 +41,7 @@ func NewManipulator(_ *Config) (*Manipulator, error) {
 	return nil, errors.Trace(errUnsupported)
 }
 
-func (m *Manipulator) Start(_ context.Context) error {
+func (m *Manipulator) Start() error {
 	return errors.Trace(errUnsupported)
 }
 
