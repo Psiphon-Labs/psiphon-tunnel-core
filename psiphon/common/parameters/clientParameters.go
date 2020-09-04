@@ -239,6 +239,9 @@ const (
 	BPFServerTCPProbability                          = "BPFServerTCPProbability"
 	BPFClientTCPProgram                              = "BPFClientTCPProgram"
 	BPFClientTCPProbability                          = "BPFClientTCPProbability"
+	ServerPacketManipulationSpecs                    = "ServerPacketManipulationSpecs"
+	ServerProtocolPacketManipulations                = "ServerProtocolPacketManipulations"
+	ServerPacketManipulationProbability              = "ServerPacketManipulationProbability"
 )
 
 const (
@@ -495,6 +498,10 @@ var defaultClientParameters = map[string]struct {
 	BPFServerTCPProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
 	BPFClientTCPProgram:     {value: (*BPFProgramSpec)(nil)},
 	BPFClientTCPProbability: {value: 0.5, minimum: 0.0},
+
+	ServerPacketManipulationSpecs:       {value: PacketManipulationSpecs{}, flags: serverSideOnly},
+	ServerProtocolPacketManipulations:   {value: make(ProtocolPacketManipulations), flags: serverSideOnly},
+	ServerPacketManipulationProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -1078,7 +1085,7 @@ func (p ClientParametersAccessor) QUICVersions(name string) protocol.QUICVersion
 // corresponding to the specified labeled set and label value. The return
 // value is nil when no set is found.
 func (p ClientParametersAccessor) LabeledQUICVersions(name, label string) protocol.QUICVersions {
-	var value protocol.LabeledQUICVersions
+	value := protocol.LabeledQUICVersions{}
 	p.snapshot.getValue(name, &value)
 	return value[label]
 }
@@ -1152,4 +1159,18 @@ func (p ClientParametersAccessor) BPFProgram(name string) (bool, string, []bpf.R
 	// Validation checks that Assemble is successful.
 	rawInstructions, _ := value.Assemble()
 	return true, value.Name, rawInstructions
+}
+
+// PacketManipulationSpecs returns a PacketManipulationSpecs parameter value.
+func (p ClientParametersAccessor) PacketManipulationSpecs(name string) PacketManipulationSpecs {
+	value := PacketManipulationSpecs{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// ProtocolPacketManipulations returns a ProtocolPacketManipulations parameter value.
+func (p ClientParametersAccessor) ProtocolPacketManipulations(name string) ProtocolPacketManipulations {
+	value := make(ProtocolPacketManipulations)
+	p.snapshot.getValue(name, &value)
+	return value
 }

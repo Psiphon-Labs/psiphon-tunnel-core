@@ -48,6 +48,10 @@ func (m *Manipulator) Start() error {
 func (m *Manipulator) Stop() {
 }
 
+func (m *Manipulator) SetSpecs(_ []*Spec) error {
+	return errors.Trace(errUnsupported)
+}
+
 func (m *Manipulator) GetAppliedSpecName(_, _ *net.TCPAddr) (string, error) {
 	return "", errors.Trace(errUnsupported)
 }

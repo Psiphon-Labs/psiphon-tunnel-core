@@ -1057,6 +1057,39 @@ func (sshServer *sshServer) handleClient(
 		}
 	}
 
+	serverPacketManipulation := ""
+	if protocol.TunnelProtocolMayUseServerPacketManipulation(tunnelProtocol) {
+
+		// A meekConn has synthetic address values, including the original client
+		// address in cases where the client uses an upstream proxy to connect to
+		// Psiphon. For meekConn, and any other conn implementing
+		// UnderlyingTCPAddrSource, get the underlying TCP connection addresses.
+		//
+		// Limitation: a meek tunnel may consist of several TCP connections. The
+		// server_packet_manipulation metric will reflect the packet manipulation
+		// applied to the _first_ TCP connection only.
+
+		var localAddr, remoteAddr *net.TCPAddr
+		var ok bool
+		underlying, ok := clientConn.(UnderlyingTCPAddrSource)
+		if ok {
+			localAddr, remoteAddr, ok = underlying.GetUnderlyingTCPAddrs()
+		} else {
+			localAddr, ok = clientConn.LocalAddr().(*net.TCPAddr)
+			if ok {
+				remoteAddr, ok = clientConn.RemoteAddr().(*net.TCPAddr)
+			}
+		}
+
+		if ok {
+			specName, err := sshServer.support.PacketManipulator.
+				GetAppliedSpecName(localAddr, remoteAddr)
+			if err == nil {
+				serverPacketManipulation = specName
+			}
+		}
+	}
+
 	geoIPData := sshServer.support.GeoIPService.Lookup(
 		common.IPAddressFromAddr(clientAddr))
 
@@ -1112,6 +1145,7 @@ func (sshServer *sshServer) handleClient(
 		sshServer,
 		sshListener,
 		tunnelProtocol,
+		serverPacketManipulation,
 		geoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
@@ -1156,6 +1190,7 @@ type sshClient struct {
 	sshConn                              ssh.Conn
 	activityConn                         *common.ActivityMonitoredConn
 	throttledConn                        *common.ThrottledConn
+	serverPacketManipulation             string
 	geoIPData                            GeoIPData
 	sessionID                            string
 	isFirstTunnelInSession               bool
@@ -1246,6 +1281,7 @@ func newSshClient(
 	sshServer *sshServer,
 	sshListener *sshListener,
 	tunnelProtocol string,
+	serverPacketManipulation string,
 	geoIPData GeoIPData) *sshClient {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
@@ -1255,18 +1291,19 @@ func newSshClient(
 	// unthrottled bytes during the initial protocol negotiation.
 
 	client := &sshClient{
-		sshServer:              sshServer,
-		sshListener:            sshListener,
-		tunnelProtocol:         tunnelProtocol,
-		geoIPData:              geoIPData,
-		isFirstTunnelInSession: true,
-		tcpPortForwardLRU:      common.NewLRUConns(),
-		signalIssueSLOKs:       make(chan struct{}, 1),
-		runCtx:                 runCtx,
-		stopRunning:            stopRunning,
-		stopped:                make(chan struct{}),
-		sendAlertRequests:      make(chan protocol.AlertRequest, ALERT_REQUEST_QUEUE_BUFFER_SIZE),
-		sentAlertRequests:      make(map[protocol.AlertRequest]bool),
+		sshServer:                sshServer,
+		sshListener:              sshListener,
+		tunnelProtocol:           tunnelProtocol,
+		serverPacketManipulation: serverPacketManipulation,
+		geoIPData:                geoIPData,
+		isFirstTunnelInSession:   true,
+		tcpPortForwardLRU:        common.NewLRUConns(),
+		signalIssueSLOKs:         make(chan struct{}, 1),
+		runCtx:                   runCtx,
+		stopRunning:              stopRunning,
+		stopped:                  make(chan struct{}),
+		sendAlertRequests:        make(chan protocol.AlertRequest, ALERT_REQUEST_QUEUE_BUFFER_SIZE),
+		sentAlertRequests:        make(map[protocol.AlertRequest]bool),
 	}
 
 	client.tcpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
@@ -2261,6 +2298,9 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	// unconditionally, overwriting any value from handshake.
 	logFields["relay_protocol"] = sshClient.tunnelProtocol
 
+	if sshClient.serverPacketManipulation != "" {
+		logFields["server_packet_manipulation"] = sshClient.serverPacketManipulation
+	}
 	if sshClient.sshListener.BPFProgramName != "" {
 		logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
 	}

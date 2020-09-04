@@ -80,47 +80,37 @@ const (
 // NFQUEUE with queue-bypass requires Linux kernel 2.6.39; 3.16 or later is
 // validated and recommended.
 type Manipulator struct {
-	config           *Config
-	mutex            sync.Mutex
-	runContext       context.Context
-	stopRunning      context.CancelFunc
-	waitGroup        *sync.WaitGroup
-	injectIPv4FD     int
-	injectIPv6FD     int
-	nfqueue          *nfqueue.Nfqueue
-	compiledSpecs    map[string]*compiledSpec
-	appliedSpecCache *cache.Cache
+	config             *Config
+	mutex              sync.Mutex
+	runContext         context.Context
+	stopRunning        context.CancelFunc
+	waitGroup          *sync.WaitGroup
+	injectIPv4FD       int
+	injectIPv6FD       int
+	nfqueue            *nfqueue.Nfqueue
+	compiledSpecsMutex sync.Mutex
+	compiledSpecs      map[string]*compiledSpec
+	appliedSpecCache   *cache.Cache
 }
 
 // NewManipulator creates a new Manipulator.
 func NewManipulator(config *Config) (*Manipulator, error) {
 
-	compiledSpecs := make(map[string]*compiledSpec)
+	m := &Manipulator{
+		config: config,
+	}
 
-	for _, spec := range config.Specs {
-		if spec.Name == "" {
-			return nil, errors.TraceNew("invalid spec name")
-		}
-		if _, ok := compiledSpecs[spec.Name]; ok {
-			return nil, errors.TraceNew("duplicate spec name")
-		}
-		compiledSpec, err := compileSpec(spec)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		compiledSpecs[spec.Name] = compiledSpec
+	err := m.SetSpecs(config.Specs)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	// To avoid memory exhaustion, do not retain unconsumed appliedSpecCache
 	// entries for a longer time than it may reasonably take to complete the TCP
 	// handshake.
-	appliedSpecCache := cache.New(appliedSpecCacheTTL, appliedSpecCacheTTL/2)
+	m.appliedSpecCache = cache.New(appliedSpecCacheTTL, appliedSpecCacheTTL/2)
 
-	return &Manipulator{
-		config:           config,
-		compiledSpecs:    compiledSpecs,
-		appliedSpecCache: appliedSpecCache,
-	}, nil
+	return m, nil
 }
 
 // Start initializes NFQUEUEs and raw sockets for packet manipulation. Start
@@ -281,6 +271,33 @@ func (m *Manipulator) Stop() {
 	}
 
 	m.configureIPTables(false)
+}
+
+// SetSpecs installs a new set of packet transformation Spec values, replacing
+// the initial specs from Config.Specs, or any previous SetSpecs call. When
+// SetSpecs returns an error, the previous set of specs is retained.
+func (m *Manipulator) SetSpecs(specs []*Spec) error {
+
+	compiledSpecs := make(map[string]*compiledSpec)
+	for _, spec := range config.Specs {
+		if spec.Name == "" {
+			return errors.TraceNew("invalid spec name")
+		}
+		if _, ok := compiledSpecs[spec.Name]; ok {
+			return errors.TraceNew("duplicate spec name")
+		}
+		compiledSpec, err := compileSpec(spec)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		compiledSpecs[spec.Name] = compiledSpec
+	}
+
+	m.compiledSpecsMutex.Lock()
+	m.compiledSpecs = compiledSpecs
+	m.compiledSpecsMutex.Unlock()
+
+	return nil
 }
 
 func makeConnectionID(
@@ -515,7 +532,14 @@ func (m *Manipulator) getCompiledSpec(interceptedPacket gopacket.Packet) (*compi
 		return nil, nil
 	}
 
+	// Concurrency note: m.compiledSpecs may be replaced by SetSpecs, but any
+	// reference to an individual compiledSpec remains valid; each compiledSpec
+	// is read-only.
+
+	m.compiledSpecsMutex.Lock()
 	spec, ok := m.compiledSpecs[specName]
+	m.compiledSpecsMutex.Unlock()
+
 	if !ok {
 		return nil, errors.Tracef("invalid spec name: %s", specName)
 	}

@@ -21,6 +21,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
@@ -172,6 +173,12 @@ func NewMeekServer(
 	return meekServer, nil
 }
 
+type meekContextKey struct {
+	key string
+}
+
+var meekNetConnContextKey = &meekContextKey{"net.Conn"}
+
 // Run runs the meek server; this function blocks while serving HTTP or
 // HTTPS connections on the specified listener. This function also runs
 // a goroutine which cleans up expired meek client sessions.
@@ -217,6 +224,9 @@ func (server *MeekServer) Run() error {
 		WriteTimeout: MEEK_HTTP_CLIENT_IO_TIMEOUT,
 		Handler:      server,
 		ConnState:    server.httpConnStateCallback,
+		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
+			return context.WithValue(ctx, meekNetConnContextKey, conn)
+		},
 
 		// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
@@ -621,6 +631,8 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	session.touch()
 
+	underlyingConn := request.Context().Value(meekNetConnContextKey).(net.Conn)
+
 	// Create a new meek conn that will relay the payload
 	// between meek request/responses and the tunnel server client
 	// handler. The client IP is also used to initialize the
@@ -632,6 +644,8 @@ func (server *MeekServer) getSessionOrEndpoint(
 	clientConn := newMeekConn(
 		server,
 		session,
+		underlyingConn.LocalAddr(),
+		underlyingConn.RemoteAddr(),
 		&net.TCPAddr{
 			IP:   net.ParseIP(clientIP),
 			Port: 0,
@@ -1195,26 +1209,33 @@ func makeMeekSessionID() (string, error) {
 // connection by the tunnel server (being passed to sshServer.handleClient).
 // meekConn bridges net/http request/response payload readers and writers
 // and goroutines calling Read()s and Write()s.
+//
+// meekConn implements the UnderlyingTCPAddrSource, returning the TCP
+// addresses for the _first_ underlying TCP connection in the meek tunnel.
 type meekConn struct {
-	meekServer        *MeekServer
-	meekSession       *meekSession
-	remoteAddr        net.Addr
-	protocolVersion   int
-	closeBroadcast    chan struct{}
-	closed            int32
-	lastReadChecksum  *uint64
-	readLock          sync.Mutex
-	emptyReadBuffer   chan *bytes.Buffer
-	partialReadBuffer chan *bytes.Buffer
-	fullReadBuffer    chan *bytes.Buffer
-	writeLock         sync.Mutex
-	nextWriteBuffer   chan []byte
-	writeResult       chan error
+	meekServer           *MeekServer
+	meekSession          *meekSession
+	remoteAddr           net.Addr
+	underlyingLocalAddr  net.Addr
+	underlyingRemoteAddr net.Addr
+	protocolVersion      int
+	closeBroadcast       chan struct{}
+	closed               int32
+	lastReadChecksum     *uint64
+	readLock             sync.Mutex
+	emptyReadBuffer      chan *bytes.Buffer
+	partialReadBuffer    chan *bytes.Buffer
+	fullReadBuffer       chan *bytes.Buffer
+	writeLock            sync.Mutex
+	nextWriteBuffer      chan []byte
+	writeResult          chan error
 }
 
 func newMeekConn(
 	meekServer *MeekServer,
 	meekSession *meekSession,
+	underlyingLocalAddr net.Addr,
+	underlyingRemoteAddr net.Addr,
 	remoteAddr net.Addr,
 	protocolVersion int) *meekConn {
 
@@ -1236,6 +1257,18 @@ func newMeekConn(
 	// in psiphon.MeekConn.
 	conn.emptyReadBuffer <- new(bytes.Buffer)
 	return conn
+}
+
+func (conn *meekConn) GetUnderlyingTCPAddrs() (*net.TCPAddr, *net.TCPAddr, bool) {
+	localAddr, ok := conn.underlyingLocalAddr.(*net.TCPAddr)
+	if !ok {
+		return nil, nil, false
+	}
+	remoteAddr, ok := conn.underlyingRemoteAddr.(*net.TCPAddr)
+	if !ok {
+		return nil, nil, false
+	}
+	return localAddr, remoteAddr, true
 }
 
 // pumpReads causes goroutines blocking on meekConn.Read() to read
