@@ -1,3 +1,5 @@
+// +build PACKET_MANIPULATOR_TEST
+
 /*
  * Copyright (c) 2020, Psiphon Inc.
  * All rights reserved.
@@ -20,7 +22,6 @@
 package packetman
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"io/ioutil"

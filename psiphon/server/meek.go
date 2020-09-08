@@ -1240,17 +1240,19 @@ func newMeekConn(
 	protocolVersion int) *meekConn {
 
 	conn := &meekConn{
-		meekServer:        meekServer,
-		meekSession:       meekSession,
-		remoteAddr:        remoteAddr,
-		protocolVersion:   protocolVersion,
-		closeBroadcast:    make(chan struct{}),
-		closed:            0,
-		emptyReadBuffer:   make(chan *bytes.Buffer, 1),
-		partialReadBuffer: make(chan *bytes.Buffer, 1),
-		fullReadBuffer:    make(chan *bytes.Buffer, 1),
-		nextWriteBuffer:   make(chan []byte, 1),
-		writeResult:       make(chan error, 1),
+		meekServer:           meekServer,
+		meekSession:          meekSession,
+		underlyingLocalAddr:  underlyingLocalAddr,
+		underlyingRemoteAddr: underlyingRemoteAddr,
+		remoteAddr:           remoteAddr,
+		protocolVersion:      protocolVersion,
+		closeBroadcast:       make(chan struct{}),
+		closed:               0,
+		emptyReadBuffer:      make(chan *bytes.Buffer, 1),
+		partialReadBuffer:    make(chan *bytes.Buffer, 1),
+		fullReadBuffer:       make(chan *bytes.Buffer, 1),
+		nextWriteBuffer:      make(chan []byte, 1),
+		writeResult:          make(chan error, 1),
 	}
 	// Read() calls and pumpReads() are synchronized by exchanging control
 	// of a single readBuffer. This is the same scheme used in and described

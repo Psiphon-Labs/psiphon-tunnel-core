@@ -279,7 +279,7 @@ func (m *Manipulator) Stop() {
 func (m *Manipulator) SetSpecs(specs []*Spec) error {
 
 	compiledSpecs := make(map[string]*compiledSpec)
-	for _, spec := range config.Specs {
+	for _, spec := range m.config.Specs {
 		if spec.Name == "" {
 			return errors.TraceNew("invalid spec name")
 		}

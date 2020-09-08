@@ -1058,7 +1058,8 @@ func (sshServer *sshServer) handleClient(
 	}
 
 	serverPacketManipulation := ""
-	if protocol.TunnelProtocolMayUseServerPacketManipulation(tunnelProtocol) {
+	if sshServer.support.Config.RunPacketManipulator &&
+		protocol.TunnelProtocolMayUseServerPacketManipulation(tunnelProtocol) {
 
 		// A meekConn has synthetic address values, including the original client
 		// address in cases where the client uses an upstream proxy to connect to
