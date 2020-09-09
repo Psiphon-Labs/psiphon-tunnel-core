@@ -1668,6 +1668,8 @@ loop:
 		// tunnel dial fails due to an upstream proxy error. As the upstream proxy
 		// is user configured, the error message may need to be relayed to the user.
 
+		callbackCandidateServerEntry := candidateServerEntry
+
 		upstreamProxyErrorCallback := func(err error) {
 
 			// Do not post the notice when overall context is canceled or timed-out:
@@ -1707,7 +1709,8 @@ loop:
 			// candidates have completed by checking that at least 2*workerPoolSize
 			// candidates have started.
 
-			elapsedTime := time.Since(candidateServerEntry.adjustedEstablishStartTime)
+			elapsedTime := time.Since(
+				callbackCandidateServerEntry.adjustedEstablishStartTime)
 
 			if elapsedTime < minWaitDuration ||
 				(elapsedTime < maxWaitDuration &&
