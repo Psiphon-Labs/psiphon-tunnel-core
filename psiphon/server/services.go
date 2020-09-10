@@ -510,22 +510,22 @@ func (support *SupportServices) Reload() {
 	// reload; new tactics will be obtained on the next client handshake or
 	// tactics request.
 
-	reloadSpecs := func() {
-		err := reloadPacketManipulationSpecs(support)
-		if err != nil {
-			log.WithTraceFields(
-				LogFields{"error": errors.Trace(err)}).Warning(
-				"failed to reload packet manipulation specs")
-		}
-	}
-
 	// Take these actions only after the corresponding Reloader has reloaded.
 	// In both the traffic rules and OSL cases, there is some impact from state
 	// reset, so the reset should be avoided where possible.
 	reloadPostActions := map[common.Reloader]func(){
 		support.TrafficRulesSet: func() { support.TunnelServer.ResetAllClientTrafficRules() },
 		support.OSLConfig:       func() { support.TunnelServer.ResetAllClientOSLConfigs() },
-		support.TacticsServer:   reloadSpecs,
+	}
+	if support.Config.RunPacketManipulator {
+		reloadPostActions[support.TacticsServer] = func() {
+			err := reloadPacketManipulationSpecs(support)
+			if err != nil {
+				log.WithTraceFields(
+					LogFields{"error": errors.Trace(err)}).Warning(
+					"failed to reload packet manipulation specs")
+			}
+		}
 	}
 
 	for _, reloader := range reloaders {
