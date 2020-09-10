@@ -193,5 +193,10 @@ func selectPacketManipulationSpec(
 		specNames = append(specNames, allProtocolsSpecNames...)
 	}
 
+	if len(specNames) < 1 {
+		// Tactics contains no candidate specs for this protocol.
+		return "", nil
+	}
+
 	return specNames[prng.Range(0, len(specNames)-1)], nil
 }
