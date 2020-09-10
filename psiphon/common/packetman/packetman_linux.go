@@ -508,8 +508,14 @@ func (m *Manipulator) parseInterceptedPacket(packetData []byte) (gopacket.Packet
 
 	tcp := tcpLayer.(*layers.TCP)
 
+	// Any of the ECN TCP flags (https://tools.ietf.org/html/rfc3168 and
+	// rfc3540), ECE/CWR/NS, may be set in a SYN-ACK, and are retained.
+	//
+	// Limitation: these additional flags are retained as-is on injected packets
+	// only when no TCP flag transformation is applied.
+
 	if !tcp.SYN || !tcp.ACK ||
-		tcp.FIN || tcp.RST || tcp.PSH || tcp.URG || tcp.ECE || tcp.CWR || tcp.NS {
+		tcp.FIN || tcp.RST || tcp.PSH || tcp.URG {
 		return nil, errors.TraceNew("unexpected TCP flags")
 	}
 
