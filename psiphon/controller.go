@@ -1668,19 +1668,23 @@ loop:
 		// tunnel dial fails due to an upstream proxy error. As the upstream proxy
 		// is user configured, the error message may need to be relayed to the user.
 
+		// As the callback may be invoked after establishment is over (e.g., if an
+		// initial dial isn't fully shutdown when ConnectTunnel returns; or a meek
+		// underlying TCP connection re-dial) don't access these variables
+		// directly.
 		callbackCandidateServerEntry := candidateServerEntry
+		callbackEstablishCtx := controller.establishCtx
 
 		upstreamProxyErrorCallback := func(err error) {
 
-			// Do not post the notice when overall context is canceled or timed-out:
-			// the upstream proxy connection error is likely a result of the
-			// cancellation, and not a condition to be fixed by the user.
-			//
-			// Concurrency note: due to accessing controller.establishCtx,
-			// upstreamProxyErrorCallback must only be called while establishing;
-			// specifically, from the following ConnectTunnel call.
-
-			if controller.establishCtx.Err() != nil {
+			// Do not post the notice when overall establishment context is canceled or
+			// timed-out: the upstream proxy connection error is likely a result of the
+			// cancellation, and not a condition to be fixed by the user. In the case
+			// of meek underlying TCP connection re-dials, this condition will always
+			// be true; however in this case the initial dial succeeded with the
+			// current upstream proxy settings, so any upstream proxy error is
+			// transient.
+			if callbackEstablishCtx.Err() != nil {
 				return
 			}
 
