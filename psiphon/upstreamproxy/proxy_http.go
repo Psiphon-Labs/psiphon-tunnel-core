@@ -219,6 +219,22 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 				return err
 			}
 		}
+
+		headers := resp.Header[http.CanonicalHeaderKey("proxy-connection")]
+		for _, header := range headers {
+			if header == "close" {
+				// The server has signaled that it will close the
+				// connection. Create a new ClientConn and continue the
+				// handshake.
+				err = pc.makeNewClientConn()
+				if err != nil {
+					// Already wrapped in proxyError
+					return err
+				}
+				break
+			}
+		}
+
 		return nil
 	}
 	pc.authState = HTTP_AUTH_STATE_FAILURE

@@ -257,10 +257,16 @@
 			"revisionTime": "2018-01-09T07:02:41Z"
 		},
 		{
-			"checksumSHA1": "RbvI/I41Th10HSa2dC3IS2JzW/w=",
+			"checksumSHA1": "njovpO35R7czcCeBKwQV3Hnee0g=",
 			"path": "github.com/elazarl/goproxy",
-			"revision": "a96fa3a318260eab29abaf32f7128c9eb07fb073",
-			"revisionTime": "2017-11-01T14:35:03Z"
+			"revision": "0581fc3aee2d07555835bed1a876aca196a4a511",
+			"revisionTime": "2020-08-09T06:25:17Z"
+		},
+		{
+			"checksumSHA1": "z60viLQyKoqp8U3O046JbTaoeOs=",
+			"path": "github.com/elazarl/goproxy/ext/auth",
+			"revision": "0581fc3aee2d07555835bed1a876aca196a4a511",
+			"revisionTime": "2020-08-09T06:25:17Z"
 		},
 		{
 			"checksumSHA1": "+feaBcESiI7xYo/JHfi/tBLBd0M=",
