@@ -98,14 +98,14 @@ type Config struct {
 	// available for packet manipulation. Spec names must be unique.
 	Specs []*Spec
 
-	// GetSpecName is a callback invoked for each intercepted SYN-ACK packet.
-	// GetSpecName must return a name of a Spec, in Specs, to apply that
+	// SelectSpecName is a callback invoked for each intercepted SYN-ACK packet.
+	// SelectSpecName must return a name of a Spec, in Specs, to apply that
 	// transformation spec, or "" to send the SYN-ACK packet unmodified.
 	//
 	// The inputs protocolPort and clientIP allow the callback to select a Spec
 	// based on the protocol running at the intercepted packet's port and/or
 	// client GeoIP.
-	GetSpecName func(protocolPort int, clientIP net.IP) string
+	SelectSpecName func(protocolPort int, clientIP net.IP) string
 
 	// SudoNetworkConfigCommands specifies whether to use "sudo" when executing
 	// network configuration commands. See comment for same parameter in

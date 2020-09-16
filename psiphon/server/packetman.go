@@ -44,7 +44,7 @@ func makePacketManipulatorConfig(
 		}
 	}
 
-	getSpecName := func(protocolPort int, clientIP net.IP) string {
+	selectSpecName := func(protocolPort int, clientIP net.IP) string {
 
 		specName, err := selectPacketManipulationSpec(support, protocolPort, clientIP)
 		if err != nil {
@@ -68,7 +68,7 @@ func makePacketManipulatorConfig(
 		QueueNumber:               1,
 		ProtocolPorts:             ports,
 		Specs:                     specs,
-		GetSpecName:               getSpecName,
+		SelectSpecName:            selectSpecName,
 	}, nil
 }
 

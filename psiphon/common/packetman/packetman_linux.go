@@ -52,7 +52,7 @@ const (
 //
 // NFQUEUE/Netlink is used to intercept SYN-ACK packets, on all local
 // interfaces, with source port equal to one of the ProtocolPorts specified in
-// Config. For each intercepted SYN-ACK packet, the GetSpecName callback in
+// Config. For each intercepted SYN-ACK packet, the SelectSpecName callback in
 // Config is invoked; the callback determines which packet transformation spec
 // to apply, based on, for example, client GeoIP, protocol, or other
 // considerations.
@@ -352,9 +352,9 @@ func makeConnectionID(
 // TCP connection, represented by its local and remote address components,
 // that was ultimately accepted by a network listener.
 //
-// This allows GetSpecName, the spec selector, to be non-deterministic while
-// also allowing for accurate packet manipulation metrics to be associated
-// with each TCP connection.
+// This allows SelectSpecName, the spec selector, to be non-deterministic
+// while also allowing for accurate packet manipulation metrics to be
+// associated with each TCP connection.
 //
 // For a given connection, GetAppliedSpecName must be called before a TTL
 // clears the stored value. Calling GetAppliedSpecName immediately clears the
@@ -533,7 +533,7 @@ func (m *Manipulator) getCompiledSpec(interceptedPacket gopacket.Packet) (*compi
 	protocolPort := interceptedTCP.SrcPort
 	clientIP := dstIP
 
-	specName := m.config.GetSpecName(int(protocolPort), clientIP)
+	specName := m.config.SelectSpecName(int(protocolPort), clientIP)
 	if specName == "" {
 		return nil, nil
 	}

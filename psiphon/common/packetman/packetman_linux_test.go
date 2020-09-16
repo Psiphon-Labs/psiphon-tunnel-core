@@ -81,7 +81,7 @@ func testPacketManipulator(useIPv6 bool, t *testing.T) {
 		Logger:        newTestLogger(),
 		ProtocolPorts: []int{listenerPort},
 		Specs:         []*Spec{&Spec{Name: testSpecName, PacketSpecs: [][]string{[]string{"TCP-flags S"}}}},
-		GetSpecName: func(protocolPort int, _ net.IP) string {
+		SelectSpecName: func(protocolPort int, _ net.IP) string {
 			if protocolPort == listenerPort {
 				return testSpecName
 			}
