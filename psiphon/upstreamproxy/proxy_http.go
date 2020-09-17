@@ -207,7 +207,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 		if username == "" {
 			pc.httpClientConn.Close()
 			pc.authState = HTTP_AUTH_STATE_FAILURE
-			return proxyError(fmt.Errorf("ho username credentials provided for proxy auth"))
+			return proxyError(fmt.Errorf("no username credentials provided for proxy auth"))
 		}
 		if err == errPersistEOF {
 			// The server may send Connection: close,
@@ -219,6 +219,22 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 				return err
 			}
 		}
+
+		headers := resp.Header[http.CanonicalHeaderKey("proxy-connection")]
+		for _, header := range headers {
+			if header == "close" {
+				// The server has signaled that it will close the
+				// connection. Create a new ClientConn and continue the
+				// handshake.
+				err = pc.makeNewClientConn()
+				if err != nil {
+					// Already wrapped in proxyError
+					return err
+				}
+				break
+			}
+		}
+
 		return nil
 	}
 	pc.authState = HTTP_AUTH_STATE_FAILURE

@@ -310,6 +310,9 @@ type Config struct {
 	// tun.ServerConfig.SudoNetworkConfigCommands.
 	PacketTunnelSudoNetworkConfigCommands bool
 
+	// RunPacketManipulator specifies whether to run a packet manipulator.
+	RunPacketManipulator bool
+
 	// MaxConcurrentSSHHandshakes specifies a limit on the number of concurrent
 	// SSH handshake negotiations. This is set to mitigate spikes in memory
 	// allocations and CPU usage associated with SSH handshakes when many clients

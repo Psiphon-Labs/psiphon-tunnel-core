@@ -145,6 +145,7 @@ type DialParameters struct {
 // when establishment is cancelled.
 func MakeDialParameters(
 	config *Config,
+	upstreamProxyErrorCallback func(error),
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
 	serverEntry *protocol.ServerEntry,
@@ -262,8 +263,10 @@ func MakeDialParameters(
 		isReplay = false
 	}
 
-	// Set IsExchanged so that full dial parameters are stored and replayed upon success.
+	// Set IsExchanged such that full dial parameters are stored and replayed
+	// upon success.
 	dialParams.IsExchanged = false
+
 	dialParams.ServerEntry = serverEntry
 	dialParams.NetworkID = networkID
 	dialParams.IsReplay = isReplay
@@ -662,6 +665,7 @@ func MakeDialParameters(
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 		FragmentorConfig:              fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed),
+		UpstreamProxyErrorCallback:    upstreamProxyErrorCallback,
 	}
 
 	// Unconditionally initialize MeekResolvedIPAddress, so a valid string can

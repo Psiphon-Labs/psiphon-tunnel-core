@@ -30,7 +30,6 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/syndtr/gocapability/capability"
 )
 
 const (
@@ -140,36 +139,6 @@ func (device *Device) writeTunPacket(packet []byte) error {
 	return nil
 }
 
-func configureNetworkConfigSubprocessCapabilities() error {
-
-	// If this process has CAP_NET_ADMIN, make it available to be inherited
-	// be child processes via ambient mechanism described here:
-	// https://github.com/torvalds/linux/commit/58319057b7847667f0c9585b9de0e8932b0fdb08
-	//
-	// The ambient mechanism is available in Linux kernel 4.3 and later.
-
-	// When using capabilities, this process should have CAP_NET_ADMIN in order
-	// to create tun devices. And the subprocess operations such as using "ifconfig"
-	// and "iptables" for network config require the same CAP_NET_ADMIN capability.
-
-	cap, err := capability.NewPid(0)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	if cap.Get(capability.EFFECTIVE, capability.CAP_NET_ADMIN) {
-
-		cap.Set(capability.INHERITABLE|capability.AMBIENT, capability.CAP_NET_ADMIN)
-
-		err = cap.Apply(capability.AMBIENT)
-		if err != nil {
-			return errors.Trace(err)
-		}
-	}
-
-	return nil
-}
-
 func resetNATTables(
 	config *ServerConfig,
 	IPAddress net.IP) error {
@@ -182,7 +151,7 @@ func resetNATTables(
 	// the already unlikely event that there's still in-flight traffic when the address is
 	// recycled.
 
-	err := runNetworkConfigCommand(
+	err := common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"conntrack",
@@ -215,7 +184,7 @@ func configureServerInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"ifconfig",
@@ -227,7 +196,7 @@ func configureServerInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"ifconfig",
@@ -253,7 +222,7 @@ func configureServerInterface(
 
 	// TODO: need only set forwarding for specific interfaces?
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"sysctl",
@@ -262,7 +231,7 @@ func configureServerInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"sysctl",
@@ -282,7 +251,7 @@ func configureServerInterface(
 
 	for _, mode := range []string{"-D", "-A"} {
 
-		err = runNetworkConfigCommand(
+		err = common.RunNetworkConfigCommand(
 			config.Logger,
 			config.SudoNetworkConfigCommands,
 			"iptables",
@@ -295,7 +264,7 @@ func configureServerInterface(
 			return errors.Trace(err)
 		}
 
-		err = runNetworkConfigCommand(
+		err = common.RunNetworkConfigCommand(
 			config.Logger,
 			config.SudoNetworkConfigCommands,
 			"ip6tables",
@@ -330,7 +299,7 @@ func configureClientInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"ifconfig",
@@ -343,7 +312,7 @@ func configureClientInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"ifconfig",
@@ -384,7 +353,7 @@ func configureClientInterface(
 		// Note: use "replace" instead of "add" as route from
 		// previous run (e.g., tun_test case) may not yet be cleared.
 
-		err = runNetworkConfigCommand(
+		err = common.RunNetworkConfigCommand(
 			config.Logger,
 			config.SudoNetworkConfigCommands,
 			"ip",
@@ -419,8 +388,14 @@ func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) e
 
 	// Fix the problem described here:
 	// https://stackoverflow.com/questions/24011205/cant-perform-tcp-handshake-through-a-nat-between-two-nics-with-so-bindtodevice/
+	//
+	// > the linux kernel is configured on certain mainstream distributions
+	// > (Ubuntu...) to act as a router and drop packets where the source
+	// > address is suspect in order to prevent spoofing (search "rp_filter" on
+	// > https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt and
+	// > RFC3704)
 
-	err := runNetworkConfigCommand(
+	err := common.RunNetworkConfigCommand(
 		logger,
 		useSudo,
 		"sysctl",
@@ -429,7 +404,7 @@ func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) e
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		logger,
 		useSudo,
 		"sysctl",
@@ -438,7 +413,7 @@ func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) e
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		logger,
 		useSudo,
 		"sysctl",

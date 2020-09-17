@@ -1010,14 +1010,18 @@ public class PsiphonTunnel {
         candidates.put("192", new PrivateAddress("192.168.0.1", "192.168.0.0", 16, "192.168.0.2"));
         candidates.put("169", new PrivateAddress("169.254.1.1", "169.254.1.0", 24, "169.254.1.2"));
 
-        List<NetworkInterface> netInterfaces;
+        Enumeration<NetworkInterface> netInterfaces;
         try {
-            netInterfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
+            netInterfaces = NetworkInterface.getNetworkInterfaces();
         } catch (SocketException e) {
             throw new Exception("selectPrivateAddress failed", e);
         }
 
-        for (NetworkInterface netInterface : netInterfaces) {
+        if (netInterfaces == null) {
+            throw new Exception("no network interfaces found");
+        }
+
+        for (NetworkInterface netInterface : Collections.list(netInterfaces)) {
             for (InetAddress inetAddress : Collections.list(netInterface.getInetAddresses())) {
                 if (inetAddress instanceof Inet4Address) {
                     String ipAddress = inetAddress.getHostAddress();
