@@ -77,3 +77,7 @@ func (server *HTTPSServer) ServeTLS(listener net.Listener, config *tris.Config) 
 	tlsListener := tris.NewListener(listener, config)
 	return server.Serve(tlsListener)
 }
+
+type UnderlyingTCPAddrSource interface {
+	GetUnderlyingTCPAddrs() (*net.TCPAddr, *net.TCPAddr, bool)
+}

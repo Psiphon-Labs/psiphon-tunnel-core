@@ -1697,22 +1697,28 @@ loop:
 
 			p := controller.config.GetClientParameters().Get()
 			workerPoolSize := p.Int(parameters.ConnectionWorkerPoolSize)
-			waitDuration := p.Duration(parameters.UpstreamProxyErrorWaitDuration)
+			minWaitDuration := p.Duration(parameters.UpstreamProxyErrorMinWaitDuration)
+			maxWaitDuration := p.Duration(parameters.UpstreamProxyErrorMaxWaitDuration)
 			p.Close()
 
 			controller.concurrentEstablishTunnelsMutex.Lock()
 			establishConnectTunnelCount := controller.establishConnectTunnelCount
 			controller.concurrentEstablishTunnelsMutex.Unlock()
 
-			// Delay until either UpstreamProxyErrorWaitDuration has elapsed (excluding
-			// time spent waiting for network connectivity) or, to post sooner if many
+			// Delay UpstreamProxyErrorMinWaitDuration (excluding time spent waiting
+			// for network connectivity) and then until either
+			// UpstreamProxyErrorMaxWaitDuration has elapsed or, to post sooner if many
 			// candidates are failing, at least workerPoolSize tunnel connection
 			// attempts have completed. We infer that at least workerPoolSize
 			// candidates have completed by checking that at least 2*workerPoolSize
 			// candidates have started.
 
-			if time.Since(callbackCandidateServerEntry.adjustedEstablishStartTime) < waitDuration &&
-				establishConnectTunnelCount < 2*workerPoolSize {
+			elapsedTime := time.Since(
+				callbackCandidateServerEntry.adjustedEstablishStartTime)
+
+			if elapsedTime < minWaitDuration ||
+				(elapsedTime < maxWaitDuration &&
+					establishConnectTunnelCount < 2*workerPoolSize) {
 				return
 			}
 

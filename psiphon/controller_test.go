@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/elazarl/goproxy"
+	"github.com/elazarl/goproxy/ext/auth"
 )
 
 func TestMain(m *testing.M) {
@@ -1039,7 +1040,7 @@ func initDisruptor() {
 	}()
 }
 
-const upstreamProxyURL = "http://127.0.0.1:2161"
+const upstreamProxyURL = "http://testUser:testPassword@127.0.0.1:2161"
 
 var upstreamProxyCustomHeaders = map[string][]string{"X-Test-Header-Name": {"test-header-value1", "test-header-value2"}}
 
@@ -1062,6 +1063,11 @@ func initUpstreamProxy() {
 	go func() {
 		proxy := goproxy.NewProxyHttpServer()
 		proxy.Logger = log.New(ioutil.Discard, "", 0)
+
+		auth.ProxyBasic(
+			proxy,
+			"testRealm",
+			func(user, passwd string) bool { return user == "testUser" && passwd == "testPassword" })
 
 		proxy.OnRequest().DoFunc(
 			func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {

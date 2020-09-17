@@ -43,6 +43,8 @@ const (
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH          = "TAPDANCE-OSSH"
 	TUNNEL_PROTOCOL_CONJOUR_OBFUSCATED_SSH           = "CONJOUR-OSSH"
 
+	TUNNEL_PROTOCOLS_ALL = "All"
+
 	SERVER_ENTRY_SOURCE_EMBEDDED   = "EMBEDDED"
 	SERVER_ENTRY_SOURCE_REMOTE     = "REMOTE"
 	SERVER_ENTRY_SOURCE_DISCOVERY  = "DISCOVERY"
@@ -226,6 +228,14 @@ func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
 	// UpstreamProxy, but not currently supported.
 
 	return !TunnelProtocolUsesQUIC(protocol)
+}
+
+func TunnelProtocolMayUseServerPacketManipulation(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_SSH ||
+		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
 func UseClientTunnelProtocol(
