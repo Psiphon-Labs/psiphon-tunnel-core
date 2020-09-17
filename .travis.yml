@@ -29,7 +29,7 @@ script:
 - go test -race -v ./common/values
 - go test -race -v ./common/wildcard
 - go test -race -v ./transferstats
-# TODO: seet "packetman" comment above
+# TODO: see "packetman" comment above
 - go test -race -v ./server
 - go test -race -v ./server/psinet
 - go test -race -v ../Server/logging/analysis
