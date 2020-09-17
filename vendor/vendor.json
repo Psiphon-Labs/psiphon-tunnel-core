@@ -401,14 +401,14 @@
 		{
 			"checksumSHA1": "UwQZ9aXiyKkLhwF3ZyWAQz0oXy8=",
 			"path": "github.com/mdlayher/netlink",
-			"revision": "c5f8ab79aa345dcfcf7f14d746659ca1b80a0ecc",
-			"revisionTime": "2020-06-11T20:48:29Z"
+			"revision": "6189c368e3291a8661be258658f94965c5a39343",
+			"revisionTime": "2020-07-28T10:15:04Z"
 		},
 		{
 			"checksumSHA1": "O8qf/eFcZ82nw5jnRt9nSHPS9CM=",
 			"path": "github.com/mdlayher/netlink/nlenc",
-			"revision": "c5f8ab79aa345dcfcf7f14d746659ca1b80a0ecc",
-			"revisionTime": "2020-06-11T20:48:29Z"
+			"revision": "6189c368e3291a8661be258658f94965c5a39343",
+			"revisionTime": "2020-07-28T10:15:04Z"
 		},
 		{
 			"checksumSHA1": "CqKUytzURTAPk1mUOsySyXGQft0=",
