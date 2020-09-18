@@ -128,6 +128,14 @@ func (m *Manipulator) Start() (retErr error) {
 		return errors.TraceNew("already running")
 	}
 
+	if len(m.config.ProtocolPorts) == 0 {
+		// There are no ports to intercept, so there is nothing to run. Skip
+		// subsequent operations which assume at least one intercept port is
+		// configured. This is a success case, and a subseqent call to Stop is a
+		// no-op.
+		return nil
+	}
+
 	err := m.configureIPTables(true)
 	if err != nil {
 		return errors.Trace(err)
