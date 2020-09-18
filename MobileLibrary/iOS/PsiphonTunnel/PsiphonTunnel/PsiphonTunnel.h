@@ -36,15 +36,6 @@ FOUNDATION_EXPORT const unsigned char PsiphonTunnelVersionString[];
 
 /*!
  The set of possible connection states the tunnel can be in.
- Swift:
- @code
- public enum PsiphonConnectionState : Int {
-     case disconnected
-     case connecting
-     case connected
-     case waitingForNetwork
- }
- @endcode
  */
 typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 {
@@ -66,7 +57,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Gets runtime errors info that may be useful for debugging.
  @param message  The diagnostic message string.
  @param timestamp RFC3339 encoded timestamp.
- Swift: @code func onDiagnosticMessage(_ message: String, withTimestamp timestamp: String) @endcode
  */
 - (void)onDiagnosticMessage:(NSString * _Nonnull)message withTimestamp:(NSString * _Nonnull)timestamp;
 
@@ -131,8 +121,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  @return Either JSON NSString with config that should be used to run the Psiphon tunnel,
          or return already parsed JSON as NSDictionary,
          or nil on error.
-
- Swift: @code func getPsiphonConfig() -> Any? @endcode
  */
 - (id _Nullable)getPsiphonConfig;
 
@@ -158,12 +146,10 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 
 /*!
  Called when the tunnel is in the process of connecting.
- Swift: @code func onConnecting() @endcode
  */
 - (void)onConnecting;
 /*!
  Called when the tunnel has successfully connected.
- Swift: @code func onConnected() @endcode
  */
 - (void)onConnected;
 
@@ -171,7 +157,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Called when the tunnel notices that the device has no network connectivity and
  begins waiting to regain it. When connecitvity is regained, `onConnecting`
  will be called.
- Swift: @code func onStartedWaitingForNetworkConnectivity @endcode
  */
 - (void)onStartedWaitingForNetworkConnectivity;
 
@@ -182,7 +167,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  (since it didn't change from anything).
  @param oldState  The previous connection state.
  @param newState  The new connection state.
- Swift: @code func onConnectionStateChanged(from oldState: PsiphonConnectionState, to newState: PsiphonConnectionState) @endcode
  */
 - (void)onConnectionStateChangedFrom:(PsiphonConnectionState)oldState to:(PsiphonConnectionState)newState;
 
@@ -190,7 +174,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  Called to indicate that tunnel-core is exiting imminently (usually due to
  a `stop()` call, but could be due to an unexpected error).
  onExiting may be called before or after `stop()` returns.
- Swift: @code func onExiting() @endcode
  */
 - (void)onExiting;
 
@@ -198,7 +181,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
 Called when the device's Internet connection state has changed.
 This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
 WWAN or vice versa or VPN state changed
-Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachability) @endcode
 */
 - (void)onInternetReachabilityChanged:(Reachability * _Nonnull)currentReachability;
 
@@ -207,7 +189,6 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  for use. This can be used for updating the UI which provides the options to
  the user.
  @param regions  A string array containing the available egress region country codes.
- Swift: @code func onAvailableEgressRegions(_ regions: [Any]) @endcode
  */
 - (void)onAvailableEgressRegions:(NSArray * _Nonnull)regions;
 
@@ -215,48 +196,41 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  If the tunnel is started with a fixed SOCKS proxy port, and that port is
  already in use, this will be called.
  @param port  The port number.
- Swift: @code func onSocksProxyPort(inUse port: Int) @endcode
  */
 - (void)onSocksProxyPortInUse:(NSInteger)port;
 /*!
  If the tunnel is started with a fixed HTTP proxy port, and that port is
  already in use, this will be called.
  @param port  The port number.
- Swift: @code func onHttpProxyPort(inUse port: Int) @endcode
  */
 - (void)onHttpProxyPortInUse:(NSInteger)port;
 
 /*!
  Called when tunnel-core determines what port will be used for the local SOCKS proxy.
  @param port  The port number.
- Swift: @code func onListeningSocksProxyPort(_ port: Int) @endcode
  */
 - (void)onListeningSocksProxyPort:(NSInteger)port;
 /*!
  Called when tunnel-core determines what port will be used for the local HTTP proxy.
  @param port  The port number.
- Swift: @code func onListeningHttpProxyPort(_ port: Int) @endcode
  */
 - (void)onListeningHttpProxyPort:(NSInteger)port;
 
 /*!
  Called when a error occurs when trying to utilize a configured upstream proxy.
  @param message  A message giving additional info about the error.
- Swift: @code func onUpstreamProxyError(_ message: String) @endcode
  */
 - (void)onUpstreamProxyError:(NSString * _Nonnull)message;
 
 /*!
  Called after the handshake with the Psiphon server, with the client region as determined by the server.
  @param region  The country code of the client, as determined by the server.
- Swift: @code func onClientRegion(_ region: String) @endcode
  */
 - (void)onClientRegion:(NSString * _Nonnull)region;
 
 /*!
  Called to report that split tunnel is on for the given region.
  @param region  The region split tunnel is on for.
- Swift: @code func onSplitTunnelRegion(_ region: String) @endcode
  */
 - (void)onSplitTunnelRegion:(NSString * _Nonnull)region;
 
@@ -266,7 +240,6 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  Note: `address` should remain private; this notice should be used for alerting
  users, not for diagnotics logs.
  @param address  The IP or hostname that is not being tunneled.
- Swift: @code func onUntunneledAddress(_ address: String) @endcode
  */
 - (void)onUntunneledAddress:(NSString * _Nonnull)address;
 
@@ -277,7 +250,6 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  EmitBytesTransferred to true in the Psiphon config.
  @param sent  The number of bytes sent.
  @param received  The number of bytes received.
- Swift: @code func onBytesTransferred(_ sent: Int64, _ received: Int64) @endcode
  */
 - (void)onBytesTransferred:(int64_t)sent :(int64_t)received;
 
@@ -287,21 +259,18 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  once, for multiple home pages.
  Note: This is probably only applicable to Psiphon Inc.'s apps.
  @param url  The URL of the home page.
- Swift: @code func onHomepage(_ url: String) @endcode
  */
 - (void)onHomepage:(NSString * _Nonnull)url;
 
 /*!
  Called when tunnel-core receives server timetamp in the handshake
  @param timestamp  The server timestamp in RFC3339 format.
- Swift: @code func onServerTimestamp(_ timestamp: String) @endcode
  */
 - (void)onServerTimestamp:(NSString * _Nonnull)timestamp;
 
 /*!
  Called when tunnel-core receives an array of active authorization IDs in the handshake
  @param authorizations  A string array containing active authorization IDs.
- Swift: @code func onActiveAuthorizationIDs(_ authorizations: [Any]) @endcode
  */
 - (void)onActiveAuthorizationIDs:(NSArray * _Nonnull)authorizations;
 
@@ -309,7 +278,6 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  Called when tunnel-core receives traffic rate limit information in the handshake
  @param upstreamBytesPerSecond  upstream rate limit; 0 for no limit
  @param downstreamBytesPerSecond  downstream rate limit; 0 for no limit
- Swift: @code func onTrafficRateLimits(_ upstreamBytesPerSecond: Int64, _ downstreamBytesPerSecond: Int64) @endcode
  */
 - (void)onTrafficRateLimits:(int64_t)upstreamBytesPerSecond :(int64_t)downstreamBytesPerSecond;
 
@@ -317,7 +285,6 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  Called when tunnel-core receives an alert from the server.
  @param reason The reason for the alert.
  @param subject Additional context or classification of the reason; blank for none.
- Swift: @code func onServerAlert(_ reason: String, _ subject: String) @endcode
  */
 - (void)onServerAlert:(NSString * _Nonnull)reason :(NSString * _Nonnull)subject;
 
@@ -332,7 +299,6 @@ Swift: @code func onInternetReachabilityChanged(_ currentReachability: Reachabil
  Returns an instance of PsiphonTunnel. This is either a new instance or the pre-existing singleton. If an instance already exists, it will be stopped when this function is called.
  @param tunneledAppDelegate  The delegate implementation to use for callbacks.
  @return  The PsiphonTunnel instance.
- Swift: @code class func newPsiphonTunnel(_ tunneledAppDelegate: TunneledAppDelegate) -> Self @endcode
  */
 + (PsiphonTunnel * _Nonnull)newPsiphonTunnel:(id<TunneledAppDelegate> _Nonnull)tunneledAppDelegate;
 
@@ -375,7 +341,6 @@ Returns the path where the rotated notices file will be created.
  Start connecting the PsiphonTunnel. Returns before connection is complete -- delegate callbacks (such as `onConnected` and `onConnectionStateChanged`) are used to indicate progress and state.
  @param ifNeeded  If TRUE, the tunnel will only be started if it's not already connected and healthy. If FALSE, the tunnel will be forced to stop and reconnect.
  @return TRUE if the connection start was successful, FALSE otherwise.
- Swift: @code func start(_ ifNeeded: Bool) -> Bool @endcode
  */
 - (BOOL)start:(BOOL)ifNeeded;
 
@@ -393,26 +358,22 @@ Returns the path where the rotated notices file will be created.
  session ID.
 
  @return TRUE if the connection start was successful, FALSE otherwise.
- Swift: @code func startWithCurrentSessionID() @endcode
  */
 - (BOOL)stopAndReconnectWithCurrentSessionID;
 
 /*!
  Stop the tunnel (regardless of its current connection state).
- Swift: @code func stop() @endcode
  */
 - (void)stop;
 
 /*!
  Indicate if the device is sleeping. This logs a diagnostic message and forces hasNetworkConnectivity to false when sleeping.
- Swift: @code func setSleeping(_ isSleeping: Bool) @endcode
  */
 - (void)setSleeping:(BOOL)isSleeping;
 
 /*!
  Returns the current tunnel connection state.
  @return  The current connection state.
- Swift: @code func getConnectionState() -> PsiphonConnectionState @endcode
  */
 - (PsiphonConnectionState)getConnectionState;
 
@@ -420,49 +381,42 @@ Returns the path where the rotated notices file will be created.
  Returns the current network reachability status, if Psiphon tunnel is not in a
  disconnected state.
  @return The current reachability status.
- Swift: @code func getNetworkReachabilityStatus(_ status: UnsafeMutablePointer<NetworkStatus>!) -> Bool  @endcode
  */
 - (BOOL)getNetworkReachabilityStatus:(NetworkStatus * _Nonnull)status;
 
 /*!
  Provides the port number of the local SOCKS proxy. Only valid when currently connected (will return 0 otherwise).
  @return  The current local SOCKS proxy port number.
- Swift: @code func getLocalSocksProxyPort() -> Int @endcode
  */
 - (NSInteger)getLocalSocksProxyPort;
 
 /*!
  Provides the port number of the local HTTP proxy. Only valid when currently connected (will return 0 otherwise).
  @return  The current local HTTP proxy port number.
- Swift: @code func getLocalHttpProxyPort() -> Int @endcode
  */
 - (NSInteger)getLocalHttpProxyPort;
 
 /*!
  Only valid in whole device mode. Provides the MTU the packet tunnel requires the device to use.
  @return  The MTU size.
- Swift: @code func getPacketTunnelMTU() -> Int @endcode
  */
 - (long)getPacketTunnelMTU;
 
 /*!
  Only valid in whole device mode. Provides the DNS resolver IP address that is provided by the packet tunnel to the device.
   @return  The IP address of the DNS resolver as a string.
-  Swift: @code func getPacketTunnelDNSResolverIPv4Address() -> String @endcode
  */
 - (NSString * _Nonnull)getPacketTunnelDNSResolverIPv4Address;
 
 /*!
  Only valid in whole device mode. Provides the DNS resolver IP address that is provided by the packet tunnel to the device.
  @return  The IP address of the DNS resolver as a string.
-  Swift: @code func getPacketTunnelDNSResolverIPv6Address() -> String @endcode
  */
 - (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address;
 
 /*!
  Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.
  @return  The build info json as a string.
- Swift: @code func getBuildInfo() -> String @endcode
  */
 + (NSString * _Nonnull)getBuildInfo;
 
@@ -472,7 +426,6 @@ Returns the path where the rotated notices file will be created.
  Writes Go runtime profile information to a set of files in the specifiec output directory.
  @param cpuSampleDurationSeconds determines how to long to wait and sample profiles that require active sampling. When set to 0, these profiles are skipped.
  @param blockSampleDurationSeconds determines how to long to wait and sample profiles that require active sampling. When set to 0, these profiles are skipped.
- Swift: @code func writeRuntimeProfilesTo(_ outputDirectory: String, withCPUSampleDurationSeconds cpuSampleDurationSecond: Int, withBlockSampleDurationSeconds blockSampleDurationSeconds: Int) @endcode
  */
 - (void)writeRuntimeProfilesTo:(NSString * _Nonnull)outputDirectory withCPUSampleDurationSeconds:(int)cpuSampleDurationSeconds withBlockSampleDurationSeconds:(int)blockSampleDurationSeconds;
 
@@ -510,7 +463,6 @@ Returns the path where the rotated notices file will be created.
  error is non-nil, then the operation failed. Stored as a weak reference; the caller is responsible for holding a strong reference.
  @warning Only one active upload is supported at a time. An ongoing upload will be cancelled if this function is called again before it
  completes.
- Swift: @code func sendFeedback(_ feedbackJson: String, feedbackConfigJson: Any, uploadPath: String, loggerDelegate: PsiphonTunnelLoggerDelegate?, feedbackDelegate: PsiphonTunnelSendFeedbackDelegate) @endcode
  */
 - (void)startSendFeedback:(NSString * _Nonnull)feedbackJson
        feedbackConfigJson:(id _Nonnull)feedbackConfigJson
