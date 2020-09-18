@@ -466,6 +466,8 @@ var remoteServerListStatParams = append(
 		{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"url", isAnyString, 0},
 		{"etag", isAnyString, 0},
+		{"bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool}},
 	baseSessionParams...)
 
@@ -491,12 +493,12 @@ var failedTunnelStatParams = append(
 		{"session_id", isHexDigits, 0},
 		{"last_connected", isLastConnected, 0},
 		{"client_failed_timestamp", isISO8601Date, 0},
-		{"liveness_test_upstream_bytes", isIntString, requestParamOptional},
-		{"liveness_test_sent_upstream_bytes", isIntString, requestParamOptional},
-		{"liveness_test_downstream_bytes", isIntString, requestParamOptional},
-		{"liveness_test_received_downstream_bytes", isIntString, requestParamOptional},
-		{"bytes_up", isIntString, requestParamOptional},
-		{"bytes_down", isIntString, requestParamOptional},
+		{"liveness_test_upstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"liveness_test_sent_upstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"liveness_test_downstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"liveness_test_received_downstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"bytes_up", isIntString, requestParamOptional | requestParamLogStringAsInt},
+		{"bytes_down", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"tunnel_error", isAnyString, 0}},
 	baseSessionAndDialParams...)
 
@@ -1065,6 +1067,19 @@ func getRequestLogFields(
 				// Due to a client bug, clients may deliever an incorrect ""
 				// value for speed_test_samples via the web API protocol. Omit
 				// the field in this case.
+
+			case "tunnel_error":
+				// net/url.Error, returned from net/url.Parse, contains the original input
+				// URL, which may contain PII. New clients strip this out by using
+				// common.SafeParseURL. Legacy clients will still send the full error
+				// message, so strip it out here. The target substring should be unique to
+				// legacy clients.
+				target := "upstreamproxy error: proxyURI url.Parse: parse "
+				index := strings.Index(strValue, target)
+				if index != -1 {
+					strValue = strValue[:index+len(target)] + "<redacted>"
+				}
+				logFields[expectedParam.name] = strValue
 
 			default:
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {

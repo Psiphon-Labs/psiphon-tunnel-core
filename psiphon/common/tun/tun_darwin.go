@@ -247,11 +247,6 @@ func (device *Device) writeTunPacket(packet []byte) error {
 	return nil
 }
 
-func configureNetworkConfigSubprocessCapabilities() error {
-	// Not supported on Darwin
-	return nil
-}
-
 func resetNATTables(_ *ServerConfig, _ net.IP) error {
 	// Not supported on Darwin
 	// TODO: could use pfctl -K?
@@ -272,7 +267,7 @@ func configureServerInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"ifconfig",
@@ -289,7 +284,7 @@ func configureServerInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"ifconfig",
@@ -309,7 +304,7 @@ func configureServerInterface(
 		egressInterface = DEFAULT_PUBLIC_INTERFACE_NAME
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"sysctl",
@@ -318,7 +313,7 @@ func configureServerInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"sysctl",
@@ -359,14 +354,14 @@ func configureServerInterface(
 	}).Debug("pf.conf")
 
 	// Disable first to avoid "pfctl: pf already enabled"
-	_ = runNetworkConfigCommand(
+	_ = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"pfctl",
 		"-q",
 		"-d")
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"pfctl",
@@ -394,7 +389,7 @@ func configureClientInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"ifconfig",
@@ -412,7 +407,7 @@ func configureClientInterface(
 		return errors.Trace(err)
 	}
 
-	err = runNetworkConfigCommand(
+	err = common.RunNetworkConfigCommand(
 		config.Logger,
 		config.SudoNetworkConfigCommands,
 		"ifconfig",
@@ -429,7 +424,7 @@ func configureClientInterface(
 
 		// TODO: IPv6
 
-		err = runNetworkConfigCommand(
+		err = common.RunNetworkConfigCommand(
 			config.Logger,
 			config.SudoNetworkConfigCommands,
 			"route",

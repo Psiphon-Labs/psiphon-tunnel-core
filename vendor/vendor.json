@@ -257,10 +257,28 @@
 			"revisionTime": "2018-01-09T07:02:41Z"
 		},
 		{
-			"checksumSHA1": "RbvI/I41Th10HSa2dC3IS2JzW/w=",
+			"checksumSHA1": "njovpO35R7czcCeBKwQV3Hnee0g=",
 			"path": "github.com/elazarl/goproxy",
-			"revision": "a96fa3a318260eab29abaf32f7128c9eb07fb073",
-			"revisionTime": "2017-11-01T14:35:03Z"
+			"revision": "0581fc3aee2d07555835bed1a876aca196a4a511",
+			"revisionTime": "2020-08-09T06:25:17Z"
+		},
+		{
+			"checksumSHA1": "z60viLQyKoqp8U3O046JbTaoeOs=",
+			"path": "github.com/elazarl/goproxy/ext/auth",
+			"revision": "0581fc3aee2d07555835bed1a876aca196a4a511",
+			"revisionTime": "2020-08-09T06:25:17Z"
+		},
+		{
+			"checksumSHA1": "+feaBcESiI7xYo/JHfi/tBLBd0M=",
+			"path": "github.com/florianl/go-nfqueue",
+			"revision": "a2f196e98ab0ffdcb8b5252e7cbba98e45dea204",
+			"revisionTime": "2020-08-29T12:05:58Z"
+		},
+		{
+			"checksumSHA1": "qGv/SywjwcuVQBX68we+HAjuk/Y=",
+			"path": "github.com/florianl/go-nfqueue/internal/unix",
+			"revision": "a2f196e98ab0ffdcb8b5252e7cbba98e45dea204",
+			"revisionTime": "2020-08-29T12:05:58Z"
 		},
 		{
 			"checksumSHA1": "/RE0VzeaXdaBUNeNMUXWqzly7qY=",
@@ -317,6 +335,18 @@
 			"revisionTime": "2019-03-18T19:48:12Z"
 		},
 		{
+			"checksumSHA1": "ftN25Xw6PDNJ6E4wTHEgQtpdvrw=",
+			"path": "github.com/google/gopacket",
+			"revision": "df1bbd09a56154336515b057a4d1baead45c6543",
+			"revisionTime": "2020-04-21T18:24:12Z"
+		},
+		{
+			"checksumSHA1": "HZXCatlYChKE5otgoJGnZqE3jTw=",
+			"path": "github.com/google/gopacket/layers",
+			"revision": "df1bbd09a56154336515b057a4d1baead45c6543",
+			"revisionTime": "2020-04-21T18:24:12Z"
+		},
+		{
 			"checksumSHA1": "AsR4mwCc2eGqcPb4xHklV5/stmc=",
 			"path": "github.com/grafov/m3u8",
 			"revision": "6ab8f28ed427e7ab787340596709e27ecc4b32db",
@@ -367,6 +397,18 @@
 			"path": "github.com/marusama/semaphore",
 			"revision": "565ffd8e868a4e9a2b4e218e940cf4cb40ebd105",
 			"revisionTime": "2017-12-14T15:47:24Z"
+		},
+		{
+			"checksumSHA1": "UwQZ9aXiyKkLhwF3ZyWAQz0oXy8=",
+			"path": "github.com/mdlayher/netlink",
+			"revision": "6189c368e3291a8661be258658f94965c5a39343",
+			"revisionTime": "2020-07-28T10:15:04Z"
+		},
+		{
+			"checksumSHA1": "O8qf/eFcZ82nw5jnRt9nSHPS9CM=",
+			"path": "github.com/mdlayher/netlink/nlenc",
+			"revision": "6189c368e3291a8661be258658f94965c5a39343",
+			"revisionTime": "2020-07-28T10:15:04Z"
 		},
 		{
 			"checksumSHA1": "CqKUytzURTAPk1mUOsySyXGQft0=",
@@ -490,10 +532,10 @@
 			"revisionTime": "2019-09-09T20:29:46Z"
 		},
 		{
-			"checksumSHA1": "1HFgQE+SHogT82ebPmvCUnGwrxo=",
+			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",
 			"path": "github.com/refraction-networking/utls",
-			"revision": "ada0bb9b38a0975b15bb4591cd4a939fe74d1a1b",
-			"revisionTime": "2020-06-01T20:02:09Z"
+			"revision": "186025ac7b77465439618d1aeb2a5e444714d1cc",
+			"revisionTime": "2020-07-29T01:25:36Z"
 		},
 		{
 			"checksumSHA1": "Fn9JW8u40ABN9Uc9wuvquuyOB+8=",
@@ -898,10 +940,6 @@
 			"path": "golang.org/x/xerrors/internal",
 			"revision": "9bdfabe68543c54f90421aeb9a60ef8061b5b544",
 			"revisionTime": "2019-07-19T19:12:34Z"
-		},
-		{
-			"path": "https://github.com/miekg/dns",
-			"revision": ""
 		}
 	],
 	"rootPath": "github.com/Psiphon-Labs/psiphon-tunnel-core"

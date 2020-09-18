@@ -23,10 +23,12 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/rand"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math"
+	"net/url"
 	"os"
 	"time"
 
@@ -236,4 +238,38 @@ func DoFileMigration(migration FileMigration) error {
 	}
 
 	return nil
+}
+
+// SafeParseURL wraps url.Parse, stripping the input URL from any error
+// message. This allows logging url.Parse errors without unintentially logging
+// PII that may appear in the input URL.
+func SafeParseURL(rawurl string) (*url.URL, error) {
+	parsedURL, err := url.Parse(rawurl)
+	if err != nil {
+		// Unwrap yields just the url.Error error field without the url.Error URL
+		// and operation fields.
+		err = std_errors.Unwrap(err)
+		if err == nil {
+			err = std_errors.New("SafeParseURL: Unwrap failed")
+		} else {
+			err = fmt.Errorf("url.Parse: %v", err)
+		}
+	}
+	return parsedURL, err
+}
+
+// SafeParseRequestURI wraps url.ParseRequestURI, stripping the input URL from
+// any error message. This allows logging url.ParseRequestURI errors without
+// unintentially logging PII that may appear in the input URL.
+func SafeParseRequestURI(rawurl string) (*url.URL, error) {
+	parsedURL, err := url.ParseRequestURI(rawurl)
+	if err != nil {
+		err = std_errors.Unwrap(err)
+		if err == nil {
+			err = std_errors.New("SafeParseRequestURI: Unwrap failed")
+		} else {
+			err = fmt.Errorf("url.ParseRequestURI: %v", err)
+		}
+	}
+	return parsedURL, err
 }

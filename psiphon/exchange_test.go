@@ -180,6 +180,7 @@ func TestServerEntryExchange(t *testing.T) {
 
 			dialParams, err := MakeDialParameters(
 				config,
+				nil,
 				canReplay,
 				selectProtocol,
 				serverEntry,

@@ -86,6 +86,8 @@ const (
 	StaggerConnectionWorkersPeriod                   = "StaggerConnectionWorkersPeriod"
 	StaggerConnectionWorkersJitter                   = "StaggerConnectionWorkersJitter"
 	LimitIntensiveConnectionWorkers                  = "LimitIntensiveConnectionWorkers"
+	UpstreamProxyErrorMinWaitDuration                = "UpstreamProxyErrorMinWaitDuration"
+	UpstreamProxyErrorMaxWaitDuration                = "UpstreamProxyErrorMaxWaitDuration"
 	IgnoreHandshakeStatsRegexps                      = "IgnoreHandshakeStatsRegexps"
 	PrioritizeTunnelProtocolsProbability             = "PrioritizeTunnelProtocolsProbability"
 	PrioritizeTunnelProtocols                        = "PrioritizeTunnelProtocols"
@@ -237,6 +239,9 @@ const (
 	BPFServerTCPProbability                          = "BPFServerTCPProbability"
 	BPFClientTCPProgram                              = "BPFClientTCPProgram"
 	BPFClientTCPProbability                          = "BPFClientTCPProbability"
+	ServerPacketManipulationSpecs                    = "ServerPacketManipulationSpecs"
+	ServerProtocolPacketManipulations                = "ServerProtocolPacketManipulations"
+	ServerPacketManipulationProbability              = "ServerPacketManipulationProbability"
 	FeedbackUploadURLs                               = "FeedbackUploadURLs"
 	FeedbackEncryptionPublicKey                      = "FeedbackEncryptionPublicKey"
 	FeedbackTacticsWaitPeriod                        = "FeedbackTacticsWaitPeriod"
@@ -288,6 +293,8 @@ var defaultClientParameters = map[string]struct {
 	StaggerConnectionWorkersPeriod:           {value: time.Duration(0), minimum: time.Duration(0)},
 	StaggerConnectionWorkersJitter:           {value: 0.1, minimum: 0.0},
 	LimitIntensiveConnectionWorkers:          {value: 0, minimum: 0},
+	UpstreamProxyErrorMinWaitDuration:        {value: 10 * time.Second, minimum: time.Duration(0)},
+	UpstreamProxyErrorMaxWaitDuration:        {value: 30 * time.Second, minimum: time.Duration(0)},
 	IgnoreHandshakeStatsRegexps:              {value: false},
 	TunnelOperateShutdownTimeout:             {value: 1 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	TunnelPortForwardDialTimeout:             {value: 10 * time.Second, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
@@ -494,10 +501,14 @@ var defaultClientParameters = map[string]struct {
 	ApplicationParametersProbability: {value: 1.0, minimum: 0.0},
 	ApplicationParameters:            {value: KeyValues{}},
 
-	BPFServerTCPProgram:     {value: (*BPFProgramSpec)(nil)},
-	BPFServerTCPProbability: {value: 0.5, minimum: 0.0},
+	BPFServerTCPProgram:     {value: (*BPFProgramSpec)(nil), flags: serverSideOnly},
+	BPFServerTCPProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
 	BPFClientTCPProgram:     {value: (*BPFProgramSpec)(nil)},
 	BPFClientTCPProbability: {value: 0.5, minimum: 0.0},
+
+	ServerPacketManipulationSpecs:       {value: PacketManipulationSpecs{}, flags: serverSideOnly},
+	ServerProtocolPacketManipulations:   {value: make(ProtocolPacketManipulations), flags: serverSideOnly},
+	ServerPacketManipulationProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
 
 	FeedbackUploadURLs:                 {value: TransferURLs{}},
 	FeedbackEncryptionPublicKey:        {value: ""},
@@ -1089,7 +1100,7 @@ func (p ClientParametersAccessor) QUICVersions(name string) protocol.QUICVersion
 // corresponding to the specified labeled set and label value. The return
 // value is nil when no set is found.
 func (p ClientParametersAccessor) LabeledQUICVersions(name, label string) protocol.QUICVersions {
-	var value protocol.LabeledQUICVersions
+	value := protocol.LabeledQUICVersions{}
 	p.snapshot.getValue(name, &value)
 	return value[label]
 }
@@ -1163,4 +1174,18 @@ func (p ClientParametersAccessor) BPFProgram(name string) (bool, string, []bpf.R
 	// Validation checks that Assemble is successful.
 	rawInstructions, _ := value.Assemble()
 	return true, value.Name, rawInstructions
+}
+
+// PacketManipulationSpecs returns a PacketManipulationSpecs parameter value.
+func (p ClientParametersAccessor) PacketManipulationSpecs(name string) PacketManipulationSpecs {
+	value := PacketManipulationSpecs{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// ProtocolPacketManipulations returns a ProtocolPacketManipulations parameter value.
+func (p ClientParametersAccessor) ProtocolPacketManipulations(name string) ProtocolPacketManipulations {
+	value := make(ProtocolPacketManipulations)
+	p.snapshot.getValue(name, &value)
+	return value
 }

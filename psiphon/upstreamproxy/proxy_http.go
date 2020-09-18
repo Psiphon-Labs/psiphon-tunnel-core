@@ -54,6 +54,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"golang.org/x/net/proxy"
 )
 
@@ -131,7 +132,7 @@ type proxyConn struct {
 func (pc *proxyConn) handshake(addr, username, password string) error {
 	// HACK: prefix addr of the form 'hostname:port' with a 'http' scheme
 	// so it could be parsed by url.Parse
-	reqURL, err := url.Parse("http://" + addr)
+	reqURL, err := common.SafeParseURL("http://" + addr)
 	if err != nil {
 		pc.httpClientConn.Close()
 		pc.authState = HTTP_AUTH_STATE_FAILURE
@@ -206,7 +207,7 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 		if username == "" {
 			pc.httpClientConn.Close()
 			pc.authState = HTTP_AUTH_STATE_FAILURE
-			return proxyError(fmt.Errorf("ho username credentials provided for proxy auth"))
+			return proxyError(fmt.Errorf("no username credentials provided for proxy auth"))
 		}
 		if err == errPersistEOF {
 			// The server may send Connection: close,
@@ -218,6 +219,22 @@ func (pc *proxyConn) handshake(addr, username, password string) error {
 				return err
 			}
 		}
+
+		headers := resp.Header[http.CanonicalHeaderKey("proxy-connection")]
+		for _, header := range headers {
+			if header == "close" {
+				// The server has signaled that it will close the
+				// connection. Create a new ClientConn and continue the
+				// handshake.
+				err = pc.makeNewClientConn()
+				if err != nil {
+					// Already wrapped in proxyError
+					return err
+				}
+				break
+			}
+		}
+
 		return nil
 	}
 	pc.authState = HTTP_AUTH_STATE_FAILURE

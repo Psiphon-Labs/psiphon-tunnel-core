@@ -23,59 +23,12 @@ import (
 	std_errors "errors"
 	"fmt"
 	"net"
-	"os/exec"
 	"strconv"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 var errUnsupported = std_errors.New("operation unsupported on this platform")
-
-// runNetworkConfigCommand execs a network config command, such as "ifconfig"
-// or "iptables". On platforms that support capabilities, the network config
-// capabilities of the current process is made available to the command
-// subprocess. Alternatively, "sudo" will be used when useSudo is true.
-func runNetworkConfigCommand(
-	logger common.Logger,
-	useSudo bool,
-	commandName string, commandArgs ...string) error {
-
-	// configureSubprocessCapabilities will set inheritable
-	// capabilities on platforms which support that (Linux).
-	// Specifically, CAP_NET_ADMIN will be transferred from
-	// this process to the child command.
-
-	err := configureNetworkConfigSubprocessCapabilities()
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	// TODO: use CommandContext to interrupt on server shutdown?
-	// (the commands currently being issued shouldn't block...)
-
-	if useSudo {
-		commandArgs = append([]string{commandName}, commandArgs...)
-		commandName = "sudo"
-	}
-
-	cmd := exec.Command(commandName, commandArgs...)
-	output, err := cmd.CombinedOutput()
-
-	logger.WithTraceFields(common.LogFields{
-		"command": commandName,
-		"args":    commandArgs,
-		"output":  string(output),
-		"error":   err,
-	}).Debug("exec")
-
-	if err != nil {
-		err := fmt.Errorf(
-			"command %s %+v failed with %s", commandName, commandArgs, string(output))
-		return errors.Trace(err)
-	}
-	return nil
-}
 
 func splitIPMask(IPAddressCIDR string) (string, string, error) {
 

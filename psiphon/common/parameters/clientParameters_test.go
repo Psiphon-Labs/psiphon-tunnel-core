@@ -129,6 +129,16 @@ func TestGetDefaultParameters(t *testing.T) {
 					"BPFProgramSpec returned %+v %+v %+v expected %+v",
 					ok, name, rawInstructions, v)
 			}
+		case PacketManipulationSpecs:
+			g := p.Get().PacketManipulationSpecs(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("PacketManipulationSpecs returned %+v expected %+v", g, v)
+			}
+		case ProtocolPacketManipulations:
+			g := p.Get().ProtocolPacketManipulations(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("ProtocolPacketManipulations returned %+v expected %+v", g, v)
+			}
 		default:
 			t.Fatalf("Unhandled default type: %s", name)
 		}

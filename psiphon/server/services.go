@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/packetman"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
@@ -46,25 +47,32 @@ import (
 // RunServices initializes support functions including logging and GeoIP services;
 // and then starts the server components and runs them until os.Interrupt or
 // os.Kill signals are received. The config determines which components are run.
-func RunServices(configJSON []byte) error {
+func RunServices(configJSON []byte) (retErr error) {
+
+	loggingInitialized := false
+
+	defer func() {
+		if retErr != nil && loggingInitialized {
+			log.WithTraceFields(LogFields{"error": retErr}).Error("RunServices failed")
+		}
+	}()
 
 	rand.Seed(int64(time.Now().Nanosecond()))
 
 	config, err := LoadConfig(configJSON)
 	if err != nil {
-		log.WithTraceFields(LogFields{"error": err}).Error("load config failed")
 		return errors.Trace(err)
 	}
 
 	err = InitLogging(config)
 	if err != nil {
-		log.WithTraceFields(LogFields{"error": err}).Error("init logging failed")
 		return errors.Trace(err)
 	}
 
+	loggingInitialized = true
+
 	supportServices, err := NewSupportServices(config)
 	if err != nil {
-		log.WithTraceFields(LogFields{"error": err}).Error("init support services failed")
 		return errors.Trace(err)
 	}
 
@@ -78,7 +86,6 @@ func RunServices(configJSON []byte) error {
 
 	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
 	if err != nil {
-		log.WithTraceFields(LogFields{"error": err}).Error("init tunnel server failed")
 		return errors.Trace(err)
 	}
 
@@ -97,11 +104,25 @@ func RunServices(configJSON []byte) error {
 			AllowBogons:                 config.AllowBogons,
 		})
 		if err != nil {
-			log.WithTraceFields(LogFields{"error": err}).Error("init packet tunnel failed")
 			return errors.Trace(err)
 		}
 
 		supportServices.PacketTunnelServer = packetTunnelServer
+	}
+
+	if config.RunPacketManipulator {
+
+		packetManipulatorConfig, err := makePacketManipulatorConfig(supportServices)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		packetManipulator, err := packetman.NewManipulator(packetManipulatorConfig)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		supportServices.PacketManipulator = packetManipulator
 	}
 
 	// After this point, errors should be delivered to the errors channel and
@@ -116,6 +137,23 @@ func RunServices(configJSON []byte) error {
 			<-shutdownBroadcast
 			supportServices.PacketTunnelServer.Stop()
 		}()
+	}
+
+	if config.RunPacketManipulator {
+		err := supportServices.PacketManipulator.Start()
+		if err != nil {
+			select {
+			case errorChannel <- err:
+			default:
+			}
+		} else {
+			waitGroup.Add(1)
+			go func() {
+				defer waitGroup.Done()
+				<-shutdownBroadcast
+				supportServices.PacketManipulator.Stop()
+			}()
+		}
 	}
 
 	if config.RunLoadMonitor() {
@@ -256,7 +294,6 @@ loop:
 			break loop
 
 		case err = <-errorChannel:
-			log.WithTraceFields(LogFields{"error": err}).Error("service failed")
 			break loop
 		}
 	}
@@ -397,6 +434,7 @@ type SupportServices struct {
 	PacketTunnelServer *tun.Server
 	TacticsServer      *tactics.Server
 	Blocklist          *Blocklist
+	PacketManipulator  *packetman.Manipulator
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -478,6 +516,16 @@ func (support *SupportServices) Reload() {
 	reloadPostActions := map[common.Reloader]func(){
 		support.TrafficRulesSet: func() { support.TunnelServer.ResetAllClientTrafficRules() },
 		support.OSLConfig:       func() { support.TunnelServer.ResetAllClientOSLConfigs() },
+	}
+	if support.Config.RunPacketManipulator {
+		reloadPostActions[support.TacticsServer] = func() {
+			err := reloadPacketManipulationSpecs(support)
+			if err != nil {
+				log.WithTraceFields(
+					LogFields{"error": errors.Trace(err)}).Warning(
+					"failed to reload packet manipulation specs")
+			}
+		}
 	}
 
 	for _, reloader := range reloaders {

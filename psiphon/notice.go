@@ -667,9 +667,11 @@ func NoticeSplitTunnelRegion(region string) {
 // NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
 // user may have input, for example, an incorrect address or incorrect credentials.
 func NoticeUpstreamProxyError(err error) {
-	singletonNoticeLogger.outputNotice(
+	message := err.Error()
+	outputRepetitiveNotice(
+		"UpstreamProxyError", message, 0,
 		"UpstreamProxyError", 0,
-		"message", err.Error())
+		"message", message)
 }
 
 // NoticeClientUpgradeDownloadedBytes reports client upgrade download progress.
@@ -745,14 +747,15 @@ func NoticeExiting() {
 }
 
 // NoticeRemoteServerListResourceDownloadedBytes reports remote server list download progress.
-func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64) {
+func NoticeRemoteServerListResourceDownloadedBytes(url string, bytes int64, duration time.Duration) {
 	if !GetEmitNetworkParameters() {
 		url = "[redacted]"
 	}
 	singletonNoticeLogger.outputNotice(
 		"RemoteServerListResourceDownloadedBytes", noticeIsDiagnostic,
 		"url", url,
-		"bytes", bytes)
+		"bytes", bytes,
+		"duration", duration.String())
 }
 
 // NoticeRemoteServerListResourceDownloaded indicates that a remote server list download
@@ -843,7 +846,7 @@ func NoticePruneServerEntry(serverEntryTag string) {
 func NoticeEstablishTunnelTimeout(timeout time.Duration) {
 	singletonNoticeLogger.outputNotice(
 		"EstablishTunnelTimeout", 0,
-		"timeout", timeout)
+		"timeout", timeout.String())
 }
 
 func NoticeFragmentor(diagnosticID string, message string) {
@@ -873,7 +876,7 @@ func NoticeServerAlert(alert protocol.AlertRequest) {
 	repetitionKey := fmt.Sprintf("ServerAlert-%+v", alert)
 	outputRepetitiveNotice(
 		repetitionKey, "", 0,
-		"ServerAlert", noticeIsDiagnostic, "reason", alert.Reason, "subject", alert.Subject)
+		"ServerAlert", 0, "reason", alert.Reason, "subject", alert.Subject)
 }
 
 type repetitiveNoticeState struct {
@@ -897,7 +900,7 @@ func outputRepetitiveNotice(
 
 	state, keyFound := repetitiveNoticeStates[repetitionKey]
 	if !keyFound {
-		state = new(repetitiveNoticeState)
+		state = &repetitiveNoticeState{message: repetitionMessage}
 		repetitiveNoticeStates[repetitionKey] = state
 	}
 

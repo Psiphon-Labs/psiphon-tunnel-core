@@ -131,6 +131,7 @@ func TestSSH(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
 		})
 }
 
@@ -150,6 +151,7 @@ func TestOSSH(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
 		})
 }
 
@@ -169,6 +171,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
 		})
 }
 
@@ -188,6 +191,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
 		})
 }
 
@@ -208,6 +212,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
 		})
 }
 
@@ -228,6 +233,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
 		})
 }
 
@@ -248,6 +254,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
 		})
 }
 
@@ -268,6 +275,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
 		})
 }
 
@@ -290,6 +298,7 @@ func TestQUICOSSH(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -312,6 +321,7 @@ func TestMarionetteOSSH(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -331,6 +341,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -350,6 +361,7 @@ func TestHotReload(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -369,6 +381,7 @@ func TestDefaultSponsorID(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -388,6 +401,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -407,6 +421,7 @@ func TestOmitAuthorization(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -426,6 +441,7 @@ func TestNoAuthorization(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -445,6 +461,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -464,6 +481,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -483,6 +501,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -502,6 +521,7 @@ func TestLivenessTest(t *testing.T) {
 			forceLivenessTest:    true,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -521,6 +541,7 @@ func TestPruneServerEntries(t *testing.T) {
 			forceLivenessTest:    true,
 			doPruneServerEntries: true,
 			doDanglingTCPConn:    false,
+			doPacketManipulation: false,
 		})
 }
 
@@ -539,6 +560,7 @@ type runServerConfig struct {
 	forceLivenessTest    bool
 	doPruneServerEntries bool
 	doDanglingTCPConn    bool
+	doPacketManipulation bool
 }
 
 var (
@@ -705,6 +727,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Allow port forwards to local test web server.
 	serverConfig["AllowBogons"] = true
+
+	serverConfig["RunPacketManipulator"] = runConfig.doPacketManipulation
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -1171,11 +1195,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics
 	expectServerBPFField := ServerBPFEnabled() && doServerTactics
+	expectServerPacketManipulationField := runConfig.doPacketManipulation
 
 	select {
 	case logFields := <-serverTunnelLog:
 		err := checkExpectedServerTunnelLogFields(
-			runConfig, expectClientBPFField, expectServerBPFField, logFields)
+			runConfig,
+			expectClientBPFField,
+			expectServerBPFField,
+			expectServerPacketManipulationField,
+			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
 		}
@@ -1186,7 +1215,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if expectUniqueUser {
 		select {
 		case logFields := <-uniqueUserLog:
-			err := checkExpectedUniqueUserLogFields(runConfig, logFields)
+			err := checkExpectedUniqueUserLogFields(
+				runConfig,
+				logFields)
 			if err != nil {
 				t.Fatalf("invalid unique user log fields: %s", err)
 			}
@@ -1209,6 +1240,7 @@ func checkExpectedServerTunnelLogFields(
 	runConfig *runServerConfig,
 	expectClientBPFField bool,
 	expectServerBPFField bool,
+	expectServerPacketManipulationField bool,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -1381,6 +1413,15 @@ func checkExpectedServerTunnelLogFields(
 		if fields[name] == nil {
 			return fmt.Errorf("missing expected field '%s'", name)
 		} else if fmt.Sprintf("%s", fields[name]) != "test-server-bpf" {
+			return fmt.Errorf("unexpected field value %s: '%s'", name, fields[name])
+		}
+	}
+
+	if expectServerPacketManipulationField {
+		name := "server_packet_manipulation"
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		} else if fmt.Sprintf("%s", fields[name]) != "test-packetman-spec" {
 			return fmt.Errorf("unexpected field value %s: '%s'", name, fields[name])
 		}
 	}
@@ -1951,7 +1992,10 @@ func paveTacticsConfigFile(
             "Name" : "test-client-bpf",
               "Instructions" : [
                 {"Op": "RetConstant", "Args": {"Val": 65535}}]},
-          "BPFClientTCPProbability" : 1.0
+          "BPFClientTCPProbability" : 1.0,
+          "ServerPacketManipulationSpecs" : [{"Name": "test-packetman-spec", "PacketSpecs": [["TCP-flags S"]]}],
+          "ServerPacketManipulationProbability" : 1.0,
+          "ServerProtocolPacketManipulations": {"All" : ["test-packetman-spec"]}
         }
       },
       "FilteredTactics" : [
@@ -2199,6 +2243,7 @@ func storePruneServerEntriesTest(
 
 		dialParams, err := psiphon.MakeDialParameters(
 			clientConfig,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
 			func(serverEntry *protocol.ServerEntry) (string, bool) {
 				return runConfig.tunnelProtocol, true

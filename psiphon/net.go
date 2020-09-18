@@ -98,6 +98,11 @@ type DialConfig struct {
 	// FragmentorConfig specifies whether to layer a fragmentor.Conn on top
 	// of dialed TCP conns, and the fragmentation configuration to use.
 	FragmentorConfig *fragmentor.Config
+
+	// UpstreamProxyErrorCallback is called when a dial fails due to an upstream
+	// proxy error. As the upstream proxy is user configured, the error message
+	// may need to be relayed to the user.
+	UpstreamProxyErrorCallback func(error)
 }
 
 // NetworkConnectivityChecker defines the interface to the external
