@@ -194,8 +194,10 @@ func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath s
 		err = uploadFeedback(client, request)
 		cancelFunc()
 		if err != nil {
-			if stdlibErrors.Is(err, context.Canceled) {
-				return errors.TraceMsg(err, "feedback upload interrupted")
+			if ctx.Err() != nil {
+				// Input context has completed
+				return errors.TraceMsg(err,
+					fmt.Sprintf("feedback upload attempt %d cancelled", i+1))
 			}
 			// Do not sleep after the last attempt
 			if i+1 < feedbackUploadMaxRetries {
