@@ -124,7 +124,7 @@ func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath s
 	feedbackUploadMinRetryDelay := p.Duration(parameters.FeedbackUploadRetryMinDelaySeconds)
 	feedbackUploadMaxRetryDelay := p.Duration(parameters.FeedbackUploadRetryMaxDelaySeconds)
 	feedbackUploadTimeout := p.Duration(parameters.FeedbackUploadTimeoutSeconds)
-	feedbackUploadMaxRetries := p.Int(parameters.FeedbackUploadMaxRetries)
+	feedbackUploadMaxAttempts := p.Int(parameters.FeedbackUploadMaxAttempts)
 	transferURLs := p.TransferURLs(parameters.FeedbackUploadURLs)
 	p.Close()
 
@@ -139,7 +139,7 @@ func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath s
 
 	uploadId := prng.HexString(8)
 
-	for i := 0; i < feedbackUploadMaxRetries; i++ {
+	for i := 0; i < feedbackUploadMaxAttempts; i++ {
 
 		uploadURL := transferURLs.Select(i)
 		if uploadURL == nil {
@@ -197,19 +197,20 @@ func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath s
 			if ctx.Err() != nil {
 				// Input context has completed
 				return errors.TraceMsg(err,
-					fmt.Sprintf("feedback upload attempt %d cancelled", i+1))
+					fmt.Sprintf("feedback upload attempt %d/%d cancelled", i+1, feedbackUploadMaxAttempts))
 			}
 			// Do not sleep after the last attempt
-			if i+1 < feedbackUploadMaxRetries {
+			if i+1 < feedbackUploadMaxAttempts {
 				// Log error, sleep and then retry
 				timeUntilRetry := prng.Period(feedbackUploadMinRetryDelay, feedbackUploadMaxRetryDelay)
 				NoticeWarning(
-					"feedback upload attempt %d failed (retry in %.0fs): %s",
-					i+1, timeUntilRetry.Seconds(), errors.Trace(err))
+					"feedback upload attempt %d/%d failed (retry in %.0fs): %s",
+					i+1, feedbackUploadMaxAttempts, timeUntilRetry.Seconds(), errors.Trace(err))
 				select {
 				case <-ctx.Done():
 					return errors.TraceNew(
-						fmt.Sprintf("feedback upload attempt %d cancelled before attempt", i+2))
+						fmt.Sprintf("feedback upload attempt %d/%d cancelled before attempt",
+							i+2, feedbackUploadMaxAttempts))
 				case <-time.After(timeUntilRetry):
 				}
 				continue

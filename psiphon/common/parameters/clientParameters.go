@@ -245,7 +245,7 @@ const (
 	FeedbackUploadURLs                               = "FeedbackUploadURLs"
 	FeedbackEncryptionPublicKey                      = "FeedbackEncryptionPublicKey"
 	FeedbackTacticsWaitPeriod                        = "FeedbackTacticsWaitPeriod"
-	FeedbackUploadMaxRetries                         = "FeedbackUploadMaxRetries"
+	FeedbackUploadMaxAttempts                        = "FeedbackUploadMaxAttempts"
 	FeedbackUploadRetryMinDelaySeconds               = "FeedbackUploadRetryMinDelaySeconds"
 	FeedbackUploadRetryMaxDelaySeconds               = "FeedbackUploadRetryMaxDelaySeconds"
 	FeedbackUploadTimeoutSeconds                     = "FeedbackUploadTimeoutSeconds"
@@ -513,7 +513,7 @@ var defaultClientParameters = map[string]struct {
 	FeedbackUploadURLs:                 {value: TransferURLs{}},
 	FeedbackEncryptionPublicKey:        {value: ""},
 	FeedbackTacticsWaitPeriod:          {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
-	FeedbackUploadMaxRetries:           {value: 5, minimum: 0},
+	FeedbackUploadMaxAttempts:          {value: 5, minimum: 0},
 	FeedbackUploadRetryMinDelaySeconds: {value: 1 * time.Minute, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	FeedbackUploadRetryMaxDelaySeconds: {value: 5 * time.Minute, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	FeedbackUploadTimeoutSeconds:       {value: 30 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
