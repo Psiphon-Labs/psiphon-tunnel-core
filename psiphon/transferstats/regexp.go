@@ -35,12 +35,11 @@ type Regexps []regexpReplace
 
 // MakeRegexps takes the raw string-map form of the regex-replace pairs
 // returned by the server handshake and turns them into a usable object.
-func MakeRegexps(pageViewRegexes, httpsRequestRegexes []map[string]string) (regexps *Regexps, notices []string) {
+func MakeRegexps(hostnameRegexes []map[string]string) (regexps *Regexps, notices []string) {
 	regexpsSlice := make(Regexps, 0)
 	notices = make([]string, 0)
 
-	// We aren't doing page view stats anymore, so we won't process those regexps.
-	for _, rr := range httpsRequestRegexes {
+	for _, rr := range hostnameRegexes {
 		regexString := rr["regex"]
 		if regexString == "" {
 			notices = append(notices, "MakeRegexps: empty regex")
