@@ -32,7 +32,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	stdlibErrors "errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -199,20 +199,26 @@ func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath s
 			}
 			// Do not sleep after the last attempt
 			if i+1 < feedbackUploadMaxRetries {
+				// Log error, sleep and then retry
 				timeUntilRetry := prng.Period(feedbackUploadMinRetryDelay, feedbackUploadMaxRetryDelay)
-				NoticeWarning("uploadFeedback failed: %s, retry in %.0fs", errors.Trace(err), timeUntilRetry.Seconds())
+				NoticeWarning(
+					"feedback upload attempt %d failed (retry in %.0fs): %s",
+					i+1, timeUntilRetry.Seconds(), errors.Trace(err))
 				select {
 				case <-ctx.Done():
-					return errors.TraceNew("feedback upload interrupted")
+					return errors.TraceNew(
+						fmt.Sprintf("feedback upload attempt %d cancelled before attempt", i+2))
 				case <-time.After(timeUntilRetry):
 				}
+				continue
 			}
-		} else {
-			break
+			return errors.TraceMsg(err,
+				fmt.Sprintf("feedback upload failed after %d attempts", i+1))
 		}
+		return nil
 	}
 
-	return err
+	return nil
 }
 
 // Attempt to upload feedback data to server.
