@@ -65,6 +65,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 
 import psi.Psi;
 import psi.PsiphonProvider;
@@ -315,7 +316,10 @@ public class PsiphonTunnel {
     }
 
     // The interface for managing the Psiphon feedback upload operations.
-    // Warning: should not be used in the same process as PsiphonTunnel.
+    // Warnings:
+    // - Should not be used in the same process as PsiphonTunnel.
+    // - Only a single instance of PsiphonTunnelFeedback should be used at a time. Using multiple
+    // instances in parallel, or concurrently, will result in undefined behavior.
     public static class PsiphonTunnelFeedback {
 
         final private ExecutorService workQueue;
@@ -334,8 +338,13 @@ public class PsiphonTunnel {
         // HostFeedbackHandler. The provided HostLogger will be called to log informational notices,
         // including warnings.
         //
-        // Warning: only one active upload is supported at a time. An ongoing upload will be
-        // cancelled if this function is called again before it completes.
+        // Warnings:
+        // - Only one active upload is supported at a time. An ongoing upload will be cancelled if
+        // this function is called again before it completes.
+        // - An ongoing feedback upload started with startSendFeedback() should be stopped with
+        // stopSendFeedback() before the process exits. This ensures that any underlying resources
+        // are cleaned up; failing to do so may result in data store corruption or other undefined
+        // behavior.
         public void startSendFeedback(Context context, HostFeedbackHandler feedbackHandler, HostLogger logger,
                                       String feedbackConfigJson, String diagnosticsJson, String uploadPath,
                                       String clientPlatformPrefix, String clientPlatformSuffix) {
@@ -401,14 +410,16 @@ public class PsiphonTunnel {
             });
         }
 
-        // Interrupt an in-progress feedback upload operation started with startSendFeedback.
-        public void stopSendFeedback() {
-            workQueue.submit(new Runnable() {
+        // Interrupt an in-progress feedback upload operation started with startSendFeedback(). This
+        // call is asynchronous and returns a future which is fulfilled when the underlying stop
+        // operation completes.
+        public Future<Void> stopSendFeedback() {
+            return workQueue.submit(new Runnable() {
                 @Override
                 public void run() {
                     Psi.stopSendFeedback();
                 }
-            });
+            }, null);
         }
     }
 

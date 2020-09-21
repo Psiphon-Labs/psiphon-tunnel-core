@@ -446,6 +446,8 @@ Returns the path where the rotated notices file will be created.
 /*!
  The interface for managing the Psiphon tunnel feedback upload operations.
  @warning Should not be used in the same process as PsiphonTunnel.
+ @warning Only a single instance of PsiphonTunnelFeedback should be used at a time. Using multiple instances in parallel, or
+ concurrently, will result in undefined behavior.
  */
 @interface PsiphonTunnelFeedback : NSObject
 
@@ -463,6 +465,9 @@ Returns the path where the rotated notices file will be created.
  error is non-nil, then the operation failed. Stored as a weak reference; the caller is responsible for holding a strong reference.
  @warning Only one active upload is supported at a time. An ongoing upload will be cancelled if this function is called again before it
  completes.
+ @warning An ongoing feedback upload started with `startSendFeedback:` should be stopped with `stopSendFeedback` before the
+ process exits. This ensures that any underlying resources are cleaned up; failing to do so may result in data store corruption or other
+ undefined behavior.
  */
 - (void)startSendFeedback:(NSString * _Nonnull)feedbackJson
        feedbackConfigJson:(id _Nonnull)feedbackConfigJson
@@ -470,7 +475,10 @@ Returns the path where the rotated notices file will be created.
            loggerDelegate:(id<PsiphonTunnelLoggerDelegate> _Nullable)loggerDelegate
          feedbackDelegate:(id<PsiphonTunnelFeedbackDelegate> _Nonnull)feedbackDelegate;
 
-/// Interrupt an in-progress feedback upload operation started with `startSendFeedback:`.
+/*!
+ Interrupt an in-progress feedback upload operation started with `startSendFeedback:`. This call is synchronous and returns once the
+ upload has been cancelled.
+ */
 - (void)stopSendFeedback;
 
 @end

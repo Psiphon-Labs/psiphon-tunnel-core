@@ -317,6 +317,10 @@ var sendFeedbackWaitGroup *sync.WaitGroup
 //
 // Warnings:
 // - Should not be used with Start concurrently in the same process
+// - An ongoing feedback upload started with StartSendFeedback should be
+//   stopped with StopSendFeedback before the process exists. This ensures that
+//   any underlying resources are cleaned up; failing to do so may result in
+//   data store corruption or other undefined behavior.
 // - Start and StartSendFeedback both make an attempt to migrate persistent
 //   files from legacy locations in a one-time operation. If these functions
 //   are called in parallel, then there is a chance that the migration attempts

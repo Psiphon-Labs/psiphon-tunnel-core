@@ -1812,7 +1812,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 // See comment in header.
 - (void)stopSendFeedback {
-    dispatch_async(self->workQueue, ^{
+    dispatch_sync(self->workQueue, ^{
         GoPsiStopSendFeedback();
     });
 }
