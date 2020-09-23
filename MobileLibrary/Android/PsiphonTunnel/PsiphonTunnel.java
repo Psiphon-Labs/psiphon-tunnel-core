@@ -66,6 +66,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import psi.Psi;
 import psi.PsiphonProvider;
@@ -330,6 +331,33 @@ public class PsiphonTunnel {
             callbackQueue = Executors.newSingleThreadExecutor();
         }
 
+        @Override
+        protected void finalize() throws Throwable {
+            // Ensure the queues are cleaned up.
+            shutdownAndAwaitTermination(callbackQueue);
+            shutdownAndAwaitTermination(workQueue);
+            super.finalize();
+        }
+
+        void shutdownAndAwaitTermination(ExecutorService pool) {
+            try {
+                // Wait a while for existing tasks to terminate
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    pool.shutdownNow(); // Cancel currently executing tasks
+                    // Wait a while for tasks to respond to being cancelled
+                    if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                        System.err.println("PsiphonTunnelFeedback: pool did not terminate");
+                        return;
+                    }
+                }
+            } catch (InterruptedException ie) {
+                // (Re-)Cancel if current thread also interrupted
+                pool.shutdownNow();
+                // Preserve interrupt status
+                Thread.currentThread().interrupt();
+            }
+        }
+
         // Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics
         // information in a particular format, then calls this function to upload it for later
         // investigation. The feedback compatible config and upload path must be provided by
@@ -404,7 +432,12 @@ public class PsiphonTunnel {
                                     }
                                 });
                     } catch (java.lang.Exception e) {
-                        feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
+                        callbackQueue.submit(new Runnable() {
+                            @Override
+                            public void run() {
+                                feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
+                            }
+                        });
                     }
                 }
             });
