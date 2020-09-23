@@ -98,7 +98,13 @@ func getPacketManipulationSpecs(support *SupportServices) ([]*packetman.Spec, er
 	}
 	p := clientParameters.Get()
 
-	specs := p.PacketManipulationSpecs(parameters.ServerPacketManipulationSpecs)
+	paramSpecs := p.PacketManipulationSpecs(parameters.ServerPacketManipulationSpecs)
+
+	specs := make([]*packetman.Spec, len(paramSpecs))
+	for i, spec := range paramSpecs {
+		packetmanSpec := packetman.Spec(*spec)
+		specs[i] = &packetmanSpec
+	}
 
 	return specs, nil
 }

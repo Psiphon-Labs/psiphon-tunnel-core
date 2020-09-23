@@ -21,12 +21,25 @@ package parameters
 
 import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/packetman"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
+// PacketManipulationSpec is a work-around to avoid the client-side code size
+// impact of importing the packetman package and its dependencies.
+//
+// TODO: Given that packetman and its parameters are server-side only,
+// rearrange tactics/parameters to reference packetman.Spec directly, but only
+// in server code. This should allow reinstating the spec.Validate below.
+
+// PacketManipulationSpec is type-compatible with
+// psiphon/common.packetman.Spec.
+type PacketManipulationSpec struct {
+	Name        string
+	PacketSpecs [][]string
+}
+
 // PacketManipulationSpecs is a list of packet manipulation specs.
-type PacketManipulationSpecs []*packetman.Spec
+type PacketManipulationSpecs []*PacketManipulationSpec
 
 // Validate checks that each spec name is unique and that each spec compiles.
 func (specs PacketManipulationSpecs) Validate() error {
@@ -39,10 +52,18 @@ func (specs PacketManipulationSpecs) Validate() error {
 			return errors.TraceNew("duplicate spec name")
 		}
 		specNames[spec.Name] = true
-		err := spec.Validate()
-		if err != nil {
-			return errors.Trace(err)
-		}
+
+		// See PacketManipulationSpec comment above.
+		//
+		// Note that, even with spec.Validate disabled, spec validation will still
+		// be performed, by packetman.Manipulator, on startup and after tactics hot
+		// reload, with equivilent outcomes for invalid specs; however, the tactics
+		// load itself will not fail in this case.
+
+		// err := spec.Validate()
+		// if err != nil {
+		// 	return errors.Trace(err)
+		// }
 	}
 	return nil
 }
