@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"testing"
@@ -87,7 +88,7 @@ func TestFeedbackUpload(t *testing.T) {
 		t.Fatalf("Marshal failed: %s", err)
 	}
 
-	err = SendFeedback(string(configFileContents), string(diagnosticData), "")
+	err = SendFeedback(context.Background(), string(configFileContents), string(diagnosticData), "")
 	if err != nil {
 		t.Fatalf("SendFeedback failed: %s", err)
 	}
