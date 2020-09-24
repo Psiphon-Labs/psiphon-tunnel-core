@@ -159,14 +159,15 @@ func TestTransferURLs(t *testing.T) {
 
 			attempt := 0
 			for i := 0; i < runs; i++ {
-				url, canonicalURL, skipVerify := testCase.transferURLs.Select(attempt)
+				canonicalURL := testCase.transferURLs.CanonicalURL()
 				if canonicalURL != testCase.expectedCanonicalURL {
 					t.Fatalf("unexpected canonical URL: %s", canonicalURL)
 				}
-				if skipVerify {
-					t.Fatalf("expected skipVerify")
+				transferUrl := testCase.transferURLs.Select(attempt)
+				if transferUrl.SkipVerify {
+					t.Fatalf("unexpected skipVerify")
 				}
-				attemptDistinctSelections[attempt][url] += 1
+				attemptDistinctSelections[attempt][transferUrl.URL] += 1
 				attempt = (attempt + 1) % testCase.attempts
 			}
 

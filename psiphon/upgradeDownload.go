@@ -84,14 +84,14 @@ func DownloadUpgrade(
 
 	// Select tunneled or untunneled configuration
 
-	downloadURL, _, skipVerify := urls.Select(attempt)
+	downloadURL := urls.Select(attempt)
 
 	httpClient, _, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
-		skipVerify)
+		downloadURL.SkipVerify)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -102,7 +102,7 @@ func DownloadUpgrade(
 	availableClientVersion := handshakeVersion
 	if availableClientVersion == "" {
 
-		request, err := http.NewRequest("HEAD", downloadURL, nil)
+		request, err := http.NewRequest("HEAD", downloadURL.URL, nil)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -159,7 +159,7 @@ func DownloadUpgrade(
 	n, _, err := ResumeDownload(
 		ctx,
 		httpClient,
-		downloadURL,
+		downloadURL.URL,
 		MakePsiphonUserAgent(config),
 		downloadFilename,
 		"")

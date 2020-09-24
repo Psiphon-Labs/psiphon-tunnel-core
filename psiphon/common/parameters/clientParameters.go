@@ -242,6 +242,13 @@ const (
 	ServerPacketManipulationSpecs                    = "ServerPacketManipulationSpecs"
 	ServerProtocolPacketManipulations                = "ServerProtocolPacketManipulations"
 	ServerPacketManipulationProbability              = "ServerPacketManipulationProbability"
+	FeedbackUploadURLs                               = "FeedbackUploadURLs"
+	FeedbackEncryptionPublicKey                      = "FeedbackEncryptionPublicKey"
+	FeedbackTacticsWaitPeriod                        = "FeedbackTacticsWaitPeriod"
+	FeedbackUploadMaxAttempts                        = "FeedbackUploadMaxAttempts"
+	FeedbackUploadRetryMinDelaySeconds               = "FeedbackUploadRetryMinDelaySeconds"
+	FeedbackUploadRetryMaxDelaySeconds               = "FeedbackUploadRetryMaxDelaySeconds"
+	FeedbackUploadTimeoutSeconds                     = "FeedbackUploadTimeoutSeconds"
 )
 
 const (
@@ -502,6 +509,14 @@ var defaultClientParameters = map[string]struct {
 	ServerPacketManipulationSpecs:       {value: PacketManipulationSpecs{}, flags: serverSideOnly},
 	ServerProtocolPacketManipulations:   {value: make(ProtocolPacketManipulations), flags: serverSideOnly},
 	ServerPacketManipulationProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
+
+	FeedbackUploadURLs:                 {value: TransferURLs{}},
+	FeedbackEncryptionPublicKey:        {value: ""},
+	FeedbackTacticsWaitPeriod:          {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
+	FeedbackUploadMaxAttempts:          {value: 5, minimum: 0},
+	FeedbackUploadRetryMinDelaySeconds: {value: 1 * time.Minute, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	FeedbackUploadRetryMaxDelaySeconds: {value: 5 * time.Minute, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	FeedbackUploadTimeoutSeconds:       {value: 30 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
