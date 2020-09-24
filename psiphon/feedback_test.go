@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"testing"
@@ -46,36 +47,49 @@ func TestFeedbackUpload(t *testing.T) {
 		t.Skipf("error loading configuration file: %s", err)
 	}
 
+	// Unmarshal config, configure data root directory and re-marshal
+
+	var config map[string]interface{}
+
+	err = json.Unmarshal(configFileContents, &config)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %s", err)
+	}
+
+	testDataDirName, err := ioutil.TempDir("", "psiphon-feedback-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s", err)
+	}
+	config["DataRootDirectory"] = testDataDirName
+
+	configFileContents, err = json.Marshal(config)
+	if err != nil {
+		t.Fatalf("Marshal failed: %s", err)
+	}
+
+	// git_rev is a file which contains the shortened hash of the latest commit
+	// pointed to by HEAD, i.e. git rev-parse --short HEAD.
+
 	shortRevHash, err := ioutil.ReadFile("git_rev")
 	if err != nil {
 		// Skip, don't fail, if git rev file is not present
 		t.Skipf("error loading git revision file: %s", err)
 	}
 
-	var config map[string]interface{}
-
-	err = json.Unmarshal(configFileContents, &config)
-	if err != nil {
-		t.Error(err.Error())
-		t.FailNow()
-	}
-
-	// Form dummy feedback data which can be verified later
+	// Construct feedback data which can be verified later
 	diagnostics := Diagnostics{}
-	diagnostics.Feedback.Message.Text = "Travis test feedback. Revision " + string(shortRevHash)
+	diagnostics.Feedback.Message.Text = "Test feedback from feedback_test.go, revision: " + string(shortRevHash)
 	diagnostics.Metadata.Id = "0000000000000000"
 	diagnostics.Metadata.Platform = "android"
 	diagnostics.Metadata.Version = 4
 
 	diagnosticData, err := json.Marshal(diagnostics)
 	if err != nil {
-		t.Error(err.Error())
-		t.FailNow()
+		t.Fatalf("Marshal failed: %s", err)
 	}
 
-	err = SendFeedback(string(configFileContents), string(diagnosticData), config["ENCRYPTION_PUBLIC_KEY"].(string), config["UPLOAD_SERVER"].(string), config["UPLOAD_PATH"].(string), config["UPLOAD_SERVER_HEADERS"].(string))
+	err = SendFeedback(context.Background(), string(configFileContents), string(diagnosticData), "")
 	if err != nil {
-		t.Error(err.Error())
-		t.FailNow()
+		t.Fatalf("SendFeedback failed: %s", err)
 	}
 }

@@ -32,19 +32,16 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
-	"strings"
+	"net/url"
+	"path"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-)
-
-const (
-	FEEDBACK_UPLOAD_MAX_RETRIES         = 5
-	FEEDBACK_UPLOAD_RETRY_DELAY_SECONDS = 300
-	FEEDBACK_UPLOAD_TIMEOUT_SECONDS     = 30
 )
 
 // Conforms to the format expected by the feedback decryptor.
@@ -100,8 +97,8 @@ func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error
 }
 
 // Encrypt feedback and upload to server. If upload fails
-// the feedback thread will sleep and retry multiple times.
-func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) error {
+// the routine will sleep and retry multiple times.
+func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath string) error {
 
 	config, err := LoadConfig([]byte(configJson))
 	if err != nil {
@@ -112,6 +109,25 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 		return errors.Trace(err)
 	}
 
+	// Get tactics, may update client parameters
+	p := config.GetClientParameters().Get()
+	timeout := p.Duration(parameters.FeedbackTacticsWaitPeriod)
+	p.Close()
+	getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
+	defer cancelFunc()
+	// Note: GetTactics will fail silently if the datastore used for retrieving
+	// and storing tactics is opened by another process.
+	GetTactics(getTacticsCtx, config)
+
+	// Get the latest client parameters
+	p = config.GetClientParameters().Get()
+	feedbackUploadMinRetryDelay := p.Duration(parameters.FeedbackUploadRetryMinDelaySeconds)
+	feedbackUploadMaxRetryDelay := p.Duration(parameters.FeedbackUploadRetryMaxDelaySeconds)
+	feedbackUploadTimeout := p.Duration(parameters.FeedbackUploadTimeoutSeconds)
+	feedbackUploadMaxAttempts := p.Int(parameters.FeedbackUploadMaxAttempts)
+	transferURLs := p.TransferURLs(parameters.FeedbackUploadURLs)
+	p.Close()
+
 	untunneledDialConfig := &DialConfig{
 		UpstreamProxyURL:              config.UpstreamProxyURL,
 		CustomHeaders:                 config.CustomHeaders,
@@ -121,65 +137,96 @@ func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 	}
 
-	secureFeedback, err := encryptFeedback(diagnosticsJson, b64EncodedPublicKey)
-	if err != nil {
-		return err
-	}
-
 	uploadId := prng.HexString(8)
 
-	url := "https://" + uploadServer + uploadPath + uploadId
-	headerPieces := strings.Split(uploadServerHeaders, ": ")
-	// Only a single header is expected.
-	if len(headerPieces) != 2 {
-		return errors.Tracef("expected 2 header pieces, got: %d", len(headerPieces))
-	}
+	for i := 0; i < feedbackUploadMaxAttempts; i++ {
 
-	for i := 0; i < FEEDBACK_UPLOAD_MAX_RETRIES; i++ {
-		err = uploadFeedback(
+		uploadURL := transferURLs.Select(i)
+		if uploadURL == nil {
+			return errors.TraceNew("error no feedback upload URL selected")
+		}
+
+		b64PublicKey := uploadURL.B64EncodedPublicKey
+		if b64PublicKey == "" {
+			if config.FeedbackEncryptionPublicKey == "" {
+				return errors.TraceNew("error no default encryption key")
+			}
+			b64PublicKey = config.FeedbackEncryptionPublicKey
+		}
+
+		secureFeedback, err := encryptFeedback(diagnosticsJson, b64PublicKey)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		feedbackUploadCtx, cancelFunc := context.WithTimeout(
+			ctx,
+			feedbackUploadTimeout)
+		defer cancelFunc()
+
+		client, err := MakeUntunneledHTTPClient(
+			feedbackUploadCtx,
 			config,
 			untunneledDialConfig,
-			secureFeedback,
-			url,
-			MakePsiphonUserAgent(config),
-			headerPieces)
+			nil,
+			uploadURL.SkipVerify)
 		if err != nil {
-			time.Sleep(FEEDBACK_UPLOAD_RETRY_DELAY_SECONDS * time.Second)
-		} else {
-			break
+			return errors.Trace(err)
 		}
+
+		parsedURL, err := url.Parse(uploadURL.URL)
+		if err != nil {
+			return errors.TraceMsg(err, "failed to parse feedback upload URL")
+		}
+
+		parsedURL.Path = path.Join(parsedURL.Path, uploadPath, uploadId)
+
+		request, err := http.NewRequestWithContext(feedbackUploadCtx, "PUT", parsedURL.String(), bytes.NewBuffer(secureFeedback))
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		for k, v := range uploadURL.RequestHeaders {
+			request.Header.Set(k, v)
+		}
+		request.Header.Set("User-Agent", MakePsiphonUserAgent(config))
+
+		err = uploadFeedback(client, request)
+		cancelFunc()
+		if err != nil {
+			if ctx.Err() != nil {
+				// Input context has completed
+				return errors.TraceMsg(err,
+					fmt.Sprintf("feedback upload attempt %d/%d cancelled", i+1, feedbackUploadMaxAttempts))
+			}
+			// Do not sleep after the last attempt
+			if i+1 < feedbackUploadMaxAttempts {
+				// Log error, sleep and then retry
+				timeUntilRetry := prng.Period(feedbackUploadMinRetryDelay, feedbackUploadMaxRetryDelay)
+				NoticeWarning(
+					"feedback upload attempt %d/%d failed (retry in %.0fs): %s",
+					i+1, feedbackUploadMaxAttempts, timeUntilRetry.Seconds(), errors.Trace(err))
+				select {
+				case <-ctx.Done():
+					return errors.TraceNew(
+						fmt.Sprintf("feedback upload attempt %d/%d cancelled before attempt",
+							i+2, feedbackUploadMaxAttempts))
+				case <-time.After(timeUntilRetry):
+				}
+				continue
+			}
+			return errors.TraceMsg(err,
+				fmt.Sprintf("feedback upload failed after %d attempts", i+1))
+		}
+		return nil
 	}
 
-	return err
+	return nil
 }
 
 // Attempt to upload feedback data to server.
 func uploadFeedback(
-	config *Config, dialConfig *DialConfig, feedbackData []byte, url, userAgent string, headerPieces []string) error {
-
-	ctx, cancelFunc := context.WithTimeout(
-		context.Background(),
-		time.Duration(FEEDBACK_UPLOAD_TIMEOUT_SECONDS*time.Second))
-	defer cancelFunc()
-
-	client, err := MakeUntunneledHTTPClient(
-		ctx,
-		config,
-		dialConfig,
-		nil,
-		false)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(feedbackData))
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	req.Header.Set("User-Agent", userAgent)
-
-	req.Header.Set(headerPieces[0], headerPieces[1])
+	client *http.Client, req *http.Request) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -188,7 +235,7 @@ func uploadFeedback(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return errors.TraceNew("received HTTP status: " + resp.Status)
+		return errors.TraceNew("unexpected HTTP status: " + resp.Status)
 	}
 
 	return nil

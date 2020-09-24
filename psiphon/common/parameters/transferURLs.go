@@ -34,7 +34,7 @@ type TransferURL struct {
 	// with base64 encoding to mitigate trivial binary executable string scanning.
 	URL string
 
-	// SkipVerify indicates whether to verify HTTPS certificates. It some
+	// SkipVerify indicates whether to verify HTTPS certificates. In some
 	// circumvention scenarios, verification is not possible. This must
 	// only be set to true when the resource has its own verification mechanism.
 	SkipVerify bool
@@ -44,12 +44,22 @@ type TransferURL struct {
 	// candidate locations. For a value of N, this URL is only a candidate
 	// after N rounds of attempting the transfer to or from other URLs.
 	OnlyAfterAttempts int
+
+	// B64EncodedPublicKey is a base64-encoded RSA public key to be used for
+	// encrypting the resource, when uploading, or for verifying a signature of
+	// the resource, when downloading. Required by some operations, such as
+	// uploading feedback.
+	B64EncodedPublicKey string `json:",omitempty"`
+
+	// RequestHeaders are optional HTTP headers to set on any requests made to
+	// the destination.
+	RequestHeaders map[string]string `json:",omitempty"`
 }
 
 // TransferURLs is a list of transfer URLs.
 type TransferURLs []*TransferURL
 
-// DecodeAndValidate validates a list of download URLs.
+// DecodeAndValidate validates a list of transfer URLs.
 //
 // At least one TransferURL in the list must have OnlyAfterAttempts of 0,
 // or no TransferURL would be selected on the first attempt.
@@ -75,28 +85,28 @@ func (t TransferURLs) DecodeAndValidate() error {
 	return nil
 }
 
-// Select chooses a TransferURL from the list.
-//
-// The first return value is the canonical URL, to be used
-// as a key when storing information related to the TransferURLs,
-// such as an ETag.
-//
-// The second return value is the chosen transfer URL, which is
-// selected based at random from the candidates allowed in the
-// specified attempt.
-func (t TransferURLs) Select(attempt int) (string, string, bool) {
+// CanonicalURL returns the canonical URL, to be used as a key when storing
+// information related to the TransferURLs, such as an ETag.
+func (t TransferURLs) CanonicalURL() string {
 
 	// The first OnlyAfterAttempts = 0 URL is the canonical URL. This
 	// is the value used as the key for SetUrlETag when multiple download
 	// URLs can be used to fetch a single entity.
 
-	canonicalURL := ""
 	for _, transferURL := range t {
 		if transferURL.OnlyAfterAttempts == 0 {
-			canonicalURL = transferURL.URL
-			break
+			return transferURL.URL
 		}
 	}
+
+	return ""
+}
+
+// Select chooses a TransferURL from the list.
+//
+// The TransferURL is selected based at random from the candidates allowed in
+// the specified attempt.
+func (t TransferURLs) Select(attempt int) *TransferURL {
 
 	candidates := make([]int, 0)
 	for index, URL := range t {
@@ -108,11 +118,11 @@ func (t TransferURLs) Select(attempt int) (string, string, bool) {
 	if len(candidates) < 1 {
 		// This case is not expected, as DecodeAndValidate should reject configs
 		// that would have no candidates for 0 attempts.
-		return "", "", true
+		return nil
 	}
 
 	selection := prng.Intn(len(candidates))
 	transferURL := t[candidates[selection]]
 
-	return transferURL.URL, canonicalURL, transferURL.SkipVerify
+	return transferURL
 }
