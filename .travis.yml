@@ -15,6 +15,8 @@ script:
 - go test -race -v ./common/fragmentor
 - go test -race -v ./common/obfuscator
 - go test -race -v ./common/osl
+# TODO: enable all packetman tests with tag PACKET_MANIPULATOR_TEST; requires CAP_NETADMIN and CAP_RAW
+- go test -race -v ./common/packetman
 - go test -race -v ./common/parameters
 - go test -race -v ./common/protocol
 - go test -race -v ./common/quic
@@ -27,6 +29,7 @@ script:
 - go test -race -v ./common/values
 - go test -race -v ./common/wildcard
 - go test -race -v ./transferstats
+# TODO: see "packetman" comment above
 - go test -race -v ./server
 - go test -race -v ./server/psinet
 - go test -race -v ../Server/logging/analysis
@@ -39,10 +42,11 @@ script:
 - go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./common/obfuscator
 - go test -v -covermode=count -coverprofile=osl.coverprofile ./common/osl
 - go test -v -covermode=count -coverprofile=parameters.coverprofile ./common/parameters
+- go test -v -covermode=count -coverprofile=packetman.coverprofile ./common/packetman
 - go test -v -covermode=count -coverprofile=protocol.coverprofile ./common/protocol
 - go test -v -covermode=count -coverprofile=quic.coverprofile ./common/quic
 - go test -v -covermode=count -coverprofile=tactics.coverprofile ./common/tactics
-# TODO: see comment above
+# TODO: see "tun" test comment above
 #- sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=tun.coverprofile ./common/tun
 - go test -v -covermode=count -coverprofile=values.coverprofile ./common/values
 - go test -v -covermode=count -coverprofile=wildcard.coverprofile ./common/wildcard

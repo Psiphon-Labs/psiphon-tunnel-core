@@ -278,9 +278,15 @@ func (serverContext *ServerContext) doHandshakeRequest(
 
 	if !ignoreStatsRegexps {
 
+		// The handshake returns page_view_regexes and https_request_regexes.
+		// page_view_regexes is obsolete and not used. https_request_regexes, which
+		// are actually host/domain name regexes, are used for host/domain name
+		// bytes transferred metrics: tunneled traffic TLS SNI server names and HTTP
+		// Host header host names are matched against these regexes to select flows
+		// for bytes transferred counting.
+
 		var regexpsNotices []string
 		serverContext.statsRegexps, regexpsNotices = transferstats.MakeRegexps(
-			handshakeResponse.PageViewRegexes,
 			handshakeResponse.HttpsRequestRegexes)
 
 		for _, notice := range regexpsNotices {

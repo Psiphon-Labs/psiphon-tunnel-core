@@ -171,42 +171,38 @@ func (suite *StatsTestSuite) Test_NoRegexes() {
 }
 
 func (suite *StatsTestSuite) Test_MakeRegexps() {
-	pageViewRegexes := []map[string]string{make(map[string]string)}
-	pageViewRegexes[0]["regex"] = `(^http://[a-z0-9\.]*\.example\.[a-z\.]*)/.*`
-	pageViewRegexes[0]["replace"] = "$1"
+	hostnameRegexes := []map[string]string{make(map[string]string), make(map[string]string)}
+	hostnameRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com)$`
+	hostnameRegexes[0]["replace"] = "$1"
+	hostnameRegexes[1]["regex"] = `^.*example\.org$`
+	hostnameRegexes[1]["replace"] = "replacement"
 
-	httpsRequestRegexes := []map[string]string{make(map[string]string), make(map[string]string)}
-	httpsRequestRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com)$`
-	httpsRequestRegexes[0]["replace"] = "$1"
-	httpsRequestRegexes[1]["regex"] = `^.*example\.org$`
-	httpsRequestRegexes[1]["replace"] = "replacement"
-
-	regexps, notices := MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	regexps, notices := MakeRegexps(hostnameRegexes)
 	suite.NotNil(regexps, "should return a valid object")
-	suite.Len(*regexps, 2, "should only have processed httpsRequestRegexes")
+	suite.Len(*regexps, 2, "should only have processed hostnameRegexes")
 	suite.Len(notices, 0, "should return no notices")
 
 	//
 	// Test some bad regexps
 	//
 
-	httpsRequestRegexes[0]["regex"] = ""
-	httpsRequestRegexes[0]["replace"] = "$1"
-	regexps, notices = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	hostnameRegexes[0]["regex"] = ""
+	hostnameRegexes[0]["replace"] = "$1"
+	regexps, notices = MakeRegexps(hostnameRegexes)
 	suite.NotNil(regexps, "should return a valid object")
 	suite.Len(*regexps, 1, "should have discarded one regexp")
 	suite.Len(notices, 1, "should have returned one notice")
 
-	httpsRequestRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com)$`
-	httpsRequestRegexes[0]["replace"] = ""
-	regexps, notices = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	hostnameRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com)$`
+	hostnameRegexes[0]["replace"] = ""
+	regexps, notices = MakeRegexps(hostnameRegexes)
 	suite.NotNil(regexps, "should return a valid object")
 	suite.Len(*regexps, 1, "should have discarded one regexp")
 	suite.Len(notices, 1, "should have returned one notice")
 
-	httpsRequestRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com$` // missing closing paren
-	httpsRequestRegexes[0]["replace"] = "$1"
-	regexps, notices = MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	hostnameRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com$` // missing closing paren
+	hostnameRegexes[0]["replace"] = "$1"
+	regexps, notices = MakeRegexps(hostnameRegexes)
 	suite.NotNil(regexps, "should return a valid object")
 	suite.Len(*regexps, 1, "should have discarded one regexp")
 	suite.Len(notices, 1, "should have returned one notice")
@@ -214,13 +210,12 @@ func (suite *StatsTestSuite) Test_MakeRegexps() {
 
 func (suite *StatsTestSuite) Test_Regex() {
 	// We'll make a new client with actual regexps.
-	pageViewRegexes := make([]map[string]string, 0)
-	httpsRequestRegexes := []map[string]string{make(map[string]string), make(map[string]string)}
-	httpsRequestRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com)$`
-	httpsRequestRegexes[0]["replace"] = "$1"
-	httpsRequestRegexes[1]["regex"] = `^.*example\.org$`
-	httpsRequestRegexes[1]["replace"] = "replacement"
-	regexps, _ := MakeRegexps(pageViewRegexes, httpsRequestRegexes)
+	hostnameRegexes := []map[string]string{make(map[string]string), make(map[string]string)}
+	hostnameRegexes[0]["regex"] = `^[a-z0-9\.]*\.(example\.com)$`
+	hostnameRegexes[0]["replace"] = "$1"
+	hostnameRegexes[1]["regex"] = `^.*example\.org$`
+	hostnameRegexes[1]["replace"] = "replacement"
+	regexps, _ := MakeRegexps(hostnameRegexes)
 
 	suite.httpClient = &http.Client{
 		Transport: &http.Transport{

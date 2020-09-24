@@ -25,10 +25,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
-// GetInterfaceIPAddresses takes an interface name, such as "eth0", and returns
-// the first IPv4 and IPv6 addresses associated with it. Either of the IPv4 or
-// IPv6 address may be nil. If neither type of address is found, an error
-// is returned.
+// GetInterfaceIPAddresses takes an interface name, such as "eth0", and
+// returns the first non-link local IPv4 and IPv6 addresses associated with
+// it. Either of the IPv4 or IPv6 address may be nil. If neither type of
+// address is found, an error is returned.
 func GetInterfaceIPAddresses(interfaceName string) (net.IP, net.IP, error) {
 
 	var IPv4Address, IPv6Address net.IP
@@ -51,11 +51,11 @@ func GetInterfaceIPAddresses(interfaceName string) (net.IP, net.IP, error) {
 		}
 
 		if ipNet.IP.To4() != nil {
-			if IPv4Address == nil {
+			if IPv4Address == nil && !ipNet.IP.IsLinkLocalUnicast() {
 				IPv4Address = ipNet.IP
 			}
 		} else {
-			if IPv6Address == nil {
+			if IPv6Address == nil && !ipNet.IP.IsLinkLocalUnicast() {
 				IPv6Address = ipNet.IP
 			}
 		}
