@@ -15,7 +15,7 @@ script:
 - go test -race -v ./common/fragmentor
 - go test -race -v ./common/obfuscator
 - go test -race -v ./common/osl
-# TODO: enable all packetman tests with tag PACKET_MANIPULATOR_TEST; requires CAP_NETADMIN and CAP_RAW
+# TODO: enable all packetman tests with tag PSIPHON_RUN_PACKET_MANIPULATOR_TEST; requires CAP_NETADMIN and CAP_RAW
 - go test -race -v ./common/packetman
 - go test -race -v ./common/parameters
 - go test -race -v ./common/protocol
