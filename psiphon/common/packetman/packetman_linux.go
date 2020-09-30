@@ -43,9 +43,8 @@ func IsSupported() bool {
 }
 
 const (
-	netlinkSocketIOTimeout = 10 * time.Millisecond
-	defaultSocketMark      = 0x70736970 // "PSIP"
-	appliedSpecCacheTTL    = 1 * time.Minute
+	defaultSocketMark   = 0x70736970 // "PSIP"
+	appliedSpecCacheTTL = 1 * time.Minute
 )
 
 // Manipulator is a SYN-ACK packet manipulator.
@@ -200,9 +199,13 @@ func (m *Manipulator) Start() (retErr error) {
 	// via https://github.com/florianl/go-nfqueue/issues/3.
 	maxQueueLen := uint32(1024)
 
-	// Note: runContext alone is not sufficient to interrupt the
-	// nfqueue.socketCallback goroutine spawned by nfqueue.Register; timeouts
-	// must be set. See comment in Manipulator.Stop.
+	// Timeout note: on a small subset of production servers, we have found that
+	// setting a non-zero read timeout results in occasional "orphaned" packets
+	// which remain in the queue but are not delivered to handleInterceptedPacket
+	// for a verdict. This phenomenon leads to a stall in nfqueue processing once
+	// the queue fills up with packers apparently awaiting a verdict. The shorter
+	// the timeout, the faster that orphaned packets accumulate. With no timeout,
+	// and reads in blocking mode, this phenomenon does not occur.
 
 	m.nfqueue, err = nfqueue.Open(
 		&nfqueue.Config{
@@ -211,8 +214,8 @@ func (m *Manipulator) Start() (retErr error) {
 			MaxQueueLen:  maxQueueLen,
 			Copymode:     nfqueue.NfQnlCopyPacket,
 			Logger:       newNfqueueLogger(m.config.Logger),
-			ReadTimeout:  netlinkSocketIOTimeout,
-			WriteTimeout: netlinkSocketIOTimeout,
+			ReadTimeout:  0,
+			WriteTimeout: 0,
 		})
 	if err != nil {
 		return errors.Trace(err)
@@ -252,23 +255,13 @@ func (m *Manipulator) Stop() {
 		return
 	}
 
+	// Call stopRunning before interrupting the blocked read; this ensures that
+	// the nfqueue socketCallback loop will exit after the read is interrupted.
+
 	m.stopRunning()
 
-	// stopRunning will cancel the context passed into nfqueue.Register. The
-	// goroutine spawned by Register, nfqueue.socketCallback, polls the context
-	// after a read timeout:
-	// https://github.com/florianl/go-nfqueue/blob/1e38df738c06deffbac08da8fec4b7c28a69b918/nfqueue_gteq_1.12.go#L138-L146
-	//
-	// There's no stop synchronization exposed by nfqueue. Calling nfqueue.Close
-	// while socketCallback is still running can result in errors such as
-	// "nfqueuenfqueue_gteq_1.12.go:134: Could not unbind from queue: netlink
-	// send: sendmsg: bad file descriptor".
-	//
-	// To avoid invalid file descriptor operations and spurious error messages,
-	// sleep for two polling periods, which should be sufficient, in most cases,
-	// for socketCallback to poll the context and exit.
-
-	time.Sleep(2 * netlinkSocketIOTimeout)
+	// Interrupt a blocked read.
+	m.nfqueue.Con.SetDeadline(time.Unix(0, 1))
 
 	m.nfqueue.Close()
 
