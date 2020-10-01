@@ -1243,7 +1243,7 @@ public class PsiphonTunnel {
         ConnectivityManager connectivityManager =
                 (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (connectivityManager == null) {
-            return dnsAddresses;
+            throw new Exception(errorMessage, "Couldn't get ConnectivityManager system service");
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             NetworkRequest networkRequest = new NetworkRequest.Builder().build();
