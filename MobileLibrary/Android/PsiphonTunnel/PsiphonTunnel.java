@@ -23,7 +23,9 @@ import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
+import android.net.Network;
 import android.net.NetworkInfo;
+import android.net.NetworkRequest;
 import android.net.VpnService;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
@@ -60,6 +62,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -1232,17 +1235,46 @@ public class PsiphonTunnel {
         throw new Exception("no active network DNS resolver");
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private static Collection<InetAddress> getActiveNetworkDnsResolvers(Context context)
             throws Exception {
         final String errorMessage = "getActiveNetworkDnsResolvers failed";
         ArrayList<InetAddress> dnsAddresses = new ArrayList<InetAddress>();
+
+        ConnectivityManager connectivityManager =
+                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivityManager == null) {
+            throw new Exception(errorMessage, "Couldn't get ConnectivityManager system service");
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            NetworkRequest networkRequest = new NetworkRequest.Builder().build();
+            final CountDownLatch countDownLatch = new CountDownLatch(1);
+            try {
+                ConnectivityManager.NetworkCallback networkCallback =
+                        new ConnectivityManager.NetworkCallback() {
+                            @Override
+                            public void onLinkPropertiesChanged(Network network,
+                                                                LinkProperties linkProperties) {
+                                dnsAddresses.addAll(linkProperties.getDnsServers());
+                                countDownLatch.countDown();
+                            }
+                        };
+
+                connectivityManager.registerNetworkCallback(networkRequest, networkCallback);
+                countDownLatch.await(1, TimeUnit.SECONDS);
+                connectivityManager.unregisterNetworkCallback(networkCallback);
+            } catch (RuntimeException ignored) {
+                // Failed to register network callback
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (!dnsAddresses.isEmpty()) {
+                return dnsAddresses;
+            }
+        }
         try {
             // Hidden API
             // - only available in Android 4.0+
             // - no guarantee will be available beyond 4.2, or on all vendor devices
-            ConnectivityManager connectivityManager =
-                    (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
             Class<?> LinkPropertiesClass = Class.forName("android.net.LinkProperties");
             Method getActiveLinkPropertiesMethod = ConnectivityManager.class.getMethod("getActiveLinkProperties", new Class []{});
             Object linkProperties = getActiveLinkPropertiesMethod.invoke(connectivityManager);
