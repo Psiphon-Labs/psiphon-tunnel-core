@@ -1,4 +1,4 @@
-// +build PACKET_MANIPULATOR_TEST
+// +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
 
 /*
  * Copyright (c) 2020, Psiphon Inc.

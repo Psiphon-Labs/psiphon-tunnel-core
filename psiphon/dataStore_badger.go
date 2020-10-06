@@ -1,4 +1,4 @@
-// +build BADGER_DB
+// +build PSIPHON_USE_BADGER_DB
 
 /*
  * Copyright (c) 2018, Psiphon Inc.
