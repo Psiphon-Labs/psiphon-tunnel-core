@@ -1,5 +1,3 @@
-// +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
-
 /*
  * Copyright (c) 2020, Psiphon Inc.
  * All rights reserved.
@@ -19,28 +17,20 @@
  *
  */
 
-package server
+#import <Foundation/Foundation.h>
+#import "PsiphonTunnel.h"
+#import "Psi-meta.h"
 
-import (
-	"testing"
-)
+NS_ASSUME_NONNULL_BEGIN
 
-func TestServerPacketManipulation(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: true,
-			omitAuthorization:    false,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    true,
-			doPacketManipulation: true,
-		})
-}
+/// PsiphonProviderFeedbackHandlerShim provides a shim between the internal GoPsiPsiphonProviderFeedbackHandler and exported
+/// PsiphonTunnelFeedbackDelegate interfaces.
+@interface PsiphonProviderFeedbackHandlerShim : NSObject <GoPsiPsiphonProviderFeedbackHandler>
+
+/// Initialize the shim with the given feedback delegate.
+/// @param handler Callback which is invoked when the feedback upload completes.
+- (id)initWithHandler:(void (^__nonnull)(NSError *_Nonnull))handler;
+
+@end
+
+NS_ASSUME_NONNULL_END

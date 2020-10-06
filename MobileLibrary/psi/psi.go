@@ -40,14 +40,22 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
-type PsiphonProvider interface {
+type PsiphonProviderNoticeHandler interface {
 	Notice(noticeJSON string)
+}
+
+type PsiphonProvider interface {
+	PsiphonProviderNoticeHandler
 	HasNetworkConnectivity() int
 	BindToDevice(fileDescriptor int) (string, error)
 	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
 	GetNetworkID() string
+}
+
+type PsiphonProviderFeedbackHandler interface {
+	SendFeedbackCompleted(err error)
 }
 
 func NoticeUserLog(message string) {
@@ -290,9 +298,91 @@ func ImportExchangePayload(payload string) bool {
 	return controller.ImportExchangePayload(payload)
 }
 
-// Encrypt and upload feedback.
-func SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders string) error {
-	return psiphon.SendFeedback(configJson, diagnosticsJson, b64EncodedPublicKey, uploadServer, uploadPath, uploadServerHeaders)
+var sendFeedbackMutex sync.Mutex
+var sendFeedbackCtx context.Context
+var stopSendFeedback context.CancelFunc
+var sendFeedbackWaitGroup *sync.WaitGroup
+
+// StartSendFeedback encrypts the provided diagnostics and then attempts to
+// upload the encrypted diagnostics to one of the feedback upload locations
+// supplied by the provided config or tactics.
+//
+// Returns immediately after starting the operation in a goroutine. The
+// operation has completed when SendFeedbackCompleted(error) is called on the
+// provided PsiphonProviderFeedbackHandler; if error is non-nil, then the
+// operation failed.
+//
+// Only one active upload is supported at a time. An ongoing upload will be
+// cancelled if this function is called again before it completes.
+//
+// Warnings:
+// - Should not be used with Start concurrently in the same process
+// - An ongoing feedback upload started with StartSendFeedback should be
+//   stopped with StopSendFeedback before the process exists. This ensures that
+//   any underlying resources are cleaned up; failing to do so may result in
+//   data store corruption or other undefined behavior.
+// - Start and StartSendFeedback both make an attempt to migrate persistent
+//   files from legacy locations in a one-time operation. If these functions
+//   are called in parallel, then there is a chance that the migration attempts
+//   could execute at the same time and result in non-fatal errors in one, or
+//   both, of the migration operations.
+// - Calling StartSendFeedback or StopSendFeedback on the same call stack
+//   that the PsiphonProviderFeedbackHandler.SendFeedbackCompleted() callback
+//   is delivered on can cause a deadlock. I.E. the callback code must return
+//   so the wait group can complete and the lock acquired in StopSendFeedback
+//   can be released.
+func StartSendFeedback(
+	configJson,
+	diagnosticsJson,
+	uploadPath string,
+	feedbackHandler PsiphonProviderFeedbackHandler,
+	noticeHandler PsiphonProviderNoticeHandler) {
+
+	// Cancel any ongoing uploads.
+	StopSendFeedback()
+
+	sendFeedbackMutex.Lock()
+	defer sendFeedbackMutex.Unlock()
+
+	sendFeedbackCtx, stopSendFeedback = context.WithCancel(context.Background())
+
+	// Unlike in Start, the provider is not wrapped in a newMutexPsiphonProvider
+	// or equivilent, as SendFeedback is not expected to be used in a memory
+	// constrained environment.
+
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+		func(notice []byte) {
+			noticeHandler.Notice(string(notice))
+		}))
+
+	sendFeedbackWaitGroup = new(sync.WaitGroup)
+	sendFeedbackWaitGroup.Add(1)
+
+	go func() {
+		defer sendFeedbackWaitGroup.Done()
+		err := psiphon.SendFeedback(sendFeedbackCtx, configJson, diagnosticsJson, uploadPath)
+		feedbackHandler.SendFeedbackCompleted(err)
+	}()
+}
+
+// StopSendFeedback interrupts an in-progress feedback upload operation
+// started with `StartSendFeedback`.
+//
+// Warning: should not be used with Start concurrently in the same process.
+func StopSendFeedback() {
+
+	sendFeedbackMutex.Lock()
+	defer sendFeedbackMutex.Unlock()
+
+	if stopSendFeedback != nil {
+		stopSendFeedback()
+		sendFeedbackWaitGroup.Wait()
+		sendFeedbackCtx = nil
+		stopSendFeedback = nil
+		sendFeedbackWaitGroup = nil
+		// Allow the notice receiver to be deallocated.
+		psiphon.SetNoticeWriter(os.Stderr)
+	}
 }
 
 // Get build info from tunnel-core

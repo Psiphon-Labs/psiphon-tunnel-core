@@ -1,5 +1,3 @@
-// +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
-
 /*
  * Copyright (c) 2020, Psiphon Inc.
  * All rights reserved.
@@ -19,28 +17,26 @@
  *
  */
 
-package server
+#import "PsiphonProviderNoticeHandlerShim.h"
 
-import (
-	"testing"
-)
-
-func TestServerPacketManipulation(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: true,
-			omitAuthorization:    false,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    true,
-			doPacketManipulation: true,
-		})
+@implementation PsiphonProviderNoticeHandlerShim {
+    void (^logger) (NSString *_Nonnull);
 }
+
+- (id)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger {
+    self = [super init];
+    if (self != nil) {
+        self->logger = logger;
+    }
+    return self;
+}
+
+#pragma mark - GoPsiPsiphonProviderNoticeHandler implementation
+
+- (void)notice:(NSString *)noticeJSON {
+    if (self->logger != nil) {
+        self->logger(noticeJSON);
+    }
+}
+
+@end

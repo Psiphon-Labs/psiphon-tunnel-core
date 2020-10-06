@@ -1,5 +1,3 @@
-// +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
-
 /*
  * Copyright (c) 2020, Psiphon Inc.
  * All rights reserved.
@@ -19,28 +17,26 @@
  *
  */
 
-package server
+#import "PsiphonProviderFeedbackHandlerShim.h"
 
-import (
-	"testing"
-)
-
-func TestServerPacketManipulation(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: true,
-			omitAuthorization:    false,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    true,
-			doPacketManipulation: true,
-		})
+@implementation PsiphonProviderFeedbackHandlerShim {
+    void (^handler) (NSError *_Nonnull);
 }
+
+- (id)initWithHandler:(void (^__nonnull)(NSError *_Nonnull))handler; {
+    self = [super init];
+    if (self != nil) {
+        self->handler = handler;
+    }
+    return self;
+}
+
+#pragma mark - GoPsiPsiphonProviderFeedbackHandler implementation
+
+- (void)sendFeedbackCompleted:(NSError *)err {
+    if (self->handler) {
+        self->handler(err);
+    }
+}
+
+@end

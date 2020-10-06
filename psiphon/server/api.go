@@ -320,6 +320,10 @@ func handshakeAPIRequestHandler(
 		}
 	}
 
+	// PageViewRegexes is obsolete and not used by any tunnel-core clients. In
+	// the JSON response, return an empty array instead of null for legacy
+	// clients.
+
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:             sessionID,
 		Homepages:                db.GetRandomizedHomepages(sponsorID, geoIPData.Country, geoIPData.ASN, isMobile),

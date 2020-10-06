@@ -1,7 +1,5 @@
-// +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
-
 /*
- * Copyright (c) 2020, Psiphon Inc.
+ * Copyright (c) 2019, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,28 +17,22 @@
  *
  */
 
-package server
+#import "Backups.h"
 
-import (
-	"testing"
-)
+@implementation Backups
 
-func TestServerPacketManipulation(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: true,
-			omitAuthorization:    false,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    true,
-			doPacketManipulation: true,
-		})
+// See comment in header
++ (BOOL)excludeFileFromBackup:(NSString*)filePath err:(NSError**)err {
+    *err = nil;
+
+    // The URL must be of the file scheme ("file://"), otherwise the `setResourceValue:forKey:error`
+    // operation will silently fail with: "CFURLCopyResourcePropertyForKey failed because passed URL
+    // no scheme".
+    NSURL *urlWithScheme = [NSURL fileURLWithPath:filePath];
+
+    return [urlWithScheme setResourceValue:[NSNumber numberWithBool:YES]
+                                    forKey:NSURLIsExcludedFromBackupKey
+                                     error:err];
 }
+
+@end

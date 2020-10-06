@@ -1,7 +1,5 @@
-// +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
-
 /*
- * Copyright (c) 2020, Psiphon Inc.
+ * Copyright (c) 2019, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,28 +17,18 @@
  *
  */
 
-package server
+#import <Foundation/Foundation.h>
 
-import (
-	"testing"
-)
+NS_ASSUME_NONNULL_BEGIN
 
-func TestServerPacketManipulation(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: true,
-			omitAuthorization:    false,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    true,
-			doPacketManipulation: true,
-		})
-}
+@interface Backups : NSObject
+
+/// Excludes the target file from application backups made by iCloud and iTunes.
+/// If NO is returned, the file was not successfully excluded from backup and the error is populated.
+/// @param filePath Path at which the file exists.
+/// @param err If non-nil, contains the error encountered when attempting to exclude the file from backup.
++ (BOOL)excludeFileFromBackup:(NSString*)filePath err:(NSError * _Nullable *)err;
+
+@end
+
+NS_ASSUME_NONNULL_END

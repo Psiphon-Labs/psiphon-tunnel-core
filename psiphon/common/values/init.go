@@ -1,4 +1,4 @@
-// +build INIT_PSIPHON_COMMON_VALUES
+// +build PSIPHON_INIT_COMMON_VALUES
 
 /*
  * Copyright (c) 2019, Psiphon Inc.
@@ -21,7 +21,7 @@
 
 package values
 
-// This file is a guard against building with INIT_PSIPHON_COMMON_VALUES
+// This file is a guard against building with PSIPHON_INIT_COMMON_VALUES
 // without replacing init.go.
 
 var buildGuard = intentionally_undefined

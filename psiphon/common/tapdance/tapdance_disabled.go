@@ -1,4 +1,4 @@
-// +build !TAPDANCE
+// +build !PSIPHON_ENABLE_TAPDANCE
 
 /*
  * Copyright (c) 2018, Psiphon Inc.

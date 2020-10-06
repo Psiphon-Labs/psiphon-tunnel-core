@@ -1,5 +1,3 @@
-// +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
-
 /*
  * Copyright (c) 2020, Psiphon Inc.
  * All rights reserved.
@@ -19,28 +17,19 @@
  *
  */
 
-package server
+#import <Foundation/Foundation.h>
+#import "Psi-meta.h"
 
-import (
-	"testing"
-)
+NS_ASSUME_NONNULL_BEGIN
 
-func TestServerPacketManipulation(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: true,
-			omitAuthorization:    false,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    true,
-			doPacketManipulation: true,
-		})
-}
+/// PsiphonProviderNoticeHandlerShim provides a shim between GoPsiPsiphonProviderNoticeHandler and a block which logs notices.
+/// @note This indirection is required because gomobile does not support Objective-C blocks.
+@interface PsiphonProviderNoticeHandlerShim : NSObject <GoPsiPsiphonProviderNoticeHandler>
+
+/// Initialize the notice handler with the given logger.
+/// @param logger Logger which will receive notices.
+- (id)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger;
+
+@end
+
+NS_ASSUME_NONNULL_END

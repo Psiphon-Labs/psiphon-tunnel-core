@@ -1,4 +1,4 @@
-// +build !RUN_PPROF
+// +build !PSIPHON_RUN_PPROF
 
 /*
  * Copyright (c) 2018, Psiphon Inc.

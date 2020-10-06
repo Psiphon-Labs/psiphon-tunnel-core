@@ -23,7 +23,9 @@ import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
+import android.net.Network;
 import android.net.NetworkInfo;
+import android.net.NetworkRequest;
 import android.net.VpnService;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
@@ -60,16 +62,35 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import psi.Psi;
 import psi.PsiphonProvider;
+import psi.PsiphonProviderNoticeHandler;
+import psi.PsiphonProviderFeedbackHandler;
 
 public class PsiphonTunnel {
 
-    public interface HostService {
+    public interface HostLogger {
+        default public void onDiagnosticMessage(String message) {}
+    }
+
+    // Protocol used to communicate the outcome of feedback upload operations to the application
+    // using PsiphonTunnelFeedback.
+    public interface HostFeedbackHandler {
+        // Callback which is invoked once the feedback upload has completed.
+        // If the exception is non-null, then the upload failed.
+        default public void sendFeedbackCompleted(java.lang.Exception e) {}
+    }
+
+    public interface HostService extends HostLogger {
 
         public String getAppName();
         public Context getContext();
@@ -77,7 +98,6 @@ public class PsiphonTunnel {
 
         default public Object getVpnService() {return null;} // Object must be a VpnService (Android < 4 cannot reference this class name)
         default public Object newVpnServiceBuilder() {return null;} // Object must be a VpnService.Builder (Android < 4 cannot reference this class name)
-        default public void onDiagnosticMessage(String message) {}
         default public void onAvailableEgressRegions(List<String> regions) {}
         default public void onSocksProxyPortInUse(int port) {}
         default public void onHttpProxyPortInUse(int port) {}
@@ -297,6 +317,151 @@ public class PsiphonTunnel {
     // sample profiles that require active sampling. When set to 0, these profiles are skipped.
     public void writeRuntimeProfiles(String outputDirectory, int cpuSampleDurationSeconnds, int blockSampleDurationSeconds) {
         Psi.writeRuntimeProfiles(outputDirectory, cpuSampleDurationSeconnds, blockSampleDurationSeconds);
+    }
+
+    // The interface for managing the Psiphon feedback upload operations.
+    // Warnings:
+    // - Should not be used in the same process as PsiphonTunnel.
+    // - Only a single instance of PsiphonTunnelFeedback should be used at a time. Using multiple
+    // instances in parallel, or concurrently, will result in undefined behavior.
+    public static class PsiphonTunnelFeedback {
+
+        final private ExecutorService workQueue;
+        final private ExecutorService callbackQueue;
+
+        public PsiphonTunnelFeedback() {
+            workQueue = Executors.newSingleThreadExecutor();
+            callbackQueue = Executors.newSingleThreadExecutor();
+        }
+
+        @Override
+        protected void finalize() throws Throwable {
+            // Ensure the queues are cleaned up.
+            shutdownAndAwaitTermination(callbackQueue);
+            shutdownAndAwaitTermination(workQueue);
+            super.finalize();
+        }
+
+        void shutdownAndAwaitTermination(ExecutorService pool) {
+            try {
+                // Wait a while for existing tasks to terminate
+                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    pool.shutdownNow(); // Cancel currently executing tasks
+                    // Wait a while for tasks to respond to being cancelled
+                    if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                        System.err.println("PsiphonTunnelFeedback: pool did not terminate");
+                        return;
+                    }
+                }
+            } catch (InterruptedException ie) {
+                // (Re-)Cancel if current thread also interrupted
+                pool.shutdownNow();
+                // Preserve interrupt status
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        // Upload a feedback package to Psiphon Inc. The app collects feedback and diagnostics
+        // information in a particular format, then calls this function to upload it for later
+        // investigation. The feedback compatible config and upload path must be provided by
+        // Psiphon Inc. This call is asynchronous and returns before the upload completes. The
+        // operation has completed when sendFeedbackCompleted() is called on the provided
+        // HostFeedbackHandler. The provided HostLogger will be called to log informational notices,
+        // including warnings.
+        //
+        // Warnings:
+        // - Only one active upload is supported at a time. An ongoing upload will be cancelled if
+        // this function is called again before it completes.
+        // - An ongoing feedback upload started with startSendFeedback() should be stopped with
+        // stopSendFeedback() before the process exits. This ensures that any underlying resources
+        // are cleaned up; failing to do so may result in data store corruption or other undefined
+        // behavior.
+        // - PsiphonTunnel.startTunneling and startSendFeedback both make an attempt to migrate
+        // persistent files from legacy locations in a one-time operation. If these functions are
+        // called in parallel, then there is a chance that the migration attempts could execute at
+        // the same time and result in non-fatal errors in one, or both, of the migration
+        // operations.
+        public void startSendFeedback(Context context, HostFeedbackHandler feedbackHandler, HostLogger logger,
+                                      String feedbackConfigJson, String diagnosticsJson, String uploadPath,
+                                      String clientPlatformPrefix, String clientPlatformSuffix) {
+
+            workQueue.submit(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        // Adds fields used in feedback upload, e.g. client platform.
+                        String psiphonConfig = buildPsiphonConfig(context, logger, feedbackConfigJson,
+                                clientPlatformPrefix, clientPlatformSuffix, false, 0);
+
+                        Psi.startSendFeedback(psiphonConfig, diagnosticsJson, uploadPath,
+                                new PsiphonProviderFeedbackHandler() {
+                                    @Override
+                                    public void sendFeedbackCompleted(java.lang.Exception e) {
+                                        callbackQueue.submit(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                feedbackHandler.sendFeedbackCompleted(e);
+                                            }
+                                        });
+                                    }
+                                },
+                                new PsiphonProviderNoticeHandler() {
+                                    @Override
+                                    public void notice(String noticeJSON) {
+
+                                        try {
+                                            JSONObject notice = new JSONObject(noticeJSON);
+
+                                            String noticeType = notice.getString("noticeType");
+                                            if (noticeType == null) {
+                                                return;
+                                            }
+
+                                            JSONObject data = notice.getJSONObject("data");
+                                            if (data == null) {
+                                                return;
+                                            }
+
+                                            String diagnosticMessage = noticeType + ": " + data.toString();
+                                            callbackQueue.submit(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    logger.onDiagnosticMessage(diagnosticMessage);
+                                                }
+                                            });
+                                        } catch (java.lang.Exception e) {
+                                            callbackQueue.submit(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    logger.onDiagnosticMessage("Error handling notice " + e.toString());
+                                                }
+                                            });
+                                        }
+                                    }
+                                });
+                    } catch (java.lang.Exception e) {
+                        callbackQueue.submit(new Runnable() {
+                            @Override
+                            public void run() {
+                                feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
+                            }
+                        });
+                    }
+                }
+            });
+        }
+
+        // Interrupt an in-progress feedback upload operation started with startSendFeedback(). This
+        // call is asynchronous and returns a future which is fulfilled when the underlying stop
+        // operation completes.
+        public Future<Void> stopSendFeedback() {
+            return workQueue.submit(new Runnable() {
+                @Override
+                public void run() {
+                    Psi.stopSendFeedback();
+                }
+            }, null);
+        }
     }
 
     //----------------------------------------------------------------------------------------------
@@ -615,9 +780,19 @@ public class PsiphonTunnel {
     private String loadPsiphonConfig(Context context)
             throws IOException, JSONException, Exception {
 
+        return buildPsiphonConfig(context, mHostService, mHostService.getPsiphonConfig(),
+                mClientPlatformPrefix.get(), mClientPlatformSuffix.get(), isVpnMode(),
+                mLocalSocksProxyPort.get());
+    }
+
+    private static String buildPsiphonConfig(Context context, HostLogger logger, String psiphonConfig,
+                                             String clientPlatformPrefix, String clientPlatformSuffix,
+                                             boolean isVpnMode, Integer localSocksProxyPort)
+            throws IOException, JSONException, Exception {
+
         // Load settings from the raw resource JSON config file and
         // update as necessary. Then write JSON to disk for the Go client.
-        JSONObject json = new JSONObject(mHostService.getPsiphonConfig());
+        JSONObject json = new JSONObject(psiphonConfig);
 
         // On Android, this directory must be set to the app private storage area.
         // The Psiphon library won't be able to use its current working directory
@@ -658,46 +833,44 @@ public class PsiphonTunnel {
 
         // This parameter is for stats reporting
         if (!json.has("TunnelWholeDevice")) {
-            json.put("TunnelWholeDevice", isVpnMode() ? 1 : 0);
+            json.put("TunnelWholeDevice", isVpnMode ? 1 : 0);
         }
 
         json.put("EmitBytesTransferred", true);
 
-        if (mLocalSocksProxyPort.get() != 0 && (!json.has("LocalSocksProxyPort") || json.getInt("LocalSocksProxyPort") == 0)) {
+        if (localSocksProxyPort != 0 && (!json.has("LocalSocksProxyPort") || json.getInt("LocalSocksProxyPort") == 0)) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
             // A side-effect of this is that changing the SOCKS port preference
             // has no effect with restartPsiphon(), a full stop() is necessary.
-            json.put("LocalSocksProxyPort", mLocalSocksProxyPort);
+            json.put("LocalSocksProxyPort", localSocksProxyPort);
         }
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
             try {
                 json.put(
                         "TrustedCACertificatesFilename",
-                        setupTrustedCertificates(mHostService.getContext()));
+                        setupTrustedCertificates(context, logger));
             } catch (Exception e) {
-                mHostService.onDiagnosticMessage(e.getMessage());
+                logger.onDiagnosticMessage(e.getMessage());
             }
         }
 
-        json.put("DeviceRegion", getDeviceRegion(mHostService.getContext()));
+        json.put("DeviceRegion", getDeviceRegion(context));
 
         StringBuilder clientPlatform = new StringBuilder();
 
-        String prefix = mClientPlatformPrefix.get();
-        if (prefix.length() > 0) {
-            clientPlatform.append(prefix);
+        if (clientPlatformPrefix.length() > 0) {
+            clientPlatform.append(clientPlatformPrefix);
         }
 
         clientPlatform.append("Android_");
         clientPlatform.append(Build.VERSION.RELEASE);
         clientPlatform.append("_");
-        clientPlatform.append(mHostService.getContext().getPackageName());
+        clientPlatform.append(context.getPackageName());
 
-        String suffix = mClientPlatformSuffix.get();
-        if (suffix.length() > 0) {
-            clientPlatform.append(suffix);
+        if (clientPlatformSuffix.length() > 0) {
+            clientPlatform.append(clientPlatformSuffix);
         }
 
         json.put("ClientPlatform", clientPlatform.toString().replaceAll("[^\\w\\-\\.]", "_"));
@@ -802,7 +975,7 @@ public class PsiphonTunnel {
         }
     }
 
-    private String setupTrustedCertificates(Context context) throws Exception {
+    private static String setupTrustedCertificates(Context context, HostLogger logger) throws Exception {
 
         // Copy the Android system CA store to a local, private cert bundle file.
         //
@@ -863,7 +1036,7 @@ public class PsiphonTunnel {
                     output.println("-----END CERTIFICATE-----");
                 }
 
-                mHostService.onDiagnosticMessage("prepared PsiphonCAStore");
+                logger.onDiagnosticMessage("prepared PsiphonCAStore");
 
                 return file.getAbsolutePath();
 
@@ -1062,17 +1235,46 @@ public class PsiphonTunnel {
         throw new Exception("no active network DNS resolver");
     }
 
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private static Collection<InetAddress> getActiveNetworkDnsResolvers(Context context)
             throws Exception {
         final String errorMessage = "getActiveNetworkDnsResolvers failed";
         ArrayList<InetAddress> dnsAddresses = new ArrayList<InetAddress>();
+
+        ConnectivityManager connectivityManager =
+                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivityManager == null) {
+            throw new Exception(errorMessage, new Throwable("couldn't get ConnectivityManager system service"));
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            NetworkRequest networkRequest = new NetworkRequest.Builder().build();
+            final CountDownLatch countDownLatch = new CountDownLatch(1);
+            try {
+                ConnectivityManager.NetworkCallback networkCallback =
+                        new ConnectivityManager.NetworkCallback() {
+                            @Override
+                            public void onLinkPropertiesChanged(Network network,
+                                                                LinkProperties linkProperties) {
+                                dnsAddresses.addAll(linkProperties.getDnsServers());
+                                countDownLatch.countDown();
+                            }
+                        };
+
+                connectivityManager.registerNetworkCallback(networkRequest, networkCallback);
+                countDownLatch.await(1, TimeUnit.SECONDS);
+                connectivityManager.unregisterNetworkCallback(networkCallback);
+            } catch (RuntimeException ignored) {
+                // Failed to register network callback
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (!dnsAddresses.isEmpty()) {
+                return dnsAddresses;
+            }
+        }
         try {
             // Hidden API
             // - only available in Android 4.0+
             // - no guarantee will be available beyond 4.2, or on all vendor devices
-            ConnectivityManager connectivityManager =
-                    (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
             Class<?> LinkPropertiesClass = Class.forName("android.net.LinkProperties");
             Method getActiveLinkPropertiesMethod = ConnectivityManager.class.getMethod("getActiveLinkProperties", new Class []{});
             Object linkProperties = getActiveLinkPropertiesMethod.invoke(connectivityManager);
