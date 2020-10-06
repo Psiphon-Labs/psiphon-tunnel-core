@@ -1,4 +1,4 @@
-// +build MARIONETTE
+// +build PSIPHON_ENABLE_MARIONETTE
 
 /*
  * Copyright (c) 2018, Psiphon Inc.

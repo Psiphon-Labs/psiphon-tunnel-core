@@ -1,4 +1,4 @@
-// +build DISABLE_QUIC
+// +build PSIPHON_DISABLE_QUIC
 
 /*
  * Copyright (c) 2020, Psiphon Inc.

@@ -1,4 +1,4 @@
-// +build FILES_DB
+// +build PSIPHON_USE_FILES_DB
 
 /*
  * Copyright (c) 2018, Psiphon Inc.
