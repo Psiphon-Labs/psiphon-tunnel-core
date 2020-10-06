@@ -161,18 +161,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -1092,121 +1089,6 @@ func (server *Server) handleTacticsRequest(
 	logFields[IS_TACTICS_REQUEST_LOG_FIELD_NAME] = true
 
 	server.logger.LogMetric(TACTICS_METRIC_EVENT_NAME, logFields)
-}
-
-// Listener wraps a net.Listener and applies server-side implementation of
-// certain tactics parameters to accepted connections. Tactics filtering is
-// limited to GeoIP attributes as the client has not yet sent API paramaters.
-type Listener struct {
-	net.Listener
-	server         *Server
-	tunnelProtocol string
-	geoIPLookup    func(IPaddress string) common.GeoIPData
-}
-
-// NewListener creates a new Listener.
-func NewListener(
-	listener net.Listener,
-	server *Server,
-	tunnelProtocol string,
-	geoIPLookup func(IPaddress string) common.GeoIPData) *Listener {
-
-	return &Listener{
-		Listener:       listener,
-		server:         server,
-		tunnelProtocol: tunnelProtocol,
-		geoIPLookup:    geoIPLookup,
-	}
-}
-
-// Accept calls the underlying listener's Accept, and then checks if tactics
-// for the connection set LimitTunnelProtocols.
-//
-// If LimitTunnelProtocols is set and does not include the tunnel protocol the
-// listener is running, the accepted connection is immediately closed and the
-// underlying Accept is called again.
-//
-// For retained connections, fragmentation is applied when specified by
-// tactics.
-func (listener *Listener) Accept() (net.Conn, error) {
-
-	conn, err := listener.Listener.Accept()
-	if err != nil {
-		// Don't modify error from net.Listener
-		return nil, err
-	}
-
-	geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
-
-	tactics, err := listener.server.GetTactics(true, geoIPData, make(common.APIParameters))
-	if err != nil {
-		listener.server.logger.WithTraceFields(
-			common.LogFields{"error": err}).Warning("failed to get tactics for connection")
-		// If tactics is somehow misconfigured, keep handling connections.
-		// Other error cases that follow below take the same approach.
-		return conn, nil
-	}
-
-	if tactics == nil {
-		// This server isn't configured with tactics.
-		return conn, nil
-	}
-
-	if !prng.FlipWeightedCoin(tactics.Probability) {
-		// Skip tactics with the configured probability.
-		return conn, nil
-	}
-
-	clientParameters, err := parameters.NewClientParameters(nil)
-	if err != nil {
-		return conn, nil
-	}
-
-	_, err = clientParameters.Set("", false, tactics.Parameters)
-	if err != nil {
-		return conn, nil
-	}
-
-	p := clientParameters.Get()
-
-	// Wrap the conn in a fragmentor.Conn, subject to tactics parameters.
-	//
-	// Limitation: this server-side fragmentation is not synchronized with
-	// client-side; where client-side will make a single coin flip to fragment
-	// or not fragment all TCP connections for a one meek session, the server
-	// will make a coin flip per connection.
-	//
-	// Delay seeding the fragmentor PRNG when we can derive a seed from the
-	// client's initial obfuscation message. This enables server-side replay
-	// of fragmentation when initiated by the client. Currently this is only
-	// supported for OSSH: SSH lacks the initial obfuscation message, and
-	// meek and other protocols transmit downstream data before the initial
-	// obfuscation message arrives.
-
-	var seed *prng.Seed
-	if listener.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
-		seed, err = prng.NewSeed()
-		if err != nil {
-			listener.server.logger.WithTraceFields(
-				common.LogFields{"error": err}).Warning("failed to seed fragmentor PRNG")
-			return conn, nil
-		}
-	}
-
-	fragmentorConfig := fragmentor.NewDownstreamConfig(
-		p, listener.tunnelProtocol, seed)
-
-	if fragmentorConfig.MayFragment() {
-		conn = fragmentor.NewConn(
-			fragmentorConfig,
-			func(message string) {
-				listener.server.logger.WithTraceFields(
-					common.LogFields{"message": message}).Debug("Fragmentor")
-			},
-			conn)
-	}
-
-	return conn, nil
 }
 
 // RoundTripper performs a round trip to the specified endpoint, sending the

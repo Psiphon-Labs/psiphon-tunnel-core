@@ -31,6 +31,7 @@ import (
 
 	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/miekg/dns"
 	"github.com/wader/filtertransport"
 )
@@ -58,6 +59,24 @@ type CloseWriter interface {
 // connection establishment.
 type IrregularIndicator interface {
 	IrregularTunnelError() error
+}
+
+// UnderlyingTCPAddrSource defines the interface for a type, typically a
+// net.Conn, such as a server meek Conn, which has an underlying TCP conn(s),
+// providing access to the LocalAddr and RemoteAddr properties of the
+// underlying TCP conn.
+type UnderlyingTCPAddrSource interface {
+
+	// GetUnderlyingTCPAddrs returns the LocalAddr and RemoteAddr properties of
+	// the underlying TCP conn.
+	GetUnderlyingTCPAddrs() (*net.TCPAddr, *net.TCPAddr, bool)
+}
+
+// FragmentorReplayAccessor defines the interface for accessing replay properties
+// of a fragmentor Conn.
+type FragmentorReplayAccessor interface {
+	SetReplay(*prng.PRNG)
+	GetReplay() (*prng.Seed, bool)
 }
 
 // TerminateHTTPConnection sends a 404 response to a client and also closes
@@ -337,19 +356,19 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 			}
 		}
 
+		lastReadActivityTime := atomic.LoadInt64(&conn.lastReadActivityTime)
 		readActivityTime := int64(monotime.Now())
+
+		atomic.StoreInt64(&conn.lastReadActivityTime, readActivityTime)
 
 		if conn.activityUpdater != nil {
 			conn.activityUpdater.UpdateProgress(
-				int64(n), 0, readActivityTime-atomic.LoadInt64(&conn.lastReadActivityTime))
+				int64(n), 0, readActivityTime-lastReadActivityTime)
 		}
 
 		if conn.lruEntry != nil {
 			conn.lruEntry.Touch()
 		}
-
-		atomic.StoreInt64(&conn.lastReadActivityTime, readActivityTime)
-
 	}
 	// Note: no context error to preserve error type
 	return n, err

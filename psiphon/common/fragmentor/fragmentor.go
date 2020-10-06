@@ -159,6 +159,7 @@ type Conn struct {
 	isClosed        int32
 	writeMutex      sync.Mutex
 	numNotices      int
+	isReplay        bool
 	fragmentPRNG    *prng.PRNG
 	bytesToFragment int
 	bytesFragmented int
@@ -227,23 +228,49 @@ func GetUpstreamMetricsNames() []string {
 	return upstreamMetricsNames
 }
 
-// SetPRNG sets the PRNG to be used by the fragmentor. Specifying a PRNG
-// allows for optional replay of a fragmentor sequence. SetPRNG is intended to
-// be used with obfuscator.GetDerivedPRNG and allows for setting the PRNG
-// after a conn has already been wrapped with a fragmentor.Conn (but before
-// the first Write).
+// SetReplay sets the PRNG to be used by the fragmentor, allowing for replay
+// of a fragmentor sequence. SetPRNG may be used to set the PRNG after a conn
+// has already been wrapped with a fragmentor.Conn, when no PRNG is specified
+// in the config, and before the first Write. SetReplay sets the fragmentor
+// isReplay flag to true.
 //
-// If no seed is specified in NewUp/DownstreamConfig and SetPRNG is not called
-// before the first Write, the Write will fail. If a seed was specified, or
-// SetPRNG was already called, SetPRNG has no effect.
-func (c *Conn) SetPRNG(PRNG *prng.PRNG) {
+// For replay coordinated with a peer, SetReplay may be used with
+// obfuscator.GetDerivedPRNG, using a seed provided by the peer.
+//
+// If no seed is specified in NewUp/DownstreamConfig and SetReplay is not
+// called before the first Write, the Write will fail. If a seed was specified
+// in the config, or SetReplay was already called, or the input PRNG is nil,
+// SetReplay has no effect.
+//
+// SetReplay implements FragmentorReplayAccessor.
+func (c *Conn) SetReplay(PRNG *prng.PRNG) {
 
 	c.writeMutex.Lock()
 	defer c.writeMutex.Unlock()
 
-	if c.fragmentPRNG == nil {
+	if c.fragmentPRNG == nil && PRNG != nil {
+		c.isReplay = true
 		c.fragmentPRNG = PRNG
 	}
+}
+
+// GetReplay returns the seed for the fragmentor PRNG, and whether the
+// fragmentor was configured to replay. The seed return value may be nil when
+// isReplay is false.
+//
+// GetReplay implements GetReplay.
+func (c *Conn) GetReplay() (*prng.Seed, bool) {
+
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
+
+	var seed *prng.Seed
+
+	if c.fragmentPRNG != nil {
+		seed = c.fragmentPRNG.GetSeed()
+	}
+
+	return seed, c.isReplay
 }
 
 func (c *Conn) Write(buffer []byte) (int, error) {

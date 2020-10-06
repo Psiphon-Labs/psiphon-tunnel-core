@@ -569,7 +569,8 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 				config.UseUpstreamProxy(),
 				limitTunnelProtocols,
 				false)) == 0 {
-				return false, nil, errors.TraceNew("TargetServerEntry does not support LimitTunnelProtocols")
+				return false, nil, errors.Tracef(
+					"TargetServerEntry does not support LimitTunnelProtocols: %v", limitTunnelProtocols)
 			}
 		}
 	}

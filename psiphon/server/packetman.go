@@ -22,7 +22,6 @@ package server
 import (
 	"net"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/packetman"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -44,17 +43,18 @@ func makePacketManipulatorConfig(
 		}
 	}
 
-	selectSpecName := func(protocolPort int, clientIP net.IP) string {
+	selectSpecName := func(protocolPort int, clientIP net.IP) (string, interface{}) {
 
-		specName, err := selectPacketManipulationSpec(support, protocolPort, clientIP)
+		specName, extraData, err := selectPacketManipulationSpec(
+			support, protocolPort, clientIP)
 		if err != nil {
 			log.WithTraceFields(
 				LogFields{"error": err}).Warning(
 				"failed to get tactics for packet manipulation")
-			return ""
+			return "", nil
 		}
 
-		return specName
+		return specName, extraData
 	}
 
 	specs, err := getPacketManipulationSpecs(support)
@@ -75,28 +75,18 @@ func makePacketManipulatorConfig(
 func getPacketManipulationSpecs(support *SupportServices) ([]*packetman.Spec, error) {
 
 	// By convention, parameters.ServerPacketManipulationSpecs should be in
-	// DefaultTactics, not FilteredTactics; and Tactics.Probability is ignored.
+	// DefaultTactics, not FilteredTactics; and GetServerTacticsParameters
+	// ignores Tactics.Probability.
 
-	tactics, err := support.TacticsServer.GetTactics(
-		true, common.GeoIPData(NewGeoIPData()), make(common.APIParameters))
+	p, err := GetServerTacticsParameters(support, NewGeoIPData())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	if tactics == nil {
-		// This server isn't configured with tactics.
-		return []*packetman.Spec{}, nil
+	if p.IsNil() {
+		// No tactics are configured; return an empty spec list.
+		return nil, nil
 	}
-
-	clientParameters, err := parameters.NewClientParameters(nil)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	_, err = clientParameters.Set("", false, tactics.Parameters)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	p := clientParameters.Get()
 
 	paramSpecs := p.PacketManipulationSpecs(parameters.ServerPacketManipulationSpecs)
 
@@ -125,52 +115,15 @@ func reloadPacketManipulationSpecs(support *SupportServices) error {
 }
 
 func selectPacketManipulationSpec(
-	support *SupportServices, protocolPort int, clientIP net.IP) (string, error) {
+	support *SupportServices,
+	protocolPort int,
+	clientIP net.IP) (string, interface{}, error) {
 
-	geoIPData := support.GeoIPService.Lookup(clientIP.String())
+	// First check for reply, then check tactics.
 
-	tactics, err := support.TacticsServer.GetTactics(
-		true, common.GeoIPData(geoIPData), make(common.APIParameters))
-	if err != nil {
-		return "", errors.Trace(err)
-	}
-
-	if tactics == nil {
-		// This server isn't configured with tactics.
-		return "", nil
-	}
-
-	if !prng.FlipWeightedCoin(tactics.Probability) {
-		// Skip tactics with the configured probability.
-		return "", nil
-	}
-
-	clientParameters, err := parameters.NewClientParameters(nil)
-	if err != nil {
-		return "", errors.Trace(err)
-	}
-	_, err = clientParameters.Set("", false, tactics.Parameters)
-	if err != nil {
-		return "", errors.Trace(err)
-	}
-	p := clientParameters.Get()
-
-	// GeoIP tactics filtering is applied before getting
-	// ServerPacketManipulationProbability and ServerProtocolPacketManipulations.
-	//
 	// The intercepted packet source/protocol port is used to determine the
-	// tunnel protocol name, which is used to lookup enabled packet manipulation
-	// specs in ServerProtocolPacketManipulations.
-	//
-	// When there are multiple enabled specs, one is selected at random.
-	//
-	// Specs under the key "All" apply to all protocols. Duplicate specs per
-	// entry are allowed, enabling weighted selection. If a spec appears in both
-	// "All" and a specific protocol, the duplicate(s) are retained.
-
-	if !p.WeightedCoinFlip(parameters.ServerPacketManipulationProbability) {
-		return "", nil
-	}
+	// tunnel protocol name, which is used to lookup first replay and then
+	// enabled packet manipulation specs in ServerProtocolPacketManipulations.
 
 	targetTunnelProtocol := ""
 	for tunnelProtocol, port := range support.Config.TunnelProtocolPorts {
@@ -180,15 +133,49 @@ func selectPacketManipulationSpec(
 		}
 	}
 	if targetTunnelProtocol == "" {
-		return "", errors.Tracef(
+		return "", nil, errors.Tracef(
 			"packet manipulation protocol port not found: %d", protocolPort)
+	}
+
+	geoIPData := support.GeoIPService.Lookup(clientIP.String())
+
+	specName, doReplay := support.ReplayCache.GetReplayPacketManipulation(
+		targetTunnelProtocol, geoIPData)
+
+	// extraData records the is_server_replay metric.
+	extraData := doReplay
+
+	if doReplay {
+		return specName, extraData, nil
+	}
+
+	// GeoIP tactics filtering is applied when getting
+	// ServerPacketManipulationProbability and ServerProtocolPacketManipulations.
+	//
+	// When there are multiple enabled specs, one is selected at random.
+	//
+	// Specs under the key "All" apply to all protocols. Duplicate specs per
+	// entry are allowed, enabling weighted selection. If a spec appears in both
+	// "All" and a specific protocol, the duplicate(s) are retained.
+
+	p, err := GetServerTacticsParameters(support, geoIPData)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+
+	if p.IsNil() {
+		// No tactics are configured; select no spec.
+		return "", extraData, nil
+	}
+
+	if !p.WeightedCoinFlip(parameters.ServerPacketManipulationProbability) {
+		return "", extraData, nil
 	}
 
 	protocolSpecs := p.ProtocolPacketManipulations(
 		parameters.ServerProtocolPacketManipulations)
 
 	// TODO: cache merged per-protocol + "All" lists?
-
 	specNames, ok := protocolSpecs[targetTunnelProtocol]
 	if !ok {
 		specNames = []string{}
@@ -201,8 +188,8 @@ func selectPacketManipulationSpec(
 
 	if len(specNames) < 1 {
 		// Tactics contains no candidate specs for this protocol.
-		return "", nil
+		return "", extraData, nil
 	}
 
-	return specNames[prng.Range(0, len(specNames)-1)], nil
+	return specNames[prng.Range(0, len(specNames)-1)], extraData, nil
 }

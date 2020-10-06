@@ -118,7 +118,7 @@ func TestFragmentor(t *testing.T) {
 		if err != nil {
 			return errors.Trace(err)
 		}
-		fragConn.SetPRNG(PRNG)
+		fragConn.SetReplay(PRNG)
 		_, err = fragConn.Write(data)
 		if err != nil {
 			return errors.Trace(err)

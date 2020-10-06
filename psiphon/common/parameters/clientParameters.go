@@ -249,6 +249,14 @@ const (
 	FeedbackUploadRetryMinDelaySeconds               = "FeedbackUploadRetryMinDelaySeconds"
 	FeedbackUploadRetryMaxDelaySeconds               = "FeedbackUploadRetryMaxDelaySeconds"
 	FeedbackUploadTimeoutSeconds                     = "FeedbackUploadTimeoutSeconds"
+	ServerReplayPacketManipulation                   = "ServerReplayPacketManipulation"
+	ServerReplayFragmentor                           = "ServerReplayFragmentor"
+	ServerReplayTTL                                  = "ServerReplayTTL"
+	ServerReplayTargetWaitDuration                   = "ServerReplayTargetWaitDuration"
+	ServerReplayTargetTunnelDuration                 = "ServerReplayTargetTunnelDuration"
+	ServerReplayTargetUpstreamBytes                  = "ServerReplayTargetUpstreamBytes"
+	ServerReplayTargetDownstreamBytes                = "ServerReplayTargetDownstreamBytes"
+	ServerReplayFailedCountThreshold                 = "ServerReplayFailedCountThreshold"
 )
 
 const (
@@ -517,6 +525,15 @@ var defaultClientParameters = map[string]struct {
 	FeedbackUploadRetryMinDelaySeconds: {value: 1 * time.Minute, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	FeedbackUploadRetryMaxDelaySeconds: {value: 5 * time.Minute, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	FeedbackUploadTimeoutSeconds:       {value: 30 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
+
+	ServerReplayPacketManipulation:    {value: true, flags: serverSideOnly},
+	ServerReplayFragmentor:            {value: true, flags: serverSideOnly},
+	ServerReplayTTL:                   {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	ServerReplayTargetWaitDuration:    {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	ServerReplayTargetTunnelDuration:  {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	ServerReplayTargetUpstreamBytes:   {value: 0, minimum: 0, flags: serverSideOnly},
+	ServerReplayTargetDownstreamBytes: {value: 0, minimum: 0, flags: serverSideOnly},
+	ServerReplayFailedCountThreshold:  {value: 0, minimum: 0, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -599,6 +616,61 @@ func makeDefaultParameters() (map[string]interface{}, error) {
 func (p *ClientParameters) Set(
 	tag string, skipOnError bool, applyParameters ...map[string]interface{}) ([]int, error) {
 
+	makeTypedValue := func(templateValue, value interface{}) (interface{}, error) {
+
+		// Accept strings such as "1h" for duration parameters.
+
+		switch templateValue.(type) {
+		case time.Duration:
+			if s, ok := value.(string); ok {
+				if d, err := time.ParseDuration(s); err == nil {
+					value = d
+				}
+			}
+		}
+
+		// A JSON remarshal resolves cases where applyParameters is a
+		// result of unmarshal-into-interface, in which case non-scalar
+		// values will not have the expected types; see:
+		// https://golang.org/pkg/encoding/json/#Unmarshal. This remarshal
+		// also results in a deep copy.
+
+		marshaledValue, err := json.Marshal(value)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		newValuePtr := reflect.New(reflect.TypeOf(templateValue))
+
+		err = json.Unmarshal(marshaledValue, newValuePtr.Interface())
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return newValuePtr.Elem().Interface(), nil
+	}
+
+	getAppliedValue := func(
+		name string,
+		parameters map[string]interface{},
+		applyParameters []map[string]interface{}) (interface{}, error) {
+
+		templateValue := parameters[name]
+		if templateValue == nil {
+			return nil, errors.Tracef("unknown parameter: %s", name)
+		}
+
+		value := templateValue
+		for i := len(applyParameters) - 1; i >= 0; i-- {
+			if v := applyParameters[i][name]; v != nil {
+				value = v
+				break
+			}
+		}
+
+		return makeTypedValue(templateValue, value)
+	}
+
 	var counts []int
 
 	parameters, err := makeDefaultParameters()
@@ -606,26 +678,31 @@ func (p *ClientParameters) Set(
 		return nil, errors.Trace(err)
 	}
 
-	// Special case: TLSProfiles/LabeledTLSProfiles may reference CustomTLSProfiles names.
-	// Inspect the CustomTLSProfiles parameter and extract its names. Do not
-	// call Get().CustomTLSProfilesNames() as CustomTLSProfiles may not yet be
-	// validated.
+	// Special case: TLSProfiles/LabeledTLSProfiles may reference
+	// CustomTLSProfiles names. Inspect the CustomTLSProfiles parameter and
+	// extract its names. Do not call Get().CustomTLSProfilesNames() as
+	// CustomTLSProfiles may not yet be validated.
 
-	var customTLSProfileNames []string
+	customTLSProfilesValue, err := getAppliedValue(
+		CustomTLSProfiles, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	customTLSProfiles, _ := customTLSProfilesValue.(protocol.CustomTLSProfiles)
+	customTLSProfileNames := make([]string, len(customTLSProfiles))
+	for i, profile := range customTLSProfiles {
+		customTLSProfileNames[i] = profile.Name
+	}
 
-	customTLSProfilesValue := parameters[CustomTLSProfiles]
-	for i := len(applyParameters) - 1; i >= 0; i-- {
-		if v := applyParameters[i][CustomTLSProfiles]; v != nil {
-			customTLSProfilesValue = v
-			break
-		}
+	// Special case: PacketManipulations will reference PacketManipulationSpecs.
+
+	serverPacketManipulationSpecsValue, err := getAppliedValue(
+		ServerPacketManipulationSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
-	if customTLSProfiles, ok := customTLSProfilesValue.(protocol.CustomTLSProfiles); ok {
-		customTLSProfileNames = make([]string, len(customTLSProfiles))
-		for i := 0; i < len(customTLSProfiles); i++ {
-			customTLSProfileNames[i] = customTLSProfiles[i].Name
-		}
-	}
+	serverPacketManipulationSpecs, _ :=
+		serverPacketManipulationSpecsValue.(PacketManipulationSpecs)
 
 	for i := 0; i < len(applyParameters); i++ {
 
@@ -633,7 +710,7 @@ func (p *ClientParameters) Set(
 
 		for name, value := range applyParameters[i] {
 
-			existingValue, ok := parameters[name]
+			templateValue, ok := parameters[name]
 			if !ok {
 				if skipOnError {
 					continue
@@ -641,39 +718,14 @@ func (p *ClientParameters) Set(
 				return nil, errors.Tracef("unknown parameter: %s", name)
 			}
 
-			// Accept strings such as "1h" for duration parameters.
-
-			switch existingValue.(type) {
-			case time.Duration:
-				if s, ok := value.(string); ok {
-					if d, err := time.ParseDuration(s); err == nil {
-						value = d
-					}
-				}
-			}
-
-			// A JSON remarshal resolves cases where applyParameters is a
-			// result of unmarshal-into-interface, in which case non-scalar
-			// values will not have the expected types; see:
-			// https://golang.org/pkg/encoding/json/#Unmarshal. This remarshal
-			// also results in a deep copy.
-
-			marshaledValue, err := json.Marshal(value)
-			if err != nil {
-				continue
-			}
-
-			newValuePtr := reflect.New(reflect.TypeOf(existingValue))
-
-			err = json.Unmarshal(marshaledValue, newValuePtr.Interface())
+			newValue, err := makeTypedValue(templateValue, value)
 			if err != nil {
 				if skipOnError {
 					continue
 				}
-				return nil, errors.Tracef("unmarshal parameter %s failed: %s", name, err)
+				return nil, errors.Tracef(
+					"unmarshal parameter %s failed: %v", name, err)
 			}
-
-			newValue := newValuePtr.Elem().Interface()
 
 			// Perform type-specific validation for some cases.
 
@@ -760,6 +812,28 @@ func (p *ClientParameters) Set(
 						}
 						return nil, errors.Trace(err)
 					}
+				}
+			case PacketManipulationSpecs:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case ProtocolPacketManipulations:
+
+				var packetManipulationSpecs PacketManipulationSpecs
+				if name == ServerProtocolPacketManipulations {
+					packetManipulationSpecs = serverPacketManipulationSpecs
+				}
+
+				err := v.Validate(packetManipulationSpecs)
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
 				}
 			}
 
@@ -914,6 +988,25 @@ func (p *clientParametersSnapshot) getValue(name string, target interface{}) {
 type ClientParametersAccessor struct {
 	snapshot                       *clientParametersSnapshot
 	customNetworkLatencyMultiplier float64
+}
+
+// MakeNilClientParametersAccessor produces a stub ClientParametersAccessor
+// which returns true for IsNil. This may be used where a
+// ClientParametersAccessor value is required, but ClientParameters.Get may
+// not succeed. In contexts where MakeNilClientParametersAccessor may be used,
+// calls to ClientParametersAccessor must first check IsNil before calling
+// accessor functions.
+func MakeNilClientParametersAccessor() ClientParametersAccessor {
+	return ClientParametersAccessor{}
+}
+
+// IsNil indicates that this ClientParametersAccessor is a stub and its
+// accessor functions may not be called. A ClientParametersAccessor produced
+// by ClientParameters.Get will never return true for IsNil and IsNil guards
+// are not required for ClientParametersAccessors known to be produced by
+// ClientParameters.Get.
+func (p ClientParametersAccessor) IsNil() bool {
+	return p.snapshot == nil
 }
 
 // Close clears internal references to large memory objects, allowing them to

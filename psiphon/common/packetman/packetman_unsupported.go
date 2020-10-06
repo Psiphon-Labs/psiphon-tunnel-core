@@ -52,6 +52,8 @@ func (m *Manipulator) SetSpecs(_ []*Spec) error {
 	return errors.Trace(errUnsupported)
 }
 
-func (m *Manipulator) GetAppliedSpecName(_, _ *net.TCPAddr) (string, error) {
-	return "", errors.Trace(errUnsupported)
+func (m *Manipulator) GetAppliedSpecName(
+	_, _ *net.TCPAddr) (string, interface{}, error) {
+
+	return "", nil, errors.Trace(errUnsupported)
 }
