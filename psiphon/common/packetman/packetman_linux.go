@@ -78,6 +78,9 @@ const (
 //
 // NFQUEUE with queue-bypass requires Linux kernel 2.6.39; 3.16 or later is
 // validated and recommended.
+//
+// Due to use of NFQUEUE, larger than max socket buffer sizes, and raw
+// sockets, Manipulator requires CAP_NET_ADMIN and CAP_NET_RAW.
 type Manipulator struct {
 	config             *Config
 	mutex              sync.Mutex
@@ -194,10 +197,11 @@ func (m *Manipulator) Start() (retErr error) {
 	// payload, this size should be more than sufficient.
 	maxPacketLen := uint32(1500)
 
-	// Use the kernel default of 1024:
+	// The kernel default is 1024:
 	// https://github.com/torvalds/linux/blob/cd8dead0c39457e58ec1d36db93aedca811d48f1/net/netfilter/nfnetlink_queue.c#L51,
 	// via https://github.com/florianl/go-nfqueue/issues/3.
-	maxQueueLen := uint32(1024)
+	// We use a larger queue size to accomodate more concurrent SYN-ACK packets.
+	maxQueueLen := uint32(2048)
 
 	// Timeout note: on a small subset of production servers, we have found that
 	// setting a non-zero read timeout results in occasional "orphaned" packets
@@ -225,6 +229,16 @@ func (m *Manipulator) Start() (retErr error) {
 			m.nfqueue.Close()
 		}
 	}()
+
+	// Set a netlink socket receive buffer size that is significantly larger than
+	// the typical default of 212992. This avoids ENOBUFS in the case of many
+	// netlink messages from the kernel (capped by the max queue size). Note that
+	// the CAP_NET_ADMIN may be required when this exceeds the configured max
+	// buffer size.
+	err = m.nfqueue.Con.SetReadBuffer(1703936)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	runContext, stopRunning := context.WithCancel(context.Background())
 	defer func() {
