@@ -717,12 +717,12 @@ type Config struct {
 	// B64EncodedPublicKey = "".
 	FeedbackEncryptionPublicKey string
 
-	// clientParameters is the active ClientParameters with defaults, config
-	// values, and, optionally, tactics applied.
+	// params is the active parameters.Parameters with defaults, config values,
+	// and, optionally, tactics applied.
 	//
-	// New tactics must be applied by calling Config.SetClientParameters;
-	// calling clientParameters.Set directly will fail to add config values.
-	clientParameters *parameters.ClientParameters
+	// New tactics must be applied by calling Config.SetParameters; calling
+	// params.Set directly will fail to add config values.
+	params *parameters.Parameters
 
 	dialParametersHash []byte
 
@@ -1062,9 +1062,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid SessionID")
 	}
 
-	config.clientParameters, err = parameters.NewClientParameters(
+	config.params, err = parameters.NewParameters(
 		func(err error) {
-			NoticeWarning("ClientParameters getValue failed: %s", err)
+			NoticeWarning("Parameters getValue failed: %s", err)
 		})
 	if err != nil {
 		return errors.Trace(err)
@@ -1076,9 +1076,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
-	// clientParameters.Set will validate the config fields applied to parameters.
+	// parametersParameters.Set will validate the config fields applied to
+	// parametersParameters.
 
-	err = config.SetClientParameters("", false, nil)
+	err = config.SetParameters("", false, nil)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1180,12 +1181,12 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	return nil
 }
 
-// GetClientParameters returns the current client parameters.
-func (config *Config) GetClientParameters() *parameters.ClientParameters {
-	return config.clientParameters
+// GetParameters returns the current parameters.Parameters.
+func (config *Config) GetParameters() *parameters.Parameters {
+	return config.params
 }
 
-// SetClientParameters resets Config.clientParameters to the default values,
+// SetParameters resets the parameters.Parameters to the default values,
 // applies any config file values, and then applies the input parameters (from
 // tactics, etc.)
 //
@@ -1193,19 +1194,19 @@ func (config *Config) GetClientParameters() *parameters.ClientParameters {
 // this will validate the values and should fail. Set skipOnError to true when
 // applying tactics to ignore invalid or unknown parameter values from tactics.
 //
-// In the case of applying tactics, do not call Config.clientParameters.Set
+// In the case of applying tactics, do not call Config.parameters.Set
 // directly as this will not first apply config values.
 //
-// If there is an error, the existing Config.clientParameters are left
+// If there is an error, the existing Config.parameters are left
 // entirely unmodified.
-func (config *Config) SetClientParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
+func (config *Config) SetParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
 
 	setParameters := []map[string]interface{}{config.makeConfigParameters()}
 	if applyParameters != nil {
 		setParameters = append(setParameters, applyParameters)
 	}
 
-	counts, err := config.clientParameters.Set(tag, skipOnError, setParameters...)
+	counts, err := config.params.Set(tag, skipOnError, setParameters...)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1213,7 +1214,7 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
 
 	// Emit certain individual parameter values for quick reference in diagnostics.
-	p := config.clientParameters.Get()
+	p := config.params.Get()
 	NoticeInfo(
 		"NetworkLatencyMultiplier Min/Max/Lambda: %f/%f/%f",
 		p.Float(parameters.NetworkLatencyMultiplierMin),

@@ -92,14 +92,13 @@ func newTCPListenerWithBPF(
 
 func getBPFProgram(support *SupportServices) (bool, string, []bpf.RawInstruction, error) {
 
-	tactics, err := support.TacticsServer.GetTactics(
-		true, common.GeoIPData(NewGeoIPData()), make(common.APIParameters))
+	p, err := GetServerTacticsParameters(r.support, NewGeoIPData())
 	if err != nil {
 		return false, "", nil, errors.Trace(err)
 	}
 
-	if tactics == nil {
-		// This server isn't configured with tactics.
+	if p.IsNil() {
+		// No tactics are configured; BPF is disabled.
 		return false, "", nil, nil
 	}
 
@@ -109,23 +108,6 @@ func getBPFProgram(support *SupportServices) (bool, string, []bpf.RawInstruction
 	}
 
 	PRNG := prng.NewPRNGWithSeed(seed)
-
-	if !PRNG.FlipWeightedCoin(tactics.Probability) {
-		// Skip tactics with the configured probability.
-		return false, "", nil, nil
-	}
-
-	clientParameters, err := parameters.NewClientParameters(nil)
-	if err != nil {
-		return false, "", nil, nil
-	}
-
-	_, err = clientParameters.Set("", false, tactics.Parameters)
-	if err != nil {
-		return false, "", nil, nil
-	}
-
-	p := clientParameters.Get()
 
 	if !PRNG.FlipWeightedCoin(
 		p.Float(parameters.BPFServerTCPProbability)) {

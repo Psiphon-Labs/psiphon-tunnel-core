@@ -106,11 +106,11 @@ the handshake request parameters with tactics inputs, and calls
 HandleTacticsPayload to process the tactics payload in the handshake response.
 
 The core tactics data is custom values for a subset of the parameters in
-parameters.ClientParameters. A client takes the default ClientParameters,
-applies any custom values set in its config file, and then applies any stored or
-received tactics. Each time the tactics changes, this process is repeated so
-that obsolete tactics parameters are not retained in the client's
-ClientParameters instance.
+parameters.Parameters. A client takes the default Parameters, applies any
+custom values set in its config file, and then applies any stored or received
+tactics. Each time the tactics changes, this process is repeated so that
+obsolete tactics parameters are not retained in the client's Parameters
+instance.
 
 Tactics has a probability parameter that is used in a weighted coin flip to
 determine if the tactics is to be applied or skipped for the current client
@@ -516,12 +516,12 @@ func (server *Server) Validate() error {
 			return errors.TraceNew("invalid probability")
 		}
 
-		clientParameters, err := parameters.NewClientParameters(nil)
+		params, err := parameters.NewParameters(nil)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		_, err = clientParameters.Set("", false, tactics.Parameters)
+		_, err = params.Set("", false, tactics.Parameters)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -796,19 +796,19 @@ func (server *Server) GetTactics(
 }
 
 // TODO: refactor this copy of psiphon/server.getStringRequestParam into common?
-func getStringRequestParam(params common.APIParameters, name string) (string, error) {
-	if params[name] == nil {
+func getStringRequestParam(apiParams common.APIParameters, name string) (string, error) {
+	if apiParams[name] == nil {
 		return "", errors.Tracef("missing param: %s", name)
 	}
-	value, ok := params[name].(string)
+	value, ok := apiParams[name].(string)
 	if !ok {
 		return "", errors.Tracef("invalid param: %s", name)
 	}
 	return value, nil
 }
 
-func getJSONRequestParam(params common.APIParameters, name string, value interface{}) error {
-	if params[name] == nil {
+func getJSONRequestParam(apiParams common.APIParameters, name string, value interface{}) error {
+	if apiParams[name] == nil {
 		return errors.Tracef("missing param: %s", name)
 	}
 
@@ -817,7 +817,7 @@ func getJSONRequestParam(params common.APIParameters, name string, value interfa
 	// unmarhsal-into-struct, common.APIParameters will have an unmarshal-into-interface
 	// value as described here: https://golang.org/pkg/encoding/json/#Unmarshal.
 
-	jsonValue, err := json.Marshal(params[name])
+	jsonValue, err := json.Marshal(apiParams[name])
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1115,7 +1115,6 @@ type Storer interface {
 // parameters for tactics. This is used by the Psiphon client when
 // preparing its handshake request.
 func SetTacticsAPIParameters(
-	clientParameters *parameters.ClientParameters,
 	storer Storer,
 	networkID string,
 	apiParams common.APIParameters) error {
@@ -1230,7 +1229,7 @@ func UseStoredTactics(
 // FetchTactics modifies the apiParams input.
 func FetchTactics(
 	ctx context.Context,
-	clientParameters *parameters.ClientParameters,
+	params *parameters.Parameters,
 	storer Storer,
 	getNetworkID func() string,
 	apiParams common.APIParameters,
@@ -1256,7 +1255,7 @@ func FetchTactics(
 
 	if len(speedTestSamples) == 0 {
 
-		p := clientParameters.Get()
+		p := params.Get()
 		request := prng.Padding(
 			p.Int(parameters.SpeedTestPaddingMinBytes),
 			p.Int(parameters.SpeedTestPaddingMaxBytes))
@@ -1276,7 +1275,7 @@ func FetchTactics(
 		}
 
 		err = AddSpeedTestSample(
-			clientParameters,
+			params,
 			storer,
 			networkID,
 			endPointRegion,
@@ -1399,7 +1398,7 @@ func MakeSpeedTestResponse(minPadding, maxPadding int) ([]byte, error) {
 // that limit is reached, the oldest samples are removed to make room
 // for the new sample.
 func AddSpeedTestSample(
-	clientParameters *parameters.ClientParameters,
+	params *parameters.Parameters,
 	storer Storer,
 	networkID string,
 	endPointRegion string,
@@ -1431,7 +1430,7 @@ func AddSpeedTestSample(
 		BytesDown:        len(response),
 	}
 
-	maxCount := clientParameters.Get().Int(parameters.SpeedTestMaxSampleCount)
+	maxCount := params.Get().Int(parameters.SpeedTestMaxSampleCount)
 	if maxCount == 0 {
 		return errors.TraceNew("speed test max sample count is 0")
 	}

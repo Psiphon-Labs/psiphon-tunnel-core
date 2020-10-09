@@ -560,7 +560,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 			return false, nil, errors.TraceNew("TargetServerEntry does not support EgressRegion")
 		}
 
-		limitTunnelProtocols := config.GetClientParameters().Get().TunnelProtocols(parameters.LimitTunnelProtocols)
+		limitTunnelProtocols := config.GetParameters().Get().TunnelProtocols(parameters.LimitTunnelProtocols)
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
 			// excludeIntensive is handled higher up.
@@ -679,7 +679,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		//
 		// TODO: move only up to parameters.ReplayCandidateCount to front?
 
-		p := iterator.config.GetClientParameters().Get()
+		p := iterator.config.GetParameters().Get()
 
 		if (isInitialRound || p.WeightedCoinFlip(parameters.ReplayLaterRoundMoveToFrontProbability)) &&
 			p.Int(parameters.ReplayCandidateCount) != 0 {
@@ -982,7 +982,7 @@ func PruneServerEntry(config *Config, serverEntryTag string) {
 
 func pruneServerEntry(config *Config, serverEntryTag string) error {
 
-	minimumAgeForPruning := config.GetClientParameters().Get().Duration(
+	minimumAgeForPruning := config.GetParameters().Get().Duration(
 		parameters.ServerEntryMinimumAgeForPruning)
 
 	return datastoreUpdate(func(tx *datastoreTx) error {
@@ -1464,7 +1464,7 @@ func StorePersistentStat(config *Config, statType string, stat []byte) error {
 		return errors.Tracef("invalid persistent stat type: %s", statType)
 	}
 
-	maxStoreRecords := config.GetClientParameters().Get().Int(
+	maxStoreRecords := config.GetParameters().Get().Int(
 		parameters.PersistentStatsMaxStoreRecords)
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
@@ -1540,7 +1540,7 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 
 	stats := make(map[string][][]byte)
 
-	maxSendBytes := config.GetClientParameters().Get().Int(
+	maxSendBytes := config.GetParameters().Get().Int(
 		parameters.PersistentStatsMaxSendBytes)
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {

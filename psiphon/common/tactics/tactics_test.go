@@ -151,11 +151,11 @@ func TestTactics(t *testing.T) {
 	logger := newTestLogger()
 
 	validator := func(
-		params common.APIParameters) error {
+		apiParams common.APIParameters) error {
 
 		expectedParams := []string{"client_platform", "client_version"}
 		for _, name := range expectedParams {
-			value, ok := params[name]
+			value, ok := apiParams[name]
 			if !ok {
 				return fmt.Errorf("missing param: %s", name)
 			}
@@ -169,9 +169,9 @@ func TestTactics(t *testing.T) {
 
 	formatter := func(
 		geoIPData common.GeoIPData,
-		params common.APIParameters) common.LogFields {
+		apiParams common.APIParameters) common.LogFields {
 
-		return common.LogFields(params)
+		return common.LogFields(apiParams)
 	}
 
 	server, err := NewServer(
@@ -211,12 +211,12 @@ func TestTactics(t *testing.T) {
 
 	// Configure client
 
-	clientParams, err := parameters.NewClientParameters(
+	params, err := parameters.NewParameters(
 		func(err error) {
-			t.Fatalf("ClientParameters getValue failed: %s", err)
+			t.Fatalf("Parameters getValue failed: %s", err)
 		})
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	networkID := "NETWORK1"
@@ -276,9 +276,9 @@ func TestTactics(t *testing.T) {
 
 	checkParameters := func(r *Record) {
 
-		p, err := parameters.NewClientParameters(nil)
+		p, err := parameters.NewParameters(nil)
 		if err != nil {
-			t.Fatalf("NewClientParameters failed: %s", err)
+			t.Fatalf("NewParameters failed: %s", err)
 		}
 
 		if r.Tactics.Probability != tacticsProbability {
@@ -318,7 +318,7 @@ func TestTactics(t *testing.T) {
 
 	initialFetchTacticsRecord, err := FetchTactics(
 		ctx,
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -390,7 +390,7 @@ func TestTactics(t *testing.T) {
 
 	fetchTacticsRecord, err := FetchTactics(
 		context.Background(),
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -467,7 +467,7 @@ func TestTactics(t *testing.T) {
 
 	fetchTacticsRecord, err = FetchTactics(
 		context.Background(),
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -507,7 +507,7 @@ func TestTactics(t *testing.T) {
 		"client_platform": "P1",
 		"client_version":  "V1"}
 
-	err = SetTacticsAPIParameters(clientParams, storer, networkID, handshakeParams)
+	err = SetTacticsAPIParameters(storer, networkID, handshakeParams)
 	if err != nil {
 		t.Fatalf("SetTacticsAPIParameters failed: %s", err)
 	}
@@ -576,7 +576,7 @@ func TestTactics(t *testing.T) {
 
 	// Exercise speed test sample truncation
 
-	maxSamples := clientParams.Get().Int(parameters.SpeedTestMaxSampleCount)
+	maxSamples := params.Get().Int(parameters.SpeedTestMaxSampleCount)
 
 	for i := 0; i < maxSamples*2; i++ {
 
@@ -586,7 +586,7 @@ func TestTactics(t *testing.T) {
 		}
 
 		err = AddSpeedTestSample(
-			clientParams,
+			params,
 			storer,
 			networkID,
 			"",
@@ -623,7 +623,7 @@ func TestTactics(t *testing.T) {
 
 	_, err = FetchTactics(
 		context.Background(),
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -638,7 +638,7 @@ func TestTactics(t *testing.T) {
 
 	_, err = FetchTactics(
 		context.Background(),
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,

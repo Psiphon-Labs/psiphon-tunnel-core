@@ -58,11 +58,11 @@ func TestFragmentor(t *testing.T) {
 	minDelay := 2 * time.Millisecond
 	maxDelay := 2 * time.Millisecond
 
-	clientParameters, err := parameters.NewClientParameters(nil)
+	params, err := parameters.NewParameters(nil)
 	if err != nil {
-		t.Fatalf("parameters.NewClientParameters failed: %s", err)
+		t.Fatalf("parameters.NewParameters failed: %s", err)
 	}
-	_, err = clientParameters.Set("", false, map[string]interface{}{
+	_, err = params.Set("", false, map[string]interface{}{
 		"FragmentorProbability":              1.0,
 		"FragmentorLimitProtocols":           protocol.TunnelProtocols{tunnelProtocol},
 		"FragmentorMinTotalBytes":            bytesToFragment,
@@ -81,7 +81,7 @@ func TestFragmentor(t *testing.T) {
 		"FragmentorDownstreamMaxDelay":       maxDelay,
 	})
 	if err != nil {
-		t.Fatalf("ClientParameters.Set failed: %s", err)
+		t.Fatalf("parameters.Parameters.Set failed: %s", err)
 	}
 
 	testGroup, testCtx := errgroup.WithContext(context.Background())
@@ -93,7 +93,7 @@ func TestFragmentor(t *testing.T) {
 			return errors.Trace(err)
 		}
 		fragConn := NewConn(
-			NewDownstreamConfig(clientParameters.Get(), tunnelProtocol, nil),
+			NewDownstreamConfig(params.Get(), tunnelProtocol, nil),
 			func(message string) { t.Logf(message) },
 			conn)
 		defer fragConn.Close()
@@ -137,7 +137,7 @@ func TestFragmentor(t *testing.T) {
 			return errors.Trace(err)
 		}
 		fragConn := NewConn(
-			NewUpstreamConfig(clientParameters.Get(), tunnelProtocol, seed),
+			NewUpstreamConfig(params.Get(), tunnelProtocol, seed),
 			func(message string) { t.Logf(message) },
 			conn)
 		defer fragConn.Close()

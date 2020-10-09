@@ -124,9 +124,9 @@ func runMemoryTest(t *testing.T, testMode int) {
 	applyParameters := map[string]interface{}{
 		parameters.TacticsWaitPeriod: "1ms",
 	}
-	err = config.SetClientParameters("", true, applyParameters)
+	err = config.SetParameters("", true, applyParameters)
 	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
+		t.Fatalf("SetParameters failed: %s", err)
 	}
 
 	err = psiphon.OpenDataStore(config)

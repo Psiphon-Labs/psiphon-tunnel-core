@@ -32,12 +32,12 @@ import (
 
 func TestGetDefaultParameters(t *testing.T) {
 
-	p, err := NewClientParameters(nil)
+	p, err := NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
-	for name, defaults := range defaultClientParameters {
+	for name, defaults := range defaultParameters {
 		switch v := defaults.value.(type) {
 		case string:
 			g := p.Get().String(name)
@@ -149,12 +149,12 @@ func TestGetValueLogger(t *testing.T) {
 
 	loggerCalled := false
 
-	p, err := NewClientParameters(
+	p, err := NewParameters(
 		func(error) {
 			loggerCalled = true
 		})
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	p.Get().Int("unknown-parameter-name")
@@ -170,20 +170,20 @@ func TestOverrides(t *testing.T) {
 	applyParameters := make(map[string]interface{})
 
 	// Below minimum, should not apply
-	defaultConnectionWorkerPoolSize := defaultClientParameters[ConnectionWorkerPoolSize].value.(int)
-	minimumConnectionWorkerPoolSize := defaultClientParameters[ConnectionWorkerPoolSize].minimum.(int)
+	defaultConnectionWorkerPoolSize := defaultParameters[ConnectionWorkerPoolSize].value.(int)
+	minimumConnectionWorkerPoolSize := defaultParameters[ConnectionWorkerPoolSize].minimum.(int)
 	newConnectionWorkerPoolSize := minimumConnectionWorkerPoolSize - 1
 	applyParameters[ConnectionWorkerPoolSize] = newConnectionWorkerPoolSize
 
 	// Above minimum, should apply
-	defaultInitialLimitTunnelProtocolsCandidateCount := defaultClientParameters[InitialLimitTunnelProtocolsCandidateCount].value.(int)
-	minimumInitialLimitTunnelProtocolsCandidateCount := defaultClientParameters[InitialLimitTunnelProtocolsCandidateCount].minimum.(int)
+	defaultInitialLimitTunnelProtocolsCandidateCount := defaultParameters[InitialLimitTunnelProtocolsCandidateCount].value.(int)
+	minimumInitialLimitTunnelProtocolsCandidateCount := defaultParameters[InitialLimitTunnelProtocolsCandidateCount].minimum.(int)
 	newInitialLimitTunnelProtocolsCandidateCount := minimumInitialLimitTunnelProtocolsCandidateCount + 1
 	applyParameters[InitialLimitTunnelProtocolsCandidateCount] = newInitialLimitTunnelProtocolsCandidateCount
 
-	p, err := NewClientParameters(nil)
+	p, err := NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	// No skip on error; should fail and not apply any changes
@@ -230,9 +230,9 @@ func TestOverrides(t *testing.T) {
 }
 
 func TestNetworkLatencyMultiplier(t *testing.T) {
-	p, err := NewClientParameters(nil)
+	p, err := NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	timeout1 := p.Get().Duration(TunnelConnectTimeout)
@@ -252,9 +252,9 @@ func TestNetworkLatencyMultiplier(t *testing.T) {
 }
 
 func TestCustomNetworkLatencyMultiplier(t *testing.T) {
-	p, err := NewClientParameters(nil)
+	p, err := NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	timeout1 := p.Get().Duration(TunnelConnectTimeout)
@@ -274,9 +274,9 @@ func TestCustomNetworkLatencyMultiplier(t *testing.T) {
 }
 
 func TestLimitTunnelProtocolProbability(t *testing.T) {
-	p, err := NewClientParameters(nil)
+	p, err := NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	// Default probability should be 1.0 and always return tunnelProtocols
@@ -330,9 +330,9 @@ func TestLimitTunnelProtocolProbability(t *testing.T) {
 }
 
 func TestLabeledLists(t *testing.T) {
-	p, err := NewClientParameters(nil)
+	p, err := NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	tlsProfiles := make(protocol.TLSProfiles, 0)
@@ -381,9 +381,9 @@ func TestLabeledLists(t *testing.T) {
 }
 
 func TestCustomTLSProfiles(t *testing.T) {
-	p, err := NewClientParameters(nil)
+	p, err := NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	customTLSProfiles := protocol.CustomTLSProfiles{
@@ -449,9 +449,9 @@ func TestApplicationParameters(t *testing.T) {
 		t.Fatalf("Unmarshal failed: %s", err)
 	}
 
-	p, err := NewClientParameters(nil)
+	p, err := NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	_, err = p.Set("", false, applyParameters)

@@ -75,9 +75,9 @@ import (
 // of CustomTLSDial.
 type CustomTLSConfig struct {
 
-	// ClientParameters is the active set of client parameters to use
-	// for the TLS dial.
-	ClientParameters *parameters.ClientParameters
+	// Parameters is the active set of parameters.Parameters to use for the TLS
+	// dial.
+	Parameters *parameters.Parameters
 
 	// Dial is the network connection dialer. TLS is layered on
 	// top of a new network connection created with dialer.
@@ -164,7 +164,7 @@ func SelectTLSProfile(
 	requireTLS12SessionTickets bool,
 	isFronted bool,
 	frontingProviderID string,
-	p parameters.ClientParametersAccessor) string {
+	p parameters.ParametersAccessor) string {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
 	// stock, fixed parrots (non-randomized SupportedTLSProfiles) and custom
@@ -255,7 +255,7 @@ func SelectTLSProfile(
 }
 
 func getUTLSClientHelloID(
-	p parameters.ClientParametersAccessor,
+	p parameters.ParametersAccessor,
 	tlsProfile string) (utls.ClientHelloID, *utls.ClientHelloSpec, error) {
 
 	switch tlsProfile {
@@ -384,7 +384,7 @@ func CustomTLSDial(
 	network, addr string,
 	config *CustomTLSConfig) (net.Conn, error) {
 
-	p := config.ClientParameters.Get()
+	p := config.Parameters.Get()
 
 	dialAddr := addr
 	if config.DialAddr != "" {
@@ -599,7 +599,7 @@ func CustomTLSDial(
 		if config.NoDefaultTLSSessionID != nil {
 			noDefaultSessionID = *config.NoDefaultTLSSessionID
 		} else {
-			noDefaultSessionID = config.ClientParameters.Get().WeightedCoinFlip(
+			noDefaultSessionID = config.Parameters.Get().WeightedCoinFlip(
 				parameters.NoDefaultTLSSessionIDProbability)
 		}
 

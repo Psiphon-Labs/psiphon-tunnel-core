@@ -110,7 +110,7 @@ func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath s
 	}
 
 	// Get tactics, may update client parameters
-	p := config.GetClientParameters().Get()
+	p := config.GetParameters().Get()
 	timeout := p.Duration(parameters.FeedbackTacticsWaitPeriod)
 	p.Close()
 	getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
@@ -120,7 +120,7 @@ func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath s
 	GetTactics(getTacticsCtx, config)
 
 	// Get the latest client parameters
-	p = config.GetClientParameters().Get()
+	p = config.GetParameters().Get()
 	feedbackUploadMinRetryDelay := p.Duration(parameters.FeedbackUploadRetryMinDelaySeconds)
 	feedbackUploadMaxRetryDelay := p.Duration(parameters.FeedbackUploadRetryMaxDelaySeconds)
 	feedbackUploadTimeout := p.Duration(parameters.FeedbackUploadTimeoutSeconds)

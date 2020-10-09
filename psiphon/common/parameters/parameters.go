@@ -19,19 +19,20 @@
 
 /*
 Package parameters implements dynamic, concurrency-safe parameters that
-determine Psiphon client behavior.
+determine Psiphon client and server behaviors.
 
 Parameters include network timeouts, probabilities for actions, lists of
 protocols, etc. Parameters are initialized with reasonable defaults. New
-values may be applied, allowing the client to customized its parameters from
-both a config file and tactics data. Sane minimum values are enforced.
+values may be applied, allowing the client or server to customize its
+parameters from both a config file and tactics data. Sane minimum values are
+enforced.
 
 Parameters may be read and updated concurrently. The read mechanism offers a
 snapshot so that related parameters, such as two Ints representing a range; or
 a more complex series of related parameters; may be read in an atomic and
 consistent way. For example:
 
-    p := clientParameters.Get()
+    p := params.Get()
     min := p.Int("Min")
     max := p.Int("Max")
     p = nil
@@ -40,8 +41,8 @@ For long-running operations, it is recommended to set any pointer to the
 snapshot to nil to allow garbage collection of old snaphots in cases where the
 parameters change.
 
-In general, client parameters should be read as close to the point of use as
-possible to ensure that dynamic changes to the parameter values take effect.
+In general, parameters should be read as close to the point of use as possible
+to ensure that dynamic changes to the parameter values take effect.
 
 For duration parameters, time.ParseDuration-compatible string values are
 supported when applying new values. This allows specifying durations as, for
@@ -264,8 +265,8 @@ const (
 	serverSideOnly              = 2
 )
 
-// defaultClientParameters specifies the type, default value, and minimum
-// value for all dynamically configurable client parameters.
+// defaultParameters specifies the type, default value, and minimum value for
+// all dynamically configurable client and server parameters.
 //
 // Do not change the names or types of existing values, as that can break
 // client logic or cause parameters to not be applied.
@@ -273,7 +274,7 @@ const (
 // Minimum values are a fail-safe for cases where lower values would break the
 // client logic. For example, setting a ConnectionWorkerPoolSize of 0 would
 // make the client never connect.
-var defaultClientParameters = map[string]struct {
+var defaultParameters = map[string]struct {
 	value   interface{}
 	minimum interface{}
 	flags   int32
@@ -539,42 +540,42 @@ var defaultClientParameters = map[string]struct {
 // IsServerSideOnly indicates if the parameter specified by name is used
 // server-side only.
 func IsServerSideOnly(name string) bool {
-	defaultParameter, ok := defaultClientParameters[name]
+	defaultParameter, ok := defaultParameters[name]
 	return ok && (defaultParameter.flags&serverSideOnly) != 0
 }
 
-// ClientParameters is a set of client parameters. To use the parameters, call
-// Get. To apply new values to the parameters, call Set.
-type ClientParameters struct {
+// Parameters is a set of parameters. To use the parameters, call Get. To
+// apply new values to the parameters, call Set.
+type Parameters struct {
 	getValueLogger func(error)
 	snapshot       atomic.Value
 }
 
-// NewClientParameters initializes a new ClientParameters with the default
-// parameter values.
+// NewParameters initializes a new Parameters with the default parameter
+// values.
 //
 // getValueLogger is optional, and is used to report runtime errors with
 // getValue; see comment in getValue.
-func NewClientParameters(
-	getValueLogger func(error)) (*ClientParameters, error) {
+func NewParameters(
+	getValueLogger func(error)) (*Parameters, error) {
 
-	clientParameters := &ClientParameters{
+	parameters := &Parameters{
 		getValueLogger: getValueLogger,
 	}
 
-	_, err := clientParameters.Set("", false)
+	_, err := parameters.Set("", false)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	return clientParameters, nil
+	return parameters, nil
 }
 
 func makeDefaultParameters() (map[string]interface{}, error) {
 
 	parameters := make(map[string]interface{})
 
-	for name, defaults := range defaultClientParameters {
+	for name, defaults := range defaultParameters {
 
 		if defaults.value == nil {
 			return nil, errors.Tracef("default parameter missing value: %s", name)
@@ -613,7 +614,7 @@ func makeDefaultParameters() (map[string]interface{}, error) {
 //
 // For use in logging, Set returns a count of the number of parameters applied
 // from each applyParameters.
-func (p *ClientParameters) Set(
+func (p *Parameters) Set(
 	tag string, skipOnError bool, applyParameters ...map[string]interface{}) ([]int, error) {
 
 	makeTypedValue := func(templateValue, value interface{}) (interface{}, error) {
@@ -837,23 +838,23 @@ func (p *ClientParameters) Set(
 				}
 			}
 
-			// Enforce any minimums. Assumes defaultClientParameters[name]
+			// Enforce any minimums. Assumes defaultParameters[name]
 			// exists.
-			if defaultClientParameters[name].minimum != nil {
+			if defaultParameters[name].minimum != nil {
 				valid := true
 				switch v := newValue.(type) {
 				case int:
-					m, ok := defaultClientParameters[name].minimum.(int)
+					m, ok := defaultParameters[name].minimum.(int)
 					if !ok || v < m {
 						valid = false
 					}
 				case float64:
-					m, ok := defaultClientParameters[name].minimum.(float64)
+					m, ok := defaultParameters[name].minimum.(float64)
 					if !ok || v < m {
 						valid = false
 					}
 				case time.Duration:
-					m, ok := defaultClientParameters[name].minimum.(time.Duration)
+					m, ok := defaultParameters[name].minimum.(time.Duration)
 					if !ok || v < m {
 						valid = false
 					}
@@ -879,7 +880,7 @@ func (p *ClientParameters) Set(
 		counts = append(counts, count)
 	}
 
-	snapshot := &clientParametersSnapshot{
+	snapshot := &parametersSnapshot{
 		getValueLogger: p.getValueLogger,
 		tag:            tag,
 		parameters:     parameters,
@@ -895,15 +896,15 @@ func (p *ClientParameters) Set(
 // Values read from the current parameters are not deep copies and must be
 // treated read-only.
 //
-// The returned ClientParametersAccessor may be used to read multiple related
-// values atomically and consistently while the current set of values in
-// ClientParameters may change concurrently.
+// The returned ParametersAccessor may be used to read multiple related values
+// atomically and consistently while the current set of values in Parameters
+// may change concurrently.
 //
 // Get does not perform any heap allocations and is intended for repeated,
 // direct, low-overhead invocations.
-func (p *ClientParameters) Get() ClientParametersAccessor {
-	return ClientParametersAccessor{
-		snapshot: p.snapshot.Load().(*clientParametersSnapshot)}
+func (p *Parameters) Get() ParametersAccessor {
+	return ParametersAccessor{
+		snapshot: p.snapshot.Load().(*parametersSnapshot)}
 }
 
 // GetCustom returns the current parameters while also setting customizations
@@ -917,20 +918,20 @@ func (p *ClientParameters) Get() ClientParametersAccessor {
 // - customNetworkLatencyMultiplier, which overrides NetworkLatencyMultiplier
 //   for this instance only.
 //
-func (p *ClientParameters) GetCustom(
-	customNetworkLatencyMultiplier float64) ClientParametersAccessor {
+func (p *Parameters) GetCustom(
+	customNetworkLatencyMultiplier float64) ParametersAccessor {
 
-	return ClientParametersAccessor{
-		snapshot:                       p.snapshot.Load().(*clientParametersSnapshot),
+	return ParametersAccessor{
+		snapshot:                       p.snapshot.Load().(*parametersSnapshot),
 		customNetworkLatencyMultiplier: customNetworkLatencyMultiplier,
 	}
 }
 
-// clientParametersSnapshot is an atomic snapshot of the client parameter
-// values. ClientParameters.Get will return a snapshot which may be used to
-// read multiple related values atomically and consistently while the current
-// snapshot in ClientParameters may change concurrently.
-type clientParametersSnapshot struct {
+// parametersSnapshot is an atomic snapshot of the parameter values.
+// Parameters.Get will return a snapshot which may be used to read multiple
+// related values atomically and consistently while the current snapshot in
+// Parameters may change concurrently.
+type parametersSnapshot struct {
 	getValueLogger func(error)
 	tag            string
 	parameters     map[string]interface{}
@@ -942,13 +943,13 @@ type clientParametersSnapshot struct {
 // type of target points to does not match the value.
 //
 // Any of these conditions would be a bug in the caller. getValue does not
-// panic in these cases as the client is deployed as a library in various apps
+// panic in these cases as clients are deployed as a library in various apps
 // and the failure of Psiphon may not be a failure for the app process.
 //
 // Instead, errors are logged to the getValueLogger and getValue leaves the
 // target unset, which will result in the caller getting and using a zero
 // value of the requested type.
-func (p *clientParametersSnapshot) getValue(name string, target interface{}) {
+func (p *parametersSnapshot) getValue(name string, target interface{}) {
 
 	value, ok := p.parameters[name]
 	if !ok {
@@ -983,76 +984,73 @@ func (p *clientParametersSnapshot) getValue(name string, target interface{}) {
 	targetValue.Elem().Set(reflect.ValueOf(value))
 }
 
-// ClientParametersAccessor provides consistent, atomic access to client
-// parameter values. Any customizations are applied transparently.
-type ClientParametersAccessor struct {
-	snapshot                       *clientParametersSnapshot
+// ParametersAccessor provides consistent, atomic access to  parameter values.
+// Any customizations are applied transparently.
+type ParametersAccessor struct {
+	snapshot                       *parametersSnapshot
 	customNetworkLatencyMultiplier float64
 }
 
-// MakeNilClientParametersAccessor produces a stub ClientParametersAccessor
-// which returns true for IsNil. This may be used where a
-// ClientParametersAccessor value is required, but ClientParameters.Get may
-// not succeed. In contexts where MakeNilClientParametersAccessor may be used,
-// calls to ClientParametersAccessor must first check IsNil before calling
-// accessor functions.
-func MakeNilClientParametersAccessor() ClientParametersAccessor {
-	return ClientParametersAccessor{}
+// MakeNilParametersAccessor produces a stub ParametersAccessor which returns
+// true for IsNil. This may be used where a ParametersAccessor value is
+// required, but Parameters.Get may not succeed. In contexts where
+// MakeNilParametersAccessor may be used, calls to ParametersAccessor must
+// first check IsNil before calling accessor functions.
+func MakeNilParametersAccessor() ParametersAccessor {
+	return ParametersAccessor{}
 }
 
-// IsNil indicates that this ClientParametersAccessor is a stub and its
-// accessor functions may not be called. A ClientParametersAccessor produced
-// by ClientParameters.Get will never return true for IsNil and IsNil guards
-// are not required for ClientParametersAccessors known to be produced by
-// ClientParameters.Get.
-func (p ClientParametersAccessor) IsNil() bool {
+// IsNil indicates that this ParametersAccessor is a stub and its accessor
+// functions may not be called. A ParametersAccessor produced by
+// Parameters.Get will never return true for IsNil and IsNil guards are not
+// required for ParametersAccessors known to be produced by Parameters.Get.
+func (p ParametersAccessor) IsNil() bool {
 	return p.snapshot == nil
 }
 
 // Close clears internal references to large memory objects, allowing them to
-// be garbage collected. Call Close when done using a
-// ClientParametersAccessor, where memory footprint is a concern, and where
-// the ClientParametersAccessor is not immediately going out of scope. After
-// Close is called, all other ClientParametersAccessor functions will panic if
-// called.
-func (p ClientParametersAccessor) Close() {
+// be garbage collected. Call Close when done using a ParametersAccessor,
+// where memory footprint is a concern, and where the ParametersAccessor is
+// not immediately going out of scope. After Close is called, all other
+// ParametersAccessor functions will panic if called.
+func (p ParametersAccessor) Close() {
 	p.snapshot = nil
 }
 
 // Tag returns the tag associated with these parameters.
-func (p ClientParametersAccessor) Tag() string {
+func (p ParametersAccessor) Tag() string {
 	return p.snapshot.tag
 }
 
 // String returns a string parameter value.
-func (p ClientParametersAccessor) String(name string) string {
+func (p ParametersAccessor) String(name string) string {
 	value := ""
 	p.snapshot.getValue(name, &value)
 	return value
 }
 
-func (p ClientParametersAccessor) Strings(name string) []string {
+func (p ParametersAccessor) Strings(name string) []string {
 	value := []string{}
 	p.snapshot.getValue(name, &value)
 	return value
 }
 
 // Int returns an int parameter value.
-func (p ClientParametersAccessor) Int(name string) int {
+func (p ParametersAccessor) Int(name string) int {
 	value := int(0)
 	p.snapshot.getValue(name, &value)
 	return value
 }
 
 // Bool returns a bool parameter value.
-func (p ClientParametersAccessor) Bool(name string) bool {
+func (p ParametersAccessor) Bool(name string) bool {
 	value := false
 	p.snapshot.getValue(name, &value)
 	return value
 }
 
 // Float returns a float64 parameter value.
-func (p ClientParametersAccessor) Float(name string) float64 {
+func (p ParametersAccessor) Float(name string) float64 {
 	value := float64(0.0)
 	p.snapshot.getValue(name, &value)
 	return value
@@ -1060,7 +1058,7 @@ func (p ClientParametersAccessor) Float(name string) float64 {
 
 // WeightedCoinFlip returns the result of prng.FlipWeightedCoin using the
 // specified float parameter as the probability input.
-func (p ClientParametersAccessor) WeightedCoinFlip(name string) bool {
+func (p ParametersAccessor) WeightedCoinFlip(name string) bool {
 	var value float64
 	p.snapshot.getValue(name, &value)
 	return prng.FlipWeightedCoin(value)
@@ -1069,11 +1067,11 @@ func (p ClientParametersAccessor) WeightedCoinFlip(name string) bool {
 // Duration returns a time.Duration parameter value. When the duration
 // parameter has the useNetworkLatencyMultiplier flag, the
 // NetworkLatencyMultiplier is applied to the returned value.
-func (p ClientParametersAccessor) Duration(name string) time.Duration {
+func (p ParametersAccessor) Duration(name string) time.Duration {
 	value := time.Duration(0)
 	p.snapshot.getValue(name, &value)
 
-	defaultParameter, ok := defaultClientParameters[name]
+	defaultParameter, ok := defaultParameters[name]
 	if value > 0 && ok && defaultParameter.flags&useNetworkLatencyMultiplier != 0 {
 
 		multiplier := float64(0.0)
@@ -1097,7 +1095,7 @@ func (p ClientParametersAccessor) Duration(name string) time.Duration {
 // If there is a corresponding Probability value, a weighted coin flip
 // will be performed and, depending on the result, the value or the
 // parameter default will be returned.
-func (p ClientParametersAccessor) TunnelProtocols(name string) protocol.TunnelProtocols {
+func (p ParametersAccessor) TunnelProtocols(name string) protocol.TunnelProtocols {
 
 	probabilityName := name + "Probability"
 	_, ok := p.snapshot.parameters[probabilityName]
@@ -1105,7 +1103,7 @@ func (p ClientParametersAccessor) TunnelProtocols(name string) protocol.TunnelPr
 		probabilityValue := float64(1.0)
 		p.snapshot.getValue(probabilityName, &probabilityValue)
 		if !prng.FlipWeightedCoin(probabilityValue) {
-			defaultParameter, ok := defaultClientParameters[name]
+			defaultParameter, ok := defaultParameters[name]
 			if ok {
 				defaultValue, ok := defaultParameter.value.(protocol.TunnelProtocols)
 				if ok {
@@ -1126,7 +1124,7 @@ func (p ClientParametersAccessor) TunnelProtocols(name string) protocol.TunnelPr
 // If there is a corresponding Probability value, a weighted coin flip
 // will be performed and, depending on the result, the value or the
 // parameter default will be returned.
-func (p ClientParametersAccessor) TLSProfiles(name string) protocol.TLSProfiles {
+func (p ParametersAccessor) TLSProfiles(name string) protocol.TLSProfiles {
 
 	probabilityName := name + "Probability"
 	_, ok := p.snapshot.parameters[probabilityName]
@@ -1134,7 +1132,7 @@ func (p ClientParametersAccessor) TLSProfiles(name string) protocol.TLSProfiles 
 		probabilityValue := float64(1.0)
 		p.snapshot.getValue(probabilityName, &probabilityValue)
 		if !prng.FlipWeightedCoin(probabilityValue) {
-			defaultParameter, ok := defaultClientParameters[name]
+			defaultParameter, ok := defaultParameters[name]
 			if ok {
 				defaultValue, ok := defaultParameter.value.(protocol.TLSProfiles)
 				if ok {
@@ -1154,7 +1152,7 @@ func (p ClientParametersAccessor) TLSProfiles(name string) protocol.TLSProfiles 
 // LabeledTLSProfiles returns a protocol.TLSProfiles parameter value
 // corresponding to the specified labeled set and label value. The return
 // value is nil when no set is found.
-func (p ClientParametersAccessor) LabeledTLSProfiles(name, label string) protocol.TLSProfiles {
+func (p ParametersAccessor) LabeledTLSProfiles(name, label string) protocol.TLSProfiles {
 	var value protocol.LabeledTLSProfiles
 	p.snapshot.getValue(name, &value)
 	return value[label]
@@ -1164,7 +1162,7 @@ func (p ClientParametersAccessor) LabeledTLSProfiles(name, label string) protoco
 // If there is a corresponding Probability value, a weighted coin flip
 // will be performed and, depending on the result, the value or the
 // parameter default will be returned.
-func (p ClientParametersAccessor) QUICVersions(name string) protocol.QUICVersions {
+func (p ParametersAccessor) QUICVersions(name string) protocol.QUICVersions {
 
 	probabilityName := name + "Probability"
 	_, ok := p.snapshot.parameters[probabilityName]
@@ -1172,7 +1170,7 @@ func (p ClientParametersAccessor) QUICVersions(name string) protocol.QUICVersion
 		probabilityValue := float64(1.0)
 		p.snapshot.getValue(probabilityName, &probabilityValue)
 		if !prng.FlipWeightedCoin(probabilityValue) {
-			defaultParameter, ok := defaultClientParameters[name]
+			defaultParameter, ok := defaultParameters[name]
 			if ok {
 				defaultValue, ok := defaultParameter.value.(protocol.QUICVersions)
 				if ok {
@@ -1192,28 +1190,28 @@ func (p ClientParametersAccessor) QUICVersions(name string) protocol.QUICVersion
 // LabeledQUICVersions returns a protocol.QUICVersions parameter value
 // corresponding to the specified labeled set and label value. The return
 // value is nil when no set is found.
-func (p ClientParametersAccessor) LabeledQUICVersions(name, label string) protocol.QUICVersions {
+func (p ParametersAccessor) LabeledQUICVersions(name, label string) protocol.QUICVersions {
 	value := protocol.LabeledQUICVersions{}
 	p.snapshot.getValue(name, &value)
 	return value[label]
 }
 
 // TransferURLs returns a TransferURLs parameter value.
-func (p ClientParametersAccessor) TransferURLs(name string) TransferURLs {
+func (p ParametersAccessor) TransferURLs(name string) TransferURLs {
 	value := TransferURLs{}
 	p.snapshot.getValue(name, &value)
 	return value
 }
 
 // RateLimits returns a common.RateLimits parameter value.
-func (p ClientParametersAccessor) RateLimits(name string) common.RateLimits {
+func (p ParametersAccessor) RateLimits(name string) common.RateLimits {
 	value := common.RateLimits{}
 	p.snapshot.getValue(name, &value)
 	return value
 }
 
 // HTTPHeaders returns an http.Header parameter value.
-func (p ClientParametersAccessor) HTTPHeaders(name string) http.Header {
+func (p ParametersAccessor) HTTPHeaders(name string) http.Header {
 	value := make(http.Header)
 	p.snapshot.getValue(name, &value)
 	return value
@@ -1221,7 +1219,7 @@ func (p ClientParametersAccessor) HTTPHeaders(name string) http.Header {
 
 // CustomTLSProfileNames returns the CustomTLSProfile.Name fields for
 // each profile in the CustomTLSProfiles parameter value.
-func (p ClientParametersAccessor) CustomTLSProfileNames() []string {
+func (p ParametersAccessor) CustomTLSProfileNames() []string {
 	value := protocol.CustomTLSProfiles{}
 	p.snapshot.getValue(CustomTLSProfiles, &value)
 	names := make([]string, len(value))
@@ -1234,7 +1232,7 @@ func (p ClientParametersAccessor) CustomTLSProfileNames() []string {
 // CustomTLSProfile returns the CustomTLSProfile fields with the specified
 // Name field if it exists in the CustomTLSProfiles parameter value.
 // Returns nil if not found.
-func (p ClientParametersAccessor) CustomTLSProfile(name string) *protocol.CustomTLSProfile {
+func (p ParametersAccessor) CustomTLSProfile(name string) *protocol.CustomTLSProfile {
 	value := protocol.CustomTLSProfiles{}
 	p.snapshot.getValue(CustomTLSProfiles, &value)
 
@@ -1249,7 +1247,7 @@ func (p ClientParametersAccessor) CustomTLSProfile(name string) *protocol.Custom
 }
 
 // KeyValues returns a KeyValues parameter value.
-func (p ClientParametersAccessor) KeyValues(name string) KeyValues {
+func (p ParametersAccessor) KeyValues(name string) KeyValues {
 	value := KeyValues{}
 	p.snapshot.getValue(name, &value)
 	return value
@@ -1258,7 +1256,7 @@ func (p ClientParametersAccessor) KeyValues(name string) KeyValues {
 // BPFProgram returns an assembled BPF program corresponding to a
 // BPFProgramSpec parameter value. Returns nil in the case of any empty
 // program.
-func (p ClientParametersAccessor) BPFProgram(name string) (bool, string, []bpf.RawInstruction) {
+func (p ParametersAccessor) BPFProgram(name string) (bool, string, []bpf.RawInstruction) {
 	var value *BPFProgramSpec
 	p.snapshot.getValue(name, &value)
 	if value == nil {
@@ -1270,14 +1268,14 @@ func (p ClientParametersAccessor) BPFProgram(name string) (bool, string, []bpf.R
 }
 
 // PacketManipulationSpecs returns a PacketManipulationSpecs parameter value.
-func (p ClientParametersAccessor) PacketManipulationSpecs(name string) PacketManipulationSpecs {
+func (p ParametersAccessor) PacketManipulationSpecs(name string) PacketManipulationSpecs {
 	value := PacketManipulationSpecs{}
 	p.snapshot.getValue(name, &value)
 	return value
 }
 
 // ProtocolPacketManipulations returns a ProtocolPacketManipulations parameter value.
-func (p ClientParametersAccessor) ProtocolPacketManipulations(name string) ProtocolPacketManipulations {
+func (p ParametersAccessor) ProtocolPacketManipulations(name string) ProtocolPacketManipulations {
 	value := make(ProtocolPacketManipulations)
 	p.snapshot.getValue(name, &value)
 	return value

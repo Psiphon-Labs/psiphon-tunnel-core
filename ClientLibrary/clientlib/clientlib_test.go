@@ -85,7 +85,7 @@ func TestStartTunnel(t *testing.T) {
 		configJSON              []byte
 		embeddedServerEntryList string
 		params                  Parameters
-		paramsDelta             ClientParametersDelta
+		paramsDelta             ParametersDelta
 		noticeReceiver          func(NoticeEvent)
 	}
 	tests := []struct {

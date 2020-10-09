@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -358,39 +357,4 @@ type replayParameters struct {
 	replayFragmentor           bool
 	fragmentorSeed             *prng.Seed
 	failedCount                int
-}
-
-// GetServerTacticsParameters returns server-side tactics parameters for the
-// specified GeoIP scope. GetServerTacticsParameters is designed to be called
-// before the API handshake and does not filter by API parameters. IsNil
-// guards must be used when accessing the  returned ClientParametersAccessor.
-func GetServerTacticsParameters(
-	support *SupportServices,
-	geoIPData GeoIPData) (parameters.ClientParametersAccessor, error) {
-
-	nilAccessor := parameters.MakeNilClientParametersAccessor()
-
-	tactics, err := support.TacticsServer.GetTactics(
-		true, common.GeoIPData(geoIPData), make(common.APIParameters))
-	if err != nil {
-		return nilAccessor, errors.Trace(err)
-	}
-
-	if tactics == nil {
-		// This server isn't configured with tactics.
-		return nilAccessor, nil
-	}
-
-	// Tactics.Probability is ignored for server-side tactics.
-
-	clientParameters, err := parameters.NewClientParameters(nil)
-	if err != nil {
-		return nilAccessor, errors.Trace(err)
-	}
-	_, err = clientParameters.Set("", false, tactics.Parameters)
-	if err != nil {
-		return nilAccessor, errors.Trace(err)
-	}
-
-	return clientParameters.Get(), nil
 }

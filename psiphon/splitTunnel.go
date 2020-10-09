@@ -67,8 +67,8 @@ import (
 // data is cached in the data store so it need not be downloaded in full
 // when fresh data is in the cache.
 type SplitTunnelClassifier struct {
+	config               *Config
 	mutex                sync.RWMutex
-	clientParameters     *parameters.ClientParameters
 	userAgent            string
 	dnsTunneler          Tunneler
 	fetchRoutesWaitGroup *sync.WaitGroup
@@ -84,7 +84,7 @@ type classification struct {
 
 func NewSplitTunnelClassifier(config *Config, tunneler Tunneler) *SplitTunnelClassifier {
 	return &SplitTunnelClassifier{
-		clientParameters:     config.clientParameters,
+		config:               config,
 		userAgent:            MakePsiphonUserAgent(config),
 		dnsTunneler:          tunneler,
 		fetchRoutesWaitGroup: new(sync.WaitGroup),
@@ -104,7 +104,7 @@ func (classifier *SplitTunnelClassifier) Start(fetchRoutesTunnel *Tunnel) {
 
 	classifier.isRoutesSet = false
 
-	p := classifier.clientParameters.Get()
+	p := classifier.config.GetParameters().Get()
 	dnsServerAddress := p.String(parameters.SplitTunnelDNSServer)
 	routesSignaturePublicKey := p.String(parameters.SplitTunnelRoutesSignaturePublicKey)
 	fetchRoutesUrlFormat := p.String(parameters.SplitTunnelRoutesURLFormat)
@@ -158,7 +158,7 @@ func (classifier *SplitTunnelClassifier) IsUntunneled(targetAddress string) bool
 		return false
 	}
 
-	dnsServerAddress := classifier.clientParameters.Get().String(
+	dnsServerAddress := classifier.config.GetParameters().Get().String(
 		parameters.SplitTunnelDNSServer)
 	if dnsServerAddress == "" {
 		// Split tunnel has been disabled.
@@ -225,7 +225,7 @@ func (classifier *SplitTunnelClassifier) setRoutes(tunnel *Tunnel) {
 // fails and cached routes data is present, that cached data is returned.
 func (classifier *SplitTunnelClassifier) getRoutes(tunnel *Tunnel) (routesData []byte, err error) {
 
-	p := classifier.clientParameters.Get()
+	p := classifier.config.GetParameters().Get()
 	routesSignaturePublicKey := p.String(parameters.SplitTunnelRoutesSignaturePublicKey)
 	fetchRoutesUrlFormat := p.String(parameters.SplitTunnelRoutesURLFormat)
 	fetchTimeout := p.Duration(parameters.FetchSplitTunnelRoutesTimeout)

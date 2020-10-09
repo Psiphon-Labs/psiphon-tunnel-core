@@ -916,9 +916,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		applyParameters[parameters.TunnelConnectTimeout] = "1s"
 		applyParameters[parameters.TunnelRateLimits] = common.RateLimits{WriteBytesPerSecond: 1}
 
-		err = clientConfig.SetClientParameters("", true, applyParameters)
+		err = clientConfig.SetParameters("", true, applyParameters)
 		if err != nil {
-			t.Fatalf("SetClientParameters failed: %s", err)
+			t.Fatalf("SetParameters failed: %s", err)
 		}
 
 	} else {
@@ -950,9 +950,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			applyParameters[parameters.PsiphonAPIStatusRequestShortPeriodMax] = 1 * time.Millisecond
 		}
 
-		err = clientConfig.SetClientParameters("", true, applyParameters)
+		err = clientConfig.SetParameters("", true, applyParameters)
 		if err != nil {
-			t.Fatalf("SetClientParameters failed: %s", err)
+			t.Fatalf("SetParameters failed: %s", err)
 		}
 	}
 
@@ -2213,9 +2213,9 @@ func storePruneServerEntriesTest(
 	applyParameters := make(map[string]interface{})
 	applyParameters[parameters.RecordFailedTunnelPersistentStatsProbability] = 1.0
 
-	err = clientConfig.SetClientParameters("", true, applyParameters)
+	err = clientConfig.SetParameters("", true, applyParameters)
 	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
+		t.Fatalf("SetParameters failed: %s", err)
 	}
 
 	verifyTestCasesStored := make(verifyTestCasesStoredLookup)

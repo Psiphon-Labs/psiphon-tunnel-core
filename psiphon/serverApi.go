@@ -99,7 +99,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 		paddingPRNG:        prng.NewPRNGWithSeed(tunnel.dialParams.APIRequestPaddingSeed),
 	}
 
-	ignoreRegexps := tunnel.config.GetClientParameters().Get().Bool(
+	ignoreRegexps := tunnel.config.GetParameters().Get().Bool(
 		parameters.IgnoreHandshakeStatsRegexps)
 
 	err := serverContext.doHandshakeRequest(ignoreRegexps)
@@ -154,7 +154,6 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		networkID = serverContext.tunnel.config.GetNetworkID()
 
 		err := tactics.SetTacticsAPIParameters(
-			serverContext.tunnel.config.clientParameters,
 			GetTacticsStorer(serverContext.tunnel.config),
 			networkID,
 			params)
@@ -327,13 +326,13 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			if tacticsRecord != nil &&
 				prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
 
-				err := serverContext.tunnel.config.SetClientParameters(
+				err := serverContext.tunnel.config.SetParameters(
 					tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
 				if err != nil {
 					NoticeInfo("apply handshake tactics failed: %s", err)
 				}
-				// The error will be due to invalid tactics values from
-				// the server. When ApplyClientParameters fails, all
+				// The error will be due to invalid tactics values
+				// from the server. When SetParameters fails, all
 				// previous tactics values are left in place.
 			}
 		}
@@ -642,7 +641,7 @@ func RecordRemoteServerListStat(
 	duration time.Duration,
 	authenticated bool) error {
 
-	if !config.GetClientParameters().Get().WeightedCoinFlip(
+	if !config.GetParameters().Get().WeightedCoinFlip(
 		parameters.RecordRemoteServerListPersistentStatsProbability) {
 		return nil
 	}
@@ -700,7 +699,7 @@ func RecordFailedTunnelStat(
 	bytesDown int64,
 	tunnelErr error) error {
 
-	if !config.GetClientParameters().Get().WeightedCoinFlip(
+	if !config.GetParameters().Get().WeightedCoinFlip(
 		parameters.RecordFailedTunnelPersistentStatsProbability) {
 		return nil
 	}
@@ -832,7 +831,7 @@ func (serverContext *ServerContext) getBaseAPIParameters(
 	// fingerprints. The "pad_response" field instructs the server to pad its
 	// response accordingly.
 
-	p := serverContext.tunnel.config.GetClientParameters().Get()
+	p := serverContext.tunnel.config.GetParameters().Get()
 	minUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMinBytes)
 	maxUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMaxBytes)
 	minDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMinBytes)
@@ -957,7 +956,7 @@ func getBaseAPIParameters(
 		}
 
 		params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] =
-			config.GetClientParameters().Get().Tag()
+			config.GetParameters().Get().Tag()
 
 		if dialParams.DialPortNumber != "" {
 			params["dial_port_number"] = dialParams.DialPortNumber
@@ -1091,7 +1090,7 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 
 	dialer := NewCustomTLSDialer(
 		&CustomTLSConfig{
-			ClientParameters:        tunnel.config.clientParameters,
+			Parameters:              tunnel.config.GetParameters(),
 			Dial:                    tunneledDialer,
 			VerifyLegacyCertificate: certificate,
 		})
