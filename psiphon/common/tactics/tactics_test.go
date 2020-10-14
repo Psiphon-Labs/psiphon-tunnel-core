@@ -698,6 +698,238 @@ func TestTactics(t *testing.T) {
 	// TODO: test Server.Validate with invalid tactics configurations
 }
 
+func TestTacticsFilterGeoIPScope(t *testing.T) {
+
+	encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatalf("GenerateKeys failed: %s", err)
+	}
+
+	tacticsConfigTemplate := fmt.Sprintf(`
+    {
+      "RequestPublicKey" : "%s",
+      "RequestPrivateKey" : "%s",
+      "RequestObfuscatedKey" : "%s",
+      "DefaultTactics" : {
+        "TTL" : "60s",
+        "Probability" : 1.0
+      },
+      %%s
+      ]
+    }
+    `, encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey)
+
+	// Test: region-only scope
+
+	filteredTactics := `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1", "R2", "R3"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R4", "R5", "R6"]
+          }
+        }
+	`
+
+	tacticsConfig := fmt.Sprintf(tacticsConfigTemplate, filteredTactics)
+
+	file, err := ioutil.TempFile("", "tactics.config")
+	if err != nil {
+		t.Fatalf("TempFile create failed: %s", err)
+	}
+	_, err = file.Write([]byte(tacticsConfig))
+	if err != nil {
+		t.Fatalf("TempFile write failed: %s", err)
+	}
+	file.Close()
+
+	configFileName := file.Name()
+	defer os.Remove(configFileName)
+
+	server, err := NewServer(
+		nil,
+		nil,
+		nil,
+		configFileName)
+	if err != nil {
+		t.Fatalf("NewServer failed: %s", err)
+	}
+
+	geoIPData := common.GeoIPData{
+		Country: "R0",
+		ISP:     "I0",
+		City:    "C0",
+	}
+
+	scope := server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeRegion {
+		t.Fatalf("unexpected scope: %d", scope)
+	}
+
+	// Test: ISP-only scope
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "ISPs": ["I1", "I2", "I3"]
+          }
+        },
+        {
+          "Filter" : {
+            "ISPs": ["I4", "I5", "I6"]
+          }
+        }
+	`
+
+	reload := func() {
+		tacticsConfig = fmt.Sprintf(tacticsConfigTemplate, filteredTactics)
+
+		err = ioutil.WriteFile(configFileName, []byte(tacticsConfig), 0600)
+		if err != nil {
+			t.Fatalf("WriteFile failed: %s", err)
+		}
+
+		reloaded, err := server.Reload()
+		if err != nil {
+			t.Fatalf("Reload failed: %s", err)
+		}
+
+		if !reloaded {
+			t.Fatalf("Server config failed to reload")
+		}
+	}
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeISP {
+		t.Fatalf("unexpected scope: %d", scope)
+	}
+
+	// Test: City-only scope
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Cities": ["C1", "C2", "C3"]
+          }
+        },
+        {
+          "Filter" : {
+            "Cities": ["C4", "C5", "C6"]
+          }
+        }
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %d", scope)
+	}
+
+	// Test: full scope
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1", "R2", "R3"]
+          }
+        },
+        {
+          "Filter" : {
+            "ISPs": ["I1", "I2", "I3"]
+          }
+        },
+        {
+          "Filter" : {
+            "Cities": ["C4", "C5", "C6"]
+          }
+        }
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %d", scope)
+	}
+
+	// Test: conditional scopes
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R2"],
+            "ISPs": ["I2a"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R2"],
+            "ISPs": ["I2b"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R3"],
+            "ISPs": ["I3a"],
+            "Cities": ["C3a"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R3"],
+            "ISPs": ["I3b"],
+            "Cities": ["C3b"]
+          }
+        }
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R0"})
+
+	if scope != GeoIPScopeRegion {
+		t.Fatalf("unexpected scope: %d", scope)
+	}
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R1"})
+
+	if scope != GeoIPScopeRegion {
+		t.Fatalf("unexpected scope: %d", scope)
+	}
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R2"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP {
+		t.Fatalf("unexpected scope: %d", scope)
+	}
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R3"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %d", scope)
+	}
+}
+
 type testStorer struct {
 	tacticsRecords         map[string][]byte
 	speedTestSampleRecords map[string][]byte

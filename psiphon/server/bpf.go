@@ -27,7 +27,6 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -92,7 +91,7 @@ func newTCPListenerWithBPF(
 
 func getBPFProgram(support *SupportServices) (bool, string, []bpf.RawInstruction, error) {
 
-	p, err := GetServerTacticsParameters(r.support, NewGeoIPData())
+	p, err := support.ServerTacticsParametersCache.Get(NewGeoIPData())
 	if err != nil {
 		return false, "", nil, errors.Trace(err)
 	}

@@ -148,6 +148,8 @@ func TestListener(t *testing.T) {
 				TacticsServer: tacticsServer,
 			}
 			support.ReplayCache = NewReplayCache(support)
+			support.ServerTacticsParametersCache =
+				NewServerTacticsParametersCache(support)
 
 			tacticsListener := NewTacticsListener(
 				support,

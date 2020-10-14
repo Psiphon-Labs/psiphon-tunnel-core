@@ -250,10 +250,19 @@ type Server struct {
 	// condition (vs., say, checking for a zero-value Server).
 	loaded bool
 
+	filterGeoIPScope   int
+	filterRegionScopes map[string]int
+
 	logger                common.Logger
 	logFieldFormatter     common.APIParameterLogFieldFormatter
 	apiParameterValidator common.APIParameterValidator
 }
+
+const (
+	GeoIPScopeRegion = 1
+	GeoIPScopeISP    = 2
+	GeoIPScopeCity   = 4
+)
 
 // Filter defines a filter to match against client attributes.
 // Each field within the filter is optional and may be omitted.
@@ -579,6 +588,9 @@ const stringLookupThreshold = 5
 // slice.
 func (server *Server) initLookups() {
 
+	server.filterGeoIPScope = 0
+	server.filterRegionScopes = make(map[string]int)
+
 	for _, filteredTactics := range server.FilteredTactics {
 
 		if len(filteredTactics.Filter.Regions) >= stringLookupThreshold {
@@ -602,9 +614,66 @@ func (server *Server) initLookups() {
 			}
 		}
 
+		// Initialize the filter GeoIP scope fields used by GetFilterGeoIPScope.
+		//
+		// The basic case is, for example, when only Regions appear in filters, then
+		// only GeoIPScopeRegion is set.
+		//
+		// As an optimization, a regional map is populated so that, for example,
+		// GeoIPScopeRegion&GeoIPScopeISP will be set only for regions for which
+		// there is a filter with region and ISP, while other regions will set only
+		// GeoIPScopeRegion.
+		//
+		// When any ISP or City appears in a filter without a Region, the regional
+		// map optimization is disabled.
+
+		if len(filteredTactics.Filter.Regions) == 0 {
+			if len(filteredTactics.Filter.ISPs) > 0 {
+				server.filterGeoIPScope |= GeoIPScopeISP
+				server.filterRegionScopes = nil
+			}
+			if len(filteredTactics.Filter.Cities) > 0 {
+				server.filterGeoIPScope |= GeoIPScopeCity
+				server.filterRegionScopes = nil
+			}
+		} else {
+			server.filterGeoIPScope |= GeoIPScopeRegion
+			if server.filterRegionScopes != nil {
+				regionScope := 0
+				if len(filteredTactics.Filter.ISPs) > 0 {
+					regionScope |= GeoIPScopeISP
+				}
+				if len(filteredTactics.Filter.Cities) > 0 {
+					regionScope |= GeoIPScopeCity
+				}
+				for _, region := range filteredTactics.Filter.Regions {
+					server.filterRegionScopes[region] |= regionScope
+				}
+			}
+		}
+
 		// TODO: add lookups for APIParameters?
 		// Not expected to be long lists of values.
 	}
+}
+
+// GetFilterGeoIPScope returns which GeoIP fields are relevent to tactics
+// filters. The return value is a bit array containing some combination of the
+// GeoIPScopeRegion, GeoIPScopeISP, and GeoIPScopeCity flags. For the given
+// geoIPData, all tactics filters reference only the flagged fields.
+func (server *Server) GetFilterGeoIPScope(geoIPData common.GeoIPData) int {
+
+	scope := server.filterGeoIPScope
+
+	if server.filterRegionScopes != nil {
+
+		regionScope, ok := server.filterRegionScopes[geoIPData.Country]
+		if ok {
+			scope |= regionScope
+		}
+	}
+
+	return scope
 }
 
 // GetTacticsPayload assembles and returns a tactics payload for a client with
@@ -635,14 +704,10 @@ func (server *Server) GetTacticsPayload(
 		return nil, nil
 	}
 
-	marshaledTactics, err := json.Marshal(tactics)
+	marshaledTactics, tag, err := marshalTactics(tactics)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	// MD5 hash is used solely as a data checksum and not for any security purpose.
-	digest := md5.Sum(marshaledTactics)
-	tag := hex.EncodeToString(digest[:])
 
 	payload := &Payload{
 		Tag: tag,
@@ -674,6 +739,43 @@ func (server *Server) GetTacticsPayload(
 	}
 
 	return payload, nil
+}
+
+func marshalTactics(tactics *Tactics) ([]byte, string, error) {
+	marshaledTactics, err := json.Marshal(tactics)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	// MD5 hash is used solely as a data checksum and not for any security purpose.
+	digest := md5.Sum(marshaledTactics)
+	tag := hex.EncodeToString(digest[:])
+
+	return marshaledTactics, tag, nil
+}
+
+// GetTacticsWithTag returns a GetTactics value along with the associated tag value.
+func (server *Server) GetTacticsWithTag(
+	includeServerSideOnly bool,
+	geoIPData common.GeoIPData,
+	apiParams common.APIParameters) (*Tactics, string, error) {
+
+	tactics, err := server.GetTactics(
+		includeServerSideOnly, geoIPData, apiParams)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	if tactics == nil {
+		return nil, "", nil
+	}
+
+	_, tag, err := marshalTactics(tactics)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	return tactics, tag, nil
 }
 
 // GetTactics assembles and returns tactics data for a client with the

@@ -378,6 +378,8 @@ func logServerLoad(support *SupportServices) {
 
 	serverLoad.Add(support.ReplayCache.GetMetrics())
 
+	serverLoad.Add(support.ServerTacticsParametersCache.GetMetrics())
+
 	protocolStats, regionStats :=
 		support.TunnelServer.GetLoadStats()
 
@@ -428,18 +430,19 @@ func logIrregularTunnel(
 // components, which allows these data components to be refreshed
 // without restarting the server process.
 type SupportServices struct {
-	Config             *Config
-	TrafficRulesSet    *TrafficRulesSet
-	OSLConfig          *osl.Config
-	PsinetDatabase     *psinet.Database
-	GeoIPService       *GeoIPService
-	DNSResolver        *DNSResolver
-	TunnelServer       *TunnelServer
-	PacketTunnelServer *tun.Server
-	TacticsServer      *tactics.Server
-	Blocklist          *Blocklist
-	PacketManipulator  *packetman.Manipulator
-	ReplayCache        *ReplayCache
+	Config                       *Config
+	TrafficRulesSet              *TrafficRulesSet
+	OSLConfig                    *osl.Config
+	PsinetDatabase               *psinet.Database
+	GeoIPService                 *GeoIPService
+	DNSResolver                  *DNSResolver
+	TunnelServer                 *TunnelServer
+	PacketTunnelServer           *tun.Server
+	TacticsServer                *tactics.Server
+	Blocklist                    *Blocklist
+	PacketManipulator            *packetman.Manipulator
+	ReplayCache                  *ReplayCache
+	ServerTacticsParametersCache *ServerTacticsParametersCache
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -498,6 +501,9 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 
 	support.ReplayCache = NewReplayCache(support)
 
+	support.ServerTacticsParametersCache =
+		NewServerTacticsParametersCache(support)
+
 	return support, nil
 }
 
@@ -521,8 +527,9 @@ func (support *SupportServices) Reload() {
 
 	reloadTactics := func() {
 
-		// Don't replay using stale tactics.
+		// Don't use stale tactics.
 		support.ReplayCache.Flush()
+		support.ServerTacticsParametersCache.Flush()
 
 		if support.Config.RunPacketManipulator {
 			err := reloadPacketManipulationSpecs(support)

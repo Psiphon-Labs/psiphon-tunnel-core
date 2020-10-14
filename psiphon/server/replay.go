@@ -115,10 +115,10 @@ func (r *ReplayCache) GetMetrics() LogFields {
 func (r *ReplayCache) GetReplayTargetDuration(
 	geoIPData GeoIPData) (bool, time.Duration, time.Duration) {
 
-	p, err := GetServerTacticsParameters(r.support, geoIPData)
+	p, err := r.support.ServerTacticsParametersCache.Get(geoIPData)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
-			"GetServerTacticsParameters failed")
+			"ServerTacticsParametersCache.Get failed")
 		return false, 0, 0
 	}
 
@@ -164,10 +164,10 @@ func (r *ReplayCache) SetReplayParameters(
 	tunneledBytesUp int64,
 	tunneledBytesDown int64) {
 
-	p, err := GetServerTacticsParameters(r.support, geoIPData)
+	p, err := r.support.ServerTacticsParametersCache.Get(geoIPData)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
-			"GetServerTacticsParameters failed")
+			"ServerTacticsParametersCache.Get failed")
 		return
 	}
 
@@ -300,10 +300,10 @@ func (r *ReplayCache) FailedReplayParameters(
 	packetManipulationSpecName string,
 	fragmentorSeed *prng.Seed) {
 
-	p, err := GetServerTacticsParameters(r.support, geoIPData)
+	p, err := r.support.ServerTacticsParametersCache.Get(geoIPData)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
-			"GetServerTacticsParameters failed")
+			"ServerTacticsParametersCache.Get failed")
 		return
 	}
 

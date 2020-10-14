@@ -74,8 +74,7 @@ func (listener *TacticsListener) Accept() (net.Conn, error) {
 	geoIPData := listener.geoIPLookup(
 		common.IPAddressFromAddr(conn.RemoteAddr()))
 
-	p, err := GetServerTacticsParameters(
-		listener.support, geoIPData)
+	p, err := listener.support.ServerTacticsParametersCache.Get(geoIPData)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

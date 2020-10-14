@@ -75,10 +75,10 @@ func makePacketManipulatorConfig(
 func getPacketManipulationSpecs(support *SupportServices) ([]*packetman.Spec, error) {
 
 	// By convention, parameters.ServerPacketManipulationSpecs should be in
-	// DefaultTactics, not FilteredTactics; and GetServerTacticsParameters
+	// DefaultTactics, not FilteredTactics; and ServerTacticsParametersCache
 	// ignores Tactics.Probability.
 
-	p, err := GetServerTacticsParameters(support, NewGeoIPData())
+	p, err := support.ServerTacticsParametersCache.Get(NewGeoIPData())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -158,7 +158,7 @@ func selectPacketManipulationSpec(
 	// entry are allowed, enabling weighted selection. If a spec appears in both
 	// "All" and a specific protocol, the duplicate(s) are retained.
 
-	p, err := GetServerTacticsParameters(support, geoIPData)
+	p, err := support.ServerTacticsParametersCache.Get(geoIPData)
 	if err != nil {
 		return "", nil, errors.Trace(err)
 	}
