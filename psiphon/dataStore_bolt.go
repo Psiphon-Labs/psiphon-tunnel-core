@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	OPEN_DB_RETRIES = 3
+	OPEN_DB_RETRIES = 2
 )
 
 type datastoreDB struct {
@@ -63,14 +63,14 @@ func datastoreOpenDB(
 	var db *datastoreDB
 	var err error
 
-	retries := OPEN_DB_RETRIES
-	if !retryAndReset {
-		retries = 1
+	attempts := 1
+	if retryAndReset {
+		attempts += OPEN_DB_RETRIES
 	}
 
-	for retry := 0; retry < retries; retry++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 
-		db, err = tryDatastoreOpenDB(rootDataDirectory, retry > 0)
+		db, err = tryDatastoreOpenDB(rootDataDirectory, attempt > 0)
 		if err == nil {
 			break
 		}
