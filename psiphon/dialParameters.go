@@ -174,7 +174,8 @@ func MakeDialParameters(
 
 	// Check for existing dial parameters for this server/network ID.
 
-	dialParams, err := GetDialParameters(serverEntry.IpAddress, networkID)
+	dialParams, err := GetDialParameters(
+		config, serverEntry.IpAddress, networkID)
 	if err != nil {
 		NoticeWarning("GetDialParameters failed: %s", err)
 		dialParams = nil

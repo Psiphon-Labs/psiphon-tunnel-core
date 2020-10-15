@@ -1817,13 +1817,22 @@ func SetDialParameters(serverIPAddress, networkID string, dialParams *DialParame
 
 // GetDialParameters fetches any dial parameters associated with the specified
 // server/network ID. Returns nil, nil when no record is found.
-func GetDialParameters(serverIPAddress, networkID string) (*DialParameters, error) {
+func GetDialParameters(
+	config *Config, serverIPAddress, networkID string) (*DialParameters, error) {
+
+	// Support stand-alone GetTactics operation. See TacticsStorer for more
+	// details.
+	err := OpenDataStoreWithoutReset(config)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	defer CloseDataStore()
 
 	key := makeDialParametersKey([]byte(serverIPAddress), []byte(networkID))
 
 	var dialParams *DialParameters
 
-	err := getBucketValue(
+	err = getBucketValue(
 		datastoreDialParametersBucket,
 		key,
 		func(value []byte) error {
