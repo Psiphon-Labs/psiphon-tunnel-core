@@ -110,8 +110,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     _Atomic NSInteger localSocksProxyPort;
     _Atomic NSInteger localHttpProxyPort;
 
-    _Atomic BOOL isSleeping;
-
     Reachability* reachability;
     _Atomic NetworkStatus currentNetworkStatus;
 
@@ -139,7 +137,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     atomic_init(&self->connectionState, PsiphonConnectionStateDisconnected);
     atomic_init(&self->localSocksProxyPort, 0);
     atomic_init(&self->localHttpProxyPort, 0);
-    atomic_init(&self->isSleeping, FALSE);
     self->reachability = [Reachability reachabilityForInternetConnection];
     atomic_init(&self->currentNetworkStatus, NotReachable);
     self->tunnelWholeDevice = FALSE;
@@ -256,12 +253,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     }
 
     return [self start];
-}
-
-// See comment in header
-- (void)setSleeping:(BOOL)isSleeping {
-    [self logMessage: isSleeping ? @"Sleeping" : @"Waking"];
-    atomic_store(&self->isSleeping, isSleeping);
 }
 
 /*!
@@ -1323,10 +1314,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (long)hasNetworkConnectivity {
-
-    if (atomic_load(&self->isSleeping)) {
-        return FALSE;
-    }
 
     BOOL hasConnectivity = [self->reachability currentReachabilityStatus] != NotReachable;
 
