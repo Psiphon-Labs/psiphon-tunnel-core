@@ -85,22 +85,27 @@ func openDataStore(config *Config, retryAndReset bool) error {
 		return errors.Tracef(
 			"invalid datastore reference count: %d", datastoreReferenceCount)
 	}
-	datastoreReferenceCount += 1
-	if datastoreReferenceCount > 1 {
-		var err error
+
+	if datastoreReferenceCount > 0 {
+
 		if activeDatastoreDB == nil {
-			err = errors.TraceNew("datastore unexpectedly closed")
+			datastoreMutex.Unlock()
+			return errors.TraceNew("datastore unexpectedly closed")
 		}
+
+		// Add a reference to the open datastore.
+
+		datastoreReferenceCount += 1
 		datastoreMutex.Unlock()
-		return err
+		return nil
 	}
 
-	existingDB := activeDatastoreDB
-
-	if existingDB != nil {
+	if activeDatastoreDB != nil {
 		datastoreMutex.Unlock()
 		return errors.TraceNew("datastore unexpectedly open")
 	}
+
+	// datastoreReferenceCount is 0, so open the datastore.
 
 	newDB, err := datastoreOpenDB(
 		config.GetDataStoreDirectory(), retryAndReset)
@@ -109,8 +114,8 @@ func openDataStore(config *Config, retryAndReset bool) error {
 		return errors.Trace(err)
 	}
 
+	datastoreReferenceCount = 1
 	activeDatastoreDB = newDB
-
 	datastoreMutex.Unlock()
 
 	_ = resetAllPersistentStatsToUnreported()
