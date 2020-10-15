@@ -66,6 +66,17 @@ var (
 // must be paired with a corresponding call to CloseDataStore to ensure the
 // datastore is closed.
 func OpenDataStore(config *Config) error {
+	return openDataStore(config, true)
+}
+
+// OpenDataStoreWithoutReset performs an OpenDataStore but does not retry or
+// reset the datastore file in case of failures. Use OpenDataStoreWithoutReset
+// when the datastore may be locked by another process.
+func OpenDataStoreWithoutReset(config *Config) error {
+	return openDataStore(config, false)
+}
+
+func openDataStore(config *Config, retryAndReset bool) error {
 
 	datastoreMutex.Lock()
 
@@ -91,7 +102,8 @@ func OpenDataStore(config *Config) error {
 		return errors.TraceNew("datastore unexpectedly open")
 	}
 
-	newDB, err := datastoreOpenDB(config.GetDataStoreDirectory())
+	newDB, err := datastoreOpenDB(
+		config.GetDataStoreDirectory(), retryAndReset)
 	if err != nil {
 		datastoreMutex.Unlock()
 		return errors.Trace(err)
@@ -603,7 +615,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 	// Support stand-alone GetTactics operation. See TacticsStorer for more
 	// details.
 	if iterator.isTacticsServerEntryIterator {
-		err := OpenDataStore(iterator.config)
+		err := OpenDataStoreWithoutReset(iterator.config)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -753,7 +765,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 	// Support stand-alone GetTactics operation. See TacticsStorer for more
 	// details.
 	if iterator.isTacticsServerEntryIterator {
-		err := OpenDataStore(iterator.config)
+		err := OpenDataStoreWithoutReset(iterator.config)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1845,7 +1857,7 @@ func DeleteDialParameters(serverIPAddress, networkID string) error {
 // TacticsStorer implements tactics.Storer.
 //
 // Each TacticsStorer datastore operation is wrapped with
-// OpenDataStore/CloseDataStore, which enables a limited degree of
+// OpenDataStoreWithoutReset/CloseDataStore, which enables a limited degree of
 // multiprocess datastore synchronization:
 //
 // One process runs a Controller. Another process runs a stand-alone operation
@@ -1871,12 +1883,21 @@ func DeleteDialParameters(serverIPAddress, networkID string) error {
 // that is, if a different process writes tactics in between GetTactics calls
 // to GetTacticsRecord and then SetTacticsRecord. This is because all tactics
 // writes are considered fresh and valid.
+//
+//
+// Using OpenDataStoreWithoutReset ensures that the GetTactics attempt in the
+// non-Controller operation will immediately fail if the datastore is locked
+// and not reset (delete) the datastore file when open fails. The Controller
+// process will use OpenDataStore, which performs the reset on failure, to
+// recover from datastore corruption; when OpenDataStore is called while the
+// non-Controller operation holds a datastore lock, the OpenDataStore timeout,
+// 1s, should be sufficient to avoid an unnecessary reset.
 type TacticsStorer struct {
 	config *Config
 }
 
 func (t *TacticsStorer) SetTacticsRecord(networkID string, record []byte) error {
-	err := OpenDataStore(t.config)
+	err := OpenDataStoreWithoutReset(t.config)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1889,7 +1910,7 @@ func (t *TacticsStorer) SetTacticsRecord(networkID string, record []byte) error 
 }
 
 func (t *TacticsStorer) GetTacticsRecord(networkID string) ([]byte, error) {
-	err := OpenDataStore(t.config)
+	err := OpenDataStoreWithoutReset(t.config)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1902,7 +1923,7 @@ func (t *TacticsStorer) GetTacticsRecord(networkID string) ([]byte, error) {
 }
 
 func (t *TacticsStorer) SetSpeedTestSamplesRecord(networkID string, record []byte) error {
-	err := OpenDataStore(t.config)
+	err := OpenDataStoreWithoutReset(t.config)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1915,7 +1936,7 @@ func (t *TacticsStorer) SetSpeedTestSamplesRecord(networkID string, record []byt
 }
 
 func (t *TacticsStorer) GetSpeedTestSamplesRecord(networkID string) ([]byte, error) {
-	err := OpenDataStore(t.config)
+	err := OpenDataStoreWithoutReset(t.config)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

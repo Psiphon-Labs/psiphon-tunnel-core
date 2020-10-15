@@ -75,7 +75,8 @@ type datastoreCursor struct {
 	lastBuffer *bytes.Buffer
 }
 
-func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
+func datastoreOpenDB(
+	rootDataDirectory string, _ bool) (*datastoreDB, error) {
 
 	dataDirectory := filepath.Join(rootDataDirectory, "psiphon.filesdb")
 	err := os.MkdirAll(dataDirectory, 0700)

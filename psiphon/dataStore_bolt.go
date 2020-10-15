@@ -33,6 +33,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
+const (
+	OPEN_DB_RETRIES = 3
+)
+
 type datastoreDB struct {
 	boltDB   *bolt.DB
 	isFailed int32
@@ -53,12 +57,18 @@ type datastoreCursor struct {
 	boltCursor *bolt.Cursor
 }
 
-func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
+func datastoreOpenDB(
+	rootDataDirectory string, retryAndReset bool) (*datastoreDB, error) {
 
 	var db *datastoreDB
 	var err error
 
-	for retry := 0; retry < 3; retry++ {
+	retries := OPEN_DB_RETRIES
+	if !retryAndReset {
+		retries = 1
+	}
+
+	for retry := 0; retry < retries; retry++ {
 
 		db, err = tryDatastoreOpenDB(rootDataDirectory, retry > 0)
 		if err == nil {
@@ -74,7 +84,8 @@ func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
 	return db, err
 }
 
-func tryDatastoreOpenDB(rootDataDirectory string, reset bool) (retdb *datastoreDB, reterr error) {
+func tryDatastoreOpenDB(
+	rootDataDirectory string, reset bool) (retdb *datastoreDB, reterr error) {
 
 	// Testing indicates that the bolt Check function can raise SIGSEGV due to
 	// invalid mmap buffer accesses in cases such as opening a valid but
