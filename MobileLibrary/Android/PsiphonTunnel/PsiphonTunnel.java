@@ -73,6 +73,7 @@ import java.util.concurrent.TimeUnit;
 
 import psi.Psi;
 import psi.PsiphonProvider;
+import psi.PsiphonProviderNetwork;
 import psi.PsiphonProviderNoticeHandler;
 import psi.PsiphonProviderFeedbackHandler;
 
@@ -405,6 +406,25 @@ public class PsiphonTunnel {
                                         });
                                     }
                                 },
+                                new PsiphonProviderNetwork() {
+                                    @Override
+                                    public long hasNetworkConnectivity() {
+                                        boolean hasConnectivity = PsiphonTunnel.hasNetworkConnectivity(context);
+                                        // TODO: change to bool return value once gobind supports that type
+                                        return hasConnectivity ? 1 : 0;
+                                    }
+
+                                    @Override
+                                    public String getNetworkID() {
+                                        return PsiphonTunnel.getNetworkID(context);
+                                    }
+
+                                    @Override
+                                    public String iPv6Synthesize(String IPv4Addr) {
+                                        // Unused on Android.
+                                        return PsiphonTunnel.iPv6Synthesize(IPv4Addr);
+                                    }
+                                },
                                 new PsiphonProviderNoticeHandler() {
                                     @Override
                                     public void notice(String noticeJSON) {
@@ -438,7 +458,9 @@ public class PsiphonTunnel {
                                             });
                                         }
                                     }
-                                });
+                                },
+                                // Do not use IPv6 synthesizer for android
+                                false);
                     } catch (java.lang.Exception e) {
                         callbackQueue.submit(new Runnable() {
                             @Override
@@ -618,22 +640,22 @@ public class PsiphonTunnel {
 
         @Override
         public String getPrimaryDnsServer() {
-            return mPsiphonTunnel.getPrimaryDnsServer();
+            return PsiphonTunnel.getPrimaryDnsServer(mHostService.getContext(), mHostService);
         }
 
         @Override
         public String getSecondaryDnsServer() {
-            return mPsiphonTunnel.getSecondaryDnsServer();
+            return PsiphonTunnel.getSecondaryDnsServer();
         }
 
         @Override
         public String iPv6Synthesize(String IPv4Addr) {
-            return mPsiphonTunnel.iPv6Synthesize(IPv4Addr);
+            return PsiphonTunnel.iPv6Synthesize(IPv4Addr);
         }
 
         @Override
         public String getNetworkID() {
-            return mPsiphonTunnel.getNetworkID();
+            return PsiphonTunnel.getNetworkID(mHostService.getContext());
         }
     }
 
@@ -664,26 +686,27 @@ public class PsiphonTunnel {
         return hasConnectivity ? 1 : 0;
     }
 
-    private String getPrimaryDnsServer() {
+    private static String getPrimaryDnsServer(Context context, HostLogger logger) {
         String dnsResolver = null;
         try {
-            dnsResolver = getFirstActiveNetworkDnsResolver(mHostService.getContext());
+            dnsResolver = getFirstActiveNetworkDnsResolver(context);
         } catch (Exception e) {
-            mHostService.onDiagnosticMessage("failed to get active network DNS resolver: " + e.getMessage());
+            logger.onDiagnosticMessage("failed to get active network DNS resolver: " + e.getMessage());
             dnsResolver = DEFAULT_PRIMARY_DNS_SERVER;
         }
         return dnsResolver;
     }
 
-    private String getSecondaryDnsServer() {
+    private static String getSecondaryDnsServer() {
         return DEFAULT_SECONDARY_DNS_SERVER;
     }
 
-    private String iPv6Synthesize(String IPv4Addr) {
+    private static String iPv6Synthesize(String IPv4Addr) {
+        // Unused on Android.
         return IPv4Addr;
     }
 
-    private String getNetworkID() {
+    private static String getNetworkID(Context context) {
 
         // The network ID contains potential PII. In tunnel-core, the network ID
         // is used only locally in the client and not sent to the server.
@@ -693,7 +716,6 @@ public class PsiphonTunnel {
 
         String networkID = "UNKNOWN";
 
-        Context context = mHostService.getContext();
         ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo activeNetworkInfo = null;
         try {
