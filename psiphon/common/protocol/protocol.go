@@ -366,7 +366,7 @@ const (
 	QUIC_VERSION_GQUIC43      = "gQUICv43"
 	QUIC_VERSION_GQUIC44      = "gQUICv44"
 	QUIC_VERSION_OBFUSCATED   = "OBFUSCATED"
-	QUIC_VERSION_IETF_DRAFT24 = "IETF-draft-24"
+	QUIC_VERSION_IETF_DRAFT29 = "IETF-draft-29"
 )
 
 var SupportedQUICVersions = QUICVersions{
@@ -374,7 +374,11 @@ var SupportedQUICVersions = QUICVersions{
 	QUIC_VERSION_GQUIC43,
 	QUIC_VERSION_GQUIC44,
 	QUIC_VERSION_OBFUSCATED,
-	QUIC_VERSION_IETF_DRAFT24,
+	QUIC_VERSION_IETF_DRAFT29,
+}
+
+var legacyQUICVersions = QUICVersions{
+	"IETF-draft-24",
 }
 
 func QUICVersionIsObfuscated(version string) bool {
@@ -385,7 +389,8 @@ type QUICVersions []string
 
 func (versions QUICVersions) Validate() error {
 	for _, v := range versions {
-		if !common.Contains(SupportedQUICVersions, v) {
+		if !common.Contains(SupportedQUICVersions, v) &&
+			!common.Contains(legacyQUICVersions, v) {
 			return errors.Tracef("invalid QUIC version: %s", v)
 		}
 	}

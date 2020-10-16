@@ -61,8 +61,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/h2quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/qerr"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	ietf_quic "github.com/Psiphon-Labs/quic-go"
-	"github.com/Psiphon-Labs/quic-go/http3"
+	ietf_quic "github.com/lucas-clemente/quic-go"
+	"github.com/lucas-clemente/quic-go/http3"
 )
 
 const (
@@ -76,14 +76,14 @@ func Enabled() bool {
 	return true
 }
 
-const ietfQUICDraft24VersionNumber = 0xff000018
+const ietfQUICDraft29VersionNumber = 0xff00001d
 
 var supportedVersionNumbers = map[string]uint32{
 	protocol.QUIC_VERSION_GQUIC39:      uint32(gquic.VersionGQUIC39),
 	protocol.QUIC_VERSION_GQUIC43:      uint32(gquic.VersionGQUIC43),
 	protocol.QUIC_VERSION_GQUIC44:      uint32(gquic.VersionGQUIC44),
 	protocol.QUIC_VERSION_OBFUSCATED:   uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_IETF_DRAFT24: ietfQUICDraft24VersionNumber,
+	protocol.QUIC_VERSION_IETF_DRAFT29: ietfQUICDraft29VersionNumber,
 }
 
 func isObfuscated(quicVersion string) bool {
@@ -91,11 +91,11 @@ func isObfuscated(quicVersion string) bool {
 }
 
 func isIETFVersion(versionNumber uint32) bool {
-	return versionNumber == ietfQUICDraft24VersionNumber
+	return versionNumber == ietfQUICDraft29VersionNumber
 }
 
 func getALPN(versionNumber uint32) string {
-	return "h3-24"
+	return "h3-29"
 }
 
 // quic_test overrides the server idle timeout.
@@ -223,7 +223,8 @@ func Dial(
 		packetConn,
 		remoteAddr,
 		quicSNIAddress,
-		versionNumber)
+		versionNumber,
+		false)
 	if err != nil {
 		packetConn.Close()
 		return nil, errors.Trace(err)
@@ -495,12 +496,12 @@ func (t *QUICTransporter) closePacketConn() {
 }
 
 func (t *QUICTransporter) dialIETFQUIC(
-	_, _ string, _ *tls.Config, _ *ietf_quic.Config) (ietf_quic.Session, error) {
+	_, _ string, _ *tls.Config, _ *ietf_quic.Config) (ietf_quic.EarlySession, error) {
 	session, err := t.dialQUIC()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return session.(*ietfQUICSession).Session, nil
+	return session.(*ietfQUICSession).Session.(ietf_quic.EarlySession), nil
 }
 
 func (t *QUICTransporter) dialgQUIC(
@@ -546,7 +547,8 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 		packetConn,
 		remoteAddr,
 		t.quicSNIAddress,
-		versionNumber)
+		versionNumber,
+		true)
 	if err != nil {
 		packetConn.Close()
 		return nil, errors.Trace(err)
@@ -645,6 +647,10 @@ func (s *ietfQUICSession) OpenStream() (quicStream, error) {
 	return s.Session.OpenStream()
 }
 
+func (s *ietfQUICSession) Close() error {
+	return s.Session.CloseWithError(0, "")
+}
+
 func (s *ietfQUICSession) isErrorIndicatingClosed(err error) bool {
 	if err == nil {
 		return false
@@ -701,13 +707,14 @@ func dialQUIC(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
-	versionNumber uint32) (quicSession, error) {
+	versionNumber uint32,
+	dialEarly bool) (quicSession, error) {
 
 	if isIETFVersion(versionNumber) {
 
 		quicConfig := &ietf_quic.Config{
 			HandshakeTimeout: time.Duration(1<<63 - 1),
-			IdleTimeout:      CLIENT_IDLE_TIMEOUT,
+			MaxIdleTimeout:   CLIENT_IDLE_TIMEOUT,
 			KeepAlive:        true,
 			Versions: []ietf_quic.VersionNumber{
 				ietf_quic.VersionNumber(versionNumber)},
@@ -718,16 +725,30 @@ func dialQUIC(
 			quicConfig.HandshakeTimeout = time.Until(deadline)
 		}
 
-		dialSession, err := ietf_quic.DialContext(
-			ctx,
-			packetConn,
-			remoteAddr,
-			quicSNIAddress,
-			&tls.Config{
-				InsecureSkipVerify: true,
-				NextProtos:         []string{getALPN(versionNumber)},
-			},
-			quicConfig)
+		var dialSession ietf_quic.Session
+		var err error
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true,
+			NextProtos:         []string{getALPN(versionNumber)},
+		}
+
+		if dialEarly {
+			dialSession, err = ietf_quic.DialEarlyContext(
+				ctx,
+				packetConn,
+				remoteAddr,
+				quicSNIAddress,
+				tlsConfig,
+				quicConfig)
+		} else {
+			dialSession, err = ietf_quic.DialContext(
+				ctx,
+				packetConn,
+				remoteAddr,
+				quicSNIAddress,
+				tlsConfig,
+				quicConfig)
+		}
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -879,12 +900,12 @@ func newMuxListener(
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCertificate},
-		NextProtos:   []string{getALPN(ietfQUICDraft24VersionNumber)},
+		NextProtos:   []string{getALPN(ietfQUICDraft29VersionNumber)},
 	}
 
 	ietfQUICConfig := &ietf_quic.Config{
 		HandshakeTimeout:      SERVER_HANDSHAKE_TIMEOUT,
-		IdleTimeout:           serverIdleTimeout,
+		MaxIdleTimeout:        serverIdleTimeout,
 		MaxIncomingStreams:    1,
 		MaxIncomingUniStreams: -1,
 		KeepAlive:             true,

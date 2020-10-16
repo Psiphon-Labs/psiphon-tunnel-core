@@ -508,5 +508,5 @@ func isIETFQUICClientHello(buffer []byte) bool {
 	return buffer[1] == 0xff &&
 		buffer[2] == 0 &&
 		buffer[3] == 0 &&
-		buffer[4] == 0x18
+		buffer[4] == 0x1d
 }
