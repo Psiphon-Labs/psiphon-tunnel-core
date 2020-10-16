@@ -22,15 +22,17 @@
 #import <stdatomic.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
-#import <SystemConfiguration/CaptiveNetwork.h>
-#import "LookupIPv6.h"
+#import "IPv6Synthesizer.h"
 #import "Psi-meta.h"
 #import "PsiphonProviderFeedbackHandlerShim.h"
 #import "PsiphonProviderNoticeHandlerShim.h"
+#import "PsiphonProviderNetwork.h"
 #import "PsiphonTunnel.h"
+#import "Reachability+HasNetworkConnectivity.h"
 #import "Backups.h"
 #import "json-framework/SBJson4.h"
 #import "JailbreakCheck/JailbreakCheck.h"
+#import "NetworkID.h"
 #import <ifaddrs.h>
 #import <resolv.h>
 #import <netdb.h>
@@ -39,6 +41,8 @@
 #define GOOGLE_DNS_2 @"8.8.8.8"
 
 NSErrorDomain _Nonnull const PsiphonTunnelErrorDomain = @"com.psiphon3.ios.PsiphonTunnelErrorDomain";
+
+const BOOL UseIPv6Synthesizer = TRUE; // Must always use IPv6Synthesizer for iOS
 
 /// Error codes which can returned by PsiphonTunnel
 typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
@@ -106,8 +110,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     _Atomic NSInteger localSocksProxyPort;
     _Atomic NSInteger localHttpProxyPort;
 
-    _Atomic BOOL isSleeping;
-
     Reachability* reachability;
     _Atomic NetworkStatus currentNetworkStatus;
 
@@ -135,7 +137,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     atomic_init(&self->connectionState, PsiphonConnectionStateDisconnected);
     atomic_init(&self->localSocksProxyPort, 0);
     atomic_init(&self->localHttpProxyPort, 0);
-    atomic_init(&self->isSleeping, FALSE);
     self->reachability = [Reachability reachabilityForInternetConnection];
     atomic_init(&self->currentNetworkStatus, NotReachable);
     self->tunnelWholeDevice = FALSE;
@@ -254,12 +255,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return [self start];
 }
 
-// See comment in header
-- (void)setSleeping:(BOOL)isSleeping {
-    [self logMessage: isSleeping ? @"Sleeping" : @"Waking"];
-    atomic_store(&self->isSleeping, isSleeping);
-}
-
 /*!
  Start the tunnel. If the tunnel is already started it will be stopped first.
  Assumes self.sessionID has been initialized -- i.e., assumes that
@@ -271,9 +266,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         [self stop];
 
         [self logMessage:@"Starting Psiphon library"];
-
-        // Must always use IPv6Synthesizer for iOS
-        const BOOL useIPv6Synthesizer = TRUE;
 
         BOOL usingNoticeFiles = FALSE;
 
@@ -329,7 +321,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                 embeddedServerEntriesPath,
                 self,
                 self->tunnelWholeDevice, // useDeviceBinder
-                useIPv6Synthesizer,
+                UseIPv6Synthesizer,
                 &e);
             
             if (e != nil) {
@@ -1323,10 +1315,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 - (long)hasNetworkConnectivity {
 
-    if (atomic_load(&self->isSleeping)) {
-        return FALSE;
-    }
-
     BOOL hasConnectivity = [self->reachability currentReachabilityStatus] != NotReachable;
 
     if (!hasConnectivity) {
@@ -1339,46 +1327,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (NSString *)iPv6Synthesize:(NSString *)IPv4Addr {
-    // This function is called to synthesize an ipv6 address from an ipv4 one on a DNS64/NAT64 network
-    char *result = getIPv6ForIPv4([IPv4Addr UTF8String]);
-    if (result != NULL) {
-        NSString *IPv6Addr = [NSString stringWithUTF8String:result];
-        free(result);
-        return IPv6Addr;
-    }
-    return @"";
+    return [IPv6Synthesizer IPv4ToIPv6:IPv4Addr];
 }
 
 - (NSString *)getNetworkID {
-
-    // The network ID contains potential PII. In tunnel-core, the network ID
-    // is used only locally in the client and not sent to the server.
-    //
-    // See network ID requirements here:
-    // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
-
-    NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
-    NetworkStatus status = [self->reachability currentReachabilityStatus];
-    if (status == ReachableViaWiFi) {
-        [networkID setString:@"WIFI"];
-        NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
-        for (NSString *networkInterfaceName in networkInterfaceNames) {
-            NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
-            if (networkInterfaceInfo[@"BSSID"]) {
-                [networkID appendFormat:@"-%@", networkInterfaceInfo[@"BSSID"]];
-            }
-        }
-    } else if (status == ReachableViaWWAN) {
-        [networkID setString:@"MOBILE"];
-        CTTelephonyNetworkInfo *telephonyNetworkinfo = [[CTTelephonyNetworkInfo alloc] init];
-        CTCarrier *cellularProvider = [telephonyNetworkinfo subscriberCellularProvider];
-        if (cellularProvider != nil) {
-            NSString *mcc = [cellularProvider mobileCountryCode];
-            NSString *mnc = [cellularProvider mobileNetworkCode];
-            [networkID appendFormat:@"-%@-%@", mcc, mnc];
-        }
-    }
-    return networkID;
+    return [NetworkID getNetworkID:[self->reachability currentReachabilityStatus]];
 }
 
 - (void)notice:(NSString *)noticeJSON {
@@ -1806,7 +1759,24 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         PsiphonProviderNoticeHandlerShim *noticeHandler =
             [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
 
-        GoPsiStartSendFeedback(psiphonConfig, feedbackJson, uploadPath, innerFeedbackHandler, noticeHandler);
+        PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc] init];
+
+        GoPsiStartSendFeedback(psiphonConfig, feedbackJson, uploadPath,
+                               innerFeedbackHandler, networkInfoProvider, noticeHandler,
+                               UseIPv6Synthesizer, &err);
+        if (err != nil) {
+            NSError *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                                    code:PsiphonTunnelErrorCodeSendFeedbackError
+                                                userInfo:@{NSLocalizedDescriptionKey:@"Error sending feedback",
+                                                           NSUnderlyingErrorKey:err}];
+            dispatch_sync(self->callbackQueue, ^{
+                __strong id<PsiphonTunnelFeedbackDelegate> strongFeedbackDelegate = weakFeedbackDelegate;
+                if (strongFeedbackDelegate == nil) {
+                    return;
+                }
+                [strongFeedbackDelegate sendFeedbackCompleted:outError];
+            });
+        }
     });
 }
 

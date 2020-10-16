@@ -52,7 +52,8 @@ type datastoreCursor struct {
 	prefix         []byte
 }
 
-func datastoreOpenDB(rootDataDirectory string) (*datastoreDB, error) {
+func datastoreOpenDB(
+	rootDataDirectory string, _ bool) (*datastoreDB, error) {
 
 	dbDirectory := filepath.Join(rootDataDirectory, "psiphon.badgerdb")
 
