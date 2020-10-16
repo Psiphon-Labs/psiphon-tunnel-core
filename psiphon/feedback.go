@@ -98,16 +98,7 @@ func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error
 
 // Encrypt feedback and upload to server. If upload fails
 // the routine will sleep and retry multiple times.
-func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath string) error {
-
-	config, err := LoadConfig([]byte(configJson))
-	if err != nil {
-		return errors.Trace(err)
-	}
-	err = config.Commit(true)
-	if err != nil {
-		return errors.Trace(err)
-	}
+func SendFeedback(ctx context.Context, config *Config, diagnosticsJson, uploadPath string) error {
 
 	// Get tactics, may update client parameters
 	p := config.GetClientParameters().Get()
