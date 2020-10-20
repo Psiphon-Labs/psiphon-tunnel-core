@@ -170,7 +170,7 @@ type Conn struct {
 }
 
 // NewConn creates a new Conn. When no seed was provided in the Config,
-// SetPRNG must be called before the first Write.
+// SetReplay must be called before the first Write.
 func NewConn(
 	config *Config,
 	noticeEmitter func(string),
@@ -229,10 +229,10 @@ func GetUpstreamMetricsNames() []string {
 }
 
 // SetReplay sets the PRNG to be used by the fragmentor, allowing for replay
-// of a fragmentor sequence. SetPRNG may be used to set the PRNG after a conn
-// has already been wrapped with a fragmentor.Conn, when no PRNG is specified
-// in the config, and before the first Write. SetReplay sets the fragmentor
-// isReplay flag to true.
+// of a fragmentor sequence. SetReplay may be used to set the PRNG after a
+// conn has already been wrapped with a fragmentor.Conn, when no PRNG is
+// specified in the config, and before the first Write. SetReplay sets the
+// fragmentor isReplay flag to true.
 //
 // For replay coordinated with a peer, SetReplay may be used with
 // obfuscator.GetDerivedPRNG, using a seed provided by the peer.
