@@ -234,7 +234,7 @@ func TestServerEntryExchange(t *testing.T) {
 			}
 		}
 
-		dialParams, err := GetDialParameters(serverEntry.IpAddress, networkID)
+		dialParams, err := GetDialParameters(config, serverEntry.IpAddress, networkID)
 		if err != nil {
 			t.Fatalf("GetDialParameters failed: %s", err)
 		}

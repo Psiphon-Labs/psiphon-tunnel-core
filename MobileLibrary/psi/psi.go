@@ -44,14 +44,18 @@ type PsiphonProviderNoticeHandler interface {
 	Notice(noticeJSON string)
 }
 
+type PsiphonProviderNetwork interface {
+	HasNetworkConnectivity() int
+	GetNetworkID() string
+	IPv6Synthesize(IPv4Addr string) string
+}
+
 type PsiphonProvider interface {
 	PsiphonProviderNoticeHandler
-	HasNetworkConnectivity() int
+	PsiphonProviderNetwork
 	BindToDevice(fileDescriptor int) (string, error)
-	IPv6Synthesize(IPv4Addr string) string
 	GetPrimaryDnsServer() string
 	GetSecondaryDnsServer() string
-	GetNetworkID() string
 }
 
 type PsiphonProviderFeedbackHandler interface {
@@ -336,7 +340,9 @@ func StartSendFeedback(
 	diagnosticsJson,
 	uploadPath string,
 	feedbackHandler PsiphonProviderFeedbackHandler,
-	noticeHandler PsiphonProviderNoticeHandler) {
+	networkInfoProvider PsiphonProviderNetwork,
+	noticeHandler PsiphonProviderNoticeHandler,
+	useIPv6Synthesizer bool) error {
 
 	// Cancel any ongoing uploads.
 	StopSendFeedback()
@@ -355,14 +361,36 @@ func StartSendFeedback(
 			noticeHandler.Notice(string(notice))
 		}))
 
+	config, err := psiphon.LoadConfig([]byte(configJson))
+	if err != nil {
+		return fmt.Errorf("error loading configuration file: %s", err)
+	}
+
+	config.NetworkConnectivityChecker = networkInfoProvider
+
+	config.NetworkIDGetter = networkInfoProvider
+
+	if useIPv6Synthesizer {
+		config.IPv6Synthesizer = networkInfoProvider
+	}
+
+	// All config fields should be set before calling Commit.
+
+	err = config.Commit(true)
+	if err != nil {
+		return fmt.Errorf("error committing configuration file: %s", err)
+	}
+
 	sendFeedbackWaitGroup = new(sync.WaitGroup)
 	sendFeedbackWaitGroup.Add(1)
-
 	go func() {
 		defer sendFeedbackWaitGroup.Done()
-		err := psiphon.SendFeedback(sendFeedbackCtx, configJson, diagnosticsJson, uploadPath)
+		err := psiphon.SendFeedback(sendFeedbackCtx, config,
+			diagnosticsJson, uploadPath)
 		feedbackHandler.SendFeedbackCompleted(err)
 	}()
+
+	return nil
 }
 
 // StopSendFeedback interrupts an in-progress feedback upload operation
