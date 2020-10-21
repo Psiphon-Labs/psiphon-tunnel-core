@@ -119,15 +119,19 @@ func selectPacketManipulationSpec(
 	protocolPort int,
 	clientIP net.IP) (string, interface{}, error) {
 
-	// First check for reply, then check tactics.
+	// First check for replay, then check tactics.
 
 	// The intercepted packet source/protocol port is used to determine the
 	// tunnel protocol name, which is used to lookup first replay and then
 	// enabled packet manipulation specs in ServerProtocolPacketManipulations.
+	//
+	// This assumes that all TunnelProtocolMayUseServerPacketManipulation
+	// protocols run on distinct ports, which is true when all such protocols run
+	// over TCP.
 
 	targetTunnelProtocol := ""
 	for tunnelProtocol, port := range support.Config.TunnelProtocolPorts {
-		if port == protocolPort {
+		if port == protocolPort && protocol.TunnelProtocolMayUseServerPacketManipulation(tunnelProtocol) {
 			targetTunnelProtocol = tunnelProtocol
 			break
 		}
