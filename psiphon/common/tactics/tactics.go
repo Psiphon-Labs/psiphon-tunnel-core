@@ -653,12 +653,19 @@ func (server *Server) initLookups() {
 		// map optimization is disabled.
 
 		if len(filteredTactics.Filter.Regions) == 0 {
+			disableRegionScope := false
 			if len(filteredTactics.Filter.ISPs) > 0 {
 				server.filterGeoIPScope |= GeoIPScopeISP
-				server.filterRegionScopes = nil
+				disableRegionScope = true
 			}
 			if len(filteredTactics.Filter.Cities) > 0 {
 				server.filterGeoIPScope |= GeoIPScopeCity
+				disableRegionScope = true
+			}
+			if disableRegionScope && server.filterRegionScopes != nil {
+				for _, regionScope := range server.filterRegionScopes {
+					server.filterGeoIPScope |= regionScope
+				}
 				server.filterRegionScopes = nil
 			}
 		} else {

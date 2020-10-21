@@ -730,7 +730,6 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
         "Probability" : 1.0
       },
       %%s
-      ]
     }
     `, encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey)
 
@@ -748,6 +747,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
             "Regions": ["R4", "R5", "R6"]
           }
         }
+      ]
 	`
 
 	tacticsConfig := fmt.Sprintf(tacticsConfigTemplate, filteredTactics)
@@ -783,7 +783,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 	scope := server.GetFilterGeoIPScope(geoIPData)
 
 	if scope != GeoIPScopeRegion {
-		t.Fatalf("unexpected scope: %d", scope)
+		t.Fatalf("unexpected scope: %b", scope)
 	}
 
 	// Test: ISP-only scope
@@ -800,6 +800,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
             "ISPs": ["I4", "I5", "I6"]
           }
         }
+      ]
 	`
 
 	reload := func() {
@@ -825,7 +826,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 	scope = server.GetFilterGeoIPScope(geoIPData)
 
 	if scope != GeoIPScopeISP {
-		t.Fatalf("unexpected scope: %d", scope)
+		t.Fatalf("unexpected scope: %b", scope)
 	}
 
 	// Test: City-only scope
@@ -842,6 +843,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
             "Cities": ["C4", "C5", "C6"]
           }
         }
+      ]
 	`
 
 	reload()
@@ -849,7 +851,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 	scope = server.GetFilterGeoIPScope(geoIPData)
 
 	if scope != GeoIPScopeCity {
-		t.Fatalf("unexpected scope: %d", scope)
+		t.Fatalf("unexpected scope: %b", scope)
 	}
 
 	// Test: full scope
@@ -871,6 +873,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
             "Cities": ["C4", "C5", "C6"]
           }
         }
+      ]
 	`
 
 	reload()
@@ -878,7 +881,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 	scope = server.GetFilterGeoIPScope(geoIPData)
 
 	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
-		t.Fatalf("unexpected scope: %d", scope)
+		t.Fatalf("unexpected scope: %b", scope)
 	}
 
 	// Test: conditional scopes
@@ -916,6 +919,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
             "Cities": ["C3b"]
           }
         }
+      ]
 	`
 
 	reload()
@@ -923,25 +927,75 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R0"})
 
 	if scope != GeoIPScopeRegion {
-		t.Fatalf("unexpected scope: %d", scope)
+		t.Fatalf("unexpected scope: %b", scope)
 	}
 
 	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R1"})
 
 	if scope != GeoIPScopeRegion {
-		t.Fatalf("unexpected scope: %d", scope)
+		t.Fatalf("unexpected scope: %b", scope)
 	}
 
 	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R2"})
 
 	if scope != GeoIPScopeRegion|GeoIPScopeISP {
-		t.Fatalf("unexpected scope: %d", scope)
+		t.Fatalf("unexpected scope: %b", scope)
 	}
 
 	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R3"})
 
 	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
-		t.Fatalf("unexpected scope: %d", scope)
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	// Test: reset regional map optimization
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1"],
+            "ISPs": ["I1"]
+          }
+        },
+        {
+          "Filter" : {
+            "Cities": ["C1"]
+          }
+        }
+      ]
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R0"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1"],
+            "Cities": ["C1"]
+          }
+        },
+        {
+          "Filter" : {
+            "ISPs": ["I1"]
+          }
+        }
+      ]
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R0"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %b", scope)
 	}
 }
 
