@@ -498,7 +498,24 @@ func (server *Server) Validate() error {
 		}
 	}
 
-	validateTactics := func(tactics *Tactics, isDefault bool) error {
+	// validateTactics validates either the defaultTactics, when filteredTactics
+	// is nil, or the filteredTactics otherwise. In the second case,
+	// defaultTactics must be passed in to validate filtered tactics references
+	// to default tactics parameters, such as CustomTLSProfiles or
+	// PacketManipulationSpecs.
+	//
+	// Limitation: references must point to the default tactics or the filtered
+	// tactics itself; referring to parameters in a previous filtered tactics is
+	// not suported.
+
+	validateTactics := func(defaultTactics, filteredTactics *Tactics) error {
+
+		tactics := defaultTactics
+		validatingDefault := true
+		if filteredTactics != nil {
+			tactics = filteredTactics
+			validatingDefault = false
+		}
 
 		// Allow "" for 0, even though ParseDuration does not.
 		var d time.Duration
@@ -511,14 +528,14 @@ func (server *Server) Validate() error {
 		}
 
 		if d <= 0 {
-			if isDefault {
+			if validatingDefault {
 				return errors.TraceNew("invalid duration")
 			}
 			// For merging logic, Normalize any 0 duration to "".
 			tactics.TTL = ""
 		}
 
-		if (isDefault && tactics.Probability == 0.0) ||
+		if (validatingDefault && tactics.Probability == 0.0) ||
 			tactics.Probability < 0.0 ||
 			tactics.Probability > 1.0 {
 
@@ -530,7 +547,15 @@ func (server *Server) Validate() error {
 			return errors.Trace(err)
 		}
 
-		_, err = params.Set("", false, tactics.Parameters)
+		applyParameters := []map[string]interface{}{
+			defaultTactics.Parameters,
+		}
+		if filteredTactics != nil {
+			applyParameters = append(
+				applyParameters, filteredTactics.Parameters)
+		}
+
+		_, err = params.Set("", false, applyParameters...)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -557,14 +582,14 @@ func (server *Server) Validate() error {
 		return nil
 	}
 
-	err := validateTactics(&server.DefaultTactics, true)
+	err := validateTactics(&server.DefaultTactics, nil)
 	if err != nil {
 		return errors.Tracef("invalid default tactics: %s", err)
 	}
 
 	for i, filteredTactics := range server.FilteredTactics {
 
-		err := validateTactics(&filteredTactics.Tactics, false)
+		err := validateTactics(&server.DefaultTactics, &filteredTactics.Tactics)
 
 		if err == nil {
 			err = validateRange(filteredTactics.Filter.SpeedTestRTTMilliseconds)

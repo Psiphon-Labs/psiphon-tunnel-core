@@ -42,8 +42,12 @@ func TestTactics(t *testing.T) {
 
 	// Server tactics configuration
 
-	// Long and short region lists test both map and slice lookups
-	// Repeated median aggregation tests aggregation memoization
+	// Long and short region lists test both map and slice lookups.
+	//
+	// Repeated median aggregation tests aggregation memoization.
+	//
+	// The test-packetman-spec tests a reference between a filter tactics
+	// and default tactics.
 
 	tacticsConfigTemplate := `
     {
@@ -54,7 +58,8 @@ func TestTactics(t *testing.T) {
         "TTL" : "1s",
         "Probability" : %0.1f,
         "Parameters" : {
-          "NetworkLatencyMultiplier" : %0.1f
+          "NetworkLatencyMultiplier" : %0.1f,
+          "ServerPacketManipulationSpecs" : [{"Name": "test-packetman-spec", "PacketSpecs": [["TCP-flags S"]]}]
         }
       },
       "FilteredTactics" : [
@@ -95,6 +100,16 @@ func TestTactics(t *testing.T) {
           "Tactics" : {
             "Parameters" : {
               "ConnectionWorkerPoolSize" : %d
+            }
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R7"]
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "ServerProtocolPacketManipulations": {"All" : ["test-packetman-spec"]}
             }
           }
         }
