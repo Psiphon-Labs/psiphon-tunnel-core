@@ -790,10 +790,9 @@ func dialTunnel(
 	monitoringStartTime := time.Now()
 	monitoredConn := common.NewBurstMonitoredConn(
 		dialConn,
-		burstUpstreamDeadline,
-		burstUpstreamThresholdBytes,
-		burstDownstreamDeadline,
-		burstDownstreamThresholdBytes)
+		false,
+		burstUpstreamDeadline, burstUpstreamThresholdBytes,
+		burstDownstreamDeadline, burstDownstreamThresholdBytes)
 
 	// Apply throttling (if configured)
 	throttledConn := common.NewThrottledConn(

@@ -46,35 +46,48 @@ import (
 // Overhead: BurstMonitoredConn adds mutexes but does not use timers.
 type BurstMonitoredConn struct {
 	net.Conn
-	upstreamDeadline         time.Duration
-	upstreamThresholdBytes   int64
-	downstreamDeadline       time.Duration
-	downstreamThresholdBytes int64
+	isServer            bool
+	readDeadline        time.Duration
+	readThresholdBytes  int64
+	writeDeadline       time.Duration
+	writeThresholdBytes int64
 
-	readMutex            sync.Mutex
-	currentUpstreamBurst burst
-	upstreamBursts       burstHistory
+	readMutex        sync.Mutex
+	currentReadBurst burst
+	readBursts       burstHistory
 
-	writeMutex             sync.Mutex
-	currentDownstreamBurst burst
-	downstreamBursts       burstHistory
+	writeMutex        sync.Mutex
+	currentWriteBurst burst
+	writeBursts       burstHistory
 }
 
 // NewBurstMonitoredConn creates a new BurstMonitoredConn.
 func NewBurstMonitoredConn(
 	conn net.Conn,
+	isServer bool,
 	upstreamDeadline time.Duration,
 	upstreamThresholdBytes int64,
 	downstreamDeadline time.Duration,
 	downstreamThresholdBytes int64) *BurstMonitoredConn {
 
-	return &BurstMonitoredConn{
-		Conn:                     conn,
-		upstreamDeadline:         upstreamDeadline,
-		upstreamThresholdBytes:   upstreamThresholdBytes,
-		downstreamDeadline:       downstreamDeadline,
-		downstreamThresholdBytes: downstreamThresholdBytes,
+	burstConn := &BurstMonitoredConn{
+		Conn:     conn,
+		isServer: isServer,
 	}
+
+	if isServer {
+		burstConn.readDeadline = upstreamDeadline
+		burstConn.readThresholdBytes = upstreamThresholdBytes
+		burstConn.writeDeadline = downstreamDeadline
+		burstConn.writeThresholdBytes = downstreamThresholdBytes
+	} else {
+		burstConn.readDeadline = downstreamDeadline
+		burstConn.readThresholdBytes = downstreamThresholdBytes
+		burstConn.writeDeadline = upstreamDeadline
+		burstConn.writeThresholdBytes = upstreamThresholdBytes
+	}
+
+	return burstConn
 }
 
 type burst struct {
@@ -118,7 +131,7 @@ type burstHistory struct {
 
 func (conn *BurstMonitoredConn) Read(buffer []byte) (int, error) {
 
-	if conn.upstreamDeadline <= 0 || conn.upstreamThresholdBytes <= 0 {
+	if conn.readDeadline <= 0 || conn.readThresholdBytes <= 0 {
 		return conn.Conn.Read(buffer)
 	}
 
@@ -132,10 +145,10 @@ func (conn *BurstMonitoredConn) Read(buffer []byte) (int, error) {
 			start,
 			end,
 			int64(n),
-			conn.upstreamDeadline,
-			conn.upstreamThresholdBytes,
-			&conn.currentUpstreamBurst,
-			&conn.upstreamBursts)
+			conn.readDeadline,
+			conn.readThresholdBytes,
+			&conn.currentReadBurst,
+			&conn.readBursts)
 		conn.readMutex.Unlock()
 	}
 
@@ -145,7 +158,7 @@ func (conn *BurstMonitoredConn) Read(buffer []byte) (int, error) {
 
 func (conn *BurstMonitoredConn) Write(buffer []byte) (int, error) {
 
-	if conn.downstreamDeadline <= 0 || conn.downstreamThresholdBytes <= 0 {
+	if conn.writeDeadline <= 0 || conn.writeThresholdBytes <= 0 {
 		return conn.Conn.Write(buffer)
 	}
 
@@ -159,10 +172,10 @@ func (conn *BurstMonitoredConn) Write(buffer []byte) (int, error) {
 			start,
 			end,
 			int64(n),
-			conn.downstreamDeadline,
-			conn.downstreamThresholdBytes,
-			&conn.currentDownstreamBurst,
-			&conn.downstreamBursts)
+			conn.writeDeadline,
+			conn.writeThresholdBytes,
+			&conn.currentWriteBurst,
+			&conn.writeBursts)
 		conn.writeMutex.Unlock()
 	}
 
@@ -173,21 +186,21 @@ func (conn *BurstMonitoredConn) Write(buffer []byte) (int, error) {
 func (conn *BurstMonitoredConn) Close() error {
 	err := conn.Conn.Close()
 
-	if conn.upstreamDeadline > 0 && conn.upstreamThresholdBytes > 0 {
+	if conn.readDeadline > 0 && conn.readThresholdBytes > 0 {
 		conn.readMutex.Lock()
 		conn.endBurst(
-			conn.upstreamThresholdBytes,
-			&conn.currentUpstreamBurst,
-			&conn.upstreamBursts)
+			conn.readThresholdBytes,
+			&conn.currentReadBurst,
+			&conn.readBursts)
 		conn.readMutex.Unlock()
 	}
 
-	if conn.downstreamDeadline > 0 && conn.downstreamThresholdBytes > 0 {
+	if conn.writeDeadline > 0 && conn.writeThresholdBytes > 0 {
 		conn.writeMutex.Lock()
 		conn.endBurst(
-			conn.downstreamThresholdBytes,
-			&conn.currentDownstreamBurst,
-			&conn.downstreamBursts)
+			conn.writeThresholdBytes,
+			&conn.currentWriteBurst,
+			&conn.writeBursts)
 		conn.writeMutex.Unlock()
 	}
 
@@ -228,8 +241,19 @@ func (conn *BurstMonitoredConn) GetMetrics(baseTime time.Time) LogFields {
 		addFields(prefix+"max_", &history.max)
 	}
 
-	addHistory("burst_upstream_", &conn.upstreamBursts)
-	addHistory("burst_downstream_", &conn.downstreamBursts)
+	var upstreamBursts *burstHistory
+	var downstreamBursts *burstHistory
+
+	if conn.isServer {
+		upstreamBursts = &conn.readBursts
+		downstreamBursts = &conn.writeBursts
+	} else {
+		upstreamBursts = &conn.writeBursts
+		downstreamBursts = &conn.readBursts
+	}
+
+	addHistory("burst_upstream_", upstreamBursts)
+	addHistory("burst_downstream_", downstreamBursts)
 
 	return logFields
 }

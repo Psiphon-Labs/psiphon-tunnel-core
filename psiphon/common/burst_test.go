@@ -36,6 +36,7 @@ func TestBurstMonitoredConn(t *testing.T) {
 
 	conn := NewBurstMonitoredConn(
 		dummy,
+		true,
 		burstDeadline,
 		upstreamThresholdBytes,
 		burstDeadline,
@@ -109,21 +110,21 @@ func TestBurstMonitoredConn(t *testing.T) {
 	conn.Close()
 
 	t.Logf("upstream first:    %d bytes in %s; %d bytes/s",
-		conn.upstreamBursts.first.bytes, conn.upstreamBursts.first.duration(), conn.upstreamBursts.first.rate())
+		conn.readBursts.first.bytes, conn.readBursts.first.duration(), conn.readBursts.first.rate())
 	t.Logf("upstream last:     %d bytes in %s; %d bytes/s",
-		conn.upstreamBursts.last.bytes, conn.upstreamBursts.last.duration(), conn.upstreamBursts.last.rate())
+		conn.readBursts.last.bytes, conn.readBursts.last.duration(), conn.readBursts.last.rate())
 	t.Logf("upstream min:      %d bytes in %s; %d bytes/s",
-		conn.upstreamBursts.min.bytes, conn.upstreamBursts.min.duration(), conn.upstreamBursts.min.rate())
+		conn.readBursts.min.bytes, conn.readBursts.min.duration(), conn.readBursts.min.rate())
 	t.Logf("upstream max:      %d bytes in %s; %d bytes/s",
-		conn.upstreamBursts.max.bytes, conn.upstreamBursts.max.duration(), conn.upstreamBursts.max.rate())
+		conn.readBursts.max.bytes, conn.readBursts.max.duration(), conn.readBursts.max.rate())
 	t.Logf("downstream first:  %d bytes in %s; %d bytes/s",
-		conn.downstreamBursts.first.bytes, conn.downstreamBursts.first.duration(), conn.downstreamBursts.first.rate())
+		conn.writeBursts.first.bytes, conn.writeBursts.first.duration(), conn.writeBursts.first.rate())
 	t.Logf("downstream last:   %d bytes in %s; %d bytes/s",
-		conn.downstreamBursts.last.bytes, conn.downstreamBursts.last.duration(), conn.downstreamBursts.last.rate())
+		conn.writeBursts.last.bytes, conn.writeBursts.last.duration(), conn.writeBursts.last.rate())
 	t.Logf("downstream min:    %d bytes in %s; %d bytes/s",
-		conn.downstreamBursts.min.bytes, conn.downstreamBursts.min.duration(), conn.downstreamBursts.min.rate())
+		conn.writeBursts.min.bytes, conn.writeBursts.min.duration(), conn.writeBursts.min.rate())
 	t.Logf("downstream max:    %d bytes in %s; %d bytes/s",
-		conn.downstreamBursts.max.bytes, conn.downstreamBursts.max.duration(), conn.downstreamBursts.max.rate())
+		conn.writeBursts.max.bytes, conn.writeBursts.max.duration(), conn.writeBursts.max.rate())
 
 	logFields := conn.GetMetrics(baseTime)
 

@@ -1386,6 +1386,7 @@ func (sshClient *sshClient) run(
 
 			burstConn = common.NewBurstMonitoredConn(
 				conn,
+				true,
 				upstreamDeadline, upstreamThresholdBytes,
 				downstreamDeadline, downstreamThresholdBytes)
 			conn = burstConn
