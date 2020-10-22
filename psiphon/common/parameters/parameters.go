@@ -262,6 +262,10 @@ const (
 	ServerBurstUpstreamThresholdBytes                = "ServerBurstUpstreamThresholdBytes"
 	ServerBurstDownstreamDeadline                    = "ServerBurstDownstreamDeadline"
 	ServerBurstDownstreamThresholdBytes              = "ServerBurstDownstreamThresholdBytes"
+	ClientBurstUpstreamDeadline                      = "ClientBurstUpstreamDeadline"
+	ClientBurstUpstreamThresholdBytes                = "ClientBurstUpstreamThresholdBytes"
+	ClientBurstDownstreamDeadline                    = "ClientBurstDownstreamDeadline"
+	ClientBurstDownstreamThresholdBytes              = "ClientBurstDownstreamThresholdBytes"
 )
 
 const (
@@ -544,6 +548,10 @@ var defaultParameters = map[string]struct {
 	ServerBurstUpstreamThresholdBytes:   {value: 0, minimum: 0, flags: serverSideOnly},
 	ServerBurstDownstreamDeadline:       {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
 	ServerBurstDownstreamThresholdBytes: {value: 0, minimum: 0, flags: serverSideOnly},
+	ClientBurstUpstreamDeadline:         {value: time.Duration(0), minimum: time.Duration(0)},
+	ClientBurstUpstreamThresholdBytes:   {value: 0, minimum: 0},
+	ClientBurstDownstreamDeadline:       {value: time.Duration(0), minimum: time.Duration(0)},
+	ClientBurstDownstreamThresholdBytes: {value: 0, minimum: 0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

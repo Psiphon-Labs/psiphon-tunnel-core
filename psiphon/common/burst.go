@@ -118,13 +118,15 @@ type burstHistory struct {
 
 func (conn *BurstMonitoredConn) Read(buffer []byte) (int, error) {
 
+	if conn.upstreamDeadline <= 0 || conn.upstreamThresholdBytes <= 0 {
+		return conn.Conn.Read(buffer)
+	}
+
 	start := time.Now()
 	n, err := conn.Conn.Read(buffer)
 	end := time.Now()
 
-	if n > 0 &&
-		conn.upstreamDeadline > 0 && conn.upstreamThresholdBytes > 0 {
-
+	if n > 0 {
 		conn.readMutex.Lock()
 		conn.updateBurst(
 			start,
@@ -143,13 +145,15 @@ func (conn *BurstMonitoredConn) Read(buffer []byte) (int, error) {
 
 func (conn *BurstMonitoredConn) Write(buffer []byte) (int, error) {
 
+	if conn.downstreamDeadline <= 0 || conn.downstreamThresholdBytes <= 0 {
+		return conn.Conn.Write(buffer)
+	}
+
 	start := time.Now()
 	n, err := conn.Conn.Write(buffer)
 	end := time.Now()
 
-	if n > 0 &&
-		conn.downstreamDeadline > 0 && conn.downstreamThresholdBytes > 0 {
-
+	if n > 0 {
 		conn.writeMutex.Lock()
 		conn.updateBurst(
 			start,
@@ -169,22 +173,36 @@ func (conn *BurstMonitoredConn) Write(buffer []byte) (int, error) {
 func (conn *BurstMonitoredConn) Close() error {
 	err := conn.Conn.Close()
 
-	conn.readMutex.Lock()
-	conn.endBurst(
-		conn.upstreamThresholdBytes,
-		&conn.currentUpstreamBurst,
-		&conn.upstreamBursts)
-	conn.readMutex.Unlock()
+	if conn.upstreamDeadline > 0 && conn.upstreamThresholdBytes > 0 {
+		conn.readMutex.Lock()
+		conn.endBurst(
+			conn.upstreamThresholdBytes,
+			&conn.currentUpstreamBurst,
+			&conn.upstreamBursts)
+		conn.readMutex.Unlock()
+	}
 
-	conn.writeMutex.Lock()
-	conn.endBurst(
-		conn.downstreamThresholdBytes,
-		&conn.currentDownstreamBurst,
-		&conn.downstreamBursts)
-	conn.writeMutex.Unlock()
+	if conn.downstreamDeadline > 0 && conn.downstreamThresholdBytes > 0 {
+		conn.writeMutex.Lock()
+		conn.endBurst(
+			conn.downstreamThresholdBytes,
+			&conn.currentDownstreamBurst,
+			&conn.downstreamBursts)
+		conn.writeMutex.Unlock()
+	}
 
 	// Note: no context error to preserve error type
 	return err
+}
+
+// IsClosed implements the Closer iterface. The return value indicates whether
+// the underlying conn has been closed.
+func (conn *BurstMonitoredConn) IsClosed() bool {
+	closer, ok := conn.Conn.(Closer)
+	if !ok {
+		return false
+	}
+	return closer.IsClosed()
 }
 
 // GetMetrics returns log fields with burst metrics for the first, last, min

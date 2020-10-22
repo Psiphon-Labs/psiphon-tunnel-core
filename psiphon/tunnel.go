@@ -90,7 +90,8 @@ type Tunnel struct {
 	dialParams                     *DialParameters
 	livenessTestMetrics            *livenessTestMetrics
 	serverContext                  *ServerContext
-	conn                           *common.ActivityMonitoredConn
+	monitoringStartTime            time.Time
+	conn                           *common.BurstMonitoredConn
 	sshClient                      *ssh.Client
 	sshServerRequests              <-chan *ssh.Request
 	operateWaitGroup               *sync.WaitGroup
@@ -157,6 +158,7 @@ func ConnectTunnel(
 		config:              config,
 		dialParams:          dialParams,
 		livenessTestMetrics: dialResult.livenessTestMetrics,
+		monitoringStartTime: dialResult.monitoringStartTime,
 		conn:                dialResult.monitoredConn,
 		sshClient:           dialResult.sshClient,
 		sshServerRequests:   dialResult.sshRequests,
@@ -332,6 +334,17 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		err := tunnel.sshClient.Wait()
 		if err != nil {
 			NoticeWarning("close tunnel ssh error: %s", err)
+		}
+	}
+
+	// Log burst metrics now that the BurstMonitoredConn is closed.
+	// Metrics will be empty when burst monitoring is disabled.
+	if !isDiscarded && isActivated {
+		burstMetrics := tunnel.conn.GetMetrics(tunnel.monitoringStartTime)
+		if len(burstMetrics) > 0 {
+			NoticeBursts(
+				tunnel.dialParams.ServerEntry.GetDiagnosticID(),
+				burstMetrics)
 		}
 	}
 }
@@ -600,7 +613,8 @@ func (conn *TunneledConn) Close() error {
 
 type dialResult struct {
 	dialConn            net.Conn
-	monitoredConn       *common.ActivityMonitoredConn
+	monitoringStartTime time.Time
+	monitoredConn       *common.BurstMonitoredConn
 	sshClient           *ssh.Client
 	sshRequests         <-chan *ssh.Request
 	livenessTestMetrics *livenessTestMetrics
@@ -609,11 +623,6 @@ type dialResult struct {
 // dialTunnel is a helper that builds the transport layers and establishes the
 // SSH connection. When additional dial configuration is used, dial metrics
 // are recorded and returned.
-//
-// The net.Conn return value is the value to be removed from pendingConns;
-// additional layering (ThrottledConn, ActivityMonitoredConn) is applied, but
-// this return value is the base dial conn. The *ActivityMonitoredConn return
-// value is the layered conn passed into the ssh.Client.
 func dialTunnel(
 	ctx context.Context,
 	config *Config,
@@ -635,6 +644,10 @@ func dialTunnel(
 	livenessTestMaxUpstreamBytes := p.Int(parameters.LivenessTestMaxUpstreamBytes)
 	livenessTestMinDownstreamBytes := p.Int(parameters.LivenessTestMinDownstreamBytes)
 	livenessTestMaxDownstreamBytes := p.Int(parameters.LivenessTestMaxDownstreamBytes)
+	burstUpstreamDeadline := p.Duration(parameters.ClientBurstUpstreamDeadline)
+	burstUpstreamThresholdBytes := int64(p.Int(parameters.ClientBurstUpstreamThresholdBytes))
+	burstDownstreamDeadline := p.Duration(parameters.ClientBurstDownstreamDeadline)
+	burstDownstreamThresholdBytes := int64(p.Int(parameters.ClientBurstDownstreamThresholdBytes))
 	p.Close()
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
@@ -774,11 +787,13 @@ func dialTunnel(
 		}
 	}()
 
-	// Activity monitoring is used to measure tunnel duration
-	monitoredConn, err := common.NewActivityMonitoredConn(dialConn, 0, false, nil, nil)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	monitoringStartTime := time.Now()
+	monitoredConn := common.NewBurstMonitoredConn(
+		dialConn,
+		burstUpstreamDeadline,
+		burstUpstreamThresholdBytes,
+		burstDownstreamDeadline,
+		burstDownstreamThresholdBytes)
 
 	// Apply throttling (if configured)
 	throttledConn := common.NewThrottledConn(
@@ -977,6 +992,7 @@ func dialTunnel(
 
 	return &dialResult{
 			dialConn:            dialConn,
+			monitoringStartTime: monitoringStartTime,
 			monitoredConn:       monitoredConn,
 			sshClient:           result.sshClient,
 			sshRequests:         result.sshRequests,

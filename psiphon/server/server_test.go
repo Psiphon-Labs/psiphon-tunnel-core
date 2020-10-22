@@ -2101,6 +2101,10 @@ func paveTacticsConfigFile(
           "ServerBurstUpstreamThresholdBytes" : 1000,
           "ServerBurstDownstreamDeadline" : "100ms",
           "ServerBurstDownstreamThresholdBytes" : 100000,
+          "ClientBurstUpstreamDeadline" : "100ms",
+          "ClientBurstUpstreamThresholdBytes" : 1000,
+          "ClientBurstDownstreamDeadline" : "100ms",
+          "ClientBurstDownstreamThresholdBytes" : 100000,
 	`
 	}
 
