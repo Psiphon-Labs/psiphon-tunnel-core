@@ -261,22 +261,25 @@ func (entry *LRUConnsEntry) Touch() {
 	entry.lruConns.list.MoveToFront(entry.element)
 }
 
-// ActivityMonitoredConn wraps a net.Conn, adding logic to deal with
-// events triggered by I/O activity.
+// ActivityMonitoredConn wraps a net.Conn, adding logic to deal with events
+// triggered by I/O activity.
 //
-// When an inactivity timeout is specified, the network I/O will
-// timeout after the specified period of read inactivity. Optionally,
-// for the purpose of inactivity only, ActivityMonitoredConn will also
-// consider the connection active when data is written to it.
+// ActivityMonitoredConn uses lock-free concurrency synronization, avoiding an
+// additional mutex resource, making it suitable for wrapping many net.Conns
+// (e.g, each Psiphon port forward).
 //
-// When a LRUConnsEntry is specified, then the LRU entry is promoted on
-// either a successful read or write.
+// When an inactivity timeout is specified, the network I/O will timeout after
+// the specified period of read inactivity. Optionally, for the purpose of
+// inactivity only, ActivityMonitoredConn will also consider the connection
+// active when data is written to it.
 //
-// When an ActivityUpdater is set, then its UpdateActivity method is
-// called on each read and write with the number of bytes transferred.
-// The durationNanoseconds, which is the time since the last read, is
-// reported only on reads.
+// When a LRUConnsEntry is specified, then the LRU entry is promoted on either
+// a successful read or write.
 //
+// When an ActivityUpdater is set, then its UpdateActivity method is called on
+// each read and write with the number of bytes transferred. The
+// durationNanoseconds, which is the time since the last read, is reported
+// only on reads.
 type ActivityMonitoredConn struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
@@ -292,8 +295,8 @@ type ActivityMonitoredConn struct {
 }
 
 // ActivityUpdater defines an interface for receiving updates for
-// ActivityMonitoredConn activity. Values passed to UpdateProgress are
-// bytes transferred and conn duration since the previous UpdateProgress.
+// ActivityMonitoredConn activity. Values passed to UpdateProgress are bytes
+// transferred and conn duration since the previous UpdateProgress.
 type ActivityUpdater interface {
 	UpdateProgress(bytesRead, bytesWritten int64, durationNanoseconds int64)
 }
@@ -313,6 +316,9 @@ func NewActivityMonitoredConn(
 		}
 	}
 
+	// The "monotime" package is still used here as its time value is an int64,
+	// which is compatible with atomic operations.
+
 	now := int64(monotime.Now())
 
 	return &ActivityMonitoredConn{
@@ -327,27 +333,22 @@ func NewActivityMonitoredConn(
 	}, nil
 }
 
-// GetStartTime gets the time when the ActivityMonitoredConn was
-// initialized. Reported time is UTC.
+// GetStartTime gets the time when the ActivityMonitoredConn was initialized.
+// Reported time is UTC.
 func (conn *ActivityMonitoredConn) GetStartTime() time.Time {
 	return conn.realStartTime.UTC()
 }
 
-// GetActiveDuration returns the time elapsed between the initialization
-// of the ActivityMonitoredConn and the last Read. Only reads are used
-// for this calculation since writes may succeed locally due to buffering.
+// GetActiveDuration returns the time elapsed between the initialization of
+// the ActivityMonitoredConn and the last Read. Only reads are used for this
+// calculation since writes may succeed locally due to buffering.
 func (conn *ActivityMonitoredConn) GetActiveDuration() time.Duration {
 	return time.Duration(atomic.LoadInt64(&conn.lastReadActivityTime) - conn.monotonicStartTime)
 }
 
-// GetLastActivityMonotime returns the arbitrary monotonic time of the last Read.
-func (conn *ActivityMonitoredConn) GetLastActivityMonotime() monotime.Time {
-	return monotime.Time(atomic.LoadInt64(&conn.lastReadActivityTime))
-}
-
 func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 	n, err := conn.Conn.Read(buffer)
-	if err == nil {
+	if n > 0 {
 
 		if conn.inactivityTimeout > 0 {
 			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
@@ -376,7 +377,7 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 
 func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	n, err := conn.Conn.Write(buffer)
-	if err == nil && conn.activeOnWrite {
+	if n > 0 && conn.activeOnWrite {
 
 		if conn.inactivityTimeout > 0 {
 			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
@@ -398,14 +399,272 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	return n, err
 }
 
-// IsClosed implements the Closer iterface. The return value
-// indicates whether the underlying conn has been closed.
+// IsClosed implements the Closer iterface. The return value indicates whether
+// the underlying conn has been closed.
 func (conn *ActivityMonitoredConn) IsClosed() bool {
 	closer, ok := conn.Conn.(Closer)
 	if !ok {
 		return false
 	}
 	return closer.IsClosed()
+}
+
+// BurstMonitoredConn wraps a net.Conn and monitors for data transfer bursts.
+// Upstream (read) and downstream (write) bursts are tracked independently.
+//
+// A burst is defined as a transfer of at least "threshold" bytes, across
+// multiple I/O operations where the delay between operations does not exceed
+// "deadline". Both a non-zero deadline and theshold must be set to enable
+// monitoring. Four bursts are reported: the first, the last, the min (by
+// rate) and max.
+//
+// The reported rates will be more accurate for larger data transfers,
+// especially for higher transfer rates. Tune the deadline/threshold as
+// required. The threshold should be set to account for buffering (e.g, the
+// local host socket send/receive buffer) but this is not enforced by
+// BurstMonitoredConn.
+//
+// Close must be called to complete any outstanding bursts. For complete
+// results, call GetMetrics only after Close is called.
+//
+// Overhead: BurstMonitoredConn adds mutexes but does not use timers.
+type BurstMonitoredConn struct {
+	net.Conn
+	upstreamDeadline         time.Duration
+	upstreamThresholdBytes   int64
+	downstreamDeadline       time.Duration
+	downstreamThresholdBytes int64
+
+	readMutex            sync.Mutex
+	currentUpstreamBurst burst
+	upstreamBursts       burstHistory
+
+	writeMutex             sync.Mutex
+	currentDownstreamBurst burst
+	downstreamBursts       burstHistory
+}
+
+// NewBurstMonitoredConn creates a new BurstMonitoredConn.
+func NewBurstMonitoredConn(
+	conn net.Conn,
+	upstreamDeadline time.Duration,
+	upstreamThresholdBytes int64,
+	downstreamDeadline time.Duration,
+	downstreamThresholdBytes int64) *BurstMonitoredConn {
+
+	return &BurstMonitoredConn{
+		Conn:                     conn,
+		upstreamDeadline:         upstreamDeadline,
+		upstreamThresholdBytes:   upstreamThresholdBytes,
+		downstreamDeadline:       downstreamDeadline,
+		downstreamThresholdBytes: downstreamThresholdBytes,
+	}
+}
+
+type burst struct {
+	startTime    time.Time
+	lastByteTime time.Time
+	bytes        int64
+}
+
+func (b *burst) isZero() bool {
+	return b.startTime.IsZero()
+}
+
+func (b *burst) offset(baseTime time.Time) time.Duration {
+	offset := b.startTime.Sub(baseTime)
+	if offset <= 0 {
+		return 0
+	}
+	return offset
+}
+
+func (b *burst) duration() time.Duration {
+	duration := b.lastByteTime.Sub(b.startTime)
+	if duration <= 0 {
+		return 0
+	}
+	return duration
+}
+
+func (b *burst) rate() int64 {
+	return int64(
+		(float64(b.bytes) * float64(time.Second)) /
+			float64(b.duration()))
+}
+
+type burstHistory struct {
+	first burst
+	last  burst
+	min   burst
+	max   burst
+}
+
+func (conn *BurstMonitoredConn) Read(buffer []byte) (int, error) {
+
+	start := time.Now()
+	n, err := conn.Conn.Read(buffer)
+	end := time.Now()
+
+	if n > 0 &&
+		conn.upstreamDeadline > 0 && conn.upstreamThresholdBytes > 0 {
+
+		conn.readMutex.Lock()
+		conn.updateBurst(
+			start,
+			end,
+			int64(n),
+			conn.upstreamDeadline,
+			conn.upstreamThresholdBytes,
+			&conn.currentUpstreamBurst,
+			&conn.upstreamBursts)
+		conn.readMutex.Unlock()
+	}
+
+	// Note: no context error to preserve error type
+	return n, err
+}
+
+func (conn *BurstMonitoredConn) Write(buffer []byte) (int, error) {
+
+	start := time.Now()
+	n, err := conn.Conn.Write(buffer)
+	end := time.Now()
+
+	if n > 0 &&
+		conn.downstreamDeadline > 0 && conn.downstreamThresholdBytes > 0 {
+
+		conn.writeMutex.Lock()
+		conn.updateBurst(
+			start,
+			end,
+			int64(n),
+			conn.downstreamDeadline,
+			conn.downstreamThresholdBytes,
+			&conn.currentDownstreamBurst,
+			&conn.downstreamBursts)
+		conn.writeMutex.Unlock()
+	}
+
+	// Note: no context error to preserve error type
+	return n, err
+}
+
+func (conn *BurstMonitoredConn) Close() error {
+	err := conn.Conn.Close()
+
+	conn.readMutex.Lock()
+	conn.endBurst(
+		conn.upstreamThresholdBytes,
+		&conn.currentUpstreamBurst,
+		&conn.upstreamBursts)
+	conn.readMutex.Unlock()
+
+	conn.writeMutex.Lock()
+	conn.endBurst(
+		conn.downstreamThresholdBytes,
+		&conn.currentDownstreamBurst,
+		&conn.downstreamBursts)
+	conn.writeMutex.Unlock()
+
+	// Note: no context error to preserve error type
+	return err
+}
+
+// GetMetrics returns log fields with burst metrics for the first, last, min
+// (by rate), and max bursts for this conn. Time/duration values are reported
+// in milliseconds.
+func (conn *BurstMonitoredConn) GetMetrics(baseTime time.Time) LogFields {
+	logFields := make(LogFields)
+
+	addFields := func(prefix string, burst *burst) {
+		if burst.isZero() {
+			return
+		}
+		logFields[prefix+"offset"] = int64(burst.offset(baseTime) / time.Millisecond)
+		logFields[prefix+"duration"] = int64(burst.duration() / time.Millisecond)
+		logFields[prefix+"bytes"] = burst.bytes
+		logFields[prefix+"rate"] = burst.rate()
+	}
+
+	addHistory := func(prefix string, history *burstHistory) {
+		addFields(prefix+"first_", &history.first)
+		addFields(prefix+"last_", &history.last)
+		addFields(prefix+"min_", &history.min)
+		addFields(prefix+"max_", &history.max)
+	}
+
+	addHistory("burst_upstream_", &conn.upstreamBursts)
+	addHistory("burst_downstream_", &conn.downstreamBursts)
+
+	return logFields
+}
+
+func (conn *BurstMonitoredConn) updateBurst(
+	operationStart time.Time,
+	operationEnd time.Time,
+	operationBytes int64,
+	deadline time.Duration,
+	thresholdBytes int64,
+	currentBurst *burst,
+	history *burstHistory) {
+
+	// Assumes the associated mutex is locked.
+
+	if currentBurst.isZero() {
+		currentBurst.startTime = operationStart
+		currentBurst.lastByteTime = operationEnd
+		currentBurst.bytes = operationBytes
+
+	} else {
+
+		if operationStart.Sub(currentBurst.lastByteTime) >
+			deadline {
+
+			conn.endBurst(thresholdBytes, currentBurst, history)
+			currentBurst.startTime = operationStart
+		}
+
+		currentBurst.lastByteTime = operationEnd
+		currentBurst.bytes += operationBytes
+	}
+
+}
+
+func (conn *BurstMonitoredConn) endBurst(
+	thresholdBytes int64,
+	currentBurst *burst,
+	history *burstHistory) {
+
+	// Assumes the associated mutex is locked.
+
+	if currentBurst.isZero() {
+		return
+	}
+
+	burst := *currentBurst
+
+	currentBurst.startTime = time.Time{}
+	currentBurst.lastByteTime = time.Time{}
+	currentBurst.bytes = 0
+
+	if burst.bytes < thresholdBytes {
+		return
+	}
+
+	if history.first.isZero() {
+		history.first = burst
+	}
+
+	history.last = burst
+
+	if history.min.isZero() || history.min.rate() > burst.rate() {
+		history.min = burst
+	}
+
+	if history.max.isZero() || history.max.rate() < burst.rate() {
+		history.max = burst
+	}
 }
 
 // IsBogon checks if the specified IP is a bogon (loopback, private addresses,

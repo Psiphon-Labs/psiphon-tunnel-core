@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
@@ -1193,7 +1194,6 @@ type sshClient struct {
 	sshListener                          *sshListener
 	tunnelProtocol                       string
 	sshConn                              ssh.Conn
-	activityConn                         *common.ActivityMonitoredConn
 	throttledConn                        *common.ThrottledConn
 	serverPacketManipulation             string
 	replayedServerPacketManipulation     bool
@@ -1360,6 +1360,40 @@ func (sshClient *sshClient) run(
 		return
 	}
 	conn = activityConn
+
+	// Further wrap the connection with burst monitoring, when enabled.
+	//
+	// Limitation: burst parameters are fixed for the duration of the tunnel
+	// and do not change after a tactics hot reload.
+
+	var burstConn *common.BurstMonitoredConn
+
+	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
+			"ServerTacticsParametersCache.Get failed")
+		return
+	}
+
+	if !p.IsNil() {
+		upstreamDeadline := p.Duration(parameters.ServerBurstUpstreamDeadline)
+		upstreamThresholdBytes := int64(p.Int(parameters.ServerBurstUpstreamThresholdBytes))
+		downstreamDeadline := p.Duration(parameters.ServerBurstUpstreamDeadline)
+		downstreamThresholdBytes := int64(p.Int(parameters.ServerBurstUpstreamThresholdBytes))
+
+		if (upstreamDeadline != 0 && upstreamThresholdBytes != 0) ||
+			(downstreamDeadline != 0 && downstreamThresholdBytes != 0) {
+
+			burstConn = common.NewBurstMonitoredConn(
+				conn,
+				upstreamDeadline, upstreamThresholdBytes,
+				downstreamDeadline, downstreamThresholdBytes)
+			conn = burstConn
+		}
+	}
+
+	// Allow garbage collection.
+	p.Close()
 
 	// Further wrap the connection in a rate limiting ThrottledConn.
 
@@ -1595,7 +1629,6 @@ func (sshClient *sshClient) run(
 
 	sshClient.Lock()
 	sshClient.sshConn = result.sshConn
-	sshClient.activityConn = activityConn
 	sshClient.throttledConn = throttledConn
 	sshClient.Unlock()
 
@@ -1612,10 +1645,35 @@ func (sshClient *sshClient) run(
 
 	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 
+	// Log tunnel metrics.
+
+	var additionalMetrics []LogFields
+
+	// Add activity and burst metrics.
+	//
+	// The reported duration is based on last confirmed data transfer, which for
+	// sshClient.activityConn.GetActiveDuration() is time of last read byte and
+	// not conn close time. This is important for protocols such as meek. For
+	// meek, the connection remains open until the HTTP session expires, which
+	// may be some time after the tunnel has closed. (The meek protocol has no
+	// allowance for signalling payload EOF, and even if it did the client may
+	// not have the opportunity to send a final request with an EOF flag set.)
+
+	activityMetrics := make(LogFields)
+	activityMetrics["start_time"] = activityConn.GetStartTime()
+	activityMetrics["duration"] = int64(activityConn.GetActiveDuration() / time.Millisecond)
+	additionalMetrics = append(additionalMetrics, activityMetrics)
+
+	if burstConn != nil {
+		// Any outstanding burst should be recorded by burstConn.Close which should
+		// be called by unregisterEstablishedClient.
+		additionalMetrics = append(
+			additionalMetrics, LogFields(burstConn.GetMetrics(activityConn.GetStartTime())))
+	}
+
 	// Some conns report additional metrics. Meek conns report resiliency
 	// metrics and fragmentor.Conns report fragmentor configs.
 
-	var additionalMetrics []LogFields
 	if metricsSource, ok := baseConn.(common.MetricsSource); ok {
 		additionalMetrics = append(
 			additionalMetrics, LogFields(metricsSource.GetMetrics()))
@@ -1625,7 +1683,7 @@ func (sshClient *sshClient) run(
 			additionalMetrics, LogFields(result.obfuscatedSSHConn.GetMetrics()))
 	}
 
-	// Record server-replay metrics.
+	// Add server-replay metrics.
 
 	replayMetrics := make(LogFields)
 	replayedFragmentation := false
@@ -2376,15 +2434,6 @@ var serverTunnelStatParams = append(
 
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
-	// Note: reporting duration based on last confirmed data transfer, which
-	// is reads for sshClient.activityConn.GetActiveDuration(), and not
-	// connection closing is important for protocols such as meek. For
-	// meek, the connection remains open until the HTTP session expires,
-	// which may be some time after the tunnel has closed. (The meek
-	// protocol has no allowance for signalling payload EOF, and even if
-	// it did the client may not have the opportunity to send a final
-	// request with an EOF flag set.)
-
 	sshClient.Lock()
 
 	logFields := getRequestLogFields(
@@ -2408,8 +2457,6 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	}
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
-	logFields["start_time"] = sshClient.activityConn.GetStartTime()
-	logFields["duration"] = int64(sshClient.activityConn.GetActiveDuration() / time.Millisecond)
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
 	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
 	logFields["peak_concurrent_dialing_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentDialingPortForwardCount

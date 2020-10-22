@@ -258,6 +258,10 @@ const (
 	ServerReplayTargetUpstreamBytes                  = "ServerReplayTargetUpstreamBytes"
 	ServerReplayTargetDownstreamBytes                = "ServerReplayTargetDownstreamBytes"
 	ServerReplayFailedCountThreshold                 = "ServerReplayFailedCountThreshold"
+	ServerBurstUpstreamDeadline                      = "ServerBurstUpstreamDeadline"
+	ServerBurstUpstreamThresholdBytes                = "ServerBurstUpstreamThresholdBytes"
+	ServerBurstDownstreamDeadline                    = "ServerBurstDownstreamDeadline"
+	ServerBurstDownstreamThresholdBytes              = "ServerBurstDownstreamThresholdBytes"
 )
 
 const (
@@ -535,6 +539,11 @@ var defaultParameters = map[string]struct {
 	ServerReplayTargetUpstreamBytes:   {value: 0, minimum: 0, flags: serverSideOnly},
 	ServerReplayTargetDownstreamBytes: {value: 0, minimum: 0, flags: serverSideOnly},
 	ServerReplayFailedCountThreshold:  {value: 0, minimum: 0, flags: serverSideOnly},
+
+	ServerBurstUpstreamDeadline:         {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	ServerBurstUpstreamThresholdBytes:   {value: 0, minimum: 0, flags: serverSideOnly},
+	ServerBurstDownstreamDeadline:       {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	ServerBurstDownstreamThresholdBytes: {value: 0, minimum: 0, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
