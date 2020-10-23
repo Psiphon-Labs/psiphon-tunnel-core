@@ -2098,13 +2098,13 @@ func paveTacticsConfigFile(
 	if doBurstMonitor {
 		burstParameters = `
           "ServerBurstUpstreamDeadline" : "100ms",
-          "ServerBurstUpstreamThresholdBytes" : 1000,
+          "ServerBurstUpstreamTargetBytes" : 1000,
           "ServerBurstDownstreamDeadline" : "100ms",
-          "ServerBurstDownstreamThresholdBytes" : 100000,
+          "ServerBurstDownstreamTargetBytes" : 100000,
           "ClientBurstUpstreamDeadline" : "100ms",
-          "ClientBurstUpstreamThresholdBytes" : 1000,
+          "ClientBurstUpstreamTargetBytes" : 1000,
           "ClientBurstDownstreamDeadline" : "100ms",
-          "ClientBurstDownstreamThresholdBytes" : 100000,
+          "ClientBurstDownstreamTargetBytes" : 100000,
 	`
 	}
 

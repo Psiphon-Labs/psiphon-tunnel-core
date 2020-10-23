@@ -541,6 +541,13 @@ type Config struct {
 	SelectRandomizedTLSProfileProbability *float64
 	NoDefaultTLSSessionIDProbability      *float64
 
+	// ClientBurstUpstreamTargetBytes and other burst metric fields are for
+	// testing purposes.
+	ClientBurstUpstreamTargetBytes            *int
+	ClientBurstUpstreamDeadlineMilliseconds   *int
+	ClientBurstDownstreamTargetBytes          *int
+	ClientBurstDownstreamDeadlineMilliseconds *int
+
 	// ApplicationParameters is for testing purposes.
 	ApplicationParameters parameters.KeyValues
 
@@ -1579,6 +1586,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.NoDefaultTLSSessionIDProbability != nil {
 		applyParameters[parameters.NoDefaultTLSSessionIDProbability] = *config.NoDefaultTLSSessionIDProbability
+	}
+
+	if config.ClientBurstUpstreamTargetBytes != nil {
+		applyParameters[parameters.ClientBurstUpstreamTargetBytes] = *config.ClientBurstUpstreamTargetBytes
+	}
+
+	if config.ClientBurstUpstreamDeadlineMilliseconds != nil {
+		applyParameters[parameters.ClientBurstUpstreamDeadline] = fmt.Sprintf("%dms", *config.ClientBurstUpstreamDeadlineMilliseconds)
+	}
+
+	if config.ClientBurstDownstreamTargetBytes != nil {
+		applyParameters[parameters.ClientBurstDownstreamTargetBytes] = *config.ClientBurstDownstreamTargetBytes
+	}
+
+	if config.ClientBurstDownstreamDeadlineMilliseconds != nil {
+		applyParameters[parameters.ClientBurstDownstreamDeadline] = fmt.Sprintf("%dms", *config.ClientBurstDownstreamDeadlineMilliseconds)
 	}
 
 	if config.ApplicationParameters != nil {

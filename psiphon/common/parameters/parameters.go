@@ -259,13 +259,13 @@ const (
 	ServerReplayTargetDownstreamBytes                = "ServerReplayTargetDownstreamBytes"
 	ServerReplayFailedCountThreshold                 = "ServerReplayFailedCountThreshold"
 	ServerBurstUpstreamDeadline                      = "ServerBurstUpstreamDeadline"
-	ServerBurstUpstreamThresholdBytes                = "ServerBurstUpstreamThresholdBytes"
+	ServerBurstUpstreamTargetBytes                   = "ServerBurstUpstreamTargetBytes"
 	ServerBurstDownstreamDeadline                    = "ServerBurstDownstreamDeadline"
-	ServerBurstDownstreamThresholdBytes              = "ServerBurstDownstreamThresholdBytes"
+	ServerBurstDownstreamTargetBytes                 = "ServerBurstDownstreamTargetBytes"
 	ClientBurstUpstreamDeadline                      = "ClientBurstUpstreamDeadline"
-	ClientBurstUpstreamThresholdBytes                = "ClientBurstUpstreamThresholdBytes"
+	ClientBurstUpstreamTargetBytes                   = "ClientBurstUpstreamTargetBytes"
 	ClientBurstDownstreamDeadline                    = "ClientBurstDownstreamDeadline"
-	ClientBurstDownstreamThresholdBytes              = "ClientBurstDownstreamThresholdBytes"
+	ClientBurstDownstreamTargetBytes                 = "ClientBurstDownstreamTargetBytes"
 )
 
 const (
@@ -544,14 +544,14 @@ var defaultParameters = map[string]struct {
 	ServerReplayTargetDownstreamBytes: {value: 0, minimum: 0, flags: serverSideOnly},
 	ServerReplayFailedCountThreshold:  {value: 0, minimum: 0, flags: serverSideOnly},
 
-	ServerBurstUpstreamDeadline:         {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
-	ServerBurstUpstreamThresholdBytes:   {value: 0, minimum: 0, flags: serverSideOnly},
-	ServerBurstDownstreamDeadline:       {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
-	ServerBurstDownstreamThresholdBytes: {value: 0, minimum: 0, flags: serverSideOnly},
-	ClientBurstUpstreamDeadline:         {value: time.Duration(0), minimum: time.Duration(0)},
-	ClientBurstUpstreamThresholdBytes:   {value: 0, minimum: 0},
-	ClientBurstDownstreamDeadline:       {value: time.Duration(0), minimum: time.Duration(0)},
-	ClientBurstDownstreamThresholdBytes: {value: 0, minimum: 0},
+	ServerBurstUpstreamTargetBytes:   {value: 0, minimum: 0, flags: serverSideOnly},
+	ServerBurstUpstreamDeadline:      {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	ServerBurstDownstreamTargetBytes: {value: 0, minimum: 0, flags: serverSideOnly},
+	ServerBurstDownstreamDeadline:    {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	ClientBurstUpstreamTargetBytes:   {value: 0, minimum: 0},
+	ClientBurstUpstreamDeadline:      {value: time.Duration(0), minimum: time.Duration(0)},
+	ClientBurstDownstreamTargetBytes: {value: 0, minimum: 0},
+	ClientBurstDownstreamDeadline:    {value: time.Duration(0), minimum: time.Duration(0)},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

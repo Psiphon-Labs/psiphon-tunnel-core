@@ -1376,19 +1376,19 @@ func (sshClient *sshClient) run(
 	}
 
 	if !p.IsNil() {
+		upstreamTargetBytes := int64(p.Int(parameters.ServerBurstUpstreamTargetBytes))
 		upstreamDeadline := p.Duration(parameters.ServerBurstUpstreamDeadline)
-		upstreamThresholdBytes := int64(p.Int(parameters.ServerBurstUpstreamThresholdBytes))
+		downstreamTargetBytes := int64(p.Int(parameters.ServerBurstUpstreamTargetBytes))
 		downstreamDeadline := p.Duration(parameters.ServerBurstUpstreamDeadline)
-		downstreamThresholdBytes := int64(p.Int(parameters.ServerBurstUpstreamThresholdBytes))
 
-		if (upstreamDeadline != 0 && upstreamThresholdBytes != 0) ||
-			(downstreamDeadline != 0 && downstreamThresholdBytes != 0) {
+		if (upstreamDeadline != 0 && upstreamTargetBytes != 0) ||
+			(downstreamDeadline != 0 && downstreamTargetBytes != 0) {
 
 			burstConn = common.NewBurstMonitoredConn(
 				conn,
 				true,
-				upstreamDeadline, upstreamThresholdBytes,
-				downstreamDeadline, downstreamThresholdBytes)
+				upstreamTargetBytes, upstreamDeadline,
+				downstreamTargetBytes, downstreamDeadline)
 			conn = burstConn
 		}
 	}

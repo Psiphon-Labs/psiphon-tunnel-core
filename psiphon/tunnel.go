@@ -644,10 +644,10 @@ func dialTunnel(
 	livenessTestMaxUpstreamBytes := p.Int(parameters.LivenessTestMaxUpstreamBytes)
 	livenessTestMinDownstreamBytes := p.Int(parameters.LivenessTestMinDownstreamBytes)
 	livenessTestMaxDownstreamBytes := p.Int(parameters.LivenessTestMaxDownstreamBytes)
+	burstUpstreamTargetBytes := int64(p.Int(parameters.ClientBurstUpstreamTargetBytes))
 	burstUpstreamDeadline := p.Duration(parameters.ClientBurstUpstreamDeadline)
-	burstUpstreamThresholdBytes := int64(p.Int(parameters.ClientBurstUpstreamThresholdBytes))
+	burstDownstreamTargetBytes := int64(p.Int(parameters.ClientBurstDownstreamTargetBytes))
 	burstDownstreamDeadline := p.Duration(parameters.ClientBurstDownstreamDeadline)
-	burstDownstreamThresholdBytes := int64(p.Int(parameters.ClientBurstDownstreamThresholdBytes))
 	p.Close()
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
@@ -791,8 +791,8 @@ func dialTunnel(
 	monitoredConn := common.NewBurstMonitoredConn(
 		dialConn,
 		false,
-		burstUpstreamDeadline, burstUpstreamThresholdBytes,
-		burstDownstreamDeadline, burstDownstreamThresholdBytes)
+		burstUpstreamTargetBytes, burstUpstreamDeadline,
+		burstDownstreamTargetBytes, burstDownstreamDeadline)
 
 	// Apply throttling (if configured)
 	throttledConn := common.NewThrottledConn(

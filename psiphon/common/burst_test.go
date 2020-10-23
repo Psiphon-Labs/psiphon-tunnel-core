@@ -26,9 +26,9 @@ import (
 
 func TestBurstMonitoredConn(t *testing.T) {
 
-	burstDeadline := 100 * time.Millisecond
-	upstreamThresholdBytes := int64(100000)
-	downstreamThresholdBytes := int64(1000000)
+	upstreamTargetBytes := int64(100000)
+	downstreamTargetBytes := int64(1000000)
+	burstDeadline := 1 * time.Second
 
 	baseTime := time.Now()
 
@@ -37,10 +37,10 @@ func TestBurstMonitoredConn(t *testing.T) {
 	conn := NewBurstMonitoredConn(
 		dummy,
 		true,
+		upstreamTargetBytes,
 		burstDeadline,
-		upstreamThresholdBytes,
-		burstDeadline,
-		downstreamThresholdBytes)
+		downstreamTargetBytes,
+		burstDeadline)
 
 	// Simulate 128KB/s up, 1MB/s down; transmit >= min bytes in segments; sets "first" and "min"
 
@@ -48,14 +48,14 @@ func TestBurstMonitoredConn(t *testing.T) {
 
 	segments := 10
 
-	b := make([]byte, int(upstreamThresholdBytes)/segments)
+	b := make([]byte, int(upstreamTargetBytes)/segments)
 	firstReadStart := time.Now()
 	for i := 0; i < segments; i++ {
 		conn.Read(b)
 	}
 	firstReadEnd := time.Now()
 
-	b = make([]byte, int(downstreamThresholdBytes)/segments)
+	b = make([]byte, int(downstreamTargetBytes)/segments)
 	firstWriteStart := time.Now()
 	for i := 0; i < segments; i++ {
 		conn.Write(b)
@@ -84,11 +84,11 @@ func TestBurstMonitoredConn(t *testing.T) {
 	dummy.SetRateLimits(524288, 5242880)
 
 	maxReadStart := time.Now()
-	conn.Read(make([]byte, upstreamThresholdBytes))
+	conn.Read(make([]byte, upstreamTargetBytes))
 	maxReadEnd := time.Now()
 
 	maxWriteStart := time.Now()
-	conn.Write(make([]byte, downstreamThresholdBytes))
+	conn.Write(make([]byte, downstreamTargetBytes))
 	maxWriteEnd := time.Now()
 
 	time.Sleep(burstDeadline * 2)
@@ -98,11 +98,11 @@ func TestBurstMonitoredConn(t *testing.T) {
 	dummy.SetRateLimits(262144, 2097152)
 
 	lastReadStart := time.Now()
-	conn.Read(make([]byte, upstreamThresholdBytes))
+	conn.Read(make([]byte, upstreamTargetBytes))
 	lastReadEnd := time.Now()
 
 	lastWriteStart := time.Now()
-	conn.Write(make([]byte, downstreamThresholdBytes))
+	conn.Write(make([]byte, downstreamTargetBytes))
 	lastWriteEnd := time.Now()
 
 	time.Sleep(burstDeadline * 2)
@@ -135,35 +135,35 @@ func TestBurstMonitoredConn(t *testing.T) {
 	for name, expectedValue := range map[string]int64{
 		"burst_upstream_first_offset":     int64(firstReadStart.Sub(baseTime) / time.Millisecond),
 		"burst_upstream_first_duration":   int64(firstReadEnd.Sub(firstReadStart) / time.Millisecond),
-		"burst_upstream_first_bytes":      upstreamThresholdBytes,
+		"burst_upstream_first_bytes":      upstreamTargetBytes,
 		"burst_upstream_first_rate":       131072,
 		"burst_upstream_last_offset":      int64(lastReadStart.Sub(baseTime) / time.Millisecond),
 		"burst_upstream_last_duration":    int64(lastReadEnd.Sub(lastReadStart) / time.Millisecond),
-		"burst_upstream_last_bytes":       upstreamThresholdBytes,
+		"burst_upstream_last_bytes":       upstreamTargetBytes,
 		"burst_upstream_last_rate":        262144,
 		"burst_upstream_min_offset":       int64(firstReadStart.Sub(baseTime) / time.Millisecond),
 		"burst_upstream_min_duration":     int64(firstReadEnd.Sub(firstReadStart) / time.Millisecond),
-		"burst_upstream_min_bytes":        upstreamThresholdBytes,
+		"burst_upstream_min_bytes":        upstreamTargetBytes,
 		"burst_upstream_min_rate":         131072,
 		"burst_upstream_max_offset":       int64(maxReadStart.Sub(baseTime) / time.Millisecond),
 		"burst_upstream_max_duration":     int64(maxReadEnd.Sub(maxReadStart) / time.Millisecond),
-		"burst_upstream_max_bytes":        upstreamThresholdBytes,
+		"burst_upstream_max_bytes":        upstreamTargetBytes,
 		"burst_upstream_max_rate":         524288,
 		"burst_downstream_first_offset":   int64(firstWriteStart.Sub(baseTime) / time.Millisecond),
 		"burst_downstream_first_duration": int64(firstWriteEnd.Sub(firstWriteStart) / time.Millisecond),
-		"burst_downstream_first_bytes":    downstreamThresholdBytes,
+		"burst_downstream_first_bytes":    downstreamTargetBytes,
 		"burst_downstream_first_rate":     1048576,
 		"burst_downstream_last_offset":    int64(lastWriteStart.Sub(baseTime) / time.Millisecond),
 		"burst_downstream_last_duration":  int64(lastWriteEnd.Sub(lastWriteStart) / time.Millisecond),
-		"burst_downstream_last_bytes":     downstreamThresholdBytes,
+		"burst_downstream_last_bytes":     downstreamTargetBytes,
 		"burst_downstream_last_rate":      2097152,
 		"burst_downstream_min_offset":     int64(firstWriteStart.Sub(baseTime) / time.Millisecond),
 		"burst_downstream_min_duration":   int64(firstWriteEnd.Sub(firstWriteStart) / time.Millisecond),
-		"burst_downstream_min_bytes":      downstreamThresholdBytes,
+		"burst_downstream_min_bytes":      downstreamTargetBytes,
 		"burst_downstream_min_rate":       1048576,
 		"burst_downstream_max_offset":     int64(maxWriteStart.Sub(baseTime) / time.Millisecond),
 		"burst_downstream_max_duration":   int64(maxWriteEnd.Sub(maxWriteStart) / time.Millisecond),
-		"burst_downstream_max_bytes":      downstreamThresholdBytes,
+		"burst_downstream_max_bytes":      downstreamTargetBytes,
 		"burst_downstream_max_rate":       5242880,
 	} {
 		value, ok := logFields[name]
