@@ -1378,8 +1378,8 @@ func (sshClient *sshClient) run(
 	if !p.IsNil() {
 		upstreamTargetBytes := int64(p.Int(parameters.ServerBurstUpstreamTargetBytes))
 		upstreamDeadline := p.Duration(parameters.ServerBurstUpstreamDeadline)
-		downstreamTargetBytes := int64(p.Int(parameters.ServerBurstUpstreamTargetBytes))
-		downstreamDeadline := p.Duration(parameters.ServerBurstUpstreamDeadline)
+		downstreamTargetBytes := int64(p.Int(parameters.ServerBurstDownstreamTargetBytes))
+		downstreamDeadline := p.Duration(parameters.ServerBurstDownstreamDeadline)
 
 		if (upstreamDeadline != 0 && upstreamTargetBytes != 0) ||
 			(downstreamDeadline != 0 && downstreamTargetBytes != 0) {
