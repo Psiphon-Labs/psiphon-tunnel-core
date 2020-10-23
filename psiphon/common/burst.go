@@ -252,7 +252,8 @@ func (conn *BurstMonitoredConn) updateBurst(
 
 	// Assumes the associated mutex is locked.
 
-	if operationEnd.Sub(currentBurst.startTime) > deadline {
+	if !currentBurst.isZero() &&
+		operationEnd.Sub(currentBurst.startTime) > deadline {
 		// Partial burst failed to reach the target, so discard it.
 		currentBurst.reset()
 	}

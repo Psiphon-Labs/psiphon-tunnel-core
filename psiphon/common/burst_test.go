@@ -176,8 +176,8 @@ func TestBurstMonitoredConn(t *testing.T) {
 			t.Errorf("missing expected metric type: %s (%T)", name, value)
 			continue
 		}
-		minAcceptable := int64(float64(expectedValue) * 0.95)
-		maxAcceptable := int64(float64(expectedValue) * 1.05)
+		minAcceptable := int64(float64(expectedValue) * 0.90)
+		maxAcceptable := int64(float64(expectedValue) * 1.10)
 		if valueInt64 < minAcceptable || valueInt64 > maxAcceptable {
 			t.Errorf("unexpected metric value: %s (%v <= %v <= %v)",
 				name, minAcceptable, valueInt64, maxAcceptable)
