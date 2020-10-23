@@ -88,6 +88,7 @@ func runServerReplayTest(
           "ServerProtocolPacketManipulations": {"%s" : ["test-packetman-spec"]},
           "ServerReplayPacketManipulation" : true,
           "ServerReplayFragmentor" : true,
+          "ServerReplayUnknownGeoIP" : true,
           "ServerReplayTTL" : "3s",
           "ServerReplayTargetWaitDuration" : "200ms",
           "ServerReplayTargetTunnelDuration" : "100ms",

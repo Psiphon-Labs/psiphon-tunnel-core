@@ -252,6 +252,7 @@ const (
 	FeedbackUploadTimeoutSeconds                     = "FeedbackUploadTimeoutSeconds"
 	ServerReplayPacketManipulation                   = "ServerReplayPacketManipulation"
 	ServerReplayFragmentor                           = "ServerReplayFragmentor"
+	ServerReplayUnknownGeoIP                         = "ServerReplayUnknownGeoIP"
 	ServerReplayTTL                                  = "ServerReplayTTL"
 	ServerReplayTargetWaitDuration                   = "ServerReplayTargetWaitDuration"
 	ServerReplayTargetTunnelDuration                 = "ServerReplayTargetTunnelDuration"
@@ -537,6 +538,7 @@ var defaultParameters = map[string]struct {
 
 	ServerReplayPacketManipulation:    {value: true, flags: serverSideOnly},
 	ServerReplayFragmentor:            {value: true, flags: serverSideOnly},
+	ServerReplayUnknownGeoIP:          {value: false, flags: serverSideOnly},
 	ServerReplayTTL:                   {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
 	ServerReplayTargetWaitDuration:    {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
 	ServerReplayTargetTunnelDuration:  {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},

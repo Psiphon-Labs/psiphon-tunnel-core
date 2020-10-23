@@ -135,6 +135,14 @@ func (r *ReplayCache) GetReplayTargetDuration(
 		return false, 0, 0
 	}
 
+	if !p.Bool(parameters.ServerReplayUnknownGeoIP) &&
+		geoIPData.Country == GEOIP_UNKNOWN_VALUE &&
+		geoIPData.ISP == GEOIP_UNKNOWN_VALUE {
+		// Unless configured otherwise, skip replay for unknown GeoIP, since clients
+		// may not have equivilent network conditions.
+		return false, 0, 0
+	}
+
 	TTL := p.Duration(parameters.ServerReplayTTL)
 
 	if TTL == 0 {
