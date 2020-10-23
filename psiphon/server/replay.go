@@ -64,6 +64,14 @@ type replayCacheMetrics struct {
 	DeleteReplayCount  int64
 }
 
+type replayParameters struct {
+	replayPacketManipulation   bool
+	packetManipulationSpecName string
+	replayFragmentor           bool
+	fragmentorSeed             *prng.Seed
+	failedCount                int
+}
+
 // NewReplayCache creates a new ReplayCache.
 func NewReplayCache(support *SupportServices) *ReplayCache {
 	return &ReplayCache{
@@ -326,7 +334,8 @@ func (r *ReplayCache) FailedReplayParameters(
 	if (parameters.replayPacketManipulation &&
 		parameters.packetManipulationSpecName != packetManipulationSpecName) ||
 		(parameters.replayFragmentor &&
-			*parameters.fragmentorSeed != *fragmentorSeed) {
+			(fragmentorSeed == nil ||
+				*parameters.fragmentorSeed != *fragmentorSeed)) {
 		return
 	}
 
@@ -349,12 +358,4 @@ func (r *ReplayCache) makeKey(
 	return fmt.Sprintf(
 		"%s-%s-%s",
 		tunnelProtocol, geoIPData.Country, geoIPData.ISP)
-}
-
-type replayParameters struct {
-	replayPacketManipulation   bool
-	packetManipulationSpecName string
-	replayFragmentor           bool
-	fragmentorSeed             *prng.Seed
-	failedCount                int
 }
