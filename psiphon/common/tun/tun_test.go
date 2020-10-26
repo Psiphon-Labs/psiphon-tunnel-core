@@ -95,7 +95,7 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 	// and routing config, see the changes made in fixBindToDevice.
 
 	if TCP_RELAY_TOTAL_SIZE%TCP_RELAY_CHUNK_SIZE != 0 {
-		t.Fatalf("startTestTCPServer failed: invalid relay size")
+		t.Fatalf("invalid relay size")
 	}
 
 	MTU := DEFAULT_MTU

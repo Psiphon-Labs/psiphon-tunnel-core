@@ -57,6 +57,9 @@ func testPacketManipulator(useIPv6 bool, t *testing.T) {
 	network := "tcp4"
 	address := net.JoinHostPort(ipv4.String(), "0")
 	if useIPv6 {
+		if ipv6 == nil {
+			t.Skipf("test unsupported: no IP address")
+		}
 		network = "tcp6"
 		address = net.JoinHostPort(ipv6.String(), "0")
 	}
