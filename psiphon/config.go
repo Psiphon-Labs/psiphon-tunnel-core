@@ -390,6 +390,20 @@ type Config struct {
 	// is used. This value is typical overridden for testing.
 	FetchUpgradeRetryPeriodMilliseconds *int
 
+	// FeedbackUploadURLs is a list of SecureTransferURLs which specify
+	// locations where feedback data can be uploaded, pairing with each
+	// location a public key with which to encrypt the feedback data. This
+	// value is supplied by and depends on the Psiphon Network, and is
+	// typically embedded in the client binary. At least one TransferURL must
+	// have OnlyAfterAttempts = 0.
+	FeedbackUploadURLs parameters.TransferURLs
+
+	// FeedbackEncryptionPublicKey is a default base64-encoded, RSA public key
+	// value used to encrypt feedback data. Used when uploading feedback with a
+	// TransferURL which has no public key value configured, i.e.
+	// B64EncodedPublicKey = "".
+	FeedbackEncryptionPublicKey string
+
 	// TrustedCACertificatesFilename specifies a file containing trusted CA
 	// certs. When set, this toggles use of the trusted CA certs, specified in
 	// TrustedCACertificatesFilename, for tunneled TLS connections that expect
@@ -480,6 +494,173 @@ type Config struct {
 	// Required for the exchange functionality.
 	ExchangeObfuscationKey string
 
+	// MigrateHomepageNoticesFilename migrates a homepage file from the path
+	// previously configured with setNoticeFiles to the new path for homepage
+	// files under the data root directory. The file specified by this config
+	// value will be moved to config.GetHomePageFilename().
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
+	//
+	// If not set, no migration operation will be performed.
+	MigrateHomepageNoticesFilename string
+
+	// MigrateRotatingNoticesFilename migrates notice files from the path
+	// previously configured with setNoticeFiles to the new path for notice
+	// files under the data root directory.
+	//
+	// MigrateRotatingNoticesFilename will be moved to
+	// config.GetNoticesFilename().
+	//
+	// MigrateRotatingNoticesFilename.1 will be moved to
+	// config.GetOldNoticesFilename().
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
+	//
+	// If not set, no migration operation will be performed.
+	MigrateRotatingNoticesFilename string
+
+	// MigrateDataStoreDirectory indicates the location of the datastore
+	// directory, as previously configured with the deprecated
+	// DataStoreDirectory config field. Datastore files found in the specified
+	// directory will be moved under the data root directory.
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
+	MigrateDataStoreDirectory string
+
+	// MigrateRemoteServerListDownloadFilename indicates the location of
+	// remote server list download files. The remote server list files found at
+	// the specified path will be moved under the data root directory.
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
+	MigrateRemoteServerListDownloadFilename string
+
+	// MigrateObfuscatedServerListDownloadDirectory indicates the location of
+	// the obfuscated server list downloads directory, as previously configured
+	// with ObfuscatedServerListDownloadDirectory. Obfuscated server list
+	// download files found in the specified directory will be moved under the
+	// data root directory.
+	//
+	// Warning: if the directory is empty after obfuscated server
+	// list files are moved, then it will be deleted.
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
+	MigrateObfuscatedServerListDownloadDirectory string
+
+	// MigrateUpgradeDownloadFilename indicates the location of downloaded
+	// application upgrade files. Downloaded upgrade files found at the
+	// specified path will be moved under the data root directory.
+	//
+	// Note: see comment for config.Commit() for a description of how file
+	// migrations are performed.
+	MigrateUpgradeDownloadFilename string
+
+	//
+	// The following parameters are deprecated.
+	//
+
+	// DataStoreDirectory is the directory in which to store the persistent
+	// database, which contains information such as server entries. By
+	// default, current working directory.
+	//
+	// Deprecated:
+	// Use MigrateDataStoreDirectory. When MigrateDataStoreDirectory
+	// is set, this parameter is ignored.
+	//
+	// DataStoreDirectory has been subsumed by the new data root directory,
+	// which is configured with DataRootDirectory. If set, datastore files
+	// found in the specified directory will be moved under the data root
+	// directory.
+	DataStoreDirectory string
+
+	// RemoteServerListDownloadFilename specifies a target filename for
+	// storing the remote server list download. Data is stored in co-located
+	// files (RemoteServerListDownloadFilename.part*) to allow for resumable
+	// downloading.
+	//
+	// Deprecated:
+	// Use MigrateRemoteServerListDownloadFilename. When
+	// MigrateRemoteServerListDownloadFilename is set, this parameter is
+	// ignored.
+	//
+	// If set, remote server list download files found at the specified path
+	// will be moved under the data root directory.
+	RemoteServerListDownloadFilename string
+
+	// ObfuscatedServerListDownloadDirectory specifies a target directory for
+	// storing the obfuscated remote server list downloads. Data is stored in
+	// co-located files (<OSL filename>.part*) to allow for resumable
+	// downloading.
+	//
+	// Deprecated:
+	// Use MigrateObfuscatedServerListDownloadDirectory. When
+	// MigrateObfuscatedServerListDownloadDirectory is set, this parameter is
+	// ignored.
+	//
+	// If set, obfuscated server list download files found at the specified path
+	// will be moved under the data root directory.
+	ObfuscatedServerListDownloadDirectory string
+
+	// UpgradeDownloadFilename is the local target filename for an upgrade
+	// download. This parameter is required when UpgradeDownloadURLs (or
+	// UpgradeDownloadUrl) is specified. Data is stored in co-located files
+	// (UpgradeDownloadFilename.part*) to allow for resumable downloading.
+	//
+	// Deprecated:
+	// Use MigrateUpgradeDownloadFilename. When MigrateUpgradeDownloadFilename
+	// is set, this parameter is ignored.
+	//
+	// If set, upgrade download files found at the specified path will be moved
+	// under the data root directory.
+	UpgradeDownloadFilename string
+
+	// TunnelProtocol indicates which protocol to use. For the default, "",
+	// all protocols are used.
+	//
+	// Deprecated: Use LimitTunnelProtocols. When LimitTunnelProtocols is not
+	// nil, this parameter is ignored.
+	TunnelProtocol string
+
+	// Deprecated: Use CustomHeaders. When CustomHeaders is not nil, this
+	// parameter is ignored.
+	UpstreamProxyCustomHeaders http.Header
+
+	// RemoteServerListUrl is a URL which specifies a location to fetch out-
+	// of-band server entries. This facility is used when a tunnel cannot be
+	// established to known servers. This value is supplied by and depends on
+	// the Psiphon Network, and is typically embedded in the client binary.
+	//
+	// Deprecated: Use RemoteServerListURLs. When RemoteServerListURLs is not
+	// nil, this parameter is ignored.
+	RemoteServerListUrl string
+
+	// ObfuscatedServerListRootURL is a URL which specifies the root location
+	// from which to fetch obfuscated server list files. This value is
+	// supplied by and depends on the Psiphon Network, and is typically
+	// embedded in the client binary.
+	//
+	// Deprecated: Use ObfuscatedServerListRootURLs. When
+	// ObfuscatedServerListRootURLs is not nil, this parameter is ignored.
+	ObfuscatedServerListRootURL string
+
+	// UpgradeDownloadUrl specifies a URL from which to download a host client
+	// upgrade file, when one is available. The core tunnel controller
+	// provides a resumable download facility which downloads this resource
+	// and emits a notice when complete. This value is supplied by and depends
+	// on the Psiphon Network, and is typically embedded in the client binary.
+	//
+	// Deprecated: Use UpgradeDownloadURLs. When UpgradeDownloadURLs is not
+	// nil, this parameter is ignored.
+	UpgradeDownloadUrl string
+
+	//
+	// The following parameters are for testing purposes.
+	//
+
 	// TransformHostNameProbability is for testing purposes.
 	TransformHostNameProbability *float64
 
@@ -541,188 +722,22 @@ type Config struct {
 	SelectRandomizedTLSProfileProbability *float64
 	NoDefaultTLSSessionIDProbability      *float64
 
+	// ClientBurstUpstreamTargetBytes and other burst metric fields are for
+	// testing purposes.
+	ClientBurstUpstreamTargetBytes            *int
+	ClientBurstUpstreamDeadlineMilliseconds   *int
+	ClientBurstDownstreamTargetBytes          *int
+	ClientBurstDownstreamDeadlineMilliseconds *int
+
 	// ApplicationParameters is for testing purposes.
 	ApplicationParameters parameters.KeyValues
 
-	// MigrateHomepageNoticesFilename migrates a homepage file from the path
-	// previously configured with setNoticeFiles to the new path for homepage
-	// files under the data root directory. The file specified by this config
-	// value will be moved to config.GetHomePageFilename().
+	// params is the active parameters.Parameters with defaults, config values,
+	// and, optionally, tactics applied.
 	//
-	// Note: see comment for config.Commit() for a description of how file
-	// migrations are performed.
-	//
-	// If not set, no migration operation will be performed.
-	MigrateHomepageNoticesFilename string
-
-	// MigrateRotatingNoticesFilename migrates notice files from the path
-	// previously configured with setNoticeFiles to the new path for notice
-	// files under the data root directory.
-	//
-	// MigrateRotatingNoticesFilename will be moved to
-	// config.GetNoticesFilename().
-	//
-	// MigrateRotatingNoticesFilename.1 will be moved to
-	// config.GetOldNoticesFilename().
-	//
-	// Note: see comment for config.Commit() for a description of how file
-	// migrations are performed.
-	//
-	// If not set, no migration operation will be performed.
-	MigrateRotatingNoticesFilename string
-
-	// DataStoreDirectory is the directory in which to store the persistent
-	// database, which contains information such as server entries. By
-	// default, current working directory.
-	//
-	// Deprecated:
-	// Use MigrateDataStoreDirectory. When MigrateDataStoreDirectory
-	// is set, this parameter is ignored.
-	//
-	// DataStoreDirectory has been subsumed by the new data root directory,
-	// which is configured with DataRootDirectory. If set, datastore files
-	// found in the specified directory will be moved under the data root
-	// directory.
-	DataStoreDirectory string
-
-	// MigrateDataStoreDirectory indicates the location of the datastore
-	// directory, as previously configured with the deprecated
-	// DataStoreDirectory config field. Datastore files found in the specified
-	// directory will be moved under the data root directory.
-	//
-	// Note: see comment for config.Commit() for a description of how file
-	// migrations are performed.
-	MigrateDataStoreDirectory string
-
-	// RemoteServerListDownloadFilename specifies a target filename for
-	// storing the remote server list download. Data is stored in co-located
-	// files (RemoteServerListDownloadFilename.part*) to allow for resumable
-	// downloading.
-	//
-	// Deprecated:
-	// Use MigrateRemoteServerListDownloadFilename. When
-	// MigrateRemoteServerListDownloadFilename is set, this parameter is
-	// ignored.
-	//
-	// If set, remote server list download files found at the specified path
-	// will be moved under the data root directory.
-	RemoteServerListDownloadFilename string
-
-	// MigrateRemoteServerListDownloadFilename indicates the location of
-	// remote server list download files. The remote server list files found at
-	// the specified path will be moved under the data root directory.
-	//
-	// Note: see comment for config.Commit() for a description of how file
-	// migrations are performed.
-	MigrateRemoteServerListDownloadFilename string
-
-	// ObfuscatedServerListDownloadDirectory specifies a target directory for
-	// storing the obfuscated remote server list downloads. Data is stored in
-	// co-located files (<OSL filename>.part*) to allow for resumable
-	// downloading.
-	//
-	// Deprecated:
-	// Use MigrateObfuscatedServerListDownloadDirectory. When
-	// MigrateObfuscatedServerListDownloadDirectory is set, this parameter is
-	// ignored.
-	//
-	// If set, obfuscated server list download files found at the specified path
-	// will be moved under the data root directory.
-	ObfuscatedServerListDownloadDirectory string
-
-	// MigrateObfuscatedServerListDownloadDirectory indicates the location of
-	// the obfuscated server list downloads directory, as previously configured
-	// with ObfuscatedServerListDownloadDirectory. Obfuscated server list
-	// download files found in the specified directory will be moved under the
-	// data root directory.
-	//
-	// Warning: if the directory is empty after obfuscated server
-	// list files are moved, then it will be deleted.
-	//
-	// Note: see comment for config.Commit() for a description of how file
-	// migrations are performed.
-	MigrateObfuscatedServerListDownloadDirectory string
-
-	// UpgradeDownloadFilename is the local target filename for an upgrade
-	// download. This parameter is required when UpgradeDownloadURLs (or
-	// UpgradeDownloadUrl) is specified. Data is stored in co-located files
-	// (UpgradeDownloadFilename.part*) to allow for resumable downloading.
-	//
-	// Deprecated:
-	// Use MigrateUpgradeDownloadFilename. When MigrateUpgradeDownloadFilename
-	// is set, this parameter is ignored.
-	//
-	// If set, upgrade download files found at the specified path will be moved
-	// under the data root directory.
-	UpgradeDownloadFilename string
-
-	// MigrateUpgradeDownloadFilename indicates the location of downloaded
-	// application upgrade files. Downloaded upgrade files found at the
-	// specified path will be moved under the data root directory.
-	//
-	// Note: see comment for config.Commit() for a description of how file
-	// migrations are performed.
-	MigrateUpgradeDownloadFilename string
-
-	// TunnelProtocol indicates which protocol to use. For the default, "",
-	// all protocols are used.
-	//
-	// Deprecated: Use LimitTunnelProtocols. When LimitTunnelProtocols is not
-	// nil, this parameter is ignored.
-	TunnelProtocol string
-
-	// Deprecated: Use CustomHeaders. When CustomHeaders is not nil, this
-	// parameter is ignored.
-	UpstreamProxyCustomHeaders http.Header
-
-	// RemoteServerListUrl is a URL which specifies a location to fetch out-
-	// of-band server entries. This facility is used when a tunnel cannot be
-	// established to known servers. This value is supplied by and depends on
-	// the Psiphon Network, and is typically embedded in the client binary.
-	//
-	// Deprecated: Use RemoteServerListURLs. When RemoteServerListURLs is not
-	// nil, this parameter is ignored.
-	RemoteServerListUrl string
-
-	// ObfuscatedServerListRootURL is a URL which specifies the root location
-	// from which to fetch obfuscated server list files. This value is
-	// supplied by and depends on the Psiphon Network, and is typically
-	// embedded in the client binary.
-	//
-	// Deprecated: Use ObfuscatedServerListRootURLs. When
-	// ObfuscatedServerListRootURLs is not nil, this parameter is ignored.
-	ObfuscatedServerListRootURL string
-
-	// UpgradeDownloadUrl specifies a URL from which to download a host client
-	// upgrade file, when one is available. The core tunnel controller
-	// provides a resumable download facility which downloads this resource
-	// and emits a notice when complete. This value is supplied by and depends
-	// on the Psiphon Network, and is typically embedded in the client binary.
-	//
-	// Deprecated: Use UpgradeDownloadURLs. When UpgradeDownloadURLs is not
-	// nil, this parameter is ignored.
-	UpgradeDownloadUrl string
-
-	// FeedbackUploadURLs is a list of SecureTransferURLs which specify
-	// locations where feedback data can be uploaded, pairing with each
-	// location a public key with which to encrypt the feedback data. This
-	// value is supplied by and depends on the Psiphon Network, and is
-	// typically embedded in the client binary. At least one TransferURL must
-	// have OnlyAfterAttempts = 0.
-	FeedbackUploadURLs parameters.TransferURLs
-
-	// FeedbackEncryptionPublicKey is a default base64-encoded, RSA public key
-	// value used to encrypt feedback data. Used when uploading feedback with a
-	// TransferURL which has no public key value configured, i.e.
-	// B64EncodedPublicKey = "".
-	FeedbackEncryptionPublicKey string
-
-	// clientParameters is the active ClientParameters with defaults, config
-	// values, and, optionally, tactics applied.
-	//
-	// New tactics must be applied by calling Config.SetClientParameters;
-	// calling clientParameters.Set directly will fail to add config values.
-	clientParameters *parameters.ClientParameters
+	// New tactics must be applied by calling Config.SetParameters; calling
+	// params.Set directly will fail to add config values.
+	params *parameters.Parameters
 
 	dialParametersHash []byte
 
@@ -1062,9 +1077,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid SessionID")
 	}
 
-	config.clientParameters, err = parameters.NewClientParameters(
+	config.params, err = parameters.NewParameters(
 		func(err error) {
-			NoticeWarning("ClientParameters getValue failed: %s", err)
+			NoticeWarning("Parameters getValue failed: %s", err)
 		})
 	if err != nil {
 		return errors.Trace(err)
@@ -1076,9 +1091,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
-	// clientParameters.Set will validate the config fields applied to parameters.
+	// parametersParameters.Set will validate the config fields applied to
+	// parametersParameters.
 
-	err = config.SetClientParameters("", false, nil)
+	err = config.SetParameters("", false, nil)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1180,12 +1196,12 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	return nil
 }
 
-// GetClientParameters returns the current client parameters.
-func (config *Config) GetClientParameters() *parameters.ClientParameters {
-	return config.clientParameters
+// GetParameters returns the current parameters.Parameters.
+func (config *Config) GetParameters() *parameters.Parameters {
+	return config.params
 }
 
-// SetClientParameters resets Config.clientParameters to the default values,
+// SetParameters resets the parameters.Parameters to the default values,
 // applies any config file values, and then applies the input parameters (from
 // tactics, etc.)
 //
@@ -1193,19 +1209,19 @@ func (config *Config) GetClientParameters() *parameters.ClientParameters {
 // this will validate the values and should fail. Set skipOnError to true when
 // applying tactics to ignore invalid or unknown parameter values from tactics.
 //
-// In the case of applying tactics, do not call Config.clientParameters.Set
+// In the case of applying tactics, do not call Config.parameters.Set
 // directly as this will not first apply config values.
 //
-// If there is an error, the existing Config.clientParameters are left
+// If there is an error, the existing Config.parameters are left
 // entirely unmodified.
-func (config *Config) SetClientParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
+func (config *Config) SetParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
 
 	setParameters := []map[string]interface{}{config.makeConfigParameters()}
 	if applyParameters != nil {
 		setParameters = append(setParameters, applyParameters)
 	}
 
-	counts, err := config.clientParameters.Set(tag, skipOnError, setParameters...)
+	counts, err := config.params.Set(tag, skipOnError, setParameters...)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1213,7 +1229,7 @@ func (config *Config) SetClientParameters(tag string, skipOnError bool, applyPar
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
 
 	// Emit certain individual parameter values for quick reference in diagnostics.
-	p := config.clientParameters.Get()
+	p := config.params.Get()
 	NoticeInfo(
 		"NetworkLatencyMultiplier Min/Max/Lambda: %f/%f/%f",
 		p.Float(parameters.NetworkLatencyMultiplierMin),
@@ -1446,6 +1462,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.UpgradeDownloadURLs] = config.UpgradeDownloadURLs
 	}
 
+	if len(config.FeedbackUploadURLs) > 0 {
+		applyParameters[parameters.FeedbackUploadURLs] = config.FeedbackUploadURLs
+	}
+
+	if config.FeedbackEncryptionPublicKey != "" {
+		applyParameters[parameters.FeedbackEncryptionPublicKey] = config.FeedbackEncryptionPublicKey
+	}
+
 	applyParameters[parameters.TunnelRateLimits] = config.RateLimits
 
 	if config.TransformHostNameProbability != nil {
@@ -1580,16 +1604,24 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.NoDefaultTLSSessionIDProbability] = *config.NoDefaultTLSSessionIDProbability
 	}
 
+	if config.ClientBurstUpstreamTargetBytes != nil {
+		applyParameters[parameters.ClientBurstUpstreamTargetBytes] = *config.ClientBurstUpstreamTargetBytes
+	}
+
+	if config.ClientBurstUpstreamDeadlineMilliseconds != nil {
+		applyParameters[parameters.ClientBurstUpstreamDeadline] = fmt.Sprintf("%dms", *config.ClientBurstUpstreamDeadlineMilliseconds)
+	}
+
+	if config.ClientBurstDownstreamTargetBytes != nil {
+		applyParameters[parameters.ClientBurstDownstreamTargetBytes] = *config.ClientBurstDownstreamTargetBytes
+	}
+
+	if config.ClientBurstDownstreamDeadlineMilliseconds != nil {
+		applyParameters[parameters.ClientBurstDownstreamDeadline] = fmt.Sprintf("%dms", *config.ClientBurstDownstreamDeadlineMilliseconds)
+	}
+
 	if config.ApplicationParameters != nil {
 		applyParameters[parameters.ApplicationParameters] = config.ApplicationParameters
-	}
-
-	if len(config.FeedbackUploadURLs) > 0 {
-		applyParameters[parameters.FeedbackUploadURLs] = config.FeedbackUploadURLs
-	}
-
-	if config.FeedbackEncryptionPublicKey != "" {
-		applyParameters[parameters.FeedbackEncryptionPublicKey] = config.FeedbackEncryptionPublicKey
 	}
 
 	return applyParameters

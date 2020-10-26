@@ -64,9 +64,9 @@ func TestInterruptDials(t *testing.T) {
 
 	// TODO: test upstreamproxy.ProxyAuthTransport
 
-	clientParameters, err := parameters.NewClientParameters(nil)
+	params, err := parameters.NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	seed, err := prng.NewSeed()
@@ -77,7 +77,7 @@ func TestInterruptDials(t *testing.T) {
 	makeDialers["TLS"] = func(string) Dialer {
 		return NewCustomTLSDialer(
 			&CustomTLSConfig{
-				ClientParameters:         clientParameters,
+				Parameters:               params,
 				Dial:                     NewTCPDialer(&DialConfig{}),
 				RandomizedTLSProfileSeed: seed,
 			})

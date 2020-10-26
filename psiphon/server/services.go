@@ -71,7 +71,7 @@ func RunServices(configJSON []byte) (retErr error) {
 
 	loggingInitialized = true
 
-	supportServices, err := NewSupportServices(config)
+	support, err := NewSupportServices(config)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -84,20 +84,20 @@ func RunServices(configJSON []byte) (retErr error) {
 	shutdownBroadcast := make(chan struct{})
 	errorChannel := make(chan error, 1)
 
-	tunnelServer, err := NewTunnelServer(supportServices, shutdownBroadcast)
+	tunnelServer, err := NewTunnelServer(support, shutdownBroadcast)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	supportServices.TunnelServer = tunnelServer
+	support.TunnelServer = tunnelServer
 
 	if config.RunPacketTunnel {
 
 		packetTunnelServer, err := tun.NewServer(&tun.ServerConfig{
 			Logger:                      CommonLogger(log),
 			SudoNetworkConfigCommands:   config.PacketTunnelSudoNetworkConfigCommands,
-			GetDNSResolverIPv4Addresses: supportServices.DNSResolver.GetAllIPv4,
-			GetDNSResolverIPv6Addresses: supportServices.DNSResolver.GetAllIPv6,
+			GetDNSResolverIPv4Addresses: support.DNSResolver.GetAllIPv4,
+			GetDNSResolverIPv6Addresses: support.DNSResolver.GetAllIPv6,
 			EgressInterface:             config.PacketTunnelEgressInterface,
 			DownstreamPacketQueueSize:   config.PacketTunnelDownstreamPacketQueueSize,
 			SessionIdleExpirySeconds:    config.PacketTunnelSessionIdleExpirySeconds,
@@ -107,12 +107,12 @@ func RunServices(configJSON []byte) (retErr error) {
 			return errors.Trace(err)
 		}
 
-		supportServices.PacketTunnelServer = packetTunnelServer
+		support.PacketTunnelServer = packetTunnelServer
 	}
 
 	if config.RunPacketManipulator {
 
-		packetManipulatorConfig, err := makePacketManipulatorConfig(supportServices)
+		packetManipulatorConfig, err := makePacketManipulatorConfig(support)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -122,7 +122,7 @@ func RunServices(configJSON []byte) (retErr error) {
 			return errors.Trace(err)
 		}
 
-		supportServices.PacketManipulator = packetManipulator
+		support.PacketManipulator = packetManipulator
 	}
 
 	// After this point, errors should be delivered to the errors channel and
@@ -130,17 +130,17 @@ func RunServices(configJSON []byte) (retErr error) {
 	// all workers are synchronously stopped.
 
 	if config.RunPacketTunnel {
-		supportServices.PacketTunnelServer.Start()
+		support.PacketTunnelServer.Start()
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
 			<-shutdownBroadcast
-			supportServices.PacketTunnelServer.Stop()
+			support.PacketTunnelServer.Stop()
 		}()
 	}
 
 	if config.RunPacketManipulator {
-		err := supportServices.PacketManipulator.Start()
+		err := support.PacketManipulator.Start()
 		if err != nil {
 			select {
 			case errorChannel <- err:
@@ -151,7 +151,7 @@ func RunServices(configJSON []byte) (retErr error) {
 			go func() {
 				defer waitGroup.Done()
 				<-shutdownBroadcast
-				supportServices.PacketManipulator.Stop()
+				support.PacketManipulator.Stop()
 			}()
 		}
 	}
@@ -167,7 +167,7 @@ func RunServices(configJSON []byte) (retErr error) {
 				case <-shutdownBroadcast:
 					return
 				case <-ticker.C:
-					logServerLoad(tunnelServer)
+					logServerLoad(support)
 				}
 			}
 		}()
@@ -194,7 +194,7 @@ func RunServices(configJSON []byte) (retErr error) {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			err := RunWebServer(supportServices, shutdownBroadcast)
+			err := RunWebServer(support, shutdownBroadcast)
 			select {
 			case errorChannel <- err:
 			default:
@@ -222,7 +222,7 @@ func RunServices(configJSON []byte) (retErr error) {
 		for {
 			select {
 			case <-signalProcessProfiles:
-				outputProcessProfiles(supportServices.Config, "")
+				outputProcessProfiles(support.Config, "")
 			case <-shutdownBroadcast:
 				return
 			}
@@ -269,7 +269,7 @@ loop:
 				// Run the profile dump in a goroutine and don't block this loop. Shutdown
 				// doesn't wait for any running outputProcessProfiles to complete.
 				go func() {
-					outputProcessProfiles(supportServices.Config, "stop_establish_tunnels")
+					outputProcessProfiles(support.Config, "stop_establish_tunnels")
 				}()
 			}
 
@@ -277,7 +277,7 @@ loop:
 			tunnelServer.SetEstablishTunnels(true)
 
 		case <-reloadSupportServicesSignal:
-			supportServices.Reload()
+			support.Reload()
 
 		case <-logServerLoadSignal:
 			// Signal profiles writes first to ensure some diagnostics are
@@ -287,7 +287,7 @@ loop:
 			case signalProcessProfiles <- struct{}{}:
 			default:
 			}
-			logServerLoad(tunnelServer)
+			logServerLoad(support)
 
 		case <-systemStopSignal:
 			log.WithTrace().Info("shutdown by system")
@@ -312,7 +312,7 @@ loop:
 				return
 			case <-ticker.C:
 				filenameSuffix := fmt.Sprintf("delayed_shutdown_%ds", i)
-				outputProcessProfiles(supportServices.Config, filenameSuffix)
+				outputProcessProfiles(support.Config, filenameSuffix)
 			}
 		}
 	}()
@@ -365,17 +365,23 @@ func outputProcessProfiles(config *Config, filenameSuffix string) {
 	}
 }
 
-func logServerLoad(server *TunnelServer) {
-
-	protocolStats, regionStats := server.GetLoadStats()
+func logServerLoad(support *SupportServices) {
 
 	serverLoad := getRuntimeMetrics()
 
 	serverLoad["event_name"] = "server_load"
 
-	establishTunnels, establishLimitedCount := server.GetEstablishTunnelsMetrics()
+	establishTunnels, establishLimitedCount :=
+		support.TunnelServer.GetEstablishTunnelsMetrics()
 	serverLoad["establish_tunnels"] = establishTunnels
 	serverLoad["establish_tunnels_limited_count"] = establishLimitedCount
+
+	serverLoad.Add(support.ReplayCache.GetMetrics())
+
+	serverLoad.Add(support.ServerTacticsParametersCache.GetMetrics())
+
+	protocolStats, regionStats :=
+		support.TunnelServer.GetLoadStats()
 
 	for protocol, stats := range protocolStats {
 		serverLoad[protocol] = stats
@@ -424,17 +430,19 @@ func logIrregularTunnel(
 // components, which allows these data components to be refreshed
 // without restarting the server process.
 type SupportServices struct {
-	Config             *Config
-	TrafficRulesSet    *TrafficRulesSet
-	OSLConfig          *osl.Config
-	PsinetDatabase     *psinet.Database
-	GeoIPService       *GeoIPService
-	DNSResolver        *DNSResolver
-	TunnelServer       *TunnelServer
-	PacketTunnelServer *tun.Server
-	TacticsServer      *tactics.Server
-	Blocklist          *Blocklist
-	PacketManipulator  *packetman.Manipulator
+	Config                       *Config
+	TrafficRulesSet              *TrafficRulesSet
+	OSLConfig                    *osl.Config
+	PsinetDatabase               *psinet.Database
+	GeoIPService                 *GeoIPService
+	DNSResolver                  *DNSResolver
+	TunnelServer                 *TunnelServer
+	PacketTunnelServer           *tun.Server
+	TacticsServer                *tactics.Server
+	Blocklist                    *Blocklist
+	PacketManipulator            *packetman.Manipulator
+	ReplayCache                  *ReplayCache
+	ServerTacticsParametersCache *ServerTacticsParametersCache
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -480,7 +488,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		return nil, errors.Trace(err)
 	}
 
-	return &SupportServices{
+	support := &SupportServices{
 		Config:          config,
 		TrafficRulesSet: trafficRulesSet,
 		OSLConfig:       oslConfig,
@@ -489,7 +497,14 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		DNSResolver:     dnsResolver,
 		TacticsServer:   tacticsServer,
 		Blocklist:       blocklist,
-	}, nil
+	}
+
+	support.ReplayCache = NewReplayCache(support)
+
+	support.ServerTacticsParametersCache =
+		NewServerTacticsParametersCache(support)
+
+	return support, nil
 }
 
 // Reload reinitializes traffic rules, psinet database, and geo IP database
@@ -510,15 +525,13 @@ func (support *SupportServices) Reload() {
 	// reload; new tactics will be obtained on the next client handshake or
 	// tactics request.
 
-	// Take these actions only after the corresponding Reloader has reloaded.
-	// In both the traffic rules and OSL cases, there is some impact from state
-	// reset, so the reset should be avoided where possible.
-	reloadPostActions := map[common.Reloader]func(){
-		support.TrafficRulesSet: func() { support.TunnelServer.ResetAllClientTrafficRules() },
-		support.OSLConfig:       func() { support.TunnelServer.ResetAllClientOSLConfigs() },
-	}
-	if support.Config.RunPacketManipulator {
-		reloadPostActions[support.TacticsServer] = func() {
+	reloadTactics := func() {
+
+		// Don't use stale tactics.
+		support.ReplayCache.Flush()
+		support.ServerTacticsParametersCache.Flush()
+
+		if support.Config.RunPacketManipulator {
 			err := reloadPacketManipulationSpecs(support)
 			if err != nil {
 				log.WithTraceFields(
@@ -526,6 +539,15 @@ func (support *SupportServices) Reload() {
 					"failed to reload packet manipulation specs")
 			}
 		}
+	}
+
+	// Take these actions only after the corresponding Reloader has reloaded.
+	// In both the traffic rules and OSL cases, there is some impact from state
+	// reset, so the reset should be avoided where possible.
+	reloadPostActions := map[common.Reloader]func(){
+		support.TrafficRulesSet: func() { support.TunnelServer.ResetAllClientTrafficRules() },
+		support.OSLConfig:       func() { support.TunnelServer.ResetAllClientOSLConfigs() },
+		support.TacticsServer:   reloadTactics,
 	}
 
 	for _, reloader := range reloaders {

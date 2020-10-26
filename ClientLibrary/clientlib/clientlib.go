@@ -81,9 +81,9 @@ type PsiphonTunnel struct {
 	SOCKSProxyPort int
 }
 
-// ClientParametersDelta allows for fine-grained modification of parameters.ClientParameters.
+// ParametersDelta allows for fine-grained modification of parameters.Parameters.
 // NOTE: Ordinary users of this library should never need this.
-type ClientParametersDelta map[string]interface{}
+type ParametersDelta map[string]interface{}
 
 // NoticeEvent represents the notices emitted by tunnel core. It will be passed to
 // noticeReceiver, if supplied.
@@ -110,14 +110,14 @@ var ErrTimeout = std_errors.New("clientlib: tunnel establishment timeout")
 //
 // params are config values that typically need to be overridden at runtime.
 //
-// paramsDelta contains changes that will be applied to the ClientParameters.
+// paramsDelta contains changes that will be applied to the Parameters.
 // NOTE: Ordinary users of this library should never need this and should pass nil.
 //
 // noticeReceiver, if non-nil, will be called for each notice emitted by tunnel core.
 // NOTE: Ordinary users of this library should never need this and should pass nil.
 func StartTunnel(ctx context.Context,
 	configJSON []byte, embeddedServerEntryList string,
-	params Parameters, paramsDelta ClientParametersDelta,
+	params Parameters, paramsDelta ParametersDelta,
 	noticeReceiver func(NoticeEvent)) (tunnel *PsiphonTunnel, retErr error) {
 
 	config, err := psiphon.LoadConfig(configJSON)
@@ -154,19 +154,19 @@ func StartTunnel(ctx context.Context,
 		}
 	} // else use the value in the config
 
-	// config.Commit must be called before calling config.SetClientParameters
+	// config.Commit must be called before calling config.SetParameters
 	// or attempting to connect.
 	err = config.Commit(true)
 	if err != nil {
 		return nil, errors.TraceMsg(err, "config.Commit failed")
 	}
 
-	// If supplied, apply the client parameters delta
+	// If supplied, apply the parameters delta
 	if len(paramsDelta) > 0 {
-		err = config.SetClientParameters("", false, paramsDelta)
+		err = config.SetParameters("", false, paramsDelta)
 		if err != nil {
 			return nil, errors.TraceMsg(
-				err, fmt.Sprintf("SetClientParameters failed for delta: %v", paramsDelta))
+				err, fmt.Sprintf("SetParameters failed for delta: %v", paramsDelta))
 		}
 	}
 

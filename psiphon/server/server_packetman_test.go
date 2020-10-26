@@ -44,3 +44,7 @@ func TestServerPacketManipulation(t *testing.T) {
 			doPacketManipulation: true,
 		})
 }
+
+func TestServerPacketManipulationReplay(t *testing.T) {
+	runServerReplayTests(t, true)
+}

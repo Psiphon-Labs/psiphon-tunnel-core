@@ -879,6 +879,13 @@ func NoticeServerAlert(alert protocol.AlertRequest) {
 		"ServerAlert", 0, "reason", alert.Reason, "subject", alert.Subject)
 }
 
+// NoticeBursts reports tunnel data transfer burst metrics.
+func NoticeBursts(diagnosticID string, burstMetrics common.LogFields) {
+	singletonNoticeLogger.outputNotice(
+		"Bursts", noticeIsDiagnostic,
+		append([]interface{}{"diagnosticID", diagnosticID}, listCommonFields(burstMetrics)...)...)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int

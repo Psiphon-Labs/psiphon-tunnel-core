@@ -77,15 +77,16 @@ func testPacketManipulator(useIPv6 bool, t *testing.T) {
 	// SYN packet, implementing TCP simultaneous open.
 
 	testSpecName := "test-spec"
+	extraDataValue := "extra-data"
 	config := &Config{
 		Logger:        newTestLogger(),
 		ProtocolPorts: []int{listenerPort},
 		Specs:         []*Spec{&Spec{Name: testSpecName, PacketSpecs: [][]string{[]string{"TCP-flags S"}}}},
-		SelectSpecName: func(protocolPort int, _ net.IP) string {
+		SelectSpecName: func(protocolPort int, _ net.IP) (string, interface{}) {
 			if protocolPort == listenerPort {
-				return testSpecName
+				return testSpecName, extraDataValue
 			}
-			return ""
+			return "", nil
 		},
 		QueueNumber: 1,
 	}
@@ -113,12 +114,16 @@ func testPacketManipulator(useIPv6 bool, t *testing.T) {
 				if state == http.StateNew {
 					localAddr := conn.LocalAddr().(*net.TCPAddr)
 					remoteAddr := conn.RemoteAddr().(*net.TCPAddr)
-					specName, err := m.GetAppliedSpecName(localAddr, remoteAddr)
+					specName, extraData, err := m.GetAppliedSpecName(localAddr, remoteAddr)
 					if err != nil {
 						t.Fatalf("GetAppliedSpecName failed: %v", err)
 					}
 					if specName != testSpecName {
 						t.Fatalf("unexpected spec name: %s", specName)
+					}
+					extraDataStr, ok := extraData.(string)
+					if !ok || extraDataStr != extraDataValue {
+						t.Fatalf("unexpected extra data value: %v", extraData)
 					}
 				}
 			},

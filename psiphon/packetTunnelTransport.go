@@ -261,7 +261,7 @@ func (p *PacketTunnelTransport) setChannel(
 	// Initialize the read deadline mechanism using parameters associated with the
 	// new tunnel.
 	timeout := channelTunnel.config.
-		GetClientParameters().
+		GetParameters().
 		GetCustom(channelTunnel.dialParams.NetworkLatencyMultiplier).
 		Duration(parameters.PacketTunnelReadTimeout)
 	atomic.StoreInt64(&p.readTimeout, int64(timeout))
