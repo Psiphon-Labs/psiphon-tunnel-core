@@ -271,11 +271,23 @@ func (m *Manipulator) Stop() {
 
 	// Call stopRunning before interrupting the blocked read; this ensures that
 	// the nfqueue socketCallback loop will exit after the read is interrupted.
-
 	m.stopRunning()
 
 	// Interrupt a blocked read.
 	m.nfqueue.Con.SetDeadline(time.Unix(0, 1))
+
+	// There's no socketCallback exit synchronization exposed by nfqueue. Calling
+	// nfqueue.Close while socketCallback is still running can result in errors
+	// such as "nfqueuenfqueue_gteq_1.12.go:134: Could not unbind from queue:
+	// netlink send: sendmsg: bad file descriptor"; and closing the raw socket
+	// file descriptors while socketCallback is still running can result in
+	// errors such as "packetman.(*Manipulator).injectPackets#604: bad file
+	// descriptor".
+	//
+	// Attempt to avoid invalid file descriptor operations and spurious error
+	// messages by sleeping for a short period, allowing socketCallback to poll
+	// the context and exit.
+	time.Sleep(100 * time.Millisecond)
 
 	m.nfqueue.Close()
 
