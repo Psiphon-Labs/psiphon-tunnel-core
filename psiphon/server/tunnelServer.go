@@ -2457,6 +2457,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
 	}
 	logFields["session_id"] = sshClient.sessionID
+	logFields["is_first_tunnel_in_session"] = sshClient.isFirstTunnelInSession
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
 	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
