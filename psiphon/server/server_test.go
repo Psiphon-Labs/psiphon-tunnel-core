@@ -1300,6 +1300,7 @@ func checkExpectedServerTunnelLogFields(
 		"start_time",
 		"duration",
 		"session_id",
+		"is_first_tunnel_in_session",
 		"last_connected",
 		"establishment_duration",
 		"propagation_channel_id",
