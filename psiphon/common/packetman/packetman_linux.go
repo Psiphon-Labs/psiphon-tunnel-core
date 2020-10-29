@@ -271,11 +271,23 @@ func (m *Manipulator) Stop() {
 
 	// Call stopRunning before interrupting the blocked read; this ensures that
 	// the nfqueue socketCallback loop will exit after the read is interrupted.
-
 	m.stopRunning()
 
 	// Interrupt a blocked read.
 	m.nfqueue.Con.SetDeadline(time.Unix(0, 1))
+
+	// There's no socketCallback exit synchronization exposed by nfqueue. Calling
+	// nfqueue.Close while socketCallback is still running can result in errors
+	// such as "nfqueuenfqueue_gteq_1.12.go:134: Could not unbind from queue:
+	// netlink send: sendmsg: bad file descriptor"; and closing the raw socket
+	// file descriptors while socketCallback is still running can result in
+	// errors such as "packetman.(*Manipulator).injectPackets#604: bad file
+	// descriptor".
+	//
+	// Attempt to avoid invalid file descriptor operations and spurious error
+	// messages by sleeping for a short period, allowing socketCallback to poll
+	// the context and exit.
+	time.Sleep(100 * time.Millisecond)
 
 	m.nfqueue.Close()
 
@@ -363,9 +375,15 @@ func makeConnectionID(
 	return string(connID[:])
 }
 
+type appliedSpec struct {
+	specName  string
+	extraData interface{}
+}
+
 // GetAppliedSpecName returns the packet manipulation spec name applied to the
 // TCP connection, represented by its local and remote address components,
-// that was ultimately accepted by a network listener.
+// that was ultimately accepted by a network listener. The second return value
+// is the arbitrary extra data returned by GetSpecName.
 //
 // This allows SelectSpecName, the spec selector, to be non-deterministic
 // while also allowing for accurate packet manipulation metrics to be
@@ -382,7 +400,7 @@ func makeConnectionID(
 // psiphon/server.meekConn) the true peer RemoteAddr must instead be
 // provided.
 func (m *Manipulator) GetAppliedSpecName(
-	localAddr, remoteAddr *net.TCPAddr) (string, error) {
+	localAddr, remoteAddr *net.TCPAddr) (string, interface{}, error) {
 
 	connID := makeConnectionID(
 		localAddr.IP,
@@ -390,18 +408,22 @@ func (m *Manipulator) GetAppliedSpecName(
 		remoteAddr.IP,
 		uint16(remoteAddr.Port))
 
-	specName, found := m.appliedSpecCache.Get(connID)
+	value, found := m.appliedSpecCache.Get(connID)
 	if !found {
-		return "", errors.TraceNew("connection not found")
+		return "", nil, errors.TraceNew("connection not found")
 	}
+
+	appliedSpec := value.(appliedSpec)
 
 	m.appliedSpecCache.Delete(connID)
 
-	return specName.(string), nil
+	return appliedSpec.specName, appliedSpec.extraData, nil
 }
 
 func (m *Manipulator) setAppliedSpecName(
-	interceptedPacket gopacket.Packet, specName string) {
+	interceptedPacket gopacket.Packet,
+	specName string,
+	extraData interface{}) {
 
 	srcIP, dstIP, _, _ := m.getPacketAddressInfo(interceptedPacket)
 
@@ -413,7 +435,13 @@ func (m *Manipulator) setAppliedSpecName(
 		dstIP,
 		uint16(interceptedTCP.DstPort))
 
-	m.appliedSpecCache.Set(connID, specName, cache.DefaultExpiration)
+	m.appliedSpecCache.Set(
+		connID,
+		appliedSpec{
+			specName:  specName,
+			extraData: extraData,
+		},
+		cache.DefaultExpiration)
 }
 
 func (m *Manipulator) getSocketMark() int {
@@ -448,7 +476,7 @@ func (m *Manipulator) handleInterceptedPacket(attr nfqueue.Attribute) int {
 		return 0
 	}
 
-	spec, err := m.getCompiledSpec(packet)
+	spec, extraData, err := m.getCompiledSpec(packet)
 	if err != nil {
 
 		// Fail open in this case.
@@ -466,12 +494,12 @@ func (m *Manipulator) handleInterceptedPacket(attr nfqueue.Attribute) int {
 	if spec == nil {
 
 		// No packet manipulation in this case.
-		m.setAppliedSpecName(packet, "")
+		m.setAppliedSpecName(packet, "", extraData)
 		m.nfqueue.SetVerdict(*attr.PacketID, nfqueue.NfAccept)
 		return 0
 	}
 
-	m.setAppliedSpecName(packet, spec.name)
+	m.setAppliedSpecName(packet, spec.name, extraData)
 	m.nfqueue.SetVerdict(*attr.PacketID, nfqueue.NfDrop)
 
 	err = m.injectPackets(packet, spec)
@@ -539,7 +567,8 @@ func (m *Manipulator) parseInterceptedPacket(packetData []byte) (gopacket.Packet
 	return packet, nil
 }
 
-func (m *Manipulator) getCompiledSpec(interceptedPacket gopacket.Packet) (*compiledSpec, error) {
+func (m *Manipulator) getCompiledSpec(
+	interceptedPacket gopacket.Packet) (*compiledSpec, interface{}, error) {
 
 	_, dstIP, _, _ := m.getPacketAddressInfo(interceptedPacket)
 
@@ -548,9 +577,9 @@ func (m *Manipulator) getCompiledSpec(interceptedPacket gopacket.Packet) (*compi
 	protocolPort := interceptedTCP.SrcPort
 	clientIP := dstIP
 
-	specName := m.config.SelectSpecName(int(protocolPort), clientIP)
+	specName, extraData := m.config.SelectSpecName(int(protocolPort), clientIP)
 	if specName == "" {
-		return nil, nil
+		return nil, extraData, nil
 	}
 
 	// Concurrency note: m.compiledSpecs may be replaced by SetSpecs, but any
@@ -562,10 +591,10 @@ func (m *Manipulator) getCompiledSpec(interceptedPacket gopacket.Packet) (*compi
 	m.compiledSpecsMutex.Unlock()
 
 	if !ok {
-		return nil, errors.Tracef("invalid spec name: %s", specName)
+		return nil, nil, errors.Tracef("invalid spec name: %s", specName)
 	}
 
-	return spec, nil
+	return spec, extraData, nil
 }
 
 func (m *Manipulator) injectPackets(interceptedPacket gopacket.Packet, spec *compiledSpec) error {

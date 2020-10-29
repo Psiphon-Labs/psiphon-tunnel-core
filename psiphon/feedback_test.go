@@ -47,24 +47,22 @@ func TestFeedbackUpload(t *testing.T) {
 		t.Skipf("error loading configuration file: %s", err)
 	}
 
-	// Unmarshal config, configure data root directory and re-marshal
+	// Load config, configure data root directory and commit it
 
-	var config map[string]interface{}
-
-	err = json.Unmarshal(configFileContents, &config)
+	config, err := LoadConfig(configFileContents)
 	if err != nil {
-		t.Fatalf("Unmarshal failed: %s", err)
+		t.Fatalf("error loading configuration file: %s", err)
 	}
 
 	testDataDirName, err := ioutil.TempDir("", "psiphon-feedback-test")
 	if err != nil {
 		t.Fatalf("TempDir failed: %s", err)
 	}
-	config["DataRootDirectory"] = testDataDirName
+	config.DataRootDirectory = testDataDirName
 
-	configFileContents, err = json.Marshal(config)
+	err = config.Commit(true)
 	if err != nil {
-		t.Fatalf("Marshal failed: %s", err)
+		t.Fatalf("error committing configuration file: %s", err)
 	}
 
 	// git_rev is a file which contains the shortened hash of the latest commit
@@ -88,7 +86,7 @@ func TestFeedbackUpload(t *testing.T) {
 		t.Fatalf("Marshal failed: %s", err)
 	}
 
-	err = SendFeedback(context.Background(), string(configFileContents), string(diagnosticData), "")
+	err = SendFeedback(context.Background(), config, string(diagnosticData), "")
 	if err != nil {
 		t.Fatalf("SendFeedback failed: %s", err)
 	}

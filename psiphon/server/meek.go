@@ -74,16 +74,16 @@ const (
 	// when retrying a request for a partially downloaded response payload.
 	MEEK_PROTOCOL_VERSION_3 = 3
 
-	MEEK_MAX_REQUEST_PAYLOAD_LENGTH     = 65536
-	MEEK_TURN_AROUND_TIMEOUT            = 20 * time.Millisecond
-	MEEK_EXTENDED_TURN_AROUND_TIMEOUT   = 100 * time.Millisecond
-	MEEK_MAX_SESSION_STALENESS          = 45 * time.Second
-	MEEK_HTTP_CLIENT_IO_TIMEOUT         = 45 * time.Second
-	MEEK_MIN_SESSION_ID_LENGTH          = 8
-	MEEK_MAX_SESSION_ID_LENGTH          = 20
-	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH = 65536
-	MEEK_DEFAULT_POOL_BUFFER_LENGTH     = 65536
-	MEEK_DEFAULT_POOL_BUFFER_COUNT      = 2048
+	MEEK_MAX_REQUEST_PAYLOAD_LENGTH           = 65536
+	MEEK_MIN_SESSION_ID_LENGTH                = 8
+	MEEK_MAX_SESSION_ID_LENGTH                = 20
+	MEEK_DEFAULT_TURN_AROUND_TIMEOUT          = 20 * time.Millisecond
+	MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT = 100 * time.Millisecond
+	MEEK_DEFAULT_MAX_SESSION_STALENESS        = 45 * time.Second
+	MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT       = 45 * time.Second
+	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH       = 65536
+	MEEK_DEFAULT_POOL_BUFFER_LENGTH           = 65536
+	MEEK_DEFAULT_POOL_BUFFER_COUNT            = 2048
 )
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
@@ -98,24 +98,28 @@ const (
 // HTTP payload traffic for a given session into net.Conn conforming Read()s and Write()s via
 // the meekConn struct.
 type MeekServer struct {
-	support                *SupportServices
-	listener               net.Listener
-	listenerTunnelProtocol string
-	listenerPort           int
-	passthroughAddress     string
-	tlsConfig              *tris.Config
-	obfuscatorSeedHistory  *obfuscator.SeedHistory
-	clientHandler          func(clientTunnelProtocol string, clientConn net.Conn)
-	openConns              *common.Conns
-	stopBroadcast          <-chan struct{}
-	sessionsLock           sync.RWMutex
-	sessions               map[string]*meekSession
-	checksumTable          *crc64.Table
-	bufferPool             *CachedResponseBufferPool
-	rateLimitLock          sync.Mutex
-	rateLimitHistory       map[string][]time.Time
-	rateLimitCount         int
-	rateLimitSignalGC      chan struct{}
+	support                   *SupportServices
+	listener                  net.Listener
+	listenerTunnelProtocol    string
+	listenerPort              int
+	passthroughAddress        string
+	turnAroundTimeout         time.Duration
+	extendedTurnAroundTimeout time.Duration
+	maxSessionStaleness       time.Duration
+	httpClientIOTimeout       time.Duration
+	tlsConfig                 *tris.Config
+	obfuscatorSeedHistory     *obfuscator.SeedHistory
+	clientHandler             func(clientTunnelProtocol string, clientConn net.Conn)
+	openConns                 *common.Conns
+	stopBroadcast             <-chan struct{}
+	sessionsLock              sync.RWMutex
+	sessions                  map[string]*meekSession
+	checksumTable             *crc64.Table
+	bufferPool                *CachedResponseBufferPool
+	rateLimitLock             sync.Mutex
+	rateLimitHistory          map[string][]time.Time
+	rateLimitCount            int
+	rateLimitSignalGC         chan struct{}
 }
 
 // NewMeekServer initializes a new meek server.
@@ -127,6 +131,32 @@ func NewMeekServer(
 	useTLS, isFronted, useObfuscatedSessionTickets bool,
 	clientHandler func(clientTunnelProtocol string, clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
+
+	passthroughAddress := support.Config.TunnelProtocolPassthroughAddresses[listenerTunnelProtocol]
+
+	turnAroundTimeout := MEEK_DEFAULT_TURN_AROUND_TIMEOUT
+	if support.Config.MeekTurnAroundTimeoutMilliseconds != nil {
+		turnAroundTimeout = time.Duration(
+			*support.Config.MeekTurnAroundTimeoutMilliseconds) * time.Millisecond
+	}
+
+	extendedTurnAroundTimeout := MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT
+	if support.Config.MeekExtendedTurnAroundTimeoutMilliseconds != nil {
+		extendedTurnAroundTimeout = time.Duration(
+			*support.Config.MeekExtendedTurnAroundTimeoutMilliseconds) * time.Millisecond
+	}
+
+	maxSessionStaleness := MEEK_DEFAULT_MAX_SESSION_STALENESS
+	if support.Config.MeekMaxSessionStalenessMilliseconds != nil {
+		maxSessionStaleness = time.Duration(
+			*support.Config.MeekMaxSessionStalenessMilliseconds) * time.Millisecond
+	}
+
+	httpClientIOTimeout := MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT
+	if support.Config.MeekHTTPClientIOTimeoutMilliseconds != nil {
+		httpClientIOTimeout = time.Duration(
+			*support.Config.MeekHTTPClientIOTimeoutMilliseconds) * time.Millisecond
+	}
 
 	checksumTable := crc64.MakeTable(crc64.ECMA)
 
@@ -142,23 +172,25 @@ func NewMeekServer(
 
 	bufferPool := NewCachedResponseBufferPool(bufferLength, bufferCount)
 
-	passthroughAddress := support.Config.TunnelProtocolPassthroughAddresses[listenerTunnelProtocol]
-
 	meekServer := &MeekServer{
-		support:                support,
-		listener:               listener,
-		listenerTunnelProtocol: listenerTunnelProtocol,
-		listenerPort:           listenerPort,
-		passthroughAddress:     passthroughAddress,
-		obfuscatorSeedHistory:  obfuscator.NewSeedHistory(nil),
-		clientHandler:          clientHandler,
-		openConns:              common.NewConns(),
-		stopBroadcast:          stopBroadcast,
-		sessions:               make(map[string]*meekSession),
-		checksumTable:          checksumTable,
-		bufferPool:             bufferPool,
-		rateLimitHistory:       make(map[string][]time.Time),
-		rateLimitSignalGC:      make(chan struct{}, 1),
+		support:                   support,
+		listener:                  listener,
+		listenerTunnelProtocol:    listenerTunnelProtocol,
+		listenerPort:              listenerPort,
+		passthroughAddress:        passthroughAddress,
+		turnAroundTimeout:         turnAroundTimeout,
+		extendedTurnAroundTimeout: extendedTurnAroundTimeout,
+		maxSessionStaleness:       maxSessionStaleness,
+		httpClientIOTimeout:       httpClientIOTimeout,
+		obfuscatorSeedHistory:     obfuscator.NewSeedHistory(nil),
+		clientHandler:             clientHandler,
+		openConns:                 common.NewConns(),
+		stopBroadcast:             stopBroadcast,
+		sessions:                  make(map[string]*meekSession),
+		checksumTable:             checksumTable,
+		bufferPool:                bufferPool,
+		rateLimitHistory:          make(map[string][]time.Time),
+		rateLimitSignalGC:         make(chan struct{}, 1),
 	}
 
 	if useTLS {
@@ -192,7 +224,7 @@ func (server *MeekServer) Run() error {
 	waitGroup.Add(1)
 	go func() {
 		defer waitGroup.Done()
-		ticker := time.NewTicker(MEEK_MAX_SESSION_STALENESS / 2)
+		ticker := time.NewTicker(server.maxSessionStaleness / 2)
 		defer ticker.Stop()
 		for {
 			select {
@@ -220,8 +252,8 @@ func (server *MeekServer) Run() error {
 	//   now be sufficient.
 
 	httpServer := &http.Server{
-		ReadTimeout:  MEEK_HTTP_CLIENT_IO_TIMEOUT,
-		WriteTimeout: MEEK_HTTP_CLIENT_IO_TIMEOUT,
+		ReadTimeout:  server.httpClientIOTimeout,
+		WriteTimeout: server.httpClientIOTimeout,
 		Handler:      server,
 		ConnState:    server.httpConnStateCallback,
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
@@ -644,8 +676,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	clientConn := newMeekConn(
 		server,
 		session,
-		underlyingConn.LocalAddr(),
-		underlyingConn.RemoteAddr(),
+		underlyingConn,
 		&net.TCPAddr{
 			IP:   net.ParseIP(clientIP),
 			Port: 0,
@@ -1130,8 +1161,14 @@ func (session *meekSession) touch() {
 }
 
 func (session *meekSession) expired() bool {
+	if session.clientConn == nil {
+		// Not fully initialized. meekSession.clientConn will be set before adding
+		// the session to MeekServer.sessions.
+		return false
+	}
 	lastActivity := monotime.Time(atomic.LoadInt64(&session.lastActivity))
-	return monotime.Since(lastActivity) > MEEK_MAX_SESSION_STALENESS
+	return monotime.Since(lastActivity) >
+		session.clientConn.meekServer.maxSessionStaleness
 }
 
 // delete releases all resources allocated by a session.
@@ -1209,50 +1246,51 @@ func makeMeekSessionID() (string, error) {
 // connection by the tunnel server (being passed to sshServer.handleClient).
 // meekConn bridges net/http request/response payload readers and writers
 // and goroutines calling Read()s and Write()s.
-//
-// meekConn implements the UnderlyingTCPAddrSource, returning the TCP
-// addresses for the _first_ underlying TCP connection in the meek tunnel.
 type meekConn struct {
-	meekServer           *MeekServer
-	meekSession          *meekSession
-	remoteAddr           net.Addr
-	underlyingLocalAddr  net.Addr
-	underlyingRemoteAddr net.Addr
-	protocolVersion      int
-	closeBroadcast       chan struct{}
-	closed               int32
-	lastReadChecksum     *uint64
-	readLock             sync.Mutex
-	emptyReadBuffer      chan *bytes.Buffer
-	partialReadBuffer    chan *bytes.Buffer
-	fullReadBuffer       chan *bytes.Buffer
-	writeLock            sync.Mutex
-	nextWriteBuffer      chan []byte
-	writeResult          chan error
+	meekServer          *MeekServer
+	meekSession         *meekSession
+	firstUnderlyingConn net.Conn
+	remoteAddr          net.Addr
+	protocolVersion     int
+	closeBroadcast      chan struct{}
+	closed              int32
+	lastReadChecksum    *uint64
+	readLock            sync.Mutex
+	emptyReadBuffer     chan *bytes.Buffer
+	partialReadBuffer   chan *bytes.Buffer
+	fullReadBuffer      chan *bytes.Buffer
+	writeLock           sync.Mutex
+	nextWriteBuffer     chan []byte
+	writeResult         chan error
 }
 
 func newMeekConn(
 	meekServer *MeekServer,
 	meekSession *meekSession,
-	underlyingLocalAddr net.Addr,
-	underlyingRemoteAddr net.Addr,
+	underlyingConn net.Conn,
 	remoteAddr net.Addr,
 	protocolVersion int) *meekConn {
 
+	// In order to inspect its properties, meekConn will hold a reference to
+	// firstUnderlyingConn, the _first_ underlying TCP conn, for the full
+	// lifetime of meekConn, which may exceed the lifetime of firstUnderlyingConn
+	// and include subsequent underlying TCP conns. In this case, it is expected
+	// that firstUnderlyingConn will be closed by "net/http", so no OS resources
+	// (e.g., a socket) are retained longer than necessary.
+
 	conn := &meekConn{
-		meekServer:           meekServer,
-		meekSession:          meekSession,
-		underlyingLocalAddr:  underlyingLocalAddr,
-		underlyingRemoteAddr: underlyingRemoteAddr,
-		remoteAddr:           remoteAddr,
-		protocolVersion:      protocolVersion,
-		closeBroadcast:       make(chan struct{}),
-		closed:               0,
-		emptyReadBuffer:      make(chan *bytes.Buffer, 1),
-		partialReadBuffer:    make(chan *bytes.Buffer, 1),
-		fullReadBuffer:       make(chan *bytes.Buffer, 1),
-		nextWriteBuffer:      make(chan []byte, 1),
-		writeResult:          make(chan error, 1),
+		meekServer:          meekServer,
+		meekSession:         meekSession,
+		firstUnderlyingConn: underlyingConn,
+		remoteAddr:          remoteAddr,
+		protocolVersion:     protocolVersion,
+		closeBroadcast:      make(chan struct{}),
+		closed:              0,
+		emptyReadBuffer:     make(chan *bytes.Buffer, 1),
+		partialReadBuffer:   make(chan *bytes.Buffer, 1),
+		fullReadBuffer:      make(chan *bytes.Buffer, 1),
+		nextWriteBuffer:     make(chan []byte, 1),
+		writeResult:         make(chan error, 1),
 	}
 	// Read() calls and pumpReads() are synchronized by exchanging control
 	// of a single readBuffer. This is the same scheme used in and described
@@ -1261,16 +1299,68 @@ func newMeekConn(
 	return conn
 }
 
+// GetMetrics implements the common.MetricsSource interface. The metrics are
+// maintained in the meek session type; but logTunnel, which calls
+// MetricsSource.GetMetrics, has a pointer only to this conn, so it calls
+// through to the session.
+func (conn *meekConn) GetMetrics() common.LogFields {
+
+	logFields := conn.meekSession.GetMetrics()
+
+	if conn.meekServer.passthroughAddress != "" {
+		logFields["passthrough_address"] = conn.meekServer.passthroughAddress
+	}
+
+	// Include metrics, such as fragmentor metrics, from the _first_ underlying
+	// TCP conn. Properties of subsequent underlying TCP conns are not reflected
+	// in these metrics; we assume that the first TCP conn, which most likely
+	// transits the various protocol handshakes, is most significant.
+	underlyingMetrics, ok := conn.firstUnderlyingConn.(common.MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
+
+	return logFields
+}
+
+// GetUnderlyingTCPAddrs implements the common.UnderlyingTCPAddrSource
+// interface, returning the TCP addresses for the _first_ underlying TCP
+// connection in the meek tunnel.
 func (conn *meekConn) GetUnderlyingTCPAddrs() (*net.TCPAddr, *net.TCPAddr, bool) {
-	localAddr, ok := conn.underlyingLocalAddr.(*net.TCPAddr)
+	localAddr, ok := conn.firstUnderlyingConn.LocalAddr().(*net.TCPAddr)
 	if !ok {
 		return nil, nil, false
 	}
-	remoteAddr, ok := conn.underlyingRemoteAddr.(*net.TCPAddr)
+	remoteAddr, ok := conn.firstUnderlyingConn.RemoteAddr().(*net.TCPAddr)
 	if !ok {
 		return nil, nil, false
 	}
 	return localAddr, remoteAddr, true
+}
+
+// SetReplay implements the common.FragmentorReplayAccessor interface, applying
+// the inputs to the _first_ underlying TCP connection in the meek tunnel. If
+// the underlying connection is closed, the SetSeed call will have no effect.
+func (conn *meekConn) SetReplay(PRNG *prng.PRNG) {
+	fragmentor, ok := conn.firstUnderlyingConn.(common.FragmentorReplayAccessor)
+	if ok {
+		fragmentor.SetReplay(PRNG)
+	}
+}
+
+// GetReplay implements the FragmentorReplayAccessor interface, getting the
+// outputs from the _first_ underlying TCP connection in the meek tunnel.
+//
+// We assume that the first TCP conn is most significant: the initial TCP
+// connection most likely fragments protocol handshakes; and, in the case the
+// packet manipulation, any selected packet manipulation spec would have been
+// successful.
+func (conn *meekConn) GetReplay() (*prng.Seed, bool) {
+	fragmentor, ok := conn.firstUnderlyingConn.(common.FragmentorReplayAccessor)
+	if ok {
+		return fragmentor.GetReplay()
+	}
+	return nil, false
 }
 
 // pumpReads causes goroutines blocking on meekConn.Read() to read
@@ -1387,7 +1477,7 @@ func (conn *meekConn) replaceReadBuffer(readBuffer *bytes.Buffer) {
 func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
 
 	startTime := time.Now()
-	timeout := time.NewTimer(MEEK_TURN_AROUND_TIMEOUT)
+	timeout := time.NewTimer(conn.meekServer.turnAroundTimeout)
 	defer timeout.Stop()
 
 	n := 0
@@ -1411,10 +1501,10 @@ func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
 				return n, nil
 			}
 			totalElapsedTime := time.Since(startTime) / time.Millisecond
-			if totalElapsedTime >= MEEK_EXTENDED_TURN_AROUND_TIMEOUT {
+			if totalElapsedTime >= conn.meekServer.extendedTurnAroundTimeout {
 				return n, nil
 			}
-			timeout.Reset(MEEK_TURN_AROUND_TIMEOUT)
+			timeout.Reset(conn.meekServer.turnAroundTimeout)
 		case <-timeout.C:
 			return n, nil
 		case <-conn.closeBroadcast:
@@ -1483,6 +1573,10 @@ func (conn *meekConn) Write(buffer []byte) (int, error) {
 func (conn *meekConn) Close() error {
 	if atomic.CompareAndSwapInt32(&conn.closed, 0, 1) {
 		close(conn.closeBroadcast)
+
+		// In general, we reply on "net/http" to close underlying TCP conns. In this
+		// case, we can directly close the first once, if it's still open.
+		conn.firstUnderlyingConn.Close()
 	}
 	return nil
 }
@@ -1509,7 +1603,7 @@ func (conn *meekConn) RemoteAddr() net.Addr {
 // timing out on idle on or before the requested deadline.
 func (conn *meekConn) SetDeadline(t time.Time) error {
 	// Overhead: nanoseconds (https://blog.cloudflare.com/its-go-time-on-linux/)
-	if time.Now().Add(MEEK_MAX_SESSION_STALENESS).Before(t) {
+	if time.Now().Add(conn.meekServer.maxSessionStaleness).Before(t) {
 		return nil
 	}
 	return errors.TraceNew("not supported")
@@ -1523,16 +1617,4 @@ func (conn *meekConn) SetReadDeadline(t time.Time) error {
 // Stub implementation of net.Conn.SetWriteDeadline
 func (conn *meekConn) SetWriteDeadline(t time.Time) error {
 	return errors.TraceNew("not supported")
-}
-
-// GetMetrics implements the common.MetricsSource interface. The metrics are
-// maintained in the meek session type; but logTunnel, which calls
-// MetricsSource.GetMetrics, has a pointer only to this conn, so it calls
-// through to the session.
-func (conn *meekConn) GetMetrics() common.LogFields {
-	logFields := conn.meekSession.GetMetrics()
-	if conn.meekServer.passthroughAddress != "" {
-		logFields["passthrough_address"] = conn.meekServer.passthroughAddress
-	}
-	return logFields
 }

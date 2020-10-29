@@ -367,11 +367,6 @@ Returns the path where the rotated notices file will be created.
 - (void)stop;
 
 /*!
- Indicate if the device is sleeping. This logs a diagnostic message and forces hasNetworkConnectivity to false when sleeping.
- */
-- (void)setSleeping:(BOOL)isSleeping;
-
-/*!
  Returns the current tunnel connection state.
  @return  The current connection state.
  */

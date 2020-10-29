@@ -98,19 +98,10 @@ func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error
 
 // Encrypt feedback and upload to server. If upload fails
 // the routine will sleep and retry multiple times.
-func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath string) error {
-
-	config, err := LoadConfig([]byte(configJson))
-	if err != nil {
-		return errors.Trace(err)
-	}
-	err = config.Commit(true)
-	if err != nil {
-		return errors.Trace(err)
-	}
+func SendFeedback(ctx context.Context, config *Config, diagnosticsJson, uploadPath string) error {
 
 	// Get tactics, may update client parameters
-	p := config.GetClientParameters().Get()
+	p := config.GetParameters().Get()
 	timeout := p.Duration(parameters.FeedbackTacticsWaitPeriod)
 	p.Close()
 	getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
@@ -120,7 +111,7 @@ func SendFeedback(ctx context.Context, configJson, diagnosticsJson, uploadPath s
 	GetTactics(getTacticsCtx, config)
 
 	// Get the latest client parameters
-	p = config.GetClientParameters().Get()
+	p = config.GetParameters().Get()
 	feedbackUploadMinRetryDelay := p.Duration(parameters.FeedbackUploadRetryMinDelaySeconds)
 	feedbackUploadMaxRetryDelay := p.Duration(parameters.FeedbackUploadRetryMaxDelaySeconds)
 	feedbackUploadTimeout := p.Duration(parameters.FeedbackUploadTimeoutSeconds)

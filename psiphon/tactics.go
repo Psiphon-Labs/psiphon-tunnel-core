@@ -117,7 +117,7 @@ func GetTactics(ctx context.Context, config *Config) {
 			// TODO: distinguish network and local errors and abort
 			// on local errors.
 
-			p := config.GetClientParameters().Get()
+			p := config.GetParameters().Get()
 			timeout := prng.JitterDuration(
 				p.Duration(parameters.TacticsRetryPeriod),
 				p.Float(parameters.TacticsRetryPeriodJitter))
@@ -138,13 +138,13 @@ func GetTactics(ctx context.Context, config *Config) {
 	if tacticsRecord != nil &&
 		prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
 
-		err := config.SetClientParameters(
+		err := config.SetParameters(
 			tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
 		if err != nil {
 			NoticeWarning("apply tactics failed: %s", err)
 
 			// The error will be due to invalid tactics values from
-			// the server. When ApplyClientParameters fails, all
+			// the server. When SetParameters fails, all
 			// previous tactics values are left in place. Abort
 			// without retry since the server is highly unlikely
 			// to return different values immediately.
@@ -215,7 +215,7 @@ func fetchTactics(
 	// Using controller.establishCtx will cancel FetchTactics
 	// if tunnel establishment completes first.
 
-	timeout := config.GetClientParameters().Get().Duration(
+	timeout := config.GetParameters().Get().Duration(
 		parameters.TacticsTimeout)
 
 	ctx, cancelFunc := context.WithTimeout(ctx, timeout)
@@ -243,7 +243,7 @@ func fetchTactics(
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,
-		config.clientParameters,
+		config.GetParameters(),
 		GetTacticsStorer(config),
 		config.GetNetworkID,
 		apiParams,

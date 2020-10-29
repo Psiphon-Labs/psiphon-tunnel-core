@@ -49,7 +49,7 @@ func (specs PacketManipulationSpecs) Validate() error {
 			return errors.TraceNew("missing spec name")
 		}
 		if ok, _ := specNames[spec.Name]; ok {
-			return errors.TraceNew("duplicate spec name")
+			return errors.Tracef("duplicate spec name: %s", spec.Name)
 		}
 		specNames[spec.Name] = true
 
@@ -88,7 +88,7 @@ func (manipulations ProtocolPacketManipulations) Validate(specs PacketManipulati
 
 		for _, specName := range specNames {
 			if ok, _ := validSpecNames[specName]; !ok {
-				return errors.TraceNew("invalid spec name")
+				return errors.Tracef("invalid spec name: %s", specName)
 			}
 		}
 	}

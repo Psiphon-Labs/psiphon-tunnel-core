@@ -66,6 +66,17 @@ var (
 // must be paired with a corresponding call to CloseDataStore to ensure the
 // datastore is closed.
 func OpenDataStore(config *Config) error {
+	return openDataStore(config, true)
+}
+
+// OpenDataStoreWithoutReset performs an OpenDataStore but does not retry or
+// reset the datastore file in case of failures. Use OpenDataStoreWithoutReset
+// when the datastore may be locked by another process.
+func OpenDataStoreWithoutReset(config *Config) error {
+	return openDataStore(config, false)
+}
+
+func openDataStore(config *Config, retryAndReset bool) error {
 
 	datastoreMutex.Lock()
 
@@ -74,31 +85,37 @@ func OpenDataStore(config *Config) error {
 		return errors.Tracef(
 			"invalid datastore reference count: %d", datastoreReferenceCount)
 	}
-	datastoreReferenceCount += 1
-	if datastoreReferenceCount > 1 {
-		var err error
+
+	if datastoreReferenceCount > 0 {
+
 		if activeDatastoreDB == nil {
-			err = errors.TraceNew("datastore unexpectedly closed")
+			datastoreMutex.Unlock()
+			return errors.TraceNew("datastore unexpectedly closed")
 		}
+
+		// Add a reference to the open datastore.
+
+		datastoreReferenceCount += 1
 		datastoreMutex.Unlock()
-		return err
+		return nil
 	}
 
-	existingDB := activeDatastoreDB
-
-	if existingDB != nil {
+	if activeDatastoreDB != nil {
 		datastoreMutex.Unlock()
 		return errors.TraceNew("datastore unexpectedly open")
 	}
 
-	newDB, err := datastoreOpenDB(config.GetDataStoreDirectory())
+	// datastoreReferenceCount is 0, so open the datastore.
+
+	newDB, err := datastoreOpenDB(
+		config.GetDataStoreDirectory(), retryAndReset)
 	if err != nil {
 		datastoreMutex.Unlock()
 		return errors.Trace(err)
 	}
 
+	datastoreReferenceCount = 1
 	activeDatastoreDB = newDB
-
 	datastoreMutex.Unlock()
 
 	_ = resetAllPersistentStatsToUnreported()
@@ -560,7 +577,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 			return false, nil, errors.TraceNew("TargetServerEntry does not support EgressRegion")
 		}
 
-		limitTunnelProtocols := config.GetClientParameters().Get().TunnelProtocols(parameters.LimitTunnelProtocols)
+		limitTunnelProtocols := config.GetParameters().Get().TunnelProtocols(parameters.LimitTunnelProtocols)
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
 			// excludeIntensive is handled higher up.
@@ -569,7 +586,8 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 				config.UseUpstreamProxy(),
 				limitTunnelProtocols,
 				false)) == 0 {
-				return false, nil, errors.TraceNew("TargetServerEntry does not support LimitTunnelProtocols")
+				return false, nil, errors.Tracef(
+					"TargetServerEntry does not support LimitTunnelProtocols: %v", limitTunnelProtocols)
 			}
 		}
 	}
@@ -603,7 +621,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 	// Support stand-alone GetTactics operation. See TacticsStorer for more
 	// details.
 	if iterator.isTacticsServerEntryIterator {
-		err := OpenDataStore(iterator.config)
+		err := OpenDataStoreWithoutReset(iterator.config)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -678,7 +696,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		//
 		// TODO: move only up to parameters.ReplayCandidateCount to front?
 
-		p := iterator.config.GetClientParameters().Get()
+		p := iterator.config.GetParameters().Get()
 
 		if (isInitialRound || p.WeightedCoinFlip(parameters.ReplayLaterRoundMoveToFrontProbability)) &&
 			p.Int(parameters.ReplayCandidateCount) != 0 {
@@ -753,7 +771,7 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 	// Support stand-alone GetTactics operation. See TacticsStorer for more
 	// details.
 	if iterator.isTacticsServerEntryIterator {
-		err := OpenDataStore(iterator.config)
+		err := OpenDataStoreWithoutReset(iterator.config)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -981,7 +999,7 @@ func PruneServerEntry(config *Config, serverEntryTag string) {
 
 func pruneServerEntry(config *Config, serverEntryTag string) error {
 
-	minimumAgeForPruning := config.GetClientParameters().Get().Duration(
+	minimumAgeForPruning := config.GetParameters().Get().Duration(
 		parameters.ServerEntryMinimumAgeForPruning)
 
 	return datastoreUpdate(func(tx *datastoreTx) error {
@@ -1463,7 +1481,7 @@ func StorePersistentStat(config *Config, statType string, stat []byte) error {
 		return errors.Tracef("invalid persistent stat type: %s", statType)
 	}
 
-	maxStoreRecords := config.GetClientParameters().Get().Int(
+	maxStoreRecords := config.GetParameters().Get().Int(
 		parameters.PersistentStatsMaxStoreRecords)
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
@@ -1539,7 +1557,7 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 
 	stats := make(map[string][][]byte)
 
-	maxSendBytes := config.GetClientParameters().Get().Int(
+	maxSendBytes := config.GetParameters().Get().Int(
 		parameters.PersistentStatsMaxSendBytes)
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
@@ -1800,13 +1818,22 @@ func SetDialParameters(serverIPAddress, networkID string, dialParams *DialParame
 
 // GetDialParameters fetches any dial parameters associated with the specified
 // server/network ID. Returns nil, nil when no record is found.
-func GetDialParameters(serverIPAddress, networkID string) (*DialParameters, error) {
+func GetDialParameters(
+	config *Config, serverIPAddress, networkID string) (*DialParameters, error) {
+
+	// Support stand-alone GetTactics operation. See TacticsStorer for more
+	// details.
+	err := OpenDataStoreWithoutReset(config)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	defer CloseDataStore()
 
 	key := makeDialParametersKey([]byte(serverIPAddress), []byte(networkID))
 
 	var dialParams *DialParameters
 
-	err := getBucketValue(
+	err = getBucketValue(
 		datastoreDialParametersBucket,
 		key,
 		func(value []byte) error {
@@ -1845,7 +1872,7 @@ func DeleteDialParameters(serverIPAddress, networkID string) error {
 // TacticsStorer implements tactics.Storer.
 //
 // Each TacticsStorer datastore operation is wrapped with
-// OpenDataStore/CloseDataStore, which enables a limited degree of
+// OpenDataStoreWithoutReset/CloseDataStore, which enables a limited degree of
 // multiprocess datastore synchronization:
 //
 // One process runs a Controller. Another process runs a stand-alone operation
@@ -1871,12 +1898,21 @@ func DeleteDialParameters(serverIPAddress, networkID string) error {
 // that is, if a different process writes tactics in between GetTactics calls
 // to GetTacticsRecord and then SetTacticsRecord. This is because all tactics
 // writes are considered fresh and valid.
+//
+//
+// Using OpenDataStoreWithoutReset ensures that the GetTactics attempt in the
+// non-Controller operation will immediately fail if the datastore is locked
+// and not reset (delete) the datastore file when open fails. The Controller
+// process will use OpenDataStore, which performs the reset on failure, to
+// recover from datastore corruption; when OpenDataStore is called while the
+// non-Controller operation holds a datastore lock, the OpenDataStore timeout,
+// 1s, should be sufficient to avoid an unnecessary reset.
 type TacticsStorer struct {
 	config *Config
 }
 
 func (t *TacticsStorer) SetTacticsRecord(networkID string, record []byte) error {
-	err := OpenDataStore(t.config)
+	err := OpenDataStoreWithoutReset(t.config)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1889,7 +1925,7 @@ func (t *TacticsStorer) SetTacticsRecord(networkID string, record []byte) error 
 }
 
 func (t *TacticsStorer) GetTacticsRecord(networkID string) ([]byte, error) {
-	err := OpenDataStore(t.config)
+	err := OpenDataStoreWithoutReset(t.config)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1902,7 +1938,7 @@ func (t *TacticsStorer) GetTacticsRecord(networkID string) ([]byte, error) {
 }
 
 func (t *TacticsStorer) SetSpeedTestSamplesRecord(networkID string, record []byte) error {
-	err := OpenDataStore(t.config)
+	err := OpenDataStoreWithoutReset(t.config)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1915,7 +1951,7 @@ func (t *TacticsStorer) SetSpeedTestSamplesRecord(networkID string, record []byt
 }
 
 func (t *TacticsStorer) GetSpeedTestSamplesRecord(networkID string) ([]byte, error) {
-	err := OpenDataStore(t.config)
+	err := OpenDataStoreWithoutReset(t.config)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

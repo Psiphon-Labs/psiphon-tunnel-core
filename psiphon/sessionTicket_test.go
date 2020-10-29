@@ -56,9 +56,9 @@ func TestObfuscatedSessionTicket(t *testing.T) {
 
 func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 
-	clientParameters, err := parameters.NewClientParameters(nil)
+	params, err := parameters.NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s\n", err)
+		t.Fatalf("NewParameters failed: %s\n", err)
 	}
 
 	var standardSessionTicketKey [32]byte
@@ -154,7 +154,7 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 			defer tcpConn.Close()
 
 			utlsClientHelloID, _, err := getUTLSClientHelloID(
-				clientParameters.Get(), tlsProfile)
+				params.Get(), tlsProfile)
 			if err != nil {
 				report(err)
 				return

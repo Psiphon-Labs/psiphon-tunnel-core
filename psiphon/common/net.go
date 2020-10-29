@@ -26,11 +26,9 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
-	"sync/atomic"
-	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/miekg/dns"
 	"github.com/wader/filtertransport"
 )
@@ -58,6 +56,24 @@ type CloseWriter interface {
 // connection establishment.
 type IrregularIndicator interface {
 	IrregularTunnelError() error
+}
+
+// UnderlyingTCPAddrSource defines the interface for a type, typically a
+// net.Conn, such as a server meek Conn, which has an underlying TCP conn(s),
+// providing access to the LocalAddr and RemoteAddr properties of the
+// underlying TCP conn.
+type UnderlyingTCPAddrSource interface {
+
+	// GetUnderlyingTCPAddrs returns the LocalAddr and RemoteAddr properties of
+	// the underlying TCP conn.
+	GetUnderlyingTCPAddrs() (*net.TCPAddr, *net.TCPAddr, bool)
+}
+
+// FragmentorReplayAccessor defines the interface for accessing replay properties
+// of a fragmentor Conn.
+type FragmentorReplayAccessor interface {
+	SetReplay(*prng.PRNG)
+	GetReplay() (*prng.Seed, bool)
 }
 
 // TerminateHTTPConnection sends a 404 response to a client and also closes
@@ -240,153 +256,6 @@ func (entry *LRUConnsEntry) Touch() {
 	entry.lruConns.mutex.Lock()
 	defer entry.lruConns.mutex.Unlock()
 	entry.lruConns.list.MoveToFront(entry.element)
-}
-
-// ActivityMonitoredConn wraps a net.Conn, adding logic to deal with
-// events triggered by I/O activity.
-//
-// When an inactivity timeout is specified, the network I/O will
-// timeout after the specified period of read inactivity. Optionally,
-// for the purpose of inactivity only, ActivityMonitoredConn will also
-// consider the connection active when data is written to it.
-//
-// When a LRUConnsEntry is specified, then the LRU entry is promoted on
-// either a successful read or write.
-//
-// When an ActivityUpdater is set, then its UpdateActivity method is
-// called on each read and write with the number of bytes transferred.
-// The durationNanoseconds, which is the time since the last read, is
-// reported only on reads.
-//
-type ActivityMonitoredConn struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	monotonicStartTime   int64
-	lastReadActivityTime int64
-	realStartTime        time.Time
-	net.Conn
-	inactivityTimeout time.Duration
-	activeOnWrite     bool
-	activityUpdater   ActivityUpdater
-	lruEntry          *LRUConnsEntry
-}
-
-// ActivityUpdater defines an interface for receiving updates for
-// ActivityMonitoredConn activity. Values passed to UpdateProgress are
-// bytes transferred and conn duration since the previous UpdateProgress.
-type ActivityUpdater interface {
-	UpdateProgress(bytesRead, bytesWritten int64, durationNanoseconds int64)
-}
-
-// NewActivityMonitoredConn creates a new ActivityMonitoredConn.
-func NewActivityMonitoredConn(
-	conn net.Conn,
-	inactivityTimeout time.Duration,
-	activeOnWrite bool,
-	activityUpdater ActivityUpdater,
-	lruEntry *LRUConnsEntry) (*ActivityMonitoredConn, error) {
-
-	if inactivityTimeout > 0 {
-		err := conn.SetDeadline(time.Now().Add(inactivityTimeout))
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-	}
-
-	now := int64(monotime.Now())
-
-	return &ActivityMonitoredConn{
-		Conn:                 conn,
-		inactivityTimeout:    inactivityTimeout,
-		activeOnWrite:        activeOnWrite,
-		realStartTime:        time.Now(),
-		monotonicStartTime:   now,
-		lastReadActivityTime: now,
-		activityUpdater:      activityUpdater,
-		lruEntry:             lruEntry,
-	}, nil
-}
-
-// GetStartTime gets the time when the ActivityMonitoredConn was
-// initialized. Reported time is UTC.
-func (conn *ActivityMonitoredConn) GetStartTime() time.Time {
-	return conn.realStartTime.UTC()
-}
-
-// GetActiveDuration returns the time elapsed between the initialization
-// of the ActivityMonitoredConn and the last Read. Only reads are used
-// for this calculation since writes may succeed locally due to buffering.
-func (conn *ActivityMonitoredConn) GetActiveDuration() time.Duration {
-	return time.Duration(atomic.LoadInt64(&conn.lastReadActivityTime) - conn.monotonicStartTime)
-}
-
-// GetLastActivityMonotime returns the arbitrary monotonic time of the last Read.
-func (conn *ActivityMonitoredConn) GetLastActivityMonotime() monotime.Time {
-	return monotime.Time(atomic.LoadInt64(&conn.lastReadActivityTime))
-}
-
-func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
-	n, err := conn.Conn.Read(buffer)
-	if err == nil {
-
-		if conn.inactivityTimeout > 0 {
-			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
-			if err != nil {
-				return n, errors.Trace(err)
-			}
-		}
-
-		readActivityTime := int64(monotime.Now())
-
-		if conn.activityUpdater != nil {
-			conn.activityUpdater.UpdateProgress(
-				int64(n), 0, readActivityTime-atomic.LoadInt64(&conn.lastReadActivityTime))
-		}
-
-		if conn.lruEntry != nil {
-			conn.lruEntry.Touch()
-		}
-
-		atomic.StoreInt64(&conn.lastReadActivityTime, readActivityTime)
-
-	}
-	// Note: no context error to preserve error type
-	return n, err
-}
-
-func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
-	n, err := conn.Conn.Write(buffer)
-	if err == nil && conn.activeOnWrite {
-
-		if conn.inactivityTimeout > 0 {
-			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
-			if err != nil {
-				return n, errors.Trace(err)
-			}
-		}
-
-		if conn.activityUpdater != nil {
-			conn.activityUpdater.UpdateProgress(0, int64(n), 0)
-		}
-
-		if conn.lruEntry != nil {
-			conn.lruEntry.Touch()
-		}
-
-	}
-	// Note: no context error to preserve error type
-	return n, err
-}
-
-// IsClosed implements the Closer iterface. The return value
-// indicates whether the underlying conn has been closed.
-func (conn *ActivityMonitoredConn) IsClosed() bool {
-	closer, ok := conn.Conn.(Closer)
-	if !ok {
-		return false
-	}
-	return closer.IsClosed()
 }
 
 // IsBogon checks if the specified IP is a bogon (loopback, private addresses,

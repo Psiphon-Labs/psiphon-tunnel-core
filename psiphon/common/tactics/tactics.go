@@ -106,11 +106,11 @@ the handshake request parameters with tactics inputs, and calls
 HandleTacticsPayload to process the tactics payload in the handshake response.
 
 The core tactics data is custom values for a subset of the parameters in
-parameters.ClientParameters. A client takes the default ClientParameters,
-applies any custom values set in its config file, and then applies any stored or
-received tactics. Each time the tactics changes, this process is repeated so
-that obsolete tactics parameters are not retained in the client's
-ClientParameters instance.
+parameters.Parameters. A client takes the default Parameters, applies any
+custom values set in its config file, and then applies any stored or received
+tactics. Each time the tactics changes, this process is repeated so that
+obsolete tactics parameters are not retained in the client's Parameters
+instance.
 
 Tactics has a probability parameter that is used in a weighted coin flip to
 determine if the tactics is to be applied or skipped for the current client
@@ -161,18 +161,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -253,10 +250,19 @@ type Server struct {
 	// condition (vs., say, checking for a zero-value Server).
 	loaded bool
 
+	filterGeoIPScope   int
+	filterRegionScopes map[string]int
+
 	logger                common.Logger
 	logFieldFormatter     common.APIParameterLogFieldFormatter
 	apiParameterValidator common.APIParameterValidator
 }
+
+const (
+	GeoIPScopeRegion = 1
+	GeoIPScopeISP    = 2
+	GeoIPScopeCity   = 4
+)
 
 // Filter defines a filter to match against client attributes.
 // Each field within the filter is optional and may be omitted.
@@ -492,7 +498,24 @@ func (server *Server) Validate() error {
 		}
 	}
 
-	validateTactics := func(tactics *Tactics, isDefault bool) error {
+	// validateTactics validates either the defaultTactics, when filteredTactics
+	// is nil, or the filteredTactics otherwise. In the second case,
+	// defaultTactics must be passed in to validate filtered tactics references
+	// to default tactics parameters, such as CustomTLSProfiles or
+	// PacketManipulationSpecs.
+	//
+	// Limitation: references must point to the default tactics or the filtered
+	// tactics itself; referring to parameters in a previous filtered tactics is
+	// not suported.
+
+	validateTactics := func(defaultTactics, filteredTactics *Tactics) error {
+
+		tactics := defaultTactics
+		validatingDefault := true
+		if filteredTactics != nil {
+			tactics = filteredTactics
+			validatingDefault = false
+		}
 
 		// Allow "" for 0, even though ParseDuration does not.
 		var d time.Duration
@@ -505,26 +528,34 @@ func (server *Server) Validate() error {
 		}
 
 		if d <= 0 {
-			if isDefault {
+			if validatingDefault {
 				return errors.TraceNew("invalid duration")
 			}
 			// For merging logic, Normalize any 0 duration to "".
 			tactics.TTL = ""
 		}
 
-		if (isDefault && tactics.Probability == 0.0) ||
+		if (validatingDefault && tactics.Probability == 0.0) ||
 			tactics.Probability < 0.0 ||
 			tactics.Probability > 1.0 {
 
 			return errors.TraceNew("invalid probability")
 		}
 
-		clientParameters, err := parameters.NewClientParameters(nil)
+		params, err := parameters.NewParameters(nil)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		_, err = clientParameters.Set("", false, tactics.Parameters)
+		applyParameters := []map[string]interface{}{
+			defaultTactics.Parameters,
+		}
+		if filteredTactics != nil {
+			applyParameters = append(
+				applyParameters, filteredTactics.Parameters)
+		}
+
+		_, err = params.Set("", false, applyParameters...)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -551,14 +582,14 @@ func (server *Server) Validate() error {
 		return nil
 	}
 
-	err := validateTactics(&server.DefaultTactics, true)
+	err := validateTactics(&server.DefaultTactics, nil)
 	if err != nil {
 		return errors.Tracef("invalid default tactics: %s", err)
 	}
 
 	for i, filteredTactics := range server.FilteredTactics {
 
-		err := validateTactics(&filteredTactics.Tactics, false)
+		err := validateTactics(&server.DefaultTactics, &filteredTactics.Tactics)
 
 		if err == nil {
 			err = validateRange(filteredTactics.Filter.SpeedTestRTTMilliseconds)
@@ -581,6 +612,9 @@ const stringLookupThreshold = 5
 // benchmarks show maps are faster than looping through a string
 // slice.
 func (server *Server) initLookups() {
+
+	server.filterGeoIPScope = 0
+	server.filterRegionScopes = make(map[string]int)
 
 	for _, filteredTactics := range server.FilteredTactics {
 
@@ -605,9 +639,73 @@ func (server *Server) initLookups() {
 			}
 		}
 
+		// Initialize the filter GeoIP scope fields used by GetFilterGeoIPScope.
+		//
+		// The basic case is, for example, when only Regions appear in filters, then
+		// only GeoIPScopeRegion is set.
+		//
+		// As an optimization, a regional map is populated so that, for example,
+		// GeoIPScopeRegion&GeoIPScopeISP will be set only for regions for which
+		// there is a filter with region and ISP, while other regions will set only
+		// GeoIPScopeRegion.
+		//
+		// When any ISP or City appears in a filter without a Region, the regional
+		// map optimization is disabled.
+
+		if len(filteredTactics.Filter.Regions) == 0 {
+			disableRegionScope := false
+			if len(filteredTactics.Filter.ISPs) > 0 {
+				server.filterGeoIPScope |= GeoIPScopeISP
+				disableRegionScope = true
+			}
+			if len(filteredTactics.Filter.Cities) > 0 {
+				server.filterGeoIPScope |= GeoIPScopeCity
+				disableRegionScope = true
+			}
+			if disableRegionScope && server.filterRegionScopes != nil {
+				for _, regionScope := range server.filterRegionScopes {
+					server.filterGeoIPScope |= regionScope
+				}
+				server.filterRegionScopes = nil
+			}
+		} else {
+			server.filterGeoIPScope |= GeoIPScopeRegion
+			if server.filterRegionScopes != nil {
+				regionScope := 0
+				if len(filteredTactics.Filter.ISPs) > 0 {
+					regionScope |= GeoIPScopeISP
+				}
+				if len(filteredTactics.Filter.Cities) > 0 {
+					regionScope |= GeoIPScopeCity
+				}
+				for _, region := range filteredTactics.Filter.Regions {
+					server.filterRegionScopes[region] |= regionScope
+				}
+			}
+		}
+
 		// TODO: add lookups for APIParameters?
 		// Not expected to be long lists of values.
 	}
+}
+
+// GetFilterGeoIPScope returns which GeoIP fields are relevent to tactics
+// filters. The return value is a bit array containing some combination of the
+// GeoIPScopeRegion, GeoIPScopeISP, and GeoIPScopeCity flags. For the given
+// geoIPData, all tactics filters reference only the flagged fields.
+func (server *Server) GetFilterGeoIPScope(geoIPData common.GeoIPData) int {
+
+	scope := server.filterGeoIPScope
+
+	if server.filterRegionScopes != nil {
+
+		regionScope, ok := server.filterRegionScopes[geoIPData.Country]
+		if ok {
+			scope |= regionScope
+		}
+	}
+
+	return scope
 }
 
 // GetTacticsPayload assembles and returns a tactics payload for a client with
@@ -638,14 +736,10 @@ func (server *Server) GetTacticsPayload(
 		return nil, nil
 	}
 
-	marshaledTactics, err := json.Marshal(tactics)
+	marshaledTactics, tag, err := marshalTactics(tactics)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	// MD5 hash is used solely as a data checksum and not for any security purpose.
-	digest := md5.Sum(marshaledTactics)
-	tag := hex.EncodeToString(digest[:])
 
 	payload := &Payload{
 		Tag: tag,
@@ -677,6 +771,43 @@ func (server *Server) GetTacticsPayload(
 	}
 
 	return payload, nil
+}
+
+func marshalTactics(tactics *Tactics) ([]byte, string, error) {
+	marshaledTactics, err := json.Marshal(tactics)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	// MD5 hash is used solely as a data checksum and not for any security purpose.
+	digest := md5.Sum(marshaledTactics)
+	tag := hex.EncodeToString(digest[:])
+
+	return marshaledTactics, tag, nil
+}
+
+// GetTacticsWithTag returns a GetTactics value along with the associated tag value.
+func (server *Server) GetTacticsWithTag(
+	includeServerSideOnly bool,
+	geoIPData common.GeoIPData,
+	apiParams common.APIParameters) (*Tactics, string, error) {
+
+	tactics, err := server.GetTactics(
+		includeServerSideOnly, geoIPData, apiParams)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	if tactics == nil {
+		return nil, "", nil
+	}
+
+	_, tag, err := marshalTactics(tactics)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	return tactics, tag, nil
 }
 
 // GetTactics assembles and returns tactics data for a client with the
@@ -799,19 +930,19 @@ func (server *Server) GetTactics(
 }
 
 // TODO: refactor this copy of psiphon/server.getStringRequestParam into common?
-func getStringRequestParam(params common.APIParameters, name string) (string, error) {
-	if params[name] == nil {
+func getStringRequestParam(apiParams common.APIParameters, name string) (string, error) {
+	if apiParams[name] == nil {
 		return "", errors.Tracef("missing param: %s", name)
 	}
-	value, ok := params[name].(string)
+	value, ok := apiParams[name].(string)
 	if !ok {
 		return "", errors.Tracef("invalid param: %s", name)
 	}
 	return value, nil
 }
 
-func getJSONRequestParam(params common.APIParameters, name string, value interface{}) error {
-	if params[name] == nil {
+func getJSONRequestParam(apiParams common.APIParameters, name string, value interface{}) error {
+	if apiParams[name] == nil {
 		return errors.Tracef("missing param: %s", name)
 	}
 
@@ -820,7 +951,7 @@ func getJSONRequestParam(params common.APIParameters, name string, value interfa
 	// unmarhsal-into-struct, common.APIParameters will have an unmarshal-into-interface
 	// value as described here: https://golang.org/pkg/encoding/json/#Unmarshal.
 
-	jsonValue, err := json.Marshal(params[name])
+	jsonValue, err := json.Marshal(apiParams[name])
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1094,121 +1225,6 @@ func (server *Server) handleTacticsRequest(
 	server.logger.LogMetric(TACTICS_METRIC_EVENT_NAME, logFields)
 }
 
-// Listener wraps a net.Listener and applies server-side implementation of
-// certain tactics parameters to accepted connections. Tactics filtering is
-// limited to GeoIP attributes as the client has not yet sent API paramaters.
-type Listener struct {
-	net.Listener
-	server         *Server
-	tunnelProtocol string
-	geoIPLookup    func(IPaddress string) common.GeoIPData
-}
-
-// NewListener creates a new Listener.
-func NewListener(
-	listener net.Listener,
-	server *Server,
-	tunnelProtocol string,
-	geoIPLookup func(IPaddress string) common.GeoIPData) *Listener {
-
-	return &Listener{
-		Listener:       listener,
-		server:         server,
-		tunnelProtocol: tunnelProtocol,
-		geoIPLookup:    geoIPLookup,
-	}
-}
-
-// Accept calls the underlying listener's Accept, and then checks if tactics
-// for the connection set LimitTunnelProtocols.
-//
-// If LimitTunnelProtocols is set and does not include the tunnel protocol the
-// listener is running, the accepted connection is immediately closed and the
-// underlying Accept is called again.
-//
-// For retained connections, fragmentation is applied when specified by
-// tactics.
-func (listener *Listener) Accept() (net.Conn, error) {
-
-	conn, err := listener.Listener.Accept()
-	if err != nil {
-		// Don't modify error from net.Listener
-		return nil, err
-	}
-
-	geoIPData := listener.geoIPLookup(common.IPAddressFromAddr(conn.RemoteAddr()))
-
-	tactics, err := listener.server.GetTactics(true, geoIPData, make(common.APIParameters))
-	if err != nil {
-		listener.server.logger.WithTraceFields(
-			common.LogFields{"error": err}).Warning("failed to get tactics for connection")
-		// If tactics is somehow misconfigured, keep handling connections.
-		// Other error cases that follow below take the same approach.
-		return conn, nil
-	}
-
-	if tactics == nil {
-		// This server isn't configured with tactics.
-		return conn, nil
-	}
-
-	if !prng.FlipWeightedCoin(tactics.Probability) {
-		// Skip tactics with the configured probability.
-		return conn, nil
-	}
-
-	clientParameters, err := parameters.NewClientParameters(nil)
-	if err != nil {
-		return conn, nil
-	}
-
-	_, err = clientParameters.Set("", false, tactics.Parameters)
-	if err != nil {
-		return conn, nil
-	}
-
-	p := clientParameters.Get()
-
-	// Wrap the conn in a fragmentor.Conn, subject to tactics parameters.
-	//
-	// Limitation: this server-side fragmentation is not synchronized with
-	// client-side; where client-side will make a single coin flip to fragment
-	// or not fragment all TCP connections for a one meek session, the server
-	// will make a coin flip per connection.
-	//
-	// Delay seeding the fragmentor PRNG when we can derive a seed from the
-	// client's initial obfuscation message. This enables server-side replay
-	// of fragmentation when initiated by the client. Currently this is only
-	// supported for OSSH: SSH lacks the initial obfuscation message, and
-	// meek and other protocols transmit downstream data before the initial
-	// obfuscation message arrives.
-
-	var seed *prng.Seed
-	if listener.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
-		seed, err = prng.NewSeed()
-		if err != nil {
-			listener.server.logger.WithTraceFields(
-				common.LogFields{"error": err}).Warning("failed to seed fragmentor PRNG")
-			return conn, nil
-		}
-	}
-
-	fragmentorConfig := fragmentor.NewDownstreamConfig(
-		p, listener.tunnelProtocol, seed)
-
-	if fragmentorConfig.MayFragment() {
-		conn = fragmentor.NewConn(
-			fragmentorConfig,
-			func(message string) {
-				listener.server.logger.WithTraceFields(
-					common.LogFields{"message": message}).Debug("Fragmentor")
-			},
-			conn)
-	}
-
-	return conn, nil
-}
-
 // RoundTripper performs a round trip to the specified endpoint, sending the
 // request body and returning the response body. The context may be used to
 // set a timeout or cancel the rount trip.
@@ -1233,7 +1249,6 @@ type Storer interface {
 // parameters for tactics. This is used by the Psiphon client when
 // preparing its handshake request.
 func SetTacticsAPIParameters(
-	clientParameters *parameters.ClientParameters,
 	storer Storer,
 	networkID string,
 	apiParams common.APIParameters) error {
@@ -1348,7 +1363,7 @@ func UseStoredTactics(
 // FetchTactics modifies the apiParams input.
 func FetchTactics(
 	ctx context.Context,
-	clientParameters *parameters.ClientParameters,
+	params *parameters.Parameters,
 	storer Storer,
 	getNetworkID func() string,
 	apiParams common.APIParameters,
@@ -1374,7 +1389,7 @@ func FetchTactics(
 
 	if len(speedTestSamples) == 0 {
 
-		p := clientParameters.Get()
+		p := params.Get()
 		request := prng.Padding(
 			p.Int(parameters.SpeedTestPaddingMinBytes),
 			p.Int(parameters.SpeedTestPaddingMaxBytes))
@@ -1394,7 +1409,7 @@ func FetchTactics(
 		}
 
 		err = AddSpeedTestSample(
-			clientParameters,
+			params,
 			storer,
 			networkID,
 			endPointRegion,
@@ -1517,7 +1532,7 @@ func MakeSpeedTestResponse(minPadding, maxPadding int) ([]byte, error) {
 // that limit is reached, the oldest samples are removed to make room
 // for the new sample.
 func AddSpeedTestSample(
-	clientParameters *parameters.ClientParameters,
+	params *parameters.Parameters,
 	storer Storer,
 	networkID string,
 	endPointRegion string,
@@ -1549,7 +1564,7 @@ func AddSpeedTestSample(
 		BytesDown:        len(response),
 	}
 
-	maxCount := clientParameters.Get().Int(parameters.SpeedTestMaxSampleCount)
+	maxCount := params.Get().Int(parameters.SpeedTestMaxSampleCount)
 	if maxCount == 0 {
 		return errors.TraceNew("speed test max sample count is 0")
 	}

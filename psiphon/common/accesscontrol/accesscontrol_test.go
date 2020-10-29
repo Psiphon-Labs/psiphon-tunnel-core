@@ -94,6 +94,18 @@ func TestAuthorization(t *testing.T) {
 		t.Fatalf("IssueAuthorization failed: %s", err)
 	}
 
+	// Test: re-issuing authorization with the same seedAuthorizationID yields
+	// the same value
+
+	reauth, _, err := IssueAuthorization(correctSigningKey, id, expires)
+	if err != nil {
+		t.Fatalf("IssueAuthorization failed: %s", err)
+	}
+
+	if auth != reauth {
+		t.Fatalf("unexpected difference in authorizations")
+	}
+
 	// Decode the signed authorization and check that the auth ID in the JSON
 	// matches the one returned by IssueAuthorization.
 

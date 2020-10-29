@@ -176,6 +176,7 @@ Psiphon Tunnel Core uses:
 * [hashicorp/golang-lru](https://github.com/hashicorp/golang-lru)
 * [juju/ratelimit](https://github.com/juju/ratelimit)
 * [kardianos/osext](https://github.com/kardianos/osext)
+* [groupcache/lru]("github.com/golang/groupcache/lru")
 * [lucas-clemente/quic-go](https://github.com/lucas-clemente/quic-go)
 * [marusama/semaphore](https://github.com/marusama/semaphore)
 * [mdlayher/netlink)](https://github.com/mdlayher/netlink)

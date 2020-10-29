@@ -48,6 +48,17 @@ type TraceLogger struct {
 // package.
 type LogFields logrus.Fields
 
+// Add copies log fields from b to a, skipping fields which already exist,
+// regardless of value, in a.
+func (a LogFields) Add(b LogFields) {
+	for name, value := range b {
+		_, ok := a[name]
+		if !ok {
+			a[name] = value
+		}
+	}
+}
+
 // WithTrace adds a "trace" field containing the caller's function name
 // and source file line number; and "host_id" and "build_rev" fields
 // identifying this server and build. Use this function when the log has no

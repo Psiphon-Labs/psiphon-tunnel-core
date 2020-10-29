@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
@@ -43,8 +42,12 @@ func TestTactics(t *testing.T) {
 
 	// Server tactics configuration
 
-	// Long and short region lists test both map and slice lookups
-	// Repeated median aggregation tests aggregation memoization
+	// Long and short region lists test both map and slice lookups.
+	//
+	// Repeated median aggregation tests aggregation memoization.
+	//
+	// The test-packetman-spec tests a reference between a filter tactics
+	// and default tactics.
 
 	tacticsConfigTemplate := `
     {
@@ -55,7 +58,8 @@ func TestTactics(t *testing.T) {
         "TTL" : "1s",
         "Probability" : %0.1f,
         "Parameters" : {
-          "NetworkLatencyMultiplier" : %0.1f
+          "NetworkLatencyMultiplier" : %0.1f,
+          "ServerPacketManipulationSpecs" : [{"Name": "test-packetman-spec", "PacketSpecs": [["TCP-flags S"]]}]
         }
       },
       "FilteredTactics" : [
@@ -101,18 +105,11 @@ func TestTactics(t *testing.T) {
         },
         {
           "Filter" : {
-            "Regions": ["R7"],
-            "ISPs": ["I1"],
-            "Cities": ["C1"]
+            "Regions": ["R7"]
           },
           "Tactics" : {
             "Parameters" : {
-              "FragmentorDownstreamProbability" : 1.0,
-              "FragmentorDownstreamMinTotalBytes" : 1,
-              "FragmentorDownstreamMaxTotalBytes" : 1,
-              "FragmentorDownstreamMinWriteBytes" : 1,
-              "FragmentorDownstreamMaxWriteBytes" : 1,
-              "FragmentorDownstreamLimitProtocols" : ["OSSH"]
+              "ServerProtocolPacketManipulations": {"All" : ["test-packetman-spec"]}
             }
           }
         }
@@ -135,20 +132,6 @@ func TestTactics(t *testing.T) {
 	jsonTacticsLimitTunnelProtocols := `"LimitTunnelProtocols" : ["OSSH", "SSH"]`
 
 	expectedApplyCount := 3
-
-	listenerProtocol := "OSSH"
-	listenerFragmentedGeoIP := func(string) common.GeoIPData {
-		return common.GeoIPData{Country: "R7", ISP: "I1", City: "C1"}
-	}
-	listenerUnfragmentedGeoIPWrongRegion := func(string) common.GeoIPData {
-		return common.GeoIPData{Country: "R8", ISP: "I1", City: "C1"}
-	}
-	listenerUnfragmentedGeoIPWrongISP := func(string) common.GeoIPData {
-		return common.GeoIPData{Country: "R7", ISP: "I2", City: "C1"}
-	}
-	listenerUnfragmentedGeoIPWrongCity := func(string) common.GeoIPData {
-		return common.GeoIPData{Country: "R7", ISP: "I1", City: "C2"}
-	}
 
 	tacticsConfig := fmt.Sprintf(
 		tacticsConfigTemplate,
@@ -183,11 +166,11 @@ func TestTactics(t *testing.T) {
 	logger := newTestLogger()
 
 	validator := func(
-		params common.APIParameters) error {
+		apiParams common.APIParameters) error {
 
 		expectedParams := []string{"client_platform", "client_version"}
 		for _, name := range expectedParams {
-			value, ok := params[name]
+			value, ok := apiParams[name]
 			if !ok {
 				return fmt.Errorf("missing param: %s", name)
 			}
@@ -201,9 +184,9 @@ func TestTactics(t *testing.T) {
 
 	formatter := func(
 		geoIPData common.GeoIPData,
-		params common.APIParameters) common.LogFields {
+		apiParams common.APIParameters) common.LogFields {
 
-		return common.LogFields(params)
+		return common.LogFields(apiParams)
 	}
 
 	server, err := NewServer(
@@ -243,12 +226,12 @@ func TestTactics(t *testing.T) {
 
 	// Configure client
 
-	clientParams, err := parameters.NewClientParameters(
+	params, err := parameters.NewParameters(
 		func(err error) {
-			t.Fatalf("ClientParameters getValue failed: %s", err)
+			t.Fatalf("Parameters getValue failed: %s", err)
 		})
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	networkID := "NETWORK1"
@@ -308,9 +291,9 @@ func TestTactics(t *testing.T) {
 
 	checkParameters := func(r *Record) {
 
-		p, err := parameters.NewClientParameters(nil)
+		p, err := parameters.NewParameters(nil)
 		if err != nil {
-			t.Fatalf("NewClientParameters failed: %s", err)
+			t.Fatalf("NewParameters failed: %s", err)
 		}
 
 		if r.Tactics.Probability != tacticsProbability {
@@ -350,7 +333,7 @@ func TestTactics(t *testing.T) {
 
 	initialFetchTacticsRecord, err := FetchTactics(
 		ctx,
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -422,7 +405,7 @@ func TestTactics(t *testing.T) {
 
 	fetchTacticsRecord, err := FetchTactics(
 		context.Background(),
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -499,7 +482,7 @@ func TestTactics(t *testing.T) {
 
 	fetchTacticsRecord, err = FetchTactics(
 		context.Background(),
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -539,7 +522,7 @@ func TestTactics(t *testing.T) {
 		"client_platform": "P1",
 		"client_version":  "V1"}
 
-	err = SetTacticsAPIParameters(clientParams, storer, networkID, handshakeParams)
+	err = SetTacticsAPIParameters(storer, networkID, handshakeParams)
 	if err != nil {
 		t.Fatalf("SetTacticsAPIParameters failed: %s", err)
 	}
@@ -608,7 +591,7 @@ func TestTactics(t *testing.T) {
 
 	// Exercise speed test sample truncation
 
-	maxSamples := clientParams.Get().Int(parameters.SpeedTestMaxSampleCount)
+	maxSamples := params.Get().Int(parameters.SpeedTestMaxSampleCount)
 
 	for i := 0; i < maxSamples*2; i++ {
 
@@ -618,7 +601,7 @@ func TestTactics(t *testing.T) {
 		}
 
 		err = AddSpeedTestSample(
-			clientParams,
+			params,
 			storer,
 			networkID,
 			"",
@@ -655,7 +638,7 @@ func TestTactics(t *testing.T) {
 
 	_, err = FetchTactics(
 		context.Background(),
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -670,7 +653,7 @@ func TestTactics(t *testing.T) {
 
 	_, err = FetchTactics(
 		context.Background(),
-		clientParams,
+		params,
 		storer,
 		getNetworkID,
 		apiParams,
@@ -726,114 +709,294 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("HandleEndPoint unexpectedly handled request")
 	}
 
-	// Test Listener
-
-	tacticsProbability = 1.0
-
-	tacticsConfig = fmt.Sprintf(
-		tacticsConfigTemplate,
-		"",
-		"",
-		"",
-		tacticsProbability,
-		tacticsNetworkLatencyMultiplier,
-		tacticsConnectionWorkerPoolSize,
-		jsonTacticsLimitTunnelProtocols,
-		tacticsConnectionWorkerPoolSize+1)
-
-	err = ioutil.WriteFile(configFileName, []byte(tacticsConfig), 0600)
-	if err != nil {
-		t.Fatalf("WriteFile failed: %s", err)
-	}
-
-	reloaded, err = server.Reload()
-	if err != nil {
-		t.Fatalf("Reload failed: %s", err)
-	}
-
-	if !reloaded {
-		t.Fatalf("Server config failed to reload")
-	}
-
-	listenerTestCases := []struct {
-		description      string
-		geoIPLookup      func(string) common.GeoIPData
-		expectFragmentor bool
-	}{
-		{
-			"fragmented",
-			listenerFragmentedGeoIP,
-			true,
-		},
-		{
-			"unfragmented-region",
-			listenerUnfragmentedGeoIPWrongRegion,
-			false,
-		},
-		{
-			"unfragmented-ISP",
-			listenerUnfragmentedGeoIPWrongISP,
-			false,
-		},
-		{
-			"unfragmented-city",
-			listenerUnfragmentedGeoIPWrongCity,
-			false,
-		},
-	}
-
-	for _, testCase := range listenerTestCases {
-		t.Run(testCase.description, func(t *testing.T) {
-
-			tcpListener, err := net.Listen("tcp", ":0")
-			if err != nil {
-				t.Fatalf(" net.Listen failed: %s", err)
-			}
-
-			tacticsListener := NewListener(
-				tcpListener,
-				server,
-				listenerProtocol,
-				testCase.geoIPLookup)
-
-			clientConn, err := net.Dial("tcp", tacticsListener.Addr().String())
-			if err != nil {
-				t.Fatalf(" net.Dial failed: %s", err)
-				return
-			}
-
-			result := make(chan net.Conn, 1)
-
-			go func() {
-				serverConn, err := tacticsListener.Accept()
-				if err == nil {
-					result <- serverConn
-				}
-			}()
-
-			timer := time.NewTimer(3 * time.Second)
-			defer timer.Stop()
-
-			select {
-			case serverConn := <-result:
-				_, isFragmentor := serverConn.(*fragmentor.Conn)
-				if testCase.expectFragmentor && !isFragmentor {
-					t.Fatalf("unexpected non-fragmentor: %T", serverConn)
-				} else if !testCase.expectFragmentor && isFragmentor {
-					t.Fatalf("unexpected fragmentor:  %T", serverConn)
-				}
-				serverConn.Close()
-			case <-timer.C:
-				t.Fatalf("timeout before expected accepted connection")
-			}
-
-			clientConn.Close()
-			tacticsListener.Close()
-		})
-	}
-
 	// TODO: test replay attack defence
 	// TODO: test Server.Validate with invalid tactics configurations
+}
+
+func TestTacticsFilterGeoIPScope(t *testing.T) {
+
+	encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatalf("GenerateKeys failed: %s", err)
+	}
+
+	tacticsConfigTemplate := fmt.Sprintf(`
+    {
+      "RequestPublicKey" : "%s",
+      "RequestPrivateKey" : "%s",
+      "RequestObfuscatedKey" : "%s",
+      "DefaultTactics" : {
+        "TTL" : "60s",
+        "Probability" : 1.0
+      },
+      %%s
+    }
+    `, encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey)
+
+	// Test: region-only scope
+
+	filteredTactics := `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1", "R2", "R3"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R4", "R5", "R6"]
+          }
+        }
+      ]
+	`
+
+	tacticsConfig := fmt.Sprintf(tacticsConfigTemplate, filteredTactics)
+
+	file, err := ioutil.TempFile("", "tactics.config")
+	if err != nil {
+		t.Fatalf("TempFile create failed: %s", err)
+	}
+	_, err = file.Write([]byte(tacticsConfig))
+	if err != nil {
+		t.Fatalf("TempFile write failed: %s", err)
+	}
+	file.Close()
+
+	configFileName := file.Name()
+	defer os.Remove(configFileName)
+
+	server, err := NewServer(
+		nil,
+		nil,
+		nil,
+		configFileName)
+	if err != nil {
+		t.Fatalf("NewServer failed: %s", err)
+	}
+
+	geoIPData := common.GeoIPData{
+		Country: "R0",
+		ISP:     "I0",
+		City:    "C0",
+	}
+
+	scope := server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeRegion {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	// Test: ISP-only scope
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "ISPs": ["I1", "I2", "I3"]
+          }
+        },
+        {
+          "Filter" : {
+            "ISPs": ["I4", "I5", "I6"]
+          }
+        }
+      ]
+	`
+
+	reload := func() {
+		tacticsConfig = fmt.Sprintf(tacticsConfigTemplate, filteredTactics)
+
+		err = ioutil.WriteFile(configFileName, []byte(tacticsConfig), 0600)
+		if err != nil {
+			t.Fatalf("WriteFile failed: %s", err)
+		}
+
+		reloaded, err := server.Reload()
+		if err != nil {
+			t.Fatalf("Reload failed: %s", err)
+		}
+
+		if !reloaded {
+			t.Fatalf("Server config failed to reload")
+		}
+	}
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeISP {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	// Test: City-only scope
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Cities": ["C1", "C2", "C3"]
+          }
+        },
+        {
+          "Filter" : {
+            "Cities": ["C4", "C5", "C6"]
+          }
+        }
+      ]
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	// Test: full scope
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1", "R2", "R3"]
+          }
+        },
+        {
+          "Filter" : {
+            "ISPs": ["I1", "I2", "I3"]
+          }
+        },
+        {
+          "Filter" : {
+            "Cities": ["C4", "C5", "C6"]
+          }
+        }
+      ]
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	// Test: conditional scopes
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R2"],
+            "ISPs": ["I2a"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R2"],
+            "ISPs": ["I2b"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R3"],
+            "ISPs": ["I3a"],
+            "Cities": ["C3a"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R3"],
+            "ISPs": ["I3b"],
+            "Cities": ["C3b"]
+          }
+        }
+      ]
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R0"})
+
+	if scope != GeoIPScopeRegion {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R1"})
+
+	if scope != GeoIPScopeRegion {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R2"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R3"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	// Test: reset regional map optimization
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1"],
+            "ISPs": ["I1"]
+          }
+        },
+        {
+          "Filter" : {
+            "Cities": ["C1"]
+          }
+        }
+      ]
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R0"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "Regions": ["R1"],
+            "Cities": ["C1"]
+          }
+        },
+        {
+          "Filter" : {
+            "ISPs": ["I1"]
+          }
+        }
+      ]
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R0"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
 }
 
 type testStorer struct {

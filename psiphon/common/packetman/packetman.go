@@ -42,14 +42,14 @@ algorithm component.
 Other notable differences:
 
 - We intercept, parse, and transform only server-side outbound SYN-ACK
-  packets. Geneva supports client-side packet manipulation with a more diverse
-  set of trigger packets, but in practise we cannot execute most low-level
-  packet operations on client platforms such as Android and iOS.
+packets. Geneva supports client-side packet manipulation with a more diverse
+set of trigger packets, but in practise we cannot execute most low-level
+packet operations on client platforms such as Android and iOS.
 
 - For expediancy, we use a simplified strategy syntax (called transformation
-  specs, to avoid confusion with the more general original). As we do not
-  evolve strategies, we do not use a tree representation and some
-  randomization tranformations are simplified.
+specs, to avoid confusion with the more general original). As we do not
+evolve strategies, we do not use a tree representation and some
+randomization tranformations are simplified.
 
 At this time, full functionality is limited to the Linux platform.
 
@@ -101,11 +101,13 @@ type Config struct {
 	// SelectSpecName is a callback invoked for each intercepted SYN-ACK packet.
 	// SelectSpecName must return a name of a Spec, in Specs, to apply that
 	// transformation spec, or "" to send the SYN-ACK packet unmodified.
+	// The second return value is arbitrary extra data that is associated
+	// with the packet's connection; see GetAppliedSpecName.
 	//
 	// The inputs protocolPort and clientIP allow the callback to select a Spec
 	// based on the protocol running at the intercepted packet's port and/or
 	// client GeoIP.
-	SelectSpecName func(protocolPort int, clientIP net.IP) string
+	SelectSpecName func(protocolPort int, clientIP net.IP) (string, interface{})
 
 	// SudoNetworkConfigCommands specifies whether to use "sudo" when executing
 	// network configuration commands. See comment for same parameter in
@@ -130,17 +132,16 @@ type Config struct {
 // Syntax of individual tranformations:
 //
 // "TCP-flags random|<flags>"
+// flags: FSRPAUECN
+//
 // "TCP-<field> random|<base64>"
+// field: srcport, dstport, seq, ack, dataoffset, window, checksum, urgent
+//
 // "TCP-option-<option> random|omit|<base64>"
+// option: eol, nop, mss, windowscale, sackpermitted, sack, timestamps,
+// altchecksum, altchecksumdata, md5header, usertimeout
+//
 // "TCP-payload random|<base64>"
-//
-// flags:   FSRPAUECN
-//
-// fields:  srcport, dstport, seq, ack, dataoffset, window, checksum, urgent
-//
-// options: eol, nop, mss, windowscale, sackpermitted, sack, timestamps,
-//          altchecksum, altchecksumdata, md5header, usertimeout
-//
 //
 // For example, this Geneva strategy:
 //   [TCP:flags:SA]-duplicate(tamper{TCP:flags:replace:R},tamper{TCP:flags:replace:S})-| \/

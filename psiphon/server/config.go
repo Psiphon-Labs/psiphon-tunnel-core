@@ -214,6 +214,25 @@ type Config struct {
 	// used as the client IP.
 	MeekProxyForwardedForHeaders []string
 
+	// MeekTurnAroundTimeoutMilliseconds specifies the amount of time meek will
+	// wait for downstream bytes before responding to a request. The default is
+	// MEEK_DEFAULT_TURN_AROUND_TIMEOUT.
+	MeekTurnAroundTimeoutMilliseconds *int
+
+	// MeekExtendedTurnAroundTimeoutMilliseconds specifies the extended amount of
+	// time meek will wait for downstream bytes, as long as bytes arrive every
+	// MeekTurnAroundTimeoutMilliseconds, before responding to a request. The
+	// default is MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT.
+	MeekExtendedTurnAroundTimeoutMilliseconds *int
+
+	// MeekMaxSessionStalenessMilliseconds specifies the TTL for meek sessions.
+	// The default is MEEK_DEFAULT_MAX_SESSION_STALENESS.
+	MeekMaxSessionStalenessMilliseconds *int
+
+	// MeekHTTPClientIOTimeoutMilliseconds specifies meek HTTP server I/O
+	// timeouts. The default is MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT.
+	MeekHTTPClientIOTimeoutMilliseconds *int
+
 	// MeekCachedResponseBufferSize is the size of a private,
 	// fixed-size buffer allocated for every meek client. The buffer
 	// is used to cache response payload, allowing the client to retry
