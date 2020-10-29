@@ -124,7 +124,7 @@ func TestLimitTunnelProtocols(t *testing.T) {
 	applyParameters[parameters.InitialLimitTunnelProtocolsCandidateCount] = initialLimitTunnelProtocolsCandidateCount
 	applyParameters[parameters.LimitTunnelProtocols] = limitTunnelProtocols
 
-	err = clientConfig.SetClientParameters("", true, applyParameters)
+	err = clientConfig.SetParameters("", true, applyParameters)
 	if err != nil {
 		t.Fatalf("error setting client parameters: %s", err)
 	}

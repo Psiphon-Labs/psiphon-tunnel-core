@@ -134,6 +134,14 @@ func NewPRNGWithSaltedSeed(seed *Seed, salt string) (*PRNG, error) {
 	return NewPRNGWithSeed(saltedSeed), nil
 }
 
+// GetSeed returns the seed for the PRNG. The returned value must not be mutated.
+func (p *PRNG) GetSeed() *Seed {
+	// Concurrency note: p.randomStreamSeed is not mutated after creationg, and
+	// is safe for concurrent reads. p.randomStreamSeed is reread internally, and
+	// so must not be mutated.
+	return p.randomStreamSeed
+}
+
 // Read reads random bytes from the PRNG stream into b. Read conforms to
 // io.Reader and always returns len(p), nil.
 func (p *PRNG) Read(b []byte) (int, error) {

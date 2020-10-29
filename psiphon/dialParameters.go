@@ -155,7 +155,7 @@ func MakeDialParameters(
 
 	networkID := config.GetNetworkID()
 
-	p := config.GetClientParameters().Get()
+	p := config.GetParameters().Get()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
 	replayBPF := p.Bool(parameters.ReplayBPF)
@@ -677,7 +677,7 @@ func MakeDialParameters(
 
 		dialParams.meekConfig = &MeekConfig{
 			DiagnosticID:                  serverEntry.GetDiagnosticID(),
-			ClientParameters:              config.clientParameters,
+			Parameters:                    config.GetParameters(),
 			DialAddress:                   dialParams.MeekDialAddress,
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
@@ -769,7 +769,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// to, e.g., temporary network disruptions or server load limiting.
 
 	if dialParams.IsReplay &&
-		!config.GetClientParameters().Get().WeightedCoinFlip(
+		!config.GetParameters().Get().WeightedCoinFlip(
 			parameters.ReplayRetainFailedProbability) {
 
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
@@ -858,7 +858,7 @@ func (dialParams *ExchangedDialParameters) Validate(serverEntry *protocol.Server
 // then later fully initialized by MakeDialParameters.
 func (dialParams *ExchangedDialParameters) MakeDialParameters(
 	config *Config,
-	p parameters.ClientParametersAccessor,
+	p parameters.ParametersAccessor,
 	serverEntry *protocol.ServerEntry) *DialParameters {
 
 	return &DialParameters{
@@ -871,7 +871,7 @@ func (dialParams *ExchangedDialParameters) MakeDialParameters(
 
 func getConfigStateHash(
 	config *Config,
-	p parameters.ClientParametersAccessor,
+	p parameters.ParametersAccessor,
 	serverEntry *protocol.ServerEntry) []byte {
 
 	// The config state hash should reflect config, tactics, and server entry
@@ -950,7 +950,7 @@ func selectFrontingParameters(serverEntry *protocol.ServerEntry) (string, string
 func selectQUICVersion(
 	isFronted bool,
 	frontingProviderID string,
-	p parameters.ClientParametersAccessor) string {
+	p parameters.ParametersAccessor) string {
 
 	limitQUICVersions := p.QUICVersions(parameters.LimitQUICVersions)
 
@@ -998,7 +998,7 @@ func selectQUICVersion(
 
 // selectUserAgentIfUnset selects a User-Agent header if one is not set.
 func selectUserAgentIfUnset(
-	p parameters.ClientParametersAccessor, headers http.Header) (bool, string) {
+	p parameters.ParametersAccessor, headers http.Header) (bool, string) {
 
 	if _, ok := headers["User-Agent"]; !ok {
 
@@ -1015,7 +1015,7 @@ func selectUserAgentIfUnset(
 
 func makeDialCustomHeaders(
 	config *Config,
-	p parameters.ClientParametersAccessor) http.Header {
+	p parameters.ParametersAccessor) http.Header {
 
 	dialCustomHeaders := make(http.Header)
 	if config.CustomHeaders != nil {

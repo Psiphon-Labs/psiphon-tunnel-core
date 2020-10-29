@@ -309,9 +309,9 @@ func TestMeekResiliency(t *testing.T) {
 		DeviceBinder: new(fileDescriptorInterruptor),
 	}
 
-	clientParameters, err := parameters.NewClientParameters(nil)
+	params, err := parameters.NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s", err)
+		t.Fatalf("NewParameters failed: %s", err)
 	}
 
 	meekObfuscatorPaddingSeed, err := prng.NewSeed()
@@ -320,7 +320,7 @@ func TestMeekResiliency(t *testing.T) {
 	}
 
 	meekConfig := &psiphon.MeekConfig{
-		ClientParameters:              clientParameters,
+		Parameters:                    params,
 		DialAddress:                   serverAddress,
 		UseHTTPS:                      useTLS,
 		UseObfuscatedSessionTickets:   useObfuscatedSessionTickets,
@@ -486,9 +486,9 @@ func TestMeekRateLimiter(t *testing.T) {
 
 		dialConfig := &psiphon.DialConfig{}
 
-		clientParameters, err := parameters.NewClientParameters(nil)
+		params, err := parameters.NewParameters(nil)
 		if err != nil {
-			t.Fatalf("NewClientParameters failed: %s", err)
+			t.Fatalf("NewParameters failed: %s", err)
 		}
 
 		meekObfuscatorPaddingSeed, err := prng.NewSeed()
@@ -497,7 +497,7 @@ func TestMeekRateLimiter(t *testing.T) {
 		}
 
 		meekConfig := &psiphon.MeekConfig{
-			ClientParameters:              clientParameters,
+			Parameters:                    params,
 			DialAddress:                   serverAddress,
 			HostHeader:                    "example.com",
 			MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,

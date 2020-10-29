@@ -254,7 +254,7 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 		if err == nil {
 			dialParams := payload.ExchangedDialParameters.MakeDialParameters(
 				config,
-				config.GetClientParameters().Get(),
+				config.GetParameters().Get(),
 				serverEntry)
 
 			err = SetDialParameters(

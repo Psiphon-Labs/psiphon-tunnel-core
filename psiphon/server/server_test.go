@@ -132,6 +132,7 @@ func TestSSH(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -152,6 +153,7 @@ func TestOSSH(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -172,6 +174,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -192,6 +195,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -213,6 +217,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -234,6 +239,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -255,6 +261,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -276,6 +283,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -299,6 +307,7 @@ func TestQUICOSSH(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -322,6 +331,7 @@ func TestMarionetteOSSH(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -342,6 +352,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -362,6 +373,7 @@ func TestHotReload(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -382,6 +394,7 @@ func TestDefaultSponsorID(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -402,6 +415,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -422,6 +436,7 @@ func TestOmitAuthorization(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -442,6 +457,7 @@ func TestNoAuthorization(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -462,6 +478,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -482,6 +499,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -502,6 +520,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -522,6 +541,7 @@ func TestLivenessTest(t *testing.T) {
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
 		})
 }
 
@@ -542,6 +562,28 @@ func TestPruneServerEntries(t *testing.T) {
 			doPruneServerEntries: true,
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
+			doBurstMonitor:       false,
+		})
+}
+
+func TestBurstMonitor(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
+			forceLivenessTest:    false,
+			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
+			doBurstMonitor:       true,
 		})
 }
 
@@ -561,6 +603,7 @@ type runServerConfig struct {
 	doPruneServerEntries bool
 	doDanglingTCPConn    bool
 	doPacketManipulation bool
+	doBurstMonitor       bool
 }
 
 var (
@@ -607,7 +650,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// establish.
 
 	doClientTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol)
-	doServerTactics := doClientTactics || runConfig.forceFragmenting
+	doServerTactics := doClientTactics || runConfig.forceFragmenting || runConfig.doBurstMonitor
 
 	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
@@ -696,7 +739,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			tacticsRequestObfuscatedKey,
 			runConfig.tunnelProtocol,
 			propagationChannelID,
-			livenessTestSize)
+			livenessTestSize,
+			runConfig.doBurstMonitor)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -916,9 +960,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		applyParameters[parameters.TunnelConnectTimeout] = "1s"
 		applyParameters[parameters.TunnelRateLimits] = common.RateLimits{WriteBytesPerSecond: 1}
 
-		err = clientConfig.SetClientParameters("", true, applyParameters)
+		err = clientConfig.SetParameters("", true, applyParameters)
 		if err != nil {
-			t.Fatalf("SetClientParameters failed: %s", err)
+			t.Fatalf("SetParameters failed: %s", err)
 		}
 
 	} else {
@@ -950,9 +994,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			applyParameters[parameters.PsiphonAPIStatusRequestShortPeriodMax] = 1 * time.Millisecond
 		}
 
-		err = clientConfig.SetClientParameters("", true, applyParameters)
+		err = clientConfig.SetParameters("", true, applyParameters)
 		if err != nil {
-			t.Fatalf("SetClientParameters failed: %s", err)
+			t.Fatalf("SetParameters failed: %s", err)
 		}
 	}
 
@@ -1196,6 +1240,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics
 	expectServerBPFField := ServerBPFEnabled() && doServerTactics
 	expectServerPacketManipulationField := runConfig.doPacketManipulation
+	expectBurstFields := runConfig.doBurstMonitor
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -1204,6 +1249,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectClientBPFField,
 			expectServerBPFField,
 			expectServerPacketManipulationField,
+			expectBurstFields,
 			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
@@ -1241,6 +1287,7 @@ func checkExpectedServerTunnelLogFields(
 	expectClientBPFField bool,
 	expectServerBPFField bool,
 	expectServerPacketManipulationField bool,
+	expectBurstFields bool,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -1250,6 +1297,8 @@ func checkExpectedServerTunnelLogFields(
 	// - fronting_provider_id/meek_dial_ip_address/meek_resolved_ip_address only logged for FRONTED meek protocols
 
 	for _, name := range []string{
+		"start_time",
+		"duration",
 		"session_id",
 		"last_connected",
 		"establishment_duration",
@@ -1423,6 +1472,25 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("missing expected field '%s'", name)
 		} else if fmt.Sprintf("%s", fields[name]) != "test-packetman-spec" {
 			return fmt.Errorf("unexpected field value %s: '%s'", name, fields[name])
+		}
+	}
+
+	if expectBurstFields {
+
+		// common.TestBurstMonitoredConn covers inclusion of additional fields.
+		for _, name := range []string{
+			"burst_upstream_first_rate",
+			"burst_upstream_last_rate",
+			"burst_upstream_min_rate",
+			"burst_upstream_max_rate",
+			"burst_downstream_first_rate",
+			"burst_downstream_last_rate",
+			"burst_downstream_min_rate",
+			"burst_downstream_max_rate",
+		} {
+			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+				return fmt.Errorf("missing expected field '%s'", name)
+			}
 		}
 	}
 
@@ -1947,7 +2015,8 @@ func paveTacticsConfigFile(
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey string,
 	tunnelProtocol string,
 	propagationChannelID string,
-	livenessTestSize int) {
+	livenessTestSize int,
+	doBurstMonitor bool) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -1957,11 +2026,11 @@ func paveTacticsConfigFile(
       "RequestPublicKey" : "%s",
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
-      "EnforceServerSide" : true,
       "DefaultTactics" : {
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
+          %s
           "LimitTunnelProtocols" : ["%s"],
           "FragmentorLimitProtocols" : ["%s"],
           "FragmentorProbability" : 1.0,
@@ -2025,9 +2094,24 @@ func paveTacticsConfigFile(
     }
     `
 
+	burstParameters := ""
+	if doBurstMonitor {
+		burstParameters = `
+          "ServerBurstUpstreamDeadline" : "100ms",
+          "ServerBurstUpstreamTargetBytes" : 1000,
+          "ServerBurstDownstreamDeadline" : "100ms",
+          "ServerBurstDownstreamTargetBytes" : 100000,
+          "ClientBurstUpstreamDeadline" : "100ms",
+          "ClientBurstUpstreamTargetBytes" : 1000,
+          "ClientBurstDownstreamDeadline" : "100ms",
+          "ClientBurstDownstreamTargetBytes" : 100000,
+	`
+	}
+
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		burstParameters,
 		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,
@@ -2214,9 +2298,9 @@ func storePruneServerEntriesTest(
 	applyParameters := make(map[string]interface{})
 	applyParameters[parameters.RecordFailedTunnelPersistentStatsProbability] = 1.0
 
-	err = clientConfig.SetClientParameters("", true, applyParameters)
+	err = clientConfig.SetParameters("", true, applyParameters)
 	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
+		t.Fatalf("SetParameters failed: %s", err)
 	}
 
 	verifyTestCasesStored := make(verifyTestCasesStoredLookup)

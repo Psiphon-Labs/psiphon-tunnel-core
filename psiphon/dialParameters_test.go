@@ -79,9 +79,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters := make(map[string]interface{})
 	applyParameters[parameters.TransformHostNameProbability] = 1.0
 	applyParameters[parameters.PickUserAgentProbability] = 1.0
-	err = clientConfig.SetClientParameters("tag1", true, applyParameters)
+	err = clientConfig.SetParameters("tag1", true, applyParameters)
 	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
+		t.Fatalf("SetParameters failed: %s", err)
 	}
 
 	err = OpenDataStore(clientConfig)
@@ -326,9 +326,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	// Test: no replay after change tactics
 
 	applyParameters[parameters.ReplayDialParametersTTL] = "1s"
-	err = clientConfig.SetClientParameters("tag2", true, applyParameters)
+	err = clientConfig.SetParameters("tag2", true, applyParameters)
 	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
+		t.Fatalf("SetParameters failed: %s", err)
 	}
 
 	dialParams, err = MakeDialParameters(clientConfig, nil, canReplay, selectProtocol, serverEntries[0], false, 0, 0)
@@ -380,9 +380,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.ReplayObfuscatedQUIC] = false
 	applyParameters[parameters.ReplayLivenessTest] = false
 	applyParameters[parameters.ReplayAPIRequestPadding] = false
-	err = clientConfig.SetClientParameters("tag3", true, applyParameters)
+	err = clientConfig.SetParameters("tag3", true, applyParameters)
 	if err != nil {
-		t.Fatalf("SetClientParameters failed: %s", err)
+		t.Fatalf("SetParameters failed: %s", err)
 	}
 
 	dialParams, err = MakeDialParameters(clientConfig, nil, canReplay, selectProtocol, serverEntries[0], false, 0, 0)

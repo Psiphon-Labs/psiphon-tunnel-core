@@ -101,7 +101,7 @@ func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error
 func SendFeedback(ctx context.Context, config *Config, diagnosticsJson, uploadPath string) error {
 
 	// Get tactics, may update client parameters
-	p := config.GetClientParameters().Get()
+	p := config.GetParameters().Get()
 	timeout := p.Duration(parameters.FeedbackTacticsWaitPeriod)
 	p.Close()
 	getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
@@ -111,7 +111,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnosticsJson, uploadPa
 	GetTactics(getTacticsCtx, config)
 
 	// Get the latest client parameters
-	p = config.GetClientParameters().Get()
+	p = config.GetParameters().Get()
 	feedbackUploadMinRetryDelay := p.Duration(parameters.FeedbackUploadRetryMinDelaySeconds)
 	feedbackUploadMaxRetryDelay := p.Duration(parameters.FeedbackUploadRetryMaxDelaySeconds)
 	feedbackUploadTimeout := p.Duration(parameters.FeedbackUploadTimeoutSeconds)

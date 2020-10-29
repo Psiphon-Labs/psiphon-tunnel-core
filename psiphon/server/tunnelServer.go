@@ -41,10 +41,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
@@ -189,13 +189,11 @@ func (server *TunnelServer) Run() error {
 			return errors.Trace(err)
 		}
 
-		tacticsListener := tactics.NewListener(
+		tacticsListener := NewTacticsListener(
+			support,
 			listener,
-			support.TacticsServer,
 			tunnelProtocol,
-			func(IPAddress string) common.GeoIPData {
-				return common.GeoIPData(support.GeoIPService.Lookup(IPAddress))
-			})
+			func(IP string) GeoIPData { return support.GeoIPService.Lookup(IP) })
 
 		log.WithTraceFields(
 			LogFields{
@@ -1057,7 +1055,12 @@ func (sshServer *sshServer) handleClient(
 		}
 	}
 
+	// Get any packet manipulation values from GetAppliedSpecName as soon as
+	// possible due to the expiring TTL.
+
 	serverPacketManipulation := ""
+	replayedServerPacketManipulation := false
+
 	if sshServer.support.Config.RunPacketManipulator &&
 		protocol.TunnelProtocolMayUseServerPacketManipulation(tunnelProtocol) {
 
@@ -1072,7 +1075,7 @@ func (sshServer *sshServer) handleClient(
 
 		var localAddr, remoteAddr *net.TCPAddr
 		var ok bool
-		underlying, ok := clientConn.(UnderlyingTCPAddrSource)
+		underlying, ok := clientConn.(common.UnderlyingTCPAddrSource)
 		if ok {
 			localAddr, remoteAddr, ok = underlying.GetUnderlyingTCPAddrs()
 		} else {
@@ -1083,10 +1086,11 @@ func (sshServer *sshServer) handleClient(
 		}
 
 		if ok {
-			specName, err := sshServer.support.PacketManipulator.
+			specName, extraData, err := sshServer.support.PacketManipulator.
 				GetAppliedSpecName(localAddr, remoteAddr)
 			if err == nil {
 				serverPacketManipulation = specName
+				replayedServerPacketManipulation, _ = extraData.(bool)
 			}
 		}
 	}
@@ -1147,6 +1151,7 @@ func (sshServer *sshServer) handleClient(
 		sshListener,
 		tunnelProtocol,
 		serverPacketManipulation,
+		replayedServerPacketManipulation,
 		geoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
@@ -1189,9 +1194,9 @@ type sshClient struct {
 	sshListener                          *sshListener
 	tunnelProtocol                       string
 	sshConn                              ssh.Conn
-	activityConn                         *common.ActivityMonitoredConn
 	throttledConn                        *common.ThrottledConn
 	serverPacketManipulation             string
+	replayedServerPacketManipulation     bool
 	geoIPData                            GeoIPData
 	sessionID                            string
 	isFirstTunnelInSession               bool
@@ -1283,6 +1288,7 @@ func newSshClient(
 	sshListener *sshListener,
 	tunnelProtocol string,
 	serverPacketManipulation string,
+	replayedServerPacketManipulation bool,
 	geoIPData GeoIPData) *sshClient {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
@@ -1292,19 +1298,20 @@ func newSshClient(
 	// unthrottled bytes during the initial protocol negotiation.
 
 	client := &sshClient{
-		sshServer:                sshServer,
-		sshListener:              sshListener,
-		tunnelProtocol:           tunnelProtocol,
-		serverPacketManipulation: serverPacketManipulation,
-		geoIPData:                geoIPData,
-		isFirstTunnelInSession:   true,
-		tcpPortForwardLRU:        common.NewLRUConns(),
-		signalIssueSLOKs:         make(chan struct{}, 1),
-		runCtx:                   runCtx,
-		stopRunning:              stopRunning,
-		stopped:                  make(chan struct{}),
-		sendAlertRequests:        make(chan protocol.AlertRequest, ALERT_REQUEST_QUEUE_BUFFER_SIZE),
-		sentAlertRequests:        make(map[protocol.AlertRequest]bool),
+		sshServer:                        sshServer,
+		sshListener:                      sshListener,
+		tunnelProtocol:                   tunnelProtocol,
+		serverPacketManipulation:         serverPacketManipulation,
+		replayedServerPacketManipulation: replayedServerPacketManipulation,
+		geoIPData:                        geoIPData,
+		isFirstTunnelInSession:           true,
+		tcpPortForwardLRU:                common.NewLRUConns(),
+		signalIssueSLOKs:                 make(chan struct{}, 1),
+		runCtx:                           runCtx,
+		stopRunning:                      stopRunning,
+		stopped:                          make(chan struct{}),
+		sendAlertRequests:                make(chan protocol.AlertRequest, ALERT_REQUEST_QUEUE_BUFFER_SIZE),
+		sentAlertRequests:                make(map[protocol.AlertRequest]bool),
 	}
 
 	client.tcpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
@@ -1354,10 +1361,129 @@ func (sshClient *sshClient) run(
 	}
 	conn = activityConn
 
+	// Further wrap the connection with burst monitoring, when enabled.
+	//
+	// Limitation: burst parameters are fixed for the duration of the tunnel
+	// and do not change after a tactics hot reload.
+
+	var burstConn *common.BurstMonitoredConn
+
+	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
+			"ServerTacticsParametersCache.Get failed")
+		return
+	}
+
+	if !p.IsNil() {
+		upstreamTargetBytes := int64(p.Int(parameters.ServerBurstUpstreamTargetBytes))
+		upstreamDeadline := p.Duration(parameters.ServerBurstUpstreamDeadline)
+		downstreamTargetBytes := int64(p.Int(parameters.ServerBurstDownstreamTargetBytes))
+		downstreamDeadline := p.Duration(parameters.ServerBurstDownstreamDeadline)
+
+		if (upstreamDeadline != 0 && upstreamTargetBytes != 0) ||
+			(downstreamDeadline != 0 && downstreamTargetBytes != 0) {
+
+			burstConn = common.NewBurstMonitoredConn(
+				conn,
+				true,
+				upstreamTargetBytes, upstreamDeadline,
+				downstreamTargetBytes, downstreamDeadline)
+			conn = burstConn
+		}
+	}
+
+	// Allow garbage collection.
+	p.Close()
+
 	// Further wrap the connection in a rate limiting ThrottledConn.
 
 	throttledConn := common.NewThrottledConn(conn, sshClient.rateLimits())
 	conn = throttledConn
+
+	// Replay of server-side parameters is set or extended after a new tunnel
+	// meets duration and bytes transferred targets. Set a timer now that expires
+	// shortly after the target duration. When the timer fires, check the time of
+	// last byte read (a read indicating a live connection with the client),
+	// along with total bytes transferred and set or extend replay if the targets
+	// are met.
+	//
+	// Both target checks are conservative: the tunnel may be healthy, but a byte
+	// may not have been read in the last second when the timer fires. Or bytes
+	// may be transferring, but not at the target level. Only clients that meet
+	// the strict targets at the single check time will trigger replay; however,
+	// this replay will impact all clients with similar GeoIP data.
+	//
+	// A deferred function cancels the timer and also increments the replay
+	// failure counter, which will ultimately clear replay parameters, when the
+	// tunnel fails before the API handshake is completed (this includes any
+	// liveness test).
+	//
+	// A tunnel which fails to meet the targets but successfully completes any
+	// liveness test and the API handshake is ignored in terms of replay scoring.
+
+	isReplayCandidate, replayWaitDuration, replayTargetDuration :=
+		sshClient.sshServer.support.ReplayCache.GetReplayTargetDuration(sshClient.geoIPData)
+
+	if isReplayCandidate {
+
+		getFragmentorSeed := func() *prng.Seed {
+			fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+			if ok {
+				fragmentorSeed, _ := fragmentor.GetReplay()
+				return fragmentorSeed
+			}
+			return nil
+		}
+
+		setReplayAfterFunc := time.AfterFunc(
+			replayWaitDuration,
+			func() {
+				if activityConn.GetActiveDuration() >= replayTargetDuration {
+
+					sshClient.Lock()
+					bytesUp := sshClient.tcpTrafficState.bytesUp + sshClient.udpTrafficState.bytesUp
+					bytesDown := sshClient.tcpTrafficState.bytesDown + sshClient.udpTrafficState.bytesDown
+					sshClient.Unlock()
+
+					sshClient.sshServer.support.ReplayCache.SetReplayParameters(
+						sshClient.tunnelProtocol,
+						sshClient.geoIPData,
+						sshClient.serverPacketManipulation,
+						getFragmentorSeed(),
+						bytesUp,
+						bytesDown)
+				}
+			})
+
+		defer func() {
+			setReplayAfterFunc.Stop()
+			completed, _ := sshClient.getHandshaked()
+			if !completed {
+
+				// Count a replay failure case when a tunnel used replay parameters
+				// (excluding OSSH fragmentation, which doesn't use the ReplayCache) and
+				// failed to complete the API handshake.
+
+				replayedFragmentation := false
+				if sshClient.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+					fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+					if ok {
+						_, replayedFragmentation = fragmentor.GetReplay()
+					}
+				}
+				usedReplay := replayedFragmentation || sshClient.replayedServerPacketManipulation
+
+				if usedReplay {
+					sshClient.sshServer.support.ReplayCache.FailedReplayParameters(
+						sshClient.tunnelProtocol,
+						sshClient.geoIPData,
+						sshClient.serverPacketManipulation,
+						getFragmentorSeed())
+				}
+			}
+		}()
+	}
 
 	// Run the initial [obfuscated] SSH handshake in a goroutine so we can both
 	// respect shutdownBroadcast and implement a specific handshake timeout.
@@ -1374,9 +1500,9 @@ func (sshClient *sshClient) run(
 
 	resultChannel := make(chan *sshNewServerConnResult, 2)
 
-	var afterFunc *time.Timer
+	var sshHandshakeAfterFunc *time.Timer
 	if sshClient.sshServer.support.Config.sshHandshakeTimeout > 0 {
-		afterFunc = time.AfterFunc(sshClient.sshServer.support.Config.sshHandshakeTimeout, func() {
+		sshHandshakeAfterFunc = time.AfterFunc(sshClient.sshServer.support.Config.sshHandshakeTimeout, func() {
 			resultChannel <- &sshNewServerConnResult{err: std_errors.New("ssh handshake timeout")}
 		})
 	}
@@ -1440,18 +1566,19 @@ func (sshClient *sshClient) run(
 				conn = result.obfuscatedSSHConn
 			}
 
-			// Now seed fragmentor, when present, with seed derived from
-			// initial obfuscator message. See tactics.Listener.Accept.
-			// This must preceed ssh.NewServerConn to ensure fragmentor
-			// is seeded before downstream bytes are written.
+			// Seed the fragmentor, when present, with seed derived from initial
+			// obfuscator message. See tactics.Listener.Accept. This must preceed
+			// ssh.NewServerConn to ensure fragmentor is seeded before downstream bytes
+			// are written.
 			if err == nil && sshClient.tunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
-				if fragmentorConn, ok := baseConn.(*fragmentor.Conn); ok {
+				fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+				if ok {
 					var fragmentorPRNG *prng.PRNG
 					fragmentorPRNG, err = result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
 					if err != nil {
 						err = errors.Trace(err)
 					} else {
-						fragmentorConn.SetPRNG(fragmentorPRNG)
+						fragmentor.SetReplay(fragmentorPRNG)
 					}
 				}
 			}
@@ -1481,8 +1608,8 @@ func (sshClient *sshClient) run(
 		return
 	}
 
-	if afterFunc != nil {
-		afterFunc.Stop()
+	if sshHandshakeAfterFunc != nil {
+		sshHandshakeAfterFunc.Stop()
 	}
 
 	if result.err != nil {
@@ -1490,7 +1617,7 @@ func (sshClient *sshClient) run(
 		// This is a Debug log due to noise. The handshake often fails due to I/O
 		// errors as clients frequently interrupt connections in progress when
 		// client-side load balancing completes a connection to a different server.
-		log.WithTraceFields(LogFields{"error": result.err}).Debug("handshake failed")
+		log.WithTraceFields(LogFields{"error": result.err}).Debug("SSH handshake failed")
 		return
 	}
 
@@ -1503,7 +1630,6 @@ func (sshClient *sshClient) run(
 
 	sshClient.Lock()
 	sshClient.sshConn = result.sshConn
-	sshClient.activityConn = activityConn
 	sshClient.throttledConn = throttledConn
 	sshClient.Unlock()
 
@@ -1520,13 +1646,35 @@ func (sshClient *sshClient) run(
 
 	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 
-	// Some conns report additional metrics. Meek conns report resiliency
-	// metrics and fragmentor.Conns report fragmentor configs.
-	//
-	// Limitation: for meek, GetMetrics from underlying fragmentor.Conn(s)
-	// should be called in order to log fragmentor metrics for meek sessions.
+	// Log tunnel metrics.
 
 	var additionalMetrics []LogFields
+
+	// Add activity and burst metrics.
+	//
+	// The reported duration is based on last confirmed data transfer, which for
+	// sshClient.activityConn.GetActiveDuration() is time of last read byte and
+	// not conn close time. This is important for protocols such as meek. For
+	// meek, the connection remains open until the HTTP session expires, which
+	// may be some time after the tunnel has closed. (The meek protocol has no
+	// allowance for signalling payload EOF, and even if it did the client may
+	// not have the opportunity to send a final request with an EOF flag set.)
+
+	activityMetrics := make(LogFields)
+	activityMetrics["start_time"] = activityConn.GetStartTime()
+	activityMetrics["duration"] = int64(activityConn.GetActiveDuration() / time.Millisecond)
+	additionalMetrics = append(additionalMetrics, activityMetrics)
+
+	if burstConn != nil {
+		// Any outstanding burst should be recorded by burstConn.Close which should
+		// be called by unregisterEstablishedClient.
+		additionalMetrics = append(
+			additionalMetrics, LogFields(burstConn.GetMetrics(activityConn.GetStartTime())))
+	}
+
+	// Some conns report additional metrics. Meek conns report resiliency
+	// metrics and fragmentor.Conns report fragmentor configs.
+
 	if metricsSource, ok := baseConn.(common.MetricsSource); ok {
 		additionalMetrics = append(
 			additionalMetrics, LogFields(metricsSource.GetMetrics()))
@@ -1535,6 +1683,18 @@ func (sshClient *sshClient) run(
 		additionalMetrics = append(
 			additionalMetrics, LogFields(result.obfuscatedSSHConn.GetMetrics()))
 	}
+
+	// Add server-replay metrics.
+
+	replayMetrics := make(LogFields)
+	replayedFragmentation := false
+	fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+	if ok {
+		_, replayedFragmentation = fragmentor.GetReplay()
+	}
+	replayMetrics["server_replay_fragmentation"] = replayedFragmentation
+	replayMetrics["server_replay_packet_manipulation"] = sshClient.replayedServerPacketManipulation
+	additionalMetrics = append(additionalMetrics, replayMetrics)
 
 	sshClient.logTunnel(additionalMetrics)
 
@@ -2275,15 +2435,6 @@ var serverTunnelStatParams = append(
 
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
-	// Note: reporting duration based on last confirmed data transfer, which
-	// is reads for sshClient.activityConn.GetActiveDuration(), and not
-	// connection closing is important for protocols such as meek. For
-	// meek, the connection remains open until the HTTP session expires,
-	// which may be some time after the tunnel has closed. (The meek
-	// protocol has no allowance for signalling payload EOF, and even if
-	// it did the client may not have the opportunity to send a final
-	// request with an EOF flag set.)
-
 	sshClient.Lock()
 
 	logFields := getRequestLogFields(
@@ -2307,8 +2458,6 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	}
 	logFields["session_id"] = sshClient.sessionID
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
-	logFields["start_time"] = sshClient.activityConn.GetStartTime()
-	logFields["duration"] = int64(sshClient.activityConn.GetActiveDuration() / time.Millisecond)
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
 	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
 	logFields["peak_concurrent_dialing_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentDialingPortForwardCount
