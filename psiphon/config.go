@@ -42,7 +42,8 @@ import (
 )
 
 const (
-	TUNNEL_POOL_SIZE = 1
+	TUNNEL_POOL_SIZE     = 1
+	MAX_TUNNEL_POOL_SIZE = 32
 
 	// Psiphon data directory name, relative to config.DataRootDirectory.
 	// See config.GetPsiphonDataDirectory().
@@ -215,7 +216,8 @@ type Config struct {
 
 	// TunnelPoolSize specifies how many tunnels to run in parallel. Port
 	// forwards are multiplexed over multiple tunnels. If omitted or when 0,
-	// the default is TUNNEL_POOL_SIZE, which is recommended.
+	// the default is TUNNEL_POOL_SIZE, which is recommended. Any value over
+	// MAX_TUNNEL_POOL_SIZE is treated as MAX_TUNNEL_POOL_SIZE.
 	TunnelPoolSize int
 
 	// StaggerConnectionWorkersMilliseconds adds a specified delay before
@@ -1413,6 +1415,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ConnectionWorkerPoolSize != 0 {
 		applyParameters[parameters.ConnectionWorkerPoolSize] = config.ConnectionWorkerPoolSize
+	}
+
+	if config.TunnelPoolSize != 0 {
+		applyParameters[parameters.TunnelPoolSize] = config.TunnelPoolSize
 	}
 
 	if config.StaggerConnectionWorkersMilliseconds > 0 {

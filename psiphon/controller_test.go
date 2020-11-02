@@ -463,6 +463,23 @@ func TestFrontedQUIC(t *testing.T) {
 		})
 }
 
+func TestTunnelPool(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           2,
+			useUpstreamProxy:         false,
+			disruptNetwork:           false,
+			transformHostNames:       false,
+			useFragmentor:            false,
+		})
+}
+
 type controllerRunConfig struct {
 	expectNoServerEntries    bool
 	protocol                 string

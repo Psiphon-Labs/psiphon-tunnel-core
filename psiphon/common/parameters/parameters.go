@@ -78,6 +78,7 @@ const (
 	TacticsRetryPeriodJitter                         = "TacticsRetryPeriodJitter"
 	TacticsTimeout                                   = "TacticsTimeout"
 	ConnectionWorkerPoolSize                         = "ConnectionWorkerPoolSize"
+	TunnelPoolSize                                   = "TunnelPoolSize"
 	TunnelConnectTimeout                             = "TunnelConnectTimeout"
 	EstablishTunnelTimeout                           = "EstablishTunnelTimeout"
 	EstablishTunnelWorkTime                          = "EstablishTunnelWorkTime"
@@ -302,6 +303,7 @@ var defaultParameters = map[string]struct {
 	TacticsTimeout:           {value: 2 * time.Minute, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
 	ConnectionWorkerPoolSize:                 {value: 10, minimum: 1},
+	TunnelPoolSize:                           {value: 1, minimum: 1},
 	TunnelConnectTimeout:                     {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	EstablishTunnelTimeout:                   {value: 300 * time.Second, minimum: time.Duration(0)},
 	EstablishTunnelWorkTime:                  {value: 60 * time.Second, minimum: 1 * time.Second},
