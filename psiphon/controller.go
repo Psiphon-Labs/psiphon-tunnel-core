@@ -52,6 +52,7 @@ type Controller struct {
 	failedTunnels                           chan *Tunnel
 	tunnelMutex                             sync.Mutex
 	establishedOnce                         bool
+	tunnelPoolSize                          int
 	tunnels                                 []*Tunnel
 	nextTunnel                              int
 	isEstablishing                          bool
@@ -108,8 +109,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 		runWaitGroup: new(sync.WaitGroup),
 		// connectedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		connectedTunnels:     make(chan *Tunnel, config.TunnelPoolSize),
-		failedTunnels:        make(chan *Tunnel, config.TunnelPoolSize),
+		connectedTunnels:     make(chan *Tunnel, MAX_TUNNEL_POOL_SIZE),
+		failedTunnels:        make(chan *Tunnel, MAX_TUNNEL_POOL_SIZE),
+		tunnelPoolSize:       TUNNEL_POOL_SIZE,
 		tunnels:              make([]*Tunnel, 0),
 		establishedOnce:      false,
 		isEstablishing:       false,
@@ -684,10 +686,10 @@ loop:
 			// Any delays in stopEstablishing will delay the handshake for the last
 			// active tunnel.
 			//
-			// In the typical case of TunnelPoolSize of 1, only a single handshake is
+			// In the typical case of tunnelPoolSize of 1, only a single handshake is
 			// performed and the homepages notices file, when used, will not be modifed
 			// after the NoticeTunnels(1) [i.e., connected] until NoticeTunnels(0) [i.e.,
-			// disconnected]. For TunnelPoolSize > 1, serial handshakes only ensures that
+			// disconnected]. For tunnelPoolSize > 1, serial handshakes only ensures that
 			// each set of emitted NoticeHomepages is contiguous.
 
 			active, outstanding := controller.numTunnels()
@@ -787,17 +789,15 @@ loop:
 			// channel over the new SSH tunnel and configure the packet tunnel client to use
 			// the new SSH channel as its transport.
 			//
-			// Note: as is, this logic is suboptimal for TunnelPoolSize > 1, as this would
+			// Note: as is, this logic is suboptimal for tunnelPoolSize > 1, as this would
 			// continuously initialize new packet tunnel sessions for each established
-			// server. For now, config validation requires TunnelPoolSize == 1 when
+			// server. For now, config validation requires tunnelPoolSize == 1 when
 			// the packet tunnel is used.
 
 			if controller.packetTunnelTransport != nil {
 				controller.packetTunnelTransport.UseTunnel(connectedTunnel)
 			}
 
-			// TODO: design issue -- might not be enough server entries with region/caps to ever fill tunnel slots;
-			// possible solution is establish target MIN(CountServerEntries(region, protocol), TunnelPoolSize)
 			if controller.isFullyEstablished() {
 				controller.stopEstablishing()
 			}
@@ -868,7 +868,7 @@ func (controller *Controller) discardTunnel(tunnel *Tunnel) {
 func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	if len(controller.tunnels) >= controller.config.TunnelPoolSize {
+	if len(controller.tunnels) >= controller.tunnelPoolSize {
 		return false
 	}
 	// Perform a final check just in case we've established
@@ -909,7 +909,7 @@ func (controller *Controller) hasEstablishedOnce() bool {
 func (controller *Controller) isFullyEstablished() bool {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
-	return len(controller.tunnels) >= controller.config.TunnelPoolSize
+	return len(controller.tunnels) >= controller.tunnelPoolSize
 }
 
 // numTunnels returns the number of active and outstanding tunnels.
@@ -919,7 +919,7 @@ func (controller *Controller) numTunnels() (int, int) {
 	controller.tunnelMutex.Lock()
 	defer controller.tunnelMutex.Unlock()
 	active := len(controller.tunnels)
-	outstanding := controller.config.TunnelPoolSize - len(controller.tunnels)
+	outstanding := controller.tunnelPoolSize - len(controller.tunnels)
 	return active, outstanding
 }
 
@@ -996,6 +996,24 @@ func (controller *Controller) isActiveTunnelServerEntry(
 		}
 	}
 	return false
+}
+
+func (controller *Controller) setTunnelPoolSize(tunnelPoolSize int) {
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+	if tunnelPoolSize < 1 {
+		tunnelPoolSize = 1
+	}
+	if tunnelPoolSize > MAX_TUNNEL_POOL_SIZE {
+		tunnelPoolSize = MAX_TUNNEL_POOL_SIZE
+	}
+	controller.tunnelPoolSize = tunnelPoolSize
+}
+
+func (controller *Controller) getTunnelPoolSize() int {
+	controller.tunnelMutex.Lock()
+	defer controller.tunnelMutex.Unlock()
+	return controller.tunnelPoolSize
 }
 
 // Dial selects an active tunnel and establishes a port forward
@@ -1275,9 +1293,8 @@ func (controller *Controller) launchEstablishing() {
 		tacticsWaitPeriod.Stop()
 
 		if controller.isStopEstablishing() {
-			// This check isn't strictly required by avoids the
-			// overhead of launching workers if establishment
-			// stopped while awaiting a tactics request.
+			// This check isn't strictly required but avoids the overhead of launching
+			// workers if establishment stopped while awaiting a tactics request.
 			return
 		}
 	}
@@ -1303,8 +1320,6 @@ func (controller *Controller) launchEstablishing() {
 
 	workerPoolSize := p.Int(parameters.ConnectionWorkerPoolSize)
 
-	p.Close()
-
 	// When TargetServerEntry is used, override any worker pool size config or
 	// tactic parameter and use a pool size of 1. The typical use case for
 	// TargetServerEntry is to test a specific server with a single connection
@@ -1313,6 +1328,42 @@ func (controller *Controller) launchEstablishing() {
 	if controller.config.TargetServerEntry != "" {
 		workerPoolSize = 1
 	}
+
+	// TunnelPoolSize may be set by tactics, subject to local constraints. A pool
+	// size of one is forced in packet tunnel mode or when using a
+	// TargetServerEntry. The tunnel pool size is reduced when there are
+	// insufficent known server entries, within the set region and protocol
+	// constraints, to satisfy the target.
+	//
+	// Limitations, to simplify concurrent access to shared state: a ceiling of
+	// MAX_TUNNEL_POOL_SIZE is enforced by setTunnelPoolSize; the tunnel pool
+	// size target is not re-adjusted after an API handshake, even though the
+	// handshake response may deliver new tactics, or prune server entries which
+	// were potential candidates; nor is the target re-adjusted after fetching
+	// new server entries during this establishment.
+
+	tunnelPoolSize := p.Int(parameters.TunnelPoolSize)
+	if controller.config.PacketTunnelTunFileDescriptor > 0 ||
+		controller.config.TargetServerEntry != "" {
+		tunnelPoolSize = 1
+	}
+	if tunnelPoolSize > 1 {
+		// Initial count is ignored as count candidates will eventually become
+		// available.
+		_, count := CountServerEntriesWithConstraints(
+			controller.config.UseUpstreamProxy(),
+			controller.config.EgressRegion,
+			controller.protocolSelectionConstraints)
+		if count < tunnelPoolSize {
+			if count < 1 {
+				count = 1
+			}
+			tunnelPoolSize = count
+		}
+	}
+	controller.setTunnelPoolSize(tunnelPoolSize)
+
+	p.Close()
 
 	// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
 	// skip the initial phase in this establishment. This avoids spinning,
@@ -1459,7 +1510,7 @@ func (controller *Controller) establishCandidateGenerator() {
 	defer iterator.Close()
 
 	// TODO: reconcile server affinity scheme with multi-tunnel mode
-	if controller.config.TunnelPoolSize > 1 {
+	if controller.getTunnelPoolSize() > 1 {
 		applyServerAffinity = false
 	}
 
