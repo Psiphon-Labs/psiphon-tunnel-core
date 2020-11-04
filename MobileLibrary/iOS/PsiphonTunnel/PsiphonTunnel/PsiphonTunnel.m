@@ -831,9 +831,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
     
-    // This library expects a pool size of 1
-    config[@"TunnelPoolSize"] = [NSNumber numberWithInt:1];
-
     // We don't support upgrade downloading
     config[@"UpgradeDownloadURLs"] = nil;
     config[@"UpgradeDownloadUrl"] = nil;
@@ -899,11 +896,12 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             return;
         }
 
-        if ([count integerValue] > 0) {
-            [self changeConnectionStateTo:PsiphonConnectionStateConnected evenIfSameState:NO];
-        } else {
+        if ([count integerValue] == 0) {
             [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
+        } else if ([count integerValue] == 1) {
+            [self changeConnectionStateTo:PsiphonConnectionStateConnected evenIfSameState:NO];
         }
+        // count > 1 is an additional multi-tunnel establishment, and not reported.
     }
     else if ([noticeType isEqualToString:@"Exiting"]) {
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onExiting)]) {

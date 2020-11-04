@@ -845,9 +845,6 @@ public class PsiphonTunnel {
         File oslDownloadDir = new File(context.getFilesDir(), "osl");
         json.put("MigrateObfuscatedServerListDownloadDirectory", oslDownloadDir.getAbsolutePath());
 
-        // Note: onConnecting/onConnected logic assumes 1 tunnel connection
-        json.put("TunnelPoolSize", 1);
-
         // Continue to run indefinitely until connected
         if (!json.has("EstablishTunnelTimeoutSeconds")) {
             json.put("EstablishTunnelTimeoutSeconds", 0);
@@ -911,14 +908,15 @@ public class PsiphonTunnel {
 
             if (noticeType.equals("Tunnels")) {
                 int count = notice.getJSONObject("data").getInt("count");
-                if (count > 0) {
+                if (count == 0) {
+                    mHostService.onConnecting();
+                } else if (count == 1) {
                     if (isVpnMode() && mShouldRouteThroughTunnelAutomatically) {
                         routeThroughTunnel();
                     }
                     mHostService.onConnected();
-                } else {
-                    mHostService.onConnecting();
                 }
+                // count > 1 is an additional multi-tunnel establishment, and not reported.
 
             } else if (noticeType.equals("AvailableEgressRegions")) {
                 JSONArray egressRegions = notice.getJSONObject("data").getJSONArray("regions");
