@@ -89,7 +89,7 @@ func runServerReplayTest(
           "ServerReplayPacketManipulation" : true,
           "ServerReplayFragmentor" : true,
           "ServerReplayUnknownGeoIP" : true,
-          "ServerReplayTTL" : "3s",
+          "ServerReplayTTL" : "5s",
           "ServerReplayTargetWaitDuration" : "200ms",
           "ServerReplayTargetTunnelDuration" : "50ms",
           "ServerReplayTargetUpstreamBytes" : 0,
@@ -141,7 +141,7 @@ func runServerReplayTest(
 	serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
 
 	// Ensure server_tunnels emit quickly.
-	serverConfig["MeekMaxSessionStalenessMilliseconds"] = 100
+	serverConfig["MeekMaxSessionStalenessMilliseconds"] = 500
 
 	if runPacketManipulation {
 		serverConfig["RunPacketManipulator"] = true
@@ -231,7 +231,7 @@ func runServerReplayTest(
 	t.Log("TTL expires; no replay")
 
 	// Wait until TTL expires.
-	time.Sleep(3010 * time.Millisecond)
+	time.Sleep(5100 * time.Millisecond)
 
 	runServerReplayClient(t, encodedServerEntry, true)
 	checkServerTunnelLog(false)
@@ -246,7 +246,7 @@ func runServerReplayTest(
 
 	// Wait for session to be retired, which will trigger replay failure.
 	if protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
-		time.Sleep(110 * time.Millisecond)
+		time.Sleep(1000 * time.Millisecond)
 	}
 
 	runServerReplayClient(t, encodedServerEntry, true)
