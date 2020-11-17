@@ -3,6 +3,12 @@
 	"ignore": "test",
 	"package": [
 		{
+			"checksumSHA1": "U+FCQqriNrAjZd1HTErRvII8Co0=",
+			"path": "git.torproject.org/pluggable-transports/goptlib.git",
+			"revision": "781a46c66d2ddbc3509354ae7f1fccab74cb9927",
+			"revisionTime": "2019-04-11T18:29:08Z"
+		},
+		{
 			"checksumSHA1": "+Bo3QheGAtKFk7QPb+pdIEZNiYI=",
 			"path": "github.com/AndreasBriese/bbloom",
 			"revision": "28f7e881ca57bc00e028f9ede9f0d9104cfeef5e",
@@ -209,6 +215,12 @@
 			"revisionTime": "2017-10-02T20:02:53Z"
 		},
 		{
+			"checksumSHA1": "haOootYK2tDd6cG3F/ot4wg4al4=",
+			"path": "github.com/dchest/siphash",
+			"revision": "a21c2e7914a8fe0db087fa007cbe804967665dfc",
+			"revisionTime": "2020-11-09T08:17:23Z"
+		},
+		{
 			"checksumSHA1": "LE/UfJmiAXFbHwf4fNIRnFuMHUM=",
 			"path": "github.com/deckarep/golang-set",
 			"revision": "1d4478f51bed434f1dadf96dcd9b43aabac66795",
@@ -371,6 +383,12 @@
 			"revisionTime": "2018-02-01T23:52:37Z"
 		},
 		{
+			"checksumSHA1": "eGEk/t876DJsabi73ReGQSmNxVI=",
+			"path": "github.com/jinzhu/copier",
+			"revision": "632e723a6687dc925c0c4a99ea86d36e00ff2fb5",
+			"revisionTime": "2020-10-25T03:57:56Z"
+		},
+		{
 			"checksumSHA1": "z8MqG1rnemNMAoCpATKO9HpA0M8=",
 			"path": "github.com/juju/ratelimit",
 			"revision": "f60b32039441cd828005f82f3a54aafd00bc9882",
@@ -427,6 +445,12 @@
 			"path": "github.com/mitchellh/panicwrap",
 			"revision": "fce601fe55579125e1b3cb0b992287e7290f7b83",
 			"revisionTime": "2017-01-06T18:23:40Z"
+		},
+		{
+			"checksumSHA1": "PSwMdiyt8i4JTvrfwFkRRPZ2Itc=",
+			"path": "github.com/mroth/weightedrand",
+			"revision": "953da99f62a7995b5b73a21940be7af2a0be59cc",
+			"revisionTime": "2020-10-29T23:44:42Z"
 		},
 		{
 			"checksumSHA1": "N6I3i0LIjQckurgTeH3b2A5YTec=",
@@ -526,16 +550,40 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "kt4nwBTlAIn0dET5SqLdWXLLuso=",
-			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
-			"revisionTime": "2019-09-09T20:29:46Z"
+			"checksumSHA1": "TtIN/5Wshp+L7WdSLIRLlH+QzYI=",
+			"path": "github.com/refraction-networking/gotapdance",
+			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
+			"revisionTime": "2020-11-11T16:02:33Z"
 		},
 		{
-			"checksumSHA1": "vcO0kZzwAtxZ0Jk2nhrPdE16myI=",
+			"checksumSHA1": "ObZZJpjQl2BISlIiES82BW8jbEE=",
+			"path": "github.com/refraction-networking/gotapdance/ed25519/edwards25519",
+			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
+			"revisionTime": "2020-11-11T16:02:33Z"
+		},
+		{
+			"checksumSHA1": "VoyDh1KIIVE+OJbehDNJ91tf4Vw=",
+			"path": "github.com/refraction-networking/gotapdance/ed25519/extra25519",
+			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
+			"revisionTime": "2020-11-11T16:02:33Z"
+		},
+		{
+			"checksumSHA1": "5PHRWm/HbwpycYDHj6u6rQCoazg=",
+			"path": "github.com/refraction-networking/gotapdance/protobuf",
+			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
+			"revisionTime": "2020-11-11T16:02:33Z"
+		},
+		{
+			"checksumSHA1": "QGBPB0Wc0TM6grq9HWdE8IAcy3w=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "3a6e1938ad70af3e91081cd036e3ed05995d67e7",
-			"revisionTime": "2019-09-09T20:29:46Z"
+			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
+			"revisionTime": "2020-11-11T16:02:33Z"
+		},
+		{
+			"checksumSHA1": "oTqIsSoFDYizPxaLbGG1nWmiQiI=",
+			"path": "github.com/refraction-networking/gotapdance/tapdance/phantoms",
+			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
+			"revisionTime": "2020-11-11T16:02:33Z"
 		},
 		{
 			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",
@@ -602,6 +650,54 @@
 			"path": "github.com/zach-klippenstein/goregen",
 			"revision": "795b5e3961ea1912fde60af417ad85e86acc0d6a",
 			"revisionTime": "2016-03-03T16:20:51Z"
+		},
+		{
+			"checksumSHA1": "0hAOhCdLVxSQA1Q0JohD8Bhn7K4=",
+			"path": "gitlab.com/yawning/obfs4.git/common/csrand",
+			"revision": "816cff15f425d0cb87a1b996366989aa01833f99",
+			"revisionTime": "2019-01-20T16:14:28Z"
+		},
+		{
+			"checksumSHA1": "/XPowaH9OlO1DP0PoLFz0aix+SM=",
+			"path": "gitlab.com/yawning/obfs4.git/common/drbg",
+			"revision": "816cff15f425d0cb87a1b996366989aa01833f99",
+			"revisionTime": "2019-01-20T16:14:28Z"
+		},
+		{
+			"checksumSHA1": "v60BfXtdH8GnFjObFmnSeLCFaOk=",
+			"path": "gitlab.com/yawning/obfs4.git/common/ntor",
+			"revision": "816cff15f425d0cb87a1b996366989aa01833f99",
+			"revisionTime": "2019-01-20T16:14:28Z"
+		},
+		{
+			"checksumSHA1": "ionu/jUjAwvpK7ApMCqGDSEZCuY=",
+			"path": "gitlab.com/yawning/obfs4.git/common/probdist",
+			"revision": "816cff15f425d0cb87a1b996366989aa01833f99",
+			"revisionTime": "2019-01-20T16:14:28Z"
+		},
+		{
+			"checksumSHA1": "FzzCEnbgv9Va+2hf6a1NSDn9+js=",
+			"path": "gitlab.com/yawning/obfs4.git/common/replayfilter",
+			"revision": "816cff15f425d0cb87a1b996366989aa01833f99",
+			"revisionTime": "2019-01-20T16:14:28Z"
+		},
+		{
+			"checksumSHA1": "qkgbPdXEwvk3XRcsTYVaJvW0vNs=",
+			"path": "gitlab.com/yawning/obfs4.git/transports/base",
+			"revision": "816cff15f425d0cb87a1b996366989aa01833f99",
+			"revisionTime": "2019-01-20T16:14:28Z"
+		},
+		{
+			"checksumSHA1": "QluTzp5bKaIyF5QCwlS8Vg7asls=",
+			"path": "gitlab.com/yawning/obfs4.git/transports/obfs4",
+			"revision": "816cff15f425d0cb87a1b996366989aa01833f99",
+			"revisionTime": "2019-01-20T16:14:28Z"
+		},
+		{
+			"checksumSHA1": "/cd1rCHqtzxLYCjMNDSxS4xpm20=",
+			"path": "gitlab.com/yawning/obfs4.git/transports/obfs4/framing",
+			"revision": "816cff15f425d0cb87a1b996366989aa01833f99",
+			"revisionTime": "2019-01-20T16:14:28Z"
 		},
 		{
 			"checksumSHA1": "VrTiQbtu3FoRCY9h3HwjvtGVksw=",

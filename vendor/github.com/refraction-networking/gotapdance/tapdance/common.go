@@ -1,14 +1,19 @@
 package tapdance
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/refraction-networking/utls"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/refraction-networking/gotapdance/ed25519/extra25519"
+	"golang.org/x/crypto/curve25519"
 )
+
+const AES_GCM_TAG_SIZE = 16
 
 const timeoutMax = 30000
 const timeoutMin = 20000
@@ -33,10 +38,20 @@ const maxInt16 = int16(^uint16(0) >> 1) // max msg size -> might have to chunk
 
 type flowType int8
 
+/*______________________TapdanceFlowConn Mode Chart _________________________________\
+|FlowType     |Default Tag|Diff from old-school bidirectional       | Engines spawned|
+|-------------|-----------|-----------------------------------------|----------------|
+|Bidirectional| HTTP GET  |                                         | Writer, Reader |
+|Upload       | HTTP POST | acquires upload                         | Writer, Reader |
+|ReadOnly     | HTTP GET  | yields upload, writer sync ignored      | Reader         |
+|Rendezvous   | HTTP GET  | passes data in handshake and shuts down |                |
+\_____________|___________|_________________________________________|_______________*/
+
 const (
 	flowUpload        flowType = 0x1
 	flowReadOnly      flowType = 0x2
 	flowBidirectional flowType = 0x4
+	flowRendezvous    flowType = 0x0 // rendezvous flows shutdown after handshake
 )
 
 func (m *flowType) Str() string {
@@ -94,28 +109,33 @@ func (m *tdTagType) Str() string {
 	}
 }
 
-// First byte of tag is for FLAGS
+// Fixed-Size-Payload has a 1 byte flags field.
 // bit 0 (1 << 7) determines if flow is bidirectional(0) or upload-only(1)
-// bits 1-5 are unassigned
+// bit 1 (1 << 6) enables dark-decoys
+// bits 2-5 are unassigned
 // bit 6 determines whether PROXY-protocol-formatted string will be sent
 // bit 7 (1 << 0) signals to use TypeLen outer proto
 var (
-	tdFlagUploadOnly  = uint8(1 << 7)
+	tdFlagUploadOnly = uint8(1 << 7)
+	// tdFlagDarkDecoy   = uint8(1 << 6)
 	tdFlagProxyHeader = uint8(1 << 1)
 	tdFlagUseTIL      = uint8(1 << 0)
 )
 
 var default_flags = tdFlagUseTIL
 
-// Requests station to proxy client IP to upstream in following form:
-// CONNECT 1.2.3.4:443 HTTP/1.1\r\n
-// Host: 1.2.3.4\r\n
-// \r\n
+// Global EnableProxyProtocol() is deprecated,
+// use tapdance.Dialer with UseProxyHeader flag instead
+//
+// Requests station to send client's IP to covert in following form:
 // PROXY TCP4 x.x.x.x 127.0.0.1 1111 1234\r\n
 //       ^__^ ^_____^ ^_________________^
 //      proto clientIP      garbage
 func EnableProxyProtocol() {
+	Logger().Println("tapdance.EnableProxyProtocol() is deprecated, " +
+		"use tapdance.Dialer with UseProxyHeader flag instead.")
 	default_flags |= tdFlagProxyHeader
+	return
 }
 
 var tlsSecretLog string
@@ -149,21 +169,43 @@ func WriteTlsLog(clientRandom, masterSecret []byte) error {
 	return nil
 }
 
-// List of actually supported ciphers(not a list of offered ciphers!)
-// Essentially all working AES_GCM_128 ciphers
-var tapDanceSupportedCiphers = []uint16{
-	tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-	tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-	tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-	tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-	tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-	tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-}
-
 // How much time to sleep on trying to connect to decoys to prevent overwhelming them
 func sleepBeforeConnect(attempt int) (waitTime <-chan time.Time) {
 	if attempt >= 6 { // return nil for first 6 attempts
 		waitTime = time.After(time.Second * 1)
 	}
 	return
+}
+
+// takes Station's Public Key
+// returns Shared Secret, and Eligator Representative
+func generateEligatorTransformedKey(stationPubkey []byte) ([]byte, []byte, error) {
+	if len(stationPubkey) != 32 {
+		return nil, nil, errors.New("Unexpected station pubkey length. Expected: 32." +
+			" Received: " + strconv.Itoa(len(stationPubkey)) + ".")
+	}
+	var sharedSecret, clientPrivate, clientPublic, representative [32]byte
+	for ok := false; ok != true; {
+		var sliceKeyPrivate []byte = clientPrivate[:]
+		_, err := rand.Read(sliceKeyPrivate)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		ok = extra25519.ScalarBaseMult(&clientPublic, &representative, &clientPrivate)
+	}
+	var stationPubkeyByte32 [32]byte
+	copy(stationPubkeyByte32[:], stationPubkey)
+	curve25519.ScalarMult(&sharedSecret, &clientPrivate, &stationPubkeyByte32)
+
+	// extra25519.ScalarBaseMult does not randomize most significant bit(sign of y_coord?)
+	// Other implementations of elligator may have up to 2 non-random bits.
+	// Here we randomize the bit, expecting it to be flipped back to 0 on station
+	randByte := make([]byte, 1)
+	_, err := rand.Read(randByte)
+	if err != nil {
+		return nil, nil, err
+	}
+	representative[31] |= (0xC0 & randByte[0])
+	return sharedSecret[:], representative[:], nil
 }

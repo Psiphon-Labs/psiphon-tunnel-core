@@ -5,6 +5,8 @@ package tdproto
 import (
 	"encoding/binary"
 	"net"
+
+	"github.com/jinzhu/copier"
 )
 
 // InitTLSDecoySpec creates TLSDecoySpec from ip address and server name.
@@ -19,7 +21,7 @@ func InitTLSDecoySpec(ip string, sni string) *TLSDecoySpec {
 	if _ip.To4() != nil {
 		ipUint32 = new(uint32)
 		*ipUint32 = binary.BigEndian.Uint32(net.ParseIP(ip).To4())
-	} else if _ip.To16() != nil  {
+	} else if _ip.To16() != nil {
 		ipv6Bytes = _ip
 	}
 	tlsDecoy := TLSDecoySpec{Hostname: &sni, Ipv4Addr: ipUint32, Ipv6Addr: ipv6Bytes}
@@ -28,6 +30,9 @@ func InitTLSDecoySpec(ip string, sni string) *TLSDecoySpec {
 
 // GetIpAddrStr returns IP address of TLSDecoySpec as a string.
 func (ds *TLSDecoySpec) GetIpAddrStr() string {
+	if ds == nil {
+		return ""
+	}
 	if ds.Ipv4Addr != nil {
 		_ip := make(net.IP, 4)
 		binary.BigEndian.PutUint32(_ip, ds.GetIpv4Addr())
@@ -37,4 +42,11 @@ func (ds *TLSDecoySpec) GetIpAddrStr() string {
 		return net.JoinHostPort(net.IP(ds.Ipv6Addr).String(), "443")
 	}
 	return ""
+}
+
+// DeepCopy - Create a Deep Copy of a given TLSDecoySpec Object
+func (ds *TLSDecoySpec) DeepCopy() *TLSDecoySpec {
+	newDs := TLSDecoySpec{}
+	copier.Copy(&newDs, ds)
+	return &newDs
 }

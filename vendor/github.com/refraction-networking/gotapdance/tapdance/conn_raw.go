@@ -18,7 +18,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	pb "github.com/refraction-networking/gotapdance/protobuf"
-	"github.com/refraction-networking/utls"
+	tls "github.com/refraction-networking/utls"
 )
 
 // Simply establishes TLS and TapDance connection.
@@ -32,11 +32,11 @@ type tdRawConn struct {
 
 	TcpDialer func(context.Context, string, string) (net.Conn, error)
 
-	decoySpec            pb.TLSDecoySpec
-	pinDecoySpec         bool // don't ever change decoy (still changeable from outside)
-	initialMsg           pb.StationToClient
-	defaultStationPubkey []byte // this pubkey is used if the per-decoy key (tdRaw.decoySpec.Pubkey.Key) is not set
-	tagType              tdTagType
+	decoySpec     *pb.TLSDecoySpec
+	pinDecoySpec  bool // don't ever change decoy (still changeable from outside)
+	initialMsg    *pb.StationToClient
+	stationPubkey []byte
+	tagType       tdTagType
 
 	remoteConnId []byte // 32 byte ID of the connection to station, used for reconnection
 
@@ -46,19 +46,28 @@ type tdRawConn struct {
 	closed    chan struct{}
 	closeOnce sync.Once
 
+	useProxyHeader bool // request the station to prepend the connection with PROXY header
+
+	// dark decoy variables
+	darkDecoyUsed      bool
+	darkDecoySNI       string
+	darkDecoyV6Support bool // *bool so that it is a nullable type. that can be overridden by the dialer
+
 	// stats to report
 	sessionStats pb.SessionStats
 	failedDecoys []string
 
 	// purely for logging and stats reporting purposes:
-	flowId      CounterUint64 // id of the flow within the session (=how many times reconnected)
-	sessionId   uint64        // id of the local session
-	strIdSuffix string        // suffix for every log string (e.g. to mark upload-only flows)
+	flowId      uint64 // id of the flow within the session (=how many times reconnected)
+	sessionId   uint64 // id of the local session
+	strIdSuffix string // suffix for every log string (e.g. to mark upload-only flows)
+
+	tdKeys tapdanceSharedKeys
 }
 
 func makeTdRaw(handshakeType tdTagType, stationPubkey []byte) *tdRawConn {
 	tdRaw := &tdRawConn{tagType: handshakeType,
-		defaultStationPubkey: stationPubkey,
+		stationPubkey: stationPubkey,
 	}
 	tdRaw.closed = make(chan struct{})
 	return tdRaw
@@ -69,7 +78,7 @@ func (tdRaw *tdRawConn) DialContext(ctx context.Context) error {
 }
 
 func (tdRaw *tdRawConn) RedialContext(ctx context.Context) error {
-	tdRaw.flowId.Inc()
+	tdRaw.flowId++
 	return tdRaw.dial(ctx, true)
 }
 
@@ -153,6 +162,13 @@ func (tdRaw *tdRawConn) tryDialOnce(ctx context.Context, expectedTransition pb.S
 			") failed with " + err.Error())
 		return err
 	}
+
+	err = WriteTlsLog(tdRaw.tlsConn.HandshakeState.Hello.Random,
+		tdRaw.tlsConn.HandshakeState.MasterSecret)
+	if err != nil {
+		Logger().Warningf("Failed to write TLS secret log: %s", err)
+	}
+
 	tdRaw.sessionStats.TlsToDecoy = durationToU32ptrMs(tlsToDecoyTotalTs)
 	Logger().Infof("%s Connected to decoy %s(%s) in %s", tdRaw.idStr(), tdRaw.decoySpec.GetHostname(),
 		tdRaw.decoySpec.GetIpAddrStr(), tlsToDecoyTotalTs.String())
@@ -163,27 +179,7 @@ func (tdRaw *tdRawConn) tryDialOnce(ctx context.Context, expectedTransition pb.S
 		return errors.New("Closed")
 	}
 
-	// Check if cipher is supported
-	cipherIsSupported := func(id uint16) bool {
-		for _, c := range tapDanceSupportedCiphers {
-			if c == id {
-				return true
-			}
-		}
-		return false
-	}
-	if !cipherIsSupported(tdRaw.tlsConn.ConnectionState().CipherSuite) {
-		Logger().Errorf("%s decoy %s offered unsupported cipher %d\n Client ciphers: %#v\n",
-			tdRaw.idStr(), tdRaw.decoySpec.GetHostname(),
-			tdRaw.tlsConn.ConnectionState().CipherSuite,
-			tdRaw.tlsConn.HandshakeState.Hello.CipherSuites)
-		err = errors.New("Unsupported cipher.")
-		tdRaw.tlsConn.Close()
-		return err
-	}
-
-	var tdRequest string
-	tdRequest, err = tdRaw.prepareTDRequest(tdRaw.tagType)
+	tdRequest, err := tdRaw.prepareTDRequest(tdRaw.tagType)
 	if err != nil {
 		Logger().Errorf(tdRaw.idStr() +
 			" Preparation of initial TD request failed with " + err.Error())
@@ -195,6 +191,7 @@ func (tdRaw *tdRawConn) tryDialOnce(ctx context.Context, expectedTransition pb.S
 	Logger().Infoln(tdRaw.idStr() + " Attempting to connect to TapDance Station" +
 		" with connection ID: " + hex.EncodeToString(tdRaw.remoteConnId[:]) + ", method: " +
 		tdRaw.tagType.Str())
+
 	rttToStationStartTs := time.Now()
 	_, err = tdRaw.tlsConn.Write([]byte(tdRequest))
 	if err != nil {
@@ -246,7 +243,7 @@ func (tdRaw *tdRawConn) tryDialOnce(ctx context.Context, expectedTransition pb.S
 			return err
 		}
 		Logger().Infoln(tdRaw.idStr() + " Successfully connected to TapDance Station [" + tdRaw.initialMsg.GetStationId() + "]")
-	case tagHttpPostIncomplete:
+	case tagHttpPostIncomplete, tagHttpGetComplete:
 		// don't wait for response
 	default:
 		panic("Unsupported td handshake type:" + tdRaw.tagType.Str())
@@ -337,6 +334,44 @@ func (tdRaw *tdRawConn) closeWrite() error {
 	return tdRaw.tcpConn.CloseWrite()
 }
 
+// func (tdRaw *tdRawConn) generateFSP(espSize uint16) []byte {
+// 	buf := make([]byte, 6)
+// 	binary.BigEndian.PutUint16(buf[0:2], espSize)
+// 	flags := default_flags
+// 	if tdRaw.tagType == tagHttpPostIncomplete {
+// 		flags |= tdFlagUploadOnly
+// 	}
+// 	if tdRaw.useProxyHeader {
+// 		flags |= tdFlagProxyHeader
+// 	}
+// 	buf[2] = flags
+
+// 	return buf
+// }
+
+func (tdRaw *tdRawConn) generateVSP() ([]byte, error) {
+	// Generate and marshal protobuf
+	transition := pb.C2S_Transition_C2S_SESSION_INIT
+	var covert *string
+	if len(tdRaw.covert) > 0 {
+		transition = pb.C2S_Transition_C2S_SESSION_COVERT_INIT
+		covert = &tdRaw.covert
+	}
+	currGen := Assets().GetGeneration()
+	initProto := &pb.ClientToStation{
+		CovertAddress:       covert,
+		StateTransition:     &transition,
+		DecoyListGeneration: &currGen,
+	}
+
+	Logger().Debugln(tdRaw.idStr()+" Initial protobuf", initProto)
+	const AES_GCM_TAG_SIZE = 16
+	for (proto.Size(initProto)+AES_GCM_TAG_SIZE)%3 != 0 {
+		initProto.Padding = append(initProto.Padding, byte(0))
+	}
+	return proto.Marshal(initProto)
+}
+
 func (tdRaw *tdRawConn) prepareTDRequest(handshakeType tdTagType) (string, error) {
 	// Generate tag for the initial TapDance request
 	buf := new(bytes.Buffer) // What we have to encrypt with the shared secret using AES
@@ -347,6 +382,9 @@ func (tdRaw *tdRawConn) prepareTDRequest(handshakeType tdTagType) (string, error
 	flags := default_flags
 	if tdRaw.tagType == tagHttpPostIncomplete {
 		flags |= tdFlagUploadOnly
+	}
+	if tdRaw.useProxyHeader {
+		flags |= tdFlagProxyHeader
 	}
 	if err := binary.Write(buf, binary.BigEndian, flags); err != nil {
 		return "", err
@@ -389,7 +427,7 @@ func (tdRaw *tdRawConn) prepareTDRequest(handshakeType tdTagType) (string, error
 	Logger().Debugln(tdRaw.idStr()+" Initial protobuf", initProto)
 
 	// Choose the station pubkey
-	pubkey := tdRaw.defaultStationPubkey
+	pubkey := tdRaw.stationPubkey
 	if perDecoyKey := tdRaw.decoySpec.GetPubkey().GetKey(); perDecoyKey != nil {
 		pubkey = perDecoyKey // per-decoy key takes preference over default global pubkey
 	}
@@ -400,6 +438,113 @@ func (tdRaw *tdRawConn) prepareTDRequest(handshakeType tdTagType) (string, error
 		return "", err
 	}
 	return tdRaw.genHTTP1Tag(tag, encryptedProtoMsg)
+}
+
+func (tdRaw *tdRawConn) idStr() string {
+	return "[Session " + strconv.FormatUint(tdRaw.sessionId, 10) + ", " +
+		"Flow " + strconv.FormatUint(tdRaw.flowId, 10) + tdRaw.strIdSuffix + "]"
+}
+
+// Simply reads and returns protobuf
+// Returns error if it's not a protobuf
+// TODO: redesign it pb, data, err
+func (tdRaw *tdRawConn) readProto() (msg *pb.StationToClient, err error) {
+	var readBuffer bytes.Buffer
+
+	var outerProtoMsgType msgType
+	var msgLen int64 // just the body (e.g. raw data or protobuf)
+
+	// Get TIL
+	_, err = io.CopyN(&readBuffer, tdRaw.tlsConn, 2)
+	if err != nil {
+		return
+	}
+
+	typeLen := uint16toInt16(binary.BigEndian.Uint16(readBuffer.Next(2)))
+	if typeLen < 0 {
+		outerProtoMsgType = msgRawData
+		msgLen = int64(-typeLen)
+	} else if typeLen > 0 {
+		outerProtoMsgType = msgProtobuf
+		msgLen = int64(typeLen)
+	} else {
+		// protobuf with size over 32KB, not fitting into 2-byte TL
+		outerProtoMsgType = msgProtobuf
+		_, err = io.CopyN(&readBuffer, tdRaw.tlsConn, 4)
+		if err != nil {
+			return
+		}
+		msgLen = int64(binary.BigEndian.Uint32(readBuffer.Next(4)))
+	}
+
+	if outerProtoMsgType == msgRawData {
+		err = errors.New("Received data message in uninitialized flow")
+		return
+	}
+
+	// Get the message itself
+	_, err = io.CopyN(&readBuffer, tdRaw.tlsConn, msgLen)
+	if err != nil {
+		return
+	}
+
+	msg = &pb.StationToClient{}
+	err = proto.Unmarshal(readBuffer.Bytes(), msg)
+	if err != nil {
+		return
+	}
+
+	Logger().Debugln(tdRaw.idStr() + " INIT: received protobuf: " + msg.String())
+	return
+}
+
+// Generates padding and stuff
+// Currently guaranteed to be less than 1024 bytes long
+func (tdRaw *tdRawConn) writeTransition(transition pb.C2S_Transition) (n int, err error) {
+	const paddingMinSize = 250
+	const paddingMaxSize = 800
+	const paddingSmoothness = 5
+	paddingDecrement := 0 // reduce potential padding size by this value
+
+	currGen := Assets().GetGeneration()
+	msg := pb.ClientToStation{
+		DecoyListGeneration: &currGen,
+		StateTransition:     &transition,
+		UploadSync:          new(uint64)} // TODO: remove
+	if tdRaw.flowId == 0 {
+		// we have stats for each reconnect, but only send stats for the initial connection
+		msg.Stats = &tdRaw.sessionStats
+	}
+
+	if len(tdRaw.failedDecoys) > 0 {
+		failedDecoysIdx := 0 // how many failed decoys to report now
+		for failedDecoysIdx < len(tdRaw.failedDecoys) {
+			if paddingMinSize < proto.Size(&pb.ClientToStation{
+				FailedDecoys: tdRaw.failedDecoys[:failedDecoysIdx+1]}) {
+				// if failedDecoys list is too big to fit in place of min padding
+				// then send the rest on the next reconnect
+				break
+			}
+			failedDecoysIdx += 1
+		}
+		paddingDecrement = proto.Size(&pb.ClientToStation{
+			FailedDecoys: tdRaw.failedDecoys[:failedDecoysIdx]})
+
+		msg.FailedDecoys = tdRaw.failedDecoys[:failedDecoysIdx]
+		tdRaw.failedDecoys = tdRaw.failedDecoys[failedDecoysIdx:]
+	}
+	msg.Padding = []byte(getRandPadding(paddingMinSize-paddingDecrement,
+		paddingMaxSize-paddingDecrement, paddingSmoothness))
+
+	msgBytes, err := proto.Marshal(&msg)
+	if err != nil {
+		return
+	}
+
+	Logger().Infoln(tdRaw.idStr()+" sending transition: ", msg.String())
+	b := getMsgWithHeader(msgProtobuf, msgBytes)
+	n, err = tdRaw.tlsConn.Write(b)
+	return
 }
 
 // mutates tdRaw: sets tdRaw.UploadLimit
@@ -443,118 +588,12 @@ Content-Disposition: form-data; name=\"td.zip\"
 	}
 	keystreamAtTag := wholeKeystream[keystreamOffset:]
 
-	httpTag += reverseEncrypt(tag, keystreamAtTag)
+	httpTag += string(reverseEncrypt(tag, keystreamAtTag))
 	if tdRaw.tagType == tagHttpGetComplete {
 		httpTag += "\r\n\r\n"
 	}
 	Logger().Debugf("Generated HTTP TAG:\n%s\n", httpTag)
 	return httpTag, nil
-}
-
-func (tdRaw *tdRawConn) idStr() string {
-	return "[Session " + strconv.FormatUint(tdRaw.sessionId, 10) + ", " +
-		"Flow " + strconv.FormatUint(tdRaw.flowId.Get(), 10) + tdRaw.strIdSuffix + "]"
-}
-
-// Simply reads and returns protobuf
-// Returns error if it's not a protobuf
-// TODO: redesign it pb, data, err
-func (tdRaw *tdRawConn) readProto() (msg pb.StationToClient, err error) {
-	var readBuffer bytes.Buffer
-
-	var outerProtoMsgType msgType
-	var msgLen int64 // just the body (e.g. raw data or protobuf)
-
-	// Get TIL
-	_, err = io.CopyN(&readBuffer, tdRaw.tlsConn, 2)
-	if err != nil {
-		return
-	}
-
-	typeLen := uint16toInt16(binary.BigEndian.Uint16(readBuffer.Next(2)))
-	if typeLen < 0 {
-		outerProtoMsgType = msgRawData
-		msgLen = int64(-typeLen)
-	} else if typeLen > 0 {
-		outerProtoMsgType = msgProtobuf
-		msgLen = int64(typeLen)
-	} else {
-		// protobuf with size over 32KB, not fitting into 2-byte TL
-		outerProtoMsgType = msgProtobuf
-		_, err = io.CopyN(&readBuffer, tdRaw.tlsConn, 4)
-		if err != nil {
-			return
-		}
-		msgLen = int64(binary.BigEndian.Uint32(readBuffer.Next(4)))
-	}
-
-	if outerProtoMsgType == msgRawData {
-		err = errors.New("Received data message in uninitialized flow")
-		return
-	}
-
-	// Get the message itself
-	_, err = io.CopyN(&readBuffer, tdRaw.tlsConn, msgLen)
-	if err != nil {
-		return
-	}
-
-	err = proto.Unmarshal(readBuffer.Bytes(), &msg)
-	if err != nil {
-		return
-	}
-
-	Logger().Debugln(tdRaw.idStr() + " INIT: received protobuf: " + msg.String())
-	return
-}
-
-// Generates padding and stuff
-// Currently guaranteed to be less than 1024 bytes long
-func (tdRaw *tdRawConn) writeTransition(transition pb.C2S_Transition) (n int, err error) {
-	const paddingMinSize = 250
-	const paddingMaxSize = 800
-	const paddingSmoothness = 5
-	paddingDecrement := 0 // reduce potential padding size by this value
-
-	currGen := Assets().GetGeneration()
-	msg := pb.ClientToStation{
-		DecoyListGeneration: &currGen,
-		StateTransition:     &transition,
-		UploadSync:          new(uint64)} // TODO: remove
-	if tdRaw.flowId.Get() == 0 {
-		// we have stats for each reconnect, but only send stats for the initial connection
-		msg.Stats = &tdRaw.sessionStats
-	}
-
-	if len(tdRaw.failedDecoys) > 0 {
-		failedDecoysIdx := 0 // how many failed decoys to report now
-		for failedDecoysIdx < len(tdRaw.failedDecoys) {
-			if paddingMinSize < proto.Size(&pb.ClientToStation{
-				FailedDecoys: tdRaw.failedDecoys[:failedDecoysIdx+1]}) {
-				// if failedDecoys list is too big to fit in place of min padding
-				// then send the rest on the next reconnect
-				break
-			}
-			failedDecoysIdx += 1
-		}
-		paddingDecrement = proto.Size(&pb.ClientToStation{
-			FailedDecoys: tdRaw.failedDecoys[:failedDecoysIdx]})
-
-		msg.FailedDecoys = tdRaw.failedDecoys[:failedDecoysIdx]
-		tdRaw.failedDecoys = tdRaw.failedDecoys[failedDecoysIdx:]
-	}
-	msg.Padding = []byte(getRandPadding(paddingMinSize-paddingDecrement,
-		paddingMaxSize-paddingDecrement, paddingSmoothness))
-
-	msgBytes, err := proto.Marshal(&msg)
-	if err != nil {
-		return
-	}
-
-	Logger().Infoln(tdRaw.idStr()+" sending transition: ", msg.String())
-	b := getMsgWithHeader(msgProtobuf, msgBytes)
-	n, err = tdRaw.tlsConn.Write(b)
-	return
 }
 
 func (tdRaw *tdRawConn) IsClosed() bool {
