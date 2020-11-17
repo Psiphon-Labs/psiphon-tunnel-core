@@ -468,7 +468,7 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 type ConditionallyEnabledComponents interface {
 	QUICEnabled() bool
 	MarionetteEnabled() bool
-	TapdanceEnabled() bool
+	RefractionNetworkingEnabled() bool
 }
 
 // GetSupportedProtocols returns a list of tunnel protocols supported
@@ -503,7 +503,8 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 
 		if (TunnelProtocolUsesQUIC(protocol) && !conditionallyEnabled.QUICEnabled()) ||
 			(TunnelProtocolUsesMarionette(protocol) && !conditionallyEnabled.MarionetteEnabled()) ||
-			(TunnelProtocolUsesTapdance(protocol) && !conditionallyEnabled.TapdanceEnabled()) {
+			(TunnelProtocolUsesRefractionNetworking(protocol) &&
+				!conditionallyEnabled.RefractionNetworkingEnabled()) {
 			continue
 		}
 

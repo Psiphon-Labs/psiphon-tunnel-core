@@ -48,8 +48,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tapdance"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/marusama/semaphore"
 	cache "github.com/patrickmn/go-cache"
@@ -173,13 +173,13 @@ func (server *TunnelServer) Run() error {
 				support.Config.ServerIPAddress,
 				support.Config.MarionetteFormat)
 
+		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
+
+			listener, err = refraction.Listen(listener)
+
 		} else {
 
 			listener, BPFProgramName, err = newTCPListenerWithBPF(support, localAddress)
-
-			if protocol.TunnelProtocolUsesTapdance(tunnelProtocol) {
-				listener, err = tapdance.Listen(listener)
-			}
 		}
 
 		if err != nil {

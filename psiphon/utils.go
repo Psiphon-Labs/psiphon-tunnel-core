@@ -39,8 +39,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tapdance"
 )
 
 // MakePsiphonUserAgent constructs a User-Agent value to use for web service
@@ -277,6 +277,6 @@ func (c conditionallyEnabledComponents) MarionetteEnabled() bool {
 	return marionette.Enabled()
 }
 
-func (c conditionallyEnabledComponents) TapdanceEnabled() bool {
-	return tapdance.Enabled()
+func (c conditionallyEnabledComponents) RefractionNetworkingEnabled() bool {
+	return refraction.Enabled()
 }

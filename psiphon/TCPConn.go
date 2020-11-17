@@ -46,7 +46,7 @@ type TCPConn struct {
 // Note: do not set an UpstreamProxyURL in the config when using NewTCPDialer
 // as a custom dialer for NewProxyAuthTransport (or http.Transport with a
 // ProxyUrl), as that would result in double proxy chaining.
-func NewTCPDialer(config *DialConfig) Dialer {
+func NewTCPDialer(config *DialConfig) common.Dialer {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if network != "tcp" {
 			return nil, errors.Tracef("%s unsupported", network)

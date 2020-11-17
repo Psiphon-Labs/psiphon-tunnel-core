@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/miekg/dns"
@@ -105,6 +106,19 @@ type DialConfig struct {
 	UpstreamProxyErrorCallback func(error)
 }
 
+// WithoutFragmentor returns a copy of the DialConfig with any fragmentor
+// configuration disabled. The return value is not a deep copy and may be the
+// input DialConfig; it should not be modified.
+func (config *DialConfig) WithoutFragmentor() *DialConfig {
+	if config.FragmentorConfig == nil {
+		return config
+	}
+	newConfig := new(DialConfig)
+	*newConfig = *config
+	newConfig.FragmentorConfig = nil
+	return newConfig
+}
+
 // NetworkConnectivityChecker defines the interface to the external
 // HasNetworkConnectivity provider, which call into the host application to
 // check for network connectivity.
@@ -159,13 +173,10 @@ type NetworkIDGetter interface {
 	GetNetworkID() string
 }
 
-// Dialer is a custom network dialer.
-type Dialer func(context.Context, string, string) (net.Conn, error)
-
 // NetDialer implements an interface that matches net.Dialer.
 // Limitation: only "tcp" Dials are supported.
 type NetDialer struct {
-	dialTCP Dialer
+	dialTCP common.Dialer
 }
 
 // NewNetDialer creates a new NetDialer.
@@ -176,13 +187,21 @@ func NewNetDialer(config *DialConfig) *NetDialer {
 }
 
 func (d *NetDialer) Dial(network, address string) (net.Conn, error) {
-	return d.DialContext(context.Background(), network, address)
+	conn, err := d.DialContext(context.Background(), network, address)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return conn, nil
 }
 
 func (d *NetDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	switch network {
 	case "tcp":
-		return d.dialTCP(ctx, "tcp", address)
+		conn, err := d.dialTCP(ctx, "tcp", address)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return conn, nil
 	default:
 		return nil, errors.Tracef("unsupported network: %s", network)
 	}

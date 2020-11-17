@@ -434,7 +434,7 @@ func DialMeek(
 
 		scheme = "http"
 
-		var dialer Dialer
+		var dialer common.Dialer
 
 		// For HTTP, and when the meekConfig.DialAddress matches the
 		// meekConfig.HostHeader, we let http.Transport handle proxying.
@@ -573,13 +573,13 @@ func DialMeek(
 type cachedTLSDialer struct {
 	usedCachedConn int32
 	cachedConn     net.Conn
-	dialer         Dialer
+	dialer         common.Dialer
 
 	mutex      sync.Mutex
 	requestCtx context.Context
 }
 
-func newCachedTLSDialer(cachedConn net.Conn, dialer Dialer) *cachedTLSDialer {
+func newCachedTLSDialer(cachedConn net.Conn, dialer common.Dialer) *cachedTLSDialer {
 	return &cachedTLSDialer{
 		cachedConn: cachedConn,
 		dialer:     dialer,
