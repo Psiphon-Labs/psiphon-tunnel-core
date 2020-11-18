@@ -55,7 +55,8 @@ type ServerEntry struct {
 	SshHostKey                    string   `json:"sshHostKey"`
 	SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
 	SshObfuscatedQUICPort         int      `json:"sshObfuscatedQUICPort"`
-	SshObfuscatedTapdancePort     int      `json:"sshObfuscatedTapdancePort"`
+	SshObfuscatedTapDancePort     int      `json:"sshObfuscatedTapdancePort"`
+	SshObfuscatedConjurePort      int      `json:"sshObfuscatedConjurePort"`
 	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
 	Capabilities                  []string `json:"capabilities"`
 	Region                        string   `json:"region"`

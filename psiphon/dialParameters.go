@@ -546,8 +546,11 @@ func MakeDialParameters(
 	case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
 		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 
-	case protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH, protocol.TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH:
-		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedTapdancePort)
+	case protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
+		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedTapDancePort)
+
+	case protocol.TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH:
+		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedConjurePort)
 
 	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
 		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)
