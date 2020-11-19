@@ -5,7 +5,7 @@ set -e -u -x
 if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
 # Modify this value as we use newer Go versions.
-GO_VERSION_REQUIRED="1.14.9"
+GO_VERSION_REQUIRED="1.14.12"
 
 # At this time, gomobile doesn't support modules
 export GO111MODULE=off
