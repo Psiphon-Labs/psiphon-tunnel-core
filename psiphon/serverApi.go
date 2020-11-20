@@ -293,13 +293,17 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		}
 	}
 
-	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
-	NoticeServerTimestamp(serverContext.serverHandshakeTimestamp)
+	diagnosticID := serverContext.tunnel.dialParams.ServerEntry.GetDiagnosticID()
 
-	NoticeActiveAuthorizationIDs(handshakeResponse.ActiveAuthorizationIDs)
+	serverContext.serverHandshakeTimestamp = handshakeResponse.ServerTimestamp
+	NoticeServerTimestamp(diagnosticID, serverContext.serverHandshakeTimestamp)
+
+	NoticeActiveAuthorizationIDs(diagnosticID, handshakeResponse.ActiveAuthorizationIDs)
 
 	NoticeTrafficRateLimits(
-		handshakeResponse.UpstreamBytesPerSecond, handshakeResponse.DownstreamBytesPerSecond)
+		diagnosticID,
+		handshakeResponse.UpstreamBytesPerSecond,
+		handshakeResponse.DownstreamBytesPerSecond)
 
 	if doTactics && handshakeResponse.TacticsPayload != nil &&
 		networkID == serverContext.tunnel.config.GetNetworkID() {

@@ -53,7 +53,7 @@ func TestBoltResiliency(t *testing.T) {
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
-        "ConnectionPoolSize" : 10,
+        "ConnectionWorkerPoolSize" : 10,
         "EstablishTunnelTimeoutSeconds" : 1,
         "EstablishTunnelPausePeriodSeconds" : 1
     }`

@@ -174,6 +174,7 @@ const (
 	UpgradeDownloadURLs                              = "UpgradeDownloadURLs"
 	UpgradeDownloadClientVersionHeader               = "UpgradeDownloadClientVersionHeader"
 	TotalBytesTransferredNoticePeriod                = "TotalBytesTransferredNoticePeriod"
+	TotalBytesTransferredEmitMemoryMetrics           = "TotalBytesTransferredEmitMemoryMetrics"
 	MeekDialDomainsOnly                              = "MeekDialDomainsOnly"
 	MeekLimitBufferSizes                             = "MeekLimitBufferSizes"
 	MeekCookieMaxPadding                             = "MeekCookieMaxPadding"
@@ -436,7 +437,8 @@ var defaultParameters = map[string]struct {
 	UpgradeDownloadURLs:                {value: TransferURLs{}},
 	UpgradeDownloadClientVersionHeader: {value: ""},
 
-	TotalBytesTransferredNoticePeriod: {value: 5 * time.Minute, minimum: 1 * time.Second},
+	TotalBytesTransferredNoticePeriod:      {value: 5 * time.Minute, minimum: 1 * time.Second},
+	TotalBytesTransferredEmitMemoryMetrics: {value: true},
 
 	// The meek server times out inactive sessions after 45 seconds, so this
 	// is a soft max for MeekMaxPollInterval,  MeekRoundTripTimeout, and
