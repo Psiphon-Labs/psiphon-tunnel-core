@@ -194,7 +194,7 @@ func attemptConnectionsWithUserAgent(
         "ClientVersion" : "0",
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
-        "ConnectionPoolSize" : 1,
+        "ConnectionWorkerPoolSize" : 1,
         "EstablishTunnelPausePeriodSeconds" : 1,
         "DisableRemoteServerListFetcher" : true,
         "TransformHostNameProbability" : 0.0,

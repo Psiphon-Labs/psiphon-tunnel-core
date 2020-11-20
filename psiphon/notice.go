@@ -779,15 +779,16 @@ func NoticeSLOKSeeded(slokID string, duplicate bool) {
 }
 
 // NoticeServerTimestamp reports server side timestamp as seen in the handshake.
-func NoticeServerTimestamp(timestamp string) {
+func NoticeServerTimestamp(diagnosticID string, timestamp string) {
 	singletonNoticeLogger.outputNotice(
 		"ServerTimestamp", 0,
+		"diagnosticID", diagnosticID,
 		"timestamp", timestamp)
 }
 
 // NoticeActiveAuthorizationIDs reports the authorizations the server has accepted.
 // Each ID is a base64-encoded accesscontrol.Authorization.ID value.
-func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
+func NoticeActiveAuthorizationIDs(diagnosticID string, activeAuthorizationIDs []string) {
 
 	// Never emit 'null' instead of empty list
 	if activeAuthorizationIDs == nil {
@@ -796,6 +797,7 @@ func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
 
 	singletonNoticeLogger.outputNotice(
 		"ActiveAuthorizationIDs", 0,
+		"diagnosticID", diagnosticID,
 		"IDs", activeAuthorizationIDs)
 }
 
@@ -806,9 +808,12 @@ func NoticeActiveAuthorizationIDs(activeAuthorizationIDs []string) {
 //
 // Limitation: any rate limit changes during the lifetime of the tunnel are
 // not reported.
-func NoticeTrafficRateLimits(upstreamBytesPerSecond, downstreamBytesPerSecond int64) {
+func NoticeTrafficRateLimits(
+	diagnosticID string, upstreamBytesPerSecond, downstreamBytesPerSecond int64) {
+
 	singletonNoticeLogger.outputNotice(
 		"TrafficRateLimits", 0,
+		"diagnosticID", diagnosticID,
 		"upstreamBytesPerSecond", upstreamBytesPerSecond,
 		"downstreamBytesPerSecond", downstreamBytesPerSecond)
 }

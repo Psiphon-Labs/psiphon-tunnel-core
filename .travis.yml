@@ -2,7 +2,7 @@ dist: trusty
 language: go
 sudo: required
 go:
-- 1.14.9
+- 1.14.12
 addons:
   apt_packages:
     - libx11-dev

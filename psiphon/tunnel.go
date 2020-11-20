@@ -1241,6 +1241,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 			p := tunnel.getCustomParameters()
 			noticePeriod := p.Duration(parameters.TotalBytesTransferredNoticePeriod)
+			doEmitMemoryMetrics := p.Bool(parameters.TotalBytesTransferredEmitMemoryMetrics)
 			replayTargetUpstreamBytes := p.Int(parameters.ReplayTargetUpstreamBytes)
 			replayTargetDownstreamBytes := p.Int(parameters.ReplayTargetDownstreamBytes)
 			replayTargetTunnelDuration := p.Duration(parameters.ReplayTargetTunnelDuration)
@@ -1248,6 +1249,9 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			if lastTotalBytesTransferedTime.Add(noticePeriod).Before(time.Now()) {
 				NoticeTotalBytesTransferred(
 					tunnel.dialParams.ServerEntry.GetDiagnosticID(), bytesUp, bytesDown)
+				if doEmitMemoryMetrics {
+					emitMemoryMetrics()
+				}
 				lastTotalBytesTransferedTime = time.Now()
 			}
 
