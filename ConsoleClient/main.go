@@ -449,6 +449,13 @@ type FeedbackWorker struct {
 // Init implements the Worker interface.
 func (f *FeedbackWorker) Init(config *psiphon.Config) error {
 
+	// The datastore is not opened here, with psiphon.OpenDatastore,
+	// because it is opened/closed transiently in the psiphon.SendFeedback
+	// operation. We do not want to contest database access incase another
+	// process needs to use the database. E.g. a process running in tunnel
+	// mode, which will fail if it cannot aquire a lock on the database
+	// within a short period of time.
+
 	f.config = config
 
 	return nil
