@@ -2,7 +2,7 @@ package handshake
 
 import (
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
-	"github.com/marten-seemann/qtls"
+	"github.com/Psiphon-Labs/quic-go/internal/qtls"
 )
 
 const quicTLSExtensionType = 0xffa5

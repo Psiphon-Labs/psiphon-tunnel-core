@@ -2,7 +2,6 @@ package http3
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -12,19 +11,28 @@ import (
 	"sync"
 
 	"github.com/Psiphon-Labs/quic-go"
+	"github.com/Psiphon-Labs/quic-go/internal/protocol"
+	"github.com/Psiphon-Labs/quic-go/internal/qtls"
 	"github.com/Psiphon-Labs/quic-go/internal/utils"
 	"github.com/marten-seemann/qpack"
 )
 
-const defaultUserAgent = "quic-go HTTP/3"
-const defaultMaxResponseHeaderBytes = 10 * 1 << 20 // 10 MB
+// MethodGet0RTT allows a GET request to be sent using 0-RTT.
+// Note that 0-RTT data doesn't provide replay protection.
+const MethodGet0RTT = "GET_0RTT"
+
+const (
+	defaultUserAgent              = "quic-go HTTP/3"
+	defaultMaxResponseHeaderBytes = 10 * 1 << 20 // 10 MB
+)
 
 var defaultQuicConfig = &quic.Config{
 	MaxIncomingStreams: -1, // don't allow the server to create bidirectional streams
 	KeepAlive:          true,
+	Versions:           []protocol.VersionNumber{protocol.VersionTLS},
 }
 
-var dialAddr = quic.DialAddr
+var dialAddr = quic.DialAddrEarly
 
 type roundTripperOpts struct {
 	DisableCompression bool
@@ -38,7 +46,7 @@ type client struct {
 	opts    *roundTripperOpts
 
 	dialOnce     sync.Once
-	dialer       func(network, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.Session, error)
+	dialer       func(network, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlySession, error)
 	handshakeErr error
 
 	requestWriter *requestWriter
@@ -48,9 +56,10 @@ type client struct {
 	hostname string
 
 	// [Psiphon]
-	setSession sync.Mutex
-
-	session quic.Session
+	// Enable Close to be called concurrently with dial.
+	sessionMutex sync.Mutex
+	closed       bool
+	session      quic.EarlySession
 
 	logger utils.Logger
 }
@@ -60,26 +69,34 @@ func newClient(
 	tlsConf *tls.Config,
 	opts *roundTripperOpts,
 	quicConfig *quic.Config,
-	dialer func(network, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.Session, error),
-) *client {
+	dialer func(network, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlySession, error),
+) (*client, error) {
+	if quicConfig == nil {
+		quicConfig = defaultQuicConfig
+	} else if len(quicConfig.Versions) == 0 {
+		quicConfig = quicConfig.Clone()
+		quicConfig.Versions = []quic.VersionNumber{defaultQuicConfig.Versions[0]}
+	}
+	if len(quicConfig.Versions) != 1 {
+		return nil, errors.New("can only use a single QUIC version for dialing a HTTP/3 connection")
+	}
+
+	// [Psiphon]
+	// Avoid race condition the results from concurrent RoundTrippers using
+	// defaultQuicConfig.
+	if quicConfig.MaxIncomingStreams != -1 {
+		quicConfig.MaxIncomingStreams = -1 // don't allow any bidirectional streams
+	}
+
+	logger := utils.DefaultLogger.WithPrefix("h3 client")
+
 	if tlsConf == nil {
 		tlsConf = &tls.Config{}
 	} else {
 		tlsConf = tlsConf.Clone()
 	}
 	// Replace existing ALPNs by H3
-	tlsConf.NextProtos = []string{nextProtoH3}
-	if quicConfig == nil {
-		quicConfig = defaultQuicConfig
-	}
-
-	// [Psiphon]
-	// Prevent race condition the results from concurrent RoundTrippers using defaultQuicConfig
-	if quicConfig.MaxIncomingStreams != -1 {
-		quicConfig.MaxIncomingStreams = -1 // don't allow any bidirectional streams
-	}
-
-	logger := utils.DefaultLogger.WithPrefix("h3 client")
+	tlsConf.NextProtos = []string{versionToALPN(quicConfig.Versions[0])}
 
 	return &client{
 		hostname:      authorityAddr("https", hostname),
@@ -90,12 +107,12 @@ func newClient(
 		opts:          opts,
 		dialer:        dialer,
 		logger:        logger,
-	}
+	}, nil
 }
 
 func (c *client) dial() error {
 	var err error
-	var session quic.Session
+	var session quic.EarlySession
 	if c.dialer != nil {
 		session, err = c.dialer("udp", c.hostname, c.tlsConf, c.config)
 	} else {
@@ -103,14 +120,20 @@ func (c *client) dial() error {
 	}
 
 	// [Psiphon]
-	c.setSession.Lock()
-	c.session = session
-	c.setSession.Unlock()
+	c.sessionMutex.Lock()
+	if c.closed {
+		session.CloseWithError(quic.ErrorCode(errorNoError), "")
+		err = errors.New("closed while dialing")
+	} else {
+		c.session = session
+	}
+	c.sessionMutex.Unlock()
 
 	if err != nil {
 		return err
 	}
 
+	// run the sesssion setup using 0-RTT data
 	go func() {
 		if err := c.setupSession(); err != nil {
 			c.logger.Debugf("Setting up session failed: %s", err)
@@ -142,15 +165,15 @@ func (c *client) setupSession() error {
 func (c *client) Close() error {
 
 	// [Psiphon]
-	// Prevent panic when c.session is nil
-	c.setSession.Lock()
+	c.sessionMutex.Lock()
 	session := c.session
-	c.setSession.Unlock()
+	c.closed = true
+	c.sessionMutex.Unlock()
+
 	if session == nil {
 		return nil
 	}
-
-	return c.session.Close()
+	return session.CloseWithError(quic.ErrorCode(errorNoError), "")
 }
 
 func (c *client) maxHeaderBytes() uint64 {
@@ -177,7 +200,19 @@ func (c *client) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, c.handshakeErr
 	}
 
-	str, err := c.session.OpenStreamSync(context.Background())
+	// Immediately send out this request, if this is a 0-RTT request.
+	if req.Method == MethodGet0RTT {
+		req.Method = http.MethodGet
+	} else {
+		// wait for the handshake to complete
+		select {
+		case <-c.session.HandshakeComplete().Done():
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
+
+	str, err := c.session.OpenStreamSync(req.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -246,10 +281,12 @@ func (c *client) doRequest(
 		return nil, newConnError(errorGeneralProtocolError, err)
 	}
 
+	connState := qtls.ToTLSConnectionState(c.session.ConnectionState())
 	res := &http.Response{
 		Proto:      "HTTP/3",
 		ProtoMajor: 3,
 		Header:     http.Header{},
+		TLS:        &connState,
 	}
 	for _, hf := range hfs {
 		switch hf.Name {
