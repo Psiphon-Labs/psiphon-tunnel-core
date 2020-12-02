@@ -61,8 +61,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/h2quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/qerr"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	ietf_quic "github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
+	ietf_quic "github.com/Psiphon-Labs/quic-go"
+	"github.com/Psiphon-Labs/quic-go/http3"
 )
 
 const (
