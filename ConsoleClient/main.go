@@ -64,6 +64,20 @@ func main() {
 	flag.BoolVar(&versionDetails, "version", false, "print build information and exit")
 	flag.BoolVar(&versionDetails, "v", false, "print build information and exit")
 
+	var feedbackUpload bool
+	flag.BoolVar(&feedbackUpload, "feedbackUpload", false,
+		"Run in feedback upload mode to send a feedback package to Psiphon Inc.\n"+
+			"The feedback package will be read as a UTF-8 encoded string from stdin.\n"+
+			"Informational notices will be written to stdout. If the upload succeeds,\n"+
+			"the process will exit with status code 0; otherwise, the process will\n"+
+			"exit with status code 1. A feedback compatible config must be specified\n"+
+			"with the \"-config\" flag. Config must be provided by Psiphon Inc.")
+
+	var feedbackUploadPath string
+	flag.StringVar(&feedbackUploadPath, "feedbackUploadPath", "",
+		"The path at which to upload the feedback package when the \"-feedbackUpload\"\n"+
+			"flag is provided. Must be provided by Psiphon Inc.")
+
 	var tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS string
 	if tun.IsSupported() {
 
@@ -221,79 +235,44 @@ func main() {
 
 	psiphon.NoticeBuildInfo()
 
-	// Initialize data store
+	var worker Worker
 
-	err = psiphon.OpenDataStore(config)
-	if err != nil {
-		psiphon.NoticeError("error initializing datastore: %s", err)
-		os.Exit(1)
-	}
-	defer psiphon.CloseDataStore()
-
-	// Handle optional embedded server list file parameter
-	// If specified, the embedded server list is loaded and stored. When there
-	// are no server candidates at all, we wait for this import to complete
-	// before starting the Psiphon controller. Otherwise, we import while
-	// concurrently starting the controller to minimize delay before attempting
-	// to connect to existing candidate servers.
-	// If the import fails, an error notice is emitted, but the controller is
-	// still started: either existing candidate servers may suffice, or the
-	// remote server list fetch may obtain candidate servers.
-	if embeddedServerEntryListFilename != "" {
-		embeddedServerListWaitGroup := new(sync.WaitGroup)
-		embeddedServerListWaitGroup.Add(1)
-		go func() {
-			defer embeddedServerListWaitGroup.Done()
-			serverEntryList, err := ioutil.ReadFile(embeddedServerEntryListFilename)
-			if err != nil {
-				psiphon.NoticeError("error loading embedded server entry list file: %s", err)
-				return
-			}
-			// TODO: stream embedded server list data? also, the cast makes an unnecessary copy of a large buffer?
-			serverEntries, err := protocol.DecodeServerEntryList(
-				string(serverEntryList),
-				common.GetCurrentTimestamp(),
-				protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
-			if err != nil {
-				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
-				return
-			}
-			// Since embedded server list entries may become stale, they will not
-			// overwrite existing stored entries for the same server.
-			err = psiphon.StoreServerEntries(config, serverEntries, false)
-			if err != nil {
-				psiphon.NoticeError("error storing embedded server entry list data: %s", err)
-				return
-			}
-		}()
-
-		if psiphon.CountServerEntries() == 0 {
-			embeddedServerListWaitGroup.Wait()
-		} else {
-			defer embeddedServerListWaitGroup.Wait()
+	if feedbackUpload {
+		// Feedback upload mode
+		worker = &FeedbackWorker{
+			feedbackUploadPath: feedbackUploadPath,
+		}
+	} else {
+		// Tunnel mode
+		worker = &TunnelWorker{
+			embeddedServerEntryListFilename: embeddedServerEntryListFilename,
 		}
 	}
 
-	// Run Psiphon
-
-	controller, err := psiphon.NewController(config)
+	err = worker.Init(config)
 	if err != nil {
-		psiphon.NoticeError("error creating controller: %s", err)
+		psiphon.NoticeError("error in init: %s", err)
 		os.Exit(1)
 	}
 
-	controllerCtx, stopController := context.WithCancel(context.Background())
-	defer stopController()
+	workCtx, stopWork := context.WithCancel(context.Background())
+	defer stopWork()
 
-	controllerWaitGroup := new(sync.WaitGroup)
-	controllerWaitGroup.Add(1)
+	workWaitGroup := new(sync.WaitGroup)
+	workWaitGroup.Add(1)
 	go func() {
-		defer controllerWaitGroup.Done()
-		controller.Run(controllerCtx)
+		defer workWaitGroup.Done()
+
+		err := worker.Run(workCtx)
+		if err != nil {
+			psiphon.NoticeError("%s", err)
+			stopWork()
+			os.Exit(1)
+		}
 
 		// Signal the <-controllerCtx.Done() case below. If the <-systemStopSignal
 		// case already called stopController, this is a noop.
-		stopController()
+		stopWork()
 	}()
 
 	systemStopSignal := make(chan os.Signal, 1)
@@ -317,10 +296,10 @@ func main() {
 				profileSampleDurationSeconds)
 		case <-systemStopSignal:
 			psiphon.NoticeInfo("shutdown by system")
-			stopController()
-			controllerWaitGroup.Wait()
+			stopWork()
+			workWaitGroup.Wait()
 			exit = true
-		case <-controllerCtx.Done():
+		case <-workCtx.Done():
 			psiphon.NoticeInfo("shutdown by controller")
 			exit = true
 		}
@@ -368,4 +347,135 @@ func (p *tunProvider) GetPrimaryDnsServer() string {
 // GetSecondaryDnsServer implements the psiphon.DnsServerGetter interface.
 func (p *tunProvider) GetSecondaryDnsServer() string {
 	return p.secondaryDNS
+}
+
+// Worker creates a protocol around the different run modes provided by the
+// compiled executable.
+type Worker interface {
+	// Init is called once for the worker to perform any initialization.
+	Init(config *psiphon.Config) error
+	// Run is called once, after Init(..), for the worker to perform its
+	// work. The provided context should control the lifetime of the work
+	// being performed.
+	Run(ctx context.Context) error
+}
+
+// TunnelWorker is the Worker protocol implementation used for tunnel mode.
+type TunnelWorker struct {
+	embeddedServerEntryListFilename string
+	controller                      *psiphon.Controller
+}
+
+// Init implements the Worker interface.
+func (w *TunnelWorker) Init(config *psiphon.Config) error {
+
+	// Initialize data store
+
+	err := psiphon.OpenDataStore(config)
+	if err != nil {
+		psiphon.NoticeError("error initializing datastore: %s", err)
+		os.Exit(1)
+	}
+
+	// Handle optional embedded server list file parameter
+	// If specified, the embedded server list is loaded and stored. When there
+	// are no server candidates at all, we wait for this import to complete
+	// before starting the Psiphon controller. Otherwise, we import while
+	// concurrently starting the controller to minimize delay before attempting
+	// to connect to existing candidate servers.
+	// If the import fails, an error notice is emitted, but the controller is
+	// still started: either existing candidate servers may suffice, or the
+	// remote server list fetch may obtain candidate servers.
+	if w.embeddedServerEntryListFilename != "" {
+		embeddedServerListWaitGroup := new(sync.WaitGroup)
+		embeddedServerListWaitGroup.Add(1)
+		go func() {
+			defer embeddedServerListWaitGroup.Done()
+			serverEntryList, err := ioutil.ReadFile(w.embeddedServerEntryListFilename)
+			if err != nil {
+				psiphon.NoticeError("error loading embedded server entry list file: %s", err)
+				return
+			}
+			// TODO: stream embedded server list data? also, the cast makes an unnecessary copy of a large buffer?
+			serverEntries, err := protocol.DecodeServerEntryList(
+				string(serverEntryList),
+				common.GetCurrentTimestamp(),
+				protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+			if err != nil {
+				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
+				return
+			}
+			// Since embedded server list entries may become stale, they will not
+			// overwrite existing stored entries for the same server.
+			err = psiphon.StoreServerEntries(config, serverEntries, false)
+			if err != nil {
+				psiphon.NoticeError("error storing embedded server entry list data: %s", err)
+				return
+			}
+		}()
+
+		if psiphon.CountServerEntries() == 0 {
+			embeddedServerListWaitGroup.Wait()
+		} else {
+			defer embeddedServerListWaitGroup.Wait()
+		}
+	}
+
+	controller, err := psiphon.NewController(config)
+	if err != nil {
+		psiphon.NoticeError("error creating controller: %s", err)
+		return errors.Trace(err)
+	}
+	w.controller = controller
+
+	return nil
+}
+
+// Run implements the Worker interface.
+func (w *TunnelWorker) Run(ctx context.Context) error {
+	defer psiphon.CloseDataStore()
+
+	w.controller.Run(ctx)
+	return nil
+}
+
+// FeedbackWorker is the Worker protocol implementation used for feedback
+// upload mode.
+type FeedbackWorker struct {
+	config             *psiphon.Config
+	feedbackUploadPath string
+}
+
+// Init implements the Worker interface.
+func (f *FeedbackWorker) Init(config *psiphon.Config) error {
+
+	// The datastore is not opened here, with psiphon.OpenDatastore,
+	// because it is opened/closed transiently in the psiphon.SendFeedback
+	// operation. We do not want to contest database access incase another
+	// process needs to use the database. E.g. a process running in tunnel
+	// mode, which will fail if it cannot aquire a lock on the database
+	// within a short period of time.
+
+	f.config = config
+
+	return nil
+}
+
+// Run implements the Worker interface.
+func (f *FeedbackWorker) Run(ctx context.Context) error {
+
+	// TODO: cancel blocking read when worker context cancelled?
+	diagnostics, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = psiphon.SendFeedback(ctx, f.config, string(diagnostics), f.feedbackUploadPath)
+	if err != nil {
+		return errors.TraceMsg(err, "FeedbackUpload: upload failed")
+	}
+
+	psiphon.NoticeInfo("FeedbackUpload: upload succeeded")
+
+	return nil
 }

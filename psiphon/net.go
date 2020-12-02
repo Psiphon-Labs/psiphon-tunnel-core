@@ -315,7 +315,7 @@ func MakeUntunneledHTTPClient(
 	// Note: when verifyLegacyCertificate is not nil, some
 	// of the other CustomTLSConfig is overridden.
 	tlsConfig := &CustomTLSConfig{
-		ClientParameters:              config.clientParameters,
+		Parameters:                    config.GetParameters(),
 		Dial:                          dialer,
 		VerifyLegacyCertificate:       verifyLegacyCertificate,
 		UseDialAddrSNI:                true,

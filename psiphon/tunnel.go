@@ -90,7 +90,8 @@ type Tunnel struct {
 	dialParams                     *DialParameters
 	livenessTestMetrics            *livenessTestMetrics
 	serverContext                  *ServerContext
-	conn                           *common.ActivityMonitoredConn
+	monitoringStartTime            time.Time
+	conn                           *common.BurstMonitoredConn
 	sshClient                      *ssh.Client
 	sshServerRequests              <-chan *ssh.Request
 	operateWaitGroup               *sync.WaitGroup
@@ -105,17 +106,17 @@ type Tunnel struct {
 	inFlightConnectedRequestSignal chan struct{}
 }
 
-// getCustomClientParameters helpers wrap the verbose function call chain
-// required to get a current snapshot of the ClientParameters customized with
-// the dial parameters associated with a tunnel.
+// getCustomParameters helpers wrap the verbose function call chain required
+// to get a current snapshot of the parameters.Parameters customized with the
+// dial parameters associated with a tunnel.
 
-func (tunnel *Tunnel) getCustomClientParameters() parameters.ClientParametersAccessor {
-	return getCustomClientParameters(tunnel.config, tunnel.dialParams)
+func (tunnel *Tunnel) getCustomParameters() parameters.ParametersAccessor {
+	return getCustomParameters(tunnel.config, tunnel.dialParams)
 }
 
-func getCustomClientParameters(
-	config *Config, dialParams *DialParameters) parameters.ClientParametersAccessor {
-	return config.GetClientParameters().GetCustom(dialParams.NetworkLatencyMultiplier)
+func getCustomParameters(
+	config *Config, dialParams *DialParameters) parameters.ParametersAccessor {
+	return config.GetParameters().GetCustom(dialParams.NetworkLatencyMultiplier)
 }
 
 // ConnectTunnel first makes a network transport connection to the
@@ -157,6 +158,7 @@ func ConnectTunnel(
 		config:              config,
 		dialParams:          dialParams,
 		livenessTestMetrics: dialResult.livenessTestMetrics,
+		monitoringStartTime: dialResult.monitoringStartTime,
 		conn:                dialResult.monitoredConn,
 		sshClient:           dialResult.sshClient,
 		sshServerRequests:   dialResult.sshRequests,
@@ -210,7 +212,7 @@ func (tunnel *Tunnel) Activate(
 		// request. At this point, there is no operateTunnel monitor that will detect
 		// this condition with SSH keep alives.
 
-		timeout := tunnel.getCustomClientParameters().Duration(
+		timeout := tunnel.getCustomParameters().Duration(
 			parameters.PsiphonAPIRequestTimeout)
 
 		if timeout > 0 {
@@ -315,7 +317,7 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		// tunnel is closed, which will interrupt any slow final status request.
 
 		if isActivated {
-			timeout := tunnel.getCustomClientParameters().Duration(
+			timeout := tunnel.getCustomParameters().Duration(
 				parameters.TunnelOperateShutdownTimeout)
 			afterFunc := time.AfterFunc(
 				timeout,
@@ -332,6 +334,17 @@ func (tunnel *Tunnel) Close(isDiscarded bool) {
 		err := tunnel.sshClient.Wait()
 		if err != nil {
 			NoticeWarning("close tunnel ssh error: %s", err)
+		}
+	}
+
+	// Log burst metrics now that the BurstMonitoredConn is closed.
+	// Metrics will be empty when burst monitoring is disabled.
+	if !isDiscarded && isActivated {
+		burstMetrics := tunnel.conn.GetMetrics(tunnel.monitoringStartTime)
+		if len(burstMetrics) > 0 {
+			NoticeBursts(
+				tunnel.dialParams.ServerEntry.GetDiagnosticID(),
+				burstMetrics)
 		}
 	}
 }
@@ -492,7 +505,7 @@ func (tunnel *Tunnel) dialChannel(channelType, remoteAddr string) (interface{}, 
 	results := make(chan *channelDialResult, 1)
 
 	afterFunc := time.AfterFunc(
-		tunnel.getCustomClientParameters().Duration(
+		tunnel.getCustomParameters().Duration(
 			parameters.TunnelPortForwardDialTimeout),
 		func() {
 			results <- &channelDialResult{
@@ -600,7 +613,8 @@ func (conn *TunneledConn) Close() error {
 
 type dialResult struct {
 	dialConn            net.Conn
-	monitoredConn       *common.ActivityMonitoredConn
+	monitoringStartTime time.Time
+	monitoredConn       *common.BurstMonitoredConn
 	sshClient           *ssh.Client
 	sshRequests         <-chan *ssh.Request
 	livenessTestMetrics *livenessTestMetrics
@@ -609,11 +623,6 @@ type dialResult struct {
 // dialTunnel is a helper that builds the transport layers and establishes the
 // SSH connection. When additional dial configuration is used, dial metrics
 // are recorded and returned.
-//
-// The net.Conn return value is the value to be removed from pendingConns;
-// additional layering (ThrottledConn, ActivityMonitoredConn) is applied, but
-// this return value is the base dial conn. The *ActivityMonitoredConn return
-// value is the layered conn passed into the ssh.Client.
 func dialTunnel(
 	ctx context.Context,
 	config *Config,
@@ -626,7 +635,7 @@ func dialTunnel(
 		return nil, errors.Trace(err)
 	}
 
-	p := getCustomClientParameters(config, dialParams)
+	p := getCustomParameters(config, dialParams)
 	timeout := p.Duration(parameters.TunnelConnectTimeout)
 	rateLimits := p.RateLimits(parameters.TunnelRateLimits)
 	obfuscatedSSHMinPadding := p.Int(parameters.ObfuscatedSSHMinPadding)
@@ -635,6 +644,10 @@ func dialTunnel(
 	livenessTestMaxUpstreamBytes := p.Int(parameters.LivenessTestMaxUpstreamBytes)
 	livenessTestMinDownstreamBytes := p.Int(parameters.LivenessTestMinDownstreamBytes)
 	livenessTestMaxDownstreamBytes := p.Int(parameters.LivenessTestMaxDownstreamBytes)
+	burstUpstreamTargetBytes := int64(p.Int(parameters.ClientBurstUpstreamTargetBytes))
+	burstUpstreamDeadline := p.Duration(parameters.ClientBurstUpstreamDeadline)
+	burstDownstreamTargetBytes := int64(p.Int(parameters.ClientBurstDownstreamTargetBytes))
+	burstDownstreamDeadline := p.Duration(parameters.ClientBurstDownstreamDeadline)
 	p.Close()
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
@@ -774,11 +787,12 @@ func dialTunnel(
 		}
 	}()
 
-	// Activity monitoring is used to measure tunnel duration
-	monitoredConn, err := common.NewActivityMonitoredConn(dialConn, 0, false, nil, nil)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	monitoringStartTime := time.Now()
+	monitoredConn := common.NewBurstMonitoredConn(
+		dialConn,
+		false,
+		burstUpstreamTargetBytes, burstUpstreamDeadline,
+		burstDownstreamTargetBytes, burstDownstreamDeadline)
 
 	// Apply throttling (if configured)
 	throttledConn := common.NewThrottledConn(
@@ -977,6 +991,7 @@ func dialTunnel(
 
 	return &dialResult{
 			dialConn:            dialConn,
+			monitoringStartTime: monitoringStartTime,
 			monitoredConn:       monitoredConn,
 			sshClient:           result.sshClient,
 			sshRequests:         result.sshRequests,
@@ -1117,7 +1132,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	// from a range, to make the resulting traffic less fingerprintable,
 	// Note: not using Tickers since these are not fixed time periods.
 	nextStatusRequestPeriod := func() time.Duration {
-		p := tunnel.getCustomClientParameters()
+		p := tunnel.getCustomParameters()
 		return prng.Period(
 			p.Duration(parameters.PsiphonAPIStatusRequestPeriodMin),
 			p.Duration(parameters.PsiphonAPIStatusRequestPeriodMax))
@@ -1131,7 +1146,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	unreported := CountUnreportedPersistentStats()
 	if unreported > 0 {
 		NoticeInfo("Unreported persistent stats: %d", unreported)
-		p := tunnel.getCustomClientParameters()
+		p := tunnel.getCustomParameters()
 		statsTimer.Reset(
 			prng.Period(
 				p.Duration(parameters.PsiphonAPIStatusRequestShortPeriodMin),
@@ -1139,7 +1154,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	}
 
 	nextSshKeepAlivePeriod := func() time.Duration {
-		p := tunnel.getCustomClientParameters()
+		p := tunnel.getCustomParameters()
 		return prng.Period(
 			p.Duration(parameters.SSHKeepAlivePeriodMin),
 			p.Duration(parameters.SSHKeepAlivePeriodMax))
@@ -1224,8 +1239,9 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			bytesUp := atomic.AddInt64(&totalSent, sent)
 			bytesDown := atomic.AddInt64(&totalReceived, received)
 
-			p := tunnel.getCustomClientParameters()
+			p := tunnel.getCustomParameters()
 			noticePeriod := p.Duration(parameters.TotalBytesTransferredNoticePeriod)
+			doEmitMemoryMetrics := p.Bool(parameters.TotalBytesTransferredEmitMemoryMetrics)
 			replayTargetUpstreamBytes := p.Int(parameters.ReplayTargetUpstreamBytes)
 			replayTargetDownstreamBytes := p.Int(parameters.ReplayTargetDownstreamBytes)
 			replayTargetTunnelDuration := p.Duration(parameters.ReplayTargetTunnelDuration)
@@ -1233,6 +1249,9 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			if lastTotalBytesTransferedTime.Add(noticePeriod).Before(time.Now()) {
 				NoticeTotalBytesTransferred(
 					tunnel.dialParams.ServerEntry.GetDiagnosticID(), bytesUp, bytesDown)
+				if doEmitMemoryMetrics {
+					emitMemoryMetrics()
+				}
 				lastTotalBytesTransferedTime = time.Now()
 			}
 
@@ -1268,7 +1287,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
-			p := tunnel.getCustomClientParameters()
+			p := tunnel.getCustomParameters()
 			inactivePeriod := p.Duration(parameters.SSHKeepAlivePeriodicInactivePeriod)
 			if lastBytesReceivedTime.Add(inactivePeriod).Before(time.Now()) {
 				timeout := p.Duration(parameters.SSHKeepAlivePeriodicTimeout)
@@ -1297,7 +1316,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			if tunnel.conn.IsClosed() {
 				err = errors.TraceNew("underlying conn is closed")
 			} else {
-				p := tunnel.getCustomClientParameters()
+				p := tunnel.getCustomParameters()
 				inactivePeriod := p.Duration(parameters.SSHKeepAliveProbeInactivePeriod)
 				if lastBytesReceivedTime.Add(inactivePeriod).Before(time.Now()) {
 					timeout := p.Duration(parameters.SSHKeepAliveProbeTimeout)
@@ -1390,7 +1409,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(
 	bytesUp int64,
 	bytesDown int64) error {
 
-	p := tunnel.getCustomClientParameters()
+	p := tunnel.getCustomParameters()
 
 	// Random padding to frustrate fingerprinting.
 	request := prng.Padding(
@@ -1453,7 +1472,7 @@ func (tunnel *Tunnel) sendSshKeepAlive(
 		if success && speedTestSample {
 
 			err = tactics.AddSpeedTestSample(
-				tunnel.config.GetClientParameters(),
+				tunnel.config.GetParameters(),
 				GetTacticsStorer(tunnel.config),
 				tunnel.config.GetNetworkID(),
 				tunnel.dialParams.ServerEntry.Region,

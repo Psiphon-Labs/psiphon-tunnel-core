@@ -121,10 +121,10 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 		return d.DialContext(ctx, network, address)
 	}
 
-	clientParameters := makeCustomTLSProfilesClientParameters(t, false, "")
+	params := makeCustomTLSProfilesParameters(t, false, "")
 
 	profiles := append([]string(nil), protocol.SupportedTLSProfiles...)
-	profiles = append(profiles, clientParameters.Get().CustomTLSProfileNames()...)
+	profiles = append(profiles, params.Get().CustomTLSProfileNames()...)
 
 	for _, tlsProfile := range profiles {
 
@@ -140,10 +140,10 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			transformHostname := i%2 == 0
 
 			tlsConfig := &CustomTLSConfig{
-				ClientParameters: clientParameters,
-				Dial:             dialer,
-				SkipVerify:       true,
-				TLSProfile:       tlsProfile,
+				Parameters: params,
+				Dial:       dialer,
+				SkipVerify: true,
+				TLSProfile: tlsProfile,
 			}
 
 			if transformHostname {
@@ -197,17 +197,17 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 
 func TestSelectTLSProfile(t *testing.T) {
 
-	clientParameters := makeCustomTLSProfilesClientParameters(t, false, "")
+	params := makeCustomTLSProfilesParameters(t, false, "")
 
 	profiles := append([]string(nil), protocol.SupportedTLSProfiles...)
-	profiles = append(profiles, clientParameters.Get().CustomTLSProfileNames()...)
+	profiles = append(profiles, params.Get().CustomTLSProfileNames()...)
 
 	selected := make(map[string]int)
 
 	numSelections := 10000
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, false, "", clientParameters.Get())
+		profile := SelectTLSProfile(false, false, "", params.Get())
 		selected[profile] += 1
 	}
 
@@ -237,7 +237,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	t.Logf("ratio of randomized selected: %d/%d",
 		numRandomized, numSelections)
 
-	randomizedProbability := clientParameters.Get().Float(
+	randomizedProbability := params.Get().Float(
 		parameters.SelectRandomizedTLSProfileProbability)
 
 	if numRandomized < int(0.9*float64(numSelections)*randomizedProbability) ||
@@ -250,7 +250,7 @@ func TestSelectTLSProfile(t *testing.T) {
 
 	for i, profile := range profiles {
 		utlsClientHelloID, utlsClientHelloSpec, err :=
-			getUTLSClientHelloID(clientParameters.Get(), profile)
+			getUTLSClientHelloID(params.Get(), profile)
 		if err != nil {
 			t.Fatalf("getUTLSClientHelloID failed: %s\n", err)
 		}
@@ -282,11 +282,11 @@ func TestSelectTLSProfile(t *testing.T) {
 
 	// Only custom TLS profiles should be selected
 
-	clientParameters = makeCustomTLSProfilesClientParameters(t, true, "")
-	customTLSProfileNames := clientParameters.Get().CustomTLSProfileNames()
+	params = makeCustomTLSProfilesParameters(t, true, "")
+	customTLSProfileNames := params.Get().CustomTLSProfileNames()
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, false, "", clientParameters.Get())
+		profile := SelectTLSProfile(false, false, "", params.Get())
 		if !common.Contains(customTLSProfileNames, profile) {
 			t.Errorf("unexpected non-custom TLS profile selected")
 		}
@@ -296,8 +296,8 @@ func TestSelectTLSProfile(t *testing.T) {
 
 	frontingProviderID := "frontingProviderID"
 
-	clientParameters = makeCustomTLSProfilesClientParameters(t, false, frontingProviderID)
-	disableTLSProfiles := clientParameters.Get().LabeledTLSProfiles(
+	params = makeCustomTLSProfilesParameters(t, false, frontingProviderID)
+	disableTLSProfiles := params.Get().LabeledTLSProfiles(
 		parameters.DisableFrontingProviderTLSProfiles, frontingProviderID)
 
 	if len(disableTLSProfiles) < 1 {
@@ -305,7 +305,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	}
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, true, frontingProviderID, clientParameters.Get())
+		profile := SelectTLSProfile(false, true, frontingProviderID, params.Get())
 		if common.Contains(disableTLSProfiles, profile) {
 			t.Errorf("unexpected disabled TLS profile selected")
 		}
@@ -314,7 +314,7 @@ func TestSelectTLSProfile(t *testing.T) {
 	// Session ticket incapable TLS 1.2 profiles should not be selected
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(true, false, "", clientParameters.Get())
+		profile := SelectTLSProfile(true, false, "", params.Get())
 		if protocol.TLS12ProfileOmitsSessionTickets(profile) {
 			t.Errorf("unexpected session ticket incapable TLS profile selected")
 		}
@@ -329,12 +329,12 @@ func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {
 	}
 }
 
-func makeCustomTLSProfilesClientParameters(
-	t *testing.T, useOnlyCustomTLSProfiles bool, frontingProviderID string) *parameters.ClientParameters {
+func makeCustomTLSProfilesParameters(
+	t *testing.T, useOnlyCustomTLSProfiles bool, frontingProviderID string) *parameters.Parameters {
 
-	clientParameters, err := parameters.NewClientParameters(nil)
+	params, err := parameters.NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewClientParameters failed: %s\n", err)
+		t.Fatalf("NewParameters failed: %s\n", err)
 	}
 
 	// Equivilent to utls.HelloChrome_62
@@ -392,15 +392,15 @@ func makeCustomTLSProfilesClientParameters(
 		applyParameters[parameters.DisableFrontingProviderTLSProfiles] = disabledTLSProfiles
 	}
 
-	_, err = clientParameters.Set("", false, applyParameters)
+	_, err = params.Set("", false, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
 
-	customTLSProfileNames := clientParameters.Get().CustomTLSProfileNames()
+	customTLSProfileNames := params.Get().CustomTLSProfileNames()
 	if len(customTLSProfileNames) != 1 {
 		t.Fatalf("Unexpected CustomTLSProfileNames count")
 	}
 
-	return clientParameters
+	return params
 }
