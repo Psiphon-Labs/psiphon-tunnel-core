@@ -552,38 +552,38 @@
 		{
 			"checksumSHA1": "TtIN/5Wshp+L7WdSLIRLlH+QzYI=",
 			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
-			"revisionTime": "2020-11-11T16:02:33Z"
+			"revision": "00010e1cc7b42e059fa97a0465103d83ae4fa902",
+			"revisionTime": "2020-12-09T19:52:13Z"
 		},
 		{
 			"checksumSHA1": "ObZZJpjQl2BISlIiES82BW8jbEE=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/edwards25519",
-			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
-			"revisionTime": "2020-11-11T16:02:33Z"
+			"revision": "00010e1cc7b42e059fa97a0465103d83ae4fa902",
+			"revisionTime": "2020-12-09T19:52:13Z"
 		},
 		{
 			"checksumSHA1": "VoyDh1KIIVE+OJbehDNJ91tf4Vw=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/extra25519",
-			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
-			"revisionTime": "2020-11-11T16:02:33Z"
+			"revision": "00010e1cc7b42e059fa97a0465103d83ae4fa902",
+			"revisionTime": "2020-12-09T19:52:13Z"
 		},
 		{
 			"checksumSHA1": "5PHRWm/HbwpycYDHj6u6rQCoazg=",
 			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
-			"revisionTime": "2020-11-11T16:02:33Z"
+			"revision": "00010e1cc7b42e059fa97a0465103d83ae4fa902",
+			"revisionTime": "2020-12-09T19:52:13Z"
 		},
 		{
-			"checksumSHA1": "QGBPB0Wc0TM6grq9HWdE8IAcy3w=",
+			"checksumSHA1": "kACahtrgVCA9nOe3kwBc7bu9+Rk=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
-			"revisionTime": "2020-11-11T16:02:33Z"
+			"revision": "00010e1cc7b42e059fa97a0465103d83ae4fa902",
+			"revisionTime": "2020-12-09T19:52:13Z"
 		},
 		{
-			"checksumSHA1": "oTqIsSoFDYizPxaLbGG1nWmiQiI=",
+			"checksumSHA1": "fv2fYuM1BN+zb4/TEktcVTqKhnI=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance/phantoms",
-			"revision": "da5fdc57c78547c5bbeea19f7ebe107af5f91bbf",
-			"revisionTime": "2020-11-11T16:02:33Z"
+			"revision": "00010e1cc7b42e059fa97a0465103d83ae4fa902",
+			"revisionTime": "2020-12-09T19:52:13Z"
 		},
 		{
 			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",
