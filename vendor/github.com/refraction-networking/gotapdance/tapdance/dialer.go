@@ -85,6 +85,7 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 				return nil, err
 			}
 			flow.tdRaw.TcpDialer = d.TcpDialer
+			flow.tdRaw.useProxyHeader = d.UseProxyHeader
 			return flow, flow.DialContext(ctx)
 		} else {
 			// _, err := makeTdFlow(flowBidirectional, nil, address)
