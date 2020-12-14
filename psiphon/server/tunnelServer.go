@@ -175,10 +175,16 @@ func (server *TunnelServer) Run() error {
 
 		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
 
-			listener, err = refraction.Listen(listener)
+			listener, err = refraction.Listen(localAddress)
+
+		} else if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+
+			listener, err = net.Listen("tcp", localAddress)
 
 		} else {
 
+			// Only direct, unfronted protocol listeners use TCP BPF circumvention
+			// programs.
 			listener, BPFProgramName, err = newTCPListenerWithBPF(support, localAddress)
 		}
 

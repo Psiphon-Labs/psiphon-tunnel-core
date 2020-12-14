@@ -60,8 +60,7 @@ type Listener struct {
 	net.Listener
 }
 
-// Listen creates a new Refraction Networking listener on top of an existing
-// TCP listener.
+// Listen creates a new Refraction Networking listener.
 //
 // The Refraction Networking station (TapDance or Conjure) will send the
 // original client address via the HAProxy proxy protocol v1,
@@ -70,7 +69,12 @@ type Listener struct {
 // RemoteAddr _must_ be called non-concurrently before calling Read on
 // accepted conns as the HAProxy proxy protocol header reading logic sets
 // SetReadDeadline and performs a Read.
-func Listen(tcpListener net.Listener) (net.Listener, error) {
+func Listen(address string) (net.Listener, error) {
+
+	tcpListener, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	// Setting a timeout ensures that reading the proxy protocol
 	// header completes or times out and RemoteAddr will not block. See:
