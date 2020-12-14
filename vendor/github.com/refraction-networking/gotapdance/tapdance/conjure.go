@@ -193,8 +193,8 @@ func (r APIRegistrar) Register(cjSession *ConjureSession, ctx context.Context) (
 
 	c2s := reg.generateClientToStation()
 
-	protoPayload := pb.ClientToAPI{
-		Secret:              cjSession.Keys.SharedSecret,
+	protoPayload := pb.C2SWrapper{
+		SharedSecret:        cjSession.Keys.SharedSecret,
 		RegistrationPayload: c2s,
 	}
 

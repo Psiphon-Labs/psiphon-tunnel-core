@@ -167,7 +167,8 @@ message RegistrationFlags {
 	optional bool upload_only = 1;
 	optional bool dark_decoy = 2;
 	optional bool proxy_header = 3;
-	optional bool use_TIL = 4;
+    optional bool use_TIL = 4;
+    optional bool prescanned = 5;
 }
 
 message ClientToStation {
@@ -216,15 +217,6 @@ message ClientToStation {
     optional bytes padding = 100;
 }
 
-// Message type used as the request body when registering via the HTTP API.
-// This message is assumed to be sent via TLS, meaning that sending the secret outright is acceptable.
-message ClientToAPI {
-    // The secret that will be used when forming phantom connections.
-    optional bytes secret = 1;
-
-    // The ClientToStation payload; the same as used in decoy registrations.
-    optional ClientToStation registration_payload = 2;
-}
 
 enum RegistrationSource {
 	Detector = 0;
@@ -232,10 +224,16 @@ enum RegistrationSource {
     DetectorPrescan = 2;
 }
 
-message ZMQPayload {
+message C2SWrapper {
 	optional bytes shared_secret = 1;
 	optional ClientToStation registration_payload = 3;
-	optional RegistrationSource registration_source = 4;
+    optional RegistrationSource registration_source = 4;
+    
+    // client source address when receiving a registration
+    optional bytes registration_address = 6;
+
+    // Decoy address used when registering over Decoy registrar
+    optional bytes decoy_address = 7;
 }
 
 message SessionStats {
