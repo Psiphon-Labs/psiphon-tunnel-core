@@ -3,12 +3,12 @@ package tapdance
 import (
 	"crypto/x509"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"io/ioutil"
 	"net"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -20,13 +20,14 @@ type assets struct {
 	sync.RWMutex
 	path string
 
-	config pb.ClientConf
+	config *pb.ClientConf
 
 	roots *x509.CertPool
 
-	filenameStationPubkey string
-	filenameRoots         string
-	filenameClientConf    string
+	filenameRoots      string
+	filenameClientConf string
+
+	socksAddr string
 }
 
 // could reset this internally to refresh assets and avoid woes of singleton testing
@@ -48,17 +49,25 @@ func AssetsSetDir(dir string) *assets {
 	_initAssets := func() { initAssets(dir) }
 	if assetsInstance != nil {
 		assetsInstance.Lock()
+		defer assetsInstance.Unlock()
 		if dir != assetsInstance.path {
 			Logger().Warnf("Assets path changed %s->%s. (Re)initializing.\n",
 				assetsInstance.path, dir)
 			assetsInstance.path = dir
 			assetsInstance.readConfigs()
-			assetsInstance.Unlock()
 			return assetsInstance
 		}
 	}
 	assetsOnce.Do(_initAssets)
 	return assetsInstance
+}
+
+func getDefaultKey() []byte {
+	// keyStr := "515868be7f45ab6f310afed4b229b7a479fc9fde553dea4ccdb369ab1899e70c"
+	keyStr := "a1cb97be697c5ed5aefd78ffa4db7e68101024603511e40a89951bc158807177"
+	key := make([]byte, hex.DecodedLen(len(keyStr)))
+	hex.Decode(key, []byte(keyStr))
+	return key
 }
 
 func initAssets(path string) {
@@ -68,9 +77,7 @@ func initAssets(path string) {
 		pb.InitTLSDecoySpec("192.122.190.106", "tapdance3.freeaeskey.xyz"),
 	}
 
-	defaultKey := []byte{81, 88, 104, 190, 127, 69, 171, 111, 49, 10, 254, 212, 178, 41, 183,
-		164, 121, 252, 159, 222, 85, 61, 234, 76, 205, 179, 105, 171, 24, 153, 231, 12}
-
+	defaultKey := getDefaultKey()
 	defualtKeyType := pb.KeyType_AES_GCM_128
 	defaultPubKey := pb.PubKey{Key: defaultKey, Type: &defualtKeyType}
 	defaultGeneration := uint32(0)
@@ -80,11 +87,11 @@ func initAssets(path string) {
 		Generation:    &defaultGeneration}
 
 	assetsInstance = &assets{
-		path:                  path,
-		config:                defaultClientConf,
-		filenameRoots:         "roots",
-		filenameClientConf:    "ClientConf",
-		filenameStationPubkey: "station_pubkey",
+		path:               path,
+		config:             &defaultClientConf,
+		filenameRoots:      "roots",
+		filenameClientConf: "ClientConf",
+		socksAddr:          "",
 	}
 	assetsInstance.readConfigs()
 }
@@ -115,25 +122,12 @@ func (a *assets) readConfigs() {
 		if err != nil {
 			return err
 		}
-		clientConf := pb.ClientConf{}
-		err = proto.Unmarshal(buf, &clientConf)
+		clientConf := &pb.ClientConf{}
+		err = proto.Unmarshal(buf, clientConf)
 		if err != nil {
 			return err
 		}
 		a.config = clientConf
-		return nil
-	}
-
-	readPubkey := func(filename string) error {
-		staionPubkey, err := ioutil.ReadFile(filename)
-		if err != nil {
-			return err
-		}
-		if len(staionPubkey) != 32 {
-			return errors.New("Unexpected keyfile length! Expected: 32. Got: " +
-				strconv.Itoa(len(staionPubkey)))
-		}
-		copy(a.config.DefaultPubkey.Key[:], staionPubkey[0:32])
 		return nil
 	}
 
@@ -155,14 +149,6 @@ func (a *assets) readConfigs() {
 	} else {
 		Logger().Infoln("Client config successfully read from " + clientConfFilename)
 	}
-
-	pubkeyFilename := path.Join(a.path, a.filenameStationPubkey)
-	err = readPubkey(pubkeyFilename)
-	if err != nil {
-		Logger().Debugln("Assets: failed to read pubkey file: " + err.Error())
-	} else {
-		Logger().Infoln("Pubkey successfully read from " + pubkeyFilename)
-	}
 }
 
 // Picks random decoy, returns Server Name Indication and addr in format ipv4:port
@@ -177,27 +163,61 @@ func (a *assets) GetDecoyAddress() (sni string, addr string) {
 	decoyIndex := getRandInt(0, len(decoys)-1)
 	ip := make(net.IP, 4)
 	binary.BigEndian.PutUint32(ip, decoys[decoyIndex].GetIpv4Addr())
-	// TODO: what checks need to be done, and what's guaranteed?
+	//[TODO]{priority:winter-break}: what checks need to be done, and what's guaranteed?
 	addr = ip.To4().String() + ":443"
 	sni = decoys[decoyIndex].GetHostname()
 	return
 }
 
-// Gets random DecoySpec.
-func (a *assets) GetDecoy() pb.TLSDecoySpec {
+// Get all Decoys from ClientConf
+func (a *assets) GetAllDecoys() []*pb.TLSDecoySpec {
+	return a.config.GetDecoyList().GetTlsDecoys()
+}
+
+// Get all Decoys from ClientConf that have an IPv6 address
+func (a *assets) GetV6Decoys() []*pb.TLSDecoySpec {
+	v6Decoys := make([]*pb.TLSDecoySpec, 0)
+	allDecoys := a.config.GetDecoyList().GetTlsDecoys()
+
+	for _, decoy := range allDecoys {
+		if decoy.GetIpv6Addr() != nil {
+			v6Decoys = append(v6Decoys, decoy)
+		}
+	}
+
+	return v6Decoys
+}
+
+// Get all Decoys from ClientConf that have an IPv6 address
+func (a *assets) GetV4Decoys() []*pb.TLSDecoySpec {
+	v6Decoys := make([]*pb.TLSDecoySpec, 0)
+	allDecoys := a.config.GetDecoyList().GetTlsDecoys()
+
+	for _, decoy := range allDecoys {
+		if decoy.GetIpv4Addr() != 0 {
+			v6Decoys = append(v6Decoys, decoy)
+		}
+	}
+
+	return v6Decoys
+}
+
+// GetDecoy - Gets random DecoySpec
+func (a *assets) GetDecoy() *pb.TLSDecoySpec {
 	a.RLock()
 	defer a.RUnlock()
 
 	decoys := a.config.GetDecoyList().GetTlsDecoys()
-	chosenDecoy := pb.TLSDecoySpec{}
+	chosenDecoy := &pb.TLSDecoySpec{}
 	if len(decoys) == 0 {
 		return chosenDecoy
 	}
 	decoyIndex := getRandInt(0, len(decoys)-1)
-	chosenDecoy = *decoys[decoyIndex]
+	chosenDecoy = decoys[decoyIndex]
 
-	// TODO: stop enforcing values >= defaults.
+	//[TODO]{priority:soon} stop enforcing values >= defaults.
 	// Fix ackhole instead
+	// No value checks when using
 	if chosenDecoy.GetTimeout() < timeoutMin {
 		timeout := uint32(timeoutMax)
 		chosenDecoy.Timeout = &timeout
@@ -206,6 +226,23 @@ func (a *assets) GetDecoy() pb.TLSDecoySpec {
 		tcpWin := uint32(sendLimitMax)
 		chosenDecoy.Tcpwin = &tcpWin
 	}
+	return chosenDecoy
+}
+
+// GetDecoy - Gets random IPv6 DecoySpec
+func (a *assets) GetV6Decoy() *pb.TLSDecoySpec {
+	a.RLock()
+	defer a.RUnlock()
+
+	decoys := a.GetV6Decoys()
+	chosenDecoy := &pb.TLSDecoySpec{}
+	if len(decoys) == 0 {
+		return chosenDecoy
+	}
+	decoyIndex := getRandInt(0, len(decoys)-1)
+	chosenDecoy = decoys[decoyIndex]
+
+	// No enforcing TCPWIN etc. values because this is conjure only
 	return chosenDecoy
 }
 
@@ -222,6 +259,15 @@ func (a *assets) GetPubkey() *[32]byte {
 
 	var pKey [32]byte
 	copy(pKey[:], a.config.GetDefaultPubkey().GetKey()[:])
+	return &pKey
+}
+
+func (a *assets) GetConjurePubkey() *[32]byte {
+	a.RLock()
+	defer a.RUnlock()
+
+	var pKey [32]byte
+	copy(pKey[:], a.config.GetConjurePubkey().GetKey()[:])
 	return &pKey
 }
 
@@ -244,12 +290,11 @@ func (a *assets) SetGeneration(gen uint32) (err error) {
 }
 
 // Set Public key and store config to disk
-func (a *assets) SetPubkey(pubkey pb.PubKey) (err error) {
+func (a *assets) SetPubkey(pubkey *pb.PubKey) (err error) {
 	a.Lock()
 	defer a.Unlock()
 
-	copyPubkey := pubkey
-	a.config.DefaultPubkey = &copyPubkey
+	a.config.DefaultPubkey = pubkey
 	err = a.saveClientConf()
 	return
 }
@@ -259,14 +304,14 @@ func (a *assets) SetClientConf(conf *pb.ClientConf) (err error) {
 	a.Lock()
 	defer a.Unlock()
 
-	a.config = *conf
+	a.config = conf
 	err = a.saveClientConf()
 	return
 }
 
 // Not goroutine-safe, use at your own risk
 func (a *assets) GetClientConfPtr() *pb.ClientConf {
-	return &a.config
+	return a.config
 }
 
 // Overwrite currently used decoys and store config to disk
@@ -283,7 +328,7 @@ func (a *assets) SetDecoys(decoys []*pb.TLSDecoySpec) (err error) {
 }
 
 // Checks if decoy is in currently used ClientConf decoys list
-func (a *assets) IsDecoyInList(decoy pb.TLSDecoySpec) bool {
+func (a *assets) IsDecoyInList(decoy *pb.TLSDecoySpec) bool {
 	ipv4str := decoy.GetIpAddrStr()
 	hostname := decoy.GetHostname()
 	a.RLock()
@@ -298,7 +343,7 @@ func (a *assets) IsDecoyInList(decoy pb.TLSDecoySpec) bool {
 }
 
 func (a *assets) saveClientConf() error {
-	buf, err := proto.Marshal(&a.config)
+	buf, err := proto.Marshal(a.config)
 	if err != nil {
 		return err
 	}
@@ -310,4 +355,9 @@ func (a *assets) saveClientConf() error {
 	}
 
 	return os.Rename(tmpFilename, filename)
+}
+
+// SetStatsSocksAddr - Provide a socks address for reporting stats from the client in the form "addr:port"
+func (a *assets) SetStatsSocksAddr(addr string) {
+	a.socksAddr = addr
 }

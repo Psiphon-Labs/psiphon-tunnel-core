@@ -198,6 +198,7 @@ Psiphon Tunnel Core uses:
 * [wader/filtertransport](https://github.com/wader/filtertransport)
 * [Yawning/chacha20](https://github.com/Yawning/chacha20)
 * [Yawning/goptlib](https://github.com/Yawning/goptlib)
+* [yawning/obfs4](https://gitlab.com/yawning/obfs4)
 * [zach-klippenstein/goregen](https://github.com/zach-klippenstein/goregen)
 * [zap](https://go.uber.org/zap)
 

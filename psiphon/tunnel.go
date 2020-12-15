@@ -42,8 +42,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tapdance"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
 
@@ -742,13 +742,35 @@ func dialTunnel(
 			return nil, errors.Trace(err)
 		}
 
-	} else if protocol.TunnelProtocolUsesTapdance(dialParams.TunnelProtocol) {
+	} else if protocol.TunnelProtocolUsesTapDance(dialParams.TunnelProtocol) {
 
-		dialConn, err = tapdance.Dial(
+		dialConn, err = refraction.DialTapDance(
 			ctx,
-			config.EmitTapdanceLogs,
-			config.GetTapdanceDirectory(),
+			config.EmitRefractionNetworkingLogs,
+			config.GetPsiphonDataDirectory(),
 			NewNetDialer(dialParams.GetDialConfig()),
+			dialParams.DirectDialAddress)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	} else if protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
+
+		// The Conjure "phantom" connection is compatible with fragmentation, but
+		// the decoy registrar connection, like Tapdance, is not, so force it off.
+		// Any tunnel fragmentation metrics will refer to the "phantom" connection
+		// only.
+		decoyRegistrarDialer := NewNetDialer(
+			dialParams.GetDialConfig().WithoutFragmentor())
+
+		dialConn, err = refraction.DialConjure(
+			ctx,
+			config.EmitRefractionNetworkingLogs,
+			config.GetPsiphonDataDirectory(),
+			NewNetDialer(dialParams.GetDialConfig()),
+			decoyRegistrarDialer,
+			dialParams.ConjureDecoyRegistrarWidth,
+			dialParams.ConjureTransport,
 			dialParams.DirectDialAddress)
 		if err != nil {
 			return nil, errors.Trace(err)

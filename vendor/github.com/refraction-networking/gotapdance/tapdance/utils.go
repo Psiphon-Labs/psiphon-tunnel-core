@@ -8,13 +8,14 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	mrand "math/rand"
 	"net"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/agl/ed25519/extra25519"
+	"github.com/refraction-networking/gotapdance/ed25519/extra25519"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -83,6 +84,148 @@ func getRandString(length int) string {
 		randString[i] = alphabet[getRandInt(0, len(alphabet)-1)]
 	}
 	return string(randString)
+}
+
+type tapdanceSharedKeys struct {
+	FspKey, FspIv, VspKey, VspIv, NewMasterSecret, ConjureSeed []byte
+}
+
+func getMsgWithHeader(msgType msgType, msgBytes []byte) []byte {
+	if len(msgBytes) == 0 {
+		return nil
+	}
+	bufSend := new(bytes.Buffer)
+	var err error
+	switch msgType {
+	case msgProtobuf:
+		if len(msgBytes) <= int(maxInt16) {
+			bufSend.Grow(2 + len(msgBytes)) // to avoid double allocation
+			err = binary.Write(bufSend, binary.BigEndian, int16(len(msgBytes)))
+
+		} else {
+			bufSend.Grow(2 + 4 + len(msgBytes)) // to avoid double allocation
+			bufSend.Write([]byte{0, 0})
+			err = binary.Write(bufSend, binary.BigEndian, int32(len(msgBytes)))
+		}
+	case msgRawData:
+		err = binary.Write(bufSend, binary.BigEndian, int16(-len(msgBytes)))
+	default:
+		panic("getMsgWithHeader() called with msgType: " + strconv.Itoa(int(msgType)))
+	}
+	if err != nil {
+		// shouldn't ever happen
+		Logger().Errorln("getMsgWithHeader() failed with error: ", err)
+		Logger().Errorln("msgType ", msgType)
+		Logger().Errorln("msgBytes ", msgBytes)
+	}
+	bufSend.Write(msgBytes)
+	return bufSend.Bytes()
+}
+
+func uint16toInt16(i uint16) int16 {
+	pos := int16(i & 32767)
+	neg := int16(0)
+	if i&32768 != 0 {
+		neg = int16(-32768)
+	}
+	return pos + neg
+}
+
+// generates HTTP request, that is ready to have tag prepended to it
+func generateHTTPRequestBeginning(decoyHostname string) []byte {
+	sharedHeaders := `Host: ` + decoyHostname +
+		"\nUser-Agent: TapDance/1.2 (+https://refraction.network/info)"
+	httpTag := fmt.Sprintf(`GET / HTTP/1.1
+%s
+X-Ignore: %s`, sharedHeaders, getRandPadding(7, maxInt(612-len(sharedHeaders), 7), 10))
+	return []byte(strings.Replace(httpTag, "\n", "\r\n", -1))
+}
+
+func reverseEncrypt(ciphertext []byte, keyStream []byte) []byte {
+	var plaintext string
+	// our plaintext can be antyhing where x & 0xc0 == 0x40
+	// i.e. 64-127 in ascii (@, A-Z, [\]^_`, a-z, {|}~ DEL)
+	// This means that we are allowed to choose the last 6 bits
+	// of each byte in the ciphertext arbitrarily; the upper 2
+	// bits will have to be 01, so that our plaintext ends up
+	// in the desired range.
+	var ka, kb, kc, kd byte // key stream bytes
+	var ca, cb, cc, cd byte // ciphertext bytes
+	var pa, pb, pc, pd byte // plaintext bytes
+	var sa, sb, sc byte     // secret bytes
+
+	var tagIdx, keystreamIdx int
+
+	for tagIdx < len(ciphertext) {
+		ka = keyStream[keystreamIdx]
+		kb = keyStream[keystreamIdx+1]
+		kc = keyStream[keystreamIdx+2]
+		kd = keyStream[keystreamIdx+3]
+		keystreamIdx += 4
+
+		// read 3 bytes
+		sa = ciphertext[tagIdx]
+		sb = ciphertext[tagIdx+1]
+		sc = ciphertext[tagIdx+2]
+		tagIdx += 3
+
+		// figure out what plaintext needs to be in base64 encode
+		ca = (ka & 0xc0) | ((sa & 0xfc) >> 2)                        // 6 bits sa
+		cb = (kb & 0xc0) | (((sa & 0x03) << 4) | ((sb & 0xf0) >> 4)) // 2 bits sa, 4 bits sb
+		cc = (kc & 0xc0) | (((sb & 0x0f) << 2) | ((sc & 0xc0) >> 6)) // 4 bits sb, 2 bits sc
+		cd = (kd & 0xc0) | (sc & 0x3f)                               // 6 bits sc
+
+		// Xor with key_stream, and add on 0x40 so it's in range of allowed
+		pa = (ca ^ ka) + 0x40
+		pb = (cb ^ kb) + 0x40
+		pc = (cc ^ kc) + 0x40
+		pd = (cd ^ kd) + 0x40
+
+		plaintext += string(pa)
+		plaintext += string(pb)
+		plaintext += string(pc)
+		plaintext += string(pd)
+	}
+	return []byte(plaintext)
+}
+
+func minInt(a, b int) int {
+	if a > b {
+		return b
+	}
+	return a
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// Converts provided duration to raw milliseconds.
+// Returns a pointer to u32, because protobuf wants pointers.
+// Max valid input duration (that fits into uint32): 49.71 days.
+func durationToU32ptrMs(d time.Duration) *uint32 {
+	i := uint32(d.Nanoseconds() / int64(time.Millisecond))
+	return &i
+}
+
+func readAndClose(c net.Conn, readDeadline time.Duration) {
+	tinyBuf := []byte{0}
+	c.SetReadDeadline(time.Now().Add(readDeadline))
+	c.Read(tinyBuf)
+	c.Close()
+}
+
+func errIsTimeout(err error) bool {
+	if err != nil {
+		if strings.Contains(err.Error(), ": i/o timeout") || // client timed out
+			err.Error() == "EOF" { // decoy timed out
+			return true
+		}
+	}
+	return false
 }
 
 // obfuscateTagAndProtobuf() generates key-pair and combines it /w stationPubkey to generate
@@ -154,131 +297,4 @@ func obfuscateTagAndProtobuf(stegoPayload []byte, protobuf []byte, stationPubkey
 
 	encryptedProtobuf, err := aesGcmEncrypt(protobuf, aesKey, aesIvProtobuf)
 	return tag, append(aesIvProtobuf, encryptedProtobuf...), err
-}
-
-func getMsgWithHeader(msgType msgType, msgBytes []byte) []byte {
-	if len(msgBytes) == 0 {
-		return nil
-	}
-	bufSend := new(bytes.Buffer)
-	var err error
-	switch msgType {
-	case msgProtobuf:
-		if len(msgBytes) <= int(maxInt16) {
-			bufSend.Grow(2 + len(msgBytes)) // to avoid double allocation
-			err = binary.Write(bufSend, binary.BigEndian, int16(len(msgBytes)))
-
-		} else {
-			bufSend.Grow(2 + 4 + len(msgBytes)) // to avoid double allocation
-			bufSend.Write([]byte{0, 0})
-			err = binary.Write(bufSend, binary.BigEndian, int32(len(msgBytes)))
-		}
-	case msgRawData:
-		err = binary.Write(bufSend, binary.BigEndian, int16(-len(msgBytes)))
-	default:
-		panic("getMsgWithHeader() called with msgType: " + strconv.Itoa(int(msgType)))
-	}
-	if err != nil {
-		// shouldn't ever happen
-		Logger().Errorln("getMsgWithHeader() failed with error: ", err)
-		Logger().Errorln("msgType ", msgType)
-		Logger().Errorln("msgBytes ", msgBytes)
-	}
-	bufSend.Write(msgBytes)
-	return bufSend.Bytes()
-}
-
-func uint16toInt16(i uint16) int16 {
-	pos := int16(i & 32767)
-	neg := int16(0)
-	if i&32768 != 0 {
-		neg = int16(-32768)
-	}
-	return pos + neg
-}
-
-func reverseEncrypt(ciphertext []byte, keyStream []byte) (plaintext string) {
-	// our plaintext can be antyhing where x & 0xc0 == 0x40
-	// i.e. 64-127 in ascii (@, A-Z, [\]^_`, a-z, {|}~ DEL)
-	// This means that we are allowed to choose the last 6 bits
-	// of each byte in the ciphertext arbitrarily; the upper 2
-	// bits will have to be 01, so that our plaintext ends up
-	// in the desired range.
-	var ka, kb, kc, kd byte // key stream bytes
-	var ca, cb, cc, cd byte // ciphertext bytes
-	var pa, pb, pc, pd byte // plaintext bytes
-	var sa, sb, sc byte     // secret bytes
-
-	var tagIdx, keystreamIdx int
-
-	for tagIdx < len(ciphertext) {
-		ka = keyStream[keystreamIdx]
-		kb = keyStream[keystreamIdx+1]
-		kc = keyStream[keystreamIdx+2]
-		kd = keyStream[keystreamIdx+3]
-		keystreamIdx += 4
-
-		// read 3 bytes
-		sa = ciphertext[tagIdx]
-		sb = ciphertext[tagIdx+1]
-		sc = ciphertext[tagIdx+2]
-		tagIdx += 3
-
-		// figure out what plaintext needs to be in base64 encode
-		ca = (ka & 0xc0) | ((sa & 0xfc) >> 2)                        // 6 bits sa
-		cb = (kb & 0xc0) | (((sa & 0x03) << 4) | ((sb & 0xf0) >> 4)) // 2 bits sa, 4 bits sb
-		cc = (kc & 0xc0) | (((sb & 0x0f) << 2) | ((sc & 0xc0) >> 6)) // 4 bits sb, 2 bits sc
-		cd = (kd & 0xc0) | (sc & 0x3f)                               // 6 bits sc
-
-		// Xor with key_stream, and add on 0x40 so it's in range of allowed
-		pa = (ca ^ ka) + 0x40
-		pb = (cb ^ kb) + 0x40
-		pc = (cc ^ kc) + 0x40
-		pd = (cd ^ kd) + 0x40
-
-		plaintext += string(pa)
-		plaintext += string(pb)
-		plaintext += string(pc)
-		plaintext += string(pd)
-	}
-	return
-}
-
-func minInt(a, b int) int {
-	if a > b {
-		return b
-	}
-	return a
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// Converts provided duration to raw milliseconds.
-// Returns a pointer to u32, because protobuf wants pointers.
-// Max valid input duration (that fits into uint32): 49.71 days.
-func durationToU32ptrMs(d time.Duration) *uint32 {
-	i := uint32(d.Nanoseconds() / int64(time.Millisecond))
-	return &i
-}
-
-func readAndClose(c net.Conn, readDeadline time.Duration) {
-	tinyBuf := []byte{0}
-	c.SetReadDeadline(time.Now().Add(readDeadline))
-	c.Read(tinyBuf)
-	c.Close()
-}
-
-func errIsTimeout(err error) bool {
-	if err != nil {
-		if strings.Contains(err.Error(), ": i/o timeout") || // client timed out
-			err.Error() == "EOF" { // decoy timed out
-			return true
-		}
-	}
-	return false
 }

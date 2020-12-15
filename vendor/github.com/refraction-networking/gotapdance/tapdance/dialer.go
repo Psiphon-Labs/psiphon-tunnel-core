@@ -2,7 +2,10 @@ package tapdance
 
 import (
 	"context"
+	"errors"
 	"net"
+
+	pb "github.com/refraction-networking/gotapdance/protobuf"
 )
 
 var sessionsTotal CounterUint64
@@ -10,7 +13,23 @@ var sessionsTotal CounterUint64
 // Dialer contains options and implements advanced functions for establishing TapDance connection.
 type Dialer struct {
 	SplitFlows bool
-	TcpDialer  func(context.Context, string, string) (net.Conn, error)
+
+	// THIS IS REQUIRED TO INTERFACE WITH PSIPHON ANDROID
+	//		we use their dialer to prevent connection loopback into our own proxy
+	//		connection when tunneling the whole device.
+	TcpDialer func(context.Context, string, string) (net.Conn, error)
+
+	DarkDecoy bool
+
+	// The type of registrar to use when performing Conjure registrations.
+	DarkDecoyRegistrar Registrar
+
+	// The type of transport to use for Conjure connections.
+	Transport pb.TransportType
+
+	UseProxyHeader bool
+	V6Support      bool // *bool so that it is a nullable type. that can be overridden
+	Width          int
 }
 
 // Dial connects to the address on the named network.
@@ -53,15 +72,43 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 		}
 	}
 
-	if !d.SplitFlows {
-		flow, err := makeTdFlow(flowBidirectional, nil, address)
-		if err != nil {
-			return nil, err
-		}
-		flow.tdRaw.TcpDialer = d.TcpDialer
-		return flow, flow.DialContext(ctx)
+	if d.TcpDialer == nil {
+		// custom dialer is not set, use default
+		defaultDialer := net.Dialer{}
+		d.TcpDialer = defaultDialer.DialContext
 	}
-	return dialSplitFlow(ctx, d.TcpDialer, address)
+
+	if !d.SplitFlows {
+		if !d.DarkDecoy {
+			flow, err := makeTdFlow(flowBidirectional, nil, address)
+			if err != nil {
+				return nil, err
+			}
+			flow.tdRaw.TcpDialer = d.TcpDialer
+			flow.tdRaw.useProxyHeader = d.UseProxyHeader
+			return flow, flow.DialContext(ctx)
+		} else {
+			// _, err := makeTdFlow(flowBidirectional, nil, address)
+			// if err != nil {
+			// 	return nil, err
+			// }
+			cjSession := makeConjureSession(address, d.Transport)
+			cjSession.TcpDialer = d.TcpDialer
+			cjSession.UseProxyHeader = d.UseProxyHeader
+			cjSession.Width = uint(d.Width)
+
+			if d.V6Support {
+				cjSession.V6Support = &V6{include: both, support: true}
+			} else {
+				cjSession.V6Support = &V6{include: v4, support: false}
+			}
+			if len(address) == 0 {
+				return nil, errors.New("Dark Decoys require target address to be set")
+			}
+			return DialConjure(ctx, cjSession, d.DarkDecoyRegistrar)
+		}
+	}
+	return nil, errors.New("SplitFlows are not supported")
 }
 
 // DialProxy establishes direct connection to TapDance station proxy.
@@ -70,7 +117,7 @@ func (d *Dialer) DialProxy() (net.Conn, error) {
 	return d.DialProxyContext(context.Background())
 }
 
-// DialProxy establishes direct connection to TapDance station proxy using the provided context.
+// DialProxyContext establishes direct connection to TapDance station proxy using the provided context.
 // Users are expected to send HTTP CONNECT request next.
 func (d *Dialer) DialProxyContext(ctx context.Context) (net.Conn, error) {
 	return d.DialContext(ctx, "tcp", "")

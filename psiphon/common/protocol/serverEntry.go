@@ -55,7 +55,8 @@ type ServerEntry struct {
 	SshHostKey                    string   `json:"sshHostKey"`
 	SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
 	SshObfuscatedQUICPort         int      `json:"sshObfuscatedQUICPort"`
-	SshObfuscatedTapdancePort     int      `json:"sshObfuscatedTapdancePort"`
+	SshObfuscatedTapDancePort     int      `json:"sshObfuscatedTapdancePort"`
+	SshObfuscatedConjurePort      int      `json:"sshObfuscatedConjurePort"`
 	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
 	Capabilities                  []string `json:"capabilities"`
 	Region                        string   `json:"region"`
@@ -468,7 +469,7 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 type ConditionallyEnabledComponents interface {
 	QUICEnabled() bool
 	MarionetteEnabled() bool
-	TapdanceEnabled() bool
+	RefractionNetworkingEnabled() bool
 }
 
 // GetSupportedProtocols returns a list of tunnel protocols supported
@@ -503,7 +504,8 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 
 		if (TunnelProtocolUsesQUIC(protocol) && !conditionallyEnabled.QUICEnabled()) ||
 			(TunnelProtocolUsesMarionette(protocol) && !conditionallyEnabled.MarionetteEnabled()) ||
-			(TunnelProtocolUsesTapdance(protocol) && !conditionallyEnabled.TapdanceEnabled()) {
+			(TunnelProtocolUsesRefractionNetworking(protocol) &&
+				!conditionallyEnabled.RefractionNetworkingEnabled()) {
 			continue
 		}
 
