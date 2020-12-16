@@ -219,9 +219,10 @@ message ClientToStation {
 
 
 enum RegistrationSource {
-	Detector = 0;
-	API = 1;
-    DetectorPrescan = 2;
+    Unspecified = 0;
+	Detector = 1;
+	API = 2;
+    DetectorPrescan = 3;
 }
 
 message C2SWrapper {
