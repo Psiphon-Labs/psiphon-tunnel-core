@@ -118,25 +118,50 @@ func IsAddressInUseError(err error) bool {
 	return false
 }
 
-var stripIPv4AddressRegex = regexp.MustCompile(
-	`(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}(:(6553[0-5]|655[0-2][0-9]\d|65[0-4](\d){2}|6[0-4](\d){3}|[1-5](\d){4}|[1-9](\d){0,3}))?`)
+var stripIPAddressAndPortRegex = regexp.MustCompile(
+	// IP address
+	`(` +
+		// IPv4
+		`\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|` +
 
-// StripIPAddresses returns a copy of the input with all IP addresses [and
-// optional ports] replaced  by "[address]". This is intended to be used to
+		// IPv6
+		//
+		// Optional brackets for IPv6 with port
+		`\[?` +
+		`(` +
+		// Uncompressed IPv6; ensure there are 8 segments to avoid matching, e.g., a
+		// timestamp
+		`(([a-fA-F0-9]{1,4}:){7}[a-fA-F0-9]{1,4})|` +
+		// Compressed IPv6
+		`([a-fA-F0-9:]*::[a-fA-F0-9:]+)|([a-fA-F0-9:]+::[a-fA-F0-9:]*)` +
+		`)` +
+		// Optional mapped/translated/embeded IPv4 suffix
+		`(.\d{1,3}\.\d{1,3}\.\d{1,3})?` +
+		`\]?` +
+		`)` +
+
+		// Optional port number
+		`(:\d+)?`)
+
+// StripIPAddresses returns a copy of the input with all IP addresses (and
+// optional ports) replaced by "[redacted]". This is intended to be used to
 // strip addresses from "net" package I/O error messages and otherwise avoid
 // inadvertently recording direct server IPs via error message logs; and, in
 // metrics, to reduce the error space due to superfluous source port data.
 //
-// Limitation: only strips IPv4 addresses.
+// StripIPAddresses uses a simple regex match which liberally matches IP
+// address-like patterns and will match invalid addresses; for example, it
+// will match port numbers greater than 65535. We err on the side of redaction
+// and are not as concerned, in this context, with false positive matches. If
+// a user configures an upstream proxy address with an invalid IP or port
+// value, we prefer to redact it.
 func StripIPAddresses(b []byte) []byte {
-	// TODO: IPv6 support
-	return stripIPv4AddressRegex.ReplaceAll(b, []byte("[redacted]"))
+	return stripIPAddressAndPortRegex.ReplaceAll(b, []byte("[redacted]"))
 }
 
 // StripIPAddressesString is StripIPAddresses for strings.
 func StripIPAddressesString(s string) string {
-	// TODO: IPv6 support
-	return stripIPv4AddressRegex.ReplaceAllString(s, "[redacted]")
+	return stripIPAddressAndPortRegex.ReplaceAllString(s, "[redacted]")
 }
 
 // RedactNetError removes network address information from a "net" package
