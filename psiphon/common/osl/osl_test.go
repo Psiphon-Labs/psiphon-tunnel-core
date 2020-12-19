@@ -363,6 +363,21 @@ func TestOSL(t *testing.T) {
 			omitEmptyOSLsSchemes := []int{}
 
 			firstPaveFiles, err := config.Pave(
+				time.Time{},
+				endTime,
+				propagationChannelID,
+				signingPublicKey,
+				signingPrivateKey,
+				paveServerEntries,
+				omitMD5SumsSchemes,
+				omitEmptyOSLsSchemes,
+				nil)
+			if err != nil {
+				t.Fatalf("Pave failed: %s", err)
+			}
+
+			offsetPaveFiles, err := config.Pave(
+				epoch.Add(500*seedPeriod+seedPeriod/2),
 				endTime,
 				propagationChannelID,
 				signingPublicKey,
@@ -376,6 +391,7 @@ func TestOSL(t *testing.T) {
 			}
 
 			paveFiles, err := config.Pave(
+				time.Time{},
 				endTime,
 				propagationChannelID,
 				signingPublicKey,
@@ -399,10 +415,35 @@ func TestOSL(t *testing.T) {
 
 			for index, paveFile := range paveFiles {
 				if paveFile.Name != firstPaveFiles[index].Name {
-					t.Fatalf("Pave name mismatch")
+					t.Fatalf("pave name mismatch")
 				}
 				if !bytes.Equal(paveFile.Contents, firstPaveFiles[index].Contents) {
-					t.Fatalf("Pave content mismatch")
+					t.Fatalf("pave content mismatch")
+				}
+			}
+
+			// Check that the output of a pave using an unaligned offset from epoch
+			// produces a subset of OSLs with the same IDs and content: the OSL and
+			// SLOK time slots must align.
+
+			if len(offsetPaveFiles) >= len(paveFiles) {
+				t.Fatalf("unexpected pave size")
+			}
+
+			for _, offsetPaveFile := range offsetPaveFiles {
+				found := false
+				for _, paveFile := range paveFiles {
+					if offsetPaveFile.Name == paveFile.Name {
+						if offsetPaveFile.Name != GetOSLRegistryURL("") &&
+							!bytes.Equal(offsetPaveFile.Contents, paveFile.Contents) {
+							t.Fatalf("pave content mismatch")
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("pave name missing")
 				}
 			}
 
