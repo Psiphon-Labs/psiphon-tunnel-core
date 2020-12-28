@@ -37,7 +37,7 @@ Users run a client program which connects to a proxy server and routes client ho
 
 Psiphon has multiple routing modes:
 - Port forward mode: the client runs localhost SOCKS and HTTPS proxies and the client host or individual apps are configured to use these local proxies; each connection to a local proxy is related through the tunnel to the server.
-- Packet runnel mode: the client relays IP packets between a host "tun" device and the server.
+- Packet tunnel mode: the client relays IP packets between a host "tun" device and the server.
 
 ### Traffic Security
 
