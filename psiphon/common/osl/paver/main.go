@@ -213,6 +213,7 @@ func main() {
 	for propagationChannelID := range allPropagationChannelIDs {
 
 		paveFiles, err := config.Pave(
+			startTime,
 			endTime,
 			propagationChannelID,
 			signingPublicKey,
