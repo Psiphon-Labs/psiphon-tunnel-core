@@ -43,7 +43,7 @@ func main() {
 	var offset time.Duration
 	flag.DurationVar(
 		&offset, "offset", 0,
-		"pave OSL start time (offset from now); default, 0, selects earliest epoch")
+		"pave OSL start time (now minus offset); default, 0, selects earliest epoch")
 
 	var period time.Duration
 	flag.DurationVar(
@@ -173,7 +173,7 @@ func main() {
 	var startTime, endTime time.Time
 
 	if offset != 0 {
-		startTime = paveTime.Add(offset)
+		startTime = paveTime.Add(-offset)
 	} else {
 		// Default to the earliest scheme epoch.
 		startTime = paveTime
@@ -213,6 +213,7 @@ func main() {
 	for propagationChannelID := range allPropagationChannelIDs {
 
 		paveFiles, err := config.Pave(
+			startTime,
 			endTime,
 			propagationChannelID,
 			signingPublicKey,

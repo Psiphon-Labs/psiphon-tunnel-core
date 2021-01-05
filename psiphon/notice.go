@@ -510,6 +510,10 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 			args = append(args, "networkLatencyMultiplier", dialParams.NetworkLatencyMultiplier)
 		}
 
+		if dialParams.ConjureTransport != "" {
+			args = append(args, "conjureTransport", dialParams.ConjureTransport)
+		}
+
 		if dialParams.DialConnMetrics != nil {
 			metrics := dialParams.DialConnMetrics.GetMetrics()
 			for name, value := range metrics {

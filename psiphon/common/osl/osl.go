@@ -786,6 +786,9 @@ type PaveLogInfo struct {
 // separated. Otherwise the OSL will still be issued, but be empty (unless
 // the scheme is in omitEmptyOSLsSchemes).
 //
+// If startTime is specified and is after epoch, the pave file will contain
+// OSLs for the first period at or after startTime.
+//
 // As OSLs outside the epoch-endTime range will no longer appear in
 // the registry, Pave is intended to be used to create the full set
 // of OSLs for a distribution site; i.e., not incrementally.
@@ -793,6 +796,7 @@ type PaveLogInfo struct {
 // Automation is responsible for consistently distributing server entries
 // to OSLs in the case where OSLs are repaved in subsequent calls.
 func (config *Config) Pave(
+	startTime time.Time,
 	endTime time.Time,
 	propagationChannelID string,
 	signingPublicKey string,
@@ -819,6 +823,12 @@ func (config *Config) Pave(
 			oslDuration := scheme.GetOSLDuration()
 
 			oslTime := scheme.epoch
+
+			if !startTime.IsZero() && !startTime.Before(scheme.epoch) {
+				for oslTime.Before(startTime) {
+					oslTime = oslTime.Add(oslDuration)
+				}
+			}
 
 			for !oslTime.After(endTime) {
 

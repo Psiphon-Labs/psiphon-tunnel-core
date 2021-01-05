@@ -158,11 +158,12 @@ type Config struct {
 	NetworkLatencyMultiplier float64
 
 	// LimitTunnelProtocols indicates which protocols to use. Valid values
-	// include:
-	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
-	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
-	// "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH", "MARIONETTE-OSSH", and
-	// "TAPDANCE-OSSH".
+	// include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH",
+	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
+	// "FRONTED-MEEK-QUIC-OSSH", "MARIONETTE-OSSH", "TAPDANCE-OSSH", and
+	// "CONJURE-OSSH".
+
 	// For the default, an empty list, all protocols are used.
 	LimitTunnelProtocols []string
 
@@ -451,10 +452,10 @@ type Config struct {
 	// and testing only.
 	EmitSLOKs bool
 
-	// EmitTapdanceLogs indicates whether to emit gotapdance log messages
-	// to stdout. Note that gotapdance log messages do not conform to the
-	// Notice format standard. Default is off.
-	EmitTapdanceLogs bool
+	// EmitRefractionNetworkingLogs indicates whether to emit gotapdance log
+	// messages to stdout. Note that gotapdance log messages do not conform to
+	// the Notice format standard. Default is off.
+	EmitRefractionNetworkingLogs bool
 
 	// EmitServerAlerts indicates whether to emit notices for server alerts.
 	EmitServerAlerts bool
@@ -978,15 +979,6 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		}
 	}
 
-	// Create tapdance directory
-	tapdanceDirectoryPath := config.GetTapdanceDirectory()
-	if !common.FileExists(tapdanceDirectoryPath) {
-		err := os.Mkdir(tapdanceDirectoryPath, os.ModePerm)
-		if err != nil {
-			return errors.Tracef("failed to create tapdance directory %s with error: %s", tapdanceDirectoryPath, err.Error())
-		}
-	}
-
 	if config.ClientVersion == "" {
 		config.ClientVersion = "0"
 	}
@@ -1329,12 +1321,6 @@ func (config *Config) GetRemoteServerListDownloadFilename() string {
 // (UpgradeDownloadFilename.part*) to allow for resumable downloading.
 func (config *Config) GetUpgradeDownloadFilename() string {
 	return filepath.Join(config.GetPsiphonDataDirectory(), UpgradeDownloadFilename)
-}
-
-// GetTapdanceDirectory returns the directory under which tapdance will create
-// and manage files.
-func (config *Config) GetTapdanceDirectory() string {
-	return filepath.Join(config.GetPsiphonDataDirectory(), "tapdance")
 }
 
 // UseUpstreamProxy indicates if an upstream proxy has been
@@ -1901,11 +1887,6 @@ func migrationsFromLegacyFilePaths(config *Config) ([]common.FileMigration, erro
 		{
 			OldPath: filepath.Join(config.MigrateDataStoreDirectory, "psiphon.boltdb.lock"),
 			NewPath: filepath.Join(config.GetDataStoreDirectory(), "psiphon.boltdb.lock"),
-		},
-		{
-			OldPath: filepath.Join(config.MigrateDataStoreDirectory, "tapdance"),
-			NewPath: filepath.Join(config.GetTapdanceDirectory(), "tapdance"),
-			IsDir:   true,
 		},
 	}
 

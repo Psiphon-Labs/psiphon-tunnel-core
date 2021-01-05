@@ -29,33 +29,34 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 func TestInterruptDials(t *testing.T) {
 
-	makeDialers := make(map[string]func(string) Dialer)
+	makeDialers := make(map[string]func(string) common.Dialer)
 
-	makeDialers["TCP"] = func(string) Dialer {
+	makeDialers["TCP"] = func(string) common.Dialer {
 		return NewTCPDialer(&DialConfig{})
 	}
 
-	makeDialers["SOCKS4-Proxied"] = func(mockServerAddr string) Dialer {
+	makeDialers["SOCKS4-Proxied"] = func(mockServerAddr string) common.Dialer {
 		return NewTCPDialer(
 			&DialConfig{
 				UpstreamProxyURL: "socks4a://" + mockServerAddr,
 			})
 	}
 
-	makeDialers["SOCKS5-Proxied"] = func(mockServerAddr string) Dialer {
+	makeDialers["SOCKS5-Proxied"] = func(mockServerAddr string) common.Dialer {
 		return NewTCPDialer(
 			&DialConfig{
 				UpstreamProxyURL: "socks5://" + mockServerAddr,
 			})
 	}
 
-	makeDialers["HTTP-CONNECT-Proxied"] = func(mockServerAddr string) Dialer {
+	makeDialers["HTTP-CONNECT-Proxied"] = func(mockServerAddr string) common.Dialer {
 		return NewTCPDialer(
 			&DialConfig{
 				UpstreamProxyURL: "http://" + mockServerAddr,
@@ -74,7 +75,7 @@ func TestInterruptDials(t *testing.T) {
 		t.Fatalf("NewSeed failed: %s", err)
 	}
 
-	makeDialers["TLS"] = func(string) Dialer {
+	makeDialers["TLS"] = func(string) common.Dialer {
 		return NewCustomTLSDialer(
 			&CustomTLSConfig{
 				Parameters:               params,
@@ -104,7 +105,7 @@ func TestInterruptDials(t *testing.T) {
 func runInterruptDials(
 	t *testing.T,
 	doTimeout bool,
-	makeDialer func(string) Dialer,
+	makeDialer func(string) common.Dialer,
 	dialGoroutineFunctionNames []string) {
 
 	t.Logf("Test timeout: %+v", doTimeout)

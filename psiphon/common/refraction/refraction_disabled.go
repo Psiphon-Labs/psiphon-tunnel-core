@@ -1,4 +1,4 @@
-// +build !PSIPHON_ENABLE_TAPDANCE
+// +build !PSIPHON_ENABLE_REFRACTION_NETWORKING
 
 /*
  * Copyright (c) 2018, Psiphon Inc.
@@ -19,7 +19,7 @@
  *
  */
 
-package tapdance
+package refraction
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
-// Enabled indicates if Tapdance functionality is enabled.
+// Enabled indicates if Refraction Networking functionality is enabled.
 func Enabled() bool {
 	return false
 }
@@ -39,12 +39,17 @@ type Listener struct {
 	net.Listener
 }
 
-// Listen creates a new Tapdance listener.
-func Listen(_ net.Listener) (net.Listener, error) {
+// Listen creates a new Refraction Networking listener.
+func Listen(_ string) (net.Listener, error) {
 	return nil, errors.TraceNew("operation is not enabled")
 }
 
-// Dial establishes a new Tapdance session to a Tapdance station.
-func Dial(_ context.Context, _ bool, _ string, _ common.NetDialer, _ string) (net.Conn, error) {
+// DialTapDance establishes a new Tapdance connection to a Tapdance station.
+func DialTapDance(_ context.Context, _ bool, _ string, _ common.NetDialer, _ string) (net.Conn, error) {
+	return nil, errors.TraceNew("operation is not enabled")
+}
+
+// DialConjure establishes a new Conjure connection to a Conjure station.
+func DialConjure(_ context.Context, _ bool, _ string, _, _ common.NetDialer, _ int, _, _ string) (net.Conn, error) {
 	return nil, errors.TraceNew("operation is not enabled")
 }

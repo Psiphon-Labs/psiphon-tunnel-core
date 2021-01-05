@@ -996,6 +996,10 @@ func getBaseAPIParameters(
 				fmt.Sprintf("%f", dialParams.NetworkLatencyMultiplier)
 		}
 
+		if dialParams.ConjureTransport != "" {
+			params["conjure_transport"] = dialParams.ConjureTransport
+		}
+
 		if dialParams.DialConnMetrics != nil {
 			metrics := dialParams.DialConnMetrics.GetMetrics()
 			for name, value := range metrics {
