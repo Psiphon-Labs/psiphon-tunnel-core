@@ -33,6 +33,9 @@ import (
 	"github.com/wader/filtertransport"
 )
 
+// Dialer is a custom network dialer.
+type Dialer func(context.Context, string, string) (net.Conn, error)
+
 // NetDialer mimicks the net.Dialer interface.
 type NetDialer interface {
 	Dial(network, address string) (net.Conn, error)

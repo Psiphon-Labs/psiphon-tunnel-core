@@ -2,8 +2,9 @@ package tapdance
 
 import (
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"sync"
+
+	"github.com/sirupsen/logrus"
 )
 
 // implements interface logrus.Formatter
@@ -22,8 +23,8 @@ func Logger() *logrus.Logger {
 	initLoggerOnce.Do(func() {
 		logrusLogger = logrus.New()
 		logrusLogger.Formatter = new(formatter)
-		logrusLogger.Level = logrus.InfoLevel
-		// logrusLogger.Level = logrus.DebugLevel
+		// logrusLogger.Level = logrus.InfoLevel
+		logrusLogger.Level = logrus.DebugLevel
 
 		// buildInfo const will be overwritten by CI with `sed` for test builds
 		// if not overwritten -- this is a NO-OP

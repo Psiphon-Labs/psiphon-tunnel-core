@@ -165,6 +165,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	omitEmptyOSLsSchemes := []int{}
 
 	paveFiles, err := oslConfig.Pave(
+		time.Time{},
 		epoch,
 		propagationChannelID,
 		signingPublicKey,
@@ -182,6 +183,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	omitEmptyOSLsSchemes = []int{0}
 
 	paveFiles, err = oslConfig.Pave(
+		time.Time{},
 		epoch,
 		propagationChannelID,
 		signingPublicKey,
