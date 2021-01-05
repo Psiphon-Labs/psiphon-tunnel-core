@@ -54,15 +54,8 @@ func NewTacticsListener(
 	}
 }
 
-// Accept calls the underlying listener's Accept, and then checks if tactics
-// for the connection set LimitTunnelProtocols.
-//
-// If LimitTunnelProtocols is set and does not include the tunnel protocol the
-// listener is running, the accepted connection is immediately closed and the
-// underlying Accept is called again.
-//
-// For retained connections, fragmentation is applied when specified by
-// tactics.
+// Accept calls the underlying listener's Accept, and then applies server-side
+// tactics to new connections.
 func (listener *TacticsListener) Accept() (net.Conn, error) {
 
 	conn, err := listener.Listener.Accept()
