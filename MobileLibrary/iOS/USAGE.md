@@ -6,8 +6,13 @@ Psiphon Library for iOS enables you to easily embed Psiphon in your iOS app.
 You can then tunnel requests through Psiphon, ensuring that your app can't be
 blocked by censors.
 
-The Psiphon Library is available as a `.framework` that can be easily included
+The Psiphon Library is available as a XCFramework bundle `.xcframework` that can be easily included
 in your project using these instructions.
+
+## Requirements
+
+Psiphon Library for iOS requires Xcode 11 or above.
+If using CocoaPods, CocoaPods version 1.10 or greater is required.
 
 ## Using the Library in your App
 
@@ -20,7 +25,7 @@ This code is a canonical guide for integrating the Library.
 
 1. Get the latest iOS release from the project's [Releases](https://github.com/Psiphon-Labs/psiphon-tunnel-core/releases) page.
 
-2. Add `PsiphonTunnel.framework` to project (drag into project tree).
+2. Add `PsiphonTunnel.xcframework` to project (drag into project tree).
 
 3. In the "General" settings for the target, set "Deployment Target" to 9.3.
 
@@ -28,15 +33,7 @@ This code is a canonical guide for integrating the Library.
 
 5. In the "Build Settings" for the target, click the `+` at the top, then "Add User-Defined Setting". Name the new setting `STRIP_BITCODE_FROM_COPIED_FILES` and set it to `NO`.
 
-6. In the "Build Phases" for the target, add a "Copy Files" phase. Set "Destination" to "Frameworks". Add `PsiphonTunnel.framework` to the list. Ensure "Code Sign on Copy" is checked.
-
-7. In the "Build Phases" for the target, add a "Run Script" phase. Set the script contents to:
-
-   ```no-highlight
-   bash "${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}/PsiphonTunnel.framework/strip-frameworks.sh"
-   ```
-
-   This step is required to work around an [App Store submission validation bug](http://www.openradar.me/23681704) that rejects apps containing a framework with simulator slices.
+6. In the "Build Phases" for the target, add a "Copy Files" phase. Set "Destination" to "Frameworks". Add `PsiphonTunnel.xcframework` to the list. Ensure "Code Sign on Copy" is checked.
 
 ## Compiling and testing
 

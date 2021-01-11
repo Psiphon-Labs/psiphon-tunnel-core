@@ -17,7 +17,6 @@
 		6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDCC1E2E88A200F0E414 /* Psi-meta.h */; };
 		6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD21E2EBB1000F0E414 /* GoPsi.objc.h */; };
 		6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */ = {isa = PBXBuildFile; fileRef = 6685BDD31E2EBB1000F0E414 /* Universe.objc.h */; };
-		6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */ = {isa = PBXBuildFile; fileRef = 6685BDD81E300AC200F0E414 /* strip-frameworks.sh */; };
 		669541B71EF9FECF0038E125 /* build-git-commit.txt in Resources */ = {isa = PBXBuildFile; fileRef = 669541B61EF9FECF0038E125 /* build-git-commit.txt */; };
 		66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */ = {isa = PBXBuildFile; fileRef = 66BAD3331E525FBC00CD06DE /* JailbreakCheck.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		66BAD3361E525FBC00CD06DE /* JailbreakCheck.m in Sources */ = {isa = PBXBuildFile; fileRef = 66BAD3341E525FBC00CD06DE /* JailbreakCheck.m */; };
@@ -428,7 +427,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				669541B71EF9FECF0038E125 /* build-git-commit.txt in Resources */,
-				6685BDD91E300AC200F0E414 /* strip-frameworks.sh in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -453,7 +451,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "git rev-parse --verify HEAD > build-git-commit.txt";
+			shellScript = "git rev-parse --verify HEAD > build-git-commit.txt\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
