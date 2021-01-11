@@ -9,6 +9,11 @@ blocked by censors.
 The Psiphon Library is available as a XCFramework bundle `.xcframework` that can be easily included
 in your project using these instructions.
 
+## Requirements
+
+Psiphon Library for iOS requires Xcode 11 or above.
+If using CocoaPods, CocoaPods version 1.10 or greater is required.
+
 ## Using the Library in your App
 
 **First step:** Review the sample app, located under `SampleApps`.
