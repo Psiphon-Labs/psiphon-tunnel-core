@@ -552,38 +552,38 @@
 		{
 			"checksumSHA1": "TtIN/5Wshp+L7WdSLIRLlH+QzYI=",
 			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "b431f20d9b13a056f7b706990639bf3ad5d3b786",
-			"revisionTime": "2020-12-15T21:04:44Z"
+			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
+			"revisionTime": "2021-01-11T22:28:43Z"
 		},
 		{
 			"checksumSHA1": "ObZZJpjQl2BISlIiES82BW8jbEE=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/edwards25519",
-			"revision": "b431f20d9b13a056f7b706990639bf3ad5d3b786",
-			"revisionTime": "2020-12-15T21:04:44Z"
+			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
+			"revisionTime": "2021-01-11T22:28:43Z"
 		},
 		{
 			"checksumSHA1": "VoyDh1KIIVE+OJbehDNJ91tf4Vw=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/extra25519",
-			"revision": "b431f20d9b13a056f7b706990639bf3ad5d3b786",
-			"revisionTime": "2020-12-15T21:04:44Z"
+			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
+			"revisionTime": "2021-01-11T22:28:43Z"
 		},
 		{
 			"checksumSHA1": "pv457Nq5W+/UI8AYxLSljqlohk0=",
 			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "b431f20d9b13a056f7b706990639bf3ad5d3b786",
-			"revisionTime": "2020-12-15T21:04:44Z"
+			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
+			"revisionTime": "2021-01-11T22:28:43Z"
 		},
 		{
-			"checksumSHA1": "4BHfngLYV4TDRnjnW2h8dRHmjH8=",
+			"checksumSHA1": "2C5hsdfPpJoACSbdgDF0hS/so3E=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "b431f20d9b13a056f7b706990639bf3ad5d3b786",
-			"revisionTime": "2020-12-15T21:04:44Z"
+			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
+			"revisionTime": "2021-01-11T22:28:43Z"
 		},
 		{
 			"checksumSHA1": "fv2fYuM1BN+zb4/TEktcVTqKhnI=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance/phantoms",
-			"revision": "b431f20d9b13a056f7b706990639bf3ad5d3b786",
-			"revisionTime": "2020-12-15T21:04:44Z"
+			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
+			"revisionTime": "2021-01-11T22:28:43Z"
 		},
 		{
 			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",
