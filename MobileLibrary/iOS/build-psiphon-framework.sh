@@ -113,6 +113,7 @@ function gomobile_build_for_platform() {
   CGO_CFLAGS_ALLOW="-fmodules|-fblocks" "${GOPATH}"/bin/gomobile bind -v -x \
   -target "${TARGETS}" \
   -prefix Go \
+  -tags="${BUILD_TAGS}" \
   -ldflags="${LDFLAGS}" \
   -o "${GOBIND_OUT}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
 
