@@ -51,8 +51,11 @@
 		CECF014A2538DD0B00CD3E5C /* PsiphonProviderNetwork.m in Sources */ = {isa = PBXBuildFile; fileRef = CECF01482538DD0B00CD3E5C /* PsiphonProviderNetwork.m */; };
 		CECF01502538E14B00CD3E5C /* NetworkID.h in Headers */ = {isa = PBXBuildFile; fileRef = CECF014E2538E14B00CD3E5C /* NetworkID.h */; };
 		CECF01512538E14B00CD3E5C /* NetworkID.m in Sources */ = {isa = PBXBuildFile; fileRef = CECF014F2538E14B00CD3E5C /* NetworkID.m */; };
+		CEDBA51225B7737C007685E2 /* NetworkInterface.h in Headers */ = {isa = PBXBuildFile; fileRef = CEDBA51025B7737C007685E2 /* NetworkInterface.h */; };
+		CEDBA51325B7737C007685E2 /* NetworkInterface.m in Sources */ = {isa = PBXBuildFile; fileRef = CEDBA51125B7737C007685E2 /* NetworkInterface.m */; };
 		CEDE547924EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h in Headers */ = {isa = PBXBuildFile; fileRef = CEDE547724EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h */; };
 		CEDE547A24EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m in Sources */ = {isa = PBXBuildFile; fileRef = CEDE547824EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m */; };
+		CEFC764225B1F358003A2A52 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CEFC764125B1F358003A2A52 /* Network.framework */; };
 		EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = EFED7EBE1F587F6E0078980F /* libresolv.tbd */; };
 /* End PBXBuildFile section */
 
@@ -127,8 +130,11 @@
 		CECF01482538DD0B00CD3E5C /* PsiphonProviderNetwork.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PsiphonProviderNetwork.m; sourceTree = "<group>"; };
 		CECF014E2538E14B00CD3E5C /* NetworkID.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NetworkID.h; sourceTree = "<group>"; };
 		CECF014F2538E14B00CD3E5C /* NetworkID.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NetworkID.m; sourceTree = "<group>"; };
+		CEDBA51025B7737C007685E2 /* NetworkInterface.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NetworkInterface.h; sourceTree = "<group>"; };
+		CEDBA51125B7737C007685E2 /* NetworkInterface.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NetworkInterface.m; sourceTree = "<group>"; };
 		CEDE547724EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = PsiphonProviderFeedbackHandlerShim.h; path = ../PsiphonProviderFeedbackHandlerShim.h; sourceTree = "<group>"; };
 		CEDE547824EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = PsiphonProviderFeedbackHandlerShim.m; path = ../PsiphonProviderFeedbackHandlerShim.m; sourceTree = "<group>"; };
+		CEFC764125B1F358003A2A52 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.1.sdk/System/Library/Frameworks/Network.framework; sourceTree = DEVELOPER_DIR; };
 		EFED7EBE1F587F6E0078980F /* libresolv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libresolv.tbd; path = usr/lib/libresolv.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -139,6 +145,7 @@
 			files = (
 				EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */,
 				660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */,
+				CEFC764225B1F358003A2A52 /* Network.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -163,6 +170,8 @@
 				CECF01432538D34100CD3E5C /* IPv6Synthesizer.m */,
 				CECF014E2538E14B00CD3E5C /* NetworkID.h */,
 				CECF014F2538E14B00CD3E5C /* NetworkID.m */,
+				CEDBA51025B7737C007685E2 /* NetworkInterface.h */,
+				CEDBA51125B7737C007685E2 /* NetworkInterface.m */,
 				CE4616BD2539493600D1243E /* Reachability+HasNetworkConnectivity.h */,
 				CE4616BE2539493600D1243E /* Reachability+HasNetworkConnectivity.m */,
 			);
@@ -301,6 +310,7 @@
 		EFED7EBD1F587F6E0078980F /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				CEFC764125B1F358003A2A52 /* Network.framework */,
 				EFED7EBE1F587F6E0078980F /* libresolv.tbd */,
 			);
 			name = Frameworks;
@@ -329,6 +339,7 @@
 				66BDB0651DC26CCC0079384C /* SBJson4StreamWriterState.h in Headers */,
 				CECF01502538E14B00CD3E5C /* NetworkID.h in Headers */,
 				66BDB05B1DC26CCC0079384C /* SBJson4Parser.h in Headers */,
+				CEDBA51225B7737C007685E2 /* NetworkInterface.h in Headers */,
 				CEDE547924EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h in Headers */,
 				6685BDCD1E2E88A200F0E414 /* Psi-meta.h in Headers */,
 				66BDB05A1DC26CCC0079384C /* SBJson4.h in Headers */,
@@ -469,6 +480,7 @@
 				4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */,
 				CECF01512538E14B00CD3E5C /* NetworkID.m in Sources */,
 				66BAD3361E525FBC00CD06DE /* JailbreakCheck.m in Sources */,
+				CEDBA51325B7737C007685E2 /* NetworkInterface.m in Sources */,
 				66BDB0681DC26CCC0079384C /* SBJson4Writer.m in Sources */,
 				66BDB0621DC26CCC0079384C /* SBJson4StreamTokeniser.m in Sources */,
 				66BDB0441DA6C7DD0079384C /* PsiphonTunnel.m in Sources */,
