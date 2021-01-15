@@ -51,6 +51,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -859,6 +860,36 @@ func (conn *muxPacketConn) SetReadDeadline(t time.Time) error {
 
 func (conn *muxPacketConn) SetWriteDeadline(t time.Time) error {
 	return errors.TraceNew("not supported")
+}
+
+// SetReadBuffer and SyscallConn provide passthroughs to the underlying
+// net.UDPConn implementations, used to optimize the UDP receive buffer size.
+// See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
+// and ietf_quic.setReceiveBuffer. Only the IETF stack will access these
+// functions.
+//
+// Limitation: due to the relayPackets/ReadFrom scheme, this simple
+// passthrough does not suffice to provide access to ReadMsgUDP for
+// https://godoc.org/github.com/lucas-clemente/quic-go#ECNCapablePacketConn.
+
+func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
+	c, ok := conn.listener.conn.PacketConn.(interface {
+		SetReadBuffer(int) error
+	})
+	if !ok {
+		return errors.TraceNew("not supported")
+	}
+	return c.SetReadBuffer(bytes)
+}
+
+func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {
+	c, ok := conn.listener.conn.PacketConn.(interface {
+		SyscallConn() (syscall.RawConn, error)
+	})
+	if !ok {
+		return nil, errors.TraceNew("not supported")
+	}
+	return c.SyscallConn()
 }
 
 // muxListener is a multiplexing packet conn listener which relays packets to
