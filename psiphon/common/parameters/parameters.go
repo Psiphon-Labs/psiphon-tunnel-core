@@ -222,6 +222,8 @@ const (
 	ReplayHostname                                   = "ReplayHostname"
 	ReplayQUICVersion                                = "ReplayQUICVersion"
 	ReplayObfuscatedQUIC                             = "ReplayObfuscatedQUIC"
+	ReplayConjureRegistration                        = "ReplayConjureRegistration"
+	ReplayConjureTransport                           = "ReplayConjureTransport"
 	ReplayLivenessTest                               = "ReplayLivenessTest"
 	ReplayUserAgent                                  = "ReplayUserAgent"
 	ReplayAPIRequestPadding                          = "ReplayAPIRequestPadding"
@@ -269,6 +271,8 @@ const (
 	ClientBurstUpstreamTargetBytes                   = "ClientBurstUpstreamTargetBytes"
 	ClientBurstDownstreamDeadline                    = "ClientBurstDownstreamDeadline"
 	ClientBurstDownstreamTargetBytes                 = "ClientBurstDownstreamTargetBytes"
+	ConjureDecoyRegistrarWidth                       = "ConjureDecoyRegistrarWidth"
+	ConjureTransportObfs4Probability                 = "ConjureTransportObfs4Probability"
 )
 
 const (
@@ -502,6 +506,8 @@ var defaultParameters = map[string]struct {
 	ReplayHostname:                         {value: true},
 	ReplayQUICVersion:                      {value: true},
 	ReplayObfuscatedQUIC:                   {value: true},
+	ReplayConjureRegistration:              {value: true},
+	ReplayConjureTransport:                 {value: true},
 	ReplayLivenessTest:                     {value: true},
 	ReplayUserAgent:                        {value: true},
 	ReplayAPIRequestPadding:                {value: true},
@@ -558,6 +564,9 @@ var defaultParameters = map[string]struct {
 	ClientBurstUpstreamDeadline:      {value: time.Duration(0), minimum: time.Duration(0)},
 	ClientBurstDownstreamTargetBytes: {value: 0, minimum: 0},
 	ClientBurstDownstreamDeadline:    {value: time.Duration(0), minimum: time.Duration(0)},
+
+	ConjureDecoyRegistrarWidth:       {value: 5, minimum: 1},
+	ConjureTransportObfs4Probability: {value: 0.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

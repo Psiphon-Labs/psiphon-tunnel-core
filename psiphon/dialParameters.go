@@ -113,6 +113,9 @@ type DialParameters struct {
 	QUICDialSNIAddress        string
 	ObfuscatedQUICPaddingSeed *prng.Seed
 
+	ConjureDecoyRegistrarWidth int
+	ConjureTransport           string
+
 	LivenessTestSeed *prng.Seed
 
 	APIRequestPaddingSeed *prng.Seed
@@ -168,6 +171,8 @@ func MakeDialParameters(
 	replayHostname := p.Bool(parameters.ReplayHostname)
 	replayQUICVersion := p.Bool(parameters.ReplayQUICVersion)
 	replayObfuscatedQUIC := p.Bool(parameters.ReplayObfuscatedQUIC)
+	replayConjureRegistration := p.Bool(parameters.ReplayConjureRegistration)
+	replayConjureTransport := p.Bool(parameters.ReplayConjureTransport)
 	replayLivenessTest := p.Bool(parameters.ReplayLivenessTest)
 	replayUserAgent := p.Bool(parameters.ReplayUserAgent)
 	replayAPIRequestPadding := p.Bool(parameters.ReplayAPIRequestPadding)
@@ -498,6 +503,22 @@ func MakeDialParameters(
 		}
 	}
 
+	if (!isReplay || !replayConjureRegistration) &&
+		protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
+
+		dialParams.ConjureDecoyRegistrarWidth = p.Int(parameters.ConjureDecoyRegistrarWidth)
+	}
+
+	if (!isReplay || !replayConjureTransport) &&
+		protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
+
+		dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_MIN_OSSH
+		if p.WeightedCoinFlip(
+			parameters.ConjureTransportObfs4Probability) {
+			dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_OBFS4_OSSH
+		}
+	}
+
 	if !isReplay || !replayLivenessTest {
 
 		// TODO: initialize only when LivenessTestMaxUp/DownstreamBytes > 0?
@@ -526,7 +547,10 @@ func MakeDialParameters(
 		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedPort)
 
 	case protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
-		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedTapdancePort)
+		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedTapDancePort)
+
+	case protocol.TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH:
+		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedConjurePort)
 
 	case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
 		dialParams.DirectDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, serverEntry.SshObfuscatedQUICPort)

@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/sergeyfrolov/bsbuffer"
 	pb "github.com/refraction-networking/gotapdance/protobuf"
+	"github.com/sergeyfrolov/bsbuffer"
 )
 
 // TapdanceFlowConn represents single TapDance flow.
@@ -48,14 +48,6 @@ type TapdanceFlowConn struct {
 
 	flowType flowType
 }
-
-/*______________________TapdanceFlowConn Mode Chart _____________________________
-|FlowType     |Default Tag|Diff from old-school bidirectional  | Engines spawned|
-|-------------|-----------|------------------------------------|----------------|
-|Bidirectional| HTTP GET  |                                    | Writer, Reader |
-|Upload       | HTTP POST |acquires upload                     | Writer, Reader |
-|ReadOnly     | HTTP GET  |yields upload, writer sync ignored  | Reader         |
-\_____________|___________|____________________________________|_______________*/
 
 // NewTapDanceConn returns TapDance connection, that is ready to be Dial'd
 func NewTapDanceConn() (net.Conn, error) {
@@ -92,6 +84,7 @@ func (flowConn *TapdanceFlowConn) DialContext(ctx context.Context) error {
 			return err
 		}
 	}
+
 	// don't lose initial msg from station
 	// strip off state transition and push protobuf up for processing
 	flowConn.tdRaw.initialMsg.StateTransition = nil
@@ -111,13 +104,13 @@ func (flowConn *TapdanceFlowConn) DialContext(ctx context.Context) error {
 		flowConn.writeResultChan = make(chan ioOpResult)
 		go flowConn.spawnReaderEngine()
 		go flowConn.spawnWriterEngine()
-		return nil
 	case flowReadOnly:
 		go flowConn.spawnReaderEngine()
-		return nil
+	case flowRendezvous:
 	default:
 		panic("Not implemented")
 	}
+	return nil
 }
 
 type ioOpResult struct {
@@ -301,7 +294,7 @@ func (flowConn *TapdanceFlowConn) readRawData(msgLen int) ([]byte, error) {
 	return flowConn.recvbuf[:readBytesTotal], err
 }
 
-func (flowConn *TapdanceFlowConn) readProtobuf(msgLen int) (msg pb.StationToClient, err error) {
+func (flowConn *TapdanceFlowConn) readProtobuf(msgLen int) (msg *pb.StationToClient, err error) {
 	rbuf := make([]byte, msgLen)
 	var readBytes int
 	var readBytesTotal int // both header and body
@@ -316,7 +309,8 @@ func (flowConn *TapdanceFlowConn) readProtobuf(msgLen int) (msg pb.StationToClie
 			}
 		}
 	}
-	err = proto.Unmarshal(rbuf[:], &msg)
+	msg = &pb.StationToClient{}
+	err = proto.Unmarshal(rbuf[:], msg)
 	return
 }
 
@@ -544,8 +538,10 @@ func (flowConn *TapdanceFlowConn) idStr() string {
 	return flowConn.tdRaw.idStr()
 }
 
-func (flowConn *TapdanceFlowConn) processProto(msg pb.StationToClient) error {
-	handleConfigInfo := func(conf *pb.ClientConf) {
+func (flowConn *TapdanceFlowConn) processProto(msg *pb.StationToClient) error {
+	// //[TODO]{priority:after-placement-updates} uncomment to re-enable automatic clientconf downloads
+	//handleConfigInfo := func(conf *pb.ClientConf) {
+	_ = func(conf *pb.ClientConf) {
 		currGen := Assets().GetGeneration()
 		if conf.GetGeneration() < currGen {
 			Logger().Infoln(flowConn.idStr()+" not appliying new config due"+
@@ -567,7 +563,8 @@ func (flowConn *TapdanceFlowConn) processProto(msg pb.StationToClient) error {
 	Logger().Debugln(flowConn.idStr() + " processing incoming protobuf: " + msg.String())
 	// handle ConfigInfo
 	if confInfo := msg.ConfigInfo; confInfo != nil {
-		handleConfigInfo(confInfo)
+		// //[TODO]{priority:after-placement-updates} uncomment to re-enable automatic clientconf downloads
+		// handleConfigInfo(confInfo)
 		// TODO: if we ever get a ``safe'' decoy rotation - code below has to be rewritten
 		if !Assets().IsDecoyInList(flowConn.tdRaw.decoySpec) {
 			Logger().Warningln(flowConn.idStr() + " current decoy is no " +

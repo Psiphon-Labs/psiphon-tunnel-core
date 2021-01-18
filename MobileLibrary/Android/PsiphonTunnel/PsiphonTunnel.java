@@ -937,6 +937,7 @@ public class PsiphonTunnel {
                 int port = notice.getJSONObject("data").getInt("port");
                 mHostService.onListeningHttpProxyPort(port);
             } else if (noticeType.equals("UpstreamProxyError")) {
+                diagnostic = false;
                 mHostService.onUpstreamProxyError(notice.getJSONObject("data").getString("message"));
             } else if (noticeType.equals("ClientUpgradeDownloaded")) {
                 mHostService.onClientUpgradeDownloaded(notice.getJSONObject("data").getString("filename"));

@@ -46,6 +46,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -784,7 +785,12 @@ type PaveLogInfo struct {
 // a map from hex-encoded OSL IDs to server entries to pave into that OSL.
 // When entries are found, OSL will contain those entries, newline
 // separated. Otherwise the OSL will still be issued, but be empty (unless
-// the scheme is in omitEmptyOSLsSchemes).
+// the scheme is in omitEmptyOSLsSchemes). The server entries are paved
+// in string value sort order, ensuring that the OSL content remains
+// constant as long as the same _set_ of server entries is input.
+//
+// If startTime is specified and is after epoch, the pave file will contain
+// OSLs for the first period at or after startTime.
 //
 // As OSLs outside the epoch-endTime range will no longer appear in
 // the registry, Pave is intended to be used to create the full set
@@ -793,6 +799,7 @@ type PaveLogInfo struct {
 // Automation is responsible for consistently distributing server entries
 // to OSLs in the case where OSLs are repaved in subsequent calls.
 func (config *Config) Pave(
+	startTime time.Time,
 	endTime time.Time,
 	propagationChannelID string,
 	signingPublicKey string,
@@ -820,6 +827,12 @@ func (config *Config) Pave(
 
 			oslTime := scheme.epoch
 
+			if !startTime.IsZero() && !startTime.Before(scheme.epoch) {
+				for oslTime.Before(startTime) {
+					oslTime = oslTime.Add(oslDuration)
+				}
+			}
+
 			for !oslTime.After(endTime) {
 
 				firstSLOKTime := oslTime
@@ -837,11 +850,14 @@ func (config *Config) Pave(
 
 					registry.FileSpecs = append(registry.FileSpecs, fileSpec)
 
-					// serverEntries will be "" when nothing is found in paveServerEntries
-					serverEntries := strings.Join(paveServerEntries[hexEncodedOSLID], "\n")
+					serverEntries := append([]string(nil), paveServerEntries[hexEncodedOSLID]...)
+					sort.Strings(serverEntries)
+
+					// payload will be "" when nothing is found in serverEntries
+					payload := strings.Join(serverEntries, "\n")
 
 					serverEntriesPackage, err := common.WriteAuthenticatedDataPackage(
-						serverEntries,
+						payload,
 						signingPublicKey,
 						signingPrivateKey)
 					if err != nil {

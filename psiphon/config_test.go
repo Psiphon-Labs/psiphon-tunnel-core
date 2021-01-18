@@ -300,17 +300,6 @@ func LoadConfigMigrateTest(oslDirChildrenPreMigration []FileTree, oslDirChildren
 						Name: "psiphon.boltdb.lock",
 					},
 					{
-						Name: "tapdance",
-						Children: []FileTree{
-							{
-								Name: "file1",
-							},
-							{
-								Name: "file2",
-							},
-						},
-					},
-					{
 						Name: "non_tunnel_core_file_should_not_be_migrated",
 					},
 				},
@@ -451,22 +440,6 @@ func LoadConfigMigrateTest(oslDirChildrenPreMigration []FileTree, oslDirChildren
 									},
 									{
 										Name: "osl-1.part",
-									},
-								},
-							},
-							{
-								Name: "tapdance",
-								Children: []FileTree{
-									{
-										Name: "tapdance",
-										Children: []FileTree{
-											{
-												Name: "file1",
-											},
-											{
-												Name: "file2",
-											},
-										},
 									},
 								},
 							},

@@ -1,8 +1,8 @@
 <p align="center">
 <a href="https://refraction.network"><img src="https://user-images.githubusercontent.com/5443147/30133006-7c3019f4-930f-11e7-9f60-3df45ee13d9d.png" alt="refract"></a>
-<h1 class="header-title" align="center">TapDance Client</h1>
+<h1 class="header-title" align="center">Refraction Networking Client</h1>
 
-<p align="center">TapDance is a free-to-use anti-censorship technology, protected from enumeration attacks.</p>
+<p align="center">Refraction Networking is a free-to-use anti-censorship technology, that places proxies at Internet Service Providers, so they are harder to block. This client includes support for both the TapDance and Conjure protocols</p>
 <p align="center">
 <a href="https://travis-ci.org/refraction-networking/gotapdance"><img src="https://travis-ci.org/refraction-networking/gotapdance.svg?branch=master"></a>
 <a href="https://godoc.org/github.com/refraction-networking/gotapdance/tapdance"><img src="https://img.shields.io/badge/godoc-reference-blue.svg"></a>

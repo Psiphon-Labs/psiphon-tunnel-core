@@ -78,6 +78,9 @@ const (
 	RANDOM_STREAM_CHANNEL_TYPE = "random@psiphon.ca"
 
 	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
+
+	CONJURE_TRANSPORT_MIN_OSSH   = "Min-OSSH"
+	CONJURE_TRANSPORT_OBFS4_OSSH = "Obfs4-OSSH"
 )
 
 type TunnelProtocols []string
@@ -187,12 +190,16 @@ func TunnelProtocolUsesMarionette(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH
 }
 
-func TunnelProtocolUsesTapdance(protocol string) bool {
+func TunnelProtocolUsesRefractionNetworking(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH
 }
 
-func TunnelProtocolUsesDarkDecoys(protocol string) bool {
+func TunnelProtocolUsesTapDance(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH
+}
+
+func TunnelProtocolUsesConjure(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH
 }
 
@@ -200,7 +207,7 @@ func TunnelProtocolIsResourceIntensive(protocol string) bool {
 	return TunnelProtocolUsesMeek(protocol) ||
 		TunnelProtocolUsesQUIC(protocol) ||
 		TunnelProtocolUsesMarionette(protocol) ||
-		TunnelProtocolUsesTapdance(protocol)
+		TunnelProtocolUsesRefractionNetworking(protocol)
 }
 
 func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
@@ -210,7 +217,8 @@ func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
-		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
+		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP ||
+		protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH
 }
 
 func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {

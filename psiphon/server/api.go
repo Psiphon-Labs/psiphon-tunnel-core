@@ -860,6 +860,7 @@ var baseDialParams = []requestParamSpec{
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
 	{"network_type", isAnyString, requestParamOptional},
+	{"conjure_transport", isAnyString, requestParamOptional},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.

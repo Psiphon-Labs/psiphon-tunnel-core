@@ -81,7 +81,7 @@ type CustomTLSConfig struct {
 
 	// Dial is the network connection dialer. TLS is layered on
 	// top of a new network connection created with dialer.
-	Dial Dialer
+	Dial common.Dialer
 
 	// DialAddr overrides the "addr" input to Dial when specified
 	DialAddr string
@@ -363,7 +363,7 @@ func IsTLSConnUsingHTTP2(conn net.Conn) bool {
 }
 
 // NewCustomTLSDialer creates a new dialer based on CustomTLSDial.
-func NewCustomTLSDialer(config *CustomTLSConfig) Dialer {
+func NewCustomTLSDialer(config *CustomTLSConfig) common.Dialer {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return CustomTLSDial(ctx, network, addr, config)
 	}
