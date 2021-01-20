@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */ = {isa = PBXBuildFile; fileRef = 4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */; };
 		4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */ = {isa = PBXBuildFile; fileRef = 4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */; };
+		52BE676825B8A615002DB553 /* PsiphonClientPlatform.h in Headers */ = {isa = PBXBuildFile; fileRef = 52BE676725B8A615002DB553 /* PsiphonClientPlatform.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		52BE676D25B8A635002DB553 /* PsiphonClientPlatform.m in Sources */ = {isa = PBXBuildFile; fileRef = 52BE676B25B8A635002DB553 /* PsiphonClientPlatform.m */; };
 		660E0B7A1E2D6EB6002BF5D4 /* Psi in Frameworks */ = {isa = PBXBuildFile; fileRef = 660E0B791E2D6EB6002BF5D4 /* Psi */; };
 		662659271DD270E900872F6C /* Reachability.h in Headers */ = {isa = PBXBuildFile; fileRef = 662659251DD270E900872F6C /* Reachability.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		662659281DD270E900872F6C /* Reachability.m in Sources */ = {isa = PBXBuildFile; fileRef = 662659261DD270E900872F6C /* Reachability.m */; };
@@ -81,6 +83,8 @@
 /* Begin PBXFileReference section */
 		4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = LookupIPv6.c; sourceTree = "<group>"; };
 		4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LookupIPv6.h; sourceTree = "<group>"; };
+		52BE676725B8A615002DB553 /* PsiphonClientPlatform.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PsiphonClientPlatform.h; sourceTree = "<group>"; };
+		52BE676B25B8A635002DB553 /* PsiphonClientPlatform.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PsiphonClientPlatform.m; sourceTree = "<group>"; };
 		660E0B791E2D6EB6002BF5D4 /* Psi */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = Psi; path = PsiphonTunnel/Psi.framework/Versions/A/Psi; sourceTree = "<group>"; };
 		662659251DD270E900872F6C /* Reachability.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Reachability.h; sourceTree = "<group>"; };
 		662659261DD270E900872F6C /* Reachability.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Reachability.m; sourceTree = "<group>"; };
@@ -272,6 +276,8 @@
 			children = (
 				CE3D1DA323906003009A4AF6 /* Backups.h */,
 				CE3D1DA423906003009A4AF6 /* Backups.m */,
+				52BE676725B8A615002DB553 /* PsiphonClientPlatform.h */,
+				52BE676B25B8A635002DB553 /* PsiphonClientPlatform.m */,
 			);
 			path = Utils;
 			sourceTree = "<group>";
@@ -321,6 +327,7 @@
 				662659271DD270E900872F6C /* Reachability.h in Headers */,
 				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,
 				6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */,
+				52BE676825B8A615002DB553 /* PsiphonClientPlatform.h in Headers */,
 				6685BDD51E2EBB1000F0E414 /* Universe.objc.h in Headers */,
 				CECF01492538DD0B00CD3E5C /* PsiphonProviderNetwork.h in Headers */,
 				66BDB05F1DC26CCC0079384C /* SBJson4StreamParserState.h in Headers */,
@@ -463,6 +470,7 @@
 				66BDB05E1DC26CCC0079384C /* SBJson4StreamParser.m in Sources */,
 				66BDB0641DC26CCC0079384C /* SBJson4StreamWriter.m in Sources */,
 				CEDE547A24EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m in Sources */,
+				52BE676D25B8A635002DB553 /* PsiphonClientPlatform.m in Sources */,
 				66BDB0661DC26CCC0079384C /* SBJson4StreamWriterState.m in Sources */,
 				CECF01452538D34100CD3E5C /* IPv6Synthesizer.m in Sources */,
 				66BDB05C1DC26CCC0079384C /* SBJson4Parser.m in Sources */,
