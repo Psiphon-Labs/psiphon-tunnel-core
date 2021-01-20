@@ -31,11 +31,11 @@
 #import "Reachability+HasNetworkConnectivity.h"
 #import "Backups.h"
 #import "json-framework/SBJson4.h"
-#import "JailbreakCheck/JailbreakCheck.h"
 #import "NetworkID.h"
 #import "NetworkInterface.h"
 #import <resolv.h>
 #import <netdb.h>
+#import "PsiphonClientPlatform.h"
 
 #define GOOGLE_DNS_1 @"8.8.4.4"
 #define GOOGLE_DNS_2 @"8.8.8.8"
@@ -795,39 +795,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Fill in the rest of the values.
     //
     
-    // ClientPlatform must not contain:
-    //   - underscores, which are used by us to separate the constituent parts
-    //   - spaces, which are considered invalid by the server
-    // Like "iOS". Older iOS reports "iPhone OS", which we will convert.
-    NSString *systemName = [[UIDevice currentDevice] systemName];
-    if ([systemName isEqual: @"iPhone OS"]) {
-        systemName = @"iOS";
-    }
-    systemName = [[systemName
-                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
-    // Like "10.2.1"
-    NSString *systemVersion = [[[[UIDevice currentDevice]systemVersion]
-                                stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                               stringByReplacingOccurrencesOfString:@" " withString:@"-"];
-    
-    // "unjailbroken"/"jailbroken"
-    NSString *jailbroken = @"unjailbroken";
-    if ([JailbreakCheck isDeviceJailbroken]) {
-        jailbroken = @"jailbroken";
-    }
-    // Like "com.psiphon3.browser"
-    NSString *bundleIdentifier = [[[[NSBundle mainBundle] bundleIdentifier]
-                                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
-    
-    NSString *clientPlatform = [NSString stringWithFormat:@"%@_%@_%@_%@",
-                                systemName,
-                                systemVersion,
-                                jailbroken,
-                                bundleIdentifier];
-    
-    config[@"ClientPlatform"] = clientPlatform;
+    config[@"ClientPlatform"] = [PsiphonClientPlatform getClientPlatform];
         
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
     
