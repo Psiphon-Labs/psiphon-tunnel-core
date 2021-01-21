@@ -23,6 +23,7 @@
  */
 
 #import "Reachability.h"
+#import "JailbreakCheck.h"
 
 //! Project version number for PsiphonTunnel.
 FOUNDATION_EXPORT double PsiphonTunnelVersionNumber;
