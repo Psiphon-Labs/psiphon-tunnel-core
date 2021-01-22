@@ -78,6 +78,9 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, ecdheParameters, error) {
 		secureRenegotiationSupported: true,
 		alpnProtocols:                config.NextProtos,
 		supportedVersions:            supportedVersions,
+
+		// [Psiphon]
+		PRNG: config.ClientHelloPRNG,
 	}
 
 	if c.handshakes > 0 {

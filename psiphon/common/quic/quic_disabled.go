@@ -49,7 +49,8 @@ func Dial(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
-	negotiateQUICVersion string,
+	quicVersion string,
+	clientHelloSeed *prng.Seed,
 	obfuscationKey string,
 	obfuscationPaddingSeed *prng.Seed) (net.Conn, error) {
 
@@ -74,7 +75,8 @@ func NewQUICTransporter(
 	noticeEmitter func(string),
 	udpDialer func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
 	quicSNIAddress string,
-	negotiateQUICVersion string) (*QUICTransporter, error) {
+	quicVersion string,
+	clientHelloSeed *prng.Seed) (*QUICTransporter, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }

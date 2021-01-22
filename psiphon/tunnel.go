@@ -725,6 +725,7 @@ func dialTunnel(
 			remoteAddr,
 			dialParams.QUICDialSNIAddress,
 			dialParams.QUICVersion,
+			dialParams.QUICClientHelloSeed,
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatedQUICPaddingSeed)
 		if err != nil {

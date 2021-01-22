@@ -80,15 +80,20 @@ func Enabled() bool {
 const ietfQUICDraft29VersionNumber = 0xff00001d
 
 var supportedVersionNumbers = map[string]uint32{
-	protocol.QUIC_VERSION_GQUIC39:      uint32(gquic.VersionGQUIC39),
-	protocol.QUIC_VERSION_GQUIC43:      uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_GQUIC44:      uint32(gquic.VersionGQUIC44),
-	protocol.QUIC_VERSION_OBFUSCATED:   uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_IETF_DRAFT29: ietfQUICDraft29VersionNumber,
+	protocol.QUIC_VERSION_GQUIC39:                 uint32(gquic.VersionGQUIC39),
+	protocol.QUIC_VERSION_GQUIC43:                 uint32(gquic.VersionGQUIC43),
+	protocol.QUIC_VERSION_GQUIC44:                 uint32(gquic.VersionGQUIC44),
+	protocol.QUIC_VERSION_OBFUSCATED:              uint32(gquic.VersionGQUIC43),
+	protocol.QUIC_VERSION_IETF_DRAFT29:            ietfQUICDraft29VersionNumber,
+	protocol.QUIC_VERSION_RANDOMIZED_IETF_DRAFT29: ietfQUICDraft29VersionNumber,
 }
 
 func isObfuscated(quicVersion string) bool {
 	return quicVersion == protocol.QUIC_VERSION_OBFUSCATED
+}
+
+func isClientHelloRandomized(quicVersion string) bool {
+	return quicVersion == protocol.QUIC_VERSION_RANDOMIZED_IETF_DRAFT29
 }
 
 func isIETFVersion(versionNumber uint32) bool {
@@ -190,17 +195,26 @@ func Dial(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
-	negotiateQUICVersion string,
+	quicVersion string,
+	clientHelloSeed *prng.Seed,
 	obfuscationKey string,
 	obfuscationPaddingSeed *prng.Seed) (net.Conn, error) {
 
-	if negotiateQUICVersion == "" {
+	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
 	}
 
-	versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
+	if isClientHelloRandomized(quicVersion) && clientHelloSeed == nil {
+		return nil, errors.TraceNew("missing client hello randomization values")
+	}
+
+	if isObfuscated(quicVersion) && (obfuscationPaddingSeed == nil || obfuscationKey == "") {
+		return nil, errors.TraceNew("missing obfuscation values")
+	}
+
+	versionNumber, ok := supportedVersionNumbers[quicVersion]
 	if !ok {
-		return nil, errors.Tracef("unsupported version: %s", negotiateQUICVersion)
+		return nil, errors.Tracef("unsupported version: %s", quicVersion)
 	}
 
 	// Fail if the destination port is invalid. Network operations should fail
@@ -210,13 +224,13 @@ func Dial(
 		return nil, errors.Tracef("invalid destination port: %d", remoteAddr.Port)
 	}
 
-	if isObfuscated(negotiateQUICVersion) {
-		var err error
-		packetConn, err = NewObfuscatedPacketConn(
+	if isObfuscated(quicVersion) {
+		obfuscatedPacketConn, err := NewObfuscatedPacketConn(
 			packetConn, false, obfuscationKey, obfuscationPaddingSeed)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+		packetConn = obfuscatedPacketConn
 	}
 
 	session, err := dialQUIC(
@@ -225,6 +239,7 @@ func Dial(
 		remoteAddr,
 		quicSNIAddress,
 		versionNumber,
+		clientHelloSeed,
 		false)
 	if err != nil {
 		packetConn.Close()
@@ -428,11 +443,12 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 // CloseIdleConnections.
 type QUICTransporter struct {
 	quicRoundTripper
-	noticeEmitter        func(string)
-	udpDialer            func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
-	quicSNIAddress       string
-	negotiateQUICVersion string
-	packetConn           atomic.Value
+	noticeEmitter   func(string)
+	udpDialer       func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
+	quicSNIAddress  string
+	quicVersion     string
+	clientHelloSeed *prng.Seed
+	packetConn      atomic.Value
 
 	mutex sync.Mutex
 	ctx   context.Context
@@ -444,19 +460,29 @@ func NewQUICTransporter(
 	noticeEmitter func(string),
 	udpDialer func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
 	quicSNIAddress string,
-	negotiateQUICVersion string) (*QUICTransporter, error) {
+	quicVersion string,
+	clientHelloSeed *prng.Seed) (*QUICTransporter, error) {
 
-	versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
+	if quicVersion == "" {
+		return nil, errors.TraceNew("missing version")
+	}
+
+	versionNumber, ok := supportedVersionNumbers[quicVersion]
 	if !ok {
-		return nil, errors.Tracef("unsupported version: %s", negotiateQUICVersion)
+		return nil, errors.Tracef("unsupported version: %s", quicVersion)
+	}
+
+	if isClientHelloRandomized(quicVersion) && clientHelloSeed == nil {
+		return nil, errors.TraceNew("missing client hello randomization values")
 	}
 
 	t := &QUICTransporter{
-		noticeEmitter:        noticeEmitter,
-		udpDialer:            udpDialer,
-		quicSNIAddress:       quicSNIAddress,
-		negotiateQUICVersion: negotiateQUICVersion,
-		ctx:                  ctx,
+		noticeEmitter:   noticeEmitter,
+		udpDialer:       udpDialer,
+		quicSNIAddress:  quicSNIAddress,
+		quicVersion:     quicVersion,
+		clientHelloSeed: clientHelloSeed,
+		ctx:             ctx,
 	}
 
 	if isIETFVersion(versionNumber) {
@@ -522,13 +548,9 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 		}
 	}()
 
-	if t.negotiateQUICVersion == "" {
-		return nil, errors.TraceNew("missing version")
-	}
-
-	versionNumber, ok := supportedVersionNumbers[t.negotiateQUICVersion]
+	versionNumber, ok := supportedVersionNumbers[t.quicVersion]
 	if !ok {
-		return nil, errors.Tracef("unsupported version: %s", t.negotiateQUICVersion)
+		return nil, errors.Tracef("unsupported version: %s", t.quicVersion)
 	}
 
 	t.mutex.Lock()
@@ -549,6 +571,7 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 		remoteAddr,
 		t.quicSNIAddress,
 		versionNumber,
+		t.clientHelloSeed,
 		true)
 	if err != nil {
 		packetConn.Close()
@@ -709,16 +732,17 @@ func dialQUIC(
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
 	versionNumber uint32,
+	clientHelloSeed *prng.Seed,
 	dialEarly bool) (quicSession, error) {
 
 	if isIETFVersion(versionNumber) {
-
 		quicConfig := &ietf_quic.Config{
 			HandshakeTimeout: time.Duration(1<<63 - 1),
 			MaxIdleTimeout:   CLIENT_IDLE_TIMEOUT,
 			KeepAlive:        true,
 			Versions: []ietf_quic.VersionNumber{
 				ietf_quic.VersionNumber(versionNumber)},
+			ClientHelloSeed: clientHelloSeed,
 		}
 
 		deadline, ok := ctx.Deadline()

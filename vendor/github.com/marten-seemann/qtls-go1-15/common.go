@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"golang.org/x/sys/cpu"
 )
 
@@ -743,6 +744,10 @@ type ExtraConfig struct {
 	// Is called when the client uses a session ticket.
 	// Restores the application data that was saved earlier on GetAppDataForSessionTicket.
 	SetAppDataFromSessionState func([]byte)
+
+	// [Psiphon]
+	// ClientHelloPRNG is used for Client Hello randomization and replay.
+	ClientHelloPRNG *prng.PRNG
 }
 
 // Clone clones.

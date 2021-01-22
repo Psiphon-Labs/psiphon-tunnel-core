@@ -111,6 +111,7 @@ type DialParameters struct {
 
 	QUICVersion               string
 	QUICDialSNIAddress        string
+	QUICClientHelloSeed       *prng.Seed
 	ObfuscatedQUICPaddingSeed *prng.Seed
 
 	ConjureDecoyRegistrarWidth int
@@ -492,6 +493,13 @@ func MakeDialParameters(
 
 		isFronted := protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
 		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry.FrontingProviderID, p)
+
+		if protocol.QUICVersionHasRandomizedClientHello(dialParams.QUICVersion) {
+			dialParams.QUICClientHelloSeed, err = prng.NewSeed()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
@@ -705,6 +713,7 @@ func MakeDialParameters(
 			DialAddress:                   dialParams.MeekDialAddress,
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
+			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
 			UseHTTPS:                      protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
 			TLSProfile:                    dialParams.TLSProfile,
 			NoDefaultTLSSessionID:         dialParams.NoDefaultTLSSessionID,

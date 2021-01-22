@@ -83,6 +83,9 @@ type MeekConfig struct {
 	// QUICVersion indicates which QUIC version to use.
 	QUICVersion string
 
+	// QUICClientHelloSeed is used for randomized QUIC Client Hellos.
+	QUICClientHelloSeed *prng.Seed
+
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	// Ignored when UseQUIC is true.
 	UseHTTPS bool
@@ -295,7 +298,8 @@ func DialMeek(
 			},
 			udpDialer,
 			quicDialSNIAddress,
-			meekConfig.QUICVersion)
+			meekConfig.QUICVersion,
+			meekConfig.QUICClientHelloSeed)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

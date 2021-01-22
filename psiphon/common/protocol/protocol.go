@@ -370,11 +370,12 @@ func (labeledProfiles LabeledTLSProfiles) PruneInvalid(customTLSProfiles []strin
 }
 
 const (
-	QUIC_VERSION_GQUIC39      = "gQUICv39"
-	QUIC_VERSION_GQUIC43      = "gQUICv43"
-	QUIC_VERSION_GQUIC44      = "gQUICv44"
-	QUIC_VERSION_OBFUSCATED   = "OBFUSCATED"
-	QUIC_VERSION_IETF_DRAFT29 = "IETF-draft-29"
+	QUIC_VERSION_GQUIC39                 = "gQUICv39"
+	QUIC_VERSION_GQUIC43                 = "gQUICv43"
+	QUIC_VERSION_GQUIC44                 = "gQUICv44"
+	QUIC_VERSION_OBFUSCATED              = "OBFUSCATED"
+	QUIC_VERSION_IETF_DRAFT29            = "IETF-draft-29"
+	QUIC_VERSION_RANDOMIZED_IETF_DRAFT29 = "Randomized-IETF-draft-29"
 )
 
 var SupportedQUICVersions = QUICVersions{
@@ -383,10 +384,15 @@ var SupportedQUICVersions = QUICVersions{
 	QUIC_VERSION_GQUIC44,
 	QUIC_VERSION_OBFUSCATED,
 	QUIC_VERSION_IETF_DRAFT29,
+	QUIC_VERSION_RANDOMIZED_IETF_DRAFT29,
 }
 
 var legacyQUICVersions = QUICVersions{
 	"IETF-draft-24",
+}
+
+func QUICVersionHasRandomizedClientHello(version string) bool {
+	return version == QUIC_VERSION_RANDOMIZED_IETF_DRAFT29
 }
 
 func QUICVersionIsObfuscated(version string) bool {

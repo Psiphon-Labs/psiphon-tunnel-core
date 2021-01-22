@@ -37,14 +37,14 @@ import (
 )
 
 func TestQUIC(t *testing.T) {
-	for negotiateQUICVersion := range supportedVersionNumbers {
-		t.Run(negotiateQUICVersion, func(t *testing.T) {
-			runQUIC(t, negotiateQUICVersion)
+	for quicVersion := range supportedVersionNumbers {
+		t.Run(quicVersion, func(t *testing.T) {
+			runQUIC(t, quicVersion)
 		})
 	}
 }
 
-func runQUIC(t *testing.T, negotiateQUICVersion string) {
+func runQUIC(t *testing.T, quicVersion string) {
 
 	initGoroutines := getGoroutines()
 
@@ -135,12 +135,21 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 				return errors.Trace(err)
 			}
 
+			var clientHelloSeed *prng.Seed
+			if isClientHelloRandomized(quicVersion) {
+				clientHelloSeed, err = prng.NewSeed()
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+
 			conn, err := Dial(
 				ctx,
 				packetConn,
 				remoteAddr,
 				serverAddress,
-				negotiateQUICVersion,
+				quicVersion,
+				clientHelloSeed,
 				obfuscationKey,
 				obfuscationPaddingSeed)
 			if err != nil {
