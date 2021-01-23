@@ -360,6 +360,7 @@ func (m *clientHelloMsg) marshalRandomized() []byte {
 			break
 		}
 	}
+	compressionMethods = compressionMethods[:cut]
 
 	supportedCurves := make([]CurveID, len(m.supportedCurves))
 	perm = m.PRNG.Perm(len(m.supportedCurves))
@@ -385,6 +386,7 @@ func (m *clientHelloMsg) marshalRandomized() []byte {
 			break
 		}
 	}
+	supportedPoints = supportedPoints[:cut]
 
 	var b cryptobyte.Builder
 	b.AddUint8(typeClientHello)

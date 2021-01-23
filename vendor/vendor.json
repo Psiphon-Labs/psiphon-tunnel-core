@@ -63,16 +63,16 @@
 			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
-			"checksumSHA1": "2iy6aXBJutaq420vFiVo1zMIoL0=",
+			"checksumSHA1": "LYEAzuL2IYFG6DYc+S+VXEEV9aM=",
 			"path": "github.com/Psiphon-Labs/qtls",
-			"revision": "17cd2308c9f2daa5ccae7e2b6333cb155a0e48c8",
-			"revisionTime": "2021-01-22T18:39:06Z"
+			"revision": "2d7d7bc167b19fec0f88d094efd954c2e151781b",
+			"revisionTime": "2021-01-23T14:02:11Z"
 		},
 		{
-			"checksumSHA1": "YWb8OQ1ywZdM1oMwCiCPVyOprPI=",
+			"checksumSHA1": "dB2KbS3Pk/Aay7AvMR4z9jz5W0M=",
 			"path": "github.com/Psiphon-Labs/qtls-go1-15",
-			"revision": "84e2f3807a5344089390d18e64dd7c5148cfd57e",
-			"revisionTime": "2021-01-22T18:37:27Z"
+			"revision": "8f4aac16bd62865a63ccfcc75b254c6651713062",
+			"revisionTime": "2021-01-23T14:02:40Z"
 		},
 		{
 			"checksumSHA1": "F+phd7pR0XrnOZTRiuPFDmjnVHc=",
