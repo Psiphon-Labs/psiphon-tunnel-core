@@ -370,12 +370,13 @@ func (labeledProfiles LabeledTLSProfiles) PruneInvalid(customTLSProfiles []strin
 }
 
 const (
-	QUIC_VERSION_GQUIC39                 = "gQUICv39"
-	QUIC_VERSION_GQUIC43                 = "gQUICv43"
-	QUIC_VERSION_GQUIC44                 = "gQUICv44"
-	QUIC_VERSION_OBFUSCATED              = "OBFUSCATED"
-	QUIC_VERSION_IETF_DRAFT29            = "IETF-draft-29"
-	QUIC_VERSION_RANDOMIZED_IETF_DRAFT29 = "Randomized-IETF-draft-29"
+	QUIC_VERSION_GQUIC39           = "gQUICv39"
+	QUIC_VERSION_GQUIC43           = "gQUICv43"
+	QUIC_VERSION_GQUIC44           = "gQUICv44"
+	QUIC_VERSION_OBFUSCATED        = "OBFUSCATED"
+	QUIC_VERSION_IETF29            = "IETFv29"
+	QUIC_VERSION_RANDOMIZED_IETF29 = "RANDOMIZED-IETFv29"
+	QUIC_VERSION_OBFUSCATED_IETF29 = "OBFUSCATED-IETFv29"
 )
 
 var SupportedQUICVersions = QUICVersions{
@@ -383,8 +384,9 @@ var SupportedQUICVersions = QUICVersions{
 	QUIC_VERSION_GQUIC43,
 	QUIC_VERSION_GQUIC44,
 	QUIC_VERSION_OBFUSCATED,
-	QUIC_VERSION_IETF_DRAFT29,
-	QUIC_VERSION_RANDOMIZED_IETF_DRAFT29,
+	QUIC_VERSION_IETF29,
+	QUIC_VERSION_RANDOMIZED_IETF29,
+	QUIC_VERSION_OBFUSCATED_IETF29,
 }
 
 var legacyQUICVersions = QUICVersions{
@@ -392,11 +394,11 @@ var legacyQUICVersions = QUICVersions{
 }
 
 func QUICVersionHasRandomizedClientHello(version string) bool {
-	return version == QUIC_VERSION_RANDOMIZED_IETF_DRAFT29
+	return version == QUIC_VERSION_RANDOMIZED_IETF29
 }
 
 func QUICVersionIsObfuscated(version string) bool {
-	return version == QUIC_VERSION_OBFUSCATED
+	return version == QUIC_VERSION_OBFUSCATED || version == QUIC_VERSION_OBFUSCATED_IETF29
 }
 
 type QUICVersions []string

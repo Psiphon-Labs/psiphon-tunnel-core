@@ -80,12 +80,13 @@ func Enabled() bool {
 const ietfQUICDraft29VersionNumber = 0xff00001d
 
 var supportedVersionNumbers = map[string]uint32{
-	protocol.QUIC_VERSION_GQUIC39:                 uint32(gquic.VersionGQUIC39),
-	protocol.QUIC_VERSION_GQUIC43:                 uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_GQUIC44:                 uint32(gquic.VersionGQUIC44),
-	protocol.QUIC_VERSION_OBFUSCATED:              uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_IETF_DRAFT29:            ietfQUICDraft29VersionNumber,
-	protocol.QUIC_VERSION_RANDOMIZED_IETF_DRAFT29: ietfQUICDraft29VersionNumber,
+	protocol.QUIC_VERSION_GQUIC39:           uint32(gquic.VersionGQUIC39),
+	protocol.QUIC_VERSION_GQUIC43:           uint32(gquic.VersionGQUIC43),
+	protocol.QUIC_VERSION_GQUIC44:           uint32(gquic.VersionGQUIC44),
+	protocol.QUIC_VERSION_OBFUSCATED:        uint32(gquic.VersionGQUIC43),
+	protocol.QUIC_VERSION_IETF29:            ietfQUICDraft29VersionNumber,
+	protocol.QUIC_VERSION_RANDOMIZED_IETF29: ietfQUICDraft29VersionNumber,
+	protocol.QUIC_VERSION_OBFUSCATED_IETF29: uint32(ietfQUICDraft29VersionNumber),
 }
 
 func isObfuscated(quicVersion string) bool {
@@ -93,7 +94,7 @@ func isObfuscated(quicVersion string) bool {
 }
 
 func isClientHelloRandomized(quicVersion string) bool {
-	return quicVersion == protocol.QUIC_VERSION_RANDOMIZED_IETF_DRAFT29
+	return quicVersion == protocol.QUIC_VERSION_RANDOMIZED_IETF29
 }
 
 func isIETFVersion(versionNumber uint32) bool {

@@ -992,7 +992,10 @@ func selectQUICVersion(
 	if isFronted {
 		if frontingProviderID == "" {
 			// Legacy server entry case
-			disableQUICVersions = protocol.QUICVersions{protocol.QUIC_VERSION_IETF_DRAFT29}
+			disableQUICVersions = protocol.QUICVersions{
+				protocol.QUIC_VERSION_IETF29,
+				protocol.QUIC_VERSION_RANDOMIZED_IETF29,
+			}
 		} else {
 			disableQUICVersions = p.LabeledQUICVersions(
 				parameters.DisableFrontingProviderQUICVersions, frontingProviderID)
