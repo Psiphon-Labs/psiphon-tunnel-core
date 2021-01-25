@@ -56,6 +56,7 @@ type Controller struct {
 	tunnels                                 []*Tunnel
 	nextTunnel                              int
 	isEstablishing                          bool
+	establishStartTime                      time.Time
 	protocolSelectionConstraints            *protocolSelectionConstraints
 	concurrentEstablishTunnelsMutex         sync.Mutex
 	establishConnectTunnelCount             int
@@ -1203,6 +1204,12 @@ func (controller *Controller) startEstablishing() {
 	}
 	NoticeInfo("start establishing")
 
+	// establishStartTime is used to calculate and report the client's tunnel
+	// establishment duration. Establishment duration should include all
+	// initialization in launchEstablishing and establishCandidateGenerator,
+	// including any potentially long-running datastore iterations.
+	establishStartTime := time.Now()
+
 	controller.concurrentEstablishTunnelsMutex.Lock()
 	controller.establishConnectTunnelCount = 0
 	controller.concurrentEstablishTunnels = 0
@@ -1214,10 +1221,11 @@ func (controller *Controller) startEstablishing() {
 	DoGarbageCollection()
 	emitMemoryMetrics()
 
-	// Note: the establish context cancelFunc, controller.stopEstablish,
-	// is called in controller.stopEstablishing.
+	// The establish context cancelFunc, controller.stopEstablish, is called in
+	// controller.stopEstablishing.
 
 	controller.isEstablishing = true
+	controller.establishStartTime = establishStartTime
 	controller.establishCtx, controller.stopEstablish = context.WithCancel(controller.runCtx)
 	controller.establishWaitGroup = new(sync.WaitGroup)
 	controller.candidateServerEntries = make(chan *candidateServerEntry)
@@ -1463,6 +1471,7 @@ func (controller *Controller) stopEstablishing() {
 	NoticeInfo("stopped establishing")
 
 	controller.isEstablishing = false
+	controller.establishStartTime = time.Time{}
 	controller.establishCtx = nil
 	controller.stopEstablish = nil
 	controller.establishWaitGroup = nil
@@ -1492,13 +1501,9 @@ func (controller *Controller) establishCandidateGenerator() {
 	defer controller.establishWaitGroup.Done()
 	defer close(controller.candidateServerEntries)
 
-	// establishStartTime is used to calculate and report the
-	// client's tunnel establishment duration.
-	//
 	// networkWaitDuration is the elapsed time spent waiting
 	// for network connectivity. This duration will be excluded
 	// from reported tunnel establishment duration.
-	establishStartTime := time.Now()
 	var totalNetworkWaitDuration time.Duration
 
 	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
@@ -1598,7 +1603,8 @@ loop:
 
 			// adjustedEstablishStartTime is establishStartTime shifted
 			// to exclude time spent waiting for network connectivity.
-			adjustedEstablishStartTime := establishStartTime.Add(totalNetworkWaitDuration)
+			adjustedEstablishStartTime := controller.establishStartTime.Add(
+				totalNetworkWaitDuration)
 
 			candidate := &candidateServerEntry{
 				serverEntry:                serverEntry,
@@ -1666,7 +1672,7 @@ loop:
 		// case, we're only trying to connect to a specific server entry.
 
 		if (candidateServerEntryCount == 0 ||
-			time.Since(establishStartTime)-totalNetworkWaitDuration > workTime) &&
+			time.Since(controller.establishStartTime)-totalNetworkWaitDuration > workTime) &&
 			controller.config.TargetServerEntry == "" {
 
 			controller.triggerFetches()
