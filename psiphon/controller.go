@@ -241,10 +241,10 @@ func (controller *Controller) Run(ctx context.Context) {
 	go controller.connectedReporter()
 
 	controller.runWaitGroup.Add(1)
-	go controller.runTunnels()
+	go controller.establishTunnelWatcher()
 
 	controller.runWaitGroup.Add(1)
-	go controller.establishTunnelWatcher()
+	go controller.runTunnels()
 
 	if controller.packetTunnelClient != nil {
 		controller.packetTunnelClient.Start()
@@ -412,32 +412,92 @@ fetcherLoop:
 	NoticeInfo("exiting %s remote server list fetcher", name)
 }
 
-// establishTunnelWatcher terminates the controller if a tunnel
-// has not been established in the configured time period. This
-// is regardless of how many tunnels are presently active -- meaning
-// that if an active tunnel was established and lost the controller
-// is left running (to re-establish).
-func (controller *Controller) establishTunnelWatcher() {
+// upgradeDownloader makes periodic attempts to complete a client upgrade
+// download. DownloadUpgrade() is resumable, so each attempt has potential for
+// getting closer to completion, even in conditions where the download or
+// tunnel is repeatedly interrupted.
+// An upgrade download is triggered by either a handshake response indicating
+// that a new version is available; or after failing to connect, in which case
+// it's useful to check, out-of-band, for an upgrade with new circumvention
+// capabilities.
+// Once the download operation completes successfully, the downloader exits
+// and is not run again: either there is not a newer version, or the upgrade
+// has been downloaded and is ready to be applied.
+// We're assuming that the upgrade will be applied and the entire system
+// restarted before another upgrade is to be downloaded.
+//
+// TODO: refactor upgrade downloader and remote server list fetcher to use
+// common code (including the resumable download routines).
+//
+func (controller *Controller) upgradeDownloader() {
 	defer controller.runWaitGroup.Done()
 
-	timeout := controller.config.GetParameters().Get().Duration(
-		parameters.EstablishTunnelTimeout)
+	var lastDownloadTime time.Time
 
-	if timeout > 0 {
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-
+downloadLoop:
+	for {
+		// Wait for a signal before downloading
+		var handshakeVersion string
 		select {
-		case <-timer.C:
-			if !controller.hasEstablishedOnce() {
-				NoticeEstablishTunnelTimeout(timeout)
-				controller.SignalComponentFailure()
-			}
+		case handshakeVersion = <-controller.signalDownloadUpgrade:
 		case <-controller.runCtx.Done():
+			break downloadLoop
+		}
+
+		stalePeriod := controller.config.GetParameters().Get().Duration(
+			parameters.FetchUpgradeStalePeriod)
+
+		// Unless handshake is explicitly advertizing a new version, skip
+		// checking entirely when a recent download was successful.
+		if handshakeVersion == "" &&
+			!lastDownloadTime.IsZero() &&
+			lastDownloadTime.Add(stalePeriod).After(time.Now()) {
+			continue
+		}
+
+	retryLoop:
+		for attempt := 0; ; attempt++ {
+			// Don't attempt to download while there is no network connectivity,
+			// to avoid alert notice noise.
+			if !WaitForNetworkConnectivity(
+				controller.runCtx,
+				controller.config.NetworkConnectivityChecker) {
+				break downloadLoop
+			}
+
+			// Pick any active tunnel and make the next download attempt. If there's
+			// no active tunnel, the untunneledDialConfig will be used.
+			tunnel := controller.getNextActiveTunnel()
+
+			err := DownloadUpgrade(
+				controller.runCtx,
+				controller.config,
+				attempt,
+				handshakeVersion,
+				tunnel,
+				controller.untunneledDialConfig)
+
+			if err == nil {
+				lastDownloadTime = time.Now()
+				break retryLoop
+			}
+
+			NoticeWarning("failed to download upgrade: %s", err)
+
+			timeout := controller.config.GetParameters().Get().Duration(
+				parameters.FetchUpgradeRetryPeriod)
+
+			timer := time.NewTimer(timeout)
+			select {
+			case <-timer.C:
+			case <-controller.runCtx.Done():
+				timer.Stop()
+				break downloadLoop
+			}
 		}
 	}
 
-	NoticeInfo("exiting establish tunnel watcher")
+	NoticeInfo("exiting upgrade downloader")
 }
 
 // connectedReporter sends periodic "connected" requests to the Psiphon API.
@@ -527,92 +587,32 @@ func (controller *Controller) signalConnectedReporter() {
 	}
 }
 
-// upgradeDownloader makes periodic attempts to complete a client upgrade
-// download. DownloadUpgrade() is resumable, so each attempt has potential for
-// getting closer to completion, even in conditions where the download or
-// tunnel is repeatedly interrupted.
-// An upgrade download is triggered by either a handshake response indicating
-// that a new version is available; or after failing to connect, in which case
-// it's useful to check, out-of-band, for an upgrade with new circumvention
-// capabilities.
-// Once the download operation completes successfully, the downloader exits
-// and is not run again: either there is not a newer version, or the upgrade
-// has been downloaded and is ready to be applied.
-// We're assuming that the upgrade will be applied and the entire system
-// restarted before another upgrade is to be downloaded.
-//
-// TODO: refactor upgrade downloader and remote server list fetcher to use
-// common code (including the resumable download routines).
-//
-func (controller *Controller) upgradeDownloader() {
+// establishTunnelWatcher terminates the controller if a tunnel
+// has not been established in the configured time period. This
+// is regardless of how many tunnels are presently active -- meaning
+// that if an active tunnel was established and lost the controller
+// is left running (to re-establish).
+func (controller *Controller) establishTunnelWatcher() {
 	defer controller.runWaitGroup.Done()
 
-	var lastDownloadTime time.Time
+	timeout := controller.config.GetParameters().Get().Duration(
+		parameters.EstablishTunnelTimeout)
 
-downloadLoop:
-	for {
-		// Wait for a signal before downloading
-		var handshakeVersion string
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
 		select {
-		case handshakeVersion = <-controller.signalDownloadUpgrade:
+		case <-timer.C:
+			if !controller.hasEstablishedOnce() {
+				NoticeEstablishTunnelTimeout(timeout)
+				controller.SignalComponentFailure()
+			}
 		case <-controller.runCtx.Done():
-			break downloadLoop
-		}
-
-		stalePeriod := controller.config.GetParameters().Get().Duration(
-			parameters.FetchUpgradeStalePeriod)
-
-		// Unless handshake is explicitly advertizing a new version, skip
-		// checking entirely when a recent download was successful.
-		if handshakeVersion == "" &&
-			!lastDownloadTime.IsZero() &&
-			lastDownloadTime.Add(stalePeriod).After(time.Now()) {
-			continue
-		}
-
-	retryLoop:
-		for attempt := 0; ; attempt++ {
-			// Don't attempt to download while there is no network connectivity,
-			// to avoid alert notice noise.
-			if !WaitForNetworkConnectivity(
-				controller.runCtx,
-				controller.config.NetworkConnectivityChecker) {
-				break downloadLoop
-			}
-
-			// Pick any active tunnel and make the next download attempt. If there's
-			// no active tunnel, the untunneledDialConfig will be used.
-			tunnel := controller.getNextActiveTunnel()
-
-			err := DownloadUpgrade(
-				controller.runCtx,
-				controller.config,
-				attempt,
-				handshakeVersion,
-				tunnel,
-				controller.untunneledDialConfig)
-
-			if err == nil {
-				lastDownloadTime = time.Now()
-				break retryLoop
-			}
-
-			NoticeWarning("failed to download upgrade: %s", err)
-
-			timeout := controller.config.GetParameters().Get().Duration(
-				parameters.FetchUpgradeRetryPeriod)
-
-			timer := time.NewTimer(timeout)
-			select {
-			case <-timer.C:
-			case <-controller.runCtx.Done():
-				timer.Stop()
-				break downloadLoop
-			}
 		}
 	}
 
-	NoticeInfo("exiting upgrade downloader")
+	NoticeInfo("exiting establish tunnel watcher")
 }
 
 // runTunnels is the controller tunnel management main loop. It starts and stops
