@@ -28,9 +28,7 @@ import (
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // Parameters provide an easier way to modify the tunnel config at runtime.
@@ -72,8 +70,9 @@ type Parameters struct {
 // PsiphonTunnel is the tunnel object. It can be used for stopping the tunnel and
 // retrieving proxy ports.
 type PsiphonTunnel struct {
-	controllerWaitGroup sync.WaitGroup
-	stopController      context.CancelFunc
+	embeddedServerListWaitGroup sync.WaitGroup
+	controllerWaitGroup         sync.WaitGroup
+	stopController              context.CancelFunc
 
 	// The port on which the HTTP proxy is running
 	HTTPProxyPort int
@@ -118,7 +117,7 @@ var ErrTimeout = std_errors.New("clientlib: tunnel establishment timeout")
 func StartTunnel(ctx context.Context,
 	configJSON []byte, embeddedServerEntryList string,
 	params Parameters, paramsDelta ParametersDelta,
-	noticeReceiver func(NoticeEvent)) (tunnel *PsiphonTunnel, retErr error) {
+	noticeReceiver func(NoticeEvent)) (retTunnel *PsiphonTunnel, retErr error) {
 
 	config, err := psiphon.LoadConfig(configJSON)
 	if err != nil {
@@ -170,31 +169,6 @@ func StartTunnel(ctx context.Context,
 		}
 	}
 
-	err = psiphon.OpenDataStore(config)
-	if err != nil {
-		return nil, errors.TraceMsg(err, "failed to open data store")
-	}
-	// Make sure we close the datastore in case of error
-	defer func() {
-		if retErr != nil {
-			psiphon.CloseDataStore()
-		}
-	}()
-
-	// Store embedded server entries
-	serverEntries, err := protocol.DecodeServerEntryList(
-		embeddedServerEntryList,
-		common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
-		protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
-	if err != nil {
-		return nil, errors.TraceMsg(err, "failed to decode server entry list")
-	}
-
-	err = psiphon.StoreServerEntries(config, serverEntries, false)
-	if err != nil {
-		return nil, errors.TraceMsg(err, "failed to store server entries")
-	}
-
 	// Will receive a value when the tunnel has successfully connected.
 	connected := make(chan struct{})
 	// Will receive a value if the tunnel times out trying to connect.
@@ -203,7 +177,7 @@ func StartTunnel(ctx context.Context,
 	errored := make(chan error)
 
 	// Create the tunnel object
-	tunnel = new(PsiphonTunnel)
+	tunnel := new(PsiphonTunnel)
 
 	// Set up notice handling
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
@@ -249,6 +223,49 @@ func StartTunnel(ctx context.Context,
 			}
 		}))
 
+	err = psiphon.OpenDataStore(config)
+	if err != nil {
+		return nil, errors.TraceMsg(err, "failed to open data store")
+	}
+	// Make sure we close the datastore in case of error
+	defer func() {
+		if retErr != nil {
+			tunnel.controllerWaitGroup.Wait()
+			tunnel.embeddedServerListWaitGroup.Wait()
+			psiphon.CloseDataStore()
+		}
+	}()
+
+	// If specified, the embedded server list is loaded and stored. When there
+	// are no server candidates at all, we wait for this import to complete
+	// before starting the Psiphon controller. Otherwise, we import while
+	// concurrently starting the controller to minimize delay before attempting
+	// to connect to existing candidate servers.
+	//
+	// If the import fails, an error notice is emitted, but the controller is
+	// still started: either existing candidate servers may suffice, or the
+	// remote server list fetch may obtain candidate servers.
+	//
+	// TODO: abort import if controller run ctx is cancelled. Currently, this
+	// import will block shutdown.
+	tunnel.embeddedServerListWaitGroup.Add(1)
+	go func() {
+		defer tunnel.embeddedServerListWaitGroup.Done()
+
+		err = psiphon.ImportEmbeddedServerEntries(
+			config,
+			"",
+			embeddedServerEntryList)
+		if err != nil {
+			psiphon.NoticeError("error importing embedded server entry list: %s", err)
+			return
+		}
+	}()
+	if !psiphon.HasServerEntries() {
+		psiphon.NoticeInfo("awaiting embedded server entry list import")
+		tunnel.embeddedServerListWaitGroup.Wait()
+	}
+
 	// Create the Psiphon controller
 	controller, err := psiphon.NewController(config)
 	if err != nil {
@@ -292,8 +309,7 @@ func (tunnel *PsiphonTunnel) Stop() {
 	if tunnel.stopController != nil {
 		tunnel.stopController()
 	}
-
 	tunnel.controllerWaitGroup.Wait()
-
+	tunnel.embeddedServerListWaitGroup.Wait()
 	psiphon.CloseDataStore()
 }

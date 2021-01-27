@@ -417,7 +417,7 @@ func NoticeCandidateServers(
 // NoticeAvailableEgressRegions is what regions are available for egress from.
 // Consecutive reports of the same list of regions are suppressed.
 func NoticeAvailableEgressRegions(regions []string) {
-	sortedRegions := append([]string(nil), regions...)
+	sortedRegions := append([]string{}, regions...)
 	sort.Strings(sortedRegions)
 	repetitionMessage := strings.Join(sortedRegions, "")
 	outputRepetitiveNotice(
