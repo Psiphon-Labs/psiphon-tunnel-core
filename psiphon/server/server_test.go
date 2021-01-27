@@ -1282,6 +1282,25 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
 }
 
+func sendNotificationReceived(c chan<- struct{}) {
+	select {
+	case c <- struct{}{}:
+	default:
+	}
+}
+
+func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutMessage string) {
+	if timeoutSignal == nil {
+		<-c
+	} else {
+		select {
+		case <-c:
+		case <-timeoutSignal:
+			t.Fatalf(timeoutMessage)
+		}
+	}
+}
+
 func checkExpectedServerTunnelLogFields(
 	runConfig *runServerConfig,
 	expectClientBPFField bool,
@@ -2133,25 +2152,6 @@ func paveBlocklistFile(t *testing.T, blocklistFilename string) {
 	err := ioutil.WriteFile(blocklistFilename, []byte(blocklistContent), 0600)
 	if err != nil {
 		t.Fatalf("error paving blocklist file: %s", err)
-	}
-}
-
-func sendNotificationReceived(c chan<- struct{}) {
-	select {
-	case c <- struct{}{}:
-	default:
-	}
-}
-
-func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutMessage string) {
-	if timeoutSignal == nil {
-		<-c
-	} else {
-		select {
-		case <-c:
-		case <-timeoutSignal:
-			t.Fatalf(timeoutMessage)
-		}
 	}
 }
 
