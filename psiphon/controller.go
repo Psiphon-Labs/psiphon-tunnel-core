@@ -611,7 +611,13 @@ loop:
 			}
 		}
 
+		startTime := time.Now()
+
 		response.err = ScanServerEntries(callback)
+
+		// Report this duration in CandidateServers as an indication of datastore
+		// performance.
+		duration := time.Since(startTime)
 
 		response.availableEgressRegions = make([]string, 0, len(regions))
 		for region := range regions {
@@ -645,7 +651,8 @@ loop:
 				controller.config.EgressRegion,
 				controller.protocolSelectionConstraints,
 				response.initialCandidates,
-				response.candidates)
+				response.candidates,
+				duration)
 
 			NoticeAvailableEgressRegions(
 				response.availableEgressRegions)
