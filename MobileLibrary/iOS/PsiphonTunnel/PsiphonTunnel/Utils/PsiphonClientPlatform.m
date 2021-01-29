@@ -27,20 +27,7 @@
     // ClientPlatform must not contain:
     //   - underscores, which are used by us to separate the constituent parts
     //   - spaces, which are considered invalid by the server
-    // Like "iOS". Older iOS reports "iPhone OS", which we will convert.
-    NSString *systemName = [[UIDevice currentDevice] systemName];
 
-    if ([systemName isEqual: @"iPhone OS"]) {
-        systemName = @"iOS";
-    }
-    systemName = [[systemName
-                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
-
-    // Like "10.2.1"
-    NSString *systemVersion = [[[[UIDevice currentDevice]systemVersion]
-                                stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                               stringByReplacingOccurrencesOfString:@" " withString:@"-"];
 
     // The value of this property is YES only when the process is an iOS app running on a Mac.
     // The value of the property is NO for all other apps on the Mac, including Mac apps built
@@ -50,42 +37,60 @@
         isiOSAppOnMac = [[NSProcessInfo processInfo] isiOSAppOnMac];
     }
 
-    // The value of this property is true when the process is:
-    // - A Mac app built with Mac Catalyst, or an iOS app running on Apple silicon.
-    // - Running on a Mac.
-    BOOL isMacCatalystApp = FALSE;
-    if (@available(iOS 14.0, *)) {
-        isMacCatalystApp = [[NSProcessInfo processInfo] isMacCatalystApp];
-    }
-
-    // Possible values are: "unjailbroken"/"jailbroken"/"iOSAppOnMac"/"MacCatalystApp"
-    // Note that on Macs, users have root access, unlike iOS, where
-    // the user has to jailbreak the device to get root access.
-    NSString *detail = @"unjailbroken";
-
-    if (isiOSAppOnMac == TRUE && isMacCatalystApp == TRUE) {
-        detail = @"iOSAppOnMac";
-    } else if (isiOSAppOnMac == FALSE && isMacCatalystApp == TRUE) {
-        detail = @"MacCatalystApp";
-    } else {
-        // App is an iOS app running on iOS.
-        if ([JailbreakCheck isDeviceJailbroken] == TRUE) {
-            detail = @"jailbroken";
-        }
-    }
+    // Like "10.2.1"
+    NSString *systemVersion = [[[[UIDevice currentDevice]systemVersion]
+                                stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                               stringByReplacingOccurrencesOfString:@" " withString:@"-"];
 
     // Like "com.psiphon3.browser"
     NSString *bundleIdentifier = [[[[NSBundle mainBundle] bundleIdentifier]
                                    stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
                                   stringByReplacingOccurrencesOfString:@" " withString:@"-"];
 
-    NSString *clientPlatform = [NSString stringWithFormat:@"%@_%@_%@_%@",
-                                systemName,
-                                systemVersion,
-                                detail,
-                                bundleIdentifier];
 
-    return clientPlatform;
+    if (isiOSAppOnMac == TRUE) {
+
+        // iOS app running on ARM Mac.
+
+        NSString *systemName = @"mac_iOSAppOnMac";
+
+        return [NSString stringWithFormat:@"%@_%@_%@",
+                systemName,
+                systemVersion,
+                bundleIdentifier];
+
+
+    } else {
+
+        // iOS build running on iOS device.
+
+        // Like "iOS". Older iOS reports "iPhone OS", which we will convert.
+        NSString *systemName = [[UIDevice currentDevice] systemName];
+
+        if ([systemName isEqual: @"iPhone OS"]) {
+            systemName = @"iOS";
+        }
+        systemName = [[systemName
+                       stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                      stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+
+        // Note that on Macs, users have root access, unlike iOS, where
+        // the user has to jailbreak the device to get root access.
+        NSString *jailbroken = nil;
+        if ([JailbreakCheck isDeviceJailbroken] == TRUE) {
+            jailbroken = @"jailbroken";
+        } else {
+            jailbroken = @"unjailbroken";
+        }
+
+        return [NSString stringWithFormat:@"%@_%@_%@_%@",
+                systemName,
+                systemVersion,
+                jailbroken,
+                bundleIdentifier];
+
+    }
+
 }
 
 @end
