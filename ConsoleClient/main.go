@@ -467,7 +467,11 @@ func (f *FeedbackWorker) Run(ctx context.Context) error {
 	// TODO: cancel blocking read when worker context cancelled?
 	diagnostics, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.TraceMsg(err, "FeedbackUpload: read stdin failed")
+	}
+
+	if len(diagnostics) == 0 {
+		return errors.TraceNew("FeedbackUpload: error zero bytes of diagnostics read from stdin")
 	}
 
 	err = psiphon.SendFeedback(ctx, f.config, string(diagnostics), f.feedbackUploadPath)
