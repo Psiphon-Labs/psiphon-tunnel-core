@@ -74,6 +74,7 @@ type Controller struct {
 	signalFetchCommonRemoteServerList       chan struct{}
 	signalFetchObfuscatedServerLists        chan struct{}
 	signalDownloadUpgrade                   chan string
+	signalReportServerEntries               chan *serverEntriesReportRequest
 	signalReportConnected                   chan struct{}
 	signalRestartEstablishing               chan struct{}
 	serverAffinityDoneBroadcast             chan struct{}
@@ -117,6 +118,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishedOnce:      false,
 		isEstablishing:       false,
 		untunneledDialConfig: untunneledDialConfig,
+
 		// TODO: Add a buffer of 1 so we don't miss a signal while receiver is
 		// starting? Trade-off is potential back-to-back fetch remotes. As-is,
 		// establish will eventually signal another fetch remote.
@@ -124,6 +126,12 @@ func NewController(config *Config) (controller *Controller, err error) {
 		signalFetchObfuscatedServerLists:  make(chan struct{}),
 		signalDownloadUpgrade:             make(chan string),
 		signalReportConnected:             make(chan struct{}),
+
+		// Using a buffer of 1 to ensure there's no race between the first signal
+		// sent and a channel receiver initializing; a side effect is that this
+		// allows 1 additional scan to enqueue while a scan is in progress, possibly
+		// resulting in one unnecessary scan.
+		signalReportServerEntries: make(chan *serverEntriesReportRequest, 1),
 
 		// signalRestartEstablishing has a buffer of 1 to ensure sending the
 		// signal doesn't block and receiving won't miss a signal.
@@ -189,7 +197,7 @@ func (controller *Controller) Run(ctx context.Context) {
 			err = fmt.Errorf("no IPv4 address for interface %s", controller.config.ListenInterface)
 		}
 		if err != nil {
-			NoticeError("error getting listener IP: %s", errors.Trace(err))
+			NoticeError("error getting listener IP: %v", errors.Trace(err))
 			return
 		}
 		listenIP = IPv4Address.String()
@@ -198,7 +206,7 @@ func (controller *Controller) Run(ctx context.Context) {
 	if !controller.config.DisableLocalSocksProxy {
 		socksProxy, err := NewSocksProxy(controller.config, controller, listenIP)
 		if err != nil {
-			NoticeWarning("error initializing local SOCKS proxy: %s", err)
+			NoticeError("error initializing local SOCKS proxy: %v", errors.Trace(err))
 			return
 		}
 		defer socksProxy.Close()
@@ -207,7 +215,7 @@ func (controller *Controller) Run(ctx context.Context) {
 	if !controller.config.DisableLocalHTTPProxy {
 		httpProxy, err := NewHttpProxy(controller.config, controller, listenIP)
 		if err != nil {
-			NoticeWarning("error initializing local HTTP proxy: %s", err)
+			NoticeError("error initializing local HTTP proxy: %v", errors.Trace(err))
 			return
 		}
 		defer httpProxy.Close()
@@ -238,13 +246,16 @@ func (controller *Controller) Run(ctx context.Context) {
 	}
 
 	controller.runWaitGroup.Add(1)
+	go controller.serverEntriesReporter()
+
+	controller.runWaitGroup.Add(1)
 	go controller.connectedReporter()
 
 	controller.runWaitGroup.Add(1)
-	go controller.runTunnels()
+	go controller.establishTunnelWatcher()
 
 	controller.runWaitGroup.Add(1)
-	go controller.establishTunnelWatcher()
+	go controller.runTunnels()
 
 	if controller.packetTunnelClient != nil {
 		controller.packetTunnelClient.Start()
@@ -394,7 +405,8 @@ fetcherLoop:
 				break retryLoop
 			}
 
-			NoticeWarning("failed to fetch %s remote server list: %s", name, err)
+			NoticeWarning("failed to fetch %s remote server list: %v",
+				name, errors.Trace(err))
 
 			retryPeriod := controller.config.GetParameters().Get().Duration(
 				parameters.FetchRemoteServerListRetryPeriod)
@@ -410,121 +422,6 @@ fetcherLoop:
 	}
 
 	NoticeInfo("exiting %s remote server list fetcher", name)
-}
-
-// establishTunnelWatcher terminates the controller if a tunnel
-// has not been established in the configured time period. This
-// is regardless of how many tunnels are presently active -- meaning
-// that if an active tunnel was established and lost the controller
-// is left running (to re-establish).
-func (controller *Controller) establishTunnelWatcher() {
-	defer controller.runWaitGroup.Done()
-
-	timeout := controller.config.GetParameters().Get().Duration(
-		parameters.EstablishTunnelTimeout)
-
-	if timeout > 0 {
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-
-		select {
-		case <-timer.C:
-			if !controller.hasEstablishedOnce() {
-				NoticeEstablishTunnelTimeout(timeout)
-				controller.SignalComponentFailure()
-			}
-		case <-controller.runCtx.Done():
-		}
-	}
-
-	NoticeInfo("exiting establish tunnel watcher")
-}
-
-// connectedReporter sends periodic "connected" requests to the Psiphon API.
-// These requests are for server-side unique user stats calculation. See the
-// comment in DoConnectedRequest for a description of the request mechanism.
-//
-// To correctly count daily unique users, only one connected request is made
-// across all simultaneous multi-tunnels; and the connected request is
-// repeated every 24h.
-//
-// The signalReportConnected mechanism is used to trigger a connected request
-// immediately after a reconnect. While strictly only one connected request
-// per 24h is required in order to count daily unique users, the connected
-// request also delivers the establishment duration metric (which includes
-// time elapsed performing the handshake request) and additional fragmentation
-// metrics; these metrics are measured for each tunnel.
-func (controller *Controller) connectedReporter() {
-	defer controller.runWaitGroup.Done()
-
-	// session is nil when DisableApi is set
-	if controller.config.DisableApi {
-		return
-	}
-
-loop:
-	for {
-
-		select {
-		case <-controller.signalReportConnected:
-			// Make the initial connected request
-		case <-controller.runCtx.Done():
-			break loop
-		}
-
-		// Pick any active tunnel and make the next connected request. No error is
-		// logged if there's no active tunnel, as that's not an unexpected
-		// condition.
-		reported := false
-		tunnel := controller.getNextActiveTunnel()
-		if tunnel != nil {
-			err := tunnel.serverContext.DoConnectedRequest()
-			if err == nil {
-				reported = true
-			} else {
-				NoticeWarning("failed to make connected request: %s", err)
-			}
-		}
-
-		// Schedule the next connected request and wait. This duration is not a
-		// dynamic ClientParameter as the daily unique user stats logic specifically
-		// requires a "connected" request no more or less often than every 24h.
-		var duration time.Duration
-		if reported {
-			duration = 24 * time.Hour
-		} else {
-			duration = controller.config.GetParameters().Get().Duration(
-				parameters.PsiphonAPIConnectedRequestRetryPeriod)
-		}
-		timer := time.NewTimer(duration)
-		doBreak := false
-		select {
-		case <-controller.signalReportConnected:
-		case <-timer.C:
-			// Make another connected request
-		case <-controller.runCtx.Done():
-			doBreak = true
-		}
-		timer.Stop()
-		if doBreak {
-			break loop
-		}
-	}
-
-	NoticeInfo("exiting connected reporter")
-}
-
-func (controller *Controller) signalConnectedReporter() {
-
-	// session is nil when DisableApi is set
-	if controller.config.DisableApi {
-		return
-	}
-
-	select {
-	case controller.signalReportConnected <- struct{}{}:
-	default:
-	}
 }
 
 // upgradeDownloader makes periodic attempts to complete a client upgrade
@@ -597,7 +494,7 @@ downloadLoop:
 				break retryLoop
 			}
 
-			NoticeWarning("failed to download upgrade: %s", err)
+			NoticeWarning("failed to download upgrade: %v", errors.Trace(err))
 
 			timeout := controller.config.GetParameters().Get().Duration(
 				parameters.FetchUpgradeRetryPeriod)
@@ -613,6 +510,300 @@ downloadLoop:
 	}
 
 	NoticeInfo("exiting upgrade downloader")
+}
+
+type serverEntriesReportRequest struct {
+	constraints   *protocolSelectionConstraints
+	awaitResponse chan *serverEntriesReportResponse
+}
+
+type serverEntriesReportResponse struct {
+	err                              error
+	candidates                       int
+	initialCandidates                int
+	initialCandidatesAnyEgressRegion int
+	availableEgressRegions           []string
+}
+
+// serverEntriesReporter performs scans over all server entries to report on
+// available tunnel candidates, subject to protocol selection constraints, and
+// available egress regions.
+//
+// Because scans may be slow, depending on the client device and server entry
+// list size, serverEntriesReporter is used to perform asychronous, background
+// operations that would otherwise block establishment. This includes emitting
+// diagnotic notices that are informational (CandidateServers) or which do not
+// need to emit before establishment starts (AvailableEgressRegions).
+//
+// serverEntriesReporter also serves to combine these scans, which would
+// otherwise be logically independent, due to the performance impact of scans.
+//
+// The underlying datastore implementation _may_ block write transactions
+// while there are open read transactions. For example, bolt write
+// transactions which need to  re-map the data file (when the datastore grows)
+// will block on open read transactions. In these scenarios, a slow scan will
+// still block other operations.
+//
+// serverEntriesReporter runs beyond the establishment phase, since it's
+// important for notices such as AvailableEgressRegions to eventually emit
+// even if already established. serverEntriesReporter scans are cancellable,
+// so controller shutdown is not blocked by slow scans.
+//
+// In some special cases, establishment cannot begin without candidate counts
+// up front. In these cases only, the request contains a non-nil
+// awaitResponse, a channel which is used by the requester to block until the
+// scan is complete and the candidate counts are available.
+func (controller *Controller) serverEntriesReporter() {
+	defer controller.runWaitGroup.Done()
+
+loop:
+	for {
+
+		var request *serverEntriesReportRequest
+
+		select {
+		case request = <-controller.signalReportServerEntries:
+		case <-controller.runCtx.Done():
+			break loop
+		}
+
+		egressRegion := controller.config.EgressRegion
+		constraints := request.constraints
+
+		var response serverEntriesReportResponse
+
+		regions := make(map[string]bool)
+
+		callback := func(serverEntry *protocol.ServerEntry) bool {
+
+			// In establishment, excludeIntensive depends on what set of protocols are
+			// already being dialed. For these reports, don't exclude intensive
+			// protocols as any intensive candidate can always be an available
+			// candidate at some point.
+			excludeIntensive := false
+
+			isInitialCandidate := constraints.isInitialCandidate(excludeIntensive, serverEntry)
+			isCandidate := constraints.isCandidate(excludeIntensive, serverEntry)
+
+			if isInitialCandidate {
+				response.initialCandidatesAnyEgressRegion += 1
+			}
+
+			if egressRegion == "" || serverEntry.Region == egressRegion {
+				if isInitialCandidate {
+					response.initialCandidates += 1
+				}
+				if isCandidate {
+					response.candidates += 1
+				}
+			}
+
+			isAvailable := isCandidate
+			if constraints.hasInitialProtocols() {
+				// Available egress regions is subject to an initial limit constraint, if
+				// present: see AvailableEgressRegions comment in launchEstablishing.
+				isAvailable = isInitialCandidate
+			}
+
+			if isAvailable {
+				// Ignore server entries with no region field.
+				if serverEntry.Region != "" {
+					regions[serverEntry.Region] = true
+				}
+			}
+
+			select {
+			case <-controller.runCtx.Done():
+				// Don't block controller shutdown: cancel the scan.
+				return false
+			default:
+				return true
+			}
+		}
+
+		startTime := time.Now()
+
+		response.err = ScanServerEntries(callback)
+
+		// Report this duration in CandidateServers as an indication of datastore
+		// performance.
+		duration := time.Since(startTime)
+
+		response.availableEgressRegions = make([]string, 0, len(regions))
+		for region := range regions {
+			response.availableEgressRegions = append(response.availableEgressRegions, region)
+		}
+
+		if response.err != nil {
+
+			// For diagnostics, we'll post this even when cancelled due to shutdown.
+			NoticeWarning("ScanServerEntries failed: %v", errors.Trace(response.err))
+
+			// Continue and send error reponse. Clear any partial data to avoid
+			// misuse.
+			response.candidates = 0
+			response.initialCandidates = 0
+			response.initialCandidatesAnyEgressRegion = 0
+			response.availableEgressRegions = []string{}
+		}
+
+		if request.awaitResponse != nil {
+			select {
+			case request.awaitResponse <- &response:
+			case <-controller.runCtx.Done():
+				// The receiver may be gone when shutting down.
+			}
+		}
+
+		if response.err == nil {
+
+			NoticeCandidateServers(
+				controller.config.EgressRegion,
+				controller.protocolSelectionConstraints,
+				response.initialCandidates,
+				response.candidates,
+				duration)
+
+			NoticeAvailableEgressRegions(
+				response.availableEgressRegions)
+		}
+	}
+
+	NoticeInfo("exiting server entries reporter")
+}
+
+// signalServerEntriesReporter triggers a new server entry report. Set
+// request.awaitResponse to obtain the report output. When awaitResponse is
+// set, signalServerEntriesReporter blocks until the reporter receives the
+// request, guaranteeing the new report runs. Otherwise, the report is
+// considered to be informational and may or may not run, depending on whether
+// another run is already in progress.
+func (controller *Controller) signalServerEntriesReporter(request *serverEntriesReportRequest) {
+
+	if request.awaitResponse == nil {
+		select {
+		case controller.signalReportServerEntries <- request:
+		default:
+		}
+	} else {
+		controller.signalReportServerEntries <- request
+	}
+}
+
+// connectedReporter sends periodic "connected" requests to the Psiphon API.
+// These requests are for server-side unique user stats calculation. See the
+// comment in DoConnectedRequest for a description of the request mechanism.
+//
+// To correctly count daily unique users, only one connected request is made
+// across all simultaneous multi-tunnels; and the connected request is
+// repeated every 24h.
+//
+// The signalReportConnected mechanism is used to trigger a connected request
+// immediately after a reconnect. While strictly only one connected request
+// per 24h is required in order to count daily unique users, the connected
+// request also delivers the establishment duration metric (which includes
+// time elapsed performing the handshake request) and additional fragmentation
+// metrics; these metrics are measured for each tunnel.
+func (controller *Controller) connectedReporter() {
+	defer controller.runWaitGroup.Done()
+
+	// session is nil when DisableApi is set
+	if controller.config.DisableApi {
+		return
+	}
+
+loop:
+	for {
+
+		select {
+		case <-controller.signalReportConnected:
+			// Make the initial connected request
+		case <-controller.runCtx.Done():
+			break loop
+		}
+
+		// Pick any active tunnel and make the next connected request. No error is
+		// logged if there's no active tunnel, as that's not an unexpected
+		// condition.
+		reported := false
+		tunnel := controller.getNextActiveTunnel()
+		if tunnel != nil {
+			err := tunnel.serverContext.DoConnectedRequest()
+			if err == nil {
+				reported = true
+			} else {
+				NoticeWarning("failed to make connected request: %v",
+					errors.Trace(err))
+			}
+		}
+
+		// Schedule the next connected request and wait. This duration is not a
+		// dynamic ClientParameter as the daily unique user stats logic specifically
+		// requires a "connected" request no more or less often than every 24h.
+		var duration time.Duration
+		if reported {
+			duration = 24 * time.Hour
+		} else {
+			duration = controller.config.GetParameters().Get().Duration(
+				parameters.PsiphonAPIConnectedRequestRetryPeriod)
+		}
+		timer := time.NewTimer(duration)
+		doBreak := false
+		select {
+		case <-controller.signalReportConnected:
+		case <-timer.C:
+			// Make another connected request
+		case <-controller.runCtx.Done():
+			doBreak = true
+		}
+		timer.Stop()
+		if doBreak {
+			break loop
+		}
+	}
+
+	NoticeInfo("exiting connected reporter")
+}
+
+func (controller *Controller) signalConnectedReporter() {
+
+	// session is nil when DisableApi is set
+	if controller.config.DisableApi {
+		return
+	}
+
+	select {
+	case controller.signalReportConnected <- struct{}{}:
+	default:
+	}
+}
+
+// establishTunnelWatcher terminates the controller if a tunnel
+// has not been established in the configured time period. This
+// is regardless of how many tunnels are presently active -- meaning
+// that if an active tunnel was established and lost the controller
+// is left running (to re-establish).
+func (controller *Controller) establishTunnelWatcher() {
+	defer controller.runWaitGroup.Done()
+
+	timeout := controller.config.GetParameters().Get().Duration(
+		parameters.EstablishTunnelTimeout)
+
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+			if !controller.hasEstablishedOnce() {
+				NoticeEstablishTunnelTimeout(timeout)
+				controller.SignalComponentFailure()
+			}
+		case <-controller.runCtx.Done():
+		}
+	}
+
+	NoticeInfo("exiting establish tunnel watcher")
 }
 
 // runTunnels is the controller tunnel management main loop. It starts and stops
@@ -710,16 +901,18 @@ loop:
 				err := connectedTunnel.Activate(controller.runCtx, controller)
 
 				if err != nil {
-					NoticeWarning("failed to activate %s: %s",
-						connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
+					NoticeWarning("failed to activate %s: %v",
+						connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(),
+						errors.Trace(err))
 					discardTunnel = true
 				} else {
 					// It's unlikely that registerTunnel will fail, since only this goroutine
 					// calls registerTunnel -- and after checking numTunnels; so failure is not
 					// expected.
 					if !controller.registerTunnel(connectedTunnel) {
-						NoticeWarning("failed to register %s: %s",
-							connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(), err)
+						NoticeWarning("failed to register %s: %v",
+							connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(),
+							errors.Trace(err))
 						discardTunnel = true
 					}
 				}
@@ -1307,10 +1500,9 @@ func (controller *Controller) launchEstablishing() {
 		}
 	}
 
-	// LimitTunnelProtocols and ConnectionWorkerPoolSize may be set by
-	// tactics.
-
-	// Initial- and LimitTunnelProtocols are set once per establishment, for
+	// Initial- and LimitTunnelProtocols may be set by tactics.
+	//
+	// These protocol limits are fixed once per establishment, for
 	// consistent application of related probabilities (applied by
 	// ParametersAccessor.TunnelProtocols). The
 	// establishLimitTunnelProtocolsState field must be read-only after this
@@ -1325,6 +1517,8 @@ func (controller *Controller) launchEstablishing() {
 		limitProtocols:                      p.TunnelProtocols(parameters.LimitTunnelProtocols),
 		replayCandidateCount:                p.Int(parameters.ReplayCandidateCount),
 	}
+
+	// ConnectionWorkerPoolSize may be set by tactics.
 
 	workerPoolSize := p.Int(parameters.ConnectionWorkerPoolSize)
 
@@ -1355,98 +1549,123 @@ func (controller *Controller) launchEstablishing() {
 		controller.config.TargetServerEntry != "" {
 		tunnelPoolSize = 1
 	}
-	if tunnelPoolSize > 1 {
-		// Initial count is ignored as count candidates will eventually become
-		// available.
-		_, count := CountServerEntriesWithConstraints(
-			controller.config.UseUpstreamProxy(),
-			controller.config.EgressRegion,
-			controller.protocolSelectionConstraints)
-		if count < tunnelPoolSize {
-			if count < 1 {
-				count = 1
-			}
-			tunnelPoolSize = count
-		}
-	}
-	controller.setTunnelPoolSize(tunnelPoolSize)
 
 	p.Close()
 
-	// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
-	// skip the initial phase in this establishment. This avoids spinning,
-	// unable to connect, in this case. InitialLimitTunnelProtocols is
-	// intended to prioritize certain protocols, but not strictly select them.
-	//
-	// The candidate count check is made with egress region selection unset.
-	// When an egress region is selected, it's the responsibility of the outer
-	// client to react to the following ReportAvailableRegions output and
-	// clear the user's selected region to prevent spinning, unable to
-	// connect. The initial phase is skipped only when
-	// InitialLimitTunnelProtocols cannot be satisfied _regardless_ of region
-	// selection.
-	//
-	// We presume that, in practise, most clients will have embedded server
-	// entries with capabilities for most protocols; and that clients will
-	// often perform RSL checks. So clients should most often have the
-	// necessary capabilities to satisfy InitialLimitTunnelProtocols. When
-	// this check fails, RSL/OSL/upgrade checks are triggered in order to gain
-	// new capabilities.
-	//
-	// LimitTunnelProtocols remains a hard limit, as using prohibited
-	// protocols may have some bad effect, such as a firewall blocking all
-	// traffic from a host.
+	// Trigger CandidateServers and AvailableEgressRegions notices. By default,
+	// this is an asynchronous operation, as the underlying full server entry
+	// list enumeration may be a slow operation. In certain cases, where
+	// candidate counts are required up front, await the result before
+	// proceeding.
 
-	if controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount > 0 {
+	awaitResponse := tunnelPoolSize > 1 ||
+		controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount > 0
 
-		egressRegion := "" // no egress region
-
-		initialCount, count := CountServerEntriesWithConstraints(
-			controller.config.UseUpstreamProxy(),
-			egressRegion,
-			controller.protocolSelectionConstraints)
-
-		if initialCount == 0 {
-			NoticeCandidateServers(
-				egressRegion,
-				controller.protocolSelectionConstraints,
-				initialCount,
-				count)
-			NoticeWarning("skipping initial limit tunnel protocols")
-			controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount = 0
-
-			// Since we were unable to satisfy the InitialLimitTunnelProtocols
-			// tactic, trigger RSL, OSL, and upgrade fetches to potentially
-			// gain new capabilities.
-			controller.triggerFetches()
-		}
-	}
-
-	// Report available egress regions. After a fresh install, the outer
-	// client may not have a list of regions to display; and
-	// LimitTunnelProtocols may reduce the number of available regions.
+	// AvailableEgressRegions: after a fresh install, the outer client may not
+	// have a list of regions to display; and LimitTunnelProtocols may reduce the
+	// number of available regions.
 	//
 	// When the outer client receives NoticeAvailableEgressRegions and the
 	// configured EgressRegion is not included in the region list, the outer
-	// client _should_ stop tunnel-core and prompt the user to change the
-	// region selection, as there are insufficient servers/capabilities to
-	// establish a tunnel in the selected region.
+	// client _should_ stop tunnel-core and prompt the user to change the region
+	// selection, as there are insufficient servers/capabilities to establish a
+	// tunnel in the selected region.
 	//
-	// This report is delayed until after tactics are likely to be applied;
-	// this avoids a ReportAvailableRegions reporting too many regions,
-	// followed shortly by a ReportAvailableRegions reporting fewer regions.
-	// That sequence could cause issues in the outer client UI.
+	// This report is delayed until after tactics are likely to be applied,
+	// above; this avoids a ReportAvailableRegions reporting too many regions,
+	// followed shortly by a ReportAvailableRegions reporting fewer regions. That
+	// sequence could cause issues in the outer client UI.
 	//
-	// The reported regions are limited by protocolSelectionConstraints;
-	// in the case where an initial limit is in place, only regions available
-	// for the initial limit are reported. The initial phase will not complete
-	// if EgressRegion is set such that there are no server entries with the
+	// The reported regions are limited by protocolSelectionConstraints; in the
+	// case where an initial limit is in place, only regions available for the
+	// initial limit are reported. The initial phase will not complete if
+	// EgressRegion is set such that there are no server entries with the
 	// necessary protocol capabilities (either locally or from a remote server
 	// list fetch).
 
-	ReportAvailableRegions(
-		controller.config,
-		controller.protocolSelectionConstraints)
+	// Concurrency note: controller.protocolSelectionConstraints may be
+	// overwritten before serverEntriesReporter reads it, and so cannot be
+	// accessed directly by serverEntriesReporter.
+	reportRequest := &serverEntriesReportRequest{
+		constraints: controller.protocolSelectionConstraints,
+	}
+
+	if awaitResponse {
+		// Buffer size of 1 ensures the sender, serverEntryReporter, won't block on
+		// sending the response in the case where launchEstablishing exits due to
+		// stopping establishment.
+		reportRequest.awaitResponse = make(chan *serverEntriesReportResponse, 1)
+	}
+
+	controller.signalServerEntriesReporter(reportRequest)
+
+	if awaitResponse {
+
+		var reportResponse *serverEntriesReportResponse
+		select {
+		case reportResponse = <-reportRequest.awaitResponse:
+		case <-controller.establishCtx.Done():
+			// The sender may be gone when shutting down, or may not send until after
+			// stopping establishment.
+			return
+		}
+		if reportResponse.err != nil {
+			NoticeError("failed to report server entries: %v",
+				errors.Trace(reportResponse.err))
+			controller.SignalComponentFailure()
+			return
+		}
+
+		// Make adjustments based on candidate counts.
+
+		if tunnelPoolSize > 1 {
+			// Initial canidate count is ignored as count candidates will eventually
+			// become available.
+			if reportResponse.candidates < tunnelPoolSize {
+				tunnelPoolSize = reportResponse.candidates
+			}
+			if tunnelPoolSize < 1 {
+				tunnelPoolSize = 1
+			}
+		}
+		controller.setTunnelPoolSize(tunnelPoolSize)
+
+		// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
+		// skip the initial phase in this establishment. This avoids spinning,
+		// unable to connect, in this case. InitialLimitTunnelProtocols is
+		// intended to prioritize certain protocols, but not strictly select them.
+		//
+		// The candidate count check ignores egress region selection. When an egress
+		// region is selected, it's the responsibility of the outer client to react
+		// to the following ReportAvailableRegions output and clear the user's
+		// selected region to prevent spinning, unable to connect. The initial phase
+		// is skipped only when InitialLimitTunnelProtocols cannot be satisfied
+		// _regardless_ of region selection.
+		//
+		// We presume that, in practise, most clients will have embedded server
+		// entries with capabilities for most protocols; and that clients will
+		// often perform RSL checks. So clients should most often have the
+		// necessary capabilities to satisfy InitialLimitTunnelProtocols. When
+		// this check fails, RSL/OSL/upgrade checks are triggered in order to gain
+		// new capabilities.
+		//
+		// LimitTunnelProtocols remains a hard limit, as using prohibited
+		// protocols may have some bad effect, such as a firewall blocking all
+		// traffic from a host.
+
+		if controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount > 0 {
+
+			if reportResponse.initialCandidatesAnyEgressRegion == 0 {
+				NoticeWarning("skipping initial limit tunnel protocols")
+				controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount = 0
+
+				// Since we were unable to satisfy the InitialLimitTunnelProtocols
+				// tactic, trigger RSL, OSL, and upgrade fetches to potentially
+				// gain new capabilities.
+				controller.triggerFetches()
+			}
+		}
+	}
 
 	for i := 0; i < workerPoolSize; i++ {
 		controller.establishWaitGroup.Add(1)
@@ -1508,7 +1727,7 @@ func (controller *Controller) establishCandidateGenerator() {
 
 	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
-		NoticeWarning("failed to iterate over candidates: %s", err)
+		NoticeError("failed to iterate over candidates: %v", errors.Trace(err))
 		controller.SignalComponentFailure()
 		return
 	}
@@ -1529,23 +1748,6 @@ loop:
 	// Repeat until stopped
 	for {
 
-		// For diagnostics, emits counts of the number of known server
-		// entries that satisfy both the egress region and tunnel protocol
-		// requirements (excluding excludeIntensive logic).
-		// Counts may change during establishment due to remote server
-		// list fetches, etc.
-
-		initialCount, count := CountServerEntriesWithConstraints(
-			controller.config.UseUpstreamProxy(),
-			controller.config.EgressRegion,
-			controller.protocolSelectionConstraints)
-
-		NoticeCandidateServers(
-			controller.config.EgressRegion,
-			controller.protocolSelectionConstraints,
-			initialCount,
-			count)
-
 		// A "round" consists of a new shuffle of the server entries and attempted
 		// connections up to the end of the server entry iterator, or
 		// parameters.EstablishTunnelWorkTime elapsed. Time spent waiting for
@@ -1560,6 +1762,12 @@ loop:
 		// candidates, in which case rounds end instantly due to the complete server
 		// entry iteration. An exception is made for an empty server entry iterator;
 		// in that case fetches may be triggered immediately.
+		//
+		// The number of server candidates may change during this loop, due to
+		// remote server list fetches. Due to the performance impact, we will not
+		// trigger additional, informational CandidateServer notices while in the
+		// establishing loop. Clients typically re-establish often enough that we
+		// will see the effect of the remote server list fetch in diagnostics.
 
 		roundStartTime := time.Now()
 		var roundNetworkWaitDuration time.Duration
@@ -1584,7 +1792,7 @@ loop:
 
 			serverEntry, err := iterator.Next()
 			if err != nil {
-				NoticeWarning("failed to get next candidate: %s", err)
+				NoticeError("failed to get next candidate: %v", errors.Trace(err))
 				controller.SignalComponentFailure()
 				break loop
 			}
@@ -1710,6 +1918,7 @@ func (controller *Controller) establishTunnelWorker() {
 	defer controller.establishWaitGroup.Done()
 loop:
 	for candidateServerEntry := range controller.candidateServerEntries {
+
 		// Note: don't receive from candidateServerEntries and isStopEstablishing
 		// in the same select, since we want to prioritize receiving the stop signal
 		if controller.isStopEstablishing() {
@@ -1861,8 +2070,9 @@ loop:
 			// and the excludeIntensive flag.
 			// Silently skip the candidate in this case. Otherwise, emit error.
 			if err != nil {
-				NoticeInfo("failed to select protocol for %s: %s",
-					candidateServerEntry.serverEntry.GetDiagnosticID(), err)
+				NoticeInfo("failed to select protocol for %s: %v",
+					candidateServerEntry.serverEntry.GetDiagnosticID(),
+					errors.Trace(err))
 			}
 
 			// Unblock other candidates immediately when server affinity
@@ -1968,8 +2178,9 @@ loop:
 				break loop
 			}
 
-			NoticeInfo("failed to connect to %s: %s",
-				candidateServerEntry.serverEntry.GetDiagnosticID(), err)
+			NoticeInfo("failed to connect to %s: %v",
+				candidateServerEntry.serverEntry.GetDiagnosticID(),
+				errors.Trace(err))
 
 			continue
 		}
