@@ -569,9 +569,6 @@ loop:
 
 		egressRegion := controller.config.EgressRegion
 		constraints := request.constraints
-		// When CountServerEntriesWithConstraints is called only
-		// limitTunnelProtocolState is fixed; excludeIntensive is transitory.
-		excludeIntensive := false
 
 		var response serverEntriesReportResponse
 
@@ -579,23 +576,36 @@ loop:
 
 		callback := func(serverEntry *protocol.ServerEntry) bool {
 
+			// In establishment, excludeIntensive depends on what set of protocols are
+			// already being dialed. For these reports, don't exclude intensive
+			// protocols as any intensive candidate can always be an available
+			// candidate at some point.
+			excludeIntensive := false
+
 			isInitialCandidate := constraints.isInitialCandidate(excludeIntensive, serverEntry)
 			isCandidate := constraints.isCandidate(excludeIntensive, serverEntry)
 
 			if isInitialCandidate {
-				if egressRegion == "" || serverEntry.Region == egressRegion {
-					response.initialCandidates += 1
-				}
 				response.initialCandidatesAnyEgressRegion += 1
 			}
 
-			if isCandidate {
-				response.candidates += 1
+			if egressRegion == "" || serverEntry.Region == egressRegion {
+				if isInitialCandidate {
+					response.initialCandidates += 1
+				}
+				if isCandidate {
+					response.candidates += 1
+				}
 			}
 
-			// Available egress regions is subject to an initial limit constraint, if
-			// present: see AvailableEgressRegions comment in launchEstablishing.
-			if (constraints.hasInitialProtocols() && isInitialCandidate) || isCandidate {
+			isAvailable := isCandidate
+			if constraints.hasInitialProtocols() {
+				// Available egress regions is subject to an initial limit constraint, if
+				// present: see AvailableEgressRegions comment in launchEstablishing.
+				isAvailable = isInitialCandidate
+			}
+
+			if isAvailable {
 				// Ignore server entries with no region field.
 				if serverEntry.Region != "" {
 					regions[serverEntry.Region] = true
@@ -1717,7 +1727,7 @@ func (controller *Controller) establishCandidateGenerator() {
 
 	applyServerAffinity, iterator, err := NewServerEntryIterator(controller.config)
 	if err != nil {
-		NoticeError("failed to iterate over candidates: %s", errors.Trace(err))
+		NoticeError("failed to iterate over candidates: %v", errors.Trace(err))
 		controller.SignalComponentFailure()
 		return
 	}

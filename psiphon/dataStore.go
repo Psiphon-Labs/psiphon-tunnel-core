@@ -1273,6 +1273,25 @@ func deleteServerEntryHelper(
 // ScanServerEntries where possible; and use the canel option to interrupt
 // scans that are no longer required.
 func ScanServerEntries(callback func(*protocol.ServerEntry) bool) error {
+
+	// TODO: this operation can be sped up (by a factor of ~2x, in one test
+	// scenario) by using a faster JSON implementation
+	// (https://github.com/json-iterator/go) and increasing
+	// datastoreServerEntryFetchGCThreshold.
+	//
+	// json-iterator increases the binary code size significantly, which affects
+	// memory limit accounting on some platforms, so it's not clear we can use it
+	// universally. Similarly, tuning datastoreServerEntryFetchGCThreshold has a
+	// memory limit tradeoff.
+	//
+	// Since ScanServerEntries is now called asynchronously and doesn't block
+	// establishment at all, we can tolerate its slower performance. Other
+	// bulk-JSON operations such as [Streaming]StoreServerEntries also benefit
+	// from using a faster JSON implementation, but the relative performance
+	// increase is far smaller as import times are dominated by data store write
+	// transaction overhead. Other operations such as ServerEntryIterator
+	// amortize the cost of JSON unmarshalling over many other operations.
+
 	err := datastoreView(func(tx *datastoreTx) error {
 
 		bucket := tx.bucket(datastoreServerEntriesBucket)
