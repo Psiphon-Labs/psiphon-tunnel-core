@@ -252,7 +252,7 @@ func StartTunnel(ctx context.Context,
 	go func() {
 		defer tunnel.embeddedServerListWaitGroup.Done()
 
-		err = psiphon.ImportEmbeddedServerEntries(
+		err := psiphon.ImportEmbeddedServerEntries(
 			config,
 			"",
 			embeddedServerEntryList)

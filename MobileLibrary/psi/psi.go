@@ -201,7 +201,7 @@ func Start(
 	go func() {
 		defer embeddedServerListWaitGroup.Done()
 
-		err = psiphon.ImportEmbeddedServerEntries(
+		err := psiphon.ImportEmbeddedServerEntries(
 			config,
 			embeddedServerEntryListFilename,
 			embeddedServerEntryList)
