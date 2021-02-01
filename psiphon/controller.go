@@ -1930,6 +1930,13 @@ loop:
 			continue
 		}
 
+		// TODO: we allow multiple, concurrent workers to attempt to connect to the
+		// same server. This is not wasteful if the server supports several
+		// different protocols, some of which may be blocked while others are not
+		// blocked. Limiting protocols with [Initial]LimitTunnelProtocols may make
+		// these multiple attempts redundent. Also, replay should be used only by
+		// the first attempt.
+
 		// upstreamProxyErrorCallback will post NoticeUpstreamProxyError when the
 		// tunnel dial fails due to an upstream proxy error. As the upstream proxy
 		// is user configured, the error message may need to be relayed to the user.
