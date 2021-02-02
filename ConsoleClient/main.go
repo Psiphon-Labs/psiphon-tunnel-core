@@ -37,7 +37,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
@@ -363,6 +362,7 @@ type Worker interface {
 // TunnelWorker is the Worker protocol implementation used for tunnel mode.
 type TunnelWorker struct {
 	embeddedServerEntryListFilename string
+	embeddedServerListWaitGroup     *sync.WaitGroup
 	controller                      *psiphon.Controller
 }
 
@@ -377,47 +377,38 @@ func (w *TunnelWorker) Init(config *psiphon.Config) error {
 		os.Exit(1)
 	}
 
-	// Handle optional embedded server list file parameter
 	// If specified, the embedded server list is loaded and stored. When there
 	// are no server candidates at all, we wait for this import to complete
 	// before starting the Psiphon controller. Otherwise, we import while
 	// concurrently starting the controller to minimize delay before attempting
 	// to connect to existing candidate servers.
+	//
 	// If the import fails, an error notice is emitted, but the controller is
 	// still started: either existing candidate servers may suffice, or the
 	// remote server list fetch may obtain candidate servers.
+	//
+	// TODO: abort import if controller run ctx is cancelled. Currently, this
+	// import will block shutdown.
 	if w.embeddedServerEntryListFilename != "" {
-		embeddedServerListWaitGroup := new(sync.WaitGroup)
-		embeddedServerListWaitGroup.Add(1)
+		w.embeddedServerListWaitGroup = new(sync.WaitGroup)
+		w.embeddedServerListWaitGroup.Add(1)
 		go func() {
-			defer embeddedServerListWaitGroup.Done()
-			serverEntryList, err := ioutil.ReadFile(w.embeddedServerEntryListFilename)
+			defer w.embeddedServerListWaitGroup.Done()
+
+			err = psiphon.ImportEmbeddedServerEntries(
+				config,
+				w.embeddedServerEntryListFilename,
+				"")
+
 			if err != nil {
-				psiphon.NoticeError("error loading embedded server entry list file: %s", err)
-				return
-			}
-			// TODO: stream embedded server list data? also, the cast makes an unnecessary copy of a large buffer?
-			serverEntries, err := protocol.DecodeServerEntryList(
-				string(serverEntryList),
-				common.GetCurrentTimestamp(),
-				protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
-			if err != nil {
-				psiphon.NoticeError("error decoding embedded server entry list file: %s", err)
-				return
-			}
-			// Since embedded server list entries may become stale, they will not
-			// overwrite existing stored entries for the same server.
-			err = psiphon.StoreServerEntries(config, serverEntries, false)
-			if err != nil {
-				psiphon.NoticeError("error storing embedded server entry list data: %s", err)
+				psiphon.NoticeError("error importing embedded server entry list: %s", err)
 				return
 			}
 		}()
 
-		if psiphon.CountServerEntries() == 0 {
-			embeddedServerListWaitGroup.Wait()
-		} else {
-			defer embeddedServerListWaitGroup.Wait()
+		if !psiphon.HasServerEntries() {
+			psiphon.NoticeInfo("awaiting embedded server entry list import")
+			w.embeddedServerListWaitGroup.Wait()
 		}
 	}
 
@@ -434,6 +425,9 @@ func (w *TunnelWorker) Init(config *psiphon.Config) error {
 // Run implements the Worker interface.
 func (w *TunnelWorker) Run(ctx context.Context) error {
 	defer psiphon.CloseDataStore()
+	if w.embeddedServerListWaitGroup != nil {
+		defer w.embeddedServerListWaitGroup.Wait()
+	}
 
 	w.controller.Run(ctx)
 	return nil
@@ -467,7 +461,11 @@ func (f *FeedbackWorker) Run(ctx context.Context) error {
 	// TODO: cancel blocking read when worker context cancelled?
 	diagnostics, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.TraceMsg(err, "FeedbackUpload: read stdin failed")
+	}
+
+	if len(diagnostics) == 0 {
+		return errors.TraceNew("FeedbackUpload: error zero bytes of diagnostics read from stdin")
 	}
 
 	err = psiphon.SendFeedback(ctx, f.config, string(diagnostics), f.feedbackUploadPath)

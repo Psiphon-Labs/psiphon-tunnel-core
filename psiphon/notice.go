@@ -401,7 +401,8 @@ func NoticeCandidateServers(
 	region string,
 	constraints *protocolSelectionConstraints,
 	initialCount int,
-	count int) {
+	count int,
+	duration time.Duration) {
 
 	singletonNoticeLogger.outputNotice(
 		"CandidateServers", noticeIsDiagnostic,
@@ -411,13 +412,14 @@ func NoticeCandidateServers(
 		"limitTunnelProtocols", constraints.limitProtocols,
 		"replayCandidateCount", constraints.replayCandidateCount,
 		"initialCount", initialCount,
-		"count", count)
+		"count", count,
+		"duration", duration.String())
 }
 
 // NoticeAvailableEgressRegions is what regions are available for egress from.
 // Consecutive reports of the same list of regions are suppressed.
 func NoticeAvailableEgressRegions(regions []string) {
-	sortedRegions := append([]string(nil), regions...)
+	sortedRegions := append([]string{}, regions...)
 	sort.Strings(sortedRegions)
 	repetitionMessage := strings.Join(sortedRegions, "")
 	outputRepetitiveNotice(

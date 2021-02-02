@@ -31,11 +31,11 @@
 #import "Reachability+HasNetworkConnectivity.h"
 #import "Backups.h"
 #import "json-framework/SBJson4.h"
-#import "JailbreakCheck/JailbreakCheck.h"
 #import "NetworkID.h"
-#import <ifaddrs.h>
+#import "NetworkInterface.h"
 #import <resolv.h>
 #import <netdb.h>
+#import "PsiphonClientPlatform.h"
 
 #define GOOGLE_DNS_1 @"8.8.4.4"
 #define GOOGLE_DNS_2 @"8.8.8.8"
@@ -795,39 +795,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Fill in the rest of the values.
     //
     
-    // ClientPlatform must not contain:
-    //   - underscores, which are used by us to separate the constituent parts
-    //   - spaces, which are considered invalid by the server
-    // Like "iOS". Older iOS reports "iPhone OS", which we will convert.
-    NSString *systemName = [[UIDevice currentDevice] systemName];
-    if ([systemName isEqual: @"iPhone OS"]) {
-        systemName = @"iOS";
-    }
-    systemName = [[systemName
-                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
-    // Like "10.2.1"
-    NSString *systemVersion = [[[[UIDevice currentDevice]systemVersion]
-                                stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                               stringByReplacingOccurrencesOfString:@" " withString:@"-"];
-    
-    // "unjailbroken"/"jailbroken"
-    NSString *jailbroken = @"unjailbroken";
-    if ([JailbreakCheck isDeviceJailbroken]) {
-        jailbroken = @"jailbroken";
-    }
-    // Like "com.psiphon3.browser"
-    NSString *bundleIdentifier = [[[[NSBundle mainBundle] bundleIdentifier]
-                                   stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                                  stringByReplacingOccurrencesOfString:@" " withString:@"-"];
-    
-    NSString *clientPlatform = [NSString stringWithFormat:@"%@_%@_%@_%@",
-                                systemName,
-                                systemVersion,
-                                jailbroken,
-                                bundleIdentifier];
-    
-    config[@"ClientPlatform"] = clientPlatform;
+    config[@"ClientPlatform"] = [PsiphonClientPlatform getClientPlatform];
         
     config[@"DeviceRegion"] = [PsiphonTunnel getDeviceRegion];
     
@@ -1191,10 +1159,28 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: invalid mode"}];
         return @"";
     }
-    
-    NSString *activeInterface = [self getActiveInterface];
+
+    NSSet<NSString*>* upIffList = NetworkInterface.activeInterfaces;
+    if (upIffList == nil) {
+        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interfaces"}];
+        return @"";
+    }
+
+    NSString *activeInterface;
+
+    if (@available(iOS 12.0, *)) {
+
+        NetworkPathState *state = [NetworkInterface networkPathState:upIffList];
+
+        if (state.defaultActiveInterface != nil) {
+            const char *interfaceName = nw_interface_get_name(state.defaultActiveInterface);
+            activeInterface = [NSString stringWithUTF8String:interfaceName];
+        }
+    } else {
+        activeInterface = [self getActiveInterface:upIffList];
+    }
     if (activeInterface == nil) {
-        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: not active interface"}];
+        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interface"}];
         return @"";
     }
     
@@ -1235,39 +1221,12 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 /*!
- @brief Returns name of active network interface.
+ @brief Returns name of default active network interface from the provided list of active interfaces.
+ @param upIffList List of active network interfaces.
  @return Active interface name, nil otherwise.
+ @warning Use [NetworkInterface networkPathState:] instead on iOS 12+.
  */
-- (NSString *)getActiveInterface {
-    
-    // Getting list of all active interfaces
-    NSMutableArray *upIffList = [NSMutableArray new];
-    
-    struct ifaddrs *interfaces;
-    if (getifaddrs(&interfaces) != 0) {
-        return nil;
-    }
-    
-    struct ifaddrs *interface;
-    for (interface=interfaces; interface; interface=interface->ifa_next) {
-        
-        // Only IFF_UP interfaces. Loopback is ignored.
-        if (interface->ifa_flags & IFF_UP && !(interface->ifa_flags & IFF_LOOPBACK)) {
-            
-            if (interface->ifa_addr && (interface->ifa_addr->sa_family==AF_INET || interface->ifa_addr->sa_family==AF_INET6)) {
-                
-                // ifa_name could be NULL
-                // https://sourceware.org/bugzilla/show_bug.cgi?id=21812
-                if (interface->ifa_name != NULL) {
-                    NSString *interfaceName = [NSString stringWithUTF8String:interface->ifa_name];
-                    [upIffList addObject:interfaceName];
-                }
-            }
-        }
-    }
-    
-    // Free getifaddrs data
-    freeifaddrs(interfaces);
+- (NSString *)getActiveInterface:(NSSet<NSString*>*)upIffList {
     
     // TODO: following is a heuristic for choosing active network interface
     // Only Wi-Fi and Cellular interfaces are considered
