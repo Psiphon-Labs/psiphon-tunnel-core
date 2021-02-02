@@ -24,9 +24,11 @@ NS_ASSUME_NONNULL_BEGIN
 @interface Backups : NSObject
 
 /// Excludes the target file from application backups made by iCloud and iTunes.
-/// If NO is returned, the file was not successfully excluded from backup and the error is populated.
+/// If false is returned, the file was not successfully excluded from backup and the error is populated.
 /// @param filePath Path at which the file exists.
 /// @param err If non-nil, contains the error encountered when attempting to exclude the file from backup.
+/// @return If true, then the operation succeeded. If false, then the file was not successfully excluded from
+/// backup and the error is populated.
 + (BOOL)excludeFileFromBackup:(NSString*)filePath err:(NSError * _Nullable *)err;
 
 @end

@@ -36,6 +36,7 @@
 #import <resolv.h>
 #import <netdb.h>
 #import "PsiphonClientPlatform.h"
+#import "Redactor.h"
 
 #define GOOGLE_DNS_1 @"8.8.4.4"
 #define GOOGLE_DNS_2 @"8.8.8.8"
@@ -632,8 +633,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Note: this deprecates the "DataStoreDirectory" config field.
     NSURL *defaultDataRootDirectoryURL = [PsiphonTunnel defaultDataRootDirectoryWithError:&err];
     if (err != nil) {
+        NSString *redactedErr = [Redactor stripFilePaths:err.localizedDescription];
         NSString *s = [NSString stringWithFormat:@"Unable to get defaultDataRootDirectoryURL: %@",
-                       err.localizedDescription];
+                       redactedErr];
         *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                         code:PsiphonTunnelErrorCodeConfigError
                                     userInfo:@{NSLocalizedDescriptionKey:s}];
@@ -649,8 +651,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                                attributes:nil
                                     error:&err];
         if (err != nil) {
-            NSString *s = [NSString stringWithFormat: @"Unable to create defaultRootDirectoryURL '%@': %@",
-                           defaultDataRootDirectoryURL, err.localizedDescription];
+            NSString *redactedErr = [Redactor stripFilePaths:err.localizedDescription
+                                               withFilePaths:@[defaultDataRootDirectoryURL.path]];
+            NSString *s = [NSString stringWithFormat:@"Unable to create defaultRootDirectoryURL: %@",
+                           redactedErr];
             *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                             code:PsiphonTunnelErrorCodeConfigError
                                         userInfo:@{NSLocalizedDescriptionKey:s}];
@@ -660,7 +664,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         config[@"DataRootDirectory"] = defaultDataRootDirectoryURL.path;
     }
     else {
-        logMessage([NSString stringWithFormat:@"DataRootDirectory overridden from '%@' to '%@'", defaultDataRootDirectoryURL.path, config[@"DataRootDirectory"]]);
+        logMessage(@"DataRootDirectory overridden");
     }
 
     // Ensure that the configured data root directory is not backed up to iCloud or iTunes.
@@ -668,7 +672,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     BOOL succeeded = [Backups excludeFileFromBackup:dataRootDirectory.path err:&err];
     if (!succeeded) {
-        logMessage([NSString stringWithFormat:@"Failed to exclude data root directory from backup: %@", err.localizedDescription]);
+        NSString *redactedErr = [Redactor stripFilePaths:err.localizedDescription
+                                           withFilePaths:@[dataRootDirectory.path]];
+        logMessage([NSString stringWithFormat:@"Failed to exclude data root directory from backup: %@", redactedErr]);
     } else {
         logMessage(@"Excluded data root directory from backup");
     }
@@ -679,7 +685,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     NSURL *libraryURL = [PsiphonTunnel libraryURLWithError:&err];
     if (err != nil) {
-        NSString *s = [NSString stringWithFormat: @"Unable to get Library URL: %@", err.localizedDescription];
+        NSString *redactedErr = [Redactor stripFilePaths:err.localizedDescription];
+        NSString *s = [NSString stringWithFormat:@"Unable to get Library URL: %@", redactedErr];
         *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                         code:PsiphonTunnelErrorCodeConfigError
                                     userInfo:@{NSLocalizedDescriptionKey:s}];
@@ -708,7 +715,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         config[@"MigrateDataStoreDirectory"] = defaultDataStoreDirectoryURL.path;
     }
     else {
-        logMessage([NSString stringWithFormat: @"DataStoreDirectory overridden from '%@' to '%@'", [defaultDataStoreDirectoryURL path], config[@"DataStoreDirectory"]]);
+        logMessage(@"DataStoreDirectory overridden from default");
     }
 
     //
@@ -733,8 +740,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         config[@"MigrateRemoteServerListDownloadFilename"] = defaultRemoteServerListFilename;
     }
     else {
-        logMessage([NSString stringWithFormat: @"RemoteServerListDownloadFilename overridden from '%@' to '%@'",
-                defaultRemoteServerListFilename, config[@"RemoteServerListDownloadFilename"]]);
+        logMessage(@"RemoteServerListDownloadFilename overridden from default");
     }
     
     // If RemoteServerListUrl/RemoteServerListURLs and RemoteServerListSignaturePublicKey
@@ -765,8 +771,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         config[@"MigrateObfuscatedServerListDownloadDirectory"] = defaultOSLDirectoryURL.path;
     }
     else {
-        logMessage([NSString stringWithFormat: @"ObfuscatedServerListDownloadDirectory overridden from '%@' to '%@'",
-                [defaultOSLDirectoryURL path], config[@"ObfuscatedServerListDownloadDirectory"]]);
+        logMessage(@"ObfuscatedServerListDownloadDirectory overridden from default");
     }
     
     // If ObfuscatedServerListRootURL/ObfuscatedServerListRootURLs is absent,

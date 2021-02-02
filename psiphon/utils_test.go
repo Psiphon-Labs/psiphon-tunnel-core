@@ -20,6 +20,8 @@
 package psiphon
 
 import (
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -95,6 +97,94 @@ func TestStripIPAddresses(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.description, func(t *testing.T) {
 			output := StripIPAddressesString(testCase.input)
+			if output != testCase.expectedOutput {
+				t.Errorf("unexpected output: %s", output)
+			}
+		})
+	}
+}
+
+func TestStripFilePaths(t *testing.T) {
+
+	testCases := []struct {
+		description    string
+		input          string
+		expectedOutput string
+		filePaths      []string
+	}{
+		{
+			"Absolute path",
+			"prefix /a suffix",
+			"prefix [redacted] suffix",
+			nil,
+		},
+		{
+			"Absolute path with directories",
+			"prefix /a/b/c/d suffix",
+			"prefix [redacted] suffix",
+			nil,
+		},
+		{
+			"Relative path 1",
+			"prefix ./a/b/c/d suffix",
+			"prefix [redacted] suffix",
+			nil,
+		},
+		{
+			"Relative path 2",
+			"prefix a/b/c/d suffix",
+			"prefix [redacted] suffix",
+			nil,
+		},
+		{
+			"Relative path 3",
+			"prefix ../a/b/c/d/../ suffix",
+			"prefix [redacted] suffix",
+			nil,
+		},
+		{
+			"File path with home directory tilde",
+			"prefix ~/a/b/c/d suffix",
+			"prefix [redacted] suffix",
+			nil,
+		},
+		{
+			"Multiple file paths",
+			"prefix /a/b c/d suffix",
+			"prefix [redacted] [redacted] suffix",
+			nil,
+		},
+		{
+			"File path with percent encoded spaces",
+			"prefix /a/b%20c/d suffix",
+			"prefix [redacted] suffix",
+			nil,
+		},
+		{
+			"Strip file paths unhandled case",
+			"prefix /a/file name with spaces /e/f/g/ suffix",
+			"prefix [redacted] name with spaces [redacted] suffix",
+			nil,
+		},
+		{
+			"Strip file paths catch unhandled case with provided path",
+			"prefix /a/file name with spaces /e/f/g/ suffix",
+			"prefix [redacted] [redacted] suffix",
+			[]string{"/a/file name with spaces"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.description, func(t *testing.T) {
+			// For convenience replace separators in input string and
+			// file paths with the OS-specific path separator here instead
+			// constructing the test input strings with os.PathSeparator.
+			input := strings.ReplaceAll(testCase.input, "/", string(os.PathSeparator))
+			var filePaths []string
+			for _, filePath := range testCase.filePaths {
+				filePaths = append(filePaths, strings.ReplaceAll(filePath, "/", string(os.PathSeparator)))
+			}
+			output := StripFilePaths(input, filePaths...)
 			if output != testCase.expectedOutput {
 				t.Errorf("unexpected output: %s", output)
 			}
