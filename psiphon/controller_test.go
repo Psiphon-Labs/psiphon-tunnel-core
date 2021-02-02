@@ -617,6 +617,8 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	upgradeDownloaded := make(chan struct{}, 1)
 	remoteServerListDownloaded := make(chan struct{}, 1)
 	confirmedLatestVersion := make(chan struct{}, 1)
+	candidateServers := make(chan struct{}, 1)
+	availableEgressRegions := make(chan struct{}, 1)
 
 	var clientUpgradeDownloadedBytesCount int32
 	var remoteServerListDownloadedBytesCount int32
@@ -696,6 +698,20 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 					default:
 					}
 				}
+
+			case "CandidateServers":
+
+				select {
+				case candidateServers <- struct{}{}:
+				default:
+				}
+
+			case "AvailableEgressRegions":
+
+				select {
+				case availableEgressRegions <- struct{}{}:
+				default:
+				}
 			}
 		}))
 
@@ -740,9 +756,22 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 		select {
 		case <-tunnelEstablished:
-
 		case <-establishTimeout.C:
 			t.Fatalf("tunnel establish timeout exceeded")
+		}
+
+		// Test: asynchronous server entry scans must complete
+
+		select {
+		case <-candidateServers:
+		case <-establishTimeout.C:
+			t.Fatalf("missing candidate servers notice")
+		}
+
+		select {
+		case <-availableEgressRegions:
+		case <-establishTimeout.C:
+			t.Fatalf("missing available egress regions notice")
 		}
 
 		// Test: if starting with no server entries, a fetch remote

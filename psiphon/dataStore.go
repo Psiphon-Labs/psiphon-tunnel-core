@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -54,9 +55,10 @@ var (
 	datastorePersistentStatTypeFailedTunnel     = string(datastoreFailedTunnelStatsBucket)
 	datastoreServerEntryFetchGCThreshold        = 10
 
-	datastoreMutex          sync.RWMutex
-	datastoreReferenceCount int64
-	activeDatastoreDB       *datastoreDB
+	datastoreReferenceCountMutex sync.RWMutex
+	datastoreReferenceCount      int64
+	datastoreMutex               sync.RWMutex
+	activeDatastoreDB            *datastoreDB
 )
 
 // OpenDataStore opens and initializes the singleton datastore instance.
@@ -78,30 +80,60 @@ func OpenDataStoreWithoutReset(config *Config) error {
 
 func openDataStore(config *Config, retryAndReset bool) error {
 
-	datastoreMutex.Lock()
+	// The datastoreReferenceCountMutex/datastoreMutex mutex pair allow for:
+	//
+	// _Nested_ OpenDataStore/CloseDataStore calls to not block when a
+	// datastoreView is in progress (for example, a GetDialParameters call while
+	// a slow ScanServerEntries is running). In this case the nested
+	// OpenDataStore/CloseDataStore calls will lock only
+	// datastoreReferenceCountMutex and not datastoreMutex.
+	//
+	// Synchronized access, for OpenDataStore/CloseDataStore, to
+	// activeDatastoreDB based on a consistent view of datastoreReferenceCount
+	// via locking first datastoreReferenceCount and then datastoreMutex while
+	// holding datastoreReferenceCount.
+	//
+	// Concurrent access, for datastoreView/datastoreUpdate, to activeDatastoreDB
+	// via datastoreMutex read locks.
+	//
+	// Exclusive access, for OpenDataStore/CloseDataStore, to activeDatastoreDB,
+	// with no running datastoreView/datastoreUpdate, by aquiring a
+	// datastoreMutex write lock.
+
+	datastoreReferenceCountMutex.Lock()
 
 	if datastoreReferenceCount < 0 || datastoreReferenceCount == math.MaxInt64 {
-		datastoreMutex.Unlock()
+		datastoreReferenceCountMutex.Unlock()
 		return errors.Tracef(
 			"invalid datastore reference count: %d", datastoreReferenceCount)
 	}
 
 	if datastoreReferenceCount > 0 {
 
-		if activeDatastoreDB == nil {
-			datastoreMutex.Unlock()
+		// For this sanity check, we need only the read-only lock; and must use the
+		// read-only lock to allow concurrent datastoreView calls.
+
+		datastoreMutex.RLock()
+		isNil := activeDatastoreDB == nil
+		datastoreMutex.RUnlock()
+		if isNil {
 			return errors.TraceNew("datastore unexpectedly closed")
 		}
 
 		// Add a reference to the open datastore.
 
 		datastoreReferenceCount += 1
-		datastoreMutex.Unlock()
+		datastoreReferenceCountMutex.Unlock()
 		return nil
 	}
 
+	// Only lock datastoreMutex now that it's necessary.
+	// datastoreReferenceCountMutex remains locked.
+	datastoreMutex.Lock()
+
 	if activeDatastoreDB != nil {
 		datastoreMutex.Unlock()
+		datastoreReferenceCountMutex.Unlock()
 		return errors.TraceNew("datastore unexpectedly open")
 	}
 
@@ -111,12 +143,14 @@ func openDataStore(config *Config, retryAndReset bool) error {
 		config.GetDataStoreDirectory(), retryAndReset)
 	if err != nil {
 		datastoreMutex.Unlock()
+		datastoreReferenceCountMutex.Unlock()
 		return errors.Trace(err)
 	}
 
 	datastoreReferenceCount = 1
 	activeDatastoreDB = newDB
 	datastoreMutex.Unlock()
+	datastoreReferenceCountMutex.Unlock()
 
 	_ = resetAllPersistentStatsToUnreported()
 
@@ -126,8 +160,8 @@ func openDataStore(config *Config, retryAndReset bool) error {
 // CloseDataStore closes the singleton datastore instance, if open.
 func CloseDataStore() {
 
-	datastoreMutex.Lock()
-	defer datastoreMutex.Unlock()
+	datastoreReferenceCountMutex.Lock()
+	defer datastoreReferenceCountMutex.Unlock()
 
 	if datastoreReferenceCount <= 0 {
 		NoticeWarning(
@@ -138,6 +172,11 @@ func CloseDataStore() {
 	if datastoreReferenceCount > 0 {
 		return
 	}
+
+	// Only lock datastoreMutex now that it's necessary.
+	// datastoreReferenceCountMutex remains locked.
+	datastoreMutex.Lock()
+	defer datastoreMutex.Unlock()
 
 	if activeDatastoreDB == nil {
 		return
@@ -356,6 +395,52 @@ func StreamingStoreServerEntries(
 		if n == datastoreServerEntryFetchGCThreshold {
 			DoGarbageCollection()
 			n = 0
+		}
+	}
+
+	return nil
+}
+
+// ImportEmbeddedServerEntries loads, decodes, and stores a list of server
+// entries. If embeddedServerEntryListFilename is not empty,
+// embeddedServerEntryList will be ignored and the encoded server entry list
+// will be loaded from the specified file.
+func ImportEmbeddedServerEntries(
+	config *Config,
+	embeddedServerEntryListFilename string,
+	embeddedServerEntryList string) error {
+
+	if embeddedServerEntryListFilename != "" {
+
+		file, err := os.Open(embeddedServerEntryListFilename)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		defer file.Close()
+
+		err = StreamingStoreServerEntries(
+			config,
+			protocol.NewStreamingServerEntryDecoder(
+				file,
+				common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
+				protocol.SERVER_ENTRY_SOURCE_EMBEDDED),
+			false)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+	} else {
+
+		serverEntries, err := protocol.DecodeServerEntryList(
+			embeddedServerEntryList,
+			common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
+			protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		err = StoreServerEntries(config, serverEntries, false)
+		if err != nil {
+			return errors.Trace(err)
 		}
 	}
 
@@ -1179,21 +1264,55 @@ func deleteServerEntryHelper(
 	return nil
 }
 
-func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
+// ScanServerEntries iterates over all stored server entries, unmarshals each,
+// and passes it to callback for processing. If callback returns false, the
+// iteration is cancelled and an error is returned.
+//
+// ScanServerEntries may be slow to execute, particularly for older devices
+// and/or very large server lists. Callers should avoid blocking on
+// ScanServerEntries where possible; and use the canel option to interrupt
+// scans that are no longer required.
+func ScanServerEntries(callback func(*protocol.ServerEntry) bool) error {
+
+	// TODO: this operation can be sped up (by a factor of ~2x, in one test
+	// scenario) by using a faster JSON implementation
+	// (https://github.com/json-iterator/go) and increasing
+	// datastoreServerEntryFetchGCThreshold.
+	//
+	// json-iterator increases the binary code size significantly, which affects
+	// memory limit accounting on some platforms, so it's not clear we can use it
+	// universally. Similarly, tuning datastoreServerEntryFetchGCThreshold has a
+	// memory limit tradeoff.
+	//
+	// Since ScanServerEntries is now called asynchronously and doesn't block
+	// establishment at all, we can tolerate its slower performance. Other
+	// bulk-JSON operations such as [Streaming]StoreServerEntries also benefit
+	// from using a faster JSON implementation, but the relative performance
+	// increase is far smaller as import times are dominated by data store write
+	// transaction overhead. Other operations such as ServerEntryIterator
+	// amortize the cost of JSON unmarshalling over many other operations.
+
 	err := datastoreView(func(tx *datastoreTx) error {
+
 		bucket := tx.bucket(datastoreServerEntriesBucket)
 		cursor := bucket.cursor()
 		n := 0
+
 		for key, value := cursor.first(); key != nil; key, value = cursor.next() {
+
 			var serverEntry *protocol.ServerEntry
 			err := json.Unmarshal(value, &serverEntry)
 			if err != nil {
 				// In case of data corruption or a bug causing this condition,
 				// do not stop iterating.
-				NoticeWarning("scanServerEntries: %s", errors.Trace(err))
+				NoticeWarning("ScanServerEntries: %s", errors.Trace(err))
 				continue
 			}
-			scanner(serverEntry)
+
+			if !callback(serverEntry) {
+				cursor.close()
+				return errors.TraceNew("scan cancelled")
+			}
 
 			n += 1
 			if n == datastoreServerEntryFetchGCThreshold {
@@ -1212,11 +1331,44 @@ func scanServerEntries(scanner func(*protocol.ServerEntry)) error {
 	return nil
 }
 
-// CountServerEntries returns a count of stored server entries.
+// HasServerEntries returns a bool indicating if the data store contains at
+// least one server entry. This is a faster operation than CountServerEntries.
+// On failure, HasServerEntries returns false.
+func HasServerEntries() bool {
+
+	hasServerEntries := false
+
+	err := datastoreView(func(tx *datastoreTx) error {
+		bucket := tx.bucket(datastoreServerEntriesBucket)
+		cursor := bucket.cursor()
+		key, _ := cursor.first()
+		hasServerEntries = (key != nil)
+		cursor.close()
+		return nil
+	})
+
+	if err != nil {
+		NoticeWarning("HasServerEntries failed: %s", errors.Trace(err))
+		return false
+	}
+
+	return hasServerEntries
+}
+
+// CountServerEntries returns a count of stored server entries. On failure,
+// CountServerEntries returns 0.
 func CountServerEntries() int {
+
 	count := 0
-	err := scanServerEntries(func(_ *protocol.ServerEntry) {
-		count += 1
+
+	err := datastoreView(func(tx *datastoreTx) error {
+		bucket := tx.bucket(datastoreServerEntriesBucket)
+		cursor := bucket.cursor()
+		for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
+			count += 1
+		}
+		cursor.close()
+		return nil
 	})
 
 	if err != nil {
@@ -1225,83 +1377,6 @@ func CountServerEntries() int {
 	}
 
 	return count
-}
-
-// CountServerEntriesWithConstraints returns a count of stored server entries for
-// the specified region and tunnel protocol limits.
-func CountServerEntriesWithConstraints(
-	useUpstreamProxy bool,
-	region string,
-	constraints *protocolSelectionConstraints) (int, int) {
-
-	// When CountServerEntriesWithConstraints is called only
-	// limitTunnelProtocolState is fixed; excludeIntensive is transitory.
-	excludeIntensive := false
-
-	initialCount := 0
-	count := 0
-	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
-		if region == "" || serverEntry.Region == region {
-
-			if constraints.isInitialCandidate(excludeIntensive, serverEntry) {
-				initialCount += 1
-			}
-
-			if constraints.isCandidate(excludeIntensive, serverEntry) {
-				count += 1
-			}
-
-		}
-	})
-
-	if err != nil {
-		NoticeWarning("CountServerEntriesWithConstraints failed: %s", err)
-		return 0, 0
-	}
-
-	return initialCount, count
-}
-
-// ReportAvailableRegions prints a notice with the available egress regions.
-// When limitState has initial protocols, the available regions are limited
-// to those available for the initial protocols; or if limitState has general
-// limited protocols, the available regions are similarly limited.
-func ReportAvailableRegions(config *Config, constraints *protocolSelectionConstraints) {
-
-	// When ReportAvailableRegions is called only limitTunnelProtocolState is
-	// fixed; excludeIntensive is transitory.
-	excludeIntensive := false
-
-	regions := make(map[string]bool)
-	err := scanServerEntries(func(serverEntry *protocol.ServerEntry) {
-
-		isCandidate := false
-		if constraints.hasInitialProtocols() {
-			isCandidate = constraints.isInitialCandidate(excludeIntensive, serverEntry)
-		} else {
-			isCandidate = constraints.isCandidate(excludeIntensive, serverEntry)
-		}
-
-		if isCandidate {
-			regions[serverEntry.Region] = true
-		}
-	})
-
-	if err != nil {
-		NoticeWarning("ReportAvailableRegions failed: %s", err)
-		return
-	}
-
-	regionList := make([]string, 0, len(regions))
-	for region := range regions {
-		// Some server entries do not have a region, but it makes no sense to return
-		// an empty string as an "available region".
-		if region != "" {
-			regionList = append(regionList, region)
-		}
-	}
-
-	NoticeAvailableEgressRegions(regionList)
 }
 
 // SetSplitTunnelRoutes updates the cached routes data for
