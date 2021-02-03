@@ -90,7 +90,8 @@ var supportedVersionNumbers = map[string]uint32{
 }
 
 func isObfuscated(quicVersion string) bool {
-	return quicVersion == protocol.QUIC_VERSION_OBFUSCATED
+	return quicVersion == protocol.QUIC_VERSION_OBFUSCATED ||
+		quicVersion == QUIC_VERSION_OBFUSCATED_IETF29
 }
 
 func isClientHelloRandomized(quicVersion string) bool {
