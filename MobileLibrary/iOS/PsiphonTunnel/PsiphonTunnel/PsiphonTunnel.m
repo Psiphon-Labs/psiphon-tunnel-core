@@ -633,9 +633,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Note: this deprecates the "DataStoreDirectory" config field.
     NSURL *defaultDataRootDirectoryURL = [PsiphonTunnel defaultDataRootDirectoryWithError:&err];
     if (err != nil) {
-        NSString *redactedErr = [Redactor stripFilePaths:err.localizedDescription];
         NSString *s = [NSString stringWithFormat:@"Unable to get defaultDataRootDirectoryURL: %@",
-                       redactedErr];
+                       [Redactor errorDescription:err]];
         *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                         code:PsiphonTunnelErrorCodeConfigError
                                     userInfo:@{NSLocalizedDescriptionKey:s}];
@@ -651,10 +650,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                                attributes:nil
                                     error:&err];
         if (err != nil) {
-            NSString *redactedErr = [Redactor stripFilePaths:err.localizedDescription
-                                               withFilePaths:@[defaultDataRootDirectoryURL.path]];
             NSString *s = [NSString stringWithFormat:@"Unable to create defaultRootDirectoryURL: %@",
-                           redactedErr];
+                           [Redactor errorDescription:err]];
             *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                             code:PsiphonTunnelErrorCodeConfigError
                                         userInfo:@{NSLocalizedDescriptionKey:s}];
@@ -672,9 +669,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     BOOL succeeded = [Backups excludeFileFromBackup:dataRootDirectory.path err:&err];
     if (!succeeded) {
-        NSString *redactedErr = [Redactor stripFilePaths:err.localizedDescription
-                                           withFilePaths:@[dataRootDirectory.path]];
-        logMessage([NSString stringWithFormat:@"Failed to exclude data root directory from backup: %@", redactedErr]);
+        logMessage([NSString stringWithFormat:@"Failed to exclude data root directory from backup: %@", [Redactor errorDescription:err]]);
     } else {
         logMessage(@"Excluded data root directory from backup");
     }
@@ -685,8 +680,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     NSURL *libraryURL = [PsiphonTunnel libraryURLWithError:&err];
     if (err != nil) {
-        NSString *redactedErr = [Redactor stripFilePaths:err.localizedDescription];
-        NSString *s = [NSString stringWithFormat:@"Unable to get Library URL: %@", redactedErr];
+        NSString *s = [NSString stringWithFormat:@"Unable to get Library URL: %@", [Redactor errorDescription:err]];
         *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                         code:PsiphonTunnelErrorCodeConfigError
                                     userInfo:@{NSLocalizedDescriptionKey:s}];

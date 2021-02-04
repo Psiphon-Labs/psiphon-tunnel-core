@@ -21,43 +21,19 @@
 
 @implementation Redactor
 
-+ (NSString*)stripFilePaths:(NSString*)s {
-    return [Redactor stripFilePaths:s withFilePaths:nil];
-}
++ (NSString *)errorDescription:(NSError *)error {
+    NSError *_Nullable underlyingError = error.userInfo[NSUnderlyingErrorKey];
 
-+ (NSString*)stripFilePaths:(NSString*)s withFilePaths:(NSArray<NSString*>*)filePaths {
-
-    NSMutableString *ret = [s mutableCopy];
-    NSRange replaceRange = NSMakeRange(0, [ret length]);
-
-    for (NSString *filePath in filePaths) {
-        [ret replaceOccurrencesOfString:filePath withString:@"[redacted]"
-                                options:kNilOptions range:replaceRange];
+    if (underlyingError != nil) {
+        return [NSString stringWithFormat:@"NSError(domain:%@, code:%ld, underlyingError:%@)",
+                error.domain,
+                (long)error.code,
+                [Redactor errorDescription:underlyingError]];
+    } else {
+        return [NSString stringWithFormat:@"NSError(domain:%@, code:%ld)",
+                error.domain,
+                (long)error.code];
     }
-
-    NSString *filePathRegex =
-        // File path
-        @"("
-            // Leading characters
-            @"[^ ]*"
-            // At least one path separator
-            @"/"
-            // Path component; take until next space
-            @"[^ ]*"
-        @")+";
-
-    NSError *err = nil;
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:filePathRegex
-                                                                           options:kNilOptions
-                                                                             error:&err];
-    if (err != nil) {
-        [NSException raise:@"Regex compile failed" format:@"failed to compile %@", filePathRegex];
-    }
-
-    NSRange searchRange = NSMakeRange(0, [ret length]);
-    [regex replaceMatchesInString:ret options:kNilOptions range:searchRange withTemplate:@"[redacted]"];
-
-    return ret;
 }
 
 @end

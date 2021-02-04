@@ -24,22 +24,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Redactor implements a set of functions to redact sensitive values from data.
 @interface Redactor : NSObject
 
-/// Returns a redacted copy of the provided string where any file paths are replaced with "[redacted]". For example,
-/// the input "prefix /a/b/c suffix" will result in the return value "prefix [redacted] suffix".
-/// @warning An attempt is made to redact file paths, but there is no guarantee that all file path schemes on the
-/// given system will be caught.
-/// @param s The string to redact.
-/// @return A copy of the provided string with any file paths redacted.
-+ (NSString*)stripFilePaths:(NSString*)s;
-
-/// Version of stripFilePaths which first replaces any occurrences of the provided file paths in the input string with
-/// "[redacted]".
-/// @warning An attempt is made to redact file paths, but there is no guarantee that all file path schemes on the given
-/// system will be caught.
-/// @param s The string to redact.
-/// @param filePaths File paths to redact directly.
-/// @return A copy of the provided string with any file paths redacted.
-+ (NSString*)stripFilePaths:(NSString*)s withFilePaths:(NSArray<NSString*>*_Nullable)filePaths;
+/// Returns a formatted string containing the error's domain and code. This includes the domain and code
+/// of any underlying errors.
++ (NSString *)errorDescription:(NSError *)error;
 
 @end
 
