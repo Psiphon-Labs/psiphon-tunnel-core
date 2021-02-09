@@ -35,6 +35,7 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -55,6 +56,13 @@ func TestObfuscatedRemoteServerLists(t *testing.T) {
 func TestObfuscatedRemoteServerListsOmitMD5Sums(t *testing.T) {
 	testObfuscatedRemoteServerLists(t, true)
 }
+
+// Each instance testObfuscatedRemoteServerLists runs a server which binds to
+// specific network ports. Server shutdown, via SIGTERM, is not supported on
+// Windows. Shutdown is not necessary for these tests, but, without shutdown,
+// multiple testObfuscatedRemoteServerLists calls fail when trying to reuse
+// network ports. This workaround selects unique ports for each server.
+var nextServerPort int32 = 8000
 
 func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
@@ -83,8 +91,8 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		&server.GenerateConfigParams{
 			ServerIPAddress:      serverIPAddress,
 			EnableSSHAPIRequests: true,
-			WebServerPort:        8001,
-			TunnelProtocolPorts:  map[string]int{"OSSH": 4001},
+			WebServerPort:        int(atomic.AddInt32(&nextServerPort, 1)),
+			TunnelProtocolPorts:  map[string]int{"OSSH": int(atomic.AddInt32(&nextServerPort, 1))},
 			LogFilename:          filepath.Join(testDataDirName, "psiphond.log"),
 			LogLevel:             "debug",
 
@@ -379,7 +387,6 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	// Note: calling LoadConfig ensures all *int config fields are initialized
 	clientConfigJSONTemplate := `
     {
-        "DataRootDirectory" : "%s",
         "ClientPlatform" : "",
         "ClientVersion" : "0",
         "SponsorId" : "0",
@@ -395,7 +402,6 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
 	clientConfigJSON := fmt.Sprintf(
 		clientConfigJSONTemplate,
-		testDataDirName,
 		signingPublicKey,
 		remoteServerListURL,
 		obfuscatedServerListRootURLsJSONConfig,
@@ -405,6 +411,9 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
 	}
+
+	clientConfig.DataRootDirectory = testDataDirName
+
 	err = clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("error committing configuration file: %s", err)
