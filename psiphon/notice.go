@@ -242,6 +242,10 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	// in I/O error messages.
 	output = StripIPAddresses(output)
 
+	// Don't call StripFilePaths here, as the file path redaction can
+	// potentially match many non-path strings. Instead, StripFilePaths should
+	// be applied in specific cases.
+
 	nl.mutex.Lock()
 	defer nl.mutex.Unlock()
 
