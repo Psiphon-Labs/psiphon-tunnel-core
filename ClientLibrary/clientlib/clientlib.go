@@ -236,6 +236,10 @@ func StartTunnel(ctx context.Context,
 		}
 	}()
 
+	// Create a cancelable context that will be used for stopping the tunnel
+	var controllerCtx context.Context
+	controllerCtx, tunnel.stopController = context.WithCancel(ctx)
+
 	// If specified, the embedded server list is loaded and stored. When there
 	// are no server candidates at all, we wait for this import to complete
 	// before starting the Psiphon controller. Otherwise, we import while
@@ -246,13 +250,14 @@ func StartTunnel(ctx context.Context,
 	// still started: either existing candidate servers may suffice, or the
 	// remote server list fetch may obtain candidate servers.
 	//
-	// TODO: abort import if controller run ctx is cancelled. Currently, this
-	// import will block shutdown.
+	// The import will be interrupted if it's still running when the controller
+	// is stopped.
 	tunnel.embeddedServerListWaitGroup.Add(1)
 	go func() {
 		defer tunnel.embeddedServerListWaitGroup.Done()
 
 		err := psiphon.ImportEmbeddedServerEntries(
+			controllerCtx,
 			config,
 			"",
 			embeddedServerEntryList)
@@ -269,12 +274,10 @@ func StartTunnel(ctx context.Context,
 	// Create the Psiphon controller
 	controller, err := psiphon.NewController(config)
 	if err != nil {
+		tunnel.stopController()
+		tunnel.embeddedServerListWaitGroup.Wait()
 		return nil, errors.TraceMsg(err, "psiphon.NewController failed")
 	}
-
-	// Create a cancelable context that will be used for stopping the tunnel
-	var controllerCtx context.Context
-	controllerCtx, tunnel.stopController = context.WithCancel(ctx)
 
 	// Begin tunnel connection
 	tunnel.controllerWaitGroup.Add(1)
@@ -306,9 +309,10 @@ func StartTunnel(ctx context.Context,
 // Stop stops/disconnects/shuts down the tunnel. It is safe to call when not connected.
 // Not safe to call concurrently with Start.
 func (tunnel *PsiphonTunnel) Stop() {
-	if tunnel.stopController != nil {
-		tunnel.stopController()
+	if tunnel.stopController == nil {
+		return
 	}
+	tunnel.stopController()
 	tunnel.controllerWaitGroup.Wait()
 	tunnel.embeddedServerListWaitGroup.Wait()
 	psiphon.CloseDataStore()
