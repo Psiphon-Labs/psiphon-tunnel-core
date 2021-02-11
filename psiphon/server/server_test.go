@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -607,9 +608,10 @@ type runServerConfig struct {
 }
 
 var (
-	testSSHClientVersions = []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
-	testUserAgents        = []string{"ua1", "ua2", "ua3"}
-	testNetworkType       = "WIFI"
+	testSSHClientVersions   = []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
+	testUserAgents          = []string{"ua1", "ua2", "ua3"}
+	testNetworkType         = "WIFI"
+	testCustomHostNameRegex = `[a-z0-9]{5,10}\.example\.org`
 )
 
 var serverRuns = 0
@@ -1394,6 +1396,15 @@ func checkExpectedServerTunnelLogFields(
 			}
 		}
 
+		hostName := fields["meek_host_header"].(string)
+		dialPortNumber := int(fields["dial_port_number"].(float64))
+		if dialPortNumber != 80 {
+			hostName, _, _ = net.SplitHostPort(hostName)
+		}
+		if regexp.MustCompile(testCustomHostNameRegex).FindString(hostName) != hostName {
+			return fmt.Errorf("unexpected meek_host_header '%s'", fields["meek_host_header"])
+		}
+
 		for _, name := range []string{
 			"meek_dial_ip_address",
 			"meek_resolved_ip_address",
@@ -1414,6 +1425,11 @@ func checkExpectedServerTunnelLogFields(
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
 			}
+		}
+
+		hostName := fields["meek_sni_server_name"].(string)
+		if regexp.MustCompile(testCustomHostNameRegex).FindString(hostName) != hostName {
+			return fmt.Errorf("unexpected meek_sni_server_name '%s'", fields["meek_sni_server_name"])
 		}
 
 		for _, name := range []string{
@@ -2106,7 +2122,10 @@ func paveTacticsConfigFile(
                 "AppFlag1" : true,
                 "AppConfig1" : {"Option1" : "A", "Option2" : "B"},
                 "AppSwitches1" : [1, 2, 3, 4]
-              }
+              },
+              "CustomHostNameRegexes": ["%s"],
+              "CustomHostNameProbability": 1.0,
+              "CustomHostNameLimitProtocols": ["%s"]
             }
           }
         }
@@ -2136,7 +2155,9 @@ func paveTacticsConfigFile(
 		tunnelProtocol,
 		tunnelProtocol,
 		livenessTestSize, livenessTestSize, livenessTestSize, livenessTestSize,
-		propagationChannelID)
+		propagationChannelID,
+		strings.ReplaceAll(testCustomHostNameRegex, `\`, `\\`),
+		tunnelProtocol)
 
 	err := ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
 	if err != nil {

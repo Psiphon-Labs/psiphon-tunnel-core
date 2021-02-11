@@ -273,6 +273,9 @@ const (
 	ClientBurstDownstreamTargetBytes                 = "ClientBurstDownstreamTargetBytes"
 	ConjureDecoyRegistrarWidth                       = "ConjureDecoyRegistrarWidth"
 	ConjureTransportObfs4Probability                 = "ConjureTransportObfs4Probability"
+	CustomHostNameRegexes                            = "CustomHostNameRegexes"
+	CustomHostNameProbability                        = "CustomHostNameProbability"
+	CustomHostNameLimitProtocols                     = "CustomHostNameLimitProtocols"
 )
 
 const (
@@ -567,6 +570,10 @@ var defaultParameters = map[string]struct {
 
 	ConjureDecoyRegistrarWidth:       {value: 5, minimum: 1},
 	ConjureTransportObfs4Probability: {value: 0.0, minimum: 0.0},
+
+	CustomHostNameRegexes:        {value: RegexStrings{}},
+	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},
+	CustomHostNameLimitProtocols: {value: protocol.TunnelProtocols{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -862,6 +869,14 @@ func (p *Parameters) Set(
 				}
 
 				err := v.Validate(packetManipulationSpecs)
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case RegexStrings:
+				err := v.Validate()
 				if err != nil {
 					if skipOnError {
 						continue
@@ -1309,6 +1324,13 @@ func (p ParametersAccessor) PacketManipulationSpecs(name string) PacketManipulat
 // ProtocolPacketManipulations returns a ProtocolPacketManipulations parameter value.
 func (p ParametersAccessor) ProtocolPacketManipulations(name string) ProtocolPacketManipulations {
 	value := make(ProtocolPacketManipulations)
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// RegexStrings returns a RegexStrings parameter value.
+func (p ParametersAccessor) RegexStrings(name string) RegexStrings {
+	value := RegexStrings{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

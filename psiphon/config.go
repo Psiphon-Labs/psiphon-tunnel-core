@@ -735,6 +735,12 @@ type Config struct {
 	// ApplicationParameters is for testing purposes.
 	ApplicationParameters parameters.KeyValues
 
+	// CustomHostNameRegexes and other custom host name fields are for testing
+	// purposes.
+	CustomHostNameRegexes        []string
+	CustomHostNameProbability    *float64
+	CustomHostNameLimitProtocols []string
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1619,6 +1625,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ApplicationParameters != nil {
 		applyParameters[parameters.ApplicationParameters] = config.ApplicationParameters
+	}
+
+	if config.CustomHostNameRegexes != nil {
+		applyParameters[parameters.CustomHostNameRegexes] = parameters.RegexStrings(config.CustomHostNameRegexes)
+	}
+
+	if config.CustomHostNameProbability != nil {
+		applyParameters[parameters.CustomHostNameProbability] = *config.CustomHostNameProbability
+	}
+
+	if config.CustomHostNameLimitProtocols != nil {
+		applyParameters[parameters.CustomHostNameLimitProtocols] = protocol.TunnelProtocols(config.CustomHostNameLimitProtocols)
 	}
 
 	return applyParameters
