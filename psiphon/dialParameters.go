@@ -1079,6 +1079,7 @@ func selectHostName(
 	choice := prng.Intn(len(regexStrings))
 	hostName, err := regen.Generate(regexStrings[choice])
 	if err != nil {
+		NoticeWarning("regen.Generate failed: %v", errors.Trace(err))
 		return values.GetHostName()
 	}
 
