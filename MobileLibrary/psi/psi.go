@@ -184,6 +184,8 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
+	controllerCtx, stopController = context.WithCancel(context.Background())
+
 	// If specified, the embedded server list is loaded and stored. When there
 	// are no server candidates at all, we wait for this import to complete
 	// before starting the Psiphon controller. Otherwise, we import while
@@ -194,14 +196,15 @@ func Start(
 	// still started: either existing candidate servers may suffice, or the
 	// remote server list fetch may obtain candidate servers.
 	//
-	// TODO: abort import if controller run ctx is cancelled. Currently, this
-	// import will block shutdown.
+	// The import will be interrupted if it's still running when the controller
+	// is stopped.
 	embeddedServerListWaitGroup = new(sync.WaitGroup)
 	embeddedServerListWaitGroup.Add(1)
 	go func() {
 		defer embeddedServerListWaitGroup.Done()
 
 		err := psiphon.ImportEmbeddedServerEntries(
+			controllerCtx,
 			config,
 			embeddedServerEntryListFilename,
 			embeddedServerEntryList)
@@ -217,12 +220,11 @@ func Start(
 
 	controller, err = psiphon.NewController(config)
 	if err != nil {
+		stopController()
 		embeddedServerListWaitGroup.Wait()
 		psiphon.CloseDataStore()
 		return fmt.Errorf("error initializing controller: %s", err)
 	}
-
-	controllerCtx, stopController = context.WithCancel(context.Background())
 
 	controllerWaitGroup = new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)

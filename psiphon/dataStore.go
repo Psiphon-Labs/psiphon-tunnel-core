@@ -21,6 +21,7 @@ package psiphon
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"math"
 	"os"
@@ -362,9 +363,12 @@ func StoreServerEntries(
 	return nil
 }
 
-// StreamingStoreServerEntries stores a list of server entries.
-// There is an independent transaction for each entry insert/update.
+// StreamingStoreServerEntries stores a list of server entries. There is an
+// independent transaction for each entry insert/update.
+// StreamingStoreServerEntries stops early and returns an error if ctx becomes
+// done; any server entries stored up to that point are retained.
 func StreamingStoreServerEntries(
+	ctx context.Context,
 	config *Config,
 	serverEntries *protocol.StreamingServerEntryDecoder,
 	replaceIfExists bool) error {
@@ -376,6 +380,13 @@ func StreamingStoreServerEntries(
 
 	n := 0
 	for {
+
+		select {
+		case <-ctx.Done():
+			return errors.Trace(ctx.Err())
+		default:
+		}
+
 		serverEntry, err := serverEntries.Next()
 		if err != nil {
 			return errors.Trace(err)
@@ -383,7 +394,7 @@ func StreamingStoreServerEntries(
 
 		if serverEntry == nil {
 			// No more server entries
-			break
+			return nil
 		}
 
 		err = StoreServerEntry(serverEntry, replaceIfExists)
@@ -404,8 +415,11 @@ func StreamingStoreServerEntries(
 // ImportEmbeddedServerEntries loads, decodes, and stores a list of server
 // entries. If embeddedServerEntryListFilename is not empty,
 // embeddedServerEntryList will be ignored and the encoded server entry list
-// will be loaded from the specified file.
+// will be loaded from the specified file. The import process stops early if
+// ctx becomes done; any server entries imported up to that point are
+// retained.
 func ImportEmbeddedServerEntries(
+	ctx context.Context,
 	config *Config,
 	embeddedServerEntryListFilename string,
 	embeddedServerEntryList string) error {
@@ -419,6 +433,7 @@ func ImportEmbeddedServerEntries(
 		defer file.Close()
 
 		err = StreamingStoreServerEntries(
+			ctx,
 			config,
 			protocol.NewStreamingServerEntryDecoder(
 				file,

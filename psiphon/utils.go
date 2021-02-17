@@ -123,6 +123,12 @@ var stripIPAddressAndPortRegex = regexp.MustCompile(
 	// IP address
 	`(` +
 		// IPv4
+		//
+		// An IPv4 address can also be represented as an unsigned integer, or with
+		// octal or with hex octet values, but we do not check for any of these
+		// uncommon representations as some may match non-IP values and we don't
+		// expect the "net" package, etc., to emit them.)
+
 		`\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|` +
 
 		// IPv6
@@ -156,6 +162,9 @@ var stripIPAddressAndPortRegex = regexp.MustCompile(
 // and are not as concerned, in this context, with false positive matches. If
 // a user configures an upstream proxy address with an invalid IP or port
 // value, we prefer to redact it.
+//
+// See the stripIPAddressAndPortRegex comment for some uncommon IP address
+// representations that are not matched.
 func StripIPAddresses(b []byte) []byte {
 	return stripIPAddressAndPortRegex.ReplaceAll(b, []byte("[redacted]"))
 }
