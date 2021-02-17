@@ -104,6 +104,7 @@ func FetchCommonRemoteServerList(
 	authenticatedDownload = true
 
 	err = StreamingStoreServerEntries(
+		ctx,
 		config,
 		protocol.NewStreamingServerEntryDecoder(
 			serverListPayloadReader,
@@ -383,6 +384,7 @@ func downloadOSLFileSpec(
 	authenticatedDownload = true
 
 	err = StreamingStoreServerEntries(
+		ctx,
 		config,
 		protocol.NewStreamingServerEntryDecoder(
 			serverListPayloadReader,
