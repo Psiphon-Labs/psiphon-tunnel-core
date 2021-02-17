@@ -36,7 +36,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
@@ -109,6 +108,7 @@ func UpgradeDownloadFilePath(rootDataDirectoryPath string) string {
 }
 
 var controllerMutex sync.Mutex
+var embeddedServerListWaitGroup *sync.WaitGroup
 var controller *psiphon.Controller
 var controllerCtx context.Context
 var stopController context.CancelFunc
@@ -184,22 +184,47 @@ func Start(
 		return fmt.Errorf("error initializing datastore: %s", err)
 	}
 
-	// Stores list of server entries.
-	err = storeServerEntries(
-		config,
-		embeddedServerEntryListFilename,
-		embeddedServerEntryList)
-	if err != nil {
-		return err
+	controllerCtx, stopController = context.WithCancel(context.Background())
+
+	// If specified, the embedded server list is loaded and stored. When there
+	// are no server candidates at all, we wait for this import to complete
+	// before starting the Psiphon controller. Otherwise, we import while
+	// concurrently starting the controller to minimize delay before attempting
+	// to connect to existing candidate servers.
+	//
+	// If the import fails, an error notice is emitted, but the controller is
+	// still started: either existing candidate servers may suffice, or the
+	// remote server list fetch may obtain candidate servers.
+	//
+	// The import will be interrupted if it's still running when the controller
+	// is stopped.
+	embeddedServerListWaitGroup = new(sync.WaitGroup)
+	embeddedServerListWaitGroup.Add(1)
+	go func() {
+		defer embeddedServerListWaitGroup.Done()
+
+		err := psiphon.ImportEmbeddedServerEntries(
+			controllerCtx,
+			config,
+			embeddedServerEntryListFilename,
+			embeddedServerEntryList)
+		if err != nil {
+			psiphon.NoticeError("error importing embedded server entry list: %s", err)
+			return
+		}
+	}()
+	if !psiphon.HasServerEntries() {
+		psiphon.NoticeInfo("awaiting embedded server entry list import")
+		embeddedServerListWaitGroup.Wait()
 	}
 
 	controller, err = psiphon.NewController(config)
 	if err != nil {
+		stopController()
+		embeddedServerListWaitGroup.Wait()
 		psiphon.CloseDataStore()
 		return fmt.Errorf("error initializing controller: %s", err)
 	}
-
-	controllerCtx, stopController = context.WithCancel(context.Background())
 
 	controllerWaitGroup = new(sync.WaitGroup)
 	controllerWaitGroup.Add(1)
@@ -219,6 +244,7 @@ func Stop() {
 	if controller != nil {
 		stopController()
 		controllerWaitGroup.Wait()
+		embeddedServerListWaitGroup.Wait()
 		psiphon.CloseDataStore()
 		controller = nil
 		controllerCtx = nil
@@ -446,49 +472,6 @@ func WriteRuntimeProfiles(outputDirectory string, cpuSampleDurationSeconds, bloc
 		"",
 		cpuSampleDurationSeconds,
 		blockSampleDurationSeconds)
-}
-
-// Helper function to store a list of server entries.
-// if embeddedServerEntryListFilename is not empty, embeddedServerEntryList will be ignored.
-func storeServerEntries(
-	config *psiphon.Config,
-	embeddedServerEntryListFilename, embeddedServerEntryList string) error {
-
-	if embeddedServerEntryListFilename != "" {
-
-		file, err := os.Open(embeddedServerEntryListFilename)
-		if err != nil {
-			return fmt.Errorf("error reading embedded server list file: %s", err)
-		}
-		defer file.Close()
-
-		err = psiphon.StreamingStoreServerEntries(
-			config,
-			protocol.NewStreamingServerEntryDecoder(
-				file,
-				common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
-				protocol.SERVER_ENTRY_SOURCE_EMBEDDED),
-			false)
-		if err != nil {
-			return fmt.Errorf("error storing embedded server list: %s", err)
-		}
-
-	} else {
-
-		serverEntries, err := protocol.DecodeServerEntryList(
-			embeddedServerEntryList,
-			common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
-			protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
-		if err != nil {
-			return fmt.Errorf("error decoding embedded server list: %s", err)
-		}
-		err = psiphon.StoreServerEntries(config, serverEntries, false)
-		if err != nil {
-			return fmt.Errorf("error storing embedded server list: %s", err)
-		}
-	}
-
-	return nil
 }
 
 type mutexPsiphonProvider struct {

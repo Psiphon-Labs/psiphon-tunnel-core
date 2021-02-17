@@ -242,6 +242,10 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	// in I/O error messages.
 	output = StripIPAddresses(output)
 
+	// Don't call StripFilePaths here, as the file path redaction can
+	// potentially match many non-path strings. Instead, StripFilePaths should
+	// be applied in specific cases.
+
 	nl.mutex.Lock()
 	defer nl.mutex.Unlock()
 
@@ -401,7 +405,8 @@ func NoticeCandidateServers(
 	region string,
 	constraints *protocolSelectionConstraints,
 	initialCount int,
-	count int) {
+	count int,
+	duration time.Duration) {
 
 	singletonNoticeLogger.outputNotice(
 		"CandidateServers", noticeIsDiagnostic,
@@ -411,13 +416,14 @@ func NoticeCandidateServers(
 		"limitTunnelProtocols", constraints.limitProtocols,
 		"replayCandidateCount", constraints.replayCandidateCount,
 		"initialCount", initialCount,
-		"count", count)
+		"count", count,
+		"duration", duration.String())
 }
 
 // NoticeAvailableEgressRegions is what regions are available for egress from.
 // Consecutive reports of the same list of regions are suppressed.
 func NoticeAvailableEgressRegions(regions []string) {
-	sortedRegions := append([]string(nil), regions...)
+	sortedRegions := append([]string{}, regions...)
 	sort.Strings(sortedRegions)
 	repetitionMessage := strings.Join(sortedRegions, "")
 	outputRepetitiveNotice(

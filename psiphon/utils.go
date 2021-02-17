@@ -27,6 +27,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -122,6 +123,12 @@ var stripIPAddressAndPortRegex = regexp.MustCompile(
 	// IP address
 	`(` +
 		// IPv4
+		//
+		// An IPv4 address can also be represented as an unsigned integer, or with
+		// octal or with hex octet values, but we do not check for any of these
+		// uncommon representations as some may match non-IP values and we don't
+		// expect the "net" package, etc., to emit them.)
+
 		`\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|` +
 
 		// IPv6
@@ -155,6 +162,9 @@ var stripIPAddressAndPortRegex = regexp.MustCompile(
 // and are not as concerned, in this context, with false positive matches. If
 // a user configures an upstream proxy address with an invalid IP or port
 // value, we prefer to redact it.
+//
+// See the stripIPAddressAndPortRegex comment for some uncommon IP address
+// representations that are not matched.
 func StripIPAddresses(b []byte) []byte {
 	return stripIPAddressAndPortRegex.ReplaceAll(b, []byte("[redacted]"))
 }
@@ -162,6 +172,34 @@ func StripIPAddresses(b []byte) []byte {
 // StripIPAddressesString is StripIPAddresses for strings.
 func StripIPAddressesString(s string) string {
 	return stripIPAddressAndPortRegex.ReplaceAllString(s, "[redacted]")
+}
+
+var stripFilePathRegex = regexp.MustCompile(
+	// File path
+	`(` +
+		// Leading characters
+		`[^ ]*` +
+		// At least one path separator
+		`/` +
+		// Path component; take until next space
+		`[^ ]*` +
+		`)+`)
+
+// StripFilePaths returns a copy of the input with all file paths
+// replaced by "[redacted]". First any occurrences of the provided file paths
+// are replaced and then an attempt is made to replace any other file paths by
+// searching with a heuristic. The latter is a best effort attempt it is not
+// guaranteed that it will catch every file path.
+func StripFilePaths(s string, filePaths ...string) string {
+	for _, filePath := range filePaths {
+		s = strings.ReplaceAll(s, filePath, "[redacted]")
+	}
+	return stripFilePathRegex.ReplaceAllLiteralString(filepath.ToSlash(s), "[redacted]")
+}
+
+// StripFilePathsError is StripFilePaths for errors.
+func StripFilePathsError(err error, filePaths ...string) error {
+	return std_errors.New(StripFilePaths(err.Error(), filePaths...))
 }
 
 // RedactNetError removes network address information from a "net" package
@@ -304,4 +342,62 @@ func (c conditionallyEnabledComponents) MarionetteEnabled() bool {
 
 func (c conditionallyEnabledComponents) RefractionNetworkingEnabled() bool {
 	return refraction.Enabled()
+}
+
+// FileMigration represents the action of moving a file, or directory, to a new
+// location.
+type FileMigration struct {
+
+	// Name is the name of the migration for logging because file paths are not
+	// logged as they may contain sensitive information.
+	Name string
+
+	// OldPath is the current location of the file.
+	OldPath string
+
+	// NewPath is the location that the file should be moved to.
+	NewPath string
+
+	// IsDir should be set to true if the file is a directory.
+	IsDir bool
+}
+
+// DoFileMigration performs the specified file move operation. An error will be
+// returned and the operation will not performed if: a file is expected, but a
+// directory is found; a directory is expected, but a file is found; or a file,
+// or directory, already exists at the target path of the move operation.
+// Note: an attempt is made to redact any file paths from the returned error.
+func DoFileMigration(migration FileMigration) error {
+
+	// Prefix string added to any errors for debug purposes.
+	errPrefix := ""
+	if len(migration.Name) > 0 {
+		errPrefix = fmt.Sprintf("(%s) ", migration.Name)
+	}
+
+	if !common.FileExists(migration.OldPath) {
+		return errors.TraceNew(errPrefix + "old path does not exist")
+	}
+	info, err := os.Stat(migration.OldPath)
+	if err != nil {
+		return errors.Tracef(errPrefix+"error getting file info: %s", StripFilePathsError(err, migration.OldPath))
+	}
+	if info.IsDir() != migration.IsDir {
+		if migration.IsDir {
+			return errors.TraceNew(errPrefix + "expected directory but found file")
+		}
+
+		return errors.TraceNew(errPrefix + "expected but found directory")
+	}
+
+	if common.FileExists(migration.NewPath) {
+		return errors.TraceNew(errPrefix + "file already exists, will not overwrite")
+	}
+
+	err = os.Rename(migration.OldPath, migration.NewPath)
+	if err != nil {
+		return errors.Tracef(errPrefix+"renaming file failed with error %s", StripFilePathsError(err, migration.OldPath, migration.NewPath))
+	}
+
+	return nil
 }

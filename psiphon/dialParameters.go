@@ -463,7 +463,7 @@ func MakeDialParameters(
 
 			dialParams.MeekSNIServerName = ""
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
-				dialParams.MeekSNIServerName = values.GetHostName()
+				dialParams.MeekSNIServerName = selectHostName(dialParams.TunnelProtocol, p)
 				dialParams.MeekTransformedHostName = true
 			}
 
@@ -472,7 +472,7 @@ func MakeDialParameters(
 			dialParams.MeekHostHeader = ""
 			hostname := serverEntry.IpAddress
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
-				hostname = values.GetHostName()
+				hostname = selectHostName(dialParams.TunnelProtocol, p)
 				dialParams.MeekTransformedHostName = true
 			}
 			if serverEntry.MeekServerPort == 80 {
@@ -483,7 +483,9 @@ func MakeDialParameters(
 		} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
 			dialParams.QUICDialSNIAddress = fmt.Sprintf(
-				"%s:%d", values.GetHostName(), serverEntry.SshObfuscatedQUICPort)
+				"%s:%d",
+				selectHostName(dialParams.TunnelProtocol, p),
+				serverEntry.SshObfuscatedQUICPort)
 		}
 	}
 
@@ -1055,4 +1057,31 @@ func makeDialCustomHeaders(
 		copy(dialCustomHeaders[k], v)
 	}
 	return dialCustomHeaders
+}
+
+func selectHostName(
+	tunnelProtocol string, p parameters.ParametersAccessor) string {
+
+	limitProtocols := p.TunnelProtocols(parameters.CustomHostNameLimitProtocols)
+	if len(limitProtocols) > 0 && !common.Contains(limitProtocols, tunnelProtocol) {
+		return values.GetHostName()
+	}
+
+	if !p.WeightedCoinFlip(parameters.CustomHostNameProbability) {
+		return values.GetHostName()
+	}
+
+	regexStrings := p.RegexStrings(parameters.CustomHostNameRegexes)
+	if len(regexStrings) == 0 {
+		return values.GetHostName()
+	}
+
+	choice := prng.Intn(len(regexStrings))
+	hostName, err := regen.Generate(regexStrings[choice])
+	if err != nil {
+		NoticeWarning("selectHostName: regen.Generate failed: %v", errors.Trace(err))
+		return values.GetHostName()
+	}
+
+	return hostName
 }

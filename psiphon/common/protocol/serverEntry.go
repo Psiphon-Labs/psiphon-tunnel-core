@@ -623,7 +623,10 @@ func EncodeServerEntryFields(serverEntryFields ServerEntryFields) (string, error
 }
 
 func encodeServerEntry(
-	IPAddress, webServerPort, webServerSecret, webServerCertificate string,
+	prefixIPAddress string,
+	prefixWebServerPort string,
+	prefixWebServerSecret string,
+	prefixWebServerCertificate string,
 	serverEntry interface{}) (string, error) {
 
 	serverEntryJSON, err := json.Marshal(serverEntry)
@@ -631,13 +634,26 @@ func encodeServerEntry(
 		return "", errors.Trace(err)
 	}
 
-	// Legacy clients expect the space-delimited fields.
+	// Legacy clients use a space-delimited fields prefix, and all clients expect
+	// to at least parse the prefix in order to skip over it.
+	//
+	// When the server entry has no web API server certificate, the entire prefix
+	// can be compacted down to single character placeholders. Clients that can
+	// use the ssh API always prefer it over the web API and won't use the prefix
+	// values.
+	if len(prefixWebServerCertificate) == 0 {
+		prefixIPAddress = "0"
+		prefixWebServerPort = "0"
+		prefixWebServerSecret = "0"
+		prefixWebServerCertificate = "0"
+	}
+
 	return hex.EncodeToString([]byte(fmt.Sprintf(
 		"%s %s %s %s %s",
-		IPAddress,
-		webServerPort,
-		webServerSecret,
-		webServerCertificate,
+		prefixIPAddress,
+		prefixWebServerPort,
+		prefixWebServerSecret,
+		prefixWebServerCertificate,
 		serverEntryJSON))), nil
 }
 

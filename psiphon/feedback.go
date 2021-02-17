@@ -56,13 +56,13 @@ type secureFeedback struct {
 
 // Encrypt and marshal feedback into secure json structure utilizing the
 // Encrypt-then-MAC paradigm (https://tools.ietf.org/html/rfc7366#section-3).
-func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error) {
+func encryptFeedback(diagnostics, b64EncodedPublicKey string) ([]byte, error) {
 	publicKey, err := base64.StdEncoding.DecodeString(b64EncodedPublicKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	iv, encryptionKey, diagnosticsCiphertext, err := encryptAESCBC([]byte(diagnosticsJson))
+	iv, encryptionKey, diagnosticsCiphertext, err := encryptAESCBC([]byte(diagnostics))
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,11 @@ func encryptFeedback(diagnosticsJson, b64EncodedPublicKey string) ([]byte, error
 
 // Encrypt feedback and upload to server. If upload fails
 // the routine will sleep and retry multiple times.
-func SendFeedback(ctx context.Context, config *Config, diagnosticsJson, uploadPath string) error {
+func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath string) error {
+
+	if len(diagnostics) == 0 {
+		return errors.TraceNew("error diagnostics empty")
+	}
 
 	// Get tactics, may update client parameters
 	p := config.GetParameters().Get()
@@ -145,7 +149,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnosticsJson, uploadPa
 			b64PublicKey = config.FeedbackEncryptionPublicKey
 		}
 
-		secureFeedback, err := encryptFeedback(diagnosticsJson, b64PublicKey)
+		secureFeedback, err := encryptFeedback(diagnostics, b64PublicKey)
 		if err != nil {
 			return errors.Trace(err)
 		}

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, Psiphon Inc.
+ * Copyright (c) 2021, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -21,15 +21,11 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface Backups : NSObject
+@interface PsiphonClientPlatform : NSObject
 
-/// Excludes the target file from application backups made by iCloud and iTunes.
-/// If false is returned, the file was not successfully excluded from backup and the error is populated.
-/// @param filePath Path at which the file exists.
-/// @param err If non-nil, contains the error encountered when attempting to exclude the file from backup.
-/// @return If true, then the operation succeeded. If false, then the file was not successfully excluded from
-/// backup and the error is populated.
-+ (BOOL)excludeFileFromBackup:(NSString*)filePath err:(NSError * _Nullable *)err;
+/// Returns a short description of the platform like "iOS_14.2_unjailbroken_ca.psiphon.Psiphon" if running on iOS
+/// or "iOS_13.1_iOSAppOnMac_ca.psiphon.Psiphon" if running as an iOS build on an ARM Mac.
++ (NSString *)getClientPlatform;
 
 @end
 

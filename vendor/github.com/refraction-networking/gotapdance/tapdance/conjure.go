@@ -131,7 +131,7 @@ func (r DecoyRegistrar) Register(cjSession *ConjureSession, ctx context.Context)
 	// randomized sleeping here to break the intraflow signal
 	toSleep := reg.getRandomDuration(3000, 212, 3449)
 	Logger().Debugf("%v Successfully sent registrations, sleeping for: %v", cjSession.IDString(), toSleep)
-	time.Sleep(toSleep)
+	sleepWithContext(ctx, toSleep)
 
 	return reg, nil
 }
@@ -217,12 +217,12 @@ func (r APIRegistrar) Register(cjSession *ConjureSession, ctx context.Context) (
 	tries := 0
 	for tries < r.MaxRetries+1 {
 		tries++
-		err = r.executeHTTPRequest(cjSession, payload)
+		err = r.executeHTTPRequest(ctx, cjSession, payload)
 		if err == nil {
 			Logger().Debugf("%v API registration succeeded", cjSession.IDString())
 			if r.ConnectionDelay != 0 {
 				Logger().Debugf("%v sleeping for %v", cjSession.IDString(), r.ConnectionDelay)
-				time.Sleep(r.ConnectionDelay)
+				sleepWithContext(ctx, r.ConnectionDelay)
 			}
 			return reg, nil
 		}
@@ -240,8 +240,8 @@ func (r APIRegistrar) Register(cjSession *ConjureSession, ctx context.Context) (
 	return nil, err
 }
 
-func (r APIRegistrar) executeHTTPRequest(cjSession *ConjureSession, payload []byte) error {
-	req, err := http.NewRequest("POST", r.Endpoint, bytes.NewReader(payload))
+func (r APIRegistrar) executeHTTPRequest(ctx context.Context, cjSession *ConjureSession, payload []byte) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", r.Endpoint, bytes.NewReader(payload))
 	if err != nil {
 		Logger().Warnf("%v failed to create HTTP request to registration endpoint %s: %v", cjSession.IDString(), r.Endpoint, err)
 		return err
@@ -880,10 +880,13 @@ func (cjSession *ConjureSession) getTcpToDecoy() uint32 {
 	return 0
 }
 
-func (cjSession *ConjureSession) randomSleep() {
-	toSleep := cjSession.getRandomDuration(300, 212, 3449)
-	Logger().Debugf("%v Sleeping %v ms", cjSession.IDString(), toSleep)
-	time.Sleep(toSleep)
+func sleepWithContext(ctx context.Context, duration time.Duration) {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 func rttInt(millis uint32) int {
