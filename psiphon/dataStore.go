@@ -23,8 +23,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"math"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -424,6 +426,8 @@ func ImportEmbeddedServerEntries(
 	embeddedServerEntryListFilename string,
 	embeddedServerEntryList string) error {
 
+	var reader io.Reader
+
 	if embeddedServerEntryListFilename != "" {
 
 		file, err := os.Open(embeddedServerEntryListFilename)
@@ -432,31 +436,23 @@ func ImportEmbeddedServerEntries(
 		}
 		defer file.Close()
 
-		err = StreamingStoreServerEntries(
-			ctx,
-			config,
-			protocol.NewStreamingServerEntryDecoder(
-				file,
-				common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
-				protocol.SERVER_ENTRY_SOURCE_EMBEDDED),
-			false)
-		if err != nil {
-			return errors.Trace(err)
-		}
+		reader = file
 
 	} else {
 
-		serverEntries, err := protocol.DecodeServerEntryList(
-			embeddedServerEntryList,
+		reader = strings.NewReader(embeddedServerEntryList)
+	}
+
+	err := StreamingStoreServerEntries(
+		ctx,
+		config,
+		protocol.NewStreamingServerEntryDecoder(
+			reader,
 			common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
-			protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		err = StoreServerEntries(config, serverEntries, false)
-		if err != nil {
-			return errors.Trace(err)
-		}
+			protocol.SERVER_ENTRY_SOURCE_EMBEDDED),
+		false)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	return nil
