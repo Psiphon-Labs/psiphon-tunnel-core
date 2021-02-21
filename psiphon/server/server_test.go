@@ -134,6 +134,7 @@ func TestSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -155,6 +156,7 @@ func TestOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -176,6 +178,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -197,6 +200,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -219,6 +223,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -241,6 +246,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -263,6 +269,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -285,6 +292,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -309,6 +317,7 @@ func TestQUICOSSH(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -333,6 +342,7 @@ func TestMarionetteOSSH(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -354,6 +364,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -375,6 +386,7 @@ func TestHotReload(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -396,6 +408,7 @@ func TestDefaultSponsorID(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -417,6 +430,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -438,6 +452,7 @@ func TestOmitAuthorization(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -459,6 +474,7 @@ func TestNoAuthorization(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -480,6 +496,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -501,6 +518,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -522,6 +540,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -543,6 +562,7 @@ func TestLivenessTest(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -564,6 +584,7 @@ func TestPruneServerEntries(t *testing.T) {
 			doDanglingTCPConn:    false,
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
+			doSplitTunnel:        false,
 		})
 }
 
@@ -585,6 +606,29 @@ func TestBurstMonitor(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doPacketManipulation: false,
 			doBurstMonitor:       true,
+			doSplitTunnel:        false,
+		})
+}
+
+func TestSplitTunnel(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
+			forceLivenessTest:    false,
+			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
+			doBurstMonitor:       false,
+			doSplitTunnel:        true,
 		})
 }
 
@@ -605,6 +649,7 @@ type runServerConfig struct {
 	doDanglingTCPConn    bool
 	doPacketManipulation bool
 	doBurstMonitor       bool
+	doSplitTunnel        bool
 }
 
 var (
@@ -750,7 +795,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
-	serverConfig["GeoIPDatabaseFilename"] = ""
+
+	// The test GeoIP database maps all IPs to a single, non-"None" country. When
+	// split tunnel mode is enabled, this should cause port forwards to be
+	// untunneled. When split tunnel mode is not enabled, port forwards should be
+	// tunneled despite the country match.
+	geoIPDatabaseFilename := filepath.Join(testDataDirName, "geoip_database.mmbd")
+	paveGeoIPDatabaseFile(t, geoIPDatabaseFilename)
+	serverConfig["GeoIPDatabaseFilenames"] = []string{geoIPDatabaseFilename}
+
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
@@ -945,6 +998,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.EmitSLOKs = true
 	clientConfig.EmitServerAlerts = true
 
+	if runConfig.doSplitTunnel {
+		clientConfig.EnableSplitTunnel = true
+	}
+
 	if !runConfig.omitAuthorization {
 		clientConfig.Authorizations = []string{clientAuthorization}
 	}
@@ -1044,11 +1101,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
 	slokSeeded := make(chan struct{}, 1)
-
 	numPruneNotices := 0
 	pruneServerEntriesNoticesEmitted := make(chan struct{}, 1)
-
 	serverAlertDisallowedNoticesEmitted := make(chan struct{}, 1)
+	untunneledPortForward := make(chan struct{}, 1)
 
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -1093,6 +1149,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				if reason == protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC {
 					sendNotificationReceived(serverAlertDisallowedNoticesEmitted)
 				}
+
+			case "Untunneled":
+				sendNotificationReceived(untunneledPortForward)
+
 			}
 		}))
 
@@ -1223,6 +1283,24 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			t.Fatalf("TCP dial failed: %s", err)
 		}
 		defer danglingConn.Close()
+	}
+
+	// Test: check for split tunnel notice
+
+	if runConfig.doSplitTunnel {
+		if !runConfig.doTunneledWebRequest || expectTrafficFailure {
+			t.Fatalf("invalid test run configuration")
+		}
+		waitOnNotification(t, untunneledPortForward, nil, "")
+	} else {
+		// There should be no "Untunneled" notice. This check assumes that any
+		// unexpected Untunneled notice will have been delivered at this point,
+		// after the SLOK notice.
+		select {
+		case <-untunneledPortForward:
+			t.Fatalf("unexpected untunnedl port forward")
+		default:
+		}
 	}
 
 	// Shutdown to ensure logs/notices are flushed

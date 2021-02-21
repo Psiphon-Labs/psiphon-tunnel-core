@@ -87,7 +87,7 @@ func TestStandAloneGetTactics(t *testing.T) {
 
 	err = FetchCommonRemoteServerList(ctx, config, 0, nil, untunneledDialConfig)
 	if err != nil {
-		t.Fatalf("error cfetching remote server list: %s", err)
+		t.Fatalf("error fetching remote server list: %s", err)
 	}
 
 	// Close the datastore to exercise the OpenDatastore/CloseDatastore

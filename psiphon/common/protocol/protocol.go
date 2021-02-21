@@ -74,8 +74,15 @@ const (
 	PSIPHON_SSH_API_PROTOCOL = "ssh"
 	PSIPHON_WEB_API_PROTOCOL = "web"
 
-	PACKET_TUNNEL_CHANNEL_TYPE = "tun@psiphon.ca"
-	RANDOM_STREAM_CHANNEL_TYPE = "random@psiphon.ca"
+	PACKET_TUNNEL_CHANNEL_TYPE            = "tun@psiphon.ca"
+	RANDOM_STREAM_CHANNEL_TYPE            = "random@psiphon.ca"
+	TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE = "direct-tcpip-no-split-tunnel@psiphon.ca"
+
+	// Reject reason codes are returned in SSH open channel responses.
+	//
+	// Values 0xFE000000 to 0xFFFFFFFF are reserved for "PRIVATE USE" (see
+	// https://tools.ietf.org/rfc/rfc4254.html#section-5.1).
+	CHANNEL_REJECT_REASON_SPLIT_TUNNEL = 0xFE000000
 
 	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
 

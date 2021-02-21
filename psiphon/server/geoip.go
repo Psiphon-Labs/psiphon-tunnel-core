@@ -201,13 +201,28 @@ func (geoIP *GeoIPService) Reloaders() []common.Reloader {
 	return reloaders
 }
 
-// Lookup determines a GeoIPData for a given client IP address.
-func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
+// Lookup determines a GeoIPData for a given string client IP address. Lookup
+// populates the GeoIPData.DiscoveryValue field.
+func (geoIP *GeoIPService) Lookup(strIP string) GeoIPData {
+	IP := net.ParseIP(strIP)
+	if IP == nil {
+		return NewGeoIPData()
+	}
+
+	result := geoIP.LookupIP(IP)
+
+	result.DiscoveryValue = calculateDiscoveryValue(
+		geoIP.discoveryValueHMACKey, strIP)
+
+	return result
+}
+
+// LookupIP determines a GeoIPData for a given client IP address. LookupIP
+// omits the GeoIPData.DiscoveryValue field.
+func (geoIP *GeoIPService) LookupIP(IP net.IP) GeoIPData {
 	result := NewGeoIPData()
 
-	ip := net.ParseIP(ipAddress)
-
-	if ip == nil || len(geoIP.databases) == 0 {
+	if len(geoIP.databases) == 0 {
 		return result
 	}
 
@@ -230,7 +245,7 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 	// the separate ISP database populates ISP.
 	for _, database := range geoIP.databases {
 		database.ReloadableFile.RLock()
-		err := database.maxMindReader.Lookup(ip, &geoIPFields)
+		err := database.maxMindReader.Lookup(IP, &geoIPFields)
 		database.ReloadableFile.RUnlock()
 		if err != nil {
 			log.WithTraceFields(LogFields{"error": err}).Warning("GeoIP lookup failed")
@@ -257,9 +272,6 @@ func (geoIP *GeoIPService) Lookup(ipAddress string) GeoIPData {
 	if geoIPFields.ASO != "" {
 		result.ASO = geoIPFields.ASO
 	}
-
-	result.DiscoveryValue = calculateDiscoveryValue(
-		geoIP.discoveryValueHMACKey, ipAddress)
 
 	return result
 }
@@ -309,7 +321,7 @@ func (geoIP *GeoIPService) InSessionCache(sessionID string) bool {
 // used as input in the server discovery algorithm. Since we do not explicitly
 // store the client IP address, we must derive the value here and store it for
 // later use by the discovery algorithm.
-// See https://bitbucket.org/psiphon/psiphon-circumvention-system/src/tip/Automation/psi_ops_discovery.py
+// See https://github.com/Psiphon-Inc/psiphon-automation/tree/master/Automation/psi_ops_discovery.py
 // for full details.
 func calculateDiscoveryValue(discoveryValueHMACKey, ipAddress string) int {
 	// From: psi_ops_discovery.calculate_ip_address_strategy_value:
