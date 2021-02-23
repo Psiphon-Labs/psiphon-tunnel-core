@@ -430,7 +430,8 @@ func (tunnel *Tunnel) SendAPIRequest(
 	return responsePayload, nil
 }
 
-// Dial establishes a port forward connection through the tunnel.
+// DialTCPChannel establishes a TCP port forward connection through the
+// tunnel.
 //
 // When split tunnel mode is enabled, and unless alwaysTunneled is set, the
 // server may reject the port forward and indicate that the client is to make
@@ -439,7 +440,7 @@ func (tunnel *Tunnel) SendAPIRequest(
 //
 // downstreamConn is an optional parameter which specifies a connection to be
 // explicitly closed when the dialed connection is closed.
-func (tunnel *Tunnel) Dial(
+func (tunnel *Tunnel) DialTCPChannel(
 	remoteAddr string,
 	alwaysTunneled bool,
 	downstreamConn net.Conn) (net.Conn, bool, error) {
@@ -469,17 +470,6 @@ func (tunnel *Tunnel) Dial(
 		downstreamConn: downstreamConn}
 
 	return tunnel.wrapWithTransferStats(conn), false, nil
-}
-
-func isSplitTunnelRejectReason(err error) bool {
-
-	var openChannelErr *ssh.OpenChannelError
-	if std_errors.As(err, &openChannelErr) {
-		return openChannelErr.Reason ==
-			ssh.RejectionReason(protocol.CHANNEL_REJECT_REASON_SPLIT_TUNNEL)
-	}
-
-	return false
 }
 
 func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
@@ -567,15 +557,27 @@ func (tunnel *Tunnel) dialChannel(channelType, remoteAddr string) (interface{}, 
 	result := <-results
 
 	if result.err != nil {
-		// TODO: conditional on type of error or error message?
-		select {
-		case tunnel.signalPortForwardFailure <- struct{}{}:
-		default:
+		if !isSplitTunnelRejectReason(result.err) {
+			select {
+			case tunnel.signalPortForwardFailure <- struct{}{}:
+			default:
+			}
 		}
 		return nil, errors.Trace(result.err)
 	}
 
 	return result.channel, nil
+}
+
+func isSplitTunnelRejectReason(err error) bool {
+
+	var openChannelErr *ssh.OpenChannelError
+	if std_errors.As(err, &openChannelErr) {
+		return openChannelErr.Reason ==
+			ssh.RejectionReason(protocol.CHANNEL_REJECT_REASON_SPLIT_TUNNEL)
+	}
+
+	return false
 }
 
 func (tunnel *Tunnel) wrapWithTransferStats(conn net.Conn) net.Conn {

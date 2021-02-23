@@ -377,7 +377,7 @@ func MakeTunneledHTTPClient(
 	tunneledDialer := func(_, addr string) (net.Conn, error) {
 		// Set alwaysTunneled to ensure the http.Client traffic is always tunneled,
 		// even when split tunnel mode is enabled.
-		conn, _, err := tunnel.Dial(addr, true, nil)
+		conn, _, err := tunnel.DialTCPChannel(addr, true, nil)
 		return conn, errors.Trace(err)
 	}
 

@@ -1274,7 +1274,7 @@ func (controller *Controller) Dial(
 
 	if !cachedUntunneled {
 
-		tunneledConn, splitTunnel, err := tunnel.Dial(
+		tunneledConn, splitTunnel, err := tunnel.DialTCPChannel(
 			remoteAddr, false, downstreamConn)
 		if err != nil {
 			return nil, errors.Trace(err)
