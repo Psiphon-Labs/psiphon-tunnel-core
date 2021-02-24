@@ -41,8 +41,6 @@ var (
 	datastoreServerEntriesBucket                = []byte("serverEntries")
 	datastoreServerEntryTagsBucket              = []byte("serverEntryTags")
 	datastoreServerEntryTombstoneTagsBucket     = []byte("serverEntryTombstoneTags")
-	datastoreSplitTunnelRouteETagsBucket        = []byte("splitTunnelRouteETags")
-	datastoreSplitTunnelRouteDataBucket         = []byte("splitTunnelRouteData")
 	datastoreUrlETagsBucket                     = []byte("urlETags")
 	datastoreKeyValueBucket                     = []byte("keyValues")
 	datastoreRemoteServerListStatsBucket        = []byte("remoteServerListStats")
@@ -1388,74 +1386,6 @@ func CountServerEntries() int {
 	}
 
 	return count
-}
-
-// SetSplitTunnelRoutes updates the cached routes data for
-// the given region. The associated etag is also stored and
-// used to make efficient web requests for updates to the data.
-func SetSplitTunnelRoutes(region, etag string, data []byte) error {
-
-	err := datastoreUpdate(func(tx *datastoreTx) error {
-		bucket := tx.bucket(datastoreSplitTunnelRouteETagsBucket)
-		err := bucket.put([]byte(region), []byte(etag))
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		bucket = tx.bucket(datastoreSplitTunnelRouteDataBucket)
-		err = bucket.put([]byte(region), data)
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return errors.Trace(err)
-	}
-	return nil
-}
-
-// GetSplitTunnelRoutesETag retrieves the etag for cached routes
-// data for the specified region. If not found, it returns an empty string value.
-func GetSplitTunnelRoutesETag(region string) (string, error) {
-
-	var etag string
-
-	err := datastoreView(func(tx *datastoreTx) error {
-		bucket := tx.bucket(datastoreSplitTunnelRouteETagsBucket)
-		etag = string(bucket.get([]byte(region)))
-		return nil
-	})
-
-	if err != nil {
-		return "", errors.Trace(err)
-	}
-	return etag, nil
-}
-
-// GetSplitTunnelRoutesData retrieves the cached routes data
-// for the specified region. If not found, it returns a nil value.
-func GetSplitTunnelRoutesData(region string) ([]byte, error) {
-
-	var data []byte
-
-	err := datastoreView(func(tx *datastoreTx) error {
-		bucket := tx.bucket(datastoreSplitTunnelRouteDataBucket)
-		value := bucket.get([]byte(region))
-		if value != nil {
-			// Must make a copy as slice is only valid within transaction.
-			data = make([]byte, len(value))
-			copy(data, value)
-		}
-		return nil
-	})
-
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return data, nil
 }
 
 // SetUrlETag stores an ETag for the specfied URL.

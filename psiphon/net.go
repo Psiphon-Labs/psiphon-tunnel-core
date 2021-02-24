@@ -374,8 +374,11 @@ func MakeTunneledHTTPClient(
 	// Note: there is no dial context since SSH port forward dials cannot
 	// be interrupted directly. Closing the tunnel will interrupt the dials.
 
-	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
-		return tunnel.sshClient.Dial("tcp", addr)
+	tunneledDialer := func(_, addr string) (net.Conn, error) {
+		// Set alwaysTunneled to ensure the http.Client traffic is always tunneled,
+		// even when split tunnel mode is enabled.
+		conn, _, err := tunnel.DialTCPChannel(addr, true, nil)
+		return conn, errors.Trace(err)
 	}
 
 	transport := &http.Transport{

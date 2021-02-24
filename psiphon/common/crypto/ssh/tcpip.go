@@ -332,12 +332,18 @@ func (l *tcpListener) Addr() net.Addr {
 	return l.laddr
 }
 
+// [Psiphon]
+// directTCPIPNoSplitTunnel is the same as "direct-tcpip", except it indicates
+// custom split tunnel behavior. It shares the same payload. We allow the
+// Client.Dial network type to optionally specify a channel type instead.
+const directTCPIPNoSplitTunnel = "direct-tcpip-no-split-tunnel@psiphon.ca"
+
 // Dial initiates a connection to the addr from the remote host.
 // The resulting connection has a zero LocalAddr() and RemoteAddr().
 func (c *Client) Dial(n, addr string) (net.Conn, error) {
 	var ch Channel
 	switch n {
-	case "tcp", "tcp4", "tcp6":
+	case "tcp", "tcp4", "tcp6", "direct-tcpip", directTCPIPNoSplitTunnel:
 		// Parse the address into host and numeric port.
 		host, portString, err := net.SplitHostPort(addr)
 		if err != nil {
@@ -347,7 +353,14 @@ func (c *Client) Dial(n, addr string) (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
-		ch, err = c.dial(net.IPv4zero.String(), 0, host, int(port))
+
+		// [Psiphon]
+		channelType := "direct-tcpip"
+		if n == directTCPIPNoSplitTunnel {
+			channelType = directTCPIPNoSplitTunnel
+		}
+
+		ch, err = c.dial(channelType, net.IPv4zero.String(), 0, host, int(port))
 		if err != nil {
 			return nil, err
 		}
@@ -393,7 +406,7 @@ func (c *Client) DialTCP(n string, laddr, raddr *net.TCPAddr) (net.Conn, error) 
 			Port: 0,
 		}
 	}
-	ch, err := c.dial(laddr.IP.String(), laddr.Port, raddr.IP.String(), raddr.Port)
+	ch, err := c.dial("direct-tcpip", laddr.IP.String(), laddr.Port, raddr.IP.String(), raddr.Port)
 	if err != nil {
 		return nil, err
 	}
@@ -412,14 +425,14 @@ type channelOpenDirectMsg struct {
 	lport uint32
 }
 
-func (c *Client) dial(laddr string, lport int, raddr string, rport int) (Channel, error) {
+func (c *Client) dial(channelType string, laddr string, lport int, raddr string, rport int) (Channel, error) {
 	msg := channelOpenDirectMsg{
 		raddr: raddr,
 		rport: uint32(rport),
 		laddr: laddr,
 		lport: uint32(lport),
 	}
-	ch, in, err := c.OpenChannel("direct-tcpip", Marshal(&msg))
+	ch, in, err := c.OpenChannel(channelType, Marshal(&msg))
 	if err != nil {
 		return nil, err
 	}
