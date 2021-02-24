@@ -415,7 +415,7 @@ func logIrregularTunnel(
 	logFields["event_name"] = "irregular_tunnel"
 	logFields["listener_protocol"] = listenerTunnelProtocol
 	logFields["listener_port_number"] = listenerPort
-	support.GeoIPService.Lookup(clientIP).SetLogFields(logFields)
+	support.GeoIPService.Lookup(clientIP, false).SetLogFields(logFields)
 	logFields["tunnel_error"] = tunnelError.Error()
 	log.LogRawFieldsWithTimestamp(logFields)
 }

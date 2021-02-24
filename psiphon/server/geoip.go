@@ -49,12 +49,13 @@ const (
 // a special value derived from the client IP that's used to compartmentalize
 // discoverable servers (see calculateDiscoveryValue for details).
 type GeoIPData struct {
-	Country        string
-	City           string
-	ISP            string
-	ASN            string
-	ASO            string
-	DiscoveryValue int
+	Country           string
+	City              string
+	ISP               string
+	ASN               string
+	ASO               string
+	HasDiscoveryValue bool
+	DiscoveryValue    int
 }
 
 // NewGeoIPData returns a GeoIPData initialized with the expected
@@ -201,30 +202,30 @@ func (geoIP *GeoIPService) Reloaders() []common.Reloader {
 	return reloaders
 }
 
-// Lookup determines a GeoIPData for a given string client IP address. Lookup
-// populates the GeoIPData.DiscoveryValue field.
-func (geoIP *GeoIPService) Lookup(strIP string) GeoIPData {
-	IP := net.ParseIP(strIP)
-	if IP == nil {
-		return NewGeoIPData()
-	}
+// Lookup determines a GeoIPData for a given string client IP address.
+//
+// When addDiscoveryValue is true, GeoIPData.DiscoveryValue is calculated and
+// GeoIPData.HasDiscoveryValue is true.
+func (geoIP *GeoIPService) Lookup(
+	strIP string, addDiscoveryValue bool) GeoIPData {
 
-	result := geoIP.LookupIP(IP)
-
-	result.DiscoveryValue = calculateDiscoveryValue(
-		geoIP.discoveryValueHMACKey, strIP)
-
-	return result
+	return geoIP.LookupIP(net.ParseIP(strIP), addDiscoveryValue)
 }
 
-// LookupIP determines a GeoIPData for a given client IP address. LookupIP
-// omits the GeoIPData.DiscoveryValue field.
-func (geoIP *GeoIPService) LookupIP(IP net.IP) GeoIPData {
+// LookupIP determines a GeoIPData for a given client IP address.
+//
+// When addDiscoveryValue is true, GeoIPData.DiscoveryValue is calculated and
+// GeoIPData.HasDiscoveryValue is true.
+func (geoIP *GeoIPService) LookupIP(
+	IP net.IP, addDiscoveryValue bool) GeoIPData {
+
 	result := NewGeoIPData()
 
-	if len(geoIP.databases) == 0 {
+	if IP == nil {
 		return result
 	}
+
+	// Populate GeoIP fields.
 
 	var geoIPFields struct {
 		Country struct {
@@ -271,6 +272,14 @@ func (geoIP *GeoIPService) LookupIP(IP net.IP) GeoIPData {
 
 	if geoIPFields.ASO != "" {
 		result.ASO = geoIPFields.ASO
+	}
+
+	// Populate DiscoveryValue fields (even when there's no GeoIP database).
+
+	if addDiscoveryValue {
+		result.HasDiscoveryValue = true
+		result.DiscoveryValue = calculateDiscoveryValue(
+			geoIP.discoveryValueHMACKey, IP)
 	}
 
 	return result
@@ -323,13 +332,13 @@ func (geoIP *GeoIPService) InSessionCache(sessionID string) bool {
 // later use by the discovery algorithm.
 // See https://github.com/Psiphon-Inc/psiphon-automation/tree/master/Automation/psi_ops_discovery.py
 // for full details.
-func calculateDiscoveryValue(discoveryValueHMACKey, ipAddress string) int {
+func calculateDiscoveryValue(discoveryValueHMACKey string, ipAddress net.IP) int {
 	// From: psi_ops_discovery.calculate_ip_address_strategy_value:
 	//     # Mix bits from all octets of the client IP address to determine the
 	//     # bucket. An HMAC is used to prevent pre-calculation of buckets for IPs.
 	//     return ord(hmac.new(HMAC_KEY, ip_address, hashlib.sha256).digest()[0])
 	// TODO: use 3-octet algorithm?
 	hash := hmac.New(sha256.New, []byte(discoveryValueHMACKey))
-	hash.Write([]byte(ipAddress))
+	hash.Write([]byte(ipAddress.String()))
 	return int(hash.Sum(nil)[0])
 }

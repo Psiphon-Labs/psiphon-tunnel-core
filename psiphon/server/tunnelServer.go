@@ -199,7 +199,7 @@ func (server *TunnelServer) Run() error {
 			support,
 			listener,
 			tunnelProtocol,
-			func(IP string) GeoIPData { return support.GeoIPService.Lookup(IP) })
+			func(IP string) GeoIPData { return support.GeoIPService.Lookup(IP, false) })
 
 		log.WithTraceFields(
 			LogFields{
@@ -1102,7 +1102,7 @@ func (sshServer *sshServer) handleClient(
 	}
 
 	geoIPData := sshServer.support.GeoIPService.Lookup(
-		common.IPAddressFromAddr(clientAddr))
+		common.IPAddressFromAddr(clientAddr), true)
 
 	sshServer.registerAcceptedClient(tunnelProtocol, geoIPData.Country)
 	defer sshServer.unregisterAcceptedClient(tunnelProtocol, geoIPData.Country)
@@ -3603,7 +3603,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	if doSplitTunnel {
 
-		destinationGeoIPData := sshClient.sshServer.support.GeoIPService.LookupIP(IP)
+		destinationGeoIPData := sshClient.sshServer.support.GeoIPService.LookupIP(IP, false)
 
 		if destinationGeoIPData.Country == sshClient.geoIPData.Country &&
 			sshClient.geoIPData.Country != GEOIP_UNKNOWN_VALUE {

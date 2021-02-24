@@ -354,7 +354,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// Endpoint mode. Currently, this means it's handled by the tactics
 		// request handler.
 
-		geoIPData := server.support.GeoIPService.Lookup(clientIP)
+		geoIPData := server.support.GeoIPService.Lookup(clientIP, false)
 		handled := server.support.TacticsServer.HandleEndPoint(
 			endPoint, common.GeoIPData(geoIPData), responseWriter, request)
 		if !handled {
@@ -601,7 +601,8 @@ func (server *MeekServer) getSessionOrEndpoint(
 				// the client IP.
 				proxyClientIP := strings.Split(value, ",")[0]
 				if net.ParseIP(proxyClientIP) != nil &&
-					server.support.GeoIPService.Lookup(proxyClientIP).Country != GEOIP_UNKNOWN_VALUE {
+					server.support.GeoIPService.Lookup(
+						proxyClientIP, false).Country != GEOIP_UNKNOWN_VALUE {
 
 					clientIP = proxyClientIP
 					break
@@ -723,7 +724,7 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 	if len(regions) > 0 || len(ISPs) > 0 || len(cities) > 0 {
 
 		// TODO: avoid redundant GeoIP lookups?
-		geoIPData := server.support.GeoIPService.Lookup(clientIP)
+		geoIPData := server.support.GeoIPService.Lookup(clientIP, false)
 
 		if len(regions) > 0 {
 			if !common.Contains(regions, geoIPData.Country) {

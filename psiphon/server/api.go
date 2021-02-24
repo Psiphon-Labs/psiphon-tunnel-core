@@ -305,6 +305,9 @@ func handshakeAPIRequestHandler(
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
+	if !geoIPData.HasDiscoveryValue {
+		return nil, errors.TraceNew("unexpected missing discovery value")
+	}
 	encodedServerList := db.DiscoverServers(geoIPData.DiscoveryValue)
 
 	// When the client indicates that it used an unsigned server entry for this
