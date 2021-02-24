@@ -168,6 +168,8 @@ const (
 	SplitTunnelRoutesURLFormat                       = "SplitTunnelRoutesURLFormat"
 	SplitTunnelRoutesSignaturePublicKey              = "SplitTunnelRoutesSignaturePublicKey"
 	SplitTunnelDNSServer                             = "SplitTunnelDNSServer"
+	SplitTunnelClassificationTTL                     = "SplitTunnelClassificationTTL"
+	SplitTunnelClassificationMaxEntries              = "SplitTunnelClassificationMaxEntries"
 	FetchUpgradeTimeout                              = "FetchUpgradeTimeout"
 	FetchUpgradeRetryPeriod                          = "FetchUpgradeRetryPeriod"
 	FetchUpgradeStalePeriod                          = "FetchUpgradeStalePeriod"
@@ -433,10 +435,17 @@ var defaultParameters = map[string]struct {
 
 	PsiphonAPIConnectedRequestRetryPeriod: {value: 5 * time.Second, minimum: 1 * time.Millisecond},
 
+	// FetchSplitTunnelRoutesTimeout, SplitTunnelRoutesURLFormat,
+	// SplitTunnelRoutesSignaturePublicKey and SplitTunnelDNSServer are obsoleted
+	// by the server-assisted split tunnel implementation.
+	// TODO: remove once no longer required for older clients.
 	FetchSplitTunnelRoutesTimeout:       {value: 60 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	SplitTunnelRoutesURLFormat:          {value: ""},
 	SplitTunnelRoutesSignaturePublicKey: {value: ""},
 	SplitTunnelDNSServer:                {value: ""},
+
+	SplitTunnelClassificationTTL:        {value: 24 * time.Hour, minimum: 0 * time.Second},
+	SplitTunnelClassificationMaxEntries: {value: 65536, minimum: 0},
 
 	FetchUpgradeTimeout:                {value: 60 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	FetchUpgradeRetryPeriod:            {value: 30 * time.Second, minimum: 1 * time.Millisecond},

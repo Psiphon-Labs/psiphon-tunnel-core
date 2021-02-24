@@ -31,7 +31,7 @@ import (
 )
 
 // GetFunctionName is a helper that extracts a simple function name from
-// full name returned byruntime.Func.Name(). This is used to declutter
+// full name returned by runtime.Func.Name(). This is used to declutter
 // error messages containing function names.
 func GetFunctionName(pc uintptr) string {
 	funcName := runtime.FuncForPC(pc).Name()

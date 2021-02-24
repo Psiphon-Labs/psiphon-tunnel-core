@@ -339,7 +339,7 @@ func runServerReplayClient(
 	// Meet tunnel duration critera.
 	for i := 0; i < 20; i++ {
 		time.Sleep(10 * time.Millisecond)
-		_, _ = controller.Dial("127.0.0.1:80", true, nil)
+		_, _ = controller.Dial("127.0.0.1:80", nil)
 	}
 
 	cancelFunc()

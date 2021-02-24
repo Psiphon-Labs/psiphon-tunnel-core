@@ -199,7 +199,7 @@ func (server *TunnelServer) Run() error {
 			support,
 			listener,
 			tunnelProtocol,
-			func(IP string) GeoIPData { return support.GeoIPService.Lookup(IP) })
+			func(IP string) GeoIPData { return support.GeoIPService.Lookup(IP, false) })
 
 		log.WithTraceFields(
 			LogFields{
@@ -1102,7 +1102,7 @@ func (sshServer *sshServer) handleClient(
 	}
 
 	geoIPData := sshServer.support.GeoIPService.Lookup(
-		common.IPAddressFromAddr(clientAddr))
+		common.IPAddressFromAddr(clientAddr), true)
 
 	sshServer.registerAcceptedClient(tunnelProtocol, geoIPData.Country)
 	defer sshServer.unregisterAcceptedClient(tunnelProtocol, geoIPData.Country)
@@ -1280,6 +1280,7 @@ type handshakeState struct {
 	authorizationsRevoked   bool
 	expectDomainBytes       bool
 	establishedTunnelsCount int
+	splitTunnel             bool
 }
 
 type handshakeStateInfo struct {
@@ -1926,8 +1927,15 @@ func (sshClient *sshClient) runTunnel(
 			sshClient.handleNewRandomStreamChannel(waitGroup, newChannel)
 		case protocol.PACKET_TUNNEL_CHANNEL_TYPE:
 			sshClient.handleNewPacketTunnelChannel(waitGroup, newChannel)
+		case protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE:
+			// The protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE is the same as
+			// "direct-tcpip", except split tunnel channel rejections are disallowed
+			// even if the client has enabled split tunnel. This channel type allows
+			// the client to ensure tunneling for certain cases while split tunnel is
+			// enabled.
+			sshClient.handleNewTCPPortForwardChannel(waitGroup, newChannel, false, newTCPPortForwards)
 		case "direct-tcpip":
-			sshClient.handleNewTCPPortForwardChannel(waitGroup, newChannel, newTCPPortForwards)
+			sshClient.handleNewTCPPortForwardChannel(waitGroup, newChannel, true, newTCPPortForwards)
 		default:
 			sshClient.rejectNewChannel(newChannel,
 				fmt.Sprintf("unknown or unsupported channel type: %s", newChannel.ChannelType()))
@@ -2008,6 +2016,7 @@ type newTCPPortForward struct {
 	enqueueTime   time.Time
 	hostToConnect string
 	portToConnect int
+	doSplitTunnel bool
 	newChannel    ssh.NewChannel
 }
 
@@ -2132,6 +2141,7 @@ func (sshClient *sshClient) handleTCPPortForwards(
 				remainingDialTimeout,
 				newPortForward.hostToConnect,
 				newPortForward.portToConnect,
+				newPortForward.doSplitTunnel,
 				newPortForward.newChannel)
 		}(remainingDialTimeout, newPortForward)
 	}
@@ -2332,7 +2342,9 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 }
 
 func (sshClient *sshClient) handleNewTCPPortForwardChannel(
-	waitGroup *sync.WaitGroup, newChannel ssh.NewChannel,
+	waitGroup *sync.WaitGroup,
+	newChannel ssh.NewChannel,
+	allowSplitTunnel bool,
 	newTCPPortForwards chan *newTCPPortForward) {
 
 	// udpgw client connections are dispatched immediately (clients use this for
@@ -2377,11 +2389,15 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 
 		// Dispatch via TCP port forward manager. When the queue is full, the channel
 		// is immediately rejected.
+		//
+		// Split tunnel logic is enabled for this TCP port forward when the client
+		// has enabled split tunnel mode and the channel type allows it.
 
 		tcpPortForward := &newTCPPortForward{
 			enqueueTime:   time.Now(),
 			hostToConnect: directTcpipExtraData.HostToConnect,
 			portToConnect: int(directTcpipExtraData.PortToConnect),
+			doSplitTunnel: sshClient.handshakeState.splitTunnel && allowSplitTunnel,
 			newChannel:    newChannel,
 		}
 
@@ -3103,16 +3119,8 @@ func (sshClient *sshClient) isPortForwardPermitted(
 	// cases, a blocklist entry won't be dialed in any case. However, no logs
 	// will be recorded.
 
-	tags := sshClient.sshServer.support.Blocklist.LookupIP(remoteIP)
-	if len(tags) > 0 {
-
-		sshClient.logBlocklistHits(remoteIP, "", tags)
-
-		if sshClient.sshServer.support.Config.BlocklistActive {
-			// Actively alert and block
-			sshClient.enqueueUnsafeTrafficAlertRequest(tags)
-			return false
-		}
+	if !sshClient.isIPPermitted(remoteIP) {
+		return false
 	}
 
 	// Don't lock before calling logBlocklistHits.
@@ -3191,6 +3199,23 @@ func (sshClient *sshClient) isDomainPermitted(domain string) (bool, string) {
 	}
 
 	return true, ""
+}
+
+func (sshClient *sshClient) isIPPermitted(remoteIP net.IP) bool {
+
+	tags := sshClient.sshServer.support.Blocklist.LookupIP(remoteIP)
+	if len(tags) > 0 {
+
+		sshClient.logBlocklistHits(remoteIP, "", tags)
+
+		if sshClient.sshServer.support.Config.BlocklistActive {
+			// Actively alert and block
+			sshClient.enqueueUnsafeTrafficAlertRequest(tags)
+			return false
+		}
+	}
+
+	return true
 }
 
 func (sshClient *sshClient) isTCPDialingPortForwardLimitExceeded() bool {
@@ -3439,6 +3464,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	remainingDialTimeout time.Duration,
 	hostToConnect string,
 	portToConnect int,
+	doSplitTunnel bool,
 	newChannel ssh.NewChannel) {
 
 	// Assumptions:
@@ -3547,6 +3573,50 @@ func (sshClient *sshClient) handleTCPChannel(
 	if remainingDialTimeout <= 0 {
 		sshClient.rejectNewChannel(newChannel, "TCP port forward timed out resolving")
 		return
+	}
+
+	// When the client has indicated split tunnel mode and when the channel is
+	// not of type protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE, check if the
+	// client and the port forward destination are in the same GeoIP country. If
+	// so, reject the port forward with a distinct response code that indicates
+	// to the client that this port forward should be performed locally, direct
+	// and untunneled.
+	//
+	// Clients are expected to cache untunneled responses to avoid this round
+	// trip in the immediate future and reduce server load.
+	//
+	// When the countries differ, immediately proceed with the standard port
+	// forward. No additional round trip is required.
+	//
+	// If either GeoIP country is "None", one or both countries are unknown
+	// and there is no match.
+	//
+	// Traffic rules, such as allowed ports, are not enforced for port forward
+	// destinations classified as untunneled.
+	//
+	// Domain and IP blocklists still apply to port forward destinations
+	// classified as untunneled.
+	//
+	// The client's use of split tunnel mode is logged in server_tunnel metrics
+	// as the boolean value split_tunnel. As they may indicate some information
+	// about browsing activity, no other split tunnel metrics are logged.
+
+	if doSplitTunnel {
+
+		destinationGeoIPData := sshClient.sshServer.support.GeoIPService.LookupIP(IP, false)
+
+		if destinationGeoIPData.Country == sshClient.geoIPData.Country &&
+			sshClient.geoIPData.Country != GEOIP_UNKNOWN_VALUE {
+
+			// Since isPortForwardPermitted is not called in this case, explicitly call
+			// ipBlocklistCheck. The domain blocklist case is handled above.
+			if !sshClient.isIPPermitted(IP) {
+				// Note: not recording a port forward failure in this case
+				sshClient.rejectNewChannel(newChannel, "port forward not permitted")
+			}
+
+			newChannel.Reject(protocol.CHANNEL_REJECT_REASON_SPLIT_TUNNEL, "")
+		}
 	}
 
 	// Enforce traffic rules, using the resolved IP address.

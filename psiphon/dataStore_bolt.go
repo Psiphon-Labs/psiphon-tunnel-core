@@ -134,8 +134,6 @@ func tryDatastoreOpenDB(
 			datastoreServerEntriesBucket,
 			datastoreServerEntryTagsBucket,
 			datastoreServerEntryTombstoneTagsBucket,
-			datastoreSplitTunnelRouteETagsBucket,
-			datastoreSplitTunnelRouteDataBucket,
 			datastoreUrlETagsBucket,
 			datastoreKeyValueBucket,
 			datastoreRemoteServerListStatsBucket,
@@ -163,6 +161,8 @@ func tryDatastoreOpenDB(
 		obsoleteBuckets := [][]byte{
 			[]byte("tunnelStats"),
 			[]byte("rankedServerEntries"),
+			[]byte("splitTunnelRouteETags"),
+			[]byte("splitTunnelRouteData"),
 		}
 		for _, obsoleteBucket := range obsoleteBuckets {
 			if tx.Bucket(obsoleteBucket) != nil {

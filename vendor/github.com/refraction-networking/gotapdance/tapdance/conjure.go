@@ -50,7 +50,13 @@ func (r DecoyRegistrar) Register(cjSession *ConjureSession, ctx context.Context)
 	Logger().Debugf("%v Registering V4 and V6 via DecoyRegistrar", cjSession.IDString())
 
 	// Choose N (width) decoys from decoylist
-	cjSession.RegDecoys = SelectDecoys(cjSession.Keys.SharedSecret, cjSession.V6Support.include, cjSession.Width)
+	decoys, err := SelectDecoys(cjSession.Keys.SharedSecret, cjSession.V6Support.include, cjSession.Width)
+	if err != nil {
+		Logger().Warnf("%v failed to select decoys: %v", cjSession.IDString(), err)
+		return nil, err
+	}
+	cjSession.RegDecoys = decoys
+
 	phantom4, phantom6, err := SelectPhantom(cjSession.Keys.ConjureSeed, cjSession.V6Support.include)
 	if err != nil {
 		Logger().Warnf("%v failed to select Phantom: %v", cjSession.IDString(), err)
@@ -898,7 +904,7 @@ func rttInt(millis uint32) int {
 }
 
 // SelectDecoys - Get an array of `width` decoys to be used for registration
-func SelectDecoys(sharedSecret []byte, version uint, width uint) []*pb.TLSDecoySpec {
+func SelectDecoys(sharedSecret []byte, version uint, width uint) ([]*pb.TLSDecoySpec, error) {
 
 	//[reference] prune to v6 only decoys if useV6 is true
 	var allDecoys []*pb.TLSDecoySpec
@@ -911,6 +917,10 @@ func SelectDecoys(sharedSecret []byte, version uint, width uint) []*pb.TLSDecoyS
 		allDecoys = Assets().GetAllDecoys()
 	default:
 		allDecoys = Assets().GetAllDecoys()
+	}
+
+	if len(allDecoys) == 0 {
+		return nil, fmt.Errorf("no decoys")
 	}
 
 	decoys := make([]*pb.TLSDecoySpec, width)
@@ -928,7 +938,7 @@ func SelectDecoys(sharedSecret []byte, version uint, width uint) []*pb.TLSDecoyS
 		idx.Mod(hmacInt, numDecoys)
 		decoys[i] = allDecoys[int(idx.Int64())]
 	}
-	return decoys
+	return decoys, nil
 }
 
 // var phantomSubnets = []conjurePhantomSubnet{
