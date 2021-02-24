@@ -36,7 +36,10 @@ import (
 // stack frame information.
 func TraceNew(message string) error {
 	err := fmt.Errorf("%s", message)
-	pc, _, line, _ := runtime.Caller(1)
+	pc, _, line, ok := runtime.Caller(1)
+	if !ok {
+		return fmt.Errorf("[unknown]: %w", err)
+	}
 	return fmt.Errorf("%s#%d: %w", stacktrace.GetFunctionName(pc), line, err)
 }
 
@@ -52,7 +55,10 @@ func BackTraceNew(backTraceFuncName, message string) error {
 // the caller stack frame information.
 func Tracef(format string, args ...interface{}) error {
 	err := fmt.Errorf(format, args...)
-	pc, _, line, _ := runtime.Caller(1)
+	pc, _, line, ok := runtime.Caller(1)
+	if !ok {
+		return fmt.Errorf("[unknown]: %w", err)
+	}
 	return fmt.Errorf("%s#%d: %w", stacktrace.GetFunctionName(pc), line, err)
 }
 
@@ -61,7 +67,10 @@ func Trace(err error) error {
 	if err == nil {
 		return nil
 	}
-	pc, _, line, _ := runtime.Caller(1)
+	pc, _, line, ok := runtime.Caller(1)
+	if !ok {
+		return fmt.Errorf("[unknown]: %w", err)
+	}
 	return fmt.Errorf("%s#%d: %w", stacktrace.GetFunctionName(pc), line, err)
 }
 
@@ -71,7 +80,10 @@ func TraceMsg(err error, message string) error {
 	if err == nil {
 		return nil
 	}
-	pc, _, line, _ := runtime.Caller(1)
+	pc, _, line, ok := runtime.Caller(1)
+	if !ok {
+		return fmt.Errorf("[unknown]: %s: %w", message, err)
+	}
 	return fmt.Errorf("%s#%d: %s: %w", stacktrace.GetFunctionName(pc), line, message, err)
 }
 
