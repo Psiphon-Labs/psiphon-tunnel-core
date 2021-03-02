@@ -203,6 +203,7 @@ const (
 	noticeIsHomepage     = 2
 	noticeClearHomepages = 4
 	noticeSyncHomepages  = 8
+	noticeSkipRedaction  = 16
 )
 
 // outputNotice encodes a notice in JSON and writes it to the output writer.
@@ -237,10 +238,21 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 			fmt.Sprintf("marshal notice failed: %s", errors.Trace(err)))
 	}
 
-	// Ensure direct server IPs are not exposed in notices. The "net" package,
-	// and possibly other 3rd party packages, will include destination addresses
-	// in I/O error messages.
-	output = StripIPAddresses(output)
+	// Skip redaction when we need to display browsing activity network addresses
+	// to users; for example, in the case of the Untunneled notice. Never log
+	// skipRedaction notices to diagnostics files (outputNoticeToRotatingFile,
+	// below). The notice writer may still be invoked for a skipRedaction notice;
+	// the writer must keep all known skipRedaction notices out of any upstream
+	// diagnostics logs.
+
+	skipRedaction := (noticeFlags&noticeSkipRedaction != 0)
+
+	if !skipRedaction {
+		// Ensure direct server IPs are not exposed in notices. The "net" package,
+		// and possibly other 3rd party packages, will include destination addresses
+		// in I/O error messages.
+		output = StripIPAddresses(output)
+	}
 
 	// Don't call StripFilePaths here, as the file path redaction can
 	// potentially match many non-path strings. Instead, StripFilePaths should
@@ -271,12 +283,15 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 			skipWriter = (noticeFlags&noticeIsDiagnostic != 0)
 		}
 
-		err := nl.outputNoticeToRotatingFile(output)
+		if !skipRedaction {
 
-		if err != nil {
-			output := makeNoticeInternalError(
-				fmt.Sprintf("write rotating file failed: %s", err))
-			nl.writer.Write(output)
+			err := nl.outputNoticeToRotatingFile(output)
+
+			if err != nil {
+				output := makeNoticeInternalError(
+					fmt.Sprintf("write rotating file failed: %s", err))
+				nl.writer.Write(output)
+			}
 		}
 	}
 
@@ -660,18 +675,10 @@ func NoticeSessionId(sessionId string) {
 //
 // Note: "address" should remain private; this notice should only be used for alerting
 // users, not for diagnostics logs.
-//
 func NoticeUntunneled(address string) {
 	singletonNoticeLogger.outputNotice(
-		"Untunneled", 0,
+		"Untunneled", noticeSkipRedaction,
 		"address", address)
-}
-
-// NoticeSplitTunnelRegion reports that split tunnel is on for the given region.
-func NoticeSplitTunnelRegion(region string) {
-	singletonNoticeLogger.outputNotice(
-		"SplitTunnelRegion", 0,
-		"region", region)
 }
 
 // NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The

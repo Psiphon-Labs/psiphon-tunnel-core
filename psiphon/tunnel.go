@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -47,23 +48,19 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
 
-// Tunneler specifies the interface required by components that use a tunnel.
-// Components which use this interface may be serviced by a single Tunnel instance,
-// or a Controller which manages a pool of tunnels, or any other object which
-// implements Tunneler.
+// Tunneler specifies the interface required by components that use tunnels.
 type Tunneler interface {
 
 	// Dial creates a tunneled connection.
 	//
-	// alwaysTunnel indicates that the connection should always be tunneled. If this
-	// is not set, the connection may be made directly, depending on split tunnel
-	// classification, when that feature is supported and active.
+	// When split tunnel mode is enabled, the connection may be untunneled,
+	// depending on GeoIP classification of the destination.
 	//
 	// downstreamConn is an optional parameter which specifies a connection to be
 	// explicitly closed when the Dialed connection is closed. For instance, this
 	// is used to close downstreamConn App<->LocalProxy connections when the related
 	// LocalProxy<->SshPortForward connections close.
-	Dial(remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error)
+	Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error)
 
 	DirectDial(remoteAddr string) (conn net.Conn, err error)
 
@@ -433,19 +430,38 @@ func (tunnel *Tunnel) SendAPIRequest(
 	return responsePayload, nil
 }
 
-// Dial establishes a port forward connection through the tunnel
-// This Dial doesn't support split tunnel, so alwaysTunnel is not referenced
-func (tunnel *Tunnel) Dial(
-	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (net.Conn, error) {
+// DialTCPChannel establishes a TCP port forward connection through the
+// tunnel.
+//
+// When split tunnel mode is enabled, and unless alwaysTunneled is set, the
+// server may reject the port forward and indicate that the client is to make
+// direct, untunneled connection. In this case, the bool return value is true
+// and net.Conn and error are nil.
+//
+// downstreamConn is an optional parameter which specifies a connection to be
+// explicitly closed when the dialed connection is closed.
+func (tunnel *Tunnel) DialTCPChannel(
+	remoteAddr string,
+	alwaysTunneled bool,
+	downstreamConn net.Conn) (net.Conn, bool, error) {
 
-	channel, err := tunnel.dialChannel("tcp", remoteAddr)
+	channelType := "direct-tcpip"
+	if alwaysTunneled && tunnel.config.EnableSplitTunnel {
+		// This channel type is only necessary in split tunnel mode.
+		channelType = protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE
+	}
+
+	channel, err := tunnel.dialChannel(channelType, remoteAddr)
 	if err != nil {
-		return nil, errors.Trace(err)
+		if isSplitTunnelRejectReason(err) {
+			return nil, true, nil
+		}
+		return nil, false, errors.Trace(err)
 	}
 
 	netConn, ok := channel.(net.Conn)
 	if !ok {
-		return nil, errors.Tracef("unexpected channel type: %T", channel)
+		return nil, false, errors.Tracef("unexpected channel type: %T", channel)
 	}
 
 	conn := &TunneledConn{
@@ -453,7 +469,7 @@ func (tunnel *Tunnel) Dial(
 		tunnel:         tunnel,
 		downstreamConn: downstreamConn}
 
-	return tunnel.wrapWithTransferStats(conn), nil
+	return tunnel.wrapWithTransferStats(conn), false, nil
 }
 
 func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
@@ -515,10 +531,16 @@ func (tunnel *Tunnel) dialChannel(channelType, remoteAddr string) (interface{}, 
 
 	go func() {
 		result := new(channelDialResult)
-		if channelType == "tcp" {
+		switch channelType {
+
+		case "direct-tcpip", protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE:
+			// The protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE is the same as
+			// "direct-tcpip", except split tunnel channel rejections are disallowed
+			// even when split tunnel mode is enabled.
 			result.channel, result.err =
-				tunnel.sshClient.Dial("tcp", remoteAddr)
-		} else {
+				tunnel.sshClient.Dial(channelType, remoteAddr)
+
+		default:
 			var sshRequests <-chan *ssh.Request
 			result.channel, sshRequests, result.err =
 				tunnel.sshClient.OpenChannel(channelType, nil)
@@ -535,15 +557,27 @@ func (tunnel *Tunnel) dialChannel(channelType, remoteAddr string) (interface{}, 
 	result := <-results
 
 	if result.err != nil {
-		// TODO: conditional on type of error or error message?
-		select {
-		case tunnel.signalPortForwardFailure <- struct{}{}:
-		default:
+		if !isSplitTunnelRejectReason(result.err) {
+			select {
+			case tunnel.signalPortForwardFailure <- struct{}{}:
+			default:
+			}
 		}
 		return nil, errors.Trace(result.err)
 	}
 
 	return result.channel, nil
+}
+
+func isSplitTunnelRejectReason(err error) bool {
+
+	var openChannelErr *ssh.OpenChannelError
+	if std_errors.As(err, &openChannelErr) {
+		return openChannelErr.Reason ==
+			ssh.RejectionReason(protocol.CHANNEL_REJECT_REASON_SPLIT_TUNNEL)
+	}
+
+	return false
 }
 
 func (tunnel *Tunnel) wrapWithTransferStats(conn net.Conn) net.Conn {

@@ -162,6 +162,14 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		}
 	}
 
+	// When split tunnel mode is enabled, indicate this to the server. When
+	// indicated, the server will perform split tunnel classifications on TCP
+	// port forwards and reject, with a distinct response, port forwards which
+	// the client should connect to directly, untunneled.
+	if serverContext.tunnel.config.EnableSplitTunnel {
+		params["split_tunnel"] = "1"
+	}
+
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
 
@@ -1086,7 +1094,12 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 		return nil, errors.Trace(err)
 	}
 
-	tunneledDialer := func(_ context.Context, _, addr string) (conn net.Conn, err error) {
+	tunneledDialer := func(_ context.Context, _, addr string) (net.Conn, error) {
+		// This case bypasses tunnel.Dial, to avoid its check that the tunnel is
+		// already active (it won't be pre-handshake). This bypass won't handle the
+		// server rejecting the port forward due to split tunnel classification, but
+		// we know that the server won't classify the web API destination as
+		// untunneled.
 		return tunnel.sshClient.Dial("tcp", addr)
 	}
 

@@ -112,7 +112,7 @@ func NewHttpProxy(
 		// downstreamConn is not set in this case, as there is not a fixed
 		// association between a downstream client connection and a particular
 		// tunnel.
-		return tunneler.Dial(addr, false, nil)
+		return tunneler.Dial(addr, nil)
 	}
 	directDialer := func(_, addr string) (conn net.Conn, err error) {
 		return tunneler.DirectDial(addr)
@@ -253,7 +253,7 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 	// Setting downstreamConn so localConn.Close() will be called when remoteConn.Close() is called.
 	// This ensures that the downstream client (e.g., web browser) doesn't keep waiting on the
 	// open connection for data which will never arrive.
-	remoteConn, err := proxy.tunneler.Dial(target, false, localConn)
+	remoteConn, err := proxy.tunneler.Dial(target, localConn)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -398,7 +398,7 @@ func (proxy *HttpProxy) makeRewriteICYClient() (*http.Client, *rewriteICYStatus)
 
 	tunneledDialer := func(_, addr string) (conn net.Conn, err error) {
 		// See comment in NewHttpProxy regarding downstreamConn
-		return proxy.tunneler.Dial(addr, false, nil)
+		return proxy.tunneler.Dial(addr, nil)
 	}
 
 	dial := func(network, address string) (net.Conn, error) {

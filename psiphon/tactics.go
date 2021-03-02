@@ -37,6 +37,9 @@ import (
 // immediately return. If no unexpired stored tactics are found, tactics
 // requests are attempted until the input context is cancelled.
 //
+// Callers may pass in a context that is already done. In this case, stored
+// tactics, when available, are applied but no request will be attempted.
+//
 // Callers are responsible for ensuring that the input context eventually
 // cancels, and should synchronize GetTactics calls to ensure no unintended
 // concurrent fetch attempts occur.
@@ -68,6 +71,11 @@ func GetTactics(ctx context.Context, config *Config) {
 		// The error will be due to a local datastore problem.
 		// While we could proceed with the tactics request, this
 		// could result in constant tactics requests. So, abort.
+		return
+	}
+
+	// If the context is already Done, don't even start the request.
+	if ctx.Err() != nil {
 		return
 	}
 

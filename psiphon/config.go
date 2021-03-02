@@ -129,6 +129,11 @@ type Config struct {
 	// in any country is selected.
 	EgressRegion string
 
+	// EnableSplitTunnel toggles split tunnel mode. When enabled, TCP port
+	// forward destinations that resolve to the same GeoIP country as the client
+	// are connected to directly, untunneled.
+	EnableSplitTunnel bool
+
 	// ListenInterface specifies which interface to listen on.  If no
 	// interface is provided then listen on 127.0.0.1. If 'any' is provided
 	// then use 0.0.0.0. If there are multiple IP addresses on an interface
@@ -348,27 +353,6 @@ type Config struct {
 	// with the same ETag. At least one DownloadURL must have
 	// OnlyAfterAttempts = 0.
 	ObfuscatedServerListRootURLs parameters.TransferURLs
-
-	// SplitTunnelRoutesURLFormat is a URL which specifies the location of a
-	// routes file to use for split tunnel mode. The URL must include a
-	// placeholder for the client region to be supplied. Split tunnel mode
-	// uses the routes file to classify port forward destinations as foreign
-	// or domestic and does not tunnel domestic destinations. Split tunnel
-	// mode is on when all the SplitTunnel parameters are supplied. This value
-	// is supplied by and depends on the Psiphon Network, and is typically
-	// embedded in the client binary.
-	SplitTunnelRoutesURLFormat string
-
-	// SplitTunnelRoutesSignaturePublicKey specifies a public key that's used
-	// to authenticate the split tunnel routes payload. This value is supplied
-	// by and depends on the Psiphon Network, and is typically embedded in the
-	// client binary.
-	SplitTunnelRoutesSignaturePublicKey string
-
-	// SplitTunnelDNSServer specifies a DNS server to use when resolving port
-	// forward target domain names to IP addresses for classification. The DNS
-	// server must support TCP requests.
-	SplitTunnelDNSServer string
 
 	// UpgradeDownloadURLs is list of URLs which specify locations from which
 	// to download a host client upgrade file, when one is available. The core
@@ -1036,15 +1020,6 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		}
 	}
 
-	if config.SplitTunnelRoutesURLFormat != "" {
-		if config.SplitTunnelRoutesSignaturePublicKey == "" {
-			return errors.TraceNew("missing SplitTunnelRoutesSignaturePublicKey")
-		}
-		if config.SplitTunnelDNSServer == "" {
-			return errors.TraceNew("missing SplitTunnelDNSServer")
-		}
-	}
-
 	if config.UpgradeDownloadURLs != nil {
 		if config.UpgradeDownloadClientVersionHeader == "" {
 			return errors.TraceNew("missing UpgradeDownloadClientVersionHeader")
@@ -1455,10 +1430,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		}
 
 	}
-
-	applyParameters[parameters.SplitTunnelRoutesURLFormat] = config.SplitTunnelRoutesURLFormat
-	applyParameters[parameters.SplitTunnelRoutesSignaturePublicKey] = config.SplitTunnelRoutesSignaturePublicKey
-	applyParameters[parameters.SplitTunnelDNSServer] = config.SplitTunnelDNSServer
 
 	if config.UpgradeDownloadURLs != nil {
 		applyParameters[parameters.UpgradeDownloadClientVersionHeader] = config.UpgradeDownloadClientVersionHeader

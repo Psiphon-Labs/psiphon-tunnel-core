@@ -251,3 +251,9 @@ message SessionStats {
     optional uint32 tcp_to_decoy = 39; // measured when establishing tcp connection to decot
 }
 
+message StationToDetector {
+    optional string phantom_ip = 1;
+    optional string client_ip = 2;
+
+    optional uint64 timeout_ns = 3;
+}
