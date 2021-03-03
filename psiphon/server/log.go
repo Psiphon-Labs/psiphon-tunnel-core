@@ -263,7 +263,10 @@ func InitLogging(config *Config) (retErr error) {
 		var logWriter io.Writer
 
 		if config.LogFilename != "" {
-			logWriter, err = rotate.NewRotatableFileWriter(config.LogFilename, 0666)
+
+			retries, create, mode := config.GetLogFileReopenConfig()
+			logWriter, err = rotate.NewRotatableFileWriter(
+				config.LogFilename, retries, create, mode)
 			if err != nil {
 				retErr = errors.Trace(err)
 				return
