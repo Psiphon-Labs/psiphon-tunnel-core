@@ -28,6 +28,7 @@ package rotate
 import (
 	"os"
 	"sync"
+	"time"
 )
 
 // RotatableFileWriter implementation that knows when the file has been rotated and re-opens it
@@ -35,8 +36,10 @@ type RotatableFileWriter struct {
 	sync.Mutex
 	file     *os.File
 	fileInfo *os.FileInfo
-	mode     os.FileMode
 	name     string
+	retries  int
+	create   bool
+	mode     os.FileMode
 }
 
 // Close closes the underlying file
@@ -56,7 +59,12 @@ func (f *RotatableFileWriter) reopen() error {
 		f.fileInfo = nil
 	}
 
-	reopened, err := os.OpenFile(f.name, os.O_WRONLY|os.O_APPEND|os.O_CREATE, f.mode)
+	flags := os.O_WRONLY | os.O_APPEND
+	if f.create {
+		flags |= os.O_CREATE
+	}
+
+	reopened, err := os.OpenFile(f.name, flags, f.mode)
 	if err != nil {
 		return err
 	}
@@ -73,10 +81,22 @@ func (f *RotatableFileWriter) reopen() error {
 	return nil
 }
 
+func (f *RotatableFileWriter) reopenWithRetries() error {
+	var err error
+	for i := 0; i <= f.retries; i++ {
+		err = f.reopen()
+		if err == nil {
+			break
+		}
+		time.Sleep(1 * time.Millisecond)
+	}
+	return err
+}
+
 // Reopen provides the concurrency safe implementation of re-opening the file, and updating the struct's fileInfo
 func (f *RotatableFileWriter) Reopen() error {
 	f.Lock()
-	err := f.reopen()
+	err := f.reopenWithRetries()
 	f.Unlock()
 
 	return err
@@ -92,7 +112,7 @@ func (f *RotatableFileWriter) Write(p []byte) (int, error) {
 	// could be left nil, causing subsequent writes to panic. This will attempt
 	// to re-open the file handle prior to writing in that case
 	if f.file == nil || f.fileInfo == nil {
-		err := f.reopen()
+		err := f.reopenWithRetries()
 		if err != nil {
 			return 0, err
 		}
@@ -100,7 +120,7 @@ func (f *RotatableFileWriter) Write(p []byte) (int, error) {
 
 	currentFileInfo, err := os.Stat(f.name)
 	if err != nil || !os.SameFile(*f.fileInfo, currentFileInfo) {
-		err := f.reopen()
+		err := f.reopenWithRetries()
 		if err != nil {
 			return 0, err
 		}
@@ -110,7 +130,7 @@ func (f *RotatableFileWriter) Write(p []byte) (int, error) {
 
 	// If the write fails with nothing written, attempt to re-open the file and retry the write
 	if bytesWritten == 0 && err != nil {
-		err = f.reopen()
+		err = f.reopenWithRetries()
 		if err != nil {
 			return 0, err
 		}
@@ -121,16 +141,39 @@ func (f *RotatableFileWriter) Write(p []byte) (int, error) {
 	return bytesWritten, err
 }
 
-// NewRotatableFileWriter opens a file for appending and writing that can be safely rotated
-func NewRotatableFileWriter(name string, mode os.FileMode) (*RotatableFileWriter, error) {
-	rotatableFileWriter := RotatableFileWriter{
-		file:     nil,
-		name:     name,
-		mode:     mode,
-		fileInfo: nil,
+// NewRotatableFileWriter opens a file for appending and writing that can be
+// safely rotated.
+//
+// If retries is greater than 0, RotatableFileWriter will make that number of
+// additional attempts to reopen a rotated file after a file open failure,
+// following a 1ms delay. This option can mitigate race conditions that may
+// occur when RotatableFileWriter reopens the file while an underlying file
+// manager, such as logrotate, is recreating the file and setting its
+// properties.
+//
+// When create is true, RotatableFileWriter will attempt to create the file
+// (using mode), if it does not exist, when reopening the file. Set create to
+// false to avoid conflicts with an underlying file manager, such as
+// logrotate. logrotate, unless configured with nocreate, creates files with
+// O_EXCL and re-rotates/retries if another process has created the file.
+func NewRotatableFileWriter(
+	name string,
+	retries int,
+	create bool,
+	mode os.FileMode) (*RotatableFileWriter, error) {
+
+	if retries < 0 {
+		retries = 0
 	}
 
-	err := rotatableFileWriter.reopen()
+	rotatableFileWriter := RotatableFileWriter{
+		name:    name,
+		retries: retries,
+		create:  create,
+		mode:    mode,
+	}
+
+	err := rotatableFileWriter.reopenWithRetries()
 	if err != nil {
 		return nil, err
 	}
