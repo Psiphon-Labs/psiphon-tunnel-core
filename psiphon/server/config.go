@@ -29,6 +29,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -60,6 +61,7 @@ const (
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH                      = 32
 	PERIODIC_GARBAGE_COLLECTION                         = 120 * time.Second
 	STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD = 20
+	DEFAULT_LOG_FILE_REOPEN_RETRIES                     = 10
 )
 
 // Config specifies the configuration and behavior of a Psiphon
@@ -73,6 +75,22 @@ type Config struct {
 	// LogFilename specifies the path of the file to log
 	// to. When blank, logs are written to stderr.
 	LogFilename string
+
+	// LogFileReopenRetries specifies how many retries, each with a 1ms delay,
+	// will be attempted after reopening a rotated log file fails. Retries
+	// mitigate any race conditions between writes/reopens and file operations
+	// performed by external log managers, such as logrotate.
+	//
+	// When omitted, DEFAULT_LOG_FILE_REOPEN_RETRIES is used.
+	LogFileReopenRetries *int
+
+	// LogFileCreateMode specifies that the Psiphon server should create a new
+	// log file when one is not found, such as after rotation with logrotate
+	// configured with nocreate. The value is the os.FileMode value to use when
+	// creating the file.
+	//
+	// When omitted, the Psiphon server does not create log files.
+	LogFileCreateMode *int
 
 	// SkipPanickingLogWriter disables panicking when
 	// unable to write any logs.
@@ -402,6 +420,34 @@ type Config struct {
 	periodicGarbageCollection                      time.Duration
 	stopEstablishTunnelsEstablishedClientThreshold int
 	dumpProfilesOnStopEstablishTunnelsDone         int32
+}
+
+// GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
+// rotate.NewRotatableFileWriter, which is used when writing to log files.
+//
+// By default, we expect the log files to be managed by logrotate, with
+// logrotate configured to re-create the next log file after rotation. As
+// described in the documentation for rotate.NewRotatableFileWriter, and as
+// observed in production, we occasionally need retries when attempting to
+// reopen the log file post-rotation; and we avoid conflicts, and spurious
+// re-rotations, by disabling file create in rotate.NewRotatableFileWriter. In
+// large scale production, incidents requiring retry are very rare, so the
+// retry delay is not expected to have a significant impact on performance.
+//
+// The defaults may be overriden in the Config.
+func (config *Config) GetLogFileReopenConfig() (int, bool, os.FileMode) {
+
+	retries := DEFAULT_LOG_FILE_REOPEN_RETRIES
+	if config.LogFileReopenRetries != nil {
+		retries = *config.LogFileReopenRetries
+	}
+	create := false
+	mode := os.FileMode(0)
+	if config.LogFileCreateMode != nil {
+		create = true
+		mode = os.FileMode(*config.LogFileCreateMode)
+	}
+	return retries, create, mode
 }
 
 // RunWebServer indicates whether to run a web server component.
@@ -778,9 +824,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		logLevel = "info"
 	}
 
+	// For testing, set the Psiphon server to create its log files; we do not
+	// expect tests to necessarily run under log managers, such as logrotate.
+	createMode := 0666
+
 	config := &Config{
 		LogLevel:                       logLevel,
 		LogFilename:                    params.LogFilename,
+		LogFileCreateMode:              &createMode,
 		SkipPanickingLogWriter:         params.SkipPanickingLogWriter,
 		GeoIPDatabaseFilenames:         nil,
 		HostID:                         "example-host-id",

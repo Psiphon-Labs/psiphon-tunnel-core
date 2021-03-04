@@ -301,7 +301,10 @@ func panicHandler(output string) {
 		// Logs are written to the configured file name. If no name is specified, logs are written to stderr
 		var jsonWriter io.Writer
 		if config.LogFilename != "" {
-			panicLog, err := rotate.NewRotatableFileWriter(config.LogFilename, 0666)
+
+			retries, create, mode := config.GetLogFileReopenConfig()
+			panicLog, err := rotate.NewRotatableFileWriter(
+				config.LogFilename, retries, create, mode)
 			if err != nil {
 				fmt.Printf("unable to set panic log output: %s\n%s\n", err, output)
 				os.Exit(1)
