@@ -21,11 +21,24 @@ package psiphon
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io/ioutil"
+	"math/big"
 	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,6 +49,292 @@ import (
 	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/refraction-networking/utls"
 )
+
+func TestTLSCertificateVerification(t *testing.T) {
+
+	testDataDirName, err := ioutil.TempDir("", "psiphon-tls-certificate-verification-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %s\n", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	// Generate a root CA certificate.
+
+	rootCACertificate := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"test"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().AddDate(1, 0, 0),
+		IsCA:                  true,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+
+	rootCAPrivateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey failed: %s", err)
+	}
+
+	rootCACertificateBytes, err := x509.CreateCertificate(
+		rand.Reader,
+		rootCACertificate,
+		rootCACertificate,
+		&rootCAPrivateKey.PublicKey,
+		rootCAPrivateKey)
+	if err != nil {
+		t.Fatalf("x509.CreateCertificate failed: %s", err)
+	}
+
+	pemRootCACertificate := pem.EncodeToMemory(
+		&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: rootCACertificateBytes,
+		})
+
+	// Generate a server certificate.
+
+	serverName := "example.org"
+
+	serverCertificate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject: pkix.Name{
+			Organization: []string{"test"},
+		},
+		DNSNames:    []string{serverName},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().AddDate(1, 0, 0),
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+	}
+
+	serverPrivateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey failed: %s", err)
+	}
+
+	serverCertificateBytes, err := x509.CreateCertificate(
+		rand.Reader,
+		serverCertificate,
+		rootCACertificate,
+		&serverPrivateKey.PublicKey,
+		rootCAPrivateKey)
+	if err != nil {
+		t.Fatalf("x509.CreateCertificate failed: %s", err)
+	}
+
+	pemServerCertificate := pem.EncodeToMemory(
+		&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: serverCertificateBytes,
+		})
+
+	pemServerPrivateKey := pem.EncodeToMemory(
+		&pem.Block{
+			Type:  "RSA PRIVATE KEY",
+			Bytes: x509.MarshalPKCS1PrivateKey(serverPrivateKey),
+		})
+
+	// Run an HTTPS server with the server certificate.
+
+	dialAddr := "127.0.0.1:8000"
+	serverAddr := fmt.Sprintf("%s:8000", serverName)
+
+	serverKeyPair, err := tls.X509KeyPair(
+		pemServerCertificate, pemServerPrivateKey)
+	if err != nil {
+		t.Fatalf("tls.X509KeyPair failed: %s", err)
+	}
+
+	server := &http.Server{
+		Addr: dialAddr,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{serverKeyPair},
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		server.ListenAndServeTLS("", "")
+	}()
+
+	defer func() {
+		server.Shutdown(context.Background())
+		wg.Wait()
+	}()
+
+	// Test: without custom RootCAs, the TLS dial fails.
+
+	params, err := parameters.NewParameters(nil)
+	if err != nil {
+		t.Fatalf("parameters.NewParameters failed: %s", err)
+	}
+
+	dialer := func(ctx context.Context, network, address string) (net.Conn, error) {
+		d := &net.Dialer{}
+		// Ignore the address input, which will be serverAddr, and dial dialAddr, as
+		// if the serverName in serverAddr had been resolved to "127.0.0.1".
+		return d.DialContext(ctx, network, dialAddr)
+	}
+
+	conn, err := CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters: params,
+			Dial:       dialer,
+		})
+
+	if err == nil {
+		conn.Close()
+		t.Errorf("unexpected success without custom RootCAs")
+	}
+
+	// Test: without custom RootCAs and with SkipVerify, the TLS dial succeeds.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters: params,
+			Dial:       dialer,
+			SkipVerify: true,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %s", err)
+	} else {
+		conn.Close()
+	}
+
+	// Test: with custom RootCAs, the TLS dial succeeds.
+
+	rootCAsFileName := filepath.Join(testDataDirName, "RootCAs.pem")
+	err = ioutil.WriteFile(rootCAsFileName, pemRootCACertificate, 0600)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %s", err)
+	}
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			TrustedCACertificatesFilename: rootCAsFileName,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %s", err)
+	} else {
+		conn.Close()
+	}
+
+	// Test: with SNI changed and VerifyServerName set, the TLS dial succeeds.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			SNIServerName:                 "not-" + serverName,
+			VerifyServerName:              serverName,
+			TrustedCACertificatesFilename: rootCAsFileName,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %s", err)
+	} else {
+		conn.Close()
+	}
+
+	// Test: with an invalid pin, the TLS dial fails.
+
+	invalidPin := base64.StdEncoding.EncodeToString(make([]byte, 32))
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			VerifyPins:                    []string{invalidPin},
+			TrustedCACertificatesFilename: rootCAsFileName,
+		})
+
+	if err == nil {
+		conn.Close()
+		t.Errorf("unexpected success without invalid pin")
+	}
+
+	// Test: with the root CA certirficate pinned, the TLS dial succeeds.
+
+	parsedCertificate, err := x509.ParseCertificate(rootCACertificateBytes)
+	if err != nil {
+		t.Fatalf("x509.ParseCertificate failed: %s", err)
+	}
+	publicKeyDigest := sha256.Sum256(parsedCertificate.RawSubjectPublicKeyInfo)
+	rootCACertificatePin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			VerifyPins:                    []string{rootCACertificatePin},
+			TrustedCACertificatesFilename: rootCAsFileName,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %s", err)
+	} else {
+		conn.Close()
+	}
+
+	// Test: with the server certificate pinned, the TLS dial succeeds.
+
+	parsedCertificate, err = x509.ParseCertificate(serverCertificateBytes)
+	if err != nil {
+		t.Fatalf("x509.ParseCertificate failed: %s", err)
+	}
+	publicKeyDigest = sha256.Sum256(parsedCertificate.RawSubjectPublicKeyInfo)
+	serverCertificatePin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			VerifyPins:                    []string{serverCertificatePin},
+			TrustedCACertificatesFilename: rootCAsFileName,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %s", err)
+	} else {
+		conn.Close()
+	}
+
+	// Test: with SNI changed, VerifyServerName set, and pinning the TLS dial
+	// succeeds.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			SNIServerName:                 "not-" + serverName,
+			VerifyServerName:              serverName,
+			VerifyPins:                    []string{rootCACertificatePin},
+			TrustedCACertificatesFilename: rootCAsFileName,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %s", err)
+	} else {
+		conn.Close()
+	}
+}
 
 func TestTLSDialerCompatibility(t *testing.T) {
 
