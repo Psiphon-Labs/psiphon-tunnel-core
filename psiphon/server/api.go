@@ -446,15 +446,6 @@ func connectedAPIRequestHandler(
 				uniqueUserParams))
 	}
 
-	// TODO: retire the legacy "connected" log event
-	log.LogRawFieldsWithTimestamp(
-		getRequestLogFields(
-			"connected",
-			geoIPData,
-			authorizedAccessTypes,
-			params,
-			connectedRequestParams))
-
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
 	connectedResponse := protocol.ConnectedResponse{
@@ -812,10 +803,9 @@ var baseParams = []requestParamSpec{
 	{"sponsor_id", isHexDigits, 0},
 	{"client_version", isIntString, requestParamLogStringAsInt},
 	{"client_platform", isClientPlatform, 0},
+	{"client_features", isAnyString, requestParamOptional | requestParamArray},
 	{"client_build_rev", isHexDigits, requestParamOptional},
-	{"tunnel_whole_device", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"device_region", isAnyString, requestParamOptional},
-	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 // baseSessionParams adds to baseParams the required session_id parameter. For
@@ -870,6 +860,7 @@ var baseDialParams = []requestParamSpec{
 	{"client_bpf", isAnyString, requestParamOptional},
 	{"network_type", isAnyString, requestParamOptional},
 	{"conjure_transport", isAnyString, requestParamOptional},
+	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.

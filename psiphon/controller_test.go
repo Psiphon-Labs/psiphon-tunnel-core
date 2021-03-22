@@ -1029,7 +1029,7 @@ func fetchAndVerifyWebsite(t *testing.T, httpProxyPort int) error {
 
 const disruptorProxyAddress = "127.0.0.1:2160"
 const disruptorProxyURL = "socks4a://" + disruptorProxyAddress
-const disruptorMaxConnectionBytes = 250000
+const disruptorMaxConnectionBytes = 150000
 const disruptorMaxConnectionTime = 10 * time.Second
 
 func initDisruptor() {

@@ -107,7 +107,6 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
    - `FetchRoutesTimeoutSeconds`
    - `HttpProxyOriginServerTimeoutSeconds`
  - Fields which should only be set by Psiphon proper:
-   - `TunnelWholeDevice`
    - `LocalHttpProxyPort`
    - `LocalSocksProxyPort`
  @endcode

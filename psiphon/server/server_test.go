@@ -657,6 +657,7 @@ var (
 	testUserAgents          = []string{"ua1", "ua2", "ua3"}
 	testNetworkType         = "WIFI"
 	testCustomHostNameRegex = `[a-z0-9]{5,10}\.example\.org`
+	testClientFeatures      = []string{"feature 1", "feature 2"}
 )
 
 var serverRuns = 0
@@ -964,13 +965,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		jsonLimitTLSProfiles = fmt.Sprintf(`,"LimitTLSProfiles" : ["%s"]`, runConfig.tlsProfile)
 	}
 
+	testClientFeaturesJSON, _ := json.Marshal(testClientFeatures)
+
 	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Android_10_com.test.app",
         "ClientVersion" : "0",
+        "ClientFeatures" : %s,
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
-        "TunnelWholeDevice" : 1,
         "DeviceRegion" : "US",
         "DisableRemoteServerListFetcher" : true,
         "EstablishTunnelPausePeriodSeconds" : 1,
@@ -978,7 +981,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "LimitTunnelProtocols" : ["%s"]
         %s
         %s
-    }`, numTunnels, runConfig.tunnelProtocol, jsonLimitTLSProfiles, jsonNetworkID)
+    }`,
+		string(testClientFeaturesJSON),
+		numTunnels,
+		runConfig.tunnelProtocol,
+		jsonLimitTLSProfiles,
+		jsonNetworkID)
 
 	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
 	if err != nil {
@@ -1405,8 +1413,8 @@ func checkExpectedServerTunnelLogFields(
 		"propagation_channel_id",
 		"sponsor_id",
 		"client_platform",
+		"client_features",
 		"relay_protocol",
-		"tunnel_whole_device",
 		"device_region",
 		"ssh_client_version",
 		"server_entry_region",
@@ -1431,6 +1439,25 @@ func checkExpectedServerTunnelLogFields(
 
 	if !common.Contains(testSSHClientVersions, fields["ssh_client_version"].(string)) {
 		return fmt.Errorf("unexpected relay_protocol '%s'", fields["ssh_client_version"])
+	}
+
+	clientFeatures := fields["client_features"].([]interface{})
+	if len(clientFeatures) != len(testClientFeatures) {
+		return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
+	}
+	for i, feature := range testClientFeatures {
+		if clientFeatures[i].(string) != feature {
+			return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
+		}
+	}
+
+	if runConfig.doSplitTunnel {
+		if fields["split_tunnel"] == nil {
+			return fmt.Errorf("missing expected field 'split_tunnel'")
+		}
+		if fields["split_tunnel"].(bool) != true {
+			return fmt.Errorf("missing split_tunnel value")
+		}
 	}
 
 	if protocol.TunnelProtocolUsesObfuscatedSSH(runConfig.tunnelProtocol) {
@@ -1625,7 +1652,6 @@ func checkExpectedUniqueUserLogFields(
 		"propagation_channel_id",
 		"sponsor_id",
 		"client_platform",
-		"tunnel_whole_device",
 		"device_region",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
