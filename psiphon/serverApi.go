@@ -879,8 +879,8 @@ func getBaseAPIParameters(
 	params["sponsor_id"] = config.GetSponsorID()
 	params["client_version"] = config.ClientVersion
 	params["client_platform"] = config.ClientPlatform
+	params["client_features"] = config.clientFeatures
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
-	params["tunnel_whole_device"] = strconv.Itoa(config.TunnelWholeDevice)
 
 	// Blank parameters must be omitted.
 

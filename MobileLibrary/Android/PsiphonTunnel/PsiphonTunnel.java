@@ -850,11 +850,6 @@ public class PsiphonTunnel {
             json.put("EstablishTunnelTimeoutSeconds", 0);
         }
 
-        // This parameter is for stats reporting
-        if (!json.has("TunnelWholeDevice")) {
-            json.put("TunnelWholeDevice", isVpnMode ? 1 : 0);
-        }
-
         json.put("EmitBytesTransferred", true);
 
         if (localSocksProxyPort != 0 && (!json.has("LocalSocksProxyPort") || json.getInt("LocalSocksProxyPort") == 0)) {
