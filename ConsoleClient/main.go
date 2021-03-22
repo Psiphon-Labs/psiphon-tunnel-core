@@ -395,7 +395,7 @@ func (w *TunnelWorker) Init(ctx context.Context, config *psiphon.Config) error {
 		go func() {
 			defer w.embeddedServerListWaitGroup.Done()
 
-			err = psiphon.ImportEmbeddedServerEntries(
+			err := psiphon.ImportEmbeddedServerEntries(
 				ctx,
 				config,
 				w.embeddedServerEntryListFilename,

@@ -119,10 +119,10 @@ type Config struct {
 	// the client reports to the server.
 	ClientPlatform string
 
-	// TunnelWholeDevice is a flag that is passed through to the handshake
-	// request for stats purposes. Set to 1 when the host application is
-	// tunneling the whole device, 0 otherwise.
-	TunnelWholeDevice int
+	// ClientFeatures is a list of feature names denoting enabled application
+	// features. Clients report enabled features to the server for stats
+	// purposes.
+	ClientFeatures []string
 
 	// EgressRegion is a ISO 3166-1 alpha-2 country code which indicates which
 	// country to egress from. For the default, "", the best performing server
@@ -257,36 +257,29 @@ type Config struct {
 	// NetworkConnectivityChecker is an interface that enables tunnel-core to
 	// call into the host application to check for network connectivity. See:
 	// NetworkConnectivityChecker doc.
-	//
-	// This parameter is only applicable to library deployments.
 	NetworkConnectivityChecker NetworkConnectivityChecker
 
 	// DeviceBinder is an interface that enables tunnel-core to call into the
 	// host application to bind sockets to specific devices. See: DeviceBinder
 	// doc.
 	//
-	// This parameter is only applicable to library deployments.
+	// When DeviceBinder is set, the "VPN" feature name is automatically added
+	// when reporting ClientFeatures.
 	DeviceBinder DeviceBinder
 
 	// IPv6Synthesizer is an interface that allows tunnel-core to call into
 	// the host application to synthesize IPv6 addresses. See: IPv6Synthesizer
 	// doc.
-	//
-	// This parameter is only applicable to library deployments.
 	IPv6Synthesizer IPv6Synthesizer
 
 	// DnsServerGetter is an interface that enables tunnel-core to call into
 	// the host application to discover the native network DNS server
 	// settings. See: DnsServerGetter doc.
-	//
-	// This parameter is only applicable to library deployments.
 	DnsServerGetter DnsServerGetter
 
 	// NetworkIDGetter in an interface that enables tunnel-core to call into
 	// the host application to get an identifier for the host's current active
 	// network. See: NetworkIDGetter doc.
-	//
-	// This parameter is only applicable to library deployments.
 	NetworkIDGetter NetworkIDGetter
 
 	// NetworkID, when not blank, is used as the identifier for the host's
@@ -741,6 +734,8 @@ type Config struct {
 	deviceBinder    DeviceBinder
 	networkIDGetter NetworkIDGetter
 
+	clientFeatures []string
+
 	committed bool
 
 	loadTimestamp string
@@ -1112,6 +1107,16 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	}
 
 	config.networkIDGetter = newLoggingNetworkIDGetter(networkIDGetter)
+
+	// Initialize config.clientFeatures, which adds feature names on top of
+	// those specified by the host application in config.ClientFeatures.
+
+	config.clientFeatures = config.ClientFeatures
+
+	feature := "VPN"
+	if config.DeviceBinder != nil && !common.Contains(config.clientFeatures, feature) {
+		config.clientFeatures = append(config.clientFeatures, feature)
+	}
 
 	// Migrate from old config fields. This results in files being moved under
 	// a config specified data root directory.

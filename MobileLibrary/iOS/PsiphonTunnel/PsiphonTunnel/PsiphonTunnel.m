@@ -779,10 +779,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     //
 
     // We'll record our state about what mode we're in.
-    *tunnelWholeDevice = ([config[@"TunnelWholeDevice"] integerValue] == 1);
+    *tunnelWholeDevice = (config[@"PacketTunnelTunFileDescriptor"] != nil);
 
     // Other optional fields not being altered. If not set, their defaults will be used:
-    // * TunnelWholeDevice
     // * LocalSocksProxyPort
     // * LocalHttpProxyPort
     // * UpstreamProxyUrl
