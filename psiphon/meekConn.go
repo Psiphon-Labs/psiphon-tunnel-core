@@ -49,19 +49,25 @@ import (
 	"golang.org/x/crypto/nacl/box"
 )
 
-// MeekConn is based on meek-client.go from Tor and Psiphon:
+// MeekConn is based on meek-client.go from Tor:
 //
 // https://gitweb.torproject.org/pluggable-transports/meek.git/blob/HEAD:/meek-client/meek-client.go
 // CC0 1.0 Universal
-//
-// https://bitbucket.org/psiphon/psiphon-circumvention-system/src/default/go/meek-client/meek-client.go
 
 const (
 	MEEK_PROTOCOL_VERSION           = 3
 	MEEK_MAX_REQUEST_PAYLOAD_LENGTH = 65536
 )
 
-// MeekConfig specifies the behavior of a MeekConn
+type MeekMode int
+
+const (
+	MeekModeRelay = iota
+	MeekModeObfuscatedRoundTrip
+	MeekModePlaintextRoundTrip
+)
+
+// MeekConfig specifies the behavior of a MeekConn.
 type MeekConfig struct {
 
 	// DiagnosticID is the server ID to record in any diagnostics notices.
@@ -70,6 +76,32 @@ type MeekConfig struct {
 	// Parameters is the active set of parameters.Parameters to use
 	// for the meek dial.
 	Parameters *parameters.Parameters
+
+	// Mode selects the mode of operation:
+	//
+	// MeekModeRelay: encapsulates net.Conn flows in HTTP requests and responses;
+	// secures and obfuscates metadata in an encrypted HTTP cookie, making it
+	// suitable for non-TLS HTTP and HTTPS with unverifed server certificates;
+	// the caller is responsible for securing and obfuscating the net.Conn flows;
+	// the origin server should be a meek server; used for the meek tunnel
+	// protocols.
+	//
+	// MeekModeObfuscatedRoundTrip: enables ObfuscatedRoundTrip, which performs
+	// HTTP round trips; secures and obfuscates metadata, including the end point
+	// (or path), in an encrypted HTTP cookie, making it suitable for non-TLS
+	// HTTP and HTTPS with unverifed server certificates; the caller is
+	// responsible for securing and obfuscating request/response payloads; the
+	// origin server should be a meek server; used for tactics requests.
+	//
+	// MeekModePlaintextRoundTrip: enables RoundTrip; the MeekConn is an
+	// http.RoundTripper; there are no security or obfuscation measures at the
+	// HTTP level; TLS and server certificate verification is required; the
+	// origin server may be any HTTP(S) server.
+	//
+	// As with the other modes, MeekModePlaintextRoundTrip supports HTTP/2 with
+	// utls, and integration with DialParameters for replay -- which are not
+	// otherwise implemented if using just CustomTLSDialer and net.http.
+	Mode MeekMode
 
 	// DialAddress is the actual network address to dial to establish a
 	// connection to the meek server. This may be either a fronted or
@@ -84,7 +116,6 @@ type MeekConfig struct {
 	QUICVersion string
 
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
-	// Ignored when UseQUIC is true.
 	UseHTTPS bool
 
 	// TLSProfile specifies the value for CustomTLSConfig.TLSProfile for all
@@ -101,12 +132,13 @@ type MeekConfig struct {
 	// connections created by this meek connection.
 	RandomizedTLSProfileSeed *prng.Seed
 
-	// UseObfuscatedSessionTickets indicates whether to use obfuscated
-	// session tickets. Assumes UseHTTPS is true.
+	// UseObfuscatedSessionTickets indicates whether to use obfuscated session
+	// tickets. Assumes UseHTTPS is true. Ignored for MeekModePlaintextRoundTrip.
+	//
 	UseObfuscatedSessionTickets bool
 
-	// SNIServerName is the value to place in the TLS/QUIC SNI server_name
-	// field when HTTPS or QUIC is used.
+	// SNIServerName is the value to place in the TLS/QUIC SNI server_name field
+	// when HTTPS or QUIC is used.
 	SNIServerName string
 
 	// HostHeader is the value to place in the HTTP request Host header.
@@ -116,46 +148,54 @@ type MeekConfig struct {
 	// in effect. This value is used for stats reporting.
 	TransformedHostName bool
 
-	// ClientTunnelProtocol is the protocol the client is using. It's
-	// included in the meek cookie for optional use by the server, in
-	// cases where the server cannot unambiguously determine the
-	// tunnel protocol.
-	// ClientTunnelProtocol is used when selecting tactics targeted at
-	// specific protocols.
-	ClientTunnelProtocol string
+	// VerifyServerName specifies a domain name that must appear in the server
+	// certificate. When blank, server certificate verification is disabled.
+	VerifyServerName string
 
-	// RoundTripperOnly sets the MeekConn to operate in round tripper
-	// mode, which is used for untunneled tactics requests. In this
-	// mode, a connection is established to the meek server as usual,
-	// but instead of relaying tunnel traffic, the RoundTrip function
-	// may be used to make requests. In this mode, no relay resources
-	// incuding buffers are allocated.
-	RoundTripperOnly bool
+	// VerifyPins specifies one or more certificate pin values, one of which must
+	// appear in the verified server certificate chain. A pin value is the
+	// base64-encoded SHA2 digest of a certificate's public key. When specified,
+	// at least one pin must match at least one certificate in the chain, at any
+	// position; e.g., the root CA may be pinned, or the server certificate,
+	// etc.
+	VerifyPins []string
+
+	// ClientTunnelProtocol is the protocol the client is using. It's included in
+	// the meek cookie for optional use by the server, in cases where the server
+	// cannot unambiguously determine the tunnel protocol. ClientTunnelProtocol
+	// is used when selecting tactics targeted at specific protocols. Ignored for
+	// MeekModePlaintextRoundTrip.
+	ClientTunnelProtocol string
 
 	// NetworkLatencyMultiplier specifies a custom network latency multiplier to
 	// apply to client parameters used by this meek connection.
 	NetworkLatencyMultiplier float64
 
 	// The following values are used to create the obfuscated meek cookie.
+	// Ignored for MeekModePlaintextRoundTrip.
 
 	MeekCookieEncryptionPublicKey string
 	MeekObfuscatedKey             string
 	MeekObfuscatorPaddingSeed     *prng.Seed
 }
 
-// MeekConn is a network connection that tunnels TCP over HTTP and supports "fronting". Meek sends
-// client->server flow in HTTP request bodies and receives server->client flow in HTTP response bodies.
-// Polling is used to achieve full duplex TCP.
+// MeekConn is a network connection that tunnels net.Conn flows over HTTP and supports
+// "domain fronting". Meek sends client->server flow in HTTP request bodies and
+// receives server->client flow in HTTP response bodies. Polling is used to
+// approximate full duplex TCP. MeekConn also offers HTTP round trip modes.
 //
-// Fronting is an obfuscation technique in which the connection
-// to a web server, typically a CDN, is indistinguishable from any other HTTPS connection to the generic
-// "fronting domain" -- the HTTP Host header is used to route the requests to the actual destination.
-// See https://trac.torproject.org/projects/tor/wiki/doc/meek for more details.
+// Domain fronting is a network obfuscation technique in which the connection to a web
+// server, typically a CDN, is indistinguishable from any other HTTPS
+// connection to the generic "fronting domain" -- the HTTP Host header is used
+// to route the requests to the actual destination. See
+// https://trac.torproject.org/projects/tor/wiki/doc/meek for more details.
 //
-// MeekConn also operates in unfronted mode, in which plain HTTP connections are made without routing
-// through a CDN.
+// MeekConn also support unfronted operation, in which connections are made
+// without routing through a CDN; and plain HTTP operation, without TLS or
+// QUIC, with connection metadata obfuscated in HTTP cookies.
 type MeekConn struct {
 	params                    *parameters.Parameters
+	mode                      MeekMode
 	networkLatencyMultiplier  float64
 	isQUIC                    bool
 	url                       *url.URL
@@ -173,14 +213,13 @@ type MeekConn struct {
 	stopRunning               context.CancelFunc
 	relayWaitGroup            *sync.WaitGroup
 
-	// For round tripper mode
-	roundTripperOnly              bool
+	// For MeekModeObfuscatedRoundTrip
 	meekCookieEncryptionPublicKey string
 	meekObfuscatedKey             string
 	meekObfuscatorPaddingSeed     *prng.Seed
 	clientTunnelProtocol          string
 
-	// For relay mode
+	// For MeekModeRelay
 	fullReceiveBufferLength int
 	readPayloadChunkLength  int
 	emptyReceiveBuffer      chan *bytes.Buffer
@@ -203,15 +242,38 @@ type transporter interface {
 
 // DialMeek returns an initialized meek connection. A meek connection is
 // an HTTP session which does not depend on an underlying socket connection (although
-// persistent HTTP connections are used for performance). This function does not
-// wait for the connection to be "established" before returning. A goroutine
-// is spawned which will eventually start HTTP polling.
-// When frontingAddress is not "", fronting is used. This option assumes caller has
-// already checked server entry capabilities.
+// persistent HTTP connections are used for performance). This function may not
+// wait for the connection to be established before returning.
 func DialMeek(
 	ctx context.Context,
 	meekConfig *MeekConfig,
-	dialConfig *DialConfig) (meek *MeekConn, err error) {
+	dialConfig *DialConfig) (*MeekConn, error) {
+
+	if meekConfig.UseQUIC && meekConfig.UseHTTPS {
+		return nil, errors.TraceNew(
+			"invalid config: only one of UseQUIC or UseHTTPS may be set")
+	}
+
+	if meekConfig.UseQUIC &&
+		(meekConfig.VerifyServerName != "" || len(meekConfig.VerifyPins) > 0) {
+
+		// TODO: UseQUIC VerifyServerName and VerifyPins support (required for MeekModePlaintextRoundTrip).
+
+		return nil, errors.TraceNew(
+			"invalid config: VerifyServerName and VerifyPins not supported for UseQUIC")
+	}
+
+	skipVerify := meekConfig.VerifyServerName == ""
+	if len(meekConfig.VerifyPins) > 0 && skipVerify {
+		return nil, errors.TraceNew(
+			"invalid config: VerifyServerName must be set when VerifyPins is set")
+	}
+
+	if meekConfig.Mode == MeekModePlaintextRoundTrip &&
+		(!meekConfig.UseHTTPS || skipVerify) {
+		return nil, errors.TraceNew(
+			"invalid config: MeekModePlaintextRoundTrip requires UseHTTPS and VerifyServerName")
+	}
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
@@ -229,18 +291,18 @@ func DialMeek(
 		}
 	}()
 
-	meek = &MeekConn{
+	meek := &MeekConn{
 		params:                   meekConfig.Parameters,
+		mode:                     meekConfig.Mode,
 		networkLatencyMultiplier: meekConfig.NetworkLatencyMultiplier,
 		isClosed:                 false,
 		runCtx:                   runCtx,
 		stopRunning:              stopRunning,
 		relayWaitGroup:           new(sync.WaitGroup),
-		roundTripperOnly:         meekConfig.RoundTripperOnly,
 	}
 
-	if !meek.roundTripperOnly {
-
+	if meek.mode == MeekModeRelay {
+		var err error
 		meek.cookie,
 			meek.tlsPadding,
 			meek.limitRequestPayloadLength,
@@ -256,6 +318,9 @@ func DialMeek(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+
+		// For stats, record the size of the initial obfuscated cookie.
+		meek.cookieSize = len(meek.cookie.Name) + len(meek.cookie.Value)
 	}
 
 	// Configure transport: QUIC or HTTPS or HTTP
@@ -306,7 +371,7 @@ func DialMeek(
 		//
 		//  1. ignores the HTTP request address and uses the fronting domain
 		//  2. optionally disables SNI -- SNI breaks fronting when used with certain CDNs.
-		//  3. skips verifying the server cert.
+		//  3. may skip verifying the server cert.
 		//
 		// Reasoning for #3:
 		//
@@ -342,7 +407,9 @@ func DialMeek(
 			DialAddr:                      meekConfig.DialAddress,
 			Dial:                          NewTCPDialer(dialConfig),
 			SNIServerName:                 meekConfig.SNIServerName,
-			SkipVerify:                    true,
+			SkipVerify:                    skipVerify,
+			VerifyServerName:              meekConfig.VerifyServerName,
+			VerifyPins:                    meekConfig.VerifyPins,
 			TLSProfile:                    meekConfig.TLSProfile,
 			NoDefaultTLSSessionID:         &meekConfig.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,
@@ -355,17 +422,21 @@ func DialMeek(
 			tlsConfig.ObfuscatedSessionTicketKey = meekConfig.MeekObfuscatedKey
 		}
 
-		// As the passthrough message is unique and indistinguisbale from a normal
-		// TLS client random value, we set it unconditionally and not just for
-		// protocols which may support passthrough (even for those protocols,
-		// clients don't know which servers are configured to use it).
+		if meekConfig.Mode != MeekModePlaintextRoundTrip &&
+			meekConfig.MeekObfuscatedKey != "" {
 
-		passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
-			meekConfig.MeekObfuscatedKey)
-		if err != nil {
-			return nil, errors.Trace(err)
+			// As the passthrough message is unique and indistinguishable from a normal
+			// TLS client random value, we set it unconditionally and not just for
+			// protocols which may support passthrough (even for those protocols,
+			// clients don't know which servers are configured to use it).
+
+			passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
+				meekConfig.MeekObfuscatedKey)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			tlsConfig.PassthroughMessage = passthroughMessage
 		}
-		tlsConfig.PassthroughMessage = passthroughMessage
 
 		tlsDialer := NewCustomTLSDialer(tlsConfig)
 
@@ -478,6 +549,7 @@ func DialMeek(
 
 		if proxyUrl != nil {
 			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
+			var err error
 			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, dialConfig.CustomHeaders)
 			if err != nil {
 				return nil, errors.Trace(err)
@@ -518,7 +590,7 @@ func DialMeek(
 
 	// Allocate relay resources, including buffers and running the relay
 	// go routine, only when running in relay mode.
-	if !meek.roundTripperOnly {
+	if meek.mode == MeekModeRelay {
 
 		// The main loop of a MeekConn is run in the relay() goroutine.
 		// A MeekConn implements net.Conn concurrency semantics:
@@ -559,7 +631,7 @@ func DialMeek(
 		meek.relayWaitGroup.Add(1)
 		go meek.relay()
 
-	} else {
+	} else if meek.mode == MeekModeObfuscatedRoundTrip {
 
 		meek.meekCookieEncryptionPublicKey = meekConfig.MeekCookieEncryptionPublicKey
 		meek.meekObfuscatedKey = meekConfig.MeekObfuscatedKey
@@ -617,10 +689,11 @@ func (c *cachedTLSDialer) close() {
 	}
 }
 
-// Close terminates the meek connection. Close waits for the relay goroutine
-// to stop (in relay mode) and releases HTTP transport resources.
-// A mutex is required to support net.Conn concurrency semantics.
+// Close terminates the meek connection and releases its resources. In in
+// MeekModeRelay, Close waits for the relay goroutine to stop.
 func (meek *MeekConn) Close() (err error) {
+
+	// A mutex is required to support net.Conn concurrency semantics.
 
 	meek.mutex.Lock()
 	isClosed := meek.isClosed
@@ -671,26 +744,28 @@ func (meek *MeekConn) IsClosed() bool {
 // GetMetrics implements the common.MetricsSource interface.
 func (meek *MeekConn) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
-	logFields["meek_cookie_size"] = meek.cookieSize
-	logFields["meek_tls_padding"] = meek.tlsPadding
-	logFields["meek_limit_request"] = meek.limitRequestPayloadLength
+	if meek.mode == MeekModeRelay {
+		logFields["meek_cookie_size"] = meek.cookieSize
+		logFields["meek_tls_padding"] = meek.tlsPadding
+		logFields["meek_limit_request"] = meek.limitRequestPayloadLength
+	}
 	return logFields
 }
 
-// RoundTrip makes a request to the meek server and returns the response.
-// A new, obfuscated meek cookie is created for every request. The specified
-// end point is recorded in the cookie and is not exposed as plaintext in the
-// meek traffic. The caller is responsible for obfuscating the request body.
+// ObfuscatedRoundTrip makes a request to the meek server and returns the
+// response. A new, obfuscated meek cookie is created for every request. The
+// specified end point is recorded in the cookie and is not exposed as
+// plaintext in the meek traffic. The caller is responsible for securing and
+// obfuscating the request body.
 //
-// RoundTrip is not safe for concurrent use, and Close must not be called
-// concurrently. The caller must ensure onlt one RoundTrip call is active
-// at once and that it completes before calling Close.
-//
-// RoundTrip is only available in round tripper mode.
-func (meek *MeekConn) RoundTrip(
-	ctx context.Context, endPoint string, requestBody []byte) ([]byte, error) {
+// ObfuscatedRoundTrip is not safe for concurrent use, and Close must not be
+// called concurrently. The caller must ensure only one ObfuscatedRoundTrip
+// call is active at once and that it completes or is cancelled before calling
+// Close.
+func (meek *MeekConn) ObfuscatedRoundTrip(
+	requestCtx context.Context, endPoint string, requestBody []byte) ([]byte, error) {
 
-	if !meek.roundTripperOnly {
+	if meek.mode != MeekModeObfuscatedRoundTrip {
 		return nil, errors.TraceNew("operation unsupported")
 	}
 
@@ -707,32 +782,23 @@ func (meek *MeekConn) RoundTrip(
 
 	// Note:
 	//
-	// - multiple, concurrent RoundTrip calls are unsafe due to the
-	//   setRequestContext calls in newRequest.
+	// - multiple, concurrent ObfuscatedRoundTrip calls are unsafe due to the
+	//   setDialerRequestContext calls in newRequest.
 	//
-	// - concurrent Close and RoundTrip calls are unsafe as Close
-	//   does not synchronize with RoundTrip before calling
-	//   meek.transport.CloseIdleConnections(), so resources could
-	//   be left open.
+	// - concurrent Close and ObfuscatedRoundTrip calls are unsafe as Close does
+	//   not synchronize with ObfuscatedRoundTrip before calling
+	//   meek.transport.CloseIdleConnections(), so resources could be left open.
 	//
-	// At this time, RoundTrip is used for tactics in Controller and
+	// At this time, ObfuscatedRoundTrip is used for tactics in Controller and
 	// the concurrency constraints are satisfied.
 
-	request, cancelFunc, err := meek.newRequest(
-		ctx, cookie, bytes.NewReader(requestBody), 0)
+	request, err := meek.newRequest(
+		requestCtx, cookie, bytes.NewReader(requestBody), 0)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	defer cancelFunc()
 
-	// Workaround for h2quic.RoundTripper context issue. See comment in
-	// MeekConn.Close.
-	if meek.isQUIC {
-		go func() {
-			<-request.Context().Done()
-			meek.transport.CloseIdleConnections()
-		}()
-	}
+	meek.scheduleQUICCloseIdle(request)
 
 	response, err := meek.transport.RoundTrip(request)
 	if err == nil {
@@ -753,10 +819,36 @@ func (meek *MeekConn) RoundTrip(
 	return responseBody, nil
 }
 
+// RoundTrip implements the http.RoundTripper interface. RoundTrip may only be
+// used when TLS and server certificate verification are configured. RoundTrip
+// does not implement any security or obfuscation at the HTTP layer.
+//
+// RoundTrip is not safe for concurrent use, and Close must not be called
+// concurrently. The caller must ensure only one RoundTrip call is active at
+// once and that it completes or is cancelled before calling Close.
+func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
+
+	if meek.mode != MeekModePlaintextRoundTrip {
+		return nil, errors.TraceNew("operation unsupported")
+	}
+
+	requestCtx := request.Context()
+
+	// The setDialerRequestContext/CloseIdleConnections concurrency note in
+	// ObfuscatedRoundTrip applies to RoundTrip as well.
+
+	// Ensure dials are made within the request context.
+	meek.setDialerRequestContext(requestCtx)
+
+	meek.scheduleQUICCloseIdle(request)
+
+	return meek.transport.RoundTrip(request)
+}
+
 // Read reads data from the connection.
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
-	if meek.roundTripperOnly {
+	if meek.mode != MeekModeRelay {
 		return 0, errors.TraceNew("operation unsupported")
 	}
 	if meek.IsClosed() {
@@ -778,7 +870,7 @@ func (meek *MeekConn) Read(buffer []byte) (n int, err error) {
 // Write writes data to the connection.
 // net.Conn Deadlines are ignored. net.Conn concurrency semantics are supported.
 func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
-	if meek.roundTripperOnly {
+	if meek.mode != MeekModeRelay {
 		return 0, errors.TraceNew("operation unsupported")
 	}
 	if meek.IsClosed() {
@@ -1016,43 +1108,25 @@ func (r *readCloseSignaller) AwaitClosed() bool {
 	return false
 }
 
-// newRequest performs common request setup for both relay and round
-// tripper modes.
+// newRequest performs common request setup for both MeekModeRelay and
+// MeekModeObfuscatedRoundTrip.
 //
 // newRequest is not safe for concurrent calls due to its use of
 // setRequestContext.
 //
 // The caller must call the returned cancelFunc.
 func (meek *MeekConn) newRequest(
-	ctx context.Context,
+	requestCtx context.Context,
 	cookie *http.Cookie,
 	body io.Reader,
-	contentLength int) (*http.Request, context.CancelFunc, error) {
+	contentLength int) (*http.Request, error) {
 
-	var requestCtx context.Context
-	var cancelFunc context.CancelFunc
-
-	if ctx != nil {
-		requestCtx, cancelFunc = context.WithCancel(ctx)
-	} else {
-		// - meek.stopRunning() will abort a round trip in flight
-		// - round trip will abort if it exceeds timeout
-		requestCtx, cancelFunc = context.WithTimeout(
-			meek.runCtx,
-			meek.getCustomParameters().Duration(parameters.MeekRoundTripTimeout))
-	}
-
-	// Ensure dials are made within the current request context.
-	if meek.isQUIC {
-		meek.transport.(*quic.QUICTransporter).SetRequestContext(requestCtx)
-	} else if meek.cachedTLSDialer != nil {
-		meek.cachedTLSDialer.setRequestContext(requestCtx)
-	}
+	// Ensure dials are made within the request context.
+	meek.setDialerRequestContext(requestCtx)
 
 	request, err := http.NewRequest("POST", meek.url.String(), body)
 	if err != nil {
-		cancelFunc()
-		return nil, nil, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	request = request.WithContext(requestCtx)
@@ -1072,7 +1146,30 @@ func (meek *MeekConn) newRequest(
 	}
 	request.AddCookie(cookie)
 
-	return request, cancelFunc, nil
+	return request, nil
+}
+
+// setDialerRequestContext ensures that underlying TLS/QUIC dials operate
+// within the context of the request context. setDialerRequestContext must not
+// be called while another request is already in flight.
+func (meek *MeekConn) setDialerRequestContext(requestCtx context.Context) {
+	if meek.isQUIC {
+		meek.transport.(*quic.QUICTransporter).SetRequestContext(requestCtx)
+	} else if meek.cachedTLSDialer != nil {
+		meek.cachedTLSDialer.setRequestContext(requestCtx)
+	}
+}
+
+// Workaround for h2quic.RoundTripper context issue. See comment in
+// MeekConn.Close.
+func (meek *MeekConn) scheduleQUICCloseIdle(request *http.Request) {
+	requestCtx := request.Context()
+	if meek.isQUIC && requestCtx != context.Background() {
+		go func() {
+			<-requestCtx.Done()
+			meek.transport.CloseIdleConnections()
+		}()
+	}
 }
 
 // relayRoundTrip configures and makes the actual HTTP POST request
@@ -1153,9 +1250,15 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			contentLength = sendBuffer.Len()
 		}
 
-		request, cancelFunc, err := meek.newRequest(
-			//lint:ignore SA1012 meek.newRequest expects/handles nil context
-			nil,
+		// - meek.stopRunning() will abort a round trip in flight
+		// - round trip will abort if it exceeds timeout
+		requestCtx, cancelFunc := context.WithTimeout(
+			meek.runCtx,
+			meek.getCustomParameters().Duration(parameters.MeekRoundTripTimeout))
+		defer cancelFunc()
+
+		request, err := meek.newRequest(
+			requestCtx,
 			nil,
 			requestBody,
 			contentLength)
@@ -1256,7 +1359,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			}
 		}
 
-		// Release context resources now.
+		// Release context resources immediately.
 		cancelFunc()
 
 		// Either the request failed entirely, or there was a failure
@@ -1383,6 +1486,10 @@ func makeMeekObfuscationValues(
 	redialTLSProbability float64,
 	err error) {
 
+	if meekCookieEncryptionPublicKey == "" {
+		return nil, 0, 0, 0.0, errors.TraceNew("missing public key")
+	}
+
 	cookieData := &protocol.MeekCookieData{
 		MeekProtocolVersion:  MEEK_PROTOCOL_VERSION,
 		ClientTunnelProtocol: clientTunnelProtocol,
@@ -1418,7 +1525,8 @@ func makeMeekObfuscationValues(
 
 	maxPadding := p.Int(parameters.MeekCookieMaxPadding)
 
-	// Obfuscate the encrypted data
+	// Obfuscate the encrypted data. NewClientObfuscator checks that
+	// meekObfuscatedKey isn't missing.
 	obfuscator, err := obfuscator.NewClientObfuscator(
 		&obfuscator.ObfuscatorConfig{
 			Keyword:         meekObfuscatedKey,

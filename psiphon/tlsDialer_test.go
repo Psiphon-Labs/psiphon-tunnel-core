@@ -54,131 +54,26 @@ func TestTLSCertificateVerification(t *testing.T) {
 
 	testDataDirName, err := ioutil.TempDir("", "psiphon-tls-certificate-verification-test")
 	if err != nil {
-		t.Fatalf("TempDir failed: %s\n", err)
+		t.Fatalf("TempDir failed: %v", err)
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	// Generate a root CA certificate.
-
-	rootCACertificate := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			Organization: []string{"test"},
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(1, 0, 0),
-		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-	}
-
-	rootCAPrivateKey, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		t.Fatalf("rsa.GenerateKey failed: %s", err)
-	}
-
-	rootCACertificateBytes, err := x509.CreateCertificate(
-		rand.Reader,
-		rootCACertificate,
-		rootCACertificate,
-		&rootCAPrivateKey.PublicKey,
-		rootCAPrivateKey)
-	if err != nil {
-		t.Fatalf("x509.CreateCertificate failed: %s", err)
-	}
-
-	pemRootCACertificate := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: rootCACertificateBytes,
-		})
-
-	// Generate a server certificate.
-
 	serverName := "example.org"
 
-	serverCertificate := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		Subject: pkix.Name{
-			Organization: []string{"test"},
-		},
-		DNSNames:    []string{serverName},
-		NotBefore:   time.Now(),
-		NotAfter:    time.Now().AddDate(1, 0, 0),
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		KeyUsage:    x509.KeyUsageDigitalSignature,
-	}
-
-	serverPrivateKey, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		t.Fatalf("rsa.GenerateKey failed: %s", err)
-	}
-
-	serverCertificateBytes, err := x509.CreateCertificate(
-		rand.Reader,
-		serverCertificate,
-		rootCACertificate,
-		&serverPrivateKey.PublicKey,
-		rootCAPrivateKey)
-	if err != nil {
-		t.Fatalf("x509.CreateCertificate failed: %s", err)
-	}
-
-	pemServerCertificate := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: serverCertificateBytes,
-		})
-
-	pemServerPrivateKey := pem.EncodeToMemory(
-		&pem.Block{
-			Type:  "RSA PRIVATE KEY",
-			Bytes: x509.MarshalPKCS1PrivateKey(serverPrivateKey),
-		})
-
-	// Run an HTTPS server with the server certificate.
-
-	dialAddr := "127.0.0.1:8000"
-	serverAddr := fmt.Sprintf("%s:8000", serverName)
-
-	serverKeyPair, err := tls.X509KeyPair(
-		pemServerCertificate, pemServerPrivateKey)
-	if err != nil {
-		t.Fatalf("tls.X509KeyPair failed: %s", err)
-	}
-
-	server := &http.Server{
-		Addr: dialAddr,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{serverKeyPair},
-		},
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		wg.Done()
-		server.ListenAndServeTLS("", "")
-	}()
-
-	defer func() {
-		server.Shutdown(context.Background())
-		wg.Wait()
-	}()
+	rootCAsFileName,
+		rootCACertificatePin,
+		serverCertificatePin,
+		shutdown,
+		serverAddr,
+		dialer := initTestCertificatesAndWebServer(
+		t, testDataDirName, serverName)
+	defer shutdown()
 
 	// Test: without custom RootCAs, the TLS dial fails.
 
 	params, err := parameters.NewParameters(nil)
 	if err != nil {
-		t.Fatalf("parameters.NewParameters failed: %s", err)
-	}
-
-	dialer := func(ctx context.Context, network, address string) (net.Conn, error) {
-		d := &net.Dialer{}
-		// Ignore the address input, which will be serverAddr, and dial dialAddr, as
-		// if the serverName in serverAddr had been resolved to "127.0.0.1".
-		return d.DialContext(ctx, network, dialAddr)
+		t.Fatalf("parameters.NewParameters failed: %v", err)
 	}
 
 	conn, err := CustomTLSDial(
@@ -204,18 +99,12 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %s", err)
+		t.Errorf("CustomTLSDial failed: %v", err)
 	} else {
 		conn.Close()
 	}
 
 	// Test: with custom RootCAs, the TLS dial succeeds.
-
-	rootCAsFileName := filepath.Join(testDataDirName, "RootCAs.pem")
-	err = ioutil.WriteFile(rootCAsFileName, pemRootCACertificate, 0600)
-	if err != nil {
-		t.Fatalf("WriteFile failed: %s", err)
-	}
 
 	conn, err = CustomTLSDial(
 		context.Background(), "tcp", serverAddr,
@@ -226,7 +115,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %s", err)
+		t.Errorf("CustomTLSDial failed: %v", err)
 	} else {
 		conn.Close()
 	}
@@ -244,7 +133,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %s", err)
+		t.Errorf("CustomTLSDial failed: %v", err)
 	} else {
 		conn.Close()
 	}
@@ -269,13 +158,6 @@ func TestTLSCertificateVerification(t *testing.T) {
 
 	// Test: with the root CA certirficate pinned, the TLS dial succeeds.
 
-	parsedCertificate, err := x509.ParseCertificate(rootCACertificateBytes)
-	if err != nil {
-		t.Fatalf("x509.ParseCertificate failed: %s", err)
-	}
-	publicKeyDigest := sha256.Sum256(parsedCertificate.RawSubjectPublicKeyInfo)
-	rootCACertificatePin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
-
 	conn, err = CustomTLSDial(
 		context.Background(), "tcp", serverAddr,
 		&CustomTLSConfig{
@@ -286,19 +168,12 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %s", err)
+		t.Errorf("CustomTLSDial failed: %v", err)
 	} else {
 		conn.Close()
 	}
 
 	// Test: with the server certificate pinned, the TLS dial succeeds.
-
-	parsedCertificate, err = x509.ParseCertificate(serverCertificateBytes)
-	if err != nil {
-		t.Fatalf("x509.ParseCertificate failed: %s", err)
-	}
-	publicKeyDigest = sha256.Sum256(parsedCertificate.RawSubjectPublicKeyInfo)
-	serverCertificatePin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
 
 	conn, err = CustomTLSDial(
 		context.Background(), "tcp", serverAddr,
@@ -310,7 +185,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %s", err)
+		t.Errorf("CustomTLSDial failed: %v", err)
 	} else {
 		conn.Close()
 	}
@@ -330,10 +205,186 @@ func TestTLSCertificateVerification(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Errorf("CustomTLSDial failed: %s", err)
+		t.Errorf("CustomTLSDial failed: %v", err)
 	} else {
 		conn.Close()
 	}
+}
+
+// initTestCertificatesAndWebServer creates a Root CA, a web server
+// certificate, for serverName, signed by that Root CA, and runs a web server
+// that uses that server certificate. initRootCAandWebServer returns:
+//
+// - the file name containing the Root CA, to be used with
+//   CustomTLSConfig.TrustedCACertificatesFilename
+//
+// - pin values for the Root CA and server certificare, to be used with
+//   CustomTLSConfig.VerifyPins
+//
+// - a shutdown function which the caller must invoked to terminate the web
+//   server
+//
+// - the web server dial address: serverName and port
+//
+// - and a dialer function, which bypasses DNS resolution of serverName, to be
+//   used with CustomTLSConfig.Dial
+func initTestCertificatesAndWebServer(
+	t *testing.T,
+	testDataDirName string,
+	serverName string) (string, string, string, func(), string, common.Dialer) {
+
+	// Generate a root CA certificate.
+
+	rootCACertificate := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"test"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().AddDate(1, 0, 0),
+		IsCA:                  true,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+
+	rootCAPrivateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey failed: %v", err)
+	}
+
+	rootCACertificateBytes, err := x509.CreateCertificate(
+		rand.Reader,
+		rootCACertificate,
+		rootCACertificate,
+		&rootCAPrivateKey.PublicKey,
+		rootCAPrivateKey)
+	if err != nil {
+		t.Fatalf("x509.CreateCertificate failed: %v", err)
+	}
+
+	pemRootCACertificate := pem.EncodeToMemory(
+		&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: rootCACertificateBytes,
+		})
+
+	// Generate a server certificate.
+
+	serverCertificate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject: pkix.Name{
+			Organization: []string{"test"},
+		},
+		DNSNames:    []string{serverName},
+		NotBefore:   time.Now(),
+		NotAfter:    time.Now().AddDate(1, 0, 0),
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+	}
+
+	serverPrivateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey failed: %v", err)
+	}
+
+	serverCertificateBytes, err := x509.CreateCertificate(
+		rand.Reader,
+		serverCertificate,
+		rootCACertificate,
+		&serverPrivateKey.PublicKey,
+		rootCAPrivateKey)
+	if err != nil {
+		t.Fatalf("x509.CreateCertificate failed: %v", err)
+	}
+
+	pemServerCertificate := pem.EncodeToMemory(
+		&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: serverCertificateBytes,
+		})
+
+	pemServerPrivateKey := pem.EncodeToMemory(
+		&pem.Block{
+			Type:  "RSA PRIVATE KEY",
+			Bytes: x509.MarshalPKCS1PrivateKey(serverPrivateKey),
+		})
+
+	// Pave Root CA file.
+
+	rootCAsFileName := filepath.Join(testDataDirName, "RootCAs.pem")
+	err = ioutil.WriteFile(rootCAsFileName, pemRootCACertificate, 0600)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// Calculate certificate pins.
+
+	parsedCertificate, err := x509.ParseCertificate(rootCACertificateBytes)
+	if err != nil {
+		t.Fatalf("x509.ParseCertificate failed: %v", err)
+	}
+	publicKeyDigest := sha256.Sum256(parsedCertificate.RawSubjectPublicKeyInfo)
+	rootCACertificatePin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
+
+	parsedCertificate, err = x509.ParseCertificate(serverCertificateBytes)
+	if err != nil {
+		t.Fatalf("x509.ParseCertificate failed: %v", err)
+	}
+	publicKeyDigest = sha256.Sum256(parsedCertificate.RawSubjectPublicKeyInfo)
+	serverCertificatePin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
+
+	// Run an HTTPS server with the server certificate.
+
+	dialAddr := "127.0.0.1:8000"
+	serverAddr := fmt.Sprintf("%s:8000", serverName)
+
+	serverKeyPair, err := tls.X509KeyPair(
+		pemServerCertificate, pemServerPrivateKey)
+	if err != nil {
+		t.Fatalf("tls.X509KeyPair failed: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("test"))
+	})
+
+	server := &http.Server{
+		Addr: dialAddr,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{serverKeyPair},
+		},
+		Handler: mux,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		server.ListenAndServeTLS("", "")
+	}()
+
+	shutdown := func() {
+		server.Shutdown(context.Background())
+		wg.Wait()
+	}
+
+	// Initialize a custom dialer for the client which bypasses DNS resolution.
+
+	dialer := func(ctx context.Context, network, address string) (net.Conn, error) {
+		d := &net.Dialer{}
+		// Ignore the address input, which will be serverAddr, and dial dialAddr, as
+		// if the serverName in serverAddr had been resolved to "127.0.0.1".
+		return d.DialContext(ctx, network, dialAddr)
+	}
+
+	return rootCAsFileName,
+		rootCACertificatePin,
+		serverCertificatePin,
+		shutdown,
+		serverAddr,
+		dialer
 }
 
 func TestTLSDialerCompatibility(t *testing.T) {
@@ -375,12 +426,12 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 
 		certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 		if err != nil {
-			t.Fatalf("%s\n", err)
+			t.Fatalf("common.GenerateWebServerCertificate failed: %v", err)
 		}
 
 		tlsCertificate, err := tris.X509KeyPair([]byte(certificate), []byte(privateKey))
 		if err != nil {
-			t.Fatalf("%s\n", err)
+			t.Fatalf("tris.X509KeyPair failed: %v", err)
 		}
 
 		config := &tris.Config{
@@ -392,7 +443,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 
 		tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			t.Fatalf("%s\n", err)
+			t.Fatalf("net.Listen failed: %v", err)
 		}
 
 		tlsListener := tris.NewListener(tcpListener, config)
@@ -408,7 +459,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 				}
 				err = conn.(*tris.Conn).Handshake()
 				if err != nil {
-					t.Logf("server handshake: %s", err)
+					t.Logf("tris.Conn.Handshake failed: %v", err)
 				}
 				conn.Close()
 			}
@@ -456,7 +507,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			conn, err := CustomTLSDial(ctx, "tcp", address, tlsConfig)
 
 			if err != nil {
-				t.Logf("%s (transformHostname: %v): %s\n",
+				t.Logf("CustomTLSDial failed: %s (transformHostname: %v): %v",
 					tlsProfile, transformHostname, err)
 			} else {
 
@@ -483,7 +534,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 		}
 
 		result := fmt.Sprintf(
-			"%s: %d/%d successful; negotiated TLS versions: %v\n",
+			"%s: %d/%d successful; negotiated TLS versions: %v",
 			tlsProfile, success, repeats, tlsVersions)
 
 		if success == repeats {
@@ -551,7 +602,7 @@ func TestSelectTLSProfile(t *testing.T) {
 		utlsClientHelloID, utlsClientHelloSpec, err :=
 			getUTLSClientHelloID(params.Get(), profile)
 		if err != nil {
-			t.Fatalf("getUTLSClientHelloID failed: %s\n", err)
+			t.Fatalf("getUTLSClientHelloID failed: %v", err)
 		}
 
 		var unexpectedClientHelloID, unexpectedClientHelloSpec bool
@@ -633,7 +684,7 @@ func makeCustomTLSProfilesParameters(
 
 	params, err := parameters.NewParameters(nil)
 	if err != nil {
-		t.Fatalf("NewParameters failed: %s\n", err)
+		t.Fatalf("NewParameters failed: %v", err)
 	}
 
 	// Equivilent to utls.HelloChrome_62
@@ -669,7 +720,7 @@ func makeCustomTLSProfilesParameters(
 
 	err = json.Unmarshal(customTLSProfilesJSON, &customTLSProfiles)
 	if err != nil {
-		t.Fatalf("Unmarshal failed: %s", err)
+		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
 	applyParameters := make(map[string]interface{})
@@ -693,7 +744,7 @@ func makeCustomTLSProfilesParameters(
 
 	_, err = params.Set("", false, applyParameters)
 	if err != nil {
-		t.Fatalf("Set failed: %s", err)
+		t.Fatalf("Set failed: %v", err)
 	}
 
 	customTLSProfileNames := params.Get().CustomTLSProfileNames()

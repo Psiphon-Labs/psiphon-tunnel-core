@@ -1225,14 +1225,15 @@ func (server *Server) handleTacticsRequest(
 	server.logger.LogMetric(TACTICS_METRIC_EVENT_NAME, logFields)
 }
 
-// RoundTripper performs a round trip to the specified endpoint, sending the
-// request body and returning the response body. The context may be used to
-// set a timeout or cancel the rount trip.
+// ObfuscatedRoundTripper performs a round trip to the specified endpoint,
+// sending the request body and returning the response body, with an
+// obfuscation layer applied to the endpoint value. The context may be used
+// to set a timeout or cancel the round trip.
 //
-// The Psiphon client provides a RoundTripper using meek. The client will
-// handle connection details including server selection, dialing details
-// including device binding and upstream proxy, etc.
-type RoundTripper func(
+// The Psiphon client provides a ObfuscatedRoundTripper using MeekConn. The
+// client will handle connection details including server selection, dialing
+// details including device binding and upstream proxy, etc.
+type ObfuscatedRoundTripper func(
 	ctx context.Context,
 	endPoint string,
 	requestBody []byte) ([]byte, error)
@@ -1343,11 +1344,11 @@ func UseStoredTactics(
 // FetchTactics performs a tactics request. When there are no stored
 // speed test samples for the network ID, a speed test request is
 // performed immediately before the tactics request, using the same
-// RoundTripper.
+// ObfuscatedRoundTripper.
 //
-// The RoundTripper transport should be established in advance, so that
-// calls to RoundTripper don't take additional time in TCP, TLS, etc.
-// handshakes.
+// The ObfuscatedRoundTripper transport should be established in advance, so
+// that calls to ObfuscatedRoundTripper don't take additional time in TCP,
+// TLS, etc. handshakes.
 //
 // The caller should first call UseStoredTactics and skip FetchTactics
 // when there is an unexpired stored tactics record available. The
@@ -1371,7 +1372,7 @@ func FetchTactics(
 	endPointProtocol string,
 	encodedRequestPublicKey string,
 	encodedRequestObfuscatedKey string,
-	roundTripper RoundTripper) (*Record, error) {
+	obfuscatedRoundTripper ObfuscatedRoundTripper) (*Record, error) {
 
 	networkID := getNetworkID()
 
@@ -1396,7 +1397,7 @@ func FetchTactics(
 
 		startTime := time.Now()
 
-		response, err := roundTripper(ctx, SPEED_TEST_END_POINT, request)
+		response, err := obfuscatedRoundTripper(ctx, SPEED_TEST_END_POINT, request)
 
 		elapsedTime := time.Since(startTime)
 
@@ -1458,7 +1459,7 @@ func FetchTactics(
 		return nil, errors.Trace(err)
 	}
 
-	boxedResponse, err := roundTripper(ctx, TACTICS_END_POINT, boxedRequest)
+	boxedResponse, err := obfuscatedRoundTripper(ctx, TACTICS_END_POINT, boxedRequest)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

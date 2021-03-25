@@ -732,8 +732,12 @@ func MakeDialParameters(
 		}
 
 		if isTactics {
-			dialParams.meekConfig.RoundTripperOnly = true
+			dialParams.meekConfig.Mode = MeekModeObfuscatedRoundTrip
+		} else {
+			dialParams.meekConfig.Mode = MeekModeRelay
 		}
+		// TODO: CONJURE-OSSH will use MeekModePlaintextRoundTrip for domain-fronted
+		// API registration.
 	}
 
 	return dialParams, nil

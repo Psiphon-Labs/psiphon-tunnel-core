@@ -104,6 +104,13 @@ type DialConfig struct {
 	// proxy error. As the upstream proxy is user configured, the error message
 	// may need to be relayed to the user.
 	UpstreamProxyErrorCallback func(error)
+
+	// CustomDialer overrides the dialer created by NewNetDialer/NewTCPDialer.
+	// When CustomDialer is set, all other DialConfig parameters are ignored by
+	// NewNetDialer/NewTCPDialer. Other DialConfig consumers may still reference
+	// other DialConfig parameters; for example MeekConfig still uses
+	// TrustedCACertificatesFilename.
+	CustomDialer common.Dialer
 }
 
 // WithoutFragmentor returns a copy of the DialConfig with any fragmentor
