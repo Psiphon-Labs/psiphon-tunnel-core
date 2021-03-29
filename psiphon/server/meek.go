@@ -340,7 +340,12 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// 3. A request to an endpoint. This meek connection is not for relaying
 	// tunnel traffic. Instead, the request is handed off to a custom handler.
 
-	sessionID, session, endPoint, clientIP, err := server.getSessionOrEndpoint(request, meekCookie)
+	sessionID,
+		session,
+		underlyingConn,
+		endPoint,
+		clientIP,
+		err := server.getSessionOrEndpoint(request, meekCookie)
 	if err != nil {
 		// Debug since session cookie errors commonly occur during
 		// normal operation.
@@ -389,6 +394,18 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// Wait for the existing request to complete.
 	session.lock.Lock()
 	defer session.lock.Unlock()
+
+	// Count this metric once the lock is acquired, to avoid concurrent and
+	// potentially incorrect session.underlyingConn updates.
+	//
+	// It should never be the case that a new underlyingConn has the same
+	// value as the previous session.underlyingConn, as each is a net.Conn
+	// interface which includes a pointer, and the previous value cannot
+	// be garbage collected until session.underlyingConn is updated.
+	if session.underlyingConn != underlyingConn {
+		atomic.AddInt64(&session.metricUnderlyingConnCount, 1)
+		session.underlyingConn = underlyingConn
+	}
 
 	// If a newer request has arrived while waiting, discard this one.
 	// Do not delay processing the newest request.
@@ -570,7 +587,9 @@ func checkRangeHeader(request *http.Request) (int, bool) {
 // mode; or the endpoint is returned when the meek cookie indicates endpoint
 // mode.
 func (server *MeekServer) getSessionOrEndpoint(
-	request *http.Request, meekCookie *http.Cookie) (string, *meekSession, string, string, error) {
+	request *http.Request, meekCookie *http.Cookie) (string, *meekSession, net.Conn, string, string, error) {
+
+	underlyingConn := request.Context().Value(meekNetConnContextKey).(net.Conn)
 
 	// Check for an existing session.
 
@@ -582,7 +601,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 		// TODO: can multiple http client connections using same session cookie
 		// cause race conditions on session struct?
 		session.touch()
-		return existingSessionID, session, "", "", nil
+		return existingSessionID, session, underlyingConn, "", "", nil
 	}
 
 	// Determine the client remote address, which is used for geolocation
@@ -612,7 +631,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 
 	if server.rateLimit(clientIP) {
-		return "", nil, "", "", errors.TraceNew("rate limit exceeded")
+		return "", nil, nil, "", "", errors.TraceNew("rate limit exceeded")
 	}
 
 	// The session is new (or expired). Treat the cookie value as a new meek
@@ -620,7 +639,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	payloadJSON, err := server.getMeekCookiePayload(clientIP, meekCookie.Value)
 	if err != nil {
-		return "", nil, "", "", errors.Trace(err)
+		return "", nil, nil, "", "", errors.Trace(err)
 	}
 
 	// Note: this meek server ignores legacy values PsiphonClientSessionId
@@ -629,7 +648,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	err = json.Unmarshal(payloadJSON, &clientSessionData)
 	if err != nil {
-		return "", nil, "", "", errors.Trace(err)
+		return "", nil, nil, "", "", errors.Trace(err)
 	}
 
 	// Handle endpoints before enforcing CheckEstablishTunnels.
@@ -637,7 +656,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// handled by servers which would otherwise reject new tunnels.
 
 	if clientSessionData.EndPoint != "" {
-		return "", nil, clientSessionData.EndPoint, clientIP, nil
+		return "", nil, nil, clientSessionData.EndPoint, clientIP, nil
 	}
 
 	// Don't create new sessions when not establishing. A subsequent SSH handshake
@@ -645,7 +664,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	if server.support.TunnelServer != nil &&
 		!server.support.TunnelServer.CheckEstablishTunnels() {
-		return "", nil, "", "", errors.TraceNew("not establishing tunnels")
+		return "", nil, nil, "", "", errors.TraceNew("not establishing tunnels")
 	}
 
 	// Create a new session
@@ -663,8 +682,6 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 
 	session.touch()
-
-	underlyingConn := request.Context().Value(meekNetConnContextKey).(net.Conn)
 
 	// Create a new meek conn that will relay the payload
 	// between meek request/responses and the tunnel server client
@@ -697,7 +714,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	if clientSessionData.MeekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 {
 		sessionID, err = makeMeekSessionID()
 		if err != nil {
-			return "", nil, "", "", errors.Trace(err)
+			return "", nil, nil, "", "", errors.Trace(err)
 		}
 	}
 
@@ -709,7 +726,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// will close when session.delete calls Close() on the meekConn.
 	server.clientHandler(clientSessionData.ClientTunnelProtocol, session.clientConn)
 
-	return sessionID, session, "", "", nil
+	return sessionID, session, underlyingConn, "", "", nil
 }
 
 func (server *MeekServer) rateLimit(clientIP string) bool {
@@ -1149,8 +1166,10 @@ type meekSession struct {
 	metricPeakCachedResponseSize     int64
 	metricPeakCachedResponseHitSize  int64
 	metricCachedResponseMissPosition int64
+	metricUnderlyingConnCount        int64
 	lock                             sync.Mutex
 	deleted                          bool
+	underlyingConn                   net.Conn
 	clientConn                       *meekConn
 	meekProtocolVersion              int
 	sessionIDSent                    bool
@@ -1222,6 +1241,7 @@ func (session *meekSession) GetMetrics() common.LogFields {
 	logFields["meek_peak_cached_response_size"] = atomic.LoadInt64(&session.metricPeakCachedResponseSize)
 	logFields["meek_peak_cached_response_hit_size"] = atomic.LoadInt64(&session.metricPeakCachedResponseHitSize)
 	logFields["meek_cached_response_miss_position"] = atomic.LoadInt64(&session.metricCachedResponseMissPosition)
+	logFields["meek_underlying_connection_count"] = atomic.LoadInt64(&session.metricUnderlyingConnCount)
 	return logFields
 }
 
