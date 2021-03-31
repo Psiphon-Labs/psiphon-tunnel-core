@@ -74,10 +74,14 @@ type replayParameters struct {
 
 // NewReplayCache creates a new ReplayCache.
 func NewReplayCache(support *SupportServices) *ReplayCache {
+	// Cache TTL may vary based on tactics filtering, so each cache.Add must set
+	// the entry TTL.
 	return &ReplayCache{
 		support: support,
 		cache: lrucache.NewWithLRU(
-			0, REPLAY_CACHE_CLEANUP_INTERVAL, REPLAY_CACHE_MAX_ENTRIES),
+			lrucache.NoExpiration,
+			REPLAY_CACHE_CLEANUP_INTERVAL,
+			REPLAY_CACHE_MAX_ENTRIES),
 		metrics: &replayCacheMetrics{},
 	}
 }

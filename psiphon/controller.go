@@ -1300,7 +1300,7 @@ func (controller *Controller) Dial(
 		// The server has indicated that the client should make a direct,
 		// untunneled dial. Cache the classification to avoid this round trip in
 		// the immediate future.
-		untunneledCache.Add(splitTunnelHost, true, 0)
+		untunneledCache.Add(splitTunnelHost, true, lrucache.DefaultExpiration)
 	}
 
 	NoticeUntunneled(splitTunnelHost)
