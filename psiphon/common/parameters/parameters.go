@@ -273,7 +273,15 @@ const (
 	ClientBurstUpstreamTargetBytes                   = "ClientBurstUpstreamTargetBytes"
 	ClientBurstDownstreamDeadline                    = "ClientBurstDownstreamDeadline"
 	ClientBurstDownstreamTargetBytes                 = "ClientBurstDownstreamTargetBytes"
+	ConjureCachedRegistrationTTL                     = "ConjureCachedRegistrationTTL"
+	ConjureAPIRegistrarURL                           = "ConjureAPIRegistrarURL"
+	ConjureAPIRegistrarFrontingSpecs                 = "ConjureAPIRegistrarFrontingSpecs"
+	ConjureAPIRegistrarMinDelay                      = "ConjureAPIRegistrarMinDelay"
+	ConjureAPIRegistrarMaxDelay                      = "ConjureAPIRegistrarMaxDelay"
+	ConjureDecoyRegistrarProbability                 = "ConjureDecoyRegistrarProbability"
 	ConjureDecoyRegistrarWidth                       = "ConjureDecoyRegistrarWidth"
+	ConjureDecoyRegistrarMinDelay                    = "ConjureDecoyRegistrarMinDelay"
+	ConjureDecoyRegistrarMaxDelay                    = "ConjureDecoyRegistrarMaxDelay"
 	ConjureTransportObfs4Probability                 = "ConjureTransportObfs4Probability"
 	CustomHostNameRegexes                            = "CustomHostNameRegexes"
 	CustomHostNameProbability                        = "CustomHostNameProbability"
@@ -577,7 +585,16 @@ var defaultParameters = map[string]struct {
 	ClientBurstDownstreamTargetBytes: {value: 0, minimum: 0},
 	ClientBurstDownstreamDeadline:    {value: time.Duration(0), minimum: time.Duration(0)},
 
-	ConjureDecoyRegistrarWidth:       {value: 5, minimum: 1},
+	ConjureCachedRegistrationTTL:     {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureAPIRegistrarURL:           {value: ""},
+	ConjureAPIRegistrarFrontingSpecs: {value: FrontingSpecs{}},
+	ConjureAPIRegistrarMinDelay:      {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureAPIRegistrarMaxDelay:      {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarProbability: {value: 0.0, minimum: 0.0},
+	ConjureDecoyRegistrarWidth:       {value: 5, minimum: 0},
+	ConjureDecoyRegistrarMinDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarMaxDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
+
 	ConjureTransportObfs4Probability: {value: 0.0, minimum: 0.0},
 
 	CustomHostNameRegexes:        {value: RegexStrings{}},
@@ -1340,6 +1357,13 @@ func (p ParametersAccessor) ProtocolPacketManipulations(name string) ProtocolPac
 // RegexStrings returns a RegexStrings parameter value.
 func (p ParametersAccessor) RegexStrings(name string) RegexStrings {
 	value := RegexStrings{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// FrontingSpecs returns a FrontingSpecs parameter value.
+func (p ParametersAccessor) FrontingSpecs(name string) FrontingSpecs {
+	value := FrontingSpecs{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

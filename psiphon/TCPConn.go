@@ -47,6 +47,13 @@ type TCPConn struct {
 // as a custom dialer for NewProxyAuthTransport (or http.Transport with a
 // ProxyUrl), as that would result in double proxy chaining.
 func NewTCPDialer(config *DialConfig) common.Dialer {
+
+	// Use config.CustomDialer when set. This ignores all other parameters in
+	// DialConfig.
+	if config.CustomDialer != nil {
+		return config.CustomDialer
+	}
+
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if network != "tcp" {
 			return nil, errors.Tracef("%s unsupported", network)

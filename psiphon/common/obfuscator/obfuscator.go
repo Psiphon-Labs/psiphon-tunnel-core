@@ -83,6 +83,10 @@ type ObfuscatorConfig struct {
 func NewClientObfuscator(
 	config *ObfuscatorConfig) (obfuscator *Obfuscator, err error) {
 
+	if config.Keyword == "" {
+		return nil, errors.TraceNew("missing keyword")
+	}
+
 	if config.PaddingPRNGSeed == nil {
 		return nil, errors.TraceNew("missing padding seed")
 	}
@@ -147,6 +151,10 @@ func NewClientObfuscator(
 // for a short time. See SeedHistory documentation.
 func NewServerObfuscator(
 	config *ObfuscatorConfig, clientIP string, clientReader io.Reader) (obfuscator *Obfuscator, err error) {
+
+	if config.Keyword == "" {
+		return nil, errors.TraceNew("missing keyword")
+	}
 
 	clientToServerCipher, serverToClientCipher, paddingPRNGSeed, err := readSeedMessage(
 		config, clientIP, clientReader)
