@@ -954,6 +954,12 @@ func dialTunnel(
 		return nil, errors.Trace(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
+		IsHostAuthority: func(auth ssh.PublicKey, address string) bool {
+			// Psiphon servers do not currently use SSH certificates. This CertChecker
+			// code path may still be hit if a client attempts to connect using an
+			// obsolete server entry.
+			return false
+		},
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
 			if !bytes.Equal(expectedPublicKey, publicKey.Marshal()) {
 				return errors.TraceNew("unexpected host public key")
