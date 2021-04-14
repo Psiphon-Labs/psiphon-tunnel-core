@@ -372,6 +372,14 @@ func dial(
 		default:
 			return nil, errors.Tracef("invalid Conjure transport: %s", conjureConfig.Transport)
 		}
+
+		if conjureCachedRegistration != nil {
+
+			// When using a cached registration, patch its TcpDialer to use the custom
+			// dialer for this dial. In the non-cached code path, gotapdance will set
+			// refractionDialer.TcpDialer into a new registration.
+			conjureCachedRegistration.TcpDialer = refractionDialer.TcpDialer
+		}
 	}
 
 	// If the dial context is cancelled, use dialManager to interrupt
@@ -424,6 +432,13 @@ func dial(
 		// conjureRecordRegistrar.registration will be nil there was no cached
 		// registration _and_ registration didn't succeed before a cancel.
 		if registration != nil {
+
+			// Do not retain a reference to the custom dialer, as its context will not
+			// be valid for future dials using this cached registration. Assumes that
+			// gotapdance will no longer reference the TcpDialer now that the
+			// connection is established.
+			registration.TcpDialer = nil
+
 			conjureRegistrationCache.put(
 				conjureConfig.RegistrationCacheTTL,
 				conjureConfig.RegistrationCacheKey,

@@ -1628,7 +1628,7 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 	}
 
 	if config.ConjureCachedRegistrationTTLSeconds != nil {
-		applyParameters[parameters.ConjureCachedRegistrationTTL] = fmt.Sprintf("%dms", *config.ConjureCachedRegistrationTTLSeconds)
+		applyParameters[parameters.ConjureCachedRegistrationTTL] = fmt.Sprintf("%ds", *config.ConjureCachedRegistrationTTLSeconds)
 	}
 
 	if config.ConjureAPIRegistrarURL != "" {

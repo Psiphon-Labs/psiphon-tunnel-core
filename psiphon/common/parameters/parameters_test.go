@@ -144,6 +144,11 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("RegexStrings returned %+v expected %+v", g, v)
 			}
+		case FrontingSpecs:
+			g := p.Get().FrontingSpecs(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("FrontingSpecs returned %+v expected %+v", g, v)
+			}
 		default:
 			t.Fatalf("Unhandled default type: %s", name)
 		}
