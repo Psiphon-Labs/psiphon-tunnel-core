@@ -50,6 +50,6 @@ func DialTapDance(_ context.Context, _ bool, _ string, _ common.NetDialer, _ str
 }
 
 // DialConjure establishes a new Conjure connection to a Conjure station.
-func DialConjure(_ context.Context, _ bool, _ string, _, _ common.NetDialer, _ int, _, _ string) (net.Conn, error) {
+func DialConjure(_ context.Context, _ bool, _ string, _ common.NetDialer, _ string, _ *ConjureConfig) (net.Conn, error) {
 	return nil, errors.TraceNew("operation is not enabled")
 }

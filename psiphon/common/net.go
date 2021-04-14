@@ -79,6 +79,24 @@ type FragmentorReplayAccessor interface {
 	GetReplay() (*prng.Seed, bool)
 }
 
+// HTTPRoundTripper is an adapter that allows using a function as a
+// http.RoundTripper.
+type HTTPRoundTripper struct {
+	roundTrip func(*http.Request) (*http.Response, error)
+}
+
+// NewHTTPRoundTripper creates a new HTTPRoundTripper, using the specified
+// roundTrip function for HTTP round trips.
+func NewHTTPRoundTripper(
+	roundTrip func(*http.Request) (*http.Response, error)) *HTTPRoundTripper {
+	return &HTTPRoundTripper{roundTrip: roundTrip}
+}
+
+// RoundTrip implements http.RoundTripper RoundTrip.
+func (h HTTPRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return h.roundTrip(request)
+}
+
 // TerminateHTTPConnection sends a 404 response to a client and also closes
 // the persistent connection.
 func TerminateHTTPConnection(

@@ -718,6 +718,18 @@ type Config struct {
 	CustomHostNameProbability    *float64
 	CustomHostNameLimitProtocols []string
 
+	// ConjureCachedRegistrationTTLSeconds and other Conjure fields are for
+	// testing purposes.
+	ConjureCachedRegistrationTTLSeconds       *int
+	ConjureAPIRegistrarURL                    string
+	ConjureAPIRegistrarFrontingSpecs          parameters.FrontingSpecs
+	ConjureAPIRegistrarMinDelayMilliseconds   *int
+	ConjureAPIRegistrarMaxDelayMilliseconds   *int
+	ConjureDecoyRegistrarProbability          *float64
+	ConjureDecoyRegistrarWidth                *int
+	ConjureDecoyRegistrarMinDelayMilliseconds *int
+	ConjureDecoyRegistrarMaxDelayMilliseconds *int
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1613,6 +1625,42 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.CustomHostNameLimitProtocols != nil {
 		applyParameters[parameters.CustomHostNameLimitProtocols] = protocol.TunnelProtocols(config.CustomHostNameLimitProtocols)
+	}
+
+	if config.ConjureCachedRegistrationTTLSeconds != nil {
+		applyParameters[parameters.ConjureCachedRegistrationTTL] = fmt.Sprintf("%dms", *config.ConjureCachedRegistrationTTLSeconds)
+	}
+
+	if config.ConjureAPIRegistrarURL != "" {
+		applyParameters[parameters.ConjureAPIRegistrarURL] = config.ConjureAPIRegistrarURL
+	}
+
+	if config.ConjureAPIRegistrarFrontingSpecs != nil {
+		applyParameters[parameters.ConjureAPIRegistrarFrontingSpecs] = config.ConjureAPIRegistrarFrontingSpecs
+	}
+
+	if config.ConjureAPIRegistrarMinDelayMilliseconds != nil {
+		applyParameters[parameters.ConjureAPIRegistrarMinDelay] = fmt.Sprintf("%dms", *config.ConjureAPIRegistrarMinDelayMilliseconds)
+	}
+
+	if config.ConjureAPIRegistrarMaxDelayMilliseconds != nil {
+		applyParameters[parameters.ConjureAPIRegistrarMaxDelay] = fmt.Sprintf("%dms", *config.ConjureAPIRegistrarMaxDelayMilliseconds)
+	}
+
+	if config.ConjureDecoyRegistrarProbability != nil {
+		applyParameters[parameters.ConjureDecoyRegistrarProbability] = *config.ConjureDecoyRegistrarProbability
+	}
+
+	if config.ConjureDecoyRegistrarWidth != nil {
+		applyParameters[parameters.ConjureDecoyRegistrarWidth] = *config.ConjureDecoyRegistrarWidth
+	}
+
+	if config.ConjureDecoyRegistrarMinDelayMilliseconds != nil {
+		applyParameters[parameters.ConjureDecoyRegistrarMinDelay] = fmt.Sprintf("%dms", *config.ConjureDecoyRegistrarMinDelayMilliseconds)
+	}
+
+	if config.ConjureDecoyRegistrarMaxDelayMilliseconds != nil {
+		applyParameters[parameters.ConjureDecoyRegistrarMaxDelay] = fmt.Sprintf("%dms", *config.ConjureDecoyRegistrarMaxDelayMilliseconds)
 	}
 
 	return applyParameters

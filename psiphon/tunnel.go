@@ -30,6 +30,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -790,22 +791,97 @@ func dialTunnel(
 
 	} else if protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
 
-		// The Conjure "phantom" connection is compatible with fragmentation, but
-		// the decoy registrar connection, like Tapdance, is not, so force it off.
-		// Any tunnel fragmentation metrics will refer to the "phantom" connection
-		// only.
-		decoyRegistrarDialer := NewNetDialer(
-			dialParams.GetDialConfig().WithoutFragmentor())
+		// Specify a cache key with a scope that ensures that:
+		//
+		// (a) cached registrations aren't used across different networks, as a
+		// registration requires the client's public IP to match the value at time
+		// of registration;
+		//
+		// (b) cached registrations are associated with specific Psiphon server
+		// candidates, to ensure that replay will use the same phantom IP(s).
+		//
+		// This scheme allows for reuse of cached registrations on network A when a
+		// client roams from network A to network B and back to network A.
+		//
+		// Using the network ID as a proxy for client public IP address is a
+		// heurisitic: it's possible that a clients public IP address changes
+		// without the network ID changing, and it's not guaranteed that the client
+		// will be assigned the original public IP on network A; so there's some
+		// chance the registration cannot be reused.
+
+		cacheKey := dialParams.NetworkID + dialParams.ServerEntry.IpAddress
+
+		conjureConfig := &refraction.ConjureConfig{
+			RegistrationCacheTTL: dialParams.ConjureCachedRegistrationTTL,
+			RegistrationCacheKey: cacheKey,
+			Transport:            dialParams.ConjureTransport,
+		}
+
+		if dialParams.ConjureAPIRegistration {
+
+			// Use MeekConn to domain front Conjure API registration.
+			//
+			// ConjureAPIRegistrarFrontingSpecs are applied via
+			// dialParams.GetMeekConfig, and will be subject to replay.
+			//
+			// Since DialMeek will create a TLS connection immediately, and a cached
+			// registration may be used, we will delay initializing the MeekConn-based
+			// RoundTripper until we know it's needed. This is implemented by passing
+			// in a RoundTripper that establishes a MeekConn when RoundTrip is called.
+			//
+			// In refraction.dial we configure 0 retries for API registration requests,
+			// assuming it's better to let another Psiphon candidate retry, with new
+			// domaing fronting parameters. As such, we expect only one round trip call
+			// per NewHTTPRoundTripper, so, in practise, there's no performance penalty
+			// from establishing a new MeekConn per round trip.
+			//
+			// Performing the full DialMeek/RoundTrip operation here allows us to call
+			// MeekConn.Close and ensure all resources are immediately cleaned up.
+			roundTrip := func(request *http.Request) (*http.Response, error) {
+				conn, err := DialMeek(
+					ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				defer conn.Close()
+				response, err := conn.RoundTrip(request)
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				// Currently, gotapdance does not read the response body. When that
+				// changes, we will need to ensure MeekConn.Close does not make the
+				// response body unavailable, perhaps by reading into a buffer and
+				// replacing reponse.Body. For now, we can immediately close it.
+				response.Body.Close()
+				return response, nil
+			}
+
+			conjureConfig.APIRegistrarHTTPClient = &http.Client{
+				Transport: common.NewHTTPRoundTripper(roundTrip),
+			}
+
+			conjureConfig.APIRegistrarURL = dialParams.ConjureAPIRegistrarURL
+			conjureConfig.APIRegistrarDelay = dialParams.ConjureAPIRegistrarDelay
+
+		} else if dialParams.ConjureDecoyRegistration {
+
+			// The Conjure "phantom" connection is compatible with fragmentation, but
+			// the decoy registrar connection, like Tapdance, is not, so force it off.
+			// Any tunnel fragmentation metrics will refer to the "phantom" connection
+			// only.
+			conjureConfig.DecoyRegistrarDialer = NewNetDialer(
+				dialParams.GetDialConfig().WithoutFragmentor())
+			conjureConfig.DecoyRegistrarWidth = dialParams.ConjureDecoyRegistrarWidth
+			conjureConfig.DecoyRegistrarDelay = dialParams.ConjureDecoyRegistrarDelay
+		}
 
 		dialConn, err = refraction.DialConjure(
 			ctx,
 			config.EmitRefractionNetworkingLogs,
 			config.GetPsiphonDataDirectory(),
 			NewNetDialer(dialParams.GetDialConfig()),
-			decoyRegistrarDialer,
-			dialParams.ConjureDecoyRegistrarWidth,
-			dialParams.ConjureTransport,
-			dialParams.DirectDialAddress)
+			dialParams.DirectDialAddress,
+			conjureConfig)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
