@@ -306,6 +306,7 @@ func dial(
 		// after canceling or success, but not on phantom dial failure.
 
 		conjureCachedRegistration = conjureRegistrationCache.pop(
+			conjureConfig.Logger,
 			conjureConfig.RegistrationCacheTTL,
 			conjureConfig.RegistrationCacheKey)
 
@@ -440,6 +441,7 @@ func dial(
 			registration.TcpDialer = nil
 
 			conjureRegistrationCache.put(
+				conjureConfig.Logger,
 				conjureConfig.RegistrationCacheTTL,
 				conjureConfig.RegistrationCacheKey,
 				registration)
@@ -484,6 +486,7 @@ func newRegistrationCache() *registrationCache {
 }
 
 func (c *registrationCache) put(
+	logger common.Logger,
 	TTL time.Duration,
 	key string,
 	registration *refraction_networking_client.ConjureReg) {
@@ -500,6 +503,10 @@ func (c *registrationCache) put(
 		c.TTL = TTL
 	}
 
+	logger.WithTraceFields(
+		common.LogFields{"size": c.cache.ItemCount()}).Info(
+		"Conjure cache")
+
 	c.cache.Set(
 		key,
 		registration,
@@ -507,6 +514,7 @@ func (c *registrationCache) put(
 }
 
 func (c *registrationCache) pop(
+	logger common.Logger,
 	TTL time.Duration,
 	key string) *refraction_networking_client.ConjureReg {
 
@@ -518,6 +526,10 @@ func (c *registrationCache) pop(
 		c.cache.Flush()
 		c.TTL = TTL
 	}
+
+	logger.WithTraceFields(
+		common.LogFields{"size": c.cache.ItemCount()}).Info(
+		"Conjure cache")
 
 	entry, found := c.cache.Get(key)
 	if found {

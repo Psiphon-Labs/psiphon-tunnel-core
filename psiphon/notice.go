@@ -306,7 +306,6 @@ func makeNoticeInternalError(errorMessage string) []byte {
 	// Format an Alert Notice (_without_ using json.Marshal, since that can fail)
 	alertNoticeFormat := "{\"noticeType\":\"InternalError\",\"timestamp\":\"%s\",\"data\":{\"message\":\"%s\"}}\n"
 	return []byte(fmt.Sprintf(alertNoticeFormat, time.Now().UTC().Format(common.RFC3339Milli), errorMessage))
-
 }
 
 func (nl *noticeLogger) outputNoticeToHomepageFile(noticeFlags uint32, output []byte) error {

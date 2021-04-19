@@ -85,4 +85,7 @@ type ConjureConfig struct {
 	// Transport may be protocol.CONJURE_TRANSPORT_MIN_OSSH or
 	// protocol.CONJURE_TRANSPORT_OBFS4_OSSH.
 	Transport string
+
+	// Logger is used for logging diagnostics.
+	Logger common.Logger
 }
