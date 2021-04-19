@@ -269,6 +269,10 @@ public class PsiphonTunnel {
         startPsiphon("");
     }
 
+    public synchronized void reconnectPsiphon() throws Exception {
+        Psi.reconnectTunnel();
+    }
+
     // Creates a temporary dummy VPN interface in order to prevent traffic leaking while performing
     // complete VPN and tunnel restart, for example, caused by host app settings change.
     // Note: same deadlock note as stop().
