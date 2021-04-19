@@ -1183,26 +1183,50 @@ func performLivenessTest(
 
 	go ssh.DiscardRequests(requests)
 
-	// In consideration of memory-constrained environments, use a modest-sized
-	// copy buffer since many tunnel establishment workers may run the
-	// liveness test concurrently.
-
-	var buffer [8192]byte
+	sent := 0
+	received := 0
+	upstream := new(sync.WaitGroup)
+	var errUpstream, errDownstream error
 
 	if metrics.UpstreamBytes > 0 {
-		n, err := common.CopyNBuffer(channel, rand.Reader, int64(metrics.UpstreamBytes), buffer[:])
-		metrics.SentUpstreamBytes = int(n)
-		if err != nil {
-			return metrics, errors.Trace(err)
-		}
+
+		// Process streams concurrently to minimize elapsed time. This also
+		// avoids a unidirectional flow burst early in the tunnel lifecycle.
+
+		upstream.Add(1)
+		go func() {
+			defer upstream.Done()
+
+			// In consideration of memory-constrained environments, use modest-sized copy
+			// buffers since many tunnel establishment workers may run the liveness test
+			// concurrently.
+			var buffer [4096]byte
+
+			n, err := common.CopyNBuffer(channel, rand.Reader, int64(metrics.UpstreamBytes), buffer[:])
+			sent = int(n)
+			if err != nil {
+				errUpstream = errors.Trace(err)
+			}
+		}()
 	}
 
 	if metrics.DownstreamBytes > 0 {
+		var buffer [4096]byte
 		n, err := common.CopyNBuffer(ioutil.Discard, channel, int64(metrics.DownstreamBytes), buffer[:])
-		metrics.ReceivedDownstreamBytes = int(n)
+		received = int(n)
 		if err != nil {
-			return metrics, errors.Trace(err)
+			errDownstream = errors.Trace(err)
 		}
+	}
+
+	upstream.Wait()
+	metrics.SentUpstreamBytes = sent
+	metrics.ReceivedDownstreamBytes = received
+
+	if errUpstream != nil {
+		return metrics, errUpstream
+	} else if errDownstream != nil {
+		return metrics, errDownstream
 	}
 
 	return metrics, nil
