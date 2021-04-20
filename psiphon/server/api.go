@@ -859,6 +859,8 @@ var baseDialParams = []requestParamSpec{
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
 	{"network_type", isAnyString, requestParamOptional},
+	{"conjure_cached", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"conjure_delay", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"conjure_transport", isAnyString, requestParamOptional},
 	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
