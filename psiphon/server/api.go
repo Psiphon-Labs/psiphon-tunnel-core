@@ -26,7 +26,6 @@ import (
 	std_errors "errors"
 	"net"
 	"regexp"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -103,21 +102,6 @@ func dispatchAPIRequestHandler(
 	authorizedAccessTypes []string,
 	name string,
 	params common.APIParameters) (response []byte, reterr error) {
-
-	// Recover from and log any unexpected panics caused by user input
-	// handling bugs. User inputs should be properly validated; this
-	// mechanism is only a last resort to prevent the process from
-	// terminating in the case of a bug.
-	defer func() {
-		if e := recover(); e != nil {
-			if intentionalPanic, ok := e.(IntentionalPanicError); ok {
-				panic(intentionalPanic)
-			} else {
-				log.LogPanicRecover(e, debug.Stack())
-				reterr = errors.TraceNew("request handler panic")
-			}
-		}
-	}()
 
 	// Before invoking the handlers, enforce some preconditions:
 	//
@@ -859,6 +843,8 @@ var baseDialParams = []requestParamSpec{
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
 	{"network_type", isAnyString, requestParamOptional},
+	{"conjure_cached", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"conjure_delay", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"conjure_transport", isAnyString, requestParamOptional},
 	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }

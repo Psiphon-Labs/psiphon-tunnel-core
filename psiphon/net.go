@@ -104,6 +104,13 @@ type DialConfig struct {
 	// proxy error. As the upstream proxy is user configured, the error message
 	// may need to be relayed to the user.
 	UpstreamProxyErrorCallback func(error)
+
+	// CustomDialer overrides the dialer created by NewNetDialer/NewTCPDialer.
+	// When CustomDialer is set, all other DialConfig parameters are ignored by
+	// NewNetDialer/NewTCPDialer. Other DialConfig consumers may still reference
+	// other DialConfig parameters; for example MeekConfig still uses
+	// TrustedCACertificatesFilename.
+	CustomDialer common.Dialer
 }
 
 // WithoutFragmentor returns a copy of the DialConfig with any fragmentor
@@ -318,25 +325,21 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 }
 
 // MakeUntunneledHTTPClient returns a net/http.Client which is configured to
-// use custom dialing features -- including BindToDevice, etc. If
-// verifyLegacyCertificate is not nil, it's used for certificate verification.
+// use custom dialing features -- including BindToDevice, etc.
+//
 // The context is applied to underlying TCP dials. The caller is responsible
 // for applying the context to requests made with the returned http.Client.
 func MakeUntunneledHTTPClient(
 	ctx context.Context,
 	config *Config,
 	untunneledDialConfig *DialConfig,
-	verifyLegacyCertificate *x509.Certificate,
 	skipVerify bool) (*http.Client, error) {
 
 	dialer := NewTCPDialer(untunneledDialConfig)
 
-	// Note: when verifyLegacyCertificate is not nil, some
-	// of the other CustomTLSConfig is overridden.
 	tlsConfig := &CustomTLSConfig{
 		Parameters:                    config.GetParameters(),
 		Dial:                          dialer,
-		VerifyLegacyCertificate:       verifyLegacyCertificate,
 		UseDialAddrSNI:                true,
 		SNIServerName:                 "",
 		SkipVerify:                    skipVerify,
@@ -430,7 +433,7 @@ func MakeDownloadHTTPClient(
 	} else {
 
 		httpClient, err = MakeUntunneledHTTPClient(
-			ctx, config, untunneledDialConfig, nil, skipVerify)
+			ctx, config, untunneledDialConfig, skipVerify)
 		if err != nil {
 			return nil, false, errors.Trace(err)
 		}

@@ -30,6 +30,7 @@ package refraction
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -42,12 +43,14 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/armon/go-proxyproto"
+	lrucache "github.com/cognusion/go-cache-lru"
 	refraction_networking_proto "github.com/refraction-networking/gotapdance/protobuf"
 	refraction_networking_client "github.com/refraction-networking/gotapdance/tapdance"
 )
 
 const (
 	READ_PROXY_PROTOCOL_HEADER_TIMEOUT = 5 * time.Second
+	REGISTRATION_CACHE_MAX_ENTRIES     = 256
 )
 
 // Enabled indicates if Refraction Networking functionality is enabled.
@@ -178,6 +181,8 @@ func (c *stationConn) GetMetrics() common.LogFields {
 // assets) are read from dataDirectory/"refraction-networking". When no config
 // is found, default assets are paved.
 //
+// dialer specifies the custom dialer for underlying TCP dials.
+//
 // The input ctx is expected to have a timeout for the dial.
 //
 // Limitation: the parameters emitLogs and dataDirectory are used for one-time
@@ -194,14 +199,14 @@ func DialTapDance(
 		emitLogs,
 		dataDirectory,
 		dialer,
-		false,
-		nil,
-		0,
-		"",
-		address)
+		address,
+		nil)
 }
 
 // DialConjure establishes a new Conjure connection to a Conjure station.
+//
+// dialer specifies the custom dialer to use for phantom dials. Additional
+// Conjure-specific parameters are specified in conjureConfig.
 //
 // See DialTapdance comment.
 func DialConjure(
@@ -209,21 +214,16 @@ func DialConjure(
 	emitLogs bool,
 	dataDirectory string,
 	dialer common.NetDialer,
-	conjureDecoyRegistrarDialer common.NetDialer,
-	conjureDecoyRegistrarWidth int,
-	conjureTransport string,
-	address string) (net.Conn, error) {
+	address string,
+	conjureConfig *ConjureConfig) (net.Conn, error) {
 
 	return dial(
 		ctx,
 		emitLogs,
 		dataDirectory,
 		dialer,
-		true,
-		conjureDecoyRegistrarDialer,
-		conjureDecoyRegistrarWidth,
-		conjureTransport,
-		address)
+		address,
+		conjureConfig)
 }
 
 func dial(
@@ -231,11 +231,8 @@ func dial(
 	emitLogs bool,
 	dataDirectory string,
 	dialer common.NetDialer,
-	useConjure bool,
-	conjureDecoyRegistrarDialer common.NetDialer,
-	conjureDecoyRegistrarWidth int,
-	conjureTransport string,
-	address string) (net.Conn, error) {
+	address string,
+	conjureConfig *ConjureConfig) (net.Conn, error) {
 
 	err := initRefractionNetworking(emitLogs, dataDirectory)
 	if err != nil {
@@ -246,6 +243,8 @@ func dial(
 		return nil, errors.TraceNew("dial context has no timeout")
 	}
 
+	useConjure := conjureConfig != nil
+
 	manager := newDialManager()
 
 	refractionDialer := &refraction_networking_client.Dialer{
@@ -253,23 +252,134 @@ func dial(
 		UseProxyHeader: true,
 	}
 
+	conjureCached := false
+	conjureDelay := time.Duration(0)
+
+	var conjureCachedRegistration *refraction_networking_client.ConjureReg
+	var conjureRecordRegistrar *recordRegistrar
+
 	if useConjure {
+
+		// Our strategy is to try one registration per dial attempt: a cached
+		// registration, if it exists, or API or decoy registration, as configured.
+		// This assumes Psiphon establishment will try/retry many candidates as
+		// required, and that the desired mix of API/decoy registrations will be
+		// configured and generated. In good network conditions, internal gotapdance
+		// retries (via APIRegistrar.MaxRetries or APIRegistrar.SecondaryRegistrar)
+		// are unlikely to start before the Conjure dial is canceled.
+
+		// Caching registrations reduces average Conjure dial time by often
+		// eliminating the registration phase. This is especially impactful for
+		// short duration tunnels, such as on mobile. Caching also reduces domain
+		// fronted traffic and load on the API registrar and decoys.
+		//
+		// We implement a simple in-memory registration cache with the following
+		// behavior:
+		//
+		// - If a new registration succeeds, but the overall Conjure dial is
+		//   _canceled_, the registration is optimistically cached.
+		// - If the Conjure phantom dial fails, any associated cached registration
+		//   is discarded.
+		// - A cached registration's TTL is extended upon phantom dial success.
+		// - If the configured TTL changes, the cache is cleared.
+		//
+		// Limitations:
+		// - The cache is not persistent.
+		// - There is no TTL extension during a long connection.
+		// - Caching a successful registration when the phantom dial is canceled may
+		//   skip the necessary "delay" step (however, an immediate re-establishment
+		//   to the same candidate is unlikely in this case).
+		//
+		// TODO:
+		// - Revisit when gotapdance adds its own caching.
+		// - Consider "pre-registering" Conjure when already connected with a
+		//   different protocol, so a Conjure registration is available on the next
+		//   establishment; in this scenario, a tunneled API registration would not
+		//   require domain fronting.
 
 		refractionDialer.DarkDecoy = true
 
-		refractionDialer.DarkDecoyRegistrar = refraction_networking_client.DecoyRegistrar{
-			TcpDialer: manager.makeManagedDialer(conjureDecoyRegistrarDialer.DialContext),
-		}
-		refractionDialer.Width = conjureDecoyRegistrarWidth
+		// The pop operation removes the registration from the cache. This
+		// eliminates the possibility of concurrent candidates (with the same cache
+		// key) using and modifying the same registration, a potential race
+		// condition. The popped cached registration must be reinserted in the cache
+		// after canceling or success, but not on phantom dial failure.
 
-		switch conjureTransport {
+		conjureCachedRegistration = conjureRegistrationCache.pop(
+			conjureConfig.Logger,
+			conjureConfig.RegistrationCacheTTL,
+			conjureConfig.RegistrationCacheKey)
+
+		if conjureCachedRegistration != nil {
+
+			refractionDialer.DarkDecoyRegistrar = &cachedRegistrar{
+				registration: conjureCachedRegistration,
+			}
+
+			conjureCached = true
+			conjureDelay = 0 // report no delay
+
+		} else if conjureConfig.APIRegistrarURL != "" {
+
+			if conjureConfig.APIRegistrarHTTPClient == nil {
+				// While not a guaranteed check, if the APIRegistrarHTTPClient isn't set
+				// then the API registration would certainly be unfronted, resulting in a
+				// fingerprintable connection leak.
+				return nil, errors.TraceNew("missing APIRegistrarHTTPClient")
+			}
+
+			refractionDialer.DarkDecoyRegistrar = &refraction_networking_client.APIRegistrar{
+				Endpoint:        conjureConfig.APIRegistrarURL,
+				ConnectionDelay: conjureConfig.APIRegistrarDelay,
+				MaxRetries:      0,
+				Client:          conjureConfig.APIRegistrarHTTPClient,
+			}
+
+			conjureDelay = conjureConfig.APIRegistrarDelay
+
+		} else if conjureConfig.DecoyRegistrarDialer != nil {
+
+			refractionDialer.DarkDecoyRegistrar = &refraction_networking_client.DecoyRegistrar{
+				TcpDialer: manager.makeManagedDialer(
+					conjureConfig.DecoyRegistrarDialer.DialContext),
+			}
+
+			refractionDialer.Width = conjureConfig.DecoyRegistrarWidth
+
+			// Limitation: the decoy regsitration delay is not currently exposed in the
+			// gotapdance API.
+			conjureDelay = -1 // don't report delay
+
+		} else {
+
+			return nil, errors.TraceNew("no conjure registrar specified")
+		}
+
+		if conjureCachedRegistration == nil && conjureConfig.RegistrationCacheTTL != 0 {
+
+			// Record the registration result in order to cache it.
+			conjureRecordRegistrar = &recordRegistrar{
+				registrar: refractionDialer.DarkDecoyRegistrar,
+			}
+			refractionDialer.DarkDecoyRegistrar = conjureRecordRegistrar
+		}
+
+		switch conjureConfig.Transport {
 		case protocol.CONJURE_TRANSPORT_MIN_OSSH:
 			refractionDialer.Transport = refraction_networking_proto.TransportType_Min
 			refractionDialer.TcpDialer = newMinTransportDialer(refractionDialer.TcpDialer)
 		case protocol.CONJURE_TRANSPORT_OBFS4_OSSH:
 			refractionDialer.Transport = refraction_networking_proto.TransportType_Obfs4
 		default:
-			return nil, errors.Tracef("invalid Conjure transport: %s", conjureTransport)
+			return nil, errors.Tracef("invalid Conjure transport: %s", conjureConfig.Transport)
+		}
+
+		if conjureCachedRegistration != nil {
+
+			// When using a cached registration, patch its TcpDialer to use the custom
+			// dialer for this dial. In the non-cached code path, gotapdance will set
+			// refractionDialer.TcpDialer into a new registration.
+			conjureCachedRegistration.TcpDialer = refractionDialer.TcpDialer
 		}
 	}
 
@@ -294,17 +404,170 @@ func dial(
 
 	conn, err := refractionDialer.DialContext(ctx, "tcp", address)
 	close(dialComplete)
+
 	if err != nil {
+		// Call manager.close before updating cache, to synchronously shutdown dials
+		// and ensure there are no further concurrent reads/writes to the recorded
+		// registration before referencing it.
 		manager.close()
+	}
+
+	// Cache (or put back) a successful registration. Also put back in the
+	// specific error case where the phantom dial was canceled, as the
+	// registration may still be valid. This operation implicitly extends the TTL
+	// of a reused cached registration; we assume the Conjure station is also
+	// extending the TTL by the same amount.
+	//
+	// Limitation: the cancel case shouldn't extend the TTL.
+
+	if useConjure &&
+		(err == nil || ctx.Err() == context.Canceled) &&
+		(conjureCachedRegistration != nil || conjureRecordRegistrar != nil) {
+
+		registration := conjureCachedRegistration
+		if registration == nil {
+			// We assume gotapdance is no longer accessing the Registrar.
+			registration = conjureRecordRegistrar.registration
+		}
+
+		// conjureRecordRegistrar.registration will be nil there was no cached
+		// registration _and_ registration didn't succeed before a cancel.
+		if registration != nil {
+
+			// Do not retain a reference to the custom dialer, as its context will not
+			// be valid for future dials using this cached registration. Assumes that
+			// gotapdance will no longer reference the TcpDialer now that the
+			// connection is established.
+			registration.TcpDialer = nil
+
+			conjureRegistrationCache.put(
+				conjureConfig.Logger,
+				conjureConfig.RegistrationCacheTTL,
+				conjureConfig.RegistrationCacheKey,
+				registration)
+		}
+	}
+
+	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	manager.startUsingRunCtx()
 
-	return &refractionConn{
+	refractionConn := &refractionConn{
 		Conn:    conn,
 		manager: manager,
-	}, nil
+	}
+
+	if useConjure {
+		// Retain these values for logging metrics.
+		refractionConn.isConjure = true
+		refractionConn.conjureCached = conjureCached
+		refractionConn.conjureDelay = conjureDelay
+		refractionConn.conjureTransport = conjureConfig.Transport
+	}
+
+	return refractionConn, nil
+}
+
+type registrationCache struct {
+	mutex sync.Mutex
+	TTL   time.Duration
+	cache *lrucache.Cache
+}
+
+func newRegistrationCache() *registrationCache {
+	return &registrationCache{
+		cache: lrucache.NewWithLRU(
+			lrucache.NoExpiration,
+			1*time.Minute,
+			REGISTRATION_CACHE_MAX_ENTRIES),
+	}
+}
+
+func (c *registrationCache) put(
+	logger common.Logger,
+	TTL time.Duration,
+	key string,
+	registration *refraction_networking_client.ConjureReg) {
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// Clear the entire cache if the configured TTL changes to avoid retaining
+	// items for too long. This is expected to be an infrequent event. The
+	// go-cache-lru API does not offer a mechanism to inspect and adjust the TTL
+	// of all existing items.
+	if c.TTL != TTL {
+		c.cache.Flush()
+		c.TTL = TTL
+	}
+
+	logger.WithTraceFields(
+		common.LogFields{"size": c.cache.ItemCount()}).Info(
+		"Conjure cache")
+
+	c.cache.Set(
+		key,
+		registration,
+		c.TTL)
+}
+
+func (c *registrationCache) pop(
+	logger common.Logger,
+	TTL time.Duration,
+	key string) *refraction_networking_client.ConjureReg {
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// See TTL/Flush comment in put.
+	if c.TTL != TTL {
+		c.cache.Flush()
+		c.TTL = TTL
+	}
+
+	logger.WithTraceFields(
+		common.LogFields{"size": c.cache.ItemCount()}).Info(
+		"Conjure cache")
+
+	entry, found := c.cache.Get(key)
+	if found {
+		c.cache.Delete(key)
+		return entry.(*refraction_networking_client.ConjureReg)
+	}
+
+	return nil
+}
+
+var conjureRegistrationCache = newRegistrationCache()
+
+type cachedRegistrar struct {
+	registration *refraction_networking_client.ConjureReg
+}
+
+func (r *cachedRegistrar) Register(
+	_ *refraction_networking_client.ConjureSession,
+	_ context.Context) (*refraction_networking_client.ConjureReg, error) {
+
+	return r.registration, nil
+}
+
+type recordRegistrar struct {
+	registrar    refraction_networking_client.Registrar
+	registration *refraction_networking_client.ConjureReg
+}
+
+func (r *recordRegistrar) Register(
+	session *refraction_networking_client.ConjureSession,
+	ctx context.Context) (*refraction_networking_client.ConjureReg, error) {
+
+	registration, err := r.registrar.Register(session, ctx)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	r.registration = registration
+	return registration, nil
 }
 
 // minTransportConn buffers the first 32-byte random HMAC write performed by
@@ -516,6 +779,11 @@ type refractionConn struct {
 	net.Conn
 	manager  *dialManager
 	isClosed int32
+
+	isConjure        bool
+	conjureCached    bool
+	conjureDelay     time.Duration
+	conjureTransport string
 }
 
 func (conn *refractionConn) Close() error {
@@ -527,6 +795,26 @@ func (conn *refractionConn) Close() error {
 
 func (conn *refractionConn) IsClosed() bool {
 	return atomic.LoadInt32(&conn.isClosed) == 1
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *refractionConn) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+	if conn.isConjure {
+
+		cached := "0"
+		if conn.conjureCached {
+			cached = "1"
+		}
+		logFields["conjure_cached"] = cached
+
+		if conn.conjureDelay != -1 {
+			logFields["conjure_delay"] = fmt.Sprintf("%d", conn.conjureDelay/time.Millisecond)
+		}
+
+		logFields["conjure_transport"] = conn.conjureTransport
+	}
+	return logFields
 }
 
 var initRefractionNetworkingOnce sync.Once
