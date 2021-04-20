@@ -259,7 +259,7 @@ func fetchTactics(
 		dialParams.TunnelProtocol,
 		serverEntry.TacticsRequestPublicKey,
 		serverEntry.TacticsRequestObfuscatedKey,
-		meekConn.RoundTrip)
+		meekConn.ObfuscatedRoundTrip)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

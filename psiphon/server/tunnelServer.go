@@ -2161,7 +2161,7 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 	// is available pre-handshake, albeit with additional restrictions.
 	//
 	// The random stream is subject to throttling in traffic rules; for
-	// unthrottled liveness tests, set initial   Read/WriteUnthrottledBytes as
+	// unthrottled liveness tests, set initial Read/WriteUnthrottledBytes as
 	// required. The random stream maximum count and response size cap
 	// mitigate clients abusing the facility to waste server resources.
 	//
@@ -2228,18 +2228,26 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 	go func() {
 		defer waitGroup.Done()
 
+		upstream := new(sync.WaitGroup)
 		received := 0
 		sent := 0
 
 		if request.UpstreamBytes > 0 {
-			n, err := io.CopyN(ioutil.Discard, channel, int64(request.UpstreamBytes))
-			received = int(n)
-			if err != nil {
-				if !isExpectedTunnelIOError(err) {
-					log.WithTraceFields(LogFields{"error": err}).Warning("receive failed")
+
+			// Process streams concurrently to minimize elapsed time. This also
+			// avoids a unidirectional flow burst early in the tunnel lifecycle.
+
+			upstream.Add(1)
+			go func() {
+				defer upstream.Done()
+				n, err := io.CopyN(ioutil.Discard, channel, int64(request.UpstreamBytes))
+				received = int(n)
+				if err != nil {
+					if !isExpectedTunnelIOError(err) {
+						log.WithTraceFields(LogFields{"error": err}).Warning("receive failed")
+					}
 				}
-				// Fall through and record any bytes received...
-			}
+			}()
 		}
 
 		if request.DownstreamBytes > 0 {
@@ -2251,6 +2259,8 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 				}
 			}
 		}
+
+		upstream.Wait()
 
 		sshClient.Lock()
 		metrics.upstreamBytes += request.UpstreamBytes

@@ -163,7 +163,6 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			feedbackUploadCtx,
 			config,
 			untunneledDialConfig,
-			nil,
 			uploadURL.SkipVerify)
 		if err != nil {
 			return errors.Trace(err)

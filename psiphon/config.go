@@ -718,6 +718,18 @@ type Config struct {
 	CustomHostNameProbability    *float64
 	CustomHostNameLimitProtocols []string
 
+	// ConjureCachedRegistrationTTLSeconds and other Conjure fields are for
+	// testing purposes.
+	ConjureCachedRegistrationTTLSeconds       *int
+	ConjureAPIRegistrarURL                    string
+	ConjureAPIRegistrarFrontingSpecs          parameters.FrontingSpecs
+	ConjureAPIRegistrarMinDelayMilliseconds   *int
+	ConjureAPIRegistrarMaxDelayMilliseconds   *int
+	ConjureDecoyRegistrarProbability          *float64
+	ConjureDecoyRegistrarWidth                *int
+	ConjureDecoyRegistrarMinDelayMilliseconds *int
+	ConjureDecoyRegistrarMaxDelayMilliseconds *int
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1615,6 +1627,45 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.CustomHostNameLimitProtocols] = protocol.TunnelProtocols(config.CustomHostNameLimitProtocols)
 	}
 
+	if config.ConjureCachedRegistrationTTLSeconds != nil {
+		applyParameters[parameters.ConjureCachedRegistrationTTL] = fmt.Sprintf("%ds", *config.ConjureCachedRegistrationTTLSeconds)
+	}
+
+	if config.ConjureAPIRegistrarURL != "" {
+		applyParameters[parameters.ConjureAPIRegistrarURL] = config.ConjureAPIRegistrarURL
+	}
+
+	if config.ConjureAPIRegistrarFrontingSpecs != nil {
+		applyParameters[parameters.ConjureAPIRegistrarFrontingSpecs] = config.ConjureAPIRegistrarFrontingSpecs
+	}
+
+	if config.ConjureAPIRegistrarMinDelayMilliseconds != nil {
+		applyParameters[parameters.ConjureAPIRegistrarMinDelay] = fmt.Sprintf("%dms", *config.ConjureAPIRegistrarMinDelayMilliseconds)
+	}
+
+	if config.ConjureAPIRegistrarMaxDelayMilliseconds != nil {
+		applyParameters[parameters.ConjureAPIRegistrarMaxDelay] = fmt.Sprintf("%dms", *config.ConjureAPIRegistrarMaxDelayMilliseconds)
+	}
+
+	if config.ConjureDecoyRegistrarProbability != nil {
+		applyParameters[parameters.ConjureDecoyRegistrarProbability] = *config.ConjureDecoyRegistrarProbability
+	}
+
+	if config.ConjureDecoyRegistrarWidth != nil {
+		applyParameters[parameters.ConjureDecoyRegistrarWidth] = *config.ConjureDecoyRegistrarWidth
+	}
+
+	if config.ConjureDecoyRegistrarMinDelayMilliseconds != nil {
+		applyParameters[parameters.ConjureDecoyRegistrarMinDelay] = fmt.Sprintf("%dms", *config.ConjureDecoyRegistrarMinDelayMilliseconds)
+	}
+
+	if config.ConjureDecoyRegistrarMaxDelayMilliseconds != nil {
+		applyParameters[parameters.ConjureDecoyRegistrarMaxDelay] = fmt.Sprintf("%dms", *config.ConjureDecoyRegistrarMaxDelayMilliseconds)
+	}
+
+	// When adding new config dial parameters that may override tactics, also
+	// update setDialParametersHash.
+
 	return applyParameters
 }
 
@@ -1625,18 +1676,34 @@ func (config *Config) setDialParametersHash() {
 	// replay mechanism to detect when persisted dial parameters should
 	// be discarded due to conflicting config changes.
 	//
+	// With a couple of minor exceptions, configuring dial parameters via the
+	// config is intended for testing only, and so these parameters are expected
+	// to be present in test runs only. It remains an important case to discard
+	// replay dial parameters when test config parameters are varied.
+	//
+	//
+	// Hashing the parameter names detects some ambiguous hash cases, such as two
+	// consecutive int64 parameters, one omitted and one not, that are flipped.
+	// The serialization is not completely unambiguous, and the format is
+	// currently limited by legacy cases (not invalidating replay dial parameters
+	// for production clients is more important than invalidating for test runs).
+	// We cannot hash the entire config JSON as it contains non-dial parameter
+	// fields which may frequently change across runs.
+	//
 	// MD5 hash is used solely as a data checksum and not for any security
-	// purpose; serialization is not strictly unambiguous.
+	// purpose.
 
 	hash := md5.New()
 
 	if len(config.LimitTunnelProtocols) > 0 {
+		hash.Write([]byte("LimitTunnelProtocols"))
 		for _, protocol := range config.LimitTunnelProtocols {
 			hash.Write([]byte(protocol))
 		}
 	}
 
 	if len(config.InitialLimitTunnelProtocols) > 0 && config.InitialLimitTunnelProtocolsCandidateCount > 0 {
+		hash.Write([]byte("InitialLimitTunnelProtocols"))
 		for _, protocol := range config.InitialLimitTunnelProtocols {
 			hash.Write([]byte(protocol))
 		}
@@ -1644,12 +1711,14 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if len(config.LimitTLSProfiles) > 0 {
+		hash.Write([]byte("LimitTLSProfiles"))
 		for _, profile := range config.LimitTLSProfiles {
 			hash.Write([]byte(profile))
 		}
 	}
 
 	if len(config.LimitQUICVersions) > 0 {
+		hash.Write([]byte("LimitQUICVersions"))
 		for _, version := range config.LimitQUICVersions {
 			hash.Write([]byte(version))
 		}
@@ -1659,116 +1728,210 @@ func (config *Config) setDialParametersHash() {
 	// the replay dial parameters value applies. When set, external
 	// considerations apply.
 	if _, ok := config.CustomHeaders["User-Agent"]; ok {
+		hash.Write([]byte("CustomHeaders User-Agent"))
 		hash.Write([]byte{1})
 	}
 
 	if config.UpstreamProxyURL != "" {
+		hash.Write([]byte("UpstreamProxyURL"))
 		hash.Write([]byte(config.UpstreamProxyURL))
 	}
 
 	if config.TransformHostNameProbability != nil {
+		hash.Write([]byte("TransformHostNameProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.TransformHostNameProbability)
 	}
 
 	if config.FragmentorProbability != nil {
+		hash.Write([]byte("FragmentorProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.FragmentorProbability)
 	}
 
 	if len(config.FragmentorLimitProtocols) > 0 {
+		hash.Write([]byte("FragmentorLimitProtocols"))
 		for _, protocol := range config.FragmentorLimitProtocols {
 			hash.Write([]byte(protocol))
 		}
 	}
 
 	if config.FragmentorMinTotalBytes != nil {
+		hash.Write([]byte("FragmentorMinTotalBytes"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMinTotalBytes))
 	}
 
 	if config.FragmentorMaxTotalBytes != nil {
+		hash.Write([]byte("FragmentorMaxTotalBytes"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMaxTotalBytes))
 	}
 
 	if config.FragmentorMinWriteBytes != nil {
+		hash.Write([]byte("FragmentorMinWriteBytes"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMinWriteBytes))
 	}
 
 	if config.FragmentorMaxWriteBytes != nil {
+		hash.Write([]byte("FragmentorMaxWriteBytes"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMaxWriteBytes))
 	}
 
 	if config.FragmentorMinDelayMicroseconds != nil {
+		hash.Write([]byte("FragmentorMinDelayMicroseconds"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMinDelayMicroseconds))
 	}
 
 	if config.FragmentorMaxDelayMicroseconds != nil {
+		hash.Write([]byte("FragmentorMaxDelayMicroseconds"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.FragmentorMaxDelayMicroseconds))
 	}
 
 	if config.MeekTrafficShapingProbability != nil {
+		hash.Write([]byte("MeekTrafficShapingProbability"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.MeekTrafficShapingProbability))
 	}
 
 	if len(config.MeekTrafficShapingLimitProtocols) > 0 {
+		hash.Write([]byte("MeekTrafficShapingLimitProtocols"))
 		for _, protocol := range config.MeekTrafficShapingLimitProtocols {
 			hash.Write([]byte(protocol))
 		}
 	}
 
 	if config.MeekMinLimitRequestPayloadLength != nil {
+		hash.Write([]byte("MeekMinLimitRequestPayloadLength"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.MeekMinLimitRequestPayloadLength))
 	}
 
 	if config.MeekMaxLimitRequestPayloadLength != nil {
+		hash.Write([]byte("MeekMaxLimitRequestPayloadLength"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.MeekMaxLimitRequestPayloadLength))
 	}
 
 	if config.MeekRedialTLSProbability != nil {
+		hash.Write([]byte("MeekRedialTLSProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.MeekRedialTLSProbability)
 	}
 
 	if config.ObfuscatedSSHMinPadding != nil {
+		hash.Write([]byte("ObfuscatedSSHMinPadding"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.ObfuscatedSSHMinPadding))
 	}
 
 	if config.ObfuscatedSSHMaxPadding != nil {
+		hash.Write([]byte("ObfuscatedSSHMaxPadding"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.ObfuscatedSSHMaxPadding))
 	}
 
 	if config.LivenessTestMinUpstreamBytes != nil {
+		hash.Write([]byte("LivenessTestMinUpstreamBytes"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.LivenessTestMinUpstreamBytes))
 	}
 
 	if config.LivenessTestMaxUpstreamBytes != nil {
+		hash.Write([]byte("LivenessTestMaxUpstreamBytes"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.LivenessTestMaxUpstreamBytes))
 	}
 
 	if config.LivenessTestMinDownstreamBytes != nil {
+		hash.Write([]byte("LivenessTestMinDownstreamBytes"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.LivenessTestMinDownstreamBytes))
 	}
 
 	if config.LivenessTestMaxDownstreamBytes != nil {
+		hash.Write([]byte("LivenessTestMaxDownstreamBytes"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.LivenessTestMaxDownstreamBytes))
 	}
 
+	// Legacy case: these parameters are included in the hash unconditionally,
+	// and so will impact almost all production clients. These parameter names
+	// are not hashed since that would invalidate all replay dial parameters for
+	// existing clients whose hashes predate the inclusion of parameter names.
 	binary.Write(hash, binary.LittleEndian, config.NetworkLatencyMultiplierMin)
 	binary.Write(hash, binary.LittleEndian, config.NetworkLatencyMultiplierMax)
 	binary.Write(hash, binary.LittleEndian, config.NetworkLatencyMultiplierLambda)
 
 	if config.UseOnlyCustomTLSProfiles != nil {
+		hash.Write([]byte("UseOnlyCustomTLSProfiles"))
 		binary.Write(hash, binary.LittleEndian, *config.UseOnlyCustomTLSProfiles)
 	}
 
-	for _, customTLSProfile := range config.CustomTLSProfiles {
-		// Assumes consistent definition for a given profile name
-		hash.Write([]byte(customTLSProfile.Name))
+	if len(config.CustomTLSProfiles) > 0 {
+		hash.Write([]byte("CustomTLSProfiles"))
+		for _, customTLSProfile := range config.CustomTLSProfiles {
+			encodedCustomTLSProofile, _ := json.Marshal(customTLSProfile)
+			hash.Write(encodedCustomTLSProofile)
+		}
 	}
 
 	if config.SelectRandomizedTLSProfileProbability != nil {
+		hash.Write([]byte("SelectRandomizedTLSProfileProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.SelectRandomizedTLSProfileProbability)
 	}
 
 	if config.NoDefaultTLSSessionIDProbability != nil {
+		hash.Write([]byte("NoDefaultTLSSessionIDProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.NoDefaultTLSSessionIDProbability)
+	}
+
+	if len(config.CustomHostNameRegexes) > 0 {
+		hash.Write([]byte("CustomHostNameRegexes"))
+		for _, customHostNameRegex := range config.CustomHostNameRegexes {
+			hash.Write([]byte(customHostNameRegex))
+		}
+	}
+
+	if config.CustomHostNameProbability != nil {
+		hash.Write([]byte("CustomHostNameProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.CustomHostNameProbability)
+	}
+
+	if len(config.CustomHostNameLimitProtocols) > 0 {
+		hash.Write([]byte("CustomHostNameLimitProtocols"))
+		for _, protocol := range config.CustomHostNameLimitProtocols {
+			hash.Write([]byte(protocol))
+		}
+	}
+
+	if config.ConjureCachedRegistrationTTLSeconds != nil {
+		hash.Write([]byte("ConjureCachedRegistrationTTLSeconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureCachedRegistrationTTLSeconds))
+	}
+
+	if config.ConjureAPIRegistrarURL != "" {
+		hash.Write([]byte("ConjureAPIRegistrarURL"))
+		hash.Write([]byte(config.ConjureAPIRegistrarURL))
+	}
+
+	if len(config.ConjureAPIRegistrarFrontingSpecs) > 0 {
+		hash.Write([]byte("ConjureAPIRegistrarFrontingSpecs"))
+		for _, frontingSpec := range config.ConjureAPIRegistrarFrontingSpecs {
+			encodedFrontSpec, _ := json.Marshal(frontingSpec)
+			hash.Write(encodedFrontSpec)
+		}
+	}
+
+	if config.ConjureAPIRegistrarMinDelayMilliseconds != nil {
+		hash.Write([]byte("ConjureAPIRegistrarMinDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureAPIRegistrarMinDelayMilliseconds))
+	}
+
+	if config.ConjureAPIRegistrarMaxDelayMilliseconds != nil {
+		hash.Write([]byte("ConjureAPIRegistrarMaxDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureAPIRegistrarMaxDelayMilliseconds))
+	}
+
+	if config.ConjureDecoyRegistrarWidth != nil {
+		hash.Write([]byte("ConjureDecoyRegistrarWidth"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureDecoyRegistrarWidth))
+	}
+
+	if config.ConjureDecoyRegistrarMinDelayMilliseconds != nil {
+		hash.Write([]byte("ConjureDecoyRegistrarMinDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureDecoyRegistrarMinDelayMilliseconds))
+	}
+
+	if config.ConjureDecoyRegistrarMaxDelayMilliseconds != nil {
+		hash.Write([]byte("ConjureDecoyRegistrarMaxDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureDecoyRegistrarMaxDelayMilliseconds))
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

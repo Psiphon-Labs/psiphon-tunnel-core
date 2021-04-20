@@ -28,11 +28,13 @@ import (
 	"math/rand"
 	"net"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"golang.org/x/crypto/nacl/box"
@@ -253,7 +255,10 @@ func TestMeekResiliency(t *testing.T) {
 
 	relayWaitGroup := new(sync.WaitGroup)
 
+	var serverClientConn atomic.Value
+
 	clientHandler := func(_ string, conn net.Conn) {
+		serverClientConn.Store(conn)
 		name := "server"
 		relayWaitGroup.Add(1)
 		go func() {
@@ -342,7 +347,6 @@ func TestMeekResiliency(t *testing.T) {
 	// Relay data through meek while interrupting underlying TCP connections
 
 	name := "client"
-
 	relayWaitGroup.Add(1)
 	go func() {
 		defer relayWaitGroup.Done()
@@ -356,6 +360,14 @@ func TestMeekResiliency(t *testing.T) {
 	}()
 
 	relayWaitGroup.Wait()
+
+	// Check for multiple underlying connections
+
+	metrics := serverClientConn.Load().(common.MetricsSource).GetMetrics()
+	count := metrics["meek_underlying_connection_count"].(int64)
+	if count <= 1 {
+		t.Fatalf("unexpected meek_underlying_connection_count: %d", count)
+	}
 
 	// Graceful shutdown
 
