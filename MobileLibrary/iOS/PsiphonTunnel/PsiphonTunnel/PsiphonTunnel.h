@@ -284,7 +284,7 @@ WWAN or vice versa or VPN state changed
  @param reason The reason for the alert.
  @param subject Additional context or classification of the reason; blank for none.
  */
-- (void)onServerAlert:(NSString * _Nonnull)reason :(NSString * _Nonnull)subject;
+- (void)onServerAlert:(NSString * _Nonnull)reason :(NSString * _Nonnull)subject :(NSArray * _Nonnull)actionURLs;
 
 @end
 

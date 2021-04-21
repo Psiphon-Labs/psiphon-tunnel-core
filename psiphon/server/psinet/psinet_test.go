@@ -62,6 +62,9 @@ func TestDatabase(t *testing.T) {
                         "url" : "DEFAULT-MOBILE-HOME-PAGE-URL?client_region=XX&client_asn=XX"
                      }]
                 },
+                "alert_action_urls" : {
+                    "ALERT-REASON-1" : ["SPONSOR-ALERT-1-ACTION-URL?client_region=XX"]
+                },
                 "https_request_regexes" : [{
                     "regex" : "REGEX-VALUE",
                     "replace" : "REPLACE-VALUE"
@@ -77,6 +80,11 @@ func TestDatabase(t *testing.T) {
         },
 
         "default_sponsor_id" : "SPONSOR-ID",
+
+        "default_alert_action_urls" : {
+            "ALERT-REASON-1" : ["DEFAULT-ALERT-1-ACTION-URL?client_region=XX"],
+            "ALERT-REASON-2" : ["DEFAULT-ALERT-2-ACTION-URL?client_region=XX"]
+        },
 
         "valid_server_entry_tags" : {
             "SERVER-ENTRY-TAG" : true
@@ -128,6 +136,28 @@ func TestDatabase(t *testing.T) {
 			homepages := db.GetHomepages(testCase.sponsorID, testCase.clientRegion, testCase.clientASN, testCase.isMobile)
 			if len(homepages) != 1 || homepages[0] != testCase.expectedURL {
 				t.Fatalf("unexpected home page: %+v", homepages)
+			}
+		})
+	}
+
+	alertActionURLTestCases := []struct {
+		alertReason      string
+		sponsorID        string
+		expectedURLCount int
+		expectedURL      string
+	}{
+		{"ALERT-REASON-1", "SPONSOR-ID", 1, "SPONSOR-ALERT-1-ACTION-URL?client_region=CLIENT-REGION"},
+		{"ALERT-REASON-1", "UNCONFIGURED-SPONSOR-ID", 1, "DEFAULT-ALERT-1-ACTION-URL?client_region=CLIENT-REGION"},
+		{"ALERT-REASON-2", "SPONSOR-ID", 1, "DEFAULT-ALERT-2-ACTION-URL?client_region=CLIENT-REGION"},
+		{"ALERT-REASON-2", "UNCONFIGURED-SPONSOR-ID", 1, "DEFAULT-ALERT-2-ACTION-URL?client_region=CLIENT-REGION"},
+		{"UNCONFIGURED-ALERT-REASON", "SPONSOR-ID", 0, ""},
+	}
+
+	for _, testCase := range alertActionURLTestCases {
+		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
+			URLs := db.GetAlertActionURLs(testCase.alertReason, testCase.sponsorID, "CLIENT-REGION", "")
+			if len(URLs) != testCase.expectedURLCount || (len(URLs) > 0 && URLs[0] != testCase.expectedURL) {
+				t.Fatalf("unexpected URLs: %d %+v, %+v", testCase.expectedURLCount, testCase.expectedURL, URLs)
 			}
 		})
 	}
