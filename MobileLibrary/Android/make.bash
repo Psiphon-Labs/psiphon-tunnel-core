@@ -103,7 +103,7 @@ yes | cp -f PsiphonTunnel/libs/x86/libtun2socks.so build-tmp/psi/jni/x86/libtun2
 mkdir -p build-tmp/psi/res/xml
 yes | cp -f PsiphonTunnel/ca_psiphon_psiphontunnel_backup_rules.xml build-tmp/psi/res/xml/ca_psiphon_psiphontunnel_backup_rules.xml
 
-javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-23/android.jar -source 1.8 -target 1.8 -classpath build-tmp/psi/classes.jar PsiphonTunnel/PsiphonTunnel.java
+javac -d build-tmp -bootclasspath $ANDROID_HOME/platforms/android-26/android.jar -source 1.8 -target 1.8 -classpath build-tmp/psi/classes.jar PsiphonTunnel/PsiphonTunnel.java
 if [ $? != 0 ]; then
   echo "..'javac' compiling PsiphonTunnel failed, exiting"
   exit $?

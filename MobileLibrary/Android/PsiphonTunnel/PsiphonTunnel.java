@@ -24,6 +24,7 @@ import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
 import android.net.NetworkRequest;
 import android.net.VpnService;
@@ -134,6 +135,7 @@ public class PsiphonTunnel {
     private AtomicReference<String> mClientPlatformPrefix;
     private AtomicReference<String> mClientPlatformSuffix;
     private final boolean mShouldRouteThroughTunnelAutomatically;
+    private final NetworkMonitor mNetworkMonitor;
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // psi.Psi and tun2socks implementations each contain global state.
@@ -185,6 +187,16 @@ public class PsiphonTunnel {
         mClientPlatformPrefix = new AtomicReference<String>("");
         mClientPlatformSuffix = new AtomicReference<String>("");
         mShouldRouteThroughTunnelAutomatically = shouldRouteThroughTunnelAutomatically;
+        mNetworkMonitor = new NetworkMonitor(new NetworkMonitor.NetworkChangeListener() {
+            @Override
+            public void onChanged() {
+                try {
+                    reconnectPsiphon();
+                } catch (Exception e) {
+                    mHostService.onDiagnosticMessage("reconnect error: " + e);
+                }
+            }
+        });
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -794,11 +806,13 @@ public class PsiphonTunnel {
             throw new Exception("failed to start Psiphon library", e);
         }
 
+        mNetworkMonitor.start(mHostService.getContext());
         mHostService.onDiagnosticMessage("Psiphon library started");
     }
 
     private void stopPsiphon() {
         mHostService.onDiagnosticMessage("stopping Psiphon library");
+        mNetworkMonitor.stop(mHostService.getContext());
         Psi.stop();
         mHostService.onDiagnosticMessage("Psiphon library stopped");
     }
@@ -1346,6 +1360,147 @@ public class PsiphonTunnel {
         }
         public Exception(String message, Throwable cause) {
             super(message + ": " + cause.getMessage());
+        }
+    }
+
+    //----------------------------------------------------------------------------------------------
+    // Network connectivity monitor
+    //----------------------------------------------------------------------------------------------
+
+    private static class NetworkMonitor {
+        private final NetworkChangeListener listener;
+        private ConnectivityManager.NetworkCallback networkCallback;
+
+        public NetworkMonitor(NetworkChangeListener listener) {
+            this.listener = listener;
+        }
+
+        private void start(Context context) {
+            // Need API 21(LOLLIPOP)+ for ConnectivityManager.NetworkCallback
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+                return;
+            }
+            ConnectivityManager connectivityManager =
+                    (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (connectivityManager == null) {
+                return;
+            }
+            networkCallback = new ConnectivityManager.NetworkCallback() {
+                boolean isInitialState = true;
+                private Network currentActiveNetwork;
+
+                private void consumeActiveNetwork(Network network) {
+                    if (isInitialState) {
+                        isInitialState = false;
+                        currentActiveNetwork = network;
+                        return;
+                    }
+
+                    if (!network.equals(currentActiveNetwork)) {
+                        currentActiveNetwork = network;
+                        if (listener != null) {
+                            listener.onChanged();
+                        }
+                    }
+                }
+
+                private void consumeLostNetwork(Network network) {
+                    if (network.equals(currentActiveNetwork)) {
+                        currentActiveNetwork = null;
+                        if (listener != null) {
+                            listener.onChanged();
+                        }
+                    }
+                }
+
+                @Override
+                public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+                    super.onCapabilitiesChanged(network, capabilities);
+
+                    // Need API 23(M)+ for NET_CAPABILITY_VALIDATED
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                        return;
+                    }
+
+                    // https://developer.android.com/reference/android/net/NetworkCapabilities#NET_CAPABILITY_VALIDATED
+                    // Indicates that connectivity on this network was successfully validated.
+                    // For example, for a network with NET_CAPABILITY_INTERNET, it means that Internet connectivity was
+                    // successfully detected.
+                    if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                        consumeActiveNetwork(network);
+                    }
+                }
+
+                @Override
+                public void onAvailable(Network network) {
+                    super.onAvailable(network);
+
+                    // Skip on API 26(O)+ because onAvailable is guaranteed to be followed by
+                    // onCapabilitiesChanged
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        return;
+                    }
+                    consumeActiveNetwork(network);
+                }
+
+                @Override
+                public void onLost(Network network) {
+                    super.onLost(network);
+                    consumeLostNetwork(network);
+                }
+            };
+
+            try {
+                // When searching for a network to satisfy a request, all capabilities requested must be satisfied.
+                NetworkRequest.Builder builder = new NetworkRequest.Builder()
+                        // Indicates that this network should be able to reach the internet.
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+
+                if (mPsiphonTunnel.mVpnMode.get()) {
+                    // If we are in the VPN mode then ensure we monitor only the VPN's underlying
+                    // active networks and not self.
+                    builder.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
+                } else {
+                    // If we are NOT in the VPN mode then monitor default active networks with the
+                    // Internet capability, including VPN, to ensure we won't trigger a reconnect in
+                    // case the VPN is up while the system switches the underlying network.
+                    builder.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
+                }
+
+                NetworkRequest networkRequest = builder.build();
+                connectivityManager.requestNetwork(networkRequest, networkCallback);
+            } catch (RuntimeException ignored) {
+                // Could be a security exception or any other runtime exception on customized firmwares.
+                networkCallback = null;
+            }
+        }
+
+        private void stop(Context context) {
+            if (networkCallback == null) {
+                return;
+            }
+            // Need API 21(LOLLIPOP)+ for ConnectivityManager.NetworkCallback
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+                return;
+            }
+            ConnectivityManager connectivityManager =
+                    (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (connectivityManager == null) {
+                return;
+            }
+            // Note: ConnectivityManager.unregisterNetworkCallback() may throw
+            // "java.lang.IllegalArgumentException: NetworkCallback was not registered".
+            // This scenario should be handled in the start() above but we'll add a try/catch
+            // anyway to match the start's call to ConnectivityManager.registerNetworkCallback()
+            try {
+                connectivityManager.unregisterNetworkCallback(networkCallback);
+            } catch (RuntimeException ignored) {
+            }
+            networkCallback = null;
+        }
+
+        public interface NetworkChangeListener {
+            void onChanged();
         }
     }
 }
