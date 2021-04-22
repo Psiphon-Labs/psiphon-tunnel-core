@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -653,11 +654,12 @@ type runServerConfig struct {
 }
 
 var (
-	testSSHClientVersions   = []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
-	testUserAgents          = []string{"ua1", "ua2", "ua3"}
-	testNetworkType         = "WIFI"
-	testCustomHostNameRegex = `[a-z0-9]{5,10}\.example\.org`
-	testClientFeatures      = []string{"feature 1", "feature 2"}
+	testSSHClientVersions                = []string{"SSH-2.0-A", "SSH-2.0-B", "SSH-2.0-C"}
+	testUserAgents                       = []string{"ua1", "ua2", "ua3"}
+	testNetworkType                      = "WIFI"
+	testCustomHostNameRegex              = `[a-z0-9]{5,10}\.example\.org`
+	testClientFeatures                   = []string{"feature 1", "feature 2"}
+	testDisallowedTrafficAlertActionURLs = []string{"https://example.org/disallowed"}
 )
 
 var serverRuns = 0
@@ -1153,8 +1155,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				}
 
 			case "ServerAlert":
+
 				reason := payload["reason"].(string)
-				if reason == protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC {
+				actionURLsPayload := payload["actionURLs"].([]interface{})
+				actionURLs := make([]string, len(actionURLsPayload))
+				for i, value := range actionURLsPayload {
+					actionURLs[i] = value.(string)
+				}
+				if reason == protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC &&
+					reflect.DeepEqual(actionURLs, testDisallowedTrafficAlertActionURLs) {
 					sendNotificationReceived(serverAlertDisallowedNoticesEmitted)
 				}
 
@@ -1933,11 +1942,16 @@ func pavePsinetDatabaseFile(
                 }
             }
         },
+        "default_alert_action_urls" : {
+            "%s": %s
+        },
         "valid_server_entry_tags" : {
             %s
         }
     }
 	`
+
+	actionURLsJSON, _ := json.Marshal(testDisallowedTrafficAlertActionURLs)
 
 	validServerEntryTagsJSON := ""
 	for _, serverEntryTag := range validServerEntryTags {
@@ -1952,6 +1966,8 @@ func pavePsinetDatabaseFile(
 		defaultSponsorID,
 		sponsorID,
 		expectedHomepageURL,
+		protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC,
+		actionURLsJSON,
 		validServerEntryTagsJSON)
 
 	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)

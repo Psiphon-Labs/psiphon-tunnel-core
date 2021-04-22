@@ -1083,10 +1083,15 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             [self logMessage:[NSString stringWithFormat: @"ServerAlert notice missing data.reason or data.subject: %@", noticeJSON]];
             return;
         }
+        id actionURLs = [notice valueForKeyPath:@"data.actionURLs"];
+        if (![actionURLs isKindOfClass:[NSArray class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ServerAlert notice missing data.actionURLs: %@", noticeJSON]];
+            return;
+        }
 
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerAlert::)]) {
             dispatch_sync(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onServerAlert:reason:subject];
+                [self.tunneledAppDelegate onServerAlert:reason:subject:actionURLs];
             });
         }
     }
