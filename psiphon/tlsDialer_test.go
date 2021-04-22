@@ -336,9 +336,6 @@ func initTestCertificatesAndWebServer(
 
 	// Run an HTTPS server with the server certificate.
 
-	dialAddr := "127.0.0.1:8000"
-	serverAddr := fmt.Sprintf("%s:8000", serverName)
-
 	serverKeyPair, err := tls.X509KeyPair(
 		pemServerCertificate, pemServerPrivateKey)
 	if err != nil {
@@ -351,21 +348,32 @@ func initTestCertificatesAndWebServer(
 	})
 
 	server := &http.Server{
-		Addr: dialAddr,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{serverKeyPair},
-		},
 		Handler: mux,
 	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen failed: %v", err)
+	}
+	dialAddr := listener.Addr().String()
+	_, port, _ := net.SplitHostPort(dialAddr)
+	serverAddr := fmt.Sprintf("%s:%s", serverName, port)
+
+	listener = tls.NewListener(
+		listener,
+		&tls.Config{
+			Certificates: []tls.Certificate{serverKeyPair},
+		})
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		wg.Done()
-		server.ListenAndServeTLS("", "")
+		server.Serve(listener)
 	}()
 
 	shutdown := func() {
+		listener.Close()
 		server.Shutdown(context.Background())
 		wg.Wait()
 	}
