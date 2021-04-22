@@ -45,11 +45,12 @@ const (
 type Database struct {
 	common.ReloadableFile
 
-	Sponsors             map[string]*Sponsor        `json:"sponsors"`
-	Versions             map[string][]ClientVersion `json:"client_versions"`
-	DefaultSponsorID     string                     `json:"default_sponsor_id"`
-	ValidServerEntryTags map[string]bool            `json:"valid_server_entry_tags"`
-	DiscoveryServers     []*DiscoveryServer         `json:"discovery_servers"`
+	Sponsors               map[string]*Sponsor        `json:"sponsors"`
+	Versions               map[string][]ClientVersion `json:"client_versions"`
+	DefaultSponsorID       string                     `json:"default_sponsor_id"`
+	DefaultAlertActionURLs map[string][]string        `json:"default_alert_action_urls"`
+	ValidServerEntryTags   map[string]bool            `json:"valid_server_entry_tags"`
+	DiscoveryServers       []*DiscoveryServer         `json:"discovery_servers"`
 
 	fileModTime time.Time
 }
@@ -63,6 +64,7 @@ type Sponsor struct {
 	ID                  string                `json:"id"`
 	HomePages           map[string][]HomePage `json:"home_pages"`
 	MobileHomePages     map[string][]HomePage `json:"mobile_home_pages"`
+	AlertActionURLs     map[string][]string   `json:"alert_action_urls"`
 	HttpsRequestRegexes []HttpsRequestRegex   `json:"https_request_regexes"`
 }
 
@@ -100,6 +102,7 @@ func NewDatabase(filename string) (*Database, error) {
 			database.Sponsors = newDatabase.Sponsors
 			database.Versions = newDatabase.Versions
 			database.DefaultSponsorID = newDatabase.DefaultSponsorID
+			database.DefaultAlertActionURLs = newDatabase.DefaultAlertActionURLs
 			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
 			database.DiscoveryServers = newDatabase.DiscoveryServers
 			database.fileModTime = fileModTime
@@ -193,6 +196,37 @@ func homepageQueryParameterSubstitution(
 	return strings.Replace(
 		strings.Replace(url, "client_region=XX", "client_region="+clientRegion, 1),
 		"client_asn=XX", "client_asn="+clientASN, 1)
+}
+
+// GetAlertActionURLs returns a list of alert action URLs for the specified
+// alert reason and sponsor.
+func (db *Database) GetAlertActionURLs(
+	alertReason, sponsorID, clientRegion, clientASN string) []string {
+
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
+
+	// Prefer URLs from the Sponsor.AlertActionURLs. When there are no sponsor
+	// URLs, then select from Database.DefaultAlertActionURLs.
+
+	actionURLs := []string{}
+
+	sponsor := db.Sponsors[sponsorID]
+	if sponsor != nil {
+		for _, URL := range sponsor.AlertActionURLs[alertReason] {
+			actionURLs = append(
+				actionURLs, homepageQueryParameterSubstitution(URL, clientRegion, clientASN))
+		}
+	}
+
+	if len(actionURLs) == 0 {
+		for _, URL := range db.DefaultAlertActionURLs[alertReason] {
+			actionURLs = append(
+				actionURLs, homepageQueryParameterSubstitution(URL, clientRegion, clientASN))
+		}
+	}
+
+	return actionURLs
 }
 
 // GetUpgradeClientVersion returns a new client version when an upgrade is

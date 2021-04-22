@@ -486,8 +486,9 @@ type RandomStreamRequest struct {
 }
 
 type AlertRequest struct {
-	Reason  string `json:"reason"`
-	Subject string `json:"subject"`
+	Reason     string   `json:"reason"`
+	Subject    string   `json:"subject"`
+	ActionURLs []string `json:"action"`
 }
 
 func DeriveSSHServerKEXPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
