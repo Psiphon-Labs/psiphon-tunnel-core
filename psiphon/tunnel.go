@@ -809,12 +809,15 @@ func dialTunnel(
 		// will be assigned the original public IP on network A; so there's some
 		// chance the registration cannot be reused.
 
-		cacheKey := dialParams.NetworkID + "-" + dialParams.ServerEntry.GetDiagnosticID()
+		diagnosticID := dialParams.ServerEntry.GetDiagnosticID()
+
+		cacheKey := dialParams.NetworkID + "-" + diagnosticID
 
 		conjureConfig := &refraction.ConjureConfig{
 			RegistrationCacheTTL: dialParams.ConjureCachedRegistrationTTL,
 			RegistrationCacheKey: cacheKey,
 			Transport:            dialParams.ConjureTransport,
+			DiagnosticID:         diagnosticID,
 			Logger:               NoticeCommonLogger(),
 		}
 
