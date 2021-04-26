@@ -53,3 +53,6 @@ func DialTapDance(_ context.Context, _ bool, _ string, _ common.NetDialer, _ str
 func DialConjure(_ context.Context, _ bool, _ string, _ common.NetDialer, _ string, _ *ConjureConfig) (net.Conn, error) {
 	return nil, errors.TraceNew("operation is not enabled")
 }
+
+func DeleteCachedConjureRegistration(_ *ConjureConfig) {
+}
