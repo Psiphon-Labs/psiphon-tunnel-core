@@ -14,6 +14,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	pb "github.com/refraction-networking/gotapdance/protobuf"
+	ps "github.com/refraction-networking/gotapdance/tapdance/phantoms"
 )
 
 type assets struct {
@@ -38,53 +39,75 @@ var assetsOnce sync.Once
 // First access to singleton sets path. Assets(), if called
 // before SetAssetsDir() sets path to "./assets/"
 func Assets() *assets {
-	_initAssets := func() { initAssets("./assets/") }
+	var err error
+	_initAssets := func() { err = initAssets("./assets/") }
 	assetsOnce.Do(_initAssets)
+	if err != nil {
+		Logger().Warnf("error getting assets: %v", err)
+	}
 	return assetsInstance
 }
 
 // AssetsSetDir sets the directory to read assets from.
 // Functionally equivalent to Assets() after initialization, unless dir changes.
-func AssetsSetDir(dir string) *assets {
-	_initAssets := func() { initAssets(dir) }
+func AssetsSetDir(dir string) (*assets, error) {
+	var err error
+	_initAssets := func() { err = initAssets(dir) }
 	if assetsInstance != nil {
 		assetsInstance.Lock()
 		defer assetsInstance.Unlock()
 		if dir != assetsInstance.path {
-			Logger().Warnf("Assets path changed %s->%s. (Re)initializing.\n",
-				assetsInstance.path, dir)
+
+			if _, err := os.Stat(dir); err != nil {
+				Logger().Warnf("Assets path unchanged %v.\n", err)
+				return assetsInstance, err
+			}
+			Logger().Warnf("Assets path changed %s->%s. (Re)initializing", assetsInstance.path, dir)
 			assetsInstance.path = dir
-			assetsInstance.readConfigs()
-			return assetsInstance
+			err = assetsInstance.readConfigs()
+			return assetsInstance, err
 		}
 	}
 	assetsOnce.Do(_initAssets)
-	return assetsInstance
+	return assetsInstance, err
 }
 
 func getDefaultKey() []byte {
-	// keyStr := "515868be7f45ab6f310afed4b229b7a479fc9fde553dea4ccdb369ab1899e70c"
 	keyStr := "a1cb97be697c5ed5aefd78ffa4db7e68101024603511e40a89951bc158807177"
 	key := make([]byte, hex.DecodedLen(len(keyStr)))
 	hex.Decode(key, []byte(keyStr))
 	return key
 }
 
-func initAssets(path string) {
+func getDefaultTapdanceKey() []byte {
+	keyStr := "515868be7f45ab6f310afed4b229b7a479fc9fde553dea4ccdb369ab1899e70c"
+	key := make([]byte, hex.DecodedLen(len(keyStr)))
+	hex.Decode(key, []byte(keyStr))
+	return key
+}
+
+func initAssets(path string) error {
 	var defaultDecoys = []*pb.TLSDecoySpec{
 		pb.InitTLSDecoySpec("192.122.190.104", "tapdance1.freeaeskey.xyz"),
 		pb.InitTLSDecoySpec("192.122.190.105", "tapdance2.freeaeskey.xyz"),
 		pb.InitTLSDecoySpec("192.122.190.106", "tapdance3.freeaeskey.xyz"),
 	}
 
-	defaultKey := getDefaultKey()
+	defaultKey := getDefaultTapdanceKey()
+	defaultConjureKey := getDefaultKey()
+
 	defualtKeyType := pb.KeyType_AES_GCM_128
 	defaultPubKey := pb.PubKey{Key: defaultKey, Type: &defualtKeyType}
-	defaultGeneration := uint32(0)
+	defaultConjurePubKey := pb.PubKey{Key: defaultConjureKey, Type: &defualtKeyType}
+
+	defaultGeneration := uint32(1)
 	defaultDecoyList := pb.DecoyList{TlsDecoys: defaultDecoys}
-	defaultClientConf := pb.ClientConf{DecoyList: &defaultDecoyList,
+	defaultClientConf := pb.ClientConf{
+		DecoyList:     &defaultDecoyList,
 		DefaultPubkey: &defaultPubKey,
-		Generation:    &defaultGeneration}
+		ConjurePubkey: &defaultConjurePubKey,
+		Generation:    &defaultGeneration,
+	}
 
 	assetsInstance = &assets{
 		path:               path,
@@ -93,7 +116,8 @@ func initAssets(path string) {
 		filenameClientConf: "ClientConf",
 		socksAddr:          "",
 	}
-	assetsInstance.readConfigs()
+	err := assetsInstance.readConfigs()
+	return err
 }
 
 func (a *assets) GetAssetsDir() string {
@@ -102,7 +126,7 @@ func (a *assets) GetAssetsDir() string {
 	return a.path
 }
 
-func (a *assets) readConfigs() {
+func (a *assets) readConfigs() error {
 	readRoots := func(filename string) error {
 		rootCerts, err := ioutil.ReadFile(filename)
 		if err != nil {
@@ -137,18 +161,21 @@ func (a *assets) readConfigs() {
 	rootsFilename := path.Join(a.path, a.filenameRoots)
 	err = readRoots(rootsFilename)
 	if err != nil {
-		Logger().Warningln("Assets: failed to read root ca file: " + err.Error())
+		Logger().Warn("Assets: failed to read root ca file: " + err.Error())
 	} else {
 		Logger().Infoln("X.509 root CAs successfully read from " + rootsFilename)
 	}
 
+	// Parse ClientConf for Decoys and Phantoms List
 	clientConfFilename := path.Join(a.path, a.filenameClientConf)
 	err = readClientConf(clientConfFilename)
 	if err != nil {
-		Logger().Warningln("Assets: failed to read ClientConf file: " + err.Error())
+		Logger().Warn("Assets: failed to read ClientConf file: " + err.Error())
 	} else {
 		Logger().Infoln("Client config successfully read from " + clientConfFilename)
 	}
+
+	return err
 }
 
 // Picks random decoy, returns Server Name Indication and addr in format ipv4:port
@@ -360,4 +387,35 @@ func (a *assets) saveClientConf() error {
 // SetStatsSocksAddr - Provide a socks address for reporting stats from the client in the form "addr:port"
 func (a *assets) SetStatsSocksAddr(addr string) {
 	a.socksAddr = addr
+}
+
+// GetPhantomSubnets -
+func (a *assets) GetPhantomSubnets() *pb.PhantomSubnetsList {
+	a.RLock()
+	defer a.RUnlock()
+
+	if a.config == nil {
+		return ps.GetDefaultPhantomSubnets()
+	}
+
+	if phantomSubnetsList := a.config.GetPhantomSubnetsList(); phantomSubnetsList != nil {
+		return phantomSubnetsList
+	}
+
+	return ps.GetDefaultPhantomSubnets()
+}
+
+// SetPhantomSubnets -
+func (a *assets) SetPhantomSubnets(subnetConf *pb.PhantomSubnetsList) error {
+	a.Lock()
+	defer a.Unlock()
+
+	if a.config == nil {
+		a.config = &pb.ClientConf{}
+	}
+
+	a.config.PhantomSubnetsList = subnetConf
+
+	err := a.saveClientConf()
+	return err
 }

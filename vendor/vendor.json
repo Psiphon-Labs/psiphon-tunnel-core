@@ -550,40 +550,40 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "TtIN/5Wshp+L7WdSLIRLlH+QzYI=",
+			"checksumSHA1": "Tq3U98W2uwIgjWSjH7tqBonGjBE=",
 			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "3b9150fdb0ba53a01f58adbfe29b1e49b0ccd2db",
-			"revisionTime": "2021-02-22T17:27:12Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
 			"checksumSHA1": "ObZZJpjQl2BISlIiES82BW8jbEE=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/edwards25519",
-			"revision": "3b9150fdb0ba53a01f58adbfe29b1e49b0ccd2db",
-			"revisionTime": "2021-02-22T17:27:12Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
 			"checksumSHA1": "VoyDh1KIIVE+OJbehDNJ91tf4Vw=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/extra25519",
-			"revision": "3b9150fdb0ba53a01f58adbfe29b1e49b0ccd2db",
-			"revisionTime": "2021-02-22T17:27:12Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
-			"checksumSHA1": "0KryOirNgY6/K0W6tNDH97emng4=",
+			"checksumSHA1": "J0kNvH3uYnwnPEJQhaa5Y1TcbZI=",
 			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "3b9150fdb0ba53a01f58adbfe29b1e49b0ccd2db",
-			"revisionTime": "2021-02-22T17:27:12Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
-			"checksumSHA1": "oV3lQZAOagZeIGr78it5ZDaYeIM=",
+			"checksumSHA1": "rPJAZXxZ5w5+ZnIPZGDFyp/uO6w=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "3b9150fdb0ba53a01f58adbfe29b1e49b0ccd2db",
-			"revisionTime": "2021-02-22T17:27:12Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
-			"checksumSHA1": "fv2fYuM1BN+zb4/TEktcVTqKhnI=",
+			"checksumSHA1": "NiwZ/PirZniVT64D03KOS6UFMGU=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance/phantoms",
-			"revision": "3b9150fdb0ba53a01f58adbfe29b1e49b0ccd2db",
-			"revisionTime": "2021-02-22T17:27:12Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
 			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",
