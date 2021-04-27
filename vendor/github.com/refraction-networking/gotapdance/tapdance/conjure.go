@@ -948,15 +948,9 @@ func SelectDecoys(sharedSecret []byte, version uint, width uint) ([]*pb.TLSDecoy
 // 	{subnet: "35.8.0.0/16", weight: 10.0},
 // }
 
-var phantomSubnets = ps.SubnetConfig{
-	WeightedSubnets: []ps.ConjurePhantomSubnet{
-		{Weight: 9, Subnets: []string{"192.122.190.0/24", "2001:48a8:687f:1::/64"}},
-		{Weight: 1, Subnets: []string{"141.219.0.0/16", "35.8.0.0/16"}},
-	},
-}
-
 // SelectPhantom - select one phantom IP address based on shared secret
 func SelectPhantom(seed []byte, support uint) (*net.IP, *net.IP, error) {
+	phantomSubnets := Assets().GetPhantomSubnets()
 	switch support {
 	case v4:
 		phantomIPv4, err := ps.SelectPhantom(seed, phantomSubnets, ps.V4Only, true)

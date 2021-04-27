@@ -10,21 +10,13 @@ import (
 	"net"
 
 	wr "github.com/mroth/weightedrand"
+	pb "github.com/refraction-networking/gotapdance/protobuf"
 )
-
-type ConjurePhantomSubnet struct {
-	Weight  float32
-	Subnets []string
-}
-
-type SubnetConfig struct {
-	WeightedSubnets []ConjurePhantomSubnet
-}
 
 // getSubnets - return EITHER all subnet strings as one composite array if we are
 //		selecting unweighted, or return the array associated with the (seed) selected
 //		array of subnet strings based on the associated weights
-func (sc *SubnetConfig) getSubnets(seed []byte, weighted bool) []string {
+func getSubnets(sc *pb.PhantomSubnetsList, seed []byte, weighted bool) []string {
 
 	var out []string = []string{}
 
@@ -36,16 +28,39 @@ func (sc *SubnetConfig) getSubnets(seed []byte, weighted bool) []string {
 		}
 		rand.Seed(seedInt)
 
-		choices := make([]wr.Choice, 0, len(sc.WeightedSubnets))
-		for _, cjSubnet := range sc.WeightedSubnets {
-			choices = append(choices, wr.Choice{Item: cjSubnet.Subnets, Weight: uint(cjSubnet.Weight)})
+		weightedSubnets := sc.GetWeightedSubnets()
+		if weightedSubnets == nil {
+			return []string{}
 		}
+
+		choices := make([]wr.Choice, 0, len(weightedSubnets))
+
+		// fmt.Println("DEBUG - len = ", len(weightedSubnets))
+		for _, cjSubnet := range weightedSubnets {
+			weight := cjSubnet.GetWeight()
+			subnets := cjSubnet.GetSubnets()
+			if subnets == nil {
+				continue
+			}
+			// fmt.Println("Adding Choice", subnets, weight)
+			choices = append(choices, wr.Choice{Item: subnets, Weight: uint(weight)})
+		}
+
 		c, _ := wr.NewChooser(choices...)
+		if c == nil {
+			return []string{}
+		}
+
 		out = c.Pick().([]string)
 	} else {
 
+		weightedSubnets := sc.GetWeightedSubnets()
+		if weightedSubnets == nil {
+			return []string{}
+		}
+
 		// Use unweighted config for subnets, concat all into one array and return.
-		for _, cjSubnet := range sc.WeightedSubnets {
+		for _, cjSubnet := range weightedSubnets {
 			for _, subnet := range cjSubnet.Subnets {
 				out = append(out, subnet)
 			}
@@ -70,13 +85,18 @@ func V4Only(obj []*net.IPNet) ([]*net.IPNet, error) {
 	return out, nil
 }
 
+// V6Only - a functor for transforming the subnet list to only include IPv6 subnets
 func V6Only(obj []*net.IPNet) ([]*net.IPNet, error) {
 	var out []*net.IPNet = []*net.IPNet{}
 
 	for _, _net := range obj {
-		if ipv6net := _net.IP.To16(); ipv6net != nil {
-			out = append(out, _net)
+		if _net.IP == nil {
+			continue
 		}
+		if net := _net.IP.To4(); net != nil {
+			continue
+		}
+		out = append(out, _net)
 	}
 	return out, nil
 }
@@ -207,9 +227,9 @@ func selectIPAddr(seed []byte, subnets []*net.IPNet) (*net.IP, error) {
 }
 
 // SelectPhantom - select one phantom IP address based on shared secret
-func SelectPhantom(seed []byte, subnets SubnetConfig, transform SubnetFilter, weighted bool) (*net.IP, error) {
+func SelectPhantom(seed []byte, subnetsList *pb.PhantomSubnetsList, transform SubnetFilter, weighted bool) (*net.IP, error) {
 
-	s, err := parseSubnets(subnets.getSubnets(seed, weighted))
+	s, err := parseSubnets(getSubnets(subnetsList, seed, weighted))
 	if err != nil {
 		return nil, fmt.Errorf("Failed to parse subnets: %v", err)
 	}
@@ -225,11 +245,29 @@ func SelectPhantom(seed []byte, subnets SubnetConfig, transform SubnetFilter, we
 }
 
 // SelectPhantomUnweighted - select one phantom IP address based on shared secret
-func SelectPhantomUnweighted(seed []byte, subnets SubnetConfig, transform SubnetFilter) (*net.IP, error) {
+func SelectPhantomUnweighted(seed []byte, subnets *pb.PhantomSubnetsList, transform SubnetFilter) (*net.IP, error) {
 	return SelectPhantom(seed, subnets, transform, false)
 }
 
 // SelectPhantomWeighted - select one phantom IP address based on shared secret
-func SelectPhantomWeighted(seed []byte, subnets SubnetConfig, transform SubnetFilter) (*net.IP, error) {
+func SelectPhantomWeighted(seed []byte, subnets *pb.PhantomSubnetsList, transform SubnetFilter) (*net.IP, error) {
 	return SelectPhantom(seed, subnets, transform, true)
+}
+
+// GetDefaultPhantomSubnets implements the
+func GetDefaultPhantomSubnets() *pb.PhantomSubnetsList {
+	var w1 = uint32(9.0)
+	var w2 = uint32(1.0)
+	return &pb.PhantomSubnetsList{
+		WeightedSubnets: []*pb.PhantomSubnets{
+			{
+				Weight:  &w1,
+				Subnets: []string{"192.122.190.0/24", "2001:48a8:687f:1::/64"},
+			},
+			{
+				Weight:  &w2,
+				Subnets: []string{"141.219.0.0/16", "35.8.0.0/16"},
+			},
+		},
+	}
 }
