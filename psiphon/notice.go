@@ -1103,13 +1103,7 @@ func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
 func listCommonFields(fields common.LogFields) []interface{} {
 	fieldList := make([]interface{}, 0)
 	for name, value := range fields {
-		var formattedValue string
-		if err, ok := value.(error); ok {
-			formattedValue = err.Error()
-		} else {
-			formattedValue = fmt.Sprintf("%#v", value)
-		}
-		fieldList = append(fieldList, name, formattedValue)
+		fieldList = append(fieldList, name, value)
 	}
 	return fieldList
 }
