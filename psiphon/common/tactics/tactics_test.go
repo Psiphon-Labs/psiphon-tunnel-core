@@ -248,10 +248,13 @@ func TestTactics(t *testing.T) {
 	endPointProtocol := "OSSH"
 	differentEndPointProtocol := "SSH"
 
-	roundTripper := func(
+	obfuscatedRoundTripper := func(
 		ctx context.Context,
 		endPoint string,
 		requestBody []byte) ([]byte, error) {
+
+		// This mock ObfuscatedRoundTripper does not actually obfuscate the endpoint
+		// value.
 
 		request, err := http.NewRequest(
 			"POST",
@@ -341,7 +344,7 @@ func TestTactics(t *testing.T) {
 		endPointRegion,
 		encodedRequestPublicKey,
 		encodedObfuscatedKey,
-		roundTripper)
+		obfuscatedRoundTripper)
 
 	cancelFunc()
 
@@ -413,7 +416,7 @@ func TestTactics(t *testing.T) {
 		endPointRegion,
 		encodedRequestPublicKey,
 		encodedObfuscatedKey,
-		roundTripper)
+		obfuscatedRoundTripper)
 	if err != nil {
 		t.Fatalf("FetchTactics failed: %s", err)
 	}
@@ -490,7 +493,7 @@ func TestTactics(t *testing.T) {
 		endPointRegion,
 		encodedRequestPublicKey,
 		encodedObfuscatedKey,
-		roundTripper)
+		obfuscatedRoundTripper)
 	if err != nil {
 		t.Fatalf("FetchTactics failed: %s", err)
 	}
@@ -646,7 +649,7 @@ func TestTactics(t *testing.T) {
 		endPointRegion,
 		encodedIncorrectRequestPublicKey,
 		encodedObfuscatedKey,
-		roundTripper)
+		obfuscatedRoundTripper)
 	if err == nil {
 		t.Fatalf("FetchTactics succeeded unexpectedly with incorrect request key")
 	}
@@ -661,7 +664,7 @@ func TestTactics(t *testing.T) {
 		endPointRegion,
 		encodedRequestPublicKey,
 		encodedIncorrectObfuscatedKey,
-		roundTripper)
+		obfuscatedRoundTripper)
 	if err == nil {
 		t.Fatalf("FetchTactics succeeded unexpectedly with incorrect obfuscated key")
 	}

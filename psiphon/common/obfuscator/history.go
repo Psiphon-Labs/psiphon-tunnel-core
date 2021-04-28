@@ -126,9 +126,9 @@ func (h *SeedHistory) AddNew(
 	// an unlikely possibility that this Add and the following Get don't see the
 	// same existing key/value state.
 
-	if h.seedToTime.Add(key, time.Now(), 0) == nil {
+	if h.seedToTime.Add(key, time.Now(), lrucache.DefaultExpiration) == nil {
 		// Seed was not already in cache
-		h.seedToClientIP.Set(key, clientIP, 0)
+		h.seedToClientIP.Set(key, clientIP, lrucache.DefaultExpiration)
 		return true, nil
 	}
 

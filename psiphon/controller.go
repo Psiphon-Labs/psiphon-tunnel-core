@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	lrucache "github.com/cognusion/go-cache-lru"
 )
 
 // Controller is a tunnel lifecycle coordinator. It manages lists of servers to
@@ -70,7 +71,9 @@ type Controller struct {
 	establishedTunnelsCount                 int32
 	candidateServerEntries                  chan *candidateServerEntry
 	untunneledDialConfig                    *DialConfig
-	splitTunnelClassifier                   *SplitTunnelClassifier
+	untunneledSplitTunnelClassifications    *lrucache.Cache
+	splitTunnelClassificationTTL            time.Duration
+	splitTunnelClassificationMaxEntries     int
 	signalFetchCommonRemoteServerList       chan struct{}
 	signalFetchObfuscatedServerLists        chan struct{}
 	signalDownloadUpgrade                   chan string
@@ -106,6 +109,18 @@ func NewController(config *Config) (controller *Controller, err error) {
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 	}
 
+	// Attempt to apply any valid, local stored tactics. The pre-done context
+	// ensures no tactics request is attempted now.
+	doneContext, cancelFunc := context.WithCancel(context.Background())
+	cancelFunc()
+	GetTactics(doneContext, config)
+
+	p := config.GetParameters().Get()
+	splitTunnelClassificationTTL :=
+		p.Duration(parameters.SplitTunnelClassificationTTL)
+	splitTunnelClassificationMaxEntries :=
+		p.Int(parameters.SplitTunnelClassificationMaxEntries)
+
 	controller = &Controller{
 		config:       config,
 		runWaitGroup: new(sync.WaitGroup),
@@ -118,6 +133,11 @@ func NewController(config *Config) (controller *Controller, err error) {
 		establishedOnce:      false,
 		isEstablishing:       false,
 		untunneledDialConfig: untunneledDialConfig,
+
+		untunneledSplitTunnelClassifications: lrucache.NewWithLRU(
+			splitTunnelClassificationTTL,
+			1*time.Minute,
+			splitTunnelClassificationMaxEntries),
 
 		// TODO: Add a buffer of 1 so we don't miss a signal while receiver is
 		// starting? Trade-off is potential back-to-back fetch remotes. As-is,
@@ -137,8 +157,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 		// signal doesn't block and receiving won't miss a signal.
 		signalRestartEstablishing: make(chan struct{}, 1),
 	}
-
-	controller.splitTunnelClassifier = NewSplitTunnelClassifier(config, controller)
 
 	if config.PacketTunnelTunFileDescriptor > 0 {
 
@@ -276,8 +294,6 @@ func (controller *Controller) Run(ctx context.Context) {
 	// be interrupted when the run context is done.
 
 	controller.runWaitGroup.Wait()
-
-	controller.splitTunnelClassifier.Shutdown()
 
 	NoticeInfo("exiting controller")
 
@@ -945,19 +961,6 @@ loop:
 
 			if isFirstTunnel {
 
-				// The split tunnel classifier is started once the first tunnel is
-				// established. This first tunnel is passed in to be used to make
-				// the routes data request.
-				// A long-running controller may run while the host device is present
-				// in different regions. In this case, we want the split tunnel logic
-				// to switch to routes for new regions and not classify traffic based
-				// on routes installed for older regions.
-				// We assume that when regions change, the host network will also
-				// change, and so all tunnels will fail and be re-established. Under
-				// that assumption, the classifier will be re-Start()-ed here when
-				// the region has changed.
-				controller.splitTunnelClassifier.Start(connectedTunnel)
-
 				// Signal a connected request on each 1st tunnel establishment. For
 				// multi-tunnels, the session is connected as long as at least one
 				// tunnel is established.
@@ -1213,40 +1216,104 @@ func (controller *Controller) getTunnelPoolSize() int {
 // Dial selects an active tunnel and establishes a port forward
 // connection through the selected tunnel. Failure to connect is considered
 // a port forward failure, for the purpose of monitoring tunnel health.
+//
+// When split tunnel mode is enabled, the connection may be untunneled,
+// depending on GeoIP classification of the destination.
+//
+// downstreamConn is an optional parameter which specifies a connection to be
+// explicitly closed when the dialed connection is closed. For instance, this
+// is used to close downstreamConn App<->LocalProxy connections when the
+// related LocalProxy<->SshPortForward connections close.
 func (controller *Controller) Dial(
-	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error) {
+	remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error) {
 
 	tunnel := controller.getNextActiveTunnel()
 	if tunnel == nil {
 		return nil, errors.TraceNew("no active tunnels")
 	}
 
-	// Perform split tunnel classification when feature is enabled, and if the remote
-	// address is classified as untunneled, dial directly.
-	if !alwaysTunnel && controller.config.SplitTunnelDNSServer != "" {
+	if !controller.config.EnableSplitTunnel {
 
-		host, _, err := net.SplitHostPort(remoteAddr)
+		tunneledConn, splitTunnel, err := tunnel.DialTCPChannel(
+			remoteAddr, false, downstreamConn)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		// Note: a possible optimization, when split tunnel is active and IsUntunneled performs
-		// a DNS resolution in order to make its classification, is to reuse that IP address in
-		// the following Dials so they do not need to make their own resolutions. However, the
-		// way this is currently implemented ensures that, e.g., DNS geo load balancing occurs
-		// relative to the outbound network.
-
-		if controller.splitTunnelClassifier.IsUntunneled(host) {
-			return controller.DirectDial(remoteAddr)
+		if splitTunnel {
+			return nil, errors.TraceNew(
+				"unexpected split tunnel classification")
 		}
+
+		return tunneledConn, nil
 	}
 
-	tunneledConn, err := tunnel.Dial(remoteAddr, alwaysTunnel, downstreamConn)
+	// In split tunnel mode, TCP port forwards to destinations in the same
+	// country as the client are untunneled.
+	//
+	// Split tunnel is implemented with assistence from the server to classify
+	// destinations as being in the same country as the client. The server knows
+	// the client's public IP GeoIP data, and, for clients with split tunnel mode
+	// enabled, the server resolves the port forward destination address and
+	// checks the destination IP GeoIP data.
+	//
+	// When the countries match, the server "rejects" the port forward with a
+	// distinct response that indicates to the client that an untunneled port
+	// foward should be established locally.
+	//
+	// The client maintains a classification cache that allows it to make
+	// untunneled port forwards without requiring a round trip to the server.
+	// Only destinations classified as untunneled are stored in the cache: a
+	// destination classified as tunneled requires the same round trip as an
+	// unknown destination.
+	//
+	// When the countries do not match, the server establishes a port forward, as
+	// it does for all port forwards in non-split tunnel mode. There is no
+	// additional round trip for tunneled port forwards.
+
+	splitTunnelHost, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	return tunneledConn, nil
+	untunneledCache := controller.untunneledSplitTunnelClassifications
+
+	// If the destination hostname is in the untunneled split tunnel
+	// classifications cache, skip the round trip to the server and do the
+	// direct, untunneled dial immediately.
+	_, cachedUntunneled := untunneledCache.Get(splitTunnelHost)
+
+	if !cachedUntunneled {
+
+		tunneledConn, splitTunnel, err := tunnel.DialTCPChannel(
+			remoteAddr, false, downstreamConn)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		if !splitTunnel {
+
+			// Clear any cached untunneled classification entry for this destination
+			// hostname, as the server is now classifying it as tunneled.
+			untunneledCache.Delete(splitTunnelHost)
+
+			return tunneledConn, nil
+		}
+
+		// The server has indicated that the client should make a direct,
+		// untunneled dial. Cache the classification to avoid this round trip in
+		// the immediate future.
+		untunneledCache.Add(splitTunnelHost, true, lrucache.DefaultExpiration)
+	}
+
+	NoticeUntunneled(splitTunnelHost)
+
+	untunneledConn, err := controller.DirectDial(remoteAddr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return untunneledConn, nil
 }
 
 // DirectDial dials an untunneled TCP connection within the controller run context.

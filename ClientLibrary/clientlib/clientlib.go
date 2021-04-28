@@ -114,9 +114,12 @@ var ErrTimeout = std_errors.New("clientlib: tunnel establishment timeout")
 //
 // noticeReceiver, if non-nil, will be called for each notice emitted by tunnel core.
 // NOTE: Ordinary users of this library should never need this and should pass nil.
-func StartTunnel(ctx context.Context,
-	configJSON []byte, embeddedServerEntryList string,
-	params Parameters, paramsDelta ParametersDelta,
+func StartTunnel(
+	ctx context.Context,
+	configJSON []byte,
+	embeddedServerEntryList string,
+	params Parameters,
+	paramsDelta ParametersDelta,
 	noticeReceiver func(NoticeEvent)) (retTunnel *PsiphonTunnel, retErr error) {
 
 	config, err := psiphon.LoadConfig(configJSON)
@@ -170,11 +173,9 @@ func StartTunnel(ctx context.Context,
 	}
 
 	// Will receive a value when the tunnel has successfully connected.
-	connected := make(chan struct{})
-	// Will receive a value if the tunnel times out trying to connect.
-	timedOut := make(chan struct{})
+	connected := make(chan struct{}, 1)
 	// Will receive a value if an error occurs during the connection sequence.
-	errored := make(chan error)
+	errored := make(chan error, 1)
 
 	// Create the tunnel object
 	tunnel := new(PsiphonTunnel)
@@ -203,7 +204,7 @@ func StartTunnel(ctx context.Context,
 				tunnel.SOCKSProxyPort = int(port)
 			} else if event.Type == "EstablishTunnelTimeout" {
 				select {
-				case timedOut <- struct{}{}:
+				case errored <- ErrTimeout:
 				default:
 				}
 			} else if event.Type == "Tunnels" {
@@ -236,6 +237,10 @@ func StartTunnel(ctx context.Context,
 		}
 	}()
 
+	// Create a cancelable context that will be used for stopping the tunnel
+	var controllerCtx context.Context
+	controllerCtx, tunnel.stopController = context.WithCancel(ctx)
+
 	// If specified, the embedded server list is loaded and stored. When there
 	// are no server candidates at all, we wait for this import to complete
 	// before starting the Psiphon controller. Otherwise, we import while
@@ -246,13 +251,14 @@ func StartTunnel(ctx context.Context,
 	// still started: either existing candidate servers may suffice, or the
 	// remote server list fetch may obtain candidate servers.
 	//
-	// TODO: abort import if controller run ctx is cancelled. Currently, this
-	// import will block shutdown.
+	// The import will be interrupted if it's still running when the controller
+	// is stopped.
 	tunnel.embeddedServerListWaitGroup.Add(1)
 	go func() {
 		defer tunnel.embeddedServerListWaitGroup.Done()
 
 		err := psiphon.ImportEmbeddedServerEntries(
+			controllerCtx,
 			config,
 			"",
 			embeddedServerEntryList)
@@ -269,12 +275,10 @@ func StartTunnel(ctx context.Context,
 	// Create the Psiphon controller
 	controller, err := psiphon.NewController(config)
 	if err != nil {
+		tunnel.stopController()
+		tunnel.embeddedServerListWaitGroup.Wait()
 		return nil, errors.TraceMsg(err, "psiphon.NewController failed")
 	}
-
-	// Create a cancelable context that will be used for stopping the tunnel
-	var controllerCtx context.Context
-	controllerCtx, tunnel.stopController = context.WithCancel(ctx)
 
 	// Begin tunnel connection
 	tunnel.controllerWaitGroup.Add(1)
@@ -284,31 +288,46 @@ func StartTunnel(ctx context.Context,
 		// Start the tunnel. Only returns on error (or internal timeout).
 		controller.Run(controllerCtx)
 
+		// controller.Run does not exit until the goroutine that posts
+		// EstablishTunnelTimeout has terminated; so, if there was a
+		// EstablishTunnelTimeout event, ErrTimeout is guaranteed to be sent to
+		// errord before this next error and will be the StartTunnel return value.
+
+		var err error
+		switch ctx.Err() {
+		case context.DeadlineExceeded:
+			err = ErrTimeout
+		case context.Canceled:
+			err = errors.TraceNew("StartTunnel canceled")
+		default:
+			err = errors.TraceNew("controller.Run exited unexpectedly")
+		}
 		select {
-		case errored <- errors.TraceNew("controller.Run exited unexpectedly"):
+		case errored <- err:
 		default:
 		}
 	}()
 
-	// Wait for an active tunnel, timeout, or error
+	// Wait for an active tunnel or error
 	select {
 	case <-connected:
 		return tunnel, nil
-	case <-timedOut:
-		tunnel.Stop()
-		return nil, ErrTimeout
 	case err := <-errored:
 		tunnel.Stop()
-		return nil, errors.TraceMsg(err, "tunnel start produced error")
+		if err != ErrTimeout {
+			err = errors.TraceMsg(err, "tunnel start produced error")
+		}
+		return nil, err
 	}
 }
 
 // Stop stops/disconnects/shuts down the tunnel. It is safe to call when not connected.
 // Not safe to call concurrently with Start.
 func (tunnel *PsiphonTunnel) Stop() {
-	if tunnel.stopController != nil {
-		tunnel.stopController()
+	if tunnel.stopController == nil {
+		return
 	}
+	tunnel.stopController()
 	tunnel.controllerWaitGroup.Wait()
 	tunnel.embeddedServerListWaitGroup.Wait()
 	psiphon.CloseDataStore()

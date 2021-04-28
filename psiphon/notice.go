@@ -203,6 +203,7 @@ const (
 	noticeIsHomepage     = 2
 	noticeClearHomepages = 4
 	noticeSyncHomepages  = 8
+	noticeSkipRedaction  = 16
 )
 
 // outputNotice encodes a notice in JSON and writes it to the output writer.
@@ -237,10 +238,25 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 			fmt.Sprintf("marshal notice failed: %s", errors.Trace(err)))
 	}
 
-	// Ensure direct server IPs are not exposed in notices. The "net" package,
-	// and possibly other 3rd party packages, will include destination addresses
-	// in I/O error messages.
-	output = StripIPAddresses(output)
+	// Skip redaction when we need to display browsing activity network addresses
+	// to users; for example, in the case of the Untunneled notice. Never log
+	// skipRedaction notices to diagnostics files (outputNoticeToRotatingFile,
+	// below). The notice writer may still be invoked for a skipRedaction notice;
+	// the writer must keep all known skipRedaction notices out of any upstream
+	// diagnostics logs.
+
+	skipRedaction := (noticeFlags&noticeSkipRedaction != 0)
+
+	if !skipRedaction {
+		// Ensure direct server IPs are not exposed in notices. The "net" package,
+		// and possibly other 3rd party packages, will include destination addresses
+		// in I/O error messages.
+		output = StripIPAddresses(output)
+	}
+
+	// Don't call StripFilePaths here, as the file path redaction can
+	// potentially match many non-path strings. Instead, StripFilePaths should
+	// be applied in specific cases.
 
 	nl.mutex.Lock()
 	defer nl.mutex.Unlock()
@@ -267,12 +283,15 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 			skipWriter = (noticeFlags&noticeIsDiagnostic != 0)
 		}
 
-		err := nl.outputNoticeToRotatingFile(output)
+		if !skipRedaction {
 
-		if err != nil {
-			output := makeNoticeInternalError(
-				fmt.Sprintf("write rotating file failed: %s", err))
-			nl.writer.Write(output)
+			err := nl.outputNoticeToRotatingFile(output)
+
+			if err != nil {
+				output := makeNoticeInternalError(
+					fmt.Sprintf("write rotating file failed: %s", err))
+				nl.writer.Write(output)
+			}
 		}
 	}
 
@@ -287,7 +306,6 @@ func makeNoticeInternalError(errorMessage string) []byte {
 	// Format an Alert Notice (_without_ using json.Marshal, since that can fail)
 	alertNoticeFormat := "{\"noticeType\":\"InternalError\",\"timestamp\":\"%s\",\"data\":{\"message\":\"%s\"}}\n"
 	return []byte(fmt.Sprintf(alertNoticeFormat, time.Now().UTC().Format(common.RFC3339Milli), errorMessage))
-
 }
 
 func (nl *noticeLogger) outputNoticeToHomepageFile(noticeFlags uint32, output []byte) error {
@@ -656,18 +674,10 @@ func NoticeSessionId(sessionId string) {
 //
 // Note: "address" should remain private; this notice should only be used for alerting
 // users, not for diagnostics logs.
-//
 func NoticeUntunneled(address string) {
 	singletonNoticeLogger.outputNotice(
-		"Untunneled", 0,
+		"Untunneled", noticeSkipRedaction,
 		"address", address)
-}
-
-// NoticeSplitTunnelRegion reports that split tunnel is on for the given region.
-func NoticeSplitTunnelRegion(region string) {
-	singletonNoticeLogger.outputNotice(
-		"SplitTunnelRegion", 0,
-		"region", region)
 }
 
 // NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
@@ -798,7 +808,7 @@ func NoticeActiveAuthorizationIDs(diagnosticID string, activeAuthorizationIDs []
 
 	// Never emit 'null' instead of empty list
 	if activeAuthorizationIDs == nil {
-		activeAuthorizationIDs = make([]string, 0)
+		activeAuthorizationIDs = []string{}
 	}
 
 	singletonNoticeLogger.outputNotice(
@@ -882,12 +892,21 @@ func NoticeApplicationParameters(keyValues parameters.KeyValues) {
 // reported at most once per session.
 func NoticeServerAlert(alert protocol.AlertRequest) {
 
+	// Never emit 'null' instead of empty list
+	actionURLs := alert.ActionURLs
+	if actionURLs == nil {
+		actionURLs = []string{}
+	}
+
 	// This key ensures that each distinct server alert will appear, not repeat,
 	// and not interfere with other alerts appearing.
 	repetitionKey := fmt.Sprintf("ServerAlert-%+v", alert)
 	outputRepetitiveNotice(
 		repetitionKey, "", 0,
-		"ServerAlert", 0, "reason", alert.Reason, "subject", alert.Subject)
+		"ServerAlert", 0,
+		"reason", alert.Reason,
+		"subject", alert.Subject,
+		"actionURLs", actionURLs)
 }
 
 // NoticeBursts reports tunnel data transfer burst metrics.
@@ -1084,13 +1103,7 @@ func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
 func listCommonFields(fields common.LogFields) []interface{} {
 	fieldList := make([]interface{}, 0)
 	for name, value := range fields {
-		var formattedValue string
-		if err, ok := value.(error); ok {
-			formattedValue = err.Error()
-		} else {
-			formattedValue = fmt.Sprintf("%#v", value)
-		}
-		fieldList = append(fieldList, name, formattedValue)
+		fieldList = append(fieldList, name, value)
 	}
 	return fieldList
 }

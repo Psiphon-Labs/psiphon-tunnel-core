@@ -248,14 +248,14 @@ func main() {
 		}
 	}
 
-	err = worker.Init(config)
+	workCtx, stopWork := context.WithCancel(context.Background())
+	defer stopWork()
+
+	err = worker.Init(workCtx, config)
 	if err != nil {
 		psiphon.NoticeError("error in init: %s", err)
 		os.Exit(1)
 	}
-
-	workCtx, stopWork := context.WithCancel(context.Background())
-	defer stopWork()
 
 	workWaitGroup := new(sync.WaitGroup)
 	workWaitGroup.Add(1)
@@ -352,7 +352,7 @@ func (p *tunProvider) GetSecondaryDnsServer() string {
 // compiled executable.
 type Worker interface {
 	// Init is called once for the worker to perform any initialization.
-	Init(config *psiphon.Config) error
+	Init(ctx context.Context, config *psiphon.Config) error
 	// Run is called once, after Init(..), for the worker to perform its
 	// work. The provided context should control the lifetime of the work
 	// being performed.
@@ -367,7 +367,7 @@ type TunnelWorker struct {
 }
 
 // Init implements the Worker interface.
-func (w *TunnelWorker) Init(config *psiphon.Config) error {
+func (w *TunnelWorker) Init(ctx context.Context, config *psiphon.Config) error {
 
 	// Initialize data store
 
@@ -387,15 +387,16 @@ func (w *TunnelWorker) Init(config *psiphon.Config) error {
 	// still started: either existing candidate servers may suffice, or the
 	// remote server list fetch may obtain candidate servers.
 	//
-	// TODO: abort import if controller run ctx is cancelled. Currently, this
-	// import will block shutdown.
+	// The import will be interrupted if it's still running when the controller
+	// is stopped.
 	if w.embeddedServerEntryListFilename != "" {
 		w.embeddedServerListWaitGroup = new(sync.WaitGroup)
 		w.embeddedServerListWaitGroup.Add(1)
 		go func() {
 			defer w.embeddedServerListWaitGroup.Done()
 
-			err = psiphon.ImportEmbeddedServerEntries(
+			err := psiphon.ImportEmbeddedServerEntries(
+				ctx,
 				config,
 				w.embeddedServerEntryListFilename,
 				"")
@@ -441,7 +442,7 @@ type FeedbackWorker struct {
 }
 
 // Init implements the Worker interface.
-func (f *FeedbackWorker) Init(config *psiphon.Config) error {
+func (f *FeedbackWorker) Init(ctx context.Context, config *psiphon.Config) error {
 
 	// The datastore is not opened here, with psiphon.OpenDatastore,
 	// because it is opened/closed transiently in the psiphon.SendFeedback

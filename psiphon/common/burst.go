@@ -203,7 +203,7 @@ func (conn *BurstMonitoredConn) IsClosed() bool {
 
 // GetMetrics returns log fields with burst metrics for the first, last, min
 // (by rate), and max bursts for this conn. Time/duration values are reported
-// in milliseconds.
+// in milliseconds. Rate is reported in bytes per second.
 func (conn *BurstMonitoredConn) GetMetrics(baseTime time.Time) LogFields {
 	logFields := make(LogFields)
 

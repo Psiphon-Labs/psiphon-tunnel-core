@@ -25,10 +25,12 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,23 +49,19 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 )
 
-// Tunneler specifies the interface required by components that use a tunnel.
-// Components which use this interface may be serviced by a single Tunnel instance,
-// or a Controller which manages a pool of tunnels, or any other object which
-// implements Tunneler.
+// Tunneler specifies the interface required by components that use tunnels.
 type Tunneler interface {
 
 	// Dial creates a tunneled connection.
 	//
-	// alwaysTunnel indicates that the connection should always be tunneled. If this
-	// is not set, the connection may be made directly, depending on split tunnel
-	// classification, when that feature is supported and active.
+	// When split tunnel mode is enabled, the connection may be untunneled,
+	// depending on GeoIP classification of the destination.
 	//
 	// downstreamConn is an optional parameter which specifies a connection to be
 	// explicitly closed when the Dialed connection is closed. For instance, this
 	// is used to close downstreamConn App<->LocalProxy connections when the related
 	// LocalProxy<->SshPortForward connections close.
-	Dial(remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (conn net.Conn, err error)
+	Dial(remoteAddr string, downstreamConn net.Conn) (conn net.Conn, err error)
 
 	DirectDial(remoteAddr string) (conn net.Conn, err error)
 
@@ -89,6 +87,7 @@ type Tunnel struct {
 	isClosed                       bool
 	dialParams                     *DialParameters
 	livenessTestMetrics            *livenessTestMetrics
+	extraFailureAction             func()
 	serverContext                  *ServerContext
 	monitoringStartTime            time.Time
 	conn                           *common.BurstMonitoredConn
@@ -158,6 +157,7 @@ func ConnectTunnel(
 		config:              config,
 		dialParams:          dialParams,
 		livenessTestMetrics: dialResult.livenessTestMetrics,
+		extraFailureAction:  dialResult.extraFailureAction,
 		monitoringStartTime: dialResult.monitoringStartTime,
 		conn:                dialResult.monitoredConn,
 		sshClient:           dialResult.sshClient,
@@ -181,7 +181,7 @@ func (tunnel *Tunnel) Activate(
 	activationSucceeded := false
 	baseCtx := ctx
 	defer func() {
-		if !activationSucceeded && baseCtx.Err() == nil {
+		if !activationSucceeded && baseCtx.Err() != context.Canceled {
 			tunnel.dialParams.Failed(tunnel.config)
 			_ = RecordFailedTunnelStat(
 				tunnel.config,
@@ -190,6 +190,9 @@ func (tunnel *Tunnel) Activate(
 				-1,
 				-1,
 				retErr)
+			if tunnel.extraFailureAction != nil {
+				tunnel.extraFailureAction()
+			}
 		}
 	}()
 
@@ -433,19 +436,38 @@ func (tunnel *Tunnel) SendAPIRequest(
 	return responsePayload, nil
 }
 
-// Dial establishes a port forward connection through the tunnel
-// This Dial doesn't support split tunnel, so alwaysTunnel is not referenced
-func (tunnel *Tunnel) Dial(
-	remoteAddr string, alwaysTunnel bool, downstreamConn net.Conn) (net.Conn, error) {
+// DialTCPChannel establishes a TCP port forward connection through the
+// tunnel.
+//
+// When split tunnel mode is enabled, and unless alwaysTunneled is set, the
+// server may reject the port forward and indicate that the client is to make
+// direct, untunneled connection. In this case, the bool return value is true
+// and net.Conn and error are nil.
+//
+// downstreamConn is an optional parameter which specifies a connection to be
+// explicitly closed when the dialed connection is closed.
+func (tunnel *Tunnel) DialTCPChannel(
+	remoteAddr string,
+	alwaysTunneled bool,
+	downstreamConn net.Conn) (net.Conn, bool, error) {
 
-	channel, err := tunnel.dialChannel("tcp", remoteAddr)
+	channelType := "direct-tcpip"
+	if alwaysTunneled && tunnel.config.EnableSplitTunnel {
+		// This channel type is only necessary in split tunnel mode.
+		channelType = protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE
+	}
+
+	channel, err := tunnel.dialChannel(channelType, remoteAddr)
 	if err != nil {
-		return nil, errors.Trace(err)
+		if isSplitTunnelRejectReason(err) {
+			return nil, true, nil
+		}
+		return nil, false, errors.Trace(err)
 	}
 
 	netConn, ok := channel.(net.Conn)
 	if !ok {
-		return nil, errors.Tracef("unexpected channel type: %T", channel)
+		return nil, false, errors.Tracef("unexpected channel type: %T", channel)
 	}
 
 	conn := &TunneledConn{
@@ -453,7 +475,7 @@ func (tunnel *Tunnel) Dial(
 		tunnel:         tunnel,
 		downstreamConn: downstreamConn}
 
-	return tunnel.wrapWithTransferStats(conn), nil
+	return tunnel.wrapWithTransferStats(conn), false, nil
 }
 
 func (tunnel *Tunnel) DialPacketTunnelChannel() (net.Conn, error) {
@@ -515,10 +537,16 @@ func (tunnel *Tunnel) dialChannel(channelType, remoteAddr string) (interface{}, 
 
 	go func() {
 		result := new(channelDialResult)
-		if channelType == "tcp" {
+		switch channelType {
+
+		case "direct-tcpip", protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE:
+			// The protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE is the same as
+			// "direct-tcpip", except split tunnel channel rejections are disallowed
+			// even when split tunnel mode is enabled.
 			result.channel, result.err =
-				tunnel.sshClient.Dial("tcp", remoteAddr)
-		} else {
+				tunnel.sshClient.Dial(channelType, remoteAddr)
+
+		default:
 			var sshRequests <-chan *ssh.Request
 			result.channel, sshRequests, result.err =
 				tunnel.sshClient.OpenChannel(channelType, nil)
@@ -535,15 +563,27 @@ func (tunnel *Tunnel) dialChannel(channelType, remoteAddr string) (interface{}, 
 	result := <-results
 
 	if result.err != nil {
-		// TODO: conditional on type of error or error message?
-		select {
-		case tunnel.signalPortForwardFailure <- struct{}{}:
-		default:
+		if !isSplitTunnelRejectReason(result.err) {
+			select {
+			case tunnel.signalPortForwardFailure <- struct{}{}:
+			default:
+			}
 		}
 		return nil, errors.Trace(result.err)
 	}
 
 	return result.channel, nil
+}
+
+func isSplitTunnelRejectReason(err error) bool {
+
+	var openChannelErr *ssh.OpenChannelError
+	if std_errors.As(err, &openChannelErr) {
+		return openChannelErr.Reason ==
+			ssh.RejectionReason(protocol.CHANNEL_REJECT_REASON_SPLIT_TUNNEL)
+	}
+
+	return false
 }
 
 func (tunnel *Tunnel) wrapWithTransferStats(conn net.Conn) net.Conn {
@@ -618,6 +658,7 @@ type dialResult struct {
 	sshClient           *ssh.Client
 	sshRequests         <-chan *ssh.Request
 	livenessTestMetrics *livenessTestMetrics
+	extraFailureAction  func()
 }
 
 // dialTunnel is a helper that builds the transport layers and establishes the
@@ -654,14 +695,17 @@ func dialTunnel(
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
 	// connect.
 	//
+	//
+	//
 	// Limitation: dials that fail to connect due to the server being in a
 	// load-limiting state are not distinguished and excepted from this
 	// logic.
 	dialSucceeded := false
 	baseCtx := ctx
 	var failedTunnelLivenessTestMetrics *livenessTestMetrics
+	var extraFailureAction func()
 	defer func() {
-		if !dialSucceeded && baseCtx.Err() == nil {
+		if !dialSucceeded && baseCtx.Err() != context.Canceled {
 			dialParams.Failed(config)
 			_ = RecordFailedTunnelStat(
 				config,
@@ -670,6 +714,9 @@ func dialTunnel(
 				-1,
 				-1,
 				retErr)
+			if extraFailureAction != nil {
+				extraFailureAction()
+			}
 		}
 	}()
 
@@ -757,22 +804,120 @@ func dialTunnel(
 
 	} else if protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
 
-		// The Conjure "phantom" connection is compatible with fragmentation, but
-		// the decoy registrar connection, like Tapdance, is not, so force it off.
-		// Any tunnel fragmentation metrics will refer to the "phantom" connection
-		// only.
-		decoyRegistrarDialer := NewNetDialer(
-			dialParams.GetDialConfig().WithoutFragmentor())
+		// Specify a cache key with a scope that ensures that:
+		//
+		// (a) cached registrations aren't used across different networks, as a
+		// registration requires the client's public IP to match the value at time
+		// of registration;
+		//
+		// (b) cached registrations are associated with specific Psiphon server
+		// candidates, to ensure that replay will use the same phantom IP(s).
+		//
+		// This scheme allows for reuse of cached registrations on network A when a
+		// client roams from network A to network B and back to network A.
+		//
+		// Using the network ID as a proxy for client public IP address is a
+		// heurisitic: it's possible that a clients public IP address changes
+		// without the network ID changing, and it's not guaranteed that the client
+		// will be assigned the original public IP on network A; so there's some
+		// chance the registration cannot be reused.
+
+		diagnosticID := dialParams.ServerEntry.GetDiagnosticID()
+
+		cacheKey := dialParams.NetworkID + "-" + diagnosticID
+
+		conjureConfig := &refraction.ConjureConfig{
+			RegistrationCacheTTL: dialParams.ConjureCachedRegistrationTTL,
+			RegistrationCacheKey: cacheKey,
+			Transport:            dialParams.ConjureTransport,
+			DiagnosticID:         diagnosticID,
+			Logger:               NoticeCommonLogger(),
+		}
+
+		// Set extraFailureAction, which is invoked whenever the tunnel fails (i.e.,
+		// where RecordFailedTunnelStat is invoked). The action will remove any
+		// cached registration. When refraction.DialConjure succeeds, the underlying
+		// registration is cached. After refraction.DialConjure returns, it no
+		// longer modifies the cached state of that registration, assuming that it
+		// remains valid and effective. However adversarial impact on a given
+		// phantom IP may not become evident until after the initial TCP connection
+		// establishment and handshake performed by refraction.DialConjure. For
+		// example, it may be that the phantom dial is targeted for severe
+		// throttling which begins or is only evident later in the flow. Scheduling
+		// a call to DeleteCachedConjureRegistration allows us to invalidate the
+		// cached registration for a tunnel that fails later in its lifecycle.
+		//
+		// Note that extraFailureAction will retain a reference to conjureConfig for
+		// the lifetime of the tunnel.
+		extraFailureAction = func() {
+			refraction.DeleteCachedConjureRegistration(conjureConfig)
+		}
+
+		if dialParams.ConjureAPIRegistration {
+
+			// Use MeekConn to domain front Conjure API registration.
+			//
+			// ConjureAPIRegistrarFrontingSpecs are applied via
+			// dialParams.GetMeekConfig, and will be subject to replay.
+			//
+			// Since DialMeek will create a TLS connection immediately, and a cached
+			// registration may be used, we will delay initializing the MeekConn-based
+			// RoundTripper until we know it's needed. This is implemented by passing
+			// in a RoundTripper that establishes a MeekConn when RoundTrip is called.
+			//
+			// In refraction.dial we configure 0 retries for API registration requests,
+			// assuming it's better to let another Psiphon candidate retry, with new
+			// domaing fronting parameters. As such, we expect only one round trip call
+			// per NewHTTPRoundTripper, so, in practise, there's no performance penalty
+			// from establishing a new MeekConn per round trip.
+			//
+			// Performing the full DialMeek/RoundTrip operation here allows us to call
+			// MeekConn.Close and ensure all resources are immediately cleaned up.
+			roundTrip := func(request *http.Request) (*http.Response, error) {
+				conn, err := DialMeek(
+					ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				defer conn.Close()
+				response, err := conn.RoundTrip(request)
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				// Currently, gotapdance does not read the response body. When that
+				// changes, we will need to ensure MeekConn.Close does not make the
+				// response body unavailable, perhaps by reading into a buffer and
+				// replacing reponse.Body. For now, we can immediately close it.
+				response.Body.Close()
+				return response, nil
+			}
+
+			conjureConfig.APIRegistrarHTTPClient = &http.Client{
+				Transport: common.NewHTTPRoundTripper(roundTrip),
+			}
+
+			conjureConfig.APIRegistrarURL = dialParams.ConjureAPIRegistrarURL
+			conjureConfig.APIRegistrarDelay = dialParams.ConjureAPIRegistrarDelay
+
+		} else if dialParams.ConjureDecoyRegistration {
+
+			// The Conjure "phantom" connection is compatible with fragmentation, but
+			// the decoy registrar connection, like Tapdance, is not, so force it off.
+			// Any tunnel fragmentation metrics will refer to the "phantom" connection
+			// only.
+			conjureConfig.DecoyRegistrarDialer = NewNetDialer(
+				dialParams.GetDialConfig().WithoutFragmentor())
+			conjureConfig.DecoyRegistrarWidth = dialParams.ConjureDecoyRegistrarWidth
+			conjureConfig.DecoyRegistrarDelay = dialParams.ConjureDecoyRegistrarDelay
+		}
 
 		dialConn, err = refraction.DialConjure(
 			ctx,
 			config.EmitRefractionNetworkingLogs,
 			config.GetPsiphonDataDirectory(),
 			NewNetDialer(dialParams.GetDialConfig()),
-			decoyRegistrarDialer,
-			dialParams.ConjureDecoyRegistrarWidth,
-			dialParams.ConjureTransport,
-			dialParams.DirectDialAddress)
+			dialParams.DirectDialAddress,
+			conjureConfig)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -845,6 +990,12 @@ func dialTunnel(
 		return nil, errors.Trace(err)
 	}
 	sshCertChecker := &ssh.CertChecker{
+		IsHostAuthority: func(auth ssh.PublicKey, address string) bool {
+			// Psiphon servers do not currently use SSH certificates. This CertChecker
+			// code path may still be hit if a client attempts to connect using an
+			// obsolete server entry.
+			return false
+		},
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
 			if !bytes.Equal(expectedPublicKey, publicKey.Marshal()) {
 				return errors.TraceNew("unexpected host public key")
@@ -1018,7 +1169,9 @@ func dialTunnel(
 			monitoredConn:       monitoredConn,
 			sshClient:           result.sshClient,
 			sshRequests:         result.sshRequests,
-			livenessTestMetrics: result.livenessTestMetrics},
+			livenessTestMetrics: result.livenessTestMetrics,
+			extraFailureAction:  extraFailureAction,
+		},
 		nil
 }
 
@@ -1067,26 +1220,50 @@ func performLivenessTest(
 
 	go ssh.DiscardRequests(requests)
 
-	// In consideration of memory-constrained environments, use a modest-sized
-	// copy buffer since many tunnel establishment workers may run the
-	// liveness test concurrently.
-
-	var buffer [8192]byte
+	sent := 0
+	received := 0
+	upstream := new(sync.WaitGroup)
+	var errUpstream, errDownstream error
 
 	if metrics.UpstreamBytes > 0 {
-		n, err := common.CopyNBuffer(channel, rand.Reader, int64(metrics.UpstreamBytes), buffer[:])
-		metrics.SentUpstreamBytes = int(n)
-		if err != nil {
-			return metrics, errors.Trace(err)
-		}
+
+		// Process streams concurrently to minimize elapsed time. This also
+		// avoids a unidirectional flow burst early in the tunnel lifecycle.
+
+		upstream.Add(1)
+		go func() {
+			defer upstream.Done()
+
+			// In consideration of memory-constrained environments, use modest-sized copy
+			// buffers since many tunnel establishment workers may run the liveness test
+			// concurrently.
+			var buffer [4096]byte
+
+			n, err := common.CopyNBuffer(channel, rand.Reader, int64(metrics.UpstreamBytes), buffer[:])
+			sent = int(n)
+			if err != nil {
+				errUpstream = errors.Trace(err)
+			}
+		}()
 	}
 
 	if metrics.DownstreamBytes > 0 {
+		var buffer [4096]byte
 		n, err := common.CopyNBuffer(ioutil.Discard, channel, int64(metrics.DownstreamBytes), buffer[:])
-		metrics.ReceivedDownstreamBytes = int(n)
+		received = int(n)
 		if err != nil {
-			return metrics, errors.Trace(err)
+			errDownstream = errors.Trace(err)
 		}
+	}
+
+	upstream.Wait()
+	metrics.SentUpstreamBytes = sent
+	metrics.ReceivedDownstreamBytes = received
+
+	if errUpstream != nil {
+		return metrics, errUpstream
+	} else if errDownstream != nil {
+		return metrics, errDownstream
 	}
 
 	return metrics, nil
@@ -1580,6 +1757,9 @@ loop:
 				bytesUp,
 				bytesDown,
 				err)
+			if tunnel.extraFailureAction != nil {
+				tunnel.extraFailureAction()
+			}
 
 			// SSHKeepAliveResetOnFailureProbability is set when a late-lifecycle
 			// impaired protocol attack is suspected. With the given probability, reset

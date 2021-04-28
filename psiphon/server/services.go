@@ -240,20 +240,16 @@ func RunServices(configJSON []byte) (retErr error) {
 	signal.Notify(systemStopSignal, os.Interrupt, syscall.SIGTERM)
 
 	// SIGUSR1 triggers a reload of support services
-	reloadSupportServicesSignal := make(chan os.Signal, 1)
-	signal.Notify(reloadSupportServicesSignal, syscall.SIGUSR1)
+	reloadSupportServicesSignal := makeSIGUSR1Channel()
 
 	// SIGUSR2 triggers an immediate load log and optional process profile output
-	logServerLoadSignal := make(chan os.Signal, 1)
-	signal.Notify(logServerLoadSignal, syscall.SIGUSR2)
+	logServerLoadSignal := makeSIGUSR2Channel()
 
 	// SIGTSTP triggers tunnelServer to stop establishing new tunnels
-	stopEstablishingTunnelsSignal := make(chan os.Signal, 1)
-	signal.Notify(stopEstablishingTunnelsSignal, syscall.SIGTSTP)
+	stopEstablishingTunnelsSignal := makeSIGTSTPChannel()
 
 	// SIGCONT triggers tunnelServer to resume establishing new tunnels
-	resumeEstablishingTunnelsSignal := make(chan os.Signal, 1)
-	signal.Notify(resumeEstablishingTunnelsSignal, syscall.SIGCONT)
+	resumeEstablishingTunnelsSignal := makeSIGCONTChannel()
 
 	err = nil
 
@@ -419,7 +415,7 @@ func logIrregularTunnel(
 	logFields["event_name"] = "irregular_tunnel"
 	logFields["listener_protocol"] = listenerTunnelProtocol
 	logFields["listener_port_number"] = listenerPort
-	support.GeoIPService.Lookup(clientIP).SetLogFields(logFields)
+	support.GeoIPService.Lookup(clientIP, false).SetLogFields(logFields)
 	logFields["tunnel_error"] = tunnelError.Error()
 	log.LogRawFieldsWithTimestamp(logFields)
 }

@@ -193,53 +193,6 @@ func FileExists(filePath string) bool {
 	return true
 }
 
-// FileMigration represents the action of moving a file, or directory, to a new
-// location.
-type FileMigration struct {
-
-	// OldPath is the current location of the file.
-	OldPath string
-
-	// NewPath is the location that the file should be moved to.
-	NewPath string
-
-	// IsDir should be set to true if the file is a directory.
-	IsDir bool
-}
-
-// DoFileMigration performs the specified file move operation. An error will be
-// returned and the operation will not performed if: a file is expected, but a
-// directory is found; a directory is expected, but a file is found; or a file,
-// or directory, already exists at the target path of the move operation.
-func DoFileMigration(migration FileMigration) error {
-	if !FileExists(migration.OldPath) {
-		return errors.Tracef("%s does not exist", migration.OldPath)
-	}
-	info, err := os.Stat(migration.OldPath)
-	if err != nil {
-		return errors.Tracef("error getting file info of %s: %s", migration.OldPath, err.Error())
-	}
-	if info.IsDir() != migration.IsDir {
-		if migration.IsDir {
-			return errors.Tracef("expected directory %s to be directory but found file", migration.OldPath)
-		}
-
-		return errors.Tracef("expected %s to be file but found directory",
-			migration.OldPath)
-	}
-
-	if FileExists(migration.NewPath) {
-		return errors.Tracef("%s already exists, will not overwrite", migration.NewPath)
-	}
-
-	err = os.Rename(migration.OldPath, migration.NewPath)
-	if err != nil {
-		return errors.Tracef("renaming %s as %s failed with error %s", migration.OldPath, migration.NewPath, err.Error())
-	}
-
-	return nil
-}
-
 // SafeParseURL wraps url.Parse, stripping the input URL from any error
 // message. This allows logging url.Parse errors without unintentially logging
 // PII that may appear in the input URL.

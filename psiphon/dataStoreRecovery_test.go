@@ -36,6 +36,11 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
+// Set canTruncateOpenDataStore to false on platforms, such as Windows, where
+// the OS doesn't allow an open memory-mapped file to be truncated. This will
+// skip the associated test cases.
+var canTruncateOpenDataStore = true
+
 func TestBoltResiliency(t *testing.T) {
 
 	testDataDirName, err := ioutil.TempDir("", "psiphon-bolt-recovery-test")
@@ -46,9 +51,8 @@ func TestBoltResiliency(t *testing.T) {
 
 	SetEmitDiagnosticNotices(true, true)
 
-	clientConfigJSONTemplate := `
+	clientConfigJSON := `
     {
-        "DataRootDirectory" : "%s",
         "ClientPlatform" : "",
         "ClientVersion" : "0",
         "SponsorId" : "0",
@@ -58,14 +62,13 @@ func TestBoltResiliency(t *testing.T) {
         "EstablishTunnelPausePeriodSeconds" : 1
     }`
 
-	clientConfigJSON := fmt.Sprintf(
-		clientConfigJSONTemplate,
-		testDataDirName)
-
 	clientConfig, err := LoadConfig([]byte(clientConfigJSON))
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
+
+	clientConfig.DataRootDirectory = testDataDirName
+
 	err = clientConfig.Commit(false)
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)
@@ -242,6 +245,11 @@ func TestBoltResiliency(t *testing.T) {
 	}
 
 	<-noticeResetDatastore
+
+	if !canTruncateOpenDataStore {
+		CloseDataStore()
+		return
+	}
 
 	paveServerEntries()
 

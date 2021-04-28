@@ -26,7 +26,6 @@ import (
 	std_errors "errors"
 	"net"
 	"regexp"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -103,21 +102,6 @@ func dispatchAPIRequestHandler(
 	authorizedAccessTypes []string,
 	name string,
 	params common.APIParameters) (response []byte, reterr error) {
-
-	// Recover from and log any unexpected panics caused by user input
-	// handling bugs. User inputs should be properly validated; this
-	// mechanism is only a last resort to prevent the process from
-	// terminating in the case of a bug.
-	defer func() {
-		if e := recover(); e != nil {
-			if intentionalPanic, ok := e.(IntentionalPanicError); ok {
-				panic(intentionalPanic)
-			} else {
-				log.LogPanicRecover(e, debug.Stack())
-				reterr = errors.TraceNew("request handler panic")
-			}
-		}
-	}()
 
 	// Before invoking the handlers, enforce some preconditions:
 	//
@@ -214,6 +198,10 @@ func handshakeAPIRequestHandler(
 	// the client, a value of 0 will be used.
 	establishedTunnelsCount, _ := getIntStringRequestParam(params, "established_tunnels_count")
 
+	// splitTunnel indicates if the client is using split tunnel mode. When
+	// omitted by the client, the value will be false.
+	splitTunnel, _ := getBoolStringRequestParam(params, "split_tunnel")
+
 	var authorizations []string
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
 		authorizations, err = getStringArrayRequestParam(params, protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS)
@@ -241,6 +229,7 @@ func handshakeAPIRequestHandler(
 			apiParams:               copyBaseSessionAndDialParams(params),
 			expectDomainBytes:       len(httpsRequestRegexes) > 0,
 			establishedTunnelsCount: establishedTunnelsCount,
+			splitTunnel:             splitTunnel,
 		},
 		authorizations)
 	if err != nil {
@@ -300,6 +289,9 @@ func handshakeAPIRequestHandler(
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
+	if !geoIPData.HasDiscoveryValue {
+		return nil, errors.TraceNew("unexpected missing discovery value")
+	}
 	encodedServerList := db.DiscoverServers(geoIPData.DiscoveryValue)
 
 	// When the client indicates that it used an unsigned server entry for this
@@ -437,15 +429,6 @@ func connectedAPIRequestHandler(
 				params,
 				uniqueUserParams))
 	}
-
-	// TODO: retire the legacy "connected" log event
-	log.LogRawFieldsWithTimestamp(
-		getRequestLogFields(
-			"connected",
-			geoIPData,
-			authorizedAccessTypes,
-			params,
-			connectedRequestParams))
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
@@ -804,8 +787,8 @@ var baseParams = []requestParamSpec{
 	{"sponsor_id", isHexDigits, 0},
 	{"client_version", isIntString, requestParamLogStringAsInt},
 	{"client_platform", isClientPlatform, 0},
+	{"client_features", isAnyString, requestParamOptional | requestParamArray},
 	{"client_build_rev", isHexDigits, requestParamOptional},
-	{"tunnel_whole_device", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"device_region", isAnyString, requestParamOptional},
 }
 
@@ -860,7 +843,10 @@ var baseDialParams = []requestParamSpec{
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
 	{"network_type", isAnyString, requestParamOptional},
+	{"conjure_cached", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"conjure_delay", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"conjure_transport", isAnyString, requestParamOptional},
+	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.
@@ -1197,6 +1183,20 @@ func getIntStringRequestParam(params common.APIParameters, name string) (int, er
 		return 0, errors.Trace(err)
 	}
 	return value, nil
+}
+
+func getBoolStringRequestParam(params common.APIParameters, name string) (bool, error) {
+	if params[name] == nil {
+		return false, errors.Tracef("missing param: %s", name)
+	}
+	valueStr, ok := params[name].(string)
+	if !ok {
+		return false, errors.Tracef("invalid param: %s", name)
+	}
+	if valueStr == "1" {
+		return true, nil
+	}
+	return false, nil
 }
 
 func getPaddingSizeRequestParam(params common.APIParameters, name string) (int, error) {

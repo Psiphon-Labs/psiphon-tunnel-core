@@ -65,7 +65,6 @@ func TestServerEntryExchange(t *testing.T) {
 		    {
                 "SponsorId" : "0",
                 "PropagationChannelId" : "0",
-		        "DataRootDirectory" : "%s",
 		        "ServerEntrySignaturePublicKey" : "%s",
 		        "ExchangeObfuscationKey" : "%s",
 		        "NetworkID" : "%s"
@@ -73,7 +72,6 @@ func TestServerEntryExchange(t *testing.T) {
 
 	configJSON := fmt.Sprintf(
 		configJSONTemplate,
-		testDataDirName,
 		publicKey,
 		obfuscationKey,
 		networkID)
@@ -82,6 +80,9 @@ func TestServerEntryExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
+
+	config.DataRootDirectory = testDataDirName
+
 	err = config.Commit(false)
 	if err != nil {
 		t.Fatalf("Commit failed: %s", err)

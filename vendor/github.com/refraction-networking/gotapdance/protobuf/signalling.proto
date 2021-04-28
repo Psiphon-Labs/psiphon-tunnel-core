@@ -83,7 +83,7 @@ message ClientConf {
     optional DecoyList decoy_list = 1;
     optional uint32 generation = 2;
     optional PubKey default_pubkey = 3;
-    optional DarkDecoyBlocks dark_decoy_blocks = 4;
+    optional PhantomSubnetsList phantom_subnets_list = 4;
     optional PubKey conjure_pubkey = 5;
 }
 
@@ -91,8 +91,13 @@ message DecoyList {
     repeated TLSDecoySpec tls_decoys = 1;
 }
 
-message DarkDecoyBlocks{
-    repeated string blocks = 1;
+message PhantomSubnetsList{
+    repeated PhantomSubnets weighted_subnets = 1;
+}
+
+message PhantomSubnets{
+    optional uint32 weight = 1;
+    repeated string subnets = 2;
 }
 
 // State transitions of the client
@@ -251,3 +256,9 @@ message SessionStats {
     optional uint32 tcp_to_decoy = 39; // measured when establishing tcp connection to decot
 }
 
+message StationToDetector {
+    optional string phantom_ip = 1;
+    optional string client_ip = 2;
+
+    optional uint64 timeout_ns = 3;
+}

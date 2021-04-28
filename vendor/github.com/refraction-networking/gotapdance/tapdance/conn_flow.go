@@ -539,9 +539,7 @@ func (flowConn *TapdanceFlowConn) idStr() string {
 }
 
 func (flowConn *TapdanceFlowConn) processProto(msg *pb.StationToClient) error {
-	// //[TODO]{priority:after-placement-updates} uncomment to re-enable automatic clientconf downloads
-	//handleConfigInfo := func(conf *pb.ClientConf) {
-	_ = func(conf *pb.ClientConf) {
+	handleConfigInfo := func(conf *pb.ClientConf) {
 		currGen := Assets().GetGeneration()
 		if conf.GetGeneration() < currGen {
 			Logger().Infoln(flowConn.idStr()+" not appliying new config due"+
@@ -563,8 +561,7 @@ func (flowConn *TapdanceFlowConn) processProto(msg *pb.StationToClient) error {
 	Logger().Debugln(flowConn.idStr() + " processing incoming protobuf: " + msg.String())
 	// handle ConfigInfo
 	if confInfo := msg.ConfigInfo; confInfo != nil {
-		// //[TODO]{priority:after-placement-updates} uncomment to re-enable automatic clientconf downloads
-		// handleConfigInfo(confInfo)
+		handleConfigInfo(confInfo)
 		// TODO: if we ever get a ``safe'' decoy rotation - code below has to be rewritten
 		if !Assets().IsDecoyInList(flowConn.tdRaw.decoySpec) {
 			Logger().Warningln(flowConn.idStr() + " current decoy is no " +

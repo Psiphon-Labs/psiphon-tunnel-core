@@ -15,10 +15,10 @@
 			"revisionTime": "2017-07-02T08:40:17Z"
 		},
 		{
-			"checksumSHA1": "aFs1ojFW1UmUNMtN6rdRJ2FEIRE=",
+			"checksumSHA1": "sfwh75+6RErl2wUTOYb5PSVm7ik=",
 			"path": "github.com/Psiphon-Inc/rotate-safe-writer",
-			"revision": "b276127301a99aa7102ebdc6f509fc8d890900d0",
-			"revisionTime": "2017-02-28T16:03:01Z"
+			"revision": "464a7a37606efa061cb3021e7bb9fa3642e1e74d",
+			"revisionTime": "2021-03-03T14:09:23Z"
 		},
 		{
 			"checksumSHA1": "okYVKU03vmD+0tpqfhvXEubcaCw=",
@@ -560,40 +560,40 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "TtIN/5Wshp+L7WdSLIRLlH+QzYI=",
+			"checksumSHA1": "Tq3U98W2uwIgjWSjH7tqBonGjBE=",
 			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
-			"revisionTime": "2021-01-11T22:28:43Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
 			"checksumSHA1": "ObZZJpjQl2BISlIiES82BW8jbEE=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/edwards25519",
-			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
-			"revisionTime": "2021-01-11T22:28:43Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
 			"checksumSHA1": "VoyDh1KIIVE+OJbehDNJ91tf4Vw=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/extra25519",
-			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
-			"revisionTime": "2021-01-11T22:28:43Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
-			"checksumSHA1": "pv457Nq5W+/UI8AYxLSljqlohk0=",
+			"checksumSHA1": "J0kNvH3uYnwnPEJQhaa5Y1TcbZI=",
 			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
-			"revisionTime": "2021-01-11T22:28:43Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
-			"checksumSHA1": "2C5hsdfPpJoACSbdgDF0hS/so3E=",
+			"checksumSHA1": "rPJAZXxZ5w5+ZnIPZGDFyp/uO6w=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
-			"revisionTime": "2021-01-11T22:28:43Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
-			"checksumSHA1": "fv2fYuM1BN+zb4/TEktcVTqKhnI=",
+			"checksumSHA1": "NiwZ/PirZniVT64D03KOS6UFMGU=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance/phantoms",
-			"revision": "3329123236de461a1478b2b5a019ca0d416e44eb",
-			"revisionTime": "2021-01-11T22:28:43Z"
+			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
+			"revisionTime": "2021-04-26T00:19:26Z"
 		},
 		{
 			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",

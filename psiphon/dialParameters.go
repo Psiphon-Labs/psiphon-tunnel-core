@@ -95,6 +95,8 @@ type DialParameters struct {
 	MeekDialAddress           string
 	MeekTransformedHostName   bool
 	MeekSNIServerName         string
+	MeekVerifyServerName      string
+	MeekVerifyPins            []string
 	MeekHostHeader            string
 	MeekObfuscatorPaddingSeed *prng.Seed
 	MeekTLSPaddingSize        int
@@ -114,8 +116,14 @@ type DialParameters struct {
 	QUICClientHelloSeed       *prng.Seed
 	ObfuscatedQUICPaddingSeed *prng.Seed
 
-	ConjureDecoyRegistrarWidth int
-	ConjureTransport           string
+	ConjureCachedRegistrationTTL time.Duration
+	ConjureAPIRegistration       bool
+	ConjureAPIRegistrarURL       string
+	ConjureAPIRegistrarDelay     time.Duration
+	ConjureDecoyRegistration     bool
+	ConjureDecoyRegistrarDelay   time.Duration
+	ConjureDecoyRegistrarWidth   int
+	ConjureTransport             string
 
 	LivenessTestSeed *prng.Seed
 
@@ -393,14 +401,115 @@ func MakeDialParameters(
 		}
 	}
 
-	if (!isReplay || !replayTLSProfile) &&
-		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) {
+	if (!isReplay || !replayConjureRegistration) &&
+		protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
+
+		dialParams.ConjureCachedRegistrationTTL = p.Duration(parameters.ConjureCachedRegistrationTTL)
+
+		apiURL := p.String(parameters.ConjureAPIRegistrarURL)
+		decoyWidth := p.Int(parameters.ConjureDecoyRegistrarWidth)
+
+		dialParams.ConjureAPIRegistration = apiURL != ""
+		dialParams.ConjureDecoyRegistration = decoyWidth != 0
+
+		// We select only one of API or decoy registration. When both are enabled,
+		// ConjureDecoyRegistrarProbability determines the probability of using
+		// decoy registration.
+		//
+		// In general, we disable retries in gotapdance and rely on Psiphon
+		// establishment to try/retry different registration schemes. This allows us
+		// to control the proportion of registration types attempted. And, in good
+		// network conditions, individual candidates are most likely to be cancelled
+		// before they exhaust their retry options.
+
+		if dialParams.ConjureAPIRegistration && dialParams.ConjureDecoyRegistration {
+			if p.WeightedCoinFlip(parameters.ConjureDecoyRegistrarProbability) {
+				dialParams.ConjureAPIRegistration = false
+			}
+		}
+
+		if dialParams.ConjureAPIRegistration {
+
+			// While Conjure API registration uses MeekConn and specifies common meek
+			// parameters, the meek address and SNI configuration is implemented in this
+			// code block and not in common code blocks below. The exception is TLS
+			// configuration.
+			//
+			// Accordingly, replayFronting/replayHostname have no effect on Conjure API
+			// registration replay.
+
+			dialParams.ConjureAPIRegistrarURL = apiURL
+
+			frontingSpecs := p.FrontingSpecs(parameters.ConjureAPIRegistrarFrontingSpecs)
+			dialParams.FrontingProviderID,
+				dialParams.MeekFrontingDialAddress,
+				dialParams.MeekSNIServerName,
+				dialParams.MeekVerifyServerName,
+				dialParams.MeekVerifyPins,
+				dialParams.MeekFrontingHost,
+				err = frontingSpecs.SelectParameters()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			dialParams.MeekDialAddress = fmt.Sprintf("%s:443", dialParams.MeekFrontingDialAddress)
+			dialParams.MeekHostHeader = dialParams.MeekFrontingHost
+
+			// For a FrontingSpec, an SNI value of "" indicates to disable/omit SNI, so
+			// never transform in that case.
+			if dialParams.MeekSNIServerName != "" {
+				if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
+					dialParams.MeekSNIServerName = selectHostName(dialParams.TunnelProtocol, p)
+					dialParams.MeekTransformedHostName = true
+				}
+			}
+
+			// The minimum delay value is determined by the Conjure station, which
+			// performs an asynchronous "liveness test" against the selected phantom
+			// IPs. The min/max range allows us to introduce some jitter so that we
+			// don't present a trivial inter-flow fingerprint: CDN connection, fixed
+			// delay, phantom dial.
+
+			minDelay := p.Duration(parameters.ConjureAPIRegistrarMinDelay)
+			maxDelay := p.Duration(parameters.ConjureAPIRegistrarMaxDelay)
+			dialParams.ConjureAPIRegistrarDelay = prng.Period(minDelay, maxDelay)
+
+		} else if dialParams.ConjureDecoyRegistration {
+
+			dialParams.ConjureDecoyRegistrarWidth = decoyWidth
+			minDelay := p.Duration(parameters.ConjureDecoyRegistrarMinDelay)
+			maxDelay := p.Duration(parameters.ConjureDecoyRegistrarMaxDelay)
+			dialParams.ConjureAPIRegistrarDelay = prng.Period(minDelay, maxDelay)
+
+		} else {
+
+			return nil, errors.TraceNew("no Conjure registrar configured")
+		}
+	}
+
+	if (!isReplay || !replayConjureTransport) &&
+		protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
+
+		dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_MIN_OSSH
+		if p.WeightedCoinFlip(
+			parameters.ConjureTransportObfs4Probability) {
+			dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_OBFS4_OSSH
+		}
+	}
+
+	usingTLS := protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
+		dialParams.ConjureAPIRegistration
+
+	if (!isReplay || !replayTLSProfile) && usingTLS {
 
 		dialParams.SelectedTLSProfile = true
 
 		requireTLS12SessionTickets := protocol.TunnelProtocolRequiresTLS12SessionTickets(
 			dialParams.TunnelProtocol)
-		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
+
+		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) ||
+			dialParams.ConjureAPIRegistration
+
 		dialParams.TLSProfile = SelectTLSProfile(
 			requireTLS12SessionTickets, isFronted, serverEntry.FrontingProviderID, p)
 
@@ -408,8 +517,7 @@ func MakeDialParameters(
 			parameters.NoDefaultTLSSessionIDProbability)
 	}
 
-	if (!isReplay || !replayRandomizedTLSProfile) &&
-		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) &&
+	if (!isReplay || !replayRandomizedTLSProfile) && usingTLS &&
 		protocol.TLSProfileIsRandomized(dialParams.TLSProfile) {
 
 		dialParams.RandomizedTLSProfileSeed, err = prng.NewSeed()
@@ -418,8 +526,7 @@ func MakeDialParameters(
 		}
 	}
 
-	if (!isReplay || !replayTLSProfile) &&
-		protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) {
+	if (!isReplay || !replayTLSProfile) && usingTLS {
 
 		// Since "Randomized-v2"/CustomTLSProfiles may be TLS 1.2 or TLS 1.3,
 		// construct the ClientHello to determine if it's TLS 1.3. This test also
@@ -464,7 +571,7 @@ func MakeDialParameters(
 
 			dialParams.MeekSNIServerName = ""
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
-				dialParams.MeekSNIServerName = values.GetHostName()
+				dialParams.MeekSNIServerName = selectHostName(dialParams.TunnelProtocol, p)
 				dialParams.MeekTransformedHostName = true
 			}
 
@@ -473,7 +580,7 @@ func MakeDialParameters(
 			dialParams.MeekHostHeader = ""
 			hostname := serverEntry.IpAddress
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
-				hostname = values.GetHostName()
+				hostname = selectHostName(dialParams.TunnelProtocol, p)
 				dialParams.MeekTransformedHostName = true
 			}
 			if serverEntry.MeekServerPort == 80 {
@@ -484,7 +591,9 @@ func MakeDialParameters(
 		} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
 			dialParams.QUICDialSNIAddress = fmt.Sprintf(
-				"%s:%d", values.GetHostName(), serverEntry.SshObfuscatedQUICPort)
+				"%s:%d",
+				selectHostName(dialParams.TunnelProtocol, p),
+				serverEntry.SshObfuscatedQUICPort)
 		}
 	}
 
@@ -508,22 +617,6 @@ func MakeDialParameters(
 		dialParams.ObfuscatedQUICPaddingSeed, err = prng.NewSeed()
 		if err != nil {
 			return nil, errors.Trace(err)
-		}
-	}
-
-	if (!isReplay || !replayConjureRegistration) &&
-		protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
-
-		dialParams.ConjureDecoyRegistrarWidth = p.Int(parameters.ConjureDecoyRegistrarWidth)
-	}
-
-	if (!isReplay || !replayConjureTransport) &&
-		protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
-
-		dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_MIN_OSSH
-		if p.WeightedCoinFlip(
-			parameters.ConjureTransportObfs4Probability) {
-			dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_OBFS4_OSSH
 		}
 	}
 
@@ -661,7 +754,9 @@ func MakeDialParameters(
 
 	dialCustomHeaders := makeDialCustomHeaders(config, p)
 
-	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) || dialParams.UpstreamProxyType == "http" {
+	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) ||
+		dialParams.UpstreamProxyType == "http" ||
+		dialParams.ConjureAPIRegistration {
 
 		if !isReplay || !replayUserAgent {
 			dialParams.SelectedUserAgent, dialParams.UserAgent = selectUserAgentIfUnset(p, dialCustomHeaders)
@@ -705,7 +800,8 @@ func MakeDialParameters(
 	// always be read.
 	dialParams.MeekResolvedIPAddress.Store("")
 
-	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) ||
+		dialParams.ConjureAPIRegistration {
 
 		dialParams.meekConfig = &MeekConfig{
 			DiagnosticID:                  serverEntry.GetDiagnosticID(),
@@ -714,12 +810,14 @@ func MakeDialParameters(
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
 			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
-			UseHTTPS:                      protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol),
+			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
 			NoDefaultTLSSessionID:         dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
 			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			SNIServerName:                 dialParams.MeekSNIServerName,
+			VerifyServerName:              dialParams.MeekVerifyServerName,
+			VerifyPins:                    dialParams.MeekVerifyPins,
 			HostHeader:                    dialParams.MeekHostHeader,
 			TransformedHostName:           dialParams.MeekTransformedHostName,
 			ClientTunnelProtocol:          dialParams.TunnelProtocol,
@@ -739,7 +837,11 @@ func MakeDialParameters(
 		}
 
 		if isTactics {
-			dialParams.meekConfig.RoundTripperOnly = true
+			dialParams.meekConfig.Mode = MeekModeObfuscatedRoundTrip
+		} else if dialParams.ConjureAPIRegistration {
+			dialParams.meekConfig.Mode = MeekModePlaintextRoundTrip
+		} else {
+			dialParams.meekConfig.Mode = MeekModeRelay
 		}
 	}
 
@@ -938,7 +1040,8 @@ func getConfigStateHash(
 	return hash.Sum(nil)
 }
 
-func selectFrontingParameters(serverEntry *protocol.ServerEntry) (string, string, error) {
+func selectFrontingParameters(
+	serverEntry *protocol.ServerEntry) (string, string, error) {
 
 	frontingDialHost := ""
 	frontingHost := ""
@@ -1067,4 +1170,31 @@ func makeDialCustomHeaders(
 		copy(dialCustomHeaders[k], v)
 	}
 	return dialCustomHeaders
+}
+
+func selectHostName(
+	tunnelProtocol string, p parameters.ParametersAccessor) string {
+
+	limitProtocols := p.TunnelProtocols(parameters.CustomHostNameLimitProtocols)
+	if len(limitProtocols) > 0 && !common.Contains(limitProtocols, tunnelProtocol) {
+		return values.GetHostName()
+	}
+
+	if !p.WeightedCoinFlip(parameters.CustomHostNameProbability) {
+		return values.GetHostName()
+	}
+
+	regexStrings := p.RegexStrings(parameters.CustomHostNameRegexes)
+	if len(regexStrings) == 0 {
+		return values.GetHostName()
+	}
+
+	choice := prng.Intn(len(regexStrings))
+	hostName, err := regen.Generate(regexStrings[choice])
+	if err != nil {
+		NoticeWarning("selectHostName: regen.Generate failed: %v", errors.Trace(err))
+		return values.GetHostName()
+	}
+
+	return hostName
 }
