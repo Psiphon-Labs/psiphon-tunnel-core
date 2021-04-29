@@ -25,7 +25,7 @@ type clientHandshakeStateTLS13 struct {
 	hello       *clientHelloMsg
 	ecdheParams ecdheParameters
 
-	session     *ClientSessionState
+	session     *clientSessionState
 	earlySecret []byte
 	binderKey   []byte
 
@@ -180,51 +180,62 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 	c := hs.c
 
 	// The first ClientHello gets double-hashed into the transcript upon a
-	// HelloRetryRequest. See RFC 8446, Section 4.4.1.
+	// HelloRetryRequest. (The idea is that the server might offload transcript
+	// storage to the client in the cookie.) See RFC 8446, Section 4.4.1.
 	chHash := hs.transcript.Sum(nil)
 	hs.transcript.Reset()
 	hs.transcript.Write([]byte{typeMessageHash, 0, 0, uint8(len(chHash))})
 	hs.transcript.Write(chHash)
 	hs.transcript.Write(hs.serverHello.marshal())
 
+	// The only HelloRetryRequest extensions we support are key_share and
+	// cookie, and clients must abort the handshake if the HRR would not result
+	// in any change in the ClientHello.
+	if hs.serverHello.selectedGroup == 0 && hs.serverHello.cookie == nil {
+		c.sendAlert(alertIllegalParameter)
+		return errors.New("tls: server sent an unnecessary HelloRetryRequest message")
+	}
+
+	if hs.serverHello.cookie != nil {
+		hs.hello.cookie = hs.serverHello.cookie
+	}
+
 	if hs.serverHello.serverShare.group != 0 {
 		c.sendAlert(alertDecodeError)
 		return errors.New("tls: received malformed key_share extension")
 	}
 
-	curveID := hs.serverHello.selectedGroup
-	if curveID == 0 {
-		c.sendAlert(alertMissingExtension)
-		return errors.New("tls: received HelloRetryRequest without selected group")
-	}
-	curveOK := false
-	for _, id := range hs.hello.supportedCurves {
-		if id == curveID {
-			curveOK = true
-			break
+	// If the server sent a key_share extension selecting a group, ensure it's
+	// a group we advertised but did not send a key share for, and send a key
+	// share for it this time.
+	if curveID := hs.serverHello.selectedGroup; curveID != 0 {
+		curveOK := false
+		for _, id := range hs.hello.supportedCurves {
+			if id == curveID {
+				curveOK = true
+				break
+			}
 		}
+		if !curveOK {
+			c.sendAlert(alertIllegalParameter)
+			return errors.New("tls: server selected unsupported group")
+		}
+		if hs.ecdheParams.CurveID() == curveID {
+			c.sendAlert(alertIllegalParameter)
+			return errors.New("tls: server sent an unnecessary HelloRetryRequest key_share")
+		}
+		if _, ok := curveForCurveID(curveID); curveID != X25519 && !ok {
+			c.sendAlert(alertInternalError)
+			return errors.New("tls: CurvePreferences includes unsupported curve")
+		}
+		params, err := generateECDHEParameters(c.config.rand(), curveID)
+		if err != nil {
+			c.sendAlert(alertInternalError)
+			return err
+		}
+		hs.ecdheParams = params
+		hs.hello.keyShares = []keyShare{{group: curveID, data: params.PublicKey()}}
 	}
-	if !curveOK {
-		c.sendAlert(alertIllegalParameter)
-		return errors.New("tls: server selected unsupported group")
-	}
-	if hs.ecdheParams.CurveID() == curveID {
-		c.sendAlert(alertIllegalParameter)
-		return errors.New("tls: server sent an unnecessary HelloRetryRequest message")
-	}
-	if _, ok := curveForCurveID(curveID); curveID != X25519 && !ok {
-		c.sendAlert(alertInternalError)
-		return errors.New("tls: CurvePreferences includes unsupported curve")
-	}
-	params, err := generateECDHEParameters(c.config.rand(), curveID)
-	if err != nil {
-		c.sendAlert(alertInternalError)
-		return err
-	}
-	hs.ecdheParams = params
-	hs.hello.keyShares = []keyShare{{group: curveID, data: params.PublicKey()}}
-
-	hs.hello.cookie = hs.serverHello.cookie
 
 	hs.hello.raw = nil
 	if len(hs.hello.pskIdentities) > 0 {
@@ -251,10 +262,10 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 		}
 	}
 
-	hs.hello.earlyData = false // disable 0-RTT
-	if c.config.Rejected0RTT != nil {
-		c.config.Rejected0RTT()
+	if hs.hello.earlyData && c.extraConfig != nil && c.extraConfig.Rejected0RTT != nil {
+		c.extraConfig.Rejected0RTT()
 	}
+	hs.hello.earlyData = false // disable 0-RTT
 
 	hs.transcript.Write(hs.hello.marshal())
 	if _, err := c.writeRecord(recordTypeHandshake, hs.hello.marshal()); err != nil {
@@ -332,6 +343,8 @@ func (hs *clientHandshakeStateTLS13) processServerHello() error {
 	c.didResume = true
 	c.peerCertificates = hs.session.serverCertificates
 	c.verifiedChains = hs.session.verifiedChains
+	c.ocspResponse = hs.session.ocspResponse
+	c.scts = hs.session.scts
 	return nil
 }
 
@@ -390,34 +403,39 @@ func (hs *clientHandshakeStateTLS13) readServerParameters() error {
 		c.sendAlert(alertUnexpectedMessage)
 		return unexpectedMessageError(encryptedExtensions, msg)
 	}
-	if hs.c.config.ReceivedExtensions != nil {
-		hs.c.config.ReceivedExtensions(typeEncryptedExtensions, encryptedExtensions.additionalExtensions)
+	// Notify the caller if 0-RTT was rejected.
+	if !encryptedExtensions.earlyData && hs.hello.earlyData && c.extraConfig != nil && c.extraConfig.Rejected0RTT != nil {
+		c.extraConfig.Rejected0RTT()
+	}
+	c.used0RTT = encryptedExtensions.earlyData
+	if hs.c.extraConfig != nil && hs.c.extraConfig.ReceivedExtensions != nil {
+		hs.c.extraConfig.ReceivedExtensions(typeEncryptedExtensions, encryptedExtensions.additionalExtensions)
 	}
 	hs.transcript.Write(encryptedExtensions.marshal())
 
-	if len(encryptedExtensions.alpnProtocol) != 0 && len(hs.hello.alpnProtocols) == 0 {
-		c.sendAlert(alertUnsupportedExtension)
-		return errors.New("tls: server advertised unrequested ALPN extension")
-	}
-	if c.config.EnforceNextProtoSelection {
+	if c.extraConfig != nil && c.extraConfig.EnforceNextProtoSelection {
 		if len(encryptedExtensions.alpnProtocol) == 0 {
 			// the server didn't select an ALPN
 			c.sendAlert(alertNoApplicationProtocol)
 			return errors.New("ALPN negotiation failed. Server didn't offer any protocols")
 		}
-		if _, fallback := mutualProtocol([]string{encryptedExtensions.alpnProtocol}, hs.c.config.NextProtos); fallback {
+		if mutualProtocol([]string{encryptedExtensions.alpnProtocol}, hs.c.config.NextProtos) == "" {
 			// the protocol selected by the server was not offered
 			c.sendAlert(alertNoApplicationProtocol)
 			return fmt.Errorf("ALPN negotiation failed. Server offered: %q", encryptedExtensions.alpnProtocol)
 		}
 	}
-	c.clientProtocol = encryptedExtensions.alpnProtocol
-	// Notify the caller if 0-RTT was rejected.
-	if !encryptedExtensions.earlyData && hs.hello.earlyData && c.config.Rejected0RTT != nil {
-		c.config.Rejected0RTT()
+	if encryptedExtensions.alpnProtocol != "" {
+		if len(hs.hello.alpnProtocols) == 0 {
+			c.sendAlert(alertUnsupportedExtension)
+			return errors.New("tls: server advertised unrequested ALPN extension")
+		}
+		if mutualProtocol([]string{encryptedExtensions.alpnProtocol}, hs.hello.alpnProtocols) == "" {
+			c.sendAlert(alertUnsupportedExtension)
+			return errors.New("tls: server selected unadvertised ALPN protocol")
+		}
+		c.clientProtocol = encryptedExtensions.alpnProtocol
 	}
-	c.used0RTT = encryptedExtensions.earlyData
-
 	return nil
 }
 
@@ -427,6 +445,15 @@ func (hs *clientHandshakeStateTLS13) readServerCertificate() error {
 	// Either a PSK or a certificate is always used, but not both.
 	// See RFC 8446, Section 4.1.1.
 	if hs.usingPSK {
+		// Make sure the connection is still being verified whether or not this
+		// is a resumption. Resumptions currently don't reverify certificates so
+		// they don't call verifyServerCertificate. See Issue 31641.
+		if c.config.VerifyConnection != nil {
+			if err := c.config.VerifyConnection(c.connectionStateLocked()); err != nil {
+				c.sendAlert(alertBadCertificate)
+				return err
+			}
+		}
 		return nil
 	}
 
@@ -555,11 +582,11 @@ func (hs *clientHandshakeStateTLS13) sendClientCertificate() error {
 		return nil
 	}
 
-	cert, err := c.getClientCertificate(&CertificateRequestInfo{
+	cert, err := c.getClientCertificate(toCertificateRequestInfo(&certificateRequestInfo{
 		AcceptableCAs:    hs.certReq.certificateAuthorities,
 		SignatureSchemes: hs.certReq.supportedSignatureAlgorithms,
 		Version:          c.vers,
-	})
+	}))
 	if err != nil {
 		return err
 	}
@@ -674,8 +701,8 @@ func (c *Conn) handleNewSessionTicket(msg *newSessionTicketMsgTLS13) error {
 	copy(nonceWithEarlyData[4:], msg.nonce)
 
 	var appData []byte
-	if c.config.GetAppDataForSessionState != nil {
-		appData = c.config.GetAppDataForSessionState()
+	if c.extraConfig != nil && c.extraConfig.GetAppDataForSessionState != nil {
+		appData = c.extraConfig.GetAppDataForSessionState()
 	}
 	var b cryptobyte.Builder
 	b.AddUint16(clientSessionStateVersion) // revision
@@ -691,7 +718,7 @@ func (c *Conn) handleNewSessionTicket(msg *newSessionTicketMsgTLS13) error {
 	// to do the least amount of work on NewSessionTicket messages before we
 	// know if the ticket will be used. Forward secrecy of resumed connections
 	// is guaranteed by the requirement for pskModeDHE.
-	session := &ClientSessionState{
+	session := &clientSessionState{
 		sessionTicket:      msg.label,
 		vers:               c.vers,
 		cipherSuite:        c.cipherSuite,
@@ -702,10 +729,12 @@ func (c *Conn) handleNewSessionTicket(msg *newSessionTicketMsgTLS13) error {
 		nonce:              b.BytesOrPanic(),
 		useBy:              c.config.time().Add(lifetime),
 		ageAdd:             msg.ageAdd,
+		ocspResponse:       c.ocspResponse,
+		scts:               c.scts,
 	}
 
 	cacheKey := clientSessionCacheKey(c.conn.RemoteAddr(), c.config)
-	c.config.ClientSessionCache.Put(cacheKey, session)
+	c.config.ClientSessionCache.Put(cacheKey, toClientSessionState(session))
 
 	return nil
 }

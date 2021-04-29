@@ -100,15 +100,14 @@ type clientHelloMsg struct {
 }
 
 func (m *clientHelloMsg) marshal() []byte {
+	if m.raw != nil {
+		return m.raw
+	}
 
 	// [Psiphon]
 	// Randomize the Client Hello.
 	if m.PRNG != nil {
 		return m.marshalRandomized()
-	}
-
-	if m.raw != nil {
-		return m.raw
 	}
 
 	var b cryptobyte.Builder

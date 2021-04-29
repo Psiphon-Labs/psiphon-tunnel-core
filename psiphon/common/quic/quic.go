@@ -91,7 +91,7 @@ var supportedVersionNumbers = map[string]uint32{
 
 func isObfuscated(quicVersion string) bool {
 	return quicVersion == protocol.QUIC_VERSION_OBFUSCATED ||
-		quicVersion == QUIC_VERSION_OBFUSCATED_IETF29
+		quicVersion == protocol.QUIC_VERSION_OBFUSCATED_IETF29
 }
 
 func isClientHelloRandomized(quicVersion string) bool {
@@ -739,9 +739,9 @@ func dialQUIC(
 
 	if isIETFVersion(versionNumber) {
 		quicConfig := &ietf_quic.Config{
-			HandshakeTimeout: time.Duration(1<<63 - 1),
-			MaxIdleTimeout:   CLIENT_IDLE_TIMEOUT,
-			KeepAlive:        true,
+			HandshakeIdleTimeout: time.Duration(1<<63 - 1),
+			MaxIdleTimeout:       CLIENT_IDLE_TIMEOUT,
+			KeepAlive:            true,
 			Versions: []ietf_quic.VersionNumber{
 				ietf_quic.VersionNumber(versionNumber)},
 			ClientHelloSeed: clientHelloSeed,
@@ -749,7 +749,7 @@ func dialQUIC(
 
 		deadline, ok := ctx.Deadline()
 		if ok {
-			quicConfig.HandshakeTimeout = time.Until(deadline)
+			quicConfig.HandshakeIdleTimeout = time.Until(deadline)
 		}
 
 		var dialSession ietf_quic.Session
@@ -961,7 +961,7 @@ func newMuxListener(
 	}
 
 	ietfQUICConfig := &ietf_quic.Config{
-		HandshakeTimeout:      SERVER_HANDSHAKE_TIMEOUT,
+		HandshakeIdleTimeout:  SERVER_HANDSHAKE_TIMEOUT,
 		MaxIdleTimeout:        serverIdleTimeout,
 		MaxIncomingStreams:    1,
 		MaxIncomingUniStreams: -1,

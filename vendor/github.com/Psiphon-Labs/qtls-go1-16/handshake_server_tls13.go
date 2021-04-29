@@ -140,22 +140,39 @@ func (hs *serverHandshakeStateTLS13) processClientHello() error {
 	hs.hello.compressionMethod = compressionNone
 
 	var preferenceList, supportedList, ourList []uint16
+	var useConfiguredCipherSuites bool
 	for _, suiteID := range c.config.CipherSuites {
 		for _, suite := range cipherSuitesTLS13 {
 			if suite.id == suiteID {
 				ourList = append(ourList, suiteID)
+				break
 			}
 		}
 	}
-	if len(ourList) == 0 {
+	if len(ourList) > 0 {
+		useConfiguredCipherSuites = true
+	} else {
 		ourList = defaultCipherSuitesTLS13()
 	}
 	if c.config.PreferServerCipherSuites {
 		preferenceList = ourList
 		supportedList = hs.clientHello.cipherSuites
+
+		// If the client does not seem to have hardware support for AES-GCM,
+		// prefer other AEAD ciphers even if we prioritized AES-GCM ciphers
+		// by default.
+		if !useConfiguredCipherSuites && !aesgcmPreferred(hs.clientHello.cipherSuites) {
+			preferenceList = deprioritizeAES(preferenceList)
+		}
 	} else {
 		preferenceList = hs.clientHello.cipherSuites
 		supportedList = ourList
+
+		// If we don't have hardware support for AES-GCM, prefer other AEAD
+		// ciphers even if the client prioritized AES-GCM.
+		if !hasAESGCMHardwareSupport {
+			preferenceList = deprioritizeAES(preferenceList)
+		}
 	}
 	for _, suiteID := range preferenceList {
 		hs.suite = mutualCipherSuiteTLS13(supportedList, suiteID)
@@ -223,12 +240,12 @@ GroupSelection:
 
 	c.serverName = hs.clientHello.serverName
 
-	if c.config.ReceivedExtensions != nil {
-		c.config.ReceivedExtensions(typeClientHello, hs.clientHello.additionalExtensions)
+	if c.extraConfig != nil && c.extraConfig.ReceivedExtensions != nil {
+		c.extraConfig.ReceivedExtensions(typeClientHello, hs.clientHello.additionalExtensions)
 	}
 
 	if len(hs.clientHello.alpnProtocols) > 0 {
-		if selectedProto, fallback := mutualProtocol(hs.clientHello.alpnProtocols, c.config.NextProtos); !fallback {
+		if selectedProto := mutualProtocol(hs.clientHello.alpnProtocols, c.config.NextProtos); selectedProto != "" {
 			hs.encryptedExtensions.alpnProtocol = selectedProto
 			c.clientProtocol = selectedProto
 		}
@@ -284,7 +301,8 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 			}
 
 			if sessionState.alpn == c.clientProtocol &&
-				c.config.Accept0RTT != nil && c.config.Accept0RTT(sessionState.appData) {
+				c.extraConfig != nil && c.extraConfig.MaxEarlyData > 0 &&
+				c.extraConfig.Accept0RTT != nil && c.extraConfig.Accept0RTT(sessionState.appData) {
 				hs.encryptedExtensions.earlyData = true
 				c.used0RTT = true
 			}
@@ -333,13 +351,14 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 			return errors.New("tls: invalid PSK binder")
 		}
 
+		c.didResume = true
 		if err := c.processCertsFromClient(sessionState.certificate); err != nil {
 			return err
 		}
 
 		h := cloneHash(hs.transcript, hs.suite.hash)
 		h.Write(hs.clientHello.marshal())
-		if sessionState.maxEarlyData > 0 && c.config.MaxEarlyData > 0 {
+		if hs.encryptedExtensions.earlyData {
 			clientEarlySecret := hs.suite.deriveSecret(hs.earlySecret, "c e traffic", h)
 			c.in.exportKey(Encryption0RTT, hs.suite, clientEarlySecret)
 			if err := c.config.writeKeyLog(keyLogLabelEarlyTraffic, hs.clientHello.random, clientEarlySecret); err != nil {
@@ -351,7 +370,6 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 		hs.hello.selectedIdentityPresent = true
 		hs.hello.selectedIdentity = uint16(i)
 		hs.usingPSK = true
-		c.didResume = true
 		return nil
 	}
 
@@ -399,7 +417,7 @@ func (hs *serverHandshakeStateTLS13) pickCertificate() error {
 		return c.sendAlert(alertMissingExtension)
 	}
 
-	certificate, err := c.config.getCertificate(clientHelloInfo(c, hs.clientHello))
+	certificate, err := c.config.getCertificate(newClientHelloInfo(c, hs.clientHello))
 	if err != nil {
 		if err == errNoCertificates {
 			c.sendAlert(alertUnrecognizedName)
@@ -558,7 +576,7 @@ func illegalClientHelloChange(ch, ch1 *clientHelloMsg) bool {
 func (hs *serverHandshakeStateTLS13) sendServerParameters() error {
 	c := hs.c
 
-	if c.config.EnforceNextProtoSelection && len(c.clientProtocol) == 0 {
+	if c.extraConfig != nil && c.extraConfig.EnforceNextProtoSelection && len(c.clientProtocol) == 0 {
 		c.sendAlert(alertNoApplicationProtocol)
 		return fmt.Errorf("ALPN negotiation failed. Client offered: %q", hs.clientHello.alpnProtocols)
 	}
@@ -600,8 +618,8 @@ func (hs *serverHandshakeStateTLS13) sendServerParameters() error {
 		return err
 	}
 
-	if hs.c.config.GetExtensions != nil {
-		hs.encryptedExtensions.additionalExtensions = hs.c.config.GetExtensions(typeEncryptedExtensions)
+	if hs.c.extraConfig != nil && hs.c.extraConfig.GetExtensions != nil {
+		hs.encryptedExtensions.additionalExtensions = hs.c.extraConfig.GetExtensions(typeEncryptedExtensions)
 	}
 
 	hs.transcript.Write(hs.encryptedExtensions.marshal())
@@ -768,7 +786,7 @@ func (hs *serverHandshakeStateTLS13) sendSessionTickets() error {
 	// Don't send session tickets when the alternative record layer is set.
 	// Instead, save the resumption secret on the Conn.
 	// Session tickets can then be generated by calling Conn.GetSessionTicket().
-	if hs.c.config.AlternativeRecordLayer != nil {
+	if hs.c.extraConfig != nil && hs.c.extraConfig.AlternativeRecordLayer != nil {
 		return nil
 	}
 
@@ -787,6 +805,14 @@ func (hs *serverHandshakeStateTLS13) readClientCertificate() error {
 	c := hs.c
 
 	if !hs.requestClientCert() {
+		// Make sure the connection is still being verified whether or not
+		// the server requested a client certificate.
+		if c.config.VerifyConnection != nil {
+			if err := c.config.VerifyConnection(c.connectionStateLocked()); err != nil {
+				c.sendAlert(alertBadCertificate)
+				return err
+			}
+		}
 		return nil
 	}
 
@@ -807,6 +833,13 @@ func (hs *serverHandshakeStateTLS13) readClientCertificate() error {
 
 	if err := c.processCertsFromClient(certMsg.certificate); err != nil {
 		return err
+	}
+
+	if c.config.VerifyConnection != nil {
+		if err := c.config.VerifyConnection(c.connectionStateLocked()); err != nil {
+			c.sendAlert(alertBadCertificate)
+			return err
+		}
 	}
 
 	if len(certMsg.certificate.Certificate) != 0 {
