@@ -459,6 +459,8 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 	if GetEmitNetworkParameters() {
 
+		// Omit appliedTacticsTag as that is emitted in another notice.
+
 		if dialParams.BPFProgramName != "" {
 			args = append(args, "client_bpf", dialParams.BPFProgramName)
 		}
@@ -508,6 +510,18 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 		if dialParams.SelectedTLSProfile {
 			args = append(args, "TLSProfile", dialParams.TLSProfile)
 			args = append(args, "TLSVersion", dialParams.GetTLSVersionForMetrics())
+		}
+
+		// dialParams.ServerEntry.Region is emitted above.
+
+		if dialParams.ServerEntry.LocalSource != "" {
+			args = append(args, "serverEntrySource", dialParams.ServerEntry.LocalSource)
+		}
+
+		localServerEntryTimestamp := common.TruncateTimestampToHour(
+			dialParams.ServerEntry.LocalTimestamp)
+		if localServerEntryTimestamp != "" {
+			args = append(args, "serverEntryTimestamp", localServerEntryTimestamp)
 		}
 
 		if dialParams.DialPortNumber != "" {
