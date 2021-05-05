@@ -1105,13 +1105,14 @@ func (server *MeekServer) makeMeekTLSConfig(
 
 		config.PassthroughAddress = server.passthroughAddress
 
-		passthroughKey, err := obfuscator.DeriveTLSPassthroughKey(
-			server.support.Config.MeekObfuscatedKey)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+		config.PassthroughVerifyMessage = func(
+			message []byte) bool {
 
-		config.PassthroughKey = passthroughKey
+			return obfuscator.VerifyTLSPassthroughMessage(
+				!server.support.Config.LegacyPassthrough,
+				server.support.Config.MeekObfuscatedKey,
+				message)
+		}
 
 		config.PassthroughLogInvalidMessage = func(
 			clientIP string) {
@@ -1129,14 +1130,22 @@ func (server *MeekServer) makeMeekTLSConfig(
 			clientIP string,
 			clientRandom []byte) bool {
 
+			// Use a custom, shorter TTL based on the validity period of the
+			// passthrough message.
+			TTL := obfuscator.TLS_PASSTHROUGH_TIME_PERIOD
+			if server.support.Config.LegacyPassthrough {
+				TTL = obfuscator.HISTORY_SEED_TTL
+			}
+
 			// strictMode is true as, unlike with meek cookies, legitimate meek clients
 			// never retry TLS connections using a previous random value.
 
-			ok, logFields := server.obfuscatorSeedHistory.AddNew(
+			ok, logFields := server.obfuscatorSeedHistory.AddNewWithTTL(
 				true,
 				clientIP,
 				"client-random",
-				clientRandom)
+				clientRandom,
+				TTL)
 
 			if logFields != nil {
 				logIrregularTunnel(

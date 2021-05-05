@@ -170,6 +170,11 @@ type Config struct {
 	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH".
 	TunnelProtocolPassthroughAddresses map[string]string
 
+	// LegacyPassthrough indicates whether to expect legacy passthrough messages
+	// from clients attempting to connect. This should be set for existing/legacy
+	// passthrough servers only.
+	LegacyPassthrough bool
+
 	// SSHPrivateKey is the SSH host key. The same key is used for
 	// all protocols, run by this server instance, which use SSH.
 	SSHPrivateKey string
@@ -662,6 +667,8 @@ type GenerateConfigParams struct {
 	TacticsConfigFilename       string
 	TacticsRequestPublicKey     string
 	TacticsRequestObfuscatedKey string
+	Passthrough                 bool
+	LegacyPassthrough           bool
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON encoded
@@ -859,6 +866,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		OSLConfigFilename:              params.OSLConfigFilename,
 		TacticsConfigFilename:          params.TacticsConfigFilename,
 		MarionetteFormat:               params.MarionetteFormat,
+		LegacyPassthrough:              params.LegacyPassthrough,
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
@@ -952,7 +960,16 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	}
 
 	for tunnelProtocol := range params.TunnelProtocolPorts {
-		capabilities = append(capabilities, protocol.GetCapability(tunnelProtocol))
+
+		capability := protocol.GetCapability(tunnelProtocol)
+		if params.Passthrough && protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) {
+			if !params.LegacyPassthrough {
+				capability += "-PASSTHROUGH-v2"
+			} else {
+				capability += "-PASSTHROUGH"
+			}
+		}
+		capabilities = append(capabilities, capability)
 
 		if params.TacticsRequestPublicKey != "" && params.TacticsRequestObfuscatedKey != "" &&
 			protocol.TunnelProtocolUsesMeek(tunnelProtocol) {

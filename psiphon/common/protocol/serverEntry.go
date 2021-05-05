@@ -447,13 +447,14 @@ func GetTacticsCapability(protocol string) string {
 
 // hasCapability indicates if the server entry has the specified capability.
 //
-// Any internal "PASSTHROUGH" componant in the server entry's capabilities is
-// ignored. The PASSTHROUGH component is used to mask protocols which are
-// running the passthrough mechanism from older clients which do not implement
-// the passthrough message. Older clients will treat these capabilities as
-// unknown protocols and skip them.
+// Any internal "PASSTHROUGH-v2 or "PASSTHROUGH" componant in the server
+// entry's capabilities is ignored. These PASSTHROUGH components are used to
+// mask protocols which are running the passthrough mechanisms from older
+// clients which do not implement the passthrough messages. Older clients will
+// treat these capabilities as unknown protocols and skip them.
 func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 	for _, capability := range serverEntry.Capabilities {
+		capability = strings.ReplaceAll(capability, "-PASSTHROUGH-v2", "")
 		capability = strings.ReplaceAll(capability, "-PASSTHROUGH", "")
 		if capability == requiredCapability {
 			return true
@@ -467,6 +468,18 @@ func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 	requiredCapability := GetCapability(protocol)
 	return serverEntry.hasCapability(requiredCapability)
+}
+
+// ProtocolUsesLegacyPassthrough indicates whether the ServerEntry supports
+// the specified protocol using legacy passthrough messages.
+func (serverEntry *ServerEntry) ProtocolUsesLegacyPassthrough(protocol string) bool {
+	legacyCapability := GetCapability(protocol) + "-PASSTHROUGH"
+	for _, capability := range serverEntry.Capabilities {
+		if capability == legacyCapability {
+			return true
+		}
+	}
+	return false
 }
 
 // ConditionallyEnabledComponents defines an interface which can be queried to

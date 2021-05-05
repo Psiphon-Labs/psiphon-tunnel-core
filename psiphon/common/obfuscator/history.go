@@ -106,18 +106,32 @@ func NewSeedHistory(config *SeedHistoryConfig) *SeedHistory {
 	}
 }
 
-// AddNew adds a new seed value to the history. If the seed value is already
-// in the history, and an expected case such as a meek retry is ruled out (or
-// strictMode is on), AddNew returns false.
-//
-// When a duplicate seed is found, a common.LogFields instance is returned,
-// populated with event data. Log fields may be returned in either the false
-// or true case.
+// AddNew calls AddNewWithTTL using the SeedTTL that was specified in the
+// SeedHistoryConfig.
 func (h *SeedHistory) AddNew(
 	strictMode bool,
 	clientIP string,
 	seedType string,
 	seed []byte) (bool, *common.LogFields) {
+
+	return h.AddNewWithTTL(
+		strictMode, clientIP, seedType, seed, lrucache.DefaultExpiration)
+}
+
+// AddNewWithTTL adds a new seed value to the history, set to expire with the
+// specified TTL. If the seed value is already in the history, and an expected
+// case such as a meek retry is ruled out (or strictMode is on), AddNew
+// returns false.
+//
+// When a duplicate seed is found, a common.LogFields instance is returned,
+// populated with event data. Log fields may be returned in either the false
+// or true case.
+func (h *SeedHistory) AddNewWithTTL(
+	strictMode bool,
+	clientIP string,
+	seedType string,
+	seed []byte,
+	TTL time.Duration) (bool, *common.LogFields) {
 
 	key := string(seed)
 
@@ -126,8 +140,9 @@ func (h *SeedHistory) AddNew(
 	// an unlikely possibility that this Add and the following Get don't see the
 	// same existing key/value state.
 
-	if h.seedToTime.Add(key, time.Now(), lrucache.DefaultExpiration) == nil {
+	if h.seedToTime.Add(key, time.Now(), TTL) == nil {
 		// Seed was not already in cache
+		// TODO: if TTL < SeedHistory.ClientIPTTL, use the shorter TTL here
 		h.seedToClientIP.Set(key, clientIP, lrucache.DefaultExpiration)
 		return true, nil
 	}

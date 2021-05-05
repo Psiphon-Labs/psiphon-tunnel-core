@@ -125,6 +125,10 @@ type MeekConfig struct {
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
 
+	// LegacyPassthrough indicates that the server expects a legacy passthrough
+	// message.
+	LegacyPassthrough bool
+
 	// NoDefaultTLSSessionID specifies the value for
 	// CustomTLSConfig.NoDefaultTLSSessionID for all underlying TLS connections
 	// created by this meek connection.
@@ -137,7 +141,6 @@ type MeekConfig struct {
 
 	// UseObfuscatedSessionTickets indicates whether to use obfuscated session
 	// tickets. Assumes UseHTTPS is true. Ignored for MeekModePlaintextRoundTrip.
-	//
 	UseObfuscatedSessionTickets bool
 
 	// SNIServerName is the value to place in the TLS/QUIC SNI server_name field
@@ -435,6 +438,7 @@ func DialMeek(
 			// clients don't know which servers are configured to use it).
 
 			passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
+				!meekConfig.LegacyPassthrough,
 				meekConfig.MeekObfuscatedKey)
 			if err != nil {
 				return nil, errors.Trace(err)

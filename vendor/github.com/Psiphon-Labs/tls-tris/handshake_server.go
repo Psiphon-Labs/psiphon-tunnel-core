@@ -17,8 +17,6 @@ import (
 	"net"
 	"sync/atomic"
 	"time"
-
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 )
 
 // serverHandshakeState contains details of a server handshake in progress.
@@ -105,8 +103,7 @@ func (c *Conn) serverHandshake() error {
 		clientIP, _, _ := net.SplitHostPort(clientAddr)
 
 		if !doPassthrough {
-			if !obfuscator.VerifyTLSPassthroughMessage(
-				c.config.PassthroughKey, hs.clientHello.random) {
+			if !c.config.PassthroughVerifyMessage(hs.clientHello.random) {
 
 				c.config.PassthroughLogInvalidMessage(clientIP)
 
