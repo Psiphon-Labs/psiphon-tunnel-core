@@ -701,6 +701,7 @@ type Config struct {
 	CustomTLSProfiles                     protocol.CustomTLSProfiles
 	SelectRandomizedTLSProfileProbability *float64
 	NoDefaultTLSSessionIDProbability      *float64
+	DisableFrontingProviderTLSProfiles    protocol.LabeledTLSProfiles
 
 	// ClientBurstUpstreamTargetBytes and other burst metric fields are for
 	// testing purposes.
@@ -1595,6 +1596,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.NoDefaultTLSSessionIDProbability] = *config.NoDefaultTLSSessionIDProbability
 	}
 
+	if config.DisableFrontingProviderTLSProfiles != nil {
+		applyParameters[parameters.DisableFrontingProviderTLSProfiles] = config.DisableFrontingProviderTLSProfiles
+	}
+
 	if config.ClientBurstUpstreamTargetBytes != nil {
 		applyParameters[parameters.ClientBurstUpstreamTargetBytes] = *config.ClientBurstUpstreamTargetBytes
 	}
@@ -1870,6 +1875,13 @@ func (config *Config) setDialParametersHash() {
 	if config.NoDefaultTLSSessionIDProbability != nil {
 		hash.Write([]byte("NoDefaultTLSSessionIDProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.NoDefaultTLSSessionIDProbability)
+	}
+
+	if config.DisableFrontingProviderTLSProfiles != nil {
+		hash.Write([]byte("DisableFrontingProviderTLSProfiles"))
+		encodedDisableFrontingProviderTLSProfiles, _ :=
+			json.Marshal(config.DisableFrontingProviderTLSProfiles)
+		hash.Write(encodedDisableFrontingProviderTLSProfiles)
 	}
 
 	if len(config.CustomHostNameRegexes) > 0 {

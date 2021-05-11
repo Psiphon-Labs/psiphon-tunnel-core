@@ -126,7 +126,9 @@ func (h *SeedHistory) AddNew(
 	// an unlikely possibility that this Add and the following Get don't see the
 	// same existing key/value state.
 
-	if h.seedToTime.Add(key, time.Now(), lrucache.DefaultExpiration) == nil {
+	now := time.Now()
+
+	if h.seedToTime.Add(key, now, lrucache.DefaultExpiration) == nil {
 		// Seed was not already in cache
 		h.seedToClientIP.Set(key, clientIP, lrucache.DefaultExpiration)
 		return true, nil
@@ -135,7 +137,7 @@ func (h *SeedHistory) AddNew(
 	previousTime, ok := h.seedToTime.Get(key)
 	if !ok {
 		// Inconsistent Add/Get state: assume cache item just expired.
-		previousTime = h.seedTTL
+		previousTime = now.Add(-h.seedTTL)
 	}
 
 	logFields := common.LogFields{
