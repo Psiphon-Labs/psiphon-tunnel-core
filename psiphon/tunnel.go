@@ -87,6 +87,7 @@ type Tunnel struct {
 	isClosed                       bool
 	dialParams                     *DialParameters
 	livenessTestMetrics            *livenessTestMetrics
+	extraFailureAction             func()
 	serverContext                  *ServerContext
 	monitoringStartTime            time.Time
 	conn                           *common.BurstMonitoredConn
@@ -156,6 +157,7 @@ func ConnectTunnel(
 		config:              config,
 		dialParams:          dialParams,
 		livenessTestMetrics: dialResult.livenessTestMetrics,
+		extraFailureAction:  dialResult.extraFailureAction,
 		monitoringStartTime: dialResult.monitoringStartTime,
 		conn:                dialResult.monitoredConn,
 		sshClient:           dialResult.sshClient,
@@ -179,7 +181,7 @@ func (tunnel *Tunnel) Activate(
 	activationSucceeded := false
 	baseCtx := ctx
 	defer func() {
-		if !activationSucceeded && baseCtx.Err() == nil {
+		if !activationSucceeded && baseCtx.Err() != context.Canceled {
 			tunnel.dialParams.Failed(tunnel.config)
 			_ = RecordFailedTunnelStat(
 				tunnel.config,
@@ -188,6 +190,9 @@ func (tunnel *Tunnel) Activate(
 				-1,
 				-1,
 				retErr)
+			if tunnel.extraFailureAction != nil {
+				tunnel.extraFailureAction()
+			}
 		}
 	}()
 
@@ -653,6 +658,7 @@ type dialResult struct {
 	sshClient           *ssh.Client
 	sshRequests         <-chan *ssh.Request
 	livenessTestMetrics *livenessTestMetrics
+	extraFailureAction  func()
 }
 
 // dialTunnel is a helper that builds the transport layers and establishes the
@@ -689,14 +695,17 @@ func dialTunnel(
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
 	// connect.
 	//
+	//
+	//
 	// Limitation: dials that fail to connect due to the server being in a
 	// load-limiting state are not distinguished and excepted from this
 	// logic.
 	dialSucceeded := false
 	baseCtx := ctx
 	var failedTunnelLivenessTestMetrics *livenessTestMetrics
+	var extraFailureAction func()
 	defer func() {
-		if !dialSucceeded && baseCtx.Err() == nil {
+		if !dialSucceeded && baseCtx.Err() != context.Canceled {
 			dialParams.Failed(config)
 			_ = RecordFailedTunnelStat(
 				config,
@@ -705,6 +714,9 @@ func dialTunnel(
 				-1,
 				-1,
 				retErr)
+			if extraFailureAction != nil {
+				extraFailureAction()
+			}
 		}
 	}()
 
@@ -809,13 +821,35 @@ func dialTunnel(
 		// will be assigned the original public IP on network A; so there's some
 		// chance the registration cannot be reused.
 
-		cacheKey := dialParams.NetworkID + "-" + dialParams.ServerEntry.GetDiagnosticID()
+		diagnosticID := dialParams.ServerEntry.GetDiagnosticID()
+
+		cacheKey := dialParams.NetworkID + "-" + diagnosticID
 
 		conjureConfig := &refraction.ConjureConfig{
 			RegistrationCacheTTL: dialParams.ConjureCachedRegistrationTTL,
 			RegistrationCacheKey: cacheKey,
 			Transport:            dialParams.ConjureTransport,
+			DiagnosticID:         diagnosticID,
 			Logger:               NoticeCommonLogger(),
+		}
+
+		// Set extraFailureAction, which is invoked whenever the tunnel fails (i.e.,
+		// where RecordFailedTunnelStat is invoked). The action will remove any
+		// cached registration. When refraction.DialConjure succeeds, the underlying
+		// registration is cached. After refraction.DialConjure returns, it no
+		// longer modifies the cached state of that registration, assuming that it
+		// remains valid and effective. However adversarial impact on a given
+		// phantom IP may not become evident until after the initial TCP connection
+		// establishment and handshake performed by refraction.DialConjure. For
+		// example, it may be that the phantom dial is targeted for severe
+		// throttling which begins or is only evident later in the flow. Scheduling
+		// a call to DeleteCachedConjureRegistration allows us to invalidate the
+		// cached registration for a tunnel that fails later in its lifecycle.
+		//
+		// Note that extraFailureAction will retain a reference to conjureConfig for
+		// the lifetime of the tunnel.
+		extraFailureAction = func() {
+			refraction.DeleteCachedConjureRegistration(conjureConfig)
 		}
 
 		if dialParams.ConjureAPIRegistration {
@@ -1134,7 +1168,9 @@ func dialTunnel(
 			monitoredConn:       monitoredConn,
 			sshClient:           result.sshClient,
 			sshRequests:         result.sshRequests,
-			livenessTestMetrics: result.livenessTestMetrics},
+			livenessTestMetrics: result.livenessTestMetrics,
+			extraFailureAction:  extraFailureAction,
+		},
 		nil
 }
 
@@ -1720,6 +1756,9 @@ loop:
 				bytesUp,
 				bytesDown,
 				err)
+			if tunnel.extraFailureAction != nil {
+				tunnel.extraFailureAction()
+			}
 
 			// SSHKeepAliveResetOnFailureProbability is set when a late-lifecycle
 			// impaired protocol attack is suspected. With the given probability, reset

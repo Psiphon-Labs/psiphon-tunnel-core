@@ -86,6 +86,9 @@ type ConjureConfig struct {
 	// protocol.CONJURE_TRANSPORT_OBFS4_OSSH.
 	Transport string
 
+	// DiagnosticID identifies this dial in diagnostics.
+	DiagnosticID string
+
 	// Logger is used for logging diagnostics.
 	Logger common.Logger
 }

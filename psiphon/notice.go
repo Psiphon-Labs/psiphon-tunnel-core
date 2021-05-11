@@ -459,6 +459,8 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 	if GetEmitNetworkParameters() {
 
+		// Omit appliedTacticsTag as that is emitted in another notice.
+
 		if dialParams.BPFProgramName != "" {
 			args = append(args, "client_bpf", dialParams.BPFProgramName)
 		}
@@ -508,6 +510,18 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 		if dialParams.SelectedTLSProfile {
 			args = append(args, "TLSProfile", dialParams.TLSProfile)
 			args = append(args, "TLSVersion", dialParams.GetTLSVersionForMetrics())
+		}
+
+		// dialParams.ServerEntry.Region is emitted above.
+
+		if dialParams.ServerEntry.LocalSource != "" {
+			args = append(args, "serverEntrySource", dialParams.ServerEntry.LocalSource)
+		}
+
+		localServerEntryTimestamp := common.TruncateTimestampToHour(
+			dialParams.ServerEntry.LocalTimestamp)
+		if localServerEntryTimestamp != "" {
+			args = append(args, "serverEntryTimestamp", localServerEntryTimestamp)
 		}
 
 		if dialParams.DialPortNumber != "" {
@@ -1103,13 +1117,7 @@ func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
 func listCommonFields(fields common.LogFields) []interface{} {
 	fieldList := make([]interface{}, 0)
 	for name, value := range fields {
-		var formattedValue string
-		if err, ok := value.(error); ok {
-			formattedValue = err.Error()
-		} else {
-			formattedValue = fmt.Sprintf("%#v", value)
-		}
-		fieldList = append(fieldList, name, formattedValue)
+		fieldList = append(fieldList, name, value)
 	}
 	return fieldList
 }

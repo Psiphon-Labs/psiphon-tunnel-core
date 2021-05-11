@@ -305,10 +305,7 @@ func dial(
 		// condition. The popped cached registration must be reinserted in the cache
 		// after canceling or success, but not on phantom dial failure.
 
-		conjureCachedRegistration = conjureRegistrationCache.pop(
-			conjureConfig.Logger,
-			conjureConfig.RegistrationCacheTTL,
-			conjureConfig.RegistrationCacheKey)
+		conjureCachedRegistration = conjureRegistrationCache.pop(conjureConfig)
 
 		if conjureCachedRegistration != nil {
 
@@ -420,31 +417,39 @@ func dial(
 	//
 	// Limitation: the cancel case shouldn't extend the TTL.
 
-	if useConjure &&
-		(err == nil || ctx.Err() == context.Canceled) &&
-		(conjureCachedRegistration != nil || conjureRecordRegistrar != nil) {
+	if useConjure && (conjureCachedRegistration != nil || conjureRecordRegistrar != nil) {
 
-		registration := conjureCachedRegistration
-		if registration == nil {
-			// We assume gotapdance is no longer accessing the Registrar.
-			registration = conjureRecordRegistrar.registration
-		}
+		isCanceled := (err != nil && ctx.Err() == context.Canceled)
 
-		// conjureRecordRegistrar.registration will be nil there was no cached
-		// registration _and_ registration didn't succeed before a cancel.
-		if registration != nil {
+		if err == nil || isCanceled {
 
-			// Do not retain a reference to the custom dialer, as its context will not
-			// be valid for future dials using this cached registration. Assumes that
-			// gotapdance will no longer reference the TcpDialer now that the
-			// connection is established.
-			registration.TcpDialer = nil
+			registration := conjureCachedRegistration
+			if registration == nil {
+				// We assume gotapdance is no longer accessing the Registrar.
+				registration = conjureRecordRegistrar.registration
+			}
 
-			conjureRegistrationCache.put(
-				conjureConfig.Logger,
-				conjureConfig.RegistrationCacheTTL,
-				conjureConfig.RegistrationCacheKey,
-				registration)
+			// conjureRecordRegistrar.registration will be nil if there was no cached
+			// registration _and_ registration didn't succeed before a cancel.
+			if registration != nil {
+
+				// Do not retain a reference to the custom dialer, as its context will not
+				// be valid for future dials using this cached registration. Assumes that
+				// gotapdance will no longer reference the TcpDialer now that the
+				// connection is established.
+				registration.TcpDialer = nil
+
+				conjureRegistrationCache.put(conjureConfig, registration, isCanceled)
+			}
+
+		} else if conjureCachedRegistration != nil {
+
+			conjureConfig.Logger.WithTraceFields(
+				common.LogFields{
+					"diagnosticID": conjureConfig.DiagnosticID,
+					"reason":       "phantom dial failed",
+				}).Info(
+				"drop cached registration")
 		}
 	}
 
@@ -470,6 +475,10 @@ func dial(
 	return refractionConn, nil
 }
 
+func DeleteCachedConjureRegistration(config *ConjureConfig) {
+	conjureRegistrationCache.delete(config)
+}
+
 type registrationCache struct {
 	mutex sync.Mutex
 	TTL   time.Duration
@@ -486,10 +495,9 @@ func newRegistrationCache() *registrationCache {
 }
 
 func (c *registrationCache) put(
-	logger common.Logger,
-	TTL time.Duration,
-	key string,
-	registration *refraction_networking_client.ConjureReg) {
+	config *ConjureConfig,
+	registration *refraction_networking_client.ConjureReg,
+	isCanceled bool) {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -498,46 +506,98 @@ func (c *registrationCache) put(
 	// items for too long. This is expected to be an infrequent event. The
 	// go-cache-lru API does not offer a mechanism to inspect and adjust the TTL
 	// of all existing items.
-	if c.TTL != TTL {
+	if c.TTL != config.RegistrationCacheTTL {
 		c.cache.Flush()
-		c.TTL = TTL
+		c.TTL = config.RegistrationCacheTTL
 	}
 
-	logger.WithTraceFields(
-		common.LogFields{"size": c.cache.ItemCount()}).Info(
-		"Conjure cache")
+	// Drop the cached registration if another entry is found under the same key.
+	// Since the dial pops its entry out of the cache, finding an existing entry
+	// implies that another tunnel establishment candidate with the same key has
+	// successfully registered and connected (or canceled) in the meantime.
+	// Prefer that newer cached registration.
+	//
+	// For Psiphon, one scenario resulting in this condition is that the first
+	// dial to a given server, using a cached registration, is delayed long
+	// enough that a new candidate for the same server has been started and
+	// outpaced the first candidate.
+	_, found := c.cache.Get(config.RegistrationCacheKey)
+	if found {
+		config.Logger.WithTraceFields(
+			common.LogFields{
+				"diagnosticID": config.DiagnosticID,
+				"reason":       "existing entry found",
+			}).Info(
+			"drop cached registration")
+		return
+	}
+
+	reason := "connected"
+	if isCanceled {
+		reason = "canceled"
+	}
+
+	config.Logger.WithTraceFields(
+		common.LogFields{
+			"diagnosticID": config.DiagnosticID,
+			"cacheSize":    c.cache.ItemCount(),
+			"reason":       reason,
+		}).Info(
+		"put cached registration")
 
 	c.cache.Set(
-		key,
+		config.RegistrationCacheKey,
 		registration,
 		c.TTL)
 }
 
 func (c *registrationCache) pop(
-	logger common.Logger,
-	TTL time.Duration,
-	key string) *refraction_networking_client.ConjureReg {
+	config *ConjureConfig) *refraction_networking_client.ConjureReg {
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	// See TTL/Flush comment in put.
-	if c.TTL != TTL {
+	if c.TTL != config.RegistrationCacheTTL {
 		c.cache.Flush()
-		c.TTL = TTL
+		c.TTL = config.RegistrationCacheTTL
 	}
 
-	logger.WithTraceFields(
-		common.LogFields{"size": c.cache.ItemCount()}).Info(
-		"Conjure cache")
+	entry, found := c.cache.Get(config.RegistrationCacheKey)
 
-	entry, found := c.cache.Get(key)
+	config.Logger.WithTraceFields(
+		common.LogFields{
+			"diagnosticID": config.DiagnosticID,
+			"cacheSize":    c.cache.ItemCount(),
+			"found":        found,
+		}).Info(
+		"pop cached registration")
+
 	if found {
-		c.cache.Delete(key)
+		c.cache.Delete(config.RegistrationCacheKey)
 		return entry.(*refraction_networking_client.ConjureReg)
 	}
 
 	return nil
+}
+
+func (c *registrationCache) delete(config *ConjureConfig) {
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	_, found := c.cache.Get(config.RegistrationCacheKey)
+
+	config.Logger.WithTraceFields(
+		common.LogFields{
+			"diagnosticID": config.DiagnosticID,
+			"found":        found,
+		}).Info(
+		"delete cached registration")
+
+	if found {
+		c.cache.Delete(config.RegistrationCacheKey)
+	}
 }
 
 var conjureRegistrationCache = newRegistrationCache()
