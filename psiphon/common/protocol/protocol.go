@@ -445,6 +445,7 @@ type HandshakeResponse struct {
 	HttpsRequestRegexes      []map[string]string `json:"https_request_regexes"`
 	EncodedServerList        []string            `json:"encoded_server_list"`
 	ClientRegion             string              `json:"client_region"`
+	ClientAddress            string              `json:"client_address"`
 	ServerTimestamp          string              `json:"server_timestamp"`
 	ActiveAuthorizationIDs   []string            `json:"active_authorization_ids"`
 	TacticsPayload           json.RawMessage     `json:"tactics_payload"`

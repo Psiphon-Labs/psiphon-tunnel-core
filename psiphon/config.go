@@ -437,6 +437,10 @@ type Config struct {
 	// EmitServerAlerts indicates whether to emit notices for server alerts.
 	EmitServerAlerts bool
 
+	// EmitClientAddress indicates whether to emit the client's public network
+	// address, IP and port, as seen by the server.
+	EmitClientAddress bool
+
 	// RateLimits specify throttling configuration for the tunnel.
 	RateLimits common.RateLimits
 

@@ -667,6 +667,15 @@ func NoticeClientRegion(region string) {
 		"region", region)
 }
 
+// NoticeClientAddress is the client's public network address, the IP address
+// and port, as seen by the server and reported to the client in the
+// handshake.
+func NoticeClientAddress(address string) {
+	singletonNoticeLogger.outputNotice(
+		"ClientAddress", 0,
+		"address", address)
+}
+
 // NoticeTunnels is how many active tunnels are available. The client should use this to
 // determine connecting/unexpected disconnect state transitions. When count is 0, the core is
 // disconnected; when count > 1, the core is connected.

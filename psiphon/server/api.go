@@ -60,6 +60,7 @@ const (
 //
 func sshAPIRequestHandler(
 	support *SupportServices,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	name string,
@@ -87,6 +88,7 @@ func sshAPIRequestHandler(
 	return dispatchAPIRequestHandler(
 		support,
 		protocol.PSIPHON_SSH_API_PROTOCOL,
+		clientAddr,
 		geoIPData,
 		authorizedAccessTypes,
 		name,
@@ -98,6 +100,7 @@ func sshAPIRequestHandler(
 func dispatchAPIRequestHandler(
 	support *SupportServices,
 	apiProtocol string,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	name string,
@@ -146,14 +149,22 @@ func dispatchAPIRequestHandler(
 	}
 
 	switch name {
+
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(support, apiProtocol, geoIPData, params)
+		return handshakeAPIRequestHandler(
+			support, apiProtocol, clientAddr, geoIPData, params)
+
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
+		return connectedAPIRequestHandler(
+			support, clientAddr, geoIPData, authorizedAccessTypes, params)
+
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
+		return statusAPIRequestHandler(
+			support, clientAddr, geoIPData, authorizedAccessTypes, params)
+
 	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
+		return clientVerificationAPIRequestHandler(
+			support, clientAddr, geoIPData, authorizedAccessTypes, params)
 	}
 
 	return nil, errors.Tracef("invalid request name: %s", name)
@@ -177,6 +188,7 @@ var handshakeRequestParams = append(
 func handshakeAPIRequestHandler(
 	support *SupportServices,
 	apiProtocol string,
+	clientAddr string,
 	geoIPData GeoIPData,
 	params common.APIParameters) ([]byte, error) {
 
@@ -324,6 +336,7 @@ func handshakeAPIRequestHandler(
 		HttpsRequestRegexes:      httpsRequestRegexes,
 		EncodedServerList:        encodedServerList,
 		ClientRegion:             geoIPData.Country,
+		ClientAddress:            clientAddr,
 		ServerTimestamp:          common.GetCurrentTimestamp(),
 		ActiveAuthorizationIDs:   handshakeStateInfo.activeAuthorizationIDs,
 		TacticsPayload:           marshaledTacticsPayload,
@@ -370,6 +383,7 @@ var updateOnConnectedParamNames = append(
 // connected_timestamp is truncated as a privacy measure.
 func connectedAPIRequestHandler(
 	support *SupportServices,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters) ([]byte, error) {
@@ -497,6 +511,7 @@ var failedTunnelStatParams = append(
 // string). Stats processor must handle this input with care.
 func statusAPIRequestHandler(
 	support *SupportServices,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters) ([]byte, error) {
@@ -720,6 +735,7 @@ func statusAPIRequestHandler(
 // for older Android clients that still send verification requests
 func clientVerificationAPIRequestHandler(
 	support *SupportServices,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters) ([]byte, error) {

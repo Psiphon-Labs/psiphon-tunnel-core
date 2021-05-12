@@ -1158,6 +1158,7 @@ func (sshServer *sshServer) handleClient(
 		tunnelProtocol,
 		serverPacketManipulation,
 		replayedServerPacketManipulation,
+		clientAddr,
 		geoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
@@ -1203,6 +1204,7 @@ type sshClient struct {
 	throttledConn                        *common.ThrottledConn
 	serverPacketManipulation             string
 	replayedServerPacketManipulation     bool
+	clientAddr                           net.Addr
 	geoIPData                            GeoIPData
 	sessionID                            string
 	isFirstTunnelInSession               bool
@@ -1296,6 +1298,7 @@ func newSshClient(
 	tunnelProtocol string,
 	serverPacketManipulation string,
 	replayedServerPacketManipulation bool,
+	clientAddr net.Addr,
 	geoIPData GeoIPData) *sshClient {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
@@ -1310,6 +1313,7 @@ func newSshClient(
 		tunnelProtocol:                   tunnelProtocol,
 		serverPacketManipulation:         serverPacketManipulation,
 		replayedServerPacketManipulation: replayedServerPacketManipulation,
+		clientAddr:                       clientAddr,
 		geoIPData:                        geoIPData,
 		isFirstTunnelInSession:           true,
 		tcpPortForwardLRU:                common.NewLRUConns(),
@@ -1988,8 +1992,14 @@ func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 			// Note: unlock before use is only safe as long as referenced sshClient data,
 			// such as slices in handshakeState, is read-only after initially set.
 
+			clientAddr := ""
+			if sshClient.clientAddr != nil {
+				clientAddr = sshClient.clientAddr.String()
+			}
+
 			responsePayload, err = sshAPIRequestHandler(
 				sshClient.sshServer.support,
+				clientAddr,
 				sshClient.geoIPData,
 				authorizedAccessTypes,
 				request.Type,
