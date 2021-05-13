@@ -357,6 +357,12 @@ type MetricsUpdater func(
 	TCPApplicationBytesDown, TCPApplicationBytesUp,
 	UDPApplicationBytesDown, UDPApplicationBytesUp int64)
 
+// DNSQualityReporter is a function which receives a DNS quality report:
+// whether a DNS request received a reponse, the elapsed time, and the
+// resolver used.
+type DNSQualityReporter func(
+	receivedResponse bool, requestDuration time.Duration, resolverIP net.IP)
+
 // ClientConnected handles new client connections, creating or resuming
 // a session and returns with client packet handlers running.
 //
@@ -394,7 +400,8 @@ func (server *Server) ClientConnected(
 	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
 	checkAllowedDomainFunc AllowedDomainChecker,
 	flowActivityUpdaterMaker FlowActivityUpdaterMaker,
-	metricsUpdater MetricsUpdater) error {
+	metricsUpdater MetricsUpdater,
+	dnsQualityReporter DNSQualityReporter) error {
 
 	// It's unusual to call both sync.WaitGroup.Add() _and_ Done() in the same
 	// goroutine. There's no other place to call Add() since ClientConnected is
@@ -479,7 +486,8 @@ func (server *Server) ClientConnected(
 		checkAllowedUDPPortFunc,
 		checkAllowedDomainFunc,
 		flowActivityUpdaterMaker,
-		metricsUpdater)
+		metricsUpdater,
+		dnsQualityReporter)
 
 	return nil
 }
@@ -518,7 +526,8 @@ func (server *Server) resumeSession(
 	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
 	checkAllowedDomainFunc AllowedDomainChecker,
 	flowActivityUpdaterMaker FlowActivityUpdaterMaker,
-	metricsUpdater MetricsUpdater) {
+	metricsUpdater MetricsUpdater,
+	dnsQualityReporter DNSQualityReporter) {
 
 	session.mutex.Lock()
 	defer session.mutex.Unlock()
@@ -559,6 +568,8 @@ func (server *Server) resumeSession(
 	session.setFlowActivityUpdaterMaker(&flowActivityUpdaterMaker)
 
 	session.setMetricsUpdater(&metricsUpdater)
+
+	session.setDNSQualityReporter(&dnsQualityReporter)
 
 	session.channel = channel
 
@@ -1071,12 +1082,13 @@ type session struct {
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastActivity             int64
 	lastFlowReapIndex        int64
+	downstreamPackets        unsafe.Pointer
 	checkAllowedTCPPortFunc  unsafe.Pointer
 	checkAllowedUDPPortFunc  unsafe.Pointer
 	checkAllowedDomainFunc   unsafe.Pointer
 	flowActivityUpdaterMaker unsafe.Pointer
 	metricsUpdater           unsafe.Pointer
-	downstreamPackets        unsafe.Pointer
+	dnsQualityReporter       unsafe.Pointer
 
 	allowBogons              bool
 	metrics                  *packetMetrics
@@ -1136,6 +1148,14 @@ func (session *session) getOriginalIPv6Address() net.IP {
 		return nil
 	}
 	return session.originalIPv6Address
+}
+
+func (session *session) setDownstreamPackets(p *PacketQueue) {
+	atomic.StorePointer(&session.downstreamPackets, unsafe.Pointer(p))
+}
+
+func (session *session) getDownstreamPackets() *PacketQueue {
+	return (*PacketQueue)(atomic.LoadPointer(&session.downstreamPackets))
 }
 
 func (session *session) setCheckAllowedTCPPortFunc(p *AllowedPortChecker) {
@@ -1198,12 +1218,16 @@ func (session *session) getMetricsUpdater() MetricsUpdater {
 	return *p
 }
 
-func (session *session) setDownstreamPackets(p *PacketQueue) {
-	atomic.StorePointer(&session.downstreamPackets, unsafe.Pointer(p))
+func (session *session) setDNSQualityReporter(p *DNSQualityReporter) {
+	atomic.StorePointer(&session.dnsQualityReporter, unsafe.Pointer(p))
 }
 
-func (session *session) getDownstreamPackets() *PacketQueue {
-	return (*PacketQueue)(atomic.LoadPointer(&session.downstreamPackets))
+func (session *session) getDNSQualityReporter() DNSQualityReporter {
+	p := (*DNSQualityReporter)(atomic.LoadPointer(&session.dnsQualityReporter))
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 // flowID identifies an IP traffic flow using the conventional
@@ -1249,9 +1273,13 @@ type flowState struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastUpstreamPacketTime   int64
-	lastDownstreamPacketTime int64
-	activityUpdaters         []FlowActivityUpdater
+	firstUpstreamPacketTime   int64
+	lastUpstreamPacketTime    int64
+	firstDownstreamPacketTime int64
+	lastDownstreamPacketTime  int64
+	isDNS                     bool
+	dnsQualityReporter        DNSQualityReporter
+	activityUpdaters          []FlowActivityUpdater
 }
 
 func (flowState *flowState) expired(idleExpiry time.Duration) bool {
@@ -1271,7 +1299,7 @@ func (session *session) isTrackingFlow(ID flowID) bool {
 
 	// Check if flow is expired but not yet reaped.
 	if flowState.expired(FLOW_IDLE_EXPIRY) {
-		session.flows.Delete(ID)
+		session.deleteFlow(ID, flowState)
 		return false
 	}
 
@@ -1285,6 +1313,7 @@ func (session *session) isTrackingFlow(ID flowID) bool {
 // - one-time permissions checks for a flow
 // - OSLs
 // - domain bytes transferred [TODO]
+// - DNS quality metrics
 //
 // The applicationData from the first packet in the flow is
 // inspected to determine any associated hostname, using HTTP or
@@ -1305,7 +1334,10 @@ func (session *session) isTrackingFlow(ID flowID) bool {
 // startTrackingFlow may be called from concurrent goroutines; if
 // the flow is already tracked, it is simply updated.
 func (session *session) startTrackingFlow(
-	ID flowID, direction packetDirection, applicationData []byte) {
+	ID flowID,
+	direction packetDirection,
+	applicationData []byte,
+	isDNS bool) {
 
 	now := int64(monotime.Now())
 
@@ -1334,12 +1366,16 @@ func (session *session) startTrackingFlow(
 	}
 
 	flowState := &flowState{
-		activityUpdaters: activityUpdaters,
+		isDNS:              isDNS,
+		activityUpdaters:   activityUpdaters,
+		dnsQualityReporter: session.getDNSQualityReporter(),
 	}
 
 	if direction == packetDirectionServerUpstream {
+		flowState.firstUpstreamPacketTime = now
 		flowState.lastUpstreamPacketTime = now
 	} else {
+		flowState.firstDownstreamPacketTime = now
 		flowState.lastDownstreamPacketTime = now
 	}
 
@@ -1350,7 +1386,9 @@ func (session *session) startTrackingFlow(
 }
 
 func (session *session) updateFlow(
-	ID flowID, direction packetDirection, applicationData []byte) {
+	ID flowID,
+	direction packetDirection,
+	applicationData []byte) {
 
 	f, ok := session.flows.Load(ID)
 	if !ok {
@@ -1366,9 +1404,15 @@ func (session *session) updateFlow(
 
 	if direction == packetDirectionServerUpstream {
 		upstreamBytes = int64(len(applicationData))
+
+		atomic.CompareAndSwapInt64(&flowState.firstUpstreamPacketTime, 0, now)
+
 		atomic.StoreInt64(&flowState.lastUpstreamPacketTime, now)
+
 	} else {
 		downstreamBytes = int64(len(applicationData))
+
+		atomic.CompareAndSwapInt64(&flowState.firstDownstreamPacketTime, 0, now)
 
 		// Follows common.ActivityMonitoredConn semantics, where
 		// duration is updated only for downstream activity. This
@@ -1384,12 +1428,52 @@ func (session *session) updateFlow(
 	}
 }
 
+// deleteFlow stops tracking a flow and logs any outstanding metrics.
+// flowState is passed in to avoid duplicating the lookup that all callers
+// have already performed.
+func (session *session) deleteFlow(ID flowID, flowState *flowState) {
+
+	if flowState.isDNS {
+
+		dnsStartTime := monotime.Time(
+			atomic.LoadInt64(&flowState.firstUpstreamPacketTime))
+
+		if dnsStartTime > 0 {
+
+			// Record DNS quality metrics using a heuristic: if a packet was sent and
+			// then a packet was received, assume the DNS request successfully received
+			// a valid response; failure occurs when the resolver fails to provide a
+			// response; a "no such host" response is still a success. Limitations: we
+			// assume a resolver will not respond when, e.g., rate limiting; we ignore
+			// subsequent requests made via the same UDP/TCP flow.
+
+			dnsEndTime := monotime.Time(
+				atomic.LoadInt64(&flowState.firstDownstreamPacketTime))
+
+			dnsSuccess := true
+			if dnsEndTime == 0 {
+				dnsSuccess = false
+				dnsEndTime = monotime.Now()
+			}
+
+			resolveElapsedTime := dnsEndTime.Sub(dnsStartTime)
+
+			flowState.dnsQualityReporter(
+				dnsSuccess,
+				resolveElapsedTime,
+				net.IP(ID.upstreamIPAddress[:]))
+		}
+	}
+
+	session.flows.Delete(ID)
+}
+
 // reapFlows removes expired idle flows.
 func (session *session) reapFlows() {
 	session.flows.Range(func(key, value interface{}) bool {
 		flowState := value.(*flowState)
 		if flowState.expired(FLOW_IDLE_EXPIRY) {
-			session.flows.Delete(key)
+			session.deleteFlow(key.(flowID), flowState)
 		}
 		return true
 	})
@@ -2570,7 +2654,7 @@ func processPacket(
 
 	if doFlowTracking {
 		if !isTrackingFlow {
-			session.startTrackingFlow(ID, direction, applicationData)
+			session.startTrackingFlow(ID, direction, applicationData, doTransparentDNS)
 		} else {
 			session.updateFlow(ID, direction, applicationData)
 		}

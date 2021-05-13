@@ -172,21 +172,28 @@ func (dns *DNSResolver) reloadWhenStale() {
 	}
 }
 
+// GetAll returns a list of all DNS resolver addresses. Cached values are
+// updated if they're stale. If reloading fails, the previous values are
+// used.
+func (dns *DNSResolver) GetAll() []net.IP {
+	return dns.getAll(true, true)
+}
+
 // GetAllIPv4 returns a list of all IPv4 DNS resolver addresses.
 // Cached values are updated if they're stale. If reloading fails,
 // the previous values are used.
 func (dns *DNSResolver) GetAllIPv4() []net.IP {
-	return dns.getAll(false)
+	return dns.getAll(true, false)
 }
 
 // GetAllIPv6 returns a list of all IPv6 DNS resolver addresses.
 // Cached values are updated if they're stale. If reloading fails,
 // the previous values are used.
 func (dns *DNSResolver) GetAllIPv6() []net.IP {
-	return dns.getAll(true)
+	return dns.getAll(false, true)
 }
 
-func (dns *DNSResolver) getAll(wantIPv6 bool) []net.IP {
+func (dns *DNSResolver) getAll(wantIPv4, wantIPv6 bool) []net.IP {
 
 	dns.reloadWhenStale()
 
@@ -195,8 +202,14 @@ func (dns *DNSResolver) getAll(wantIPv6 bool) []net.IP {
 
 	resolvers := make([]net.IP, 0)
 	for _, resolver := range dns.resolvers {
-		if (resolver.To4() == nil) == wantIPv6 {
-			resolvers = append(resolvers, resolver)
+		if resolver.To4() != nil {
+			if wantIPv4 {
+				resolvers = append(resolvers, resolver)
+			}
+		} else {
+			if wantIPv6 {
+				resolvers = append(resolvers, resolver)
+			}
 		}
 	}
 	return resolvers
