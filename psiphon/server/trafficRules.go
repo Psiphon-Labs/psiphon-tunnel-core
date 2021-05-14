@@ -266,6 +266,12 @@ type RateLimits struct {
 	WriteBytesPerSecond   *int64
 	CloseAfterExhausted   *bool
 
+	// EstablishmentRead/WriteBytesPerSecond are used in place of
+	// Read/WriteBytesPerSecond for tunnels in the establishment phase, from the
+	// initial network connection up to the completion of the API handshake.
+	EstablishmentReadBytesPerSecond  *int64
+	EstablishmentWriteBytesPerSecond *int64
+
 	// UnthrottleFirstTunnelOnly specifies whether any
 	// ReadUnthrottledBytes/WriteUnthrottledBytes apply
 	// only to the first tunnel in a session.
@@ -273,14 +279,19 @@ type RateLimits struct {
 }
 
 // CommonRateLimits converts a RateLimits to a common.RateLimits.
-func (rateLimits *RateLimits) CommonRateLimits() common.RateLimits {
-	return common.RateLimits{
+func (rateLimits *RateLimits) CommonRateLimits(handshaked bool) common.RateLimits {
+	r := common.RateLimits{
 		ReadUnthrottledBytes:  *rateLimits.ReadUnthrottledBytes,
 		ReadBytesPerSecond:    *rateLimits.ReadBytesPerSecond,
 		WriteUnthrottledBytes: *rateLimits.WriteUnthrottledBytes,
 		WriteBytesPerSecond:   *rateLimits.WriteBytesPerSecond,
 		CloseAfterExhausted:   *rateLimits.CloseAfterExhausted,
 	}
+	if !handshaked {
+		r.ReadBytesPerSecond = *rateLimits.EstablishmentReadBytesPerSecond
+		r.WriteBytesPerSecond = *rateLimits.EstablishmentWriteBytesPerSecond
+	}
+	return r
 }
 
 // NewTrafficRulesSet initializes a TrafficRulesSet with
@@ -349,6 +360,8 @@ func (set *TrafficRulesSet) Validate() error {
 			(rules.RateLimits.ReadBytesPerSecond != nil && *rules.RateLimits.ReadBytesPerSecond < 0) ||
 			(rules.RateLimits.WriteUnthrottledBytes != nil && *rules.RateLimits.WriteUnthrottledBytes < 0) ||
 			(rules.RateLimits.WriteBytesPerSecond != nil && *rules.RateLimits.WriteBytesPerSecond < 0) ||
+			(rules.RateLimits.EstablishmentReadBytesPerSecond != nil && *rules.RateLimits.EstablishmentReadBytesPerSecond < 0) ||
+			(rules.RateLimits.EstablishmentWriteBytesPerSecond != nil && *rules.RateLimits.EstablishmentWriteBytesPerSecond < 0) ||
 			(rules.DialTCPPortForwardTimeoutMilliseconds != nil && *rules.DialTCPPortForwardTimeoutMilliseconds < 0) ||
 			(rules.IdleTCPPortForwardTimeoutMilliseconds != nil && *rules.IdleTCPPortForwardTimeoutMilliseconds < 0) ||
 			(rules.IdleUDPPortForwardTimeoutMilliseconds != nil && *rules.IdleUDPPortForwardTimeoutMilliseconds < 0) ||
@@ -525,6 +538,14 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 	if trafficRules.RateLimits.CloseAfterExhausted == nil {
 		trafficRules.RateLimits.CloseAfterExhausted = new(bool)
+	}
+
+	if trafficRules.RateLimits.EstablishmentReadBytesPerSecond == nil {
+		trafficRules.RateLimits.EstablishmentReadBytesPerSecond = new(int64)
+	}
+
+	if trafficRules.RateLimits.EstablishmentWriteBytesPerSecond == nil {
+		trafficRules.RateLimits.EstablishmentWriteBytesPerSecond = new(int64)
 	}
 
 	if trafficRules.RateLimits.UnthrottleFirstTunnelOnly == nil {
@@ -725,6 +746,14 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 		if filteredRules.Rules.RateLimits.CloseAfterExhausted != nil {
 			trafficRules.RateLimits.CloseAfterExhausted = filteredRules.Rules.RateLimits.CloseAfterExhausted
+		}
+
+		if filteredRules.Rules.RateLimits.EstablishmentReadBytesPerSecond != nil {
+			trafficRules.RateLimits.EstablishmentReadBytesPerSecond = filteredRules.Rules.RateLimits.EstablishmentReadBytesPerSecond
+		}
+
+		if filteredRules.Rules.RateLimits.EstablishmentWriteBytesPerSecond != nil {
+			trafficRules.RateLimits.EstablishmentWriteBytesPerSecond = filteredRules.Rules.RateLimits.EstablishmentWriteBytesPerSecond
 		}
 
 		if filteredRules.Rules.RateLimits.UnthrottleFirstTunnelOnly != nil {

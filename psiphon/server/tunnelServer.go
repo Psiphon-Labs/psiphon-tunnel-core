@@ -2280,9 +2280,9 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 	// is available pre-handshake, albeit with additional restrictions.
 	//
 	// The random stream is subject to throttling in traffic rules; for
-	// unthrottled liveness tests, set initial Read/WriteUnthrottledBytes as
-	// required. The random stream maximum count and response size cap
-	// mitigate clients abusing the facility to waste server resources.
+	// unthrottled liveness tests, set EstablishmentRead/WriteBytesPerSecond as
+	// required. The random stream maximum count and response size cap mitigate
+	// clients abusing the facility to waste server resources.
 	//
 	// Like all other channels, this channel type is handled asynchronously,
 	// so it's possible to run at any point in the tunnel lifecycle.
@@ -3130,7 +3130,8 @@ func (sshClient *sshClient) setTrafficRules() (int64, int64) {
 	if sshClient.throttledConn != nil {
 		// Any existing throttling state is reset.
 		sshClient.throttledConn.SetLimits(
-			sshClient.trafficRules.RateLimits.CommonRateLimits())
+			sshClient.trafficRules.RateLimits.CommonRateLimits(
+				sshClient.handshakeState.completed))
 	}
 
 	return *sshClient.trafficRules.RateLimits.ReadBytesPerSecond,
@@ -3224,7 +3225,8 @@ func (sshClient *sshClient) rateLimits() common.RateLimits {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	return sshClient.trafficRules.RateLimits.CommonRateLimits()
+	return sshClient.trafficRules.RateLimits.CommonRateLimits(
+		sshClient.handshakeState.completed)
 }
 
 func (sshClient *sshClient) idleTCPPortForwardTimeout() time.Duration {
