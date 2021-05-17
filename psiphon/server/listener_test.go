@@ -28,13 +28,16 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 )
 
 func TestListener(t *testing.T) {
 
-	tunnelProtocol := protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH
+	tunnelProtocol := protocol.TUNNEL_PROTOCOL_FRONTED_MEEK
+
+	frontingProviderID := prng.HexString(8)
 
 	tacticsConfigJSONFormat := `
     {
@@ -54,14 +57,25 @@ func TestListener(t *testing.T) {
           },
           "Tactics" : {
             "Parameters" : {
-              "LimitTunnelProtocols" : ["%s"],
               "FragmentorDownstreamLimitProtocols" : ["%s"],
               "FragmentorDownstreamProbability" : 1.0,
               "FragmentorDownstreamMinTotalBytes" : 1,
               "FragmentorDownstreamMaxTotalBytes" : 1,
               "FragmentorDownstreamMinWriteBytes" : 1,
-              "FragmentorDownstreamMaxWriteBytes" : 1,
-              "FragmentorDownstreamLimitProtocols" : ["OSSH"]
+              "FragmentorDownstreamMaxWriteBytes" : 1
+            }
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R3"],
+            "ISPs": ["I3"],
+            "Cities": ["C3"]
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "RestrictFrontingProviderIDs" : ["%s"],
+              "RestrictFrontingProviderIDsServerProbability" : 1.0
             }
           }
         }
@@ -78,7 +92,7 @@ func TestListener(t *testing.T) {
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
-		tunnelProtocol, tunnelProtocol)
+		tunnelProtocol, frontingProviderID)
 
 	tacticsConfigFilename := filepath.Join(testDataDirName, "tactics_config.json")
 
@@ -108,31 +122,54 @@ func TestListener(t *testing.T) {
 	listenerUnfragmentedGeoIPWrongCity := func(string) GeoIPData {
 		return GeoIPData{Country: "R1", ISP: "I1", City: "C2"}
 	}
+	listenerRestrictedFrontingProviderIDGeoIP := func(string) GeoIPData {
+		return GeoIPData{Country: "R3", ISP: "I3", City: "C3"}
+	}
+	listenerUnrestrictedFrontingProviderIDWrongRegion := func(string) GeoIPData {
+		return GeoIPData{Country: "R2", ISP: "I3", City: "C3"}
+	}
 
 	listenerTestCases := []struct {
 		description      string
 		geoIPLookup      func(string) GeoIPData
 		expectFragmentor bool
+		expectConnection bool
 	}{
 		{
 			"fragmented",
 			listenerFragmentedGeoIP,
+			true,
 			true,
 		},
 		{
 			"unfragmented-region",
 			listenerUnfragmentedGeoIPWrongRegion,
 			false,
+			true,
 		},
 		{
 			"unfragmented-ISP",
 			listenerUnfragmentedGeoIPWrongISP,
 			false,
+			true,
 		},
 		{
 			"unfragmented-city",
 			listenerUnfragmentedGeoIPWrongCity,
 			false,
+			true,
+		},
+		{
+			"restricted",
+			listenerRestrictedFrontingProviderIDGeoIP,
+			false,
+			false,
+		},
+		{
+			"unrestricted-region",
+			listenerUnrestrictedFrontingProviderIDWrongRegion,
+			false,
+			true,
 		},
 	}
 
@@ -145,6 +182,7 @@ func TestListener(t *testing.T) {
 			}
 
 			support := &SupportServices{
+				Config:        &Config{frontingProviderID: frontingProviderID},
 				TacticsServer: tacticsServer,
 			}
 			support.ReplayCache = NewReplayCache(support)
@@ -172,11 +210,14 @@ func TestListener(t *testing.T) {
 				}
 			}()
 
-			timer := time.NewTimer(3 * time.Second)
+			timer := time.NewTimer(1 * time.Second)
 			defer timer.Stop()
 
 			select {
 			case serverConn := <-result:
+				if !testCase.expectConnection {
+					t.Fatalf("unexpected accepted connection")
+				}
 				_, isFragmentor := serverConn.(*fragmentor.Conn)
 				if testCase.expectFragmentor && !isFragmentor {
 					t.Fatalf("unexpected non-fragmentor: %T", serverConn)
@@ -185,7 +226,9 @@ func TestListener(t *testing.T) {
 				}
 				serverConn.Close()
 			case <-timer.C:
-				t.Fatalf("timeout before expected accepted connection")
+				if testCase.expectConnection {
+					t.Fatalf("timeout before expected accepted connection")
+				}
 			}
 
 			clientConn.Close()

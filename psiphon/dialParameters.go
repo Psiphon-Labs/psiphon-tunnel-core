@@ -128,6 +128,8 @@ type DialParameters struct {
 
 	APIRequestPaddingSeed *prng.Seed
 
+	HoldOffTunnelDuration time.Duration
+
 	DialConnMetrics          common.MetricsSource `json:"-"`
 	ObfuscatedSSHConnMetrics common.MetricsSource `json:"-"`
 
@@ -184,6 +186,7 @@ func MakeDialParameters(
 	replayLivenessTest := p.Bool(parameters.ReplayLivenessTest)
 	replayUserAgent := p.Bool(parameters.ReplayUserAgent)
 	replayAPIRequestPadding := p.Bool(parameters.ReplayAPIRequestPadding)
+	replayHoldOffTunnel := p.Bool(parameters.ReplayHoldOffTunnel)
 
 	// Check for existing dial parameters for this server/network ID.
 
@@ -343,6 +346,20 @@ func MakeDialParameters(
 		}
 
 		dialParams.TunnelProtocol = selectedProtocol
+	}
+
+	// Skip this candidate when the clients tactics restrict usage of the
+	// fronting provider ID. See the corresponding server-side enforcement
+	// comments in server.TacticsListener.accept.
+	if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
+		common.Contains(
+			p.Strings(parameters.RestrictFrontingProviderIDs),
+			dialParams.ServerEntry.FrontingProviderID) {
+		if p.WeightedCoinFlip(
+			parameters.RestrictFrontingProviderIDsClientProbability) {
+			return nil, errors.Tracef(
+				"restricted fronting provider ID: %s", dialParams.ServerEntry.FrontingProviderID)
+		}
 	}
 
 	if config.UseUpstreamProxy() &&
@@ -626,6 +643,26 @@ func MakeDialParameters(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+	}
+
+	if !isReplay || !replayHoldOffTunnel {
+
+		if common.Contains(
+			p.TunnelProtocols(parameters.HoldOffTunnelProtocols), dialParams.TunnelProtocol) ||
+
+			(protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
+				common.Contains(
+					p.Strings(parameters.HoldOffTunnelFrontingProviderIDs),
+					dialParams.FrontingProviderID)) {
+
+			if p.WeightedCoinFlip(parameters.HoldOffTunnelProbability) {
+
+				dialParams.HoldOffTunnelDuration = prng.Period(
+					p.Duration(parameters.HoldOffTunnelMinDuration),
+					p.Duration(parameters.HoldOffTunnelMaxDuration))
+			}
+		}
+
 	}
 
 	// Set dial address fields. This portion of configuration is

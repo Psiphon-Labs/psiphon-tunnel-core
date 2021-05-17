@@ -76,9 +76,17 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
+	holdOffTunnelProtocols := protocol.TunnelProtocols{protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH}
+	frontingProviderID := prng.HexString(8)
+
 	applyParameters := make(map[string]interface{})
 	applyParameters[parameters.TransformHostNameProbability] = 1.0
 	applyParameters[parameters.PickUserAgentProbability] = 1.0
+	applyParameters[parameters.HoldOffTunnelMinDuration] = "1ms"
+	applyParameters[parameters.HoldOffTunnelMaxDuration] = "10ms"
+	applyParameters[parameters.HoldOffTunnelProtocols] = holdOffTunnelProtocols
+	applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = []string{frontingProviderID}
+	applyParameters[parameters.HoldOffTunnelProbability] = 1.0
 	err = clientConfig.SetParameters("tag1", true, applyParameters)
 	if err != nil {
 		t.Fatalf("SetParameters failed: %s", err)
@@ -90,7 +98,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	}
 	defer CloseDataStore()
 
-	serverEntries := makeMockServerEntries(tunnelProtocol, 100)
+	serverEntries := makeMockServerEntries(tunnelProtocol, frontingProviderID, 100)
 
 	canReplay := func(serverEntry *protocol.ServerEntry, replayProtocol string) bool {
 		return replayProtocol == tunnelProtocol
@@ -202,6 +210,18 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	if dialParams.APIRequestPaddingSeed == nil {
 		t.Fatalf("missing API request fields")
+	}
+
+	if common.Contains(holdOffTunnelProtocols, tunnelProtocol) ||
+		protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		if dialParams.HoldOffTunnelDuration < 1*time.Millisecond ||
+			dialParams.HoldOffTunnelDuration > 10*time.Millisecond {
+			t.Fatalf("unexpected hold-off duration: %v", dialParams.HoldOffTunnelDuration)
+		}
+	} else {
+		if dialParams.HoldOffTunnelDuration != 0 {
+			t.Fatalf("unexpected hold-off duration: %v", dialParams.HoldOffTunnelDuration)
+		}
 	}
 
 	dialConfig := dialParams.GetDialConfig()
@@ -418,6 +438,33 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("unexpected replayed fields")
 	}
 
+	// Test: client-side restrict fronting provider ID
+
+	applyParameters[parameters.RestrictFrontingProviderIDs] = []string{frontingProviderID}
+	applyParameters[parameters.RestrictFrontingProviderIDsClientProbability] = 1.0
+	err = clientConfig.SetParameters("tag4", true, applyParameters)
+	if err != nil {
+		t.Fatalf("SetParameters failed: %s", err)
+	}
+
+	dialParams, err = MakeDialParameters(clientConfig, nil, canReplay, selectProtocol, serverEntries[0], false, 0, 0)
+
+	if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		if err == nil {
+			t.Fatalf("unexpected MakeDialParameters success")
+		}
+	} else {
+		if err != nil {
+			t.Fatalf("MakeDialParameters failed: %s", err)
+		}
+	}
+
+	applyParameters[parameters.RestrictFrontingProviderIDsClientProbability] = 0.0
+	err = clientConfig.SetParameters("tag5", true, applyParameters)
+	if err != nil {
+		t.Fatalf("SetParameters failed: %s", err)
+	}
+
 	// Test: iterator shuffles
 
 	for i, serverEntry := range serverEntries {
@@ -509,7 +556,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	}
 }
 
-func makeMockServerEntries(tunnelProtocol string, count int) []*protocol.ServerEntry {
+func makeMockServerEntries(
+	tunnelProtocol string,
+	frontingProviderID string,
+	count int) []*protocol.ServerEntry {
 
 	serverEntries := make([]*protocol.ServerEntry, count)
 
@@ -524,6 +574,7 @@ func makeMockServerEntries(tunnelProtocol string, count int) []*protocol.ServerE
 			MeekServerPort:             6,
 			MeekFrontingHosts:          []string{"www1.example.org", "www2.example.org", "www3.example.org"},
 			MeekFrontingAddressesRegex: "[a-z0-9]{1,64}.example.org",
+			FrontingProviderID:         frontingProviderID,
 			LocalSource:                protocol.SERVER_ENTRY_SOURCE_EMBEDDED,
 			LocalTimestamp:             common.TruncateTimestampToHour(common.GetCurrentTimestamp()),
 		}

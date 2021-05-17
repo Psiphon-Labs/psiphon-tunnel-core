@@ -934,9 +934,21 @@ func NoticeServerAlert(alert protocol.AlertRequest) {
 
 // NoticeBursts reports tunnel data transfer burst metrics.
 func NoticeBursts(diagnosticID string, burstMetrics common.LogFields) {
-	singletonNoticeLogger.outputNotice(
-		"Bursts", noticeIsDiagnostic,
-		append([]interface{}{"diagnosticID", diagnosticID}, listCommonFields(burstMetrics)...)...)
+	if GetEmitNetworkParameters() {
+		singletonNoticeLogger.outputNotice(
+			"Bursts", noticeIsDiagnostic,
+			append([]interface{}{"diagnosticID", diagnosticID}, listCommonFields(burstMetrics)...)...)
+	}
+}
+
+// NoticeHoldOffTunnel reports tunnel hold-offs.
+func NoticeHoldOffTunnel(diagnosticID string, duration time.Duration) {
+	if GetEmitNetworkParameters() {
+		singletonNoticeLogger.outputNotice(
+			"HoldOffTunnel", noticeIsDiagnostic,
+			"diagnosticID", diagnosticID,
+			"duration", duration)
+	}
 }
 
 type repetitiveNoticeState struct {
