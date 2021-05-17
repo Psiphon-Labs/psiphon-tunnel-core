@@ -947,7 +947,7 @@ func NoticeHoldOffTunnel(diagnosticID string, duration time.Duration) {
 		singletonNoticeLogger.outputNotice(
 			"HoldOffTunnel", noticeIsDiagnostic,
 			"diagnosticID", diagnosticID,
-			"duration", duration)
+			"duration", duration.String())
 	}
 }
 
