@@ -376,8 +376,12 @@ func logServerLoad(support *SupportServices) {
 
 	serverLoad.Add(support.ServerTacticsParametersCache.GetMetrics())
 
-	protocolStats, regionStats :=
+	upstreamStats, protocolStats, regionStats :=
 		support.TunnelServer.GetLoadStats()
+
+	for name, value := range upstreamStats {
+		serverLoad[name] = value
+	}
 
 	for protocol, stats := range protocolStats {
 		serverLoad[protocol] = stats
