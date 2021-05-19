@@ -242,6 +242,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 				preambleSize: message.preambleSize,
 				remoteIP:     message.remoteIP,
 				remotePort:   message.remotePort,
+				dialIP:       dialIP,
 				conn:         conn,
 				lruEntry:     lruEntry,
 				bytesUp:      0,
@@ -305,6 +306,7 @@ type udpPortForward struct {
 	preambleSize      int
 	remoteIP          []byte
 	remotePort        uint16
+	dialIP            net.IP
 	conn              net.Conn
 	lruEntry          *common.LRUConnsEntry
 	mux               *udpPortForwardMultiplexer
@@ -405,7 +407,7 @@ func (portForward *udpPortForward) relayDownstream() {
 		portForward.mux.sshClient.updateQualityMetricsWithDNSResult(
 			dnsSuccess,
 			resolveElapsedTime,
-			net.IP(portForward.remoteIP))
+			net.IP(portForward.dialIP))
 	}
 
 	log.WithTraceFields(
