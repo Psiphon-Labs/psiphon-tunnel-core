@@ -908,7 +908,8 @@ func (sshServer *sshServer) getLoadStats() (
 
 		// DNS metrics limitations:
 		// - port forwards (sshClient.handleTCPChannel) don't know or log the resolver IP.
-		// - udpgw and packet tunnel transparent DNS use a heuristic to classify success/failure.
+		// - udpgw and packet tunnel transparent DNS use a heuristic to classify success/failure,
+		//   and there may be some delay before these code paths report DNS metrics.
 
 		// Every client.qualityMetrics DNS map has an "ALL" entry.
 

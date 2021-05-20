@@ -335,6 +335,10 @@ type Config struct {
 	// PacketTunnelEgressInterface specifies tun.ServerConfig.EgressInterface.
 	PacketTunnelEgressInterface string
 
+	// PacketTunnelEnableDNSFlowTracking sets
+	// tun.ServerConfig.EnableDNSFlowTracking.
+	PacketTunnelEnableDNSFlowTracking bool
+
 	// PacketTunnelDownstreamPacketQueueSize specifies
 	// tun.ServerConfig.DownStreamPacketQueueSize.
 	PacketTunnelDownstreamPacketQueueSize int

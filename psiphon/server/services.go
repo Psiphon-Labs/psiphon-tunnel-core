@@ -98,6 +98,7 @@ func RunServices(configJSON []byte) (retErr error) {
 			SudoNetworkConfigCommands:   config.PacketTunnelSudoNetworkConfigCommands,
 			GetDNSResolverIPv4Addresses: support.DNSResolver.GetAllIPv4,
 			GetDNSResolverIPv6Addresses: support.DNSResolver.GetAllIPv6,
+			EnableDNSFlowTracking:       config.PacketTunnelEnableDNSFlowTracking,
 			EgressInterface:             config.PacketTunnelEgressInterface,
 			DownstreamPacketQueueSize:   config.PacketTunnelDownstreamPacketQueueSize,
 			SessionIdleExpirySeconds:    config.PacketTunnelSessionIdleExpirySeconds,
