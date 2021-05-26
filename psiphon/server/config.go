@@ -425,6 +425,7 @@ type Config struct {
 	stopEstablishTunnelsEstablishedClientThreshold int
 	dumpProfilesOnStopEstablishTunnelsDone         int32
 	frontingProviderID                             string
+	runningProtocols                               []string
 }
 
 // GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
@@ -495,6 +496,12 @@ func (config *Config) GetOwnEncodedServerEntry(serverEntryTag string) (string, b
 // server's fronted protocol(s).
 func (config *Config) GetFrontingProviderID() string {
 	return config.frontingProviderID
+}
+
+// GetRunningProtocols returns the list of protcols this server is running.
+// The caller must not mutate the return value.
+func (config *Config) GetRunningProtocols() []string {
+	return config.runningProtocols
 }
 
 // LoadConfig loads and validates a JSON encoded server config.
@@ -656,6 +663,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		} else if config.frontingProviderID != serverEntry.FrontingProviderID {
 			return nil, errors.Tracef("unsupported multiple FrontingProviderID values")
 		}
+	}
+
+	config.runningProtocols = []string{}
+	for tunnelProtocol := range config.TunnelProtocolPorts {
+		config.runningProtocols = append(config.runningProtocols, tunnelProtocol)
 	}
 
 	return &config, nil

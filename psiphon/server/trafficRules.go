@@ -70,8 +70,16 @@ type TrafficRulesSet struct {
 	// any client endpoint request or any request to create a new session, but
 	// not any meek request for an existing session, if the
 	// MeekRateLimiterHistorySize requests occur in
-	// MeekRateLimiterThresholdSeconds. The scope of rate limiting may be
-	// limited using LimitMeekRateLimiterRegions/ISPs/Cities.
+	// MeekRateLimiterThresholdSeconds.
+	//
+	// A use case for the the meek rate limiter is to mitigate dangling resource
+	// usage that results from meek connections that are partially established
+	// and then interrupted (e.g, drop packets after allowing up to the initial
+	// HTTP request and header lines). In the case of CDN fronted meek, the CDN
+	// itself may hold open the interrupted connection.
+	//
+	// The scope of rate limiting may be
+	// limited using LimitMeekRateLimiterTunnelProtocols/Regions/ISPs/Cities.
 	//
 	// Hot reloading a new history size will result in existing history being
 	// truncated.
@@ -80,6 +88,11 @@ type TrafficRulesSet struct {
 	// MeekRateLimiterThresholdSeconds is part of the meek rate limiter
 	// specification and must be set when MeekRateLimiterHistorySize is set.
 	MeekRateLimiterThresholdSeconds int
+
+	// MeekRateLimiterTunnelProtocols, if set, limits application of the meek
+	// late-stage rate limiter to the specified meek protocols. When omitted or
+	// empty, meek rate limiting is applied to all meek protocols.
+	MeekRateLimiterTunnelProtocols []string
 
 	// MeekRateLimiterRegions, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
@@ -317,6 +330,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			// Modify actual traffic rules only after validation
 			set.MeekRateLimiterHistorySize = newSet.MeekRateLimiterHistorySize
 			set.MeekRateLimiterThresholdSeconds = newSet.MeekRateLimiterThresholdSeconds
+			set.MeekRateLimiterTunnelProtocols = newSet.MeekRateLimiterTunnelProtocols
 			set.MeekRateLimiterRegions = newSet.MeekRateLimiterRegions
 			set.MeekRateLimiterISPs = newSet.MeekRateLimiterISPs
 			set.MeekRateLimiterCities = newSet.MeekRateLimiterCities
@@ -906,7 +920,8 @@ func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
 
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
 // configuration values.
-func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, []string, []string, int, int) {
+func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
+	int, int, []string, []string, []string, []string, int, int) {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -924,6 +939,7 @@ func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, []st
 
 	return set.MeekRateLimiterHistorySize,
 		set.MeekRateLimiterThresholdSeconds,
+		set.MeekRateLimiterTunnelProtocols,
 		set.MeekRateLimiterRegions,
 		set.MeekRateLimiterISPs,
 		set.MeekRateLimiterCities,

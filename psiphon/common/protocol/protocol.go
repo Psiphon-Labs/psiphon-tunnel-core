@@ -253,14 +253,27 @@ func TunnelProtocolMayUseServerPacketManipulation(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
-func UseClientTunnelProtocol(
+func IsValidClientTunnelProtocol(
 	clientProtocol string,
+	listenerProtocol string,
 	serverProtocols TunnelProtocols) bool {
 
+	if !common.Contains(serverProtocols, clientProtocol) {
+		return false
+	}
+
+	// If the client reports the same tunnel protocol as the listener, the value
+	// is valid.
+
+	if clientProtocol == listenerProtocol {
+		return true
+	}
+
 	// When the server is running multiple fronted protocols, and the client
-	// reports a fronted protocol, use the client's reported tunnel protocol
-	// since some CDNs forward several protocols to the same server port; in this
-	// case the server port is not sufficient to distinguish these protocols.
+	// reports a fronted protocol, the client's reported tunnel protocol is
+	// presumed to be valid since some CDNs forward several protocols to the same
+	// server port; in this case the listener port is not sufficient to
+	// distinguish these protocols.
 
 	if !TunnelProtocolUsesFrontedMeek(clientProtocol) {
 		return false

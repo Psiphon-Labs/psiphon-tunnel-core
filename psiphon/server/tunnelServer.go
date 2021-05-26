@@ -462,11 +462,6 @@ func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {
 // occurs, it will send the error to the listenerError channel.
 func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError chan<- error) {
 
-	runningProtocols := make([]string, 0)
-	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
-		runningProtocols = append(runningProtocols, tunnelProtocol)
-	}
-
 	handleClient := func(clientTunnelProtocol string, clientConn net.Conn) {
 
 		// Note: establish tunnel limiter cannot simply stop TCP
@@ -479,28 +474,15 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 			return
 		}
 
-		// The tunnelProtocol passed to handleClient is used for stats,
-		// throttling, etc. When the tunnel protocol can be determined
-		// unambiguously from the listening port, use that protocol and
-		// don't use any client-declared value. Only use the client's
-		// value, if present, in special cases where the listening port
-		// cannot distinguish the protocol.
+		// tunnelProtocol is used for stats and traffic rules. In many cases, its
+		// value is unambiguously determined by the listener port. In certain cases,
+		// such as multiple fronted protocols with a single backend listener, the
+		// client's reported tunnel protocol value is used. The caller must validate
+		// clientTunnelProtocol with protocol.IsValidClientTunnelProtocol.
+
 		tunnelProtocol := sshListener.tunnelProtocol
 		if clientTunnelProtocol != "" {
-
-			if !common.Contains(runningProtocols, clientTunnelProtocol) {
-				log.WithTraceFields(
-					LogFields{
-						"clientTunnelProtocol": clientTunnelProtocol}).
-					Warning("invalid client tunnel protocol")
-				clientConn.Close()
-				return
-			}
-
-			if protocol.UseClientTunnelProtocol(
-				clientTunnelProtocol, runningProtocols) {
-				tunnelProtocol = clientTunnelProtocol
-			}
+			tunnelProtocol = clientTunnelProtocol
 		}
 
 		// sshListener.tunnelProtocol indictes the tunnel protocol run by the

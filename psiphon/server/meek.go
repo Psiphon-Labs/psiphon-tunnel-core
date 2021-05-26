@@ -630,10 +630,6 @@ func (server *MeekServer) getSessionOrEndpoint(
 		}
 	}
 
-	if server.rateLimit(clientIP) {
-		return "", nil, nil, "", "", errors.TraceNew("rate limit exceeded")
-	}
-
 	// The session is new (or expired). Treat the cookie value as a new meek
 	// cookie, extract the payload, and create a new session.
 
@@ -649,6 +645,32 @@ func (server *MeekServer) getSessionOrEndpoint(
 	err = json.Unmarshal(payloadJSON, &clientSessionData)
 	if err != nil {
 		return "", nil, nil, "", "", errors.Trace(err)
+	}
+
+	tunnelProtocol := server.listenerTunnelProtocol
+
+	if clientSessionData.ClientTunnelProtocol != "" {
+
+		if !protocol.IsValidClientTunnelProtocol(
+			clientSessionData.ClientTunnelProtocol,
+			server.listenerTunnelProtocol,
+			server.support.Config.GetRunningProtocols()) {
+
+			return "", nil, nil, "", "", errors.Tracef(
+				"invalid client tunnel protocol: %s", clientSessionData.ClientTunnelProtocol)
+		}
+
+		tunnelProtocol = clientSessionData.ClientTunnelProtocol
+	}
+
+	// Any rate limit is enforced after the meek cookie is validated, so a prober
+	// without the obfuscation secret will be unable to fingerprint the server
+	// based on response time combined with the rate limit configuration. The
+	// rate limit is primarily intended to limit memory resource consumption and
+	// not the overhead incurred by cookie validation.
+
+	if server.rateLimit(clientIP, tunnelProtocol) {
+		return "", nil, nil, "", "", errors.TraceNew("rate limit exceeded")
 	}
 
 	// Handle endpoints before enforcing CheckEstablishTunnels.
@@ -729,13 +751,25 @@ func (server *MeekServer) getSessionOrEndpoint(
 	return sessionID, session, underlyingConn, "", "", nil
 }
 
-func (server *MeekServer) rateLimit(clientIP string) bool {
+func (server *MeekServer) rateLimit(clientIP string, tunnelProtocol string) bool {
 
-	historySize, thresholdSeconds, regions, ISPs, cities, GCTriggerCount, _ :=
+	historySize,
+		thresholdSeconds,
+		tunnelProtocols,
+		regions,
+		ISPs,
+		cities,
+		GCTriggerCount, _ :=
 		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 	if historySize == 0 {
 		return false
+	}
+
+	if len(tunnelProtocols) > 0 {
+		if !common.Contains(tunnelProtocols, tunnelProtocol) {
+			return false
+		}
 	}
 
 	if len(regions) > 0 || len(ISPs) > 0 || len(cities) > 0 {
@@ -811,7 +845,7 @@ func (server *MeekServer) rateLimit(clientIP string) bool {
 
 func (server *MeekServer) rateLimitWorker() {
 
-	_, _, _, _, _, _, reapFrequencySeconds :=
+	_, _, _, _, _, _, _, reapFrequencySeconds :=
 		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 	timer := time.NewTimer(time.Duration(reapFrequencySeconds) * time.Second)
@@ -821,7 +855,7 @@ func (server *MeekServer) rateLimitWorker() {
 		select {
 		case <-timer.C:
 
-			_, thresholdSeconds, _, _, _, _, reapFrequencySeconds :=
+			_, thresholdSeconds, _, _, _, _, _, reapFrequencySeconds :=
 				server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 			server.rateLimitLock.Lock()
