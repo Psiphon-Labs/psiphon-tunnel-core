@@ -61,7 +61,7 @@ const (
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH                      = 32
 	PERIODIC_GARBAGE_COLLECTION                         = 120 * time.Second
 	STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD = 20
-	DEFAULT_LOG_FILE_REOPEN_RETRIES                     = 10
+	DEFAULT_LOG_FILE_REOPEN_RETRIES                     = 25
 )
 
 // Config specifies the configuration and behavior of a Psiphon
