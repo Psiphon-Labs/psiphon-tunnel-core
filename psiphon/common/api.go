@@ -30,13 +30,11 @@ type APIParameterValidator func(APIParameters) error
 
 // GeoIPData is type-compatible with psiphon/server.GeoIPData.
 type GeoIPData struct {
-	Country           string
-	City              string
-	ISP               string
-	ASN               string
-	ASO               string
-	HasDiscoveryValue bool
-	DiscoveryValue    int
+	Country string
+	City    string
+	ISP     string
+	ASN     string
+	ASO     string
 }
 
 // APIParameterLogFieldFormatter is a function that returns formatted

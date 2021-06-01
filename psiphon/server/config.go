@@ -61,7 +61,7 @@ const (
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH                      = 32
 	PERIODIC_GARBAGE_COLLECTION                         = 120 * time.Second
 	STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD = 20
-	DEFAULT_LOG_FILE_REOPEN_RETRIES                     = 10
+	DEFAULT_LOG_FILE_REOPEN_RETRIES                     = 25
 )
 
 // Config specifies the configuration and behavior of a Psiphon
@@ -154,8 +154,8 @@ type Config struct {
 	// protocols include:
 	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
 	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
-	// ""FRONTED-MEEK-QUIC-OSSH" FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
-	// ""MARIONETTE-OSSH", and TAPDANCE-OSSH".
+	// "FRONTED-MEEK-QUIC-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
+	// "MARIONETTE-OSSH", "TAPDANCE-OSSH", abd "CONJURE-OSSH".
 	//
 	// In the case of "MARIONETTE-OSSH" the port value is ignored and must be
 	// set to 0. The port value specified in the Marionette format is used.
@@ -335,6 +335,10 @@ type Config struct {
 	// PacketTunnelEgressInterface specifies tun.ServerConfig.EgressInterface.
 	PacketTunnelEgressInterface string
 
+	// PacketTunnelEnableDNSFlowTracking sets
+	// tun.ServerConfig.EnableDNSFlowTracking.
+	PacketTunnelEnableDNSFlowTracking bool
+
 	// PacketTunnelDownstreamPacketQueueSize specifies
 	// tun.ServerConfig.DownStreamPacketQueueSize.
 	PacketTunnelDownstreamPacketQueueSize int
@@ -420,6 +424,8 @@ type Config struct {
 	periodicGarbageCollection                      time.Duration
 	stopEstablishTunnelsEstablishedClientThreshold int
 	dumpProfilesOnStopEstablishTunnelsDone         int32
+	frontingProviderID                             string
+	runningProtocols                               []string
 }
 
 // GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
@@ -484,6 +490,18 @@ func (config *Config) DumpProfilesOnStopEstablishTunnels(establishedClientsCount
 func (config *Config) GetOwnEncodedServerEntry(serverEntryTag string) (string, bool) {
 	serverEntry, ok := config.OwnEncodedServerEntries[serverEntryTag]
 	return serverEntry, ok
+}
+
+// GetFrontingProviderID returns the fronting provider ID associated with the
+// server's fronted protocol(s).
+func (config *Config) GetFrontingProviderID() string {
+	return config.frontingProviderID
+}
+
+// GetRunningProtocols returns the list of protcols this server is running.
+// The caller must not mutate the return value.
+func (config *Config) GetRunningProtocols() []string {
+	return config.runningProtocols
 }
 
 // LoadConfig loads and validates a JSON encoded server config.
@@ -623,6 +641,33 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	if err != nil {
 		return nil, errors.Tracef(
 			"AccessControlVerificationKeyRing is invalid: %s", err)
+	}
+
+	// Limitation: the following is a shortcut which extracts the server's
+	// fronting provider ID from the server's OwnEncodedServerEntries. This logic
+	// assumes a server has only one fronting provider. In principle, it's
+	// possible for server with multiple server entries to run multiple fronted
+	// protocols, each with a different fronting provider ID.
+	//
+	// TODO: add an explicit parameter mapping tunnel protocol ports to fronting
+	// provider IDs.
+
+	for _, encodedServerEntry := range config.OwnEncodedServerEntries {
+		serverEntry, err := protocol.DecodeServerEntry(encodedServerEntry, "", "")
+		if err != nil {
+			return nil, errors.Tracef(
+				"protocol.DecodeServerEntry failed: %s", err)
+		}
+		if config.frontingProviderID == "" {
+			config.frontingProviderID = serverEntry.FrontingProviderID
+		} else if config.frontingProviderID != serverEntry.FrontingProviderID {
+			return nil, errors.Tracef("unsupported multiple FrontingProviderID values")
+		}
+	}
+
+	config.runningProtocols = []string{}
+	for tunnelProtocol := range config.TunnelProtocolPorts {
+		config.runningProtocols = append(config.runningProtocols, tunnelProtocol)
 	}
 
 	return &config, nil

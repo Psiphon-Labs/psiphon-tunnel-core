@@ -240,6 +240,7 @@ func (webServer *webServer) handshakeHandler(w http.ResponseWriter, r *http.Requ
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
+			r.RemoteAddr,
 			webServer.lookupGeoIPData(params),
 			nil,
 			protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME,
@@ -271,6 +272,7 @@ func (webServer *webServer) connectedHandler(w http.ResponseWriter, r *http.Requ
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
+			r.RemoteAddr,
 			webServer.lookupGeoIPData(params),
 			nil, // authorizedAccessTypes not logged in web API transport
 			protocol.PSIPHON_API_CONNECTED_REQUEST_NAME,
@@ -296,6 +298,7 @@ func (webServer *webServer) statusHandler(w http.ResponseWriter, r *http.Request
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
+			r.RemoteAddr,
 			webServer.lookupGeoIPData(params),
 			nil, // authorizedAccessTypes not logged in web API transport
 			protocol.PSIPHON_API_STATUS_REQUEST_NAME,
@@ -322,6 +325,7 @@ func (webServer *webServer) clientVerificationHandler(w http.ResponseWriter, r *
 		responsePayload, err = dispatchAPIRequestHandler(
 			webServer.support,
 			protocol.PSIPHON_WEB_API_PROTOCOL,
+			r.RemoteAddr,
 			webServer.lookupGeoIPData(params),
 			nil, // authorizedAccessTypes not logged in web API transport
 			protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME,
