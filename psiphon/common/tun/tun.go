@@ -210,6 +210,12 @@ type ServerConfig struct {
 	// IPv6 DNS traffic. It functions like GetDNSResolverIPv4Addresses.
 	GetDNSResolverIPv6Addresses func() []net.IP
 
+	// EnableDNSFlowTracking specifies whether to apply flow tracking to DNS
+	// flows, as required for DNS quality metrics. Typically there are many
+	// short-lived DNS flows to track and each tracked flow adds some overhead,
+	// so this defaults to off.
+	EnableDNSFlowTracking bool
+
 	// DownstreamPacketQueueSize specifies the size of the downstream
 	// packet queue. The packet tunnel server multiplexes all client
 	// packets through a single tun device, so when a packet is read,
@@ -357,6 +363,12 @@ type MetricsUpdater func(
 	TCPApplicationBytesDown, TCPApplicationBytesUp,
 	UDPApplicationBytesDown, UDPApplicationBytesUp int64)
 
+// DNSQualityReporter is a function which receives a DNS quality report:
+// whether a DNS request received a reponse, the elapsed time, and the
+// resolver used.
+type DNSQualityReporter func(
+	receivedResponse bool, requestDuration time.Duration, resolverIP net.IP)
+
 // ClientConnected handles new client connections, creating or resuming
 // a session and returns with client packet handlers running.
 //
@@ -394,7 +406,8 @@ func (server *Server) ClientConnected(
 	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
 	checkAllowedDomainFunc AllowedDomainChecker,
 	flowActivityUpdaterMaker FlowActivityUpdaterMaker,
-	metricsUpdater MetricsUpdater) error {
+	metricsUpdater MetricsUpdater,
+	dnsQualityReporter DNSQualityReporter) error {
 
 	// It's unusual to call both sync.WaitGroup.Add() _and_ Done() in the same
 	// goroutine. There's no other place to call Add() since ClientConnected is
@@ -452,9 +465,19 @@ func (server *Server) ClientConnected(
 			lastActivity:             int64(monotime.Now()),
 			sessionID:                sessionID,
 			metrics:                  new(packetMetrics),
+			enableDNSFlowTracking:    server.config.EnableDNSFlowTracking,
 			DNSResolverIPv4Addresses: append([]net.IP(nil), DNSResolverIPv4Addresses...),
 			DNSResolverIPv6Addresses: append([]net.IP(nil), server.config.GetDNSResolverIPv6Addresses()...),
 			workers:                  new(sync.WaitGroup),
+		}
+
+		// One-time, for this session, random resolver selection for TCP transparent
+		// DNS forwarding. See comment in processPacket.
+		if len(clientSession.DNSResolverIPv4Addresses) > 0 {
+			clientSession.TCPDNSResolverIPv4Index = prng.Intn(len(clientSession.DNSResolverIPv4Addresses))
+		}
+		if len(clientSession.DNSResolverIPv6Addresses) > 0 {
+			clientSession.TCPDNSResolverIPv6Index = prng.Intn(len(clientSession.DNSResolverIPv6Addresses))
 		}
 
 		// allocateIndex initializes session.index, session.assignedIPv4Address,
@@ -479,7 +502,8 @@ func (server *Server) ClientConnected(
 		checkAllowedUDPPortFunc,
 		checkAllowedDomainFunc,
 		flowActivityUpdaterMaker,
-		metricsUpdater)
+		metricsUpdater,
+		dnsQualityReporter)
 
 	return nil
 }
@@ -518,7 +542,8 @@ func (server *Server) resumeSession(
 	checkAllowedTCPPortFunc, checkAllowedUDPPortFunc AllowedPortChecker,
 	checkAllowedDomainFunc AllowedDomainChecker,
 	flowActivityUpdaterMaker FlowActivityUpdaterMaker,
-	metricsUpdater MetricsUpdater) {
+	metricsUpdater MetricsUpdater,
+	dnsQualityReporter DNSQualityReporter) {
 
 	session.mutex.Lock()
 	defer session.mutex.Unlock()
@@ -559,6 +584,8 @@ func (server *Server) resumeSession(
 	session.setFlowActivityUpdaterMaker(&flowActivityUpdaterMaker)
 
 	session.setMetricsUpdater(&metricsUpdater)
+
+	session.setDNSQualityReporter(&dnsQualityReporter)
 
 	session.channel = channel
 
@@ -687,6 +714,9 @@ func (server *Server) removeSession(session *session) {
 	server.sessionIDToIndex.Delete(session.sessionID)
 	server.indexToSession.Delete(session.index)
 	server.interruptSession(session)
+
+	// Delete flows to ensure any pending flow metrics are reported.
+	session.deleteFlows()
 }
 
 func (server *Server) runOrphanMetricsCheckpointer() {
@@ -1071,22 +1101,26 @@ type session struct {
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	lastActivity             int64
 	lastFlowReapIndex        int64
+	downstreamPackets        unsafe.Pointer
 	checkAllowedTCPPortFunc  unsafe.Pointer
 	checkAllowedUDPPortFunc  unsafe.Pointer
 	checkAllowedDomainFunc   unsafe.Pointer
 	flowActivityUpdaterMaker unsafe.Pointer
 	metricsUpdater           unsafe.Pointer
-	downstreamPackets        unsafe.Pointer
+	dnsQualityReporter       unsafe.Pointer
 
 	allowBogons              bool
 	metrics                  *packetMetrics
 	sessionID                string
 	index                    int32
+	enableDNSFlowTracking    bool
 	DNSResolverIPv4Addresses []net.IP
+	TCPDNSResolverIPv4Index  int
 	assignedIPv4Address      net.IP
 	setOriginalIPv4Address   int32
 	originalIPv4Address      net.IP
 	DNSResolverIPv6Addresses []net.IP
+	TCPDNSResolverIPv6Index  int
 	assignedIPv6Address      net.IP
 	setOriginalIPv6Address   int32
 	originalIPv6Address      net.IP
@@ -1136,6 +1170,14 @@ func (session *session) getOriginalIPv6Address() net.IP {
 		return nil
 	}
 	return session.originalIPv6Address
+}
+
+func (session *session) setDownstreamPackets(p *PacketQueue) {
+	atomic.StorePointer(&session.downstreamPackets, unsafe.Pointer(p))
+}
+
+func (session *session) getDownstreamPackets() *PacketQueue {
+	return (*PacketQueue)(atomic.LoadPointer(&session.downstreamPackets))
 }
 
 func (session *session) setCheckAllowedTCPPortFunc(p *AllowedPortChecker) {
@@ -1198,12 +1240,16 @@ func (session *session) getMetricsUpdater() MetricsUpdater {
 	return *p
 }
 
-func (session *session) setDownstreamPackets(p *PacketQueue) {
-	atomic.StorePointer(&session.downstreamPackets, unsafe.Pointer(p))
+func (session *session) setDNSQualityReporter(p *DNSQualityReporter) {
+	atomic.StorePointer(&session.dnsQualityReporter, unsafe.Pointer(p))
 }
 
-func (session *session) getDownstreamPackets() *PacketQueue {
-	return (*PacketQueue)(atomic.LoadPointer(&session.downstreamPackets))
+func (session *session) getDNSQualityReporter() DNSQualityReporter {
+	p := (*DNSQualityReporter)(atomic.LoadPointer(&session.dnsQualityReporter))
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 // flowID identifies an IP traffic flow using the conventional
@@ -1249,14 +1295,23 @@ type flowState struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastUpstreamPacketTime   int64
-	lastDownstreamPacketTime int64
-	activityUpdaters         []FlowActivityUpdater
+	firstUpstreamPacketTime   int64
+	lastUpstreamPacketTime    int64
+	firstDownstreamPacketTime int64
+	lastDownstreamPacketTime  int64
+	isDNS                     bool
+	dnsQualityReporter        DNSQualityReporter
+	activityUpdaters          []FlowActivityUpdater
 }
 
 func (flowState *flowState) expired(idleExpiry time.Duration) bool {
 	now := monotime.Now()
-	return (now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastUpstreamPacketTime))) > idleExpiry) ||
+
+	// Traffic in either direction keeps the flow alive. Initially, only one of
+	// lastUpstreamPacketTime or lastDownstreamPacketTime will be set by
+	// startTrackingFlow, and the other value will be 0 and evaluate as expired.
+
+	return (now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastUpstreamPacketTime))) > idleExpiry) &&
 		(now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastDownstreamPacketTime))) > idleExpiry)
 }
 
@@ -1271,7 +1326,7 @@ func (session *session) isTrackingFlow(ID flowID) bool {
 
 	// Check if flow is expired but not yet reaped.
 	if flowState.expired(FLOW_IDLE_EXPIRY) {
-		session.flows.Delete(ID)
+		session.deleteFlow(ID, flowState)
 		return false
 	}
 
@@ -1285,6 +1340,7 @@ func (session *session) isTrackingFlow(ID flowID) bool {
 // - one-time permissions checks for a flow
 // - OSLs
 // - domain bytes transferred [TODO]
+// - DNS quality metrics
 //
 // The applicationData from the first packet in the flow is
 // inspected to determine any associated hostname, using HTTP or
@@ -1305,7 +1361,10 @@ func (session *session) isTrackingFlow(ID flowID) bool {
 // startTrackingFlow may be called from concurrent goroutines; if
 // the flow is already tracked, it is simply updated.
 func (session *session) startTrackingFlow(
-	ID flowID, direction packetDirection, applicationData []byte) {
+	ID flowID,
+	direction packetDirection,
+	applicationData []byte,
+	isDNS bool) {
 
 	now := int64(monotime.Now())
 
@@ -1334,12 +1393,16 @@ func (session *session) startTrackingFlow(
 	}
 
 	flowState := &flowState{
-		activityUpdaters: activityUpdaters,
+		isDNS:              isDNS,
+		activityUpdaters:   activityUpdaters,
+		dnsQualityReporter: session.getDNSQualityReporter(),
 	}
 
 	if direction == packetDirectionServerUpstream {
+		flowState.firstUpstreamPacketTime = now
 		flowState.lastUpstreamPacketTime = now
 	} else {
+		flowState.firstDownstreamPacketTime = now
 		flowState.lastDownstreamPacketTime = now
 	}
 
@@ -1350,7 +1413,9 @@ func (session *session) startTrackingFlow(
 }
 
 func (session *session) updateFlow(
-	ID flowID, direction packetDirection, applicationData []byte) {
+	ID flowID,
+	direction packetDirection,
+	applicationData []byte) {
 
 	f, ok := session.flows.Load(ID)
 	if !ok {
@@ -1366,9 +1431,15 @@ func (session *session) updateFlow(
 
 	if direction == packetDirectionServerUpstream {
 		upstreamBytes = int64(len(applicationData))
+
+		atomic.CompareAndSwapInt64(&flowState.firstUpstreamPacketTime, 0, now)
+
 		atomic.StoreInt64(&flowState.lastUpstreamPacketTime, now)
+
 	} else {
 		downstreamBytes = int64(len(applicationData))
+
+		atomic.CompareAndSwapInt64(&flowState.firstDownstreamPacketTime, 0, now)
 
 		// Follows common.ActivityMonitoredConn semantics, where
 		// duration is updated only for downstream activity. This
@@ -1384,13 +1455,63 @@ func (session *session) updateFlow(
 	}
 }
 
+// deleteFlow stops tracking a flow and logs any outstanding metrics.
+// flowState is passed in to avoid duplicating the lookup that all callers
+// have already performed.
+func (session *session) deleteFlow(ID flowID, flowState *flowState) {
+
+	if flowState.isDNS {
+
+		dnsStartTime := monotime.Time(
+			atomic.LoadInt64(&flowState.firstUpstreamPacketTime))
+
+		if dnsStartTime > 0 {
+
+			// Record DNS quality metrics using a heuristic: if a packet was sent and
+			// then a packet was received, assume the DNS request successfully received
+			// a valid response; failure occurs when the resolver fails to provide a
+			// response; a "no such host" response is still a success. Limitations: we
+			// assume a resolver will not respond when, e.g., rate limiting; we ignore
+			// subsequent requests made via the same UDP/TCP flow; deleteFlow may be
+			// called only after the flow has expired, which adds some delay to the
+			// recording of the DNS metric.
+
+			dnsEndTime := monotime.Time(
+				atomic.LoadInt64(&flowState.firstDownstreamPacketTime))
+
+			dnsSuccess := true
+			if dnsEndTime == 0 {
+				dnsSuccess = false
+				dnsEndTime = monotime.Now()
+			}
+
+			resolveElapsedTime := dnsEndTime.Sub(dnsStartTime)
+
+			flowState.dnsQualityReporter(
+				dnsSuccess,
+				resolveElapsedTime,
+				net.IP(ID.upstreamIPAddress[:]))
+		}
+	}
+
+	session.flows.Delete(ID)
+}
+
 // reapFlows removes expired idle flows.
 func (session *session) reapFlows() {
 	session.flows.Range(func(key, value interface{}) bool {
 		flowState := value.(*flowState)
 		if flowState.expired(FLOW_IDLE_EXPIRY) {
-			session.flows.Delete(key)
+			session.deleteFlow(key.(flowID), flowState)
 		}
+		return true
+	})
+}
+
+// deleteFlows deletes all flows.
+func (session *session) deleteFlows() {
+	session.flows.Range(func(key, value interface{}) bool {
+		session.deleteFlow(key.(flowID), value.(*flowState))
 		return true
 	})
 }
@@ -2287,8 +2408,8 @@ func processPacket(
 	// Check if the packet qualifies for transparent DNS rewriting
 	//
 	// - Both TCP and UDP DNS packets may qualify
-	// - Transparent DNS flows are not tracked, as most DNS
-	//   resolutions are very-short lived exchanges
+	// - Unless configured, transparent DNS flows are not tracked,
+	//   as most DNS resolutions are very-short lived exchanges
 	// - The traffic rules checks are bypassed, since transparent
 	//   DNS is essential
 
@@ -2301,7 +2422,9 @@ func processPacket(
 			// will be rewritten to go to one of the server's resolvers.
 
 			if destinationPort == portNumberDNS {
-				if version == 4 && destinationIPAddress.Equal(transparentDNSResolverIPv4Address) {
+				if version == 4 &&
+					destinationIPAddress.Equal(transparentDNSResolverIPv4Address) {
+
 					numResolvers := len(session.DNSResolverIPv4Addresses)
 					if numResolvers > 0 {
 						doTransparentDNS = true
@@ -2310,7 +2433,9 @@ func processPacket(
 						return false
 					}
 
-				} else if version == 6 && destinationIPAddress.Equal(transparentDNSResolverIPv6Address) {
+				} else if version == 6 &&
+					destinationIPAddress.Equal(transparentDNSResolverIPv6Address) {
+
 					numResolvers := len(session.DNSResolverIPv6Addresses)
 					if numResolvers > 0 {
 						doTransparentDNS = true
@@ -2372,9 +2497,82 @@ func processPacket(
 		}
 	}
 
+	// Apply rewrites before determining flow ID to ensure that corresponding up-
+	// and downstream flows yield the same flow ID.
+
+	var rewriteSourceIPAddress, rewriteDestinationIPAddress net.IP
+
+	if direction == packetDirectionServerUpstream {
+
+		// Store original source IP address to be replaced in
+		// downstream rewriting.
+
+		if version == 4 {
+			session.setOriginalIPv4AddressIfNotSet(sourceIPAddress)
+			rewriteSourceIPAddress = session.assignedIPv4Address
+		} else { // version == 6
+			session.setOriginalIPv6AddressIfNotSet(sourceIPAddress)
+			rewriteSourceIPAddress = session.assignedIPv6Address
+		}
+
+		// Rewrite DNS packets destinated for the transparent DNS target addresses
+		// to go to one of the server's resolvers. This random selection uses
+		// math/rand to minimize overhead.
+		//
+		// Limitation: TCP packets are always assigned to the same resolver, as
+		// currently there is no method for tracking the assigned resolver per TCP
+		// flow.
+
+		if doTransparentDNS {
+			if version == 4 {
+
+				index := session.TCPDNSResolverIPv4Index
+				if protocol == internetProtocolUDP {
+					index = rand.Intn(len(session.DNSResolverIPv4Addresses))
+				}
+				rewriteDestinationIPAddress = session.DNSResolverIPv4Addresses[index]
+
+			} else { // version == 6
+
+				index := session.TCPDNSResolverIPv6Index
+				if protocol == internetProtocolUDP {
+					index = rand.Intn(len(session.DNSResolverIPv6Addresses))
+				}
+				rewriteDestinationIPAddress = session.DNSResolverIPv6Addresses[index]
+			}
+		}
+
+	} else if direction == packetDirectionServerDownstream {
+
+		// Destination address will be original source address.
+
+		if version == 4 {
+			rewriteDestinationIPAddress = session.getOriginalIPv4Address()
+		} else { // version == 6
+			rewriteDestinationIPAddress = session.getOriginalIPv6Address()
+		}
+
+		if rewriteDestinationIPAddress == nil {
+			metrics.rejectedPacket(direction, packetRejectNoOriginalAddress)
+			return false
+		}
+
+		// Rewrite source address of packets from servers' resolvers
+		// to transparent DNS target address.
+
+		if doTransparentDNS {
+
+			if version == 4 {
+				rewriteSourceIPAddress = transparentDNSResolverIPv4Address
+			} else { // version == 6
+				rewriteSourceIPAddress = transparentDNSResolverIPv6Address
+			}
+		}
+	}
+
 	// Check if flow is tracked before checking traffic permission
 
-	doFlowTracking := !doTransparentDNS && isServer
+	doFlowTracking := isServer && (!doTransparentDNS || session.enableDNSFlowTracking)
 
 	// TODO: verify this struct is stack allocated
 	var ID flowID
@@ -2384,12 +2582,32 @@ func processPacket(
 	if doFlowTracking {
 
 		if direction == packetDirectionServerUpstream {
-			ID.set(
-				sourceIPAddress, sourcePort, destinationIPAddress, destinationPort, protocol)
+
+			// Reflect rewrites in the upstream case and don't reflect rewrites in the
+			// following downstream case: all flow IDs are in the upstream space, with
+			// the assigned private IP for the client and, in the case of DNS, the
+			// actual resolver IP.
+
+			srcIP := sourceIPAddress
+			if rewriteSourceIPAddress != nil {
+				srcIP = rewriteSourceIPAddress
+			}
+
+			destIP := destinationIPAddress
+			if rewriteDestinationIPAddress != nil {
+				destIP = rewriteDestinationIPAddress
+			}
+
+			ID.set(srcIP, sourcePort, destIP, destinationPort, protocol)
 
 		} else if direction == packetDirectionServerDownstream {
+
 			ID.set(
-				destinationIPAddress, destinationPort, sourceIPAddress, sourcePort, protocol)
+				destinationIPAddress,
+				destinationPort,
+				sourceIPAddress,
+				sourcePort,
+				protocol)
 		}
 
 		isTrackingFlow = session.isTrackingFlow(ID)
@@ -2477,68 +2695,10 @@ func processPacket(
 		}
 	}
 
-	// Configure rewriting.
+	// Apply packet rewrites. IP (v4 only) and TCP/UDP all have packet
+	// checksums which are updated to relect the rewritten headers.
 
 	var checksumAccumulator int32
-	var rewriteSourceIPAddress, rewriteDestinationIPAddress net.IP
-
-	if direction == packetDirectionServerUpstream {
-
-		// Store original source IP address to be replaced in
-		// downstream rewriting.
-
-		if version == 4 {
-			session.setOriginalIPv4AddressIfNotSet(sourceIPAddress)
-			rewriteSourceIPAddress = session.assignedIPv4Address
-		} else { // version == 6
-			session.setOriginalIPv6AddressIfNotSet(sourceIPAddress)
-			rewriteSourceIPAddress = session.assignedIPv6Address
-		}
-
-		// Rewrite DNS packets destinated for the transparent DNS target
-		// addresses to go to one of the server's resolvers.
-
-		if doTransparentDNS {
-
-			if version == 4 {
-				rewriteDestinationIPAddress = session.DNSResolverIPv4Addresses[rand.Intn(
-					len(session.DNSResolverIPv4Addresses))]
-			} else { // version == 6
-				rewriteDestinationIPAddress = session.DNSResolverIPv6Addresses[rand.Intn(
-					len(session.DNSResolverIPv6Addresses))]
-			}
-		}
-
-	} else if direction == packetDirectionServerDownstream {
-
-		// Destination address will be original source address.
-
-		if version == 4 {
-			rewriteDestinationIPAddress = session.getOriginalIPv4Address()
-		} else { // version == 6
-			rewriteDestinationIPAddress = session.getOriginalIPv6Address()
-		}
-
-		if rewriteDestinationIPAddress == nil {
-			metrics.rejectedPacket(direction, packetRejectNoOriginalAddress)
-			return false
-		}
-
-		// Rewrite source address  of packets from servers' resolvers
-		// to transparent DNS target address.
-
-		if doTransparentDNS {
-
-			if version == 4 {
-				rewriteSourceIPAddress = transparentDNSResolverIPv4Address
-			} else { // version == 6
-				rewriteSourceIPAddress = transparentDNSResolverIPv6Address
-			}
-		}
-	}
-
-	// Apply rewrites. IP (v4 only) and TCP/UDP all have packet
-	// checksums which are updated to relect the rewritten headers.
 
 	if rewriteSourceIPAddress != nil {
 		checksumAccumulate(sourceIPAddress, false, &checksumAccumulator)
@@ -2570,7 +2730,7 @@ func processPacket(
 
 	if doFlowTracking {
 		if !isTrackingFlow {
-			session.startTrackingFlow(ID, direction, applicationData)
+			session.startTrackingFlow(ID, direction, applicationData, doTransparentDNS)
 		} else {
 			session.updateFlow(ID, direction, applicationData)
 		}

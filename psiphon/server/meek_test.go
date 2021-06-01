@@ -37,6 +37,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -400,9 +401,18 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) (
 }
 
 func TestMeekRateLimiter(t *testing.T) {
+	runTestMeekRateLimiter(t, true)
+	runTestMeekRateLimiter(t, false)
+}
+
+func runTestMeekRateLimiter(t *testing.T, rateLimit bool) {
+
+	attempts := 10
 
 	allowedConnections := 5
-	testDurationSeconds := 10
+	if !rateLimit {
+		allowedConnections = 10
+	}
 
 	// Run meek server
 
@@ -414,14 +424,23 @@ func TestMeekRateLimiter(t *testing.T) {
 	meekCookieEncryptionPrivateKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
 	meekObfuscatedKey := prng.HexString(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 
+	tunnelProtocol := protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK
+
+	meekRateLimiterTunnelProtocols := []string{tunnelProtocol}
+	if !rateLimit {
+		meekRateLimiterTunnelProtocols = []string{protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS}
+	}
+
 	mockSupport := &SupportServices{
 		Config: &Config{
 			MeekObfuscatedKey:              meekObfuscatedKey,
 			MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
+			TunnelProtocolPorts:            map[string]int{tunnelProtocol: 0},
 		},
 		TrafficRulesSet: &TrafficRulesSet{
 			MeekRateLimiterHistorySize:                   allowedConnections,
-			MeekRateLimiterThresholdSeconds:              testDurationSeconds,
+			MeekRateLimiterThresholdSeconds:              attempts,
+			MeekRateLimiterTunnelProtocols:               meekRateLimiterTunnelProtocols,
 			MeekRateLimiterGarbageCollectionTriggerCount: 1,
 			MeekRateLimiterReapHistoryFrequencySeconds:   1,
 		},
@@ -444,7 +463,7 @@ func TestMeekRateLimiter(t *testing.T) {
 	server, err := NewMeekServer(
 		mockSupport,
 		listener,
-		"",
+		tunnelProtocol,
 		0,
 		useTLS,
 		isFronted,
@@ -486,15 +505,13 @@ func TestMeekRateLimiter(t *testing.T) {
 	}()
 
 	// Run meek clients:
-	// For 10 seconds, connect once per second vs. rate limit of 5-per-10 seconds,
+	// For 10 attempts, connect once per second vs. rate limit of 5-per-10 seconds,
 	// so about half of the connections should be rejected by the rate limiter.
-
-	stopTime := time.Now().Add(time.Duration(testDurationSeconds) * time.Second)
 
 	totalConnections := 0
 	totalFailures := 0
 
-	for {
+	for i := 0; i < attempts; i++ {
 
 		dialConfig := &psiphon.DialConfig{}
 
@@ -541,14 +558,14 @@ func TestMeekRateLimiter(t *testing.T) {
 			totalConnections += 1
 		}
 
-		if !time.Now().Before(stopTime) {
-			break
+		if i < attempts-1 {
+			time.Sleep(1 * time.Second)
 		}
-
-		time.Sleep(1 * time.Second)
 	}
 
-	if totalConnections != allowedConnections || totalFailures == 0 {
+	if totalConnections != allowedConnections ||
+		totalFailures != attempts-totalConnections {
+
 		t.Fatalf(
 			"Unexpected results: %d connections, %d failures",
 			totalConnections, totalFailures)

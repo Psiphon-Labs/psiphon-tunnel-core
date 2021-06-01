@@ -141,7 +141,7 @@ func selectPacketManipulationSpec(
 			"packet manipulation protocol port not found: %d", protocolPort)
 	}
 
-	geoIPData := support.GeoIPService.LookupIP(clientIP, false)
+	geoIPData := support.GeoIPService.LookupIP(clientIP)
 
 	specName, doReplay := support.ReplayCache.GetReplayPacketManipulation(
 		targetTunnelProtocol, geoIPData)

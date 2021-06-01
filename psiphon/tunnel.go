@@ -695,8 +695,6 @@ func dialTunnel(
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
 	// connect.
 	//
-	//
-	//
 	// Limitation: dials that fail to connect due to the server being in a
 	// load-limiting state are not distinguished and excepted from this
 	// logic.
@@ -1157,6 +1155,17 @@ func dialTunnel(
 	NoticeConnectedServer(dialParams)
 
 	cleanupConn = nil
+
+	// When configured to do so, hold-off on activating this tunnel. This allows
+	// some extra time for slower but less resource intensive protocols to
+	// establish tunnels. By holding off post-connect, the client has this
+	// established tunnel ready to activate in case other protocols fail to
+	// establish. This hold-off phase continues to consume one connection worker.
+
+	if dialParams.HoldOffTunnelDuration > 0 {
+		NoticeHoldOffTunnel(dialParams.ServerEntry.GetDiagnosticID(), dialParams.HoldOffTunnelDuration)
+		common.SleepWithContext(ctx, dialParams.HoldOffTunnelDuration)
+	}
 
 	// Note: dialConn may be used to close the underlying network connection
 	// but should not be used to perform I/O as that would interfere with SSH

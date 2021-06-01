@@ -21,11 +21,13 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/url"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGetStringSlice(t *testing.T) {
@@ -140,5 +142,25 @@ func TestSafeParseRequestURI(t *testing.T) {
 
 	if strings.Index(err.Error(), invalidURL) != -1 {
 		t.Error("URL in error string")
+	}
+}
+
+func TestSleepWithContext(t *testing.T) {
+
+	start := time.Now()
+	SleepWithContext(context.Background(), 100*time.Millisecond)
+	duration := time.Since(start)
+	// Allows for 100-109ms actual elapsed time.
+	if duration/time.Millisecond/10 != 10 {
+		t.Errorf("unexpected duration: %v", duration)
+	}
+
+	start = time.Now()
+	ctx, cancelFunc := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelFunc()
+	SleepWithContext(ctx, 50*time.Millisecond)
+	duration = time.Since(start)
+	if duration/time.Millisecond/10 != 5 {
+		t.Errorf("unexpected duration: %v", duration)
 	}
 }

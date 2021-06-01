@@ -199,7 +199,7 @@ func (server *TunnelServer) Run() error {
 			support,
 			listener,
 			tunnelProtocol,
-			func(IP string) GeoIPData { return support.GeoIPService.Lookup(IP, false) })
+			func(IP string) GeoIPData { return support.GeoIPService.Lookup(IP) })
 
 		log.WithTraceFields(
 			LogFields{
@@ -264,7 +264,9 @@ func (server *TunnelServer) Run() error {
 // broken down by protocol ("SSH", "OSSH", etc.) and type. Types of stats
 // include current connected client count, total number of current port
 // forwards.
-func (server *TunnelServer) GetLoadStats() (ProtocolStats, RegionStats) {
+func (server *TunnelServer) GetLoadStats() (
+	UpstreamStats, ProtocolStats, RegionStats) {
+
 	return server.sshServer.getLoadStats()
 }
 
@@ -460,11 +462,6 @@ func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {
 // occurs, it will send the error to the listenerError channel.
 func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError chan<- error) {
 
-	runningProtocols := make([]string, 0)
-	for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
-		runningProtocols = append(runningProtocols, tunnelProtocol)
-	}
-
 	handleClient := func(clientTunnelProtocol string, clientConn net.Conn) {
 
 		// Note: establish tunnel limiter cannot simply stop TCP
@@ -477,28 +474,15 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 			return
 		}
 
-		// The tunnelProtocol passed to handleClient is used for stats,
-		// throttling, etc. When the tunnel protocol can be determined
-		// unambiguously from the listening port, use that protocol and
-		// don't use any client-declared value. Only use the client's
-		// value, if present, in special cases where the listening port
-		// cannot distinguish the protocol.
+		// tunnelProtocol is used for stats and traffic rules. In many cases, its
+		// value is unambiguously determined by the listener port. In certain cases,
+		// such as multiple fronted protocols with a single backend listener, the
+		// client's reported tunnel protocol value is used. The caller must validate
+		// clientTunnelProtocol with protocol.IsValidClientTunnelProtocol.
+
 		tunnelProtocol := sshListener.tunnelProtocol
 		if clientTunnelProtocol != "" {
-
-			if !common.Contains(runningProtocols, clientTunnelProtocol) {
-				log.WithTraceFields(
-					LogFields{
-						"clientTunnelProtocol": clientTunnelProtocol}).
-					Warning("invalid client tunnel protocol")
-				clientConn.Close()
-				return
-			}
-
-			if protocol.UseClientTunnelProtocol(
-				clientTunnelProtocol, runningProtocols) {
-				tunnelProtocol = clientTunnelProtocol
-			}
+			tunnelProtocol = clientTunnelProtocol
 		}
 
 		// sshListener.tunnelProtocol indictes the tunnel protocol run by the
@@ -717,50 +701,83 @@ func (sshServer *sshServer) unregisterEstablishedClient(client *sshClient) {
 	client.stop()
 }
 
-type ProtocolStats map[string]map[string]int64
-type RegionStats map[string]map[string]map[string]int64
+type UpstreamStats map[string]interface{}
+type ProtocolStats map[string]map[string]interface{}
+type RegionStats map[string]map[string]map[string]interface{}
 
-func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
+func (sshServer *sshServer) getLoadStats() (
+	UpstreamStats, ProtocolStats, RegionStats) {
 
 	sshServer.clientsMutex.Lock()
 	defer sshServer.clientsMutex.Unlock()
 
-	// Explicitly populate with zeros to ensure 0 counts in log messages
-	zeroStats := func() map[string]int64 {
-		stats := make(map[string]int64)
-		stats["accepted_clients"] = 0
-		stats["established_clients"] = 0
-		stats["dialing_tcp_port_forwards"] = 0
-		stats["tcp_port_forwards"] = 0
-		stats["total_tcp_port_forwards"] = 0
-		stats["udp_port_forwards"] = 0
-		stats["total_udp_port_forwards"] = 0
-		stats["tcp_port_forward_dialed_count"] = 0
-		stats["tcp_port_forward_dialed_duration"] = 0
-		stats["tcp_port_forward_failed_count"] = 0
-		stats["tcp_port_forward_failed_duration"] = 0
-		stats["tcp_port_forward_rejected_dialing_limit_count"] = 0
-		stats["tcp_port_forward_rejected_disallowed_count"] = 0
-		stats["udp_port_forward_rejected_disallowed_count"] = 0
-		stats["tcp_ipv4_port_forward_dialed_count"] = 0
-		stats["tcp_ipv4_port_forward_dialed_duration"] = 0
-		stats["tcp_ipv4_port_forward_failed_count"] = 0
-		stats["tcp_ipv4_port_forward_failed_duration"] = 0
-		stats["tcp_ipv6_port_forward_dialed_count"] = 0
-		stats["tcp_ipv6_port_forward_dialed_duration"] = 0
-		stats["tcp_ipv6_port_forward_failed_count"] = 0
-		stats["tcp_ipv6_port_forward_failed_duration"] = 0
+	// Explicitly populate with zeros to ensure 0 counts in log messages.
+
+	zeroClientStats := func() map[string]interface{} {
+		stats := make(map[string]interface{})
+		stats["accepted_clients"] = int64(0)
+		stats["established_clients"] = int64(0)
 		return stats
 	}
 
-	zeroProtocolStats := func() map[string]map[string]int64 {
-		stats := make(map[string]map[string]int64)
-		stats["ALL"] = zeroStats()
+	// Due to hot reload and changes to the underlying system configuration, the
+	// set of resolver IPs may change between getLoadStats calls, so this
+	// enumeration for zeroing is a best effort.
+	resolverIPs := sshServer.support.DNSResolver.GetAll()
+
+	// Fields which are primarily concerned with upstream/egress performance.
+	zeroUpstreamStats := func() map[string]interface{} {
+		stats := make(map[string]interface{})
+		stats["dialing_tcp_port_forwards"] = int64(0)
+		stats["tcp_port_forwards"] = int64(0)
+		stats["total_tcp_port_forwards"] = int64(0)
+		stats["udp_port_forwards"] = int64(0)
+		stats["total_udp_port_forwards"] = int64(0)
+		stats["tcp_port_forward_dialed_count"] = int64(0)
+		stats["tcp_port_forward_dialed_duration"] = int64(0)
+		stats["tcp_port_forward_failed_count"] = int64(0)
+		stats["tcp_port_forward_failed_duration"] = int64(0)
+		stats["tcp_port_forward_rejected_dialing_limit_count"] = int64(0)
+		stats["tcp_port_forward_rejected_disallowed_count"] = int64(0)
+		stats["udp_port_forward_rejected_disallowed_count"] = int64(0)
+		stats["tcp_ipv4_port_forward_dialed_count"] = int64(0)
+		stats["tcp_ipv4_port_forward_dialed_duration"] = int64(0)
+		stats["tcp_ipv4_port_forward_failed_count"] = int64(0)
+		stats["tcp_ipv4_port_forward_failed_duration"] = int64(0)
+		stats["tcp_ipv6_port_forward_dialed_count"] = int64(0)
+		stats["tcp_ipv6_port_forward_dialed_duration"] = int64(0)
+		stats["tcp_ipv6_port_forward_failed_count"] = int64(0)
+		stats["tcp_ipv6_port_forward_failed_duration"] = int64(0)
+
+		zeroDNSStats := func() map[string]int64 {
+			m := map[string]int64{"ALL": 0}
+			for _, resolverIP := range resolverIPs {
+				m[resolverIP.String()] = 0
+			}
+			return m
+		}
+
+		stats["dns_count"] = zeroDNSStats()
+		stats["dns_duration"] = zeroDNSStats()
+		stats["dns_failed_count"] = zeroDNSStats()
+		stats["dns_failed_duration"] = zeroDNSStats()
+		return stats
+	}
+
+	zeroProtocolStats := func() map[string]map[string]interface{} {
+		stats := make(map[string]map[string]interface{})
+		stats["ALL"] = zeroClientStats()
 		for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
-			stats[tunnelProtocol] = zeroStats()
+			stats[tunnelProtocol] = zeroClientStats()
 		}
 		return stats
 	}
+
+	addInt64 := func(stats map[string]interface{}, name string, value int64) {
+		stats[name] = stats[name].(int64) + value
+	}
+
+	upstreamStats := zeroUpstreamStats()
 
 	// [<protocol or ALL>][<stat name>] -> count
 	protocolStats := zeroProtocolStats()
@@ -778,11 +795,11 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 					regionStats[region] = zeroProtocolStats()
 				}
 
-				protocolStats["ALL"]["accepted_clients"] += acceptedClientCount
-				protocolStats[tunnelProtocol]["accepted_clients"] += acceptedClientCount
+				addInt64(protocolStats["ALL"], "accepted_clients", acceptedClientCount)
+				addInt64(protocolStats[tunnelProtocol], "accepted_clients", acceptedClientCount)
 
-				regionStats[region]["ALL"]["accepted_clients"] += acceptedClientCount
-				regionStats[region][tunnelProtocol]["accepted_clients"] += acceptedClientCount
+				addInt64(regionStats[region]["ALL"], "accepted_clients", acceptedClientCount)
+				addInt64(regionStats[region][tunnelProtocol], "accepted_clients", acceptedClientCount)
 			}
 		}
 	}
@@ -798,75 +815,108 @@ func (sshServer *sshServer) getLoadStats() (ProtocolStats, RegionStats) {
 			regionStats[region] = zeroProtocolStats()
 		}
 
-		stats := []map[string]int64{
+		for _, stats := range []map[string]interface{}{
 			protocolStats["ALL"],
 			protocolStats[tunnelProtocol],
 			regionStats[region]["ALL"],
-			regionStats[region][tunnelProtocol]}
+			regionStats[region][tunnelProtocol]} {
 
-		for _, stat := range stats {
-
-			stat["established_clients"] += 1
-
-			// Note: can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
-
-			stat["dialing_tcp_port_forwards"] += client.tcpTrafficState.concurrentDialingPortForwardCount
-			stat["tcp_port_forwards"] += client.tcpTrafficState.concurrentPortForwardCount
-			stat["total_tcp_port_forwards"] += client.tcpTrafficState.totalPortForwardCount
-			// client.udpTrafficState.concurrentDialingPortForwardCount isn't meaningful
-			stat["udp_port_forwards"] += client.udpTrafficState.concurrentPortForwardCount
-			stat["total_udp_port_forwards"] += client.udpTrafficState.totalPortForwardCount
-
-			stat["tcp_port_forward_dialed_count"] += client.qualityMetrics.TCPPortForwardDialedCount
-			stat["tcp_port_forward_dialed_duration"] +=
-				int64(client.qualityMetrics.TCPPortForwardDialedDuration / time.Millisecond)
-			stat["tcp_port_forward_failed_count"] += client.qualityMetrics.TCPPortForwardFailedCount
-			stat["tcp_port_forward_failed_duration"] +=
-				int64(client.qualityMetrics.TCPPortForwardFailedDuration / time.Millisecond)
-			stat["tcp_port_forward_rejected_dialing_limit_count"] +=
-				client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount
-			stat["tcp_port_forward_rejected_disallowed_count"] +=
-				client.qualityMetrics.TCPPortForwardRejectedDisallowedCount
-			stat["udp_port_forward_rejected_disallowed_count"] +=
-				client.qualityMetrics.UDPPortForwardRejectedDisallowedCount
-
-			stat["tcp_ipv4_port_forward_dialed_count"] += client.qualityMetrics.TCPIPv4PortForwardDialedCount
-			stat["tcp_ipv4_port_forward_dialed_duration"] +=
-				int64(client.qualityMetrics.TCPIPv4PortForwardDialedDuration / time.Millisecond)
-			stat["tcp_ipv4_port_forward_failed_count"] += client.qualityMetrics.TCPIPv4PortForwardFailedCount
-			stat["tcp_ipv4_port_forward_failed_duration"] +=
-				int64(client.qualityMetrics.TCPIPv4PortForwardFailedDuration / time.Millisecond)
-
-			stat["tcp_ipv6_port_forward_dialed_count"] += client.qualityMetrics.TCPIPv6PortForwardDialedCount
-			stat["tcp_ipv6_port_forward_dialed_duration"] +=
-				int64(client.qualityMetrics.TCPIPv6PortForwardDialedDuration / time.Millisecond)
-			stat["tcp_ipv6_port_forward_failed_count"] += client.qualityMetrics.TCPIPv6PortForwardFailedCount
-			stat["tcp_ipv6_port_forward_failed_duration"] +=
-				int64(client.qualityMetrics.TCPIPv6PortForwardFailedDuration / time.Millisecond)
+			addInt64(stats, "established_clients", 1)
 		}
 
-		client.qualityMetrics.TCPPortForwardDialedCount = 0
-		client.qualityMetrics.TCPPortForwardDialedDuration = 0
-		client.qualityMetrics.TCPPortForwardFailedCount = 0
-		client.qualityMetrics.TCPPortForwardFailedDuration = 0
-		client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount = 0
-		client.qualityMetrics.TCPPortForwardRejectedDisallowedCount = 0
-		client.qualityMetrics.UDPPortForwardRejectedDisallowedCount = 0
+		// Note:
+		// - can't sum trafficState.peakConcurrentPortForwardCount to get a global peak
+		// - client.udpTrafficState.concurrentDialingPortForwardCount isn't meaningful
 
-		client.qualityMetrics.TCPIPv4PortForwardDialedCount = 0
-		client.qualityMetrics.TCPIPv4PortForwardDialedDuration = 0
-		client.qualityMetrics.TCPIPv4PortForwardFailedCount = 0
-		client.qualityMetrics.TCPIPv4PortForwardFailedDuration = 0
+		addInt64(upstreamStats, "dialing_tcp_port_forwards",
+			client.tcpTrafficState.concurrentDialingPortForwardCount)
 
-		client.qualityMetrics.TCPIPv6PortForwardDialedCount = 0
-		client.qualityMetrics.TCPIPv6PortForwardDialedDuration = 0
-		client.qualityMetrics.TCPIPv6PortForwardFailedCount = 0
-		client.qualityMetrics.TCPIPv6PortForwardFailedDuration = 0
+		addInt64(upstreamStats, "tcp_port_forwards",
+			client.tcpTrafficState.concurrentPortForwardCount)
+
+		addInt64(upstreamStats, "total_tcp_port_forwards",
+			client.tcpTrafficState.totalPortForwardCount)
+
+		addInt64(upstreamStats, "udp_port_forwards",
+			client.udpTrafficState.concurrentPortForwardCount)
+
+		addInt64(upstreamStats, "total_udp_port_forwards",
+			client.udpTrafficState.totalPortForwardCount)
+
+		addInt64(upstreamStats, "tcp_port_forward_dialed_count",
+			client.qualityMetrics.TCPPortForwardDialedCount)
+
+		addInt64(upstreamStats, "tcp_port_forward_dialed_duration",
+			int64(client.qualityMetrics.TCPPortForwardDialedDuration/time.Millisecond))
+
+		addInt64(upstreamStats, "tcp_port_forward_failed_count",
+			client.qualityMetrics.TCPPortForwardFailedCount)
+
+		addInt64(upstreamStats, "tcp_port_forward_failed_duration",
+			int64(client.qualityMetrics.TCPPortForwardFailedDuration/time.Millisecond))
+
+		addInt64(upstreamStats, "tcp_port_forward_rejected_dialing_limit_count",
+			client.qualityMetrics.TCPPortForwardRejectedDialingLimitCount)
+
+		addInt64(upstreamStats, "tcp_port_forward_rejected_disallowed_count",
+			client.qualityMetrics.TCPPortForwardRejectedDisallowedCount)
+
+		addInt64(upstreamStats, "udp_port_forward_rejected_disallowed_count",
+			client.qualityMetrics.UDPPortForwardRejectedDisallowedCount)
+
+		addInt64(upstreamStats, "tcp_ipv4_port_forward_dialed_count",
+			client.qualityMetrics.TCPIPv4PortForwardDialedCount)
+
+		addInt64(upstreamStats, "tcp_ipv4_port_forward_dialed_duration",
+			int64(client.qualityMetrics.TCPIPv4PortForwardDialedDuration/time.Millisecond))
+
+		addInt64(upstreamStats, "tcp_ipv4_port_forward_failed_count",
+			client.qualityMetrics.TCPIPv4PortForwardFailedCount)
+
+		addInt64(upstreamStats, "tcp_ipv4_port_forward_failed_duration",
+			int64(client.qualityMetrics.TCPIPv4PortForwardFailedDuration/time.Millisecond))
+
+		addInt64(upstreamStats, "tcp_ipv6_port_forward_dialed_count",
+			client.qualityMetrics.TCPIPv6PortForwardDialedCount)
+
+		addInt64(upstreamStats, "tcp_ipv6_port_forward_dialed_duration",
+			int64(client.qualityMetrics.TCPIPv6PortForwardDialedDuration/time.Millisecond))
+
+		addInt64(upstreamStats, "tcp_ipv6_port_forward_failed_count",
+			client.qualityMetrics.TCPIPv6PortForwardFailedCount)
+
+		addInt64(upstreamStats, "tcp_ipv6_port_forward_failed_duration",
+			int64(client.qualityMetrics.TCPIPv6PortForwardFailedDuration/time.Millisecond))
+
+		// DNS metrics limitations:
+		// - port forwards (sshClient.handleTCPChannel) don't know or log the resolver IP.
+		// - udpgw and packet tunnel transparent DNS use a heuristic to classify success/failure,
+		//   and there may be some delay before these code paths report DNS metrics.
+
+		// Every client.qualityMetrics DNS map has an "ALL" entry.
+
+		for key, value := range client.qualityMetrics.DNSCount {
+			upstreamStats["dns_count"].(map[string]int64)[key] += value
+		}
+
+		for key, value := range client.qualityMetrics.DNSDuration {
+			upstreamStats["dns_duration"].(map[string]int64)[key] += int64(value / time.Millisecond)
+		}
+
+		for key, value := range client.qualityMetrics.DNSFailedCount {
+			upstreamStats["dns_failed_count"].(map[string]int64)[key] += value
+		}
+
+		for key, value := range client.qualityMetrics.DNSFailedDuration {
+			upstreamStats["dns_failed_duration"].(map[string]int64)[key] += int64(value / time.Millisecond)
+		}
+
+		client.qualityMetrics.reset()
 
 		client.Unlock()
 	}
 
-	return protocolStats, regionStats
+	return upstreamStats, protocolStats, regionStats
 }
 
 func (sshServer *sshServer) getEstablishedClientCount() int {
@@ -1102,7 +1152,7 @@ func (sshServer *sshServer) handleClient(
 	}
 
 	geoIPData := sshServer.support.GeoIPService.Lookup(
-		common.IPAddressFromAddr(clientAddr), true)
+		common.IPAddressFromAddr(clientAddr))
 
 	sshServer.registerAcceptedClient(tunnelProtocol, geoIPData.Country)
 	defer sshServer.unregisterAcceptedClient(tunnelProtocol, geoIPData.Country)
@@ -1158,6 +1208,7 @@ func (sshServer *sshServer) handleClient(
 		tunnelProtocol,
 		serverPacketManipulation,
 		replayedServerPacketManipulation,
+		clientAddr,
 		geoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
@@ -1203,6 +1254,7 @@ type sshClient struct {
 	throttledConn                        *common.ThrottledConn
 	serverPacketManipulation             string
 	replayedServerPacketManipulation     bool
+	clientAddr                           net.Addr
 	geoIPData                            GeoIPData
 	sessionID                            string
 	isFirstTunnelInSession               bool
@@ -1213,7 +1265,7 @@ type sshClient struct {
 	trafficRules                         TrafficRules
 	tcpTrafficState                      trafficState
 	udpTrafficState                      trafficState
-	qualityMetrics                       qualityMetrics
+	qualityMetrics                       *qualityMetrics
 	tcpPortForwardLRU                    *common.LRUConns
 	oslClientSeedState                   *osl.ClientSeedState
 	signalIssueSLOKs                     chan struct{}
@@ -1269,6 +1321,57 @@ type qualityMetrics struct {
 	TCPIPv6PortForwardDialedDuration        time.Duration
 	TCPIPv6PortForwardFailedCount           int64
 	TCPIPv6PortForwardFailedDuration        time.Duration
+	DNSCount                                map[string]int64
+	DNSDuration                             map[string]time.Duration
+	DNSFailedCount                          map[string]int64
+	DNSFailedDuration                       map[string]time.Duration
+}
+
+func newQualityMetrics() *qualityMetrics {
+	return &qualityMetrics{
+		DNSCount:          make(map[string]int64),
+		DNSDuration:       make(map[string]time.Duration),
+		DNSFailedCount:    make(map[string]int64),
+		DNSFailedDuration: make(map[string]time.Duration),
+	}
+}
+
+func (q *qualityMetrics) reset() {
+
+	q.TCPPortForwardDialedCount = 0
+	q.TCPPortForwardDialedDuration = 0
+	q.TCPPortForwardFailedCount = 0
+	q.TCPPortForwardFailedDuration = 0
+	q.TCPPortForwardRejectedDialingLimitCount = 0
+	q.TCPPortForwardRejectedDisallowedCount = 0
+
+	q.UDPPortForwardRejectedDisallowedCount = 0
+
+	q.TCPIPv4PortForwardDialedCount = 0
+	q.TCPIPv4PortForwardDialedDuration = 0
+	q.TCPIPv4PortForwardFailedCount = 0
+	q.TCPIPv4PortForwardFailedDuration = 0
+
+	q.TCPIPv6PortForwardDialedCount = 0
+	q.TCPIPv6PortForwardDialedDuration = 0
+	q.TCPIPv6PortForwardFailedCount = 0
+	q.TCPIPv6PortForwardFailedDuration = 0
+
+	// Retain existing maps to avoid memory churn. The Go compiler optimizes map
+	// clearing operations of the following form.
+
+	for k := range q.DNSCount {
+		delete(q.DNSCount, k)
+	}
+	for k := range q.DNSDuration {
+		delete(q.DNSDuration, k)
+	}
+	for k := range q.DNSFailedCount {
+		delete(q.DNSFailedCount, k)
+	}
+	for k := range q.DNSFailedDuration {
+		delete(q.DNSFailedDuration, k)
+	}
 }
 
 type handshakeState struct {
@@ -1296,6 +1399,7 @@ func newSshClient(
 	tunnelProtocol string,
 	serverPacketManipulation string,
 	replayedServerPacketManipulation bool,
+	clientAddr net.Addr,
 	geoIPData GeoIPData) *sshClient {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
@@ -1310,8 +1414,10 @@ func newSshClient(
 		tunnelProtocol:                   tunnelProtocol,
 		serverPacketManipulation:         serverPacketManipulation,
 		replayedServerPacketManipulation: replayedServerPacketManipulation,
+		clientAddr:                       clientAddr,
 		geoIPData:                        geoIPData,
 		isFirstTunnelInSession:           true,
+		qualityMetrics:                   newQualityMetrics(),
 		tcpPortForwardLRU:                common.NewLRUConns(),
 		signalIssueSLOKs:                 make(chan struct{}, 1),
 		runCtx:                           runCtx,
@@ -1988,8 +2094,14 @@ func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 			// Note: unlock before use is only safe as long as referenced sshClient data,
 			// such as slices in handshakeState, is read-only after initially set.
 
+			clientAddr := ""
+			if sshClient.clientAddr != nil {
+				clientAddr = sshClient.clientAddr.String()
+			}
+
 			responsePayload, err = sshAPIRequestHandler(
 				sshClient.sshServer.support,
+				clientAddr,
 				sshClient.geoIPData,
 				authorizedAccessTypes,
 				request.Type,
@@ -2161,9 +2273,9 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 	// is available pre-handshake, albeit with additional restrictions.
 	//
 	// The random stream is subject to throttling in traffic rules; for
-	// unthrottled liveness tests, set initial Read/WriteUnthrottledBytes as
-	// required. The random stream maximum count and response size cap
-	// mitigate clients abusing the facility to waste server resources.
+	// unthrottled liveness tests, set EstablishmentRead/WriteBytesPerSecond as
+	// required. The random stream maximum count and response size cap mitigate
+	// clients abusing the facility to waste server resources.
 	//
 	// Like all other channels, this channel type is handled asynchronously,
 	// so it's possible to run at any point in the tunnel lifecycle.
@@ -2337,6 +2449,8 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 		sshClient.Unlock()
 	}
 
+	dnsQualityReporter := sshClient.updateQualityMetricsWithDNSResult
+
 	err = sshClient.sshServer.support.PacketTunnelServer.ClientConnected(
 		sshClient.sessionID,
 		packetTunnelChannel,
@@ -2344,7 +2458,8 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 		checkAllowedUDPPortFunc,
 		checkAllowedDomainFunc,
 		flowActivityUpdaterMaker,
-		metricUpdater)
+		metricUpdater,
+		dnsQualityReporter)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": err}).Warning("start packet tunnel client failed")
 		sshClient.setPacketTunnelChannel(nil)
@@ -3008,7 +3123,8 @@ func (sshClient *sshClient) setTrafficRules() (int64, int64) {
 	if sshClient.throttledConn != nil {
 		// Any existing throttling state is reset.
 		sshClient.throttledConn.SetLimits(
-			sshClient.trafficRules.RateLimits.CommonRateLimits())
+			sshClient.trafficRules.RateLimits.CommonRateLimits(
+				sshClient.handshakeState.completed))
 	}
 
 	return *sshClient.trafficRules.RateLimits.ReadBytesPerSecond,
@@ -3102,7 +3218,8 @@ func (sshClient *sshClient) rateLimits() common.RateLimits {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	return sshClient.trafficRules.RateLimits.CommonRateLimits()
+	return sshClient.trafficRules.RateLimits.CommonRateLimits(
+		sshClient.handshakeState.completed)
 }
 
 func (sshClient *sshClient) idleTCPPortForwardTimeout() time.Duration {
@@ -3496,6 +3613,33 @@ func (sshClient *sshClient) updateQualityMetricsWithUDPRejectedDisallowed() {
 	sshClient.qualityMetrics.UDPPortForwardRejectedDisallowedCount += 1
 }
 
+func (sshClient *sshClient) updateQualityMetricsWithDNSResult(
+	success bool, duration time.Duration, resolverIP net.IP) {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	resolver := ""
+	if resolverIP != nil {
+		resolver = resolverIP.String()
+	}
+	if success {
+		sshClient.qualityMetrics.DNSCount["ALL"] += 1
+		sshClient.qualityMetrics.DNSDuration["ALL"] += duration
+		if resolver != "" {
+			sshClient.qualityMetrics.DNSCount[resolver] += 1
+			sshClient.qualityMetrics.DNSDuration[resolver] += duration
+		}
+	} else {
+		sshClient.qualityMetrics.DNSFailedCount["ALL"] += 1
+		sshClient.qualityMetrics.DNSFailedDuration["ALL"] += duration
+		if resolver != "" {
+			sshClient.qualityMetrics.DNSFailedCount[resolver] += 1
+			sshClient.qualityMetrics.DNSFailedDuration[resolver] += duration
+		}
+	}
+}
+
 func (sshClient *sshClient) handleTCPChannel(
 	remainingDialTimeout time.Duration,
 	hostToConnect string,
@@ -3573,6 +3717,17 @@ func (sshClient *sshClient) handleTCPChannel(
 	IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
+	resolveElapsedTime := time.Since(dialStartTime)
+
+	// Record DNS metrics. If LookupIPAddr returns net.DNSError.IsNotFound, this
+	// is "no such host" and not a DNS failure. Limitation: the resolver IP is
+	// not known.
+
+	dnsErr, ok := err.(*net.DNSError)
+	dnsNotFound := ok && dnsErr.IsNotFound
+	dnsSuccess := err == nil || dnsNotFound
+	sshClient.updateQualityMetricsWithDNSResult(dnsSuccess, resolveElapsedTime, nil)
+
 	// IPv4 is preferred in case the host has limited IPv6 routing. IPv6 is
 	// selected and attempted only when there's no IPv4 option.
 	// TODO: shuffle list to try other IPs?
@@ -3592,8 +3747,6 @@ func (sshClient *sshClient) handleTCPChannel(
 	if err == nil && IP == nil {
 		err = std_errors.New("no IP address")
 	}
-
-	resolveElapsedTime := time.Since(dialStartTime)
 
 	if err != nil {
 
@@ -3639,7 +3792,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	if doSplitTunnel {
 
-		destinationGeoIPData := sshClient.sshServer.support.GeoIPService.LookupIP(IP, false)
+		destinationGeoIPData := sshClient.sshServer.support.GeoIPService.LookupIP(IP)
 
 		if destinationGeoIPData.Country == sshClient.geoIPData.Country &&
 			sshClient.geoIPData.Country != GEOIP_UNKNOWN_VALUE {

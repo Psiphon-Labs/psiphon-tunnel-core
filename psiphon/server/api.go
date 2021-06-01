@@ -20,6 +20,8 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
@@ -60,6 +62,7 @@ const (
 //
 func sshAPIRequestHandler(
 	support *SupportServices,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	name string,
@@ -87,6 +90,7 @@ func sshAPIRequestHandler(
 	return dispatchAPIRequestHandler(
 		support,
 		protocol.PSIPHON_SSH_API_PROTOCOL,
+		clientAddr,
 		geoIPData,
 		authorizedAccessTypes,
 		name,
@@ -98,6 +102,7 @@ func sshAPIRequestHandler(
 func dispatchAPIRequestHandler(
 	support *SupportServices,
 	apiProtocol string,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	name string,
@@ -146,14 +151,22 @@ func dispatchAPIRequestHandler(
 	}
 
 	switch name {
+
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(support, apiProtocol, geoIPData, params)
+		return handshakeAPIRequestHandler(
+			support, apiProtocol, clientAddr, geoIPData, params)
+
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
+		return connectedAPIRequestHandler(
+			support, clientAddr, geoIPData, authorizedAccessTypes, params)
+
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
+		return statusAPIRequestHandler(
+			support, clientAddr, geoIPData, authorizedAccessTypes, params)
+
 	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(support, geoIPData, authorizedAccessTypes, params)
+		return clientVerificationAPIRequestHandler(
+			support, clientAddr, geoIPData, authorizedAccessTypes, params)
 	}
 
 	return nil, errors.Tracef("invalid request name: %s", name)
@@ -177,6 +190,7 @@ var handshakeRequestParams = append(
 func handshakeAPIRequestHandler(
 	support *SupportServices,
 	apiProtocol string,
+	clientAddr string,
 	geoIPData GeoIPData,
 	params common.APIParameters) ([]byte, error) {
 
@@ -289,10 +303,20 @@ func handshakeAPIRequestHandler(
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
-	if !geoIPData.HasDiscoveryValue {
-		return nil, errors.TraceNew("unexpected missing discovery value")
+	// Discover new servers
+
+	host, _, err := net.SplitHostPort(clientAddr)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
-	encodedServerList := db.DiscoverServers(geoIPData.DiscoveryValue)
+
+	clientIP := net.ParseIP(host)
+	if clientIP == nil {
+		return nil, errors.TraceNew("missing client IP")
+	}
+
+	encodedServerList := db.DiscoverServers(
+		calculateDiscoveryValue(support.Config.DiscoveryValueHMACKey, clientIP))
 
 	// When the client indicates that it used an unsigned server entry for this
 	// connection, return a signed copy of the server entry for the client to
@@ -324,6 +348,7 @@ func handshakeAPIRequestHandler(
 		HttpsRequestRegexes:      httpsRequestRegexes,
 		EncodedServerList:        encodedServerList,
 		ClientRegion:             geoIPData.Country,
+		ClientAddress:            clientAddr,
 		ServerTimestamp:          common.GetCurrentTimestamp(),
 		ActiveAuthorizationIDs:   handshakeStateInfo.activeAuthorizationIDs,
 		TacticsPayload:           marshaledTacticsPayload,
@@ -338,6 +363,21 @@ func handshakeAPIRequestHandler(
 	}
 
 	return responsePayload, nil
+}
+
+// calculateDiscoveryValue derives a value from the client IP address to be
+// used as input in the server discovery algorithm.
+// See https://github.com/Psiphon-Inc/psiphon-automation/tree/master/Automation/psi_ops_discovery.py
+// for full details.
+func calculateDiscoveryValue(discoveryValueHMACKey string, ipAddress net.IP) int {
+	// From: psi_ops_discovery.calculate_ip_address_strategy_value:
+	//     # Mix bits from all octets of the client IP address to determine the
+	//     # bucket. An HMAC is used to prevent pre-calculation of buckets for IPs.
+	//     return ord(hmac.new(HMAC_KEY, ip_address, hashlib.sha256).digest()[0])
+	// TODO: use 3-octet algorithm?
+	hash := hmac.New(sha256.New, []byte(discoveryValueHMACKey))
+	hash.Write([]byte(ipAddress.String()))
+	return int(hash.Sum(nil)[0])
 }
 
 // uniqueUserParams are the connected request parameters which are logged for
@@ -370,6 +410,7 @@ var updateOnConnectedParamNames = append(
 // connected_timestamp is truncated as a privacy measure.
 func connectedAPIRequestHandler(
 	support *SupportServices,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters) ([]byte, error) {
@@ -497,6 +538,7 @@ var failedTunnelStatParams = append(
 // string). Stats processor must handle this input with care.
 func statusAPIRequestHandler(
 	support *SupportServices,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters) ([]byte, error) {
@@ -720,6 +762,7 @@ func statusAPIRequestHandler(
 // for older Android clients that still send verification requests
 func clientVerificationAPIRequestHandler(
 	support *SupportServices,
+	clientAddr string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters) ([]byte, error) {
