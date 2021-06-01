@@ -22,6 +22,7 @@ package common
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"crypto/rand"
 	std_errors "errors"
 	"fmt"
@@ -225,4 +226,15 @@ func SafeParseRequestURI(rawurl string) (*url.URL, error) {
 		}
 	}
 	return parsedURL, err
+}
+
+// SleepWithContext returns after the specified duration or once the input ctx
+// is done, whichever is first.
+func SleepWithContext(ctx context.Context, duration time.Duration) {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }

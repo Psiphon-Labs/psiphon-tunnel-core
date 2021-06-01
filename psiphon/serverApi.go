@@ -55,7 +55,6 @@ type ServerContext struct {
 	tunnel                   *Tunnel
 	psiphonHttpsClient       *http.Client
 	statsRegexps             *transferstats.Regexps
-	clientRegion             string
 	clientUpgradeVersion     string
 	serverHandshakeTimestamp string
 	paddingPRNG              *prng.PRNG
@@ -225,8 +224,11 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		return errors.Trace(err)
 	}
 
-	serverContext.clientRegion = handshakeResponse.ClientRegion
-	NoticeClientRegion(serverContext.clientRegion)
+	if serverContext.tunnel.config.EmitClientAddress {
+		NoticeClientAddress(handshakeResponse.ClientAddress)
+	}
+
+	NoticeClientRegion(handshakeResponse.ClientRegion)
 
 	var serverEntries []protocol.ServerEntryFields
 

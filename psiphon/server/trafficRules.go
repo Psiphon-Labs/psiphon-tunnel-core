@@ -70,8 +70,16 @@ type TrafficRulesSet struct {
 	// any client endpoint request or any request to create a new session, but
 	// not any meek request for an existing session, if the
 	// MeekRateLimiterHistorySize requests occur in
-	// MeekRateLimiterThresholdSeconds. The scope of rate limiting may be
-	// limited using LimitMeekRateLimiterRegions/ISPs/Cities.
+	// MeekRateLimiterThresholdSeconds.
+	//
+	// A use case for the the meek rate limiter is to mitigate dangling resource
+	// usage that results from meek connections that are partially established
+	// and then interrupted (e.g, drop packets after allowing up to the initial
+	// HTTP request and header lines). In the case of CDN fronted meek, the CDN
+	// itself may hold open the interrupted connection.
+	//
+	// The scope of rate limiting may be
+	// limited using LimitMeekRateLimiterTunnelProtocols/Regions/ISPs/Cities.
 	//
 	// Hot reloading a new history size will result in existing history being
 	// truncated.
@@ -80,6 +88,11 @@ type TrafficRulesSet struct {
 	// MeekRateLimiterThresholdSeconds is part of the meek rate limiter
 	// specification and must be set when MeekRateLimiterHistorySize is set.
 	MeekRateLimiterThresholdSeconds int
+
+	// MeekRateLimiterTunnelProtocols, if set, limits application of the meek
+	// late-stage rate limiter to the specified meek protocols. When omitted or
+	// empty, meek rate limiting is applied to all meek protocols.
+	MeekRateLimiterTunnelProtocols []string
 
 	// MeekRateLimiterRegions, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
@@ -266,6 +279,12 @@ type RateLimits struct {
 	WriteBytesPerSecond   *int64
 	CloseAfterExhausted   *bool
 
+	// EstablishmentRead/WriteBytesPerSecond are used in place of
+	// Read/WriteBytesPerSecond for tunnels in the establishment phase, from the
+	// initial network connection up to the completion of the API handshake.
+	EstablishmentReadBytesPerSecond  *int64
+	EstablishmentWriteBytesPerSecond *int64
+
 	// UnthrottleFirstTunnelOnly specifies whether any
 	// ReadUnthrottledBytes/WriteUnthrottledBytes apply
 	// only to the first tunnel in a session.
@@ -273,14 +292,19 @@ type RateLimits struct {
 }
 
 // CommonRateLimits converts a RateLimits to a common.RateLimits.
-func (rateLimits *RateLimits) CommonRateLimits() common.RateLimits {
-	return common.RateLimits{
+func (rateLimits *RateLimits) CommonRateLimits(handshaked bool) common.RateLimits {
+	r := common.RateLimits{
 		ReadUnthrottledBytes:  *rateLimits.ReadUnthrottledBytes,
 		ReadBytesPerSecond:    *rateLimits.ReadBytesPerSecond,
 		WriteUnthrottledBytes: *rateLimits.WriteUnthrottledBytes,
 		WriteBytesPerSecond:   *rateLimits.WriteBytesPerSecond,
 		CloseAfterExhausted:   *rateLimits.CloseAfterExhausted,
 	}
+	if !handshaked {
+		r.ReadBytesPerSecond = *rateLimits.EstablishmentReadBytesPerSecond
+		r.WriteBytesPerSecond = *rateLimits.EstablishmentWriteBytesPerSecond
+	}
+	return r
 }
 
 // NewTrafficRulesSet initializes a TrafficRulesSet with
@@ -306,6 +330,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			// Modify actual traffic rules only after validation
 			set.MeekRateLimiterHistorySize = newSet.MeekRateLimiterHistorySize
 			set.MeekRateLimiterThresholdSeconds = newSet.MeekRateLimiterThresholdSeconds
+			set.MeekRateLimiterTunnelProtocols = newSet.MeekRateLimiterTunnelProtocols
 			set.MeekRateLimiterRegions = newSet.MeekRateLimiterRegions
 			set.MeekRateLimiterISPs = newSet.MeekRateLimiterISPs
 			set.MeekRateLimiterCities = newSet.MeekRateLimiterCities
@@ -349,6 +374,8 @@ func (set *TrafficRulesSet) Validate() error {
 			(rules.RateLimits.ReadBytesPerSecond != nil && *rules.RateLimits.ReadBytesPerSecond < 0) ||
 			(rules.RateLimits.WriteUnthrottledBytes != nil && *rules.RateLimits.WriteUnthrottledBytes < 0) ||
 			(rules.RateLimits.WriteBytesPerSecond != nil && *rules.RateLimits.WriteBytesPerSecond < 0) ||
+			(rules.RateLimits.EstablishmentReadBytesPerSecond != nil && *rules.RateLimits.EstablishmentReadBytesPerSecond < 0) ||
+			(rules.RateLimits.EstablishmentWriteBytesPerSecond != nil && *rules.RateLimits.EstablishmentWriteBytesPerSecond < 0) ||
 			(rules.DialTCPPortForwardTimeoutMilliseconds != nil && *rules.DialTCPPortForwardTimeoutMilliseconds < 0) ||
 			(rules.IdleTCPPortForwardTimeoutMilliseconds != nil && *rules.IdleTCPPortForwardTimeoutMilliseconds < 0) ||
 			(rules.IdleUDPPortForwardTimeoutMilliseconds != nil && *rules.IdleUDPPortForwardTimeoutMilliseconds < 0) ||
@@ -525,6 +552,14 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 	if trafficRules.RateLimits.CloseAfterExhausted == nil {
 		trafficRules.RateLimits.CloseAfterExhausted = new(bool)
+	}
+
+	if trafficRules.RateLimits.EstablishmentReadBytesPerSecond == nil {
+		trafficRules.RateLimits.EstablishmentReadBytesPerSecond = new(int64)
+	}
+
+	if trafficRules.RateLimits.EstablishmentWriteBytesPerSecond == nil {
+		trafficRules.RateLimits.EstablishmentWriteBytesPerSecond = new(int64)
 	}
 
 	if trafficRules.RateLimits.UnthrottleFirstTunnelOnly == nil {
@@ -727,6 +762,14 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			trafficRules.RateLimits.CloseAfterExhausted = filteredRules.Rules.RateLimits.CloseAfterExhausted
 		}
 
+		if filteredRules.Rules.RateLimits.EstablishmentReadBytesPerSecond != nil {
+			trafficRules.RateLimits.EstablishmentReadBytesPerSecond = filteredRules.Rules.RateLimits.EstablishmentReadBytesPerSecond
+		}
+
+		if filteredRules.Rules.RateLimits.EstablishmentWriteBytesPerSecond != nil {
+			trafficRules.RateLimits.EstablishmentWriteBytesPerSecond = filteredRules.Rules.RateLimits.EstablishmentWriteBytesPerSecond
+		}
+
 		if filteredRules.Rules.RateLimits.UnthrottleFirstTunnelOnly != nil {
 			trafficRules.RateLimits.UnthrottleFirstTunnelOnly = filteredRules.Rules.RateLimits.UnthrottleFirstTunnelOnly
 		}
@@ -877,7 +920,8 @@ func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
 
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
 // configuration values.
-func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, []string, []string, int, int) {
+func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
+	int, int, []string, []string, []string, []string, int, int) {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -895,6 +939,7 @@ func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (int, int, []string, []st
 
 	return set.MeekRateLimiterHistorySize,
 		set.MeekRateLimiterThresholdSeconds,
+		set.MeekRateLimiterTunnelProtocols,
 		set.MeekRateLimiterRegions,
 		set.MeekRateLimiterISPs,
 		set.MeekRateLimiterCities,
