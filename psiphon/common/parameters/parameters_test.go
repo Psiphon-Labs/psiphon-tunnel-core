@@ -44,6 +44,11 @@ func TestGetDefaultParameters(t *testing.T) {
 			if v != g {
 				t.Fatalf("String returned %+v expected %+v", g, v)
 			}
+		case []string:
+			g := p.Get().Strings(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("Strings returned %+v expected %+v", g, v)
+			}
 		case int:
 			g := p.Get().Int(name)
 			if v != g {

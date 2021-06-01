@@ -148,18 +148,19 @@ func TestSafeParseRequestURI(t *testing.T) {
 func TestSleepWithContext(t *testing.T) {
 
 	start := time.Now()
-	SleepWithContext(context.Background(), 2*time.Millisecond)
+	SleepWithContext(context.Background(), 100*time.Millisecond)
 	duration := time.Since(start)
-	if duration/time.Millisecond != 2 {
+	// Allows for 100-109ms actual elapsed time.
+	if duration/time.Millisecond/10 != 10 {
 		t.Errorf("unexpected duration: %v", duration)
 	}
 
 	start = time.Now()
-	ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancelFunc()
-	SleepWithContext(ctx, 2*time.Millisecond)
+	SleepWithContext(ctx, 50*time.Millisecond)
 	duration = time.Since(start)
-	if duration/time.Millisecond != 1 {
+	if duration/time.Millisecond/10 != 5 {
 		t.Errorf("unexpected duration: %v", duration)
 	}
 }
