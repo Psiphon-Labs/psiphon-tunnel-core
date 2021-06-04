@@ -394,10 +394,11 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
         "ConnectionWorkerPoolSize" : 1,
         "EstablishTunnelPausePeriodSeconds" : 1,
         "FetchRemoteServerListRetryPeriodMilliseconds" : 250,
-		"RemoteServerListSignaturePublicKey" : "%s",
-		"RemoteServerListUrl" : "%s",
-		"ObfuscatedServerListRootURLs" : %s,
-		"UpstreamProxyUrl" : "%s"
+        "RemoteServerListSignaturePublicKey" : "%s",
+        "RemoteServerListUrl" : "%s",
+        "ObfuscatedServerListRootURLs" : %s,
+        "UpstreamProxyUrl" : "%s",
+        "UpstreamProxyAllowAllServerEntrySources" : true
     }`
 
 	clientConfigJSON := fmt.Sprintf(

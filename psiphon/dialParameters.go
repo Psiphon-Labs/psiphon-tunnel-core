@@ -362,15 +362,31 @@ func MakeDialParameters(
 		}
 	}
 
-	if config.UseUpstreamProxy() &&
-		!protocol.TunnelProtocolSupportsUpstreamProxy(dialParams.TunnelProtocol) {
+	if config.UseUpstreamProxy() {
 
-		// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
-		// called via selectProtocol, will filter out protocols such that will not
-		// select a protocol incompatible with UpstreamProxy. This additional check
-		// will catch cases where selectProtocol does not apply this filter.
-		return nil, errors.Tracef(
-			"protocol does not support upstream proxy: %s", dialParams.TunnelProtocol)
+		if !protocol.TunnelProtocolSupportsUpstreamProxy(dialParams.TunnelProtocol) {
+
+			// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
+			// called via selectProtocol, will filter out protocols such that will not
+			// select a protocol incompatible with UpstreamProxy. This additional check
+			// will catch cases where selectProtocol does not apply this filter.
+			return nil, errors.Tracef(
+				"protocol does not support upstream proxy: %s", dialParams.TunnelProtocol)
+		}
+
+		// Skip this candidate when the server entry is not to be used with an
+		// upstream proxy. By not exposing servers from sources that are
+		// relatively hard to enumerate, this mechanism mitigates the risk of
+		// a malicious upstream proxy enumerating Psiphon servers. Populate
+		// the allowed sources with fronted servers to provide greater
+		// blocking resistence for clients using upstream proxy clients that
+		// are subject to blocking.
+		source := dialParams.ServerEntry.LocalSource
+		if !protocol.AllowServerEntrySourceWithUpstreamProxy(source) &&
+			!p.Bool(parameters.UpstreamProxyAllowAllServerEntrySources) {
+			return nil, errors.Tracef(
+				"server entry source disallowed with upstream proxy: %s", source)
+		}
 	}
 
 	if (!isReplay || !replayBPF) &&
