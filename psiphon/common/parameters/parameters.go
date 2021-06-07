@@ -295,6 +295,7 @@ const (
 	RestrictFrontingProviderIDs                      = "RestrictFrontingProviderIDs"
 	RestrictFrontingProviderIDsServerProbability     = "RestrictFrontingProviderIDsServerProbability"
 	RestrictFrontingProviderIDsClientProbability     = "RestrictFrontingProviderIDsClientProbability"
+	UpstreamProxyAllowAllServerEntrySources          = "UpstreamProxyAllowAllServerEntrySources"
 )
 
 const (
@@ -620,6 +621,8 @@ var defaultParameters = map[string]struct {
 	RestrictFrontingProviderIDs:                  {value: []string{}},
 	RestrictFrontingProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	RestrictFrontingProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
+
+	UpstreamProxyAllowAllServerEntrySources: {value: false},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
