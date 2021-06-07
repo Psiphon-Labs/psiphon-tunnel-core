@@ -90,6 +90,20 @@ const (
 	CONJURE_TRANSPORT_OBFS4_OSSH = "Obfs4-OSSH"
 )
 
+var SupportedServerEntrySources = []string{
+	SERVER_ENTRY_SOURCE_EMBEDDED,
+	SERVER_ENTRY_SOURCE_REMOTE,
+	SERVER_ENTRY_SOURCE_DISCOVERY,
+	SERVER_ENTRY_SOURCE_TARGET,
+	SERVER_ENTRY_SOURCE_OBFUSCATED,
+	SERVER_ENTRY_SOURCE_EXCHANGED,
+}
+
+func AllowServerEntrySourceWithUpstreamProxy(source string) bool {
+	return source == SERVER_ENTRY_SOURCE_EMBEDDED ||
+		source == SERVER_ENTRY_SOURCE_REMOTE
+}
+
 type TunnelProtocols []string
 
 func (t TunnelProtocols) Validate() error {
@@ -131,15 +145,6 @@ var DefaultDisabledTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
-}
-
-var SupportedServerEntrySources = TunnelProtocols{
-	SERVER_ENTRY_SOURCE_EMBEDDED,
-	SERVER_ENTRY_SOURCE_REMOTE,
-	SERVER_ENTRY_SOURCE_DISCOVERY,
-	SERVER_ENTRY_SOURCE_TARGET,
-	SERVER_ENTRY_SOURCE_OBFUSCATED,
-	SERVER_ENTRY_SOURCE_EXCHANGED,
 }
 
 func TunnelProtocolUsesTCP(protocol string) bool {

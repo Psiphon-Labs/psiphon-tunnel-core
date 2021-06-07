@@ -748,6 +748,9 @@ type Config struct {
 	RestrictFrontingProviderIDs                  []string
 	RestrictFrontingProviderIDsClientProbability *float64
 
+	// UpstreamProxyAllowAllServerEntrySources is for testing purposes.
+	UpstreamProxyAllowAllServerEntrySources *bool
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1713,6 +1716,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.RestrictFrontingProviderIDsClientProbability] = *config.RestrictFrontingProviderIDsClientProbability
 	}
 
+	if config.UpstreamProxyAllowAllServerEntrySources != nil {
+		applyParameters[parameters.UpstreamProxyAllowAllServerEntrySources] = *config.UpstreamProxyAllowAllServerEntrySources
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2030,6 +2037,11 @@ func (config *Config) setDialParametersHash() {
 	if config.RestrictFrontingProviderIDsClientProbability != nil {
 		hash.Write([]byte("RestrictFrontingProviderIDsClientProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.RestrictFrontingProviderIDsClientProbability)
+	}
+
+	if config.UpstreamProxyAllowAllServerEntrySources != nil {
+		hash.Write([]byte("UpstreamProxyAllowAllServerEntrySources"))
+		binary.Write(hash, binary.LittleEndian, *config.UpstreamProxyAllowAllServerEntrySources)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)
