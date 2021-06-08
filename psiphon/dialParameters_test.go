@@ -451,7 +451,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 		if err == nil {
-			t.Fatalf("unexpected MakeDialParameters success")
+			if dialParams != nil {
+				t.Fatalf("unexpected MakeDialParameters success")
+			}
 		}
 	} else {
 		if err != nil {

@@ -951,6 +951,18 @@ func NoticeHoldOffTunnel(diagnosticID string, duration time.Duration) {
 	}
 }
 
+// NoticeSkipServerEntry reports a reason for skipping a server entry when
+// preparing dial parameters. To avoid log noise, the server entry
+// diagnosticID is not emitted and each reason is reported at most once per
+// session.
+func NoticeSkipServerEntry(format string, args ...interface{}) {
+	reason := fmt.Sprintf(format, args...)
+	repetitionKey := fmt.Sprintf("ServerAlert-%+v", reason)
+	outputRepetitiveNotice(
+		repetitionKey, "", 0,
+		"SkipServerEntry", 0, "reason", reason)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int

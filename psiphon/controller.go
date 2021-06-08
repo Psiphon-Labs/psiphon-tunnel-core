@@ -2139,12 +2139,12 @@ loop:
 
 			controller.concurrentEstablishTunnelsMutex.Unlock()
 
-			// dialParams is nil when the server does not support any protocol
-			// that remains after applying the LimitTunnelProtocols parameter
-			// and the excludeIntensive flag.
-			// Silently skip the candidate in this case. Otherwise, emit error.
+			// MakeDialParameters returns nil/nil when the server entry is to
+			// be skipped. See MakeDialParameters for skip cases and skip
+			// logging. Silently fail the candidate in this case. Otherwise,
+			// emit error.
 			if err != nil {
-				NoticeInfo("failed to select protocol for %s: %v",
+				NoticeInfo("failed to make dial parameters for %s: %v",
 					candidateServerEntry.serverEntry.GetDiagnosticID(),
 					errors.Trace(err))
 			}

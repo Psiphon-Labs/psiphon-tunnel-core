@@ -21,7 +21,6 @@ package psiphon
 
 import (
 	"context"
-	std_errors "errors"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -88,6 +87,8 @@ func GetTactics(ctx context.Context, config *Config) {
 		}
 		defer iterator.Close()
 
+		noCapableServers := true
+
 		for iteration := 0; ; iteration++ {
 
 			if !WaitForNetworkConnectivity(
@@ -102,8 +103,11 @@ func GetTactics(ctx context.Context, config *Config) {
 			}
 
 			if serverEntry == nil {
-				if iteration == 0 {
-					NoticeWarning("tactics request skipped: no capable servers")
+				if noCapableServers {
+					// Abort when no capable servers have been found after
+					// a full iteration. Server entries that are skipped are
+					// classified as not capable.
+					NoticeWarning("tactics request aborted: no capable servers")
 					return
 				}
 
@@ -113,8 +117,24 @@ func GetTactics(ctx context.Context, config *Config) {
 
 			tacticsRecord, err = fetchTactics(
 				ctx, config, serverEntry)
+
+			if tacticsRecord != nil || err != nil {
+				// The fetch succeeded or failed but was not skipped.
+				noCapableServers = false
+			}
+
 			if err == nil {
-				break
+				if tacticsRecord != nil {
+					// The fetch succeeded, so exit the fetch loop and apply
+					// the result.
+					break
+				} else {
+					// MakeDialParameters, via fetchTactics, returns nil/nil
+					// when the server entry is to be skipped. See
+					// MakeDialParameters for skip cases and skip logging.
+					// Silently select a new candidate in this case.
+					continue
+				}
 			}
 
 			NoticeWarning("tactics request failed: %s", err)
@@ -166,6 +186,9 @@ func GetTactics(ctx context.Context, config *Config) {
 	emitMemoryMetrics()
 }
 
+// fetchTactics performs a tactics request using the specified server entry.
+// fetchTactics will return nil/nil when the candidate server entry is
+// skipped.
 func fetchTactics(
 	ctx context.Context,
 	config *Config,
@@ -201,15 +224,13 @@ func fetchTactics(
 		0,
 		0)
 	if dialParams == nil {
-		// MakeDialParameters may return nil, nil when the server entry can't
-		// satisfy protocol selection criteria. This case in not expected
-		// since NewTacticsServerEntryIterator should only return tactics-
-		// capable server entries and selectProtocol will select any tactics
-		// protocol.
-		err = std_errors.New("failed to make dial parameters")
+		return nil, nil
 	}
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.Tracef(
+			"failed to make dial parameters for %s: %v",
+			serverEntry.GetDiagnosticID(),
+			err)
 	}
 
 	NoticeRequestingTactics(dialParams)
