@@ -311,6 +311,11 @@ func MakeDialParameters(
 	// heavily favor values close to the min, which should be set to the
 	// singleton NetworkLatencyMultiplier tactics value.
 	//
+	// For NetworkLatencyMultiplierLambda close to 2.0, values near min are
+	// very approximately 10x more likely to be selected than values near
+	// max, while for NetworkLatencyMultiplierLambda close to 0.1, the
+	// distribution is close to uniform.
+	//
 	// Not all existing, persisted DialParameters will have a custom
 	// NetworkLatencyMultiplier value. Its zero value will cause the singleton
 	// NetworkLatencyMultiplier tactics value to be used instead, which is
