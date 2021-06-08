@@ -311,6 +311,11 @@ func MakeDialParameters(
 	// heavily favor values close to the min, which should be set to the
 	// singleton NetworkLatencyMultiplier tactics value.
 	//
+	// For NetworkLatencyMultiplierLambda close to 2.0, values near min are
+	// very approximately 10x more likely to be selected than values near
+	// max, while for NetworkLatencyMultiplierLambda close to 0.1, the
+	// distribution is close to uniform.
+	//
 	// Not all existing, persisted DialParameters will have a custom
 	// NetworkLatencyMultiplier value. Its zero value will cause the singleton
 	// NetworkLatencyMultiplier tactics value to be used instead, which is
@@ -357,21 +362,32 @@ func MakeDialParameters(
 			dialParams.ServerEntry.FrontingProviderID) {
 		if p.WeightedCoinFlip(
 			parameters.RestrictFrontingProviderIDsClientProbability) {
-			return nil, errors.Tracef(
-				"restricted fronting provider ID: %s", dialParams.ServerEntry.FrontingProviderID)
+
+			// When skipping, return nil/nil as no error should be logged.
+			// NoticeSkipServerEntry emits each skip reason, regardless
+			// of server entry, at most once per session.
+
+			NoticeSkipServerEntry(
+				"restricted fronting provider ID: %s",
+				dialParams.ServerEntry.FrontingProviderID)
+
+			return nil, nil
 		}
 	}
 
 	if config.UseUpstreamProxy() {
 
+		// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
+		// called via selectProtocol, will filter out protocols such that will not
+		// select a protocol incompatible with UpstreamProxy. This additional check
+		// will catch cases where selectProtocol does not apply this filter.
 		if !protocol.TunnelProtocolSupportsUpstreamProxy(dialParams.TunnelProtocol) {
 
-			// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
-			// called via selectProtocol, will filter out protocols such that will not
-			// select a protocol incompatible with UpstreamProxy. This additional check
-			// will catch cases where selectProtocol does not apply this filter.
-			return nil, errors.Tracef(
-				"protocol does not support upstream proxy: %s", dialParams.TunnelProtocol)
+			NoticeSkipServerEntry(
+				"protocol does not support upstream proxy: %s",
+				dialParams.TunnelProtocol)
+
+			return nil, nil
 		}
 
 		// Skip this candidate when the server entry is not to be used with an
@@ -384,8 +400,12 @@ func MakeDialParameters(
 		source := dialParams.ServerEntry.LocalSource
 		if !protocol.AllowServerEntrySourceWithUpstreamProxy(source) &&
 			!p.Bool(parameters.UpstreamProxyAllowAllServerEntrySources) {
-			return nil, errors.Tracef(
-				"server entry source disallowed with upstream proxy: %s", source)
+
+			NoticeSkipServerEntry(
+				"server entry source disallowed with upstream proxy: %s",
+				source)
+
+			return nil, nil
 		}
 	}
 
