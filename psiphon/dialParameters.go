@@ -338,6 +338,10 @@ func MakeDialParameters(
 			p.Float(parameters.NetworkLatencyMultiplierLambda))
 	}
 
+	// After this point, any tactics parameters that apply the network latency
+	// multiplier will use this selected value.
+	p = config.GetParameters().GetCustom(dialParams.NetworkLatencyMultiplier)
+
 	if !isReplay && !isExchanged {
 
 		// TODO: should there be a pre-check of selectProtocol before incurring
