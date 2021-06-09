@@ -1161,6 +1161,14 @@ func dialTunnel(
 	// establish tunnels. By holding off post-connect, the client has this
 	// established tunnel ready to activate in case other protocols fail to
 	// establish. This hold-off phase continues to consume one connection worker.
+	//
+	// The network latency multiplier is not applied to HoldOffTunnelDuration,
+	// as the goal is to apply a consistent hold-off range across all tunnel
+	// candidates; and this avoids scaling up any delay users experience.
+	//
+	// The hold-off is applied regardless of whether this is the first tunnel
+	// in a session or a reconnection, even to a server affinity candidate,
+	// so that the advantage for other protocols persists.
 
 	if dialParams.HoldOffTunnelDuration > 0 {
 		NoticeHoldOffTunnel(dialParams.ServerEntry.GetDiagnosticID(), dialParams.HoldOffTunnelDuration)
