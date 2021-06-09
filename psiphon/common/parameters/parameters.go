@@ -612,8 +612,8 @@ var defaultParameters = map[string]struct {
 	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},
 	CustomHostNameLimitProtocols: {value: protocol.TunnelProtocols{}},
 
-	HoldOffTunnelMinDuration:         {value: time.Duration(0), minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
-	HoldOffTunnelMaxDuration:         {value: time.Duration(0), minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	HoldOffTunnelMinDuration:         {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelMaxDuration:         {value: time.Duration(0), minimum: time.Duration(0)},
 	HoldOffTunnelProtocols:           {value: protocol.TunnelProtocols{}},
 	HoldOffTunnelFrontingProviderIDs: {value: []string{}},
 	HoldOffTunnelProbability:         {value: 0.0, minimum: 0.0},
