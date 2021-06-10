@@ -503,10 +503,10 @@ func isIETFQUICClientHello(buffer []byte) bool {
 		return false
 	}
 
-	// IETF QUIC draft-24
+	// IETF QUIC version 1, RFC 9000
 
-	return buffer[1] == 0xff &&
+	return buffer[1] == 0 &&
 		buffer[2] == 0 &&
 		buffer[3] == 0 &&
-		buffer[4] == 0x1d
+		buffer[4] == 0x1
 }

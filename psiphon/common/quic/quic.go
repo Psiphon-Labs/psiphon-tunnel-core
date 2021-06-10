@@ -77,33 +77,33 @@ func Enabled() bool {
 	return true
 }
 
-const ietfQUICDraft29VersionNumber = 0xff00001d
+const ietfQUIC1VersionNumber = 0x1
 
 var supportedVersionNumbers = map[string]uint32{
-	protocol.QUIC_VERSION_GQUIC39:           uint32(gquic.VersionGQUIC39),
-	protocol.QUIC_VERSION_GQUIC43:           uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_GQUIC44:           uint32(gquic.VersionGQUIC44),
-	protocol.QUIC_VERSION_OBFUSCATED:        uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_IETF29:            ietfQUICDraft29VersionNumber,
-	protocol.QUIC_VERSION_RANDOMIZED_IETF29: ietfQUICDraft29VersionNumber,
-	protocol.QUIC_VERSION_OBFUSCATED_IETF29: uint32(ietfQUICDraft29VersionNumber),
+	protocol.QUIC_VERSION_GQUIC39:       uint32(gquic.VersionGQUIC39),
+	protocol.QUIC_VERSION_GQUIC43:       uint32(gquic.VersionGQUIC43),
+	protocol.QUIC_VERSION_GQUIC44:       uint32(gquic.VersionGQUIC44),
+	protocol.QUIC_VERSION_OBFUSCATED:    uint32(gquic.VersionGQUIC43),
+	protocol.QUIC_VERSION_V1:            ietfQUIC1VersionNumber,
+	protocol.QUIC_VERSION_RANDOMIZED_V1: ietfQUIC1VersionNumber,
+	protocol.QUIC_VERSION_OBFUSCATED_V1: uint32(ietfQUIC1VersionNumber),
 }
 
 func isObfuscated(quicVersion string) bool {
 	return quicVersion == protocol.QUIC_VERSION_OBFUSCATED ||
-		quicVersion == protocol.QUIC_VERSION_OBFUSCATED_IETF29
+		quicVersion == protocol.QUIC_VERSION_OBFUSCATED_V1
 }
 
 func isClientHelloRandomized(quicVersion string) bool {
-	return quicVersion == protocol.QUIC_VERSION_RANDOMIZED_IETF29
+	return quicVersion == protocol.QUIC_VERSION_RANDOMIZED_V1
 }
 
 func isIETFVersion(versionNumber uint32) bool {
-	return versionNumber == ietfQUICDraft29VersionNumber
+	return versionNumber == ietfQUIC1VersionNumber
 }
 
 func getALPN(versionNumber uint32) string {
-	return "h3-29"
+	return "h3"
 }
 
 // quic_test overrides the server idle timeout.
@@ -957,7 +957,7 @@ func newMuxListener(
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCertificate},
-		NextProtos:   []string{getALPN(ietfQUICDraft29VersionNumber)},
+		NextProtos:   []string{getALPN(ietfQUIC1VersionNumber)},
 	}
 
 	ietfQUICConfig := &ietf_quic.Config{
