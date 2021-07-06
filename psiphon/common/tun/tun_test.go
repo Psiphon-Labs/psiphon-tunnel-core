@@ -409,6 +409,8 @@ func (server *testServer) run() {
 			checkAllowedPortFunc := func(net.IP, int) bool { return true }
 			checkAllowedDomainFunc := func(string) bool { return true }
 
+			dnsQualityReporter := func(_ bool, _ time.Duration, _ net.IP) {}
+
 			server.tunServer.ClientConnected(
 				sessionID,
 				signalConn,
@@ -416,7 +418,8 @@ func (server *testServer) run() {
 				checkAllowedPortFunc,
 				checkAllowedDomainFunc,
 				server.updaterMaker,
-				server.metricsUpdater)
+				server.metricsUpdater,
+				dnsQualityReporter)
 
 			signalConn.Wait()
 

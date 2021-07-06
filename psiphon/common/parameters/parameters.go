@@ -231,6 +231,7 @@ const (
 	ReplayAPIRequestPadding                          = "ReplayAPIRequestPadding"
 	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
 	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
+	ReplayHoldOffTunnel                              = "ReplayHoldOffTunnel"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -286,6 +287,15 @@ const (
 	CustomHostNameRegexes                            = "CustomHostNameRegexes"
 	CustomHostNameProbability                        = "CustomHostNameProbability"
 	CustomHostNameLimitProtocols                     = "CustomHostNameLimitProtocols"
+	HoldOffTunnelMinDuration                         = "HoldOffTunnelMinDuration"
+	HoldOffTunnelMaxDuration                         = "HoldOffTunnelMaxDuration"
+	HoldOffTunnelProtocols                           = "HoldOffTunnelProtocols"
+	HoldOffTunnelFrontingProviderIDs                 = "HoldOffTunnelFrontingProviderIDs"
+	HoldOffTunnelProbability                         = "HoldOffTunnelProbability"
+	RestrictFrontingProviderIDs                      = "RestrictFrontingProviderIDs"
+	RestrictFrontingProviderIDsServerProbability     = "RestrictFrontingProviderIDsServerProbability"
+	RestrictFrontingProviderIDsClientProbability     = "RestrictFrontingProviderIDsClientProbability"
+	UpstreamProxyAllowAllServerEntrySources          = "UpstreamProxyAllowAllServerEntrySources"
 )
 
 const (
@@ -533,6 +543,7 @@ var defaultParameters = map[string]struct {
 	ReplayAPIRequestPadding:                {value: true},
 	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
 	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
+	ReplayHoldOffTunnel:                    {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -600,6 +611,18 @@ var defaultParameters = map[string]struct {
 	CustomHostNameRegexes:        {value: RegexStrings{}},
 	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},
 	CustomHostNameLimitProtocols: {value: protocol.TunnelProtocols{}},
+
+	HoldOffTunnelMinDuration:         {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelMaxDuration:         {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelProtocols:           {value: protocol.TunnelProtocols{}},
+	HoldOffTunnelFrontingProviderIDs: {value: []string{}},
+	HoldOffTunnelProbability:         {value: 0.0, minimum: 0.0},
+
+	RestrictFrontingProviderIDs:                  {value: []string{}},
+	RestrictFrontingProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
+	RestrictFrontingProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
+
+	UpstreamProxyAllowAllServerEntrySources: {value: false},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -826,7 +849,6 @@ func (p *Parameters) Set(
 					}
 				}
 			case protocol.LabeledTLSProfiles:
-
 				if skipOnError {
 					newValue = v.PruneInvalid(customTLSProfileNames)
 				} else {

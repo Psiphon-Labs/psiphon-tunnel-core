@@ -20,8 +20,6 @@
 package server
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"net"
@@ -45,17 +43,13 @@ const (
 // GeoIPData is GeoIP data for a client session. Individual client
 // IP addresses are neither logged nor explicitly referenced during a session.
 // The GeoIP country, city, and ISP corresponding to a client IP address are
-// resolved and then logged along with usage stats. The DiscoveryValue is
-// a special value derived from the client IP that's used to compartmentalize
-// discoverable servers (see calculateDiscoveryValue for details).
+// resolved and then logged along with usage stats.
 type GeoIPData struct {
-	Country           string
-	City              string
-	ISP               string
-	ASN               string
-	ASO               string
-	HasDiscoveryValue bool
-	DiscoveryValue    int
+	Country string
+	City    string
+	ISP     string
+	ASN     string
+	ASO     string
 }
 
 // NewGeoIPData returns a GeoIPData initialized with the expected
@@ -93,9 +87,8 @@ func (g GeoIPData) SetLogFieldsWithPrefix(prefix string, logFields LogFields) {
 // supports hot reloading of MaxMind data while the server is
 // running.
 type GeoIPService struct {
-	databases             []*geoIPDatabase
-	sessionCache          *cache.Cache
-	discoveryValueHMACKey string
+	databases    []*geoIPDatabase
+	sessionCache *cache.Cache
 }
 
 type geoIPDatabase struct {
@@ -107,14 +100,11 @@ type geoIPDatabase struct {
 }
 
 // NewGeoIPService initializes a new GeoIPService.
-func NewGeoIPService(
-	databaseFilenames []string,
-	discoveryValueHMACKey string) (*GeoIPService, error) {
+func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 
 	geoIP := &GeoIPService{
-		databases:             make([]*geoIPDatabase, len(databaseFilenames)),
-		sessionCache:          cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute),
-		discoveryValueHMACKey: discoveryValueHMACKey,
+		databases:    make([]*geoIPDatabase, len(databaseFilenames)),
+		sessionCache: cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute),
 	}
 
 	for i, filename := range databaseFilenames {
@@ -203,21 +193,12 @@ func (geoIP *GeoIPService) Reloaders() []common.Reloader {
 }
 
 // Lookup determines a GeoIPData for a given string client IP address.
-//
-// When addDiscoveryValue is true, GeoIPData.DiscoveryValue is calculated and
-// GeoIPData.HasDiscoveryValue is true.
-func (geoIP *GeoIPService) Lookup(
-	strIP string, addDiscoveryValue bool) GeoIPData {
-
-	return geoIP.LookupIP(net.ParseIP(strIP), addDiscoveryValue)
+func (geoIP *GeoIPService) Lookup(strIP string) GeoIPData {
+	return geoIP.LookupIP(net.ParseIP(strIP))
 }
 
 // LookupIP determines a GeoIPData for a given client IP address.
-//
-// When addDiscoveryValue is true, GeoIPData.DiscoveryValue is calculated and
-// GeoIPData.HasDiscoveryValue is true.
-func (geoIP *GeoIPService) LookupIP(
-	IP net.IP, addDiscoveryValue bool) GeoIPData {
+func (geoIP *GeoIPService) LookupIP(IP net.IP) GeoIPData {
 
 	result := NewGeoIPData()
 
@@ -274,14 +255,6 @@ func (geoIP *GeoIPService) LookupIP(
 		result.ASO = geoIPFields.ASO
 	}
 
-	// Populate DiscoveryValue fields (even when there's no GeoIP database).
-
-	if addDiscoveryValue {
-		result.HasDiscoveryValue = true
-		result.DiscoveryValue = calculateDiscoveryValue(
-			geoIP.discoveryValueHMACKey, IP)
-	}
-
 	return result
 }
 
@@ -324,21 +297,4 @@ func (geoIP *GeoIPService) GetSessionCache(sessionID string) GeoIPData {
 func (geoIP *GeoIPService) InSessionCache(sessionID string) bool {
 	_, found := geoIP.sessionCache.Get(sessionID)
 	return found
-}
-
-// calculateDiscoveryValue derives a value from the client IP address to be
-// used as input in the server discovery algorithm. Since we do not explicitly
-// store the client IP address, we must derive the value here and store it for
-// later use by the discovery algorithm.
-// See https://github.com/Psiphon-Inc/psiphon-automation/tree/master/Automation/psi_ops_discovery.py
-// for full details.
-func calculateDiscoveryValue(discoveryValueHMACKey string, ipAddress net.IP) int {
-	// From: psi_ops_discovery.calculate_ip_address_strategy_value:
-	//     # Mix bits from all octets of the client IP address to determine the
-	//     # bucket. An HMAC is used to prevent pre-calculation of buckets for IPs.
-	//     return ord(hmac.new(HMAC_KEY, ip_address, hashlib.sha256).digest()[0])
-	// TODO: use 3-octet algorithm?
-	hash := hmac.New(sha256.New, []byte(discoveryValueHMACKey))
-	hash.Write([]byte(ipAddress.String()))
-	return int(hash.Sum(nil)[0])
 }

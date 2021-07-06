@@ -574,38 +574,38 @@
 		{
 			"checksumSHA1": "Tq3U98W2uwIgjWSjH7tqBonGjBE=",
 			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
-			"revisionTime": "2021-04-26T00:19:26Z"
+			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
+			"revisionTime": "2021-06-04T20:39:09Z"
 		},
 		{
 			"checksumSHA1": "ObZZJpjQl2BISlIiES82BW8jbEE=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/edwards25519",
-			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
-			"revisionTime": "2021-04-26T00:19:26Z"
+			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
+			"revisionTime": "2021-06-04T20:39:09Z"
 		},
 		{
 			"checksumSHA1": "VoyDh1KIIVE+OJbehDNJ91tf4Vw=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/extra25519",
-			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
-			"revisionTime": "2021-04-26T00:19:26Z"
+			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
+			"revisionTime": "2021-06-04T20:39:09Z"
 		},
 		{
 			"checksumSHA1": "J0kNvH3uYnwnPEJQhaa5Y1TcbZI=",
 			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
-			"revisionTime": "2021-04-26T00:19:26Z"
+			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
+			"revisionTime": "2021-06-04T20:39:09Z"
 		},
 		{
 			"checksumSHA1": "rPJAZXxZ5w5+ZnIPZGDFyp/uO6w=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
-			"revisionTime": "2021-04-26T00:19:26Z"
+			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
+			"revisionTime": "2021-06-04T20:39:09Z"
 		},
 		{
 			"checksumSHA1": "NiwZ/PirZniVT64D03KOS6UFMGU=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance/phantoms",
-			"revision": "b563c6928d2acf9557ad6ffd4005e3c790822e3a",
-			"revisionTime": "2021-04-26T00:19:26Z"
+			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
+			"revisionTime": "2021-06-04T20:39:09Z"
 		},
 		{
 			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",

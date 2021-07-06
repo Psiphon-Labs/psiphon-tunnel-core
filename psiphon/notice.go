@@ -667,6 +667,15 @@ func NoticeClientRegion(region string) {
 		"region", region)
 }
 
+// NoticeClientAddress is the client's public network address, the IP address
+// and port, as seen by the server and reported to the client in the
+// handshake.
+func NoticeClientAddress(address string) {
+	singletonNoticeLogger.outputNotice(
+		"ClientAddress", 0,
+		"address", address)
+}
+
 // NoticeTunnels is how many active tunnels are available. The client should use this to
 // determine connecting/unexpected disconnect state transitions. When count is 0, the core is
 // disconnected; when count > 1, the core is connected.
@@ -925,9 +934,33 @@ func NoticeServerAlert(alert protocol.AlertRequest) {
 
 // NoticeBursts reports tunnel data transfer burst metrics.
 func NoticeBursts(diagnosticID string, burstMetrics common.LogFields) {
-	singletonNoticeLogger.outputNotice(
-		"Bursts", noticeIsDiagnostic,
-		append([]interface{}{"diagnosticID", diagnosticID}, listCommonFields(burstMetrics)...)...)
+	if GetEmitNetworkParameters() {
+		singletonNoticeLogger.outputNotice(
+			"Bursts", noticeIsDiagnostic,
+			append([]interface{}{"diagnosticID", diagnosticID}, listCommonFields(burstMetrics)...)...)
+	}
+}
+
+// NoticeHoldOffTunnel reports tunnel hold-offs.
+func NoticeHoldOffTunnel(diagnosticID string, duration time.Duration) {
+	if GetEmitNetworkParameters() {
+		singletonNoticeLogger.outputNotice(
+			"HoldOffTunnel", noticeIsDiagnostic,
+			"diagnosticID", diagnosticID,
+			"duration", duration.String())
+	}
+}
+
+// NoticeSkipServerEntry reports a reason for skipping a server entry when
+// preparing dial parameters. To avoid log noise, the server entry
+// diagnosticID is not emitted and each reason is reported at most once per
+// session.
+func NoticeSkipServerEntry(format string, args ...interface{}) {
+	reason := fmt.Sprintf(format, args...)
+	repetitionKey := fmt.Sprintf("ServerAlert-%+v", reason)
+	outputRepetitiveNotice(
+		repetitionKey, "", 0,
+		"SkipServerEntry", 0, "reason", reason)
 }
 
 type repetitiveNoticeState struct {

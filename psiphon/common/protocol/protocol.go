@@ -90,6 +90,20 @@ const (
 	CONJURE_TRANSPORT_OBFS4_OSSH = "Obfs4-OSSH"
 )
 
+var SupportedServerEntrySources = []string{
+	SERVER_ENTRY_SOURCE_EMBEDDED,
+	SERVER_ENTRY_SOURCE_REMOTE,
+	SERVER_ENTRY_SOURCE_DISCOVERY,
+	SERVER_ENTRY_SOURCE_TARGET,
+	SERVER_ENTRY_SOURCE_OBFUSCATED,
+	SERVER_ENTRY_SOURCE_EXCHANGED,
+}
+
+func AllowServerEntrySourceWithUpstreamProxy(source string) bool {
+	return source == SERVER_ENTRY_SOURCE_EMBEDDED ||
+		source == SERVER_ENTRY_SOURCE_REMOTE
+}
+
 type TunnelProtocols []string
 
 func (t TunnelProtocols) Validate() error {
@@ -131,15 +145,6 @@ var DefaultDisabledTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
-}
-
-var SupportedServerEntrySources = TunnelProtocols{
-	SERVER_ENTRY_SOURCE_EMBEDDED,
-	SERVER_ENTRY_SOURCE_REMOTE,
-	SERVER_ENTRY_SOURCE_DISCOVERY,
-	SERVER_ENTRY_SOURCE_TARGET,
-	SERVER_ENTRY_SOURCE_OBFUSCATED,
-	SERVER_ENTRY_SOURCE_EXCHANGED,
 }
 
 func TunnelProtocolUsesTCP(protocol string) bool {
@@ -253,14 +258,27 @@ func TunnelProtocolMayUseServerPacketManipulation(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
-func UseClientTunnelProtocol(
+func IsValidClientTunnelProtocol(
 	clientProtocol string,
+	listenerProtocol string,
 	serverProtocols TunnelProtocols) bool {
 
+	if !common.Contains(serverProtocols, clientProtocol) {
+		return false
+	}
+
+	// If the client reports the same tunnel protocol as the listener, the value
+	// is valid.
+
+	if clientProtocol == listenerProtocol {
+		return true
+	}
+
 	// When the server is running multiple fronted protocols, and the client
-	// reports a fronted protocol, use the client's reported tunnel protocol
-	// since some CDNs forward several protocols to the same server port; in this
-	// case the server port is not sufficient to distinguish these protocols.
+	// reports a fronted protocol, the client's reported tunnel protocol is
+	// presumed to be valid since some CDNs forward several protocols to the same
+	// server port; in this case the listener port is not sufficient to
+	// distinguish these protocols.
 
 	if !TunnelProtocolUsesFrontedMeek(clientProtocol) {
 		return false
@@ -458,6 +476,7 @@ type HandshakeResponse struct {
 	HttpsRequestRegexes      []map[string]string `json:"https_request_regexes"`
 	EncodedServerList        []string            `json:"encoded_server_list"`
 	ClientRegion             string              `json:"client_region"`
+	ClientAddress            string              `json:"client_address"`
 	ServerTimestamp          string              `json:"server_timestamp"`
 	ActiveAuthorizationIDs   []string            `json:"active_authorization_ids"`
 	TacticsPayload           json.RawMessage     `json:"tactics_payload"`

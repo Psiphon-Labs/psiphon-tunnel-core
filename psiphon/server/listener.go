@@ -25,6 +25,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
@@ -57,6 +58,18 @@ func NewTacticsListener(
 // Accept calls the underlying listener's Accept, and then applies server-side
 // tactics to new connections.
 func (listener *TacticsListener) Accept() (net.Conn, error) {
+	for {
+		// accept may discard a successfully accepted conn. In that case, accept
+		// returns nil, nil; call accept until either the conn or err is not nil.
+		conn, err := listener.accept()
+		if conn != nil || err != nil {
+			// Don't modify error from net.Listener
+			return conn, err
+		}
+	}
+}
+
+func (listener *TacticsListener) accept() (net.Conn, error) {
 
 	conn, err := listener.Listener.Accept()
 	if err != nil {
@@ -75,6 +88,34 @@ func (listener *TacticsListener) Accept() (net.Conn, error) {
 	if p.IsNil() {
 		// No tactics are configured; use the accepted conn without customization.
 		return conn, nil
+	}
+
+	// Disconnect immediately if the clients tactics restricts usage of the
+	// fronting provider ID. The probability may be used to influence usage of a
+	// given fronting provider; but when only that provider works for a given
+	// client, and the probability is less than 1.0, the client can retry until
+	// it gets a successful coin flip.
+	//
+	// Clients will also skip candidates with restricted fronting provider IDs.
+	// The client-side probability, RestrictFrontingProviderIDsClientProbability,
+	// is applied independently of the server-side coin flip here.
+	//
+	//
+	// At this stage, GeoIP tactics filters are active, but handshake API
+	// parameters are not.
+	//
+	// See the comment in server.LoadConfig regarding fronting provider ID
+	// limitations.
+
+	if protocol.TunnelProtocolUsesFrontedMeek(listener.tunnelProtocol) &&
+		common.Contains(
+			p.Strings(parameters.RestrictFrontingProviderIDs),
+			listener.support.Config.GetFrontingProviderID()) {
+		if p.WeightedCoinFlip(
+			parameters.RestrictFrontingProviderIDsServerProbability) {
+			conn.Close()
+			return nil, nil
+		}
 	}
 
 	// Server-side fragmentation may be synchronized with client-side in two ways.

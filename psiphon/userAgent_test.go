@@ -198,7 +198,8 @@ func attemptConnectionsWithUserAgent(
         "EstablishTunnelPausePeriodSeconds" : 1,
         "DisableRemoteServerListFetcher" : true,
         "TransformHostNameProbability" : 0.0,
-        "UpstreamProxyUrl" : "http://127.0.0.1:2163"
+        "UpstreamProxyUrl" : "http://127.0.0.1:2163",
+        "UpstreamProxyAllowAllServerEntrySources" : true
     }`
 	clientConfig, err := LoadConfig([]byte(clientConfigJSON))
 	if err != nil {

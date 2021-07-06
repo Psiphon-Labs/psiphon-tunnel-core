@@ -129,6 +129,8 @@ type DialParameters struct {
 
 	APIRequestPaddingSeed *prng.Seed
 
+	HoldOffTunnelDuration time.Duration
+
 	DialConnMetrics          common.MetricsSource `json:"-"`
 	ObfuscatedSSHConnMetrics common.MetricsSource `json:"-"`
 
@@ -185,6 +187,7 @@ func MakeDialParameters(
 	replayLivenessTest := p.Bool(parameters.ReplayLivenessTest)
 	replayUserAgent := p.Bool(parameters.ReplayUserAgent)
 	replayAPIRequestPadding := p.Bool(parameters.ReplayAPIRequestPadding)
+	replayHoldOffTunnel := p.Bool(parameters.ReplayHoldOffTunnel)
 
 	// Check for existing dial parameters for this server/network ID.
 
@@ -309,6 +312,11 @@ func MakeDialParameters(
 	// heavily favor values close to the min, which should be set to the
 	// singleton NetworkLatencyMultiplier tactics value.
 	//
+	// For NetworkLatencyMultiplierLambda close to 2.0, values near min are
+	// very approximately 10x more likely to be selected than values near
+	// max, while for NetworkLatencyMultiplierLambda close to 0.1, the
+	// distribution is close to uniform.
+	//
 	// Not all existing, persisted DialParameters will have a custom
 	// NetworkLatencyMultiplier value. Its zero value will cause the singleton
 	// NetworkLatencyMultiplier tactics value to be used instead, which is
@@ -331,6 +339,10 @@ func MakeDialParameters(
 			p.Float(parameters.NetworkLatencyMultiplierLambda))
 	}
 
+	// After this point, any tactics parameters that apply the network latency
+	// multiplier will use this selected value.
+	p = config.GetParameters().GetCustom(dialParams.NetworkLatencyMultiplier)
+
 	if !isReplay && !isExchanged {
 
 		// TODO: should there be a pre-check of selectProtocol before incurring
@@ -346,15 +358,60 @@ func MakeDialParameters(
 		dialParams.TunnelProtocol = selectedProtocol
 	}
 
-	if config.UseUpstreamProxy() &&
-		!protocol.TunnelProtocolSupportsUpstreamProxy(dialParams.TunnelProtocol) {
+	// Skip this candidate when the clients tactics restrict usage of the
+	// fronting provider ID. See the corresponding server-side enforcement
+	// comments in server.TacticsListener.accept.
+	if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
+		common.Contains(
+			p.Strings(parameters.RestrictFrontingProviderIDs),
+			dialParams.ServerEntry.FrontingProviderID) {
+		if p.WeightedCoinFlip(
+			parameters.RestrictFrontingProviderIDsClientProbability) {
+
+			// When skipping, return nil/nil as no error should be logged.
+			// NoticeSkipServerEntry emits each skip reason, regardless
+			// of server entry, at most once per session.
+
+			NoticeSkipServerEntry(
+				"restricted fronting provider ID: %s",
+				dialParams.ServerEntry.FrontingProviderID)
+
+			return nil, nil
+		}
+	}
+
+	if config.UseUpstreamProxy() {
 
 		// When UpstreamProxy is configured, ServerEntry.GetSupportedProtocols, when
 		// called via selectProtocol, will filter out protocols such that will not
 		// select a protocol incompatible with UpstreamProxy. This additional check
 		// will catch cases where selectProtocol does not apply this filter.
-		return nil, errors.Tracef(
-			"protocol does not support upstream proxy: %s", dialParams.TunnelProtocol)
+		if !protocol.TunnelProtocolSupportsUpstreamProxy(dialParams.TunnelProtocol) {
+
+			NoticeSkipServerEntry(
+				"protocol does not support upstream proxy: %s",
+				dialParams.TunnelProtocol)
+
+			return nil, nil
+		}
+
+		// Skip this candidate when the server entry is not to be used with an
+		// upstream proxy. By not exposing servers from sources that are
+		// relatively hard to enumerate, this mechanism mitigates the risk of
+		// a malicious upstream proxy enumerating Psiphon servers. Populate
+		// the allowed sources with fronted servers to provide greater
+		// blocking resistence for clients using upstream proxy clients that
+		// are subject to blocking.
+		source := dialParams.ServerEntry.LocalSource
+		if !protocol.AllowServerEntrySourceWithUpstreamProxy(source) &&
+			!p.Bool(parameters.UpstreamProxyAllowAllServerEntrySources) {
+
+			NoticeSkipServerEntry(
+				"server entry source disallowed with upstream proxy: %s",
+				source)
+
+			return nil, nil
+		}
 	}
 
 	if (!isReplay || !replayBPF) &&
@@ -634,6 +691,26 @@ func MakeDialParameters(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+	}
+
+	if !isReplay || !replayHoldOffTunnel {
+
+		if common.Contains(
+			p.TunnelProtocols(parameters.HoldOffTunnelProtocols), dialParams.TunnelProtocol) ||
+
+			(protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
+				common.Contains(
+					p.Strings(parameters.HoldOffTunnelFrontingProviderIDs),
+					dialParams.FrontingProviderID)) {
+
+			if p.WeightedCoinFlip(parameters.HoldOffTunnelProbability) {
+
+				dialParams.HoldOffTunnelDuration = prng.Period(
+					p.Duration(parameters.HoldOffTunnelMinDuration),
+					p.Duration(parameters.HoldOffTunnelMaxDuration))
+			}
+		}
+
 	}
 
 	// Set dial address fields. This portion of configuration is
