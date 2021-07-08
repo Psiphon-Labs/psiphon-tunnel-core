@@ -21,6 +21,10 @@ jobs:
 
     name: psiphon-tunnel-core ${{ matrix.test-type }} tests on ${{ matrix.os}}, Go ${{ matrix.go }}
 
+    permissions:
+      checks: write
+      contents: read
+
     env:
       GOPATH: ${{ github.workspace }}/go
 
@@ -95,8 +99,8 @@ jobs:
       # sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=tun.coverprofile ./psiphon/common/tun
       - name: Run tests with coverage
         env:
-          COVERALLS_TOKEN: ${{ secrets.COVERALLS_TOKEN }}
-        if: ${{ matrix.test-type == 'coverage' && env.COVERALLS_TOKEN != '' }}
+          COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ matrix.test-type == 'coverage' && github.repository == 'Psiphon-Labs/psiphon-tunnel-core' }}
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
           go test -v -covermode=count -coverprofile=common.coverprofile ./psiphon/common
