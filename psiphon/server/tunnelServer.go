@@ -2827,7 +2827,7 @@ func (sshClient *sshClient) enqueueDisallowedTrafficAlertRequest() {
 
 	sshClient.enqueueAlertRequest(
 		protocol.AlertRequest{
-			Reason:     protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC,
+			Reason:     reason,
 			ActionURLs: actionURLs,
 		})
 }
