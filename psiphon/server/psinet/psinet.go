@@ -396,7 +396,7 @@ func calculateBucketCount(length int) int {
 func bucketizeServerList(servers []*DiscoveryServer, bucketCount int) [][]*DiscoveryServer {
 
 	// This code creates the same partitions as legacy servers:
-	// https://bitbucket.org/psiphon/psiphon-circumvention-system/src/03bc1a7e51e7c85a816e370bb3a6c755fd9c6fee/Automation/psi_ops_discovery.py
+	// https://github.com/Psiphon-Inc/psiphon-automation/blob/685f91a85bcdb33a75a200d936eadcb0686eadd7/Automation/psi_ops_discovery.py
 	//
 	// Both use the same algorithm from:
 	// http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
