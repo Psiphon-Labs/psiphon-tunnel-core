@@ -1034,14 +1034,21 @@ func GetNotice(notice []byte) (
 	var object noticeObject
 	err = json.Unmarshal(notice, &object)
 	if err != nil {
-		return "", nil, err
+		return "", nil, errors.Trace(err)
 	}
-	var objectPayload interface{}
-	err = json.Unmarshal(object.Data, &objectPayload)
+
+	var data interface{}
+	err = json.Unmarshal(object.Data, &data)
 	if err != nil {
-		return "", nil, err
+		return "", nil, errors.Trace(err)
 	}
-	return object.NoticeType, objectPayload.(map[string]interface{}), nil
+
+	dataValue, ok := data.(map[string]interface{})
+	if !ok {
+		return "", nil, errors.TraceNew("invalid data value")
+	}
+
+	return object.NoticeType, dataValue, nil
 }
 
 // NoticeReceiver consumes a notice input stream and invokes a callback function
