@@ -477,49 +477,119 @@ type ConditionallyEnabledComponents interface {
 	RefractionNetworkingEnabled() bool
 }
 
-// GetSupportedProtocols returns a list of tunnel protocols supported
-// by the ServerEntry's capabilities.
+// TunnelProtocolPortLists is a map from tunnel protocol names (or "All") to a
+// list of port number ranges.
+type TunnelProtocolPortLists map[string]*common.PortList
+
+// GetSupportedProtocols returns a list of tunnel protocols supported by the
+// ServerEntry's capabilities and allowed by various constraints.
 func (serverEntry *ServerEntry) GetSupportedProtocols(
 	conditionallyEnabled ConditionallyEnabledComponents,
 	useUpstreamProxy bool,
 	limitTunnelProtocols []string,
+	limitTunnelDialPortNumbers TunnelProtocolPortLists,
 	excludeIntensive bool) []string {
 
 	supportedProtocols := make([]string, 0)
 
-	for _, protocol := range SupportedTunnelProtocols {
+	for _, tunnelProtocol := range SupportedTunnelProtocols {
 
-		if useUpstreamProxy && !TunnelProtocolSupportsUpstreamProxy(protocol) {
+		if useUpstreamProxy && !TunnelProtocolSupportsUpstreamProxy(tunnelProtocol) {
 			continue
 		}
 
 		if len(limitTunnelProtocols) > 0 {
-			if !common.Contains(limitTunnelProtocols, protocol) {
+			if !common.Contains(limitTunnelProtocols, tunnelProtocol) {
 				continue
 			}
 		} else {
-			if common.Contains(DefaultDisabledTunnelProtocols, protocol) {
+			if common.Contains(DefaultDisabledTunnelProtocols, tunnelProtocol) {
 				continue
 			}
 		}
 
-		if excludeIntensive && TunnelProtocolIsResourceIntensive(protocol) {
+		if excludeIntensive && TunnelProtocolIsResourceIntensive(tunnelProtocol) {
 			continue
 		}
 
-		if (TunnelProtocolUsesQUIC(protocol) && !conditionallyEnabled.QUICEnabled()) ||
-			(TunnelProtocolUsesMarionette(protocol) && !conditionallyEnabled.MarionetteEnabled()) ||
-			(TunnelProtocolUsesRefractionNetworking(protocol) &&
+		if (TunnelProtocolUsesQUIC(tunnelProtocol) && !conditionallyEnabled.QUICEnabled()) ||
+			(TunnelProtocolUsesMarionette(tunnelProtocol) && !conditionallyEnabled.MarionetteEnabled()) ||
+			(TunnelProtocolUsesRefractionNetworking(tunnelProtocol) &&
 				!conditionallyEnabled.RefractionNetworkingEnabled()) {
 			continue
 		}
 
-		if serverEntry.SupportsProtocol(protocol) {
-			supportedProtocols = append(supportedProtocols, protocol)
+		if !serverEntry.SupportsProtocol(tunnelProtocol) {
+			continue
 		}
+
+		dialPortNumber, err := serverEntry.GetDialPortNumber(tunnelProtocol)
+		if err != nil {
+			continue
+		}
+
+		if len(limitTunnelDialPortNumbers) > 0 {
+			if portList, ok := limitTunnelDialPortNumbers[tunnelProtocol]; ok {
+				if !portList.Lookup(dialPortNumber) {
+					continue
+				}
+			} else if portList, ok := limitTunnelDialPortNumbers[TUNNEL_PROTOCOLS_ALL]; ok {
+				if !portList.Lookup(dialPortNumber) {
+					continue
+				}
+			}
+		}
+
+		supportedProtocols = append(supportedProtocols, tunnelProtocol)
 
 	}
 	return supportedProtocols
+}
+
+func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, error) {
+
+	if !serverEntry.SupportsProtocol(tunnelProtocol) {
+		return 0, errors.TraceNew("protocol not supported")
+	}
+
+	switch tunnelProtocol {
+
+	case TUNNEL_PROTOCOL_SSH:
+		return serverEntry.SshPort, nil
+
+	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+		return serverEntry.SshObfuscatedPort, nil
+
+	case TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
+		return serverEntry.SshObfuscatedTapDancePort, nil
+
+	case TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH:
+		return serverEntry.SshObfuscatedConjurePort, nil
+
+	case TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+		return serverEntry.SshObfuscatedQUICPort, nil
+
+	case TUNNEL_PROTOCOL_FRONTED_MEEK,
+		TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH:
+		return 443, nil
+
+	case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+		return 80, nil
+
+	case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+		TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
+		TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+		return serverEntry.MeekServerPort, nil
+
+	case TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
+		// The port is encoded in the marionnete "format"
+		// Limitations:
+		// - not compatible with LimitDialPortNumbers
+		// - accurate port is not reported via dial_port_number
+		return -1, nil
+	}
+
+	return 0, errors.TraceNew("unknown protocol")
 }
 
 // GetSupportedTacticsProtocols returns a list of tunnel protocols,
