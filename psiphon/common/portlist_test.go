@@ -21,12 +21,15 @@ package common
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"unicode"
 )
 
 func TestPortList(t *testing.T) {
 
-	var p PortList
+	var p *PortList
+
 	err := json.Unmarshal([]byte("[1.5]"), &p)
 	if err == nil {
 		t.Fatalf("unexpected parse of float port number")
@@ -52,19 +55,73 @@ func TestPortList(t *testing.T) {
 		t.Fatalf("unexpected parse of invalid port range")
 	}
 
+	p = nil
+
+	if p.Lookup(1) != false {
+		t.Fatalf("unexpected nil PortList Lookup result")
+	}
+
+	if !p.IsEmpty() {
+		t.Fatalf("unexpected nil PortList IsEmpty result")
+	}
+
+	err = json.Unmarshal([]byte("[]"), &p)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if !p.IsEmpty() {
+		t.Fatalf("unexpected IsEmpty result")
+	}
+
+	err = json.Unmarshal([]byte("[1]"), &p)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if p.IsEmpty() {
+		t.Fatalf("unexpected IsEmpty result")
+	}
+
 	s := struct {
-		List1 PortList
-		List2 PortList
+		List1 *PortList
+		List2 *PortList
 	}{}
 
-	jsonStruct := `
+	jsonString := `
     {
         "List1" : [1,2,[10,20],100,[1000,2000]],
         "List2" : [3,4,5,[300,400],1000,2000,[3000,3996],3997,3998,3999,4000]
     }
     `
 
-	err = json.Unmarshal([]byte(jsonStruct), &s)
+	err = json.Unmarshal([]byte(jsonString), &s)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	// Marshal and re-Unmarshal to exercise PortList.MarshalJSON.
+
+	jsonBytes, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	strip := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) {
+				return -1
+			}
+			return r
+		}, s)
+	}
+
+	if strip(jsonString) != strip(string(jsonBytes)) {
+
+		t.Fatalf("unexpected JSON encoding")
+	}
+
+	err = json.Unmarshal(jsonBytes, &s)
 	if err != nil {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}

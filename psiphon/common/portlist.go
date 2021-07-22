@@ -53,6 +53,9 @@ const lookupThreshold = 10
 // concurrently with Lookup and should be called immediately after
 // UnmarshalJSON and before performing lookups.
 func (p *PortList) OptimizeLookups() {
+	if p == nil {
+		return
+	}
 	// TODO: does the threshold take long ranges into account?
 	if len(p.portRanges) > lookupThreshold {
 		p.lookup = make(map[int]bool)
@@ -64,9 +67,20 @@ func (p *PortList) OptimizeLookups() {
 	}
 }
 
+// IsEmpty returns true for a nil PortList or a PortList with no entries.
+func (p *PortList) IsEmpty() bool {
+	if p == nil {
+		return true
+	}
+	return len(p.portRanges) == 0
+}
+
 // Lookup returns true if the specified port is in the port list and false
-// otherwise.
+// otherwise. Lookups on a nil PortList are allowed and return false.
 func (p *PortList) Lookup(port int) bool {
+	if p == nil {
+		return false
+	}
 	if p.lookup != nil {
 		return p.lookup[port]
 	}
