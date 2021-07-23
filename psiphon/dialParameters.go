@@ -758,8 +758,8 @@ func MakeDialParameters(
 		}
 
 	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
-
 		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET:
+
 		dialParams.MeekDialAddress = fmt.Sprintf("%s:%d", serverEntry.IpAddress, dialPortNumber)
 		if !dialParams.MeekTransformedHostName {
 			// Note: IP address in SNI field will be omitted.
