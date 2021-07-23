@@ -671,7 +671,11 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 			return false, nil, errors.TraceNew("TargetServerEntry does not support EgressRegion")
 		}
 
-		limitTunnelProtocols := config.GetParameters().Get().TunnelProtocols(parameters.LimitTunnelProtocols)
+		p := config.GetParameters().Get()
+		limitTunnelProtocols := p.TunnelProtocols(parameters.LimitTunnelProtocols)
+		limitTunnelDialPortNumbers := protocol.TunnelProtocolPortLists(
+			p.TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers))
+
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
 			// excludeIntensive is handled higher up.
@@ -679,6 +683,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 				conditionallyEnabledComponents{},
 				config.UseUpstreamProxy(),
 				limitTunnelProtocols,
+				limitTunnelDialPortNumbers,
 				false)) == 0 {
 				return false, nil, errors.Tracef(
 					"TargetServerEntry does not support LimitTunnelProtocols: %v", limitTunnelProtocols)

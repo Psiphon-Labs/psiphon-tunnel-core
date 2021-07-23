@@ -425,9 +425,10 @@ func NoticeCandidateServers(
 	singletonNoticeLogger.outputNotice(
 		"CandidateServers", noticeIsDiagnostic,
 		"region", region,
-		"initialLimitTunnelProtocols", constraints.initialLimitProtocols,
-		"initialLimitTunnelProtocolsCandidateCount", constraints.initialLimitProtocolsCandidateCount,
-		"limitTunnelProtocols", constraints.limitProtocols,
+		"initialLimitTunnelProtocols", constraints.initialLimitTunnelProtocols,
+		"initialLimitTunnelProtocolsCandidateCount", constraints.initialLimitTunnelProtocolsCandidateCount,
+		"limitTunnelProtocols", constraints.limitTunnelProtocols,
+		"limitTunnelDialPortNumbers", constraints.limitTunnelDialPortNumbers,
 		"replayCandidateCount", constraints.replayCandidateCount,
 		"initialCount", initialCount,
 		"count", count,

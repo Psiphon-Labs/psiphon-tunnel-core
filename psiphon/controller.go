@@ -1358,15 +1358,16 @@ func (controller *Controller) triggerFetches() {
 }
 
 type protocolSelectionConstraints struct {
-	useUpstreamProxy                    bool
-	initialLimitProtocols               protocol.TunnelProtocols
-	initialLimitProtocolsCandidateCount int
-	limitProtocols                      protocol.TunnelProtocols
-	replayCandidateCount                int
+	useUpstreamProxy                          bool
+	initialLimitTunnelProtocols               protocol.TunnelProtocols
+	initialLimitTunnelProtocolsCandidateCount int
+	limitTunnelProtocols                      protocol.TunnelProtocols
+	limitTunnelDialPortNumbers                protocol.TunnelProtocolPortLists
+	replayCandidateCount                      int
 }
 
 func (p *protocolSelectionConstraints) hasInitialProtocols() bool {
-	return len(p.initialLimitProtocols) > 0 && p.initialLimitProtocolsCandidateCount > 0
+	return len(p.initialLimitTunnelProtocols) > 0 && p.initialLimitTunnelProtocolsCandidateCount > 0
 }
 
 func (p *protocolSelectionConstraints) isInitialCandidate(
@@ -1377,7 +1378,8 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 		len(serverEntry.GetSupportedProtocols(
 			conditionallyEnabledComponents{},
 			p.useUpstreamProxy,
-			p.initialLimitProtocols,
+			p.initialLimitTunnelProtocols,
+			p.limitTunnelDialPortNumbers,
 			excludeIntensive)) > 0
 }
 
@@ -1385,11 +1387,12 @@ func (p *protocolSelectionConstraints) isCandidate(
 	excludeIntensive bool,
 	serverEntry *protocol.ServerEntry) bool {
 
-	return len(p.limitProtocols) == 0 ||
+	return len(p.limitTunnelProtocols) == 0 ||
 		len(serverEntry.GetSupportedProtocols(
 			conditionallyEnabledComponents{},
 			p.useUpstreamProxy,
-			p.limitProtocols,
+			p.limitTunnelProtocols,
+			p.limitTunnelDialPortNumbers,
 			excludeIntensive)) > 0
 }
 
@@ -1413,16 +1416,19 @@ func (p *protocolSelectionConstraints) supportedProtocols(
 	excludeIntensive bool,
 	serverEntry *protocol.ServerEntry) []string {
 
-	limitProtocols := p.limitProtocols
+	limitTunnelProtocols := p.limitTunnelProtocols
 
-	if len(p.initialLimitProtocols) > 0 && p.initialLimitProtocolsCandidateCount > connectTunnelCount {
-		limitProtocols = p.initialLimitProtocols
+	if len(p.initialLimitTunnelProtocols) > 0 &&
+		p.initialLimitTunnelProtocolsCandidateCount > connectTunnelCount {
+
+		limitTunnelProtocols = p.initialLimitTunnelProtocols
 	}
 
 	return serverEntry.GetSupportedProtocols(
 		conditionallyEnabledComponents{},
 		p.useUpstreamProxy,
-		limitProtocols,
+		limitTunnelProtocols,
+		p.limitTunnelDialPortNumbers,
 		excludeIntensive)
 }
 
@@ -1578,11 +1584,15 @@ func (controller *Controller) launchEstablishing() {
 	p := controller.config.GetParameters().Get()
 
 	controller.protocolSelectionConstraints = &protocolSelectionConstraints{
-		useUpstreamProxy:                    controller.config.UseUpstreamProxy(),
-		initialLimitProtocols:               p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
-		initialLimitProtocolsCandidateCount: p.Int(parameters.InitialLimitTunnelProtocolsCandidateCount),
-		limitProtocols:                      p.TunnelProtocols(parameters.LimitTunnelProtocols),
-		replayCandidateCount:                p.Int(parameters.ReplayCandidateCount),
+		useUpstreamProxy:                          controller.config.UseUpstreamProxy(),
+		initialLimitTunnelProtocols:               p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
+		initialLimitTunnelProtocolsCandidateCount: p.Int(parameters.InitialLimitTunnelProtocolsCandidateCount),
+		limitTunnelProtocols:                      p.TunnelProtocols(parameters.LimitTunnelProtocols),
+
+		limitTunnelDialPortNumbers: protocol.TunnelProtocolPortLists(
+			p.TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers)),
+
+		replayCandidateCount: p.Int(parameters.ReplayCandidateCount),
 	}
 
 	// ConnectionWorkerPoolSize may be set by tactics.
@@ -1626,7 +1636,7 @@ func (controller *Controller) launchEstablishing() {
 	// proceeding.
 
 	awaitResponse := tunnelPoolSize > 1 ||
-		controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount > 0
+		controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount > 0
 
 	// AvailableEgressRegions: after a fresh install, the outer client may not
 	// have a list of regions to display; and LimitTunnelProtocols may reduce the
@@ -1720,11 +1730,11 @@ func (controller *Controller) launchEstablishing() {
 		// protocols may have some bad effect, such as a firewall blocking all
 		// traffic from a host.
 
-		if controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount > 0 {
+		if controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount > 0 {
 
 			if reportResponse.initialCandidatesAnyEgressRegion == 0 {
 				NoticeWarning("skipping initial limit tunnel protocols")
-				controller.protocolSelectionConstraints.initialLimitProtocolsCandidateCount = 0
+				controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount = 0
 
 				// Since we were unable to satisfy the InitialLimitTunnelProtocols
 				// tactic, trigger RSL, OSL, and upgrade fetches to potentially

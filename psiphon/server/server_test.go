@@ -1998,12 +1998,12 @@ func paveTrafficRulesFile(
 
 	allowTCPPorts := TCPPorts
 	allowUDPPorts := UDPPorts
-	disallowTCPPorts := "0"
-	disallowUDPPorts := "0"
+	disallowTCPPorts := "1"
+	disallowUDPPorts := "1"
 
 	if deny {
-		allowTCPPorts = "0"
-		allowUDPPorts = "0"
+		allowTCPPorts = "1"
+		allowUDPPorts = "1"
 		disallowTCPPorts = TCPPorts
 		disallowUDPPorts = UDPPorts
 	}
@@ -2033,8 +2033,8 @@ func paveTrafficRulesFile(
                 "ReadUnthrottledBytes": %d,
                 "WriteUnthrottledBytes": %d
             },
-            "AllowTCPPorts" : [0],
-            "AllowUDPPorts" : [0],
+            "AllowTCPPorts" : [1],
+            "AllowUDPPorts" : [1],
             "MeekRateLimiterHistorySize" : 10,
             "MeekRateLimiterThresholdSeconds" : 1,
             "MeekRateLimiterGarbageCollectionTriggerCount" : 1,

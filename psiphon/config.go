@@ -751,6 +751,9 @@ type Config struct {
 	// UpstreamProxyAllowAllServerEntrySources is for testing purposes.
 	UpstreamProxyAllowAllServerEntrySources *bool
 
+	// LimitTunnelDialPortNumbers is for testing purposes.
+	LimitTunnelDialPortNumbers parameters.TunnelProtocolPortLists
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1604,7 +1607,7 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.UseOnlyCustomTLSProfiles] = *config.UseOnlyCustomTLSProfiles
 	}
 
-	if config.CustomTLSProfiles != nil {
+	if len(config.CustomTLSProfiles) > 0 {
 		applyParameters[parameters.CustomTLSProfiles] = config.CustomTLSProfiles
 	}
 
@@ -1616,7 +1619,7 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.NoDefaultTLSSessionIDProbability] = *config.NoDefaultTLSSessionIDProbability
 	}
 
-	if config.DisableFrontingProviderTLSProfiles != nil {
+	if len(config.DisableFrontingProviderTLSProfiles) > 0 {
 		applyParameters[parameters.DisableFrontingProviderTLSProfiles] = config.DisableFrontingProviderTLSProfiles
 	}
 
@@ -1660,7 +1663,7 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ConjureAPIRegistrarURL] = config.ConjureAPIRegistrarURL
 	}
 
-	if config.ConjureAPIRegistrarFrontingSpecs != nil {
+	if len(config.ConjureAPIRegistrarFrontingSpecs) > 0 {
 		applyParameters[parameters.ConjureAPIRegistrarFrontingSpecs] = config.ConjureAPIRegistrarFrontingSpecs
 	}
 
@@ -1718,6 +1721,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.UpstreamProxyAllowAllServerEntrySources != nil {
 		applyParameters[parameters.UpstreamProxyAllowAllServerEntrySources] = *config.UpstreamProxyAllowAllServerEntrySources
+	}
+
+	if len(config.LimitTunnelDialPortNumbers) > 0 {
+		applyParameters[parameters.LimitTunnelDialPortNumbers] = config.LimitTunnelDialPortNumbers
 	}
 
 	// When adding new config dial parameters that may override tactics, also
@@ -1929,7 +1936,7 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, *config.NoDefaultTLSSessionIDProbability)
 	}
 
-	if config.DisableFrontingProviderTLSProfiles != nil {
+	if len(config.DisableFrontingProviderTLSProfiles) > 0 {
 		hash.Write([]byte("DisableFrontingProviderTLSProfiles"))
 		encodedDisableFrontingProviderTLSProfiles, _ :=
 			json.Marshal(config.DisableFrontingProviderTLSProfiles)
@@ -2042,6 +2049,13 @@ func (config *Config) setDialParametersHash() {
 	if config.UpstreamProxyAllowAllServerEntrySources != nil {
 		hash.Write([]byte("UpstreamProxyAllowAllServerEntrySources"))
 		binary.Write(hash, binary.LittleEndian, *config.UpstreamProxyAllowAllServerEntrySources)
+	}
+
+	if len(config.LimitTunnelDialPortNumbers) > 0 {
+		hash.Write([]byte("LimitTunnelDialPortNumbers"))
+		encodedLimitTunnelDialPortNumbers, _ :=
+			json.Marshal(config.LimitTunnelDialPortNumbers)
+		hash.Write(encodedLimitTunnelDialPortNumbers)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)
