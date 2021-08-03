@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - staging-client
+      - staging-server
+
+jobs:
+  run_tests:
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ "ubuntu" ]
+        go: [ "1.14.12" ]
+        test-type: [ "detector", "coverage", "memory" ]
+
+    runs-on: ${{ matrix.os }}-latest
+
+    name: psiphon-tunnel-core ${{ matrix.test-type }} tests on ${{ matrix.os}}, Go ${{ matrix.go }}
+
+    permissions:
+      checks: write
+      contents: read
+
+    env:
+      GOPATH: ${{ github.workspace }}/go
+
+    steps:
+
+      - name: Clone repository
+        uses: actions/checkout@v2
+        with:
+          path: ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+
+      - name: Install Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Install networking components
+        run: |
+          sudo apt-get update
+          sudo apt-get install libnetfilter-queue-dev
+          sudo apt-get install conntrack
+
+      - name: Install coverage tools
+        if: ${{ matrix.test-type == 'coverage' }}
+        run: |
+          go get github.com/axw/gocov/gocov
+          go get github.com/modocache/gover
+          go get github.com/mattn/goveralls
+          go get golang.org/x/tools/cmd/cover
+
+      - name: Check environment
+        run: |
+          echo "GitHub workspace: $GITHUB_WORKSPACE"
+          echo "Working directory: `pwd`"
+          echo "GOROOT: $GOROOT"
+          echo "GOPATH: $GOPATH"
+          echo "Go version: `go version`"
+
+      - name: Pave config files
+        env:
+          CONTROLLER_TEST_CONFIG: ${{ secrets.CONTROLLER_TEST_CONFIG }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          echo "$CONTROLLER_TEST_CONFIG" > ./psiphon/controller_test.config
+
+      # TODO: fix and re-enable test
+      # sudo -E env "PATH=$PATH" go test -v -race ./psiphon/common/tun
+      - name: Run tests with data race detector
+        if: ${{ matrix.test-type == 'detector' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          go test -v -race ./psiphon/common
+          go test -v -race ./psiphon/common/accesscontrol
+          go test -v -race ./psiphon/common/crypto/ssh
+          go test -v -race ./psiphon/common/fragmentor
+          go test -v -race ./psiphon/common/obfuscator
+          go test -v -race ./psiphon/common/osl
+          sudo -E env "PATH=$PATH" go test -v -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/common/packetman
+          go test -v -race ./psiphon/common/parameters
+          go test -v -race ./psiphon/common/protocol
+          go test -v -race ./psiphon/common/quic
+          go test -v -race ./psiphon/common/tactics
+          go test -v -race ./psiphon/common/values
+          go test -v -race ./psiphon/common/wildcard
+          go test -v -race ./psiphon/transferstats
+          sudo -E env "PATH=$PATH" go test -v -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          go test -v -race ./psiphon/server/psinet
+          go test -v -race ./psiphon
+          go test -v -race ./ClientLibrary/clientlib
+          go test -v -race ./Server/logging/analysis
+
+      # TODO: fix and re-enable test
+      # sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=tun.coverprofile ./psiphon/common/tun
+      - name: Run tests with coverage
+        env:
+          COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ matrix.test-type == 'coverage' && github.repository == 'Psiphon-Labs/psiphon-tunnel-core' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          go test -v -covermode=count -coverprofile=common.coverprofile ./psiphon/common
+          go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./psiphon/common/accesscontrol
+          go test -v -covermode=count -coverprofile=ssh.coverprofile ./psiphon/common/crypto/ssh
+          go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./psiphon/common/fragmentor
+          go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./psiphon/common/obfuscator
+          go test -v -covermode=count -coverprofile=osl.coverprofile ./psiphon/common/osl
+          sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=packetman.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/common/packetman
+          go test -v -covermode=count -coverprofile=parameters.coverprofile ./psiphon/common/parameters
+          go test -v -covermode=count -coverprofile=protocol.coverprofile ./psiphon/common/protocol
+          go test -v -covermode=count -coverprofile=quic.coverprofile ./psiphon/common/quic
+          go test -v -covermode=count -coverprofile=tactics.coverprofile ./psiphon/common/tactics
+          go test -v -covermode=count -coverprofile=values.coverprofile ./psiphon/common/values
+          go test -v -covermode=count -coverprofile=wildcard.coverprofile ./psiphon/common/wildcard
+          go test -v -covermode=count -coverprofile=transferstats.coverprofile ./psiphon/transferstats
+          sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          go test -v -covermode=count -coverprofile=psinet.coverprofile ./psiphon/server/psinet
+          go test -v -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
+          go test -v -covermode=count -coverprofile=clientlib.coverprofile ./ClientLibrary/clientlib
+          go test -v -covermode=count -coverprofile=analysis.coverprofile ./Server/logging/analysis
+          $GOPATH/bin/gover
+          $GOPATH/bin/goveralls -coverprofile=gover.coverprofile -service=github -repotoken "$COVERALLS_TOKEN"
+
+      - name: Run memory tests
+        if: ${{ matrix.test-type == 'memory' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          go test -v ./psiphon/memory_test -run TestReconnectTunnel
+          go test -v ./psiphon/memory_test -run TestRestartController

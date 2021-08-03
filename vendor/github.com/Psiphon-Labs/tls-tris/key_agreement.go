@@ -72,7 +72,13 @@ func (ka rsaKeyAgreement) generateClientKeyExchange(config *Config, clientHello 
 		return nil, nil, err
 	}
 
-	encrypted, err := rsa.EncryptPKCS1v15(config.rand(), pk.(*rsa.PublicKey), preMasterSecret)
+	// [Psiphon]
+	// Backport fix: https://github.com/golang/go/commit/58bc454a11d4b3dbc03f44dfcabb9068a9c076f4
+	rsaKey, ok := pk.(*rsa.PublicKey)
+	if !ok {
+		return nil, nil, errors.New("tls: server certificate contains incorrect key type for selected ciphersuite")
+	}
+	encrypted, err := rsa.EncryptPKCS1v15(config.rand(), rsaKey, preMasterSecret)
 	if err != nil {
 		return nil, nil, err
 	}

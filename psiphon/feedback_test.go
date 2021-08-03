@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"io/ioutil"
+	"os/exec"
 	"testing"
 )
 
@@ -41,7 +42,7 @@ type Diagnostics struct {
 }
 
 func TestFeedbackUpload(t *testing.T) {
-	configFileContents, err := ioutil.ReadFile("feedback_test.config")
+	configFileContents, err := ioutil.ReadFile("controller_test.config")
 	if err != nil {
 		// Skip, don't fail, if config file is not present
 		t.Skipf("error loading configuration file: %s", err)
@@ -65,13 +66,11 @@ func TestFeedbackUpload(t *testing.T) {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
-	// git_rev is a file which contains the shortened hash of the latest commit
-	// pointed to by HEAD, i.e. git rev-parse --short HEAD.
-
-	shortRevHash, err := ioutil.ReadFile("git_rev")
+	shortRevHash, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
-		// Skip, don't fail, if git rev file is not present
-		t.Skipf("error loading git revision file: %s", err)
+		// Log, don't fail, if git rev is not available
+		t.Logf("error loading git revision file: %s", err)
+		shortRevHash = []byte("unknown")
 	}
 
 	// Construct feedback data which can be verified later

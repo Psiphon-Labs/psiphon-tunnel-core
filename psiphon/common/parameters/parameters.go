@@ -99,6 +99,8 @@ const (
 	InitialLimitTunnelProtocolsCandidateCount        = "InitialLimitTunnelProtocolsCandidateCount"
 	LimitTunnelProtocolsProbability                  = "LimitTunnelProtocolsProbability"
 	LimitTunnelProtocols                             = "LimitTunnelProtocols"
+	LimitTunnelDialPortNumbersProbability            = "LimitTunnelDialPortNumbersProbability"
+	LimitTunnelDialPortNumbers                       = "LimitTunnelDialPortNumbers"
 	LimitTLSProfilesProbability                      = "LimitTLSProfilesProbability"
 	LimitTLSProfiles                                 = "LimitTLSProfiles"
 	UseOnlyCustomTLSProfiles                         = "UseOnlyCustomTLSProfiles"
@@ -361,6 +363,9 @@ var defaultParameters = map[string]struct {
 
 	LimitTunnelProtocolsProbability: {value: 1.0, minimum: 0.0},
 	LimitTunnelProtocols:            {value: protocol.TunnelProtocols{}},
+
+	LimitTunnelDialPortNumbersProbability: {value: 1.0, minimum: 0.0},
+	LimitTunnelDialPortNumbers:            {value: TunnelProtocolPortLists{}},
 
 	LimitTLSProfilesProbability:           {value: 1.0, minimum: 0.0},
 	LimitTLSProfiles:                      {value: protocol.TLSProfiles{}},
@@ -931,6 +936,22 @@ func (p *Parameters) Set(
 					}
 					return nil, errors.Trace(err)
 				}
+			case FrontingSpecs:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case TunnelProtocolPortLists:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
 			}
 
 			// Enforce any minimums. Assumes defaultParameters[name]
@@ -1386,6 +1407,34 @@ func (p ParametersAccessor) RegexStrings(name string) RegexStrings {
 // FrontingSpecs returns a FrontingSpecs parameter value.
 func (p ParametersAccessor) FrontingSpecs(name string) FrontingSpecs {
 	value := FrontingSpecs{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// TunnelProtocolPortLists returns a TunnelProtocolPortLists parameter value.
+func (p ParametersAccessor) TunnelProtocolPortLists(name string) TunnelProtocolPortLists {
+
+	probabilityName := name + "Probability"
+	_, ok := p.snapshot.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
+		if !prng.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(TunnelProtocolPortLists)
+				if ok {
+					value := make(TunnelProtocolPortLists)
+					for tunnelProtocol, portLists := range defaultValue {
+						value[tunnelProtocol] = portLists
+					}
+					return value
+				}
+			}
+		}
+	}
+
+	value := make(TunnelProtocolPortLists)
 	p.snapshot.getValue(name, &value)
 	return value
 }

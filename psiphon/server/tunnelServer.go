@@ -2645,12 +2645,11 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		}
 	}
 
-	sshClient.Unlock()
-
-	// Note: unlock before use is only safe as long as referenced sshClient data,
-	// such as slices in handshakeState, is read-only after initially set.
-
+	// Retain lock when invoking LogRawFieldsWithTimestamp to block any
+	// concurrent writes to variables referenced by logFields.
 	log.LogRawFieldsWithTimestamp(logFields)
+
+	sshClient.Unlock()
 }
 
 var blocklistHitsStatParams = []requestParamSpec{
@@ -2827,7 +2826,7 @@ func (sshClient *sshClient) enqueueDisallowedTrafficAlertRequest() {
 
 	sshClient.enqueueAlertRequest(
 		protocol.AlertRequest{
-			Reason:     protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC,
+			Reason:     reason,
 			ActionURLs: actionURLs,
 		})
 }
