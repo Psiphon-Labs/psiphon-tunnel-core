@@ -88,7 +88,6 @@ func (n *V2Session) Sign(message []byte) ([]byte, error) {
 	return nil, nil
 }
 
-//Mildly ghetto that we expose this
 func NtlmVCommonMac(message []byte, sequenceNumber int, sealingKey, signingKey []byte, NegotiateFlags uint32) []byte {
 	var handle *rc4P.Cipher
 	// TODO: Need to keep track of the sequence number for connection oriented NTLM
