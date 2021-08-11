@@ -1,3 +1,8 @@
+
+This is a fork of the package that previously existed at https://github.com/ThomsonReutersEikon/go-ntlm/ntlm. It contains several bug fixes, tagged with "[Psiphon]".
+
+Original github.com/ThomsonReutersEikon/go-ntlm/ntlm README:
+
 # NTLM Implementation for Go
 
 This is a native implementation of NTLM for Go that was implemented using the Microsoft MS-NLMP documentation available at http://msdn.microsoft.com/en-us/library/cc236621.aspx.
