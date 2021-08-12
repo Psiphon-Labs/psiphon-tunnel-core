@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 )
 
@@ -51,13 +52,16 @@ func (p *AvPairs) AddAvPair(avId AvPairType, bytes []byte) {
 	p.List = append(p.List, *a)
 }
 
-func ReadAvPairs(data []byte) *AvPairs {
+func ReadAvPairs(data []byte) (*AvPairs, error) {
 	pairs := new(AvPairs)
 
 	// Get the number of AvPairs and allocate enough AvPair structures to hold them
 	offset := 0
 	for i := 0; len(data) > 0 && i < 11; i++ {
-		pair := ReadAvPair(data, offset)
+		pair, err := ReadAvPair(data, offset)
+		if err != nil {
+			return nil, err
+		}
 		offset = offset + 4 + int(pair.AvLen)
 		pairs.List = append(pairs.List, *pair)
 		if pair.AvId == MsvAvEOL {
@@ -65,7 +69,7 @@ func ReadAvPairs(data []byte) *AvPairs {
 		}
 	}
 
-	return pairs
+	return pairs, nil
 }
 
 func (p *AvPairs) Bytes() (result []byte) {
@@ -131,12 +135,26 @@ type AvPair struct {
 	Value []byte
 }
 
-func ReadAvPair(data []byte, offset int) *AvPair {
+func ReadAvPair(data []byte, offset int) (*AvPair, error) {
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(data) < offset+4 {
+		return nil, errors.New("invalid AvPair")
+	}
+
 	pair := new(AvPair)
 	pair.AvId = AvPairType(binary.LittleEndian.Uint16(data[offset : offset+2]))
 	pair.AvLen = binary.LittleEndian.Uint16(data[offset+2 : offset+4])
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(data) < offset+4+int(pair.AvLen) {
+		return nil, errors.New("invalid AvPair")
+	}
+
 	pair.Value = data[offset+4 : offset+4+int(pair.AvLen)]
-	return pair
+	return pair, nil
 }
 
 func (a *AvPair) UnicodeStringValue() string {

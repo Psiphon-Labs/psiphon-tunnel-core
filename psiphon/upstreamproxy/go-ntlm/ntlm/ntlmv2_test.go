@@ -172,7 +172,7 @@ func TestNTLMv2WithDomain(t *testing.T) {
 
 	err := server.ProcessAuthenticateMessage(a)
 	if err != nil {
-		t.Error("Could not process authenticate message: %s\n", err)
+		t.Errorf("Could not process authenticate message: %s\n", err)
 	}
 }
 

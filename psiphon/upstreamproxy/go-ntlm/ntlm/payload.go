@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 )
 
 const (
@@ -80,6 +81,12 @@ func ReadBytePayload(startByte int, bytes []byte) (*PayloadStruct, error) {
 func ReadPayloadStruct(startByte int, bytes []byte, PayloadType int) (*PayloadStruct, error) {
 	p := new(PayloadStruct)
 
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(bytes) < startByte+8 {
+		return nil, errors.New("invalid payload")
+	}
+
 	p.Type = PayloadType
 	p.Len = binary.LittleEndian.Uint16(bytes[startByte : startByte+2])
 	p.MaxLen = binary.LittleEndian.Uint16(bytes[startByte+2 : startByte+4])
@@ -87,6 +94,13 @@ func ReadPayloadStruct(startByte int, bytes []byte, PayloadType int) (*PayloadSt
 
 	if p.Len > 0 {
 		endOffset := p.Offset + uint32(p.Len)
+
+		// [Psiphon]
+		// Don't panic on malformed remote input.
+		if len(bytes) < int(endOffset) {
+			return nil, errors.New("invalid payload")
+		}
+
 		p.Payload = bytes[p.Offset:endOffset]
 	}
 

@@ -56,6 +56,12 @@ type ChallengeMessage struct {
 func ParseChallengeMessage(body []byte) (*ChallengeMessage, error) {
 	challenge := new(ChallengeMessage)
 
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(body) < 40 {
+		return nil, errors.New("invalid challenge message")
+	}
+
 	challenge.Signature = body[0:8]
 	if !bytes.Equal(challenge.Signature, []byte("NTLMSSP\x00")) {
 		return challenge, errors.New("Invalid NTLM message signature")
@@ -84,16 +90,32 @@ func ParseChallengeMessage(body []byte) (*ChallengeMessage, error) {
 		return nil, err
 	}
 
-	challenge.TargetInfo = ReadAvPairs(challenge.TargetInfoPayloadStruct.Payload)
+	challenge.TargetInfo, err = ReadAvPairs(challenge.TargetInfoPayloadStruct.Payload)
+	if err != nil {
+		return nil, err
+	}
 
 	offset := 48
 
 	if NTLMSSP_NEGOTIATE_VERSION.IsSet(challenge.NegotiateFlags) {
+
+		// [Psiphon]
+		// Don't panic on malformed remote input.
+		if len(body) < offset+8 {
+			return nil, errors.New("invalid challenge message")
+		}
+
 		challenge.Version, err = ReadVersionStruct(body[offset : offset+8])
 		if err != nil {
 			return nil, err
 		}
 		offset = offset + 8
+	}
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(body) < offset {
+		return nil, errors.New("invalid challenge message")
 	}
 
 	challenge.Payload = body[offset:]
