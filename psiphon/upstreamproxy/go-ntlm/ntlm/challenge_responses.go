@@ -21,6 +21,13 @@ func (n *NtlmV1Response) String() string {
 }
 
 func ReadNtlmV1Response(bytes []byte) (*NtlmV1Response, error) {
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(bytes) < 24 {
+		return nil, errors.New("invalid NTLM v1 response")
+	}
+
 	r := new(NtlmV1Response)
 	r.Response = bytes[0:24]
 	return r, nil
@@ -84,6 +91,13 @@ func (n *NtlmV2Response) String() string {
 }
 
 func ReadNtlmV2Response(bytes []byte) (*NtlmV2Response, error) {
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(bytes) < 45 {
+		return nil, errors.New("invalid NTLM v2 response")
+	}
+
 	r := new(NtlmV2Response)
 	r.Response = bytes[0:16]
 	r.NtlmV2ClientChallenge = new(NtlmV2ClientChallenge)
@@ -103,7 +117,11 @@ func ReadNtlmV2Response(bytes []byte) (*NtlmV2Response, error) {
 	c.ChallengeFromClient = bytes[32:40]
 	// Ignoring - 4 bytes reserved
 	// c.Reserved3
-	c.AvPairs = ReadAvPairs(bytes[44:])
+	var err error
+	c.AvPairs, err = ReadAvPairs(bytes[44:])
+	if err != nil {
+		return nil, err
+	}
 	return r, nil
 }
 
@@ -114,10 +132,17 @@ type LmV1Response struct {
 	Response []byte
 }
 
-func ReadLmV1Response(bytes []byte) *LmV1Response {
+func ReadLmV1Response(bytes []byte) (*LmV1Response, error) {
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(bytes) < 24 {
+		return nil, errors.New("invalid LM v1 response")
+	}
+
 	r := new(LmV1Response)
 	r.Response = bytes[0:24]
-	return r
+	return r, nil
 }
 
 func (l *LmV1Response) String() string {
@@ -136,11 +161,18 @@ type LmV2Response struct {
 	ChallengeFromClient []byte
 }
 
-func ReadLmV2Response(bytes []byte) *LmV2Response {
+func ReadLmV2Response(bytes []byte) (*LmV2Response, error) {
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(bytes) < 24 {
+		return nil, errors.New("invalid LM v2 response")
+	}
+
 	r := new(LmV2Response)
 	r.Response = bytes[0:16]
 	r.ChallengeFromClient = bytes[16:24]
-	return r
+	return r, nil
 }
 
 func (l *LmV2Response) String() string {

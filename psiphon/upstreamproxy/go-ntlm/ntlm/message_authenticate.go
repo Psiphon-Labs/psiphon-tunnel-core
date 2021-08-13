@@ -38,7 +38,7 @@ type AuthenticateMessage struct {
 	/// MS-NLMP 2.2.1.3 - In connectionless mode, a NEGOTIATE structure that contains a set of bit flags (section 2.2.2.5) and represents the
 	// conclusion of negotiation—the choices the client has made from the options the server offered in the CHALLENGE_MESSAGE.
 	// In connection-oriented mode, a NEGOTIATE structure that contains the set of bit flags (section 2.2.2.5) negotiated in
-	// the previous 
+	// the previous
 	NegotiateFlags uint32 // 4 bytes
 
 	// Version (8 bytes): A VERSION structure (section 2.2.2.10) that is present only when the NTLMSSP_NEGOTIATE_VERSION
@@ -55,6 +55,12 @@ type AuthenticateMessage struct {
 
 func ParseAuthenticateMessage(body []byte, ntlmVersion int) (*AuthenticateMessage, error) {
 	am := new(AuthenticateMessage)
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(body) < 12 {
+		return nil, errors.New("invalid authenticate message")
+	}
 
 	am.Signature = body[0:8]
 	if !bytes.Equal(am.Signature, []byte("NTLMSSP\x00")) {
@@ -74,9 +80,12 @@ func ParseAuthenticateMessage(body []byte, ntlmVersion int) (*AuthenticateMessag
 	}
 
 	if ntlmVersion == 2 {
-		am.LmV2Response = ReadLmV2Response(am.LmChallengeResponse.Payload)
+		am.LmV2Response, err = ReadLmV2Response(am.LmChallengeResponse.Payload)
 	} else {
-		am.LmV1Response = ReadLmV1Response(am.LmChallengeResponse.Payload)
+		am.LmV1Response, err = ReadLmV1Response(am.LmChallengeResponse.Payload)
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	am.NtChallengeResponseFields, err = ReadBytePayload(20, body)
@@ -90,7 +99,6 @@ func ParseAuthenticateMessage(body []byte, ntlmVersion int) (*AuthenticateMessag
 	} else {
 		am.NtlmV1Response, err = ReadNtlmV1Response(am.NtChallengeResponseFields.Payload)
 	}
-
 	if err != nil {
 		return nil, err
 	}
@@ -124,11 +132,24 @@ func ParseAuthenticateMessage(body []byte, ntlmVersion int) (*AuthenticateMessag
 		}
 		offset = offset + 8
 
+		// [Psiphon]
+		// Don't panic on malformed remote input.
+		if len(body) < offset+4 {
+			return nil, errors.New("invalid authenticate message")
+		}
+
 		am.NegotiateFlags = binary.LittleEndian.Uint32(body[offset : offset+4])
 		offset = offset + 4
 
 		// Version (8 bytes): A VERSION structure (section 2.2.2.10) that is present only when the NTLMSSP_NEGOTIATE_VERSION flag is set in the NegotiateFlags field. This structure is used for debugging purposes only. In normal protocol messages, it is ignored and does not affect the NTLM message processing.<9>
 		if NTLMSSP_NEGOTIATE_VERSION.IsSet(am.NegotiateFlags) {
+
+			// [Psiphon]
+			// Don't panic on malformed remote input.
+			if len(body) < offset+8 {
+				return nil, errors.New("invalid authenticate message")
+			}
+
 			am.Version, err = ReadVersionStruct(body[offset : offset+8])
 			if err != nil {
 				return nil, err
@@ -144,10 +165,23 @@ func ParseAuthenticateMessage(body []byte, ntlmVersion int) (*AuthenticateMessag
 		// there is a MIC and read it out.
 		var lowestOffset = am.getLowestPayloadOffset()
 		if lowestOffset > offset {
+
+			// [Psiphon]
+			// Don't panic on malformed remote input.
+			if len(body) < offset+16 {
+				return nil, errors.New("invalid authenticate message")
+			}
+
 			// MIC - 16 bytes
 			am.Mic = body[offset : offset+16]
 			offset = offset + 16
 		}
+	}
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(body) < offset {
+		return nil, errors.New("invalid authenticate message")
 	}
 
 	am.Payload = body[offset:]
