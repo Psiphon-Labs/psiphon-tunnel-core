@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
 
@@ -91,16 +90,6 @@ func (mux *udpPortForwardMultiplexer) run() {
 	//
 	// When the client disconnects or the server shuts down, the channel will close and
 	// readUdpgwMessage will exit with EOF.
-
-	// Recover from and log any unexpected panics caused by udpgw input handling bugs.
-	// Note: this covers the run() goroutine only and not relayDownstream() goroutines.
-	defer func() {
-		if e := recover(); e != nil {
-			err := errors.Tracef(
-				"udpPortForwardMultiplexer panic: %s: %s", e, debug.Stack())
-			log.WithTraceFields(LogFields{"error": err}).Warning("run failed")
-		}
-	}()
 
 	buffer := make([]byte, udpgwProtocolMaxMessageSize)
 	for {
