@@ -1261,7 +1261,9 @@ type sshClient struct {
 	supportsServerRequests               bool
 	handshakeState                       handshakeState
 	udpgwChannelHandler                  *udpgwPortForwardMultiplexer
+	totalUdpgwChannelCount               int
 	packetTunnelChannel                  ssh.Channel
+	totalPacketTunnelChannelCount        int
 	trafficRules                         TrafficRules
 	tcpTrafficState                      trafficState
 	udpTrafficState                      trafficState
@@ -2558,6 +2560,7 @@ func (sshClient *sshClient) setPacketTunnelChannel(channel ssh.Channel) {
 		sshClient.packetTunnelChannel.Close()
 	}
 	sshClient.packetTunnelChannel = channel
+	sshClient.totalPacketTunnelChannelCount += 1
 	sshClient.Unlock()
 }
 
@@ -2571,6 +2574,7 @@ func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPor
 		sshClient.udpgwChannelHandler.stop()
 	}
 	sshClient.udpgwChannelHandler = udpgwChannelHandler
+	sshClient.totalUdpgwChannelCount += 1
 	sshClient.Unlock()
 }
 
@@ -2616,6 +2620,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	// sshClient.udpTrafficState.peakConcurrentDialingPortForwardCount isn't meaningful
 	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
 	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
+	logFields["total_udpgw_channel_count"] = sshClient.totalUdpgwChannelCount
+	logFields["total_packet_tunnel_channel_count"] = sshClient.totalPacketTunnelChannelCount
 
 	logFields["pre_handshake_random_stream_count"] = sshClient.preHandshakeRandomStreamMetrics.count
 	logFields["pre_handshake_random_stream_upstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.upstreamBytes
