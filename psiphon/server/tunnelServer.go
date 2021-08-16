@@ -1260,7 +1260,7 @@ type sshClient struct {
 	isFirstTunnelInSession               bool
 	supportsServerRequests               bool
 	handshakeState                       handshakeState
-	udpgwChannel                         ssh.Channel
+	udpgwChannelHandler                  *udpgwPortForwardMultiplexer
 	packetTunnelChannel                  ssh.Channel
 	trafficRules                         TrafficRules
 	tcpTrafficState                      trafficState
@@ -2561,16 +2561,16 @@ func (sshClient *sshClient) setPacketTunnelChannel(channel ssh.Channel) {
 	sshClient.Unlock()
 }
 
-// setUdpgwChannel sets the single udpgw channel for this sshClient.
-// Each sshClient may have only one concurrent udpgw channel. Each
-// udpgw channel multiplexes many UDP port forwards via the udpgw
-// protocol. Any existing udpgw channel is closed.
-func (sshClient *sshClient) setUdpgwChannel(channel ssh.Channel) {
+// setUdpgwChannelHandler sets the single udpgw channel handler for this
+// sshClient. Each sshClient may have only one concurrent udpgw
+// channel/handler. Each udpgw channel multiplexes many UDP port forwards via
+// the udpgw protocol. Any existing udpgw channel/handler is closed.
+func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPortForwardMultiplexer) {
 	sshClient.Lock()
-	if sshClient.udpgwChannel != nil {
-		sshClient.udpgwChannel.Close()
+	if sshClient.udpgwChannelHandler != nil {
+		sshClient.udpgwChannelHandler.stop()
 	}
-	sshClient.udpgwChannel = channel
+	sshClient.udpgwChannelHandler = udpgwChannelHandler
 	sshClient.Unlock()
 }
 
