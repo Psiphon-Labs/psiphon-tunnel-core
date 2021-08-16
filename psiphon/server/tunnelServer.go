@@ -1260,7 +1260,7 @@ type sshClient struct {
 	isFirstTunnelInSession               bool
 	supportsServerRequests               bool
 	handshakeState                       handshakeState
-	udpChannel                           ssh.Channel
+	udpgwChannel                         ssh.Channel
 	packetTunnelChannel                  ssh.Channel
 	trafficRules                         TrafficRules
 	tcpTrafficState                      trafficState
@@ -2495,11 +2495,11 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 
 	// Intercept TCP port forwards to a specified udpgw server and handle directly.
 	// TODO: also support UDP explicitly, e.g. with a custom "direct-udp" channel type?
-	isUDPChannel := sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress != "" &&
+	isUdpgwChannel := sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress != "" &&
 		sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress ==
 			net.JoinHostPort(directTcpipExtraData.HostToConnect, strconv.Itoa(int(directTcpipExtraData.PortToConnect)))
 
-	if isUDPChannel {
+	if isUdpgwChannel {
 
 		// Dispatch immediately. handleUDPChannel runs the udpgw protocol in its
 		// own worker goroutine.
@@ -2507,7 +2507,7 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 		waitGroup.Add(1)
 		go func(channel ssh.NewChannel) {
 			defer waitGroup.Done()
-			sshClient.handleUDPChannel(channel)
+			sshClient.handleUdpgwChannel(channel)
 		}(newChannel)
 
 	} else {
@@ -2561,16 +2561,16 @@ func (sshClient *sshClient) setPacketTunnelChannel(channel ssh.Channel) {
 	sshClient.Unlock()
 }
 
-// setUDPChannel sets the single UDP channel for this sshClient.
-// Each sshClient may have only one concurrent UDP channel. Each
-// UDP channel multiplexes many UDP port forwards via the udpgw
-// protocol. Any existing UDP channel is closed.
-func (sshClient *sshClient) setUDPChannel(channel ssh.Channel) {
+// setUdpgwChannel sets the single udpgw channel for this sshClient.
+// Each sshClient may have only one concurrent udpgw channel. Each
+// udpgw channel multiplexes many UDP port forwards via the udpgw
+// protocol. Any existing udpgw channel is closed.
+func (sshClient *sshClient) setUdpgwChannel(channel ssh.Channel) {
 	sshClient.Lock()
-	if sshClient.udpChannel != nil {
-		sshClient.udpChannel.Close()
+	if sshClient.udpgwChannel != nil {
+		sshClient.udpgwChannel.Close()
 	}
-	sshClient.udpChannel = channel
+	sshClient.udpgwChannel = channel
 	sshClient.Unlock()
 }
 

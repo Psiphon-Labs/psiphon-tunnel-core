@@ -34,7 +34,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
-// handleUDPChannel implements UDP port forwarding. A single UDP
+// handleUdpgwChannel implements UDP port forwarding. A single UDP
 // SSH channel follows the udpgw protocol, which multiplexes many
 // UDP port forwards.
 //
@@ -42,7 +42,7 @@ import (
 // Copyright (c) 2009, Ambroz Bizjak <ambrop7@gmail.com>
 // https://github.com/ambrop72/badvpn
 //
-func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
+func (sshClient *sshClient) handleUdpgwChannel(newChannel ssh.NewChannel) {
 
 	// Accept this channel immediately. This channel will replace any
 	// previously existing UDP channel for this client.
@@ -57,33 +57,33 @@ func (sshClient *sshClient) handleUDPChannel(newChannel ssh.NewChannel) {
 	go ssh.DiscardRequests(requests)
 	defer sshChannel.Close()
 
-	sshClient.setUDPChannel(sshChannel)
+	sshClient.setUdpgwChannel(sshChannel)
 
-	multiplexer := &udpPortForwardMultiplexer{
+	multiplexer := &udpgwPortForwardMultiplexer{
 		sshClient:      sshClient,
 		sshChannel:     sshChannel,
-		portForwards:   make(map[uint16]*udpPortForward),
+		portForwards:   make(map[uint16]*udpgwPortForward),
 		portForwardLRU: common.NewLRUConns(),
 		relayWaitGroup: new(sync.WaitGroup),
 	}
 	multiplexer.run()
 }
 
-type udpPortForwardMultiplexer struct {
+type udpgwPortForwardMultiplexer struct {
 	sshClient            *sshClient
 	sshChannelWriteMutex sync.Mutex
 	sshChannel           ssh.Channel
 	portForwardsMutex    sync.Mutex
-	portForwards         map[uint16]*udpPortForward
+	portForwards         map[uint16]*udpgwPortForward
 	portForwardLRU       *common.LRUConns
 	relayWaitGroup       *sync.WaitGroup
 }
 
-func (mux *udpPortForwardMultiplexer) run() {
+func (mux *udpgwPortForwardMultiplexer) run() {
 
-	// In a loop, read udpgw messages from the client to this channel. Each message is
-	// a UDP packet to send upstream either via a new port forward, or on an existing
-	// port forward.
+	// In a loop, read udpgw messages from the client to this channel. Each
+	// message contains a UDP packet to send upstream either via a new port
+	// forward, or on an existing port forward.
 	//
 	// A goroutine is run to read downstream packets for each UDP port forward. All read
 	// packets are encapsulated in udpgw protocol and sent down the channel to the client.
@@ -226,7 +226,7 @@ func (mux *udpPortForwardMultiplexer) run() {
 				continue
 			}
 
-			portForward = &udpPortForward{
+			portForward = &udpgwPortForward{
 				connID:       message.connID,
 				preambleSize: message.preambleSize,
 				remoteIP:     message.remoteIP,
@@ -277,13 +277,13 @@ func (mux *udpPortForwardMultiplexer) run() {
 	mux.relayWaitGroup.Wait()
 }
 
-func (mux *udpPortForwardMultiplexer) removePortForward(connID uint16) {
+func (mux *udpgwPortForwardMultiplexer) removePortForward(connID uint16) {
 	mux.portForwardsMutex.Lock()
 	delete(mux.portForwards, connID)
 	mux.portForwardsMutex.Unlock()
 }
 
-type udpPortForward struct {
+type udpgwPortForward struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
@@ -298,10 +298,10 @@ type udpPortForward struct {
 	dialIP            net.IP
 	conn              net.Conn
 	lruEntry          *common.LRUConnsEntry
-	mux               *udpPortForwardMultiplexer
+	mux               *udpgwPortForwardMultiplexer
 }
 
-func (portForward *udpPortForward) relayDownstream() {
+func (portForward *udpgwPortForward) relayDownstream() {
 	defer portForward.mux.relayWaitGroup.Done()
 
 	// Downstream UDP packets are read into the reusable memory
