@@ -108,7 +108,14 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 		portForward := mux.portForwards[message.connID]
 		mux.portForwardsMutex.Unlock()
 
-		if portForward != nil && message.discardExistingConn {
+		// In the udpgw protocol, an existing port forward is closed when
+		// either the discard flag is set or the remote address has changed.
+
+		if portForward != nil &&
+			(message.discardExistingConn ||
+				!bytes.Equal(portForward.remoteIP, message.remoteIP) ||
+				portForward.remotePort != message.remotePort) {
+
 			// The port forward's goroutine will complete cleanup, including
 			// tallying stats and calling sshClient.closedPortForward.
 			// portForward.conn.Close() will signal this shutdown.
@@ -117,18 +124,7 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 			portForward = nil
 		}
 
-		if portForward != nil {
-
-			// Verify that portForward remote address matches latest message
-
-			if !bytes.Equal(portForward.remoteIP, message.remoteIP) ||
-				portForward.remotePort != message.remotePort {
-
-				log.WithTrace().Warning("UDP port forward remote address mismatch")
-				continue
-			}
-
-		} else {
+		if portForward == nil {
 
 			// Create a new port forward
 
