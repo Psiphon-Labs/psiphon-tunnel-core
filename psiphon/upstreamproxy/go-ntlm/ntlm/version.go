@@ -5,6 +5,7 @@ package ntlm
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
@@ -18,6 +19,12 @@ type VersionStruct struct {
 
 func ReadVersionStruct(structSource []byte) (*VersionStruct, error) {
 	versionStruct := new(VersionStruct)
+
+	// [Psiphon]
+	// Don't panic on malformed remote input.
+	if len(structSource) < 8 {
+		return nil, errors.New("invalid version struct")
+	}
 
 	versionStruct.ProductMajorVersion = uint8(structSource[0])
 	versionStruct.ProductMinorVersion = uint8(structSource[1])

@@ -1387,13 +1387,12 @@ func (p *protocolSelectionConstraints) isCandidate(
 	excludeIntensive bool,
 	serverEntry *protocol.ServerEntry) bool {
 
-	return len(p.limitTunnelProtocols) == 0 ||
-		len(serverEntry.GetSupportedProtocols(
-			conditionallyEnabledComponents{},
-			p.useUpstreamProxy,
-			p.limitTunnelProtocols,
-			p.limitTunnelDialPortNumbers,
-			excludeIntensive)) > 0
+	return len(serverEntry.GetSupportedProtocols(
+		conditionallyEnabledComponents{},
+		p.useUpstreamProxy,
+		p.limitTunnelProtocols,
+		p.limitTunnelDialPortNumbers,
+		excludeIntensive)) > 0
 }
 
 func (p *protocolSelectionConstraints) canReplay(
