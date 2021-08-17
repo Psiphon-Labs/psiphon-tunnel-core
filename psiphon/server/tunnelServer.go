@@ -2568,14 +2568,31 @@ func (sshClient *sshClient) setPacketTunnelChannel(channel ssh.Channel) {
 // sshClient. Each sshClient may have only one concurrent udpgw
 // channel/handler. Each udpgw channel multiplexes many UDP port forwards via
 // the udpgw protocol. Any existing udpgw channel/handler is closed.
-func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPortForwardMultiplexer) {
+func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPortForwardMultiplexer) bool {
 	sshClient.Lock()
 	if sshClient.udpgwChannelHandler != nil {
-		sshClient.udpgwChannelHandler.stop()
+		previousHandler := sshClient.udpgwChannelHandler
+		sshClient.udpgwChannelHandler = nil
+
+		// stop must be run without holding the sshClient mutex lock, as the
+		// udpgw goroutines may attempt to lock the same mutex. For example,
+		// udpgwPortForwardMultiplexer.run calls sshClient.establishedPortForward
+		// which calls sshClient.allocatePortForward.
+		sshClient.Unlock()
+		previousHandler.stop()
+		sshClient.Lock()
+
+		// In case some other channel has set the sshClient.udpgwChannelHandler
+		// in the meantime, fail. The caller should discard this channel/handler.
+		if sshClient.udpgwChannelHandler != nil {
+			sshClient.Unlock()
+			return false
+		}
 	}
 	sshClient.udpgwChannelHandler = udpgwChannelHandler
 	sshClient.totalUdpgwChannelCount += 1
 	sshClient.Unlock()
+	return true
 }
 
 var serverTunnelStatParams = append(
