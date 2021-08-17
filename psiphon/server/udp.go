@@ -84,7 +84,13 @@ func (sshClient *sshClient) handleUdpgwChannel(newChannel ssh.NewChannel) {
 	// runWaitGroup.Wait() cannot be invoked (by some subsequent new udpgw
 	// channel) before initialized.
 
-	sshClient.setUdpgwChannelHandler(multiplexer)
+	if !sshClient.setUdpgwChannelHandler(multiplexer) {
+		// setUdpgwChannelHandler returns false if some other SSH channel
+		// calls setUdpgwChannelHandler in the middle of this call. In that
+		// case, discard this channel: the client's latest udpgw channel is
+		// retained.
+		return
+	}
 
 	multiplexer.run()
 	multiplexer.runWaitGroup.Done()
