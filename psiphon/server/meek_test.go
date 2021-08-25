@@ -245,6 +245,7 @@ func TestMeekResiliency(t *testing.T) {
 		},
 		TrafficRulesSet: &TrafficRulesSet{},
 	}
+	mockSupport.GeoIPService, _ = NewGeoIPService([]string{})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -445,6 +446,7 @@ func runTestMeekRateLimiter(t *testing.T, rateLimit bool) {
 			MeekRateLimiterReapHistoryFrequencySeconds:   1,
 		},
 	}
+	mockSupport.GeoIPService, _ = NewGeoIPService([]string{})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

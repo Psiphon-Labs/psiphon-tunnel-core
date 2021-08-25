@@ -43,6 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
@@ -344,8 +345,9 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		session,
 		underlyingConn,
 		endPoint,
-		clientIP,
+		endPointGeoIPData,
 		err := server.getSessionOrEndpoint(request, meekCookie)
+
 	if err != nil {
 		// Debug since session cookie errors commonly occur during
 		// normal operation.
@@ -359,9 +361,8 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// Endpoint mode. Currently, this means it's handled by the tactics
 		// request handler.
 
-		geoIPData := server.support.GeoIPService.Lookup(clientIP)
 		handled := server.support.TacticsServer.HandleEndPoint(
-			endPoint, common.GeoIPData(geoIPData), responseWriter, request)
+			endPoint, common.GeoIPData(*endPointGeoIPData), responseWriter, request)
 		if !handled {
 			log.WithTraceFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
 			common.TerminateHTTPConnection(responseWriter, request)
@@ -587,7 +588,7 @@ func checkRangeHeader(request *http.Request) (int, bool) {
 // mode; or the endpoint is returned when the meek cookie indicates endpoint
 // mode.
 func (server *MeekServer) getSessionOrEndpoint(
-	request *http.Request, meekCookie *http.Cookie) (string, *meekSession, net.Conn, string, string, error) {
+	request *http.Request, meekCookie *http.Cookie) (string, *meekSession, net.Conn, string, *GeoIPData, error) {
 
 	underlyingConn := request.Context().Value(meekNetConnContextKey).(net.Conn)
 
@@ -601,7 +602,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 		// TODO: can multiple http client connections using same session cookie
 		// cause race conditions on session struct?
 		session.touch()
-		return existingSessionID, session, underlyingConn, "", "", nil
+		return existingSessionID, session, underlyingConn, "", nil, nil
 	}
 
 	// Determine the client remote address, which is used for geolocation
@@ -610,6 +611,8 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// headers such as X-Forwarded-For.
 
 	clientIP := strings.Split(request.RemoteAddr, ":")[0]
+	usedProxyForwardedForHeader := false
+	var geoIPData GeoIPData
 
 	if len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
 		for _, header := range server.support.Config.MeekProxyForwardedForHeaders {
@@ -619,15 +622,21 @@ func (server *MeekServer) getSessionOrEndpoint(
 				// list of IPs (each proxy in a chain). The first IP should be
 				// the client IP.
 				proxyClientIP := strings.Split(value, ",")[0]
-				if net.ParseIP(proxyClientIP) != nil &&
-					server.support.GeoIPService.Lookup(
-						proxyClientIP).Country != GEOIP_UNKNOWN_VALUE {
-
-					clientIP = proxyClientIP
-					break
+				if net.ParseIP(proxyClientIP) != nil {
+					proxyClientGeoIPData := server.support.GeoIPService.Lookup(proxyClientIP)
+					if proxyClientGeoIPData.Country != GEOIP_UNKNOWN_VALUE {
+						usedProxyForwardedForHeader = true
+						clientIP = proxyClientIP
+						geoIPData = proxyClientGeoIPData
+						break
+					}
 				}
 			}
 		}
+	}
+
+	if !usedProxyForwardedForHeader {
+		geoIPData = server.support.GeoIPService.Lookup(clientIP)
 	}
 
 	// The session is new (or expired). Treat the cookie value as a new meek
@@ -635,7 +644,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	payloadJSON, err := server.getMeekCookiePayload(clientIP, meekCookie.Value)
 	if err != nil {
-		return "", nil, nil, "", "", errors.Trace(err)
+		return "", nil, nil, "", nil, errors.Trace(err)
 	}
 
 	// Note: this meek server ignores legacy values PsiphonClientSessionId
@@ -644,7 +653,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	err = json.Unmarshal(payloadJSON, &clientSessionData)
 	if err != nil {
-		return "", nil, nil, "", "", errors.Trace(err)
+		return "", nil, nil, "", nil, errors.Trace(err)
 	}
 
 	tunnelProtocol := server.listenerTunnelProtocol
@@ -656,7 +665,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 			server.listenerTunnelProtocol,
 			server.support.Config.GetRunningProtocols()) {
 
-			return "", nil, nil, "", "", errors.Tracef(
+			return "", nil, nil, "", nil, errors.Tracef(
 				"invalid client tunnel protocol: %s", clientSessionData.ClientTunnelProtocol)
 		}
 
@@ -669,8 +678,8 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// rate limit is primarily intended to limit memory resource consumption and
 	// not the overhead incurred by cookie validation.
 
-	if server.rateLimit(clientIP, tunnelProtocol) {
-		return "", nil, nil, "", "", errors.TraceNew("rate limit exceeded")
+	if server.rateLimit(clientIP, geoIPData, tunnelProtocol) {
+		return "", nil, nil, "", nil, errors.TraceNew("rate limit exceeded")
 	}
 
 	// Handle endpoints before enforcing CheckEstablishTunnels.
@@ -678,7 +687,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// handled by servers which would otherwise reject new tunnels.
 
 	if clientSessionData.EndPoint != "" {
-		return "", nil, nil, clientSessionData.EndPoint, clientIP, nil
+		return "", nil, nil, clientSessionData.EndPoint, &geoIPData, nil
 	}
 
 	// Don't create new sessions when not establishing. A subsequent SSH handshake
@@ -686,7 +695,42 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	if server.support.TunnelServer != nil &&
 		!server.support.TunnelServer.CheckEstablishTunnels() {
-		return "", nil, nil, "", "", errors.TraceNew("not establishing tunnels")
+		return "", nil, nil, "", nil, errors.TraceNew("not establishing tunnels")
+	}
+
+	// Disconnect immediately if the clients tactics restricts usage of the
+	// fronting provider ID. The probability may be used to influence usage of a
+	// given fronting provider; but when only that provider works for a given
+	// client, and the probability is less than 1.0, the client can retry until
+	// it gets a successful coin flip.
+	//
+	// Clients will also skip candidates with restricted fronting provider IDs.
+	// The client-side probability, RestrictFrontingProviderIDsClientProbability,
+	// is applied independently of the server-side coin flip here.
+	//
+	// At this stage, GeoIP tactics filters are active, but handshake API
+	// parameters are not.
+	//
+	// See the comment in server.LoadConfig regarding fronting provider ID
+	// limitations.
+
+	if protocol.TunnelProtocolUsesFrontedMeek(server.listenerTunnelProtocol) &&
+		server.support.ServerTacticsParametersCache != nil {
+
+		p, err := server.support.ServerTacticsParametersCache.Get(geoIPData)
+		if err != nil {
+			return "", nil, nil, "", nil, errors.Trace(err)
+		}
+
+		if !p.IsNil() &&
+			common.Contains(
+				p.Strings(parameters.RestrictFrontingProviderIDs),
+				server.support.Config.GetFrontingProviderID()) {
+			if p.WeightedCoinFlip(
+				parameters.RestrictFrontingProviderIDsServerProbability) {
+				return "", nil, nil, "", nil, errors.TraceNew("restricted fronting provider")
+			}
+		}
 	}
 
 	// Create a new session
@@ -736,7 +780,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	if clientSessionData.MeekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 {
 		sessionID, err = makeMeekSessionID()
 		if err != nil {
-			return "", nil, nil, "", "", errors.Trace(err)
+			return "", nil, nil, "", nil, errors.Trace(err)
 		}
 	}
 
@@ -748,10 +792,11 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// will close when session.delete calls Close() on the meekConn.
 	server.clientHandler(clientSessionData.ClientTunnelProtocol, session.clientConn)
 
-	return sessionID, session, underlyingConn, "", "", nil
+	return sessionID, session, underlyingConn, "", nil, nil
 }
 
-func (server *MeekServer) rateLimit(clientIP string, tunnelProtocol string) bool {
+func (server *MeekServer) rateLimit(
+	clientIP string, geoIPData GeoIPData, tunnelProtocol string) bool {
 
 	historySize,
 		thresholdSeconds,
@@ -773,9 +818,6 @@ func (server *MeekServer) rateLimit(clientIP string, tunnelProtocol string) bool
 	}
 
 	if len(regions) > 0 || len(ISPs) > 0 || len(cities) > 0 {
-
-		// TODO: avoid redundant GeoIP lookups?
-		geoIPData := server.support.GeoIPService.Lookup(clientIP)
 
 		if len(regions) > 0 {
 			if !common.Contains(regions, geoIPData.Country) {
