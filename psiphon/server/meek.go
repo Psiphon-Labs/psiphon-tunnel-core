@@ -698,11 +698,11 @@ func (server *MeekServer) getSessionOrEndpoint(
 		return "", nil, nil, "", nil, errors.TraceNew("not establishing tunnels")
 	}
 
-	// Disconnect immediately if the clients tactics restricts usage of the
-	// fronting provider ID. The probability may be used to influence usage of a
-	// given fronting provider; but when only that provider works for a given
-	// client, and the probability is less than 1.0, the client can retry until
-	// it gets a successful coin flip.
+	// Disconnect immediately if the tactics for the client restricts usage of
+	// the fronting provider ID. The probability may be used to influence
+	// usage of a given fronting provider; but when only that provider works
+	// for a given client, and the probability is less than 1.0, the client
+	// can retry until it gets a successful coin flip.
 	//
 	// Clients will also skip candidates with restricted fronting provider IDs.
 	// The client-side probability, RestrictFrontingProviderIDsClientProbability,

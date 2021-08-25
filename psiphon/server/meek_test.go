@@ -25,8 +25,10 @@ import (
 	crypto_rand "crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -38,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -402,17 +405,71 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) (
 }
 
 func TestMeekRateLimiter(t *testing.T) {
-	runTestMeekRateLimiter(t, true)
-	runTestMeekRateLimiter(t, false)
+	runTestMeekAccessControl(t, true, false)
+	runTestMeekAccessControl(t, false, false)
 }
 
-func runTestMeekRateLimiter(t *testing.T, rateLimit bool) {
+func TestMeekRestrictFrontingProviders(t *testing.T) {
+	runTestMeekAccessControl(t, false, true)
+	runTestMeekAccessControl(t, false, false)
+}
+
+func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider bool) {
 
 	attempts := 10
 
 	allowedConnections := 5
+
 	if !rateLimit {
 		allowedConnections = 10
+	}
+
+	if restrictProvider {
+		allowedConnections = 0
+	}
+
+	// Configure tactics
+
+	frontingProviderID := prng.HexString(8)
+
+	tacticsConfigJSONFormat := `
+    {
+      "RequestPublicKey" : "%s",
+      "RequestPrivateKey" : "%s",
+      "RequestObfuscatedKey" : "%s",
+      "DefaultTactics" : {
+        "TTL" : "60s",
+        "Probability" : 1.0,
+        "Parameters" : {
+          "RestrictFrontingProviderIDs" : ["%s"],
+          "RestrictFrontingProviderIDsServerProbability" : 1.0
+        }
+      }
+    }
+    `
+
+	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
+		tactics.GenerateKeys()
+	if err != nil {
+		t.Fatalf("error generating tactics keys: %s", err)
+	}
+
+	restrictFrontingProviderID := ""
+
+	if restrictProvider {
+		restrictFrontingProviderID = frontingProviderID
+	}
+
+	tacticsConfigJSON := fmt.Sprintf(
+		tacticsConfigJSONFormat,
+		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		restrictFrontingProviderID)
+
+	tacticsConfigFilename := filepath.Join(testDataDirName, "tactics_config.json")
+
+	err = ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving tactics config file: %s", err)
 	}
 
 	// Run meek server
@@ -425,11 +482,11 @@ func runTestMeekRateLimiter(t *testing.T, rateLimit bool) {
 	meekCookieEncryptionPrivateKey := base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
 	meekObfuscatedKey := prng.HexString(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 
-	tunnelProtocol := protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK
+	tunnelProtocol := protocol.TUNNEL_PROTOCOL_FRONTED_MEEK
 
 	meekRateLimiterTunnelProtocols := []string{tunnelProtocol}
 	if !rateLimit {
-		meekRateLimiterTunnelProtocols = []string{protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS}
+		meekRateLimiterTunnelProtocols = []string{protocol.TUNNEL_PROTOCOL_FRONTED_MEEK}
 	}
 
 	mockSupport := &SupportServices{
@@ -437,6 +494,7 @@ func runTestMeekRateLimiter(t *testing.T, rateLimit bool) {
 			MeekObfuscatedKey:              meekObfuscatedKey,
 			MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
 			TunnelProtocolPorts:            map[string]int{tunnelProtocol: 0},
+			frontingProviderID:             frontingProviderID,
 		},
 		TrafficRulesSet: &TrafficRulesSet{
 			MeekRateLimiterHistorySize:                   allowedConnections,
@@ -447,6 +505,14 @@ func runTestMeekRateLimiter(t *testing.T, rateLimit bool) {
 		},
 	}
 	mockSupport.GeoIPService, _ = NewGeoIPService([]string{})
+
+	tacticsServer, err := tactics.NewServer(nil, nil, nil, tacticsConfigFilename)
+	if err != nil {
+		t.Fatalf("tactics.NewServer failed: %s", err)
+	}
+
+	mockSupport.TacticsServer = tacticsServer
+	mockSupport.ServerTacticsParametersCache = NewServerTacticsParametersCache(mockSupport)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -569,8 +635,8 @@ func runTestMeekRateLimiter(t *testing.T, rateLimit bool) {
 		totalFailures != attempts-totalConnections {
 
 		t.Fatalf(
-			"Unexpected results: %d connections, %d failures",
-			totalConnections, totalFailures)
+			"Unexpected results: %d connections, %d failures, %d allowed",
+			totalConnections, totalFailures, allowedConnections)
 	}
 
 	// Graceful shutdown
