@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 )
@@ -36,8 +35,6 @@ import (
 func TestListener(t *testing.T) {
 
 	tunnelProtocol := protocol.TUNNEL_PROTOCOL_FRONTED_MEEK
-
-	frontingProviderID := prng.HexString(8)
 
 	tacticsConfigJSONFormat := `
     {
@@ -65,19 +62,6 @@ func TestListener(t *testing.T) {
               "FragmentorDownstreamMaxWriteBytes" : 1
             }
           }
-        },
-        {
-          "Filter" : {
-            "Regions": ["R3"],
-            "ISPs": ["I3"],
-            "Cities": ["C3"]
-          },
-          "Tactics" : {
-            "Parameters" : {
-              "RestrictFrontingProviderIDs" : ["%s"],
-              "RestrictFrontingProviderIDsServerProbability" : 1.0
-            }
-          }
         }
       ]
     }
@@ -92,7 +76,7 @@ func TestListener(t *testing.T) {
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
-		tunnelProtocol, frontingProviderID)
+		tunnelProtocol)
 
 	tacticsConfigFilename := filepath.Join(testDataDirName, "tactics_config.json")
 
@@ -121,12 +105,6 @@ func TestListener(t *testing.T) {
 	}
 	listenerUnfragmentedGeoIPWrongCity := func(string) GeoIPData {
 		return GeoIPData{Country: "R1", ISP: "I1", City: "C2"}
-	}
-	listenerRestrictedFrontingProviderIDGeoIP := func(string) GeoIPData {
-		return GeoIPData{Country: "R3", ISP: "I3", City: "C3"}
-	}
-	listenerUnrestrictedFrontingProviderIDWrongRegion := func(string) GeoIPData {
-		return GeoIPData{Country: "R2", ISP: "I3", City: "C3"}
 	}
 
 	listenerTestCases := []struct {
@@ -159,18 +137,6 @@ func TestListener(t *testing.T) {
 			false,
 			true,
 		},
-		{
-			"restricted",
-			listenerRestrictedFrontingProviderIDGeoIP,
-			false,
-			false,
-		},
-		{
-			"unrestricted-region",
-			listenerUnrestrictedFrontingProviderIDWrongRegion,
-			false,
-			true,
-		},
 	}
 
 	for _, testCase := range listenerTestCases {
@@ -182,7 +148,7 @@ func TestListener(t *testing.T) {
 			}
 
 			support := &SupportServices{
-				Config:        &Config{frontingProviderID: frontingProviderID},
+				Config:        &Config{},
 				TacticsServer: tacticsServer,
 			}
 			support.ReplayCache = NewReplayCache(support)

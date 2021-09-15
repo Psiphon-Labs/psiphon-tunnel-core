@@ -1338,6 +1338,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	expectServerBPFField := ServerBPFEnabled() && doServerTactics
 	expectServerPacketManipulationField := runConfig.doPacketManipulation
 	expectBurstFields := runConfig.doBurstMonitor
+	expectTCPPortForwardDial := runConfig.doTunneledWebRequest
+	expectTCPDataTransfer := runConfig.doTunneledWebRequest && !expectTrafficFailure && !runConfig.doSplitTunnel
+	// Even with expectTrafficFailure, DNS port forwards will succeed
+	expectUDPDataTransfer := runConfig.doTunneledNTPRequest
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -1347,6 +1351,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectServerBPFField,
 			expectServerPacketManipulationField,
 			expectBurstFields,
+			expectTCPPortForwardDial,
+			expectTCPDataTransfer,
+			expectUDPDataTransfer,
 			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
@@ -1404,6 +1411,9 @@ func checkExpectedServerTunnelLogFields(
 	expectServerBPFField bool,
 	expectServerPacketManipulationField bool,
 	expectBurstFields bool,
+	expectTCPPortForwardDial bool,
+	expectTCPDataTransfer bool,
+	expectUDPDataTransfer bool,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -1647,6 +1657,66 @@ func checkExpectedServerTunnelLogFields(
 
 	if fields["network_type"].(string) != testNetworkType {
 		return fmt.Errorf("unexpected network_type '%s'", fields["network_type"])
+	}
+
+	var checkTCPMetric func(float64) bool
+	if expectTCPPortForwardDial {
+		checkTCPMetric = func(f float64) bool { return f > 0 }
+	} else {
+		checkTCPMetric = func(f float64) bool { return f == 0 }
+	}
+
+	for _, name := range []string{
+		"peak_concurrent_dialing_port_forward_count_tcp",
+	} {
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
+		if !checkTCPMetric(fields[name].(float64)) {
+			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+		}
+	}
+
+	if expectTCPDataTransfer {
+		checkTCPMetric = func(f float64) bool { return f > 0 }
+	} else {
+		checkTCPMetric = func(f float64) bool { return f == 0 }
+	}
+
+	for _, name := range []string{
+		"bytes_up_tcp",
+		"bytes_down_tcp",
+		"peak_concurrent_port_forward_count_tcp",
+		"total_port_forward_count_tcp",
+	} {
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
+		if !checkTCPMetric(fields[name].(float64)) {
+			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+		}
+	}
+
+	var checkUDPMetric func(float64) bool
+	if expectUDPDataTransfer {
+		checkUDPMetric = func(f float64) bool { return f > 0 }
+	} else {
+		checkUDPMetric = func(f float64) bool { return f == 0 }
+	}
+
+	for _, name := range []string{
+		"bytes_up_udp",
+		"bytes_down_udp",
+		"peak_concurrent_port_forward_count_udp",
+		"total_port_forward_count_udp",
+		"total_udpgw_channel_count",
+	} {
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
+		if !checkUDPMetric(fields[name].(float64)) {
+			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+		}
 	}
 
 	return nil
