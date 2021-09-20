@@ -457,10 +457,10 @@
 			"revisionTime": "2020-07-28T10:15:04Z"
 		},
 		{
-			"checksumSHA1": "CqKUytzURTAPk1mUOsySyXGQft0=",
+			"checksumSHA1": "zpjq6xHytHc3aAYfkaomcDmeAek=",
 			"path": "github.com/miekg/dns",
-			"revision": "d128d10d176b810543f8fecd089082a29d3f159d",
-			"revisionTime": "2020-04-28T07:24:18Z"
+			"revision": "ab67aa64230094bdd0167ee5360e00e0a250a3ac",
+			"revisionTime": "2021-08-04T16:16:52Z"
 		},
 		{
 			"checksumSHA1": "m2L8ohfZiFRsMW3iynaH/TWgnSY=",
@@ -608,10 +608,10 @@
 			"revisionTime": "2021-06-04T20:39:09Z"
 		},
 		{
-			"checksumSHA1": "OagdWaWcbCBQZR5bBGgGaK3nddE=",
+			"checksumSHA1": "jOxlnqvKSKn1SIkA5ldRe5lxqAc=",
 			"path": "github.com/refraction-networking/utls",
-			"revision": "186025ac7b77465439618d1aeb2a5e444714d1cc",
-			"revisionTime": "2020-07-29T01:25:36Z"
+			"revision": "0b2885c8c0d4467cfe98136748a9d011d0b8fff0",
+			"revisionTime": "2021-07-13T16:56:36Z"
 		},
 		{
 			"checksumSHA1": "Fn9JW8u40ABN9Uc9wuvquuyOB+8=",

@@ -25,14 +25,15 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // TacticsListener wraps a net.Listener and applies server-side implementation
 // of certain tactics parameters to accepted connections. Tactics filtering is
-// limited to GeoIP attributes as the client has not yet sent API paramaters.
+// limited to GeoIP attributes as the client has not yet sent API parameters.
+// GeoIP uses the immediate peer IP, and so TacticsListener is suitable only
+// for tactics that do not require the original client GeoIP when fronted.
 type TacticsListener struct {
 	net.Listener
 	support        *SupportServices
@@ -77,45 +78,20 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 		return nil, err
 	}
 
+	// Limitation: RemoteAddr is the immediate peer IP, which is not the original
+	// client IP in the case of fronting.
 	geoIPData := listener.geoIPLookup(
 		common.IPAddressFromAddr(conn.RemoteAddr()))
 
 	p, err := listener.support.ServerTacticsParametersCache.Get(geoIPData)
 	if err != nil {
+		conn.Close()
 		return nil, errors.Trace(err)
 	}
 
 	if p.IsNil() {
 		// No tactics are configured; use the accepted conn without customization.
 		return conn, nil
-	}
-
-	// Disconnect immediately if the clients tactics restricts usage of the
-	// fronting provider ID. The probability may be used to influence usage of a
-	// given fronting provider; but when only that provider works for a given
-	// client, and the probability is less than 1.0, the client can retry until
-	// it gets a successful coin flip.
-	//
-	// Clients will also skip candidates with restricted fronting provider IDs.
-	// The client-side probability, RestrictFrontingProviderIDsClientProbability,
-	// is applied independently of the server-side coin flip here.
-	//
-	//
-	// At this stage, GeoIP tactics filters are active, but handshake API
-	// parameters are not.
-	//
-	// See the comment in server.LoadConfig regarding fronting provider ID
-	// limitations.
-
-	if protocol.TunnelProtocolUsesFrontedMeek(listener.tunnelProtocol) &&
-		common.Contains(
-			p.Strings(parameters.RestrictFrontingProviderIDs),
-			listener.support.Config.GetFrontingProviderID()) {
-		if p.WeightedCoinFlip(
-			parameters.RestrictFrontingProviderIDsServerProbability) {
-			conn.Close()
-			return nil, nil
-		}
 	}
 
 	// Server-side fragmentation may be synchronized with client-side in two ways.

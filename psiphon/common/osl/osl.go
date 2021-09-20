@@ -294,6 +294,10 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 	for _, scheme := range config.Schemes {
 
+		if scheme == nil {
+			return nil, errors.TraceNew("invalid scheme")
+		}
+
 		epoch, err := time.Parse(time.RFC3339, scheme.Epoch)
 		if err != nil {
 			return nil, errors.Tracef("invalid epoch format: %s", err)
@@ -322,6 +326,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 
 		for index, seedSpec := range scheme.SeedSpecs {
+
+			if seedSpec == nil {
+				return nil, errors.TraceNew("invalid seed spec")
+			}
+
 			if len(seedSpec.ID) != KEY_LENGTH_BYTES {
 				return nil, errors.TraceNew("invalid seed spec ID")
 			}

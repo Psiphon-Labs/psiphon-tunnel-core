@@ -645,6 +645,14 @@ func DialMeek(
 		meek.meekObfuscatedKey = meekConfig.MeekObfuscatedKey
 		meek.meekObfuscatorPaddingSeed = meekConfig.MeekObfuscatorPaddingSeed
 		meek.clientTunnelProtocol = meekConfig.ClientTunnelProtocol
+
+	} else if meek.mode == MeekModePlaintextRoundTrip {
+
+		// MeekModeRelay and MeekModeObfuscatedRoundTrip set the Host header
+		// implicitly via meek.url; MeekModePlaintextRoundTrip does not use
+		// meek.url; it uses the RoundTrip input request.URL instead. So the
+		// Host header is set to meekConfig.HostHeader explicitly here.
+		meek.additionalHeaders.Add("Host", meekConfig.HostHeader)
 	}
 
 	return meek, nil
@@ -841,6 +849,10 @@ func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
 	}
 
 	requestCtx := request.Context()
+
+	// Clone the request to apply addtional headers without modifying the input.
+	request = request.Clone(requestCtx)
+	meek.addAdditionalHeaders(request)
 
 	// The setDialerRequestContext/CloseIdleConnections concurrency note in
 	// ObfuscatedRoundTrip applies to RoundTrip as well.

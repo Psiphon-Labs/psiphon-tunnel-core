@@ -309,6 +309,9 @@ func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration
 
 	// Process the response
 	response, err := dnsConn.ReadMsg()
+	if err == nil && response.MsgHdr.Id != query.MsgHdr.Id {
+		err = dns.ErrId
+	}
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}

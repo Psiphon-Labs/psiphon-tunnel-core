@@ -1260,8 +1260,10 @@ type sshClient struct {
 	isFirstTunnelInSession               bool
 	supportsServerRequests               bool
 	handshakeState                       handshakeState
-	udpChannel                           ssh.Channel
+	udpgwChannelHandler                  *udpgwPortForwardMultiplexer
+	totalUdpgwChannelCount               int
 	packetTunnelChannel                  ssh.Channel
+	totalPacketTunnelChannelCount        int
 	trafficRules                         TrafficRules
 	tcpTrafficState                      trafficState
 	udpTrafficState                      trafficState
@@ -2495,11 +2497,11 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 
 	// Intercept TCP port forwards to a specified udpgw server and handle directly.
 	// TODO: also support UDP explicitly, e.g. with a custom "direct-udp" channel type?
-	isUDPChannel := sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress != "" &&
+	isUdpgwChannel := sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress != "" &&
 		sshClient.sshServer.support.Config.UDPInterceptUdpgwServerAddress ==
 			net.JoinHostPort(directTcpipExtraData.HostToConnect, strconv.Itoa(int(directTcpipExtraData.PortToConnect)))
 
-	if isUDPChannel {
+	if isUdpgwChannel {
 
 		// Dispatch immediately. handleUDPChannel runs the udpgw protocol in its
 		// own worker goroutine.
@@ -2507,7 +2509,7 @@ func (sshClient *sshClient) handleNewTCPPortForwardChannel(
 		waitGroup.Add(1)
 		go func(channel ssh.NewChannel) {
 			defer waitGroup.Done()
-			sshClient.handleUDPChannel(channel)
+			sshClient.handleUdpgwChannel(channel)
 		}(newChannel)
 
 	} else {
@@ -2558,20 +2560,39 @@ func (sshClient *sshClient) setPacketTunnelChannel(channel ssh.Channel) {
 		sshClient.packetTunnelChannel.Close()
 	}
 	sshClient.packetTunnelChannel = channel
+	sshClient.totalPacketTunnelChannelCount += 1
 	sshClient.Unlock()
 }
 
-// setUDPChannel sets the single UDP channel for this sshClient.
-// Each sshClient may have only one concurrent UDP channel. Each
-// UDP channel multiplexes many UDP port forwards via the udpgw
-// protocol. Any existing UDP channel is closed.
-func (sshClient *sshClient) setUDPChannel(channel ssh.Channel) {
+// setUdpgwChannelHandler sets the single udpgw channel handler for this
+// sshClient. Each sshClient may have only one concurrent udpgw
+// channel/handler. Each udpgw channel multiplexes many UDP port forwards via
+// the udpgw protocol. Any existing udpgw channel/handler is closed.
+func (sshClient *sshClient) setUdpgwChannelHandler(udpgwChannelHandler *udpgwPortForwardMultiplexer) bool {
 	sshClient.Lock()
-	if sshClient.udpChannel != nil {
-		sshClient.udpChannel.Close()
+	if sshClient.udpgwChannelHandler != nil {
+		previousHandler := sshClient.udpgwChannelHandler
+		sshClient.udpgwChannelHandler = nil
+
+		// stop must be run without holding the sshClient mutex lock, as the
+		// udpgw goroutines may attempt to lock the same mutex. For example,
+		// udpgwPortForwardMultiplexer.run calls sshClient.establishedPortForward
+		// which calls sshClient.allocatePortForward.
+		sshClient.Unlock()
+		previousHandler.stop()
+		sshClient.Lock()
+
+		// In case some other channel has set the sshClient.udpgwChannelHandler
+		// in the meantime, fail. The caller should discard this channel/handler.
+		if sshClient.udpgwChannelHandler != nil {
+			sshClient.Unlock()
+			return false
+		}
 	}
-	sshClient.udpChannel = channel
+	sshClient.udpgwChannelHandler = udpgwChannelHandler
+	sshClient.totalUdpgwChannelCount += 1
 	sshClient.Unlock()
+	return true
 }
 
 var serverTunnelStatParams = append(
@@ -2616,6 +2637,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	// sshClient.udpTrafficState.peakConcurrentDialingPortForwardCount isn't meaningful
 	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
 	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
+	logFields["total_udpgw_channel_count"] = sshClient.totalUdpgwChannelCount
+	logFields["total_packet_tunnel_channel_count"] = sshClient.totalPacketTunnelChannelCount
 
 	logFields["pre_handshake_random_stream_count"] = sshClient.preHandshakeRandomStreamMetrics.count
 	logFields["pre_handshake_random_stream_upstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.upstreamBytes
@@ -2645,12 +2668,11 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		}
 	}
 
-	sshClient.Unlock()
-
-	// Note: unlock before use is only safe as long as referenced sshClient data,
-	// such as slices in handshakeState, is read-only after initially set.
-
+	// Retain lock when invoking LogRawFieldsWithTimestamp to block any
+	// concurrent writes to variables referenced by logFields.
 	log.LogRawFieldsWithTimestamp(logFields)
+
+	sshClient.Unlock()
 }
 
 var blocklistHitsStatParams = []requestParamSpec{
@@ -2827,7 +2849,7 @@ func (sshClient *sshClient) enqueueDisallowedTrafficAlertRequest() {
 
 	sshClient.enqueueAlertRequest(
 		protocol.AlertRequest{
-			Reason:     protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC,
+			Reason:     reason,
 			ActionURLs: actionURLs,
 		})
 }
