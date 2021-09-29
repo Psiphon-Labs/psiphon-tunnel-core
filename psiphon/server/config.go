@@ -175,6 +175,12 @@ type Config struct {
 	// passthrough servers only.
 	LegacyPassthrough bool
 
+	// EnableGQUIC indicates whether to enable legacy gQUIC QUIC-OSSH
+	// versions, for backwards compatibility with all versions used by older
+	// clients. Enabling gQUIC degrades the anti-probing stance of QUIC-OSSH,
+	// as the legacy gQUIC stack will respond to probing packets.
+	EnableGQUIC bool
+
 	// SSHPrivateKey is the SSH host key. The same key is used for
 	// all protocols, run by this server instance, which use SSH.
 	SSHPrivateKey string

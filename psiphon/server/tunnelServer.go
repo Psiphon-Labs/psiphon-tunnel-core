@@ -170,7 +170,8 @@ func (server *TunnelServer) Run() error {
 						errors.Trace(err), LogFields(logFields))
 				},
 				localAddress,
-				support.Config.ObfuscatedSSHKey)
+				support.Config.ObfuscatedSSHKey,
+				support.Config.EnableGQUIC)
 
 		} else if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
 

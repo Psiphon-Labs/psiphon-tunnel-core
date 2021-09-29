@@ -127,8 +127,9 @@ var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 
 // Listener is a net.Listener.
 type Listener struct {
-	*muxListener
-	clientRandomHistory *obfuscator.SeedHistory
+	quicListener
+	obfuscatedPacketConn *ObfuscatedPacketConn
+	clientRandomHistory  *obfuscator.SeedHistory
 }
 
 // Listen creates a new Listener.
@@ -136,7 +137,8 @@ func Listen(
 	logger common.Logger,
 	irregularTunnelLogger func(string, error, common.LogFields),
 	address string,
-	obfuscationKey string) (net.Listener, error) {
+	obfuscationKey string,
+	enableGQUIC bool) (net.Listener, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(
 		values.GetHostName())
@@ -218,20 +220,90 @@ func Listen(
 		return ok
 	}
 
-	// Note that, due to nature of muxListener, full accepts may happen before
-	// return and caller calls Accept.
+	var quicListener quicListener
 
-	muxListener, err := newMuxListener(
-		logger, verifyClientHelloRandom, obfuscatedPacketConn, tlsCertificate)
-	if err != nil {
-		obfuscatedPacketConn.Close()
-		return nil, errors.Trace(err)
+	if !enableGQUIC {
+
+		// When gQUIC is disabled, skip the muxListener entirely. This allows
+		// quic-go to enable ECN operations as the packet conn is a
+		// quic-goOOBCapablePacketConn; this provides some performance
+		// optimizations and also generate packets that may be harder to
+		// fingerprint, due to lack of ECN bits in IP packets otherwise.
+		// Skipping muxListener also avoids the additional overhead of
+		// pumping read packets though mux channels.
+
+		tlsConfig, ietfQUICConfig := makeIETFConfig(
+			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate)
+
+		listener, err := ietf_quic.Listen(
+			obfuscatedPacketConn, tlsConfig, ietfQUICConfig)
+		if err != nil {
+			obfuscatedPacketConn.Close()
+			return nil, errors.Trace(err)
+		}
+
+		quicListener = &ietfQUICListener{Listener: listener}
+
+	} else {
+
+		// Note that, due to nature of muxListener, full accepts may happen before
+		// return and caller calls Accept.
+
+		muxListener, err := newMuxListener(
+			logger, verifyClientHelloRandom, obfuscatedPacketConn, tlsCertificate)
+		if err != nil {
+			obfuscatedPacketConn.Close()
+			return nil, errors.Trace(err)
+		}
+
+		quicListener = muxListener
 	}
 
 	return &Listener{
-		muxListener:         muxListener,
-		clientRandomHistory: clientRandomHistory,
+		quicListener:         quicListener,
+		obfuscatedPacketConn: obfuscatedPacketConn,
+		clientRandomHistory:  clientRandomHistory,
 	}, nil
+}
+
+func makeIETFConfig(
+	conn *ObfuscatedPacketConn,
+	verifyClientHelloRandom func(net.Addr, []byte) bool,
+	tlsCertificate tls.Certificate) (*tls.Config, *ietf_quic.Config) {
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		NextProtos:   []string{getALPN(ietfQUIC1VersionNumber)},
+	}
+
+	ietfQUICConfig := &ietf_quic.Config{
+		HandshakeIdleTimeout:  SERVER_HANDSHAKE_TIMEOUT,
+		MaxIdleTimeout:        serverIdleTimeout,
+		MaxIncomingStreams:    1,
+		MaxIncomingUniStreams: -1,
+		KeepAlive:             true,
+
+		// The quic-go server may respond with a version negotiation packet
+		// before reaching the Initial packet processing with its
+		// anti-probing defense. This may happen even for a malformed packet.
+		// To prevent all responses to probers, version negotiation is
+		// disabled, which disables sending these packets. The fact that the
+		// server does not issue version negotiation packets may be a
+		// fingerprint itself, but, regardless, probers cannot ellicit any
+		// reponse from the server without providing a well-formed Initial
+		// packet with a valid Client Hello random value.
+		//
+		// Limitation: once version negotiate is required, the order of
+		// quic-go operations may need to be changed in order to first check
+		// the Initial/Client Hello, and then issue any required version
+		// negotiation packet.
+		DisableVersionNegotiationPackets: true,
+
+		VerifyClientHelloRandom:       verifyClientHelloRandom,
+		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
+	}
+
+	return tlsConfig, ietfQUICConfig
 }
 
 // Accept returns a net.Conn that wraps a single QUIC session and stream. The
@@ -240,7 +312,7 @@ func Listen(
 // net.Conn will perform the blocking AcceptStream.
 func (listener *Listener) Accept() (net.Conn, error) {
 
-	session, err := listener.muxListener.Accept()
+	session, err := listener.quicListener.Accept()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -249,6 +321,16 @@ func (listener *Listener) Accept() (net.Conn, error) {
 		session:              session,
 		deferredAcceptStream: true,
 	}, nil
+}
+
+func (listener *Listener) Close() error {
+
+	// First close the underlying packet conn to ensure all quic-go goroutines
+	// as well as any blocking Accept call goroutine is interrupted. Note
+	// that muxListener does this as well, so this is for the IETF-only case.
+	_ = listener.obfuscatedPacketConn.Close()
+
+	return listener.quicListener.Close()
 }
 
 // Dial establishes a new QUIC session and stream to the server specified by
@@ -719,6 +801,7 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 
 type quicListener interface {
 	Close() error
+	Addr() net.Addr
 	Accept() (quicSession, error)
 }
 
@@ -1010,7 +1093,7 @@ func (conn *muxPacketConn) SetWriteDeadline(t time.Time) error {
 // https://godoc.org/github.com/lucas-clemente/quic-go#ECNCapablePacketConn.
 
 func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
-	c, ok := conn.listener.conn.PacketConn.(interface {
+	c, ok := conn.listener.conn.OOBCapablePacketConn.(interface {
 		SetReadBuffer(int) error
 	})
 	if !ok {
@@ -1020,7 +1103,7 @@ func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
 }
 
 func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {
-	c, ok := conn.listener.conn.PacketConn.(interface {
+	c, ok := conn.listener.conn.OOBCapablePacketConn.(interface {
 		SyscallConn() (syscall.RawConn, error)
 	})
 	if !ok {
@@ -1067,37 +1150,8 @@ func newMuxListener(
 
 	listener.ietfQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{tlsCertificate},
-		NextProtos:   []string{getALPN(ietfQUIC1VersionNumber)},
-	}
-
-	ietfQUICConfig := &ietf_quic.Config{
-		HandshakeIdleTimeout:  SERVER_HANDSHAKE_TIMEOUT,
-		MaxIdleTimeout:        serverIdleTimeout,
-		MaxIncomingStreams:    1,
-		MaxIncomingUniStreams: -1,
-		KeepAlive:             true,
-
-		// The quic-go server may respond with a version negotiation packet
-		// before reaching the Initial packet processing with its
-		// anti-probing defense. This may happen even for a malformed packet.
-		// To prevent all responses to probers, version negotiation is
-		// disabled, which disables sending these packets. The fact that the
-		// server does not issue version negotiation packets may be a
-		// fingerprint itself, but, regardless, probers cannot ellicit any
-		// reponse from the server without providing a well-formed Initial
-		// packet with a valid Client Hello random value.
-		//
-		// Limitation: once version negotiate is required, the order of
-		// quic-go operations may need to be changed in order to first check
-		// the Initial/Client Hello, and then issue any required version
-		// negotiation packet.
-		DisableVersionNegotiationPackets: true,
-
-		VerifyClientHelloRandom:       verifyClientHelloRandom,
-		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
-	}
+	tlsConfig, ietfQUICConfig := makeIETFConfig(
+		conn, verifyClientHelloRandom, tlsCertificate)
 
 	il, err := ietf_quic.Listen(listener.ietfQUICConn, tlsConfig, ietfQUICConfig)
 	if err != nil {
@@ -1157,7 +1211,7 @@ func (listener *muxListener) relayPackets() {
 
 		var isIETF bool
 		var err error
-		p.size, p.addr, isIETF, err = listener.conn.readFromWithType(p.data)
+		p.size, _, _, p.addr, isIETF, err = listener.conn.readPacketWithType(p.data, nil)
 		if err != nil {
 			if listener.logger != nil {
 				message := "readFromWithType failed"

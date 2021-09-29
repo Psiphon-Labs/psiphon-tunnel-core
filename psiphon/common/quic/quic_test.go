@@ -42,18 +42,26 @@ import (
 func TestQUIC(t *testing.T) {
 	for quicVersion := range supportedVersionNumbers {
 		t.Run(fmt.Sprintf("%s", quicVersion), func(t *testing.T) {
-			runQUIC(t, quicVersion, false)
+			runQUIC(t, quicVersion, true, false)
 		})
 		if isIETF(quicVersion) {
 			t.Run(fmt.Sprintf("%s (invoke anti-probing)", quicVersion), func(t *testing.T) {
-				runQUIC(t, quicVersion, true)
+				runQUIC(t, quicVersion, true, true)
+			})
+		}
+		if isIETF(quicVersion) {
+			t.Run(fmt.Sprintf("%s (disable gQUIC)", quicVersion), func(t *testing.T) {
+				runQUIC(t, quicVersion, false, false)
 			})
 		}
 	}
 }
 
 func runQUIC(
-	t *testing.T, quicVersion string, invokeAntiProbing bool) {
+	t *testing.T,
+	quicVersion string,
+	enableGQUIC bool,
+	invokeAntiProbing bool) {
 
 	initGoroutines := getGoroutines()
 
@@ -82,7 +90,11 @@ func runQUIC(
 	obfuscationKey := prng.HexString(32)
 
 	listener, err := Listen(
-		nil, irregularTunnelLogger, "127.0.0.1:0", obfuscationKey)
+		nil,
+		irregularTunnelLogger,
+		"127.0.0.1:0",
+		obfuscationKey,
+		enableGQUIC)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}
