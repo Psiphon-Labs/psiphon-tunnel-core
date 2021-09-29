@@ -111,7 +111,7 @@ func (p *packetContents) ToAckHandlerPacket(now time.Time, q *retransmissionQueu
 	}
 }
 
-func getMaxPacketSize(addr net.Addr) protocol.ByteCount {
+func getMaxPacketSize(addr net.Addr, maxPacketSizeAdustment int) protocol.ByteCount {
 	maxSize := protocol.ByteCount(protocol.MinInitialPacketSize)
 	// If this is not a UDP address, we don't know anything about the MTU.
 	// Use the minimum size of an Initial packet as the max packet size.
@@ -121,6 +121,14 @@ func getMaxPacketSize(addr net.Addr) protocol.ByteCount {
 		} else {
 			maxSize = protocol.InitialPacketSizeIPv6
 		}
+
+		// [Psiphon]
+		// Adjust the max packet size to allow for obfuscation overhead.
+		// TODO: internal/congestion.cubicSender continues to use initialMaxDatagramSize = protocol.InitialPacketSizeIPv4
+		if maxSize > protocol.ByteCount(maxPacketSizeAdustment) {
+			maxSize -= protocol.ByteCount(maxPacketSizeAdustment)
+		}
+
 	}
 	return maxSize
 }
@@ -180,6 +188,10 @@ func newPacketPacker(
 	packetNumberManager packetNumberManager,
 	retransmissionQueue *retransmissionQueue,
 	remoteAddr net.Addr, // only used for determining the max packet size
+
+	// [Psiphon]
+	maxPacketSizeAdustment int,
+
 	cryptoSetup sealingManager,
 	framer frameSource,
 	acks ackFrameSource,
@@ -200,7 +212,7 @@ func newPacketPacker(
 		framer:              framer,
 		acks:                acks,
 		pnManager:           packetNumberManager,
-		maxPacketSize:       getMaxPacketSize(remoteAddr),
+		maxPacketSize:       getMaxPacketSize(remoteAddr, maxPacketSizeAdustment),
 	}
 }
 

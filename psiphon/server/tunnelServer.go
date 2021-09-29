@@ -164,6 +164,11 @@ func (server *TunnelServer) Run() error {
 
 			listener, err = quic.Listen(
 				CommonLogger(log),
+				func(clientAddress string, err error, logFields common.LogFields) {
+					logIrregularTunnel(
+						support, tunnelProtocol, listenPort, clientAddress,
+						errors.Trace(err), LogFields(logFields))
+				},
 				localAddress,
 				support.Config.ObfuscatedSSHKey)
 

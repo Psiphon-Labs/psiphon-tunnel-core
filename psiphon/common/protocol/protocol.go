@@ -402,6 +402,7 @@ const (
 	QUIC_VERSION_V1            = "QUICv1"
 	QUIC_VERSION_RANDOMIZED_V1 = "RANDOMIZED-QUICv1"
 	QUIC_VERSION_OBFUSCATED_V1 = "OBFUSCATED-QUICv1"
+	QUIC_VERSION_DECOY_V1      = "DECOY-QUICv1"
 )
 
 var SupportedQUICVersions = QUICVersions{
@@ -412,6 +413,7 @@ var SupportedQUICVersions = QUICVersions{
 	QUIC_VERSION_V1,
 	QUIC_VERSION_RANDOMIZED_V1,
 	QUIC_VERSION_OBFUSCATED_V1,
+	QUIC_VERSION_DECOY_V1,
 }
 
 var legacyQUICVersions = QUICVersions{
@@ -423,7 +425,9 @@ func QUICVersionHasRandomizedClientHello(version string) bool {
 }
 
 func QUICVersionIsObfuscated(version string) bool {
-	return version == QUIC_VERSION_OBFUSCATED || version == QUIC_VERSION_OBFUSCATED_V1
+	return version == QUIC_VERSION_OBFUSCATED ||
+		version == QUIC_VERSION_OBFUSCATED_V1 ||
+		version == QUIC_VERSION_DECOY_V1
 }
 
 type QUICVersions []string

@@ -97,6 +97,16 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, ecdheParameters, error) {
 	// [Psiphon]
 	if c.extraConfig != nil {
 		hello.PRNG = c.extraConfig.ClientHelloPRNG
+		if c.extraConfig.GetClientHelloRandom != nil {
+			helloRandom, err := c.extraConfig.GetClientHelloRandom()
+			if err == nil && len(helloRandom) != 32 {
+				err = errors.New("invalid length")
+			}
+			if err != nil {
+				return nil, nil, errors.New("tls: GetClientHelloRandom failed: " + err.Error())
+			}
+			copy(hello.random, helloRandom)
+		}
 	}
 
 	if c.handshakes > 0 {
@@ -123,9 +133,14 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, ecdheParameters, error) {
 		hello.cipherSuites = append(hello.cipherSuites, suiteId)
 	}
 
-	_, err := io.ReadFull(config.rand(), hello.random)
-	if err != nil {
-		return nil, nil, errors.New("tls: short read from Rand: " + err.Error())
+	// [Psiphon]
+	var err error
+	if c.extraConfig == nil || c.extraConfig.GetClientHelloRandom == nil {
+
+		_, err = io.ReadFull(config.rand(), hello.random)
+		if err != nil {
+			return nil, nil, errors.New("tls: short read from Rand: " + err.Error())
+		}
 	}
 
 	// A random session ID is used to detect when the server accepted a ticket

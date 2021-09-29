@@ -1,3 +1,4 @@
+//go:build !PSIPHON_DISABLE_QUIC
 // +build !PSIPHON_DISABLE_QUIC
 
 /*
@@ -56,6 +57,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
@@ -87,15 +89,29 @@ var supportedVersionNumbers = map[string]uint32{
 	protocol.QUIC_VERSION_V1:            ietfQUIC1VersionNumber,
 	protocol.QUIC_VERSION_RANDOMIZED_V1: ietfQUIC1VersionNumber,
 	protocol.QUIC_VERSION_OBFUSCATED_V1: uint32(ietfQUIC1VersionNumber),
+	protocol.QUIC_VERSION_DECOY_V1:      uint32(ietfQUIC1VersionNumber),
 }
 
 func isObfuscated(quicVersion string) bool {
 	return quicVersion == protocol.QUIC_VERSION_OBFUSCATED ||
-		quicVersion == protocol.QUIC_VERSION_OBFUSCATED_V1
+		quicVersion == protocol.QUIC_VERSION_OBFUSCATED_V1 ||
+		quicVersion == protocol.QUIC_VERSION_DECOY_V1
+}
+
+func isDecoy(quicVersion string) bool {
+	return quicVersion == protocol.QUIC_VERSION_DECOY_V1
 }
 
 func isClientHelloRandomized(quicVersion string) bool {
 	return quicVersion == protocol.QUIC_VERSION_RANDOMIZED_V1
+}
+
+func isIETF(quicVersion string) bool {
+	versionNumber, ok := supportedVersionNumbers[quicVersion]
+	if !ok {
+		return false
+	}
+	return isIETFVersion(versionNumber)
 }
 
 func isIETFVersion(versionNumber uint32) bool {
@@ -112,11 +128,13 @@ var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 // Listener is a net.Listener.
 type Listener struct {
 	*muxListener
+	clientRandomHistory *obfuscator.SeedHistory
 }
 
 // Listen creates a new Listener.
 func Listen(
 	logger common.Logger,
+	irregularTunnelLogger func(string, error, common.LogFields),
 	address string,
 	obfuscationKey string) (net.Listener, error) {
 
@@ -148,22 +166,72 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
-	obfuscatedPacketConn, err := NewObfuscatedPacketConn(udpConn, true, obfuscationKey, seed)
+	obfuscatedPacketConn, err := NewObfuscatedPacketConn(
+		udpConn, true, false, false, obfuscationKey, seed)
 	if err != nil {
 		udpConn.Close()
 		return nil, errors.Trace(err)
 	}
 
+	// QUIC clients must prove knowledge of the obfuscated key via a message
+	// sent in the TLS ClientHello random field, or receive no UDP packets
+	// back from the server. This anti-probing mechanism is implemented using
+	// the existing Passthrough message and SeedHistory replay detection
+	// mechanisms. The replay history TTL is set to the validity period of
+	// the passthrough message.
+	//
+	// Irregular events are logged for invalid client activity.
+
+	clientRandomHistory := obfuscator.NewSeedHistory(
+		&obfuscator.SeedHistoryConfig{SeedTTL: obfuscator.TLS_PASSTHROUGH_TIME_PERIOD})
+
+	verifyClientHelloRandom := func(remoteAddr net.Addr, clientHelloRandom []byte) bool {
+
+		ok := obfuscator.VerifyTLSPassthroughMessage(
+			true, obfuscationKey, clientHelloRandom)
+		if !ok {
+			irregularTunnelLogger(
+				common.IPAddressFromAddr(remoteAddr),
+				errors.TraceNew("invalid client random message"),
+				nil)
+			return false
+		}
+
+		// Replay history is set to non-strict mode, allowing for a legitimate
+		// client to resend its Initial packet, as may happen. Since the
+		// source _port_ should be the same as the source IP in this case, we use
+		// the full IP:port value as the client address from which a replay is
+		// allowed.
+		//
+		// The non-strict case where ok is true and logFields is not nil is
+		// ignored, and nothing is logged in that scenario.
+
+		ok, logFields := clientRandomHistory.AddNew(
+			false, remoteAddr.String(), "client-hello-random", clientHelloRandom)
+		if !ok && logFields != nil {
+			irregularTunnelLogger(
+				common.IPAddressFromAddr(remoteAddr),
+				errors.TraceNew("duplicate client random message"),
+				*logFields)
+		}
+
+		return ok
+	}
+
 	// Note that, due to nature of muxListener, full accepts may happen before
 	// return and caller calls Accept.
 
-	listener, err := newMuxListener(logger, obfuscatedPacketConn, tlsCertificate)
+	muxListener, err := newMuxListener(
+		logger, verifyClientHelloRandom, obfuscatedPacketConn, tlsCertificate)
 	if err != nil {
 		obfuscatedPacketConn.Close()
 		return nil, errors.Trace(err)
 	}
 
-	return &Listener{muxListener: listener}, nil
+	return &Listener{
+		muxListener:         muxListener,
+		clientRandomHistory: clientRandomHistory,
+	}, nil
 }
 
 // Accept returns a net.Conn that wraps a single QUIC session and stream. The
@@ -210,7 +278,7 @@ func Dial(
 		return nil, errors.TraceNew("missing client hello randomization values")
 	}
 
-	if isObfuscated(quicVersion) && (obfuscationPaddingSeed == nil || obfuscationKey == "") {
+	if isObfuscated(quicVersion) && (obfuscationPaddingSeed == nil) || obfuscationKey == "" {
 		return nil, errors.TraceNew("missing obfuscation values")
 	}
 
@@ -226,13 +294,48 @@ func Dial(
 		return nil, errors.Tracef("invalid destination port: %d", remoteAddr.Port)
 	}
 
+	maxPacketSizeAdjustment := 0
+
 	if isObfuscated(quicVersion) {
 		obfuscatedPacketConn, err := NewObfuscatedPacketConn(
-			packetConn, false, obfuscationKey, obfuscationPaddingSeed)
+			packetConn,
+			false,
+			isIETFVersion(versionNumber),
+			isDecoy(quicVersion),
+			obfuscationKey,
+			obfuscationPaddingSeed)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		packetConn = obfuscatedPacketConn
+
+		// Reserve space for packet obfuscation overhead so that quic-go will
+		// continue to produce packets of max size 1280.
+		maxPacketSizeAdjustment = OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT
+	}
+
+	// As an anti-probing measure, QUIC clients must prove knowledge of the
+	// server obfuscation key in the first client packet sent to the server. In
+	// the case of QUIC, the first packet, the Initial packet, contains a TLS
+	// Client Hello, and we set the client random field to a value that both
+	// proves knowledge of the obfuscation key and is indistiguishable from
+	// random. This is the same "passthrough" technique used for TLS, although
+	// for QUIC the server simply doesn't respond to any packets instead of
+	// passing traffic through to a different server.
+	//
+	// Limitation: the legacy gQUIC implementation does not support this
+	// anti-probling measure; gQUIC must be disabled to ensure no response
+	// from the server.
+
+	var getClientHelloRandom func() ([]byte, error)
+	if obfuscationKey != "" {
+		getClientHelloRandom = func() ([]byte, error) {
+			random, err := obfuscator.MakeTLSPassthroughMessage(true, obfuscationKey)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return random, nil
+		}
 	}
 
 	session, err := dialQUIC(
@@ -242,6 +345,8 @@ func Dial(
 		quicSNIAddress,
 		versionNumber,
 		clientHelloSeed,
+		getClientHelloRandom,
+		maxPacketSizeAdjustment,
 		false)
 	if err != nil {
 		packetConn.Close()
@@ -574,6 +679,8 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 		t.quicSNIAddress,
 		versionNumber,
 		t.clientHelloSeed,
+		nil,
+		0,
 		true)
 	if err != nil {
 		packetConn.Close()
@@ -735,6 +842,8 @@ func dialQUIC(
 	quicSNIAddress string,
 	versionNumber uint32,
 	clientHelloSeed *prng.Seed,
+	getClientHelloRandom func() ([]byte, error),
+	clientMaxPacketSizeAdjustment int,
 	dialEarly bool) (quicSession, error) {
 
 	if isIETFVersion(versionNumber) {
@@ -744,7 +853,9 @@ func dialQUIC(
 			KeepAlive:            true,
 			Versions: []ietf_quic.VersionNumber{
 				ietf_quic.VersionNumber(versionNumber)},
-			ClientHelloSeed: clientHelloSeed,
+			ClientHelloSeed:               clientHelloSeed,
+			GetClientHelloRandom:          getClientHelloRandom,
+			ClientMaxPacketSizeAdjustment: clientMaxPacketSizeAdjustment,
 		}
 
 		deadline, ok := ctx.Deadline()
@@ -936,6 +1047,7 @@ type muxListener struct {
 
 func newMuxListener(
 	logger common.Logger,
+	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	conn *ObfuscatedPacketConn,
 	tlsCertificate tls.Certificate) (*muxListener, error) {
 
@@ -966,6 +1078,25 @@ func newMuxListener(
 		MaxIncomingStreams:    1,
 		MaxIncomingUniStreams: -1,
 		KeepAlive:             true,
+
+		// The quic-go server may respond with a version negotiation packet
+		// before reaching the Initial packet processing with its
+		// anti-probing defense. This may happen even for a malformed packet.
+		// To prevent all responses to probers, version negotiation is
+		// disabled, which disables sending these packets. The fact that the
+		// server does not issue version negotiation packets may be a
+		// fingerprint itself, but, regardless, probers cannot ellicit any
+		// reponse from the server without providing a well-formed Initial
+		// packet with a valid Client Hello random value.
+		//
+		// Limitation: once version negotiate is required, the order of
+		// quic-go operations may need to be changed in order to first check
+		// the Initial/Client Hello, and then issue any required version
+		// negotiation packet.
+		DisableVersionNegotiationPackets: true,
+
+		VerifyClientHelloRandom:       verifyClientHelloRandom,
+		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
 	}
 
 	il, err := ietf_quic.Listen(listener.ietfQUICConn, tlsConfig, ietfQUICConfig)

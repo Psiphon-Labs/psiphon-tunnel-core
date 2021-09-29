@@ -51,11 +51,14 @@ const (
 func MakeTLSPassthroughMessage(
 	useTimeFactor bool, obfuscatedKey string) ([]byte, error) {
 
-	passthroughKey := derivePassthroughKey(useTimeFactor, obfuscatedKey)
+	passthroughKey, err := derivePassthroughKey(useTimeFactor, obfuscatedKey)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	message := make([]byte, TLS_PASSTHROUGH_MESSAGE_SIZE)
 
-	_, err := rand.Read(message[0:TLS_PASSTHROUGH_NONCE_SIZE])
+	_, err = rand.Read(message[0:TLS_PASSTHROUGH_NONCE_SIZE])
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -83,7 +86,11 @@ func VerifyTLSPassthroughMessage(
 		message = stub[:]
 	}
 
-	passthroughKey := derivePassthroughKey(useTimeFactor, obfuscatedKey)
+	passthroughKey, err := derivePassthroughKey(useTimeFactor, obfuscatedKey)
+	if err != nil {
+		// TODO: log error
+		return false
+	}
 
 	h := hmac.New(sha256.New, passthroughKey)
 	h.Write(message[0:TLS_PASSTHROUGH_NONCE_SIZE])
@@ -99,7 +106,7 @@ func VerifyTLSPassthroughMessage(
 var timePeriodSeconds = int64(TLS_PASSTHROUGH_TIME_PERIOD / time.Second)
 
 func derivePassthroughKey(
-	useTimeFactor bool, obfuscatedKey string) []byte {
+	useTimeFactor bool, obfuscatedKey string) ([]byte, error) {
 
 	secret := []byte(obfuscatedKey)
 
@@ -132,7 +139,10 @@ func derivePassthroughKey(
 
 	key := make([]byte, TLS_PASSTHROUGH_KEY_SIZE)
 
-	_, _ = io.ReadFull(hkdf.New(sha256.New, secret, salt, nil), key)
+	_, err := io.ReadFull(hkdf.New(sha256.New, secret, salt, nil), key)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
-	return key
+	return key, nil
 }
