@@ -9,9 +9,12 @@ if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 # Note:
 #   clangwrap.sh needs to be updated when the Go version changes.
 #   The last version was:
-#   https://github.com/golang/go/blob/go1.14.12/misc/ios/clangwrap.sh
+#   https://github.com/golang/go/blob/go1.17.1/misc/ios/clangwrap.sh
 #     - with a patch to lower -mios-version-min to 7.0
-GO_VERSION_REQUIRED="1.14.12"
+GO_VERSION_REQUIRED="1.17.1"
+
+# At this time, we don't support modules
+export GO111MODULE=off
 
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
@@ -113,17 +116,13 @@ build_for_ios () {
 
   prepare_build darwin
 
-  CC=${BASE_DIR}/clangwrap.sh \
-  CXX=${BASE_DIR}/clangwrap.sh \
-  CGO_LDFLAGS="-arch armv7 -isysroot $(xcrun --sdk iphoneos --show-sdk-path)" \
-  CGO_CFLAGS=-isysroot$(xcrun --sdk iphoneos --show-sdk-path) \
-  CGO_ENABLED=1 GOOS=darwin GOARCH=arm GOARM=7 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm7/libpsiphontunnel.a PsiphonTunnel.go
+  # As of Go 1.15, "ios/arm" is no longer supported: https://golang.org/doc/go1.15#darwin
 
   CC=${BASE_DIR}/clangwrap.sh \
   CXX=${BASE_DIR}/clangwrap.sh \
   CGO_LDFLAGS="-arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path)" \
   CGO_CFLAGS=-isysroot$(xcrun --sdk iphoneos --show-sdk-path) \
-  CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm64/libpsiphontunnel.a PsiphonTunnel.go
+  CGO_ENABLED=1 GOOS=ios GOARCH=arm64 go build -buildmode=c-archive -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o ${IOS_BUILD_DIR}/arm64/libpsiphontunnel.a PsiphonTunnel.go
 
 }
 
