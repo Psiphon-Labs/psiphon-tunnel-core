@@ -112,7 +112,7 @@ public class PsiphonTunnel {
         default public void onClientRegion(String region) {}
         default public void onClientUpgradeDownloaded(String filename) {}
         default public void onClientIsLatestVersion() {}
-        default public void onSplitTunnelRegion(String region) {}
+        default public void onSplitTunnelRegions(List<String> regions) {}
         default public void onUntunneledAddress(String address) {}
         default public void onBytesTransferred(long sent, long received) {}
         default public void onStartedWaitingForNetworkConnectivity() {}
@@ -929,8 +929,13 @@ public class PsiphonTunnel {
                 mHostService.onHomepage(notice.getJSONObject("data").getString("url"));
             } else if (noticeType.equals("ClientRegion")) {
                 mHostService.onClientRegion(notice.getJSONObject("data").getString("region"));
-            } else if (noticeType.equals("SplitTunnelRegion")) {
-                mHostService.onSplitTunnelRegion(notice.getJSONObject("data").getString("region"));
+            } else if (noticeType.equals("SplitTunnelRegions")) {
+                JSONArray splitTunnelRegions = notice.getJSONObject("data").getJSONArray("regions");
+                ArrayList<String> regions = new ArrayList<String>();
+                for (int i=0; i<splitTunnelRegions.length(); i++) {
+                    regions.add(splitTunnelRegions.getString(i));
+                }
+                mHostService.onSplitTunnelRegions(regions);
             } else if (noticeType.equals("Untunneled")) {
                 mHostService.onUntunneledAddress(notice.getJSONObject("data").getString("address"));
             } else if (noticeType.equals("BytesTransferred")) {

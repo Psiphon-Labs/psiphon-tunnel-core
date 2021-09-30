@@ -452,7 +452,7 @@ func (tunnel *Tunnel) DialTCPChannel(
 	downstreamConn net.Conn) (net.Conn, bool, error) {
 
 	channelType := "direct-tcpip"
-	if alwaysTunneled && tunnel.config.EnableSplitTunnel {
+	if alwaysTunneled && tunnel.config.IsSplitTunnelEnabled() {
 		// This channel type is only necessary in split tunnel mode.
 		channelType = protocol.TCP_PORT_FORWARD_NO_SPLIT_TUNNEL_TYPE
 	}

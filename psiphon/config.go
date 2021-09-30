@@ -129,10 +129,18 @@ type Config struct {
 	// in any country is selected.
 	EgressRegion string
 
-	// EnableSplitTunnel toggles split tunnel mode. When enabled, TCP port
-	// forward destinations that resolve to the same GeoIP country as the client
-	// are connected to directly, untunneled.
-	EnableSplitTunnel bool
+	// SplitTunnelOwnRegion enables split tunnel mode for the client's own
+	// country. When enabled, TCP port forward destinations that resolve to
+	// the same GeoIP country as the client are connected to directly,
+	// untunneled.
+	SplitTunnelOwnRegion bool
+
+	// SplitTunnelRegions enables selected split tunnel mode in which the
+	// client specifies a list of ISO 3166-1 alpha-2 country codes for which
+	// traffic should be untunneled. TCP port forwards destined to any
+	// country specified in SplitTunnelRegions will be untunneled, regardless
+	// of whether SplitTunnelOwnRegion is on or off.
+	SplitTunnelRegions []string
 
 	// ListenInterface specifies which interface to listen on.  If no
 	// interface is provided then listen on 127.0.0.1. If 'any' is provided
@@ -1284,6 +1292,12 @@ func (config *Config) GetSponsorID() string {
 	config.dynamicConfigMutex.Lock()
 	defer config.dynamicConfigMutex.Unlock()
 	return config.sponsorID
+}
+
+// IsSplitTunnelEnabled indicates if split tunnel mode is enabled, either for
+// the client's own country, a specified list of countries, or both.
+func (config *Config) IsSplitTunnelEnabled() bool {
+	return config.SplitTunnelOwnRegion || len(config.SplitTunnelRegions) > 1
 }
 
 // GetAuthorizations returns the current client authorizations.

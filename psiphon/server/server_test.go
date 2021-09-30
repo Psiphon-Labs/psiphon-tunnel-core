@@ -1009,7 +1009,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.EmitServerAlerts = true
 
 	if runConfig.doSplitTunnel {
-		clientConfig.EnableSplitTunnel = true
+		clientConfig.SplitTunnelOwnRegion = true
 	}
 
 	if !runConfig.omitAuthorization {

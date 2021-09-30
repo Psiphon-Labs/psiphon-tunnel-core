@@ -212,9 +212,27 @@ func handshakeAPIRequestHandler(
 	// the client, a value of 0 will be used.
 	establishedTunnelsCount, _ := getIntStringRequestParam(params, "established_tunnels_count")
 
-	// splitTunnel indicates if the client is using split tunnel mode. When
-	// omitted by the client, the value will be false.
-	splitTunnel, _ := getBoolStringRequestParam(params, "split_tunnel")
+	// splitTunnelOwnRegion indicates if the client is requesting split tunnel
+	// mode to be applied to the client's own country. When omitted by the
+	// client, the value will be false.
+	//
+	// When split_tunnel_regions is non-empty, split tunnel mode will be
+	// applied for the specified country codes. When omitted by the client,
+	// the value will be an empty slice.
+	splitTunnelOwnRegion, _ := getBoolStringRequestParam(params, "split_tunnel")
+	splitTunnelOtherRegions, _ := getStringArrayRequestParam(params, "split_tunnel_regions")
+
+	ownRegion := ""
+	if splitTunnelOwnRegion {
+		ownRegion = geoIPData.Country
+	}
+	var splitTunnelLookup *splitTunnelLookup
+	if ownRegion != "" || len(splitTunnelOtherRegions) > 0 {
+		splitTunnelLookup, err = newSplitTunnelLookup(ownRegion, splitTunnelOtherRegions)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
 
 	var authorizations []string
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
@@ -243,7 +261,7 @@ func handshakeAPIRequestHandler(
 			apiParams:               copyBaseSessionAndDialParams(params),
 			expectDomainBytes:       len(httpsRequestRegexes) > 0,
 			establishedTunnelsCount: establishedTunnelsCount,
-			splitTunnel:             splitTunnel,
+			splitTunnelLookup:       splitTunnelLookup,
 		},
 		authorizations)
 	if err != nil {
@@ -890,6 +908,7 @@ var baseDialParams = []requestParamSpec{
 	{"conjure_delay", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"conjure_transport", isAnyString, requestParamOptional},
 	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"split_tunnel_regions", isRegionCode, requestParamOptional | requestParamArray},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.
@@ -989,7 +1008,7 @@ func validateStringArrayRequestParam(
 
 	arrayValue, ok := value.([]interface{})
 	if !ok {
-		return errors.Tracef("unexpected string param type: %s", expectedParam.name)
+		return errors.Tracef("unexpected array param type: %s", expectedParam.name)
 	}
 	for _, value := range arrayValue {
 		err := validateStringRequestParam(config, expectedParam, value)
