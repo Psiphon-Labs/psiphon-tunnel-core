@@ -285,37 +285,6 @@ public class PsiphonTunnel {
         Psi.reconnectTunnel();
     }
 
-    // Creates a temporary dummy VPN interface in order to prevent traffic leaking while performing
-    // complete VPN and tunnel restart, for example, caused by host app settings change.
-    // Note: same deadlock note as stop().
-    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
-    public synchronized void seamlessVpnRestart(VpnService.Builder vpnServiceBuilder) throws Exception {
-        // Perform seamless VPN interface swap Psiphon VPN -> dummy VPN
-        //
-        // From https://developer.android.com/reference/android/net/VpnService.Builder.html#establish()
-        // "However, it is rare but not impossible to have two interfaces while performing a seamless handover.
-        // In this case, the old interface will be deactivated when the new one is created successfully. Both
-        // file descriptors are valid but now outgoing packets will be routed to the new interface. Therefore,
-        // after draining the old file descriptor, the application MUST close it and start using the new file
-        // descriptor."
-        ParcelFileDescriptor dummyVpnFd = startDummyVpn(vpnServiceBuilder);
-        try {
-            // Clean up and restart Psiphon VPN interface, which will also do the swap dummy VPN -> Psiphon VPN
-            stopVpn();
-            startVpn();
-        } finally {
-            // Close dummy VPN file descriptor as per documentation.
-            if (dummyVpnFd != null) {
-                try {
-                    dummyVpnFd.close();
-                } catch (IOException e) {
-                }
-            }
-        }
-        // Restart the tunnel.
-        restartPsiphon();
-    }
-
     public void setClientPlatformAffixes(String prefix, String suffix) {
         mClientPlatformPrefix.set(prefix);
         mClientPlatformSuffix.set(suffix);
