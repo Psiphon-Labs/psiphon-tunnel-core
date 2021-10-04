@@ -407,6 +407,14 @@
 			"revisionTime": "2020-10-25T03:57:56Z"
 		},
 		{
+			"checksumSHA1": "4cH2ePvXct60Tai2ACiu9W8AA0o=",
+			"path": "github.com/josharian/native",
+			"revision": "b6b71def0850a2fbd7e6875f8e28217a48c5bcb4",
+			"revisionTime": "2020-08-17T17:32:50Z",
+			"version": "main",
+			"versionExact": "main"
+		},
+		{
 			"checksumSHA1": "z8MqG1rnemNMAoCpATKO9HpA0M8=",
 			"path": "github.com/juju/ratelimit",
 			"revision": "f60b32039441cd828005f82f3a54aafd00bc9882",
@@ -433,16 +441,26 @@
 			"revisionTime": "2017-12-14T15:47:24Z"
 		},
 		{
-			"checksumSHA1": "UwQZ9aXiyKkLhwF3ZyWAQz0oXy8=",
+			"checksumSHA1": "+3dD7sqge+J+CpRaZVp0SWe85nY=",
 			"path": "github.com/mdlayher/netlink",
-			"revision": "6189c368e3291a8661be258658f94965c5a39343",
-			"revisionTime": "2020-07-28T10:15:04Z"
+			"revision": "a81a8c23d40a0389ffcc7c9a094569ac42e6bc95",
+			"revisionTime": "2021-09-30T20:53:08Z",
+			"version": "main",
+			"versionExact": "main"
 		},
 		{
 			"checksumSHA1": "O8qf/eFcZ82nw5jnRt9nSHPS9CM=",
 			"path": "github.com/mdlayher/netlink/nlenc",
 			"revision": "6189c368e3291a8661be258658f94965c5a39343",
 			"revisionTime": "2020-07-28T10:15:04Z"
+		},
+		{
+			"checksumSHA1": "p362zgjtQJ4mQX8cU5SzmxjYwNg=",
+			"path": "github.com/mdlayher/socket",
+			"revision": "9dbe287ded84b2af7d29eedef2693df69e11ce74",
+			"revisionTime": "2021-06-24T16:07:40Z",
+			"version": "main",
+			"versionExact": "main"
 		},
 		{
 			"checksumSHA1": "zpjq6xHytHc3aAYfkaomcDmeAek=",
