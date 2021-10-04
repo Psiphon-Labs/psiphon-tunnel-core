@@ -1232,7 +1232,7 @@ func (controller *Controller) Dial(
 		return nil, errors.TraceNew("no active tunnels")
 	}
 
-	if !controller.config.EnableSplitTunnel {
+	if !tunnel.config.IsSplitTunnelEnabled() {
 
 		tunneledConn, splitTunnel, err := tunnel.DialTCPChannel(
 			remoteAddr, false, downstreamConn)

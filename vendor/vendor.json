@@ -27,12 +27,6 @@
 			"revisionTime": "2020-06-24T19:15:37Z"
 		},
 		{
-			"checksumSHA1": "F562fF3vKWomQjtjKezKjeK+YYA=",
-			"path": "github.com/Psiphon-Labs/goarista/monotime",
-			"revision": "d002785f4c6725d9f62f0e3e7b1e2a20455ed027",
-			"revisionTime": "2016-08-25T06:51:56Z"
-		},
-		{
 			"checksumSHA1": "iMZt2Rw0uicop75ZL/vi9r5/gKA=",
 			"path": "github.com/Psiphon-Labs/goptlib",
 			"revision": "c0e32a7a3464402b8b0f772794f621e6cd7fdd1e",
@@ -401,12 +395,6 @@
 			"revisionTime": "2018-02-01T23:52:37Z"
 		},
 		{
-			"checksumSHA1": "eGEk/t876DJsabi73ReGQSmNxVI=",
-			"path": "github.com/jinzhu/copier",
-			"revision": "632e723a6687dc925c0c4a99ea86d36e00ff2fb5",
-			"revisionTime": "2020-10-25T03:57:56Z"
-		},
-		{
 			"checksumSHA1": "4cH2ePvXct60Tai2ACiu9W8AA0o=",
 			"path": "github.com/josharian/native",
 			"revision": "b6b71def0850a2fbd7e6875f8e28217a48c5bcb4",
@@ -735,18 +723,6 @@
 		{
 			"checksumSHA1": "fP1hCOmaJM9ZH0dZi6dw/+uAbR8=",
 			"path": "golang.org/x/crypto/curve25519",
-			"revision": "c8d3bf9c5392d5f66747f112cd55055d7a530b19",
-			"revisionTime": "2020-11-22T21:41:03Z"
-		},
-		{
-			"checksumSHA1": "LBGzsIWPQD6uFAeSYFg8Bd28Grw=",
-			"path": "golang.org/x/crypto/ed25519",
-			"revision": "c8d3bf9c5392d5f66747f112cd55055d7a530b19",
-			"revisionTime": "2020-11-22T21:41:03Z"
-		},
-		{
-			"checksumSHA1": "0JTAFXPkankmWcZGQJGScLDiaN8=",
-			"path": "golang.org/x/crypto/ed25519/internal/edwards25519",
 			"revision": "c8d3bf9c5392d5f66747f112cd55055d7a530b19",
 			"revisionTime": "2020-11-22T21:41:03Z"
 		},

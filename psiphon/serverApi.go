@@ -165,8 +165,16 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	// indicated, the server will perform split tunnel classifications on TCP
 	// port forwards and reject, with a distinct response, port forwards which
 	// the client should connect to directly, untunneled.
-	if serverContext.tunnel.config.EnableSplitTunnel {
+	if serverContext.tunnel.config.SplitTunnelOwnRegion {
 		params["split_tunnel"] = "1"
+	}
+
+	// While regular split tunnel mode makes untunneled connections to
+	// destinations in the client's own country, selected split tunnel mode
+	// allows the client to specify a list of untunneled countries. Either or
+	// both modes may be enabled.
+	if len(serverContext.tunnel.config.SplitTunnelRegions) > 0 {
+		params["split_tunnel_regions"] = serverContext.tunnel.config.SplitTunnelRegions
 	}
 
 	var response []byte
@@ -229,6 +237,25 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	}
 
 	NoticeClientRegion(handshakeResponse.ClientRegion)
+
+	// Emit a SplitTunnelRegions notice indicating active split tunnel region.
+	// For SplitTunnelOwnRegion, the handshake ClientRegion is the split
+	// tunnel region and this region is always listed first.
+
+	splitTunnelRegions := []string{}
+	if serverContext.tunnel.config.SplitTunnelOwnRegion {
+		splitTunnelRegions = []string{handshakeResponse.ClientRegion}
+	}
+	for _, region := range serverContext.tunnel.config.SplitTunnelRegions {
+		if !serverContext.tunnel.config.SplitTunnelOwnRegion ||
+			region != handshakeResponse.ClientRegion {
+
+			splitTunnelRegions = append(splitTunnelRegions, region)
+		}
+	}
+	if len(splitTunnelRegions) > 0 {
+		NoticeSplitTunnelRegions(splitTunnelRegions)
+	}
 
 	var serverEntries []protocol.ServerEntryFields
 

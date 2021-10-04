@@ -994,16 +994,16 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
-    else if ([noticeType isEqualToString:@"SplitTunnelRegion"]) {
-        id region = [notice valueForKeyPath:@"data.region"];
-        if (![region isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"SplitTunnelRegion notice missing data.region: %@", noticeJSON]];
+    else if ([noticeType isEqualToString:@"SplitTunnelRegions"]) {
+        id regions = [notice valueForKeyPath:@"data.regions"];
+        if (![regions isKindOfClass:[NSArray class]]) {
+            [self logMessage:[NSString stringWithFormat: @"SplitTunnelRegions notice missing data.regions: %@", noticeJSON]];
             return;
         }
-        
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onSplitTunnelRegion:)]) {
+
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onSplitTunnelRegions:)]) {
             dispatch_sync(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onSplitTunnelRegion:region];
+                [self.tunneledAppDelegate onSplitTunnelRegions:regions];
             });
         }
     }
