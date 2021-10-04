@@ -159,18 +159,6 @@
 			"revisionTime": "2021-09-20T19:12:37Z"
 		},
 		{
-			"checksumSHA1": "fDKLR1SlCjRzEYN43depFkyeOoU=",
-			"path": "github.com/Psiphon-Labs/quic-go/quictrace",
-			"revision": "890e2cbbf0465e22385daee782056a5458d1ec9a",
-			"revisionTime": "2021-01-22T18:43:14Z"
-		},
-		{
-			"checksumSHA1": "SKs8m23QDphWNaZNDhVrprkJFpg=",
-			"path": "github.com/Psiphon-Labs/quic-go/quictrace/pb",
-			"revision": "890e2cbbf0465e22385daee782056a5458d1ec9a",
-			"revisionTime": "2021-01-22T18:43:14Z"
-		},
-		{
 			"checksumSHA1": "yJQ1epZUyZ5/5T8Rg9tfBGolSj4=",
 			"path": "github.com/Psiphon-Labs/quic-go/quicvarint",
 			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
