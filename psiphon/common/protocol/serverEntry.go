@@ -72,7 +72,6 @@ type ServerEntry struct {
 	MeekFrontingDisableSNI        bool     `json:"meekFrontingDisableSNI"`
 	TacticsRequestPublicKey       string   `json:"tacticsRequestPublicKey"`
 	TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
-	MarionetteFormat              string   `json:"marionetteFormat"`
 	ConfigurationVersion          int      `json:"configurationVersion"`
 	Signature                     string   `json:"signature"`
 
@@ -486,7 +485,6 @@ func (serverEntry *ServerEntry) ProtocolUsesLegacyPassthrough(protocol string) b
 // determine which conditionally compiled protocol components are present.
 type ConditionallyEnabledComponents interface {
 	QUICEnabled() bool
-	MarionetteEnabled() bool
 	RefractionNetworkingEnabled() bool
 }
 
@@ -526,7 +524,6 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 		}
 
 		if (TunnelProtocolUsesQUIC(tunnelProtocol) && !conditionallyEnabled.QUICEnabled()) ||
-			(TunnelProtocolUsesMarionette(tunnelProtocol) && !conditionallyEnabled.MarionetteEnabled()) ||
 			(TunnelProtocolUsesRefractionNetworking(tunnelProtocol) &&
 				!conditionallyEnabled.RefractionNetworkingEnabled()) {
 			continue
@@ -593,13 +590,6 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 		TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 		TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 		return serverEntry.MeekServerPort, nil
-
-	case TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
-		// The port is encoded in the marionnete "format"
-		// Limitations:
-		// - not compatible with LimitDialPortNumbers
-		// - accurate port is not reported via dial_port_number
-		return -1, nil
 	}
 
 	return 0, errors.TraceNew("unknown protocol")

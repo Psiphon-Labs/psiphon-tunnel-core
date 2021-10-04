@@ -155,10 +155,7 @@ type Config struct {
 	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
 	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
-	// "MARIONETTE-OSSH", "TAPDANCE-OSSH", abd "CONJURE-OSSH".
-	//
-	// In the case of "MARIONETTE-OSSH" the port value is ignored and must be
-	// set to 0. The port value specified in the Marionette format is used.
+	// "TAPDANCE-OSSH", abd "CONJURE-OSSH".
 	TunnelProtocolPorts map[string]int
 
 	// TunnelProtocolPassthroughAddresses specifies passthrough addresses to be
@@ -401,11 +398,6 @@ type Config struct {
 	// tactics server configuration.
 	TacticsConfigFilename string
 
-	// MarionetteFormat specifies a Marionette format to use with the
-	// MARIONETTE-OSSH tunnel protocol. The format specifies the network
-	// protocol port to listen on.
-	MarionetteFormat string
-
 	// BlocklistFilename is the path of a file containing a CSV-encoded
 	// blocklist configuration. See NewBlocklist for more file format
 	// documentation.
@@ -553,7 +545,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
-	for tunnelProtocol, port := range config.TunnelProtocolPorts {
+	for tunnelProtocol, _ := range config.TunnelProtocolPorts {
 		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
 			return nil, errors.Tracef("Unsupported tunnel protocol: %s", tunnelProtocol)
 		}
@@ -578,13 +570,6 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			if config.MeekCookieEncryptionPrivateKey == "" || config.MeekObfuscatedKey == "" {
 				return nil, errors.Tracef(
 					"Tunnel protocol %s requires MeekCookieEncryptionPrivateKey, MeekObfuscatedKey",
-					tunnelProtocol)
-			}
-		}
-		if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
-			if port != 0 {
-				return nil, errors.Tracef(
-					"Tunnel protocol %s port is specified in format, not TunnelProtocolPorts",
 					tunnelProtocol)
 			}
 		}
@@ -712,7 +697,6 @@ type GenerateConfigParams struct {
 	WebServerPort               int
 	EnableSSHAPIRequests        bool
 	TunnelProtocolPorts         map[string]int
-	MarionetteFormat            string
 	TrafficRulesConfigFilename  string
 	OSLConfigFilename           string
 	TacticsConfigFilename       string
@@ -916,7 +900,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		TrafficRulesFilename:           params.TrafficRulesConfigFilename,
 		OSLConfigFilename:              params.OSLConfigFilename,
 		TacticsConfigFilename:          params.TacticsConfigFilename,
-		MarionetteFormat:               params.MarionetteFormat,
 		LegacyPassthrough:              params.LegacyPassthrough,
 	}
 
@@ -1081,7 +1064,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		MeekFrontingDisableSNI:        false,
 		TacticsRequestPublicKey:       tacticsRequestPublicKey,
 		TacticsRequestObfuscatedKey:   tacticsRequestObfuscatedKey,
-		MarionetteFormat:              params.MarionetteFormat,
 		ConfigurationVersion:          1,
 	}
 

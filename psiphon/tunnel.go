@@ -38,7 +38,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -773,17 +772,6 @@ func dialTunnel(
 			dialParams.QUICClientHelloSeed,
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatedQUICPaddingSeed)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-	} else if protocol.TunnelProtocolUsesMarionette(dialParams.TunnelProtocol) {
-
-		dialConn, err = marionette.Dial(
-			ctx,
-			NewNetDialer(dialParams.GetDialConfig()),
-			dialParams.ServerEntry.MarionetteFormat,
-			dialParams.DirectDialAddress)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

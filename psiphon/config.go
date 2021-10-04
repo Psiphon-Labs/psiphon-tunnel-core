@@ -166,8 +166,7 @@ type Config struct {
 	// include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH",
 	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
-	// "FRONTED-MEEK-QUIC-OSSH", "MARIONETTE-OSSH", "TAPDANCE-OSSH", and
-	// "CONJURE-OSSH".
+	// "FRONTED-MEEK-QUIC-OSSH", "TAPDANCE-OSSH", and "CONJURE-OSSH".
 
 	// For the default, an empty list, all protocols are used.
 	LimitTunnelProtocols []string

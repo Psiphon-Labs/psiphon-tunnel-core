@@ -779,11 +779,6 @@ func MakeDialParameters(
 			dialParams.MeekHostHeader = dialParams.MeekDialAddress
 		}
 
-	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
-
-		// Note: port comes from marionette "format"
-		dialParams.DirectDialAddress = serverEntry.IpAddress
-
 	default:
 		return nil, errors.Tracef(
 			"unknown tunnel protocol: %s", dialParams.TunnelProtocol)

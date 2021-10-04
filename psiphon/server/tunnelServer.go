@@ -41,7 +41,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
@@ -172,12 +171,6 @@ func (server *TunnelServer) Run() error {
 				localAddress,
 				support.Config.ObfuscatedSSHKey,
 				support.Config.EnableGQUIC)
-
-		} else if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
-
-			listener, err = marionette.Listen(
-				support.Config.ServerIPAddress,
-				support.Config.MarionetteFormat)
 
 		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
 
