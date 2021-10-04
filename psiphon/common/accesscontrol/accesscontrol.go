@@ -55,7 +55,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"golang.org/x/crypto/hkdf"
 )
@@ -94,12 +93,14 @@ type VerificationKey struct {
 func NewKeyPair(
 	accessType string) (*SigningKey, *VerificationKey, error) {
 
-	ID, err := common.MakeSecureRandomBytes(keyIDLength)
+	ID := make([]byte, keyIDLength)
+	_, err := rand.Read(ID)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
 
-	authorizationIDKey, err := common.MakeSecureRandomBytes(authorizationIDKeyLength)
+	authorizationIDKey := make([]byte, authorizationIDKeyLength)
+	_, err = rand.Read(authorizationIDKey)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
