@@ -1297,7 +1297,7 @@ func (config *Config) GetSponsorID() string {
 // IsSplitTunnelEnabled indicates if split tunnel mode is enabled, either for
 // the client's own country, a specified list of countries, or both.
 func (config *Config) IsSplitTunnelEnabled() bool {
-	return config.SplitTunnelOwnRegion || len(config.SplitTunnelRegions) > 1
+	return config.SplitTunnelOwnRegion || len(config.SplitTunnelRegions) > 0
 }
 
 // GetAuthorizations returns the current client authorizations.
