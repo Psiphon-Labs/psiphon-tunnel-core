@@ -341,8 +341,7 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 		//
 		// Lantern's OQUIC specification:
 		// https://github.com/getlantern/quicwrapper/blob/master/OQUIC.md
-
-		if conn.isIETFClient && conn.isDecoyClient {
+		if err == nil && conn.isIETFClient && conn.isDecoyClient {
 			count := atomic.LoadInt32(&conn.decoyPacketCount)
 			if count > 0 && conn.paddingPRNG.FlipCoin() {
 
@@ -364,6 +363,7 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 			continue
 		}
 
+		// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
 		return n, oobn, flags, addr, isIETF, err
 	}
 }
