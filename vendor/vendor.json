@@ -437,10 +437,12 @@
 			"versionExact": "main"
 		},
 		{
-			"checksumSHA1": "O8qf/eFcZ82nw5jnRt9nSHPS9CM=",
+			"checksumSHA1": "NlYZf9y3x153XnG9uYBhdOlCUB0=",
 			"path": "github.com/mdlayher/netlink/nlenc",
-			"revision": "6189c368e3291a8661be258658f94965c5a39343",
-			"revisionTime": "2020-07-28T10:15:04Z"
+			"revision": "a81a8c23d40a0389ffcc7c9a094569ac42e6bc95",
+			"revisionTime": "2021-09-30T20:53:08Z",
+			"version": "main",
+			"versionExact": "main"
 		},
 		{
 			"checksumSHA1": "p362zgjtQJ4mQX8cU5SzmxjYwNg=",
