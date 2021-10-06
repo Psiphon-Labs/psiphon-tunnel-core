@@ -360,6 +360,8 @@ func Dial(
 		return nil, errors.TraceNew("missing client hello randomization values")
 	}
 
+	// obfuscationKey is always required, as it is used for anti-probing even
+	// when not obfuscating the QUIC payload.
 	if isObfuscated(quicVersion) && (obfuscationPaddingSeed == nil) || obfuscationKey == "" {
 		return nil, errors.TraceNew("missing obfuscation values")
 	}

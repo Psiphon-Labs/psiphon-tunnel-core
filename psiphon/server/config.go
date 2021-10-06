@@ -704,6 +704,7 @@ type GenerateConfigParams struct {
 	TacticsRequestObfuscatedKey string
 	Passthrough                 bool
 	LegacyPassthrough           bool
+	LimitQUICVersions           protocol.QUICVersions
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON encoded
@@ -1053,6 +1054,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SshHostKey:                    base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
 		SshObfuscatedPort:             obfuscatedSSHPort,
 		SshObfuscatedQUICPort:         obfuscatedSSHQUICPort,
+		LimitQUICVersions:             params.LimitQUICVersions,
 		SshObfuscatedKey:              obfuscatedSSHKey,
 		Capabilities:                  capabilities,
 		Region:                        "US",

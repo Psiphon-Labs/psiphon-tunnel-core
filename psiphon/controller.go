@@ -1363,6 +1363,7 @@ type protocolSelectionConstraints struct {
 	initialLimitTunnelProtocolsCandidateCount int
 	limitTunnelProtocols                      protocol.TunnelProtocols
 	limitTunnelDialPortNumbers                protocol.TunnelProtocolPortLists
+	limitQUICVersions                         protocol.QUICVersions
 	replayCandidateCount                      int
 }
 
@@ -1380,6 +1381,7 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 			p.useUpstreamProxy,
 			p.initialLimitTunnelProtocols,
 			p.limitTunnelDialPortNumbers,
+			p.limitQUICVersions,
 			excludeIntensive)) > 0
 }
 
@@ -1392,6 +1394,7 @@ func (p *protocolSelectionConstraints) isCandidate(
 		p.useUpstreamProxy,
 		p.limitTunnelProtocols,
 		p.limitTunnelDialPortNumbers,
+		p.limitQUICVersions,
 		excludeIntensive)) > 0
 }
 
@@ -1428,6 +1431,7 @@ func (p *protocolSelectionConstraints) supportedProtocols(
 		p.useUpstreamProxy,
 		limitTunnelProtocols,
 		p.limitTunnelDialPortNumbers,
+		p.limitQUICVersions,
 		excludeIntensive)
 }
 

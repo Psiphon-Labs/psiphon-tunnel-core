@@ -123,8 +123,16 @@ func getMaxPacketSize(addr net.Addr, maxPacketSizeAdustment int) protocol.ByteCo
 		}
 
 		// [Psiphon]
-		// Adjust the max packet size to allow for obfuscation overhead.
-		// TODO: internal/congestion.cubicSender continues to use initialMaxDatagramSize = protocol.InitialPacketSizeIPv4
+		//
+		// Adjust the max packet size to allow for obfuscation overhead. This
+		// is a best-effort operation. In practice, maxPacketSizeAdustment
+		// will be tens of bytes and maxSize is over 1200 bytes; the
+		// condition here is a sanity check guard to prevent negative sizes
+		// and possible panics. We don't expect to need to make the largest
+		// adustment that would be possible when the condition is false.
+		//
+		// TODO: internal/congestion.cubicSender continues to use
+		// initialMaxDatagramSize = protocol.InitialPacketSizeIPv4
 		if maxSize > protocol.ByteCount(maxPacketSizeAdustment) {
 			maxSize -= protocol.ByteCount(maxPacketSizeAdustment)
 		}

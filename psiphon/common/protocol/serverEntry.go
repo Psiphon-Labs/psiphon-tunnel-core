@@ -55,6 +55,7 @@ type ServerEntry struct {
 	SshHostKey                    string   `json:"sshHostKey"`
 	SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
 	SshObfuscatedQUICPort         int      `json:"sshObfuscatedQUICPort"`
+	LimitQUICVersions             []string `json:"limitQUICVersions"`
 	SshObfuscatedTapDancePort     int      `json:"sshObfuscatedTapdancePort"`
 	SshObfuscatedConjurePort      int      `json:"sshObfuscatedConjurePort"`
 	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
@@ -497,11 +498,12 @@ type TunnelProtocolPortLists map[string]*common.PortList
 func (serverEntry *ServerEntry) GetSupportedProtocols(
 	conditionallyEnabled ConditionallyEnabledComponents,
 	useUpstreamProxy bool,
-	limitTunnelProtocols []string,
+	limitTunnelProtocols TunnelProtocols,
 	limitTunnelDialPortNumbers TunnelProtocolPortLists,
-	excludeIntensive bool) []string {
+	limitQUICVersions QUICVersions,
+	excludeIntensive bool) TunnelProtocols {
 
-	supportedProtocols := make([]string, 0)
+	supportedProtocols := make(TunnelProtocols, 0)
 
 	for _, tunnelProtocol := range SupportedTunnelProtocols {
 
@@ -531,6 +533,20 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 
 		if !serverEntry.SupportsProtocol(tunnelProtocol) {
 			continue
+		}
+
+		// If the server is limiting QUIC versions, at least one must be
+		// supported. And if tactics is also limiting QUIC versions, there
+		// must be a common version in both limit lists for this server entry
+		// to support QUIC-OSSH.
+		if TunnelProtocolUsesQUIC(tunnelProtocol) && len(serverEntry.LimitQUICVersions) > 0 {
+			if !common.ContainsAny(serverEntry.LimitQUICVersions, SupportedQUICVersions) {
+				continue
+			}
+			if len(limitQUICVersions) > 0 &&
+				!common.ContainsAny(serverEntry.LimitQUICVersions, limitQUICVersions) {
+				continue
+			}
 		}
 
 		dialPortNumber, err := serverEntry.GetDialPortNumber(tunnelProtocol)

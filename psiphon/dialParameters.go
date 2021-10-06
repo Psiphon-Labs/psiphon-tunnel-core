@@ -659,7 +659,7 @@ func MakeDialParameters(
 		protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
 		isFronted := protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
-		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry.FrontingProviderID, p)
+		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry, p)
 
 		if protocol.QUICVersionHasRandomizedClientHello(dialParams.QUICVersion) {
 			dialParams.QUICClientHelloSeed, err = prng.NewSeed()
@@ -1147,7 +1147,7 @@ func selectFrontingParameters(
 
 func selectQUICVersion(
 	isFronted bool,
-	frontingProviderID string,
+	serverEntry *protocol.ServerEntry,
 	p parameters.ParametersAccessor) string {
 
 	limitQUICVersions := p.QUICVersions(parameters.LimitQUICVersions)
@@ -1155,16 +1155,18 @@ func selectQUICVersion(
 	var disableQUICVersions protocol.QUICVersions
 
 	if isFronted {
-		if frontingProviderID == "" {
+		if serverEntry.FrontingProviderID == "" {
 			// Legacy server entry case
 			disableQUICVersions = protocol.QUICVersions{
 				protocol.QUIC_VERSION_V1,
 				protocol.QUIC_VERSION_RANDOMIZED_V1,
 				protocol.QUIC_VERSION_OBFUSCATED_V1,
+				protocol.QUIC_VERSION_DECOY_V1,
 			}
 		} else {
 			disableQUICVersions = p.LabeledQUICVersions(
-				parameters.DisableFrontingProviderQUICVersions, frontingProviderID)
+				parameters.DisableFrontingProviderQUICVersions,
+				serverEntry.FrontingProviderID)
 		}
 	}
 
@@ -1174,6 +1176,21 @@ func selectQUICVersion(
 
 		if len(limitQUICVersions) > 0 &&
 			!common.Contains(limitQUICVersions, quicVersion) {
+			continue
+		}
+
+		// Both tactics and the server entry can specify LimitQUICVersions. In
+		// tactics, the parameter is intended to direct certain clients to
+		// use a successful protocol variant. In the server entry, the
+		// parameter may be used to direct all clients to send
+		// consistent-looking protocol variants to a particular server; e.g.,
+		// only regular QUIC, or only obfuscated QUIC.
+		//
+		// The isFronted/QUICVersionIsObfuscated logic predates
+		// ServerEntry.LimitQUICVersions; ServerEntry.LimitQUICVersions could
+		// now be used to achieve a similar outcome.
+		if len(serverEntry.LimitQUICVersions) > 0 &&
+			!common.Contains(serverEntry.LimitQUICVersions, quicVersion) {
 			continue
 		}
 

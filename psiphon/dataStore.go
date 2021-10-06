@@ -675,6 +675,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 		limitTunnelProtocols := p.TunnelProtocols(parameters.LimitTunnelProtocols)
 		limitTunnelDialPortNumbers := protocol.TunnelProtocolPortLists(
 			p.TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers))
+		limitQUICVersions := p.QUICVersions(parameters.LimitQUICVersions)
 
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
@@ -684,6 +685,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 				config.UseUpstreamProxy(),
 				limitTunnelProtocols,
 				limitTunnelDialPortNumbers,
+				limitQUICVersions,
 				false)) == 0 {
 				return false, nil, errors.Tracef(
 					"TargetServerEntry does not support LimitTunnelProtocols: %v", limitTunnelProtocols)
