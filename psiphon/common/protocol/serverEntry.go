@@ -539,6 +539,12 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 		// supported. And if tactics is also limiting QUIC versions, there
 		// must be a common version in both limit lists for this server entry
 		// to support QUIC-OSSH.
+		//
+		// Limitation: to avoid additional complexity, we do not consider
+		// DisableFrontingProviderQUICVersion here, as fronting providers are
+		// expected to support QUICv1 and gQUIC is expected to become
+		// obsolete in general.
+
 		if TunnelProtocolUsesQUIC(tunnelProtocol) && len(serverEntry.LimitQUICVersions) > 0 {
 			if !common.ContainsAny(serverEntry.LimitQUICVersions, SupportedQUICVersions) {
 				continue

@@ -391,16 +391,8 @@ const (
 	QUIC_VERSION_DECOY_V1      = "DECOY-QUICv1"
 )
 
-var SupportedQUICVersions = QUICVersions{
-	QUIC_VERSION_GQUIC39,
-	QUIC_VERSION_GQUIC43,
-	QUIC_VERSION_GQUIC44,
-	QUIC_VERSION_OBFUSCATED,
-	QUIC_VERSION_V1,
-	QUIC_VERSION_RANDOMIZED_V1,
-	QUIC_VERSION_OBFUSCATED_V1,
-	QUIC_VERSION_DECOY_V1,
-}
+// The value of SupportedQUICVersions is conditionally compiled based on
+// whether gQUIC is enabled.
 
 var legacyQUICVersions = QUICVersions{
 	"IETF-draft-24",

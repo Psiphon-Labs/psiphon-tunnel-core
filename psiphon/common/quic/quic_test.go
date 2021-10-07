@@ -42,11 +42,14 @@ import (
 func TestQUIC(t *testing.T) {
 	for quicVersion := range supportedVersionNumbers {
 		t.Run(fmt.Sprintf("%s", quicVersion), func(t *testing.T) {
-			runQUIC(t, quicVersion, true, false)
+			if isGQUIC(quicVersion) && !GQUICEnabled() {
+				t.Skipf("gQUIC is not enabled")
+			}
+			runQUIC(t, quicVersion, GQUICEnabled(), false)
 		})
 		if isIETF(quicVersion) {
 			t.Run(fmt.Sprintf("%s (invoke anti-probing)", quicVersion), func(t *testing.T) {
-				runQUIC(t, quicVersion, true, true)
+				runQUIC(t, quicVersion, GQUICEnabled(), true)
 			})
 		}
 		if isIETF(quicVersion) {

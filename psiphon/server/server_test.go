@@ -857,6 +857,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	serverConfig["RunPacketManipulator"] = runConfig.doPacketManipulation
 
+	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) && quic.GQUICEnabled() {
+		// Enable legacy QUIC version support.
+		serverConfig["EnableGQUIC"] = true
+	}
+
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	serverTunnelLog := make(chan map[string]interface{}, 1)

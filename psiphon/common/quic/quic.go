@@ -60,9 +60,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/h2quic"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/qerr"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	ietf_quic "github.com/Psiphon-Labs/quic-go"
 	"github.com/Psiphon-Labs/quic-go/http3"
@@ -82,10 +79,10 @@ func Enabled() bool {
 const ietfQUIC1VersionNumber = 0x1
 
 var supportedVersionNumbers = map[string]uint32{
-	protocol.QUIC_VERSION_GQUIC39:       uint32(gquic.VersionGQUIC39),
-	protocol.QUIC_VERSION_GQUIC43:       uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_GQUIC44:       uint32(gquic.VersionGQUIC44),
-	protocol.QUIC_VERSION_OBFUSCATED:    uint32(gquic.VersionGQUIC43),
+	protocol.QUIC_VERSION_GQUIC39:       uint32(0x51303339),
+	protocol.QUIC_VERSION_GQUIC43:       uint32(0x51303433),
+	protocol.QUIC_VERSION_GQUIC44:       uint32(0x51303434),
+	protocol.QUIC_VERSION_OBFUSCATED:    uint32(0x51303433),
 	protocol.QUIC_VERSION_V1:            ietfQUIC1VersionNumber,
 	protocol.QUIC_VERSION_RANDOMIZED_V1: ietfQUIC1VersionNumber,
 	protocol.QUIC_VERSION_OBFUSCATED_V1: uint32(ietfQUIC1VersionNumber),
@@ -111,11 +108,18 @@ func isIETF(quicVersion string) bool {
 	if !ok {
 		return false
 	}
-	return isIETFVersion(versionNumber)
+	return isIETFVersionNumber(versionNumber)
 }
 
-func isIETFVersion(versionNumber uint32) bool {
+func isIETFVersionNumber(versionNumber uint32) bool {
 	return versionNumber == ietfQUIC1VersionNumber
+}
+
+func isGQUIC(quicVersion string) bool {
+	return quicVersion == protocol.QUIC_VERSION_GQUIC39 ||
+		quicVersion == protocol.QUIC_VERSION_GQUIC43 ||
+		quicVersion == protocol.QUIC_VERSION_GQUIC44 ||
+		quicVersion == protocol.QUIC_VERSION_OBFUSCATED
 }
 
 func getALPN(versionNumber uint32) string {
@@ -384,7 +388,7 @@ func Dial(
 		obfuscatedPacketConn, err := NewObfuscatedPacketConn(
 			packetConn,
 			false,
-			isIETFVersion(versionNumber),
+			isIETFVersionNumber(versionNumber),
 			isDecoy(quicVersion),
 			obfuscationKey,
 			obfuscationPaddingSeed)
@@ -676,10 +680,14 @@ func NewQUICTransporter(
 		ctx:             ctx,
 	}
 
-	if isIETFVersion(versionNumber) {
+	if isIETFVersionNumber(versionNumber) {
 		t.quicRoundTripper = &http3.RoundTripper{Dial: t.dialIETFQUIC}
 	} else {
-		t.quicRoundTripper = &h2quic.RoundTripper{Dial: t.dialgQUIC}
+		var err error
+		t.quicRoundTripper, err = gQUICRoundTripper(t)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	return t, nil
@@ -720,15 +728,6 @@ func (t *QUICTransporter) dialIETFQUIC(
 		return nil, errors.Trace(err)
 	}
 	return session.(*ietfQUICSession).Session.(ietf_quic.EarlySession), nil
-}
-
-func (t *QUICTransporter) dialgQUIC(
-	_, _ string, _ *tls.Config, _ *gquic.Config) (gquic.Session, error) {
-	session, err := t.dialQUIC()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return session.(*gQUICSession).Session, nil
 }
 
 func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
@@ -793,6 +792,8 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 
 // The following code provides support for using both gQUIC and IETF QUIC,
 // which are implemented in two different branches (now forks) of quic-go.
+// (The gQUIC functions are now located in gquic.go and the entire gQUIC
+// quic-go stack may be conditionally excluded from builds).
 //
 // dialQUIC uses the appropriate quic-go and returns quicSession which wraps
 // either a ietf_quic.Session or gquic.Session.
@@ -879,47 +880,6 @@ func (s *ietfQUICSession) isErrorIndicatingClosed(err error) bool {
 		errStr == "NO_ERROR: No recent network activity"
 }
 
-type gQUICListener struct {
-	gquic.Listener
-}
-
-func (l *gQUICListener) Accept() (quicSession, error) {
-	session, err := l.Listener.Accept()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return &gQUICSession{Session: session}, nil
-}
-
-type gQUICSession struct {
-	gquic.Session
-}
-
-func (s *gQUICSession) AcceptStream() (quicStream, error) {
-	stream, err := s.Session.AcceptStream()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return stream, nil
-}
-
-func (s *gQUICSession) OpenStream() (quicStream, error) {
-	return s.Session.OpenStream()
-}
-
-func (s *gQUICSession) isErrorIndicatingClosed(err error) bool {
-	if err == nil {
-		return false
-	}
-	if quicErr, ok := err.(*qerr.QuicError); ok {
-		switch quicErr.ErrorCode {
-		case qerr.PeerGoingAway, qerr.NetworkIdleTimeout:
-			return true
-		}
-	}
-	return false
-}
-
 func dialQUIC(
 	ctx context.Context,
 	packetConn net.PacketConn,
@@ -931,7 +891,7 @@ func dialQUIC(
 	clientMaxPacketSizeAdjustment int,
 	dialEarly bool) (quicSession, error) {
 
-	if isIETFVersion(versionNumber) {
+	if isIETFVersionNumber(versionNumber) {
 		quicConfig := &ietf_quic.Config{
 			HandshakeIdleTimeout: time.Duration(1<<63 - 1),
 			MaxIdleTimeout:       CLIENT_IDLE_TIMEOUT,
@@ -980,33 +940,17 @@ func dialQUIC(
 
 	} else {
 
-		quicConfig := &gquic.Config{
-			HandshakeTimeout: time.Duration(1<<63 - 1),
-			IdleTimeout:      CLIENT_IDLE_TIMEOUT,
-			KeepAlive:        true,
-			Versions: []gquic.VersionNumber{
-				gquic.VersionNumber(versionNumber)},
-		}
-
-		deadline, ok := ctx.Deadline()
-		if ok {
-			quicConfig.HandshakeTimeout = time.Until(deadline)
-		}
-
-		dialSession, err := gquic.DialContext(
+		quicSession, err := gQUICDialContext(
 			ctx,
 			packetConn,
 			remoteAddr,
 			quicSNIAddress,
-			&tls.Config{
-				InsecureSkipVerify: true,
-			},
-			quicConfig)
+			versionNumber)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		return &gQUICSession{Session: dialSession}, nil
+		return quicSession, nil
 	}
 }
 
@@ -1163,24 +1107,12 @@ func newMuxListener(
 
 	listener.gQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
-	tlsConfig = &tls.Config{
-		Certificates: []tls.Certificate{tlsCertificate},
-	}
-
-	gQUICConfig := &gquic.Config{
-		HandshakeTimeout:      SERVER_HANDSHAKE_TIMEOUT,
-		IdleTimeout:           serverIdleTimeout,
-		MaxIncomingStreams:    1,
-		MaxIncomingUniStreams: -1,
-		KeepAlive:             true,
-	}
-
-	gl, err := gquic.Listen(listener.gQUICConn, tlsConfig, gQUICConfig)
+	gl, err := gQUICListen(listener.gQUICConn, tlsCertificate, serverIdleTimeout)
 	if err != nil {
 		listener.ietfQUICListener.Close()
 		return nil, errors.Trace(err)
 	}
-	listener.gQUICListener = &gQUICListener{Listener: gl}
+	listener.gQUICListener = gl
 
 	listener.runWaitGroup.Add(3)
 	go listener.relayPackets()

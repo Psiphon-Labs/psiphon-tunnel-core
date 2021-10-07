@@ -1,8 +1,8 @@
-//go:build PSIPHON_DISABLE_QUIC
-// +build PSIPHON_DISABLE_QUIC
+//go:build !PSIPHON_DISABLE_QUIC && PSIPHON_DISABLE_GQUIC
+// +build !PSIPHON_DISABLE_QUIC,PSIPHON_DISABLE_GQUIC
 
 /*
- * Copyright (c) 2020, Psiphon Inc.
+ * Copyright (c) 2021, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -24,66 +24,36 @@ package quic
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
-	"net/http"
+	"time"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
-
-// Enabled indicates if QUIC functionality is enabled.
-func Enabled() bool {
-	return false
-}
 
 func GQUICEnabled() bool {
 	return false
 }
 
-func Listen(
-	_ common.Logger,
-	_ func(string, error, common.LogFields),
-	_ string,
-	_ string,
-	_ bool) (net.Listener, error) {
+func gQUICListen(
+	_ net.PacketConn,
+	_ tls.Certificate,
+	_ time.Duration) (quicListener, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }
 
-func Dial(
+func gQUICDialContext(
 	_ context.Context,
 	_ net.PacketConn,
 	_ *net.UDPAddr,
 	_ string,
-	_ string,
-	_ *prng.Seed,
-	_ string,
-	_ *prng.Seed) (net.Conn, error) {
+	_ uint32) (quicSession, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }
 
-type QUICTransporter struct {
-}
-
-func (t *QUICTransporter) SetRequestContext(ctx context.Context) {
-}
-
-func (t *QUICTransporter) CloseIdleConnections() {
-}
-
-func (t *QUICTransporter) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	return nil, errors.TraceNew("operation is not enabled")
-}
-
-func NewQUICTransporter(
-	_ context.Context,
-	_ func(string),
-	_ func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
-	_ string,
-	_ string,
-	_ *prng.Seed) (*QUICTransporter, error) {
+func gQUICRoundTripper(_ *QUICTransporter) (quicRoundTripper, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }
