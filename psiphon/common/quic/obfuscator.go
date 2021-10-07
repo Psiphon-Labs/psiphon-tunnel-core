@@ -653,7 +653,7 @@ func (conn *ObfuscatedPacketConn) writePacket(
 	// quic-go uses OOB to manipulate ECN bits in the IP header; these are not
 	// obfuscated.
 	//
-	// Return n = len(input p) bytes written even when p is an obsfuscated
+	// Return n = len(input p) bytes written even when p is an obfuscated
 	// buffer and longer than the input p.
 
 	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
