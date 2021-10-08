@@ -28,10 +28,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/monotime"
 )
 
 // handleUdpgwChannel implements UDP port forwarding. A single UDP

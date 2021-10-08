@@ -24,7 +24,7 @@ import (
 	"testing/iotest"
 	"time"
 
-	"github.com/Psiphon-Labs/goarista/monotime"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/monotime"
 )
 
 func TestActivityMonitoredConn(t *testing.T) {

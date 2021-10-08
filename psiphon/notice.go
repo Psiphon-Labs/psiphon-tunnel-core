@@ -693,6 +693,13 @@ func NoticeSessionId(sessionId string) {
 		"sessionId", sessionId)
 }
 
+// NoticeSplitTunnelRegions reports that split tunnel is on for the given country codes.
+func NoticeSplitTunnelRegions(regions []string) {
+	singletonNoticeLogger.outputNotice(
+		"SplitTunnelRegions", 0,
+		"regions", regions)
+}
+
 // NoticeUntunneled indicates than an address has been classified as untunneled and is being
 // accessed directly.
 //

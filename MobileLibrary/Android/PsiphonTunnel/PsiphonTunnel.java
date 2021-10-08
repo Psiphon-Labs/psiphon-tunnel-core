@@ -112,7 +112,7 @@ public class PsiphonTunnel {
         default public void onClientRegion(String region) {}
         default public void onClientUpgradeDownloaded(String filename) {}
         default public void onClientIsLatestVersion() {}
-        default public void onSplitTunnelRegion(String region) {}
+        default public void onSplitTunnelRegions(List<String> regions) {}
         default public void onUntunneledAddress(String address) {}
         default public void onBytesTransferred(long sent, long received) {}
         default public void onStartedWaitingForNetworkConnectivity() {}
@@ -283,37 +283,6 @@ public class PsiphonTunnel {
 
     public synchronized void reconnectPsiphon() throws Exception {
         Psi.reconnectTunnel();
-    }
-
-    // Creates a temporary dummy VPN interface in order to prevent traffic leaking while performing
-    // complete VPN and tunnel restart, for example, caused by host app settings change.
-    // Note: same deadlock note as stop().
-    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
-    public synchronized void seamlessVpnRestart(VpnService.Builder vpnServiceBuilder) throws Exception {
-        // Perform seamless VPN interface swap Psiphon VPN -> dummy VPN
-        //
-        // From https://developer.android.com/reference/android/net/VpnService.Builder.html#establish()
-        // "However, it is rare but not impossible to have two interfaces while performing a seamless handover.
-        // In this case, the old interface will be deactivated when the new one is created successfully. Both
-        // file descriptors are valid but now outgoing packets will be routed to the new interface. Therefore,
-        // after draining the old file descriptor, the application MUST close it and start using the new file
-        // descriptor."
-        ParcelFileDescriptor dummyVpnFd = startDummyVpn(vpnServiceBuilder);
-        try {
-            // Clean up and restart Psiphon VPN interface, which will also do the swap dummy VPN -> Psiphon VPN
-            stopVpn();
-            startVpn();
-        } finally {
-            // Close dummy VPN file descriptor as per documentation.
-            if (dummyVpnFd != null) {
-                try {
-                    dummyVpnFd.close();
-                } catch (IOException e) {
-                }
-            }
-        }
-        // Restart the tunnel.
-        restartPsiphon();
     }
 
     public void setClientPlatformAffixes(String prefix, String suffix) {
@@ -960,8 +929,13 @@ public class PsiphonTunnel {
                 mHostService.onHomepage(notice.getJSONObject("data").getString("url"));
             } else if (noticeType.equals("ClientRegion")) {
                 mHostService.onClientRegion(notice.getJSONObject("data").getString("region"));
-            } else if (noticeType.equals("SplitTunnelRegion")) {
-                mHostService.onSplitTunnelRegion(notice.getJSONObject("data").getString("region"));
+            } else if (noticeType.equals("SplitTunnelRegions")) {
+                JSONArray splitTunnelRegions = notice.getJSONObject("data").getJSONArray("regions");
+                ArrayList<String> regions = new ArrayList<String>();
+                for (int i=0; i<splitTunnelRegions.length(); i++) {
+                    regions.add(splitTunnelRegions.getString(i));
+                }
+                mHostService.onSplitTunnelRegions(regions);
             } else if (noticeType.equals("Untunneled")) {
                 mHostService.onUntunneledAddress(notice.getJSONObject("data").getString("address"));
             } else if (noticeType.equals("BytesTransferred")) {
