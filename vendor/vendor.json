@@ -57,106 +57,106 @@
 			"revisionTime": "2019-12-04T18:36:04Z"
 		},
 		{
-			"checksumSHA1": "YW4MZjBTgJaOIFwZS0cj/O87OmA=",
+			"checksumSHA1": "xVlq4mGwhSjlQXPFoZZKydnfJzI=",
 			"path": "github.com/Psiphon-Labs/qtls-go1-15",
-			"revision": "7804feeda5e934cc25ee95002619227e68390f60",
-			"revisionTime": "2021-04-28T19:49:29Z"
+			"revision": "70c1741b4e9906b42d02da23e442701eee02cf45",
+			"revisionTime": "2021-10-08T14:25:28Z"
 		},
 		{
-			"checksumSHA1": "JWaxURlTweTcAsSuoBmB3p15HEQ=",
+			"checksumSHA1": "XeF9G/q63gI8CF0McwanR6wKboY=",
 			"path": "github.com/Psiphon-Labs/qtls-go1-16",
-			"revision": "027c2d6836f99fd9732c124418e0e8b22a323982",
-			"revisionTime": "2021-04-28T19:51:14Z"
+			"revision": "4305c2f9196314a419e4c98df6fac89a37dddf61",
+			"revisionTime": "2021-10-08T14:24:57Z"
 		},
 		{
-			"checksumSHA1": "DpJo7lKxZ2bBQblIiJqe9e1FN4o=",
+			"checksumSHA1": "9no5WKGYj+HR6TJNEQhG80JIZAg=",
 			"path": "github.com/Psiphon-Labs/qtls-go1-17",
-			"revision": "cf49632d51fde08ebe51989b43bb082ee64bb00a",
-			"revisionTime": "2021-06-09T16:40:01Z"
+			"revision": "8749de92b8551440a1f6168babd7b7d4233ece8e",
+			"revisionTime": "2021-10-08T14:23:28Z"
 		},
 		{
-			"checksumSHA1": "4cLCJ8Oe2CTZb63bx/plTNu8oU0=",
+			"checksumSHA1": "vgQ2aScuKAbk+hahXYeFtPJp+Tg=",
 			"path": "github.com/Psiphon-Labs/quic-go",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "HjejMCSOtvgvS1OrDNn0nFdGWSE=",
 			"path": "github.com/Psiphon-Labs/quic-go/http3",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "hmXNSg48Rsd2PnAHsZ/2QFFqRu0=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/ackhandler",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "CTLh10e3oErKMg6FSiL3pmPYxic=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/congestion",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "xMydmYvXzDL9PpYRL+Yc1vcXiPU=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/flowcontrol",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
-			"checksumSHA1": "sKMKS11akF5FXrma3VX1GEjxX+U=",
+			"checksumSHA1": "1Jb0Vs2Ei94POy4OTLYBhXWqMIQ=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/handshake",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "f2P/ekucIdYwzEHc7iKx/qcAWwI=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/logutils",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "DzMLlqkyiiitaFNPZ3eeRvFJDgU=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/protocol",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "JiZwGgdtcxhfVtlB/M3MnElwUAY=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/qerr",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
-			"checksumSHA1": "UFWVlDvDvdA5m6XoTw501s2LDAU=",
+			"checksumSHA1": "KycilFoMxWzh4SYh7FhwdF4lecM=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/qtls",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "BShovTkpKoYFL1IdIkbyCMWE6SI=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/utils",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "h/uEgfCweUHo7V/p/nYqJTig3F0=",
 			"path": "github.com/Psiphon-Labs/quic-go/internal/wire",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "Bs8fVNsEYQ1lJ33gVr6KA3C4fc8=",
 			"path": "github.com/Psiphon-Labs/quic-go/logging",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "yJQ1epZUyZ5/5T8Rg9tfBGolSj4=",
 			"path": "github.com/Psiphon-Labs/quic-go/quicvarint",
-			"revision": "e5c8eb1cd5f5c57a57d659cec98b6986641cd0c2",
-			"revisionTime": "2021-09-20T19:12:37Z"
+			"revision": "85d1db17c285c8e9ce84ac53859d3c18be641567",
+			"revisionTime": "2021-10-08T14:19:49Z"
 		},
 		{
 			"checksumSHA1": "pO4/yHyvwYx1NKSPKIY4aFVtz5k=",

@@ -285,7 +285,10 @@ var newSession = func(
 	s.ctx, s.ctxCancel = context.WithCancel(context.WithValue(context.Background(), SessionTracingKey, tracingID))
 
 	// [Psiphon]
-	maxPacketSizeAdjustment := conf.ServerMaxPacketSizeAdjustment(s.RemoteAddr())
+	maxPacketSizeAdjustment := 0
+	if conf.ServerMaxPacketSizeAdjustment != nil {
+		maxPacketSizeAdjustment = conf.ServerMaxPacketSizeAdjustment(s.RemoteAddr())
+	}
 
 	s.sentPacketHandler, s.receivedPacketHandler = ackhandler.NewAckHandler(
 		0,

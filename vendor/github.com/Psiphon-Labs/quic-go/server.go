@@ -357,7 +357,7 @@ func (s *baseServer) handlePacketImpl(p *receivedPacket) bool /* is the buffer s
 	// significant space in the Initial packet and send less that 1200 QUIC
 	// bytes. In this configuration, the obfuscation layer enforces the
 	// anti-amplification 1200 byte rule, but it must be disabled here.
-	isObfuscated := s.config.ServerMaxPacketSizeAdjustment(p.remoteAddr) > 0
+	isObfuscated := s.config.ServerMaxPacketSizeAdjustment != nil && s.config.ServerMaxPacketSizeAdjustment(p.remoteAddr) > 0
 
 	if !isObfuscated &&
 
@@ -535,10 +535,12 @@ func (s *baseServer) handleInitialImpl(p *receivedPacket, hdr *wire.Header) erro
 
 	// [Psiphon]
 	// Drop any Initial packet that fails verifyClientHelloRandom.
-	err := s.verifyClientHelloRandom(p, hdr)
-	if err != nil {
-		p.buffer.Release()
-		return err
+	if s.config.VerifyClientHelloRandom != nil {
+		err := s.verifyClientHelloRandom(p, hdr)
+		if err != nil {
+			p.buffer.Release()
+			return err
+		}
 	}
 
 	var (
