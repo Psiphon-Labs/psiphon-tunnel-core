@@ -706,9 +706,10 @@ func NoticeSplitTunnelRegions(regions []string) {
 // Note: "address" should remain private; this notice should only be used for alerting
 // users, not for diagnostics logs.
 func NoticeUntunneled(address string) {
-	singletonNoticeLogger.outputNotice(
-		"Untunneled", noticeSkipRedaction,
-		"address", address)
+	outputRepetitiveNotice(
+		"Untunneled", address, 0,
+		"Untunneled", noticeSkipRedaction, "address", address)
+
 }
 
 // NoticeUpstreamProxyError reports an error when connecting to an upstream proxy. The
