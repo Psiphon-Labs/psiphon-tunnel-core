@@ -875,9 +875,10 @@ func (s *ietfQUICSession) isErrorIndicatingClosed(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	// The target error is of type *qerr.QuicError, but is not exported.
+	// The target errors are of type qerr.ApplicationError and
+	// qerr.IdleTimeoutError, but these are not exported by quic-go.
 	return errStr == "Application error 0x0" ||
-		errStr == "NO_ERROR: No recent network activity"
+		errStr == "timeout: no recent network activity"
 }
 
 func dialQUIC(
