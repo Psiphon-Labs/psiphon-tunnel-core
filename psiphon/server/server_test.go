@@ -1823,7 +1823,11 @@ func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAd
 	timeout := 20 * time.Second
 	var err error
 
-	for _, testHostname := range []string{"time.google.com", "time.nist.gov", "pool.ntp.org"} {
+	testHostnames := []string{"time.google.com", "time.nist.gov", "pool.ntp.org"}
+	indexes := prng.Perm(len(testHostnames))
+
+	for _, index := range indexes {
+		testHostname := testHostnames[index]
 		err = makeTunneledNTPRequestAttempt(t, testHostname, timeout, localSOCKSProxyPort, udpgwServerAddress)
 		if err == nil {
 			break
