@@ -115,12 +115,19 @@ type MeekConfig struct {
 	// QUICVersion indicates which QUIC version to use.
 	QUICVersion string
 
+	// QUICClientHelloSeed is used for randomized QUIC Client Hellos.
+	QUICClientHelloSeed *prng.Seed
+
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	UseHTTPS bool
 
 	// TLSProfile specifies the value for CustomTLSConfig.TLSProfile for all
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
+
+	// LegacyPassthrough indicates that the server expects a legacy passthrough
+	// message.
+	LegacyPassthrough bool
 
 	// NoDefaultTLSSessionID specifies the value for
 	// CustomTLSConfig.NoDefaultTLSSessionID for all underlying TLS connections
@@ -359,7 +366,8 @@ func DialMeek(
 			},
 			udpDialer,
 			quicDialSNIAddress,
-			meekConfig.QUICVersion)
+			meekConfig.QUICVersion,
+			meekConfig.QUICClientHelloSeed)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -430,6 +438,7 @@ func DialMeek(
 			// clients don't know which servers are configured to use it).
 
 			passthroughMessage, err := obfuscator.MakeTLSPassthroughMessage(
+				!meekConfig.LegacyPassthrough,
 				meekConfig.MeekObfuscatedKey)
 			if err != nil {
 				return nil, errors.Trace(err)

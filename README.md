@@ -187,7 +187,6 @@ Psiphon Tunnel Core uses:
 * [patrickmn/go-cache](https://github.com/patrickmn/go-cache)
 * [pkg/errors](https://github.com/pkg/errors)
 * [pmezard/go-difflib](https://github.com/pmezard/go-difflib)
-* [redjack/marionette](https://github.com/redjack/marionette)
 * [refraction-networking/gotapdance](https://github.com/refraction-networking/gotapdance)
 * [refraction-networking/utls](https://github.com/refraction-networking/utls)
 * [ryanuber/go-glob](https://github.com/ryanuber/go-glob)

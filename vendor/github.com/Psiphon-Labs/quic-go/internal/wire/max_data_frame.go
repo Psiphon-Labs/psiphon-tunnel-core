@@ -4,12 +4,12 @@ import (
 	"bytes"
 
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
-	"github.com/Psiphon-Labs/quic-go/internal/utils"
+	"github.com/Psiphon-Labs/quic-go/quicvarint"
 )
 
 // A MaxDataFrame carries flow control information for the connection
 type MaxDataFrame struct {
-	ByteOffset protocol.ByteCount
+	MaximumData protocol.ByteCount
 }
 
 // parseMaxDataFrame parses a MAX_DATA frame
@@ -19,22 +19,22 @@ func parseMaxDataFrame(r *bytes.Reader, _ protocol.VersionNumber) (*MaxDataFrame
 	}
 
 	frame := &MaxDataFrame{}
-	byteOffset, err := utils.ReadVarInt(r)
+	byteOffset, err := quicvarint.Read(r)
 	if err != nil {
 		return nil, err
 	}
-	frame.ByteOffset = protocol.ByteCount(byteOffset)
+	frame.MaximumData = protocol.ByteCount(byteOffset)
 	return frame, nil
 }
 
-//Write writes a MAX_STREAM_DATA frame
+// Write writes a MAX_STREAM_DATA frame
 func (f *MaxDataFrame) Write(b *bytes.Buffer, version protocol.VersionNumber) error {
 	b.WriteByte(0x10)
-	utils.WriteVarInt(b, uint64(f.ByteOffset))
+	quicvarint.Write(b, uint64(f.MaximumData))
 	return nil
 }
 
 // Length of a written frame
 func (f *MaxDataFrame) Length(version protocol.VersionNumber) protocol.ByteCount {
-	return 1 + utils.VarIntLen(uint64(f.ByteOffset))
+	return 1 + quicvarint.Len(uint64(f.MaximumData))
 }

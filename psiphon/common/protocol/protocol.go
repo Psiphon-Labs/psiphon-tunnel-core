@@ -39,7 +39,6 @@ const (
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP                = "FRONTED-MEEK-HTTP-OSSH"
 	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH              = "QUIC-OSSH"
 	TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH = "FRONTED-MEEK-QUIC-OSSH"
-	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH        = "MARIONETTE-OSSH"
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH          = "TAPDANCE-OSSH"
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH           = "CONJURE-OSSH"
 
@@ -135,23 +134,19 @@ var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
 	TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH,
-	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
 }
 
 var DefaultDisabledTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH,
-	TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
 }
 
 func TunnelProtocolUsesTCP(protocol string) bool {
-	// Limitation: Marionette network protocol depends on its format configuration.
 	return protocol != TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
-		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH &&
-		protocol != TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH
+		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
 
 func TunnelProtocolUsesSSH(protocol string) bool {
@@ -198,10 +193,6 @@ func TunnelProtocolUsesFrontedMeekQUIC(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
 
-func TunnelProtocolUsesMarionette(protocol string) bool {
-	return protocol == TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH
-}
-
 func TunnelProtocolUsesRefractionNetworking(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH
@@ -218,7 +209,6 @@ func TunnelProtocolUsesConjure(protocol string) bool {
 func TunnelProtocolIsResourceIntensive(protocol string) bool {
 	return TunnelProtocolUsesMeek(protocol) ||
 		TunnelProtocolUsesQUIC(protocol) ||
-		TunnelProtocolUsesMarionette(protocol) ||
 		TunnelProtocolUsesRefractionNetworking(protocol)
 }
 
@@ -243,10 +233,6 @@ func TunnelProtocolSupportsPassthrough(protocol string) bool {
 }
 
 func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
-
-	// TODO: Marionette UDP formats are incompatible with
-	// UpstreamProxy, but not currently supported.
-
 	return !TunnelProtocolUsesQUIC(protocol)
 }
 
@@ -395,30 +381,39 @@ func (labeledProfiles LabeledTLSProfiles) PruneInvalid(customTLSProfiles []strin
 }
 
 const (
-	QUIC_VERSION_GQUIC39      = "gQUICv39"
-	QUIC_VERSION_GQUIC43      = "gQUICv43"
-	QUIC_VERSION_GQUIC44      = "gQUICv44"
-	QUIC_VERSION_OBFUSCATED   = "OBFUSCATED"
-	QUIC_VERSION_IETF_DRAFT24 = "IETF-draft-24"
+	QUIC_VERSION_GQUIC39       = "gQUICv39"
+	QUIC_VERSION_GQUIC43       = "gQUICv43"
+	QUIC_VERSION_GQUIC44       = "gQUICv44"
+	QUIC_VERSION_OBFUSCATED    = "OBFUSCATED"
+	QUIC_VERSION_V1            = "QUICv1"
+	QUIC_VERSION_RANDOMIZED_V1 = "RANDOMIZED-QUICv1"
+	QUIC_VERSION_OBFUSCATED_V1 = "OBFUSCATED-QUICv1"
+	QUIC_VERSION_DECOY_V1      = "DECOY-QUICv1"
 )
 
-var SupportedQUICVersions = QUICVersions{
-	QUIC_VERSION_GQUIC39,
-	QUIC_VERSION_GQUIC43,
-	QUIC_VERSION_GQUIC44,
-	QUIC_VERSION_OBFUSCATED,
-	QUIC_VERSION_IETF_DRAFT24,
+// The value of SupportedQUICVersions is conditionally compiled based on
+// whether gQUIC is enabled.
+
+var legacyQUICVersions = QUICVersions{
+	"IETF-draft-24",
+}
+
+func QUICVersionHasRandomizedClientHello(version string) bool {
+	return version == QUIC_VERSION_RANDOMIZED_V1
 }
 
 func QUICVersionIsObfuscated(version string) bool {
-	return version == QUIC_VERSION_OBFUSCATED
+	return version == QUIC_VERSION_OBFUSCATED ||
+		version == QUIC_VERSION_OBFUSCATED_V1 ||
+		version == QUIC_VERSION_DECOY_V1
 }
 
 type QUICVersions []string
 
 func (versions QUICVersions) Validate() error {
 	for _, v := range versions {
-		if !common.Contains(SupportedQUICVersions, v) {
+		if !common.Contains(SupportedQUICVersions, v) &&
+			!common.Contains(legacyQUICVersions, v) {
 			return errors.Tracef("invalid QUIC version: %s", v)
 		}
 	}

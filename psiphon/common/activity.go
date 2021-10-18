@@ -138,7 +138,7 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 			conn.lruEntry.Touch()
 		}
 	}
-	// Note: no context error to preserve error type
+	// Note: no trace error to preserve error type
 	return n, err
 }
 
@@ -162,7 +162,7 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 		}
 
 	}
-	// Note: no context error to preserve error type
+	// Note: no trace error to preserve error type
 	return n, err
 }
 

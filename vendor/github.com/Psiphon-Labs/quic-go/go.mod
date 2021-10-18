@@ -1,18 +1,20 @@
 module github.com/Psiphon-Labs/quic-go
 
-go 1.13
+go 1.15
 
 require (
-	github.com/alangpierce/go-forceexport v0.0.0-20160317203124-8f1d6941cd75
 	github.com/cheekybits/genny v1.0.0
-	github.com/golang/mock v1.2.0
-	github.com/golang/protobuf v1.3.0
-	github.com/marten-seemann/chacha20 v0.2.0
-	github.com/marten-seemann/qpack v0.1.0
-	github.com/marten-seemann/qtls v0.4.1
-	github.com/onsi/ginkgo v1.7.0
-	github.com/onsi/gomega v1.4.3
-	golang.org/x/crypto v0.0.0-20190829043050-9756ffdc2472
-	golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3
-	golang.org/x/sync v0.0.0-20180314180146-1d60e4601c6f
+	github.com/francoispqt/gojay v1.2.13
+	github.com/golang/mock v1.6.0
+	github.com/marten-seemann/qpack v0.2.1
+	github.com/Psiphon-Labs/qtls-go1-15 v0.1.5
+	github.com/Psiphon-Labs/qtls-go1-16 v0.1.4
+	github.com/Psiphon-Labs/qtls-go1-17 v0.1.0-rc.1
+	github.com/onsi/ginkgo v1.16.4
+	github.com/onsi/gomega v1.13.0
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
+	golang.org/x/net v0.0.0-20210428140749-89ef3d95e781
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	golang.org/x/sys v0.0.0-20210510120138-977fb7262007
+	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 )

@@ -44,7 +44,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -136,6 +135,7 @@ func TestSSH(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -158,6 +158,7 @@ func TestOSSH(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -180,6 +181,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -202,6 +204,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -225,6 +228,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -248,6 +252,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -271,6 +276,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -294,6 +300,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -319,16 +326,17 @@ func TestQUICOSSH(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
-func TestMarionetteOSSH(t *testing.T) {
-	if !marionette.Enabled() {
-		t.Skip("Marionette is not enabled")
+func TestLimitedQUICOSSH(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
 	}
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "MARIONETTE-OSSH",
+			tunnelProtocol:       "QUIC-OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
@@ -344,6 +352,7 @@ func TestMarionetteOSSH(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    true,
 		})
 }
 
@@ -366,6 +375,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -388,6 +398,7 @@ func TestHotReload(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -410,6 +421,7 @@ func TestDefaultSponsorID(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -432,6 +444,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -454,6 +467,7 @@ func TestOmitAuthorization(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -476,6 +490,7 @@ func TestNoAuthorization(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -498,6 +513,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -520,6 +536,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -542,6 +559,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -564,6 +582,7 @@ func TestLivenessTest(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -586,6 +605,7 @@ func TestPruneServerEntries(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -608,6 +628,7 @@ func TestBurstMonitor(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       true,
 			doSplitTunnel:        false,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -630,6 +651,7 @@ func TestSplitTunnel(t *testing.T) {
 			doPacketManipulation: false,
 			doBurstMonitor:       false,
 			doSplitTunnel:        true,
+			limitQUICVersions:    false,
 		})
 }
 
@@ -651,6 +673,7 @@ type runServerConfig struct {
 	doPacketManipulation bool
 	doBurstMonitor       bool
 	doSplitTunnel        bool
+	limitQUICVersions    bool
 }
 
 var (
@@ -717,23 +740,25 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// create a server
 
 	psiphonServerIPAddress := serverIPAddress
-	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) ||
-		protocol.TunnelProtocolUsesMarionette(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {
 		// Workaround for macOS firewall.
 		psiphonServerIPAddress = "127.0.0.1"
 	}
 	psiphonServerPort := 4000
+
+	var limitQUICVersions protocol.QUICVersions
+	if runConfig.limitQUICVersions {
+		selectedQUICVersion := protocol.SupportedQUICVersions[prng.Intn(
+			len(protocol.SupportedQUICVersions))]
+		limitQUICVersions = protocol.QUICVersions{selectedQUICVersion}
+	}
 
 	generateConfigParams := &GenerateConfigParams{
 		ServerIPAddress:      psiphonServerIPAddress,
 		EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
 		WebServerPort:        8000,
 		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: psiphonServerPort},
-	}
-
-	if protocol.TunnelProtocolUsesMarionette(runConfig.tunnelProtocol) {
-		generateConfigParams.TunnelProtocolPorts[runConfig.tunnelProtocol] = 0
-		generateConfigParams.MarionetteFormat = "http_simple_nonblocking"
+		LimitQUICVersions:    limitQUICVersions,
 	}
 
 	if doServerTactics {
@@ -831,6 +856,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["AllowBogons"] = true
 
 	serverConfig["RunPacketManipulator"] = runConfig.doPacketManipulation
+
+	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) && quic.GQUICEnabled() {
+		// Enable legacy QUIC version support.
+		serverConfig["EnableGQUIC"] = true
+	}
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -1342,6 +1372,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	expectTCPDataTransfer := runConfig.doTunneledWebRequest && !expectTrafficFailure && !runConfig.doSplitTunnel
 	// Even with expectTrafficFailure, DNS port forwards will succeed
 	expectUDPDataTransfer := runConfig.doTunneledNTPRequest
+	expectQUICVersion := ""
+	if runConfig.limitQUICVersions {
+		expectQUICVersion = limitQUICVersions[0]
+	}
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -1354,6 +1388,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectTCPPortForwardDial,
 			expectTCPDataTransfer,
 			expectUDPDataTransfer,
+			expectQUICVersion,
 			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
@@ -1414,6 +1449,7 @@ func checkExpectedServerTunnelLogFields(
 	expectTCPPortForwardDial bool,
 	expectTCPDataTransfer bool,
 	expectUDPDataTransfer bool,
+	expectQUICVersion string,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -1589,7 +1625,10 @@ func checkExpectedServerTunnelLogFields(
 			}
 		}
 
-		if !common.Contains(protocol.SupportedQUICVersions, fields["quic_version"].(string)) {
+		quicVersion := fields["quic_version"].(string)
+		if !common.Contains(protocol.SupportedQUICVersions, quicVersion) ||
+			(runConfig.limitQUICVersions && quicVersion != expectQUICVersion) {
+
 			return fmt.Errorf("unexpected quic_version '%s'", fields["quic_version"])
 		}
 	}

@@ -1,3 +1,4 @@
+//go:build !PSIPHON_DISABLE_QUIC
 // +build !PSIPHON_DISABLE_QUIC
 
 /*
@@ -23,6 +24,7 @@ package quic
 
 import (
 	"crypto/sha256"
+	std_errors "errors"
 	"io"
 	"net"
 	"sync"
@@ -32,17 +34,57 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/Yawning/chacha20"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	ietf_quic "github.com/Psiphon-Labs/quic-go"
 	"golang.org/x/crypto/hkdf"
+	"golang.org/x/net/ipv4"
 )
 
 const (
-	MAX_QUIC_IPV4_PACKET_SIZE            = 1252
-	MAX_QUIC_IPV6_PACKET_SIZE            = 1232
-	MAX_OBFUSCATED_QUIC_IPV4_PACKET_SIZE = 1372
-	MAX_OBFUSCATED_QUIC_IPV6_PACKET_SIZE = 1352
-	MAX_PADDING                          = 64
-	NONCE_SIZE                           = 12
-	RANDOM_STREAM_LIMIT                  = 1<<38 - 64
+
+	// MAX_PACKET_SIZE is the largest packet size quic-go will produce,
+	// including post MTU discovery. This value is quic-go
+	// internal/protocol.MaxPacketBufferSize, which is the Ethernet MTU of
+	// 1500 less IPv6 and UDP header sizes.
+	//
+	// Legacy gQUIC quic-go will produce packets no larger than
+	// MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4/IPV6.
+
+	MAX_PACKET_SIZE = 1452
+
+	// MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4/IPV6 are the largest packet sizes
+	// quic-go will produce before MTU discovery, 1280 less IP and UDP header
+	// sizes. These values, which match quic-go
+	// internal/protocol.InitialPacketSizeIPv4/IPv6, are used to calculate
+	// maximum padding sizes.
+
+	MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4 = 1252
+	MAX_PRE_DISCOVERY_PACKET_SIZE_IPV6 = 1232
+
+	// OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT is the minimum amount of bytes
+	// required for obfuscation overhead, the nonce and the padding length.
+	// In IETF quic-go, this adjustment value is passed into quic-go and
+	// applied to packet construction so that quic-go produces max packet
+	// sizes reduced by this adjustment value.
+
+	OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT = NONCE_SIZE + 1
+
+	// MIN_INITIAL_PACKET_SIZE is the minimum UDP packet payload size for
+	// Initial packets, an anti-amplification measure (see RFC 9000, section
+	// 14.1). To accomodate obfuscation prefix messages within the same
+	// Initial UDP packet, quic-go's enforcement of this size requirement is
+	// disabled and the enforcment is done by ObfuscatedPacketConn.
+
+	MIN_INITIAL_PACKET_SIZE = 1200
+
+	MAX_PADDING_SIZE       = 255
+	MAX_GQUIC_PADDING_SIZE = 64
+
+	MIN_DECOY_PACKETS = 0
+	MAX_DECOY_PACKETS = 10
+
+	NONCE_SIZE = 12
+
+	RANDOM_STREAM_LIMIT = 1<<38 - 64
 )
 
 // ObfuscatedPacketConn wraps a QUIC net.PacketConn with an obfuscation layer
@@ -60,16 +102,20 @@ const (
 // payload will increase UDP packets beyond the QUIC max of 1280 bytes,
 // introducing some risk of fragmentation and/or dropped packets.
 type ObfuscatedPacketConn struct {
-	net.PacketConn
-	isServer       bool
-	isClosed       int32
-	runWaitGroup   *sync.WaitGroup
-	stopBroadcast  chan struct{}
-	obfuscationKey [32]byte
-	peerModesMutex sync.Mutex
-	peerModes      map[string]*peerMode
-	noncePRNG      *prng.PRNG
-	paddingPRNG    *prng.PRNG
+	ietf_quic.OOBCapablePacketConn
+	isServer         bool
+	isIETFClient     bool
+	isDecoyClient    bool
+	isClosed         int32
+	runWaitGroup     *sync.WaitGroup
+	stopBroadcast    chan struct{}
+	obfuscationKey   [32]byte
+	peerModesMutex   sync.Mutex
+	peerModes        map[string]*peerMode
+	noncePRNG        *prng.PRNG
+	paddingPRNG      *prng.PRNG
+	decoyPacketCount int32
+	decoyBuffer      []byte
 }
 
 type peerMode struct {
@@ -86,8 +132,15 @@ func (p *peerMode) isStale() bool {
 func NewObfuscatedPacketConn(
 	conn net.PacketConn,
 	isServer bool,
+	isIETFClient bool,
+	isDecoyClient bool,
 	obfuscationKey string,
 	paddingSeed *prng.Seed) (*ObfuscatedPacketConn, error) {
+
+	oobPacketConn, ok := conn.(ietf_quic.OOBCapablePacketConn)
+	if !ok {
+		return nil, errors.TraceNew("conn must support OOBCapablePacketConn")
+	}
 
 	// There is no replay of obfuscation "encryption", just padding.
 	nonceSeed, err := prng.NewSeed()
@@ -96,11 +149,13 @@ func NewObfuscatedPacketConn(
 	}
 
 	packetConn := &ObfuscatedPacketConn{
-		PacketConn:  conn,
-		isServer:    isServer,
-		peerModes:   make(map[string]*peerMode),
-		noncePRNG:   prng.NewPRNGWithSeed(nonceSeed),
-		paddingPRNG: prng.NewPRNGWithSeed(paddingSeed),
+		OOBCapablePacketConn: oobPacketConn,
+		isServer:             isServer,
+		isIETFClient:         isIETFClient,
+		isDecoyClient:        isDecoyClient,
+		peerModes:            make(map[string]*peerMode),
+		noncePRNG:            prng.NewPRNGWithSeed(nonceSeed),
+		paddingPRNG:          prng.NewPRNGWithSeed(paddingSeed),
 	}
 
 	secret := []byte(obfuscationKey)
@@ -109,6 +164,12 @@ func NewObfuscatedPacketConn(
 		hkdf.New(sha256.New, secret, salt, nil), packetConn.obfuscationKey[:])
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if isDecoyClient {
+		packetConn.decoyPacketCount = int32(packetConn.paddingPRNG.Range(
+			MIN_DECOY_PACKETS, MAX_DECOY_PACKETS))
+		packetConn.decoyBuffer = make([]byte, MAX_PACKET_SIZE)
 	}
 
 	if isServer {
@@ -156,7 +217,7 @@ func (conn *ObfuscatedPacketConn) Close() error {
 		conn.runWaitGroup.Wait()
 	}
 
-	return conn.PacketConn.Close()
+	return conn.OOBCapablePacketConn.Close()
 }
 
 type temporaryNetError struct {
@@ -180,13 +241,137 @@ func (e *temporaryNetError) Error() string {
 }
 
 func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
-	n, addr, _, err := conn.readFromWithType(p)
+	n, _, _, addr, _, err := conn.readPacketWithType(p, nil)
+	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
 	return n, addr, err
 }
 
-func (conn *ObfuscatedPacketConn) readFromWithType(p []byte) (int, net.Addr, bool, error) {
+func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if !ok {
+		return 0, errors.TraceNew("unexpected addr type")
+	}
+	n, _, err := conn.writePacket(p, nil, udpAddr)
+	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	return n, err
+}
 
-	n, addr, err := conn.PacketConn.ReadFrom(p)
+// ReadMsgUDP, and WriteMsgUDP satisfy the ietf_quic.OOBCapablePacketConn
+// interface. In non-muxListener mode, quic-go will access the
+// ObfuscatedPacketConn directly and use these functions to set ECN bits.
+//
+// ReadBatch implements ietf_quic.batchConn. Providing this implementation
+// effectively disables the quic-go batch packet reading optimization, which
+// would otherwise bypass deobfuscation. Note that ipv4.Message is an alias
+// for x/net/internal/socket.Message and quic-go uses this one type for both
+// IPv4 and IPv6 packets.
+//
+// Read, Write, and RemoteAddr are present to satisfy the net.Conn interface,
+// to which ObfuscatedPacketConn is converted internally, via quic-go, in
+// x/net/ipv[4|6] for OOB manipulation. These functions do not need to be
+// implemented.
+
+func (conn *ObfuscatedPacketConn) ReadMsgUDP(p, oob []byte) (int, int, int, *net.UDPAddr, error) {
+	n, oobn, flags, addr, _, err := conn.readPacketWithType(p, nil)
+	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	return n, oobn, flags, addr, err
+}
+
+func (conn *ObfuscatedPacketConn) WriteMsgUDP(p, oob []byte, addr *net.UDPAddr) (int, int, error) {
+	n, oobn, err := conn.writePacket(p, oob, addr)
+	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	return n, oobn, err
+}
+
+func (conn *ObfuscatedPacketConn) ReadBatch(ms []ipv4.Message, _ int) (int, error) {
+
+	// Read a "batch" of 1 message, with any necessary deobfuscation performed
+	// by readPacketWithType.
+	//
+	// TODO: implement proper batch packet reading here, along with batch
+	// deobfuscation.
+
+	if len(ms) < 1 || len(ms[0].Buffers[0]) < 1 {
+		return 0, errors.TraceNew("unexpected message buffer size")
+	}
+	var err error
+	ms[0].N, ms[0].NN, ms[0].Flags, ms[0].Addr, _, err =
+		conn.readPacketWithType(ms[0].Buffers[0], ms[0].OOB)
+	if err != nil {
+		// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+		return 0, err
+	}
+	return 1, nil
+}
+
+var notSupported = std_errors.New("not supported")
+
+func (conn *ObfuscatedPacketConn) Read(_ []byte) (int, error) {
+	return 0, errors.Trace(notSupported)
+}
+
+func (conn *ObfuscatedPacketConn) Write(_ []byte) (int, error) {
+	return 0, errors.Trace(notSupported)
+}
+
+func (conn *ObfuscatedPacketConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (conn *ObfuscatedPacketConn) readPacketWithType(
+	p, oob []byte) (int, int, int, *net.UDPAddr, bool, error) {
+
+	for {
+		n, oobn, flags, addr, isIETF, err := conn.readPacket(p, oob)
+
+		// When enabled, and when a packet is received, sometimes immediately
+		// respond with a decoy packet, which is Sentirely random. Sending a
+		// small number of these packets early in the connection is intended
+		// to frustrate simple traffic fingerprinting which looks for a
+		// certain number of packets client->server, followed by a certain
+		// number of packets server->client, and so on.
+		//
+		// TODO: use a more sophisticated distribution; configure via tactics
+		// parameters; add server-side decoy packet injection.
+		//
+		// See also:
+		//
+		// Tor Project's Sharknado concept:
+		// https://gitlab.torproject.org/legacy/trac/-/issues/30716#note_2326086
+		//
+		// Lantern's OQUIC specification:
+		// https://github.com/getlantern/quicwrapper/blob/master/OQUIC.md
+		if err == nil && conn.isIETFClient && conn.isDecoyClient {
+			count := atomic.LoadInt32(&conn.decoyPacketCount)
+			if count > 0 && conn.paddingPRNG.FlipCoin() {
+
+				if atomic.CompareAndSwapInt32(&conn.decoyPacketCount, count, count-1) {
+
+					packetSize := conn.paddingPRNG.Range(
+						1, getMaxPreDiscoveryPacketSize(addr))
+
+					// decoyBuffer is all zeros, so the QUIC Fixed Bit is zero.
+					// Ignore any errors when writing decoy packets.
+					_, _ = conn.WriteTo(conn.decoyBuffer[:packetSize], addr)
+				}
+			}
+		}
+
+		// Ignore/drop packets with an invalid QUIC Fixed Bit (see RFC 9000,
+		// Packet Formats).
+		if err == nil && (isIETF || conn.isIETFClient) && n > 0 && (p[0]&0x40) == 0 {
+			continue
+		}
+
+		// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+		return n, oobn, flags, addr, isIETF, err
+	}
+}
+
+func (conn *ObfuscatedPacketConn) readPacket(
+	p, oob []byte) (int, int, int, *net.UDPAddr, bool, error) {
+
+	n, oobn, flags, addr, err := conn.OOBCapablePacketConn.ReadMsgUDP(p, oob)
 
 	// Data is processed even when err != nil, as ReadFrom may return both
 	// a packet and an error, such as io.EOF.
@@ -199,7 +384,7 @@ func (conn *ObfuscatedPacketConn) readFromWithType(p []byte) (int, net.Addr, boo
 	// only when the function returns no error.
 
 	isObfuscated := true
-	var isIETF bool
+	isIETF := true
 	var address string
 	var firstFlowPacket bool
 	var lastPacketTime time.Time
@@ -239,13 +424,14 @@ func (conn *ObfuscatedPacketConn) readFromWithType(p []byte) (int, net.Addr, boo
 			isObfuscated = !isQUIC
 
 			if isObfuscated && isIETF {
-				return n, addr, false, newTemporaryNetError(
+				return n, oobn, flags, addr, false, newTemporaryNetError(
 					errors.Tracef("unexpected isQUIC result"))
 			}
 
 			// Without addr, the mode cannot be determined.
 			if addr == nil {
-				return n, addr, false, newTemporaryNetError(errors.Tracef("missing addr"))
+				return n, oobn, flags, addr, true, newTemporaryNetError(
+					errors.Tracef("missing addr"))
 			}
 
 			conn.peerModesMutex.Lock()
@@ -280,6 +466,10 @@ func (conn *ObfuscatedPacketConn) readFromWithType(p []byte) (int, net.Addr, boo
 
 			isIETF = mode.isIETF
 			conn.peerModesMutex.Unlock()
+
+		} else {
+
+			isIETF = conn.isIETFClient
 		}
 
 		if isObfuscated {
@@ -288,20 +478,24 @@ func (conn *ObfuscatedPacketConn) readFromWithType(p []byte) (int, net.Addr, boo
 			// avoids allocting a buffer.
 
 			if n < (NONCE_SIZE + 1) {
-				return n, addr, false, newTemporaryNetError(errors.Tracef(
-					"unexpected obfuscated QUIC packet length: %d", n))
+				return n, oobn, flags, addr, true, newTemporaryNetError(
+					errors.Tracef("unexpected obfuscated QUIC packet length: %d", n))
 			}
 
 			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], p[0:NONCE_SIZE])
 			if err != nil {
-				return n, addr, false, errors.Trace(err)
+				return n, oobn, flags, addr, true, errors.Trace(err)
 			}
 			cipher.XORKeyStream(p[NONCE_SIZE:], p[NONCE_SIZE:])
 
+			// The padding length check allows legacy gQUIC padding to exceed
+			// its 64 byte maximum, as we don't yet know if this is gQUIC or
+			// IETF QUIC.
+
 			paddingLen := int(p[NONCE_SIZE])
-			if paddingLen > MAX_PADDING || paddingLen > n-(NONCE_SIZE+1) {
-				return n, addr, false, newTemporaryNetError(errors.Tracef(
-					"unexpected padding length: %d, %d", paddingLen, n))
+			if paddingLen > MAX_PADDING_SIZE || paddingLen > n-(NONCE_SIZE+1) {
+				return n, oobn, flags, addr, true, newTemporaryNetError(
+					errors.Tracef("unexpected padding length: %d, %d", paddingLen, n))
 			}
 
 			n -= (NONCE_SIZE + 1) + paddingLen
@@ -309,6 +503,25 @@ func (conn *ObfuscatedPacketConn) readFromWithType(p []byte) (int, net.Addr, boo
 
 			if conn.isServer && firstFlowPacket {
 				isIETF = isIETFQUICClientHello(p[0:n])
+
+				// When an obfuscated packet looks like neither IETF nor
+				// gQUIC, force it through the IETF code path which will
+				// perform anti-probing check before sending any response
+				// packet. The gQUIC stack may respond with a version
+				// negotiation packet.
+				//
+				// Ensure that mode.isIETF is set to true before returning,
+				// so subsequent packets in the same flow are also forced
+				// through the same anti-probing code path.
+				//
+				// Limitation: the following race condition check is not
+				// consistent with this constraint. This will be resolved by
+				// disabling gQUIC or once gQUIC is ultimatel retired.
+
+				if !isIETF && !isGQUICClientHello(p[0:n]) {
+					isIETF = true
+				}
+
 				conn.peerModesMutex.Lock()
 				mode, ok := conn.peerModes[address]
 
@@ -318,22 +531,37 @@ func (conn *ObfuscatedPacketConn) readFromWithType(p []byte) (int, net.Addr, boo
 				if !ok || mode.isObfuscated != true || mode.isIETF != false ||
 					mode.lastPacketTime != lastPacketTime {
 					conn.peerModesMutex.Unlock()
-					return n, addr, false, newTemporaryNetError(
+					return n, oobn, flags, addr, true, newTemporaryNetError(
 						errors.Tracef("unexpected peer mode"))
 				}
 
 				mode.isIETF = isIETF
+
 				conn.peerModesMutex.Unlock()
+
+				// Enforce the MIN_INITIAL_PACKET_SIZE size requirement for new flows.
+				//
+				// Limitations:
+				//
+				// - The Initial packet may be sent more than once, but we
+				//   only check the very first packet.
+				// - For session resumption, the first packet may be a
+				//   Handshake packet, not an Initial packet, and can be smaller.
+
+				if isIETF && n < MIN_INITIAL_PACKET_SIZE {
+					return n, oobn, flags, addr, true, newTemporaryNetError(errors.Tracef(
+						"unexpected first QUIC packet length: %d", n))
+				}
 			}
 		}
 	}
 
-	// Do not wrap any err returned by conn.PacketConn.ReadFrom.
-	return n, addr, isIETF, err
+	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	return n, oobn, flags, addr, isIETF, err
 }
 
 type obfuscatorBuffer struct {
-	buffer [MAX_OBFUSCATED_QUIC_IPV4_PACKET_SIZE]byte
+	buffer [MAX_PACKET_SIZE]byte
 }
 
 var obfuscatorBufferPool = &sync.Pool{
@@ -342,34 +570,34 @@ var obfuscatorBufferPool = &sync.Pool{
 	},
 }
 
-func getMaxPacketSizes(addr net.Addr) (int, int) {
-	if udpAddr, ok := addr.(*net.UDPAddr); ok && udpAddr.IP.To4() == nil {
-		return MAX_QUIC_IPV6_PACKET_SIZE, MAX_OBFUSCATED_QUIC_IPV6_PACKET_SIZE
-	}
-	return MAX_QUIC_IPV4_PACKET_SIZE, MAX_OBFUSCATED_QUIC_IPV4_PACKET_SIZE
-}
-
-func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
+func (conn *ObfuscatedPacketConn) writePacket(
+	p, oob []byte, addr *net.UDPAddr) (int, int, error) {
 
 	n := len(p)
 
 	isObfuscated := true
+	isIETF := true
 
 	if conn.isServer {
 
 		conn.peerModesMutex.Lock()
 		address := addr.String()
 		mode, ok := conn.peerModes[address]
-		isObfuscated = ok && mode.isObfuscated
+		if ok {
+			isObfuscated = mode.isObfuscated
+			isIETF = mode.isIETF
+		}
 		conn.peerModesMutex.Unlock()
+
+	} else {
+
+		isIETF = conn.isIETFClient
 	}
 
 	if isObfuscated {
 
-		maxQUICPacketSize, maxObfuscatedPacketSize := getMaxPacketSizes(addr)
-
-		if n > maxQUICPacketSize {
-			return 0, newTemporaryNetError(errors.Tracef(
+		if n > MAX_PACKET_SIZE {
+			return 0, 0, newTemporaryNetError(errors.Tracef(
 				"unexpected QUIC packet length: %d", n))
 		}
 
@@ -391,18 +619,9 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 			nonce := buffer[0:NONCE_SIZE]
 			conn.noncePRNG.Read(nonce)
 
-			// Obfuscated QUIC padding results in packets that exceed the
-			// QUIC max packet size of 1280.
+			maxPadding := getMaxPaddingSize(isIETF, addr, n)
 
-			maxPaddingLen := maxObfuscatedPacketSize - (n + (NONCE_SIZE + 1))
-			if maxPaddingLen < 0 {
-				maxPaddingLen = 0
-			}
-			if maxPaddingLen > MAX_PADDING {
-				maxPaddingLen = MAX_PADDING
-			}
-
-			paddingLen := conn.paddingPRNG.Intn(maxPaddingLen + 1)
+			paddingLen := conn.paddingPRNG.Intn(maxPadding + 1)
 			buffer[NONCE_SIZE] = uint8(paddingLen)
 
 			padding := buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen]
@@ -413,7 +632,7 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 
 			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], nonce)
 			if err != nil {
-				return 0, errors.Trace(err)
+				return 0, 0, errors.Trace(err)
 			}
 			packet := buffer[NONCE_SIZE:dataLen]
 			cipher.XORKeyStream(packet, packet)
@@ -429,10 +648,85 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		}
 	}
 
-	_, err := conn.PacketConn.WriteTo(p, addr)
+	_, oobn, err := conn.OOBCapablePacketConn.WriteMsgUDP(p, oob, addr)
 
-	// Do not wrap any err returned by conn.PacketConn.WriteTo.
-	return n, err
+	// quic-go uses OOB to manipulate ECN bits in the IP header; these are not
+	// obfuscated.
+	//
+	// Return n = len(input p) bytes written even when p is an obfuscated
+	// buffer and longer than the input p.
+
+	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	return n, oobn, err
+}
+
+func getMaxPreDiscoveryPacketSize(addr net.Addr) int {
+	maxPacketSize := MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4
+	if udpAddr, ok := addr.(*net.UDPAddr); ok && udpAddr.IP.To4() == nil {
+		maxPacketSize = MAX_PRE_DISCOVERY_PACKET_SIZE_IPV6
+	}
+	return maxPacketSize
+}
+
+func getMaxPaddingSize(isIETF bool, addr net.Addr, packetSize int) int {
+
+	maxPacketSize := getMaxPreDiscoveryPacketSize(addr)
+
+	maxPadding := 0
+
+	if isIETF {
+
+		// quic-go starts with a maximum packet size of 1280, which is the
+		// IPv6 minimum MTU as well as very commonly supported for IPv4
+		// (quic-go may increase the maximum packet size via MTU discovery).
+		// Do not pad beyond that initial maximum size. As a result, padding
+		// is only added for smaller packets.
+		// OBFUSCATED_PACKET_SIZE_ADJUSTMENT is already factored in via
+		// Client/ServerInitalPacketPaddingAdjustment.
+
+		maxPadding = maxPacketSize - packetSize
+		if maxPadding < 0 {
+			maxPadding = 0
+		}
+		if maxPadding > MAX_PADDING_SIZE {
+			maxPadding = MAX_PADDING_SIZE
+		}
+
+	} else {
+
+		// Legacy gQUIC has a strict maximum packet size of 1280, and legacy
+		// obfuscation adds padding on top of that.
+
+		maxPadding = (maxPacketSize + NONCE_SIZE + 1 + MAX_GQUIC_PADDING_SIZE) - packetSize
+		if maxPadding < 0 {
+			maxPadding = 0
+		}
+		if maxPadding > MAX_GQUIC_PADDING_SIZE {
+			maxPadding = MAX_GQUIC_PADDING_SIZE
+		}
+	}
+
+	return maxPadding
+}
+
+func (conn *ObfuscatedPacketConn) serverMaxPacketSizeAdjustment(
+	addr net.Addr) int {
+
+	if !conn.isServer {
+		return 0
+	}
+
+	conn.peerModesMutex.Lock()
+	address := addr.String()
+	mode, ok := conn.peerModes[address]
+	isObfuscated := ok && mode.isObfuscated
+	conn.peerModesMutex.Unlock()
+
+	if isObfuscated {
+		return OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT
+	}
+
+	return 0
 }
 
 func isQUICClientHello(buffer []byte) (bool, bool) {
@@ -446,14 +740,14 @@ func isQUICClientHello(buffer []byte) (bool, bool) {
 
 	if isIETFQUICClientHello(buffer) {
 		return true, true
-	} else if isgQUICClientHello(buffer) {
+	} else if isGQUICClientHello(buffer) {
 		return true, false
 	}
 
 	return false, false
 }
 
-func isgQUICClientHello(buffer []byte) bool {
+func isGQUICClientHello(buffer []byte) bool {
 
 	// In all currently supported versions, the first client packet contains
 	// the "CHLO" tag at one of the following offsets. The offset can vary for
@@ -503,10 +797,10 @@ func isIETFQUICClientHello(buffer []byte) bool {
 		return false
 	}
 
-	// IETF QUIC draft-24
+	// IETF QUIC version 1, RFC 9000
 
-	return buffer[1] == 0xff &&
+	return buffer[1] == 0 &&
 		buffer[2] == 0 &&
 		buffer[3] == 0 &&
-		buffer[4] == 0x18
+		buffer[4] == 0x1
 }

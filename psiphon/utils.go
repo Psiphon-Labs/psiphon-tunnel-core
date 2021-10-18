@@ -38,7 +38,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
@@ -334,10 +333,6 @@ type conditionallyEnabledComponents struct {
 
 func (c conditionallyEnabledComponents) QUICEnabled() bool {
 	return quic.Enabled()
-}
-
-func (c conditionallyEnabledComponents) MarionetteEnabled() bool {
-	return marionette.Enabled()
 }
 
 func (c conditionallyEnabledComponents) RefractionNetworkingEnabled() bool {

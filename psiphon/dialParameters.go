@@ -114,6 +114,7 @@ type DialParameters struct {
 
 	QUICVersion               string
 	QUICDialSNIAddress        string
+	QUICClientHelloSeed       *prng.Seed
 	ObfuscatedQUICPaddingSeed *prng.Seed
 
 	ConjureCachedRegistrationTTL time.Duration
@@ -658,7 +659,14 @@ func MakeDialParameters(
 		protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
 		isFronted := protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
-		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry.FrontingProviderID, p)
+		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry, p)
+
+		if protocol.QUICVersionHasRandomizedClientHello(dialParams.QUICVersion) {
+			dialParams.QUICClientHelloSeed, err = prng.NewSeed()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
@@ -771,11 +779,6 @@ func MakeDialParameters(
 			dialParams.MeekHostHeader = dialParams.MeekDialAddress
 		}
 
-	case protocol.TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
-
-		// Note: port comes from marionette "format"
-		dialParams.DirectDialAddress = serverEntry.IpAddress
-
 	default:
 		return nil, errors.Tracef(
 			"unknown tunnel protocol: %s", dialParams.TunnelProtocol)
@@ -867,8 +870,10 @@ func MakeDialParameters(
 			DialAddress:                   dialParams.MeekDialAddress,
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
+			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
 			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
+			LegacyPassthrough:             serverEntry.ProtocolUsesLegacyPassthrough(dialParams.TunnelProtocol),
 			NoDefaultTLSSessionID:         dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
 			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
@@ -1142,7 +1147,7 @@ func selectFrontingParameters(
 
 func selectQUICVersion(
 	isFronted bool,
-	frontingProviderID string,
+	serverEntry *protocol.ServerEntry,
 	p parameters.ParametersAccessor) string {
 
 	limitQUICVersions := p.QUICVersions(parameters.LimitQUICVersions)
@@ -1150,12 +1155,18 @@ func selectQUICVersion(
 	var disableQUICVersions protocol.QUICVersions
 
 	if isFronted {
-		if frontingProviderID == "" {
+		if serverEntry.FrontingProviderID == "" {
 			// Legacy server entry case
-			disableQUICVersions = protocol.QUICVersions{protocol.QUIC_VERSION_IETF_DRAFT24}
+			disableQUICVersions = protocol.QUICVersions{
+				protocol.QUIC_VERSION_V1,
+				protocol.QUIC_VERSION_RANDOMIZED_V1,
+				protocol.QUIC_VERSION_OBFUSCATED_V1,
+				protocol.QUIC_VERSION_DECOY_V1,
+			}
 		} else {
 			disableQUICVersions = p.LabeledQUICVersions(
-				parameters.DisableFrontingProviderQUICVersions, frontingProviderID)
+				parameters.DisableFrontingProviderQUICVersions,
+				serverEntry.FrontingProviderID)
 		}
 	}
 
@@ -1165,6 +1176,21 @@ func selectQUICVersion(
 
 		if len(limitQUICVersions) > 0 &&
 			!common.Contains(limitQUICVersions, quicVersion) {
+			continue
+		}
+
+		// Both tactics and the server entry can specify LimitQUICVersions. In
+		// tactics, the parameter is intended to direct certain clients to
+		// use a successful protocol variant. In the server entry, the
+		// parameter may be used to direct all clients to send
+		// consistent-looking protocol variants to a particular server; e.g.,
+		// only regular QUIC, or only obfuscated QUIC.
+		//
+		// The isFronted/QUICVersionIsObfuscated logic predates
+		// ServerEntry.LimitQUICVersions; ServerEntry.LimitQUICVersions could
+		// now be used to achieve a similar outcome.
+		if len(serverEntry.LimitQUICVersions) > 0 &&
+			!common.Contains(serverEntry.LimitQUICVersions, quicVersion) {
 			continue
 		}
 
