@@ -1,3 +1,4 @@
+//go:build !PSIPHON_DISABLE_QUIC
 // +build !PSIPHON_DISABLE_QUIC
 
 /*
@@ -23,6 +24,7 @@ package quic
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"runtime"
@@ -31,20 +33,38 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"golang.org/x/sync/errgroup"
 )
 
 func TestQUIC(t *testing.T) {
-	for negotiateQUICVersion := range supportedVersionNumbers {
-		t.Run(negotiateQUICVersion, func(t *testing.T) {
-			runQUIC(t, negotiateQUICVersion)
+	for quicVersion := range supportedVersionNumbers {
+		t.Run(fmt.Sprintf("%s", quicVersion), func(t *testing.T) {
+			if isGQUIC(quicVersion) && !GQUICEnabled() {
+				t.Skipf("gQUIC is not enabled")
+			}
+			runQUIC(t, quicVersion, GQUICEnabled(), false)
 		})
+		if isIETF(quicVersion) {
+			t.Run(fmt.Sprintf("%s (invoke anti-probing)", quicVersion), func(t *testing.T) {
+				runQUIC(t, quicVersion, GQUICEnabled(), true)
+			})
+		}
+		if isIETF(quicVersion) {
+			t.Run(fmt.Sprintf("%s (disable gQUIC)", quicVersion), func(t *testing.T) {
+				runQUIC(t, quicVersion, false, false)
+			})
+		}
 	}
 }
 
-func runQUIC(t *testing.T, negotiateQUICVersion string) {
+func runQUIC(
+	t *testing.T,
+	quicVersion string,
+	enableGQUIC bool,
+	invokeAntiProbing bool) {
 
 	initGoroutines := getGoroutines()
 
@@ -64,9 +84,20 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 	// connection termination packets.
 	serverIdleTimeout = 1 * time.Second
 
+	irregularTunnelLogger := func(_ string, err error, _ common.LogFields) {
+		if !invokeAntiProbing {
+			t.Errorf("unexpected irregular tunnel event: %v", err)
+		}
+	}
+
 	obfuscationKey := prng.HexString(32)
 
-	listener, err := Listen(nil, "127.0.0.1:0", obfuscationKey)
+	listener, err := Listen(
+		nil,
+		irregularTunnelLogger,
+		"127.0.0.1:0",
+		obfuscationKey,
+		enableGQUIC)
 	if err != nil {
 		t.Fatalf("Listen failed: %s", err)
 	}
@@ -76,6 +107,12 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 	testGroup, testCtx := errgroup.WithContext(context.Background())
 
 	testGroup.Go(func() error {
+
+		if invokeAntiProbing {
+			// The quic-go server can still handshake new sessions even if
+			// Accept isn't called.
+			return nil
+		}
 
 		var serverGroup errgroup.Group
 
@@ -130,9 +167,23 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 				return errors.Trace(err)
 			}
 
+			clientObfuscationKey := obfuscationKey
+			if invokeAntiProbing {
+				clientObfuscationKey = prng.HexString(32)
+				packetConn = &countReadsConn{PacketConn: packetConn}
+			}
+
 			obfuscationPaddingSeed, err := prng.NewSeed()
 			if err != nil {
 				return errors.Trace(err)
+			}
+
+			var clientHelloSeed *prng.Seed
+			if isClientHelloRandomized(quicVersion) {
+				clientHelloSeed, err = prng.NewSeed()
+				if err != nil {
+					return errors.Trace(err)
+				}
 			}
 
 			conn, err := Dial(
@@ -140,9 +191,29 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 				packetConn,
 				remoteAddr,
 				serverAddress,
-				negotiateQUICVersion,
-				obfuscationKey,
+				quicVersion,
+				clientHelloSeed,
+				clientObfuscationKey,
 				obfuscationPaddingSeed)
+
+			if invokeAntiProbing {
+
+				if err == nil {
+					return errors.TraceNew(
+						"unexpected dial success with invalid client hello random")
+				}
+
+				readCount := packetConn.(*countReadsConn).getReadCount()
+
+				if readCount > 0 {
+					return errors.Tracef(
+						"unexpected %d read packets with invalid client hello random",
+						readCount)
+				}
+
+				return nil
+			}
+
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -197,6 +268,9 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 
 	bytes := atomic.LoadInt64(&serverReceivedBytes)
 	expectedBytes := int64(clients * bytesToSend)
+	if invokeAntiProbing {
+		expectedBytes = 0
+	}
 	if bytes != expectedBytes {
 		t.Errorf("unexpected serverReceivedBytes: %d vs. %d", bytes, expectedBytes)
 	}
@@ -256,6 +330,23 @@ func runQUIC(t *testing.T, negotiateQUICVersion string) {
 	}
 }
 
+type countReadsConn struct {
+	net.PacketConn
+	readCount int32
+}
+
+func (conn *countReadsConn) ReadFrom(p []byte) (int, net.Addr, error) {
+	n, addr, err := conn.PacketConn.ReadFrom(p)
+	if n > 0 {
+		atomic.AddInt32(&conn.readCount, 1)
+	}
+	return n, addr, err
+}
+
+func (conn *countReadsConn) getReadCount() int {
+	return int(atomic.LoadInt32(&conn.readCount))
+}
+
 func getGoroutines() []runtime.StackRecord {
 	n, _ := runtime.GoroutineProfile(nil)
 	r := make([]runtime.StackRecord, n)
@@ -305,6 +396,14 @@ func checkDanglingGoroutines(
 				// the channel receive, so the stack of the testing.T.Run goroutine may or
 				// may not match initGoroutines. Skip it.
 				if strings.Contains(funcNames[i], "testing.(*T).Run") {
+					skip = true
+					break
+				}
+
+				// This goroutine, created by Listener.clientRandomHistory,
+				// terminates nondeterministically, based on garbage
+				// collection. Skip it.
+				if strings.Contains(funcNames[i], "go-cache-lru.(*janitor).Run") {
 					skip = true
 					break
 				}

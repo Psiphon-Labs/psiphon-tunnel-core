@@ -55,6 +55,7 @@ type ServerEntry struct {
 	SshHostKey                    string   `json:"sshHostKey"`
 	SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
 	SshObfuscatedQUICPort         int      `json:"sshObfuscatedQUICPort"`
+	LimitQUICVersions             []string `json:"limitQUICVersions"`
 	SshObfuscatedTapDancePort     int      `json:"sshObfuscatedTapdancePort"`
 	SshObfuscatedConjurePort      int      `json:"sshObfuscatedConjurePort"`
 	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
@@ -72,7 +73,6 @@ type ServerEntry struct {
 	MeekFrontingDisableSNI        bool     `json:"meekFrontingDisableSNI"`
 	TacticsRequestPublicKey       string   `json:"tacticsRequestPublicKey"`
 	TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
-	MarionetteFormat              string   `json:"marionetteFormat"`
 	ConfigurationVersion          int      `json:"configurationVersion"`
 	Signature                     string   `json:"signature"`
 
@@ -447,13 +447,14 @@ func GetTacticsCapability(protocol string) string {
 
 // hasCapability indicates if the server entry has the specified capability.
 //
-// Any internal "PASSTHROUGH" componant in the server entry's capabilities is
-// ignored. The PASSTHROUGH component is used to mask protocols which are
-// running the passthrough mechanism from older clients which do not implement
-// the passthrough message. Older clients will treat these capabilities as
-// unknown protocols and skip them.
+// Any internal "PASSTHROUGH-v2 or "PASSTHROUGH" componant in the server
+// entry's capabilities is ignored. These PASSTHROUGH components are used to
+// mask protocols which are running the passthrough mechanisms from older
+// clients which do not implement the passthrough messages. Older clients will
+// treat these capabilities as unknown protocols and skip them.
 func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 	for _, capability := range serverEntry.Capabilities {
+		capability = strings.ReplaceAll(capability, "-PASSTHROUGH-v2", "")
 		capability = strings.ReplaceAll(capability, "-PASSTHROUGH", "")
 		if capability == requiredCapability {
 			return true
@@ -469,11 +470,22 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 	return serverEntry.hasCapability(requiredCapability)
 }
 
+// ProtocolUsesLegacyPassthrough indicates whether the ServerEntry supports
+// the specified protocol using legacy passthrough messages.
+func (serverEntry *ServerEntry) ProtocolUsesLegacyPassthrough(protocol string) bool {
+	legacyCapability := GetCapability(protocol) + "-PASSTHROUGH"
+	for _, capability := range serverEntry.Capabilities {
+		if capability == legacyCapability {
+			return true
+		}
+	}
+	return false
+}
+
 // ConditionallyEnabledComponents defines an interface which can be queried to
 // determine which conditionally compiled protocol components are present.
 type ConditionallyEnabledComponents interface {
 	QUICEnabled() bool
-	MarionetteEnabled() bool
 	RefractionNetworkingEnabled() bool
 }
 
@@ -486,11 +498,12 @@ type TunnelProtocolPortLists map[string]*common.PortList
 func (serverEntry *ServerEntry) GetSupportedProtocols(
 	conditionallyEnabled ConditionallyEnabledComponents,
 	useUpstreamProxy bool,
-	limitTunnelProtocols []string,
+	limitTunnelProtocols TunnelProtocols,
 	limitTunnelDialPortNumbers TunnelProtocolPortLists,
-	excludeIntensive bool) []string {
+	limitQUICVersions QUICVersions,
+	excludeIntensive bool) TunnelProtocols {
 
-	supportedProtocols := make([]string, 0)
+	supportedProtocols := make(TunnelProtocols, 0)
 
 	for _, tunnelProtocol := range SupportedTunnelProtocols {
 
@@ -513,7 +526,6 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 		}
 
 		if (TunnelProtocolUsesQUIC(tunnelProtocol) && !conditionallyEnabled.QUICEnabled()) ||
-			(TunnelProtocolUsesMarionette(tunnelProtocol) && !conditionallyEnabled.MarionetteEnabled()) ||
 			(TunnelProtocolUsesRefractionNetworking(tunnelProtocol) &&
 				!conditionallyEnabled.RefractionNetworkingEnabled()) {
 			continue
@@ -521,6 +533,26 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 
 		if !serverEntry.SupportsProtocol(tunnelProtocol) {
 			continue
+		}
+
+		// If the server is limiting QUIC versions, at least one must be
+		// supported. And if tactics is also limiting QUIC versions, there
+		// must be a common version in both limit lists for this server entry
+		// to support QUIC-OSSH.
+		//
+		// Limitation: to avoid additional complexity, we do not consider
+		// DisableFrontingProviderQUICVersion here, as fronting providers are
+		// expected to support QUICv1 and gQUIC is expected to become
+		// obsolete in general.
+
+		if TunnelProtocolUsesQUIC(tunnelProtocol) && len(serverEntry.LimitQUICVersions) > 0 {
+			if !common.ContainsAny(serverEntry.LimitQUICVersions, SupportedQUICVersions) {
+				continue
+			}
+			if len(limitQUICVersions) > 0 &&
+				!common.ContainsAny(serverEntry.LimitQUICVersions, limitQUICVersions) {
+				continue
+			}
 		}
 
 		dialPortNumber, err := serverEntry.GetDialPortNumber(tunnelProtocol)
@@ -580,13 +612,6 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 		TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 		TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 		return serverEntry.MeekServerPort, nil
-
-	case TUNNEL_PROTOCOL_MARIONETTE_OBFUSCATED_SSH:
-		// The port is encoded in the marionnete "format"
-		// Limitations:
-		// - not compatible with LimitDialPortNumbers
-		// - accurate port is not reported via dial_port_number
-		return -1, nil
 	}
 
 	return 0, errors.TraceNew("unknown protocol")

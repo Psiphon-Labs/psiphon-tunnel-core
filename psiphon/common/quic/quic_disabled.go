@@ -1,3 +1,4 @@
+//go:build PSIPHON_DISABLE_QUIC
 // +build PSIPHON_DISABLE_QUIC
 
 /*
@@ -36,22 +37,29 @@ func Enabled() bool {
 	return false
 }
 
+func GQUICEnabled() bool {
+	return false
+}
+
 func Listen(
-	logger common.Logger,
-	address string,
-	obfuscationKey string) (net.Listener, error) {
+	_ common.Logger,
+	_ func(string, error, common.LogFields),
+	_ string,
+	_ string,
+	_ bool) (net.Listener, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }
 
 func Dial(
-	ctx context.Context,
-	packetConn net.PacketConn,
-	remoteAddr *net.UDPAddr,
-	quicSNIAddress string,
-	negotiateQUICVersion string,
-	obfuscationKey string,
-	obfuscationPaddingSeed *prng.Seed) (net.Conn, error) {
+	_ context.Context,
+	_ net.PacketConn,
+	_ *net.UDPAddr,
+	_ string,
+	_ string,
+	_ *prng.Seed,
+	_ string,
+	_ *prng.Seed) (net.Conn, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }
@@ -70,11 +78,12 @@ func (t *QUICTransporter) RoundTrip(req *http.Request) (resp *http.Response, err
 }
 
 func NewQUICTransporter(
-	ctx context.Context,
-	noticeEmitter func(string),
-	udpDialer func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
-	quicSNIAddress string,
-	negotiateQUICVersion string) (*QUICTransporter, error) {
+	_ context.Context,
+	_ func(string),
+	_ func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
+	_ string,
+	_ string,
+	_ *prng.Seed) (*QUICTransporter, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }

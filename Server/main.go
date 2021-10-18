@@ -34,7 +34,6 @@ import (
 	"github.com/Psiphon-Inc/rotate-safe-writer"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 	"github.com/mitchellh/panicwrap"
 )
@@ -147,22 +146,16 @@ func main() {
 		}
 
 		tunnelProtocolPorts := make(map[string]int)
-		marionetteFormat := ""
 
 		for _, protocolPort := range generateProtocolPorts {
 			parts := strings.Split(protocolPort, ":")
 			if len(parts) == 2 {
-				if protocol.TunnelProtocolUsesMarionette(parts[0]) {
-					tunnelProtocolPorts[parts[0]] = 0
-					marionetteFormat = parts[1]
-				} else {
-					port, err := strconv.Atoi(parts[1])
-					if err != nil {
-						fmt.Printf("generate failed: %s\n", err)
-						os.Exit(1)
-					}
-					tunnelProtocolPorts[parts[0]] = port
+				port, err := strconv.Atoi(parts[1])
+				if err != nil {
+					fmt.Printf("generate failed: %s\n", err)
+					os.Exit(1)
 				}
+				tunnelProtocolPorts[parts[0]] = port
 			}
 		}
 
@@ -175,7 +168,6 @@ func main() {
 					EnableSSHAPIRequests:       true,
 					WebServerPort:              generateWebServerPort,
 					TunnelProtocolPorts:        tunnelProtocolPorts,
-					MarionetteFormat:           marionetteFormat,
 					TrafficRulesConfigFilename: generateTrafficRulesConfigFilename,
 					OSLConfigFilename:          generateOSLConfigFilename,
 					TacticsConfigFilename:      generateTacticsConfigFilename,

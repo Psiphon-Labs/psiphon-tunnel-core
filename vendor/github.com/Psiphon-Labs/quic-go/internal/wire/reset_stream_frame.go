@@ -4,14 +4,15 @@ import (
 	"bytes"
 
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
-	"github.com/Psiphon-Labs/quic-go/internal/utils"
+	"github.com/Psiphon-Labs/quic-go/internal/qerr"
+	"github.com/Psiphon-Labs/quic-go/quicvarint"
 )
 
 // A ResetStreamFrame is a RESET_STREAM frame in QUIC
 type ResetStreamFrame struct {
-	StreamID   protocol.StreamID
-	ErrorCode  protocol.ApplicationErrorCode
-	ByteOffset protocol.ByteCount
+	StreamID  protocol.StreamID
+	ErrorCode qerr.StreamErrorCode
+	FinalSize protocol.ByteCount
 }
 
 func parseResetStreamFrame(r *bytes.Reader, _ protocol.VersionNumber) (*ResetStreamFrame, error) {
@@ -21,37 +22,37 @@ func parseResetStreamFrame(r *bytes.Reader, _ protocol.VersionNumber) (*ResetStr
 
 	var streamID protocol.StreamID
 	var byteOffset protocol.ByteCount
-	sid, err := utils.ReadVarInt(r)
+	sid, err := quicvarint.Read(r)
 	if err != nil {
 		return nil, err
 	}
 	streamID = protocol.StreamID(sid)
-	errorCode, err := utils.ReadVarInt(r)
+	errorCode, err := quicvarint.Read(r)
 	if err != nil {
 		return nil, err
 	}
-	bo, err := utils.ReadVarInt(r)
+	bo, err := quicvarint.Read(r)
 	if err != nil {
 		return nil, err
 	}
 	byteOffset = protocol.ByteCount(bo)
 
 	return &ResetStreamFrame{
-		StreamID:   streamID,
-		ErrorCode:  protocol.ApplicationErrorCode(errorCode),
-		ByteOffset: byteOffset,
+		StreamID:  streamID,
+		ErrorCode: qerr.StreamErrorCode(errorCode),
+		FinalSize: byteOffset,
 	}, nil
 }
 
 func (f *ResetStreamFrame) Write(b *bytes.Buffer, _ protocol.VersionNumber) error {
 	b.WriteByte(0x4)
-	utils.WriteVarInt(b, uint64(f.StreamID))
-	utils.WriteVarInt(b, uint64(f.ErrorCode))
-	utils.WriteVarInt(b, uint64(f.ByteOffset))
+	quicvarint.Write(b, uint64(f.StreamID))
+	quicvarint.Write(b, uint64(f.ErrorCode))
+	quicvarint.Write(b, uint64(f.FinalSize))
 	return nil
 }
 
 // Length of a written frame
 func (f *ResetStreamFrame) Length(version protocol.VersionNumber) protocol.ByteCount {
-	return 1 + utils.VarIntLen(uint64(f.StreamID)) + utils.VarIntLen(uint64(f.ErrorCode)) + utils.VarIntLen(uint64(f.ByteOffset))
+	return 1 + quicvarint.Len(uint64(f.StreamID)) + quicvarint.Len(uint64(f.ErrorCode)) + quicvarint.Len(uint64(f.FinalSize))
 }

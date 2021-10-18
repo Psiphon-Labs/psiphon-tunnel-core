@@ -40,7 +40,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/marionette"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
@@ -164,14 +163,14 @@ func (server *TunnelServer) Run() error {
 
 			listener, err = quic.Listen(
 				CommonLogger(log),
+				func(clientAddress string, err error, logFields common.LogFields) {
+					logIrregularTunnel(
+						support, tunnelProtocol, listenPort, clientAddress,
+						errors.Trace(err), LogFields(logFields))
+				},
 				localAddress,
-				support.Config.ObfuscatedSSHKey)
-
-		} else if protocol.TunnelProtocolUsesMarionette(tunnelProtocol) {
-
-			listener, err = marionette.Listen(
-				support.Config.ServerIPAddress,
-				support.Config.MarionetteFormat)
+				support.Config.ObfuscatedSSHKey,
+				support.Config.EnableGQUIC)
 
 		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
 

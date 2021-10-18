@@ -3,10 +3,10 @@ package http3
 import (
 	"fmt"
 
-	quic "github.com/Psiphon-Labs/quic-go"
+	"github.com/Psiphon-Labs/quic-go"
 )
 
-type errorCode quic.ErrorCode
+type errorCode quic.ApplicationErrorCode
 
 const (
 	errorNoError              errorCode = 0x100
@@ -23,7 +23,7 @@ const (
 	errorRequestRejected      errorCode = 0x10b
 	errorRequestCanceled      errorCode = 0x10c
 	errorRequestIncomplete    errorCode = 0x10d
-	errorEarlyResponse        errorCode = 0x10e
+	errorMessageError         errorCode = 0x10e
 	errorConnectError         errorCode = 0x10f
 	errorVersionFallback      errorCode = 0x110
 )
@@ -58,8 +58,8 @@ func (e errorCode) String() string {
 		return "H3_REQUEST_CANCELLED"
 	case errorRequestIncomplete:
 		return "H3_INCOMPLETE_REQUEST"
-	case errorEarlyResponse:
-		return "H3_EARLY_RESPONSE"
+	case errorMessageError:
+		return "H3_MESSAGE_ERROR"
 	case errorConnectError:
 		return "H3_CONNECT_ERROR"
 	case errorVersionFallback:

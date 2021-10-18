@@ -4,13 +4,13 @@ import (
 	"bytes"
 
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
-	"github.com/Psiphon-Labs/quic-go/internal/utils"
+	"github.com/Psiphon-Labs/quic-go/quicvarint"
 )
 
 // A MaxStreamDataFrame is a MAX_STREAM_DATA frame
 type MaxStreamDataFrame struct {
-	StreamID   protocol.StreamID
-	ByteOffset protocol.ByteCount
+	StreamID          protocol.StreamID
+	MaximumStreamData protocol.ByteCount
 }
 
 func parseMaxStreamDataFrame(r *bytes.Reader, _ protocol.VersionNumber) (*MaxStreamDataFrame, error) {
@@ -18,29 +18,29 @@ func parseMaxStreamDataFrame(r *bytes.Reader, _ protocol.VersionNumber) (*MaxStr
 		return nil, err
 	}
 
-	sid, err := utils.ReadVarInt(r)
+	sid, err := quicvarint.Read(r)
 	if err != nil {
 		return nil, err
 	}
-	offset, err := utils.ReadVarInt(r)
+	offset, err := quicvarint.Read(r)
 	if err != nil {
 		return nil, err
 	}
 
 	return &MaxStreamDataFrame{
-		StreamID:   protocol.StreamID(sid),
-		ByteOffset: protocol.ByteCount(offset),
+		StreamID:          protocol.StreamID(sid),
+		MaximumStreamData: protocol.ByteCount(offset),
 	}, nil
 }
 
 func (f *MaxStreamDataFrame) Write(b *bytes.Buffer, version protocol.VersionNumber) error {
 	b.WriteByte(0x11)
-	utils.WriteVarInt(b, uint64(f.StreamID))
-	utils.WriteVarInt(b, uint64(f.ByteOffset))
+	quicvarint.Write(b, uint64(f.StreamID))
+	quicvarint.Write(b, uint64(f.MaximumStreamData))
 	return nil
 }
 
 // Length of a written frame
 func (f *MaxStreamDataFrame) Length(version protocol.VersionNumber) protocol.ByteCount {
-	return 1 + utils.VarIntLen(uint64(f.StreamID)) + utils.VarIntLen(uint64(f.ByteOffset))
+	return 1 + quicvarint.Len(uint64(f.StreamID)) + quicvarint.Len(uint64(f.MaximumStreamData))
 }

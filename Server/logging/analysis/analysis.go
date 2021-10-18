@@ -118,7 +118,7 @@ func (a *MessageLogModel) key() MessageLogKey {
 		context = string(*a.MessageLogContext)
 	}
 
-	return MessageLogKey(fmt.Sprintf("(%s,%s, %s,%s)", MessageLogKey(a.Msg), MessageLogKey(a.Level), errorString, context))
+	return MessageLogKey(fmt.Sprintf("(%s,%d, %s,%s)", a.Msg, a.Level, errorString, context))
 }
 
 func (a *MessageLogContext) equal(b *MessageLogContext) bool {

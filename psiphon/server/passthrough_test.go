@@ -44,6 +44,14 @@ import (
 )
 
 func TestPassthrough(t *testing.T) {
+	testPassthrough(t, false)
+}
+
+func TestLegacyPassthrough(t *testing.T) {
+	testPassthrough(t, true)
+}
+
+func testPassthrough(t *testing.T, legacy bool) {
 
 	psiphon.SetEmitDiagnosticNotices(true, true)
 
@@ -92,6 +100,8 @@ func TestPassthrough(t *testing.T) {
 		EnableSSHAPIRequests: true,
 		WebServerPort:        8000,
 		TunnelProtocolPorts:  map[string]int{tunnelProtocol: 4000},
+		Passthrough:          true,
+		LegacyPassthrough:    legacy,
 	}
 
 	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
