@@ -191,13 +191,13 @@ func (p *PRNG) rekey() {
 	p.randomStreamUsed = 0
 }
 
-// Int63 is equivilent to math/read.Int63.
+// Int63 is equivilent to math/rand.Int63.
 func (p *PRNG) Int63() int64 {
 	i := p.Uint64()
 	return int64(i & (1<<63 - 1))
 }
 
-// Int63 is equivilent to math/read.Uint64.
+// Int63 is equivilent to math/rand.Uint64.
 func (p *PRNG) Uint64() uint64 {
 	var b [8]byte
 	p.Read(b[:])
@@ -229,7 +229,7 @@ func (p *PRNG) FlipWeightedCoin(weight float64) bool {
 	return f > 1.0-weight
 }
 
-// Intn is equivilent to math/read.Intn, except it returns 0 if n <= 0
+// Intn is equivilent to math/rand.Intn, except it returns 0 if n <= 0
 // instead of panicking.
 func (p *PRNG) Intn(n int) int {
 	if n <= 0 {
@@ -238,7 +238,7 @@ func (p *PRNG) Intn(n int) int {
 	return p.rand.Intn(n)
 }
 
-// Int63n is equivilent to math/read.Int63n, except it returns 0 if n <= 0
+// Int63n is equivilent to math/rand.Int63n, except it returns 0 if n <= 0
 // instead of panicking.
 func (p *PRNG) Int63n(n int64) int64 {
 	if n <= 0 {
@@ -266,7 +266,7 @@ func (p *PRNG) ExpFloat64Range(min, max, lambda float64) float64 {
 	return value
 }
 
-// Intn is equivilent to math/read.Perm.
+// Intn is equivilent to math/rand.Perm.
 func (p *PRNG) Perm(n int) []int {
 	return p.rand.Perm(n)
 }

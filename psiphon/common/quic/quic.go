@@ -1,3 +1,4 @@
+//go:build !PSIPHON_DISABLE_QUIC
 // +build !PSIPHON_DISABLE_QUIC
 
 /*
@@ -51,15 +52,14 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/h2quic"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/qerr"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	ietf_quic "github.com/Psiphon-Labs/quic-go"
 	"github.com/Psiphon-Labs/quic-go/http3"
@@ -76,26 +76,54 @@ func Enabled() bool {
 	return true
 }
 
-const ietfQUICDraft24VersionNumber = 0xff000018
+const ietfQUIC1VersionNumber = 0x1
 
 var supportedVersionNumbers = map[string]uint32{
-	protocol.QUIC_VERSION_GQUIC39:      uint32(gquic.VersionGQUIC39),
-	protocol.QUIC_VERSION_GQUIC43:      uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_GQUIC44:      uint32(gquic.VersionGQUIC44),
-	protocol.QUIC_VERSION_OBFUSCATED:   uint32(gquic.VersionGQUIC43),
-	protocol.QUIC_VERSION_IETF_DRAFT24: ietfQUICDraft24VersionNumber,
+	protocol.QUIC_VERSION_GQUIC39:       uint32(0x51303339),
+	protocol.QUIC_VERSION_GQUIC43:       uint32(0x51303433),
+	protocol.QUIC_VERSION_GQUIC44:       uint32(0x51303434),
+	protocol.QUIC_VERSION_OBFUSCATED:    uint32(0x51303433),
+	protocol.QUIC_VERSION_V1:            ietfQUIC1VersionNumber,
+	protocol.QUIC_VERSION_RANDOMIZED_V1: ietfQUIC1VersionNumber,
+	protocol.QUIC_VERSION_OBFUSCATED_V1: uint32(ietfQUIC1VersionNumber),
+	protocol.QUIC_VERSION_DECOY_V1:      uint32(ietfQUIC1VersionNumber),
 }
 
 func isObfuscated(quicVersion string) bool {
-	return quicVersion == protocol.QUIC_VERSION_OBFUSCATED
+	return quicVersion == protocol.QUIC_VERSION_OBFUSCATED ||
+		quicVersion == protocol.QUIC_VERSION_OBFUSCATED_V1 ||
+		quicVersion == protocol.QUIC_VERSION_DECOY_V1
 }
 
-func isIETFVersion(versionNumber uint32) bool {
-	return versionNumber == ietfQUICDraft24VersionNumber
+func isDecoy(quicVersion string) bool {
+	return quicVersion == protocol.QUIC_VERSION_DECOY_V1
+}
+
+func isClientHelloRandomized(quicVersion string) bool {
+	return quicVersion == protocol.QUIC_VERSION_RANDOMIZED_V1
+}
+
+func isIETF(quicVersion string) bool {
+	versionNumber, ok := supportedVersionNumbers[quicVersion]
+	if !ok {
+		return false
+	}
+	return isIETFVersionNumber(versionNumber)
+}
+
+func isIETFVersionNumber(versionNumber uint32) bool {
+	return versionNumber == ietfQUIC1VersionNumber
+}
+
+func isGQUIC(quicVersion string) bool {
+	return quicVersion == protocol.QUIC_VERSION_GQUIC39 ||
+		quicVersion == protocol.QUIC_VERSION_GQUIC43 ||
+		quicVersion == protocol.QUIC_VERSION_GQUIC44 ||
+		quicVersion == protocol.QUIC_VERSION_OBFUSCATED
 }
 
 func getALPN(versionNumber uint32) string {
-	return "h3-24"
+	return "h3"
 }
 
 // quic_test overrides the server idle timeout.
@@ -103,14 +131,18 @@ var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 
 // Listener is a net.Listener.
 type Listener struct {
-	*muxListener
+	quicListener
+	obfuscatedPacketConn *ObfuscatedPacketConn
+	clientRandomHistory  *obfuscator.SeedHistory
 }
 
 // Listen creates a new Listener.
 func Listen(
 	logger common.Logger,
+	irregularTunnelLogger func(string, error, common.LogFields),
 	address string,
-	obfuscationKey string) (net.Listener, error) {
+	obfuscationKey string,
+	enableGQUIC bool) (net.Listener, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(
 		values.GetHostName())
@@ -140,22 +172,142 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
-	obfuscatedPacketConn, err := NewObfuscatedPacketConn(udpConn, true, obfuscationKey, seed)
+	obfuscatedPacketConn, err := NewObfuscatedPacketConn(
+		udpConn, true, false, false, obfuscationKey, seed)
 	if err != nil {
 		udpConn.Close()
 		return nil, errors.Trace(err)
 	}
 
-	// Note that, due to nature of muxListener, full accepts may happen before
-	// return and caller calls Accept.
+	// QUIC clients must prove knowledge of the obfuscated key via a message
+	// sent in the TLS ClientHello random field, or receive no UDP packets
+	// back from the server. This anti-probing mechanism is implemented using
+	// the existing Passthrough message and SeedHistory replay detection
+	// mechanisms. The replay history TTL is set to the validity period of
+	// the passthrough message.
+	//
+	// Irregular events are logged for invalid client activity.
 
-	listener, err := newMuxListener(logger, obfuscatedPacketConn, tlsCertificate)
-	if err != nil {
-		obfuscatedPacketConn.Close()
-		return nil, errors.Trace(err)
+	clientRandomHistory := obfuscator.NewSeedHistory(
+		&obfuscator.SeedHistoryConfig{SeedTTL: obfuscator.TLS_PASSTHROUGH_TIME_PERIOD})
+
+	verifyClientHelloRandom := func(remoteAddr net.Addr, clientHelloRandom []byte) bool {
+
+		ok := obfuscator.VerifyTLSPassthroughMessage(
+			true, obfuscationKey, clientHelloRandom)
+		if !ok {
+			irregularTunnelLogger(
+				common.IPAddressFromAddr(remoteAddr),
+				errors.TraceNew("invalid client random message"),
+				nil)
+			return false
+		}
+
+		// Replay history is set to non-strict mode, allowing for a legitimate
+		// client to resend its Initial packet, as may happen. Since the
+		// source _port_ should be the same as the source IP in this case, we use
+		// the full IP:port value as the client address from which a replay is
+		// allowed.
+		//
+		// The non-strict case where ok is true and logFields is not nil is
+		// ignored, and nothing is logged in that scenario.
+
+		ok, logFields := clientRandomHistory.AddNew(
+			false, remoteAddr.String(), "client-hello-random", clientHelloRandom)
+		if !ok && logFields != nil {
+			irregularTunnelLogger(
+				common.IPAddressFromAddr(remoteAddr),
+				errors.TraceNew("duplicate client random message"),
+				*logFields)
+		}
+
+		return ok
 	}
 
-	return &Listener{muxListener: listener}, nil
+	var quicListener quicListener
+
+	if !enableGQUIC {
+
+		// When gQUIC is disabled, skip the muxListener entirely. This allows
+		// quic-go to enable ECN operations as the packet conn is a
+		// quic-goOOBCapablePacketConn; this provides some performance
+		// optimizations and also generate packets that may be harder to
+		// fingerprint, due to lack of ECN bits in IP packets otherwise.
+		// Skipping muxListener also avoids the additional overhead of
+		// pumping read packets though mux channels.
+
+		tlsConfig, ietfQUICConfig := makeIETFConfig(
+			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate)
+
+		listener, err := ietf_quic.Listen(
+			obfuscatedPacketConn, tlsConfig, ietfQUICConfig)
+		if err != nil {
+			obfuscatedPacketConn.Close()
+			return nil, errors.Trace(err)
+		}
+
+		quicListener = &ietfQUICListener{Listener: listener}
+
+	} else {
+
+		// Note that, due to nature of muxListener, full accepts may happen before
+		// return and caller calls Accept.
+
+		muxListener, err := newMuxListener(
+			logger, verifyClientHelloRandom, obfuscatedPacketConn, tlsCertificate)
+		if err != nil {
+			obfuscatedPacketConn.Close()
+			return nil, errors.Trace(err)
+		}
+
+		quicListener = muxListener
+	}
+
+	return &Listener{
+		quicListener:         quicListener,
+		obfuscatedPacketConn: obfuscatedPacketConn,
+		clientRandomHistory:  clientRandomHistory,
+	}, nil
+}
+
+func makeIETFConfig(
+	conn *ObfuscatedPacketConn,
+	verifyClientHelloRandom func(net.Addr, []byte) bool,
+	tlsCertificate tls.Certificate) (*tls.Config, *ietf_quic.Config) {
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		NextProtos:   []string{getALPN(ietfQUIC1VersionNumber)},
+	}
+
+	ietfQUICConfig := &ietf_quic.Config{
+		HandshakeIdleTimeout:  SERVER_HANDSHAKE_TIMEOUT,
+		MaxIdleTimeout:        serverIdleTimeout,
+		MaxIncomingStreams:    1,
+		MaxIncomingUniStreams: -1,
+		KeepAlive:             true,
+
+		// The quic-go server may respond with a version negotiation packet
+		// before reaching the Initial packet processing with its
+		// anti-probing defense. This may happen even for a malformed packet.
+		// To prevent all responses to probers, version negotiation is
+		// disabled, which disables sending these packets. The fact that the
+		// server does not issue version negotiation packets may be a
+		// fingerprint itself, but, regardless, probers cannot ellicit any
+		// reponse from the server without providing a well-formed Initial
+		// packet with a valid Client Hello random value.
+		//
+		// Limitation: once version negotiate is required, the order of
+		// quic-go operations may need to be changed in order to first check
+		// the Initial/Client Hello, and then issue any required version
+		// negotiation packet.
+		DisableVersionNegotiationPackets: true,
+
+		VerifyClientHelloRandom:       verifyClientHelloRandom,
+		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
+	}
+
+	return tlsConfig, ietfQUICConfig
 }
 
 // Accept returns a net.Conn that wraps a single QUIC session and stream. The
@@ -164,7 +316,7 @@ func Listen(
 // net.Conn will perform the blocking AcceptStream.
 func (listener *Listener) Accept() (net.Conn, error) {
 
-	session, err := listener.muxListener.Accept()
+	session, err := listener.quicListener.Accept()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -173,6 +325,16 @@ func (listener *Listener) Accept() (net.Conn, error) {
 		session:              session,
 		deferredAcceptStream: true,
 	}, nil
+}
+
+func (listener *Listener) Close() error {
+
+	// First close the underlying packet conn to ensure all quic-go goroutines
+	// as well as any blocking Accept call goroutine is interrupted. Note
+	// that muxListener does this as well, so this is for the IETF-only case.
+	_ = listener.obfuscatedPacketConn.Close()
+
+	return listener.quicListener.Close()
 }
 
 // Dial establishes a new QUIC session and stream to the server specified by
@@ -189,17 +351,28 @@ func Dial(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
-	negotiateQUICVersion string,
+	quicVersion string,
+	clientHelloSeed *prng.Seed,
 	obfuscationKey string,
 	obfuscationPaddingSeed *prng.Seed) (net.Conn, error) {
 
-	if negotiateQUICVersion == "" {
+	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
 	}
 
-	versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
+	if isClientHelloRandomized(quicVersion) && clientHelloSeed == nil {
+		return nil, errors.TraceNew("missing client hello randomization values")
+	}
+
+	// obfuscationKey is always required, as it is used for anti-probing even
+	// when not obfuscating the QUIC payload.
+	if isObfuscated(quicVersion) && (obfuscationPaddingSeed == nil) || obfuscationKey == "" {
+		return nil, errors.TraceNew("missing obfuscation values")
+	}
+
+	versionNumber, ok := supportedVersionNumbers[quicVersion]
 	if !ok {
-		return nil, errors.Tracef("unsupported version: %s", negotiateQUICVersion)
+		return nil, errors.Tracef("unsupported version: %s", quicVersion)
 	}
 
 	// Fail if the destination port is invalid. Network operations should fail
@@ -209,12 +382,47 @@ func Dial(
 		return nil, errors.Tracef("invalid destination port: %d", remoteAddr.Port)
 	}
 
-	if isObfuscated(negotiateQUICVersion) {
-		var err error
-		packetConn, err = NewObfuscatedPacketConn(
-			packetConn, false, obfuscationKey, obfuscationPaddingSeed)
+	maxPacketSizeAdjustment := 0
+
+	if isObfuscated(quicVersion) {
+		obfuscatedPacketConn, err := NewObfuscatedPacketConn(
+			packetConn,
+			false,
+			isIETFVersionNumber(versionNumber),
+			isDecoy(quicVersion),
+			obfuscationKey,
+			obfuscationPaddingSeed)
 		if err != nil {
 			return nil, errors.Trace(err)
+		}
+		packetConn = obfuscatedPacketConn
+
+		// Reserve space for packet obfuscation overhead so that quic-go will
+		// continue to produce packets of max size 1280.
+		maxPacketSizeAdjustment = OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT
+	}
+
+	// As an anti-probing measure, QUIC clients must prove knowledge of the
+	// server obfuscation key in the first client packet sent to the server. In
+	// the case of QUIC, the first packet, the Initial packet, contains a TLS
+	// Client Hello, and we set the client random field to a value that both
+	// proves knowledge of the obfuscation key and is indistiguishable from
+	// random. This is the same "passthrough" technique used for TLS, although
+	// for QUIC the server simply doesn't respond to any packets instead of
+	// passing traffic through to a different server.
+	//
+	// Limitation: the legacy gQUIC implementation does not support this
+	// anti-probling measure; gQUIC must be disabled to ensure no response
+	// from the server.
+
+	var getClientHelloRandom func() ([]byte, error)
+	if obfuscationKey != "" {
+		getClientHelloRandom = func() ([]byte, error) {
+			random, err := obfuscator.MakeTLSPassthroughMessage(true, obfuscationKey)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return random, nil
 		}
 	}
 
@@ -223,7 +431,11 @@ func Dial(
 		packetConn,
 		remoteAddr,
 		quicSNIAddress,
-		versionNumber)
+		versionNumber,
+		clientHelloSeed,
+		getClientHelloRandom,
+		maxPacketSizeAdjustment,
+		false)
 	if err != nil {
 		packetConn.Close()
 		return nil, errors.Trace(err)
@@ -426,11 +638,12 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 // CloseIdleConnections.
 type QUICTransporter struct {
 	quicRoundTripper
-	noticeEmitter        func(string)
-	udpDialer            func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
-	quicSNIAddress       string
-	negotiateQUICVersion string
-	packetConn           atomic.Value
+	noticeEmitter   func(string)
+	udpDialer       func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
+	quicSNIAddress  string
+	quicVersion     string
+	clientHelloSeed *prng.Seed
+	packetConn      atomic.Value
 
 	mutex sync.Mutex
 	ctx   context.Context
@@ -442,25 +655,39 @@ func NewQUICTransporter(
 	noticeEmitter func(string),
 	udpDialer func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
 	quicSNIAddress string,
-	negotiateQUICVersion string) (*QUICTransporter, error) {
+	quicVersion string,
+	clientHelloSeed *prng.Seed) (*QUICTransporter, error) {
 
-	versionNumber, ok := supportedVersionNumbers[negotiateQUICVersion]
+	if quicVersion == "" {
+		return nil, errors.TraceNew("missing version")
+	}
+
+	versionNumber, ok := supportedVersionNumbers[quicVersion]
 	if !ok {
-		return nil, errors.Tracef("unsupported version: %s", negotiateQUICVersion)
+		return nil, errors.Tracef("unsupported version: %s", quicVersion)
+	}
+
+	if isClientHelloRandomized(quicVersion) && clientHelloSeed == nil {
+		return nil, errors.TraceNew("missing client hello randomization values")
 	}
 
 	t := &QUICTransporter{
-		noticeEmitter:        noticeEmitter,
-		udpDialer:            udpDialer,
-		quicSNIAddress:       quicSNIAddress,
-		negotiateQUICVersion: negotiateQUICVersion,
-		ctx:                  ctx,
+		noticeEmitter:   noticeEmitter,
+		udpDialer:       udpDialer,
+		quicSNIAddress:  quicSNIAddress,
+		quicVersion:     quicVersion,
+		clientHelloSeed: clientHelloSeed,
+		ctx:             ctx,
 	}
 
-	if isIETFVersion(versionNumber) {
+	if isIETFVersionNumber(versionNumber) {
 		t.quicRoundTripper = &http3.RoundTripper{Dial: t.dialIETFQUIC}
 	} else {
-		t.quicRoundTripper = &h2quic.RoundTripper{Dial: t.dialgQUIC}
+		var err error
+		t.quicRoundTripper, err = gQUICRoundTripper(t)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	return t, nil
@@ -495,21 +722,12 @@ func (t *QUICTransporter) closePacketConn() {
 }
 
 func (t *QUICTransporter) dialIETFQUIC(
-	_, _ string, _ *tls.Config, _ *ietf_quic.Config) (ietf_quic.Session, error) {
+	_, _ string, _ *tls.Config, _ *ietf_quic.Config) (ietf_quic.EarlySession, error) {
 	session, err := t.dialQUIC()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return session.(*ietfQUICSession).Session, nil
-}
-
-func (t *QUICTransporter) dialgQUIC(
-	_, _ string, _ *tls.Config, _ *gquic.Config) (gquic.Session, error) {
-	session, err := t.dialQUIC()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return session.(*gQUICSession).Session, nil
+	return session.(*ietfQUICSession).Session.(ietf_quic.EarlySession), nil
 }
 
 func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
@@ -520,13 +738,9 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 		}
 	}()
 
-	if t.negotiateQUICVersion == "" {
-		return nil, errors.TraceNew("missing version")
-	}
-
-	versionNumber, ok := supportedVersionNumbers[t.negotiateQUICVersion]
+	versionNumber, ok := supportedVersionNumbers[t.quicVersion]
 	if !ok {
-		return nil, errors.Tracef("unsupported version: %s", t.negotiateQUICVersion)
+		return nil, errors.Tracef("unsupported version: %s", t.quicVersion)
 	}
 
 	t.mutex.Lock()
@@ -546,7 +760,11 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 		packetConn,
 		remoteAddr,
 		t.quicSNIAddress,
-		versionNumber)
+		versionNumber,
+		t.clientHelloSeed,
+		nil,
+		0,
+		true)
 	if err != nil {
 		packetConn.Close()
 		return nil, errors.Trace(err)
@@ -574,6 +792,8 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 
 // The following code provides support for using both gQUIC and IETF QUIC,
 // which are implemented in two different branches (now forks) of quic-go.
+// (The gQUIC functions are now located in gquic.go and the entire gQUIC
+// quic-go stack may be conditionally excluded from builds).
 //
 // dialQUIC uses the appropriate quic-go and returns quicSession which wraps
 // either a ietf_quic.Session or gquic.Session.
@@ -584,6 +804,7 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 
 type quicListener interface {
 	Close() error
+	Addr() net.Addr
 	Accept() (quicSession, error)
 }
 
@@ -645,55 +866,19 @@ func (s *ietfQUICSession) OpenStream() (quicStream, error) {
 	return s.Session.OpenStream()
 }
 
+func (s *ietfQUICSession) Close() error {
+	return s.Session.CloseWithError(0, "")
+}
+
 func (s *ietfQUICSession) isErrorIndicatingClosed(err error) bool {
 	if err == nil {
 		return false
 	}
 	errStr := err.Error()
-	// The target error is of type *qerr.QuicError, but is not exported.
+	// The target errors are of type qerr.ApplicationError and
+	// qerr.IdleTimeoutError, but these are not exported by quic-go.
 	return errStr == "Application error 0x0" ||
-		errStr == "NO_ERROR: No recent network activity"
-}
-
-type gQUICListener struct {
-	gquic.Listener
-}
-
-func (l *gQUICListener) Accept() (quicSession, error) {
-	session, err := l.Listener.Accept()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return &gQUICSession{Session: session}, nil
-}
-
-type gQUICSession struct {
-	gquic.Session
-}
-
-func (s *gQUICSession) AcceptStream() (quicStream, error) {
-	stream, err := s.Session.AcceptStream()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return stream, nil
-}
-
-func (s *gQUICSession) OpenStream() (quicStream, error) {
-	return s.Session.OpenStream()
-}
-
-func (s *gQUICSession) isErrorIndicatingClosed(err error) bool {
-	if err == nil {
-		return false
-	}
-	if quicErr, ok := err.(*qerr.QuicError); ok {
-		switch quicErr.ErrorCode {
-		case qerr.PeerGoingAway, qerr.NetworkIdleTimeout:
-			return true
-		}
-	}
-	return false
+		errStr == "timeout: no recent network activity"
 }
 
 func dialQUIC(
@@ -701,33 +886,53 @@ func dialQUIC(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
-	versionNumber uint32) (quicSession, error) {
+	versionNumber uint32,
+	clientHelloSeed *prng.Seed,
+	getClientHelloRandom func() ([]byte, error),
+	clientMaxPacketSizeAdjustment int,
+	dialEarly bool) (quicSession, error) {
 
-	if isIETFVersion(versionNumber) {
-
+	if isIETFVersionNumber(versionNumber) {
 		quicConfig := &ietf_quic.Config{
-			HandshakeTimeout: time.Duration(1<<63 - 1),
-			IdleTimeout:      CLIENT_IDLE_TIMEOUT,
-			KeepAlive:        true,
+			HandshakeIdleTimeout: time.Duration(1<<63 - 1),
+			MaxIdleTimeout:       CLIENT_IDLE_TIMEOUT,
+			KeepAlive:            true,
 			Versions: []ietf_quic.VersionNumber{
 				ietf_quic.VersionNumber(versionNumber)},
+			ClientHelloSeed:               clientHelloSeed,
+			GetClientHelloRandom:          getClientHelloRandom,
+			ClientMaxPacketSizeAdjustment: clientMaxPacketSizeAdjustment,
 		}
 
 		deadline, ok := ctx.Deadline()
 		if ok {
-			quicConfig.HandshakeTimeout = time.Until(deadline)
+			quicConfig.HandshakeIdleTimeout = time.Until(deadline)
 		}
 
-		dialSession, err := ietf_quic.DialContext(
-			ctx,
-			packetConn,
-			remoteAddr,
-			quicSNIAddress,
-			&tls.Config{
-				InsecureSkipVerify: true,
-				NextProtos:         []string{getALPN(versionNumber)},
-			},
-			quicConfig)
+		var dialSession ietf_quic.Session
+		var err error
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true,
+			NextProtos:         []string{getALPN(versionNumber)},
+		}
+
+		if dialEarly {
+			dialSession, err = ietf_quic.DialEarlyContext(
+				ctx,
+				packetConn,
+				remoteAddr,
+				quicSNIAddress,
+				tlsConfig,
+				quicConfig)
+		} else {
+			dialSession, err = ietf_quic.DialContext(
+				ctx,
+				packetConn,
+				remoteAddr,
+				quicSNIAddress,
+				tlsConfig,
+				quicConfig)
+		}
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -736,33 +941,17 @@ func dialQUIC(
 
 	} else {
 
-		quicConfig := &gquic.Config{
-			HandshakeTimeout: time.Duration(1<<63 - 1),
-			IdleTimeout:      CLIENT_IDLE_TIMEOUT,
-			KeepAlive:        true,
-			Versions: []gquic.VersionNumber{
-				gquic.VersionNumber(versionNumber)},
-		}
-
-		deadline, ok := ctx.Deadline()
-		if ok {
-			quicConfig.HandshakeTimeout = time.Until(deadline)
-		}
-
-		dialSession, err := gquic.DialContext(
+		quicSession, err := gQUICDialContext(
 			ctx,
 			packetConn,
 			remoteAddr,
 			quicSNIAddress,
-			&tls.Config{
-				InsecureSkipVerify: true,
-			},
-			quicConfig)
+			versionNumber)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		return &gQUICSession{Session: dialSession}, nil
+		return quicSession, nil
 	}
 }
 
@@ -840,6 +1029,36 @@ func (conn *muxPacketConn) SetWriteDeadline(t time.Time) error {
 	return errors.TraceNew("not supported")
 }
 
+// SetReadBuffer and SyscallConn provide passthroughs to the underlying
+// net.UDPConn implementations, used to optimize the UDP receive buffer size.
+// See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
+// and ietf_quic.setReceiveBuffer. Only the IETF stack will access these
+// functions.
+//
+// Limitation: due to the relayPackets/ReadFrom scheme, this simple
+// passthrough does not suffice to provide access to ReadMsgUDP for
+// https://godoc.org/github.com/lucas-clemente/quic-go#ECNCapablePacketConn.
+
+func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
+	c, ok := conn.listener.conn.OOBCapablePacketConn.(interface {
+		SetReadBuffer(int) error
+	})
+	if !ok {
+		return errors.TraceNew("not supported")
+	}
+	return c.SetReadBuffer(bytes)
+}
+
+func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {
+	c, ok := conn.listener.conn.OOBCapablePacketConn.(interface {
+		SyscallConn() (syscall.RawConn, error)
+	})
+	if !ok {
+		return nil, errors.TraceNew("not supported")
+	}
+	return c.SyscallConn()
+}
+
 // muxListener is a multiplexing packet conn listener which relays packets to
 // multiple quic-go listeners.
 type muxListener struct {
@@ -858,6 +1077,7 @@ type muxListener struct {
 
 func newMuxListener(
 	logger common.Logger,
+	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	conn *ObfuscatedPacketConn,
 	tlsCertificate tls.Certificate) (*muxListener, error) {
 
@@ -877,18 +1097,8 @@ func newMuxListener(
 
 	listener.ietfQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{tlsCertificate},
-		NextProtos:   []string{getALPN(ietfQUICDraft24VersionNumber)},
-	}
-
-	ietfQUICConfig := &ietf_quic.Config{
-		HandshakeTimeout:      SERVER_HANDSHAKE_TIMEOUT,
-		IdleTimeout:           serverIdleTimeout,
-		MaxIncomingStreams:    1,
-		MaxIncomingUniStreams: -1,
-		KeepAlive:             true,
-	}
+	tlsConfig, ietfQUICConfig := makeIETFConfig(
+		conn, verifyClientHelloRandom, tlsCertificate)
 
 	il, err := ietf_quic.Listen(listener.ietfQUICConn, tlsConfig, ietfQUICConfig)
 	if err != nil {
@@ -898,24 +1108,12 @@ func newMuxListener(
 
 	listener.gQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
-	tlsConfig = &tls.Config{
-		Certificates: []tls.Certificate{tlsCertificate},
-	}
-
-	gQUICConfig := &gquic.Config{
-		HandshakeTimeout:      SERVER_HANDSHAKE_TIMEOUT,
-		IdleTimeout:           serverIdleTimeout,
-		MaxIncomingStreams:    1,
-		MaxIncomingUniStreams: -1,
-		KeepAlive:             true,
-	}
-
-	gl, err := gquic.Listen(listener.gQUICConn, tlsConfig, gQUICConfig)
+	gl, err := gQUICListen(listener.gQUICConn, tlsCertificate, serverIdleTimeout)
 	if err != nil {
 		listener.ietfQUICListener.Close()
 		return nil, errors.Trace(err)
 	}
-	listener.gQUICListener = &gQUICListener{Listener: gl}
+	listener.gQUICListener = gl
 
 	listener.runWaitGroup.Add(3)
 	go listener.relayPackets()
@@ -948,7 +1146,7 @@ func (listener *muxListener) relayPackets() {
 
 		var isIETF bool
 		var err error
-		p.size, p.addr, isIETF, err = listener.conn.readFromWithType(p.data)
+		p.size, _, _, p.addr, isIETF, err = listener.conn.readPacketWithType(p.data, nil)
 		if err != nil {
 			if listener.logger != nil {
 				message := "readFromWithType failed"

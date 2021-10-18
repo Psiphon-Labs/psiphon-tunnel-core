@@ -207,7 +207,7 @@ func (m *Manipulator) Start() (retErr error) {
 	// setting a non-zero read timeout results in occasional "orphaned" packets
 	// which remain in the queue but are not delivered to handleInterceptedPacket
 	// for a verdict. This phenomenon leads to a stall in nfqueue processing once
-	// the queue fills up with packers apparently awaiting a verdict. The shorter
+	// the queue fills up with packets apparently awaiting a verdict. The shorter
 	// the timeout, the faster that orphaned packets accumulate. With no timeout,
 	// and reads in blocking mode, this phenomenon does not occur.
 

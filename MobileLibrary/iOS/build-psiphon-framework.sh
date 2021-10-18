@@ -5,7 +5,7 @@ set -e -u -x
 if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
 # Modify this value as we use newer Go versions.
-GO_VERSION_REQUIRED="1.14.12"
+GO_VERSION_REQUIRED="1.17.2"
 
 # At this time, gomobile doesn't support modules
 export GO111MODULE=off
@@ -81,10 +81,11 @@ function gomobile_build_for_platform() {
   # gomobile pinned version 92f3b9c list of
   # valid archs are "arm", "arm64", "386", "amd64".
   # https://github.com/golang/mobile/blob/92f3b9caf7ba8f4f9c10074225afcba0cba47a62/cmd/gomobile/env.go#L26
-
+  #
+  # As of Go 1.15, "ios/arm" is no longer supported: https://golang.org/doc/go1.15#darwin
   case "${PLATFORM}" in
     ios)
-      TARGETS="ios/arm,ios/arm64" 
+      TARGETS="ios/arm64"
       ;;
     simulator)
       TARGETS="ios/amd64"
@@ -245,7 +246,8 @@ CODE_SIGNING_ALLOWED="NO" \
 STRIP_BITCODE_FROM_COPIED_FILES="NO" \
 BUILD_LIBRARY_FOR_DISTRIBUTION="YES" \
 ONLY_ACTIVE_ARCH="NO" \
-SKIP_INSTALL="NO"
+SKIP_INSTALL="NO" \
+EXCLUDED_ARCHS="armv7"
 
 # Build PsiphonTunnel framework for simulator.
 #

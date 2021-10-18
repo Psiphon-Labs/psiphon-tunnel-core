@@ -196,7 +196,6 @@ func testServerEntryListSignatures(t *testing.T, setExplicitTag bool) {
 		MeekFrontingDisableSNI:        false,
 		TacticsRequestPublicKey:       prng.HexString(n),
 		TacticsRequestObfuscatedKey:   prng.HexString(n),
-		MarionetteFormat:              prng.HexString(n),
 		ConfigurationVersion:          1,
 	}
 

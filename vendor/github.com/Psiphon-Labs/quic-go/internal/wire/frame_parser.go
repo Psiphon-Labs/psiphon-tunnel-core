@@ -13,15 +13,20 @@ import (
 type frameParser struct {
 	ackDelayExponent uint8
 
+	supportsDatagrams bool
+
 	version protocol.VersionNumber
 }
 
 // NewFrameParser creates a new frame parser.
-func NewFrameParser(v protocol.VersionNumber) FrameParser {
-	return &frameParser{version: v}
+func NewFrameParser(supportsDatagrams bool, v protocol.VersionNumber) FrameParser {
+	return &frameParser{
+		supportsDatagrams: supportsDatagrams,
+		version:           v,
+	}
 }
 
-// ParseNextFrame parses the next frame
+// ParseNext parses the next frame.
 // It skips PADDING frames.
 func (p *frameParser) ParseNext(r *bytes.Reader, encLevel protocol.EncryptionLevel) (Frame, error) {
 	for r.Len() != 0 {
@@ -33,7 +38,11 @@ func (p *frameParser) ParseNext(r *bytes.Reader, encLevel protocol.EncryptionLev
 
 		f, err := p.parseFrame(r, typeByte, encLevel)
 		if err != nil {
-			return nil, qerr.ErrorWithFrameType(qerr.FrameEncodingError, uint64(typeByte), err.Error())
+			return nil, &qerr.TransportError{
+				FrameType:    uint64(typeByte),
+				ErrorCode:    qerr.FrameEncodingError,
+				ErrorMessage: err.Error(),
+			}
 		}
 		return f, nil
 	}
@@ -85,6 +94,14 @@ func (p *frameParser) parseFrame(r *bytes.Reader, typeByte byte, encLevel protoc
 			frame, err = parsePathResponseFrame(r, p.version)
 		case 0x1c, 0x1d:
 			frame, err = parseConnectionCloseFrame(r, p.version)
+		case 0x1e:
+			frame, err = parseHandshakeDoneFrame(r, p.version)
+		case 0x30, 0x31:
+			if p.supportsDatagrams {
+				frame, err = parseDatagramFrame(r, p.version)
+				break
+			}
+			fallthrough
 		default:
 			err = errors.New("unknown frame type")
 		}
@@ -104,11 +121,21 @@ func (p *frameParser) isAllowedAtEncLevel(f Frame, encLevel protocol.EncryptionL
 		switch f.(type) {
 		case *CryptoFrame, *AckFrame, *ConnectionCloseFrame, *PingFrame:
 			return true
+		default:
+			return false
+		}
+	case protocol.Encryption0RTT:
+		switch f.(type) {
+		case *CryptoFrame, *AckFrame, *ConnectionCloseFrame, *NewTokenFrame, *PathResponseFrame, *RetireConnectionIDFrame:
+			return false
+		default:
+			return true
 		}
 	case protocol.Encryption1RTT:
 		return true
+	default:
+		panic("unknown encryption level")
 	}
-	return false
 }
 
 func (p *frameParser) SetAckDelayExponent(exp uint8) {
