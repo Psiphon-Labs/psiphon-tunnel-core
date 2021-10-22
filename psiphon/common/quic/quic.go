@@ -366,7 +366,7 @@ func Dial(
 
 	// obfuscationKey is always required, as it is used for anti-probing even
 	// when not obfuscating the QUIC payload.
-	if isObfuscated(quicVersion) && (obfuscationPaddingSeed == nil) || obfuscationKey == "" {
+	if (isObfuscated(quicVersion) && obfuscationPaddingSeed == nil) || obfuscationKey == "" {
 		return nil, errors.TraceNew("missing obfuscation values")
 	}
 
