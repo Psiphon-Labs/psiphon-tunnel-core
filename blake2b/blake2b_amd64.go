@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// +build !go1.7,amd64,!gccgo,!appengine
+//go:build !go1.7 && amd64 && gc && !purego
+// +build !go1.7,amd64,gc,!purego
 
 package blake2b
 
-func init() {
-	useSSE4 = supportsSSE4()
-}
+import "golang.org/x/sys/cpu"
 
-//go:noescape
-func supportsSSE4() bool
+func init() {
+	useSSE4 = cpu.X86.HasSSE41
+}
 
 //go:noescape
 func hashBlocksSSE4(h *[8]uint64, c *[2]uint64, flag uint64, blocks []byte)

@@ -6,17 +6,19 @@ package cryptobyte
 
 import (
 	"bytes"
-	"encoding/asn1"
+	encoding_asn1 "encoding/asn1"
 	"math/big"
 	"reflect"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/cryptobyte/asn1"
 )
 
 type readASN1Test struct {
 	name string
 	in   []byte
-	tag  Tag
+	tag  asn1.Tag
 	ok   bool
 	out  interface{}
 }
@@ -29,6 +31,10 @@ var readASN1TestData = []readASN1Test{
 	{"non-minimal length", append([]byte{0x30, 0x82, 0, 0x80}, make([]byte, 0x80)...), 0x30, false, nil},
 	{"invalid tag", []byte{0xa1, 3, 0x4, 1, 1}, 31, false, nil},
 	{"high tag", []byte{0x1f, 0x81, 0x80, 0x01, 2, 1, 2}, 0xff /* actually 0x4001, but tag is uint8 */, false, nil},
+	{"2**31 - 1 length", []byte{0x30, 0x84, 0x7f, 0xff, 0xff, 0xff}, 0x30, false, nil},
+	{"2**32 - 1 length", []byte{0x30, 0x84, 0xff, 0xff, 0xff, 0xff}, 0x30, false, nil},
+	{"2**63 - 1 length", []byte{0x30, 0x88, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, 0x30, false, nil},
+	{"2**64 - 1 length", []byte{0x30, 0x88, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, 0x30, false, nil},
 }
 
 func TestReadASN1(t *testing.T) {
@@ -147,6 +153,39 @@ func TestReadASN1IntegerSigned(t *testing.T) {
 			}
 		}
 	})
+
+	// Repeat with the implicit-tagging functions
+	t.Run("WithTag", func(t *testing.T) {
+		for i, test := range testData64 {
+			tag := asn1.Tag((i * 3) % 32).ContextSpecific()
+
+			testData := make([]byte, len(test.in))
+			copy(testData, test.in)
+
+			// Alter the tag of the test case.
+			testData[0] = uint8(tag)
+
+			in := String(testData)
+			var out int64
+			ok := in.ReadASN1Int64WithTag(&out, tag)
+			if !ok || out != test.out {
+				t.Errorf("#%d: in.ReadASN1Int64WithTag() = %v, want true; out = %d, want %d", i, ok, out, test.out)
+			}
+
+			var b Builder
+			b.AddASN1Int64WithTag(test.out, tag)
+			result, err := b.Bytes()
+
+			if err != nil {
+				t.Errorf("#%d: AddASN1Int64WithTag failed: %s", i, err)
+				continue
+			}
+
+			if !bytes.Equal(result, testData) {
+				t.Errorf("#%d: AddASN1Int64WithTag: got %x, want %x", i, result, testData)
+			}
+		}
+	})
 }
 
 func TestReadASN1IntegerUnsigned(t *testing.T) {
@@ -194,7 +233,7 @@ func TestReadASN1IntegerInvalid(t *testing.T) {
 	}
 }
 
-func TestReadASN1ObjectIdentifier(t *testing.T) {
+func TestASN1ObjectIdentifier(t *testing.T) {
 	testData := []struct {
 		in  []byte
 		ok  bool
@@ -212,10 +251,23 @@ func TestReadASN1ObjectIdentifier(t *testing.T) {
 
 	for i, test := range testData {
 		in := String(test.in)
-		var out asn1.ObjectIdentifier
+		var out encoding_asn1.ObjectIdentifier
 		ok := in.ReadASN1ObjectIdentifier(&out)
 		if ok != test.ok || ok && !out.Equal(test.out) {
 			t.Errorf("#%d: in.ReadASN1ObjectIdentifier() = %v, want %v; out = %v, want %v", i, ok, test.ok, out, test.out)
+			continue
+		}
+
+		var b Builder
+		b.AddASN1ObjectIdentifier(out)
+		result, err := b.Bytes()
+		if builderOk := err == nil; test.ok != builderOk {
+			t.Errorf("#%d: error from Builder.Bytes: %s", i, err)
+			continue
+		}
+		if test.ok && !bytes.Equal(result, test.in) {
+			t.Errorf("#%d: reserialisation didn't match, got %x, want %x", i, result, test.in)
+			continue
 		}
 	}
 }
@@ -250,7 +302,7 @@ func TestReadASN1GeneralizedTime(t *testing.T) {
 		{"201001020304-10Z", false, time.Time{}},
 	}
 	for i, test := range testData {
-		in := String(append([]byte{asn1.TagGeneralizedTime, byte(len(test.in))}, test.in...))
+		in := String(append([]byte{byte(asn1.GeneralizedTime), byte(len(test.in))}, test.in...))
 		var out time.Time
 		ok := in.ReadASN1GeneralizedTime(&out)
 		if ok != test.ok || ok && !reflect.DeepEqual(out, test.out) {
@@ -259,27 +311,95 @@ func TestReadASN1GeneralizedTime(t *testing.T) {
 	}
 }
 
+func TestReadASN1UTCTime(t *testing.T) {
+	testData := []struct {
+		in  string
+		ok  bool
+		out time.Time
+	}{
+		{"000102030405Z", true, time.Date(2000, 01, 02, 03, 04, 05, 0, time.UTC)},
+		{"500102030405Z", true, time.Date(1950, 01, 02, 03, 04, 05, 0, time.UTC)},
+		{"490102030405Z", true, time.Date(2049, 01, 02, 03, 04, 05, 0, time.UTC)},
+		{"990102030405Z", true, time.Date(1999, 01, 02, 03, 04, 05, 0, time.UTC)},
+		{"250102030405Z", true, time.Date(2025, 01, 02, 03, 04, 05, 0, time.UTC)},
+		{"750102030405Z", true, time.Date(1975, 01, 02, 03, 04, 05, 0, time.UTC)},
+		{"000102030405+0905", true, time.Date(2000, 01, 02, 03, 04, 05, 0, time.FixedZone("", 9*60*60+5*60))},
+		{"000102030405-0905", true, time.Date(2000, 01, 02, 03, 04, 05, 0, time.FixedZone("", -9*60*60-5*60))},
+		{"0001020304Z", true, time.Date(2000, 01, 02, 03, 04, 0, 0, time.UTC)},
+		{"5001020304Z", true, time.Date(1950, 01, 02, 03, 04, 00, 0, time.UTC)},
+		{"0001020304+0905", true, time.Date(2000, 01, 02, 03, 04, 0, 0, time.FixedZone("", 9*60*60+5*60))},
+		{"0001020304-0905", true, time.Date(2000, 01, 02, 03, 04, 0, 0, time.FixedZone("", -9*60*60-5*60))},
+		{"000102030405Z0700", false, time.Time{}},
+		{"000102030405", false, time.Time{}},
+	}
+	for i, test := range testData {
+		in := String(append([]byte{byte(asn1.UTCTime), byte(len(test.in))}, test.in...))
+		var out time.Time
+		ok := in.ReadASN1UTCTime(&out)
+		if ok != test.ok || ok && !reflect.DeepEqual(out, test.out) {
+			t.Errorf("#%d: in.ReadASN1UTCTime() = %v, want %v; out = %q, want %q", i, ok, test.ok, out, test.out)
+		}
+	}
+}
+
 func TestReadASN1BitString(t *testing.T) {
 	testData := []struct {
 		in  []byte
 		ok  bool
-		out asn1.BitString
+		out encoding_asn1.BitString
 	}{
-		{[]byte{}, false, asn1.BitString{}},
-		{[]byte{0x00}, true, asn1.BitString{}},
-		{[]byte{0x07, 0x00}, true, asn1.BitString{Bytes: []byte{0}, BitLength: 1}},
-		{[]byte{0x07, 0x01}, false, asn1.BitString{}},
-		{[]byte{0x07, 0x40}, false, asn1.BitString{}},
-		{[]byte{0x08, 0x00}, false, asn1.BitString{}},
-		{[]byte{0xff}, false, asn1.BitString{}},
-		{[]byte{0xfe, 0x00}, false, asn1.BitString{}},
+		{[]byte{}, false, encoding_asn1.BitString{}},
+		{[]byte{0x00}, true, encoding_asn1.BitString{}},
+		{[]byte{0x07, 0x00}, true, encoding_asn1.BitString{Bytes: []byte{0}, BitLength: 1}},
+		{[]byte{0x07, 0x01}, false, encoding_asn1.BitString{}},
+		{[]byte{0x07, 0x40}, false, encoding_asn1.BitString{}},
+		{[]byte{0x08, 0x00}, false, encoding_asn1.BitString{}},
+		{[]byte{0xff}, false, encoding_asn1.BitString{}},
+		{[]byte{0xfe, 0x00}, false, encoding_asn1.BitString{}},
 	}
 	for i, test := range testData {
 		in := String(append([]byte{3, byte(len(test.in))}, test.in...))
-		var out asn1.BitString
+		var out encoding_asn1.BitString
 		ok := in.ReadASN1BitString(&out)
 		if ok != test.ok || ok && (!bytes.Equal(out.Bytes, test.out.Bytes) || out.BitLength != test.out.BitLength) {
 			t.Errorf("#%d: in.ReadASN1BitString() = %v, want %v; out = %v, want %v", i, ok, test.ok, out, test.out)
+		}
+	}
+}
+
+func TestAddASN1BigInt(t *testing.T) {
+	x := big.NewInt(-1)
+	var b Builder
+	b.AddASN1BigInt(x)
+	got, err := b.Bytes()
+	if err != nil {
+		t.Fatalf("unexpected error adding -1: %v", err)
+	}
+	s := String(got)
+	var y big.Int
+	ok := s.ReadASN1Integer(&y)
+	if !ok || x.Cmp(&y) != 0 {
+		t.Errorf("unexpected bytes %v, want %v", &y, x)
+	}
+}
+
+func TestReadASN1Boolean(t *testing.T) {
+	testData := []struct {
+		in  []byte
+		ok  bool
+		out bool
+	}{
+		{[]byte{}, false, false},
+		{[]byte{0x01, 0x01, 0x00}, true, false},
+		{[]byte{0x01, 0x01, 0xff}, true, true},
+		{[]byte{0x01, 0x01, 0x01}, false, false},
+	}
+	for i, test := range testData {
+		in := String(test.in)
+		var out bool
+		ok := in.ReadASN1Boolean(&out)
+		if ok != test.ok || ok && (out != test.out) {
+			t.Errorf("#%d: in.ReadASN1Boolean() = %v, want %v; out = %v, want %v", i, ok, test.ok, out, test.out)
 		}
 	}
 }
