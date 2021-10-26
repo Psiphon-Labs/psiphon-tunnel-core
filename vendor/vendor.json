@@ -699,6 +699,12 @@
 			"revisionTime": "2020-11-22T21:41:03Z"
 		},
 		{
+			"checksumSHA1": "q+XI9g44wd9mYvf3S5Wo8YZjAus=",
+			"path": "golang.org/x/crypto/blowfish",
+			"revision": "089bfa5675191fd96a44247682f76ebca03d7916",
+			"revisionTime": "2020-12-12T03:52:14Z"
+		},
+		{
 			"checksumSHA1": "iEhSrgDaUwe8T6wxMMwLX0zx2DU=",
 			"path": "golang.org/x/crypto/chacha20",
 			"revision": "c8d3bf9c5392d5f66747f112cd55055d7a530b19",
@@ -727,6 +733,18 @@
 			"path": "golang.org/x/crypto/curve25519",
 			"revision": "c8d3bf9c5392d5f66747f112cd55055d7a530b19",
 			"revisionTime": "2020-11-22T21:41:03Z"
+		},
+		{
+			"checksumSHA1": "ZCYqRggHbwiEZNnAJh3KKDd2FNY=",
+			"path": "golang.org/x/crypto/ed25519",
+			"revision": "089bfa5675191fd96a44247682f76ebca03d7916",
+			"revisionTime": "2020-12-12T03:52:14Z"
+		},
+		{
+			"checksumSHA1": "0JTAFXPkankmWcZGQJGScLDiaN8=",
+			"path": "golang.org/x/crypto/ed25519/internal/edwards25519",
+			"revision": "089bfa5675191fd96a44247682f76ebca03d7916",
+			"revisionTime": "2020-12-12T03:52:14Z"
 		},
 		{
 			"checksumSHA1": "ELSEW2KG0p3oua5lIxl1xW2oFBo=",

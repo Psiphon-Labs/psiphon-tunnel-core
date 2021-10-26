@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/poly1305"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/internal/poly1305"
 	"golang.org/x/crypto/salsa20/salsa"
 )
 
