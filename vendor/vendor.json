@@ -359,10 +359,16 @@
 			"revisionTime": "2020-01-21T04:51:36Z"
 		},
 		{
-			"checksumSHA1": "Y2MOwzNZfl4NRNDbLCZa6sgx7O0=",
+			"checksumSHA1": "1amYxONvuKNz5E5FAJoDui6UKWI=",
+			"path": "github.com/golang/protobuf",
+			"revision": "5d5e8c018a13017f9d5b8bf4fad64aaa42a87308",
+			"revisionTime": "2021-09-16T00:37:10Z"
+		},
+		{
+			"checksumSHA1": "386wQrPzjgnEPqGx89OBuCcs8T0=",
 			"path": "github.com/golang/protobuf/proto",
-			"revision": "d3c38a4eb4970272b87a425ae00ccc4548e2f9bb",
-			"revisionTime": "2019-03-18T19:48:12Z"
+			"revision": "5d5e8c018a13017f9d5b8bf4fad64aaa42a87308",
+			"revisionTime": "2021-09-16T00:37:10Z"
 		},
 		{
 			"checksumSHA1": "ftN25Xw6PDNJ6E4wTHEgQtpdvrw=",
@@ -497,38 +503,38 @@
 		{
 			"checksumSHA1": "Tq3U98W2uwIgjWSjH7tqBonGjBE=",
 			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
-			"revisionTime": "2021-06-04T20:39:09Z"
+			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
+			"revisionTime": "2021-10-27T21:33:19Z"
 		},
 		{
 			"checksumSHA1": "ObZZJpjQl2BISlIiES82BW8jbEE=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/edwards25519",
-			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
-			"revisionTime": "2021-06-04T20:39:09Z"
+			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
+			"revisionTime": "2021-10-27T21:33:19Z"
 		},
 		{
 			"checksumSHA1": "VoyDh1KIIVE+OJbehDNJ91tf4Vw=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/extra25519",
-			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
-			"revisionTime": "2021-06-04T20:39:09Z"
+			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
+			"revisionTime": "2021-10-27T21:33:19Z"
 		},
 		{
-			"checksumSHA1": "J0kNvH3uYnwnPEJQhaa5Y1TcbZI=",
+			"checksumSHA1": "1y7Fn9JIVFTobi2TNXZ4Z4i9rAk=",
 			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
-			"revisionTime": "2021-06-04T20:39:09Z"
+			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
+			"revisionTime": "2021-10-27T21:33:19Z"
 		},
 		{
-			"checksumSHA1": "rPJAZXxZ5w5+ZnIPZGDFyp/uO6w=",
+			"checksumSHA1": "MgD1lPRReL44MtvlOpzI/NzPM1k=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
-			"revisionTime": "2021-06-04T20:39:09Z"
+			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
+			"revisionTime": "2021-10-27T21:33:19Z"
 		},
 		{
 			"checksumSHA1": "NiwZ/PirZniVT64D03KOS6UFMGU=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance/phantoms",
-			"revision": "88b8e2e421cc808af2e65777c78bfc8cb4906a58",
-			"revisionTime": "2021-06-04T20:39:09Z"
+			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
+			"revisionTime": "2021-10-27T21:33:19Z"
 		},
 		{
 			"checksumSHA1": "jOxlnqvKSKn1SIkA5ldRe5lxqAc=",
@@ -1139,6 +1145,12 @@
 			"revisionTime": "2020-11-24T18:25:51Z"
 		},
 		{
+			"checksumSHA1": "FZJ2GzMCFiCsfyAoEPDBOb6Pzh8=",
+			"path": "google.golang.org/protobuf/reflect/protodesc",
+			"revision": "5aec41b4809b9822a34e17acd06ae9ae9f41c13d",
+			"revisionTime": "2021-08-06T18:27:51Z"
+		},
+		{
 			"checksumSHA1": "j0wTTb1wz9FdGgHiSb0+1RcsTw4=",
 			"path": "google.golang.org/protobuf/reflect/protoreflect",
 			"revision": "81d297c66c9b1e0606eee19a9ee718dcf149276d",
@@ -1161,6 +1173,12 @@
 			"path": "google.golang.org/protobuf/runtime/protoimpl",
 			"revision": "81d297c66c9b1e0606eee19a9ee718dcf149276d",
 			"revisionTime": "2020-11-24T18:25:51Z"
+		},
+		{
+			"checksumSHA1": "95MXH/TbFZP5BPXSKPkor9hgZO0=",
+			"path": "google.golang.org/protobuf/types/descriptorpb",
+			"revision": "5aec41b4809b9822a34e17acd06ae9ae9f41c13d",
+			"revisionTime": "2021-08-06T18:27:51Z"
 		}
 	],
 	"rootPath": "github.com/Psiphon-Labs/psiphon-tunnel-core"
