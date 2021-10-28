@@ -1,3 +1,4 @@
+//go:build PSIPHON_ENABLE_REFRACTION_NETWORKING
 // +build PSIPHON_ENABLE_REFRACTION_NETWORKING
 
 /*
@@ -325,7 +326,7 @@ func dial(
 				return nil, errors.TraceNew("missing APIRegistrarHTTPClient")
 			}
 
-			refractionDialer.DarkDecoyRegistrar = &refraction_networking_client.APIRegistrar{
+			refractionDialer.DarkDecoyRegistrar = &refraction_networking_client.APIRegistrarBidirectional{
 				Endpoint:        conjureConfig.APIRegistrarURL,
 				ConnectionDelay: conjureConfig.APIRegistrarDelay,
 				MaxRetries:      0,

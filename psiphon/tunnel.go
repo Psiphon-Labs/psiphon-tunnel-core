@@ -860,21 +860,36 @@ func dialTunnel(
 			// Performing the full DialMeek/RoundTrip operation here allows us to call
 			// MeekConn.Close and ensure all resources are immediately cleaned up.
 			roundTrip := func(request *http.Request) (*http.Response, error) {
+
 				conn, err := DialMeek(
 					ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
 				if err != nil {
 					return nil, errors.Trace(err)
 				}
 				defer conn.Close()
+
 				response, err := conn.RoundTrip(request)
 				if err != nil {
 					return nil, errors.Trace(err)
 				}
-				// Currently, gotapdance does not read the response body. When that
-				// changes, we will need to ensure MeekConn.Close does not make the
-				// response body unavailable, perhaps by reading into a buffer and
-				// replacing reponse.Body. For now, we can immediately close it.
-				response.Body.Close()
+
+				// Read the response into a buffer and close the response
+				// body, ensuring that MeekConn.Close closes all idle connections.
+				//
+				// Alternatively, we could Clone the request to set
+				// http.Request.Close and avoid keeping any idle connection
+				// open after the response body is read by gotapdance. Since
+				// the response body is small and since gotapdance does not
+				// stream the response body, we're taking this approach which
+				// ensures cleanup.
+
+				body, err := ioutil.ReadAll(response.Body)
+				_ = response.Body.Close()
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				response.Body = io.NopCloser(bytes.NewReader(body))
+
 				return response, nil
 			}
 

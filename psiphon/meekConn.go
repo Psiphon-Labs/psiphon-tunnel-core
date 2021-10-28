@@ -774,10 +774,10 @@ func (meek *MeekConn) GetMetrics() common.LogFields {
 // plaintext in the meek traffic. The caller is responsible for securing and
 // obfuscating the request body.
 //
-// ObfuscatedRoundTrip is not safe for concurrent use, and Close must not be
-// called concurrently. The caller must ensure only one ObfuscatedRoundTrip
-// call is active at once and that it completes or is cancelled before calling
-// Close.
+// ObfuscatedRoundTrip is not safe for concurrent use. The caller must ensure
+// only one ObfuscatedRoundTrip call is active at once. If Close is called
+// before or concurrent with ObfuscatedRoundTrip, or before the response body
+// is read, idle connections may be left open.
 func (meek *MeekConn) ObfuscatedRoundTrip(
 	requestCtx context.Context, endPoint string, requestBody []byte) ([]byte, error) {
 
@@ -800,10 +800,6 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 	//
 	// - multiple, concurrent ObfuscatedRoundTrip calls are unsafe due to the
 	//   setDialerRequestContext calls in newRequest.
-	//
-	// - concurrent Close and ObfuscatedRoundTrip calls are unsafe as Close does
-	//   not synchronize with ObfuscatedRoundTrip before calling
-	//   meek.transport.CloseIdleConnections(), so resources could be left open.
 	//
 	// At this time, ObfuscatedRoundTrip is used for tactics in Controller and
 	// the concurrency constraints are satisfied.
@@ -839,9 +835,10 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 // used when TLS and server certificate verification are configured. RoundTrip
 // does not implement any security or obfuscation at the HTTP layer.
 //
-// RoundTrip is not safe for concurrent use, and Close must not be called
-// concurrently. The caller must ensure only one RoundTrip call is active at
-// once and that it completes or is cancelled before calling Close.
+// RoundTrip is not safe for concurrent use. The caller must ensure only one
+// RoundTrip call is active at once. If Close is called before or concurrent
+// with RoundTrip, or before the response body is read, idle connections may
+// be left open.
 func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
 
 	if meek.mode != MeekModePlaintextRoundTrip {
