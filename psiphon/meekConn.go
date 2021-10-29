@@ -859,7 +859,12 @@ func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
 
 	meek.scheduleQUICCloseIdle(request)
 
-	return meek.transport.RoundTrip(request)
+	response, err := meek.transport.RoundTrip(request)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return response, nil
 }
 
 // Read reads data from the connection.
