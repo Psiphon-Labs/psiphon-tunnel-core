@@ -333,6 +333,7 @@ func DialMeek(
 
 	var (
 		scheme            string
+		opaqueURL         string
 		transport         transporter
 		additionalHeaders http.Header
 		proxyUrl          func(*http.Request) (*url.URL, error)
@@ -538,7 +539,27 @@ func DialMeek(
 
 			dialer = NewTCPDialer(copyDialConfig)
 
+			// In this proxy case, the destination server address is in the
+			// request line URL. net/http will render the request line using
+			// the URL but preferring the Host header for the host value,
+			// which means any custom host header will clobber the true
+			// destination address. The URL.Opaque logic is applied in this
+			// case, to force the request line URL value.
+			//
+			// This URL.Opaque setting assumes MeekModeRelay, with no path; at
+			// this time plain HTTP is used only with MeekModeRelay.
+			// x/net/http2 will reject requests where the URL.Opaque contains
+			// more than the path; but HTTP/2 is not used in this case.
+
+			values := dialConfig.CustomHeaders["Host"]
+			if len(values) > 0 {
+				opaqueURL = "http://" + meekConfig.DialAddress + "/"
+			}
+
 		} else {
+
+			// If dialConfig.UpstreamProxyURL is set, HTTP proxying via
+			// CONNECT will be used by the dialer.
 
 			baseDialer := NewTCPDialer(dialConfig)
 
@@ -556,9 +577,14 @@ func DialMeek(
 		}
 
 		if proxyUrl != nil {
-			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
+
+			// When http.Transport is handling proxying, wrap transport with a
+			// transport that (a) adds custom headers; (b) can perform HTTP
+			// proxy auth negotiation.
+
 			var err error
-			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, dialConfig.CustomHeaders)
+			transport, err = upstreamproxy.NewProxyAuthTransport(
+				httpTransport, dialConfig.CustomHeaders)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -571,6 +597,7 @@ func DialMeek(
 		Scheme: scheme,
 		Host:   meekConfig.HostHeader,
 		Path:   "/",
+		Opaque: opaqueURL,
 	}
 
 	if meekConfig.UseHTTPS {
@@ -583,6 +610,12 @@ func DialMeek(
 		}
 	} else {
 		if proxyUrl == nil {
+
+			// Add custom headers to plain, unproxied HTTP and to CONNECT
+			// method proxied HTTP (in the latter case, the CONNECT request
+			// itself will also have custom headers via upstreamproxy applied
+			// by the dialer).
+
 			additionalHeaders = dialConfig.CustomHeaders
 		}
 	}
@@ -1423,14 +1456,8 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 // custom headers to HTTP proxy requests.
 func (meek *MeekConn) addAdditionalHeaders(request *http.Request) {
 	for name, value := range meek.additionalHeaders {
-		// hack around special case of "Host" header
-		// https://golang.org/src/net/http/request.go#L474
-		// using URL.Opaque, see URL.RequestURI() https://golang.org/src/net/url/url.go#L915
 		if name == "Host" {
 			if len(value) > 0 {
-				if request.URL.Opaque == "" {
-					request.URL.Opaque = request.URL.Scheme + "://" + request.Host + request.URL.RequestURI()
-				}
 				request.Host = value[0]
 			}
 		} else {
