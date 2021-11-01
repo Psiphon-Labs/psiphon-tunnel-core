@@ -733,7 +733,7 @@ type Config struct {
 	// ConjureCachedRegistrationTTLSeconds and other Conjure fields are for
 	// testing purposes.
 	ConjureCachedRegistrationTTLSeconds       *int
-	ConjureAPIRegistrarURL                    string
+	ConjureAPIRegistrarBidirectionalURL       string
 	ConjureAPIRegistrarFrontingSpecs          parameters.FrontingSpecs
 	ConjureAPIRegistrarMinDelayMilliseconds   *int
 	ConjureAPIRegistrarMaxDelayMilliseconds   *int
@@ -1672,8 +1672,8 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ConjureCachedRegistrationTTL] = fmt.Sprintf("%ds", *config.ConjureCachedRegistrationTTLSeconds)
 	}
 
-	if config.ConjureAPIRegistrarURL != "" {
-		applyParameters[parameters.ConjureAPIRegistrarURL] = config.ConjureAPIRegistrarURL
+	if config.ConjureAPIRegistrarBidirectionalURL != "" {
+		applyParameters[parameters.ConjureAPIRegistrarBidirectionalURL] = config.ConjureAPIRegistrarBidirectionalURL
 	}
 
 	if len(config.ConjureAPIRegistrarFrontingSpecs) > 0 {
@@ -1980,9 +1980,9 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureCachedRegistrationTTLSeconds))
 	}
 
-	if config.ConjureAPIRegistrarURL != "" {
-		hash.Write([]byte("ConjureAPIRegistrarURL"))
-		hash.Write([]byte(config.ConjureAPIRegistrarURL))
+	if config.ConjureAPIRegistrarBidirectionalURL != "" {
+		hash.Write([]byte("ConjureAPIRegistrarBidirectionalURL"))
+		hash.Write([]byte(config.ConjureAPIRegistrarBidirectionalURL))
 	}
 
 	if len(config.ConjureAPIRegistrarFrontingSpecs) > 0 {

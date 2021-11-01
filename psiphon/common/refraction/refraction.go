@@ -317,7 +317,7 @@ func dial(
 			conjureCached = true
 			conjureDelay = 0 // report no delay
 
-		} else if conjureConfig.APIRegistrarURL != "" {
+		} else if conjureConfig.APIRegistrarBidirectionalURL != "" {
 
 			if conjureConfig.APIRegistrarHTTPClient == nil {
 				// While not a guaranteed check, if the APIRegistrarHTTPClient isn't set
@@ -327,7 +327,7 @@ func dial(
 			}
 
 			refractionDialer.DarkDecoyRegistrar = &refraction_networking_client.APIRegistrarBidirectional{
-				Endpoint:        conjureConfig.APIRegistrarURL,
+				Endpoint:        conjureConfig.APIRegistrarBidirectionalURL,
 				ConnectionDelay: conjureConfig.APIRegistrarDelay,
 				MaxRetries:      0,
 				Client:          conjureConfig.APIRegistrarHTTPClient,

@@ -117,14 +117,14 @@ type DialParameters struct {
 	QUICClientHelloSeed       *prng.Seed
 	ObfuscatedQUICPaddingSeed *prng.Seed
 
-	ConjureCachedRegistrationTTL time.Duration
-	ConjureAPIRegistration       bool
-	ConjureAPIRegistrarURL       string
-	ConjureAPIRegistrarDelay     time.Duration
-	ConjureDecoyRegistration     bool
-	ConjureDecoyRegistrarDelay   time.Duration
-	ConjureDecoyRegistrarWidth   int
-	ConjureTransport             string
+	ConjureCachedRegistrationTTL        time.Duration
+	ConjureAPIRegistration              bool
+	ConjureAPIRegistrarBidirectionalURL string
+	ConjureAPIRegistrarDelay            time.Duration
+	ConjureDecoyRegistration            bool
+	ConjureDecoyRegistrarDelay          time.Duration
+	ConjureDecoyRegistrarWidth          int
+	ConjureTransport                    string
 
 	LivenessTestSeed *prng.Seed
 
@@ -208,6 +208,7 @@ func MakeDialParameters(
 	// - The protocol selection constraints must permit replay, as indicated
 	//   by canReplay.
 	// - Must not be using an obsolete TLS profile that is no longer supported.
+	// - Must be using the latest Conjure API URL.
 	//
 	// When existing dial parameters don't meet these conditions, dialParams
 	// is reset to nil and new dial parameters will be generated.
@@ -230,7 +231,17 @@ func MakeDialParameters(
 			(dialParams.TLSProfile != "" &&
 				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile)) ||
 			(dialParams.QUICVersion != "" &&
-				!common.Contains(protocol.SupportedQUICVersions, dialParams.QUICVersion))) {
+				!common.Contains(protocol.SupportedQUICVersions, dialParams.QUICVersion)) ||
+
+			// Legacy clients use ConjureAPIRegistrarURL with
+			// gotapdance.tapdance.APIRegistrar and new clients use
+			// ConjureAPIRegistrarBidirectionalURL with
+			// gotapdance.tapdance.APIRegistrarBidirectional. Updated clients
+			// may have replay dial parameters with the old
+			// ConjureAPIRegistrarURL field, which is now ignored. In this
+			// case, ConjureAPIRegistrarBidirectionalURL will be blank. Reset
+			// this replay.
+			(dialParams.ConjureAPIRegistration && dialParams.ConjureAPIRegistrarBidirectionalURL == "")) {
 
 		// In these cases, existing dial parameters are expired or no longer
 		// match the config state and so are cleared to avoid rechecking them.
@@ -464,7 +475,7 @@ func MakeDialParameters(
 
 		dialParams.ConjureCachedRegistrationTTL = p.Duration(parameters.ConjureCachedRegistrationTTL)
 
-		apiURL := p.String(parameters.ConjureAPIRegistrarURL)
+		apiURL := p.String(parameters.ConjureAPIRegistrarBidirectionalURL)
 		decoyWidth := p.Int(parameters.ConjureDecoyRegistrarWidth)
 
 		dialParams.ConjureAPIRegistration = apiURL != ""
@@ -496,7 +507,7 @@ func MakeDialParameters(
 			// Accordingly, replayFronting/replayHostname have no effect on Conjure API
 			// registration replay.
 
-			dialParams.ConjureAPIRegistrarURL = apiURL
+			dialParams.ConjureAPIRegistrarBidirectionalURL = apiURL
 
 			frontingSpecs := p.FrontingSpecs(parameters.ConjureAPIRegistrarFrontingSpecs)
 			dialParams.FrontingProviderID,

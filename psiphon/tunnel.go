@@ -897,7 +897,8 @@ func dialTunnel(
 				Transport: common.NewHTTPRoundTripper(roundTrip),
 			}
 
-			conjureConfig.APIRegistrarURL = dialParams.ConjureAPIRegistrarURL
+			conjureConfig.APIRegistrarBidirectionalURL =
+				dialParams.ConjureAPIRegistrarBidirectionalURL
 			conjureConfig.APIRegistrarDelay = dialParams.ConjureAPIRegistrarDelay
 
 		} else if dialParams.ConjureDecoyRegistration {
