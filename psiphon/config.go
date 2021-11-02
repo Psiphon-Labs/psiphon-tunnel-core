@@ -733,7 +733,7 @@ type Config struct {
 	// ConjureCachedRegistrationTTLSeconds and other Conjure fields are for
 	// testing purposes.
 	ConjureCachedRegistrationTTLSeconds       *int
-	ConjureAPIRegistrarURL                    string
+	ConjureAPIRegistrarBidirectionalURL       string
 	ConjureAPIRegistrarFrontingSpecs          parameters.FrontingSpecs
 	ConjureAPIRegistrarMinDelayMilliseconds   *int
 	ConjureAPIRegistrarMaxDelayMilliseconds   *int
@@ -760,6 +760,9 @@ type Config struct {
 
 	// LimitTunnelDialPortNumbers is for testing purposes.
 	LimitTunnelDialPortNumbers parameters.TunnelProtocolPortLists
+
+	// QUICDisablePathMTUDiscoveryProbability is for testing purposes.
+	QUICDisablePathMTUDiscoveryProbability *float64
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -1672,8 +1675,8 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ConjureCachedRegistrationTTL] = fmt.Sprintf("%ds", *config.ConjureCachedRegistrationTTLSeconds)
 	}
 
-	if config.ConjureAPIRegistrarURL != "" {
-		applyParameters[parameters.ConjureAPIRegistrarURL] = config.ConjureAPIRegistrarURL
+	if config.ConjureAPIRegistrarBidirectionalURL != "" {
+		applyParameters[parameters.ConjureAPIRegistrarBidirectionalURL] = config.ConjureAPIRegistrarBidirectionalURL
 	}
 
 	if len(config.ConjureAPIRegistrarFrontingSpecs) > 0 {
@@ -1738,6 +1741,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if len(config.LimitTunnelDialPortNumbers) > 0 {
 		applyParameters[parameters.LimitTunnelDialPortNumbers] = config.LimitTunnelDialPortNumbers
+	}
+
+	if config.QUICDisablePathMTUDiscoveryProbability != nil {
+		applyParameters[parameters.QUICDisableClientPathMTUDiscoveryProbability] = *config.QUICDisablePathMTUDiscoveryProbability
 	}
 
 	// When adding new config dial parameters that may override tactics, also
@@ -1980,9 +1987,9 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureCachedRegistrationTTLSeconds))
 	}
 
-	if config.ConjureAPIRegistrarURL != "" {
-		hash.Write([]byte("ConjureAPIRegistrarURL"))
-		hash.Write([]byte(config.ConjureAPIRegistrarURL))
+	if config.ConjureAPIRegistrarBidirectionalURL != "" {
+		hash.Write([]byte("ConjureAPIRegistrarBidirectionalURL"))
+		hash.Write([]byte(config.ConjureAPIRegistrarBidirectionalURL))
 	}
 
 	if len(config.ConjureAPIRegistrarFrontingSpecs) > 0 {
@@ -2069,6 +2076,11 @@ func (config *Config) setDialParametersHash() {
 		encodedLimitTunnelDialPortNumbers, _ :=
 			json.Marshal(config.LimitTunnelDialPortNumbers)
 		hash.Write(encodedLimitTunnelDialPortNumbers)
+	}
+
+	if config.QUICDisablePathMTUDiscoveryProbability != nil {
+		hash.Write([]byte("QUICDisablePathMTUDiscoveryProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.QUICDisablePathMTUDiscoveryProbability)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

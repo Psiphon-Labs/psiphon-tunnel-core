@@ -24,11 +24,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"errors"
 	"net"
 	"testing"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -79,7 +79,7 @@ func TestRandomizedSSHKEXes(t *testing.T) {
 				certChecker := &CertChecker{
 					HostKeyFallback: func(addr string, remote net.Addr, key PublicKey) error {
 						if !bytes.Equal(publicKey.Marshal(), key.Marshal()) {
-							return errors.New("unexpected host public key")
+							return errors.TraceNew("unexpected host public key")
 						}
 						return nil
 					},
@@ -99,7 +99,7 @@ func TestRandomizedSSHKEXes(t *testing.T) {
 
 				clientSSHConn, _, _, err := NewClientConn(clientConn, "", clientConfig)
 				if err != nil {
-					return err
+					return errors.Trace(err)
 				}
 
 				clientSSHConn.Close()
@@ -115,7 +115,7 @@ func TestRandomizedSSHKEXes(t *testing.T) {
 					if c.User() == username && string(pass) == password {
 						return nil, nil
 					}
-					return nil, errors.New("authentication failed")
+					return nil, errors.TraceNew("authentication failed")
 				}
 
 				serverConfig := &ServerConfig{
@@ -127,7 +127,7 @@ func TestRandomizedSSHKEXes(t *testing.T) {
 
 				serverSSHConn, _, _, err := NewServerConn(serverConn, serverConfig)
 				if err != nil {
-					return err
+					return errors.Trace(err)
 				}
 
 				serverSSHConn.Close()

@@ -537,6 +537,10 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 			args = append(args, "QUICDialSNIAddress", dialParams.QUICDialSNIAddress)
 		}
 
+		if dialParams.QUICDisablePathMTUDiscovery {
+			args = append(args, "QUICDisableClientPathMTUDiscovery", dialParams.QUICDisablePathMTUDiscovery)
+		}
+
 		if dialParams.DialDuration > 0 {
 			args = append(args, "dialDuration", dialParams.DialDuration)
 		}

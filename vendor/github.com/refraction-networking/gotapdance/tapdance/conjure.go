@@ -435,10 +435,13 @@ func (reg *ConjureReg) connect(ctx context.Context, addr string, dialer dialFunc
 	return dialer(childCtx, "tcp", phantomAddr)
 }
 
-func (reg *ConjureReg) getFirstConnection(ctx context.Context, dialer dialFunc, phantoms []net.IP) (net.Conn, error) {
+func (reg *ConjureReg) getFirstConnection(ctx context.Context, dialer dialFunc, phantoms []*net.IP) (net.Conn, error) {
 	connChannel := make(chan resultTuple, len(phantoms))
 	for _, p := range phantoms {
-		go func(phantom net.IP) {
+		if p == nil {
+			continue
+		}
+		go func(phantom *net.IP) {
 			conn, err := reg.connect(ctx, phantom.String(), dialer)
 			if err != nil {
 				Logger().Infof("%v failed to dial phantom %v: %v", reg.sessionIDStr, phantom.String(), err)
@@ -481,7 +484,8 @@ func (reg *ConjureReg) getFirstConnection(ctx context.Context, dialer dialFunc, 
 // Note: This is hacky but should work for v4, v6, or both as any nil phantom addr will
 // return a dial error and be ignored.
 func (reg *ConjureReg) Connect(ctx context.Context) (net.Conn, error) {
-	phantoms := []net.IP{*reg.phantom4, *reg.phantom6}
+	phantoms := []*net.IP{reg.phantom4, reg.phantom6}
+
 	//[reference] Provide chosen transport to sent bytes (or connect) if necessary
 	switch reg.transport {
 	case pb.TransportType_Min:
@@ -534,7 +538,7 @@ func (reg *ConjureReg) Connect(ctx context.Context) (net.Conn, error) {
 		return reg.getFirstConnection(ctx, reg.TcpDialer, phantoms)
 	default:
 		// If transport is unrecognized use min transport.
-		return nil, fmt.Errorf("Unknown Transport")
+		return nil, fmt.Errorf("unknown transport")
 	}
 }
 
