@@ -111,6 +111,7 @@ const (
 	LimitQUICVersionsProbability                     = "LimitQUICVersionsProbability"
 	LimitQUICVersions                                = "LimitQUICVersions"
 	DisableFrontingProviderQUICVersions              = "DisableFrontingProviderQUICVersions"
+	QUICDisableClientPathMTUDiscoveryProbability     = "QUICDisableClientPathMTUDiscoveryProbability"
 	FragmentorProbability                            = "FragmentorProbability"
 	FragmentorLimitProtocols                         = "FragmentorLimitProtocols"
 	FragmentorMinTotalBytes                          = "FragmentorMinTotalBytes"
@@ -376,9 +377,10 @@ var defaultParameters = map[string]struct {
 	NoDefaultTLSSessionIDProbability:      {value: 0.5, minimum: 0.0},
 	DisableFrontingProviderTLSProfiles:    {value: protocol.LabeledTLSProfiles{}},
 
-	LimitQUICVersionsProbability:        {value: 1.0, minimum: 0.0},
-	LimitQUICVersions:                   {value: protocol.QUICVersions{}},
-	DisableFrontingProviderQUICVersions: {value: protocol.LabeledQUICVersions{}},
+	LimitQUICVersionsProbability:                 {value: 1.0, minimum: 0.0},
+	LimitQUICVersions:                            {value: protocol.QUICVersions{}},
+	DisableFrontingProviderQUICVersions:          {value: protocol.LabeledQUICVersions{}},
+	QUICDisableClientPathMTUDiscoveryProbability: {value: 0.0, minimum: 0.0},
 
 	FragmentorProbability:              {value: 0.5, minimum: 0.0},
 	FragmentorLimitProtocols:           {value: protocol.TunnelProtocols{}},

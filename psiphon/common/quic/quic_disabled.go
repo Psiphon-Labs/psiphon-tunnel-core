@@ -59,7 +59,8 @@ func Dial(
 	_ string,
 	_ *prng.Seed,
 	_ string,
-	_ *prng.Seed) (net.Conn, error) {
+	_ *prng.Seed,
+	_ bool) (net.Conn, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }
@@ -83,7 +84,8 @@ func NewQUICTransporter(
 	_ func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
 	_ string,
 	_ string,
-	_ *prng.Seed) (*QUICTransporter, error) {
+	_ *prng.Seed,
+	_ bool) (*QUICTransporter, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }

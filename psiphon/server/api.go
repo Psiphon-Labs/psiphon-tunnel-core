@@ -885,6 +885,7 @@ var baseDialParams = []requestParamSpec{
 	{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"quic_version", isAnyString, requestParamOptional},
 	{"quic_dial_sni_address", isAnyString, requestParamOptional},
+	{"quic_disable_client_path_mtu_discovery", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},

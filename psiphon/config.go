@@ -761,6 +761,9 @@ type Config struct {
 	// LimitTunnelDialPortNumbers is for testing purposes.
 	LimitTunnelDialPortNumbers parameters.TunnelProtocolPortLists
 
+	// QUICDisablePathMTUDiscoveryProbability is for testing purposes.
+	QUICDisablePathMTUDiscoveryProbability *float64
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1740,6 +1743,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.LimitTunnelDialPortNumbers] = config.LimitTunnelDialPortNumbers
 	}
 
+	if config.QUICDisablePathMTUDiscoveryProbability != nil {
+		applyParameters[parameters.QUICDisableClientPathMTUDiscoveryProbability] = *config.QUICDisablePathMTUDiscoveryProbability
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2069,6 +2076,11 @@ func (config *Config) setDialParametersHash() {
 		encodedLimitTunnelDialPortNumbers, _ :=
 			json.Marshal(config.LimitTunnelDialPortNumbers)
 		hash.Write(encodedLimitTunnelDialPortNumbers)
+	}
+
+	if config.QUICDisablePathMTUDiscoveryProbability != nil {
+		hash.Write([]byte("QUICDisablePathMTUDiscoveryProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.QUICDisablePathMTUDiscoveryProbability)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

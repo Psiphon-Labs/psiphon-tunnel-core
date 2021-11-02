@@ -354,7 +354,8 @@ func Dial(
 	quicVersion string,
 	clientHelloSeed *prng.Seed,
 	obfuscationKey string,
-	obfuscationPaddingSeed *prng.Seed) (net.Conn, error) {
+	obfuscationPaddingSeed *prng.Seed,
+	disablePathMTUDiscovery bool) (net.Conn, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -435,6 +436,7 @@ func Dial(
 		clientHelloSeed,
 		getClientHelloRandom,
 		maxPacketSizeAdjustment,
+		disablePathMTUDiscovery,
 		false)
 	if err != nil {
 		packetConn.Close()
@@ -638,12 +640,13 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 // CloseIdleConnections.
 type QUICTransporter struct {
 	quicRoundTripper
-	noticeEmitter   func(string)
-	udpDialer       func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
-	quicSNIAddress  string
-	quicVersion     string
-	clientHelloSeed *prng.Seed
-	packetConn      atomic.Value
+	noticeEmitter           func(string)
+	udpDialer               func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
+	quicSNIAddress          string
+	quicVersion             string
+	clientHelloSeed         *prng.Seed
+	disablePathMTUDiscovery bool
+	packetConn              atomic.Value
 
 	mutex sync.Mutex
 	ctx   context.Context
@@ -656,7 +659,8 @@ func NewQUICTransporter(
 	udpDialer func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error),
 	quicSNIAddress string,
 	quicVersion string,
-	clientHelloSeed *prng.Seed) (*QUICTransporter, error) {
+	clientHelloSeed *prng.Seed,
+	disablePathMTUDiscovery bool) (*QUICTransporter, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -672,12 +676,13 @@ func NewQUICTransporter(
 	}
 
 	t := &QUICTransporter{
-		noticeEmitter:   noticeEmitter,
-		udpDialer:       udpDialer,
-		quicSNIAddress:  quicSNIAddress,
-		quicVersion:     quicVersion,
-		clientHelloSeed: clientHelloSeed,
-		ctx:             ctx,
+		noticeEmitter:           noticeEmitter,
+		udpDialer:               udpDialer,
+		quicSNIAddress:          quicSNIAddress,
+		quicVersion:             quicVersion,
+		clientHelloSeed:         clientHelloSeed,
+		disablePathMTUDiscovery: disablePathMTUDiscovery,
+		ctx:                     ctx,
 	}
 
 	if isIETFVersionNumber(versionNumber) {
@@ -764,6 +769,7 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 		t.clientHelloSeed,
 		nil,
 		0,
+		t.disablePathMTUDiscovery,
 		true)
 	if err != nil {
 		packetConn.Close()
@@ -890,6 +896,7 @@ func dialQUIC(
 	clientHelloSeed *prng.Seed,
 	getClientHelloRandom func() ([]byte, error),
 	clientMaxPacketSizeAdjustment int,
+	disablePathMTUDiscovery bool,
 	dialEarly bool) (quicSession, error) {
 
 	if isIETFVersionNumber(versionNumber) {
@@ -902,6 +909,7 @@ func dialQUIC(
 			ClientHelloSeed:               clientHelloSeed,
 			GetClientHelloRandom:          getClientHelloRandom,
 			ClientMaxPacketSizeAdjustment: clientMaxPacketSizeAdjustment,
+			DisablePathMTUDiscovery:       disablePathMTUDiscovery,
 		}
 
 		deadline, ok := ctx.Deadline()

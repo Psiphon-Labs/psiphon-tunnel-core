@@ -112,10 +112,11 @@ type DialParameters struct {
 	TLSVersion               string
 	RandomizedTLSProfileSeed *prng.Seed
 
-	QUICVersion               string
-	QUICDialSNIAddress        string
-	QUICClientHelloSeed       *prng.Seed
-	ObfuscatedQUICPaddingSeed *prng.Seed
+	QUICVersion                 string
+	QUICDialSNIAddress          string
+	QUICClientHelloSeed         *prng.Seed
+	ObfuscatedQUICPaddingSeed   *prng.Seed
+	QUICDisablePathMTUDiscovery bool
 
 	ConjureCachedRegistrationTTL        time.Duration
 	ConjureAPIRegistration              bool
@@ -678,6 +679,9 @@ func MakeDialParameters(
 				return nil, errors.Trace(err)
 			}
 		}
+
+		dialParams.QUICDisablePathMTUDiscovery =
+			p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
@@ -882,6 +886,7 @@ func MakeDialParameters(
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
 			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
+			QUICDisablePathMTUDiscovery:   dialParams.QUICDisablePathMTUDiscovery,
 			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
 			LegacyPassthrough:             serverEntry.ProtocolUsesLegacyPassthrough(dialParams.TunnelProtocol),

@@ -151,6 +151,8 @@ func runQUIC(
 
 	for i := 0; i < clients; i++ {
 
+		disablePathMTUDiscovery := i%2 == 0
+
 		testGroup.Go(func() error {
 
 			ctx, cancelFunc := context.WithTimeout(
@@ -194,7 +196,8 @@ func runQUIC(
 				quicVersion,
 				clientHelloSeed,
 				clientObfuscationKey,
-				obfuscationPaddingSeed)
+				obfuscationPaddingSeed,
+				disablePathMTUDiscovery)
 
 			if invokeAntiProbing {
 

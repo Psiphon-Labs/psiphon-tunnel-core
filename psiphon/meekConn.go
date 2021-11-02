@@ -118,6 +118,10 @@ type MeekConfig struct {
 	// QUICClientHelloSeed is used for randomized QUIC Client Hellos.
 	QUICClientHelloSeed *prng.Seed
 
+	// QUICDisablePathMTUDiscovery indicates whether to disable path MTU
+	// discovery in the QUIC client.
+	QUICDisablePathMTUDiscovery bool
+
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	UseHTTPS bool
 
@@ -368,7 +372,8 @@ func DialMeek(
 			udpDialer,
 			quicDialSNIAddress,
 			meekConfig.QUICVersion,
-			meekConfig.QUICClientHelloSeed)
+			meekConfig.QUICClientHelloSeed,
+			meekConfig.QUICDisablePathMTUDiscovery)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
