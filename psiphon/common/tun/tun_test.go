@@ -531,8 +531,8 @@ func startTestClient(
 }
 
 func (client *testClient) stop() {
-	client.unixConn.Close()
 	client.tunClient.Stop()
+	client.unixConn.Close()
 }
 
 type testTCPServer struct {
