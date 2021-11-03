@@ -729,15 +729,16 @@ func testDNSClient(useIPv6 bool, tunDeviceName string) error {
 	if err != nil {
 		return err
 	}
-	defer syscall.Close(socketFd)
 
 	err = BindToDevice(socketFd, tunDeviceName)
 	if err != nil {
+		syscall.Close(socketFd)
 		return err
 	}
 
 	err = syscall.Connect(socketFd, sockAddr)
 	if err != nil {
+		syscall.Close(socketFd)
 		return err
 	}
 
