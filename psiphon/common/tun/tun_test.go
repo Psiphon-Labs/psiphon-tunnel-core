@@ -204,6 +204,9 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 
 			testTCPClient.stop()
 
+			// Allow some time for the TCP FIN to be tunneled, for a clean shutdown.
+			time.Sleep(100 * time.Millisecond)
+
 			testClient.stop()
 
 			// Check metrics to ensure traffic was tunneled and metrics reported
