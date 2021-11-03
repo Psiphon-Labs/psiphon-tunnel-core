@@ -835,7 +835,7 @@ const (
 	requestParamLogStringAsFloat                              = 1 << 5
 	requestParamLogStringLengthAsInt                          = 1 << 6
 	requestParamLogFlagAsBool                                 = 1 << 7
-	requestParamLogOnlyForFrontedMeek                         = 1 << 8
+	requestParamLogOnlyForFrontedMeekOrConjure                = 1 << 8
 	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 9
 )
 
@@ -870,8 +870,8 @@ var baseDialParams = []requestParamSpec{
 	{"upstream_proxy_type", isUpstreamProxyType, requestParamOptional},
 	{"upstream_proxy_custom_header_names", isAnyString, requestParamOptional | requestParamArray},
 	{"fronting_provider_id", isAnyString, requestParamOptional},
-	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
-	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeek},
+	{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
+	{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
 	{"meek_sni_server_name", isDomain, requestParamOptional},
 	{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
 	{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
@@ -885,6 +885,7 @@ var baseDialParams = []requestParamSpec{
 	{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"quic_version", isAnyString, requestParamOptional},
 	{"quic_dial_sni_address", isAnyString, requestParamOptional},
+	{"quic_disable_client_path_mtu_discovery", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_min_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"upstream_max_bytes_written", isIntString, requestParamOptional | requestParamLogStringAsInt},
@@ -1055,8 +1056,9 @@ func getRequestLogFields(
 			tunnelProtocol, _ = value.(string)
 		}
 
-		if expectedParam.flags&requestParamLogOnlyForFrontedMeek != 0 &&
-			!protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		if expectedParam.flags&requestParamLogOnlyForFrontedMeekOrConjure != 0 &&
+			!protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) &&
+			!protocol.TunnelProtocolUsesConjure(tunnelProtocol) {
 			continue
 		}
 

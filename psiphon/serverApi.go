@@ -1011,6 +1011,10 @@ func getBaseAPIParameters(
 			params["quic_dial_sni_address"] = dialParams.QUICDialSNIAddress
 		}
 
+		if dialParams.QUICDisablePathMTUDiscovery {
+			params["quic_disable_client_path_mtu_discovery"] = "1"
+		}
+
 		isReplay := "0"
 		if dialParams.IsReplay {
 			isReplay = "1"
