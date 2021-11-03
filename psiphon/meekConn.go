@@ -118,6 +118,10 @@ type MeekConfig struct {
 	// QUICClientHelloSeed is used for randomized QUIC Client Hellos.
 	QUICClientHelloSeed *prng.Seed
 
+	// QUICDisablePathMTUDiscovery indicates whether to disable path MTU
+	// discovery in the QUIC client.
+	QUICDisablePathMTUDiscovery bool
+
 	// UseHTTPS indicates whether to use HTTPS (true) or HTTP (false).
 	UseHTTPS bool
 
@@ -333,6 +337,7 @@ func DialMeek(
 
 	var (
 		scheme            string
+		opaqueURL         string
 		transport         transporter
 		additionalHeaders http.Header
 		proxyUrl          func(*http.Request) (*url.URL, error)
@@ -367,7 +372,8 @@ func DialMeek(
 			udpDialer,
 			quicDialSNIAddress,
 			meekConfig.QUICVersion,
-			meekConfig.QUICClientHelloSeed)
+			meekConfig.QUICClientHelloSeed,
+			meekConfig.QUICDisablePathMTUDiscovery)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -538,7 +544,27 @@ func DialMeek(
 
 			dialer = NewTCPDialer(copyDialConfig)
 
+			// In this proxy case, the destination server address is in the
+			// request line URL. net/http will render the request line using
+			// the URL but preferring the Host header for the host value,
+			// which means any custom host header will clobber the true
+			// destination address. The URL.Opaque logic is applied in this
+			// case, to force the request line URL value.
+			//
+			// This URL.Opaque setting assumes MeekModeRelay, with no path; at
+			// this time plain HTTP is used only with MeekModeRelay.
+			// x/net/http2 will reject requests where the URL.Opaque contains
+			// more than the path; but HTTP/2 is not used in this case.
+
+			values := dialConfig.CustomHeaders["Host"]
+			if len(values) > 0 {
+				opaqueURL = "http://" + meekConfig.DialAddress + "/"
+			}
+
 		} else {
+
+			// If dialConfig.UpstreamProxyURL is set, HTTP proxying via
+			// CONNECT will be used by the dialer.
 
 			baseDialer := NewTCPDialer(dialConfig)
 
@@ -556,9 +582,14 @@ func DialMeek(
 		}
 
 		if proxyUrl != nil {
-			// Wrap transport with a transport that can perform HTTP proxy auth negotiation
+
+			// When http.Transport is handling proxying, wrap transport with a
+			// transport that (a) adds custom headers; (b) can perform HTTP
+			// proxy auth negotiation.
+
 			var err error
-			transport, err = upstreamproxy.NewProxyAuthTransport(httpTransport, dialConfig.CustomHeaders)
+			transport, err = upstreamproxy.NewProxyAuthTransport(
+				httpTransport, dialConfig.CustomHeaders)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -571,6 +602,7 @@ func DialMeek(
 		Scheme: scheme,
 		Host:   meekConfig.HostHeader,
 		Path:   "/",
+		Opaque: opaqueURL,
 	}
 
 	if meekConfig.UseHTTPS {
@@ -583,6 +615,12 @@ func DialMeek(
 		}
 	} else {
 		if proxyUrl == nil {
+
+			// Add custom headers to plain, unproxied HTTP and to CONNECT
+			// method proxied HTTP (in the latter case, the CONNECT request
+			// itself will also have custom headers via upstreamproxy applied
+			// by the dialer).
+
 			additionalHeaders = dialConfig.CustomHeaders
 		}
 	}
@@ -774,10 +812,10 @@ func (meek *MeekConn) GetMetrics() common.LogFields {
 // plaintext in the meek traffic. The caller is responsible for securing and
 // obfuscating the request body.
 //
-// ObfuscatedRoundTrip is not safe for concurrent use, and Close must not be
-// called concurrently. The caller must ensure only one ObfuscatedRoundTrip
-// call is active at once and that it completes or is cancelled before calling
-// Close.
+// ObfuscatedRoundTrip is not safe for concurrent use. The caller must ensure
+// only one ObfuscatedRoundTrip call is active at once. If Close is called
+// before or concurrent with ObfuscatedRoundTrip, or before the response body
+// is read, idle connections may be left open.
 func (meek *MeekConn) ObfuscatedRoundTrip(
 	requestCtx context.Context, endPoint string, requestBody []byte) ([]byte, error) {
 
@@ -800,10 +838,6 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 	//
 	// - multiple, concurrent ObfuscatedRoundTrip calls are unsafe due to the
 	//   setDialerRequestContext calls in newRequest.
-	//
-	// - concurrent Close and ObfuscatedRoundTrip calls are unsafe as Close does
-	//   not synchronize with ObfuscatedRoundTrip before calling
-	//   meek.transport.CloseIdleConnections(), so resources could be left open.
 	//
 	// At this time, ObfuscatedRoundTrip is used for tactics in Controller and
 	// the concurrency constraints are satisfied.
@@ -839,9 +873,10 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 // used when TLS and server certificate verification are configured. RoundTrip
 // does not implement any security or obfuscation at the HTTP layer.
 //
-// RoundTrip is not safe for concurrent use, and Close must not be called
-// concurrently. The caller must ensure only one RoundTrip call is active at
-// once and that it completes or is cancelled before calling Close.
+// RoundTrip is not safe for concurrent use. The caller must ensure only one
+// RoundTrip call is active at once. If Close is called before or concurrent
+// with RoundTrip, or before the response body is read, idle connections may
+// be left open.
 func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
 
 	if meek.mode != MeekModePlaintextRoundTrip {
@@ -862,7 +897,12 @@ func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
 
 	meek.scheduleQUICCloseIdle(request)
 
-	return meek.transport.RoundTrip(request)
+	response, err := meek.transport.RoundTrip(request)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return response, nil
 }
 
 // Read reads data from the connection.
@@ -1421,14 +1461,8 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 // custom headers to HTTP proxy requests.
 func (meek *MeekConn) addAdditionalHeaders(request *http.Request) {
 	for name, value := range meek.additionalHeaders {
-		// hack around special case of "Host" header
-		// https://golang.org/src/net/http/request.go#L474
-		// using URL.Opaque, see URL.RequestURI() https://golang.org/src/net/url/url.go#L915
 		if name == "Host" {
 			if len(value) > 0 {
-				if request.URL.Opaque == "" {
-					request.URL.Opaque = request.URL.Scheme + "://" + request.Host + request.URL.RequestURI()
-				}
 				request.Host = value[0]
 			}
 		} else {

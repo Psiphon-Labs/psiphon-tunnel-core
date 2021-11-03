@@ -111,6 +111,7 @@ const (
 	LimitQUICVersionsProbability                     = "LimitQUICVersionsProbability"
 	LimitQUICVersions                                = "LimitQUICVersions"
 	DisableFrontingProviderQUICVersions              = "DisableFrontingProviderQUICVersions"
+	QUICDisableClientPathMTUDiscoveryProbability     = "QUICDisableClientPathMTUDiscoveryProbability"
 	FragmentorProbability                            = "FragmentorProbability"
 	FragmentorLimitProtocols                         = "FragmentorLimitProtocols"
 	FragmentorMinTotalBytes                          = "FragmentorMinTotalBytes"
@@ -278,6 +279,7 @@ const (
 	ClientBurstDownstreamTargetBytes                 = "ClientBurstDownstreamTargetBytes"
 	ConjureCachedRegistrationTTL                     = "ConjureCachedRegistrationTTL"
 	ConjureAPIRegistrarURL                           = "ConjureAPIRegistrarURL"
+	ConjureAPIRegistrarBidirectionalURL              = "ConjureAPIRegistrarBidirectionalURL"
 	ConjureAPIRegistrarFrontingSpecs                 = "ConjureAPIRegistrarFrontingSpecs"
 	ConjureAPIRegistrarMinDelay                      = "ConjureAPIRegistrarMinDelay"
 	ConjureAPIRegistrarMaxDelay                      = "ConjureAPIRegistrarMaxDelay"
@@ -375,9 +377,10 @@ var defaultParameters = map[string]struct {
 	NoDefaultTLSSessionIDProbability:      {value: 0.5, minimum: 0.0},
 	DisableFrontingProviderTLSProfiles:    {value: protocol.LabeledTLSProfiles{}},
 
-	LimitQUICVersionsProbability:        {value: 1.0, minimum: 0.0},
-	LimitQUICVersions:                   {value: protocol.QUICVersions{}},
-	DisableFrontingProviderQUICVersions: {value: protocol.LabeledQUICVersions{}},
+	LimitQUICVersionsProbability:                 {value: 1.0, minimum: 0.0},
+	LimitQUICVersions:                            {value: protocol.QUICVersions{}},
+	DisableFrontingProviderQUICVersions:          {value: protocol.LabeledQUICVersions{}},
+	QUICDisableClientPathMTUDiscoveryProbability: {value: 0.0, minimum: 0.0},
 
 	FragmentorProbability:              {value: 0.5, minimum: 0.0},
 	FragmentorLimitProtocols:           {value: protocol.TunnelProtocols{}},
@@ -601,15 +604,18 @@ var defaultParameters = map[string]struct {
 	ClientBurstDownstreamTargetBytes: {value: 0, minimum: 0},
 	ClientBurstDownstreamDeadline:    {value: time.Duration(0), minimum: time.Duration(0)},
 
-	ConjureCachedRegistrationTTL:     {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureAPIRegistrarURL:           {value: ""},
-	ConjureAPIRegistrarFrontingSpecs: {value: FrontingSpecs{}},
-	ConjureAPIRegistrarMinDelay:      {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureAPIRegistrarMaxDelay:      {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureDecoyRegistrarProbability: {value: 0.0, minimum: 0.0},
-	ConjureDecoyRegistrarWidth:       {value: 5, minimum: 0},
-	ConjureDecoyRegistrarMinDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureDecoyRegistrarMaxDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureCachedRegistrationTTL: {value: time.Duration(0), minimum: time.Duration(0)},
+	// ConjureAPIRegistrarURL parameter is obsoleted by ConjureAPIRegistrarBidirectionalURL.
+	// TODO: remove once no longer required for older clients.
+	ConjureAPIRegistrarURL:              {value: ""},
+	ConjureAPIRegistrarBidirectionalURL: {value: ""},
+	ConjureAPIRegistrarFrontingSpecs:    {value: FrontingSpecs{}},
+	ConjureAPIRegistrarMinDelay:         {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureAPIRegistrarMaxDelay:         {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarProbability:    {value: 0.0, minimum: 0.0},
+	ConjureDecoyRegistrarWidth:          {value: 5, minimum: 0},
+	ConjureDecoyRegistrarMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarMaxDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
 
 	ConjureTransportObfs4Probability: {value: 0.0, minimum: 0.0},
 

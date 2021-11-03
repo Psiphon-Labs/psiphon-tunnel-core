@@ -140,7 +140,7 @@ func ExampleNewServerConn() {
 	}
 }
 
-func ExampleHostKeyCheck() {
+func ExampleClientConfig_HostKeyCallback() {
 	// Every client must provide a host key check.  Here is a
 	// simple-minded parse of OpenSSH's known_hosts file
 	host := "hostname"
@@ -198,6 +198,7 @@ func ExampleDial() {
 	if err != nil {
 		log.Fatal("Failed to dial: ", err)
 	}
+	defer client.Close()
 
 	// Each ClientConn can support multiple interactive sessions,
 	// represented by a Session.

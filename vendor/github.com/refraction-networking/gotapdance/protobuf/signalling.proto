@@ -215,8 +215,8 @@ message ClientToStation {
     optional bool v6_support = 22;
     optional bool v4_support = 23;
 
-	// A collection of optional flags for the registration.
-	optional RegistrationFlags flags = 24;
+    // A collection of optional flags for the registration.
+    optional RegistrationFlags flags = 24;
 
     // Random-sized junk to defeat packet size fingerprinting.
     optional bytes padding = 100;
@@ -224,22 +224,25 @@ message ClientToStation {
 
 
 enum RegistrationSource {
-    Unspecified = 0;
+  Unspecified = 0;
 	Detector = 1;
 	API = 2;
-    DetectorPrescan = 3;
+  DetectorPrescan = 3;
+  BidirectionalAPI = 4;
 }
 
 message C2SWrapper {
-	optional bytes shared_secret = 1;
+  optional bytes shared_secret = 1;
 	optional ClientToStation registration_payload = 3;
-    optional RegistrationSource registration_source = 4;
-    
-    // client source address when receiving a registration
-    optional bytes registration_address = 6;
+  optional RegistrationSource registration_source = 4;
 
-    // Decoy address used when registering over Decoy registrar
-    optional bytes decoy_address = 7;
+  // client source address when receiving a registration
+  optional bytes registration_address = 6;
+
+  // Decoy address used when registering over Decoy registrar
+  optional bytes decoy_address = 7;
+
+  optional RegistrationResponse registration_response = 8;
 }
 
 message SessionStats {
@@ -261,4 +264,21 @@ message StationToDetector {
     optional string client_ip = 2;
 
     optional uint64 timeout_ns = 3;
+}
+
+// Adding message response from Station to Client for birdirectional API
+message RegistrationResponse {
+  optional fixed32 ipv4addr = 1;
+  // The 128-bit ipv6 address, in network byte order
+  optional bytes ipv6addr = 2;
+
+  // Respond with randomized port
+  optional uint32 port = 3;
+
+  // Future: station provides client with secret, want chanel present
+  // Leave null for now
+  optional bytes serverRandom = 4;
+
+  // If registration wrong, populate this error string
+  optional string error = 5;
 }

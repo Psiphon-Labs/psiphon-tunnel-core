@@ -46,13 +46,14 @@ type ConjureConfig struct {
 	// the client reverts back to its original public IP).
 	RegistrationCacheKey string
 
-	// APIRegistrarURL specifies the API registration endpoint. Setting
-	// APIRegistrarURL enables API registration. The domain fronting
-	// configuration provided by APIRegistrarHTTPClient may ignore the host
-	// portion of this URL, implicitly providing another value; the path portion
-	// is always used in the request. Only one of API registration or decoy
-	// registration can be enabled for a single dial.
-	APIRegistrarURL string
+	// APIRegistrarBidirectionalURL specifies the bidirectional API
+	// registration endpoint. Setting APIRegistrarBidirectionalURL enables
+	// API registration. The domain fronting configuration provided by
+	// APIRegistrarHTTPClient may ignore the host portion of this URL,
+	// implicitly providing another value; the path portion is always used in
+	// the request. Only one of API registration or decoy registration can be
+	// enabled for a single dial.
+	APIRegistrarBidirectionalURL string
 
 	// APIRegistrarHTTPClient specifies a custom HTTP client (and underlying
 	// dialers) to be used for Conjure API registration. The
