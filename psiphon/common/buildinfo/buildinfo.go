@@ -84,8 +84,10 @@ func (bi *BuildInfo) ToMap() map[string]interface{} {
 
 // GetBuildInfo returns an instance of the BuildInfo struct
 func GetBuildInfo() *BuildInfo {
-	if strings.TrimSpace(dependencies) == "" {
-		dependencies = "{}"
+
+	deps := strings.TrimSpace(dependencies)
+	if deps == "" {
+		deps = "{}"
 	}
 
 	buildInfo := BuildInfo{
@@ -94,7 +96,7 @@ func GetBuildInfo() *BuildInfo {
 		BuildRev:        strings.TrimSpace(buildRev),
 		GoVersion:       strings.TrimSpace(goVersion),
 		GomobileVersion: strings.TrimSpace(gomobileVersion),
-		Dependencies:    json.RawMessage(strings.TrimSpace(dependencies)),
+		Dependencies:    json.RawMessage(deps),
 		ValuesRev:       values.GetRevision(),
 	}
 
