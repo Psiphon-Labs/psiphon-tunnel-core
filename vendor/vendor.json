@@ -215,12 +215,6 @@
 			"versionExact": "feature-lru"
 		},
 		{
-			"checksumSHA1": "bFj0ceSRvaFFCfmS4el1PjWhcgw=",
-			"path": "github.com/creack/goselect",
-			"revision": "1bd5ca702c6154bccc56ecd598932ee8b295cab2",
-			"revisionTime": "2016-07-14T17:28:59Z"
-		},
-		{
 			"checksumSHA1": "mrz/kicZiUaHxkyfvC/DyQcr8Do=",
 			"path": "github.com/davecgh/go-spew/spew",
 			"revision": "ecdeabc65495df2dec95d7c4a4c3e021903035e5",

@@ -30,6 +30,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -55,21 +56,30 @@ func makeDeviceOutboundBuffer(MTU int) []byte {
 func OpenTunDevice(name string) (*os.File, string, error) {
 
 	// Prevent fork between creating fd and setting CLOEXEC
+	// TODO: is this still necessary with unix.Open?
 	syscall.ForkLock.RLock()
 	defer syscall.ForkLock.RUnlock()
 
 	// Requires process to run as root or have CAP_NET_ADMIN
 
-	// This code follows snippets in this thread:
-	// https://groups.google.com/forum/#!msg/golang-nuts/x_c_pZ6p95c/8T0JBZLpTwAJ
+	// As explained in https://github.com/golang/go/issues/30426, the fd must
+	// not be added to the Go poller before the following TUNSETIFF ioctl
+	// call. This is achieved by using unix.Open -- which opens a raw fd --
+	// instead of os.FileOpen, followed by the ioctl and finally os.NewFile
+	// to add the fd to the Go poller.
+	//
+	// Set CLOEXEC so file descriptor not leaked to network config command
+	// subprocesses.
 
-	file, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+	fileName := "/dev/net/tun"
+
+	fd, err := unix.Open(fileName, os.O_RDWR|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
 
-	// Set CLOEXEC so file descriptor not leaked to network config command subprocesses
-	syscall.CloseOnExec(int(file.Fd()))
+	// This code follows snippets in this thread:
+	// https://groups.google.com/forum/#!msg/golang-nuts/x_c_pZ6p95c/8T0JBZLpTwAJ;
 
 	// Definitions from <linux/if.h>, <linux/if_tun.h>
 
@@ -103,13 +113,21 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
-		file.Fd(),
+		uintptr(fd),
 		uintptr(syscall.TUNSETIFF),
 		uintptr(unsafe.Pointer(&ifReq)))
 	if errno != 0 {
-		file.Close()
+		unix.Close(fd)
 		return nil, "", errors.Trace(errno)
 	}
+
+	err = unix.SetNonblock(fd, true)
+	if err != nil {
+		unix.Close(fd)
+		return nil, "", errors.Trace(err)
+	}
+
+	file := os.NewFile(uintptr(fd), fileName)
 
 	deviceName := strings.Trim(string(ifReq.name[:]), "\x00")
 
