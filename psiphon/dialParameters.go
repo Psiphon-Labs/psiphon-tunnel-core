@@ -681,7 +681,8 @@ func MakeDialParameters(
 		}
 
 		dialParams.QUICDisablePathMTUDiscovery =
-			p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
+			protocol.QUICVersionUsesPathMTUDiscovery(dialParams.QUICVersion) &&
+				p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
