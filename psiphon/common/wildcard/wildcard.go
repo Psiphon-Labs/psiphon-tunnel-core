@@ -114,7 +114,7 @@ func Match(pattern, target string) bool {
 				}
 
 				pattern = pattern[i+1:]
-				target = target[j+i+1:]
+				target = target[j+i:]
 			}
 
 		}

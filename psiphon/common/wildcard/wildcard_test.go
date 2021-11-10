@@ -42,6 +42,8 @@ func TestMatch(t *testing.T) {
 		{"Lorem*dolor*eiusmod*magna*", target, true},
 		{"*ipsum*elit*aliqua.", target, true},
 		{"Lorem*dolor*eiusmod*dolore*aliqua.", target, true},
+		{"*dolor* sit*", target, true},
+		{"*aliqua.*", target, true},
 
 		{"", target, false},
 		{"L-rem*", target, false},
