@@ -100,7 +100,7 @@ func NewHttpProxy(
 	listenIP string) (proxy *HttpProxy, err error) {
 
 	listener, err := net.Listen(
-		"tcp", fmt.Sprintf("%s:%d", listenIP, config.LocalHttpProxyPort))
+		"tcp", net.JoinHostPort(listenIP, strconv.Itoa(config.LocalHttpProxyPort)))
 	if err != nil {
 		if IsAddressInUseError(err) {
 			NoticeHttpProxyPortInUse(config.LocalHttpProxyPort)

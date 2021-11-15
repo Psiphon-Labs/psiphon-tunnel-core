@@ -55,7 +55,7 @@ import (
 
 var serverIPAddress, testDataDirName string
 var mockWebServerURL, mockWebServerExpectedResponse string
-var mockWebServerPort = 8080
+var mockWebServerPort = "8080"
 
 func TestMain(m *testing.M) {
 	flag.Parse()
@@ -93,7 +93,7 @@ func runMockWebServer() (string, string) {
 	serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(responseBody))
 	})
-	webServerAddress := fmt.Sprintf("%s:%d", serverIPAddress, mockWebServerPort)
+	webServerAddress := net.JoinHostPort(serverIPAddress, mockWebServerPort)
 	server := &http.Server{
 		Addr:    webServerAddress,
 		Handler: serveMux,
@@ -2106,7 +2106,7 @@ func paveTrafficRulesFile(
 		t.Fatalf("unexpected intLookupThreshold")
 	}
 
-	TCPPorts := fmt.Sprintf("%d", mockWebServerPort)
+	TCPPorts := mockWebServerPort
 	UDPPorts := "53, 123, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010"
 
 	allowTCPPorts := TCPPorts

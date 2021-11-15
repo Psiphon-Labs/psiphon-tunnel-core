@@ -25,8 +25,8 @@ package psiphon
 import (
 	"context"
 	std_errors "errors"
-	"fmt"
 	"net"
+	"strconv"
 	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -133,7 +133,7 @@ func bindLookupIP(
 	}
 
 	netConn, err := dialer.DialContext(
-		ctx, "udp", fmt.Sprintf("%s:%d", ipAddr.String(), DNS_PORT))
+		ctx, "udp", net.JoinHostPort(ipAddr.String(), strconv.Itoa(DNS_PORT)))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

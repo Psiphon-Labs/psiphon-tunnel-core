@@ -24,10 +24,8 @@ package psiphon
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"net"
-	"strconv"
 	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -37,11 +35,7 @@ import (
 func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
 	// Get the remote IP and port, resolving a domain name if necessary
-	host, strPort, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	port, err := strconv.Atoi(strPort)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -126,7 +120,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 		}
 
 		conn, err := dialer.DialContext(
-			ctx, "tcp", fmt.Sprintf("%s:%d", ipAddrs[index].String(), port))
+			ctx, "tcp", net.JoinHostPort(ipAddrs[index].String(), port))
 		if err != nil {
 			lastErr = errors.Trace(err)
 			continue

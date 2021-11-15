@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -237,10 +238,14 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 			// Can't defer sshClient.closedPortForward() here;
 			// relayDownstream will call sshClient.closedPortForward()
 
-			log.WithTraceFields(
-				LogFields{
-					"remoteAddr": fmt.Sprintf("%s:%d", dialIP.String(), dialPort),
-					"connID":     message.connID}).Debug("dialing")
+			// Pre-check log level to avoid overhead of rendering log for
+			// every DNS query and other UDP port forward.
+			if IsLogLevelDebug() {
+				log.WithTraceFields(
+					LogFields{
+						"remoteAddr": net.JoinHostPort(dialIP.String(), strconv.Itoa(dialPort)),
+						"connID":     message.connID}).Debug("dialing")
+			}
 
 			udpConn, err := net.DialUDP(
 				"udp", nil, &net.UDPAddr{IP: dialIP, Port: dialPort})
@@ -463,8 +468,8 @@ func (portForward *udpgwPortForward) relayDownstream() {
 
 	log.WithTraceFields(
 		LogFields{
-			"remoteAddr": fmt.Sprintf("%s:%d",
-				net.IP(portForward.remoteIP).String(), portForward.remotePort),
+			"remoteAddr": net.JoinHostPort(
+				net.IP(portForward.remoteIP).String(), strconv.Itoa(int(portForward.remotePort))),
 			"bytesUp":   bytesUp,
 			"bytesDown": bytesDown,
 			"connID":    portForward.connID}).Debug("exiting")

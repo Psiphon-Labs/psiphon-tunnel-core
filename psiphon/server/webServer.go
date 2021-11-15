@@ -22,11 +22,11 @@ package server
 import (
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	golanglog "log"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -101,8 +101,9 @@ func RunWebServer(
 		},
 	}
 
-	localAddress := fmt.Sprintf("%s:%d",
-		support.Config.ServerIPAddress, support.Config.WebServerPort)
+	localAddress := net.JoinHostPort(
+		support.Config.ServerIPAddress,
+		strconv.Itoa(support.Config.WebServerPort))
 
 	listener, err := net.Listen("tcp", localAddress)
 	if err != nil {
