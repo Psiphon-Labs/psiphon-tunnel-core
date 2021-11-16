@@ -1,3 +1,4 @@
+//go:build android || linux || darwin
 // +build android linux darwin
 
 /*
@@ -25,7 +26,7 @@ import (
 	"context"
 	std_errors "errors"
 	"net"
-	"os"
+	"strconv"
 	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -111,53 +112,28 @@ func bindLookupIP(
 		}
 	}
 
-	var ipv4 [4]byte
-	var ipv6 [16]byte
-	var domain int
+	dialer := &net.Dialer{
+		Control: func(_, _ string, c syscall.RawConn) error {
+			var controlErr error
+			err := c.Control(func(fd uintptr) {
 
-	// Get address type (IPv4 or IPv6)
-	if ipAddr.To4() != nil {
-		copy(ipv4[:], ipAddr.To4())
-		domain = syscall.AF_INET
-	} else if ipAddr.To16() != nil {
-		copy(ipv6[:], ipAddr.To16())
-		domain = syscall.AF_INET6
-	} else {
-		return nil, errors.TraceNew("invalid IP address for DNS server")
+				socketFD := int(fd)
+
+				_, err := config.DeviceBinder.BindToDevice(socketFD)
+				if err != nil {
+					controlErr = errors.Tracef("BindToDevice failed: %s", err)
+					return
+				}
+			})
+			if controlErr != nil {
+				return errors.Trace(controlErr)
+			}
+			return errors.Trace(err)
+		},
 	}
 
-	socketFd, err := syscall.Socket(domain, syscall.SOCK_DGRAM, 0)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	_, err = config.DeviceBinder.BindToDevice(socketFd)
-	if err != nil {
-		syscall.Close(socketFd)
-		return nil, errors.Tracef("BindToDevice failed with %s", err)
-	}
-
-	// Connect socket to the server's IP address
-	// Note: no timeout or interrupt for this connect, as it's a datagram socket
-	if domain == syscall.AF_INET {
-		sockAddr := syscall.SockaddrInet4{Addr: ipv4, Port: DNS_PORT}
-		err = syscall.Connect(socketFd, &sockAddr)
-	} else if domain == syscall.AF_INET6 {
-		sockAddr := syscall.SockaddrInet6{Addr: ipv6, Port: DNS_PORT}
-		err = syscall.Connect(socketFd, &sockAddr)
-	}
-	if err != nil {
-		syscall.Close(socketFd)
-		return nil, errors.Trace(err)
-	}
-
-	// Convert the syscall socket to a net.Conn, for use in the dns package
-	// This code block is from:
-	// https://github.com/golang/go/issues/6966
-
-	file := os.NewFile(uintptr(socketFd), "")
-	netConn, err := net.FileConn(file) // net.FileConn() dups socketFd
-	file.Close()                       // file.Close() closes socketFd
+	netConn, err := dialer.DialContext(
+		ctx, "udp", net.JoinHostPort(ipAddr.String(), strconv.Itoa(DNS_PORT)))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

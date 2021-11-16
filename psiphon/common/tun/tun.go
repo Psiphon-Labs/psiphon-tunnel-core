@@ -960,7 +960,7 @@ var (
 	serverIPv4AddressCIDR             = "10.0.0.1/8"
 	transparentDNSResolverIPv4Address = net.ParseIP("10.0.0.2").To4() // 4-byte for rewriting
 	_, privateSubnetIPv4, _           = net.ParseCIDR("10.0.0.0/8")
-	assignedIPv4AddressTemplate       = "10.%02d.%02d.%02d"
+	assignedIPv4AddressTemplate       = "10.%d.%d.%d"
 
 	serverIPv6AddressCIDR             = "fd19:ca83:e6d5:1c44:0000:0000:0000:0001/64"
 	transparentDNSResolverIPv6Address = net.ParseIP("fd19:ca83:e6d5:1c44:0000:0000:0000:0002")
@@ -1006,6 +1006,19 @@ func (server *Server) allocateIndex(newSession *session) error {
 			index = 0
 			continue
 		}
+
+		IPv4Address := server.convertIndexToIPv4Address(index).To4()
+		IPv6Address := server.convertIndexToIPv6Address(index)
+
+		// Ensure that the index converts to valid IPs. This is not expected
+		// to fail, but continuing with nil IPs will silently misroute
+		// packets with rewritten source IPs.
+		if IPv4Address == nil || IPv6Address == nil {
+			server.config.Logger.WithTraceFields(
+				common.LogFields{"index": index}).Warning("convert index to IP address failed")
+			continue
+		}
+
 		if s, ok := server.indexToSession.LoadOrStore(index, newSession); ok {
 			// Index is already in use or acquired concurrently.
 			// If the existing session is expired, reap it and try again
@@ -1024,8 +1037,8 @@ func (server *Server) allocateIndex(newSession *session) error {
 		// that address value is assumed to be 4 bytes when rewriting.
 
 		newSession.index = index
-		newSession.assignedIPv4Address = server.convertIndexToIPv4Address(index).To4()
-		newSession.assignedIPv6Address = server.convertIndexToIPv6Address(index)
+		newSession.assignedIPv4Address = IPv4Address
+		newSession.assignedIPv6Address = IPv6Address
 		server.sessionIDToIndex.Store(newSession.sessionID, index)
 
 		server.resetRouting(newSession.assignedIPv4Address, newSession.assignedIPv6Address)
@@ -2837,21 +2850,16 @@ func NewServerDevice(config *ServerConfig) (*Device, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	defer file.Close()
 
 	err = configureServerInterface(config, deviceName)
 	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	nio, err := NewNonblockingIO(int(file.Fd()))
-	if err != nil {
+		_ = file.Close()
 		return nil, errors.Trace(err)
 	}
 
 	return newDevice(
 		deviceName,
-		nio,
+		file,
 		getMTU(config.MTU)), nil
 }
 
@@ -2863,22 +2871,17 @@ func NewClientDevice(config *ClientConfig) (*Device, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	defer file.Close()
 
 	err = configureClientInterface(
 		config, deviceName)
 	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	nio, err := NewNonblockingIO(int(file.Fd()))
-	if err != nil {
+		_ = file.Close()
 		return nil, errors.Trace(err)
 	}
 
 	return newDevice(
 		deviceName,
-		nio,
+		file,
 		getMTU(config.MTU)), nil
 }
 
@@ -2898,7 +2901,7 @@ func newDevice(
 // NewClientDeviceFromFD wraps an existing tun device.
 func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
-	nio, err := NewNonblockingIO(config.TunFileDescriptor)
+	file, err := fileFromFD(config.TunFileDescriptor, "")
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -2907,7 +2910,7 @@ func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
 	return &Device{
 		name:           "",
-		deviceIO:       nio,
+		deviceIO:       file,
 		inboundBuffer:  makeDeviceInboundBuffer(MTU),
 		outboundBuffer: makeDeviceOutboundBuffer(MTU),
 	}, nil

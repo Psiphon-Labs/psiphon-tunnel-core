@@ -408,6 +408,13 @@ func QUICVersionIsObfuscated(version string) bool {
 		version == QUIC_VERSION_DECOY_V1
 }
 
+func QUICVersionUsesPathMTUDiscovery(version string) bool {
+	return version != QUIC_VERSION_GQUIC39 &&
+		version != QUIC_VERSION_GQUIC43 &&
+		version != QUIC_VERSION_GQUIC44 &&
+		version != QUIC_VERSION_OBFUSCATED
+}
+
 type QUICVersions []string
 
 func (versions QUICVersions) Validate() error {

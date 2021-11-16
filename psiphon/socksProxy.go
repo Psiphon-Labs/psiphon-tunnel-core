@@ -20,8 +20,8 @@
 package psiphon
 
 import (
-	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -53,7 +53,7 @@ func NewSocksProxy(
 	listenIP string) (proxy *SocksProxy, err error) {
 
 	listener, err := socks.ListenSocks(
-		"tcp", fmt.Sprintf("%s:%d", listenIP, config.LocalSocksProxyPort))
+		"tcp", net.JoinHostPort(listenIP, strconv.Itoa(config.LocalSocksProxyPort)))
 	if err != nil {
 		if IsAddressInUseError(err) {
 			NoticeSocksProxyPortInUse(config.LocalSocksProxyPort)

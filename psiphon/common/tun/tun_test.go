@@ -204,6 +204,9 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 
 			testTCPClient.stop()
 
+			// Allow some time for the TCP FIN to be tunneled, for a clean shutdown.
+			time.Sleep(100 * time.Millisecond)
+
 			testClient.stop()
 
 			// Check metrics to ensure traffic was tunneled and metrics reported
@@ -531,8 +534,8 @@ func startTestClient(
 }
 
 func (client *testClient) stop() {
-	client.unixConn.Close()
 	client.tunClient.Stop()
+	client.unixConn.Close()
 }
 
 type testTCPServer struct {
@@ -729,15 +732,16 @@ func testDNSClient(useIPv6 bool, tunDeviceName string) error {
 	if err != nil {
 		return err
 	}
-	defer syscall.Close(socketFd)
 
 	err = BindToDevice(socketFd, tunDeviceName)
 	if err != nil {
+		syscall.Close(socketFd)
 		return err
 	}
 
 	err = syscall.Connect(socketFd, sockAddr)
 	if err != nil {
+		syscall.Close(socketFd)
 		return err
 	}
 

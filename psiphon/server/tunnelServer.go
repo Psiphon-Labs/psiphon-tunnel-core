@@ -145,8 +145,8 @@ func (server *TunnelServer) Run() error {
 
 	for tunnelProtocol, listenPort := range support.Config.TunnelProtocolPorts {
 
-		localAddress := fmt.Sprintf(
-			"%s:%d", support.Config.ServerIPAddress, listenPort)
+		localAddress := net.JoinHostPort(
+			support.Config.ServerIPAddress, strconv.Itoa(listenPort))
 
 		var listener net.Listener
 		var BPFProgramName string
