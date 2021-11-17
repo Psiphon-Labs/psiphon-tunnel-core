@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Psiphon-Labs/net/http/httpguts"
-	"github.com/Psiphon-Labs/net/http2"
-	"github.com/Psiphon-Labs/net/http2/hpack"
+	"golang.org/x/net/http/httpguts"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/hpack"
 
 	quic "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/internal/protocol"
