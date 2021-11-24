@@ -849,6 +849,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// TODO: test that the concurrency limit is correctly enforced.
 	serverConfig["MaxConcurrentSSHHandshakes"] = 1
 
+	// Ensure peak failure rate log fields for a single port forward attempt
+	serverConfig["PeakUpstreamFailureRateMinimumSampleSize"] = 1
+
 	// Exercise this option.
 	serverConfig["PeriodicGarbageCollectionSeconds"] = 1
 
@@ -1350,6 +1353,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
+	// Trigger server_load logging once more, to exercise
+	// sshClient.peakMetrics. As we don't have a reference to the server's
+	// Support struct, we can't invoke logServerLoad directly and there's a
+	// potential race between asynchronous logServerLoad invocation and
+	// client shutdown. For now, we sleep as a workaround.
+
+	p.Signal(syscall.SIGUSR2)
+	time.Sleep(1 * time.Second)
+
 	// Shutdown to ensure logs/notices are flushed
 
 	stopClient()
@@ -1482,6 +1494,11 @@ func checkExpectedServerTunnelLogFields(
 		"established_tunnels_count",
 		"network_latency_multiplier",
 		"network_type",
+
+		// The test run ensures that logServerLoad is invoked while the client
+		// is connected, so the following must be logged.
+		"peak_concurrent_proximate_accepted_clients",
+		"peak_concurrent_proximate_established_clients",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -1506,7 +1523,99 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
+	if fields["network_type"].(string) != testNetworkType {
+		return fmt.Errorf("unexpected network_type '%s'", fields["network_type"])
+	}
+
+	// With interruptions, timeouts, and retries in some tests, there may be
+	// more than one dangling accepted_client.
+
+	peakConcurrentProximateAcceptedClients :=
+		int(fields["peak_concurrent_proximate_accepted_clients"].(float64))
+	if peakConcurrentProximateAcceptedClients < 0 ||
+		peakConcurrentProximateAcceptedClients > 10 {
+		return fmt.Errorf(
+			"unexpected peak_concurrent_proximate_accepted_clients '%v'",
+			fields["peak_concurrent_proximate_accepted_clients"])
+	}
+
+	peakConcurrentProximateEstablishedClients :=
+		int(fields["peak_concurrent_proximate_established_clients"].(float64))
+	if peakConcurrentProximateEstablishedClients != 0 {
+		return fmt.Errorf(
+			"unexpected peak_concurrent_proximate_established_clients '%v'",
+			fields["peak_concurrent_proximate_established_clients"])
+	}
+
+	// In some negative test cases, no port forwards are attempted, in which
+	// case these fields are not logged.
+
+	if expectTCPDataTransfer {
+
+		if fields["peak_tcp_port_forward_failure_rate"] == nil {
+			return fmt.Errorf("missing expected field 'peak_tcp_port_forward_failure_rate'")
+		}
+		if fields["peak_tcp_port_forward_failure_rate"].(float64) != 0.0 {
+			return fmt.Errorf(
+				"unexpected peak_tcp_port_forward_failure_rate '%v'",
+				fields["peak_tcp_port_forward_failure_rate"])
+		}
+
+		if fields["peak_tcp_port_forward_failure_rate_sample_size"] == nil {
+			return fmt.Errorf("missing expected field 'peak_tcp_port_forward_failure_rate_sample_size'")
+		}
+		if fields["peak_tcp_port_forward_failure_rate_sample_size"].(float64) <= 0.0 {
+			return fmt.Errorf(
+				"unexpected peak_tcp_port_forward_failure_rate_sample_size '%v'",
+				fields["peak_tcp_port_forward_failure_rate_sample_size"])
+		}
+
+	} else {
+
+		if fields["peak_tcp_port_forward_failure_rate"] != nil {
+			return fmt.Errorf("unexpected field 'peak_tcp_port_forward_failure_rate'")
+		}
+
+		if fields["peak_tcp_port_forward_failure_rate_sample_size"] != nil {
+			return fmt.Errorf("unexpected field 'peak_tcp_port_forward_failure_rate_sample_size'")
+		}
+	}
+
+	if expectUDPDataTransfer {
+
+		if fields["peak_dns_failure_rate"] == nil {
+			return fmt.Errorf("missing expected field 'peak_dns_failure_rate'")
+		}
+		if fields["peak_dns_failure_rate"].(float64) != 0.0 {
+			return fmt.Errorf(
+				"unexpected peak_dns_failure_rate '%v'", fields["peak_dns_failure_rate"])
+		}
+
+		if fields["peak_dns_failure_rate_sample_size"] == nil {
+			return fmt.Errorf("missing expected field 'peak_dns_failure_rate_sample_size'")
+		}
+		if fields["peak_dns_failure_rate_sample_size"].(float64) <= 0.0 {
+			return fmt.Errorf(
+				"unexpected peak_dns_failure_rate_sample_size '%v'",
+				fields["peak_dns_failure_rate_sample_size"])
+		}
+
+	} else {
+
+		if fields["peak_dns_failure_rate"] != nil {
+			return fmt.Errorf("unexpected field 'peak_dns_failure_rate'")
+		}
+
+		if fields["peak_dns_failure_rate_sample_size"] != nil {
+			return fmt.Errorf("unexpected field 'peak_dns_failure_rate_sample_size'")
+		}
+	}
+
+	// TODO: the following cases should check that fields are not logged when
+	// not expected.
+
 	if runConfig.doSplitTunnel {
+
 		if fields["split_tunnel"] == nil {
 			return fmt.Errorf("missing expected field 'split_tunnel'")
 		}
@@ -1692,10 +1801,6 @@ func checkExpectedServerTunnelLogFields(
 				return fmt.Errorf("missing expected field '%s'", name)
 			}
 		}
-	}
-
-	if fields["network_type"].(string) != testNetworkType {
-		return fmt.Errorf("unexpected network_type '%s'", fields["network_type"])
 	}
 
 	var checkTCPMetric func(float64) bool

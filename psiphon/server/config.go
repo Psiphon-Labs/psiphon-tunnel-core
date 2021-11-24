@@ -59,6 +59,7 @@ const (
 	SSH_PASSWORD_BYTE_LENGTH                            = 32
 	SSH_RSA_HOST_KEY_BITS                               = 2048
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH                      = 32
+	PEAK_UPSTREAM_FAILURE_RATE_MINIMUM_SAMPLE_SIZE      = 10
 	PERIODIC_GARBAGE_COLLECTION                         = 120 * time.Second
 	STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD = 20
 	DEFAULT_LOG_FILE_REOPEN_RETRIES                     = 25
@@ -314,6 +315,13 @@ type Config struct {
 	// The default, 0, disables load logging.
 	LoadMonitorPeriodSeconds int
 
+	// PeakUpstreamFailureRateMinimumSampleSize specifies the minimum number
+	// of samples (e.g., upstream port forward attempts) that are required
+	// before taking a failure rate snapshot which may be recorded as
+	// peak_dns_failure_rate/peak_tcp_port_forward_failure_rate.  The default
+	// is PEAK_UPSTREAM_FAILURE_RATE_SAMPLE_SIZE.
+	PeakUpstreamFailureRateMinimumSampleSize *int
+
 	// ProcessProfileOutputDirectory is the path of a directory to which
 	// process profiles will be written when signaled with SIGUSR2. The
 	// files are overwritten on each invocation. When set to the default
@@ -424,6 +432,7 @@ type Config struct {
 
 	sshBeginHandshakeTimeout                       time.Duration
 	sshHandshakeTimeout                            time.Duration
+	peakUpstreamFailureRateMinimumSampleSize       int
 	periodicGarbageCollection                      time.Duration
 	stopEstablishTunnelsEstablishedClientThreshold int
 	dumpProfilesOnStopEstablishTunnelsDone         int32
@@ -621,6 +630,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if net.ParseIP(config.DNSResolverIPAddress) == nil {
 			return nil, errors.Tracef("DNSResolverIPAddress is invalid")
 		}
+	}
+
+	config.peakUpstreamFailureRateMinimumSampleSize = PEAK_UPSTREAM_FAILURE_RATE_MINIMUM_SAMPLE_SIZE
+	if config.PeakUpstreamFailureRateMinimumSampleSize != nil {
+		config.peakUpstreamFailureRateMinimumSampleSize = *config.PeakUpstreamFailureRateMinimumSampleSize
 	}
 
 	config.periodicGarbageCollection = PERIODIC_GARBAGE_COLLECTION
