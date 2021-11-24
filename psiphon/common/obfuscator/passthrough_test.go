@@ -104,8 +104,8 @@ func TestTLSPassthrough(t *testing.T) {
 				timeDiff = -timeDiff
 			}
 
-			if timeDiff.Microseconds() > 100 {
-				t.Fatalf("unexpected elapsed time difference")
+			if timeDiff.Microseconds() > 500 {
+				t.Fatalf("unexpected elapsed time difference: %v", timeDiff)
 			}
 
 			// test: invalid message length and elapsed time

@@ -1,3 +1,4 @@
+//go:build !darwin && !linux
 // +build !darwin,!linux
 
 /*
@@ -78,29 +79,9 @@ func BindToDevice(_ int, _ string) error {
 }
 
 func fixBindToDevice(_ common.Logger, _ bool, _ string) error {
-	// Not required
 	return nil
 }
 
-type NonblockingIO struct {
-}
-
-func NewNonblockingIO(ioFD int) (*NonblockingIO, error) {
+func fileFromFD(_ int, _ string) (*os.File, error) {
 	return nil, errors.Trace(errUnsupported)
-}
-
-func (nio *NonblockingIO) Read(p []byte) (int, error) {
-	return 0, errors.Trace(errUnsupported)
-}
-
-func (nio *NonblockingIO) Write(p []byte) (int, error) {
-	return 0, errors.Trace(errUnsupported)
-}
-
-func (nio *NonblockingIO) IsClosed() bool {
-	return false
-}
-
-func (nio *NonblockingIO) Close() error {
-	return errors.Trace(errUnsupported)
 }

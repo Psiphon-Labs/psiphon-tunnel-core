@@ -314,6 +314,10 @@ func InitLogging(config *Config) (retErr error) {
 	return retErr
 }
 
+func IsLogLevelDebug() bool {
+	return log.Logger.Level == logrus.DebugLevel
+}
+
 func init() {
 
 	// Suppress standard "log" package logging performed by other packages.

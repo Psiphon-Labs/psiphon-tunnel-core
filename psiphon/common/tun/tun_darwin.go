@@ -62,6 +62,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -126,7 +127,13 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 	}
 
 	// Set CLOEXEC so file descriptor not leaked to network config command subprocesses
-	syscall.CloseOnExec(fd)
+	unix.CloseOnExec(fd)
+
+	err = unix.SetNonblock(fd, true)
+	if err != nil {
+		unix.Close(fd)
+		return nil, "", errors.Trace(err)
+	}
 
 	var tunControlName [96]byte
 	copy(tunControlName[:], TUN_CONTROL_NAME)
@@ -192,6 +199,7 @@ func OpenTunDevice(name string) (*os.File, string, error) {
 	}
 
 	deviceName := string(ifName.name[:ifNameSize-1])
+
 	file := os.NewFile(uintptr(fd), deviceName)
 
 	return file, deviceName, nil

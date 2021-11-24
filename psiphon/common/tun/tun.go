@@ -2850,21 +2850,16 @@ func NewServerDevice(config *ServerConfig) (*Device, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	defer file.Close()
 
 	err = configureServerInterface(config, deviceName)
 	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	nio, err := NewNonblockingIO(int(file.Fd()))
-	if err != nil {
+		_ = file.Close()
 		return nil, errors.Trace(err)
 	}
 
 	return newDevice(
 		deviceName,
-		nio,
+		file,
 		getMTU(config.MTU)), nil
 }
 
@@ -2876,22 +2871,17 @@ func NewClientDevice(config *ClientConfig) (*Device, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	defer file.Close()
 
 	err = configureClientInterface(
 		config, deviceName)
 	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	nio, err := NewNonblockingIO(int(file.Fd()))
-	if err != nil {
+		_ = file.Close()
 		return nil, errors.Trace(err)
 	}
 
 	return newDevice(
 		deviceName,
-		nio,
+		file,
 		getMTU(config.MTU)), nil
 }
 
@@ -2911,7 +2901,7 @@ func newDevice(
 // NewClientDeviceFromFD wraps an existing tun device.
 func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
-	nio, err := NewNonblockingIO(config.TunFileDescriptor)
+	file, err := fileFromFD(config.TunFileDescriptor, "")
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -2920,7 +2910,7 @@ func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
 
 	return &Device{
 		name:           "",
-		deviceIO:       nio,
+		deviceIO:       file,
 		inboundBuffer:  makeDeviceInboundBuffer(MTU),
 		outboundBuffer: makeDeviceOutboundBuffer(MTU),
 	}, nil

@@ -1,3 +1,4 @@
+//go:build !windows
 // +build !windows
 
 /*
@@ -25,30 +26,16 @@ import (
 	"context"
 	"math/rand"
 	"net"
-	"os"
-	"strconv"
 	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/creack/goselect"
 )
 
 // tcpDial is the platform-specific part of DialTCP
-//
-// To implement socket device binding, the lower-level syscall APIs are used.
-// The sequence of syscalls in this implementation are taken from:
-// https://github.com/golang/go/issues/6966
-// (originally: https://code.google.com/p/go/issues/detail?id=6966)
-//
-// TODO: use https://golang.org/pkg/net/#Dialer.Control, introduced in Go 1.11?
 func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
 	// Get the remote IP and port, resolving a domain name if necessary
-	host, strPort, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	port, err := strconv.Atoi(strPort)
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -100,188 +87,43 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 
 	for _, index := range permutedIndexes {
 
-		// Get address type (IPv4 or IPv6)
+		dialer := &net.Dialer{
+			Control: func(_, _ string, c syscall.RawConn) error {
+				var controlErr error
+				err := c.Control(func(fd uintptr) {
 
-		var ipv4 [4]byte
-		var ipv6 [16]byte
-		var domain int
-		var sockAddr syscall.Sockaddr
+					socketFD := int(fd)
 
-		ipAddr := ipAddrs[index]
-		if ipAddr != nil && ipAddr.To4() != nil {
-			copy(ipv4[:], ipAddr.To4())
-			domain = syscall.AF_INET
-		} else if ipAddr != nil && ipAddr.To16() != nil {
-			copy(ipv6[:], ipAddr.To16())
-			domain = syscall.AF_INET6
-		} else {
-			lastErr = errors.TraceNew("invalid IP address")
-			continue
+					setAdditionalSocketOptions(socketFD)
+
+					if config.BPFProgramInstructions != nil {
+						err := setSocketBPF(config.BPFProgramInstructions, socketFD)
+						if err != nil {
+							controlErr = errors.Tracef("setSocketBPF failed: %s", err)
+							return
+						}
+					}
+
+					if config.DeviceBinder != nil {
+						_, err := config.DeviceBinder.BindToDevice(socketFD)
+						if err != nil {
+							controlErr = errors.Tracef("BindToDevice failed: %s", err)
+							return
+						}
+					}
+				})
+				if controlErr != nil {
+					return errors.Trace(controlErr)
+				}
+				return errors.Trace(err)
+			},
 		}
-		if domain == syscall.AF_INET {
-			sockAddr = &syscall.SockaddrInet4{Addr: ipv4, Port: port}
-		} else if domain == syscall.AF_INET6 {
-			sockAddr = &syscall.SockaddrInet6{Addr: ipv6, Port: port}
-		}
 
-		// Create a socket and bind to device, when configured to do so
-
-		socketFD, err := syscall.Socket(domain, syscall.SOCK_STREAM, 0)
+		conn, err := dialer.DialContext(
+			ctx, "tcp", net.JoinHostPort(ipAddrs[index].String(), port))
 		if err != nil {
 			lastErr = errors.Trace(err)
 			continue
-		}
-
-		syscall.CloseOnExec(socketFD)
-
-		setAdditionalSocketOptions(socketFD)
-
-		if config.BPFProgramInstructions != nil {
-			err = setSocketBPF(config.BPFProgramInstructions, socketFD)
-			if err != nil {
-				syscall.Close(socketFD)
-				lastErr = errors.Trace(err)
-				continue
-			}
-		}
-
-		if config.DeviceBinder != nil {
-			_, err = config.DeviceBinder.BindToDevice(socketFD)
-			if err != nil {
-				syscall.Close(socketFD)
-				lastErr = errors.Tracef("BindToDevice failed with %s", err)
-				continue
-			}
-		}
-
-		// Connect socket to the server's IP address
-
-		err = syscall.SetNonblock(socketFD, true)
-		if err != nil {
-			syscall.Close(socketFD)
-			lastErr = errors.Trace(err)
-			continue
-		}
-
-		err = syscall.Connect(socketFD, sockAddr)
-		if err != nil {
-			if errno, ok := err.(syscall.Errno); !ok || errno != syscall.EINPROGRESS {
-				syscall.Close(socketFD)
-				lastErr = errors.Trace(err)
-				continue
-			}
-		}
-
-		// Use a control pipe to interrupt if the dial context is done (timeout or
-		// interrupted) before the TCP connection is established.
-
-		var controlFDs [2]int
-		err = syscall.Pipe(controlFDs[:])
-		if err != nil {
-			syscall.Close(socketFD)
-			lastErr = errors.Trace(err)
-			continue
-
-		}
-
-		for _, controlFD := range controlFDs {
-			syscall.CloseOnExec(controlFD)
-			err = syscall.SetNonblock(controlFD, true)
-			if err != nil {
-				break
-			}
-		}
-
-		if err != nil {
-			syscall.Close(socketFD)
-			lastErr = errors.Trace(err)
-			continue
-		}
-
-		resultChannel := make(chan error)
-
-		go func() {
-
-			readSet := goselect.FDSet{}
-			readSet.Set(uintptr(controlFDs[0]))
-			writeSet := goselect.FDSet{}
-			writeSet.Set(uintptr(socketFD))
-
-			max := socketFD
-			if controlFDs[0] > max {
-				max = controlFDs[0]
-			}
-
-			err := goselect.Select(max+1, &readSet, &writeSet, nil, -1)
-
-			if err == nil && !writeSet.IsSet(uintptr(socketFD)) {
-				err = errors.TraceNew("interrupted")
-			}
-
-			resultChannel <- err
-		}()
-
-		done := false
-		select {
-		case err = <-resultChannel:
-		case <-ctx.Done():
-			err = ctx.Err()
-			// Interrupt the goroutine
-			// TODO: if this Write fails, abandon the goroutine instead of hanging?
-			var b [1]byte
-			syscall.Write(controlFDs[1], b[:])
-			<-resultChannel
-			done = true
-		}
-
-		syscall.Close(controlFDs[0])
-		syscall.Close(controlFDs[1])
-
-		if err != nil {
-			syscall.Close(socketFD)
-
-			if done {
-				// Skip retry as dial context has timed out of been canceled.
-				return nil, errors.Trace(err)
-			}
-
-			lastErr = errors.Trace(err)
-			continue
-		}
-
-		err = syscall.SetNonblock(socketFD, false)
-		if err != nil {
-			syscall.Close(socketFD)
-			lastErr = errors.Trace(err)
-			continue
-		}
-
-		// Convert the socket fd to a net.Conn
-		// This code block is from:
-		// https://github.com/golang/go/issues/6966
-
-		file := os.NewFile(uintptr(socketFD), "")
-		conn, err := net.FileConn(file) // net.FileConn() dups socketFD
-		file.Close()                    // file.Close() closes socketFD
-		if err != nil {
-			lastErr = errors.Trace(err)
-			continue
-		}
-
-		// Handle the case where net.FileConn produces a Conn where RemoteAddr
-		// unexpectedly returns nil: https://github.com/golang/go/issues/23022.
-		//
-		// The net.Conn interface indicates that RemoteAddr returns a usable value,
-		// and code such as crypto/tls, in loadSession/clientSessionCacheKey, uses
-		// the RemoteAddr return value without a nil check, resulting in an panic.
-		//
-		// As the most likely explanation for this net.FileConn condition is
-		// getpeername returning ENOTCONN due to the socket connection closing
-		// during the net.FileConn execution, we choose to abort this dial rather
-		// than try to mask the RemoteAddr issue.
-		if conn.RemoteAddr() == nil {
-			conn.Close()
-			return nil, errors.TraceNew("RemoteAddr returns nil")
 		}
 
 		return &TCPConn{Conn: conn}, nil
