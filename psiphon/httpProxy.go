@@ -76,6 +76,7 @@ import (
 // URL encoded.
 //
 type HttpProxy struct {
+	config                 *Config
 	tunneler               Tunneler
 	listener               net.Listener
 	serveWaitGroup         *sync.WaitGroup
@@ -162,6 +163,7 @@ func NewHttpProxy(
 	proxyPort, _ := strconv.Atoi(proxyPortString)
 
 	proxy = &HttpProxy{
+		config:                 config,
 		tunneler:               tunneler,
 		listener:               listener,
 		serveWaitGroup:         new(sync.WaitGroup),
@@ -262,7 +264,7 @@ func (proxy *HttpProxy) httpConnectHandler(localConn net.Conn, target string) (e
 	if err != nil {
 		return errors.Trace(err)
 	}
-	LocalProxyRelay(_HTTP_PROXY_TYPE, localConn, remoteConn)
+	LocalProxyRelay(proxy.config, _HTTP_PROXY_TYPE, localConn, remoteConn)
 	return nil
 }
 
@@ -572,7 +574,7 @@ func (proxy *HttpProxy) relayHTTPRequest(
 			return
 		}
 
-		_, err = io.Copy(conn, response.Body)
+		_, err = RelayCopyBuffer(proxy.config, conn, response.Body)
 		if err != nil {
 			NoticeWarning("write body failed: %s", errors.Trace(err))
 			conn.Close()
@@ -584,7 +586,7 @@ func (proxy *HttpProxy) relayHTTPRequest(
 		// Standard HTTP response.
 
 		responseWriter.WriteHeader(response.StatusCode)
-		_, err = io.Copy(responseWriter, response.Body)
+		_, err = RelayCopyBuffer(proxy.config, responseWriter, response.Body)
 		if err != nil {
 			NoticeWarning("%s", errors.Trace(err))
 			forceClose(responseWriter)
