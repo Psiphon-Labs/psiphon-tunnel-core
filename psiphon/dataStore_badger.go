@@ -1,3 +1,4 @@
+//go:build PSIPHON_USE_BADGER_DB
 // +build PSIPHON_USE_BADGER_DB
 
 /*

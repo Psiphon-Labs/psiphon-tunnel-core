@@ -35,6 +35,7 @@ import (
 // the tunnel SSH client and relays traffic through the port
 // forward.
 type SocksProxy struct {
+	config                 *Config
 	tunneler               Tunneler
 	listener               *socks.SocksListener
 	serveWaitGroup         *sync.WaitGroup
@@ -61,6 +62,7 @@ func NewSocksProxy(
 		return nil, errors.Trace(err)
 	}
 	proxy = &SocksProxy{
+		config:                 config,
 		tunneler:               tunneler,
 		listener:               listener,
 		serveWaitGroup:         new(sync.WaitGroup),
@@ -113,7 +115,7 @@ func (proxy *SocksProxy) socksConnectionHandler(localConn *socks.SocksConn) (err
 		return errors.Trace(err)
 	}
 
-	LocalProxyRelay(_SOCKS_PROXY_TYPE, localConn, remoteConn)
+	LocalProxyRelay(proxy.config, _SOCKS_PROXY_TYPE, localConn, remoteConn)
 
 	return nil
 }

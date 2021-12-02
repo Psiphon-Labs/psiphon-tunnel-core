@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -187,6 +188,10 @@ func NewController(config *Config) (controller *Controller, err error) {
 // Run executes the controller. Run exits if a controller
 // component fails or the parent context is canceled.
 func (controller *Controller) Run(ctx context.Context) {
+
+	if controller.config.LimitCPUThreads {
+		runtime.GOMAXPROCS(1)
+	}
 
 	pprofRun()
 
