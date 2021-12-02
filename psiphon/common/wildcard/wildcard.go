@@ -68,9 +68,15 @@ func Match(pattern, target string) bool {
 
 	wildcard := "*"
 
+	// Pattern and target inputs are advanced as substring matches are found,
+	// and each iteration operates on the remaining pattern and target.
+
 	for n := 0; ; n++ {
 
 		if pattern == wildcard {
+
+			// Any remaining target matches the remaining "*" pattern.
+
 			return true
 		}
 
@@ -78,43 +84,67 @@ func Match(pattern, target string) bool {
 
 		if n == 0 {
 
+			// First wildcard.
+
 			if i == -1 {
+
+				// No wildcard, so the target must exactly match the pattern.
 
 				return pattern == target
 
 			} else if i == 0 {
 
+				// For the pattern "*abc...", advance the pattern to search for
+				// "abc..."
+
 				pattern = pattern[i+1:]
 
 			} else if i > 0 {
 
+				// For the pattern "a*bc...", the target must begin with "a";
+				// advance the target past "a" and advance the pattern to
+				// search for "bc..."
+
 				if !strings.HasPrefix(target, pattern[:i]) {
 					return false
 				}
-				pattern = pattern[i+1:]
 				target = target[i:]
-
+				pattern = pattern[i+1:]
 			}
 
 		} else {
 
+			// After advancing from a previous wildcard.
+			//
+			// In the following cases, the previous wildcard may match the
+			// characters still at the start of the remaining target.
+
 			if i == -1 {
+
+				// No further wildcard, so the remaining target must end in
+				// the remaining pattern.
 
 				return strings.HasSuffix(target, pattern)
 
 			} else if i == 0 {
 
+				// If the previous iteration found "**abc...", then "*abc..."
+				// is found in this case; advance to search for "abc..."
+
 				pattern = pattern[i+1:]
 
 			} else if i > 0 {
+
+				// For the remaining pattern "a*bc...", the remaining target
+				// must contain "a"; advance the target past the first "a"
+				// and advance the pattern to search for "bc..."
 
 				j := strings.Index(target, pattern[:i])
 				if j == -1 {
 					return false
 				}
-
-				pattern = pattern[i+1:]
 				target = target[j+i:]
+				pattern = pattern[i+1:]
 			}
 
 		}

@@ -894,8 +894,12 @@ func (sshServer *sshServer) getLoadStats() (
 
 		// Every client.qualityMetrics DNS map has an "ALL" entry.
 
+		totalDNSCount := int64(0)
+		totalDNSFailedCount := int64(0)
+
 		for key, value := range client.qualityMetrics.DNSCount {
 			upstreamStats["dns_count"].(map[string]int64)[key] += value
+			totalDNSCount += value
 		}
 
 		for key, value := range client.qualityMetrics.DNSDuration {
@@ -904,13 +908,140 @@ func (sshServer *sshServer) getLoadStats() (
 
 		for key, value := range client.qualityMetrics.DNSFailedCount {
 			upstreamStats["dns_failed_count"].(map[string]int64)[key] += value
+			totalDNSFailedCount += value
 		}
 
 		for key, value := range client.qualityMetrics.DNSFailedDuration {
 			upstreamStats["dns_failed_duration"].(map[string]int64)[key] += int64(value / time.Millisecond)
 		}
 
+		// Update client peak failure rate metrics, to be recorded in
+		// server_tunnel.
+		//
+		// Limitations:
+		//
+		// - This is a simple data sampling that doesn't require additional
+		//   timers or tracking logic. Since the rates are calculated on
+		//   getLoadStats events and using accumulated counts, these peaks
+		//   only represent the highest failure rate within a
+		//   Config.LoadMonitorPeriodSeconds non-sliding window. There is no
+		//   sample recorded for short tunnels with no overlapping
+		//   getLoadStats event.
+		//
+		// - There is no minimum sample window, as a getLoadStats event may
+		//   occur immediately after a client first connects. This may be
+		//   compensated for by adjusting
+		//   Config.PeakUpstreamFailureRateMinimumSampleSize, so as to only
+		//   consider failure rates with a larger number of samples.
+		//
+		// - Non-UDP "failures" are not currently tracked.
+
+		minimumSampleSize := int64(sshServer.support.Config.peakUpstreamFailureRateMinimumSampleSize)
+
+		sampleSize := client.qualityMetrics.TCPPortForwardDialedCount +
+			client.qualityMetrics.TCPPortForwardFailedCount
+
+		if sampleSize >= minimumSampleSize {
+
+			TCPPortForwardFailureRate := float64(client.qualityMetrics.TCPPortForwardFailedCount) /
+				float64(sampleSize)
+
+			if client.peakMetrics.TCPPortForwardFailureRate == nil {
+
+				client.peakMetrics.TCPPortForwardFailureRate = new(float64)
+				*client.peakMetrics.TCPPortForwardFailureRate = TCPPortForwardFailureRate
+				client.peakMetrics.TCPPortForwardFailureRateSampleSize = new(int64)
+				*client.peakMetrics.TCPPortForwardFailureRateSampleSize = sampleSize
+
+			} else if *client.peakMetrics.TCPPortForwardFailureRate < TCPPortForwardFailureRate {
+
+				*client.peakMetrics.TCPPortForwardFailureRate = TCPPortForwardFailureRate
+				*client.peakMetrics.TCPPortForwardFailureRateSampleSize = sampleSize
+			}
+		}
+
+		sampleSize = totalDNSCount + totalDNSFailedCount
+
+		if sampleSize >= minimumSampleSize {
+
+			DNSFailureRate := float64(totalDNSFailedCount) / float64(sampleSize)
+
+			if client.peakMetrics.DNSFailureRate == nil {
+
+				client.peakMetrics.DNSFailureRate = new(float64)
+				*client.peakMetrics.DNSFailureRate = DNSFailureRate
+				client.peakMetrics.DNSFailureRateSampleSize = new(int64)
+				*client.peakMetrics.DNSFailureRateSampleSize = sampleSize
+
+			} else if *client.peakMetrics.DNSFailureRate < DNSFailureRate {
+
+				*client.peakMetrics.DNSFailureRate = DNSFailureRate
+				*client.peakMetrics.DNSFailureRateSampleSize = sampleSize
+			}
+		}
+
+		// Reset quality metrics counters
+
 		client.qualityMetrics.reset()
+
+		client.Unlock()
+	}
+
+	for _, client := range sshServer.clients {
+
+		client.Lock()
+
+		// Update client peak proximate (same region) concurrently connected
+		// (other clients) client metrics, to be recorded in server_tunnel.
+		// This operation requires a second loop over sshServer.clients since
+		// established_clients is calculated in the first loop.
+		//
+		// Limitations:
+		//
+		// - This is an approximation, not a true peak, as it only samples
+		//   data every Config.LoadMonitorPeriodSeconds period. There is no
+		//   sample recorded for short tunnels with no overlapping
+		//   getLoadStats event.
+		//
+		// - The "-1" calculation counts all but the current client as other
+		//   clients; it can be the case that the same client has a dangling
+		//   accepted connection that has yet to time-out server side. Due to
+		//   NAT, we can't determine if the client is the same based on
+		//   network address. For established clients,
+		//   registerEstablishedClient ensures that any previous connection
+		//   is first terminated, although this is only for the same
+		//   session_id. Concurrent proximate clients may be considered an
+		//   exact number of other _network connections_, even from the same
+		//   client.
+
+		region := client.geoIPData.Country
+		stats := regionStats[region]["ALL"]
+
+		n := stats["accepted_clients"].(int64) - 1
+		if n >= 0 {
+			if client.peakMetrics.concurrentProximateAcceptedClients == nil {
+
+				client.peakMetrics.concurrentProximateAcceptedClients = new(int64)
+				*client.peakMetrics.concurrentProximateAcceptedClients = n
+
+			} else if *client.peakMetrics.concurrentProximateAcceptedClients < n {
+
+				*client.peakMetrics.concurrentProximateAcceptedClients = n
+			}
+		}
+
+		n = stats["established_clients"].(int64) - 1
+		if n >= 0 {
+			if client.peakMetrics.concurrentProximateEstablishedClients == nil {
+
+				client.peakMetrics.concurrentProximateEstablishedClients = new(int64)
+				*client.peakMetrics.concurrentProximateEstablishedClients = n
+
+			} else if *client.peakMetrics.concurrentProximateEstablishedClients < n {
+
+				*client.peakMetrics.concurrentProximateEstablishedClients = n
+			}
+		}
 
 		client.Unlock()
 	}
@@ -1280,6 +1411,7 @@ type sshClient struct {
 	postHandshakeRandomStreamMetrics     randomStreamMetrics
 	sendAlertRequests                    chan protocol.AlertRequest
 	sentAlertRequests                    map[string]bool
+	peakMetrics                          peakMetrics
 }
 
 type trafficState struct {
@@ -1294,11 +1426,20 @@ type trafficState struct {
 }
 
 type randomStreamMetrics struct {
-	count                 int
-	upstreamBytes         int
-	receivedUpstreamBytes int
-	downstreamBytes       int
-	sentDownstreamBytes   int
+	count                 int64
+	upstreamBytes         int64
+	receivedUpstreamBytes int64
+	downstreamBytes       int64
+	sentDownstreamBytes   int64
+}
+
+type peakMetrics struct {
+	concurrentProximateAcceptedClients    *int64
+	concurrentProximateEstablishedClients *int64
+	TCPPortForwardFailureRate             *float64
+	TCPPortForwardFailureRateSampleSize   *int64
+	DNSFailureRate                        *float64
+	DNSFailureRateSampleSize              *int64
 }
 
 // qualityMetrics records upstream TCP dial attempts and
@@ -2433,10 +2574,10 @@ func (sshClient *sshClient) handleNewRandomStreamChannel(
 		upstream.Wait()
 
 		sshClient.Lock()
-		metrics.upstreamBytes += request.UpstreamBytes
-		metrics.receivedUpstreamBytes += received
-		metrics.downstreamBytes += request.DownstreamBytes
-		metrics.sentDownstreamBytes += sent
+		metrics.upstreamBytes += int64(request.UpstreamBytes)
+		metrics.receivedUpstreamBytes += int64(received)
+		metrics.downstreamBytes += int64(request.DownstreamBytes)
+		metrics.sentDownstreamBytes += int64(sent)
 		sshClient.Unlock()
 
 		channel.Close()
@@ -2708,6 +2849,23 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	logFields["random_stream_received_upstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.receivedUpstreamBytes
 	logFields["random_stream_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.downstreamBytes
 	logFields["random_stream_sent_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.sentDownstreamBytes
+
+	// Only log fields for peakMetrics when there is data recorded, otherwise
+	// omit the field.
+	if sshClient.peakMetrics.concurrentProximateAcceptedClients != nil {
+		logFields["peak_concurrent_proximate_accepted_clients"] = *sshClient.peakMetrics.concurrentProximateAcceptedClients
+	}
+	if sshClient.peakMetrics.concurrentProximateEstablishedClients != nil {
+		logFields["peak_concurrent_proximate_established_clients"] = *sshClient.peakMetrics.concurrentProximateEstablishedClients
+	}
+	if sshClient.peakMetrics.TCPPortForwardFailureRate != nil && sshClient.peakMetrics.TCPPortForwardFailureRateSampleSize != nil {
+		logFields["peak_tcp_port_forward_failure_rate"] = *sshClient.peakMetrics.TCPPortForwardFailureRate
+		logFields["peak_tcp_port_forward_failure_rate_sample_size"] = *sshClient.peakMetrics.TCPPortForwardFailureRateSampleSize
+	}
+	if sshClient.peakMetrics.DNSFailureRate != nil && sshClient.peakMetrics.DNSFailureRateSampleSize != nil {
+		logFields["peak_dns_failure_rate"] = *sshClient.peakMetrics.DNSFailureRate
+		logFields["peak_dns_failure_rate_sample_size"] = *sshClient.peakMetrics.DNSFailureRateSampleSize
+	}
 
 	// Pre-calculate a total-tunneled-bytes field. This total is used
 	// extensively in analytics and is more performant when pre-calculated.
@@ -3791,53 +3949,59 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	dialStartTime := time.Now()
 
-	log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
+	IP := net.ParseIP(hostToConnect)
 
-	ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
-	IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
-	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
+	if IP == nil {
 
-	resolveElapsedTime := time.Since(dialStartTime)
+		// Resolve the hostname
 
-	// Record DNS metrics. If LookupIPAddr returns net.DNSError.IsNotFound, this
-	// is "no such host" and not a DNS failure. Limitation: the resolver IP is
-	// not known.
+		log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
 
-	dnsErr, ok := err.(*net.DNSError)
-	dnsNotFound := ok && dnsErr.IsNotFound
-	dnsSuccess := err == nil || dnsNotFound
-	sshClient.updateQualityMetricsWithDNSResult(dnsSuccess, resolveElapsedTime, nil)
+		ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
+		IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
+		cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
-	// IPv4 is preferred in case the host has limited IPv6 routing. IPv6 is
-	// selected and attempted only when there's no IPv4 option.
-	// TODO: shuffle list to try other IPs?
+		resolveElapsedTime := time.Since(dialStartTime)
 
-	var IP net.IP
-	for _, ip := range IPs {
-		if ip.IP.To4() != nil {
-			IP = ip.IP
-			break
+		// Record DNS metrics. If LookupIPAddr returns net.DNSError.IsNotFound, this
+		// is "no such host" and not a DNS failure. Limitation: the resolver IP is
+		// not known.
+
+		dnsErr, ok := err.(*net.DNSError)
+		dnsNotFound := ok && dnsErr.IsNotFound
+		dnsSuccess := err == nil || dnsNotFound
+		sshClient.updateQualityMetricsWithDNSResult(dnsSuccess, resolveElapsedTime, nil)
+
+		// IPv4 is preferred in case the host has limited IPv6 routing. IPv6 is
+		// selected and attempted only when there's no IPv4 option.
+		// TODO: shuffle list to try other IPs?
+
+		for _, ip := range IPs {
+			if ip.IP.To4() != nil {
+				IP = ip.IP
+				break
+			}
 		}
+		if IP == nil && len(IPs) > 0 {
+			// If there are no IPv4 IPs, the first IP is IPv6.
+			IP = IPs[0].IP
+		}
+
+		if err == nil && IP == nil {
+			err = std_errors.New("no IP address")
+		}
+
+		if err != nil {
+
+			// Record a port forward failure
+			sshClient.updateQualityMetricsWithDialResult(false, resolveElapsedTime, IP)
+
+			sshClient.rejectNewChannel(newChannel, fmt.Sprintf("LookupIP failed: %s", err))
+			return
+		}
+
+		remainingDialTimeout -= resolveElapsedTime
 	}
-	if IP == nil && len(IPs) > 0 {
-		// If there are no IPv4 IPs, the first IP is IPv6.
-		IP = IPs[0].IP
-	}
-
-	if err == nil && IP == nil {
-		err = std_errors.New("no IP address")
-	}
-
-	if err != nil {
-
-		// Record a port forward failure
-		sshClient.updateQualityMetricsWithDialResult(false, resolveElapsedTime, IP)
-
-		sshClient.rejectNewChannel(newChannel, fmt.Sprintf("LookupIP failed: %s", err))
-		return
-	}
-
-	remainingDialTimeout -= resolveElapsedTime
 
 	if remainingDialTimeout <= 0 {
 		sshClient.rejectNewChannel(newChannel, "TCP port forward timed out resolving")
@@ -3883,9 +4047,11 @@ func (sshClient *sshClient) handleTCPChannel(
 			if !sshClient.isIPPermitted(IP) {
 				// Note: not recording a port forward failure in this case
 				sshClient.rejectNewChannel(newChannel, "port forward not permitted")
+				return
 			}
 
 			newChannel.Reject(protocol.CHANNEL_REJECT_REASON_SPLIT_TUNNEL, "")
+			return
 		}
 	}
 
@@ -3907,7 +4073,7 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
 
-	ctx, cancelCtx = context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
+	ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 	fwdConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", remoteAddr)
 	cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 

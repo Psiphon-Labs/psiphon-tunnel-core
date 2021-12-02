@@ -1,3 +1,4 @@
+//go:build !PSIPHON_USE_BADGER_DB && !PSIPHON_USE_FILES_DB
 // +build !PSIPHON_USE_BADGER_DB,!PSIPHON_USE_FILES_DB
 
 /*
@@ -68,17 +69,27 @@ func datastoreOpenDB(
 		attempts += OPEN_DB_RETRIES
 	}
 
+	reset := false
+
 	for attempt := 0; attempt < attempts; attempt++ {
 
-		db, err = tryDatastoreOpenDB(rootDataDirectory, attempt > 0)
+		db, err = tryDatastoreOpenDB(rootDataDirectory, reset)
 		if err == nil {
 			break
 		}
 
 		NoticeWarning("tryDatastoreOpenDB failed: %s", err)
 
-		// The datastore file may be corrupt, so, in subsequent iterations, set the
-		// "reset" flag and attempt to delete the file and try again.
+		// The datastore file may be corrupt, so, in subsequent iterations,
+		// set the "reset" flag and attempt to delete the file and try again.
+		//
+		// Don't reset the datastore when open failed due to timeout obtaining
+		// the file lock, as the datastore is simply locked by another
+		// process and not corrupt. As the file lock is advisory, deleting
+		// the file would succeed despite the lock. In this case, still retry
+		// in case the the lock is released.
+
+		reset = !std_errors.Is(err, bolt.ErrTimeout)
 	}
 
 	return db, err

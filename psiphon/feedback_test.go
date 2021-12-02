@@ -55,10 +55,15 @@ func TestFeedbackUpload(t *testing.T) {
 		t.Fatalf("error loading configuration file: %s", err)
 	}
 
+	if config.ClientPlatform == "" {
+		config.ClientPlatform = testClientPlatform
+	}
+
 	testDataDirName, err := ioutil.TempDir("", "psiphon-feedback-test")
 	if err != nil {
 		t.Fatalf("TempDir failed: %s", err)
 	}
+
 	config.DataRootDirectory = testDataDirName
 
 	err = config.Commit(true)

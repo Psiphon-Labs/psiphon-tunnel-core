@@ -45,6 +45,7 @@ func TestStandAloneGetTactics(t *testing.T) {
 
 	var modifyConfig map[string]interface{}
 	json.Unmarshal(configJSON, &modifyConfig)
+
 	modifyConfig["DataRootDirectory"] = testDataDirName
 
 	configJSON, _ = json.Marshal(modifyConfig)
@@ -52,6 +53,10 @@ func TestStandAloneGetTactics(t *testing.T) {
 	config, err := LoadConfig(configJSON)
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
+	}
+
+	if config.ClientPlatform == "" {
+		config.ClientPlatform = testClientPlatform
 	}
 
 	err = config.Commit(false)

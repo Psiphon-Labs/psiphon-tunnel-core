@@ -247,6 +247,13 @@ type Config struct {
 	// LimitMeekBufferSizes selects smaller buffers for meek protocols.
 	LimitMeekBufferSizes bool
 
+	// LimitCPUThreads minimizes the number of CPU threads -- and associated
+	// overhead -- the are used.
+	LimitCPUThreads bool
+
+	// LimitRelayBufferSizes selects smaller buffers for port forward relaying.
+	LimitRelayBufferSizes bool
+
 	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
 	IgnoreHandshakeStatsRegexps bool
 

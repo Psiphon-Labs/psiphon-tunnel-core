@@ -1,3 +1,4 @@
+//go:build PSIPHON_USE_FILES_DB
 // +build PSIPHON_USE_FILES_DB
 
 /*

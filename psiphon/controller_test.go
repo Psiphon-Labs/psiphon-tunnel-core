@@ -45,6 +45,8 @@ import (
 	"github.com/elazarl/goproxy/ext/auth"
 )
 
+const testClientPlatform = "test_github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+
 func TestMain(m *testing.M) {
 	flag.Parse()
 
@@ -512,6 +514,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	var modifyConfig map[string]interface{}
 	json.Unmarshal(configJSON, &modifyConfig)
+
 	modifyConfig["DataRootDirectory"] = testDataDirName
 
 	if runConfig.protocol != "" {
@@ -553,6 +556,10 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	config, err := LoadConfig(configJSON)
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
+	}
+
+	if config.ClientPlatform == "" {
+		config.ClientPlatform = testClientPlatform
 	}
 
 	if runConfig.clientIsLatestVersion {
