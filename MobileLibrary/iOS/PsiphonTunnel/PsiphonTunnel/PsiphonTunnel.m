@@ -1089,7 +1089,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             return;
         }
 
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerAlert::)]) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onServerAlert:::)]) {
             dispatch_sync(self->callbackQueue, ^{
                 [self.tunneledAppDelegate onServerAlert:reason:subject:actionURLs];
             });
