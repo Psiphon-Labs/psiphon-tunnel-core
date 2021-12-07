@@ -675,12 +675,6 @@
 			"revisionTime": "2020-11-22T21:41:03Z"
 		},
 		{
-			"checksumSHA1": "iRA5GH0qX7eKM1FHf5gSQ3lUXEE=",
-			"path": "golang.org/x/crypto/internal/chacha20",
-			"revision": "a1f597ede03a7bef967a422b5b3a5bd08805a01e",
-			"revisionTime": "2019-02-05T21:23:42Z"
-		},
-		{
 			"checksumSHA1": "/U7f2gaH6DnEmLguVLDbipU6kXU=",
 			"path": "golang.org/x/crypto/internal/subtle",
 			"revision": "c8d3bf9c5392d5f66747f112cd55055d7a530b19",
