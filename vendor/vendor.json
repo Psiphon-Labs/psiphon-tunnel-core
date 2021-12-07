@@ -135,10 +135,10 @@
 			"revisionTime": "2021-10-16T15:45:43Z"
 		},
 		{
-			"checksumSHA1": "pO4/yHyvwYx1NKSPKIY4aFVtz5k=",
+			"checksumSHA1": "O9PZ+7E4n7CXzWL4M4zc5KLGtbU=",
 			"path": "github.com/Psiphon-Labs/tls-tris",
-			"revision": "2b2504c3e2a203e192b73beda551da9a5ca55d81",
-			"revisionTime": "2021-05-05T21:04:15Z"
+			"revision": "676a693d51ad58dffbf000f7029501fd29b4caee",
+			"revisionTime": "2021-07-13T13:38:51Z"
 		},
 		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",
@@ -673,12 +673,6 @@
 			"path": "golang.org/x/crypto/hkdf",
 			"revision": "c8d3bf9c5392d5f66747f112cd55055d7a530b19",
 			"revisionTime": "2020-11-22T21:41:03Z"
-		},
-		{
-			"checksumSHA1": "iRA5GH0qX7eKM1FHf5gSQ3lUXEE=",
-			"path": "golang.org/x/crypto/internal/chacha20",
-			"revision": "a1f597ede03a7bef967a422b5b3a5bd08805a01e",
-			"revisionTime": "2019-02-05T21:23:42Z"
 		},
 		{
 			"checksumSHA1": "/U7f2gaH6DnEmLguVLDbipU6kXU=",
