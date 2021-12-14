@@ -748,8 +748,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	var limitQUICVersions protocol.QUICVersions
 	if runConfig.limitQUICVersions {
-		selectedQUICVersion := protocol.SupportedQUICVersions[prng.Intn(
-			len(protocol.SupportedQUICVersions))]
+
+		// Limit the server entry to one specific QUICv1 version, and check
+		// that this is used (see expectQUICVersion below). This test case
+		// also exercises disabling gQUIC in the server config and
+		// using "QUICv1" as the server entry capability.
+
+		selectedQUICVersion := protocol.SupportedQUICv1Versions[prng.Intn(
+			len(protocol.SupportedQUICv1Versions))]
 		limitQUICVersions = protocol.QUICVersions{selectedQUICVersion}
 	}
 
@@ -759,6 +765,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		WebServerPort:        8000,
 		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: psiphonServerPort},
 		LimitQUICVersions:    limitQUICVersions,
+		EnableGQUIC:          !runConfig.limitQUICVersions,
 	}
 
 	if doServerTactics {

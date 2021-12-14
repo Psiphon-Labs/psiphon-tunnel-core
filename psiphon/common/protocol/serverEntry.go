@@ -450,12 +450,26 @@ func GetTacticsCapability(protocol string) string {
 // Any internal "PASSTHROUGH-v2 or "PASSTHROUGH" componant in the server
 // entry's capabilities is ignored. These PASSTHROUGH components are used to
 // mask protocols which are running the passthrough mechanisms from older
-// clients which do not implement the passthrough messages. Older clients will
-// treat these capabilities as unknown protocols and skip them.
+// clients which do not implement the passthrough messages. Older clients
+// will treat these capabilities as unknown protocols and skip them.
+//
+// Any "QUICv1" capability is treated as "QUIC". "QUICv1" is used to mask the
+// QUIC-OSSH capability from older clients to ensure that older clients do
+// not send gQUIC packets to second generation QUICv1-only QUIC-OSSH servers.
+// New clients must check SupportsOnlyQUICv1 before selecting a QUIC version;
+// for "QUICv1", this ensures that new clients also do not select gQUIC to
+// QUICv1-only servers.
 func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 	for _, capability := range serverEntry.Capabilities {
+
 		capability = strings.ReplaceAll(capability, "-PASSTHROUGH-v2", "")
 		capability = strings.ReplaceAll(capability, "-PASSTHROUGH", "")
+
+		quicCapability := GetCapability(TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH)
+		if capability == quicCapability+"v1" {
+			capability = quicCapability
+		}
+
 		if capability == requiredCapability {
 			return true
 		}
@@ -472,6 +486,10 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 
 // ProtocolUsesLegacyPassthrough indicates whether the ServerEntry supports
 // the specified protocol using legacy passthrough messages.
+//
+// There is no correspondong check for v2 passthrough, as clients send v2
+// passthrough messages unconditionally, by default, for passthrough
+// protocols.
 func (serverEntry *ServerEntry) ProtocolUsesLegacyPassthrough(protocol string) bool {
 	legacyCapability := GetCapability(protocol) + "-PASSTHROUGH"
 	for _, capability := range serverEntry.Capabilities {
@@ -480,6 +498,14 @@ func (serverEntry *ServerEntry) ProtocolUsesLegacyPassthrough(protocol string) b
 		}
 	}
 	return false
+}
+
+// SupportsOnlyQUICv1 indicates that the QUIC-OSSH server supports only QUICv1
+// and gQUIC versions should not be selected, as they will fail to connect
+// while sending atypical traffic to the server.
+func (serverEntry *ServerEntry) SupportsOnlyQUICv1() bool {
+	quicCapability := GetCapability(TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH)
+	return serverEntry.hasCapability(quicCapability+"v1") && !serverEntry.hasCapability(quicCapability)
 }
 
 // ConditionallyEnabledComponents defines an interface which can be queried to

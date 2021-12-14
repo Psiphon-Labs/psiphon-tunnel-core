@@ -1188,7 +1188,13 @@ func selectQUICVersion(
 
 	quicVersions := make([]string, 0)
 
-	for _, quicVersion := range protocol.SupportedQUICVersions {
+	// Don't use gQUIC versions when the server entry specifies QUICv1-only.
+	supportedQUICVersions := protocol.SupportedQUICVersions
+	if serverEntry.SupportsOnlyQUICv1() {
+		supportedQUICVersions = protocol.SupportedQUICv1Versions
+	}
+
+	for _, quicVersion := range supportedQUICVersions {
 
 		if len(limitQUICVersions) > 0 &&
 			!common.Contains(limitQUICVersions, quicVersion) {
