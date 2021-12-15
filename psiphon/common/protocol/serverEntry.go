@@ -505,7 +505,8 @@ func (serverEntry *ServerEntry) ProtocolUsesLegacyPassthrough(protocol string) b
 // while sending atypical traffic to the server.
 func (serverEntry *ServerEntry) SupportsOnlyQUICv1() bool {
 	quicCapability := GetCapability(TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH)
-	return serverEntry.hasCapability(quicCapability+"v1") && !serverEntry.hasCapability(quicCapability)
+	return common.Contains(serverEntry.Capabilities, quicCapability+"v1") &&
+		!common.Contains(serverEntry.Capabilities, quicCapability)
 }
 
 // ConditionallyEnabledComponents defines an interface which can be queried to
