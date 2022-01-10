@@ -50,23 +50,31 @@ func LookupIP(ctx context.Context, host string, config *DialConfig) ([]net.IP, e
 
 		ips, err := bindLookupIP(ctx, host, dnsServer, config)
 		if err == nil {
-			if len(ips) == 0 {
-				err = std_errors.New("empty address list")
-			} else {
-				return ips, err
+			if len(ips) > 0 {
+				return ips, nil
 			}
+			err = std_errors.New("empty address list")
+		}
+
+		if ctx.Err() != nil {
+			// Don't fall through to secondary when the context is cancelled.
+			return ips, errors.Trace(err)
 		}
 
 		dnsServer = config.DnsServerGetter.GetSecondaryDnsServer()
 		if dnsServer == "" {
-			return ips, err
+			return ips, errors.Trace(err)
 		}
 
 		if GetEmitNetworkParameters() {
 			NoticeWarning("retry resolve host %s: %s", host, err)
 		}
 
-		return bindLookupIP(ctx, host, dnsServer, config)
+		ips, err = bindLookupIP(ctx, host, dnsServer, config)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return ips, nil
 	}
 
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
