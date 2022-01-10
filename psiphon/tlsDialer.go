@@ -323,8 +323,6 @@ func CustomTLSDial(
 		}
 	}
 
-	// Note: utls will automatically omit SNI when ServerName is an IP address.
-
 	tlsConfig := &utls.Config{
 		RootCAs:               tlsConfigRootCAs,
 		InsecureSkipVerify:    tlsConfigInsecureSkipVerify,
@@ -498,14 +496,13 @@ func CustomTLSDial(
 		}
 	}
 
-	// utls doesn't omit the server_name extension when the SNI value is empty
-	// (including both the case where we set the SNI value to "" and the case
-	// where the SNI address is an IP address, which is internally changed to
-	// ""). To avoid a fingerprintable invalid/unusual server_name extension,
-	// remove it in these cases.
+	// utls doesn't omit the server_name extension when the ServerName value is
+	// empty or an IP address. To avoid a fingerprintable invalid/unusual
+	// server_name extension, remove it in these cases.
 	if tlsConfigServerName == "" || net.ParseIP(tlsConfigServerName) != nil {
 
 		// Assumes only one SNIExtension.
+		// TODO: use new UConn.RemoveSNIExtension function?
 		deleteIndex := -1
 		for index, extension := range conn.Extensions {
 			if _, ok := extension.(*utls.SNIExtension); ok {

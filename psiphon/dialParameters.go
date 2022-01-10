@@ -811,8 +811,9 @@ func MakeDialParameters(
 			}
 		}
 
-		// The underlying TLS will automatically disable SNI for IP address server name
-		// values; we have this explicit check here so we record the correct value for stats.
+		// The underlying TLS implementation will automatically omit SNI for
+		// IP address server name values; we have this explicit check here so
+		// we record the correct value for stats.
 		if net.ParseIP(dialParams.MeekSNIServerName) != nil {
 			dialParams.MeekSNIServerName = ""
 		}
