@@ -1315,17 +1315,11 @@ public class PsiphonTunnel {
                 }
             }
         } catch (ClassNotFoundException e) {
-            throw new Exception(errorMessage, e);
         } catch (NoSuchMethodException e) {
-            throw new Exception(errorMessage, e);
         } catch (IllegalArgumentException e) {
-            throw new Exception(errorMessage, e);
         } catch (IllegalAccessException e) {
-            throw new Exception(errorMessage, e);
         } catch (InvocationTargetException e) {
-            throw new Exception(errorMessage, e);
         } catch (NullPointerException e) {
-            throw new Exception(errorMessage, e);
         }
 
         if (!dnsAddresses.isEmpty()) {
