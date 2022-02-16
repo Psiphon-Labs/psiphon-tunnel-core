@@ -1,3 +1,4 @@
+//go:build android || linux
 // +build android linux
 
 /*
@@ -22,6 +23,8 @@
 package psiphon
 
 import (
+	"net"
+	"strconv"
 	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -48,4 +51,12 @@ func setSocketBPF(BPFProgramInstructions []bpf.RawInstruction, socketFD int) err
 }
 
 func setAdditionalSocketOptions(_ int) {
+}
+
+func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, error) {
+	listener, err := net.Listen("tcp", net.JoinHostPort(listenIP, strconv.Itoa(port)))
+	if err != nil {
+		return nil, IsAddressInUseError(err), errors.Trace(err)
+	}
+	return listener, false, nil
 }
