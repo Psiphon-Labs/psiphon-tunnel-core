@@ -95,6 +95,11 @@ func (db *datastoreDB) close() error {
 	return db.badgerDB.Close()
 }
 
+func (db *datastoreDB) getDataStoreMetrics() string {
+	// TODO: report metrics
+	return ""
+}
+
 func (db *datastoreDB) view(fn func(tx *datastoreTx) error) error {
 	return db.badgerDB.View(
 		func(tx *badger.Txn) error {

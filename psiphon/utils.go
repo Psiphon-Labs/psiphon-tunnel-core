@@ -323,6 +323,10 @@ func emitMemoryMetrics() {
 		common.FormatByteCount(memStats.TotalAlloc))
 }
 
+func emitDatastoreMetrics() {
+	NoticeInfo("Datastore metrics at %s: %s", stacktrace.GetParentFunctionName(), GetDataStoreMetrics())
+}
+
 func DoGarbageCollection() {
 	debug.SetGCPercent(5)
 	debug.FreeOSMemory()
