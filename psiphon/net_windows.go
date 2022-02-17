@@ -49,11 +49,11 @@ func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, erro
 			var controlErr error
 			err := c.Control(func(fd uintptr) {
 
-				if listenIP != "0.0.0.0" {
+				if listenIP != "0.0.0.0" && listenIP != "::" {
 					return
 				}
 
-				// When binding to the wildcard IP address, 0.0.0.0, set
+				// When binding to a wildcard IP address, 0.0.0.0 or ::, set
 				// SO_EXCLUSIVEADDRUSE since Windows, in this case, otherwise
 				// allows other programs to bind to a specific IP address
 				// (e.g., 127.0.0.1) with the same port number and we'll
