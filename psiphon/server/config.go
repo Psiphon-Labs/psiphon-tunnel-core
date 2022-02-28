@@ -252,6 +252,12 @@ type Config struct {
 	// default is MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT.
 	MeekExtendedTurnAroundTimeoutMilliseconds *int
 
+	// MeekSkipExtendedTurnAroundThresholdBytes specifies when to skip the
+	// extended turn around. When the number of bytes received in the client
+	// request meets the threshold, optimize for upstream flows with quicker
+	// round trip turn arounds.
+	MeekSkipExtendedTurnAroundThresholdBytes *int
+
 	// MeekMaxSessionStalenessMilliseconds specifies the TTL for meek sessions.
 	// The default is MEEK_DEFAULT_MAX_SESSION_STALENESS.
 	MeekMaxSessionStalenessMilliseconds *int
