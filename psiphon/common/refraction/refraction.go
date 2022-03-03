@@ -73,6 +73,9 @@ type Listener struct {
 // RemoteAddr _must_ be called non-concurrently before calling Read on
 // accepted conns as the HAProxy proxy protocol header reading logic sets
 // SetReadDeadline and performs a Read.
+//
+// Psiphon server hosts should be configured to accept tunnel connections only
+// from Refraction Networking stations.
 func Listen(address string) (net.Listener, error) {
 
 	tcpListener, err := net.Listen("tcp", address)
