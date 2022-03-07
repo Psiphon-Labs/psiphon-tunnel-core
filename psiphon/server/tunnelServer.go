@@ -161,11 +161,12 @@ func (server *TunnelServer) Run() error {
 
 		} else if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
 
+			logTunnelProtocol := tunnelProtocol
 			listener, err = quic.Listen(
 				CommonLogger(log),
 				func(clientAddress string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
-						support, tunnelProtocol, listenPort, clientAddress,
+						support, logTunnelProtocol, listenPort, clientAddress,
 						errors.Trace(err), LogFields(logFields))
 				},
 				localAddress,
