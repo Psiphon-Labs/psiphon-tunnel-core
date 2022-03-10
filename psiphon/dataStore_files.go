@@ -134,6 +134,11 @@ func (db *datastoreDB) close() error {
 	return nil
 }
 
+func (db *datastoreDB) getDataStoreMetrics() string {
+	// TODO: report metrics
+	return ""
+}
+
 func (db *datastoreDB) view(fn func(tx *datastoreTx) error) error {
 	db.lock.RLock()
 	defer db.lock.RUnlock()

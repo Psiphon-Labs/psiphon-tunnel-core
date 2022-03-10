@@ -192,6 +192,18 @@ func CloseDataStore() {
 	activeDatastoreDB = nil
 }
 
+// GetDataStoreMetrics returns a string logging datastore metrics.
+func GetDataStoreMetrics() string {
+	datastoreMutex.RLock()
+	defer datastoreMutex.RUnlock()
+
+	if activeDatastoreDB == nil {
+		return ""
+	}
+
+	return activeDatastoreDB.getDataStoreMetrics()
+}
+
 // datastoreView runs a read-only transaction, making datastore buckets and
 // values available to the supplied function.
 //

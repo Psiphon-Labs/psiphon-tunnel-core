@@ -107,9 +107,11 @@ func IsAddressInUseError(err error) bool {
 			if err.Err == syscall.EADDRINUSE {
 				return true
 			}
-			// Special case for Windows (WSAEADDRINUSE = 10048)
+			// Special case for Windows, WSAEADDRINUSE (10048). In the case
+			// where the socket already bound to the port has set
+			// SO_EXCLUSIVEADDRUSE, the error will instead be WSAEACCES (10013).
 			if errno, ok := err.Err.(syscall.Errno); ok {
-				if int(errno) == 10048 {
+				if int(errno) == 10048 || int(errno) == 10013 {
 					return true
 				}
 			}
@@ -319,6 +321,10 @@ func emitMemoryMetrics() {
 		common.FormatByteCount(memStats.Sys),
 		memStats.Mallocs,
 		common.FormatByteCount(memStats.TotalAlloc))
+}
+
+func emitDatastoreMetrics() {
+	NoticeInfo("Datastore metrics at %s: %s", stacktrace.GetParentFunctionName(), GetDataStoreMetrics())
 }
 
 func DoGarbageCollection() {

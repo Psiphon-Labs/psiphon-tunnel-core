@@ -811,8 +811,9 @@ func MakeDialParameters(
 			}
 		}
 
-		// The underlying TLS will automatically disable SNI for IP address server name
-		// values; we have this explicit check here so we record the correct value for stats.
+		// The underlying TLS implementation will automatically omit SNI for
+		// IP address server name values; we have this explicit check here so
+		// we record the correct value for stats.
 		if net.ParseIP(dialParams.MeekSNIServerName) != nil {
 			dialParams.MeekSNIServerName = ""
 		}
@@ -1188,7 +1189,13 @@ func selectQUICVersion(
 
 	quicVersions := make([]string, 0)
 
-	for _, quicVersion := range protocol.SupportedQUICVersions {
+	// Don't use gQUIC versions when the server entry specifies QUICv1-only.
+	supportedQUICVersions := protocol.SupportedQUICVersions
+	if serverEntry.SupportsOnlyQUICv1() {
+		supportedQUICVersions = protocol.SupportedQUICv1Versions
+	}
+
+	for _, quicVersion := range supportedQUICVersions {
 
 		if len(limitQUICVersions) > 0 &&
 			!common.Contains(limitQUICVersions, quicVersion) {

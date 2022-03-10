@@ -252,6 +252,12 @@ type Config struct {
 	// default is MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT.
 	MeekExtendedTurnAroundTimeoutMilliseconds *int
 
+	// MeekSkipExtendedTurnAroundThresholdBytes specifies when to skip the
+	// extended turn around. When the number of bytes received in the client
+	// request meets the threshold, optimize for upstream flows with quicker
+	// round trip turn arounds.
+	MeekSkipExtendedTurnAroundThresholdBytes *int
+
 	// MeekMaxSessionStalenessMilliseconds specifies the TTL for meek sessions.
 	// The default is MEEK_DEFAULT_MAX_SESSION_STALENESS.
 	MeekMaxSessionStalenessMilliseconds *int
@@ -719,6 +725,7 @@ type GenerateConfigParams struct {
 	Passthrough                 bool
 	LegacyPassthrough           bool
 	LimitQUICVersions           protocol.QUICVersions
+	EnableGQUIC                 bool
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON encoded
@@ -916,6 +923,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		OSLConfigFilename:              params.OSLConfigFilename,
 		TacticsConfigFilename:          params.TacticsConfigFilename,
 		LegacyPassthrough:              params.LegacyPassthrough,
+		EnableGQUIC:                    params.EnableGQUIC,
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
@@ -1011,6 +1019,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	for tunnelProtocol := range params.TunnelProtocolPorts {
 
 		capability := protocol.GetCapability(tunnelProtocol)
+
 		if params.Passthrough && protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) {
 			if !params.LegacyPassthrough {
 				capability += "-PASSTHROUGH-v2"
@@ -1018,6 +1027,11 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 				capability += "-PASSTHROUGH"
 			}
 		}
+
+		if tunnelProtocol == protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH && !params.EnableGQUIC {
+			capability += "v1"
+		}
+
 		capabilities = append(capabilities, capability)
 
 		if params.TacticsRequestPublicKey != "" && params.TacticsRequestObfuscatedKey != "" &&
@@ -1027,19 +1041,19 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		}
 	}
 
-	sshPort := params.TunnelProtocolPorts["SSH"]
-	obfuscatedSSHPort := params.TunnelProtocolPorts["OSSH"]
-	obfuscatedSSHQUICPort := params.TunnelProtocolPorts["QUIC-OSSH"]
+	sshPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_SSH]
+	obfuscatedSSHPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH]
+	obfuscatedSSHQUICPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH]
 
 	// Meek port limitations
 	// - fronted meek protocols are hard-wired in the client to be port 443 or 80.
 	// - only one other meek port may be specified.
-	meekPort := params.TunnelProtocolPorts["UNFRONTED-MEEK-OSSH"]
+	meekPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK]
 	if meekPort == 0 {
-		meekPort = params.TunnelProtocolPorts["UNFRONTED-MEEK-HTTPS-OSSH"]
+		meekPort = params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS]
 	}
 	if meekPort == 0 {
-		meekPort = params.TunnelProtocolPorts["UNFRONTED-MEEK-SESSION-TICKET-OSSH"]
+		meekPort = params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET]
 	}
 
 	// Note: fronting params are a stub; this server entry will exercise

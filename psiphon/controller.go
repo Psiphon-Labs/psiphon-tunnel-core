@@ -1796,6 +1796,11 @@ func (controller *Controller) stopEstablishing() {
 
 	emitMemoryMetrics()
 	DoGarbageCollection()
+
+	// Record datastore metrics after establishment, the phase which generates
+	// the bulk of all datastore transactions: iterating over server entries,
+	// storing new server entries, etc.
+	emitDatastoreMetrics()
 }
 
 // establishCandidateGenerator populates the candidate queue with server entries

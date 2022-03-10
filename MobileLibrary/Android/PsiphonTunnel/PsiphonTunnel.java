@@ -136,6 +136,8 @@ public class PsiphonTunnel {
     private AtomicReference<String> mClientPlatformSuffix;
     private final boolean mShouldRouteThroughTunnelAutomatically;
     private final NetworkMonitor mNetworkMonitor;
+    private AtomicReference<String> mActiveNetworkType;
+    private AtomicReference<String> mActiveNetworkPrimaryDNSServer;
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // psi.Psi and tun2socks implementations each contain global state.
@@ -187,6 +189,8 @@ public class PsiphonTunnel {
         mClientPlatformPrefix = new AtomicReference<String>("");
         mClientPlatformSuffix = new AtomicReference<String>("");
         mShouldRouteThroughTunnelAutomatically = shouldRouteThroughTunnelAutomatically;
+        mActiveNetworkType = new AtomicReference<String>("");
+        mActiveNetworkPrimaryDNSServer = new AtomicReference<String>("");
         mNetworkMonitor = new NetworkMonitor(new NetworkMonitor.NetworkChangeListener() {
             @Override
             public void onChanged() {
@@ -196,7 +200,7 @@ public class PsiphonTunnel {
                     mHostService.onDiagnosticMessage("reconnect error: " + e);
                 }
             }
-        });
+        }, mActiveNetworkType, mActiveNetworkPrimaryDNSServer, mHostService);
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -625,7 +629,7 @@ public class PsiphonTunnel {
 
         @Override
         public String getPrimaryDnsServer() {
-            return PsiphonTunnel.getPrimaryDnsServer(mHostService.getContext(), mHostService);
+            return mPsiphonTunnel.getPrimaryDnsServer(mHostService.getContext(), mHostService);
         }
 
         @Override
@@ -671,10 +675,26 @@ public class PsiphonTunnel {
         return hasConnectivity ? 1 : 0;
     }
 
-    private static String getPrimaryDnsServer(Context context, HostLogger logger) {
+    private String getPrimaryDnsServer(Context context, HostLogger logger) {
+
+        // Use the primary DNS server set by mNetworkMonitor,
+        // mActiveNetworkPrimaryDNSServer, when available. It's the most
+        // reliable mechanism. Otherwise fallback to
+        // getFirstActiveNetworkDnsResolver or DEFAULT_PRIMARY_DNS_SERVER.
+        //
+        // mActiveNetworkPrimaryDNSServer is not available on API < 21
+        // (LOLLIPOP). mActiveNetworkPrimaryDNSServer may also be temporarily
+        // unavailable if the last active network has been lost and no new
+        // one has yet replaced it.
+
+        String primaryDNSServer = mActiveNetworkPrimaryDNSServer.get();
+        if (primaryDNSServer != "") {
+            return primaryDNSServer;
+        }
+
         String dnsResolver = null;
         try {
-            dnsResolver = getFirstActiveNetworkDnsResolver(context);
+            dnsResolver = getFirstActiveNetworkDnsResolver(context, mVpnMode.get());
         } catch (Exception e) {
             logger.onDiagnosticMessage("failed to get active network DNS resolver: " + e.getMessage());
             dnsResolver = DEFAULT_PRIMARY_DNS_SERVER;
@@ -692,6 +712,10 @@ public class PsiphonTunnel {
     }
 
     private static String getNetworkID(Context context) {
+
+        // TODO: getActiveNetworkInfo is deprecated in API 29; once
+        // getActiveNetworkInfo is no longer available, use
+        // mActiveNetworkType which is updated by mNetworkMonitor.
 
         // The network ID contains potential PII. In tunnel-core, the network ID
         // is used only locally in the client and not sent to the server.
@@ -1235,22 +1259,25 @@ public class PsiphonTunnel {
         throw new Exception("no private address available");
     }
 
-    public static String getFirstActiveNetworkDnsResolver(Context context)
+    private static String getFirstActiveNetworkDnsResolver(Context context, boolean isVpnMode)
             throws Exception {
-        Collection<InetAddress> dnsResolvers = getActiveNetworkDnsResolvers(context);
+
+        Collection<InetAddress> dnsResolvers = getActiveNetworkDnsResolvers(context, isVpnMode);
         if (!dnsResolvers.isEmpty()) {
-            // strip the leading slash e.g., "/192.168.1.1"
             String dnsResolver = dnsResolvers.iterator().next().toString();
+            // strip the leading slash e.g., "/192.168.1.1"
             if (dnsResolver.startsWith("/")) {
                 dnsResolver = dnsResolver.substring(1);
             }
             return dnsResolver;
         }
+
         throw new Exception("no active network DNS resolver");
     }
 
-    private static Collection<InetAddress> getActiveNetworkDnsResolvers(Context context)
+    private static Collection<InetAddress> getActiveNetworkDnsResolvers(Context context, boolean isVpnMode)
             throws Exception {
+
         final String errorMessage = "getActiveNetworkDnsResolvers failed";
         ArrayList<InetAddress> dnsAddresses = new ArrayList<InetAddress>();
 
@@ -1259,8 +1286,73 @@ public class PsiphonTunnel {
         if (connectivityManager == null) {
             throw new Exception(errorMessage, new Throwable("couldn't get ConnectivityManager system service"));
         }
+
+        try {
+
+            // Hidden API:
+            //
+            // - Only available in Android 4.0+
+            // - No guarantee will be available beyond 4.2, or on all vendor
+            //   devices
+            // - Field reports indicate this is no longer working on some --
+            //   but not all -- Android 10+ devices
+
+            Class<?> LinkPropertiesClass = Class.forName("android.net.LinkProperties");
+            Method getActiveLinkPropertiesMethod = ConnectivityManager.class.getMethod("getActiveLinkProperties", new Class []{});
+            Object linkProperties = getActiveLinkPropertiesMethod.invoke(connectivityManager);
+            if (linkProperties != null) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+                    Method getDnsesMethod = LinkPropertiesClass.getMethod("getDnses", new Class []{});
+                    Collection<?> dnses = (Collection<?>)getDnsesMethod.invoke(linkProperties);
+                    for (Object dns : dnses) {
+                        dnsAddresses.add((InetAddress)dns);
+                    }
+                } else {
+                    // LinkProperties is public in API 21 (and the DNS function signature has changed)
+                    for (InetAddress dns : ((LinkProperties)linkProperties).getDnsServers()) {
+                        dnsAddresses.add(dns);
+                    }
+                }
+            }
+        } catch (ClassNotFoundException e) {
+        } catch (NoSuchMethodException e) {
+        } catch (IllegalArgumentException e) {
+        } catch (IllegalAccessException e) {
+        } catch (InvocationTargetException e) {
+        } catch (NullPointerException e) {
+        }
+
+        if (!dnsAddresses.isEmpty()) {
+            return dnsAddresses;
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            NetworkRequest networkRequest = new NetworkRequest.Builder().build();
+
+            // This case is attempted only when the hidden API fails:
+            //
+            // - Testing shows the hidden API still works more reliably on
+            //   some Android 11+ devices
+            // - Testing indicates that the NetworkRequest can sometimes
+            //   select the wrong network
+            //   - e.g., mobile instead of WiFi, and return the wrong DNS
+            //     servers
+            //   - there's currently no way to filter for the "currently
+            //     active default data network" returned by, e.g., the
+            //     deprecated getActiveNetworkInfo
+            //   - we cannot add the NET_CAPABILITY_FOREGROUND capability to
+            //     the NetworkRequest at this time due to target SDK
+            //     constraints
+
+            NetworkRequest.Builder networkRequestBuilder = new NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+
+            if (isVpnMode) {
+                // In VPN mode, we want the DNS servers for the underlying physical network.
+                networkRequestBuilder.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
+            }
+
+            NetworkRequest networkRequest = networkRequestBuilder.build();
+
             final CountDownLatch countDownLatch = new CountDownLatch(1);
             try {
                 ConnectivityManager.NetworkCallback networkCallback =
@@ -1281,43 +1373,6 @@ public class PsiphonTunnel {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-            if (!dnsAddresses.isEmpty()) {
-                return dnsAddresses;
-            }
-        }
-        try {
-            // Hidden API
-            // - only available in Android 4.0+
-            // - no guarantee will be available beyond 4.2, or on all vendor devices
-            Class<?> LinkPropertiesClass = Class.forName("android.net.LinkProperties");
-            Method getActiveLinkPropertiesMethod = ConnectivityManager.class.getMethod("getActiveLinkProperties", new Class []{});
-            Object linkProperties = getActiveLinkPropertiesMethod.invoke(connectivityManager);
-            if (linkProperties != null) {
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-                    Method getDnsesMethod = LinkPropertiesClass.getMethod("getDnses", new Class []{});
-                    Collection<?> dnses = (Collection<?>)getDnsesMethod.invoke(linkProperties);
-                    for (Object dns : dnses) {
-                        dnsAddresses.add((InetAddress)dns);
-                    }
-                } else {
-                    // LinkProperties is public in API 21 (and the DNS function signature has changed)
-                    for (InetAddress dns : ((LinkProperties)linkProperties).getDnsServers()) {
-                        dnsAddresses.add(dns);
-                    }
-                }
-            }
-        } catch (ClassNotFoundException e) {
-            throw new Exception(errorMessage, e);
-        } catch (NoSuchMethodException e) {
-            throw new Exception(errorMessage, e);
-        } catch (IllegalArgumentException e) {
-            throw new Exception(errorMessage, e);
-        } catch (IllegalAccessException e) {
-            throw new Exception(errorMessage, e);
-        } catch (InvocationTargetException e) {
-            throw new Exception(errorMessage, e);
-        } catch (NullPointerException e) {
-            throw new Exception(errorMessage, e);
         }
 
         return dnsAddresses;
@@ -1344,9 +1399,20 @@ public class PsiphonTunnel {
     private static class NetworkMonitor {
         private final NetworkChangeListener listener;
         private ConnectivityManager.NetworkCallback networkCallback;
+        private AtomicReference<String> activeNetworkType;
+        private AtomicReference<String> activeNetworkPrimaryDNSServer;
+        private HostLogger logger;
 
-        public NetworkMonitor(NetworkChangeListener listener) {
+        public NetworkMonitor(
+            NetworkChangeListener listener,
+            AtomicReference<String> activeNetworkType,
+            AtomicReference<String> activeNetworkPrimaryDNSServer,
+            HostLogger logger) {
+
             this.listener = listener;
+            this.activeNetworkType = activeNetworkType;
+            this.activeNetworkPrimaryDNSServer = activeNetworkPrimaryDNSServer;
+            this.logger = logger;
         }
 
         private void start(Context context) {
@@ -1360,18 +1426,18 @@ public class PsiphonTunnel {
                 return;
             }
             networkCallback = new ConnectivityManager.NetworkCallback() {
-                boolean isInitialState = true;
+                private boolean isInitialState = true;
                 private Network currentActiveNetwork;
 
                 private void consumeActiveNetwork(Network network) {
                     if (isInitialState) {
                         isInitialState = false;
-                        currentActiveNetwork = network;
+                        setCurrentActiveNetworkAndProperties(network);
                         return;
                     }
 
                     if (!network.equals(currentActiveNetwork)) {
-                        currentActiveNetwork = network;
+                        setCurrentActiveNetworkAndProperties(network);
                         if (listener != null) {
                             listener.onChanged();
                         }
@@ -1380,10 +1446,62 @@ public class PsiphonTunnel {
 
                 private void consumeLostNetwork(Network network) {
                     if (network.equals(currentActiveNetwork)) {
-                        currentActiveNetwork = null;
+                        setCurrentActiveNetworkAndProperties(null);
                         if (listener != null) {
                             listener.onChanged();
                         }
+                    }
+                }
+
+                private void setCurrentActiveNetworkAndProperties(Network network) {
+
+                    currentActiveNetwork = network;
+
+                    if (network == null) {
+
+                        activeNetworkType.set("NONE");
+                        activeNetworkPrimaryDNSServer.set("");
+                        logger.onDiagnosticMessage("NetworkMonitor: clear current active network");
+
+                    } else {
+
+                        String networkType = "UNKNOWN";
+                        try {
+                            // Limitation: a network may have both CELLULAR
+                            // and WIFI transports, or different network
+                            // transport types entirely. This logic currently
+                            // mimics the type determination logic in
+                            // getNetworkID.
+                            NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
+                            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                                networkType = "MOBILE";
+                            } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                                networkType = "WIFI";
+                            }
+                        } catch (java.lang.Exception e) {
+                        }
+                        activeNetworkType.set(networkType);
+
+                        String primaryDNSServer = "";
+                        try {
+                            LinkProperties linkProperties = connectivityManager.getLinkProperties(network);
+                            List<InetAddress> dnsServers = linkProperties.getDnsServers();
+                            if (!dnsServers.isEmpty()) {
+                                primaryDNSServer = dnsServers.iterator().next().toString();
+                                if (primaryDNSServer.startsWith("/")) {
+                                    primaryDNSServer = primaryDNSServer.substring(1);
+                                }
+                            }
+                        } catch (java.lang.Exception e) {
+                        }
+                        activeNetworkPrimaryDNSServer.set(primaryDNSServer);
+
+                        String message = "NetworkMonitor: set current active network " + networkType;
+                        if (primaryDNSServer != "") {
+                            // The DNS server address is potential PII and not logged.
+                            message += " with DNS";
+                        }
+                        logger.onDiagnosticMessage(message);
                     }
                 }
 

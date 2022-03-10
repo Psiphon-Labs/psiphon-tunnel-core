@@ -392,7 +392,15 @@ const (
 )
 
 // The value of SupportedQUICVersions is conditionally compiled based on
-// whether gQUIC is enabled.
+// whether gQUIC is enabled. SupportedQUICv1Versions are the supported QUIC
+// versions that are based on QUICv1.
+
+var SupportedQUICv1Versions = QUICVersions{
+	QUIC_VERSION_V1,
+	QUIC_VERSION_RANDOMIZED_V1,
+	QUIC_VERSION_OBFUSCATED_V1,
+	QUIC_VERSION_DECOY_V1,
+}
 
 var legacyQUICVersions = QUICVersions{
 	"IETF-draft-24",

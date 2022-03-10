@@ -36,7 +36,8 @@ const (
 	DEFAULT_MAX_TCP_PORT_FORWARD_COUNT                        = 512
 	DEFAULT_MAX_UDP_PORT_FORWARD_COUNT                        = 32
 	DEFAULT_MEEK_RATE_LIMITER_GARBAGE_COLLECTOR_TRIGGER_COUNT = 5000
-	DEFAULT_MEEK_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS  = 600
+	DEFAULT_MEEK_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS  = 300
+	DEFAULT_MEEK_RATE_LIMITER_MAX_ENTRIES                     = 1000000
 )
 
 // TrafficRulesSet represents the various traffic rules to
@@ -81,8 +82,10 @@ type TrafficRulesSet struct {
 	// The scope of rate limiting may be
 	// limited using LimitMeekRateLimiterTunnelProtocols/Regions/ISPs/Cities.
 	//
-	// Hot reloading a new history size will result in existing history being
-	// truncated.
+	// Upon hot reload,
+	// MeekRateLimiterHistorySize/MeekRateLimiterThresholdSeconds are not
+	// changed for currently tracked client IPs; new values will apply to
+	// newly tracked client IPs.
 	MeekRateLimiterHistorySize int
 
 	// MeekRateLimiterThresholdSeconds is part of the meek rate limiter
@@ -116,15 +119,24 @@ type TrafficRulesSet struct {
 	// rate limit events after which garbage collection is manually triggered
 	// in order to reclaim memory used by rate limited and other rejected
 	// requests.
-	// A default of 5000 is used when
-	// MeekRateLimiterGarbageCollectionTriggerCount is 0.
+	//
+	// A default of DEFAULT_MEEK_RATE_LIMITER_GARBAGE_COLLECTOR_TRIGGER_COUNT
+	// is used when MeekRateLimiterGarbageCollectionTriggerCount is 0.
 	MeekRateLimiterGarbageCollectionTriggerCount int
 
 	// MeekRateLimiterReapHistoryFrequencySeconds specifies a schedule for
 	// reaping old records from the rate limit history.
-	// A default of 600 is used when
-	// MeekRateLimiterReapHistoryFrequencySeconds is 0.
+	//
+	// A default of DEFAULT_MEEK_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS
+	// is used when MeekRateLimiterReapHistoryFrequencySeconds is 0.
+	//
+	// MeekRateLimiterReapHistoryFrequencySeconds is not applied upon hot
+	// reload.
 	MeekRateLimiterReapHistoryFrequencySeconds int
+
+	// MeekRateLimiterMaxEntries specifies a maximum size for the rate limit
+	// history.
+	MeekRateLimiterMaxEntries int
 }
 
 // TrafficRulesFilter defines a filter to match against client attributes.
@@ -846,7 +858,7 @@ func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
 // configuration values.
 func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
-	int, int, []string, []string, []string, []string, int, int) {
+	int, int, []string, []string, []string, []string, int, int, int) {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -862,6 +874,12 @@ func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
 
 	}
 
+	maxEntries := set.MeekRateLimiterMaxEntries
+	if maxEntries <= 0 {
+		maxEntries = DEFAULT_MEEK_RATE_LIMITER_MAX_ENTRIES
+
+	}
+
 	return set.MeekRateLimiterHistorySize,
 		set.MeekRateLimiterThresholdSeconds,
 		set.MeekRateLimiterTunnelProtocols,
@@ -869,5 +887,6 @@ func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
 		set.MeekRateLimiterISPs,
 		set.MeekRateLimiterCities,
 		GCTriggerCount,
-		reapFrequencySeconds
+		reapFrequencySeconds,
+		maxEntries
 }

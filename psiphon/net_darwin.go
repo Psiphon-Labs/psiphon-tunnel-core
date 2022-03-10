@@ -20,6 +20,8 @@
 package psiphon
 
 import (
+	"net"
+	"strconv"
 	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -36,4 +38,12 @@ func setSocketBPF(_ []bpf.RawInstruction, _ int) error {
 
 func setAdditionalSocketOptions(socketFd int) {
 	syscall.SetsockoptInt(socketFd, syscall.SOL_SOCKET, syscall.SO_NOSIGPIPE, 1)
+}
+
+func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, error) {
+	listener, err := net.Listen("tcp", net.JoinHostPort(listenIP, strconv.Itoa(port)))
+	if err != nil {
+		return nil, IsAddressInUseError(err), errors.Trace(err)
+	}
+	return listener, false, nil
 }

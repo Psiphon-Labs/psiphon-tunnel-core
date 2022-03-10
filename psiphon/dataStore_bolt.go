@@ -24,6 +24,7 @@ package psiphon
 
 import (
 	std_errors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/bolt"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
@@ -40,6 +42,7 @@ const (
 
 type datastoreDB struct {
 	boltDB   *bolt.DB
+	filename string
 	isFailed int32
 }
 
@@ -125,6 +128,14 @@ func tryDatastoreOpenDB(
 		os.Remove(filename)
 	}
 
+	// A typical Psiphon datastore will not have a large, fragmented freelist.
+	// For this reason, we're not setting FreelistType to FreelistMapType or
+	// enabling NoFreelistSync. The latter option has a trade-off of slower
+	// start up time.
+	//
+	// Monitor freelist stats in DataStoreMetrics in diagnostics and consider
+	// setting these options if necessary.
+
 	newDB, err := bolt.Open(filename, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -190,7 +201,10 @@ func tryDatastoreOpenDB(
 		return nil, errors.Trace(err)
 	}
 
-	return &datastoreDB{boltDB: newDB}, nil
+	return &datastoreDB{
+		boltDB:   newDB,
+		filename: filename,
+	}, nil
 }
 
 var errDatastoreFailed = std_errors.New("datastore has failed")
@@ -213,6 +227,22 @@ func (db *datastoreDB) close() error {
 	// transaction panics and the database is in the failed state.
 
 	return db.boltDB.Close()
+}
+
+func (db *datastoreDB) getDataStoreMetrics() string {
+	fileSize := int64(0)
+	fileInfo, err := os.Stat(db.filename)
+	if err == nil {
+		fileSize = fileInfo.Size()
+	}
+	stats := db.boltDB.Stats()
+	return fmt.Sprintf("filesize %s | freepages %d | freealloc %s | txcount %d | writes %d | writetime %s",
+		common.FormatByteCount(uint64(fileSize)),
+		stats.FreePageN,
+		common.FormatByteCount(uint64(stats.FreeAlloc)),
+		stats.TxN,
+		stats.TxStats.Write,
+		stats.TxStats.WriteTime)
 }
 
 func (db *datastoreDB) view(fn func(tx *datastoreTx) error) (reterr error) {
