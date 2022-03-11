@@ -273,6 +273,10 @@ type TrafficRules struct {
 	// client sends an IP address. Domain names are not resolved before checking
 	// AllowSubnets.
 	AllowSubnets []string
+
+	// DisableDiscovery specifies whether to disable server entry discovery,
+	// to manage load on discovery servers.
+	DisableDiscovery *bool
 }
 
 // RateLimits is a clone of common.RateLimits with pointers
@@ -589,6 +593,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		trafficRules.AllowSubnets = make([]string, 0)
 	}
 
+	if trafficRules.DisableDiscovery == nil {
+		trafficRules.DisableDiscovery = new(bool)
+	}
+
 	// TODO: faster lookup?
 	for _, filteredRules := range set.FilteredRules {
 
@@ -793,6 +801,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 		if filteredRules.Rules.AllowSubnets != nil {
 			trafficRules.AllowSubnets = filteredRules.Rules.AllowSubnets
+		}
+
+		if filteredRules.Rules.DisableDiscovery != nil {
+			trafficRules.DisableDiscovery = filteredRules.Rules.DisableDiscovery
 		}
 
 		break
