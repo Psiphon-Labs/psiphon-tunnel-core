@@ -323,18 +323,28 @@ func handshakeAPIRequestHandler(
 
 	// Discover new servers
 
-	host, _, err := net.SplitHostPort(clientAddr)
+	disableDiscovery, err := support.TunnelServer.GetClientDisableDiscovery(sessionID)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	clientIP := net.ParseIP(host)
-	if clientIP == nil {
-		return nil, errors.TraceNew("missing client IP")
-	}
+	var encodedServerList []string
 
-	encodedServerList := db.DiscoverServers(
-		calculateDiscoveryValue(support.Config.DiscoveryValueHMACKey, clientIP))
+	if !disableDiscovery {
+
+		host, _, err := net.SplitHostPort(clientAddr)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		clientIP := net.ParseIP(host)
+		if clientIP == nil {
+			return nil, errors.TraceNew("missing client IP")
+		}
+
+		encodedServerList = db.DiscoverServers(
+			calculateDiscoveryValue(support.Config.DiscoveryValueHMACKey, clientIP))
+	}
 
 	// When the client indicates that it used an unsigned server entry for this
 	// connection, return a signed copy of the server entry for the client to

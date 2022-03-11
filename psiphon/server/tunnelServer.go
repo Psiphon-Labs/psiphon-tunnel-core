@@ -319,6 +319,14 @@ func (server *TunnelServer) GetClientHandshaked(
 	return server.sshServer.getClientHandshaked(sessionID)
 }
 
+// GetClientDisableDiscovery indicates whether discovery is disabled for the
+// client corresponding to sessionID.
+func (server *TunnelServer) GetClientDisableDiscovery(
+	sessionID string) (bool, error) {
+
+	return server.sshServer.getClientDisableDiscovery(sessionID)
+}
+
 // UpdateClientAPIParameters updates the recorded handshake API parameters for
 // the client corresponding to sessionID.
 func (server *TunnelServer) UpdateClientAPIParameters(
@@ -1128,6 +1136,20 @@ func (sshServer *sshServer) getClientHandshaked(
 	completed, exhausted := client.getHandshaked()
 
 	return completed, exhausted, nil
+}
+
+func (sshServer *sshServer) getClientDisableDiscovery(
+	sessionID string) (bool, error) {
+
+	sshServer.clientsMutex.Lock()
+	client := sshServer.clients[sessionID]
+	sshServer.clientsMutex.Unlock()
+
+	if client == nil {
+		return false, errors.TraceNew("unknown session ID")
+	}
+
+	return client.getDisableDiscovery(), nil
 }
 
 func (sshServer *sshServer) updateClientAPIParameters(
@@ -3318,6 +3340,13 @@ func (sshClient *sshClient) getHandshaked() (bool, bool) {
 	}
 
 	return completed, exhausted
+}
+
+func (sshClient *sshClient) getDisableDiscovery() bool {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	return *sshClient.trafficRules.DisableDiscovery
 }
 
 func (sshClient *sshClient) updateAPIParameters(
