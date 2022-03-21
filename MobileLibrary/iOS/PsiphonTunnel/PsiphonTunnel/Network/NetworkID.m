@@ -24,10 +24,10 @@
 
 @implementation NetworkID
 
-+ (NSString *)getNetworkID:(NetworkStatus)networkStatus {
++ (NSString *)getNetworkID:(NetworkReachability)networkReachability {
 
     NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
-    if (networkStatus == ReachableViaWiFi) {
+    if (networkReachability == NetworkReachabilityReachableViaWiFi) {
         [networkID setString:@"WIFI"];
         NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
         for (NSString *networkInterfaceName in networkInterfaceNames) {
@@ -36,7 +36,7 @@
                 [networkID appendFormat:@"-%@", networkInterfaceInfo[@"BSSID"]];
             }
         }
-    } else if (networkStatus == ReachableViaWWAN) {
+    } else if (networkReachability == NetworkReachabilityReachableViaCellular) {
         [networkID setString:@"MOBILE"];
         CTTelephonyNetworkInfo *telephonyNetworkinfo = [[CTTelephonyNetworkInfo alloc] init];
         CTCarrier *cellularProvider = [telephonyNetworkinfo subscriberCellularProvider];

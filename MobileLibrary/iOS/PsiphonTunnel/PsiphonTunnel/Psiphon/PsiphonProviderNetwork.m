@@ -18,25 +18,31 @@
  */
 
 #import "PsiphonProviderNetwork.h"
+#import "DefaultRouteMonitor.h"
 #import "IPv6Synthesizer.h"
-#import "Reachability.h"
-#import "Reachability+HasNetworkConnectivity.h"
 #import "NetworkID.h"
+#import "Reachability.h"
+#import "Reachability+ReachabilityProtocol.h"
+#import "ReachabilityProtocol.h"
 
 @implementation PsiphonProviderNetwork {
-    Reachability *reachability;
+    id<ReachabilityProtocol> reachability;
 }
 
 - (id)init {
     self = [super init];
     if (self) {
-        self->reachability = [Reachability reachabilityForInternetConnection];
+        if (@available(iOS 12.0, *)) {
+            self->reachability = [[DefaultRouteMonitor alloc] init];
+        } else {
+            self->reachability = [Reachability reachabilityForInternetConnection];
+        }
     }
     return self;
 }
 
 - (long)hasNetworkConnectivity {
-    return [self->reachability hasNetworkConnectivity];
+    return [self->reachability reachabilityStatus] != NetworkReachabilityNotReachable;
 }
 
 
@@ -45,7 +51,7 @@
 }
 
 - (NSString *)getNetworkID {
-    return [NetworkID getNetworkID:reachability.currentReachabilityStatus];
+    return [NetworkID getNetworkID:reachability.reachabilityStatus];
 }
 
 @end

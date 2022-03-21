@@ -18,7 +18,7 @@
  */
 
 #import <Foundation/Foundation.h>
-#import "Reachability.h"
+#import "ReachabilityProtocol.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -29,7 +29,7 @@ NS_ASSUME_NONNULL_BEGIN
 ///
 /// See network ID requirements here:
 /// https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
-+ (NSString *)getNetworkID:(NetworkStatus)networkStatus;
++ (NSString *)getNetworkID:(NetworkReachability)networkReachability;
 
 @end
 

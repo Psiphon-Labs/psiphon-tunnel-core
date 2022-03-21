@@ -29,7 +29,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, nullable) nw_path_t path;
 
 /// Default active interface available to the network path.
-@property (nonatomic, nullable) nw_interface_t defaultActiveInterface;
+@property (nonatomic, nullable) NSString* defaultActiveInterfaceName;
 
 @end
 
@@ -38,18 +38,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Returns list of active interfaces excluding the loopback interface which support communicating with IPv4, or IPv6, addresses.
 + (NSSet<NSString*>*_Nullable)activeInterfaces;
-
-/// Returns the currrent network path state and default active interface. The default active interface is found by mapping the active
-/// interface type used by the current network path to the first interface available to that path which is of the same type (e.g. WiFi, Cellular,
-/// etc.). This allows for the possibility of returning a non-default active interface in the scenario where there are other active interfaces
-/// which share the same type as the default active interface. This design limitation is present because querying the routing table is not
-/// supported on iOS; therefore we cannot query the routing table for the interface associated with the default route. Fortunately the
-/// selected interface should always be capable of routing traffic to the internet, even if a non-default active interface is chosen.
-/// @param activeInterfaces If non-nil, then only interfaces available to the current network path which are present in this list will
-/// be considered when searching for the default active interface. If nil, then all interfaces available to the current network path will be
-/// searched.
-/// @return The current network path state. See NetworkPathState for further details.
-+ (NetworkPathState*)networkPathState:(NSSet<NSString*>*_Nullable)activeInterfaces API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0));
 
 @end
 
