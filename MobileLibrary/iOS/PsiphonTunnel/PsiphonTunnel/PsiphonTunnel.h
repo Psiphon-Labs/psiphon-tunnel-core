@@ -227,6 +227,12 @@ WWAN or vice versa or VPN state changed
 - (void)onClientRegion:(NSString * _Nonnull)region;
 
 /*!
+ Called after the handshake with the Psiphon server, with the client address as seen by the server.
+ @param address  The Internet address of the client, IP:port, as seen by the server.
+ */
+- (void)onClientAddress:(NSString * _Nonnull)address;
+
+/*!
  Called to report that split tunnel is on for the given regions.
  @param regions  The regions split tunnel is on for.
  */
