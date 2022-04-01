@@ -675,9 +675,11 @@ func NoticeClientRegion(region string) {
 // NoticeClientAddress is the client's public network address, the IP address
 // and port, as seen by the server and reported to the client in the
 // handshake.
+//
+// Note: "address" should remain private and not included in diagnostics logs.
 func NoticeClientAddress(address string) {
 	singletonNoticeLogger.outputNotice(
-		"ClientAddress", 0,
+		"ClientAddress", noticeSkipRedaction,
 		"address", address)
 }
 

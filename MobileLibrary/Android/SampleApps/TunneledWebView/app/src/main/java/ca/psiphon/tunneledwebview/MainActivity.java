@@ -305,6 +305,11 @@ public class MainActivity extends AppCompatActivity
         logMessage("client region: " + region);
     }
 
+    @Override
+    public void onClientAddress(String address) {
+        logMessage("client address: " + address);
+    }
+
     private static String readInputStreamToString(InputStream inputStream) throws IOException {
         return new String(readInputStreamToBytes(inputStream), "UTF-8");
     }
