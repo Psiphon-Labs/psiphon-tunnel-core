@@ -34,7 +34,6 @@ func TestActivityMonitoredConn(t *testing.T) {
 		&dummyConn{},
 		200*time.Millisecond,
 		true,
-		nil,
 		nil)
 	if err != nil {
 		t.Fatalf("NewActivityMonitoredConn failed")
@@ -106,19 +105,19 @@ func TestActivityMonitoredLRUConns(t *testing.T) {
 	lruConns := NewLRUConns()
 
 	dummy1 := &dummyConn{}
-	conn1, err := NewActivityMonitoredConn(dummy1, 0, true, nil, lruConns.Add(dummy1))
+	conn1, err := NewActivityMonitoredConn(dummy1, 0, true, lruConns.Add(dummy1))
 	if err != nil {
 		t.Fatalf("NewActivityMonitoredConn failed")
 	}
 
 	dummy2 := &dummyConn{}
-	conn2, err := NewActivityMonitoredConn(dummy2, 0, true, nil, lruConns.Add(dummy2))
+	conn2, err := NewActivityMonitoredConn(dummy2, 0, true, lruConns.Add(dummy2))
 	if err != nil {
 		t.Fatalf("NewActivityMonitoredConn failed")
 	}
 
 	dummy3 := &dummyConn{}
-	conn3, err := NewActivityMonitoredConn(dummy3, 0, true, nil, lruConns.Add(dummy3))
+	conn3, err := NewActivityMonitoredConn(dummy3, 0, true, lruConns.Add(dummy3))
 	if err != nil {
 		t.Fatalf("NewActivityMonitoredConn failed")
 	}
