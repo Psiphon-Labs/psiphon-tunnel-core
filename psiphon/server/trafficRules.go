@@ -80,7 +80,7 @@ type TrafficRulesSet struct {
 	// itself may hold open the interrupted connection.
 	//
 	// The scope of rate limiting may be
-	// limited using LimitMeekRateLimiterTunnelProtocols/Regions/ISPs/Cities.
+	// limited using LimitMeekRateLimiterTunnelProtocols/Regions/ISPs/ASNs/Cities.
 	//
 	// Upon hot reload,
 	// MeekRateLimiterHistorySize/MeekRateLimiterThresholdSeconds are not
@@ -100,19 +100,25 @@ type TrafficRulesSet struct {
 	// MeekRateLimiterRegions, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
 	// countries. When omitted or empty, meek rate limiting, if configured,
-	// is applied to all client countries.
+	// is applied to any client country.
 	MeekRateLimiterRegions []string
 
 	// MeekRateLimiterISPs, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
 	// ISPs. When omitted or empty, meek rate limiting, if configured,
-	// is applied to all client ISPs.
+	// is applied to any client ISP.
 	MeekRateLimiterISPs []string
+
+	// MeekRateLimiterASNs, if set, limits application of the meek
+	// late-stage rate limiter to clients in the specified list of GeoIP
+	// ASNs. When omitted or empty, meek rate limiting, if configured,
+	// is applied to any client ASN.
+	MeekRateLimiterASNs []string
 
 	// MeekRateLimiterCities, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
 	// cities. When omitted or empty, meek rate limiting, if configured,
-	// is applied to all client cities.
+	// is applied to any client city.
 	MeekRateLimiterCities []string
 
 	// MeekRateLimiterGarbageCollectionTriggerCount specifies the number of
@@ -156,6 +162,10 @@ type TrafficRulesFilter struct {
 	// match this filter. When omitted or empty, any client ISP matches.
 	ISPs []string
 
+	// ASNs is a list of ASNs that the client must geolocate to in order to
+	// match this filter. When omitted or empty, any client ASN matches.
+	ASNs []string
+
 	// Cities is a list of cities that the client must geolocate to in order to
 	// match this filter. When omitted or empty, any client city matches.
 	Cities []string
@@ -190,6 +200,7 @@ type TrafficRulesFilter struct {
 
 	regionLookup                map[string]bool
 	ispLookup                   map[string]bool
+	asnLookup                   map[string]bool
 	cityLookup                  map[string]bool
 	activeAuthorizationIDLookup map[string]bool
 }
@@ -344,6 +355,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			set.MeekRateLimiterTunnelProtocols = newSet.MeekRateLimiterTunnelProtocols
 			set.MeekRateLimiterRegions = newSet.MeekRateLimiterRegions
 			set.MeekRateLimiterISPs = newSet.MeekRateLimiterISPs
+			set.MeekRateLimiterASNs = newSet.MeekRateLimiterASNs
 			set.MeekRateLimiterCities = newSet.MeekRateLimiterCities
 			set.MeekRateLimiterGarbageCollectionTriggerCount = newSet.MeekRateLimiterGarbageCollectionTriggerCount
 			set.MeekRateLimiterReapHistoryFrequencySeconds = newSet.MeekRateLimiterReapHistoryFrequencySeconds
@@ -465,6 +477,13 @@ func (set *TrafficRulesSet) initLookups() {
 			filter.ispLookup = make(map[string]bool)
 			for _, ISP := range filter.ISPs {
 				filter.ispLookup[ISP] = true
+			}
+		}
+
+		if len(filter.ASNs) >= stringLookupThreshold {
+			filter.asnLookup = make(map[string]bool)
+			for _, ASN := range filter.ASNs {
+				filter.asnLookup[ASN] = true
 			}
 		}
 
@@ -627,6 +646,18 @@ func (set *TrafficRulesSet) GetTrafficRules(
 				}
 			} else {
 				if !common.Contains(filteredRules.Filter.ISPs, geoIPData.ISP) {
+					continue
+				}
+			}
+		}
+
+		if len(filteredRules.Filter.ASNs) > 0 {
+			if filteredRules.Filter.asnLookup != nil {
+				if !filteredRules.Filter.asnLookup[geoIPData.ASN] {
+					continue
+				}
+			} else {
+				if !common.Contains(filteredRules.Filter.ASNs, geoIPData.ASN) {
 					continue
 				}
 			}
@@ -870,7 +901,7 @@ func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
 // configuration values.
 func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
-	int, int, []string, []string, []string, []string, int, int, int) {
+	int, int, []string, []string, []string, []string, []string, int, int, int) {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -897,6 +928,7 @@ func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
 		set.MeekRateLimiterTunnelProtocols,
 		set.MeekRateLimiterRegions,
 		set.MeekRateLimiterISPs,
+		set.MeekRateLimiterASNs,
 		set.MeekRateLimiterCities,
 		GCTriggerCount,
 		reapFrequencySeconds,
