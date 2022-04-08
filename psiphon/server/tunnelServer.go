@@ -1569,8 +1569,19 @@ type destinationBytesMetrics struct {
 func (d *destinationBytesMetrics) UpdateProgress(
 	downstreamBytes, upstreamBytes, _ int64) {
 
+	// Concurrency: UpdateProgress may be called without holding the sshClient
+	// lock; all accesses to bytesUp/bytesDown must use atomic operations.
+
 	atomic.AddInt64(&d.bytesUp, upstreamBytes)
 	atomic.AddInt64(&d.bytesDown, downstreamBytes)
+}
+
+func (d *destinationBytesMetrics) getBytesUp() int64 {
+	return atomic.LoadInt64(&d.bytesUp)
+}
+
+func (d *destinationBytesMetrics) getBytesDown() int64 {
+	return atomic.LoadInt64(&d.bytesDown)
 }
 
 type splitTunnelLookup struct {
@@ -2895,15 +2906,18 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	logFields["random_stream_sent_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.sentDownstreamBytes
 
 	if sshClient.destinationBytesMetricsASN != "" {
+
+		bytesUpTCP := sshClient.tcpDestinationBytesMetrics.getBytesUp()
+		bytesDownTCP := sshClient.tcpDestinationBytesMetrics.getBytesDown()
+		bytesUpUDP := sshClient.udpDestinationBytesMetrics.getBytesUp()
+		bytesDownUDP := sshClient.udpDestinationBytesMetrics.getBytesDown()
+
 		logFields["dest_bytes_asn"] = sshClient.destinationBytesMetricsASN
-		logFields["dest_bytes_up_tcp"] = sshClient.tcpDestinationBytesMetrics.bytesUp
-		logFields["dest_bytes_down_tcp"] = sshClient.tcpDestinationBytesMetrics.bytesDown
-		logFields["dest_bytes_up_udp"] = sshClient.udpDestinationBytesMetrics.bytesUp
-		logFields["dest_bytes_down_udp"] = sshClient.udpDestinationBytesMetrics.bytesDown
-		logFields["dest_bytes"] = sshClient.tcpDestinationBytesMetrics.bytesUp +
-			sshClient.tcpDestinationBytesMetrics.bytesDown +
-			sshClient.udpDestinationBytesMetrics.bytesUp +
-			sshClient.udpDestinationBytesMetrics.bytesDown
+		logFields["dest_bytes_up_tcp"] = bytesUpTCP
+		logFields["dest_bytes_down_tcp"] = bytesDownTCP
+		logFields["dest_bytes_up_udp"] = bytesUpUDP
+		logFields["dest_bytes_down_udp"] = bytesDownUDP
+		logFields["dest_bytes"] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
 	}
 
 	// Only log fields for peakMetrics when there is data recorded, otherwise
