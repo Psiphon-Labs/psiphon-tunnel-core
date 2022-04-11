@@ -994,6 +994,21 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
+    else if ([noticeType isEqualToString:@"ClientAddress"]) {
+        diagnostic = FALSE;
+
+        id address = [notice valueForKeyPath:@"data.address"];
+        if (![address isKindOfClass:[NSString class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ClientAddress notice missing data.address: %@", noticeJSON]];
+            return;
+        }
+
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onClientAddress:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onClientAddress:address];
+            });
+        }
+    }
     else if ([noticeType isEqualToString:@"SplitTunnelRegions"]) {
         id regions = [notice valueForKeyPath:@"data.regions"];
         if (![regions isKindOfClass:[NSArray class]]) {
@@ -1008,6 +1023,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         }
     }
     else if ([noticeType isEqualToString:@"Untunneled"]) {
+        diagnostic = FALSE;
+
         id address = [notice valueForKeyPath:@"data.address"];
         if (![address isKindOfClass:[NSString class]]) {
             [self logMessage:[NSString stringWithFormat: @"Untunneled notice missing data.address: %@", noticeJSON]];

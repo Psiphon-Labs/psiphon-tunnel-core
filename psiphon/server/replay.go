@@ -141,7 +141,7 @@ func (r *ReplayCache) GetReplayTargetDuration(
 
 	if !p.Bool(parameters.ServerReplayUnknownGeoIP) &&
 		geoIPData.Country == GEOIP_UNKNOWN_VALUE &&
-		geoIPData.ISP == GEOIP_UNKNOWN_VALUE {
+		geoIPData.ASN == GEOIP_UNKNOWN_VALUE {
 		// Unless configured otherwise, skip replay for unknown GeoIP, since clients
 		// may not have equivilent network conditions.
 		return false, 0, 0
@@ -369,5 +369,5 @@ func (r *ReplayCache) makeKey(
 	tunnelProtocol string, geoIPData GeoIPData) string {
 	return fmt.Sprintf(
 		"%s-%s-%s",
-		tunnelProtocol, geoIPData.Country, geoIPData.ISP)
+		tunnelProtocol, geoIPData.Country, geoIPData.ASN)
 }

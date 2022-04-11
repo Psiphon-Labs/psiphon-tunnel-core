@@ -348,14 +348,15 @@ type AllowedDomainChecker func(string) bool
 // flow activity. Values passed to UpdateProgress are bytes transferred
 // and flow duration since the previous UpdateProgress.
 type FlowActivityUpdater interface {
-	UpdateProgress(downstreamBytes, upstreamBytes int64, durationNanoseconds int64)
+	UpdateProgress(downstreamBytes, upstreamBytes, durationNanoseconds int64)
 }
 
 // FlowActivityUpdaterMaker is a function which returns a list of
 // appropriate updaters for a new flow to the specified upstream
 // hostname (if known -- may be ""), and IP address.
+// The flow is TCP when isTCP is true, and UDP otherwise.
 type FlowActivityUpdaterMaker func(
-	upstreamHostname string, upstreamIPAddress net.IP) []FlowActivityUpdater
+	isTCP bool, upstreamHostname string, upstreamIPAddress net.IP) []FlowActivityUpdater
 
 // MetricsUpdater is a function which receives a checkpoint summary
 // of application bytes transferred through a packet tunnel.
@@ -1389,20 +1390,25 @@ func (session *session) startTrackingFlow(
 		session.reapFlows()
 	}
 
+	var isTCP bool
 	var hostname string
-	//lint:ignore SA9003 intentionally empty branch
 	if ID.protocol == internetProtocolTCP {
 		// TODO: implement
 		// hostname = common.ExtractHostnameFromTCPFlow(applicationData)
+		isTCP = true
 	}
 
 	var activityUpdaters []FlowActivityUpdater
 
-	flowActivityUpdaterMaker := session.getFlowActivityUpdaterMaker()
-	if flowActivityUpdaterMaker != nil {
-		activityUpdaters = flowActivityUpdaterMaker(
-			hostname,
-			net.IP(ID.upstreamIPAddress[:]))
+	// Don't incur activity monitor overhead for DNS requests
+	if !isDNS {
+		flowActivityUpdaterMaker := session.getFlowActivityUpdaterMaker()
+		if flowActivityUpdaterMaker != nil {
+			activityUpdaters = flowActivityUpdaterMaker(
+				isTCP,
+				hostname,
+				net.IP(ID.upstreamIPAddress[:]))
+		}
 	}
 
 	flowState := &flowState{

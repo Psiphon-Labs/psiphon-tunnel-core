@@ -180,7 +180,7 @@ func NewMeekServer(
 		bufferCount = support.Config.MeekCachedResponsePoolBufferCount
 	}
 
-	_, thresholdSeconds, _, _, _, _, _, reapFrequencySeconds, maxEntries :=
+	_, thresholdSeconds, _, _, _, _, _, _, reapFrequencySeconds, maxEntries :=
 		support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 	rateLimitHistory := lrucache.NewWithLRU(
@@ -848,6 +848,7 @@ func (server *MeekServer) rateLimit(
 		tunnelProtocols,
 		regions,
 		ISPs,
+		ASNs,
 		cities,
 		GCTriggerCount, _, _ :=
 		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
@@ -862,7 +863,7 @@ func (server *MeekServer) rateLimit(
 		}
 	}
 
-	if len(regions) > 0 || len(ISPs) > 0 || len(cities) > 0 {
+	if len(regions) > 0 || len(ISPs) > 0 || len(ASNs) > 0 || len(cities) > 0 {
 
 		if len(regions) > 0 {
 			if !common.Contains(regions, geoIPData.Country) {
@@ -872,6 +873,12 @@ func (server *MeekServer) rateLimit(
 
 		if len(ISPs) > 0 {
 			if !common.Contains(ISPs, geoIPData.ISP) {
+				return false
+			}
+		}
+
+		if len(ASNs) > 0 {
+			if !common.Contains(ASNs, geoIPData.ASN) {
 				return false
 			}
 		}

@@ -521,7 +521,7 @@ func (state *ClientSeedState) sendIssueSLOKsSignal() {
 // design is that progress reported at the exact time of SLOK time period
 // rollover may be dropped.
 func (portForward *ClientSeedPortForward) UpdateProgress(
-	bytesRead, bytesWritten int64, durationNanoseconds int64) {
+	bytesRead, bytesWritten, durationNanoseconds int64) {
 
 	// Concurrency: non-blocking -- access to ClientSeedState is unsynchronized
 	// to read-only fields, atomic, or channels, except in the case of a time

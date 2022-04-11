@@ -269,19 +269,18 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 			// forward if both reads and writes have been idle for the specified
 			// duration.
 
-			// Ensure nil interface if newClientSeedPortForward returns nil
-			var updater common.ActivityUpdater
-			seedUpdater := mux.sshClient.newClientSeedPortForward(dialIP)
-			if seedUpdater != nil {
-				updater = seedUpdater
+			var activityUpdaters []common.ActivityUpdater
+			// Don't incur activity monitor overhead for DNS requests
+			if !message.forwardDNS {
+				activityUpdaters = mux.sshClient.getActivityUpdaters(portForwardTypeUDP, dialIP)
 			}
 
 			conn, err := common.NewActivityMonitoredConn(
 				udpConn,
 				mux.sshClient.idleUDPPortForwardTimeout(),
 				true,
-				updater,
-				lruEntry)
+				lruEntry,
+				activityUpdaters...)
 			if err != nil {
 				lruEntry.Remove()
 				mux.sshClient.closedPortForward(portForwardTypeUDP, 0, 0)

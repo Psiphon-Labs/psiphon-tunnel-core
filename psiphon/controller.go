@@ -733,15 +733,15 @@ func (controller *Controller) connectedReporter() {
 		return
 	}
 
+	select {
+	case <-controller.signalReportConnected:
+		// Make the initial connected request
+	case <-controller.runCtx.Done():
+		return
+	}
+
 loop:
 	for {
-
-		select {
-		case <-controller.signalReportConnected:
-			// Make the initial connected request
-		case <-controller.runCtx.Done():
-			break loop
-		}
 
 		// Pick any active tunnel and make the next connected request. No error is
 		// logged if there's no active tunnel, as that's not an unexpected
