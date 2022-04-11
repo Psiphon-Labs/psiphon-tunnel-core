@@ -20,6 +20,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -336,12 +337,12 @@ func (server *TunnelServer) UpdateClientAPIParameters(
 	return server.sshServer.updateClientAPIParameters(sessionID, apiParams)
 }
 
-// ExpectClientDomainBytes indicates whether the client was configured to report
-// domain bytes in its handshake response.
-func (server *TunnelServer) ExpectClientDomainBytes(
+// AcceptClientDomainBytes indicates whether to accept domain bytes reported
+// by the client.
+func (server *TunnelServer) AcceptClientDomainBytes(
 	sessionID string) (bool, error) {
 
-	return server.sshServer.expectClientDomainBytes(sessionID)
+	return server.sshServer.acceptClientDomainBytes(sessionID)
 }
 
 // SetEstablishTunnels sets whether new tunnels may be established or not.
@@ -1194,7 +1195,7 @@ func (sshServer *sshServer) revokeClientAuthorizations(sessionID string) {
 	client.setTrafficRules()
 }
 
-func (sshServer *sshServer) expectClientDomainBytes(
+func (sshServer *sshServer) acceptClientDomainBytes(
 	sessionID string) (bool, error) {
 
 	sshServer.clientsMutex.Lock()
@@ -1205,7 +1206,7 @@ func (sshServer *sshServer) expectClientDomainBytes(
 		return false, errors.TraceNew("unknown session ID")
 	}
 
-	return client.expectDomainBytes(), nil
+	return client.acceptDomainBytes(), nil
 }
 
 func (sshServer *sshServer) stopClients() {
@@ -1556,7 +1557,7 @@ type handshakeState struct {
 	activeAuthorizationIDs  []string
 	authorizedAccessTypes   []string
 	authorizationsRevoked   bool
-	expectDomainBytes       bool
+	domainBytesChecksum     []byte
 	establishedTunnelsCount int
 	splitTunnelLookup       *splitTunnelLookup
 }
@@ -2055,6 +2056,11 @@ func (sshClient *sshClient) run(
 	replayMetrics["server_replay_fragmentation"] = replayedFragmentation
 	replayMetrics["server_replay_packet_manipulation"] = sshClient.replayedServerPacketManipulation
 	additionalMetrics = append(additionalMetrics, replayMetrics)
+
+	// Limitation: there's only one log per tunnel with bytes transferred
+	// metrics, so the byte count can't be attributed to a certain day for
+	// tunnels that remain connected for well over 24h. In practise, most
+	// tunnels are short-lived, especially on mobile devices.
 
 	sshClient.logTunnel(additionalMetrics)
 
@@ -2907,17 +2913,39 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	if sshClient.destinationBytesMetricsASN != "" {
 
-		bytesUpTCP := sshClient.tcpDestinationBytesMetrics.getBytesUp()
-		bytesDownTCP := sshClient.tcpDestinationBytesMetrics.getBytesDown()
-		bytesUpUDP := sshClient.udpDestinationBytesMetrics.getBytesUp()
-		bytesDownUDP := sshClient.udpDestinationBytesMetrics.getBytesDown()
+		// Check if the configured DestinationBytesMetricsASN has changed
+		// (or been cleared). If so, don't log and discard the accumulated
+		// bytes to ensure we don't continue to record stats as previously
+		// configured.
+		//
+		// Any counts accumulated before the DestinationBytesMetricsASN change
+		// are lost. At this time we can't change
+		// sshClient.destinationBytesMetricsASN dynamically, after a tactics
+		// hot reload, as there may be destination bytes port forwards that
+		// were in place before the change, which will continue to count.
 
-		logFields["dest_bytes_asn"] = sshClient.destinationBytesMetricsASN
-		logFields["dest_bytes_up_tcp"] = bytesUpTCP
-		logFields["dest_bytes_down_tcp"] = bytesDownTCP
-		logFields["dest_bytes_up_udp"] = bytesUpUDP
-		logFields["dest_bytes_down_udp"] = bytesDownUDP
-		logFields["dest_bytes"] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
+		logDestBytes := true
+		if sshClient.sshServer.support.ServerTacticsParametersCache != nil {
+			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+			if err != nil || p.IsNil() ||
+				sshClient.destinationBytesMetricsASN != p.String(parameters.DestinationBytesMetricsASN) {
+				logDestBytes = false
+			}
+		}
+
+		if logDestBytes {
+			bytesUpTCP := sshClient.tcpDestinationBytesMetrics.getBytesUp()
+			bytesDownTCP := sshClient.tcpDestinationBytesMetrics.getBytesDown()
+			bytesUpUDP := sshClient.udpDestinationBytesMetrics.getBytesUp()
+			bytesDownUDP := sshClient.udpDestinationBytesMetrics.getBytesDown()
+
+			logFields["dest_bytes_asn"] = sshClient.destinationBytesMetricsASN
+			logFields["dest_bytes_up_tcp"] = bytesUpTCP
+			logFields["dest_bytes_down_tcp"] = bytesDownTCP
+			logFields["dest_bytes_up_udp"] = bytesUpUDP
+			logFields["dest_bytes_down_udp"] = bytesDownUDP
+			logFields["dest_bytes"] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
+		}
 	}
 
 	// Only log fields for peakMetrics when there is data recorded, otherwise
@@ -3422,11 +3450,34 @@ func (sshClient *sshClient) updateAPIParameters(
 	}
 }
 
-func (sshClient *sshClient) expectDomainBytes() bool {
+func (sshClient *sshClient) acceptDomainBytes() bool {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	return sshClient.handshakeState.expectDomainBytes
+	// When the domain bytes checksum differs from the checksum sent to the
+	// client in the handshake response, the psinet regex configuration has
+	// changed. In this case, drop the stats so we don't continue to record
+	// stats as previously configured.
+	//
+	// Limitations:
+	// - The checksum comparison may result in dropping some stats for a
+	//   domain that remains in the new configuration.
+	// - We don't push new regexs to the clients, so clients that remain
+	//   connected will continue to send stats that will be dropped; and
+	//   those clients will not send stats as newly configured until after
+	//   reconnecting.
+	// - Due to the design of
+	//   transferstats.ReportRecentBytesTransferredForServer in the client,
+	//   the client may accumulate stats, reconnect before its next status
+	//   request, get a new regex configuration, and then send the previously
+	//   accumulated stats in its next status request. The checksum scheme
+	//   won't prevent the reporting of those stats.
+
+	sponsorID, _ := getStringRequestParam(sshClient.handshakeState.apiParams, "sponsor_id")
+
+	domainBytesChecksum := sshClient.sshServer.support.PsinetDatabase.GetDomainBytesChecksum(sponsorID)
+
+	return bytes.Equal(sshClient.handshakeState.domainBytesChecksum, domainBytesChecksum)
 }
 
 // setOSLConfig resets the client's OSL seed state based on the latest OSL config
