@@ -163,7 +163,7 @@ func (c *ServerTacticsParametersCache) Get(
 	//
 	// 1. The scope of the GeoIP data cache key is limited to the fields --
 	// Country/ISP/ASN/City -- that are present in tactics filters. E.g., if only
-	// Country appears in filters, then the key will omit IS, ASN, and City.
+	// Country appears in filters, then the key will omit ISP, ASN, and City.
 	//
 	// 2. Two maps are maintained: GeoIP-key -> tactics-tag; and tactics-tag ->
 	// parameters. For N keys with the same filtered parameters, the mapped value
