@@ -245,7 +245,7 @@ func handshakeAPIRequestHandler(
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
 
-	httpsRequestRegexes := db.GetHttpsRequestRegexes(sponsorID)
+	httpsRequestRegexes, domainBytesChecksum := db.GetHttpsRequestRegexes(sponsorID)
 
 	// Flag the SSH client as having completed its handshake. This
 	// may reselect traffic rules and starts allowing port forwards.
@@ -259,7 +259,7 @@ func handshakeAPIRequestHandler(
 			completed:               true,
 			apiProtocol:             apiProtocol,
 			apiParams:               copyBaseSessionAndDialParams(params),
-			expectDomainBytes:       len(httpsRequestRegexes) > 0,
+			domainBytesChecksum:     domainBytesChecksum,
 			establishedTunnelsCount: establishedTunnelsCount,
 			splitTunnelLookup:       splitTunnelLookup,
 		},
@@ -323,18 +323,28 @@ func handshakeAPIRequestHandler(
 
 	// Discover new servers
 
-	host, _, err := net.SplitHostPort(clientAddr)
+	disableDiscovery, err := support.TunnelServer.GetClientDisableDiscovery(sessionID)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	clientIP := net.ParseIP(host)
-	if clientIP == nil {
-		return nil, errors.TraceNew("missing client IP")
-	}
+	var encodedServerList []string
 
-	encodedServerList := db.DiscoverServers(
-		calculateDiscoveryValue(support.Config.DiscoveryValueHMACKey, clientIP))
+	if !disableDiscovery {
+
+		host, _, err := net.SplitHostPort(clientAddr)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		clientIP := net.ParseIP(host)
+		if clientIP == nil {
+			return nil, errors.TraceNew("missing client IP")
+		}
+
+		encodedServerList = db.DiscoverServers(
+			calculateDiscoveryValue(support.Config.DiscoveryValueHMACKey, clientIP))
+	}
 
 	// When the client indicates that it used an unsigned server entry for this
 	// connection, return a signed copy of the server entry for the client to
@@ -586,12 +596,13 @@ func statusAPIRequestHandler(
 	// Clients are expected to send host_bytes/domain_bytes stats only when
 	// configured to do so in the handshake reponse. Legacy clients may still
 	// report "(OTHER)" host_bytes when no regexes are set. Drop those stats.
-	domainBytesExpected, err := support.TunnelServer.ExpectClientDomainBytes(sessionID)
+
+	acceptDomainBytes, err := support.TunnelServer.AcceptClientDomainBytes(sessionID)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	if domainBytesExpected && statusData["host_bytes"] != nil {
+	if acceptDomainBytes && statusData["host_bytes"] != nil {
 
 		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
 		if err != nil {

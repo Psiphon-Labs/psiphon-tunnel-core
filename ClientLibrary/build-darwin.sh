@@ -9,9 +9,9 @@ if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 # Note:
 #   clangwrap.sh needs to be updated when the Go version changes.
 #   The last version was:
-#   https://github.com/golang/go/blob/go1.17.5/misc/ios/clangwrap.sh
+#   https://github.com/golang/go/blob/go1.17.8/misc/ios/clangwrap.sh
 #     - with a patch to lower -mios-version-min to 7.0
-GO_VERSION_REQUIRED="1.17.5"
+GO_VERSION_REQUIRED="1.17.8"
 
 # At this time, we don't support modules
 export GO111MODULE=off

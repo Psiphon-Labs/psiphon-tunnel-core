@@ -20,6 +20,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -161,11 +162,12 @@ func (server *TunnelServer) Run() error {
 
 		} else if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
 
+			logTunnelProtocol := tunnelProtocol
 			listener, err = quic.Listen(
 				CommonLogger(log),
 				func(clientAddress string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
-						support, tunnelProtocol, listenPort, clientAddress,
+						support, logTunnelProtocol, listenPort, clientAddress,
 						errors.Trace(err), LogFields(logFields))
 				},
 				localAddress,
@@ -318,6 +320,14 @@ func (server *TunnelServer) GetClientHandshaked(
 	return server.sshServer.getClientHandshaked(sessionID)
 }
 
+// GetClientDisableDiscovery indicates whether discovery is disabled for the
+// client corresponding to sessionID.
+func (server *TunnelServer) GetClientDisableDiscovery(
+	sessionID string) (bool, error) {
+
+	return server.sshServer.getClientDisableDiscovery(sessionID)
+}
+
 // UpdateClientAPIParameters updates the recorded handshake API parameters for
 // the client corresponding to sessionID.
 func (server *TunnelServer) UpdateClientAPIParameters(
@@ -327,12 +337,12 @@ func (server *TunnelServer) UpdateClientAPIParameters(
 	return server.sshServer.updateClientAPIParameters(sessionID, apiParams)
 }
 
-// ExpectClientDomainBytes indicates whether the client was configured to report
-// domain bytes in its handshake response.
-func (server *TunnelServer) ExpectClientDomainBytes(
+// AcceptClientDomainBytes indicates whether to accept domain bytes reported
+// by the client.
+func (server *TunnelServer) AcceptClientDomainBytes(
 	sessionID string) (bool, error) {
 
-	return server.sshServer.expectClientDomainBytes(sessionID)
+	return server.sshServer.acceptClientDomainBytes(sessionID)
 }
 
 // SetEstablishTunnels sets whether new tunnels may be established or not.
@@ -1129,6 +1139,20 @@ func (sshServer *sshServer) getClientHandshaked(
 	return completed, exhausted, nil
 }
 
+func (sshServer *sshServer) getClientDisableDiscovery(
+	sessionID string) (bool, error) {
+
+	sshServer.clientsMutex.Lock()
+	client := sshServer.clients[sessionID]
+	sshServer.clientsMutex.Unlock()
+
+	if client == nil {
+		return false, errors.TraceNew("unknown session ID")
+	}
+
+	return client.getDisableDiscovery(), nil
+}
+
 func (sshServer *sshServer) updateClientAPIParameters(
 	sessionID string,
 	apiParams common.APIParameters) error {
@@ -1171,7 +1195,7 @@ func (sshServer *sshServer) revokeClientAuthorizations(sessionID string) {
 	client.setTrafficRules()
 }
 
-func (sshServer *sshServer) expectClientDomainBytes(
+func (sshServer *sshServer) acceptClientDomainBytes(
 	sessionID string) (bool, error) {
 
 	sshServer.clientsMutex.Lock()
@@ -1182,7 +1206,7 @@ func (sshServer *sshServer) expectClientDomainBytes(
 		return false, errors.TraceNew("unknown session ID")
 	}
 
-	return client.expectDomainBytes(), nil
+	return client.acceptDomainBytes(), nil
 }
 
 func (sshServer *sshServer) stopClients() {
@@ -1412,6 +1436,9 @@ type sshClient struct {
 	sendAlertRequests                    chan protocol.AlertRequest
 	sentAlertRequests                    map[string]bool
 	peakMetrics                          peakMetrics
+	destinationBytesMetricsASN           string
+	tcpDestinationBytesMetrics           destinationBytesMetrics
+	udpDestinationBytesMetrics           destinationBytesMetrics
 }
 
 type trafficState struct {
@@ -1530,9 +1557,32 @@ type handshakeState struct {
 	activeAuthorizationIDs  []string
 	authorizedAccessTypes   []string
 	authorizationsRevoked   bool
-	expectDomainBytes       bool
+	domainBytesChecksum     []byte
 	establishedTunnelsCount int
 	splitTunnelLookup       *splitTunnelLookup
+}
+
+type destinationBytesMetrics struct {
+	bytesUp   int64
+	bytesDown int64
+}
+
+func (d *destinationBytesMetrics) UpdateProgress(
+	downstreamBytes, upstreamBytes, _ int64) {
+
+	// Concurrency: UpdateProgress may be called without holding the sshClient
+	// lock; all accesses to bytesUp/bytesDown must use atomic operations.
+
+	atomic.AddInt64(&d.bytesUp, upstreamBytes)
+	atomic.AddInt64(&d.bytesDown, downstreamBytes)
+}
+
+func (d *destinationBytesMetrics) getBytesUp() int64 {
+	return atomic.LoadInt64(&d.bytesUp)
+}
+
+func (d *destinationBytesMetrics) getBytesDown() int64 {
+	return atomic.LoadInt64(&d.bytesDown)
 }
 
 type splitTunnelLookup struct {
@@ -1662,7 +1712,6 @@ func (sshClient *sshClient) run(
 		conn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
-		nil,
 		nil)
 	if err != nil {
 		conn.Close()
@@ -2007,6 +2056,11 @@ func (sshClient *sshClient) run(
 	replayMetrics["server_replay_fragmentation"] = replayedFragmentation
 	replayMetrics["server_replay_packet_manipulation"] = sshClient.replayedServerPacketManipulation
 	additionalMetrics = append(additionalMetrics, replayMetrics)
+
+	// Limitation: there's only one log per tunnel with bytes transferred
+	// metrics, so the byte count can't be attributed to a certain day for
+	// tunnels that remain connected for well over 24h. In practise, most
+	// tunnels are short-lived, especially on mobile devices.
 
 	sshClient.logTunnel(additionalMetrics)
 
@@ -2626,14 +2680,21 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 	}
 
 	flowActivityUpdaterMaker := func(
-		upstreamHostname string, upstreamIPAddress net.IP) []tun.FlowActivityUpdater {
+		isTCP bool, upstreamHostname string, upstreamIPAddress net.IP) []tun.FlowActivityUpdater {
 
-		var updaters []tun.FlowActivityUpdater
-		oslUpdater := sshClient.newClientSeedPortForward(upstreamIPAddress)
-		if oslUpdater != nil {
-			updaters = append(updaters, oslUpdater)
+		trafficType := portForwardTypeTCP
+		if !isTCP {
+			trafficType = portForwardTypeUDP
 		}
-		return updaters
+
+		activityUpdaters := sshClient.getActivityUpdaters(trafficType, upstreamIPAddress)
+
+		flowUpdaters := make([]tun.FlowActivityUpdater, len(activityUpdaters))
+		for i, activityUpdater := range activityUpdaters {
+			flowUpdaters[i] = activityUpdater
+		}
+
+		return flowUpdaters
 	}
 
 	metricUpdater := func(
@@ -2849,6 +2910,43 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	logFields["random_stream_received_upstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.receivedUpstreamBytes
 	logFields["random_stream_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.downstreamBytes
 	logFields["random_stream_sent_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.sentDownstreamBytes
+
+	if sshClient.destinationBytesMetricsASN != "" {
+
+		// Check if the configured DestinationBytesMetricsASN has changed
+		// (or been cleared). If so, don't log and discard the accumulated
+		// bytes to ensure we don't continue to record stats as previously
+		// configured.
+		//
+		// Any counts accumulated before the DestinationBytesMetricsASN change
+		// are lost. At this time we can't change
+		// sshClient.destinationBytesMetricsASN dynamically, after a tactics
+		// hot reload, as there may be destination bytes port forwards that
+		// were in place before the change, which will continue to count.
+
+		logDestBytes := true
+		if sshClient.sshServer.support.ServerTacticsParametersCache != nil {
+			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+			if err != nil || p.IsNil() ||
+				sshClient.destinationBytesMetricsASN != p.String(parameters.DestinationBytesMetricsASN) {
+				logDestBytes = false
+			}
+		}
+
+		if logDestBytes {
+			bytesUpTCP := sshClient.tcpDestinationBytesMetrics.getBytesUp()
+			bytesDownTCP := sshClient.tcpDestinationBytesMetrics.getBytesDown()
+			bytesUpUDP := sshClient.udpDestinationBytesMetrics.getBytesUp()
+			bytesDownUDP := sshClient.udpDestinationBytesMetrics.getBytesDown()
+
+			logFields["dest_bytes_asn"] = sshClient.destinationBytesMetricsASN
+			logFields["dest_bytes_up_tcp"] = bytesUpTCP
+			logFields["dest_bytes_down_tcp"] = bytesDownTCP
+			logFields["dest_bytes_up_udp"] = bytesUpUDP
+			logFields["dest_bytes_down_udp"] = bytesDownUDP
+			logFields["dest_bytes"] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
+		}
+	}
 
 	// Only log fields for peakMetrics when there is data recorded, otherwise
 	// omit the field.
@@ -3277,6 +3375,16 @@ func (sshClient *sshClient) setHandshakeState(
 
 	sshClient.setOSLConfig()
 
+	// Set destination bytes metrics.
+	//
+	// Limitation: this is a one-time operation and doesn't get reset when
+	// tactics are hot-reloaded. This allows us to simply retain any
+	// destination byte counts accumulated and eventually log in
+	// server_tunnel, without having to deal with a destination change
+	// mid-tunnel. As typical tunnels are short, and destination changes can
+	// be applied gradually, handling mid-tunnel changes is not a priority.
+	sshClient.setDestinationBytesMetrics()
+
 	return &handshakeStateInfo{
 		activeAuthorizationIDs:   authorizationIDs,
 		authorizedAccessTypes:    authorizedAccessTypes,
@@ -3319,6 +3427,13 @@ func (sshClient *sshClient) getHandshaked() (bool, bool) {
 	return completed, exhausted
 }
 
+func (sshClient *sshClient) getDisableDiscovery() bool {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	return *sshClient.trafficRules.DisableDiscovery
+}
+
 func (sshClient *sshClient) updateAPIParameters(
 	apiParams common.APIParameters) {
 
@@ -3335,38 +3450,34 @@ func (sshClient *sshClient) updateAPIParameters(
 	}
 }
 
-func (sshClient *sshClient) expectDomainBytes() bool {
+func (sshClient *sshClient) acceptDomainBytes() bool {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
-	return sshClient.handshakeState.expectDomainBytes
-}
+	// When the domain bytes checksum differs from the checksum sent to the
+	// client in the handshake response, the psinet regex configuration has
+	// changed. In this case, drop the stats so we don't continue to record
+	// stats as previously configured.
+	//
+	// Limitations:
+	// - The checksum comparison may result in dropping some stats for a
+	//   domain that remains in the new configuration.
+	// - We don't push new regexs to the clients, so clients that remain
+	//   connected will continue to send stats that will be dropped; and
+	//   those clients will not send stats as newly configured until after
+	//   reconnecting.
+	// - Due to the design of
+	//   transferstats.ReportRecentBytesTransferredForServer in the client,
+	//   the client may accumulate stats, reconnect before its next status
+	//   request, get a new regex configuration, and then send the previously
+	//   accumulated stats in its next status request. The checksum scheme
+	//   won't prevent the reporting of those stats.
 
-// setTrafficRules resets the client's traffic rules based on the latest server config
-// and client properties. As sshClient.trafficRules may be reset by a concurrent
-// goroutine, trafficRules must only be accessed within the sshClient mutex.
-func (sshClient *sshClient) setTrafficRules() (int64, int64) {
-	sshClient.Lock()
-	defer sshClient.Unlock()
+	sponsorID, _ := getStringRequestParam(sshClient.handshakeState.apiParams, "sponsor_id")
 
-	isFirstTunnelInSession := sshClient.isFirstTunnelInSession &&
-		sshClient.handshakeState.establishedTunnelsCount == 0
+	domainBytesChecksum := sshClient.sshServer.support.PsinetDatabase.GetDomainBytesChecksum(sponsorID)
 
-	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
-		isFirstTunnelInSession,
-		sshClient.tunnelProtocol,
-		sshClient.geoIPData,
-		sshClient.handshakeState)
-
-	if sshClient.throttledConn != nil {
-		// Any existing throttling state is reset.
-		sshClient.throttledConn.SetLimits(
-			sshClient.trafficRules.RateLimits.CommonRateLimits(
-				sshClient.handshakeState.completed))
-	}
-
-	return *sshClient.trafficRules.RateLimits.ReadBytesPerSecond,
-		*sshClient.trafficRules.RateLimits.WriteBytesPerSecond
+	return bytes.Equal(sshClient.handshakeState.domainBytesChecksum, domainBytesChecksum)
 }
 
 // setOSLConfig resets the client's OSL seed state based on the latest OSL config
@@ -3419,7 +3530,7 @@ func (sshClient *sshClient) setOSLConfig() {
 
 // newClientSeedPortForward will return nil when no seeding is
 // associated with the specified ipAddress.
-func (sshClient *sshClient) newClientSeedPortForward(ipAddress net.IP) *osl.ClientSeedPortForward {
+func (sshClient *sshClient) newClientSeedPortForward(IPAddress net.IP) *osl.ClientSeedPortForward {
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
@@ -3428,7 +3539,7 @@ func (sshClient *sshClient) newClientSeedPortForward(ipAddress net.IP) *osl.Clie
 		return nil
 	}
 
-	return sshClient.oslClientSeedState.NewClientSeedPortForward(ipAddress)
+	return sshClient.oslClientSeedState.NewClientSeedPortForward(IPAddress)
 }
 
 // getOSLSeedPayload returns a payload containing all seeded SLOKs for
@@ -3450,6 +3561,94 @@ func (sshClient *sshClient) clearOSLSeedPayload() {
 	defer sshClient.Unlock()
 
 	sshClient.oslClientSeedState.ClearSeedPayload()
+}
+
+func (sshClient *sshClient) setDestinationBytesMetrics() {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	// Limitation: the server-side tactics cache is used to avoid the overhead
+	// of an additional tactics filtering per tunnel. As this cache is
+	// designed for GeoIP filtering only, handshake API parameters are not
+	// applied to tactics filtering in this case.
+
+	tacticsCache := sshClient.sshServer.support.ServerTacticsParametersCache
+	if tacticsCache == nil {
+		return
+	}
+
+	p, err := tacticsCache.Get(sshClient.geoIPData)
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": err}).Warning("get tactics failed")
+		return
+	}
+	if p.IsNil() {
+		return
+	}
+
+	sshClient.destinationBytesMetricsASN = p.String(parameters.DestinationBytesMetricsASN)
+}
+
+func (sshClient *sshClient) newDestinationBytesMetricsUpdater(portForwardType int, IPAddress net.IP) *destinationBytesMetrics {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	if sshClient.destinationBytesMetricsASN == "" {
+		return nil
+	}
+
+	if sshClient.sshServer.support.GeoIPService.LookupISPForIP(IPAddress).ASN != sshClient.destinationBytesMetricsASN {
+		return nil
+	}
+
+	if portForwardType == portForwardTypeTCP {
+		return &sshClient.tcpDestinationBytesMetrics
+	}
+
+	return &sshClient.udpDestinationBytesMetrics
+}
+
+func (sshClient *sshClient) getActivityUpdaters(portForwardType int, IPAddress net.IP) []common.ActivityUpdater {
+	var updaters []common.ActivityUpdater
+
+	clientSeedPortForward := sshClient.newClientSeedPortForward(IPAddress)
+	if clientSeedPortForward != nil {
+		updaters = append(updaters, clientSeedPortForward)
+	}
+
+	destinationBytesMetrics := sshClient.newDestinationBytesMetricsUpdater(portForwardType, IPAddress)
+	if destinationBytesMetrics != nil {
+		updaters = append(updaters, destinationBytesMetrics)
+	}
+
+	return updaters
+}
+
+// setTrafficRules resets the client's traffic rules based on the latest server config
+// and client properties. As sshClient.trafficRules may be reset by a concurrent
+// goroutine, trafficRules must only be accessed within the sshClient mutex.
+func (sshClient *sshClient) setTrafficRules() (int64, int64) {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	isFirstTunnelInSession := sshClient.isFirstTunnelInSession &&
+		sshClient.handshakeState.establishedTunnelsCount == 0
+
+	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
+		isFirstTunnelInSession,
+		sshClient.tunnelProtocol,
+		sshClient.geoIPData,
+		sshClient.handshakeState)
+
+	if sshClient.throttledConn != nil {
+		// Any existing throttling state is reset.
+		sshClient.throttledConn.SetLimits(
+			sshClient.trafficRules.RateLimits.CommonRateLimits(
+				sshClient.handshakeState.completed))
+	}
+
+	return *sshClient.trafficRules.RateLimits.ReadBytesPerSecond,
+		*sshClient.trafficRules.RateLimits.WriteBytesPerSecond
 }
 
 func (sshClient *sshClient) rateLimits() common.RateLimits {
@@ -4135,19 +4334,12 @@ func (sshClient *sshClient) handleTCPChannel(
 	// forward if both reads and writes have been idle for the specified
 	// duration.
 
-	// Ensure nil interface if newClientSeedPortForward returns nil
-	var updater common.ActivityUpdater
-	seedUpdater := sshClient.newClientSeedPortForward(IP)
-	if seedUpdater != nil {
-		updater = seedUpdater
-	}
-
 	fwdConn, err = common.NewActivityMonitoredConn(
 		fwdConn,
 		sshClient.idleTCPPortForwardTimeout(),
 		true,
-		updater,
-		lruEntry)
+		lruEntry,
+		sshClient.getActivityUpdaters(portForwardTypeTCP, IP)...)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 		return

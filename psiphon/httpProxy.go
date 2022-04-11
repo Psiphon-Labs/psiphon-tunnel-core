@@ -100,10 +100,10 @@ func NewHttpProxy(
 	tunneler Tunneler,
 	listenIP string) (proxy *HttpProxy, err error) {
 
-	listener, err := net.Listen(
-		"tcp", net.JoinHostPort(listenIP, strconv.Itoa(config.LocalHttpProxyPort)))
+	listener, portInUse, err := makeLocalProxyListener(
+		listenIP, config.LocalHttpProxyPort)
 	if err != nil {
-		if IsAddressInUseError(err) {
+		if portInUse {
 			NoticeHttpProxyPortInUse(config.LocalHttpProxyPort)
 		}
 		return nil, errors.Trace(err)

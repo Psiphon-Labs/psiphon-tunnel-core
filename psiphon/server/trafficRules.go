@@ -36,7 +36,8 @@ const (
 	DEFAULT_MAX_TCP_PORT_FORWARD_COUNT                        = 512
 	DEFAULT_MAX_UDP_PORT_FORWARD_COUNT                        = 32
 	DEFAULT_MEEK_RATE_LIMITER_GARBAGE_COLLECTOR_TRIGGER_COUNT = 5000
-	DEFAULT_MEEK_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS  = 600
+	DEFAULT_MEEK_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS  = 300
+	DEFAULT_MEEK_RATE_LIMITER_MAX_ENTRIES                     = 1000000
 )
 
 // TrafficRulesSet represents the various traffic rules to
@@ -79,10 +80,12 @@ type TrafficRulesSet struct {
 	// itself may hold open the interrupted connection.
 	//
 	// The scope of rate limiting may be
-	// limited using LimitMeekRateLimiterTunnelProtocols/Regions/ISPs/Cities.
+	// limited using LimitMeekRateLimiterTunnelProtocols/Regions/ISPs/ASNs/Cities.
 	//
-	// Hot reloading a new history size will result in existing history being
-	// truncated.
+	// Upon hot reload,
+	// MeekRateLimiterHistorySize/MeekRateLimiterThresholdSeconds are not
+	// changed for currently tracked client IPs; new values will apply to
+	// newly tracked client IPs.
 	MeekRateLimiterHistorySize int
 
 	// MeekRateLimiterThresholdSeconds is part of the meek rate limiter
@@ -97,34 +100,49 @@ type TrafficRulesSet struct {
 	// MeekRateLimiterRegions, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
 	// countries. When omitted or empty, meek rate limiting, if configured,
-	// is applied to all client countries.
+	// is applied to any client country.
 	MeekRateLimiterRegions []string
 
 	// MeekRateLimiterISPs, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
 	// ISPs. When omitted or empty, meek rate limiting, if configured,
-	// is applied to all client ISPs.
+	// is applied to any client ISP.
 	MeekRateLimiterISPs []string
+
+	// MeekRateLimiterASNs, if set, limits application of the meek
+	// late-stage rate limiter to clients in the specified list of GeoIP
+	// ASNs. When omitted or empty, meek rate limiting, if configured,
+	// is applied to any client ASN.
+	MeekRateLimiterASNs []string
 
 	// MeekRateLimiterCities, if set, limits application of the meek
 	// late-stage rate limiter to clients in the specified list of GeoIP
 	// cities. When omitted or empty, meek rate limiting, if configured,
-	// is applied to all client cities.
+	// is applied to any client city.
 	MeekRateLimiterCities []string
 
 	// MeekRateLimiterGarbageCollectionTriggerCount specifies the number of
 	// rate limit events after which garbage collection is manually triggered
 	// in order to reclaim memory used by rate limited and other rejected
 	// requests.
-	// A default of 5000 is used when
-	// MeekRateLimiterGarbageCollectionTriggerCount is 0.
+	//
+	// A default of DEFAULT_MEEK_RATE_LIMITER_GARBAGE_COLLECTOR_TRIGGER_COUNT
+	// is used when MeekRateLimiterGarbageCollectionTriggerCount is 0.
 	MeekRateLimiterGarbageCollectionTriggerCount int
 
 	// MeekRateLimiterReapHistoryFrequencySeconds specifies a schedule for
 	// reaping old records from the rate limit history.
-	// A default of 600 is used when
-	// MeekRateLimiterReapHistoryFrequencySeconds is 0.
+	//
+	// A default of DEFAULT_MEEK_RATE_LIMITER_REAP_HISTORY_FREQUENCY_SECONDS
+	// is used when MeekRateLimiterReapHistoryFrequencySeconds is 0.
+	//
+	// MeekRateLimiterReapHistoryFrequencySeconds is not applied upon hot
+	// reload.
 	MeekRateLimiterReapHistoryFrequencySeconds int
+
+	// MeekRateLimiterMaxEntries specifies a maximum size for the rate limit
+	// history.
+	MeekRateLimiterMaxEntries int
 }
 
 // TrafficRulesFilter defines a filter to match against client attributes.
@@ -143,6 +161,10 @@ type TrafficRulesFilter struct {
 	// ISPs is a list of ISPs that the client must geolocate to in order to
 	// match this filter. When omitted or empty, any client ISP matches.
 	ISPs []string
+
+	// ASNs is a list of ASNs that the client must geolocate to in order to
+	// match this filter. When omitted or empty, any client ASN matches.
+	ASNs []string
 
 	// Cities is a list of cities that the client must geolocate to in order to
 	// match this filter. When omitted or empty, any client city matches.
@@ -178,6 +200,7 @@ type TrafficRulesFilter struct {
 
 	regionLookup                map[string]bool
 	ispLookup                   map[string]bool
+	asnLookup                   map[string]bool
 	cityLookup                  map[string]bool
 	activeAuthorizationIDLookup map[string]bool
 }
@@ -261,6 +284,10 @@ type TrafficRules struct {
 	// client sends an IP address. Domain names are not resolved before checking
 	// AllowSubnets.
 	AllowSubnets []string
+
+	// DisableDiscovery specifies whether to disable server entry discovery,
+	// to manage load on discovery servers.
+	DisableDiscovery *bool
 }
 
 // RateLimits is a clone of common.RateLimits with pointers
@@ -328,6 +355,7 @@ func NewTrafficRulesSet(filename string) (*TrafficRulesSet, error) {
 			set.MeekRateLimiterTunnelProtocols = newSet.MeekRateLimiterTunnelProtocols
 			set.MeekRateLimiterRegions = newSet.MeekRateLimiterRegions
 			set.MeekRateLimiterISPs = newSet.MeekRateLimiterISPs
+			set.MeekRateLimiterASNs = newSet.MeekRateLimiterASNs
 			set.MeekRateLimiterCities = newSet.MeekRateLimiterCities
 			set.MeekRateLimiterGarbageCollectionTriggerCount = newSet.MeekRateLimiterGarbageCollectionTriggerCount
 			set.MeekRateLimiterReapHistoryFrequencySeconds = newSet.MeekRateLimiterReapHistoryFrequencySeconds
@@ -449,6 +477,13 @@ func (set *TrafficRulesSet) initLookups() {
 			filter.ispLookup = make(map[string]bool)
 			for _, ISP := range filter.ISPs {
 				filter.ispLookup[ISP] = true
+			}
+		}
+
+		if len(filter.ASNs) >= stringLookupThreshold {
+			filter.asnLookup = make(map[string]bool)
+			for _, ASN := range filter.ASNs {
+				filter.asnLookup[ASN] = true
 			}
 		}
 
@@ -577,6 +612,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		trafficRules.AllowSubnets = make([]string, 0)
 	}
 
+	if trafficRules.DisableDiscovery == nil {
+		trafficRules.DisableDiscovery = new(bool)
+	}
+
 	// TODO: faster lookup?
 	for _, filteredRules := range set.FilteredRules {
 
@@ -607,6 +646,18 @@ func (set *TrafficRulesSet) GetTrafficRules(
 				}
 			} else {
 				if !common.Contains(filteredRules.Filter.ISPs, geoIPData.ISP) {
+					continue
+				}
+			}
+		}
+
+		if len(filteredRules.Filter.ASNs) > 0 {
+			if filteredRules.Filter.asnLookup != nil {
+				if !filteredRules.Filter.asnLookup[geoIPData.ASN] {
+					continue
+				}
+			} else {
+				if !common.Contains(filteredRules.Filter.ASNs, geoIPData.ASN) {
 					continue
 				}
 			}
@@ -783,6 +834,10 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			trafficRules.AllowSubnets = filteredRules.Rules.AllowSubnets
 		}
 
+		if filteredRules.Rules.DisableDiscovery != nil {
+			trafficRules.DisableDiscovery = filteredRules.Rules.DisableDiscovery
+		}
+
 		break
 	}
 
@@ -846,7 +901,7 @@ func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
 // configuration values.
 func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
-	int, int, []string, []string, []string, []string, int, int) {
+	int, int, []string, []string, []string, []string, []string, int, int, int) {
 
 	set.ReloadableFile.RLock()
 	defer set.ReloadableFile.RUnlock()
@@ -862,12 +917,20 @@ func (set *TrafficRulesSet) GetMeekRateLimiterConfig() (
 
 	}
 
+	maxEntries := set.MeekRateLimiterMaxEntries
+	if maxEntries <= 0 {
+		maxEntries = DEFAULT_MEEK_RATE_LIMITER_MAX_ENTRIES
+
+	}
+
 	return set.MeekRateLimiterHistorySize,
 		set.MeekRateLimiterThresholdSeconds,
 		set.MeekRateLimiterTunnelProtocols,
 		set.MeekRateLimiterRegions,
 		set.MeekRateLimiterISPs,
+		set.MeekRateLimiterASNs,
 		set.MeekRateLimiterCities,
 		GCTriggerCount,
-		reapFrequencySeconds
+		reapFrequencySeconds,
+		maxEntries
 }

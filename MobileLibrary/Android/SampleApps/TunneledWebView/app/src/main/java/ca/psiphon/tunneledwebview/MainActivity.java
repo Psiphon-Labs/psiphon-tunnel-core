@@ -265,11 +265,6 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
-    public void onSplitTunnelRegion(String region) {
-        logMessage("split tunnel region: " + region);
-    }
-
-    @Override
     public void onUntunneledAddress(String address) {
         logMessage("untunneled address: " + address);
     }

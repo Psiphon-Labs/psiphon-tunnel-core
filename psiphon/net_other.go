@@ -1,4 +1,5 @@
-// +build !darwin,!android,!linux
+//go:build !darwin && !android && !linux && !windows
+// +build !darwin,!android,!linux,!windows
 
 /*
  * Copyright (c) 2017, Psiphon Inc.
@@ -22,6 +23,9 @@
 package psiphon
 
 import (
+	"net"
+	"strconv"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"golang.org/x/net/bpf"
 )
@@ -35,4 +39,12 @@ func setSocketBPF(_ []bpf.RawInstruction, _ int) error {
 }
 
 func setAdditionalSocketOptions(_ int) {
+}
+
+func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, error) {
+	listener, err := net.Listen("tcp", net.JoinHostPort(listenIP, strconv.Itoa(port)))
+	if err != nil {
+		return nil, IsAddressInUseError(err), errors.Trace(err)
+	}
+	return listener, false, nil
 }

@@ -136,6 +136,8 @@ func TestSSH(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -159,6 +161,8 @@ func TestOSSH(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -182,6 +186,8 @@ func TestFragmentedOSSH(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -205,6 +211,8 @@ func TestUnfrontedMeek(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -229,6 +237,8 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -253,6 +263,8 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -277,6 +289,8 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -301,6 +315,8 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -327,6 +343,8 @@ func TestQUICOSSH(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -353,6 +371,8 @@ func TestLimitedQUICOSSH(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    true,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -376,6 +396,8 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -399,6 +421,8 @@ func TestHotReload(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -422,6 +446,8 @@ func TestDefaultSponsorID(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -445,6 +471,8 @@ func TestDenyTrafficRules(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -468,6 +496,8 @@ func TestOmitAuthorization(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -491,6 +521,8 @@ func TestNoAuthorization(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -514,6 +546,8 @@ func TestUnusedAuthorization(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -537,6 +571,8 @@ func TestTCPOnlySLOK(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -560,6 +596,8 @@ func TestUDPOnlySLOK(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -583,6 +621,8 @@ func TestLivenessTest(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -606,10 +646,12 @@ func TestPruneServerEntries(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
-func TestBurstMonitor(t *testing.T) {
+func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
@@ -629,6 +671,33 @@ func TestBurstMonitor(t *testing.T) {
 			doBurstMonitor:       true,
 			doSplitTunnel:        false,
 			limitQUICVersions:    false,
+			doDestinationBytes:   true,
+			doChangeBytesConfig:  false,
+		})
+}
+
+func TestChangeBytesConfig(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
+			forceLivenessTest:    false,
+			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
+			doBurstMonitor:       false,
+			doSplitTunnel:        false,
+			limitQUICVersions:    false,
+			doDestinationBytes:   true,
+			doChangeBytesConfig:  true,
 		})
 }
 
@@ -652,6 +721,8 @@ func TestSplitTunnel(t *testing.T) {
 			doBurstMonitor:       false,
 			doSplitTunnel:        true,
 			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
 		})
 }
 
@@ -674,6 +745,8 @@ type runServerConfig struct {
 	doBurstMonitor       bool
 	doSplitTunnel        bool
 	limitQUICVersions    bool
+	doDestinationBytes   bool
+	doChangeBytesConfig  bool
 }
 
 var (
@@ -723,7 +796,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// establish.
 
 	doClientTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol)
-	doServerTactics := doClientTactics || runConfig.forceFragmenting || runConfig.doBurstMonitor
+	doServerTactics := doClientTactics ||
+		runConfig.forceFragmenting ||
+		runConfig.doBurstMonitor ||
+		runConfig.doDestinationBytes
 
 	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
@@ -787,7 +863,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Pave psinet with random values to test handshake homepages.
 	psinetFilename := filepath.Join(testDataDirName, "psinet.json")
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(
-		t, runConfig.doDefaultSponsorID, psinetFilename, psinetValidServerEntryTags)
+		t, psinetFilename, "", runConfig.doDefaultSponsorID, true, psinetValidServerEntryTags)
 
 	// Pave OSL config for SLOK testing
 	oslConfigFilename := filepath.Join(testDataDirName, "osl_config.json")
@@ -822,7 +898,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.tunnelProtocol,
 			propagationChannelID,
 			livenessTestSize,
-			runConfig.doBurstMonitor)
+			runConfig.doBurstMonitor,
+			runConfig.doDestinationBytes)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -831,13 +908,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
 
-	// The test GeoIP database maps all IPs to a single, non-"None" country. When
-	// split tunnel mode is enabled, this should cause port forwards to be
-	// untunneled. When split tunnel mode is not enabled, port forwards should be
-	// tunneled despite the country match.
-	geoIPDatabaseFilename := filepath.Join(testDataDirName, "geoip_database.mmbd")
-	paveGeoIPDatabaseFile(t, geoIPDatabaseFilename)
-	serverConfig["GeoIPDatabaseFilenames"] = []string{geoIPDatabaseFilename}
+	// The test GeoIP databases map all IPs to a single, non-"None" country
+	// and ASN.
+	//
+	// When split tunnel mode is enabled, this should cause port forwards to
+	// be untunneled. When split tunnel mode is not enabled, port forwards
+	// should be tunneled despite the country match.
+	//
+	// When destination bytes metrics are enabled, all traffic will map to the
+	// single ASN.
+	geoIPCityDatabaseFilename := filepath.Join(testDataDirName, "geoip_city_database.mmbd")
+	geoIPISPDatabaseFilename := filepath.Join(testDataDirName, "geoip_isp_database.mmbd")
+	paveGeoIPDatabaseFiles(t, geoIPCityDatabaseFilename, geoIPISPDatabaseFilename)
+	serverConfig["GeoIPDatabaseFilenames"] = []string{geoIPCityDatabaseFilename, geoIPISPDatabaseFilename}
 
 	serverConfig["PsinetDatabaseFilename"] = psinetFilename
 	serverConfig["TrafficRulesFilename"] = trafficRulesFilename
@@ -874,8 +957,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
-	serverTunnelLog := make(chan map[string]interface{}, 1)
 	uniqueUserLog := make(chan map[string]interface{}, 1)
+	domainBytesLog := make(chan map[string]interface{}, 1)
+	serverTunnelLog := make(chan map[string]interface{}, 1)
 
 	setLogCallback(func(log []byte) {
 
@@ -894,6 +978,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		case "unique_user":
 			select {
 			case uniqueUserLog <- logFields:
+			default:
+			}
+		case "domain_bytes":
+			select {
+			case domainBytesLog <- logFields:
 			default:
 			}
 		case "server_tunnel":
@@ -957,7 +1046,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		// Pave new config files with different random values.
 		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(
-			t, runConfig.doDefaultSponsorID, psinetFilename, psinetValidServerEntryTags)
+			t, psinetFilename, "", runConfig.doDefaultSponsorID, true, psinetValidServerEntryTags)
 
 		propagationChannelID = paveOSLConfigFile(t, oslConfigFilename)
 
@@ -1262,7 +1351,46 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
 	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
 
+	if runConfig.doChangeBytesConfig {
+
+		if !runConfig.doDestinationBytes {
+			t.Fatalf("invalid test configuration")
+		}
+
+		// Test: now that the client is connected, change the domain bytes and
+		// destination bytes configurations. No stats should be logged, even
+		// with an already connected client.
+
+		// Pave psinet without domain bytes; retain the same sponsor ID. The
+		// random homepage URLs will change, but this has no effect on the
+		// already connected client.
+		_, _ = pavePsinetDatabaseFile(
+			t, psinetFilename, sponsorID, runConfig.doDefaultSponsorID, false, psinetValidServerEntryTags)
+
+		// Pave tactics without destination bytes.
+		paveTacticsConfigFile(
+			t,
+			tacticsConfigFilename,
+			tacticsRequestPublicKey,
+			tacticsRequestPrivateKey,
+			tacticsRequestObfuscatedKey,
+			runConfig.tunnelProtocol,
+			propagationChannelID,
+			livenessTestSize,
+			runConfig.doBurstMonitor,
+			false)
+
+		p, _ := os.FindProcess(os.Getpid())
+		p.Signal(syscall.SIGUSR1)
+
+		// TODO: monitor logs for more robust wait-until-reloaded
+		time.Sleep(1 * time.Second)
+	}
+
 	expectTrafficFailure := runConfig.denyTrafficRules || (runConfig.omitAuthorization && runConfig.requireAuthorization)
+
+	// The client still reports zero domain_bytes when no port forwards are allowed (expectTrafficFailure)
+	expectDomainBytes := !runConfig.doChangeBytesConfig
 
 	if runConfig.doTunneledWebRequest {
 
@@ -1395,6 +1523,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if runConfig.limitQUICVersions {
 		expectQUICVersion = limitQUICVersions[0]
 	}
+	expectDestinationBytesFields := runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -1408,6 +1537,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectTCPDataTransfer,
 			expectUDPDataTransfer,
 			expectQUICVersion,
+			expectDestinationBytesFields,
 			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
@@ -1432,6 +1562,26 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		select {
 		case <-uniqueUserLog:
 			t.Fatalf("unexpected unique user log")
+		default:
+		}
+	}
+
+	if expectDomainBytes {
+		select {
+		case logFields := <-domainBytesLog:
+			err := checkExpectedDomainBytesLogFields(
+				runConfig,
+				logFields)
+			if err != nil {
+				t.Fatalf("invalid domain bytes log fields: %s", err)
+			}
+		default:
+			t.Fatalf("missing domain bytes log")
+		}
+	} else {
+		select {
+		case <-domainBytesLog:
+			t.Fatalf("unexpected domain bytes log")
 		default:
 		}
 	}
@@ -1469,6 +1619,7 @@ func checkExpectedServerTunnelLogFields(
 	expectTCPDataTransfer bool,
 	expectUDPDataTransfer bool,
 	expectQUICVersion string,
+	expectDestinationBytesFields bool,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -1870,6 +2021,47 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
+	for _, name := range []string{
+		"dest_bytes_asn",
+		"dest_bytes_up_tcp",
+		"dest_bytes_down_tcp",
+		"dest_bytes_up_udp",
+		"dest_bytes_down_udp",
+		"dest_bytes",
+	} {
+		if expectDestinationBytesFields && fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+
+		} else if !expectDestinationBytesFields && fields[name] != nil {
+			return fmt.Errorf("unexpected field '%s'", name)
+		}
+	}
+
+	if expectDestinationBytesFields {
+		name := "dest_bytes_asn"
+		if fields[name].(string) != testGeoIPASN {
+			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+		}
+		for _, pair := range [][]string{
+			[]string{"dest_bytes_up_tcp", "bytes_up_tcp"},
+			[]string{"dest_bytes_down_tcp", "bytes_down_tcp"},
+			[]string{"dest_bytes_up_udp", "bytes_up_udp"},
+			[]string{"dest_bytes_down_udp", "bytes_down_udp"},
+			[]string{"dest_bytes", "bytes"},
+		} {
+			value0 := int64(fields[pair[0]].(float64))
+			value1 := int64(fields[pair[1]].(float64))
+			ok := value0 == value1
+			if pair[0] == "dest_bytes_up_udp" || pair[0] == "dest_bytes_down_udp" || pair[0] == "dest_bytes" {
+				// DNS requests are excluded from destination bytes counting
+				ok = value0 > 0 && value0 < value1
+			}
+			if !ok {
+				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -1887,6 +2079,33 @@ func checkExpectedUniqueUserLogFields(
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
+		}
+	}
+
+	return nil
+}
+
+func checkExpectedDomainBytesLogFields(
+	runConfig *runServerConfig,
+	fields map[string]interface{}) error {
+
+	for _, name := range []string{
+		"session_id",
+		"propagation_channel_id",
+		"sponsor_id",
+		"client_platform",
+		"device_region",
+		"domain",
+		"bytes",
+	} {
+		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
+
+		if name == "domain" {
+			if fields[name].(string) != "ALL" && fields[name].(string) != "(OTHER)" {
+				return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+			}
 		}
 	}
 
@@ -2137,11 +2356,15 @@ func makeTunneledNTPRequestAttempt(
 
 func pavePsinetDatabaseFile(
 	t *testing.T,
-	useDefaultSponsorID bool,
 	psinetFilename string,
+	sponsorID string,
+	useDefaultSponsorID bool,
+	doDomainBytes bool,
 	validServerEntryTags []string) (string, string) {
 
-	sponsorID := prng.HexString(8)
+	if sponsorID == "" {
+		sponsorID = prng.HexString(8)
+	}
 
 	defaultSponsorID := ""
 	if useDefaultSponsorID {
@@ -2155,26 +2378,39 @@ func pavePsinetDatabaseFile(
 	psinetJSONFormat := `
     {
         "default_sponsor_id" : "%s",
-        "sponsors": {
-            "%s": {
-                "home_pages": {
-                    "None": [
+        "sponsors" : {
+            "%s" : {
+                %s
+                "home_pages" : {
+                    "None" : [
                         {
-                            "region": null,
-                            "url": "%s"
+                            "region" : null,
+                            "url" : "%s"
                         }
                     ]
                 }
             }
         },
         "default_alert_action_urls" : {
-            "%s": %s
+            "%s" : %s
         },
         "valid_server_entry_tags" : {
             %s
         }
     }
 	`
+
+	domainBytes := ""
+	if doDomainBytes {
+		domainBytes = `
+                "https_request_regexes" : [
+                    {
+                        "regex" : ".*",
+                        "replace" : "ALL"
+                    }
+                ],
+	`
+	}
 
 	actionURLsJSON, _ := json.Marshal(testDisallowedTrafficAlertActionURLs)
 
@@ -2190,6 +2426,7 @@ func pavePsinetDatabaseFile(
 		psinetJSONFormat,
 		defaultSponsorID,
 		sponsorID,
+		domainBytes,
 		expectedHomepageURL,
 		protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC,
 		actionURLsJSON,
@@ -2398,7 +2635,8 @@ func paveTacticsConfigFile(
 	tunnelProtocol string,
 	propagationChannelID string,
 	livenessTestSize int,
-	doBurstMonitor bool) {
+	doBurstMonitor bool,
+	doDestinationBytes bool) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -2412,6 +2650,7 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
+          %s
           %s
           "LimitTunnelProtocols" : ["%s"],
           "FragmentorLimitProtocols" : ["%s"],
@@ -2493,10 +2732,18 @@ func paveTacticsConfigFile(
 	`
 	}
 
+	destinationBytesParameters := ""
+	if doDestinationBytes {
+		destinationBytesParameters = fmt.Sprintf(`
+          "DestinationBytesMetricsASN" : "%s",
+	`, testGeoIPASN)
+	}
+
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
 		burstParameters,
+		destinationBytesParameters,
 		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,

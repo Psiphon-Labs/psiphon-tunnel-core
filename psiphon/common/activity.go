@@ -57,7 +57,7 @@ type ActivityMonitoredConn struct {
 	net.Conn
 	inactivityTimeout time.Duration
 	activeOnWrite     bool
-	activityUpdater   ActivityUpdater
+	activityUpdaters  []ActivityUpdater
 	lruEntry          *LRUConnsEntry
 }
 
@@ -65,7 +65,7 @@ type ActivityMonitoredConn struct {
 // ActivityMonitoredConn activity. Values passed to UpdateProgress are bytes
 // transferred and conn duration since the previous UpdateProgress.
 type ActivityUpdater interface {
-	UpdateProgress(bytesRead, bytesWritten int64, durationNanoseconds int64)
+	UpdateProgress(bytesRead, bytesWritten, durationNanoseconds int64)
 }
 
 // NewActivityMonitoredConn creates a new ActivityMonitoredConn.
@@ -73,8 +73,8 @@ func NewActivityMonitoredConn(
 	conn net.Conn,
 	inactivityTimeout time.Duration,
 	activeOnWrite bool,
-	activityUpdater ActivityUpdater,
-	lruEntry *LRUConnsEntry) (*ActivityMonitoredConn, error) {
+	lruEntry *LRUConnsEntry,
+	activityUpdaters ...ActivityUpdater) (*ActivityMonitoredConn, error) {
 
 	if inactivityTimeout > 0 {
 		err := conn.SetDeadline(time.Now().Add(inactivityTimeout))
@@ -95,8 +95,8 @@ func NewActivityMonitoredConn(
 		realStartTime:        time.Now(),
 		monotonicStartTime:   now,
 		lastReadActivityTime: now,
-		activityUpdater:      activityUpdater,
 		lruEntry:             lruEntry,
+		activityUpdaters:     activityUpdaters,
 	}, nil
 }
 
@@ -129,8 +129,8 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 
 		atomic.StoreInt64(&conn.lastReadActivityTime, readActivityTime)
 
-		if conn.activityUpdater != nil {
-			conn.activityUpdater.UpdateProgress(
+		for _, activityUpdater := range conn.activityUpdaters {
+			activityUpdater.UpdateProgress(
 				int64(n), 0, readActivityTime-lastReadActivityTime)
 		}
 
@@ -153,8 +153,8 @@ func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 			}
 		}
 
-		if conn.activityUpdater != nil {
-			conn.activityUpdater.UpdateProgress(0, int64(n), 0)
+		for _, activityUpdater := range conn.activityUpdaters {
+			activityUpdater.UpdateProgress(0, int64(n), 0)
 		}
 
 		if conn.lruEntry != nil {

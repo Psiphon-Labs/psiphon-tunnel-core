@@ -733,15 +733,15 @@ func (controller *Controller) connectedReporter() {
 		return
 	}
 
+	select {
+	case <-controller.signalReportConnected:
+		// Make the initial connected request
+	case <-controller.runCtx.Done():
+		return
+	}
+
 loop:
 	for {
-
-		select {
-		case <-controller.signalReportConnected:
-			// Make the initial connected request
-		case <-controller.runCtx.Done():
-			break loop
-		}
 
 		// Pick any active tunnel and make the next connected request. No error is
 		// logged if there's no active tunnel, as that's not an unexpected
@@ -1796,6 +1796,11 @@ func (controller *Controller) stopEstablishing() {
 
 	emitMemoryMetrics()
 	DoGarbageCollection()
+
+	// Record datastore metrics after establishment, the phase which generates
+	// the bulk of all datastore transactions: iterating over server entries,
+	// storing new server entries, etc.
+	emitDatastoreMetrics()
 }
 
 // establishCandidateGenerator populates the candidate queue with server entries

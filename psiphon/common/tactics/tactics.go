@@ -261,7 +261,8 @@ type Server struct {
 const (
 	GeoIPScopeRegion = 1
 	GeoIPScopeISP    = 2
-	GeoIPScopeCity   = 4
+	GeoIPScopeASN    = 4
+	GeoIPScopeCity   = 8
 )
 
 // Filter defines a filter to match against client attributes.
@@ -274,6 +275,9 @@ type Filter struct {
 
 	// ISPs specifies a list of GeoIP ISPs the client must match.
 	ISPs []string
+
+	// ASNs specifies a list of GeoIP ASNs the client must match.
+	ASNs []string
 
 	// Cities specifies a list of GeoIP Cities the client must match.
 	Cities []string
@@ -290,6 +294,7 @@ type Filter struct {
 
 	regionLookup map[string]bool
 	ispLookup    map[string]bool
+	asnLookup    map[string]bool
 	cityLookup   map[string]bool
 }
 
@@ -632,6 +637,13 @@ func (server *Server) initLookups() {
 			}
 		}
 
+		if len(filteredTactics.Filter.ASNs) >= stringLookupThreshold {
+			filteredTactics.Filter.asnLookup = make(map[string]bool)
+			for _, ASN := range filteredTactics.Filter.ASNs {
+				filteredTactics.Filter.asnLookup[ASN] = true
+			}
+		}
+
 		if len(filteredTactics.Filter.Cities) >= stringLookupThreshold {
 			filteredTactics.Filter.cityLookup = make(map[string]bool)
 			for _, city := range filteredTactics.Filter.Cities {
@@ -649,13 +661,17 @@ func (server *Server) initLookups() {
 		// there is a filter with region and ISP, while other regions will set only
 		// GeoIPScopeRegion.
 		//
-		// When any ISP or City appears in a filter without a Region, the regional
-		// map optimization is disabled.
+		// When any ISP, ASN, or City appears in a filter without a Region,
+		// the regional map optimization is disabled.
 
 		if len(filteredTactics.Filter.Regions) == 0 {
 			disableRegionScope := false
 			if len(filteredTactics.Filter.ISPs) > 0 {
 				server.filterGeoIPScope |= GeoIPScopeISP
+				disableRegionScope = true
+			}
+			if len(filteredTactics.Filter.ASNs) > 0 {
+				server.filterGeoIPScope |= GeoIPScopeASN
 				disableRegionScope = true
 			}
 			if len(filteredTactics.Filter.Cities) > 0 {
@@ -675,6 +691,9 @@ func (server *Server) initLookups() {
 				if len(filteredTactics.Filter.ISPs) > 0 {
 					regionScope |= GeoIPScopeISP
 				}
+				if len(filteredTactics.Filter.ASNs) > 0 {
+					regionScope |= GeoIPScopeASN
+				}
 				if len(filteredTactics.Filter.Cities) > 0 {
 					regionScope |= GeoIPScopeCity
 				}
@@ -690,9 +709,10 @@ func (server *Server) initLookups() {
 }
 
 // GetFilterGeoIPScope returns which GeoIP fields are relevent to tactics
-// filters. The return value is a bit array containing some combination of the
-// GeoIPScopeRegion, GeoIPScopeISP, and GeoIPScopeCity flags. For the given
-// geoIPData, all tactics filters reference only the flagged fields.
+// filters. The return value is a bit array containing some combination of
+// the GeoIPScopeRegion, GeoIPScopeISP, GeoIPScopeASN, and GeoIPScopeCity
+// flags. For the given geoIPData, all tactics filters reference only the
+// flagged fields.
 func (server *Server) GetFilterGeoIPScope(geoIPData common.GeoIPData) int {
 
 	scope := server.filterGeoIPScope
@@ -852,6 +872,18 @@ func (server *Server) GetTactics(
 				}
 			} else {
 				if !common.Contains(filteredTactics.Filter.ISPs, geoIPData.ISP) {
+					continue
+				}
+			}
+		}
+
+		if len(filteredTactics.Filter.ASNs) > 0 {
+			if filteredTactics.Filter.asnLookup != nil {
+				if !filteredTactics.Filter.asnLookup[geoIPData.ASN] {
+					continue
+				}
+			} else {
+				if !common.Contains(filteredTactics.Filter.ASNs, geoIPData.ASN) {
 					continue
 				}
 			}

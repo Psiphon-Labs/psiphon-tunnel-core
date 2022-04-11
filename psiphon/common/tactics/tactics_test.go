@@ -81,6 +81,7 @@ func TestTactics(t *testing.T) {
         {
           "Filter" : {
             "Regions": ["R1"],
+            "ASNs": ["1"],
             "APIParameters" : {"client_platform" : ["P1"], "client_version": ["V1"]},
             "SpeedTestRTTMilliseconds" : {
               "Aggregation" : "Median",
@@ -161,7 +162,7 @@ func TestTactics(t *testing.T) {
 
 	// Mock server uses an insecure HTTP transport that exposes endpoint names
 
-	clientGeoIPData := common.GeoIPData{Country: "R1"}
+	clientGeoIPData := common.GeoIPData{Country: "R1", ASN: "1"}
 
 	logger := newTestLogger()
 
@@ -777,9 +778,28 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 		t.Fatalf("NewServer failed: %s", err)
 	}
 
+	reload := func() {
+		tacticsConfig = fmt.Sprintf(tacticsConfigTemplate, filteredTactics)
+
+		err = ioutil.WriteFile(configFileName, []byte(tacticsConfig), 0600)
+		if err != nil {
+			t.Fatalf("WriteFile failed: %s", err)
+		}
+
+		reloaded, err := server.Reload()
+		if err != nil {
+			t.Fatalf("Reload failed: %s", err)
+		}
+
+		if !reloaded {
+			t.Fatalf("Server config failed to reload")
+		}
+	}
+
 	geoIPData := common.GeoIPData{
 		Country: "R0",
 		ISP:     "I0",
+		ASN:     "0",
 		City:    "C0",
 	}
 
@@ -806,29 +826,36 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
       ]
 	`
 
-	reload := func() {
-		tacticsConfig = fmt.Sprintf(tacticsConfigTemplate, filteredTactics)
-
-		err = ioutil.WriteFile(configFileName, []byte(tacticsConfig), 0600)
-		if err != nil {
-			t.Fatalf("WriteFile failed: %s", err)
-		}
-
-		reloaded, err := server.Reload()
-		if err != nil {
-			t.Fatalf("Reload failed: %s", err)
-		}
-
-		if !reloaded {
-			t.Fatalf("Server config failed to reload")
-		}
-	}
-
 	reload()
 
 	scope = server.GetFilterGeoIPScope(geoIPData)
 
 	if scope != GeoIPScopeISP {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	// Test: ASN-only scope
+
+	filteredTactics = `
+      "FilteredTactics" : [
+        {
+          "Filter" : {
+            "ASNs": ["1", "2", "3"]
+          }
+        },
+        {
+          "Filter" : {
+            "ASNs": ["4", "5", "6"]
+          }
+        }
+      ]
+	`
+
+	reload()
+
+	scope = server.GetFilterGeoIPScope(geoIPData)
+
+	if scope != GeoIPScopeASN {
 		t.Fatalf("unexpected scope: %b", scope)
 	}
 
@@ -873,6 +900,11 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
         },
         {
           "Filter" : {
+            "ASNs": ["1", "2", "3"]
+          }
+        },
+        {
+          "Filter" : {
             "Cities": ["C4", "C5", "C6"]
           }
         }
@@ -883,7 +915,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 
 	scope = server.GetFilterGeoIPScope(geoIPData)
 
-	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeASN|GeoIPScopeCity {
 		t.Fatalf("unexpected scope: %b", scope)
 	}
 
@@ -921,6 +953,32 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
             "ISPs": ["I3b"],
             "Cities": ["C3b"]
           }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R4"],
+            "ASNs": ["4"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R4"],
+            "ASNs": ["4"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R5"],
+            "ASNs": ["5"],
+            "Cities": ["C3a"]
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R5"],
+            "ASNs": ["5"],
+            "Cities": ["C3b"]
+          }
         }
       ]
 	`
@@ -948,6 +1006,18 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R3"})
 
 	if scope != GeoIPScopeRegion|GeoIPScopeISP|GeoIPScopeCity {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R4"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeASN {
+		t.Fatalf("unexpected scope: %b", scope)
+	}
+
+	scope = server.GetFilterGeoIPScope(common.GeoIPData{Country: "R5"})
+
+	if scope != GeoIPScopeRegion|GeoIPScopeASN|GeoIPScopeCity {
 		t.Fatalf("unexpected scope: %b", scope)
 	}
 

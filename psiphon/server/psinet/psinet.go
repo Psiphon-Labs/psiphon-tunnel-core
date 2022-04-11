@@ -24,6 +24,7 @@
 package psinet
 
 import (
+	"crypto/md5"
 	"encoding/json"
 	"math"
 	"math/rand"
@@ -66,6 +67,8 @@ type Sponsor struct {
 	MobileHomePages     map[string][]HomePage `json:"mobile_home_pages"`
 	AlertActionURLs     map[string][]string   `json:"alert_action_urls"`
 	HttpsRequestRegexes []HttpsRequestRegex   `json:"https_request_regexes"`
+
+	domainBytesChecksum []byte `json:"-"`
 }
 
 type ClientVersion struct {
@@ -106,6 +109,19 @@ func NewDatabase(filename string) (*Database, error) {
 			database.ValidServerEntryTags = newDatabase.ValidServerEntryTags
 			database.DiscoveryServers = newDatabase.DiscoveryServers
 			database.fileModTime = fileModTime
+
+			for _, sponsor := range database.Sponsors {
+
+				value, err := json.Marshal(sponsor.HttpsRequestRegexes)
+				if err != nil {
+					return errors.Trace(err)
+				}
+
+				// MD5 hash is used solely as a data checksum and not for any
+				// security purpose.
+				checksum := md5.Sum(value)
+				sponsor.domainBytesChecksum = checksum[:]
+			}
 
 			return nil
 		})
@@ -267,9 +283,9 @@ func (db *Database) GetUpgradeClientVersion(clientVersion, clientPlatform string
 	return ""
 }
 
-// GetHttpsRequestRegexes returns bytes transferred stats regexes for the
-// specified sponsor.
-func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string {
+// GetHttpsRequestRegexes returns bytes transferred stats regexes and the
+// associated checksum for the specified sponsor. The checksum may be nil.
+func (db *Database) GetHttpsRequestRegexes(sponsorID string) ([]map[string]string, []byte) {
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
 
@@ -281,7 +297,7 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 	}
 
 	if sponsor == nil {
-		return regexes
+		return regexes, nil
 	}
 
 	// If neither sponsorID or DefaultSponsorID were found, sponsor will be the
@@ -293,7 +309,25 @@ func (db *Database) GetHttpsRequestRegexes(sponsorID string) []map[string]string
 		regexes = append(regexes, regex)
 	}
 
-	return regexes
+	return regexes, sponsor.domainBytesChecksum
+}
+
+// GetDomainBytesChecksum returns the bytes transferred stats regexes
+// checksum for the specified sponsor. The checksum may be nil.
+func (db *Database) GetDomainBytesChecksum(sponsorID string) []byte {
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
+
+	sponsor, ok := db.Sponsors[sponsorID]
+	if !ok {
+		sponsor = db.Sponsors[db.DefaultSponsorID]
+	}
+
+	if sponsor == nil {
+		return nil
+	}
+
+	return sponsor.domainBytesChecksum
 }
 
 // DiscoverServers selects new encoded server entries to be "discovered" by

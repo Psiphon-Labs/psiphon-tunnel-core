@@ -48,6 +48,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	tris "github.com/Psiphon-Labs/tls-tris"
+	lrucache "github.com/cognusion/go-cache-lru"
+	"github.com/juju/ratelimit"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -75,16 +77,17 @@ const (
 	// when retrying a request for a partially downloaded response payload.
 	MEEK_PROTOCOL_VERSION_3 = 3
 
-	MEEK_MAX_REQUEST_PAYLOAD_LENGTH           = 65536
-	MEEK_MIN_SESSION_ID_LENGTH                = 8
-	MEEK_MAX_SESSION_ID_LENGTH                = 20
-	MEEK_DEFAULT_TURN_AROUND_TIMEOUT          = 20 * time.Millisecond
-	MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT = 100 * time.Millisecond
-	MEEK_DEFAULT_MAX_SESSION_STALENESS        = 45 * time.Second
-	MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT       = 45 * time.Second
-	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH       = 65536
-	MEEK_DEFAULT_POOL_BUFFER_LENGTH           = 65536
-	MEEK_DEFAULT_POOL_BUFFER_COUNT            = 2048
+	MEEK_MAX_REQUEST_PAYLOAD_LENGTH                  = 65536
+	MEEK_MIN_SESSION_ID_LENGTH                       = 8
+	MEEK_MAX_SESSION_ID_LENGTH                       = 20
+	MEEK_DEFAULT_TURN_AROUND_TIMEOUT                 = 10 * time.Millisecond
+	MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT        = 100 * time.Millisecond
+	MEEK_DEFAULT_SKIP_EXTENDED_TURN_AROUND_THRESHOLD = 8192
+	MEEK_DEFAULT_MAX_SESSION_STALENESS               = 45 * time.Second
+	MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT              = 45 * time.Second
+	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH              = 65536
+	MEEK_DEFAULT_POOL_BUFFER_LENGTH                  = 65536
+	MEEK_DEFAULT_POOL_BUFFER_COUNT                   = 2048
 )
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
@@ -99,28 +102,29 @@ const (
 // HTTP payload traffic for a given session into net.Conn conforming Read()s and Write()s via
 // the meekConn struct.
 type MeekServer struct {
-	support                   *SupportServices
-	listener                  net.Listener
-	listenerTunnelProtocol    string
-	listenerPort              int
-	passthroughAddress        string
-	turnAroundTimeout         time.Duration
-	extendedTurnAroundTimeout time.Duration
-	maxSessionStaleness       time.Duration
-	httpClientIOTimeout       time.Duration
-	tlsConfig                 *tris.Config
-	obfuscatorSeedHistory     *obfuscator.SeedHistory
-	clientHandler             func(clientTunnelProtocol string, clientConn net.Conn)
-	openConns                 *common.Conns
-	stopBroadcast             <-chan struct{}
-	sessionsLock              sync.RWMutex
-	sessions                  map[string]*meekSession
-	checksumTable             *crc64.Table
-	bufferPool                *CachedResponseBufferPool
-	rateLimitLock             sync.Mutex
-	rateLimitHistory          map[string][]time.Time
-	rateLimitCount            int
-	rateLimitSignalGC         chan struct{}
+	support                         *SupportServices
+	listener                        net.Listener
+	listenerTunnelProtocol          string
+	listenerPort                    int
+	passthroughAddress              string
+	turnAroundTimeout               time.Duration
+	extendedTurnAroundTimeout       time.Duration
+	skipExtendedTurnAroundThreshold int
+	maxSessionStaleness             time.Duration
+	httpClientIOTimeout             time.Duration
+	tlsConfig                       *tris.Config
+	obfuscatorSeedHistory           *obfuscator.SeedHistory
+	clientHandler                   func(clientTunnelProtocol string, clientConn net.Conn)
+	openConns                       *common.Conns
+	stopBroadcast                   <-chan struct{}
+	sessionsLock                    sync.RWMutex
+	sessions                        map[string]*meekSession
+	checksumTable                   *crc64.Table
+	bufferPool                      *CachedResponseBufferPool
+	rateLimitLock                   sync.Mutex
+	rateLimitHistory                *lrucache.Cache
+	rateLimitCount                  int
+	rateLimitSignalGC               chan struct{}
 }
 
 // NewMeekServer initializes a new meek server.
@@ -147,6 +151,11 @@ func NewMeekServer(
 			*support.Config.MeekExtendedTurnAroundTimeoutMilliseconds) * time.Millisecond
 	}
 
+	skipExtendedTurnAroundThreshold := MEEK_DEFAULT_SKIP_EXTENDED_TURN_AROUND_THRESHOLD
+	if support.Config.MeekSkipExtendedTurnAroundThresholdBytes != nil {
+		skipExtendedTurnAroundThreshold = *support.Config.MeekSkipExtendedTurnAroundThresholdBytes
+	}
+
 	maxSessionStaleness := MEEK_DEFAULT_MAX_SESSION_STALENESS
 	if support.Config.MeekMaxSessionStalenessMilliseconds != nil {
 		maxSessionStaleness = time.Duration(
@@ -171,27 +180,36 @@ func NewMeekServer(
 		bufferCount = support.Config.MeekCachedResponsePoolBufferCount
 	}
 
+	_, thresholdSeconds, _, _, _, _, _, _, reapFrequencySeconds, maxEntries :=
+		support.TrafficRulesSet.GetMeekRateLimiterConfig()
+
+	rateLimitHistory := lrucache.NewWithLRU(
+		time.Duration(thresholdSeconds)*time.Second,
+		time.Duration(reapFrequencySeconds)*time.Second,
+		maxEntries)
+
 	bufferPool := NewCachedResponseBufferPool(bufferLength, bufferCount)
 
 	meekServer := &MeekServer{
-		support:                   support,
-		listener:                  listener,
-		listenerTunnelProtocol:    listenerTunnelProtocol,
-		listenerPort:              listenerPort,
-		passthroughAddress:        passthroughAddress,
-		turnAroundTimeout:         turnAroundTimeout,
-		extendedTurnAroundTimeout: extendedTurnAroundTimeout,
-		maxSessionStaleness:       maxSessionStaleness,
-		httpClientIOTimeout:       httpClientIOTimeout,
-		obfuscatorSeedHistory:     obfuscator.NewSeedHistory(nil),
-		clientHandler:             clientHandler,
-		openConns:                 common.NewConns(),
-		stopBroadcast:             stopBroadcast,
-		sessions:                  make(map[string]*meekSession),
-		checksumTable:             checksumTable,
-		bufferPool:                bufferPool,
-		rateLimitHistory:          make(map[string][]time.Time),
-		rateLimitSignalGC:         make(chan struct{}, 1),
+		support:                         support,
+		listener:                        listener,
+		listenerTunnelProtocol:          listenerTunnelProtocol,
+		listenerPort:                    listenerPort,
+		passthroughAddress:              passthroughAddress,
+		turnAroundTimeout:               turnAroundTimeout,
+		extendedTurnAroundTimeout:       extendedTurnAroundTimeout,
+		skipExtendedTurnAroundThreshold: skipExtendedTurnAroundThreshold,
+		maxSessionStaleness:             maxSessionStaleness,
+		httpClientIOTimeout:             httpClientIOTimeout,
+		obfuscatorSeedHistory:           obfuscator.NewSeedHistory(nil),
+		clientHandler:                   clientHandler,
+		openConns:                       common.NewConns(),
+		stopBroadcast:                   stopBroadcast,
+		sessions:                        make(map[string]*meekSession),
+		checksumTable:                   checksumTable,
+		bufferPool:                      bufferPool,
+		rateLimitHistory:                rateLimitHistory,
+		rateLimitSignalGC:               make(chan struct{}, 1),
 	}
 
 	if useTLS {
@@ -430,7 +448,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// interruption, without knowing whether the server has received or
 	// relayed the data.
 
-	err = session.clientConn.pumpReads(request.Body)
+	requestSize, err := session.clientConn.pumpReads(request.Body)
 	if err != nil {
 		if err != io.EOF {
 			// Debug since errors such as "i/o timeout" occur during normal operation;
@@ -443,6 +461,12 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 		return
 	}
+
+	// The extended turn around mechanism optimizes for downstream flows by
+	// sending more data in the response as long as it's available. As a
+	// heuristic, when the request size meets a threshold, optimize instead
+	// of upstream flows by skipping the extended turn around.
+	skipExtendedTurnAround := requestSize >= int64(server.skipExtendedTurnAroundThreshold)
 
 	// Set cookie before writing the response.
 
@@ -536,7 +560,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// pumpWrites causes a TunnelServer/SSH goroutine blocking on a Write to
 		// write its downstream traffic through to the response body.
 
-		responseSize, responseError = session.clientConn.pumpWrites(multiWriter)
+		responseSize, responseError = session.clientConn.pumpWrites(multiWriter, skipExtendedTurnAround)
 		greaterThanSwapInt64(&session.metricPeakResponseSize, int64(responseSize))
 		greaterThanSwapInt64(&session.metricPeakCachedResponseSize, int64(session.cachedResponse.Available()))
 	}
@@ -606,38 +630,59 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 
 	// Determine the client remote address, which is used for geolocation
-	// and stats. When an intermediate proxy or CDN is in use, we may be
+	// stats, rate limiting, anti-probing, discovery, and tactics selection
+	// logic.
+	//
+	// When an intermediate proxy or CDN is in use, we may be
 	// able to determine the original client address by inspecting HTTP
 	// headers such as X-Forwarded-For.
+	//
+	// We trust only headers provided by CDNs. Fronted Psiphon server hosts
+	// should be configured to accept tunnel connections only from CDN edges.
+	// When the CDN passes along a chain of IPs, as in X-Forwarded-For, we
+	// trust only the right-most IP, which is provided by the CDN.
 
-	clientIP := strings.Split(request.RemoteAddr, ":")[0]
-	usedProxyForwardedForHeader := false
-	var geoIPData GeoIPData
+	clientIP, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err != nil {
+		return "", nil, nil, "", nil, errors.Trace(err)
+	}
+	if net.ParseIP(clientIP) == nil {
+		return "", nil, nil, "", nil, errors.TraceNew("invalid IP address")
+	}
 
-	if len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
+	if protocol.TunnelProtocolUsesFrontedMeek(server.listenerTunnelProtocol) &&
+		len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
+
+		// When there are multiple header names in MeekProxyForwardedForHeaders,
+		// the first valid match is preferred. MeekProxyForwardedForHeaders should be
+		// configured to use header names that are always provided by the CDN(s) and
+		// not header names that may be passed through from clients.
 		for _, header := range server.support.Config.MeekProxyForwardedForHeaders {
-			value := request.Header.Get(header)
-			if len(value) > 0 {
+
+			// In the case where there are multiple headers,
+			// request.Header.Get returns the first header, but we want the
+			// last header; so use request.Header.Values and select the last
+			// value. As per RFC 2616 section 4.2, a proxy must not change
+			// the order of field values, which implies that it should append
+			// values to the last header.
+			values := request.Header.Values(header)
+			if len(values) > 0 {
+				value := values[len(values)-1]
+
 				// Some headers, such as X-Forwarded-For, are a comma-separated
-				// list of IPs (each proxy in a chain). The first IP should be
-				// the client IP.
-				proxyClientIP := strings.Split(value, ",")[0]
-				if net.ParseIP(proxyClientIP) != nil {
-					proxyClientGeoIPData := server.support.GeoIPService.Lookup(proxyClientIP)
-					if proxyClientGeoIPData.Country != GEOIP_UNKNOWN_VALUE {
-						usedProxyForwardedForHeader = true
-						clientIP = proxyClientIP
-						geoIPData = proxyClientGeoIPData
-						break
-					}
+				// list of IPs (each proxy in a chain). Select the last IP.
+				IPs := strings.Split(value, ",")
+				IP := IPs[len(IPs)-1]
+
+				if net.ParseIP(IP) != nil {
+					clientIP = IP
+					break
 				}
 			}
 		}
 	}
 
-	if !usedProxyForwardedForHeader {
-		geoIPData = server.support.GeoIPService.Lookup(clientIP)
-	}
+	geoIPData := server.support.GeoIPService.Lookup(clientIP)
 
 	// The session is new (or expired). Treat the cookie value as a new meek
 	// cookie, extract the payload, and create a new session.
@@ -803,8 +848,9 @@ func (server *MeekServer) rateLimit(
 		tunnelProtocols,
 		regions,
 		ISPs,
+		ASNs,
 		cities,
-		GCTriggerCount, _ :=
+		GCTriggerCount, _, _ :=
 		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
 	if historySize == 0 {
@@ -817,7 +863,7 @@ func (server *MeekServer) rateLimit(
 		}
 	}
 
-	if len(regions) > 0 || len(ISPs) > 0 || len(cities) > 0 {
+	if len(regions) > 0 || len(ISPs) > 0 || len(ASNs) > 0 || len(cities) > 0 {
 
 		if len(regions) > 0 {
 			if !common.Contains(regions, geoIPData.Country) {
@@ -831,6 +877,12 @@ func (server *MeekServer) rateLimit(
 			}
 		}
 
+		if len(ASNs) > 0 {
+			if !common.Contains(ASNs, geoIPData.ASN) {
+				return false
+			}
+		}
+
 		if len(cities) > 0 {
 			if !common.Contains(cities, geoIPData.City) {
 				return false
@@ -838,35 +890,40 @@ func (server *MeekServer) rateLimit(
 		}
 	}
 
-	limit := true
-	triggerGC := false
+	// With IPv6, individual users or sites are users commonly allocated a /64
+	// or /56, so rate limit by /56.
+	rateLimitIP := clientIP
+	IP := net.ParseIP(clientIP)
+	if IP != nil && IP.To4() == nil {
+		rateLimitIP = IP.Mask(net.CIDRMask(56, 128)).String()
+	}
 
-	now := time.Now()
-	threshold := now.Add(-time.Duration(thresholdSeconds) * time.Second)
-
+	// go-cache-lru is safe for concurrent access, but lacks an atomic
+	// compare-and-set type operations to check if an entry exists before
+	// adding a new one. This mutex ensures the Get and Add are atomic
+	// (as well as synchronizing access to rateLimitCount).
 	server.rateLimitLock.Lock()
 
-	history, ok := server.rateLimitHistory[clientIP]
-	if !ok || len(history) != historySize {
-		history = make([]time.Time, historySize)
-		server.rateLimitHistory[clientIP] = history
+	var rateLimiter *ratelimit.Bucket
+	entry, ok := server.rateLimitHistory.Get(rateLimitIP)
+	if ok {
+		rateLimiter = entry.(*ratelimit.Bucket)
+	} else {
+		rateLimiter = ratelimit.NewBucketWithQuantum(
+			time.Duration(thresholdSeconds)*time.Second,
+			int64(historySize),
+			int64(historySize))
+		server.rateLimitHistory.Set(
+			rateLimitIP,
+			rateLimiter,
+			time.Duration(thresholdSeconds)*time.Second)
 	}
 
-	for i := 0; i < len(history); i++ {
-		if history[i].IsZero() || history[i].Before(threshold) {
-			limit = false
-		}
-		if i == len(history)-1 {
-			history[i] = now
-		} else {
-			history[i] = history[i+1]
-		}
-	}
+	limit := rateLimiter.TakeAvailable(1) < 1
 
+	triggerGC := false
 	if limit {
-
 		server.rateLimitCount += 1
-
 		if server.rateLimitCount >= GCTriggerCount {
 			triggerGC = true
 			server.rateLimitCount = 0
@@ -886,48 +943,10 @@ func (server *MeekServer) rateLimit(
 }
 
 func (server *MeekServer) rateLimitWorker() {
-
-	_, _, _, _, _, _, _, reapFrequencySeconds :=
-		server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
-
-	timer := time.NewTimer(time.Duration(reapFrequencySeconds) * time.Second)
-	defer timer.Stop()
-
 	for {
 		select {
-		case <-timer.C:
-
-			_, thresholdSeconds, _, _, _, _, _, reapFrequencySeconds :=
-				server.support.TrafficRulesSet.GetMeekRateLimiterConfig()
-
-			server.rateLimitLock.Lock()
-
-			threshold := time.Now().Add(-time.Duration(thresholdSeconds) * time.Second)
-
-			for key, history := range server.rateLimitHistory {
-				reap := true
-				for i := 0; i < len(history); i++ {
-					if !history[i].IsZero() && !history[i].Before(threshold) {
-						reap = false
-					}
-				}
-				if reap {
-					delete(server.rateLimitHistory, key)
-				}
-			}
-
-			// Enable rate limit history map to be garbage collected when possible.
-			if len(server.rateLimitHistory) == 0 {
-				server.rateLimitHistory = make(map[string][]time.Time)
-			}
-
-			server.rateLimitLock.Unlock()
-
-			timer.Reset(time.Duration(reapFrequencySeconds) * time.Second)
-
 		case <-server.rateLimitSignalGC:
 			runtime.GC()
-
 		case <-server.stopBroadcast:
 			return
 		}
@@ -1476,8 +1495,9 @@ func (conn *meekConn) GetReplay() (*prng.Seed, bool) {
 // without a Read() immediately consuming the bytes, but there's still
 // a possibility of a stall if no Read() calls are made after this
 // read buffer is full.
+// Returns the number of request bytes read.
 // Note: assumes only one concurrent call to pumpReads
-func (conn *meekConn) pumpReads(reader io.Reader) error {
+func (conn *meekConn) pumpReads(reader io.Reader) (int64, error) {
 
 	// Use either an empty or partial buffer. By using a partial
 	// buffer, pumpReads will not block if the Read() caller has
@@ -1488,7 +1508,7 @@ func (conn *meekConn) pumpReads(reader io.Reader) error {
 	case readBuffer = <-conn.emptyReadBuffer:
 	case readBuffer = <-conn.partialReadBuffer:
 	case <-conn.closeBroadcast:
-		return io.EOF
+		return 0, io.EOF
 	}
 
 	newDataOffset := readBuffer.Len()
@@ -1512,7 +1532,7 @@ func (conn *meekConn) pumpReads(reader io.Reader) error {
 	if err != nil {
 		readBuffer.Truncate(newDataOffset)
 		conn.replaceReadBuffer(readBuffer)
-		return errors.Trace(err)
+		return 0, errors.Trace(err)
 	}
 
 	// Check if request payload checksum matches immediately
@@ -1536,7 +1556,7 @@ func (conn *meekConn) pumpReads(reader io.Reader) error {
 
 	conn.replaceReadBuffer(readBuffer)
 
-	return nil
+	return n, nil
 }
 
 var errMeekConnectionHasClosed = std_errors.New("meek connection has closed")
@@ -1579,8 +1599,10 @@ func (conn *meekConn) replaceReadBuffer(readBuffer *bytes.Buffer) {
 // to the specified writer. This function blocks until the meek response
 // body limits (size for protocol v1, turn around time for protocol v2+)
 // are met, or the meekConn is closed.
+//
 // Note: channel scheme assumes only one concurrent call to pumpWrites
-func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
+func (conn *meekConn) pumpWrites(
+	writer io.Writer, skipExtendedTurnAround bool) (int, error) {
 
 	startTime := time.Now()
 	timeout := time.NewTimer(conn.meekServer.turnAroundTimeout)
@@ -1606,13 +1628,22 @@ func (conn *meekConn) pumpWrites(writer io.Writer) (int, error) {
 				// MEEK_MAX_REQUEST_PAYLOAD_LENGTH response bodies
 				return n, nil
 			}
+
+			if skipExtendedTurnAround {
+				// When fast turn around is indicated, skip the extended turn
+				// around timeout. This optimizes for upstream flows.
+				return n, nil
+			}
+
 			totalElapsedTime := time.Since(startTime) / time.Millisecond
 			if totalElapsedTime >= conn.meekServer.extendedTurnAroundTimeout {
 				return n, nil
 			}
 			timeout.Reset(conn.meekServer.turnAroundTimeout)
+
 		case <-timeout.C:
 			return n, nil
+
 		case <-conn.closeBroadcast:
 			return n, errors.Trace(errMeekConnectionHasClosed)
 		}
