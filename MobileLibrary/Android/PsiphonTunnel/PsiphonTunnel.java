@@ -92,7 +92,13 @@ public class PsiphonTunnel {
         default public void sendFeedbackCompleted(java.lang.Exception e) {}
     }
 
-    public interface HostService extends HostLogger {
+    public interface HostLibraryLoader {
+        default public void loadLibrary(String library) {
+            System.loadLibrary(library);
+        }
+    }
+
+    public interface HostService extends HostLogger, HostLibraryLoader {
 
         public String getAppName();
         public Context getContext();
@@ -158,7 +164,7 @@ public class PsiphonTunnel {
             mPsiphonTunnel.stop();
         }
         // Load the native go code embedded in psi.aar
-        System.loadLibrary("gojni");
+        hostService.loadLibrary("gojni");
         mPsiphonTunnel = new PsiphonTunnel(hostService, shouldRouteThroughTunnelAutomatically);
         return mPsiphonTunnel;
     }
@@ -227,7 +233,7 @@ public class PsiphonTunnel {
         // Load tun2socks library embedded in the aar
         // If this method is called more than once with the same library name, the second and subsequent calls are ignored.
         // http://docs.oracle.com/javase/7/docs/api/java/lang/Runtime.html#loadLibrary%28java.lang.String%29
-        System.loadLibrary("tun2socks");
+        mHostService.loadLibrary("tun2socks");
         return startVpn();
     }
 
