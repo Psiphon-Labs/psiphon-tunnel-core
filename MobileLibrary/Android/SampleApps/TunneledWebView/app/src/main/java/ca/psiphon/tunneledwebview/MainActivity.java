@@ -142,7 +142,7 @@ public class MainActivity extends AppCompatActivity
             public void run() {
                 WebViewProxySettings.setLocalProxy(
                         MainActivity.this, mLocalHttpProxyPort.get());
-                mWebView.loadUrl("https://freegeoip.app/");
+                mWebView.loadUrl("https://psip.me/");
             }
         });
     }
