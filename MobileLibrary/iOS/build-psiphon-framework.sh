@@ -84,6 +84,7 @@ function gomobile_build_for_platform() {
   # CGO_CFLAGS_ALLOW is to workaround https://github.com/golang/go/issues/23742 in Go 1.9.4
   CGO_CFLAGS_ALLOW="-fmodules|-fblocks" "${GOPATH}"/bin/gomobile bind -v -x \
   -target "${TARGETS}" \
+  -iosversion "10.0" \
   -prefix Go \
   -tags="${BUILD_TAGS}" \
   -ldflags="${LDFLAGS}" \
