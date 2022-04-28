@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		29EA5B41281B01640092BA56 /* Psi.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 29EA5B3E281B00EE0092BA56 /* Psi.xcframework */; };
-		29EA5B42281B01640092BA56 /* Psi.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 29EA5B3E281B00EE0092BA56 /* Psi.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		4E89F7FE1E2ED3CE00005F4C /* LookupIPv6.c in Sources */ = {isa = PBXBuildFile; fileRef = 4E89F7FC1E2ED3CE00005F4C /* LookupIPv6.c */; };
 		4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */ = {isa = PBXBuildFile; fileRef = 4E89F7FD1E2ED3CE00005F4C /* LookupIPv6.h */; };
 		52BE676825B8A615002DB553 /* PsiphonClientPlatform.h in Headers */ = {isa = PBXBuildFile; fileRef = 52BE676725B8A615002DB553 /* PsiphonClientPlatform.h */; settings = {ATTRIBUTES = (Public, ); }; };
@@ -68,20 +67,6 @@
 			remoteInfo = PsiphonTunnel;
 		};
 /* End PBXContainerItemProxy section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		29EA5B43281B01640092BA56 /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				29EA5B42281B01640092BA56 /* Psi.xcframework in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		29EA5B3E281B00EE0092BA56 /* Psi.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Psi.xcframework; path = PsiphonTunnel/Psi.xcframework; sourceTree = "<group>"; };
@@ -352,7 +337,6 @@
 				66BDB01D1DA6BFCC0079384C /* Headers */,
 				669541B51EF9FDB60038E125 /* ShellScript */,
 				66BDB01E1DA6BFCC0079384C /* Resources */,
-				29EA5B43281B01640092BA56 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
