@@ -10,7 +10,7 @@ fi
 # $1, if specified, is go build tags
 if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
-# At this time, gomobile doesn't support modules
+# At this time, psiphon-tunnel-core doesn't support modules
 export GO111MODULE=off
 
 BUILDINFOFILE="psiphon-tunnel-core_buildinfo.txt"
