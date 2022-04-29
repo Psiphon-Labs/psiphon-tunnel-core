@@ -7,7 +7,7 @@ if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 # Modify this value as we use newer Go versions.
 GO_VERSION_REQUIRED="1.17.9"
 
-# At this time, gomobile doesn't support modules
+# At this time, psiphon-tunnel-core doesn't support modules
 export GO111MODULE=off
 
 # Reset the PATH to macOS default. This is mainly so we don't execute the wrong
@@ -41,7 +41,7 @@ export PATH=${GOPATH}/bin:${PATH}
 # The GOPATH we're using is temporary, so make sure there isn't one from a previous run.
 rm -rf "${GOPATH}"
 
-GOMOBILE_PINNED_REV=92f3b9caf7ba8f4f9c10074225afcba0cba47a62
+GOMOBILE_PINNED_REV=ce6a79cf6a13dd77095a6f8dbee5f39848fa7da1
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
@@ -69,45 +69,16 @@ fi
 
 # Builds Psi.framework library for the given platform.
 #
-# - Parameter 1: Possible values are "ios" and "simulator"
-# - Parameter 2: Variable name to set output path to.
+# - Parameter 1: `gomobile bind` -target option value
+# - Parameter 2: Variable name where gomobile output will be set to.
 function gomobile_build_for_platform() {
 
   # Possible values are "ios" and "simulator"
-  local PLATFORM=$1
+  local TARGETS=$1
 
-  local TARGETS=""
+  echo "Build library for targets ${TARGETS}"
 
-  # gomobile pinned version 92f3b9c list of
-  # valid archs are "arm", "arm64", "386", "amd64".
-  # https://github.com/golang/mobile/blob/92f3b9caf7ba8f4f9c10074225afcba0cba47a62/cmd/gomobile/env.go#L26
-  #
-  # As of Go 1.15, "ios/arm" is no longer supported: https://golang.org/doc/go1.15#darwin
-  case "${PLATFORM}" in
-    ios)
-      TARGETS="ios/arm64"
-      ;;
-    simulator)
-      TARGETS="ios/amd64"
-      ;;
-    *)
-      echo "FATAL ERROR: Unknown platform ${PLATFORM}"
-      exit 1
-      ;;
-  esac
-
-  echo "Build library for platform ${PLATFORM}"
-
-  local FRAMEWORK="Psi"
-
-  # Since frameworks for all platforms share the same name "Psi.framework",
-  # each framework should be in its own directory.
-  local INTERMEDIATE_OUPUT_DIR="${BUILD_DIR}/${PLATFORM}-psi-framework"
-
-  local INTERMEDIATE_OUPUT_FILE="${FRAMEWORK}.framework"
-  # local FRAMEWORK_BINARY="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}/Versions/A/${FRAMEWORK}"
-
-  local GOBIND_OUT="${INTERMEDIATE_OUPUT_DIR}/${INTERMEDIATE_OUPUT_FILE}"
+  local GOBIND_OUT="${BUILD_DIR}/gobind-framework/Psi.xcframework"
 
   # We're using a generated-code prefix to workaround https://github.com/golang/go/issues/18693
   # CGO_CFLAGS_ALLOW is to workaround https://github.com/golang/go/issues/23742 in Go 1.9.4
@@ -147,16 +118,17 @@ cd "${GOPATH}"/src/golang.org/x/mobile/cmd/gomobile
 git checkout master
 git checkout -b pinned ${GOMOBILE_PINNED_REV}
 
+# Patch gomobile to edit a command that assumes modules
+mv init.go init.go.orig
+sed -e 's/golang.org\/x\/mobile\/cmd\/gobind@latest/golang.org\/x\/mobile\/cmd\/gobind/g' init.go.orig > init.go
+
+
 go install
 "${GOPATH}"/bin/gomobile init -v -x
 if [[ $? != 0 ]]; then
   echo "FAILURE: ${GOPATH}/bin/gomobile init"
   exit 1
 fi
-
-#
-# gomobile bind
-#
 
 # Ensure BUILD* variables reflect the tunnel-core repo
 cd "${TUNNEL_CORE_SRC_DIR}"
@@ -202,34 +174,23 @@ rm -rf "${BUILD_DIR}"
 
 
 #
-# Builds Psi.framework for each platform/variant.
+# Builds Psi.xcframework
 #
 IOS_PSI_FRAMEWORK=""
 gomobile_build_for_platform "ios" IOS_PSI_FRAMEWORK
 
-SIMULATOR_PSI_FRAMEWORK=""
-gomobile_build_for_platform "simulator" SIMULATOR_PSI_FRAMEWORK
-
-
-#
-# Xcode archive for each platform.
-#
-
-# Xcode project requires Psi.framework bundle at $PSI_FRAMEWORK.
-# Except for macOS, Apple does not support umbrella frameworks that
-# contain other frameworks. So for building framework for each platform/variant,
-# the Psi.framework should be copied to the path at $PSI_FRAMEWORK_PATH.
-PSI_FRAMEWORK_PATH="${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
-PSI_FRAMEWORK="${PSI_FRAMEWORK_PATH}/Psi.framework"
-
-
-# Build PsiphonTunnel framework for iOS.
 echo "$IOS_PSI_FRAMEWORK"
-echo "$SIMULATOR_PSI_FRAMEWORK"
 
-# Copies iOS Psi.framework 
-rm -rf "${PSI_FRAMEWORK}"
-cp -r "${IOS_PSI_FRAMEWORK}" "${PSI_FRAMEWORK_PATH}"
+#
+# Copies gobind output Psi.xcframework to the Xcode project
+#
+
+rm -rf "${BASE_DIR}/PsiphonTunnel/PsiphonTunnel/Psi.xcframework"
+cp -r "${IOS_PSI_FRAMEWORK}" "${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
+
+#
+# Build PsiphonTunnel framework for iOS.
+#
 
 IOS_ARCHIVE="${BUILD_DIR}/ios.xcarchive"
 
@@ -249,15 +210,12 @@ ONLY_ACTIVE_ARCH="NO" \
 SKIP_INSTALL="NO" \
 EXCLUDED_ARCHS="armv7"
 
+
 # Build PsiphonTunnel framework for simulator.
 #
 # Note:
 # - Excludes 32-bit Intel: EXCLUDED_ARCHS="i386".
 # - Excludes ARM Macs: EXCLUDED_ARCHS="arm64".
-
-# Copies simulator Psi.framework 
-rm -rf "${PSI_FRAMEWORK}"
-cp -r "${SIMULATOR_PSI_FRAMEWORK}" "${PSI_FRAMEWORK_PATH}"
 
 SIMULATOR_ARCHIVE="${BUILD_DIR}/simulator.xcarchive"
 
@@ -278,7 +236,7 @@ SKIP_INSTALL="NO" \
 EXCLUDED_ARCHS="arm64 i386"
 
 #
-# Building PsiphonTunnel.xcframework
+# Bundling the generated frameworks into a single PsiphonTunnel.xcframework
 #
 
 xcodebuild -create-xcframework \

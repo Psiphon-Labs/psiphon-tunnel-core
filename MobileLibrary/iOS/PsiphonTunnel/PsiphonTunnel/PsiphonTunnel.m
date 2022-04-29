@@ -22,8 +22,8 @@
 #import <stdatomic.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
+#import <Psi/Psi.h>
 #import "IPv6Synthesizer.h"
-#import "Psi-meta.h"
 #import "PsiphonProviderFeedbackHandlerShim.h"
 #import "PsiphonProviderNoticeHandlerShim.h"
 #import "PsiphonProviderNetwork.h"
