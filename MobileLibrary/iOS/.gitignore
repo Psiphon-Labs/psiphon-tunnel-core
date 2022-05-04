@@ -2,6 +2,7 @@
 go-ios-build
 build
 Psi.framework
+Psi.xcframework
 PsiphonTunnel.framework
 psiphon-config.json
 PsiphonTunnel/build-git-commit.txt
