@@ -26,21 +26,20 @@ RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz 
   && rm /tmp/go.tar.gz \
   && echo $GOVERSION > $GOROOT/VERSION
 
-# Setup Android Environment.
-ENV ANDROID_NDK_ROOT=/android-ndk ANDROID_NDK_HOME=/android-ndk ANDROID_HOME=/android-sdk-linux
-
-# Setup Android NDK.
-RUN cd /tmp \
-  && curl -L https://dl.google.com/android/repository/android-ndk-r23b-linux.zip -o /tmp/android-ndk-r23b-linux.zip \
-  && cd /tmp \
-  && unzip android-ndk-r23b-linux.zip \
-  && mv /tmp/android-ndk-r23b /android-ndk
-
-# Setup Android SDK.
-RUN curl -L https://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/android-sdk.tgz \
-  && tar -C / -xzf /tmp/android-sdk.tgz \
-  && rm /tmp/android-sdk.tgz \
-  && (while true; do echo 'y'; sleep 2; done) | $ANDROID_HOME/tools/android update sdk --no-ui --filter platform,platform-tool,tool
+# Setup Android environment and install build tools.
+ENV ANDROID_PLATFORM_VERSION=30 ANDROID_NDK_VERSION=23.1.7779620
+ENV ANDROID_SDK_ROOT=/android-sdk-root-linux
+ENV ANDROID_HOME=$ANDROID_SDK_ROOT
+ENV ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION
+RUN curl -L https://dl.google.com/android/repository/commandlinetools-linux-8092744_latest.zip -o /tmp/commandlinetools-linux.zip \
+  && mkdir -p $ANDROID_SDK_ROOT \
+  && cd $ANDROID_SDK_ROOT \
+  && mkdir cmdline-tools \
+  && cd cmdline-tools \
+  && unzip /tmp/commandlinetools-linux.zip \
+  && mv cmdline-tools latest \
+  && yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses \
+  && $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-${ANDROID_PLATFORM_VERSION}" "ndk;${ANDROID_NDK_VERSION}"
 
 # Install Pinned Gomobile.
 # The sed operation patches gomobile, editing a command that assumes modules
@@ -57,7 +56,7 @@ RUN mkdir -p $GOPATH/pkg/gomobile/dl \
   && echo "master: $(git rev-parse master)\npinned: $(git rev-parse master)" | tee $GOROOT/MOBILE \
   && export GO111MODULE=off \
   && go get golang.org/x/mod/modfile \
-  && go get golang.org/x/tools/go/packages\
+  && go get golang.org/x/tools/go/packages \
   && go install golang.org/x/mobile/cmd/gomobile \
   && gomobile init -v
 
