@@ -55,6 +55,7 @@ package parameters
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"reflect"
 	"sync/atomic"
@@ -65,6 +66,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"golang.org/x/net/bpf"
 )
 
@@ -301,6 +303,17 @@ const (
 	RestrictFrontingProviderIDsClientProbability     = "RestrictFrontingProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources          = "UpstreamProxyAllowAllServerEntrySources"
 	DestinationBytesMetricsASN                       = "DestinationBytesMetricsASN"
+	DNSResolverAttemptsPerServer                     = "DNSResolverAttemptsPerServer"
+	DNSResolverRequestTimeout                        = "DNSResolverRequestTimeout"
+	DNSResolverAwaitTimeout                          = "DNSResolverAwaitTimeout"
+	DNSResolverPreresolvedIPAddressProbability       = "DNSResolverPreresolvedIPAddressProbability"
+	DNSResolverPreresolvedIPAddressCIDRs             = "DNSResolverPreresolvedIPAddressCIDRs"
+	DNSResolverAlternateServers                      = "DNSResolverAlternateServers"
+	DNSResolverPreferAlternateServerProbability      = "DNSResolverPreferAlternateServerProbability"
+	DNSResolverProtocolTransformProbability          = "DNSResolverProtocolTransformProbability"
+	DNSResolverProtocolTransformSpecs                = "DNSResolverProtocolTransformSpecs"
+	DNSResolverProtocolTransformScopedSpecNames      = "DNSResolverProtocolTransformScopedSpecNames"
+	DNSResolverIncludeEDNS0Probability               = "DNSResolverIncludeEDNS0Probability"
 )
 
 const (
@@ -637,6 +650,18 @@ var defaultParameters = map[string]struct {
 	UpstreamProxyAllowAllServerEntrySources: {value: false},
 
 	DestinationBytesMetricsASN: {value: "", flags: serverSideOnly},
+
+	DNSResolverAttemptsPerServer:                {value: 2, minimum: 1},
+	DNSResolverRequestTimeout:                   {value: 5 * time.Second, minimum: 100 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	DNSResolverAwaitTimeout:                     {value: 100 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	DNSResolverPreresolvedIPAddressProbability:  {value: 0.0, minimum: 0.0},
+	DNSResolverPreresolvedIPAddressCIDRs:        {value: LabeledCIDRs{}},
+	DNSResolverAlternateServers:                 {value: []string{}},
+	DNSResolverPreferAlternateServerProbability: {value: 0.0, minimum: 0.0},
+	DNSResolverProtocolTransformProbability:     {value: 0.0, minimum: 0.0},
+	DNSResolverProtocolTransformSpecs:           {value: transforms.Specs{}},
+	DNSResolverProtocolTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	DNSResolverIncludeEDNS0Probability:          {value: 0.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -954,6 +979,14 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case TunnelProtocolPortLists:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case LabeledCIDRs:
 				err := v.Validate()
 				if err != nil {
 					if skipOnError {
@@ -1444,6 +1477,43 @@ func (p ParametersAccessor) TunnelProtocolPortLists(name string) TunnelProtocolP
 	}
 
 	value := make(TunnelProtocolPortLists)
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// *TODO* move to other file?
+// *DOC*
+type LabeledCIDRs map[string][]string
+
+func (c LabeledCIDRs) Validate() error {
+	for _, CIDRs := range c {
+		for _, CIDR := range CIDRs {
+			_, _, err := net.ParseCIDR(CIDR)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+	}
+	return nil
+}
+
+// *DOC*
+func (p ParametersAccessor) LabeledCIDRs(name, label string) []string {
+	value := LabeledCIDRs{}
+	p.snapshot.getValue(name, &value)
+	return value[label]
+}
+
+// *DOC*
+func (p ParametersAccessor) ProtocolTransformSpecs(name string) transforms.Specs {
+	value := transforms.Specs{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// *DOC*
+func (p ParametersAccessor) ProtocolTransformScopedSpecNames(name string) transforms.ScopedSpecNames {
+	value := transforms.ScopedSpecNames{}
 	p.snapshot.getValue(name, &value)
 	return value
 }
