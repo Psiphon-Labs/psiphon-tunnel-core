@@ -45,6 +45,10 @@
             NSString *mnc = [cellularProvider mobileNetworkCode];
             [networkID appendFormat:@"-%@-%@", mcc, mnc];
         }
+    } else if (networkReachability == NetworkReachabilityReachableViaWired) {
+        [networkID setString:@"WIRED"];
+    } else if (networkReachability == NetworkReachabilityReachableViaLoopback) {
+        [networkID setString:@"LOOPBACK"];
     }
     return networkID;
 }
