@@ -237,6 +237,7 @@ const (
 	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
 	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
 	ReplayHoldOffTunnel                              = "ReplayHoldOffTunnel"
+	ReplayResolveParameters                          = "ReplayResolveParameters"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -306,13 +307,13 @@ const (
 	DNSResolverAttemptsPerServer                     = "DNSResolverAttemptsPerServer"
 	DNSResolverRequestTimeout                        = "DNSResolverRequestTimeout"
 	DNSResolverAwaitTimeout                          = "DNSResolverAwaitTimeout"
-	DNSResolverPreresolvedIPAddressProbability       = "DNSResolverPreresolvedIPAddressProbability"
 	DNSResolverPreresolvedIPAddressCIDRs             = "DNSResolverPreresolvedIPAddressCIDRs"
+	DNSResolverPreresolvedIPAddressProbability       = "DNSResolverPreresolvedIPAddressProbability"
 	DNSResolverAlternateServers                      = "DNSResolverAlternateServers"
 	DNSResolverPreferAlternateServerProbability      = "DNSResolverPreferAlternateServerProbability"
-	DNSResolverProtocolTransformProbability          = "DNSResolverProtocolTransformProbability"
 	DNSResolverProtocolTransformSpecs                = "DNSResolverProtocolTransformSpecs"
 	DNSResolverProtocolTransformScopedSpecNames      = "DNSResolverProtocolTransformScopedSpecNames"
+	DNSResolverProtocolTransformProbability          = "DNSResolverProtocolTransformProbability"
 	DNSResolverIncludeEDNS0Probability               = "DNSResolverIncludeEDNS0Probability"
 )
 
@@ -566,6 +567,7 @@ var defaultParameters = map[string]struct {
 	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
 	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
 	ReplayHoldOffTunnel:                    {value: true},
+	ReplayResolveParameters:                {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -654,13 +656,13 @@ var defaultParameters = map[string]struct {
 	DNSResolverAttemptsPerServer:                {value: 2, minimum: 1},
 	DNSResolverRequestTimeout:                   {value: 5 * time.Second, minimum: 100 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	DNSResolverAwaitTimeout:                     {value: 100 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
-	DNSResolverPreresolvedIPAddressProbability:  {value: 0.0, minimum: 0.0},
 	DNSResolverPreresolvedIPAddressCIDRs:        {value: LabeledCIDRs{}},
+	DNSResolverPreresolvedIPAddressProbability:  {value: 0.0, minimum: 0.0},
 	DNSResolverAlternateServers:                 {value: []string{}},
 	DNSResolverPreferAlternateServerProbability: {value: 0.0, minimum: 0.0},
-	DNSResolverProtocolTransformProbability:     {value: 0.0, minimum: 0.0},
 	DNSResolverProtocolTransformSpecs:           {value: transforms.Specs{}},
 	DNSResolverProtocolTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	DNSResolverProtocolTransformProbability:     {value: 0.0, minimum: 0.0},
 	DNSResolverIncludeEDNS0Probability:          {value: 0.0, minimum: 0.0},
 }
 

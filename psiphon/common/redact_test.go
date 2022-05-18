@@ -17,7 +17,7 @@
  *
  */
 
-package psiphon
+package common
 
 import (
 	"os"
@@ -25,7 +25,7 @@ import (
 	"testing"
 )
 
-func TestStripIPAddresses(t *testing.T) {
+func TestRedactIPAddresses(t *testing.T) {
 
 	testCases := []struct {
 		description    string
@@ -96,7 +96,7 @@ func TestStripIPAddresses(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.description, func(t *testing.T) {
-			output := StripIPAddressesString(testCase.input)
+			output := RedactIPAddressesString(testCase.input)
 			if output != testCase.expectedOutput {
 				t.Errorf("unexpected output: %s", output)
 			}
@@ -104,7 +104,7 @@ func TestStripIPAddresses(t *testing.T) {
 	}
 }
 
-func TestStripFilePaths(t *testing.T) {
+func TestRedactFilePaths(t *testing.T) {
 
 	testCases := []struct {
 		description    string
@@ -184,7 +184,7 @@ func TestStripFilePaths(t *testing.T) {
 			for _, filePath := range testCase.filePaths {
 				filePaths = append(filePaths, strings.ReplaceAll(filePath, "/", string(os.PathSeparator)))
 			}
-			output := StripFilePaths(input, filePaths...)
+			output := RedactFilePaths(input, filePaths...)
 			if output != testCase.expectedOutput {
 				t.Errorf("unexpected output: %s", output)
 			}

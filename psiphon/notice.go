@@ -251,11 +251,11 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 		// Ensure direct server IPs are not exposed in notices. The "net" package,
 		// and possibly other 3rd party packages, will include destination addresses
 		// in I/O error messages.
-		output = StripIPAddresses(output)
+		output = common.RedactIPAddresses(output)
 	}
 
-	// Don't call StripFilePaths here, as the file path redaction can
-	// potentially match many non-path strings. Instead, StripFilePaths should
+	// Don't call RedactFilePaths here, as the file path redaction can
+	// potentially match many non-path strings. Instead, RedactFilePaths should
 	// be applied in specific cases.
 
 	nl.mutex.Lock()
@@ -463,7 +463,7 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 		// Omit appliedTacticsTag as that is emitted in another notice.
 
 		if dialParams.BPFProgramName != "" {
-			args = append(args, "client_bpf", dialParams.BPFProgramName)
+			args = append(args, "clientBPF", dialParams.BPFProgramName)
 		}
 
 		if dialParams.SelectedSSHClientVersion {
@@ -551,6 +551,27 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 		if dialParams.ConjureTransport != "" {
 			args = append(args, "conjureTransport", dialParams.ConjureTransport)
+		}
+
+		if dialParams.ResolveParameters != nil {
+
+			if dialParams.ResolveParameters.PreresolvedIPAddress != "" {
+				args = append(args, "DNSPreresolved", dialParams.ResolveParameters.PreresolvedIPAddress)
+
+			} else {
+
+				// See dialParams.ResolveParameters comment in getBaseAPIParameters.
+
+				if dialParams.ResolveParameters.PreferAlternateDNSServer {
+					args = append(args, "DNSPreferred", dialParams.ResolveParameters.AlternateDNSServer)
+				}
+
+				if dialParams.ResolveParameters.ProtocolTransformName != "" {
+					args = append(args, "DNSTransform", dialParams.ResolveParameters.ProtocolTransformName)
+				}
+
+				args = append(args, "DNSAttempt", dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
+			}
 		}
 
 		if dialParams.DialConnMetrics != nil {

@@ -149,6 +149,24 @@ type ResolveParameters struct {
 	// whether the extension is included; the extension may be included as
 	// part of appearing similar to other DNS traffic.
 	IncludeEDNS0 bool
+
+	firstAttemptWithAnswer int32
+}
+
+// GetFirstAttemptWithAnswer returns the zero-based index of the first request
+// attempt that received a valid response, for the most recent ResolveIP call
+// using this ResolveParameters. This information is used for logging
+// metrics.
+//
+// The caller is responsible for synchronizing use of a ResolveParameters
+// instance (e.g, use a distinct ResolveParameters per ResolveIP to ensure
+// GetFirstAttemptWithAnswer refers to a specific ResolveIP).
+func (r *ResolveParameters) GetFirstAttemptWithAnswer() int {
+	return int(atomic.LoadInt32(&r.firstAttemptWithAnswer))
+}
+
+func (r *ResolveParameters) setFirstAttemptWithAnswer(attempt int) {
+	atomic.StoreInt32(&r.firstAttemptWithAnswer, int32(attempt))
 }
 
 // Implementation note: Go's standard net.Resolver supports specifying a
@@ -190,9 +208,8 @@ type resolverMetrics struct {
 	maxRTT        time.Duration
 }
 
-// NewResolver creates a new Resolver, invoking Update for the specified
-// networkID.
-func NewResolver(networkConfig *NetworkConfig, networkID string) (*Resolver, error) {
+// NewResolver creates a new Resolver instance.
+func NewResolver(networkConfig *NetworkConfig, networkID string) *Resolver {
 
 	r := &Resolver{
 		networkConfig: networkConfig,
@@ -200,12 +217,9 @@ func NewResolver(networkConfig *NetworkConfig, networkID string) (*Resolver, err
 
 	// updateNetworkState will initialize the cache and network state,
 	// including system DNS servers.
-	err := r.updateNetworkState(networkID)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	r.updateNetworkState(networkID)
 
-	return r, nil
+	return r
 }
 
 // Stop clears the Resolver cache and resets metrics. Stop must be called only
@@ -344,7 +358,8 @@ func (r *Resolver) ResolveAddress(
 // The input params may be nil, in which case default timeouts are used.
 //
 // ResolveIP performs concurrent A and AAAA lookups, returns any valid
-// response IPs, and caches results.
+// response IPs, and caches results. An error is returned when there are
+// no valid response IPs.
 //
 // ResolveIP is not a general purpose resolver and is Psiphon-specific. For
 // example, resolved domains are expected to exist; ResolveIP does not
@@ -379,10 +394,7 @@ func (r *Resolver) ResolveIP(
 	// call, updateNetworkState may not perform any operations; and after the
 	// updateNetworkState call, ResolveIP proceeds without holding the mutex
 	// lock. As a result, this step should not prevent ResolveIP concurrency.
-	err := r.updateNetworkState(networkID)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	r.updateNetworkState(networkID)
 
 	if params == nil {
 		// Supply default ResolveParameters
@@ -499,8 +511,9 @@ func (r *Resolver) ResolveIP(
 	waitGroup := new(sync.WaitGroup)
 	conns := common.NewConns()
 	type answer struct {
-		IPs  []net.IP
-		TTLs []time.Duration
+		attempt int
+		IPs     []net.IP
+		TTLs    []time.Duration
 	}
 	maxAttempts := len(servers) * params.AttemptsPerServer
 	answerChan := make(chan *answer, maxAttempts*2)
@@ -545,7 +558,7 @@ func (r *Resolver) ResolveIP(
 			// in the channel.
 			r.updateMetricPeakInFlight(atomic.AddInt64(&inFlight, 1))
 
-			go func(questionType resolverQuestionType, useProtocolTransform bool) {
+			go func(attempt int, questionType resolverQuestionType, useProtocolTransform bool) {
 				defer waitGroup.Done()
 
 				// We must decrement inFlight only after sending an answer and
@@ -648,7 +661,7 @@ func (r *Resolver) ResolveIP(
 
 				if len(IPs) > 0 {
 					select {
-					case answerChan <- &answer{IPs: IPs, TTLs: TTLs}:
+					case answerChan <- &answer{attempt: attempt, IPs: IPs, TTLs: TTLs}:
 					default:
 					}
 				}
@@ -665,7 +678,7 @@ func (r *Resolver) ResolveIP(
 				default:
 				}
 
-			}(questionType, useProtocolTransform)
+			}(i, questionType, useProtocolTransform)
 		}
 
 		resetTimer(requestTimeout)
@@ -675,6 +688,7 @@ func (r *Resolver) ResolveIP(
 			// When the first answer, a response with valid IPs, arrives, exit
 			// the attempts loop. The following await branch may collect
 			// additional answers.
+			params.setFirstAttemptWithAnswer(result.attempt)
 			stop = true
 		case <-timer.C:
 			// When requestTimeout arrives, loop around and launch the next
@@ -753,12 +767,17 @@ func (r *Resolver) ResolveIP(
 	if result == nil {
 		err := lastErr.Load()
 		if err == nil {
-			err = errors.TraceNew("missing error")
+			err = errors.TraceNew("unexpected missing error")
 		}
 		if r.networkConfig.LogHostnames {
 			err = fmt.Errorf("resolve %s : %w", hostname, err.(error))
 		}
 		return nil, errors.Trace(err.(error))
+	}
+
+	if len(result.IPs) == 0 {
+		// Unexpected, since a len(IPs) > 0 check precedes sending to answerChan.
+		return nil, errors.TraceNew("unexpected no IPs")
 	}
 
 	// Update the cache now, after all results are gathered.
@@ -786,7 +805,11 @@ func (r *Resolver) GetMetrics() string {
 
 // updateNetworkState updates the system DNS server list, IPv6 state, and the
 // cache.
-func (r *Resolver) updateNetworkState(networkID string) error {
+//
+// Any errors that occur while querying network state are logged; in error
+// conditions the functionality of the resolver may be reduced, but the
+// resolver remains operational.
+func (r *Resolver) updateNetworkState(networkID string) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -906,8 +929,6 @@ func (r *Resolver) updateNetworkState(networkID string) error {
 	// ResolveIP/updateNetworkState call might proceed as if the network
 	// state were updated for the specified network ID.
 	r.networkID = networkID
-
-	return nil
 }
 
 func (r *Resolver) getNetworkState() (bool, []string) {

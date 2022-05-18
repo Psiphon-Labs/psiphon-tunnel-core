@@ -24,10 +24,12 @@ import (
 	std_errors "errors"
 	"net"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 )
 
@@ -201,4 +203,109 @@ func (conn *TCPConn) CloseWrite() (err error) {
 	}
 
 	return tcpConn.CloseWrite()
+}
+
+func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
+
+	// Get the remote IP and port, resolving a domain name if necessary
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if config.ResolveIP == nil {
+		// Fail even if we don't need a resolver fir this dial: this is a code
+		// misconfiguration.
+		return nil, errors.TraceNew("missing resolver")
+	}
+	ipAddrs, err := config.ResolveIP(ctx, host)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if len(ipAddrs) < 1 {
+		return nil, errors.TraceNew("no IP address")
+	}
+
+	// When configured, attempt to synthesize IPv6 addresses from
+	// an IPv4 addresses for compatibility on DNS64/NAT64 networks.
+	// If synthesize fails, try the original addresses.
+	if config.IPv6Synthesizer != nil {
+		for i, ipAddr := range ipAddrs {
+			if ipAddr.To4() != nil {
+				synthesizedIPAddress := config.IPv6Synthesizer.IPv6Synthesize(ipAddr.String())
+				if synthesizedIPAddress != "" {
+					synthesizedAddr := net.ParseIP(synthesizedIPAddress)
+					if synthesizedAddr != nil {
+						ipAddrs[i] = synthesizedAddr
+					}
+				}
+			}
+		}
+	}
+
+	// Iterate over a pseudorandom permutation of the destination
+	// IPs and attempt connections.
+	//
+	// Only continue retrying as long as the dial context is not
+	// done. Unlike net.Dial, we do not fractionalize the context
+	// deadline, as the dial is generally intended to apply to a
+	// single attempt. So these serial retries are most useful in
+	// cases of immediate failure, such as "no route to host"
+	// errors when a host resolves to both IPv4 and IPv6 but IPv6
+	// addresses are unreachable.
+	//
+	// Retries at higher levels cover other cases: e.g.,
+	// Controller.remoteServerListFetcher will retry its entire
+	// operation and tcpDial will try a new permutation; or similarly,
+	// Controller.establishCandidateGenerator will retry a candidate
+	// tunnel server dials.
+
+	permutedIndexes := prng.Perm(len(ipAddrs))
+
+	lastErr := errors.TraceNew("unknown error")
+
+	for _, index := range permutedIndexes {
+
+		dialer := &net.Dialer{
+			Control: func(_, _ string, c syscall.RawConn) error {
+				var controlErr error
+				err := c.Control(func(fd uintptr) {
+
+					socketFD := int(fd)
+
+					setAdditionalSocketOptions(socketFD)
+
+					if config.BPFProgramInstructions != nil {
+						err := setSocketBPF(config.BPFProgramInstructions, socketFD)
+						if err != nil {
+							controlErr = errors.Tracef("setSocketBPF failed: %s", err)
+							return
+						}
+					}
+
+					if config.DeviceBinder != nil {
+						_, err := config.DeviceBinder.BindToDevice(socketFD)
+						if err != nil {
+							controlErr = errors.Tracef("BindToDevice failed: %s", err)
+							return
+						}
+					}
+				})
+				if controlErr != nil {
+					return errors.Trace(controlErr)
+				}
+				return errors.Trace(err)
+			},
+		}
+
+		conn, err := dialer.DialContext(
+			ctx, "tcp", net.JoinHostPort(ipAddrs[index].String(), port))
+		if err != nil {
+			lastErr = errors.Trace(err)
+			continue
+		}
+
+		return &TCPConn{Conn: conn}, nil
+	}
+
+	return nil, lastErr
 }

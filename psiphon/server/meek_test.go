@@ -317,6 +317,9 @@ func TestMeekResiliency(t *testing.T) {
 
 	dialConfig := &psiphon.DialConfig{
 		DeviceBinder: new(fileDescriptorInterruptor),
+		ResolveIP: func(_ context.Context, host string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP(host)}, nil
+		},
 	}
 
 	params, err := parameters.NewParameters(nil)
@@ -581,7 +584,11 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider bool) {
 
 	for i := 0; i < attempts; i++ {
 
-		dialConfig := &psiphon.DialConfig{}
+		dialConfig := &psiphon.DialConfig{
+			ResolveIP: func(_ context.Context, host string) ([]net.IP, error) {
+				return []net.IP{net.ParseIP(host)}, nil
+			},
+		}
 
 		params, err := parameters.NewParameters(nil)
 		if err != nil {
