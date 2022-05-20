@@ -90,6 +90,36 @@
     }
 }
 
+nw_interface_type_t
+nw_path_interface_type(nw_path_t path) API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
+    // Discover active interface type. Follows: https://developer.apple.com/forums/thread/105822?answerId=322343022#322343022.
+    if (nw_path_uses_interface_type(path, nw_interface_type_wifi)) {
+        return nw_interface_type_wifi;
+    } else if (nw_path_uses_interface_type(path, nw_interface_type_cellular)) {
+        return nw_interface_type_cellular;
+    } else if (nw_path_uses_interface_type(path, nw_interface_type_wired)) {
+        return nw_interface_type_wired;
+    } else if (nw_path_uses_interface_type(path, nw_interface_type_loopback)) {
+        return nw_interface_type_loopback;
+    } else {
+        return nw_interface_type_other;
+    }
+}
+
+NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t interface_type) {
+    if (interface_type == nw_interface_type_wifi) {
+        return NetworkReachabilityReachableViaWiFi;
+    } else if (interface_type == nw_interface_type_cellular) {
+        return NetworkReachabilityReachableViaCellular;
+    } else if (interface_type == nw_interface_type_wired) {
+        return NetworkReachabilityReachableViaWired;
+    } else if (interface_type == nw_interface_type_loopback) {
+        return NetworkReachabilityReachableViaLoopback;
+    } else {
+        return NetworkReachabilityReachableViaUnknown;
+    }
+}
+
 - (void)start API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
     @synchronized (self) {
         // Ensure previous monitor cancelled
@@ -112,38 +142,23 @@
             }
 
             nw_path_status_t status = nw_path_get_status(path);
-            if (status == nw_path_status_invalid) {
-                self->status = NetworkReachabilityNotReachable;
-            } else if (status == nw_path_status_unsatisfied) {
+            if (status == nw_path_status_invalid || status == nw_path_status_unsatisfied) {
                 self->status = NetworkReachabilityNotReachable;
             } else if (status == nw_path_status_satisfied || status == nw_path_status_satisfiable) {
-                if (nw_path_uses_interface_type(path, nw_interface_type_wifi)) {
-                    self->status = NetworkReachabilityReachableViaWiFi;
-                } else if (nw_path_uses_interface_type(path, nw_interface_type_cellular)) {
-                    self->status = NetworkReachabilityReachableViaCellular;
-                } else if (nw_path_uses_interface_type(path, nw_interface_type_wired)) {
-                    self->status = NetworkReachabilityReachableViaWired;
-                } else if (nw_path_uses_interface_type(path, nw_interface_type_loopback)) {
-                    self->status = NetworkReachabilityReachableViaLoopback;
-                } else {
-                    self->status = NetworkReachabilityReachableViaUnknown;
-                }
 
-                // Discover active interface type. Follows: https://developer.apple.com/forums/thread/105822?answerId=322343022#322343022.
-                nw_interface_type_t active_interface_type = nw_interface_type_other;
-                if (nw_path_uses_interface_type(path, nw_interface_type_wifi)) {
-                    active_interface_type = nw_interface_type_wifi;
-                } else if (nw_path_uses_interface_type(path, nw_interface_type_cellular)) {
-                    active_interface_type = nw_interface_type_cellular;
-                } else if (nw_path_uses_interface_type(path, nw_interface_type_wired)) {
-                    active_interface_type = nw_interface_type_wired;
-                } else if (nw_path_uses_interface_type(path, nw_interface_type_loopback)) {
-                    active_interface_type = nw_interface_type_loopback;
-                } else {
-                    active_interface_type = nw_interface_type_other;
-                }
+                // Network is, or could, be reachable. Determine interface corresponding to this
+                // path.
 
-                NSSet<NSString*>* activeInterfaces = [NetworkInterface activeInterfaces];
+                nw_interface_type_t active_interface_type = nw_path_interface_type(path);
+                self->status = nw_interface_type_network_reachability(active_interface_type);
+
+                NSError *err;
+                NSSet<NSString*>* activeInterfaces = [NetworkInterface activeInterfaces:&err];
+                if (err != nil) {
+                    [self log:[NSString stringWithFormat:@"failed to get active interfaces %@", err.localizedDescription]];
+                    // Continue. activeInterfaces will be an empty set (non-nil) and we still want
+                    // to log interfaces enumerated with nw_path_enumerate_interfaces for debugging.
+                }
                 [self log:[NSString stringWithFormat:@"active interfaces %@", activeInterfaces]];
 
                 NSMutableArray<NSString*> *candidateInterfaces = [[NSMutableArray alloc] init];
@@ -167,6 +182,7 @@
                 });
                 [self log:[NSString stringWithFormat:@"%lu candidate interfaces",
                            (unsigned long)[candidateInterfaces count]]];
+
                 if ([candidateInterfaces count] > 0) {
                     // Arbitrarily choose first interface
                     NSString *interfaceName = [candidateInterfaces objectAtIndex:0];

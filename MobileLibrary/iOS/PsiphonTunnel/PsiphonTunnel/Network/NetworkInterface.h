@@ -19,6 +19,7 @@
 
 #import <Foundation/Foundation.h>
 #import <Network/path.h>
+#import "ReachabilityProtocol.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -36,8 +37,23 @@ NS_ASSUME_NONNULL_BEGIN
 /// NetworkInterface provides a set of functions for discovering active network interfaces on the device.
 @interface NetworkInterface : NSObject
 
+/// Returns address assigned to the given interface. If the interface has no assigned addresses, or only has a link-local IPv6 address,
+/// then nil is returned.
+/// @param interfaceName Interface name. E.g. "en0".
+/// @param outError If non-nil, then an error occurred while trying determine the interface address.
++ (NSString*_Nullable)getInterfaceAddress:(NSString*_Nonnull)interfaceName
+                                    error:(NSError *_Nullable *_Nonnull)outError;
+
 /// Returns list of active interfaces excluding the loopback interface which support communicating with IPv4, or IPv6, addresses.
-+ (NSSet<NSString*>*_Nullable)activeInterfaces;
++ (NSSet<NSString*>*)activeInterfaces:(NSError *_Nullable *_Nonnull)outError;
+
+/// Returns the active interface name.
+/// @param reachability ReachabilityProtocol implementer used to determine active interface on iOS >=12.
+/// @param currentNetworkStatus Used to determine active interface on iOS <12.
+/// @param outError If non-nil, then an error occurred while determining the active interface.
++ (NSString*)getActiveInterfaceWithReachability:(id<ReachabilityProtocol>)reachability
+                        andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                                          error:(NSError *_Nullable *_Nonnull)outError;
 
 @end
 

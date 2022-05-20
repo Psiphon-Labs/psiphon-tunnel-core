@@ -1174,44 +1174,13 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         return @"";
     }
 
-    NSSet<NSString*>* upIffList = NetworkInterface.activeInterfaces;
-    if (upIffList == nil) {
-        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interfaces"}];
-        return @"";
-    }
-
-    NSString *activeInterface;
-
-    if (@available(iOS 12.0, *)) {
-        // Note: it is hypothetically possible that NWPathMonitor emits a new path after
-        // bindToDevice is called. This creates a race between DefaultRouteMonitor updating its
-        // internal state and bindToDevice retrieving the active interface from that internal state.
-        // Therefore the following sequence of events is possible:
-        // - NWPathMonitor emits path that is satisfied or satisfiable
-        // - GoPsiPsiphonProvider protocol consumer sees there is connectivity and calls bindToDevice
-        // - NWPathMonitor emits path that is unsatisfied or invalid
-        // - bindToDevice either: a) does not observe update and returns previously active
-        //   interface; or b) observes update and cannot find active interface.
-        // In both scenarios the reachability state will change to unreachable and it is up to the
-        // consumer to call bindToDevice again once it becomes reachable again.
-        DefaultRouteMonitor *gwMonitor = (DefaultRouteMonitor*)self->reachability;
-        if (gwMonitor == nil) {
-            *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: DefaultRouteMonitor nil"}];
-            return @"";
-        }
-        NetworkPathState *state = [gwMonitor pathState];
-        if (state == nil) {
-            *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: network path state nil"}];
-            return @"";
-        }
-        // Note: could fallback on heuristic for iOS <12.0 if nil
-        activeInterface = state.defaultActiveInterfaceName;
-    } else {
-        activeInterface = [self getActiveInterface:upIffList];
-    }
-
-    if (activeInterface == nil) {
-        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interface"}];
+    NSError *err;
+    NSString *activeInterface = [NetworkInterface getActiveInterfaceWithReachability:self->reachability
+                                                             andCurrentNetworkStatus:atomic_load(&self->currentNetworkStatus)
+                                                                               error:&err];
+    if (err != nil) {
+        NSString *localizedDescription = [NSString stringWithFormat:@"bindToDevice: error getting active interface %@", err.localizedDescription];
+        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
         return @"";
     }
 
@@ -1249,34 +1218,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     }
     
     return [NSString stringWithFormat:@"active interface: %@", activeInterface];
-}
-
-/*!
- @brief Returns name of default active network interface from the provided list of active interfaces.
- @param upIffList List of active network interfaces.
- @return Active interface name, nil otherwise.
- @warning Use DefaultRouteMonitor instead on iOS 12.0+.
- */
-- (NSString *)getActiveInterface:(NSSet<NSString*>*)upIffList {
-    
-    // TODO: following is a heuristic for choosing active network interface
-    // Only Wi-Fi and Cellular interfaces are considered
-    // @see : https://forums.developer.apple.com/thread/76711
-    NSArray *iffPriorityList = @[@"en0", @"pdp_ip0"];
-    if (atomic_load(&self->currentNetworkStatus) == NetworkReachabilityReachableViaCellular) {
-        iffPriorityList = @[@"pdp_ip0", @"en0"];
-    }
-    for (NSString * key in iffPriorityList) {
-        for (NSString * upIff in upIffList) {
-            if ([key isEqualToString:upIff]) {
-                return [NSString stringWithString:upIff];
-            }
-        }
-    }
-    
-    [self logMessage:@"getActiveInterface: No active interface found."];
-    
-    return nil;
 }
 
 - (NSString *)getPrimaryDnsServer {
@@ -1319,7 +1260,14 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (NSString *)getNetworkID {
-    return [NetworkID getNetworkID:[self->reachability reachabilityStatus]];
+    NSError *warn;
+    NSString *networkID = [NetworkID getNetworkIDWithReachability:self->reachability
+                                          andCurrentNetworkStatus:atomic_load(&self->currentNetworkStatus)
+                                                          warning:&warn];
+    if (warn != nil) {
+        [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];
+    }
+    return networkID;
 }
 
 - (void)notice:(NSString *)noticeJSON {
@@ -1763,10 +1711,30 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             }
         };
 
+        NSDateFormatter *rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
+
+        void (^logger)(NSString * _Nonnull) = ^void(NSString * _Nonnull msg) {
+            __strong PsiphonTunnelFeedback *strongSelf = weakSelf;
+            if (strongSelf == nil) {
+                return;
+            }
+            __strong id<PsiphonTunnelLoggerDelegate> strongLogger = weakLogger;
+            if (strongLogger == nil) {
+                return;
+            }
+            if ([strongLogger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+
+                NSString *timestampStr = [rfc3339Formatter stringFromDate:[NSDate date]];
+                dispatch_sync(strongSelf->callbackQueue, ^{
+                    [strongLogger onDiagnosticMessage:msg withTimestamp:timestampStr];
+                });
+            }
+        };
+
         PsiphonProviderNoticeHandlerShim *noticeHandler =
             [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
 
-        PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc] init];
+        PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc] initWithLogger:logger];
 
         GoPsiStartSendFeedback(psiphonConfig, feedbackJson, uploadPath,
                                innerFeedbackHandler, networkInfoProvider, noticeHandler,

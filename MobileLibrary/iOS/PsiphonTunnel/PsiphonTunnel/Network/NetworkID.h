@@ -29,7 +29,12 @@ NS_ASSUME_NONNULL_BEGIN
 ///
 /// See network ID requirements here:
 /// https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter
-+ (NSString *)getNetworkID:(NetworkReachability)networkReachability;
+/// @param reachability ReachabilityProtocol implementer used to determine network ID on iOS >=12.
+/// @param currentNetworkStatus Used to determine network ID on iOS <12.
+/// @param outWarn If non-nil, then a non-fatal error occurred while determining the network ID and a valid network ID will still be returned.
++ (NSString *)getNetworkIDWithReachability:(id<ReachabilityProtocol>)reachability
+                   andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                                   warning:(NSError *_Nullable *_Nonnull)outWarn;
 
 @end
 
