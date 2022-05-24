@@ -80,7 +80,7 @@
                                               (socklen_t)interface->ifa_addr->sa_len,
                                               addr,
                                               (socklen_t)NI_MAXHOST,
-                                              nil,
+                                              NULL,
                                               (socklen_t)0,
                                               NI_NUMERICHOST);
                         if (ret != 0) {
