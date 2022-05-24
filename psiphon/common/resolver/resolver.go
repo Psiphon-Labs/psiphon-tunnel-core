@@ -59,7 +59,7 @@ const (
 // NetworkConfig specifies network-level configuration for a Resolver.
 type NetworkConfig struct {
 
-	// GetDNSServers returns a list of system DNS server addresses(IP:port, or
+	// GetDNSServers returns a list of system DNS server addresses (IP:port, or
 	// IP only with port 53 assumed), as determined via OS APIs, in priority
 	// order. GetDNSServers may be nil.
 	GetDNSServers func() []string
@@ -114,9 +114,9 @@ type ResolveParameters struct {
 	// of making a request.
 	PreresolvedIPAddress string
 
-	// AlternateDNSServer specifies an alterate DNS server to be used when
-	// either no system DNS servers are available or when
-	// PreferAlternateDNSServer is set.
+	// AlternateDNSServer specifies an alterate DNS server (IP:port, or IP
+	// only with port 53 assumed) to be used when either no system DNS
+	// servers are available or when PreferAlternateDNSServer is set.
 	AlternateDNSServer string
 
 	// PreferAlternateDNSServer indicates whether to prioritize using the
@@ -279,16 +279,37 @@ func (r *Resolver) MakeResolveParameters(
 	// in cases where attempts to public DNS server are unwanted.
 	alternateServers := p.Strings(parameters.DNSResolverAlternateServers)
 	if len(alternateServers) > 0 {
-		params.AlternateDNSServer = alternateServers[prng.Intn(len(alternateServers))]
+
+		alternateServer := alternateServers[prng.Intn(len(alternateServers))]
+
+		// Check that the alternateServer has a well-formed IP address; and add
+		// a default port if none it present.
+		host, _, err := net.SplitHostPort(alternateServer)
+		if err != nil {
+			// Assume the SplitHostPort error is due to missing port.
+			host = alternateServer
+			alternateServer = net.JoinHostPort(alternateServer, resolverDNSPort)
+		}
+		if net.ParseIP(host) == nil {
+			// Log warning and proceed without this DNS server.
+			r.networkConfig.logWarning(
+				errors.TraceNew("invalid alternate DNS server IP address"))
+
+		} else {
+
+			params.AlternateDNSServer = alternateServer
+			params.PreferAlternateDNSServer = p.WeightedCoinFlip(
+				parameters.DNSResolverPreferAlternateServerProbability)
+		}
+
 	}
-	params.PreferAlternateDNSServer = p.WeightedCoinFlip(
-		parameters.DNSResolverPreferAlternateServerProbability)
 
 	// Select a DNS transform. DNS request transforms are "scoped" by
-	// alternate DNS server; that is, when an alternate DNS server is certain
-	// to be attempted first, a transform associated with and known to work
-	// with that DNS server will be selected. Otherwise, a transform from the
-	// default scope (transforms.SCOPE_ANY == "") is selected.
+	// alternate DNS server (IP address without port); that is, when an
+	// alternate DNS server is certain to be attempted first, a transform
+	// associated with and known to work with that DNS server will be
+	// selected. Otherwise, a transform from the default scope
+	// (transforms.SCOPE_ANY == "") is selected.
 	//
 	// In any case, ResolveIP will only apply a transform on the first request
 	// attempt.
@@ -307,8 +328,18 @@ func (r *Resolver) MakeResolveParameters(
 		// ResolveParameters.
 		_, systemServers := r.getNetworkState()
 		scope := transforms.SCOPE_ANY
-		if params.PreferAlternateDNSServer || len(systemServers) == 0 {
-			scope = params.AlternateDNSServer
+		if params.AlternateDNSServer != "" &&
+			(params.PreferAlternateDNSServer || len(systemServers) == 0) {
+
+			// Remove the port number, as the scope key is an IP address only.
+			//
+			// TODO: when we only just added the default port above, which is
+			// the common case, we could avoid this extra split.
+			host, _, err := net.SplitHostPort(params.AlternateDNSServer)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			scope = host
 		}
 
 		name, spec := specs.Select(scope, scopedSpecNames)
@@ -566,7 +597,7 @@ func (r *Resolver) ResolveIP(
 				// in the outer goroutine will see inFlight 0 only once those
 				// operations are complete.
 				//
-				// We cannot wait and decement inFlight when the outer
+				// We cannot wait and decrement inFlight when the outer
 				// goroutine receives answers, as no answer is sent in some
 				// cases, such as when the resolve fails due to NXDOMAIN.
 				defer atomic.AddInt64(&inFlight, -1)
@@ -581,10 +612,10 @@ func (r *Resolver) ResolveIP(
 					r.updateMetricRequestsIPv6()
 				}
 
-				// While it's possible, and potentially more more optimal, to
-				// use the same UDP socket for both the A and AAAA request,
-				// we use a distinct socket per request, as common DNS clients do.
-				conn, err := r.newResolverConn(server)
+				// While it's possible, and potentially more optimal, to use
+				// the same UDP socket for both the A and AAAA request, we
+				// use a distinct socket per request, as common DNS clients do.
+				conn, err := r.newResolverConn(r.networkConfig.logWarning, server)
 				if err != nil {
 					if resolveCtx.Err() == nil {
 						lastErr.Store(errors.Trace(err))
@@ -876,25 +907,23 @@ func (r *Resolver) updateNetworkState(networkID string) {
 	// ResolveParameters which specifies an AlternateDNSServer.
 	if updateServers && r.networkConfig.GetDNSServers != nil {
 
-		servers := r.networkConfig.GetDNSServers()
-
-		// Make a copy; don't rely on the slice from GetDNSServers being stable.
-		systemServers := append([]string(nil), servers...)
-
-		for i, systemServer := range systemServers {
+		systemServers := []string{}
+		for _, systemServer := range r.networkConfig.GetDNSServers() {
 			host, _, err := net.SplitHostPort(systemServer)
 			if err != nil {
 				// Assume the SplitHostPort error is due to systemServer being
 				// an IP only, and append the default port, 53. If
 				// systemServer _isn't_ an IP, the following ParseIP will fail.
-				systemServers[i] = net.JoinHostPort(systemServer, resolverDNSPort)
 				host = systemServer
+				systemServer = net.JoinHostPort(systemServer, resolverDNSPort)
 			}
 			if net.ParseIP(host) == nil {
 				// Log warning and proceed without this DNS server.
 				r.networkConfig.logWarning(
 					errors.TraceNew("invalid DNS server IP address"))
+				continue
 			}
+			systemServers = append(systemServers, systemServer)
 		}
 
 		// Check if the list of servers has changed, including order. If
@@ -971,7 +1000,15 @@ func (r *Resolver) getCache(hostname string) []net.IP {
 // newResolverConn creates a UDP socket that will send packets to serverAddr.
 // serverAddr is an IP:port, which allows specifying the port for testing or
 // in rare cases where the port isn't 53.
-func (r *Resolver) newResolverConn(serverAddr string) (net.Conn, error) {
+func (r *Resolver) newResolverConn(
+	logWarning func(error),
+	serverAddr string) (retConn net.Conn, retErr error) {
+
+	defer func() {
+		if retErr != nil {
+			logWarning(retErr)
+		}
+	}()
 
 	// When configured, attempt to synthesize an IPv6 address from
 	// an IPv4 address for compatibility on DNS64/NAT64 networks.
@@ -997,7 +1034,7 @@ func (r *Resolver) newResolverConn(serverAddr string) (net.Conn, error) {
 			err := c.Control(func(fd uintptr) {
 				_, err := r.networkConfig.BindToDevice(int(fd))
 				if err != nil {
-					controlErr = errors.Tracef("BindToDevice failed: %s", err)
+					controlErr = errors.Tracef("BindToDevice failed: %v", err)
 					return
 				}
 			})
@@ -1260,6 +1297,7 @@ func performDNSQuery(
 
 		checkFailed := false
 		for _, answer := range response.Answer {
+			haveAnswer := false
 			var IP net.IP
 			var TTLSec uint32
 			switch questionType {
@@ -1267,12 +1305,17 @@ func performDNSQuery(
 				if a, ok := answer.(*dns.A); ok {
 					IP = a.A
 					TTLSec = a.Hdr.Ttl
+					haveAnswer = true
 				}
 			case resolverQuestionTypeAAAA:
 				if aaaa, ok := answer.(*dns.AAAA); ok {
 					IP = aaaa.AAAA
 					TTLSec = aaaa.Hdr.Ttl
+					haveAnswer = true
 				}
+			}
+			if !haveAnswer {
+				continue
 			}
 			err := checkDNSAnswerIP(IP)
 			if err != nil {

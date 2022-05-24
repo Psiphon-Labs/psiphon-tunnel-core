@@ -55,7 +55,6 @@ package parameters
 
 import (
 	"encoding/json"
-	"net"
 	"net/http"
 	"reflect"
 	"sync/atomic"
@@ -1483,37 +1482,24 @@ func (p ParametersAccessor) TunnelProtocolPortLists(name string) TunnelProtocolP
 	return value
 }
 
-// *TODO* move to other file?
-// *DOC*
-type LabeledCIDRs map[string][]string
-
-func (c LabeledCIDRs) Validate() error {
-	for _, CIDRs := range c {
-		for _, CIDR := range CIDRs {
-			_, _, err := net.ParseCIDR(CIDR)
-			if err != nil {
-				return errors.Trace(err)
-			}
-		}
-	}
-	return nil
-}
-
-// *DOC*
+// LabeledCIDRs returns a CIDR string list parameter value corresponding to
+// the specified labeled set and label value. The return value is nil when no
+// set is found.
 func (p ParametersAccessor) LabeledCIDRs(name, label string) []string {
 	value := LabeledCIDRs{}
 	p.snapshot.getValue(name, &value)
 	return value[label]
 }
 
-// *DOC*
+// ProtocolTransformSpecs returns a transforms.Specs parameter value.
 func (p ParametersAccessor) ProtocolTransformSpecs(name string) transforms.Specs {
 	value := transforms.Specs{}
 	p.snapshot.getValue(name, &value)
 	return value
 }
 
-// *DOC*
+// ProtocolTransformScopedSpecNames returns a transforms.ScopedSpecNames
+// parameter value.
 func (p ParametersAccessor) ProtocolTransformScopedSpecNames(name string) transforms.ScopedSpecNames {
 	value := transforms.ScopedSpecNames{}
 	p.snapshot.getValue(name, &value)

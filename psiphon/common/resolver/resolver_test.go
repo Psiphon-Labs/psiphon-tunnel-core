@@ -62,6 +62,7 @@ func runTestMakeResolveParameters() error {
 
 	frontingProviderID := "frontingProvider"
 	alternateDNSServer := "172.16.0.1"
+	alternateDNSServerWithPort := net.JoinHostPort(alternateDNSServer, resolverDNSPort)
 	transformName := "exampleTransform"
 
 	paramValues := map[string]interface{}{
@@ -84,10 +85,7 @@ func runTestMakeResolveParameters() error {
 		return errors.Trace(err)
 	}
 
-	resolver, err := NewResolver(&NetworkConfig{}, "")
-	if err != nil {
-		return errors.Trace(err)
-	}
+	resolver := NewResolver(&NetworkConfig{}, "")
 	defer resolver.Stop()
 
 	resolverParams, err := resolver.MakeResolveParameters(
@@ -149,7 +147,7 @@ func runTestMakeResolveParameters() error {
 		resolverParams.RequestTimeout != 5*time.Second ||
 		resolverParams.AwaitTimeout != 100*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
-		resolverParams.AlternateDNSServer != alternateDNSServer ||
+		resolverParams.AlternateDNSServer != alternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != true ||
 		resolverParams.ProtocolTransformName != transformName ||
 		resolverParams.ProtocolTransformSpec == nil ||
@@ -178,7 +176,7 @@ func runTestMakeResolveParameters() error {
 		resolverParams.RequestTimeout != 5*time.Second ||
 		resolverParams.AwaitTimeout != 100*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
-		resolverParams.AlternateDNSServer != alternateDNSServer ||
+		resolverParams.AlternateDNSServer != alternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != false ||
 		resolverParams.ProtocolTransformName != "" ||
 		resolverParams.ProtocolTransformSpec != nil ||
@@ -239,10 +237,7 @@ func runTestResolver() error {
 
 	networkID := "networkID-1"
 
-	resolver, err := NewResolver(networkConfig, networkID)
-	if err != nil {
-		return errors.Trace(err)
-	}
+	resolver := NewResolver(networkConfig, networkID)
 	defer resolver.Stop()
 
 	params := &ResolveParameters{
@@ -568,10 +563,7 @@ func runTestPublicDNSServers() ([]net.IP, string, error) {
 
 	networkID := "networkID-1"
 
-	resolver, err := NewResolver(networkConfig, networkID)
-	if err != nil {
-		return nil, "", errors.Trace(err)
-	}
+	resolver := NewResolver(networkConfig, networkID)
 	defer resolver.Stop()
 
 	params := &ResolveParameters{
