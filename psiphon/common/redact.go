@@ -102,6 +102,19 @@ func RedactIPAddressesString(s string) string {
 	return redactIPAddressAndPortRegex.ReplaceAllString(s, "[redacted]")
 }
 
+// EscapeRedactIPAddressString escapes the IP or IP:port addresses in the
+// input in such a way that they won't be redacted when part of the input to
+// RedactIPAddresses.
+//
+// The escape encoding is not guaranteed to be reversable or suitable for
+// machine processing; the goal is to simply ensure the original value is
+// human readable.
+func EscapeRedactIPAddressString(address string) string {
+	address = strings.ReplaceAll(address, ".", "\\.")
+	address = strings.ReplaceAll(address, ":", "\\:")
+	return address
+}
+
 var redactFilePathRegex = regexp.MustCompile(
 	// File path
 	`(` +

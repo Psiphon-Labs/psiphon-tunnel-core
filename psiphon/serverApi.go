@@ -946,9 +946,11 @@ func getBaseAPIParameters(
 			params["meek_dial_address"] = dialParams.MeekDialAddress
 		}
 
-		meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
-		if meekResolvedIPAddress != "" {
-			params["meek_resolved_ip_address"] = meekResolvedIPAddress
+		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+			meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
+			if meekResolvedIPAddress != "" {
+				params["meek_resolved_ip_address"] = meekResolvedIPAddress
+			}
 		}
 
 		if dialParams.MeekSNIServerName != "" {

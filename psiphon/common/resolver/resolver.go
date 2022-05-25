@@ -153,10 +153,11 @@ type ResolveParameters struct {
 	firstAttemptWithAnswer int32
 }
 
-// GetFirstAttemptWithAnswer returns the zero-based index of the first request
-// attempt that received a valid response, for the most recent ResolveIP call
-// using this ResolveParameters. This information is used for logging
-// metrics.
+// GetFirstAttemptWithAnswer returns the index of the first request attempt
+// that received a valid response, for the most recent ResolveIP call using
+// this ResolveParameters. This information is used for logging metrics. The
+// first attempt has index 1. GetFirstAttemptWithAnswer return 0 when no
+// request attempt has reported a valid response.
 //
 // The caller is responsible for synchronizing use of a ResolveParameters
 // instance (e.g, use a distinct ResolveParameters per ResolveIP to ensure
@@ -208,11 +209,16 @@ type resolverMetrics struct {
 	maxRTT        time.Duration
 }
 
+func newResolverMetrics() resolverMetrics {
+	return resolverMetrics{minRTT: -1}
+}
+
 // NewResolver creates a new Resolver instance.
 func NewResolver(networkConfig *NetworkConfig, networkID string) *Resolver {
 
 	r := &Resolver{
 		networkConfig: networkConfig,
+		metrics:       newResolverMetrics(),
 	}
 
 	// updateNetworkState will initialize the cache and network state,
@@ -237,7 +243,7 @@ func (r *Resolver) Stop() {
 	r.hasIPv6Route = false
 	r.systemServers = nil
 	r.cache.Flush()
-	r.metrics = resolverMetrics{}
+	r.metrics = newResolverMetrics()
 }
 
 // MakeResolveParameters generates ResolveParameters using the input tactics
@@ -669,17 +675,16 @@ func (r *Resolver) ResolveIP(
 					questionType,
 					hostname)
 
-				// Update the min/max RTT metric as long as the reported RTT >
-				// 0, even if the result is an error -- i.e., the even if
-				// there was an invalid response --  unless the resolveCtx is
-				// done (we don't want to consider the RTT in the case of
-				// cancellation). This assumes no actual RTT will be 0 nanoseconds
+				// Update the min/max RTT metric when reported (>=0) even if
+				// the result is an error -- i.e., the even if there was an
+				// invalid response --  unless the resolveCtx is done
+				// (we don't want to consider the RTT in the case of cancellation).
 				//
 				// Limitation: since individual requests aren't cancelled
 				// after requestTimeout, RTT metrics won't reflect
 				// no-response cases, although request and response count
 				// disparities will still show up in the metrics.
-				if RTT > 0 && resolveCtx.Err() == nil {
+				if RTT >= 0 && resolveCtx.Err() == nil {
 					r.updateMetricRTT(RTT)
 				}
 
@@ -709,7 +714,7 @@ func (r *Resolver) ResolveIP(
 				default:
 				}
 
-			}(i, questionType, useProtocolTransform)
+			}(i+1, questionType, useProtocolTransform)
 		}
 
 		resetTimer(requestTimeout)
@@ -822,7 +827,15 @@ func (r *Resolver) GetMetrics() string {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	return fmt.Sprintf("resolves %d | hit %d | req v4/v6 %d/%d | resp %d/%d | peak %d | rtt %d - %d ms.",
+	// When r.metrics.minRTT < 0, min/maxRTT is unset.
+	minRTT := "n/a"
+	maxRTT := minRTT
+	if r.metrics.minRTT >= 0 {
+		minRTT = fmt.Sprintf("%d", r.metrics.minRTT/time.Millisecond)
+		maxRTT = fmt.Sprintf("%d", r.metrics.maxRTT/time.Millisecond)
+	}
+
+	return fmt.Sprintf("resolves %d | hit %d | req v4/v6 %d/%d | resp %d/%d | peak %d | rtt %s - %s ms.",
 		r.metrics.resolves,
 		r.metrics.cacheHits,
 		r.metrics.requestsIPv4,
@@ -830,8 +843,8 @@ func (r *Resolver) GetMetrics() string {
 		r.metrics.responsesIPv4,
 		r.metrics.responsesIPv6,
 		r.metrics.peakInFlight,
-		r.metrics.minRTT/time.Millisecond,
-		r.metrics.maxRTT/time.Millisecond)
+		minRTT,
+		maxRTT)
 }
 
 // updateNetworkState updates the system DNS server list, IPv6 state, and the
@@ -971,10 +984,11 @@ func (r *Resolver) setCache(hostname string, IPs []net.IP, TTLs []time.Duration)
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	// In case TTL is zero, use a default. The shortest TTL is used.
+	// The shortest TTL is used. In some cases, a DNS server may omit the TTL
+	// or set a 0 TTL, in which case the default is used.
 	TTL := resolverDefaultAnswerTTL
 	for _, answerTTL := range TTLs {
-		if answerTTL < TTL {
+		if answerTTL > 0 && answerTTL < TTL {
 			TTL = answerTTL
 		}
 	}
@@ -1103,8 +1117,13 @@ func (r *Resolver) updateMetricRTT(rtt time.Duration) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	// This assumes no actual RTT will be 0 nanoseconds
-	if r.metrics.minRTT == 0 || rtt < r.metrics.minRTT {
+	if rtt < 0 {
+		// Ignore invalid input.
+		return
+	}
+
+	// When r.metrics.minRTT < 0, min/maxRTT is unset.
+	if r.metrics.minRTT < 0 || rtt < r.metrics.minRTT {
 		r.metrics.minRTT = rtt
 	}
 
@@ -1152,7 +1171,7 @@ func generateIPAddressFromCIDR(CIDR string) (net.IP, error) {
 	}
 	// A retry is required, since a CIDR may include broadcast IPs (a.b.c.0) or
 	// other invalid values. The number of retries is limited to ensure we
-	// don't hanging case of a misconfiguration
+	// don't hang in the case of a misconfiguration.
 	for i := 0; i < 10; i++ {
 		randBytes := prng.Bytes(len(IPNet.IP))
 		IP := make(net.IP, len(IPNet.IP))
@@ -1187,13 +1206,13 @@ func performDNSQuery(
 	if useProtocolTransform {
 		if params.ProtocolTransformSpec == nil ||
 			params.ProtocolTransformSeed == nil {
-			return nil, nil, 0, errors.TraceNew("invalid protocol transform configuration")
+			return nil, nil, -1, errors.TraceNew("invalid protocol transform configuration")
 		}
 		// miekg/dns expects conn to be a net.PacketConn or else it writes the
 		// TCP length prefix
 		udpConn, ok := conn.(*net.UDPConn)
 		if !ok {
-			return nil, nil, 0, errors.TraceNew("conn is not a *net.UDPConn")
+			return nil, nil, -1, errors.TraceNew("conn is not a *net.UDPConn")
 		}
 		conn = &transformDNSPacketConn{
 			UDPConn:   udpConn,
@@ -1219,7 +1238,7 @@ func performDNSQuery(
 	case resolverQuestionTypeAAAA:
 		request.SetQuestion(dns.Fqdn(hostname), dns.TypeAAAA)
 	default:
-		return nil, nil, 0, errors.TraceNew("unknown DNS request question type")
+		return nil, nil, -1, errors.TraceNew("unknown DNS request question type")
 	}
 	if params.IncludeEDNS0 {
 		// miekg/dns: "RFC 6891, Section 6.1.1 allows the OPT record to appear
@@ -1269,13 +1288,13 @@ func performDNSQuery(
 		// will still abort after resolveCtx is done, or RequestTimeout
 		// expires for maxAttempts).
 		//
-		// For IPv6, we should also expect RCodeSucess even if there is no
+		// For IPv6, we should also expect RCodeSuccess even if there is no
 		// AAAA record, as long as the domain exists and has an A record.
 		// However, per RFC 6147 section 5.1.2, we may receive
 		// NXDOMAIN: "...some servers respond with RCODE=3 to a AAAA query
 		// even if there is an A record available for that owner name. Those
 		// servers are in clear violation of the meaning of RCODE 3...". In
-		// this case, we coalese NXDOMAIN into success to treat the response
+		// this case, we coalesce NXDOMAIN into success to treat the response
 		// the same as success with no AAAA record.
 		//
 		// All other RCodes, which are unexpected, lead to a read retry.

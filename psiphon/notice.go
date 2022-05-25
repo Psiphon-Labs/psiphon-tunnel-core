@@ -446,7 +446,7 @@ func NoticeAvailableEgressRegions(regions []string) {
 		"AvailableEgressRegions", 0, "regions", sortedRegions)
 }
 
-func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
+func noticeWithDialParameters(noticeType string, dialParams *DialParameters, postDial bool) {
 
 	args := []interface{}{
 		"diagnosticID", dialParams.ServerEntry.GetDiagnosticID(),
@@ -486,9 +486,12 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 			args = append(args, "meekDialAddress", dialParams.MeekDialAddress)
 		}
 
-		meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
-		if meekResolvedIPAddress != "" {
-			args = append(args, "meekResolvedIPAddress", meekResolvedIPAddress)
+		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+			meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
+			if meekResolvedIPAddress != "" {
+				nonredacted := common.EscapeRedactIPAddressString(meekResolvedIPAddress)
+				args = append(args, "meekResolvedIPAddress", nonredacted)
+			}
 		}
 
 		if dialParams.MeekSNIServerName != "" {
@@ -556,21 +559,25 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 		if dialParams.ResolveParameters != nil {
 
 			if dialParams.ResolveParameters.PreresolvedIPAddress != "" {
-				args = append(args, "DNSPreresolved", dialParams.ResolveParameters.PreresolvedIPAddress)
+				nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.PreresolvedIPAddress)
+				args = append(args, "DNSPreresolved", nonredacted)
 
 			} else {
 
 				// See dialParams.ResolveParameters comment in getBaseAPIParameters.
 
 				if dialParams.ResolveParameters.PreferAlternateDNSServer {
-					args = append(args, "DNSPreferred", dialParams.ResolveParameters.AlternateDNSServer)
+					nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.AlternateDNSServer)
+					args = append(args, "DNSPreferred", nonredacted)
 				}
 
 				if dialParams.ResolveParameters.ProtocolTransformName != "" {
 					args = append(args, "DNSTransform", dialParams.ResolveParameters.ProtocolTransformName)
 				}
 
-				args = append(args, "DNSAttempt", dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
+				if postDial {
+					args = append(args, "DNSAttempt", dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
+				}
 			}
 		}
 
@@ -596,22 +603,22 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters) {
 
 // NoticeConnectingServer reports parameters and details for a single connection attempt
 func NoticeConnectingServer(dialParams *DialParameters) {
-	noticeWithDialParameters("ConnectingServer", dialParams)
+	noticeWithDialParameters("ConnectingServer", dialParams, false)
 }
 
 // NoticeConnectedServer reports parameters and details for a single successful connection
 func NoticeConnectedServer(dialParams *DialParameters) {
-	noticeWithDialParameters("ConnectedServer", dialParams)
+	noticeWithDialParameters("ConnectedServer", dialParams, true)
 }
 
 // NoticeRequestingTactics reports parameters and details for a tactics request attempt
 func NoticeRequestingTactics(dialParams *DialParameters) {
-	noticeWithDialParameters("RequestingTactics", dialParams)
+	noticeWithDialParameters("RequestingTactics", dialParams, false)
 }
 
 // NoticeRequestedTactics reports parameters and details for a successful tactics request
 func NoticeRequestedTactics(dialParams *DialParameters) {
-	noticeWithDialParameters("RequestedTactics", dialParams)
+	noticeWithDialParameters("RequestedTactics", dialParams, true)
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
