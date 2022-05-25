@@ -178,18 +178,6 @@
 
     *outError = nil;
 
-    NSError *err;
-    NSSet<NSString*>* upIffList = [NetworkInterface activeInterfaces:&err];
-    if (err != nil) {
-        NSString *localizedDescription = [NSString stringWithFormat:@"bindToDevice: error getting active interfaces %@", err.localizedDescription];
-        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: localizedDescription}];
-        return @"";
-    }
-    if (upIffList == nil) {
-        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interfaces"}];
-        return @"";
-    }
-
     NSString *activeInterface;
 
     if (@available(iOS 12.0, *)) {
@@ -217,6 +205,17 @@
         // Note: could fallback on heuristic for iOS <12.0 if nil
         activeInterface = state.defaultActiveInterfaceName;
     } else {
+        NSError *err;
+        NSSet<NSString*>* upIffList = [NetworkInterface activeInterfaces:&err];
+        if (err != nil) {
+            NSString *localizedDescription = [NSString stringWithFormat:@"bindToDevice: error getting active interfaces %@", err.localizedDescription];
+            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: localizedDescription}];
+            return @"";
+        }
+        if (upIffList == nil) {
+            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interfaces"}];
+            return @"";
+        }
         activeInterface = [NetworkInterface getActiveInterface:upIffList
                                           currentNetworkStatus:currentNetworkStatus];
     }

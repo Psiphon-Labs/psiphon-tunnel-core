@@ -23,6 +23,7 @@
  */
 
 #import "Reachability.h"
+#import "DefaultRouteMonitor.h"
 #import "ReachabilityProtocol.h"
 #import "JailbreakCheck.h"
 #import "PsiphonClientPlatform.h"

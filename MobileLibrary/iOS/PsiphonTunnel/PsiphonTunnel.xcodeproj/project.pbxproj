@@ -44,7 +44,7 @@
 		CE3D1DA523906003009A4AF6 /* Backups.h in Headers */ = {isa = PBXBuildFile; fileRef = CE3D1DA323906003009A4AF6 /* Backups.h */; };
 		CE3D1DA623906003009A4AF6 /* Backups.m in Sources */ = {isa = PBXBuildFile; fileRef = CE3D1DA423906003009A4AF6 /* Backups.m */; };
 		CE676F2525FA818200F7DB13 /* ReachabilityProtocol.h in Headers */ = {isa = PBXBuildFile; fileRef = CE676F2325FA818200F7DB13 /* ReachabilityProtocol.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		CE676F2A25FA82DA00F7DB13 /* DefaultRouteMonitor.h in Headers */ = {isa = PBXBuildFile; fileRef = CE676F2825FA82DA00F7DB13 /* DefaultRouteMonitor.h */; };
+		CE676F2A25FA82DA00F7DB13 /* DefaultRouteMonitor.h in Headers */ = {isa = PBXBuildFile; fileRef = CE676F2825FA82DA00F7DB13 /* DefaultRouteMonitor.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		CE676F2B25FA82DA00F7DB13 /* DefaultRouteMonitor.m in Sources */ = {isa = PBXBuildFile; fileRef = CE676F2925FA82DA00F7DB13 /* DefaultRouteMonitor.m */; };
 		CE676F2F25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.h in Headers */ = {isa = PBXBuildFile; fileRef = CE676F2D25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.h */; };
 		CE676F3025FA830C00F7DB13 /* Reachability+ReachabilityProtocol.m in Sources */ = {isa = PBXBuildFile; fileRef = CE676F2E25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.m */; };
@@ -349,8 +349,8 @@
 				66BAD3351E525FBC00CD06DE /* JailbreakCheck.h in Headers */,
 				4E89F7FF1E2ED3CE00005F4C /* LookupIPv6.h in Headers */,
 				CE676F2F25FA830C00F7DB13 /* Reachability+ReachabilityProtocol.h in Headers */,
-				662659271DD270E900872F6C /* Reachability.h in Headers */,
 				CE676F2A25FA82DA00F7DB13 /* DefaultRouteMonitor.h in Headers */,
+				662659271DD270E900872F6C /* Reachability.h in Headers */,
 				66BDB05D1DC26CCC0079384C /* SBJson4StreamParser.h in Headers */,
 				6685BDD41E2EBB1000F0E414 /* GoPsi.objc.h in Headers */,
 				52BE676825B8A615002DB553 /* PsiphonClientPlatform.h in Headers */,

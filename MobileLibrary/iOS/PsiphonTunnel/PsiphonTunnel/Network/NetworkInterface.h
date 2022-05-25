@@ -23,17 +23,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// NetworkPathState represents the state of the network path on the device.
-@interface NetworkPathState : NSObject
-
-/// Network path state.
-@property (nonatomic, nullable) nw_path_t path;
-
-/// Default active interface available to the network path.
-@property (nonatomic, nullable) NSString* defaultActiveInterfaceName;
-
-@end
-
 /// NetworkInterface provides a set of functions for discovering active network interfaces on the device.
 @interface NetworkInterface : NSObject
 

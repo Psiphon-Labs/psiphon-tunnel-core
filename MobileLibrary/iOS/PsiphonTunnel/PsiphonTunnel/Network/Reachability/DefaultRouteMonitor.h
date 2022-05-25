@@ -18,17 +18,24 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <Network/path.h>
 #import "ReachabilityProtocol.h"
-#import "NetworkInterface.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// NetworkPathState represents the state of the network path on the device.
+@interface NetworkPathState : NSObject
+
+/// Network path state.
+@property (nonatomic, nullable) nw_path_t path;
+
+/// Default active interface available to the network path.
+@property (nonatomic, nullable) NSString* defaultActiveInterfaceName;
+
+@end
+
 /// ReachabilityChangedNotification represents the reachability state on the device.
 @interface ReachabilityChangedNotification : NSObject
-
-- (instancetype)initWithReachabilityStatus:(NetworkReachability)networkReachability
-             curDefaultActiveInterfaceName:(NSString*)curDefaultActiveInterfaceName
-            prevDefaultActiveInterfaceName:(NSString*)prevDefaultActiveInterfaceName;
 
 /// Current reachability status.
 @property (nonatomic, readonly) NetworkReachability reachabilityStatus;
