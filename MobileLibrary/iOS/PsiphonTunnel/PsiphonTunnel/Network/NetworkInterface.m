@@ -182,24 +182,26 @@
 
     if (@available(iOS 12.0, *)) {
         // Note: it is hypothetically possible that NWPathMonitor emits a new path after
-        // bindToDevice is called. This creates a race between DefaultRouteMonitor updating its
-        // internal state and bindToDevice retrieving the active interface from that internal state.
+        // getActiveInterfaceWithReachability is called. This creates a race between
+        // DefaultRouteMonitor updating its internal state and getActiveInterfaceWithReachability
+        // retrieving the active interface from that internal state.
         // Therefore the following sequence of events is possible:
         // - NWPathMonitor emits path that is satisfied or satisfiable
-        // - GoPsiPsiphonProvider protocol consumer sees there is connectivity and calls bindToDevice
+        // - ReachabilityProtocol consumer sees there is connectivity and calls
+        //   getActiveInterfaceWithReachability
         // - NWPathMonitor emits path that is unsatisfied or invalid
-        // - bindToDevice either: a) does not observe update and returns previously active
-        //   interface; or b) observes update and cannot find active interface.
+        // - getActiveInterfaceWithReachability either: a) does not observe update and returns the
+        //   previously active interface; or b) observes update and cannot find active interface.
         // In both scenarios the reachability state will change to unreachable and it is up to the
-        // consumer to call bindToDevice again once it becomes reachable again.
+        // consumer to call getActiveInterfaceWithReachability again once it becomes reachable again.
         DefaultRouteMonitor *gwMonitor = (DefaultRouteMonitor*)reachability;
         if (gwMonitor == nil) {
-            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: DefaultRouteMonitor nil"}];
+            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithReachability: DefaultRouteMonitor nil"}];
             return @"";
         }
         NetworkPathState *state = [gwMonitor pathState];
         if (state == nil) {
-            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: network path state nil"}];
+            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithReachability: network path state nil"}];
             return @"";
         }
         // Note: could fallback on heuristic for iOS <12.0 if nil
@@ -208,12 +210,12 @@
         NSError *err;
         NSSet<NSString*>* upIffList = [NetworkInterface activeInterfaces:&err];
         if (err != nil) {
-            NSString *localizedDescription = [NSString stringWithFormat:@"bindToDevice: error getting active interfaces %@", err.localizedDescription];
+            NSString *localizedDescription = [NSString stringWithFormat:@"getActiveInterfaceWithReachability: error getting active interfaces %@", err.localizedDescription];
             *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: localizedDescription}];
             return @"";
         }
         if (upIffList == nil) {
-            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interfaces"}];
+            *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithReachability: no active interfaces"}];
             return @"";
         }
         activeInterface = [NetworkInterface getActiveInterface:upIffList
@@ -221,7 +223,7 @@
     }
 
     if (activeInterface == nil) {
-        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interface"}];
+        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"getActiveInterfaceWithReachability: no active interface"}];
         return @"";
     }
 
