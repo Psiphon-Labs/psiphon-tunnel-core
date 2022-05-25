@@ -144,7 +144,7 @@ public class PsiphonTunnel {
     private final boolean mShouldRouteThroughTunnelAutomatically;
     private final NetworkMonitor mNetworkMonitor;
     private AtomicReference<String> mActiveNetworkType;
-    private AtomicReference<String> mActiveNetworkPrimaryDNSServer;
+    private AtomicReference<String> mActiveNetworkDNSServers;
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // psi.Psi and tun2socks implementations each contain global state.
@@ -197,7 +197,7 @@ public class PsiphonTunnel {
         mClientPlatformSuffix = new AtomicReference<String>("");
         mShouldRouteThroughTunnelAutomatically = shouldRouteThroughTunnelAutomatically;
         mActiveNetworkType = new AtomicReference<String>("");
-        mActiveNetworkPrimaryDNSServer = new AtomicReference<String>("");
+        mActiveNetworkDNSServers = new AtomicReference<String>("");
         mNetworkMonitor = new NetworkMonitor(new NetworkMonitor.NetworkChangeListener() {
             @Override
             public void onChanged() {
@@ -207,7 +207,7 @@ public class PsiphonTunnel {
                     mHostService.onDiagnosticMessage("reconnect error: " + e);
                 }
             }
-        }, mActiveNetworkType, mActiveNetworkPrimaryDNSServer, mHostService);
+        }, mActiveNetworkType, mActiveNetworkDNSServers, mHostService);
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -489,8 +489,6 @@ public class PsiphonTunnel {
     private final static String VPN_INTERFACE_NETMASK = "255.255.255.0";
     private final static int VPN_INTERFACE_MTU = 1500;
     private final static int UDPGW_SERVER_PORT = 7300;
-    private final static String DEFAULT_PRIMARY_DNS_SERVER = "8.8.4.4";
-    private final static String DEFAULT_SECONDARY_DNS_SERVER = "8.8.8.8";
 
     // Note: Atomic variables used for getting/setting local proxy port, routing flag, and
     // tun fd, as these functions may be called via PsiphonProvider callbacks. Do not use
@@ -635,13 +633,8 @@ public class PsiphonTunnel {
         }
 
         @Override
-        public String getPrimaryDnsServer() {
-            return mPsiphonTunnel.getPrimaryDnsServer(mHostService.getContext(), mHostService);
-        }
-
-        @Override
-        public String getSecondaryDnsServer() {
-            return PsiphonTunnel.getSecondaryDnsServer();
+        public String getDNSServersAsString() {
+            return mPsiphonTunnel.getDNSServers(mHostService.getContext(), mHostService);
         }
 
         @Override
@@ -682,35 +675,31 @@ public class PsiphonTunnel {
         return hasConnectivity ? 1 : 0;
     }
 
-    private String getPrimaryDnsServer(Context context, HostLogger logger) {
+    private String getDNSServers(Context context, HostLogger logger) {
 
-        // Use the primary DNS server set by mNetworkMonitor,
-        // mActiveNetworkPrimaryDNSServer, when available. It's the most
-        // reliable mechanism. Otherwise fallback to
-        // getFirstActiveNetworkDnsResolver or DEFAULT_PRIMARY_DNS_SERVER.
+        // Use the DNS servers set by mNetworkMonitor,
+        // mActiveNetworkDNSServers, when available. It's the most reliable
+        // mechanism. Otherwise fallback to getActiveNetworkDNSServers.
         //
-        // mActiveNetworkPrimaryDNSServer is not available on API < 21
-        // (LOLLIPOP). mActiveNetworkPrimaryDNSServer may also be temporarily
+        // mActiveNetworkDNSServers is not available on API < 21
+        // (LOLLIPOP). mActiveNetworkDNSServers may also be temporarily
         // unavailable if the last active network has been lost and no new
         // one has yet replaced it.
 
-        String primaryDNSServer = mActiveNetworkPrimaryDNSServer.get();
-        if (primaryDNSServer != "") {
-            return primaryDNSServer;
+        String servers = mActiveNetworkDNSServers.get();
+        if (servers != "") {
+            return servers;
         }
 
-        String dnsResolver = null;
         try {
-            dnsResolver = getFirstActiveNetworkDnsResolver(context, mVpnMode.get());
+            // Use the workaround, comma-delimited format required for gobind.
+            servers = String.join(",", getActiveNetworkDNSServers(context, mVpnMode.get()));
         } catch (Exception e) {
             logger.onDiagnosticMessage("failed to get active network DNS resolver: " + e.getMessage());
-            dnsResolver = DEFAULT_PRIMARY_DNS_SERVER;
+            // Alternate DNS servers will be provided by psiphon-tunnel-core
+            // config or tactics.
         }
-        return dnsResolver;
-    }
-
-    private static String getSecondaryDnsServer() {
-        return DEFAULT_SECONDARY_DNS_SERVER;
+        return servers;
     }
 
     private static String iPv6Synthesize(String IPv4Addr) {
@@ -1270,26 +1259,30 @@ public class PsiphonTunnel {
         throw new Exception("no private address available");
     }
 
-    private static String getFirstActiveNetworkDnsResolver(Context context, boolean isVpnMode)
+    private static Collection<String> getActiveNetworkDNSServers(Context context, boolean isVpnMode)
             throws Exception {
 
-        Collection<InetAddress> dnsResolvers = getActiveNetworkDnsResolvers(context, isVpnMode);
-        if (!dnsResolvers.isEmpty()) {
-            String dnsResolver = dnsResolvers.iterator().next().toString();
+        ArrayList<String> servers = new ArrayList<String>();
+        for (InetAddress serverAddress : getActiveNetworkDNSServerAddresses(context, isVpnMode)) {
+            String server = serverAddress.toString();
             // strip the leading slash e.g., "/192.168.1.1"
-            if (dnsResolver.startsWith("/")) {
-                dnsResolver = dnsResolver.substring(1);
+            if (server.startsWith("/")) {
+                server = server.substring(1);
             }
-            return dnsResolver;
+            servers.add(server);
         }
 
-        throw new Exception("no active network DNS resolver");
+        if (servers.isEmpty()) {
+            throw new Exception("no active network DNS resolver");
+        }
+
+        return servers;
     }
 
-    private static Collection<InetAddress> getActiveNetworkDnsResolvers(Context context, boolean isVpnMode)
+    private static Collection<InetAddress> getActiveNetworkDNSServerAddresses(Context context, boolean isVpnMode)
             throws Exception {
 
-        final String errorMessage = "getActiveNetworkDnsResolvers failed";
+        final String errorMessage = "getActiveNetworkDNSServerAddresses failed";
         ArrayList<InetAddress> dnsAddresses = new ArrayList<InetAddress>();
 
         ConnectivityManager connectivityManager =
@@ -1411,18 +1404,18 @@ public class PsiphonTunnel {
         private final NetworkChangeListener listener;
         private ConnectivityManager.NetworkCallback networkCallback;
         private AtomicReference<String> activeNetworkType;
-        private AtomicReference<String> activeNetworkPrimaryDNSServer;
+        private AtomicReference<String> activeNetworkDNSServers;
         private HostLogger logger;
 
         public NetworkMonitor(
             NetworkChangeListener listener,
             AtomicReference<String> activeNetworkType,
-            AtomicReference<String> activeNetworkPrimaryDNSServer,
+            AtomicReference<String> activeNetworkDNSServers,
             HostLogger logger) {
 
             this.listener = listener;
             this.activeNetworkType = activeNetworkType;
-            this.activeNetworkPrimaryDNSServer = activeNetworkPrimaryDNSServer;
+            this.activeNetworkDNSServers = activeNetworkDNSServers;
             this.logger = logger;
         }
 
@@ -1471,7 +1464,7 @@ public class PsiphonTunnel {
                     if (network == null) {
 
                         activeNetworkType.set("NONE");
-                        activeNetworkPrimaryDNSServer.set("");
+                        activeNetworkDNSServers.set("");
                         logger.onDiagnosticMessage("NetworkMonitor: clear current active network");
 
                     } else {
@@ -1493,22 +1486,23 @@ public class PsiphonTunnel {
                         }
                         activeNetworkType.set(networkType);
 
-                        String primaryDNSServer = "";
+                        ArrayList<String> servers = new ArrayList<String>();
                         try {
                             LinkProperties linkProperties = connectivityManager.getLinkProperties(network);
-                            List<InetAddress> dnsServers = linkProperties.getDnsServers();
-                            if (!dnsServers.isEmpty()) {
-                                primaryDNSServer = dnsServers.iterator().next().toString();
-                                if (primaryDNSServer.startsWith("/")) {
-                                    primaryDNSServer = primaryDNSServer.substring(1);
+                            List<InetAddress> serverAddresses = linkProperties.getDnsServers();
+                            for (InetAddress serverAddress : serverAddresses) {
+                                String server = serverAddress.toString();
+                                if (server.startsWith("/")) {
+                                    server = server.substring(1);
                                 }
                             }
                         } catch (java.lang.Exception e) {
                         }
-                        activeNetworkPrimaryDNSServer.set(primaryDNSServer);
+                        // Use the workaround, comma-delimited format required for gobind.
+                        activeNetworkDNSServers.set(String.join(",", servers));
 
                         String message = "NetworkMonitor: set current active network " + networkType;
-                        if (primaryDNSServer != "") {
+                        if (!servers.isEmpty()) {
                             // The DNS server address is potential PII and not logged.
                             message += " with DNS";
                         }
