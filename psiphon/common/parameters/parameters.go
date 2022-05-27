@@ -218,6 +218,8 @@ const (
 	ReplayTargetUpstreamBytes                        = "ReplayTargetUpstreamBytes"
 	ReplayTargetDownstreamBytes                      = "ReplayTargetDownstreamBytes"
 	ReplayTargetTunnelDuration                       = "ReplayTargetTunnelDuration"
+	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
+	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
 	ReplayBPF                                        = "ReplayBPF"
 	ReplaySSH                                        = "ReplaySSH"
 	ReplayObfuscatorPadding                          = "ReplayObfuscatorPadding"
@@ -233,8 +235,6 @@ const (
 	ReplayLivenessTest                               = "ReplayLivenessTest"
 	ReplayUserAgent                                  = "ReplayUserAgent"
 	ReplayAPIRequestPadding                          = "ReplayAPIRequestPadding"
-	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
-	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
 	ReplayHoldOffTunnel                              = "ReplayHoldOffTunnel"
 	ReplayResolveParameters                          = "ReplayResolveParameters"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
@@ -548,6 +548,8 @@ var defaultParameters = map[string]struct {
 	ReplayTargetUpstreamBytes:              {value: 0, minimum: 0},
 	ReplayTargetDownstreamBytes:            {value: 0, minimum: 0},
 	ReplayTargetTunnelDuration:             {value: 1 * time.Second, minimum: time.Duration(0)},
+	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
+	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
 	ReplayBPF:                              {value: true},
 	ReplaySSH:                              {value: true},
 	ReplayObfuscatorPadding:                {value: true},
@@ -563,8 +565,6 @@ var defaultParameters = map[string]struct {
 	ReplayLivenessTest:                     {value: true},
 	ReplayUserAgent:                        {value: true},
 	ReplayAPIRequestPadding:                {value: true},
-	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
-	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
 	ReplayHoldOffTunnel:                    {value: true},
 	ReplayResolveParameters:                {value: true},
 

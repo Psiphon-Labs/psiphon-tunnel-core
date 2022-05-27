@@ -1495,6 +1495,7 @@ public class PsiphonTunnel {
                                 if (server.startsWith("/")) {
                                     server = server.substring(1);
                                 }
+                                servers.add(server);
                             }
                         } catch (java.lang.Exception e) {
                         }

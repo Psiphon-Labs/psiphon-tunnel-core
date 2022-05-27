@@ -55,7 +55,7 @@ func NewUDPConn(
 	}
 
 	if config.ResolveIP == nil {
-		// Fail even if we don't need a resolver fir this dial: this is a code
+		// Fail even if we don't need a resolver for this dial: this is a code
 		// misconfiguration.
 		return nil, nil, errors.TraceNew("missing resolver")
 	}

@@ -54,8 +54,8 @@ type PsiphonProvider interface {
 	PsiphonProviderNetwork
 	BindToDevice(fileDescriptor int) (string, error)
 
-	// GetDNSServers must return a comma-delimited list of DNS server
-	// addresses. A single string return value is used gobind does not
+	// GetDNSServersAsString must return a comma-delimited list of DNS server
+	// addresses. A single string return value is used since gobind does not
 	// support string slice types.
 	GetDNSServersAsString() string
 }

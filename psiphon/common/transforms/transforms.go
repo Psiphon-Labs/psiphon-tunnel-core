@@ -70,9 +70,9 @@ func (specs Specs) Validate() error {
 	return nil
 }
 
-// ScopedSpecNames defines groups a list of Specs, referenced by their Spec
-// name, with the group defined by a scope. The meaning of scope depends on
-// the context in which the transforms are to be used.
+// ScopedSpecNames groups a list of Specs, referenced by their Spec name, with
+// the group defined by a scope. The meaning of scope depends on the context
+// in which the transforms are to be used.
 //
 // For example, in the context of DNS request transforms, the scope is the DNS
 // server for which a specific group of transforms is known to be effective.
@@ -142,14 +142,14 @@ func (specs Specs) Select(scope string, scopedSpecs ScopedSpecNames) (string, Sp
 	return specName, spec
 }
 
-// Apply applies the Spec to the input string, producting the output string.
+// Apply applies the Spec to the input string, producing the output string.
 //
 // The input seed is used for all random generation. The same seed can be
 // supplied to produce the same output, for replay.
 func (spec Spec) Apply(seed *prng.Seed, input string) (string, error) {
 
-	// TODO: complied regexp and regen could be cached, but the seed is an
-	// issue with the regen.
+	// TODO: the compiled regexp and regen could be cached, but the seed is an
+	// issue with caching the regen.
 
 	value := input
 	for _, transform := range spec {

@@ -151,8 +151,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		signalRestartEstablishing: make(chan struct{}, 1),
 	}
 
-	// Initialize untunneledDialConfig, used untunneled dials including remote
-	// server list and upgrade downloads.
+	// Initialize untunneledDialConfig, used by untunneled dials including
+	// remote server list and upgrade downloads.
 	controller.untunneledDialConfig = &DialConfig{
 		UpstreamProxyURL: controller.config.UpstreamProxyURL,
 		CustomHeaders:    controller.config.CustomHeaders,

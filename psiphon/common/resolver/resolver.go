@@ -623,9 +623,7 @@ func (r *Resolver) ResolveIP(
 				// use a distinct socket per request, as common DNS clients do.
 				conn, err := r.newResolverConn(r.networkConfig.logWarning, server)
 				if err != nil {
-					if resolveCtx.Err() == nil {
-						lastErr.Store(errors.Trace(err))
-					}
+					lastErr.Store(errors.Trace(err))
 					return
 				}
 				defer conn.Close()
@@ -676,22 +674,19 @@ func (r *Resolver) ResolveIP(
 					hostname)
 
 				// Update the min/max RTT metric when reported (>=0) even if
-				// the result is an error -- i.e., the even if there was an
-				// invalid response --  unless the resolveCtx is done
-				// (we don't want to consider the RTT in the case of cancellation).
+				// the result is an error; i.e., the even if there was an
+				// invalid response.
 				//
 				// Limitation: since individual requests aren't cancelled
 				// after requestTimeout, RTT metrics won't reflect
 				// no-response cases, although request and response count
 				// disparities will still show up in the metrics.
-				if RTT >= 0 && resolveCtx.Err() == nil {
+				if RTT >= 0 {
 					r.updateMetricRTT(RTT)
 				}
 
 				if err != nil {
-					if resolveCtx.Err() == nil {
-						lastErr.Store(errors.Trace(err))
-					}
+					lastErr.Store(errors.Trace(err))
 					return
 				}
 
@@ -730,16 +725,13 @@ func (r *Resolver) ResolveIP(
 			// When requestTimeout arrives, loop around and launch the next
 			// attempt; leave the existing requests running in case they
 			// eventually respond.
-			lastErr.Store(errors.TraceNew("timeout"))
 			timerDrained = true
 		case <-resolveCtx.Done():
 			// When resolveCtx is done, exit the attempts loop.
 			//
-			// TODO: retain previous lastErr, for failed_tunnel, if it
-			// provides more infomation about DNS interference? As part of
-			// this, have performDNSQuery also return relevent errors instead
-			// of simply calling LogWarning for invalid DNS responses.
-			lastErr.Store(errors.Trace(ctx.Err()))
+			// Append the existing lastErr, which may convey useful
+			// information to be reported in a failed_tunnel error message.
+			lastErr.Store(errors.Tracef("%v (lastErr: %v)", ctx.Err(), lastErr.Load()))
 			stop = true
 		}
 	}
@@ -1255,16 +1247,30 @@ func performDNSQuery(
 	// Read and process the DNS response
 	var IPs []net.IP
 	var TTLs []time.Duration
+	var lastErr error
+	RTT := time.Duration(-1)
 	for {
 
 		// Stop when resolveCtx is done; the caller, ResolveIP, will also
 		// close conn, which will interrupt a blocking dnsConn.ReadMsg.
 		if resolveCtx.Err() != nil {
-			return nil, nil, time.Since(startTime), errors.Trace(resolveCtx.Err())
+
+			// ResolveIP, which calls performDNSQuery, already records the
+			// context error (e.g., context timeout), so instead report
+			// lastErr, when present, as it may contain more useful
+			// information about why a response was rejected.
+			err := lastErr
+			if err == nil {
+				err = errors.Trace(resolveCtx.Err())
+			}
+
+			return nil, nil, RTT, err
 		}
 
-		// Read a response
+		// Read a response. RTT is the elapsed time between sending the
+		// request and reading the last received response.
 		response, err := dnsConn.ReadMsg()
+		RTT = time.Since(startTime)
 		if err == nil && response.MsgHdr.Id != request.MsgHdr.Id {
 			err = dns.ErrId
 		}
@@ -1275,7 +1281,8 @@ func performDNSQuery(
 			if resolveCtx.Err() == nil {
 				// Only log if resolveCtx is not done; otherwise the error could
 				// be due to conn being closed by ResolveIP.
-				logWarning(errors.Tracef("invalid response: %v", err))
+				lastErr = errors.Tracef("invalid response: %v", err)
+				logWarning(lastErr)
 			}
 			continue
 		}
@@ -1305,7 +1312,8 @@ func performDNSQuery(
 			if !ok {
 				errMsg = fmt.Sprintf("Rcode: %d", response.MsgHdr.Rcode)
 			}
-			logWarning(errors.Tracef("unexpected RCode: %v", errMsg))
+			lastErr = errors.Tracef("unexpected RCode: %v", errMsg)
+			logWarning(lastErr)
 			continue
 		}
 
@@ -1339,7 +1347,8 @@ func performDNSQuery(
 			err := checkDNSAnswerIP(IP)
 			if err != nil {
 				checkFailed = true
-				logWarning(errors.Tracef("invalid IP: %v", err))
+				lastErr = errors.Tracef("invalid IP: %v", err)
+				logWarning(lastErr)
 				// Check the next answer
 				continue
 			}
@@ -1355,7 +1364,8 @@ func performDNSQuery(
 		// logic will delay the parent dial in that case.
 		if questionType == resolverQuestionTypeA && len(IPs) == 0 && !checkFailed {
 			checkFailed = true
-			logWarning(errors.TraceNew("unexpected empty A response"))
+			lastErr = errors.TraceNew("unexpected empty A response")
+			logWarning(lastErr)
 		}
 
 		// Retry if there are no valid IPs and any error; if no error, this
@@ -1365,7 +1375,7 @@ func performDNSQuery(
 			continue
 		}
 
-		return IPs, TTLs, time.Since(startTime), nil
+		return IPs, TTLs, RTT, nil
 	}
 }
 
