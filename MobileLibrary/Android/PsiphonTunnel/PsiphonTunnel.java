@@ -47,6 +47,7 @@ import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
@@ -420,6 +421,11 @@ public class PsiphonTunnel {
                                         // Unused on Android.
                                         return PsiphonTunnel.iPv6Synthesize(IPv4Addr);
                                     }
+
+                                    @Override
+                                    public long hasIPv6Route() {
+                                        return PsiphonTunnel.hasIPv6Route(context, logger);
+                                    }
                                 },
                                 new PsiphonProviderNoticeHandler() {
                                     @Override
@@ -455,8 +461,9 @@ public class PsiphonTunnel {
                                         }
                                     }
                                 },
-                                // Do not use IPv6 synthesizer for android
-                                false);
+                                false,   // Do not use IPv6 synthesizer for Android
+                                true     // Use hasIPv6Route on Android
+                                );
                     } catch (java.lang.Exception e) {
                         callbackQueue.submit(new Runnable() {
                             @Override
@@ -643,6 +650,11 @@ public class PsiphonTunnel {
         }
 
         @Override
+        public long hasIPv6Route() {
+            return PsiphonTunnel.hasIPv6Route(mHostService.getContext(), mHostService);
+        }
+
+        @Override
         public String getNetworkID() {
             return PsiphonTunnel.getNetworkID(mHostService.getContext());
         }
@@ -705,6 +717,17 @@ public class PsiphonTunnel {
     private static String iPv6Synthesize(String IPv4Addr) {
         // Unused on Android.
         return IPv4Addr;
+    }
+
+    private static long hasIPv6Route(Context context, HostLogger logger) {
+        boolean hasRoute = false;
+        try {
+            hasRoute = hasIPv6Route(context);
+        } catch (Exception e) {
+            logger.onDiagnosticMessage("failed to check IPv6 route: " + e.getMessage());
+        }
+        // TODO: change to bool return value once gobind supports that type
+        return hasRoute ? 1 : 0;
     }
 
     private static String getNetworkID(Context context) {
@@ -789,7 +812,8 @@ public class PsiphonTunnel {
                     "",
                     new PsiphonProviderShim(this),
                     isVpnMode(),
-                    false        // Do not use IPv6 synthesizer for android
+                    false,   // Do not use IPv6 synthesizer for Android
+                    true     // Use hasIPv6Route on Android
                     );
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
@@ -1380,6 +1404,47 @@ public class PsiphonTunnel {
         }
 
         return dnsAddresses;
+    }
+
+    private static boolean hasIPv6Route(Context context) throws Exception {
+
+            try {
+                // This logic mirrors the logic in
+                // psiphon/common/resolver.hasRoutableIPv6Interface. That
+                // function currently doesn't work on Android due to Go's
+                // net.InterfaceAddrs failing on Android SDK 30+ (see Go issue
+                // 40569). hasIPv6Route provides the same functionality via a
+                // callback into Java code.
+
+                for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                    if (netInterface.isUp() &&
+                        !netInterface.isLoopback() &&
+                        !netInterface.isPointToPoint()) {
+                        for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
+
+                            // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
+                            // "Java will never return an IPv4-mapped address.
+                            //  These classes can take an IPv4-mapped address as
+                            //  input, both in byte array and text
+                            //  representation. However, it will be converted
+                            //  into an IPv4 address." As such, when the type of
+                            //  the IP address is Inet6Address, this should be
+                            //  an actual IPv6 address.
+
+                            if (address instanceof Inet6Address &&
+                                !address.isLinkLocalAddress() &&
+                                !address.isSiteLocalAddress() &&
+                                !address.isMulticastAddress ()) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                } catch (SocketException e) {
+                throw new Exception("hasIPv6Route failed", e);
+            }
+
+            return false;
     }
 
     //----------------------------------------------------------------------------------------------

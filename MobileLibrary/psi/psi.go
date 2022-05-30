@@ -47,12 +47,16 @@ type PsiphonProviderNetwork interface {
 	HasNetworkConnectivity() int
 	GetNetworkID() string
 	IPv6Synthesize(IPv4Addr string) string
+	HasIPv6Route() int
 }
 
 type PsiphonProvider interface {
 	PsiphonProviderNoticeHandler
 	PsiphonProviderNetwork
 	BindToDevice(fileDescriptor int) (string, error)
+
+	// TODO: move GetDNSServersAsString to PsiphonProviderNetwork to
+	// facilitate custom tunnel-core resolver support in SendFeedback.
 
 	// GetDNSServersAsString must return a comma-delimited list of DNS server
 	// addresses. A single string return value is used since gobind does not
@@ -118,12 +122,13 @@ var stopController context.CancelFunc
 var controllerWaitGroup *sync.WaitGroup
 
 func Start(
-	configJson,
-	embeddedServerEntryList,
+	configJson string,
+	embeddedServerEntryList string,
 	embeddedServerEntryListFilename string,
 	provider PsiphonProvider,
-	useDeviceBinder,
-	useIPv6Synthesizer bool) error {
+	useDeviceBinder bool,
+	useIPv6Synthesizer bool,
+	useHasIPv6RouteGetter bool) error {
 
 	controllerMutex.Lock()
 	defer controllerMutex.Unlock()
@@ -152,17 +157,22 @@ func Start(
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
 
-	config.NetworkConnectivityChecker = wrappedProvider
+	// Set up callbacks.
 
+	config.NetworkConnectivityChecker = wrappedProvider
 	config.NetworkIDGetter = wrappedProvider
+	config.DNSServerGetter = wrappedProvider
 
 	if useDeviceBinder {
 		config.DeviceBinder = wrappedProvider
-		config.DNSServerGetter = wrappedProvider
 	}
 
 	if useIPv6Synthesizer {
 		config.IPv6Synthesizer = wrappedProvider
+	}
+
+	if useHasIPv6RouteGetter {
+		config.HasIPv6RouteGetter = wrappedProvider
 	}
 
 	// All config fields should be set before calling Commit.
@@ -371,7 +381,8 @@ func StartSendFeedback(
 	feedbackHandler PsiphonProviderFeedbackHandler,
 	networkInfoProvider PsiphonProviderNetwork,
 	noticeHandler PsiphonProviderNoticeHandler,
-	useIPv6Synthesizer bool) error {
+	useIPv6Synthesizer bool,
+	useHasIPv6RouteGetter bool) error {
 
 	// Cancel any ongoing uploads.
 	StopSendFeedback()
@@ -395,13 +406,26 @@ func StartSendFeedback(
 		return fmt.Errorf("error loading configuration file: %s", err)
 	}
 
-	config.NetworkConnectivityChecker = networkInfoProvider
+	// Set up callbacks.
 
+	config.NetworkConnectivityChecker = networkInfoProvider
 	config.NetworkIDGetter = networkInfoProvider
 
 	if useIPv6Synthesizer {
 		config.IPv6Synthesizer = networkInfoProvider
 	}
+
+	if useHasIPv6RouteGetter {
+		config.HasIPv6RouteGetter = networkInfoProvider
+	}
+
+	// Limitation: config.DNSServerGetter is not set up in the SendFeedback
+	// case, as we don't currently implement network path and system DNS
+	// server monitoring for SendFeedback in the platform code. To ensure we
+	// fallback to the system resolver and don't always use the custom
+	// resolver with alternate DNS servers, clear that config field (this may
+	// still be set via tactics).
+	config.DNSResolverAlternateServers = nil
 
 	// All config fields should be set before calling Commit.
 
@@ -510,17 +534,21 @@ func (p *mutexPsiphonProvider) IPv6Synthesize(IPv4Addr string) string {
 	return p.p.IPv6Synthesize(IPv4Addr)
 }
 
+func (p *mutexPsiphonProvider) HasIPv6Route() int {
+	p.Lock()
+	defer p.Unlock()
+	return p.p.HasIPv6Route()
+}
+
 func (p *mutexPsiphonProvider) GetDNSServersAsString() string {
 	p.Lock()
 	defer p.Unlock()
 	return p.p.GetDNSServersAsString()
 }
 
-// GetDNSServers implements psiphon.DNSServerGetter.
 func (p *mutexPsiphonProvider) GetDNSServers() []string {
 	p.Lock()
 	defer p.Unlock()
-	// Convert the workaround format, used for gobind, to a normal string slice.
 	return strings.Split(p.p.GetDNSServersAsString(), ",")
 }
 

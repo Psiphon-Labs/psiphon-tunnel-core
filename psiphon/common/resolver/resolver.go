@@ -73,6 +73,13 @@ type NetworkConfig struct {
 	// endpoint. IPv6Synthesize may be nil.
 	IPv6Synthesize func(IPv4 string) string
 
+	// HasIPv6Route should return true when the host has an IPv6 route.
+	// Resolver has an internal implementation, hasRoutableIPv6Interface, to
+	// determine this, but it can fail on some platforms ("route ip+net:
+	// netlinkrib: permission denied" on Android, for example; see Go issue
+	// 40569). When HasIPv6Route is nil, the internal implementation is used.
+	HasIPv6Route func() bool
+
 	// LogWarning is an optional callback which is used to log warnings and
 	// transient errors which would otherwise not be recorded or returned.
 	LogWarning func(error)
@@ -897,14 +904,22 @@ func (r *Resolver) updateNetworkState(networkID string) {
 	// similarly use NAT 64 (on iOS; on Android, 464XLAT will handle this
 	// transparently).
 	if updateIPv6Route {
-		hasIPv6Route, err := hasRoutableIPv6Interface()
-		if err != nil {
-			// Log warning and proceed without IPv6.
-			r.networkConfig.logWarning(
-				errors.Tracef("unable to determine IPv6 route: %v", err))
-			hasIPv6Route = false
+
+		if r.networkConfig.HasIPv6Route != nil {
+
+			r.hasIPv6Route = r.networkConfig.HasIPv6Route()
+
+		} else {
+
+			hasIPv6Route, err := hasRoutableIPv6Interface()
+			if err != nil {
+				// Log warning and proceed without IPv6.
+				r.networkConfig.logWarning(
+					errors.Tracef("unable to determine IPv6 route: %v", err))
+				hasIPv6Route = false
+			}
+			r.hasIPv6Route = hasIPv6Route
 		}
-		r.hasIPv6Route = hasIPv6Route
 	}
 
 	// Update the list of system DNS servers. It's not an error condition here

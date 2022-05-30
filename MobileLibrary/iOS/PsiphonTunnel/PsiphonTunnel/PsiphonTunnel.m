@@ -41,6 +41,7 @@
 NSErrorDomain _Nonnull const PsiphonTunnelErrorDomain = @"com.psiphon3.ios.PsiphonTunnelErrorDomain";
 
 const BOOL UseIPv6Synthesizer = TRUE; // Must always use IPv6Synthesizer for iOS
+const BOOL UseHasIPv6RouteGetter = FALSE;
 
 /// Error codes which can returned by PsiphonTunnel
 typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
@@ -309,6 +310,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                 self,
                 self->tunnelWholeDevice, // useDeviceBinder
                 UseIPv6Synthesizer,
+                UseHasIPv6RouteGetter,
                 &e);
             
             if (e != nil) {
@@ -1283,6 +1285,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return [IPv6Synthesizer IPv4ToIPv6:IPv4Addr];
 }
 
+- (NSString *)hasIPv6Route:()BOOL {
+    // Unused on iOS.
+    return FALSE;
+}
+
 - (NSString *)getNetworkID {
     return [NetworkID getNetworkID:[self->reachability currentReachabilityStatus]];
 }
@@ -1738,9 +1745,16 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc] init];
 
-        GoPsiStartSendFeedback(psiphonConfig, feedbackJson, uploadPath,
-                               innerFeedbackHandler, networkInfoProvider, noticeHandler,
-                               UseIPv6Synthesizer, &err);
+        GoPsiStartSendFeedback(
+            psiphonConfig,
+            feedbackJson,
+            uploadPath,
+            innerFeedbackHandler,
+            networkInfoProvider,
+            noticeHandler,
+            UseIPv6Synthesizer,
+            UseHasIPv6RouteGetter,
+            &err);
         if (err != nil) {
             NSError *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                                     code:PsiphonTunnelErrorCodeSendFeedbackError

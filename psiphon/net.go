@@ -155,6 +155,14 @@ type IPv6Synthesizer interface {
 	IPv6Synthesize(IPv4Addr string) string
 }
 
+// HasIPv6RouteGetter defines the interface to the external HasIPv6Route
+// provider which calls into the host application to determine if the host
+// has an IPv6 route.
+type HasIPv6RouteGetter interface {
+	// TODO: change to bool return value once gobind supports that type
+	HasIPv6Route() int
+}
+
 // NetworkIDGetter defines the interface to the external GetNetworkID
 // provider, which returns an identifier for the host's current active
 // network.
@@ -333,6 +341,12 @@ func NewResolver(config *Config, useBindToDevice bool) *resolver.Resolver {
 
 	if config.IPv6Synthesizer != nil {
 		networkConfig.IPv6Synthesize = config.IPv6Synthesizer.IPv6Synthesize
+	}
+
+	if config.HasIPv6RouteGetter != nil {
+		networkConfig.HasIPv6Route = func() bool {
+			return config.HasIPv6RouteGetter.HasIPv6Route() == 1
+		}
 	}
 
 	return resolver.NewResolver(networkConfig, config.GetNetworkID())

@@ -288,6 +288,11 @@ type Config struct {
 	// doc.
 	IPv6Synthesizer IPv6Synthesizer
 
+	// HasIPv6RouteGetter is an interface that allows tunnel-core to call into
+	// the host application to determine if the host has an IPv6 route. See:
+	// HasIPv6RouteGetter doc.
+	HasIPv6RouteGetter HasIPv6RouteGetter
+
 	// DNSServerGetter is an interface that enables tunnel-core to call into
 	// the host application to discover the native network DNS server
 	// settings. See: DNSServerGetter doc.
