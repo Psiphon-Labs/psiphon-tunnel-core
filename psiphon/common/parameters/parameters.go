@@ -833,6 +833,17 @@ func (p *Parameters) Set(
 	serverPacketManipulationSpecs, _ :=
 		serverPacketManipulationSpecsValue.(PacketManipulationSpecs)
 
+	// Special case: ProtocolTransformScopedSpecNames will reference
+	// ProtocolTransformSpecs.
+
+	dnsResolverProtocolTransformSpecsValue, err := getAppliedValue(
+		DNSResolverProtocolTransformSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	dnsResolverProtocolTransformSpecs, _ :=
+		dnsResolverProtocolTransformSpecsValue.(transforms.Specs)
+
 	for i := 0; i < len(applyParameters); i++ {
 
 		count := 0
@@ -989,6 +1000,28 @@ func (p *Parameters) Set(
 				}
 			case LabeledCIDRs:
 				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case transforms.Specs:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case transforms.ScopedSpecNames:
+
+				var specs transforms.Specs
+				if name == DNSResolverProtocolTransformScopedSpecNames {
+					specs = dnsResolverProtocolTransformSpecs
+				}
+
+				err := v.Validate(specs)
 				if err != nil {
 					if skipOnError {
 						continue
