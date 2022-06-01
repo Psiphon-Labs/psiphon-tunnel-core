@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -77,7 +78,7 @@ func main() {
 		"The path at which to upload the feedback package when the \"-feedbackUpload\"\n"+
 			"flag is provided. Must be provided by Psiphon Inc.")
 
-	var tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS string
+	var tunDevice, tunBindInterface, tunDNSServers string
 	if tun.IsSupported() {
 
 		// When tunDevice is specified, a packet tunnel is run and packets are relayed between
@@ -96,8 +97,7 @@ func main() {
 
 		flag.StringVar(&tunDevice, "tunDevice", "", "run packet tunnel for specified tun device")
 		flag.StringVar(&tunBindInterface, "tunBindInterface", tun.DEFAULT_PUBLIC_INTERFACE_NAME, "bypass tun device via specified interface")
-		flag.StringVar(&tunPrimaryDNS, "tunPrimaryDNS", "8.8.8.8", "primary DNS resolver for bypass")
-		flag.StringVar(&tunSecondaryDNS, "tunSecondaryDNS", "8.8.4.4", "secondary DNS resolver for bypass")
+		flag.StringVar(&tunDNSServers, "tunDNSServers", "8.8.8.8,8.8.4.4", "Comma-delimited list of tun bypass DNS server IP addresses")
 	}
 
 	var noticeFilename string
@@ -211,7 +211,7 @@ func main() {
 
 	if tun.IsSupported() && tunDevice != "" {
 		tunDeviceFile, err := configurePacketTunnel(
-			config, tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS)
+			config, tunDevice, tunBindInterface, strings.Split(tunDNSServers, ","))
 		if err != nil {
 			psiphon.SetEmitDiagnosticNotices(true, false)
 			psiphon.NoticeError("error configuring packet tunnel: %s", err)
@@ -307,7 +307,9 @@ func main() {
 
 func configurePacketTunnel(
 	config *psiphon.Config,
-	tunDevice, tunBindInterface, tunPrimaryDNS, tunSecondaryDNS string) (*os.File, error) {
+	tunDevice string,
+	tunBindInterface string,
+	tunDNSServers []string) (*os.File, error) {
 
 	file, _, err := tun.OpenTunDevice(tunDevice)
 	if err != nil {
@@ -316,21 +318,19 @@ func configurePacketTunnel(
 
 	provider := &tunProvider{
 		bindInterface: tunBindInterface,
-		primaryDNS:    tunPrimaryDNS,
-		secondaryDNS:  tunSecondaryDNS,
+		dnsServers:    tunDNSServers,
 	}
 
 	config.PacketTunnelTunFileDescriptor = int(file.Fd())
 	config.DeviceBinder = provider
-	config.DnsServerGetter = provider
+	config.DNSServerGetter = provider
 
 	return file, nil
 }
 
 type tunProvider struct {
 	bindInterface string
-	primaryDNS    string
-	secondaryDNS  string
+	dnsServers    []string
 }
 
 // BindToDevice implements the psiphon.DeviceBinder interface.
@@ -338,14 +338,9 @@ func (p *tunProvider) BindToDevice(fileDescriptor int) (string, error) {
 	return p.bindInterface, tun.BindToDevice(fileDescriptor, p.bindInterface)
 }
 
-// GetPrimaryDnsServer implements the psiphon.DnsServerGetter interface.
-func (p *tunProvider) GetPrimaryDnsServer() string {
-	return p.primaryDNS
-}
-
-// GetSecondaryDnsServer implements the psiphon.DnsServerGetter interface.
-func (p *tunProvider) GetSecondaryDnsServer() string {
-	return p.secondaryDNS
+// GetDNSServers implements the psiphon.DNSServerGetter interface.
+func (p *tunProvider) GetDNSServers() []string {
+	return p.dnsServers
 }
 
 // Worker creates a protocol around the different run modes provided by the

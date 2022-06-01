@@ -144,6 +144,10 @@ func TestDuplicateSessionID(t *testing.T) {
 		t.Fatalf("Commit failed: %s", err)
 	}
 
+	resolver := psiphon.NewResolver(clientConfig, true)
+	defer resolver.Stop()
+	clientConfig.SetResolver(resolver)
+
 	err = psiphon.OpenDataStore(clientConfig)
 	if err != nil {
 		t.Fatalf("OpenDataStore failed: %s", err)

@@ -921,6 +921,9 @@ var baseDialParams = []requestParamSpec{
 	{"conjure_transport", isAnyString, requestParamOptional},
 	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"split_tunnel_regions", isRegionCode, requestParamOptional | requestParamArray},
+	{"dns_preresolved", isAnyString, requestParamOptional},
+	{"dns_preferred", isAnyString, requestParamOptional},
+	{"dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.

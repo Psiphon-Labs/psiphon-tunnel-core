@@ -25,13 +25,9 @@ import (
 	std_errors "errors"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
-	"path/filepath"
-	"regexp"
 	"runtime"
 	"runtime/debug"
-	"strings"
 	"syscall"
 	"time"
 
@@ -40,6 +36,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
@@ -70,26 +67,6 @@ func DecodeCertificate(encodedCertificate string) (certificate *x509.Certificate
 	return certificate, nil
 }
 
-// FilterUrlError transforms an error, when it is a url.Error, removing
-// the URL value. This is to avoid logging private user data in cases
-// where the URL may be a user input value.
-// This function is used with errors returned by net/http and net/url,
-// which are (currently) of type url.Error. In particular, the round trip
-// function used by our HttpProxy, http.Client.Do, returns errors of type
-// url.Error, with the URL being the url sent from the user's tunneled
-// applications:
-// https://github.com/golang/go/blob/release-branch.go1.4/src/net/http/client.go#L394
-func FilterUrlError(err error) error {
-	if urlErr, ok := err.(*url.Error); ok {
-		err = &url.Error{
-			Op:  urlErr.Op,
-			URL: "",
-			Err: urlErr.Err,
-		}
-	}
-	return err
-}
-
 // TrimError removes the middle of over-long error message strings
 func TrimError(err error) error {
 	const MAX_LEN = 100
@@ -118,118 +95,6 @@ func IsAddressInUseError(err error) bool {
 		}
 	}
 	return false
-}
-
-var stripIPAddressAndPortRegex = regexp.MustCompile(
-	// IP address
-	`(` +
-		// IPv4
-		//
-		// An IPv4 address can also be represented as an unsigned integer, or with
-		// octal or with hex octet values, but we do not check for any of these
-		// uncommon representations as some may match non-IP values and we don't
-		// expect the "net" package, etc., to emit them.)
-
-		`\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|` +
-
-		// IPv6
-		//
-		// Optional brackets for IPv6 with port
-		`\[?` +
-		`(` +
-		// Uncompressed IPv6; ensure there are 8 segments to avoid matching, e.g., a
-		// timestamp
-		`(([a-fA-F0-9]{1,4}:){7}[a-fA-F0-9]{1,4})|` +
-		// Compressed IPv6
-		`([a-fA-F0-9:]*::[a-fA-F0-9:]+)|([a-fA-F0-9:]+::[a-fA-F0-9:]*)` +
-		`)` +
-		// Optional mapped/translated/embeded IPv4 suffix
-		`(.\d{1,3}\.\d{1,3}\.\d{1,3})?` +
-		`\]?` +
-		`)` +
-
-		// Optional port number
-		`(:\d+)?`)
-
-// StripIPAddresses returns a copy of the input with all IP addresses (and
-// optional ports) replaced by "[redacted]". This is intended to be used to
-// strip addresses from "net" package I/O error messages and otherwise avoid
-// inadvertently recording direct server IPs via error message logs; and, in
-// metrics, to reduce the error space due to superfluous source port data.
-//
-// StripIPAddresses uses a simple regex match which liberally matches IP
-// address-like patterns and will match invalid addresses; for example, it
-// will match port numbers greater than 65535. We err on the side of redaction
-// and are not as concerned, in this context, with false positive matches. If
-// a user configures an upstream proxy address with an invalid IP or port
-// value, we prefer to redact it.
-//
-// See the stripIPAddressAndPortRegex comment for some uncommon IP address
-// representations that are not matched.
-func StripIPAddresses(b []byte) []byte {
-	return stripIPAddressAndPortRegex.ReplaceAll(b, []byte("[redacted]"))
-}
-
-// StripIPAddressesString is StripIPAddresses for strings.
-func StripIPAddressesString(s string) string {
-	return stripIPAddressAndPortRegex.ReplaceAllString(s, "[redacted]")
-}
-
-var stripFilePathRegex = regexp.MustCompile(
-	// File path
-	`(` +
-		// Leading characters
-		`[^ ]*` +
-		// At least one path separator
-		`/` +
-		// Path component; take until next space
-		`[^ ]*` +
-		`)+`)
-
-// StripFilePaths returns a copy of the input with all file paths
-// replaced by "[redacted]". First any occurrences of the provided file paths
-// are replaced and then an attempt is made to replace any other file paths by
-// searching with a heuristic. The latter is a best effort attempt it is not
-// guaranteed that it will catch every file path.
-func StripFilePaths(s string, filePaths ...string) string {
-	for _, filePath := range filePaths {
-		s = strings.ReplaceAll(s, filePath, "[redacted]")
-	}
-	return stripFilePathRegex.ReplaceAllLiteralString(filepath.ToSlash(s), "[redacted]")
-}
-
-// StripFilePathsError is StripFilePaths for errors.
-func StripFilePathsError(err error, filePaths ...string) error {
-	return std_errors.New(StripFilePaths(err.Error(), filePaths...))
-}
-
-// RedactNetError removes network address information from a "net" package
-// error message. Addresses may be domains or IP addresses.
-//
-// Limitations: some non-address error context can be lost; this function
-// makes assumptions about how the Go "net" package error messages are
-// formatted and will fail to redact network addresses if this assumptions
-// become untrue.
-func RedactNetError(err error) error {
-
-	// Example "net" package error messages:
-	//
-	// - lookup <domain>: no such host
-	// - lookup <domain>: No address associated with hostname
-	// - dial tcp <address>: connectex: No connection could be made because the target machine actively refused it
-	// - write tcp <address>-><address>: write: connection refused
-
-	if err == nil {
-		return err
-	}
-
-	errstr := err.Error()
-	index := strings.Index(errstr, ": ")
-	if index == -1 {
-		return err
-	}
-
-	return std_errors.New("[redacted]" + errstr[index:])
 }
 
 // SyncFileWriter wraps a file and exposes an io.Writer. At predefined
@@ -327,6 +192,10 @@ func emitDatastoreMetrics() {
 	NoticeInfo("Datastore metrics at %s: %s", stacktrace.GetParentFunctionName(), GetDataStoreMetrics())
 }
 
+func emitDNSMetrics(resolver *resolver.Resolver) {
+	NoticeInfo("DNS metrics at %s: %s", stacktrace.GetParentFunctionName(), resolver.GetMetrics())
+}
+
 func DoGarbageCollection() {
 	debug.SetGCPercent(5)
 	debug.FreeOSMemory()
@@ -381,7 +250,7 @@ func DoFileMigration(migration FileMigration) error {
 	}
 	info, err := os.Stat(migration.OldPath)
 	if err != nil {
-		return errors.Tracef(errPrefix+"error getting file info: %s", StripFilePathsError(err, migration.OldPath))
+		return errors.Tracef(errPrefix+"error getting file info: %s", common.RedactFilePathsError(err, migration.OldPath))
 	}
 	if info.IsDir() != migration.IsDir {
 		if migration.IsDir {
@@ -397,7 +266,7 @@ func DoFileMigration(migration FileMigration) error {
 
 	err = os.Rename(migration.OldPath, migration.NewPath)
 	if err != nil {
-		return errors.Tracef(errPrefix+"renaming file failed with error %s", StripFilePathsError(err, migration.OldPath, migration.NewPath))
+		return errors.Tracef(errPrefix+"renaming file failed with error %s", common.RedactFilePathsError(err, migration.OldPath, migration.NewPath))
 	}
 
 	return nil

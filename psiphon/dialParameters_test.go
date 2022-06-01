@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -87,10 +88,15 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.HoldOffTunnelProtocols] = holdOffTunnelProtocols
 	applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = []string{frontingProviderID}
 	applyParameters[parameters.HoldOffTunnelProbability] = 1.0
+	applyParameters[parameters.DNSResolverAlternateServers] = []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"}
 	err = clientConfig.SetParameters("tag1", false, applyParameters)
 	if err != nil {
 		t.Fatalf("SetParameters failed: %s", err)
 	}
+
+	resolver := NewResolver(clientConfig, true)
+	defer resolver.Stop()
+	clientConfig.SetResolver(resolver)
 
 	err = OpenDataStore(clientConfig)
 	if err != nil {
@@ -171,7 +177,8 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) &&
 		(dialParams.MeekFrontingDialAddress == "" ||
-			dialParams.MeekFrontingHost == "") {
+			dialParams.MeekFrontingHost == "" ||
+			dialParams.ResolveParameters == nil) {
 		t.Fatalf("missing meek fronting fields")
 	}
 
@@ -341,6 +348,12 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	if !identicalSeeds(replayDialParams.APIRequestPaddingSeed, dialParams.APIRequestPaddingSeed) {
 		t.Fatalf("mismatching API request fields")
+	}
+
+	if (replayDialParams.ResolveParameters == nil) != (dialParams.ResolveParameters == nil) ||
+		(replayDialParams.ResolveParameters != nil &&
+			!reflect.DeepEqual(replayDialParams.ResolveParameters, dialParams.ResolveParameters)) {
+		t.Fatalf("mismatching ResolveParameters fields")
 	}
 
 	// Test: no replay after change tactics

@@ -312,7 +312,7 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 		err = std_errors.New("missing origin URL")
 	}
 	if err != nil {
-		NoticeWarning("%s", errors.Trace(FilterUrlError(err)))
+		NoticeWarning("%s", errors.Trace(common.RedactURLError(err)))
 		forceClose(responseWriter)
 		return
 	}
@@ -320,7 +320,7 @@ func (proxy *HttpProxy) urlProxyHandler(responseWriter http.ResponseWriter, requ
 	// Origin URL must be well-formed, absolute, and have a scheme of "http" or "https"
 	originURL, err := common.SafeParseRequestURI(originURLString)
 	if err != nil {
-		NoticeWarning("%s", errors.Trace(FilterUrlError(err)))
+		NoticeWarning("%s", errors.Trace(common.RedactURLError(err)))
 		forceClose(responseWriter)
 		return
 	}
@@ -499,7 +499,7 @@ func (proxy *HttpProxy) relayHTTPRequest(
 	}
 
 	if err != nil {
-		NoticeWarning("%s", errors.Trace(FilterUrlError(err)))
+		NoticeWarning("%s", errors.Trace(common.RedactURLError(err)))
 		forceClose(responseWriter)
 		return
 	}

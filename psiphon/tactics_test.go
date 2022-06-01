@@ -23,10 +23,13 @@ import (
 	"context"
 	"encoding/json"
 	"io/ioutil"
+	"net"
 	"os"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
 func TestStandAloneGetTactics(t *testing.T) {
@@ -64,6 +67,10 @@ func TestStandAloneGetTactics(t *testing.T) {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
+	resolver := NewResolver(config, true)
+	defer resolver.Stop()
+	config.SetResolver(resolver)
+
 	gotTactics := int32(0)
 
 	SetNoticeWriter(NewNoticeReceiver(
@@ -87,6 +94,14 @@ func TestStandAloneGetTactics(t *testing.T) {
 	}
 
 	untunneledDialConfig := &DialConfig{
+		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+			IPs, err := UntunneledResolveIP(
+				ctx, config, resolver, hostname)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return IPs, nil
+		},
 		UpstreamProxyURL: config.UpstreamProxyURL,
 	}
 
