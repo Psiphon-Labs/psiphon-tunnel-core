@@ -23,7 +23,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
+	std_errors "errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -44,12 +44,14 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	"github.com/miekg/dns"
 	"golang.org/x/net/proxy"
 )
 
@@ -2278,15 +2280,15 @@ func makeTunneledNTPRequestAttempt(
 	clientUDPConn.SetReadDeadline(time.Now().Add(timeout))
 	clientUDPConn.SetWriteDeadline(time.Now().Add(timeout))
 
-	addrs, _, err := psiphon.ResolveIP(testHostname, clientUDPConn)
+	addrs, err := resolveIP(testHostname, clientUDPConn)
 
 	clientUDPConn.Close()
 
 	if err == nil && (len(addrs) == 0 || len(addrs[0]) < 4) {
-		err = errors.New("no address")
+		err = std_errors.New("no address")
 	}
 	if err != nil {
-		return fmt.Errorf("ResolveIP failed: %s", err)
+		return fmt.Errorf("resolveIP failed: %s", err)
 	}
 
 	waitGroup.Wait()
@@ -2352,6 +2354,33 @@ func makeTunneledNTPRequestAttempt(
 	waitGroup.Wait()
 
 	return nil
+}
+
+func resolveIP(host string, conn net.Conn) (addrs []net.IP, err error) {
+
+	// Send the DNS query (A record only)
+	dnsConn := &dns.Conn{Conn: conn}
+	defer dnsConn.Close()
+	query := new(dns.Msg)
+	query.SetQuestion(dns.Fqdn(host), dns.TypeA)
+	query.RecursionDesired = true
+	dnsConn.WriteMsg(query)
+
+	// Process the response
+	response, err := dnsConn.ReadMsg()
+	if err == nil && response.MsgHdr.Id != query.MsgHdr.Id {
+		err = dns.ErrId
+	}
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	addrs = make([]net.IP, 0)
+	for _, answer := range response.Answer {
+		if a, ok := answer.(*dns.A); ok {
+			addrs = append(addrs, a.A)
+		}
+	}
+	return addrs, nil
 }
 
 func pavePsinetDatabaseFile(
@@ -2910,6 +2939,10 @@ func storePruneServerEntriesTest(
 		t.Fatalf("Commit failed: %s", err)
 	}
 
+	resolver := psiphon.NewResolver(clientConfig, true)
+	defer resolver.Stop()
+	clientConfig.SetResolver(resolver)
+
 	applyParameters := make(map[string]interface{})
 	applyParameters[parameters.RecordFailedTunnelPersistentStatsProbability] = 1.0
 
@@ -2956,7 +2989,7 @@ func storePruneServerEntriesTest(
 		}
 
 		err = psiphon.RecordFailedTunnelStat(
-			clientConfig, dialParams, nil, 0, 0, errors.New("test error"))
+			clientConfig, dialParams, nil, 0, 0, std_errors.New("test error"))
 		if err != nil {
 			t.Fatalf("RecordFailedTunnelStat failed: %s", err)
 		}

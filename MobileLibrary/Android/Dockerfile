@@ -26,42 +26,38 @@ RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz 
   && rm /tmp/go.tar.gz \
   && echo $GOVERSION > $GOROOT/VERSION
 
-# Setup Android Environment.
-ENV ANDROID_NDK_ROOT=/android-ndk ANDROID_HOME=/android-sdk-linux
+# Setup Android environment and install build tools.
+ENV ANDROID_PLATFORM_VERSION=30 ANDROID_NDK_VERSION=23.1.7779620
+ENV ANDROID_SDK_ROOT=/android-sdk-root-linux
+ENV ANDROID_HOME=$ANDROID_SDK_ROOT
+ENV ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION
+RUN curl -L https://dl.google.com/android/repository/commandlinetools-linux-8092744_latest.zip -o /tmp/commandlinetools-linux.zip \
+  && mkdir -p $ANDROID_SDK_ROOT \
+  && cd $ANDROID_SDK_ROOT \
+  && mkdir cmdline-tools \
+  && cd cmdline-tools \
+  && unzip /tmp/commandlinetools-linux.zip \
+  && mv cmdline-tools latest \
+  && yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses \
+  && $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-${ANDROID_PLATFORM_VERSION}" "ndk;${ANDROID_NDK_VERSION}"
 
-# Setup Android NDK
-RUN cd /tmp \
-  && curl -L http://dl.google.com/android/ndk/android-ndk-r10e-linux-x86_64.bin -o /tmp/android-ndk.bin \
-  && chmod a+x /tmp/android-ndk.bin \
-  && /tmp/android-ndk.bin \
-  && rm /tmp/android-ndk.bin \
-  && ln -s $(find /tmp -type d -name 'android-ndk-*') /android-ndk
-
-# Setup Android SDK.
-RUN curl -L http://dl.google.com/android/android-sdk_r24.4.1-linux.tgz -o /tmp/android-sdk.tgz \
-  && tar -C / -xzf /tmp/android-sdk.tgz \
-  && rm /tmp/android-sdk.tgz \
-  && (while true; do echo 'y'; sleep 2; done) | $ANDROID_HOME/tools/android update sdk --no-ui --filter platform,platform-tool,tool
-
-# Install Pinned Gomobile
-#  - Ordered last to allow use of previously cached layers when changing revisions
-ENV GOMOBILE_PINNED_REV=c4d780faeb85123ee32b88e84fd022739ed8c124
+# Install Pinned Gomobile.
+# The sed operation patches gomobile, editing a command that assumes modules
+ENV GOMOBILE_PINNED_REV=ce6a79cf6a13dd77095a6f8dbee5f39848fa7da1
 RUN mkdir -p $GOPATH/pkg/gomobile/dl \
   && cd $GOPATH/pkg/gomobile/dl \
-  && curl -O https://dl.google.com/go/mobile/gomobile-ndk-r10e-linux-x86_64.tar.gz \
-  && curl -O https://dl.google.com/go/mobile/gomobile-openal-soft-1.16.0.1.tar.gz \
   && mkdir -p $GOPATH/src/golang.org/x \
   && cd $GOPATH/src/golang.org/x \
   && git clone https://github.com/golang/mobile \
   && cd mobile \
   && git checkout -b pinned $GOMOBILE_PINNED_REV \
-  && git format-patch --stdout -1 e6f31964531b3d6b76d334ba0d313b64c9687146 | git apply \
-  && mv ./cmd/gomobile/build.go ./cmd/gomobile/build.go.orig \
-  && sed -e 's/"-tags="+strconv.Quote(strings.Join(ctx.BuildTags, ",")),/"-tags",strings.Join(ctx.BuildTags, " "),/g' ./cmd/gomobile/build.go.orig > ./cmd/gomobile/build.go \
-  && mv ./cmd/gomobile/build.go ./cmd/gomobile/build.go.orig \
-  && sed -e 's/"strconv"//g' ./cmd/gomobile/build.go.orig > ./cmd/gomobile/build.go \
-  && echo "master: $(git rev-parse master)\npinned: $(git rev-parse pinned)" | tee $GOROOT/MOBILE \
-  && GO111MODULE=off go install golang.org/x/mobile/cmd/gomobile \
+  && mv ./cmd/gomobile/init.go ./cmd/gomobile/init.go.orig \
+  && sed -e 's/golang.org\/x\/mobile\/cmd\/gobind@latest/golang.org\/x\/mobile\/cmd\/gobind/g' ./cmd/gomobile/init.go.orig > ./cmd/gomobile/init.go \
+  && echo "master: $(git rev-parse master)\npinned: $(git rev-parse master)" | tee $GOROOT/MOBILE \
+  && export GO111MODULE=off \
+  && go get golang.org/x/mod/modfile \
+  && go get golang.org/x/tools/go/packages \
+  && go install golang.org/x/mobile/cmd/gomobile \
   && gomobile init -v
 
 WORKDIR $GOPATH/src

@@ -33,6 +33,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -104,6 +105,16 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 		return errors.TraceNew("error diagnostics empty")
 	}
 
+	// Initialize a resolver to use for dials. useBindToDevice is false so
+	// that the feedback upload will be tunneled, indirectly, if it routes
+	// through the VPN.
+	//
+	// config.SetResolver makes this resolver available to MakeDialParameters
+	// in GetTactics.
+	resolver := NewResolver(config, false)
+	defer resolver.Stop()
+	config.SetResolver(resolver)
+
 	// Get tactics, may update client parameters
 	p := config.GetParameters().Get()
 	timeout := p.Duration(parameters.FeedbackTacticsWaitPeriod)
@@ -123,12 +134,21 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 	transferURLs := p.TransferURLs(parameters.FeedbackUploadURLs)
 	p.Close()
 
+	// Initialize the feedback upload dial configuration. config.DeviceBinder
+	// is not applied; see resolver comment above.
 	untunneledDialConfig := &DialConfig{
-		UpstreamProxyURL:              config.UpstreamProxyURL,
-		CustomHeaders:                 config.CustomHeaders,
-		DeviceBinder:                  nil,
-		IPv6Synthesizer:               nil,
-		DnsServerGetter:               nil,
+		UpstreamProxyURL: config.UpstreamProxyURL,
+		CustomHeaders:    config.CustomHeaders,
+		DeviceBinder:     nil,
+		IPv6Synthesizer:  config.IPv6Synthesizer,
+		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+			IPs, err := UntunneledResolveIP(
+				ctx, config, resolver, hostname)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return IPs, nil
+		},
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
 	}
 

@@ -38,11 +38,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
-	"github.com/miekg/dns"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"golang.org/x/net/bpf"
 )
-
-const DNS_PORT = 53
 
 // DialConfig contains parameters to determine the behavior
 // of a Psiphon dialer (TCPDial, UDPDial, MeekDial, etc.)
@@ -73,21 +71,17 @@ type DialConfig struct {
 	// socket before connecting.
 	BPFProgramInstructions []bpf.RawInstruction
 
-	// BindToDevice parameters are used to exclude connections and
-	// associated DNS requests from VPN routing.
-	// When DeviceBinder is set, any underlying socket is
-	// submitted to the device binding servicebefore connecting.
-	// The service should bind the socket to a device so that it doesn't route
-	// through a VPN interface. This service is also used to bind UDP sockets used
-	// for DNS requests, in which case DnsServerGetter is used to get the
-	// current active untunneled network DNS server.
-	DeviceBinder    DeviceBinder
-	DnsServerGetter DnsServerGetter
+	// DeviceBinder, when not nil, is applied when dialing UDP/TCP. See:
+	// DeviceBinder doc.
+	DeviceBinder DeviceBinder
+
+	// IPv6Synthesizer, when not nil, is applied when dialing UDP/TCP. See:
+	// IPv6Synthesizer doc.
 	IPv6Synthesizer IPv6Synthesizer
 
-	// TrustedCACertificatesFilename specifies a file containing trusted
-	// CA certs. See Config.TrustedCACertificatesFilename.
-	TrustedCACertificatesFilename string
+	// ResolveIP is used to resolve destination domains. ResolveIP should
+	// return either at least one IP address or an error.
+	ResolveIP func(context.Context, string) ([]net.IP, error)
 
 	// ResolvedIPCallback, when set, is called with the IP address that was
 	// dialed. This is either the specified IP address in the dial address,
@@ -95,6 +89,10 @@ type DialConfig struct {
 	// domain name.
 	// The callback may be invoked by a concurrent goroutine.
 	ResolvedIPCallback func(string)
+
+	// TrustedCACertificatesFilename specifies a file containing trusted
+	// CA certs. See Config.TrustedCACertificatesFilename.
+	TrustedCACertificatesFilename string
 
 	// FragmentorConfig specifies whether to layer a fragmentor.Conn on top
 	// of dialed TCP conns, and the fragmentation configuration to use.
@@ -142,12 +140,11 @@ type DeviceBinder interface {
 	BindToDevice(fileDescriptor int) (string, error)
 }
 
-// DnsServerGetter defines the interface to the external GetDnsServer provider
+// DNSServerGetter defines the interface to the external GetDNSServers provider
 // which calls into the host application to discover the native network DNS
 // server settings.
-type DnsServerGetter interface {
-	GetPrimaryDnsServer() string
-	GetSecondaryDnsServer() string
+type DNSServerGetter interface {
+	GetDNSServers() []string
 }
 
 // IPv6Synthesizer defines the interface to the external IPv6Synthesize
@@ -156,6 +153,14 @@ type DnsServerGetter interface {
 // networks.
 type IPv6Synthesizer interface {
 	IPv6Synthesize(IPv4Addr string) string
+}
+
+// HasIPv6RouteGetter defines the interface to the external HasIPv6Route
+// provider which calls into the host application to determine if the host
+// has an IPv6 route.
+type HasIPv6RouteGetter interface {
+	// TODO: change to bool return value once gobind supports that type
+	HasIPv6Route() int
 }
 
 // NetworkIDGetter defines the interface to the external GetNetworkID
@@ -315,39 +320,65 @@ func WaitForNetworkConnectivity(
 	}
 }
 
-// ResolveIP uses a custom dns stack to make a DNS query over the
-// given TCP or UDP conn. This is used, e.g., when we need to ensure
-// that a DNS connection bypasses a VPN interface (BindToDevice) or
-// when we need to ensure that a DNS connection is tunneled.
-// Caller must set timeouts or interruptibility as required for conn.
-func ResolveIP(host string, conn net.Conn) (addrs []net.IP, ttls []time.Duration, err error) {
+// New Resolver creates a new resolver using the specified config.
+// useBindToDevice indicates whether to apply config.BindToDevice, when it
+// exists; set useBindToDevice to false when the resolve doesn't need to be
+// excluded from any VPN routing.
+func NewResolver(config *Config, useBindToDevice bool) *resolver.Resolver {
 
-	// Send the DNS query
-	dnsConn := &dns.Conn{Conn: conn}
-	defer dnsConn.Close()
-	query := new(dns.Msg)
-	query.SetQuestion(dns.Fqdn(host), dns.TypeA)
-	query.RecursionDesired = true
-	dnsConn.WriteMsg(query)
+	networkConfig := &resolver.NetworkConfig{
+		LogWarning:   func(err error) { NoticeWarning("ResolveIP: %v", err) },
+		LogHostnames: config.EmitDiagnosticNetworkParameters,
+	}
 
-	// Process the response
-	response, err := dnsConn.ReadMsg()
-	if err == nil && response.MsgHdr.Id != query.MsgHdr.Id {
-		err = dns.ErrId
+	if config.DNSServerGetter != nil {
+		networkConfig.GetDNSServers = config.DNSServerGetter.GetDNSServers
 	}
-	if err != nil {
-		return nil, nil, errors.Trace(err)
+
+	if useBindToDevice && config.DeviceBinder != nil {
+		networkConfig.BindToDevice = config.DeviceBinder.BindToDevice
 	}
-	addrs = make([]net.IP, 0)
-	ttls = make([]time.Duration, 0)
-	for _, answer := range response.Answer {
-		if a, ok := answer.(*dns.A); ok {
-			addrs = append(addrs, a.A)
-			ttl := time.Duration(a.Hdr.Ttl) * time.Second
-			ttls = append(ttls, ttl)
+
+	if config.IPv6Synthesizer != nil {
+		networkConfig.IPv6Synthesize = config.IPv6Synthesizer.IPv6Synthesize
+	}
+
+	if config.HasIPv6RouteGetter != nil {
+		networkConfig.HasIPv6Route = func() bool {
+			return config.HasIPv6RouteGetter.HasIPv6Route() == 1
 		}
 	}
-	return addrs, ttls, nil
+
+	return resolver.NewResolver(networkConfig, config.GetNetworkID())
+}
+
+// UntunneledResolveIP is used to resolve domains for untunneled dials,
+// including remote server list and upgrade downloads.
+func UntunneledResolveIP(
+	ctx context.Context,
+	config *Config,
+	resolver *resolver.Resolver,
+	hostname string) ([]net.IP, error) {
+
+	// Limitations: for untunneled resolves, there is currently no resolve
+	// parameter replay, and no support for pre-resolved IPs.
+
+	params, err := resolver.MakeResolveParameters(
+		config.GetParameters().Get(), "")
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	IPs, err := resolver.ResolveIP(
+		ctx,
+		config.GetNetworkID(),
+		params,
+		hostname)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return IPs, nil
 }
 
 // MakeUntunneledHTTPClient returns a net/http.Client which is configured to

@@ -47,6 +47,7 @@ import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
@@ -144,7 +145,7 @@ public class PsiphonTunnel {
     private final boolean mShouldRouteThroughTunnelAutomatically;
     private final NetworkMonitor mNetworkMonitor;
     private AtomicReference<String> mActiveNetworkType;
-    private AtomicReference<String> mActiveNetworkPrimaryDNSServer;
+    private AtomicReference<String> mActiveNetworkDNSServers;
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // psi.Psi and tun2socks implementations each contain global state.
@@ -197,7 +198,7 @@ public class PsiphonTunnel {
         mClientPlatformSuffix = new AtomicReference<String>("");
         mShouldRouteThroughTunnelAutomatically = shouldRouteThroughTunnelAutomatically;
         mActiveNetworkType = new AtomicReference<String>("");
-        mActiveNetworkPrimaryDNSServer = new AtomicReference<String>("");
+        mActiveNetworkDNSServers = new AtomicReference<String>("");
         mNetworkMonitor = new NetworkMonitor(new NetworkMonitor.NetworkChangeListener() {
             @Override
             public void onChanged() {
@@ -207,7 +208,7 @@ public class PsiphonTunnel {
                     mHostService.onDiagnosticMessage("reconnect error: " + e);
                 }
             }
-        }, mActiveNetworkType, mActiveNetworkPrimaryDNSServer, mHostService);
+        }, mActiveNetworkType, mActiveNetworkDNSServers, mHostService);
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -420,6 +421,11 @@ public class PsiphonTunnel {
                                         // Unused on Android.
                                         return PsiphonTunnel.iPv6Synthesize(IPv4Addr);
                                     }
+
+                                    @Override
+                                    public long hasIPv6Route() {
+                                        return PsiphonTunnel.hasIPv6Route(context, logger);
+                                    }
                                 },
                                 new PsiphonProviderNoticeHandler() {
                                     @Override
@@ -455,8 +461,9 @@ public class PsiphonTunnel {
                                         }
                                     }
                                 },
-                                // Do not use IPv6 synthesizer for android
-                                false);
+                                false,   // Do not use IPv6 synthesizer for Android
+                                true     // Use hasIPv6Route on Android
+                                );
                     } catch (java.lang.Exception e) {
                         callbackQueue.submit(new Runnable() {
                             @Override
@@ -489,8 +496,6 @@ public class PsiphonTunnel {
     private final static String VPN_INTERFACE_NETMASK = "255.255.255.0";
     private final static int VPN_INTERFACE_MTU = 1500;
     private final static int UDPGW_SERVER_PORT = 7300;
-    private final static String DEFAULT_PRIMARY_DNS_SERVER = "8.8.4.4";
-    private final static String DEFAULT_SECONDARY_DNS_SERVER = "8.8.8.8";
 
     // Note: Atomic variables used for getting/setting local proxy port, routing flag, and
     // tun fd, as these functions may be called via PsiphonProvider callbacks. Do not use
@@ -635,18 +640,18 @@ public class PsiphonTunnel {
         }
 
         @Override
-        public String getPrimaryDnsServer() {
-            return mPsiphonTunnel.getPrimaryDnsServer(mHostService.getContext(), mHostService);
-        }
-
-        @Override
-        public String getSecondaryDnsServer() {
-            return PsiphonTunnel.getSecondaryDnsServer();
+        public String getDNSServersAsString() {
+            return mPsiphonTunnel.getDNSServers(mHostService.getContext(), mHostService);
         }
 
         @Override
         public String iPv6Synthesize(String IPv4Addr) {
             return PsiphonTunnel.iPv6Synthesize(IPv4Addr);
+        }
+
+        @Override
+        public long hasIPv6Route() {
+            return PsiphonTunnel.hasIPv6Route(mHostService.getContext(), mHostService);
         }
 
         @Override
@@ -682,40 +687,47 @@ public class PsiphonTunnel {
         return hasConnectivity ? 1 : 0;
     }
 
-    private String getPrimaryDnsServer(Context context, HostLogger logger) {
+    private String getDNSServers(Context context, HostLogger logger) {
 
-        // Use the primary DNS server set by mNetworkMonitor,
-        // mActiveNetworkPrimaryDNSServer, when available. It's the most
-        // reliable mechanism. Otherwise fallback to
-        // getFirstActiveNetworkDnsResolver or DEFAULT_PRIMARY_DNS_SERVER.
+        // Use the DNS servers set by mNetworkMonitor,
+        // mActiveNetworkDNSServers, when available. It's the most reliable
+        // mechanism. Otherwise fallback to getActiveNetworkDNSServers.
         //
-        // mActiveNetworkPrimaryDNSServer is not available on API < 21
-        // (LOLLIPOP). mActiveNetworkPrimaryDNSServer may also be temporarily
+        // mActiveNetworkDNSServers is not available on API < 21
+        // (LOLLIPOP). mActiveNetworkDNSServers may also be temporarily
         // unavailable if the last active network has been lost and no new
         // one has yet replaced it.
 
-        String primaryDNSServer = mActiveNetworkPrimaryDNSServer.get();
-        if (primaryDNSServer != "") {
-            return primaryDNSServer;
+        String servers = mActiveNetworkDNSServers.get();
+        if (servers != "") {
+            return servers;
         }
 
-        String dnsResolver = null;
         try {
-            dnsResolver = getFirstActiveNetworkDnsResolver(context, mVpnMode.get());
+            // Use the workaround, comma-delimited format required for gobind.
+            servers = String.join(",", getActiveNetworkDNSServers(context, mVpnMode.get()));
         } catch (Exception e) {
             logger.onDiagnosticMessage("failed to get active network DNS resolver: " + e.getMessage());
-            dnsResolver = DEFAULT_PRIMARY_DNS_SERVER;
+            // Alternate DNS servers will be provided by psiphon-tunnel-core
+            // config or tactics.
         }
-        return dnsResolver;
-    }
-
-    private static String getSecondaryDnsServer() {
-        return DEFAULT_SECONDARY_DNS_SERVER;
+        return servers;
     }
 
     private static String iPv6Synthesize(String IPv4Addr) {
         // Unused on Android.
         return IPv4Addr;
+    }
+
+    private static long hasIPv6Route(Context context, HostLogger logger) {
+        boolean hasRoute = false;
+        try {
+            hasRoute = hasIPv6Route(context);
+        } catch (Exception e) {
+            logger.onDiagnosticMessage("failed to check IPv6 route: " + e.getMessage());
+        }
+        // TODO: change to bool return value once gobind supports that type
+        return hasRoute ? 1 : 0;
     }
 
     private static String getNetworkID(Context context) {
@@ -800,7 +812,8 @@ public class PsiphonTunnel {
                     "",
                     new PsiphonProviderShim(this),
                     isVpnMode(),
-                    false        // Do not use IPv6 synthesizer for android
+                    false,   // Do not use IPv6 synthesizer for Android
+                    true     // Use hasIPv6Route on Android
                     );
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
@@ -1270,26 +1283,30 @@ public class PsiphonTunnel {
         throw new Exception("no private address available");
     }
 
-    private static String getFirstActiveNetworkDnsResolver(Context context, boolean isVpnMode)
+    private static Collection<String> getActiveNetworkDNSServers(Context context, boolean isVpnMode)
             throws Exception {
 
-        Collection<InetAddress> dnsResolvers = getActiveNetworkDnsResolvers(context, isVpnMode);
-        if (!dnsResolvers.isEmpty()) {
-            String dnsResolver = dnsResolvers.iterator().next().toString();
+        ArrayList<String> servers = new ArrayList<String>();
+        for (InetAddress serverAddress : getActiveNetworkDNSServerAddresses(context, isVpnMode)) {
+            String server = serverAddress.toString();
             // strip the leading slash e.g., "/192.168.1.1"
-            if (dnsResolver.startsWith("/")) {
-                dnsResolver = dnsResolver.substring(1);
+            if (server.startsWith("/")) {
+                server = server.substring(1);
             }
-            return dnsResolver;
+            servers.add(server);
         }
 
-        throw new Exception("no active network DNS resolver");
+        if (servers.isEmpty()) {
+            throw new Exception("no active network DNS resolver");
+        }
+
+        return servers;
     }
 
-    private static Collection<InetAddress> getActiveNetworkDnsResolvers(Context context, boolean isVpnMode)
+    private static Collection<InetAddress> getActiveNetworkDNSServerAddresses(Context context, boolean isVpnMode)
             throws Exception {
 
-        final String errorMessage = "getActiveNetworkDnsResolvers failed";
+        final String errorMessage = "getActiveNetworkDNSServerAddresses failed";
         ArrayList<InetAddress> dnsAddresses = new ArrayList<InetAddress>();
 
         ConnectivityManager connectivityManager =
@@ -1389,6 +1406,47 @@ public class PsiphonTunnel {
         return dnsAddresses;
     }
 
+    private static boolean hasIPv6Route(Context context) throws Exception {
+
+            try {
+                // This logic mirrors the logic in
+                // psiphon/common/resolver.hasRoutableIPv6Interface. That
+                // function currently doesn't work on Android due to Go's
+                // net.InterfaceAddrs failing on Android SDK 30+ (see Go issue
+                // 40569). hasIPv6Route provides the same functionality via a
+                // callback into Java code.
+
+                for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                    if (netInterface.isUp() &&
+                        !netInterface.isLoopback() &&
+                        !netInterface.isPointToPoint()) {
+                        for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
+
+                            // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
+                            // "Java will never return an IPv4-mapped address.
+                            //  These classes can take an IPv4-mapped address as
+                            //  input, both in byte array and text
+                            //  representation. However, it will be converted
+                            //  into an IPv4 address." As such, when the type of
+                            //  the IP address is Inet6Address, this should be
+                            //  an actual IPv6 address.
+
+                            if (address instanceof Inet6Address &&
+                                !address.isLinkLocalAddress() &&
+                                !address.isSiteLocalAddress() &&
+                                !address.isMulticastAddress ()) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                } catch (SocketException e) {
+                throw new Exception("hasIPv6Route failed", e);
+            }
+
+            return false;
+    }
+
     //----------------------------------------------------------------------------------------------
     // Exception
     //----------------------------------------------------------------------------------------------
@@ -1411,18 +1469,18 @@ public class PsiphonTunnel {
         private final NetworkChangeListener listener;
         private ConnectivityManager.NetworkCallback networkCallback;
         private AtomicReference<String> activeNetworkType;
-        private AtomicReference<String> activeNetworkPrimaryDNSServer;
+        private AtomicReference<String> activeNetworkDNSServers;
         private HostLogger logger;
 
         public NetworkMonitor(
             NetworkChangeListener listener,
             AtomicReference<String> activeNetworkType,
-            AtomicReference<String> activeNetworkPrimaryDNSServer,
+            AtomicReference<String> activeNetworkDNSServers,
             HostLogger logger) {
 
             this.listener = listener;
             this.activeNetworkType = activeNetworkType;
-            this.activeNetworkPrimaryDNSServer = activeNetworkPrimaryDNSServer;
+            this.activeNetworkDNSServers = activeNetworkDNSServers;
             this.logger = logger;
         }
 
@@ -1471,7 +1529,7 @@ public class PsiphonTunnel {
                     if (network == null) {
 
                         activeNetworkType.set("NONE");
-                        activeNetworkPrimaryDNSServer.set("");
+                        activeNetworkDNSServers.set("");
                         logger.onDiagnosticMessage("NetworkMonitor: clear current active network");
 
                     } else {
@@ -1493,22 +1551,24 @@ public class PsiphonTunnel {
                         }
                         activeNetworkType.set(networkType);
 
-                        String primaryDNSServer = "";
+                        ArrayList<String> servers = new ArrayList<String>();
                         try {
                             LinkProperties linkProperties = connectivityManager.getLinkProperties(network);
-                            List<InetAddress> dnsServers = linkProperties.getDnsServers();
-                            if (!dnsServers.isEmpty()) {
-                                primaryDNSServer = dnsServers.iterator().next().toString();
-                                if (primaryDNSServer.startsWith("/")) {
-                                    primaryDNSServer = primaryDNSServer.substring(1);
+                            List<InetAddress> serverAddresses = linkProperties.getDnsServers();
+                            for (InetAddress serverAddress : serverAddresses) {
+                                String server = serverAddress.toString();
+                                if (server.startsWith("/")) {
+                                    server = server.substring(1);
                                 }
+                                servers.add(server);
                             }
                         } catch (java.lang.Exception e) {
                         }
-                        activeNetworkPrimaryDNSServer.set(primaryDNSServer);
+                        // Use the workaround, comma-delimited format required for gobind.
+                        activeNetworkDNSServers.set(String.join(",", servers));
 
                         String message = "NetworkMonitor: set current active network " + networkType;
-                        if (primaryDNSServer != "") {
+                        if (!servers.isEmpty()) {
                             // The DNS server address is potential PII and not logged.
                             message += " with DNS";
                         }

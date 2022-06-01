@@ -54,7 +54,12 @@ func NewUDPConn(
 		return nil, nil, errors.Tracef("invalid destination port: %d", port)
 	}
 
-	ipAddrs, err := LookupIP(ctx, host, config)
+	if config.ResolveIP == nil {
+		// Fail even if we don't need a resolver for this dial: this is a code
+		// misconfiguration.
+		return nil, nil, errors.TraceNew("missing resolver")
+	}
+	ipAddrs, err := config.ResolveIP(ctx, host)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}

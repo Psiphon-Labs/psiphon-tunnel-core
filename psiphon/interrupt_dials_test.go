@@ -36,15 +36,20 @@ import (
 
 func TestInterruptDials(t *testing.T) {
 
+	resolveIP := func(_ context.Context, host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP(host)}, nil
+	}
+
 	makeDialers := make(map[string]func(string) common.Dialer)
 
 	makeDialers["TCP"] = func(string) common.Dialer {
-		return NewTCPDialer(&DialConfig{})
+		return NewTCPDialer(&DialConfig{ResolveIP: resolveIP})
 	}
 
 	makeDialers["SOCKS4-Proxied"] = func(mockServerAddr string) common.Dialer {
 		return NewTCPDialer(
 			&DialConfig{
+				ResolveIP:        resolveIP,
 				UpstreamProxyURL: "socks4a://" + mockServerAddr,
 			})
 	}
@@ -52,6 +57,7 @@ func TestInterruptDials(t *testing.T) {
 	makeDialers["SOCKS5-Proxied"] = func(mockServerAddr string) common.Dialer {
 		return NewTCPDialer(
 			&DialConfig{
+				ResolveIP:        resolveIP,
 				UpstreamProxyURL: "socks5://" + mockServerAddr,
 			})
 	}
@@ -59,6 +65,7 @@ func TestInterruptDials(t *testing.T) {
 	makeDialers["HTTP-CONNECT-Proxied"] = func(mockServerAddr string) common.Dialer {
 		return NewTCPDialer(
 			&DialConfig{
+				ResolveIP:        resolveIP,
 				UpstreamProxyURL: "http://" + mockServerAddr,
 			})
 	}
@@ -79,7 +86,7 @@ func TestInterruptDials(t *testing.T) {
 		return NewCustomTLSDialer(
 			&CustomTLSConfig{
 				Parameters:               params,
-				Dial:                     NewTCPDialer(&DialConfig{}),
+				Dial:                     NewTCPDialer(&DialConfig{ResolveIP: resolveIP}),
 				RandomizedTLSProfileSeed: seed,
 			})
 	}
