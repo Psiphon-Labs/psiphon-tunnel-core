@@ -18,7 +18,7 @@
  */
 
 #import <Foundation/Foundation.h>
-#import "Psi-meta.h"
+#import <Psi/Psi.h>
 
 NS_ASSUME_NONNULL_BEGIN
 

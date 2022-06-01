@@ -28,6 +28,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 )
 
 func TestGetDefaultParameters(t *testing.T) {
@@ -159,8 +160,25 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("TunnelProtocolPortLists returned %+v expected %+v", g, v)
 			}
+		case LabeledCIDRs:
+			for label, CIDRs := range v {
+				g := p.Get().LabeledCIDRs(name, label)
+				if !reflect.DeepEqual(CIDRs, g) {
+					t.Fatalf("LabeledCIDRs returned %+v expected %+v", g, CIDRs)
+				}
+			}
+		case transforms.Specs:
+			g := p.Get().ProtocolTransformSpecs(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("ProtocolTransformSpecs returned %+v expected %+v", g, v)
+			}
+		case transforms.ScopedSpecNames:
+			g := p.Get().ProtocolTransformScopedSpecNames(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("ProtocolTransformScopedSpecNames returned %+v expected %+v", g, v)
+			}
 		default:
-			t.Fatalf("Unhandled default type: %s", name)
+			t.Fatalf("Unhandled default type: %s (%T)", name, defaults.value)
 		}
 	}
 }

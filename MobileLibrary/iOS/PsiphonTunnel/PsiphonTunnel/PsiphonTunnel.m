@@ -22,8 +22,8 @@
 #import <stdatomic.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
+#import <Psi/Psi.h>
 #import "IPv6Synthesizer.h"
-#import "Psi-meta.h"
 #import "PsiphonProviderFeedbackHandlerShim.h"
 #import "PsiphonProviderNoticeHandlerShim.h"
 #import "PsiphonProviderNetwork.h"
@@ -38,12 +38,10 @@
 #import "PsiphonClientPlatform.h"
 #import "Redactor.h"
 
-#define GOOGLE_DNS_1 @"8.8.4.4"
-#define GOOGLE_DNS_2 @"8.8.8.8"
-
 NSErrorDomain _Nonnull const PsiphonTunnelErrorDomain = @"com.psiphon3.ios.PsiphonTunnelErrorDomain";
 
 const BOOL UseIPv6Synthesizer = TRUE; // Must always use IPv6Synthesizer for iOS
+const BOOL UseHasIPv6RouteGetter = FALSE;
 
 /// Error codes which can returned by PsiphonTunnel
 typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
@@ -118,10 +116,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     _Atomic BOOL usingNoticeFiles;
 
     // DNS
-    NSString *primaryGoogleDNS;
-    NSString *secondaryGoogleDNS;
     _Atomic BOOL useInitialDNS; // initialDNSCache validity flag.
-    NSArray<NSString *> *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
+    NSString *initialDNSCache;  // This cache becomes void if internetReachabilityChanged is called.
     
     // Log timestamp formatter
     // Note: NSDateFormatter is threadsafe.
@@ -143,18 +139,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     self->tunnelWholeDevice = FALSE;
     atomic_init(&self->usingNoticeFiles, FALSE);
 
-    // Randomize order of Google DNS servers on start,
-    // and consistently return in that fixed order.
-    if (arc4random_uniform(2) == 0) {
-        self->primaryGoogleDNS = GOOGLE_DNS_1;
-        self->secondaryGoogleDNS = GOOGLE_DNS_2;
-    } else {
-        self->primaryGoogleDNS = GOOGLE_DNS_2;
-        self->secondaryGoogleDNS = GOOGLE_DNS_1;
-    }
-
-    self->initialDNSCache = [self getDNSServers];
-    atomic_init(&self->useInitialDNS, [self->initialDNSCache count] > 0);
+    // Use the workaround, comma-delimited format required for gobind.
+    self->initialDNSCache = [[self getSystemDNSServers] componentsJoinedByString:@","];
+    atomic_init(&self->useInitialDNS, TRUE);
 
     rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
     
@@ -323,6 +310,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                 self,
                 self->tunnelWholeDevice, // useDeviceBinder
                 UseIPv6Synthesizer,
+                UseHasIPv6RouteGetter,
                 &e);
             
             if (e != nil) {
@@ -1268,25 +1256,15 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return nil;
 }
 
-- (NSString *)getPrimaryDnsServer {
-    // This function is only called when BindToDevice is used/supported.
+- (NSString *)getDNSServersAsString {
     // TODO: Implement correctly
 
     if (atomic_load(&self->useInitialDNS)) {
-        return self->initialDNSCache[0];
+        return self->initialDNSCache;
     } else {
-        return self->primaryGoogleDNS;
-    }
-}
-
-- (NSString *)getSecondaryDnsServer {
-    // This function is only called when BindToDevice is used/supported.
-    // TODO: Implement correctly
-
-    if (atomic_load(&self->useInitialDNS) && [self->initialDNSCache count] > 1) {
-        return self->initialDNSCache[1];
-    } else {
-        return self->secondaryGoogleDNS;
+        // Alternate DNS servers will be provided by psiphon-tunnel-core
+        // config or tactics.
+        return @"";
     }
 }
 
@@ -1305,6 +1283,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 - (NSString *)iPv6Synthesize:(NSString *)IPv4Addr {
     return [IPv6Synthesizer IPv4ToIPv6:IPv4Addr];
+}
+
+- (NSString *)hasIPv6Route:()BOOL {
+    // Unused on iOS.
+    return FALSE;
 }
 
 - (NSString *)getNetworkID {
@@ -1331,14 +1314,31 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     @return Array of DNS addresses, nil on failure.
  */
 
-- (NSArray<NSString *> *)getDNSServers {
+- (NSArray<NSString *> *)getSystemDNSServers {
     NSMutableArray<NSString *> *serverList = [NSMutableArray new];
+
+    // Limitations:
+    //
+    // - May not work on IPv6-only networks:
+    //   https://developer.apple.com/forums/thread/86338.
+    //
+    // - Will not return the DNS servers for the underlying physical network
+    //   once the VPN is running:
+    //   https://developer.apple.com/forums/thread/661601.
+    //
+    // - Potential APIs which return the DNS servers associated with an
+    //   interface (e.g, invoke nw_path_get_dns_servers as part of
+    //   NWPathMonitor) are private:
+    //   https://developer.apple.com/forums/thread/107861.
+    //
+    // - High-level APIs such as resolving and making connections via
+    //   NEPacketTunnelProvider are missing circumvention capabilities.
 
     res_state _state;
     _state = malloc(sizeof(struct __res_state));
 
     if (res_ninit(_state) < 0) {
-        [self logMessage:@"getDNSServers: res_ninit failed."];
+        [self logMessage:@"getSystemDNSServers: res_ninit failed."];
         free(_state);
         return nil;
     }
@@ -1362,7 +1362,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             if (EXIT_SUCCESS == ret_code) {
                 [serverList addObject:[NSString stringWithUTF8String:hostBuf]];
             } else {
-                [self logMessage:[NSString stringWithFormat: @"getDNSServers: getnameinfo failed: %d", ret_code]];
+                [self logMessage:[NSString stringWithFormat: @"getSystemDNSServers: getnameinfo failed: %d", ret_code]];
             }
         }
     }
@@ -1469,7 +1469,14 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (void)internetReachabilityChanged:(NSNotification *)note {
-    // Invalidate initialDNSCache.
+
+    // Invalidate initialDNSCache due to limitations documented in
+    // getDNSServers.
+    //
+    // TODO: consider at least reverting to using the initialDNSCache when a
+    // new network ID matches the initial network ID -- i.e., when the device
+    // is back on the initial network -- even though those DNS server _may_
+    // have changed.
     atomic_store(&self->useInitialDNS, FALSE);
 
     Reachability* currentReachability = [note object];
@@ -1738,9 +1745,16 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc] init];
 
-        GoPsiStartSendFeedback(psiphonConfig, feedbackJson, uploadPath,
-                               innerFeedbackHandler, networkInfoProvider, noticeHandler,
-                               UseIPv6Synthesizer, &err);
+        GoPsiStartSendFeedback(
+            psiphonConfig,
+            feedbackJson,
+            uploadPath,
+            innerFeedbackHandler,
+            networkInfoProvider,
+            noticeHandler,
+            UseIPv6Synthesizer,
+            UseHasIPv6RouteGetter,
+            &err);
         if (err != nil) {
             NSError *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
                                                     code:PsiphonTunnelErrorCodeSendFeedbackError

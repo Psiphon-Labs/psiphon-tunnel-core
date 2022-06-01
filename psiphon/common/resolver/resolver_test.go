@@ -1,0 +1,722 @@
+/*
+ * Copyright (c) 2022, Psiphon Inc.
+ * All rights reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+package resolver
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
+	"github.com/miekg/dns"
+)
+
+func TestMakeResolveParameters(t *testing.T) {
+	err := runTestMakeResolveParameters()
+	if err != nil {
+		t.Fatalf(errors.Trace(err).Error())
+	}
+}
+
+func TestResolver(t *testing.T) {
+	err := runTestResolver()
+	if err != nil {
+		t.Fatalf(errors.Trace(err).Error())
+	}
+}
+
+func TestPublicDNSServers(t *testing.T) {
+	IPs, metrics, err := runTestPublicDNSServers()
+	if err != nil {
+		t.Fatalf(errors.Trace(err).Error())
+	}
+	t.Logf("IPs: %v", IPs)
+	t.Logf("Metrics: %v", metrics)
+}
+
+func runTestMakeResolveParameters() error {
+
+	frontingProviderID := "frontingProvider"
+	alternateDNSServer := "172.16.0.1"
+	alternateDNSServerWithPort := net.JoinHostPort(alternateDNSServer, resolverDNSPort)
+	transformName := "exampleTransform"
+
+	paramValues := map[string]interface{}{
+		"DNSResolverPreresolvedIPAddressProbability":  1.0,
+		"DNSResolverPreresolvedIPAddressCIDRs":        parameters.LabeledCIDRs{frontingProviderID: []string{exampleIPv4CIDR}},
+		"DNSResolverAlternateServers":                 []string{alternateDNSServer},
+		"DNSResolverPreferAlternateServerProbability": 1.0,
+		"DNSResolverProtocolTransformProbability":     1.0,
+		"DNSResolverProtocolTransformSpecs":           transforms.Specs{transformName: exampleTransform},
+		"DNSResolverProtocolTransformScopedSpecNames": transforms.ScopedSpecNames{alternateDNSServer: []string{transformName}},
+		"DNSResolverIncludeEDNS0Probability":          1.0,
+	}
+
+	params, err := parameters.NewParameters(nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	_, err = params.Set("", false, paramValues)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	resolver := NewResolver(&NetworkConfig{}, "")
+	defer resolver.Stop()
+
+	resolverParams, err := resolver.MakeResolveParameters(
+		params.Get(), frontingProviderID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Test: PreresolvedIPAddress
+
+	CIDRContainsIP := func(CIDR, IP string) bool {
+		_, IPNet, _ := net.ParseCIDR(CIDR)
+		return IPNet.Contains(net.ParseIP(IP))
+	}
+
+	if resolverParams.AttemptsPerServer != 2 ||
+		resolverParams.RequestTimeout != 5*time.Second ||
+		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		!CIDRContainsIP(exampleIPv4CIDR, resolverParams.PreresolvedIPAddress) ||
+		resolverParams.AlternateDNSServer != "" ||
+		resolverParams.PreferAlternateDNSServer != false ||
+		resolverParams.ProtocolTransformName != "" ||
+		resolverParams.ProtocolTransformSpec != nil ||
+		resolverParams.IncludeEDNS0 != false {
+		return errors.Tracef("unexpected resolver parameters: %+v", resolverParams)
+	}
+
+	// Test: additional generateIPAddressFromCIDR cases
+
+	for i := 0; i < 10000; i++ {
+		for _, CIDR := range []string{exampleIPv4CIDR, exampleIPv6CIDR} {
+			IP, err := generateIPAddressFromCIDR(CIDR)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			if !CIDRContainsIP(CIDR, IP.String()) || common.IsBogon(IP) {
+				return errors.Tracef(
+					"invalid generated IP address %v for CIDR %v", IP, CIDR)
+			}
+		}
+	}
+
+	// Test: Alternate/Transform/EDNS(0)
+
+	paramValues["DNSResolverPreresolvedIPAddressProbability"] = 0.0
+
+	_, err = params.Set("", false, paramValues)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	resolverParams, err = resolver.MakeResolveParameters(
+		params.Get(), frontingProviderID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if resolverParams.AttemptsPerServer != 2 ||
+		resolverParams.RequestTimeout != 5*time.Second ||
+		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		resolverParams.PreresolvedIPAddress != "" ||
+		resolverParams.AlternateDNSServer != alternateDNSServerWithPort ||
+		resolverParams.PreferAlternateDNSServer != true ||
+		resolverParams.ProtocolTransformName != transformName ||
+		resolverParams.ProtocolTransformSpec == nil ||
+		resolverParams.IncludeEDNS0 != true {
+		return errors.Tracef("unexpected resolver parameters: %+v", resolverParams)
+	}
+
+	// Test: No Alternate/Transform/EDNS(0)
+
+	paramValues["DNSResolverPreferAlternateServerProbability"] = 0.0
+	paramValues["DNSResolverProtocolTransformProbability"] = 0.0
+	paramValues["DNSResolverIncludeEDNS0Probability"] = 0.0
+
+	_, err = params.Set("", false, paramValues)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	resolverParams, err = resolver.MakeResolveParameters(
+		params.Get(), frontingProviderID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if resolverParams.AttemptsPerServer != 2 ||
+		resolverParams.RequestTimeout != 5*time.Second ||
+		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		resolverParams.PreresolvedIPAddress != "" ||
+		resolverParams.AlternateDNSServer != alternateDNSServerWithPort ||
+		resolverParams.PreferAlternateDNSServer != false ||
+		resolverParams.ProtocolTransformName != "" ||
+		resolverParams.ProtocolTransformSpec != nil ||
+		resolverParams.IncludeEDNS0 != false {
+		return errors.Tracef("unexpected resolver parameters: %+v", resolverParams)
+	}
+
+	return nil
+}
+
+func runTestResolver() error {
+
+	// noResponseServer will not respond to requests
+	noResponseServer, err := newTestDNSServer(false, false, false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer noResponseServer.stop()
+
+	// invalidIPServer will respond with an invalid IP
+	invalidIPServer, err := newTestDNSServer(true, false, false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer invalidIPServer.stop()
+
+	// okServer will respond to correct requests (expected domain) with the
+	// correct response (expected IPv4 or IPv6 address)
+	okServer, err := newTestDNSServer(true, true, false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer okServer.stop()
+
+	// alternateOkServer behaves like okServer; getRequestCount is used to
+	// confirm that the alternate server was indeed used
+	alternateOkServer, err := newTestDNSServer(true, true, false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer alternateOkServer.stop()
+
+	// transformOkServer behaves like okServer but only responds if the
+	// transform was applied; other servers do not respond if the transform
+	// is applied
+	transformOkServer, err := newTestDNSServer(true, true, true)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer transformOkServer.stop()
+
+	servers := []string{noResponseServer.getAddr(), invalidIPServer.getAddr(), okServer.getAddr()}
+
+	networkConfig := &NetworkConfig{
+		GetDNSServers: func() []string { return servers },
+		LogWarning:    func(err error) { fmt.Printf("LogWarning: %v\n", err) },
+	}
+
+	networkID := "networkID-1"
+
+	resolver := NewResolver(networkConfig, networkID)
+	defer resolver.Stop()
+
+	params := &ResolveParameters{
+		AttemptsPerServer: 1,
+		RequestTimeout:    250 * time.Millisecond,
+		AwaitTimeout:      250 * time.Millisecond,
+		IncludeEDNS0:      true,
+	}
+
+	checkResult := func(IPs []net.IP) error {
+		var IPv4, IPv6 net.IP
+		for _, IP := range IPs {
+			if IP.To4() != nil {
+				IPv4 = IP
+			} else {
+				IPv6 = IP
+			}
+		}
+		if IPv4 == nil {
+			return errors.TraceNew("missing IPv4 response")
+		}
+		if IPv4.String() != exampleIPv4 {
+			return errors.TraceNew("unexpected IPv4 response")
+		}
+		if resolver.hasIPv6Route {
+			if IPv6 == nil {
+				return errors.TraceNew("missing IPv6 response")
+			}
+			if IPv6.String() != exampleIPv6 {
+				return errors.TraceNew("unexpected IPv6 response")
+			}
+		}
+		return nil
+	}
+
+	ctx, cancelFunc := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelFunc()
+
+	// Test: should retry until okServer responds
+
+	IPs, err := resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if resolver.metrics.resolves != 1 ||
+		resolver.metrics.cacheHits != 0 ||
+		resolver.metrics.requestsIPv4 != 3 || resolver.metrics.responsesIPv4 != 1 ||
+		(resolver.hasIPv6Route && (resolver.metrics.requestsIPv6 != 3 || resolver.metrics.responsesIPv6 != 1)) {
+		return errors.Tracef("unexpected metrics: %+v", resolver.metrics)
+	}
+
+	// Test: cached response
+
+	beforeMetrics := resolver.metrics
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if resolver.metrics.resolves != beforeMetrics.resolves+1 ||
+		resolver.metrics.cacheHits != beforeMetrics.cacheHits+1 ||
+		resolver.metrics.requestsIPv4 != beforeMetrics.requestsIPv4 ||
+		resolver.metrics.requestsIPv6 != beforeMetrics.requestsIPv6 {
+		return errors.Tracef("unexpected metrics: %+v", resolver.metrics)
+	}
+
+	// Test: PreresolvedIPAddress
+
+	beforeMetrics = resolver.metrics
+
+	params.PreresolvedIPAddress = exampleIPv4
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(IPs) != 1 || IPs[0].String() != exampleIPv4 {
+		return errors.TraceNew("unexpected preresolved response")
+	}
+
+	if resolver.metrics.resolves != beforeMetrics.resolves+1 ||
+		resolver.metrics.cacheHits != beforeMetrics.cacheHits ||
+		resolver.metrics.requestsIPv4 != beforeMetrics.requestsIPv4 ||
+		resolver.metrics.requestsIPv6 != beforeMetrics.requestsIPv6 {
+		return errors.Tracef("unexpected metrics: %+v", resolver.metrics)
+	}
+
+	params.PreresolvedIPAddress = ""
+
+	// Test: change network ID, which must clear cache
+
+	beforeMetrics = resolver.metrics
+
+	networkID = "networkID-2"
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if resolver.metrics.resolves != beforeMetrics.resolves+1 ||
+		resolver.metrics.cacheHits != beforeMetrics.cacheHits {
+		return errors.Tracef("unexpected metrics: %+v", resolver.metrics)
+	}
+
+	// Test: PreferAlternateDNSServer
+
+	if alternateOkServer.getRequestCount() != 0 {
+		return errors.TraceNew("unexpected alternate server request count")
+	}
+
+	resolver.cache.Flush()
+
+	params.AlternateDNSServer = alternateOkServer.getAddr()
+	params.PreferAlternateDNSServer = true
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if alternateOkServer.getRequestCount() < 1 {
+		return errors.TraceNew("unexpected alternate server request count")
+	}
+
+	params.AlternateDNSServer = ""
+	params.PreferAlternateDNSServer = false
+
+	// Test: fall over to AlternateDNSServer when no system servers
+
+	beforeCount := alternateOkServer.getRequestCount()
+
+	previousGetDNSServers := networkConfig.GetDNSServers
+
+	networkConfig.GetDNSServers = func() []string { return nil }
+
+	// Force system servers update
+	networkID = "networkID-3"
+
+	resolver.cache.Flush()
+
+	params.AlternateDNSServer = alternateOkServer.getAddr()
+	params.PreferAlternateDNSServer = false
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if alternateOkServer.getRequestCount() <= beforeCount {
+		return errors.TraceNew("unexpected alterate server request count")
+	}
+
+	// Test: use default, standard resolver when no servers
+
+	resolver.cache.Flush()
+
+	params.AlternateDNSServer = ""
+	params.PreferAlternateDNSServer = false
+
+	if len(resolver.systemServers) != 0 {
+		return errors.TraceNew("unexpected server count")
+	}
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(IPs) == 0 {
+		return errors.TraceNew("unexpected response")
+	}
+
+	// Test: ResolveAddress
+
+	networkConfig.GetDNSServers = previousGetDNSServers
+
+	// Force system servers update
+	networkID = "networkID-4"
+
+	domainAddress := net.JoinHostPort(exampleDomain, "443")
+
+	address, err := resolver.ResolveAddress(ctx, networkID, params, domainAddress)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	IP := net.ParseIP(host)
+
+	if IP == nil || (host != exampleIPv4 && host != exampleIPv6) || port != "443" {
+		return errors.TraceNew("unexpected response")
+	}
+
+	// Test: protocol transform
+
+	if transformOkServer.getRequestCount() != 0 {
+		return errors.TraceNew("unexpected transform server request count")
+	}
+
+	resolver.cache.Flush()
+
+	params.AlternateDNSServer = transformOkServer.getAddr()
+	params.PreferAlternateDNSServer = true
+
+	seed, err := prng.NewSeed()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	params.ProtocolTransformName = "exampleTransform"
+	params.ProtocolTransformSpec = exampleTransform
+	params.ProtocolTransformSeed = seed
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if transformOkServer.getRequestCount() < 1 {
+		return errors.TraceNew("unexpected transform server request count")
+	}
+
+	params.AlternateDNSServer = ""
+	params.PreferAlternateDNSServer = false
+	params.ProtocolTransformName = ""
+	params.ProtocolTransformSpec = nil
+	params.ProtocolTransformSeed = nil
+
+	// Test: EDNS(0)
+
+	resolver.cache.Flush()
+
+	params.IncludeEDNS0 = true
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	params.IncludeEDNS0 = false
+
+	// Test: input IP address
+
+	beforeMetrics = resolver.metrics
+
+	resolver.cache.Flush()
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleIPv4)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(IPs) != 1 || IPs[0].String() != exampleIPv4 {
+		return errors.TraceNew("unexpected IPv4 response")
+	}
+
+	if resolver.metrics.resolves != beforeMetrics.resolves {
+		return errors.Tracef("unexpected metrics: %+v", resolver.metrics)
+	}
+
+	// Test: cancel context
+
+	resolver.cache.Flush()
+
+	cancelFunc()
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	return nil
+}
+
+func runTestPublicDNSServers() ([]net.IP, string, error) {
+
+	networkConfig := &NetworkConfig{
+		GetDNSServers: getPublicDNSServers,
+	}
+
+	networkID := "networkID-1"
+
+	resolver := NewResolver(networkConfig, networkID)
+	defer resolver.Stop()
+
+	params := &ResolveParameters{
+		AttemptsPerServer: 1,
+		RequestTimeout:    5 * time.Second,
+		AwaitTimeout:      1 * time.Second,
+		IncludeEDNS0:      true,
+	}
+
+	IPs, err := resolver.ResolveIP(
+		context.Background(), networkID, params, exampleDomain)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	gotIPv4 := false
+	gotIPv6 := false
+	for _, IP := range IPs {
+		if IP.To4() != nil {
+			gotIPv4 = true
+		} else {
+			gotIPv6 = true
+		}
+	}
+	if !gotIPv4 {
+		return nil, "", errors.TraceNew("missing IPv4 response")
+	}
+	if !gotIPv6 && resolver.hasIPv6Route {
+		return nil, "", errors.TraceNew("missing IPv6 response")
+	}
+
+	return IPs, resolver.GetMetrics(), nil
+}
+
+func getPublicDNSServers() []string {
+	servers := []string{"1.1.1.1", "8.8.8.8", "9.9.9.9"}
+	shuffledServers := make([]string, len(servers))
+	for i, j := range prng.Perm(len(servers)) {
+		shuffledServers[i] = servers[j]
+	}
+	return shuffledServers
+}
+
+const (
+	exampleDomain   = "example.com"
+	exampleIPv4     = "93.184.216.34"
+	exampleIPv4CIDR = "93.184.216.0/24"
+	exampleIPv6     = "2606:2800:220:1:248:1893:25c8:1946"
+	exampleIPv6CIDR = "2606:2800:220::/48"
+)
+
+// Set the reserved Z flag
+var exampleTransform = transforms.Spec{[2]string{"^([a-f0-9]{4})0100", "\\$\\{1\\}0140"}}
+
+type testDNSServer struct {
+	respond         bool
+	validResponse   bool
+	expectTransform bool
+	addr            string
+	requestCount    int32
+	server          *dns.Server
+}
+
+func newTestDNSServer(respond, validResponse, expectTransform bool) (*testDNSServer, error) {
+
+	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	udpConn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	s := &testDNSServer{
+		respond:         respond,
+		validResponse:   validResponse,
+		expectTransform: expectTransform,
+		addr:            udpConn.LocalAddr().String(),
+	}
+
+	server := &dns.Server{
+		PacketConn: udpConn,
+		Handler:    s,
+	}
+
+	s.server = server
+
+	go server.ActivateAndServe()
+
+	return s, nil
+}
+
+func (s *testDNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	atomic.AddInt32(&s.requestCount, 1)
+
+	if !s.respond {
+		return
+	}
+
+	// Check the reserved Z flag
+	if s.expectTransform != r.MsgHdr.Zero {
+		return
+	}
+
+	if len(r.Question) != 1 || r.Question[0].Name != dns.Fqdn(exampleDomain) {
+		return
+	}
+
+	m := new(dns.Msg)
+	m.SetReply(r)
+	m.Answer = make([]dns.RR, 1)
+	if r.Question[0].Qtype == dns.TypeA {
+		IP := net.ParseIP(exampleIPv4)
+		if !s.validResponse {
+			IP = net.ParseIP("127.0.0.1")
+		}
+		m.Answer[0] = &dns.A{
+			Hdr: dns.RR_Header{
+				Name:   r.Question[0].Name,
+				Rrtype: dns.TypeA,
+				Class:  dns.ClassINET,
+				Ttl:    60},
+			A: IP,
+		}
+	} else {
+		IP := net.ParseIP(exampleIPv6)
+		if !s.validResponse {
+			IP = net.ParseIP("::1")
+		}
+		m.Answer[0] = &dns.AAAA{
+			Hdr: dns.RR_Header{
+				Name:   r.Question[0].Name,
+				Rrtype: dns.TypeAAAA,
+				Class:  dns.ClassINET,
+				Ttl:    60},
+			AAAA: IP,
+		}
+	}
+
+	w.WriteMsg(m)
+}
+
+func (s *testDNSServer) getAddr() string {
+	return s.addr
+}
+
+func (s *testDNSServer) getRequestCount() int {
+	return int(atomic.LoadInt32(&s.requestCount))
+}
+
+func (s *testDNSServer) stop() {
+	s.server.PacketConn.Close()
+	s.server.Shutdown()
+}

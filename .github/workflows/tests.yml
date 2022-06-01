@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.17.8" ]
+        go: [ "1.17.9" ]
         test-type: [ "detector", "coverage", "memory" ]
 
     runs-on: ${{ matrix.os }}-latest
@@ -88,7 +88,9 @@ jobs:
           go test -v -race ./psiphon/common/parameters
           go test -v -race ./psiphon/common/protocol
           go test -v -race ./psiphon/common/quic
+          go test -v -race ./psiphon/common/resolver
           go test -v -race ./psiphon/common/tactics
+          go test -v -race ./psiphon/common/transforms
           go test -v -race ./psiphon/common/values
           go test -v -race ./psiphon/common/wildcard
           go test -v -race ./psiphon/transferstats
@@ -117,7 +119,9 @@ jobs:
           go test -v -covermode=count -coverprofile=parameters.coverprofile ./psiphon/common/parameters
           go test -v -covermode=count -coverprofile=protocol.coverprofile ./psiphon/common/protocol
           go test -v -covermode=count -coverprofile=quic.coverprofile ./psiphon/common/quic
+          go test -v -covermode=count -coverprofile=resolver.coverprofile ./psiphon/common/resolver
           go test -v -covermode=count -coverprofile=tactics.coverprofile ./psiphon/common/tactics
+          go test -v -covermode=count -coverprofile=transforms.coverprofile ./psiphon/common/transforms
           go test -v -covermode=count -coverprofile=values.coverprofile ./psiphon/common/values
           go test -v -covermode=count -coverprofile=wildcard.coverprofile ./psiphon/common/wildcard
           go test -v -covermode=count -coverprofile=transferstats.coverprofile ./psiphon/transferstats
