@@ -131,7 +131,28 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (id)init {
-    self.tunneledAppDelegate = nil;
+    self = [super init];
+    if (self) {
+        [self initializeWithAppDelegate:nil];
+    }
+    return self;
+}
+
+- (id)initWithAppDelegate:(id<TunneledAppDelegate> _Nullable)appDelegate {
+    self = [super init];
+    if (self) {
+        [self initializeWithAppDelegate:appDelegate];
+    }
+    return self;
+}
+
+- (void)initializeWithAppDelegate:(id<TunneledAppDelegate> _Nullable)appDelegate {
+
+    // Set delegate first so it receives any initialization logs
+    self.tunneledAppDelegate = appDelegate;
+
+    // Must be initialized for logging
+    rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
 
     self->workQueue = dispatch_queue_create("com.psiphon3.library.WorkQueue", DISPATCH_QUEUE_SERIAL);
     self->callbackQueue = dispatch_queue_create("com.psiphon3.library.CallbackQueue", DISPATCH_QUEUE_SERIAL);
@@ -143,7 +164,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // reachability for the default route (destination 0.0.0.0/0)
     if (@available(iOS 12.0, *)) {
         void (^logNotice)(NSString * _Nonnull) = ^void(NSString * _Nonnull noticeJSON) {
-            // Warning: any logs emitted before tunneledAppDelegate is set will be discarded silently.
             [self logMessage:[@"DefaultRouteMonitor: " stringByAppendingString:noticeJSON]];
         };
         self->reachability = [[DefaultRouteMonitor alloc] initWithLogger:logNotice];
@@ -166,10 +186,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     self->initialDNSCache = [self getDNSServers];
     atomic_init(&self->useInitialDNS, [self->initialDNSCache count] > 0);
-
-    rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
-
-    return self;
 }
 
 #pragma mark - PsiphonTunnel public methods
@@ -210,7 +226,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         static PsiphonTunnel *sharedInstance = nil;
         static dispatch_once_t onceToken = 0;
         dispatch_once(&onceToken, ^{
-            sharedInstance = [[self alloc] init];
+            sharedInstance = [[self alloc] initWithAppDelegate:tunneledAppDelegate];
         });
 
         [sharedInstance stop];

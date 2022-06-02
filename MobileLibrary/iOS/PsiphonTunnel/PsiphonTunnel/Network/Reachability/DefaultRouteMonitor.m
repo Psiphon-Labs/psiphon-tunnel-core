@@ -102,8 +102,8 @@
 - (instancetype)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger {
     self = [super init];
     if (self) {
-        [self initialize];
         self->logger = logger;
+        [self initialize];
     }
     return self;
 }
