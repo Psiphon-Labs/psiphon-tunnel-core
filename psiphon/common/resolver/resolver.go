@@ -491,10 +491,16 @@ func (r *Resolver) ResolveIP(
 	// that try a AlternateDNSServer, or just use the standard library
 	// resolver.
 	//
-	// ResolveIP should always be called, even when defaultResolverLookupIP
-	// will be used, to ensure correct metrics counts and ensure a consistent
-	// error message log stack for all DNS-related failures.
-	if len(systemServers) == 0 && params.AlternateDNSServer == "" {
+	// ResolveIP should always be called, even when defaultResolverLookupIP is
+	// expected to be used, to ensure correct metrics counts and ensure a
+	// consistent error message log stack for all DNS-related failures.
+	//
+	// When BindToDevice is configured, the standard library resolver is not
+	// used, as it will not route outside of the VPN.
+	if len(systemServers) == 0 &&
+		params.AlternateDNSServer == "" &&
+		r.networkConfig.BindToDevice == nil {
+
 		IPs, err := defaultResolverLookupIP(ctx, hostname, r.networkConfig.LogHostnames)
 		if err != nil {
 			return nil, errors.Trace(err)
