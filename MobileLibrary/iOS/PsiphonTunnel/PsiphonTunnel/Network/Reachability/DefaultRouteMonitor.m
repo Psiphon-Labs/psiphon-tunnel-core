@@ -52,14 +52,36 @@
     dispatch_queue_t workQueue;
     NetworkReachability status;
     NetworkPathState* state;
+    BOOL emitReachabilityUpdates;
 
     void (^logger) (NSString *_Nonnull);
 }
 
-- (void)initialize {
+- (void)initialize API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
     self->state = nil;
     self->status = NetworkReachabilityNotReachable;
+    self->emitReachabilityUpdates = FALSE;
+    self->monitor = nw_path_monitor_create();
     self->workQueue = dispatch_queue_create("com.psiphon3.library.NWInterfaceNWPathMonitorQueue", DISPATCH_QUEUE_SERIAL);
+
+    nw_path_monitor_set_queue(self->monitor, self->workQueue);
+    __block dispatch_group_t group = dispatch_group_create();
+    dispatch_group_enter(group);
+
+    nw_path_monitor_set_update_handler(self->monitor, ^(nw_path_t  _Nonnull path) {
+        @synchronized (self) {
+            [self pathUpdateHandler:path];
+            if (group != NULL) {
+                dispatch_group_leave(group);
+                group = NULL;
+            }
+        }
+    });
+    nw_path_monitor_start(self->monitor);
+
+    // Wait for the current path to be emitted before returning to ensure this instance is populated
+    // with the current network state before use. PsiphonTunnel depends on this guarantee.
+    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
 }
 
 - (instancetype)init {
@@ -68,6 +90,13 @@
         [self initialize];
     }
     return self;
+}
+
+- (void)dealloc API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
+    // Note: this monitor cannot be used after being cancelled. Its update handler will not
+    // fire again and cannot be restarted with nw_path_monitor_start. A new monitor must be
+    // created and started.
+    nw_path_monitor_cancel(self->monitor);
 }
 
 - (instancetype)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger {
@@ -121,101 +150,93 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
 
 - (void)start API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
     @synchronized (self) {
-        // Ensure previous monitor cancelled
-        if (self->monitor != nil) {
-            nw_path_monitor_cancel(self->monitor);
-        }
-
-        self->monitor = nw_path_monitor_create();
-        nw_path_monitor_set_queue(self->monitor, self->workQueue);
-
-        nw_path_monitor_set_update_handler(self->monitor, ^(nw_path_t  _Nonnull path) {
-            [self log:[NSString stringWithFormat:@"new path: %@",
-                       [DefaultRouteMonitor pathDebugInfo:path]]];
-
-            NetworkPathState *newPathState = [[NetworkPathState alloc] init];
-            newPathState.path = path;
-            NSString *prevDefaultActiveInterfaceName = nil;
-            if (self->state != nil) {
-                prevDefaultActiveInterfaceName = self->state.defaultActiveInterfaceName;
-            }
-
-            nw_path_status_t status = nw_path_get_status(path);
-            if (status == nw_path_status_invalid || status == nw_path_status_unsatisfied) {
-                self->status = NetworkReachabilityNotReachable;
-            } else if (status == nw_path_status_satisfied || status == nw_path_status_satisfiable) {
-
-                // Network is, or could, be reachable. Determine interface corresponding to this
-                // path.
-
-                nw_interface_type_t active_interface_type = nw_path_interface_type(path);
-                self->status = nw_interface_type_network_reachability(active_interface_type);
-
-                NSError *err;
-                NSSet<NSString*>* activeInterfaces = [NetworkInterface activeInterfaces:&err];
-                if (err != nil) {
-                    [self log:[NSString stringWithFormat:@"failed to get active interfaces %@", err.localizedDescription]];
-                    // Continue. activeInterfaces will be an empty set (non-nil) and we still want
-                    // to log interfaces enumerated with nw_path_enumerate_interfaces for debugging.
-                }
-                [self log:[NSString stringWithFormat:@"active interfaces %@", activeInterfaces]];
-
-                NSMutableArray<NSString*> *candidateInterfaces = [[NSMutableArray alloc] init];
-                // Map the active interface type to the interface itself
-                nw_path_enumerate_interfaces(path, ^bool(nw_interface_t  _Nonnull interface) {
-                    nw_interface_type_t interfaceType = nw_interface_get_type(interface);
-                    [self log:[NSString stringWithFormat:@"enumerated interface %@ with type %d",
-                               [NSString stringWithUTF8String:nw_interface_get_name(interface)], interfaceType]];
-
-                    if (interfaceType == active_interface_type) {
-                        NSString *interfaceName = [NSString stringWithUTF8String:nw_interface_get_name(interface)];
-                        if ([activeInterfaces containsObject:interfaceName]) {
-                            [candidateInterfaces addObject:interfaceName];
-                            // Note: could return false here to end enumeration and choose first
-                            // candidate interface.
-                            return true;
-                        }
-                    }
-                    // Continue searching
-                    return true;
-                });
-                [self log:[NSString stringWithFormat:@"%lu candidate interfaces",
-                           (unsigned long)[candidateInterfaces count]]];
-
-                if ([candidateInterfaces count] > 0) {
-                    // Arbitrarily choose first interface
-                    NSString *interfaceName = [candidateInterfaces objectAtIndex:0];
-                    newPathState.defaultActiveInterfaceName = interfaceName;
-                    [self log:[NSString stringWithFormat:@"active interface %@", interfaceName]];
-                } else {
-                    // This should never happen
-                }
-            } else {
-                // Unhandled case. Should never happen.
-            }
-            self->state = newPathState;
-
-            // Backwards compatibility with Reachability
-            ReachabilityChangedNotification *notif =
-                [[ReachabilityChangedNotification alloc]
-                 initWithReachabilityStatus:self->status
-                 curDefaultActiveInterfaceName:newPathState.defaultActiveInterfaceName
-                 prevDefaultActiveInterfaceName:prevDefaultActiveInterfaceName];
-            [[NSNotificationCenter defaultCenter]
-             postNotificationName:[DefaultRouteMonitor reachabilityChangedNotification]
-             object:notif];
-        });
-        nw_path_monitor_start(self->monitor);
+        self->emitReachabilityUpdates = TRUE;
     }
 }
 
 - (void)stop API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
     @synchronized (self) {
-        // Note: this monitor cannot be used after being cancelled. Its update handler will not
-        // fire again and cannot be restarted with nw_path_monitor_start. A new monitor must be
-        // created and started.
-        nw_path_monitor_cancel(self->monitor);
-        self->monitor = nil;
+        self->emitReachabilityUpdates = FALSE;
+    }
+}
+
+- (void)pathUpdateHandler:(nw_path_t _Nonnull)path API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
+
+    [self log:[NSString stringWithFormat:@"new path: %@",
+               [DefaultRouteMonitor pathDebugInfo:path]]];
+
+    NetworkPathState *newPathState = [[NetworkPathState alloc] init];
+    newPathState.path = path;
+    NSString *prevDefaultActiveInterfaceName = nil;
+    if (self->state != nil) {
+        prevDefaultActiveInterfaceName = self->state.defaultActiveInterfaceName;
+    }
+
+    nw_path_status_t status = nw_path_get_status(path);
+    if (status == nw_path_status_invalid || status == nw_path_status_unsatisfied) {
+        self->status = NetworkReachabilityNotReachable;
+    } else if (status == nw_path_status_satisfied || status == nw_path_status_satisfiable) {
+
+        // Network is, or could, be reachable. Determine interface corresponding to this
+        // path.
+
+        nw_interface_type_t active_interface_type = nw_path_interface_type(path);
+        self->status = nw_interface_type_network_reachability(active_interface_type);
+
+        NSError *err;
+        NSSet<NSString*>* activeInterfaces = [NetworkInterface activeInterfaces:&err];
+        if (err != nil) {
+            [self log:[NSString stringWithFormat:@"failed to get active interfaces %@", err.localizedDescription]];
+            // Continue. activeInterfaces will be an empty set (non-nil) and we still want
+            // to log interfaces enumerated with nw_path_enumerate_interfaces for debugging.
+        }
+        [self log:[NSString stringWithFormat:@"active interfaces %@", activeInterfaces]];
+
+        NSMutableArray<NSString*> *candidateInterfaces = [[NSMutableArray alloc] init];
+        // Map the active interface type to the interface itself
+        nw_path_enumerate_interfaces(path, ^bool(nw_interface_t  _Nonnull interface) {
+            nw_interface_type_t interfaceType = nw_interface_get_type(interface);
+            [self log:[NSString stringWithFormat:@"enumerated interface %@ with type %d",
+                       [NSString stringWithUTF8String:nw_interface_get_name(interface)], interfaceType]];
+
+            if (interfaceType == active_interface_type) {
+                NSString *interfaceName = [NSString stringWithUTF8String:nw_interface_get_name(interface)];
+                if ([activeInterfaces containsObject:interfaceName]) {
+                    [candidateInterfaces addObject:interfaceName];
+                    // Note: could return false here to end enumeration and choose first
+                    // candidate interface.
+                    return true;
+                }
+            }
+            // Continue searching
+            return true;
+        });
+        [self log:[NSString stringWithFormat:@"%lu candidate interfaces",
+                   (unsigned long)[candidateInterfaces count]]];
+
+        if ([candidateInterfaces count] > 0) {
+            // Arbitrarily choose first interface
+            NSString *interfaceName = [candidateInterfaces objectAtIndex:0];
+            newPathState.defaultActiveInterfaceName = interfaceName;
+            [self log:[NSString stringWithFormat:@"active interface %@", interfaceName]];
+        } else {
+            // This should never happen
+        }
+    } else {
+        // Unhandled case. Should never happen.
+    }
+    self->state = newPathState;
+
+    if (self->emitReachabilityUpdates) {
+        // Backwards compatibility with Reachability
+        ReachabilityChangedNotification *notif =
+            [[ReachabilityChangedNotification alloc]
+             initWithReachabilityStatus:self->status
+             curDefaultActiveInterfaceName:newPathState.defaultActiveInterfaceName
+             prevDefaultActiveInterfaceName:prevDefaultActiveInterfaceName];
+        [[NSNotificationCenter defaultCenter]
+         postNotificationName:[DefaultRouteMonitor reachabilityChangedNotification]
+         object:notif];
     }
 }
 
