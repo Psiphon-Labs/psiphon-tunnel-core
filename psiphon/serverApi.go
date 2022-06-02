@@ -1087,7 +1087,8 @@ func getBaseAPIParameters(
 					params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
 				}
 
-				params["dns_attempt"] = dialParams.ResolveParameters.GetFirstAttemptWithAnswer()
+				params["dns_attempt"] = strconv.Itoa(
+					dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 			}
 		}
 

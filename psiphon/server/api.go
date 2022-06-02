@@ -923,6 +923,7 @@ var baseDialParams = []requestParamSpec{
 	{"split_tunnel_regions", isRegionCode, requestParamOptional | requestParamArray},
 	{"dns_preresolved", isAnyString, requestParamOptional},
 	{"dns_preferred", isAnyString, requestParamOptional},
+	{"dns_transform", isAnyString, requestParamOptional},
 	{"dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
