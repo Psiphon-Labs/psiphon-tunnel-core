@@ -340,6 +340,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
 
+        [self startInternetReachabilityMonitoring];
+
         @try {
             NSError *e = nil;
 
@@ -375,8 +377,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
             return FALSE;
         }
-
-        [self startInternetReachabilityMonitoring];
 
         [self logMessage:@"Psiphon library started"];
         
@@ -1432,10 +1432,15 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 // time for the tunnel to notice the network is gone (depending on attempts to
 // use the tunnel).
 - (void)startInternetReachabilityMonitoring {
-    atomic_store(&self->currentNetworkStatus, [self->reachability reachabilityStatus]);
-
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(internetReachabilityChanged:) name:kReachabilityChangedNotification object:nil];
+    // (1) Start notifier and then (2) sample the reachability status to bootstrap current network
+    // status. This ordering is required to ensure we do not miss any reachability status updates.
+    // Note: this function must complete execution before any reachability changed notifications are
+    // processed to ensure ordering; otherwise (2) may overwrite the current network status with a
+    // stale value in the unlikely event where a reachability changed notification is emitted
+    // immediately after (1).
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(internetReachabilityChanged:) name:kReachabilityChangedNotification object :nil];
     [self->reachability startNotifier];
+    atomic_store(&self->currentNetworkStatus, [self->reachability reachabilityStatus]);
 }
 
 - (void)stopInternetReachabilityMonitoring {
@@ -1444,45 +1449,49 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (void)internetReachabilityChanged:(NSNotification *)note {
-    // Invalidate initialDNSCache.
-    atomic_store(&self->useInitialDNS, FALSE);
+    // Ensure notifications are not processed until current network status is
+    // bootstrapped. See comment in startInternetReachabilityMonitoring.
+    @synchronized (PsiphonTunnel.self) {
+        // Invalidate initialDNSCache.
+        atomic_store(&self->useInitialDNS, FALSE);
 
-    NetworkReachability networkStatus;
-    NetworkReachability previousNetworkStatus;
-    BOOL interfaceChanged = FALSE;
+        NetworkReachability networkStatus;
+        NetworkReachability previousNetworkStatus;
+        BOOL interfaceChanged = FALSE;
 
-    // Pass current reachability through to the delegate
-    // as soon as a network reachability change is detected
-    if (@available(iOS 12.0, *)) {
-        ReachabilityChangedNotification *notif = [note object];
-        networkStatus = notif.reachabilityStatus;
-        if (notif.prevDefaultActiveInterfaceName == nil && notif.curDefaultActiveInterfaceName == nil) {
-            // no interface change
-        } else if (notif.prevDefaultActiveInterfaceName == nil || notif.curDefaultActiveInterfaceName == nil) {
-            // interface appeared or disappeared
-            interfaceChanged = TRUE;
-        } else if (![notif.prevDefaultActiveInterfaceName isEqualToString:notif.curDefaultActiveInterfaceName]) {
-            // active interface changed
-            interfaceChanged = TRUE;
+        // Pass current reachability through to the delegate
+        // as soon as a network reachability change is detected
+        if (@available(iOS 12.0, *)) {
+            ReachabilityChangedNotification *notif = [note object];
+            networkStatus = notif.reachabilityStatus;
+            if (notif.prevDefaultActiveInterfaceName == nil && notif.curDefaultActiveInterfaceName == nil) {
+                // no interface change
+            } else if (notif.prevDefaultActiveInterfaceName == nil || notif.curDefaultActiveInterfaceName == nil) {
+                // interface appeared or disappeared
+                interfaceChanged = TRUE;
+            } else if (![notif.prevDefaultActiveInterfaceName isEqualToString:notif.curDefaultActiveInterfaceName]) {
+                // active interface changed
+                interfaceChanged = TRUE;
+            }
+        } else {
+            Reachability* currentReachability = [note object];
+            networkStatus = [currentReachability reachabilityStatus];
         }
-    } else {
-        Reachability* currentReachability = [note object];
-        networkStatus = [currentReachability reachabilityStatus];
-    }
 
-    if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
-        dispatch_sync(self->callbackQueue, ^{
-            [self.tunneledAppDelegate onInternetReachabilityChanged:networkStatus];
-        });
-    }
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onInternetReachabilityChanged:networkStatus];
+            });
+        }
 
-    previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
+        previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
 
-    // Restart if the network status or interface has changed, unless the previous status was
-    // NetworkReachabilityNotReachable, because the tunnel should be waiting for connectivity in
-    // that case.
-    if ((networkStatus != previousNetworkStatus || interfaceChanged) && previousNetworkStatus != NetworkReachabilityNotReachable) {
-        GoPsiReconnectTunnel();
+        // Restart if the network status or interface has changed, unless the previous status was
+        // NetworkReachabilityNotReachable, because the tunnel should be waiting for connectivity in
+        // that case.
+        if ((networkStatus != previousNetworkStatus || interfaceChanged) && previousNetworkStatus != NetworkReachabilityNotReachable) {
+            GoPsiReconnectTunnel();
+        }
     }
 }
 

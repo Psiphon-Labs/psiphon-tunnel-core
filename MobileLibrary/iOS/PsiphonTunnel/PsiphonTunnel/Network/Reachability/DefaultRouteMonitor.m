@@ -49,10 +49,10 @@
 
 @implementation DefaultRouteMonitor {
     nw_path_monitor_t monitor;
-    dispatch_queue_t workQueue;
+    dispatch_queue_t nwPathMonitorQueue;
+    dispatch_queue_t notifQueue;
     NetworkReachability status;
     NetworkPathState* state;
-    BOOL emitReachabilityUpdates;
 
     void (^logger) (NSString *_Nonnull);
 }
@@ -60,28 +60,8 @@
 - (void)initialize API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
     self->state = nil;
     self->status = NetworkReachabilityNotReachable;
-    self->emitReachabilityUpdates = FALSE;
-    self->monitor = nw_path_monitor_create();
-    self->workQueue = dispatch_queue_create("com.psiphon3.library.NWInterfaceNWPathMonitorQueue", DISPATCH_QUEUE_SERIAL);
-
-    nw_path_monitor_set_queue(self->monitor, self->workQueue);
-    __block dispatch_group_t group = dispatch_group_create();
-    dispatch_group_enter(group);
-
-    nw_path_monitor_set_update_handler(self->monitor, ^(nw_path_t  _Nonnull path) {
-        @synchronized (self) {
-            [self pathUpdateHandler:path];
-            if (group != NULL) {
-                dispatch_group_leave(group);
-                group = NULL;
-            }
-        }
-    });
-    nw_path_monitor_start(self->monitor);
-
-    // Wait for the current path to be emitted before returning to ensure this instance is populated
-    // with the current network state before use. PsiphonTunnel depends on this guarantee.
-    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+    self->nwPathMonitorQueue = dispatch_queue_create("com.psiphon3.library.DefaultRouteMonitorNWPathMonitorQueue", DISPATCH_QUEUE_SERIAL);
+    self->notifQueue = dispatch_queue_create("com.psiphon3.library.DefaultRouteMonitorNotificationQueue", DISPATCH_QUEUE_SERIAL);
 }
 
 - (instancetype)init {
@@ -90,13 +70,6 @@
         [self initialize];
     }
     return self;
-}
-
-- (void)dealloc API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
-    // Note: this monitor cannot be used after being cancelled. Its update handler will not
-    // fire again and cannot be restarted with nw_path_monitor_start. A new monitor must be
-    // created and started.
-    nw_path_monitor_cancel(self->monitor);
 }
 
 - (instancetype)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger {
@@ -150,13 +123,38 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
 
 - (void)start API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
     @synchronized (self) {
-        self->emitReachabilityUpdates = TRUE;
+        // Ensure previous monitor cancelled
+        if (self->monitor != nil) {
+            nw_path_monitor_cancel(self->monitor);
+        }
+        self->monitor = nw_path_monitor_create();
+
+        nw_path_monitor_set_queue(self->monitor, self->nwPathMonitorQueue);
+        __block dispatch_group_t group = dispatch_group_create();
+        dispatch_group_enter(group);
+
+        nw_path_monitor_set_update_handler(self->monitor, ^(nw_path_t  _Nonnull path) {
+            [self pathUpdateHandler:path];
+            if (group != NULL) {
+                dispatch_group_leave(group);
+                group = NULL;
+            }
+        });
+        nw_path_monitor_start(self->monitor);
+
+        // Wait for the current path to be emitted before returning to ensure this instance is
+        // populated with the current network state. PsiphonTunnel depends on this guarantee.
+        dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
     }
 }
 
 - (void)stop API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
     @synchronized (self) {
-        self->emitReachabilityUpdates = FALSE;
+        // Note: this monitor cannot be used after being cancelled. Its update handler will not
+        // fire again and cannot be restarted with nw_path_monitor_start. A new monitor must be
+        // created and started.
+        nw_path_monitor_cancel(self->monitor);
+        self->monitor = nil;
     }
 }
 
@@ -227,17 +225,17 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
     }
     self->state = newPathState;
 
-    if (self->emitReachabilityUpdates) {
-        // Backwards compatibility with Reachability
-        ReachabilityChangedNotification *notif =
-            [[ReachabilityChangedNotification alloc]
-             initWithReachabilityStatus:self->status
-             curDefaultActiveInterfaceName:newPathState.defaultActiveInterfaceName
-             prevDefaultActiveInterfaceName:prevDefaultActiveInterfaceName];
+    // Backwards compatibility with Reachability
+    ReachabilityChangedNotification *notif =
+        [[ReachabilityChangedNotification alloc]
+         initWithReachabilityStatus:self->status
+         curDefaultActiveInterfaceName:newPathState.defaultActiveInterfaceName
+         prevDefaultActiveInterfaceName:prevDefaultActiveInterfaceName];
+    dispatch_async(self->notifQueue, ^{
         [[NSNotificationCenter defaultCenter]
          postNotificationName:[DefaultRouteMonitor reachabilityChangedNotification]
          object:notif];
-    }
+    });
 }
 
 + (NSString*)pathDebugInfo:(nw_path_t)path API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
@@ -313,6 +311,8 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
 }
 
 - (NetworkReachability)reachabilityStatus {
+    // Note: alternatively we could initialize a temporary NWPathMonitor instance and sample the
+    // reachability state by synchronously waiting for its initial update.
     return self->status;
 }
 
