@@ -197,7 +197,7 @@ func (r APIRegistrarBidirectional) unpackRegResp(reg *ConjureReg, regResp *pb.Re
 
 	// Client config -- check if not nil in the registration response
 	if regResp.GetClientConf() != nil {
-		currGen := Assets().config.GetGeneration()
+		currGen := Assets().GetGeneration()
 		incomingGen := regResp.GetClientConf().GetGeneration()
 		Logger().Debugf("received clientconf in regResponse w/ gen %d", incomingGen)
 		if currGen < incomingGen {
