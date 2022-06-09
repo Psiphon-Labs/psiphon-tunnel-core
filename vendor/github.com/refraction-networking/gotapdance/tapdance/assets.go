@@ -332,9 +332,11 @@ func (a *assets) SetClientConf(conf *pb.ClientConf) (err error) {
 	a.Lock()
 	defer a.Unlock()
 
+	origConf := a.config
+	a.config = conf
 	err = a.saveClientConf()
-	if err == nil {
-		a.config = conf
+	if err != nil {
+		a.config = origConf
 	}
 	return
 }
