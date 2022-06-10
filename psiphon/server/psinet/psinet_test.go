@@ -20,6 +20,7 @@
 package psinet
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -194,7 +195,10 @@ func TestDatabase(t *testing.T) {
 
 	for _, testCase := range httpsRegexTestCases {
 		t.Run(fmt.Sprintf("%+v", testCase), func(t *testing.T) {
-			regexes := db.GetHttpsRequestRegexes(testCase.sponsorID)
+			regexes, checksum := db.GetHttpsRequestRegexes(testCase.sponsorID)
+			if !bytes.Equal(checksum, db.GetDomainBytesChecksum(testCase.sponsorID)) {
+				t.Fatalf("unexpected checksum: %+v", checksum)
+			}
 			var regexValue, replaceValue string
 			ok := false
 			if len(regexes) == 1 && len(regexes[0]) == 2 {

@@ -38,6 +38,7 @@ import (
 const (
 	GEOIP_SESSION_CACHE_TTL = 60 * time.Minute
 	GEOIP_UNKNOWN_VALUE     = "None"
+	GEOIP_DATABASE_TYPE_ISP = "GeoIP2-ISP"
 )
 
 // GeoIPData is GeoIP data for a client session. Individual client
@@ -96,6 +97,7 @@ type geoIPDatabase struct {
 	filename       string
 	tempFilename   string
 	tempFileSuffix int64
+	isISPType      bool
 	maxMindReader  *maxminddb.Reader
 }
 
@@ -163,7 +165,10 @@ func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 					_ = os.Remove(database.tempFilename)
 				}
 
+				isISPType := (maxMindReader.Metadata.DatabaseType == GEOIP_DATABASE_TYPE_ISP)
+
 				database.maxMindReader = maxMindReader
+				database.isISPType = isISPType
 				database.tempFilename = tempFilename
 				database.tempFileSuffix = tempFileSuffix
 
@@ -199,6 +204,17 @@ func (geoIP *GeoIPService) Lookup(strIP string) GeoIPData {
 
 // LookupIP determines a GeoIPData for a given client IP address.
 func (geoIP *GeoIPService) LookupIP(IP net.IP) GeoIPData {
+	return geoIP.lookupIP(IP, false)
+}
+
+// LookupISPForIP determines a GeoIPData for a given client IP address. Only
+// ISP, ASN, and ASO fields will be populated. This lookup is faster than a
+// full lookup.
+func (geoIP *GeoIPService) LookupISPForIP(IP net.IP) GeoIPData {
+	return geoIP.lookupIP(IP, true)
+}
+
+func (geoIP *GeoIPService) lookupIP(IP net.IP, ISPOnly bool) GeoIPData {
 
 	result := NewGeoIPData()
 
@@ -227,7 +243,12 @@ func (geoIP *GeoIPService) LookupIP(IP net.IP) GeoIPData {
 	// the separate ISP database populates ISP.
 	for _, database := range geoIP.databases {
 		database.ReloadableFile.RLock()
-		err := database.maxMindReader.Lookup(IP, &geoIPFields)
+		var err error
+		// Don't lookup the City database when only ISP fields are required;
+		// skipping the City lookup is 5-10x faster.
+		if !ISPOnly || database.isISPType {
+			err = database.maxMindReader.Lookup(IP, &geoIPFields)
+		}
 		database.ReloadableFile.RUnlock()
 		if err != nil {
 			log.WithTraceFields(LogFields{"error": err}).Warning("GeoIP lookup failed")

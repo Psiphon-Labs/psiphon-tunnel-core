@@ -142,7 +142,7 @@ public class MainActivity extends AppCompatActivity
             public void run() {
                 WebViewProxySettings.setLocalProxy(
                         MainActivity.this, mLocalHttpProxyPort.get());
-                mWebView.loadUrl("https://freegeoip.app/");
+                mWebView.loadUrl("https://psip.me/");
             }
         });
     }
@@ -298,6 +298,11 @@ public class MainActivity extends AppCompatActivity
     @Override
     public void onClientRegion(String region) {
         logMessage("client region: " + region);
+    }
+
+    @Override
+    public void onClientAddress(String address) {
+        logMessage("client address: " + address);
     }
 
     private static String readInputStreamToString(InputStream inputStream) throws IOException {

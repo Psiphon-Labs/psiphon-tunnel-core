@@ -772,7 +772,7 @@ func RecordFailedTunnelStat(
 	// Ensure direct server IPs are not exposed in logs. The "net" package, and
 	// possibly other 3rd party packages, will include destination addresses in
 	// I/O error messages.
-	tunnelError := StripIPAddressesString(tunnelErr.Error())
+	tunnelError := common.RedactIPAddressesString(tunnelErr.Error())
 
 	params["tunnel_error"] = tunnelError
 
@@ -946,9 +946,11 @@ func getBaseAPIParameters(
 			params["meek_dial_address"] = dialParams.MeekDialAddress
 		}
 
-		meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
-		if meekResolvedIPAddress != "" {
-			params["meek_resolved_ip_address"] = meekResolvedIPAddress
+		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+			meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
+			if meekResolvedIPAddress != "" {
+				params["meek_resolved_ip_address"] = meekResolvedIPAddress
+			}
 		}
 
 		if dialParams.MeekSNIServerName != "" {
@@ -1039,6 +1041,55 @@ func getBaseAPIParameters(
 
 		if dialParams.ConjureTransport != "" {
 			params["conjure_transport"] = dialParams.ConjureTransport
+		}
+
+		if dialParams.ResolveParameters != nil {
+
+			if dialParams.ResolveParameters.PreresolvedIPAddress != "" {
+				params["dns_preresolved"] = dialParams.ResolveParameters.PreresolvedIPAddress
+
+			} else {
+
+				// Log enough information to distinguish several successful or
+				// failed circumvention cases of interest, including preferring
+				// alternate servers and/or using DNS protocol transforms, and
+				// appropriate for both handshake and failed_tunnel logging:
+				//
+				// - The initial attempt made by Resolver.ResolveIP,
+				//   preferring an alternate DNS server and/or using a
+				//   protocol transform succeeds (dns_result = 0, the initial
+				//   attempt, 0, got the first result).
+				//
+				// - A second attempt may be used, still preferring an
+				//   alternate DNS server but no longer using the protocol
+				//   transform, which presumably failed (dns_result = 1, the
+				//   second attempt, 1, got the first result).
+				//
+				// - Subsequent attempts will use the system DNS server and no
+				//   protocol transforms (dns_result > 2).
+				//
+				// Due to the design of Resolver.ResolveIP, the notion
+				// of "success" is approximate; for example a successful
+				// response may arrive after a subsequent attempt succeeds,
+				// simply due to slow network conditions. It's also possible
+				// that, for a given attemp, only one of the two concurrent
+				// requests (A and AAAA) succeeded.
+				//
+				// Note that ResolveParameters.GetFirstAttemptWithAnswer
+				// semantics assume that dialParams.ResolveParameters wasn't
+				// used by or modified by any other dial.
+
+				if dialParams.ResolveParameters.PreferAlternateDNSServer {
+					params["dns_preferred"] = dialParams.ResolveParameters.AlternateDNSServer
+				}
+
+				if dialParams.ResolveParameters.ProtocolTransformName != "" {
+					params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
+				}
+
+				params["dns_attempt"] = strconv.Itoa(
+					dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
+			}
 		}
 
 		if dialParams.DialConnMetrics != nil {

@@ -65,6 +65,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"golang.org/x/net/bpf"
 )
 
@@ -217,6 +218,8 @@ const (
 	ReplayTargetUpstreamBytes                        = "ReplayTargetUpstreamBytes"
 	ReplayTargetDownstreamBytes                      = "ReplayTargetDownstreamBytes"
 	ReplayTargetTunnelDuration                       = "ReplayTargetTunnelDuration"
+	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
+	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
 	ReplayBPF                                        = "ReplayBPF"
 	ReplaySSH                                        = "ReplaySSH"
 	ReplayObfuscatorPadding                          = "ReplayObfuscatorPadding"
@@ -232,9 +235,8 @@ const (
 	ReplayLivenessTest                               = "ReplayLivenessTest"
 	ReplayUserAgent                                  = "ReplayUserAgent"
 	ReplayAPIRequestPadding                          = "ReplayAPIRequestPadding"
-	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
-	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
 	ReplayHoldOffTunnel                              = "ReplayHoldOffTunnel"
+	ReplayResolveParameters                          = "ReplayResolveParameters"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -300,6 +302,18 @@ const (
 	RestrictFrontingProviderIDsServerProbability     = "RestrictFrontingProviderIDsServerProbability"
 	RestrictFrontingProviderIDsClientProbability     = "RestrictFrontingProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources          = "UpstreamProxyAllowAllServerEntrySources"
+	DestinationBytesMetricsASN                       = "DestinationBytesMetricsASN"
+	DNSResolverAttemptsPerServer                     = "DNSResolverAttemptsPerServer"
+	DNSResolverRequestTimeout                        = "DNSResolverRequestTimeout"
+	DNSResolverAwaitTimeout                          = "DNSResolverAwaitTimeout"
+	DNSResolverPreresolvedIPAddressCIDRs             = "DNSResolverPreresolvedIPAddressCIDRs"
+	DNSResolverPreresolvedIPAddressProbability       = "DNSResolverPreresolvedIPAddressProbability"
+	DNSResolverAlternateServers                      = "DNSResolverAlternateServers"
+	DNSResolverPreferAlternateServerProbability      = "DNSResolverPreferAlternateServerProbability"
+	DNSResolverProtocolTransformSpecs                = "DNSResolverProtocolTransformSpecs"
+	DNSResolverProtocolTransformScopedSpecNames      = "DNSResolverProtocolTransformScopedSpecNames"
+	DNSResolverProtocolTransformProbability          = "DNSResolverProtocolTransformProbability"
+	DNSResolverIncludeEDNS0Probability               = "DNSResolverIncludeEDNS0Probability"
 )
 
 const (
@@ -534,6 +548,8 @@ var defaultParameters = map[string]struct {
 	ReplayTargetUpstreamBytes:              {value: 0, minimum: 0},
 	ReplayTargetDownstreamBytes:            {value: 0, minimum: 0},
 	ReplayTargetTunnelDuration:             {value: 1 * time.Second, minimum: time.Duration(0)},
+	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
+	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
 	ReplayBPF:                              {value: true},
 	ReplaySSH:                              {value: true},
 	ReplayObfuscatorPadding:                {value: true},
@@ -549,9 +565,8 @@ var defaultParameters = map[string]struct {
 	ReplayLivenessTest:                     {value: true},
 	ReplayUserAgent:                        {value: true},
 	ReplayAPIRequestPadding:                {value: true},
-	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
-	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
 	ReplayHoldOffTunnel:                    {value: true},
+	ReplayResolveParameters:                {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -634,6 +649,20 @@ var defaultParameters = map[string]struct {
 	RestrictFrontingProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
 
 	UpstreamProxyAllowAllServerEntrySources: {value: false},
+
+	DestinationBytesMetricsASN: {value: "", flags: serverSideOnly},
+
+	DNSResolverAttemptsPerServer:                {value: 2, minimum: 1},
+	DNSResolverRequestTimeout:                   {value: 5 * time.Second, minimum: 100 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	DNSResolverAwaitTimeout:                     {value: 100 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	DNSResolverPreresolvedIPAddressCIDRs:        {value: LabeledCIDRs{}},
+	DNSResolverPreresolvedIPAddressProbability:  {value: 0.0, minimum: 0.0},
+	DNSResolverAlternateServers:                 {value: []string{}},
+	DNSResolverPreferAlternateServerProbability: {value: 0.0, minimum: 0.0},
+	DNSResolverProtocolTransformSpecs:           {value: transforms.Specs{}},
+	DNSResolverProtocolTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	DNSResolverProtocolTransformProbability:     {value: 0.0, minimum: 0.0},
+	DNSResolverIncludeEDNS0Probability:          {value: 0.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -804,6 +833,17 @@ func (p *Parameters) Set(
 	serverPacketManipulationSpecs, _ :=
 		serverPacketManipulationSpecsValue.(PacketManipulationSpecs)
 
+	// Special case: ProtocolTransformScopedSpecNames will reference
+	// ProtocolTransformSpecs.
+
+	dnsResolverProtocolTransformSpecsValue, err := getAppliedValue(
+		DNSResolverProtocolTransformSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	dnsResolverProtocolTransformSpecs, _ :=
+		dnsResolverProtocolTransformSpecsValue.(transforms.Specs)
+
 	for i := 0; i < len(applyParameters); i++ {
 
 		count := 0
@@ -952,6 +992,36 @@ func (p *Parameters) Set(
 				}
 			case TunnelProtocolPortLists:
 				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case LabeledCIDRs:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case transforms.Specs:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case transforms.ScopedSpecNames:
+
+				var specs transforms.Specs
+				if name == DNSResolverProtocolTransformScopedSpecNames {
+					specs = dnsResolverProtocolTransformSpecs
+				}
+
+				err := v.Validate(specs)
 				if err != nil {
 					if skipOnError {
 						continue
@@ -1441,6 +1511,30 @@ func (p ParametersAccessor) TunnelProtocolPortLists(name string) TunnelProtocolP
 	}
 
 	value := make(TunnelProtocolPortLists)
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// LabeledCIDRs returns a CIDR string list parameter value corresponding to
+// the specified labeled set and label value. The return value is nil when no
+// set is found.
+func (p ParametersAccessor) LabeledCIDRs(name, label string) []string {
+	value := LabeledCIDRs{}
+	p.snapshot.getValue(name, &value)
+	return value[label]
+}
+
+// ProtocolTransformSpecs returns a transforms.Specs parameter value.
+func (p ParametersAccessor) ProtocolTransformSpecs(name string) transforms.Specs {
+	value := transforms.Specs{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// ProtocolTransformScopedSpecNames returns a transforms.ScopedSpecNames
+// parameter value.
+func (p ParametersAccessor) ProtocolTransformScopedSpecNames(name string) transforms.ScopedSpecNames {
+	value := transforms.ScopedSpecNames{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

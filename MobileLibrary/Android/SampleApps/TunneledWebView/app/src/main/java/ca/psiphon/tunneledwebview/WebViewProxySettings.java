@@ -207,7 +207,7 @@ public class WebViewProxySettings
         return false;
     }
 
-    // http://stackanswers.com/questions/25272393/android-webview-set-proxy-programmatically-on-android-l
+    // https://stackoverflow.com/questions/25272393/android-webview-set-proxy-programmatically-on-android-l
     @TargetApi(Build.VERSION_CODES.KITKAT) // for android.util.ArrayMap methods
     @SuppressWarnings("rawtypes")
     private static boolean setWebkitProxyLollipop(Context appContext, String host, int port)

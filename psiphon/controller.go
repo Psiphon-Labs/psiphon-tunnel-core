@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	lrucache "github.com/cognusion/go-cache-lru"
 )
@@ -85,6 +86,7 @@ type Controller struct {
 	packetTunnelClient                      *tun.Client
 	packetTunnelTransport                   *PacketTunnelTransport
 	staggerMutex                            sync.Mutex
+	resolver                                *resolver.Resolver
 }
 
 // NewController initializes a new controller.
@@ -100,15 +102,6 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// The session ID for the Psiphon server API is used across all
 	// tunnels established by the controller.
 	NoticeSessionId(config.SessionID)
-
-	untunneledDialConfig := &DialConfig{
-		UpstreamProxyURL:              config.UpstreamProxyURL,
-		CustomHeaders:                 config.CustomHeaders,
-		DeviceBinder:                  config.deviceBinder,
-		DnsServerGetter:               config.DnsServerGetter,
-		IPv6Synthesizer:               config.IPv6Synthesizer,
-		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-	}
 
 	// Attempt to apply any valid, local stored tactics. The pre-done context
 	// ensures no tactics request is attempted now.
@@ -127,13 +120,12 @@ func NewController(config *Config) (controller *Controller, err error) {
 		runWaitGroup: new(sync.WaitGroup),
 		// connectedTunnels and failedTunnels buffer sizes are large enough to
 		// receive full pools of tunnels without blocking. Senders should not block.
-		connectedTunnels:     make(chan *Tunnel, MAX_TUNNEL_POOL_SIZE),
-		failedTunnels:        make(chan *Tunnel, MAX_TUNNEL_POOL_SIZE),
-		tunnelPoolSize:       TUNNEL_POOL_SIZE,
-		tunnels:              make([]*Tunnel, 0),
-		establishedOnce:      false,
-		isEstablishing:       false,
-		untunneledDialConfig: untunneledDialConfig,
+		connectedTunnels: make(chan *Tunnel, MAX_TUNNEL_POOL_SIZE),
+		failedTunnels:    make(chan *Tunnel, MAX_TUNNEL_POOL_SIZE),
+		tunnelPoolSize:   TUNNEL_POOL_SIZE,
+		tunnels:          make([]*Tunnel, 0),
+		establishedOnce:  false,
+		isEstablishing:   false,
 
 		untunneledSplitTunnelClassifications: lrucache.NewWithLRU(
 			splitTunnelClassificationTTL,
@@ -157,6 +149,24 @@ func NewController(config *Config) (controller *Controller, err error) {
 		// signalRestartEstablishing has a buffer of 1 to ensure sending the
 		// signal doesn't block and receiving won't miss a signal.
 		signalRestartEstablishing: make(chan struct{}, 1),
+	}
+
+	// Initialize untunneledDialConfig, used by untunneled dials including
+	// remote server list and upgrade downloads.
+	controller.untunneledDialConfig = &DialConfig{
+		UpstreamProxyURL: controller.config.UpstreamProxyURL,
+		CustomHeaders:    controller.config.CustomHeaders,
+		DeviceBinder:     controller.config.deviceBinder,
+		IPv6Synthesizer:  controller.config.IPv6Synthesizer,
+		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+			IPs, err := UntunneledResolveIP(
+				ctx, controller.config, controller.resolver, hostname)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return IPs, nil
+		},
+		TrustedCACertificatesFilename: controller.config.TrustedCACertificatesFilename,
 	}
 
 	if config.PacketTunnelTunFileDescriptor > 0 {
@@ -207,6 +217,16 @@ func (controller *Controller) Run(ctx context.Context) {
 	controller.stopRunning = stopRunning
 
 	// Start components
+
+	// Initialize a single resolver to be used by all dials. Sharing a single
+	// resolver ensures cached results are shared, and that network state
+	// query overhead is amortized over all dials. Multiple dials can resolve
+	// domain concurrently.
+	//
+	// config.SetResolver makes this resolver available to MakeDialParameters.
+	controller.resolver = NewResolver(controller.config, true)
+	defer controller.resolver.Stop()
+	controller.config.SetResolver(controller.resolver)
 
 	// TODO: IPv6 support
 	var listenIP string
@@ -733,15 +753,15 @@ func (controller *Controller) connectedReporter() {
 		return
 	}
 
+	select {
+	case <-controller.signalReportConnected:
+		// Make the initial connected request
+	case <-controller.runCtx.Done():
+		return
+	}
+
 loop:
 	for {
-
-		select {
-		case <-controller.signalReportConnected:
-			// Make the initial connected request
-		case <-controller.runCtx.Done():
-			break loop
-		}
 
 		// Pick any active tunnel and make the next connected request. No error is
 		// logged if there's no active tunnel, as that's not an unexpected
@@ -1801,6 +1821,9 @@ func (controller *Controller) stopEstablishing() {
 	// the bulk of all datastore transactions: iterating over server entries,
 	// storing new server entries, etc.
 	emitDatastoreMetrics()
+
+	// Similarly, establishment generates the bulk of domain resolves.
+	emitDNSMetrics(controller.resolver)
 }
 
 // establishCandidateGenerator populates the candidate queue with server entries

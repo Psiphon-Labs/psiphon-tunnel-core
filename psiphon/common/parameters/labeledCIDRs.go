@@ -1,7 +1,5 @@
-// +build windows
-
 /*
- * Copyright (c) 2015, Psiphon Inc.
+ * Copyright (c) 2022, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,34 +17,26 @@
  *
  */
 
-package psiphon
+package parameters
 
 import (
-	"context"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
-// tcpDial is the platform-specific part of DialTCP
-func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
+// LabeledCIDRs consists of lists of CIDRs referenced by a label value.
+type LabeledCIDRs map[string][]string
 
-	if config.DeviceBinder != nil {
-		return nil, errors.TraceNew("psiphon.interruptibleTCPDial with DeviceBinder not supported")
+// Validate checks that the CIDR values are well-formed.
+func (c LabeledCIDRs) Validate() error {
+	for _, CIDRs := range c {
+		for _, CIDR := range CIDRs {
+			_, _, err := net.ParseCIDR(CIDR)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
 	}
-
-	dialer := net.Dialer{}
-
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-
-	// Remove domain names from "net" error messages.
-	if err != nil && !GetEmitNetworkParameters() {
-		err = RedactNetError(err)
-	}
-
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return &TCPConn{Conn: conn}, nil
+	return nil
 }

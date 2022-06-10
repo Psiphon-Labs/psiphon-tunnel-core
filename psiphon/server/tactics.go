@@ -162,8 +162,8 @@ func (c *ServerTacticsParametersCache) Get(
 	// Two optimizations are used to limit the memory size of the cache:
 	//
 	// 1. The scope of the GeoIP data cache key is limited to the fields --
-	// Country/ISP/City -- that are present in tactics filters. E.g., if only
-	// Country appears in filters, then the key will omit ISP and City.
+	// Country/ISP/ASN/City -- that are present in tactics filters. E.g., if only
+	// Country appears in filters, then the key will omit ISP, ASN, and City.
 	//
 	// 2. Two maps are maintained: GeoIP-key -> tactics-tag; and tactics-tag ->
 	// parameters. For N keys with the same filtered parameters, the mapped value
@@ -232,7 +232,7 @@ func (c *ServerTacticsParametersCache) makeKey(geoIPData GeoIPData) string {
 	scope := c.support.TacticsServer.GetFilterGeoIPScope(
 		common.GeoIPData(geoIPData))
 
-	var region, ISP, city string
+	var region, ISP, ASN, city string
 
 	if scope&tactics.GeoIPScopeRegion != 0 {
 		region = geoIPData.Country
@@ -240,9 +240,12 @@ func (c *ServerTacticsParametersCache) makeKey(geoIPData GeoIPData) string {
 	if scope&tactics.GeoIPScopeISP != 0 {
 		ISP = geoIPData.ISP
 	}
+	if scope&tactics.GeoIPScopeASN != 0 {
+		ASN = geoIPData.ASN
+	}
 	if scope&tactics.GeoIPScopeCity != 0 {
 		city = geoIPData.City
 	}
 
-	return fmt.Sprintf("%s-%s-%s", region, ISP, city)
+	return fmt.Sprintf("%s-%s-%s-%s", region, ISP, ASN, city)
 }

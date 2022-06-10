@@ -88,6 +88,10 @@ func TestServerEntryExchange(t *testing.T) {
 		t.Fatalf("Commit failed: %s", err)
 	}
 
+	resolver := NewResolver(config, true)
+	defer resolver.Stop()
+	config.SetResolver(resolver)
+
 	err = OpenDataStore(config)
 	if err != nil {
 		t.Fatalf("OpenDataStore failed: %s", err)

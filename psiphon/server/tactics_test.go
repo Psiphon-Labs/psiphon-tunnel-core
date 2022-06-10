@@ -86,6 +86,39 @@ func TestServerTacticsParametersCache(t *testing.T) {
               "ConnectionWorkerPoolSize" : 4
             }
           }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R3"],
+            "ASNs": ["31"]
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "ConnectionWorkerPoolSize" : 5
+            }
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R3"],
+            "ASNs": ["32"]
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "ConnectionWorkerPoolSize" : 6
+            }
+          }
+        },
+        {
+          "Filter" : {
+            "Regions": ["R3"],
+            "ASNs": ["33"]
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "ConnectionWorkerPoolSize" : 6
+            }
+          }
         }
       ]
     }
@@ -204,6 +237,54 @@ func TestServerTacticsParametersCache(t *testing.T) {
 			4,
 			4, 5, 4,
 		},
+		{
+			"region already cached, region-only key",
+			GeoIPData{Country: "R0", ASN: "0", City: "C1"},
+			1,
+			5, 5, 4,
+		},
+		{
+			"region already cached, region-only key",
+			GeoIPData{Country: "R1", ASN: "1", City: "C1a"},
+			2,
+			5, 5, 4,
+		},
+		{
+			"add new cache entry, filtered parameter, region/ASN key",
+			GeoIPData{Country: "R3", ASN: "31", City: "C2a"},
+			5,
+			5, 6, 5,
+		},
+		{
+			"region/ASN already cached",
+			GeoIPData{Country: "R3", ASN: "31", City: "C2a"},
+			5,
+			6, 6, 5,
+		},
+		{
+			"region/ASN already cached, city is ignored",
+			GeoIPData{Country: "R3", ASN: "31", City: "C2b"},
+			5,
+			6, 6, 5,
+		},
+		{
+			"add new cache entry, filtered parameter, region/ASN key",
+			GeoIPData{Country: "R3", ASN: "32", City: "C2a"},
+			6,
+			6, 7, 6,
+		},
+		{
+			"region/ASN already cached, city is ignored",
+			GeoIPData{Country: "R3", ASN: "32", City: "C2b"},
+			6,
+			7, 7, 6,
+		},
+		{
+			"add new cache entry, filtered parameter, region/ASN key, duplicate parameters",
+			GeoIPData{Country: "R3", ASN: "33", City: "C2a"},
+			6,
+			7, 8, 6,
+		},
 	}
 
 	for _, testCase := range keySplitTestCases {
@@ -244,10 +325,10 @@ func TestServerTacticsParametersCache(t *testing.T) {
 	}
 
 	metrics := support.ServerTacticsParametersCache.GetMetrics()
-	if metrics["server_tactics_max_cache_entries"].(int64) != 5 ||
-		metrics["server_tactics_max_parameter_references"].(int64) != 4 ||
-		metrics["server_tactics_cache_hit_count"].(int64) != 7 ||
-		metrics["server_tactics_cache_miss_count"].(int64) != 5 {
+	if metrics["server_tactics_max_cache_entries"].(int64) != 8 ||
+		metrics["server_tactics_max_parameter_references"].(int64) != 6 ||
+		metrics["server_tactics_cache_hit_count"].(int64) != 12 ||
+		metrics["server_tactics_cache_miss_count"].(int64) != 8 {
 
 		t.Fatalf("unexpected metrics: %v", metrics)
 	}
