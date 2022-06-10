@@ -86,6 +86,43 @@ type NetworkConfig struct {
 
 	// LogHostnames indicates whether to log hostname in errors or not.
 	LogHostnames bool
+
+	// CacheExtensionInitialTTL specifies a minimum TTL to use when caching
+	// domain resolution results. This minimum will override any TTL in the
+	// DNS response. CacheExtensionInitialTTL is off when 0.
+	CacheExtensionInitialTTL time.Duration
+
+	// CacheExtensionVerifiedTTL specifies the minimum TTL to set for a cached
+	// domain resolution result after the result has been verified.
+	// CacheExtensionVerifiedTTL is off when 0.
+	//
+	// DNS cache extension is a workaround to partially mitigate issues with
+	// obtaining underlying system DNS resolvers on platforms such as iOS
+	// once a VPN is running and after network changes, such as changing from
+	// Wi-Fi to mobile. While ResolveParameters.AlternateDNSServer can be
+	// used to specify a known public DNS server, it may be the case that
+	// public DNS servers are blocked or always falling back to a public DNS
+	// server creates unusual traffic.
+	//
+	// Extending the TTL for cached responses allows Psiphon to redial domains
+	// using recently successful IPs.
+	//
+	// CacheExtensionInitialTTL allows for a greater initial minimum TTL, so
+	// that the response entry remains in the cache long enough for a dial to
+	// fully complete and verify the endpoint. Psiphon will call
+	// Resolver.VerifyExtendCacheTTL once a dial has authenticated, for
+	// example, the destination Psiphon server. VerifyCacheExtension will
+	// further extend the corresponding TTL to CacheExtensionVerifiedTTL, a
+	// longer TTL. CacheExtensionInitialTTL is intended to be on the order of
+	// minutes and CacheExtensionVerifiedTTL may be on the order of hours.
+	//
+	// When CacheExtensionVerifiedTTL is on, the DNS cache is not flushed on
+	// network changes, to allow for the previously cached entries to remain
+	// available in the problematic scenario. Like adjusting TTLs, this is an
+	// explicit trade-off which doesn't adhere to standard best practise, but
+	// is expected to be more blocking resistent; this approach also assumes
+	// that endpoints such as CDN IPs are typically available on any network.
+	CacheExtensionVerifiedTTL time.Duration
 }
 
 func (c *NetworkConfig) logWarning(err error) {
@@ -205,15 +242,16 @@ type Resolver struct {
 }
 
 type resolverMetrics struct {
-	resolves      int
-	cacheHits     int
-	requestsIPv4  int
-	requestsIPv6  int
-	responsesIPv4 int
-	responsesIPv6 int
-	peakInFlight  int64
-	minRTT        time.Duration
-	maxRTT        time.Duration
+	resolves                int
+	cacheHits               int
+	verifiedCacheExtensions int
+	requestsIPv4            int
+	requestsIPv6            int
+	responsesIPv4           int
+	responsesIPv6           int
+	peakInFlight            int64
+	minRTT                  time.Duration
+	maxRTT                  time.Duration
 }
 
 func newResolverMetrics() resolverMetrics {
@@ -827,6 +865,38 @@ func (r *Resolver) ResolveIP(
 	return result.IPs, nil
 }
 
+// VerifyCacheExtension extends the TTL for any cached result for the
+// specified hostname to at least NetworkConfig.CacheExtensionVerifiedTTL.
+func (r *Resolver) VerifyCacheExtension(hostname string) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if r.networkConfig.CacheExtensionVerifiedTTL == 0 {
+		return
+	}
+
+	if net.ParseIP(hostname) != nil {
+		return
+	}
+
+	entry, expires, ok := r.cache.GetWithExpiration(hostname)
+	if !ok {
+		return
+	}
+
+	// Change the TTL only if the entry expires and the existing TTL isn't
+	// longer than the extension.
+	neverExpires := time.Time{}
+	if expires == neverExpires ||
+		expires.After(time.Now().Add(r.networkConfig.CacheExtensionVerifiedTTL)) {
+		return
+	}
+
+	r.cache.Set(hostname, entry, r.networkConfig.CacheExtensionVerifiedTTL)
+
+	r.metrics.verifiedCacheExtensions += 1
+}
+
 // GetMetrics returns a summary of DNS metrics.
 func (r *Resolver) GetMetrics() string {
 	r.mutex.Lock()
@@ -840,9 +910,15 @@ func (r *Resolver) GetMetrics() string {
 		maxRTT = fmt.Sprintf("%d", r.metrics.maxRTT/time.Millisecond)
 	}
 
-	return fmt.Sprintf("resolves %d | hit %d | req v4/v6 %d/%d | resp %d/%d | peak %d | rtt %s - %s ms.",
+	extend := ""
+	if r.networkConfig.CacheExtensionVerifiedTTL > 0 {
+		extend = fmt.Sprintf("| extend %d ", r.metrics.verifiedCacheExtensions)
+	}
+
+	return fmt.Sprintf("resolves %d | hit %d %s| req v4/v6 %d/%d | resp %d/%d | peak %d | rtt %s - %s ms.",
 		r.metrics.resolves,
 		r.metrics.cacheHits,
+		extend,
 		r.metrics.requestsIPv4,
 		r.metrics.requestsIPv6,
 		r.metrics.responsesIPv4,
@@ -975,7 +1051,9 @@ func (r *Resolver) updateNetworkState(networkID string) {
 		r.lastServersUpdate = time.Now()
 	}
 
-	if flushCache {
+	// Skip cache flushes when the extended DNS caching mechanism is enabled.
+	// TODO: retain only verified cache entries?
+	if flushCache && r.networkConfig.CacheExtensionVerifiedTTL == 0 {
 		r.cache.Flush()
 	}
 
@@ -1004,6 +1082,14 @@ func (r *Resolver) setCache(hostname string, IPs []net.IP, TTLs []time.Duration)
 		if answerTTL > 0 && answerTTL < TTL {
 			TTL = answerTTL
 		}
+	}
+
+	// When NetworkConfig.CacheExtensionInitialTTL configured, ensure the TTL
+	// is no shorter than CacheExtensionInitialTTL.
+	if r.networkConfig.CacheExtensionInitialTTL != 0 &&
+		TTL < r.networkConfig.CacheExtensionInitialTTL {
+
+		TTL = r.networkConfig.CacheExtensionInitialTTL
 	}
 
 	// Limitation: with concurrent ResolveIPs for the same domain, the last

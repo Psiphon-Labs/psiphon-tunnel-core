@@ -314,6 +314,8 @@ const (
 	DNSResolverProtocolTransformScopedSpecNames      = "DNSResolverProtocolTransformScopedSpecNames"
 	DNSResolverProtocolTransformProbability          = "DNSResolverProtocolTransformProbability"
 	DNSResolverIncludeEDNS0Probability               = "DNSResolverIncludeEDNS0Probability"
+	DNSResolverCacheExtensionInitialTTL              = "DNSResolverCacheExtensionInitialTTL"
+	DNSResolverCacheExtensionVerifiedTTL             = "DNSResolverCacheExtensionVerifiedTTL"
 )
 
 const (
@@ -663,6 +665,8 @@ var defaultParameters = map[string]struct {
 	DNSResolverProtocolTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
 	DNSResolverProtocolTransformProbability:     {value: 0.0, minimum: 0.0},
 	DNSResolverIncludeEDNS0Probability:          {value: 0.0, minimum: 0.0},
+	DNSResolverCacheExtensionInitialTTL:         {value: time.Duration(0), minimum: time.Duration(0)},
+	DNSResolverCacheExtensionVerifiedTTL:        {value: time.Duration(0), minimum: time.Duration(0)},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

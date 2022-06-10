@@ -178,5 +178,10 @@ func DownloadUpgrade(
 
 	NoticeClientUpgradeDownloaded(config.GetUpgradeDownloadFilename())
 
+	// Limitation: unlike the remote server list download case, DNS cache
+	// extension is not invoked here since payload authentication is not
+	// currently implemented at this level. iOS VPN, the primary use case for
+	// DNS cache extension, does not use this side-load upgrade mechanism.
+
 	return nil
 }

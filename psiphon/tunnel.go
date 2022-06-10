@@ -1162,6 +1162,21 @@ func dialTunnel(
 
 	cleanupConn = nil
 
+	// Invoke DNS cache extension (if enabled in the resolver) now that the
+	// tunnel is connected and the Psiphon server is authenticated. This
+	// demonstrates that any domain name resolved to an endpoint that is or
+	// is forwarded to the expected Psiphon server.
+	//
+	// Limitation: DNS cache extension is not implemented for Refraction
+	// Networking protocols. iOS VPN, the primary use case for DNS cache
+	// extension, does not enable Refraction Networking.
+	if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+		resolver := config.GetResolver()
+		if resolver != nil {
+			resolver.VerifyCacheExtension(dialParams.MeekFrontingDialAddress)
+		}
+	}
+
 	// When configured to do so, hold-off on activating this tunnel. This allows
 	// some extra time for slower but less resource intensive protocols to
 	// establish tunnels. By holding off post-connect, the client has this
