@@ -81,4 +81,9 @@
     return networkID;
 }
 
+- (long)hasIPv6Route {
+    // Unused on iOS.
+    return FALSE;
+}
+
 @end
