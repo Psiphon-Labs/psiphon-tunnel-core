@@ -780,17 +780,19 @@ type Config struct {
 
 	// DNSResolverAttemptsPerServer and other DNSResolver fields are for
 	// testing purposes.
-	DNSResolverAttemptsPerServer                *int
-	DNSResolverRequestTimeoutMilliseconds       *int
-	DNSResolverAwaitTimeoutMilliseconds         *int
-	DNSResolverPreresolvedIPAddressCIDRs        parameters.LabeledCIDRs
-	DNSResolverPreresolvedIPAddressProbability  *float64
-	DNSResolverAlternateServers                 []string
-	DNSResolverPreferAlternateServerProbability *float64
-	DNSResolverProtocolTransformSpecs           transforms.Specs
-	DNSResolverProtocolTransformScopedSpecNames transforms.ScopedSpecNames
-	DNSResolverProtocolTransformProbability     *float64
-	DNSResolverIncludeEDNS0Probability          *float64
+	DNSResolverAttemptsPerServer                     *int
+	DNSResolverRequestTimeoutMilliseconds            *int
+	DNSResolverAwaitTimeoutMilliseconds              *int
+	DNSResolverPreresolvedIPAddressCIDRs             parameters.LabeledCIDRs
+	DNSResolverPreresolvedIPAddressProbability       *float64
+	DNSResolverAlternateServers                      []string
+	DNSResolverPreferAlternateServerProbability      *float64
+	DNSResolverProtocolTransformSpecs                transforms.Specs
+	DNSResolverProtocolTransformScopedSpecNames      transforms.ScopedSpecNames
+	DNSResolverProtocolTransformProbability          *float64
+	DNSResolverIncludeEDNS0Probability               *float64
+	DNSResolverCacheExtensionInitialTTLMilliseconds  *int
+	DNSResolverCacheExtensionVerifiedTTLMilliseconds *int
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -1842,12 +1844,20 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.DNSResolverProtocolTransformScopedSpecNames] = config.DNSResolverProtocolTransformScopedSpecNames
 	}
 
+	if config.DNSResolverProtocolTransformProbability != nil {
+		applyParameters[parameters.DNSResolverProtocolTransformProbability] = *config.DNSResolverProtocolTransformProbability
+	}
+
 	if config.DNSResolverIncludeEDNS0Probability != nil {
 		applyParameters[parameters.DNSResolverIncludeEDNS0Probability] = *config.DNSResolverIncludeEDNS0Probability
 	}
 
-	if config.DNSResolverProtocolTransformProbability != nil {
-		applyParameters[parameters.DNSResolverProtocolTransformProbability] = *config.DNSResolverProtocolTransformProbability
+	if config.DNSResolverCacheExtensionInitialTTLMilliseconds != nil {
+		applyParameters[parameters.DNSResolverCacheExtensionInitialTTL] = fmt.Sprintf("%dms", *config.DNSResolverCacheExtensionInitialTTLMilliseconds)
+	}
+
+	if config.DNSResolverCacheExtensionVerifiedTTLMilliseconds != nil {
+		applyParameters[parameters.DNSResolverCacheExtensionVerifiedTTL] = fmt.Sprintf("%dms", *config.DNSResolverCacheExtensionVerifiedTTLMilliseconds)
 	}
 
 	// When adding new config dial parameters that may override tactics, also
@@ -2246,6 +2256,16 @@ func (config *Config) setDialParametersHash() {
 	if config.DNSResolverIncludeEDNS0Probability != nil {
 		hash.Write([]byte("DNSResolverIncludeEDNS0Probability"))
 		binary.Write(hash, binary.LittleEndian, *config.DNSResolverIncludeEDNS0Probability)
+	}
+
+	if config.DNSResolverCacheExtensionInitialTTLMilliseconds != nil {
+		hash.Write([]byte("DNSResolverCacheExtensionInitialTTLMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.DNSResolverCacheExtensionInitialTTLMilliseconds))
+	}
+
+	if config.DNSResolverCacheExtensionVerifiedTTLMilliseconds != nil {
+		hash.Write([]byte("DNSResolverCacheExtensionVerifiedTTLMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.DNSResolverCacheExtensionVerifiedTTLMilliseconds))
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

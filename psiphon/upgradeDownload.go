@@ -46,10 +46,11 @@ import (
 // NOTE: This code does not check that any existing file at config.GetUpgradeDownloadFilename()
 // is actually the version specified in handshakeVersion.
 //
-// when there's already a downloaded upgrade pending. Because the outer client currently
-// handles the authenticated package phase, and because the outer client deletes the
-// intermediate files (including config.GetUpgradeDownloadFilename()), if the outer client
-// does not omit config.GetUpgradeDownloadFilename() then the new version will be downloaded
+// TODO: This logic requires the outer client to *omit* config.UpgradeDownloadURLs, disabling
+// upgrade downloads, when there's already a downloaded upgrade pending. This is because the
+// outer client currently handles the authenticated package phase, and because the outer client
+// deletes the intermediate files (including config.GetUpgradeDownloadFilename()). So if the outer
+// client does not disable upgrade downloads then the new version will be downloaded
 // repeatedly. Implement a new scheme where tunnel core does the authenticated package phase
 // and tracks the the output by version number so that (a) tunnel core knows when it's not
 // necessary to re-download; (b) newer upgrades will be downloaded even when an older
@@ -176,6 +177,11 @@ func DownloadUpgrade(
 	}
 
 	NoticeClientUpgradeDownloaded(config.GetUpgradeDownloadFilename())
+
+	// Limitation: unlike the remote server list download case, DNS cache
+	// extension is not invoked here since payload authentication is not
+	// currently implemented at this level. iOS VPN, the primary use case for
+	// DNS cache extension, does not use this side-load upgrade mechanism.
 
 	return nil
 }

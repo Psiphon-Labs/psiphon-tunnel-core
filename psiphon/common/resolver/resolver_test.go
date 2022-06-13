@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -358,7 +359,7 @@ func runTestResolver() error {
 
 	if resolver.metrics.resolves != beforeMetrics.resolves+1 ||
 		resolver.metrics.cacheHits != beforeMetrics.cacheHits {
-		return errors.Tracef("unexpected metrics: %+v", resolver.metrics)
+		return errors.Tracef("unexpected metrics: %+v (%+v)", resolver.metrics, beforeMetrics)
 	}
 
 	// Test: PreferAlternateDNSServer
@@ -541,6 +542,49 @@ func runTestResolver() error {
 		return errors.Tracef("unexpected metrics: %+v", resolver.metrics)
 	}
 
+	// Test: DNS cache extension
+
+	resolver.cache.Flush()
+
+	networkConfig.CacheExtensionInitialTTL = (exampleTTLSeconds * 2) * time.Second
+	networkConfig.CacheExtensionVerifiedTTL = 2 * time.Hour
+
+	now := time.Now()
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	entry, expiry, ok := resolver.cache.GetWithExpiration(exampleDomain)
+	if !ok ||
+		!reflect.DeepEqual(entry, IPs) ||
+		expiry.Before(now.Add(networkConfig.CacheExtensionInitialTTL)) ||
+		expiry.After(now.Add(networkConfig.CacheExtensionVerifiedTTL)) {
+		return errors.TraceNew("unexpected CacheExtensionInitialTTL state")
+	}
+
+	resolver.VerifyCacheExtension(exampleDomain)
+
+	entry, expiry, ok = resolver.cache.GetWithExpiration(exampleDomain)
+	if !ok ||
+		!reflect.DeepEqual(entry, IPs) ||
+		expiry.Before(now.Add(networkConfig.CacheExtensionVerifiedTTL)) {
+		return errors.TraceNew("unexpected CacheExtensionInitialTTL state")
+	}
+
+	// Set cache flush condition, which should be ignored
+	networkID = "networkID-5"
+
+	resolver.updateNetworkState(networkID)
+
+	entry, expiry, ok = resolver.cache.GetWithExpiration(exampleDomain)
+	if !ok ||
+		!reflect.DeepEqual(entry, IPs) ||
+		expiry.Before(now.Add(networkConfig.CacheExtensionVerifiedTTL)) {
+		return errors.TraceNew("unexpected CacheExtensionInitialTTL state")
+	}
+
 	// Test: cancel context
 
 	resolver.cache.Flush()
@@ -608,11 +652,12 @@ func getPublicDNSServers() []string {
 }
 
 const (
-	exampleDomain   = "example.com"
-	exampleIPv4     = "93.184.216.34"
-	exampleIPv4CIDR = "93.184.216.0/24"
-	exampleIPv6     = "2606:2800:220:1:248:1893:25c8:1946"
-	exampleIPv6CIDR = "2606:2800:220::/48"
+	exampleDomain     = "example.com"
+	exampleIPv4       = "93.184.216.34"
+	exampleIPv4CIDR   = "93.184.216.0/24"
+	exampleIPv6       = "2606:2800:220:1:248:1893:25c8:1946"
+	exampleIPv6CIDR   = "2606:2800:220::/48"
+	exampleTTLSeconds = 60
 )
 
 // Set the reserved Z flag
@@ -687,7 +732,7 @@ func (s *testDNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 				Name:   r.Question[0].Name,
 				Rrtype: dns.TypeA,
 				Class:  dns.ClassINET,
-				Ttl:    60},
+				Ttl:    exampleTTLSeconds},
 			A: IP,
 		}
 	} else {
@@ -700,7 +745,7 @@ func (s *testDNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 				Name:   r.Question[0].Name,
 				Rrtype: dns.TypeAAAA,
 				Class:  dns.ClassINET,
-				Ttl:    60},
+				Ttl:    exampleTTLSeconds},
 			AAAA: IP,
 		}
 	}

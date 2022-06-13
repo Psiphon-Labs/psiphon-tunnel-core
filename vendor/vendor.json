@@ -471,40 +471,40 @@
 			"revisionTime": "2016-01-10T10:55:54Z"
 		},
 		{
-			"checksumSHA1": "Tq3U98W2uwIgjWSjH7tqBonGjBE=",
+			"checksumSHA1": "9bOB+Wt4ZtWpkQ2pGs/xOezBAfM=",
 			"path": "github.com/refraction-networking/gotapdance",
-			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
-			"revisionTime": "2021-10-27T21:33:19Z"
+			"revision": "519c7851c33f0b28ddc72d7741b3d56b4a34a2db",
+			"revisionTime": "2022-04-13T22:02:46Z"
 		},
 		{
 			"checksumSHA1": "ObZZJpjQl2BISlIiES82BW8jbEE=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/edwards25519",
-			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
-			"revisionTime": "2021-10-27T21:33:19Z"
+			"revision": "519c7851c33f0b28ddc72d7741b3d56b4a34a2db",
+			"revisionTime": "2022-04-13T22:02:46Z"
 		},
 		{
 			"checksumSHA1": "VoyDh1KIIVE+OJbehDNJ91tf4Vw=",
 			"path": "github.com/refraction-networking/gotapdance/ed25519/extra25519",
-			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
-			"revisionTime": "2021-10-27T21:33:19Z"
+			"revision": "519c7851c33f0b28ddc72d7741b3d56b4a34a2db",
+			"revisionTime": "2022-04-13T22:02:46Z"
 		},
 		{
-			"checksumSHA1": "1y7Fn9JIVFTobi2TNXZ4Z4i9rAk=",
+			"checksumSHA1": "cR8fSqWLZjlU/ICRhZ3pSB/ZFhk=",
 			"path": "github.com/refraction-networking/gotapdance/protobuf",
-			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
-			"revisionTime": "2021-10-27T21:33:19Z"
+			"revision": "519c7851c33f0b28ddc72d7741b3d56b4a34a2db",
+			"revisionTime": "2022-04-13T22:02:46Z"
 		},
 		{
-			"checksumSHA1": "MgD1lPRReL44MtvlOpzI/NzPM1k=",
+			"checksumSHA1": "X10aYQktZK23jZEUhiEnyznYV1s=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance",
-			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
-			"revisionTime": "2021-10-27T21:33:19Z"
+			"revision": "519c7851c33f0b28ddc72d7741b3d56b4a34a2db",
+			"revisionTime": "2022-04-13T22:02:46Z"
 		},
 		{
 			"checksumSHA1": "NiwZ/PirZniVT64D03KOS6UFMGU=",
 			"path": "github.com/refraction-networking/gotapdance/tapdance/phantoms",
-			"revision": "25380c96b147bfc85680f9999f04606fe8092b23",
-			"revisionTime": "2021-10-27T21:33:19Z"
+			"revision": "519c7851c33f0b28ddc72d7741b3d56b4a34a2db",
+			"revisionTime": "2022-04-13T22:02:46Z"
 		},
 		{
 			"checksumSHA1": "jOxlnqvKSKn1SIkA5ldRe5lxqAc=",
