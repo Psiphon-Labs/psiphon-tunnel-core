@@ -130,21 +130,30 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
         self->monitor = nw_path_monitor_create();
 
         nw_path_monitor_set_queue(self->monitor, self->nwPathMonitorQueue);
-        __block dispatch_group_t group = dispatch_group_create();
-        dispatch_group_enter(group);
+        __block dispatch_semaphore_t sem = dispatch_semaphore_create(0);
 
         nw_path_monitor_set_update_handler(self->monitor, ^(nw_path_t  _Nonnull path) {
             [self pathUpdateHandler:path];
-            if (group != NULL) {
-                dispatch_group_leave(group);
-                group = NULL;
+            if (sem != NULL) {
+                dispatch_semaphore_signal(sem);
+                @synchronized (self) {
+                    // Release memory after `start` has completed. Otherwise we may set `sem` to
+                    // NULL before dispatch_semaphore_wait is called in the enclosing scope and the
+                    // program will crash.
+                    sem = NULL;
+                }
             }
         });
         nw_path_monitor_start(self->monitor);
 
         // Wait for the current path to be emitted before returning to ensure this instance is
         // populated with the current network state. PsiphonTunnel depends on this guarantee.
-        dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+        // NOTE: This null guard defends against nw_path_monitor_start calling the update handler
+        // synchronously before returning, e.g. with dispatch_sync, which will set `sem` to NULL
+        // because @synchronized provides a reentrant thread level locking mechanism.
+        if (sem != NULL) {
+            dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+        }
     }
 }
 
