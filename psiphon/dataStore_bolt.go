@@ -108,6 +108,11 @@ func tryDatastoreOpenDB(
 	// To handle this, we temporarily set SetPanicOnFault in order to treat the
 	// fault as a panic, recover any panic, and return an error which will result
 	// in a retry with reset.
+	//
+	// Limitation: another potential crash case is "fatal error: out of
+	// memory" due to bolt.freelist.read attempting to allocate a slice using
+	// a corrupted size value on disk. There is no way to recover from this
+	// fatal.
 
 	// Begin recovery preamble
 	panicOnFault := debug.SetPanicOnFault(true)

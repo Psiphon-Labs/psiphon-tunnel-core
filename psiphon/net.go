@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"golang.org/x/net/bpf"
 )
@@ -326,9 +327,13 @@ func WaitForNetworkConnectivity(
 // excluded from any VPN routing.
 func NewResolver(config *Config, useBindToDevice bool) *resolver.Resolver {
 
+	p := config.GetParameters().Get()
+
 	networkConfig := &resolver.NetworkConfig{
-		LogWarning:   func(err error) { NoticeWarning("ResolveIP: %v", err) },
-		LogHostnames: config.EmitDiagnosticNetworkParameters,
+		LogWarning:                func(err error) { NoticeWarning("ResolveIP: %v", err) },
+		LogHostnames:              config.EmitDiagnosticNetworkParameters,
+		CacheExtensionInitialTTL:  p.Duration(parameters.DNSResolverCacheExtensionInitialTTL),
+		CacheExtensionVerifiedTTL: p.Duration(parameters.DNSResolverCacheExtensionVerifiedTTL),
 	}
 
 	if config.DNSServerGetter != nil {

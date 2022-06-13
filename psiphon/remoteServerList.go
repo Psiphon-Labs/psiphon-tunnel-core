@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"sync/atomic"
 	"time"
@@ -489,6 +490,22 @@ func downloadRemoteServerListFile(
 	NoticeRemoteServerListResourceDownloaded(sourceURL)
 
 	downloadStatRecorder := func(authenticated bool) {
+
+		// Invoke DNS cache extension (if enabled in the resolver) now that
+		// the download succeeded and the payload is authenticated. Only
+		// extend when authenticated, as this demonstrates that any domain
+		// name resolved to an endpoint that served a valid Psiphon remote
+		// server list.
+		//
+		// TODO: when !skipVerify, invoke DNS cache extension earlier, in
+		// ResumeDownload, after making the request but before downloading
+		// the response body?
+		resolver := config.GetResolver()
+		url, err := url.Parse(sourceURL)
+		if authenticated && resolver != nil && err == nil {
+			resolver.VerifyCacheExtension(url.Hostname())
+		}
+
 		_ = RecordRemoteServerListStat(
 			config, tunneled, sourceURL, responseETag, bytes, duration, authenticated)
 	}
