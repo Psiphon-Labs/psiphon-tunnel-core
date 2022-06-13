@@ -598,6 +598,7 @@ var defaultParameters = map[string]struct {
 	FeedbackEncryptionPublicKey:        {value: ""},
 	FeedbackTacticsWaitPeriod:          {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
 	FeedbackUploadMaxAttempts:          {value: 5, minimum: 0},
+	// TODO: rename -- remove "Seconds" suffix
 	FeedbackUploadRetryMinDelaySeconds: {value: 1 * time.Minute, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	FeedbackUploadRetryMaxDelaySeconds: {value: 5 * time.Minute, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	FeedbackUploadTimeoutSeconds:       {value: 30 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
