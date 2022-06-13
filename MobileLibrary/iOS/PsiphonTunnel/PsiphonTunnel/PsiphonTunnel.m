@@ -1285,7 +1285,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return [IPv6Synthesizer IPv4ToIPv6:IPv4Addr];
 }
 
-- (NSString *)hasIPv6Route:()BOOL {
+- (long)hasIPv6Route {
     // Unused on iOS.
     return FALSE;
 }
