@@ -915,7 +915,10 @@ func (r *Resolver) GetMetrics() string {
 		extend = fmt.Sprintf("| extend %d ", r.metrics.verifiedCacheExtensions)
 	}
 
-	return fmt.Sprintf("resolves %d | hit %d %s| req v4/v6 %d/%d | resp %d/%d | peak %d | rtt %s - %s ms.",
+	// Note that the number of system resolvers is a point-in-time value,
+	// while the others are cumulative.
+
+	return fmt.Sprintf("resolves %d | hit %d %s| req v4/v6 %d/%d | resp %d/%d | peak %d | rtt %s - %s ms. | sys %d",
 		r.metrics.resolves,
 		r.metrics.cacheHits,
 		extend,
@@ -925,7 +928,8 @@ func (r *Resolver) GetMetrics() string {
 		r.metrics.responsesIPv6,
 		r.metrics.peakInFlight,
 		minRTT,
-		maxRTT)
+		maxRTT,
+		len(r.systemServers))
 }
 
 // updateNetworkState updates the system DNS server list, IPv6 state, and the
