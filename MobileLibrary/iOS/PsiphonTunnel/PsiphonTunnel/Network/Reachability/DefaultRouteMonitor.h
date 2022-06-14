@@ -26,11 +26,14 @@ NS_ASSUME_NONNULL_BEGIN
 /// NetworkPathState represents the state of the network path on the device.
 @interface NetworkPathState : NSObject
 
+/// Reachability status.
+@property (nonatomic, readonly) NetworkReachability status;
+
 /// Network path state.
-@property (nonatomic, nullable) nw_path_t path;
+@property (nonatomic, nullable, readonly) nw_path_t path;
 
 /// Default active interface available to the network path.
-@property (nonatomic, nullable) NSString* defaultActiveInterfaceName;
+@property (nonatomic, nullable, readonly) NSString* defaultActiveInterfaceName;
 
 @end
 
@@ -53,12 +56,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// receiving network data.
 @interface DefaultRouteMonitor : NSObject <ReachabilityProtocol>
 
+/// Returns the state of the default route on the device. If nil, then there is no usable route available for sending or receiving network data.
+@property (atomic, readonly) NetworkPathState *pathState;
+
 - (instancetype)init API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0));
 
 - (id)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0));
-
-/// Returns the state of the default route on the device. If nil, then there is no usable route available for sending or receiving network data.
-- (NetworkPathState*_Nullable)pathState;
 
 // Denote ReachabilityProtocol availability.
 - (BOOL)startNotifier API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0));

@@ -27,10 +27,6 @@
 #import <Network/path_monitor.h>
 #import "DefaultRouteMonitor.h"
 
-@implementation NetworkPathState
-
-@end
-
 @implementation NetworkInterface
 
 + (NSString*_Nullable)getInterfaceAddress:(NSString*_Nonnull)interfaceName

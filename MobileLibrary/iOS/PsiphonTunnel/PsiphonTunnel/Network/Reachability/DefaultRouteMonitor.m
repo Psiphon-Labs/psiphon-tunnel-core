@@ -22,6 +22,31 @@
 #import <net/if.h>
 #import <ifaddrs.h>
 
+@interface NetworkPathState ()
+/// See comment in DefaultRouteMonitor.h
+@property (nonatomic) NetworkReachability status;
+/// See comment in DefaultRouteMonitor.h
+@property (nonatomic, nullable) nw_path_t path;
+/// See comment in DefaultRouteMonitor.h
+@property (nonatomic, nullable) NSString* defaultActiveInterfaceName;
+@end
+
+@implementation NetworkPathState
+
+- (instancetype)initWithNetworkReachability:(NetworkReachability)networkReachability
+                                       path:(nw_path_t)path
+                 defaultActiveInterfaceName:(NSString*)defaultActiveInterfaceName {
+    self = [super init];
+    if (self) {
+        self->_status = networkReachability;
+        self->_path = path;
+        self->_defaultActiveInterfaceName = defaultActiveInterfaceName;
+    }
+    return self;
+}
+
+@end
+
 @interface ReachabilityChangedNotification ()
 /// See comment in DefaultRouteMonitor.h
 @property (nonatomic) NetworkReachability reachabilityStatus;
@@ -47,19 +72,22 @@
 
 @end
 
+@interface DefaultRouteMonitor ()
+@property (atomic) NetworkPathState *pathState;
+@end
+
 @implementation DefaultRouteMonitor {
     nw_path_monitor_t monitor;
     dispatch_queue_t nwPathMonitorQueue;
     dispatch_queue_t notifQueue;
-    NetworkReachability status;
-    NetworkPathState* state;
 
     void (^logger) (NSString *_Nonnull);
 }
 
 - (void)initialize API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
-    self->state = nil;
-    self->status = NetworkReachabilityNotReachable;
+    self.pathState = [[NetworkPathState alloc] initWithNetworkReachability:NetworkReachabilityNotReachable
+                                                                      path:nil
+                                                defaultActiveInterfaceName:nil];
     self->nwPathMonitorQueue = dispatch_queue_create("com.psiphon3.library.DefaultRouteMonitorNWPathMonitorQueue", DISPATCH_QUEUE_SERIAL);
     self->notifQueue = dispatch_queue_create("com.psiphon3.library.DefaultRouteMonitorNotificationQueue", DISPATCH_QUEUE_SERIAL);
 }
@@ -79,10 +107,6 @@
         [self initialize];
     }
     return self;
-}
-
-- (NetworkPathState*)pathState {
-    return self->state;
 }
 
 - (void)log:(NSString*)notice {
@@ -175,20 +199,20 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
     NetworkPathState *newPathState = [[NetworkPathState alloc] init];
     newPathState.path = path;
     NSString *prevDefaultActiveInterfaceName = nil;
-    if (self->state != nil) {
-        prevDefaultActiveInterfaceName = self->state.defaultActiveInterfaceName;
+    if (self.pathState != nil) {
+        prevDefaultActiveInterfaceName = self.pathState.defaultActiveInterfaceName;
     }
 
     nw_path_status_t status = nw_path_get_status(path);
     if (status == nw_path_status_invalid || status == nw_path_status_unsatisfied) {
-        self->status = NetworkReachabilityNotReachable;
+        newPathState.status = NetworkReachabilityNotReachable;
     } else if (status == nw_path_status_satisfied || status == nw_path_status_satisfiable) {
 
         // Network is, or could, be reachable. Determine interface corresponding to this
         // path.
 
         nw_interface_type_t active_interface_type = nw_path_interface_type(path);
-        self->status = nw_interface_type_network_reachability(active_interface_type);
+        newPathState.status = nw_interface_type_network_reachability(active_interface_type);
 
         NSError *err;
         NSSet<NSString*>* activeInterfaces = [NetworkInterface activeInterfaces:&err];
@@ -232,12 +256,12 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
     } else {
         // Unhandled case. Should never happen.
     }
-    self->state = newPathState;
+    self.pathState = newPathState;
 
     // Backwards compatibility with Reachability
     ReachabilityChangedNotification *notif =
         [[ReachabilityChangedNotification alloc]
-         initWithReachabilityStatus:self->status
+         initWithReachabilityStatus:self.pathState.status
          curDefaultActiveInterfaceName:newPathState.defaultActiveInterfaceName
          prevDefaultActiveInterfaceName:prevDefaultActiveInterfaceName];
     dispatch_async(self->notifQueue, ^{
@@ -248,6 +272,11 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
 }
 
 + (NSString*)pathDebugInfo:(nw_path_t)path API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
+
+    if (path == nil) {
+        return @"state nil";
+    }
+
     NSString *constrained = @"UNAVAILABLE";
     if (@available(iOS 13.0, *)) {
         constrained = [NSString stringWithFormat:@"%d", nw_path_is_constrained(path)];
@@ -322,15 +351,11 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
 - (NetworkReachability)reachabilityStatus {
     // Note: alternatively we could initialize a temporary NWPathMonitor instance and sample the
     // reachability state by synchronously waiting for its initial update.
-    return self->status;
+    return self.pathState.status;
 }
 
 - (NSString*)reachabilityStatusDebugInfo {
-    if (self->state == nil) {
-        return @"state nil";
-    }
-    nw_path_t path = self->state.path;
-    return [DefaultRouteMonitor pathDebugInfo:path];
+    return [DefaultRouteMonitor pathDebugInfo:self.pathState.path];
 }
 
 #pragma mark Helpers (private)
