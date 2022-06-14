@@ -157,7 +157,11 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
         __block dispatch_semaphore_t sem = dispatch_semaphore_create(0);
 
         nw_path_monitor_set_update_handler(self->monitor, ^(nw_path_t  _Nonnull path) {
-            [self pathUpdateHandler:path];
+            // Do not emit notification on first update. PsiphonTunnel expects that only
+            // subsequent path updates will be emitted and will invalidate the DNS cache once the
+            // first notification is received.
+            BOOL emitNotification = sem == NULL;
+            [self pathUpdateHandler:path emitNotification:emitNotification];
             if (sem != NULL) {
                 dispatch_semaphore_signal(sem);
                 @synchronized (self) {
@@ -191,7 +195,7 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
     }
 }
 
-- (void)pathUpdateHandler:(nw_path_t _Nonnull)path API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
+- (void)pathUpdateHandler:(nw_path_t _Nonnull)path emitNotification:(BOOL)emitNotification API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
 
     [self log:[NSString stringWithFormat:@"new path: %@",
                [DefaultRouteMonitor pathDebugInfo:path]]];
@@ -258,17 +262,19 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
     }
     self.pathState = newPathState;
 
-    // Backwards compatibility with Reachability
-    ReachabilityChangedNotification *notif =
-        [[ReachabilityChangedNotification alloc]
-         initWithReachabilityStatus:self.pathState.status
-         curDefaultActiveInterfaceName:newPathState.defaultActiveInterfaceName
-         prevDefaultActiveInterfaceName:prevDefaultActiveInterfaceName];
-    dispatch_async(self->notifQueue, ^{
-        [[NSNotificationCenter defaultCenter]
-         postNotificationName:[DefaultRouteMonitor reachabilityChangedNotification]
-         object:notif];
-    });
+    if (emitNotification == TRUE) {
+        // Backwards compatibility with Reachability
+        ReachabilityChangedNotification *notif =
+            [[ReachabilityChangedNotification alloc]
+             initWithReachabilityStatus:self.pathState.status
+             curDefaultActiveInterfaceName:newPathState.defaultActiveInterfaceName
+             prevDefaultActiveInterfaceName:prevDefaultActiveInterfaceName];
+        dispatch_async(self->notifQueue, ^{
+            [[NSNotificationCenter defaultCenter]
+             postNotificationName:[DefaultRouteMonitor reachabilityChangedNotification]
+             object:notif];
+        });
+    }
 }
 
 + (NSString*)pathDebugInfo:(nw_path_t)path API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
