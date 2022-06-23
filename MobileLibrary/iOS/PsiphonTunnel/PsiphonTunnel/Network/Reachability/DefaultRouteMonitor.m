@@ -199,7 +199,7 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
 
 - (void)pathUpdateHandler:(nw_path_t _Nonnull)path emitNotification:(BOOL)emitNotification API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
 
-    if (self.pathState.path != nil && pathIsEqual(self.pathState.path, path)) {
+    if (self.pathState.path != nil && pathUpdateIsRedundant(self.pathState.path, path)) {
         // Do nothing, path update is redundant.
         return;
     }
@@ -229,7 +229,7 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
             // Continue. activeInterfaces will be an empty set (non-nil) and we still want
             // to log interfaces enumerated with nw_path_enumerate_interfaces for debugging.
         }
-        [self log:[NSString stringWithFormat:@"active interfaces %@", activeInterfaces]];
+        [self log:[NSString stringWithFormat:@"active interfaces %@", [[activeInterfaces allObjects] componentsJoinedByString:@","]]];
 
         NSMutableArray<NSString*> *candidateInterfaces = [[NSMutableArray alloc] init];
         // Map the active interface type to the interface itself
@@ -281,97 +281,36 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
     }
 }
 
-/// Returns true if the paths are identical when comparing all the information that can be gathered with the public nw_path APIs;
+/// Returns true if the network state represented by newPath is considered equivalent, for our purposes, to that represented by oldPath;
 /// otherwise returns false.
-/// @note Only compares path interfaces that match the active interface type
-/// @warning There is the potential for false positives because the paths may differ in a manner that cannot be measured with the
-/// public nw_path APIs, but this is acceptable for our usecase.
-bool pathIsEqual(nw_path_t path, nw_path_t otherPath) API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
+bool pathUpdateIsRedundant(nw_path_t oldPath, nw_path_t newPath) API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
 
-    if (nw_path_is_equal(path, otherPath)) {
+    // Note: nw_path_is_equal may return FALSE even though the paths are identical when comparing
+    // all the information that can be gathered with the public nw_path APIs.
+    if (nw_path_is_equal(oldPath, newPath)) {
         return TRUE;
     }
-    // nw_path_is_equal may return FALSE even though the paths are identical when comparing all the
-    // information that can be gathered with the public nw_path APIs. If this is the case, then the
-    // paths can be considered equal and the new path update is redundant.
 
-    nw_interface_type_t interfaceType = nw_path_interface_type(path);
-    if (interfaceType != nw_path_interface_type(otherPath)) {
+    nw_interface_type_t interfaceType = nw_path_interface_type(oldPath);
+    if (interfaceType != nw_path_interface_type(newPath)) {
+        return FALSE;
+    }
+
+    if (nw_path_get_status(oldPath) != nw_path_get_status(newPath)) {
         return FALSE;
     }
 
     // Compare path interfaces that match the active interface type
 
-    NSArray<nw_interface_t>* pathInterfaces = [DefaultRouteMonitor pathInterfaces:path withType:interfaceType];
-    NSArray<nw_interface_t>* otherPathInterfaces = [DefaultRouteMonitor pathInterfaces:otherPath withType:interfaceType];
+    NSArray<nw_interface_t>* pathInterfaces = [DefaultRouteMonitor pathInterfaces:oldPath withType:interfaceType];
+    NSArray<nw_interface_t>* otherPathInterfaces = [DefaultRouteMonitor pathInterfaces:newPath withType:interfaceType];
     if ([pathInterfaces count] != [otherPathInterfaces count]) {
         return FALSE;
     }
 
-    for (nw_interface_t interface in pathInterfaces) {
-        BOOL found = FALSE;
-        for (nw_interface_t otherInterface in otherPathInterfaces) {
-            if (interfaceIsEqual(interface, otherInterface)) {
-                found = TRUE;
-                break;
-            }
-        }
-        if (found == FALSE) {
-            return FALSE;
-        }
-    }
-
-    if (nw_path_get_status(path) != nw_path_get_status(otherPath) ||
-        nw_path_is_expensive(path) != nw_path_is_expensive(otherPath) ||
-        nw_path_has_ipv4(path) != nw_path_has_ipv4(otherPath) ||
-        nw_path_has_ipv6(path) != nw_path_has_ipv6(otherPath) ||
-        nw_path_has_dns(path) != nw_path_has_dns(otherPath)) {
-        return FALSE;
-    }
-
-    if (@available(iOS 13.0, *)) {
-        if (nw_path_is_constrained(path) != nw_path_is_constrained(otherPath)) {
-            return FALSE;
-        }
-    }
-
-    if (@available(iOS 14.2, *)) {
-        if (nw_path_get_unsatisfied_reason(path) != nw_path_get_unsatisfied_reason(otherPath)) {
-            return FALSE;
-        }
-    }
-
-    // Compare path gateways
-
-    if (@available(iOS 13.0, *)) {
-        NSArray<nw_endpoint_t>* pathGateways = [DefaultRouteMonitor pathGateways:path];
-        NSArray<nw_endpoint_t>* otherPathGateways = [DefaultRouteMonitor pathGateways:path];
-        if ([pathGateways count] != [otherPathGateways count]) {
-            return FALSE;
-        }
-
-        for (nw_endpoint_t gateway in pathGateways) {
-            BOOL found = FALSE;
-            for (nw_endpoint_t otherGateway in otherPathGateways) {
-                if (endpointIsEqual(gateway, otherGateway)) {
-                    found = TRUE;
-                    break;
-                }
-            }
-            if (found == FALSE) {
-                return FALSE;
-            }
-        }
-    }
-
-    // Compare endpoints
-
-    if (!endpointIsEqual(nw_path_copy_effective_local_endpoint(path),
-                         nw_path_copy_effective_local_endpoint(otherPath)) ||
-        !endpointIsEqual(nw_path_copy_effective_remote_endpoint(path),
-                         nw_path_copy_effective_remote_endpoint(otherPath))) {
-        return FALSE;
-    }
+    // Note: we do not compare the values returned by other public nw_path_* APIs because testing
+    // has shown us these values can change when the active interface has not and we want to reduce
+    // the chance of false negatives.
 
     return TRUE;
 }
@@ -497,99 +436,6 @@ bool interfaceIsEqual(nw_interface_t interface, nw_interface_t otherInterface) A
         nw_interface_get_type(interface) != nw_interface_get_type(otherInterface)) {
         return FALSE;
     }
-    return TRUE;
-}
-
-+ (NSArray<nw_endpoint_t>*)pathGateways:(nw_path_t)path API_AVAILABLE(macos(10.15), ios(13.0), watchos(6.0), tvos(13.0)) {
-
-    NSMutableArray<nw_endpoint_t>* gateways = [[NSMutableArray alloc] init];
-
-    nw_path_enumerate_gateways(path, ^bool(nw_endpoint_t  _Nonnull gateway) {
-        [gateways addObject:gateway];
-        return TRUE;
-    });
-
-    return gateways;
-}
-
-bool endpointIsEqual(nw_endpoint_t _Nullable endpoint, nw_endpoint_t _Nullable otherEndpoint) API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0)) {
-    if (endpoint == NULL && otherEndpoint == NULL) {
-        return TRUE;
-    } else if (endpoint == NULL || otherEndpoint == NULL) {
-        return FALSE;
-    }
-
-    nw_endpoint_type_t endpoint_type = nw_endpoint_get_type(endpoint);
-    if (endpoint_type != nw_endpoint_get_type(otherEndpoint)) {
-        return FALSE;
-    }
-
-    if (endpoint_type == nw_endpoint_type_url) {
-        if (strcmp(nw_endpoint_get_hostname(endpoint), nw_endpoint_get_hostname(otherEndpoint)) != 0 ||
-            nw_endpoint_get_port(endpoint) != nw_endpoint_get_port(otherEndpoint)) {
-            return FALSE;
-        }
-        if (@available(iOS 13.0, *)) {
-            if (strcmp(nw_endpoint_get_url(endpoint), nw_endpoint_get_url(otherEndpoint)) != 0) {
-                return FALSE;
-            }
-        }
-    } else if (endpoint_type == nw_endpoint_type_host) {
-        if (strcmp(nw_endpoint_get_hostname(endpoint), nw_endpoint_get_hostname(otherEndpoint)) != 0 ||
-            nw_endpoint_get_port(endpoint) != nw_endpoint_get_port(otherEndpoint)) {
-            return FALSE;
-        }
-    } else if (endpoint_type == nw_endpoint_type_address) {
-        const struct sockaddr *addr1 = nw_endpoint_get_address(endpoint);
-        const struct sockaddr *addr2 = nw_endpoint_get_address(otherEndpoint);
-        if (!sockaddr_is_equal(addr1, addr2)) {
-            return FALSE;
-        }
-    } else if (endpoint_type == nw_endpoint_type_bonjour_service) {
-        if (strcmp(nw_endpoint_get_bonjour_service_type(endpoint), nw_endpoint_get_bonjour_service_type(otherEndpoint)) != 0 ||
-            strcmp(nw_endpoint_get_bonjour_service_name(endpoint), nw_endpoint_get_bonjour_service_name(otherEndpoint)) != 0 ||
-            strcmp(nw_endpoint_get_bonjour_service_domain(endpoint), nw_endpoint_get_bonjour_service_domain(otherEndpoint)) != 0) {
-            return FALSE;
-        }
-    } else if (endpoint_type == nw_endpoint_type_invalid) {
-        // Nothing to compare.
-    }
-
-    return TRUE;
-}
-
-bool sockaddr_is_equal(const struct sockaddr *addr1, const struct sockaddr *addr2) {
-    if (addr1 == NULL && addr2 == NULL) {
-        return TRUE;
-    } else if (addr1 == NULL || addr2 == NULL) {
-        return FALSE;
-    }
-
-    if (addr1->sa_family != addr2->sa_family ||
-        addr1->sa_len != addr2->sa_len) {
-        return FALSE;
-    }
-    if (addr1->sa_family == AF_INET) {
-        struct sockaddr_in *addr1_in = (struct sockaddr_in*)addr1;
-        struct sockaddr_in *addr2_in = (struct sockaddr_in*)addr2;
-        if (!IN_ARE_ADDR_EQUAL(&addr1_in->sin_addr, &addr2_in->sin_addr) ||
-            addr1_in->sin_port != addr2_in->sin_port) {
-            return FALSE;
-        }
-    } else if (addr1->sa_family == AF_INET6) {
-        struct sockaddr_in6 *addr1_in6 = (struct sockaddr_in6*)addr1;
-        struct sockaddr_in6 *addr2_in6 = (struct sockaddr_in6*)addr2;
-        if (!IN6_ARE_ADDR_EQUAL(&addr1_in6->sin6_addr, &addr2_in6->sin6_addr) ||
-            addr1_in6->sin6_port != addr2_in6->sin6_port ||
-            addr1_in6->sin6_flowinfo != addr2_in6->sin6_flowinfo ||
-            addr1_in6->sin6_scope_id != addr2_in6 ->sin6_scope_id) {
-            return FALSE;
-        }
-    } else {
-        // Unsupported. Assume addresses differ.
-        return FALSE;
-    }
-
     return TRUE;
 }
 
