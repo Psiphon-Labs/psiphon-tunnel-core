@@ -549,7 +549,11 @@ func (p *mutexPsiphonProvider) GetDNSServersAsString() string {
 func (p *mutexPsiphonProvider) GetDNSServers() []string {
 	p.Lock()
 	defer p.Unlock()
-	return strings.Split(p.p.GetDNSServersAsString(), ",")
+	s := p.p.GetDNSServersAsString()
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, ",")
 }
 
 func (p *mutexPsiphonProvider) GetNetworkID() string {
