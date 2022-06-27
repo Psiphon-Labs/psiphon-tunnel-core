@@ -64,16 +64,21 @@ func runTestMakeResolveParameters() error {
 	frontingProviderID := "frontingProvider"
 	alternateDNSServer := "172.16.0.1"
 	alternateDNSServerWithPort := net.JoinHostPort(alternateDNSServer, resolverDNSPort)
+	preferredAlternateDNSServer := "172.16.0.2"
+	preferredAlternateDNSServerWithPort := net.JoinHostPort(preferredAlternateDNSServer, resolverDNSPort)
 	transformName := "exampleTransform"
 
 	paramValues := map[string]interface{}{
+		"DNSResolverAttemptsPerServer":                2,
+		"DNSResolverAttemptsPerPreferredServer":       1,
 		"DNSResolverPreresolvedIPAddressProbability":  1.0,
 		"DNSResolverPreresolvedIPAddressCIDRs":        parameters.LabeledCIDRs{frontingProviderID: []string{exampleIPv4CIDR}},
 		"DNSResolverAlternateServers":                 []string{alternateDNSServer},
+		"DNSResolverPreferredAlternateServers":        []string{preferredAlternateDNSServer},
 		"DNSResolverPreferAlternateServerProbability": 1.0,
 		"DNSResolverProtocolTransformProbability":     1.0,
 		"DNSResolverProtocolTransformSpecs":           transforms.Specs{transformName: exampleTransform},
-		"DNSResolverProtocolTransformScopedSpecNames": transforms.ScopedSpecNames{alternateDNSServer: []string{transformName}},
+		"DNSResolverProtocolTransformScopedSpecNames": transforms.ScopedSpecNames{preferredAlternateDNSServer: []string{transformName}},
 		"DNSResolverIncludeEDNS0Probability":          1.0,
 	}
 
@@ -103,6 +108,7 @@ func runTestMakeResolveParameters() error {
 	}
 
 	if resolverParams.AttemptsPerServer != 2 ||
+		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
 		resolverParams.AwaitTimeout != 100*time.Millisecond ||
 		!CIDRContainsIP(exampleIPv4CIDR, resolverParams.PreresolvedIPAddress) ||
@@ -129,7 +135,7 @@ func runTestMakeResolveParameters() error {
 		}
 	}
 
-	// Test: Alternate/Transform/EDNS(0)
+	// Test: Preferred/Transform/EDNS(0)
 
 	paramValues["DNSResolverPreresolvedIPAddressProbability"] = 0.0
 
@@ -145,10 +151,11 @@ func runTestMakeResolveParameters() error {
 	}
 
 	if resolverParams.AttemptsPerServer != 2 ||
+		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
 		resolverParams.AwaitTimeout != 100*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
-		resolverParams.AlternateDNSServer != alternateDNSServerWithPort ||
+		resolverParams.AlternateDNSServer != preferredAlternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != true ||
 		resolverParams.ProtocolTransformName != transformName ||
 		resolverParams.ProtocolTransformSpec == nil ||
@@ -156,7 +163,7 @@ func runTestMakeResolveParameters() error {
 		return errors.Tracef("unexpected resolver parameters: %+v", resolverParams)
 	}
 
-	// Test: No Alternate/Transform/EDNS(0)
+	// Test: No Preferred/Transform/EDNS(0)
 
 	paramValues["DNSResolverPreferAlternateServerProbability"] = 0.0
 	paramValues["DNSResolverProtocolTransformProbability"] = 0.0
@@ -174,6 +181,7 @@ func runTestMakeResolveParameters() error {
 	}
 
 	if resolverParams.AttemptsPerServer != 2 ||
+		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
 		resolverParams.AwaitTimeout != 100*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
@@ -242,10 +250,11 @@ func runTestResolver() error {
 	defer resolver.Stop()
 
 	params := &ResolveParameters{
-		AttemptsPerServer: 1,
-		RequestTimeout:    250 * time.Millisecond,
-		AwaitTimeout:      250 * time.Millisecond,
-		IncludeEDNS0:      true,
+		AttemptsPerServer:          1,
+		AttemptsPerPreferredServer: 1,
+		RequestTimeout:             250 * time.Millisecond,
+		AwaitTimeout:               250 * time.Millisecond,
+		IncludeEDNS0:               true,
 	}
 
 	checkResult := func(IPs []net.IP) error {
@@ -385,6 +394,26 @@ func runTestResolver() error {
 
 	if alternateOkServer.getRequestCount() < 1 {
 		return errors.TraceNew("unexpected alternate server request count")
+	}
+
+	params.AlternateDNSServer = ""
+	params.PreferAlternateDNSServer = false
+
+	// Test: PreferAlternateDNSServer with failed attempt (exercise maxAttempts prefer case)
+
+	resolver.cache.Flush()
+
+	params.AlternateDNSServer = invalidIPServer.getAddr()
+	params.PreferAlternateDNSServer = true
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	params.AlternateDNSServer = ""

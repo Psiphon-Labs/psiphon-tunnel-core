@@ -304,11 +304,13 @@ const (
 	UpstreamProxyAllowAllServerEntrySources          = "UpstreamProxyAllowAllServerEntrySources"
 	DestinationBytesMetricsASN                       = "DestinationBytesMetricsASN"
 	DNSResolverAttemptsPerServer                     = "DNSResolverAttemptsPerServer"
+	DNSResolverAttemptsPerPreferredServer            = "DNSResolverAttemptsPerPreferredServer"
 	DNSResolverRequestTimeout                        = "DNSResolverRequestTimeout"
 	DNSResolverAwaitTimeout                          = "DNSResolverAwaitTimeout"
 	DNSResolverPreresolvedIPAddressCIDRs             = "DNSResolverPreresolvedIPAddressCIDRs"
 	DNSResolverPreresolvedIPAddressProbability       = "DNSResolverPreresolvedIPAddressProbability"
 	DNSResolverAlternateServers                      = "DNSResolverAlternateServers"
+	DNSResolverPreferredAlternateServers             = "DNSResolverPreferredAlternateServers"
 	DNSResolverPreferAlternateServerProbability      = "DNSResolverPreferAlternateServerProbability"
 	DNSResolverProtocolTransformSpecs                = "DNSResolverProtocolTransformSpecs"
 	DNSResolverProtocolTransformScopedSpecNames      = "DNSResolverProtocolTransformScopedSpecNames"
@@ -594,10 +596,10 @@ var defaultParameters = map[string]struct {
 	ServerProtocolPacketManipulations:   {value: make(ProtocolPacketManipulations), flags: serverSideOnly},
 	ServerPacketManipulationProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
 
-	FeedbackUploadURLs:                 {value: TransferURLs{}},
-	FeedbackEncryptionPublicKey:        {value: ""},
-	FeedbackTacticsWaitPeriod:          {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
-	FeedbackUploadMaxAttempts:          {value: 5, minimum: 0},
+	FeedbackUploadURLs:          {value: TransferURLs{}},
+	FeedbackEncryptionPublicKey: {value: ""},
+	FeedbackTacticsWaitPeriod:   {value: 5 * time.Second, minimum: 0 * time.Second, flags: useNetworkLatencyMultiplier},
+	FeedbackUploadMaxAttempts:   {value: 5, minimum: 0},
 	// TODO: rename -- remove "Seconds" suffix
 	FeedbackUploadRetryMinDelaySeconds: {value: 1 * time.Minute, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	FeedbackUploadRetryMaxDelaySeconds: {value: 5 * time.Minute, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
@@ -656,11 +658,13 @@ var defaultParameters = map[string]struct {
 	DestinationBytesMetricsASN: {value: "", flags: serverSideOnly},
 
 	DNSResolverAttemptsPerServer:                {value: 2, minimum: 1},
+	DNSResolverAttemptsPerPreferredServer:       {value: 1, minimum: 1},
 	DNSResolverRequestTimeout:                   {value: 5 * time.Second, minimum: 100 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	DNSResolverAwaitTimeout:                     {value: 100 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	DNSResolverPreresolvedIPAddressCIDRs:        {value: LabeledCIDRs{}},
 	DNSResolverPreresolvedIPAddressProbability:  {value: 0.0, minimum: 0.0},
 	DNSResolverAlternateServers:                 {value: []string{}},
+	DNSResolverPreferredAlternateServers:        {value: []string{}},
 	DNSResolverPreferAlternateServerProbability: {value: 0.0, minimum: 0.0},
 	DNSResolverProtocolTransformSpecs:           {value: transforms.Specs{}},
 	DNSResolverProtocolTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},

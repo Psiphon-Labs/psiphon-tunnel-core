@@ -781,11 +781,13 @@ type Config struct {
 	// DNSResolverAttemptsPerServer and other DNSResolver fields are for
 	// testing purposes.
 	DNSResolverAttemptsPerServer                     *int
+	DNSResolverAttemptsPerPreferredServer            *int
 	DNSResolverRequestTimeoutMilliseconds            *int
 	DNSResolverAwaitTimeoutMilliseconds              *int
 	DNSResolverPreresolvedIPAddressCIDRs             parameters.LabeledCIDRs
 	DNSResolverPreresolvedIPAddressProbability       *float64
 	DNSResolverAlternateServers                      []string
+	DNSResolverPreferredAlternateServers             []string
 	DNSResolverPreferAlternateServerProbability      *float64
 	DNSResolverProtocolTransformSpecs                transforms.Specs
 	DNSResolverProtocolTransformScopedSpecNames      transforms.ScopedSpecNames
@@ -1812,6 +1814,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.DNSResolverAttemptsPerServer] = *config.DNSResolverAttemptsPerServer
 	}
 
+	if config.DNSResolverAttemptsPerPreferredServer != nil {
+		applyParameters[parameters.DNSResolverAttemptsPerPreferredServer] = *config.DNSResolverAttemptsPerPreferredServer
+	}
+
 	if config.DNSResolverRequestTimeoutMilliseconds != nil {
 		applyParameters[parameters.DNSResolverRequestTimeout] = fmt.Sprintf("%dms", *config.DNSResolverRequestTimeoutMilliseconds)
 	}
@@ -1830,6 +1836,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.DNSResolverAlternateServers != nil {
 		applyParameters[parameters.DNSResolverAlternateServers] = config.DNSResolverAlternateServers
+	}
+
+	if config.DNSResolverPreferredAlternateServers != nil {
+		applyParameters[parameters.DNSResolverPreferredAlternateServers] = config.DNSResolverPreferredAlternateServers
 	}
 
 	if config.DNSResolverPreferAlternateServerProbability != nil {
