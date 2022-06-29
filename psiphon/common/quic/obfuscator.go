@@ -92,7 +92,7 @@ const (
 // random payload.
 //
 // The crypto performed by ObfuscatedPacketConn is purely for obfuscation to
-// frusctrate wire-speed DPI and does not add privacy/security. The small
+// frustrate wire-speed DPI and does not add privacy/security. The small
 // nonce space and single key per server is not cryptographically secure.
 //
 // A server-side ObfuscatedPacketConn performs simple QUIC DPI to distinguish
