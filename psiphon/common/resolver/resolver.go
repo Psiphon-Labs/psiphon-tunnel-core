@@ -97,12 +97,14 @@ type NetworkConfig struct {
 	// CacheExtensionVerifiedTTL is off when 0.
 	//
 	// DNS cache extension is a workaround to partially mitigate issues with
-	// obtaining underlying system DNS resolvers on platforms such as iOS
+	// obtaining underlying system DNS server IPs on platforms such as iOS
 	// once a VPN is running and after network changes, such as changing from
 	// Wi-Fi to mobile. While ResolveParameters.AlternateDNSServer can be
 	// used to specify a known public DNS server, it may be the case that
 	// public DNS servers are blocked or always falling back to a public DNS
-	// server creates unusual traffic.
+	// server creates unusual traffic. And while it may be possible to use
+	// the default system resolver, it lacks certain circumvention
+	// capabilities.
 	//
 	// Extending the TTL for cached responses allows Psiphon to redial domains
 	// using recently successful IPs.
@@ -125,6 +127,12 @@ type NetworkConfig struct {
 	CacheExtensionVerifiedTTL time.Duration
 }
 
+func (c *NetworkConfig) allowDefaultResolver() bool {
+	// When BindToDevice is configured, the standard library resolver is not
+	// used, as the system resolver may not route outside of the VPN.
+	return c.BindToDevice == nil
+}
+
 func (c *NetworkConfig) logWarning(err error) {
 	if c.LogWarning != nil {
 		c.LogWarning(err)
@@ -141,9 +149,13 @@ func (c *NetworkConfig) logWarning(err error) {
 type ResolveParameters struct {
 
 	// AttemptsPerServer specifies how many requests to send to each DNS
-	// server before trying the next server. IPv4 and IPv6 requests are set
+	// server before trying the next server. IPv4 and IPv6 requests are sent
 	// concurrently and count as one attempt.
 	AttemptsPerServer int
+
+	// AttemptsPerPreferredServer is AttemptsPerServer for a preferred
+	// alternate DNS server.
+	AttemptsPerPreferredServer int
 
 	// RequestTimeout specifies how long to wait for a valid response before
 	// moving on to the next attempt.
@@ -249,6 +261,8 @@ type resolverMetrics struct {
 	requestsIPv6            int
 	responsesIPv4           int
 	responsesIPv6           int
+	defaultResolves         int
+	defaultSuccesses        int
 	peakInFlight            int64
 	minRTT                  time.Duration
 	maxRTT                  time.Duration
@@ -298,9 +312,10 @@ func (r *Resolver) MakeResolveParameters(
 	frontingProviderID string) (*ResolveParameters, error) {
 
 	params := &ResolveParameters{
-		AttemptsPerServer: p.Int(parameters.DNSResolverAttemptsPerServer),
-		RequestTimeout:    p.Duration(parameters.DNSResolverRequestTimeout),
-		AwaitTimeout:      p.Duration(parameters.DNSResolverAwaitTimeout),
+		AttemptsPerServer:          p.Int(parameters.DNSResolverAttemptsPerServer),
+		AttemptsPerPreferredServer: p.Int(parameters.DNSResolverAttemptsPerPreferredServer),
+		RequestTimeout:             p.Duration(parameters.DNSResolverRequestTimeout),
+		AwaitTimeout:               p.Duration(parameters.DNSResolverAwaitTimeout),
 	}
 
 	// When a frontingProviderID is specified, generate a pre-resolved IP
@@ -325,10 +340,25 @@ func (r *Resolver) MakeResolveParameters(
 		return params, nil
 	}
 
+	// When preferring an alternate DNS server, select the alternate from
+	// DNSResolverPreferredAlternateServers. This list is for circumvention
+	// operations, such as using a public DNS server with a protocol
+	// transform. Otherwise, select from DNSResolverAlternateServers, which
+	// is a fallback list of DNS servers to be used when the system DNS
+	// servers cannot be obtained.
+
+	preferredServers := p.Strings(parameters.DNSResolverPreferredAlternateServers)
+	preferAlternateDNSServer := len(preferredServers) > 0 && p.WeightedCoinFlip(
+		parameters.DNSResolverPreferAlternateServerProbability)
+
+	alternateServers := preferredServers
+	if !preferAlternateDNSServer {
+		alternateServers = p.Strings(parameters.DNSResolverAlternateServers)
+	}
+
 	// Select an alternate DNS server, typically a public DNS server. Ensure
 	// tactics is configured with an empty DNSResolverAlternateServers list
 	// in cases where attempts to public DNS server are unwanted.
-	alternateServers := p.Strings(parameters.DNSResolverAlternateServers)
 	if len(alternateServers) > 0 {
 
 		alternateServer := alternateServers[prng.Intn(len(alternateServers))]
@@ -349,8 +379,7 @@ func (r *Resolver) MakeResolveParameters(
 		} else {
 
 			params.AlternateDNSServer = alternateServer
-			params.PreferAlternateDNSServer = p.WeightedCoinFlip(
-				parameters.DNSResolverPreferAlternateServerProbability)
+			params.PreferAlternateDNSServer = preferAlternateDNSServer
 		}
 
 	}
@@ -481,9 +510,10 @@ func (r *Resolver) ResolveIP(
 	if params == nil {
 		// Supply default ResolveParameters
 		params = &ResolveParameters{
-			AttemptsPerServer: resolverDefaultAttemptsPerServer,
-			RequestTimeout:    resolverDefaultRequestTimeout,
-			AwaitTimeout:      resolverDefaultAwaitTimeout,
+			AttemptsPerServer:          resolverDefaultAttemptsPerServer,
+			AttemptsPerPreferredServer: resolverDefaultAttemptsPerServer,
+			RequestTimeout:             resolverDefaultRequestTimeout,
+			AwaitTimeout:               resolverDefaultAwaitTimeout,
 		}
 	}
 
@@ -533,13 +563,12 @@ func (r *Resolver) ResolveIP(
 	// expected to be used, to ensure correct metrics counts and ensure a
 	// consistent error message log stack for all DNS-related failures.
 	//
-	// When BindToDevice is configured, the standard library resolver is not
-	// used, as it will not route outside of the VPN.
 	if len(systemServers) == 0 &&
 		params.AlternateDNSServer == "" &&
-		r.networkConfig.BindToDevice == nil {
+		r.networkConfig.allowDefaultResolver() {
 
 		IPs, err := defaultResolverLookupIP(ctx, hostname, r.networkConfig.LogHostnames)
+		r.updateMetricDefaultResolver(err == nil)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -603,7 +632,13 @@ func (r *Resolver) ResolveIP(
 		IPs     []net.IP
 		TTLs    []time.Duration
 	}
-	maxAttempts := len(servers) * params.AttemptsPerServer
+	var maxAttempts int
+	if params.PreferAlternateDNSServer {
+		maxAttempts = params.AttemptsPerPreferredServer
+		maxAttempts += (len(servers) - 1) * params.AttemptsPerServer
+	} else {
+		maxAttempts = len(servers) * params.AttemptsPerServer
+	}
 	answerChan := make(chan *answer, maxAttempts*2)
 	inFlight := int64(0)
 	awaitA := int32(1)
@@ -617,11 +652,18 @@ func (r *Resolver) ResolveIP(
 	stop := false
 	for i := 0; !stop && i < maxAttempts; i++ {
 
-		// Limitation: AttemptsPerServer applies for all servers, including
-		// the AlternateDNSSever. So in the PreferAlternateDNSServer case,
-		// that many attempts are made before falling back to system DNS servers.
+		var index int
+		if params.PreferAlternateDNSServer {
+			if i < params.AttemptsPerPreferredServer {
+				index = 0
+			} else {
+				index = 1 + ((i - params.AttemptsPerPreferredServer) / params.AttemptsPerServer)
+			}
+		} else {
+			index = i / params.AttemptsPerServer
+		}
 
-		server := servers[i/params.AttemptsPerServer]
+		server := servers[index]
 
 		// Only the first attempt pair tries transforms, as it's not certain
 		// the transforms will be compatible with DNS servers.
@@ -915,7 +957,16 @@ func (r *Resolver) GetMetrics() string {
 		extend = fmt.Sprintf("| extend %d ", r.metrics.verifiedCacheExtensions)
 	}
 
-	return fmt.Sprintf("resolves %d | hit %d %s| req v4/v6 %d/%d | resp %d/%d | peak %d | rtt %s - %s ms.",
+	defaultResolves := ""
+	if r.networkConfig.allowDefaultResolver() {
+		defaultResolves = fmt.Sprintf(
+			" | def %d/%d", r.metrics.defaultResolves, r.metrics.defaultSuccesses)
+	}
+
+	// Note that the number of system resolvers is a point-in-time value,
+	// while the others are cumulative.
+
+	return fmt.Sprintf("resolves %d | hit %d %s| req v4/v6 %d/%d | resp %d/%d | peak %d | rtt %s - %s ms. | sys %d%s",
 		r.metrics.resolves,
 		r.metrics.cacheHits,
 		extend,
@@ -925,7 +976,9 @@ func (r *Resolver) GetMetrics() string {
 		r.metrics.responsesIPv6,
 		r.metrics.peakInFlight,
 		minRTT,
-		maxRTT)
+		maxRTT,
+		len(r.systemServers),
+		defaultResolves)
 }
 
 // updateNetworkState updates the system DNS server list, IPv6 state, and the
@@ -1201,6 +1254,16 @@ func (r *Resolver) updateMetricResponsesIPv6() {
 	defer r.mutex.Unlock()
 
 	r.metrics.responsesIPv6 += 1
+}
+
+func (r *Resolver) updateMetricDefaultResolver(success bool) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	r.metrics.defaultResolves += 1
+	if success {
+		r.metrics.defaultSuccesses += 1
+	}
 }
 
 func (r *Resolver) updateMetricPeakInFlight(inFlight int64) {

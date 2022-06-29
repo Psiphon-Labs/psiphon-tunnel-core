@@ -23,6 +23,8 @@
  */
 
 #import "Reachability.h"
+#import "DefaultRouteMonitor.h"
+#import "ReachabilityProtocol.h"
 #import "JailbreakCheck.h"
 #import "PsiphonClientPlatform.h"
 
@@ -180,7 +182,7 @@ Called when the device's Internet connection state has changed.
 This may mean that it had connectivity and now doesn't, or went from Wi-Fi to
 WWAN or vice versa or VPN state changed
 */
-- (void)onInternetReachabilityChanged:(Reachability * _Nonnull)currentReachability;
+- (void)onInternetReachabilityChanged:(NetworkReachability)currentReachability;
 
 /*!
  Called when tunnel-core determines which server egress regions are available
@@ -381,7 +383,7 @@ Returns the path where the rotated notices file will be created.
  disconnected state.
  @return The current reachability status.
  */
-- (BOOL)getNetworkReachabilityStatus:(NetworkStatus * _Nonnull)status;
+- (BOOL)getNetworkReachabilityStatus:(NetworkReachability * _Nonnull)status;
 
 /*!
  Provides the port number of the local SOCKS proxy. Only valid when currently connected (will return 0 otherwise).

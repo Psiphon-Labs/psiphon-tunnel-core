@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Psiphon Inc.
+ * Copyright (c) 2021, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,14 +19,12 @@
 
 #import <Foundation/Foundation.h>
 #import "Reachability.h"
+#import "ReachabilityProtocol.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface Reachability (HasNetworkConnectivity)
-
-/// Returns 1 if there is network connectivity. Otherwise returns 0.
-- (long)hasNetworkConnectivity;
-
+@interface Reachability (ReachabilityProtocol) <ReachabilityProtocol>
 @end
 
 NS_ASSUME_NONNULL_END
+
