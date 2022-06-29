@@ -28,7 +28,6 @@
 #import "PsiphonProviderNoticeHandlerShim.h"
 #import "PsiphonProviderNetwork.h"
 #import "PsiphonTunnel.h"
-#import "Reachability+HasNetworkConnectivity.h"
 #import "Backups.h"
 #import "json-framework/SBJson4.h"
 #import "NetworkID.h"
@@ -37,6 +36,9 @@
 #import <netdb.h>
 #import "PsiphonClientPlatform.h"
 #import "Redactor.h"
+#import "ReachabilityProtocol.h"
+#import "Reachability+ReachabilityProtocol.h"
+#import "DefaultRouteMonitor.h"
 
 NSErrorDomain _Nonnull const PsiphonTunnelErrorDomain = @"com.psiphon3.ios.PsiphonTunnelErrorDomain";
 
@@ -109,8 +111,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     _Atomic NSInteger localSocksProxyPort;
     _Atomic NSInteger localHttpProxyPort;
 
-    Reachability* reachability;
-    _Atomic NetworkStatus currentNetworkStatus;
+    id<ReachabilityProtocol> reachability;
+    _Atomic NetworkReachability currentNetworkStatus;
 
     BOOL tunnelWholeDevice;
     _Atomic BOOL usingNoticeFiles;
@@ -125,7 +127,28 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (id)init {
-    self.tunneledAppDelegate = nil;
+    self = [super init];
+    if (self) {
+        [self initializeWithAppDelegate:nil];
+    }
+    return self;
+}
+
+- (id)initWithAppDelegate:(id<TunneledAppDelegate> _Nullable)appDelegate {
+    self = [super init];
+    if (self) {
+        [self initializeWithAppDelegate:appDelegate];
+    }
+    return self;
+}
+
+- (void)initializeWithAppDelegate:(id<TunneledAppDelegate> _Nullable)appDelegate {
+
+    // Set delegate first so it receives any initialization logs
+    self.tunneledAppDelegate = appDelegate;
+
+    // Must be initialized for logging
+    rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
 
     self->workQueue = dispatch_queue_create("com.psiphon3.library.WorkQueue", DISPATCH_QUEUE_SERIAL);
     self->callbackQueue = dispatch_queue_create("com.psiphon3.library.CallbackQueue", DISPATCH_QUEUE_SERIAL);
@@ -134,18 +157,22 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     atomic_init(&self->connectionState, PsiphonConnectionStateDisconnected);
     atomic_init(&self->localSocksProxyPort, 0);
     atomic_init(&self->localHttpProxyPort, 0);
-    self->reachability = [Reachability reachabilityForInternetConnection];
-    atomic_init(&self->currentNetworkStatus, NotReachable);
+    // reachability for the default route (destination 0.0.0.0/0)
+    if (@available(iOS 12.0, *)) {
+        void (^logNotice)(NSString * _Nonnull) = ^void(NSString * _Nonnull noticeJSON) {
+            [self logMessage:[@"DefaultRouteMonitor: " stringByAppendingString:noticeJSON]];
+        };
+        self->reachability = [[DefaultRouteMonitor alloc] initWithLogger:logNotice];
+    } else {
+        self->reachability = [Reachability reachabilityForInternetConnection];
+    }
+    atomic_init(&self->currentNetworkStatus, NetworkReachabilityNotReachable);
     self->tunnelWholeDevice = FALSE;
     atomic_init(&self->usingNoticeFiles, FALSE);
 
     // Use the workaround, comma-delimited format required for gobind.
     self->initialDNSCache = [[self getSystemDNSServers] componentsJoinedByString:@","];
     atomic_init(&self->useInitialDNS, TRUE);
-
-    rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
-    
-    return self;
 }
 
 #pragma mark - PsiphonTunnel public methods
@@ -186,7 +213,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         static PsiphonTunnel *sharedInstance = nil;
         static dispatch_once_t onceToken = 0;
         dispatch_once(&onceToken, ^{
-            sharedInstance = [[self alloc] init];
+            sharedInstance = [[self alloc] initWithAppDelegate:tunneledAppDelegate];
         });
 
         [sharedInstance stop];
@@ -300,6 +327,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         [self changeConnectionStateTo:PsiphonConnectionStateConnecting evenIfSameState:NO];
 
+        [self startInternetReachabilityMonitoring];
+
         @try {
             NSError *e = nil;
 
@@ -336,8 +365,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             [self changeConnectionStateTo:PsiphonConnectionStateDisconnected evenIfSameState:NO];
             return FALSE;
         }
-
-        [self startInternetReachabilityMonitoring];
 
         [self logMessage:@"Psiphon library started"];
         
@@ -405,7 +432,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return atomic_load(&self->connectionState);
 }
 
-- (BOOL)getNetworkReachabilityStatus:(NetworkStatus * _Nonnull)status {
+- (BOOL)getNetworkReachabilityStatus:(NetworkReachability * _Nonnull)status {
     PsiphonConnectionState connState = [self getConnectionState];
     if (connState == PsiphonConnectionStateDisconnected) {
         return FALSE;
@@ -1168,30 +1195,16 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         return @"";
     }
 
-    NSSet<NSString*>* upIffList = NetworkInterface.activeInterfaces;
-    if (upIffList == nil) {
-        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interfaces"}];
+    NSError *err;
+    NSString *activeInterface = [NetworkInterface getActiveInterfaceWithReachability:self->reachability
+                                                             andCurrentNetworkStatus:atomic_load(&self->currentNetworkStatus)
+                                                                               error:&err];
+    if (err != nil) {
+        NSString *localizedDescription = [NSString stringWithFormat:@"bindToDevice: error getting active interface %@", err.localizedDescription];
+        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
         return @"";
     }
 
-    NSString *activeInterface;
-
-    if (@available(iOS 12.0, *)) {
-
-        NetworkPathState *state = [NetworkInterface networkPathState:upIffList];
-
-        if (state.defaultActiveInterface != nil) {
-            const char *interfaceName = nw_interface_get_name(state.defaultActiveInterface);
-            activeInterface = [NSString stringWithUTF8String:interfaceName];
-        }
-    } else {
-        activeInterface = [self getActiveInterface:upIffList];
-    }
-    if (activeInterface == nil) {
-        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: no active interface"}];
-        return @"";
-    }
-    
     unsigned int interfaceIndex = if_nametoindex([activeInterface UTF8String]);
     if (interfaceIndex == 0) {
         *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: if_nametoindex failed: %d", errno]}];
@@ -1228,34 +1241,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return [NSString stringWithFormat:@"active interface: %@", activeInterface];
 }
 
-/*!
- @brief Returns name of default active network interface from the provided list of active interfaces.
- @param upIffList List of active network interfaces.
- @return Active interface name, nil otherwise.
- @warning Use [NetworkInterface networkPathState:] instead on iOS 12+.
- */
-- (NSString *)getActiveInterface:(NSSet<NSString*>*)upIffList {
-    
-    // TODO: following is a heuristic for choosing active network interface
-    // Only Wi-Fi and Cellular interfaces are considered
-    // @see : https://forums.developer.apple.com/thread/76711
-    NSArray *iffPriorityList = @[@"en0", @"pdp_ip0"];
-    if (atomic_load(&self->currentNetworkStatus) == ReachableViaWWAN) {
-        iffPriorityList = @[@"pdp_ip0", @"en0"];
-    }
-    for (NSString * key in iffPriorityList) {
-        for (NSString * upIff in upIffList) {
-            if ([key isEqualToString:upIff]) {
-                return [NSString stringWithString:upIff];
-            }
-        }
-    }
-    
-    [self logMessage:@"getActiveInterface: No active interface found."];
-    
-    return nil;
-}
-
 - (NSString *)getDNSServersAsString {
     // TODO: Implement correctly
 
@@ -1270,7 +1255,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 - (long)hasNetworkConnectivity {
 
-    BOOL hasConnectivity = [self->reachability currentReachabilityStatus] != NotReachable;
+    BOOL hasConnectivity = [self->reachability reachabilityStatus] != NetworkReachabilityNotReachable;
 
     if (!hasConnectivity) {
         // changeConnectionStateTo self-throttles, so even if called multiple
@@ -1285,13 +1270,20 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     return [IPv6Synthesizer IPv4ToIPv6:IPv4Addr];
 }
 
-- (NSString *)hasIPv6Route:()BOOL {
+- (long)hasIPv6Route {
     // Unused on iOS.
     return FALSE;
 }
 
 - (NSString *)getNetworkID {
-    return [NetworkID getNetworkID:[self->reachability currentReachabilityStatus]];
+    NSError *warn;
+    NSString *networkID = [NetworkID getNetworkIDWithReachability:self->reachability
+                                          andCurrentNetworkStatus:atomic_load(&self->currentNetworkStatus)
+                                                          warning:&warn];
+    if (warn != nil) {
+        [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];
+    }
+    return networkID;
 }
 
 - (void)notice:(NSString *)noticeJSON {
@@ -1457,10 +1449,15 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 // time for the tunnel to notice the network is gone (depending on attempts to
 // use the tunnel).
 - (void)startInternetReachabilityMonitoring {
-    atomic_store(&self->currentNetworkStatus, [self->reachability currentReachabilityStatus]);
-
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(internetReachabilityChanged:) name:kReachabilityChangedNotification object:nil];
+    // (1) Start notifier and then (2) sample the reachability status to bootstrap current network
+    // status. This ordering is required to ensure we do not miss any reachability status updates.
+    // Note: this function must complete execution before any reachability changed notifications are
+    // processed to ensure ordering; otherwise (2) may overwrite the current network status with a
+    // stale value in the unlikely event where a reachability changed notification is emitted
+    // immediately after (1).
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(internetReachabilityChanged:) name:kReachabilityChangedNotification object :nil];
     [self->reachability startNotifier];
+    atomic_store(&self->currentNetworkStatus, [self->reachability reachabilityStatus]);
 }
 
 - (void)stopInternetReachabilityMonitoring {
@@ -1469,33 +1466,55 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (void)internetReachabilityChanged:(NSNotification *)note {
+    // Ensure notifications are not processed until current network status is
+    // bootstrapped. See comment in startInternetReachabilityMonitoring.
+    @synchronized (PsiphonTunnel.self) {
+        // Invalidate initialDNSCache due to limitations documented in
+        // getDNSServers.
+        //
+        // TODO: consider at least reverting to using the initialDNSCache when a
+        // new network ID matches the initial network ID -- i.e., when the device
+        // is back on the initial network -- even though those DNS server _may_
+        // have changed.
+        atomic_store(&self->useInitialDNS, FALSE);
 
-    // Invalidate initialDNSCache due to limitations documented in
-    // getDNSServers.
-    //
-    // TODO: consider at least reverting to using the initialDNSCache when a
-    // new network ID matches the initial network ID -- i.e., when the device
-    // is back on the initial network -- even though those DNS server _may_
-    // have changed.
-    atomic_store(&self->useInitialDNS, FALSE);
+        NetworkReachability networkStatus;
+        NetworkReachability previousNetworkStatus;
+        BOOL interfaceChanged = FALSE;
 
-    Reachability* currentReachability = [note object];
+        // Pass current reachability through to the delegate
+        // as soon as a network reachability change is detected
+        if (@available(iOS 12.0, *)) {
+            ReachabilityChangedNotification *notif = [note object];
+            networkStatus = notif.reachabilityStatus;
+            if (notif.prevDefaultActiveInterfaceName == nil && notif.curDefaultActiveInterfaceName == nil) {
+                // no interface change
+            } else if (notif.prevDefaultActiveInterfaceName == nil || notif.curDefaultActiveInterfaceName == nil) {
+                // interface appeared or disappeared
+                interfaceChanged = TRUE;
+            } else if (![notif.prevDefaultActiveInterfaceName isEqualToString:notif.curDefaultActiveInterfaceName]) {
+                // active interface changed
+                interfaceChanged = TRUE;
+            }
+        } else {
+            Reachability* currentReachability = [note object];
+            networkStatus = [currentReachability reachabilityStatus];
+        }
 
-    // Pass current reachability through to the delegate
-    // as soon as a network reachability change is detected
-    if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
-        dispatch_sync(self->callbackQueue, ^{
-            [self.tunneledAppDelegate onInternetReachabilityChanged:currentReachability];
-        });
-    }
-    
-    NetworkStatus networkStatus = [currentReachability currentReachabilityStatus];
-    NetworkStatus previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
-    
-    // Restart if the state has changed, unless the previous state was NotReachable, because
-    // the tunnel should be waiting for connectivity in that case.
-    if (networkStatus != previousNetworkStatus && previousNetworkStatus != NotReachable) {
-        GoPsiReconnectTunnel();
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInternetReachabilityChanged:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onInternetReachabilityChanged:networkStatus];
+            });
+        }
+
+        previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
+
+        // Restart if the network status or interface has changed, unless the previous status was
+        // NetworkReachabilityNotReachable, because the tunnel should be waiting for connectivity in
+        // that case.
+        if ((networkStatus != previousNetworkStatus || interfaceChanged) && previousNetworkStatus != NetworkReachabilityNotReachable) {
+            GoPsiReconnectTunnel();
+        }
     }
 }
 
@@ -1740,10 +1759,30 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             }
         };
 
+        NSDateFormatter *rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
+
+        void (^logger)(NSString * _Nonnull) = ^void(NSString * _Nonnull msg) {
+            __strong PsiphonTunnelFeedback *strongSelf = weakSelf;
+            if (strongSelf == nil) {
+                return;
+            }
+            __strong id<PsiphonTunnelLoggerDelegate> strongLogger = weakLogger;
+            if (strongLogger == nil) {
+                return;
+            }
+            if ([strongLogger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+
+                NSString *timestampStr = [rfc3339Formatter stringFromDate:[NSDate date]];
+                dispatch_sync(strongSelf->callbackQueue, ^{
+                    [strongLogger onDiagnosticMessage:msg withTimestamp:timestampStr];
+                });
+            }
+        };
+
         PsiphonProviderNoticeHandlerShim *noticeHandler =
             [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
 
-        PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc] init];
+        PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc] initWithLogger:logger];
 
         GoPsiStartSendFeedback(
             psiphonConfig,

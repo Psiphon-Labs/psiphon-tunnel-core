@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.17.9" ]
+        go: [ "1.17.11" ]
         test-type: [ "detector", "coverage", "memory" ]
 
     runs-on: ${{ matrix.os }}-latest
