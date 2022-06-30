@@ -721,8 +721,17 @@ func MakeDialParameters(
 		}
 	}
 
-	useResolver := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) ||
-		dialParams.ConjureAPIRegistration
+	// Initialize dialParams.ResolveParameters for dials that will resolve
+	// domain names, which currently includes fronted meek and Conjure API
+	// registration, where the dial address is not an IP address.
+	//
+	// dialParams.ResolveParameters must be nil when the dial address is an IP
+	// address to ensure that no DNS dial parameters are reported in metrics
+	// or diagnostics when when no domain is resolved.
+
+	useResolver := (protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) ||
+		dialParams.ConjureAPIRegistration) &&
+		net.ParseIP(dialParams.MeekFrontingDialAddress) == nil
 
 	if (!isReplay || !replayResolveParameters) && useResolver {
 
@@ -885,9 +894,9 @@ func MakeDialParameters(
 	// Initialize Dial/MeekConfigs to be passed to the corresponding dialers.
 
 	// Custom ResolveParameters are set only when useResolver is true, but
-	// DialConfig.ResolveIP is wired up unconditionally, so that we fail over
-	// to resolving, but without custom parameters, in case of a
-	// misconfigured or miscoded case.
+	// DialConfig.ResolveIP is required and wired up unconditionally. Any
+	// misconfigured or miscoded domain dial cases will use default
+	// ResolveParameters.
 	//
 	// ResolveIP will use the networkID obtained above, as it will be used
 	// almost immediately, instead of incurring the overhead of calling

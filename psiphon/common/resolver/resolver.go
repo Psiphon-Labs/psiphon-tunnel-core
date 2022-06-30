@@ -496,6 +496,18 @@ func (r *Resolver) ResolveIP(
 	// ResolveIP does _not_ lock r.mutex for the lifetime of the function, to
 	// ensure many ResolveIP calls can run concurrently.
 
+	// If the hostname is already an IP address, just return that. For
+	// metrics, this does not count as a resolve, as the caller may invoke
+	// ResolveIP for all dials.
+	IP := net.ParseIP(hostname)
+	if IP != nil {
+		return []net.IP{IP}, nil
+	}
+
+	// Count all resolves of an actual domain, including cached and
+	// pre-resolved cases.
+	r.updateMetricResolves()
+
 	// Call updateNetworkState immediately before resolving, as a best effort
 	// to ensure that system DNS servers and IPv6 routing network state
 	// reflects the current network. updateNetworkState locks the Resolver
@@ -516,18 +528,6 @@ func (r *Resolver) ResolveIP(
 			AwaitTimeout:               resolverDefaultAwaitTimeout,
 		}
 	}
-
-	// If the hostname is already an IP address, just return that. For
-	// metrics, this does not count as a resolve, as the caller may invoke
-	// ResolveIP for all dials.
-	IP := net.ParseIP(hostname)
-	if IP != nil {
-		return []net.IP{IP}, nil
-	}
-
-	// Count all resolves of an actual domain, including cached and
-	// pre-resolved cases.
-	r.updateMetricResolves()
 
 	// When PreresolvedIPAddress is set, tactics parameters determined the IP address
 	// in this case.
