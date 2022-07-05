@@ -68,6 +68,11 @@ type NetworkConfig struct {
 	// excluded from VPN routing. BindToDevice may be nil.
 	BindToDevice func(fd int) (string, error)
 
+	// AllowDefaultResolverWithBindToDevice indicates that it's safe to use
+	// the default resolver when BindToDevice is configured, as the host OS
+	// will automatically exclude DNS requests from the VPN.
+	AllowDefaultResolverWithBindToDevice bool
+
 	// IPv6Synthesize should apply NAT64 synthesis to the input IPv4 address,
 	// returning a synthesized IPv6 address that will route to the same
 	// endpoint. IPv6Synthesize may be nil.
@@ -130,7 +135,7 @@ type NetworkConfig struct {
 func (c *NetworkConfig) allowDefaultResolver() bool {
 	// When BindToDevice is configured, the standard library resolver is not
 	// used, as the system resolver may not route outside of the VPN.
-	return c.BindToDevice == nil
+	return c.BindToDevice == nil || c.AllowDefaultResolverWithBindToDevice
 }
 
 func (c *NetworkConfig) logWarning(err error) {

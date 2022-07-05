@@ -283,6 +283,11 @@ type Config struct {
 	// when reporting ClientFeatures.
 	DeviceBinder DeviceBinder
 
+	// AllowDefaultDNSResolverWithBindToDevice indicates that it's safe to use
+	// the default resolver when DeviceBinder is configured, as the host OS
+	// will automatically exclude DNS requests from the VPN.
+	AllowDefaultDNSResolverWithBindToDevice bool
+
 	// IPv6Synthesizer is an interface that allows tunnel-core to call into
 	// the host application to synthesize IPv6 addresses. See: IPv6Synthesizer
 	// doc.
