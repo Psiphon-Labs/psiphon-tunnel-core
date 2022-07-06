@@ -823,6 +823,12 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Indicate whether UseNoticeFiles is set
     *usingNoticeFiles = (config[@"UseNoticeFiles"] != nil);
 
+    // For iOS VPN, the standard library system resolver will automatically be
+    // routed outside the VPN.
+    if (*tunnelWholeDevice) {
+        config[@"AllowDefaultDNSResolverWithBindToDevice"] = @YES;
+    }
+
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
     if (finalConfigStr == nil) {
@@ -1242,13 +1248,15 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 - (NSString *)getDNSServersAsString {
-    // TODO: Implement correctly
 
     if (atomic_load(&self->useInitialDNS)) {
         return self->initialDNSCache;
     } else {
-        // Alternate DNS servers will be provided by psiphon-tunnel-core
-        // config or tactics.
+        // Alternate DNS servers may be provided by psiphon-tunnel-core config
+        // or tactics, or the system default resolver may be used (Go on iOS
+        // uses the C standard library resolver via CGO, and iOS ensures
+        // those calls are routed outside of the VPN when invoked from a VPN
+        // extension).
         return @"";
     }
 }
@@ -1470,11 +1478,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // bootstrapped. See comment in startInternetReachabilityMonitoring.
     @synchronized (PsiphonTunnel.self) {
         // Invalidate initialDNSCache due to limitations documented in
-        // getDNSServers.
+        // getSystemDNSServers.
         //
         // TODO: consider at least reverting to using the initialDNSCache when a
         // new network ID matches the initial network ID -- i.e., when the device
-        // is back on the initial network -- even though those DNS server _may_
+        // is back on the initial network -- even though those DNS servers _may_
         // have changed.
         atomic_store(&self->useInitialDNS, FALSE);
 
