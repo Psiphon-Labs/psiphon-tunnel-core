@@ -147,6 +147,12 @@
 			"revisionTime": "2021-07-13T13:38:51Z"
 		},
 		{
+			"checksumSHA1": "p/PX122/75A15rICplS7MhNqXdU=",
+			"path": "github.com/Psiphon-Labs/utls",
+			"revision": "ef42bd06a6413a12de5a6f1c89689b354a928df6",
+			"revisionTime": "2022-08-17T18:36:28Z"
+		},
+		{
 			"checksumSHA1": "30PBqj9BW03KCVqASvLg3bR+xYc=",
 			"path": "github.com/agl/ed25519/edwards25519",
 			"revision": "5312a61534124124185d41f09206b9fef1d88403",
@@ -157,6 +163,12 @@
 			"path": "github.com/agl/ed25519/extra25519",
 			"revision": "5312a61534124124185d41f09206b9fef1d88403",
 			"revisionTime": "2017-01-16T20:05:12Z"
+		},
+		{
+			"checksumSHA1": "lwAdzgFNJ+//pIv0X9GkHwnHiNw=",
+			"path": "github.com/andybalholm/brotli",
+			"revision": "786ec621f618ab5545dfea6e29880962bed23644",
+			"revisionTime": "2022-05-18T19:05:34Z"
 		},
 		{
 			"checksumSHA1": "+9FZihevG7Sm0XLvdER/UpALuy0=",
@@ -391,6 +403,48 @@
 			"revisionTime": "2017-05-10T13:15:34Z"
 		},
 		{
+			"checksumSHA1": "PdDwkolD0IYX/JSJAU7PyTOhLF4=",
+			"path": "github.com/klauspost/compress",
+			"revision": "5a3a4a965cc6dc28df4962646ef8fba7354cc12e",
+			"revisionTime": "2022-07-29T10:14:46Z"
+		},
+		{
+			"checksumSHA1": "UMHIUgpT/C/8bmbRLA0KsWC/TdM=",
+			"path": "github.com/klauspost/compress/fse",
+			"revision": "5a3a4a965cc6dc28df4962646ef8fba7354cc12e",
+			"revisionTime": "2022-07-29T10:14:46Z"
+		},
+		{
+			"checksumSHA1": "jGTEb4MxNP62emCbQlyAvVzns2k=",
+			"path": "github.com/klauspost/compress/huff0",
+			"revision": "5a3a4a965cc6dc28df4962646ef8fba7354cc12e",
+			"revisionTime": "2022-07-29T10:14:46Z"
+		},
+		{
+			"checksumSHA1": "Kx91RBj8QXURgTayYOcaXDUUG7E=",
+			"path": "github.com/klauspost/compress/internal/cpuinfo",
+			"revision": "5a3a4a965cc6dc28df4962646ef8fba7354cc12e",
+			"revisionTime": "2022-07-29T10:14:46Z"
+		},
+		{
+			"checksumSHA1": "iJJZG1oRv2UzEk46A0CZnwB23Ak=",
+			"path": "github.com/klauspost/compress/internal/snapref",
+			"revision": "5a3a4a965cc6dc28df4962646ef8fba7354cc12e",
+			"revisionTime": "2022-07-29T10:14:46Z"
+		},
+		{
+			"checksumSHA1": "aF0zDwlDQlI9g24Limi9GSbJ/Uk=",
+			"path": "github.com/klauspost/compress/zstd",
+			"revision": "5a3a4a965cc6dc28df4962646ef8fba7354cc12e",
+			"revisionTime": "2022-07-29T10:14:46Z"
+		},
+		{
+			"checksumSHA1": "QoV6yGviv2xY3Fcdf2ZgeALNfI8=",
+			"path": "github.com/klauspost/compress/zstd/internal/xxhash",
+			"revision": "5a3a4a965cc6dc28df4962646ef8fba7354cc12e",
+			"revisionTime": "2022-07-29T10:14:46Z"
+		},
+		{
 			"checksumSHA1": "QU5DwESi+Y1CvxJkCUBhVcYbvUY=",
 			"path": "github.com/marten-seemann/qpack",
 			"revision": "4f43360ce1a6e0e4b5e85d9115407908ca8e9eed",
@@ -507,16 +561,10 @@
 			"revisionTime": "2022-04-13T22:02:46Z"
 		},
 		{
-			"checksumSHA1": "jOxlnqvKSKn1SIkA5ldRe5lxqAc=",
-			"path": "github.com/refraction-networking/utls",
-			"revision": "0b2885c8c0d4467cfe98136748a9d011d0b8fff0",
-			"revisionTime": "2021-07-13T16:56:36Z"
-		},
-		{
-			"checksumSHA1": "Fn9JW8u40ABN9Uc9wuvquuyOB+8=",
+			"checksumSHA1": "AgLy8bJAEt1jgduMP+yaL17JAMU=",
 			"path": "github.com/refraction-networking/utls/cpu",
-			"revision": "db1b65d2300d3a59616a43d2df4ea556b4a7d277",
-			"revisionTime": "2018-07-28T22:37:20Z"
+			"revision": "7344e34650c003f29afed2e5228a5f6e662994f1",
+			"revisionTime": "2022-07-20T01:12:30Z"
 		},
 		{
 			"checksumSHA1": "6JP37UqrI0H80Gpk0Y2P+KXgn5M=",
