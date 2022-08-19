@@ -838,11 +838,21 @@ func (r *Resolver) ResolveIP(
 	// arrived concurrent with the first answer. This receive avoids a race
 	// condition where inFlight may now be 0, with additional answers
 	// enqueued, in which case the following await branch is not taken.
-	select {
-	case nextAnswer := <-answerChan:
-		result.IPs = append(result.IPs, nextAnswer.IPs...)
-		result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
-	default:
+	//
+	// It's possible for the attempts loop to exit with no received answer due
+	// to timeouts or cancellation while, concurrently, an answer is sent to
+	// the channel. In this case, when result == nil, we ignore the answers
+	// and leave this as a failed resolve.
+	if result != nil {
+		for loop := true; loop; {
+			select {
+			case nextAnswer := <-answerChan:
+				result.IPs = append(result.IPs, nextAnswer.IPs...)
+				result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+			default:
+				loop = false
+			}
+		}
 	}
 
 	// When we have an answer, await -- for a short time,
