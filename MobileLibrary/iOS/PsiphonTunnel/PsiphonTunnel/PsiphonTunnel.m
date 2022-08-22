@@ -1133,7 +1133,29 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
+    else if ([noticeType isEqualToString:@"ApplicationParameter"]) {
+        
+        id key = [notice valueForKeyPath:@"data.key"];
+        if (![key isKindOfClass:[NSString class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ApplicationParameter notice missing data.key: %@", noticeJSON]];
+            return;
+        }
 
+        id maybeValue = [notice valueForKeyPath:@"data.value"];
+        if (!maybeValue) {
+            [self logMessage:[NSString stringWithFormat: @"ApplicationParameter notice missing data.value: %@", noticeJSON]];
+            return;
+        }
+
+        // value is nil if data.value is NSNull.
+        id value = maybeValue == [NSNull null] ? nil : maybeValue;
+
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onApplicationParameter::)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onApplicationParameter:(NSString *)key :value];
+            });
+        }
+    }
     else if ([noticeType isEqualToString:@"InternalError"]) {
         internalError = TRUE;
     }
