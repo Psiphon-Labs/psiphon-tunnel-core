@@ -134,8 +134,9 @@ type DialParameters struct {
 
 	HoldOffTunnelDuration time.Duration
 
-	DialConnMetrics          common.MetricsSource `json:"-"`
-	ObfuscatedSSHConnMetrics common.MetricsSource `json:"-"`
+	DialConnMetrics          common.MetricsSource       `json:"-"`
+	DialConnNoticeMetrics    common.NoticeMetricsSource `json:"-"`
+	ObfuscatedSSHConnMetrics common.MetricsSource       `json:"-"`
 
 	DialDuration time.Duration `json:"-"`
 

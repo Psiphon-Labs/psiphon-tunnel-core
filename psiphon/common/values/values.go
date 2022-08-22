@@ -55,11 +55,10 @@ func NewPickOneSpec(items []string) *ValueSpec {
 
 // GetValue selects a value according to the spec. An optional seed may
 // be specified to support replay.
-func (spec *ValueSpec) GetValue(seed *prng.Seed) string {
+func (spec *ValueSpec) GetValue(PRNG *prng.PRNG) string {
 	rangeFunc := prng.Range
 	intnFunc := prng.Intn
-	if seed != nil {
-		PRNG := prng.NewPRNGWithSeed(seed)
+	if PRNG != nil {
 		rangeFunc = PRNG.Range
 		intnFunc = PRNG.Intn
 	}
@@ -126,6 +125,8 @@ var (
 	sshServerVersionsSpec atomic.Value
 	userAgentsSpec        atomic.Value
 	hostNamesSpec         atomic.Value
+	cookieNamesSpec       atomic.Value
+	contentTypeSpec       atomic.Value
 )
 
 // SetRevision set the revision value, which may be used to track which value
@@ -173,11 +174,15 @@ func SetSSHServerVersionsSpec(spec *ValueSpec) {
 // GetSSHServerVersion selects a value based on the previously set spec, or
 // returns a default when no spec is set.
 func GetSSHServerVersion(seed *prng.Seed) string {
+	var PRNG *prng.PRNG
+	if seed != nil {
+		PRNG = prng.NewPRNGWithSeed(seed)
+	}
 	spec, ok := sshServerVersionsSpec.Load().(*ValueSpec)
 	if !ok {
 		return ""
 	}
-	return spec.GetValue(seed)
+	return spec.GetValue(PRNG)
 }
 
 // SetUserAgentsSpec sets the corresponding value spec.
@@ -214,4 +219,40 @@ func GetHostName() string {
 		return "www.example.org"
 	}
 	return spec.GetValue(nil)
+}
+
+// SetCookieNamesSpec sets the corresponding value spec.
+func SetCookieNamesSpec(spec *ValueSpec) {
+	if spec == nil {
+		return
+	}
+	cookieNamesSpec.Store(spec)
+}
+
+// GetCookieName selects a value based on the previously set spec, or
+// returns a default when no spec is set.
+func GetCookieName(PRNG *prng.PRNG) string {
+	spec, ok := cookieNamesSpec.Load().(*ValueSpec)
+	if !ok {
+		return "c"
+	}
+	return spec.GetValue(PRNG)
+}
+
+// SetContentTypesSpec sets the corresponding value spec.
+func SetContentTypesSpec(spec *ValueSpec) {
+	if spec == nil {
+		return
+	}
+	contentTypeSpec.Store(spec)
+}
+
+// GetContentType selects a value based on the previously set spec, or
+// returns a default when no spec is set.
+func GetContentType(PRNG *prng.PRNG) string {
+	spec, ok := contentTypeSpec.Load().(*ValueSpec)
+	if !ok {
+		return "application/octet-stream"
+	}
+	return spec.GetValue(PRNG)
 }

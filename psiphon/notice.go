@@ -588,6 +588,13 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			}
 		}
 
+		if dialParams.DialConnNoticeMetrics != nil {
+			metrics := dialParams.DialConnNoticeMetrics.GetNoticeMetrics()
+			for name, value := range metrics {
+				args = append(args, name, value)
+			}
+		}
+
 		if dialParams.ObfuscatedSSHConnMetrics != nil {
 			metrics := dialParams.ObfuscatedSSHConnMetrics.GetMetrics()
 			for name, value := range metrics {
