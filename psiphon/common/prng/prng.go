@@ -334,6 +334,10 @@ func (p *PRNG) Base64String(byteLength int) string {
 
 var p *PRNG
 
+func DefaultPRNG() *PRNG {
+	return p
+}
+
 func Read(b []byte) (int, error) {
 	return p.Read(b)
 }
