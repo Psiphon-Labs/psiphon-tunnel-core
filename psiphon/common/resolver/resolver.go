@@ -50,7 +50,7 @@ const (
 	resolverServersUpdateTTL         = 5 * time.Second
 	resolverDefaultAttemptsPerServer = 2
 	resolverDefaultRequestTimeout    = 5 * time.Second
-	resolverDefaultAwaitTimeout      = 100 * time.Millisecond
+	resolverDefaultAwaitTimeout      = 10 * time.Millisecond
 	resolverDefaultAnswerTTL         = 1 * time.Minute
 	resolverDNSPort                  = "53"
 	udpPacketBufferSize              = 1232
@@ -168,7 +168,7 @@ type ResolveParameters struct {
 
 	// AwaitTimeout specifies how long to await an additional response after
 	// the first response is received. This additional wait time applies only
-	// when there is no IPv4 or IPv6 response.
+	// when there is either no IPv4 or IPv6 response.
 	AwaitTimeout time.Duration
 
 	// PreresolvedIPAddress specifies an IP address result to be used in place
