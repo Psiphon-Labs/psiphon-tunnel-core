@@ -55,7 +55,10 @@ type PartSpec struct {
 // NewPickOneSpec creates a simple spec to select one item from a list as a
 // value.
 func NewPickOneSpec(items []string) *ValueSpec {
-	return &ValueSpec{Parts: []PartSpec{{Items: items, MinCount: 1, MaxCount: 1}}}
+	return &ValueSpec{
+		Probability: 1.0,
+		Parts:       []PartSpec{{Items: items, MinCount: 1, MaxCount: 1}},
+	}
 }
 
 // GetValue selects a value according to the spec. An optional seed may

@@ -1670,7 +1670,7 @@ func checkExpectedServerTunnelLogFields(
 	}
 
 	if !common.Contains(testSSHClientVersions, fields["ssh_client_version"].(string)) {
-		return fmt.Errorf("unexpected relay_protocol '%s'", fields["ssh_client_version"])
+		return fmt.Errorf("unexpected ssh_client_version '%s'", fields["ssh_client_version"])
 	}
 
 	clientFeatures := fields["client_features"].([]interface{})

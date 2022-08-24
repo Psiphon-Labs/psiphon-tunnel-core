@@ -791,7 +791,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 		sessionIDSent:       false,
 		cachedResponse:      cachedResponse,
 		cookieName:          meekCookie.Name,
-		contentType:         r.Header.Get("Content-Type"),
+		contentType:         request.Header.Get("Content-Type"),
 	}
 
 	session.touch()
