@@ -865,7 +865,7 @@ func (r *Resolver) ResolveIP(
 	if result != nil &&
 		resolveCtx.Err() == nil &&
 		atomic.LoadInt64(&inFlight) > 0 &&
-		(atomic.LoadInt32(&awaitA) != 0 || atomic.LoadInt32(&awaitAAAA) != 0) ||
+		(atomic.LoadInt32(&awaitA) != 0 || atomic.LoadInt32(&awaitAAAA) != 0) &&
 		params.AwaitTimeout > 0 {
 
 		resetTimer(params.AwaitTimeout)
