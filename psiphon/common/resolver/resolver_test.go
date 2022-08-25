@@ -110,7 +110,7 @@ func runTestMakeResolveParameters() error {
 	if resolverParams.AttemptsPerServer != 2 ||
 		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
-		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		!CIDRContainsIP(exampleIPv4CIDR, resolverParams.PreresolvedIPAddress) ||
 		resolverParams.AlternateDNSServer != "" ||
 		resolverParams.PreferAlternateDNSServer != false ||
@@ -153,7 +153,7 @@ func runTestMakeResolveParameters() error {
 	if resolverParams.AttemptsPerServer != 2 ||
 		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
-		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
 		resolverParams.AlternateDNSServer != preferredAlternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != true ||
@@ -183,7 +183,7 @@ func runTestMakeResolveParameters() error {
 	if resolverParams.AttemptsPerServer != 2 ||
 		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
-		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
 		resolverParams.AlternateDNSServer != alternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != false ||
