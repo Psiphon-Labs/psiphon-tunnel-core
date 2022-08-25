@@ -625,6 +625,27 @@ func runTestResolver() error {
 		return errors.TraceNew("unexpected success")
 	}
 
+	// Test: cancel context while resolving
+
+	// This test exercises the additional answers and await cases in
+	// ResolveIP. The test is timing dependent, and so imperfect, but this
+	// configuration can reproduce panics in those cases before bugs were
+	// fixed, where DNS responses need to be received just as the context is
+	// cancelled.
+
+	networkConfig.GetDNSServers = func() []string { return []string{okServer.getAddr()} }
+	networkID = "networkID-6"
+
+	for i := 0; i < 100; i++ {
+		resolver.cache.Flush()
+
+		ctx, cancelFunc := context.WithTimeout(
+			context.Background(), time.Duration(i%10*20)*time.Microsecond)
+		defer cancelFunc()
+
+		_, _ = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	}
+
 	return nil
 }
 
