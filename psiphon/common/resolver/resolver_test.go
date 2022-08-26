@@ -636,11 +636,11 @@ func runTestResolver() error {
 	networkConfig.GetDNSServers = func() []string { return []string{okServer.getAddr()} }
 	networkID = "networkID-6"
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 500; i++ {
 		resolver.cache.Flush()
 
 		ctx, cancelFunc := context.WithTimeout(
-			context.Background(), time.Duration(i%10*20)*time.Microsecond)
+			context.Background(), time.Duration((i%10+1)*20)*time.Microsecond)
 		defer cancelFunc()
 
 		_, _ = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
