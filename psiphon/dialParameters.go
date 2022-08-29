@@ -39,7 +39,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 	regen "github.com/zach-klippenstein/goregen"
 	"golang.org/x/net/bpf"
 )
@@ -134,8 +134,9 @@ type DialParameters struct {
 
 	HoldOffTunnelDuration time.Duration
 
-	DialConnMetrics          common.MetricsSource `json:"-"`
-	ObfuscatedSSHConnMetrics common.MetricsSource `json:"-"`
+	DialConnMetrics          common.MetricsSource       `json:"-"`
+	DialConnNoticeMetrics    common.NoticeMetricsSource `json:"-"`
+	ObfuscatedSSHConnMetrics common.MetricsSource       `json:"-"`
 
 	DialDuration time.Duration `json:"-"`
 

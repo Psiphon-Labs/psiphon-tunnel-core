@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/net/http2"
@@ -211,6 +212,7 @@ type MeekConn struct {
 	url                       *url.URL
 	additionalHeaders         http.Header
 	cookie                    *http.Cookie
+	contentType               string
 	cookieSize                int
 	tlsPadding                int
 	limitRequestPayloadLength int
@@ -314,6 +316,7 @@ func DialMeek(
 	if meek.mode == MeekModeRelay {
 		var err error
 		meek.cookie,
+			meek.contentType,
 			meek.tlsPadding,
 			meek.limitRequestPayloadLength,
 			meek.redialTLSProbability,
@@ -806,6 +809,19 @@ func (meek *MeekConn) GetMetrics() common.LogFields {
 	return logFields
 }
 
+// GetNoticeMetrics implements the common.NoticeMetricsSource interface.
+func (meek *MeekConn) GetNoticeMetrics() common.LogFields {
+
+	// These fields are logged only in notices, for diagnostics. The server
+	// will log the same values, but derives them from HTTP headers, so they
+	// don't need to be sent in the API request.
+
+	logFields := make(common.LogFields)
+	logFields["meek_cookie_name"] = meek.cookie.Name
+	logFields["meek_content_type"] = meek.contentType
+	return logFields
+}
+
 // ObfuscatedRoundTrip makes a request to the meek server and returns the
 // response. A new, obfuscated meek cookie is created for every request. The
 // specified end point is recorded in the cookie and is not exposed as
@@ -823,7 +839,7 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 		return nil, errors.TraceNew("operation unsupported")
 	}
 
-	cookie, _, _, _, err := makeMeekObfuscationValues(
+	cookie, contentType, _, _, _, err := makeMeekObfuscationValues(
 		meek.getCustomParameters(),
 		meek.meekCookieEncryptionPublicKey,
 		meek.meekObfuscatedKey,
@@ -843,7 +859,7 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 	// the concurrency constraints are satisfied.
 
 	request, err := meek.newRequest(
-		requestCtx, cookie, bytes.NewReader(requestBody), 0)
+		requestCtx, cookie, contentType, bytes.NewReader(requestBody), 0)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1178,6 +1194,7 @@ func (r *readCloseSignaller) AwaitClosed() bool {
 func (meek *MeekConn) newRequest(
 	requestCtx context.Context,
 	cookie *http.Cookie,
+	contentType string,
 	body io.Reader,
 	contentLength int) (*http.Request, error) {
 
@@ -1199,7 +1216,7 @@ func (meek *MeekConn) newRequest(
 
 	meek.addAdditionalHeaders(request)
 
-	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Content-Type", contentType)
 
 	if cookie == nil {
 		cookie = meek.cookie
@@ -1320,6 +1337,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		request, err := meek.newRequest(
 			requestCtx,
 			nil,
+			meek.contentType,
 			requestBody,
 			contentLength)
 		if err != nil {
@@ -1535,13 +1553,14 @@ func makeMeekObfuscationValues(
 	endPoint string,
 
 ) (cookie *http.Cookie,
+	contentType string,
 	tlsPadding int,
 	limitRequestPayloadLength int,
 	redialTLSProbability float64,
 	err error) {
 
 	if meekCookieEncryptionPublicKey == "" {
-		return nil, 0, 0, 0.0, errors.TraceNew("missing public key")
+		return nil, "", 0, 0, 0.0, errors.TraceNew("missing public key")
 	}
 
 	cookieData := &protocol.MeekCookieData{
@@ -1551,7 +1570,7 @@ func makeMeekObfuscationValues(
 	}
 	serializedCookie, err := json.Marshal(cookieData)
 	if err != nil {
-		return nil, 0, 0, 0.0, errors.Trace(err)
+		return nil, "", 0, 0, 0.0, errors.Trace(err)
 	}
 
 	// Encrypt the JSON data
@@ -1565,12 +1584,12 @@ func makeMeekObfuscationValues(
 	var publicKey [32]byte
 	decodedPublicKey, err := base64.StdEncoding.DecodeString(meekCookieEncryptionPublicKey)
 	if err != nil {
-		return nil, 0, 0, 0.0, errors.Trace(err)
+		return nil, "", 0, 0, 0.0, errors.Trace(err)
 	}
 	copy(publicKey[:], decodedPublicKey)
 	ephemeralPublicKey, ephemeralPrivateKey, err := box.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, 0, 0, 0.0, errors.Trace(err)
+		return nil, "", 0, 0, 0.0, errors.Trace(err)
 	}
 	box := box.Seal(nil, serializedCookie, &nonce, &publicKey, ephemeralPrivateKey)
 	encryptedCookie := make([]byte, 32+len(box))
@@ -1587,7 +1606,7 @@ func makeMeekObfuscationValues(
 			PaddingPRNGSeed: meekObfuscatorPaddingPRNGSeed,
 			MaxPadding:      &maxPadding})
 	if err != nil {
-		return nil, 0, 0, 0.0, errors.Trace(err)
+		return nil, "", 0, 0, 0.0, errors.Trace(err)
 	}
 	obfuscatedCookie := obfuscator.SendSeedMessage()
 	seedLen := len(obfuscatedCookie)
@@ -1596,19 +1615,34 @@ func makeMeekObfuscationValues(
 
 	cookieNamePRNG, err := obfuscator.GetDerivedPRNG("meek-cookie-name")
 	if err != nil {
-		return nil, 0, 0, 0.0, errors.Trace(err)
+		return nil, "", 0, 0, 0.0, errors.Trace(err)
+	}
+	var cookieName string
+	if cookieNamePRNG.FlipWeightedCoin(p.Float(parameters.MeekAlternateCookieNameProbability)) {
+		cookieName = values.GetCookieName(cookieNamePRNG)
+	} else {
+		// Format the HTTP cookie
+		// The format is <random letter 'A'-'Z'>=<base64 data>, which is intended to match common cookie formats.
+		A := int('A')
+		Z := int('Z')
+		// letterIndex is integer in range [int('A'), int('Z')]
+		letterIndex := cookieNamePRNG.Intn(Z - A + 1)
+		cookieName = string(byte(A + letterIndex))
 	}
 
-	// Format the HTTP cookie
-	// The format is <random letter 'A'-'Z'>=<base64 data>, which is intended to match common cookie formats.
-	A := int('A')
-	Z := int('Z')
-	// letterIndex is integer in range [int('A'), int('Z')]
-	letterIndex := cookieNamePRNG.Intn(Z - A + 1)
-
 	cookie = &http.Cookie{
-		Name:  string(byte(A + letterIndex)),
+		Name:  cookieName,
 		Value: base64.StdEncoding.EncodeToString(obfuscatedCookie)}
+
+	contentTypePRNG, err := obfuscator.GetDerivedPRNG("meek-content-type")
+	if err != nil {
+		return nil, "", 0, 0, 0.0, errors.Trace(err)
+	}
+	if contentTypePRNG.FlipWeightedCoin(p.Float(parameters.MeekAlternateContentTypeProbability)) {
+		contentType = values.GetContentType(contentTypePRNG)
+	} else {
+		contentType = "application/octet-stream"
+	}
 
 	tlsPadding = 0
 	limitRequestPayloadLength = MEEK_MAX_REQUEST_PAYLOAD_LENGTH
@@ -1622,7 +1656,7 @@ func makeMeekObfuscationValues(
 		limitRequestPayloadLengthPRNG, err := obfuscator.GetDerivedPRNG(
 			"meek-limit-request-payload-length")
 		if err != nil {
-			return nil, 0, 0, 0.0, errors.Trace(err)
+			return nil, "", 0, 0, 0.0, errors.Trace(err)
 		}
 
 		minLength := p.Int(parameters.MeekMinLimitRequestPayloadLength)
@@ -1649,7 +1683,7 @@ func makeMeekObfuscationValues(
 			tlsPaddingPRNG, err := obfuscator.GetDerivedPRNG(
 				"meek-tls-padding")
 			if err != nil {
-				return nil, 0, 0, 0.0, errors.Trace(err)
+				return nil, "", 0, 0, 0.0, errors.Trace(err)
 			}
 
 			tlsPadding = tlsPaddingPRNG.Range(minPadding, maxPadding)
@@ -1658,5 +1692,5 @@ func makeMeekObfuscationValues(
 		redialTLSProbability = p.Float(parameters.MeekRedialTLSProbability)
 	}
 
-	return cookie, tlsPadding, limitRequestPayloadLength, redialTLSProbability, nil
+	return cookie, contentType, tlsPadding, limitRequestPayloadLength, redialTLSProbability, nil
 }

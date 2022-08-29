@@ -25,7 +25,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // CustomTLSProfile specifies custom TLS profile. This is used to deploy
@@ -206,7 +206,7 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 	case "ChannelID":
 		return &utls.FakeChannelIDExtension{}, nil
 	case "CertCompressionAlgs":
-		var extension *utls.FakeCertCompressionAlgsExtension
+		var extension *utls.UtlsCompressCertExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -214,6 +214,20 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		return extension, nil
 	case "RecordSizeLimit":
 		var extension *utls.FakeRecordSizeLimitExtension
+		err := json.Unmarshal(e.Data, &extension)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return extension, nil
+	case "ALPS":
+		var extension *utls.ApplicationSettingsExtension
+		err := json.Unmarshal(e.Data, &extension)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return extension, nil
+	case "DelegatedCredentials":
+		var extension *utls.DelegatedCredentialsExtension
 		err := json.Unmarshal(e.Data, &extension)
 		if err != nil {
 			return nil, errors.Trace(err)

@@ -207,6 +207,8 @@ const (
 	MeekMinLimitRequestPayloadLength                 = "MeekMinLimitRequestPayloadLength"
 	MeekMaxLimitRequestPayloadLength                 = "MeekMaxLimitRequestPayloadLength"
 	MeekRedialTLSProbability                         = "MeekRedialTLSProbability"
+	MeekAlternateCookieNameProbability               = "MeekAlternateCookieNameProbability"
+	MeekAlternateContentTypeProbability              = "MeekAlternateContentTypeProbability"
 	TransformHostNameProbability                     = "TransformHostNameProbability"
 	PickUserAgentProbability                         = "PickUserAgentProbability"
 	LivenessTestMinUpstreamBytes                     = "LivenessTestMinUpstreamBytes"
@@ -530,14 +532,15 @@ var defaultParameters = map[string]struct {
 	MeekRoundTripRetryMaxDelay:                 {value: 1 * time.Second, minimum: time.Duration(0)},
 	MeekRoundTripRetryMultiplier:               {value: 2.0, minimum: 0.0},
 	MeekRoundTripTimeout:                       {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
-
-	MeekTrafficShapingProbability:    {value: 1.0, minimum: 0.0},
-	MeekTrafficShapingLimitProtocols: {value: protocol.TunnelProtocols{}},
-	MeekMinTLSPadding:                {value: 0, minimum: 0},
-	MeekMaxTLSPadding:                {value: 0, minimum: 0},
-	MeekMinLimitRequestPayloadLength: {value: 65536, minimum: 1},
-	MeekMaxLimitRequestPayloadLength: {value: 65536, minimum: 1},
-	MeekRedialTLSProbability:         {value: 0.0, minimum: 0.0},
+	MeekTrafficShapingProbability:              {value: 1.0, minimum: 0.0},
+	MeekTrafficShapingLimitProtocols:           {value: protocol.TunnelProtocols{}},
+	MeekMinTLSPadding:                          {value: 0, minimum: 0},
+	MeekMaxTLSPadding:                          {value: 0, minimum: 0},
+	MeekMinLimitRequestPayloadLength:           {value: 65536, minimum: 1},
+	MeekMaxLimitRequestPayloadLength:           {value: 65536, minimum: 1},
+	MeekRedialTLSProbability:                   {value: 0.0, minimum: 0.0},
+	MeekAlternateCookieNameProbability:         {value: 0.5, minimum: 0.0},
+	MeekAlternateContentTypeProbability:        {value: 0.5, minimum: 0.0},
 
 	TransformHostNameProbability: {value: 0.5, minimum: 0.0},
 	PickUserAgentProbability:     {value: 0.5, minimum: 0.0},
@@ -660,7 +663,7 @@ var defaultParameters = map[string]struct {
 	DNSResolverAttemptsPerServer:                {value: 2, minimum: 1},
 	DNSResolverAttemptsPerPreferredServer:       {value: 1, minimum: 1},
 	DNSResolverRequestTimeout:                   {value: 5 * time.Second, minimum: 100 * time.Millisecond, flags: useNetworkLatencyMultiplier},
-	DNSResolverAwaitTimeout:                     {value: 100 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	DNSResolverAwaitTimeout:                     {value: 10 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	DNSResolverPreresolvedIPAddressCIDRs:        {value: LabeledCIDRs{}},
 	DNSResolverPreresolvedIPAddressProbability:  {value: 0.0, minimum: 0.0},
 	DNSResolverAlternateServers:                 {value: []string{}},
