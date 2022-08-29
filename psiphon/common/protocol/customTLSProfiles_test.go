@@ -93,7 +93,7 @@ func TestCustomTLSProfiles(t *testing.T) {
 				utls.VersionTLS11,
 				utls.VersionTLS10,
 			}},
-			&utls.FakeCertCompressionAlgsExtension{[]utls.CertCompressionAlgo{
+			&utls.UtlsCompressCertExtension{[]utls.CertCompressionAlgo{
 				utls.CertCompressionBrotli,
 			}},
 			&utls.FakeChannelIDExtension{},
@@ -129,7 +129,7 @@ func TestCustomTLSProfiles(t *testing.T) {
             {"Name": "KeyShare", "Data": {"KeyShares": [{"Group": 29, "Data": [9, 9, 9, 9]}]}},
             {"Name": "PSKKeyExchangeModes", "Data": {"Modes": [1]}},
             {"Name": "SupportedVersions", "Data": {"Versions": [772, 771, 770, 769]}},
-            {"Name": "CertCompressionAlgs", "Data": {"Methods": [2]}},
+            {"Name": "CertCompressionAlgs", "Data": {"Algorithms": [2]}},
             {"Name": "ChannelID"},
             {"Name": "RecordSizeLimit", "Data": {"Limit": 9999}}],
           "GetSessionID": "SHA-256"
