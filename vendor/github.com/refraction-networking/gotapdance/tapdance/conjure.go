@@ -20,7 +20,9 @@ import (
 	"github.com/golang/protobuf/proto"
 	pb "github.com/refraction-networking/gotapdance/protobuf"
 	ps "github.com/refraction-networking/gotapdance/tapdance/phantoms"
-	tls "github.com/refraction-networking/utls"
+	// [Psiphon] use Psiphon-Labs/utls fork
+	//tls "github.com/refraction-networking/utls"
+	tls "github.com/Psiphon-Labs/utls"
 	"gitlab.com/yawning/obfs4.git/common/ntor"
 	"gitlab.com/yawning/obfs4.git/transports/obfs4"
 	"golang.org/x/crypto/curve25519"
@@ -681,7 +683,6 @@ func (reg *ConjureReg) createTLSConn(dialConn net.Conn, address string, hostname
 	}
 	//[TODO]{priority:medium} parroting Chrome 62 ClientHello -- parrot newer.
 	tlsConn := tls.UClient(dialConn, &config, tls.HelloChrome_62)
-
 	err = tlsConn.BuildHandshakeState()
 	if err != nil {
 		return nil, err
