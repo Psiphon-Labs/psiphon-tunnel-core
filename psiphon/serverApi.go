@@ -728,7 +728,8 @@ func RecordRemoteServerListStat(
 }
 
 // RecordFailedTunnelStat records metrics for a failed tunnel dial, including
-// dial parameters and error condition (tunnelErr).
+// dial parameters and error condition (tunnelErr). No record is created when
+// tunnelErr is nil.
 //
 // This uses the same reporting facility, with the same caveats, as
 // RecordRemoteServerListStat.
@@ -743,6 +744,16 @@ func RecordFailedTunnelStat(
 	if !config.GetParameters().Get().WeightedCoinFlip(
 		parameters.RecordFailedTunnelPersistentStatsProbability) {
 		return nil
+	}
+
+	// Callers should not call RecordFailedTunnelStat with a nil tunnelErr, as
+	// this is not a useful stat and it results in a nil pointer dereference.
+	// This check catches potential bug cases. An example edge case, now
+	// fixed, is deferred error handlers, such as the ones in in
+	// dialTunnel/tunnel.Activate, which may be invoked in the case of a
+	// panic, which can occur before any error value is returned.
+	if tunnelErr == nil {
+		return errors.TraceNew("no error")
 	}
 
 	lastConnected, err := getLastConnected()
