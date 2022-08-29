@@ -945,6 +945,10 @@ func dialTunnel(
 		dialParams.DialConnMetrics = metricsSource
 	}
 
+	if noticeMetricsSource, ok := dialConn.(common.NoticeMetricsSource); ok {
+		dialParams.DialConnNoticeMetrics = noticeMetricsSource
+	}
+
 	// If dialConn is not a Closer, tunnel failure detection may be slower
 	if _, ok := dialConn.(common.Closer); !ok {
 		NoticeWarning("tunnel.dialTunnel: dialConn is not a Closer")

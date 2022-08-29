@@ -163,9 +163,6 @@ func (spec Spec) Apply(seed *prng.Seed, input string) (string, error) {
 			panic(err.Error())
 		}
 		replacement := rg.Generate()
-		if err != nil {
-			panic(err.Error())
-		}
 
 		re := regexp.MustCompile(transform[0])
 		value = re.ReplaceAllString(value, replacement)

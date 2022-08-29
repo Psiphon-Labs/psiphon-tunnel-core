@@ -54,10 +54,19 @@ func (a LogFields) Add(b LogFields) {
 	}
 }
 
-// MetricsSource is an object that provides metrics to be logged
+// MetricsSource is an object that provides metrics to be logged.
 type MetricsSource interface {
 
-	// GetMetrics returns a LogFields populated with
-	// metrics from the MetricsSource
+	// GetMetrics returns a LogFields populated with metrics from the
+	// MetricsSource.
 	GetMetrics() LogFields
+}
+
+// NoticeMetricsSource is an object that provides metrics to be logged
+// only in notices, for inclusion in diagnostics.
+type NoticeMetricsSource interface {
+
+	// GetNoticeMetrics returns a LogFields populated with metrics from
+	// the NoticeMetricsSource.
+	GetNoticeMetrics() LogFields
 }
