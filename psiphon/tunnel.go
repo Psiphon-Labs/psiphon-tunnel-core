@@ -182,15 +182,17 @@ func (tunnel *Tunnel) Activate(
 	defer func() {
 		if !activationSucceeded && baseCtx.Err() != context.Canceled {
 			tunnel.dialParams.Failed(tunnel.config)
-			_ = RecordFailedTunnelStat(
-				tunnel.config,
-				tunnel.dialParams,
-				tunnel.livenessTestMetrics,
-				-1,
-				-1,
-				retErr)
 			if tunnel.extraFailureAction != nil {
 				tunnel.extraFailureAction()
+			}
+			if retErr != nil {
+				_ = RecordFailedTunnelStat(
+					tunnel.config,
+					tunnel.dialParams,
+					tunnel.livenessTestMetrics,
+					-1,
+					-1,
+					retErr)
 			}
 		}
 	}()
@@ -704,15 +706,17 @@ func dialTunnel(
 	defer func() {
 		if !dialSucceeded && baseCtx.Err() != context.Canceled {
 			dialParams.Failed(config)
-			_ = RecordFailedTunnelStat(
-				config,
-				dialParams,
-				failedTunnelLivenessTestMetrics,
-				-1,
-				-1,
-				retErr)
 			if extraFailureAction != nil {
 				extraFailureAction()
+			}
+			if retErr != nil {
+				_ = RecordFailedTunnelStat(
+					config,
+					dialParams,
+					failedTunnelLivenessTestMetrics,
+					-1,
+					-1,
+					retErr)
 			}
 		}
 	}()

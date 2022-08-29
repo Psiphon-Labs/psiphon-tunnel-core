@@ -952,9 +952,14 @@ func NoticeFragmentor(diagnosticID string, message string) {
 	}
 }
 
+// NoticeApplicationParameters reports application parameters. Each key/value
+// parameter pair is emitted in a distinct notice, and each key/value pair is
+// reported at most once per session for a fixed value.
 func NoticeApplicationParameters(keyValues parameters.KeyValues) {
 	for key, value := range keyValues {
-		singletonNoticeLogger.outputNotice(
+		repetitionKey := fmt.Sprintf("ApplicationParameterKey-%s", key)
+		outputRepetitiveNotice(
+			repetitionKey, string(value), 0,
 			"ApplicationParameter", 0,
 			"key", key,
 			"value", value)
@@ -1007,7 +1012,7 @@ func NoticeHoldOffTunnel(diagnosticID string, duration time.Duration) {
 // session.
 func NoticeSkipServerEntry(format string, args ...interface{}) {
 	reason := fmt.Sprintf(format, args...)
-	repetitionKey := fmt.Sprintf("ServerAlert-%+v", reason)
+	repetitionKey := fmt.Sprintf("SkipServerEntryReason-%+v", reason)
 	outputRepetitiveNotice(
 		repetitionKey, "", 0,
 		"SkipServerEntry", 0, "reason", reason)

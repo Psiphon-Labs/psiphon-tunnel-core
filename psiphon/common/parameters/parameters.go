@@ -663,7 +663,7 @@ var defaultParameters = map[string]struct {
 	DNSResolverAttemptsPerServer:                {value: 2, minimum: 1},
 	DNSResolverAttemptsPerPreferredServer:       {value: 1, minimum: 1},
 	DNSResolverRequestTimeout:                   {value: 5 * time.Second, minimum: 100 * time.Millisecond, flags: useNetworkLatencyMultiplier},
-	DNSResolverAwaitTimeout:                     {value: 100 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	DNSResolverAwaitTimeout:                     {value: 10 * time.Millisecond, minimum: 1 * time.Millisecond, flags: useNetworkLatencyMultiplier},
 	DNSResolverPreresolvedIPAddressCIDRs:        {value: LabeledCIDRs{}},
 	DNSResolverPreresolvedIPAddressProbability:  {value: 0.0, minimum: 0.0},
 	DNSResolverAlternateServers:                 {value: []string{}},

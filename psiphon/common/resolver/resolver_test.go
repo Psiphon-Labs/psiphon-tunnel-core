@@ -110,7 +110,7 @@ func runTestMakeResolveParameters() error {
 	if resolverParams.AttemptsPerServer != 2 ||
 		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
-		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		!CIDRContainsIP(exampleIPv4CIDR, resolverParams.PreresolvedIPAddress) ||
 		resolverParams.AlternateDNSServer != "" ||
 		resolverParams.PreferAlternateDNSServer != false ||
@@ -153,7 +153,7 @@ func runTestMakeResolveParameters() error {
 	if resolverParams.AttemptsPerServer != 2 ||
 		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
-		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
 		resolverParams.AlternateDNSServer != preferredAlternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != true ||
@@ -183,7 +183,7 @@ func runTestMakeResolveParameters() error {
 	if resolverParams.AttemptsPerServer != 2 ||
 		resolverParams.AttemptsPerPreferredServer != 1 ||
 		resolverParams.RequestTimeout != 5*time.Second ||
-		resolverParams.AwaitTimeout != 100*time.Millisecond ||
+		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
 		resolverParams.AlternateDNSServer != alternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != false ||
@@ -636,11 +636,11 @@ func runTestResolver() error {
 	networkConfig.GetDNSServers = func() []string { return []string{okServer.getAddr()} }
 	networkID = "networkID-6"
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 500; i++ {
 		resolver.cache.Flush()
 
 		ctx, cancelFunc := context.WithTimeout(
-			context.Background(), time.Duration(i%10*20)*time.Microsecond)
+			context.Background(), time.Duration((i%10+1)*20)*time.Microsecond)
 		defer cancelFunc()
 
 		_, _ = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
