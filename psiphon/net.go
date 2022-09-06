@@ -342,6 +342,8 @@ func NewResolver(config *Config, useBindToDevice bool) *resolver.Resolver {
 
 	if useBindToDevice && config.DeviceBinder != nil {
 		networkConfig.BindToDevice = config.DeviceBinder.BindToDevice
+		networkConfig.AllowDefaultResolverWithBindToDevice =
+			config.AllowDefaultDNSResolverWithBindToDevice
 	}
 
 	if config.IPv6Synthesizer != nil {

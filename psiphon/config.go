@@ -283,6 +283,11 @@ type Config struct {
 	// when reporting ClientFeatures.
 	DeviceBinder DeviceBinder
 
+	// AllowDefaultDNSResolverWithBindToDevice indicates that it's safe to use
+	// the default resolver when DeviceBinder is configured, as the host OS
+	// will automatically exclude DNS requests from the VPN.
+	AllowDefaultDNSResolverWithBindToDevice bool
+
 	// IPv6Synthesizer is an interface that allows tunnel-core to call into
 	// the host application to synthesize IPv6 addresses. See: IPv6Synthesizer
 	// doc.
@@ -682,13 +687,15 @@ type Config struct {
 
 	// MeekTrafficShapingProbability and associated fields are for testing
 	// purposes.
-	MeekTrafficShapingProbability    *float64
-	MeekTrafficShapingLimitProtocols []string
-	MeekMinTLSPadding                *int
-	MeekMaxTLSPadding                *int
-	MeekMinLimitRequestPayloadLength *int
-	MeekMaxLimitRequestPayloadLength *int
-	MeekRedialTLSProbability         *float64
+	MeekTrafficShapingProbability       *float64
+	MeekTrafficShapingLimitProtocols    []string
+	MeekMinTLSPadding                   *int
+	MeekMaxTLSPadding                   *int
+	MeekMinLimitRequestPayloadLength    *int
+	MeekMaxLimitRequestPayloadLength    *int
+	MeekRedialTLSProbability            *float64
+	MeekAlternateCookieNameProbability  *float64
+	MeekAlternateContentTypeProbability *float64
 
 	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
 	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
@@ -1628,6 +1635,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.MeekRedialTLSProbability != nil {
 		applyParameters[parameters.MeekRedialTLSProbability] = *config.MeekRedialTLSProbability
+	}
+
+	if config.MeekAlternateCookieNameProbability != nil {
+		applyParameters[parameters.MeekAlternateCookieNameProbability] = *config.MeekAlternateCookieNameProbability
+	}
+
+	if config.MeekAlternateContentTypeProbability != nil {
+		applyParameters[parameters.MeekAlternateContentTypeProbability] = *config.MeekAlternateContentTypeProbability
 	}
 
 	if config.ObfuscatedSSHMinPadding != nil {

@@ -68,7 +68,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // CustomTLSConfig specifies the parameters for a CustomTLSDial, supporting
@@ -764,6 +764,10 @@ func getUTLSClientHelloID(
 		return utls.HelloIOS_11_1, nil, nil
 	case protocol.TLS_PROFILE_IOS_121:
 		return utls.HelloIOS_12_1, nil, nil
+	case protocol.TLS_PROFILE_IOS_13:
+		return utls.HelloIOS_13, nil, nil
+	case protocol.TLS_PROFILE_IOS_14:
+		return utls.HelloIOS_14, nil, nil
 	case protocol.TLS_PROFILE_CHROME_58:
 		return utls.HelloChrome_58, nil, nil
 	case protocol.TLS_PROFILE_CHROME_62:
@@ -774,12 +778,20 @@ func getUTLSClientHelloID(
 		return utls.HelloChrome_72, nil, nil
 	case protocol.TLS_PROFILE_CHROME_83:
 		return utls.HelloChrome_83, nil, nil
+	case protocol.TLS_PROFILE_CHROME_96:
+		return utls.HelloChrome_96, nil, nil
+	case protocol.TLS_PROFILE_CHROME_102:
+		return utls.HelloChrome_102, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
 		return utls.HelloFirefox_56, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_65:
 		return utls.HelloFirefox_65, nil, nil
+	case protocol.TLS_PROFILE_FIREFOX_99:
+		return utls.HelloFirefox_99, nil, nil
+	case protocol.TLS_PROFILE_FIREFOX_102:
+		return utls.HelloFirefox_102, nil, nil
 	case protocol.TLS_PROFILE_RANDOMIZED:
 		return utls.HelloRandomized, nil, nil
 	}

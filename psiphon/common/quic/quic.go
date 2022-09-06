@@ -50,6 +50,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -69,6 +70,7 @@ const (
 	SERVER_HANDSHAKE_TIMEOUT = 30 * time.Second
 	SERVER_IDLE_TIMEOUT      = 5 * time.Minute
 	CLIENT_IDLE_TIMEOUT      = 30 * time.Second
+	UDP_PACKET_WRITE_TIMEOUT = 1 * time.Second
 )
 
 // Enabled indicates if QUIC functionality is enabled.
@@ -383,6 +385,16 @@ func Dial(
 		return nil, errors.Tracef("invalid destination port: %d", remoteAddr.Port)
 	}
 
+	udpConn, ok := packetConn.(udpConn)
+	if !ok {
+		return nil, errors.TraceNew("packetConn must implement net.UDPConn functions")
+	}
+
+	// Ensure blocked packet writes eventually timeout.
+	packetConn = &writeTimeoutUDPConn{
+		udpConn: udpConn,
+	}
+
 	maxPacketSizeAdjustment := 0
 
 	if isObfuscated(quicVersion) {
@@ -486,6 +498,95 @@ func Dial(
 	}
 
 	return conn, nil
+}
+
+// udpConn matches net.UDPConn, which implements both net.Conn and
+// net.PacketConn. udpConn enables handling of Dial packetConn inputs that
+// are not concrete *net.UDPConn types but which still implement all the
+// required functions. A udpConn instance can be passed to quic-go; various
+// quic-go code paths check that the input conn implements net.Conn and/or
+// net.PacketConn.
+//
+// TODO: add *AddrPort functions introduced in Go 1.18
+type udpConn interface {
+	Close() error
+	File() (f *os.File, err error)
+	LocalAddr() net.Addr
+	Read(b []byte) (int, error)
+	ReadFrom(b []byte) (int, net.Addr, error)
+	ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error)
+	ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
+	RemoteAddr() net.Addr
+	SetDeadline(t time.Time) error
+	SetReadBuffer(bytes int) error
+	SetReadDeadline(t time.Time) error
+	SetWriteBuffer(bytes int) error
+	SetWriteDeadline(t time.Time) error
+	SyscallConn() (syscall.RawConn, error)
+	Write(b []byte) (int, error)
+	WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)
+	WriteTo(b []byte, addr net.Addr) (int, error)
+	WriteToUDP(b []byte, addr *net.UDPAddr) (int, error)
+}
+
+// writeTimeoutUDPConn sets write deadlines before each UDP packet write.
+//
+// Generally, a UDP packet write doesn't block. However, Go's
+// internal/poll.FD.WriteMsg continues to loop when syscall.SendmsgN fails
+// with EAGAIN, which indicates that an OS socket buffer is currently full;
+// in certain OS states this may cause WriteMsgUDP/etc. to block
+// indefinitely. In this scenario, we want to instead behave as if the packet
+// were dropped, so we set a write deadline which will eventually interrupt
+// any EAGAIN loop.
+//
+// Note that quic-go manages read deadlines; we set only the write deadline
+// here.
+type writeTimeoutUDPConn struct {
+	udpConn
+}
+
+func (conn *writeTimeoutUDPConn) Write(b []byte) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.udpConn.Write(b)
+}
+
+func (conn *writeTimeoutUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (int, int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.udpConn.WriteMsgUDP(b, oob, addr)
+}
+
+func (conn *writeTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.udpConn.WriteTo(b, addr)
+}
+
+func (conn *writeTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.udpConn.WriteToUDP(b, addr)
 }
 
 // Conn is a net.Conn and psiphon/common.Closer.

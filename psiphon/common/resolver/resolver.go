@@ -50,7 +50,7 @@ const (
 	resolverServersUpdateTTL         = 5 * time.Second
 	resolverDefaultAttemptsPerServer = 2
 	resolverDefaultRequestTimeout    = 5 * time.Second
-	resolverDefaultAwaitTimeout      = 100 * time.Millisecond
+	resolverDefaultAwaitTimeout      = 10 * time.Millisecond
 	resolverDefaultAnswerTTL         = 1 * time.Minute
 	resolverDNSPort                  = "53"
 	udpPacketBufferSize              = 1232
@@ -67,6 +67,11 @@ type NetworkConfig struct {
 	// BindToDevice should ensure the input file descriptor, a UDP socket, is
 	// excluded from VPN routing. BindToDevice may be nil.
 	BindToDevice func(fd int) (string, error)
+
+	// AllowDefaultResolverWithBindToDevice indicates that it's safe to use
+	// the default resolver when BindToDevice is configured, as the host OS
+	// will automatically exclude DNS requests from the VPN.
+	AllowDefaultResolverWithBindToDevice bool
 
 	// IPv6Synthesize should apply NAT64 synthesis to the input IPv4 address,
 	// returning a synthesized IPv6 address that will route to the same
@@ -130,7 +135,7 @@ type NetworkConfig struct {
 func (c *NetworkConfig) allowDefaultResolver() bool {
 	// When BindToDevice is configured, the standard library resolver is not
 	// used, as the system resolver may not route outside of the VPN.
-	return c.BindToDevice == nil
+	return c.BindToDevice == nil || c.AllowDefaultResolverWithBindToDevice
 }
 
 func (c *NetworkConfig) logWarning(err error) {
@@ -163,7 +168,7 @@ type ResolveParameters struct {
 
 	// AwaitTimeout specifies how long to await an additional response after
 	// the first response is received. This additional wait time applies only
-	// when there is no IPv4 or IPv6 response.
+	// when there is either no IPv4 or IPv6 response.
 	AwaitTimeout time.Duration
 
 	// PreresolvedIPAddress specifies an IP address result to be used in place
@@ -496,6 +501,18 @@ func (r *Resolver) ResolveIP(
 	// ResolveIP does _not_ lock r.mutex for the lifetime of the function, to
 	// ensure many ResolveIP calls can run concurrently.
 
+	// If the hostname is already an IP address, just return that. For
+	// metrics, this does not count as a resolve, as the caller may invoke
+	// ResolveIP for all dials.
+	IP := net.ParseIP(hostname)
+	if IP != nil {
+		return []net.IP{IP}, nil
+	}
+
+	// Count all resolves of an actual domain, including cached and
+	// pre-resolved cases.
+	r.updateMetricResolves()
+
 	// Call updateNetworkState immediately before resolving, as a best effort
 	// to ensure that system DNS servers and IPv6 routing network state
 	// reflects the current network. updateNetworkState locks the Resolver
@@ -516,18 +533,6 @@ func (r *Resolver) ResolveIP(
 			AwaitTimeout:               resolverDefaultAwaitTimeout,
 		}
 	}
-
-	// If the hostname is already an IP address, just return that. For
-	// metrics, this does not count as a resolve, as the caller may invoke
-	// ResolveIP for all dials.
-	IP := net.ParseIP(hostname)
-	if IP != nil {
-		return []net.IP{IP}, nil
-	}
-
-	// Count all resolves of an actual domain, including cached and
-	// pre-resolved cases.
-	r.updateMetricResolves()
 
 	// When PreresolvedIPAddress is set, tactics parameters determined the IP address
 	// in this case.
@@ -833,11 +838,21 @@ func (r *Resolver) ResolveIP(
 	// arrived concurrent with the first answer. This receive avoids a race
 	// condition where inFlight may now be 0, with additional answers
 	// enqueued, in which case the following await branch is not taken.
-	select {
-	case nextAnswer := <-answerChan:
-		result.IPs = append(result.IPs, nextAnswer.IPs...)
-		result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
-	default:
+	//
+	// It's possible for the attempts loop to exit with no received answer due
+	// to timeouts or cancellation while, concurrently, an answer is sent to
+	// the channel. In this case, when result == nil, we ignore the answers
+	// and leave this as a failed resolve.
+	if result != nil {
+		for loop := true; loop; {
+			select {
+			case nextAnswer := <-answerChan:
+				result.IPs = append(result.IPs, nextAnswer.IPs...)
+				result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+			default:
+				loop = false
+			}
+		}
 	}
 
 	// When we have an answer, await -- for a short time,
@@ -850,7 +865,7 @@ func (r *Resolver) ResolveIP(
 	if result != nil &&
 		resolveCtx.Err() == nil &&
 		atomic.LoadInt64(&inFlight) > 0 &&
-		(atomic.LoadInt32(&awaitA) != 0 || atomic.LoadInt32(&awaitAAAA) != 0) ||
+		(atomic.LoadInt32(&awaitA) != 0 || atomic.LoadInt32(&awaitAAAA) != 0) &&
 		params.AwaitTimeout > 0 {
 
 		resetTimer(params.AwaitTimeout)
