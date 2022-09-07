@@ -108,7 +108,19 @@ func (r DecoyRegistrar) Register(cjSession *ConjureSession, ctx context.Context)
 	for _, decoy := range cjSession.RegDecoys {
 		Logger().Debugf("%v Sending Reg: %v, %v", cjSession.IDString(), decoy.GetHostname(), decoy.GetIpAddrStr())
 		//decoyAddr := decoy.GetIpAddrStr()
-		go reg.send(ctx, decoy, dialErrors, cjSession.registrationCallback)
+
+		// [Psiphon]
+		//
+		// Workaround: reference and pass in reg.TcpDialer rather than wait
+		// and reference it within reg.send in the goroutine. This allows
+		// gotapdance users to clear and reset the TcpDialer field for cached
+		// ConjureRegs without risking a race condition or nil pointer
+		// dereference. These conditions otherwise arise as reg.send
+		// goroutines can remain running, and reference reg.TcpDialer, after
+		// Register returns -- the point at which gotapdance users may cache
+		// the ConjureReg.
+
+		go reg.send(ctx, decoy, reg.TcpDialer, dialErrors, cjSession.registrationCallback)
 	}
 
 	//[reference] Dial errors happen immediately so block until all N dials complete
@@ -605,7 +617,7 @@ func (reg *ConjureReg) createRequest(tlsConn *tls.UConn, decoy *pb.TLSDecoySpec)
 }
 
 // Being called in parallel -> no changes to ConjureReg allowed in this function
-func (reg *ConjureReg) send(ctx context.Context, decoy *pb.TLSDecoySpec, dialError chan error, callback func(*ConjureReg)) {
+func (reg *ConjureReg) send(ctx context.Context, decoy *pb.TLSDecoySpec, dialer dialFunc, dialError chan error, callback func(*ConjureReg)) {
 
 	deadline, deadlineAlreadySet := ctx.Deadline()
 	if !deadlineAlreadySet {
@@ -618,7 +630,7 @@ func (reg *ConjureReg) send(ctx context.Context, decoy *pb.TLSDecoySpec, dialErr
 	tcpToDecoyStartTs := time.Now()
 
 	//[Note] decoy.GetIpAddrStr() will get only v4 addr if a decoy has both
-	dialConn, err := reg.TcpDialer(childCtx, "tcp", decoy.GetIpAddrStr())
+	dialConn, err := dialer(childCtx, "tcp", decoy.GetIpAddrStr())
 
 	reg.setTCPToDecoy(durationToU32ptrMs(time.Since(tcpToDecoyStartTs)))
 	if err != nil {
