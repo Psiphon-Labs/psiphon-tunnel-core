@@ -217,6 +217,7 @@ type MeekConn struct {
 	tlsPadding                int
 	limitRequestPayloadLength int
 	redialTLSProbability      float64
+	underlyingDialer          common.Dialer
 	cachedTLSDialer           *cachedTLSDialer
 	transport                 transporter
 	mutex                     sync.Mutex
@@ -224,6 +225,7 @@ type MeekConn struct {
 	runCtx                    context.Context
 	stopRunning               context.CancelFunc
 	relayWaitGroup            *sync.WaitGroup
+	firstUnderlyingConn       net.Conn
 
 	// For MeekModeObfuscatedRoundTrip
 	meekCookieEncryptionPublicKey string
@@ -418,10 +420,12 @@ func DialMeek(
 
 		scheme = "https"
 
+		meek.initUnderlyingDialer(dialConfig)
+
 		tlsConfig := &CustomTLSConfig{
 			Parameters:                    meekConfig.Parameters,
 			DialAddr:                      meekConfig.DialAddress,
-			Dial:                          NewTCPDialer(dialConfig),
+			Dial:                          meek.underlyingDial,
 			SNIServerName:                 meekConfig.SNIServerName,
 			SkipVerify:                    skipVerify,
 			VerifyServerName:              meekConfig.VerifyServerName,
@@ -545,7 +549,8 @@ func DialMeek(
 			*copyDialConfig = *dialConfig
 			copyDialConfig.UpstreamProxyURL = ""
 
-			dialer = NewTCPDialer(copyDialConfig)
+			meek.initUnderlyingDialer(copyDialConfig)
+			dialer = meek.underlyingDial
 
 			// In this proxy case, the destination server address is in the
 			// request line URL. net/http will render the request line using
@@ -569,7 +574,8 @@ func DialMeek(
 			// If dialConfig.UpstreamProxyURL is set, HTTP proxying via
 			// CONNECT will be used by the dialer.
 
-			baseDialer := NewTCPDialer(dialConfig)
+			meek.initUnderlyingDialer(dialConfig)
+			baseDialer := meek.underlyingDial
 
 			// The dialer ignores any address that http.Transport will pass in
 			// (derived from the HTTP request URL) and always dials
@@ -699,6 +705,28 @@ func DialMeek(
 	return meek, nil
 }
 
+func (meek *MeekConn) initUnderlyingDialer(dialConfig *DialConfig) {
+
+	// Not safe for concurrent calls; should be called only from DialMeek.
+	meek.underlyingDialer = NewTCPDialer(dialConfig)
+}
+
+func (meek *MeekConn) underlyingDial(ctx context.Context, network, addr string) (net.Conn, error) {
+	conn, err := meek.underlyingDialer(ctx, network, addr)
+	if err == nil {
+		meek.mutex.Lock()
+		if meek.firstUnderlyingConn == nil {
+			// Keep a reference to the first underlying conn to be used as a
+			// common.MetricsSource in GetMetrics. This enables capturing
+			// metrics such as fragmentor configuration.
+			meek.firstUnderlyingConn = conn
+		}
+		meek.mutex.Unlock()
+	}
+	// Note: no trace error to preserve error type
+	return conn, err
+}
+
 type cachedTLSDialer struct {
 	usedCachedConn int32
 	cachedConn     net.Conn
@@ -806,6 +834,16 @@ func (meek *MeekConn) GetMetrics() common.LogFields {
 		logFields["meek_tls_padding"] = meek.tlsPadding
 		logFields["meek_limit_request"] = meek.limitRequestPayloadLength
 	}
+	// Include metrics, such as fragmentor metrics, from the _first_ underlying
+	// dial conn. Properties of subsequent underlying dial conns are not reflected
+	// in these metrics; we assume that the first dial conn, which most likely
+	// transits the various protocol handshakes, is most significant.
+	meek.mutex.Lock()
+	underlyingMetrics, ok := meek.firstUnderlyingConn.(common.MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
+	meek.mutex.Unlock()
 	return logFields
 }
 
