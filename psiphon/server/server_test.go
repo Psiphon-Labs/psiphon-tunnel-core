@@ -218,6 +218,31 @@ func TestUnfrontedMeek(t *testing.T) {
 		})
 }
 
+func TestFragmentedUnfrontedMeek(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     true,
+			forceLivenessTest:    false,
+			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
+			doBurstMonitor:       false,
+			doSplitTunnel:        false,
+			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
+		})
+}
+
 func TestUnfrontedMeekHTTPS(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
@@ -232,6 +257,32 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     false,
+			forceLivenessTest:    false,
+			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
+			doBurstMonitor:       false,
+			doSplitTunnel:        false,
+			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
+		})
+}
+
+func TestFragmentedUnfrontedMeekHTTPS(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
+			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     true,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
