@@ -674,6 +674,9 @@ func (server *MeekServer) getSessionOrEndpoint(
 				IPs := strings.Split(value, ",")
 				IP := IPs[len(IPs)-1]
 
+				// Remove optional whitespace surrounding the commas.
+				IP = strings.TrimSpace(IP)
+
 				if net.ParseIP(IP) != nil {
 					clientIP = IP
 					break
