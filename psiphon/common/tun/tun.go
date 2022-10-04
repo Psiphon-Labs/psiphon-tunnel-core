@@ -22,57 +22,55 @@
 // license that can be found in the LICENSE file.
 
 /*
-
 Package tun is an IP packet tunnel server and client. It supports tunneling
 both IPv4 and IPv6.
 
- .........................................................       .-,(  ),-.
- . [server]                                     .-----.  .    .-(          )-.
- .                                              | NIC |<---->(    Internet    )
- . .......................................      '-----'  .    '-(          ).-'
- . . [packet tunnel daemon]              .         ^     .        '-.( ).-'
- . .                                     .         |     .
- . . ...........................         .         |     .
- . . . [session]               .         .        NAT    .
- . . .                         .         .         |     .
- . . .                         .         .         v     .
- . . .                         .         .       .---.   .
- . . .                         .         .       | t |   .
- . . .                         .         .       | u |   .
- . . .                 .---.   .  .---.  .       | n |   .
- . . .                 | q |   .  | d |  .       |   |   .
- . . .                 | u |   .  | e |  .       | d |   .
- . . .          .------| e |<-----| m |<---------| e |   .
- . . .          |      | u |   .  | u |  .       | v |   .
- . . .          |      | e |   .  | x |  .       | i |   .
- . . .       rewrite   '---'   .  '---'  .       | c |   .
- . . .          |              .         .       | e |   .
- . . .          v              .         .       '---'   .
- . . .     .---------.         .         .         ^     .
- . . .     | channel |--rewrite--------------------'     .
- . . .     '---------'         .         .               .
- . . ...........^...............         .               .
- . .............|.........................               .
- ...............|.........................................
-                |
-                | (typically via Internet)
-                |
- ...............|.................
- . [client]     |                .
- .              |                .
- . .............|............... .
- . .            v              . .
- . .       .---------.         . .
- . .       | channel |         . .
- . .       '---------'         . .
- . .            ^              . .
- . .............|............... .
- .              v                .
- .        .------------.         .
- .        | tun device |         .
- .        '------------'         .
- .................................
-
+	.........................................................       .-,(  ),-.
+	. [server]                                     .-----.  .    .-(          )-.
+	.                                              | NIC |<---->(    Internet    )
+	. .......................................      '-----'  .    '-(          ).-'
+	. . [packet tunnel daemon]              .         ^     .        '-.( ).-'
+	. .                                     .         |     .
+	. . ...........................         .         |     .
+	. . . [session]               .         .        NAT    .
+	. . .                         .         .         |     .
+	. . .                         .         .         v     .
+	. . .                         .         .       .---.   .
+	. . .                         .         .       | t |   .
+	. . .                         .         .       | u |   .
+	. . .                 .---.   .  .---.  .       | n |   .
+	. . .                 | q |   .  | d |  .       |   |   .
+	. . .                 | u |   .  | e |  .       | d |   .
+	. . .          .------| e |<-----| m |<---------| e |   .
+	. . .          |      | u |   .  | u |  .       | v |   .
+	. . .          |      | e |   .  | x |  .       | i |   .
+	. . .       rewrite   '---'   .  '---'  .       | c |   .
+	. . .          |              .         .       | e |   .
+	. . .          v              .         .       '---'   .
+	. . .     .---------.         .         .         ^     .
+	. . .     | channel |--rewrite--------------------'     .
+	. . .     '---------'         .         .               .
+	. . ...........^...............         .               .
+	. .............|.........................               .
+	...............|.........................................
+	               |
+	               | (typically via Internet)
+	               |
+	...............|.................
+	. [client]     |                .
+	.              |                .
+	. .............|............... .
+	. .            v              . .
+	. .       .---------.         . .
+	. .       | channel |         . .
+	. .       '---------'         . .
+	. .            ^              . .
+	. .............|............... .
+	.              v                .
+	.        .------------.         .
+	.        | tun device |         .
+	.        '------------'         .
+	.................................
 
 The client relays IP packets between a local tun device and a channel, which
 is a transport to the server. In Psiphon, the channel will be an SSH channel
@@ -120,7 +118,6 @@ channel and negotiating the correct MTU and DNS settings. The Psiphon
 server will call Server.ClientConnected when a client connects and establishes
 a packet tunnel channel; and Server.ClientDisconnected when the client closes
 the channel and/or disconnects.
-
 */
 package tun
 
@@ -576,6 +573,11 @@ func (server *Server) resumeSession(
 	// Set new access control, flow monitoring, and metrics
 	// callbacks; all associated with the new client connection.
 
+	// IMPORTANT: any new callbacks or references to the outer client added
+	// here must be cleared in interruptSession to ensure that a paused
+	// session does not retain references to old client connection objects
+	// after the client disconnects.
+
 	session.setCheckAllowedTCPPortFunc(&checkAllowedTCPPortFunc)
 
 	session.setCheckAllowedUDPPortFunc(&checkAllowedUDPPortFunc)
@@ -665,6 +667,8 @@ func (server *Server) interruptSession(session *session) {
 	session.setFlowActivityUpdaterMaker(nil)
 
 	session.setMetricsUpdater(nil)
+
+	session.setDNSQualityReporter(nil)
 }
 
 func (server *Server) runSessionReaper() {
@@ -1506,10 +1510,12 @@ func (session *session) deleteFlow(ID flowID, flowState *flowState) {
 
 			resolveElapsedTime := dnsEndTime.Sub(dnsStartTime)
 
-			flowState.dnsQualityReporter(
-				dnsSuccess,
-				resolveElapsedTime,
-				net.IP(ID.upstreamIPAddress[:]))
+			if flowState.dnsQualityReporter != nil {
+				flowState.dnsQualityReporter(
+					dnsSuccess,
+					resolveElapsedTime,
+					net.IP(ID.upstreamIPAddress[:]))
+			}
 		}
 	}
 

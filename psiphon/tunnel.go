@@ -136,7 +136,6 @@ func getCustomParameters(
 // handshake requests and starting operateTunnel from tunnels which
 // may be discarded, call Activate on connected tunnels sequentially
 // as necessary.
-//
 func ConnectTunnel(
 	ctx context.Context,
 	config *Config,
@@ -942,9 +941,6 @@ func dialTunnel(
 
 	// Some conns report additional metrics. fragmentor.Conns report
 	// fragmentor configs.
-	//
-	// Limitation: for meek, GetMetrics from underlying fragmentor.Conn(s)
-	// should be called in order to log fragmentor metrics for meek sessions.
 	if metricsSource, ok := dialConn.(common.MetricsSource); ok {
 		dialParams.DialConnMetrics = metricsSource
 	}
@@ -1359,7 +1355,6 @@ func performLivenessTest(
 //
 // TODO: change "recently active" to include having received any
 // SSH protocol messages from the server, not just user payload?
-//
 func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	defer tunnel.operateWaitGroup.Done()
 
