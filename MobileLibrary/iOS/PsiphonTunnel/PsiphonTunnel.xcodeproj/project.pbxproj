@@ -57,7 +57,7 @@
 		CEDBA51325B7737C007685E2 /* NetworkInterface.m in Sources */ = {isa = PBXBuildFile; fileRef = CEDBA51125B7737C007685E2 /* NetworkInterface.m */; };
 		CEDE547924EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h in Headers */ = {isa = PBXBuildFile; fileRef = CEDE547724EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.h */; };
 		CEDE547A24EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m in Sources */ = {isa = PBXBuildFile; fileRef = CEDE547824EBF5980053566E /* PsiphonProviderFeedbackHandlerShim.m */; };
-		CEFC764225B1F358003A2A52 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CEFC764125B1F358003A2A52 /* Network.framework */; };
+		CEFC764225B1F358003A2A52 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CEFC764125B1F358003A2A52 /* Network.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
 		EFED7EBF1F587F6E0078980F /* libresolv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = EFED7EBE1F587F6E0078980F /* libresolv.tbd */; };
 /* End PBXBuildFile section */
 
