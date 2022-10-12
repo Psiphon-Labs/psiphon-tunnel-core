@@ -54,7 +54,6 @@ RUN mkdir -p $GOPATH/pkg/gomobile/dl \
   && mv ./cmd/gomobile/init.go ./cmd/gomobile/init.go.orig \
   && sed -e 's/golang.org\/x\/mobile\/cmd\/gobind@latest/golang.org\/x\/mobile\/cmd\/gobind/g' ./cmd/gomobile/init.go.orig > ./cmd/gomobile/init.go \
   && echo "master: $(git rev-parse master)\npinned: $(git rev-parse master)" | tee $GOROOT/MOBILE \
-  && export GO111MODULE=off \
   && go get golang.org/x/mod/modfile \
   && go get golang.org/x/tools/go/packages \
   && go install golang.org/x/mobile/cmd/gomobile \

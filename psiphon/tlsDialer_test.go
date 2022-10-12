@@ -47,7 +47,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	tris "github.com/Psiphon-Labs/tls-tris"
-	utls "github.com/Psiphon-Labs/utls"
+	utls "github.com/refraction-networking/utls"
 )
 
 func TestTLSCertificateVerification(t *testing.T) {

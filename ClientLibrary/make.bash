@@ -16,9 +16,6 @@ if [ ! -d ${BUILD_DIR} ]; then
   mkdir ${BUILD_DIR}
 fi
 
-# At this time, we don't support modules
-export GO111MODULE=off
-
 prepare_build () {
 
   BUILDDATE=$(date --iso-8601=seconds)

@@ -12,9 +12,6 @@ if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 #   https://github.com/golang/go/blob/go1.19.2/misc/ios/clangwrap.sh
 GO_VERSION_REQUIRED="1.19.2"
 
-# At this time, we don't support modules
-export GO111MODULE=off
-
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}
 
