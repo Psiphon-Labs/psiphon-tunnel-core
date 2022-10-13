@@ -114,7 +114,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     id<ReachabilityProtocol> reachability;
     _Atomic NetworkReachability currentNetworkStatus;
 
-    BOOL tunnelWholeDevice;
     _Atomic BOOL usingNoticeFiles;
 
     // DNS
@@ -167,7 +166,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         self->reachability = [Reachability reachabilityForInternetConnection];
     }
     atomic_init(&self->currentNetworkStatus, NetworkReachabilityNotReachable);
-    self->tunnelWholeDevice = FALSE;
     atomic_init(&self->usingNoticeFiles, FALSE);
 
     // Use the workaround, comma-delimited format required for gobind.
@@ -337,7 +335,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                 embeddedServerEntries,
                 embeddedServerEntriesPath,
                 self,
-                self->tunnelWholeDevice, // useDeviceBinder
+                FALSE, // useDeviceBinder
                 UseIPv6Synthesizer,
                 UseHasIPv6RouteGetter,
                 &e);
@@ -539,7 +537,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     NSError *err;
     NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:configObject
                                                usingNoticeFiles:usingNoticeFiles
-                                              tunnelWholeDevice:&self->tunnelWholeDevice
                                                       sessionID:self.sessionID
                                                      logMessage:logMessage
                                                           error:&err];
@@ -553,7 +550,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 + (NSString * _Nullable)buildPsiphonConfig:(id _Nonnull)configObject
                           usingNoticeFiles:(BOOL * _Nonnull)usingNoticeFiles
-                         tunnelWholeDevice:(BOOL * _Nonnull)tunnelWholeDevice
                                  sessionID:(NSString * _Nonnull)sessionID
                                 logMessage:(void (^)(NSString * _Nonnull))logMessage
                                      error:(NSError *_Nullable *_Nonnull)outError {
@@ -794,9 +790,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     //
 
     // We'll record our state about what mode we're in.
-    *tunnelWholeDevice = (config[@"PacketTunnelTunFileDescriptor"] != nil);
+    BOOL tunnelWholeDevice = (config[@"PacketTunnelTunFileDescriptor"] != nil);
 
-    // Other optional fields not being altered. If not set, their defaults will be used:
+    // Optional fields not being altered. If not set, their defaults will be used:
     // * LocalSocksProxyPort
     // * LocalHttpProxyPort
     // * UpstreamProxyUrl
@@ -823,10 +819,27 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     // Indicate whether UseNoticeFiles is set
     *usingNoticeFiles = (config[@"UseNoticeFiles"] != nil);
 
-    // For iOS VPN, the standard library system resolver will automatically be
-    // routed outside the VPN.
-    if (*tunnelWholeDevice) {
-        config[@"AllowDefaultDNSResolverWithBindToDevice"] = @YES;
+    // For iOS VPN, set VPN client feature while preserving any present feature names
+    if (tunnelWholeDevice == TRUE) {
+        id oldClientFeatures = config[@"ClientFeatures"];
+        NSString *vpnClientFeature = @"VPN";
+        NSMutableArray<NSString*> *clientFeatures;
+
+        if (oldClientFeatures != nil) {
+            if (![oldClientFeatures isKindOfClass:[NSArray<NSString*> class]]) {
+                *outError = [NSError errorWithDomain:PsiphonTunnelErrorDomain
+                                                code:PsiphonTunnelErrorCodeConfigError
+                                            userInfo:@{NSLocalizedDescriptionKey:@"ClientFeatures not NSArray<String*>"}];
+                return nil;
+            }
+            clientFeatures = [NSMutableArray arrayWithArray:oldClientFeatures];
+            if (![clientFeatures containsObject:vpnClientFeature]) {
+                [clientFeatures addObject:vpnClientFeature];
+            }
+        } else {
+            clientFeatures = [NSMutableArray arrayWithObject:vpnClientFeature];
+        }
+        config[@"ClientFeatures"] = clientFeatures;
     }
 
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
@@ -1218,55 +1231,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 - (NSString *)bindToDevice:(long)fileDescriptor error:(NSError **)error {
 
-    if (!self->tunnelWholeDevice) {
-        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: invalid mode"}];
-        return @"";
-    }
-
-    NSError *err;
-    NSString *activeInterface = [NetworkInterface getActiveInterfaceWithReachability:self->reachability
-                                                             andCurrentNetworkStatus:atomic_load(&self->currentNetworkStatus)
-                                                                               error:&err];
-    if (err != nil) {
-        NSString *localizedDescription = [NSString stringWithFormat:@"bindToDevice: error getting active interface %@", err.localizedDescription];
-        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
-        return @"";
-    }
-
-    unsigned int interfaceIndex = if_nametoindex([activeInterface UTF8String]);
-    if (interfaceIndex == 0) {
-        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: if_nametoindex failed: %d", errno]}];
-        return @"";
-    }
-
-    struct sockaddr sa;
-    socklen_t len = sizeof(sa);
-    int ret = getsockname((int)fileDescriptor, &sa, &len);
-    if (ret != 0) {
-        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: getsockname failed: %d", errno]}];
-        return @"";
-    }
-
-    int level = 0;
-    int optname = 0;
-    if (sa.sa_family == PF_INET) {
-        level = IPPROTO_IP;
-        optname = IP_BOUND_IF;
-    } else if (sa.sa_family == PF_INET6) {
-        level = IPPROTO_IPV6;
-        optname = IPV6_BOUND_IF;
-    } else {
-        *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: unsupported domain: %d", (int)sa.sa_family]}];
-        return @"";
-    }
-
-    ret = setsockopt((int)fileDescriptor, level, optname, &interfaceIndex, sizeof(interfaceIndex));
-    if (ret != 0) {
-        *error = [[NSError alloc] initWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"bindToDevice: setsockopt failed: %d", errno]}];
-        return @"";
-    }
-    
-    return [NSString stringWithFormat:@"active interface: %@", activeInterface];
+    *error = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: @"bindToDevice: not supported"}];
+    return @"";
 }
 
 - (NSString *)getDNSServersAsString {
@@ -1679,11 +1645,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         }
 
         BOOL usingNoticeFiles = FALSE;
-        BOOL tunnelWholeDevice = FALSE;
 
         NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:feedbackConfigJson
                                                    usingNoticeFiles:&usingNoticeFiles
-                                                  tunnelWholeDevice:&tunnelWholeDevice
                                                           sessionID:sessionID
                                                          logMessage:logMessage
                                                               error:&err];
