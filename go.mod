@@ -2,7 +2,17 @@ module github.com/Psiphon-Labs/psiphon-tunnel-core
 
 go 1.19
 
-replace github.com/refraction-networking/gotapdance => ./psiphon/common/refraction/gotapdance
+// When this is the main module, use a patched version of
+// refraction/gotapdance with
+// https://github.com/Psiphon-Labs/psiphon-tunnel-core/commit/2a4121d9
+replace github.com/refraction-networking/gotapdance => ./replace/gotapdance
+
+// When this is the main module, gitlab.com/yawning/obfs4, used by
+// refraction-networking/gotapdance, is pinned at 816cff15 the last revision
+// published without a GPL license. This version lacks obfuscation
+// improvements added in revision 1a6129b6, but these changes apply only on
+// the server side.
+replace gitlab.com/yawning/obfs4.git => ./replace/obfs4.git
 
 require (
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e

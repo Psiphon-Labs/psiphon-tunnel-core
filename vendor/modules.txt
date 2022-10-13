@@ -183,7 +183,7 @@ github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib
-# github.com/refraction-networking/gotapdance v1.2.0 => ./psiphon/common/refraction/gotapdance
+# github.com/refraction-networking/gotapdance v1.2.0 => ./replace/gotapdance
 ## explicit; go 1.16
 github.com/refraction-networking/gotapdance/ed25519/edwards25519
 github.com/refraction-networking/gotapdance/ed25519/extra25519
@@ -219,8 +219,8 @@ github.com/wader/filtertransport
 # github.com/zach-klippenstein/goregen v0.0.0-20160303162051-795b5e3961ea
 ## explicit
 github.com/zach-klippenstein/goregen
-# gitlab.com/yawning/obfs4.git v0.0.0-20190120164510-816cff15f425
-## explicit
+# gitlab.com/yawning/obfs4.git v0.0.0-20190120164510-816cff15f425 => ./replace/obfs4.git
+## explicit; go 1.19
 gitlab.com/yawning/obfs4.git/common/csrand
 gitlab.com/yawning/obfs4.git/common/drbg
 gitlab.com/yawning/obfs4.git/common/ntor
@@ -381,4 +381,5 @@ honnef.co/go/tools/staticcheck
 honnef.co/go/tools/stylecheck
 honnef.co/go/tools/unused
 honnef.co/go/tools/unused/typemap
-# github.com/refraction-networking/gotapdance => ./psiphon/common/refraction/gotapdance
+# github.com/refraction-networking/gotapdance => ./replace/gotapdance
+# gitlab.com/yawning/obfs4.git => ./replace/obfs4.git
