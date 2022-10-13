@@ -29,7 +29,4 @@ RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz 
    && rm /tmp/go.tar.gz \
    && echo $GOVERSION > $GOROOT/VERSION
 
-# Get external Go dependencies.
-RUN go get github.com/pwaller/goupx
-
 WORKDIR $GOPATH/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient

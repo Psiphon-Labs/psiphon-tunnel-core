@@ -95,10 +95,10 @@ build_for_linux () {
   unset RETVAL
 
   echo "....UPX packaging output"
-  goupx --best bin/linux/${EXE_BASENAME}-i686
+  upx --best bin/linux/${EXE_BASENAME}-i686
   RETVAL=$?
   if [ $RETVAL != 0 ]; then
-    echo ".....goupx failed, exiting"
+    echo ".....upx failed, exiting"
     exit $RETVAL
   fi
   unset RETVAL
@@ -113,10 +113,10 @@ build_for_linux () {
   unset RETVAL
 
   echo "....UPX packaging output"
-  goupx --best bin/linux/${EXE_BASENAME}-x86_64
+  upx --best bin/linux/${EXE_BASENAME}-x86_64
   RETVAL=$?
   if [ $RETVAL != 0 ]; then
-    echo ".....goupx failed, exiting"
+    echo ".....upx failed, exiting"
     exit $RETVAL
   fi
   unset RETVAL
