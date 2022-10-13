@@ -487,7 +487,7 @@ func (serverEntry *ServerEntry) SupportsProtocol(protocol string) bool {
 // ProtocolUsesLegacyPassthrough indicates whether the ServerEntry supports
 // the specified protocol using legacy passthrough messages.
 //
-// There is no correspondong check for v2 passthrough, as clients send v2
+// There is no corresponding check for v2 passthrough, as clients send v2
 // passthrough messages unconditionally, by default, for passthrough
 // protocols.
 func (serverEntry *ServerEntry) ProtocolUsesLegacyPassthrough(protocol string) bool {
@@ -725,23 +725,31 @@ func TagToDiagnosticID(tag string) string {
 // EncodeServerEntry returns a string containing the encoding of
 // a ServerEntry following Psiphon conventions.
 func EncodeServerEntry(serverEntry *ServerEntry) (string, error) {
-	return encodeServerEntry(
+	encodedServerEntry, err := encodeServerEntry(
 		serverEntry.IpAddress,
 		serverEntry.WebServerPort,
 		serverEntry.WebServerSecret,
 		serverEntry.WebServerCertificate,
 		serverEntry)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	return encodedServerEntry, nil
 }
 
 // EncodeServerEntryFields returns a string containing the encoding of
 // ServerEntryFields following Psiphon conventions.
 func EncodeServerEntryFields(serverEntryFields ServerEntryFields) (string, error) {
-	return encodeServerEntry(
+	encodedServerEntry, err := encodeServerEntry(
 		serverEntryFields.GetIPAddress(),
 		serverEntryFields.GetWebServerPort(),
 		serverEntryFields.GetWebServerSecret(),
 		serverEntryFields.GetWebServerCertificate(),
 		serverEntryFields)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	return encodedServerEntry, nil
 }
 
 func encodeServerEntry(
@@ -940,14 +948,13 @@ func NewStreamingServerEntryDecoder(
 // input stream, returning a nil server entry when the stream is complete.
 //
 // Limitations:
-// - Each encoded server entry line cannot exceed bufio.MaxScanTokenSize,
-//   the default buffer size which this decoder uses. This is 64K.
-// - DecodeServerEntry is called on each encoded server entry line, which
-//   will allocate memory to hex decode and JSON deserialze the server
-//   entry. As this is not presently reusing a fixed buffer, each call
-//   will allocate additional memory; garbage collection is necessary to
-//   reclaim that memory for reuse for the next server entry.
-//
+//   - Each encoded server entry line cannot exceed bufio.MaxScanTokenSize,
+//     the default buffer size which this decoder uses. This is 64K.
+//   - DecodeServerEntry is called on each encoded server entry line, which
+//     will allocate memory to hex decode and JSON deserialze the server
+//     entry. As this is not presently reusing a fixed buffer, each call
+//     will allocate additional memory; garbage collection is necessary to
+//     reclaim that memory for reuse for the next server entry.
 func (decoder *StreamingServerEntryDecoder) Next() (ServerEntryFields, error) {
 
 	for {

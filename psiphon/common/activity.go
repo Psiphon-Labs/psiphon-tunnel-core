@@ -144,23 +144,28 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 
 func (conn *ActivityMonitoredConn) Write(buffer []byte) (int, error) {
 	n, err := conn.Conn.Write(buffer)
-	if n > 0 && conn.activeOnWrite {
+	if n > 0 {
 
-		if conn.inactivityTimeout > 0 {
-			err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
-			if err != nil {
-				return n, errors.Trace(err)
-			}
-		}
+		// Bytes written are reported regardless of activeOnWrite. Inactivity
+		// deadline extension and LRU updates are conditional on activeOnWrite.
 
 		for _, activityUpdater := range conn.activityUpdaters {
 			activityUpdater.UpdateProgress(0, int64(n), 0)
 		}
 
-		if conn.lruEntry != nil {
-			conn.lruEntry.Touch()
-		}
+		if conn.activeOnWrite {
 
+			if conn.inactivityTimeout > 0 {
+				err = conn.Conn.SetDeadline(time.Now().Add(conn.inactivityTimeout))
+				if err != nil {
+					return n, errors.Trace(err)
+				}
+			}
+
+			if conn.lruEntry != nil {
+				conn.lruEntry.Touch()
+			}
+		}
 	}
 	// Note: no trace error to preserve error type
 	return n, err

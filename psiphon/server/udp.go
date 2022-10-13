@@ -42,7 +42,6 @@ import (
 // The udpgw protocol and original server implementation:
 // Copyright (c) 2009, Ambroz Bizjak <ambrop7@gmail.com>
 // https://github.com/ambrop72/badvpn
-//
 func (sshClient *sshClient) handleUdpgwChannel(newChannel ssh.NewChannel) {
 
 	// Accept this channel immediately. This channel will replace any
@@ -264,7 +263,7 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 			// Can't defer lruEntry.Remove() here;
 			// relayDownstream will call lruEntry.Remove()
 
-			// ActivityMonitoredConn monitors the TCP port forward I/O and updates
+			// ActivityMonitoredConn monitors the UDP port forward I/O and updates
 			// its LRU status. ActivityMonitoredConn also times out I/O on the port
 			// forward if both reads and writes have been idle for the specified
 			// duration.

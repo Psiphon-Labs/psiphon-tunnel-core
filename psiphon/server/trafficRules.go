@@ -59,9 +59,13 @@ type TrafficRulesSet struct {
 	// For each client, the first matching Filter in FilteredTrafficRules
 	// determines the additional Rules that are selected and applied
 	// on top of DefaultRules.
+	//
+	// When ExceptFilter is present, a client must match Filter and not match
+	// ExceptFilter.
 	FilteredRules []struct {
-		Filter TrafficRulesFilter
-		Rules  TrafficRules
+		Filter       TrafficRulesFilter
+		ExceptFilter *TrafficRulesFilter
+		Rules        TrafficRules
 	}
 
 	// MeekRateLimiterHistorySize enables the late-stage meek rate limiter and
@@ -418,14 +422,8 @@ func (set *TrafficRulesSet) Validate() error {
 		return nil
 	}
 
-	err := validateTrafficRules(&set.DefaultRules)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	for _, filteredRule := range set.FilteredRules {
-
-		for paramName := range filteredRule.Filter.HandshakeParameters {
+	validateFilter := func(filter *TrafficRulesFilter) error {
+		for paramName := range filter.HandshakeParameters {
 			validParamName := false
 			for _, paramSpec := range handshakeRequestParams {
 				if paramSpec.name == paramName {
@@ -437,8 +435,29 @@ func (set *TrafficRulesSet) Validate() error {
 				return errors.Tracef("invalid parameter name: %s", paramName)
 			}
 		}
+		return nil
+	}
 
-		err := validateTrafficRules(&filteredRule.Rules)
+	err := validateTrafficRules(&set.DefaultRules)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, filteredRule := range set.FilteredRules {
+
+		err := validateFilter(&filteredRule.Filter)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if filteredRule.ExceptFilter != nil {
+			err := validateFilter(filteredRule.ExceptFilter)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+
+		err = validateTrafficRules(&filteredRule.Rules)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -506,6 +525,9 @@ func (set *TrafficRulesSet) initLookups() {
 
 	for i := range set.FilteredRules {
 		initTrafficRulesFilterLookups(&set.FilteredRules[i].Filter)
+		if set.FilteredRules[i].ExceptFilter != nil {
+			initTrafficRulesFilterLookups(set.FilteredRules[i].ExceptFilter)
+		}
 		initTrafficRulesLookups(&set.FilteredRules[i].Rules)
 	}
 
@@ -616,142 +638,155 @@ func (set *TrafficRulesSet) GetTrafficRules(
 		trafficRules.DisableDiscovery = new(bool)
 	}
 
-	// TODO: faster lookup?
-	for _, filteredRules := range set.FilteredRules {
+	// matchFilter is used to check both Filter and any ExceptFilter
 
-		log.WithTraceFields(LogFields{"filter": filteredRules.Filter}).Debug("filter check")
+	matchFilter := func(filter *TrafficRulesFilter) bool {
 
-		if len(filteredRules.Filter.TunnelProtocols) > 0 {
-			if !common.Contains(filteredRules.Filter.TunnelProtocols, tunnelProtocol) {
-				continue
+		if len(filter.TunnelProtocols) > 0 {
+			if !common.Contains(filter.TunnelProtocols, tunnelProtocol) {
+				return false
 			}
 		}
 
-		if len(filteredRules.Filter.Regions) > 0 {
-			if filteredRules.Filter.regionLookup != nil {
-				if !filteredRules.Filter.regionLookup[geoIPData.Country] {
-					continue
+		if len(filter.Regions) > 0 {
+			if filter.regionLookup != nil {
+				if !filter.regionLookup[geoIPData.Country] {
+					return false
 				}
 			} else {
-				if !common.Contains(filteredRules.Filter.Regions, geoIPData.Country) {
-					continue
+				if !common.Contains(filter.Regions, geoIPData.Country) {
+					return false
 				}
 			}
 		}
 
-		if len(filteredRules.Filter.ISPs) > 0 {
-			if filteredRules.Filter.ispLookup != nil {
-				if !filteredRules.Filter.ispLookup[geoIPData.ISP] {
-					continue
+		if len(filter.ISPs) > 0 {
+			if filter.ispLookup != nil {
+				if !filter.ispLookup[geoIPData.ISP] {
+					return false
 				}
 			} else {
-				if !common.Contains(filteredRules.Filter.ISPs, geoIPData.ISP) {
-					continue
+				if !common.Contains(filter.ISPs, geoIPData.ISP) {
+					return false
 				}
 			}
 		}
 
-		if len(filteredRules.Filter.ASNs) > 0 {
-			if filteredRules.Filter.asnLookup != nil {
-				if !filteredRules.Filter.asnLookup[geoIPData.ASN] {
-					continue
+		if len(filter.ASNs) > 0 {
+			if filter.asnLookup != nil {
+				if !filter.asnLookup[geoIPData.ASN] {
+					return false
 				}
 			} else {
-				if !common.Contains(filteredRules.Filter.ASNs, geoIPData.ASN) {
-					continue
+				if !common.Contains(filter.ASNs, geoIPData.ASN) {
+					return false
 				}
 			}
 		}
 
-		if len(filteredRules.Filter.Cities) > 0 {
-			if filteredRules.Filter.cityLookup != nil {
-				if !filteredRules.Filter.cityLookup[geoIPData.City] {
-					continue
+		if len(filter.Cities) > 0 {
+			if filter.cityLookup != nil {
+				if !filter.cityLookup[geoIPData.City] {
+					return false
 				}
 			} else {
-				if !common.Contains(filteredRules.Filter.Cities, geoIPData.City) {
-					continue
+				if !common.Contains(filter.Cities, geoIPData.City) {
+					return false
 				}
 			}
 		}
 
-		if filteredRules.Filter.APIProtocol != "" {
+		if filter.APIProtocol != "" {
 			if !state.completed {
-				continue
+				return false
 			}
-			if state.apiProtocol != filteredRules.Filter.APIProtocol {
-				continue
+			if state.apiProtocol != filter.APIProtocol {
+				return false
 			}
 		}
 
-		if filteredRules.Filter.HandshakeParameters != nil {
+		if filter.HandshakeParameters != nil {
 			if !state.completed {
-				continue
+				return false
 			}
 
-			mismatch := false
-			for name, values := range filteredRules.Filter.HandshakeParameters {
+			for name, values := range filter.HandshakeParameters {
 				clientValue, err := getStringRequestParam(state.apiParams, name)
 				if err != nil || !common.ContainsWildcard(values, clientValue) {
-					mismatch = true
-					break
+					return false
 				}
-			}
-			if mismatch {
-				continue
 			}
 		}
 
-		if filteredRules.Filter.AuthorizationsRevoked {
+		if filter.AuthorizationsRevoked {
 			if !state.completed {
-				continue
+				return false
 			}
 
 			if !state.authorizationsRevoked {
-				continue
+				return false
 			}
 
 		} else {
-			if len(filteredRules.Filter.ActiveAuthorizationIDs) > 0 {
+			if len(filter.ActiveAuthorizationIDs) > 0 {
 				if !state.completed {
-					continue
+					return false
 				}
 
 				if state.authorizationsRevoked {
-					continue
+					return false
 				}
 
-				if filteredRules.Filter.activeAuthorizationIDLookup != nil {
+				if filter.activeAuthorizationIDLookup != nil {
 					found := false
 					for _, ID := range state.activeAuthorizationIDs {
-						if filteredRules.Filter.activeAuthorizationIDLookup[ID] {
+						if filter.activeAuthorizationIDLookup[ID] {
 							found = true
 							break
 						}
 					}
 					if !found {
-						continue
+						return false
 					}
 				} else {
-					if !common.ContainsAny(filteredRules.Filter.ActiveAuthorizationIDs, state.activeAuthorizationIDs) {
-						continue
+					if !common.ContainsAny(filter.ActiveAuthorizationIDs, state.activeAuthorizationIDs) {
+						return false
 					}
 				}
 
 			}
-			if len(filteredRules.Filter.AuthorizedAccessTypes) > 0 {
+			if len(filter.AuthorizedAccessTypes) > 0 {
 				if !state.completed {
-					continue
+					return false
 				}
 
 				if state.authorizationsRevoked {
-					continue
+					return false
 				}
 
-				if !common.ContainsAny(filteredRules.Filter.AuthorizedAccessTypes, state.authorizedAccessTypes) {
-					continue
+				if !common.ContainsAny(filter.AuthorizedAccessTypes, state.authorizedAccessTypes) {
+					return false
 				}
 			}
+		}
+
+		return true
+	}
+
+	// Match filtered rules
+	//
+	// TODO: faster lookup?
+
+	for _, filteredRules := range set.FilteredRules {
+
+		log.WithTraceFields(LogFields{"filter": filteredRules.Filter}).Debug("filter check")
+
+		match := matchFilter(&filteredRules.Filter)
+		if match && filteredRules.ExceptFilter != nil {
+			match = !matchFilter(filteredRules.ExceptFilter)
+		}
+		if !match {
+			continue
 		}
 
 		log.WithTraceFields(LogFields{"filter": filteredRules.Filter}).Debug("filter match")
