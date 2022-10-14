@@ -18,7 +18,7 @@ require (
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/quic-go v0.0.0-20221012142746-f3b75b440582
+	github.com/Psiphon-Labs/quic-go v0.0.0-20221014165902-1b7c3975fcf3
 	github.com/Psiphon-Labs/tls-tris v0.0.0-20210713133851-676a693d51ad
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
@@ -48,10 +48,10 @@ require (
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 	github.com/zach-klippenstein/goregen v0.0.0-20160303162051-795b5e3961ea
-	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4
-	golang.org/x/net v0.0.0-20220722155237-a158d28d115b
+	golang.org/x/crypto v0.0.0-20221012134737-56aed061732a
+	golang.org/x/net v0.0.0-20221014081412-f15817d10f9b
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
-	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f
+	golang.org/x/sys v0.0.0-20221013171732-95e765b1cc43
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
 )
 
@@ -59,8 +59,8 @@ require (
 	git.torproject.org/pluggable-transports/goptlib.git v1.2.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20170702084017-28f7e881ca57 // indirect
 	github.com/BurntSushi/toml v0.3.1 // indirect
-	github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20220329170849-8c3d6ec797db // indirect
-	github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20221011165004-2c4f1e9e222f // indirect
+	github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20221014170512-3bdc7291c091 // indirect
+	github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20221014165721-ed28749db082 // indirect
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/andybalholm/brotli v1.0.5-0.20220518190645-786ec621f618 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -82,7 +82,7 @@ require (
 	github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507 // indirect
 	github.com/smartystreets/goconvey v1.7.2 // indirect
 	gitlab.com/yawning/obfs4.git v0.0.0-20190120164510-816cff15f425 // indirect
-	golang.org/x/exp v0.0.0-20221011184403-17211926a99e // indirect
+	golang.org/x/exp v0.0.0-20221012211006-4de253d81b95 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/tools v0.1.12 // indirect
