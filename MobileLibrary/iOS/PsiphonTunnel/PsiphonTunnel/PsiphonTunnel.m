@@ -1146,26 +1146,17 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
-    else if ([noticeType isEqualToString:@"ApplicationParameter"]) {
+    else if ([noticeType isEqualToString:@"ApplicationParameters"]) {
         
-        id key = [notice valueForKeyPath:@"data.key"];
-        if (![key isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"ApplicationParameter notice missing data.key: %@", noticeJSON]];
+        id parameters = [notice valueForKeyPath:@"data.parameters"];
+        if (![parameters isKindOfClass:[NSDictionary class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ApplicationParameters notice missing data.parameters: %@", noticeJSON]];
             return;
         }
 
-        id maybeValue = [notice valueForKeyPath:@"data.value"];
-        if (!maybeValue) {
-            [self logMessage:[NSString stringWithFormat: @"ApplicationParameter notice missing data.value: %@", noticeJSON]];
-            return;
-        }
-
-        // value is nil if data.value is NSNull.
-        id value = maybeValue == [NSNull null] ? nil : maybeValue;
-
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onApplicationParameter::)]) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onApplicationParameters:)]) {
             dispatch_sync(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onApplicationParameter:(NSString *)key :value];
+                [self.tunneledAppDelegate onApplicationParameters:parameters];
             });
         }
     }

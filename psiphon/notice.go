@@ -111,7 +111,6 @@ func GetEmitNetworkParameters() bool {
 // - "timestamp": UTC timezone, RFC3339Milli format timestamp for notice event
 //
 // See the Notice* functions for details on each notice meaning and payload.
-//
 func SetNoticeWriter(writer io.Writer) {
 
 	singletonNoticeLogger.mutex.Lock()
@@ -122,25 +121,24 @@ func SetNoticeWriter(writer io.Writer) {
 
 // setNoticeFiles configures files for notice writing.
 //
-// - When homepageFilename is not "", homepages are written to the specified file
-//   and omitted from the writer. The file may be read after the Tunnels notice
-//   with count of 1. The file should be opened read-only for reading.
+//   - When homepageFilename is not "", homepages are written to the specified file
+//     and omitted from the writer. The file may be read after the Tunnels notice
+//     with count of 1. The file should be opened read-only for reading.
 //
-// - When rotatingFilename is not "", all notices are are written to the specified
-//   file. Diagnostic notices are omitted from the writer. The file is rotated
-//   when its size exceeds rotatingFileSize. One rotated older file,
-//   <rotatingFilename>.1, is retained. The files may be read at any time; and
-//   should be opened read-only for reading. rotatingSyncFrequency specifies how
-//   many notices are written before syncing the file.
-//   If either rotatingFileSize or rotatingSyncFrequency are <= 0, default values
-//   are used.
+//   - When rotatingFilename is not "", all notices are are written to the specified
+//     file. Diagnostic notices are omitted from the writer. The file is rotated
+//     when its size exceeds rotatingFileSize. One rotated older file,
+//     <rotatingFilename>.1, is retained. The files may be read at any time; and
+//     should be opened read-only for reading. rotatingSyncFrequency specifies how
+//     many notices are written before syncing the file.
+//     If either rotatingFileSize or rotatingSyncFrequency are <= 0, default values
+//     are used.
 //
-// - If an error occurs when writing to a file, an InternalError notice is emitted to
-//   the writer.
+//   - If an error occurs when writing to a file, an InternalError notice is emitted to
+//     the writer.
 //
 // setNoticeFiles closes open homepage or rotating files before applying the new
 // configuration.
-//
 func setNoticeFiles(
 	homepageFilename string,
 	rotatingFilename string,
@@ -952,18 +950,18 @@ func NoticeFragmentor(diagnosticID string, message string) {
 	}
 }
 
-// NoticeApplicationParameters reports application parameters. Each key/value
-// parameter pair is emitted in a distinct notice, and each key/value pair is
-// reported at most once per session for a fixed value.
+// NoticeApplicationParameters reports application parameters.
 func NoticeApplicationParameters(keyValues parameters.KeyValues) {
-	for key, value := range keyValues {
-		repetitionKey := fmt.Sprintf("ApplicationParameterKey-%s", key)
-		outputRepetitiveNotice(
-			repetitionKey, string(value), 0,
-			"ApplicationParameter", 0,
-			"key", key,
-			"value", value)
+
+	// Never emit 'null' instead of empty object
+	if keyValues == nil {
+		keyValues = parameters.KeyValues{}
 	}
+
+	outputRepetitiveNotice(
+		"ApplicationParameters", fmt.Sprintf("%+v", keyValues), 0,
+		"ApplicationParameters", 0,
+		"parameters", keyValues)
 }
 
 // NoticeServerAlert reports server alerts. Each distinct server alert is
