@@ -297,7 +297,7 @@ WWAN or vice versa or VPN state changed
 /*!
  Called when tunnel-core receives "ApplicationParameters" from the server.
  */
-- (void)onApplicationParameter:(NSString * _Nonnull)key :(id _Nonnull)value;
+- (void)onApplicationParameters:(NSDictionary * _Nonnull)parameters;
 
 @end
 

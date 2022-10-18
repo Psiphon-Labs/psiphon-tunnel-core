@@ -663,7 +663,13 @@ func (s *session) handlePacketImpl(p *receivedPacket) error {
 	if s.perspective == protocol.PerspectiveClient && !s.receivedFirstPacket && hdr.IsLongHeader && !hdr.SrcConnectionID.Equal(s.destConnID) {
 		s.logger.Debugf("Received first packet. Switching destination connection ID to: %s", hdr.SrcConnectionID)
 		s.destConnID = hdr.SrcConnectionID
-		s.packer.ChangeDestConnectionID(s.destConnID)
+		err = s.packer.ChangeDestConnectionID(s.destConnID)
+		// [Psiphon]
+		// - Check error return value.
+		if err != nil {
+			return err
+		}
+		// [Psiphon]
 	}
 
 	s.receivedFirstPacket = true

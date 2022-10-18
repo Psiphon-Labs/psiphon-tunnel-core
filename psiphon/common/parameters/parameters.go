@@ -32,10 +32,10 @@ snapshot so that related parameters, such as two Ints representing a range; or
 a more complex series of related parameters; may be read in an atomic and
 consistent way. For example:
 
-    p := params.Get()
-    min := p.Int("Min")
-    max := p.Int("Max")
-    p = nil
+	p := params.Get()
+	min := p.Int("Min")
+	max := p.Int("Max")
+	p = nil
 
 For long-running operations, it is recommended to set any pointer to the
 snapshot to nil to allow garbage collection of old snaphots in cases where the
@@ -508,7 +508,7 @@ var defaultParameters = map[string]struct {
 	//
 	// MeekCookieMaxPadding cannot exceed common.OBFUSCATE_SEED_LENGTH.
 	//
-	// MeekMinTLSPadding/MeekMinTLSPadding are subject to TLS server limitations.
+	// MeekMinTLSPadding/MeekMaxTLSPadding are subject to TLS server limitations.
 	//
 	// MeekMinLimitRequestPayloadLength/MeekMaxLimitRequestPayloadLength
 	// cannot exceed server.MEEK_MAX_REQUEST_PAYLOAD_LENGTH.
@@ -1119,9 +1119,8 @@ func (p *Parameters) Get() ParametersAccessor {
 //
 // Customizations include:
 //
-// - customNetworkLatencyMultiplier, which overrides NetworkLatencyMultiplier
-//   for this instance only.
-//
+//   - customNetworkLatencyMultiplier, which overrides NetworkLatencyMultiplier
+//     for this instance only.
 func (p *Parameters) GetCustom(
 	customNetworkLatencyMultiplier float64) ParametersAccessor {
 

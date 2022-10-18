@@ -459,8 +459,12 @@ func (p *packetPackerLegacy) canSendData(encLevel protocol.EncryptionLevel) bool
 	return encLevel == protocol.EncryptionForwardSecure
 }
 
-func (p *packetPackerLegacy) ChangeDestConnectionID(connID protocol.ConnectionID) {
-	panic("changing connection IDs not supported by gQUIC")
+func (p *packetPackerLegacy) ChangeDestConnectionID(connID protocol.ConnectionID) error {
+	// [Psiphon]
+	// - Don't panic, since this may be invoked due to invalid input.
+	//panic("changing connection IDs not supported by gQUIC")
+	return errors.New("changing connection IDs not supported by gQUIC")
+	// [Psiphon]
 }
 
 func (p *packetPackerLegacy) HandleTransportParameters(params *handshake.TransportParameters) {

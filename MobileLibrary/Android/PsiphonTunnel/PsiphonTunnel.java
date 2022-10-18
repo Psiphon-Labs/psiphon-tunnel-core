@@ -127,7 +127,7 @@ public class PsiphonTunnel {
         default public void onStoppedWaitingForNetworkConnectivity() {}
         default public void onActiveAuthorizationIDs(List<String> authorizations) {}
         default public void onTrafficRateLimits(long upstreamBytesPerSecond, long downstreamBytesPerSecond) {}
-        default public void onApplicationParameter(String key, Object value) {}
+        default public void onApplicationParameters(Object parameters) {}
         default public void onServerAlert(String reason, String subject, List<String> actionURLs) {}
         default public void onExiting() {}
     }
@@ -1011,10 +1011,9 @@ public class PsiphonTunnel {
                       enableUdpGwKeepalive();
                     }
                 }
-            } else if (noticeType.equals("ApplicationParameter")) {
-                mHostService.onApplicationParameter(
-                    notice.getJSONObject("data").getString("key"),
-                    notice.getJSONObject("data").get("value"));
+            } else if (noticeType.equals("ApplicationParameters")) {
+                mHostService.onApplicationParameters(
+                    notice.getJSONObject("data").get("parameters"));
             } else if (noticeType.equals("ServerAlert")) {
                 JSONArray actionURLs = notice.getJSONObject("data").getJSONArray("actionURLs");
                 ArrayList<String> actionURLsList = new ArrayList<String>();
