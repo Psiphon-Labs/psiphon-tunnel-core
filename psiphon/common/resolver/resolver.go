@@ -892,7 +892,9 @@ func (r *Resolver) ResolveIP(
 		}
 	}
 
-	timer.Stop()
+	if timer != nil {
+		timer.Stop()
+	}
 
 	// Interrupt all workers.
 	cancelFunc()
