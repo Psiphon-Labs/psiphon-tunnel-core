@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.17.13" ]
+        go: [ "1.19.2" ]
         test-type: [ "detector", "coverage", "memory" ]
 
     runs-on: ${{ matrix.os }}-latest
@@ -28,7 +28,6 @@ jobs:
 
     env:
       GOPATH: ${{ github.workspace }}/go
-      GO111MODULE: off
 
     steps:
 

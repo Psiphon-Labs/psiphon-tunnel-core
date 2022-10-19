@@ -1,0 +1,8 @@
+language: go
+go:
+ - 1.7.3
+install:
+- go build -v ./...
+
+script:
+- go test -race -v

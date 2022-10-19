@@ -10,9 +10,6 @@ fi
 # $2, if specified, is go build tags
 if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 
-# At this time, we don't support modules
-export GO111MODULE=off
-
 EXE_BASENAME="psiphon-tunnel-core"
 
 prepare_build () {
@@ -98,10 +95,10 @@ build_for_linux () {
   unset RETVAL
 
   echo "....UPX packaging output"
-  goupx --best bin/linux/${EXE_BASENAME}-i686
+  upx --best bin/linux/${EXE_BASENAME}-i686
   RETVAL=$?
   if [ $RETVAL != 0 ]; then
-    echo ".....goupx failed, exiting"
+    echo ".....upx failed, exiting"
     exit $RETVAL
   fi
   unset RETVAL
@@ -116,10 +113,10 @@ build_for_linux () {
   unset RETVAL
 
   echo "....UPX packaging output"
-  goupx --best bin/linux/${EXE_BASENAME}-x86_64
+  upx --best bin/linux/${EXE_BASENAME}-x86_64
   RETVAL=$?
   if [ $RETVAL != 0 ]; then
-    echo ".....goupx failed, exiting"
+    echo ".....upx failed, exiting"
     exit $RETVAL
   fi
   unset RETVAL

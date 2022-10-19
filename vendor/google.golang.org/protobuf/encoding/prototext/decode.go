@@ -22,6 +22,7 @@ import (
 )
 
 // Unmarshal reads the given []byte into the given proto.Message.
+// The provided message must be mutable (e.g., a non-nil pointer to a message).
 func Unmarshal(b []byte, m proto.Message) error {
 	return UnmarshalOptions{}.Unmarshal(b, m)
 }
@@ -50,8 +51,9 @@ type UnmarshalOptions struct {
 	}
 }
 
-// Unmarshal reads the given []byte and populates the given proto.Message using options in
-// UnmarshalOptions object.
+// Unmarshal reads the given []byte and populates the given proto.Message
+// using options in the UnmarshalOptions object.
+// The provided message must be mutable (e.g., a non-nil pointer to a message).
 func (o UnmarshalOptions) Unmarshal(b []byte, m proto.Message) error {
 	return o.unmarshal(b, m)
 }
@@ -742,9 +744,6 @@ func (d decoder) skipValue() error {
 				// Skip items. This will not validate whether skipped values are
 				// of the same type or not, same behavior as C++
 				// TextFormat::Parser::AllowUnknownField(true) version 3.8.0.
-				if err := d.skipValue(); err != nil {
-					return err
-				}
 			}
 		}
 	}
