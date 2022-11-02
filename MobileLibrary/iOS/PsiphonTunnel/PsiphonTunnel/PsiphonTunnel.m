@@ -114,6 +114,8 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     id<ReachabilityProtocol> reachability;
     _Atomic NetworkReachability currentNetworkStatus;
 
+    BOOL tunnelWholeDevice;
+
     _Atomic BOOL usingNoticeFiles;
 
     // DNS
@@ -166,6 +168,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         self->reachability = [Reachability reachabilityForInternetConnection];
     }
     atomic_init(&self->currentNetworkStatus, NetworkReachabilityNotReachable);
+    self->tunnelWholeDevice = FALSE;
     atomic_init(&self->usingNoticeFiles, FALSE);
 
     // Use the workaround, comma-delimited format required for gobind.
@@ -536,6 +539,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     NSError *err;
     NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:configObject
+                                              tunnelWholeDevice:&self->tunnelWholeDevice
                                                usingNoticeFiles:usingNoticeFiles
                                                       sessionID:self.sessionID
                                                      logMessage:logMessage
@@ -549,6 +553,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 + (NSString * _Nullable)buildPsiphonConfig:(id _Nonnull)configObject
+                        tunnelWholeDevice:(BOOL * _Nonnull)tunnelWholeDevice
                           usingNoticeFiles:(BOOL * _Nonnull)usingNoticeFiles
                                  sessionID:(NSString * _Nonnull)sessionID
                                 logMessage:(void (^)(NSString * _Nonnull))logMessage
@@ -790,7 +795,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     //
 
     // We'll record our state about what mode we're in.
-    BOOL tunnelWholeDevice = (config[@"PacketTunnelTunFileDescriptor"] != nil);
+    *tunnelWholeDevice = (config[@"PacketTunnelTunFileDescriptor"] != nil);
 
     // Optional fields not being altered. If not set, their defaults will be used:
     // * LocalSocksProxyPort
@@ -820,7 +825,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     *usingNoticeFiles = (config[@"UseNoticeFiles"] != nil);
 
     // For iOS VPN, set VPN client feature while preserving any present feature names
-    if (tunnelWholeDevice == TRUE) {
+    if (*tunnelWholeDevice == TRUE) {
         id oldClientFeatures = config[@"ClientFeatures"];
         NSString *vpnClientFeature = @"VPN";
         NSMutableArray<NSString*> *clientFeatures;
@@ -840,6 +845,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             clientFeatures = [NSMutableArray arrayWithObject:vpnClientFeature];
         }
         config[@"ClientFeatures"] = clientFeatures;
+
     }
 
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
@@ -1228,7 +1234,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 - (NSString *)getDNSServersAsString {
 
-    if (atomic_load(&self->useInitialDNS)) {
+    // In non-VPN mode, don't use the tunnel-core custom DNS resolver with
+    // any system DNS servers, as these are commonly LAN addresses and
+    // sending UDP packets to the LAN will trigger Local Network Privacy
+    // permissions requirements.
+    if (self->tunnelWholeDevice == TRUE && atomic_load(&self->useInitialDNS)) {
         return self->initialDNSCache;
     } else {
         // Alternate DNS servers may be provided by psiphon-tunnel-core config
@@ -1635,9 +1645,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             return;
         }
 
+        BOOL tunnelWholeDevice = FALSE;
         BOOL usingNoticeFiles = FALSE;
 
         NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:feedbackConfigJson
+                                                  tunnelWholeDevice:&tunnelWholeDevice
                                                    usingNoticeFiles:&usingNoticeFiles
                                                           sessionID:sessionID
                                                          logMessage:logMessage
