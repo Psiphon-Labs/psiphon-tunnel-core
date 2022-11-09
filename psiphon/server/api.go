@@ -59,7 +59,6 @@ const (
 // psi_web protocol and naming conventions. The API is compatible with
 // all tunnel-core clients but are not backwards compatible with all
 // legacy clients.
-//
 func sshAPIRequestHandler(
 	support *SupportServices,
 	clientAddr string,
@@ -549,6 +548,7 @@ var failedTunnelStatParams = append(
 		{"session_id", isHexDigits, 0},
 		{"last_connected", isLastConnected, 0},
 		{"client_failed_timestamp", isISO8601Date, 0},
+		{"record_probability", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 		{"liveness_test_upstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"liveness_test_sent_upstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"liveness_test_downstream_bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
