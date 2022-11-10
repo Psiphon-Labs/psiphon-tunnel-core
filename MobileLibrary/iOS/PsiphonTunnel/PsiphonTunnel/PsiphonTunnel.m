@@ -848,6 +848,24 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     }
 
+    // Where required, enable TransferURLsAlwaysSkipVerify, which overrides
+    // the TransferURL.SkipVerify configuration for remote server list
+    // downloads and feedback uploads. Both of these operations have
+    // additional security at the payload level. Verifying TLS certificates
+    // is preferred, as an additional security and circumvention layer, but
+    // is not possible in these circumstances:
+    // - On iOS < 12, Go 1.18+ does not support loading the system root CAs.
+    // - On iOS < 15 and in the VPN extension, loading the system root CAs
+    //   exceeds the extension memory limit.
+
+    BOOL alwaysSkipVerify = TRUE;
+    if (@available(iOS 15.0, *)) {
+        alwaysSkipVerify = FALSE;
+    } else if (@available(iOS 12.0, *)) {
+        alwaysSkipVerify = *tunnelWholeDevice;
+    }
+    config[@"TransferURLsAlwaysSkipVerify"] = @(alwaysSkipVerify);
+
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
     if (finalConfigStr == nil) {

@@ -71,7 +71,7 @@ func FetchCommonRemoteServerList(
 		downloadTimeout,
 		downloadURL.URL,
 		canonicalURL,
-		downloadURL.SkipVerify,
+		downloadURL.SkipVerify || config.TransferURLsAlwaysSkipVerify,
 		"",
 		config.GetRemoteServerListDownloadFilename())
 	if err != nil {

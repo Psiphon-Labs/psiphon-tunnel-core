@@ -419,6 +419,16 @@ type Config struct {
 	// operating system.
 	TrustedCACertificatesFilename string
 
+	// TransferURLsAlwaysSkipVerify, when true, forces TransferURL.SkipVerify
+	// to true for all remote server list downloads, upgrade downloads, and
+	// feedback uploads. Each of these transfers has additional security at
+	// the payload level. Verifying TLS certificates is preferred, as an
+	// additional security and circumvention layer; set
+	// TransferURLsAlwaysSkipVerify only in cases where system root CAs
+	// cannot be loaded; for example, if unsupported (iOS < 12) or
+	// insufficient memory (VPN extension on iOS < 15).
+	TransferURLsAlwaysSkipVerify bool
+
 	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive
 	// every 1-2 minutes, when the tunnel is idle. If the SSH keepalive times
 	// out, the tunnel is considered to have failed.
@@ -891,12 +901,12 @@ func (config *Config) IsCommitted() bool {
 // DataRootDirectory.
 //
 // For each migration operation:
-// - In the case of directories that could have defaulted to the current working
-//   directory, persistent files and directories created by Psiphon are
-//   precisely targeted to avoid moving files which were not created by Psiphon.
-// - If no file is found at the specified path, or an error is encountered while
-//   migrating the file, then an error is logged and execution continues
-//   normally.
+//   - In the case of directories that could have defaulted to the current working
+//     directory, persistent files and directories created by Psiphon are
+//     precisely targeted to avoid moving files which were not created by Psiphon.
+//   - If no file is found at the specified path, or an error is encountered while
+//     migrating the file, then an error is logged and execution continues
+//     normally.
 //
 // A sentinel file which signals that file migration has been completed, and
 // should not be attempted again, is created under DataRootDirectory after one
