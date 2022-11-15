@@ -741,8 +741,10 @@ func RecordFailedTunnelStat(
 	bytesDown int64,
 	tunnelErr error) error {
 
-	if !config.GetParameters().Get().WeightedCoinFlip(
-		parameters.RecordFailedTunnelPersistentStatsProbability) {
+	probability := config.GetParameters().Get().Float(
+		parameters.RecordFailedTunnelPersistentStatsProbability)
+
+	if !prng.FlipWeightedCoin(probability) {
 		return nil
 	}
 
@@ -780,11 +782,15 @@ func RecordFailedTunnelStat(
 		params["bytes_down"] = fmt.Sprintf("%d", bytesDown)
 	}
 
+	// Log RecordFailedTunnelPersistentStatsProbability to indicate the
+	// proportion of failed tunnel events being recorded at the time of
+	// this log event.
+	params["record_probability"] = fmt.Sprintf("%f", probability)
+
 	// Ensure direct server IPs are not exposed in logs. The "net" package, and
 	// possibly other 3rd party packages, will include destination addresses in
 	// I/O error messages.
 	tunnelError := common.RedactIPAddressesString(tunnelErr.Error())
-
 	params["tunnel_error"] = tunnelError
 
 	failedTunnelStatJson, err := json.Marshal(params)

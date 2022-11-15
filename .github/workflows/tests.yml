@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.17.13" ]
+        go: [ "1.19.2" ]
         test-type: [ "detector", "coverage", "memory" ]
 
     runs-on: ${{ matrix.os }}-latest
@@ -28,17 +28,16 @@ jobs:
 
     env:
       GOPATH: ${{ github.workspace }}/go
-      GO111MODULE: off
 
     steps:
 
       - name: Clone repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           path: ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
 
       - name: Install Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: ${{ matrix.go }}
 
@@ -51,10 +50,10 @@ jobs:
       - name: Install coverage tools
         if: ${{ matrix.test-type == 'coverage' }}
         run: |
-          go get github.com/axw/gocov/gocov
-          go get github.com/modocache/gover
-          go get github.com/mattn/goveralls
-          go get golang.org/x/tools/cmd/cover
+          go install github.com/axw/gocov/gocov@latest
+          go install github.com/modocache/gover@latest
+          go install github.com/mattn/goveralls@latest
+          go install golang.org/x/tools/cmd/cover@latest
 
       - name: Check environment
         run: |

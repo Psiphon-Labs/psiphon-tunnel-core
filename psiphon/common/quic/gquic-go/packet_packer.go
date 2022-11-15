@@ -21,7 +21,11 @@ type packer interface {
 	PackConnectionClose(*wire.ConnectionCloseFrame) (*packedPacket, error)
 
 	HandleTransportParameters(*handshake.TransportParameters)
-	ChangeDestConnectionID(protocol.ConnectionID)
+
+	// [Psiphon]
+	// - Add error return value.
+	ChangeDestConnectionID(protocol.ConnectionID) error
+	// [Psiphon]
 }
 
 type packedPacket struct {
@@ -477,8 +481,12 @@ func (p *packetPacker) canSendData(encLevel protocol.EncryptionLevel) bool {
 	return encLevel == protocol.EncryptionForwardSecure
 }
 
-func (p *packetPacker) ChangeDestConnectionID(connID protocol.ConnectionID) {
+func (p *packetPacker) ChangeDestConnectionID(connID protocol.ConnectionID) error {
 	p.destConnID = connID
+
+	// [Psiphon]
+	return nil
+	// [Psiphon]
 }
 
 func (p *packetPacker) HandleTransportParameters(params *handshake.TransportParameters) {

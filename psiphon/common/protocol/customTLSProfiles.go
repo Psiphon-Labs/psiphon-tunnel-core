@@ -25,7 +25,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	utls "github.com/Psiphon-Labs/utls"
+	utls "github.com/refraction-networking/utls"
 )
 
 // CustomTLSProfile specifies custom TLS profile. This is used to deploy

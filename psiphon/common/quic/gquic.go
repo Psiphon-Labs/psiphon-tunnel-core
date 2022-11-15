@@ -42,12 +42,12 @@ type gQUICListener struct {
 	gquic.Listener
 }
 
-func (l *gQUICListener) Accept() (quicSession, error) {
+func (l *gQUICListener) Accept() (quicConnection, error) {
 	session, err := l.Listener.Accept()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return &gQUICSession{Session: session}, nil
+	return &gQUICConnection{Session: session}, nil
 }
 
 func gQUICListen(
@@ -75,23 +75,24 @@ func gQUICListen(
 	return &gQUICListener{Listener: gl}, nil
 }
 
-type gQUICSession struct {
+type gQUICConnection struct {
+	// Legacy gQUIC used the term "session" for a QUICv1 "connection".
 	gquic.Session
 }
 
-func (s *gQUICSession) AcceptStream() (quicStream, error) {
-	stream, err := s.Session.AcceptStream()
+func (c *gQUICConnection) AcceptStream() (quicStream, error) {
+	stream, err := c.Session.AcceptStream()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	return stream, nil
 }
 
-func (s *gQUICSession) OpenStream() (quicStream, error) {
-	return s.Session.OpenStream()
+func (c *gQUICConnection) OpenStream() (quicStream, error) {
+	return c.Session.OpenStream()
 }
 
-func (s *gQUICSession) isErrorIndicatingClosed(err error) bool {
+func (c *gQUICConnection) isErrorIndicatingClosed(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -109,7 +110,7 @@ func gQUICDialContext(
 	packetConn net.PacketConn,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
-	versionNumber uint32) (quicSession, error) {
+	versionNumber uint32) (quicConnection, error) {
 
 	quicConfig := &gquic.Config{
 		HandshakeTimeout: time.Duration(1<<63 - 1),
@@ -137,7 +138,7 @@ func gQUICDialContext(
 		return nil, errors.Trace(err)
 	}
 
-	return &gQUICSession{Session: dialSession}, nil
+	return &gQUICConnection{Session: dialSession}, nil
 }
 
 func gQUICRoundTripper(t *QUICTransporter) (quicRoundTripper, error) {
@@ -146,9 +147,9 @@ func gQUICRoundTripper(t *QUICTransporter) (quicRoundTripper, error) {
 
 func (t *QUICTransporter) dialgQUIC(
 	_, _ string, _ *tls.Config, _ *gquic.Config) (gquic.Session, error) {
-	session, err := t.dialQUIC()
+	connection, err := t.dialQUIC()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return session.(*gQUICSession).Session, nil
+	return connection.(*gQUICConnection).Session, nil
 }

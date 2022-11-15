@@ -302,7 +302,7 @@ const (
 	TLS_PROFILE_FIREFOX_56  = "Firefox-56"
 	TLS_PROFILE_FIREFOX_65  = "Firefox-65"
 	TLS_PROFILE_FIREFOX_99  = "Firefox-99"
-	TLS_PROFILE_FIREFOX_102 = "Firefox-102"
+	TLS_PROFILE_FIREFOX_105 = "Firefox-105"
 	TLS_PROFILE_RANDOMIZED  = "Randomized-v2"
 )
 
@@ -322,7 +322,7 @@ var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_FIREFOX_56,
 	TLS_PROFILE_FIREFOX_65,
 	TLS_PROFILE_FIREFOX_99,
-	TLS_PROFILE_FIREFOX_102,
+	TLS_PROFILE_FIREFOX_105,
 	TLS_PROFILE_RANDOMIZED,
 }
 
@@ -333,6 +333,7 @@ var legacyTLSProfiles = TLSProfiles{
 	"Chrome-57",
 	"Randomized",
 	"TLS-1.3-Randomized",
+	"Firefox-102",
 }
 
 func TLSProfileIsRandomized(tlsProfile string) bool {

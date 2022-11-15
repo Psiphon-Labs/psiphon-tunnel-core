@@ -68,7 +68,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	tris "github.com/Psiphon-Labs/tls-tris"
-	utls "github.com/Psiphon-Labs/utls"
+	utls "github.com/refraction-networking/utls"
 )
 
 // CustomTLSConfig specifies the parameters for a CustomTLSDial, supporting
@@ -760,6 +760,10 @@ func getUTLSClientHelloID(
 	tlsProfile string) (utls.ClientHelloID, *utls.ClientHelloSpec, error) {
 
 	switch tlsProfile {
+
+	// IMPORTANT: when adding new cases here, also add to
+	// getClientHelloVersion below.
+
 	case protocol.TLS_PROFILE_IOS_111:
 		return utls.HelloIOS_11_1, nil, nil
 	case protocol.TLS_PROFILE_IOS_121:
@@ -790,8 +794,8 @@ func getUTLSClientHelloID(
 		return utls.HelloFirefox_65, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_99:
 		return utls.HelloFirefox_99, nil, nil
-	case protocol.TLS_PROFILE_FIREFOX_102:
-		return utls.HelloFirefox_102, nil, nil
+	case protocol.TLS_PROFILE_FIREFOX_105:
+		return utls.HelloFirefox_105, nil, nil
 	case protocol.TLS_PROFILE_RANDOMIZED:
 		return utls.HelloRandomized, nil, nil
 	}
@@ -820,12 +824,16 @@ func getClientHelloVersion(
 
 	switch utlsClientHelloID {
 
-	case utls.HelloIOS_11_1, utls.HelloIOS_12_1, utls.HelloChrome_58,
-		utls.HelloChrome_62, utls.HelloFirefox_55, utls.HelloFirefox_56:
+	case utls.HelloIOS_11_1, utls.HelloIOS_12_1,
+		utls.HelloChrome_58, utls.HelloChrome_62,
+		utls.HelloFirefox_55, utls.HelloFirefox_56:
 		return protocol.TLS_VERSION_12, nil
 
-	case utls.HelloChrome_70, utls.HelloChrome_72, utls.HelloChrome_83,
-		utls.HelloFirefox_65, utls.HelloGolang:
+	case utls.HelloChrome_70, utls.HelloChrome_72,
+		utls.HelloChrome_83, utls.HelloChrome_96,
+		utls.HelloChrome_102, utls.HelloFirefox_65,
+		utls.HelloFirefox_99, utls.HelloFirefox_105,
+		utls.HelloGolang:
 		return protocol.TLS_VERSION_13, nil
 	}
 
