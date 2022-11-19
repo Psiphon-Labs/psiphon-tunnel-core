@@ -2,10 +2,13 @@
 #
 # See README.md for usage instructions.
 
-FROM ubuntu:18.04
+FROM --platform=linux/amd64 ubuntu:18.04
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive
+
+RUN mkdir -p /usr/share/man/man1 # fixes https://stackoverflow.com/a/69844974
+
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
