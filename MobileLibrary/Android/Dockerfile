@@ -49,9 +49,6 @@ RUN cd $GOPATH/src/golang.org/x/mobile \
   && mv ./cmd/gomobile/init.go ./cmd/gomobile/init.go.orig \
   && sed -e 's/golang.org\/x\/mobile\/cmd\/gobind@latest/golang.org\/x\/mobile\/cmd\/gobind/g' ./cmd/gomobile/init.go.orig > ./cmd/gomobile/init.go \
   && export GO111MODULE=off \
-  && go get golang.org/x/mod/modfile \
-  && go get golang.org/x/sync/errgroup \
-  && go get golang.org/x/tools/go/packages \
   && go install golang.org/x/mobile/cmd/gomobile \
   && gomobile init -v
 

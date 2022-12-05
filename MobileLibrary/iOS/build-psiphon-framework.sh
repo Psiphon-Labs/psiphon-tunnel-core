@@ -122,9 +122,6 @@ cd "${GOPATH}/src/golang.org/x/mobile/cmd/gomobile"
 mv init.go init.go.orig
 sed -e 's/golang.org\/x\/mobile\/cmd\/gobind@latest/golang.org\/x\/mobile\/cmd\/gobind/g' init.go.orig > init.go
 
-go get golang.org/x/mod/modfile
-go get golang.org/x/sync/errgroup
-go get golang.org/x/tools/go/packages
 go install
 "${GOPATH}"/bin/gomobile init -v -x
 if [[ $? != 0 ]]; then
