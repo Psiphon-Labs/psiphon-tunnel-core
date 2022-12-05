@@ -438,7 +438,7 @@ var defaultParameters = map[string]struct {
 
 	SpeedTestPaddingMinBytes: {value: 0, minimum: 0},
 	SpeedTestPaddingMaxBytes: {value: 256, minimum: 0},
-	SpeedTestMaxSampleCount:  {value: 25, minimum: 1},
+	SpeedTestMaxSampleCount:  {value: 5, minimum: 1},
 
 	// The Psiphon server times out inactive tunnels after 5 minutes, so this
 	// is a soft max for SSHKeepAlivePeriodMax.

@@ -1536,7 +1536,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// after the SLOK notice.
 		select {
 		case <-untunneledPortForward:
-			t.Fatalf("unexpected untunnedl port forward")
+			t.Fatalf("unexpected untunneled port forward")
 		default:
 		}
 	}

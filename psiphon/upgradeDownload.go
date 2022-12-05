@@ -92,7 +92,7 @@ func DownloadUpgrade(
 		config,
 		tunnel,
 		untunneledDialConfig,
-		downloadURL.SkipVerify)
+		downloadURL.SkipVerify || config.TransferURLsAlwaysSkipVerify)
 	if err != nil {
 		return errors.Trace(err)
 	}

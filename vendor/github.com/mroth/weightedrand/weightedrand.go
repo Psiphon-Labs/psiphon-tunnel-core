@@ -52,7 +52,7 @@ func NewChooser(choices ...Choice) (*Chooser, error) {
 		totals[i] = runningTotal
 	}
 
-	if runningTotal <= 1 {
+	if runningTotal < 1 {
 		return nil, errNoValidChoices
 	}
 

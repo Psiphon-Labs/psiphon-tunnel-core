@@ -1,0 +1,25 @@
+sudo: required
+language: go
+
+services:
+  - docker
+
+go:
+  - 1.10.x
+
+env:
+  - TEST_SUITE=test-unit
+  - TEST_SUITE=test-bogo
+  - TEST_SUITE=test-interop
+
+matrix:
+  fast_finish: true
+
+before_install:
+  - make -f _dev/Makefile fmtcheck
+
+install:
+  - sudo pip install docker
+
+script:
+  - make -f _dev/Makefile build-all && make -f _dev/Makefile "$TEST_SUITE"

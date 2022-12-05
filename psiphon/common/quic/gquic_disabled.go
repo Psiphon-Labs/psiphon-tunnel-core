@@ -48,7 +48,7 @@ func gQUICDialContext(
 	_ net.PacketConn,
 	_ *net.UDPAddr,
 	_ string,
-	_ uint32) (quicSession, error) {
+	_ uint32) (quicConnection, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }

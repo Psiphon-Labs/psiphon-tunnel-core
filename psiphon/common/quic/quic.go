@@ -25,13 +25,13 @@
 Package quic wraps github.com/lucas-clemente/quic-go with net.Listener and
 net.Conn types that provide a drop-in replacement for net.TCPConn.
 
-Each QUIC session has exactly one stream, which is the equivilent of a TCP
+Each QUIC connection has exactly one stream, which is the equivilent of a TCP
 stream.
 
-Conns returned from Accept will have an established QUIC session and are
+Conns returned from Accept will have an established QUIC connection and are
 configured to perform a deferred AcceptStream on the first Read or Write.
 
-Conns returned from Dial have an established QUIC session and stream. Dial
+Conns returned from Dial have an established QUIC connection and stream. Dial
 accepts a Context input which may be used to cancel the dial.
 
 Conns mask or translate qerr.PeerGoingAway to io.EOF as appropriate.
@@ -287,7 +287,8 @@ func makeIETFConfig(
 		MaxIdleTimeout:        serverIdleTimeout,
 		MaxIncomingStreams:    1,
 		MaxIncomingUniStreams: -1,
-		KeepAlive:             true,
+		// TODO: add jitter to keep alive period
+		KeepAlivePeriod: CLIENT_IDLE_TIMEOUT / 2,
 
 		// The quic-go server may respond with a version negotiation packet
 		// before reaching the Initial packet processing with its
@@ -312,19 +313,19 @@ func makeIETFConfig(
 	return tlsConfig, ietfQUICConfig
 }
 
-// Accept returns a net.Conn that wraps a single QUIC session and stream. The
-// stream establishment is deferred until the first Read or Write, allowing
-// Accept to be called in a fast loop while goroutines spawned to handle each
-// net.Conn will perform the blocking AcceptStream.
+// Accept returns a net.Conn that wraps a single QUIC connection and stream.
+// The stream establishment is deferred until the first Read or Write,
+// allowing Accept to be called in a fast loop while goroutines spawned to
+// handle each net.Conn will perform the blocking AcceptStream.
 func (listener *Listener) Accept() (net.Conn, error) {
 
-	session, err := listener.quicListener.Accept()
+	connection, err := listener.quicListener.Accept()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	return &Conn{
-		session:              session,
+		connection:           connection,
 		deferredAcceptStream: true,
 	}, nil
 }
@@ -339,8 +340,8 @@ func (listener *Listener) Close() error {
 	return listener.quicListener.Close()
 }
 
-// Dial establishes a new QUIC session and stream to the server specified by
-// address.
+// Dial establishes a new QUIC connection and stream to the server specified
+// by address.
 //
 // packetConn is used as the underlying packet connection for QUIC. The dial
 // may be cancelled by ctx; packetConn will be closed if the dial is
@@ -439,7 +440,7 @@ func Dial(
 		}
 	}
 
-	session, err := dialQUIC(
+	connection, err := dialQUIC(
 		ctx,
 		packetConn,
 		remoteAddr,
@@ -464,9 +465,9 @@ func Dial(
 
 	go func() {
 
-		stream, err := session.OpenStream()
+		stream, err := connection.OpenStream()
 		if err != nil {
-			session.Close()
+			connection.Close()
 			resultChannel <- dialResult{err: err}
 			return
 		}
@@ -474,7 +475,7 @@ func Dial(
 		resultChannel <- dialResult{
 			conn: &Conn{
 				packetConn: packetConn,
-				session:    session,
+				connection: connection,
 				stream:     stream,
 			},
 		}
@@ -488,7 +489,7 @@ func Dial(
 	case <-ctx.Done():
 		err = ctx.Err()
 		// Interrupt the goroutine
-		session.Close()
+		connection.Close()
 		<-resultChannel
 	}
 
@@ -592,7 +593,7 @@ func (conn *writeTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, e
 // Conn is a net.Conn and psiphon/common.Closer.
 type Conn struct {
 	packetConn net.PacketConn
-	session    quicSession
+	connection quicConnection
 
 	deferredAcceptStream bool
 
@@ -618,9 +619,9 @@ func (conn *Conn) doDeferredAcceptStream() error {
 		return conn.acceptErr
 	}
 
-	stream, err := conn.session.AcceptStream()
+	stream, err := conn.connection.AcceptStream()
 	if err != nil {
-		conn.session.Close()
+		conn.connection.Close()
 		conn.acceptErr = errors.Trace(err)
 		return conn.acceptErr
 	}
@@ -647,7 +648,7 @@ func (conn *Conn) Read(b []byte) (int, error) {
 	defer conn.readMutex.Unlock()
 
 	n, err := conn.stream.Read(b)
-	if conn.session.isErrorIndicatingClosed(err) {
+	if conn.connection.isErrorIndicatingClosed(err) {
 		_ = conn.Close()
 		err = io.EOF
 	}
@@ -667,7 +668,7 @@ func (conn *Conn) Write(b []byte) (int, error) {
 	defer conn.writeMutex.Unlock()
 
 	n, err := conn.stream.Write(b)
-	if conn.session.isErrorIndicatingClosed(err) {
+	if conn.connection.isErrorIndicatingClosed(err) {
 		_ = conn.Close()
 		if n == len(b) {
 			err = nil
@@ -677,7 +678,7 @@ func (conn *Conn) Write(b []byte) (int, error) {
 }
 
 func (conn *Conn) Close() error {
-	err := conn.session.Close()
+	err := conn.connection.Close()
 	if conn.packetConn != nil {
 		err1 := conn.packetConn.Close()
 		if err == nil {
@@ -693,11 +694,11 @@ func (conn *Conn) IsClosed() bool {
 }
 
 func (conn *Conn) LocalAddr() net.Addr {
-	return conn.session.LocalAddr()
+	return conn.connection.LocalAddr()
 }
 
 func (conn *Conn) RemoteAddr() net.Addr {
-	return conn.session.RemoteAddr()
+	return conn.connection.RemoteAddr()
 }
 
 func (conn *Conn) SetDeadline(t time.Time) error {
@@ -828,15 +829,17 @@ func (t *QUICTransporter) closePacketConn() {
 }
 
 func (t *QUICTransporter) dialIETFQUIC(
-	_, _ string, _ *tls.Config, _ *ietf_quic.Config) (ietf_quic.EarlySession, error) {
-	session, err := t.dialQUIC()
+	_ context.Context, _ string, _ *tls.Config, _ *ietf_quic.Config) (ietf_quic.EarlyConnection, error) {
+	// quic-go now supports the request context in its RoundTripper.Dial, but
+	// we already handle this via t.ctx, so we ignore the input context.
+	connection, err := t.dialQUIC()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return session.(*ietfQUICSession).Session.(ietf_quic.EarlySession), nil
+	return connection.(*ietfQUICConnection).Connection.(ietf_quic.EarlyConnection), nil
 }
 
-func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
+func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error) {
 
 	defer func() {
 		if retErr != nil && t.noticeEmitter != nil {
@@ -861,7 +864,7 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 		return nil, errors.Trace(err)
 	}
 
-	session, err := dialQUIC(
+	connection, err := dialQUIC(
 		ctx,
 		packetConn,
 		remoteAddr,
@@ -880,13 +883,13 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 	// dialQUIC uses quic-go.DialContext as we must create our own UDP sockets to
 	// set properties such as BIND_TO_DEVICE. However, when DialContext is used,
 	// quic-go does not take responsibiity for closing the underlying packetConn
-	// when the QUIC session is closed.
+	// when the QUIC connection is closed.
 	//
 	// We track the most recent packetConn in QUICTransporter and close it:
 	// - when CloseIdleConnections is called, as it is by psiphon.MeekConn when
 	//   it is closing;
 	// - here in dialFunc, with the assumption that only one concurrent QUIC
-	//   session is used per h2quic.RoundTripper.
+	//   connection is used per h2quic.RoundTripper.
 	//
 	// This code also assume no concurrent calls to dialFunc, as otherwise a race
 	// condition exists between closePacketConn and Store.
@@ -894,7 +897,7 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 	t.closePacketConn()
 	t.packetConn.Store(packetConn)
 
-	return session, nil
+	return connection, nil
 }
 
 // The following code provides support for using both gQUIC and IETF QUIC,
@@ -902,8 +905,8 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 // (The gQUIC functions are now located in gquic.go and the entire gQUIC
 // quic-go stack may be conditionally excluded from builds).
 //
-// dialQUIC uses the appropriate quic-go and returns quicSession which wraps
-// either a ietf_quic.Session or gquic.Session.
+// dialQUIC uses the appropriate quic-go and returns quicConnection which
+// wraps either a ietf_quic.Connection or gquic.Session.
 //
 // muxPacketConn provides a multiplexing listener that directs packets to
 // either a ietf_quic.Listener or a gquic.Listener based on the content of the
@@ -912,10 +915,10 @@ func (t *QUICTransporter) dialQUIC() (retSession quicSession, retErr error) {
 type quicListener interface {
 	Close() error
 	Addr() net.Addr
-	Accept() (quicSession, error)
+	Accept() (quicConnection, error)
 }
 
-type quicSession interface {
+type quicConnection interface {
 	io.Closer
 	LocalAddr() net.Addr
 	RemoteAddr() net.Addr
@@ -942,42 +945,42 @@ type ietfQUICListener struct {
 	ietf_quic.Listener
 }
 
-func (l *ietfQUICListener) Accept() (quicSession, error) {
+func (l *ietfQUICListener) Accept() (quicConnection, error) {
 	// A specific context is not provided since the interface needs to match the
 	// gquic-go API, which lacks context support.
-	session, err := l.Listener.Accept(context.Background())
+	connection, err := l.Listener.Accept(context.Background())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return &ietfQUICSession{Session: session}, nil
+	return &ietfQUICConnection{Connection: connection}, nil
 }
 
-type ietfQUICSession struct {
-	ietf_quic.Session
+type ietfQUICConnection struct {
+	ietf_quic.Connection
 }
 
-func (s *ietfQUICSession) AcceptStream() (quicStream, error) {
+func (c *ietfQUICConnection) AcceptStream() (quicStream, error) {
 	// A specific context is not provided since the interface needs to match the
 	// gquic-go API, which lacks context support.
 	//
 	// TODO: once gQUIC support is retired, this context may be used in place
 	// of the deferredAcceptStream mechanism.
-	stream, err := s.Session.AcceptStream(context.Background())
+	stream, err := c.Connection.AcceptStream(context.Background())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	return stream, nil
 }
 
-func (s *ietfQUICSession) OpenStream() (quicStream, error) {
-	return s.Session.OpenStream()
+func (c *ietfQUICConnection) OpenStream() (quicStream, error) {
+	return c.Connection.OpenStream()
 }
 
-func (s *ietfQUICSession) Close() error {
-	return s.Session.CloseWithError(0, "")
+func (c *ietfQUICConnection) Close() error {
+	return c.Connection.CloseWithError(0, "")
 }
 
-func (s *ietfQUICSession) isErrorIndicatingClosed(err error) bool {
+func (c *ietfQUICConnection) isErrorIndicatingClosed(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -998,13 +1001,14 @@ func dialQUIC(
 	getClientHelloRandom func() ([]byte, error),
 	clientMaxPacketSizeAdjustment int,
 	disablePathMTUDiscovery bool,
-	dialEarly bool) (quicSession, error) {
+	dialEarly bool) (quicConnection, error) {
 
 	if isIETFVersionNumber(versionNumber) {
 		quicConfig := &ietf_quic.Config{
 			HandshakeIdleTimeout: time.Duration(1<<63 - 1),
 			MaxIdleTimeout:       CLIENT_IDLE_TIMEOUT,
-			KeepAlive:            true,
+			// TODO: add jitter to keep alive period
+			KeepAlivePeriod: CLIENT_IDLE_TIMEOUT / 2,
 			Versions: []ietf_quic.VersionNumber{
 				ietf_quic.VersionNumber(versionNumber)},
 			ClientHelloSeed:               clientHelloSeed,
@@ -1018,7 +1022,7 @@ func dialQUIC(
 			quicConfig.HandshakeIdleTimeout = time.Until(deadline)
 		}
 
-		var dialSession ietf_quic.Session
+		var dialConnection ietf_quic.Connection
 		var err error
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
@@ -1026,7 +1030,7 @@ func dialQUIC(
 		}
 
 		if dialEarly {
-			dialSession, err = ietf_quic.DialEarlyContext(
+			dialConnection, err = ietf_quic.DialEarlyContext(
 				ctx,
 				packetConn,
 				remoteAddr,
@@ -1034,7 +1038,7 @@ func dialQUIC(
 				tlsConfig,
 				quicConfig)
 		} else {
-			dialSession, err = ietf_quic.DialContext(
+			dialConnection, err = ietf_quic.DialContext(
 				ctx,
 				packetConn,
 				remoteAddr,
@@ -1046,11 +1050,11 @@ func dialQUIC(
 			return nil, errors.Trace(err)
 		}
 
-		return &ietfQUICSession{Session: dialSession}, nil
+		return &ietfQUICConnection{Connection: dialConnection}, nil
 
 	} else {
 
-		quicSession, err := gQUICDialContext(
+		quicConnection, err := gQUICDialContext(
 			ctx,
 			packetConn,
 			remoteAddr,
@@ -1060,7 +1064,7 @@ func dialQUIC(
 			return nil, errors.Trace(err)
 		}
 
-		return quicSession, nil
+		return quicConnection, nil
 	}
 }
 
@@ -1171,17 +1175,17 @@ func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {
 // muxListener is a multiplexing packet conn listener which relays packets to
 // multiple quic-go listeners.
 type muxListener struct {
-	logger           common.Logger
-	isClosed         int32
-	runWaitGroup     *sync.WaitGroup
-	stopBroadcast    chan struct{}
-	conn             *ObfuscatedPacketConn
-	packets          chan *packet
-	acceptedSessions chan quicSession
-	ietfQUICConn     *muxPacketConn
-	ietfQUICListener quicListener
-	gQUICConn        *muxPacketConn
-	gQUICListener    quicListener
+	logger              common.Logger
+	isClosed            int32
+	runWaitGroup        *sync.WaitGroup
+	stopBroadcast       chan struct{}
+	conn                *ObfuscatedPacketConn
+	packets             chan *packet
+	acceptedConnections chan quicConnection
+	ietfQUICConn        *muxPacketConn
+	ietfQUICListener    quicListener
+	gQUICConn           *muxPacketConn
+	gQUICListener       quicListener
 }
 
 func newMuxListener(
@@ -1191,12 +1195,12 @@ func newMuxListener(
 	tlsCertificate tls.Certificate) (*muxListener, error) {
 
 	listener := &muxListener{
-		logger:           logger,
-		runWaitGroup:     new(sync.WaitGroup),
-		stopBroadcast:    make(chan struct{}),
-		conn:             conn,
-		packets:          make(chan *packet, muxPacketQueueSize),
-		acceptedSessions: make(chan quicSession, 2), // 1 per listener
+		logger:              logger,
+		runWaitGroup:        new(sync.WaitGroup),
+		stopBroadcast:       make(chan struct{}),
+		conn:                conn,
+		packets:             make(chan *packet, muxPacketQueueSize),
+		acceptedConnections: make(chan quicConnection, 2), // 1 per listener
 	}
 
 	// All packet relay buffers are allocated in advance.
@@ -1226,8 +1230,8 @@ func newMuxListener(
 
 	listener.runWaitGroup.Add(3)
 	go listener.relayPackets()
-	go listener.relayAcceptedSessions(listener.gQUICListener)
-	go listener.relayAcceptedSessions(listener.ietfQUICListener)
+	go listener.relayAcceptedConnections(listener.gQUICListener)
+	go listener.relayAcceptedConnections(listener.ietfQUICListener)
 
 	return listener, nil
 }
@@ -1291,10 +1295,10 @@ func (listener *muxListener) relayPackets() {
 	}
 }
 
-func (listener *muxListener) relayAcceptedSessions(l quicListener) {
+func (listener *muxListener) relayAcceptedConnections(l quicListener) {
 	defer listener.runWaitGroup.Done()
 	for {
-		session, err := l.Accept()
+		connection, err := l.Accept()
 		if err != nil {
 			if listener.logger != nil {
 				message := "Accept failed"
@@ -1315,16 +1319,16 @@ func (listener *muxListener) relayAcceptedSessions(l quicListener) {
 			continue
 		}
 		select {
-		case listener.acceptedSessions <- session:
+		case listener.acceptedConnections <- connection:
 		case <-listener.stopBroadcast:
 			return
 		}
 	}
 }
 
-func (listener *muxListener) Accept() (quicSession, error) {
+func (listener *muxListener) Accept() (quicConnection, error) {
 	select {
-	case conn := <-listener.acceptedSessions:
+	case conn := <-listener.acceptedConnections:
 		return conn, nil
 	case <-listener.stopBroadcast:
 		return nil, errors.TraceNew("closed")

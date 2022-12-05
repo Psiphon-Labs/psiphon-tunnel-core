@@ -1703,8 +1703,8 @@ func (metrics *packetMetrics) checkpoint(
 
 		if updater != nil {
 			updater(
-				TCPApplicationBytesUp, TCPApplicationBytesDown,
-				UDPApplicationBytesUp, UDPApplicationBytesDown)
+				TCPApplicationBytesDown, TCPApplicationBytesUp,
+				UDPApplicationBytesDown, UDPApplicationBytesUp)
 		}
 	}
 
