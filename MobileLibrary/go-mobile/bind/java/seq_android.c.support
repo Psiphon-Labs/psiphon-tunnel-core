@@ -256,6 +256,20 @@ jobject go_seq_from_refnum(JNIEnv *env, int32_t refnum, jclass proxy_class, jmet
 	}
 	// Seq.Ref ref = Seq.getRef(refnum)
 	jobject ref = (*env)->CallStaticObjectMethod(env, seq_class, seq_getRef, (jint)refnum);
+
+	// [Psiphon]
+	// - Check for thrown exception, and abort log its name and message instead of "Unknown reference"
+	jthrowable exception = (*env)->ExceptionOccurred(env);
+	if (exception != NULL) {
+		(*env)->ExceptionDescribe(env);
+		(*env)->ExceptionClear(env);
+		jclass throwable_class = (*env)->FindClass(env, "java/lang/Throwable");
+		jmethodID to_string_method = (*env)->GetMethodID(env, throwable_class, "toString", "()Ljava/lang/String;");
+		jstring to_string = (jstring)((*env)->CallObjectMethod(env, exception, to_string_method));
+		LOG_FATAL("Seq.getRef exception: %s", (*env)->GetStringUTFChars(env, to_string, JNI_FALSE));
+	}
+	// [Psiphon]
+
 	if (ref == NULL) {
 		LOG_FATAL("Unknown reference: %d", refnum);
 	}
