@@ -340,21 +340,8 @@ public class PsiphonTunnel {
     // instances in parallel, or concurrently, will result in undefined behavior.
     public static class PsiphonTunnelFeedback {
 
-        final private ExecutorService workQueue;
-        final private ExecutorService callbackQueue;
-
-        public PsiphonTunnelFeedback() {
-            workQueue = Executors.newSingleThreadExecutor();
-            callbackQueue = Executors.newSingleThreadExecutor();
-        }
-
-        @Override
-        protected void finalize() throws Throwable {
-            // Ensure the queues are cleaned up.
-            shutdownAndAwaitTermination(callbackQueue);
-            shutdownAndAwaitTermination(workQueue);
-            super.finalize();
-        }
+        private ExecutorService workQueue;
+        private ExecutorService callbackQueue;
 
         void shutdownAndAwaitTermination(ExecutorService pool) {
             try {
@@ -398,6 +385,9 @@ public class PsiphonTunnel {
         public void startSendFeedback(Context context, HostFeedbackHandler feedbackHandler, HostLogger logger,
                                       String feedbackConfigJson, String diagnosticsJson, String uploadPath,
                                       String clientPlatformPrefix, String clientPlatformSuffix) {
+            // initialize executor queues
+            workQueue = Executors.newSingleThreadExecutor();
+            callbackQueue = Executors.newSingleThreadExecutor();
 
             workQueue.submit(new Runnable() {
                 @Override
@@ -526,12 +516,18 @@ public class PsiphonTunnel {
         // call is asynchronous and returns a future which is fulfilled when the underlying stop
         // operation completes.
         public Future<Void> stopSendFeedback() {
-            return workQueue.submit(new Runnable() {
+            Future<Void> result = workQueue.submit(new Runnable() {
                 @Override
                 public void run() {
                     Psi.stopSendFeedback();
                 }
             }, null);
+
+            // Also shutdown executor queues
+            shutdownAndAwaitTermination(workQueue);
+            shutdownAndAwaitTermination(callbackQueue);
+
+            return result;
         }
     }
 
