@@ -66,6 +66,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -401,12 +402,15 @@ public class PsiphonTunnel {
                                 new PsiphonProviderFeedbackHandler() {
                                     @Override
                                     public void sendFeedbackCompleted(java.lang.Exception e) {
-                                        callbackQueue.submit(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                feedbackHandler.sendFeedbackCompleted(e);
-                                            }
-                                        });
+                                        try {
+                                            callbackQueue.submit(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    feedbackHandler.sendFeedbackCompleted(e);
+                                                }
+                                            });
+                                        } catch (RejectedExecutionException ignored) {
+                                        }
                                     }
                                 },
                                 new PsiphonProviderNetwork() {
@@ -481,19 +485,25 @@ public class PsiphonTunnel {
                                             }
 
                                             String diagnosticMessage = noticeType + ": " + data.toString();
-                                            callbackQueue.submit(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    logger.onDiagnosticMessage(diagnosticMessage);
-                                                }
-                                            });
+                                            try {
+                                                callbackQueue.submit(new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        logger.onDiagnosticMessage(diagnosticMessage);
+                                                    }
+                                                });
+                                            } catch (RejectedExecutionException ignored) {
+                                            }
                                         } catch (java.lang.Exception e) {
-                                            callbackQueue.submit(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    logger.onDiagnosticMessage("Error handling notice " + e.toString());
-                                                }
-                                            });
+                                            try {
+                                                callbackQueue.submit(new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        logger.onDiagnosticMessage("Error handling notice " + e.toString());
+                                                    }
+                                                });
+                                            } catch (RejectedExecutionException ignored) {
+                                            }
                                         }
                                     }
                                 },
@@ -501,12 +511,15 @@ public class PsiphonTunnel {
                                 true     // Use hasIPv6Route on Android
                                 );
                     } catch (java.lang.Exception e) {
-                        callbackQueue.submit(new Runnable() {
-                            @Override
-                            public void run() {
-                                feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
-                            }
-                        });
+                        try {
+                            callbackQueue.submit(new Runnable() {
+                                @Override
+                                public void run() {
+                                    feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
+                                }
+                            });
+                        } catch (RejectedExecutionException ignored) {
+                        }
                     }
                 }
             });
