@@ -40,7 +40,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
 
 ##### Create the build image:
 
-1. While in the `MobileLibrary/Android` directory, run the command: `docker build --no-cache=true -t psiandroid .`
+1. While in the `MobileLibrary/Android` directory, run the command: `docker build --no-cache=true -t psiandroid -f Dockerfile ..`
 
 2. Once completed, verify that you see an image named `psiandroid` when running: `docker images`
 

@@ -114,15 +114,13 @@ fi
 # Get and install gomobile, using our pinned revision
 #
 
-go get -u golang.org/x/mobile/cmd/gomobile
-cd "${GOPATH}"/src/golang.org/x/mobile/cmd/gomobile
-git checkout master
-git checkout -b pinned ${GOMOBILE_PINNED_REV}
+mkdir -p "${GOPATH}/src/golang.org/x"
+cp -R "${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/go-mobile" "${GOPATH}/src/golang.org/x/mobile"
+cd "${GOPATH}/src/golang.org/x/mobile/cmd/gomobile"
 
 # Patch gomobile to edit a command that assumes modules
 mv init.go init.go.orig
 sed -e 's/golang.org\/x\/mobile\/cmd\/gobind@latest/golang.org\/x\/mobile\/cmd\/gobind/g' init.go.orig > init.go
-
 
 go install
 "${GOPATH}"/bin/gomobile init -v -x

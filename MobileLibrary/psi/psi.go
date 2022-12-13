@@ -263,6 +263,8 @@ func Stop() {
 		controllerCtx = nil
 		stopController = nil
 		controllerWaitGroup = nil
+		// Allow the provider to be garbage collected.
+		psiphon.SetNoticeWriter(os.Stderr)
 	}
 }
 
@@ -359,21 +361,21 @@ var sendFeedbackWaitGroup *sync.WaitGroup
 // cancelled if this function is called again before it completes.
 //
 // Warnings:
-// - Should not be used with Start concurrently in the same process
-// - An ongoing feedback upload started with StartSendFeedback should be
-//   stopped with StopSendFeedback before the process exists. This ensures that
-//   any underlying resources are cleaned up; failing to do so may result in
-//   data store corruption or other undefined behavior.
-// - Start and StartSendFeedback both make an attempt to migrate persistent
-//   files from legacy locations in a one-time operation. If these functions
-//   are called in parallel, then there is a chance that the migration attempts
-//   could execute at the same time and result in non-fatal errors in one, or
-//   both, of the migration operations.
-// - Calling StartSendFeedback or StopSendFeedback on the same call stack
-//   that the PsiphonProviderFeedbackHandler.SendFeedbackCompleted() callback
-//   is delivered on can cause a deadlock. I.E. the callback code must return
-//   so the wait group can complete and the lock acquired in StopSendFeedback
-//   can be released.
+//   - Should not be used with Start concurrently in the same process
+//   - An ongoing feedback upload started with StartSendFeedback should be
+//     stopped with StopSendFeedback before the process exists. This ensures that
+//     any underlying resources are cleaned up; failing to do so may result in
+//     data store corruption or other undefined behavior.
+//   - Start and StartSendFeedback both make an attempt to migrate persistent
+//     files from legacy locations in a one-time operation. If these functions
+//     are called in parallel, then there is a chance that the migration attempts
+//     could execute at the same time and result in non-fatal errors in one, or
+//     both, of the migration operations.
+//   - Calling StartSendFeedback or StopSendFeedback on the same call stack
+//     that the PsiphonProviderFeedbackHandler.SendFeedbackCompleted() callback
+//     is delivered on can cause a deadlock. I.E. the callback code must return
+//     so the wait group can complete and the lock acquired in StopSendFeedback
+//     can be released.
 func StartSendFeedback(
 	configJson,
 	diagnosticsJson,
@@ -461,7 +463,7 @@ func StopSendFeedback() {
 		sendFeedbackCtx = nil
 		stopSendFeedback = nil
 		sendFeedbackWaitGroup = nil
-		// Allow the notice receiver to be deallocated.
+		// Allow the notice handler to be garbage collected.
 		psiphon.SetNoticeWriter(os.Stderr)
 	}
 }

@@ -729,7 +729,7 @@ func (server *Server) GetFilterGeoIPScope(geoIPData common.GeoIPData) int {
 }
 
 // GetTacticsPayload assembles and returns a tactics payload for a client with
-// the specified GeoIP, API parameter, and speed test attributes.
+// the specified GeoIP, API parameters, and speed test attributes.
 //
 // The speed test samples are expected to be in apiParams, as is the stored
 // tactics tag.
@@ -1107,7 +1107,7 @@ func (t *Tactics) merge(includeServerSideOnly bool, u *Tactics) {
 	}
 
 	// Note: there is no deep copy of parameter values; the the returned
-	// Tactics shares memory with the original and it individual parameters
+	// Tactics shares memory with the original and its individual parameters
 	// should not be modified.
 	if u.Parameters != nil {
 		if t.Parameters == nil {

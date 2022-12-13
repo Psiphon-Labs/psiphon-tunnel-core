@@ -41,22 +41,14 @@ RUN curl -L https://dl.google.com/android/repository/commandlinetools-linux-8092
   && yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses \
   && $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-${ANDROID_PLATFORM_VERSION}" "ndk;${ANDROID_NDK_VERSION}"
 
-# Install Pinned Gomobile.
+# Install Gomobile from source at MobileLibrary/go-mobile
 # The sed operation patches gomobile, editing a command that assumes modules
-ENV GOMOBILE_PINNED_REV=ce6a79cf6a13dd77095a6f8dbee5f39848fa7da1
-RUN mkdir -p $GOPATH/pkg/gomobile/dl \
-  && cd $GOPATH/pkg/gomobile/dl \
-  && mkdir -p $GOPATH/src/golang.org/x \
-  && cd $GOPATH/src/golang.org/x \
-  && git clone https://github.com/golang/mobile \
-  && cd mobile \
-  && git checkout -b pinned $GOMOBILE_PINNED_REV \
+RUN mkdir -p $GOPATH/src/golang.org/x
+COPY go-mobile $GOPATH/src/golang.org/x/mobile
+RUN cd $GOPATH/src/golang.org/x/mobile \
   && mv ./cmd/gomobile/init.go ./cmd/gomobile/init.go.orig \
   && sed -e 's/golang.org\/x\/mobile\/cmd\/gobind@latest/golang.org\/x\/mobile\/cmd\/gobind/g' ./cmd/gomobile/init.go.orig > ./cmd/gomobile/init.go \
-  && echo "master: $(git rev-parse master)\npinned: $(git rev-parse master)" | tee $GOROOT/MOBILE \
   && export GO111MODULE=off \
-  && go get golang.org/x/mod/modfile \
-  && go get golang.org/x/tools/go/packages \
   && go install golang.org/x/mobile/cmd/gomobile \
   && gomobile init -v
 
