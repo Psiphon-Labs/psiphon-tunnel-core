@@ -137,11 +137,6 @@ BUILDDATE=$(date +%Y-%m-%dT%H:%M:%S%z)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)
 GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
-GOMOBILEVERSION=$("${GOPATH}"/bin/gomobile version | perl -ne '/gomobile version (.*?) / && print $1')
-
-# see DEPENDENCIES comment in MobileLibrary/Android/make.bash
-cd "${GOPATH}"/src/github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
-DEPENDENCIES=$(echo -n "{" && GOOS=darwin go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=darwin xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/$0 && if echo -n "$0" | grep -vEq "^github.com/Psiphon-Labs/psiphon-tunnel-core/" ; then echo -n "\"$0\":\"$(git rev-parse --short HEAD)\"," ; fi' pkg | sed 's/,$//' | tr -d '\n' && echo -n "}")
 
 LDFLAGS="\
 -s \
@@ -150,8 +145,6 @@ LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRepo=${BUILDREPO} \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRev=${BUILDREV} \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.goVersion=${GOVERSION} \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.gomobileVersion=${GOMOBILEVERSION} \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.dependencies=${DEPENDENCIES} \
 "
 
 echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > "$BUILDINFOFILE"
@@ -162,7 +155,6 @@ echo " Build date: ${BUILDDATE}"
 echo " Build repo: ${BUILDREPO}"
 echo " Build revision: ${BUILDREV}"
 echo " Go version: ${GOVERSION}"
-echo " Gomobile version: ${GOMOBILEVERSION}"
 echo ""
 
 

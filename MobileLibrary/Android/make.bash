@@ -18,37 +18,6 @@ BUILDDATE=$(date --iso-8601=seconds)
 BUILDREPO=$(git config --get remote.origin.url)
 BUILDREV=$(git rev-parse --short HEAD)
 GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
-GOMOBILEVERSION=$(gomobile version | perl -ne '/gomobile version (.*?) / && print $1')
-
-# DEPENDENCIES
-#
-# - this script produces a JSON object listing all Go package dependencies,
-#   excluding packages under github.com/Psiphon-Labs/psiphon-tunnel-core/
-#   (thus also excluding vendored packages) which will all have the same rev
-#   as BUILDREV
-#
-# - starts the string with a `{` and ends with a `}`
-#
-# - uses the `go list` command and passes it a template string (using the Go
-#   template syntax) saying I want all the dependencies of the package in the
-#   current directory, printing 1/line via printf
-#
-# - pipes to `xargs` to run a command on each line output from the first
-#   command and uses `go list` with a template string to print the "Import
-#   Path" (from just below `$GOPATH/src`) if the package is not part of the
-#   standard library
-#
-# - pipes to `xargs` again, specifiying `pkg` as the placeholder name for each
-#   item being operated on (which is the list of non standard library import
-#   paths from the previous step); `xargs` runs a bash script (via `-c`) which
-#   changes to each import path in sequence, then echoes out, after the
-#   exclusion check, `"<import path>":"<subshell output of getting the short
-#   git revision>",`
-#
-# - for non-empty dependency lists, the last command leaves a trailing `,\n` at
-#   the end, so use `sed` and `tr` to remove the suffix.
-#
-DEPENDENCIES=$(cd ../psi && echo -n "{" && GOOS=android go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=android xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/$0 && if echo -n "$0" | grep -vEq "^github.com/Psiphon-Labs/psiphon-tunnel-core/" ; then echo -n "\"$0\":\"$(git rev-parse --short HEAD)\"," ; fi' pkg | sed 's/,$//' | tr -d '\n' && echo -n "}")
 
 LDFLAGS="\
 -s \
@@ -57,8 +26,6 @@ LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRepo=$BUILDREPO \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRev=$BUILDREV \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.goVersion=$GOVERSION \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.gomobileVersion=$GOMOBILEVERSION \
--X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.dependencies=$DEPENDENCIES \
 "
 
 echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > $BUILDINFOFILE
@@ -68,8 +35,6 @@ echo " Build date: ${BUILDDATE}"
 echo " Build repo: ${BUILDREPO}"
 echo " Build revision: ${BUILDREV}"
 echo " Go version: ${GOVERSION}"
-echo " Gomobile version: ${GOMOBILEVERSION}"
-echo " Dependencies: ${DEPENDENCIES}"
 echo ""
 
 gomobile bind -v -x -target=android/arm,android/arm64,android/386,android/amd64 -tags="${BUILD_TAGS}" -ldflags="$LDFLAGS" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi

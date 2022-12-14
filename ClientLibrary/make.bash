@@ -23,9 +23,6 @@ prepare_build () {
   BUILDREV=$(git rev-parse --short HEAD)
   GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
-  # see DEPENDENCIES comment in MobileLibrary/Android/make.bash
-  DEPENDENCIES=$(echo -n "{" && GOOS=$1 go list -tags "${BUILD_TAGS}" -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | GOOS=$1 xargs go list -tags "${BUILD_TAGS}" -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/$0 && if echo -n "$0" | grep -vEq "^github.com/Psiphon-Labs/psiphon-tunnel-core/" ; then echo -n "\"$0\":\"$(git rev-parse --short HEAD)\"," ; fi' pkg | sed 's/,$//' | tr -d '\n' && echo -n "}")
-
   LDFLAGS="\
   -s \
   -w \
@@ -33,7 +30,6 @@ prepare_build () {
   -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRepo=$BUILDREPO \
   -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRev=$BUILDREV \
   -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.goVersion=$GOVERSION \
-  -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.dependencies=$DEPENDENCIES \
   "
 
   echo "Variables for ldflags:"
@@ -41,7 +37,6 @@ prepare_build () {
   echo " Build repo: ${BUILDREPO}"
   echo " Build revision: ${BUILDREV}"
   echo " Go version: ${GOVERSION}"
-  echo " Dependencies: ${DEPENDENCIES}"
   echo ""
 
 }
