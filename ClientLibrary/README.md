@@ -60,6 +60,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
 ```bash
 cd .. && \
   docker run \
+  --platform=linux/amd64 \
   --rm \
   -v $PWD:/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
   psiclientlibrary-builder \
