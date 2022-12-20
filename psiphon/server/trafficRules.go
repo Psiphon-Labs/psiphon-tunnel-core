@@ -22,6 +22,7 @@ package server
 import (
 	"encoding/json"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -279,15 +280,29 @@ type TrafficRules struct {
 	// AllowSubnets.
 	DisallowUDPPorts *common.PortList
 
-	// AllowSubnets specifies a list of IP address subnets for which all TCP and
-	// UDP ports are allowed. This list is consulted if a port is disallowed by
-	// the AllowTCPPorts or AllowUDPPorts configuration. Each entry is a IP
-	// subnet in CIDR notation.
-	//
-	// Limitation: currently, AllowSubnets only matches port forwards where the
-	// client sends an IP address. Domain names are not resolved before checking
-	// AllowSubnets.
+	// AllowSubnets specifies a list of IP address subnets for which all TCP
+	// and UDP ports are allowed. This list is consulted if a port is not
+	// allowed by the AllowTCPPorts or AllowUDPPorts configuration; but not
+	// if a port is disallowed by DisallowTCPPorts, DisallowUDPPorts,
+	// DisallowSubnets or DisallowASNs. Each entry is a IP subnet in CIDR
+	// notation.
 	AllowSubnets []string
+
+	// AllowASNs specifies a list of ASNs for which all TCP and UDP ports are
+	// allowed. This list is consulted if a port is not allowed by the
+	// AllowTCPPorts or AllowUDPPorts configuration; but not if a port is
+	// disallowed by DisallowTCPPorts, DisallowUDPPorts, DisallowSubnets or
+	// DisallowASNs.
+	AllowASNs []string
+
+	// DisallowSubnets specifies a list of IP address subnets for which all
+	// TCP and UDP ports are disallowed. Each entry is a IP subnet in CIDR
+	// notation.
+	DisallowSubnets []string
+
+	// DisallowASNs specifies a list of ASNs for which all TCP and UDP ports
+	// are disallowed.
+	DisallowASNs []string
 
 	// DisableDiscovery specifies whether to disable server entry discovery,
 	// to manage load on discovery servers.
@@ -416,6 +431,27 @@ func (set *TrafficRulesSet) Validate() error {
 			_, _, err := net.ParseCIDR(subnet)
 			if err != nil {
 				return errors.Tracef("invalid subnet: %s %s", subnet, err)
+			}
+		}
+
+		for _, ASN := range rules.AllowASNs {
+			_, err := strconv.Atoi(ASN)
+			if err != nil {
+				return errors.Tracef("invalid ASN: %s %s", ASN, err)
+			}
+		}
+
+		for _, subnet := range rules.DisallowSubnets {
+			_, _, err := net.ParseCIDR(subnet)
+			if err != nil {
+				return errors.Tracef("invalid subnet: %s %s", subnet, err)
+			}
+		}
+
+		for _, ASN := range rules.DisallowASNs {
+			_, err := strconv.Atoi(ASN)
+			if err != nil {
+				return errors.Tracef("invalid ASN: %s %s", ASN, err)
 			}
 		}
 
@@ -632,6 +668,18 @@ func (set *TrafficRulesSet) GetTrafficRules(
 
 	if trafficRules.AllowSubnets == nil {
 		trafficRules.AllowSubnets = make([]string, 0)
+	}
+
+	if trafficRules.AllowASNs == nil {
+		trafficRules.AllowASNs = make([]string, 0)
+	}
+
+	if trafficRules.DisallowSubnets == nil {
+		trafficRules.DisallowSubnets = make([]string, 0)
+	}
+
+	if trafficRules.DisallowASNs == nil {
+		trafficRules.DisallowASNs = make([]string, 0)
 	}
 
 	if trafficRules.DisableDiscovery == nil {
@@ -869,6 +917,18 @@ func (set *TrafficRulesSet) GetTrafficRules(
 			trafficRules.AllowSubnets = filteredRules.Rules.AllowSubnets
 		}
 
+		if filteredRules.Rules.AllowASNs != nil {
+			trafficRules.AllowASNs = filteredRules.Rules.AllowASNs
+		}
+
+		if filteredRules.Rules.DisallowSubnets != nil {
+			trafficRules.DisallowSubnets = filteredRules.Rules.DisallowSubnets
+		}
+
+		if filteredRules.Rules.DisallowASNs != nil {
+			trafficRules.DisallowASNs = filteredRules.Rules.DisallowASNs
+		}
+
 		if filteredRules.Rules.DisableDiscovery != nil {
 			trafficRules.DisableDiscovery = filteredRules.Rules.DisableDiscovery
 		}
@@ -886,7 +946,12 @@ func (set *TrafficRulesSet) GetTrafficRules(
 	return trafficRules
 }
 
-func (rules *TrafficRules) AllowTCPPort(remoteIP net.IP, port int) bool {
+func (rules *TrafficRules) AllowTCPPort(
+	geoIPService *GeoIPService, remoteIP net.IP, port int) bool {
+
+	if rules.disallowSubnet(remoteIP) || rules.disallowASN(geoIPService, remoteIP) {
+		return false
+	}
 
 	if rules.DisallowTCPPorts.Lookup(port) {
 		return false
@@ -900,10 +965,15 @@ func (rules *TrafficRules) AllowTCPPort(remoteIP net.IP, port int) bool {
 		return true
 	}
 
-	return rules.allowSubnet(remoteIP)
+	return rules.allowSubnet(remoteIP) || rules.allowASN(geoIPService, remoteIP)
 }
 
-func (rules *TrafficRules) AllowUDPPort(remoteIP net.IP, port int) bool {
+func (rules *TrafficRules) AllowUDPPort(
+	geoIPService *GeoIPService, remoteIP net.IP, port int) bool {
+
+	if rules.disallowSubnet(remoteIP) || rules.disallowASN(geoIPService, remoteIP) {
+		return false
+	}
 
 	if rules.DisallowUDPPorts.Lookup(port) {
 		return false
@@ -917,12 +987,35 @@ func (rules *TrafficRules) AllowUDPPort(remoteIP net.IP, port int) bool {
 		return true
 	}
 
-	return rules.allowSubnet(remoteIP)
+	return rules.allowSubnet(remoteIP) || rules.allowASN(geoIPService, remoteIP)
 }
 
 func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
+	return ipInSubnets(remoteIP, rules.AllowSubnets)
+}
 
-	for _, subnet := range rules.AllowSubnets {
+func (rules *TrafficRules) allowASN(
+	geoIPService *GeoIPService, remoteIP net.IP) bool {
+
+	if len(rules.AllowASNs) == 0 || geoIPService == nil {
+		return false
+	}
+
+	return common.Contains(
+		rules.AllowASNs,
+		geoIPService.LookupISPForIP(remoteIP).ASN)
+}
+
+func (rules *TrafficRules) disallowSubnet(remoteIP net.IP) bool {
+	return ipInSubnets(remoteIP, rules.DisallowSubnets)
+}
+
+func ipInSubnets(remoteIP net.IP, subnets []string) bool {
+
+	for _, subnet := range subnets {
+
+		// TODO: cache parsed results
+
 		// Note: ignoring error as config has been validated
 		_, network, _ := net.ParseCIDR(subnet)
 		if network.Contains(remoteIP) {
@@ -931,6 +1024,18 @@ func (rules *TrafficRules) allowSubnet(remoteIP net.IP) bool {
 	}
 
 	return false
+}
+
+func (rules *TrafficRules) disallowASN(
+	geoIPService *GeoIPService, remoteIP net.IP) bool {
+
+	if len(rules.DisallowASNs) == 0 || geoIPService == nil {
+		return false
+	}
+
+	return common.Contains(
+		rules.DisallowASNs,
+		geoIPService.LookupISPForIP(remoteIP).ASN)
 }
 
 // GetMeekRateLimiterConfig gets a snapshot of the meek rate limiter
