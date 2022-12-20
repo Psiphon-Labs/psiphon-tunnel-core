@@ -10,6 +10,8 @@ fi
 # $2, if specified, is go build tags
 if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 
+export GOCACHE=/tmp
+
 BUILD_DIR=build
 
 if [ ! -d ${BUILD_DIR} ]; then

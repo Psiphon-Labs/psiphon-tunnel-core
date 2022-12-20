@@ -13,6 +13,8 @@ fi
 # $1, if specified, is go build tags
 if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 
+export GOCACHE=/tmp
+
 prepare_build () {
   BUILDINFOFILE="psiphond_buildinfo.txt"
   BUILDDATE=$(date -Iseconds)

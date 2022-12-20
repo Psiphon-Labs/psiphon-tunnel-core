@@ -13,6 +13,8 @@ if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
 # At this time, psiphon-tunnel-core doesn't support modules
 export GO111MODULE=off
 
+export GOCACHE=/tmp
+
 BUILDINFOFILE="psiphon-tunnel-core_buildinfo.txt"
 BUILDDATE=$(date --iso-8601=seconds)
 BUILDREPO=$(git config --get remote.origin.url)
