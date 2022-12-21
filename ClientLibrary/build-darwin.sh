@@ -80,6 +80,8 @@ prepare_build () {
   BUILDREV=$(git rev-parse --short HEAD)
   GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
+  cd ${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ClientLibrary
+
   LDFLAGS="\
   -s \
   -w \
