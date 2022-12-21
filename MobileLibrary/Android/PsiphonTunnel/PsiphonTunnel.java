@@ -33,6 +33,7 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.telephony.TelephonyManager;
+import android.text.TextUtils;
 import android.util.Base64;
 
 import org.json.JSONArray;
@@ -705,7 +706,7 @@ public class PsiphonTunnel {
 
         try {
             // Use the workaround, comma-delimited format required for gobind.
-            servers = String.join(",", getActiveNetworkDNSServers(context, mVpnMode.get()));
+            servers = TextUtils.join(",", getActiveNetworkDNSServers(context, mVpnMode.get()));
         } catch (Exception e) {
             logger.onDiagnosticMessage("failed to get active network DNS resolver: " + e.getMessage());
             // Alternate DNS servers will be provided by psiphon-tunnel-core
@@ -1564,7 +1565,7 @@ public class PsiphonTunnel {
                         } catch (java.lang.Exception e) {
                         }
                         // Use the workaround, comma-delimited format required for gobind.
-                        activeNetworkDNSServers.set(String.join(",", servers));
+                        activeNetworkDNSServers.set(TextUtils.join(",", servers));
 
                         String message = "NetworkMonitor: set current active network " + networkType;
                         if (!servers.isEmpty()) {

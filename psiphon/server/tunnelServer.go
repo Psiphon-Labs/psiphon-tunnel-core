@@ -3729,11 +3729,15 @@ func (sshClient *sshClient) isPortForwardPermitted(
 		// Traffic rules checks.
 		switch portForwardType {
 		case portForwardTypeTCP:
-			if !sshClient.trafficRules.AllowTCPPort(remoteIP, port) {
+			if !sshClient.trafficRules.AllowTCPPort(
+				sshClient.sshServer.support.GeoIPService, remoteIP, port) {
+
 				allowed = false
 			}
 		case portForwardTypeUDP:
-			if !sshClient.trafficRules.AllowUDPPort(remoteIP, port) {
+			if !sshClient.trafficRules.AllowUDPPort(
+				sshClient.sshServer.support.GeoIPService, remoteIP, port) {
+
 				allowed = false
 			}
 		}

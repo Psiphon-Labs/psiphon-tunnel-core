@@ -20,7 +20,6 @@
 package buildinfo
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
@@ -46,37 +45,24 @@ var buildRev string
 // -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.goVersion=`go version | perl -ne '/go version (.*?) / && print $1'`
 var goVersion string
 
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.gomobileVersion=`gomobile version | perl -ne '/gomobile version (.*?) / && print $1'`
-var gomobileVersion string
-
-// -X github.com/Psiphon-Labs/psiphon-tunnel-core/common/buildinfo.dependencies=`echo -n "{" && go list -f '{{range $dep := .Deps}}{{printf "%s\n" $dep}}{{end}}' | xargs go list -f '{{if not .Standard}}{{.ImportPath}}{{end}}' | xargs -I pkg bash -c 'cd $GOPATH/src/pkg && echo -n "\"pkg\":\"$(git rev-parse --short HEAD)\","' | sed 's/,$/}/'`
-// Dependencies should be listed as a JSON object like the following (no spaces) {"github.com/Psiphon-Labs/psiphon-tunnel-core":"abcdef","...":"..."}
-var dependencies string
-
 // BuildInfo captures relevant build information here for use in clients or servers
 type BuildInfo struct {
-	BuildDate       string          `json:"buildDate"`
-	BuildRepo       string          `json:"buildRepo"`
-	BuildRev        string          `json:"buildRev"`
-	GoVersion       string          `json:"goVersion"`
-	GomobileVersion string          `json:"gomobileVersion,omitempty"`
-	Dependencies    json.RawMessage `json:"dependencies"`
-	ValuesRev       string          `json:"valuesRev"`
+	BuildDate string `json:"buildDate"`
+	BuildRepo string `json:"buildRepo"`
+	BuildRev  string `json:"buildRev"`
+	GoVersion string `json:"goVersion"`
+	ValuesRev string `json:"valuesRev"`
 }
 
 // ToMap converts 'BuildInfo' struct to 'map[string]interface{}'
 func (bi *BuildInfo) ToMap() map[string]interface{} {
 
-	var dependenciesMap map[string]interface{}
-	json.Unmarshal([]byte(bi.Dependencies), &dependenciesMap)
-
 	buildInfoMap := map[string]interface{}{
-		"buildDate":    bi.BuildDate,
-		"buildRepo":    bi.BuildRepo,
-		"buildRev":     bi.BuildRev,
-		"goVersion":    bi.GoVersion,
-		"dependencies": dependenciesMap,
-		"valuesRev":    bi.ValuesRev,
+		"buildDate": bi.BuildDate,
+		"buildRepo": bi.BuildRepo,
+		"buildRev":  bi.BuildRev,
+		"goVersion": bi.GoVersion,
+		"valuesRev": bi.ValuesRev,
 	}
 
 	return buildInfoMap
@@ -85,19 +71,12 @@ func (bi *BuildInfo) ToMap() map[string]interface{} {
 // GetBuildInfo returns an instance of the BuildInfo struct
 func GetBuildInfo() *BuildInfo {
 
-	deps := strings.TrimSpace(dependencies)
-	if deps == "" {
-		deps = "{}"
-	}
-
 	buildInfo := BuildInfo{
-		BuildDate:       strings.TrimSpace(buildDate),
-		BuildRepo:       strings.TrimSpace(buildRepo),
-		BuildRev:        strings.TrimSpace(buildRev),
-		GoVersion:       strings.TrimSpace(goVersion),
-		GomobileVersion: strings.TrimSpace(gomobileVersion),
-		Dependencies:    json.RawMessage(deps),
-		ValuesRev:       values.GetRevision(),
+		BuildDate: strings.TrimSpace(buildDate),
+		BuildRepo: strings.TrimSpace(buildRepo),
+		BuildRev:  strings.TrimSpace(buildRev),
+		GoVersion: strings.TrimSpace(goVersion),
+		ValuesRev: values.GetRevision(),
 	}
 
 	return &buildInfo

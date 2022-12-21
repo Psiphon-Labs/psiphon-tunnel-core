@@ -2,7 +2,7 @@
 #
 # See README.md for usage instructions.
 
-FROM ubuntu:18.04
+FROM --platform=linux/amd64 ubuntu:18.04
 
 # Install system-level dependencies.
 ENV DEBIAN_FRONTEND=noninteractive

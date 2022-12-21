@@ -102,6 +102,7 @@ func (h HTTPRoundTripper) RoundTrip(request *http.Request) (*http.Response, erro
 func TerminateHTTPConnection(
 	responseWriter http.ResponseWriter, request *http.Request) {
 
+	responseWriter.Header().Set("Content-Length", "0")
 	http.NotFound(responseWriter, request)
 
 	hijack, ok := responseWriter.(http.Hijacker)
@@ -293,9 +294,9 @@ func IsBogon(IP net.IP) bool {
 // for invalid DNS messages.
 //
 // Limitations:
-// - Only the first Question field is extracted.
-// - ParseDNSQuestion only functions for plaintext DNS and cannot
-//   extract domains from DNS-over-TLS/HTTPS, etc.
+//   - Only the first Question field is extracted.
+//   - ParseDNSQuestion only functions for plaintext DNS and cannot
+//     extract domains from DNS-over-TLS/HTTPS, etc.
 func ParseDNSQuestion(request []byte) (string, error) {
 	m := new(dns.Msg)
 	err := m.Unpack(request)
