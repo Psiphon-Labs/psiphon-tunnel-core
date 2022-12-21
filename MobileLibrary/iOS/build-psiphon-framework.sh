@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 
+# build-psiphon-framework.sh builds a PsiphonTunnel.xcframework bundle
+# to be used by the Objective-C tunnel-core users.
+#
+# The build script performs the following tasks:
+# 1. Creates a new Go environment and installs (vendored) gomobile.
+# 2. Builds Objective-C tunnel-core library (Psi.xcframework) using `gomobile bind`.
+# 3. Copies Psi.xcframework into the PsiphonTunnel Xcode project.
+# 4. Builds PsiphonTunnel.framework for iOS (arm64) and simulators (x86_64 and arm64).
+# 5. Assembles the iOS and simulator PsiphonTunnel.framework packages
+#    into a single PsiphonTunnel.xcframework bundle.
+
+
 set -e -u -x
 
 if [ -z ${1+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$1"; fi
@@ -32,6 +44,8 @@ if [[ $? != 0 ]]; then
   exit 1
 fi
 
+# PsiphonTunnel Xcode project imports the framework built by gomobile,
+# and defines the interface for Objective-C tunnel-core users.
 UMBRELLA_FRAMEWORK_XCODE_PROJECT=${BASE_DIR}/PsiphonTunnel/PsiphonTunnel.xcodeproj/
 
 # Exporting these seems necessary for subcommands to pick them up.
@@ -41,7 +55,7 @@ export PATH=${GOPATH}/bin:${PATH}
 # The GOPATH we're using is temporary, so make sure there isn't one from a previous run.
 rm -rf "${GOPATH}"
 
-GOMOBILE_PINNED_REV=ce6a79cf6a13dd77095a6f8dbee5f39848fa7da1
+# gomobile library is vendored
 GOMOBILE_PATH=${GOPATH}/src/golang.org/x/mobile/cmd/gomobile
 
 TUNNEL_CORE_SRC_DIR=${GOPATH}/src/github.com/Psiphon-Labs/psiphon-tunnel-core
@@ -67,10 +81,11 @@ if [[ $? != 0 ]]; then
   exit 1
 fi
 
-# Builds Psi.framework library for the given platform.
+# Builds Psi.xcframework library for the given platform.
+# Psi.xcframework is the glue code between Go and Objective-C.
 #
 # - Parameter 1: `gomobile bind` -target option value
-# - Parameter 2: Variable name where gomobile output will be set to.
+# - Parameter 2: Variable name where gomobile output (Psi.xcframework) will be set to.
 function gomobile_build_for_platform() {
 
   # Possible values are "ios" and "simulator"
@@ -111,7 +126,7 @@ if [[ ${GO_VERSION} != "${GO_VERSION_REQUIRED}" ]]; then
 fi
 
 #
-# Get and install gomobile, using our pinned revision
+# Copies vendored gomobile into the local GOPATH.
 #
 
 mkdir -p "${GOPATH}/src/golang.org/x"
@@ -173,7 +188,7 @@ gomobile_build_for_platform "ios" IOS_PSI_FRAMEWORK
 echo "$IOS_PSI_FRAMEWORK"
 
 #
-# Copies gobind output Psi.xcframework to the Xcode project
+# Copies gobind output Psi.xcframework to the TunnelCore Xcode project
 #
 
 rm -rf "${BASE_DIR}/PsiphonTunnel/PsiphonTunnel/Psi.xcframework"
@@ -206,7 +221,6 @@ EXCLUDED_ARCHS="armv7"
 #
 # Note:
 # - Excludes 32-bit Intel: EXCLUDED_ARCHS="i386".
-# - Excludes ARM Macs: EXCLUDED_ARCHS="arm64".
 
 SIMULATOR_ARCHIVE="${BUILD_DIR}/simulator.xcarchive"
 
@@ -224,12 +238,11 @@ STRIP_BITCODE_FROM_COPIED_FILES="NO" \
 BUILD_LIBRARY_FOR_DISTRIBUTION="YES" \
 ONLY_ACTIVE_ARCH="NO" \
 SKIP_INSTALL="NO" \
-EXCLUDED_ARCHS="arm64 i386"
+EXCLUDED_ARCHS="i386"
 
 #
-# Bundling the generated frameworks into a single PsiphonTunnel.xcframework
+# Bundles the generated frameworks (for iOS and simulator) into a single PsiphonTunnel.xcframework
 #
-
 xcodebuild -create-xcframework \
 -framework "${IOS_ARCHIVE}/Products/Library/Frameworks/PsiphonTunnel.framework" \
 -debug-symbols "${IOS_ARCHIVE}/dSYMs/PsiphonTunnel.framework.dSYM" \
