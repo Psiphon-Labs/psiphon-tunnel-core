@@ -246,26 +246,41 @@ public class PsiphonTunnel {
         if (!mRoutingThroughTunnel.compareAndSet(false, true)) {
             return;
         }
-        ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
+        ParcelFileDescriptor tunFd = mTunFd.get();
         if (tunFd == null) {
             return;
         }
 
         String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
         String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
-        startTun2Socks(
-                tunFd,
-                VPN_INTERFACE_MTU,
-                mPrivateAddress.mRouter,
-                VPN_INTERFACE_NETMASK,
-                socksServerAddress,
-                udpgwServerAddress,
-                true);
 
-        mHostService.onDiagnosticMessage("routing through tunnel");
+        // We may call routeThroughTunnel and stopRouteThroughTunnel more than once within the same
+        // VPN session. Since stopTun2Socks() closes the FD passed to startTun2Socks() we will use a
+        // dup of the original tun FD and close the original only when we call stopVpn().
+        //
+        // Note that ParcelFileDescriptor.dup() may throw an IOException.
+        try {
+            startTun2Socks(
+                    tunFd.dup(),
+                    VPN_INTERFACE_MTU,
+                    mPrivateAddress.mRouter,
+                    VPN_INTERFACE_NETMASK,
+                    socksServerAddress,
+                    udpgwServerAddress,
+                    true);
+            mHostService.onDiagnosticMessage("routing through tunnel");
 
-        // TODO: should double-check tunnel routing; see:
-        // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/1dc5e4257dca99790109f3bf374e8ab3a0ead4d7/Android/PsiphonAndroidLibrary/src/com/psiphon3/psiphonlibrary/TunnelCore.java?at=default#cl-779
+            // TODO: should double-check tunnel routing; see:
+            // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/1dc5e4257dca99790109f3bf374e8ab3a0ead4d7/Android/PsiphonAndroidLibrary/src/com/psiphon3/psiphonlibrary/TunnelCore.java?at=default#cl-779
+        } catch (IOException e) {
+            mHostService.onDiagnosticMessage("routing through tunnel error: " + e);
+        }
+    }
+
+    public void stopRouteThroughTunnel() {
+        if (mRoutingThroughTunnel.compareAndSet(true, false)) {
+            stopTun2Socks();
+        }
     }
 
     // Throws an exception in error conditions. In the case of an exception, the routing
