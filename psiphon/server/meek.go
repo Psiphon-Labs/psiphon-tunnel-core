@@ -690,6 +690,15 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// The session is new (or expired). Treat the cookie value as a new meek
 	// cookie, extract the payload, and create a new session.
 
+	// Limitation: when the cookie is a session ID for an expired session, we
+	// still attempt to treat it as a meek cookie. As it stands, that yields
+	// either base64 decoding errors (RawStdEncoding vs. StdEncoding) or
+	// length errors. We could log cleaner errors ("session is expired") by
+	// checking that the cookie is a well-formed (base64.RawStdEncoding) value
+	// between MEEK_MIN_SESSION_ID_LENGTH and MEEK_MAX_SESSION_ID_LENGTH
+	// bytes -- assuming that MEEK_MAX_SESSION_ID_LENGTH is too short to be a
+	// valid meek cookie.
+
 	payloadJSON, err := server.getMeekCookiePayload(clientIP, meekCookie.Value)
 	if err != nil {
 		return "", nil, nil, "", nil, errors.Trace(err)

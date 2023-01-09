@@ -40,7 +40,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
 
 ##### Create the build image:
 
-1. While in the `MobileLibrary/Android` directory, run the command: `docker build --no-cache=true -t psiandroid .`
+1. While in the `MobileLibrary/Android` directory, run the command: `docker build --no-cache=true -t psiandroid -f Dockerfile ..`
 
 2. Once completed, verify that you see an image named `psiandroid` when running: `docker images`
 
@@ -48,9 +48,13 @@ Note that you may need to use `sudo docker` below, depending on your OS.
 
 *Ensure that the command below is run from within the `MobileLibrary/Android` directory*
 
+*The `--user "$(id -u):$(id -g)"` flag must be omitted when building on macOS because manually specifying the UID/GID will cause the build to fail since Docker on macOS handles host to container UID/GID mapping automatically and will be unable to map the manually specified UID/GID to the current user.*
+
 ```bash
 cd ../.. && \
   docker run \
+  --platform=linux/amd64 \
+  --user "$(id -u):$(id -g)" \
   --rm \
   -v $(pwd):/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
   psiandroid \

@@ -57,9 +57,13 @@ Note that you may need to use `sudo docker` below, depending on your OS.
 
 *Ensure that the command below is run from within the `ClientLibrary` directory*
 
+*The `--user "$(id -u):$(id -g)"` flag must be omitted when building on macOS because manually specifying the UID/GID will cause the build to fail since Docker on macOS handles host to container UID/GID mapping automatically and will be unable to map the manually specified UID/GID to the current user.*
+
 ```bash
 cd .. && \
   docker run \
+  --platform=linux/amd64 \
+  --user "$(id -u):$(id -g)" \
   --rm \
   -v $PWD:/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core \
   psiclientlibrary-builder \

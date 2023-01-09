@@ -20,16 +20,13 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -117,32 +114,9 @@ func main() {
 
 	if versionDetails {
 		b := buildinfo.GetBuildInfo()
-
-		var printableDependencies bytes.Buffer
-		var dependencyMap map[string]string
-		longestRepoUrl := 0
-		json.Unmarshal(b.Dependencies, &dependencyMap)
-
-		sortedRepoUrls := make([]string, 0, len(dependencyMap))
-		for repoUrl := range dependencyMap {
-			repoUrlLength := len(repoUrl)
-			if repoUrlLength > longestRepoUrl {
-				longestRepoUrl = repoUrlLength
-			}
-
-			sortedRepoUrls = append(sortedRepoUrls, repoUrl)
-		}
-		sort.Strings(sortedRepoUrls)
-
-		for repoUrl := range sortedRepoUrls {
-			printableDependencies.WriteString(fmt.Sprintf("    %s  ", sortedRepoUrls[repoUrl]))
-			for i := 0; i < (longestRepoUrl - len(sortedRepoUrls[repoUrl])); i++ {
-				printableDependencies.WriteString(" ")
-			}
-			printableDependencies.WriteString(fmt.Sprintf("%s\n", dependencyMap[sortedRepoUrls[repoUrl]]))
-		}
-
-		fmt.Printf("Psiphon Console Client\n  Build Date: %s\n  Built With: %s\n  Repository: %s\n  Revision: %s\n  Dependencies:\n%s\n", b.BuildDate, b.GoVersion, b.BuildRepo, b.BuildRev, printableDependencies.String())
+		fmt.Printf(
+			"Psiphon Console Client\n  Build Date: %s\n  Built With: %s\n  Repository: %s\n  Revision: %s\n",
+			b.BuildDate, b.GoVersion, b.BuildRepo, b.BuildRev)
 		os.Exit(0)
 	}
 
