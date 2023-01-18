@@ -90,7 +90,48 @@ func NewUDPConn(
 		return nil, nil, errors.Tracef("invalid IP address: %s", ipAddr.String())
 	}
 
-	conn, err := newUDPConn(domain, config)
+	network := "udp4"
+
+	if domain == syscall.AF_INET6 {
+		network = "udp6"
+	}
+
+	lc := new(net.ListenConfig)
+
+	lc.Control = func(_, _ string, c syscall.RawConn) error {
+		var controlErr error
+
+		err := c.Control(func(fd uintptr) {
+
+			socketFD := int(fd)
+
+			setAdditionalSocketOptions(socketFD)
+
+			if config.BPFProgramInstructions != nil {
+				err := setSocketBPF(config.BPFProgramInstructions, socketFD)
+				if err != nil {
+					controlErr = errors.Tracef("setSocketBPF failed: %s", err)
+					return
+				}
+			}
+
+			if config.DeviceBinder != nil {
+				_, err := config.DeviceBinder.BindToDevice(socketFD)
+				if err != nil {
+					controlErr = errors.Tracef("BindToDevice failed: %s", err)
+					return
+				}
+			}
+		})
+
+		if controlErr != nil {
+			return errors.Trace(controlErr)
+		}
+
+		return errors.Trace(err)
+	}
+
+	conn, err := lc.ListenPacket(context.Background(), network, (&net.UDPAddr{}).String())
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
@@ -99,5 +140,5 @@ func NewUDPConn(
 		config.ResolvedIPCallback(ipAddr.String())
 	}
 
-	return conn, &net.UDPAddr{IP: ipAddr, Port: port}, nil
+	return conn.(*net.UDPConn), &net.UDPAddr{IP: ipAddr, Port: port}, nil
 }
