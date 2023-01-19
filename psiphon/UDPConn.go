@@ -81,19 +81,13 @@ func NewUDPConn(
 		}
 	}
 
-	var domain int
+	var network string
 	if ipAddr != nil && ipAddr.To4() != nil {
-		domain = syscall.AF_INET
+		network = "udp4"
 	} else if ipAddr != nil && ipAddr.To16() != nil {
-		domain = syscall.AF_INET6
+		network = "udp6"
 	} else {
 		return nil, nil, errors.Tracef("invalid IP address: %s", ipAddr.String())
-	}
-
-	network := "udp4"
-
-	if domain == syscall.AF_INET6 {
-		network = "udp6"
 	}
 
 	lc := new(net.ListenConfig)
