@@ -48,6 +48,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -1007,9 +1008,9 @@ func (c *ietfQUICConnection) isErrorIndicatingClosed(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	// The target errors are of type qerr.ApplicationError and
-	// qerr.IdleTimeoutError, but these are not exported by quic-go.
-	return errStr == "Application error 0x0" ||
+	// The target errors are of type qerr.ApplicationError[Code] and
+	// qerr.IdleTimeoutError, but these are not both exported by quic-go.
+	return strings.HasPrefix(errStr, "Application error 0x0") ||
 		errStr == "timeout: no recent network activity"
 }
 
