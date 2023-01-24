@@ -21,7 +21,6 @@
  */
 
 /*
-
 Package quic wraps github.com/lucas-clemente/quic-go with net.Listener and
 net.Conn types that provide a drop-in replacement for net.TCPConn.
 
@@ -39,7 +38,6 @@ Conns mask or translate qerr.PeerGoingAway to io.EOF as appropriate.
 QUIC idle timeouts and keep alives are tuned to mitigate aggressive UDP NAT
 timeouts on mobile data networks while accounting for the fact that mobile
 devices in standby/sleep may not be able to initiate the keep alive.
-
 */
 package quic
 
@@ -50,7 +48,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -347,8 +344,8 @@ func (listener *Listener) Close() error {
 // may be cancelled by ctx; packetConn will be closed if the dial is
 // cancelled or fails.
 //
-// Keep alive and idle timeout functionality in QUIC is disabled as these
-// aspects are expected to be handled at a higher level.
+// When packetConn is a *net.UDPConn, QUIC ECN bit operations are supported,
+// unless the specified QUIC version is obfuscated.
 func Dial(
 	ctx context.Context,
 	packetConn net.PacketConn,
@@ -386,14 +383,38 @@ func Dial(
 		return nil, errors.Tracef("invalid destination port: %d", remoteAddr.Port)
 	}
 
-	udpConn, ok := packetConn.(udpConn)
-	if !ok {
-		return nil, errors.TraceNew("packetConn must implement net.UDPConn functions")
-	}
+	udpConn, ok := packetConn.(*net.UDPConn)
 
-	// Ensure blocked packet writes eventually timeout.
-	packetConn = &writeTimeoutUDPConn{
-		udpConn: udpConn,
+	if !ok || isObfuscated(quicVersion) {
+
+		// quic-go uses OOB operations to manipulate ECN bits in IP packet
+		// headers. These operations are available only when the packet conn
+		// is a *net.UDPConn. At this time, quic-go reads but does not write
+		// ECN OOB bits; see quic-go PR 2789.
+		//
+		// To guard against future writes to ECN bits, a potential fingerprint
+		// when using obfuscated QUIC, this non-OOB code path is taken for
+		// isObfuscated QUIC versions. This mitigates upstream fingerprints;
+		// see ObfuscatedPacketConn.writePacket for the server-side
+		// downstream limitation.
+
+		// Ensure blocked packet writes eventually timeout.
+		packetConn = &writeTimeoutPacketConn{
+			PacketConn: packetConn,
+		}
+
+		// Double check that OOB support won't be detected by quic-go.
+		_, ok := packetConn.(ietf_quic.OOBCapablePacketConn)
+		if ok {
+			return nil, errors.TraceNew("unexpected OOBCapablePacketConn")
+		}
+
+	} else {
+
+		// Ensure blocked packet writes eventually timeout.
+		packetConn = &writeTimeoutUDPConn{
+			UDPConn: udpConn,
+		}
 	}
 
 	maxPacketSizeAdjustment := 0
@@ -443,6 +464,7 @@ func Dial(
 	connection, err := dialQUIC(
 		ctx,
 		packetConn,
+		false,
 		remoteAddr,
 		quicSNIAddress,
 		versionNumber,
@@ -501,35 +523,6 @@ func Dial(
 	return conn, nil
 }
 
-// udpConn matches net.UDPConn, which implements both net.Conn and
-// net.PacketConn. udpConn enables handling of Dial packetConn inputs that
-// are not concrete *net.UDPConn types but which still implement all the
-// required functions. A udpConn instance can be passed to quic-go; various
-// quic-go code paths check that the input conn implements net.Conn and/or
-// net.PacketConn.
-//
-// TODO: add *AddrPort functions introduced in Go 1.18
-type udpConn interface {
-	Close() error
-	File() (f *os.File, err error)
-	LocalAddr() net.Addr
-	Read(b []byte) (int, error)
-	ReadFrom(b []byte) (int, net.Addr, error)
-	ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error)
-	ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
-	RemoteAddr() net.Addr
-	SetDeadline(t time.Time) error
-	SetReadBuffer(bytes int) error
-	SetReadDeadline(t time.Time) error
-	SetWriteBuffer(bytes int) error
-	SetWriteDeadline(t time.Time) error
-	SyscallConn() (syscall.RawConn, error)
-	Write(b []byte) (int, error)
-	WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)
-	WriteTo(b []byte, addr net.Addr) (int, error)
-	WriteToUDP(b []byte, addr *net.UDPAddr) (int, error)
-}
-
 // writeTimeoutUDPConn sets write deadlines before each UDP packet write.
 //
 // Generally, a UDP packet write doesn't block. However, Go's
@@ -543,7 +536,7 @@ type udpConn interface {
 // Note that quic-go manages read deadlines; we set only the write deadline
 // here.
 type writeTimeoutUDPConn struct {
-	udpConn
+	*net.UDPConn
 }
 
 func (conn *writeTimeoutUDPConn) Write(b []byte) (int, error) {
@@ -554,7 +547,7 @@ func (conn *writeTimeoutUDPConn) Write(b []byte) (int, error) {
 	}
 
 	// Do not wrap any I/O err returned by udpConn
-	return conn.udpConn.Write(b)
+	return conn.UDPConn.Write(b)
 }
 
 func (conn *writeTimeoutUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (int, int, error) {
@@ -565,7 +558,7 @@ func (conn *writeTimeoutUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (
 	}
 
 	// Do not wrap any I/O err returned by udpConn
-	return conn.udpConn.WriteMsgUDP(b, oob, addr)
+	return conn.UDPConn.WriteMsgUDP(b, oob, addr)
 }
 
 func (conn *writeTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
@@ -576,7 +569,7 @@ func (conn *writeTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	}
 
 	// Do not wrap any I/O err returned by udpConn
-	return conn.udpConn.WriteTo(b, addr)
+	return conn.UDPConn.WriteTo(b, addr)
 }
 
 func (conn *writeTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, error) {
@@ -587,7 +580,24 @@ func (conn *writeTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, e
 	}
 
 	// Do not wrap any I/O err returned by udpConn
-	return conn.udpConn.WriteToUDP(b, addr)
+	return conn.UDPConn.WriteToUDP(b, addr)
+}
+
+// writeTimeoutPacketConn is the equivilent of writeTimeoutUDPConn for
+// non-*net.UDPConns.
+type writeTimeoutPacketConn struct {
+	net.PacketConn
+}
+
+func (conn *writeTimeoutPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.PacketConn.WriteTo(b, addr)
 }
 
 // Conn is a net.Conn and psiphon/common.Closer.
@@ -864,9 +874,21 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 		return nil, errors.Trace(err)
 	}
 
+	// Check for a *net.UDPConn, as expected, to support OOB operations.
+	udpConn, ok := packetConn.(*net.UDPConn)
+	if !ok {
+		return nil, errors.Tracef("unexpected packetConn type: %T", packetConn)
+	}
+
+	// Ensure blocked packet writes eventually timeout.
+	packetConn = &writeTimeoutUDPConn{
+		UDPConn: udpConn,
+	}
+
 	connection, err := dialQUIC(
 		ctx,
 		packetConn,
+		true,
 		remoteAddr,
 		t.quicSNIAddress,
 		versionNumber,
@@ -994,6 +1016,7 @@ func (c *ietfQUICConnection) isErrorIndicatingClosed(err error) bool {
 func dialQUIC(
 	ctx context.Context,
 	packetConn net.PacketConn,
+	expectNetUDPConn bool,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
 	versionNumber uint32,
@@ -1153,7 +1176,7 @@ func (conn *muxPacketConn) SetWriteDeadline(t time.Time) error {
 // https://godoc.org/github.com/lucas-clemente/quic-go#ECNCapablePacketConn.
 
 func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
-	c, ok := conn.listener.conn.OOBCapablePacketConn.(interface {
+	c, ok := conn.listener.conn.PacketConn.(interface {
 		SetReadBuffer(int) error
 	})
 	if !ok {
@@ -1163,7 +1186,7 @@ func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
 }
 
 func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {
-	c, ok := conn.listener.conn.OOBCapablePacketConn.(interface {
+	c, ok := conn.listener.conn.PacketConn.(interface {
 		SyscallConn() (syscall.RawConn, error)
 	})
 	if !ok {

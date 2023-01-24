@@ -102,7 +102,7 @@ const (
 // payload will increase UDP packets beyond the QUIC max of 1280 bytes,
 // introducing some risk of fragmentation and/or dropped packets.
 type ObfuscatedPacketConn struct {
-	ietf_quic.OOBCapablePacketConn
+	net.PacketConn
 	isServer         bool
 	isIETFClient     bool
 	isDecoyClient    bool
@@ -130,17 +130,12 @@ func (p *peerMode) isStale() bool {
 
 // NewObfuscatedPacketConn creates a new ObfuscatedPacketConn.
 func NewObfuscatedPacketConn(
-	conn net.PacketConn,
+	packetConn net.PacketConn,
 	isServer bool,
 	isIETFClient bool,
 	isDecoyClient bool,
 	obfuscationKey string,
 	paddingSeed *prng.Seed) (*ObfuscatedPacketConn, error) {
-
-	oobPacketConn, ok := conn.(ietf_quic.OOBCapablePacketConn)
-	if !ok {
-		return nil, errors.TraceNew("conn must support OOBCapablePacketConn")
-	}
 
 	// There is no replay of obfuscation "encryption", just padding.
 	nonceSeed, err := prng.NewSeed()
@@ -148,61 +143,61 @@ func NewObfuscatedPacketConn(
 		return nil, errors.Trace(err)
 	}
 
-	packetConn := &ObfuscatedPacketConn{
-		OOBCapablePacketConn: oobPacketConn,
-		isServer:             isServer,
-		isIETFClient:         isIETFClient,
-		isDecoyClient:        isDecoyClient,
-		peerModes:            make(map[string]*peerMode),
-		noncePRNG:            prng.NewPRNGWithSeed(nonceSeed),
-		paddingPRNG:          prng.NewPRNGWithSeed(paddingSeed),
+	conn := &ObfuscatedPacketConn{
+		PacketConn:    packetConn,
+		isServer:      isServer,
+		isIETFClient:  isIETFClient,
+		isDecoyClient: isDecoyClient,
+		peerModes:     make(map[string]*peerMode),
+		noncePRNG:     prng.NewPRNGWithSeed(nonceSeed),
+		paddingPRNG:   prng.NewPRNGWithSeed(paddingSeed),
 	}
 
 	secret := []byte(obfuscationKey)
 	salt := []byte("quic-obfuscation-key")
 	_, err = io.ReadFull(
-		hkdf.New(sha256.New, secret, salt, nil), packetConn.obfuscationKey[:])
+		hkdf.New(sha256.New, secret, salt, nil), conn.obfuscationKey[:])
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	if isDecoyClient {
-		packetConn.decoyPacketCount = int32(packetConn.paddingPRNG.Range(
+		conn.decoyPacketCount = int32(conn.paddingPRNG.Range(
 			MIN_DECOY_PACKETS, MAX_DECOY_PACKETS))
-		packetConn.decoyBuffer = make([]byte, MAX_PACKET_SIZE)
+		conn.decoyBuffer = make([]byte, MAX_PACKET_SIZE)
 	}
 
 	if isServer {
 
-		packetConn.runWaitGroup = new(sync.WaitGroup)
-		packetConn.stopBroadcast = make(chan struct{})
+		conn.runWaitGroup = new(sync.WaitGroup)
+		conn.stopBroadcast = make(chan struct{})
 
 		// Reap stale peer mode information to reclaim memory.
 
-		packetConn.runWaitGroup.Add(1)
+		conn.runWaitGroup.Add(1)
 		go func() {
-			defer packetConn.runWaitGroup.Done()
+			defer conn.runWaitGroup.Done()
 
 			ticker := time.NewTicker(SERVER_IDLE_TIMEOUT / 2)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
-					packetConn.peerModesMutex.Lock()
-					for address, mode := range packetConn.peerModes {
+					conn.peerModesMutex.Lock()
+					for address, mode := range conn.peerModes {
 						if mode.isStale() {
-							delete(packetConn.peerModes, address)
+							delete(conn.peerModes, address)
 						}
 					}
-					packetConn.peerModesMutex.Unlock()
-				case <-packetConn.stopBroadcast:
+					conn.peerModesMutex.Unlock()
+				case <-conn.stopBroadcast:
 					return
 				}
 			}
 		}()
 	}
 
-	return packetConn, nil
+	return conn, nil
 }
 
 func (conn *ObfuscatedPacketConn) Close() error {
@@ -217,7 +212,7 @@ func (conn *ObfuscatedPacketConn) Close() error {
 		conn.runWaitGroup.Wait()
 	}
 
-	return conn.OOBCapablePacketConn.Close()
+	return conn.PacketConn.Close()
 }
 
 type temporaryNetError struct {
@@ -242,7 +237,7 @@ func (e *temporaryNetError) Error() string {
 
 func (conn *ObfuscatedPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	n, _, _, addr, _, err := conn.readPacketWithType(p, nil)
-	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	// Do not wrap any I/O err returned by conn.PacketConn
 	return n, addr, err
 }
 
@@ -252,7 +247,7 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 		return 0, errors.TraceNew("unexpected addr type")
 	}
 	n, _, err := conn.writePacket(p, nil, udpAddr)
-	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	// Do not wrap any I/O err returned by conn.PacketConn
 	return n, err
 }
 
@@ -273,13 +268,13 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 
 func (conn *ObfuscatedPacketConn) ReadMsgUDP(p, oob []byte) (int, int, int, *net.UDPAddr, error) {
 	n, oobn, flags, addr, _, err := conn.readPacketWithType(p, nil)
-	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	// Do not wrap any I/O err returned by conn.PacketConn
 	return n, oobn, flags, addr, err
 }
 
 func (conn *ObfuscatedPacketConn) WriteMsgUDP(p, oob []byte, addr *net.UDPAddr) (int, int, error) {
 	n, oobn, err := conn.writePacket(p, oob, addr)
-	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	// Do not wrap any I/O err returned by conn.PacketConn
 	return n, oobn, err
 }
 
@@ -298,7 +293,7 @@ func (conn *ObfuscatedPacketConn) ReadBatch(ms []ipv4.Message, _ int) (int, erro
 	ms[0].N, ms[0].NN, ms[0].Flags, ms[0].Addr, _, err =
 		conn.readPacketWithType(ms[0].Buffers[0], ms[0].OOB)
 	if err != nil {
-		// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+		// Do not wrap any I/O err returned by conn.PacketConn
 		return 0, err
 	}
 	return 1, nil
@@ -363,7 +358,7 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 			continue
 		}
 
-		// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+		// Do not wrap any I/O err returned by conn.PacketConn
 		return n, oobn, flags, addr, isIETF, err
 	}
 }
@@ -371,7 +366,26 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 func (conn *ObfuscatedPacketConn) readPacket(
 	p, oob []byte) (int, int, int, *net.UDPAddr, bool, error) {
 
-	n, oobn, flags, addr, err := conn.OOBCapablePacketConn.ReadMsgUDP(p, oob)
+	var n, oobn, flags int
+	var addr *net.UDPAddr
+	var err error
+
+	oobCapablePacketConn, ok := conn.PacketConn.(ietf_quic.OOBCapablePacketConn)
+	if ok {
+		// Read OOB ECN bits when supported by the packet conn.
+		n, oobn, flags, addr, err = oobCapablePacketConn.ReadMsgUDP(p, oob)
+	} else {
+		// Fall back to a generic ReadFrom, supported by any packet conn.
+		var netAddr net.Addr
+		n, netAddr, err = conn.PacketConn.ReadFrom(p)
+		if netAddr != nil {
+			// Directly convert from net.Addr to *net.UDPAddr, if possible.
+			addr, ok = netAddr.(*net.UDPAddr)
+			if !ok {
+				addr, err = net.ResolveUDPAddr("udp", netAddr.String())
+			}
+		}
+	}
 
 	// Data is processed even when err != nil, as ReadFrom may return both
 	// a packet and an error, such as io.EOF.
@@ -556,7 +570,7 @@ func (conn *ObfuscatedPacketConn) readPacket(
 		}
 	}
 
-	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	// Do not wrap any I/O err returned by conn.PacketConn
 	return n, oobn, flags, addr, isIETF, err
 }
 
@@ -648,15 +662,42 @@ func (conn *ObfuscatedPacketConn) writePacket(
 		}
 	}
 
-	_, oobn, err := conn.OOBCapablePacketConn.WriteMsgUDP(p, oob, addr)
+	var oobn int
+	var err error
 
-	// quic-go uses OOB to manipulate ECN bits in the IP header; these are not
-	// obfuscated.
-	//
+	oobCapablePacketConn, ok := conn.PacketConn.(ietf_quic.OOBCapablePacketConn)
+	if ok {
+
+		// Write OOB bits if supported by the packet conn.
+		//
+		// At this time, quic-go reads but does not write ECN OOB bits. On the
+		// client-side, the Dial function arranges for conn.PacketConn to not
+		// implement OOBCapablePacketConn when using obfuscated QUIC, and so
+		// quic-go is not expected to write ECN bits -- a potential
+		// obfuscation fingerprint -- in the future, on the client-side.
+		//
+		// Limitation: on the server-side, the single UDP server socket is
+		// wrapped with ObfuscatedPacketConn and supports both obfuscated and
+		// regular QUIC; as it stands, this logic will support writing ECN
+		// bits for both obfuscated and regular QUIC.
+
+		_, oobn, err = oobCapablePacketConn.WriteMsgUDP(p, oob, addr)
+
+	} else {
+
+		// Fall back to WriteTo, supported by any packet conn. If there are
+		// OOB bits to be written, fail.
+
+		if oob != nil {
+			return 0, 0, errors.TraceNew("unexpected OOB payload for non-OOBCapablePacketConn")
+		}
+		_, err = conn.PacketConn.WriteTo(p, addr)
+	}
+
 	// Return n = len(input p) bytes written even when p is an obfuscated
 	// buffer and longer than the input p.
 
-	// Do not wrap any I/O err returned by conn.OOBCapablePacketConn
+	// Do not wrap any I/O err returned by conn.PacketConn
 	return n, oobn, err
 }
 
