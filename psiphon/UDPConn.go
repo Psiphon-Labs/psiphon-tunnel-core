@@ -119,19 +119,20 @@ func NewUDPConn(
 		network = "udp6"
 	}
 
-	// It's necessary to create an unbound UDP socket, for use with WriteTo,
-	// as required by quic-go. As documented in net.ListenUDP: with an
-	// unspecified IP address, the resulting conn "listens on all available
-	// IP addresses of the local system except multicast IP addresses".
+	// It's necessary to create an "unconnected" UDP socket, for use with
+	// WriteTo, as required by quic-go. As documented in net.ListenUDP: with
+	// an unspecified IP address, the resulting conn "listens on all
+	// available IP addresses of the local system except multicast IP
+	// addresses".
 	//
 	// Limitation: these UDP sockets are not necessarily closed when a device
 	// changes active network (e.g., WiFi to mobile). It's possible that a
 	// QUIC connection does not immediately close on a network change, and
 	// instead outbound packets are sent from a different active interface.
 	// As quic-go does not yet support connection migration, these packets
-	// will be dropped by the server. This situation is mitigated by network
-	// change event detection, which initiates new tunnel connections, and by
-	// timeouts/keep-alives.
+	// will be dropped by the server. This situation is mitigated by use of
+	// DeviceBinder; by network change event detection, which initiates new
+	// tunnel connections; and by timeouts/keep-alives.
 
 	conn, err := listen.ListenPacket(ctx, network, "")
 	if err != nil {
