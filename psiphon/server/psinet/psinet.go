@@ -137,9 +137,9 @@ func NewDatabase(filename string) (*Database, error) {
 // GetRandomizedHomepages returns a randomly ordered list of home pages
 // for the specified sponsor, region, and platform.
 func (db *Database) GetRandomizedHomepages(
-	sponsorID, clientRegion, clientASN string, isMobilePlatform bool) []string {
+	sponsorID, clientRegion, clientASN, deviceRegion string, isMobilePlatform bool) []string {
 
-	homepages := db.GetHomepages(sponsorID, clientRegion, clientASN, isMobilePlatform)
+	homepages := db.GetHomepages(sponsorID, clientRegion, clientASN, deviceRegion, isMobilePlatform)
 	if len(homepages) > 1 {
 		shuffledHomepages := make([]string, len(homepages))
 		perm := rand.Perm(len(homepages))
@@ -154,7 +154,7 @@ func (db *Database) GetRandomizedHomepages(
 // GetHomepages returns a list of home pages for the specified sponsor,
 // region, and platform.
 func (db *Database) GetHomepages(
-	sponsorID, clientRegion, clientASN string, isMobilePlatform bool) []string {
+	sponsorID, clientRegion, clientASN, deviceRegion string, isMobilePlatform bool) []string {
 
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
@@ -187,7 +187,8 @@ func (db *Database) GetHomepages(
 	if ok {
 		for _, homePage := range homePagesByRegion {
 			sponsorHomePages = append(
-				sponsorHomePages, homepageQueryParameterSubstitution(homePage.URL, clientRegion, clientASN))
+				sponsorHomePages, homepageQueryParameterSubstitution(
+					homePage.URL, clientRegion, clientASN, deviceRegion))
 		}
 	}
 
@@ -198,7 +199,8 @@ func (db *Database) GetHomepages(
 			for _, homePage := range defaultHomePages {
 				// client_region query parameter substitution
 				sponsorHomePages = append(
-					sponsorHomePages, homepageQueryParameterSubstitution(homePage.URL, clientRegion, clientASN))
+					sponsorHomePages, homepageQueryParameterSubstitution(
+						homePage.URL, clientRegion, clientASN, deviceRegion))
 			}
 		}
 	}
@@ -207,17 +209,18 @@ func (db *Database) GetHomepages(
 }
 
 func homepageQueryParameterSubstitution(
-	url, clientRegion, clientASN string) string {
+	url, clientRegion, clientASN, deviceRegion string) string {
 
-	return strings.Replace(
-		strings.Replace(url, "client_region=XX", "client_region="+clientRegion, 1),
-		"client_asn=XX", "client_asn="+clientASN, 1)
+	url = strings.Replace(url, "client_region=XX", "client_region="+clientRegion, 1)
+	url = strings.Replace(url, "client_asn=XX", "client_asn="+clientASN, 1)
+	url = strings.Replace(url, "device_region=XX", "device_region="+deviceRegion, 1)
+	return url
 }
 
 // GetAlertActionURLs returns a list of alert action URLs for the specified
 // alert reason and sponsor.
 func (db *Database) GetAlertActionURLs(
-	alertReason, sponsorID, clientRegion, clientASN string) []string {
+	alertReason, sponsorID, clientRegion, clientASN, deviceRegion string) []string {
 
 	db.ReloadableFile.RLock()
 	defer db.ReloadableFile.RUnlock()
@@ -231,14 +234,16 @@ func (db *Database) GetAlertActionURLs(
 	if sponsor != nil {
 		for _, URL := range sponsor.AlertActionURLs[alertReason] {
 			actionURLs = append(
-				actionURLs, homepageQueryParameterSubstitution(URL, clientRegion, clientASN))
+				actionURLs, homepageQueryParameterSubstitution(
+					URL, clientRegion, clientASN, deviceRegion))
 		}
 	}
 
 	if len(actionURLs) == 0 {
 		for _, URL := range db.DefaultAlertActionURLs[alertReason] {
 			actionURLs = append(
-				actionURLs, homepageQueryParameterSubstitution(URL, clientRegion, clientASN))
+				actionURLs, homepageQueryParameterSubstitution(
+					URL, clientRegion, clientASN, deviceRegion))
 		}
 	}
 
