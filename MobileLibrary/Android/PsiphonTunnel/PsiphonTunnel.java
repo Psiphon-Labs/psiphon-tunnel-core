@@ -1138,12 +1138,19 @@ public class PsiphonTunnel {
         String region = "";
         TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
         if (telephonyManager != null) {
-            region = telephonyManager.getSimCountryIso();
-            if (region == null) {
-                region = "";
-            }
-            if (region.length() == 0 && telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_CDMA) {
+            // getNetworkCountryIso, when present, is preferred over
+            // getSimCountryIso, since getNetworkCountryIso is the network
+            // the device is currently on, while getSimCountryIso is the home
+            // region of the SIM. While roaming, only getNetworkCountryIso
+            // may more accurately represent the actual device region.
+            if (telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_CDMA) {
                 region = telephonyManager.getNetworkCountryIso();
+                if (region == null) {
+                    region = "";
+                }
+            }
+            if (region.length() == 0) {
+                region = telephonyManager.getSimCountryIso();
                 if (region == null) {
                     region = "";
                 }
