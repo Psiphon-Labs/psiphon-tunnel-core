@@ -588,6 +588,20 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 					tunnelProtocol)
 			}
 		}
+
+		// For FRONTED QUIC and HTTP, HTTPS is always used on the
+		// edge-to-server hop, so it must be enabled or else this
+		// configuration will not work. There is no FRONTED QUIC listener at
+		// all; see TunnelServer.Run.
+		if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+			_, ok := config.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_FRONTED_MEEK]
+			if !ok {
+				return nil, errors.Tracef(
+					"Tunnel protocol %s requires %s to be enabled",
+					tunnelProtocol,
+					protocol.TUNNEL_PROTOCOL_FRONTED_MEEK)
+			}
+		}
 	}
 
 	for tunnelProtocol, address := range config.TunnelProtocolPassthroughAddresses {
