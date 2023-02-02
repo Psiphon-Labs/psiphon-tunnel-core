@@ -429,7 +429,7 @@ public class PsiphonTunnel {
 
                                     @Override
                                     public String getNetworkID() {
-                                        return PsiphonTunnel.getNetworkID(context);
+                                        return PsiphonTunnel.getNetworkID(context, mPsiphonTunnel.isVpnMode());
                                     }
 
                                     @Override
@@ -672,7 +672,7 @@ public class PsiphonTunnel {
 
         @Override
         public String getNetworkID() {
-            return PsiphonTunnel.getNetworkID(mHostService.getContext());
+            return PsiphonTunnel.getNetworkID(mHostService.getContext(), mPsiphonTunnel.isVpnMode());
         }
     }
 
@@ -746,7 +746,7 @@ public class PsiphonTunnel {
         return hasRoute ? 1 : 0;
     }
 
-    private static String getNetworkID(Context context) {
+    private static String getNetworkID(Context context, boolean isVpnMode) {
 
         // TODO: getActiveNetworkInfo is deprecated in API 29; once
         // getActiveNetworkInfo is no longer available, use
@@ -761,6 +761,30 @@ public class PsiphonTunnel {
         String networkID = "UNKNOWN";
 
         ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+
+            if (!isVpnMode) {
+
+                NetworkCapabilities capabilities = null;
+                try {
+                    Network nw = connectivityManager.getActiveNetwork();
+                    capabilities = connectivityManager.getNetworkCapabilities(nw);
+                } catch (java.lang.Exception e)  {
+                    // May get exceptions due to missing permissions like android.permission.ACCESS_NETWORK_STATE.
+
+                    // Apps using the Psiphon Library and lacking android.permission.ACCESS_NETWORK_STATE will
+                    // proceed and use tactics, but with "UNKNOWN" as the sole network ID.
+                }
+
+                if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    return "VPN";
+                }
+
+            }
+
+        }
+
         NetworkInfo activeNetworkInfo = null;
         try {
             activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
@@ -1557,7 +1581,9 @@ public class PsiphonTunnel {
                             // mimics the type determination logic in
                             // getNetworkID.
                             NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
-                            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                                networkType = "VPN";
+                            } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
                                 networkType = "MOBILE";
                             } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
                                 networkType = "WIFI";
