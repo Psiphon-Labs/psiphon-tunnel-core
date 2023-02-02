@@ -1403,6 +1403,22 @@ public class PsiphonTunnel {
 
             NetworkRequest networkRequest = networkRequestBuilder.build();
 
+            // There is a potential race condition in which the following
+            // network callback may be invoked, by a worker thread, after
+            // unregisterNetworkCallback. Synchronized access to a local
+            // ArrayList copy avoids the
+            // java.util.ConcurrentModificationException crash we previously
+            // observed when getActiveNetworkDNSServers iterated over the
+            // same ArrayList object value that was modified by the
+            // callback.
+            //
+            // The late invocation of the callback still results in an empty
+            // list of DNS servers, but this behavior has been observed only
+            // in artificial conditions while rapidly starting and stopping
+            // PsiphonTunnel.
+
+            ArrayList<InetAddress> callbackDnsAddresses = new ArrayList<InetAddress>();
+
             final CountDownLatch countDownLatch = new CountDownLatch(1);
             try {
                 ConnectivityManager.NetworkCallback networkCallback =
@@ -1410,7 +1426,9 @@ public class PsiphonTunnel {
                             @Override
                             public void onLinkPropertiesChanged(Network network,
                                                                 LinkProperties linkProperties) {
-                                dnsAddresses.addAll(linkProperties.getDnsServers());
+                                synchronized (callbackDnsAddresses) {
+                                    callbackDnsAddresses.addAll(linkProperties.getDnsServers());
+                                }
                                 countDownLatch.countDown();
                             }
                         };
@@ -1422,6 +1440,10 @@ public class PsiphonTunnel {
                 // Failed to register network callback
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+            }
+
+            synchronized (callbackDnsAddresses) {
+                dnsAddresses.addAll(callbackDnsAddresses);
             }
         }
 
