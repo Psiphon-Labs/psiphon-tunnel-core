@@ -147,6 +147,7 @@ public class PsiphonTunnel {
     private final NetworkMonitor mNetworkMonitor;
     private AtomicReference<String> mActiveNetworkType;
     private AtomicReference<String> mActiveNetworkDNSServers;
+    private final CountDownLatch mNetworkMonitorCountDownLatch = new CountDownLatch(1);
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // psi.Psi and tun2socks implementations each contain global state.
@@ -209,7 +210,7 @@ public class PsiphonTunnel {
                     mHostService.onDiagnosticMessage("reconnect error: " + e);
                 }
             }
-        }, mActiveNetworkType, mActiveNetworkDNSServers, mHostService);
+        });
     }
 
     public Object clone() throws CloneNotSupportedException {
@@ -821,7 +822,9 @@ public class PsiphonTunnel {
         stopPsiphon();
         mIsWaitingForNetworkConnectivity.set(false);
         mHostService.onDiagnosticMessage("starting Psiphon library");
+        mNetworkMonitor.start(mHostService.getContext());
         try {
+            mNetworkMonitorCountDownLatch.await(1, TimeUnit.SECONDS);
             Psi.start(
                     loadPsiphonConfig(mHostService.getContext()),
                     embeddedServerEntries,
@@ -835,7 +838,6 @@ public class PsiphonTunnel {
             throw new Exception("failed to start Psiphon library", e);
         }
 
-        mNetworkMonitor.start(mHostService.getContext());
         mHostService.onDiagnosticMessage("Psiphon library started");
     }
 
@@ -1483,25 +1485,15 @@ public class PsiphonTunnel {
     private static class NetworkMonitor {
         private final NetworkChangeListener listener;
         private ConnectivityManager.NetworkCallback networkCallback;
-        private AtomicReference<String> activeNetworkType;
-        private AtomicReference<String> activeNetworkDNSServers;
-        private HostLogger logger;
-
         public NetworkMonitor(
-            NetworkChangeListener listener,
-            AtomicReference<String> activeNetworkType,
-            AtomicReference<String> activeNetworkDNSServers,
-            HostLogger logger) {
-
+            NetworkChangeListener listener) {
             this.listener = listener;
-            this.activeNetworkType = activeNetworkType;
-            this.activeNetworkDNSServers = activeNetworkDNSServers;
-            this.logger = logger;
         }
 
         private void start(Context context) {
             // Need API 21(LOLLIPOP)+ for ConnectivityManager.NetworkCallback
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+                mPsiphonTunnel.mNetworkMonitorCountDownLatch.countDown();
                 return;
             }
             ConnectivityManager connectivityManager =
@@ -1543,9 +1535,9 @@ public class PsiphonTunnel {
 
                     if (network == null) {
 
-                        activeNetworkType.set("NONE");
-                        activeNetworkDNSServers.set("");
-                        logger.onDiagnosticMessage("NetworkMonitor: clear current active network");
+                        mPsiphonTunnel.mActiveNetworkType.set("NONE");
+                        mPsiphonTunnel.mActiveNetworkDNSServers.set("");
+                        mPsiphonTunnel.mHostService.onDiagnosticMessage("NetworkMonitor: clear current active network");
 
                     } else {
 
@@ -1564,7 +1556,7 @@ public class PsiphonTunnel {
                             }
                         } catch (java.lang.Exception e) {
                         }
-                        activeNetworkType.set(networkType);
+                        mPsiphonTunnel.mActiveNetworkType.set(networkType);
 
                         ArrayList<String> servers = new ArrayList<String>();
                         try {
@@ -1580,15 +1572,16 @@ public class PsiphonTunnel {
                         } catch (java.lang.Exception e) {
                         }
                         // Use the workaround, comma-delimited format required for gobind.
-                        activeNetworkDNSServers.set(TextUtils.join(",", servers));
+                        mPsiphonTunnel.mActiveNetworkDNSServers.set(TextUtils.join(",", servers));
 
                         String message = "NetworkMonitor: set current active network " + networkType;
                         if (!servers.isEmpty()) {
                             // The DNS server address is potential PII and not logged.
                             message += " with DNS";
                         }
-                        logger.onDiagnosticMessage(message);
+                        mPsiphonTunnel.mHostService.onDiagnosticMessage(message);
                     }
+                    mPsiphonTunnel.mNetworkMonitorCountDownLatch.countDown();
                 }
 
                 @Override
