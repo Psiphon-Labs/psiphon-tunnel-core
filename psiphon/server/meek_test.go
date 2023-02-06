@@ -28,6 +28,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net"
+	"net/http"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -407,17 +408,23 @@ func (interruptor *fileDescriptorInterruptor) BindToDevice(fileDescriptor int) (
 	return "", nil
 }
 
+func TestMeekServer(t *testing.T) {
+	runTestMeekAccessControl(t, false, false, false)
+}
+
 func TestMeekRateLimiter(t *testing.T) {
-	runTestMeekAccessControl(t, true, false)
-	runTestMeekAccessControl(t, false, false)
+	runTestMeekAccessControl(t, true, false, false)
 }
 
 func TestMeekRestrictFrontingProviders(t *testing.T) {
-	runTestMeekAccessControl(t, false, true)
-	runTestMeekAccessControl(t, false, false)
+	runTestMeekAccessControl(t, false, true, false)
 }
 
-func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider bool) {
+func TestMeekMissingRequiredHeaders(t *testing.T) {
+	runTestMeekAccessControl(t, false, false, true)
+}
+
+func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider, missingRequiredHeaders bool) {
 
 	attempts := 10
 
@@ -428,6 +435,10 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider bool) {
 	}
 
 	if restrictProvider {
+		allowedConnections = 0
+	}
+
+	if missingRequiredHeaders {
 		allowedConnections = 0
 	}
 
@@ -492,10 +503,14 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider bool) {
 		meekRateLimiterTunnelProtocols = []string{protocol.TUNNEL_PROTOCOL_FRONTED_MEEK}
 	}
 
+	requiredHeaderName := "X-Psiphon-Required-Header"
+	requiredHeaderValue := prng.Base64String(32)
+
 	mockSupport := &SupportServices{
 		Config: &Config{
 			MeekObfuscatedKey:              meekObfuscatedKey,
 			MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
+			MeekRequiredHeaders:            map[string]string{requiredHeaderName: requiredHeaderValue},
 			TunnelProtocolPorts:            map[string]int{tunnelProtocol: 0},
 			frontingProviderID:             frontingProviderID,
 		},
@@ -588,6 +603,12 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider bool) {
 			ResolveIP: func(_ context.Context, host string) ([]net.IP, error) {
 				return []net.IP{net.ParseIP(host)}, nil
 			},
+		}
+
+		if !missingRequiredHeaders {
+			headers := make(http.Header)
+			headers.Add(requiredHeaderName, requiredHeaderValue)
+			dialConfig.CustomHeaders = headers
 		}
 
 		params, err := parameters.NewParameters(nil)

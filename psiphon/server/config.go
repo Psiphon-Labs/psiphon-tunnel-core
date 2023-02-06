@@ -228,6 +228,10 @@ type Config struct {
 	// request fails. This is used to defend against abuse.
 	MeekProhibitedHeaders []string
 
+	// MeekRequiredHeaders is a list of HTTP header names and values that must
+	// appear in requests. This is used to defend against abuse.
+	MeekRequiredHeaders map[string]string
+
 	// MeekProxyForwardedForHeaders is a list of HTTP headers which
 	// may be added by downstream HTTP proxies or CDNs in front
 	// of clients. These headers supply the original client IP
@@ -265,6 +269,11 @@ type Config struct {
 	// MeekHTTPClientIOTimeoutMilliseconds specifies meek HTTP server I/O
 	// timeouts. The default is MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT.
 	MeekHTTPClientIOTimeoutMilliseconds *int
+
+	// MeekFrontedHTTPClientIOTimeoutMilliseconds specifies meek HTTP server
+	// I/O timeouts for fronted protocols. The default is
+	// MEEK_DEFAULT_FRONTED_HTTP_CLIENT_IO_TIMEOUT.
+	MeekFrontedHTTPClientIOTimeoutMilliseconds *int
 
 	// MeekCachedResponseBufferSize is the size of a private,
 	// fixed-size buffer allocated for every meek client. The buffer
