@@ -147,7 +147,6 @@ public class PsiphonTunnel {
     private final NetworkMonitor mNetworkMonitor;
     private AtomicReference<String> mActiveNetworkType;
     private AtomicReference<String> mActiveNetworkDNSServers;
-    private final CountDownLatch mNetworkMonitorCountDownLatch = new CountDownLatch(1);
 
     // Only one PsiphonVpn instance may exist at a time, as the underlying
     // psi.Psi and tun2socks implementations each contain global state.
@@ -822,9 +821,10 @@ public class PsiphonTunnel {
         stopPsiphon();
         mIsWaitingForNetworkConnectivity.set(false);
         mHostService.onDiagnosticMessage("starting Psiphon library");
-        mNetworkMonitor.start(mHostService.getContext());
         try {
-            mNetworkMonitorCountDownLatch.await(1, TimeUnit.SECONDS);
+            // mNetworkMonitor.start() will wait up to 1 second before returning to give the network
+            // callback a chance to populate active network properties before we start the tunnel.
+            mNetworkMonitor.start(mHostService.getContext());
             Psi.start(
                     loadPsiphonConfig(mHostService.getContext()),
                     embeddedServerEntries,
@@ -1490,10 +1490,11 @@ public class PsiphonTunnel {
             this.listener = listener;
         }
 
-        private void start(Context context) {
+        private void start(Context context) throws InterruptedException {
+            final CountDownLatch setNetworkPropertiesCountDownLatch = new CountDownLatch(1);
+
             // Need API 21(LOLLIPOP)+ for ConnectivityManager.NetworkCallback
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-                mPsiphonTunnel.mNetworkMonitorCountDownLatch.countDown();
                 return;
             }
             ConnectivityManager connectivityManager =
@@ -1581,7 +1582,7 @@ public class PsiphonTunnel {
                         }
                         mPsiphonTunnel.mHostService.onDiagnosticMessage(message);
                     }
-                    mPsiphonTunnel.mNetworkMonitorCountDownLatch.countDown();
+                    setNetworkPropertiesCountDownLatch.countDown();
                 }
 
                 @Override
@@ -1639,11 +1640,20 @@ public class PsiphonTunnel {
                 }
 
                 NetworkRequest networkRequest = builder.build();
+                // We are using requestNetwork and not registerNetworkCallback here because we found
+                // that the callbacks from requestNetwork are more accurate in terms of tracking
+                // currently active network. Another alternative to use for tracking active network
+                // would be registerDefaultNetworkCallback but a) it needs API >= 24 and b) doesn't
+                // provide a way to set up monitoring of underlying networks only when VPN transport
+                // is also active.
                 connectivityManager.requestNetwork(networkRequest, networkCallback);
             } catch (RuntimeException ignored) {
                 // Could be a security exception or any other runtime exception on customized firmwares.
                 networkCallback = null;
             }
+            // We are going to wait up to one second for the network callback to populate
+            // active network properties before returning.
+            setNetworkPropertiesCountDownLatch.await(1, TimeUnit.SECONDS);
         }
 
         private void stop(Context context) {
