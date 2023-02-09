@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/refraction-networking/utls"
 	regen "github.com/zach-klippenstein/goregen"
@@ -143,6 +144,8 @@ type DialParameters struct {
 	resolver          *resolver.Resolver `json:"-"`
 	ResolveParameters *resolver.ResolveParameters
 
+	HTTPTransformerParameters *transforms.HTTPTransformerParameters
+
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
 }
@@ -196,6 +199,7 @@ func MakeDialParameters(
 	replayAPIRequestPadding := p.Bool(parameters.ReplayAPIRequestPadding)
 	replayHoldOffTunnel := p.Bool(parameters.ReplayHoldOffTunnel)
 	replayResolveParameters := p.Bool(parameters.ReplayResolveParameters)
+	replayHTTPTransformerParameters := p.Bool(parameters.ReplayHTTPTransformerParameters)
 
 	// Check for existing dial parameters for this server/network ID.
 
@@ -763,6 +767,22 @@ func MakeDialParameters(
 
 	}
 
+	if (!isReplay || !replayHTTPTransformerParameters) && protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
+
+		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
+
+		params, err := makeHTTPTransformerParameters(config.GetParameters().Get(), serverEntry.FrontingProviderID, isFronted)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		if params.ProtocolTransformSpec != nil {
+			dialParams.HTTPTransformerParameters = params
+		} else {
+			dialParams.HTTPTransformerParameters = nil
+		}
+	}
+
 	// Set dial address fields. This portion of configuration is
 	// deterministic, given the parameters established or replayed so far.
 
@@ -958,6 +978,7 @@ func MakeDialParameters(
 			MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
 			MeekObfuscatorPaddingSeed:     dialParams.MeekObfuscatorPaddingSeed,
 			NetworkLatencyMultiplier:      dialParams.NetworkLatencyMultiplier,
+			HTTPTransformerParameters:     dialParams.HTTPTransformerParameters,
 		}
 
 		// Use an asynchronous callback to record the resolved IP address when
@@ -1066,11 +1087,11 @@ func (dialParams *DialParameters) GetTLSVersionForMetrics() string {
 // There are two concerns regarding which dial parameter fields are safe to
 // exchange:
 //
-// - Unlike signed server entries, there's no independent trust anchor
-//   that can certify that the exchange data is valid.
+//   - Unlike signed server entries, there's no independent trust anchor
+//     that can certify that the exchange data is valid.
 //
-// - While users should only perform the exchange with trusted peers,
-//   the user's trust in their peer may be misplaced.
+//   - While users should only perform the exchange with trusted peers,
+//     the user's trust in their peer may be misplaced.
 //
 // This presents the possibility of attack such as the peer sending dial
 // parameters that could be used to trace/monitor/flag the importer; or
@@ -1354,4 +1375,61 @@ func selectHostName(
 	}
 
 	return hostName
+}
+
+// makeHTTPTransformerParameters generates HTTPTransformerParameters using the
+// input tactics parameters and optional frontingProviderID context.
+func makeHTTPTransformerParameters(p parameters.ParametersAccessor,
+	frontingProviderID string, isFronted bool) (*transforms.HTTPTransformerParameters, error) {
+
+	params := transforms.HTTPTransformerParameters{}
+
+	// Select an HTTP transform. If the request is fronted, HTTP request
+	// transforms are "scoped" by fronting provider ID. Otherwise, a transform
+	// from the default scope (transforms.SCOPE_ANY == "") is selected.
+
+	var specsKey string
+	var scopedSpecsNamesKey string
+
+	useTransform := false
+	scope := transforms.SCOPE_ANY
+
+	if isFronted {
+		if p.WeightedCoinFlip(parameters.FrontedHTTPProtocolTransformProbability) {
+			useTransform = true
+			scope = frontingProviderID
+			specsKey = parameters.FrontedHTTPProtocolTransformSpecs
+			scopedSpecsNamesKey = parameters.FrontedHTTPProtocolTransformScopedSpecNames
+		}
+	} else {
+		// unfronted
+		if p.WeightedCoinFlip(parameters.DirectHTTPProtocolTransformProbability) {
+			useTransform = true
+			specsKey = parameters.DirectHTTPProtocolTransformSpecs
+			scopedSpecsNamesKey = parameters.DirectHTTPProtocolTransformScopedSpecNames
+		}
+	}
+
+	if useTransform {
+
+		specs := p.ProtocolTransformSpecs(
+			specsKey)
+		scopedSpecNames := p.ProtocolTransformScopedSpecNames(
+			scopedSpecsNamesKey)
+
+		name, spec := specs.Select(scope, scopedSpecNames)
+
+		if spec != nil {
+			params.ProtocolTransformName = name
+			params.ProtocolTransformSpec = spec
+			var err error
+			// transform seed generated
+			params.ProtocolTransformSeed, err = prng.NewSeed()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+	}
+
+	return &params, nil
 }

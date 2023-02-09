@@ -45,7 +45,7 @@ const (
 // data may be retained in the transformed data.
 //
 // For example, with the transform [2]string{"([a-b])", "\\$\\
-// {1\\}"c}, substrings consisting of the characters 'a' and 'b' will be
+// {1\\}c"}, substrings consisting of the characters 'a' and 'b' will be
 // transformed into the same substring with a single character 'c' appended.
 type Spec [][2]string
 

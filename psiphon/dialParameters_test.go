@@ -33,6 +33,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 )
 
@@ -89,6 +90,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = []string{frontingProviderID}
 	applyParameters[parameters.HoldOffTunnelProbability] = 1.0
 	applyParameters[parameters.DNSResolverAlternateServers] = []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"}
+	applyParameters[parameters.DirectHTTPProtocolTransformProbability] = 1.0
+	applyParameters[parameters.DirectHTTPProtocolTransformSpecs] = transforms.Specs{"spec": transforms.Spec{{"", ""}}}
+	applyParameters[parameters.DirectHTTPProtocolTransformScopedSpecNames] = transforms.ScopedSpecNames{"": {"spec"}}
 	err = clientConfig.SetParameters("tag1", false, applyParameters)
 	if err != nil {
 		t.Fatalf("SetParameters failed: %s", err)
@@ -354,6 +358,12 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		(replayDialParams.ResolveParameters != nil &&
 			!reflect.DeepEqual(replayDialParams.ResolveParameters, dialParams.ResolveParameters)) {
 		t.Fatalf("mismatching ResolveParameters fields")
+	}
+
+	if (replayDialParams.HTTPTransformerParameters == nil) != (dialParams.HTTPTransformerParameters == nil) ||
+		(replayDialParams.HTTPTransformerParameters != nil &&
+			!reflect.DeepEqual(replayDialParams.HTTPTransformerParameters, dialParams.HTTPTransformerParameters)) {
+		t.Fatalf("mismatching HTTPTransformerParameters fields")
 	}
 
 	// Test: no replay after change tactics
@@ -701,4 +711,98 @@ func makeMockServerEntries(
 	}
 
 	return serverEntries
+}
+
+func TestMakeHTTPTransformerParameters(t *testing.T) {
+
+	type test struct {
+		name                  string
+		frontingProviderID    string
+		isFronted             bool
+		paramValues           map[string]interface{}
+		expectedTransformName string
+		expectedTransformSpec transforms.Spec
+	}
+
+	tests := []test{
+		{
+			name:               "unfronted",
+			frontingProviderID: "",
+			isFronted:          false,
+			paramValues: map[string]interface{}{
+				"DirectHTTPProtocolTransformProbability": 1,
+				"DirectHTTPProtocolTransformSpecs": transforms.Specs{
+					"spec1": {{"A", "B"}},
+				},
+				"DirectHTTPProtocolTransformScopedSpecNames": transforms.ScopedSpecNames{
+					"": {"spec1"},
+				},
+			},
+			expectedTransformName: "spec1",
+			expectedTransformSpec: [][2]string{{"A", "B"}},
+		},
+		{
+			name:               "fronted",
+			frontingProviderID: "frontingProvider",
+			isFronted:          true,
+			paramValues: map[string]interface{}{
+				"FrontedHTTPProtocolTransformProbability": 1,
+				"FrontedHTTPProtocolTransformSpecs": transforms.Specs{
+					"spec1": {{"A", "B"}},
+				},
+				"FrontedHTTPProtocolTransformScopedSpecNames": transforms.ScopedSpecNames{
+					"frontingProvider": {"spec1"},
+				},
+			},
+			expectedTransformName: "spec1",
+			expectedTransformSpec: [][2]string{{"A", "B"}},
+		},
+		{
+			name:               "no transform, coinflip false",
+			frontingProviderID: "frontingProvider",
+			isFronted:          false,
+			paramValues: map[string]interface{}{
+				"DirectHTTPProtocolTransformProbability": 0,
+				"DirectHTTPProtocolTransformSpecs": transforms.Specs{
+					"spec1": {{"A", "B"}},
+				},
+				"DirectHTTPProtocolTransformScopedSpecNames": transforms.ScopedSpecNames{
+					"frontingProvider": {"spec1"},
+				},
+			},
+			expectedTransformName: "",
+			expectedTransformSpec: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			params, err := parameters.NewParameters(nil)
+			if err != nil {
+				t.Fatalf("parameters.NewParameters failed %v", err)
+			}
+
+			_, err = params.Set("", false, tt.paramValues)
+			if err != nil {
+				t.Fatalf("params.Set failed %v", err)
+			}
+
+			httpTransformerParams, err := makeHTTPTransformerParameters(params.Get(), tt.frontingProviderID, tt.isFronted)
+			if err != nil {
+				t.Fatalf("MakeHTTPTransformerParameters failed %v", err)
+			}
+			if httpTransformerParams.ProtocolTransformName != tt.expectedTransformName {
+				t.Fatalf("expected ProtocolTransformName \"%s\" but got \"%s\"", tt.expectedTransformName, httpTransformerParams.ProtocolTransformName)
+			}
+			if !reflect.DeepEqual(httpTransformerParams.ProtocolTransformSpec, tt.expectedTransformSpec) {
+				t.Fatalf("expected ProtocolTransformSpec %v but got %v", tt.expectedTransformSpec, httpTransformerParams.ProtocolTransformSpec)
+			}
+			if httpTransformerParams.ProtocolTransformSpec != nil {
+				if httpTransformerParams.ProtocolTransformSeed == nil {
+					t.Fatalf("expected non-nil seed")
+				}
+			}
+		})
+	}
 }

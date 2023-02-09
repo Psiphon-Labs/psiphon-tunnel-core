@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 	"golang.org/x/crypto/nacl/box"
@@ -188,6 +189,10 @@ type MeekConfig struct {
 	MeekCookieEncryptionPublicKey string
 	MeekObfuscatedKey             string
 	MeekObfuscatorPaddingSeed     *prng.Seed
+
+	// HTTPTransformerParameters specifies an HTTP transformer to apply to the
+	// meek connection if it uses HTTP.
+	HTTPTransformerParameters *transforms.HTTPTransformerParameters
 }
 
 // MeekConn is a network connection that tunnels net.Conn flows over HTTP and supports
@@ -582,6 +587,15 @@ func DialMeek(
 			// meekConfig.DialAddress.
 			dialer = func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return baseDialer(ctx, network, meekConfig.DialAddress)
+			}
+		}
+
+		if protocol.TunnelProtocolUsesMeekHTTP(meekConfig.ClientTunnelProtocol) {
+			// Only apply transformer if it will perform a transform; otherwise
+			// applying a no-op transform will incur an unnecessary performance
+			// cost.
+			if meekConfig.HTTPTransformerParameters != nil && meekConfig.HTTPTransformerParameters.ProtocolTransformSpec != nil {
+				dialer = transforms.WrapDialerWithHTTPTransformer(dialer, meekConfig.HTTPTransformerParameters)
 			}
 		}
 

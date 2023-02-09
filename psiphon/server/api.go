@@ -925,6 +925,7 @@ var baseDialParams = []requestParamSpec{
 	{"dns_preferred", isAnyString, requestParamOptional},
 	{"dns_transform", isAnyString, requestParamOptional},
 	{"dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"http_transform", isAnyString, requestParamOptional},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.
