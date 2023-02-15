@@ -1779,8 +1779,8 @@ func (conn *meekConn) Close() error {
 	if atomic.CompareAndSwapInt32(&conn.closed, 0, 1) {
 		close(conn.closeBroadcast)
 
-		// In general, we reply on "net/http" to close underlying TCP conns.
-		// In this case, we can directly close the first once, if it's still
+		// In general, we rely on "net/http" to close underlying TCP conns. In
+		// this case, we can directly close the first once, if it's still
 		// open. Don't close a persistent connection when fronted, as it may
 		// be still be used by other clients.
 		if !conn.meekServer.isFronted {
