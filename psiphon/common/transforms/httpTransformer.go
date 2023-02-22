@@ -199,7 +199,11 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 	n, err := t.Conn.Write(b)
 
 	if uint64(n) > t.remain {
-		return 0, errors.TraceNew("t.remain - uint64(n) underflows")
+		// Attempt to recover by resetting t.remain. If b contains bytes of
+		// subsequent request(s) (should never happen), then these request(s)
+		// may be mangled.
+		t.remain = 0
+		return n, errors.TraceNew("t.remain - uint64(n) underflows")
 	}
 
 	t.remain -= uint64(n)
@@ -211,7 +215,7 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 		t.remain = 0
 	}
 
-	return n, errors.Trace(err)
+	return n, err
 }
 
 func (t *HTTPTransformer) writeBuffer() error {
@@ -219,6 +223,10 @@ func (t *HTTPTransformer) writeBuffer() error {
 		n, err := t.Conn.Write(t.b)
 
 		if uint64(n) > t.remain {
+			// Attempt to recover by resetting t.remain. If t.b contains bytes
+			// of subsequent request(s) (should never happen), then these
+			// request(s) may be mangled.
+			t.remain = 0
 			return errors.TraceNew("t.remain - uint64(n) underflows")
 		}
 
@@ -231,7 +239,7 @@ func (t *HTTPTransformer) writeBuffer() error {
 		}
 
 		if err != nil {
-			return errors.Trace(err)
+			return err
 		}
 	}
 	return nil
