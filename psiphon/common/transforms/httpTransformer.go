@@ -122,19 +122,29 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 				}
 			}
 			if len(cl) == 0 {
-				// Either Content-Length header missing or Content-Length
-				// header value is empty, e.g. "Content-Length: ".
-				// b buffered in t.b
+				// Irrecoverable error because either Content-Length header
+				// missing, or Content-Length header value is empty, e.g.
+				// "Content-Length: ", and request body length cannot be
+				// determined.
+				//
+				// b buffered in t.b, return len(b) in an attempt to get
+				// through the current Write() sequence instead of getting
+				// stuck.
 				return len(b), errors.TraceNew("Content-Length missing")
 			}
 
-			n, err := strconv.ParseUint(string(cl), 10, 63)
+			contentLength, err := strconv.ParseUint(string(cl), 10, 63)
 			if err != nil {
-				// b buffered in t.b
+				// Irrecoverable error because Content-Length is malformed and
+				// request body length cannot be determined.
+				//
+				// b buffered in t.b, return len(b) in an attempt to get
+				// through the current Write() sequence instead of getting
+				// stuck.
 				return len(b), errors.Trace(err)
 			}
 
-			t.remain = n
+			t.remain = contentLength
 
 			// transform and write header
 
@@ -144,7 +154,13 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 			if t.transform != nil {
 				newHeaderS, err := t.transform.Apply(t.seed, string(header))
 				if err != nil {
-					// b buffered in t.b
+					// TODO: consider logging an error and skiping transform
+					// instead of returning an error, if the transform is broken
+					// then all subsequent applications may fail.
+					//
+					// b buffered in t.b, return len(b) in an attempt to get
+					// through the current Write() sequence instead of getting
+					// stuck.
 					return len(b), errors.Trace(err)
 				}
 
@@ -161,41 +177,45 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 			}
 
 			if math.MaxUint64-t.remain < uint64(len(header)) {
-				// b buffered in t.b
+				// Irrecoverable error because request is malformed:
+				// Content-Length + len(header) > math.MaxUint64.
+				//
+				// b buffered in t.b, return len(b) in an attempt to get
+				// through the current Write() sequence instead of getting
+				// stuck.
 				return len(b), errors.TraceNew("t.remain + uint64(len(header)) overflows")
 			}
 			t.remain += uint64(len(header))
 
-			err = t.writeBuffer()
+			n, err := t.writeBuffer()
+
+			written := len(b) // all bytes of b buffered in t.b
+
+			if n < len(header) ||
+				len(t.b) > 0 && t.remain == 0 {
+				// All bytes of b were not written, but all bytes of b have been
+				// buffered in t.b. Drop 1 byte of b from t.b to pretend 1 byte
+				// of b was not written to trigger another Write() call. This
+				// handles the scenario where all request bytes have been
+				// received but writing to the underlying net.Conn fails and
+				// another Write() call cannot be expected unless a value
+				// less than len(b) is returned. An alternative solution would
+				// be to retry writes, or spawn a goroutine which writes t.b,
+				// but we want to return the error to the caller immediately so
+				// it can act accordingly.
+				written = len(b) - 1
+				t.b = t.b[:len(t.b)-1]
+			}
 
 			if t.remain > 0 {
 				t.state = httpTransformerReadWriteBody
-			} else {
-				// Entire request, header and body, has been written. Return to
-				// waiting for next HTTP request header to arrive.
-				if len(t.b) > 0 {
-					// Return the number of bytes written to the underlying
-					// Conn and clear t.b instead of calling t.Write() with any
-					// remaining bytes of t.b. The caller must call Write()
-					// again with the unwritten, and unbuffered, bytes of b.
-					// Since t.remain = 0 it is guaranteed that
-					// len(b) - len(t.b) >= 0 because len(t.b) is the number of
-					// subsequent request bytes and len(b) is the number of
-					// trailing bytes of the current request plus the
-					// subsequent request bytes.
-					written := len(b) - len(t.b)
-					t.b = nil
-					return written, err
-				}
 			}
 
-			if err != nil {
-				// b buffered in t.b
-				return len(b), err
-			}
+			return written, err
 		}
 
-		// b buffered in t.b
+		// b buffered in t.b and the entire HTTP request header has not been
+		// recieved so another Write() call is expected.
 		return len(b), nil
 	}
 
@@ -204,18 +224,19 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 
 	// Must write buffered bytes first, in-order, to write bytes to underlying
 	// Conn in the same order they were received in.
-	err := t.writeBuffer()
+	_, err := t.writeBuffer()
 	if err != nil {
 		// b not written or buffered
 		return 0, errors.Trace(err)
 	}
 
-	bytesToWrite := uint64(len(b))
-	if bytesToWrite > t.remain {
-		bytesToWrite = t.remain
+	// Only write bytes of current request
+	writeN := uint64(len(b))
+	if writeN > t.remain {
+		writeN = t.remain
 	}
 
-	n, err := t.Conn.Write(b[:bytesToWrite])
+	n, err := t.Conn.Write(b[:writeN])
 
 	// Do not need to check for underflow because n <= t.remain
 	t.remain -= uint64(n)
@@ -235,15 +256,29 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 	return n, err
 }
 
-func (t *HTTPTransformer) writeBuffer() error {
+func (t *HTTPTransformer) writeBuffer() (written int, err error) {
+
+	// Continue writing buffered bytes until either all buffered bytes have
+	// been written or all remaining bytes of the current HTTP request have
+	// been written.
 	for len(t.b) > 0 && t.remain > 0 {
 
-		bytesToWrite := uint64(len(t.b))
-		if bytesToWrite > t.remain {
-			bytesToWrite = t.remain
+		// Write all buffered bytes of the current request
+		writeN := uint64(len(t.b))
+		if writeN > t.remain {
+			// t.b contains bytes of the next request(s), only write current
+			// request bytes.
+			writeN = t.remain
 		}
 
-		n, err := t.Conn.Write(t.b[:bytesToWrite])
+		// Check for potential overflow before Write() call
+		if math.MaxInt-written < int(writeN) {
+			return written, errors.TraceNew("written + bytesToWrite overflows")
+		}
+
+		var n int
+		n, err = t.Conn.Write(t.b[:writeN])
+		written += n
 
 		// Do not need to check for underflow because n <= t.remain
 		t.remain -= uint64(n)
@@ -254,11 +289,13 @@ func (t *HTTPTransformer) writeBuffer() error {
 			t.b = t.b[n:]
 		}
 
+		// Stop writing and return if there was an error
 		if err != nil {
-			return err
+			return
 		}
 	}
-	return nil
+
+	return
 }
 
 func WrapDialerWithHTTPTransformer(dialer common.Dialer, params *HTTPTransformerParameters) common.Dialer {

@@ -45,60 +45,80 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 		chunkSize      int
 		transform      Spec
 		connWriteLimit int
+		connWriteLens  []int
 		connWriteErrs  []error
 	}
 
 	tests := []test{
 		{
-			name:       "no transform",
-			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			name:       "written in chunks",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			chunkSize:  1,
 		},
 		{
-			name:           "no transform with partial write and errors",
-			input:          "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
-			wantOutput:     "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			name:       "written in a single write",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			chunkSize:  999,
+		},
+		{
+			name:          "written in single write with error",
+			input:         "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			chunkSize:     999,
+			connWriteErrs: []error{errors.New("err1")},
+		},
+		{
+			name:           "written with partial write and errors",
+			input:          "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput:     "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			chunkSize:      1,
 			connWriteLimit: 1,
 			connWriteErrs:  []error{errors.New("err1"), errors.New("err2")},
 		},
 		{
 			name:       "transform not applied to body",
-			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			chunkSize:  1,
 			transform:  Spec{[2]string{"abcd", "efgh"}},
 		},
 		{
 			name:      "Content-Length missing",
-			input:     "HTTP 1.1\r\n\r\nabcd",
+			input:     "POST / HTTP/1.1\r\n\r\nabcd",
 			wantError: errors.New("Content-Length missing"),
 			chunkSize: 1,
 		},
 		{
 			name:      "Content-Length overflow",
-			input:     fmt.Sprintf("HTTP 1.1\r\nContent-Length: %d\r\n\r\nabcd", uint64(math.MaxUint64)),
+			input:     fmt.Sprintf("POST / HTTP/1.1\r\nContent-Length: %d\r\n\r\nabcd", uint64(math.MaxUint64)),
 			wantError: errors.New("strconv.ParseUint: parsing \"18446744073709551615\": value out of range"),
 			chunkSize: 1,
 		},
 		{
-			name:       "no transform",
-			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
-			chunkSize:  1,
-		},
-		{
 			name:       "incorrect Content-Length header value",
-			input:      "HTTP 1.1\r\nContent-Length: 3\r\n\r\nabcd",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 3\r\n\r\nabc",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabcd",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc",
 			chunkSize:  1,
 		},
 		{
-			name:       "single HTTP request written in a single write",
-			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcd",
-			chunkSize:  999,
+			name:          "written in a single write with errors and partial writes",
+			input:         "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 0\r\n\r\n",
+			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
+			chunkSize:     999,
+			transform:     Spec{[2]string{"Host: example.com\r\n", ""}},
+			connWriteErrs: []error{errors.New("err1"), nil, errors.New("err2"), nil, nil, errors.New("err3")},
+			connWriteLens: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		},
+		{
+			name:          "written in a single write with error and partial write",
+			input:         "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			chunkSize:     999,
+			transform:     Spec{[2]string{"Host: example.com\r\n", ""}},
+			connWriteErrs: []error{errors.New("err1")},
+			connWriteLens: []int{28}, // write lands mid "\r\n\r\n"
 		},
 		{
 			name:       "transform",
@@ -128,8 +148,8 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 		// Multiple HTTP requests written in a single write.
 		{
 			name:       "multiple HTTP requests written in a single write",
-			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 2\r\n\r\n12",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 2\r\n\r\n12",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n12",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n12",
 			chunkSize:  999,
 		},
 		// Multiple HTTP requests written in a single write. A write will occur
@@ -137,15 +157,15 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 		// start of a new one.
 		{
 			name:       "multiple HTTP requests written in chunks",
-			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 2\r\n\r\n12",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 2\r\n\r\n12",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n12",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n12",
 			chunkSize:  3,
 		},
 		// Multiple HTTP requests written in a single write with transform.
 		{
-			name:       "multiple HTTP requests written in a single write",
-			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 4\r\n\r\n12HTTP 1.1\r\nContent-Length: 4\r\n\r\n34",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 100\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 100\r\n\r\n12HTTP 1.1\r\nContent-Length: 100\r\n\r\n34",
+			name:       "multiple HTTP requests written in a single write with transform",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n12POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n34",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 100\r\n\r\n12POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\n34",
 			chunkSize:  999,
 			transform:  Spec{[2]string{"4", "100"}},
 		},
@@ -153,10 +173,10 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 		// write will occur where it contains both the end of the previous HTTP
 		// request and the start of a new one.
 		{
-			name:       "multiple HTTP requests written in chunks",
-			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 4\r\n\r\n12",
-			wantOutput: "HTTP 1.1\r\nContent-Length: 100\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 100\r\n\r\n12",
-			chunkSize:  3,
+			name:       "multiple HTTP requests written in chunks with transform",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n12",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 100\r\n\r\n12",
+			chunkSize:  4, // ensure one write contains bytes from both reqs
 			transform:  Spec{[2]string{"4", "100"}},
 		},
 	}
@@ -171,6 +191,7 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 
 			conn := testConn{
 				writeLimit: tt.connWriteLimit,
+				writeLens:  tt.connWriteLens,
 				writeErrs:  tt.connWriteErrs,
 			}
 
@@ -354,6 +375,10 @@ type testConn struct {
 	// writeLimit is the max number of bytes that will be written in a Write()
 	// call.
 	writeLimit int
+	// writeLens are returned from Write() calls in order and determine the
+	// max number of bytes that will be written. Overrides writeLimit if
+	// non-empty. If empty, then the value of writeLimit is returned.
+	writeLens []int
 	// writeErrs are returned from Write() calls in order. If empty, then a nil
 	// error is returned.
 	writeErrs []error
@@ -370,14 +395,23 @@ func (c *testConn) Write(b []byte) (n int, err error) {
 		c.writeErrs = c.writeErrs[1:]
 	}
 
-	if c.writeLimit != 0 && c.writeLimit < len(b) {
+	if len(c.writeLens) > 0 {
+		n = c.writeLens[0]
+		c.writeLens = c.writeLens[1:]
+		if len(b) <= n {
+			c.b = append(c.b, b...)
+			n = len(b)
+		} else {
+			c.b = append(c.b, b[:n]...)
+		}
+	} else if c.writeLimit != 0 && c.writeLimit < len(b) {
 		c.b = append(c.b, b[:c.writeLimit]...)
 		n = c.writeLimit
-		return
+	} else {
+		c.b = append(c.b, b...)
+		n = len(b)
 	}
 
-	c.b = append(c.b, b...)
-	n = len(b)
 	return
 }
 
