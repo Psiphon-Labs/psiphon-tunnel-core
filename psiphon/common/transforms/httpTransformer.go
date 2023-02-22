@@ -82,8 +82,7 @@ type HTTPTransformer struct {
 	net.Conn
 }
 
-// Warning: Does not handle chunked encoding and multiple HTTP
-// requests written in a single Write(). Must be called synchronously.
+// Warning: Does not handle chunked encoding. Must be called synchronously.
 func (t *HTTPTransformer) Write(b []byte) (int, error) {
 
 	if t.state == httpTransformerReadHeader {
@@ -170,14 +169,29 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 			err = t.writeBuffer()
 
 			if t.remain > 0 {
+				t.state = httpTransformerReadWriteBody
+			} else {
 				// Entire request, header and body, has been written. Return to
 				// waiting for next HTTP request header to arrive.
-				t.state = httpTransformerReadWriteBody
+				if len(t.b) > 0 {
+					// Return the number of bytes written to the underlying
+					// Conn and clear t.b instead of calling t.Write() with any
+					// remaining bytes of t.b. The caller must call Write()
+					// again with the unwritten, and unbuffered, bytes of b.
+					// Since t.remain = 0 it is guaranteed that
+					// len(b) - len(t.b) >= 0 because len(t.b) is the number of
+					// subsequent request bytes and len(b) is the number of
+					// trailing bytes of the current request plus the
+					// subsequent request bytes.
+					written := len(b) - len(t.b)
+					t.b = nil
+					return written, err
+				}
 			}
 
 			if err != nil {
 				// b buffered in t.b
-				return len(b), errors.Trace(err)
+				return len(b), err
 			}
 		}
 
@@ -196,21 +210,24 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 		return 0, errors.Trace(err)
 	}
 
-	n, err := t.Conn.Write(b)
-
-	if uint64(n) > t.remain {
-		// Attempt to recover by resetting t.remain. If b contains bytes of
-		// subsequent request(s) (should never happen), then these request(s)
-		// may be mangled.
-		t.remain = 0
-		return n, errors.TraceNew("t.remain - uint64(n) underflows")
+	bytesToWrite := uint64(len(b))
+	if bytesToWrite > t.remain {
+		bytesToWrite = t.remain
 	}
 
+	n, err := t.Conn.Write(b[:bytesToWrite])
+
+	// Do not need to check for underflow because n <= t.remain
 	t.remain -= uint64(n)
 
 	if t.remain <= 0 {
 		// Entire request, header and body, has been written. Return to
 		// waiting for next HTTP request header to arrive.
+		//
+		// Return the number of bytes written to the underlying Conn instead of
+		// calling t.Write() with any remaining bytes of b which were not
+		// written or buffered, i.e. when n < len(b). The caller must call
+		// Write() again with the unwritten, and unbuffered, bytes of b.
 		t.state = httpTransformerReadHeader
 		t.remain = 0
 	}
@@ -219,17 +236,16 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 }
 
 func (t *HTTPTransformer) writeBuffer() error {
-	for len(t.b) > 0 {
-		n, err := t.Conn.Write(t.b)
+	for len(t.b) > 0 && t.remain > 0 {
 
-		if uint64(n) > t.remain {
-			// Attempt to recover by resetting t.remain. If t.b contains bytes
-			// of subsequent request(s) (should never happen), then these
-			// request(s) may be mangled.
-			t.remain = 0
-			return errors.TraceNew("t.remain - uint64(n) underflows")
+		bytesToWrite := uint64(len(t.b))
+		if bytesToWrite > t.remain {
+			bytesToWrite = t.remain
 		}
 
+		n, err := t.Conn.Write(t.b[:bytesToWrite])
+
+		// Do not need to check for underflow because n <= t.remain
 		t.remain -= uint64(n)
 
 		if n == len(t.b) {

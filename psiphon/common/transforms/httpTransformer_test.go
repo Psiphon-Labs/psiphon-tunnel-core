@@ -125,24 +125,39 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			connWriteLimit: 1,
 			connWriteErrs:  []error{errors.New("err1"), errors.New("err2"), errors.New("err3")},
 		},
-		// Multiple HTTP requests written in a single write not supported so an
-		// error is expected.
+		// Multiple HTTP requests written in a single write.
 		{
 			name:       "multiple HTTP requests written in a single write",
 			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 2\r\n\r\n12",
 			wantOutput: "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 2\r\n\r\n12",
 			chunkSize:  999,
-			wantError:  errors.New("t.remain - uint64(n) underflows"),
 		},
-		// Multiple HTTP requests written in a single write not supported so an
-		// error is expected because a write will occur where it contains both
-		// the end of the previous HTTP request and the start of a new one.
+		// Multiple HTTP requests written in a single write. A write will occur
+		// where it contains both the end of the previous HTTP request and the
+		// start of a new one.
 		{
 			name:       "multiple HTTP requests written in chunks",
 			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 2\r\n\r\n12",
 			wantOutput: "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 2\r\n\r\n12",
 			chunkSize:  3,
-			wantError:  errors.New("t.remain - uint64(n) underflows"),
+		},
+		// Multiple HTTP requests written in a single write with transform.
+		{
+			name:       "multiple HTTP requests written in a single write",
+			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 4\r\n\r\n12HTTP 1.1\r\nContent-Length: 4\r\n\r\n34",
+			wantOutput: "HTTP 1.1\r\nContent-Length: 100\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 100\r\n\r\n12HTTP 1.1\r\nContent-Length: 100\r\n\r\n34",
+			chunkSize:  999,
+			transform:  Spec{[2]string{"4", "100"}},
+		},
+		// Multiple HTTP requests written in a single write with transform. A
+		// write will occur where it contains both the end of the previous HTTP
+		// request and the start of a new one.
+		{
+			name:       "multiple HTTP requests written in chunks",
+			input:      "HTTP 1.1\r\nContent-Length: 4\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 4\r\n\r\n12",
+			wantOutput: "HTTP 1.1\r\nContent-Length: 100\r\n\r\nabcdHTTP 1.1\r\nContent-Length: 100\r\n\r\n12",
+			chunkSize:  3,
+			transform:  Spec{[2]string{"4", "100"}},
 		},
 	}
 
