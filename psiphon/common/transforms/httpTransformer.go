@@ -131,7 +131,8 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 
 			n, err := strconv.ParseUint(string(cl), 10, 63)
 			if err != nil {
-				return 0, errors.Trace(err)
+				// b buffered in t.b
+				return len(b), errors.Trace(err)
 			}
 
 			t.remain = n
@@ -144,7 +145,8 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 			if t.transform != nil {
 				newHeaderS, err := t.transform.Apply(t.seed, string(header))
 				if err != nil {
-					return 0, errors.Trace(err)
+					// b buffered in t.b
+					return len(b), errors.Trace(err)
 				}
 
 				newHeader := []byte(newHeaderS)
@@ -160,7 +162,8 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 			}
 
 			if math.MaxUint64-t.remain < uint64(len(header)) {
-				return 0, errors.TraceNew("t.remain + uint64(len(header)) overflows")
+				// b buffered in t.b
+				return len(b), errors.TraceNew("t.remain + uint64(len(header)) overflows")
 			}
 			t.remain += uint64(len(header))
 
