@@ -57,6 +57,20 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			chunkSize:  1,
 		},
 		{
+			name:       "write header then body", // behaviour of net/http code
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			chunkSize:  38,
+		},
+		{
+			name:          "write header then body with error",
+			input:         "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			chunkSize:     38,
+			connWriteErrs: []error{nil, errors.New("err1")},
+			wantError:     errors.New("err1"),
+		},
+		{
 			name:       "written in a single write",
 			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
@@ -68,6 +82,7 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			chunkSize:     999,
 			connWriteErrs: []error{errors.New("err1")},
+			wantError:     errors.New("err1"),
 		},
 		{
 			name:           "written with partial write and errors",
@@ -75,7 +90,8 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			wantOutput:     "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			chunkSize:      1,
 			connWriteLimit: 1,
-			connWriteErrs:  []error{errors.New("err1"), errors.New("err2")},
+			connWriteErrs:  []error{nil, errors.New("err1"), errors.New("err2")},
+			wantError:      errors.New("err1"),
 		},
 		{
 			name:       "transform not applied to body",
@@ -103,24 +119,6 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			chunkSize:  1,
 		},
 		{
-			name:          "written in a single write with errors and partial writes",
-			input:         "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 0\r\n\r\n",
-			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
-			chunkSize:     999,
-			transform:     Spec{[2]string{"Host: example.com\r\n", ""}},
-			connWriteErrs: []error{errors.New("err1"), nil, errors.New("err2"), nil, nil, errors.New("err3")},
-			connWriteLens: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-		},
-		{
-			name:          "written in a single write with error and partial write",
-			input:         "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 4\r\n\r\nabcd",
-			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
-			chunkSize:     999,
-			transform:     Spec{[2]string{"Host: example.com\r\n", ""}},
-			connWriteErrs: []error{errors.New("err1")},
-			connWriteLens: []int{28}, // write lands mid "\r\n\r\n"
-		},
-		{
 			name:       "transform",
 			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcd",
@@ -135,6 +133,7 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			transform:      Spec{[2]string{"4", "100"}},
 			connWriteLimit: 1,
 			connWriteErrs:  []error{errors.New("err1"), errors.New("err2")},
+			wantError:      errors.New("err1"),
 		},
 		{
 			name:           "transform with chunk write and errors in body write",
@@ -144,13 +143,45 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			transform:      Spec{[2]string{"4", "100"}},
 			connWriteLimit: 1,
 			connWriteErrs:  []error{errors.New("err1"), errors.New("err2"), errors.New("err3")},
+			wantError:      errors.New("err1"),
 		},
-		// Multiple HTTP requests written in a single write.
+		//
+		// Below tests document unsupported behavior.
+		//
+		{
+			name:          "written in a single write with errors and partial writes",
+			input:         "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 0\r\n\r\n",
+			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
+			chunkSize:     999,
+			transform:     Spec{[2]string{"Host: example.com\r\n", ""}},
+			connWriteErrs: []error{errors.New("err1"), nil, errors.New("err2"), nil, nil, errors.New("err3")},
+			connWriteLens: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+			wantError:     errors.New("err1"),
+		},
+		{
+			name:          "written in a single write with error and partial write",
+			input:         "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			chunkSize:     999,
+			transform:     Spec{[2]string{"Host: example.com\r\n", ""}},
+			connWriteErrs: []error{errors.New("err1")},
+			connWriteLens: []int{28}, // write lands mid "\r\n\r\n"
+			wantError:     errors.New("err1"),
+		},
 		{
 			name:       "multiple HTTP requests written in a single write",
 			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n12",
 			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n12",
 			chunkSize:  999,
+			wantError:  errors.New("multiple HTTP requests in single Write() not supported"),
+		},
+		{
+			name:       "multiple HTTP requests written in a single write with transform",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n12POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n34",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 100\r\n\r\n12POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\n34",
+			chunkSize:  999,
+			transform:  Spec{[2]string{"4", "100"}},
+			wantError:  errors.New("multiple HTTP requests in single Write() not supported"),
 		},
 		// Multiple HTTP requests written in a single write. A write will occur
 		// where it contains both the end of the previous HTTP request and the
@@ -159,15 +190,8 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			name:       "multiple HTTP requests written in chunks",
 			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n12",
 			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n12",
-			chunkSize:  3,
-		},
-		// Multiple HTTP requests written in a single write with transform.
-		{
-			name:       "multiple HTTP requests written in a single write with transform",
-			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n12POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n34",
-			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 100\r\n\r\n12POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\n34",
-			chunkSize:  999,
-			transform:  Spec{[2]string{"4", "100"}},
+			chunkSize:  4,
+			wantError:  errors.New("multiple HTTP requests in single Write() not supported"),
 		},
 		// Multiple HTTP requests written in a single write with transform. A
 		// write will occur where it contains both the end of the previous HTTP
@@ -178,6 +202,7 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcdPOST / HTTP/1.1\r\nContent-Length: 100\r\n\r\n12",
 			chunkSize:  4, // ensure one write contains bytes from both reqs
 			transform:  Spec{[2]string{"4", "100"}},
+			wantError:  errors.New("multiple HTTP requests in single Write() not supported"),
 		},
 	}
 
@@ -211,24 +236,19 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 				}
 
 				var b []byte
-				if len(remain) < tt.chunkSize {
+				if len(remain) < tt.chunkSize || tt.chunkSize == 0 {
 					b = remain
 				} else {
 					b = remain[:tt.chunkSize]
 				}
 
-				expectedErr := len(conn.writeErrs) > 0
-
 				var n int
 				n, err = transformer.Write(b)
 				if err != nil {
-					if expectedErr {
-						// reset err
-						err = nil
-					} else {
-						// err checked outside loop
-						break
-					}
+					// The underlying transport will be a reliable stream
+					// transport, i.e. TCP, and we expect the caller to stop
+					// writing after an error is returned.
+					break
 				}
 
 				remain = remain[n:]
@@ -255,10 +275,14 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 func TestHTTPTransformerHTTPServer(t *testing.T) {
 
 	type test struct {
-		name      string
-		request   func(string) *http.Request
-		wantBody  string
-		transform Spec
+		name           string
+		request        func(string) *http.Request
+		wantBody       string
+		transform      Spec
+		connWriteLimit int
+		connWriteLens  []int
+		connWriteErrs  []error
+		wantError      error
 	}
 
 	tests := []test{
@@ -278,6 +302,26 @@ func TestHTTPTransformerHTTPServer(t *testing.T) {
 			},
 			wantBody: "abc",
 		},
+		// Expect HTTP request to abort after a single Write() call on
+		// underlying net.Conn fails.
+		{
+			name:      "transport fails",
+			transform: Spec{[2]string{"", ""}},
+			request: func(addr string) *http.Request {
+
+				body := bytes.NewReader([]byte("abcd"))
+
+				req, err := http.NewRequest("POST", "http://"+addr, body)
+				if err != nil {
+					panic(err)
+				}
+
+				return req
+			},
+			wantBody:      "abc",
+			connWriteErrs: []error{errors.New("test error")},
+			wantError:     errors.New("test error"),
+		},
 	}
 
 	for _, tt := range tests {
@@ -295,7 +339,24 @@ func TestHTTPTransformerHTTPServer(t *testing.T) {
 			}
 
 			dialer := func(ctx context.Context, network, address string) (net.Conn, error) {
-				return net.Dial(network, address)
+
+				if network != "tcp" {
+					return nil, errors.New("expected network tcp")
+				}
+
+				conn, err := net.Dial(network, address)
+				if err != nil {
+					return nil, err
+				}
+
+				wrappedConn := testConn{
+					Conn:       conn,
+					writeLimit: tt.connWriteLimit,
+					writeLens:  tt.connWriteLens,
+					writeErrs:  tt.connWriteErrs,
+				}
+
+				return &wrappedConn, nil
 			}
 
 			httpTransport := &http.Transport{
@@ -309,7 +370,9 @@ func TestHTTPTransformerHTTPServer(t *testing.T) {
 
 			serverReq := make(chan *serverRequest, 1)
 
-			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			mux := http.NewServeMux()
+
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 				b, err := io.ReadAll(r.Body)
 				if err != nil {
 					w.WriteHeader(http.StatusInternalServerError)
@@ -324,7 +387,8 @@ func TestHTTPTransformerHTTPServer(t *testing.T) {
 			})
 
 			s := &http.Server{
-				Addr: "127.0.0.1:8080",
+				Addr:    "127.0.0.1:8080",
+				Handler: mux,
 			}
 
 			go func() {
@@ -346,18 +410,26 @@ func TestHTTPTransformerHTTPServer(t *testing.T) {
 				t.Fatalf("s.Shutdown failed %v", shutdownErr)
 			}
 
-			if err != nil {
-				t.Fatalf("client.Do failed %v", err)
-			}
+			if tt.wantError == nil {
+				if err != nil {
+					t.Fatalf("client.Do failed %v", err)
+				}
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("expected 200 but got %d", resp.StatusCode)
+				}
 
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("expected 200 but got %d", resp.StatusCode)
-			}
+				r := <-serverReq
 
-			r := <-serverReq
-
-			if tt.wantBody != string(r.body) {
-				t.Fatalf("expected body %s but got %s", tt.wantBody, string(r.body))
+				if tt.wantBody != string(r.body) {
+					t.Fatalf("expected body %s but got %s", tt.wantBody, string(r.body))
+				}
+			} else {
+				// tt.wantError != nil
+				if err == nil {
+					t.Fatalf("expected error %v", tt.wantError)
+				} else if !strings.Contains(err.Error(), tt.wantError.Error()) {
+					t.Fatalf("expected error %v got %v", tt.wantError, err)
+				}
 			}
 		})
 	}
@@ -382,10 +454,12 @@ type testConn struct {
 	// writeErrs are returned from Write() calls in order. If empty, then a nil
 	// error is returned.
 	writeErrs []error
+
+	net.Conn
 }
 
 func (c *testConn) Read(b []byte) (n int, err error) {
-	return 0, nil
+	return c.Conn.Read(b)
 }
 
 func (c *testConn) Write(b []byte) (n int, err error) {
@@ -412,29 +486,34 @@ func (c *testConn) Write(b []byte) (n int, err error) {
 		n = len(b)
 	}
 
+	// Only write to net.Conn if set
+	if c.Conn != nil && n > 0 {
+		c.Conn.Write(b[:n])
+	}
+
 	return
 }
 
 func (c *testConn) Close() error {
-	return nil
+	return c.Conn.Close()
 }
 
 func (c *testConn) LocalAddr() net.Addr {
-	return nil
+	return c.Conn.LocalAddr()
 }
 
 func (c *testConn) RemoteAddr() net.Addr {
-	return nil
+	return c.Conn.RemoteAddr()
 }
 
 func (c *testConn) SetDeadline(t time.Time) error {
-	return nil
+	return c.Conn.SetDeadline(t)
 }
 
 func (c *testConn) SetReadDeadline(t time.Time) error {
-	return nil
+	return c.Conn.SetReadDeadline(t)
 }
 
 func (c *testConn) SetWriteDeadline(t time.Time) error {
-	return nil
+	return c.Conn.SetWriteDeadline(t)
 }
