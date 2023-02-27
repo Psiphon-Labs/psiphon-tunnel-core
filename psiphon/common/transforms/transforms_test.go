@@ -87,7 +87,7 @@ func runTestTransforms() error {
 	}
 
 	input := "aa0aa0aa0bb0aa0bb0aa0bb0aa0bb0aa0bb0aa0bb0aa0bb0aa0bb0aa0bb0aa"
-	output, err := spec.Apply(seed, input)
+	output, err := spec.ApplyString(seed, input)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -102,7 +102,7 @@ func runTestTransforms() error {
 
 	previousOutput := output
 
-	output, err = spec.Apply(seed, input)
+	output, err = spec.ApplyString(seed, input)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -121,7 +121,7 @@ func runTestTransforms() error {
 			return errors.Trace(err)
 		}
 
-		output, err = spec.Apply(seed, input)
+		output, err = spec.ApplyString(seed, input)
 		if err != nil {
 			return errors.Trace(err)
 		}

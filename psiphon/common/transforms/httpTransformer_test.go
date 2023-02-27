@@ -90,7 +90,7 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			wantOutput:     "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			chunkSize:      1,
 			connWriteLimit: 1,
-			connWriteErrs:  []error{nil, errors.New("err1"), errors.New("err2")},
+			connWriteErrs:  []error{errors.New("err1"), errors.New("err2")},
 			wantError:      errors.New("err1"),
 		},
 		{
@@ -257,6 +257,9 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error %v", err)
 				}
+				if string(conn.b) != tt.wantOutput {
+					t.Fatalf("expected \"%s\" of len %d but got \"%s\" of len %d", escapeNewlines(tt.wantOutput), len(tt.wantOutput), escapeNewlines(string(conn.b)), len(conn.b))
+				}
 			} else {
 				// tt.wantError != nil
 				if err == nil {
@@ -264,9 +267,6 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 				} else if !strings.Contains(err.Error(), tt.wantError.Error()) {
 					t.Fatalf("expected error %v got %v", tt.wantError, err)
 				}
-			}
-			if tt.wantError == nil && string(conn.b) != tt.wantOutput {
-				t.Fatalf("expected \"%s\" of len %d but got \"%s\" of len %d", escapeNewlines(tt.wantOutput), len(tt.wantOutput), escapeNewlines(string(conn.b)), len(conn.b))
 			}
 		})
 	}
