@@ -409,18 +409,6 @@ Returns the path where the rotated notices file will be created.
 - (long)getPacketTunnelMTU;
 
 /*!
- Only valid in whole device mode. Provides the DNS resolver IP address that is provided by the packet tunnel to the device.
-  @return  The IP address of the DNS resolver as a string.
- */
-- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv4Address;
-
-/*!
- Only valid in whole device mode. Provides the DNS resolver IP address that is provided by the packet tunnel to the device.
- @return  The IP address of the DNS resolver as a string.
- */
-- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address;
-
-/*!
  Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.
  @return  The build info json as a string.
  */

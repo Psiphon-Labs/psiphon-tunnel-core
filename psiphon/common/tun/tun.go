@@ -87,7 +87,7 @@ the assigned IP address. The server also rewrites the destination address of
 certain DNS packets. The purpose of this is to allow clients to reconnect
 to different servers without having to tear down or change their local
 network configuration. Clients may configure their local tun device with an
-arbitrary IP address and a static DNS resolver address.
+arbitrary IP address and an arbitrary DNS resolver address.
 
 The server uses the 24-bit 10.0.0.0/8 IPv4 private address space to maximize
 the number of addresses available, due to Psiphon client churn and minimum
@@ -849,6 +849,7 @@ func (server *Server) runDeviceDownstream() {
 		if !processPacket(
 			session.metrics,
 			session,
+			nil,
 			packetDirectionServerDownstream,
 			readPacket) {
 			// Packet is rejected and dropped. Reason will be counted in metrics.
@@ -892,7 +893,7 @@ func (server *Server) runClientUpstream(session *session) {
 
 		// processPacket transparently rewrites the source address to the
 		// session's assigned address and rewrites the destination of any
-		// DNS packets destined to the target DNS resolver.
+		// DNS packets destined to the transparent DNS resolver.
 		//
 		// The first time the source address is rewritten, the original
 		// value is recorded so inbound packets can have the reverse
@@ -903,6 +904,7 @@ func (server *Server) runClientUpstream(session *session) {
 		if !processPacket(
 			session.metrics,
 			session,
+			nil,
 			packetDirectionServerUpstream,
 			readPacket) {
 
@@ -1099,18 +1101,6 @@ func (server *Server) convertIndexToIPv6Address(index int32) net.IP {
 			(index>>16)&0xFF,
 			(index>>8)&0xFF,
 			index&0xFF))
-}
-
-// GetTransparentDNSResolverIPv4Address returns the static IPv4 address
-// to use as a DNS resolver when transparent DNS rewriting is desired.
-func GetTransparentDNSResolverIPv4Address() net.IP {
-	return transparentDNSResolverIPv4Address
-}
-
-// GetTransparentDNSResolverIPv6Address returns the static IPv6 address
-// to use as a DNS resolver when transparent DNS rewriting is desired.
-func GetTransparentDNSResolverIPv6Address() net.IP {
-	return transparentDNSResolverIPv6Address
 }
 
 type session struct {
@@ -1861,7 +1851,7 @@ type ClientConfig struct {
 	// transparent source IP address and DNS rewriting, the tun
 	// device may have any assigned IP address, but should be
 	// configured with the given MTU; and DNS should be configured
-	// to use the transparent DNS target resolver addresses.
+	// to use the specified transparent DNS resolver addresses.
 	// Set TunFileDescriptor to <= 0 to ignore this parameter
 	// and create and configure a tun device.
 	TunFileDescriptor int
@@ -1874,6 +1864,18 @@ type ClientConfig struct {
 	// assign to a newly created tun device.
 	IPv6AddressCIDR string
 
+	// TransparentDNSIPv4Address is the IPv4 address of the DNS server
+	// configured by a VPN using a packet tunnel. All DNS packets
+	// destined to this DNS server are transparently redirected to
+	// the Psiphon server DNS.
+	TransparentDNSIPv4Address string
+
+	// TransparentDNSIPv4Address is the IPv6 address of the DNS server
+	// configured by a VPN using a packet tunnel. All DNS packets
+	// destined to this DNS server are transparently redirected to
+	// the Psiphon server DNS.
+	TransparentDNSIPv6Address string
+
 	// RouteDestinations are hosts (IPs) or networks (CIDRs)
 	// to be configured to be routed through a newly
 	// created tun device.
@@ -1885,6 +1887,7 @@ type ClientConfig struct {
 // tunnel server via a transport channel.
 type Client struct {
 	config          *ClientConfig
+	transparentDNS  *clientTransparentDNS
 	device          *Device
 	channel         *Channel
 	upstreamPackets *PacketQueue
@@ -1892,6 +1895,41 @@ type Client struct {
 	runContext      context.Context
 	stopRunning     context.CancelFunc
 	workers         *sync.WaitGroup
+}
+
+// clientTransparentDNS caches the parsed representions of
+// TransparentDNSIPv4/6Address for fast packet processing and rewriting.
+type clientTransparentDNS struct {
+	IPv4Address net.IP
+	IPv6Address net.IP
+}
+
+func newClientTransparentDNS(
+	IPv4Address, IPv6Address string) (*clientTransparentDNS, error) {
+
+	var IPv4, IPv6 net.IP
+
+	if IPv4Address != "" {
+		IPv4 = net.ParseIP(IPv4Address)
+		if IPv4 != nil {
+			IPv4 = IPv4.To4()
+		}
+		if IPv4 == nil {
+			return nil, errors.TraceNew("invalid IPv4 address")
+		}
+	}
+
+	if IPv6Address != "" {
+		IPv6 = net.ParseIP(IPv6Address)
+		if IPv6 == nil || IPv6.To4() != nil {
+			return nil, errors.TraceNew("invalid IPv6 address")
+		}
+	}
+
+	return &clientTransparentDNS{
+		IPv4Address: IPv4,
+		IPv6Address: IPv6,
+	}, nil
 }
 
 // NewClient initializes a new Client. Unless using the
@@ -1917,10 +1955,18 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		upstreamPacketQueueSize = config.UpstreamPacketQueueSize
 	}
 
+	transparentDNS, err := newClientTransparentDNS(
+		config.TransparentDNSIPv4Address,
+		config.TransparentDNSIPv6Address)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	runContext, stopRunning := context.WithCancel(context.Background())
 
 	return &Client{
 		config:          config,
+		transparentDNS:  transparentDNS,
 		device:          device,
 		channel:         NewChannel(config.Transport, getMTU(config.MTU)),
 		upstreamPackets: NewPacketQueue(upstreamPacketQueueSize),
@@ -1965,6 +2011,7 @@ func (client *Client) Start() {
 			if !processPacket(
 				client.metrics,
 				nil,
+				client.transparentDNS,
 				packetDirectionClientUpstream,
 				readPacket) {
 				continue
@@ -2029,6 +2076,7 @@ func (client *Client) Start() {
 			if !processPacket(
 				client.metrics,
 				nil,
+				client.transparentDNS,
 				packetDirectionClientDownstream,
 				readPacket) {
 				continue
@@ -2280,6 +2328,7 @@ func getPacketDestinationIPAddress(
 func processPacket(
 	metrics *packetMetrics,
 	session *session,
+	clientTransparentDNS *clientTransparentDNS,
 	direction packetDirection,
 	packet []byte) bool {
 
@@ -2438,6 +2487,27 @@ func processPacket(
 	// - The traffic rules checks are bypassed, since transparent
 	//   DNS is essential
 
+	// Transparent DNS is a two-step translation. On the client, the VPN
+	// can be configured with any private address range, so as to not
+	// conflict with other local networks, such as WiFi. For example, the
+	// client may select from 192.168.0.0/16, when an existing interface
+	// uses a subnet in 10.0.0.0/8, and specify the VPN DNS server as 192.168.0.1.
+	//
+	// The first translation, on the client side, rewrites packets
+	// destined to 192.168.0.1:53, the DNS server, to the destination
+	// transparentDNSResolverIPv4Address:53. This packet is sent to the
+	// server.
+	//
+	// The second translation, on the server side, rewrites packets
+	// destined to transparentDNSResolverIPv4Address:53 to an actual DNS
+	// server destination.
+	//
+	// Then, reverse rewrites are applied to DNS response packets: the
+	// server rewrites the source address actual-DNS-server:53 to
+	// transparentDNSResolverIPv4Address:53, and then the client rewrites
+	// the source address transparentDNSResolverIPv4Address:53 to
+	// 192.168.0.1:53, and that packet is written to the tun device.
+
 	doTransparentDNS := false
 
 	if isServer {
@@ -2520,6 +2590,34 @@ func processPacket(
 				}
 			}
 		}
+
+	} else { // isClient
+
+		if direction == packetDirectionClientUpstream {
+
+			// DNS packets destined to the configured VPN DNS servers,
+			// specified in clientTransparentDNS, are rewritten to go to
+			// transparentDNSResolverIPv4/6Address.
+
+			if destinationPort == portNumberDNS {
+				if (version == 4 && destinationIPAddress.Equal(clientTransparentDNS.IPv4Address)) ||
+					(version == 6 && destinationIPAddress.Equal(clientTransparentDNS.IPv6Address)) {
+					doTransparentDNS = true
+				}
+			}
+
+		} else { // packetDirectionClientDownstream
+
+			// DNS packets with a transparentDNSResolverIPv4/6Address source
+			// address are rewritten to come from the configured VPN DNS servers.
+
+			if sourcePort == portNumberDNS {
+				if (version == 4 && sourceIPAddress.Equal(transparentDNSResolverIPv4Address)) ||
+					(version == 6 && sourceIPAddress.Equal(transparentDNSResolverIPv6Address)) {
+					doTransparentDNS = true
+				}
+			}
+		}
 	}
 
 	// Apply rewrites before determining flow ID to ensure that corresponding up-
@@ -2573,7 +2671,7 @@ func processPacket(
 
 		if version == 4 {
 			rewriteDestinationIPAddress = session.getOriginalIPv4Address()
-		} else { // version == 6
+		} else if version == 6 {
 			rewriteDestinationIPAddress = session.getOriginalIPv6Address()
 		}
 
@@ -2589,8 +2687,36 @@ func processPacket(
 
 			if version == 4 {
 				rewriteSourceIPAddress = transparentDNSResolverIPv4Address
-			} else { // version == 6
+			} else if version == 6 {
 				rewriteSourceIPAddress = transparentDNSResolverIPv6Address
+			}
+		}
+
+	} else if direction == packetDirectionClientUpstream {
+
+		// Rewrite the destination address to be
+		// transparentDNSResolverIPv4/6Address, which the server will
+		// subsequently send on to actual DNS servers.
+
+		if doTransparentDNS {
+
+			if version == 4 {
+				rewriteDestinationIPAddress = transparentDNSResolverIPv4Address
+			} else if version == 6 {
+				rewriteDestinationIPAddress = transparentDNSResolverIPv6Address
+			}
+		}
+	} else if direction == packetDirectionClientDownstream {
+
+		// Rewrite the source address so the DNS response appears to come from
+		// the configured VPN DNS server.
+
+		if doTransparentDNS {
+
+			if version == 4 {
+				rewriteSourceIPAddress = clientTransparentDNS.IPv4Address
+			} else if version == 6 {
+				rewriteSourceIPAddress = clientTransparentDNS.IPv6Address
 			}
 		}
 	}

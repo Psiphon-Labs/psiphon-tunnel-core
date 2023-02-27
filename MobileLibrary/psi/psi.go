@@ -481,14 +481,6 @@ func GetPacketTunnelMTU() int {
 	return tun.DEFAULT_MTU
 }
 
-func GetPacketTunnelDNSResolverIPv4Address() string {
-	return tun.GetTransparentDNSResolverIPv4Address().String()
-}
-
-func GetPacketTunnelDNSResolverIPv6Address() string {
-	return tun.GetTransparentDNSResolverIPv6Address().String()
-}
-
 // WriteRuntimeProfiles writes Go runtime profile information to a set of
 // files in the specified output directory. See common.WriteRuntimeProfiles
 // for more details.
