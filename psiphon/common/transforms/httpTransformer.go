@@ -72,7 +72,7 @@ type HTTPTransformer struct {
 	seed      *prng.Seed
 
 	// state is the HTTPTransformer state. Possible values are
-	// httpTransformerReadingHeader and httpTransformerReadingBody.
+	// httpTransformerReadWriteHeader and httpTransformerReadWriteBody.
 	state int64
 	// b is the accumulated bytes of the current HTTP request.
 	b []byte
