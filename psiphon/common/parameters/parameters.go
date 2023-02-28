@@ -320,6 +320,7 @@ const (
 	DNSResolverIncludeEDNS0Probability               = "DNSResolverIncludeEDNS0Probability"
 	DNSResolverCacheExtensionInitialTTL              = "DNSResolverCacheExtensionInitialTTL"
 	DNSResolverCacheExtensionVerifiedTTL             = "DNSResolverCacheExtensionVerifiedTTL"
+	AddFrontingProviderPsiphonFrontingHeader         = "AddFrontingProviderPsiphonFrontingHeader"
 )
 
 const (
@@ -675,6 +676,8 @@ var defaultParameters = map[string]struct {
 	DNSResolverIncludeEDNS0Probability:          {value: 0.0, minimum: 0.0},
 	DNSResolverCacheExtensionInitialTTL:         {value: time.Duration(0), minimum: time.Duration(0)},
 	DNSResolverCacheExtensionVerifiedTTL:        {value: time.Duration(0), minimum: time.Duration(0)},
+
+	AddFrontingProviderPsiphonFrontingHeader: {value: protocol.LabeledTunnelProtocols{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -894,6 +897,15 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case protocol.TunnelProtocols:
+				if skipOnError {
+					newValue = v.PruneInvalid()
+				} else {
+					err := v.Validate()
+					if err != nil {
+						return nil, errors.Trace(err)
+					}
+				}
+			case protocol.LabeledTunnelProtocols:
 				if skipOnError {
 					newValue = v.PruneInvalid()
 				} else {
@@ -1321,6 +1333,15 @@ func (p ParametersAccessor) TunnelProtocols(name string) protocol.TunnelProtocol
 	value := protocol.TunnelProtocols{}
 	p.snapshot.getValue(name, &value)
 	return value
+}
+
+// LabeledTunnelProtocols returns a protocol.TunnelProtocols parameter value
+// corresponding to the specified labeled set and label value. The return
+// value is nil when no set is found.
+func (p ParametersAccessor) LabeledTunnelProtocols(name, label string) protocol.TunnelProtocols {
+	var value protocol.LabeledTunnelProtocols
+	p.snapshot.getValue(name, &value)
+	return value[label]
 }
 
 // TLSProfiles returns a protocol.TLSProfiles parameter value.

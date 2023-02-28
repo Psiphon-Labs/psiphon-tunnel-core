@@ -241,6 +241,11 @@ func handshakeAPIRequestHandler(
 		}
 	}
 
+	deviceRegion, ok := getOptionalStringRequestParam(params, "device_region")
+	if !ok {
+		deviceRegion = GEOIP_UNKNOWN_VALUE
+	}
+
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
 
@@ -261,6 +266,7 @@ func handshakeAPIRequestHandler(
 			domainBytesChecksum:     domainBytesChecksum,
 			establishedTunnelsCount: establishedTunnelsCount,
 			splitTunnelLookup:       splitTunnelLookup,
+			deviceRegion:            deviceRegion,
 		},
 		authorizations)
 	if err != nil {
@@ -367,9 +373,12 @@ func handshakeAPIRequestHandler(
 	// the JSON response, return an empty array instead of null for legacy
 	// clients.
 
+	homepages := db.GetRandomizedHomepages(
+		sponsorID, geoIPData.Country, geoIPData.ASN, deviceRegion, isMobile)
+
 	handshakeResponse := protocol.HandshakeResponse{
 		SSHSessionID:             sessionID,
-		Homepages:                db.GetRandomizedHomepages(sponsorID, geoIPData.Country, geoIPData.ASN, isMobile),
+		Homepages:                homepages,
 		UpgradeClientVersion:     db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		PageViewRegexes:          make([]map[string]string, 0),
 		HttpsRequestRegexes:      httpsRequestRegexes,

@@ -1164,12 +1164,19 @@ public class PsiphonTunnel {
         String region = "";
         TelephonyManager telephonyManager = (TelephonyManager)context.getSystemService(Context.TELEPHONY_SERVICE);
         if (telephonyManager != null) {
-            region = telephonyManager.getSimCountryIso();
-            if (region == null) {
-                region = "";
-            }
-            if (region.length() == 0 && telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_CDMA) {
+            // getNetworkCountryIso, when present, is preferred over
+            // getSimCountryIso, since getNetworkCountryIso is the network
+            // the device is currently on, while getSimCountryIso is the home
+            // region of the SIM. While roaming, only getNetworkCountryIso
+            // may more accurately represent the actual device region.
+            if (telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_CDMA) {
                 region = telephonyManager.getNetworkCountryIso();
+                if (region == null) {
+                    region = "";
+                }
+            }
+            if (region.length() == 0) {
+                region = telephonyManager.getSimCountryIso();
                 if (region == null) {
                     region = "";
                 }
@@ -1422,6 +1429,22 @@ public class PsiphonTunnel {
 
             NetworkRequest networkRequest = networkRequestBuilder.build();
 
+            // There is a potential race condition in which the following
+            // network callback may be invoked, by a worker thread, after
+            // unregisterNetworkCallback. Synchronized access to a local
+            // ArrayList copy avoids the
+            // java.util.ConcurrentModificationException crash we previously
+            // observed when getActiveNetworkDNSServers iterated over the
+            // same ArrayList object value that was modified by the
+            // callback.
+            //
+            // The late invocation of the callback still results in an empty
+            // list of DNS servers, but this behavior has been observed only
+            // in artificial conditions while rapidly starting and stopping
+            // PsiphonTunnel.
+
+            ArrayList<InetAddress> callbackDnsAddresses = new ArrayList<InetAddress>();
+
             final CountDownLatch countDownLatch = new CountDownLatch(1);
             try {
                 ConnectivityManager.NetworkCallback networkCallback =
@@ -1429,7 +1452,9 @@ public class PsiphonTunnel {
                             @Override
                             public void onLinkPropertiesChanged(Network network,
                                                                 LinkProperties linkProperties) {
-                                dnsAddresses.addAll(linkProperties.getDnsServers());
+                                synchronized (callbackDnsAddresses) {
+                                    callbackDnsAddresses.addAll(linkProperties.getDnsServers());
+                                }
                                 countDownLatch.countDown();
                             }
                         };
@@ -1441,6 +1466,10 @@ public class PsiphonTunnel {
                 // Failed to register network callback
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+            }
+
+            synchronized (callbackDnsAddresses) {
+                dnsAddresses.addAll(callbackDnsAddresses);
             }
         }
 
@@ -1662,6 +1691,24 @@ public class PsiphonTunnel {
                     // If we are NOT in the VPN mode then monitor default active networks with the
                     // Internet capability, including VPN, to ensure we won't trigger a reconnect in
                     // case the VPN is up while the system switches the underlying network.
+
+                    // Limitation: for Psiphon Library apps running over Psiphon VPN, or other VPNs
+                    // with a similar architecture, it may be better to trigger a reconnect when
+                    // the underlying physical network changes. When the underlying network
+                    // changes, Psiphon VPN will remain up and reconnect its own tunnel. For the
+                    // Psiphon app, this monitoring will detect no change. However, the Psiphon
+                    // app's tunnel may be lost, and, without network change detection, initiating
+                    // a reconnect will be delayed. For example, if the Psiphon app's tunnel is
+                    // using QUIC, the Psiphon VPN will tunnel that traffic over udpgw. When
+                    // Psiphon VPN reconnects, the egress source address of that UDP flow will
+                    // change -- getting either a different source IP if the Psiphon server
+                    // changes, or a different source port even if the same server -- and the QUIC
+                    // server will drop the packets. The Psiphon app will initiate a reconnect only
+                    // after a SSH keep alive probes timeout or a QUIC timeout.
+                    //
+                    // TODO: Add a second ConnectivityManager/NetworkRequest instance to monitor
+                    // for underlying physical network changes while any VPN remains up.
+
                     builder.removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
                 }
 

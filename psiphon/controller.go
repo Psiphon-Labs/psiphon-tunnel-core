@@ -180,9 +180,11 @@ func NewController(config *Config) (controller *Controller, err error) {
 		packetTunnelTransport := NewPacketTunnelTransport()
 
 		packetTunnelClient, err := tun.NewClient(&tun.ClientConfig{
-			Logger:            NoticeCommonLogger(),
-			TunFileDescriptor: config.PacketTunnelTunFileDescriptor,
-			Transport:         packetTunnelTransport,
+			Logger:                    NoticeCommonLogger(),
+			TunFileDescriptor:         config.PacketTunnelTunFileDescriptor,
+			TransparentDNSIPv4Address: config.PacketTunnelTransparentDNSIPv4Address,
+			TransparentDNSIPv6Address: config.PacketTunnelTransparentDNSIPv6Address,
+			Transport:                 packetTunnelTransport,
 		})
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -481,7 +483,6 @@ fetcherLoop:
 //
 // TODO: refactor upgrade downloader and remote server list fetcher to use
 // common code (including the resumable download routines).
-//
 func (controller *Controller) upgradeDownloader() {
 	defer controller.runWaitGroup.Done()
 

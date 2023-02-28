@@ -228,6 +228,10 @@ type Config struct {
 	// request fails. This is used to defend against abuse.
 	MeekProhibitedHeaders []string
 
+	// MeekRequiredHeaders is a list of HTTP header names and values that must
+	// appear in requests. This is used to defend against abuse.
+	MeekRequiredHeaders map[string]string
+
 	// MeekProxyForwardedForHeaders is a list of HTTP headers which
 	// may be added by downstream HTTP proxies or CDNs in front
 	// of clients. These headers supply the original client IP
@@ -265,6 +269,11 @@ type Config struct {
 	// MeekHTTPClientIOTimeoutMilliseconds specifies meek HTTP server I/O
 	// timeouts. The default is MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT.
 	MeekHTTPClientIOTimeoutMilliseconds *int
+
+	// MeekFrontedHTTPClientIOTimeoutMilliseconds specifies meek HTTP server
+	// I/O timeouts for fronted protocols. The default is
+	// MEEK_DEFAULT_FRONTED_HTTP_CLIENT_IO_TIMEOUT.
+	MeekFrontedHTTPClientIOTimeoutMilliseconds *int
 
 	// MeekCachedResponseBufferSize is the size of a private,
 	// fixed-size buffer allocated for every meek client. The buffer
@@ -586,6 +595,20 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 				return nil, errors.Tracef(
 					"Tunnel protocol %s requires MeekCookieEncryptionPrivateKey, MeekObfuscatedKey",
 					tunnelProtocol)
+			}
+		}
+
+		// For FRONTED QUIC and HTTP, HTTPS is always used on the
+		// edge-to-server hop, so it must be enabled or else this
+		// configuration will not work. There is no FRONTED QUIC listener at
+		// all; see TunnelServer.Run.
+		if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+			_, ok := config.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_FRONTED_MEEK]
+			if !ok {
+				return nil, errors.Tracef(
+					"Tunnel protocol %s requires %s to be enabled",
+					tunnelProtocol,
+					protocol.TUNNEL_PROTOCOL_FRONTED_MEEK)
 			}
 		}
 	}
