@@ -24,7 +24,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface PsiphonProviderNetwork : NSObject <GoPsiPsiphonProviderNetwork>
 
-- (instancetype)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger;
+- (instancetype)init NS_UNAVAILABLE;
+
+- (instancetype)initWithTunnelWholeDevice:(BOOL)tunnelWholeDevice
+                                   logger:(void (^__nonnull)(NSString *_Nonnull))logger NS_DESIGNATED_INITIALIZER;
 
 @end
 

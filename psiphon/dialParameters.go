@@ -689,6 +689,15 @@ func MakeDialParameters(
 		isFronted := protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
 		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry, p)
 
+		// Due to potential tactics configurations, it may be that no QUIC
+		// version is selected. Abort immediately, with no error, as in the
+		// selectProtocol case. quic.Dial and quic.NewQUICTransporter will
+		// check for a missing QUIC version, but at that later stage an
+		// unnecessary failed_tunnel can be logged in this scenario.
+		if dialParams.QUICVersion == "" {
+			return nil, nil
+		}
+
 		if protocol.QUICVersionHasRandomizedClientHello(dialParams.QUICVersion) {
 			dialParams.QUICClientHelloSeed, err = prng.NewSeed()
 			if err != nil {
@@ -954,6 +963,17 @@ func MakeDialParameters(
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration {
 
+		// For tactics requests, AddPsiphonFrontingHeader is set when set for
+		// the related tunnel protocol. E.g., FRONTED-OSSH-MEEK for
+		// FRONTED-MEEK-TACTICS. AddPsiphonFrontingHeader is not replayed.
+		addPsiphonFrontingHeader := false
+		if dialParams.FrontingProviderID != "" {
+			addPsiphonFrontingHeader = common.Contains(
+				p.LabeledTunnelProtocols(
+					parameters.AddFrontingProviderPsiphonFrontingHeader, dialParams.FrontingProviderID),
+				dialParams.TunnelProtocol)
+		}
+
 		dialParams.meekConfig = &MeekConfig{
 			DiagnosticID:                  serverEntry.GetDiagnosticID(),
 			Parameters:                    config.GetParameters(),
@@ -969,6 +989,7 @@ func MakeDialParameters(
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
 			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			SNIServerName:                 dialParams.MeekSNIServerName,
+			AddPsiphonFrontingHeader:      addPsiphonFrontingHeader,
 			VerifyServerName:              dialParams.MeekVerifyServerName,
 			VerifyPins:                    dialParams.MeekVerifyPins,
 			HostHeader:                    dialParams.MeekHostHeader,
@@ -1020,6 +1041,9 @@ func (dialParams *DialParameters) GetNetworkType() string {
 	// check for and use the common network type prefixes currently used in
 	// NetworkIDGetter implementations.
 
+	if strings.HasPrefix(dialParams.NetworkID, "VPN") {
+		return "VPN"
+	}
 	if strings.HasPrefix(dialParams.NetworkID, "WIFI") {
 		return "WIFI"
 	}

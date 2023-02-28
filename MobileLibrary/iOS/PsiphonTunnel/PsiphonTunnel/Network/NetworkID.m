@@ -28,9 +28,23 @@
 // See comment in header.
 + (NSString *)getNetworkIDWithReachability:(id<ReachabilityProtocol>)reachability
                    andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                         tunnelWholeDevice:(BOOL)tunnelWholeDevice
                                    warning:(NSError *_Nullable *_Nonnull)outWarn {
 
     *outWarn = nil;
+
+    // NetworkID is "VPN" if the library is used in non-VPN mode,
+    // and an active VPN is found on the system.
+    // This method is not exact and relies on CFNetworkCopySystemProxySettings,
+    // specifically it may not return tun interfaces for some VPNs on macOS.
+    if (!tunnelWholeDevice) {
+        NSDictionary *_Nullable proxies = (__bridge NSDictionary *) CFNetworkCopySystemProxySettings();
+        for (NSString *interface in [proxies[@"__SCOPED__"] allKeys]) {
+            if ([interface containsString:@"tun"] || [interface containsString:@"tap"] || [interface containsString:@"ppp"] || [interface containsString:@"ipsec"]) {
+                return @"VPN";
+            }
+        }
+    }
 
     NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
     if (currentNetworkStatus == NetworkReachabilityReachableViaWiFi) {

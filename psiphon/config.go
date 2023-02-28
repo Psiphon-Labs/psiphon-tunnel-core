@@ -488,6 +488,18 @@ type Config struct {
 	// set, TunnelPoolSize must be 1.
 	PacketTunnelTunFileDescriptor int
 
+	// PacketTunnelTransparentDNSIPv4Address is the IPv4 address of the DNS
+	// server configured by a VPN using a packet tunnel. All DNS packets
+	// destined to this DNS server are transparently redirected to the
+	// Psiphon server DNS.
+	PacketTunnelTransparentDNSIPv4Address string
+
+	// PacketTunnelTransparentDNSIPv6Address is the IPv6 address of the DNS
+	// server configured by a VPN using a packet tunnel. All DNS packets
+	// destined to this DNS server are transparently redirected to the
+	// Psiphon server DNS.
+	PacketTunnelTransparentDNSIPv6Address string
+
 	// SessionID specifies a client session ID to use in the Psiphon API. The
 	// session ID should be a randomly generated value that is used only for a
 	// single session, which is defined as the period between a user starting

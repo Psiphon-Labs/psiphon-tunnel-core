@@ -9,12 +9,14 @@ import (
 
 	"github.com/Psiphon-Labs/quic-go"
 	"github.com/Psiphon-Labs/quic-go/internal/utils"
-	"github.com/marten-seemann/qpack"
+
+	"github.com/quic-go/qpack"
 )
 
 type responseWriter struct {
 	conn        quic.Connection
 	bufferedStr *bufio.Writer
+	buf         []byte
 
 	header        http.Header
 	status        int // status code passed to WriteHeader
@@ -32,6 +34,7 @@ var (
 func newResponseWriter(str quic.Stream, conn quic.Connection, logger utils.Logger) *responseWriter {
 	return &responseWriter{
 		header:      http.Header{},
+		buf:         make([]byte, 16),
 		conn:        conn,
 		bufferedStr: bufio.NewWriter(str),
 		logger:      logger,
@@ -62,10 +65,10 @@ func (w *responseWriter) WriteHeader(status int) {
 		}
 	}
 
-	buf := &bytes.Buffer{}
-	(&headersFrame{Length: uint64(headers.Len())}).Write(buf)
+	w.buf = w.buf[:0]
+	w.buf = (&headersFrame{Length: uint64(headers.Len())}).Append(w.buf)
 	w.logger.Infof("Responding with %d", status)
-	if _, err := w.bufferedStr.Write(buf.Bytes()); err != nil {
+	if _, err := w.bufferedStr.Write(w.buf); err != nil {
 		w.logger.Errorf("could not write headers frame: %s", err.Error())
 	}
 	if _, err := w.bufferedStr.Write(headers.Bytes()); err != nil {
@@ -78,15 +81,15 @@ func (w *responseWriter) WriteHeader(status int) {
 
 func (w *responseWriter) Write(p []byte) (int, error) {
 	if !w.headerWritten {
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 	}
 	if !bodyAllowedForStatus(w.status) {
 		return 0, http.ErrBodyNotAllowed
 	}
 	df := &dataFrame{Length: uint64(len(p))}
-	buf := &bytes.Buffer{}
-	df.Write(buf)
-	if _, err := w.bufferedStr.Write(buf.Bytes()); err != nil {
+	w.buf = w.buf[:0]
+	w.buf = df.Append(w.buf)
+	if _, err := w.bufferedStr.Write(w.buf); err != nil {
 		return 0, err
 	}
 	return w.bufferedStr.Write(p)
@@ -109,9 +112,9 @@ func bodyAllowedForStatus(status int) bool {
 	switch {
 	case status >= 100 && status <= 199:
 		return false
-	case status == 204:
+	case status == http.StatusNoContent:
 		return false
-	case status == 304:
+	case status == http.StatusNotModified:
 		return false
 	}
 	return true

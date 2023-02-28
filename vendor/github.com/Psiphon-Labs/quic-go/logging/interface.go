@@ -7,10 +7,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/Psiphon-Labs/quic-go/internal/utils"
-
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
 	"github.com/Psiphon-Labs/quic-go/internal/qerr"
+	"github.com/Psiphon-Labs/quic-go/internal/utils"
 	"github.com/Psiphon-Labs/quic-go/internal/wire"
 )
 
@@ -19,6 +18,8 @@ type (
 	ByteCount = protocol.ByteCount
 	// A ConnectionID is a QUIC Connection ID.
 	ConnectionID = protocol.ConnectionID
+	// An ArbitraryLenConnectionID is a QUIC Connection ID that can be up to 255 bytes long.
+	ArbitraryLenConnectionID = protocol.ArbitraryLenConnectionID
 	// The EncryptionLevel is the encryption level of a packet.
 	EncryptionLevel = protocol.EncryptionLevel
 	// The KeyPhase is the key phase of the 1-RTT keys.
@@ -42,7 +43,7 @@ type (
 
 	// The Header is the QUIC packet header, before removing header protection.
 	Header = wire.Header
-	// The ExtendedHeader is the QUIC packet header, after removing header protection.
+	// The ExtendedHeader is the QUIC Long Header packet header, after removing header protection.
 	ExtendedHeader = wire.ExtendedHeader
 	// The TransportParameters are QUIC transport parameters.
 	TransportParameters = wire.TransportParameters
@@ -90,6 +91,14 @@ const (
 	StreamTypeBidi = protocol.StreamTypeBidi
 )
 
+// The ShortHeader is the QUIC Short Header packet header, after removing header protection.
+type ShortHeader struct {
+	DestConnectionID ConnectionID
+	PacketNumber     PacketNumber
+	PacketNumberLen  protocol.PacketNumberLen
+	KeyPhase         KeyPhaseBit
+}
+
 // A Tracer traces events.
 type Tracer interface {
 	// TracerForConnection requests a new tracer for a connection.
@@ -99,6 +108,7 @@ type Tracer interface {
 	TracerForConnection(ctx context.Context, p Perspective, odcid ConnectionID) ConnectionTracer
 
 	SentPacket(net.Addr, *Header, ByteCount, []Frame)
+	SentVersionNegotiationPacket(_ net.Addr, dest, src ArbitraryLenConnectionID, _ []VersionNumber)
 	DroppedPacket(net.Addr, PacketType, ByteCount, PacketDropReason)
 }
 
@@ -110,11 +120,13 @@ type ConnectionTracer interface {
 	SentTransportParameters(*TransportParameters)
 	ReceivedTransportParameters(*TransportParameters)
 	RestoredTransportParameters(parameters *TransportParameters) // for 0-RTT
-	SentPacket(hdr *ExtendedHeader, size ByteCount, ack *AckFrame, frames []Frame)
-	ReceivedVersionNegotiationPacket(*Header, []VersionNumber)
+	SentLongHeaderPacket(hdr *ExtendedHeader, size ByteCount, ack *AckFrame, frames []Frame)
+	SentShortHeaderPacket(hdr *ShortHeader, size ByteCount, ack *AckFrame, frames []Frame)
+	ReceivedVersionNegotiationPacket(dest, src ArbitraryLenConnectionID, _ []VersionNumber)
 	ReceivedRetry(*Header)
-	ReceivedPacket(hdr *ExtendedHeader, size ByteCount, frames []Frame)
-	BufferedPacket(PacketType)
+	ReceivedLongHeaderPacket(hdr *ExtendedHeader, size ByteCount, frames []Frame)
+	ReceivedShortHeaderPacket(hdr *ShortHeader, size ByteCount, frames []Frame)
+	BufferedPacket(PacketType, ByteCount)
 	DroppedPacket(PacketType, ByteCount, PacketDropReason)
 	UpdatedMetrics(rttStats *RTTStats, cwnd, bytesInFlight ByteCount, packetsInFlight int)
 	AcknowledgedPacket(EncryptionLevel, PacketNumber)
