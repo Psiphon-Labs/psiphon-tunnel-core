@@ -999,6 +999,9 @@ func (dialParams *DialParameters) GetNetworkType() string {
 	// check for and use the common network type prefixes currently used in
 	// NetworkIDGetter implementations.
 
+	if strings.HasPrefix(dialParams.NetworkID, "VPN") {
+		return "VPN"
+	}
 	if strings.HasPrefix(dialParams.NetworkID, "WIFI") {
 		return "WIFI"
 	}
