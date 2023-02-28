@@ -18,7 +18,7 @@ require (
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/quic-go v0.0.0-20221014165902-1b7c3975fcf3
+	github.com/Psiphon-Labs/quic-go v0.0.0-20230124165616-fe8e9a215a66
 	github.com/Psiphon-Labs/tls-tris v0.0.0-20210713133851-676a693d51ad
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
@@ -51,7 +51,7 @@ require (
 	golang.org/x/crypto v0.0.0-20221012134737-56aed061732a
 	golang.org/x/net v0.0.0-20221014081412-f15817d10f9b
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
-	golang.org/x/sys v0.0.0-20221013171732-95e765b1cc43
+	golang.org/x/sys v0.2.0
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
 )
 
@@ -73,7 +73,7 @@ require (
 	github.com/josharian/native v1.0.0 // indirect
 	github.com/kardianos/osext v0.0.0-20170510131534-ae77be60afb1 // indirect
 	github.com/klauspost/compress v1.15.10-0.20220729101446-5a3a4a965cc6 // indirect
-	github.com/marten-seemann/qpack v0.2.1 // indirect
+	github.com/marten-seemann/qpack v0.3.0 // indirect
 	github.com/mdlayher/netlink v1.4.2-0.20210930205308-a81a8c23d40a // indirect
 	github.com/mdlayher/socket v0.0.0-20210624160740-9dbe287ded84 // indirect
 	github.com/mroth/weightedrand v0.4.1 // indirect
@@ -87,6 +87,6 @@ require (
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/tools v0.1.12 // indirect
 	google.golang.org/protobuf v1.28.0 // indirect
-	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	honnef.co/go/tools v0.2.1 // indirect
 )
