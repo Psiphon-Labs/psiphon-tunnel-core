@@ -1643,7 +1643,7 @@ func (conn *transformDNSPacketConn) Write(b []byte) (int, error) {
 	// the network packet MTU.
 
 	input := hex.EncodeToString(b)
-	output, err := conn.transform.Apply(conn.seed, input)
+	output, err := conn.transform.ApplyString(conn.seed, input)
 	if err != nil {
 		return 0, errors.Trace(err)
 	}

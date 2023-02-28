@@ -239,6 +239,7 @@ const (
 	ReplayAPIRequestPadding                          = "ReplayAPIRequestPadding"
 	ReplayHoldOffTunnel                              = "ReplayHoldOffTunnel"
 	ReplayResolveParameters                          = "ReplayResolveParameters"
+	ReplayHTTPTransformerParameters                  = "ReplayHTTPTransformerParameters"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -321,6 +322,12 @@ const (
 	DNSResolverCacheExtensionInitialTTL              = "DNSResolverCacheExtensionInitialTTL"
 	DNSResolverCacheExtensionVerifiedTTL             = "DNSResolverCacheExtensionVerifiedTTL"
 	AddFrontingProviderPsiphonFrontingHeader         = "AddFrontingProviderPsiphonFrontingHeader"
+	DirectHTTPProtocolTransformSpecs                 = "DirectHTTPProtocolTransformSpecs"
+	DirectHTTPProtocolTransformScopedSpecNames       = "DirectHTTPProtocolTransformScopedSpecNames"
+	DirectHTTPProtocolTransformProbability           = "DirectHTTPProtocolTransformProbability"
+	FrontedHTTPProtocolTransformSpecs                = "FrontedHTTPProtocolTransformSpecs"
+	FrontedHTTPProtocolTransformScopedSpecNames      = "FrontedHTTPProtocolTransformScopedSpecNames"
+	FrontedHTTPProtocolTransformProbability          = "FrontedHTTPProtocolTransformProbability"
 )
 
 const (
@@ -575,6 +582,7 @@ var defaultParameters = map[string]struct {
 	ReplayAPIRequestPadding:                {value: true},
 	ReplayHoldOffTunnel:                    {value: true},
 	ReplayResolveParameters:                {value: true},
+	ReplayHTTPTransformerParameters:        {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -678,6 +686,13 @@ var defaultParameters = map[string]struct {
 	DNSResolverCacheExtensionVerifiedTTL:        {value: time.Duration(0), minimum: time.Duration(0)},
 
 	AddFrontingProviderPsiphonFrontingHeader: {value: protocol.LabeledTunnelProtocols{}},
+
+	DirectHTTPProtocolTransformSpecs:            {value: transforms.Specs{}},
+	DirectHTTPProtocolTransformScopedSpecNames:  {value: transforms.ScopedSpecNames{}},
+	DirectHTTPProtocolTransformProbability:      {value: 0.0, minimum: 0.0},
+	FrontedHTTPProtocolTransformSpecs:           {value: transforms.Specs{}},
+	FrontedHTTPProtocolTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	FrontedHTTPProtocolTransformProbability:     {value: 0.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -858,6 +873,22 @@ func (p *Parameters) Set(
 	}
 	dnsResolverProtocolTransformSpecs, _ :=
 		dnsResolverProtocolTransformSpecsValue.(transforms.Specs)
+
+	directHttpProtocolTransformSpecsValue, err := getAppliedValue(
+		DirectHTTPProtocolTransformSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	directHttpProtocolTransformSpecs, _ :=
+		directHttpProtocolTransformSpecsValue.(transforms.Specs)
+
+	frontedHttpProtocolTransformSpecsValue, err := getAppliedValue(
+		FrontedHTTPProtocolTransformSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	frontedHttpProtocolTransformSpecs, _ :=
+		frontedHttpProtocolTransformSpecsValue.(transforms.Specs)
 
 	for i := 0; i < len(applyParameters); i++ {
 
@@ -1043,6 +1074,10 @@ func (p *Parameters) Set(
 				var specs transforms.Specs
 				if name == DNSResolverProtocolTransformScopedSpecNames {
 					specs = dnsResolverProtocolTransformSpecs
+				} else if name == DirectHTTPProtocolTransformScopedSpecNames {
+					specs = directHttpProtocolTransformSpecs
+				} else if name == FrontedHTTPProtocolTransformScopedSpecNames {
+					specs = frontedHttpProtocolTransformSpecs
 				}
 
 				err := v.Validate(specs)
