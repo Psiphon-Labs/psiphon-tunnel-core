@@ -110,7 +110,7 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 
 	var flowCounter bytesTransferredCounter
 
-	flowActivityUpdaterMaker := func(_ string, IPAddress net.IP) []FlowActivityUpdater {
+	flowActivityUpdaterMaker := func(_ bool, _ string, IPAddress net.IP) []FlowActivityUpdater {
 
 		if IPAddress.String() != testTCPServer.getListenerIPAddress() {
 			t.Fatalf("unexpected flow IP address")
@@ -485,6 +485,13 @@ type testClient struct {
 	tunClient *Client
 }
 
+const (
+	clientIPv4AddressCIDR           = "172.16.0.1/24"
+	clientIPv6AddressCIDR           = "fd26:b6a6:4454:310a:0000:0000:0000:0001/64"
+	clientTransparentDNSIPv4Address = "172.16.0.2"
+	clientTransparentDNSIPv6Address = "fd26:b6a6:4454:310a:0000:0000:0000:0002"
+)
+
 func startTestClient(
 	useIPv6 bool,
 	MTU int,
@@ -505,8 +512,10 @@ func startTestClient(
 		Logger:                          logger,
 		SudoNetworkConfigCommands:       os.Getenv("TUN_TEST_SUDO") != "",
 		AllowNoIPv6NetworkConfiguration: !useIPv6,
-		IPv4AddressCIDR:                 "172.16.0.1/24",
-		IPv6AddressCIDR:                 "fd26:b6a6:4454:310a:0000:0000:0000:0001/64",
+		IPv4AddressCIDR:                 clientIPv4AddressCIDR,
+		IPv6AddressCIDR:                 clientIPv6AddressCIDR,
+		TransparentDNSIPv4Address:       clientTransparentDNSIPv4Address,
+		TransparentDNSIPv6Address:       clientTransparentDNSIPv6Address,
 		RouteDestinations:               routeDestinations,
 		Transport:                       unixConn,
 		MTU:                             MTU,
@@ -719,11 +728,11 @@ func testDNSClient(useIPv6 bool, tunDeviceName string) error {
 	var sockAddr syscall.Sockaddr
 
 	if !useIPv6 {
-		copy(ipv4[:], transparentDNSResolverIPv4Address)
+		copy(ipv4[:], net.ParseIP(clientTransparentDNSIPv4Address).To4())
 		domain = syscall.AF_INET
 		sockAddr = &syscall.SockaddrInet4{Addr: ipv4, Port: portNumberDNS}
 	} else {
-		copy(ipv6[:], transparentDNSResolverIPv6Address)
+		copy(ipv6[:], net.ParseIP(clientTransparentDNSIPv6Address))
 		domain = syscall.AF_INET6
 		sockAddr = &syscall.SockaddrInet6{Addr: ipv6, Port: portNumberDNS}
 	}

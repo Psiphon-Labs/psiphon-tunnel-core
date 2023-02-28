@@ -685,6 +685,15 @@ func MakeDialParameters(
 		isFronted := protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
 		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry, p)
 
+		// Due to potential tactics configurations, it may be that no QUIC
+		// version is selected. Abort immediately, with no error, as in the
+		// selectProtocol case. quic.Dial and quic.NewQUICTransporter will
+		// check for a missing QUIC version, but at that later stage an
+		// unnecessary failed_tunnel can be logged in this scenario.
+		if dialParams.QUICVersion == "" {
+			return nil, nil
+		}
+
 		if protocol.QUICVersionHasRandomizedClientHello(dialParams.QUICVersion) {
 			dialParams.QUICClientHelloSeed, err = prng.NewSeed()
 			if err != nil {
@@ -934,6 +943,17 @@ func MakeDialParameters(
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration {
 
+		// For tactics requests, AddPsiphonFrontingHeader is set when set for
+		// the related tunnel protocol. E.g., FRONTED-OSSH-MEEK for
+		// FRONTED-MEEK-TACTICS. AddPsiphonFrontingHeader is not replayed.
+		addPsiphonFrontingHeader := false
+		if dialParams.FrontingProviderID != "" {
+			addPsiphonFrontingHeader = common.Contains(
+				p.LabeledTunnelProtocols(
+					parameters.AddFrontingProviderPsiphonFrontingHeader, dialParams.FrontingProviderID),
+				dialParams.TunnelProtocol)
+		}
+
 		dialParams.meekConfig = &MeekConfig{
 			DiagnosticID:                  serverEntry.GetDiagnosticID(),
 			Parameters:                    config.GetParameters(),
@@ -949,6 +969,7 @@ func MakeDialParameters(
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
 			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			SNIServerName:                 dialParams.MeekSNIServerName,
+			AddPsiphonFrontingHeader:      addPsiphonFrontingHeader,
 			VerifyServerName:              dialParams.MeekVerifyServerName,
 			VerifyPins:                    dialParams.MeekVerifyPins,
 			HostHeader:                    dialParams.MeekHostHeader,
@@ -1069,11 +1090,11 @@ func (dialParams *DialParameters) GetTLSVersionForMetrics() string {
 // There are two concerns regarding which dial parameter fields are safe to
 // exchange:
 //
-// - Unlike signed server entries, there's no independent trust anchor
-//   that can certify that the exchange data is valid.
+//   - Unlike signed server entries, there's no independent trust anchor
+//     that can certify that the exchange data is valid.
 //
-// - While users should only perform the exchange with trusted peers,
-//   the user's trust in their peer may be misplaced.
+//   - While users should only perform the exchange with trusted peers,
+//     the user's trust in their peer may be misplaced.
 //
 // This presents the possibility of attack such as the peer sending dial
 // parameters that could be used to trace/monitor/flag the importer; or

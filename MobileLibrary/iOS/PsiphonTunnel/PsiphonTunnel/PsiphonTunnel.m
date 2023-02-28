@@ -458,16 +458,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 // See comment in header.
-- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv4Address {
-    return GoPsiGetPacketTunnelDNSResolverIPv4Address();
-}
-
-// See comment in header.
-- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address {
-    return GoPsiGetPacketTunnelDNSResolverIPv6Address();
-}
-
-// See comment in header.
 + (NSString * _Nonnull)getBuildInfo {
     return GoPsiGetBuildInfo();
 }
