@@ -77,7 +77,10 @@ type HTTPTransformer struct {
 	// b is used to buffer the accumulated bytes of the current HTTP request
 	// header until the entire header is received and written.
 	b bytes.Buffer
-	// remain is the number of remaining HTTP request body bytes to read into b.
+	// remain is the number of remaining HTTP request bytes to write to the
+	// underlying net.Conn. Set to the value of Content-Length (HTTP request
+	// body bytes) plus the length of the transformed HTTP header once the
+	// current request header is received.
 	remain uint64
 
 	net.Conn
