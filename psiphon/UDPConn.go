@@ -29,15 +29,16 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
-// NewUDPConn resolves addr and configures a new UDP conn. The UDP socket is
-// created using options in DialConfig, including DeviceBinder. The returned
-// UDPAddr uses DialConfig options IPv6Synthesizer and ResolvedIPCallback.
+// NewUDPConn resolves addr and configures a new *net.UDPConn. The UDP socket
+// is created using options in DialConfig, including DeviceBinder. The
+// returned UDPAddr uses DialConfig options IPv6Synthesizer and
+// ResolvedIPCallback.
 //
 // The UDP conn is not dialed; it is intended for use with WriteTo using the
 // returned UDPAddr, not Write.
 //
-// The returned conn is not a Closer; the caller is expected to wrap this conn
-// with another higher-level conn that provides that interface.
+// The returned conn is not a common.Closer; the caller is expected to wrap
+// this conn with another higher-level conn that provides that interface.
 func NewUDPConn(
 	ctx context.Context, addr string, config *DialConfig) (net.PacketConn, *net.UDPAddr, error) {
 
@@ -81,23 +82,71 @@ func NewUDPConn(
 		}
 	}
 
-	var domain int
-	if ipAddr != nil && ipAddr.To4() != nil {
-		domain = syscall.AF_INET
-	} else if ipAddr != nil && ipAddr.To16() != nil {
-		domain = syscall.AF_INET6
-	} else {
-		return nil, nil, errors.Tracef("invalid IP address: %s", ipAddr.String())
+	listen := &net.ListenConfig{
+		Control: func(_, _ string, c syscall.RawConn) error {
+			var controlErr error
+			err := c.Control(func(fd uintptr) {
+
+				socketFD := int(fd)
+
+				setAdditionalSocketOptions(socketFD)
+
+				if config.BPFProgramInstructions != nil {
+					err := setSocketBPF(config.BPFProgramInstructions, socketFD)
+					if err != nil {
+						controlErr = errors.Tracef("setSocketBPF failed: %s", err)
+						return
+					}
+				}
+
+				if config.DeviceBinder != nil {
+					_, err := config.DeviceBinder.BindToDevice(socketFD)
+					if err != nil {
+						controlErr = errors.Tracef("BindToDevice failed: %s", err)
+						return
+					}
+				}
+			})
+			if controlErr != nil {
+				return errors.Trace(controlErr)
+			}
+			return errors.Trace(err)
+		},
 	}
 
-	conn, err := newUDPConn(domain, config)
+	network := "udp4"
+	if ipAddr.To4() == nil {
+		network = "udp6"
+	}
+
+	// It's necessary to create an "unconnected" UDP socket, for use with
+	// WriteTo, as required by quic-go. As documented in net.ListenUDP: with
+	// an unspecified IP address, the resulting conn "listens on all
+	// available IP addresses of the local system except multicast IP
+	// addresses".
+	//
+	// Limitation: these UDP sockets are not necessarily closed when a device
+	// changes active network (e.g., WiFi to mobile). It's possible that a
+	// QUIC connection does not immediately close on a network change, and
+	// instead outbound packets are sent from a different active interface.
+	// As quic-go does not yet support connection migration, these packets
+	// will be dropped by the server. This situation is mitigated by use of
+	// DeviceBinder; by network change event detection, which initiates new
+	// tunnel connections; and by timeouts/keep-alives.
+
+	conn, err := listen.ListenPacket(ctx, network, "")
 	if err != nil {
 		return nil, nil, errors.Trace(err)
+	}
+
+	udpConn, ok := conn.(*net.UDPConn)
+	if !ok {
+		return nil, nil, errors.Tracef("unexpected conn type: %T", conn)
 	}
 
 	if config.ResolvedIPCallback != nil {
 		config.ResolvedIPCallback(ipAddr.String())
 	}
 
-	return conn, &net.UDPAddr{IP: ipAddr, Port: port}, nil
+	return udpConn, &net.UDPAddr{IP: ipAddr, Port: port}, nil
 }

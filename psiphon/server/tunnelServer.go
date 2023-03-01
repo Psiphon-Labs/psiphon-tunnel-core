@@ -1560,6 +1560,7 @@ type handshakeState struct {
 	domainBytesChecksum     []byte
 	establishedTunnelsCount int
 	splitTunnelLookup       *splitTunnelLookup
+	deviceRegion            string
 }
 
 type destinationBytesMetrics struct {
@@ -3194,7 +3195,8 @@ func (sshClient *sshClient) getAlertActionURLs(alertReason string) []string {
 		alertReason,
 		sponsorID,
 		sshClient.geoIPData.Country,
-		sshClient.geoIPData.ASN)
+		sshClient.geoIPData.ASN,
+		sshClient.handshakeState.deviceRegion)
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessage string) {

@@ -33,9 +33,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// currentNetworkStatus is NetworkReachabilityReachableViaWired.
 /// @param currentNetworkStatus Used to determine network ID and, on iOS <12, to determine the active interface when
 /// currentNetworkStatus is NetworkReachabilityReachableViaWired.
+/// @param tunnelWholeDevice False if library is used in non-VPN mode, true otherwise.
 /// @param outWarn If non-nil, then a non-fatal error occurred while determining the network ID and a valid network ID will still be returned.
 + (NSString *)getNetworkIDWithReachability:(id<ReachabilityProtocol>)reachability
                    andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                         tunnelWholeDevice:(BOOL)tunnelWholeDevice
                                    warning:(NSError *_Nullable *_Nonnull)outWarn;
 
 @end

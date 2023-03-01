@@ -177,6 +177,13 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("ProtocolTransformScopedSpecNames returned %+v expected %+v", g, v)
 			}
+		case protocol.LabeledTunnelProtocols:
+			for label, protocols := range v {
+				g := p.Get().LabeledTunnelProtocols(name, label)
+				if !reflect.DeepEqual(protocols, g) {
+					t.Fatalf("LabeledTunnelProtocols returned %+v expected %+v", g, protocols)
+				}
+			}
 		default:
 			t.Fatalf("Unhandled default type: %s (%T)", name, defaults.value)
 		}
