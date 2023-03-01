@@ -75,6 +75,7 @@ type ServerEntry struct {
 	TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
 	ConfigurationVersion          int      `json:"configurationVersion"`
 	Signature                     string   `json:"signature"`
+	DisableHTTPTransforms         bool     `json:"disableHTTPTransforms"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
