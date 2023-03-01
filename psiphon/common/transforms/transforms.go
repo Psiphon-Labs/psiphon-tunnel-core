@@ -45,7 +45,7 @@ const (
 // data may be retained in the transformed data.
 //
 // For example, with the transform [2]string{"([a-b])", "\\$\\
-// {1\\}"c}, substrings consisting of the characters 'a' and 'b' will be
+// {1\\}c"}, substrings consisting of the characters 'a' and 'b' will be
 // transformed into the same substring with a single character 'c' appended.
 type Spec [][2]string
 
@@ -61,7 +61,7 @@ func (specs Specs) Validate() error {
 	}
 	for _, spec := range specs {
 		// Call Apply to compile/validate the regular expressions and generators.
-		_, err := spec.Apply(seed, "")
+		_, err := spec.ApplyString(seed, "")
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -142,30 +142,56 @@ func (specs Specs) Select(scope string, scopedSpecs ScopedSpecNames) (string, Sp
 	return specName, spec
 }
 
-// Apply applies the Spec to the input string, producing the output string.
+// ApplyString applies the Spec to the input string, producing the output string.
 //
 // The input seed is used for all random generation. The same seed can be
 // supplied to produce the same output, for replay.
-func (spec Spec) Apply(seed *prng.Seed, input string) (string, error) {
-
-	// TODO: the compiled regexp and regen could be cached, but the seed is an
-	// issue with caching the regen.
+func (spec Spec) ApplyString(seed *prng.Seed, input string) (string, error) {
 
 	value := input
 	for _, transform := range spec {
 
-		args := &regen.GeneratorArgs{
-			RngSource: prng.NewPRNGWithSeed(seed),
-			Flags:     syntax.OneLine | syntax.NonGreedy,
-		}
-		rg, err := regen.NewGenerator(transform[1], args)
-		if err != nil {
-			panic(err.Error())
-		}
-		replacement := rg.Generate()
-
-		re := regexp.MustCompile(transform[0])
+		re, replacement := makeRegexAndRepl(seed, transform)
 		value = re.ReplaceAllString(value, replacement)
 	}
 	return value, nil
+}
+
+// Apply applies the Spec to the input bytes, producing the output bytes.
+//
+// The input seed is used for all random generation. The same seed can be
+// supplied to produce the same output, for replay.
+func (spec Spec) Apply(seed *prng.Seed, input []byte) ([]byte, error) {
+
+	value := input
+	for _, transform := range spec {
+
+		re, replacement := makeRegexAndRepl(seed, transform)
+		value = re.ReplaceAll(value, []byte(replacement))
+	}
+	return value, nil
+}
+
+// makeRegexAndRepl generates the regex and replacement for a given seed and
+// transform. The same seed can be supplied to produce the same output, for
+// replay.
+func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (re *regexp.Regexp, replacement string) {
+
+	// TODO: the compiled regexp and regen could be cached, but the seed is an
+	// issue with caching the regen.
+
+	args := &regen.GeneratorArgs{
+		RngSource: prng.NewPRNGWithSeed(seed),
+		Flags:     syntax.OneLine | syntax.NonGreedy,
+	}
+	rg, err := regen.NewGenerator(transform[1], args)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	replacement = rg.Generate()
+
+	re = regexp.MustCompile(transform[0])
+
+	return
 }

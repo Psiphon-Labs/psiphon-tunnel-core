@@ -458,16 +458,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 // See comment in header.
-- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv4Address {
-    return GoPsiGetPacketTunnelDNSResolverIPv4Address();
-}
-
-// See comment in header.
-- (NSString * _Nonnull)getPacketTunnelDNSResolverIPv6Address {
-    return GoPsiGetPacketTunnelDNSResolverIPv6Address();
-}
-
-// See comment in header.
 + (NSString * _Nonnull)getBuildInfo {
     return GoPsiGetBuildInfo();
 }
@@ -1294,6 +1284,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     NSError *warn;
     NSString *networkID = [NetworkID getNetworkIDWithReachability:self->reachability
                                           andCurrentNetworkStatus:atomic_load(&self->currentNetworkStatus)
+                                                tunnelWholeDevice:self->tunnelWholeDevice
                                                           warning:&warn];
     if (warn != nil) {
         [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];
@@ -1797,7 +1788,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         PsiphonProviderNoticeHandlerShim *noticeHandler =
             [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
 
-        PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc] initWithLogger:logger];
+        PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc]
+                                                       initWithTunnelWholeDevice:tunnelWholeDevice
+                                                       logger:logger];
 
         GoPsiStartSendFeedback(
             psiphonConfig,

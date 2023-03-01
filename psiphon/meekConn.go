@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
 	"golang.org/x/crypto/nacl/box"
@@ -159,6 +160,10 @@ type MeekConfig struct {
 	// in effect. This value is used for stats reporting.
 	TransformedHostName bool
 
+	// AddPsiphonFrontingHeader specifies whether to add the
+	// X-Psiphon-Fronting-Address custom header.
+	AddPsiphonFrontingHeader bool
+
 	// VerifyServerName specifies a domain name that must appear in the server
 	// certificate. When blank, server certificate verification is disabled.
 	VerifyServerName string
@@ -188,6 +193,10 @@ type MeekConfig struct {
 	MeekCookieEncryptionPublicKey string
 	MeekObfuscatedKey             string
 	MeekObfuscatorPaddingSeed     *prng.Seed
+
+	// HTTPTransformerParameters specifies an HTTP transformer to apply to the
+	// meek connection if it uses HTTP.
+	HTTPTransformerParameters *transforms.HTTPTransformerParameters
 }
 
 // MeekConn is a network connection that tunnels net.Conn flows over HTTP and supports
@@ -585,6 +594,15 @@ func DialMeek(
 			}
 		}
 
+		if protocol.TunnelProtocolUsesMeekHTTP(meekConfig.ClientTunnelProtocol) {
+			// Only apply transformer if it will perform a transform; otherwise
+			// applying a no-op transform will incur an unnecessary performance
+			// cost.
+			if meekConfig.HTTPTransformerParameters != nil && meekConfig.HTTPTransformerParameters.ProtocolTransformSpec != nil {
+				dialer = transforms.WrapDialerWithHTTPTransformer(dialer, meekConfig.HTTPTransformerParameters)
+			}
+		}
+
 		httpTransport := &http.Transport{
 			Proxy:       proxyUrl,
 			DialContext: dialer,
@@ -614,24 +632,37 @@ func DialMeek(
 		Opaque: opaqueURL,
 	}
 
-	if meekConfig.UseHTTPS {
+	if scheme == "http" && proxyUrl == nil {
+
+		// Add custom headers to HTTP. This may be unproxied HTTP, or CONNECT
+		// method proxied HTTP, which is handled implicitly by DialTCP (in the
+		// latter case, the CONNECT request itself will also have custom
+		// headers via upstreamproxy applied by the dialer).
+		//
+		// When proxyUrl != nil, proxying is handled by http.Transport and
+		// custom headers are set in upstreamproxy.NewProxyAuthTransport, above.
+
+		additionalHeaders = dialConfig.CustomHeaders
+
+	} else {
+
+		additionalHeaders = make(http.Header)
+
+		// User-Agent is passed in via dialConfig.CustomHeaders. Always use
+		// any User-Agent header, even when not using all custom headers.
+
+		userAgent := dialConfig.CustomHeaders.Get("User-Agent")
+		if userAgent != "" {
+			additionalHeaders.Set("User-Agent", userAgent)
+		}
+	}
+
+	if meekConfig.AddPsiphonFrontingHeader {
 		host, _, err := net.SplitHostPort(meekConfig.DialAddress)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		additionalHeaders = map[string][]string{
-			"X-Psiphon-Fronting-Address": {host},
-		}
-	} else {
-		if proxyUrl == nil {
-
-			// Add custom headers to plain, unproxied HTTP and to CONNECT
-			// method proxied HTTP (in the latter case, the CONNECT request
-			// itself will also have custom headers via upstreamproxy applied
-			// by the dialer).
-
-			additionalHeaders = dialConfig.CustomHeaders
-		}
+		additionalHeaders.Set("X-Psiphon-Fronting-Address", host)
 	}
 
 	meek.url = url

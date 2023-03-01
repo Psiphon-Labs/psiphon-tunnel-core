@@ -579,6 +579,12 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			}
 		}
 
+		if dialParams.HTTPTransformerParameters != nil {
+			if dialParams.HTTPTransformerParameters.ProtocolTransformSpec != nil {
+				args = append(args, "HTTPTransform", dialParams.HTTPTransformerParameters.ProtocolTransformName)
+			}
+		}
+
 		if dialParams.DialConnMetrics != nil {
 			metrics := dialParams.DialConnMetrics.GetMetrics()
 			for name, value := range metrics {

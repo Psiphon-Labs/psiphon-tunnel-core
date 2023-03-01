@@ -10,12 +10,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Psiphon-Labs/quic-go"
-	"github.com/Psiphon-Labs/quic-go/internal/utils"
-	"github.com/marten-seemann/qpack"
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/http2/hpack"
 	"golang.org/x/net/idna"
+
+	"github.com/Psiphon-Labs/quic-go"
+	"github.com/Psiphon-Labs/quic-go/internal/utils"
+	"github.com/quic-go/qpack"
 )
 
 const bodyCopyBufferSize = 8 * 1024
@@ -58,10 +59,9 @@ func (w *requestWriter) writeHeaders(wr io.Writer, req *http.Request, gzip bool)
 		return err
 	}
 
-	buf := &bytes.Buffer{}
-	hf := headersFrame{Length: uint64(w.headerBuf.Len())}
-	hf.Write(buf)
-	if _, err := wr.Write(buf.Bytes()); err != nil {
+	b := make([]byte, 0, 128)
+	b = (&headersFrame{Length: uint64(w.headerBuf.Len())}).Append(b)
+	if _, err := wr.Write(b); err != nil {
 		return err
 	}
 	_, err := wr.Write(w.headerBuf.Bytes())

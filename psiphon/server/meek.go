@@ -85,6 +85,7 @@ const (
 	MEEK_DEFAULT_SKIP_EXTENDED_TURN_AROUND_THRESHOLD = 8192
 	MEEK_DEFAULT_MAX_SESSION_STALENESS               = 45 * time.Second
 	MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT              = 45 * time.Second
+	MEEK_DEFAULT_FRONTED_HTTP_CLIENT_IO_TIMEOUT      = 360 * time.Second
 	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH              = 65536
 	MEEK_DEFAULT_POOL_BUFFER_LENGTH                  = 65536
 	MEEK_DEFAULT_POOL_BUFFER_COUNT                   = 2048
@@ -106,6 +107,7 @@ type MeekServer struct {
 	listener                        net.Listener
 	listenerTunnelProtocol          string
 	listenerPort                    int
+	isFronted                       bool
 	passthroughAddress              string
 	turnAroundTimeout               time.Duration
 	extendedTurnAroundTimeout       time.Duration
@@ -162,10 +164,24 @@ func NewMeekServer(
 			*support.Config.MeekMaxSessionStalenessMilliseconds) * time.Millisecond
 	}
 
-	httpClientIOTimeout := MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT
-	if support.Config.MeekHTTPClientIOTimeoutMilliseconds != nil {
-		httpClientIOTimeout = time.Duration(
-			*support.Config.MeekHTTPClientIOTimeoutMilliseconds) * time.Millisecond
+	var httpClientIOTimeout time.Duration
+	if isFronted {
+
+		// Fronted has a distinct timeout, and the default is higher since new
+		// clients may connect to a CDN edge and start using an existing
+		// persistent connection.
+
+		httpClientIOTimeout = MEEK_DEFAULT_FRONTED_HTTP_CLIENT_IO_TIMEOUT
+		if support.Config.MeekFrontedHTTPClientIOTimeoutMilliseconds != nil {
+			httpClientIOTimeout = time.Duration(
+				*support.Config.MeekFrontedHTTPClientIOTimeoutMilliseconds) * time.Millisecond
+		}
+	} else {
+		httpClientIOTimeout = MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT
+		if support.Config.MeekHTTPClientIOTimeoutMilliseconds != nil {
+			httpClientIOTimeout = time.Duration(
+				*support.Config.MeekHTTPClientIOTimeoutMilliseconds) * time.Millisecond
+		}
 	}
 
 	checksumTable := crc64.MakeTable(crc64.ECMA)
@@ -195,6 +211,7 @@ func NewMeekServer(
 		listener:                        listener,
 		listenerTunnelProtocol:          listenerTunnelProtocol,
 		listenerPort:                    listenerPort,
+		isFronted:                       isFronted,
 		passthroughAddress:              passthroughAddress,
 		turnAroundTimeout:               turnAroundTimeout,
 		extendedTurnAroundTimeout:       extendedTurnAroundTimeout,
@@ -321,6 +338,25 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	// Note: no longer requiring that the request method is POST
 
+	// Check for required headers and values. For fronting, required headers
+	// may be used to identify a CDN edge. When this check fails,
+	// TerminateHTTPConnection is called instead of handleError, so any
+	// persistent connection is always closed.
+
+	if len(server.support.Config.MeekRequiredHeaders) > 0 {
+		for header, value := range server.support.Config.MeekRequiredHeaders {
+			requestValue := request.Header.Get(header)
+			if requestValue != value {
+				log.WithTraceFields(LogFields{
+					"header": header,
+					"value":  requestValue,
+				}).Warning("invalid required meek header")
+				common.TerminateHTTPConnection(responseWriter, request)
+				return
+			}
+		}
+	}
+
 	// Check for the expected meek/session ID cookie.
 	// Also check for prohibited HTTP headers.
 
@@ -343,7 +379,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 					"header": header,
 					"value":  value,
 				}).Warning("prohibited meek header")
-				common.TerminateHTTPConnection(responseWriter, request)
+				server.handleError(responseWriter, request)
 				return
 			}
 		}
@@ -370,7 +406,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		// Debug since session cookie errors commonly occur during
 		// normal operation.
 		log.WithTraceFields(LogFields{"error": err}).Debug("session lookup failed")
-		common.TerminateHTTPConnection(responseWriter, request)
+		server.handleError(responseWriter, request)
 		return
 	}
 
@@ -383,7 +419,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 			endPoint, common.GeoIPData(*endPointGeoIPData), responseWriter, request)
 		if !handled {
 			log.WithTraceFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
-			common.TerminateHTTPConnection(responseWriter, request)
+			server.handleError(responseWriter, request)
 		}
 		return
 	}
@@ -518,7 +554,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 		if !session.cachedResponse.HasPosition(position) {
 			greaterThanSwapInt64(&session.metricCachedResponseMissPosition, int64(position))
-			common.TerminateHTTPConnection(responseWriter, request)
+			server.handleError(responseWriter, request)
 			session.delete(true)
 			return
 		}
@@ -572,12 +608,26 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 			// also, golang network error messages may contain client IP.
 			log.WithTraceFields(LogFields{"error": responseError}).Debug("write response failed")
 		}
-		common.TerminateHTTPConnection(responseWriter, request)
+		server.handleError(responseWriter, request)
 
 		// Note: keep session open to allow client to retry
 
 		return
 	}
+}
+
+func (server *MeekServer) handleError(responseWriter http.ResponseWriter, request *http.Request) {
+
+	// When fronted, keep the persistent connection open since it may be used
+	// by many clients coming through the same edge. For performance reasons,
+	// an error, including invalid input, from one client shouldn't close the
+	// persistent connection used by other clients.
+
+	if server.isFronted {
+		http.NotFound(responseWriter, request)
+		return
+	}
+	common.TerminateHTTPConnection(responseWriter, request)
 }
 
 func checkRangeHeader(request *http.Request) (int, bool) {
@@ -1729,9 +1779,13 @@ func (conn *meekConn) Close() error {
 	if atomic.CompareAndSwapInt32(&conn.closed, 0, 1) {
 		close(conn.closeBroadcast)
 
-		// In general, we reply on "net/http" to close underlying TCP conns. In this
-		// case, we can directly close the first once, if it's still open.
-		conn.firstUnderlyingConn.Close()
+		// In general, we rely on "net/http" to close underlying TCP conns. In
+		// this case, we can directly close the first once, if it's still
+		// open. Don't close a persistent connection when fronted, as it may
+		// be still be used by other clients.
+		if !conn.meekServer.isFronted {
+			conn.firstUnderlyingConn.Close()
+		}
 	}
 	return nil
 }

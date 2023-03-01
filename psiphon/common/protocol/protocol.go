@@ -124,6 +124,26 @@ func (t TunnelProtocols) PruneInvalid() TunnelProtocols {
 	return u
 }
 
+type LabeledTunnelProtocols map[string]TunnelProtocols
+
+func (labeledProtocols LabeledTunnelProtocols) Validate() error {
+	for _, protocols := range labeledProtocols {
+		err := protocols.Validate()
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+	return nil
+}
+
+func (labeledProtocols LabeledTunnelProtocols) PruneInvalid() LabeledTunnelProtocols {
+	l := make(LabeledTunnelProtocols)
+	for label, protocols := range labeledProtocols {
+		l[label] = protocols.PruneInvalid()
+	}
+	return l
+}
+
 var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_SSH,
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH,

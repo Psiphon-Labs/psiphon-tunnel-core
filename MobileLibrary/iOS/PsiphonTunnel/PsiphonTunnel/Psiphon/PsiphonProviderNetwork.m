@@ -27,29 +27,20 @@
 
 @implementation PsiphonProviderNetwork {
     id<ReachabilityProtocol> reachability;
+    BOOL tunnelWholeDevice;
     void (^logger) (NSString *_Nonnull);
 }
 
-- (void)initialize {
-    if (@available(iOS 12.0, *)) {
-        self->reachability = [[DefaultRouteMonitor alloc] init];
-    } else {
-        self->reachability = [Reachability reachabilityForInternetConnection];
-    }
-}
-
-- (id)init {
+- (instancetype)initWithTunnelWholeDevice:(BOOL)tunnelWholeDevice
+                                   logger:(void (^__nonnull)(NSString *_Nonnull))logger {
     self = [super init];
     if (self) {
-        [self initialize];
-    }
-    return self;
-}
-
-- (instancetype)initWithLogger:(void (^__nonnull)(NSString *_Nonnull))logger {
-    self = [super init];
-    if (self) {
-        [self initialize];
+        if (@available(iOS 12.0, *)) {
+            self->reachability = [[DefaultRouteMonitor alloc] init];
+        } else {
+            self->reachability = [Reachability reachabilityForInternetConnection];
+        }
+        self->tunnelWholeDevice = tunnelWholeDevice;
         self->logger = logger;
     }
     return self;
@@ -74,6 +65,7 @@
     NSError *warn;
     NSString *networkID = [NetworkID getNetworkIDWithReachability:self->reachability
                                           andCurrentNetworkStatus:self->reachability.reachabilityStatus
+                                                tunnelWholeDevice:self->tunnelWholeDevice
                                                           warning:&warn];
     if (warn != nil) {
         [self logMessage:[NSString stringWithFormat:@"error getting network ID: %@", warn.localizedDescription]];

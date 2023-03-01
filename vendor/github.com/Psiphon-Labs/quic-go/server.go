@@ -1,7 +1,6 @@
 package quic
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -89,7 +88,6 @@ type baseServer struct {
 		*Config,
 		*tls.Config,
 		*handshake.TokenGenerator,
-		bool, /* enable 0-RTT */
 		bool, /* client address validated by an address validation token */
 		logging.ConnectionTracer,
 		uint64,
@@ -321,19 +319,42 @@ func (s *baseServer) handlePacketImpl(p *receivedPacket) bool /* is the buffer s
 		}
 		return false
 	}
+	// Short header packets should never end up here in the first place
+	if !wire.IsLongHeaderPacket(p.data[0]) {
+		panic(fmt.Sprintf("misrouted packet: %#v", p.data))
+	}
+	v, err := wire.ParseVersion(p.data)
+	// send a Version Negotiation Packet if the client is speaking a different protocol version
+	if err != nil || !protocol.IsSupportedVersion(s.config.Versions, v) {
+		if err != nil || p.Size() < protocol.MinUnknownVersionPacketSize {
+			s.logger.Debugf("Dropping a packet with an unknown version that is too small (%d bytes)", p.Size())
+			if s.config.Tracer != nil {
+				s.config.Tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropUnexpectedPacket)
+			}
+			return false
+		}
+		_, src, dest, err := wire.ParseArbitraryLenConnectionIDs(p.data)
+		if err != nil { // should never happen
+			s.logger.Debugf("Dropping a packet with an unknown version for which we failed to parse connection IDs")
+			if s.config.Tracer != nil {
+				s.config.Tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropUnexpectedPacket)
+			}
+			return false
+		}
+		if !s.config.DisableVersionNegotiationPackets {
+			go s.sendVersionNegotiationPacket(p.remoteAddr, src, dest, p.info.OOB())
+		}
+		return false
+	}
 	// If we're creating a new connection, the packet will be passed to the connection.
 	// The header will then be parsed again.
-	hdr, _, _, err := wire.ParsePacket(p.data, s.config.ConnectionIDGenerator.ConnectionIDLen())
-	if err != nil && err != wire.ErrUnsupportedVersion {
+	hdr, _, _, err := wire.ParsePacket(p.data)
+	if err != nil {
 		if s.config.Tracer != nil {
 			s.config.Tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropHeaderParseError)
 		}
 		s.logger.Debugf("Error parsing packet: %s", err)
 		return false
-	}
-	// Short header packets should never end up here in the first place
-	if !hdr.IsLongHeader {
-		panic(fmt.Sprintf("misrouted packet: %#v", hdr))
 	}
 
 	// [Psiphon]
@@ -344,29 +365,16 @@ func (s *baseServer) handlePacketImpl(p *receivedPacket) bool /* is the buffer s
 	isObfuscated := s.config.ServerMaxPacketSizeAdjustment != nil && s.config.ServerMaxPacketSizeAdjustment(p.remoteAddr) > 0
 
 	if !isObfuscated &&
-
 		hdr.Type == protocol.PacketTypeInitial && p.Size() < protocol.MinInitialPacketSize {
+
 		s.logger.Debugf("Dropping a packet that is too small to be a valid Initial (%d bytes)", p.Size())
 		if s.config.Tracer != nil {
 			s.config.Tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeInitial, p.Size(), logging.PacketDropUnexpectedPacket)
 		}
 		return false
 	}
-	// send a Version Negotiation Packet if the client is speaking a different protocol version
-	if !protocol.IsSupportedVersion(s.config.Versions, hdr.Version) {
-		if p.Size() < protocol.MinUnknownVersionPacketSize {
-			s.logger.Debugf("Dropping a packet with an unknown version that is too small (%d bytes)", p.Size())
-			if s.config.Tracer != nil {
-				s.config.Tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropUnexpectedPacket)
-			}
-			return false
-		}
-		if !s.config.DisableVersionNegotiationPackets {
-			go s.sendVersionNegotiationPacket(p, hdr)
-		}
-		return false
-	}
-	if hdr.IsLongHeader && hdr.Type != protocol.PacketTypeInitial {
+
+	if hdr.Type != protocol.PacketTypeInitial {
 		// Drop long header packets.
 		// There's little point in sending a Stateless Reset, since the client
 		// might not have received the token yet.
@@ -460,8 +468,11 @@ func (s *stubCryptoSetup) Get1RTTSealer() (handshake.ShortHeaderSealer, error) {
 // frame, and calls Config.VerifyClientHelloRandom.
 func (s *baseServer) verifyClientHelloRandom(p *receivedPacket, hdr *wire.Header) error {
 
+	// TODO: support QUICv2
+	versionNumber := protocol.Version1
+
 	_, initialOpener := handshake.NewInitialAEAD(
-		hdr.DestConnectionID, protocol.PerspectiveServer, protocol.Version1)
+		hdr.DestConnectionID, protocol.PerspectiveServer, versionNumber)
 
 	cs := &stubCryptoSetup{
 		initialOpener: initialOpener,
@@ -471,23 +482,24 @@ func (s *baseServer) verifyClientHelloRandom(p *receivedPacket, hdr *wire.Header
 	// original packet data must be retained for subsequent processing.
 	data := append([]byte(nil), p.data...)
 
-	unpacker := newPacketUnpacker(cs, protocol.Version1)
-	unpacked, err := unpacker.Unpack(hdr, p.rcvTime, data)
+	unpacker := newPacketUnpacker(cs, 0)
+	unpacked, err := unpacker.UnpackLongHeader(hdr, p.rcvTime, data, versionNumber)
 	if err != nil {
-		return fmt.Errorf("verifyClientHelloRandom: Unpack: %w", err)
+		return fmt.Errorf("verifyClientHelloRandom: UnpackLongHeader: %w", err)
 	}
 
-	parser := wire.NewFrameParser(s.config.EnableDatagrams, protocol.Version1)
+	parser := wire.NewFrameParser(s.config.EnableDatagrams)
 
-	r := bytes.NewReader(unpacked.data)
-	for {
-		frame, err := parser.ParseNext(r, protocol.EncryptionInitial)
+	d := unpacked.data
+	for len(d) > 0 {
+		l, frame, err := parser.ParseNext(d, protocol.EncryptionInitial, versionNumber)
 		if err != nil {
 			return fmt.Errorf("verifyClientHelloRandom: ParseNext: %w", err)
 		}
 		if frame == nil {
 			return errors.New("verifyClientHelloRandom: missing CRYPTO frame")
 		}
+		d = d[l:]
 		cryptoFrame, ok := frame.(*wire.CryptoFrame)
 		if !ok {
 			continue
@@ -609,7 +621,7 @@ func (s *baseServer) handleInitialImpl(p *receivedPacket, hdr *wire.Header) erro
 	if err != nil {
 		return err
 	}
-	s.logger.Debugf("Changing connection ID to %s.", protocol.ConnectionID(connID))
+	s.logger.Debugf("Changing connection ID to %s.", connID)
 	var conn quicConn
 	tracingID := nextConnTracingID()
 	if added := s.connHandler.AddWithConnID(hdr.DestConnectionID, connID, func() packetHandler {
@@ -638,7 +650,6 @@ func (s *baseServer) handleInitialImpl(p *receivedPacket, hdr *wire.Header) erro
 			s.config,
 			s.tlsConf,
 			s.tokenGenerator,
-			s.acceptEarlyConns,
 			clientAddrIsValid,
 			tracer,
 			tracingID,
@@ -700,31 +711,30 @@ func (s *baseServer) sendRetry(remoteAddr net.Addr, hdr *wire.Header, info *pack
 		return err
 	}
 	replyHdr := &wire.ExtendedHeader{}
-	replyHdr.IsLongHeader = true
 	replyHdr.Type = protocol.PacketTypeRetry
 	replyHdr.Version = hdr.Version
 	replyHdr.SrcConnectionID = srcConnID
 	replyHdr.DestConnectionID = hdr.SrcConnectionID
 	replyHdr.Token = token
 	if s.logger.Debug() {
-		s.logger.Debugf("Changing connection ID to %s.", protocol.ConnectionID(srcConnID))
+		s.logger.Debugf("Changing connection ID to %s.", srcConnID)
 		s.logger.Debugf("-> Sending Retry")
 		replyHdr.Log(s.logger)
 	}
 
-	packetBuffer := getPacketBuffer()
-	defer packetBuffer.Release()
-	buf := bytes.NewBuffer(packetBuffer.Data)
-	if err := replyHdr.Write(buf, hdr.Version); err != nil {
+	buf := getPacketBuffer()
+	defer buf.Release()
+	buf.Data, err = replyHdr.Append(buf.Data, hdr.Version)
+	if err != nil {
 		return err
 	}
 	// append the Retry integrity tag
-	tag := handshake.GetRetryIntegrityTag(buf.Bytes(), hdr.DestConnectionID, hdr.Version)
-	buf.Write(tag[:])
+	tag := handshake.GetRetryIntegrityTag(buf.Data, hdr.DestConnectionID, hdr.Version)
+	buf.Data = append(buf.Data, tag[:]...)
 	if s.config.Tracer != nil {
-		s.config.Tracer.SentPacket(remoteAddr, &replyHdr.Header, protocol.ByteCount(buf.Len()), nil)
+		s.config.Tracer.SentPacket(remoteAddr, &replyHdr.Header, protocol.ByteCount(len(buf.Data)), nil)
 	}
-	_, err = s.conn.WritePacket(buf.Bytes(), remoteAddr, info.OOB())
+	_, err = s.conn.WritePacket(buf.Data, remoteAddr, info.OOB())
 	return err
 }
 
@@ -733,7 +743,7 @@ func (s *baseServer) maybeSendInvalidToken(p *receivedPacket, hdr *wire.Header) 
 	// This makes sure that we won't send it for packets that were corrupted.
 	sealer, opener := handshake.NewInitialAEAD(hdr.DestConnectionID, protocol.PerspectiveServer, hdr.Version)
 	data := p.data[:hdr.ParsedLen()+hdr.Length]
-	extHdr, err := unpackHeader(opener, hdr, data, hdr.Version)
+	extHdr, err := unpackLongHeader(opener, hdr, data, hdr.Version)
 	if err != nil {
 		if s.config.Tracer != nil {
 			s.config.Tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeInitial, p.Size(), logging.PacketDropHeaderParseError)
@@ -762,65 +772,57 @@ func (s *baseServer) sendConnectionRefused(remoteAddr net.Addr, hdr *wire.Header
 
 // sendError sends the error as a response to the packet received with header hdr
 func (s *baseServer) sendError(remoteAddr net.Addr, hdr *wire.Header, sealer handshake.LongHeaderSealer, errorCode qerr.TransportErrorCode, info *packetInfo) error {
-	packetBuffer := getPacketBuffer()
-	defer packetBuffer.Release()
-	buf := bytes.NewBuffer(packetBuffer.Data)
+	b := getPacketBuffer()
+	defer b.Release()
 
 	ccf := &wire.ConnectionCloseFrame{ErrorCode: uint64(errorCode)}
 
 	replyHdr := &wire.ExtendedHeader{}
-	replyHdr.IsLongHeader = true
 	replyHdr.Type = protocol.PacketTypeInitial
 	replyHdr.Version = hdr.Version
 	replyHdr.SrcConnectionID = hdr.DestConnectionID
 	replyHdr.DestConnectionID = hdr.SrcConnectionID
 	replyHdr.PacketNumberLen = protocol.PacketNumberLen4
 	replyHdr.Length = 4 /* packet number len */ + ccf.Length(hdr.Version) + protocol.ByteCount(sealer.Overhead())
-	if err := replyHdr.Write(buf, hdr.Version); err != nil {
+	var err error
+	b.Data, err = replyHdr.Append(b.Data, hdr.Version)
+	if err != nil {
 		return err
 	}
-	payloadOffset := buf.Len()
+	payloadOffset := len(b.Data)
 
-	if err := ccf.Write(buf, hdr.Version); err != nil {
+	b.Data, err = ccf.Append(b.Data, hdr.Version)
+	if err != nil {
 		return err
 	}
 
-	raw := buf.Bytes()
-	_ = sealer.Seal(raw[payloadOffset:payloadOffset], raw[payloadOffset:], replyHdr.PacketNumber, raw[:payloadOffset])
-	raw = raw[0 : buf.Len()+sealer.Overhead()]
+	_ = sealer.Seal(b.Data[payloadOffset:payloadOffset], b.Data[payloadOffset:], replyHdr.PacketNumber, b.Data[:payloadOffset])
+	b.Data = b.Data[0 : len(b.Data)+sealer.Overhead()]
 
 	pnOffset := payloadOffset - int(replyHdr.PacketNumberLen)
 	sealer.EncryptHeader(
-		raw[pnOffset+4:pnOffset+4+16],
-		&raw[0],
-		raw[pnOffset:payloadOffset],
+		b.Data[pnOffset+4:pnOffset+4+16],
+		&b.Data[0],
+		b.Data[pnOffset:payloadOffset],
 	)
 
 	replyHdr.Log(s.logger)
 	wire.LogFrame(s.logger, ccf, true)
 	if s.config.Tracer != nil {
-		s.config.Tracer.SentPacket(remoteAddr, &replyHdr.Header, protocol.ByteCount(len(raw)), []logging.Frame{ccf})
+		s.config.Tracer.SentPacket(remoteAddr, &replyHdr.Header, protocol.ByteCount(len(b.Data)), []logging.Frame{ccf})
 	}
-	_, err := s.conn.WritePacket(raw, remoteAddr, info.OOB())
+	_, err = s.conn.WritePacket(b.Data, remoteAddr, info.OOB())
 	return err
 }
 
-func (s *baseServer) sendVersionNegotiationPacket(p *receivedPacket, hdr *wire.Header) {
-	s.logger.Debugf("Client offered version %s, sending Version Negotiation", hdr.Version)
-	data := wire.ComposeVersionNegotiation(hdr.SrcConnectionID, hdr.DestConnectionID, s.config.Versions)
+func (s *baseServer) sendVersionNegotiationPacket(remote net.Addr, src, dest protocol.ArbitraryLenConnectionID, oob []byte) {
+	s.logger.Debugf("Client offered version %s, sending Version Negotiation")
+
+	data := wire.ComposeVersionNegotiation(dest, src, s.config.Versions)
 	if s.config.Tracer != nil {
-		s.config.Tracer.SentPacket(
-			p.remoteAddr,
-			&wire.Header{
-				IsLongHeader:     true,
-				DestConnectionID: hdr.SrcConnectionID,
-				SrcConnectionID:  hdr.DestConnectionID,
-			},
-			protocol.ByteCount(len(data)),
-			nil,
-		)
+		s.config.Tracer.SentVersionNegotiationPacket(remote, src, dest, s.config.Versions)
 	}
-	if _, err := s.conn.WritePacket(data, p.remoteAddr, p.info.OOB()); err != nil {
+	if _, err := s.conn.WritePacket(data, remote, oob); err != nil {
 		s.logger.Debugf("Error sending Version Negotiation: %s", err)
 	}
 }

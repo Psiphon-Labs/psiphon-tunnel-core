@@ -22,7 +22,7 @@ github.com/Psiphon-Labs/qtls-go1-18
 # github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20221014165721-ed28749db082
 ## explicit; go 1.18
 github.com/Psiphon-Labs/qtls-go1-19
-# github.com/Psiphon-Labs/quic-go v0.0.0-20221014165902-1b7c3975fcf3
+# github.com/Psiphon-Labs/quic-go v0.0.0-20230215230806-9b1ddbf778cc
 ## explicit; go 1.18
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
@@ -93,6 +93,9 @@ github.com/elazarl/goproxy/ext/auth
 ## explicit; go 1.13
 github.com/florianl/go-nfqueue
 github.com/florianl/go-nfqueue/internal/unix
+# github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0
+## explicit; go 1.13
+github.com/go-task/slim-sprig
 # github.com/gobwas/glob v0.2.4-0.20180402141543-f00a7392b439
 ## explicit
 github.com/gobwas/glob
@@ -124,6 +127,9 @@ github.com/google/gopacket
 github.com/google/gopacket/layers
 # github.com/google/gxui v0.0.0-20151028112939-f85e0a97b3a4
 ## explicit
+# github.com/google/pprof v0.0.0-20210407192527-94a9f03dee38
+## explicit; go 1.14
+github.com/google/pprof/profile
 # github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
 ## explicit
 github.com/grafov/m3u8
@@ -149,9 +155,8 @@ github.com/klauspost/compress/internal/cpuinfo
 github.com/klauspost/compress/internal/snapref
 github.com/klauspost/compress/zstd
 github.com/klauspost/compress/zstd/internal/xxhash
-# github.com/marten-seemann/qpack v0.2.1
-## explicit; go 1.14
-github.com/marten-seemann/qpack
+# github.com/marten-seemann/qpack v0.3.0
+## explicit; go 1.18
 # github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
 ## explicit
 github.com/marusama/semaphore
@@ -171,6 +176,24 @@ github.com/mitchellh/panicwrap
 # github.com/mroth/weightedrand v0.4.1
 ## explicit; go 1.10
 github.com/mroth/weightedrand
+# github.com/onsi/ginkgo/v2 v2.2.0
+## explicit; go 1.18
+github.com/onsi/ginkgo/v2/config
+github.com/onsi/ginkgo/v2/formatter
+github.com/onsi/ginkgo/v2/ginkgo
+github.com/onsi/ginkgo/v2/ginkgo/build
+github.com/onsi/ginkgo/v2/ginkgo/command
+github.com/onsi/ginkgo/v2/ginkgo/generators
+github.com/onsi/ginkgo/v2/ginkgo/internal
+github.com/onsi/ginkgo/v2/ginkgo/labels
+github.com/onsi/ginkgo/v2/ginkgo/outline
+github.com/onsi/ginkgo/v2/ginkgo/run
+github.com/onsi/ginkgo/v2/ginkgo/unfocus
+github.com/onsi/ginkgo/v2/ginkgo/watch
+github.com/onsi/ginkgo/v2/internal/interrupt_handler
+github.com/onsi/ginkgo/v2/internal/parallel_support
+github.com/onsi/ginkgo/v2/reporters
+github.com/onsi/ginkgo/v2/types
 # github.com/oschwald/maxminddb-golang v1.2.1-0.20170901134056-26fe5ace1c70
 ## explicit
 github.com/oschwald/maxminddb-golang
@@ -183,6 +206,9 @@ github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.0
 ## explicit
 github.com/pmezard/go-difflib/difflib
+# github.com/quic-go/qpack v0.4.0
+## explicit; go 1.18
+github.com/quic-go/qpack
 # github.com/refraction-networking/gotapdance v1.2.0 => ./replace/gotapdance
 ## explicit; go 1.16
 github.com/refraction-networking/gotapdance/ed25519/edwards25519
@@ -253,7 +279,7 @@ golang.org/x/exp/constraints
 # golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4
 ## explicit; go 1.17
 golang.org/x/mod/semver
-# golang.org/x/net v0.0.0-20221014081412-f15817d10f9b
+# golang.org/x/net v0.7.0
 ## explicit; go 1.17
 golang.org/x/net/bpf
 golang.org/x/net/http/httpguts
@@ -271,7 +297,7 @@ golang.org/x/net/trace
 # golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
 ## explicit
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.0.0-20221013171732-95e765b1cc43
+# golang.org/x/sys v0.5.0
 ## explicit; go 1.17
 golang.org/x/sys/cpu
 golang.org/x/sys/execabs
@@ -279,10 +305,10 @@ golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
+# golang.org/x/term v0.5.0
 ## explicit; go 1.17
 golang.org/x/term
-# golang.org/x/text v0.3.7
+# golang.org/x/text v0.7.0
 ## explicit; go 1.17
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
@@ -342,7 +368,7 @@ google.golang.org/protobuf/reflect/protoregistry
 google.golang.org/protobuf/runtime/protoiface
 google.golang.org/protobuf/runtime/protoimpl
 google.golang.org/protobuf/types/descriptorpb
-# gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c
+# gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
 # honnef.co/go/tools v0.2.1

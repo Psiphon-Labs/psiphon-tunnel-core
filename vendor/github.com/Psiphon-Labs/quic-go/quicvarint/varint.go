@@ -88,32 +88,51 @@ func Write(w Writer, i uint64) {
 	}
 }
 
-// WriteWithLen writes i in the QUIC varint format with the desired length to w.
-func WriteWithLen(w Writer, i uint64, length protocol.ByteCount) {
+func Append(b []byte, i uint64) []byte {
+	if i <= maxVarInt1 {
+		return append(b, uint8(i))
+	}
+	if i <= maxVarInt2 {
+		return append(b, []byte{uint8(i>>8) | 0x40, uint8(i)}...)
+	}
+	if i <= maxVarInt4 {
+		return append(b, []byte{uint8(i>>24) | 0x80, uint8(i >> 16), uint8(i >> 8), uint8(i)}...)
+	}
+	if i <= maxVarInt8 {
+		return append(b, []byte{
+			uint8(i>>56) | 0xc0, uint8(i >> 48), uint8(i >> 40), uint8(i >> 32),
+			uint8(i >> 24), uint8(i >> 16), uint8(i >> 8), uint8(i),
+		}...)
+	}
+	panic(fmt.Sprintf("%#x doesn't fit into 62 bits", i))
+}
+
+// AppendWithLen append i in the QUIC varint format with the desired length.
+func AppendWithLen(b []byte, i uint64, length protocol.ByteCount) []byte {
 	if length != 1 && length != 2 && length != 4 && length != 8 {
 		panic("invalid varint length")
 	}
 	l := Len(i)
 	if l == length {
-		Write(w, i)
-		return
+		return Append(b, i)
 	}
 	if l > length {
 		panic(fmt.Sprintf("cannot encode %d in %d bytes", i, length))
 	}
 	if length == 2 {
-		w.WriteByte(0b01000000)
+		b = append(b, 0b01000000)
 	} else if length == 4 {
-		w.WriteByte(0b10000000)
+		b = append(b, 0b10000000)
 	} else if length == 8 {
-		w.WriteByte(0b11000000)
+		b = append(b, 0b11000000)
 	}
 	for j := protocol.ByteCount(1); j < length-l; j++ {
-		w.WriteByte(0)
+		b = append(b, 0)
 	}
 	for j := protocol.ByteCount(0); j < l; j++ {
-		w.WriteByte(uint8(i >> (8 * (l - 1 - j))))
+		b = append(b, uint8(i>>(8*(l-1-j))))
 	}
+	return b
 }
 
 // Len determines the number of bytes that will be needed to write the number i.
