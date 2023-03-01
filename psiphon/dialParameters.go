@@ -792,6 +792,10 @@ func MakeDialParameters(
 		}
 	}
 
+	if protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) && serverEntry.DisableHTTPTransforms {
+		dialParams.HTTPTransformerParameters = nil
+	}
+
 	// Set dial address fields. This portion of configuration is
 	// deterministic, given the parameters established or replayed so far.
 
