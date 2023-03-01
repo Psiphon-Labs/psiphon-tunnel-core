@@ -776,19 +776,26 @@ func MakeDialParameters(
 
 	}
 
-	if (!isReplay || !replayHTTPTransformerParameters) && protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
 
-		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
+		if serverEntry.DisableHTTPTransforms {
 
-		params, err := makeHTTPTransformerParameters(config.GetParameters().Get(), serverEntry.FrontingProviderID, isFronted)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		if params.ProtocolTransformSpec != nil {
-			dialParams.HTTPTransformerParameters = params
-		} else {
 			dialParams.HTTPTransformerParameters = nil
+
+		} else if !isReplay || !replayHTTPTransformerParameters {
+
+			isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
+
+			params, err := makeHTTPTransformerParameters(config.GetParameters().Get(), serverEntry.FrontingProviderID, isFronted)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if params.ProtocolTransformSpec != nil {
+				dialParams.HTTPTransformerParameters = params
+			} else {
+				dialParams.HTTPTransformerParameters = nil
+			}
 		}
 	}
 
