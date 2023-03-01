@@ -179,13 +179,26 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 				// Do not need to check return value. It is guaranteed that
 				// n == len(newHeader) because t.b.Len() >= n if the header
 				// size has not changed.
-				copy(t.b.Bytes()[:len(header)], newHeader)
+				copy(t.b.Bytes()[:headerLen], newHeader)
 			} else {
-				b := t.b.Bytes()
+
+				// Copy any request body bytes received before resetting the
+				// buffer.
+				var reqBody []byte
+				reqBodyLen := t.b.Len() - headerLen // number of request body bytes received
+				if reqBodyLen > 0 {
+					reqBody = make([]byte, reqBodyLen)
+					copy(reqBody, t.b.Bytes()[headerLen:])
+				}
+
+				// Reset the buffer and write transformed header and any
+				// request body bytes received into it.
 				t.b.Reset()
 				// Do not need to check return value of bytes.Buffer.Write() https://github.com/golang/go/blob/1e9ff255a130200fcc4ec5e911d28181fce947d5/src/bytes/buffer.go#L164
 				t.b.Write(newHeader)
-				t.b.Write(b[len(header):])
+				if len(reqBody) > 0 {
+					t.b.Write(reqBody)
+				}
 			}
 
 			header = newHeader
