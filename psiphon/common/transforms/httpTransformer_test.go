@@ -126,6 +126,20 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 			transform:  Spec{[2]string{"4", "100"}},
 		},
 		{
+			name:       "transform with separate write for header and body",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcd",
+			chunkSize:  38, // length of header
+			transform:  Spec{[2]string{"4", "100"}},
+		},
+		{
+			name:       "transform with single write",
+			input:      "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
+			wantOutput: "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcd",
+			chunkSize:  999,
+			transform:  Spec{[2]string{"4", "100"}},
+		},
+		{
 			name:           "transform with partial write and errors in header write",
 			input:          "POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nabcd",
 			wantOutput:     "POST / HTTP/1.1\r\nContent-Length: 100\r\n\r\nabcd",
