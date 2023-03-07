@@ -365,7 +365,7 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 		n, oobn, flags, addr, isIETF, err := conn.readPacket(p, oob)
 
 		// When enabled, and when a packet is received, sometimes immediately
-		// respond with a decoy packet, which is Sentirely random. Sending a
+		// respond with a decoy packet, which is entirely random. Sending a
 		// small number of these packets early in the connection is intended
 		// to frustrate simple traffic fingerprinting which looks for a
 		// certain number of packets client->server, followed by a certain
