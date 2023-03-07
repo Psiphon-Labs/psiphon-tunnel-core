@@ -1104,14 +1104,14 @@ func getBaseAPIParameters(
 					params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
 				}
 
-				if dialParams.HTTPTransformerParameters != nil {
-					if dialParams.HTTPTransformerParameters.ProtocolTransformSpec != nil {
-						params["http_transform"] = dialParams.HTTPTransformerParameters.ProtocolTransformName
-					}
-				}
-
 				params["dns_attempt"] = strconv.Itoa(
 					dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
+			}
+		}
+
+		if dialParams.HTTPTransformerParameters != nil {
+			if dialParams.HTTPTransformerParameters.ProtocolTransformSpec != nil {
+				params["http_transform"] = dialParams.HTTPTransformerParameters.ProtocolTransformName
 			}
 		}
 
