@@ -232,6 +232,7 @@ const (
 	ReplayHostname                                   = "ReplayHostname"
 	ReplayQUICVersion                                = "ReplayQUICVersion"
 	ReplayObfuscatedQUIC                             = "ReplayObfuscatedQUIC"
+	ReplayObfuscatedQUICNonceTransformer             = "ReplayObfuscatedQUICNonceTransformer"
 	ReplayConjureRegistration                        = "ReplayConjureRegistration"
 	ReplayConjureTransport                           = "ReplayConjureTransport"
 	ReplayLivenessTest                               = "ReplayLivenessTest"
@@ -240,6 +241,7 @@ const (
 	ReplayHoldOffTunnel                              = "ReplayHoldOffTunnel"
 	ReplayResolveParameters                          = "ReplayResolveParameters"
 	ReplayHTTPTransformerParameters                  = "ReplayHTTPTransformerParameters"
+	ReplayOSSHSeedTransformerParameters              = "ReplayOSSHSeedTransformerParameters"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -328,6 +330,12 @@ const (
 	FrontedHTTPProtocolTransformSpecs                = "FrontedHTTPProtocolTransformSpecs"
 	FrontedHTTPProtocolTransformScopedSpecNames      = "FrontedHTTPProtocolTransformScopedSpecNames"
 	FrontedHTTPProtocolTransformProbability          = "FrontedHTTPProtocolTransformProbability"
+	OSSHObfuscatorSeedTransformSpecs                 = "OSSHObfuscatorSeedTransformSpecs"
+	OSSHObfuscatorSeedTransformScopedSpecNames       = "OSSHObfuscatorSeedTransformScopedSpecNames"
+	OSSHObfuscatorSeedTransformProbability           = "OSSHObfuscatorSeedTransformProbability"
+	ObfuscatedQUICNonceTransformSpecs                = "ObfuscatedQUICNonceTransformSpecs"
+	ObfuscatedQUICNonceTransformScopedSpecNames      = "ObfuscatedQUICNonceTransformScopedSpecNames"
+	ObfuscatedQUICNonceTransformProbability          = "ObfuscatedQUICNonceTransformProbability"
 )
 
 const (
@@ -575,6 +583,7 @@ var defaultParameters = map[string]struct {
 	ReplayHostname:                         {value: true},
 	ReplayQUICVersion:                      {value: true},
 	ReplayObfuscatedQUIC:                   {value: true},
+	ReplayObfuscatedQUICNonceTransformer:   {value: true},
 	ReplayConjureRegistration:              {value: true},
 	ReplayConjureTransport:                 {value: true},
 	ReplayLivenessTest:                     {value: true},
@@ -583,6 +592,7 @@ var defaultParameters = map[string]struct {
 	ReplayHoldOffTunnel:                    {value: true},
 	ReplayResolveParameters:                {value: true},
 	ReplayHTTPTransformerParameters:        {value: true},
+	ReplayOSSHSeedTransformerParameters:    {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -693,6 +703,14 @@ var defaultParameters = map[string]struct {
 	FrontedHTTPProtocolTransformSpecs:           {value: transforms.Specs{}},
 	FrontedHTTPProtocolTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
 	FrontedHTTPProtocolTransformProbability:     {value: 0.0, minimum: 0.0},
+
+	OSSHObfuscatorSeedTransformSpecs:           {value: transforms.Specs{}},
+	OSSHObfuscatorSeedTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	OSSHObfuscatorSeedTransformProbability:     {value: 0.0, minimum: 0.0},
+
+	ObfuscatedQUICNonceTransformSpecs:           {value: transforms.Specs{}},
+	ObfuscatedQUICNonceTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	ObfuscatedQUICNonceTransformProbability:     {value: 0.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -890,6 +908,22 @@ func (p *Parameters) Set(
 	frontedHttpProtocolTransformSpecs, _ :=
 		frontedHttpProtocolTransformSpecsValue.(transforms.Specs)
 
+	osshObfuscatorSeedTransformSpecsValue, err := getAppliedValue(
+		OSSHObfuscatorSeedTransformSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	osshObfuscatorSeedTransformSpecs, _ :=
+		osshObfuscatorSeedTransformSpecsValue.(transforms.Specs)
+
+	obfuscatedQuicNonceTransformSpecsValue, err := getAppliedValue(
+		ObfuscatedQUICNonceTransformSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	obfuscatedQuicNonceTransformSpecs, _ :=
+		obfuscatedQuicNonceTransformSpecsValue.(transforms.Specs)
+
 	for i := 0; i < len(applyParameters); i++ {
 
 		count := 0
@@ -1078,6 +1112,10 @@ func (p *Parameters) Set(
 					specs = directHttpProtocolTransformSpecs
 				} else if name == FrontedHTTPProtocolTransformScopedSpecNames {
 					specs = frontedHttpProtocolTransformSpecs
+				} else if name == OSSHObfuscatorSeedTransformScopedSpecNames {
+					specs = osshObfuscatorSeedTransformSpecs
+				} else if name == ObfuscatedQUICNonceTransformScopedSpecNames {
+					specs = obfuscatedQuicNonceTransformSpecs
 				}
 
 				err := v.Validate(specs)

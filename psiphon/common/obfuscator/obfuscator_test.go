@@ -24,6 +24,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"math/bits"
 	"net"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 )
 
 func TestObfuscator(t *testing.T) {
@@ -46,11 +48,19 @@ func TestObfuscator(t *testing.T) {
 
 	var irregularLogFields common.LogFields
 
+	// creates a seed of fixed value for testing
+
 	config := &ObfuscatorConfig{
+		IsOSSH:          true,
 		Keyword:         keyword,
 		MaxPadding:      &maxPadding,
 		PaddingPRNGSeed: paddingPRNGSeed,
-		SeedHistory:     NewSeedHistory(&SeedHistoryConfig{ClientIPTTL: 500 * time.Millisecond}),
+		ObfuscatorSeedTransformerParameters: &transforms.ObfuscatorSeedTransformerParameters{
+			TransformName: "",
+			TransformSeed: &prng.Seed{1},
+			TransformSpec: transforms.Spec{{"^.{6}", "000000"}},
+		},
+		SeedHistory: NewSeedHistory(&SeedHistoryConfig{ClientIPTTL: 500 * time.Millisecond}),
 		IrregularLogger: func(_ string, err error, logFields common.LogFields) {
 			if logFields == nil {
 				logFields = make(common.LogFields)
@@ -225,7 +235,7 @@ func TestObfuscatedSSHConn(t *testing.T) {
 				conn,
 				keyword,
 				paddingPRNGSeed,
-				nil, nil)
+				nil, nil, nil)
 		}
 
 		var KEXPRNGSeed *prng.Seed
@@ -252,4 +262,94 @@ func TestObfuscatedSSHConn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("obfuscated SSH handshake failed: %s", err)
 	}
+}
+
+func TestObfuscatorSeedTransformParamters(t *testing.T) {
+
+	keyword := prng.HexString(32)
+
+	maxPadding := 256
+
+	paddingPRNGSeed, err := prng.NewSeed()
+	if err != nil {
+		t.Fatalf("prng.NewSeed failed: %s", err)
+	}
+
+	type test struct {
+		name                 string
+		transformerParamters *transforms.ObfuscatorSeedTransformerParameters
+
+		// nil means seedMessage looks random (transformer was not applied)
+		expectedResult       []byte
+		expectedResultLength int
+	}
+
+	tests := []test{
+		{
+			name: "4 byte transform",
+			transformerParamters: &transforms.ObfuscatorSeedTransformerParameters{
+				TransformName: "four-zeros",
+				TransformSeed: &prng.Seed{0},
+				TransformSpec: transforms.Spec{{"^.{8}", "00000000"}},
+			},
+			expectedResult:       []byte{0, 0, 0, 0},
+			expectedResultLength: 4,
+		},
+		{
+			name: "invalid '%' character in the regex",
+			transformerParamters: &transforms.ObfuscatorSeedTransformerParameters{
+				TransformName: "invalid-spec",
+				TransformSeed: &prng.Seed{0},
+				TransformSpec: transforms.Spec{{"^.{8}", "%00000000"}},
+			},
+			expectedResult:       nil,
+			expectedResultLength: 0,
+		},
+	}
+
+	for _, tt := range tests {
+
+		t.Run(tt.name, func(t *testing.T) {
+
+			config := &ObfuscatorConfig{
+				IsOSSH:                              true,
+				Keyword:                             keyword,
+				MaxPadding:                          &maxPadding,
+				PaddingPRNGSeed:                     paddingPRNGSeed,
+				ObfuscatorSeedTransformerParameters: tt.transformerParamters,
+			}
+
+			client, err := NewClientObfuscator(config)
+			if err != nil {
+				// if there is a expectedResult, then the error is unexpected
+				if tt.expectedResult != nil {
+					t.Fatalf("NewClientObfuscator failed: %s", err)
+				}
+				return
+			}
+
+			seedMessage := client.SendSeedMessage()
+
+			if tt.expectedResult == nil {
+
+				// Verify that the seed message looks random.
+				// obfuscator seed is generated with common.MakeSecureRandomBytes,
+				// and is not affected by the config.
+				popcount := 0
+				for _, b := range seedMessage[:tt.expectedResultLength] {
+					popcount += bits.OnesCount(uint(b))
+				}
+				popcount_per_byte := float64(popcount) / float64(tt.expectedResultLength)
+				if popcount_per_byte < 3.6 || popcount_per_byte > 4.4 {
+					t.Fatalf("unexpected popcount_per_byte: %f", popcount_per_byte)
+				}
+
+			} else if !bytes.Equal(seedMessage[:tt.expectedResultLength], tt.expectedResult) {
+				t.Fatalf("unexpected seed message")
+			}
+
+		})
+
+	}
+
 }

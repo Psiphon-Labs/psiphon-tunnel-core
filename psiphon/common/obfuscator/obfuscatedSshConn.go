@@ -30,6 +30,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 )
 
 const (
@@ -125,6 +126,7 @@ func NewObfuscatedSSHConn(
 	conn net.Conn,
 	obfuscationKeyword string,
 	obfuscationPaddingPRNGSeed *prng.Seed,
+	obfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	minPadding, maxPadding *int,
 	seedHistory *SeedHistory,
 	irregularLogger func(
@@ -140,10 +142,12 @@ func NewObfuscatedSSHConn(
 	if mode == OBFUSCATION_CONN_MODE_CLIENT {
 		obfuscator, err = NewClientObfuscator(
 			&ObfuscatorConfig{
-				Keyword:         obfuscationKeyword,
-				PaddingPRNGSeed: obfuscationPaddingPRNGSeed,
-				MinPadding:      minPadding,
-				MaxPadding:      maxPadding,
+				IsOSSH:                              true,
+				Keyword:                             obfuscationKeyword,
+				PaddingPRNGSeed:                     obfuscationPaddingPRNGSeed,
+				MinPadding:                          minPadding,
+				MaxPadding:                          maxPadding,
+				ObfuscatorSeedTransformerParameters: obfuscatorSeedTransformerParameters,
 			})
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -204,6 +208,7 @@ func NewClientObfuscatedSSHConn(
 	conn net.Conn,
 	obfuscationKeyword string,
 	obfuscationPaddingPRNGSeed *prng.Seed,
+	obfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
 
 	return NewObfuscatedSSHConn(
@@ -211,6 +216,7 @@ func NewClientObfuscatedSSHConn(
 		conn,
 		obfuscationKeyword,
 		obfuscationPaddingPRNGSeed,
+		obfuscatorSeedTransformerParameters,
 		minPadding, maxPadding,
 		nil,
 		nil)
@@ -231,7 +237,7 @@ func NewServerObfuscatedSSHConn(
 		OBFUSCATION_CONN_MODE_SERVER,
 		conn,
 		obfuscationKeyword,
-		nil,
+		nil, nil,
 		nil, nil,
 		seedHistory,
 		irregularLogger)

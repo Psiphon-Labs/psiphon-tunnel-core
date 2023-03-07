@@ -29,6 +29,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 )
 
 const (
@@ -61,10 +62,12 @@ type Obfuscator struct {
 
 // ObfuscatorConfig specifies an Obfuscator configuration.
 type ObfuscatorConfig struct {
-	Keyword         string
-	PaddingPRNGSeed *prng.Seed
-	MinPadding      *int
-	MaxPadding      *int
+	IsOSSH                              bool
+	Keyword                             string
+	PaddingPRNGSeed                     *prng.Seed
+	MinPadding                          *int
+	MaxPadding                          *int
+	ObfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
 
 	// SeedHistory and IrregularLogger are optional parameters used only by
 	// server obfuscators.
@@ -96,6 +99,16 @@ func NewClientObfuscator(
 	obfuscatorSeed, err := common.MakeSecureRandomBytes(OBFUSCATE_SEED_LENGTH)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	// This transform may reduce the entropy of the seed, which decreases
+	// the security of the stream cipher key. However, the stream cipher is
+	// for obfuscation purposes only.
+	if config.IsOSSH && config.ObfuscatorSeedTransformerParameters != nil {
+		err = config.ObfuscatorSeedTransformerParameters.Apply(obfuscatorSeed)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(config, obfuscatorSeed)

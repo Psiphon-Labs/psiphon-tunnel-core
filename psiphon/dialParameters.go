@@ -87,7 +87,8 @@ type DialParameters struct {
 	SSHClientVersion         string
 	SSHKEXSeed               *prng.Seed
 
-	ObfuscatorPaddingSeed *prng.Seed
+	ObfuscatorPaddingSeed                   *prng.Seed
+	OSSHObfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
 
 	FragmentorSeed *prng.Seed
 
@@ -114,11 +115,12 @@ type DialParameters struct {
 	TLSVersion               string
 	RandomizedTLSProfileSeed *prng.Seed
 
-	QUICVersion                 string
-	QUICDialSNIAddress          string
-	QUICClientHelloSeed         *prng.Seed
-	ObfuscatedQUICPaddingSeed   *prng.Seed
-	QUICDisablePathMTUDiscovery bool
+	QUICVersion                              string
+	QUICDialSNIAddress                       string
+	QUICClientHelloSeed                      *prng.Seed
+	ObfuscatedQUICPaddingSeed                *prng.Seed
+	ObfuscatedQUICNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
+	QUICDisablePathMTUDiscovery              bool
 
 	ConjureCachedRegistrationTTL        time.Duration
 	ConjureAPIRegistration              bool
@@ -192,6 +194,7 @@ func MakeDialParameters(
 	replayHostname := p.Bool(parameters.ReplayHostname)
 	replayQUICVersion := p.Bool(parameters.ReplayQUICVersion)
 	replayObfuscatedQUIC := p.Bool(parameters.ReplayObfuscatedQUIC)
+	replayObfuscatedQUICNonceTransformer := p.Bool(parameters.ReplayObfuscatedQUICNonceTransformer)
 	replayConjureRegistration := p.Bool(parameters.ReplayConjureRegistration)
 	replayConjureTransport := p.Bool(parameters.ReplayConjureTransport)
 	replayLivenessTest := p.Bool(parameters.ReplayLivenessTest)
@@ -200,6 +203,7 @@ func MakeDialParameters(
 	replayHoldOffTunnel := p.Bool(parameters.ReplayHoldOffTunnel)
 	replayResolveParameters := p.Bool(parameters.ReplayResolveParameters)
 	replayHTTPTransformerParameters := p.Bool(parameters.ReplayHTTPTransformerParameters)
+	replayOSSHSeedTransformerParameters := p.Bool(parameters.ReplayOSSHSeedTransformerParameters)
 
 	// Check for existing dial parameters for this server/network ID.
 
@@ -472,6 +476,7 @@ func MakeDialParameters(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+
 		if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 			dialParams.MeekObfuscatorPaddingSeed, err = prng.NewSeed()
 			if err != nil {
@@ -719,6 +724,28 @@ func MakeDialParameters(
 		}
 	}
 
+	if protocol.QUICVersionIsObfuscated(dialParams.QUICVersion) {
+
+		if serverEntry.DisableObfuscatedQUICTransforms {
+
+			dialParams.ObfuscatedQUICNonceTransformerParameters = nil
+
+		} else if !isReplay || !replayObfuscatedQUICNonceTransformer {
+
+			dialParams.ObfuscatedQUICNonceTransformerParameters, err = makeSeedTransformerParameters(
+				p,
+				parameters.ObfuscatedQUICNonceTransformProbability,
+				parameters.ObfuscatedQUICNonceTransformSpecs,
+				parameters.ObfuscatedQUICNonceTransformScopedSpecNames)
+
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+		}
+
+	}
+
 	if !isReplay || !replayLivenessTest {
 
 		// TODO: initialize only when LivenessTestMaxUp/DownstreamBytes > 0?
@@ -772,6 +799,28 @@ func MakeDialParameters(
 					p.Duration(parameters.HoldOffTunnelMinDuration),
 					p.Duration(parameters.HoldOffTunnelMaxDuration))
 			}
+		}
+
+	}
+
+	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
+
+		if serverEntry.DisableOSSHTransforms {
+
+			dialParams.OSSHObfuscatorSeedTransformerParameters = nil
+
+		} else if !isReplay || !replayOSSHSeedTransformerParameters {
+
+			dialParams.OSSHObfuscatorSeedTransformerParameters, err = makeSeedTransformerParameters(
+				p,
+				parameters.OSSHObfuscatorSeedTransformProbability,
+				parameters.OSSHObfuscatorSeedTransformSpecs,
+				parameters.OSSHObfuscatorSeedTransformScopedSpecNames)
+
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
 		}
 
 	}
@@ -1463,4 +1512,34 @@ func makeHTTPTransformerParameters(p parameters.ParametersAccessor,
 	}
 
 	return &params, nil
+}
+
+// makeSeedTransformerParameters generates ObfuscatorSeedTransformerParameters
+// using the input tactics parameters.
+func makeSeedTransformerParameters(p parameters.ParametersAccessor,
+	probabilityFieldName, specsKey, scopedSpecsKey string) (*transforms.ObfuscatorSeedTransformerParameters, error) {
+
+	if !p.WeightedCoinFlip(probabilityFieldName) {
+		return &transforms.ObfuscatorSeedTransformerParameters{}, nil
+	}
+
+	seed, err := prng.NewSeed()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	specs := p.ProtocolTransformSpecs(specsKey)
+	scopedSpecNames := p.ProtocolTransformScopedSpecNames(scopedSpecsKey)
+
+	name, spec := specs.Select(transforms.SCOPE_ANY, scopedSpecNames)
+
+	if spec == nil {
+		return &transforms.ObfuscatorSeedTransformerParameters{}, nil
+	} else {
+		return &transforms.ObfuscatorSeedTransformerParameters{
+			TransformName: name,
+			TransformSpec: spec,
+			TransformSeed: seed,
+		}, nil
+	}
 }
