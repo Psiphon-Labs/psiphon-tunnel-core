@@ -340,9 +340,8 @@ public class PsiphonTunnel {
     // - Only a single instance of PsiphonTunnelFeedback should be used at a time. Using multiple
     // instances in parallel, or concurrently, will result in undefined behavior.
     public static class PsiphonTunnelFeedback {
-
-        private ExecutorService workQueue;
-        private ExecutorService callbackQueue;
+        private final ExecutorService workQueue = Executors.newSingleThreadExecutor();
+        private final ExecutorService callbackQueue = Executors.newSingleThreadExecutor();
 
         void shutdownAndAwaitTermination(ExecutorService pool) {
             try {
@@ -386,10 +385,6 @@ public class PsiphonTunnel {
         public void startSendFeedback(Context context, HostFeedbackHandler feedbackHandler, HostLogger logger,
                                       String feedbackConfigJson, String diagnosticsJson, String uploadPath,
                                       String clientPlatformPrefix, String clientPlatformSuffix) {
-            // initialize executor queues
-            workQueue = Executors.newSingleThreadExecutor();
-            callbackQueue = Executors.newSingleThreadExecutor();
-
             workQueue.execute(new Runnable() {
                 @Override
                 public void run() {
@@ -525,8 +520,10 @@ public class PsiphonTunnel {
             });
         }
 
-        // Interrupt an in-progress feedback upload operation started with startSendFeedback().
-        public void stopSendFeedback() {
+        // Interrupt an in-progress feedback upload operation started with startSendFeedback() and shutdown
+        // executor queues.
+        // NOTE: this instance cannot be reused after shutdown() has been called.
+        public void shutdown() {
             workQueue.execute(new Runnable() {
                 @Override
                 public void run() {
@@ -534,7 +531,6 @@ public class PsiphonTunnel {
                 }
             });
 
-            // Also shutdown executor queues
             shutdownAndAwaitTermination(workQueue);
             shutdownAndAwaitTermination(callbackQueue);
         }
