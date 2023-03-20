@@ -66,6 +66,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -339,22 +340,8 @@ public class PsiphonTunnel {
     // - Only a single instance of PsiphonTunnelFeedback should be used at a time. Using multiple
     // instances in parallel, or concurrently, will result in undefined behavior.
     public static class PsiphonTunnelFeedback {
-
-        final private ExecutorService workQueue;
-        final private ExecutorService callbackQueue;
-
-        public PsiphonTunnelFeedback() {
-            workQueue = Executors.newSingleThreadExecutor();
-            callbackQueue = Executors.newSingleThreadExecutor();
-        }
-
-        @Override
-        protected void finalize() throws Throwable {
-            // Ensure the queues are cleaned up.
-            shutdownAndAwaitTermination(callbackQueue);
-            shutdownAndAwaitTermination(workQueue);
-            super.finalize();
-        }
+        private final ExecutorService workQueue = Executors.newSingleThreadExecutor();
+        private final ExecutorService callbackQueue = Executors.newSingleThreadExecutor();
 
         void shutdownAndAwaitTermination(ExecutorService pool) {
             try {
@@ -398,8 +385,7 @@ public class PsiphonTunnel {
         public void startSendFeedback(Context context, HostFeedbackHandler feedbackHandler, HostLogger logger,
                                       String feedbackConfigJson, String diagnosticsJson, String uploadPath,
                                       String clientPlatformPrefix, String clientPlatformSuffix) {
-
-            workQueue.submit(new Runnable() {
+            workQueue.execute(new Runnable() {
                 @Override
                 public void run() {
                     try {
@@ -411,12 +397,15 @@ public class PsiphonTunnel {
                                 new PsiphonProviderFeedbackHandler() {
                                     @Override
                                     public void sendFeedbackCompleted(java.lang.Exception e) {
-                                        callbackQueue.submit(new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                feedbackHandler.sendFeedbackCompleted(e);
-                                            }
-                                        });
+                                        try {
+                                            callbackQueue.execute(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    feedbackHandler.sendFeedbackCompleted(e);
+                                                }
+                                            });
+                                        } catch (RejectedExecutionException ignored) {
+                                        }
                                     }
                                 },
                                 new PsiphonProviderNetwork() {
@@ -429,7 +418,37 @@ public class PsiphonTunnel {
 
                                     @Override
                                     public String getNetworkID() {
-                                        return PsiphonTunnel.getNetworkID(context, mPsiphonTunnel.isVpnMode());
+
+                                        // startSendFeedback is invoked from the Psiphon UI process, not the Psiphon
+                                        // VPN process.
+                                        //
+                                        // Case 1: no VPN is running
+                                        //
+                                        // isVpnMode = true/false doesn't change the network ID; the network ID will
+                                        // be the physical network ID, and feedback may load existing tactics or may
+                                        // fetch tactics.
+                                        //
+                                        // Case 2: Psiphon VPN is running
+                                        //
+                                        // In principle, we might want to set isVpnMode = true so that we obtain the
+                                        // physical network ID and load any existing tactics. However, as the VPN
+                                        // holds a lock on the data store, the load will fail; also no tactics request
+                                        // is attempted.
+                                        //
+                                        // Hypothetically, if a tactics request did proceed, the tunneled client GeoIP
+                                        // would not reflect the actual client location, and so it's safer to set
+                                        // isVpnMode = false to ensure fetched tactics are stored under a distinct
+                                        // Network ID ("VPN").
+                                        //
+                                        // Case 3: another VPN is running
+                                        //
+                                        // Unlike case 2, there's no Psiphon VPN process holding the data store lock.
+                                        // As with case 2, there's some merit to setting isVpnMode = true in order to
+                                        // load existing tactics, but since a tactics request may proceed, it's safer
+                                        // to set isVpnMode = false and store fetched tactics under a distinct
+                                        // Network ID ("VPN").
+
+                                        return PsiphonTunnel.getNetworkID(context, false);
                                     }
 
                                     @Override
@@ -461,19 +480,25 @@ public class PsiphonTunnel {
                                             }
 
                                             String diagnosticMessage = noticeType + ": " + data.toString();
-                                            callbackQueue.submit(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    logger.onDiagnosticMessage(diagnosticMessage);
-                                                }
-                                            });
+                                            try {
+                                                callbackQueue.execute(new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        logger.onDiagnosticMessage(diagnosticMessage);
+                                                    }
+                                                });
+                                            } catch (RejectedExecutionException ignored) {
+                                            }
                                         } catch (java.lang.Exception e) {
-                                            callbackQueue.submit(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    logger.onDiagnosticMessage("Error handling notice " + e.toString());
-                                                }
-                                            });
+                                            try {
+                                                callbackQueue.execute(new Runnable() {
+                                                    @Override
+                                                    public void run() {
+                                                        logger.onDiagnosticMessage("Error handling notice " + e.toString());
+                                                    }
+                                                });
+                                            } catch (RejectedExecutionException ignored) {
+                                            }
                                         }
                                     }
                                 },
@@ -481,27 +506,33 @@ public class PsiphonTunnel {
                                 true     // Use hasIPv6Route on Android
                                 );
                     } catch (java.lang.Exception e) {
-                        callbackQueue.submit(new Runnable() {
-                            @Override
-                            public void run() {
-                                feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
-                            }
-                        });
+                        try {
+                            callbackQueue.execute(new Runnable() {
+                                @Override
+                                public void run() {
+                                    feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
+                                }
+                            });
+                        } catch (RejectedExecutionException ignored) {
+                        }
                     }
                 }
             });
         }
 
-        // Interrupt an in-progress feedback upload operation started with startSendFeedback(). This
-        // call is asynchronous and returns a future which is fulfilled when the underlying stop
-        // operation completes.
-        public Future<Void> stopSendFeedback() {
-            return workQueue.submit(new Runnable() {
+        // Interrupt an in-progress feedback upload operation started with startSendFeedback() and shutdown
+        // executor queues.
+        // NOTE: this instance cannot be reused after shutdown() has been called.
+        public void shutdown() {
+            workQueue.execute(new Runnable() {
                 @Override
                 public void run() {
                     Psi.stopSendFeedback();
                 }
-            }, null);
+            });
+
+            shutdownAndAwaitTermination(workQueue);
+            shutdownAndAwaitTermination(callbackQueue);
         }
     }
 
@@ -763,9 +794,7 @@ public class PsiphonTunnel {
         ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-
             if (!isVpnMode) {
-
                 NetworkCapabilities capabilities = null;
                 try {
                     Network nw = connectivityManager.getActiveNetwork();
@@ -780,15 +809,12 @@ public class PsiphonTunnel {
                 if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                     return "VPN";
                 }
-
             }
-
         }
 
         NetworkInfo activeNetworkInfo = null;
         try {
             activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
-
         } catch (java.lang.Exception e) {
             // May get exceptions due to missing permissions like android.permission.ACCESS_NETWORK_STATE.
 

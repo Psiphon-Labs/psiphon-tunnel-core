@@ -330,7 +330,7 @@ func MakeDialParameters(
 	// Initialize dial parameters.
 	//
 	// When not replaying, all required parameters are initialized. When
-	// replaying, existing parameters are retaing, subject to the replay-X
+	// replaying, existing parameters are retained, subject to the replay-X
 	// tactics flags.
 
 	// Select a network latency multiplier for this dial. This allows clients to
