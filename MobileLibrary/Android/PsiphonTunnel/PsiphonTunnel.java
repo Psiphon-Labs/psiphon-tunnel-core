@@ -390,7 +390,7 @@ public class PsiphonTunnel {
             workQueue = Executors.newSingleThreadExecutor();
             callbackQueue = Executors.newSingleThreadExecutor();
 
-            workQueue.submit(new Runnable() {
+            workQueue.execute(new Runnable() {
                 @Override
                 public void run() {
                     try {
@@ -403,7 +403,7 @@ public class PsiphonTunnel {
                                     @Override
                                     public void sendFeedbackCompleted(java.lang.Exception e) {
                                         try {
-                                            callbackQueue.submit(new Runnable() {
+                                            callbackQueue.execute(new Runnable() {
                                                 @Override
                                                 public void run() {
                                                     feedbackHandler.sendFeedbackCompleted(e);
@@ -486,7 +486,7 @@ public class PsiphonTunnel {
 
                                             String diagnosticMessage = noticeType + ": " + data.toString();
                                             try {
-                                                callbackQueue.submit(new Runnable() {
+                                                callbackQueue.execute(new Runnable() {
                                                     @Override
                                                     public void run() {
                                                         logger.onDiagnosticMessage(diagnosticMessage);
@@ -496,7 +496,7 @@ public class PsiphonTunnel {
                                             }
                                         } catch (java.lang.Exception e) {
                                             try {
-                                                callbackQueue.submit(new Runnable() {
+                                                callbackQueue.execute(new Runnable() {
                                                     @Override
                                                     public void run() {
                                                         logger.onDiagnosticMessage("Error handling notice " + e.toString());
@@ -512,7 +512,7 @@ public class PsiphonTunnel {
                                 );
                     } catch (java.lang.Exception e) {
                         try {
-                            callbackQueue.submit(new Runnable() {
+                            callbackQueue.execute(new Runnable() {
                                 @Override
                                 public void run() {
                                     feedbackHandler.sendFeedbackCompleted(new Exception("Error sending feedback", e));
@@ -525,22 +525,18 @@ public class PsiphonTunnel {
             });
         }
 
-        // Interrupt an in-progress feedback upload operation started with startSendFeedback(). This
-        // call is asynchronous and returns a future which is fulfilled when the underlying stop
-        // operation completes.
-        public Future<Void> stopSendFeedback() {
-            Future<Void> result = workQueue.submit(new Runnable() {
+        // Interrupt an in-progress feedback upload operation started with startSendFeedback().
+        public void stopSendFeedback() {
+            workQueue.execute(new Runnable() {
                 @Override
                 public void run() {
                     Psi.stopSendFeedback();
                 }
-            }, null);
+            });
 
             // Also shutdown executor queues
             shutdownAndAwaitTermination(workQueue);
             shutdownAndAwaitTermination(callbackQueue);
-
-            return result;
         }
     }
 
@@ -802,9 +798,7 @@ public class PsiphonTunnel {
         ConnectivityManager connectivityManager = (ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-
             if (!isVpnMode) {
-
                 NetworkCapabilities capabilities = null;
                 try {
                     Network nw = connectivityManager.getActiveNetwork();
@@ -819,15 +813,12 @@ public class PsiphonTunnel {
                 if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                     return "VPN";
                 }
-
             }
-
         }
 
         NetworkInfo activeNetworkInfo = null;
         try {
             activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
-
         } catch (java.lang.Exception e) {
             // May get exceptions due to missing permissions like android.permission.ACCESS_NETWORK_STATE.
 
