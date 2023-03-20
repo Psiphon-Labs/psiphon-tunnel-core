@@ -436,7 +436,7 @@ public class PsiphonTunnel {
                                         // Case 1: no VPN is running
                                         //
                                         // isVpnMode = true/false doesn't change the network ID; the network ID will
-                                        // be the physical network ID, and feedback may load load tactics and may
+                                        // be the physical network ID, and feedback may load existing tactics or may
                                         // fetch tactics.
                                         //
                                         // Case 2: Psiphon VPN is running

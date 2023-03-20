@@ -124,7 +124,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 
 	// Limitation: GetTactics will fail silently if the datastore used for
 	// retrieving and storing tactics is opened by another process. This can
-	// be the case on Android an iOS where SendFeedback is invoked by the UI
+	// be the case on Android and iOS where SendFeedback is invoked by the UI
 	// process while tunneling is run by the VPN process.
 	//
 	// - When the Psiphon VPN is running, GetTactics won't load tactics.
