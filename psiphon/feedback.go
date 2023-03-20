@@ -121,8 +121,23 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 	p.Close()
 	getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
-	// Note: GetTactics will fail silently if the datastore used for retrieving
-	// and storing tactics is opened by another process.
+
+	// Limitation: GetTactics will fail silently if the datastore used for
+	// retrieving and storing tactics is opened by another process. This can
+	// be the case on Android an iOS where SendFeedback is invoked by the UI
+	// process while tunneling is run by the VPN process.
+	//
+	// - When the Psiphon VPN is running, GetTactics won't load tactics.
+	//   However, tactics may be less critical since feedback will be
+	//   tunneled. This outcome also avoids fetching tactics while tunneled,
+	//   where otherwise the client GeoIP used for tactics would reflect the
+	//   tunnel egress point.
+	//
+	// - When the Psiphon VPN is not running, this will load tactics, and
+	//   potentially fetch tactics, with either the correct, untunneled GeoIP
+	//   or a network ID of "VPN" if some other non-Psiphon VPN is running
+	//   (the caller should ensure a network ID of "VPN" in this case).
+
 	GetTactics(getTacticsCtx, config)
 
 	// Get the latest client parameters

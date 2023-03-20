@@ -429,7 +429,37 @@ public class PsiphonTunnel {
 
                                     @Override
                                     public String getNetworkID() {
-                                        return PsiphonTunnel.getNetworkID(context, mPsiphonTunnel.isVpnMode());
+
+                                        // startSendFeedback is invoked from the Psiphon UI process, not the Psiphon
+                                        // VPN process.
+                                        //
+                                        // Case 1: no VPN is running
+                                        //
+                                        // isVpnMode = true/false doesn't change the network ID; the network ID will
+                                        // be the physical network ID, and feedback may load load tactics and may
+                                        // fetch tactics.
+                                        //
+                                        // Case 2: Psiphon VPN is running
+                                        //
+                                        // In principle, we might want to set isVpnMode = true so that we obtain the
+                                        // physical network ID and load any existing tactics. However, as the VPN
+                                        // holds a lock on the data store, the load will fail; also no tactics request
+                                        // is attempted.
+                                        //
+                                        // Hypothetically, if a tactics request did proceed, the tunneled client GeoIP
+                                        // would not reflect the actual client location, and so it's safer to set
+                                        // isVpnMode = false to ensure fetched tactics are stored under a distinct
+                                        // Network ID ("VPN").
+                                        //
+                                        // Case 3: another VPN is running
+                                        //
+                                        // Unlike case 2, there's no Psiphon VPN process holding the data store lock.
+                                        // As with case 2, there's some merit to setting isVpnMode = true in order to
+                                        // load existing tactics, but since a tactics request may proceed, it's safer
+                                        // to set isVpnMode = false and store fetched tactics under a distinct
+                                        // Network ID ("VPN").
+
+                                        return PsiphonTunnel.getNetworkID(context, false);
                                     }
 
                                     @Override
