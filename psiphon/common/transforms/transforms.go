@@ -151,7 +151,10 @@ func (spec Spec) ApplyString(seed *prng.Seed, input string) (string, error) {
 	value := input
 	for _, transform := range spec {
 
-		re, replacement := makeRegexAndRepl(seed, transform)
+		re, replacement, err := makeRegexAndRepl(seed, transform)
+		if err != nil {
+			return "", errors.Trace(err)
+		}
 		value = re.ReplaceAllString(value, replacement)
 	}
 	return value, nil
@@ -166,7 +169,10 @@ func (spec Spec) Apply(seed *prng.Seed, input []byte) ([]byte, error) {
 	value := input
 	for _, transform := range spec {
 
-		re, replacement := makeRegexAndRepl(seed, transform)
+		re, replacement, err := makeRegexAndRepl(seed, transform)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 		value = re.ReplaceAll(value, []byte(replacement))
 	}
 	return value, nil
@@ -175,7 +181,7 @@ func (spec Spec) Apply(seed *prng.Seed, input []byte) ([]byte, error) {
 // makeRegexAndRepl generates the regex and replacement for a given seed and
 // transform. The same seed can be supplied to produce the same output, for
 // replay.
-func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (re *regexp.Regexp, replacement string) {
+func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (*regexp.Regexp, string, error) {
 
 	// TODO: the compiled regexp and regen could be cached, but the seed is an
 	// issue with caching the regen.
@@ -186,12 +192,12 @@ func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (re *regexp.Regexp, 
 	}
 	rg, err := regen.NewGenerator(transform[1], args)
 	if err != nil {
-		panic(err.Error())
+		return nil, "", errors.Trace(err)
 	}
 
-	replacement = rg.Generate()
+	replacement := rg.Generate()
 
-	re = regexp.MustCompile(transform[0])
+	re := regexp.MustCompile(transform[0])
 
-	return
+	return re, replacement, nil
 }
