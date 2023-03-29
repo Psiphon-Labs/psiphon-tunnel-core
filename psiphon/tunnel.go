@@ -775,6 +775,7 @@ func dialTunnel(
 			dialParams.QUICClientHelloSeed,
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatedQUICPaddingSeed,
+			dialParams.ObfuscatedQUICNonceTransformerParameters,
 			dialParams.QUICDisablePathMTUDiscovery)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -981,6 +982,7 @@ func dialTunnel(
 			throttledConn,
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatorPaddingSeed,
+			dialParams.OSSHObfuscatorSeedTransformerParameters,
 			&obfuscatedSSHMinPadding,
 			&obfuscatedSSHMaxPadding)
 		if err != nil {

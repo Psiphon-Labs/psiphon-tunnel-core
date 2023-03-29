@@ -1115,6 +1115,18 @@ func getBaseAPIParameters(
 			}
 		}
 
+		if dialParams.OSSHObfuscatorSeedTransformerParameters != nil {
+			if dialParams.OSSHObfuscatorSeedTransformerParameters.TransformSpec != nil {
+				params["seed_transform"] = dialParams.OSSHObfuscatorSeedTransformerParameters.TransformName
+			}
+		}
+
+		if dialParams.ObfuscatedQUICNonceTransformerParameters != nil {
+			if dialParams.ObfuscatedQUICNonceTransformerParameters.TransformSpec != nil {
+				params["seed_transform"] = dialParams.ObfuscatedQUICNonceTransformerParameters.TransformName
+			}
+		}
+
 		if dialParams.DialConnMetrics != nil {
 			metrics := dialParams.DialConnMetrics.GetMetrics()
 			for name, value := range metrics {

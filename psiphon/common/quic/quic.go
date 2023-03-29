@@ -59,6 +59,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	ietf_quic "github.com/Psiphon-Labs/quic-go"
 	"github.com/Psiphon-Labs/quic-go/http3"
@@ -172,7 +173,7 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
-	obfuscatedPacketConn, err := NewObfuscatedPacketConn(
+	obfuscatedPacketConn, err := NewServerObfuscatedPacketConn(
 		udpConn, true, false, false, obfuscationKey, seed)
 	if err != nil {
 		udpConn.Close()
@@ -356,6 +357,7 @@ func Dial(
 	clientHelloSeed *prng.Seed,
 	obfuscationKey string,
 	obfuscationPaddingSeed *prng.Seed,
+	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	disablePathMTUDiscovery bool) (net.Conn, error) {
 
 	if quicVersion == "" {
@@ -421,13 +423,14 @@ func Dial(
 	maxPacketSizeAdjustment := 0
 
 	if isObfuscated(quicVersion) {
-		obfuscatedPacketConn, err := NewObfuscatedPacketConn(
+		obfuscatedPacketConn, err := NewClientObfuscatedPacketConn(
 			packetConn,
 			false,
 			isIETFVersionNumber(versionNumber),
 			isDecoy(quicVersion),
 			obfuscationKey,
-			obfuscationPaddingSeed)
+			obfuscationPaddingSeed,
+			obfuscationNonceTransformerParameters)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

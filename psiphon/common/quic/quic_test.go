@@ -197,6 +197,7 @@ func runQUIC(
 				clientHelloSeed,
 				clientObfuscationKey,
 				obfuscationPaddingSeed,
+				nil,
 				disablePathMTUDiscovery)
 
 			if invokeAntiProbing {

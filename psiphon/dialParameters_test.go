@@ -93,6 +93,13 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.DirectHTTPProtocolTransformProbability] = 1.0
 	applyParameters[parameters.DirectHTTPProtocolTransformSpecs] = transforms.Specs{"spec": transforms.Spec{{"", ""}}}
 	applyParameters[parameters.DirectHTTPProtocolTransformScopedSpecNames] = transforms.ScopedSpecNames{"": {"spec"}}
+	applyParameters[parameters.OSSHObfuscatorSeedTransformProbability] = 1.0
+	applyParameters[parameters.OSSHObfuscatorSeedTransformSpecs] = transforms.Specs{"spec": transforms.Spec{{"", ""}}}
+	applyParameters[parameters.OSSHObfuscatorSeedTransformScopedSpecNames] = transforms.ScopedSpecNames{"": {"spec"}}
+	applyParameters[parameters.ObfuscatedQUICNonceTransformProbability] = 1.0
+	applyParameters[parameters.ObfuscatedQUICNonceTransformSpecs] = transforms.Specs{"spec": transforms.Spec{{"", ""}}}
+	applyParameters[parameters.ObfuscatedQUICNonceTransformScopedSpecNames] = transforms.ScopedSpecNames{"": {"spec"}}
+
 	err = clientConfig.SetParameters("tag1", false, applyParameters)
 	if err != nil {
 		t.Fatalf("SetParameters failed: %s", err)
@@ -364,6 +371,18 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		(replayDialParams.HTTPTransformerParameters != nil &&
 			!reflect.DeepEqual(replayDialParams.HTTPTransformerParameters, dialParams.HTTPTransformerParameters)) {
 		t.Fatalf("mismatching HTTPTransformerParameters fields")
+	}
+
+	if (replayDialParams.OSSHObfuscatorSeedTransformerParameters == nil) != (dialParams.OSSHObfuscatorSeedTransformerParameters == nil) ||
+		(replayDialParams.OSSHObfuscatorSeedTransformerParameters != nil &&
+			!reflect.DeepEqual(replayDialParams.OSSHObfuscatorSeedTransformerParameters, dialParams.OSSHObfuscatorSeedTransformerParameters)) {
+		t.Fatalf("mismatching ObfuscatorSeedTransformerParameters fields")
+	}
+
+	if (replayDialParams.ObfuscatedQUICNonceTransformerParameters == nil) != (dialParams.ObfuscatedQUICNonceTransformerParameters == nil) ||
+		(replayDialParams.ObfuscatedQUICNonceTransformerParameters != nil &&
+			!reflect.DeepEqual(replayDialParams.ObfuscatedQUICNonceTransformerParameters, dialParams.ObfuscatedQUICNonceTransformerParameters)) {
+		t.Fatalf("mismatching ObfuscatedQUICNonceTransformerParameters fields")
 	}
 
 	// Test: no replay after change tactics
@@ -805,4 +824,83 @@ func TestMakeHTTPTransformerParameters(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMakeOSSHObfuscatorSeedTranformerParameters(t *testing.T) {
+
+	type test struct {
+		name                  string
+		paramValues           map[string]interface{}
+		expectedTransformName string
+		expectedTransformSpec transforms.Spec
+	}
+
+	tests := []test{
+		{
+			name: "transform",
+			paramValues: map[string]interface{}{
+				"OSSHObfuscatorSeedTransformProbability": 1,
+				"OSSHObfuscatorSeedTransformSpecs": transforms.Specs{
+					"spec1": {{"A", "B"}},
+				},
+				"OSSHObfuscatorSeedTransformScopedSpecNames": transforms.ScopedSpecNames{
+					"": {"spec1"},
+				},
+			},
+			expectedTransformName: "spec1",
+			expectedTransformSpec: [][2]string{{"A", "B"}},
+		},
+		{
+			name: "no transform, coinflip false",
+			paramValues: map[string]interface{}{
+				"OSSHObfuscatorSeedTransformProbability": 0,
+				"OSSHObfuscatorSeedTransformSpecs": transforms.Specs{
+					"spec1": {{"A", "B"}},
+				},
+				"OSSHObfuscatorSeedTransformScopedSpecNames": transforms.ScopedSpecNames{
+					"": {"spec1"},
+				},
+			},
+			expectedTransformName: "",
+			expectedTransformSpec: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			params, err := parameters.NewParameters(nil)
+			if err != nil {
+				t.Fatalf("parameters.NewParameters failed: %v", err)
+			}
+
+			_, err = params.Set("", false, tt.paramValues)
+			if err != nil {
+				t.Fatalf("params.Set failed: %v", err)
+			}
+
+			transformerParams, err := makeSeedTransformerParameters(
+				params.Get(),
+				parameters.OSSHObfuscatorSeedTransformProbability,
+				parameters.OSSHObfuscatorSeedTransformSpecs,
+				parameters.OSSHObfuscatorSeedTransformScopedSpecNames)
+
+			if err != nil {
+				t.Fatalf("makeSeedTransformerParameters failed: %v", err)
+			}
+			if transformerParams.TransformName != tt.expectedTransformName {
+				t.Fatalf("expected TransformName \"%s\" but got \"%s\"", tt.expectedTransformName, transformerParams.TransformName)
+			}
+			if !reflect.DeepEqual(transformerParams.TransformSpec, tt.expectedTransformSpec) {
+				t.Fatalf("expected TransformSpec %v but got %v", tt.expectedTransformSpec, transformerParams.TransformSpec)
+			}
+			if transformerParams.TransformSpec != nil {
+				if transformerParams.TransformSeed == nil {
+					t.Fatalf("expected non-nil seed")
+				}
+			}
+
+		})
+	}
+
 }
