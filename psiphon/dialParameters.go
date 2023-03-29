@@ -732,16 +732,20 @@ func MakeDialParameters(
 
 		} else if !isReplay || !replayObfuscatedQUICNonceTransformer {
 
-			dialParams.ObfuscatedQUICNonceTransformerParameters, err = makeSeedTransformerParameters(
+			params, err := makeSeedTransformerParameters(
 				p,
 				parameters.ObfuscatedQUICNonceTransformProbability,
 				parameters.ObfuscatedQUICNonceTransformSpecs,
 				parameters.ObfuscatedQUICNonceTransformScopedSpecNames)
-
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 
+			if params.TransformSpec != nil {
+				dialParams.ObfuscatedQUICNonceTransformerParameters = params
+			} else {
+				dialParams.ObfuscatedQUICNonceTransformerParameters = nil
+			}
 		}
 
 	}
@@ -811,16 +815,20 @@ func MakeDialParameters(
 
 		} else if !isReplay || !replayOSSHSeedTransformerParameters {
 
-			dialParams.OSSHObfuscatorSeedTransformerParameters, err = makeSeedTransformerParameters(
+			params, err := makeSeedTransformerParameters(
 				p,
 				parameters.OSSHObfuscatorSeedTransformProbability,
 				parameters.OSSHObfuscatorSeedTransformSpecs,
 				parameters.OSSHObfuscatorSeedTransformScopedSpecNames)
-
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 
+			if params.TransformSpec != nil {
+				dialParams.OSSHObfuscatorSeedTransformerParameters = params
+			} else {
+				dialParams.OSSHObfuscatorSeedTransformerParameters = nil
+			}
 		}
 
 	}

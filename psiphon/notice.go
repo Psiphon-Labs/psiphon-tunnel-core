@@ -585,6 +585,18 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			}
 		}
 
+		if dialParams.OSSHObfuscatorSeedTransformerParameters != nil {
+			if dialParams.OSSHObfuscatorSeedTransformerParameters.TransformSpec != nil {
+				args = append(args, "SeedTransform", dialParams.OSSHObfuscatorSeedTransformerParameters.TransformName)
+			}
+		}
+
+		if dialParams.ObfuscatedQUICNonceTransformerParameters != nil {
+			if dialParams.ObfuscatedQUICNonceTransformerParameters.TransformSpec != nil {
+				args = append(args, "SeedTransform", dialParams.ObfuscatedQUICNonceTransformerParameters.TransformName)
+			}
+		}
+
 		if dialParams.DialConnMetrics != nil {
 			metrics := dialParams.DialConnMetrics.GetMetrics()
 			for name, value := range metrics {
