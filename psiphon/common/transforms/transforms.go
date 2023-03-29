@@ -197,7 +197,10 @@ func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (*regexp.Regexp, str
 
 	replacement := rg.Generate()
 
-	re := regexp.MustCompile(transform[0])
+	re, err := regexp.Compile(transform[0])
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
 
 	return re, replacement, nil
 }
