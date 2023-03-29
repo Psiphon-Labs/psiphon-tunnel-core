@@ -264,7 +264,7 @@ func TestObfuscatedSSHConn(t *testing.T) {
 	}
 }
 
-func TestObfuscatorSeedTransformParamters(t *testing.T) {
+func TestObfuscatorSeedTransformParameters(t *testing.T) {
 
 	keyword := prng.HexString(32)
 
