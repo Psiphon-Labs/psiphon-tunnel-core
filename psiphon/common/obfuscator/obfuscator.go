@@ -310,7 +310,7 @@ func readSeedMessage(
 	//
 	// Another false positive case: a retired server IP may be recycled and
 	// deployed with a new obfuscation key; legitimate clients may still attempt
-	// to connect using the old obfuscation key; this case is partically
+	// to connect using the old obfuscation key; this case is practically
 	// mitigated by the server entry pruning mechanism.
 	//
 	// Network I/O failures (e.g., failure to read the expected number of seed
