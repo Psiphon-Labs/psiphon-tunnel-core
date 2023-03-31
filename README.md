@@ -93,7 +93,7 @@ For these instructions, use:
 Run the "generate" mode of psiphond to generate configs, setting the IP address as appropriate; this is the address the client will use to connect to the server.
 
 ```
-$ ./psiphond -ipaddress 127.0.0.1 -protocol OSSH:9999 -protocol generate
+$ ./psiphond -ipaddress 127.0.0.1 -protocol OSSH:9999 generate
 
 $ ls
 psiphond
