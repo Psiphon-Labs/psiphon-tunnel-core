@@ -177,7 +177,6 @@ type Config struct {
 	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "TAPDANCE-OSSH", and "CONJURE-OSSH".
-
 	// For the default, an empty list, all protocols are used.
 	LimitTunnelProtocols []string
 
@@ -831,6 +830,14 @@ type Config struct {
 	FrontedHTTPProtocolTransformSpecs           transforms.Specs
 	FrontedHTTPProtocolTransformScopedSpecNames transforms.ScopedSpecNames
 	FrontedHTTPProtocolTransformProbability     *float64
+
+	OSSHObfuscatorSeedTransformSpecs           transforms.Specs
+	OSSHObfuscatorSeedTransformScopedSpecNames transforms.ScopedSpecNames
+	OSSHObfuscatorSeedTransformProbability     *float64
+
+	ObfuscatedQUICNonceTransformSpecs           transforms.Specs
+	ObfuscatedQUICNonceTransformScopedSpecNames transforms.ScopedSpecNames
+	ObfuscatedQUICNonceTransformProbability     *float64
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -1938,6 +1945,30 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.FrontedHTTPProtocolTransformProbability] = *config.FrontedHTTPProtocolTransformProbability
 	}
 
+	if config.OSSHObfuscatorSeedTransformSpecs != nil {
+		applyParameters[parameters.OSSHObfuscatorSeedTransformSpecs] = config.OSSHObfuscatorSeedTransformSpecs
+	}
+
+	if config.OSSHObfuscatorSeedTransformScopedSpecNames != nil {
+		applyParameters[parameters.OSSHObfuscatorSeedTransformScopedSpecNames] = config.OSSHObfuscatorSeedTransformScopedSpecNames
+	}
+
+	if config.OSSHObfuscatorSeedTransformProbability != nil {
+		applyParameters[parameters.OSSHObfuscatorSeedTransformProbability] = *config.OSSHObfuscatorSeedTransformProbability
+	}
+
+	if config.ObfuscatedQUICNonceTransformSpecs != nil {
+		applyParameters[parameters.ObfuscatedQUICNonceTransformSpecs] = config.ObfuscatedQUICNonceTransformSpecs
+	}
+
+	if config.ObfuscatedQUICNonceTransformScopedSpecNames != nil {
+		applyParameters[parameters.ObfuscatedQUICNonceTransformScopedSpecNames] = config.ObfuscatedQUICNonceTransformScopedSpecNames
+	}
+
+	if config.ObfuscatedQUICNonceTransformProbability != nil {
+		applyParameters[parameters.ObfuscatedQUICNonceTransformProbability] = *config.ObfuscatedQUICNonceTransformProbability
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2382,6 +2413,44 @@ func (config *Config) setDialParametersHash() {
 	if config.FrontedHTTPProtocolTransformProbability != nil {
 		hash.Write([]byte("FrontedHTTPProtocolTransformProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.FrontedHTTPProtocolTransformProbability)
+	}
+
+	if config.OSSHObfuscatorSeedTransformSpecs != nil {
+		hash.Write([]byte("OSSHObfuscatorSeedTransformSpecs"))
+		encodedOSSHObfuscatorSeedTransformSpecs, _ :=
+			json.Marshal(config.OSSHObfuscatorSeedTransformSpecs)
+		hash.Write(encodedOSSHObfuscatorSeedTransformSpecs)
+	}
+
+	if config.OSSHObfuscatorSeedTransformScopedSpecNames != nil {
+		hash.Write([]byte(""))
+		encodedOSSHObfuscatorSeedTransformScopedSpecNames, _ :=
+			json.Marshal(config.OSSHObfuscatorSeedTransformScopedSpecNames)
+		hash.Write(encodedOSSHObfuscatorSeedTransformScopedSpecNames)
+	}
+
+	if config.OSSHObfuscatorSeedTransformProbability != nil {
+		hash.Write([]byte("OSSHObfuscatorSeedTransformProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.OSSHObfuscatorSeedTransformProbability)
+	}
+
+	if config.ObfuscatedQUICNonceTransformSpecs != nil {
+		hash.Write([]byte("ObfuscatedQUICNonceTransformSpecs"))
+		encodedObfuscatedQUICNonceTransformSpecs, _ :=
+			json.Marshal(config.ObfuscatedQUICNonceTransformSpecs)
+		hash.Write(encodedObfuscatedQUICNonceTransformSpecs)
+	}
+
+	if config.ObfuscatedQUICNonceTransformScopedSpecNames != nil {
+		hash.Write([]byte(""))
+		encodedObfuscatedQUICNonceTransformScopedSpecNames, _ :=
+			json.Marshal(config.ObfuscatedQUICNonceTransformScopedSpecNames)
+		hash.Write(encodedObfuscatedQUICNonceTransformScopedSpecNames)
+	}
+
+	if config.ObfuscatedQUICNonceTransformProbability != nil {
+		hash.Write([]byte("ObfuscatedQUICNonceTransformProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.ObfuscatedQUICNonceTransformProbability)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

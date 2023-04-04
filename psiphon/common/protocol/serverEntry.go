@@ -44,37 +44,40 @@ import (
 // several protocols. Server entries are JSON records downloaded from
 // various sources.
 type ServerEntry struct {
-	Tag                           string   `json:"tag"`
-	IpAddress                     string   `json:"ipAddress"`
-	WebServerPort                 string   `json:"webServerPort"` // not an int
-	WebServerSecret               string   `json:"webServerSecret"`
-	WebServerCertificate          string   `json:"webServerCertificate"`
-	SshPort                       int      `json:"sshPort"`
-	SshUsername                   string   `json:"sshUsername"`
-	SshPassword                   string   `json:"sshPassword"`
-	SshHostKey                    string   `json:"sshHostKey"`
-	SshObfuscatedPort             int      `json:"sshObfuscatedPort"`
-	SshObfuscatedQUICPort         int      `json:"sshObfuscatedQUICPort"`
-	LimitQUICVersions             []string `json:"limitQUICVersions"`
-	SshObfuscatedTapDancePort     int      `json:"sshObfuscatedTapdancePort"`
-	SshObfuscatedConjurePort      int      `json:"sshObfuscatedConjurePort"`
-	SshObfuscatedKey              string   `json:"sshObfuscatedKey"`
-	Capabilities                  []string `json:"capabilities"`
-	Region                        string   `json:"region"`
-	FrontingProviderID            string   `json:"frontingProviderID"`
-	MeekServerPort                int      `json:"meekServerPort"`
-	MeekCookieEncryptionPublicKey string   `json:"meekCookieEncryptionPublicKey"`
-	MeekObfuscatedKey             string   `json:"meekObfuscatedKey"`
-	MeekFrontingHost              string   `json:"meekFrontingHost"`
-	MeekFrontingHosts             []string `json:"meekFrontingHosts"`
-	MeekFrontingDomain            string   `json:"meekFrontingDomain"`
-	MeekFrontingAddresses         []string `json:"meekFrontingAddresses"`
-	MeekFrontingAddressesRegex    string   `json:"meekFrontingAddressesRegex"`
-	MeekFrontingDisableSNI        bool     `json:"meekFrontingDisableSNI"`
-	TacticsRequestPublicKey       string   `json:"tacticsRequestPublicKey"`
-	TacticsRequestObfuscatedKey   string   `json:"tacticsRequestObfuscatedKey"`
-	ConfigurationVersion          int      `json:"configurationVersion"`
-	Signature                     string   `json:"signature"`
+	Tag                             string   `json:"tag"`
+	IpAddress                       string   `json:"ipAddress"`
+	WebServerPort                   string   `json:"webServerPort"` // not an int
+	WebServerSecret                 string   `json:"webServerSecret"`
+	WebServerCertificate            string   `json:"webServerCertificate"`
+	SshPort                         int      `json:"sshPort"`
+	SshUsername                     string   `json:"sshUsername"`
+	SshPassword                     string   `json:"sshPassword"`
+	SshHostKey                      string   `json:"sshHostKey"`
+	SshObfuscatedPort               int      `json:"sshObfuscatedPort"`
+	SshObfuscatedQUICPort           int      `json:"sshObfuscatedQUICPort"`
+	LimitQUICVersions               []string `json:"limitQUICVersions"`
+	SshObfuscatedTapDancePort       int      `json:"sshObfuscatedTapdancePort"`
+	SshObfuscatedConjurePort        int      `json:"sshObfuscatedConjurePort"`
+	SshObfuscatedKey                string   `json:"sshObfuscatedKey"`
+	Capabilities                    []string `json:"capabilities"`
+	Region                          string   `json:"region"`
+	FrontingProviderID              string   `json:"frontingProviderID"`
+	MeekServerPort                  int      `json:"meekServerPort"`
+	MeekCookieEncryptionPublicKey   string   `json:"meekCookieEncryptionPublicKey"`
+	MeekObfuscatedKey               string   `json:"meekObfuscatedKey"`
+	MeekFrontingHost                string   `json:"meekFrontingHost"`
+	MeekFrontingHosts               []string `json:"meekFrontingHosts"`
+	MeekFrontingDomain              string   `json:"meekFrontingDomain"`
+	MeekFrontingAddresses           []string `json:"meekFrontingAddresses"`
+	MeekFrontingAddressesRegex      string   `json:"meekFrontingAddressesRegex"`
+	MeekFrontingDisableSNI          bool     `json:"meekFrontingDisableSNI"`
+	TacticsRequestPublicKey         string   `json:"tacticsRequestPublicKey"`
+	TacticsRequestObfuscatedKey     string   `json:"tacticsRequestObfuscatedKey"`
+	ConfigurationVersion            int      `json:"configurationVersion"`
+	Signature                       string   `json:"signature"`
+	DisableHTTPTransforms           bool     `json:"disableHTTPTransforms"`
+	DisableObfuscatedQUICTransforms bool     `json:"disableObfuscatedQUICTransforms"`
+	DisableOSSHTransforms           bool     `json:"disableOSSHTransforms"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
