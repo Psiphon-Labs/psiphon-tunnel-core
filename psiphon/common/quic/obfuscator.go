@@ -34,6 +34,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/Yawning/chacha20"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	ietf_quic "github.com/Psiphon-Labs/quic-go"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/net/ipv4"
@@ -103,19 +104,20 @@ const (
 // introducing some risk of fragmentation and/or dropped packets.
 type ObfuscatedPacketConn struct {
 	net.PacketConn
-	isServer         bool
-	isIETFClient     bool
-	isDecoyClient    bool
-	isClosed         int32
-	runWaitGroup     *sync.WaitGroup
-	stopBroadcast    chan struct{}
-	obfuscationKey   [32]byte
-	peerModesMutex   sync.Mutex
-	peerModes        map[string]*peerMode
-	noncePRNG        *prng.PRNG
-	paddingPRNG      *prng.PRNG
-	decoyPacketCount int32
-	decoyBuffer      []byte
+	isServer                   bool
+	isIETFClient               bool
+	isDecoyClient              bool
+	isClosed                   int32
+	runWaitGroup               *sync.WaitGroup
+	stopBroadcast              chan struct{}
+	obfuscationKey             [32]byte
+	peerModesMutex             sync.Mutex
+	peerModes                  map[string]*peerMode
+	noncePRNG                  *prng.PRNG
+	paddingPRNG                *prng.PRNG
+	nonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
+	decoyPacketCount           int32
+	decoyBuffer                []byte
 }
 
 type peerMode struct {
@@ -128,14 +130,56 @@ func (p *peerMode) isStale() bool {
 	return time.Since(p.lastPacketTime) >= SERVER_IDLE_TIMEOUT
 }
 
-// NewObfuscatedPacketConn creates a new ObfuscatedPacketConn.
-func NewObfuscatedPacketConn(
+func NewClientObfuscatedPacketConn(
+	packetConn net.PacketConn,
+	isServer bool,
+	isIETFClient bool,
+	isDecoyClient bool,
+	obfuscationKey string,
+	paddingSeed *prng.Seed,
+	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
+) (*ObfuscatedPacketConn, error) {
+
+	return newObfuscatedPacketConn(
+		packetConn,
+		isServer,
+		isIETFClient,
+		isDecoyClient,
+		obfuscationKey,
+		paddingSeed,
+		obfuscationNonceTransformerParameters)
+
+}
+
+func NewServerObfuscatedPacketConn(
 	packetConn net.PacketConn,
 	isServer bool,
 	isIETFClient bool,
 	isDecoyClient bool,
 	obfuscationKey string,
 	paddingSeed *prng.Seed) (*ObfuscatedPacketConn, error) {
+
+	return newObfuscatedPacketConn(
+		packetConn,
+		isServer,
+		isIETFClient,
+		isDecoyClient,
+		obfuscationKey,
+		paddingSeed,
+		nil)
+
+}
+
+// newObfuscatedPacketConn creates a new ObfuscatedPacketConn.
+func newObfuscatedPacketConn(
+	packetConn net.PacketConn,
+	isServer bool,
+	isIETFClient bool,
+	isDecoyClient bool,
+	obfuscationKey string,
+	paddingSeed *prng.Seed,
+	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
+) (*ObfuscatedPacketConn, error) {
 
 	// There is no replay of obfuscation "encryption", just padding.
 	nonceSeed, err := prng.NewSeed()
@@ -144,13 +188,14 @@ func NewObfuscatedPacketConn(
 	}
 
 	conn := &ObfuscatedPacketConn{
-		PacketConn:    packetConn,
-		isServer:      isServer,
-		isIETFClient:  isIETFClient,
-		isDecoyClient: isDecoyClient,
-		peerModes:     make(map[string]*peerMode),
-		noncePRNG:     prng.NewPRNGWithSeed(nonceSeed),
-		paddingPRNG:   prng.NewPRNGWithSeed(paddingSeed),
+		PacketConn:                 packetConn,
+		isServer:                   isServer,
+		isIETFClient:               isIETFClient,
+		isDecoyClient:              isDecoyClient,
+		peerModes:                  make(map[string]*peerMode),
+		noncePRNG:                  prng.NewPRNGWithSeed(nonceSeed),
+		paddingPRNG:                prng.NewPRNGWithSeed(paddingSeed),
+		nonceTransformerParameters: obfuscationNonceTransformerParameters,
 	}
 
 	secret := []byte(obfuscationKey)
@@ -320,7 +365,7 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 		n, oobn, flags, addr, isIETF, err := conn.readPacket(p, oob)
 
 		// When enabled, and when a packet is received, sometimes immediately
-		// respond with a decoy packet, which is Sentirely random. Sending a
+		// respond with a decoy packet, which is entirely random. Sending a
 		// small number of these packets early in the connection is intended
 		// to frustrate simple traffic fingerprinting which looks for a
 		// certain number of packets client->server, followed by a certain
@@ -632,6 +677,16 @@ func (conn *ObfuscatedPacketConn) writePacket(
 
 			nonce := buffer[0:NONCE_SIZE]
 			conn.noncePRNG.Read(nonce)
+
+			// This transform may reduce the entropy of the nonce, which increases
+			// the chance of nonce reuse. However, this chacha20 encryption is for
+			// obfuscation purposes only.
+			if conn.nonceTransformerParameters != nil {
+				err := conn.nonceTransformerParameters.Apply(nonce)
+				if err != nil {
+					return 0, 0, errors.Trace(err)
+				}
+			}
 
 			maxPadding := getMaxPaddingSize(isIETF, addr, n)
 
