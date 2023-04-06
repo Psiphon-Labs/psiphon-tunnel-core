@@ -921,6 +921,7 @@ var baseDialParams = []requestParamSpec{
 	{"upstream_ossh_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_cookie_size", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"meek_limit_request", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"meek_redial_probability", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
