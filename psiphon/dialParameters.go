@@ -807,7 +807,9 @@ func MakeDialParameters(
 
 	}
 
-	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
+	// OSSH seed transforms are applied only to the OSSH tunnel protocol, and
+	// not to any other protocol layered over OSSH.
+	if dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
 
 		if serverEntry.DisableOSSHTransforms {
 
