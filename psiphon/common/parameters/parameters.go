@@ -222,6 +222,7 @@ const (
 	ReplayTargetTunnelDuration                       = "ReplayTargetTunnelDuration"
 	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
 	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
+	ReplayIgnoreChangedConfigState                   = "ReplayIgnoreChangedConfigState"
 	ReplayBPF                                        = "ReplayBPF"
 	ReplaySSH                                        = "ReplaySSH"
 	ReplayObfuscatorPadding                          = "ReplayObfuscatorPadding"
@@ -573,6 +574,7 @@ var defaultParameters = map[string]struct {
 	ReplayTargetTunnelDuration:             {value: 1 * time.Second, minimum: time.Duration(0)},
 	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
 	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
+	ReplayIgnoreChangedConfigState:         {value: false},
 	ReplayBPF:                              {value: true},
 	ReplaySSH:                              {value: true},
 	ReplayObfuscatorPadding:                {value: true},

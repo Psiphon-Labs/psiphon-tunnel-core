@@ -385,9 +385,28 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("mismatching ObfuscatedQUICNonceTransformerParameters fields")
 	}
 
+	// Test: replay after change tactics, with ReplayIgnoreChangedClientState = true
+
+	applyParameters[parameters.ReplayDialParametersTTL] = "1s"
+	applyParameters[parameters.ReplayIgnoreChangedConfigState] = true
+	err = clientConfig.SetParameters("tag2a", false, applyParameters)
+	if err != nil {
+		t.Fatalf("SetParameters failed: %s", err)
+	}
+
+	dialParams, err = MakeDialParameters(clientConfig, nil, canReplay, selectProtocol, serverEntries[0], false, 0, 0)
+	if err != nil {
+		t.Fatalf("MakeDialParameters failed: %s", err)
+	}
+
+	if !replayDialParams.IsReplay {
+		t.Fatalf("unexpected non-replay")
+	}
+
 	// Test: no replay after change tactics
 
 	applyParameters[parameters.ReplayDialParametersTTL] = "1s"
+	applyParameters[parameters.ReplayIgnoreChangedConfigState] = false
 	err = clientConfig.SetParameters("tag2", false, applyParameters)
 	if err != nil {
 		t.Fatalf("SetParameters failed: %s", err)
