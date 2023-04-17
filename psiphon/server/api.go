@@ -937,6 +937,7 @@ var baseDialParams = []requestParamSpec{
 	{"dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"http_transform", isAnyString, requestParamOptional},
 	{"seed_transform", isAnyString, requestParamOptional},
+	{"ossh_prefix", isAnyString, requestParamOptional},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.
