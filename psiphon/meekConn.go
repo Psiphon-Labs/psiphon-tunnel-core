@@ -864,6 +864,7 @@ func (meek *MeekConn) GetMetrics() common.LogFields {
 		logFields["meek_cookie_size"] = meek.cookieSize
 		logFields["meek_tls_padding"] = meek.tlsPadding
 		logFields["meek_limit_request"] = meek.limitRequestPayloadLength
+		logFields["meek_redial_probability"] = meek.redialTLSProbability
 	}
 	// Include metrics, such as fragmentor metrics, from the _first_ underlying
 	// dial conn. Properties of subsequent underlying dial conns are not reflected
@@ -1160,8 +1161,9 @@ func (meek *MeekConn) relay() {
 			return
 		}
 
-		// Periodically re-dial the underlying TLS connection.
-
+		// Periodically re-dial the underlying TLS/TCP connection
+		// (notwithstanding the parameter name, this also applies to TCP
+		// connections for HTTP protocols).
 		if prng.FlipWeightedCoin(meek.redialTLSProbability) {
 			meek.transport.CloseIdleConnections()
 		}

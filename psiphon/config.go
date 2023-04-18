@@ -741,6 +741,7 @@ type Config struct {
 	ReplayTargetTunnelDurationSeconds      *int
 	ReplayLaterRoundMoveToFrontProbability *float64
 	ReplayRetainFailedProbability          *float64
+	ReplayIgnoreChangedConfigState         *bool
 
 	// NetworkLatencyMultiplierMin and other NetworkLatencyMultiplier fields are
 	// for testing purposes.
@@ -1731,6 +1732,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ReplayRetainFailedProbability != nil {
 		applyParameters[parameters.ReplayRetainFailedProbability] = *config.ReplayRetainFailedProbability
+	}
+
+	if config.ReplayIgnoreChangedConfigState != nil {
+		applyParameters[parameters.ReplayIgnoreChangedConfigState] = *config.ReplayIgnoreChangedConfigState
 	}
 
 	if config.UseOnlyCustomTLSProfiles != nil {

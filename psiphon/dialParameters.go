@@ -70,6 +70,7 @@ type DialParameters struct {
 
 	LastUsedTimestamp       time.Time
 	LastUsedConfigStateHash []byte
+	LastUsedServerEntryHash []byte
 
 	NetworkLatencyMultiplier float64
 
@@ -184,6 +185,7 @@ func MakeDialParameters(
 	p := config.GetParameters().Get()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
+	replayIgnoreChangedConfigState := p.Bool(parameters.ReplayIgnoreChangedConfigState)
 	replayBPF := p.Bool(parameters.ReplayBPF)
 	replaySSH := p.Bool(parameters.ReplaySSH)
 	replayObfuscatorPadding := p.Bool(parameters.ReplayObfuscatorPadding)
@@ -230,19 +232,34 @@ func MakeDialParameters(
 
 	var currentTimestamp time.Time
 	var configStateHash []byte
+	var serverEntryHash []byte
 
 	// When TTL is 0, replay is disabled; the timestamp remains 0 and the
 	// output DialParameters will not be stored by Success.
 
 	if ttl > 0 {
 		currentTimestamp = time.Now()
-		configStateHash = getConfigStateHash(config, p, serverEntry)
+		configStateHash, serverEntryHash = getDialStateHashes(config, p, serverEntry)
 	}
 
 	if dialParams != nil &&
 		(ttl <= 0 ||
 			dialParams.LastUsedTimestamp.Before(currentTimestamp.Add(-ttl)) ||
-			!bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash) ||
+
+			// Replay is disabled when the current config state hash -- config
+			// dial parameters and the current tactics tag -- have changed
+			// since the last dial. This prioritizes applying any potential
+			// tactics change over redialing with parameters that may have
+			// changed in tactics.
+			//
+			// Because of this, frequent tactics changes may degrade replay
+			// effectiveness. When ReplayIgnoreChangedConfigState is set,
+			// differences in the config state hash are ignored.
+			(!replayIgnoreChangedConfigState && !bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash)) ||
+
+			// Replay is disabled when the server entry has changed.
+			!bytes.Equal(dialParams.LastUsedServerEntryHash, serverEntryHash) ||
+
 			(dialParams.TLSProfile != "" &&
 				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile)) ||
 			(dialParams.QUICVersion != "" &&
@@ -330,6 +347,7 @@ func MakeDialParameters(
 
 	dialParams.LastUsedTimestamp = currentTimestamp
 	dialParams.LastUsedConfigStateHash = configStateHash
+	dialParams.LastUsedServerEntryHash = serverEntryHash
 
 	// Initialize dial parameters.
 	//
@@ -807,7 +825,9 @@ func MakeDialParameters(
 
 	}
 
-	if protocol.TunnelProtocolUsesObfuscatedSSH(dialParams.TunnelProtocol) {
+	// OSSH seed transforms are applied only to the OSSH tunnel protocol, and
+	// not to any other protocol layered over OSSH.
+	if dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
 
 		if serverEntry.DisableOSSHTransforms {
 
@@ -1238,35 +1258,46 @@ func (dialParams *ExchangedDialParameters) MakeDialParameters(
 	p parameters.ParametersAccessor,
 	serverEntry *protocol.ServerEntry) *DialParameters {
 
+	configStateHash, serverEntryHash := getDialStateHashes(config, p, serverEntry)
+
 	return &DialParameters{
 		IsExchanged:             true,
 		LastUsedTimestamp:       time.Now(),
-		LastUsedConfigStateHash: getConfigStateHash(config, p, serverEntry),
+		LastUsedConfigStateHash: configStateHash,
+		LastUsedServerEntryHash: serverEntryHash,
 		TunnelProtocol:          dialParams.TunnelProtocol,
 	}
 }
 
-func getConfigStateHash(
+// getDialStateHashes returns two hashes: the config state hash reflects the
+// config dial parameters and tactics tag used for a dial; and the server
+// entry hash relects the server entry used for a dial.
+//
+// These hashes change if the input values change in a way that invalidates
+// any stored dial parameters.
+func getDialStateHashes(
 	config *Config,
 	p parameters.ParametersAccessor,
-	serverEntry *protocol.ServerEntry) []byte {
-
-	// The config state hash should reflect config, tactics, and server entry
-	// settings that impact the dial parameters. The hash should change if any
-	// of these input values change in a way that invalidates any stored dial
-	// parameters.
+	serverEntry *protocol.ServerEntry) ([]byte, []byte) {
 
 	// MD5 hash is used solely as a data checksum and not for any security
 	// purpose.
 	hash := md5.New()
 
-	// Add a hash of relevant config fields.
+	// Add a hash of relevant dial parameter config fields. Config fields
+	// that change due to user preference changes, such as selected egress
+	// region, are not to be included in config.dialParametersHash.
+	//
 	// Limitation: the config hash may change even when tactics will override the
 	// changed config field.
 	hash.Write(config.dialParametersHash)
 
 	// Add the active tactics tag.
 	hash.Write([]byte(p.Tag()))
+
+	clientStateHash := hash.Sum(nil)
+
+	hash = md5.New()
 
 	// Add the server entry version and local timestamp, both of which should
 	// change when the server entry contents change and/or a new local copy is
@@ -1279,7 +1310,9 @@ func getConfigStateHash(
 	hash.Write(serverEntryConfigurationVersion[:])
 	hash.Write([]byte(serverEntry.LocalTimestamp))
 
-	return hash.Sum(nil)
+	serverEntryHash := hash.Sum(nil)
+
+	return clientStateHash, serverEntryHash
 }
 
 func selectFrontingParameters(
