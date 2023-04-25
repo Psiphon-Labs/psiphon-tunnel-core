@@ -263,6 +263,8 @@ func GetContentType(PRNG *prng.PRNG) string {
 	return spec.GetValue(PRNG)
 }
 
+// generate string given the regexp pattern.
+// generate is intended to be used with hardcoded inputs, and panics on error.
 func generate(PRNG *prng.PRNG, pattern string) string {
 
 	args := &regen.GeneratorArgs{

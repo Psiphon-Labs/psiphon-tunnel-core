@@ -49,20 +49,6 @@ func inspectRegexpToString(r *syntax.Regexp) string {
 	return buffer.String()
 }
 
-// inspectPatternsToString returns a string describing one or more regular expressions.
-func inspectPatternsToString(simplify bool, patterns ...string) string {
-	var buffer bytes.Buffer
-	for _, pattern := range patterns {
-		inspectPatternsToWriter(simplify, &buffer, pattern)
-	}
-	return buffer.String()
-}
-func inspectPatternsToWriter(simplify bool, w io.Writer, patterns ...string) {
-	for _, pattern := range patterns {
-		inspectRegexpToWriter(w, parseOrPanic(simplify, pattern))
-	}
-}
-
 func inspectRegexpToWriter(w io.Writer, r ...*syntax.Regexp) {
 	for _, regexp := range r {
 		inspectWithIndent(regexp, "", w)
@@ -88,26 +74,8 @@ func inspectWithIndent(r *syntax.Regexp, indent string, w io.Writer) {
 	fmt.Fprintf(w, "%s  Name: %s\n", indent, r.Name)
 }
 
-// ParseOrPanic parses a regular expression into an AST.
-// Panics on error.
-func parseOrPanic(simplify bool, pattern string) *syntax.Regexp {
-	regexp, err := syntax.Parse(pattern, 0)
-	if err != nil {
-		panic(err)
-	}
-	if simplify {
-		regexp = regexp.Simplify()
-	}
-	return regexp
-}
-
 // runesToUTF8 converts a slice of runes to the Unicode string they represent.
 func runesToUTF8(runes ...rune) []byte {
-	defer func() {
-		if err := recover(); err != nil {
-			panic(fmt.Errorf("RunesToString panicked"))
-		}
-	}()
 	var buffer bytes.Buffer
 	for _, r := range runes {
 		buffer.WriteRune(r)
@@ -118,11 +86,6 @@ func runesToUTF8(runes ...rune) []byte {
 // runesToBytes converst a slice of runes to a slice of bytes.
 // Returns an error if runes not in the range [0-255].
 func runesToBytes(runes ...rune) ([]byte, error) {
-	defer func() {
-		if err := recover(); err != nil {
-			panic(fmt.Errorf("RunesToBytes panicked"))
-		}
-	}()
 	var buffer bytes.Buffer
 	for _, r := range runes {
 		if r < 0 || r > 255 {
