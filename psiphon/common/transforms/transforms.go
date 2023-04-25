@@ -29,7 +29,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	regen "github.com/zach-klippenstein/goregen"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 )
 
 const (
@@ -195,12 +195,15 @@ func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (*regexp.Regexp, str
 		return nil, "", errors.Trace(err)
 	}
 
-	replacement := rg.Generate()
+	replacement, err := rg.Generate()
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
 
 	re, err := regexp.Compile(transform[0])
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
 
-	return re, replacement, nil
+	return re, string(replacement), nil
 }
