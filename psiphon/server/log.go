@@ -59,17 +59,20 @@ func (a LogFields) Add(b LogFields) {
 	}
 }
 
-// WithTrace adds a "trace" field containing the caller's function name
-// and source file line number; and "host_id" and "build_rev" fields
+// WithTrace adds a "trace" field containing the caller's function name and
+// source file line number; and "host_id", "provider", and "build_rev" fields
 // identifying this server and build. Use this function when the log has no
 // fields.
 func (logger *TraceLogger) WithTrace() *logrus.Entry {
-	return logger.WithFields(
-		logrus.Fields{
-			"trace":     stacktrace.GetParentFunctionName(),
-			"host_id":   logHostID,
-			"build_rev": logBuildRev,
-		})
+	fields := logrus.Fields{
+		"trace":     stacktrace.GetParentFunctionName(),
+		"host_id":   logHostID,
+		"build_rev": logBuildRev,
+	}
+	if logHostProvider != "" {
+		fields["provider"] = logHostProvider
+	}
+	return logger.WithFields(fields)
 }
 
 func renameLogFields(fields LogFields) {
@@ -79,36 +82,50 @@ func renameLogFields(fields LogFields) {
 	if _, ok := fields["host_id"]; ok {
 		fields["fields.host_id"] = fields["host_id"]
 	}
+	if _, ok := fields["provider"]; ok {
+		fields["fields.provider"] = fields["provider"]
+	}
 	if _, ok := fields["build_rev"]; ok {
 		fields["fields.build_rev"] = fields["build_rev"]
 	}
 }
 
 // WithTraceFields adds a "trace" field containing the caller's function name
-// and source file line number; and "host_id" and "build_rev" fields
-// identifying this server and build. Use this function when the log has
-// fields. Note that any existing "trace"/"host_id"/"build_rev" field will be
-// renamed to "field.<name>".
+// and source file line number; and "host_id", "provider", and "build_rev"
+// fields identifying this server and build. Use this function when the log
+// has fields.
+//
+// Note that any existing "trace"/"host_id"/"provider"/build_rev" field will
+// be renamed to "field.<name>".
 func (logger *TraceLogger) WithTraceFields(fields LogFields) *logrus.Entry {
 	renameLogFields(fields)
 	fields["trace"] = stacktrace.GetParentFunctionName()
 	fields["host_id"] = logHostID
+	if logHostProvider != "" {
+		fields["provider"] = logHostProvider
+	}
 	fields["build_rev"] = logBuildRev
 	return logger.WithFields(logrus.Fields(fields))
 }
 
-// LogRawFieldsWithTimestamp directly logs the supplied fields adding only
-// an additional "timestamp" field; and "host_id" and "build_rev" fields
-// identifying this server and build. The stock "msg" and "level" fields are
-// omitted. This log is emitted at the Error level. This function exists to
-// support API logs which have neither a natural message nor severity; and
-// omitting these values here makes it easier to ship these logs to existing
-// API log consumers.
-// Note that any existing "trace"/"host_id"/"build_rev" field will be renamed
-// to "field.<name>".
+// LogRawFieldsWithTimestamp directly logs the supplied fields adding only an
+// additional "timestamp" field; and "host_id", "provider", and "build_rev"
+// fields identifying this server and build. The stock "msg" and "level"
+// fields are omitted.
+//
+// This log is emitted at the Error level. This function exists to support API
+// logs which have neither a natural message nor severity; and omitting these
+// values here makes it easier to ship these logs to existing API log
+// consumers.
+//
+// Note that any existing "trace"/"host_id"/"provider"/"build_rev" field will
+// be renamed to "field.<name>".
 func (logger *TraceLogger) LogRawFieldsWithTimestamp(fields LogFields) {
 	renameLogFields(fields)
 	fields["host_id"] = logHostID
+	if logHostProvider != "" {
+		fields["provider"] = logHostProvider
+	}
 	fields["build_rev"] = logBuildRev
 	logger.WithFields(logrus.Fields(fields)).Error(
 		customJSONFormatterLogRawFieldsWithTimestamp)
@@ -190,7 +207,6 @@ const customJSONFormatterLogRawFieldsWithTimestamp = "CustomJSONFormatter.LogRaw
 // The changes are:
 // - "time" is renamed to "timestamp"
 // - there's an option to omit the standard "msg" and "level" fields
-//
 func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	data := make(logrus.Fields, len(entry.Data)+3)
 	for k, v := range entry.Data {
@@ -237,7 +253,7 @@ func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 }
 
 var log *TraceLogger
-var logHostID, logBuildRev string
+var logHostID, logHostProvider, logBuildRev string
 var initLogging sync.Once
 
 // InitLogging configures a logger according to the specified
@@ -252,6 +268,7 @@ func InitLogging(config *Config) (retErr error) {
 	initLogging.Do(func() {
 
 		logHostID = config.HostID
+		logHostProvider = config.HostProvider
 		logBuildRev = buildinfo.GetBuildInfo().BuildRev
 
 		level, err := logrus.ParseLevel(config.LogLevel)

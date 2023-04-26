@@ -140,6 +140,7 @@ func TestSSH(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -165,6 +166,7 @@ func TestOSSH(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -190,6 +192,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -215,6 +218,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -240,6 +244,7 @@ func TestFragmentedUnfrontedMeek(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -266,6 +271,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -292,6 +298,7 @@ func TestFragmentedUnfrontedMeekHTTPS(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -318,6 +325,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -344,6 +352,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -370,6 +379,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -398,6 +408,7 @@ func TestQUICOSSH(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -426,6 +437,7 @@ func TestLimitedQUICOSSH(t *testing.T) {
 			limitQUICVersions:    true,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -451,6 +463,7 @@ func TestWebTransportAPIRequests(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -476,6 +489,7 @@ func TestHotReload(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -501,6 +515,7 @@ func TestDefaultSponsorID(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -526,6 +541,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -551,6 +567,7 @@ func TestOmitAuthorization(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -576,6 +593,7 @@ func TestNoAuthorization(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -601,6 +619,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -626,6 +645,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -651,6 +671,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -676,6 +697,7 @@ func TestLivenessTest(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -701,6 +723,7 @@ func TestPruneServerEntries(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -726,6 +749,7 @@ func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   true,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -751,6 +775,7 @@ func TestChangeBytesConfig(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   true,
 			doChangeBytesConfig:  true,
+			doLogHostProvider:    true,
 		})
 }
 
@@ -776,6 +801,33 @@ func TestSplitTunnel(t *testing.T) {
 			limitQUICVersions:    false,
 			doDestinationBytes:   false,
 			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
+		})
+}
+
+func TestOmitProvider(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     false,
+			forceLivenessTest:    false,
+			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
+			doBurstMonitor:       false,
+			doSplitTunnel:        true,
+			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
+			doLogHostProvider:    false,
 		})
 }
 
@@ -800,6 +852,7 @@ type runServerConfig struct {
 	limitQUICVersions    bool
 	doDestinationBytes   bool
 	doChangeBytesConfig  bool
+	doLogHostProvider    bool
 }
 
 var (
@@ -1008,6 +1061,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		serverConfig["EnableGQUIC"] = true
 	}
 
+	if runConfig.doLogHostProvider {
+		serverConfig["HostProvider"] = "example-host-provider"
+	}
+
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	uniqueUserLog := make(chan map[string]interface{}, 1)
@@ -1052,6 +1109,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverWaitGroup.Add(1)
 	go func() {
 		defer serverWaitGroup.Done()
+
+		// Workaround for one-time logging initialization that persists across
+		// test runs. Reset logging to uninitialized. This assumes the
+		// previous run has completed and not left any dangling goroutines
+		// that may access these variables.
+		if log != nil {
+			log = nil
+			initLogging = sync.Once{}
+		}
+
 		err := RunServices(serverConfigJSON)
 		if err != nil {
 			// TODO: wrong goroutine for t.FatalNow()
@@ -1682,6 +1749,7 @@ func checkExpectedServerTunnelLogFields(
 	// - fronting_provider_id/meek_dial_ip_address/meek_resolved_ip_address only logged for FRONTED meek protocols
 
 	for _, name := range []string{
+		"host_id",
 		"start_time",
 		"duration",
 		"session_id",
@@ -1714,6 +1782,10 @@ func checkExpectedServerTunnelLogFields(
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
 		}
+	}
+
+	if fields["host_id"].(string) != "example-host-id" {
+		return fmt.Errorf("unexpected host_id '%s'", fields["host_id"])
 	}
 
 	if fields["relay_protocol"].(string) != runConfig.tunnelProtocol {
@@ -2112,6 +2184,20 @@ func checkExpectedServerTunnelLogFields(
 			if !ok {
 				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
 			}
+		}
+	}
+
+	if runConfig.doLogHostProvider {
+		name := "provider"
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		} else if fmt.Sprintf("%s", fields[name]) != "example-host-provider" {
+			return fmt.Errorf("unexpected field value %s: '%s'", name, fields[name])
+		}
+	} else {
+		name := "provider"
+		if fields[name] != nil {
+			return fmt.Errorf("unexpected field '%s'", name)
 		}
 	}
 
