@@ -269,6 +269,11 @@ func (p *PRNG) Perm(n int) []int {
 	return p.rand.Perm(n)
 }
 
+// Shuffle is equivilent to math/rand.Shuffle.
+func (p *PRNG) Shuffle(n int, swap func(i, j int)) {
+	p.rand.Shuffle(n, swap)
+}
+
 // Range selects a random integer in [min, max].
 // If min < 0, min is set to 0. If max < min, min is returned.
 func (p *PRNG) Range(min, max int) int {

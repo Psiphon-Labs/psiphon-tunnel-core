@@ -295,3 +295,80 @@ func testServerEntryListSignatures(t *testing.T, setExplicitTag bool) {
 		t.Fatalf("AddSignature unexpectedly succeeded")
 	}
 }
+
+func TestIsValidDialAddress(t *testing.T) {
+
+	serverEntry := &ServerEntry{
+		IpAddress:                  "192.168.0.1",
+		SshPort:                    1,
+		SshObfuscatedPort:          2,
+		SshObfuscatedQUICPort:      3,
+		Capabilities:               []string{"handshake", "SSH", "OSSH", "QUIC", "FRONTED-MEEK"},
+		MeekFrontingAddressesRegex: "[ab]+",
+		MeekServerPort:             443,
+	}
+
+	testCases := []struct {
+		description     string
+		networkProtocol string
+		dialHost        string
+		dialPortNumber  int
+		isValid         bool
+	}{
+		{
+			"valid IP dial",
+			"tcp", "192.168.0.1", 1,
+			true,
+		},
+		{
+			"valid domain dial",
+			"tcp", "aaabbbaaabbb", 443,
+			true,
+		},
+		{
+			"valid UDP dial",
+			"tcp", "192.168.0.1", 1,
+			true,
+		},
+		{
+			"invalid network dial",
+			"udp", "192.168.0.1", 1,
+			false,
+		},
+		{
+			"invalid IP dial",
+			"tcp", "192.168.0.2", 1,
+			false,
+		},
+		{
+			"invalid domain dial",
+			"tcp", "aaabbbcccbbb", 443,
+			false,
+		},
+		{
+			"invalid port dial",
+			"tcp", "192.168.0.1", 4,
+			false,
+		},
+		{
+			"invalid domain port dial",
+			"tcp", "aaabbbaaabbb", 80,
+			false,
+		},
+		{
+			"invalid domain newline dial",
+			"tcp", "aaabbbaaabbb\nccc", 443,
+			false,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.description, func(t *testing.T) {
+			if testCase.isValid != serverEntry.IsValidDialAddress(
+				testCase.networkProtocol, testCase.dialHost, testCase.dialPortNumber) {
+
+				t.Errorf("unexpected IsValidDialAddress result")
+			}
+		})
+	}
+}

@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -44,40 +45,42 @@ import (
 // several protocols. Server entries are JSON records downloaded from
 // various sources.
 type ServerEntry struct {
-	Tag                             string   `json:"tag"`
-	IpAddress                       string   `json:"ipAddress"`
-	WebServerPort                   string   `json:"webServerPort"` // not an int
-	WebServerSecret                 string   `json:"webServerSecret"`
-	WebServerCertificate            string   `json:"webServerCertificate"`
-	SshPort                         int      `json:"sshPort"`
-	SshUsername                     string   `json:"sshUsername"`
-	SshPassword                     string   `json:"sshPassword"`
-	SshHostKey                      string   `json:"sshHostKey"`
-	SshObfuscatedPort               int      `json:"sshObfuscatedPort"`
-	SshObfuscatedQUICPort           int      `json:"sshObfuscatedQUICPort"`
-	LimitQUICVersions               []string `json:"limitQUICVersions"`
-	SshObfuscatedTapDancePort       int      `json:"sshObfuscatedTapdancePort"`
-	SshObfuscatedConjurePort        int      `json:"sshObfuscatedConjurePort"`
-	SshObfuscatedKey                string   `json:"sshObfuscatedKey"`
-	Capabilities                    []string `json:"capabilities"`
-	Region                          string   `json:"region"`
-	FrontingProviderID              string   `json:"frontingProviderID"`
-	MeekServerPort                  int      `json:"meekServerPort"`
-	MeekCookieEncryptionPublicKey   string   `json:"meekCookieEncryptionPublicKey"`
-	MeekObfuscatedKey               string   `json:"meekObfuscatedKey"`
-	MeekFrontingHost                string   `json:"meekFrontingHost"`
-	MeekFrontingHosts               []string `json:"meekFrontingHosts"`
-	MeekFrontingDomain              string   `json:"meekFrontingDomain"`
-	MeekFrontingAddresses           []string `json:"meekFrontingAddresses"`
-	MeekFrontingAddressesRegex      string   `json:"meekFrontingAddressesRegex"`
-	MeekFrontingDisableSNI          bool     `json:"meekFrontingDisableSNI"`
-	TacticsRequestPublicKey         string   `json:"tacticsRequestPublicKey"`
-	TacticsRequestObfuscatedKey     string   `json:"tacticsRequestObfuscatedKey"`
-	ConfigurationVersion            int      `json:"configurationVersion"`
-	Signature                       string   `json:"signature"`
-	DisableHTTPTransforms           bool     `json:"disableHTTPTransforms"`
-	DisableObfuscatedQUICTransforms bool     `json:"disableObfuscatedQUICTransforms"`
-	DisableOSSHTransforms           bool     `json:"disableOSSHTransforms"`
+	Tag                                 string   `json:"tag"`
+	IpAddress                           string   `json:"ipAddress"`
+	WebServerPort                       string   `json:"webServerPort"` // not an int
+	WebServerSecret                     string   `json:"webServerSecret"`
+	WebServerCertificate                string   `json:"webServerCertificate"`
+	SshPort                             int      `json:"sshPort"`
+	SshUsername                         string   `json:"sshUsername"`
+	SshPassword                         string   `json:"sshPassword"`
+	SshHostKey                          string   `json:"sshHostKey"`
+	SshObfuscatedPort                   int      `json:"sshObfuscatedPort"`
+	SshObfuscatedQUICPort               int      `json:"sshObfuscatedQUICPort"`
+	LimitQUICVersions                   []string `json:"limitQUICVersions"`
+	SshObfuscatedTapDancePort           int      `json:"sshObfuscatedTapdancePort"`
+	SshObfuscatedConjurePort            int      `json:"sshObfuscatedConjurePort"`
+	SshObfuscatedKey                    string   `json:"sshObfuscatedKey"`
+	Capabilities                        []string `json:"capabilities"`
+	Region                              string   `json:"region"`
+	FrontingProviderID                  string   `json:"frontingProviderID"`
+	MeekServerPort                      int      `json:"meekServerPort"`
+	MeekCookieEncryptionPublicKey       string   `json:"meekCookieEncryptionPublicKey"`
+	MeekObfuscatedKey                   string   `json:"meekObfuscatedKey"`
+	MeekFrontingHost                    string   `json:"meekFrontingHost"`
+	MeekFrontingHosts                   []string `json:"meekFrontingHosts"`
+	MeekFrontingDomain                  string   `json:"meekFrontingDomain"`
+	MeekFrontingAddresses               []string `json:"meekFrontingAddresses"`
+	MeekFrontingAddressesRegex          string   `json:"meekFrontingAddressesRegex"`
+	MeekFrontingDisableSNI              bool     `json:"meekFrontingDisableSNI"`
+	TacticsRequestPublicKey             string   `json:"tacticsRequestPublicKey"`
+	TacticsRequestObfuscatedKey         string   `json:"tacticsRequestObfuscatedKey"`
+	ConfigurationVersion                int      `json:"configurationVersion"`
+	Signature                           string   `json:"signature"`
+	DisableHTTPTransforms               bool     `json:"disableHTTPTransforms"`
+	DisableObfuscatedQUICTransforms     bool     `json:"disableObfuscatedQUICTransforms"`
+	DisableOSSHTransforms               bool     `json:"disableOSSHTransforms"`
+	InProxySessionPublicKey             string   `json:"inProxySessionPublicKey"`
+	InProxySessionRootObfuscationSecret string   `json:"inProxySessionRootObfuscationSecret"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
@@ -647,6 +650,89 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 	return 0, errors.TraceNew("unknown protocol")
 }
 
+// IsValidDialAddress indicates whether the dial destination network/host/port
+// matches the dial parameters for any of the tunnel protocols supported by
+// the server entry.
+//
+// Limitations:
+// - TAPDANCE-OSSH and CONJURE-OSSH are not supported.
+// - The host header is not considered in the case of fronted protocols.
+func (serverEntry *ServerEntry) IsValidDialAddress(
+	networkProtocol string, dialHost string, dialPortNumber int) bool {
+
+	for _, tunnelProtocol := range SupportedTunnelProtocols {
+
+		if !serverEntry.SupportsProtocol(tunnelProtocol) {
+			continue
+		}
+
+		if TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
+			// The TapDance and Conjure destination addresses are not included
+			// in the server entry, so TAPDANCE-OSSH and CONJURE-OSSH dial
+			// destinations cannot be validated here.
+			continue
+		}
+
+		usesTCP := TunnelProtocolUsesTCP(tunnelProtocol)
+		if (usesTCP && networkProtocol != "tcp") || (!usesTCP && networkProtocol != "udp") {
+			continue
+		}
+
+		tunnelPortNumber, err := serverEntry.GetDialPortNumber(tunnelProtocol)
+		if err != nil || tunnelPortNumber != dialPortNumber {
+			// Silently fail on error as the server entry should be well-formed.
+			continue
+		}
+
+		if !TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+
+			// For all direct protocols, the destination host must be the
+			// server IP address.
+
+			if serverEntry.IpAddress != dialHost {
+				continue
+			}
+
+		} else {
+
+			// For fronted protocols, the destination host may be domain and
+			// must match either MeekFrontingAddressesRegex or
+			// MeekFrontingAddresses. As in psiphon.selectFrontingParameters,
+			// MeekFrontingAddressesRegex takes precedence when not empty.
+			//
+			// As the host header value is not checked here, additional
+			// measures must be taken to ensure the destination is a Psiphon server.
+
+			if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
+
+				re, err := regexp.Compile(serverEntry.MeekFrontingAddressesRegex)
+				if err != nil {
+					continue
+				}
+
+				// The entire dialHost string must match the regex.
+				re.Longest()
+				match := re.FindString(dialHost)
+				if match == "" || match != dialHost {
+					continue
+				}
+
+			} else {
+
+				if !common.Contains(serverEntry.MeekFrontingAddresses, dialHost) {
+					continue
+				}
+			}
+		}
+
+		// When all of the checks pass for this protocol, the input is a valid
+		// dial destination.
+		return true
+	}
+
+	return false
+}
+
 // GetSupportedTacticsProtocols returns a list of tunnel protocols,
 // supported by the ServerEntry's capabilities, that may be used
 // for tactics requests.
@@ -697,6 +783,12 @@ func (serverEntry *ServerEntry) HasSignature() bool {
 
 func (serverEntry *ServerEntry) GetDiagnosticID() string {
 	return TagToDiagnosticID(serverEntry.Tag)
+}
+
+// SupportsInproxy returns true when the server is designated to receive
+// connections via in-proxies.
+func (serverEntry *ServerEntry) SupportsInProxy() bool {
+	return serverEntry.hasCapability(CAPABILITY_INPROXY)
 }
 
 // GenerateServerEntryTag creates a server entry tag value that is

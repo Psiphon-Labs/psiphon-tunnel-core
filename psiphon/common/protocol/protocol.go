@@ -87,6 +87,8 @@ const (
 
 	CONJURE_TRANSPORT_MIN_OSSH   = "Min-OSSH"
 	CONJURE_TRANSPORT_OBFS4_OSSH = "Obfs4-OSSH"
+
+	CAPABILITY_INPROXY = "inproxy"
 )
 
 var SupportedServerEntrySources = []string{
