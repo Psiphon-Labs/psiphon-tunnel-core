@@ -1220,7 +1220,7 @@ func (server *MeekServer) makeMeekTLSConfig(
 	if useObfuscatedSessionTickets {
 
 		// See obfuscated session ticket overview
-		// in NewObfuscatedClientSessionCache.
+		// in NewObfuscatedClientSessionState.
 
 		config.UseObfuscatedSessionTickets = true
 
