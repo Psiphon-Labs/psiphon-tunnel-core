@@ -113,9 +113,12 @@ type Config struct {
 	// psinet.Database data.
 	PsinetDatabaseFilename string
 
-	// HostID is the ID of the server host; this is used for API
-	// event logging.
+	// HostID identifies the server host; this value is included with all logs.
 	HostID string
+
+	// HostProvider identifies the server host provider; this value is
+	// included with all logs and logged only when not blank.
+	HostProvider string
 
 	// ServerIPAddress is the public IP address of the server.
 	ServerIPAddress string
