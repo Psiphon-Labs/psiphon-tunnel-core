@@ -19,21 +19,27 @@ package regen
 import (
 	"errors"
 	"testing"
-
-	. "github.com/smartystreets/goconvey/convey"
 )
 
 func TestGeneratorError(t *testing.T) {
-	Convey("GeneratorError", t, func() {
 
-		Convey("Handles nil cause", func() {
-			err := generatorError(nil, "msg")
-			So(err.Error(), ShouldEqual, "msg")
-		})
+	t.Run("Handles nil cause", func(t *testing.T) {
+		err := generatorError(nil, "msg")
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+		if err.Error() != "msg" {
+			t.Fatalf("Expected error message 'msg', got '%s'", err.Error())
+		}
+	})
 
-		Convey("Formats", func() {
-			err := generatorError(errors.New("cause"), "msg %s", "arg")
-			So(err.Error(), ShouldEqual, "msg arg\ncaused by cause")
-		})
+	t.Run("Formats", func(t *testing.T) {
+		err := generatorError(errors.New("cause"), "msg %s", "arg")
+		if err == nil {
+			t.Fatal("Expected error, got nil")
+		}
+		if err.Error() != "msg arg\ncaused by cause" {
+			t.Fatalf("Expected error message 'msg arg\ncaused by cause', got '%s'", err.Error())
+		}
 	})
 }

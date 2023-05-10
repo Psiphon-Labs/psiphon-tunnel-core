@@ -16,23 +16,21 @@ limitations under the License.
 
 package regen
 
-import (
-	"testing"
-
-	. "github.com/smartystreets/goconvey/convey"
-)
+import "testing"
 
 func TestXorShift64(t *testing.T) {
-	Convey("Int63 should never return negative numbers.", t, func() {
+	t.Run("Int63 should never return negative numbers", func(t *testing.T) {
 		source := xorShift64Source(1)
 		for i := 0; i < SampleSize; i++ {
 			val := source.Int63()
 
-			So(val, ShouldBeGreaterThanOrEqualTo, 0)
+			if val < 0 {
+				t.Fatal("Int63 returned a negative number")
+			}
 		}
 	})
 
-	Convey("Should not only return zeros", t, func() {
+	t.Run("Should not only return zeros", func(t *testing.T) {
 		source := xorShift64Source(0)
 		nonZeroCount := 0
 
@@ -42,6 +40,8 @@ func TestXorShift64(t *testing.T) {
 			}
 		}
 
-		So(nonZeroCount, ShouldBeGreaterThan, 0)
+		if nonZeroCount <= 0 {
+			t.Fatal("Int63 returned non-positive numbers")
+		}
 	})
 }
