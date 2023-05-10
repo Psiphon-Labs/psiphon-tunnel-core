@@ -51,11 +51,12 @@ type HTTPTransformerParameters struct {
 }
 
 const (
-	// httpTransformerReadWriteHeader HTTPTransformer is waiting to finish
-	// reading and writing the next HTTP request header.
-	httpTransformerReadWriteHeader = 0
-	// httpTransformerReadWriteBody HTTPTransformer is waiting to finish reading
-	// and writing the current HTTP request body.
+	// httpTransformerReadWriteReqLineAndHeaders HTTPTransformer is waiting to
+	// finish reading and writing the Request-Line, and headers, of the next
+	// request.
+	httpTransformerReadWriteReqLineAndHeaders = 0
+	// httpTransformerReadWriteBody HTTPTransformer is waiting to finish
+	// reading, and writing, the current request body.
 	httpTransformerReadWriteBody = 1
 )
 
@@ -72,15 +73,16 @@ type HTTPTransformer struct {
 	seed      *prng.Seed
 
 	// state is the HTTPTransformer state. Possible values are
-	// httpTransformerReadWriteHeader and httpTransformerReadWriteBody.
+	// httpTransformerReadWriteReqLineAndHeaders and
+	// httpTransformerReadWriteBody.
 	state int64
-	// b is used to buffer the accumulated bytes of the current HTTP request
-	// header until the entire header is received and written.
+	// b is used to buffer the accumulated bytes of the current request until
+	// the Request-Line and all headers are received and written.
 	b bytes.Buffer
-	// remain is the number of remaining HTTP request bytes to write to the
-	// underlying net.Conn. Set to the value of Content-Length (HTTP request
-	// body bytes) plus the length of the transformed HTTP header once the
-	// current request header is received.
+	// remain is the number of remaining request bytes to write to the
+	// underlying net.Conn. Set to the value of Content-Length (request body
+	// bytes) plus the length of the transformed Request-Line, and headers,
+	// once the Request-Line, and headers, of the current request are received.
 	remain uint64
 
 	net.Conn
@@ -102,25 +104,28 @@ type HTTPTransformer struct {
 // in a single Write(). Must be called synchronously.
 func (t *HTTPTransformer) Write(b []byte) (int, error) {
 
-	if t.state == httpTransformerReadWriteHeader {
+	if t.state == httpTransformerReadWriteReqLineAndHeaders {
 
-		// Do not need to check return value https://github.com/golang/go/blob/1e9ff255a130200fcc4ec5e911d28181fce947d5/src/bytes/buffer.go#L164
+		// Do not need to check return value. Applies to all subsequent
+		// calls to t.b.Write() and this comment will not be repeated for
+		// each. See https://github.com/golang/go/blob/1e9ff255a130200fcc4ec5e911d28181fce947d5/src/bytes/buffer.go#L164.
 		t.b.Write(b)
 
-		// Wait until the entire HTTP request header has been read. Must check
-		// all accumulated bytes incase the "\r\n\r\n" separator is written over
-		// multiple Write() calls; from reading the go1.19.5 net/http code the
-		// entire HTTP request is written in a single Write() call.
+		// Wait until the Request-Line, and all headers, have been read. Must
+		// check all accumulated bytes incase the "\r\n\r\n" separator is
+		// written over multiple Write() calls; from reading the go1.19.5
+		// net/http code the entire HTTP request is written in a single Write()
+		// call.
 
 		sep := []byte("\r\n\r\n")
 
-		headerBodyLines := bytes.SplitN(t.b.Bytes(), sep, 2) // split header and body
+		headerBodyLines := bytes.SplitN(t.b.Bytes(), sep, 2) // split Request-Line, and headers, from body
 
 		if len(headerBodyLines) <= 1 {
-			// b buffered in t.b and the entire HTTP request header has not been
-			// recieved so another Write() call is expected.
+			// b buffered in t.b and the Request-Line, and all headers, have not
+			// been recieved so another Write() call is expected.
 			return len(b), nil
-		} // else: HTTP request header has been read
+		} // else: Request-Line, and all headers, have been read
 
 		// read Content-Length before applying transform
 
@@ -128,7 +133,7 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 
 		lines := bytes.Split(headerBodyLines[0], []byte("\r\n"))
 		if len(lines) > 1 {
-			// skip request line, e.g. "GET /foo HTTP/1.1"
+			// skip Request-Line, e.g. "GET /foo HTTP/1.1"
 			headerLines = lines[1:]
 		}
 
@@ -145,7 +150,7 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 		}
 		if len(cl) == 0 {
 			// Irrecoverable error because either Content-Length header
-			// missing, or Content-Length header value is empty, e.g.
+			// is missing, or Content-Length header value is empty, e.g.
 			// "Content-Length: ", and request body length cannot be
 			// determined.
 			return len(b), errors.TraceNew("Content-Length missing")
@@ -160,13 +165,13 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 
 		t.remain = contentLength
 
-		// transform and write header
+		// transform, and write, Request-Line and headers.
 
-		headerLen := len(headerBodyLines[0]) + len(sep)
-		header := t.b.Bytes()[:headerLen]
+		reqLineAndHeadersLen := len(headerBodyLines[0]) + len(sep)
+		reqLineAndHeaders := t.b.Bytes()[:reqLineAndHeadersLen]
 
 		if t.transform != nil {
-			newHeader, err := t.transform.Apply(t.seed, header)
+			newReqLineAndHeaders, err := t.transform.Apply(t.seed, reqLineAndHeaders)
 			if err != nil {
 				// TODO: consider logging an error and skiping transform
 				// instead of returning an error, if the transform is broken
@@ -174,42 +179,42 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 				return len(b), errors.Trace(err)
 			}
 
-			// only allocate new slice if header length changed
-			if len(newHeader) == len(header) {
+			// perf: only allocate new slice if length changed, otherwise the
+			// transformed data can be copied directly over the original in t.b.
+			if len(newReqLineAndHeaders) == len(reqLineAndHeaders) {
 				// Do not need to check return value. It is guaranteed that
-				// n == len(newHeader) because t.b.Len() >= n if the header
-				// size has not changed.
-				copy(t.b.Bytes()[:headerLen], newHeader)
+				// n == len(newReqLineAndHeaders) because t.b.Len() >= n if the
+				// transformed data is the same size as the original data.
+				copy(t.b.Bytes()[:reqLineAndHeadersLen], newReqLineAndHeaders)
 			} else {
 
 				// Copy any request body bytes received before resetting the
 				// buffer.
 				var reqBody []byte
-				reqBodyLen := t.b.Len() - headerLen // number of request body bytes received
+				reqBodyLen := t.b.Len() - reqLineAndHeadersLen // number of request body bytes received
 				if reqBodyLen > 0 {
 					reqBody = make([]byte, reqBodyLen)
-					copy(reqBody, t.b.Bytes()[headerLen:])
+					copy(reqBody, t.b.Bytes()[reqLineAndHeadersLen:])
 				}
 
-				// Reset the buffer and write transformed header and any
-				// request body bytes received into it.
+				// Reset the buffer and write transformed Request-Line, and
+				// headers, and any request body bytes received into it.
 				t.b.Reset()
-				// Do not need to check return value of bytes.Buffer.Write() https://github.com/golang/go/blob/1e9ff255a130200fcc4ec5e911d28181fce947d5/src/bytes/buffer.go#L164
-				t.b.Write(newHeader)
+				t.b.Write(newReqLineAndHeaders)
 				if len(reqBody) > 0 {
 					t.b.Write(reqBody)
 				}
 			}
 
-			header = newHeader
+			reqLineAndHeaders = newReqLineAndHeaders
 		}
 
-		if math.MaxUint64-t.remain < uint64(len(header)) {
+		if math.MaxUint64-t.remain < uint64(len(reqLineAndHeaders)) {
 			// Irrecoverable error because request is malformed:
-			// Content-Length + len(header) > math.MaxUint64.
+			// Content-Length + len(reqLineAndHeaders) > math.MaxUint64.
 			return len(b), errors.TraceNew("t.remain + uint64(len(header)) overflows")
 		}
-		t.remain += uint64(len(header))
+		t.remain += uint64(len(reqLineAndHeaders))
 
 		if uint64(t.b.Len()) > t.remain {
 			// Should never happen, multiple requests written in a single
@@ -228,21 +233,22 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 		return len(b), err
 	}
 
-	// HTTP request header has been transformed. Write any remaining bytes of
-	// HTTP request header and then write HTTP request body.
+	// Request-Line, and headers, have been transformed. Write any remaining
+	// bytes of these and then write request body.
 
 	// Must write buffered bytes first, in-order, to write bytes to underlying
 	// net.Conn in the same order they were received in.
 	//
 	// Already checked that t.b does not contain bytes of a subsequent HTTP
-	// request when the header is parsed, i.e. at this point it is guaranteed
-	// that t.b.Len() <= t.remain.
+	// request when the Request-Line, and headers, are parsed, i.e. at this
+	// point it is guaranteed that t.b.Len() <= t.remain.
 	//
 	// In practise the buffer will be empty by this point because its entire
 	// contents will have been written in the first call to t.b.WriteTo(t.Conn)
-	// when the header is received, parsed, and transformed; otherwise the
-	// underlying transport will have failed and the caller will not invoke
-	// Write() again on this instance. See HTTPTransformer.Write() comment.
+	// when the Request-Line, and headers, are received, parsed, and
+	// transformed; otherwise the underlying transport will have failed and the
+	// caller will not invoke Write() again on this instance. See
+	// HTTPTransformer.Write() comment.
 	wrote, err := t.b.WriteTo(t.Conn)
 	t.remain -= uint64(wrote)
 	if err != nil {
@@ -260,9 +266,9 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 	t.remain -= uint64(n)
 
 	if t.remain <= 0 {
-		// Entire request, header and body, has been written. Return to
-		// waiting for next HTTP request header to arrive.
-		t.state = httpTransformerReadWriteHeader
+		// Entire request has been written. Return to waiting for next HTTP
+		// request to arrive.
+		t.state = httpTransformerReadWriteReqLineAndHeaders
 		t.remain = 0
 	}
 

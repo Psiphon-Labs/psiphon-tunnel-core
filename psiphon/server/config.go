@@ -163,12 +163,13 @@ type Config struct {
 	TunnelProtocolPorts map[string]int
 
 	// TunnelProtocolPassthroughAddresses specifies passthrough addresses to be
-	// used for tunnel protocols configured in  TunnelProtocolPorts. Passthrough
+	// used for tunnel protocols configured in TunnelProtocolPorts. Passthrough
 	// is a probing defense which relays all network traffic between a client and
 	// the passthrough target when the client fails anti-probing tests.
 	//
 	// TunnelProtocolPassthroughAddresses is supported for:
-	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH".
+	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+	// "UNFRONTED-MEEK-OSSH".
 	TunnelProtocolPassthroughAddresses map[string]string
 
 	// LegacyPassthrough indicates whether to expect legacy passthrough messages
@@ -1046,7 +1047,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 		capability := protocol.GetCapability(tunnelProtocol)
 
-		if params.Passthrough && protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) {
+		// Note: do not add passthrough annotation if HTTP unfronted meek
+		// because it would result in an invalid capability.
+		if params.Passthrough && protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) && tunnelProtocol != protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK {
 			if !params.LegacyPassthrough {
 				capability += "-PASSTHROUGH-v2"
 			} else {
