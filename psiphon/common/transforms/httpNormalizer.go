@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
@@ -620,6 +621,15 @@ func (t *HTTPNormalizer) SetWriteDeadline(tt time.Time) error {
 		return nil
 	}
 	return t.Conn.SetReadDeadline(tt)
+}
+
+func (t *HTTPNormalizer) GetMetrics() common.LogFields {
+	// Relay any metrics from the underlying conn.
+	m, ok := t.Conn.(common.MetricsSource)
+	if ok {
+		return m.GetMetrics()
+	}
+	return nil
 }
 
 // Note: all config fields must be set before calling Accept.

@@ -276,6 +276,15 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 	return n, err
 }
 
+func (t *HTTPTransformer) GetMetrics() common.LogFields {
+	// Relay any metrics from the underlying conn.
+	m, ok := t.Conn.(common.MetricsSource)
+	if ok {
+		return m.GetMetrics()
+	}
+	return nil
+}
+
 func WrapDialerWithHTTPTransformer(dialer common.Dialer, params *HTTPTransformerParameters) common.Dialer {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		conn, err := dialer(ctx, network, addr)
