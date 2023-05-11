@@ -1644,9 +1644,19 @@ func (conn *meekConn) GetUnderlyingTCPAddrs() (*net.TCPAddr, *net.TCPAddr, bool)
 
 // SetReplay implements the common.FragmentorReplayAccessor interface, applying
 // the inputs to the _first_ underlying TCP connection in the meek tunnel. If
-// the underlying connection is closed, the SetSeed call will have no effect.
+// the underlying connection is closed, then SetSeed call will have no effect.
 func (conn *meekConn) SetReplay(PRNG *prng.PRNG) {
-	fragmentor, ok := conn.firstUnderlyingConn.(common.FragmentorReplayAccessor)
+	underlyingConn := conn.firstUnderlyingConn
+
+	if conn.meekServer.normalizer != nil {
+		// The underlying conn is wrapped with a normalizer.
+		normalizer, ok := conn.meekSession.underlyingConn.(*transforms.HTTPNormalizer)
+		if ok {
+			underlyingConn = normalizer.Conn
+		}
+	}
+
+	fragmentor, ok := underlyingConn.(common.FragmentorReplayAccessor)
 	if ok {
 		fragmentor.SetReplay(PRNG)
 	}
@@ -1660,7 +1670,17 @@ func (conn *meekConn) SetReplay(PRNG *prng.PRNG) {
 // packet manipulation, any selected packet manipulation spec would have been
 // successful.
 func (conn *meekConn) GetReplay() (*prng.Seed, bool) {
-	fragmentor, ok := conn.firstUnderlyingConn.(common.FragmentorReplayAccessor)
+	underlyingConn := conn.firstUnderlyingConn
+
+	if conn.meekServer.normalizer != nil {
+		// The underlying conn is wrapped with a normalizer.
+		normalizer, ok := conn.meekSession.underlyingConn.(*transforms.HTTPNormalizer)
+		if ok {
+			underlyingConn = normalizer.Conn
+		}
+	}
+
+	fragmentor, ok := underlyingConn.(common.FragmentorReplayAccessor)
 	if ok {
 		return fragmentor.GetReplay()
 	}
