@@ -46,6 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	tris "github.com/Psiphon-Labs/tls-tris"
 	lrucache "github.com/cognusion/go-cache-lru"
@@ -127,6 +128,7 @@ type MeekServer struct {
 	rateLimitHistory                *lrucache.Cache
 	rateLimitCount                  int
 	rateLimitSignalGC               chan struct{}
+	normalizer                      *transforms.HTTPNormalizerListener
 }
 
 // NewMeekServer initializes a new meek server.
@@ -135,7 +137,7 @@ func NewMeekServer(
 	listener net.Listener,
 	listenerTunnelProtocol string,
 	listenerPort int,
-	useTLS, isFronted, useObfuscatedSessionTickets bool,
+	useTLS, isFronted, useObfuscatedSessionTickets, useHTTPNormalizer bool,
 	clientHandler func(clientTunnelProtocol string, clientConn net.Conn),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
@@ -236,6 +238,13 @@ func NewMeekServer(
 			return nil, errors.Trace(err)
 		}
 		meekServer.tlsConfig = tlsConfig
+	}
+
+	if useHTTPNormalizer && protocol.TunnelProtocolUsesMeekHTTPNormalizer(listenerTunnelProtocol) {
+
+		normalizer := meekServer.makeMeekHTTPNormalizerListener()
+		meekServer.normalizer = normalizer
+		meekServer.listener = normalizer
 	}
 
 	return meekServer, nil
@@ -749,9 +758,22 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// bytes -- assuming that MEEK_MAX_SESSION_ID_LENGTH is too short to be a
 	// valid meek cookie.
 
-	payloadJSON, err := server.getMeekCookiePayload(clientIP, meekCookie.Value)
-	if err != nil {
-		return "", nil, nil, "", nil, errors.Trace(err)
+	var payloadJSON []byte
+
+	if server.normalizer != nil {
+
+		// NOTE: operates on the assumption that the normalizer is not wrapped
+		// with a further conn.
+		underlyingConn := request.Context().Value(meekNetConnContextKey).(net.Conn)
+		normalizedConn := underlyingConn.(*transforms.HTTPNormalizer)
+		payloadJSON = normalizedConn.ValidateMeekCookieResult
+
+	} else {
+
+		payloadJSON, err = server.getMeekCookiePayload(clientIP, meekCookie.Value)
+		if err != nil {
+			return "", nil, nil, "", nil, errors.Trace(err)
+		}
 	}
 
 	// Note: this meek server ignores legacy values PsiphonClientSessionId
@@ -1323,6 +1345,95 @@ func (server *MeekServer) makeMeekTLSConfig(
 	return config, nil
 }
 
+// makeMeekHTTPNormalizerListener returns the meek server listener wrapped in
+// an HTTP normalizer.
+func (server *MeekServer) makeMeekHTTPNormalizerListener() *transforms.HTTPNormalizerListener {
+
+	normalizer := transforms.WrapListenerWithHTTPNormalizer(server.listener)
+
+	normalizer.ProhibitedHeaders = server.support.Config.MeekProhibitedHeaders
+
+	normalizer.MaxReqLineAndHeadersSize = 8192 // max number of header bytes common web servers will read before returning an error
+
+	if server.passthroughAddress != "" {
+		normalizer.PassthroughAddress = server.passthroughAddress
+		normalizer.PassthroughDialer = net.Dial
+	}
+	normalizer.PassthroughLogPassthrough = func(
+		clientIP string, tunnelError error, logFields map[string]interface{}) {
+
+		logIrregularTunnel(
+			server.support,
+			server.listenerTunnelProtocol,
+			server.listenerPort,
+			clientIP,
+			errors.Trace(tunnelError),
+			logFields)
+	}
+
+	// ValidateMeekCookie is invoked by the normalizer with the value of the
+	// cookie header (if present), before ServeHTTP gets the request and calls
+	// getSessionOrEndpoint; and then any valid meek cookie payload, or meek
+	// session ID, extracted in this callback is stored to be fetched by
+	// getSessionOrEndpoint.
+	// Note: if there are multiple cookie headers, even though prohibited by
+	// rfc6265, then ValidateMeekCookie will only be invoked once with the
+	// first one received.
+	normalizer.ValidateMeekCookie = func(clientIP string, rawCookies []byte) ([]byte, error) {
+
+		// Parse cookie.
+
+		if len(rawCookies) == 0 {
+			return nil, errors.TraceNew("no cookies")
+		}
+
+		// TODO/perf: readCookies in net/http is not exported, use a local
+		// implementation which does not require allocating an http.header
+		// each time.
+		request := http.Request{
+			Header: http.Header{
+				"Cookie": []string{string(rawCookies)},
+			},
+		}
+		cookies := request.Cookies()
+		if len(rawCookies) == 0 {
+			return nil, errors.Tracef("invalid cookies: %s", string(rawCookies))
+		}
+
+		// Use value of the first cookie.
+		meekCookieValue := cookies[0].Value
+
+		// Check for an existing session.
+
+		server.sessionsLock.RLock()
+		existingSessionID := meekCookieValue
+		_, ok := server.sessions[existingSessionID]
+		server.sessionsLock.RUnlock()
+		if ok {
+			// The cookie is a session ID for an active (not expired) session.
+			// Return it and then it will be stored and later fetched by
+			// getSessionOrEndpoint where it will be mapped to the existing
+			// session.
+			// Note: it's possible for the session to expire between this check
+			// and when getSessionOrEndpoint looks up the session.
+			return rawCookies, nil
+		}
+
+		// The session is new (or expired). Treat the cookie value as a new
+		// meek cookie, extract the payload, and return it; and then it will be
+		// stored and later fetched by getSessionOrEndpoint.
+
+		payloadJSON, err := server.getMeekCookiePayload(clientIP, meekCookieValue)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return payloadJSON, nil
+	}
+
+	return normalizer
+}
+
 type meekSession struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
@@ -1533,9 +1644,19 @@ func (conn *meekConn) GetUnderlyingTCPAddrs() (*net.TCPAddr, *net.TCPAddr, bool)
 
 // SetReplay implements the common.FragmentorReplayAccessor interface, applying
 // the inputs to the _first_ underlying TCP connection in the meek tunnel. If
-// the underlying connection is closed, the SetSeed call will have no effect.
+// the underlying connection is closed, then SetSeed call will have no effect.
 func (conn *meekConn) SetReplay(PRNG *prng.PRNG) {
-	fragmentor, ok := conn.firstUnderlyingConn.(common.FragmentorReplayAccessor)
+	underlyingConn := conn.firstUnderlyingConn
+
+	if conn.meekServer.normalizer != nil {
+		// The underlying conn is wrapped with a normalizer.
+		normalizer, ok := conn.meekSession.underlyingConn.(*transforms.HTTPNormalizer)
+		if ok {
+			underlyingConn = normalizer.Conn
+		}
+	}
+
+	fragmentor, ok := underlyingConn.(common.FragmentorReplayAccessor)
 	if ok {
 		fragmentor.SetReplay(PRNG)
 	}
@@ -1549,7 +1670,17 @@ func (conn *meekConn) SetReplay(PRNG *prng.PRNG) {
 // packet manipulation, any selected packet manipulation spec would have been
 // successful.
 func (conn *meekConn) GetReplay() (*prng.Seed, bool) {
-	fragmentor, ok := conn.firstUnderlyingConn.(common.FragmentorReplayAccessor)
+	underlyingConn := conn.firstUnderlyingConn
+
+	if conn.meekServer.normalizer != nil {
+		// The underlying conn is wrapped with a normalizer.
+		normalizer, ok := conn.meekSession.underlyingConn.(*transforms.HTTPNormalizer)
+		if ok {
+			underlyingConn = normalizer.Conn
+		}
+	}
+
+	fragmentor, ok := underlyingConn.(common.FragmentorReplayAccessor)
 	if ok {
 		return fragmentor.GetReplay()
 	}

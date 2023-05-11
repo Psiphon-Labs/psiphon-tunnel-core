@@ -531,6 +531,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 			protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol),
 			protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol),
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(sshListener.tunnelProtocol),
+			true,
 			handleClient,
 			sshServer.shutdownBroadcast)
 
