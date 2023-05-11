@@ -80,6 +80,7 @@ jobs:
           go test -v -race ./psiphon/common/accesscontrol
           go test -v -race ./psiphon/common/crypto/ssh
           go test -v -race ./psiphon/common/fragmentor
+          go test -v -race ./psiphon/common/regen
           go test -v -race ./psiphon/common/monotime
           go test -v -race ./psiphon/common/obfuscator
           go test -v -race ./psiphon/common/osl
@@ -111,6 +112,7 @@ jobs:
           go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./psiphon/common/accesscontrol
           go test -v -covermode=count -coverprofile=ssh.coverprofile ./psiphon/common/crypto/ssh
           go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./psiphon/common/fragmentor
+          go test -v -covermode=count -coverprofile=regen.coverprofile ./psiphon/common/regen
           go test -v -covermode=count -coverprofile=monotime.coverprofile ./psiphon/common/monotime
           go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./psiphon/common/obfuscator
           go test -v -covermode=count -coverprofile=osl.coverprofile ./psiphon/common/osl
