@@ -115,13 +115,15 @@ func runHTTPNormalizerTest(tt *httpNormalizerTest, useNormalizer bool) error {
 		}
 	}
 
+	// Calling Read on an instance of HTTPNormalizer will return io.EOF once a
+	// passthrough has been activated.
 	if tt.validateMeekCookie != nil && err == io.EOF {
 
 		// wait for passthrough to complete
 
 		timeout := time.After(time.Second)
 
-		for len(passthroughConn.readBuffer) != 0 || len(conn.readBuffer) != 0 {
+		for len(passthroughConn.ReadBuffer()) != 0 || len(conn.ReadBuffer()) != 0 {
 
 			select {
 			case <-timeout:
@@ -149,20 +151,20 @@ func runHTTPNormalizerTest(tt *httpNormalizerTest, useNormalizer bool) error {
 			return errors.TraceNew("expected to read no bytes")
 		}
 
-		if string(passthroughConn.readBuffer) != "" {
+		if string(passthroughConn.ReadBuffer()) != "" {
 			return errors.TraceNew("expected read buffer to be emptied")
 		}
 
-		if string(passthroughConn.writeBuffer) != tt.wantOutput {
-			return errors.Tracef("expected \"%s\" of len %d but got \"%s\" of len %d", escapeNewlines(tt.wantOutput), len(tt.wantOutput), escapeNewlines(string(passthroughConn.writeBuffer)), len(passthroughConn.writeBuffer))
+		if string(passthroughConn.WriteBuffer()) != tt.wantOutput {
+			return errors.Tracef("expected \"%s\" of len %d but got \"%s\" of len %d", escapeNewlines(tt.wantOutput), len(tt.wantOutput), escapeNewlines(string(passthroughConn.WriteBuffer())), len(passthroughConn.WriteBuffer()))
 		}
 
-		if string(conn.readBuffer) != "" {
+		if string(conn.ReadBuffer()) != "" {
 			return errors.TraceNew("expected read buffer to be emptied")
 		}
 
-		if string(conn.writeBuffer) != passthroughMessage {
-			return errors.Tracef("expected \"%s\" of len %d but got \"%s\" of len %d", escapeNewlines(passthroughMessage), len(passthroughMessage), escapeNewlines(string(conn.writeBuffer)), len(conn.writeBuffer))
+		if string(conn.WriteBuffer()) != passthroughMessage {
+			return errors.Tracef("expected \"%s\" of len %d but got \"%s\" of len %d", escapeNewlines(passthroughMessage), len(passthroughMessage), escapeNewlines(string(conn.WriteBuffer())), len(conn.WriteBuffer()))
 		}
 	}
 
