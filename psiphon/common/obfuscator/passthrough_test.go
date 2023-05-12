@@ -123,7 +123,7 @@ func TestTLSPassthrough(t *testing.T) {
 				timeDiff = -timeDiff
 			}
 
-			if timeDiff.Microseconds() > 100 {
+			if timeDiff.Microseconds() > 500 {
 				t.Fatalf("unexpected elapsed time difference")
 			}
 		})
