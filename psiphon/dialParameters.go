@@ -37,11 +37,11 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/refraction-networking/utls"
-	regen "github.com/zach-klippenstein/goregen"
 	"golang.org/x/net/bpf"
 )
 
@@ -1326,7 +1326,7 @@ func selectFrontingParameters(
 		// Generate a front address based on the regex.
 
 		var err error
-		frontingDialHost, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
+		frontingDialHost, err = regen.GenerateString(serverEntry.MeekFrontingAddressesRegex)
 		if err != nil {
 			return "", "", errors.Trace(err)
 		}
@@ -1489,7 +1489,7 @@ func selectHostName(
 	}
 
 	choice := prng.Intn(len(regexStrings))
-	hostName, err := regen.Generate(regexStrings[choice])
+	hostName, err := regen.GenerateString(regexStrings[choice])
 	if err != nil {
 		NoticeWarning("selectHostName: regen.Generate failed: %v", errors.Trace(err))
 		return values.GetHostName()
