@@ -16,10 +16,10 @@ github.com/Psiphon-Labs/bolt
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20221014170512-3bdc7291c091
+# github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20230515185031-ae6632ab97ac
 ## explicit; go 1.18
 github.com/Psiphon-Labs/qtls-go1-18
-# github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20221014165721-ed28749db082
+# github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20230515185100-099bac32c181
 ## explicit; go 1.18
 github.com/Psiphon-Labs/qtls-go1-19
 # github.com/Psiphon-Labs/quic-go v0.0.0-20230215230806-9b1ddbf778cc

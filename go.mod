@@ -58,8 +58,8 @@ require (
 	git.torproject.org/pluggable-transports/goptlib.git v1.2.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20170702084017-28f7e881ca57 // indirect
 	github.com/BurntSushi/toml v0.3.1 // indirect
-	github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20221014170512-3bdc7291c091 // indirect
-	github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20221014165721-ed28749db082 // indirect
+	github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20230515185031-ae6632ab97ac // indirect
+	github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20230515185100-099bac32c181 // indirect
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/andybalholm/brotli v1.0.5-0.20220518190645-786ec621f618 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
