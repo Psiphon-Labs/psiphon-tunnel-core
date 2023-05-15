@@ -1650,7 +1650,7 @@ func (conn *meekConn) SetReplay(PRNG *prng.PRNG) {
 
 	if conn.meekServer.normalizer != nil {
 		// The underlying conn is wrapped with a normalizer.
-		normalizer, ok := conn.meekSession.underlyingConn.(*transforms.HTTPNormalizer)
+		normalizer, ok := underlyingConn.(*transforms.HTTPNormalizer)
 		if ok {
 			underlyingConn = normalizer.Conn
 		}
@@ -1674,7 +1674,7 @@ func (conn *meekConn) GetReplay() (*prng.Seed, bool) {
 
 	if conn.meekServer.normalizer != nil {
 		// The underlying conn is wrapped with a normalizer.
-		normalizer, ok := conn.meekSession.underlyingConn.(*transforms.HTTPNormalizer)
+		normalizer, ok := underlyingConn.(*transforms.HTTPNormalizer)
 		if ok {
 			underlyingConn = normalizer.Conn
 		}
