@@ -37,7 +37,7 @@ providing blocking circumvention on the 2nd hop.
 
 Proxies don't create Psiphon tunnels, they just relay either TCP or UDP flows
 from the client to the server, where those flows are Psiphon tunnel
-protocols. Proxies don't need to be upgraded in order to rely newer Psiphon
+protocols. Proxies don't need to be upgraded in order to relay newer Psiphon
 tunnel protocols or protocol variants.
 
 Proxies cannot see the client traffic within the relayed Psiphon tunnel.
