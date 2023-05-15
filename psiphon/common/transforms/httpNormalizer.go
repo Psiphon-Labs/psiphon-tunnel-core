@@ -620,7 +620,7 @@ func (t *HTTPNormalizer) SetWriteDeadline(tt time.Time) error {
 	if t.passthrough {
 		return nil
 	}
-	return t.Conn.SetReadDeadline(tt)
+	return t.Conn.SetWriteDeadline(tt)
 }
 
 func (t *HTTPNormalizer) GetMetrics() common.LogFields {
