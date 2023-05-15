@@ -585,21 +585,36 @@ func (c *testConn) Close() error {
 }
 
 func (c *testConn) LocalAddr() net.Addr {
-	return c.Conn.LocalAddr()
+	if c.Conn != nil {
+		return c.Conn.LocalAddr()
+	}
+	return &net.TCPAddr{}
 }
 
 func (c *testConn) RemoteAddr() net.Addr {
-	return c.Conn.RemoteAddr()
+	if c.Conn != nil {
+		return c.Conn.RemoteAddr()
+	}
+	return &net.TCPAddr{}
 }
 
 func (c *testConn) SetDeadline(t time.Time) error {
-	return c.Conn.SetDeadline(t)
+	if c.Conn != nil {
+		return c.Conn.SetDeadline(t)
+	}
+	return nil
 }
 
 func (c *testConn) SetReadDeadline(t time.Time) error {
-	return c.Conn.SetReadDeadline(t)
+	if c.Conn != nil {
+		return c.Conn.SetReadDeadline(t)
+	}
+	return nil
 }
 
 func (c *testConn) SetWriteDeadline(t time.Time) error {
-	return c.Conn.SetWriteDeadline(t)
+	if c.Conn != nil {
+		return c.Conn.SetWriteDeadline(t)
+	}
+	return nil
 }
