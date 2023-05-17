@@ -190,7 +190,7 @@ func Listen(
 	// Irregular events are logged for invalid client activity.
 
 	clientRandomHistory := obfuscator.NewSeedHistory(
-		&obfuscator.SeedHistoryConfig{SeedTTL: obfuscator.TLS_PASSTHROUGH_TIME_PERIOD})
+		&obfuscator.SeedHistoryConfig{SeedTTL: obfuscator.TLS_PASSTHROUGH_HISTORY_TTL})
 
 	verifyClientHelloRandom := func(remoteAddr net.Addr, clientHelloRandom []byte) bool {
 
