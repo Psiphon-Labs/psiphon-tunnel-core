@@ -95,12 +95,24 @@ func runTestSessionPacketObfuscation() error {
 	// Use a replay time period factor more suitable for test runs.
 
 	originalAntiReplayTimeFactorPeriodSeconds := antiReplayTimeFactorPeriodSeconds
-	antiReplayTimeFactorPeriodSeconds = 1
+	antiReplayTimeFactorPeriodSeconds = 2
 	defer func() {
 		antiReplayTimeFactorPeriodSeconds = originalAntiReplayTimeFactorPeriodSeconds
 	}()
 
 	rootSecret, err := GenerateRootObfuscationSecret()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	initiatorSendSecret, initiatorReceiveSecret, err :=
+		deriveSessionPacketObfuscationSecrets(rootSecret, true)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	responderSendSecret, responderReceiveSecret, err :=
+		deriveSessionPacketObfuscationSecrets(rootSecret, false)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -114,13 +126,13 @@ func runTestSessionPacketObfuscation() error {
 	maxPadding := 1000
 
 	obfuscatedPacket1, err := obfuscateSessionPacket(
-		rootSecret, true, packet, minPadding, maxPadding)
+		initiatorSendSecret, true, packet, minPadding, maxPadding)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	packet1, err := deobfuscateSessionPacket(
-		rootSecret, false, replayHistory, obfuscatedPacket1)
+		responderReceiveSecret, false, replayHistory, obfuscatedPacket1)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -132,17 +144,17 @@ func runTestSessionPacketObfuscation() error {
 	// Test: replay packet
 
 	_, err = deobfuscateSessionPacket(
-		rootSecret, false, replayHistory, obfuscatedPacket1)
+		responderReceiveSecret, false, replayHistory, obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected replay success")
 	}
 
 	// Test: replay packet after time factor period
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Duration(antiReplayTimeFactorPeriodSeconds) * time.Second)
 
 	_, err = deobfuscateSessionPacket(
-		rootSecret, false, replayHistory, obfuscatedPacket1)
+		responderReceiveSecret, false, replayHistory, obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected replay success")
 	}
@@ -152,7 +164,7 @@ func runTestSessionPacketObfuscation() error {
 	n := 10
 	for i := 0; i < n; i++ {
 		obfuscatedPacket2, err := obfuscateSessionPacket(
-			rootSecret, true, packet, minPadding, maxPadding)
+			initiatorSendSecret, true, packet, minPadding, maxPadding)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -167,13 +179,13 @@ func runTestSessionPacketObfuscation() error {
 	// Test: obfuscate/deobfuscate responder -> initiator
 
 	obfuscatedPacket2, err := obfuscateSessionPacket(
-		rootSecret, false, packet, minPadding, maxPadding)
+		responderSendSecret, false, packet, minPadding, maxPadding)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	packet2, err := deobfuscateSessionPacket(
-		rootSecret, true, nil, obfuscatedPacket2)
+		initiatorReceiveSecret, true, nil, obfuscatedPacket2)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -185,13 +197,13 @@ func runTestSessionPacketObfuscation() error {
 	// Test: initiator -> initiator
 
 	obfuscatedPacket1, err = obfuscateSessionPacket(
-		rootSecret, true, packet, minPadding, maxPadding)
+		initiatorSendSecret, true, packet, minPadding, maxPadding)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	_, err = deobfuscateSessionPacket(
-		rootSecret, true, nil, obfuscatedPacket1)
+		initiatorReceiveSecret, true, nil, obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected initiator -> initiator success")
 	}
@@ -199,15 +211,15 @@ func runTestSessionPacketObfuscation() error {
 	// Test: responder -> responder
 
 	obfuscatedPacket2, err = obfuscateSessionPacket(
-		rootSecret, false, packet, minPadding, maxPadding)
+		responderSendSecret, false, packet, minPadding, maxPadding)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	_, err = deobfuscateSessionPacket(
-		rootSecret, false, newObfuscationReplayHistory(), obfuscatedPacket2)
+		responderReceiveSecret, false, newObfuscationReplayHistory(), obfuscatedPacket2)
 	if err == nil {
-		return errors.TraceNew("unexpected initiator -> initiator success")
+		return errors.TraceNew("unexpected responder -> responder success")
 	}
 
 	// Test: distinct keys derived for each direction
@@ -237,13 +249,13 @@ func runTestSessionPacketObfuscation() error {
 	padding := 100
 
 	obfuscatedPacket1, err = obfuscateSessionPacket(
-		rootSecret, true, packet, padding, padding)
+		initiatorSendSecret, true, packet, padding, padding)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	obfuscatedPacket2, err = obfuscateSessionPacket(
-		rootSecret, false, packet, padding, padding)
+		initiatorSendSecret, true, packet, padding, padding)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -258,8 +270,12 @@ func runTestSessionPacketObfuscation() error {
 	for _, isInitiator := range []bool{true, false} {
 
 		err = testEntropy(func() ([]byte, error) {
+			secret := initiatorSendSecret
+			if !isInitiator {
+				secret = responderSendSecret
+			}
 			obfuscatedPacket, err := obfuscateSessionPacket(
-				rootSecret, isInitiator, packet, padding, padding)
+				secret, isInitiator, packet, padding, padding)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -277,14 +293,20 @@ func runTestSessionPacketObfuscation() error {
 		return errors.Trace(err)
 	}
 
+	wrongInitiatorSendSecret, _, err :=
+		deriveSessionPacketObfuscationSecrets(wrongRootSecret, true)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	obfuscatedPacket1, err = obfuscateSessionPacket(
-		wrongRootSecret, true, packet, minPadding, maxPadding)
+		wrongInitiatorSendSecret, true, packet, minPadding, maxPadding)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	_, err = deobfuscateSessionPacket(
-		rootSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
+		responderReceiveSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected wrong secret success")
 	}
@@ -292,7 +314,7 @@ func runTestSessionPacketObfuscation() error {
 	// Test: truncated obfuscated packet
 
 	obfuscatedPacket1, err = obfuscateSessionPacket(
-		rootSecret, true, packet, minPadding, maxPadding)
+		initiatorSendSecret, true, packet, minPadding, maxPadding)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -300,7 +322,7 @@ func runTestSessionPacketObfuscation() error {
 	obfuscatedPacket1 = obfuscatedPacket1[:len(obfuscatedPacket1)-1]
 
 	_, err = deobfuscateSessionPacket(
-		rootSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
+		responderReceiveSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected truncated packet success")
 	}
@@ -308,7 +330,7 @@ func runTestSessionPacketObfuscation() error {
 	// Test: flip byte
 
 	obfuscatedPacket1, err = obfuscateSessionPacket(
-		rootSecret, true, packet, minPadding, maxPadding)
+		initiatorSendSecret, true, packet, minPadding, maxPadding)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -316,7 +338,7 @@ func runTestSessionPacketObfuscation() error {
 	obfuscatedPacket1[len(obfuscatedPacket1)-1] ^= 1
 
 	_, err = deobfuscateSessionPacket(
-		rootSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
+		responderReceiveSecret, false, newObfuscationReplayHistory(), obfuscatedPacket1)
 	if err == nil {
 		return errors.TraceNew("unexpected modified packet success")
 	}

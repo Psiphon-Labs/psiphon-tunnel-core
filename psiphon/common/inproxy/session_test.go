@@ -161,7 +161,7 @@ func runTestSessions() error {
 
 	unknownInitiatorSessions := NewInitiatorSessions(unknownInitiatorPrivateKey)
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancelFunc()
 
 	request = roundTripper.MakeRequest()

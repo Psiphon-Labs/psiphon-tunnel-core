@@ -37,7 +37,7 @@ import (
 
 const (
 	obfuscationSessionPacketNonceSize = 12
-	obfuscationAntiReplayTimePeriod   = 20 * time.Minute
+	obfuscationAntiReplayTimePeriod   = 10 * time.Minute
 	obfuscationAntiReplayHistorySize  = 10000000
 )
 
@@ -64,43 +64,19 @@ var antiReplayTimeFactorPeriodSeconds = int64(
 	obfuscationAntiReplayTimePeriod / time.Second)
 
 // deriveObfuscationSecret derives an obfuscation secret from the root secret,
-// a context, and an optional time factor.
-//
-// With a time factor, derived secrets remain valid only for a limited time
-// period. Both ends of an obfuscated communication will derive the same
-// secret based on a shared root secret, a common context, and local clocks.
-// The current time is rounded, allowing the one end's clock to be slightly
-// ahead of or behind of the other end's clock.
-//
-// The time factor can be used in concert with a replay history, bounding the
-// number of historical messages that need to be retained in the history.
+// and context.
 func deriveObfuscationSecret(
 	rootObfuscationSecret ObfuscationSecret,
-	useTimeFactor bool,
 	context string) (ObfuscationSecret, error) {
 
-	var salt []byte
-
-	if useTimeFactor {
-
-		roundedTimePeriod := (time.Now().Unix() +
-			(antiReplayTimeFactorPeriodSeconds / 2)) / antiReplayTimeFactorPeriodSeconds
-
-		var timeFactor [8]byte
-		binary.BigEndian.PutUint64(timeFactor[:], uint64(roundedTimePeriod))
-		salt = timeFactor[:]
-	}
-
 	var key ObfuscationSecret
-
 	_, err := io.ReadFull(
-		hkdf.New(sha256.New, rootObfuscationSecret[:], salt, []byte(context)), key[:])
+		hkdf.New(sha256.New, rootObfuscationSecret[:], nil, []byte(context)), key[:])
 	if err != nil {
 		return key, errors.Trace(err)
 	}
 
 	return key, nil
-
 }
 
 // deriveSessionPacketObfuscationSecret derives a common session obfuscation
@@ -124,14 +100,33 @@ func deriveSessionPacketObfuscationSecret(
 		context = "in-proxy-session-packet-responder-to-initiator"
 	}
 
-	// The time factor is set for upstream; the responder uses an anti-replay
-	// history for packets received from initiators.
-	key, err := deriveObfuscationSecret(rootObfuscationSecret, isUpstream, context)
+	key, err := deriveObfuscationSecret(rootObfuscationSecret, context)
 	if err != nil {
-		return key, errors.Trace(err)
+		return ObfuscationSecret{}, errors.Trace(err)
 	}
 
 	return key, nil
+}
+
+// deriveSessionPacketObfuscationSecrets derives both send and receive
+// obfuscation secrets.
+func deriveSessionPacketObfuscationSecrets(
+	rootObfuscationSecret ObfuscationSecret,
+	isInitiator bool) (ObfuscationSecret, ObfuscationSecret, error) {
+
+	send, err := deriveSessionPacketObfuscationSecret(
+		rootObfuscationSecret, isInitiator, true)
+	if err != nil {
+		return ObfuscationSecret{}, ObfuscationSecret{}, errors.Trace(err)
+	}
+
+	receive, err := deriveSessionPacketObfuscationSecret(
+		rootObfuscationSecret, isInitiator, false)
+	if err != nil {
+		return ObfuscationSecret{}, ObfuscationSecret{}, errors.Trace(err)
+	}
+
+	return send, receive, nil
 }
 
 // obfuscateSessionPacket wraps a session packet with an obfuscation layer
@@ -149,44 +144,38 @@ func deriveSessionPacketObfuscationSecret(
 // anti-replay for nonces, this measure doen't cover the session handshake,
 // so an independent anti-replay mechanism is implemented here.
 func obfuscateSessionPacket(
-	rootObfuscationSecret ObfuscationSecret,
+	obfuscationSecret ObfuscationSecret,
 	isInitiator bool,
 	packet []byte,
 	paddingMin int,
 	paddingMax int) ([]byte, error) {
 
-	// For simplicity, the secret is derived here for each packet. Derived
-	// keys could be cached, but we need to be updated when a time factor is
-	// active. Typical in-proxy sessions will exchange only a handful of
-	// packets per event: the session handshake, and an API request round
-	// trip or two. We don't attempt to avoid allocations here.
-	//
-	// Benchmark for secret derivation:
-	//
-	//   BenchmarkDeriveObfuscationSecret
-	//   BenchmarkDeriveObfuscationSecret-8   	 1303953	       902.7 ns/op
-
-	key, err := deriveSessionPacketObfuscationSecret(
-		rootObfuscationSecret, isInitiator, true)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	obfuscatedPacket := make([]byte, obfuscationSessionPacketNonceSize)
 
-	_, err = prng.Read(obfuscatedPacket[:])
+	_, err := prng.Read(obfuscatedPacket[:])
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	var paddedPacket []byte
+	// Initiators add a timestamp within the obfuscated packet. The responder
+	// uses this value to discard potentially replayed packets which are
+	// outside the time range of the reponder's anti-replay history.
+
+	// TODO: add a consistent (per-session), random offset to timestamps for
+	// privacy?
+
+	var timestampedPacket []byte
+	if isInitiator {
+		timestampedPacket = binary.AppendVarint(nil, time.Now().Unix())
+	}
+
 	paddingSize := prng.Range(paddingMin, paddingMax)
-	paddedPacket = binary.AppendUvarint(paddedPacket, uint64(paddingSize))
+	paddedPacket := binary.AppendUvarint(timestampedPacket, uint64(paddingSize))
 
 	paddedPacket = append(paddedPacket, make([]byte, paddingSize)...)
 	paddedPacket = append(paddedPacket, packet...)
 
-	block, err := aes.NewCipher(key[:])
+	block, err := aes.NewCipher(obfuscationSecret[:])
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -214,7 +203,7 @@ func obfuscateSessionPacket(
 // an error: the obfuscated packet may have been created by a prober without
 // the correct secret; or replayed by a prober.
 func deobfuscateSessionPacket(
-	rootObfuscationSecret ObfuscationSecret,
+	obfuscationSecret ObfuscationSecret,
 	isInitiator bool,
 	replayHistory *obfuscationReplayHistory,
 	obfuscatedPacket []byte) ([]byte, error) {
@@ -243,16 +232,10 @@ func deobfuscateSessionPacket(
 		return nil, errors.TraceNew("replayed nonce")
 	}
 
-	key, err := deriveSessionPacketObfuscationSecret(
-		rootObfuscationSecret, isInitiator, false)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	// As an AEAD, AES-GCM authenticates that the sender used the expected
 	// key, and so has the root obfuscation secret.
 
-	block, err := aes.NewCipher(key[:])
+	block, err := aes.NewCipher(obfuscationSecret[:])
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -271,7 +254,16 @@ func deobfuscateSessionPacket(
 		return nil, errors.Trace(err)
 	}
 
+	n := 0
 	offset := 0
+	timestamp := int64(0)
+	if replayHistory != nil {
+		timestamp, n = binary.Varint(plaintext[offset:])
+		if n < 1 {
+			return nil, errors.TraceNew("invalid timestamp")
+		}
+		offset += n
+	}
 	paddingSize, n := binary.Uvarint(plaintext[offset:])
 	if n < 1 {
 		return nil, errors.TraceNew("invalid padding size")
@@ -283,6 +275,18 @@ func deobfuscateSessionPacket(
 	offset += int(paddingSize)
 
 	if replayHistory != nil {
+
+		// Accept the initiator's timestamp only if it's within +/-
+		// antiReplayTimeFactorPeriodSeconds/2 of the responder's clock. This
+		// step discards packets that are outside the range of the replay history.
+
+		now := time.Now().Unix()
+		if timestamp+antiReplayTimeFactorPeriodSeconds/2 < now {
+			return nil, errors.TraceNew("timestamp behind")
+		}
+		if timestamp-antiReplayTimeFactorPeriodSeconds/2 > now {
+			return nil, errors.TraceNew("timestamp ahead")
+		}
 
 		// Now that it's validated, add this packet to the replay history. The
 		// nonce is expected to be unique, so it's used as the history key.
@@ -318,7 +322,7 @@ func imitateDeobfuscateSessionPacketDuration(replayHistory *obfuscationReplayHis
 // obfuscationReplayHistory provides a lookup for recently observed obfuscated
 // session packet nonces. History is maintained for
 // 2*antiReplayTimeFactorPeriodSeconds; it's assumed that older packets, if
-// replayed, will fail to decrypt due to using an expired time factor.
+// replayed, will fail to deobfuscate due to using an expired timestamp.
 type obfuscationReplayHistory struct {
 	mutex         sync.Mutex
 	filters       [2]*cuckoo.Filter

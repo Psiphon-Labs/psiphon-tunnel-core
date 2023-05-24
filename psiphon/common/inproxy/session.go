@@ -436,10 +436,18 @@ func (r *InitiatorRoundTrip) Next(
 		}
 
 		newSession := func() (*session, error) {
+
+			sendObfuscationSecret, receiveObfuscationSecret, err :=
+				deriveSessionPacketObfuscationSecrets(r.responderRootObfuscationSecret, false)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
 			session, err := newSession(
 				true, // isInitiator
 				r.initiatorSessions.privateKey,
-				r.responderRootObfuscationSecret,
+				sendObfuscationSecret,
+				receiveObfuscationSecret,
 				nil, // No obfuscation replay history
 				&r.responderPublicKey,
 				r.requestPayload,
@@ -633,7 +641,8 @@ func (r *InitiatorRoundTrip) Response() ([]byte, error) {
 // supported.
 type ResponderSessions struct {
 	privateKey                  SessionPrivateKey
-	rootObfuscationSecret       ObfuscationSecret
+	sendObfuscationSecret       ObfuscationSecret
+	receiveObfuscationSecret    ObfuscationSecret
 	applyTTL                    bool
 	obfuscationReplayHistory    *obfuscationReplayHistory
 	expectedInitiatorPublicKeys sessionPublicKeyLookup
@@ -648,9 +657,16 @@ func NewResponderSessions(
 	responderPrivateKey SessionPrivateKey,
 	responderRootObfuscationSecret ObfuscationSecret) (*ResponderSessions, error) {
 
+	sendObfuscationSecret, receiveObfuscationSecret, err :=
+		deriveSessionPacketObfuscationSecrets(responderRootObfuscationSecret, true)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	return &ResponderSessions{
 		privateKey:               responderPrivateKey,
-		rootObfuscationSecret:    responderRootObfuscationSecret,
+		sendObfuscationSecret:    sendObfuscationSecret,
+		receiveObfuscationSecret: receiveObfuscationSecret,
 		applyTTL:                 true,
 		obfuscationReplayHistory: newObfuscationReplayHistory(),
 		sessions:                 lrucache.NewWithLRU(sessionsTTL, 1*time.Minute, sessionsMaxSize),
@@ -737,7 +753,7 @@ func (s *ResponderSessions) HandlePacket(
 	// request and that will be handled below.
 
 	sessionPacket, err := unwrapSessionPacket(
-		s.rootObfuscationSecret, false, s.obfuscationReplayHistory, inPacket)
+		s.receiveObfuscationSecret, false, s.obfuscationReplayHistory, inPacket)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -899,7 +915,8 @@ func (s *ResponderSessions) getSession(sessionID ID) (*session, error) {
 	session, err := newSession(
 		false, // !isInitiator
 		s.privateKey,
-		s.rootObfuscationSecret,
+		s.sendObfuscationSecret,
+		s.receiveObfuscationSecret,
 		s.obfuscationReplayHistory,
 		nil,
 		nil,
@@ -989,7 +1006,8 @@ type sessionLookup map[SessionPublicKey]*session
 type session struct {
 	isInitiator                 bool
 	sessionID                   ID
-	rootObfuscationSecret       ObfuscationSecret
+	sendObfuscationSecret       ObfuscationSecret
+	receiveObfuscationSecret    ObfuscationSecret
 	replayHistory               *obfuscationReplayHistory
 	expectedInitiatorPublicKeys sessionPublicKeyLookup
 
@@ -1007,7 +1025,8 @@ type session struct {
 func newSession(
 	isInitiator bool,
 	privateKey SessionPrivateKey,
-	rootObfuscationSecret ObfuscationSecret,
+	sendObfuscationSecret ObfuscationSecret,
+	receiveObfuscationSecret ObfuscationSecret,
 	replayHistory *obfuscationReplayHistory,
 
 	// Initiator
@@ -1089,7 +1108,8 @@ func newSession(
 	return &session{
 		isInitiator:                 isInitiator,
 		sessionID:                   *sessionID,
-		rootObfuscationSecret:       rootObfuscationSecret,
+		sendObfuscationSecret:       sendObfuscationSecret,
+		receiveObfuscationSecret:    receiveObfuscationSecret,
 		replayHistory:               replayHistory,
 		expectedInitiatorPublicKeys: expectedInitiatorPublicKeys,
 		state:                       state,
@@ -1457,7 +1477,7 @@ func (s *session) wrapPacket(sessionPacket *SessionPacket) ([]byte, error) {
 	}
 
 	obfuscatedPacket, err := obfuscateSessionPacket(
-		s.rootObfuscationSecret,
+		s.sendObfuscationSecret,
 		s.isInitiator,
 		marshaledPacket,
 		sessionObfuscationPaddingMinSize,
@@ -1476,7 +1496,7 @@ func (s *session) unwrapPacket(obfuscatedPacket []byte) (*SessionPacket, error) 
 	// No lock. References only static session fields.
 
 	sessionPacket, err := unwrapSessionPacket(
-		s.rootObfuscationSecret,
+		s.receiveObfuscationSecret,
 		s.isInitiator,
 		s.replayHistory,
 		obfuscatedPacket)
@@ -1492,13 +1512,13 @@ func (s *session) unwrapPacket(obfuscatedPacket []byte) (*SessionPacket, error) 
 // responders, which must peak at the SessionPacket and get the session ID to
 // route packets to the correct session.
 func unwrapSessionPacket(
-	rootObfuscationSecret ObfuscationSecret,
+	receiveObfuscationSecret ObfuscationSecret,
 	isInitiator bool,
 	replayHistory *obfuscationReplayHistory,
 	obfuscatedPacket []byte) (*SessionPacket, error) {
 
 	packet, err := deobfuscateSessionPacket(
-		rootObfuscationSecret,
+		receiveObfuscationSecret,
 		isInitiator,
 		replayHistory,
 		obfuscatedPacket)

@@ -158,7 +158,7 @@ func newWebRTCConn(
 	if config.DoDTLSRandomization {
 
 		dtlsObfuscationSecret, err := deriveObfuscationSecret(
-			config.ClientRootObfuscationSecret, false, "in-proxy-DTLS-seed")
+			config.ClientRootObfuscationSecret, "in-proxy-DTLS-seed")
 		if err != nil {
 			return nil, nil, nil, errors.Trace(err)
 		}
