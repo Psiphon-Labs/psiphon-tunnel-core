@@ -135,6 +135,12 @@ func discoverNATType(
 		return NATTypeUnknown, errors.TraceNew("no RFC5780 STUN server")
 	}
 
+	serverAddress, err := config.DialParameters.ResolveAddress(
+		ctx, stunServerAddress)
+	if err != nil {
+		return NATTypeUnknown, errors.Trace(err)
+	}
+
 	// The STUN server will observe proxy IP addresses. Enumeration is
 	// mitigated by using various public STUN servers, including Psiphon STUN
 	// servers for proxies in non-censored regions. Proxies are also more
@@ -151,11 +157,52 @@ func discoverNATType(
 	// Furthermore, the UDP conn that owns the tested port may need to be
 	// closed to interrupt discovery.
 
-	conn, err := config.DialParameters.UDPListen()
+	// We run the filtering test before the mapping test, and each test uses a
+	// distinct source port; using the same source port may result in NAT
+	// state from one test confusing the other test. See also,
+	// https://github.com/jselbie/stunserver/issues/18:
+	//
+	//  > running both the behavior test and the filtering test at the
+	//  > same time can cause an incorrect filtering type to be detected.
+	//  > If the filtering is actually "address dependent", the scan will
+	//  > report it as "endpoint independent".
+	//  >
+	//  > The cause appears to be the order in which the tests are being
+	//  > performed, currently "behavior" tests followed by "filtering"
+	//  > tests. The network traffic from the behavior tests having been run
+	//  > causes the router to allow filtering test responses back through
+	//  > that would not have otherwise been allowed... The behavior tests
+	//  > send traffic to the secondary IP of the STUN server, so the
+	//  > filtering tests are allowed to get responses back from that
+	//  > secondary IP.
+	//  >
+	//  > The fix is likely some combination of ...re-order the tests...
+	//  > or use the a different port for the filtering test.
+	//
+	// TODO: RFC5780, "4.5 Combining and Ordering Tests", suggests that the
+	// individual test steps within filtering and mapping could be combined,
+	// and certain tests may be run concurrently, with the goal of reducing
+	// the total elapsed test time. However, "care must be taken when
+	// combining and parallelizing tests, due to the sensitivity of certain
+	// tests to prior state on the NAT and because some NAT devices have an
+	// upper limit on how quickly bindings will be allocated."
+	//
+	// For now, we stick with a conservative arrangement of tests. Note that,
+	// in practise, the discoverNATMapping completes much faster
+	// discoverNATFiltering, and so there's a limited gain from running these
+	// two top-level tests concurrently.
+
+	mappingConn, err := config.DialParameters.UDPListen()
 	if err != nil {
 		return NATTypeUnknown, errors.Trace(err)
 	}
-	defer conn.Close()
+	defer mappingConn.Close()
+
+	filteringConn, err := config.DialParameters.UDPListen()
+	if err != nil {
+		return NATTypeUnknown, errors.Trace(err)
+	}
+	defer filteringConn.Close()
 
 	type result struct {
 		NATType NATType
@@ -165,20 +212,13 @@ func discoverNATType(
 
 	go func() {
 
-		serverAddress, err := config.DialParameters.ResolveAddress(
-			ctx, stunServerAddress)
+		filtering, err := discoverNATFiltering(ctx, filteringConn, serverAddress)
 		if err != nil {
 			resultChannel <- result{err: errors.Trace(err)}
 			return
 		}
 
-		mapping, err := discoverNATMapping(ctx, conn, serverAddress)
-		if err != nil {
-			resultChannel <- result{err: errors.Trace(err)}
-			return
-		}
-
-		filtering, err := discoverNATFiltering(ctx, conn, serverAddress)
+		mapping, err := discoverNATMapping(ctx, mappingConn, serverAddress)
 		if err != nil {
 			resultChannel <- result{err: errors.Trace(err)}
 			return
@@ -192,19 +232,22 @@ func discoverNATType(
 	select {
 	case r = <-resultChannel:
 	case <-ctx.Done():
-		r.err = errors.Trace(ctx.Err())
-		// Interrupt the goroutine
-		conn.Close()
+
+		// Interrupt and await the goroutine
+		mappingConn.Close()
+		filteringConn.Close()
 		<-resultChannel
+
+		// Don't call STUNServerAddressFailed, since ctx.Done may be due to an
+		// early dial cancel.
+		return NATTypeUnknown, errors.Trace(ctx.Err())
 	}
 
 	if r.err != nil {
 
-		if ctx.Err() == nil {
-			config.DialParameters.STUNServerAddressFailed(RFC5780, stunServerAddress)
-		}
+		config.DialParameters.STUNServerAddressFailed(RFC5780, stunServerAddress)
 
-		return NATTypeUnknown, errors.Trace(r.err)
+		return NATTypeUnknown, errors.Trace(err)
 	}
 
 	config.DialParameters.STUNServerAddressSucceeded(RFC5780, stunServerAddress)
