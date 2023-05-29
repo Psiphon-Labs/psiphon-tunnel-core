@@ -675,13 +675,35 @@ func MakeDialParameters(
 
 	if !isReplay || !replayHostname {
 
+		// Any MeekHostHeader selections made here will be overridden below,
+		// as required, for fronting cases.
+
 		if protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
 			protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol) {
 
 			dialParams.MeekSNIServerName = ""
+			hostname := ""
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
 				dialParams.MeekSNIServerName = selectHostName(dialParams.TunnelProtocol, p)
+				hostname = dialParams.MeekSNIServerName
 				dialParams.MeekTransformedHostName = true
+			} else {
+
+				// Always select a hostname for the Host header in this case.
+				// Unlike HTTP, the Host header isn't plaintext on the wire,
+				// and so there's no anti-fingerprint benefit from presenting
+				// the server IP address in the Host header. Omitting the
+				// server IP here can prevent exposing it in certain
+				// scenarios where the traffic is rerouted and arrives at a
+				// different HTTPS server.
+
+				hostname = selectHostName(dialParams.TunnelProtocol, p)
+			}
+			if serverEntry.MeekServerPort == 443 {
+				dialParams.MeekHostHeader = hostname
+			} else {
+				dialParams.MeekHostHeader = net.JoinHostPort(
+					hostname, strconv.Itoa(serverEntry.MeekServerPort))
 			}
 
 		} else if protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
@@ -765,7 +787,6 @@ func MakeDialParameters(
 				dialParams.ObfuscatedQUICNonceTransformerParameters = nil
 			}
 		}
-
 	}
 
 	if !isReplay || !replayLivenessTest {
@@ -850,7 +871,6 @@ func MakeDialParameters(
 				dialParams.OSSHObfuscatorSeedTransformerParameters = nil
 			}
 		}
-
 	}
 
 	if protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
@@ -919,13 +939,6 @@ func MakeDialParameters(
 	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 
 		dialParams.MeekDialAddress = net.JoinHostPort(serverEntry.IpAddress, dialParams.DialPortNumber)
-		if !dialParams.MeekTransformedHostName {
-			if dialPortNumber == 80 {
-				dialParams.MeekHostHeader = serverEntry.IpAddress
-			} else {
-				dialParams.MeekHostHeader = dialParams.MeekDialAddress
-			}
-		}
 
 	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET:
@@ -935,16 +948,10 @@ func MakeDialParameters(
 			// Note: IP address in SNI field will be omitted.
 			dialParams.MeekSNIServerName = serverEntry.IpAddress
 		}
-		if dialPortNumber == 443 {
-			dialParams.MeekHostHeader = serverEntry.IpAddress
-		} else {
-			dialParams.MeekHostHeader = dialParams.MeekDialAddress
-		}
 
 	default:
 		return nil, errors.Tracef(
 			"unknown tunnel protocol: %s", dialParams.TunnelProtocol)
-
 	}
 
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {

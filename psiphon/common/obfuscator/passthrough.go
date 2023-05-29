@@ -36,6 +36,7 @@ const (
 	TLS_PASSTHROUGH_NONCE_SIZE   = 16
 	TLS_PASSTHROUGH_KEY_SIZE     = 32
 	TLS_PASSTHROUGH_TIME_PERIOD  = 20 * time.Minute
+	TLS_PASSTHROUGH_HISTORY_TTL  = TLS_PASSTHROUGH_TIME_PERIOD * 3
 	TLS_PASSTHROUGH_MESSAGE_SIZE = 32
 )
 
@@ -51,7 +52,7 @@ const (
 func MakeTLSPassthroughMessage(
 	useTimeFactor bool, obfuscatedKey string) ([]byte, error) {
 
-	passthroughKey, err := derivePassthroughKey(useTimeFactor, obfuscatedKey)
+	passthroughKey, err := derivePassthroughKey(useTimeFactor, 0, obfuscatedKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -86,9 +87,48 @@ func VerifyTLSPassthroughMessage(
 		message = stub[:]
 	}
 
-	passthroughKey, err := derivePassthroughKey(useTimeFactor, obfuscatedKey)
+	if useTimeFactor {
+
+		// Check three rounded time periods: the current one, the previous
+		// one, and the future one. Even if the client clock is ahead of the
+		// server clock by only a short amount, it can use the future time
+		// period, from the server's perspective, when the server's clock is
+		// close to the end of its current time period. And even if the
+		// client and server clocks are perfectly synchronized, the client
+		// may use the previous time period and then time advances to the
+		// next time period by the time the server receives the message.
+		//
+		// All three time periods are always checked, to avoid leaking via
+		// timing differences.
+
+		match := false
+
+		for _, timePeriodShift := range []int64{-1, 0, 1} {
+
+			passthroughKey, err := derivePassthroughKey(
+				useTimeFactor, timePeriodShift, obfuscatedKey)
+			if err != nil {
+				// derivePassthroughKey is not expected to fail.
+				// TODO: log error
+				return false
+			}
+
+			h := hmac.New(sha256.New, passthroughKey)
+			h.Write(message[0:TLS_PASSTHROUGH_NONCE_SIZE])
+
+			if 1 == subtle.ConstantTimeCompare(
+				message[TLS_PASSTHROUGH_NONCE_SIZE:],
+				h.Sum(nil)[0:TLS_PASSTHROUGH_MESSAGE_SIZE-TLS_PASSTHROUGH_NONCE_SIZE]) {
+
+				match = true
+			}
+		}
+
+		return match
+	}
+
+	passthroughKey, err := derivePassthroughKey(false, 0, obfuscatedKey)
 	if err != nil {
-		// TODO: log error
 		return false
 	}
 
@@ -106,7 +146,7 @@ func VerifyTLSPassthroughMessage(
 var timePeriodSeconds = int64(TLS_PASSTHROUGH_TIME_PERIOD / time.Second)
 
 func derivePassthroughKey(
-	useTimeFactor bool, obfuscatedKey string) ([]byte, error) {
+	useTimeFactor bool, timePeriodShift int64, obfuscatedKey string) ([]byte, error) {
 
 	secret := []byte(obfuscatedKey)
 
@@ -130,7 +170,9 @@ func derivePassthroughKey(
 		// differences at time boundaries. We assume that the server always or never
 		// sets useTimeFactor.
 
-		roundedTimePeriod := (time.Now().Unix() + (timePeriodSeconds / 2)) / timePeriodSeconds
+		roundedTimePeriod := (time.Now().Unix() +
+			(timePeriodSeconds / 2) +
+			timePeriodSeconds*timePeriodShift) / timePeriodSeconds
 
 		var timeFactor [8]byte
 		binary.LittleEndian.PutUint64(timeFactor[:], uint64(roundedTimePeriod))

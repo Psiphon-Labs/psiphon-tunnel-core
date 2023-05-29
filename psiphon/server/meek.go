@@ -1313,7 +1313,7 @@ func (server *MeekServer) makeMeekTLSConfig(
 
 			// Use a custom, shorter TTL based on the validity period of the
 			// passthrough message.
-			TTL := obfuscator.TLS_PASSTHROUGH_TIME_PERIOD
+			TTL := obfuscator.TLS_PASSTHROUGH_HISTORY_TTL
 			if server.support.Config.LegacyPassthrough {
 				TTL = obfuscator.HISTORY_SEED_TTL
 			}
