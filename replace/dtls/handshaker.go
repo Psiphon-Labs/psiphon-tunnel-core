@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"time"
 
@@ -133,6 +134,9 @@ type flightConn interface {
 	setLocalEpoch(epoch uint16)
 	handleQueuedPackets(context.Context) error
 	sessionKey() []byte
+
+	// [Psiphon]
+	LocalAddr() net.Addr
 }
 
 func (c *handshakeConfig) writeKeyLog(label string, clientRandom, secret []byte) {

@@ -47,6 +47,7 @@ type testDialParameters struct {
 	brokerClientRoundTripperFailed    func(RoundTripper)
 	clientRootObfuscationSecret       ObfuscationSecret
 	doDTLSRandomization               bool
+	trafficShapingParameters          *DataChannelTrafficShapingParameters
 	stunServerAddress                 string
 	stunServerAddressRFC5780          string
 	stunServerAddressSucceeded        func(RFC5780 bool, address string)
@@ -143,6 +144,12 @@ func (t *testDialParameters) DoDTLSRandomization() bool {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.doDTLSRandomization
+}
+
+func (t *testDialParameters) DataChannelTrafficShapingParameters() *DataChannelTrafficShapingParameters {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.trafficShapingParameters
 }
 
 func (t *testDialParameters) STUNServerAddress(RFC5780 bool) string {

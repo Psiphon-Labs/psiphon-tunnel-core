@@ -211,13 +211,15 @@ type ProxyAnnounceRequest struct {
 // user interface for display to the user; for example, to alert the proxy
 // operator of configuration issue; the JSON schema is not defined here.
 type ProxyAnnounceResponse struct {
-	OperatorMessageJSON         string                    `cbor:"1,keyasint,omitempty"`
-	ConnectionID                ID                        `cbor:"2,keyasint,omitempty"`
-	ClientProxyProtocolVersion  int32                     `cbor:"3,keyasint,omitempty"`
-	ClientOfferSDP              webrtc.SessionDescription `cbor:"4,keyasint,omitempty"`
-	ClientRootObfuscationSecret ObfuscationSecret         `cbor:"5,keyasint,omitempty"`
-	NetworkProtocol             NetworkProtocol           `cbor:"6,keyasint,omitempty"`
-	DestinationAddress          string                    `cbor:"7,keyasint,omitempty"`
+	OperatorMessageJSON         string                               `cbor:"1,keyasint,omitempty"`
+	ConnectionID                ID                                   `cbor:"2,keyasint,omitempty"`
+	ClientProxyProtocolVersion  int32                                `cbor:"3,keyasint,omitempty"`
+	ClientOfferSDP              webrtc.SessionDescription            `cbor:"4,keyasint,omitempty"`
+	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"5,keyasint,omitempty"`
+	DoDTLSRandomization         bool                                 `cbor:"7,keyasint,omitempty"`
+	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"8,keyasint,omitempty"`
+	NetworkProtocol             NetworkProtocol                      `cbor:"9,keyasint,omitempty"`
+	DestinationAddress          string                               `cbor:"10,keyasint,omitempty"`
 }
 
 // ClientOfferRequest is an API request sent from a client to a broker,
@@ -241,15 +243,33 @@ type ProxyAnnounceResponse struct {
 // domain, and destination port for a valid Psiphon tunnel protocol run by
 // the specified server entry.
 type ClientOfferRequest struct {
-	Metrics                     *ClientMetrics            `cbor:"1,keyasint,omitempty"`
-	CommonCompartmentIDs        []ID                      `cbor:"2,keyasint,omitempty"`
-	PersonalCompartmentIDs      []ID                      `cbor:"3,keyasint,omitempty"`
-	ClientOfferSDP              webrtc.SessionDescription `cbor:"4,keyasint,omitempty"`
-	ICECandidateTypes           ICECandidateTypes         `cbor:"5,keyasint,omitempty"`
-	ClientRootObfuscationSecret ObfuscationSecret         `cbor:"6,keyasint,omitempty"`
-	DestinationServerEntryJSON  []byte                    `cbor:"7,keyasint,omitempty"`
-	NetworkProtocol             NetworkProtocol           `cbor:"8,keyasint,omitempty"`
-	DestinationAddress          string                    `cbor:"9,keyasint,omitempty"`
+	Metrics                     *ClientMetrics                       `cbor:"1,keyasint,omitempty"`
+	CommonCompartmentIDs        []ID                                 `cbor:"2,keyasint,omitempty"`
+	PersonalCompartmentIDs      []ID                                 `cbor:"3,keyasint,omitempty"`
+	ClientOfferSDP              webrtc.SessionDescription            `cbor:"4,keyasint,omitempty"`
+	ICECandidateTypes           ICECandidateTypes                    `cbor:"5,keyasint,omitempty"`
+	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"6,keyasint,omitempty"`
+	DoDTLSRandomization         bool                                 `cbor:"7,keyasint,omitempty"`
+	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"8,keyasint,omitempty"`
+	DestinationServerEntryJSON  []byte                               `cbor:"9,keyasint,omitempty"`
+	NetworkProtocol             NetworkProtocol                      `cbor:"10,keyasint,omitempty"`
+	DestinationAddress          string                               `cbor:"11,keyasint,omitempty"`
+}
+
+// DataChannelTrafficShapingParameters specifies a data channel traffic
+// shaping configuration, including random padding and decoy messages.
+// Clients determine their own traffic shaping configuration, and generate
+// and send a configuration for the peer proxy to use.
+type DataChannelTrafficShapingParameters struct {
+	MinPaddedMessages       int     `cbor:"1,keyasint,omitempty"`
+	MaxPaddedMessages       int     `cbor:"2,keyasint,omitempty"`
+	MinPaddingSize          int     `cbor:"3,keyasint,omitempty"`
+	MaxPaddingSize          int     `cbor:"4,keyasint,omitempty"`
+	MinDecoyMessages        int     `cbor:"5,keyasint,omitempty"`
+	MaxDecoyMessages        int     `cbor:"6,keyasint,omitempty"`
+	MinDecoySize            int     `cbor:"7,keyasint,omitempty"`
+	MaxDecoySize            int     `cbor:"8,keyasint,omitempty"`
+	DecoyMessageProbability float64 `cbor:"9,keyasint,omitempty"`
 }
 
 // TODO: Encode SDPs using CBOR without field names, simliar to base metrics
@@ -405,10 +425,15 @@ func DecodeBaseMetrics(metrics BaseMetrics) common.APIParameters {
 	return params
 }
 
-// Sanity check lengths for array inputs.
+// Sanity check values.
 const (
 	maxICECandidateTypes = 10
 	maxPortMappingTypes  = 10
+
+	maxPaddedMessages = 100
+	maxPaddingSize    = 16384
+	maxDecoyMessages  = 100
+	maxDecoySize      = 16384
 )
 
 // ValidateAndGetLogFields validates the ProxyMetrics and returns
@@ -535,7 +560,7 @@ func (request *ProxyAnnounceRequest) ValidateAndGetLogFields(
 	return logFields, nil
 }
 
-// ClientOfferRequest validates the ProxyAnnounceRequest and returns
+// ValidateAndGetLogFields validates the ClientOfferRequest and returns
 // common.LogFields for logging.
 func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
@@ -577,6 +602,13 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 		return nil, errors.Trace(err)
 	}
 
+	if request.TrafficShapingParameters != nil {
+		err := request.TrafficShapingParameters.Validate()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
 	// CommonCompartmentIDs are generated and managed and are a form of
 	// obfuscation secret, so are not logged. PersonalCompartmentIDs are
 	// user-generated and shared out-of-band; values are not logged since
@@ -593,7 +625,38 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	return logFields, nil
 }
 
-// ProxyAnswerRequest validates the ProxyAnnounceRequest and returns
+// Validate validates the that client has not specified excess traffic shaping
+// padding or decoy traffic.
+func (params *DataChannelTrafficShapingParameters) Validate() error {
+
+	if params.MinPaddedMessages < 0 ||
+		params.MinPaddedMessages > params.MaxPaddedMessages ||
+		params.MaxPaddedMessages > maxPaddedMessages {
+		return errors.TraceNew("invalid padded messages")
+	}
+
+	if params.MinPaddingSize < 0 ||
+		params.MinPaddingSize > params.MaxPaddingSize ||
+		params.MaxPaddingSize > maxPaddingSize {
+		return errors.TraceNew("invalid padding size")
+	}
+
+	if params.MinDecoyMessages < 0 ||
+		params.MinDecoyMessages > params.MaxDecoyMessages ||
+		params.MaxDecoyMessages > maxDecoyMessages {
+		return errors.TraceNew("invalid decoy messages")
+	}
+
+	if params.MinDecoySize < 0 ||
+		params.MinDecoySize > params.MaxDecoySize ||
+		params.MaxDecoySize > maxDecoySize {
+		return errors.TraceNew("invalid decoy size")
+	}
+
+	return nil
+}
+
+// ValidateAndGetLogFields validates the ProxyAnswerRequest and returns
 // common.LogFields for logging.
 func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
@@ -631,7 +694,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	return logFields, nil
 }
 
-// ClientRelayedPacketRequest validates the ProxyAnnounceRequest and returns
+// ValidateAndGetLogFields validates the ClientRelayedPacketRequest and returns
 // common.LogFields for logging.
 func (request *ClientRelayedPacketRequest) ValidateAndGetLogFields(
 	baseMetricsValidator common.APIParameterValidator,
@@ -646,7 +709,7 @@ func (request *ClientRelayedPacketRequest) ValidateAndGetLogFields(
 	return logFields, nil
 }
 
-// BrokerServerRequest validates the ProxyAnnounceRequest and returns
+// ValidateAndGetLogFields validates the BrokerServerRequest and returns
 // common.LogFields for logging.
 func (request *BrokerServerRequest) ValidateAndGetLogFields() (common.LogFields, error) {
 

@@ -396,6 +396,8 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 			Logger:                      p.config.Logger,
 			DialParameters:              p.config.DialParameters,
 			ClientRootObfuscationSecret: announceResponse.ClientRootObfuscationSecret,
+			DoDTLSRandomization:         announceResponse.DoDTLSRandomization,
+			TrafficShapingParameters:    announceResponse.TrafficShapingParameters,
 		},
 		announceResponse.ClientOfferSDP)
 	var webRTCRequestErr string
@@ -546,12 +548,11 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 	// The proxy operator's ISP may be able to observe that the operator's
 	// host has nearly matching ingress and egress traffic. The traffic
 	// content won't be the same: the ingress traffic is wrapped in a WebRTC
-	// data channel, and the egress traffic is a Psiphon tunnel protocol. But
-	// the traffic shape will be close to the same. As a future enhancement,
-	// consider adding data channel padding and decoy traffic, which is
-	// dropped on egress. For performance, traffic shaping could be ceased
-	// after some time. Even with this measure, over time the number of bytes
-	// in and out of the proxy may still indicate proxying.
+	// data channel, and the egress traffic is a Psiphon tunnel protocol.
+	// With padding and decoy packets, the ingress and egress traffic shape
+	// will differ beyond the basic WebRTC overheader. Even with this
+	// measure, over time the number of bytes in and out of the proxy may
+	// still indicate proxying.
 
 	waitGroup := new(sync.WaitGroup)
 	relayErrors := make(chan error, 2)
@@ -567,10 +568,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 		//
 		// As io.Copy uses a buffer size of 32K, each relayed message will be
 		// less than the maximum. Calls to ClientConn.Write are also expected
-		// to use io.Copy, keeping messages at most 32K in size. Note that
-		// testing with io.CopyBuffer and a buffer of size 65536 actually
-		// yielded the pion error io.ErrShortBuffer, "short buffer", while a
-		// buffer of size 65535 worked.
+		// to use io.Copy, keeping messages at most 32K in size.
 
 		_, err := io.Copy(webRTCConn, destinationConn)
 		if err != nil {

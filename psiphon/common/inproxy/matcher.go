@@ -166,6 +166,8 @@ type MatchOffer struct {
 	ClientProxyProtocolVersion  int32
 	ClientOfferSDP              webrtc.SessionDescription
 	ClientRootObfuscationSecret ObfuscationSecret
+	DoDTLSRandomization         bool
+	TrafficShapingParameters    *DataChannelTrafficShapingParameters
 	NetworkProtocol             NetworkProtocol
 	DestinationAddress          string
 	DestinationServerID         string

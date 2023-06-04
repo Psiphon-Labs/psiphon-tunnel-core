@@ -60,7 +60,6 @@ func runTestInProxy() error {
 	numClients := 10
 
 	bytesToSend := 1 << 20
-	messageSize := 1 << 10
 	targetElapsedSeconds := 2
 
 	baseMetrics := common.APIParameters{
@@ -77,6 +76,7 @@ func runTestInProxy() error {
 	testNetworkType := NetworkTypeUnknown
 	testNATType := NATTypeUnknown
 	testSTUNServerAddress := "stun.nextcloud.com:443"
+	testDisableSTUN := false
 
 	// TODO: test port mapping
 
@@ -294,6 +294,7 @@ func runTestInProxy() error {
 			networkID:                  testNetworkID,
 			networkType:                testNetworkType,
 			natType:                    testNATType,
+			disableSTUN:                testDisableSTUN,
 			stunServerAddress:          testSTUNServerAddress,
 			stunServerAddressRFC5780:   testSTUNServerAddress,
 			stunServerAddressSucceeded: stunServerAddressSucceeded,
@@ -425,8 +426,8 @@ func runTestInProxy() error {
 			sendBytes := prng.Bytes(bytesToSend)
 
 			clientsGroup.Go(func() error {
-				for n := 0; n < bytesToSend; n += messageSize {
-					m := messageSize
+				for n := 0; n < bytesToSend; {
+					m := prng.Range(1024, 32768)
 					if bytesToSend-n < m {
 						m = bytesToSend - n
 					}
@@ -434,13 +435,14 @@ func runTestInProxy() error {
 					if err != nil {
 						return errors.Trace(err)
 					}
+					n += m
 				}
 				fmt.Printf("%d bytes sent\n", bytesToSend)
 				return nil
 			})
 
 			clientsGroup.Go(func() error {
-				buf := make([]byte, messageSize)
+				buf := make([]byte, 32768)
 				n := 0
 				for n < bytesToSend {
 					m, err := relayConn.Read(buf)
@@ -489,6 +491,7 @@ func runTestInProxy() error {
 			networkID:                  testNetworkID,
 			networkType:                testNetworkType,
 			natType:                    testNATType,
+			disableSTUN:                testDisableSTUN,
 			stunServerAddress:          testSTUNServerAddress,
 			stunServerAddressRFC5780:   testSTUNServerAddress,
 			stunServerAddressSucceeded: stunServerAddressSucceeded,
@@ -504,6 +507,17 @@ func runTestInProxy() error {
 
 			clientRootObfuscationSecret: clientRootObfuscationSecret,
 			doDTLSRandomization:         true,
+			trafficShapingParameters: &DataChannelTrafficShapingParameters{
+				MinPaddedMessages:       0,
+				MaxPaddedMessages:       10,
+				MinPaddingSize:          0,
+				MaxPaddingSize:          1500,
+				MinDecoyMessages:        0,
+				MaxDecoyMessages:        10,
+				MinDecoySize:            1,
+				MaxDecoySize:            1500,
+				DecoyMessageProbability: 0.5,
+			},
 
 			setNATType:          func(NATType) {},
 			setPortMappingTypes: func(PortMappingTypes) {},
@@ -732,7 +746,7 @@ func runTCPEchoServer(listener net.Listener) {
 			return
 		}
 		go func(conn net.Conn) {
-			buf := make([]byte, 1024)
+			buf := make([]byte, 32768)
 			for {
 				n, err := conn.Read(buf)
 				if n > 0 {
@@ -793,7 +807,7 @@ func (q *quicEchoServer) Run() {
 			return
 		}
 		go func(conn net.Conn) {
-			buf := make([]byte, 1024)
+			buf := make([]byte, 32768)
 			for {
 				n, err := conn.Read(buf)
 				if n > 0 {

@@ -6,6 +6,7 @@ package dtls
 import (
 	"bytes"
 	"context"
+	"errors"
 
 	"github.com/pion/dtls/v2/pkg/protocol"
 	"github.com/pion/dtls/v2/pkg/protocol/alert"
@@ -45,6 +46,12 @@ func flight2Parse(ctx context.Context, c flightConn, state *State, cache *handsh
 }
 
 func flight2Generate(_ flightConn, state *State, _ *handshakeCache, _ *handshakeConfig) ([]*packet, *alert.Alert, error) {
+
+	// [Psiphon]
+	// With SetDTLSInsecureSkipHelloVerify set, this should never be called,
+	// so handshake randomization is not implemented here.
+	return nil, nil, errors.New("unexpected flight2Generate call")
+
 	state.handshakeSendSequence = 0
 	return []*packet{
 		{

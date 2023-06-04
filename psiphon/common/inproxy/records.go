@@ -157,7 +157,7 @@ func readRecordPreamble(expectedRecordType int, payload []byte) ([]byte, error) 
 	}
 
 	recordDataLength, n := binary.Uvarint(payload[2:])
-	if n < 1 || 2+n > len(payload) {
+	if (recordDataLength == 0 && n <= 0) || 2+n > len(payload) {
 		return nil, errors.Tracef("invalid record preamble data length")
 	}
 

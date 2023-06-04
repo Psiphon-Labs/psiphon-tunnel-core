@@ -6,6 +6,7 @@ package dtls
 import (
 	"bytes"
 	"context"
+	"errors"
 
 	"github.com/pion/dtls/v2/internal/ciphersuite/types"
 	"github.com/pion/dtls/v2/pkg/crypto/elliptic"
@@ -228,6 +229,12 @@ func handleServerKeyExchange(_ flightConn, state *State, cfg *handshakeConfig, h
 }
 
 func flight3Generate(_ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+
+	// [Psiphon]
+	// With SetDTLSInsecureSkipHelloVerify set, this should never be called,
+	// so handshake randomization is not implemented here.
+	return nil, nil, errors.New("unexpected flight3Generate call")
+
 	extensions := []extension.Extension{
 		&extension.SupportedSignatureAlgorithms{
 			SignatureHashAlgorithms: cfg.localSignatureSchemes,

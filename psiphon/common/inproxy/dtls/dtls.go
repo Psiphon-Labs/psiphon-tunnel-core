@@ -17,7 +17,7 @@
  *
  */
 
-package inproxy
+package dtls
 
 import (
 	"net"
@@ -38,35 +38,28 @@ const (
 )
 
 // SetDTLSSeed establishes a cached common/prng seed to be used when
-// randomizing DTLS ClientHellos.
+// randomizing DTLS Hellos.
 //
 // The seed is keyed by the specified conn's local address. This allows a fork
 // of pion/dtls to fetch the seed and apply randomization without having to
 // fork many pion layers to pass in seeds. Concurrent dials must use distinct
 // conns with distinct local addresses (including port number).
 //
-// Both sides of a WebRTC connection may randomize their ClientHello. isOffer
+// Both sides of a WebRTC connection may randomize their Hellos. isOffer
 // allows the same seed to be used, but produce two distinct random streams.
 // The client generates or replays an obfuscation secret used to derive the
 // seed, and the obfuscation secret is relayed to the proxy by the Broker.
 //
 // The caller may specify TTL, which can be used to retain the cached key for
 // a dial timeout duration; when TTL is <= 0, a default TTL is used.
-func SetDTLSSeed(conn net.PacketConn, obfuscationSecret ObfuscationSecret, isOffer bool, TTL time.Duration) error {
-
-	if len(obfuscationSecret) != prng.SEED_LENGTH {
-		return errors.TraceNew("unexpected obfuscation secret length")
-	}
-
-	var baseSeed prng.Seed
-	copy(baseSeed[:], obfuscationSecret[:])
+func SetDTLSSeed(localAddr net.Addr, baseSeed *prng.Seed, isOffer bool, TTL time.Duration) error {
 
 	salt := "inproxy-client-DTLS-seed"
 	if !isOffer {
 		salt = "inproxy-proxy-DTLS-seed"
 	}
 
-	seed, err := prng.NewSaltedSeed(&baseSeed, salt)
+	seed, err := prng.NewSaltedSeed(baseSeed, salt)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -78,17 +71,31 @@ func SetDTLSSeed(conn net.PacketConn, obfuscationSecret ObfuscationSecret, isOff
 	// In the case where a previously used local port number is reused in a
 	// new dial, this will replace the previous seed.
 
-	dtlsSeedCache.Set(conn.LocalAddr().String(), seed, TTL)
+	dtlsSeedCache.Set(localAddr.String(), seed, TTL)
 
 	return nil
 }
 
+// SetNoDTLSSeed indicates to skip DTLS randomization for the conn specified
+// by the local address.
+func SetNoDTLSSeed(localAddr net.Addr, TTL time.Duration) {
+
+	if TTL <= 0 {
+		TTL = lrucache.DefaultExpiration
+	}
+
+	dtlsSeedCache.Set(localAddr.String(), nil, TTL)
+}
+
 // GetDTLSSeed fetches a seed established by SetDTLSSeed, or returns an error
-// if no seed is found for the specified conn.
-func GetDTLSSeed(conn *net.UDPConn) (*prng.Seed, error) {
-	seed, ok := dtlsSeedCache.Get(conn.LocalAddr().String())
+// if no seed is found for the specified conn, keyed by local/source address.
+func GetDTLSSeed(localAddr net.Addr) (*prng.Seed, error) {
+	seed, ok := dtlsSeedCache.Get(localAddr.String())
 	if !ok {
 		return nil, errors.TraceNew("missing seed")
+	}
+	if seed == nil {
+		return nil, nil
 	}
 	return seed.(*prng.Seed), nil
 }

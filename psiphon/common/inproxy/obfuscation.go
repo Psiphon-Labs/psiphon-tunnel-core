@@ -259,7 +259,7 @@ func deobfuscateSessionPacket(
 	timestamp := int64(0)
 	if replayHistory != nil {
 		timestamp, n = binary.Varint(plaintext[offset:])
-		if n < 1 {
+		if timestamp == 0 && n <= 0 {
 			return nil, errors.TraceNew("invalid timestamp")
 		}
 		offset += n

@@ -134,10 +134,16 @@ type DialParameters interface {
 	// obfuscation/replay on both sides.
 	ClientRootObfuscationSecret() ObfuscationSecret
 
-	// DoDTLSRandomization indicates whether to perform DTLS ClientHello
-	// randomization. DoDTLSRandomization is specified by clients, which may
-	// use a weighted coin flip or a replay to determine the value.
+	// DoDTLSRandomization indicates whether to perform DTLS
+	// Client/ServerHello randomization. DoDTLSRandomization is specified by
+	// clients, which may use a weighted coin flip or a replay to determine
+	// the value.
 	DoDTLSRandomization() bool
+
+	// DataChannelTrafficShapingParameters returns parameters specifying how
+	// to perform data channel traffic shapping -- random padding and decoy
+	// message. Returns nil when no traffic shaping is to be performed.
+	DataChannelTrafficShapingParameters() *DataChannelTrafficShapingParameters
 
 	// STUNServerAddress selects a STUN server to use for this dial. When
 	// RFC5780 is true, the STUN server must support RFC5780 NAT discovery;

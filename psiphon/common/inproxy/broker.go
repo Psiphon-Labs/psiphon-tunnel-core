@@ -466,6 +466,8 @@ func (b *Broker) handleProxyAnnounce(
 			ClientProxyProtocolVersion:  clientOffer.ClientProxyProtocolVersion,
 			ClientOfferSDP:              clientOffer.ClientOfferSDP,
 			ClientRootObfuscationSecret: clientOffer.ClientRootObfuscationSecret,
+			DoDTLSRandomization:         clientOffer.DoDTLSRandomization,
+			TrafficShapingParameters:    clientOffer.TrafficShapingParameters,
 			NetworkProtocol:             clientOffer.NetworkProtocol,
 			DestinationAddress:          clientOffer.DestinationAddress,
 		})
@@ -602,6 +604,8 @@ func (b *Broker) handleClientOffer(
 		ClientProxyProtocolVersion:  offerRequest.Metrics.ProxyProtocolVersion,
 		ClientOfferSDP:              offerRequest.ClientOfferSDP,
 		ClientRootObfuscationSecret: offerRequest.ClientRootObfuscationSecret,
+		DoDTLSRandomization:         offerRequest.DoDTLSRandomization,
+		TrafficShapingParameters:    offerRequest.TrafficShapingParameters,
 		NetworkProtocol:             offerRequest.NetworkProtocol,
 		DestinationAddress:          offerRequest.DestinationAddress,
 		DestinationServerID:         serverParams.serverID,

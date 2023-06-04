@@ -275,6 +275,8 @@ func dialClientWebRTCConn(
 
 	// Initialize the WebRTC offer
 
+	doTLSRandomization := config.DialParameters.DoDTLSRandomization()
+	trafficShapingParameters := config.DialParameters.DataChannelTrafficShapingParameters()
 	clientRootObfuscationSecret := config.DialParameters.ClientRootObfuscationSecret()
 
 	webRTCConn, SDP, SDPMetrics, err := NewWebRTCConnWithOffer(
@@ -282,6 +284,8 @@ func dialClientWebRTCConn(
 			Logger:                      config.Logger,
 			DialParameters:              config.DialParameters,
 			ClientRootObfuscationSecret: clientRootObfuscationSecret,
+			DoDTLSRandomization:         doTLSRandomization,
+			TrafficShapingParameters:    trafficShapingParameters,
 			ReliableTransport:           config.ReliableTransport,
 		})
 	if err != nil {
@@ -324,6 +328,8 @@ func dialClientWebRTCConn(
 			ClientOfferSDP:              SDP,
 			ICECandidateTypes:           SDPMetrics.ICECandidateTypes,
 			ClientRootObfuscationSecret: clientRootObfuscationSecret,
+			DoDTLSRandomization:         doTLSRandomization,
+			TrafficShapingParameters:    trafficShapingParameters,
 			DestinationServerEntryJSON:  config.DestinationServerEntryJSON,
 			NetworkProtocol:             config.DialNetworkProtocol,
 			DestinationAddress:          config.DialAddress,
