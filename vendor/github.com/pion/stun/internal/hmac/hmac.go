@@ -1,6 +1,5 @@
-// Copyright 2009 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// SPDX-FileCopyrightText: 2009 The Go Authors. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
 
 /*
 Package hmac implements the Keyed-Hash Message Authentication Code (HMAC) as
@@ -58,13 +57,13 @@ func (h *hmac) Sum(in []byte) []byte {
 
 	if h.marshaled {
 		if err := h.outer.(marshalable).UnmarshalBinary(h.opad); err != nil { //nolint:forcetypeassert
-			panic(err) // nolint
+			panic(err) //nolint
 		}
 	} else {
 		h.outer.Reset()
-		h.outer.Write(h.opad) //nolint: errcheck,gosec
+		h.outer.Write(h.opad) //nolint:errcheck,gosec
 	}
-	h.outer.Write(in[origLen:]) //nolint: errcheck,gosec
+	h.outer.Write(in[origLen:]) //nolint:errcheck,gosec
 	return h.outer.Sum(in[:origLen])
 }
 
@@ -78,13 +77,13 @@ func (h *hmac) BlockSize() int { return h.inner.BlockSize() }
 func (h *hmac) Reset() {
 	if h.marshaled {
 		if err := h.inner.(marshalable).UnmarshalBinary(h.ipad); err != nil { //nolint:forcetypeassert
-			panic(err) // nolint
+			panic(err) //nolint
 		}
 		return
 	}
 
 	h.inner.Reset()
-	h.inner.Write(h.ipad) //nolint: errcheck,gosec
+	h.inner.Write(h.ipad) //nolint:errcheck,gosec
 
 	// If the underlying hash is marshalable, we can save some time by
 	// saving a copy of the hash state now, and restoring it on future
@@ -107,7 +106,7 @@ func (h *hmac) Reset() {
 	}
 
 	h.outer.Reset()
-	h.outer.Write(h.opad) //nolint: errcheck,gosec
+	h.outer.Write(h.opad) //nolint:errcheck,gosec
 	omarshal, err := marshalableOuter.MarshalBinary()
 	if err != nil {
 		return
@@ -132,7 +131,7 @@ func New(h func() hash.Hash, key []byte) hash.Hash {
 	hm.opad = make([]byte, blocksize)
 	if len(key) > blocksize {
 		// If key is too big, hash it.
-		hm.outer.Write(key) // nolint:errcheck,gosec
+		hm.outer.Write(key) //nolint:errcheck,gosec
 		key = hm.outer.Sum(nil)
 	}
 	copy(hm.ipad, key)
@@ -143,7 +142,7 @@ func New(h func() hash.Hash, key []byte) hash.Hash {
 	for i := range hm.opad {
 		hm.opad[i] ^= 0x5c
 	}
-	hm.inner.Write(hm.ipad) //nolint: errcheck,gosec
+	hm.inner.Write(hm.ipad) //nolint:errcheck,gosec
 
 	return hm
 }

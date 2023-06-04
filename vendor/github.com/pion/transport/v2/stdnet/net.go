@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 // Package stdnet implements the transport.Net interface
 // using methods from Go's standard net package.
 package stdnet

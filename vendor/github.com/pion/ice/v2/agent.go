@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 // Package ice implements the Interactive Connectivity Establishment (ICE)
 // protocol defined in rfc5245.
 package ice
@@ -44,7 +47,7 @@ type Agent struct {
 	onConnected     chan struct{}
 	onConnectedOnce sync.Once
 
-	// force candidate to be contacted immediately (instead of waiting for task ticker)
+	// Force candidate to be contacted immediately (instead of waiting for task ticker)
 	forceCandidateContact chan bool
 
 	tieBreaker uint64
@@ -102,7 +105,7 @@ type Agent struct {
 
 	selectedPair atomic.Value // *CandidatePair
 
-	urls         []*URL
+	urls         []*stun.URI
 	networkTypes []NetworkType
 
 	buf *packetio.Buffer
@@ -212,7 +215,7 @@ func (a *Agent) taskLoop() {
 		a.startedFn()
 
 		if err := a.buf.Close(); err != nil {
-			a.log.Warnf("failed to close buffer: %v", err)
+			a.log.Warnf("Failed to close buffer: %v", err)
 		}
 
 		a.closeMulticastConn()
@@ -294,6 +297,9 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 		log:               log,
 		net:               config.Net,
 		proxyDialer:       config.ProxyDialer,
+		tcpMux:            config.TCPMux,
+		udpMux:            config.UDPMux,
+		udpMuxSrflx:       config.UDPMuxSrflx,
 
 		mDNSMode: mDNSMode,
 		mDNSName: mDNSName,
@@ -311,22 +317,15 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 		includeLoopback: config.IncludeLoopback,
 	}
 
-	a.tcpMux = config.TCPMux
-	if a.tcpMux == nil {
-		a.tcpMux = newInvalidTCPMux()
-	}
-	a.udpMux = config.UDPMux
-	a.udpMuxSrflx = config.UDPMuxSrflx
-
 	if a.net == nil {
 		a.net, err = stdnet.NewNet()
 		if err != nil {
 			return nil, fmt.Errorf("failed to create network: %w", err)
 		}
 	} else if _, isVirtual := a.net.(*vnet.Net); isVirtual {
-		a.log.Warn("virtual network is enabled")
+		a.log.Warn("Virtual network is enabled")
 		if a.mDNSMode != MulticastDNSModeDisabled {
-			a.log.Warn("virtual network does not support mDNS yet")
+			a.log.Warn("Virtual network does not support mDNS yet")
 		}
 	}
 
@@ -334,13 +333,6 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 	// can continue without it.
 	if a.mDNSConn, a.mDNSMode, err = createMulticastDNS(a.net, mDNSMode, mDNSName, log); err != nil {
 		log.Warnf("Failed to initialize mDNS %s: %v", mDNSName, err)
-	}
-	closeMDNSConn := func() {
-		if a.mDNSConn != nil {
-			if mdnsCloseErr := a.mDNSConn.Close(); mdnsCloseErr != nil {
-				log.Warnf("Failed to close mDNS: %v", mdnsCloseErr)
-			}
-		}
 	}
 
 	config.initWithDefaults(a)
@@ -351,106 +343,37 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 	a.buf.SetLimitSize(maxBufferSize)
 
 	if a.lite && (len(a.candidateTypes) != 1 || a.candidateTypes[0] != CandidateTypeHost) {
-		closeMDNSConn()
+		a.closeMulticastConn()
 		return nil, ErrLiteUsingNonHostCandidates
 	}
 
 	if config.Urls != nil && len(config.Urls) > 0 && !containsCandidateType(CandidateTypeServerReflexive, a.candidateTypes) && !containsCandidateType(CandidateTypeRelay, a.candidateTypes) {
-		closeMDNSConn()
+		a.closeMulticastConn()
 		return nil, ErrUselessUrlsProvided
 	}
 
 	if err = config.initExtIPMapping(a); err != nil {
-		closeMDNSConn()
+		a.closeMulticastConn()
 		return nil, err
 	}
 
 	go a.taskLoop()
-	a.startOnConnectionStateChangeRoutine()
+
+	// CandidatePair and ConnectionState are usually changed at once.
+	// Blocking one by the other one causes deadlock.
+	// Hence, we call handlers from independent Goroutines.
+	go a.candidatePairRoutine()
+	go a.connectionStateRoutine()
+	go a.candidateRoutine()
 
 	// Restart is also used to initialize the agent for the first time
 	if err := a.Restart(config.LocalUfrag, config.LocalPwd); err != nil {
-		closeMDNSConn()
+		a.closeMulticastConn()
 		_ = a.Close()
 		return nil, err
 	}
 
 	return a, nil
-}
-
-// OnConnectionStateChange sets a handler that is fired when the connection state changes
-func (a *Agent) OnConnectionStateChange(f func(ConnectionState)) error {
-	a.onConnectionStateChangeHdlr.Store(f)
-	return nil
-}
-
-// OnSelectedCandidatePairChange sets a handler that is fired when the final candidate
-// pair is selected
-func (a *Agent) OnSelectedCandidatePairChange(f func(Candidate, Candidate)) error {
-	a.onSelectedCandidatePairChangeHdlr.Store(f)
-	return nil
-}
-
-// OnCandidate sets a handler that is fired when new candidates gathered. When
-// the gathering process complete the last candidate is nil.
-func (a *Agent) OnCandidate(f func(Candidate)) error {
-	a.onCandidateHdlr.Store(f)
-	return nil
-}
-
-func (a *Agent) onSelectedCandidatePairChange(p *CandidatePair) {
-	if h, ok := a.onSelectedCandidatePairChangeHdlr.Load().(func(Candidate, Candidate)); ok {
-		h(p.Local, p.Remote)
-	}
-}
-
-func (a *Agent) onCandidate(c Candidate) {
-	if onCandidateHdlr, ok := a.onCandidateHdlr.Load().(func(Candidate)); ok {
-		onCandidateHdlr(c)
-	}
-}
-
-func (a *Agent) onConnectionStateChange(s ConnectionState) {
-	if hdlr, ok := a.onConnectionStateChangeHdlr.Load().(func(ConnectionState)); ok {
-		hdlr(s)
-	}
-}
-
-func (a *Agent) startOnConnectionStateChangeRoutine() {
-	go func() {
-		for {
-			// CandidatePair and ConnectionState are usually changed at once.
-			// Blocking one by the other one causes deadlock.
-			p, isOpen := <-a.chanCandidatePair
-			if !isOpen {
-				return
-			}
-			a.onSelectedCandidatePairChange(p)
-		}
-	}()
-	go func() {
-		for {
-			select {
-			case s, isOpen := <-a.chanState:
-				if !isOpen {
-					for c := range a.chanCandidate {
-						a.onCandidate(c)
-					}
-					return
-				}
-				go a.onConnectionStateChange(s)
-
-			case c, isOpen := <-a.chanCandidate:
-				if !isOpen {
-					for s := range a.chanState {
-						go a.onConnectionStateChange(s)
-					}
-					return
-				}
-				a.onCandidate(c)
-			}
-		}
-	}()
 }
 
 func (a *Agent) startConnectivityChecks(isControlling bool, remoteUfrag, remotePwd string) error {
@@ -518,11 +441,12 @@ func (a *Agent) connectivityChecks() {
 					a.updateConnectionState(ConnectionStateFailed)
 					return
 				}
+			default:
 			}
 
 			a.selector.ContactCandidates()
 		}); err != nil {
-			a.log.Warnf("taskLoop failed: %v", err)
+			a.log.Warnf("Failed to start connectivity checks: %v", err)
 		}
 	}
 
@@ -608,7 +532,7 @@ func (a *Agent) pingAllCandidates() {
 	a.log.Trace("pinging all candidates")
 
 	if len(a.checklist) == 0 {
-		a.log.Warn("pingAllCandidates called with no candidate pairs. Connection is not possible yet.")
+		a.log.Warn("Failed to ping without candidate pairs. Connection is not possible yet.")
 	}
 
 	for _, p := range a.checklist {
@@ -715,7 +639,7 @@ func (a *Agent) checkKeepalive() {
 	if (a.keepaliveInterval != 0) &&
 		((time.Since(selectedPair.Local.LastSent()) > a.keepaliveInterval) ||
 			(time.Since(selectedPair.Remote.LastReceived()) > a.keepaliveInterval)) {
-		// we use binding request instead of indication to support refresh consent schemas
+		// We use binding request instead of indication to support refresh consent schemas
 		// see https://tools.ietf.org/html/rfc7675
 		a.selector.PingCandidate(selectedPair.Local, selectedPair.Remote)
 	}
@@ -727,7 +651,7 @@ func (a *Agent) AddRemoteCandidate(c Candidate) error {
 		return nil
 	}
 
-	// cannot check for network yet because it might not be applied
+	// Cannot check for network yet because it might not be applied
 	// when mDNS hostname is used.
 	if c.TCPType() == TCPTypeActive {
 		// TCP Candidates with TCP type active will probe server passive ones, so
@@ -739,7 +663,7 @@ func (a *Agent) AddRemoteCandidate(c Candidate) error {
 	// If we have a mDNS Candidate lets fully resolve it before adding it locally
 	if c.Type() == CandidateTypeHost && strings.HasSuffix(c.Address(), ".local") {
 		if a.mDNSMode == MulticastDNSModeDisabled {
-			a.log.Warnf("remote mDNS candidate added, but mDNS is disabled: (%s)", c.Address())
+			a.log.Warnf("Remote mDNS candidate added, but mDNS is disabled: (%s)", c.Address())
 			return nil
 		}
 
@@ -903,7 +827,9 @@ func (a *Agent) GetRemoteUserCredentials() (frag string, pwd string, err error) 
 }
 
 func (a *Agent) removeUfragFromMux() {
-	a.tcpMux.RemoveConnByUfrag(a.localUfrag)
+	if a.tcpMux != nil {
+		a.tcpMux.RemoveConnByUfrag(a.localUfrag)
+	}
 	if a.udpMux != nil {
 		a.udpMux.RemoveConnByUfrag(a.localUfrag)
 	}
@@ -959,7 +885,7 @@ func (a *Agent) deleteAllCandidates() {
 func (a *Agent) findRemoteCandidate(networkType NetworkType, addr net.Addr) Candidate {
 	ip, port, _, ok := parseAddr(addr)
 	if !ok {
-		a.log.Warnf("Error parsing addr: %s", addr)
+		a.log.Warnf("Failed to parse address: %s", addr)
 		return nil
 	}
 
@@ -991,7 +917,7 @@ func (a *Agent) sendBindingSuccess(m *stun.Message, local, remote Candidate) {
 
 	ip, port, _, ok := parseAddr(base.addr())
 	if !ok {
-		a.log.Warnf("Error parsing addr: %s", base.addr())
+		a.log.Warnf("Failed to parse address: %s", base.addr())
 		return
 	}
 
@@ -1061,15 +987,15 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 
 	if a.isControlling {
 		if m.Contains(stun.AttrICEControlling) {
-			a.log.Debug("inbound isControlling && a.isControlling == true")
+			a.log.Debug("Inbound STUN message: isControlling && a.isControlling == true")
 			return
 		} else if m.Contains(stun.AttrUseCandidate) {
-			a.log.Debug("useCandidate && a.isControlling == true")
+			a.log.Debug("Inbound STUN message: useCandidate && a.isControlling == true")
 			return
 		}
 	} else {
 		if m.Contains(stun.AttrICEControlled) {
-			a.log.Debug("inbound isControlled && a.isControlling == false")
+			a.log.Debug("Inbound STUN message: isControlled && a.isControlling == false")
 			return
 		}
 	}
@@ -1077,22 +1003,22 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 	remoteCandidate := a.findRemoteCandidate(local.NetworkType(), remote)
 	if m.Type.Class == stun.ClassSuccessResponse {
 		if err = stun.MessageIntegrity([]byte(a.remotePwd)).Check(m); err != nil {
-			a.log.Warnf("discard message from (%s), %v", remote, err)
+			a.log.Warnf("Discard message from (%s), %v", remote, err)
 			return
 		}
 
 		if remoteCandidate == nil {
-			a.log.Warnf("discard success message from (%s), no such remote", remote)
+			a.log.Warnf("Discard success message from (%s), no such remote", remote)
 			return
 		}
 
 		a.selector.HandleSuccessResponse(m, local, remoteCandidate, remote)
 	} else if m.Type.Class == stun.ClassRequest {
 		if err = stunx.AssertUsername(m, a.localUfrag+":"+a.remoteUfrag); err != nil {
-			a.log.Warnf("discard message from (%s), %v", remote, err)
+			a.log.Warnf("Discard message from (%s), %v", remote, err)
 			return
 		} else if err = stun.MessageIntegrity([]byte(a.localPwd)).Check(m); err != nil {
-			a.log.Warnf("discard message from (%s), %v", remote, err)
+			a.log.Warnf("Discard message from (%s), %v", remote, err)
 			return
 		}
 
@@ -1119,7 +1045,7 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 			}
 			remoteCandidate = prflxCandidate
 
-			a.log.Debugf("adding a new peer-reflexive candidate: %s ", remote)
+			a.log.Debugf("Adding a new peer-reflexive candidate: %s ", remote)
 			a.addRemoteCandidate(remoteCandidate)
 		}
 
@@ -1135,19 +1061,18 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 
 // validateNonSTUNTraffic processes non STUN traffic from a remote candidate,
 // and returns true if it is an actual remote candidate
-func (a *Agent) validateNonSTUNTraffic(local Candidate, remote net.Addr) bool {
-	var isValidCandidate uint64
+func (a *Agent) validateNonSTUNTraffic(local Candidate, remote net.Addr) (Candidate, bool) {
+	var remoteCandidate Candidate
 	if err := a.run(local.context(), func(ctx context.Context, agent *Agent) {
-		remoteCandidate := a.findRemoteCandidate(local.NetworkType(), remote)
+		remoteCandidate = a.findRemoteCandidate(local.NetworkType(), remote)
 		if remoteCandidate != nil {
 			remoteCandidate.seen(false)
-			atomic.AddUint64(&isValidCandidate, 1)
 		}
 	}); err != nil {
-		a.log.Warnf("failed to validate remote candidate: %v", err)
+		a.log.Warnf("Failed to validate remote candidate: %v", err)
 	}
 
-	return atomic.LoadUint64(&isValidCandidate) == 1
+	return remoteCandidate, remoteCandidate != nil
 }
 
 // GetSelectedCandidatePair returns the selected pair or nil if there is none
@@ -1181,7 +1106,7 @@ func (a *Agent) getSelectedPair() *CandidatePair {
 func (a *Agent) closeMulticastConn() {
 	if a.mDNSConn != nil {
 		if err := a.mDNSConn.Close(); err != nil {
-			a.log.Warnf("failed to close mDNS Conn: %v", err)
+			a.log.Warnf("Failed to close mDNS Conn: %v", err)
 		}
 	}
 }

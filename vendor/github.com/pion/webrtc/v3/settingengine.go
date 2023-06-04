@@ -1,9 +1,14 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 //go:build !js
 // +build !js
 
 package webrtc
 
 import (
+	"context"
+	"crypto/x509"
 	"io"
 	"net"
 	"time"
@@ -57,9 +62,15 @@ type SettingEngine struct {
 		SRTCP *uint
 	}
 	dtls struct {
-		insecureSkipHelloVerify bool
-		retransmissionInterval  time.Duration
-		ellipticCurves          []dtlsElliptic.Curve
+		insecureSkipHelloVerify   bool
+		disableInsecureSkipVerify bool
+		retransmissionInterval    time.Duration
+		ellipticCurves            []dtlsElliptic.Curve
+		connectContextMaker       func() (context.Context, func())
+		extendedMasterSecret      dtls.ExtendedMasterSecretType
+		clientAuth                *dtls.ClientAuthType
+		clientCAs                 *x509.CertPool
+		rootCAs                   *x509.CertPool
 	}
 	sctp struct {
 		maxReceiveBufferSize uint32
@@ -144,6 +155,9 @@ func (e *SettingEngine) SetRelayAcceptanceMinWait(t time.Duration) {
 // SetEphemeralUDPPortRange limits the pool of ephemeral ports that
 // ICE UDP connections can allocate from. This affects both host candidates,
 // and the local address of server reflexive candidates.
+//
+// When portMin and portMax are left to the 0 default value, pion/ice candidate
+// gatherer replaces them and uses 1 for portMin and 65535 for portMax.
 func (e *SettingEngine) SetEphemeralUDPPortRange(portMin, portMax uint16) error {
 	if portMax < portMin {
 		return ice.ErrPort
@@ -360,9 +374,46 @@ func (e *SettingEngine) SetDTLSInsecureSkipHelloVerify(skip bool) {
 	e.dtls.insecureSkipHelloVerify = skip
 }
 
+// SetDTLSDisableInsecureSkipVerify sets the disable skip insecure verify flag for DTLS.
+// This controls whether a client verifies the server's certificate chain and host name.
+func (e *SettingEngine) SetDTLSDisableInsecureSkipVerify(disable bool) {
+	e.dtls.disableInsecureSkipVerify = disable
+}
+
 // SetDTLSEllipticCurves sets the elliptic curves for DTLS.
 func (e *SettingEngine) SetDTLSEllipticCurves(ellipticCurves ...dtlsElliptic.Curve) {
 	e.dtls.ellipticCurves = ellipticCurves
+}
+
+// SetDTLSConnectContextMaker sets the context used during the DTLS Handshake.
+// It can be used to extend or reduce the timeout on the DTLS Handshake.
+// If nil, the default dtls.ConnectContextMaker is used. It can be implemented as following.
+//
+//	func ConnectContextMaker() (context.Context, func()) {
+//		return context.WithTimeout(context.Background(), 30*time.Second)
+//	}
+func (e *SettingEngine) SetDTLSConnectContextMaker(connectContextMaker func() (context.Context, func())) {
+	e.dtls.connectContextMaker = connectContextMaker
+}
+
+// SetDTLSExtendedMasterSecret sets the extended master secret type for DTLS.
+func (e *SettingEngine) SetDTLSExtendedMasterSecret(extendedMasterSecret dtls.ExtendedMasterSecretType) {
+	e.dtls.extendedMasterSecret = extendedMasterSecret
+}
+
+// SetDTLSClientAuth sets the client auth type for DTLS.
+func (e *SettingEngine) SetDTLSClientAuth(clientAuth dtls.ClientAuthType) {
+	e.dtls.clientAuth = &clientAuth
+}
+
+// SetDTLSClientCAs sets the client CA certificate pool for DTLS certificate verification.
+func (e *SettingEngine) SetDTLSClientCAs(clientCAs *x509.CertPool) {
+	e.dtls.clientCAs = clientCAs
+}
+
+// SetDTLSRootCAs sets the root CA certificate pool for DTLS certificate verification.
+func (e *SettingEngine) SetDTLSRootCAs(rootCAs *x509.CertPool) {
+	e.dtls.rootCAs = rootCAs
 }
 
 // SetSCTPMaxReceiveBufferSize sets the maximum receive buffer size.

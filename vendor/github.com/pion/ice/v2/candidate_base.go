@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package ice
 
 import (
@@ -38,6 +41,8 @@ type candidateBase struct {
 
 	foundationOverride string
 	priorityOverride   uint32
+
+	remoteCandidateCaches map[AddrPort]Candidate
 }
 
 // Done implements context.Context
@@ -61,7 +66,7 @@ func (c *candidateBase) Deadline() (deadline time.Time, ok bool) {
 }
 
 // Value implements context.Context
-func (c *candidateBase) Value(key interface{}) interface{} {
+func (c *candidateBase) Value(interface{}) interface{} {
 	return nil
 }
 
@@ -231,6 +236,21 @@ func (c *candidateBase) recvLoop(initializedCh <-chan struct{}) {
 	}
 }
 
+func (c *candidateBase) validateSTUNTrafficCache(addr net.Addr) bool {
+	if candidate, ok := c.remoteCandidateCaches[toAddrPort(addr)]; ok {
+		candidate.seen(false)
+		return true
+	}
+	return false
+}
+
+func (c *candidateBase) addRemoteCandidateCache(candidate Candidate, srcAddr net.Addr) {
+	if c.validateSTUNTrafficCache(srcAddr) {
+		return
+	}
+	c.remoteCandidateCaches[toAddrPort(srcAddr)] = candidate
+}
+
 func (c *candidateBase) handleInboundPacket(buf []byte, srcAddr net.Addr) {
 	a := c.agent()
 
@@ -256,9 +276,13 @@ func (c *candidateBase) handleInboundPacket(buf []byte, srcAddr net.Addr) {
 		return
 	}
 
-	if !a.validateNonSTUNTraffic(c, srcAddr) { //nolint:contextcheck
-		a.log.Warnf("Discarded message from %s, not a valid remote candidate", c.addr())
-		return
+	if !c.validateSTUNTrafficCache(srcAddr) {
+		remoteCandidate, valid := a.validateNonSTUNTraffic(c, srcAddr) //nolint:contextcheck
+		if !valid {
+			a.log.Warnf("Discarded message from %s, not a valid remote candidate", c.addr())
+			return
+		}
+		c.addRemoteCandidateCache(remoteCandidate, srcAddr)
 	}
 
 	// Note: This will return packetio.ErrFull if the buffer ever manages to fill up.
@@ -448,7 +472,7 @@ func UnmarshalCandidate(raw string) (Candidate, error) {
 	// Component
 	rawComponent, err := strconv.ParseUint(split[1], 10, 16)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errParseComponent, err)
+		return nil, fmt.Errorf("%w: %v", errParseComponent, err) //nolint:errorlint
 	}
 	component := uint16(rawComponent)
 
@@ -458,7 +482,7 @@ func UnmarshalCandidate(raw string) (Candidate, error) {
 	// Priority
 	priorityRaw, err := strconv.ParseUint(split[3], 10, 32)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errParsePriority, err)
+		return nil, fmt.Errorf("%w: %v", errParsePriority, err) //nolint:errorlint
 	}
 	priority := uint32(priorityRaw)
 
@@ -468,7 +492,7 @@ func UnmarshalCandidate(raw string) (Candidate, error) {
 	// Port
 	rawPort, err := strconv.ParseUint(split[5], 10, 16)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errParsePort, err)
+		return nil, fmt.Errorf("%w: %v", errParsePort, err) //nolint:errorlint
 	}
 	port := int(rawPort)
 	typ := split[7]
@@ -491,7 +515,7 @@ func UnmarshalCandidate(raw string) (Candidate, error) {
 			// RelatedPort
 			rawRelatedPort, parseErr := strconv.ParseUint(split[3], 10, 16)
 			if parseErr != nil {
-				return nil, fmt.Errorf("%w: %v", errParsePort, parseErr)
+				return nil, fmt.Errorf("%w: %v", errParsePort, parseErr) //nolint:errorlint
 			}
 			relatedPort = int(rawRelatedPort)
 		} else if split[0] == "tcptype" {

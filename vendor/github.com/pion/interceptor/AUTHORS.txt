@@ -16,8 +16,9 @@ David Zhao <david@davidzhao.com>
 Jonathan Müller <jonathan@fotokite.com>
 Kevin Caffrey <kcaffrey@gmail.com>
 Maksim Nesterov <msnesterov@avito.ru>
-Mathis <mathis.engelbart@gmail.com>
 Mathis Engelbart <mathis.engelbart@gmail.com>
+Miroslav <sedivy.miro@gmail.com>
+Miroslav Šedivý <sedivy.miro@gmail.com>
 Quentin Renard <contact@asticode.com>
 Rayleigh Li <rayleigh.li@zoom.us>
 Sean DuBois <sean@siobud.com>

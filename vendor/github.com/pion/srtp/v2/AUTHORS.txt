@@ -6,6 +6,7 @@
 adamroach <adam@nostrum.com>
 Adrian Cable <adrian.cable@gmail.com>
 Agniva De Sarker <agnivade@yahoo.co.in>
+Antoine Baché <antoine@tenten.app>
 Atsushi Watanabe <atsushi.w@ieee.org>
 backkem <mail@backkem.me>
 chenkaiC4 <chenkaic4@gmail.com>
@@ -20,8 +21,13 @@ Max Hawkins <maxhawkins@gmail.com>
 mission-liao <missionaryliao@gmail.com>
 Novel Corpse <romandafe94@gmail.com>
 OrlandoCo <luisorlando.co@gmail.com>
+Patryk <digitalix4@gmail.com>
+Patryk Rogalski <digitalix4@gmail.com>
 Sean DuBois <seaduboi@amazon.com>
 Sean DuBois <sean@siobud.com>
+SeongGyu Park <tawny.port@kakaoenterprise.com>
+Steffen <post@steffenvogel.de>
+Steffen Vogel <post@steffenvogel.de>
 Tobias Fridén <tobias.friden@gmail.com>
 Woodrow Douglass <wdouglass@carnegierobotics.com>
 Yutaka Takeda <yt0916@gmail.com>

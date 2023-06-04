@@ -27,6 +27,7 @@ Sean DuBois <seaduboi@amazon.com>
 Sean DuBois <sean@pion.ly>
 Sean DuBois <sean@siobud.com>
 songjiayang <songjiayang@users.noreply.github.com>
+Steffen Vogel <post@steffenvogel.de>
 Vladislav Yarmak <vladislav@vm-0.com>
 Will LE <lexuandinhct@gmail.com>
 Y.Horie <u5.horie@gmail.com>
@@ -35,5 +36,5 @@ ZHENK <chengzhenyang@gmail.com>
 
 # List of contributors not appearing in Git history
 Aliaksandr Valialkin <valyala@gmail.com>
-The gortc project
 The IETF Trust
+The gortc project

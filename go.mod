@@ -47,22 +47,22 @@ require (
 	github.com/panmari/cuckoofilter v1.0.3
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/pion/datachannel v1.5.5
-	github.com/pion/ice/v2 v2.3.2
+	github.com/pion/ice/v2 v2.3.6
 	github.com/pion/sdp/v3 v3.0.6
-	github.com/pion/stun v0.4.0
-	github.com/pion/webrtc/v3 v3.2.1
+	github.com/pion/stun v0.6.0
+	github.com/pion/webrtc/v3 v3.2.9
 	github.com/refraction-networking/gotapdance v1.2.0
 	github.com/refraction-networking/utls v1.1.3
 	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
 	github.com/sirupsen/logrus v1.9.0
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.4
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
-	golang.org/x/crypto v0.6.0
-	golang.org/x/net v0.8.0
+	golang.org/x/crypto v0.9.0
+	golang.org/x/net v0.10.0
 	golang.org/x/sync v0.1.0
-	golang.org/x/sys v0.7.0
-	golang.org/x/term v0.6.0
+	golang.org/x/sys v0.8.0
+	golang.org/x/term v0.8.0
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
 	tailscale.com v1.40.0
 )
@@ -93,18 +93,17 @@ require (
 	github.com/mdlayher/socket v0.4.0 // indirect
 	github.com/mroth/weightedrand v0.4.1 // indirect
 	github.com/onsi/ginkgo/v2 v2.2.0 // indirect
-	github.com/pion/dtls/v2 v2.2.6 // indirect
-	github.com/pion/interceptor v0.1.16 // indirect
+	github.com/pion/dtls/v2 v2.2.7 // indirect
+	github.com/pion/interceptor v0.1.17 // indirect
 	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/mdns v0.0.7 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.10 // indirect
 	github.com/pion/rtp v1.7.13 // indirect
 	github.com/pion/sctp v1.8.7 // indirect
-	github.com/pion/srtp/v2 v2.0.12 // indirect
-	github.com/pion/transport/v2 v2.2.0 // indirect
+	github.com/pion/srtp/v2 v2.0.15 // indirect
+	github.com/pion/transport/v2 v2.2.1 // indirect
 	github.com/pion/turn/v2 v2.1.0 // indirect
-	github.com/pion/udp/v2 v2.0.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/quic-go/qpack v0.4.0 // indirect
@@ -114,7 +113,7 @@ require (
 	gitlab.com/yawning/obfs4.git v0.0.0-20190120164510-816cff15f425 // indirect
 	go4.org/mem v0.0.0-20210711025021-927187094b94 // indirect
 	golang.org/x/exp v0.0.0-20221205204356-47842c84f3db // indirect
-	golang.org/x/text v0.8.0 // indirect
+	golang.org/x/text v0.9.0 // indirect
 	golang.org/x/tools v0.7.0 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect

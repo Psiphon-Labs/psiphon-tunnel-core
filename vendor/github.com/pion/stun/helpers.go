@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package stun
 
 // Interfaces that are implemented by message attributes, shorthands for them,
@@ -68,7 +71,7 @@ func (m *Message) Parse(getters ...Getter) error {
 func MustBuild(setters ...Setter) *Message {
 	m, err := Build(setters...)
 	if err != nil {
-		panic(err) // nolint
+		panic(err) //nolint
 	}
 	return m
 }

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package nack
 
 import (
@@ -16,7 +19,7 @@ type GeneratorInterceptorFactory struct {
 }
 
 // NewInterceptor constructs a new ReceiverInterceptor
-func (g *GeneratorInterceptorFactory) NewInterceptor(string) (interceptor.Interceptor, error) {
+func (g *GeneratorInterceptorFactory) NewInterceptor(_ string) (interceptor.Interceptor, error) {
 	i := &GeneratorInterceptor{
 		size:        512,
 		skipLastN:   0,

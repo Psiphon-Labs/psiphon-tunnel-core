@@ -1,8 +1,11 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package stun
 
-import ( // nolint:gci
-	"crypto/md5"  // nolint:gosec
-	"crypto/sha1" // nolint:gosec
+import ( //nolint:gci
+	"crypto/md5"  //nolint:gosec
+	"crypto/sha1" //nolint:gosec
 	"errors"
 	"fmt"
 	"strings"
@@ -17,7 +20,7 @@ const credentialsSep = ":"
 // credentials. Password, username, and realm must be SASL-prepared.
 func NewLongTermIntegrity(username, realm, password string) MessageIntegrity {
 	k := strings.Join([]string{username, realm, password}, credentialsSep)
-	h := md5.New() // nolint:gosec
+	h := md5.New() //nolint:gosec
 	fmt.Fprint(h, k)
 	return MessageIntegrity(h.Sum(nil))
 }

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package ice
 
 import (
@@ -49,10 +52,10 @@ func localInterfaces(n transport.Net, interfaceFilter func(string) bool, ipFilte
 
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagUp == 0 {
-			continue // interface down
+			continue // Interface down
 		}
 		if (iface.Flags&net.FlagLoopback != 0) && !includeLoopback {
-			continue // loopback interface
+			continue // Loopback interface
 		}
 
 		if interfaceFilter != nil && !interfaceFilter(iface.Name) {
@@ -121,7 +124,7 @@ func listenUDPInPortRange(n transport.Net, log logging.LeveledLogger, portMax, p
 		if e == nil {
 			return c, e //nolint:nilerr
 		}
-		log.Debugf("failed to listen %s: %v", lAddr.String(), e)
+		log.Debugf("Failed to listen %s: %v", lAddr.String(), e)
 		portCurrent++
 		if portCurrent > j {
 			portCurrent = i

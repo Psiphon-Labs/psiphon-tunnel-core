@@ -1,7 +1,10 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package hmac
 
-import ( // nolint:gci
-	"crypto/sha1" // nolint:gosec
+import ( //nolint:gci
+	"crypto/sha1" //nolint:gosec
 	"crypto/sha256"
 	"hash"
 	"sync"
@@ -18,7 +21,7 @@ func (h *hmac) resetTo(key []byte) {
 
 	if len(key) > blocksize {
 		// If key is too big, hash it.
-		h.outer.Write(key) // nolint:errcheck,gosec
+		h.outer.Write(key) //nolint:errcheck,gosec
 		key = h.outer.Sum(nil)
 	}
 	copy(h.ipad, key)
@@ -29,12 +32,12 @@ func (h *hmac) resetTo(key []byte) {
 	for i := range h.opad {
 		h.opad[i] ^= 0x5c
 	}
-	h.inner.Write(h.ipad) //nolint: errcheck,gosec
+	h.inner.Write(h.ipad) //nolint:errcheck,gosec
 
 	h.marshaled = false
 }
 
-var hmacSHA1Pool = &sync.Pool{ // nolint:gochecknoglobals
+var hmacSHA1Pool = &sync.Pool{ //nolint:gochecknoglobals
 	New: func() interface{} {
 		h := New(sha1.New, make([]byte, sha1.BlockSize))
 		return h
@@ -56,7 +59,7 @@ func PutSHA1(h hash.Hash) {
 	hmacSHA1Pool.Put(hm)
 }
 
-var hmacSHA256Pool = &sync.Pool{ // nolint:gochecknoglobals
+var hmacSHA256Pool = &sync.Pool{ //nolint:gochecknoglobals
 	New: func() interface{} {
 		h := New(sha256.New, make([]byte, sha256.BlockSize))
 		return h
@@ -82,8 +85,8 @@ func PutSHA256(h hash.Hash) {
 //
 // Put and Acquire functions are internal functions to project, so
 // checking it via such assert is optimal.
-func assertHMACSize(h *hmac, size, blocksize int) { //nolint: unparam
+func assertHMACSize(h *hmac, size, blocksize int) { //nolint:unparam
 	if h.Size() != size || h.BlockSize() != blocksize {
-		panic("BUG: hmac size invalid") // nolint
+		panic("BUG: hmac size invalid") //nolint
 	}
 }

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package ice
 
 import "errors"
@@ -10,7 +13,7 @@ var (
 	ErrSchemeType = errors.New("unknown scheme type")
 
 	// ErrSTUNQuery indicates query arguments are provided in a STUN URL.
-	ErrSTUNQuery = errors.New("queries not supported in stun address")
+	ErrSTUNQuery = errors.New("queries not supported in STUN address")
 
 	// ErrInvalidQuery indicates an malformed query is provided.
 	ErrInvalidQuery = errors.New("invalid query")
@@ -100,9 +103,6 @@ var (
 	// ErrRunCanceled indicates a run operation was canceled by its individual done
 	ErrRunCanceled = errors.New("run was canceled by done")
 
-	// ErrTCPMuxNotInitialized indicates TCPMux is not initialized and that invalidTCPMux is used.
-	ErrTCPMuxNotInitialized = errors.New("TCPMux is not initialized")
-
 	// ErrTCPRemoteAddrAlreadyExists indicates we already have the connection with same remote addr.
 	ErrTCPRemoteAddrAlreadyExists = errors.New("conn with same remote addr already exists")
 
@@ -124,8 +124,6 @@ var (
 	errReadingStreamingPacket        = errors.New("error reading streaming packet")
 	errWriting                       = errors.New("error writing to")
 	errClosingConnection             = errors.New("error closing connection")
-	errMissingProtocolScheme         = errors.New("missing protocol scheme")
-	errTooManyColonsAddr             = errors.New("too many colons in address")
 	errRead                          = errors.New("unexpected error trying to read")
 	errUnknownRole                   = errors.New("unknown role")
 	errICEWriteSTUNMessage           = errors.New("the ICE conn can't write STUN messages")

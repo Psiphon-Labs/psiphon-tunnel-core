@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package twcc
 
 import (
@@ -19,7 +22,7 @@ type SenderInterceptorFactory struct {
 var errClosed = errors.New("interceptor is closed")
 
 // NewInterceptor constructs a new SenderInterceptor
-func (s *SenderInterceptorFactory) NewInterceptor(string) (interceptor.Interceptor, error) {
+func (s *SenderInterceptorFactory) NewInterceptor(_ string) (interceptor.Interceptor, error) {
 	i := &SenderInterceptor{
 		log:        logging.NewDefaultLoggerFactory().NewLogger("twcc_sender_interceptor"),
 		packetChan: make(chan packet),

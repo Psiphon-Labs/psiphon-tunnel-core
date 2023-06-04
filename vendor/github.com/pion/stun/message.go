@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package stun
 
 import (
@@ -432,11 +435,11 @@ const (
 // Common STUN message types.
 var (
 	// Binding request message type.
-	BindingRequest = NewType(MethodBinding, ClassRequest) // nolint:gochecknoglobals
+	BindingRequest = NewType(MethodBinding, ClassRequest) //nolint:gochecknoglobals
 	// Binding success response message type
-	BindingSuccess = NewType(MethodBinding, ClassSuccessResponse) // nolint:gochecknoglobals
+	BindingSuccess = NewType(MethodBinding, ClassSuccessResponse) //nolint:gochecknoglobals
 	// Binding error response message type.
-	BindingError = NewType(MethodBinding, ClassErrorResponse) // nolint:gochecknoglobals
+	BindingError = NewType(MethodBinding, ClassErrorResponse) //nolint:gochecknoglobals
 )
 
 func (c MessageClass) String() string {
@@ -450,7 +453,7 @@ func (c MessageClass) String() string {
 	case ClassErrorResponse:
 		return "error response"
 	default:
-		panic("unknown message class") // nolint
+		panic("unknown message class") //nolint
 	}
 }
 

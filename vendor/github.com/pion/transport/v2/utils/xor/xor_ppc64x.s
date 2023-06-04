@@ -1,6 +1,5 @@
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// SPDX-FileCopyrightText: 2018 The Go Authors. All rights reserved.
+// SPDX-License-Identifier: BSD-3-Clause
 
 //go:build (ppc64 && !gccgo) || (ppc64le && !gccgo)
 //+build ppc64,!gccgo ppc64le,!gccgo

@@ -6,39 +6,21 @@
 <h4 align="center">A Go implementation of STUN</h4>
 <p align="center">
   <a href="https://pion.ly"><img src="https://img.shields.io/badge/pion-stun-gray.svg?longCache=true&colorB=brightgreen" alt="Pion stun"></a>
-  <!--<a href="https://sourcegraph.com/github.com/pion/webrtc?badge"><img src="https://sourcegraph.com/github.com/pion/webrtc/-/badge.svg" alt="Sourcegraph Widget"></a>-->
   <a href="https://pion.ly/slack"><img src="https://img.shields.io/badge/join-us%20on%20slack-gray.svg?longCache=true&logo=slack&colorB=brightgreen" alt="Slack Widget"></a>
   <br>
-  <a href="https://travis-ci.org/pion/stun"><img src="https://travis-ci.org/pion/stun.svg?branch=master" alt="Build Status"></a>
-  <a href="https://pkg.go.dev/github.com/pion/stun"><img src="https://godoc.org/github.com/pion/stun?status.svg" alt="GoDoc"></a>
+  <img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/pion/stun/test.yaml">
+  <a href="https://pkg.go.dev/github.com/pion/stun"><img src="https://pkg.go.dev/badge/github.com/pion/stun.svg" alt="Go Reference"></a>
   <a href="https://codecov.io/gh/pion/stun"><img src="https://codecov.io/gh/pion/stun/branch/master/graph/badge.svg" alt="Coverage Status"></a>
   <a href="https://goreportcard.com/report/github.com/pion/stun"><img src="https://goreportcard.com/badge/github.com/pion/stun" alt="Go Report Card"></a>
-  <!--<a href="https://www.codacy.com/app/Sean-Der/webrtc"><img src="https://api.codacy.com/project/badge/Grade/18f4aec384894e6aac0b94effe51961d" alt="Codacy Badge"></a>-->
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 <br>
 
-### Roadmap
-The library is used as a part of our WebRTC implementation. Please refer to that [roadmap](https://github.com/pion/webrtc/issues/9) to track our major milestones.
-
-### Community
-Pion has an active community on the [Golang Slack](https://invite.slack.golangbridge.org/). Sign up and join the **#pion** channel for discussions and support. You can also use [Pion mailing list](https://groups.google.com/forum/#!forum/pion).
-
-We are always looking to support **your projects**. Please reach out if you have something to build!
-
-If you need commercial support or don't want to use public methods you can contact us at [team@pion.ly](mailto:team@pion.ly)
-
-### Contributing
-Check out the **[contributing wiki](https://github.com/pion/webrtc/wiki/Contributing)** to join the group of amazing people making this project possible:
-
-- See [AUTHORS.txt](AUTHORS.txt)
-
-# STUN
-Package stun implements Session Traversal Utilities for NAT (STUN) [[RFC5389](https://tools.ietf.org/html/rfc5389)]
+Package `stun` implements Session Traversal Utilities for NAT (STUN) ([RFC 5389][rfc5389])
 protocol and [client](https://pkg.go.dev/github.com/pion/stun#Client) with no external dependencies and zero allocations in hot paths.
 Client [supports](https://pkg.go.dev/github.com/pion/stun#WithRTO) automatic request retransmissions.
 
-# Example
+### Example
 You can get your current IP address from any STUN server by sending
 binding request. See more idiomatic example at `cmd/stun-client`.
 ```go
@@ -51,8 +33,14 @@ import (
 )
 
 func main() {
+	// Parse a STUN URI
+	u, err := stun.ParseURI("stun:stun.l.google.com:19302")
+	if err != nil {
+		panic(err)
+	}
+
 	// Creating a "connection" to STUN server.
-	c, err := stun.Dial("udp", "stun.l.google.com:19302")
+	c, err := stun.DialURI(u, &stun.DialConfig{})
 	if err != nil {
 		panic(err)
 	}
@@ -75,30 +63,43 @@ func main() {
 }
 ```
 
-## Supported RFCs
-- [x] [RFC 5389](https://tools.ietf.org/html/rfc5389) — Session Traversal Utilities for NAT
-- [x] [RFC 5769](https://tools.ietf.org/html/rfc5769) — Test Vectors for STUN
-- [x] [RFC 6062](https://tools.ietf.org/html/rfc6062) — TURN extensions for TCP allocations
-- [x] [RFC 7064](https://tools.ietf.org/html/rfc7064) — STUN URI
-- [x] (TLS-over-)TCP client support
-- [ ] [ALTERNATE-SERVER](https://tools.ietf.org/html/rfc5389#section-11) support [#48](https://github.com/pion/stun/issues/48)
-- [x] [RFC 5780](https://tools.ietf.org/html/rfc5780) — NAT Behavior Discovery Using STUN via [cmd/stun-nat-behaviour](cmd/stun-nat-behaviour)
+### RFCs
+#### Implemented
+- **RFC 5389**: [Session Traversal Utilities for NAT (STUN)][rfc5389]
+- **RFC 5769**: [Test Vectors for Session Traversal Utilities for NAT (STUN)][rfc5769]
+- **RFC 6062**: [Traversal Using Relays around NAT (TURN) Extensions for TCP Allocations][rfc6062]
+- **RFC 7064**: [URI Scheme for the Session Traversal Utilities for NAT (STUN) Protocol][rfc7064]
+- **RFC 7065**: [Traversal Using Relays around NAT (TURN) Uniform Resource Identifiers][rfc7065]
+- **RFC 5780**: [NAT Behavior Discovery Using Session Traversal Utilities for NAT (STUN)][rfc5780] via [cmd/stun-nat-behaviour](cmd/stun-nat-behaviour)
+- (TLS-over-)TCP client support
 
-# Stability
+#### Planned
+- **RFC 5389**: [ALTERNATE-SERVER](https://tools.ietf.org/html/rfc5389#section-11) support [#48](https://github.com/pion/stun/issues/48)
+
+#### Compatability notes
+
+[RFC 5389][rfc5389] obsoletes [RFC 3489][rfc3489], so implementation was ignored by purpose, however,
+[RFC 3489][rfc3489] can be easily implemented as separate package.
+
+[rfc3489]: https://tools.ietf.org/html/rfc3489
+[rfc5389]: https://tools.ietf.org/html/rfc5389
+[rfc5769]: https://tools.ietf.org/html/rfc5769
+[rfc5780]: https://tools.ietf.org/html/rfc5780
+[rfc6062]: https://tools.ietf.org/html/rfc6062
+[rfc7064]: https://tools.ietf.org/html/rfc7064
+[rfc7065]: https://tools.ietf.org/html/rfc7065
+
+### Stability
 Package is currently stable, no backward incompatible changes are expected
 with exception of critical bugs or security fixes.
 
 Additional attributes are unlikely to be implemented in scope of stun package,
 the only exception is constants for attribute or message types.
 
-# RFC 3489 notes
-RFC 5389 obsoletes RFC 3489, so implementation was ignored by purpose, however,
-RFC 3489 can be easily implemented as separate package.
-
-# Requirements
+### Requirements
 Go 1.12 is currently supported and tested in CI.
 
-# Testing
+### Testing
 Client behavior is tested and verified in many ways:
   * End-To-End with long-term credentials
     * **coturn**: The coturn [server](https://github.com/coturn/coturn/wiki/turnserver) (linux)
@@ -110,8 +111,7 @@ See [TeamCity project](https://tc.gortc.io/project.html?projectId=stun&guest=1) 
 for more information. Also the Wireshark `.pcap` files are available for e2e test in
 artifacts for build.
 
-# Benchmarks
-
+### Benchmarks
 Intel(R) Core(TM) i7-8700K:
 
 ```
@@ -167,6 +167,20 @@ BenchmarkXORMappedAddress_AddTo-12            21518028     54.50 ns/op          
 BenchmarkXORMappedAddress_GetFrom-12          35597667     34.40 ns/op                        0 B/op   0 allocs/op
 ok      github.com/pion/stun   60.973s
 ```
+
+### Roadmap
+The library is used as a part of our WebRTC implementation. Please refer to that [roadmap](https://github.com/pion/webrtc/issues/9) to track our major milestones.
+
+### Community
+Pion has an active community on the [Slack](https://pion.ly/slack).
+
+Follow the [Pion Twitter](https://twitter.com/_pion) for project updates and important WebRTC news.
+
+We are always looking to support **your projects**. Please reach out if you have something to build!
+If you need commercial support or don't want to use public methods you can contact us at [team@pion.ly](mailto:team@pion.ly)
+
+### Contributing
+Check out the [contributing wiki](https://github.com/pion/webrtc/wiki/Contributing) to join the group of amazing people making this project possible: [AUTHORS.txt](./AUTHORS.txt)
 
 ### License
 MIT License - see [LICENSE](LICENSE) for full text

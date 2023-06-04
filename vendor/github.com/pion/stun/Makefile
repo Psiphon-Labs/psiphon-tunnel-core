@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+# SPDX-License-Identifier: MIT
+
 VERSION := $(shell git describe --tags | sed -e 's/^v//g' | awk -F "-" '{print $$1}')
 ITERATION := $(shell git describe --tags --long | awk -F "-" '{print $$2}')
 GO_VERSION=$(shell gobuild -v)

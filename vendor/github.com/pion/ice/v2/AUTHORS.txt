@@ -7,6 +7,7 @@ Aaron France <aaron.l.france@gmail.com>
 Adam Kiss <masterada@gmail.com>
 adwpc <adwpc@hotmail.com>
 Aleksandr Razumov <ar@gortc.io>
+aler9 <46489434+aler9@users.noreply.github.com>
 Antoine Baché <antoine@tenten.app>
 Artur Shellunts <shellunts.artur@gmail.com>
 Assad Obaid <assad@lap5cg901003r.se.axis.com>
@@ -48,6 +49,7 @@ Rasmus Hanning <rasmus@hanning.se>
 Robert Eperjesi <eperjesi@uber.com>
 Sam Lancia <sam@gpsm.co.uk>
 Sam Lancia <sam@vaion.com>
+San9H0 <lucian@hpcnt.com>
 Sean DuBois <seaduboi@amazon.com>
 Sean DuBois <sean@siobud.com>
 Sebastian Waisbrot <seppo0010@gmail.com>

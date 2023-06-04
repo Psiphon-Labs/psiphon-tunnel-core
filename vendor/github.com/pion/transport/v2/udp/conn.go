@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 // Package udp provides a connection-oriented listener over a UDP PacketConn
 package udp
 
@@ -11,7 +14,6 @@ import (
 
 	"github.com/pion/transport/v2/deadline"
 	"github.com/pion/transport/v2/packetio"
-	pkgSync "github.com/pion/udp/v2/pkg/sync"
 )
 
 const (
@@ -23,6 +25,7 @@ const (
 var (
 	ErrClosedListener      = errors.New("udp: listener closed")
 	ErrListenQueueExceeded = errors.New("udp: listen queue exceeded")
+	ErrReadBufferFailed    = errors.New("udp: failed to get read buffer from pool")
 )
 
 // listener augments a connection-oriented Listener over a UDP PacketConn
@@ -38,10 +41,13 @@ type listener struct {
 
 	connLock sync.Mutex
 	conns    map[string]*Conn
-	connWG   *pkgSync.WaitGroup
+	connWG   *sync.WaitGroup
 
 	readWG   sync.WaitGroup
 	errClose atomic.Value // error
+
+	readDoneCh chan struct{}
+	errRead    atomic.Value // error
 }
 
 // Accept waits for and returns the next connection to the listener.
@@ -50,6 +56,10 @@ func (l *listener) Accept() (net.Conn, error) {
 	case c := <-l.acceptCh:
 		l.connWG.Add(1)
 		return c, nil
+
+	case <-l.readDoneCh:
+		err, _ := l.errRead.Load().(error)
+		return nil, err
 
 	case <-l.doneCh:
 		return nil, ErrClosedListener
@@ -66,7 +76,7 @@ func (l *listener) Close() error {
 
 		l.connLock.Lock()
 		// Close unaccepted connections
-	L_CLOSE:
+	lclose:
 		for {
 			select {
 			case c := <-l.acceptCh:
@@ -74,7 +84,7 @@ func (l *listener) Close() error {
 				delete(l.conns, c.rAddr.String())
 
 			default:
-				break L_CLOSE
+				break lclose
 			}
 		}
 		nConns := len(l.conns)
@@ -139,7 +149,8 @@ func (lc *ListenConfig) Listen(network string, laddr *net.UDPAddr) (net.Listener
 				return &buf
 			},
 		},
-		connWG: pkgSync.NewWaitGroup(),
+		connWG:     &sync.WaitGroup{},
+		readDoneCh: make(chan struct{}),
 	}
 
 	l.accepting.Store(true)
@@ -169,15 +180,19 @@ func Listen(network string, laddr *net.UDPAddr) (net.Listener, error) {
 //  2. Creating a new Conn when receiving from a new remote.
 func (l *listener) readLoop() {
 	defer l.readWG.Done()
+	defer close(l.readDoneCh)
+
+	buf, ok := l.readBufferPool.Get().(*[]byte)
+	if !ok {
+		l.errRead.Store(ErrReadBufferFailed)
+		return
+	}
+	defer l.readBufferPool.Put(buf)
 
 	for {
-		buf, ok := l.readBufferPool.Get().(*[]byte)
-		if !ok {
-			return
-		}
-
 		n, raddr, err := l.pConn.ReadFrom(*buf)
 		if err != nil {
+			l.errRead.Store(err)
 			return
 		}
 		conn, ok, err := l.getConn(raddr, (*buf)[:n])

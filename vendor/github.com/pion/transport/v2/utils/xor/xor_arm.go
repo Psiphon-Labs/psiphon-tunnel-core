@@ -1,6 +1,5 @@
-// Copyright 2022 The Pion Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// SPDX-FileCopyrightText: 2022 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
 
 //go:build !gccgo
 // +build !gccgo
@@ -10,8 +9,9 @@
 package xor
 
 import (
-	"golang.org/x/sys/cpu"
 	"unsafe"
+
+	"golang.org/x/sys/cpu"
 )
 
 const wordSize = int(unsafe.Sizeof(uintptr(0))) // nolint:gosec

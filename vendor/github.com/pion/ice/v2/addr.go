@@ -1,6 +1,11 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package ice
 
-import "net"
+import (
+	"net"
+)
 
 func parseMulticastAnswerAddr(in net.Addr) (net.IP, bool) {
 	switch addr := in.(type) {
@@ -45,4 +50,22 @@ func addrEqual(a, b net.Addr) bool {
 	}
 
 	return aType == bType && aIP.Equal(bIP) && aPort == bPort
+}
+
+// AddrPort is  an IP and a port number.
+type AddrPort [18]byte
+
+func toAddrPort(addr net.Addr) AddrPort {
+	var ap AddrPort
+	switch addr := addr.(type) {
+	case *net.UDPAddr:
+		copy(ap[:16], addr.IP.To16())
+		ap[16] = uint8(addr.Port >> 8)
+		ap[17] = uint8(addr.Port)
+	case *net.TCPAddr:
+		copy(ap[:16], addr.IP.To16())
+		ap[16] = uint8(addr.Port >> 8)
+		ap[17] = uint8(addr.Port)
+	}
+	return ap
 }

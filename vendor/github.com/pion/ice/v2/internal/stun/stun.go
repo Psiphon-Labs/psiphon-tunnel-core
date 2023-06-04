@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 // Package stun contains ICE specific STUN code
 package stun
 
@@ -15,7 +18,7 @@ var (
 	errMismatchUsername         = errors.New("username mismatch")
 )
 
-// GetXORMappedAddr initiates a stun requests to serverAddr using conn, reads the response and returns
+// GetXORMappedAddr initiates a STUN requests to serverAddr using conn, reads the response and returns
 // the XORMappedAddress returned by the STUN server.
 func GetXORMappedAddr(conn net.PacketConn, serverAddr net.Addr, timeout time.Duration) (*stun.XORMappedAddress, error) {
 	if timeout > 0 {
@@ -50,7 +53,7 @@ func GetXORMappedAddr(conn net.PacketConn, serverAddr net.Addr, timeout time.Dur
 
 	var addr stun.XORMappedAddress
 	if err = addr.GetFrom(res); err != nil {
-		return nil, fmt.Errorf("%w: %v", errGetXorMappedAddrResponse, err)
+		return nil, fmt.Errorf("%w: %v", errGetXorMappedAddrResponse, err) //nolint:errorlint
 	}
 
 	return &addr, nil

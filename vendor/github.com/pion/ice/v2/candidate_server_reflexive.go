@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package ice
 
 import "net"
@@ -52,6 +55,7 @@ func NewCandidateServerReflexive(config *CandidateServerReflexiveConfig) (*Candi
 				Address: config.RelAddr,
 				Port:    config.RelPort,
 			},
+			remoteCandidateCaches: map[AddrPort]Candidate{},
 		},
 	}, nil
 }

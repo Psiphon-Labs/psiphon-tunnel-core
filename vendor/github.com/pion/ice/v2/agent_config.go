@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package ice
 
 import (
@@ -5,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pion/logging"
+	"github.com/pion/stun"
 	"github.com/pion/transport/v2"
 	"golang.org/x/net/proxy"
 )
@@ -22,25 +26,25 @@ const (
 	// defaultFailedTimeout is the default time till an Agent transitions to failed after disconnected
 	defaultFailedTimeout = 25 * time.Second
 
-	// wait time before nominating a host candidate
+	// defaultHostAcceptanceMinWait is the wait time before nominating a host candidate
 	defaultHostAcceptanceMinWait = 0
 
-	// wait time before nominating a srflx candidate
+	// defaultSrflxAcceptanceMinWait is the wait time before nominating a srflx candidate
 	defaultSrflxAcceptanceMinWait = 500 * time.Millisecond
 
-	// wait time before nominating a prflx candidate
+	// defaultPrflxAcceptanceMinWait is the wait time before nominating a prflx candidate
 	defaultPrflxAcceptanceMinWait = 1000 * time.Millisecond
 
-	// wait time before nominating a relay candidate
+	// defaultRelayAcceptanceMinWait is the wait time before nominating a relay candidate
 	defaultRelayAcceptanceMinWait = 2000 * time.Millisecond
 
-	// max binding request before considering a pair failed
+	// defaultMaxBindingRequests is the maximum number of binding requests before considering a pair failed
 	defaultMaxBindingRequests = 7
 
-	// the number of bytes that can be buffered before we start to error
+	// maxBufferSize is the number of bytes that can be buffered before we start to error
 	maxBufferSize = 1000 * 1000 // 1MB
 
-	// wait time before binding requests can be deleted
+	// maxBindingRequestTimeout is the wait time before binding requests can be deleted
 	maxBindingRequestTimeout = 4000 * time.Millisecond
 )
 
@@ -51,7 +55,7 @@ func defaultCandidateTypes() []CandidateType {
 // AgentConfig collects the arguments to ice.Agent construction into
 // a single structure, for future-proofness of the interface
 type AgentConfig struct {
-	Urls []*URL
+	Urls []*stun.URI
 
 	// PortMin and PortMax are optional. Leave them 0 for the default UDP port allocation strategy.
 	PortMin uint16
@@ -242,7 +246,7 @@ func (config *AgentConfig) initExtIPMapping(a *Agent) error {
 		return err
 	}
 	if a.extIPMapper == nil {
-		return nil // this may happen when config.NAT1To1IPs is an empty array
+		return nil // This may happen when config.NAT1To1IPs is an empty array
 	}
 	if a.extIPMapper.candidateType == CandidateTypeHost {
 		if a.mDNSMode == MulticastDNSModeQueryAndGather {

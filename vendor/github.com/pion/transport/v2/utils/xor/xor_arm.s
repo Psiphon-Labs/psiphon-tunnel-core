@@ -1,6 +1,5 @@
-// Copyright 2022 The Pion Authors. All rights reserved.
-// Use of this source code is governed by an MIT
-// license that can be found in the LICENSE file.
+// SPDX-FileCopyrightText: 2022 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
 
 // go:build !gccgo
 // +build !gccgo

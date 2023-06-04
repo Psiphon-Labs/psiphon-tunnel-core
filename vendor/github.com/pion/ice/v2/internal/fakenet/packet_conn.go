@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 // Package fakenet contains fake network abstractions
 package fakenet
 
@@ -21,6 +24,6 @@ func (f *PacketConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 }
 
 // WriteTo writes a packet with payload p to addr.
-func (f *PacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
+func (f *PacketConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 	return f.Conn.Write(p)
 }
