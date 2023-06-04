@@ -229,7 +229,7 @@ github.com/patrickmn/go-cache
 # github.com/pion/datachannel v1.5.5
 ## explicit; go 1.13
 github.com/pion/datachannel
-# github.com/pion/dtls/v2 v2.2.7
+# github.com/pion/dtls/v2 v2.2.7 => ./replace/dtls
 ## explicit; go 1.13
 github.com/pion/dtls/v2
 github.com/pion/dtls/v2/internal/ciphersuite
@@ -530,3 +530,4 @@ tailscale.com/version
 tailscale.com/version/distro
 # github.com/refraction-networking/gotapdance => ./replace/gotapdance
 # gitlab.com/yawning/obfs4.git => ./replace/obfs4.git
+# github.com/pion/dtls/v2 => ./replace/dtls

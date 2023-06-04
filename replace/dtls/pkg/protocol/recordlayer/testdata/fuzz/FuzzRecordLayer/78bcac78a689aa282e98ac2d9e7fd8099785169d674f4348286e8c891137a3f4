@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("\x14\xd11<JPrior\xb8td\x01")

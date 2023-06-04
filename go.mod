@@ -14,6 +14,12 @@ replace github.com/refraction-networking/gotapdance => ./replace/gotapdance
 // the server side.
 replace gitlab.com/yawning/obfs4.git => ./replace/obfs4.git
 
+// When this is the main module, github.com/pion/dtls/v2, used by inproxy via
+// pion/webrtc, is replaced with a fork which adds support for optional DTLS
+// ClientHello randomization. This fork is currently based on
+// https://github.com/pion/dtls v2.2.7.
+replace github.com/pion/dtls/v2 => ./replace/dtls
+
 require (
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
