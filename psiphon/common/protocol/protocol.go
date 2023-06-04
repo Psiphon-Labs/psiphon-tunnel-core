@@ -196,6 +196,10 @@ func TunnelProtocolUsesMeekHTTP(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
 }
 
+func TunnelProtocolUsesMeekHTTPNormalizer(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK
+}
+
 func TunnelProtocolUsesMeekHTTPS(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
@@ -251,7 +255,8 @@ func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {
 
 func TunnelProtocolSupportsPassthrough(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
-		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK
 }
 
 func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {

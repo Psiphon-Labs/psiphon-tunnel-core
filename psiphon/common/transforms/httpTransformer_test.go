@@ -29,6 +29,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -271,8 +272,8 @@ func TestHTTPTransformerHTTPRequest(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error %v", err)
 				}
-				if string(conn.b) != tt.wantOutput {
-					t.Fatalf("expected \"%s\" of len %d but got \"%s\" of len %d", escapeNewlines(tt.wantOutput), len(tt.wantOutput), escapeNewlines(string(conn.b)), len(conn.b))
+				if string(conn.WriteBuffer()) != tt.wantOutput {
+					t.Fatalf("expected \"%s\" of len %d but got \"%s\" of len %d", escapeNewlines(tt.wantOutput), len(tt.wantOutput), escapeNewlines(string(conn.WriteBuffer())), len(conn.WriteBuffer()))
 				}
 			} else {
 				// tt.wantError != nil
@@ -461,8 +462,16 @@ func escapeNewlines(s string) string {
 }
 
 type testConn struct {
-	// b is the accumulated bytes from Write() calls.
-	b []byte
+	readLock sync.Mutex
+	// readBuffer are the bytes to return from Read() calls.
+	readBuffer []byte
+	// readErrs are returned from Read() calls in order. If empty, then a nil
+	// error is returned.
+	readErrs []error
+
+	writeLock sync.Mutex
+	// writeBuffer are the accumulated bytes from Write() calls.
+	writeBuffer []byte
 	// writeLimit is the max number of bytes that will be written in a Write()
 	// call.
 	writeLimit int
@@ -477,11 +486,65 @@ type testConn struct {
 	net.Conn
 }
 
+// ReadBuffer returns a copy of the underlying readBuffer. The length of the
+// returned buffer is also the number of bytes remaining to be Read when Conn
+// is not set.
+func (c *testConn) ReadBuffer() []byte {
+	c.readLock.Lock()
+	defer c.readLock.Unlock()
+
+	readBufferCopy := make([]byte, len(c.readBuffer))
+	copy(readBufferCopy, c.readBuffer)
+
+	return readBufferCopy
+}
+
 func (c *testConn) Read(b []byte) (n int, err error) {
-	return c.Conn.Read(b)
+
+	c.readLock.Lock()
+	defer c.readLock.Unlock()
+
+	if len(c.readErrs) > 0 {
+		err = c.readErrs[0]
+		c.readErrs = c.readErrs[1:]
+	}
+
+	// If Conn set, then read from it directly and do not use readBuffer.
+	if c.Conn != nil {
+		return c.Conn.Read(b)
+	}
+
+	if len(c.readBuffer) == 0 {
+		n = 0
+		return
+	}
+
+	n = copy(b, c.readBuffer)
+	if n == len(c.readBuffer) {
+		c.readBuffer = nil
+	} else {
+		c.readBuffer = c.readBuffer[n:]
+	}
+
+	return
+}
+
+// WriteBuffer returns a copy of the underlying writeBuffer, which is the
+// accumulation of all bytes written with Write.
+func (c *testConn) WriteBuffer() []byte {
+	c.readLock.Lock()
+	defer c.readLock.Unlock()
+
+	writeBufferCopy := make([]byte, len(c.writeBuffer))
+	copy(writeBufferCopy, c.writeBuffer)
+
+	return writeBufferCopy
 }
 
 func (c *testConn) Write(b []byte) (n int, err error) {
+
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
 
 	if len(c.writeErrs) > 0 {
 		err = c.writeErrs[0]
@@ -492,16 +555,16 @@ func (c *testConn) Write(b []byte) (n int, err error) {
 		n = c.writeLens[0]
 		c.writeLens = c.writeLens[1:]
 		if len(b) <= n {
-			c.b = append(c.b, b...)
+			c.writeBuffer = append(c.writeBuffer, b...)
 			n = len(b)
 		} else {
-			c.b = append(c.b, b[:n]...)
+			c.writeBuffer = append(c.writeBuffer, b[:n]...)
 		}
 	} else if c.writeLimit != 0 && c.writeLimit < len(b) {
-		c.b = append(c.b, b[:c.writeLimit]...)
+		c.writeBuffer = append(c.writeBuffer, b[:c.writeLimit]...)
 		n = c.writeLimit
 	} else {
-		c.b = append(c.b, b...)
+		c.writeBuffer = append(c.writeBuffer, b...)
 		n = len(b)
 	}
 
@@ -514,25 +577,44 @@ func (c *testConn) Write(b []byte) (n int, err error) {
 }
 
 func (c *testConn) Close() error {
-	return c.Conn.Close()
+	if c.Conn != nil {
+		return c.Conn.Close()
+	}
+
+	return nil
 }
 
 func (c *testConn) LocalAddr() net.Addr {
-	return c.Conn.LocalAddr()
+	if c.Conn != nil {
+		return c.Conn.LocalAddr()
+	}
+	return &net.TCPAddr{}
 }
 
 func (c *testConn) RemoteAddr() net.Addr {
-	return c.Conn.RemoteAddr()
+	if c.Conn != nil {
+		return c.Conn.RemoteAddr()
+	}
+	return &net.TCPAddr{}
 }
 
 func (c *testConn) SetDeadline(t time.Time) error {
-	return c.Conn.SetDeadline(t)
+	if c.Conn != nil {
+		return c.Conn.SetDeadline(t)
+	}
+	return nil
 }
 
 func (c *testConn) SetReadDeadline(t time.Time) error {
-	return c.Conn.SetReadDeadline(t)
+	if c.Conn != nil {
+		return c.Conn.SetReadDeadline(t)
+	}
+	return nil
 }
 
 func (c *testConn) SetWriteDeadline(t time.Time) error {
-	return c.Conn.SetWriteDeadline(t)
+	if c.Conn != nil {
+		return c.Conn.SetWriteDeadline(t)
+	}
+	return nil
 }

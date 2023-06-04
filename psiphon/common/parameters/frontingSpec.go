@@ -24,7 +24,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	regen "github.com/zach-klippenstein/goregen"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 )
 
 // FrontingSpecs is a list of domain fronting specs.
@@ -73,7 +73,7 @@ func (specs FrontingSpecs) SelectParameters() (
 		return "", "", "", "", nil, "", errors.TraceNew("missing fronting address")
 	}
 
-	frontingDialAddr, err := regen.Generate(
+	frontingDialAddr, err := regen.GenerateString(
 		spec.Addresses[prng.Intn(len(spec.Addresses))])
 	if err != nil {
 		return "", "", "", "", nil, "", errors.Trace(err)

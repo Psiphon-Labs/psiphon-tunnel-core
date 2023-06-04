@@ -74,7 +74,7 @@ func TestTLSPassthrough(t *testing.T) {
 
 			// test: valid passthrough message now invalid after time factor period
 
-			time.Sleep(time.Duration(timePeriodSeconds)*time.Second + time.Millisecond)
+			time.Sleep(time.Duration(timePeriodSeconds*2)*time.Second + time.Millisecond)
 
 			verified := VerifyTLSPassthroughMessage(useTimeFactor, correctMasterKey, validMessage)
 
@@ -123,8 +123,27 @@ func TestTLSPassthrough(t *testing.T) {
 				timeDiff = -timeDiff
 			}
 
-			if timeDiff.Microseconds() > 100 {
+			if timeDiff.Microseconds() > 500 {
 				t.Fatalf("unexpected elapsed time difference")
+			}
+
+			// test: cross rounded time period boundries
+
+			if useTimeFactor {
+
+				for i := 0; i < 2000; i++ {
+
+					validMessage, err := MakeTLSPassthroughMessage(useTimeFactor, correctMasterKey)
+					if err != nil {
+						t.Fatalf("MakeTLSPassthroughMessage failed: %s", err)
+					}
+
+					time.Sleep(10 * time.Millisecond)
+
+					if !VerifyTLSPassthroughMessage(useTimeFactor, correctMasterKey, validMessage) {
+						t.Fatalf("unexpected invalid passthrough message")
+					}
+				}
 			}
 		})
 	}

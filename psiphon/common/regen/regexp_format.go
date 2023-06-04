@@ -14,6 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+/*
+ * Copyright (c) 2023, Psiphon Inc.
+ * All rights reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
 package regen
 
 import (
@@ -28,20 +47,6 @@ func inspectRegexpToString(r *syntax.Regexp) string {
 	var buffer bytes.Buffer
 	inspectRegexpToWriter(&buffer, r)
 	return buffer.String()
-}
-
-// inspectPatternsToString returns a string describing one or more regular expressions.
-func inspectPatternsToString(simplify bool, patterns ...string) string {
-	var buffer bytes.Buffer
-	for _, pattern := range patterns {
-		inspectPatternsToWriter(simplify, &buffer, pattern)
-	}
-	return buffer.String()
-}
-func inspectPatternsToWriter(simplify bool, w io.Writer, patterns ...string) {
-	for _, pattern := range patterns {
-		inspectRegexpToWriter(w, parseOrPanic(simplify, pattern))
-	}
 }
 
 func inspectRegexpToWriter(w io.Writer, r ...*syntax.Regexp) {
@@ -63,37 +68,32 @@ func inspectWithIndent(r *syntax.Regexp, indent string, w io.Writer) {
 	} else {
 		fmt.Fprintf(w, "%s  Sub: []\n", indent)
 	}
-	fmt.Fprintf(w, "%s  Rune: %s (%s)\n", indent, runesToString(r.Rune...), runesToDecimalString(r.Rune))
+	fmt.Fprintf(w, "%s  Rune: %s (%s)\n", indent, runesToUTF8(r.Rune...), runesToDecimalString(r.Rune))
 	fmt.Fprintf(w, "%s  [Min, Max]: [%d, %d]\n", indent, r.Min, r.Max)
 	fmt.Fprintf(w, "%s  Cap: %d\n", indent, r.Cap)
 	fmt.Fprintf(w, "%s  Name: %s\n", indent, r.Name)
 }
 
-// ParseOrPanic parses a regular expression into an AST.
-// Panics on error.
-func parseOrPanic(simplify bool, pattern string) *syntax.Regexp {
-	regexp, err := syntax.Parse(pattern, 0)
-	if err != nil {
-		panic(err)
-	}
-	if simplify {
-		regexp = regexp.Simplify()
-	}
-	return regexp
-}
-
-// runesToString converts a slice of runes to the string they represent.
-func runesToString(runes ...rune) string {
-	defer func() {
-		if err := recover(); err != nil {
-			panic(fmt.Errorf("RunesToString panicked"))
-		}
-	}()
+// runesToUTF8 converts a slice of runes to the Unicode string they represent.
+func runesToUTF8(runes ...rune) []byte {
 	var buffer bytes.Buffer
 	for _, r := range runes {
 		buffer.WriteRune(r)
 	}
-	return buffer.String()
+	return buffer.Bytes()
+}
+
+// runesToBytes converst a slice of runes to a slice of bytes.
+// Returns an error if runes not in the range [0-255].
+func runesToBytes(runes ...rune) ([]byte, error) {
+	var buffer bytes.Buffer
+	for _, r := range runes {
+		if r < 0 || r > 255 {
+			return nil, fmt.Errorf("RunesToBytes: rune out of range")
+		}
+		buffer.WriteByte(byte(r))
+	}
+	return buffer.Bytes(), nil
 }
 
 // RunesToDecimalString converts a slice of runes to their comma-separated decimal values.

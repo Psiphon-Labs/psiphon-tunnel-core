@@ -336,24 +336,43 @@ func (m *clientHelloMsg) marshalRandomized() []byte {
 	// all slices before truncating.
 
 	cipherSuites := make([]uint16, len(m.cipherSuites))
-	perm := m.PRNG.Perm(len(m.cipherSuites))
-	for i, j := range perm {
-		cipherSuites[j] = m.cipherSuites[i]
-	}
-	cut := len(cipherSuites)
-	for ; cut > 1; cut-- {
-		if !m.PRNG.FlipCoin() {
+	for {
+		perm := m.PRNG.Perm(len(m.cipherSuites))
+		for i, j := range perm {
+			cipherSuites[j] = m.cipherSuites[i]
+		}
+		cut := len(cipherSuites)
+		for ; cut > 1; cut-- {
+			if !m.PRNG.FlipCoin() {
+				break
+			}
+		}
+
+		// Must contain at least one of defaultCipherSuitesTLS13.
+		containsDefault := false
+		for _, suite := range cipherSuites[:cut] {
+			for _, defaultSuite := range defaultCipherSuitesTLS13 {
+				if suite == defaultSuite {
+					containsDefault = true
+					break
+				}
+			}
+			if containsDefault {
+				break
+			}
+		}
+		if containsDefault {
+			cipherSuites = cipherSuites[:cut]
 			break
 		}
 	}
-	cipherSuites = cipherSuites[:cut]
 
 	compressionMethods := make([]uint8, len(m.compressionMethods))
-	perm = m.PRNG.Perm(len(m.compressionMethods))
+	perm := m.PRNG.Perm(len(m.compressionMethods))
 	for i, j := range perm {
 		compressionMethods[j] = m.compressionMethods[i]
 	}
-	cut = len(compressionMethods)
+	cut := len(compressionMethods)
 	for ; cut > 1; cut-- {
 		if !m.PRNG.FlipCoin() {
 			break
