@@ -1225,6 +1225,11 @@ func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
 		listCommonFields(fields)...)
 }
 
+func (log *commonLogger) IsLogLevelDebug() bool {
+	// There are no debug-level notices
+	return false
+}
+
 func listCommonFields(fields common.LogFields) []interface{} {
 	fieldList := make([]interface{}, 0)
 	for name, value := range fields {
