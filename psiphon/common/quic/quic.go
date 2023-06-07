@@ -968,7 +968,7 @@ type quicRoundTripper interface {
 }
 
 type ietfQUICListener struct {
-	ietf_quic.Listener
+	*ietf_quic.Listener
 }
 
 func (l *ietfQUICListener) Accept() (quicConnection, error) {
@@ -1049,27 +1049,30 @@ func dialQUIC(
 			quicConfig.HandshakeIdleTimeout = time.Until(deadline)
 		}
 
+		sni, _, err := net.SplitHostPort(quicSNIAddress)
+		if err != nil {
+			sni = quicSNIAddress
+		}
+
 		var dialConnection ietf_quic.Connection
-		var err error
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
 			NextProtos:         []string{getALPN(versionNumber)},
+			ServerName:         sni,
 		}
 
 		if dialEarly {
-			dialConnection, err = ietf_quic.DialEarlyContext(
+			dialConnection, err = ietf_quic.DialEarly(
 				ctx,
 				packetConn,
 				remoteAddr,
-				quicSNIAddress,
 				tlsConfig,
 				quicConfig)
 		} else {
-			dialConnection, err = ietf_quic.DialContext(
+			dialConnection, err = ietf_quic.Dial(
 				ctx,
 				packetConn,
 				remoteAddr,
-				quicSNIAddress,
 				tlsConfig,
 				quicConfig)
 		}
