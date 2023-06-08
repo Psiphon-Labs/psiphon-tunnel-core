@@ -721,10 +721,7 @@ func MakeDialParameters(
 					hostname, strconv.Itoa(serverEntry.MeekServerPort))
 			}
 		} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
-
-			dialParams.QUICDialSNIAddress = net.JoinHostPort(
-				selectHostName(dialParams.TunnelProtocol, p),
-				strconv.Itoa(serverEntry.SshObfuscatedQUICPort))
+			dialParams.QUICDialSNIAddress = selectHostName(dialParams.TunnelProtocol, p)
 		}
 	}
 

@@ -1049,6 +1049,8 @@ func dialQUIC(
 			quicConfig.HandshakeIdleTimeout = time.Until(deadline)
 		}
 
+		// Legacy replay values might include a port. If so, strip it.
+		// This was a requirement of legacy quic-go API, but is no longer required.
 		sni, _, err := net.SplitHostPort(quicSNIAddress)
 		if err != nil {
 			sni = quicSNIAddress
