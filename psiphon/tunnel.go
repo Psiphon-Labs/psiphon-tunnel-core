@@ -983,6 +983,7 @@ func dialTunnel(
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatorPaddingSeed,
 			dialParams.OSSHObfuscatorSeedTransformerParameters,
+			dialParams.OSSHPrefixSpec,
 			&obfuscatedSSHMinPadding,
 			&obfuscatedSSHMaxPadding)
 		if err != nil {

@@ -243,6 +243,7 @@ const (
 	ReplayResolveParameters                          = "ReplayResolveParameters"
 	ReplayHTTPTransformerParameters                  = "ReplayHTTPTransformerParameters"
 	ReplayOSSHSeedTransformerParameters              = "ReplayOSSHSeedTransformerParameters"
+	ReplayOSSHPrefix                                 = "ReplayOSSHPrefix"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -337,6 +338,10 @@ const (
 	ObfuscatedQUICNonceTransformSpecs                = "ObfuscatedQUICNonceTransformSpecs"
 	ObfuscatedQUICNonceTransformScopedSpecNames      = "ObfuscatedQUICNonceTransformScopedSpecNames"
 	ObfuscatedQUICNonceTransformProbability          = "ObfuscatedQUICNonceTransformProbability"
+	OSSHPrefixSpecs                                  = "OSSHPrefixSpecs"
+	OSSHPrefixScopedSpecNames                        = "OSSHPrefixScopedSpecNames"
+	OSSHPrefixProbability                            = "OSSHPrefixProbability"
+	ServerOSSHPrefixSpecs                            = "ServerOSSHPrefixSpecs"
 )
 
 const (
@@ -595,6 +600,7 @@ var defaultParameters = map[string]struct {
 	ReplayResolveParameters:                {value: true},
 	ReplayHTTPTransformerParameters:        {value: true},
 	ReplayOSSHSeedTransformerParameters:    {value: true},
+	ReplayOSSHPrefix:                       {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -713,6 +719,12 @@ var defaultParameters = map[string]struct {
 	ObfuscatedQUICNonceTransformSpecs:           {value: transforms.Specs{}},
 	ObfuscatedQUICNonceTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
 	ObfuscatedQUICNonceTransformProbability:     {value: 0.0, minimum: 0.0},
+
+	OSSHPrefixSpecs:           {value: transforms.Specs{}},
+	OSSHPrefixScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	OSSHPrefixProbability:     {value: 0.0, minimum: 0.0},
+
+	ServerOSSHPrefixSpecs: {value: transforms.Specs{}, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -926,6 +938,13 @@ func (p *Parameters) Set(
 	obfuscatedQuicNonceTransformSpecs, _ :=
 		obfuscatedQuicNonceTransformSpecsValue.(transforms.Specs)
 
+	osshPrefixSpecsValue, err := getAppliedValue(
+		OSSHPrefixSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	osshPrefixSpecs, _ := osshPrefixSpecsValue.(transforms.Specs)
+
 	for i := 0; i < len(applyParameters); i++ {
 
 		count := 0
@@ -1118,6 +1137,8 @@ func (p *Parameters) Set(
 					specs = osshObfuscatorSeedTransformSpecs
 				} else if name == ObfuscatedQUICNonceTransformScopedSpecNames {
 					specs = obfuscatedQuicNonceTransformSpecs
+				} else if name == OSSHPrefixScopedSpecNames {
+					specs = osshPrefixSpecs
 				}
 
 				err := v.Validate(specs)

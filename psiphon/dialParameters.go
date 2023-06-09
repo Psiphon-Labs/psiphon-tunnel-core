@@ -34,6 +34,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -90,6 +91,8 @@ type DialParameters struct {
 
 	ObfuscatorPaddingSeed                   *prng.Seed
 	OSSHObfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
+
+	OSSHPrefixSpec *obfuscator.OSSHPrefixSpec
 
 	FragmentorSeed *prng.Seed
 
@@ -206,6 +209,7 @@ func MakeDialParameters(
 	replayResolveParameters := p.Bool(parameters.ReplayResolveParameters)
 	replayHTTPTransformerParameters := p.Bool(parameters.ReplayHTTPTransformerParameters)
 	replayOSSHSeedTransformerParameters := p.Bool(parameters.ReplayOSSHSeedTransformerParameters)
+	replayOSSHPrefix := p.Bool(parameters.ReplayOSSHPrefix)
 
 	// Check for existing dial parameters for this server/network ID.
 
@@ -869,6 +873,25 @@ func MakeDialParameters(
 				dialParams.OSSHObfuscatorSeedTransformerParameters = params
 			} else {
 				dialParams.OSSHObfuscatorSeedTransformerParameters = nil
+			}
+		}
+
+		if serverEntry.DisableOSSHPrefix {
+			dialParams.OSSHPrefixSpec = nil
+		} else if !isReplay || !replayOSSHPrefix {
+			dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			params, err := makeOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if params.Spec != nil {
+				dialParams.OSSHPrefixSpec = params
+			} else {
+				dialParams.OSSHPrefixSpec = nil
 			}
 		}
 	}
@@ -1588,6 +1611,33 @@ func makeSeedTransformerParameters(p parameters.ParametersAccessor,
 			TransformName: name,
 			TransformSpec: spec,
 			TransformSeed: seed,
+		}, nil
+	}
+}
+
+func makeOSSHPrefixSpecParameters(
+	p parameters.ParametersAccessor, dialPortNumber string) (*obfuscator.OSSHPrefixSpec, error) {
+
+	if !p.WeightedCoinFlip(parameters.OSSHPrefixProbability) {
+		return &obfuscator.OSSHPrefixSpec{}, nil
+	}
+
+	specs := p.ProtocolTransformSpecs(parameters.OSSHPrefixSpecs)
+	scopedSpecNames := p.ProtocolTransformScopedSpecNames(parameters.OSSHPrefixScopedSpecNames)
+
+	name, spec := specs.Select(dialPortNumber, scopedSpecNames)
+
+	if spec == nil {
+		return &obfuscator.OSSHPrefixSpec{}, nil
+	} else {
+		seed, err := prng.NewSeed()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return &obfuscator.OSSHPrefixSpec{
+			Name: name,
+			Spec: spec,
+			Seed: seed,
 		}, nil
 	}
 }
