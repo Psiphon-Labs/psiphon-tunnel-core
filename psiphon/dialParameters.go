@@ -850,8 +850,8 @@ func MakeDialParameters(
 
 	}
 
-	// OSSH seed transforms are applied only to the OSSH tunnel protocol, and
-	// not to any other protocol layered over OSSH.
+	// OSSH prefix and seed transform are applied only to the OSSH tunnel protocol,
+	// and not to any other protocol layered over OSSH.
 	if dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
 
 		if serverEntry.DisableOSSHTransforms {
@@ -894,6 +894,14 @@ func MakeDialParameters(
 				dialParams.OSSHPrefixSpec = nil
 			}
 		}
+
+		// OSSHPrefix supersedes OSSHObfuscatorSeedTransform.
+		// This ensures both tactics are not used simultaneously,
+		// until OSSHObfuscatorSeedTransform is removed.
+		if dialParams.OSSHPrefixSpec != nil {
+			dialParams.OSSHObfuscatorSeedTransformerParameters = nil
+		}
+
 	}
 
 	if protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
