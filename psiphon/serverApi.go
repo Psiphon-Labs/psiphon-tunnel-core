@@ -988,6 +988,14 @@ func getBaseAPIParameters(
 			params["meek_transformed_host_name"] = transformedHostName
 		}
 
+		if dialParams.TLSOSSHSNIServerName != "" {
+			params["tls_ossh_sni_server_name"] = dialParams.TLSOSSHSNIServerName
+		}
+
+		if dialParams.TLSOSSHTransformedSNIServerName {
+			params["tls_ossh_transformed_host_name"] = "1"
+		}
+
 		if dialParams.SelectedUserAgent {
 			params["user_agent"] = dialParams.UserAgent
 		}

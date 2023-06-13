@@ -505,6 +505,14 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "meekTransformedHostName", dialParams.MeekTransformedHostName)
 		}
 
+		if dialParams.TLSOSSHSNIServerName != "" {
+			args = append(args, "tlsOSSHSNIServerName", dialParams.TLSOSSHSNIServerName)
+		}
+
+		if dialParams.TLSOSSHTransformedSNIServerName {
+			args = append(args, "tlsOSSHTransformedSNIServerName", dialParams.TLSOSSHTransformedSNIServerName)
+		}
+
 		if dialParams.SelectedUserAgent {
 			args = append(args, "userAgent", dialParams.UserAgent)
 		}

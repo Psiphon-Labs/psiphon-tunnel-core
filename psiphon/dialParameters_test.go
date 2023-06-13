@@ -457,7 +457,6 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.ReplaySSH] = false
 	applyParameters[parameters.ReplayObfuscatorPadding] = false
 	applyParameters[parameters.ReplayFragmentor] = false
-	applyParameters[parameters.ReplayRandomizedTLSProfile] = false
 	applyParameters[parameters.ReplayObfuscatedQUIC] = false
 	applyParameters[parameters.ReplayLivenessTest] = false
 	applyParameters[parameters.ReplayAPIRequestPadding] = false
