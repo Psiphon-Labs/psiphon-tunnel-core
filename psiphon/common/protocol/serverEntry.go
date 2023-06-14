@@ -78,6 +78,7 @@ type ServerEntry struct {
 	DisableHTTPTransforms           bool     `json:"disableHTTPTransforms"`
 	DisableObfuscatedQUICTransforms bool     `json:"disableObfuscatedQUICTransforms"`
 	DisableOSSHTransforms           bool     `json:"disableOSSHTransforms"`
+	DisableOSSHPrefix               bool     `json:"disableOSSHPrefix"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about

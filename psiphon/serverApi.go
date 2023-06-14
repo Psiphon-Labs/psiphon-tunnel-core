@@ -1127,6 +1127,12 @@ func getBaseAPIParameters(
 			}
 		}
 
+		if dialParams.OSSHPrefixSpec != nil {
+			if dialParams.OSSHPrefixSpec.Spec != nil {
+				params["ossh_prefix"] = dialParams.OSSHPrefixSpec.Name
+			}
+		}
+
 		if dialParams.DialConnMetrics != nil {
 			metrics := dialParams.DialConnMetrics.GetMetrics()
 			for name, value := range metrics {

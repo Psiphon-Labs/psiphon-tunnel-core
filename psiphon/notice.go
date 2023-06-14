@@ -597,6 +597,12 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			}
 		}
 
+		if dialParams.OSSHPrefixSpec != nil {
+			if dialParams.OSSHPrefixSpec.Spec != nil {
+				args = append(args, "OSSHPrefix", dialParams.OSSHPrefixSpec.Name)
+			}
+		}
+
 		if dialParams.DialConnMetrics != nil {
 			metrics := dialParams.DialConnMetrics.GetMetrics()
 			for name, value := range metrics {
