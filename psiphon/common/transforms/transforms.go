@@ -29,7 +29,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	regen "github.com/zach-klippenstein/goregen"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 )
 
 const (
@@ -155,7 +155,7 @@ func (spec Spec) ApplyString(seed *prng.Seed, input string) (string, error) {
 		if err != nil {
 			return "", errors.Trace(err)
 		}
-		value = re.ReplaceAllString(value, replacement)
+		value = re.ReplaceAllString(value, string(replacement))
 	}
 	return value, nil
 }
@@ -173,7 +173,7 @@ func (spec Spec) Apply(seed *prng.Seed, input []byte) ([]byte, error) {
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		value = re.ReplaceAll(value, []byte(replacement))
+		value = re.ReplaceAll(value, replacement)
 	}
 	return value, nil
 }
@@ -181,7 +181,7 @@ func (spec Spec) Apply(seed *prng.Seed, input []byte) ([]byte, error) {
 // makeRegexAndRepl generates the regex and replacement for a given seed and
 // transform. The same seed can be supplied to produce the same output, for
 // replay.
-func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (*regexp.Regexp, string, error) {
+func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (*regexp.Regexp, []byte, error) {
 
 	// TODO: the compiled regexp and regen could be cached, but the seed is an
 	// issue with caching the regen.
@@ -192,14 +192,17 @@ func makeRegexAndRepl(seed *prng.Seed, transform [2]string) (*regexp.Regexp, str
 	}
 	rg, err := regen.NewGenerator(transform[1], args)
 	if err != nil {
-		return nil, "", errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
-	replacement := rg.Generate()
+	replacement, err := rg.Generate()
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
 
 	re, err := regexp.Compile(transform[0])
 	if err != nil {
-		return nil, "", errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	return re, replacement, nil

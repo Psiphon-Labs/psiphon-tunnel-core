@@ -50,6 +50,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/marusama/semaphore"
 	cache "github.com/patrickmn/go-cache"
@@ -531,6 +532,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 			protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol),
 			protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol),
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(sshListener.tunnelProtocol),
+			true,
 			handleClient,
 			sshServer.shutdownBroadcast)
 
@@ -1906,12 +1908,28 @@ func (sshClient *sshClient) run(
 
 		if err == nil && protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 
+			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+
+			// Log error, but continue. A default prefix spec will be used by the server.
+			if err != nil {
+				log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
+					"ServerTacticsParametersCache.Get failed")
+			}
+
+			var serverOsshPrefixSpecs transforms.Specs = nil
+			if !p.IsNil() {
+				serverOsshPrefixSpecs = p.ProtocolTransformSpecs(parameters.ServerOSSHPrefixSpecs)
+				// Allow garbage collection.
+				p.Close()
+			}
+
 			// Note: NewServerObfuscatedSSHConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
 			result.obfuscatedSSHConn, err = obfuscator.NewServerObfuscatedSSHConn(
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
+				serverOsshPrefixSpecs,
 				func(clientIP string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,

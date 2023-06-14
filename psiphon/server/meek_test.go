@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -173,6 +174,26 @@ func TestCachedResponse(t *testing.T) {
 }
 
 func TestMeekResiliency(t *testing.T) {
+	testMeekResiliency(t, nil, false)
+}
+
+func TestMeekHTTPNormalizerResiliency(t *testing.T) {
+
+	seed, err := prng.NewSeed()
+	if err != nil {
+		t.Fatalf("prng.NewSeed failed %v", err)
+	}
+
+	spec := &transforms.HTTPTransformerParameters{
+		ProtocolTransformName: "spec1",
+		ProtocolTransformSpec: transforms.Spec{{"Host: example.com\r\n", ""}},
+		ProtocolTransformSeed: seed,
+	}
+
+	testMeekResiliency(t, spec, true)
+}
+
+func testMeekResiliency(t *testing.T, spec *transforms.HTTPTransformerParameters, useHTTPNormalizer bool) {
 
 	upstreamData := make([]byte, 5*MB)
 	_, _ = rand.Read(upstreamData)
@@ -246,6 +267,10 @@ func TestMeekResiliency(t *testing.T) {
 		Config: &Config{
 			MeekObfuscatedKey:              meekObfuscatedKey,
 			MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
+			TunnelProtocolPorts: map[string]int{
+				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK: 0,
+			},
+			runningProtocols: []string{protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK},
 		},
 		TrafficRulesSet: &TrafficRulesSet{},
 	}
@@ -287,11 +312,12 @@ func TestMeekResiliency(t *testing.T) {
 	server, err := NewMeekServer(
 		mockSupport,
 		listener,
-		"",
+		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 		0,
 		useTLS,
 		isFronted,
 		useObfuscatedSessionTickets,
+		useHTTPNormalizer,
 		clientHandler,
 		stopBroadcast)
 	if err != nil {
@@ -332,7 +358,6 @@ func TestMeekResiliency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prng.NewSeed failed: %s", err)
 	}
-
 	meekConfig := &psiphon.MeekConfig{
 		Parameters:                    params,
 		DialAddress:                   serverAddress,
@@ -342,6 +367,8 @@ func TestMeekResiliency(t *testing.T) {
 		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             meekObfuscatedKey,
 		MeekObfuscatorPaddingSeed:     meekObfuscatorPaddingSeed,
+		ClientTunnelProtocol:          protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
+		HTTPTransformerParameters:     spec,
 	}
 
 	ctx, cancelFunc := context.WithTimeout(
@@ -545,6 +572,7 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider, missing
 	useTLS := false
 	isFronted := false
 	useObfuscatedSessionTickets := false
+	useHTTPNormalizer := false
 
 	server, err := NewMeekServer(
 		mockSupport,
@@ -554,6 +582,7 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider, missing
 		useTLS,
 		isFronted,
 		useObfuscatedSessionTickets,
+		useHTTPNormalizer,
 		func(_ string, conn net.Conn) {
 			go func() {
 				for {

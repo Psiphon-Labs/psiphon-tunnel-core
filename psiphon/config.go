@@ -840,6 +840,10 @@ type Config struct {
 	ObfuscatedQUICNonceTransformScopedSpecNames transforms.ScopedSpecNames
 	ObfuscatedQUICNonceTransformProbability     *float64
 
+	OSSHPrefixSpecs           transforms.Specs
+	OSSHPrefixScopedSpecNames transforms.ScopedSpecNames
+	OSSHPrefixProbability     *float64
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -1974,6 +1978,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ObfuscatedQUICNonceTransformProbability] = *config.ObfuscatedQUICNonceTransformProbability
 	}
 
+	if config.OSSHPrefixSpecs != nil {
+		applyParameters[parameters.OSSHPrefixSpecs] = config.OSSHPrefixSpecs
+	}
+
+	if config.OSSHPrefixScopedSpecNames != nil {
+		applyParameters[parameters.OSSHPrefixScopedSpecNames] = config.OSSHPrefixScopedSpecNames
+	}
+
+	if config.OSSHPrefixProbability != nil {
+		applyParameters[parameters.OSSHPrefixProbability] = *config.OSSHPrefixProbability
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2456,6 +2472,23 @@ func (config *Config) setDialParametersHash() {
 	if config.ObfuscatedQUICNonceTransformProbability != nil {
 		hash.Write([]byte("ObfuscatedQUICNonceTransformProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.ObfuscatedQUICNonceTransformProbability)
+	}
+
+	if config.OSSHPrefixSpecs != nil {
+		hash.Write([]byte("OSSHPrefixSpecs"))
+		encodedOSSHPrefixSpecs, _ := json.Marshal(config.OSSHPrefixSpecs)
+		hash.Write(encodedOSSHPrefixSpecs)
+	}
+
+	if config.OSSHPrefixScopedSpecNames != nil {
+		hash.Write([]byte(""))
+		encodedOSSHPrefixScopedSpecNames, _ := json.Marshal(config.OSSHPrefixScopedSpecNames)
+		hash.Write(encodedOSSHPrefixScopedSpecNames)
+	}
+
+	if config.OSSHPrefixProbability != nil {
+		hash.Write([]byte("OSSHPrefixProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixProbability)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

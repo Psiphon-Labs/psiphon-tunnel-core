@@ -18,10 +18,8 @@
  */
 
 /*
-
 Package values provides a mechanism for specifying and selecting dynamic
 values employed by the Psiphon client and server.
-
 */
 package values
 
@@ -36,7 +34,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	regen "github.com/zach-klippenstein/goregen"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -265,6 +263,8 @@ func GetContentType(PRNG *prng.PRNG) string {
 	return spec.GetValue(PRNG)
 }
 
+// generate string given the regexp pattern.
+// generate is intended to be used with hardcoded inputs, and panics on error.
 func generate(PRNG *prng.PRNG, pattern string) string {
 
 	args := &regen.GeneratorArgs{
@@ -275,7 +275,11 @@ func generate(PRNG *prng.PRNG, pattern string) string {
 	if err != nil {
 		panic(err.Error())
 	}
-	return rg.Generate()
+	value, err := rg.Generate()
+	if err != nil {
+		panic(err.Error())
+	}
+	return string(value)
 }
 
 var (
@@ -337,7 +341,11 @@ func generateUserAgent() string {
 
 	g := userAgentGenerators[prng.Range(0, len(userAgentGenerators)-1)]
 
-	value := g.generator.Generate()
+	bytes, err := g.generator.Generate()
+	if err != nil {
+		panic(err.Error())
+	}
+	value := string(bytes)
 	value = strings.ReplaceAll(value, "__VER__", g.version())
 	return value
 }

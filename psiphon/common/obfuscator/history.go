@@ -64,7 +64,7 @@ func NewSeedHistory(config *SeedHistoryConfig) *SeedHistory {
 	// positives.
 	//
 	// Limitation: As go-cache-lru does not currently support iterating over all
-	// items (without making a full copy of the enture cache), the client IP with
+	// items (without making a full copy of the entire cache), the client IP with
 	// shorter TTL is stored in a second, smaller cache instead of the same cache
 	// with a a pruner. This incurs some additional overhead, as the seed key is
 	// stored twice, once in each cache.

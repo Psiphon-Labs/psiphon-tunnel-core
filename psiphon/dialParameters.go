@@ -34,14 +34,15 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	utls "github.com/refraction-networking/utls"
-	regen "github.com/zach-klippenstein/goregen"
 	"golang.org/x/net/bpf"
 )
 
@@ -90,6 +91,8 @@ type DialParameters struct {
 
 	ObfuscatorPaddingSeed                   *prng.Seed
 	OSSHObfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
+
+	OSSHPrefixSpec *obfuscator.OSSHPrefixSpec
 
 	FragmentorSeed *prng.Seed
 
@@ -206,6 +209,7 @@ func MakeDialParameters(
 	replayResolveParameters := p.Bool(parameters.ReplayResolveParameters)
 	replayHTTPTransformerParameters := p.Bool(parameters.ReplayHTTPTransformerParameters)
 	replayOSSHSeedTransformerParameters := p.Bool(parameters.ReplayOSSHSeedTransformerParameters)
+	replayOSSHPrefix := p.Bool(parameters.ReplayOSSHPrefix)
 
 	// Check for existing dial parameters for this server/network ID.
 
@@ -675,13 +679,35 @@ func MakeDialParameters(
 
 	if !isReplay || !replayHostname {
 
+		// Any MeekHostHeader selections made here will be overridden below,
+		// as required, for fronting cases.
+
 		if protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
 			protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol) {
 
 			dialParams.MeekSNIServerName = ""
+			hostname := ""
 			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
 				dialParams.MeekSNIServerName = selectHostName(dialParams.TunnelProtocol, p)
+				hostname = dialParams.MeekSNIServerName
 				dialParams.MeekTransformedHostName = true
+			} else {
+
+				// Always select a hostname for the Host header in this case.
+				// Unlike HTTP, the Host header isn't plaintext on the wire,
+				// and so there's no anti-fingerprint benefit from presenting
+				// the server IP address in the Host header. Omitting the
+				// server IP here can prevent exposing it in certain
+				// scenarios where the traffic is rerouted and arrives at a
+				// different HTTPS server.
+
+				hostname = selectHostName(dialParams.TunnelProtocol, p)
+			}
+			if serverEntry.MeekServerPort == 443 {
+				dialParams.MeekHostHeader = hostname
+			} else {
+				dialParams.MeekHostHeader = net.JoinHostPort(
+					hostname, strconv.Itoa(serverEntry.MeekServerPort))
 			}
 
 		} else if protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
@@ -765,7 +791,6 @@ func MakeDialParameters(
 				dialParams.ObfuscatedQUICNonceTransformerParameters = nil
 			}
 		}
-
 	}
 
 	if !isReplay || !replayLivenessTest {
@@ -825,8 +850,8 @@ func MakeDialParameters(
 
 	}
 
-	// OSSH seed transforms are applied only to the OSSH tunnel protocol, and
-	// not to any other protocol layered over OSSH.
+	// OSSH prefix and seed transform are applied only to the OSSH tunnel protocol,
+	// and not to any other protocol layered over OSSH.
 	if dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
 
 		if serverEntry.DisableOSSHTransforms {
@@ -849,6 +874,32 @@ func MakeDialParameters(
 			} else {
 				dialParams.OSSHObfuscatorSeedTransformerParameters = nil
 			}
+		}
+
+		if serverEntry.DisableOSSHPrefix {
+			dialParams.OSSHPrefixSpec = nil
+		} else if !isReplay || !replayOSSHPrefix {
+			dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			params, err := makeOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if params.Spec != nil {
+				dialParams.OSSHPrefixSpec = params
+			} else {
+				dialParams.OSSHPrefixSpec = nil
+			}
+		}
+
+		// OSSHPrefix supersedes OSSHObfuscatorSeedTransform.
+		// This ensures both tactics are not used simultaneously,
+		// until OSSHObfuscatorSeedTransform is removed.
+		if dialParams.OSSHPrefixSpec != nil {
+			dialParams.OSSHObfuscatorSeedTransformerParameters = nil
 		}
 
 	}
@@ -919,13 +970,6 @@ func MakeDialParameters(
 	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 
 		dialParams.MeekDialAddress = net.JoinHostPort(serverEntry.IpAddress, dialParams.DialPortNumber)
-		if !dialParams.MeekTransformedHostName {
-			if dialPortNumber == 80 {
-				dialParams.MeekHostHeader = serverEntry.IpAddress
-			} else {
-				dialParams.MeekHostHeader = dialParams.MeekDialAddress
-			}
-		}
 
 	case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 		protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET:
@@ -935,16 +979,10 @@ func MakeDialParameters(
 			// Note: IP address in SNI field will be omitted.
 			dialParams.MeekSNIServerName = serverEntry.IpAddress
 		}
-		if dialPortNumber == 443 {
-			dialParams.MeekHostHeader = serverEntry.IpAddress
-		} else {
-			dialParams.MeekHostHeader = dialParams.MeekDialAddress
-		}
 
 	default:
 		return nil, errors.Tracef(
 			"unknown tunnel protocol: %s", dialParams.TunnelProtocol)
-
 	}
 
 	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
@@ -1326,7 +1364,7 @@ func selectFrontingParameters(
 		// Generate a front address based on the regex.
 
 		var err error
-		frontingDialHost, err = regen.Generate(serverEntry.MeekFrontingAddressesRegex)
+		frontingDialHost, err = regen.GenerateString(serverEntry.MeekFrontingAddressesRegex)
 		if err != nil {
 			return "", "", errors.Trace(err)
 		}
@@ -1489,7 +1527,7 @@ func selectHostName(
 	}
 
 	choice := prng.Intn(len(regexStrings))
-	hostName, err := regen.Generate(regexStrings[choice])
+	hostName, err := regen.GenerateString(regexStrings[choice])
 	if err != nil {
 		NoticeWarning("selectHostName: regen.Generate failed: %v", errors.Trace(err))
 		return values.GetHostName()
@@ -1581,6 +1619,33 @@ func makeSeedTransformerParameters(p parameters.ParametersAccessor,
 			TransformName: name,
 			TransformSpec: spec,
 			TransformSeed: seed,
+		}, nil
+	}
+}
+
+func makeOSSHPrefixSpecParameters(
+	p parameters.ParametersAccessor, dialPortNumber string) (*obfuscator.OSSHPrefixSpec, error) {
+
+	if !p.WeightedCoinFlip(parameters.OSSHPrefixProbability) {
+		return &obfuscator.OSSHPrefixSpec{}, nil
+	}
+
+	specs := p.ProtocolTransformSpecs(parameters.OSSHPrefixSpecs)
+	scopedSpecNames := p.ProtocolTransformScopedSpecNames(parameters.OSSHPrefixScopedSpecNames)
+
+	name, spec := specs.Select(dialPortNumber, scopedSpecNames)
+
+	if spec == nil {
+		return &obfuscator.OSSHPrefixSpec{}, nil
+	} else {
+		seed, err := prng.NewSeed()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return &obfuscator.OSSHPrefixSpec{
+			Name: name,
+			Spec: spec,
+			Seed: seed,
 		}, nil
 	}
 }

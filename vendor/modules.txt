@@ -16,10 +16,10 @@ github.com/Psiphon-Labs/bolt
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20221014170512-3bdc7291c091
+# github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20230515185031-ae6632ab97ac
 ## explicit; go 1.18
 github.com/Psiphon-Labs/qtls-go1-18
-# github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20221014165721-ed28749db082
+# github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20230515185100-099bac32c181
 ## explicit; go 1.18
 github.com/Psiphon-Labs/qtls-go1-19
 # github.com/Psiphon-Labs/quic-go v0.0.0-20230215230806-9b1ddbf778cc
@@ -125,8 +125,6 @@ github.com/google/go-cmp/cmp/internal/value
 ## explicit; go 1.12
 github.com/google/gopacket
 github.com/google/gopacket/layers
-# github.com/google/gxui v0.0.0-20151028112939-f85e0a97b3a4
-## explicit
 # github.com/google/pprof v0.0.0-20210407192527-94a9f03dee38
 ## explicit; go 1.14
 github.com/google/pprof/profile
@@ -155,8 +153,6 @@ github.com/klauspost/compress/internal/cpuinfo
 github.com/klauspost/compress/internal/snapref
 github.com/klauspost/compress/zstd
 github.com/klauspost/compress/zstd/internal/xxhash
-# github.com/marten-seemann/qpack v0.3.0
-## explicit; go 1.18
 # github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
 ## explicit
 github.com/marusama/semaphore
@@ -229,8 +225,6 @@ github.com/sergeyfrolov/bsbuffer
 # github.com/sirupsen/logrus v1.8.1
 ## explicit; go 1.13
 github.com/sirupsen/logrus
-# github.com/smartystreets/goconvey v1.7.2
-## explicit; go 1.16
 # github.com/stretchr/testify v1.7.1
 ## explicit; go 1.13
 github.com/stretchr/testify/assert
@@ -242,9 +236,6 @@ github.com/syndtr/gocapability/capability
 # github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 ## explicit; go 1.12
 github.com/wader/filtertransport
-# github.com/zach-klippenstein/goregen v0.0.0-20160303162051-795b5e3961ea
-## explicit
-github.com/zach-klippenstein/goregen
 # gitlab.com/yawning/obfs4.git v0.0.0-20190120164510-816cff15f425 => ./replace/obfs4.git
 ## explicit; go 1.19
 gitlab.com/yawning/obfs4.git/common/csrand

@@ -14,10 +14,30 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+/*
+ * Copyright (c) 2023, Psiphon Inc.
+ * All rights reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
 package regen
 
 import (
 	"fmt"
+	"math"
 )
 
 // CharClass represents a regular expression character class as a list of ranges.
@@ -57,7 +77,7 @@ e.g.
 func parseCharClass(runes []rune) *tCharClass {
 	var totalSize int32
 	numRanges := len(runes) / 2
-	ranges := make([]tCharClassRange, numRanges, numRanges)
+	ranges := make([]tCharClassRange, numRanges)
 
 	for i := 0; i < numRanges; i++ {
 		start := runes[i*2]
@@ -79,6 +99,38 @@ func parseCharClass(runes []rune) *tCharClass {
 	return &tCharClass{ranges, totalSize}
 }
 
+// parseByteClass parses character classes only for byte values (0-255).
+// Returns nil if runes does not contain any byte values.
+//
+// Note:
+// If an end range is greater than 255, it is truncated to 255.
+func parseByteClass(runes []rune) *tCharClass {
+	var totalSize int32
+
+	var ranges []tCharClassRange
+	for i := 0; i < len(runes)-1; i += 2 {
+		start := runes[i]
+		end := runes[i+1]
+
+		var r tCharClassRange
+
+		if start <= math.MaxUint8 {
+			if end > math.MaxUint8 {
+				end = math.MaxUint8
+			}
+			r = newCharClassRange(start, end)
+			ranges = append(ranges, r)
+			totalSize += r.Size
+		}
+	}
+
+	if len(ranges) == 0 {
+		return nil
+	}
+
+	return &tCharClass{ranges, totalSize}
+}
+
 // GetRuneAt gets a rune from CharClass as a contiguous array of runes.
 func (class *tCharClass) GetRuneAt(i int32) rune {
 	for _, r := range class.Ranges {
@@ -95,10 +147,6 @@ func (class *tCharClass) String() string {
 }
 
 func newCharClassRange(start rune, end rune) tCharClassRange {
-	if start < 1 {
-		panic("char class range cannot contain runes less than 1")
-	}
-
 	size := end - start + 1
 
 	if size < 1 {
@@ -113,8 +161,8 @@ func newCharClassRange(start rune, end rune) tCharClassRange {
 
 func (r tCharClassRange) String() string {
 	if r.Size == 1 {
-		return fmt.Sprintf("%s:1", runesToString(r.Start))
+		return fmt.Sprintf("%s:1", runesToUTF8(r.Start))
 	}
-	return fmt.Sprintf("%s-%s:%d", runesToString(r.Start), runesToString(r.Start+rune(r.Size-1)), r.Size)
+	return fmt.Sprintf("%s-%s:%d", runesToUTF8(r.Start), runesToUTF8(r.Start+rune(r.Size-1)), r.Size)
 
 }
