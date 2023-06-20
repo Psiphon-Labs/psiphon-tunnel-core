@@ -1117,7 +1117,11 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case transforms.Specs:
-				err := v.Validate()
+				prefixMode := false
+				if name == OSSHPrefixSpecs || name == ServerOSSHPrefixSpecs {
+					prefixMode = true
+				}
+				err := v.Validate(prefixMode)
 				if err != nil {
 					if skipOnError {
 						continue
