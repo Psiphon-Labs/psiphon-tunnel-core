@@ -57,7 +57,7 @@ func runTestTransforms() error {
 
 	// Test: validation
 
-	err := specs.Validate()
+	err := specs.Validate(false)
 	if err != nil {
 		return errors.Trace(err)
 	}
