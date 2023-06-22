@@ -78,7 +78,12 @@ type internalGenerator struct {
 	GenerateFunc func() ([]byte, error)
 }
 
-func (gen *internalGenerator) Generate() ([]byte, error) {
+func (gen *internalGenerator) Generate() (b []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panicked on bad input: Generate: %v", r)
+		}
+	}()
 	return gen.GenerateFunc()
 }
 
