@@ -188,15 +188,16 @@ func TestGeneratorArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("Panics if repeat bounds are invalid", func(t *testing.T) {
+	t.Run("Error if repeat bounds are invalid", func(t *testing.T) {
 		args := &GeneratorArgs{
 			MinUnboundedRepeatCount: 2,
 			MaxUnboundedRepeatCount: 1,
 		}
 
-		shouldPanicWith(t, func() {
-			_ = args.initialize()
-		}, "MinUnboundedRepeatCount(2) > MaxUnboundedRepeatCount(1)")
+		err := args.initialize()
+		if err.Error() != "MinUnboundedRepeatCount(2) > MaxUnboundedRepeatCount(1)" {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("Allow equal repeat bounds", func(t *testing.T) {
@@ -215,12 +216,13 @@ func TestGeneratorArgs(t *testing.T) {
 
 	t.Run("Rng", func(t *testing.T) {
 
-		t.Run("Panics if called before initialize", func(t *testing.T) {
+		t.Run("Error if called before initialize", func(t *testing.T) {
 			args := &GeneratorArgs{}
 
-			shouldPanic(t, func() {
-				_ = args.Rng()
-			})
+			_, err := args.Rng()
+			if err == nil {
+				t.Fatal("expected error")
+			}
 		})
 
 		t.Run("Non-nil after initialize", func(t *testing.T) {
@@ -229,7 +231,10 @@ func TestGeneratorArgs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rng := args.Rng()
+			rng, err := args.Rng()
+			if err != nil {
+				t.Fatal(err)
+			}
 			if rng == nil {
 				t.Fatal("expected non-nil")
 			}
@@ -904,24 +909,6 @@ func max(values ...int) int {
 		}
 	}
 	return m
-}
-
-func shouldPanic(t *testing.T, f func()) {
-	t.Helper()
-	defer func() { _ = recover() }()
-	f()
-	t.Errorf("should have panicked")
-}
-
-func shouldPanicWith(t *testing.T, f func(), expected string) {
-	t.Helper()
-	defer func() {
-		if r := recover(); r != expected {
-			t.Errorf("expected panic %q, got %q", expected, r)
-		}
-	}()
-	f()
-	t.Errorf("should have panicked")
 }
 
 func shouldNotPanic(t *testing.T, f func()) {
