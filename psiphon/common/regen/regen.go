@@ -186,8 +186,8 @@ func (a *GeneratorArgs) initialize() error {
 	}
 
 	if a.MinUnboundedRepeatCount > a.MaxUnboundedRepeatCount {
-		panic(fmt.Sprintf("MinUnboundedRepeatCount(%d) > MaxUnboundedRepeatCount(%d)",
-			a.MinUnboundedRepeatCount, a.MaxUnboundedRepeatCount))
+		return fmt.Errorf("MinUnboundedRepeatCount(%d) > MaxUnboundedRepeatCount(%d)",
+			a.MinUnboundedRepeatCount, a.MaxUnboundedRepeatCount)
 	}
 
 	if a.CaptureGroupHandler == nil {
@@ -199,11 +199,11 @@ func (a *GeneratorArgs) initialize() error {
 
 // Rng returns the random number generator used by generators.
 // Panics if called before the GeneratorArgs has been initialized by NewGenerator.
-func (a *GeneratorArgs) Rng() *rand.Rand {
+func (a *GeneratorArgs) Rng() (*rand.Rand, error) {
 	if a.rng == nil {
-		panic("GeneratorArgs has not been initialized by NewGenerator yet")
+		return nil, fmt.Errorf("GeneratorArgs has not been initialized by NewGenerator yet")
 	}
-	return a.rng
+	return a.rng, nil
 }
 
 // Generator generates random bytes or strings.
@@ -219,7 +219,12 @@ If args is nil, default values are used.
 This function does not seed the default RNG, so you must call rand.Seed() if you want
 non-deterministic strings.
 */
-func GenerateString(pattern string) (string, error) {
+func GenerateString(pattern string) (str string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panicked on bad input: GenerateString: %v", r)
+		}
+	}()
 	generator, err := NewGenerator(pattern, nil)
 	if err != nil {
 		return "", err
@@ -237,6 +242,12 @@ func GenerateString(pattern string) (string, error) {
 // character range. This makes it impossible to infer the original negated
 // character class.
 func NewGenerator(pattern string, inputArgs *GeneratorArgs) (generator Generator, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panicked on bad input: NewGenerator: %v", r)
+		}
+	}()
+
 	args := GeneratorArgs{}
 
 	// Copy inputArgs so the caller can't change them.

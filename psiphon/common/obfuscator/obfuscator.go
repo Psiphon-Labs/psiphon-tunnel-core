@@ -31,7 +31,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"golang.org/x/crypto/hkdf"
 )
@@ -655,31 +654,9 @@ func makeTerminator(keyword string, prefix []byte, direction string) ([]byte, er
 // with random bytes.
 func makePrefix(spec *OSSHPrefixSpec, keyword, direction string) ([]byte, error) {
 
-	if len(spec.Spec) != 1 || len(spec.Spec[0]) != 2 || spec.Spec[0][1] == "" {
-		return nil, errors.TraceNew("invalid prefix spec")
-	}
-
-	rng := prng.NewPRNGWithSeed(spec.Seed)
-
-	args := &regen.GeneratorArgs{
-		RngSource: rng,
-		ByteMode:  true,
-	}
-
-	gen, err := regen.NewGenerator(spec.Spec[0][1], args)
+	prefix, err := spec.Spec.ApplyPrefix(spec.Seed, PREAMBLE_HEADER_LENGTH)
 	if err != nil {
 		return nil, errors.Trace(err)
-	}
-
-	prefix, err := gen.Generate()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	if len(prefix) < PREAMBLE_HEADER_LENGTH {
-		// Add random padding to fill up to PREAMBLE_HEADER_LENGTH.
-		padding := rng.Bytes(PREAMBLE_HEADER_LENGTH - len(prefix))
-		prefix = append(prefix, padding...)
 	}
 
 	terminator, err := makeTerminator(keyword, prefix, direction)
