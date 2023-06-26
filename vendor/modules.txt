@@ -22,7 +22,7 @@ github.com/Psiphon-Labs/qtls-go1-19
 # github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20230608214729-dd57d6787acf
 ## explicit; go 1.20
 github.com/Psiphon-Labs/qtls-go1-20
-# github.com/Psiphon-Labs/quic-go v0.0.0-20230614195241-44655521e44b
+# github.com/Psiphon-Labs/quic-go v0.0.0-20230626192210-73f29effc9da
 ## explicit; go 1.19
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
