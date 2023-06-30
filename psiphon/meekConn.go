@@ -374,9 +374,6 @@ func DialMeek(
 			return packetConn, remoteAddr, nil
 		}
 
-		_, port, _ := net.SplitHostPort(meekConfig.DialAddress)
-		quicDialSNIAddress := fmt.Sprintf("%s:%s", meekConfig.SNIServerName, port)
-
 		var err error
 		transport, err = quic.NewQUICTransporter(
 			ctx,
@@ -384,7 +381,7 @@ func DialMeek(
 				NoticeInfo(message)
 			},
 			udpDialer,
-			quicDialSNIAddress,
+			meekConfig.SNIServerName,
 			meekConfig.QUICVersion,
 			meekConfig.QUICClientHelloSeed,
 			meekConfig.QUICDisablePathMTUDiscovery)

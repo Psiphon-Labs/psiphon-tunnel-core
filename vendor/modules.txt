@@ -16,14 +16,14 @@ github.com/Psiphon-Labs/bolt
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/qtls-go1-18 v0.0.0-20230515185031-ae6632ab97ac
-## explicit; go 1.18
-github.com/Psiphon-Labs/qtls-go1-18
-# github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20230515185100-099bac32c181
-## explicit; go 1.18
+# github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20230608213623-d58aa73e519a
+## explicit; go 1.19
 github.com/Psiphon-Labs/qtls-go1-19
-# github.com/Psiphon-Labs/quic-go v0.0.0-20230215230806-9b1ddbf778cc
-## explicit; go 1.18
+# github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20230608214729-dd57d6787acf
+## explicit; go 1.20
+github.com/Psiphon-Labs/qtls-go1-20
+# github.com/Psiphon-Labs/quic-go v0.0.0-20230626192210-73f29effc9da
+## explicit; go 1.19
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
 github.com/Psiphon-Labs/quic-go/internal/ackhandler
