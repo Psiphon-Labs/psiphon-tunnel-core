@@ -347,7 +347,8 @@ type clientSessionState struct {
 // goroutines. Up to TLS 1.2, only ticket-based resumption is supported, not
 // SessionID-based resumption. In TLS 1.3 they were merged into PSK modes, which
 // are supported via this interface.
-//go:generate sh -c "mockgen -package qtls -destination mock_client_session_cache_test.go github.com/Psiphon-Labs/qtls-go1-17 ClientSessionCache"
+//
+//go:generate sh -c "mockgen -package qtls -destination mock_client_session_cache_test.go github.com/Psiphon-Labs/qtls-go1-19 ClientSessionCache"
 type ClientSessionCache = tls.ClientSessionCache
 
 // SignatureScheme is a tls.SignatureScheme
@@ -1424,7 +1425,7 @@ func leafCertificate(c *Certificate) (*x509.Certificate, error) {
 }
 
 type handshakeMessage interface {
-	marshal() []byte
+	marshal() ([]byte, error)
 	unmarshal([]byte) bool
 }
 

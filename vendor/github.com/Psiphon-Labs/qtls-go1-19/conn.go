@@ -125,6 +125,9 @@ type Conn struct {
 	used0RTT bool
 
 	tmp [16]byte
+
+	connStateMutex sync.Mutex
+	connState      ConnectionStateWith0RTT
 }
 
 // Access to net.Conn methods.
@@ -1038,20 +1041,40 @@ func (c *Conn) writeRecordLocked(typ recordType, data []byte) (int, error) {
 	return n, nil
 }
 
-// writeRecord writes a TLS record with the given type and payload to the
-// connection and updates the record layer state.
-func (c *Conn) writeRecord(typ recordType, data []byte) (int, error) {
-	if c.extraConfig != nil && c.extraConfig.AlternativeRecordLayer != nil {
-		if typ == recordTypeChangeCipherSpec {
-			return len(data), nil
-		}
-		return c.extraConfig.AlternativeRecordLayer.WriteRecord(data)
+// writeHandshakeRecord writes a handshake message to the connection and updates
+// the record layer state. If transcript is non-nil the marshalled message is
+// written to it.
+func (c *Conn) writeHandshakeRecord(msg handshakeMessage, transcript transcriptHash) (int, error) {
+	data, err := msg.marshal()
+	if err != nil {
+		return 0, err
 	}
 
 	c.out.Lock()
 	defer c.out.Unlock()
 
-	return c.writeRecordLocked(typ, data)
+	if transcript != nil {
+		transcript.Write(data)
+	}
+
+	if c.extraConfig != nil && c.extraConfig.AlternativeRecordLayer != nil {
+		return c.extraConfig.AlternativeRecordLayer.WriteRecord(data)
+	}
+
+	return c.writeRecordLocked(recordTypeHandshake, data)
+}
+
+// writeChangeCipherRecord writes a ChangeCipherSpec message to the connection and
+// updates the record layer state.
+func (c *Conn) writeChangeCipherRecord() error {
+	if c.extraConfig != nil && c.extraConfig.AlternativeRecordLayer != nil {
+		return nil
+	}
+
+	c.out.Lock()
+	defer c.out.Unlock()
+	_, err := c.writeRecordLocked(recordTypeChangeCipherSpec, []byte{1})
+	return err
 }
 
 // [Psiphon]
@@ -1076,8 +1099,9 @@ func ReadClientHelloRandom(data []byte) ([]byte, error) {
 }
 
 // readHandshake reads the next handshake message from
-// the record layer.
-func (c *Conn) readHandshake() (any, error) {
+// the record layer. If transcript is non-nil, the message
+// is written to the passed transcriptHash.
+func (c *Conn) readHandshake(transcript transcriptHash) (any, error) {
 	var data []byte
 	if c.extraConfig != nil && c.extraConfig.AlternativeRecordLayer != nil {
 		var err error
@@ -1165,6 +1189,11 @@ func (c *Conn) readHandshake() (any, error) {
 	if !m.unmarshal(data) {
 		return nil, c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage))
 	}
+
+	if transcript != nil {
+		transcript.Write(data)
+	}
+
 	return m, nil
 }
 
@@ -1240,7 +1269,7 @@ func (c *Conn) handleRenegotiation() error {
 		return errors.New("tls: internal error: unexpected renegotiation")
 	}
 
-	msg, err := c.readHandshake()
+	msg, err := c.readHandshake(nil)
 	if err != nil {
 		return err
 	}
@@ -1290,7 +1319,7 @@ func (c *Conn) handlePostHandshakeMessage() error {
 		return c.handleRenegotiation()
 	}
 
-	msg, err := c.readHandshake()
+	msg, err := c.readHandshake(nil)
 	if err != nil {
 		return err
 	}
@@ -1326,7 +1355,11 @@ func (c *Conn) handleKeyUpdate(keyUpdate *keyUpdateMsg) error {
 		defer c.out.Unlock()
 
 		msg := &keyUpdateMsg{}
-		_, err := c.writeRecordLocked(recordTypeHandshake, msg.marshal())
+		msgBytes, err := msg.marshal()
+		if err != nil {
+			return err
+		}
+		_, err = c.writeRecordLocked(recordTypeHandshake, msgBytes)
 		if err != nil {
 			// Surface the error at the next write.
 			c.out.setErrorLocked(err)
@@ -1556,19 +1589,16 @@ func (c *Conn) handshakeContext(ctx context.Context) (ret error) {
 
 // ConnectionState returns basic TLS details about the connection.
 func (c *Conn) ConnectionState() ConnectionState {
-	c.handshakeMutex.Lock()
-	defer c.handshakeMutex.Unlock()
-	return c.connectionStateLocked()
+	c.connStateMutex.Lock()
+	defer c.connStateMutex.Unlock()
+	return c.connState.ConnectionState
 }
 
 // ConnectionStateWith0RTT returns basic TLS details (incl. 0-RTT status) about the connection.
 func (c *Conn) ConnectionStateWith0RTT() ConnectionStateWith0RTT {
-	c.handshakeMutex.Lock()
-	defer c.handshakeMutex.Unlock()
-	return ConnectionStateWith0RTT{
-		ConnectionState: c.connectionStateLocked(),
-		Used0RTT:        c.used0RTT,
-	}
+	c.connStateMutex.Lock()
+	defer c.connStateMutex.Unlock()
+	return c.connState
 }
 
 func (c *Conn) connectionStateLocked() ConnectionState {
@@ -1597,6 +1627,15 @@ func (c *Conn) connectionStateLocked() ConnectionState {
 		state.ekm = c.ekm
 	}
 	return toConnectionState(state)
+}
+
+func (c *Conn) updateConnectionState() {
+	c.connStateMutex.Lock()
+	defer c.connStateMutex.Unlock()
+	c.connState = ConnectionStateWith0RTT{
+		Used0RTT:        c.used0RTT,
+		ConnectionState: c.connectionStateLocked(),
+	}
 }
 
 // OCSPResponse returns the stapled OCSP response from the TLS server, if
