@@ -92,7 +92,8 @@ type DialParameters struct {
 	ObfuscatorPaddingSeed                   *prng.Seed
 	OSSHObfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
 
-	OSSHPrefixSpec *obfuscator.OSSHPrefixSpec
+	OSSHPrefixSpec        *obfuscator.OSSHPrefixSpec
+	OSSHPrefixSplitConfig *obfuscator.OSSHPrefixSplitConfig
 
 	FragmentorSeed *prng.Seed
 
@@ -878,20 +879,30 @@ func MakeDialParameters(
 
 		if serverEntry.DisableOSSHPrefix {
 			dialParams.OSSHPrefixSpec = nil
+			dialParams.OSSHPrefixSplitConfig = nil
+
 		} else if !isReplay || !replayOSSHPrefix {
+
 			dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			params, err := makeOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
+			prefixSpec, err := parameters.NewOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 
-			if params.Spec != nil {
-				dialParams.OSSHPrefixSpec = params
+			splitConfig, err := parameters.NewOSSHPrefixSplitConfig(p)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if prefixSpec.Spec != nil {
+				dialParams.OSSHPrefixSpec = prefixSpec
+				dialParams.OSSHPrefixSplitConfig = splitConfig
 			} else {
 				dialParams.OSSHPrefixSpec = nil
+				dialParams.OSSHPrefixSplitConfig = nil
 			}
 		}
 
@@ -1619,33 +1630,6 @@ func makeSeedTransformerParameters(p parameters.ParametersAccessor,
 			TransformName: name,
 			TransformSpec: spec,
 			TransformSeed: seed,
-		}, nil
-	}
-}
-
-func makeOSSHPrefixSpecParameters(
-	p parameters.ParametersAccessor, dialPortNumber string) (*obfuscator.OSSHPrefixSpec, error) {
-
-	if !p.WeightedCoinFlip(parameters.OSSHPrefixProbability) {
-		return &obfuscator.OSSHPrefixSpec{}, nil
-	}
-
-	specs := p.ProtocolTransformSpecs(parameters.OSSHPrefixSpecs)
-	scopedSpecNames := p.ProtocolTransformScopedSpecNames(parameters.OSSHPrefixScopedSpecNames)
-
-	name, spec := specs.Select(dialPortNumber, scopedSpecNames)
-
-	if spec == nil {
-		return &obfuscator.OSSHPrefixSpec{}, nil
-	} else {
-		seed, err := prng.NewSeed()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		return &obfuscator.OSSHPrefixSpec{
-			Name: name,
-			Spec: spec,
-			Seed: seed,
 		}, nil
 	}
 }

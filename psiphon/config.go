@@ -840,9 +840,12 @@ type Config struct {
 	ObfuscatedQUICNonceTransformScopedSpecNames transforms.ScopedSpecNames
 	ObfuscatedQUICNonceTransformProbability     *float64
 
-	OSSHPrefixSpecs           transforms.Specs
-	OSSHPrefixScopedSpecNames transforms.ScopedSpecNames
-	OSSHPrefixProbability     *float64
+	// OSSHPrefix parameters are for testing purposes only.
+	OSSHPrefixSpecs                     transforms.Specs
+	OSSHPrefixScopedSpecNames           transforms.ScopedSpecNames
+	OSSHPrefixProbability               *float64
+	OSSHPrefixSplitMinDelayMilliseconds *int
+	OSSHPrefixSplitMaxDelayMilliseconds *int
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -1990,6 +1993,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.OSSHPrefixProbability] = *config.OSSHPrefixProbability
 	}
 
+	if config.OSSHPrefixSplitMinDelayMilliseconds != nil {
+		applyParameters[parameters.OSSHPrefixSplitMinDelay] = fmt.Sprintf("%dms", *config.OSSHPrefixSplitMinDelayMilliseconds)
+	}
+
+	if config.OSSHPrefixSplitMaxDelayMilliseconds != nil {
+		applyParameters[parameters.OSSHPrefixSplitMaxDelay] = fmt.Sprintf("%dms", *config.OSSHPrefixSplitMaxDelayMilliseconds)
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2489,6 +2500,16 @@ func (config *Config) setDialParametersHash() {
 	if config.OSSHPrefixProbability != nil {
 		hash.Write([]byte("OSSHPrefixProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixProbability)
+	}
+
+	if config.OSSHPrefixSplitMinDelayMilliseconds != nil {
+		hash.Write([]byte("OSSHPrefixSplitMinDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.OSSHPrefixSplitMinDelayMilliseconds))
+	}
+
+	if config.OSSHPrefixSplitMaxDelayMilliseconds != nil {
+		hash.Write([]byte("OSSHPrefixSplitMaxDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.OSSHPrefixSplitMaxDelayMilliseconds))
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

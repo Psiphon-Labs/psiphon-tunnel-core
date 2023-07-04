@@ -1679,7 +1679,7 @@ func makeMeekObfuscationValues(
 	if err != nil {
 		return nil, "", 0, 0, 0.0, errors.Trace(err)
 	}
-	obfuscatedCookie := obfuscator.SendPreamble()
+	obfuscatedCookie, _ := obfuscator.SendPreamble()
 	seedLen := len(obfuscatedCookie)
 	obfuscatedCookie = append(obfuscatedCookie, encryptedCookie...)
 	obfuscator.ObfuscateClientToServer(obfuscatedCookie[seedLen:])

@@ -1917,8 +1917,17 @@ func (sshClient *sshClient) run(
 			}
 
 			var serverOsshPrefixSpecs transforms.Specs = nil
+			var serverOsshPrefixSplitConfig *obfuscator.OSSHPrefixSplitConfig = nil
 			if !p.IsNil() {
 				serverOsshPrefixSpecs = p.ProtocolTransformSpecs(parameters.ServerOSSHPrefixSpecs)
+				serverOsshPrefixSplitConfig, err = parameters.NewOSSHPrefixSplitConfig(p)
+
+				// Log error, but continue.
+				if err != nil {
+					log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
+						"NewOSSHPrefixSplitConfig failed")
+				}
+
 				// Allow garbage collection.
 				p.Close()
 			}
@@ -1930,6 +1939,7 @@ func (sshClient *sshClient) run(
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
 				serverOsshPrefixSpecs,
+				serverOsshPrefixSplitConfig,
 				func(clientIP string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,

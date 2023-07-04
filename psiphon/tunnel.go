@@ -984,6 +984,7 @@ func dialTunnel(
 			dialParams.ObfuscatorPaddingSeed,
 			dialParams.OSSHObfuscatorSeedTransformerParameters,
 			dialParams.OSSHPrefixSpec,
+			dialParams.OSSHPrefixSplitConfig,
 			&obfuscatedSSHMinPadding,
 			&obfuscatedSSHMaxPadding)
 		if err != nil {

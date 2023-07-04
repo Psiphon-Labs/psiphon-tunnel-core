@@ -79,7 +79,7 @@ func TestObfuscator(t *testing.T) {
 		t.Fatalf("NewClientObfuscator failed: %s", err)
 	}
 
-	preamble := client.SendPreamble()
+	preamble, _ := client.SendPreamble()
 
 	server, err := NewServerObfuscator(config, "", bytes.NewReader(preamble))
 	if err != nil {
@@ -113,7 +113,7 @@ func TestObfuscator(t *testing.T) {
 		t.Fatalf("NewClientObfuscator failed: %s", err)
 	}
 
-	preamble = client.SendPreamble()
+	preamble, _ = client.SendPreamble()
 
 	clientIP := "192.168.0.1"
 
@@ -225,7 +225,7 @@ func TestObfuscatorSeedTransformParameters(t *testing.T) {
 				return
 			}
 
-			preamble := client.SendPreamble()
+			preamble, _ := client.SendPreamble()
 
 			if tt.expectedResult == nil {
 
@@ -269,32 +269,38 @@ func TestClientObfuscatorPrefix(t *testing.T) {
 			Spec: transforms.Spec{{"", spec}},
 			Seed: prefixSeed,
 		}
-		b, _ := makePrefix(&prefixSpec, keyword, OBFUSCATE_CLIENT_TO_SERVER_IV)
-		// return the prefix without the terminator
+		b, _, _ := makeTerminatedPrefixWithPadding(&prefixSpec, keyword, OBFUSCATE_CLIENT_TO_SERVER_IV)
+		// Strips the terminator.
 		return b[:len(b)-PREFIX_TERMINATOR_LENGTH]
 	}
 
 	type test struct {
-		name           string
-		prefixSpec     transforms.Spec
-		expectedPrefix []byte
+		name       string
+		prefixSpec transforms.Spec
+		// The expected prefix bytes with padding (if any) and terminator.
+		paddedTerminatedPrefixBytes []byte
+		// Length of the prefix without padding and terminator.
+		prefixLen int
 	}
 
 	tests := []test{
 		{
-			name:           "24 byte prefix",
-			prefixSpec:     transforms.Spec{{"", "\\x00{24}"}},
-			expectedPrefix: bytes.Repeat([]byte{0}, 24),
+			name:                        "24 byte prefix",
+			prefixSpec:                  transforms.Spec{{"", "\\x00{24}"}},
+			paddedTerminatedPrefixBytes: bytes.Repeat([]byte{0}, 24),
+			prefixLen:                   24,
 		},
 		{
-			name:           "long prefix",
-			prefixSpec:     transforms.Spec{{"", "\\x00{1000}\\x00{1000}\\x00{1000}\\x00{1000}"}},
-			expectedPrefix: bytes.Repeat([]byte{0}, 4000),
+			name:                        "long prefix",
+			prefixSpec:                  transforms.Spec{{"", "\\x00{1000}\\x00{1000}\\x00{1000}\\x00{1000}"}},
+			paddedTerminatedPrefixBytes: bytes.Repeat([]byte{0}, 4000),
+			prefixLen:                   4000,
 		},
 		{
-			name:           "short prefix spec",
-			prefixSpec:     transforms.Spec{{"", "\\x00\\x00\\x00\\x00"}},
-			expectedPrefix: generatePrefix("\\x00\\x00\\x00\\x00"),
+			name:                        "short prefix spec",
+			prefixSpec:                  transforms.Spec{{"", "\\x00\\x00\\x00\\x00"}},
+			paddedTerminatedPrefixBytes: generatePrefix("\\x00\\x00\\x00\\x00"),
+			prefixLen:                   4,
 		},
 	}
 
@@ -322,17 +328,23 @@ func TestClientObfuscatorPrefix(t *testing.T) {
 				t.Fatalf("NewClientObfuscator failed: %s", err)
 			}
 
-			preamble := bytes.NewBuffer(client.SendPreamble())
+			preambleBytes, prefixLen := client.SendPreamble()
+			preamble := bytes.NewBuffer(preambleBytes)
 
-			// check prefix
-			prefix := preamble.Next(len(tt.expectedPrefix))
-			if !bytes.Equal(prefix, tt.expectedPrefix) {
+			// check prefix excluding any padding
+			prefix := preamble.Next(prefixLen)
+			if !bytes.Equal(prefix, tt.paddedTerminatedPrefixBytes[:tt.prefixLen]) {
 				t.Fatalf("expected prefix to be all zeros")
+			}
+
+			// skips padding if any
+			if tt.prefixLen < PREAMBLE_HEADER_LENGTH {
+				preamble.Next(PREAMBLE_HEADER_LENGTH - tt.prefixLen)
 			}
 
 			// check terminator
 			terminator := preamble.Next(PREFIX_TERMINATOR_LENGTH)
-			expectedTerminator, err := makeTerminator(keyword, tt.expectedPrefix, OBFUSCATE_CLIENT_TO_SERVER_IV)
+			expectedTerminator, err := makeTerminator(keyword, tt.paddedTerminatedPrefixBytes[:PREAMBLE_HEADER_LENGTH], OBFUSCATE_CLIENT_TO_SERVER_IV)
 			if err != nil {
 				t.Fatalf("makeTerminator failed: %s", err)
 			}
@@ -406,7 +418,7 @@ func TestServerObfuscatorPrefix(t *testing.T) {
 		t.Fatalf("NewClientObfuscator failed: %s", err)
 	}
 
-	preamble := client.SendPreamble()
+	preamble, _ := client.SendPreamble()
 	reader := WrapConnWithSkipReader(newConn(preamble))
 
 	// test server obfuscator
@@ -416,7 +428,7 @@ func TestServerObfuscatorPrefix(t *testing.T) {
 	}
 
 	// check server prefix reply
-	serverPrefix := server.SendPreamble()
+	serverPrefix, _ := server.SendPreamble()
 	if !bytes.Equal(serverPrefix[:serverTermInd], expectedServerPrefix) {
 		t.Fatalf("unexpected server prefix")
 	}
@@ -507,11 +519,11 @@ func TestIrregularConnections(t *testing.T) {
 		t.Fatalf("NewClientObfuscator failed: %s", err)
 	}
 
-	if client.prefixHeader == nil {
+	if client.osshPrefixHeader == nil {
 		t.Fatalf("unexpected nil prefixHeader")
 	}
 
-	preamble := client.SendPreamble()
+	preamble, _ := client.SendPreamble()
 	seed := hex.EncodeToString(preamble[seedInd : seedInd+OBFUSCATE_SEED_LENGTH])
 
 	clientIP := "192.168.0.1"
@@ -522,7 +534,7 @@ func TestIrregularConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServerObfuscator failed: %s", err)
 	}
-	if server.prefixHeader == nil {
+	if server.osshPrefixHeader == nil {
 		t.Fatalf("unexpected nil prefixHeader")
 	}
 
@@ -616,7 +628,7 @@ func TestIrregularConnections(t *testing.T) {
 		t.Fatalf("NewClientObfuscator failed: %s", err)
 	}
 
-	preamble = client.SendPreamble()
+	preamble, _ = client.SendPreamble()
 	seedInd = 100 + PREFIX_TERMINATOR_LENGTH
 	preamble[seedInd+OBFUSCATE_SEED_LENGTH] = 0x00 // mutate magic value
 
@@ -639,7 +651,7 @@ func TestIrregularConnections(t *testing.T) {
 		t.Fatalf("NewClientObfuscator failed: %s", err)
 	}
 
-	preamble = client.SendPreamble()
+	preamble, _ = client.SendPreamble()
 	seedInd = 100 + PREFIX_TERMINATOR_LENGTH
 	preamble[seedInd+OBFUSCATE_SEED_LENGTH+4] = 0x00 // mutate padding length
 
@@ -731,6 +743,7 @@ func obfuscatedSSHConnTestHelper(
 				keyword,
 				NewSeedHistory(nil),
 				serverPrefixSpecs,
+				nil,
 				func(_ string, err error, logFields common.LogFields) {
 					t.Logf("IrregularLogger: %s %+v", err, logFields)
 				})
@@ -776,7 +789,7 @@ func obfuscatedSSHConnTestHelper(
 				conn,
 				keyword,
 				paddingPRNGSeed,
-				nil, clientPrefixSpec, nil, nil)
+				nil, clientPrefixSpec, nil, nil, nil)
 		}
 
 		var KEXPRNGSeed *prng.Seed

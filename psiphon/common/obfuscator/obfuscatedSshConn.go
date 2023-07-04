@@ -21,11 +21,13 @@ package obfuscator
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	std_errors "errors"
 	"io"
 	"io/ioutil"
 	"net"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -60,6 +62,8 @@ const (
 type ObfuscatedSSHConn struct {
 	net.Conn
 	mode            ObfuscatedSSHConnMode
+	runCtx          context.Context
+	stopRunning     context.CancelFunc
 	obfuscator      *Obfuscator
 	readDeobfuscate func([]byte)
 	writeObfuscate  func([]byte)
@@ -129,6 +133,7 @@ func NewObfuscatedSSHConn(
 	obfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	clientPrefixSpec *OSSHPrefixSpec,
 	serverPrefixSepcs transforms.Specs,
+	osshPrefixSplitConfig *OSSHPrefixSplitConfig,
 	minPadding, maxPadding *int,
 	seedHistory *SeedHistory,
 	irregularLogger func(
@@ -151,6 +156,7 @@ func NewObfuscatedSSHConn(
 				IsOSSH:                              true,
 				Keyword:                             obfuscationKeyword,
 				ClientPrefixSpec:                    clientPrefixSpec,
+				OSSHPrefixSplitConfig:               osshPrefixSplitConfig,
 				PaddingPRNGSeed:                     obfuscationPaddingPRNGSeed,
 				MinPadding:                          minPadding,
 				MaxPadding:                          maxPadding,
@@ -163,7 +169,7 @@ func NewObfuscatedSSHConn(
 		writeObfuscate = obfuscator.ObfuscateClientToServer
 		writeState = OBFUSCATION_WRITE_STATE_CLIENT_SEND_PREAMBLE
 
-		if obfuscator.prefixHeader != nil {
+		if obfuscator.osshPrefixHeader != nil {
 			// Client expects prefix with terminator from the server.
 			readState = OBFUSCATION_READ_STATE_CLIENT_READ_PREFIX
 		}
@@ -172,10 +178,11 @@ func NewObfuscatedSSHConn(
 		// NewServerObfuscator reads a seed message from conn
 		obfuscator, err = NewServerObfuscator(
 			&ObfuscatorConfig{
-				Keyword:           obfuscationKeyword,
-				ServerPrefixSpecs: serverPrefixSepcs,
-				SeedHistory:       seedHistory,
-				IrregularLogger:   irregularLogger,
+				Keyword:               obfuscationKeyword,
+				ServerPrefixSpecs:     serverPrefixSepcs,
+				OSSHPrefixSplitConfig: osshPrefixSplitConfig,
+				SeedHistory:           seedHistory,
+				IrregularLogger:       irregularLogger,
 			},
 			common.IPAddressFromAddr(conn.RemoteAddr()),
 			conn)
@@ -200,9 +207,13 @@ func NewObfuscatedSSHConn(
 		return nil, errors.Trace(err)
 	}
 
+	runCtx, stopRunning := context.WithCancel(context.Background())
+
 	return &ObfuscatedSSHConn{
 		Conn:            conn,
 		mode:            mode,
+		runCtx:          runCtx,
+		stopRunning:     stopRunning,
 		obfuscator:      obfuscator,
 		readDeobfuscate: readDeobfuscate,
 		writeObfuscate:  writeObfuscate,
@@ -224,6 +235,7 @@ func NewClientObfuscatedSSHConn(
 	obfuscationPaddingPRNGSeed *prng.Seed,
 	obfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	prefixSpec *OSSHPrefixSpec,
+	osshPrefixSplitConfig *OSSHPrefixSplitConfig,
 	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
 
 	return NewObfuscatedSSHConn(
@@ -234,6 +246,7 @@ func NewClientObfuscatedSSHConn(
 		obfuscatorSeedTransformerParameters,
 		prefixSpec,
 		nil,
+		osshPrefixSplitConfig,
 		minPadding, maxPadding,
 		nil,
 		nil)
@@ -246,6 +259,7 @@ func NewServerObfuscatedSSHConn(
 	obfuscationKeyword string,
 	seedHistory *SeedHistory,
 	serverPrefixSpecs transforms.Specs,
+	osshPrefixSplitConfig *OSSHPrefixSplitConfig,
 	irregularLogger func(
 		clientIP string,
 		err error,
@@ -258,6 +272,7 @@ func NewServerObfuscatedSSHConn(
 		nil, nil,
 		nil,
 		serverPrefixSpecs,
+		osshPrefixSplitConfig,
 		nil, nil,
 		seedHistory,
 		irregularLogger)
@@ -316,6 +331,11 @@ func (conn *ObfuscatedSSHConn) Write(buffer []byte) (int, error) {
 	// Reports that we wrote all the bytes
 	// (although we may have buffered some or all)
 	return len(buffer), nil
+}
+
+func (conn *ObfuscatedSSHConn) Close() error {
+	conn.stopRunning()
+	return conn.Conn.Close()
 }
 
 // readAndTransform reads and transforms the downstream bytes stream
@@ -499,9 +519,35 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 	// identification line padding (server) are injected before any standard SSH traffic.
 	if conn.writeState == OBFUSCATION_WRITE_STATE_CLIENT_SEND_PREAMBLE {
 
-		preamble := conn.obfuscator.SendPreamble()
+		preamble, prefixLen := conn.obfuscator.SendPreamble()
 
-		_, err := conn.Conn.Write(preamble)
+		// Writes the prefix first, then the rest of the preamble after a delay.
+		_, err := conn.Conn.Write(preamble[:prefixLen])
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		// Adds random delay defined by OSSH prefix split config.
+		if config := conn.obfuscator.osshPrefixSplitConfig; config != nil {
+			rng := prng.NewPRNGWithSeed(config.Seed)
+			delay := rng.Period(config.MinDelay, config.MaxDelay)
+
+			timer := time.NewTimer(delay)
+
+			var err error
+			select {
+			case <-conn.runCtx.Done():
+				err = conn.runCtx.Err()
+			case <-timer.C:
+			}
+			timer.Stop()
+
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+
+		_, err = conn.Conn.Write(preamble[prefixLen:])
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -512,8 +558,34 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 
 		var buffer bytes.Buffer
 
-		if preamble := conn.obfuscator.SendPreamble(); preamble != nil {
-			_, err := buffer.Write(preamble)
+		if preamble, prefixLen := conn.obfuscator.SendPreamble(); preamble != nil {
+			// Prefix bytes are written to the underlying conn immediately, skipping the buffer.
+			_, err := conn.Conn.Write(preamble[:prefixLen])
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			// Adds random delay defined by OSSH prefix split config.
+			if config := conn.obfuscator.osshPrefixSplitConfig; config != nil {
+				rng := prng.NewPRNGWithSeed(config.Seed)
+				delay := rng.Period(config.MinDelay, config.MaxDelay)
+
+				timer := time.NewTimer(delay)
+
+				var err error
+				select {
+				case <-conn.runCtx.Done():
+					err = conn.runCtx.Err()
+				case <-timer.C:
+				}
+				timer.Stop()
+
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+
+			_, err = buffer.Write(preamble[prefixLen:])
 			if err != nil {
 				return errors.Trace(err)
 			}
