@@ -278,6 +278,12 @@ func NewServerObfuscatedSSHConn(
 		irregularLogger)
 }
 
+// IsOSSHPrefixedStream returns true if client wrote a prefix to the Obfuscated SSH stream,
+// or the server read a prefixed Obfuscated SSH stream.
+func (conn *ObfuscatedSSHConn) IsOSSHPrefixStream() bool {
+	return conn.obfuscator.osshPrefixHeader != nil
+}
+
 // GetDerivedPRNG creates a new PRNG with a seed derived from the
 // ObfuscatedSSHConn padding seed and distinguished by the salt, which should
 // be a unique identifier for each usage context.

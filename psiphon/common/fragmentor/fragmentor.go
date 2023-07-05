@@ -273,6 +273,15 @@ func (c *Conn) GetReplay() (*prng.Seed, bool) {
 	return seed, c.isReplay
 }
 
+// Stops the fragmentor from fragmenting any further writes.
+func (c *Conn) Stop() {
+
+	c.writeMutex.Lock()
+	defer c.writeMutex.Unlock()
+
+	c.bytesToFragment = 0
+}
+
 func (c *Conn) Write(buffer []byte) (int, error) {
 
 	c.writeMutex.Lock()

@@ -343,6 +343,7 @@ const (
 	OSSHPrefixProbability                            = "OSSHPrefixProbability"
 	OSSHPrefixSplitMinDelay                          = "OSSHPrefixSplitMinDelay"
 	OSSHPrefixSplitMaxDelay                          = "OSSHPrefixSplitMaxDelay"
+	OSSHPrefixEnableFragmentor                       = "OSSHPrefixEnableFragmentor"
 	ServerOSSHPrefixSpecs                            = "ServerOSSHPrefixSpecs"
 )
 
@@ -727,6 +728,7 @@ var defaultParameters = map[string]struct {
 	OSSHPrefixProbability:      {value: 0.0, minimum: 0.0},
 	OSSHPrefixSplitMinDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
 	OSSHPrefixSplitMaxDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
+	OSSHPrefixEnableFragmentor: {value: false},
 	ServerOSSHPrefixSpecs:      {value: transforms.Specs{}, flags: serverSideOnly},
 }
 

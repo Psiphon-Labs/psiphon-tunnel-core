@@ -846,6 +846,7 @@ type Config struct {
 	OSSHPrefixProbability               *float64
 	OSSHPrefixSplitMinDelayMilliseconds *int
 	OSSHPrefixSplitMaxDelayMilliseconds *int
+	OSSHPrefixEnableFragmentor          *bool
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -2001,6 +2002,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.OSSHPrefixSplitMaxDelay] = fmt.Sprintf("%dms", *config.OSSHPrefixSplitMaxDelayMilliseconds)
 	}
 
+	if config.OSSHPrefixEnableFragmentor != nil {
+		applyParameters[parameters.OSSHPrefixEnableFragmentor] = *config.OSSHPrefixEnableFragmentor
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2510,6 +2515,11 @@ func (config *Config) setDialParametersHash() {
 	if config.OSSHPrefixSplitMaxDelayMilliseconds != nil {
 		hash.Write([]byte("OSSHPrefixSplitMaxDelayMilliseconds"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.OSSHPrefixSplitMaxDelayMilliseconds))
+	}
+
+	if config.OSSHPrefixEnableFragmentor != nil {
+		hash.Write([]byte("OSSHPrefixEnableFragmentor"))
+		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixEnableFragmentor)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

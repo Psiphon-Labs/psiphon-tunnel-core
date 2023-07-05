@@ -1076,6 +1076,13 @@ func MakeDialParameters(
 		return IPs, nil
 	}
 
+	// Fragmentor configuration.
+	// Note: fragmentorConfig is nil if fragmentor is disabled for prefixed OSSH.
+	fragmentorConfig := fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed)
+	if !p.Bool(parameters.OSSHPrefixEnableFragmentor) && dialParams.OSSHPrefixSpec != nil {
+		fragmentorConfig = nil
+	}
+
 	dialParams.dialConfig = &DialConfig{
 		DiagnosticID:                  serverEntry.GetDiagnosticID(),
 		UpstreamProxyURL:              config.UpstreamProxyURL,
@@ -1085,7 +1092,7 @@ func MakeDialParameters(
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		ResolveIP:                     resolveIP,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		FragmentorConfig:              fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed),
+		FragmentorConfig:              fragmentorConfig,
 		UpstreamProxyErrorCallback:    upstreamProxyErrorCallback,
 	}
 

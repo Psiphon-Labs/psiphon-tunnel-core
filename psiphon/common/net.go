@@ -72,11 +72,12 @@ type UnderlyingTCPAddrSource interface {
 	GetUnderlyingTCPAddrs() (*net.TCPAddr, *net.TCPAddr, bool)
 }
 
-// FragmentorReplayAccessor defines the interface for accessing replay properties
+// FragmentorAccessor defines the interface for accessing properties
 // of a fragmentor Conn.
-type FragmentorReplayAccessor interface {
+type FragmentorAccessor interface {
 	SetReplay(*prng.PRNG)
 	GetReplay() (*prng.Seed, bool)
+	Stop()
 }
 
 // HTTPRoundTripper is an adapter that allows using a function as a

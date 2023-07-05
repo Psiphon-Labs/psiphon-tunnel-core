@@ -1792,7 +1792,7 @@ func (sshClient *sshClient) run(
 	if isReplayCandidate {
 
 		getFragmentorSeed := func() *prng.Seed {
-			fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+			fragmentor, ok := baseConn.(common.FragmentorAccessor)
 			if ok {
 				fragmentorSeed, _ := fragmentor.GetReplay()
 				return fragmentorSeed
@@ -1831,7 +1831,7 @@ func (sshClient *sshClient) run(
 
 				replayedFragmentation := false
 				if sshClient.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
-					fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+					fragmentor, ok := baseConn.(common.FragmentorAccessor)
 					if ok {
 						_, replayedFragmentation = fragmentor.GetReplay()
 					}
@@ -1916,9 +1916,11 @@ func (sshClient *sshClient) run(
 					"ServerTacticsParametersCache.Get failed")
 			}
 
+			var osshPrefixEnableFragmentor bool = false
 			var serverOsshPrefixSpecs transforms.Specs = nil
 			var serverOsshPrefixSplitConfig *obfuscator.OSSHPrefixSplitConfig = nil
 			if !p.IsNil() {
+				osshPrefixEnableFragmentor = p.Bool(parameters.OSSHPrefixEnableFragmentor)
 				serverOsshPrefixSpecs = p.ProtocolTransformSpecs(parameters.ServerOSSHPrefixSpecs)
 				serverOsshPrefixSplitConfig, err = parameters.NewOSSHPrefixSplitConfig(p)
 
@@ -1961,7 +1963,7 @@ func (sshClient *sshClient) run(
 			// ssh.NewServerConn to ensure fragmentor is seeded before downstream bytes
 			// are written.
 			if err == nil && sshClient.tunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
-				fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+				fragmentor, ok := baseConn.(common.FragmentorAccessor)
 				if ok {
 					var fragmentorPRNG *prng.PRNG
 					fragmentorPRNG, err = result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
@@ -1970,6 +1972,12 @@ func (sshClient *sshClient) run(
 					} else {
 						fragmentor.SetReplay(fragmentorPRNG)
 					}
+
+					// Stops the fragmentor if disabled for prefixed OSSH streams.
+					if !osshPrefixEnableFragmentor && result.obfuscatedSSHConn.IsOSSHPrefixStream() {
+						fragmentor.Stop()
+					}
+
 				}
 			}
 		}
@@ -2078,7 +2086,7 @@ func (sshClient *sshClient) run(
 
 	replayMetrics := make(LogFields)
 	replayedFragmentation := false
-	fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+	fragmentor, ok := baseConn.(common.FragmentorAccessor)
 	if ok {
 		_, replayedFragmentation = fragmentor.GetReplay()
 	}
