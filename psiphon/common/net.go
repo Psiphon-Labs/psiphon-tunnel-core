@@ -77,7 +77,7 @@ type UnderlyingTCPAddrSource interface {
 type FragmentorAccessor interface {
 	SetReplay(*prng.PRNG)
 	GetReplay() (*prng.Seed, bool)
-	Stop()
+	StopFragmenting()
 }
 
 // HTTPRoundTripper is an adapter that allows using a function as a

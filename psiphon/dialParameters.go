@@ -887,12 +887,12 @@ func MakeDialParameters(
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			prefixSpec, err := parameters.NewOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
+			prefixSpec, err := makeOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 
-			splitConfig, err := parameters.NewOSSHPrefixSplitConfig(p)
+			splitConfig, err := makeOSSHPrefixSplitConfig(p)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -1639,4 +1639,49 @@ func makeSeedTransformerParameters(p parameters.ParametersAccessor,
 			TransformSeed: seed,
 		}, nil
 	}
+}
+
+func makeOSSHPrefixSpecParameters(
+	p parameters.ParametersAccessor,
+	dialPortNumber string) (*obfuscator.OSSHPrefixSpec, error) {
+
+	if !p.WeightedCoinFlip(parameters.OSSHPrefixProbability) {
+		return &obfuscator.OSSHPrefixSpec{}, nil
+	}
+
+	specs := p.ProtocolTransformSpecs(parameters.OSSHPrefixSpecs)
+	scopedSpecNames := p.ProtocolTransformScopedSpecNames(parameters.OSSHPrefixScopedSpecNames)
+
+	name, spec := specs.Select(dialPortNumber, scopedSpecNames)
+
+	if spec == nil {
+		return &obfuscator.OSSHPrefixSpec{}, nil
+	} else {
+		seed, err := prng.NewSeed()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return &obfuscator.OSSHPrefixSpec{
+			Name: name,
+			Spec: spec,
+			Seed: seed,
+		}, nil
+	}
+}
+
+func makeOSSHPrefixSplitConfig(p parameters.ParametersAccessor) (*obfuscator.OSSHPrefixSplitConfig, error) {
+
+	minDelay := p.Duration(parameters.OSSHPrefixSplitMinDelay)
+	maxDelay := p.Duration(parameters.OSSHPrefixSplitMaxDelay)
+
+	seed, err := prng.NewSeed()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &obfuscator.OSSHPrefixSplitConfig{
+		Seed:     seed,
+		MinDelay: minDelay,
+		MaxDelay: maxDelay,
+	}, nil
 }

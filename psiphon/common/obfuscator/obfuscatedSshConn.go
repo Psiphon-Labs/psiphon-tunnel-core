@@ -178,11 +178,10 @@ func NewObfuscatedSSHConn(
 		// NewServerObfuscator reads a seed message from conn
 		obfuscator, err = NewServerObfuscator(
 			&ObfuscatorConfig{
-				Keyword:               obfuscationKeyword,
-				ServerPrefixSpecs:     serverPrefixSepcs,
-				OSSHPrefixSplitConfig: osshPrefixSplitConfig,
-				SeedHistory:           seedHistory,
-				IrregularLogger:       irregularLogger,
+				Keyword:           obfuscationKeyword,
+				ServerPrefixSpecs: serverPrefixSepcs,
+				SeedHistory:       seedHistory,
+				IrregularLogger:   irregularLogger,
 			},
 			common.IPAddressFromAddr(conn.RemoteAddr()),
 			conn)
@@ -259,7 +258,6 @@ func NewServerObfuscatedSSHConn(
 	obfuscationKeyword string,
 	seedHistory *SeedHistory,
 	serverPrefixSpecs transforms.Specs,
-	osshPrefixSplitConfig *OSSHPrefixSplitConfig,
 	irregularLogger func(
 		clientIP string,
 		err error,
@@ -272,7 +270,7 @@ func NewServerObfuscatedSSHConn(
 		nil, nil,
 		nil,
 		serverPrefixSpecs,
-		osshPrefixSplitConfig,
+		nil,
 		nil, nil,
 		seedHistory,
 		irregularLogger)
@@ -293,6 +291,27 @@ func (conn *ObfuscatedSSHConn) IsOSSHPrefixStream() bool {
 // post-initial obfuscator message.
 func (conn *ObfuscatedSSHConn) GetDerivedPRNG(salt string) (*prng.PRNG, error) {
 	return conn.obfuscator.GetDerivedPRNG(salt)
+}
+
+// SetOSSHPrefixSplitConfig sets the OSSHPrefixSplitConfig for the server.
+// This must be called before any data is written.
+func (conn *ObfuscatedSSHConn) SetOSSHPrefixSplitConfig(minDelay, maxDelay time.Duration) error {
+	if conn.mode != OBFUSCATION_CONN_MODE_SERVER {
+		return errors.TraceNew("SetOSSHPrefixSplitConfig() is only valid for server connections")
+	}
+	if conn.writeState != OBFUSCATION_WRITE_STATE_SERVER_SEND_PREFIX_AND_IDENTIFICATION_LINE_PADDING {
+		return errors.TraceNew("SetOSSHPrefixSplitConfig() must be called before any data is written")
+	}
+	seed, err := conn.obfuscator.GetDerivedPRNGSeed("obfuscated-ssh-prefix-split")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	conn.obfuscator.osshPrefixSplitConfig = &OSSHPrefixSplitConfig{
+		Seed:     seed,
+		MinDelay: minDelay,
+		MaxDelay: maxDelay,
+	}
+	return nil
 }
 
 // GetMetrics implements the common.MetricsSource interface.

@@ -743,7 +743,6 @@ func obfuscatedSSHConnTestHelper(
 				keyword,
 				NewSeedHistory(nil),
 				serverPrefixSpecs,
-				nil,
 				func(_ string, err error, logFields common.LogFields) {
 					t.Logf("IrregularLogger: %s %+v", err, logFields)
 				})

@@ -256,7 +256,20 @@ func NewServerObfuscator(
 // client, so derived PRNGs may be used to replay sequences post-initial
 // obfuscator message.
 func (obfuscator *Obfuscator) GetDerivedPRNG(salt string) (*prng.PRNG, error) {
-	return prng.NewPRNGWithSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	seed, err := prng.NewPRNGWithSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	return seed, errors.Trace(err)
+}
+
+// GetDerivedPRNGSeed creates a new PRNG seed derived from the obfuscator
+// padding seed and distinguished by the salt, which should be a unique
+// identifier for each usage context.
+//
+// For NewServerObfuscator, the obfuscator padding seed is obtained from the
+// client, so derived seeds may be used to replay sequences post-initial
+// obfuscator message.
+func (obfuscator *Obfuscator) GetDerivedPRNGSeed(salt string) (*prng.Seed, error) {
+	seed, err := prng.NewSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	return seed, errors.Trace(err)
 }
 
 // GetPaddingLength returns the client seed message padding length. Only valid

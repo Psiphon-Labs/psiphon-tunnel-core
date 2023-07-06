@@ -1687,8 +1687,11 @@ func (conn *meekConn) GetReplay() (*prng.Seed, bool) {
 	return nil, false
 }
 
-func (conn *meekConn) Stop() {
-	// No-op
+func (conn *meekConn) StopFragmenting() {
+	fragmentor, ok := conn.firstUnderlyingConn.(common.FragmentorAccessor)
+	if ok {
+		fragmentor.StopFragmenting()
+	}
 }
 
 // pumpReads causes goroutines blocking on meekConn.Read() to read

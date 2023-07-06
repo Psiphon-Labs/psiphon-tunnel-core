@@ -1918,18 +1918,12 @@ func (sshClient *sshClient) run(
 
 			var osshPrefixEnableFragmentor bool = false
 			var serverOsshPrefixSpecs transforms.Specs = nil
-			var serverOsshPrefixSplitConfig *obfuscator.OSSHPrefixSplitConfig = nil
+			var minDelay, maxDelay time.Duration
 			if !p.IsNil() {
 				osshPrefixEnableFragmentor = p.Bool(parameters.OSSHPrefixEnableFragmentor)
 				serverOsshPrefixSpecs = p.ProtocolTransformSpecs(parameters.ServerOSSHPrefixSpecs)
-				serverOsshPrefixSplitConfig, err = parameters.NewOSSHPrefixSplitConfig(p)
-
-				// Log error, but continue.
-				if err != nil {
-					log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
-						"NewOSSHPrefixSplitConfig failed")
-				}
-
+				minDelay = p.Duration(parameters.OSSHPrefixSplitMinDelay)
+				maxDelay = p.Duration(parameters.OSSHPrefixSplitMaxDelay)
 				// Allow garbage collection.
 				p.Close()
 			}
@@ -1941,7 +1935,6 @@ func (sshClient *sshClient) run(
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
 				serverOsshPrefixSpecs,
-				serverOsshPrefixSplitConfig,
 				func(clientIP string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,
@@ -1956,6 +1949,16 @@ func (sshClient *sshClient) run(
 				err = errors.Trace(err)
 			} else {
 				conn = result.obfuscatedSSHConn
+			}
+
+			// Set the OSSH prefix split config.
+			if err == nil && result.obfuscatedSSHConn.IsOSSHPrefixStream() {
+				err = result.obfuscatedSSHConn.SetOSSHPrefixSplitConfig(minDelay, maxDelay)
+				// Log error, but continue.
+				if err != nil {
+					log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
+						"SetOSSHPrefixSplitConfig failed")
+				}
 			}
 
 			// Seed the fragmentor, when present, with seed derived from initial
@@ -1975,7 +1978,7 @@ func (sshClient *sshClient) run(
 
 					// Stops the fragmentor if disabled for prefixed OSSH streams.
 					if !osshPrefixEnableFragmentor && result.obfuscatedSSHConn.IsOSSHPrefixStream() {
-						fragmentor.Stop()
+						fragmentor.StopFragmenting()
 					}
 
 				}
