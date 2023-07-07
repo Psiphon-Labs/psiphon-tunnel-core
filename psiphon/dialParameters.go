@@ -260,6 +260,13 @@ func MakeDialParameters(
 			// Because of this, frequent tactics changes may degrade replay
 			// effectiveness. When ReplayIgnoreChangedConfigState is set,
 			// differences in the config state hash are ignored.
+			//
+			// Limitation: some code which previously assumed that replay
+			// always implied unchanged tactics parameters may now use newer
+			// tactics parameters in replay cases when
+			// ReplayIgnoreChangedConfigState is set. One case is the call
+			// below to fragmentor.NewUpstreamConfig, made when initializing
+			// dialParams.dialConfig.
 			(!replayIgnoreChangedConfigState && !bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash)) ||
 
 			// Replay is disabled when the server entry has changed.
@@ -726,10 +733,7 @@ func MakeDialParameters(
 					hostname, strconv.Itoa(serverEntry.MeekServerPort))
 			}
 		} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
-
-			dialParams.QUICDialSNIAddress = net.JoinHostPort(
-				selectHostName(dialParams.TunnelProtocol, p),
-				strconv.Itoa(serverEntry.SshObfuscatedQUICPort))
+			dialParams.QUICDialSNIAddress = selectHostName(dialParams.TunnelProtocol, p)
 		}
 	}
 
@@ -1078,6 +1082,10 @@ func MakeDialParameters(
 
 	// Fragmentor configuration.
 	// Note: fragmentorConfig is nil if fragmentor is disabled for prefixed OSSH.
+  //
+	// Limitation: when replaying and with ReplayIgnoreChangedConfigState set,
+	// fragmentor.NewUpstreamConfig may select a config using newer tactics
+	// parameters.
 	fragmentorConfig := fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed)
 	if !p.Bool(parameters.OSSHPrefixEnableFragmentor) && dialParams.OSSHPrefixSpec != nil {
 		fragmentorConfig = nil

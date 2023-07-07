@@ -5,6 +5,9 @@ import "time"
 // DesiredReceiveBufferSize is the kernel UDP receive buffer size that we'd like to use.
 const DesiredReceiveBufferSize = (1 << 20) * 2 // 2 MB
 
+// DesiredSendBufferSize is the kernel UDP send buffer size that we'd like to use.
+const DesiredSendBufferSize = (1 << 20) * 2 // 2 MB
+
 // InitialPacketSizeIPv4 is the maximum packet size that we use for sending IPv4 packets.
 const InitialPacketSizeIPv4 = 1252
 
@@ -149,9 +152,10 @@ const MaxNumAckRanges = 32
 // Example: For a packet pacing delay of 200μs, we would send 5 packets at once, wait for 1ms, and so forth.
 const MinPacingDelay = time.Millisecond
 
+// [Psiphon]
 // DefaultConnectionIDLength is the connection ID length that is used for multiplexed connections
 // if no other value is configured.
-const DefaultConnectionIDLength = 4
+const DefaultConnectionIDLength = 8
 
 // MaxActiveConnectionIDs is the number of connection IDs that we're storing.
 const MaxActiveConnectionIDs = 4
