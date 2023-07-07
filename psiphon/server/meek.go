@@ -1656,7 +1656,7 @@ func (conn *meekConn) SetReplay(PRNG *prng.PRNG) {
 		}
 	}
 
-	fragmentor, ok := underlyingConn.(common.FragmentorReplayAccessor)
+	fragmentor, ok := underlyingConn.(common.FragmentorAccessor)
 	if ok {
 		fragmentor.SetReplay(PRNG)
 	}
@@ -1680,11 +1680,18 @@ func (conn *meekConn) GetReplay() (*prng.Seed, bool) {
 		}
 	}
 
-	fragmentor, ok := underlyingConn.(common.FragmentorReplayAccessor)
+	fragmentor, ok := underlyingConn.(common.FragmentorAccessor)
 	if ok {
 		return fragmentor.GetReplay()
 	}
 	return nil, false
+}
+
+func (conn *meekConn) StopFragmenting() {
+	fragmentor, ok := conn.firstUnderlyingConn.(common.FragmentorAccessor)
+	if ok {
+		fragmentor.StopFragmenting()
+	}
 }
 
 // pumpReads causes goroutines blocking on meekConn.Read() to read
