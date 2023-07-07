@@ -68,7 +68,7 @@ func (specs Specs) Validate(prefixMode bool) error {
 			if len(spec) != 1 || len(spec[0]) != 2 {
 				return errors.TraceNew("prefix mode requires exactly one transform")
 			}
-			_, err := spec.ApplyPrefix(seed, 0)
+			_, _, err := spec.ApplyPrefix(seed, 0)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -161,10 +161,10 @@ func (specs Specs) Select(scope string, scopedSpecs ScopedSpecNames) (string, Sp
 //
 // The input seed is used for all random number generation. The same seed can be
 // supplied to produce the same output, for replay.
-func (spec Spec) ApplyPrefix(seed *prng.Seed, minLength int) ([]byte, error) {
+func (spec Spec) ApplyPrefix(seed *prng.Seed, minLength int) ([]byte, int, error) {
 
 	if len(spec) != 1 || len(spec[0]) != 2 {
-		return nil, errors.TraceNew("prefix mode requires exactly one transform")
+		return nil, 0, errors.TraceNew("prefix mode requires exactly one transform")
 	}
 
 	rng := prng.NewPRNGWithSeed(seed)
@@ -175,13 +175,15 @@ func (spec Spec) ApplyPrefix(seed *prng.Seed, minLength int) ([]byte, error) {
 	}
 	gen, err := regen.NewGenerator(spec[0][1], args)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, 0, errors.Trace(err)
 	}
 
 	prefix, err := gen.Generate()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, 0, errors.Trace(err)
 	}
+
+	prefixLen := len(prefix)
 
 	if len(prefix) < minLength {
 		// Add random padding to fill up to minLength.
@@ -189,7 +191,7 @@ func (spec Spec) ApplyPrefix(seed *prng.Seed, minLength int) ([]byte, error) {
 		prefix = append(prefix, padding...)
 	}
 
-	return prefix, nil
+	return prefix, prefixLen, nil
 }
 
 // ApplyString applies the Spec to the input string, producing the output string.

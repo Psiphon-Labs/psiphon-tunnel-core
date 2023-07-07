@@ -92,7 +92,8 @@ type DialParameters struct {
 	ObfuscatorPaddingSeed                   *prng.Seed
 	OSSHObfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
 
-	OSSHPrefixSpec *obfuscator.OSSHPrefixSpec
+	OSSHPrefixSpec        *obfuscator.OSSHPrefixSpec
+	OSSHPrefixSplitConfig *obfuscator.OSSHPrefixSplitConfig
 
 	FragmentorSeed *prng.Seed
 
@@ -882,20 +883,30 @@ func MakeDialParameters(
 
 		if serverEntry.DisableOSSHPrefix {
 			dialParams.OSSHPrefixSpec = nil
+			dialParams.OSSHPrefixSplitConfig = nil
+
 		} else if !isReplay || !replayOSSHPrefix {
+
 			dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			params, err := makeOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
+			prefixSpec, err := makeOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 
-			if params.Spec != nil {
-				dialParams.OSSHPrefixSpec = params
+			splitConfig, err := makeOSSHPrefixSplitConfig(p)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if prefixSpec.Spec != nil {
+				dialParams.OSSHPrefixSpec = prefixSpec
+				dialParams.OSSHPrefixSplitConfig = splitConfig
 			} else {
 				dialParams.OSSHPrefixSpec = nil
+				dialParams.OSSHPrefixSplitConfig = nil
 			}
 		}
 
@@ -1069,9 +1080,16 @@ func MakeDialParameters(
 		return IPs, nil
 	}
 
+	// Fragmentor configuration.
+	// Note: fragmentorConfig is nil if fragmentor is disabled for prefixed OSSH.
+  //
 	// Limitation: when replaying and with ReplayIgnoreChangedConfigState set,
 	// fragmentor.NewUpstreamConfig may select a config using newer tactics
 	// parameters.
+	fragmentorConfig := fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed)
+	if !p.Bool(parameters.OSSHPrefixEnableFragmentor) && dialParams.OSSHPrefixSpec != nil {
+		fragmentorConfig = nil
+	}
 
 	dialParams.dialConfig = &DialConfig{
 		DiagnosticID:                  serverEntry.GetDiagnosticID(),
@@ -1082,7 +1100,7 @@ func MakeDialParameters(
 		IPv6Synthesizer:               config.IPv6Synthesizer,
 		ResolveIP:                     resolveIP,
 		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		FragmentorConfig:              fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed),
+		FragmentorConfig:              fragmentorConfig,
 		UpstreamProxyErrorCallback:    upstreamProxyErrorCallback,
 	}
 
@@ -1632,7 +1650,8 @@ func makeSeedTransformerParameters(p parameters.ParametersAccessor,
 }
 
 func makeOSSHPrefixSpecParameters(
-	p parameters.ParametersAccessor, dialPortNumber string) (*obfuscator.OSSHPrefixSpec, error) {
+	p parameters.ParametersAccessor,
+	dialPortNumber string) (*obfuscator.OSSHPrefixSpec, error) {
 
 	if !p.WeightedCoinFlip(parameters.OSSHPrefixProbability) {
 		return &obfuscator.OSSHPrefixSpec{}, nil
@@ -1656,4 +1675,21 @@ func makeOSSHPrefixSpecParameters(
 			Seed: seed,
 		}, nil
 	}
+}
+
+func makeOSSHPrefixSplitConfig(p parameters.ParametersAccessor) (*obfuscator.OSSHPrefixSplitConfig, error) {
+
+	minDelay := p.Duration(parameters.OSSHPrefixSplitMinDelay)
+	maxDelay := p.Duration(parameters.OSSHPrefixSplitMaxDelay)
+
+	seed, err := prng.NewSeed()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &obfuscator.OSSHPrefixSplitConfig{
+		Seed:     seed,
+		MinDelay: minDelay,
+		MaxDelay: maxDelay,
+	}, nil
 }

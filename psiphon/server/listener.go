@@ -147,7 +147,7 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 			conn)
 
 		if doReplay && replaySeed != nil {
-			conn.(common.FragmentorReplayAccessor).SetReplay(
+			conn.(common.FragmentorAccessor).SetReplay(
 				prng.NewPRNGWithSeed(replaySeed))
 		}
 	}

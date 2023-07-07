@@ -50,6 +50,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/miekg/dns"
 	"golang.org/x/net/proxy"
@@ -183,6 +184,33 @@ func TestFragmentedOSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     true,
+			forceLivenessTest:    false,
+			doPruneServerEntries: false,
+			doDanglingTCPConn:    true,
+			doPacketManipulation: false,
+			doBurstMonitor:       false,
+			doSplitTunnel:        false,
+			limitQUICVersions:    false,
+			doDestinationBytes:   false,
+			doChangeBytesConfig:  false,
+			doLogHostProvider:    true,
+		})
+}
+
+func TestPrefixedOSSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			doHotReload:          false,
+			doDefaultSponsorID:   false,
+			denyTrafficRules:     false,
+			requireAuthorization: true,
+			omitAuthorization:    false,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			applyPrefix:          true,
+			forceFragmenting:     false,
 			forceLivenessTest:    false,
 			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
@@ -842,6 +870,7 @@ type runServerConfig struct {
 	omitAuthorization    bool
 	doTunneledWebRequest bool
 	doTunneledNTPRequest bool
+	applyPrefix          bool
 	forceFragmenting     bool
 	forceLivenessTest    bool
 	doPruneServerEntries bool
@@ -1005,7 +1034,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
-			runConfig.doDestinationBytes)
+			runConfig.doDestinationBytes,
+			runConfig.applyPrefix,
+		)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -1289,6 +1320,22 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		applyParameters := make(map[string]interface{})
 
+		if runConfig.applyPrefix {
+
+			applyParameters[parameters.OSSHPrefixSpecs] = transforms.Specs{
+				"TEST": {{"", "\x00{24}"}},
+			}
+			applyParameters[parameters.OSSHPrefixScopedSpecNames] = transforms.ScopedSpecNames{
+				"": {"TEST"},
+			}
+			applyParameters[parameters.OSSHPrefixProbability] = 1.0
+			applyParameters[parameters.OSSHPrefixSplitMinDelay] = 1 * time.Millisecond
+			applyParameters[parameters.OSSHPrefixSplitMaxDelay] = 10 * time.Millisecond
+
+			applyParameters[parameters.OSSHPrefixEnableFragmentor] = runConfig.forceFragmenting
+
+		}
+
 		if runConfig.forceFragmenting {
 			applyParameters[parameters.FragmentorLimitProtocols] = protocol.TunnelProtocols{runConfig.tunnelProtocol}
 			applyParameters[parameters.FragmentorProbability] = 1.0
@@ -1498,6 +1545,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
+			false,
 			false)
 
 		p, _ := os.FindProcess(os.Getpid())
@@ -2022,6 +2070,13 @@ func checkExpectedServerTunnelLogFields(
 			(runConfig.limitQUICVersions && quicVersion != expectQUICVersion) {
 
 			return fmt.Errorf("unexpected quic_version '%s'", fields["quic_version"])
+		}
+	}
+
+	if runConfig.applyPrefix {
+
+		if fields["ossh_prefix"] == nil || fmt.Sprintf("%s", fields["ossh_prefix"]) == "" {
+			return fmt.Errorf("missing expected field 'ossh_prefix'")
 		}
 	}
 
@@ -2802,7 +2857,8 @@ func paveTacticsConfigFile(
 	propagationChannelID string,
 	livenessTestSize int,
 	doBurstMonitor bool,
-	doDestinationBytes bool) {
+	doDestinationBytes bool,
+	applyOsshPrefix bool) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -2818,6 +2874,7 @@ func paveTacticsConfigFile(
         "Parameters" : {
           %s
           %s
+					%s
           "LimitTunnelProtocols" : ["%s"],
           "FragmentorLimitProtocols" : ["%s"],
           "FragmentorProbability" : 1.0,
@@ -2905,11 +2962,22 @@ func paveTacticsConfigFile(
 	`, testGeoIPASN)
 	}
 
+	osshPrefix := ""
+	if applyOsshPrefix {
+		osshPrefix = `
+          "ServerOSSHPrefixSpecs": {
+              "TEST": [["", "\\x00{20}"]],
+          },
+          "OSSHPrefixEnableFragmentor": true,
+					`
+	}
+
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
 		burstParameters,
 		destinationBytesParameters,
+		osshPrefix,
 		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,
