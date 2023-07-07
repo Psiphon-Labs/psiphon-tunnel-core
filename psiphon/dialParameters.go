@@ -259,6 +259,13 @@ func MakeDialParameters(
 			// Because of this, frequent tactics changes may degrade replay
 			// effectiveness. When ReplayIgnoreChangedConfigState is set,
 			// differences in the config state hash are ignored.
+			//
+			// Limitation: some code which previously assumed that replay
+			// always implied unchanged tactics parameters may now use newer
+			// tactics parameters in replay cases when
+			// ReplayIgnoreChangedConfigState is set. One case is the call
+			// below to fragmentor.NewUpstreamConfig, made when initializing
+			// dialParams.dialConfig.
 			(!replayIgnoreChangedConfigState && !bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash)) ||
 
 			// Replay is disabled when the server entry has changed.
@@ -1061,6 +1068,10 @@ func MakeDialParameters(
 		}
 		return IPs, nil
 	}
+
+	// Limitation: when replaying and with ReplayIgnoreChangedConfigState set,
+	// fragmentor.NewUpstreamConfig may select a config using newer tactics
+	// parameters.
 
 	dialParams.dialConfig = &DialConfig{
 		DiagnosticID:                  serverEntry.GetDiagnosticID(),
