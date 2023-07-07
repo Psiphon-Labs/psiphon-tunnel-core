@@ -1782,7 +1782,7 @@ func boxPayload(
 		return nil, errors.Trace(err)
 	}
 
-	obfuscatedBox := obfuscator.SendPreamble()
+	obfuscatedBox, _ := obfuscator.SendPreamble()
 	seedLen := len(obfuscatedBox)
 
 	obfuscatedBox = append(obfuscatedBox, box...)

@@ -27,6 +27,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -67,6 +68,14 @@ type OSSHPrefixHeader struct {
 	SpecName string
 }
 
+// OSSHPrefixSplitConfig are parameters for splitting the
+// preamble into two writes: prefix followed by rest of the preamble.
+type OSSHPrefixSplitConfig struct {
+	Seed     *prng.Seed
+	MinDelay time.Duration
+	MaxDelay time.Duration
+}
+
 // Obfuscator implements the seed message, key derivation, and
 // stream ciphers for:
 // https://github.com/brl/obfuscated-openssh/blob/master/README.obfuscation
@@ -79,9 +88,14 @@ type OSSHPrefixHeader struct {
 type Obfuscator struct {
 	preamble []byte
 
-	// prefixHeader is the prefix header written by the client,
+	// Length of the prefix in the preamble.
+	preambleOSSHPrefixLength int
+
+	// osshPrefixHeader is the prefix header written by the client,
 	// or the prefix header read by the server.
-	prefixHeader *OSSHPrefixHeader
+	osshPrefixHeader *OSSHPrefixHeader
+
+	osshPrefixSplitConfig *OSSHPrefixSplitConfig
 
 	keyword              string
 	paddingLength        int
@@ -97,6 +111,7 @@ type ObfuscatorConfig struct {
 	Keyword                             string
 	ClientPrefixSpec                    *OSSHPrefixSpec
 	ServerPrefixSpecs                   transforms.Specs
+	OSSHPrefixSplitConfig               *OSSHPrefixSplitConfig
 	PaddingPRNGSeed                     *prng.Seed
 	MinPadding                          *int
 	MaxPadding                          *int
@@ -171,7 +186,7 @@ func NewClientObfuscator(
 		maxPadding = *config.MaxPadding
 	}
 
-	preamble, prefixHeader, paddingLength, err := makeClientPreamble(
+	preamble, prefixLen, prefixHeader, paddingLength, err := makeClientPreamble(
 		config.Keyword, config.ClientPrefixSpec,
 		paddingPRNG, minPadding, maxPadding, obfuscatorSeed,
 		clientToServerCipher)
@@ -180,14 +195,16 @@ func NewClientObfuscator(
 	}
 
 	return &Obfuscator{
-		preamble:             preamble,
-		prefixHeader:         prefixHeader,
-		keyword:              config.Keyword,
-		paddingLength:        paddingLength,
-		clientToServerCipher: clientToServerCipher,
-		serverToClientCipher: serverToClientCipher,
-		paddingPRNGSeed:      config.PaddingPRNGSeed,
-		paddingPRNG:          paddingPRNG}, nil
+		preamble:                 preamble,
+		preambleOSSHPrefixLength: prefixLen,
+		osshPrefixHeader:         prefixHeader,
+		osshPrefixSplitConfig:    config.OSSHPrefixSplitConfig,
+		keyword:                  config.Keyword,
+		paddingLength:            paddingLength,
+		clientToServerCipher:     clientToServerCipher,
+		serverToClientCipher:     serverToClientCipher,
+		paddingPRNGSeed:          config.PaddingPRNGSeed,
+		paddingPRNG:              paddingPRNG}, nil
 }
 
 // NewServerObfuscator creates a new Obfuscator, reading a seed message directly
@@ -212,20 +229,22 @@ func NewServerObfuscator(
 		return nil, errors.Trace(err)
 	}
 
-	preamble, err := makeServerPreamble(prefixHeader, config.ServerPrefixSpecs, config.Keyword)
+	preamble, prefixLen, err := makeServerPreamble(prefixHeader, config.ServerPrefixSpecs, config.Keyword)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	return &Obfuscator{
-		preamble:             preamble,
-		prefixHeader:         prefixHeader,
-		keyword:              config.Keyword,
-		paddingLength:        -1,
-		clientToServerCipher: clientToServerCipher,
-		serverToClientCipher: serverToClientCipher,
-		paddingPRNGSeed:      paddingPRNGSeed,
-		paddingPRNG:          prng.NewPRNGWithSeed(paddingPRNGSeed),
+		preamble:                 preamble,
+		preambleOSSHPrefixLength: prefixLen,
+		osshPrefixHeader:         prefixHeader,
+		osshPrefixSplitConfig:    config.OSSHPrefixSplitConfig,
+		keyword:                  config.Keyword,
+		paddingLength:            -1,
+		clientToServerCipher:     clientToServerCipher,
+		serverToClientCipher:     serverToClientCipher,
+		paddingPRNGSeed:          paddingPRNGSeed,
+		paddingPRNG:              prng.NewPRNGWithSeed(paddingPRNGSeed),
 	}, nil
 }
 
@@ -237,7 +256,20 @@ func NewServerObfuscator(
 // client, so derived PRNGs may be used to replay sequences post-initial
 // obfuscator message.
 func (obfuscator *Obfuscator) GetDerivedPRNG(salt string) (*prng.PRNG, error) {
-	return prng.NewPRNGWithSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	seed, err := prng.NewPRNGWithSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	return seed, errors.Trace(err)
+}
+
+// GetDerivedPRNGSeed creates a new PRNG seed derived from the obfuscator
+// padding seed and distinguished by the salt, which should be a unique
+// identifier for each usage context.
+//
+// For NewServerObfuscator, the obfuscator padding seed is obtained from the
+// client, so derived seeds may be used to replay sequences post-initial
+// obfuscator message.
+func (obfuscator *Obfuscator) GetDerivedPRNGSeed(salt string) (*prng.Seed, error) {
+	seed, err := prng.NewSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	return seed, errors.Trace(err)
 }
 
 // GetPaddingLength returns the client seed message padding length. Only valid
@@ -248,10 +280,12 @@ func (obfuscator *Obfuscator) GetPaddingLength() int {
 
 // SendPreamble returns the preamble created in NewObfuscatorClient or
 // NewServerObfuscator, removing the reference so that it may be garbage collected.
-func (obfuscator *Obfuscator) SendPreamble() []byte {
+func (obfuscator *Obfuscator) SendPreamble() ([]byte, int) {
 	msg := obfuscator.preamble
+	prefixLen := obfuscator.preambleOSSHPrefixLength
 	obfuscator.preamble = nil
-	return msg
+	obfuscator.preambleOSSHPrefixLength = 0
+	return msg, prefixLen
 }
 
 // ObfuscateClientToServer applies the client RC4 stream to the bytes in buffer.
@@ -341,42 +375,45 @@ func makeClientPreamble(
 	paddingPRNG *prng.PRNG,
 	minPadding, maxPadding int,
 	obfuscatorSeed []byte,
-	clientToServerCipher *rc4.Cipher) ([]byte, *OSSHPrefixHeader, int, error) {
+	clientToServerCipher *rc4.Cipher) ([]byte, int, *OSSHPrefixHeader, int, error) {
 
 	padding := paddingPRNG.Padding(minPadding, maxPadding)
 	buffer := new(bytes.Buffer)
 	magicValueStartIndex := len(obfuscatorSeed)
 
+	prefixLen := 0
+
 	if prefixSpec != nil {
-		// Writes the prefix and terminator to the buffer.
-		prefix, err := makePrefix(prefixSpec, keyword, OBFUSCATE_CLIENT_TO_SERVER_IV)
+		var b []byte
+		var err error
+		b, prefixLen, err = makeTerminatedPrefixWithPadding(prefixSpec, keyword, OBFUSCATE_CLIENT_TO_SERVER_IV)
 		if err != nil {
-			return nil, nil, 0, errors.Trace(err)
+			return nil, 0, nil, 0, errors.Trace(err)
 		}
 
-		_, err = buffer.Write(prefix)
+		_, err = buffer.Write(b)
 		if err != nil {
-			return nil, nil, 0, errors.Trace(err)
+			return nil, 0, nil, 0, errors.Trace(err)
 		}
 
-		magicValueStartIndex += len(prefix)
+		magicValueStartIndex += len(b)
 	}
 
 	err := binary.Write(buffer, binary.BigEndian, obfuscatorSeed)
 	if err != nil {
-		return nil, nil, 0, errors.Trace(err)
+		return nil, 0, nil, 0, errors.Trace(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, uint32(OBFUSCATE_MAGIC_VALUE))
 	if err != nil {
-		return nil, nil, 0, errors.Trace(err)
+		return nil, 0, nil, 0, errors.Trace(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, uint32(len(padding)))
 	if err != nil {
-		return nil, nil, 0, errors.Trace(err)
+		return nil, 0, nil, 0, errors.Trace(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, padding)
 	if err != nil {
-		return nil, nil, 0, errors.Trace(err)
+		return nil, 0, nil, 0, errors.Trace(err)
 	}
 
 	var prefixHeader *OSSHPrefixHeader = nil
@@ -384,7 +421,7 @@ func makeClientPreamble(
 		// Writes the prefix header after the padding.
 		err := prefixSpec.writePrefixHeader(buffer)
 		if err != nil {
-			return nil, nil, 0, errors.Trace(err)
+			return nil, 0, nil, 0, errors.Trace(err)
 		}
 
 		prefixHeader = &OSSHPrefixHeader{
@@ -399,7 +436,7 @@ func makeClientPreamble(
 		preamble[magicValueStartIndex:],
 		preamble[magicValueStartIndex:])
 
-	return preamble, prefixHeader, len(padding), nil
+	return preamble, prefixLen, prefixHeader, len(padding), nil
 }
 
 // makeServerPreamble generates a server preamble (prefix or nil).
@@ -410,10 +447,10 @@ func makeClientPreamble(
 func makeServerPreamble(
 	header *OSSHPrefixHeader,
 	serverSpecs transforms.Specs,
-	keyword string) ([]byte, error) {
+	keyword string) ([]byte, int, error) {
 
 	if header == nil {
-		return nil, nil
+		return nil, 0, nil
 	}
 
 	spec, ok := serverSpecs[header.SpecName]
@@ -424,7 +461,7 @@ func makeServerPreamble(
 
 	seed, err := prng.NewSeed()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, 0, errors.Trace(err)
 	}
 
 	prefixSpec := &OSSHPrefixSpec{
@@ -432,7 +469,7 @@ func makeServerPreamble(
 		Spec: spec,
 		Seed: seed,
 	}
-	return makePrefix(prefixSpec, keyword, OBFUSCATE_SERVER_TO_CLIENT_IV)
+	return makeTerminatedPrefixWithPadding(prefixSpec, keyword, OBFUSCATE_SERVER_TO_CLIENT_IV)
 }
 
 // readPreamble reads the preamble bytes from the client. If it does not detect
@@ -622,12 +659,12 @@ func readPreambleHelper(
 
 // makeTerminator generates a prefix terminator used in finding end of prefix
 // placed before OSSH stream.
-// prefix should be at least PREAMBLE_HEADER_LENGTH bytes and contain enough entropy.
-func makeTerminator(keyword string, prefix []byte, direction string) ([]byte, error) {
+// b should be at least PREAMBLE_HEADER_LENGTH bytes and contain enough entropy.
+func makeTerminator(keyword string, b []byte, direction string) ([]byte, error) {
 
-	// prefix length is at least equal to obfuscator seed message.
-	if len(prefix) < PREAMBLE_HEADER_LENGTH {
-		return nil, errors.TraceNew("prefix too short")
+	// Bytes length is at least equal to obfuscator seed message.
+	if len(b) < PREAMBLE_HEADER_LENGTH {
+		return nil, errors.TraceNew("bytes too short")
 	}
 
 	if (direction != OBFUSCATE_CLIENT_TO_SERVER_IV) &&
@@ -637,7 +674,7 @@ func makeTerminator(keyword string, prefix []byte, direction string) ([]byte, er
 
 	hkdf := hkdf.New(sha256.New,
 		[]byte(keyword),
-		prefix[:PREAMBLE_HEADER_LENGTH],
+		b[:PREAMBLE_HEADER_LENGTH],
 		[]byte(direction))
 
 	terminator := make([]byte, PREFIX_TERMINATOR_LENGTH)
@@ -649,24 +686,26 @@ func makeTerminator(keyword string, prefix []byte, direction string) ([]byte, er
 	return terminator, nil
 }
 
-// makePrefix generates a prefix followed by it's terminator using the given spec.
+// makeTerminatedPrefixWithPadding generates bytes starting with the prefix bytes defiend
+// by spec and ending with the generated terminator.
 // If the generated prefix is shorter than PREAMBLE_HEADER_LENGTH, it is padded
 // with random bytes.
-func makePrefix(spec *OSSHPrefixSpec, keyword, direction string) ([]byte, error) {
+// Returns the generated prefix with teminator, and the length of the prefix if no error.
+func makeTerminatedPrefixWithPadding(spec *OSSHPrefixSpec, keyword, direction string) ([]byte, int, error) {
 
-	prefix, err := spec.Spec.ApplyPrefix(spec.Seed, PREAMBLE_HEADER_LENGTH)
+	prefix, prefixLen, err := spec.Spec.ApplyPrefix(spec.Seed, PREAMBLE_HEADER_LENGTH)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, 0, errors.Trace(err)
 	}
 
 	terminator, err := makeTerminator(keyword, prefix, direction)
 
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, 0, errors.Trace(err)
 	}
 	terminatedPrefix := append(prefix, terminator...)
 
-	return terminatedPrefix, nil
+	return terminatedPrefix, prefixLen, nil
 }
 
 // writePrefixHeader writes the prefix header to the given writer.

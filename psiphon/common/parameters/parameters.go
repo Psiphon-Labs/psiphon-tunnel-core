@@ -341,6 +341,9 @@ const (
 	OSSHPrefixSpecs                                  = "OSSHPrefixSpecs"
 	OSSHPrefixScopedSpecNames                        = "OSSHPrefixScopedSpecNames"
 	OSSHPrefixProbability                            = "OSSHPrefixProbability"
+	OSSHPrefixSplitMinDelay                          = "OSSHPrefixSplitMinDelay"
+	OSSHPrefixSplitMaxDelay                          = "OSSHPrefixSplitMaxDelay"
+	OSSHPrefixEnableFragmentor                       = "OSSHPrefixEnableFragmentor"
 	ServerOSSHPrefixSpecs                            = "ServerOSSHPrefixSpecs"
 )
 
@@ -720,11 +723,13 @@ var defaultParameters = map[string]struct {
 	ObfuscatedQUICNonceTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
 	ObfuscatedQUICNonceTransformProbability:     {value: 0.0, minimum: 0.0},
 
-	OSSHPrefixSpecs:           {value: transforms.Specs{}},
-	OSSHPrefixScopedSpecNames: {value: transforms.ScopedSpecNames{}},
-	OSSHPrefixProbability:     {value: 0.0, minimum: 0.0},
-
-	ServerOSSHPrefixSpecs: {value: transforms.Specs{}, flags: serverSideOnly},
+	OSSHPrefixSpecs:            {value: transforms.Specs{}},
+	OSSHPrefixScopedSpecNames:  {value: transforms.ScopedSpecNames{}},
+	OSSHPrefixProbability:      {value: 0.0, minimum: 0.0},
+	OSSHPrefixSplitMinDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
+	OSSHPrefixSplitMaxDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
+	OSSHPrefixEnableFragmentor: {value: false},
+	ServerOSSHPrefixSpecs:      {value: transforms.Specs{}, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
