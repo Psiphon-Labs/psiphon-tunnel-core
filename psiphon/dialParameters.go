@@ -1082,7 +1082,7 @@ func MakeDialParameters(
 
 	// Fragmentor configuration.
 	// Note: fragmentorConfig is nil if fragmentor is disabled for prefixed OSSH.
-  //
+	//
 	// Limitation: when replaying and with ReplayIgnoreChangedConfigState set,
 	// fragmentor.NewUpstreamConfig may select a config using newer tactics
 	// parameters.
