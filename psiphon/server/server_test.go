@@ -194,6 +194,21 @@ func TestFragmentedPrefixedOSSH(t *testing.T) {
 		})
 }
 
+// NOTE: breaks the naming convention of dropping the OSSH suffix
+// because TestTLS is ambiguous as there are other protocols which
+// use TLS, e.g. UNFRONTED-MEEK-HTTPS-OSSH.
+func TestTLSOSSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "TLS-OSSH",
+			enableSSHAPIRequests: true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+		})
+}
+
 func TestUnfrontedMeek(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
@@ -289,6 +304,36 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+		})
+}
+
+func TestTLSOverUnfrontedMeekHTTPSDemux(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
+			clientTunnelProtocol: "TLS-OSSH",
+			passthrough:          true,
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_96, // TLS-OSSH requires TLS 1.3 support
+			enableSSHAPIRequests: true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+		})
+}
+
+func TestTLSOverUnfrontedMeekSessionTicketDemux(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			clientTunnelProtocol: "TLS-OSSH",
+			passthrough:          true,
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_96, // TLS-OSSH requires TLS 1.3 support
+			enableSSHAPIRequests: true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -522,6 +567,8 @@ func TestOmitProvider(t *testing.T) {
 
 type runServerConfig struct {
 	tunnelProtocol       string
+	clientTunnelProtocol string
+	passthrough          bool
 	tlsProfile           string
 	enableSSHAPIRequests bool
 	doHotReload          bool
@@ -633,13 +680,24 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		limitQUICVersions = protocol.QUICVersions{selectedQUICVersion}
 	}
 
+	var tunnelProtocolPassthroughAddresses map[string]string
+
+	if runConfig.passthrough {
+		tunnelProtocolPassthroughAddresses = map[string]string{
+			// Tests do not trigger passthrough so set invalid IP and port.
+			runConfig.tunnelProtocol: "x.x.x.x:x",
+		}
+	}
+
 	generateConfigParams := &GenerateConfigParams{
-		ServerIPAddress:      psiphonServerIPAddress,
-		EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
-		WebServerPort:        8000,
-		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: psiphonServerPort},
-		LimitQUICVersions:    limitQUICVersions,
-		EnableGQUIC:          !runConfig.limitQUICVersions,
+		ServerIPAddress:                    psiphonServerIPAddress,
+		EnableSSHAPIRequests:               runConfig.enableSSHAPIRequests,
+		WebServerPort:                      8000,
+		TunnelProtocolPorts:                map[string]int{runConfig.tunnelProtocol: psiphonServerPort},
+		TunnelProtocolPassthroughAddresses: tunnelProtocolPassthroughAddresses,
+		Passthrough:                        runConfig.passthrough,
+		LimitQUICVersions:                  limitQUICVersions,
+		EnableGQUIC:                        !runConfig.limitQUICVersions,
 	}
 
 	if doServerTactics {
@@ -687,13 +745,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// case where the tactics config is omitted.
 	if doServerTactics {
 		tacticsConfigFilename = filepath.Join(testDataDirName, "tactics_config.json")
+
+		tacticsTunnelProtocol := runConfig.tunnelProtocol
+		if runConfig.clientTunnelProtocol != "" {
+			tacticsTunnelProtocol = runConfig.clientTunnelProtocol
+		}
+
 		paveTacticsConfigFile(
 			t,
 			tacticsConfigFilename,
 			tacticsRequestPublicKey,
 			tacticsRequestPrivateKey,
 			tacticsRequestObfuscatedKey,
-			runConfig.tunnelProtocol,
+			tacticsTunnelProtocol,
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
@@ -924,6 +988,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	testClientFeaturesJSON, _ := json.Marshal(testClientFeatures)
 
+	clientTunnelProtocol := runConfig.tunnelProtocol
+	if runConfig.clientTunnelProtocol != "" {
+		clientTunnelProtocol = runConfig.clientTunnelProtocol
+	}
+
 	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Android_10_com.test.app",
@@ -941,7 +1010,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
     }`,
 		string(testClientFeaturesJSON),
 		numTunnels,
-		runConfig.tunnelProtocol,
+		clientTunnelProtocol,
 		jsonLimitTLSProfiles,
 		jsonNetworkID)
 
@@ -1106,6 +1175,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			switch noticeType {
 
 			case "ConnectedServer":
+				// Check that client connected with the expected protocol.
+				protocol := payload["protocol"].(string)
+				if protocol != clientTunnelProtocol {
+					// TODO: wrong goroutine for t.FatalNow()
+					t.Errorf("unexpected protocol: %s", protocol)
+				}
 				sendNotificationReceived(connectedServer)
 
 			case "Tunnels":
@@ -1215,6 +1290,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		_, _ = pavePsinetDatabaseFile(
 			t, psinetFilename, sponsorID, runConfig.doDefaultSponsorID, false, psinetValidServerEntryTags)
 
+		tacticsTunnelProtocol := runConfig.tunnelProtocol
+		if runConfig.clientTunnelProtocol != "" {
+			tacticsTunnelProtocol = runConfig.clientTunnelProtocol
+		}
+
 		// Pave tactics without destination bytes.
 		paveTacticsConfigFile(
 			t,
@@ -1222,7 +1302,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			tacticsRequestPublicKey,
 			tacticsRequestPrivateKey,
 			tacticsRequestObfuscatedKey,
-			runConfig.tunnelProtocol,
+			tacticsTunnelProtocol,
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
@@ -1703,7 +1783,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) && (runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
 
 		for _, name := range []string{
 			"user_agent",
@@ -1752,7 +1832,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) && (runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
 
 		for _, name := range []string{
 			"tls_profile",

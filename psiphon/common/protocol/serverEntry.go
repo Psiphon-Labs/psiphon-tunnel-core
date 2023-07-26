@@ -62,6 +62,7 @@ type ServerEntry struct {
 	Capabilities                    []string `json:"capabilities"`
 	Region                          string   `json:"region"`
 	FrontingProviderID              string   `json:"frontingProviderID"`
+	TlsOSSHPort                     int      `json:"tlsOSSHPort"`
 	MeekServerPort                  int      `json:"meekServerPort"`
 	MeekCookieEncryptionPublicKey   string   `json:"meekCookieEncryptionPublicKey"`
 	MeekObfuscatedKey               string   `json:"meekObfuscatedKey"`
@@ -466,6 +467,8 @@ func GetTacticsCapability(protocol string) string {
 func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 	for _, capability := range serverEntry.Capabilities {
 
+		originalCapability := capability
+
 		capability = strings.ReplaceAll(capability, "-PASSTHROUGH-v2", "")
 		capability = strings.ReplaceAll(capability, "-PASSTHROUGH", "")
 
@@ -475,6 +478,30 @@ func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 		}
 
 		if capability == requiredCapability {
+			return true
+		}
+
+		// Special case: some capabilities may additionally support TLS-OSSH.
+		if requiredCapability == GetCapability(TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH) && capabilitySupportsTLSOSSH(originalCapability) {
+			return true
+		}
+	}
+	return false
+}
+
+// capabilitySupportsTLSOSSH returns true if and only if the given capability
+// supports TLS-OSSH in addition to its primary protocol.
+func capabilitySupportsTLSOSSH(capability string) bool {
+
+	tlsCapabilities := []string{
+		GetCapability(TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS),
+		GetCapability(TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET),
+	}
+
+	for _, tlsCapability := range tlsCapabilities {
+		// The TLS capability is additionally supported by UNFRONTED-MEEK-HTTPS
+		// and UNFRONTED-MEEK-SESSION-TICKET capabilities with passthrough.
+		if capability == tlsCapability+"-PASSTHROUGH-v2" {
 			return true
 		}
 	}
@@ -616,6 +643,15 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 	}
 
 	switch tunnelProtocol {
+
+	case TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
+		if serverEntry.TlsOSSHPort == 0 {
+			// Special case: a server which supports UNFRONTED-MEEK-HTTPS-OSSH
+			// or UNFRONTED-MEEK-SESSION-TICKET-OSSH also supports TLS-OSSH
+			// over the same port.
+			return serverEntry.MeekServerPort, nil
+		}
+		return serverEntry.TlsOSSHPort, nil
 
 	case TUNNEL_PROTOCOL_SSH:
 		return serverEntry.SshPort, nil

@@ -173,7 +173,7 @@ type Config struct {
 	NetworkLatencyMultiplier float64
 
 	// LimitTunnelProtocols indicates which protocols to use. Valid values
-	// include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH",
+	// include: "SSH", "OSSH", "TLS-OSSH", "UNFRONTED-MEEK-OSSH",
 	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "TAPDANCE-OSSH", and "CONJURE-OSSH".
@@ -847,6 +847,11 @@ type Config struct {
 	OSSHPrefixSplitMinDelayMilliseconds *int
 	OSSHPrefixSplitMaxDelayMilliseconds *int
 	OSSHPrefixEnableFragmentor          *bool
+
+	// TLSTunnelTrafficShapingProbability and associated fields are for testing.
+	TLSTunnelTrafficShapingProbability *float64
+	TLSTunnelMinTLSPadding             *int
+	TLSTunnelMaxTLSPadding             *int
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -2006,6 +2011,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.OSSHPrefixEnableFragmentor] = *config.OSSHPrefixEnableFragmentor
 	}
 
+	if config.TLSTunnelTrafficShapingProbability != nil {
+		applyParameters[parameters.TLSTunnelTrafficShapingProbability] = *config.TLSTunnelTrafficShapingProbability
+	}
+
+	if config.TLSTunnelMinTLSPadding != nil {
+		applyParameters[parameters.TLSTunnelMinTLSPadding] = *config.TLSTunnelMinTLSPadding
+	}
+
+	if config.TLSTunnelMaxTLSPadding != nil {
+		applyParameters[parameters.TLSTunnelMaxTLSPadding] = *config.TLSTunnelMaxTLSPadding
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2520,6 +2537,21 @@ func (config *Config) setDialParametersHash() {
 	if config.OSSHPrefixEnableFragmentor != nil {
 		hash.Write([]byte("OSSHPrefixEnableFragmentor"))
 		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixEnableFragmentor)
+	}
+
+	if config.TLSTunnelTrafficShapingProbability != nil {
+		hash.Write([]byte("TLSTunnelTrafficShapingProbability"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelTrafficShapingProbability))
+	}
+
+	if config.TLSTunnelMinTLSPadding != nil {
+		hash.Write([]byte("TLSTunnelMinTLSPadding"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelMinTLSPadding))
+	}
+
+	if config.TLSTunnelMaxTLSPadding != nil {
+		hash.Write([]byte("TLSTunnelMaxTLSPadding"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelMaxTLSPadding))
 	}
 
 	config.dialParametersHash = hash.Sum(nil)
