@@ -836,6 +836,8 @@ func getUTLSClientHelloID(
 		return utls.HelloIOS_13, nil, nil
 	case protocol.TLS_PROFILE_IOS_14:
 		return utls.HelloIOS_14, nil, nil
+	case protocol.TLS_PROFILE_SAFARI_16:
+		return utls.HelloSafari_16_0, nil, nil
 	case protocol.TLS_PROFILE_CHROME_58:
 		return utls.HelloChrome_58, nil, nil
 	case protocol.TLS_PROFILE_CHROME_62:
@@ -850,6 +852,8 @@ func getUTLSClientHelloID(
 		return utls.HelloChrome_96, nil, nil
 	case protocol.TLS_PROFILE_CHROME_102:
 		return utls.HelloChrome_102, nil, nil
+	case protocol.TLS_PROFILE_CHROME_106:
+		return utls.HelloChrome_106_Shuffle, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
@@ -897,7 +901,8 @@ func getClientHelloVersion(
 		utls.HelloChrome_83, utls.HelloChrome_96,
 		utls.HelloChrome_102, utls.HelloFirefox_65,
 		utls.HelloFirefox_99, utls.HelloFirefox_105,
-		utls.HelloGolang:
+		utls.HelloChrome_106_Shuffle, utls.HelloGolang,
+		utls.HelloSafari_16_0:
 		return protocol.TLS_VERSION_13, nil
 	}
 
