@@ -365,6 +365,10 @@ func CustomTLSDial(
 
 		utlsClientHelloID.Seed = new(utls.PRNGSeed)
 		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+
+		weights := utls.DefaultWeights
+		weights.TLSVersMax_Set_VersionTLS13 = 0.5
+		utlsClientHelloID.Weights = &weights
 	}
 
 	// As noted here,
