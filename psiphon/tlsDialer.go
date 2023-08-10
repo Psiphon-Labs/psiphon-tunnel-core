@@ -60,6 +60,7 @@ import (
 	"encoding/hex"
 	std_errors "errors"
 	"io/ioutil"
+	"math"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -858,6 +859,29 @@ func getUTLSClientHelloID(
 		return utls.HelloChrome_102, nil, nil
 	case protocol.TLS_PROFILE_CHROME_106:
 		return utls.HelloChrome_106_Shuffle, nil, nil
+	case protocol.TLS_PROFILE_CHROME_112_PSK:
+		preset, err := utls.UTLSIdToSpec(utls.HelloChrome_112_PSK_Shuf)
+		if err != nil {
+			return utls.HelloCustom, nil, err
+		}
+
+		// Generates typical PSK extension values.
+		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
+		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
+		obfuscatedTicketAge := uint32(prng.Range(13029567, math.MaxUint32))
+		binder := prng.Bytes(33)
+		binder[0] = 0x20 // Binder's length
+
+		if pskExt, ok := preset.Extensions[len(preset.Extensions)-1].(*utls.FakePreSharedKeyExtension); ok {
+			pskExt.PskIdentities = []utls.PskIdentity{
+				{
+					Label:               label,
+					ObfuscatedTicketAge: obfuscatedTicketAge,
+				},
+			}
+			pskExt.PskBinders = [][]byte{binder}
+		}
+		return utls.HelloCustom, &preset, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
