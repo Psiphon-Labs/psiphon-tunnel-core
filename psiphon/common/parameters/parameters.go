@@ -228,7 +228,6 @@ const (
 	ReplayObfuscatorPadding                          = "ReplayObfuscatorPadding"
 	ReplayFragmentor                                 = "ReplayFragmentor"
 	ReplayTLSProfile                                 = "ReplayTLSProfile"
-	ReplayRandomizedTLSProfile                       = "ReplayRandomizedTLSProfile"
 	ReplayFronting                                   = "ReplayFronting"
 	ReplayHostname                                   = "ReplayHostname"
 	ReplayQUICVersion                                = "ReplayQUICVersion"
@@ -345,6 +344,13 @@ const (
 	OSSHPrefixSplitMaxDelay                          = "OSSHPrefixSplitMaxDelay"
 	OSSHPrefixEnableFragmentor                       = "OSSHPrefixEnableFragmentor"
 	ServerOSSHPrefixSpecs                            = "ServerOSSHPrefixSpecs"
+	TLSTunnelTrafficShapingProbability               = "TLSTunnelTrafficShapingProbability"
+	TLSTunnelMinTLSPadding                           = "TLSTunnelMinTLSPadding"
+	TLSTunnelMaxTLSPadding                           = "TLSTunnelMaxTLSPadding"
+
+	// Retired parameters
+
+	ReplayRandomizedTLSProfile = "ReplayRandomizedTLSProfile"
 )
 
 const (
@@ -588,7 +594,6 @@ var defaultParameters = map[string]struct {
 	ReplayObfuscatorPadding:                {value: true},
 	ReplayFragmentor:                       {value: true},
 	ReplayTLSProfile:                       {value: true},
-	ReplayRandomizedTLSProfile:             {value: true},
 	ReplayFronting:                         {value: true},
 	ReplayHostname:                         {value: true},
 	ReplayQUICVersion:                      {value: true},
@@ -730,6 +735,12 @@ var defaultParameters = map[string]struct {
 	OSSHPrefixSplitMaxDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
 	OSSHPrefixEnableFragmentor: {value: false},
 	ServerOSSHPrefixSpecs:      {value: transforms.Specs{}, flags: serverSideOnly},
+
+	// TLSTunnelMinTLSPadding/TLSTunnelMaxTLSPadding are subject to TLS server limitations.
+
+	TLSTunnelTrafficShapingProbability: {value: 1.0, minimum: 0.0},
+	TLSTunnelMinTLSPadding:             {value: 0, minimum: 0},
+	TLSTunnelMaxTLSPadding:             {value: 0, minimum: 0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

@@ -689,6 +689,9 @@ func dialTunnel(
 	burstUpstreamDeadline := p.Duration(parameters.ClientBurstUpstreamDeadline)
 	burstDownstreamTargetBytes := int64(p.Int(parameters.ClientBurstDownstreamTargetBytes))
 	burstDownstreamDeadline := p.Duration(parameters.ClientBurstDownstreamDeadline)
+	tlsOSSHApplyTrafficShaping := p.WeightedCoinFlip(parameters.TLSTunnelTrafficShapingProbability)
+	tlsOSSHMinTLSPadding := p.Int(parameters.TLSTunnelMinTLSPadding)
+	tlsOSSHMaxTLSPadding := p.Int(parameters.TLSTunnelMaxTLSPadding)
 	p.Close()
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
@@ -746,7 +749,20 @@ func dialTunnel(
 
 	var dialConn net.Conn
 
-	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
+	if protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) {
+
+		dialConn, err = DialTLSTunnel(
+			ctx,
+			dialParams.GetTLSOSSHConfig(config),
+			dialParams.GetDialConfig(),
+			tlsOSSHApplyTrafficShaping,
+			tlsOSSHMinTLSPadding,
+			tlsOSSHMaxTLSPadding)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	} else if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
 		dialConn, err = DialMeek(
 			ctx,

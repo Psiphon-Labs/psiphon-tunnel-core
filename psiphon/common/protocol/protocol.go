@@ -32,6 +32,7 @@ import (
 const (
 	TUNNEL_PROTOCOL_SSH                              = "SSH"
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH                   = "OSSH"
+	TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH               = "TLS-OSSH"
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK                   = "UNFRONTED-MEEK-OSSH"
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS             = "UNFRONTED-MEEK-HTTPS-OSSH"
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET    = "UNFRONTED-MEEK-SESSION-TICKET-OSSH"
@@ -147,6 +148,7 @@ func (labeledProtocols LabeledTunnelProtocols) PruneInvalid() LabeledTunnelProto
 var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_SSH,
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
@@ -175,6 +177,13 @@ func TunnelProtocolUsesSSH(protocol string) bool {
 
 func TunnelProtocolUsesObfuscatedSSH(protocol string) bool {
 	return protocol != TUNNEL_PROTOCOL_SSH
+}
+
+// NOTE: breaks the naming convention of dropping the OSSH suffix because
+// UsesTLS is ambiguous by itself as there are other protocols which use
+// a TLS layer, e.g. UNFRONTED-MEEK-HTTPS-OSSH.
+func TunnelProtocolUsesTLSOSSH(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH
 }
 
 func TunnelProtocolUsesMeek(protocol string) bool {
@@ -239,6 +248,7 @@ func TunnelProtocolIsResourceIntensive(protocol string) bool {
 func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_SSH ||
 		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
@@ -251,10 +261,15 @@ func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
+func TunnelProtocolRequiresTLS13Support(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH
+}
+
 func TunnelProtocolSupportsPassthrough(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
-		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH
 }
 
 func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
@@ -264,6 +279,7 @@ func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
 func TunnelProtocolMayUseServerPacketManipulation(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_SSH ||
 		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET

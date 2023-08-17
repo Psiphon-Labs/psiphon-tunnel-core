@@ -20,12 +20,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	std_errors "errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -41,6 +44,7 @@ import (
 	"testing"
 	"time"
 
+	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
@@ -124,23 +128,10 @@ func TestSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "SSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -150,23 +141,10 @@ func TestOSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -176,23 +154,11 @@ func TestFragmentedOSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     true,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -202,25 +168,44 @@ func TestPrefixedOSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			applyPrefix:          true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
+			inspectFlows:         true,
+		})
+}
+
+func TestFragmentedPrefixedOSSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			enableSSHAPIRequests: true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			applyPrefix:          true,
+			forceFragmenting:     true,
+			doDanglingTCPConn:    true,
+			doLogHostProvider:    true,
+			inspectFlows:         true,
+		})
+}
+
+// NOTE: breaks the naming convention of dropping the OSSH suffix
+// because TestTLS is ambiguous as there are other protocols which
+// use TLS, e.g. UNFRONTED-MEEK-HTTPS-OSSH.
+func TestTLSOSSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "TLS-OSSH",
+			enableSSHAPIRequests: true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -229,23 +214,10 @@ func TestUnfrontedMeek(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -255,23 +227,11 @@ func TestFragmentedUnfrontedMeek(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     true,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -282,23 +242,10 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -309,23 +256,11 @@ func TestFragmentedUnfrontedMeekHTTPS(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			forceFragmenting:     true,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -336,23 +271,10 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -363,23 +285,10 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_CHROME_58,
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -390,24 +299,41 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
+		})
+}
+
+func TestTLSOverUnfrontedMeekHTTPSDemux(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
+			clientTunnelProtocol: "TLS-OSSH",
+			passthrough:          true,
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_96, // TLS-OSSH requires TLS 1.3 support
+			enableSSHAPIRequests: true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+		})
+}
+
+func TestTLSOverUnfrontedMeekSessionTicketDemux(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			clientTunnelProtocol: "TLS-OSSH",
+			passthrough:          true,
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_96, // TLS-OSSH requires TLS 1.3 support
+			enableSSHAPIRequests: true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
 		})
 }
 
@@ -419,23 +345,9 @@ func TestQUICOSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "QUIC-OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -448,23 +360,10 @@ func TestLimitedQUICOSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "QUIC-OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
 			limitQUICVersions:    true,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -473,24 +372,9 @@ func TestWebTransportAPIRequests(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: false,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: false,
 			omitAuthorization:    true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -501,22 +385,9 @@ func TestHotReload(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -528,21 +399,9 @@ func TestDefaultSponsorID(t *testing.T) {
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			doDefaultSponsorID:   true,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -553,22 +412,10 @@ func TestDenyTrafficRules(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSponsorID:   false,
 			denyTrafficRules:     true,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -579,22 +426,10 @@ func TestOmitAuthorization(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
 			omitAuthorization:    true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -605,22 +440,9 @@ func TestNoAuthorization(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: false,
 			omitAuthorization:    true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -631,22 +453,8 @@ func TestUnusedAuthorization(t *testing.T) {
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
 			doHotReload:          true,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
-			requireAuthorization: false,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -656,23 +464,8 @@ func TestTCPOnlySLOK(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
-			doTunneledNTPRequest: false,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -682,23 +475,8 @@ func TestUDPOnlySLOK(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
-			doTunneledWebRequest: false,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -708,23 +486,10 @@ func TestLivenessTest(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
 			forceLivenessTest:    true,
-			doPruneServerEntries: false,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -734,23 +499,11 @@ func TestPruneServerEntries(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
 			forceLivenessTest:    true,
 			doPruneServerEntries: true,
-			doDanglingTCPConn:    false,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -760,23 +513,12 @@ func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
 			doBurstMonitor:       true,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
 			doDestinationBytes:   true,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -786,21 +528,10 @@ func TestChangeBytesConfig(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
-			doSplitTunnel:        false,
-			limitQUICVersions:    false,
 			doDestinationBytes:   true,
 			doChangeBytesConfig:  true,
 			doLogHostProvider:    true,
@@ -812,23 +543,11 @@ func TestSplitTunnel(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
 			doSplitTunnel:        true,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
 			doLogHostProvider:    true,
 		})
 }
@@ -838,29 +557,18 @@ func TestOmitProvider(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
 			enableSSHAPIRequests: true,
-			doHotReload:          false,
-			doDefaultSponsorID:   false,
-			denyTrafficRules:     false,
 			requireAuthorization: true,
-			omitAuthorization:    false,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
-			forceFragmenting:     false,
-			forceLivenessTest:    false,
-			doPruneServerEntries: false,
 			doDanglingTCPConn:    true,
-			doPacketManipulation: false,
-			doBurstMonitor:       false,
 			doSplitTunnel:        true,
-			limitQUICVersions:    false,
-			doDestinationBytes:   false,
-			doChangeBytesConfig:  false,
-			doLogHostProvider:    false,
 		})
 }
 
 type runServerConfig struct {
 	tunnelProtocol       string
+	clientTunnelProtocol string
+	passthrough          bool
 	tlsProfile           string
 	enableSSHAPIRequests bool
 	doHotReload          bool
@@ -882,6 +590,7 @@ type runServerConfig struct {
 	doDestinationBytes   bool
 	doChangeBytesConfig  bool
 	doLogHostProvider    bool
+	inspectFlows         bool
 }
 
 var (
@@ -932,6 +641,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	doClientTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol)
 	doServerTactics := doClientTactics ||
+		runConfig.applyPrefix ||
 		runConfig.forceFragmenting ||
 		runConfig.doBurstMonitor ||
 		runConfig.doDestinationBytes
@@ -970,13 +680,24 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		limitQUICVersions = protocol.QUICVersions{selectedQUICVersion}
 	}
 
+	var tunnelProtocolPassthroughAddresses map[string]string
+
+	if runConfig.passthrough {
+		tunnelProtocolPassthroughAddresses = map[string]string{
+			// Tests do not trigger passthrough so set invalid IP and port.
+			runConfig.tunnelProtocol: "x.x.x.x:x",
+		}
+	}
+
 	generateConfigParams := &GenerateConfigParams{
-		ServerIPAddress:      psiphonServerIPAddress,
-		EnableSSHAPIRequests: runConfig.enableSSHAPIRequests,
-		WebServerPort:        8000,
-		TunnelProtocolPorts:  map[string]int{runConfig.tunnelProtocol: psiphonServerPort},
-		LimitQUICVersions:    limitQUICVersions,
-		EnableGQUIC:          !runConfig.limitQUICVersions,
+		ServerIPAddress:                    psiphonServerIPAddress,
+		EnableSSHAPIRequests:               runConfig.enableSSHAPIRequests,
+		WebServerPort:                      8000,
+		TunnelProtocolPorts:                map[string]int{runConfig.tunnelProtocol: psiphonServerPort},
+		TunnelProtocolPassthroughAddresses: tunnelProtocolPassthroughAddresses,
+		Passthrough:                        runConfig.passthrough,
+		LimitQUICVersions:                  limitQUICVersions,
+		EnableGQUIC:                        !runConfig.limitQUICVersions,
 	}
 
 	if doServerTactics {
@@ -1024,18 +745,25 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// case where the tactics config is omitted.
 	if doServerTactics {
 		tacticsConfigFilename = filepath.Join(testDataDirName, "tactics_config.json")
+
+		tacticsTunnelProtocol := runConfig.tunnelProtocol
+		if runConfig.clientTunnelProtocol != "" {
+			tacticsTunnelProtocol = runConfig.clientTunnelProtocol
+		}
+
 		paveTacticsConfigFile(
 			t,
 			tacticsConfigFilename,
 			tacticsRequestPublicKey,
 			tacticsRequestPrivateKey,
 			tacticsRequestObfuscatedKey,
-			runConfig.tunnelProtocol,
+			tacticsTunnelProtocol,
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
 			runConfig.doDestinationBytes,
 			runConfig.applyPrefix,
+			runConfig.forceFragmenting,
 		)
 	}
 
@@ -1133,6 +861,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 		}
 	})
+
+	// run flow inspector if requested
+	var flowInspectorProxy *flowInspectorProxy
+	if runConfig.inspectFlows {
+		flowInspectorProxy, err = newFlowInspectorProxy()
+		if err != nil {
+			t.Fatalf("error starting flow inspector: %s", err)
+		}
+		flowInspectorProxy.start()
+		defer flowInspectorProxy.close()
+	}
 
 	// run server
 
@@ -1249,6 +988,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	testClientFeaturesJSON, _ := json.Marshal(testClientFeatures)
 
+	clientTunnelProtocol := runConfig.tunnelProtocol
+	if runConfig.clientTunnelProtocol != "" {
+		clientTunnelProtocol = runConfig.clientTunnelProtocol
+	}
+
 	clientConfigJSON := fmt.Sprintf(`
     {
         "ClientPlatform" : "Android_10_com.test.app",
@@ -1266,7 +1010,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
     }`,
 		string(testClientFeaturesJSON),
 		numTunnels,
-		runConfig.tunnelProtocol,
+		clientTunnelProtocol,
 		jsonLimitTLSProfiles,
 		jsonNetworkID)
 
@@ -1287,6 +1031,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.EmitSLOKs = true
 	clientConfig.EmitServerAlerts = true
+
+	if runConfig.inspectFlows {
+		trueVal := true
+		clientConfig.UpstreamProxyURL = fmt.Sprintf("socks5://%s", flowInspectorProxy.listener.Addr())
+		clientConfig.UpstreamProxyAllowAllServerEntrySources = &trueVal
+	}
 
 	if runConfig.doSplitTunnel {
 		clientConfig.SplitTunnelOwnRegion = true
@@ -1323,14 +1073,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if runConfig.applyPrefix {
 
 			applyParameters[parameters.OSSHPrefixSpecs] = transforms.Specs{
-				"TEST": {{"", "\x00{24}"}},
+				"TEST": {{"", "\x00{200}"}},
 			}
 			applyParameters[parameters.OSSHPrefixScopedSpecNames] = transforms.ScopedSpecNames{
 				"": {"TEST"},
 			}
 			applyParameters[parameters.OSSHPrefixProbability] = 1.0
-			applyParameters[parameters.OSSHPrefixSplitMinDelay] = 1 * time.Millisecond
-			applyParameters[parameters.OSSHPrefixSplitMaxDelay] = 10 * time.Millisecond
+			applyParameters[parameters.OSSHPrefixSplitMinDelay] = "10ms"
+			applyParameters[parameters.OSSHPrefixSplitMaxDelay] = "20ms"
 
 			applyParameters[parameters.OSSHPrefixEnableFragmentor] = runConfig.forceFragmenting
 
@@ -1425,6 +1175,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			switch noticeType {
 
 			case "ConnectedServer":
+				// Check that client connected with the expected protocol.
+				protocol := payload["protocol"].(string)
+				if protocol != clientTunnelProtocol {
+					// TODO: wrong goroutine for t.FatalNow()
+					t.Errorf("unexpected protocol: %s", protocol)
+				}
 				sendNotificationReceived(connectedServer)
 
 			case "Tunnels":
@@ -1534,6 +1290,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		_, _ = pavePsinetDatabaseFile(
 			t, psinetFilename, sponsorID, runConfig.doDefaultSponsorID, false, psinetValidServerEntryTags)
 
+		tacticsTunnelProtocol := runConfig.tunnelProtocol
+		if runConfig.clientTunnelProtocol != "" {
+			tacticsTunnelProtocol = runConfig.clientTunnelProtocol
+		}
+
 		// Pave tactics without destination bytes.
 		paveTacticsConfigFile(
 			t,
@@ -1541,12 +1302,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			tacticsRequestPublicKey,
 			tacticsRequestPrivateKey,
 			tacticsRequestObfuscatedKey,
-			runConfig.tunnelProtocol,
+			tacticsTunnelProtocol,
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
 			false,
-			false)
+			false, false)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -1756,6 +1517,61 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Check that datastore had retained/pruned server entries as expected.
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
+
+	// Inspect OSSH prefix flows, if applicable.
+	if runConfig.inspectFlows && runConfig.applyPrefix {
+
+		flows := <-flowInspectorProxy.ch
+		serverFlows := flows[0]
+		clientFlows := flows[1]
+
+		expectedClientPrefix := bytes.Repeat([]byte{0x00}, 200)
+		expectedServerPrefix := bytes.Repeat([]byte{0x01}, 200)
+
+		if runConfig.forceFragmenting {
+
+			// Fragmentor was applied, so check for prefix in stream dump.
+			if !bytes.Equal(clientFlows.streamDump.Bytes()[:200], expectedClientPrefix) {
+				t.Fatal("client flow does not have expected prefix")
+			}
+
+			if !bytes.Equal(serverFlows.streamDump.Bytes()[:200], expectedServerPrefix) {
+				t.Fatal("server flow does not have expected prefix")
+			}
+
+			fragmentorMaxWriteBytes := 100
+			if len(clientFlows.flows[0].data) > fragmentorMaxWriteBytes {
+				t.Fatal("client flow was not fragmented")
+			}
+			if len(serverFlows.flows[0].data) > fragmentorMaxWriteBytes {
+				t.Fatal("server flow was not fragmented")
+			}
+
+		} else {
+			// Fragmentor was not applied, so check for prefix in first flow.
+			if !bytes.Equal(clientFlows.flows[0].data, expectedClientPrefix) {
+				t.Fatal("client flow does not have expected prefix")
+			}
+			if !bytes.Equal(serverFlows.flows[0].data, expectedServerPrefix) {
+				t.Fatal("server flow does not have expected prefix")
+			}
+
+			// Analyze time between prefix and next packet.
+			// client 10-20ms, 30-40ms for server with standard deviation of 1ms.
+			clientZtest := testSampleInUniformRange(clientFlows.flows[1].timeDelta.Microseconds(), 10000, 20000, 1000)
+			serverZtest := testSampleInUniformRange(serverFlows.flows[1].timeDelta.Microseconds(), 30000, 40000, 1000)
+
+			if !clientZtest {
+				t.Fatalf("client write delay after prefix too high: %f ms",
+					clientFlows.flows[1].timeDelta.Seconds()*1e3)
+			}
+
+			if !serverZtest {
+				t.Fatalf("server write delay after prefix too high: %f ms",
+					serverFlows.flows[1].timeDelta.Seconds()*1e3)
+			}
+		}
+	}
 }
 
 func sendNotificationReceived(c chan<- struct{}) {
@@ -1967,7 +1783,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) && (runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
 
 		for _, name := range []string{
 			"user_agent",
@@ -2016,7 +1832,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) && (runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
 
 		for _, name := range []string{
 			"tls_profile",
@@ -2858,7 +2674,8 @@ func paveTacticsConfigFile(
 	livenessTestSize int,
 	doBurstMonitor bool,
 	doDestinationBytes bool,
-	applyOsshPrefix bool) {
+	applyOsshPrefix bool,
+	enableOsshPrefixFragmenting bool) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -2964,12 +2781,14 @@ func paveTacticsConfigFile(
 
 	osshPrefix := ""
 	if applyOsshPrefix {
-		osshPrefix = `
+		osshPrefix = fmt.Sprintf(`
           "ServerOSSHPrefixSpecs": {
-              "TEST": [["", "\\x00{20}"]],
+              "TEST": [["", "\\x01{200}"]]
           },
-          "OSSHPrefixEnableFragmentor": true,
-					`
+          "OSSHPrefixSplitMinDelay": "30ms",
+          "OSSHPrefixSplitMaxDelay": "40ms",
+          "OSSHPrefixEnableFragmentor": %s,
+	`, strconv.FormatBool(enableOsshPrefixFragmenting))
 	}
 
 	tacticsConfigJSON := fmt.Sprintf(
@@ -3360,4 +3179,152 @@ func (v verifyTestCasesStoredLookup) checkStored(t *testing.T, errMessage string
 	if len(v) != 0 {
 		t.Fatalf("%s: %+v", errMessage, v)
 	}
+}
+
+type Number interface {
+	int64 | float64
+}
+
+// testSampleInUniformRange returns true if sample is in the range [a, b],
+// or within 2 standard deviations of the range.
+func testSampleInUniformRange[V Number](sample, a, b, stddev V) bool {
+	if sample >= a && sample <= b {
+		return true
+	}
+	lower := float64(sample-a) / float64(stddev)
+	higher := float64(sample-b) / float64(stddev)
+	return lower <= 2.0 || higher <= 2.0
+}
+
+type flowInspectorProxy struct {
+	listener *socks.SocksListener
+	ch       chan []*flows
+}
+
+func newFlowInspectorProxy() (*flowInspectorProxy, error) {
+	listener, err := socks.ListenSocks("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Printf("socks.ListenSocks failed: %s\n", err)
+		return nil, err
+	}
+	return &flowInspectorProxy{
+		listener: listener,
+		ch:       make(chan []*flows, 1),
+	}, nil
+}
+
+func (f *flowInspectorProxy) start() {
+
+	go func() {
+		for {
+			localConn, err := f.listener.AcceptSocks()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer localConn.Close()
+				remoteConn, err := net.Dial("tcp", localConn.Req.Target)
+				if err != nil {
+					fmt.Printf("net.Dial failed: %s\n", err)
+					return
+				}
+				defer remoteConn.Close()
+				err = localConn.Grant(&net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0})
+				if err != nil {
+					fmt.Printf("localConn.Grant failed: %s\n", err)
+					return
+				}
+
+				waitGroup := new(sync.WaitGroup)
+				waitGroup.Add(1)
+				serverFlowWriter := newFlowWriter(true)
+				clientFlowWriter := newFlowWriter(false)
+				go func() {
+					defer waitGroup.Done()
+
+					// Copy from remote to local, and tee to serverFlowWriter.
+					io.Copy(localConn, io.TeeReader(remoteConn, serverFlowWriter))
+
+					// fmt.Printf("Server Flows:\n%s\n\n", serverFlowWriter.String())
+
+					localConn.Close()
+					remoteConn.Close()
+				}()
+
+				// Copy from local to remote, and tee to clientFlowWriter.
+				io.Copy(remoteConn, io.TeeReader(localConn, clientFlowWriter))
+
+				// fmt.Printf("Client Flows:\n%s\n\n", clientFlowWriter.String())
+
+				localConn.Close()
+				remoteConn.Close()
+				waitGroup.Wait()
+
+				// clientFlowWriter and serverFlowWriter are synchronized by waitGroup.
+				f.ch <- []*flows{serverFlowWriter, clientFlowWriter}
+			}()
+		}
+	}()
+}
+
+func (f *flowInspectorProxy) close() error {
+	return f.listener.Close()
+}
+
+type flow struct {
+	// timeDelta is the time elapsed since the last flow
+	timeDelta time.Duration
+	data      []byte
+}
+
+type flows struct {
+	lastTime   time.Time
+	server     bool
+	streamDump *bytes.Buffer
+	flows      []flow
+}
+
+func newFlowWriter(server bool) *flows {
+	return &flows{
+		lastTime:   time.Now(),
+		streamDump: new(bytes.Buffer),
+		server:     server,
+	}
+}
+
+// String returns a string representation of the first 10 flows.
+func (f *flows) String() string {
+	var sb strings.Builder
+	for i, flow := range f.flows[:10] {
+		sb.WriteString(fmt.Sprintf("Flow %d: %.5f ms: %s\n",
+			i, flow.timeDelta.Seconds()*1000, hex.EncodeToString(flow.data)))
+	}
+	if len(f.flows) > 10 {
+		sb.WriteString("...\n")
+	}
+	return sb.String()
+}
+
+func (f *flows) Write(p []byte) (n int, err error) {
+	curTime := time.Now()
+
+	_, err = f.streamDump.Write(p)
+	if err != nil {
+		return 0, err
+	}
+
+	data := make([]byte, len(p))
+	n = copy(data, p)
+	if n < len(p) {
+		return n, io.ErrShortWrite
+	}
+
+	f.flows = append(f.flows, flow{
+		timeDelta: time.Since(f.lastTime),
+		data:      data,
+	})
+
+	f.lastTime = curTime
+
+	return n, err
 }

@@ -42,7 +42,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/bpf"
 )
 
@@ -110,6 +109,10 @@ type DialParameters struct {
 	MeekObfuscatorPaddingSeed *prng.Seed
 	MeekTLSPaddingSize        int
 	MeekResolvedIPAddress     atomic.Value `json:"-"`
+
+	TLSOSSHTransformedSNIServerName bool
+	TLSOSSHSNIServerName            string
+	TLSOSSHObfuscatorPaddingSeed    *prng.Seed
 
 	SelectedUserAgent bool
 	UserAgent         string
@@ -195,7 +198,6 @@ func MakeDialParameters(
 	replayObfuscatorPadding := p.Bool(parameters.ReplayObfuscatorPadding)
 	replayFragmentor := p.Bool(parameters.ReplayFragmentor)
 	replayTLSProfile := p.Bool(parameters.ReplayTLSProfile)
-	replayRandomizedTLSProfile := p.Bool(parameters.ReplayRandomizedTLSProfile)
 	replayFronting := p.Bool(parameters.ReplayFronting)
 	replayHostname := p.Bool(parameters.ReplayHostname)
 	replayQUICVersion := p.Bool(parameters.ReplayQUICVersion)
@@ -512,6 +514,11 @@ func MakeDialParameters(
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
+		} else if protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) {
+			dialParams.TLSOSSHObfuscatorPaddingSeed, err = prng.NewSeed()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
 		}
 	}
 
@@ -619,6 +626,7 @@ func MakeDialParameters(
 	}
 
 	usingTLS := protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
+		protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration
 
 	if (!isReplay || !replayTLSProfile) && usingTLS {
@@ -628,49 +636,23 @@ func MakeDialParameters(
 		requireTLS12SessionTickets := protocol.TunnelProtocolRequiresTLS12SessionTickets(
 			dialParams.TunnelProtocol)
 
+		requireTLS13Support := protocol.TunnelProtocolRequiresTLS13Support(dialParams.TunnelProtocol)
+
 		isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) ||
 			dialParams.ConjureAPIRegistration
 
-		dialParams.TLSProfile = SelectTLSProfile(
-			requireTLS12SessionTickets, isFronted, serverEntry.FrontingProviderID, p)
+		dialParams.TLSProfile, dialParams.TLSVersion, dialParams.RandomizedTLSProfileSeed, err = SelectTLSProfile(
+			requireTLS12SessionTickets, requireTLS13Support, isFronted, serverEntry.FrontingProviderID, p)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		if dialParams.TLSProfile == "" && (requireTLS12SessionTickets || requireTLS13Support) {
+			return nil, errors.TraceNew("required TLS profile not found")
+		}
 
 		dialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
 			parameters.NoDefaultTLSSessionIDProbability)
-	}
-
-	if (!isReplay || !replayRandomizedTLSProfile) && usingTLS &&
-		protocol.TLSProfileIsRandomized(dialParams.TLSProfile) {
-
-		dialParams.RandomizedTLSProfileSeed, err = prng.NewSeed()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-	}
-
-	if (!isReplay || !replayTLSProfile) && usingTLS {
-
-		// Since "Randomized-v2"/CustomTLSProfiles may be TLS 1.2 or TLS 1.3,
-		// construct the ClientHello to determine if it's TLS 1.3. This test also
-		// covers non-randomized TLS 1.3 profiles. This check must come after
-		// dialParams.TLSProfile and dialParams.RandomizedTLSProfileSeed are set. No
-		// actual dial is made here.
-
-		utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
-			p, dialParams.TLSProfile)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		if protocol.TLSProfileIsRandomized(dialParams.TLSProfile) {
-			utlsClientHelloID.Seed = new(utls.PRNGSeed)
-			*utlsClientHelloID.Seed = [32]byte(*dialParams.RandomizedTLSProfileSeed)
-		}
-
-		dialParams.TLSVersion, err = getClientHelloVersion(
-			utlsClientHelloID, utlsClientHelloSpec)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
 	}
 
 	if (!isReplay || !replayFronting) &&
@@ -716,6 +698,14 @@ func MakeDialParameters(
 			} else {
 				dialParams.MeekHostHeader = net.JoinHostPort(
 					hostname, strconv.Itoa(serverEntry.MeekServerPort))
+			}
+
+		} else if protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) {
+
+			dialParams.TLSOSSHSNIServerName = ""
+			if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
+				dialParams.TLSOSSHSNIServerName = selectHostName(dialParams.TunnelProtocol, p)
+				dialParams.TLSOSSHTransformedSNIServerName = true
 			}
 
 		} else if protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
@@ -958,7 +948,8 @@ func MakeDialParameters(
 		protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
 		protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 		protocol.TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
-		protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+		protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+		protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
 
 		dialParams.DirectDialAddress = net.JoinHostPort(serverEntry.IpAddress, dialParams.DialPortNumber)
 
@@ -1082,7 +1073,7 @@ func MakeDialParameters(
 
 	// Fragmentor configuration.
 	// Note: fragmentorConfig is nil if fragmentor is disabled for prefixed OSSH.
-  //
+	//
 	// Limitation: when replaying and with ReplayIgnoreChangedConfigState set,
 	// fragmentor.NewUpstreamConfig may select a config using newer tactics
 	// parameters.
@@ -1173,6 +1164,32 @@ func MakeDialParameters(
 
 func (dialParams *DialParameters) GetDialConfig() *DialConfig {
 	return dialParams.dialConfig
+}
+
+func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelConfig {
+
+	return &TLSTunnelConfig{
+		CustomTLSConfig: &CustomTLSConfig{
+			Parameters:               config.GetParameters(),
+			DialAddr:                 dialParams.DirectDialAddress,
+			SNIServerName:            dialParams.TLSOSSHSNIServerName,
+			SkipVerify:               true,
+			VerifyServerName:         "",
+			VerifyPins:               nil,
+			TLSProfile:               dialParams.TLSProfile,
+			NoDefaultTLSSessionID:    &dialParams.NoDefaultTLSSessionID,
+			RandomizedTLSProfileSeed: dialParams.RandomizedTLSProfileSeed,
+		},
+		// Obfuscated session tickets are not used because TLS-OSSH uses TLS 1.3.
+		UseObfuscatedSessionTickets: false,
+		// Meek obfuscated key used to allow clients with legacy unfronted
+		// meek-https server entries, that have the passthrough capability, to
+		// connect with TLS-OSSH to the servers corresponding to those server
+		// entries, which now support TLS-OSSH by demultiplexing meek-https and
+		// TLS-OSSH over the meek-https port.
+		ObfuscatedKey:         dialParams.ServerEntry.MeekObfuscatedKey,
+		ObfuscatorPaddingSeed: dialParams.TLSOSSHObfuscatorPaddingSeed,
+	}
 }
 
 func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
