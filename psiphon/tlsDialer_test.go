@@ -215,19 +215,19 @@ func TestTLSCertificateVerification(t *testing.T) {
 // certificate, for serverName, signed by that Root CA, and runs a web server
 // that uses that server certificate. initRootCAandWebServer returns:
 //
-// - the file name containing the Root CA, to be used with
-//   CustomTLSConfig.TrustedCACertificatesFilename
+//   - the file name containing the Root CA, to be used with
+//     CustomTLSConfig.TrustedCACertificatesFilename
 //
-// - pin values for the Root CA and server certificare, to be used with
-//   CustomTLSConfig.VerifyPins
+//   - pin values for the Root CA and server certificare, to be used with
+//     CustomTLSConfig.VerifyPins
 //
-// - a shutdown function which the caller must invoked to terminate the web
-//   server
+//   - a shutdown function which the caller must invoked to terminate the web
+//     server
 //
 // - the web server dial address: serverName and port
 //
-// - and a dialer function, which bypasses DNS resolution of serverName, to be
-//   used with CustomTLSConfig.Dial
+//   - and a dialer function, which bypasses DNS resolution of serverName, to be
+//     used with CustomTLSConfig.Dial
 func initTestCertificatesAndWebServer(
 	t *testing.T,
 	testDataDirName string,
@@ -565,7 +565,13 @@ func TestSelectTLSProfile(t *testing.T) {
 	numSelections := 10000
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
+		}
 		selected[profile] += 1
 	}
 
@@ -644,9 +650,15 @@ func TestSelectTLSProfile(t *testing.T) {
 	customTLSProfileNames := params.Get().CustomTLSProfileNames()
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
 		if !common.Contains(customTLSProfileNames, profile) {
 			t.Errorf("unexpected non-custom TLS profile selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
 		}
 	}
 
@@ -663,18 +675,64 @@ func TestSelectTLSProfile(t *testing.T) {
 	}
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, true, frontingProviderID, params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, true, frontingProviderID, params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
 		if common.Contains(disableTLSProfiles, profile) {
 			t.Errorf("unexpected disabled TLS profile selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
 		}
 	}
 
 	// Session ticket incapable TLS 1.2 profiles should not be selected
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(true, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(true, false, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
 		if protocol.TLS12ProfileOmitsSessionTickets(profile) {
 			t.Errorf("unexpected session ticket incapable TLS profile selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
+		}
+	}
+
+	// Only TLS 1.3 profiles should be selected
+
+	for i := 0; i < numSelections; i++ {
+		profile, tlsVersion, seed, err := SelectTLSProfile(false, true, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
+		if tlsVersion != protocol.TLS_VERSION_13 {
+			t.Errorf("expected TLS 1.3 profile to be selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
+		}
+	}
+
+	// Only TLS 1.3 profiles should be selected. All TLS 1.3 profiles should be
+	// session ticket capable.
+
+	for i := 0; i < numSelections; i++ {
+		profile, tlsVersion, seed, err := SelectTLSProfile(true, true, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
+		if protocol.TLS12ProfileOmitsSessionTickets(profile) {
+			t.Errorf("unexpected session ticket incapable TLS profile selected")
+		}
+		if tlsVersion != protocol.TLS_VERSION_13 {
+			t.Errorf("expected TLS 1.3 profile to be selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
 		}
 	}
 }

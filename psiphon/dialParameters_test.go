@@ -457,7 +457,6 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.ReplaySSH] = false
 	applyParameters[parameters.ReplayObfuscatorPadding] = false
 	applyParameters[parameters.ReplayFragmentor] = false
-	applyParameters[parameters.ReplayRandomizedTLSProfile] = false
 	applyParameters[parameters.ReplayObfuscatedQUIC] = false
 	applyParameters[parameters.ReplayLivenessTest] = false
 	applyParameters[parameters.ReplayAPIRequestPadding] = false
@@ -488,9 +487,6 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		identicalSeeds(replayDialParams.FragmentorSeed, dialParams.FragmentorSeed) ||
 		(protocol.TunnelProtocolUsesMeek(tunnelProtocol) &&
 			identicalSeeds(replayDialParams.MeekObfuscatorPaddingSeed, dialParams.MeekObfuscatorPaddingSeed)) ||
-		(protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) &&
-			identicalSeeds(replayDialParams.RandomizedTLSProfileSeed, dialParams.RandomizedTLSProfileSeed) &&
-			replayDialParams.RandomizedTLSProfileSeed != nil) ||
 		(protocol.TunnelProtocolUsesQUIC(tunnelProtocol) &&
 			identicalSeeds(replayDialParams.ObfuscatedQUICPaddingSeed, dialParams.ObfuscatedQUICPaddingSeed) &&
 			replayDialParams.ObfuscatedQUICPaddingSeed != nil) ||

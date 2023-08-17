@@ -116,7 +116,7 @@ func NewTunnelServer(
 }
 
 // Run runs the tunnel server; this function blocks while running a selection of
-// listeners that handle connection using various obfuscation protocols.
+// listeners that handle connections using various obfuscation protocols.
 //
 // Run listens on each designated tunnel port and spawns new goroutines to handle
 // each client connection. It halts when shutdownBroadcast is signaled. A list of active
@@ -188,6 +188,13 @@ func (server *TunnelServer) Run() error {
 			// Only direct, unfronted protocol listeners use TCP BPF circumvention
 			// programs.
 			listener, BPFProgramName, err = newTCPListenerWithBPF(support, localAddress)
+
+			if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+				listener, err = ListenTLSTunnel(support, listener, tunnelProtocol, listenPort)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
 		}
 
 		if err != nil {
@@ -521,15 +528,147 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) ||
-		protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) || protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
+
+		_, passthroughEnabled := sshServer.support.Config.TunnelProtocolPassthroughAddresses[sshListener.tunnelProtocol]
+
+		// Only use meek/TLS-OSSH demux if unfronted meek HTTPS with non-legacy passthrough.
+		useTLSDemux := protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) && !protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol) && passthroughEnabled && !sshServer.support.Config.LegacyPassthrough
+
+		if useTLSDemux {
+
+			sshServer.runMeekTLSOSSHDemuxListener(sshListener, listenerError, handleClient)
+
+		} else {
+			meekServer, err := NewMeekServer(
+				sshServer.support,
+				sshListener.Listener,
+				sshListener.tunnelProtocol,
+				sshListener.port,
+				protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol),
+				protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol),
+				protocol.TunnelProtocolUsesObfuscatedSessionTickets(sshListener.tunnelProtocol),
+				true,
+				handleClient,
+				sshServer.shutdownBroadcast)
+
+			if err == nil {
+				err = meekServer.Run()
+			}
+
+			if err != nil {
+				select {
+				case listenerError <- errors.Trace(err):
+				default:
+				}
+				return
+			}
+		}
+
+	} else {
+
+		runListener(sshListener.Listener, sshServer.shutdownBroadcast, listenerError, handleClient)
+	}
+}
+
+// runMeekTLSOSSHDemuxListener blocks running a listener which demuxes meek and
+// TLS-OSSH connections received on the same port.
+func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener, listenerError chan<- error, handleClient func(clientTunnelProtocol string, clientConn net.Conn)) {
+
+	meekClassifier := protocolClassifier{
+		minBytesToMatch: 4,
+		maxBytesToMatch: 4,
+		match: func(b []byte) bool {
+
+			// NOTE: HTTP transforms are only applied to plain HTTP
+			// meek so they are not a concern here.
+
+			return bytes.Contains(b, []byte("POST"))
+		},
+	}
+
+	tlsClassifier := protocolClassifier{
+		// NOTE: technically +1 not needed if detectors are evaluated
+		// in order by index in classifier array, which they are.
+		minBytesToMatch: meekClassifier.maxBytesToMatch + 1,
+		maxBytesToMatch: meekClassifier.maxBytesToMatch + 1,
+		match: func(b []byte) bool {
+			return len(b) > 4 // if not classified as meek, then tls
+		},
+	}
+
+	listener, err := ListenTLSTunnel(sshServer.support, sshListener.Listener, sshListener.tunnelProtocol, sshListener.port)
+	if err != nil {
+		select {
+		case listenerError <- errors.Trace(err):
+		default:
+		}
+		return
+	}
+
+	mux, listeners := newProtocolDemux(context.Background(), listener, []protocolClassifier{meekClassifier, tlsClassifier})
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+
+	go func() {
+
+		// handle shutdown gracefully
+
+		defer wg.Done()
+
+		<-sshServer.shutdownBroadcast
+		err := mux.Close()
+		if err != nil {
+			log.WithTraceFields(LogFields{"error": err}).Error("close failed")
+		}
+	}()
+
+	wg.Add(1)
+
+	go func() {
+
+		// start demultiplexing TLS-OSSH and meek HTTPS connections
+
+		defer wg.Done()
+
+		err := mux.run()
+		if err != nil {
+			select {
+			case listenerError <- errors.Trace(err):
+			default:
+			}
+			return
+		}
+	}()
+
+	wg.Add(1)
+
+	go func() {
+
+		// start handling TLS-OSSH connections as they are demultiplexed
+
+		defer wg.Done()
+
+		runListener(listeners[1], sshServer.shutdownBroadcast, listenerError, handleClient)
+	}()
+
+	wg.Add(1)
+
+	go func() {
+
+		// start handling meek HTTPS connections as they are
+		// demultiplexed
+
+		defer wg.Done()
 
 		meekServer, err := NewMeekServer(
 			sshServer.support,
-			sshListener.Listener,
+			listeners[0],
 			sshListener.tunnelProtocol,
 			sshListener.port,
-			protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol),
+			false,
 			protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol),
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(sshListener.tunnelProtocol),
 			true,
@@ -547,37 +686,39 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 			}
 			return
 		}
+	}()
 
-	} else {
+	wg.Wait()
+}
 
-		for {
-			conn, err := sshListener.Listener.Accept()
+func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, listenerError chan<- error, handleClient func(clientTunnelProtocol string, clientConn net.Conn)) {
+	for {
+		conn, err := listener.Accept()
+
+		select {
+		case <-shutdownBroadcast:
+			if err == nil {
+				conn.Close()
+			}
+			return
+		default:
+		}
+
+		if err != nil {
+			if e, ok := err.(net.Error); ok && e.Temporary() {
+				log.WithTraceFields(LogFields{"error": err}).Error("accept failed")
+				// Temporary error, keep running
+				continue
+			}
 
 			select {
-			case <-sshServer.shutdownBroadcast:
-				if err == nil {
-					conn.Close()
-				}
-				return
+			case listenerError <- errors.Trace(err):
 			default:
 			}
-
-			if err != nil {
-				if e, ok := err.(net.Error); ok && e.Temporary() {
-					log.WithTraceFields(LogFields{"error": err}).Error("accept failed")
-					// Temporary error, keep running
-					continue
-				}
-
-				select {
-				case listenerError <- errors.Trace(err):
-				default:
-				}
-				return
-			}
-
-			handleClient("", conn)
+			return
 		}
+
+		handleClient("", conn)
 	}
 }
 

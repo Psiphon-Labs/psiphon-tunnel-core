@@ -58,42 +58,51 @@
         }
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaCellular) {
         [networkID setString:@"MOBILE"];
-        CTTelephonyNetworkInfo *telephonyNetworkinfo = [[CTTelephonyNetworkInfo alloc] init];
-        CTCarrier *cellularProvider = [telephonyNetworkinfo subscriberCellularProvider];
-        if (cellularProvider != nil) {
-            NSString *mcc = [cellularProvider mobileCountryCode];
-            NSString *mnc = [cellularProvider mobileNetworkCode];
-            [networkID appendFormat:@"-%@-%@", mcc, mnc];
+
+        if (@available(iOS 16.0, *)) {
+            // Testing showed that the IP address of the active interface uniquely identified the
+            // corresponding network and did not change over long periods of time, which makes it a
+            // useful addition to the network ID value.
+            NSError *err;
+            NSString *activeInterfaceAddress =
+                [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
+                                                    andCurrentNetworkStatus:currentNetworkStatus
+                                                                      error:&err];
+            if (err != nil) {
+                NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
+                *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                                      code:1
+                                                  userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+                return networkID;
+            }
+            [networkID appendFormat:@"-%@", activeInterfaceAddress];
+        } else {
+            // CTCarrier.mobileCountryCode and CTCarrier.mobileCountryCode deprecated
+            // without replacement in iOS 16.0 https://developer.apple.com/forums/thread/714876.
+            CTTelephonyNetworkInfo *telephonyNetworkinfo = [[CTTelephonyNetworkInfo alloc] init];
+            CTCarrier *cellularProvider = [telephonyNetworkinfo subscriberCellularProvider];
+            if (cellularProvider != nil) {
+                NSString *mcc = [cellularProvider mobileCountryCode];
+                NSString *mnc = [cellularProvider mobileNetworkCode];
+                [networkID appendFormat:@"-%@-%@", mcc, mnc];
+            }
         }
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaWired) {
         [networkID setString:@"WIRED"];
 
         NSError *err;
-        NSString *activeInterface =
-            [NetworkInterface getActiveInterfaceWithReachability:reachability
-                                         andCurrentNetworkStatus:currentNetworkStatus
-                                                           error:&err];
+        NSString *activeInterfaceAddress =
+            [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
+                                                andCurrentNetworkStatus:currentNetworkStatus
+                                                                  error:&err];
         if (err != nil) {
-            NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface %@", err.localizedDescription];
+            NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
             *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary"
                                                   code:1
                                               userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
             return networkID;
         }
-
-        if (activeInterface != nil) {
-            NSError *err;
-            NSString *interfaceAddress = [NetworkInterface getInterfaceAddress:activeInterface
-                                                                         error:&err];
-            if (err != nil) {
-                NSString *localizedDescription =
-                    [NSString stringWithFormat:@"getNetworkID: error getting interface address %@", err.localizedDescription];
-                *outWarn = [[NSError alloc] initWithDomain:@"iOSLibrary" code:1 userInfo:@{NSLocalizedDescriptionKey: localizedDescription}];
-                return networkID;
-            } else if (interfaceAddress != nil) {
-                [networkID appendFormat:@"-%@", interfaceAddress];
-            }
-        }
+        [networkID appendFormat:@"-%@", activeInterfaceAddress];
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaLoopback) {
         [networkID setString:@"LOOPBACK"];
     }
