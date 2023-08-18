@@ -530,12 +530,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 
 	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) || protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
 
-		_, passthroughEnabled := sshServer.support.Config.TunnelProtocolPassthroughAddresses[sshListener.tunnelProtocol]
-
-		// Only use meek/TLS-OSSH demux if unfronted meek HTTPS with non-legacy passthrough.
-		useTLSDemux := protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) && !protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol) && passthroughEnabled && !sshServer.support.Config.LegacyPassthrough
-
-		if useTLSDemux {
+		if sshServer.tunnelProtocolUsesTLSDemux(sshListener.tunnelProtocol) {
 
 			sshServer.runMeekTLSOSSHDemuxListener(sshListener, listenerError, handleClient)
 
@@ -567,7 +562,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 
 	} else {
 
-		runListener(sshListener.Listener, sshServer.shutdownBroadcast, listenerError, handleClient)
+		runListener(sshListener.Listener, sshServer.shutdownBroadcast, listenerError, "", handleClient)
 	}
 }
 
@@ -651,7 +646,8 @@ func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener
 
 		defer wg.Done()
 
-		runListener(listeners[1], sshServer.shutdownBroadcast, listenerError, handleClient)
+		// Override the listener tunnel protocol to report TLS-OSSH instead.
+		runListener(listeners[1], sshServer.shutdownBroadcast, listenerError, protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH, handleClient)
 	}()
 
 	wg.Add(1)
@@ -691,7 +687,7 @@ func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener
 	wg.Wait()
 }
 
-func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, listenerError chan<- error, handleClient func(clientTunnelProtocol string, clientConn net.Conn)) {
+func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, listenerError chan<- error, overrideTunnelProtocol string, handleClient func(clientTunnelProtocol string, clientConn net.Conn)) {
 	for {
 		conn, err := listener.Accept()
 
@@ -718,7 +714,7 @@ func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, liste
 			return
 		}
 
-		handleClient("", conn)
+		handleClient(overrideTunnelProtocol, conn)
 	}
 }
 
@@ -921,6 +917,10 @@ func (sshServer *sshServer) getLoadStats() (
 		stats["ALL"] = zeroClientStats()
 		for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
 			stats[tunnelProtocol] = zeroClientStats()
+
+			if sshServer.tunnelProtocolUsesTLSDemux(tunnelProtocol) {
+				stats[protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH] = zeroClientStats()
+			}
 		}
 		return stats
 	}
@@ -1540,6 +1540,17 @@ func (sshServer *sshServer) monitorPortForwardDialError(err error) {
 				"port forward dial failed due to unavailable resource")
 		}
 	}
+}
+
+// tunnelProtocolUsesTLSDemux returns true if the server demultiplexes the given
+// protocol and TLS-OSSH over the same port.
+func (sshServer *sshServer) tunnelProtocolUsesTLSDemux(tunnelProtocol string) bool {
+	// Only use meek/TLS-OSSH demux if unfronted meek HTTPS with non-legacy passthrough.
+	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) && !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		_, passthroughEnabled := sshServer.support.Config.TunnelProtocolPassthroughAddresses[tunnelProtocol]
+		return passthroughEnabled && !sshServer.support.Config.LegacyPassthrough
+	}
+	return false
 }
 
 type sshClient struct {
