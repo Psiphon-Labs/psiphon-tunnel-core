@@ -69,7 +69,7 @@ func (c *Conn) serverHandshake() error {
 	// [Psiphon]
 	// The ClientHello with the passthrough message is now available. Route the
 	// client to passthrough based on message inspection. This code assumes the
-	// client TCP conn has been wrapped with recordingConn, which has recorded
+	// client TCP conn has been wrapped with recorderConn, which has recorded
 	// all bytes sent by the client, which will be replayed, byte-for-byte, to
 	// the passthrough; as a result, passthrough clients will perform their TLS
 	// handshake with the passthrough target, receive its certificate, and in the

@@ -39,7 +39,7 @@ github.com/Psiphon-Labs/quic-go/internal/utils/linkedlist
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/Psiphon-Labs/tls-tris v0.0.0-20210713133851-676a693d51ad
+# github.com/Psiphon-Labs/tls-tris v0.0.0-20230821160547-c948ccd6c156
 ## explicit
 github.com/Psiphon-Labs/tls-tris
 github.com/Psiphon-Labs/tls-tris/cipherhw
