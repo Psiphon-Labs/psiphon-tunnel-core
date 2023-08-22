@@ -171,3 +171,11 @@ func (conn *TLSTunnelConn) GetMetrics() common.LogFields {
 	}
 	return logFields
 }
+
+func (conn *TLSTunnelConn) IsClosed() bool {
+	closer, ok := conn.Conn.(common.Closer)
+	if !ok {
+		return false
+	}
+	return closer.IsClosed()
+}
