@@ -43,6 +43,9 @@ type TLSTunnelServer struct {
 	obfuscatorSeedHistory  *obfuscator.SeedHistory
 }
 
+// ListenTLSTunnel returns the listener of a new TLSTunnelServer.
+// Note: the first Read or Write call on a connection returned by the listener
+// will trigger the underlying TLS handshake.
 func ListenTLSTunnel(
 	support *SupportServices,
 	listener net.Listener,

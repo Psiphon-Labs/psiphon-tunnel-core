@@ -1652,7 +1652,12 @@ func checkExpectedServerTunnelLogFields(
 		return fmt.Errorf("unexpected host_id '%s'", fields["host_id"])
 	}
 
-	if fields["relay_protocol"].(string) != runConfig.tunnelProtocol {
+	expectedRelayProtocol := runConfig.tunnelProtocol
+	if runConfig.clientTunnelProtocol != "" {
+		expectedRelayProtocol = runConfig.clientTunnelProtocol
+	}
+
+	if fields["relay_protocol"].(string) != expectedRelayProtocol {
 		return fmt.Errorf("unexpected relay_protocol '%s'", fields["relay_protocol"])
 	}
 
