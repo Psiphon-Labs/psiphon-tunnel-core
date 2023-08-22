@@ -59,7 +59,7 @@ func runProtocolDemuxTest(tt *protocolDemuxTest) error {
 		}
 	}()
 
-	mux, protoListeners := newProtocolDemux(context.Background(), l, tt.classifiers)
+	mux, protoListeners := newProtocolDemux(context.Background(), l, tt.classifiers, 0)
 
 	errs := make([]chan error, len(protoListeners))
 	for i := range errs {
