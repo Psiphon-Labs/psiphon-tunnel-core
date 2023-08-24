@@ -165,10 +165,16 @@ func (c *Conn) serverHandshake() error {
 
 				defer conn.Close()
 
+				// Remove any pre-existing deadlines to ensure the passthrough
+				// is not interrupted.
+				_ = conn.SetDeadline(time.Time{})
+
 				passthroughConn, err := net.Dial("tcp", c.config.PassthroughAddress)
 				if err != nil {
 					return
 				}
+				defer passthroughConn.Close()
+
 				_, err = passthroughConn.Write(passthroughReadBuffer)
 				if err != nil {
 					return
