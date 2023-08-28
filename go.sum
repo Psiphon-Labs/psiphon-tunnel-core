@@ -16,10 +16,8 @@ github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20230608214729-dd57d6787acf h1:bGS+Wx
 github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20230608214729-dd57d6787acf/go.mod h1:wUiSd0qyefymNlikc99B2rRC01YPN1uUvDMytMOGmF8=
 github.com/Psiphon-Labs/quic-go v0.0.0-20230626192210-73f29effc9da h1:TI2+ExyFR3A0kPrFHfaM6y3RybP0HGfP9N1R8hfZzfk=
 github.com/Psiphon-Labs/quic-go v0.0.0-20230626192210-73f29effc9da/go.mod h1:wTIxqsKVrEQIxVIIYOEHuscY+PM3h6Wz79u5aF60fo0=
-github.com/Psiphon-Labs/tls-tris v0.0.0-20210713133851-676a693d51ad h1:m6HS84+b5xDPLj7D/ya1CeixyaHOCZoMbBilJ48y+Ts=
-github.com/Psiphon-Labs/tls-tris v0.0.0-20210713133851-676a693d51ad/go.mod h1:v3y9GXFo9Sf2mO6auD2ExGG7oDgrK8TI7eb49ZnUxrE=
-github.com/Psiphon-Labs/tls-tris v0.0.0-20230821160547-c948ccd6c156 h1:TlKg/9XkSlo5AqSJRVkTKIkwy/JXrQD6ybK3PZuAOwE=
-github.com/Psiphon-Labs/tls-tris v0.0.0-20230821160547-c948ccd6c156/go.mod h1:v3y9GXFo9Sf2mO6auD2ExGG7oDgrK8TI7eb49ZnUxrE=
+github.com/Psiphon-Labs/tls-tris v0.0.0-20230824155421-58bf6d336a9a h1:BOfU6ghaMsT/c40sWHmf3PXNwIendYXzL6tRv6NbPog=
+github.com/Psiphon-Labs/tls-tris v0.0.0-20230824155421-58bf6d336a9a/go.mod h1:v3y9GXFo9Sf2mO6auD2ExGG7oDgrK8TI7eb49ZnUxrE=
 github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 h1:w1UutsfOrms1J05zt7ISrnJIXKzwaspym5BTKGx93EI=
 github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412/go.mod h1:WPjqKcmVOxf0XSf3YxCJs6N6AOSrOx3obionmG7T0y0=
 github.com/andybalholm/brotli v1.0.4/go.mod h1:fO7iG3H7G2nSZ7m0zPUDn85XEX2GTukHGRSepvi9Eig=
