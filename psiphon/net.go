@@ -39,6 +39,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"golang.org/x/net/bpf"
 )
@@ -365,13 +367,14 @@ func UntunneledResolveIP(
 	ctx context.Context,
 	config *Config,
 	resolver *resolver.Resolver,
-	hostname string) ([]net.IP, error) {
+	hostname,
+	frontingProviderID string) ([]net.IP, error) {
 
 	// Limitations: for untunneled resolves, there is currently no resolve
 	// parameter replay, and no support for pre-resolved IPs.
 
 	params, err := resolver.MakeResolveParameters(
-		config.GetParameters().Get(), "")
+		config.GetParameters().Get(), frontingProviderID)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -388,8 +391,237 @@ func UntunneledResolveIP(
 	return IPs, nil
 }
 
+// makeUntunneledFrontedHTTPClient returns a net/http.Client which is
+// configured to use domain fronting and custom dialing features -- including
+// BindToDevice, etc. One or more fronting specs must be provided, i.e.
+// len(frontingSpecs) must be greater than 0. A function is returned which,
+// if non-nil, can be called after each request made with the net/http.Client
+// completes to retrieve the set of API parameter values applied to the request.
+//
+// The context is applied to underlying TCP dials. The caller is responsible
+// for applying the context to requests made with the returned http.Client.
+func makeUntunneledFrontedHTTPClient(ctx context.Context, config *Config, untunneledDialConfig *DialConfig, frontingSpecs parameters.FrontingSpecs, skipVerify, disableSystemRootCAs bool) (*http.Client, func() common.APIParameters, error) {
+
+	frontingProviderID, meekFrontingDialAddress, meekSNIServerName, meekVerifyServerName, meekVerifyPins, meekFrontingHost, err := parameters.FrontingSpecs(frontingSpecs).SelectParameters()
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
+
+	meekDialAddress := net.JoinHostPort(meekFrontingDialAddress, "443")
+	meekHostHeader := meekFrontingHost
+
+	p := config.GetParameters().Get()
+	effectiveTunnelProtocol := protocol.TUNNEL_PROTOCOL_FRONTED_MEEK
+
+	requireTLS12SessionTickets := protocol.TunnelProtocolRequiresTLS12SessionTickets(
+		effectiveTunnelProtocol)
+	requireTLS13Support := protocol.TunnelProtocolRequiresTLS13Support(effectiveTunnelProtocol)
+	isFronted := true
+
+	tlsProfile, tlsVersion, randomizedTLSProfileSeed, err := SelectTLSProfile(
+		requireTLS12SessionTickets, requireTLS13Support, isFronted, frontingProviderID, p)
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
+
+	if tlsProfile == "" && (requireTLS12SessionTickets || requireTLS13Support) {
+		return nil, nil, errors.TraceNew("required TLS profile not found")
+	}
+
+	noDefaultTLSSessionID := p.WeightedCoinFlip(
+		parameters.NoDefaultTLSSessionIDProbability)
+
+	// For a FrontingSpec, an SNI value of "" indicates to disable/omit SNI, so
+	// never transform in that case.
+	var meekTransformedHostName bool
+	if meekSNIServerName != "" {
+		if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
+			meekSNIServerName = selectHostName(effectiveTunnelProtocol, p)
+			meekTransformedHostName = true
+		}
+	}
+
+	addPsiphonFrontingHeader := false
+	if frontingProviderID != "" {
+		addPsiphonFrontingHeader = common.Contains(
+			p.LabeledTunnelProtocols(
+				parameters.AddFrontingProviderPsiphonFrontingHeader, frontingProviderID),
+			effectiveTunnelProtocol)
+	}
+
+	networkLatencyMultiplierMin := p.Float(parameters.NetworkLatencyMultiplierMin)
+	networkLatencyMultiplierMax := p.Float(parameters.NetworkLatencyMultiplierMax)
+
+	networkLatencyMultiplier := prng.ExpFloat64Range(
+		networkLatencyMultiplierMin,
+		networkLatencyMultiplierMax,
+		p.Float(parameters.NetworkLatencyMultiplierLambda))
+
+	meekConfig := &MeekConfig{
+		DiagnosticID:             frontingProviderID,
+		Parameters:               config.GetParameters(),
+		Mode:                     MeekModePlaintextRoundTrip,
+		DialAddress:              meekDialAddress,
+		UseHTTPS:                 true,
+		TLSProfile:               tlsProfile,
+		NoDefaultTLSSessionID:    noDefaultTLSSessionID,
+		RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
+		SNIServerName:            meekSNIServerName,
+		AddPsiphonFrontingHeader: addPsiphonFrontingHeader,
+		HostHeader:               meekHostHeader,
+		TransformedHostName:      meekTransformedHostName,
+		ClientTunnelProtocol:     effectiveTunnelProtocol,
+		NetworkLatencyMultiplier: networkLatencyMultiplier,
+	}
+
+	if !skipVerify {
+		meekConfig.VerifyServerName = meekVerifyServerName
+		meekConfig.VerifyPins = meekVerifyPins
+		meekConfig.DisableSystemRootCAs = disableSystemRootCAs
+	}
+
+	var resolvedIPAddress atomic.Value
+	resolvedIPAddress.Store("")
+
+	// The default untunneled dial config does not support pre-resolved IPs so
+	// redefine the dial config to override ResolveIP with an implementation
+	// that enables their use by passing the fronting provider ID into
+	// UntunneledResolveIP.
+	meekDialConfig := &DialConfig{
+		UpstreamProxyURL: untunneledDialConfig.UpstreamProxyURL,
+		CustomHeaders:    untunneledDialConfig.CustomHeaders,
+		DeviceBinder:     untunneledDialConfig.DeviceBinder,
+		IPv6Synthesizer:  untunneledDialConfig.IPv6Synthesizer,
+		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+			IPs, err := UntunneledResolveIP(
+				ctx, config, config.GetResolver(), hostname, frontingProviderID)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return IPs, nil
+		},
+		ResolvedIPCallback: func(IPAddress string) {
+			resolvedIPAddress.Store(IPAddress)
+		},
+	}
+
+	selectedUserAgent, userAgent := selectUserAgentIfUnset(p, meekDialConfig.CustomHeaders)
+	if selectedUserAgent {
+		if meekDialConfig.CustomHeaders == nil {
+			meekDialConfig.CustomHeaders = make(http.Header)
+		}
+		meekDialConfig.CustomHeaders.Set("User-Agent", userAgent)
+	}
+
+	// Use MeekConn to domain front requests.
+	//
+	// DialMeek will create a TLS connection immediately. We will delay
+	// initializing the MeekConn-based RoundTripper until we know it's needed.
+	// This is implemented by passing in a RoundTripper that establishes a
+	// MeekConn when RoundTrip is called.
+	//
+	// Resources are cleaned up when the response body is closed.
+	roundTrip := func(request *http.Request) (*http.Response, error) {
+
+		conn, err := DialMeek(
+			ctx, meekConfig, meekDialConfig)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		response, err := conn.RoundTrip(request)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// Do not read the response body into memory all at once because it may
+		// be large. Instead allow the caller to stream the response.
+		response.Body = newMeekHTTPResponseReadCloser(conn, response.Body)
+
+		return response, nil
+	}
+
+	params := func() common.APIParameters {
+		params := make(common.APIParameters)
+
+		params["fronting_provider_id"] = frontingProviderID
+
+		if meekConfig.DialAddress != "" {
+			params["meek_dial_address"] = meekConfig.DialAddress
+		}
+
+		meekResolvedIPAddress := resolvedIPAddress.Load()
+		if meekResolvedIPAddress != "" {
+			params["meek_resolved_ip_address"] = meekResolvedIPAddress
+		}
+
+		if meekConfig.SNIServerName != "" {
+			params["meek_sni_server_name"] = meekConfig.SNIServerName
+		}
+
+		if meekConfig.HostHeader != "" {
+			params["meek_host_header"] = meekConfig.HostHeader
+		}
+
+		transformedHostName := "0"
+		if meekTransformedHostName {
+			transformedHostName = "1"
+		}
+		params["meek_transformed_host_name"] = transformedHostName
+
+		if meekConfig.TLSProfile != "" {
+			params["tls_profile"] = meekConfig.TLSProfile
+		}
+
+		if selectedUserAgent {
+			params["user_agent"] = userAgent
+		}
+
+		if tlsVersion != "" {
+			params["tls_version"] = getTLSVersionForMetrics(tlsVersion, meekConfig.NoDefaultTLSSessionID)
+		}
+
+		return params
+	}
+
+	return &http.Client{
+		Transport: common.NewHTTPRoundTripper(roundTrip),
+	}, params, nil
+}
+
+// meekHTTPResponseReadCloser wraps an http.Response.Body received over a
+// MeekConn in MeekModePlaintextRoundTrip and exposes an io.ReadCloser. Close
+// closes the meek conn and response body.
+type meekHTTPResponseReadCloser struct {
+	conn         *MeekConn
+	responseBody io.ReadCloser
+}
+
+// newMeekHTTPResponseReadCloser creates a meekHTTPResponseReadCloser.
+func newMeekHTTPResponseReadCloser(meekConn *MeekConn, responseBody io.ReadCloser) *meekHTTPResponseReadCloser {
+	return &meekHTTPResponseReadCloser{
+		conn:         meekConn,
+		responseBody: responseBody,
+	}
+}
+
+// Read implements the io.Reader interface.
+func (meek *meekHTTPResponseReadCloser) Read(p []byte) (n int, err error) {
+	return meek.responseBody.Read(p)
+}
+
+// Read implements the io.Closer interface.
+func (meek *meekHTTPResponseReadCloser) Close() error {
+	err := meek.responseBody.Close()
+	_ = meek.conn.Close()
+	return err
+}
+
 // MakeUntunneledHTTPClient returns a net/http.Client which is configured to
-// use custom dialing features -- including BindToDevice, etc.
+// use custom dialing features -- including BindToDevice, etc. A function is
+// returned which, if non-nil, can be called after each request made with the
+// net/http.Client completes to retrieve the set of API parameter values
+// applied to the request.
 //
 // The context is applied to underlying TCP dials. The caller is responsible
 // for applying the context to requests made with the returned http.Client.
@@ -397,7 +629,20 @@ func MakeUntunneledHTTPClient(
 	ctx context.Context,
 	config *Config,
 	untunneledDialConfig *DialConfig,
-	skipVerify bool) (*http.Client, error) {
+	skipVerify bool,
+	disableSystemRootCAs bool,
+	frontingSpecs parameters.FrontingSpecs) (*http.Client, func() common.APIParameters, error) {
+
+	if len(frontingSpecs) > 0 {
+
+		// Ignore skipVerify because it only applies when there are no
+		// fronting specs.
+		httpClient, getParams, err := makeUntunneledFrontedHTTPClient(ctx, config, untunneledDialConfig, frontingSpecs, false, disableSystemRootCAs)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+		return httpClient, getParams, nil
+	}
 
 	dialer := NewTCPDialer(untunneledDialConfig)
 
@@ -407,6 +652,7 @@ func MakeUntunneledHTTPClient(
 		UseDialAddrSNI:                true,
 		SNIServerName:                 "",
 		SkipVerify:                    skipVerify,
+		DisableSystemRootCAs:          disableSystemRootCAs,
 		TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
 	}
 	tlsConfig.EnableClientSessionCache()
@@ -426,7 +672,7 @@ func MakeUntunneledHTTPClient(
 		Transport: transport,
 	}
 
-	return httpClient, nil
+	return httpClient, nil, nil
 }
 
 // MakeTunneledHTTPClient returns a net/http.Client which is
@@ -472,16 +718,23 @@ func MakeTunneledHTTPClient(
 	}, nil
 }
 
-// MakeDownloadHTTPClient is a helper that sets up a http.Client
-// for use either untunneled or through a tunnel.
+// MakeDownloadHTTPClient is a helper that sets up a http.Client for use either
+// untunneled or through a tunnel. True is returned if the http.Client is setup
+// for use through a tunnel; otherwise it is setup for untunneled use. A
+// function is returned which, if non-nil, can be called after each request
+// made with the http.Client completes to retrieve the set of API
+// parameter values applied to the request.
 func MakeDownloadHTTPClient(
 	ctx context.Context,
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
-	skipVerify bool) (*http.Client, bool, error) {
+	skipVerify,
+	disableSystemRootCAs bool,
+	frontingSpecs parameters.FrontingSpecs) (*http.Client, bool, func() common.APIParameters, error) {
 
 	var httpClient *http.Client
+	var getParams func() common.APIParameters
 	var err error
 
 	tunneled := tunnel != nil
@@ -489,21 +742,20 @@ func MakeDownloadHTTPClient(
 	if tunneled {
 
 		httpClient, err = MakeTunneledHTTPClient(
-			config, tunnel, skipVerify)
+			config, tunnel, skipVerify || disableSystemRootCAs)
 		if err != nil {
-			return nil, false, errors.Trace(err)
+			return nil, false, nil, errors.Trace(err)
 		}
 
 	} else {
-
-		httpClient, err = MakeUntunneledHTTPClient(
-			ctx, config, untunneledDialConfig, skipVerify)
+		httpClient, getParams, err = MakeUntunneledHTTPClient(
+			ctx, config, untunneledDialConfig, skipVerify, disableSystemRootCAs, frontingSpecs)
 		if err != nil {
-			return nil, false, errors.Trace(err)
+			return nil, false, nil, errors.Trace(err)
 		}
 	}
 
-	return httpClient, tunneled, nil
+	return httpClient, tunneled, getParams, nil
 }
 
 // ResumeDownload is a reusable helper that downloads requestUrl via the
@@ -519,7 +771,6 @@ func MakeDownloadHTTPClient(
 // When ifNoneMatchETag is specified, no download is made if the remote
 // object has the same ETag. ifNoneMatchETag has an effect only when no
 // partial download is in progress.
-//
 func ResumeDownload(
 	ctx context.Context,
 	httpClient *http.Client,

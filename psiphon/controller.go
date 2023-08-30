@@ -159,8 +159,13 @@ func NewController(config *Config) (controller *Controller, err error) {
 		DeviceBinder:     controller.config.deviceBinder,
 		IPv6Synthesizer:  controller.config.IPv6Synthesizer,
 		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+			// Note: when domain fronting would be used for untunneled dials a
+			// copy of untunneledDialConfig should be used instead, which
+			// redefines ResolveIP such that the corresponding fronting
+			// provider ID is passed into UntunneledResolveIP to enable the use
+			// of pre-resolved IPs.
 			IPs, err := UntunneledResolveIP(
-				ctx, controller.config, controller.resolver, hostname)
+				ctx, controller.config, controller.resolver, hostname, "")
 			if err != nil {
 				return nil, errors.Trace(err)
 			}

@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 const (
@@ -418,15 +420,15 @@ type Config struct {
 	// operating system.
 	TrustedCACertificatesFilename string
 
-	// TransferURLsAlwaysSkipVerify, when true, forces TransferURL.SkipVerify
-	// to true for all remote server list downloads, upgrade downloads, and
-	// feedback uploads. Each of these transfers has additional security at
-	// the payload level. Verifying TLS certificates is preferred, as an
-	// additional security and circumvention layer; set
-	// TransferURLsAlwaysSkipVerify only in cases where system root CAs
-	// cannot be loaded; for example, if unsupported (iOS < 12) or
-	// insufficient memory (VPN extension on iOS < 15).
-	TransferURLsAlwaysSkipVerify bool
+	// DisableSystemRootCAs, when true, disables loading system root CAs when
+	// verifying TLS certificates for all remote server list downloads, upgrade
+	// downloads, and feedback uploads. Each of these transfers has additional
+	// security at the payload level. Verifying TLS certificates is preferred,
+	// as an additional security and circumvention layer; set
+	// DisableSystemRootCAs only in cases where system root CAs cannot be
+	// loaded; for example, if unsupported (iOS < 12) or insufficient memory
+	// (VPN extension on iOS < 15).
+	DisableSystemRootCAs bool
 
 	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive
 	// every 1-2 minutes, when the tunnel is idle. If the SSH keepalive times
@@ -853,6 +855,9 @@ type Config struct {
 	TLSTunnelMinTLSPadding             *int
 	TLSTunnelMaxTLSPadding             *int
 
+	// AdditionalParameters is used for testing.
+	AdditionalParameters string
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -956,6 +961,12 @@ func (config *Config) IsCommitted() bool {
 // be re-populated over time.
 func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
+	// Apply any additional parameters first
+	additionalParametersInfoMsgs, err := config.applyAdditionalParameters()
+	if err != nil {
+		return errors.TraceMsg(err, "failed to apply additional parameters")
+	}
+
 	// Do SetEmitDiagnosticNotices first, to ensure config file errors are
 	// emitted.
 	if config.EmitDiagnosticNotices {
@@ -1041,6 +1052,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	}
 
 	// Emit notices now that notice files are set if configured
+	for _, msg := range additionalParametersInfoMsgs {
+		NoticeInfo(msg)
+	}
 	for _, msg := range noticeMigrationAlertMsgs {
 		NoticeWarning(msg)
 	}
@@ -1132,7 +1146,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("sponsor ID is missing from the configuration file")
 	}
 
-	_, err := strconv.Atoi(config.ClientVersion)
+	_, err = strconv.Atoi(config.ClientVersion)
 	if err != nil {
 		return errors.Tracef("invalid client version: %s", err)
 	}
@@ -2555,6 +2569,61 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	config.dialParametersHash = hash.Sum(nil)
+}
+
+// applyAdditionalParameters decodes and applies any additional parameters
+// stored in config.AdditionalParameter to the Config and returns an array
+// of notices which should be logged at the info level. If there is no error,
+// then config.AdditionalParameter is set to "" to conserve memory and further
+// calls will do nothing. This function should only be called once.
+//
+// If there is an error, the existing Config is left entirely unmodified.
+func (config *Config) applyAdditionalParameters() ([]string, error) {
+
+	if config.AdditionalParameters == "" {
+		return nil, nil
+	}
+
+	b, err := base64.StdEncoding.DecodeString(config.AdditionalParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if len(b) < 32 {
+		return nil, errors.Tracef("invalid length, len(b) == %d", len(b))
+	}
+
+	var key [32]byte
+	copy(key[:], b[:32])
+
+	decrypted, ok := secretbox.Open(nil, b[32:], &[24]byte{}, &key)
+	if !ok {
+		return nil, errors.TraceNew("secretbox.Open failed")
+	}
+
+	var additionalParameters Config
+	err = json.Unmarshal(decrypted, &additionalParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	src := reflect.ValueOf(&additionalParameters).Elem()
+	dest := reflect.ValueOf(config).Elem()
+
+	var infoNotices []string
+
+	for i := 0; i < src.NumField(); i++ {
+		if !src.Field(i).IsZero() {
+			dest.Field(i).Set(src.Field(i))
+			infoNotice := fmt.Sprintf("%s overridden by AdditionalParameters", dest.Type().Field(i).Name)
+			infoNotices = append(infoNotices, infoNotice)
+		}
+	}
+
+	// Reset field to conserve memory since this is a one-time operation.
+	config.AdditionalParameters = ""
+
+	return infoNotices, nil
 }
 
 func promoteLegacyTransferURL(URL string) parameters.TransferURLs {

@@ -838,7 +838,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
     }
 
-    // Where required, enable TransferURLsAlwaysSkipVerify, which overrides
+    // Where required, enable DisableSystemRootCAs, which overrides
     // the TransferURL.SkipVerify configuration for remote server list
     // downloads and feedback uploads. Both of these operations have
     // additional security at the payload level. Verifying TLS certificates
@@ -854,7 +854,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     } else if (@available(iOS 12.0, *)) {
         alwaysSkipVerify = *tunnelWholeDevice;
     }
-    config[@"TransferURLsAlwaysSkipVerify"] = @(alwaysSkipVerify);
+    config[@"DisableSystemRootCAs"] = @(alwaysSkipVerify);
 
     NSString *finalConfigStr = [[[SBJson4Writer alloc] init] stringWithObject:config];
     
