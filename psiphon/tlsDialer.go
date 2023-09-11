@@ -60,6 +60,7 @@ import (
 	"encoding/hex"
 	std_errors "errors"
 	"io/ioutil"
+	"math"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -365,6 +366,10 @@ func CustomTLSDial(
 
 		utlsClientHelloID.Seed = new(utls.PRNGSeed)
 		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+
+		weights := utls.DefaultWeights
+		weights.TLSVersMax_Set_VersionTLS13 = 0.5
+		utlsClientHelloID.Weights = &weights
 	}
 
 	// As noted here,
@@ -836,6 +841,8 @@ func getUTLSClientHelloID(
 		return utls.HelloIOS_13, nil, nil
 	case protocol.TLS_PROFILE_IOS_14:
 		return utls.HelloIOS_14, nil, nil
+	case protocol.TLS_PROFILE_SAFARI_16:
+		return utls.HelloSafari_16_0, nil, nil
 	case protocol.TLS_PROFILE_CHROME_58:
 		return utls.HelloChrome_58, nil, nil
 	case protocol.TLS_PROFILE_CHROME_62:
@@ -850,6 +857,31 @@ func getUTLSClientHelloID(
 		return utls.HelloChrome_96, nil, nil
 	case protocol.TLS_PROFILE_CHROME_102:
 		return utls.HelloChrome_102, nil, nil
+	case protocol.TLS_PROFILE_CHROME_106:
+		return utls.HelloChrome_106_Shuffle, nil, nil
+	case protocol.TLS_PROFILE_CHROME_112_PSK:
+		preset, err := utls.UTLSIdToSpec(utls.HelloChrome_112_PSK_Shuf)
+		if err != nil {
+			return utls.HelloCustom, nil, err
+		}
+
+		// Generates typical PSK extension values.
+		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
+		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
+		obfuscatedTicketAge := uint32(prng.Range(13029567, math.MaxUint32))
+		binder := prng.Bytes(33)
+		binder[0] = 0x20 // Binder's length
+
+		if pskExt, ok := preset.Extensions[len(preset.Extensions)-1].(*utls.FakePreSharedKeyExtension); ok {
+			pskExt.PskIdentities = []utls.PskIdentity{
+				{
+					Label:               label,
+					ObfuscatedTicketAge: obfuscatedTicketAge,
+				},
+			}
+			pskExt.PskBinders = [][]byte{binder}
+		}
+		return utls.HelloCustom, &preset, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
@@ -897,7 +929,8 @@ func getClientHelloVersion(
 		utls.HelloChrome_83, utls.HelloChrome_96,
 		utls.HelloChrome_102, utls.HelloFirefox_65,
 		utls.HelloFirefox_99, utls.HelloFirefox_105,
-		utls.HelloGolang:
+		utls.HelloChrome_106_Shuffle, utls.HelloGolang,
+		utls.HelloSafari_16_0:
 		return protocol.TLS_VERSION_13, nil
 	}
 
