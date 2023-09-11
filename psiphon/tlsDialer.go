@@ -868,7 +868,8 @@ func getUTLSClientHelloID(
 		// Generates typical PSK extension values.
 		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
 		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
-		obfuscatedTicketAge := uint32(prng.Range(13029567, math.MaxUint32))
+		obfuscatedTicketAge := prng.RangeUint32(13029567, math.MaxUint32)
+
 		binder := prng.Bytes(33)
 		binder[0] = 0x20 // Binder's length
 
