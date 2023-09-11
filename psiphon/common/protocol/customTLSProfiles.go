@@ -55,7 +55,6 @@ type GenericExtensionCompat utls.GenericExtension
 type UtlsExtendedMasterSecretExtensionCompat utls.UtlsExtendedMasterSecretExtension
 type UtlsGREASEExtensionCompat utls.UtlsGREASEExtension
 type UtlsPaddingExtensionCompat utls.UtlsPaddingExtension
-type KeyShareExtensionCompat utls.KeyShareExtension
 type PSKKeyExchangeModesExtensionCompat utls.PSKKeyExchangeModesExtension
 type SupportedVersionsExtensionCompat utls.SupportedVersionsExtension
 type FakeChannelIDExtensionCompat utls.FakeChannelIDExtension
@@ -63,6 +62,12 @@ type UtlsCompressCertExtensionCompat utls.UtlsCompressCertExtension
 type FakeRecordSizeLimitExtensionCompat utls.FakeRecordSizeLimitExtension
 type ApplicationSettingsExtensionCompat utls.ApplicationSettingsExtension
 type DelegatedCredentialsExtensionCompat utls.DelegatedCredentialsExtension
+type KeyShareExtensionCompat struct {
+	KeyShares []struct {
+		Group utls.CurveID
+		Data  []byte
+	}
+}
 
 // Validate checks that the profiles in CustomTLSProfiles are initialized and
 // have no name conflicts.
@@ -222,7 +227,15 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		extension := utls.KeyShareExtension(compat)
+		extension := utls.KeyShareExtension{
+			KeyShares: make([]utls.KeyShare, len(compat.KeyShares)),
+		}
+		for i, keyShare := range compat.KeyShares {
+			extension.KeyShares[i] = utls.KeyShare{
+				Group: keyShare.Group,
+				Data:  keyShare.Data,
+			}
+		}
 		return &extension, nil
 	case "PSKKeyExchangeModes":
 		var compat PSKKeyExchangeModesExtensionCompat
