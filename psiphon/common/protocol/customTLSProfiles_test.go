@@ -74,26 +74,26 @@ func TestCustomTLSProfiles(t *testing.T) {
 			&utls.ALPNExtension{AlpnProtocols: []string{"h2", "http/1.1"}},
 			&utls.FakeChannelIDExtension{},
 			&utls.SupportedPointsExtension{SupportedPoints: []byte{0}},
-			&utls.SupportedCurvesExtension{[]utls.CurveID{
+			&utls.SupportedCurvesExtension{Curves: []utls.CurveID{
 				utls.X25519, utls.CurveP256, utls.CurveP384}},
 			&utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle},
 
 			// Additional extensions for test coverage
 			&utls.NPNExtension{NextProtos: []string{"http/1.1"}},
 			&utls.GenericExtension{Id: 9999, Data: []byte("generic extension")},
-			&utls.KeyShareExtension{[]utls.KeyShare{
+			&utls.KeyShareExtension{KeyShares: []utls.KeyShare{
 				{Group: utls.X25519, Data: []byte{9, 9, 9, 9}},
 			}},
-			&utls.PSKKeyExchangeModesExtension{[]uint8{
+			&utls.PSKKeyExchangeModesExtension{Modes: []uint8{
 				utls.PskModeDHE,
 			}},
-			&utls.SupportedVersionsExtension{[]uint16{
+			&utls.SupportedVersionsExtension{Versions: []uint16{
 				utls.VersionTLS13,
 				utls.VersionTLS12,
 				utls.VersionTLS11,
 				utls.VersionTLS10,
 			}},
-			&utls.UtlsCompressCertExtension{[]utls.CertCompressionAlgo{
+			&utls.UtlsCompressCertExtension{Algorithms: []utls.CertCompressionAlgo{
 				utls.CertCompressionBrotli,
 			}},
 			&utls.FakeChannelIDExtension{},

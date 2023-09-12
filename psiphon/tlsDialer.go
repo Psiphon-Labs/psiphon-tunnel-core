@@ -862,7 +862,7 @@ func getUTLSClientHelloID(
 	case protocol.TLS_PROFILE_CHROME_112_PSK:
 		preset, err := utls.UTLSIdToSpec(utls.HelloChrome_112_PSK_Shuf)
 		if err != nil {
-			return utls.HelloCustom, nil, err
+			return utls.ClientHelloID{}, nil, err
 		}
 
 		// Generates typical PSK extension values.
@@ -902,7 +902,7 @@ func getUTLSClientHelloID(
 
 	customTLSProfile := p.CustomTLSProfile(tlsProfile)
 	if customTLSProfile == nil {
-		return utls.HelloCustom,
+		return utls.ClientHelloID{},
 			nil,
 			errors.Tracef("unknown TLS profile: %s", tlsProfile)
 	}
