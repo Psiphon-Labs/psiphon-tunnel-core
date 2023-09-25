@@ -632,6 +632,7 @@ func (t *HTTPNormalizer) SetWriteDeadline(tt time.Time) error {
 	return t.Conn.SetWriteDeadline(tt)
 }
 
+// GetMetrics implements the common.MetricsSource interface.
 func (t *HTTPNormalizer) GetMetrics() common.LogFields {
 	// Relay any metrics from the underlying conn.
 	m, ok := t.Conn.(common.MetricsSource)
