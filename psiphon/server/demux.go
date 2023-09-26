@@ -26,6 +26,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -318,4 +319,14 @@ func (conn *bufferedConn) Read(b []byte) (n int, err error) {
 	conn.buffer = nil
 
 	return conn.Conn.Read(b)
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *bufferedConn) GetMetrics() common.LogFields {
+	// Relay any metrics from the underlying conn.
+	m, ok := conn.Conn.(common.MetricsSource)
+	if ok {
+		return m.GetMetrics()
+	}
+	return nil
 }
