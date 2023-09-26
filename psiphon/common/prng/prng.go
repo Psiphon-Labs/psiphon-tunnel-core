@@ -283,6 +283,15 @@ func (p *PRNG) Range(min, max int) int {
 	return n
 }
 
+// RangeUint32 selects an unsigned 32-bit random integer in [min, max].
+// If max < min, min is returned.
+func (p *PRNG) RangeUint32(min, max uint32) uint32 {
+	if max < min {
+		return min
+	}
+	return min + uint32(p.rand.Int63n(int64(max-min)+1))
+}
+
 // Bytes returns a new slice containing length random bytes.
 func (p *PRNG) Bytes(length int) []byte {
 	b := make([]byte, length)
@@ -374,6 +383,10 @@ func Perm(n int) []int {
 
 func Range(min, max int) int {
 	return p.Range(min, max)
+}
+
+func RangeUint32(min, max uint32) uint32 {
+	return p.RangeUint32(min, max)
 }
 
 func Bytes(length int) []byte {

@@ -276,6 +276,7 @@ func (t *HTTPTransformer) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// GetMetrics implements the common.MetricsSource interface.
 func (t *HTTPTransformer) GetMetrics() common.LogFields {
 	// Relay any metrics from the underlying conn.
 	m, ok := t.Conn.(common.MetricsSource)
