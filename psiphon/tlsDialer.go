@@ -214,8 +214,7 @@ func CustomTLSDial(
 		(config.VerifyLegacyCertificate != nil &&
 			(config.SkipVerify ||
 				len(config.VerifyServerName) > 0 ||
-				len(config.VerifyPins) > 0 ||
-				config.DisableSystemRootCAs)) ||
+				len(config.VerifyPins) > 0)) ||
 
 		(config.DisableSystemRootCAs &&
 			(!config.SkipVerify &&

@@ -105,7 +105,6 @@ type DialParameters struct {
 	MeekSNIServerName         string
 	MeekVerifyServerName      string
 	MeekVerifyPins            []string
-	MeekDisableSystemRootCAs  bool
 	MeekHostHeader            string
 	MeekObfuscatorPaddingSeed *prng.Seed
 	MeekTLSPaddingSize        int
@@ -585,7 +584,6 @@ func MakeDialParameters(
 				(len(dialParams.MeekVerifyPins) == 0 || dialParams.MeekVerifyServerName == "") {
 				return nil, errors.TraceNew("TLS certificates must be verified in Conjure API registration")
 			}
-			dialParams.MeekDisableSystemRootCAs = config.DisableSystemRootCAs
 
 			dialParams.MeekDialAddress = net.JoinHostPort(dialParams.MeekFrontingDialAddress, "443")
 			dialParams.MeekHostHeader = dialParams.MeekFrontingHost
@@ -1138,7 +1136,7 @@ func MakeDialParameters(
 			AddPsiphonFrontingHeader:      addPsiphonFrontingHeader,
 			VerifyServerName:              dialParams.MeekVerifyServerName,
 			VerifyPins:                    dialParams.MeekVerifyPins,
-			DisableSystemRootCAs:          dialParams.MeekDisableSystemRootCAs,
+			DisableSystemRootCAs:          config.DisableSystemRootCAs,
 			HostHeader:                    dialParams.MeekHostHeader,
 			TransformedHostName:           dialParams.MeekTransformedHostName,
 			ClientTunnelProtocol:          dialParams.TunnelProtocol,
