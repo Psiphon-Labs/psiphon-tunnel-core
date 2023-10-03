@@ -37,6 +37,8 @@ type TransferURL struct {
 	// SkipVerify indicates whether to verify HTTPS certificates. In some
 	// circumvention scenarios, verification is not possible. This must
 	// only be set to true when the resource has its own verification mechanism.
+	// Overridden when a FrontingSpec in FrontingSpecs has verification fields
+	// set.
 	SkipVerify bool
 
 	// OnlyAfterAttempts specifies how to schedule this URL when transferring
@@ -54,6 +56,10 @@ type TransferURL struct {
 	// RequestHeaders are optional HTTP headers to set on any requests made to
 	// the destination.
 	RequestHeaders map[string]string `json:",omitempty"`
+
+	// FrontingSpecs is an optional set of domain fronting configurations to
+	// apply to any requests made to the destination.
+	FrontingSpecs FrontingSpecs
 }
 
 // TransferURLs is a list of transfer URLs.

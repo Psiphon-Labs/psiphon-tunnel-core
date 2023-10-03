@@ -87,12 +87,14 @@ func DownloadUpgrade(
 
 	downloadURL := urls.Select(attempt)
 
-	httpClient, _, err := MakeDownloadHTTPClient(
+	httpClient, _, _, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
-		downloadURL.SkipVerify || config.TransferURLsAlwaysSkipVerify)
+		downloadURL.SkipVerify,
+		config.DisableSystemRootCAs,
+		downloadURL.FrontingSpecs)
 	if err != nil {
 		return errors.Trace(err)
 	}
