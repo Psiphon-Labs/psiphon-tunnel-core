@@ -163,12 +163,36 @@ func RunServices(configJSON []byte) (retErr error) {
 			waitGroup.Done()
 			ticker := time.NewTicker(time.Duration(config.LoadMonitorPeriodSeconds) * time.Second)
 			defer ticker.Stop()
+
+			logNetworkBytes := true
+
+			previousNetworkBytesReceived, previousNetworkBytesSent, err := getNetworkBytesTransferred()
+			if err != nil {
+				log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error("failed to get initial network bytes transferred")
+				logNetworkBytes = false
+			}
+
 			for {
 				select {
 				case <-shutdownBroadcast:
 					return
 				case <-ticker.C:
-					logServerLoad(support)
+					var networkBytesReceived, networkBytesSent int64
+
+					if logNetworkBytes {
+						currentNetworkBytesReceived, currentNetworkBytesSent, err := getNetworkBytesTransferred()
+						if err != nil {
+							log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error("failed to get current network bytes transferred")
+							logNetworkBytes = false
+						}
+
+						networkBytesReceived = currentNetworkBytesReceived - previousNetworkBytesReceived
+						networkBytesSent = currentNetworkBytesSent - previousNetworkBytesSent
+
+						previousNetworkBytesReceived, previousNetworkBytesSent = currentNetworkBytesReceived, currentNetworkBytesSent
+					}
+
+					logServerLoad(support, logNetworkBytes, networkBytesReceived, networkBytesSent)
 				}
 			}
 		}()
@@ -284,7 +308,7 @@ loop:
 			case signalProcessProfiles <- struct{}{}:
 			default:
 			}
-			logServerLoad(support)
+			logServerLoad(support, false, 0, 0)
 
 		case <-systemStopSignal:
 			log.WithTrace().Info("shutdown by system")
@@ -362,11 +386,16 @@ func outputProcessProfiles(config *Config, filenameSuffix string) {
 	}
 }
 
-func logServerLoad(support *SupportServices) {
+func logServerLoad(support *SupportServices, logNetworkBytes bool, networkBytesReceived int64, networkBytesSent int64) {
 
 	serverLoad := getRuntimeMetrics()
 
 	serverLoad["event_name"] = "server_load"
+
+	if logNetworkBytes {
+		serverLoad["network_bytes_received"] = networkBytesReceived
+		serverLoad["network_bytes_sent"] = networkBytesSent
+	}
 
 	establishTunnels, establishLimitedCount :=
 		support.TunnelServer.GetEstablishTunnelsMetrics()
