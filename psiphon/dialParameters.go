@@ -580,6 +580,11 @@ func MakeDialParameters(
 				return nil, errors.Trace(err)
 			}
 
+			if config.DisableSystemRootCAs &&
+				(len(dialParams.MeekVerifyPins) == 0 || dialParams.MeekVerifyServerName == "") {
+				return nil, errors.TraceNew("TLS certificates must be verified in Conjure API registration")
+			}
+
 			dialParams.MeekDialAddress = net.JoinHostPort(dialParams.MeekFrontingDialAddress, "443")
 			dialParams.MeekHostHeader = dialParams.MeekFrontingHost
 
@@ -1131,6 +1136,7 @@ func MakeDialParameters(
 			AddPsiphonFrontingHeader:      addPsiphonFrontingHeader,
 			VerifyServerName:              dialParams.MeekVerifyServerName,
 			VerifyPins:                    dialParams.MeekVerifyPins,
+			DisableSystemRootCAs:          config.DisableSystemRootCAs,
 			HostHeader:                    dialParams.MeekHostHeader,
 			TransformedHostName:           dialParams.MeekTransformedHostName,
 			ClientTunnelProtocol:          dialParams.TunnelProtocol,
@@ -1259,11 +1265,15 @@ func (dialParams *DialParameters) Failed(config *Config) {
 }
 
 func (dialParams *DialParameters) GetTLSVersionForMetrics() string {
-	tlsVersion := dialParams.TLSVersion
-	if dialParams.NoDefaultTLSSessionID {
-		tlsVersion += "-no_def_id"
+	return getTLSVersionForMetrics(dialParams.TLSVersion, dialParams.NoDefaultTLSSessionID)
+}
+
+func getTLSVersionForMetrics(tlsVersion string, noDefaultTLSSessionID bool) string {
+	version := tlsVersion
+	if noDefaultTLSSessionID {
+		version += "-no_def_id"
 	}
-	return tlsVersion
+	return version
 }
 
 // ExchangedDialParameters represents the subset of DialParameters that is

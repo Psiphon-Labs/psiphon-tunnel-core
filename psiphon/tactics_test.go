@@ -96,7 +96,7 @@ func TestStandAloneGetTactics(t *testing.T) {
 	untunneledDialConfig := &DialConfig{
 		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
 			IPs, err := UntunneledResolveIP(
-				ctx, config, resolver, hostname)
+				ctx, config, resolver, hostname, "")
 			if err != nil {
 				return nil, errors.Trace(err)
 			}

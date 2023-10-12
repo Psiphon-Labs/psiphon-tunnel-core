@@ -680,7 +680,8 @@ func RecordRemoteServerListStat(
 	etag string,
 	bytes int64,
 	duration time.Duration,
-	authenticated bool) error {
+	authenticated bool,
+	additionalParameters common.APIParameters) error {
 
 	if !config.GetParameters().Get().WeightedCoinFlip(
 		parameters.RecordRemoteServerListPersistentStatsProbability) {
@@ -717,6 +718,10 @@ func RecordRemoteServerListStat(
 		authenticatedStr = "1"
 	}
 	params["authenticated"] = authenticatedStr
+
+	for k, v := range additionalParameters {
+		params[k] = v
+	}
 
 	remoteServerListStatJson, err := json.Marshal(params)
 	if err != nil {
