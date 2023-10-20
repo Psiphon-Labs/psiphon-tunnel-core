@@ -101,6 +101,10 @@ func encryptFeedback(diagnostics, b64EncodedPublicKey string) ([]byte, error) {
 // the routine will sleep and retry multiple times.
 func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath string) error {
 
+	if !config.EnableFeedbackUpload {
+		return errors.TraceNew("feedback upload not enabled")
+	}
+
 	if len(diagnostics) == 0 {
 		return errors.TraceNew("error diagnostics empty")
 	}

@@ -374,6 +374,12 @@ type Config struct {
 	// OnlyAfterAttempts = 0.
 	ObfuscatedServerListRootURLs parameters.TransferURLs
 
+	// EnableUpgradeDownload indicates whether to check for and download
+	// upgrades. When set, UpgradeDownloadURLs and
+	// UpgradeDownloadClientVersionHeader must also be set. ClientPlatform
+	// and ClientVersion should also be set.
+	EnableUpgradeDownload bool
+
 	// UpgradeDownloadURLs is list of URLs which specify locations from which
 	// to download a host client upgrade file, when one is available. The core
 	// tunnel controller provides a resumable download facility which
@@ -396,6 +402,11 @@ type Config struct {
 	// a client upgrade download after a failure. If omitted, a default value
 	// is used. This value is typical overridden for testing.
 	FetchUpgradeRetryPeriodMilliseconds *int
+
+	// EnableFeedbackUpload indicates whether to enable uploading feedback
+	// data. When set, FeedbackUploadURLs and FeedbackEncryptionPublicKey
+	// must also be set.
+	EnableFeedbackUpload bool
 
 	// FeedbackUploadURLs is a list of SecureTransferURLs which specify
 	// locations where feedback data can be uploaded, pairing with each
@@ -1173,13 +1184,19 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		}
 	}
 
-	if config.UpgradeDownloadURLs != nil {
+	if config.EnableUpgradeDownload {
+		if len(config.UpgradeDownloadURLs) == 0 {
+			return errors.TraceNew("missing UpgradeDownloadURLs")
+		}
 		if config.UpgradeDownloadClientVersionHeader == "" {
 			return errors.TraceNew("missing UpgradeDownloadClientVersionHeader")
 		}
 	}
 
-	if config.FeedbackUploadURLs != nil {
+	if config.EnableFeedbackUpload {
+		if len(config.FeedbackUploadURLs) == 0 {
+			return errors.TraceNew("missing FeedbackUploadURLs")
+		}
 		if config.FeedbackEncryptionPublicKey == "" {
 			return errors.TraceNew("missing FeedbackEncryptionPublicKey")
 		}
@@ -1622,16 +1639,13 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	}
 
-	if config.UpgradeDownloadURLs != nil {
-		applyParameters[parameters.UpgradeDownloadClientVersionHeader] = config.UpgradeDownloadClientVersionHeader
+	if config.EnableUpgradeDownload {
 		applyParameters[parameters.UpgradeDownloadURLs] = config.UpgradeDownloadURLs
+		applyParameters[parameters.UpgradeDownloadClientVersionHeader] = config.UpgradeDownloadClientVersionHeader
 	}
 
-	if len(config.FeedbackUploadURLs) > 0 {
+	if config.EnableFeedbackUpload {
 		applyParameters[parameters.FeedbackUploadURLs] = config.FeedbackUploadURLs
-	}
-
-	if config.FeedbackEncryptionPublicKey != "" {
 		applyParameters[parameters.FeedbackEncryptionPublicKey] = config.FeedbackEncryptionPublicKey
 	}
 

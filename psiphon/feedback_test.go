@@ -55,6 +55,10 @@ func TestFeedbackUpload(t *testing.T) {
 		t.Fatalf("error loading configuration file: %s", err)
 	}
 
+	if !config.EnableFeedbackUpload {
+		config.EnableFeedbackUpload = true
+	}
+
 	if config.ClientPlatform == "" {
 		config.ClientPlatform = testClientPlatform
 	}
