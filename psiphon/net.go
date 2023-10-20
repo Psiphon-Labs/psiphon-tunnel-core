@@ -400,11 +400,27 @@ func UntunneledResolveIP(
 //
 // The context is applied to underlying TCP dials. The caller is responsible
 // for applying the context to requests made with the returned http.Client.
-func makeUntunneledFrontedHTTPClient(ctx context.Context, config *Config, untunneledDialConfig *DialConfig, frontingSpecs parameters.FrontingSpecs, skipVerify, disableSystemRootCAs bool) (*http.Client, func() common.APIParameters, error) {
+func makeUntunneledFrontedHTTPClient(
+	ctx context.Context,
+	config *Config,
+	untunneledDialConfig *DialConfig,
+	frontingSpecs parameters.FrontingSpecs,
+	selectedFrontingProviderID func(string),
+	skipVerify bool,
+	disableSystemRootCAs bool) (*http.Client, func() common.APIParameters, error) {
 
-	frontingProviderID, meekFrontingDialAddress, meekSNIServerName, meekVerifyServerName, meekVerifyPins, meekFrontingHost, err := parameters.FrontingSpecs(frontingSpecs).SelectParameters()
+	frontingProviderID,
+		meekFrontingDialAddress,
+		meekSNIServerName,
+		meekVerifyServerName,
+		meekVerifyPins,
+		meekFrontingHost, err := parameters.FrontingSpecs(frontingSpecs).SelectParameters()
 	if err != nil {
 		return nil, nil, errors.Trace(err)
+	}
+
+	if selectedFrontingProviderID != nil {
+		selectedFrontingProviderID(frontingProviderID)
 	}
 
 	meekDialAddress := net.JoinHostPort(meekFrontingDialAddress, "443")
@@ -631,13 +647,21 @@ func MakeUntunneledHTTPClient(
 	untunneledDialConfig *DialConfig,
 	skipVerify bool,
 	disableSystemRootCAs bool,
-	frontingSpecs parameters.FrontingSpecs) (*http.Client, func() common.APIParameters, error) {
+	frontingSpecs parameters.FrontingSpecs,
+	selectedFrontingProviderID func(string)) (*http.Client, func() common.APIParameters, error) {
 
 	if len(frontingSpecs) > 0 {
 
 		// Ignore skipVerify because it only applies when there are no
 		// fronting specs.
-		httpClient, getParams, err := makeUntunneledFrontedHTTPClient(ctx, config, untunneledDialConfig, frontingSpecs, false, disableSystemRootCAs)
+		httpClient, getParams, err := makeUntunneledFrontedHTTPClient(
+			ctx,
+			config,
+			untunneledDialConfig,
+			frontingSpecs,
+			selectedFrontingProviderID,
+			false,
+			disableSystemRootCAs)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
@@ -731,7 +755,8 @@ func MakeDownloadHTTPClient(
 	untunneledDialConfig *DialConfig,
 	skipVerify,
 	disableSystemRootCAs bool,
-	frontingSpecs parameters.FrontingSpecs) (*http.Client, bool, func() common.APIParameters, error) {
+	frontingSpecs parameters.FrontingSpecs,
+	selectedFrontingProviderID func(string)) (*http.Client, bool, func() common.APIParameters, error) {
 
 	var httpClient *http.Client
 	var getParams func() common.APIParameters
@@ -749,7 +774,13 @@ func MakeDownloadHTTPClient(
 
 	} else {
 		httpClient, getParams, err = MakeUntunneledHTTPClient(
-			ctx, config, untunneledDialConfig, skipVerify, disableSystemRootCAs, frontingSpecs)
+			ctx,
+			config,
+			untunneledDialConfig,
+			skipVerify,
+			disableSystemRootCAs,
+			frontingSpecs,
+			selectedFrontingProviderID)
 		if err != nil {
 			return nil, false, nil, errors.Trace(err)
 		}

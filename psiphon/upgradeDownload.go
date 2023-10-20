@@ -94,7 +94,12 @@ func DownloadUpgrade(
 		untunneledDialConfig,
 		downloadURL.SkipVerify,
 		config.DisableSystemRootCAs,
-		downloadURL.FrontingSpecs)
+		downloadURL.FrontingSpecs,
+		func(frontingProviderID string) {
+			NoticeInfo(
+				"DownloadUpgrade: selected fronting provider %s for %s",
+				frontingProviderID, downloadURL.URL)
+		})
 	if err != nil {
 		return errors.Trace(err)
 	}

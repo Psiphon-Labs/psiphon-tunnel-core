@@ -205,7 +205,12 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			untunneledDialConfig,
 			uploadURL.SkipVerify,
 			config.DisableSystemRootCAs,
-			uploadURL.FrontingSpecs)
+			uploadURL.FrontingSpecs,
+			func(frontingProviderID string) {
+				NoticeInfo(
+					"SendFeedback: selected fronting provider %s for %s",
+					frontingProviderID, uploadURL.URL)
+			})
 		if err != nil {
 			return errors.Trace(err)
 		}
