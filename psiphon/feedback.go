@@ -166,6 +166,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			// redefines ResolveIP such that the corresponding fronting
 			// provider ID is passed into UntunneledResolveIP to enable the use
 			// of pre-resolved IPs.
+			// TODO: do not use pre-resolved IPs when tunneled.
 			IPs, err := UntunneledResolveIP(
 				ctx, config, resolver, hostname, "")
 			if err != nil {
