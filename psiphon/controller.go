@@ -290,7 +290,7 @@ func (controller *Controller) Run(ctx context.Context) {
 		}
 	}
 
-	if controller.config.UpgradeDownloadURLs != nil {
+	if controller.config.EnableUpgradeDownload {
 		controller.runWaitGroup.Add(1)
 		go controller.upgradeDownloader()
 	}

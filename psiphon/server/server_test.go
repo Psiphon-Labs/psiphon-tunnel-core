@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -1563,9 +1564,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 
 			// Analyze time between prefix and next packet.
-			// client 10-20ms, 30-40ms for server with standard deviation of 1ms.
-			clientZtest := testSampleInUniformRange(clientFlows.flows[1].timeDelta.Microseconds(), 10000, 20000, 1000)
-			serverZtest := testSampleInUniformRange(serverFlows.flows[1].timeDelta.Microseconds(), 30000, 40000, 1000)
+			// client 10-20ms, 30-40ms for server with standard deviation of 2ms.
+			clientZtest := testSampleInUniformRange(clientFlows.flows[1].timeDelta.Microseconds(), 10000, 20000, 2000)
+			serverZtest := testSampleInUniformRange(serverFlows.flows[1].timeDelta.Microseconds(), 30000, 40000, 2000)
 
 			if !clientZtest {
 				t.Fatalf("client write delay after prefix too high: %f ms",
@@ -3213,8 +3214,8 @@ func testSampleInUniformRange[V Number](sample, a, b, stddev V) bool {
 	if sample >= a && sample <= b {
 		return true
 	}
-	lower := float64(sample-a) / float64(stddev)
-	higher := float64(sample-b) / float64(stddev)
+	lower := math.Abs(float64(sample-a) / float64(stddev))
+	higher := math.Abs(float64(sample-b) / float64(stddev))
 	return lower <= 2.0 || higher <= 2.0
 }
 

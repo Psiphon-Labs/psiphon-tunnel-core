@@ -468,7 +468,12 @@ func downloadRemoteServerListFile(
 		untunneledDialConfig,
 		skipVerify,
 		disableSystemRootCAs,
-		frontingSpecs)
+		frontingSpecs,
+		func(frontingProviderID string) {
+			NoticeInfo(
+				"downloadRemoteServerListFile: selected fronting provider %s for %s",
+				frontingProviderID, sourceURL)
+		})
 	if err != nil {
 		return "", nil, errors.Trace(err)
 	}
