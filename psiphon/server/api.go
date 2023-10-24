@@ -532,7 +532,17 @@ var remoteServerListStatParams = append(
 		{"etag", isAnyString, 0},
 		{"bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool}},
+		{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+		{"fronting_provider_id", isAnyString, requestParamOptional},
+		{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
+		{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
+		{"meek_sni_server_name", isDomain, requestParamOptional},
+		{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
+		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+		{"user_agent", isAnyString, requestParamOptional},
+		{"tls_profile", isAnyString, requestParamOptional},
+		{"tls_version", isAnyString, requestParamOptional}},
+
 	baseSessionParams...)
 
 // Backwards compatibility case: legacy clients do not include these fields in

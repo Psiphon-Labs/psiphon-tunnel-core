@@ -575,10 +575,16 @@ func passthrough(conn net.Conn, address string, dialer func(network, address str
 
 	defer conn.Close()
 
+	// Remove any pre-existing deadlines to ensure the passthrough
+	// is not interrupted.
+	_ = conn.SetDeadline(time.Time{})
+
 	passthroughConn, err := dialer("tcp", address)
 	if err != nil {
 		return
 	}
+	defer passthroughConn.Close()
+
 	_, err = passthroughConn.Write(buf)
 	if err != nil {
 		return
@@ -588,7 +594,6 @@ func passthrough(conn net.Conn, address string, dialer func(network, address str
 		_, _ = io.Copy(passthroughConn, conn)
 		passthroughConn.Close()
 	}()
-
 	_, _ = io.Copy(conn, passthroughConn)
 }
 
@@ -627,6 +632,7 @@ func (t *HTTPNormalizer) SetWriteDeadline(tt time.Time) error {
 	return t.Conn.SetWriteDeadline(tt)
 }
 
+// GetMetrics implements the common.MetricsSource interface.
 func (t *HTTPNormalizer) GetMetrics() common.LogFields {
 	// Relay any metrics from the underlying conn.
 	m, ok := t.Conn.(common.MetricsSource)

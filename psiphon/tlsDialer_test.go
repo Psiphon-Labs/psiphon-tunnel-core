@@ -156,7 +156,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		t.Errorf("unexpected success without invalid pin")
 	}
 
-	// Test: with the root CA certirficate pinned, the TLS dial succeeds.
+	// Test: with the root CA certificate pinned, the TLS dial succeeds.
 
 	conn, err = CustomTLSDial(
 		context.Background(), "tcp", serverAddr,
@@ -202,6 +202,27 @@ func TestTLSCertificateVerification(t *testing.T) {
 			VerifyServerName:              serverName,
 			VerifyPins:                    []string{rootCACertificatePin},
 			TrustedCACertificatesFilename: rootCAsFileName,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %v", err)
+	} else {
+		conn.Close()
+	}
+
+	// Test: with SNI changed, DisableSystemRootCAs set along with
+	// VerifyServerName and VerifyPins, and pinning the TLS dial
+	// succeeds.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:           params,
+			Dial:                 dialer,
+			SNIServerName:        "not-" + serverName,
+			DisableSystemRootCAs: true,
+			VerifyServerName:     serverName,
+			VerifyPins:           []string{rootCACertificatePin},
 		})
 
 	if err != nil {
@@ -337,7 +358,7 @@ func initTestCertificatesAndWebServer(
 	// Run an HTTPS server with the server certificate.
 
 	serverKeyPair, err := tls.X509KeyPair(
-		pemServerCertificate, pemServerPrivateKey)
+		append(pemServerCertificate, pemRootCACertificate...), pemServerPrivateKey)
 	if err != nil {
 		t.Fatalf("tls.X509KeyPair failed: %v", err)
 	}
@@ -620,7 +641,9 @@ func TestSelectTLSProfile(t *testing.T) {
 		}
 
 		var unexpectedClientHelloID, unexpectedClientHelloSpec bool
-		if i < len(protocol.SupportedTLSProfiles) {
+
+		// TLS_PROFILE_CHROME_112_PSK profile is a special case. Check getUTLSClientHelloID for details.
+		if i < len(protocol.SupportedTLSProfiles) && profile != protocol.TLS_PROFILE_CHROME_112_PSK {
 			if utlsClientHelloID == utls.HelloCustom {
 				unexpectedClientHelloID = true
 			}

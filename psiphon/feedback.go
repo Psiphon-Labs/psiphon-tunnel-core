@@ -101,6 +101,10 @@ func encryptFeedback(diagnostics, b64EncodedPublicKey string) ([]byte, error) {
 // the routine will sleep and retry multiple times.
 func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath string) error {
 
+	if !config.EnableFeedbackUpload {
+		return errors.TraceNew("feedback upload not enabled")
+	}
+
 	if len(diagnostics) == 0 {
 		return errors.TraceNew("error diagnostics empty")
 	}
@@ -157,8 +161,14 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 		DeviceBinder:     nil,
 		IPv6Synthesizer:  config.IPv6Synthesizer,
 		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+			// Note: when domain fronting would be used for untunneled dials a
+			// copy of untunneledDialConfig should be used instead, which
+			// redefines ResolveIP such that the corresponding fronting
+			// provider ID is passed into UntunneledResolveIP to enable the use
+			// of pre-resolved IPs.
+			// TODO: do not use pre-resolved IPs when tunneled.
 			IPs, err := UntunneledResolveIP(
-				ctx, config, resolver, hostname)
+				ctx, config, resolver, hostname, "")
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -194,11 +204,18 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			feedbackUploadTimeout)
 		defer cancelFunc()
 
-		client, err := MakeUntunneledHTTPClient(
+		client, _, err := MakeUntunneledHTTPClient(
 			feedbackUploadCtx,
 			config,
 			untunneledDialConfig,
-			uploadURL.SkipVerify || config.TransferURLsAlwaysSkipVerify)
+			uploadURL.SkipVerify,
+			config.DisableSystemRootCAs,
+			uploadURL.FrontingSpecs,
+			func(frontingProviderID string) {
+				NoticeInfo(
+					"SendFeedback: selected fronting provider %s for %s",
+					frontingProviderID, uploadURL.URL)
+			})
 		if err != nil {
 			return errors.Trace(err)
 		}

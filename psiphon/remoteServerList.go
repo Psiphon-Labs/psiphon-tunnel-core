@@ -71,7 +71,9 @@ func FetchCommonRemoteServerList(
 		downloadTimeout,
 		downloadURL.URL,
 		canonicalURL,
-		downloadURL.SkipVerify || config.TransferURLsAlwaysSkipVerify,
+		downloadURL.FrontingSpecs,
+		downloadURL.SkipVerify,
+		config.DisableSystemRootCAs,
 		"",
 		config.GetRemoteServerListDownloadFilename())
 	if err != nil {
@@ -189,7 +191,9 @@ func FetchObfuscatedServerLists(
 		downloadTimeout,
 		downloadURL,
 		canonicalURL,
+		rootURL.FrontingSpecs,
 		rootURL.SkipVerify,
+		config.DisableSystemRootCAs,
 		"",
 		downloadFilename)
 	if err != nil {
@@ -265,9 +269,8 @@ func FetchObfuscatedServerLists(
 			tunnel,
 			untunneledDialConfig,
 			downloadTimeout,
-			rootURL.URL,
+			rootURL,
 			canonicalRootURL,
-			rootURL.SkipVerify,
 			publicKey,
 			lookupSLOKs,
 			oslFileSpec) {
@@ -319,9 +322,8 @@ func downloadOSLFileSpec(
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
 	downloadTimeout time.Duration,
-	rootURL string,
+	rootURL *parameters.TransferURL,
 	canonicalRootURL string,
-	skipVerify bool,
 	publicKey string,
 	lookupSLOKs func(slokID []byte) []byte,
 	oslFileSpec *osl.OSLFileSpec) bool {
@@ -329,7 +331,7 @@ func downloadOSLFileSpec(
 	downloadFilename := osl.GetOSLFilename(
 		config.GetObfuscatedServerListDownloadDirectory(), oslFileSpec.ID)
 
-	downloadURL := osl.GetOSLFileURL(rootURL, oslFileSpec.ID)
+	downloadURL := osl.GetOSLFileURL(rootURL.URL, oslFileSpec.ID)
 	canonicalURL := osl.GetOSLFileURL(canonicalRootURL, oslFileSpec.ID)
 
 	hexID := hex.EncodeToString(oslFileSpec.ID)
@@ -346,7 +348,9 @@ func downloadOSLFileSpec(
 		downloadTimeout,
 		downloadURL,
 		canonicalURL,
-		skipVerify,
+		rootURL.FrontingSpecs,
+		rootURL.SkipVerify,
+		config.DisableSystemRootCAs,
 		sourceETag,
 		downloadFilename)
 	if err != nil {
@@ -428,7 +432,9 @@ func downloadRemoteServerListFile(
 	downloadTimeout time.Duration,
 	sourceURL string,
 	canonicalURL string,
+	frontingSpecs parameters.FrontingSpecs,
 	skipVerify bool,
+	disableSystemRootCAs bool,
 	sourceETag string,
 	destinationFilename string) (string, func(bool), error) {
 
@@ -455,12 +461,19 @@ func downloadRemoteServerListFile(
 	// MakeDownloadHttpClient will select either a tunneled
 	// or untunneled configuration.
 
-	httpClient, tunneled, err := MakeDownloadHTTPClient(
+	httpClient, tunneled, getParams, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
 		tunnel,
 		untunneledDialConfig,
-		skipVerify)
+		skipVerify,
+		disableSystemRootCAs,
+		frontingSpecs,
+		func(frontingProviderID string) {
+			NoticeInfo(
+				"downloadRemoteServerListFile: selected fronting provider %s for %s",
+				frontingProviderID, sourceURL)
+		})
 	if err != nil {
 		return "", nil, errors.Trace(err)
 	}
@@ -489,6 +502,12 @@ func downloadRemoteServerListFile(
 
 	NoticeRemoteServerListResourceDownloaded(sourceURL)
 
+	// Parameters can be retrieved now because the request has completed.
+	var additionalParameters common.APIParameters
+	if getParams != nil {
+		additionalParameters = getParams()
+	}
+
 	downloadStatRecorder := func(authenticated bool) {
 
 		// Invoke DNS cache extension (if enabled in the resolver) now that
@@ -507,7 +526,7 @@ func downloadRemoteServerListFile(
 		}
 
 		_ = RecordRemoteServerListStat(
-			config, tunneled, sourceURL, responseETag, bytes, duration, authenticated)
+			config, tunneled, sourceURL, responseETag, bytes, duration, authenticated, additionalParameters)
 	}
 
 	return responseETag, downloadStatRecorder, nil

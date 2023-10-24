@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -201,6 +202,7 @@ func TestTLSOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "TLS-OSSH",
+			passthrough:          true,
 			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
@@ -681,11 +683,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	var tunnelProtocolPassthroughAddresses map[string]string
+	var passthroughAddress *string
 
 	if runConfig.passthrough {
+		passthroughAddress = new(string)
+		*passthroughAddress = "x.x.x.x:x"
+
 		tunnelProtocolPassthroughAddresses = map[string]string{
 			// Tests do not trigger passthrough so set invalid IP and port.
-			runConfig.tunnelProtocol: "x.x.x.x:x",
+			runConfig.tunnelProtocol: *passthroughAddress,
 		}
 	}
 
@@ -1467,6 +1473,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectUDPDataTransfer,
 			expectQUICVersion,
 			expectDestinationBytesFields,
+			passthroughAddress,
 			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
@@ -1557,9 +1564,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 
 			// Analyze time between prefix and next packet.
-			// client 10-20ms, 30-40ms for server with standard deviation of 1ms.
-			clientZtest := testSampleInUniformRange(clientFlows.flows[1].timeDelta.Microseconds(), 10000, 20000, 1000)
-			serverZtest := testSampleInUniformRange(serverFlows.flows[1].timeDelta.Microseconds(), 30000, 40000, 1000)
+			// client 10-20ms, 30-40ms for server with standard deviation of 2ms.
+			clientZtest := testSampleInUniformRange(clientFlows.flows[1].timeDelta.Microseconds(), 10000, 20000, 2000)
+			serverZtest := testSampleInUniformRange(serverFlows.flows[1].timeDelta.Microseconds(), 30000, 40000, 2000)
 
 			if !clientZtest {
 				t.Fatalf("client write delay after prefix too high: %f ms",
@@ -1604,6 +1611,7 @@ func checkExpectedServerTunnelLogFields(
 	expectUDPDataTransfer bool,
 	expectQUICVersion string,
 	expectDestinationBytesFields bool,
+	expectPassthroughAddress *string,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -2060,6 +2068,16 @@ func checkExpectedServerTunnelLogFields(
 			if !ok {
 				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
 			}
+		}
+	}
+
+	if expectPassthroughAddress != nil {
+		name := "passthrough_address"
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
+		if fields[name] != *expectPassthroughAddress {
+			return fmt.Errorf("unexpected field value %s: %v != %v", name, fields[name], *expectPassthroughAddress)
 		}
 	}
 
@@ -3196,8 +3214,8 @@ func testSampleInUniformRange[V Number](sample, a, b, stddev V) bool {
 	if sample >= a && sample <= b {
 		return true
 	}
-	lower := float64(sample-a) / float64(stddev)
-	higher := float64(sample-b) / float64(stddev)
+	lower := math.Abs(float64(sample-a) / float64(stddev))
+	higher := math.Abs(float64(sample-b) / float64(stddev))
 	return lower <= 2.0 || higher <= 2.0
 }
 

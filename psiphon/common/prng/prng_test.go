@@ -196,6 +196,40 @@ func TestRange(t *testing.T) {
 	}
 }
 
+func TestUint32Range(t *testing.T) {
+
+	p, err := NewPRNG()
+	if err != nil {
+		t.Fatalf("NewPRNG failed: %s", err)
+	}
+
+	var min uint32 = math.MaxUint32 - 19
+	var max uint32 = math.MaxUint32
+	var gotMin, gotMax bool
+	for n := 0; n < 1000; n++ {
+
+		i := p.RangeUint32(min, max)
+
+		if i < min || i > max {
+			t.Error("out of range")
+		}
+
+		if i == min {
+			gotMin = true
+		}
+		if i == max {
+			gotMax = true
+		}
+	}
+
+	if !gotMin {
+		t.Error("missing min")
+	}
+	if !gotMax {
+		t.Error("missing max")
+	}
+}
+
 func TestPeriod(t *testing.T) {
 
 	p, err := NewPRNG()

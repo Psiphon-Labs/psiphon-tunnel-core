@@ -60,6 +60,7 @@ import (
 	"encoding/hex"
 	std_errors "errors"
 	"io/ioutil"
+	"math"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -97,6 +98,16 @@ type CustomTLSConfig struct {
 	// the server_name is an IP address.
 	// SNIServerName is ignored when UseDialAddrSNI is true.
 	SNIServerName string
+
+	// DisableSystemRootCAs, when true, disables loading system root CAs when
+	// verifying the server certificate chain. Set DisableSystemRootCAs only in
+	// cases where system root CAs cannot be loaded; for example, if
+	// unsupported (iOS < 12) or insufficient memory (VPN extension on iOS <
+	// 15).
+	//
+	// When DisableSystemRootCAs is set, both VerifyServerName and VerifyPins
+	// must be set.
+	DisableSystemRootCAs bool
 
 	// VerifyServerName specifies a domain name that must appear in the server
 	// certificate. When specified, certificate verification checks for
@@ -203,7 +214,12 @@ func CustomTLSDial(
 		(config.VerifyLegacyCertificate != nil &&
 			(config.SkipVerify ||
 				len(config.VerifyServerName) > 0 ||
-				len(config.VerifyPins) > 0)) {
+				len(config.VerifyPins) > 0)) ||
+
+		(config.DisableSystemRootCAs &&
+			(!config.SkipVerify &&
+				(len(config.VerifyServerName) == 0 ||
+					len(config.VerifyPins) == 0))) {
 
 		return nil, errors.TraceNew("incompatible certification verification parameters")
 	}
@@ -305,7 +321,7 @@ func CustomTLSDial(
 				}
 				var err error
 				verifiedChains, err = verifyServerCertificate(
-					tlsConfigRootCAs, rawCerts, verifyServerName)
+					tlsConfigRootCAs, rawCerts, verifyServerName, config.DisableSystemRootCAs)
 				if err != nil {
 					return errors.Trace(err)
 				}
@@ -365,6 +381,10 @@ func CustomTLSDial(
 
 		utlsClientHelloID.Seed = new(utls.PRNGSeed)
 		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+
+		weights := utls.DefaultWeights
+		weights.TLSVersMax_Set_VersionTLS13 = 0.5
+		utlsClientHelloID.Weights = &weights
 	}
 
 	// As noted here,
@@ -608,8 +628,13 @@ func verifyLegacyCertificate(rawCerts [][]byte, expectedCertificate *x509.Certif
 	return nil
 }
 
+// verifyServerCertificate parses and verifies the provided chain. If
+// successful, it returns the verified chains that were built.
+//
+// WARNING: disableSystemRootCAs must only be set when the certificate
+// chain has been, or will be, verified with verifyCertificatePins.
 func verifyServerCertificate(
-	rootCAs *x509.CertPool, rawCerts [][]byte, verifyServerName string) ([][]*x509.Certificate, error) {
+	rootCAs *x509.CertPool, rawCerts [][]byte, verifyServerName string, disableSystemRootCAs bool) ([][]*x509.Certificate, error) {
 
 	// This duplicates the verification logic in utls (and standard crypto/tls).
 
@@ -620,6 +645,18 @@ func verifyServerCertificate(
 			return nil, errors.Trace(err)
 		}
 		certs[i] = cert
+	}
+
+	// Ensure system root CAs are not loaded, which will cause verification to
+	// fail. Instead use the root certificate of the chain received from the
+	// server as a trusted root certificate, which allows the chain and server
+	// name to be verified while ignoring whether the root certificate is
+	// trusted by the system.
+	if rootCAs == nil && disableSystemRootCAs {
+		rootCAs = x509.NewCertPool()
+		if len(certs) > 0 {
+			rootCAs.AddCert(certs[len(certs)-1])
+		}
 	}
 
 	opts := x509.VerifyOptions{
@@ -836,6 +873,8 @@ func getUTLSClientHelloID(
 		return utls.HelloIOS_13, nil, nil
 	case protocol.TLS_PROFILE_IOS_14:
 		return utls.HelloIOS_14, nil, nil
+	case protocol.TLS_PROFILE_SAFARI_16:
+		return utls.HelloSafari_16_0, nil, nil
 	case protocol.TLS_PROFILE_CHROME_58:
 		return utls.HelloChrome_58, nil, nil
 	case protocol.TLS_PROFILE_CHROME_62:
@@ -850,6 +889,32 @@ func getUTLSClientHelloID(
 		return utls.HelloChrome_96, nil, nil
 	case protocol.TLS_PROFILE_CHROME_102:
 		return utls.HelloChrome_102, nil, nil
+	case protocol.TLS_PROFILE_CHROME_106:
+		return utls.HelloChrome_106_Shuffle, nil, nil
+	case protocol.TLS_PROFILE_CHROME_112_PSK:
+		preset, err := utls.UTLSIdToSpec(utls.HelloChrome_112_PSK_Shuf)
+		if err != nil {
+			return utls.ClientHelloID{}, nil, err
+		}
+
+		// Generates typical PSK extension values.
+		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
+		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
+		obfuscatedTicketAge := prng.RangeUint32(13029567, math.MaxUint32)
+
+		binder := prng.Bytes(33)
+		binder[0] = 0x20 // Binder's length
+
+		if pskExt, ok := preset.Extensions[len(preset.Extensions)-1].(*utls.FakePreSharedKeyExtension); ok {
+			pskExt.PskIdentities = []utls.PskIdentity{
+				{
+					Label:               label,
+					ObfuscatedTicketAge: obfuscatedTicketAge,
+				},
+			}
+			pskExt.PskBinders = [][]byte{binder}
+		}
+		return utls.HelloCustom, &preset, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
@@ -869,7 +934,7 @@ func getUTLSClientHelloID(
 
 	customTLSProfile := p.CustomTLSProfile(tlsProfile)
 	if customTLSProfile == nil {
-		return utls.HelloCustom,
+		return utls.ClientHelloID{},
 			nil,
 			errors.Tracef("unknown TLS profile: %s", tlsProfile)
 	}
@@ -897,7 +962,8 @@ func getClientHelloVersion(
 		utls.HelloChrome_83, utls.HelloChrome_96,
 		utls.HelloChrome_102, utls.HelloFirefox_65,
 		utls.HelloFirefox_99, utls.HelloFirefox_105,
-		utls.HelloGolang:
+		utls.HelloChrome_106_Shuffle, utls.HelloGolang,
+		utls.HelloSafari_16_0:
 		return protocol.TLS_VERSION_13, nil
 	}
 

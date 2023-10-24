@@ -176,6 +176,16 @@ type MeekConfig struct {
 	// etc.
 	VerifyPins []string
 
+	// DisableSystemRootCAs, when true, disables loading system root CAs when
+	// verifying the server certificate chain. Set DisableSystemRootCAs only in
+	// cases where system root CAs cannot be loaded; for example, if
+	// unsupported (iOS < 12) or insufficient memory (VPN extension on iOS <
+	// 15).
+	//
+	// When DisableSystemRootCAs and VerifyServerName are set, VerifyPins must
+	// be set.
+	DisableSystemRootCAs bool
+
 	// ClientTunnelProtocol is the protocol the client is using. It's included in
 	// the meek cookie for optional use by the server, in cases where the server
 	// cannot unambiguously determine the tunnel protocol. ClientTunnelProtocol
@@ -290,6 +300,12 @@ func DialMeek(
 	if len(meekConfig.VerifyPins) > 0 && skipVerify {
 		return nil, errors.TraceNew(
 			"invalid config: VerifyServerName must be set when VerifyPins is set")
+	}
+
+	if meekConfig.DisableSystemRootCAs && !skipVerify &&
+		(len(meekConfig.VerifyServerName) == 0 || len(meekConfig.VerifyPins) == 0) {
+		return nil, errors.TraceNew(
+			"invalid config: VerifyServerName and VerifyPins must be set when DisableSystemRootCAs is set")
 	}
 
 	if meekConfig.Mode == MeekModePlaintextRoundTrip &&
@@ -436,6 +452,7 @@ func DialMeek(
 			SkipVerify:                    skipVerify,
 			VerifyServerName:              meekConfig.VerifyServerName,
 			VerifyPins:                    meekConfig.VerifyPins,
+			DisableSystemRootCAs:          meekConfig.DisableSystemRootCAs,
 			TLSProfile:                    meekConfig.TLSProfile,
 			NoDefaultTLSSessionID:         &meekConfig.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,

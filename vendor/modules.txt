@@ -39,7 +39,7 @@ github.com/Psiphon-Labs/quic-go/internal/utils/linkedlist
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/Psiphon-Labs/tls-tris v0.0.0-20230821160547-c948ccd6c156
+# github.com/Psiphon-Labs/tls-tris v0.0.0-20230824155421-58bf6d336a9a
 ## explicit
 github.com/Psiphon-Labs/tls-tris
 github.com/Psiphon-Labs/tls-tris/cipherhw
@@ -47,7 +47,7 @@ github.com/Psiphon-Labs/tls-tris/cipherhw
 ## explicit
 github.com/agl/ed25519/edwards25519
 github.com/agl/ed25519/extra25519
-# github.com/andybalholm/brotli v1.0.5-0.20220518190645-786ec621f618
+# github.com/andybalholm/brotli v1.0.5
 ## explicit; go 1.12
 github.com/andybalholm/brotli
 # github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
@@ -93,6 +93,9 @@ github.com/elazarl/goproxy/ext/auth
 ## explicit; go 1.13
 github.com/florianl/go-nfqueue
 github.com/florianl/go-nfqueue/internal/unix
+# github.com/gaukas/godicttls v0.0.3
+## explicit; go 1.19
+github.com/gaukas/godicttls
 # github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0
 ## explicit; go 1.13
 github.com/go-task/slim-sprig
@@ -144,8 +147,8 @@ github.com/juju/ratelimit
 # github.com/kardianos/osext v0.0.0-20170510131534-ae77be60afb1
 ## explicit
 github.com/kardianos/osext
-# github.com/klauspost/compress v1.15.10-0.20220729101446-5a3a4a965cc6
-## explicit; go 1.16
+# github.com/klauspost/compress v1.16.6
+## explicit; go 1.18
 github.com/klauspost/compress
 github.com/klauspost/compress/fse
 github.com/klauspost/compress/huff0
@@ -212,10 +215,10 @@ github.com/refraction-networking/gotapdance/ed25519/extra25519
 github.com/refraction-networking/gotapdance/protobuf
 github.com/refraction-networking/gotapdance/tapdance
 github.com/refraction-networking/gotapdance/tapdance/phantoms
-# github.com/refraction-networking/utls v1.1.3
-## explicit; go 1.16
+# github.com/refraction-networking/utls v1.3.3
+## explicit; go 1.19
 github.com/refraction-networking/utls
-github.com/refraction-networking/utls/cpu
+github.com/refraction-networking/utls/internal/helper
 # github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
 ## explicit
 github.com/ryanuber/go-glob
@@ -246,7 +249,7 @@ gitlab.com/yawning/obfs4.git/common/replayfilter
 gitlab.com/yawning/obfs4.git/transports/base
 gitlab.com/yawning/obfs4.git/transports/obfs4
 gitlab.com/yawning/obfs4.git/transports/obfs4/framing
-# golang.org/x/crypto v0.0.0-20221012134737-56aed061732a
+# golang.org/x/crypto v0.10.0
 ## explicit; go 1.17
 golang.org/x/crypto/blake2b
 golang.org/x/crypto/blowfish
@@ -267,10 +270,10 @@ golang.org/x/crypto/sha3
 # golang.org/x/exp v0.0.0-20221012211006-4de253d81b95
 ## explicit; go 1.18
 golang.org/x/exp/constraints
-# golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4
+# golang.org/x/mod v0.8.0
 ## explicit; go 1.17
 golang.org/x/mod/semver
-# golang.org/x/net v0.7.0
+# golang.org/x/net v0.11.0
 ## explicit; go 1.17
 golang.org/x/net/bpf
 golang.org/x/net/http/httpguts
@@ -285,10 +288,10 @@ golang.org/x/net/ipv4
 golang.org/x/net/ipv6
 golang.org/x/net/proxy
 golang.org/x/net/trace
-# golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
+# golang.org/x/sync v0.1.0
 ## explicit
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.5.0
+# golang.org/x/sys v0.9.0
 ## explicit; go 1.17
 golang.org/x/sys/cpu
 golang.org/x/sys/execabs
@@ -296,16 +299,16 @@ golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.5.0
+# golang.org/x/term v0.9.0
 ## explicit; go 1.17
 golang.org/x/term
-# golang.org/x/text v0.7.0
+# golang.org/x/text v0.10.0
 ## explicit; go 1.17
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# golang.org/x/tools v0.1.12
+# golang.org/x/tools v0.6.0
 ## explicit; go 1.18
 golang.org/x/tools/go/analysis
 golang.org/x/tools/go/analysis/passes/inspect
@@ -314,20 +317,20 @@ golang.org/x/tools/go/ast/inspector
 golang.org/x/tools/go/buildutil
 golang.org/x/tools/go/gcexportdata
 golang.org/x/tools/go/internal/cgo
-golang.org/x/tools/go/internal/gcimporter
 golang.org/x/tools/go/internal/packagesdriver
-golang.org/x/tools/go/internal/pkgbits
 golang.org/x/tools/go/loader
 golang.org/x/tools/go/packages
 golang.org/x/tools/go/types/objectpath
 golang.org/x/tools/go/types/typeutil
-golang.org/x/tools/internal/analysisinternal
 golang.org/x/tools/internal/event
 golang.org/x/tools/internal/event/core
 golang.org/x/tools/internal/event/keys
 golang.org/x/tools/internal/event/label
+golang.org/x/tools/internal/gcimporter
 golang.org/x/tools/internal/gocommand
 golang.org/x/tools/internal/packagesinternal
+golang.org/x/tools/internal/pkgbits
+golang.org/x/tools/internal/tokeninternal
 golang.org/x/tools/internal/typeparams
 golang.org/x/tools/internal/typesinternal
 # google.golang.org/protobuf v1.28.0

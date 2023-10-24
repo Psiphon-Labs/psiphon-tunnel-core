@@ -10,9 +10,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"sort"
 	"strconv"
 )
+
+// UTLSIdToSpec converts a ClientHelloID to a corresponding ClientHelloSpec.
+//
+// Exported internal function utlsIdToSpec per request.
+func UTLSIdToSpec(id ClientHelloID) (ClientHelloSpec, error) {
+	return utlsIdToSpec(id)
+}
 
 func utlsIdToSpec(id ClientHelloID) (ClientHelloSpec, error) {
 	switch id {
@@ -500,6 +508,95 @@ func utlsIdToSpec(id ClientHelloID) (ClientHelloSpec, error) {
 				&UtlsPaddingExtension{GetPaddingLen: BoringPaddingStyle},
 			},
 		}, nil
+	case HelloChrome_100_PSK:
+		return ClientHelloSpec{
+			CipherSuites: []uint16{
+				GREASE_PLACEHOLDER,
+				TLS_AES_128_GCM_SHA256,
+				TLS_AES_256_GCM_SHA384,
+				TLS_CHACHA20_POLY1305_SHA256,
+				TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+				TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+				TLS_RSA_WITH_AES_128_GCM_SHA256,
+				TLS_RSA_WITH_AES_256_GCM_SHA384,
+				TLS_RSA_WITH_AES_128_CBC_SHA,
+				TLS_RSA_WITH_AES_256_CBC_SHA,
+			},
+			CompressionMethods: []byte{
+				0x00, // compressionNone
+			},
+			Extensions: []TLSExtension{
+				&UtlsGREASEExtension{},
+				&SNIExtension{},
+				&UtlsExtendedMasterSecretExtension{},
+				&RenegotiationInfoExtension{Renegotiation: RenegotiateOnceAsClient},
+				&SupportedCurvesExtension{[]CurveID{
+					GREASE_PLACEHOLDER,
+					X25519,
+					CurveP256,
+					CurveP384,
+				}},
+				&SupportedPointsExtension{SupportedPoints: []byte{
+					0x00, // pointFormatUncompressed
+				}},
+				&SessionTicketExtension{},
+				&ALPNExtension{AlpnProtocols: []string{"h2", "http/1.1"}},
+				&StatusRequestExtension{},
+				&SignatureAlgorithmsExtension{SupportedSignatureAlgorithms: []SignatureScheme{
+					ECDSAWithP256AndSHA256,
+					PSSWithSHA256,
+					PKCS1WithSHA256,
+					ECDSAWithP384AndSHA384,
+					PSSWithSHA384,
+					PKCS1WithSHA384,
+					PSSWithSHA512,
+					PKCS1WithSHA512,
+				}},
+				&SCTExtension{},
+				&KeyShareExtension{[]KeyShare{
+					{Group: CurveID(GREASE_PLACEHOLDER), Data: []byte{0}},
+					{Group: X25519},
+				}},
+				&PSKKeyExchangeModesExtension{[]uint8{
+					PskModeDHE,
+				}},
+				&SupportedVersionsExtension{[]uint16{
+					GREASE_PLACEHOLDER,
+					VersionTLS13,
+					VersionTLS12,
+				}},
+				&UtlsCompressCertExtension{[]CertCompressionAlgo{
+					CertCompressionBrotli,
+				}},
+				&ApplicationSettingsExtension{SupportedProtocols: []string{"h2"}},
+				&UtlsGREASEExtension{},
+				&FakePreSharedKeyExtension{},
+			},
+		}, nil
+	case HelloChrome_106_Shuffle:
+		chs, err := utlsIdToSpec(HelloChrome_102)
+		if err != nil {
+			return chs, err
+		}
+
+		// Chrome 107 started shuffling the order of extensions
+		shuffleExtensions(&chs)
+		return chs, err
+	case HelloChrome_112_PSK_Shuf:
+		chs, err := utlsIdToSpec(HelloChrome_100_PSK)
+		if err != nil {
+			return chs, err
+		}
+
+		// Chrome 112 started shuffling the order of extensions
+		shuffleExtensions(&chs)
+		return chs, err
 	case HelloFirefox_55, HelloFirefox_56:
 		return ClientHelloSpec{
 			TLSVersMax: VersionTLS12,
@@ -664,8 +761,8 @@ func utlsIdToSpec(id ClientHelloID) (ClientHelloSpec, error) {
 				&SessionTicketExtension{},
 				&ALPNExtension{AlpnProtocols: []string{"h2", "http/1.1"}}, //application_layer_protocol_negotiation
 				&StatusRequestExtension{},
-				&DelegatedCredentialsExtension{
-					AlgorithmsSignature: []SignatureScheme{ //signature_algorithms
+				&FakeDelegatedCredentialsExtension{
+					SupportedSignatureAlgorithms: []SignatureScheme{ //signature_algorithms
 						ECDSAWithP256AndSHA256,
 						ECDSAWithP384AndSHA384,
 						ECDSAWithP521AndSHA512,
@@ -745,8 +842,8 @@ func utlsIdToSpec(id ClientHelloID) (ClientHelloSpec, error) {
 				&SessionTicketExtension{},
 				&ALPNExtension{AlpnProtocols: []string{"h2"}}, //application_layer_protocol_negotiation
 				&StatusRequestExtension{},
-				&DelegatedCredentialsExtension{
-					AlgorithmsSignature: []SignatureScheme{ //signature_algorithms
+				&FakeDelegatedCredentialsExtension{
+					SupportedSignatureAlgorithms: []SignatureScheme{ //signature_algorithms
 						ECDSAWithP256AndSHA256,
 						ECDSAWithP384AndSHA384,
 						ECDSAWithP521AndSHA512,
@@ -1829,8 +1926,57 @@ func utlsIdToSpec(id ClientHelloID) (ClientHelloSpec, error) {
 			},
 		}, nil
 	default:
+		if id.Client == helloRandomized || id.Client == helloRandomizedALPN || id.Client == helloRandomizedNoALPN {
+			// Use empty values as they can be filled later by UConn.ApplyPreset or manually.
+			return generateRandomizedSpec(&id, "", nil, nil)
+		}
 		return ClientHelloSpec{}, errors.New("ClientHello ID " + id.Str() + " is unknown")
 	}
+}
+
+func shuffleExtensions(chs *ClientHelloSpec) error {
+	// Shuffle extensions to avoid fingerprinting -- introduced in Chrome 106
+	var err error = nil
+
+	// unshufCheck checks:
+	// - if the exts[idx] is a GREASE extension, then it should not be shuffled
+	// - if the exts[idx] is a padding/pre_shared_key extension, then it should be the
+	//  last extension in the list and should not be shuffled
+	var unshufCheck = func(idx int, exts []TLSExtension) (donotshuf bool, userErr error) {
+		switch exts[idx].(type) {
+		case *UtlsGREASEExtension:
+			donotshuf = true
+		case *UtlsPaddingExtension, *FakePreSharedKeyExtension:
+			donotshuf = true
+			if idx != len(chs.Extensions)-1 {
+				userErr = errors.New("UtlsPaddingExtension or FakePreSharedKeyExtension must be the last extension")
+			}
+		default:
+			donotshuf = false
+		}
+		return
+	}
+
+	// Shuffle other extensions
+	rand.Shuffle(len(chs.Extensions), func(i, j int) {
+		if unshuf, shuferr := unshufCheck(i, chs.Extensions); unshuf {
+			if shuferr != nil {
+				err = shuferr
+			}
+			return
+		}
+
+		if unshuf, shuferr := unshufCheck(j, chs.Extensions); unshuf {
+			if shuferr != nil {
+				err = shuferr
+			}
+			return
+		}
+
+		chs.Extensions[i], chs.Extensions[j] = chs.Extensions[j], chs.Extensions[i]
+	})
+
+	return err
 }
 
 func (uconn *UConn) applyPresetByID(id ClientHelloID) (err error) {
@@ -1873,6 +2019,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 	}
 	uconn.HandshakeState.Hello = privateHello.getPublicPtr()
 	uconn.HandshakeState.State13.EcdheParams = ecdheParams
+	uconn.HandshakeState.State13.KeySharesEcdheParams = make(KeySharesEcdheParameters, 2)
 	hello := uconn.HandshakeState.Hello
 	session := uconn.HandshakeState.Session
 
@@ -1889,9 +2036,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 		return errors.New("ClientHello expected length: 32 bytes. Got: " +
 			strconv.Itoa(len(hello.Random)) + " bytes")
 	}
-	if len(hello.CipherSuites) == 0 {
-		hello.CipherSuites = defaultCipherSuites()
-	}
+
 	if len(hello.CompressionMethods) == 0 {
 		hello.CompressionMethods = []uint8{compressionNone}
 	}
@@ -1913,7 +2058,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 	hello.CipherSuites = make([]uint16, len(p.CipherSuites))
 	copy(hello.CipherSuites, p.CipherSuites)
 	for i := range hello.CipherSuites {
-		if hello.CipherSuites[i] == GREASE_PLACEHOLDER {
+		if isGREASEUint16(hello.CipherSuites[i]) { // just in case the user set a GREASE value instead of unGREASEd
 			hello.CipherSuites[i] = GetBoringGREASEValue(uconn.greaseSeed, ssl_grease_cipher)
 		}
 	}
@@ -1954,7 +2099,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 			}
 		case *SupportedCurvesExtension:
 			for i := range ext.Curves {
-				if ext.Curves[i] == GREASE_PLACEHOLDER {
+				if isGREASEUint16(uint16(ext.Curves[i])) {
 					ext.Curves[i] = CurveID(GetBoringGREASEValue(uconn.greaseSeed, ssl_grease_group))
 				}
 			}
@@ -1962,7 +2107,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 			preferredCurveIsSet := false
 			for i := range ext.KeyShares {
 				curveID := ext.KeyShares[i].Group
-				if curveID == GREASE_PLACEHOLDER {
+				if isGREASEUint16(uint16(curveID)) { // just in case the user set a GREASE value instead of unGREASEd
 					ext.KeyShares[i].Group = CurveID(GetBoringGREASEValue(uconn.greaseSeed, ssl_grease_group))
 					continue
 				}
@@ -1973,8 +2118,9 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 				ecdheParams, err := generateECDHEParameters(uconn.config.rand(), curveID)
 				if err != nil {
 					return fmt.Errorf("unsupported Curve in KeyShareExtension: %v."+
-						"To mimic it, fill the Data(key) field manually.", curveID)
+						"To mimic it, fill the Data(key) field manually", curveID)
 				}
+				uconn.HandshakeState.State13.KeySharesEcdheParams.AddEcdheParams(curveID, ecdheParams)
 				ext.KeyShares[i].Data = ecdheParams.PublicKey()
 				if !preferredCurveIsSet {
 					// only do this once for the first non-grease curve
@@ -1984,7 +2130,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 			}
 		case *SupportedVersionsExtension:
 			for i := range ext.Versions {
-				if ext.Versions[i] == GREASE_PLACEHOLDER {
+				if isGREASEUint16(ext.Versions[i]) { // just in case the user set a GREASE value instead of unGREASEd
 					ext.Versions[i] = GetBoringGREASEValue(uconn.greaseSeed, ssl_grease_version)
 				}
 			}
@@ -2001,22 +2147,33 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 }
 
 func (uconn *UConn) generateRandomizedSpec() (ClientHelloSpec, error) {
+	return generateRandomizedSpec(&uconn.ClientHelloID, uconn.serverName, uconn.HandshakeState.Session, uconn.config.NextProtos)
+}
+
+func generateRandomizedSpec(
+	id *ClientHelloID,
+	serverName string,
+	session *ClientSessionState,
+	nextProtos []string,
+) (ClientHelloSpec, error) {
 	p := ClientHelloSpec{}
 
-	if uconn.ClientHelloID.Seed == nil {
+	if id.Seed == nil {
 		seed, err := NewPRNGSeed()
 		if err != nil {
 			return p, err
 		}
-		uconn.ClientHelloID.Seed = seed
+		id.Seed = seed
 	}
 
-	r, err := newPRNGWithSeed(uconn.ClientHelloID.Seed)
+	r, err := newPRNGWithSeed(id.Seed)
 	if err != nil {
 		return p, err
 	}
 
-	id := uconn.ClientHelloID
+	if id.Weights == nil {
+		id.Weights = &DefaultWeights
+	}
 
 	var WithALPN bool
 	switch id.Client {
@@ -2025,7 +2182,7 @@ func (uconn *UConn) generateRandomizedSpec() (ClientHelloSpec, error) {
 	case helloRandomizedNoALPN:
 		WithALPN = false
 	case helloRandomized:
-		if r.FlipWeightedCoin(0.7) {
+		if r.FlipWeightedCoin(id.Weights.Extensions_Append_ALPN) {
 			WithALPN = true
 		} else {
 			WithALPN = false
@@ -2034,18 +2191,18 @@ func (uconn *UConn) generateRandomizedSpec() (ClientHelloSpec, error) {
 		return p, fmt.Errorf("using non-randomized ClientHelloID %v to generate randomized spec", id.Client)
 	}
 
-	p.CipherSuites = make([]uint16, len(defaultCipherSuites()))
-	copy(p.CipherSuites, defaultCipherSuites())
+	p.CipherSuites = make([]uint16, len(defaultCipherSuites))
+	copy(p.CipherSuites, defaultCipherSuites)
 	shuffledSuites, err := shuffledCiphers(r)
 	if err != nil {
 		return p, err
 	}
 
-	if r.FlipWeightedCoin(0.4) {
+	if r.FlipWeightedCoin(id.Weights.TLSVersMax_Set_VersionTLS13) {
 		p.TLSVersMin = VersionTLS10
 		p.TLSVersMax = VersionTLS13
-		tls13ciphers := make([]uint16, len(defaultCipherSuitesTLS13()))
-		copy(tls13ciphers, defaultCipherSuitesTLS13())
+		tls13ciphers := make([]uint16, len(defaultCipherSuitesTLS13))
+		copy(tls13ciphers, defaultCipherSuitesTLS13)
 		r.rand.Shuffle(len(tls13ciphers), func(i, j int) {
 			tls13ciphers[i], tls13ciphers[j] = tls13ciphers[j], tls13ciphers[i]
 		})
@@ -2059,10 +2216,10 @@ func (uconn *UConn) generateRandomizedSpec() (ClientHelloSpec, error) {
 		p.TLSVersMax = VersionTLS12
 	}
 
-	p.CipherSuites = removeRandomCiphers(r, shuffledSuites, 0.4)
+	p.CipherSuites = removeRandomCiphers(r, shuffledSuites, id.Weights.CipherSuites_Remove_RandomCiphers)
 
-	sni := SNIExtension{uconn.config.ServerName}
-	sessionTicket := SessionTicketExtension{Session: uconn.HandshakeState.Session}
+	sni := SNIExtension{serverName}
+	sessionTicket := SessionTicketExtension{Session: session}
 
 	sigAndHashAlgos := []SignatureScheme{
 		ECDSAWithP256AndSHA256,
@@ -2073,16 +2230,16 @@ func (uconn *UConn) generateRandomizedSpec() (ClientHelloSpec, error) {
 		PKCS1WithSHA512,
 	}
 
-	if r.FlipWeightedCoin(0.63) {
+	if r.FlipWeightedCoin(id.Weights.SigAndHashAlgos_Append_ECDSAWithSHA1) {
 		sigAndHashAlgos = append(sigAndHashAlgos, ECDSAWithSHA1)
 	}
-	if r.FlipWeightedCoin(0.59) {
+	if r.FlipWeightedCoin(id.Weights.SigAndHashAlgos_Append_ECDSAWithP521AndSHA512) {
 		sigAndHashAlgos = append(sigAndHashAlgos, ECDSAWithP521AndSHA512)
 	}
-	if r.FlipWeightedCoin(0.51) || p.TLSVersMax == VersionTLS13 {
+	if r.FlipWeightedCoin(id.Weights.SigAndHashAlgos_Append_PSSWithSHA256) || p.TLSVersMax == VersionTLS13 {
 		// https://tools.ietf.org/html/rfc8446 says "...RSASSA-PSS (which is mandatory in TLS 1.3)..."
 		sigAndHashAlgos = append(sigAndHashAlgos, PSSWithSHA256)
-		if r.FlipWeightedCoin(0.9) {
+		if r.FlipWeightedCoin(id.Weights.SigAndHashAlgos_Append_PSSWithSHA384_PSSWithSHA512) {
 			// these usually go together
 			sigAndHashAlgos = append(sigAndHashAlgos, PSSWithSHA384)
 			sigAndHashAlgos = append(sigAndHashAlgos, PSSWithSHA512)
@@ -2100,11 +2257,11 @@ func (uconn *UConn) generateRandomizedSpec() (ClientHelloSpec, error) {
 	points := SupportedPointsExtension{SupportedPoints: []byte{pointFormatUncompressed}}
 
 	curveIDs := []CurveID{}
-	if r.FlipWeightedCoin(0.71) || p.TLSVersMax == VersionTLS13 {
+	if r.FlipWeightedCoin(id.Weights.CurveIDs_Append_X25519) || p.TLSVersMax == VersionTLS13 {
 		curveIDs = append(curveIDs, X25519)
 	}
 	curveIDs = append(curveIDs, CurveP256, CurveP384)
-	if r.FlipWeightedCoin(0.46) {
+	if r.FlipWeightedCoin(id.Weights.CurveIDs_Append_CurveP521) {
 		curveIDs = append(curveIDs, CurveP521)
 	}
 
@@ -2122,36 +2279,36 @@ func (uconn *UConn) generateRandomizedSpec() (ClientHelloSpec, error) {
 	}
 
 	if WithALPN {
-		if len(uconn.config.NextProtos) == 0 {
+		if len(nextProtos) == 0 {
 			// if user didn't specify alpn yet, choose something popular
-			uconn.config.NextProtos = []string{"h2", "http/1.1"}
+			nextProtos = []string{"h2", "http/1.1"}
 		}
-		alpn := ALPNExtension{AlpnProtocols: uconn.config.NextProtos}
+		alpn := ALPNExtension{AlpnProtocols: nextProtos}
 		p.Extensions = append(p.Extensions, &alpn)
 	}
 
-	if r.FlipWeightedCoin(0.62) || p.TLSVersMax == VersionTLS13 {
+	if r.FlipWeightedCoin(id.Weights.Extensions_Append_Padding) || p.TLSVersMax == VersionTLS13 {
 		// always include for TLS 1.3, since TLS 1.3 ClientHellos are often over 256 bytes
 		// and that's when padding is required to work around buggy middleboxes
 		p.Extensions = append(p.Extensions, &padding)
 	}
-	if r.FlipWeightedCoin(0.74) {
+	if r.FlipWeightedCoin(id.Weights.Extensions_Append_Status) {
 		p.Extensions = append(p.Extensions, &status)
 	}
-	if r.FlipWeightedCoin(0.46) {
+	if r.FlipWeightedCoin(id.Weights.Extensions_Append_SCT) {
 		p.Extensions = append(p.Extensions, &sct)
 	}
-	if r.FlipWeightedCoin(0.75) {
+	if r.FlipWeightedCoin(id.Weights.Extensions_Append_Reneg) {
 		p.Extensions = append(p.Extensions, &reneg)
 	}
-	if r.FlipWeightedCoin(0.77) {
+	if r.FlipWeightedCoin(id.Weights.Extensions_Append_EMS) {
 		p.Extensions = append(p.Extensions, &ems)
 	}
 	if p.TLSVersMax == VersionTLS13 {
 		ks := KeyShareExtension{[]KeyShare{
 			{Group: X25519}, // the key for the group will be generated later
 		}}
-		if r.FlipWeightedCoin(0.25) {
+		if r.FlipWeightedCoin(id.Weights.FirstKeyShare_Set_CurveP256) {
 			// do not ADD second keyShare because crypto/tls does not support multiple ecdheParams
 			// TODO: add it back when they implement multiple keyShares, or implement it oursevles
 			// ks.KeyShares = append(ks.KeyShares, KeyShare{Group: CurveP256})
@@ -2174,11 +2331,11 @@ func (uconn *UConn) generateRandomizedSpec() (ClientHelloSpec, error) {
 			// seed to create a new, independent PRNG, so that a seed used
 			// with the previous version of generateRandomizedSpec will
 			// produce the exact same spec as long as ALPS isn't selected.
-			r, err := newPRNGWithSaltedSeed(uconn.ClientHelloID.Seed, "ALPS")
+			r, err := newPRNGWithSaltedSeed(id.Seed, "ALPS")
 			if err != nil {
 				return p, err
 			}
-			if r.FlipWeightedCoin(0.33) {
+			if r.FlipWeightedCoin(id.Weights.Extensions_Append_ALPS) {
 				// As with the ALPN case above, default to something popular
 				// (unlike ALPN, ALPS can't yet be specified in uconn.config).
 				alps := &ApplicationSettingsExtension{SupportedProtocols: []string{"h2"}}
