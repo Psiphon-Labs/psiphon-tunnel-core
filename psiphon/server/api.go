@@ -950,6 +950,7 @@ var baseDialParams = []requestParamSpec{
 	{"http_transform", isAnyString, requestParamOptional},
 	{"seed_transform", isAnyString, requestParamOptional},
 	{"ossh_prefix", isAnyString, requestParamOptional},
+	{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.

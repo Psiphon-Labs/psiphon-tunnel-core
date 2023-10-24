@@ -207,6 +207,9 @@ type MeekConfig struct {
 	// HTTPTransformerParameters specifies an HTTP transformer to apply to the
 	// meek connection if it uses HTTP.
 	HTTPTransformerParameters *transforms.HTTPTransformerParameters
+
+	// TLSFragmentClientHello specifies whether to fragment the TLS Client Hello.
+	TLSFragmentClientHello bool
 }
 
 // MeekConn is a network connection that tunnels net.Conn flows over HTTP and supports
@@ -458,6 +461,7 @@ func DialMeek(
 			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,
 			TLSPadding:                    meek.tlsPadding,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+			FragmentClientHello:           meekConfig.TLSFragmentClientHello,
 		}
 		tlsConfig.EnableClientSessionCache()
 

@@ -1007,6 +1007,10 @@ func getBaseAPIParameters(
 			params["tls_ossh_transformed_host_name"] = "1"
 		}
 
+		if dialParams.TLSFragmentClientHello {
+			params["tls_fragmented"] = "1"
+		}
+
 		if dialParams.SelectedUserAgent {
 			params["user_agent"] = dialParams.UserAgent
 		}

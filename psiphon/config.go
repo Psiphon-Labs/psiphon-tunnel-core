@@ -872,6 +872,9 @@ type Config struct {
 	TLSTunnelMinTLSPadding             *int
 	TLSTunnelMaxTLSPadding             *int
 
+	// TLSFragmentClientHelloProbability is for testing purposes only.
+	TLSFragmentClientHelloProbability *float64
+
 	// AdditionalParameters is used for testing.
 	AdditionalParameters string
 
@@ -2057,6 +2060,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.TLSTunnelMaxTLSPadding] = *config.TLSTunnelMaxTLSPadding
 	}
 
+	if config.TLSFragmentClientHelloProbability != nil {
+		applyParameters[parameters.TLSFragmentClientHelloProbability] = *config.TLSFragmentClientHelloProbability
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2586,6 +2593,11 @@ func (config *Config) setDialParametersHash() {
 	if config.TLSTunnelMaxTLSPadding != nil {
 		hash.Write([]byte("TLSTunnelMaxTLSPadding"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelMaxTLSPadding))
+	}
+
+	if config.TLSFragmentClientHelloProbability != nil {
+		hash.Write([]byte("TLSFragmentClientHelloProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.TLSFragmentClientHelloProbability)
 	}
 
 	config.dialParametersHash = hash.Sum(nil)
