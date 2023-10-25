@@ -1075,51 +1075,57 @@ func getBaseAPIParameters(
 
 		if dialParams.ResolveParameters != nil {
 
+			// Log enough information to distinguish several successful or
+			// failed circumvention cases of interest, including preferring
+			// alternate servers and/or using DNS protocol transforms, and
+			// appropriate for both handshake and failed_tunnel logging:
+			//
+			// - The initial attempt made by Resolver.ResolveIP,
+			//   preferring an alternate DNS server and/or using a
+			//   protocol transform succeeds (dns_result = 0, the initial
+			//   attempt, 0, got the first result).
+			//
+			// - A second attempt may be used, still preferring an
+			//   alternate DNS server but no longer using the protocol
+			//   transform, which presumably failed (dns_result = 1, the
+			//   second attempt, 1, got the first result).
+			//
+			// - Subsequent attempts will use the system DNS server and no
+			//   protocol transforms (dns_result > 2).
+			//
+			// Due to the design of Resolver.ResolveIP, the notion
+			// of "success" is approximate; for example a successful
+			// response may arrive after a subsequent attempt succeeds,
+			// simply due to slow network conditions. It's also possible
+			// that, for a given attemp, only one of the two concurrent
+			// requests (A and AAAA) succeeded.
+			//
+			// Note that ResolveParameters.GetFirstAttemptWithAnswer
+			// semantics assume that dialParams.ResolveParameters wasn't
+			// used by or modified by any other dial.
+			//
+			// Some protocols may use both preresolved DNS as well as actual
+			// DNS requests, such as Conjure with the DTLS transport, which
+			// may resolve STUN server domains while using preresolved DNS
+			// for fronted API registration.
+
 			if dialParams.ResolveParameters.PreresolvedIPAddress != "" {
-				params["dns_preresolved"] = dialParams.ResolveParameters.PreresolvedIPAddress
-
-			} else {
-
-				// Log enough information to distinguish several successful or
-				// failed circumvention cases of interest, including preferring
-				// alternate servers and/or using DNS protocol transforms, and
-				// appropriate for both handshake and failed_tunnel logging:
-				//
-				// - The initial attempt made by Resolver.ResolveIP,
-				//   preferring an alternate DNS server and/or using a
-				//   protocol transform succeeds (dns_result = 0, the initial
-				//   attempt, 0, got the first result).
-				//
-				// - A second attempt may be used, still preferring an
-				//   alternate DNS server but no longer using the protocol
-				//   transform, which presumably failed (dns_result = 1, the
-				//   second attempt, 1, got the first result).
-				//
-				// - Subsequent attempts will use the system DNS server and no
-				//   protocol transforms (dns_result > 2).
-				//
-				// Due to the design of Resolver.ResolveIP, the notion
-				// of "success" is approximate; for example a successful
-				// response may arrive after a subsequent attempt succeeds,
-				// simply due to slow network conditions. It's also possible
-				// that, for a given attemp, only one of the two concurrent
-				// requests (A and AAAA) succeeded.
-				//
-				// Note that ResolveParameters.GetFirstAttemptWithAnswer
-				// semantics assume that dialParams.ResolveParameters wasn't
-				// used by or modified by any other dial.
-
-				if dialParams.ResolveParameters.PreferAlternateDNSServer {
-					params["dns_preferred"] = dialParams.ResolveParameters.AlternateDNSServer
+				meekDialDomain, _, _ := net.SplitHostPort(dialParams.MeekDialAddress)
+				if dialParams.ResolveParameters.PreresolvedDomain == meekDialDomain {
+					params["dns_preresolved"] = dialParams.ResolveParameters.PreresolvedIPAddress
 				}
-
-				if dialParams.ResolveParameters.ProtocolTransformName != "" {
-					params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
-				}
-
-				params["dns_attempt"] = strconv.Itoa(
-					dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 			}
+
+			if dialParams.ResolveParameters.PreferAlternateDNSServer {
+				params["dns_preferred"] = dialParams.ResolveParameters.AlternateDNSServer
+			}
+
+			if dialParams.ResolveParameters.ProtocolTransformName != "" {
+				params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
+			}
+
+			params["dns_attempt"] = strconv.Itoa(
+				dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 		}
 
 		if dialParams.HTTPTransformerParameters != nil {

@@ -175,6 +175,10 @@ type ResolveParameters struct {
 	// of making a request.
 	PreresolvedIPAddress string
 
+	// PreresolvedDomain is the domain for which PreresolvedIPAddress is to be
+	// used.
+	PreresolvedDomain string
+
 	// AlternateDNSServer specifies an alterate DNS server (IP:port, or IP
 	// only with port 53 assumed) to be used when either no system DNS
 	// servers are available or when PreferAlternateDNSServer is set.
@@ -314,7 +318,8 @@ func (r *Resolver) Stop() {
 // parameters and optional frontingProviderID context.
 func (r *Resolver) MakeResolveParameters(
 	p parameters.ParametersAccessor,
-	frontingProviderID string) (*ResolveParameters, error) {
+	frontingProviderID string,
+	frontingDialDomain string) (*ResolveParameters, error) {
 
 	params := &ResolveParameters{
 		AttemptsPerServer:          p.Int(parameters.DNSResolverAttemptsPerServer),
@@ -326,6 +331,9 @@ func (r *Resolver) MakeResolveParameters(
 	// When a frontingProviderID is specified, generate a pre-resolved IP
 	// address, based on tactics configuration.
 	if frontingProviderID != "" {
+		if frontingDialDomain == "" {
+			return nil, errors.TraceNew("missing fronting dial domain")
+		}
 		if p.WeightedCoinFlip(parameters.DNSResolverPreresolvedIPAddressProbability) {
 			CIDRs := p.LabeledCIDRs(parameters.DNSResolverPreresolvedIPAddressCIDRs, frontingProviderID)
 			if len(CIDRs) > 0 {
@@ -335,14 +343,9 @@ func (r *Resolver) MakeResolveParameters(
 					return nil, errors.Trace(err)
 				}
 				params.PreresolvedIPAddress = IP.String()
+				params.PreresolvedDomain = frontingDialDomain
 			}
 		}
-	}
-
-	// When PreresolvedIPAddress is set, there's no DNS request and the
-	// following params can be skipped.
-	if params.PreresolvedIPAddress != "" {
-		return params, nil
 	}
 
 	// When preferring an alternate DNS server, select the alternate from
@@ -496,7 +499,7 @@ func (r *Resolver) ResolveIP(
 	ctx context.Context,
 	networkID string,
 	params *ResolveParameters,
-	hostname string) ([]net.IP, error) {
+	hostname string) (x []net.IP, y error) {
 
 	// ResolveIP does _not_ lock r.mutex for the lifetime of the function, to
 	// ensure many ResolveIP calls can run concurrently.
@@ -536,7 +539,7 @@ func (r *Resolver) ResolveIP(
 
 	// When PreresolvedIPAddress is set, tactics parameters determined the IP address
 	// in this case.
-	if params.PreresolvedIPAddress != "" {
+	if params.PreresolvedIPAddress != "" && params.PreresolvedDomain == hostname {
 		IP := net.ParseIP(params.PreresolvedIPAddress)
 		if IP == nil {
 			// Unexpected case, as MakeResolveParameters selects the IP address.

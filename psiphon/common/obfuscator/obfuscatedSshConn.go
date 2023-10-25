@@ -546,33 +546,36 @@ func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 
 		preamble, prefixLen := conn.obfuscator.SendPreamble()
 
-		// Writes the prefix first, then the rest of the preamble after a delay.
-		_, err := conn.Conn.Write(preamble[:prefixLen])
-		if err != nil {
-			return errors.Trace(err)
-		}
+		if prefixLen > 0 {
 
-		// Adds random delay defined by OSSH prefix split config.
-		if config := conn.obfuscator.osshPrefixSplitConfig; config != nil {
-			rng := prng.NewPRNGWithSeed(config.Seed)
-			delay := rng.Period(config.MinDelay, config.MaxDelay)
-
-			timer := time.NewTimer(delay)
-
-			var err error
-			select {
-			case <-conn.runCtx.Done():
-				err = conn.runCtx.Err()
-			case <-timer.C:
-			}
-			timer.Stop()
-
+			// Writes the prefix first, then the rest of the preamble after a delay.
+			_, err := conn.Conn.Write(preamble[:prefixLen])
 			if err != nil {
 				return errors.Trace(err)
 			}
+
+			// Adds random delay defined by OSSH prefix split config.
+			if config := conn.obfuscator.osshPrefixSplitConfig; config != nil {
+				rng := prng.NewPRNGWithSeed(config.Seed)
+				delay := rng.Period(config.MinDelay, config.MaxDelay)
+
+				timer := time.NewTimer(delay)
+
+				var err error
+				select {
+				case <-conn.runCtx.Done():
+					err = conn.runCtx.Err()
+				case <-timer.C:
+				}
+				timer.Stop()
+
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
 		}
 
-		_, err = conn.Conn.Write(preamble[prefixLen:])
+		_, err := conn.Conn.Write(preamble[prefixLen:])
 		if err != nil {
 			return errors.Trace(err)
 		}

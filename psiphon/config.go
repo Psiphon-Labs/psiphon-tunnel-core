@@ -797,6 +797,11 @@ type Config struct {
 	ConjureDecoyRegistrarWidth                *int
 	ConjureDecoyRegistrarMinDelayMilliseconds *int
 	ConjureDecoyRegistrarMaxDelayMilliseconds *int
+	ConjureEnableIPv6Dials                    *bool
+	ConjureEnablePortRandomization            *bool
+	ConjureEnableRegistrationOverrides        *bool
+	ConjureLimitTransports                    protocol.ConjureTransports
+	ConjureSTUNServerAddresses                []string
 
 	// HoldOffTunnelMinDurationMilliseconds and other HoldOffTunnel fields are
 	// for testing purposes.
@@ -1867,6 +1872,26 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ConjureDecoyRegistrarMaxDelay] = fmt.Sprintf("%dms", *config.ConjureDecoyRegistrarMaxDelayMilliseconds)
 	}
 
+	if config.ConjureEnableIPv6Dials != nil {
+		applyParameters[parameters.ConjureEnableIPv6Dials] = *config.ConjureEnableIPv6Dials
+	}
+
+	if config.ConjureEnablePortRandomization != nil {
+		applyParameters[parameters.ConjureEnablePortRandomization] = *config.ConjureEnablePortRandomization
+	}
+
+	if config.ConjureEnableRegistrationOverrides != nil {
+		applyParameters[parameters.ConjureEnableRegistrationOverrides] = *config.ConjureEnableRegistrationOverrides
+	}
+
+	if config.ConjureLimitTransports != nil {
+		applyParameters[parameters.ConjureLimitTransports] = config.ConjureLimitTransports
+	}
+
+	if config.ConjureSTUNServerAddresses != nil {
+		applyParameters[parameters.ConjureSTUNServerAddresses] = config.ConjureSTUNServerAddresses
+	}
+
 	if config.HoldOffTunnelMinDurationMilliseconds != nil {
 		applyParameters[parameters.HoldOffTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelMinDurationMilliseconds)
 	}
@@ -2326,6 +2351,20 @@ func (config *Config) setDialParametersHash() {
 	if config.ConjureDecoyRegistrarMaxDelayMilliseconds != nil {
 		hash.Write([]byte("ConjureDecoyRegistrarMaxDelayMilliseconds"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureDecoyRegistrarMaxDelayMilliseconds))
+	}
+
+	if config.ConjureLimitTransports != nil {
+		hash.Write([]byte("ConjureLimitTransports"))
+		for _, transport := range config.ConjureLimitTransports {
+			hash.Write([]byte(transport))
+		}
+	}
+
+	if config.ConjureSTUNServerAddresses != nil {
+		hash.Write([]byte("ConjureSTUNServerAddresses"))
+		for _, address := range config.ConjureSTUNServerAddresses {
+			hash.Write([]byte(address))
+		}
 	}
 
 	if config.HoldOffTunnelMinDurationMilliseconds != nil {

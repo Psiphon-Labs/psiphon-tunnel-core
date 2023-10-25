@@ -381,9 +381,7 @@ func DialMeek(
 
 		udpDialer := func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error) {
 			packetConn, remoteAddr, err := NewUDPConn(
-				ctx,
-				meekConfig.DialAddress,
-				dialConfig)
+				ctx, "udp", false, "", meekConfig.DialAddress, dialConfig)
 			if err != nil {
 				return nil, nil, errors.Trace(err)
 			}

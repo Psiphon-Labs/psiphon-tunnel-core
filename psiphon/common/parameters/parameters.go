@@ -295,7 +295,12 @@ const (
 	ConjureDecoyRegistrarWidth                       = "ConjureDecoyRegistrarWidth"
 	ConjureDecoyRegistrarMinDelay                    = "ConjureDecoyRegistrarMinDelay"
 	ConjureDecoyRegistrarMaxDelay                    = "ConjureDecoyRegistrarMaxDelay"
-	ConjureTransportObfs4Probability                 = "ConjureTransportObfs4Probability"
+	ConjureEnableIPv6Dials                           = "ConjureEnableIPv6Dials"
+	ConjureEnablePortRandomization                   = "ConjureEnablePortRandomization"
+	ConjureEnableRegistrationOverrides               = "ConjureEnableRegistrationOverrides"
+	ConjureLimitTransportsProbability                = "ConjureLimitTransportsProbability"
+	ConjureLimitTransports                           = "ConjureLimitTransports"
+	ConjureSTUNServerAddresses                       = "ConjureSTUNServerAddresses"
 	CustomHostNameRegexes                            = "CustomHostNameRegexes"
 	CustomHostNameProbability                        = "CustomHostNameProbability"
 	CustomHostNameLimitProtocols                     = "CustomHostNameLimitProtocols"
@@ -674,8 +679,12 @@ var defaultParameters = map[string]struct {
 	ConjureDecoyRegistrarWidth:          {value: 5, minimum: 0},
 	ConjureDecoyRegistrarMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
 	ConjureDecoyRegistrarMaxDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-
-	ConjureTransportObfs4Probability: {value: 0.0, minimum: 0.0},
+	ConjureEnableIPv6Dials:              {value: true},
+	ConjureEnablePortRandomization:      {value: true},
+	ConjureEnableRegistrationOverrides:  {value: false},
+	ConjureLimitTransportsProbability:   {value: 1.0, minimum: 0.0},
+	ConjureLimitTransports:              {value: protocol.ConjureTransports{}},
+	ConjureSTUNServerAddresses:          {value: []string{}},
 
 	CustomHostNameRegexes:        {value: RegexStrings{}},
 	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},
@@ -1167,6 +1176,15 @@ func (p *Parameters) Set(
 						continue
 					}
 					return nil, errors.Trace(err)
+				}
+			case protocol.ConjureTransports:
+				if skipOnError {
+					newValue = v.PruneInvalid()
+				} else {
+					err := v.Validate()
+					if err != nil {
+						return nil, errors.Trace(err)
+					}
 				}
 			}
 
@@ -1683,6 +1701,35 @@ func (p ParametersAccessor) ProtocolTransformSpecs(name string) transforms.Specs
 // parameter value.
 func (p ParametersAccessor) ProtocolTransformScopedSpecNames(name string) transforms.ScopedSpecNames {
 	value := transforms.ScopedSpecNames{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// ConjureTransports returns a protocol.ConjureTransports parameter value. If
+// there is a corresponding Probability value, a weighted coin flip will be
+// performed and, depending on the result, the value or the parameter default
+// will be returned.
+func (p ParametersAccessor) ConjureTransports(name string) protocol.ConjureTransports {
+
+	probabilityName := name + "Probability"
+	_, ok := p.snapshot.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
+		if !prng.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(protocol.ConjureTransports)
+				if ok {
+					value := make(protocol.ConjureTransports, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
+			}
+		}
+	}
+
+	value := protocol.ConjureTransports{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

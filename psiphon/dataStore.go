@@ -609,7 +609,6 @@ type ServerEntryIterator struct {
 // NewServerEntryIterator and any returned ServerEntryIterator are not
 // designed for concurrent use as not all related datastore operations are
 // performed in a single transaction.
-//
 func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) {
 
 	// When configured, this target server entry is the only candidate

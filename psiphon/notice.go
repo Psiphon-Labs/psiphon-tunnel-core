@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -564,26 +565,27 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 
 		if dialParams.ResolveParameters != nil {
 
+			// See dialParams.ResolveParameters comment in getBaseAPIParameters.
+
 			if dialParams.ResolveParameters.PreresolvedIPAddress != "" {
-				nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.PreresolvedIPAddress)
-				args = append(args, "DNSPreresolved", nonredacted)
-
-			} else {
-
-				// See dialParams.ResolveParameters comment in getBaseAPIParameters.
-
-				if dialParams.ResolveParameters.PreferAlternateDNSServer {
-					nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.AlternateDNSServer)
-					args = append(args, "DNSPreferred", nonredacted)
+				meekDialDomain, _, _ := net.SplitHostPort(dialParams.MeekDialAddress)
+				if dialParams.ResolveParameters.PreresolvedDomain == meekDialDomain {
+					nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.PreresolvedIPAddress)
+					args = append(args, "DNSPreresolved", nonredacted)
 				}
+			}
 
-				if dialParams.ResolveParameters.ProtocolTransformName != "" {
-					args = append(args, "DNSTransform", dialParams.ResolveParameters.ProtocolTransformName)
-				}
+			if dialParams.ResolveParameters.PreferAlternateDNSServer {
+				nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.AlternateDNSServer)
+				args = append(args, "DNSPreferred", nonredacted)
+			}
 
-				if postDial {
-					args = append(args, "DNSAttempt", dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
-				}
+			if dialParams.ResolveParameters.ProtocolTransformName != "" {
+				args = append(args, "DNSTransform", dialParams.ResolveParameters.ProtocolTransformName)
+			}
+
+			if postDial {
+				args = append(args, "DNSAttempt", dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 			}
 		}
 

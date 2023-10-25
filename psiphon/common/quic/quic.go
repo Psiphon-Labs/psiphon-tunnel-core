@@ -69,7 +69,6 @@ const (
 	SERVER_HANDSHAKE_TIMEOUT = 30 * time.Second
 	SERVER_IDLE_TIMEOUT      = 5 * time.Minute
 	CLIENT_IDLE_TIMEOUT      = 30 * time.Second
-	UDP_PACKET_WRITE_TIMEOUT = 1 * time.Second
 )
 
 // Enabled indicates if QUIC functionality is enabled.
@@ -401,8 +400,9 @@ func Dial(
 		// see ObfuscatedPacketConn.writePacket for the server-side
 		// downstream limitation.
 
-		// Ensure blocked packet writes eventually timeout.
-		packetConn = &writeTimeoutPacketConn{
+		// Ensure blocked packet writes eventually timeout. Note that quic-go
+		// manages read deadlines; we set only the write deadline here.
+		packetConn = &common.WriteTimeoutPacketConn{
 			PacketConn: packetConn,
 		}
 
@@ -415,7 +415,7 @@ func Dial(
 	} else {
 
 		// Ensure blocked packet writes eventually timeout.
-		packetConn = &writeTimeoutUDPConn{
+		packetConn = &common.WriteTimeoutUDPConn{
 			UDPConn: udpConn,
 		}
 	}
@@ -525,83 +525,6 @@ func Dial(
 	}
 
 	return conn, nil
-}
-
-// writeTimeoutUDPConn sets write deadlines before each UDP packet write.
-//
-// Generally, a UDP packet write doesn't block. However, Go's
-// internal/poll.FD.WriteMsg continues to loop when syscall.SendmsgN fails
-// with EAGAIN, which indicates that an OS socket buffer is currently full;
-// in certain OS states this may cause WriteMsgUDP/etc. to block
-// indefinitely. In this scenario, we want to instead behave as if the packet
-// were dropped, so we set a write deadline which will eventually interrupt
-// any EAGAIN loop.
-//
-// Note that quic-go manages read deadlines; we set only the write deadline
-// here.
-type writeTimeoutUDPConn struct {
-	*net.UDPConn
-}
-
-func (conn *writeTimeoutUDPConn) Write(b []byte) (int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.UDPConn.Write(b)
-}
-
-func (conn *writeTimeoutUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (int, int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.UDPConn.WriteMsgUDP(b, oob, addr)
-}
-
-func (conn *writeTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.UDPConn.WriteTo(b, addr)
-}
-
-func (conn *writeTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.UDPConn.WriteToUDP(b, addr)
-}
-
-// writeTimeoutPacketConn is the equivilent of writeTimeoutUDPConn for
-// non-*net.UDPConns.
-type writeTimeoutPacketConn struct {
-	net.PacketConn
-}
-
-func (conn *writeTimeoutPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.PacketConn.WriteTo(b, addr)
 }
 
 // Conn is a net.Conn and psiphon/common.Closer.
@@ -884,8 +807,9 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 		return nil, errors.Tracef("unexpected packetConn type: %T", packetConn)
 	}
 
-	// Ensure blocked packet writes eventually timeout.
-	packetConn = &writeTimeoutUDPConn{
+	// Ensure blocked packet writes eventually timeout. Note that quic-go
+	// manages read deadlines; we set only the write deadline here.
+	packetConn = &common.WriteTimeoutUDPConn{
 		UDPConn: udpConn,
 	}
 

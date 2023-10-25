@@ -138,6 +138,7 @@ type DialParameters struct {
 	ConjureDecoyRegistrarDelay          time.Duration
 	ConjureDecoyRegistrarWidth          int
 	ConjureTransport                    string
+	ConjureSTUNServerAddress            string
 
 	LivenessTestSeed *prng.Seed
 
@@ -623,10 +624,18 @@ func MakeDialParameters(
 	if (!isReplay || !replayConjureTransport) &&
 		protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
 
-		dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_MIN_OSSH
-		if p.WeightedCoinFlip(
-			parameters.ConjureTransportObfs4Probability) {
-			dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_OBFS4_OSSH
+		// None of ConjureEnableIPv6Dials, ConjureEnablePortRandomization, or
+		// ConjureEnableRegistrationOverrides are set here for replay. The
+		// current value of these flag parameters is always applied.
+
+		dialParams.ConjureTransport = selectConjureTransport(p)
+		if protocol.ConjureTransportUsesSTUN(dialParams.ConjureTransport) {
+			stunServerAddresses := p.Strings(parameters.ConjureSTUNServerAddresses)
+			if len(stunServerAddresses) == 0 {
+				return nil, errors.Tracef(
+					"no Conjure STUN servers addresses configured for transport %s", dialParams.ConjureTransport)
+			}
+			dialParams.ConjureSTUNServerAddress = stunServerAddresses[prng.Intn(len(stunServerAddresses))]
 		}
 	}
 
@@ -824,7 +833,7 @@ func MakeDialParameters(
 	if (!isReplay || !replayResolveParameters) && useResolver {
 
 		dialParams.ResolveParameters, err = dialParams.resolver.MakeResolveParameters(
-			p, dialParams.FrontingProviderID)
+			p, dialParams.FrontingProviderID, dialParams.MeekFrontingDialAddress)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1719,4 +1728,30 @@ func makeOSSHPrefixSplitConfig(p parameters.ParametersAccessor) (*obfuscator.OSS
 		MinDelay: minDelay,
 		MaxDelay: maxDelay,
 	}, nil
+}
+
+func selectConjureTransport(
+	p parameters.ParametersAccessor) string {
+
+	limitConjureTransports := p.ConjureTransports(parameters.ConjureLimitTransports)
+
+	transports := make([]string, 0)
+
+	for _, transport := range protocol.SupportedConjureTransports {
+
+		if len(limitConjureTransports) > 0 &&
+			!common.Contains(limitConjureTransports, transport) {
+			continue
+		}
+
+		transports = append(transports, transport)
+	}
+
+	if len(transports) == 0 {
+		return ""
+	}
+
+	choice := prng.Intn(len(transports))
+
+	return transports[choice]
 }
