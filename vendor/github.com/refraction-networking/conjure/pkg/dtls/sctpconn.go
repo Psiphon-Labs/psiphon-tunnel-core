@@ -2,6 +2,7 @@ package dtls
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -10,13 +11,21 @@ import (
 	"github.com/pion/sctp"
 )
 
+type msgStream interface {
+	io.ReadWriteCloser
+	BufferedAmount() uint64
+	SetReadDeadline(deadline time.Time) error
+	SetBufferedAmountLowThreshold(th uint64)
+	OnBufferedAmountLow(f func())
+}
+
 // SCTPConn implements the net.Conn interface using sctp stream and DTLS conn
 //
 // SCTPConn buffers incoming SCTP messages, allowing the caller to use
 // SCTPConn as a TCP-like bytes stream net.Conn, with reads smaller than
 // individual message sizes.
 type SCTPConn struct {
-	stream         *sctp.Stream
+	stream         msgStream
 	conn           net.Conn
 	maxMessageSize uint64
 
@@ -41,7 +50,7 @@ const (
 	writeMaxBufferedAmount uint64 = 256 * 1024
 )
 
-func newSCTPConn(stream *sctp.Stream, conn net.Conn, maxMessageSize uint64) *SCTPConn {
+func newSCTPConn(stream msgStream, conn net.Conn, maxMessageSize uint64) *SCTPConn {
 
 	s := &SCTPConn{
 		stream:         stream,
@@ -209,12 +218,12 @@ func openSCTP(conn net.Conn, unordered bool) (net.Conn, error) {
 
 	sctpStream.SetReliabilityParams(unordered, sctp.ReliabilityTypeReliable, 0)
 
-	sctpConn := newSCTPConn(sctpStream, conn, uint64(sctpClient.MaxMessageSize()))
-
-	err = heartbeatClient(sctpConn, &heartbeatConfig{Interval: 10 * time.Second})
+	err = heartbeatClient(sctpStream, &heartbeatConfig{Interval: 10 * time.Second})
 	if err != nil {
 		return nil, fmt.Errorf("error opening heartbeat client: %v", err)
 	}
+
+	sctpConn := newSCTPConn(sctpStream, conn, uint64(sctpClient.MaxMessageSize()))
 
 	return sctpConn, nil
 }
@@ -239,14 +248,14 @@ func acceptSCTP(conn net.Conn, unordered bool) (net.Conn, error) {
 
 	sctpStream.SetReliabilityParams(unordered, sctp.ReliabilityTypeReliable, 0)
 
-	sctpConn := newSCTPConn(sctpStream, conn, uint64(sctpServer.MaxMessageSize()))
-
-	heartbeatConn, err := heartbeatServer(sctpConn, nil)
+	heartbeatConn, err := heartbeatServer(sctpStream, nil, int(sctpServer.MaxMessageSize()))
 	if err != nil {
 		return nil, fmt.Errorf("error starting heartbeat server: %v", err)
 	}
 
-	return heartbeatConn, nil
+	sctpConn := newSCTPConn(heartbeatConn, conn, uint64(sctpServer.MaxMessageSize()))
+
+	return sctpConn, nil
 
 }
 

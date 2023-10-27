@@ -32,7 +32,7 @@ require (
 	github.com/mitchellh/panicwrap v0.0.0-20170106182340-fce601fe5557
 	github.com/oschwald/maxminddb-golang v1.12.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/refraction-networking/conjure v0.7.8-0.20231019174926-d2f991831312
+	github.com/refraction-networking/conjure v0.7.8
 	github.com/refraction-networking/gotapdance v1.7.7
 	github.com/refraction-networking/utls v1.3.3
 	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735

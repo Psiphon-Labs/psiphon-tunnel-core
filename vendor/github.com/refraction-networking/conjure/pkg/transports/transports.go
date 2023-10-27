@@ -12,6 +12,9 @@ import (
 )
 
 var (
+	// ErrUnknownTransport provided id or name does npt match any enabled transport.
+	ErrUnknownTransport = errors.New("unknown transport")
+
 	// ErrTryAgain is returned by transports when it is inconclusive with the current amount of data
 	// whether the transport exists in the connection.
 	ErrTryAgain = errors.New("not enough information to determine transport")

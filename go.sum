@@ -176,6 +176,8 @@ github.com/refraction-networking/conjure v0.7.7 h1:8vWFmSzmkNSrVr1TI4BRbgCD1tc3F
 github.com/refraction-networking/conjure v0.7.7/go.mod h1:/UxAcot49ii6ejyvBrSo3g10yyUEavaGJT1Iy47oAfU=
 github.com/refraction-networking/conjure v0.7.8-0.20231019174926-d2f991831312 h1:IP2pvATIC1QBj2/+biLxTJa23PxRIiDwrPvvE4Sh6cw=
 github.com/refraction-networking/conjure v0.7.8-0.20231019174926-d2f991831312/go.mod h1:iOb7GmuSvk/LZsd40L+D/cKmVGIjpFWQkbtOPggJrcA=
+github.com/refraction-networking/conjure v0.7.8 h1:gPjb0iFyrxkcxc7eOKMjIgh/M4fPaP+plYw9PITWXYs=
+github.com/refraction-networking/conjure v0.7.8/go.mod h1:iOb7GmuSvk/LZsd40L+D/cKmVGIjpFWQkbtOPggJrcA=
 github.com/refraction-networking/ed25519 v0.1.2 h1:08kJZUkAlY7a7cZGosl1teGytV+QEoNxPO7NnRvAB+g=
 github.com/refraction-networking/ed25519 v0.1.2/go.mod h1:nxYLUAYt/hmNpAh64PNSQ/tQ9gTIB89wCaGKJlRtZ9I=
 github.com/refraction-networking/gotapdance v1.7.7 h1:RSdDCA0v4n/iIxCnxLF6uCoJdlo000R+IKGvELfpc/A=

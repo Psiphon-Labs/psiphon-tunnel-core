@@ -390,11 +390,6 @@ func dial(
 		randomizeDstPort := conjureConfig.EnablePortRandomization
 		disableOverrides := !conjureConfig.EnableRegistrationOverrides
 
-		// TODO: EnableRegistrationOverrides is ignored and overrides are
-		// disabled. At this time, overrides appear to undo the
-		// FlushAfterPrefix policy we require for writeMergeConn.
-		disableOverrides = true
-
 		conjureMetricTransport = conjureConfig.Transport
 
 		switch conjureConfig.Transport {

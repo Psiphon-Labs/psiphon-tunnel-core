@@ -213,6 +213,14 @@ func (t *ClientTransport) SetSessionParams(incoming *anypb.Any, unchecked ...boo
 		return fmt.Errorf("%w, nil params", ErrBadParams)
 	}
 
+	// If the client set a custom flush policy, use it over whatever the bidirectional registrar
+	// is trying to set.
+	if t.parameters.CustomFlushPolicy != nil {
+		if t.parameters.GetCustomFlushPolicy() != DefaultFlush {
+			prefixParams.CustomFlushPolicy = t.parameters.CustomFlushPolicy
+		}
+	}
+
 	if len(unchecked) != 0 && unchecked[0] {
 		// Overwrite the prefix bytes and type without checking the default set. This is used for
 		// RegResponse where the registrar may override the chosen prefix with a prefix outside of
