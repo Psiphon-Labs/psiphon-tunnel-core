@@ -179,9 +179,6 @@ func (c *stationConn) GetMetrics() common.LogFields {
 	return logFields
 }
 
-// Dialer is the dialer function type expected by gotapdance.
-type Dialer func(ctx context.Context, network, laddr, raddr string) (net.Conn, error)
-
 // DialTapDance establishes a new TapDance connection to a TapDance station
 // specified in the config assets and forwarding through to the Psiphon server
 // specified by address.
@@ -1025,10 +1022,13 @@ func (conn *refractionConn) GetMetrics() common.LogFields {
 			logFields["conjure_stun"] = conn.conjureMetricSTUNServerAddress
 		}
 
-		logFields["conjure_network"] = conn.RemoteAddr().Network()
-
-		_, port, err := net.SplitHostPort(conn.RemoteAddr().String())
+		host, port, err := net.SplitHostPort(conn.RemoteAddr().String())
 		if err == nil {
+			network := "IPv4"
+			if IP := net.ParseIP(host); IP != nil && IP.To4() == nil {
+				network = "IPv6"
+			}
+			logFields["conjure_network"] = network
 			logFields["conjure_port_number"] = port
 		}
 	}

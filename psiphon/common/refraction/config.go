@@ -20,6 +20,8 @@
 package refraction
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"time"
 
@@ -111,3 +113,6 @@ type ConjureConfig struct {
 	// Logger is used for logging diagnostics.
 	Logger common.Logger
 }
+
+// Dialer is the dialer function type expected by gotapdance.
+type Dialer func(ctx context.Context, network, laddr, raddr string) (net.Conn, error)

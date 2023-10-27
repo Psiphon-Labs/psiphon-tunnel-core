@@ -2472,7 +2472,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.DNSResolverProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("DNSResolverProtocolTransformScopedSpecNames"))
 		encodedDNSResolverProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.DNSResolverProtocolTransformScopedSpecNames)
 		hash.Write(encodedDNSResolverProtocolTransformScopedSpecNames)
@@ -2506,7 +2506,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.DirectHTTPProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("DirectHTTPProtocolTransformScopedSpecNames"))
 		encodedDirectHTTPProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.DirectHTTPProtocolTransformScopedSpecNames)
 		hash.Write(encodedDirectHTTPProtocolTransformScopedSpecNames)
@@ -2525,7 +2525,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.FrontedHTTPProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("FrontedHTTPProtocolTransformScopedSpecNames"))
 		encodedFrontedHTTPProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.FrontedHTTPProtocolTransformScopedSpecNames)
 		hash.Write(encodedFrontedHTTPProtocolTransformScopedSpecNames)
@@ -2544,7 +2544,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.OSSHObfuscatorSeedTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("OSSHObfuscatorSeedTransformScopedSpecNames"))
 		encodedOSSHObfuscatorSeedTransformScopedSpecNames, _ :=
 			json.Marshal(config.OSSHObfuscatorSeedTransformScopedSpecNames)
 		hash.Write(encodedOSSHObfuscatorSeedTransformScopedSpecNames)
@@ -2563,7 +2563,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.ObfuscatedQUICNonceTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("ObfuscatedQUICNonceTransformScopedSpecNames"))
 		encodedObfuscatedQUICNonceTransformScopedSpecNames, _ :=
 			json.Marshal(config.ObfuscatedQUICNonceTransformScopedSpecNames)
 		hash.Write(encodedObfuscatedQUICNonceTransformScopedSpecNames)
@@ -2581,7 +2581,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.OSSHPrefixScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("OSSHPrefixScopedSpecNames"))
 		encodedOSSHPrefixScopedSpecNames, _ := json.Marshal(config.OSSHPrefixScopedSpecNames)
 		hash.Write(encodedOSSHPrefixScopedSpecNames)
 	}
