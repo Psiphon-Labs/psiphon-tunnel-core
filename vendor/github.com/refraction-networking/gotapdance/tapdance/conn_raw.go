@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	pb "github.com/refraction-networking/gotapdance/protobuf"
+	pb "github.com/refraction-networking/conjure/proto"
 	tls "github.com/refraction-networking/utls"
+	"google.golang.org/protobuf/proto"
 )
 
 // Simply establishes TLS and TapDance connection.
@@ -30,7 +30,7 @@ type tdRawConn struct {
 
 	covert string // hostname that tapdance station will connect client to
 
-	TcpDialer func(context.Context, string, string) (net.Conn, error)
+	Dialer func(context.Context, string, string) (net.Conn, error)
 
 	decoySpec     *pb.TLSDecoySpec
 	pinDecoySpec  bool // don't ever change decoy (still changeable from outside)
@@ -262,15 +262,15 @@ func (tdRaw *tdRawConn) establishTLStoDecoy(ctx context.Context) error {
 	childCtx, childCancelFunc := context.WithDeadline(ctx, deadline)
 	defer childCancelFunc()
 
-	tcpDialer := tdRaw.TcpDialer
-	if tcpDialer == nil {
+	dialer := tdRaw.Dialer
+	if dialer == nil {
 		// custom dialer is not set, use default
 		d := net.Dialer{}
-		tcpDialer = d.DialContext
+		dialer = d.DialContext
 	}
 
 	tcpToDecoyStartTs := time.Now()
-	dialConn, err := tcpDialer(childCtx, "tcp", tdRaw.decoySpec.GetIpAddrStr())
+	dialConn, err := dialer(childCtx, "tcp", tdRaw.decoySpec.GetIpAddrStr())
 	tcpToDecoyTotalTs := time.Since(tcpToDecoyStartTs)
 	if err != nil {
 		return err

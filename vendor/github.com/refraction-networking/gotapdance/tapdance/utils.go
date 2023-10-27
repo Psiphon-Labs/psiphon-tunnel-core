@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/refraction-networking/gotapdance/ed25519/extra25519"
+	"github.com/refraction-networking/ed25519/extra25519"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -233,13 +233,14 @@ func errIsTimeout(err error) bool {
 // public key (and avoid sending it directly over the wire, as points on ellyptic curve are
 // distinguishable)
 // Then the sharedSecret will be used to encrypt stegoPayload and protobuf slices:
-//  - stegoPayload is encrypted with AES-GCM KEY=sharedSecret[0:16], IV=sharedSecret[16:28]
-//  - protobuf is encrypted with AES-GCM KEY=sharedSecret[0:16], IV={new random IV}, that will be
-//    prepended to encryptedProtobuf and eventually sent out together
+//   - stegoPayload is encrypted with AES-GCM KEY=sharedSecret[0:16], IV=sharedSecret[16:28]
+//   - protobuf is encrypted with AES-GCM KEY=sharedSecret[0:16], IV={new random IV}, that will be
+//     prepended to encryptedProtobuf and eventually sent out together
+//
 // Returns
-//  - tag(concatenated representative and encrypted stegoPayload),
-//  - encryptedProtobuf(concatenated 12 byte IV + encrypted protobuf)
-//  - error
+//   - tag(concatenated representative and encrypted stegoPayload),
+//   - encryptedProtobuf(concatenated 12 byte IV + encrypted protobuf)
+//   - error
 func obfuscateTagAndProtobuf(stegoPayload []byte, protobuf []byte, stationPubkey []byte) ([]byte, []byte, error) {
 	if len(stationPubkey) != 32 {
 		return nil, nil, errors.New("Unexpected station pubkey length. Expected: 32." +
@@ -267,7 +268,7 @@ func obfuscateTagAndProtobuf(stegoPayload []byte, protobuf []byte, stationPubkey
 	if err != nil {
 		return nil, nil, err
 	}
-	representative[31] |= (0x80 & randByte[0])
+	representative[31] |= (0xC0 & randByte[0])
 
 	tagBuf := new(bytes.Buffer) // What we have to encrypt with the shared secret using AES
 	tagBuf.Write(representative[:])

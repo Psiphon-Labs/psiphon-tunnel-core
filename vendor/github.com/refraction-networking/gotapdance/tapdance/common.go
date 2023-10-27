@@ -5,11 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"time"
 
-	"github.com/refraction-networking/gotapdance/ed25519/extra25519"
+	"github.com/refraction-networking/ed25519/extra25519"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -129,8 +130,9 @@ var default_flags = tdFlagUseTIL
 //
 // Requests station to send client's IP to covert in following form:
 // PROXY TCP4 x.x.x.x 127.0.0.1 1111 1234\r\n
-//       ^__^ ^_____^ ^_________________^
-//      proto clientIP      garbage
+//
+//	 ^__^ ^_____^ ^_________________^
+//	proto clientIP      garbage
 func EnableProxyProtocol() {
 	Logger().Println("tapdance.EnableProxyProtocol() is deprecated, " +
 		"use tapdance.Dialer with UseProxyHeader flag instead.")
@@ -171,8 +173,9 @@ func WriteTlsLog(clientRandom, masterSecret []byte) error {
 
 // How much time to sleep on trying to connect to decoys to prevent overwhelming them
 func sleepBeforeConnect(attempt int) (waitTime <-chan time.Time) {
-	if attempt >= 6 { // return nil for first 6 attempts
-		waitTime = time.After(time.Second * 1)
+	if attempt >= 1 {
+		ms := math.Min(25*math.Pow(2, float64(attempt)), 15000)
+		waitTime = time.After(time.Duration(int(ms)) * time.Millisecond)
 	}
 	return
 }

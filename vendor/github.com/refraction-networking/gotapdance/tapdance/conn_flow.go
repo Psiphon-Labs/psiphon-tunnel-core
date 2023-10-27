@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	pb "github.com/refraction-networking/gotapdance/protobuf"
+	pb "github.com/refraction-networking/conjure/proto"
 	"github.com/sergeyfrolov/bsbuffer"
+	"google.golang.org/protobuf/proto"
 )
 
 // TapdanceFlowConn represents single TapDance flow.
@@ -632,7 +632,6 @@ func (flowConn *TapdanceFlowConn) RemoteAddr() net.Addr {
 // the deadline after successful Read or Write calls.
 //
 // A zero value for t means I/O operations will not time out.
-//
 func (flowConn *TapdanceFlowConn) SetDeadline(t time.Time) error {
 	return errNotImplemented
 }
