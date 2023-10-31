@@ -1006,6 +1006,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "ClientFeatures" : %s,
         "SponsorId" : "0",
         "PropagationChannelId" : "0",
+        "DeviceLocation" : "gzzzz",
         "DeviceRegion" : "US",
         "DisableRemoteServerListFetcher" : true,
         "EstablishTunnelPausePeriodSeconds" : 1,
