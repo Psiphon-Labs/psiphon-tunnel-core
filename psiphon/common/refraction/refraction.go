@@ -28,6 +28,7 @@ package refraction
 
 import (
 	"context"
+	std_errors "errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -42,6 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/armon/go-proxyproto"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"github.com/pion/sctp"
 	refraction_networking_assets "github.com/refraction-networking/conjure/pkg/client/assets"
 	refraction_networking_registration "github.com/refraction-networking/conjure/pkg/registrars/registration"
 	refraction_networking_transports "github.com/refraction-networking/conjure/pkg/transports/client"
@@ -979,6 +981,29 @@ type refractionConn struct {
 	conjureMetricTransport         string
 	conjureMetricPrefix            string
 	conjureMetricSTUNServerAddress string
+}
+
+func (conn *refractionConn) Write(p []byte) (int, error) {
+	n, err := conn.Conn.Write(p)
+
+	// For the DTLS transport, underlying SCTP conn writes may fail
+	// with "stream closed" -- which indicates a permanent failure of the
+	// transport -- without closing the conn. Explicitly close the conn on
+	// this error, which will trigger Psiphon to reconnect faster via
+	// IsClosed checks on port forward failures.
+	//
+	// The close is invoked asynchronously to avoid possible deadlocks due to
+	// a hypothetical panic in the Close call: for a port forward, the unwind
+	// will invoke a deferred ssh.channel.Close which reenters Write;
+	// meanwhile, the underlying ssh.channel.writePacket acquires a
+	// ssh.channel.writeMu lock but does not defer the unlock.
+
+	if std_errors.Is(err, sctp.ErrStreamClosed) {
+		go func() {
+			_ = conn.Close()
+		}()
+	}
+	return n, err
 }
 
 func (conn *refractionConn) Close() error {
