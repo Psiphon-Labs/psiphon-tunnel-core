@@ -1635,6 +1635,7 @@ func checkExpectedServerTunnelLogFields(
 		"client_features",
 		"relay_protocol",
 		"device_region",
+		"device_location",
 		"ssh_client_version",
 		"server_entry_region",
 		"server_entry_source",
@@ -2110,6 +2111,7 @@ func checkExpectedUniqueUserLogFields(
 		"sponsor_id",
 		"client_platform",
 		"device_region",
+		"device_location",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -2129,6 +2131,7 @@ func checkExpectedDomainBytesLogFields(
 		"sponsor_id",
 		"client_platform",
 		"device_region",
+		"device_location",
 		"domain",
 		"bytes",
 	} {
