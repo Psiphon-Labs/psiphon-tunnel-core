@@ -2198,7 +2198,7 @@ func (config *Config) setDialParametersHash() {
 
 	if config.MeekTrafficShapingProbability != nil {
 		hash.Write([]byte("MeekTrafficShapingProbability"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.MeekTrafficShapingProbability))
+		binary.Write(hash, binary.LittleEndian, *config.MeekTrafficShapingProbability)
 	}
 
 	if len(config.MeekTrafficShapingLimitProtocols) > 0 {
@@ -2608,7 +2608,7 @@ func (config *Config) setDialParametersHash() {
 
 	if config.TLSTunnelTrafficShapingProbability != nil {
 		hash.Write([]byte("TLSTunnelTrafficShapingProbability"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelTrafficShapingProbability))
+		binary.Write(hash, binary.LittleEndian, *config.TLSTunnelTrafficShapingProbability)
 	}
 
 	if config.TLSTunnelMinTLSPadding != nil {
