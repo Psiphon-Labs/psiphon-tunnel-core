@@ -446,6 +446,12 @@ type Config struct {
 	// out, the tunnel is considered to have failed.
 	DisablePeriodicSshKeepAlive bool
 
+	// DeviceLocation is the optional, reported location the host device is
+	// running in. This input value should be a string representing location
+	// geohash. The device location is reported to the server in the connected
+	// request and recorded for Psiphon stats.
+	DeviceLocation string
+
 	// DeviceRegion is the optional, reported region the host device is
 	// running in. This input value should be a ISO 3166-1 alpha-2 country
 	// code. The device region is reported to the server in the connected

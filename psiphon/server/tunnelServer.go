@@ -3189,6 +3189,7 @@ var blocklistHitsStatParams = []requestParamSpec{
 	{"client_features", isAnyString, requestParamOptional | requestParamArray},
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"device_region", isAnyString, requestParamOptional},
+	{"device_location", isGeoHashString, requestParamOptional},
 	{"egress_region", isRegionCode, requestParamOptional},
 	{"session_id", isHexDigits, 0},
 	{"last_connected", isLastConnected, requestParamOptional},
