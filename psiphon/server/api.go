@@ -541,7 +541,9 @@ var remoteServerListStatParams = append(
 		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"user_agent", isAnyString, requestParamOptional},
 		{"tls_profile", isAnyString, requestParamOptional},
-		{"tls_version", isAnyString, requestParamOptional}},
+		{"tls_version", isAnyString, requestParamOptional},
+		{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	},
 
 	baseSessionParams...)
 
