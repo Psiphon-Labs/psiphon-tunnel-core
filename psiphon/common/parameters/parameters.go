@@ -349,6 +349,7 @@ const (
 	TLSTunnelMinTLSPadding                           = "TLSTunnelMinTLSPadding"
 	TLSTunnelMaxTLSPadding                           = "TLSTunnelMaxTLSPadding"
 	TLSFragmentClientHelloProbability                = "TLSFragmentClientHelloProbability"
+	TLSFragmentClientHelloLimitProtocols             = "TLSFragmentClientHelloLimitProtocols"
 
 	// Retired parameters
 
@@ -745,7 +746,8 @@ var defaultParameters = map[string]struct {
 	TLSTunnelMinTLSPadding:             {value: 0, minimum: 0},
 	TLSTunnelMaxTLSPadding:             {value: 0, minimum: 0},
 
-	TLSFragmentClientHelloProbability: {value: 0.0, minimum: 0.0},
+	TLSFragmentClientHelloProbability:    {value: 0.0, minimum: 0.0},
+	TLSFragmentClientHelloLimitProtocols: {value: protocol.TunnelProtocols{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

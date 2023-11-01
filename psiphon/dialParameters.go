@@ -1021,21 +1021,25 @@ func MakeDialParameters(
 	// of SNI is determined above.
 	if (!isReplay || !replayTLSFragmentClientHello) && usingTLS {
 
-		// Note: The TLS stack automatically drops the SNI extension when
-		// the host is an IP address.
+		limitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
+		if len(limitProtocols) == 0 || common.Contains(limitProtocols, dialParams.TunnelProtocol) {
 
-		usingSNI := false
-		if dialParams.TLSOSSHSNIServerName != "" {
-			usingSNI = net.ParseIP(dialParams.TLSOSSHSNIServerName) == nil
+			// Note: The TLS stack automatically drops the SNI extension when
+			// the host is an IP address.
 
-		} else if dialParams.MeekSNIServerName != "" {
-			usingSNI = net.ParseIP(dialParams.MeekSNIServerName) == nil
-		}
+			usingSNI := false
+			if dialParams.TLSOSSHSNIServerName != "" {
+				usingSNI = net.ParseIP(dialParams.TLSOSSHSNIServerName) == nil
 
-		// TLS ClientHello fragmentor expects SNI to be present.
-		if usingSNI {
-			dialParams.TLSFragmentClientHello = p.WeightedCoinFlip(
-				parameters.TLSFragmentClientHelloProbability)
+			} else if dialParams.MeekSNIServerName != "" {
+				usingSNI = net.ParseIP(dialParams.MeekSNIServerName) == nil
+			}
+
+			// TLS ClientHello fragmentor expects SNI to be present.
+			if usingSNI {
+				dialParams.TLSFragmentClientHello = p.WeightedCoinFlip(
+					parameters.TLSFragmentClientHelloProbability)
+			}
 		}
 	}
 
@@ -1152,6 +1156,7 @@ func MakeDialParameters(
 			QUICDisablePathMTUDiscovery:   dialParams.QUICDisablePathMTUDiscovery,
 			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
+			TLSFragmentClientHello:        dialParams.TLSFragmentClientHello,
 			LegacyPassthrough:             serverEntry.ProtocolUsesLegacyPassthrough(dialParams.TunnelProtocol),
 			NoDefaultTLSSessionID:         dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
@@ -1169,7 +1174,6 @@ func MakeDialParameters(
 			MeekObfuscatorPaddingSeed:     dialParams.MeekObfuscatorPaddingSeed,
 			NetworkLatencyMultiplier:      dialParams.NetworkLatencyMultiplier,
 			HTTPTransformerParameters:     dialParams.HTTPTransformerParameters,
-			TLSFragmentClientHello:        dialParams.TLSFragmentClientHello,
 		}
 
 		// Use an asynchronous callback to record the resolved IP address when

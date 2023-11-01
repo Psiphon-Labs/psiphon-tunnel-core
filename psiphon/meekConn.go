@@ -131,6 +131,9 @@ type MeekConfig struct {
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
 
+	// TLSFragmentClientHello specifies whether to fragment the TLS Client Hello.
+	TLSFragmentClientHello bool
+
 	// LegacyPassthrough indicates that the server expects a legacy passthrough
 	// message.
 	LegacyPassthrough bool
@@ -207,9 +210,6 @@ type MeekConfig struct {
 	// HTTPTransformerParameters specifies an HTTP transformer to apply to the
 	// meek connection if it uses HTTP.
 	HTTPTransformerParameters *transforms.HTTPTransformerParameters
-
-	// TLSFragmentClientHello specifies whether to fragment the TLS Client Hello.
-	TLSFragmentClientHello bool
 }
 
 // MeekConn is a network connection that tunnels net.Conn flows over HTTP and supports
