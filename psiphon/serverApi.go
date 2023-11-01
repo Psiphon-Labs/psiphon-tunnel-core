@@ -699,6 +699,9 @@ func RecordRemoteServerListStat(
 	if config.DeviceRegion != "" {
 		params["device_region"] = config.DeviceRegion
 	}
+	if config.DeviceLocation != "" {
+		params["device_location"] = config.DeviceLocation
+	}
 
 	params["client_download_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 	tunneledStr := "0"
@@ -937,6 +940,9 @@ func getBaseAPIParameters(
 
 	if config.DeviceRegion != "" {
 		params["device_region"] = config.DeviceRegion
+	}
+	if config.DeviceLocation != "" {
+		params["device_location"] = config.DeviceLocation
 	}
 
 	if filter == baseParametersAll {
