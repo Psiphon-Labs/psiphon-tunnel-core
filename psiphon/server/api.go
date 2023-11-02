@@ -534,10 +534,10 @@ var remoteServerListStatParams = append(
 		{"duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"fronting_provider_id", isAnyString, requestParamOptional},
-		{"meek_dial_address", isDialAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
-		{"meek_resolved_ip_address", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
+		{"meek_dial_address", isDialAddress, requestParamOptional},
+		{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
 		{"meek_sni_server_name", isDomain, requestParamOptional},
-		{"meek_host_header", isHostHeader, requestParamOptional | requestParamNotLoggedForUnfrontedMeekNonTransformedHeader},
+		{"meek_host_header", isHostHeader, requestParamOptional},
 		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"user_agent", isAnyString, requestParamOptional},
 		{"tls_profile", isAnyString, requestParamOptional},
@@ -549,8 +549,8 @@ var remoteServerListStatParams = append(
 // the remote_server_list_stats entries. Use the values from the outer status
 // request as an approximation (these values reflect the client at persistent
 // stat shipping time, which may differ from the client at persistent stat
-// recording time). Note that all but client_build_rev and device_region are
-// required fields.
+// recording time). Note that all but client_build_rev, device_region, and
+// device_location are required fields.
 var remoteServerListStatBackwardsCompatibilityParamNames = []string{
 	"session_id",
 	"propagation_channel_id",
@@ -559,6 +559,7 @@ var remoteServerListStatBackwardsCompatibilityParamNames = []string{
 	"client_platform",
 	"client_build_rev",
 	"device_region",
+	"device_location",
 }
 
 var failedTunnelStatParams = append(
@@ -881,6 +882,7 @@ var baseParams = []requestParamSpec{
 	{"client_features", isAnyString, requestParamOptional | requestParamArray},
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"device_region", isAnyString, requestParamOptional},
+	{"device_location", isGeoHashString, requestParamOptional},
 }
 
 // baseSessionParams adds to baseParams the required session_id parameter. For
@@ -1555,4 +1557,20 @@ func isISO8601Date(_ *Config, value string) bool {
 
 func isLastConnected(_ *Config, value string) bool {
 	return value == "None" || isISO8601Date(nil, value)
+}
+
+const geohashAlphabet = "0123456789bcdefghjkmnpqrstuvwxyz"
+
+func isGeoHashString(_ *Config, value string) bool {
+	// Verify that the string is between 1 and 12 characters long
+	// and contains only characters from the geohash alphabet.
+	if len(value) < 1 || len(value) > 12 {
+		return false
+	}
+	for _, c := range value {
+		if strings.Index(geohashAlphabet, string(c)) == -1 {
+			return false
+		}
+	}
+	return true
 }
