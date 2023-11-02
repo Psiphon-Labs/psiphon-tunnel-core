@@ -475,10 +475,12 @@ func makeFrontedHTTPClient(
 		p.Float(parameters.NetworkLatencyMultiplierLambda))
 
 	tlsFragmentClientHello := false
-	tlsFragmentorLimitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
-	if len(tlsFragmentorLimitProtocols) == 0 || common.Contains(tlsFragmentorLimitProtocols, effectiveTunnelProtocol) {
-		if net.ParseIP(meekSNIServerName) == nil {
-			tlsFragmentClientHello = p.WeightedCoinFlip(parameters.TLSFragmentClientHelloProbability)
+	if meekSNIServerName != "" {
+		tlsFragmentorLimitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
+		if len(tlsFragmentorLimitProtocols) == 0 || common.Contains(tlsFragmentorLimitProtocols, effectiveTunnelProtocol) {
+			if net.ParseIP(meekSNIServerName) == nil {
+				tlsFragmentClientHello = p.WeightedCoinFlip(parameters.TLSFragmentClientHelloProbability)
+			}
 		}
 	}
 
