@@ -30,6 +30,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 )
 
 // Enabled indicates if QUIC functionality is enabled.
@@ -60,6 +61,7 @@ func Dial(
 	_ *prng.Seed,
 	_ string,
 	_ *prng.Seed,
+	_ *transforms.ObfuscatorSeedTransformerParameters,
 	_ bool) (net.Conn, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
