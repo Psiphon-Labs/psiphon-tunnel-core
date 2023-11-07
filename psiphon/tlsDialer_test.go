@@ -799,6 +799,7 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 			VerifyServerName:              serverName,
 			VerifyPins:                    []string{serverCertificatePin},
 			TrustedCACertificatesFilename: rootCAsFileName,
+			FragmentClientHello:           true,
 		})
 
 	if err == nil {
@@ -817,6 +818,7 @@ func TestTLSFragmentorWithoutSNI(t *testing.T) {
 			VerifyServerName:              serverName,
 			VerifyPins:                    []string{serverCertificatePin},
 			TrustedCACertificatesFilename: rootCAsFileName,
+			FragmentClientHello:           true,
 		})
 
 	if err != nil {
