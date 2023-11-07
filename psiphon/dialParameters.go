@@ -580,8 +580,7 @@ func MakeDialParameters(
 				return nil, errors.Trace(err)
 			}
 
-			if config.DisableSystemRootCAs &&
-				(len(dialParams.MeekVerifyPins) == 0 || dialParams.MeekVerifyServerName == "") {
+			if config.DisableSystemRootCAs {
 				return nil, errors.TraceNew("TLS certificates must be verified in Conjure API registration")
 			}
 

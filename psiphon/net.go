@@ -492,9 +492,11 @@ func makeFrontedHTTPClient(
 	}
 
 	if !skipVerify {
-		meekConfig.VerifyServerName = meekVerifyServerName
-		meekConfig.VerifyPins = meekVerifyPins
 		meekConfig.DisableSystemRootCAs = disableSystemRootCAs
+		if !meekConfig.DisableSystemRootCAs {
+			meekConfig.VerifyServerName = meekVerifyServerName
+			meekConfig.VerifyPins = meekVerifyPins
+		}
 	}
 
 	var resolvedIPAddress atomic.Value
