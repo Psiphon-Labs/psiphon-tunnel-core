@@ -1,4 +1,4 @@
-FROM alpine:3.10.2
+FROM alpine:3.18.4
 
 ENV GOLANG_VERSION 1.20.10
 ENV GOLANG_SRC_URL https://golang.org/dl/go$GOLANG_VERSION.src.tar.gz
