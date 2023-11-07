@@ -38,7 +38,7 @@ const (
 	ExtType_password_salt                          uint16 = 31
 	ExtType_ticket_pinning                         uint16 = 32
 	ExtType_tls_cert_with_extern_psk               uint16 = 33
-	ExtType_delegated_credentials                  uint16 = 34
+	ExtType_delegated_credentials                  uint16 = 34 // IANA name: delegated_credentials, IETF name: delegated_credential
 	ExtType_session_ticket                         uint16 = 35
 	ExtType_TLMSP                                  uint16 = 36
 	ExtType_TLMSP_proxying                         uint16 = 37
@@ -108,7 +108,7 @@ var DictExtTypeValueIndexed = map[uint16]string{
 	31:    "password_salt",
 	32:    "ticket_pinning",
 	33:    "tls_cert_with_extern_psk",
-	34:    "delegated_credentials",
+	34:    "delegated_credentials", // IANA name: delegated_credentials, IETF name: delegated_credential
 	35:    "session_ticket",
 	36:    "TLMSP",
 	37:    "TLMSP_proxying",
@@ -175,7 +175,8 @@ var DictExtTypeNameIndexed = map[string]uint16{
 	"password_salt":                          31,
 	"ticket_pinning":                         32,
 	"tls_cert_with_extern_psk":               33,
-	"delegated_credentials":                  34,
+	"delegated_credentials":                  34, // IANA name: delegated_credentials
+	"delegated_credential":                   34, // IETF name: delegated_credential
 	"session_ticket":                         35,
 	"TLMSP":                                  36,
 	"TLMSP_proxying":                         37,

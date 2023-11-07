@@ -85,9 +85,6 @@ const (
 	CHANNEL_REJECT_REASON_SPLIT_TUNNEL = 0xFE000000
 
 	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
-
-	CONJURE_TRANSPORT_MIN_OSSH   = "Min-OSSH"
-	CONJURE_TRANSPORT_OBFS4_OSSH = "Obfs4-OSSH"
 )
 
 var SupportedServerEntrySources = []string{
@@ -108,7 +105,8 @@ type TunnelProtocols []string
 
 func (t TunnelProtocols) Validate() error {
 	for _, p := range t {
-		if !common.Contains(SupportedTunnelProtocols, p) {
+		if !common.Contains(SupportedTunnelProtocols, p) ||
+			common.Contains(DisabledTunnelProtocols, p) {
 			return errors.Tracef("invalid tunnel protocol: %s", p)
 		}
 	}
@@ -118,7 +116,8 @@ func (t TunnelProtocols) Validate() error {
 func (t TunnelProtocols) PruneInvalid() TunnelProtocols {
 	u := make(TunnelProtocols, 0)
 	for _, p := range t {
-		if common.Contains(SupportedTunnelProtocols, p) {
+		if common.Contains(SupportedTunnelProtocols, p) &&
+			!common.Contains(DisabledTunnelProtocols, p) {
 			u = append(u, p)
 		}
 	}
@@ -164,6 +163,22 @@ var DefaultDisabledTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
+}
+
+// DisabledTunnelProtocols are protocols which are still integrated, but which
+// cannot be enabled in tactics and cannot be selected by clients.
+var DisabledTunnelProtocols = TunnelProtocols{
+
+	// TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH should not be reenabled without
+	// retesting the integration. github.com/refraction-networking/gotapdance
+	// and github.com/refraction-networking/conjure have undergone major
+	// changes since TapDance was last active and tested.
+	//
+	// Furthermore, existing deployed clients will use the same ClientConf for
+	// both TapDance and Conjure, which creates a risk that enabling TapDance
+	// via tactics may cause existing clients to use Conjure ClientConf
+	// decoys for TapDance, which may violate load assumptions.
+	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 }
 
 func TunnelProtocolUsesTCP(protocol string) bool {
@@ -522,6 +537,43 @@ func (labeledVersions LabeledQUICVersions) PruneInvalid() LabeledQUICVersions {
 		l[label] = versions.PruneInvalid()
 	}
 	return l
+}
+
+const (
+	CONJURE_TRANSPORT_MIN_OSSH    = "Min-OSSH"
+	CONJURE_TRANSPORT_PREFIX_OSSH = "Prefix-OSSH"
+	CONJURE_TRANSPORT_DTLS_OSSH   = "DTLS-OSSH"
+)
+
+var SupportedConjureTransports = ConjureTransports{
+	CONJURE_TRANSPORT_MIN_OSSH,
+	CONJURE_TRANSPORT_PREFIX_OSSH,
+	CONJURE_TRANSPORT_DTLS_OSSH,
+}
+
+func ConjureTransportUsesSTUN(transport string) bool {
+	return transport == CONJURE_TRANSPORT_DTLS_OSSH
+}
+
+type ConjureTransports []string
+
+func (transports ConjureTransports) Validate() error {
+	for _, t := range transports {
+		if !common.Contains(SupportedConjureTransports, t) {
+			return errors.Tracef("invalid Conjure transport: %s", t)
+		}
+	}
+	return nil
+}
+
+func (transports ConjureTransports) PruneInvalid() ConjureTransports {
+	u := make(ConjureTransports, 0)
+	for _, t := range transports {
+		if common.Contains(SupportedConjureTransports, t) {
+			u = append(u, t)
+		}
+	}
+	return u
 }
 
 type HandshakeResponse struct {

@@ -1,3 +1,4 @@
+//go:build (!arm && !amd64) || appengine || gccgo
 // +build !arm,!amd64 appengine gccgo
 
 package siphash

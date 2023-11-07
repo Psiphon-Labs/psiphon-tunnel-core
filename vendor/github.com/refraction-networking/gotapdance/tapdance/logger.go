@@ -2,6 +2,7 @@ package tapdance
 
 import (
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -34,4 +35,10 @@ func Logger() *logrus.Logger {
 		}
 	})
 	return logrusLogger
+}
+
+// SetLoggerOutput will allow a caller to change the Logger output from the
+// default of os.Stderr
+func SetLoggerOutput(out io.Writer) {
+	Logger().SetOutput(out)
 }

@@ -803,6 +803,11 @@ type Config struct {
 	ConjureDecoyRegistrarWidth                *int
 	ConjureDecoyRegistrarMinDelayMilliseconds *int
 	ConjureDecoyRegistrarMaxDelayMilliseconds *int
+	ConjureEnableIPv6Dials                    *bool
+	ConjureEnablePortRandomization            *bool
+	ConjureEnableRegistrationOverrides        *bool
+	ConjureLimitTransports                    protocol.ConjureTransports
+	ConjureSTUNServerAddresses                []string
 
 	// HoldOffTunnelMinDurationMilliseconds and other HoldOffTunnel fields are
 	// for testing purposes.
@@ -1877,6 +1882,26 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ConjureDecoyRegistrarMaxDelay] = fmt.Sprintf("%dms", *config.ConjureDecoyRegistrarMaxDelayMilliseconds)
 	}
 
+	if config.ConjureEnableIPv6Dials != nil {
+		applyParameters[parameters.ConjureEnableIPv6Dials] = *config.ConjureEnableIPv6Dials
+	}
+
+	if config.ConjureEnablePortRandomization != nil {
+		applyParameters[parameters.ConjureEnablePortRandomization] = *config.ConjureEnablePortRandomization
+	}
+
+	if config.ConjureEnableRegistrationOverrides != nil {
+		applyParameters[parameters.ConjureEnableRegistrationOverrides] = *config.ConjureEnableRegistrationOverrides
+	}
+
+	if config.ConjureLimitTransports != nil {
+		applyParameters[parameters.ConjureLimitTransports] = config.ConjureLimitTransports
+	}
+
+	if config.ConjureSTUNServerAddresses != nil {
+		applyParameters[parameters.ConjureSTUNServerAddresses] = config.ConjureSTUNServerAddresses
+	}
+
 	if config.HoldOffTunnelMinDurationMilliseconds != nil {
 		applyParameters[parameters.HoldOffTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelMinDurationMilliseconds)
 	}
@@ -2191,7 +2216,7 @@ func (config *Config) setDialParametersHash() {
 
 	if config.MeekTrafficShapingProbability != nil {
 		hash.Write([]byte("MeekTrafficShapingProbability"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.MeekTrafficShapingProbability))
+		binary.Write(hash, binary.LittleEndian, *config.MeekTrafficShapingProbability)
 	}
 
 	if len(config.MeekTrafficShapingLimitProtocols) > 0 {
@@ -2346,6 +2371,20 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureDecoyRegistrarMaxDelayMilliseconds))
 	}
 
+	if config.ConjureLimitTransports != nil {
+		hash.Write([]byte("ConjureLimitTransports"))
+		for _, transport := range config.ConjureLimitTransports {
+			hash.Write([]byte(transport))
+		}
+	}
+
+	if config.ConjureSTUNServerAddresses != nil {
+		hash.Write([]byte("ConjureSTUNServerAddresses"))
+		for _, address := range config.ConjureSTUNServerAddresses {
+			hash.Write([]byte(address))
+		}
+	}
+
 	if config.HoldOffTunnelMinDurationMilliseconds != nil {
 		hash.Write([]byte("HoldOffTunnelMinDurationMilliseconds"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelMinDurationMilliseconds))
@@ -2451,7 +2490,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.DNSResolverProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("DNSResolverProtocolTransformScopedSpecNames"))
 		encodedDNSResolverProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.DNSResolverProtocolTransformScopedSpecNames)
 		hash.Write(encodedDNSResolverProtocolTransformScopedSpecNames)
@@ -2485,7 +2524,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.DirectHTTPProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("DirectHTTPProtocolTransformScopedSpecNames"))
 		encodedDirectHTTPProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.DirectHTTPProtocolTransformScopedSpecNames)
 		hash.Write(encodedDirectHTTPProtocolTransformScopedSpecNames)
@@ -2504,7 +2543,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.FrontedHTTPProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("FrontedHTTPProtocolTransformScopedSpecNames"))
 		encodedFrontedHTTPProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.FrontedHTTPProtocolTransformScopedSpecNames)
 		hash.Write(encodedFrontedHTTPProtocolTransformScopedSpecNames)
@@ -2523,7 +2562,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.OSSHObfuscatorSeedTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("OSSHObfuscatorSeedTransformScopedSpecNames"))
 		encodedOSSHObfuscatorSeedTransformScopedSpecNames, _ :=
 			json.Marshal(config.OSSHObfuscatorSeedTransformScopedSpecNames)
 		hash.Write(encodedOSSHObfuscatorSeedTransformScopedSpecNames)
@@ -2542,7 +2581,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.ObfuscatedQUICNonceTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("ObfuscatedQUICNonceTransformScopedSpecNames"))
 		encodedObfuscatedQUICNonceTransformScopedSpecNames, _ :=
 			json.Marshal(config.ObfuscatedQUICNonceTransformScopedSpecNames)
 		hash.Write(encodedObfuscatedQUICNonceTransformScopedSpecNames)
@@ -2560,7 +2599,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.OSSHPrefixScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("OSSHPrefixScopedSpecNames"))
 		encodedOSSHPrefixScopedSpecNames, _ := json.Marshal(config.OSSHPrefixScopedSpecNames)
 		hash.Write(encodedOSSHPrefixScopedSpecNames)
 	}
@@ -2587,7 +2626,7 @@ func (config *Config) setDialParametersHash() {
 
 	if config.TLSTunnelTrafficShapingProbability != nil {
 		hash.Write([]byte("TLSTunnelTrafficShapingProbability"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelTrafficShapingProbability))
+		binary.Write(hash, binary.LittleEndian, *config.TLSTunnelTrafficShapingProbability)
 	}
 
 	if config.TLSTunnelMinTLSPadding != nil {

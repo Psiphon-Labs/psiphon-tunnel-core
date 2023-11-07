@@ -21,16 +21,14 @@
  */
 
 /*
-
 Package refraction wraps github.com/refraction-networking/gotapdance with
 net.Listener and net.Conn types that provide drop-in integration with Psiphon.
-
 */
 package refraction
 
 import (
 	"context"
-	"crypto/sha256"
+	std_errors "errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -45,7 +43,13 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/armon/go-proxyproto"
 	lrucache "github.com/cognusion/go-cache-lru"
-	refraction_networking_proto "github.com/refraction-networking/gotapdance/protobuf"
+	"github.com/pion/sctp"
+	refraction_networking_assets "github.com/refraction-networking/conjure/pkg/client/assets"
+	refraction_networking_registration "github.com/refraction-networking/conjure/pkg/registrars/registration"
+	refraction_networking_transports "github.com/refraction-networking/conjure/pkg/transports/client"
+	refraction_networking_dtls "github.com/refraction-networking/conjure/pkg/transports/connecting/dtls"
+	refraction_networking_prefix "github.com/refraction-networking/conjure/pkg/transports/wrapping/prefix"
+	refraction_networking_proto "github.com/refraction-networking/conjure/proto"
 	refraction_networking_client "github.com/refraction-networking/gotapdance/tapdance"
 )
 
@@ -195,16 +199,25 @@ func DialTapDance(
 	ctx context.Context,
 	emitLogs bool,
 	dataDirectory string,
-	dialer common.NetDialer,
+	dialer Dialer,
 	address string) (net.Conn, error) {
 
-	return dial(
-		ctx,
-		emitLogs,
-		dataDirectory,
-		dialer,
-		address,
-		nil)
+	// TapDance is disabled. See comment for protocol.DisabledTunnelProtocols.
+	// With that DisabledTunnelProtocols configuration, clients should not
+	// reach this error.
+	//
+	// Note that in addition to this entry point being disabled, the TapDance
+	// ClientConf is no longer initialized in initRefractionNetworking below.
+
+	return nil, errors.TraceNew("not supported")
+
+	// return dial(
+	// 	ctx,
+	//	emitLogs,
+	//	dataDirectory,
+	//	dialer,
+	//	address,
+	//	nil)
 }
 
 // DialConjure establishes a new Conjure connection to a Conjure station.
@@ -217,7 +230,7 @@ func DialConjure(
 	ctx context.Context,
 	emitLogs bool,
 	dataDirectory string,
-	dialer common.NetDialer,
+	dialer Dialer,
 	address string,
 	conjureConfig *ConjureConfig) (net.Conn, error) {
 
@@ -234,7 +247,7 @@ func dial(
 	ctx context.Context,
 	emitLogs bool,
 	dataDirectory string,
-	dialer common.NetDialer,
+	dialer Dialer,
 	address string,
 	conjureConfig *ConjureConfig) (net.Conn, error) {
 
@@ -252,12 +265,16 @@ func dial(
 	manager := newDialManager()
 
 	refractionDialer := &refraction_networking_client.Dialer{
-		TcpDialer:      manager.makeManagedDialer(dialer.DialContext),
-		UseProxyHeader: true,
+		DialerWithLaddr: manager.makeManagedDialer(dialer),
+		V6Support:       conjureConfig.EnableIPv6Dials,
+		UseProxyHeader:  true,
 	}
 
-	conjureCached := false
-	conjureDelay := time.Duration(0)
+	conjureMetricCached := false
+	conjureMetricDelay := time.Duration(0)
+	conjureMetricTransport := ""
+	conjureMetricPrefix := ""
+	conjureMetricSTUNServerAddress := ""
 
 	var conjureCachedRegistration *refraction_networking_client.ConjureReg
 	var conjureRecordRegistrar *recordRegistrar
@@ -317,8 +334,8 @@ func dial(
 				registration: conjureCachedRegistration,
 			}
 
-			conjureCached = true
-			conjureDelay = 0 // report no delay
+			conjureMetricCached = true
+			conjureMetricDelay = 0 // report no delay
 
 		} else if conjureConfig.APIRegistrarBidirectionalURL != "" {
 
@@ -329,27 +346,29 @@ func dial(
 				return nil, errors.TraceNew("missing APIRegistrarHTTPClient")
 			}
 
-			refractionDialer.DarkDecoyRegistrar = &refraction_networking_client.APIRegistrarBidirectional{
-				Endpoint:        conjureConfig.APIRegistrarBidirectionalURL,
-				ConnectionDelay: conjureConfig.APIRegistrarDelay,
-				MaxRetries:      0,
-				Client:          conjureConfig.APIRegistrarHTTPClient,
+			refractionDialer.DarkDecoyRegistrar, err = refraction_networking_registration.NewAPIRegistrar(
+				&refraction_networking_registration.Config{
+					Target:        conjureConfig.APIRegistrarBidirectionalURL,
+					Bidirectional: true,
+					Delay:         conjureConfig.APIRegistrarDelay,
+					MaxRetries:    0,
+					HTTPClient:    conjureConfig.APIRegistrarHTTPClient,
+				})
+			if err != nil {
+				return nil, errors.Trace(err)
 			}
 
-			conjureDelay = conjureConfig.APIRegistrarDelay
+			conjureMetricDelay = conjureConfig.APIRegistrarDelay
 
-		} else if conjureConfig.DecoyRegistrarDialer != nil {
+		} else if conjureConfig.DoDecoyRegistration {
 
-			refractionDialer.DarkDecoyRegistrar = &refraction_networking_client.DecoyRegistrar{
-				TcpDialer: manager.makeManagedDialer(
-					conjureConfig.DecoyRegistrarDialer.DialContext),
-			}
+			refractionDialer.DarkDecoyRegistrar = refraction_networking_registration.NewDecoyRegistrar()
 
 			refractionDialer.Width = conjureConfig.DecoyRegistrarWidth
 
-			// Limitation: the decoy regsitration delay is not currently exposed in the
+			// Limitation: the decoy registration delay is not currently exposed in the
 			// gotapdance API.
-			conjureDelay = -1 // don't report delay
+			conjureMetricDelay = -1 // don't report delay
 
 		} else {
 
@@ -365,22 +384,98 @@ func dial(
 			refractionDialer.DarkDecoyRegistrar = conjureRecordRegistrar
 		}
 
+		// Conjure transport replay limitations:
+		//
+		// - For CONJURE_TRANSPORT_PREFIX_OSSH, the selected prefix is not replayed
+		// - For all transports, randomized port selection is not replayed
+
+		randomizeDstPort := conjureConfig.EnablePortRandomization
+		disableOverrides := !conjureConfig.EnableRegistrationOverrides
+
+		conjureMetricTransport = conjureConfig.Transport
+
 		switch conjureConfig.Transport {
+
 		case protocol.CONJURE_TRANSPORT_MIN_OSSH:
-			refractionDialer.Transport = refraction_networking_proto.TransportType_Min
-			refractionDialer.TcpDialer = newMinTransportDialer(refractionDialer.TcpDialer)
-		case protocol.CONJURE_TRANSPORT_OBFS4_OSSH:
-			refractionDialer.Transport = refraction_networking_proto.TransportType_Obfs4
+
+			transport, ok := refraction_networking_transports.GetTransportByID(
+				refraction_networking_proto.TransportType_Min)
+			if !ok {
+				return nil, errors.TraceNew("missing min transport")
+			}
+
+			config, err := refraction_networking_transports.NewWithParams(
+				transport.Name(),
+				&refraction_networking_proto.GenericTransportParams{
+					RandomizeDstPort: &randomizeDstPort})
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			refractionDialer.Transport = transport.ID()
+			refractionDialer.TransportConfig = config
+			refractionDialer.DisableRegistrarOverrides = disableOverrides
+			refractionDialer.DialerWithLaddr = newWriteMergeDialer(
+				refractionDialer.DialerWithLaddr, false, 32)
+
+		case protocol.CONJURE_TRANSPORT_PREFIX_OSSH:
+
+			transport, ok := refraction_networking_transports.GetTransportByID(
+				refraction_networking_proto.TransportType_Prefix)
+			if !ok {
+				return nil, errors.TraceNew("missing prefix transport")
+			}
+
+			prefixID := int32(refraction_networking_prefix.Rand)
+			flushPolicy := refraction_networking_prefix.FlushAfterPrefix
+			config, err := refraction_networking_transports.NewWithParams(
+				transport.Name(),
+				&refraction_networking_proto.PrefixTransportParams{
+					RandomizeDstPort:  &randomizeDstPort,
+					PrefixId:          &prefixID,
+					CustomFlushPolicy: &flushPolicy})
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			refractionDialer.Transport = transport.ID()
+			refractionDialer.TransportConfig = config
+			refractionDialer.DisableRegistrarOverrides = disableOverrides
+			refractionDialer.DialerWithLaddr = newWriteMergeDialer(
+				refractionDialer.DialerWithLaddr, true, 64)
+
+		case protocol.CONJURE_TRANSPORT_DTLS_OSSH:
+
+			transport, ok := refraction_networking_transports.GetTransportByID(
+				refraction_networking_proto.TransportType_DTLS)
+			if !ok {
+				return nil, errors.TraceNew("missing DTLS transport")
+			}
+
+			config, err := refraction_networking_transports.NewWithParams(
+				transport.Name(),
+				&refraction_networking_proto.DTLSTransportParams{
+					RandomizeDstPort: &randomizeDstPort})
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if conjureConfig.STUNServerAddress == "" {
+				return nil, errors.TraceNew("missing STUN server address")
+			}
+			config.SetParams(
+				&refraction_networking_dtls.ClientConfig{
+					STUNServer: conjureConfig.STUNServerAddress,
+				})
+
+			conjureMetricSTUNServerAddress = conjureConfig.STUNServerAddress
+
+			refractionDialer.Transport = transport.ID()
+			refractionDialer.TransportConfig = config
+			refractionDialer.DisableRegistrarOverrides = disableOverrides
+
 		default:
 			return nil, errors.Tracef("invalid Conjure transport: %s", conjureConfig.Transport)
-		}
-
-		if conjureCachedRegistration != nil {
-
-			// When using a cached registration, patch its TcpDialer to use the custom
-			// dialer for this dial. In the non-cached code path, gotapdance will set
-			// refractionDialer.TcpDialer into a new registration.
-			conjureCachedRegistration.TcpDialer = refractionDialer.TcpDialer
 		}
 	}
 
@@ -436,14 +531,14 @@ func dial(
 			// conjureRecordRegistrar.registration will be nil if there was no cached
 			// registration _and_ registration didn't succeed before a cancel.
 			if registration != nil {
-
-				// Do not retain a reference to the custom dialer, as its context will not
-				// be valid for future dials using this cached registration. Assumes that
-				// gotapdance will no longer reference the TcpDialer now that the
-				// connection is established.
-				registration.TcpDialer = nil
-
 				conjureRegistrationCache.put(conjureConfig, registration, isCanceled)
+
+				if conjureConfig.Transport == protocol.CONJURE_TRANSPORT_PREFIX_OSSH {
+
+					// Record the selected prefix name after registration, as
+					// the registrar may have overridden the client selection.
+					conjureMetricPrefix = registration.Transport.Name()
+				}
 			}
 
 		} else if conjureCachedRegistration != nil {
@@ -471,9 +566,11 @@ func dial(
 	if useConjure {
 		// Retain these values for logging metrics.
 		refractionConn.isConjure = true
-		refractionConn.conjureCached = conjureCached
-		refractionConn.conjureDelay = conjureDelay
-		refractionConn.conjureTransport = conjureConfig.Transport
+		refractionConn.conjureMetricCached = conjureMetricCached
+		refractionConn.conjureMetricDelay = conjureMetricDelay
+		refractionConn.conjureMetricTransport = conjureMetricTransport
+		refractionConn.conjureMetricPrefix = conjureMetricPrefix
+		refractionConn.conjureMetricSTUNServerAddress = conjureMetricSTUNServerAddress
 	}
 
 	return refractionConn, nil
@@ -617,6 +714,10 @@ func (r *cachedRegistrar) Register(
 	return r.registration, nil
 }
 
+func (r *cachedRegistrar) PrepareRegKeys(_ [32]byte, _ []byte) error {
+	return nil
+}
+
 type recordRegistrar struct {
 	registrar    refraction_networking_client.Registrar
 	registration *refraction_networking_client.ConjureReg
@@ -634,14 +735,28 @@ func (r *recordRegistrar) Register(
 	return registration, nil
 }
 
-// minTransportConn buffers the first 32-byte random HMAC write performed by
-// Conjure TransportType_Min, and prepends it to the subsequent first write
-// made by OSSH. The purpose is to avoid a distinct fingerprint consisting of
-// the initial TCP data packet always containing exactly 32 bytes of payload.
-// The first write by OSSH will be a variable length multi-packet-sized
-// sequence of random bytes.
-type minTransportConn struct {
+func (r *recordRegistrar) PrepareRegKeys(_ [32]byte, _ []byte) error {
+	return nil
+}
+
+// writeMergeConn merges Conjure transport and subsequent OSSH writes in order
+// to avoid fixed-sized first or second TCP packets always containing exactly
+// the 32-byte or 64-byte HMAC tag.
+//
+// The Conjure Prefix transport will first write a prefix. writeMergeConn
+// assumes the FlushAfterPrefix policy is used, so the first write call for
+// that transport will be exactly the arbitrary sized prefix. The second
+// write call will be the HMAC tag. Pass the first write through to the
+// underlying conn, and then expect the HMAC tag on the second write, and
+// handle as follows.
+//
+// The Conjure Min transport first calls write with an HMAC tag. Buffer this
+// value and await the following initial OSSH write, and prepend the buffered
+// HMAC tag to the random OSSH data. The first write by OSSH will be a
+// variable length multi-packet-sized sequence of random bytes.
+type writeMergeConn struct {
 	net.Conn
+	tagSize int
 
 	mutex  sync.Mutex
 	state  int
@@ -650,67 +765,83 @@ type minTransportConn struct {
 }
 
 const (
-	stateMinTransportInit = iota
-	stateMinTransportBufferedHMAC
-	stateMinTransportWroteHMAC
-	stateMinTransportFailed
+	stateWriteMergeAwaitingPrefix = iota
+	stateWriteMergeAwaitingTag
+	stateWriteMergeBufferedTag
+	stateWriteMergeFinishedMerging
+	stateWriteMergeFailed
 )
 
-func newMinTransportConn(conn net.Conn) *minTransportConn {
-	return &minTransportConn{
-		Conn:  conn,
-		state: stateMinTransportInit,
+func newWriteMergeConn(conn net.Conn, hasPrefix bool, tagSize int) *writeMergeConn {
+	c := &writeMergeConn{
+		Conn:    conn,
+		tagSize: tagSize,
 	}
+	if hasPrefix {
+		c.state = stateWriteMergeAwaitingPrefix
+	} else {
+		c.state = stateWriteMergeAwaitingTag
+	}
+	return c
 }
 
-func (conn *minTransportConn) Write(p []byte) (int, error) {
+func (conn *writeMergeConn) Write(p []byte) (int, error) {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
 	switch conn.state {
-	case stateMinTransportInit:
-		if len(p) != sha256.Size {
-			conn.state = stateMinTransportFailed
-			conn.err = errors.TraceNew("unexpected HMAC write size")
+
+	case stateWriteMergeAwaitingPrefix:
+		conn.state = stateWriteMergeAwaitingTag
+		return conn.Conn.Write(p)
+
+	case stateWriteMergeAwaitingTag:
+		if len(p) != conn.tagSize {
+			conn.state = stateWriteMergeFailed
+			conn.err = errors.Tracef("unexpected tag write size: %d", len(p))
 			return 0, conn.err
 		}
-		conn.buffer = make([]byte, sha256.Size)
+		conn.buffer = make([]byte, conn.tagSize)
 		copy(conn.buffer, p)
-		conn.state = stateMinTransportBufferedHMAC
-		return sha256.Size, nil
-	case stateMinTransportBufferedHMAC:
+		conn.state = stateWriteMergeBufferedTag
+		return conn.tagSize, nil
+
+	case stateWriteMergeBufferedTag:
 		conn.buffer = append(conn.buffer, p...)
 		n, err := conn.Conn.Write(conn.buffer)
-		if n < sha256.Size {
-			conn.state = stateMinTransportFailed
-			conn.err = errors.TraceNew("failed to write HMAC")
-			if err == nil {
-				// As Write must return an error when failing to write the entire buffer,
-				// we don't expect to hit this case.
-				err = conn.err
-			}
+		if err != nil {
+			conn.state = stateWriteMergeFailed
+			conn.err = errors.Trace(err)
 		} else {
-			conn.state = stateMinTransportWroteHMAC
+			conn.state = stateWriteMergeFinishedMerging
+			conn.buffer = nil
 		}
-		n -= sha256.Size
-		// Do not wrap Conn.Write errors, and do not return conn.err here.
+		n -= conn.tagSize
+		if n < 0 {
+			n = 0
+		}
+		// Do not wrap Conn.Write errors
 		return n, err
-	case stateMinTransportWroteHMAC:
+
+	case stateWriteMergeFinishedMerging:
 		return conn.Conn.Write(p)
-	case stateMinTransportFailed:
+
+	case stateWriteMergeFailed:
+		// Return the original error that caused the failure
 		return 0, conn.err
+
 	default:
 		return 0, errors.TraceNew("unexpected state")
 	}
 }
 
-func newMinTransportDialer(dialer common.Dialer) common.Dialer {
-	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		conn, err := dialer(ctx, network, address)
+func newWriteMergeDialer(dialer Dialer, hasPrefix bool, tagSize int) Dialer {
+	return func(ctx context.Context, network, laddr, raddr string) (net.Conn, error) {
+		conn, err := dialer(ctx, network, laddr, raddr)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return newMinTransportConn(conn), nil
+		return newWriteMergeConn(conn, hasPrefix, tagSize), nil
 	}
 }
 
@@ -721,6 +852,9 @@ func newMinTransportDialer(dialer common.Dialer) common.Dialer {
 // are interrupted:
 // E.g., https://github.com/refraction-networking/gotapdance/blob/4d84655dad2e242b0af0459c31f687b12085dcca/tapdance/conn_raw.go#L307
 // (...preceeding SetDeadline is insufficient for immediate cancellation.)
+//
+// This remains an issue with the Conjure Decoy Registrar:
+// https://github.com/refraction-networking/conjure/blob/d9d58260cc7017ab0c64b120579b123a5b2d1c96/pkg/registrars/decoy-registrar/decoy-registrar.go#L208
 type dialManager struct {
 	ctxMutex       sync.Mutex
 	useRunCtx      bool
@@ -740,22 +874,19 @@ func newDialManager() *dialManager {
 	}
 }
 
-func (manager *dialManager) makeManagedDialer(dialer common.Dialer) common.Dialer {
+func (manager *dialManager) makeManagedDialer(dialer Dialer) Dialer {
 
-	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		return manager.dialWithDialer(dialer, ctx, network, address)
+	return func(ctx context.Context, network, laddr, raddr string) (net.Conn, error) {
+		return manager.dialWithDialer(dialer, ctx, network, laddr, raddr)
 	}
 }
 
 func (manager *dialManager) dialWithDialer(
-	dialer common.Dialer,
+	dialer Dialer,
 	ctx context.Context,
 	network string,
-	address string) (net.Conn, error) {
-
-	if network != "tcp" {
-		return nil, errors.Tracef("unsupported network: %s", network)
-	}
+	laddr string,
+	raddr string) (net.Conn, error) {
 
 	// The context for this dial is either:
 	// - ctx, during the initial refraction_networking_client.DialContext, when
@@ -779,7 +910,7 @@ func (manager *dialManager) dialWithDialer(
 	}
 	manager.ctxMutex.Unlock()
 
-	conn, err := dialer(ctx, network, address)
+	conn, err := dialer(ctx, network, laddr, raddr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -789,7 +920,7 @@ func (manager *dialManager) dialWithDialer(
 	// TapDance will run in a degraded state.
 	// Limitation: if the underlying conn _also_ passes through CloseWrite, this
 	// check may be insufficient.
-	if _, ok := conn.(common.CloseWriter); !ok {
+	if _, ok := conn.(common.CloseWriter); network == "tcp" && !ok {
 		return nil, errors.TraceNew("underlying conn is not a CloseWriter")
 	}
 
@@ -844,10 +975,35 @@ type refractionConn struct {
 	manager  *dialManager
 	isClosed int32
 
-	isConjure        bool
-	conjureCached    bool
-	conjureDelay     time.Duration
-	conjureTransport string
+	isConjure                      bool
+	conjureMetricCached            bool
+	conjureMetricDelay             time.Duration
+	conjureMetricTransport         string
+	conjureMetricPrefix            string
+	conjureMetricSTUNServerAddress string
+}
+
+func (conn *refractionConn) Write(p []byte) (int, error) {
+	n, err := conn.Conn.Write(p)
+
+	// For the DTLS transport, underlying SCTP conn writes may fail
+	// with "stream closed" -- which indicates a permanent failure of the
+	// transport -- without closing the conn. Explicitly close the conn on
+	// this error, which will trigger Psiphon to reconnect faster via
+	// IsClosed checks on port forward failures.
+	//
+	// The close is invoked asynchronously to avoid possible deadlocks due to
+	// a hypothetical panic in the Close call: for a port forward, the unwind
+	// will invoke a deferred ssh.channel.Close which reenters Write;
+	// meanwhile, the underlying ssh.channel.writePacket acquires a
+	// ssh.channel.writeMu lock but does not defer the unlock.
+
+	if std_errors.Is(err, sctp.ErrStreamClosed) {
+		go func() {
+			_ = conn.Close()
+		}()
+	}
+	return n, err
 }
 
 func (conn *refractionConn) Close() error {
@@ -867,17 +1023,36 @@ func (conn *refractionConn) GetMetrics() common.LogFields {
 	if conn.isConjure {
 
 		cached := "0"
-		if conn.conjureCached {
+		if conn.conjureMetricCached {
 			cached = "1"
 		}
 		logFields["conjure_cached"] = cached
 
-		if conn.conjureDelay != -1 {
-			logFields["conjure_delay"] = fmt.Sprintf("%d", conn.conjureDelay/time.Millisecond)
+		if conn.conjureMetricDelay != -1 {
+			logFields["conjure_delay"] = fmt.Sprintf("%d", conn.conjureMetricDelay/time.Millisecond)
 		}
 
-		logFields["conjure_transport"] = conn.conjureTransport
+		logFields["conjure_transport"] = conn.conjureMetricTransport
+
+		if conn.conjureMetricPrefix != "" {
+			logFields["conjure_prefix"] = conn.conjureMetricPrefix
+		}
+
+		if conn.conjureMetricSTUNServerAddress != "" {
+			logFields["conjure_stun"] = conn.conjureMetricSTUNServerAddress
+		}
+
+		host, port, err := net.SplitHostPort(conn.RemoteAddr().String())
+		if err == nil {
+			network := "IPv4"
+			if IP := net.ParseIP(host); IP != nil && IP.To4() == nil {
+				network = "IPv6"
+			}
+			logFields["conjure_network"] = network
+			logFields["conjure_port_number"] = port
+		}
 	}
+
 	return logFields
 }
 
@@ -910,7 +1085,13 @@ func initRefractionNetworking(emitLogs bool, dataDirectory string) error {
 			return
 		}
 
-		refraction_networking_client.AssetsSetDir(assetsDir)
+		refraction_networking_assets.AssetsSetDir(assetsDir)
+
+		// TapDance now uses a distinct Assets/ClientConf,
+		// refraction_networking_client.Assets. Do not configure the TapDance
+		// ClientConf to use the same configuration as Conjure, as the
+		// Conjure ClientConf may contain decoys that are appropriate for
+		// registration load but not full TapDance tunnel load.
 	})
 
 	return initErr

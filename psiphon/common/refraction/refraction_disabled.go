@@ -1,3 +1,4 @@
+//go:build !PSIPHON_ENABLE_REFRACTION_NETWORKING
 // +build !PSIPHON_ENABLE_REFRACTION_NETWORKING
 
 /*
@@ -25,7 +26,6 @@ import (
 	"context"
 	"net"
 
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
@@ -45,12 +45,12 @@ func Listen(_ string) (net.Listener, error) {
 }
 
 // DialTapDance establishes a new Tapdance connection to a Tapdance station.
-func DialTapDance(_ context.Context, _ bool, _ string, _ common.NetDialer, _ string) (net.Conn, error) {
+func DialTapDance(_ context.Context, _ bool, _ string, _ Dialer, _ string) (net.Conn, error) {
 	return nil, errors.TraceNew("operation is not enabled")
 }
 
 // DialConjure establishes a new Conjure connection to a Conjure station.
-func DialConjure(_ context.Context, _ bool, _ string, _ common.NetDialer, _ string, _ *ConjureConfig) (net.Conn, error) {
+func DialConjure(_ context.Context, _ bool, _ string, _ Dialer, _ string, _ *ConjureConfig) (net.Conn, error) {
 	return nil, errors.TraceNew("operation is not enabled")
 }
 
