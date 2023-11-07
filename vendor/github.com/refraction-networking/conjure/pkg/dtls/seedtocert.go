@@ -16,12 +16,13 @@ import (
 	"math/big"
 	"time"
 
+	"filippo.io/keygen"
 	"github.com/pion/dtls/v2/pkg/protocol/handshake"
 	"golang.org/x/crypto/hkdf"
 )
 
 func clientHelloRandomFromSeed(seed []byte) ([handshake.RandomBytesLength]byte, error) {
-	randSource := hkdf.New(sha256.New, seed, nil, nil)
+	randSource := hkdf.New(sha256.New, seed, []byte("clientHelloRandomFromSeed"), nil)
 	randomBytes := [handshake.RandomBytesLength]byte{}
 
 	_, err := io.ReadFull(randSource, randomBytes[:])
@@ -33,19 +34,17 @@ func clientHelloRandomFromSeed(seed []byte) ([handshake.RandomBytesLength]byte, 
 }
 
 // getPrivkey creates ECDSA private key used in DTLS Certificates
-func getPrivkey(seed []byte) (*ecdsa.PrivateKey, error) {
-	randSource := hkdf.New(sha256.New, seed, nil, nil)
-
-	privkey, err := ecdsa.GenerateKey(elliptic.P256(), &Not1Reader{r: randSource})
+func getPrivkey(randSource io.Reader) (*ecdsa.PrivateKey, error) {
+	privkey, err := keygen.ECDSALegacy(elliptic.P256(), randSource)
 	if err != nil {
 		return &ecdsa.PrivateKey{}, err
 	}
+
 	return privkey, nil
 }
 
 // getX509Tpl creates x509 template for x509 Certificates generation used in DTLS Certificates.
-func getX509Tpl(seed []byte) (*x509.Certificate, error) {
-	randSource := hkdf.New(sha256.New, seed, nil, nil)
+func getX509Tpl(randSource io.Reader) (*x509.Certificate, error) {
 
 	maxBigInt := new(big.Int)
 	maxBigInt.Exp(big.NewInt(2), big.NewInt(130), nil).Sub(maxBigInt, big.NewInt(1))
@@ -85,20 +84,19 @@ func getX509Tpl(seed []byte) (*x509.Certificate, error) {
 	}, nil
 }
 
-func newCertificate(seed []byte) (*tls.Certificate, error) {
-	privkey, err := getPrivkey(seed)
+func newCertificate(randSource io.Reader) (*tls.Certificate, error) {
+
+	privkey, err := getPrivkey(randSource)
 	if err != nil {
 		return &tls.Certificate{}, err
 	}
 
-	tpl, err := getX509Tpl(seed)
+	tpl, err := getX509Tpl(randSource)
 	if err != nil {
 		return &tls.Certificate{}, err
 	}
 
-	randSource := hkdf.New(sha256.New, seed, nil, nil)
-
-	certDER, err := x509.CreateCertificate(randSource, tpl, tpl, privkey.Public(), privkey)
+	certDER, err := x509.CreateCertificate(rand.Reader, tpl, tpl, privkey.Public(), privkey)
 	if err != nil {
 		return &tls.Certificate{}, err
 	}
@@ -110,15 +108,17 @@ func newCertificate(seed []byte) (*tls.Certificate, error) {
 }
 
 func certsFromSeed(seed []byte) (*tls.Certificate, *tls.Certificate, error) {
-	clientCert, err := newCertificate(seed)
+	randSource := hkdf.New(sha256.New, seed, []byte("certsFromSeed"), nil)
+
+	clientCert, err := newCertificate(randSource)
 	if err != nil {
 		return &tls.Certificate{}, &tls.Certificate{}, fmt.Errorf("error generate cert: %v", err)
 	}
 
-	// serverCert, err := newCertificate(seed)
-	// if err != nil {
-	// 	return &tls.Certificate{}, &tls.Certificate{}, fmt.Errorf("error generate cert: %v", err)
-	// }
+	serverCert, err := newCertificate(randSource)
+	if err != nil {
+		return &tls.Certificate{}, &tls.Certificate{}, fmt.Errorf("error generate cert: %v", err)
+	}
 
-	return clientCert, clientCert, nil
+	return clientCert, serverCert, nil
 }

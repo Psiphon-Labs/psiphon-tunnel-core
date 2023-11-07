@@ -256,10 +256,5 @@ func (l *Listener) getCertificateFromClientHello(clientHello *dtls.ClientHelloIn
 }
 
 func randomCertificate() (*tls.Certificate, error) {
-	seedBytes := []byte{}
-	_, err := rand.Read(seedBytes)
-	if err != nil {
-		return nil, err
-	}
-	return newCertificate(seedBytes)
+	return newCertificate(rand.Reader)
 }
