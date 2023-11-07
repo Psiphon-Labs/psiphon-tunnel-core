@@ -243,6 +243,7 @@ const (
 	ReplayHTTPTransformerParameters                  = "ReplayHTTPTransformerParameters"
 	ReplayOSSHSeedTransformerParameters              = "ReplayOSSHSeedTransformerParameters"
 	ReplayOSSHPrefix                                 = "ReplayOSSHPrefix"
+	ReplayTLSFragmentClientHello                     = "ReplayTLSFragmentClientHello"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -347,6 +348,8 @@ const (
 	TLSTunnelTrafficShapingProbability               = "TLSTunnelTrafficShapingProbability"
 	TLSTunnelMinTLSPadding                           = "TLSTunnelMinTLSPadding"
 	TLSTunnelMaxTLSPadding                           = "TLSTunnelMaxTLSPadding"
+	TLSFragmentClientHelloProbability                = "TLSFragmentClientHelloProbability"
+	TLSFragmentClientHelloLimitProtocols             = "TLSFragmentClientHelloLimitProtocols"
 
 	// Retired parameters
 
@@ -609,6 +612,7 @@ var defaultParameters = map[string]struct {
 	ReplayHTTPTransformerParameters:        {value: true},
 	ReplayOSSHSeedTransformerParameters:    {value: true},
 	ReplayOSSHPrefix:                       {value: true},
+	ReplayTLSFragmentClientHello:           {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -741,6 +745,9 @@ var defaultParameters = map[string]struct {
 	TLSTunnelTrafficShapingProbability: {value: 1.0, minimum: 0.0},
 	TLSTunnelMinTLSPadding:             {value: 0, minimum: 0},
 	TLSTunnelMaxTLSPadding:             {value: 0, minimum: 0},
+
+	TLSFragmentClientHelloProbability:    {value: 0.0, minimum: 0.0},
+	TLSFragmentClientHelloLimitProtocols: {value: protocol.TunnelProtocols{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

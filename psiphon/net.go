@@ -474,6 +474,16 @@ func makeFrontedHTTPClient(
 		networkLatencyMultiplierMax,
 		p.Float(parameters.NetworkLatencyMultiplierLambda))
 
+	tlsFragmentClientHello := false
+	if meekSNIServerName != "" {
+		tlsFragmentorLimitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
+		if len(tlsFragmentorLimitProtocols) == 0 || common.Contains(tlsFragmentorLimitProtocols, effectiveTunnelProtocol) {
+			if net.ParseIP(meekSNIServerName) == nil {
+				tlsFragmentClientHello = p.WeightedCoinFlip(parameters.TLSFragmentClientHelloProbability)
+			}
+		}
+	}
+
 	meekConfig := &MeekConfig{
 		DiagnosticID:             frontingProviderID,
 		Parameters:               config.GetParameters(),
@@ -481,6 +491,7 @@ func makeFrontedHTTPClient(
 		DialAddress:              meekDialAddress,
 		UseHTTPS:                 true,
 		TLSProfile:               tlsProfile,
+		TLSFragmentClientHello:   tlsFragmentClientHello,
 		NoDefaultTLSSessionID:    noDefaultTLSSessionID,
 		RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
 		SNIServerName:            meekSNIServerName,
@@ -601,6 +612,10 @@ func makeFrontedHTTPClient(
 
 		if tlsVersion != "" {
 			params["tls_version"] = getTLSVersionForMetrics(tlsVersion, meekConfig.NoDefaultTLSSessionID)
+		}
+
+		if meekConfig.TLSFragmentClientHello {
+			params["tls_fragmented"] = "1"
 		}
 
 		return params

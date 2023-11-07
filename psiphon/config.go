@@ -872,6 +872,10 @@ type Config struct {
 	TLSTunnelMinTLSPadding             *int
 	TLSTunnelMaxTLSPadding             *int
 
+	// TLSFragmentClientHello fields are for testing purposes only.
+	TLSFragmentClientHelloProbability    *float64
+	TLSFragmentClientHelloLimitProtocols []string
+
 	// AdditionalParameters is used for testing.
 	AdditionalParameters string
 
@@ -2057,6 +2061,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.TLSTunnelMaxTLSPadding] = *config.TLSTunnelMaxTLSPadding
 	}
 
+	if config.TLSFragmentClientHelloProbability != nil {
+		applyParameters[parameters.TLSFragmentClientHelloProbability] = *config.TLSFragmentClientHelloProbability
+	}
+
+	if len(config.TLSFragmentClientHelloLimitProtocols) > 0 {
+		applyParameters[parameters.TLSFragmentClientHelloLimitProtocols] = protocol.TunnelProtocols(config.TLSFragmentClientHelloLimitProtocols)
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2586,6 +2598,18 @@ func (config *Config) setDialParametersHash() {
 	if config.TLSTunnelMaxTLSPadding != nil {
 		hash.Write([]byte("TLSTunnelMaxTLSPadding"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelMaxTLSPadding))
+	}
+
+	if config.TLSFragmentClientHelloProbability != nil {
+		hash.Write([]byte("TLSFragmentClientHelloProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.TLSFragmentClientHelloProbability)
+	}
+
+	if len(config.TLSFragmentClientHelloLimitProtocols) > 0 {
+		hash.Write([]byte("TLSFragmentClientHelloLimitProtocols"))
+		for _, protocol := range config.TLSFragmentClientHelloLimitProtocols {
+			hash.Write([]byte(protocol))
+		}
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

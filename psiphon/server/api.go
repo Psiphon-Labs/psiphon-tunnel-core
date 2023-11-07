@@ -541,7 +541,9 @@ var remoteServerListStatParams = append(
 		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"user_agent", isAnyString, requestParamOptional},
 		{"tls_profile", isAnyString, requestParamOptional},
-		{"tls_version", isAnyString, requestParamOptional}},
+		{"tls_version", isAnyString, requestParamOptional},
+		{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	},
 
 	baseSessionParams...)
 
@@ -950,6 +952,7 @@ var baseDialParams = []requestParamSpec{
 	{"http_transform", isAnyString, requestParamOptional},
 	{"seed_transform", isAnyString, requestParamOptional},
 	{"ossh_prefix", isAnyString, requestParamOptional},
+	{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.

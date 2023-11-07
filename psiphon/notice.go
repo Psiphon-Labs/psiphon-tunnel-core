@@ -513,6 +513,10 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "tlsOSSHTransformedSNIServerName", dialParams.TLSOSSHTransformedSNIServerName)
 		}
 
+		if dialParams.TLSFragmentClientHello {
+			args = append(args, "tlsFragmentClientHello", dialParams.TLSFragmentClientHello)
+		}
+
 		if dialParams.SelectedUserAgent {
 			args = append(args, "userAgent", dialParams.UserAgent)
 		}
