@@ -181,12 +181,12 @@ type MeekConfig struct {
 
 	// DisableSystemRootCAs, when true, disables loading system root CAs when
 	// verifying the server certificate chain. Set DisableSystemRootCAs only in
-	// cases where system root CAs cannot be loaded; for example, if
-	// unsupported (iOS < 12) or insufficient memory (VPN extension on iOS <
-	// 15).
+	// cases where system root CAs cannot be loaded and there is additional
+	// security at the payload level; for example, if unsupported (iOS < 12) or
+	// insufficient memory (VPN extension on iOS < 15).
 	//
-	// When DisableSystemRootCAs and VerifyServerName are set, VerifyPins must
-	// be set.
+	// When DisableSystemRootCAs is set, both VerifyServerName and VerifyPins
+	// must not be set.
 	DisableSystemRootCAs bool
 
 	// ClientTunnelProtocol is the protocol the client is using. It's included in
@@ -305,16 +305,16 @@ func DialMeek(
 			"invalid config: VerifyServerName must be set when VerifyPins is set")
 	}
 
-	if meekConfig.DisableSystemRootCAs && !skipVerify &&
-		(len(meekConfig.VerifyServerName) == 0 || len(meekConfig.VerifyPins) == 0) {
+	if meekConfig.DisableSystemRootCAs &&
+		(len(meekConfig.VerifyServerName) > 0 || len(meekConfig.VerifyPins) > 0) {
 		return nil, errors.TraceNew(
-			"invalid config: VerifyServerName and VerifyPins must be set when DisableSystemRootCAs is set")
+			"invalid config: VerifyServerName and VerifyPins must not be set when DisableSystemRootCAs is set")
 	}
 
 	if meekConfig.Mode == MeekModePlaintextRoundTrip &&
-		(!meekConfig.UseHTTPS || skipVerify) {
+		(!meekConfig.UseHTTPS || (skipVerify && !meekConfig.DisableSystemRootCAs)) {
 		return nil, errors.TraceNew(
-			"invalid config: MeekModePlaintextRoundTrip requires UseHTTPS and VerifyServerName")
+			"invalid config: MeekModePlaintextRoundTrip requires UseHTTPS and VerifyServerName when system root CAs can be loaded")
 	}
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
