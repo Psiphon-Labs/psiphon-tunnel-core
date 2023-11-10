@@ -33,7 +33,7 @@ require (
 	github.com/oschwald/maxminddb-golang v1.12.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/pion/sctp v1.8.8
-	github.com/refraction-networking/conjure v0.7.9
+	github.com/refraction-networking/conjure v0.7.10-0.20231110193225-e4749a9dedc9
 	github.com/refraction-networking/gotapdance v1.7.7
 	github.com/refraction-networking/utls v1.3.3
 	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735

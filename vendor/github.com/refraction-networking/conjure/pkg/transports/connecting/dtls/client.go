@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,7 +45,6 @@ type ClientTransport struct {
 	psk                 []byte
 	stunServer          string
 	disableIRWorkaround bool
-	listenTimeout       *time.Duration
 }
 
 type ClientConfig struct {
@@ -132,7 +132,6 @@ func (t *ClientTransport) SetParams(p any) error {
 	case *ClientConfig:
 		t.stunServer = params.STUNServer
 		t.disableIRWorkaround = params.DisableIRWorkaround
-		t.listenTimeout = params.ListenTimeout
 	}
 
 	return nil
@@ -205,27 +204,44 @@ func (t *ClientTransport) GetDstPort(seed []byte) (uint16, error) {
 
 func (t *ClientTransport) WrapDial(dialer dialFunc) (dialFunc, error) {
 	dtlsDialer := func(ctx context.Context, network, localAddr, address string) (net.Conn, error) {
-		// Create a context that will automatically cancel after 5 seconds or when the existing context is cancelled, whichever comes first.
-		timeout := t.listenTimeout
-		if timeout == nil {
-			time := defaultListenTime
-			timeout = &time
-		}
-		ctxtimeout, cancel := context.WithTimeout(ctx, *timeout)
+
+		dialCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		conn, errListen := t.listen(ctxtimeout, dialer, address)
-		if errListen != nil {
-			// fallback to dial
-			conn, errDial := t.dial(ctx, dialer, address)
-			if errDial != nil {
-				return nil, fmt.Errorf("error listening: %v, error dialing: %v", errListen, errDial)
-			}
-
-			return conn, nil
+		type result struct {
+			conn net.Conn
+			err  error
 		}
 
-		return conn, nil
+		results := make(chan result, 2)
+
+		go func() {
+			conn, err := t.listen(dialCtx, dialer, address)
+			results <- result{conn, err}
+		}()
+
+		go func() {
+			conn, err := t.dial(dialCtx, dialer, address)
+			results <- result{conn, err}
+		}()
+
+		first := <-results
+		if first.err == nil {
+			// Interrupt the other dial
+			cancel()
+			second := <-results
+			if second.conn != nil {
+				_ = second.conn.Close()
+			}
+			return first.conn, nil
+		}
+
+		second := <-results
+		if second.err == nil {
+			return second.conn, nil
+		}
+
+		return nil, fmt.Errorf(strings.Join([]string{first.err.Error(), second.err.Error()}, "; "))
 	}
 
 	return dtlsDialer, nil
