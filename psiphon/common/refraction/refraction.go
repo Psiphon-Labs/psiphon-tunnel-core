@@ -1065,6 +1065,8 @@ func initRefractionNetworking(emitLogs bool, dataDirectory string) error {
 
 		if !emitLogs {
 			refraction_networking_client.Logger().Out = ioutil.Discard
+		} else {
+			refraction_networking_client.Logger().Out = os.Stdout
 		}
 
 		assetsDir := filepath.Join(dataDirectory, "refraction-networking")
