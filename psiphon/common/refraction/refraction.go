@@ -954,6 +954,19 @@ type managedConn struct {
 	manager *dialManager
 }
 
+type fileConn interface {
+	File() (*os.File, error)
+}
+
+// File exposes the net.UDPConn.File() functionality required by the Conjure
+// DTLS transport.
+func (conn *managedConn) File() (*os.File, error) {
+	if f, ok := conn.Conn.(fileConn); ok {
+		return f.File()
+	}
+	return nil, errors.TraceNew("underlying conn is not a fileConn")
+}
+
 // CloseWrite exposes the net.TCPConn.CloseWrite() functionality
 // required by TapDance.
 func (conn *managedConn) CloseWrite() error {
