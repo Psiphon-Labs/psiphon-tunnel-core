@@ -842,6 +842,7 @@ func dialTunnel(
 			EnableRegistrationOverrides: conjureEnableRegistrationOverrides,
 			Transport:                   dialParams.ConjureTransport,
 			STUNServerAddress:           dialParams.ConjureSTUNServerAddress,
+			DTLSEmptyInitialPacket:      dialParams.ConjureDTLSEmptyInitialPacket,
 			DiagnosticID:                diagnosticID,
 			Logger:                      NoticeCommonLogger(),
 		}

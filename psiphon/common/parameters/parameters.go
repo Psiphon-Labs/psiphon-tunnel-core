@@ -302,6 +302,7 @@ const (
 	ConjureLimitTransportsProbability                = "ConjureLimitTransportsProbability"
 	ConjureLimitTransports                           = "ConjureLimitTransports"
 	ConjureSTUNServerAddresses                       = "ConjureSTUNServerAddresses"
+	ConjureDTLSEmptyInitialPacketProbability         = "ConjureDTLSEmptyInitialPacketProbability"
 	CustomHostNameRegexes                            = "CustomHostNameRegexes"
 	CustomHostNameProbability                        = "CustomHostNameProbability"
 	CustomHostNameLimitProtocols                     = "CustomHostNameLimitProtocols"
@@ -674,21 +675,22 @@ var defaultParameters = map[string]struct {
 	ConjureCachedRegistrationTTL: {value: time.Duration(0), minimum: time.Duration(0)},
 	// ConjureAPIRegistrarURL parameter is obsoleted by ConjureAPIRegistrarBidirectionalURL.
 	// TODO: remove once no longer required for older clients.
-	ConjureAPIRegistrarURL:              {value: ""},
-	ConjureAPIRegistrarBidirectionalURL: {value: ""},
-	ConjureAPIRegistrarFrontingSpecs:    {value: FrontingSpecs{}},
-	ConjureAPIRegistrarMinDelay:         {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureAPIRegistrarMaxDelay:         {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureDecoyRegistrarProbability:    {value: 0.0, minimum: 0.0},
-	ConjureDecoyRegistrarWidth:          {value: 5, minimum: 0},
-	ConjureDecoyRegistrarMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureDecoyRegistrarMaxDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureEnableIPv6Dials:              {value: true},
-	ConjureEnablePortRandomization:      {value: true},
-	ConjureEnableRegistrationOverrides:  {value: false},
-	ConjureLimitTransportsProbability:   {value: 1.0, minimum: 0.0},
-	ConjureLimitTransports:              {value: protocol.ConjureTransports{}},
-	ConjureSTUNServerAddresses:          {value: []string{}},
+	ConjureAPIRegistrarURL:                   {value: ""},
+	ConjureAPIRegistrarBidirectionalURL:      {value: ""},
+	ConjureAPIRegistrarFrontingSpecs:         {value: FrontingSpecs{}},
+	ConjureAPIRegistrarMinDelay:              {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureAPIRegistrarMaxDelay:              {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarProbability:         {value: 0.0, minimum: 0.0},
+	ConjureDecoyRegistrarWidth:               {value: 5, minimum: 0},
+	ConjureDecoyRegistrarMinDelay:            {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarMaxDelay:            {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureEnableIPv6Dials:                   {value: true},
+	ConjureEnablePortRandomization:           {value: true},
+	ConjureEnableRegistrationOverrides:       {value: false},
+	ConjureLimitTransportsProbability:        {value: 1.0, minimum: 0.0},
+	ConjureLimitTransports:                   {value: protocol.ConjureTransports{}},
+	ConjureSTUNServerAddresses:               {value: []string{}},
+	ConjureDTLSEmptyInitialPacketProbability: {value: 0.0, minimum: 0.0},
 
 	CustomHostNameRegexes:        {value: RegexStrings{}},
 	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},

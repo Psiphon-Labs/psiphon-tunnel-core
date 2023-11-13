@@ -140,6 +140,7 @@ type DialParameters struct {
 	ConjureDecoyRegistrarWidth          int
 	ConjureTransport                    string
 	ConjureSTUNServerAddress            string
+	ConjureDTLSEmptyInitialPacket       bool
 
 	LivenessTestSeed *prng.Seed
 
@@ -637,6 +638,8 @@ func MakeDialParameters(
 					"no Conjure STUN servers addresses configured for transport %s", dialParams.ConjureTransport)
 			}
 			dialParams.ConjureSTUNServerAddress = stunServerAddresses[prng.Intn(len(stunServerAddresses))]
+			dialParams.ConjureDTLSEmptyInitialPacket = p.WeightedCoinFlip(
+				parameters.ConjureDTLSEmptyInitialPacketProbability)
 		}
 	}
 

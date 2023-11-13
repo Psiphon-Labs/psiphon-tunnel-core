@@ -945,6 +945,7 @@ var baseDialParams = []requestParamSpec{
 	{"conjure_transport", isAnyString, requestParamOptional},
 	{"conjure_prefix", isAnyString, requestParamOptional},
 	{"conjure_stun", isAnyString, requestParamOptional},
+	{"conjure_empty_packet", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"conjure_network", isAnyString, requestParamOptional},
 	{"conjure_port_number", isAnyString, requestParamOptional},
 	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},

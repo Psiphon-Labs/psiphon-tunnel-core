@@ -275,6 +275,7 @@ func dial(
 	conjureMetricTransport := ""
 	conjureMetricPrefix := ""
 	conjureMetricSTUNServerAddress := ""
+	conjureMetricDTLSEmptyInitialPacket := false
 
 	var conjureCachedRegistration *refraction_networking_client.ConjureReg
 	var conjureRecordRegistrar *recordRegistrar
@@ -465,10 +466,12 @@ func dial(
 			}
 			config.SetParams(
 				&refraction_networking_dtls.ClientConfig{
-					STUNServer: conjureConfig.STUNServerAddress,
+					STUNServer:          conjureConfig.STUNServerAddress,
+					DisableIRWorkaround: !conjureConfig.DTLSEmptyInitialPacket,
 				})
 
 			conjureMetricSTUNServerAddress = conjureConfig.STUNServerAddress
+			conjureMetricDTLSEmptyInitialPacket = conjureConfig.DTLSEmptyInitialPacket
 
 			refractionDialer.Transport = transport.ID()
 			refractionDialer.TransportConfig = config
@@ -571,6 +574,7 @@ func dial(
 		refractionConn.conjureMetricTransport = conjureMetricTransport
 		refractionConn.conjureMetricPrefix = conjureMetricPrefix
 		refractionConn.conjureMetricSTUNServerAddress = conjureMetricSTUNServerAddress
+		refractionConn.conjureMetricDTLSEmptyInitialPacket = conjureMetricDTLSEmptyInitialPacket
 	}
 
 	return refractionConn, nil
@@ -988,12 +992,13 @@ type refractionConn struct {
 	manager  *dialManager
 	isClosed int32
 
-	isConjure                      bool
-	conjureMetricCached            bool
-	conjureMetricDelay             time.Duration
-	conjureMetricTransport         string
-	conjureMetricPrefix            string
-	conjureMetricSTUNServerAddress string
+	isConjure                           bool
+	conjureMetricCached                 bool
+	conjureMetricDelay                  time.Duration
+	conjureMetricTransport              string
+	conjureMetricPrefix                 string
+	conjureMetricSTUNServerAddress      string
+	conjureMetricDTLSEmptyInitialPacket bool
 }
 
 func (conn *refractionConn) Write(p []byte) (int, error) {
@@ -1053,6 +1058,14 @@ func (conn *refractionConn) GetMetrics() common.LogFields {
 
 		if conn.conjureMetricSTUNServerAddress != "" {
 			logFields["conjure_stun"] = conn.conjureMetricSTUNServerAddress
+		}
+
+		if conn.conjureMetricTransport == protocol.CONJURE_TRANSPORT_DTLS_OSSH {
+			emptyPacket := "0"
+			if conn.conjureMetricDTLSEmptyInitialPacket {
+				emptyPacket = "1"
+			}
+			logFields["conjure_empty_packet"] = emptyPacket
 		}
 
 		host, port, err := net.SplitHostPort(conn.RemoteAddr().String())

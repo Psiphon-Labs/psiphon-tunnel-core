@@ -808,6 +808,7 @@ type Config struct {
 	ConjureEnableRegistrationOverrides        *bool
 	ConjureLimitTransports                    protocol.ConjureTransports
 	ConjureSTUNServerAddresses                []string
+	ConjureDTLSEmptyInitialPacketProbability  *float64
 
 	// HoldOffTunnelMinDurationMilliseconds and other HoldOffTunnel fields are
 	// for testing purposes.
@@ -1900,6 +1901,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ConjureSTUNServerAddresses != nil {
 		applyParameters[parameters.ConjureSTUNServerAddresses] = config.ConjureSTUNServerAddresses
+	}
+
+	if config.ConjureDTLSEmptyInitialPacketProbability != nil {
+		applyParameters[parameters.ConjureDTLSEmptyInitialPacketProbability] = *config.ConjureDTLSEmptyInitialPacketProbability
 	}
 
 	if config.HoldOffTunnelMinDurationMilliseconds != nil {

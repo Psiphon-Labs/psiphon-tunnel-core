@@ -100,12 +100,17 @@ type ConjureConfig struct {
 
 	// Transport may be protocol.CONJURE_TRANSPORT_MIN_OSSH,
 	// protocol.CONJURE_TRANSPORT_PREFIX_OSSH, or
-	// protcol.CONJURE_TRANSPORT_DTLS_OSSH.
+	// protocol.CONJURE_TRANSPORT_DTLS_OSSH.
 	Transport string
 
 	// STUNServerAddress specifies the STUN server to use with
 	// protcol.CONJURE_TRANSPORT_DTLS_OSSH.
 	STUNServerAddress string
+
+	// DTLSEmptyInitialPacket specifies whether to prefix the DTLS flow with
+	// an initial empty packet. Used only for
+	// protocol.CONJURE_TRANSPORT_DTLS_OSSH.
+	DTLSEmptyInitialPacket bool
 
 	// DiagnosticID identifies this dial in diagnostics.
 	DiagnosticID string
