@@ -210,9 +210,8 @@ func TestTLSCertificateVerification(t *testing.T) {
 		conn.Close()
 	}
 
-	// Test: with SNI changed, DisableSystemRootCAs set along with
-	// VerifyServerName and VerifyPins, and pinning the TLS dial
-	// succeeds.
+	// Test: with DisableSystemRootCAs set and without VerifyServerName or
+	// VerifyPins set, the TLS dial succeeds.
 
 	conn, err = CustomTLSDial(
 		context.Background(), "tcp", serverAddr,
@@ -221,8 +220,43 @@ func TestTLSCertificateVerification(t *testing.T) {
 			Dial:                 dialer,
 			SNIServerName:        "not-" + serverName,
 			DisableSystemRootCAs: true,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %v", err)
+	} else {
+		conn.Close()
+	}
+
+	// Test: with DisableSystemRootCAs set along with VerifyServerName and
+	// VerifyPins, the TLS dial fails.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:           params,
+			Dial:                 dialer,
+			SNIServerName:        serverName,
+			DisableSystemRootCAs: true,
 			VerifyServerName:     serverName,
 			VerifyPins:           []string{rootCACertificatePin},
+		})
+
+	if err == nil {
+		conn.Close()
+		t.Errorf("unexpected success with DisableSystemRootCAs set along with VerifyServerName and VerifyPins")
+	}
+
+	// Test: with DisableSystemRootCAs set, SNI changed, and without
+	// VerifyServerName or VerifyPins set, the TLS dial succeeds.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:           params,
+			Dial:                 dialer,
+			SNIServerName:        "not-" + serverName,
+			DisableSystemRootCAs: true,
 		})
 
 	if err != nil {
@@ -357,8 +391,11 @@ func initTestCertificatesAndWebServer(
 
 	// Run an HTTPS server with the server certificate.
 
+	// Do not include the Root CA certificate in the certificate chain returned
+	// by the server to the client in the TLS handshake by excluding it from
+	// the key pair, which matches the behavior observed in the wild.
 	serverKeyPair, err := tls.X509KeyPair(
-		append(pemServerCertificate, pemRootCACertificate...), pemServerPrivateKey)
+		pemServerCertificate, pemServerPrivateKey)
 	if err != nil {
 		t.Fatalf("tls.X509KeyPair failed: %v", err)
 	}
@@ -418,7 +455,8 @@ func initTestCertificatesAndWebServer(
 
 func TestTLSDialerCompatibility(t *testing.T) {
 
-	// This test checks that each TLS profile can successfully complete a TLS
+	// This test checks that each TLS profile in combination with TLS ClientHello
+	// fragmentation can successfully complete a TLS
 	// handshake with various servers. By default, only the "psiphon" case is
 	// run, which runs the same TLS listener used by a Psiphon server.
 	//
@@ -432,22 +470,25 @@ func TestTLSDialerCompatibility(t *testing.T) {
 		configAddresses = strings.Split(string(config), "\n")
 	}
 
-	runner := func(address string) func(t *testing.T) {
+	runner := func(address string, fragmentClientHello bool) func(t *testing.T) {
 		return func(t *testing.T) {
-			testTLSDialerCompatibility(t, address)
+			testTLSDialerCompatibility(t, address, fragmentClientHello)
 		}
 	}
 
 	for _, address := range configAddresses {
-		if len(address) > 0 {
-			t.Run(address, runner(address))
+		for _, fragmentClientHello := range []bool{false, true} {
+			if len(address) > 0 {
+				t.Run(fmt.Sprintf("%s (fragmentClientHello: %v)", address, fragmentClientHello),
+					runner(address, fragmentClientHello))
+			}
 		}
 	}
 
-	t.Run("psiphon", runner(""))
+	t.Run("psiphon", runner("", false))
 }
 
-func testTLSDialerCompatibility(t *testing.T, address string) {
+func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHello bool) {
 
 	if address == "" {
 
@@ -519,10 +560,11 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			transformHostname := i%2 == 0
 
 			tlsConfig := &CustomTLSConfig{
-				Parameters: params,
-				Dial:       dialer,
-				SkipVerify: true,
-				TLSProfile: tlsProfile,
+				Parameters:          params,
+				Dial:                dialer,
+				SkipVerify:          true,
+				TLSProfile:          tlsProfile,
+				FragmentClientHello: fragmentClientHello,
 			}
 
 			if transformHostname {
@@ -758,6 +800,70 @@ func TestSelectTLSProfile(t *testing.T) {
 			t.Errorf("expected non-nil seed for randomized TLS profile")
 		}
 	}
+}
+
+func TestTLSFragmentorWithoutSNI(t *testing.T) {
+	testDataDirName, err := ioutil.TempDir("", "psiphon-tls-certificate-verification-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	serverName := "example.org"
+
+	rootCAsFileName,
+		_,
+		serverCertificatePin,
+		shutdown,
+		serverAddr,
+		dialer := initTestCertificatesAndWebServer(
+		t, testDataDirName, serverName)
+	defer shutdown()
+
+	params, err := parameters.NewParameters(nil)
+	if err != nil {
+		t.Fatalf("parameters.NewParameters failed: %v", err)
+	}
+
+	// Test: missing SNI, the TLS dial fails
+
+	conn, err := CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			SNIServerName:                 "",
+			VerifyServerName:              serverName,
+			VerifyPins:                    []string{serverCertificatePin},
+			TrustedCACertificatesFilename: rootCAsFileName,
+			FragmentClientHello:           true,
+		})
+
+	if err == nil {
+		t.Errorf("unexpected success without SNI")
+		conn.Close()
+	}
+
+	// Test: with SNI, the TLS dial succeeds
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			SNIServerName:                 serverName,
+			VerifyServerName:              serverName,
+			VerifyPins:                    []string{serverCertificatePin},
+			TrustedCACertificatesFilename: rootCAsFileName,
+			FragmentClientHello:           true,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %v", err)
+	} else {
+		conn.Close()
+	}
+
 }
 
 func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {

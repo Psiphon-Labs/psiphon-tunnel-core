@@ -122,6 +122,7 @@ type DialParameters struct {
 	NoDefaultTLSSessionID    bool
 	TLSVersion               string
 	RandomizedTLSProfileSeed *prng.Seed
+	TLSFragmentClientHello   bool
 
 	QUICVersion                              string
 	QUICDialSNIAddress                       string
@@ -138,6 +139,8 @@ type DialParameters struct {
 	ConjureDecoyRegistrarDelay          time.Duration
 	ConjureDecoyRegistrarWidth          int
 	ConjureTransport                    string
+	ConjureSTUNServerAddress            string
+	ConjureDTLSEmptyInitialPacket       bool
 
 	LivenessTestSeed *prng.Seed
 
@@ -198,6 +201,7 @@ func MakeDialParameters(
 	replayObfuscatorPadding := p.Bool(parameters.ReplayObfuscatorPadding)
 	replayFragmentor := p.Bool(parameters.ReplayFragmentor)
 	replayTLSProfile := p.Bool(parameters.ReplayTLSProfile)
+	replayTLSFragmentClientHello := p.Bool(parameters.ReplayTLSFragmentClientHello)
 	replayFronting := p.Bool(parameters.ReplayFronting)
 	replayHostname := p.Bool(parameters.ReplayHostname)
 	replayQUICVersion := p.Bool(parameters.ReplayQUICVersion)
@@ -580,8 +584,7 @@ func MakeDialParameters(
 				return nil, errors.Trace(err)
 			}
 
-			if config.DisableSystemRootCAs &&
-				(len(dialParams.MeekVerifyPins) == 0 || dialParams.MeekVerifyServerName == "") {
+			if config.DisableSystemRootCAs {
 				return nil, errors.TraceNew("TLS certificates must be verified in Conjure API registration")
 			}
 
@@ -623,10 +626,20 @@ func MakeDialParameters(
 	if (!isReplay || !replayConjureTransport) &&
 		protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
 
-		dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_MIN_OSSH
-		if p.WeightedCoinFlip(
-			parameters.ConjureTransportObfs4Probability) {
-			dialParams.ConjureTransport = protocol.CONJURE_TRANSPORT_OBFS4_OSSH
+		// None of ConjureEnableIPv6Dials, ConjureEnablePortRandomization, or
+		// ConjureEnableRegistrationOverrides are set here for replay. The
+		// current value of these flag parameters is always applied.
+
+		dialParams.ConjureTransport = selectConjureTransport(p)
+		if protocol.ConjureTransportUsesSTUN(dialParams.ConjureTransport) {
+			stunServerAddresses := p.Strings(parameters.ConjureSTUNServerAddresses)
+			if len(stunServerAddresses) == 0 {
+				return nil, errors.Tracef(
+					"no Conjure STUN servers addresses configured for transport %s", dialParams.ConjureTransport)
+			}
+			dialParams.ConjureSTUNServerAddress = stunServerAddresses[prng.Intn(len(stunServerAddresses))]
+			dialParams.ConjureDTLSEmptyInitialPacket = p.WeightedCoinFlip(
+				parameters.ConjureDTLSEmptyInitialPacketProbability)
 		}
 	}
 
@@ -824,7 +837,7 @@ func MakeDialParameters(
 	if (!isReplay || !replayResolveParameters) && useResolver {
 
 		dialParams.ResolveParameters, err = dialParams.resolver.MakeResolveParameters(
-			p, dialParams.FrontingProviderID)
+			p, dialParams.FrontingProviderID, dialParams.MeekFrontingDialAddress)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1015,6 +1028,32 @@ func MakeDialParameters(
 		}
 	}
 
+	// TLS ClientHello fragmentation is applied only after the state
+	// of SNI is determined above.
+	if (!isReplay || !replayTLSFragmentClientHello) && usingTLS {
+
+		limitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
+		if len(limitProtocols) == 0 || common.Contains(limitProtocols, dialParams.TunnelProtocol) {
+
+			// Note: The TLS stack automatically drops the SNI extension when
+			// the host is an IP address.
+
+			usingSNI := false
+			if dialParams.TLSOSSHSNIServerName != "" {
+				usingSNI = net.ParseIP(dialParams.TLSOSSHSNIServerName) == nil
+
+			} else if dialParams.MeekSNIServerName != "" {
+				usingSNI = net.ParseIP(dialParams.MeekSNIServerName) == nil
+			}
+
+			// TLS ClientHello fragmentor expects SNI to be present.
+			if usingSNI {
+				dialParams.TLSFragmentClientHello = p.WeightedCoinFlip(
+					parameters.TLSFragmentClientHelloProbability)
+			}
+		}
+	}
+
 	// Initialize/replay User-Agent header for HTTP upstream proxy and meek protocols.
 
 	if config.UseUpstreamProxy() {
@@ -1128,6 +1167,7 @@ func MakeDialParameters(
 			QUICDisablePathMTUDiscovery:   dialParams.QUICDisablePathMTUDiscovery,
 			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
+			TLSFragmentClientHello:        dialParams.TLSFragmentClientHello,
 			LegacyPassthrough:             serverEntry.ProtocolUsesLegacyPassthrough(dialParams.TunnelProtocol),
 			NoDefaultTLSSessionID:         dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
@@ -1185,6 +1225,7 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 			TLSProfile:               dialParams.TLSProfile,
 			NoDefaultTLSSessionID:    &dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed: dialParams.RandomizedTLSProfileSeed,
+			FragmentClientHello:      dialParams.TLSFragmentClientHello,
 		},
 		// Obfuscated session tickets are not used because TLS-OSSH uses TLS 1.3.
 		UseObfuscatedSessionTickets: false,
@@ -1719,4 +1760,30 @@ func makeOSSHPrefixSplitConfig(p parameters.ParametersAccessor) (*obfuscator.OSS
 		MinDelay: minDelay,
 		MaxDelay: maxDelay,
 	}, nil
+}
+
+func selectConjureTransport(
+	p parameters.ParametersAccessor) string {
+
+	limitConjureTransports := p.ConjureTransports(parameters.ConjureLimitTransports)
+
+	transports := make([]string, 0)
+
+	for _, transport := range protocol.SupportedConjureTransports {
+
+		if len(limitConjureTransports) > 0 &&
+			!common.Contains(limitConjureTransports, transport) {
+			continue
+		}
+
+		transports = append(transports, transport)
+	}
+
+	if len(transports) == 0 {
+		return ""
+	}
+
+	choice := prng.Intn(len(transports))
+
+	return transports[choice]
 }

@@ -1,12 +1,16 @@
-# git.torproject.org/pluggable-transports/goptlib.git v1.2.0
-## explicit; go 1.11
-git.torproject.org/pluggable-transports/goptlib.git
+# filippo.io/bigmod v0.0.1
+## explicit; go 1.20
+filippo.io/bigmod
+# filippo.io/keygen v0.0.0-20230306160926-5201437acf8e
+## explicit; go 1.20
+filippo.io/keygen
 # github.com/AndreasBriese/bbloom v0.0.0-20170702084017-28f7e881ca57
 ## explicit
 github.com/AndreasBriese/bbloom
-# github.com/BurntSushi/toml v0.3.1
-## explicit
+# github.com/BurntSushi/toml v1.3.2
+## explicit; go 1.16
 github.com/BurntSushi/toml
+github.com/BurntSushi/toml/internal
 # github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 ## explicit
 github.com/Psiphon-Inc/rotate-safe-writer
@@ -43,10 +47,6 @@ github.com/Psiphon-Labs/quic-go/quicvarint
 ## explicit
 github.com/Psiphon-Labs/tls-tris
 github.com/Psiphon-Labs/tls-tris/cipherhw
-# github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412
-## explicit
-github.com/agl/ed25519/edwards25519
-github.com/agl/ed25519/extra25519
 # github.com/andybalholm/brotli v1.0.5
 ## explicit; go 1.12
 github.com/andybalholm/brotli
@@ -66,8 +66,8 @@ github.com/cognusion/go-cache-lru
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
-# github.com/dchest/siphash v1.2.3-0.20201109081723-a21c2e7914a8
-## explicit
+# github.com/dchest/siphash v1.2.3
+## explicit; go 1.16
 github.com/dchest/siphash
 # github.com/deckarep/golang-set v0.0.0-20171013212420-1d4478f51bed
 ## explicit
@@ -93,7 +93,10 @@ github.com/elazarl/goproxy/ext/auth
 ## explicit; go 1.13
 github.com/florianl/go-nfqueue
 github.com/florianl/go-nfqueue/internal/unix
-# github.com/gaukas/godicttls v0.0.3
+# github.com/flynn/noise v1.0.0
+## explicit; go 1.16
+github.com/flynn/noise
+# github.com/gaukas/godicttls v0.0.4
 ## explicit; go 1.19
 github.com/gaukas/godicttls
 # github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0
@@ -114,28 +117,28 @@ github.com/gobwas/glob/util/strings
 github.com/golang/groupcache/lru
 # github.com/golang/mock v1.6.0
 ## explicit; go 1.11
-# github.com/golang/protobuf v1.5.3-0.20210916003710-5d5e8c018a13
+# github.com/golang/protobuf v1.5.3
 ## explicit; go 1.9
 github.com/golang/protobuf/proto
-# github.com/google/go-cmp v0.5.8
+# github.com/google/go-cmp v0.5.9
 ## explicit; go 1.13
 github.com/google/go-cmp/cmp
 github.com/google/go-cmp/cmp/internal/diff
 github.com/google/go-cmp/cmp/internal/flags
 github.com/google/go-cmp/cmp/internal/function
 github.com/google/go-cmp/cmp/internal/value
-# github.com/google/gopacket v1.1.19-0.20200831200443-df1bbd09a561
+# github.com/google/gopacket v1.1.19
 ## explicit; go 1.12
 github.com/google/gopacket
 github.com/google/gopacket/layers
-# github.com/google/pprof v0.0.0-20210407192527-94a9f03dee38
+# github.com/google/pprof v0.0.0-20211214055906-6f57359322fd
 ## explicit; go 1.14
 github.com/google/pprof/profile
 # github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
 ## explicit
 github.com/grafov/m3u8
-# github.com/hashicorp/golang-lru v0.0.0-20180201235237-0fb14efe8c47
-## explicit
+# github.com/hashicorp/golang-lru v1.0.2
+## explicit; go 1.12
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
 # github.com/josharian/native v1.0.0
@@ -147,7 +150,7 @@ github.com/juju/ratelimit
 # github.com/kardianos/osext v0.0.0-20170510131534-ae77be60afb1
 ## explicit
 github.com/kardianos/osext
-# github.com/klauspost/compress v1.16.6
+# github.com/klauspost/compress v1.16.7
 ## explicit; go 1.18
 github.com/klauspost/compress
 github.com/klauspost/compress/fse
@@ -156,6 +159,9 @@ github.com/klauspost/compress/internal/cpuinfo
 github.com/klauspost/compress/internal/snapref
 github.com/klauspost/compress/zstd
 github.com/klauspost/compress/zstd/internal/xxhash
+# github.com/libp2p/go-reuseport v0.4.0
+## explicit; go 1.20
+github.com/libp2p/go-reuseport
 # github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
 ## explicit
 github.com/marusama/semaphore
@@ -172,7 +178,7 @@ github.com/miekg/dns
 # github.com/mitchellh/panicwrap v0.0.0-20170106182340-fce601fe5557
 ## explicit
 github.com/mitchellh/panicwrap
-# github.com/mroth/weightedrand v0.4.1
+# github.com/mroth/weightedrand v1.0.0
 ## explicit; go 1.10
 github.com/mroth/weightedrand
 # github.com/onsi/ginkgo/v2 v2.2.0
@@ -193,12 +199,58 @@ github.com/onsi/ginkgo/v2/internal/interrupt_handler
 github.com/onsi/ginkgo/v2/internal/parallel_support
 github.com/onsi/ginkgo/v2/reporters
 github.com/onsi/ginkgo/v2/types
-# github.com/oschwald/maxminddb-golang v1.2.1-0.20170901134056-26fe5ace1c70
-## explicit
+# github.com/oschwald/maxminddb-golang v1.12.0
+## explicit; go 1.19
 github.com/oschwald/maxminddb-golang
 # github.com/patrickmn/go-cache v2.1.0+incompatible
 ## explicit
 github.com/patrickmn/go-cache
+# github.com/pelletier/go-toml v1.9.5
+## explicit; go 1.12
+github.com/pelletier/go-toml
+# github.com/pion/dtls/v2 v2.2.7 => github.com/mingyech/dtls/v2 v2.0.0
+## explicit; go 1.13
+github.com/pion/dtls/v2
+github.com/pion/dtls/v2/internal/ciphersuite
+github.com/pion/dtls/v2/internal/ciphersuite/types
+github.com/pion/dtls/v2/internal/closer
+github.com/pion/dtls/v2/internal/util
+github.com/pion/dtls/v2/pkg/crypto/ccm
+github.com/pion/dtls/v2/pkg/crypto/ciphersuite
+github.com/pion/dtls/v2/pkg/crypto/clientcertificate
+github.com/pion/dtls/v2/pkg/crypto/elliptic
+github.com/pion/dtls/v2/pkg/crypto/hash
+github.com/pion/dtls/v2/pkg/crypto/prf
+github.com/pion/dtls/v2/pkg/crypto/signature
+github.com/pion/dtls/v2/pkg/crypto/signaturehash
+github.com/pion/dtls/v2/pkg/protocol
+github.com/pion/dtls/v2/pkg/protocol/alert
+github.com/pion/dtls/v2/pkg/protocol/extension
+github.com/pion/dtls/v2/pkg/protocol/handshake
+github.com/pion/dtls/v2/pkg/protocol/recordlayer
+# github.com/pion/logging v0.2.2
+## explicit; go 1.12
+github.com/pion/logging
+# github.com/pion/randutil v0.1.0
+## explicit; go 1.14
+github.com/pion/randutil
+# github.com/pion/sctp v1.8.8
+## explicit; go 1.13
+github.com/pion/sctp
+# github.com/pion/stun v0.6.1
+## explicit; go 1.12
+github.com/pion/stun
+github.com/pion/stun/internal/hmac
+# github.com/pion/transport/v2 v2.2.3
+## explicit; go 1.12
+github.com/pion/transport/v2
+github.com/pion/transport/v2/connctx
+github.com/pion/transport/v2/deadline
+github.com/pion/transport/v2/packetio
+github.com/pion/transport/v2/replaydetector
+github.com/pion/transport/v2/stdnet
+github.com/pion/transport/v2/udp
+github.com/pion/transport/v2/utils/xor
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
@@ -208,13 +260,47 @@ github.com/pmezard/go-difflib/difflib
 # github.com/quic-go/qpack v0.4.0
 ## explicit; go 1.18
 github.com/quic-go/qpack
-# github.com/refraction-networking/gotapdance v1.2.0 => ./replace/gotapdance
-## explicit; go 1.16
-github.com/refraction-networking/gotapdance/ed25519/edwards25519
-github.com/refraction-networking/gotapdance/ed25519/extra25519
-github.com/refraction-networking/gotapdance/protobuf
+# github.com/refraction-networking/conjure v0.7.10-0.20231110193225-e4749a9dedc9
+## explicit; go 1.18
+github.com/refraction-networking/conjure/pkg/client/assets
+github.com/refraction-networking/conjure/pkg/core
+github.com/refraction-networking/conjure/pkg/core/interfaces
+github.com/refraction-networking/conjure/pkg/dtls
+github.com/refraction-networking/conjure/pkg/phantoms
+github.com/refraction-networking/conjure/pkg/registrars/decoy-registrar
+github.com/refraction-networking/conjure/pkg/registrars/dns-registrar/dns
+github.com/refraction-networking/conjure/pkg/registrars/dns-registrar/encryption
+github.com/refraction-networking/conjure/pkg/registrars/dns-registrar/msgformat
+github.com/refraction-networking/conjure/pkg/registrars/dns-registrar/queuepacketconn
+github.com/refraction-networking/conjure/pkg/registrars/dns-registrar/remotemap
+github.com/refraction-networking/conjure/pkg/registrars/dns-registrar/requester
+github.com/refraction-networking/conjure/pkg/registrars/lib
+github.com/refraction-networking/conjure/pkg/registrars/registration
+github.com/refraction-networking/conjure/pkg/station/log
+github.com/refraction-networking/conjure/pkg/transports
+github.com/refraction-networking/conjure/pkg/transports/client
+github.com/refraction-networking/conjure/pkg/transports/connecting/dtls
+github.com/refraction-networking/conjure/pkg/transports/wrapping/min
+github.com/refraction-networking/conjure/pkg/transports/wrapping/obfs4
+github.com/refraction-networking/conjure/pkg/transports/wrapping/prefix
+github.com/refraction-networking/conjure/proto
+# github.com/refraction-networking/ed25519 v0.1.2
+## explicit; go 1.20
+github.com/refraction-networking/ed25519/edwards25519
+github.com/refraction-networking/ed25519/extra25519
+# github.com/refraction-networking/gotapdance v1.7.7
+## explicit; go 1.18
 github.com/refraction-networking/gotapdance/tapdance
-github.com/refraction-networking/gotapdance/tapdance/phantoms
+# github.com/refraction-networking/obfs4 v0.1.2
+## explicit; go 1.20
+github.com/refraction-networking/obfs4/common/csrand
+github.com/refraction-networking/obfs4/common/drbg
+github.com/refraction-networking/obfs4/common/ntor
+github.com/refraction-networking/obfs4/common/probdist
+github.com/refraction-networking/obfs4/common/replayfilter
+github.com/refraction-networking/obfs4/transports/base
+github.com/refraction-networking/obfs4/transports/obfs4
+github.com/refraction-networking/obfs4/transports/obfs4/framing
 # github.com/refraction-networking/utls v1.3.3
 ## explicit; go 1.19
 github.com/refraction-networking/utls
@@ -225,11 +311,11 @@ github.com/ryanuber/go-glob
 # github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507
 ## explicit
 github.com/sergeyfrolov/bsbuffer
-# github.com/sirupsen/logrus v1.8.1
+# github.com/sirupsen/logrus v1.9.3
 ## explicit; go 1.13
 github.com/sirupsen/logrus
-# github.com/stretchr/testify v1.7.1
-## explicit; go 1.13
+# github.com/stretchr/testify v1.8.4
+## explicit; go 1.20
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require
 github.com/stretchr/testify/suite
@@ -239,19 +325,13 @@ github.com/syndtr/gocapability/capability
 # github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 ## explicit; go 1.12
 github.com/wader/filtertransport
-# gitlab.com/yawning/obfs4.git v0.0.0-20190120164510-816cff15f425 => ./replace/obfs4.git
-## explicit; go 1.19
-gitlab.com/yawning/obfs4.git/common/csrand
-gitlab.com/yawning/obfs4.git/common/drbg
-gitlab.com/yawning/obfs4.git/common/ntor
-gitlab.com/yawning/obfs4.git/common/probdist
-gitlab.com/yawning/obfs4.git/common/replayfilter
-gitlab.com/yawning/obfs4.git/transports/base
-gitlab.com/yawning/obfs4.git/transports/obfs4
-gitlab.com/yawning/obfs4.git/transports/obfs4/framing
-# golang.org/x/crypto v0.10.0
+# gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.5.0
+## explicit; go 1.11
+gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib
+# golang.org/x/crypto v0.14.0
 ## explicit; go 1.17
 golang.org/x/crypto/blake2b
+golang.org/x/crypto/blake2s
 golang.org/x/crypto/blowfish
 golang.org/x/crypto/chacha20
 golang.org/x/crypto/chacha20poly1305
@@ -273,7 +353,7 @@ golang.org/x/exp/constraints
 # golang.org/x/mod v0.8.0
 ## explicit; go 1.17
 golang.org/x/mod/semver
-# golang.org/x/net v0.11.0
+# golang.org/x/net v0.17.0
 ## explicit; go 1.17
 golang.org/x/net/bpf
 golang.org/x/net/http/httpguts
@@ -291,18 +371,17 @@ golang.org/x/net/trace
 # golang.org/x/sync v0.1.0
 ## explicit
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.9.0
+# golang.org/x/sys v0.13.0
 ## explicit; go 1.17
 golang.org/x/sys/cpu
 golang.org/x/sys/execabs
-golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.9.0
+# golang.org/x/term v0.13.0
 ## explicit; go 1.17
 golang.org/x/term
-# golang.org/x/text v0.10.0
+# golang.org/x/text v0.13.0
 ## explicit; go 1.17
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
@@ -333,7 +412,7 @@ golang.org/x/tools/internal/pkgbits
 golang.org/x/tools/internal/tokeninternal
 golang.org/x/tools/internal/typeparams
 golang.org/x/tools/internal/typesinternal
-# google.golang.org/protobuf v1.28.0
+# google.golang.org/protobuf v1.31.0
 ## explicit; go 1.11
 google.golang.org/protobuf/encoding/prototext
 google.golang.org/protobuf/encoding/protowire
@@ -362,6 +441,7 @@ google.golang.org/protobuf/reflect/protoregistry
 google.golang.org/protobuf/runtime/protoiface
 google.golang.org/protobuf/runtime/protoimpl
 google.golang.org/protobuf/types/descriptorpb
+google.golang.org/protobuf/types/known/anypb
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
@@ -401,5 +481,5 @@ honnef.co/go/tools/staticcheck
 honnef.co/go/tools/stylecheck
 honnef.co/go/tools/unused
 honnef.co/go/tools/unused/typemap
-# github.com/refraction-networking/gotapdance => ./replace/gotapdance
-# gitlab.com/yawning/obfs4.git => ./replace/obfs4.git
+# gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-20230725223418-2d2e5b4a16ba
+# github.com/pion/dtls/v2 => github.com/mingyech/dtls/v2 v2.0.0

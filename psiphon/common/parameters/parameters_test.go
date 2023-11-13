@@ -184,6 +184,11 @@ func TestGetDefaultParameters(t *testing.T) {
 					t.Fatalf("LabeledTunnelProtocols returned %+v expected %+v", g, protocols)
 				}
 			}
+		case protocol.ConjureTransports:
+			g := p.Get().ConjureTransports(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
+			}
 		default:
 			t.Fatalf("Unhandled default type: %s (%T)", name, defaults.value)
 		}

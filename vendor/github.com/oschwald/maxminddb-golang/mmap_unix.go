@@ -1,15 +1,14 @@
-// +build !windows,!appengine
+//go:build !windows && !appengine && !plan9 && !js && !wasip1 && !wasi
+// +build !windows,!appengine,!plan9,!js,!wasip1,!wasi
 
 package maxminddb
 
 import (
-	"syscall"
-
 	"golang.org/x/sys/unix"
 )
 
-func mmap(fd int, length int) (data []byte, err error) {
-	return unix.Mmap(fd, 0, length, syscall.PROT_READ, syscall.MAP_SHARED)
+func mmap(fd, length int) (data []byte, err error) {
+	return unix.Mmap(fd, 0, length, unix.PROT_READ, unix.MAP_SHARED)
 }
 
 func munmap(b []byte) (err error) {

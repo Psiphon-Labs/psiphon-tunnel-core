@@ -169,6 +169,11 @@ func RunServices(configJSON []byte) (retErr error) {
 			previousNetworkBytesReceived, previousNetworkBytesSent, err := getNetworkBytesTransferred()
 			if err != nil {
 				log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error("failed to get initial network bytes transferred")
+
+				// If getNetworkBytesTransferred fails, stop logging network
+				// bytes for the lifetime of this process, in case there's a
+				// persistent issue with /proc/net/dev data.
+
 				logNetworkBytes = false
 			}
 
@@ -184,13 +189,19 @@ func RunServices(configJSON []byte) (retErr error) {
 						if err != nil {
 							log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error("failed to get current network bytes transferred")
 							logNetworkBytes = false
+
+						} else {
+							networkBytesReceived = currentNetworkBytesReceived - previousNetworkBytesReceived
+							networkBytesSent = currentNetworkBytesSent - previousNetworkBytesSent
+
+							previousNetworkBytesReceived, previousNetworkBytesSent = currentNetworkBytesReceived, currentNetworkBytesSent
 						}
-
-						networkBytesReceived = currentNetworkBytesReceived - previousNetworkBytesReceived
-						networkBytesSent = currentNetworkBytesSent - previousNetworkBytesSent
-
-						previousNetworkBytesReceived, previousNetworkBytesSent = currentNetworkBytesReceived, currentNetworkBytesSent
 					}
+
+					// In the rare case that /proc/net/dev rx or tx counters
+					// wrap around or are reset, networkBytesReceived or
+					// networkBytesSent may be < 0. logServerLoad will not
+					// log these negative values.
 
 					logServerLoad(support, logNetworkBytes, networkBytesReceived, networkBytesSent)
 				}
@@ -393,8 +404,16 @@ func logServerLoad(support *SupportServices, logNetworkBytes bool, networkBytesR
 	serverLoad["event_name"] = "server_load"
 
 	if logNetworkBytes {
-		serverLoad["network_bytes_received"] = networkBytesReceived
-		serverLoad["network_bytes_sent"] = networkBytesSent
+
+		// Negative values, which may occur due to counter wrap arounds, are
+		// omitted.
+
+		if networkBytesReceived >= 0 {
+			serverLoad["network_bytes_received"] = networkBytesReceived
+		}
+		if networkBytesSent >= 0 {
+			serverLoad["network_bytes_sent"] = networkBytesSent
+		}
 	}
 
 	establishTunnels, establishLimitedCount :=

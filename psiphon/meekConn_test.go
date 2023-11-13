@@ -72,30 +72,35 @@ func TestMeekModePlaintextRoundTrip(t *testing.T) {
 		CustomDialer:                  dialer,
 	}
 
-	ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancelFunc()
+	for _, tlsFragmentClientHello := range []bool{false, true} {
 
-	meekConn, err := DialMeek(ctx, meekConfig, dialConfig)
-	if err != nil {
-		t.Fatalf("DialMeek failed: %v", err)
-	}
+		ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancelFunc()
 
-	client := &http.Client{
-		Transport: meekConn,
-	}
+		meekConfig.TLSFragmentClientHello = tlsFragmentClientHello
 
-	response, err := client.Get("https://" + serverAddr + "/")
-	if err != nil {
-		t.Fatalf("http.Client.Get failed: %v", err)
-	}
-	response.Body.Close()
+		meekConn, err := DialMeek(ctx, meekConfig, dialConfig)
+		if err != nil {
+			t.Fatalf("DialMeek failed: %v", err)
+		}
 
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected response code: %v", response.StatusCode)
-	}
+		client := &http.Client{
+			Transport: meekConn,
+		}
 
-	err = meekConn.Close()
-	if err != nil {
-		t.Fatalf("MeekConn.Close failed: %v", err)
+		response, err := client.Get("https://" + serverAddr + "/")
+		if err != nil {
+			t.Fatalf("http.Client.Get failed: %v", err)
+		}
+		response.Body.Close()
+
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected response code: %v", response.StatusCode)
+		}
+
+		err = meekConn.Close()
+		if err != nil {
+			t.Fatalf("MeekConn.Close failed: %v", err)
+		}
 	}
 }
