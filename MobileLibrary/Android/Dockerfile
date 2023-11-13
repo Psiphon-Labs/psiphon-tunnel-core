@@ -14,6 +14,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
+    ca-certificates-java \
     openjdk-8-jdk \
     pkg-config \
     zip \
