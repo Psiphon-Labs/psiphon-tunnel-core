@@ -246,8 +246,9 @@ func Listen(
 		tlsConfig, ietfQUICConfig := makeIETFConfig(
 			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate)
 
-		listener, err := ietf_quic.Listen(
-			obfuscatedPacketConn, tlsConfig, ietfQUICConfig)
+		tr := newIETFTransport(obfuscatedPacketConn)
+
+		listener, err := tr.Listen(tlsConfig, ietfQUICConfig)
 		if err != nil {
 			obfuscatedPacketConn.Close()
 			return nil, errors.Trace(err)
@@ -295,6 +296,17 @@ func makeIETFConfig(
 		// TODO: add jitter to keep alive period
 		KeepAlivePeriod: CLIENT_IDLE_TIMEOUT / 2,
 
+		VerifyClientHelloRandom:       verifyClientHelloRandom,
+		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
+	}
+
+	return tlsConfig, ietfQUICConfig
+}
+
+func newIETFTransport(conn net.PacketConn) *ietf_quic.Transport {
+	return &ietf_quic.Transport{
+		Conn: conn,
+
 		// The quic-go server may respond with a version negotiation packet
 		// before reaching the Initial packet processing with its
 		// anti-probing defense. This may happen even for a malformed packet.
@@ -310,12 +322,7 @@ func makeIETFConfig(
 		// the Initial/Client Hello, and then issue any required version
 		// negotiation packet.
 		DisableVersionNegotiationPackets: true,
-
-		VerifyClientHelloRandom:       verifyClientHelloRandom,
-		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
 	}
-
-	return tlsConfig, ietfQUICConfig
 }
 
 // Accept returns a net.Conn that wraps a single QUIC connection and stream.
@@ -1186,7 +1193,8 @@ func newMuxListener(
 	tlsConfig, ietfQUICConfig := makeIETFConfig(
 		conn, verifyClientHelloRandom, tlsCertificate)
 
-	il, err := ietf_quic.Listen(listener.ietfQUICConn, tlsConfig, ietfQUICConfig)
+	tr := newIETFTransport(listener.ietfQUICConn)
+	il, err := tr.Listen(tlsConfig, ietfQUICConfig)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

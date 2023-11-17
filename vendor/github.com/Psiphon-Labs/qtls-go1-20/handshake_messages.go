@@ -94,7 +94,7 @@ type clientHelloMsg struct {
 	pskModes                         []uint8
 	pskIdentities                    []pskIdentity
 	pskBinders                       [][]byte
-	additionalExtensions             []Extension
+	quicTransportParameters          []byte
 
 	// [Psiphon]
 	PRNG *prng.PRNG
@@ -257,10 +257,11 @@ func (m *clientHelloMsg) marshal() ([]byte, error) {
 			})
 		})
 	}
-	for _, ext := range m.additionalExtensions {
-		exts.AddUint16(ext.Type)
+	if m.quicTransportParameters != nil { // marshal zero-length parameters when present
+		// RFC 9001, Section 8.2
+		exts.AddUint16(extensionQUICTransportParameters)
 		exts.AddUint16LengthPrefixed(func(exts *cryptobyte.Builder) {
-			exts.AddBytes(ext.Data)
+			exts.AddBytes(m.quicTransportParameters)
 		})
 	}
 	if len(m.pskIdentities) > 0 { // pre_shared_key must be the last extension
@@ -620,18 +621,16 @@ func (m *clientHelloMsg) marshalRandomized() []byte {
 						})
 					}
 				},
-			}
 
-			for _, ext := range m.additionalExtensions {
-				extensionMarshallers = append(extensionMarshallers,
-
-					func() {
-						b.AddUint16(ext.Type)
+				func() {
+					if m.quicTransportParameters != nil { // marshal zero-length parameters when present
+						// RFC 9001, Section 8.2
+						b.AddUint16(extensionQUICTransportParameters)
 						b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
-							b.AddBytes(ext.Data)
+							b.AddBytes(m.quicTransportParameters)
 						})
-
-					})
+					}
+				},
 			}
 
 			perm = m.PRNG.Perm(len(extensionMarshallers))
@@ -933,6 +932,11 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 			if !readUint8LengthPrefixed(&extData, &m.pskModes) {
 				return false
 			}
+		case extensionQUICTransportParameters:
+			m.quicTransportParameters = make([]byte, len(extData))
+			if !extData.CopyBytes(m.quicTransportParameters) {
+				return false
+			}
 		case extensionPreSharedKey:
 			// RFC 8446, Section 4.2.11
 			if !extensions.Empty() {
@@ -964,7 +968,7 @@ func (m *clientHelloMsg) unmarshal(data []byte) bool {
 				m.pskBinders = append(m.pskBinders, binder)
 			}
 		default:
-			m.additionalExtensions = append(m.additionalExtensions, Extension{Type: extension, Data: extData})
+			// Ignore unknown extensions.
 			continue
 		}
 
@@ -1233,11 +1237,10 @@ func (m *serverHelloMsg) unmarshal(data []byte) bool {
 }
 
 type encryptedExtensionsMsg struct {
-	raw          []byte
-	alpnProtocol string
-	earlyData    bool
-
-	additionalExtensions []Extension
+	raw                     []byte
+	alpnProtocol            string
+	quicTransportParameters []byte
+	earlyData               bool
 }
 
 func (m *encryptedExtensionsMsg) marshal() ([]byte, error) {
@@ -1259,16 +1262,17 @@ func (m *encryptedExtensionsMsg) marshal() ([]byte, error) {
 					})
 				})
 			}
+			if m.quicTransportParameters != nil { // marshal zero-length parameters when present
+				// draft-ietf-quic-tls-32, Section 8.2
+				b.AddUint16(extensionQUICTransportParameters)
+				b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
+					b.AddBytes(m.quicTransportParameters)
+				})
+			}
 			if m.earlyData {
 				// RFC 8446, Section 4.2.10
 				b.AddUint16(extensionEarlyData)
 				b.AddUint16(0) // empty extension_data
-			}
-			for _, ext := range m.additionalExtensions {
-				b.AddUint16(ext.Type)
-				b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
-					b.AddBytes(ext.Data)
-				})
 			}
 		})
 	})
@@ -1289,14 +1293,14 @@ func (m *encryptedExtensionsMsg) unmarshal(data []byte) bool {
 	}
 
 	for !extensions.Empty() {
-		var ext uint16
+		var extension uint16
 		var extData cryptobyte.String
-		if !extensions.ReadUint16(&ext) ||
+		if !extensions.ReadUint16(&extension) ||
 			!extensions.ReadUint16LengthPrefixed(&extData) {
 			return false
 		}
 
-		switch ext {
+		switch extension {
 		case extensionALPN:
 			var protoList cryptobyte.String
 			if !extData.ReadUint16LengthPrefixed(&protoList) || protoList.Empty() {
@@ -1308,10 +1312,15 @@ func (m *encryptedExtensionsMsg) unmarshal(data []byte) bool {
 				return false
 			}
 			m.alpnProtocol = string(proto)
+		case extensionQUICTransportParameters:
+			m.quicTransportParameters = make([]byte, len(extData))
+			if !extData.CopyBytes(m.quicTransportParameters) {
+				return false
+			}
 		case extensionEarlyData:
 			m.earlyData = true
 		default:
-			m.additionalExtensions = append(m.additionalExtensions, Extension{Type: ext, Data: extData})
+			// Ignore unknown extensions.
 			continue
 		}
 

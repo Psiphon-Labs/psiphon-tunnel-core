@@ -20,14 +20,11 @@ github.com/Psiphon-Labs/bolt
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/qtls-go1-19 v0.0.0-20230608213623-d58aa73e519a
-## explicit; go 1.19
-github.com/Psiphon-Labs/qtls-go1-19
-# github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20230608214729-dd57d6787acf
+# github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20231117202359-5544003bda6f
 ## explicit; go 1.20
 github.com/Psiphon-Labs/qtls-go1-20
-# github.com/Psiphon-Labs/quic-go v0.0.0-20230626192210-73f29effc9da
-## explicit; go 1.19
+# github.com/Psiphon-Labs/quic-go v0.0.0-20231117205605-756d3e334a3b
+## explicit; go 1.20
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
 github.com/Psiphon-Labs/quic-go/internal/ackhandler
@@ -40,6 +37,7 @@ github.com/Psiphon-Labs/quic-go/internal/qerr
 github.com/Psiphon-Labs/quic-go/internal/qtls
 github.com/Psiphon-Labs/quic-go/internal/utils
 github.com/Psiphon-Labs/quic-go/internal/utils/linkedlist
+github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
@@ -99,7 +97,7 @@ github.com/flynn/noise
 # github.com/gaukas/godicttls v0.0.4
 ## explicit; go 1.19
 github.com/gaukas/godicttls
-# github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0
+# github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572
 ## explicit; go 1.13
 github.com/go-task/slim-sprig
 # github.com/gobwas/glob v0.2.4-0.20180402141543-f00a7392b439
@@ -115,8 +113,6 @@ github.com/gobwas/glob/util/strings
 # github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
 ## explicit
 github.com/golang/groupcache/lru
-# github.com/golang/mock v1.6.0
-## explicit; go 1.11
 # github.com/golang/protobuf v1.5.3
 ## explicit; go 1.9
 github.com/golang/protobuf/proto
@@ -147,7 +143,7 @@ github.com/josharian/native
 # github.com/juju/ratelimit v1.0.2
 ## explicit
 github.com/juju/ratelimit
-# github.com/kardianos/osext v0.0.0-20170510131534-ae77be60afb1
+# github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 ## explicit
 github.com/kardianos/osext
 # github.com/klauspost/compress v1.16.7
@@ -181,7 +177,7 @@ github.com/mitchellh/panicwrap
 # github.com/mroth/weightedrand v1.0.0
 ## explicit; go 1.10
 github.com/mroth/weightedrand
-# github.com/onsi/ginkgo/v2 v2.2.0
+# github.com/onsi/ginkgo/v2 v2.9.5
 ## explicit; go 1.18
 github.com/onsi/ginkgo/v2/config
 github.com/onsi/ginkgo/v2/formatter
@@ -346,10 +342,11 @@ golang.org/x/crypto/nacl/box
 golang.org/x/crypto/nacl/secretbox
 golang.org/x/crypto/salsa20/salsa
 golang.org/x/crypto/sha3
-# golang.org/x/exp v0.0.0-20221012211006-4de253d81b95
+# golang.org/x/exp v0.0.0-20221205204356-47842c84f3db
 ## explicit; go 1.18
 golang.org/x/exp/constraints
-# golang.org/x/mod v0.8.0
+golang.org/x/exp/rand
+# golang.org/x/mod v0.10.0
 ## explicit; go 1.17
 golang.org/x/mod/semver
 # golang.org/x/net v0.18.0
@@ -367,7 +364,7 @@ golang.org/x/net/ipv4
 golang.org/x/net/ipv6
 golang.org/x/net/proxy
 golang.org/x/net/trace
-# golang.org/x/sync v0.1.0
+# golang.org/x/sync v0.2.0
 ## explicit
 golang.org/x/sync/errgroup
 # golang.org/x/sys v0.16.0
@@ -386,7 +383,7 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# golang.org/x/tools v0.6.0
+# golang.org/x/tools v0.9.1
 ## explicit; go 1.18
 golang.org/x/tools/go/analysis
 golang.org/x/tools/go/analysis/passes/inspect
