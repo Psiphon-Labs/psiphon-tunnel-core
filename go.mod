@@ -1,6 +1,6 @@
 module github.com/Psiphon-Labs/psiphon-tunnel-core
 
-go 1.19
+go 1.20
 
 replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-20230725223418-2d2e5b4a16ba
 
