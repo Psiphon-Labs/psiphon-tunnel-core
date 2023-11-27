@@ -537,7 +537,7 @@ func makeFrontedHTTPClient(
 		// UntunneledResolveIP.
 		meekDialConfig = &DialConfig{
 			UpstreamProxyURL: dialConfig.UpstreamProxyURL,
-			CustomHeaders:    dialConfig.CustomHeaders,
+			CustomHeaders:    makeDialCustomHeaders(config, p),
 			DeviceBinder:     dialConfig.DeviceBinder,
 			IPv6Synthesizer:  dialConfig.IPv6Synthesizer,
 			ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
