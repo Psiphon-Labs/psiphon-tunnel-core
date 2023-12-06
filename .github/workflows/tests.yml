@@ -15,8 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.19.8" ]
-        test-type: [ "detector", "coverage", "memory" ]
+        go: [ "1.20.12" ]
+        test-type: [ "detector", "coverage", "memory", "custom-build-tags" ]
 
     runs-on: ${{ matrix.os }}-latest
 
@@ -140,3 +140,11 @@ jobs:
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
           go test -v ./psiphon/memory_test -run TestReconnectTunnel
           go test -v ./psiphon/memory_test -run TestRestartController
+
+      - name: Compile with custom build tags
+        if: ${{ matrix.test-type == 'custom-build-tags' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient
+          go build -a -v -tags "PSIPHON_DISABLE_QUIC"
+          go build -a -v -tags "PSIPHON_DISABLE_GQUIC"
+          go build -a -v -tags "PSIPHON_ENABLE_REFRACTION_NETWORKING"

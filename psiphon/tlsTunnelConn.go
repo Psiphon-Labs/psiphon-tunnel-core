@@ -86,6 +86,7 @@ func DialTLSTunnel(
 		RandomizedTLSProfileSeed:      tlsTunnelConfig.CustomTLSConfig.RandomizedTLSProfileSeed,
 		TLSPadding:                    tlsPadding,
 		TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+		FragmentClientHello:           tlsTunnelConfig.CustomTLSConfig.FragmentClientHello,
 	}
 	tlsConfig.EnableClientSessionCache()
 

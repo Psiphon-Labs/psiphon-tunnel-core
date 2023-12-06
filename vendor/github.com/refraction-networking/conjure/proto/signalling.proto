@@ -1,0 +1,439 @@
+syntax = "proto2";
+
+// TODO: We're using proto2 because it's the default on Ubuntu 16.04.
+// At some point we will want to migrate to proto3, but we are not
+// using any proto3 features yet.
+
+package proto;
+
+import "google/protobuf/any.proto";
+
+enum KeyType {
+    AES_GCM_128 = 90;
+    AES_GCM_256 = 91; // not supported atm
+}
+
+message PubKey {
+    // A public key, as used by the station.
+    optional bytes key = 1;
+
+    optional KeyType type = 2;
+}
+
+message TLSDecoySpec {
+    // The hostname/SNI to use for this host
+    //
+    // The hostname is the only required field, although other
+    // fields are expected to be present in most cases.
+    optional string hostname = 1;
+
+    // The 32-bit ipv4 address, in network byte order
+    //
+    // If the IPv4 address is absent, then it may be resolved via
+    // DNS by the client, or the client may discard this decoy spec
+    // if local DNS is untrusted, or the service may be multihomed.
+    optional fixed32 ipv4addr = 2;
+
+    // The 128-bit ipv6 address, in network byte order
+    optional bytes ipv6addr = 6;
+
+    // The Tapdance station public key to use when contacting this
+    // decoy
+    //
+    // If omitted, the default station public key (if any) is used.
+    optional PubKey pubkey = 3;
+
+    // The maximum duration, in milliseconds, to maintain an open
+    // connection to this decoy (because the decoy may close the
+    // connection itself after this length of time)
+    //
+    // If omitted, a default of 30,000 milliseconds is assumed.
+    optional uint32 timeout = 4;
+
+    // The maximum TCP window size to attempt to use for this decoy.
+    //
+    // If omitted, a default of 15360 is assumed.
+    //
+    // TODO: the default is based on the current heuristic of only
+    // using decoys that permit windows of 15KB or larger.  If this
+    // heuristic changes, then this default doesn't make sense.
+    optional uint32 tcpwin = 5;
+}
+
+// In version 1, the request is very simple: when
+// the client sends a MSG_PROTO to the station, if the
+// generation number is present, then this request includes
+// (in addition to whatever other operations are part of the
+// request) a request for the station to send a copy of
+// the current decoy set that has a generation number greater
+// than the generation number in its request.
+//
+// If the response contains a DecoyListUpdate with a generation number equal
+// to that which the client sent, then the client is "caught up" with
+// the station and the response contains no new information
+// (and all other fields may be omitted or empty).  Otherwise,
+// the station will send the latest configuration information,
+// along with its generation number.
+//
+// The station can also send ClientConf messages
+// (as part of Station2Client messages) whenever it wants.
+// The client is expected to react as if it had requested
+// such messages -- possibly by ignoring them, if the client
+// is already up-to-date according to the generation number.
+
+message ClientConf {
+    optional DecoyList decoy_list = 1;
+    optional uint32 generation = 2;
+    optional PubKey default_pubkey = 3;
+    optional PhantomSubnetsList phantom_subnets_list = 4;
+    optional PubKey conjure_pubkey = 5;
+    optional DnsRegConf dns_reg_conf = 6;
+}
+
+// Configuration for DNS registrar
+message DnsRegConf {
+    required DnsRegMethod dns_reg_method = 1;
+    optional string target = 2;
+    required string domain = 3;
+    optional bytes pubkey = 4;
+    optional string utls_distribution = 5;
+    optional string stun_server = 6;
+}
+
+enum DnsRegMethod {
+    UDP = 1;
+    DOT = 2;
+    DOH = 3;
+}
+
+message DecoyList {
+    repeated TLSDecoySpec tls_decoys = 1;
+}
+
+message PhantomSubnetsList{
+    repeated PhantomSubnets weighted_subnets = 1;
+}
+
+message PhantomSubnets{
+    optional uint32 weight = 1;
+    repeated string subnets = 2;
+    optional bool randomize_dst_port = 3;
+}
+
+// State transitions of the client
+enum C2S_Transition {
+    C2S_NO_CHANGE = 0;
+    C2S_SESSION_INIT = 1; // connect me to squid
+    C2S_SESSION_COVERT_INIT = 11; // connect me to provided covert
+    C2S_EXPECT_RECONNECT = 2;
+    C2S_SESSION_CLOSE = 3;
+    C2S_YIELD_UPLOAD = 4;
+    C2S_ACQUIRE_UPLOAD = 5;
+    C2S_EXPECT_UPLOADONLY_RECONN = 6;
+    C2S_ERROR = 255;
+}
+
+// State transitions of the server
+enum S2C_Transition {
+    S2C_NO_CHANGE = 0;
+    S2C_SESSION_INIT = 1; // connected to squid
+    S2C_SESSION_COVERT_INIT = 11; // connected to covert host
+    S2C_CONFIRM_RECONNECT = 2;
+    S2C_SESSION_CLOSE = 3;
+    // TODO should probably also allow EXPECT_RECONNECT here, for DittoTap
+    S2C_ERROR = 255;
+}
+
+// Should accompany all S2C_ERROR messages.
+enum ErrorReasonS2C {
+    NO_ERROR = 0;
+    COVERT_STREAM = 1; // Squid TCP connection broke
+    CLIENT_REPORTED = 2; // You told me something was wrong, client
+    CLIENT_PROTOCOL = 3; // You messed up, client (e.g. sent a bad protobuf)
+    STATION_INTERNAL = 4; // I broke
+    DECOY_OVERLOAD = 5; // Everything's fine, but don't use this decoy right now
+
+    CLIENT_STREAM = 100; // My stream to you broke. (This is impossible to send)
+    CLIENT_TIMEOUT = 101; // You never came back. (This is impossible to send)
+}
+
+enum TransportType {
+    Null = 0;
+    Min = 1;   // Send a 32-byte HMAC id to let the station distinguish registrations to same host
+    Obfs4 = 2;
+    DTLS = 3; // UDP transport: DTLS
+    Prefix = 4; // dynamic prefix transport (and updated Min)
+    uTLS = 5; // uTLS based transport
+    Format = 6; // Formatting transport - format first, format all
+    WASM = 7; // WebAssembly
+    FTE = 8; // Format transforming encryption
+    Quic = 9; // quic transport?
+    Webrtc = 99; // UDP transport: WebRTC DataChannel
+}
+
+// Deflated ICE Candidate by seed2sdp package
+message WebRTCICECandidate {
+    // IP is represented in its 16-byte form
+    required uint64 ip_upper = 1;
+    required uint64 ip_lower = 2;
+    // Composed info includes port, tcptype (unset if not tcp), candidate type (host, srflx, prflx), protocol (TCP/UDP), and component (RTP/RTCP)
+    required uint32 composed_info = 3;
+}
+
+// Deflated SDP for WebRTC by seed2sdp package
+message WebRTCSDP {
+    required uint32 type = 1;
+    repeated WebRTCICECandidate candidates = 2; // there could be multiple candidates
+}
+
+// WebRTCSignal includes a deflated SDP and a seed
+message WebRTCSignal {
+    required string seed = 1;
+    required WebRTCSDP sdp = 2;
+}
+
+message Addr {
+    optional bytes IP = 1;
+    optional uint32 Port = 2;
+}
+
+message DTLSTransportParams {
+    optional Addr src_addr4 = 1;
+    optional Addr src_addr6 = 2;
+    optional bool randomize_dst_port = 3;
+    // Unordered sets the reliability of the DTLS stream to unordered
+    optional bool unordered = 4;
+}
+
+message StationToClient {
+    // Should accompany (at least) SESSION_INIT and CONFIRM_RECONNECT.
+    optional uint32 protocol_version = 1;
+
+    // There might be a state transition. May be absent; absence should be
+    // treated identically to NO_CHANGE.
+    optional S2C_Transition state_transition = 2;
+
+    // The station can send client config info piggybacked
+    // on any message, as it sees fit
+    optional ClientConf config_info = 3;
+
+    // If state_transition == S2C_ERROR, this field is the explanation.
+    optional ErrorReasonS2C err_reason = 4;
+
+    // Signals client to stop connecting for following amount of seconds
+    optional uint32 tmp_backoff = 5;
+
+    // Sent in SESSION_INIT, identifies the station that picked up
+    optional string station_id = 6;
+
+    // Random-sized junk to defeat packet size fingerprinting.
+    optional bytes padding = 100;
+}
+
+message RegistrationFlags {
+	optional bool upload_only = 1;
+	optional bool dark_decoy = 2;
+	optional bool proxy_header = 3;
+    optional bool use_TIL = 4;
+    optional bool prescanned = 5;
+}
+
+message ClientToStation {
+    optional uint32 protocol_version = 1;
+
+    // The client reports its decoy list's version number here, which the
+    // station can use to decide whether to send an updated one. The station
+    // should always send a list if this field is set to 0.
+    optional uint32 decoy_list_generation = 2;
+
+    optional C2S_Transition state_transition = 3;
+
+    // The position in the overall session's upload sequence where the current
+    // YIELD=>ACQUIRE switchover is happening.
+    optional uint64 upload_sync = 4;
+
+    // High level client library version used for indicating feature support, or
+    // lack therof.
+    optional uint32 client_lib_version = 5;
+
+    // Indicates whether the client will allow the registrar to provide alternative parameters that
+    // may work better in substitute for the deterministically selected parameters. This only works
+    // for bidirectional registration methods where the client receives a RegistrationResponse.
+    optional bool disable_registrar_overrides = 6;
+
+    // List of decoys that client have unsuccessfully tried in current session.
+    // Could be sent in chunks
+    repeated string failed_decoys = 10;
+
+    optional SessionStats stats = 11;
+
+    // NullTransport, MinTransport, Obfs4Transport, etc. Transport type we want from phantom proxy
+    optional TransportType transport = 12;
+
+    optional google.protobuf.Any transport_params = 13;
+
+    // Station is only required to check this variable during session initialization.
+    // If set, station must facilitate connection to said target by itself, i.e. write into squid
+    // socket an HTTP/SOCKS/any other connection request.
+    // covert_address must have exactly one ':' colon, that separates host (literal IP address or
+    // resolvable hostname) and port
+    // TODO: make it required for initialization, and stop connecting any client straight to squid?
+    optional string covert_address = 20;
+
+    // Used in dark decoys to signal which dark decoy it will connect to.
+    optional string masked_decoy_server_name = 21;
+
+    // Used to indicate to server if client is registering v4, v6 or both
+    optional bool v6_support = 22;
+    optional bool v4_support = 23;
+
+    // A collection of optional flags for the registration.
+    optional RegistrationFlags flags = 24;
+
+    // Transport Extensions
+    // TODO(jmwample) - move to WebRTC specific transport params protobuf message.
+    optional WebRTCSignal webrtc_signal = 31;
+
+    // Random-sized junk to defeat packet size fingerprinting.
+    optional bytes padding = 100;
+}
+
+
+message PrefixTransportParams {
+    // Prefix Identifier
+    optional int32 prefix_id = 1;
+
+    // Prefix bytes (optional - usually sent from station to client as override if allowed by C2S)
+    // as the station cannot take this into account when attempting to identify a connection.
+    optional bytes prefix = 2;
+    optional int32 custom_flush_policy = 3;
+
+    // // potential future fields
+    // obfuscator ID
+    // tagEncoder ID (&params?, e.g. format-base64 / padding)
+    // streamEncoder ID (&params?, e.g. foramat-base64 / padding)
+
+    // Indicates whether the client has elected to use destination port randomization. Should be
+    // checked against selected transport to ensure that destination port randomization is
+    // supported.
+    optional bool randomize_dst_port = 13;
+}
+
+message GenericTransportParams {
+    // Indicates whether the client has elected to use destination port randomization. Should be
+    // checked against selected transport to ensure that destination port randomization is
+    // supported.
+    optional bool randomize_dst_port = 13;
+}
+
+enum RegistrationSource {
+  Unspecified = 0;
+	Detector = 1;
+	API = 2;
+  DetectorPrescan = 3;
+  BidirectionalAPI = 4;
+  DNS = 5;
+  BidirectionalDNS = 6;
+}
+
+message C2SWrapper {
+  optional bytes shared_secret = 1;
+  optional ClientToStation registration_payload = 3;
+  optional RegistrationSource registration_source = 4;
+
+  // client source address when receiving a registration
+  optional bytes registration_address = 6;
+
+  // Decoy address used when registering over Decoy registrar
+  optional bytes decoy_address = 7;
+
+  // The next three fields allow an independent registrar (trusted by a station w/ a zmq keypair) to
+  // share the registration overrides that it assigned to the client with the station(s).
+  // Registration Respose is here to allow a parsed object with direct access to the fields within.
+  // RegRespBytes provides a serialized verion of the Registration response so that the signature of
+  // the Bidirectional registrar can be validated before a station applies any overrides present in
+  // the Registration Response.
+  //
+  // If you are reading this in the future and you want to extend the functionality here it might
+  // make sense to make the RegistrationResponse that is sent to the client a distinct message from
+  // the one that gets sent to the stations.
+  optional RegistrationResponse registration_response = 8;
+  optional bytes RegRespBytes = 9;
+  optional bytes RegRespSignature = 10;
+
+
+}
+
+message SessionStats {
+    optional uint32 failed_decoys_amount = 20; // how many decoys were tried before success
+
+    // Timings below are in milliseconds
+
+    // Applicable to whole session:
+    optional uint32 total_time_to_connect = 31; // includes failed attempts
+
+    // Last (i.e. successful) decoy:
+    optional uint32 rtt_to_station = 33; // measured during initial handshake
+    optional uint32 tls_to_decoy = 38; // includes tcp to decoy
+    optional uint32 tcp_to_decoy = 39; // measured when establishing tcp connection to decot
+}
+
+enum StationOperations {
+    Unknown = 0;
+    New = 1;
+    Update = 2;
+    Clear = 3;
+}
+
+enum IPProto {
+    Unk = 0;
+    Tcp = 1;
+    Udp = 2;
+}
+
+message StationToDetector {
+    optional string phantom_ip = 1;
+    optional string client_ip = 2;
+
+    optional uint64 timeout_ns = 3;
+
+    optional StationOperations operation = 4;
+
+    optional uint32 dst_port = 10;
+    optional uint32 src_port = 11;
+    optional IPProto proto = 12;
+}
+
+// Adding message response from Station to Client for bidirectional API
+message RegistrationResponse {
+  optional fixed32 ipv4addr = 1;
+  // The 128-bit ipv6 address, in network byte order
+  optional bytes ipv6addr = 2;
+
+  // Respond with randomized port
+  optional uint32 dst_port = 3;
+
+  // Future: station provides client with secret, want chanel present
+  // Leave null for now
+  optional bytes serverRandom = 4;
+
+  // If registration wrong, populate this error string
+  optional string error = 5;
+
+  // ClientConf field (optional)
+  optional ClientConf clientConf = 6;
+
+  // Transport Params to if `allow_registrar_overrides` is set.
+  optional google.protobuf.Any transport_params = 10;
+
+  // PhantomsSupportPortRand is a flag that indicates whether the selected phantoms are able to
+  // handle phantom connections to randomized ports.
+  optional bool phantoms_support_port_rand = 11;
+}
+
+// response from dns
+message DnsResponse {
+    optional bool success = 1;
+    optional bool clientconf_outdated = 2;
+    optional RegistrationResponse bidirectional_response = 3;
+}

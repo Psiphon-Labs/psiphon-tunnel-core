@@ -541,7 +541,9 @@ var remoteServerListStatParams = append(
 		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"user_agent", isAnyString, requestParamOptional},
 		{"tls_profile", isAnyString, requestParamOptional},
-		{"tls_version", isAnyString, requestParamOptional}},
+		{"tls_version", isAnyString, requestParamOptional},
+		{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	},
 
 	baseSessionParams...)
 
@@ -941,6 +943,11 @@ var baseDialParams = []requestParamSpec{
 	{"conjure_cached", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"conjure_delay", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"conjure_transport", isAnyString, requestParamOptional},
+	{"conjure_prefix", isAnyString, requestParamOptional},
+	{"conjure_stun", isAnyString, requestParamOptional},
+	{"conjure_empty_packet", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"conjure_network", isAnyString, requestParamOptional},
+	{"conjure_port_number", isAnyString, requestParamOptional},
 	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"split_tunnel_regions", isRegionCode, requestParamOptional | requestParamArray},
 	{"dns_preresolved", isAnyString, requestParamOptional},
@@ -950,6 +957,10 @@ var baseDialParams = []requestParamSpec{
 	{"http_transform", isAnyString, requestParamOptional},
 	{"seed_transform", isAnyString, requestParamOptional},
 	{"ossh_prefix", isAnyString, requestParamOptional},
+	{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},
+	{"tls_ossh_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.

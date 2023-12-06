@@ -188,35 +188,49 @@ type NetworkIDGetter interface {
 	GetNetworkID() string
 }
 
-// NetDialer implements an interface that matches net.Dialer.
-// Limitation: only "tcp" Dials are supported.
-type NetDialer struct {
-	dialTCP common.Dialer
+// RefractionNetworkingDialer implements psiphon/common/refraction.Dialer.
+
+type RefractionNetworkingDialer struct {
+	config *DialConfig
 }
 
-// NewNetDialer creates a new NetDialer.
-func NewNetDialer(config *DialConfig) *NetDialer {
-	return &NetDialer{
-		dialTCP: NewTCPDialer(config),
+// NewRefractionNetworkingDialer creates a new RefractionNetworkingDialer.
+func NewRefractionNetworkingDialer(config *DialConfig) *RefractionNetworkingDialer {
+	return &RefractionNetworkingDialer{
+		config: config,
 	}
 }
 
-func (d *NetDialer) Dial(network, address string) (net.Conn, error) {
-	conn, err := d.DialContext(context.Background(), network, address)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return conn, nil
-}
+func (d *RefractionNetworkingDialer) DialContext(
+	ctx context.Context,
+	network string,
+	laddr string,
+	raddr string) (net.Conn, error) {
 
-func (d *NetDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	switch network {
-	case "tcp":
-		conn, err := d.dialTCP(ctx, "tcp", address)
+	case "tcp", "tcp4", "tcp6":
+
+		if laddr != "" {
+			return nil, errors.TraceNew("unexpected laddr for tcp dial")
+		}
+		conn, err := DialTCP(ctx, raddr, d.config)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		return conn, nil
+
+	case "udp", "udp4", "udp6":
+
+		udpConn, _, err := NewUDPConn(ctx, network, true, laddr, raddr, d.config)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		// Ensure blocked packet writes eventually timeout.
+		conn := &common.WriteTimeoutUDPConn{
+			UDPConn: udpConn,
+		}
+		return conn, nil
+
 	default:
 		return nil, errors.Tracef("unsupported network: %s", network)
 	}
@@ -367,14 +381,14 @@ func UntunneledResolveIP(
 	ctx context.Context,
 	config *Config,
 	resolver *resolver.Resolver,
-	hostname,
+	hostname string,
 	frontingProviderID string) ([]net.IP, error) {
 
 	// Limitations: for untunneled resolves, there is currently no resolve
 	// parameter replay, and no support for pre-resolved IPs.
 
 	params, err := resolver.MakeResolveParameters(
-		config.GetParameters().Get(), frontingProviderID)
+		config.GetParameters().Get(), frontingProviderID, hostname)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -400,6 +414,11 @@ func UntunneledResolveIP(
 //
 // The context is applied to underlying TCP dials. The caller is responsible
 // for applying the context to requests made with the returned http.Client.
+//
+// Warning: it is not safe to call makeFrontedHTTPClient concurrently with the
+// same dialConfig when tunneled is true because dialConfig will be used
+// directly, instead of copied, which can lead to a crash when fields not safe
+// for concurrent use are present.
 func makeFrontedHTTPClient(
 	ctx context.Context,
 	config *Config,
@@ -474,6 +493,16 @@ func makeFrontedHTTPClient(
 		networkLatencyMultiplierMax,
 		p.Float(parameters.NetworkLatencyMultiplierLambda))
 
+	tlsFragmentClientHello := false
+	if meekSNIServerName != "" {
+		tlsFragmentorLimitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
+		if len(tlsFragmentorLimitProtocols) == 0 || common.Contains(tlsFragmentorLimitProtocols, effectiveTunnelProtocol) {
+			if net.ParseIP(meekSNIServerName) == nil {
+				tlsFragmentClientHello = p.WeightedCoinFlip(parameters.TLSFragmentClientHelloProbability)
+			}
+		}
+	}
+
 	meekConfig := &MeekConfig{
 		DiagnosticID:             frontingProviderID,
 		Parameters:               config.GetParameters(),
@@ -481,6 +510,7 @@ func makeFrontedHTTPClient(
 		DialAddress:              meekDialAddress,
 		UseHTTPS:                 true,
 		TLSProfile:               tlsProfile,
+		TLSFragmentClientHello:   tlsFragmentClientHello,
 		NoDefaultTLSSessionID:    noDefaultTLSSessionID,
 		RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
 		SNIServerName:            meekSNIServerName,
@@ -603,6 +633,10 @@ func makeFrontedHTTPClient(
 
 		if tlsVersion != "" {
 			params["tls_version"] = getTLSVersionForMetrics(tlsVersion, meekConfig.NoDefaultTLSSessionID)
+		}
+
+		if meekConfig.TLSFragmentClientHello {
+			params["tls_fragmented"] = "1"
 		}
 
 		return params

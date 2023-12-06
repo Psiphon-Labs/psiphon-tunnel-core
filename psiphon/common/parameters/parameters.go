@@ -243,6 +243,7 @@ const (
 	ReplayHTTPTransformerParameters                  = "ReplayHTTPTransformerParameters"
 	ReplayOSSHSeedTransformerParameters              = "ReplayOSSHSeedTransformerParameters"
 	ReplayOSSHPrefix                                 = "ReplayOSSHPrefix"
+	ReplayTLSFragmentClientHello                     = "ReplayTLSFragmentClientHello"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -295,7 +296,13 @@ const (
 	ConjureDecoyRegistrarWidth                       = "ConjureDecoyRegistrarWidth"
 	ConjureDecoyRegistrarMinDelay                    = "ConjureDecoyRegistrarMinDelay"
 	ConjureDecoyRegistrarMaxDelay                    = "ConjureDecoyRegistrarMaxDelay"
-	ConjureTransportObfs4Probability                 = "ConjureTransportObfs4Probability"
+	ConjureEnableIPv6Dials                           = "ConjureEnableIPv6Dials"
+	ConjureEnablePortRandomization                   = "ConjureEnablePortRandomization"
+	ConjureEnableRegistrationOverrides               = "ConjureEnableRegistrationOverrides"
+	ConjureLimitTransportsProbability                = "ConjureLimitTransportsProbability"
+	ConjureLimitTransports                           = "ConjureLimitTransports"
+	ConjureSTUNServerAddresses                       = "ConjureSTUNServerAddresses"
+	ConjureDTLSEmptyInitialPacketProbability         = "ConjureDTLSEmptyInitialPacketProbability"
 	CustomHostNameRegexes                            = "CustomHostNameRegexes"
 	CustomHostNameProbability                        = "CustomHostNameProbability"
 	CustomHostNameLimitProtocols                     = "CustomHostNameLimitProtocols"
@@ -347,6 +354,8 @@ const (
 	TLSTunnelTrafficShapingProbability               = "TLSTunnelTrafficShapingProbability"
 	TLSTunnelMinTLSPadding                           = "TLSTunnelMinTLSPadding"
 	TLSTunnelMaxTLSPadding                           = "TLSTunnelMaxTLSPadding"
+	TLSFragmentClientHelloProbability                = "TLSFragmentClientHelloProbability"
+	TLSFragmentClientHelloLimitProtocols             = "TLSFragmentClientHelloLimitProtocols"
 
 	// Retired parameters
 
@@ -609,6 +618,7 @@ var defaultParameters = map[string]struct {
 	ReplayHTTPTransformerParameters:        {value: true},
 	ReplayOSSHSeedTransformerParameters:    {value: true},
 	ReplayOSSHPrefix:                       {value: true},
+	ReplayTLSFragmentClientHello:           {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -665,17 +675,22 @@ var defaultParameters = map[string]struct {
 	ConjureCachedRegistrationTTL: {value: time.Duration(0), minimum: time.Duration(0)},
 	// ConjureAPIRegistrarURL parameter is obsoleted by ConjureAPIRegistrarBidirectionalURL.
 	// TODO: remove once no longer required for older clients.
-	ConjureAPIRegistrarURL:              {value: ""},
-	ConjureAPIRegistrarBidirectionalURL: {value: ""},
-	ConjureAPIRegistrarFrontingSpecs:    {value: FrontingSpecs{}},
-	ConjureAPIRegistrarMinDelay:         {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureAPIRegistrarMaxDelay:         {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureDecoyRegistrarProbability:    {value: 0.0, minimum: 0.0},
-	ConjureDecoyRegistrarWidth:          {value: 5, minimum: 0},
-	ConjureDecoyRegistrarMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureDecoyRegistrarMaxDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-
-	ConjureTransportObfs4Probability: {value: 0.0, minimum: 0.0},
+	ConjureAPIRegistrarURL:                   {value: ""},
+	ConjureAPIRegistrarBidirectionalURL:      {value: ""},
+	ConjureAPIRegistrarFrontingSpecs:         {value: FrontingSpecs{}},
+	ConjureAPIRegistrarMinDelay:              {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureAPIRegistrarMaxDelay:              {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarProbability:         {value: 0.0, minimum: 0.0},
+	ConjureDecoyRegistrarWidth:               {value: 5, minimum: 0},
+	ConjureDecoyRegistrarMinDelay:            {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarMaxDelay:            {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureEnableIPv6Dials:                   {value: true},
+	ConjureEnablePortRandomization:           {value: true},
+	ConjureEnableRegistrationOverrides:       {value: false},
+	ConjureLimitTransportsProbability:        {value: 1.0, minimum: 0.0},
+	ConjureLimitTransports:                   {value: protocol.ConjureTransports{}},
+	ConjureSTUNServerAddresses:               {value: []string{}},
+	ConjureDTLSEmptyInitialPacketProbability: {value: 0.0, minimum: 0.0},
 
 	CustomHostNameRegexes:        {value: RegexStrings{}},
 	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},
@@ -741,6 +756,9 @@ var defaultParameters = map[string]struct {
 	TLSTunnelTrafficShapingProbability: {value: 1.0, minimum: 0.0},
 	TLSTunnelMinTLSPadding:             {value: 0, minimum: 0},
 	TLSTunnelMaxTLSPadding:             {value: 0, minimum: 0},
+
+	TLSFragmentClientHelloProbability:    {value: 0.0, minimum: 0.0},
+	TLSFragmentClientHelloLimitProtocols: {value: protocol.TunnelProtocols{}},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -1167,6 +1185,15 @@ func (p *Parameters) Set(
 						continue
 					}
 					return nil, errors.Trace(err)
+				}
+			case protocol.ConjureTransports:
+				if skipOnError {
+					newValue = v.PruneInvalid()
+				} else {
+					err := v.Validate()
+					if err != nil {
+						return nil, errors.Trace(err)
+					}
 				}
 			}
 
@@ -1683,6 +1710,35 @@ func (p ParametersAccessor) ProtocolTransformSpecs(name string) transforms.Specs
 // parameter value.
 func (p ParametersAccessor) ProtocolTransformScopedSpecNames(name string) transforms.ScopedSpecNames {
 	value := transforms.ScopedSpecNames{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// ConjureTransports returns a protocol.ConjureTransports parameter value. If
+// there is a corresponding Probability value, a weighted coin flip will be
+// performed and, depending on the result, the value or the parameter default
+// will be returned.
+func (p ParametersAccessor) ConjureTransports(name string) protocol.ConjureTransports {
+
+	probabilityName := name + "Probability"
+	_, ok := p.snapshot.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
+		if !prng.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(protocol.ConjureTransports)
+				if ok {
+					value := make(protocol.ConjureTransports, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
+			}
+		}
+	}
+
+	value := protocol.ConjureTransports{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

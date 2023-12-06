@@ -131,6 +131,9 @@ type MeekConfig struct {
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
 
+	// TLSFragmentClientHello specifies whether to fragment the TLS Client Hello.
+	TLSFragmentClientHello bool
+
 	// LegacyPassthrough indicates that the server expects a legacy passthrough
 	// message.
 	LegacyPassthrough bool
@@ -381,9 +384,7 @@ func DialMeek(
 
 		udpDialer := func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error) {
 			packetConn, remoteAddr, err := NewUDPConn(
-				ctx,
-				meekConfig.DialAddress,
-				dialConfig)
+				ctx, "udp", false, "", meekConfig.DialAddress, dialConfig)
 			if err != nil {
 				return nil, nil, errors.Trace(err)
 			}
@@ -458,6 +459,7 @@ func DialMeek(
 			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,
 			TLSPadding:                    meek.tlsPadding,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+			FragmentClientHello:           meekConfig.TLSFragmentClientHello,
 		}
 		tlsConfig.EnableClientSessionCache()
 

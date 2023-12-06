@@ -309,7 +309,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 		})
 }
 
-func TestTLSOverUnfrontedMeekHTTPSDemux(t *testing.T) {
+func TestTLSOSSHOverUnfrontedMeekHTTPSDemux(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
@@ -324,7 +324,7 @@ func TestTLSOverUnfrontedMeekHTTPSDemux(t *testing.T) {
 		})
 }
 
-func TestTLSOverUnfrontedMeekSessionTicketDemux(t *testing.T) {
+func TestTLSOSSHOverUnfrontedMeekSessionTicketDemux(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
@@ -1051,6 +1051,18 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if !runConfig.omitAuthorization {
 		clientConfig.Authorizations = []string{clientAuthorization}
+	}
+
+	// When using TLS-OSSH the test expects the server to log the fields
+	// tls_ossh_sni_server_name and tls_ossh_transformed_host_name, which are
+	// only shipped by the client when the host name is transformed.
+	if protocol.TunnelProtocolUsesTLSOSSH(clientTunnelProtocol) {
+		transformHostNameProbability := 1.0
+		clientConfig.TransformHostNameProbability = &transformHostNameProbability
+		clientConfig.CustomHostNameRegexes = []string{testCustomHostNameRegex}
+		customHostNameProbability := 1.0
+		clientConfig.CustomHostNameProbability = &customHostNameProbability
+		clientConfig.CustomHostNameLimitProtocols = []string{clientTunnelProtocol}
 	}
 
 	err = clientConfig.Commit(false)
@@ -1901,6 +1913,23 @@ func checkExpectedServerTunnelLogFields(
 			(runConfig.limitQUICVersions && quicVersion != expectQUICVersion) {
 
 			return fmt.Errorf("unexpected quic_version '%s'", fields["quic_version"])
+		}
+	}
+
+	if protocol.TunnelProtocolUsesTLSOSSH(expectedRelayProtocol) {
+		for _, name := range []string{
+			"tls_padding",
+			"tls_ossh_sni_server_name",
+			"tls_ossh_transformed_host_name",
+		} {
+			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+				return fmt.Errorf("missing expected field '%s'", name)
+			}
+		}
+
+		hostName := fields["tls_ossh_sni_server_name"].(string)
+		if regexp.MustCompile(testCustomHostNameRegex).FindString(hostName) != hostName {
+			return fmt.Errorf("unexpected tls_ossh_sni_server_name '%s'", fields["tls_ossh_sni_server_name"])
 		}
 	}
 

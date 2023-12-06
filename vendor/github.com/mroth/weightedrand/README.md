@@ -3,7 +3,7 @@
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/mroth/weightedrand)](https://pkg.go.dev/github.com/mroth/weightedrand)
 [![CodeFactor](https://www.codefactor.io/repository/github/mroth/weightedrand/badge)](https://www.codefactor.io/repository/github/mroth/weightedrand)
 [![Build Status](https://github.com/mroth/weightedrand/workflows/test/badge.svg)](https://github.com/mroth/weightedrand/actions)
-[![codecov](https://codecov.io/gh/mroth/weightedrand/branch/master/graph/badge.svg)](https://codecov.io/gh/mroth/weightedrand)
+[![codecov](https://codecov.io/gh/mroth/weightedrand/branch/main/graph/badge.svg)](https://codecov.io/gh/mroth/weightedrand)
 
 > Fast weighted random selection for Go.
 
@@ -72,12 +72,6 @@ Don't be mislead by these numbers into thinking `weightedrand` is always the
 right choice! If you are only picking from the same distribution once,
 `randutil` will be faster. `weightedrand` optimizes for repeated calls at the
 expense of some initialization time and memory storage.
-
-## Caveats
-
-Note this library utilizes `math/rand` instead of `crypto/rand`, as it is
-optimized for performance, and is not intended to be used for cryptographically
-secure requirements.
 
 ## Credits
 

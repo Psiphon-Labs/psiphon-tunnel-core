@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -308,4 +309,80 @@ func ParseDNSQuestion(request []byte) (string, error) {
 		return m.Question[0].Name, nil
 	}
 	return "", nil
+}
+
+// WriteTimeoutUDPConn sets write deadlines before each UDP packet write.
+//
+// Generally, a UDP packet write doesn't block. However, Go's
+// internal/poll.FD.WriteMsg continues to loop when syscall.SendmsgN fails
+// with EAGAIN, which indicates that an OS socket buffer is currently full;
+// in certain OS states this may cause WriteMsgUDP/etc. to block
+// indefinitely. In this scenario, we want to instead behave as if the packet
+// were dropped, so we set a write deadline which will eventually interrupt
+// any EAGAIN loop.
+type WriteTimeoutUDPConn struct {
+	*net.UDPConn
+}
+
+func (conn *WriteTimeoutUDPConn) Write(b []byte) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.UDPConn.Write(b)
+}
+
+func (conn *WriteTimeoutUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (int, int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.UDPConn.WriteMsgUDP(b, oob, addr)
+}
+
+func (conn *WriteTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.UDPConn.WriteTo(b, addr)
+}
+
+func (conn *WriteTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.UDPConn.WriteToUDP(b, addr)
+}
+
+// WriteTimeoutPacketConn is the equivilent of WriteTimeoutUDPConn for
+// non-*net.UDPConns.
+type WriteTimeoutPacketConn struct {
+	net.PacketConn
+}
+
+const UDP_PACKET_WRITE_TIMEOUT = 1 * time.Second
+
+func (conn *WriteTimeoutPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by udpConn
+	return conn.PacketConn.WriteTo(b, addr)
 }
