@@ -414,6 +414,11 @@ func UntunneledResolveIP(
 //
 // The context is applied to underlying TCP dials. The caller is responsible
 // for applying the context to requests made with the returned http.Client.
+//
+// Warning: it is not safe to call makeFrontedHTTPClient concurrently with the
+// same dialConfig when tunneled is true because dialConfig will be used
+// directly, instead of copied, which can lead to a crash when fields not safe
+// for concurrent use are present.
 func makeFrontedHTTPClient(
 	ctx context.Context,
 	config *Config,
@@ -537,7 +542,7 @@ func makeFrontedHTTPClient(
 		// UntunneledResolveIP.
 		meekDialConfig = &DialConfig{
 			UpstreamProxyURL: dialConfig.UpstreamProxyURL,
-			CustomHeaders:    dialConfig.CustomHeaders,
+			CustomHeaders:    makeDialCustomHeaders(config, p),
 			DeviceBinder:     dialConfig.DeviceBinder,
 			IPv6Synthesizer:  dialConfig.IPv6Synthesizer,
 			ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
