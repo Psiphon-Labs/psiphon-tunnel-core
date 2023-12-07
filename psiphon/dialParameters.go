@@ -428,8 +428,30 @@ func MakeDialParameters(
 	}
 
 	// Skip this candidate when the clients tactics restrict usage of the
+	// provider ID. See the corresponding server-side enforcement comments in
+	// server.TacticsListener.accept.
+	if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
+		common.Contains(
+			p.Strings(parameters.RestrictDirectProviderIDs),
+			dialParams.ServerEntry.ProviderID) {
+		if p.WeightedCoinFlip(
+			parameters.RestrictDirectProviderIDsClientProbability) {
+
+			// When skipping, return nil/nil as no error should be logged.
+			// NoticeSkipServerEntry emits each skip reason, regardless
+			// of server entry, at most once per session.
+
+			NoticeSkipServerEntry(
+				"restricted provider ID: %s",
+				dialParams.ServerEntry.ProviderID)
+
+			return nil, nil
+		}
+	}
+
+	// Skip this candidate when the clients tactics restrict usage of the
 	// fronting provider ID. See the corresponding server-side enforcement
-	// comments in server.TacticsListener.accept.
+	// comments in server.MeekServer.getSessionOrEndpoint.
 	if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
 		common.Contains(
 			p.Strings(parameters.RestrictFrontingProviderIDs),
@@ -845,6 +867,9 @@ func MakeDialParameters(
 
 	if !isReplay || !replayHoldOffTunnel {
 
+		var holdOffTunnelDuration time.Duration
+		var holdOffDirectTunnelDuration time.Duration
+
 		if common.Contains(
 			p.TunnelProtocols(parameters.HoldOffTunnelProtocols), dialParams.TunnelProtocol) ||
 
@@ -855,12 +880,32 @@ func MakeDialParameters(
 
 			if p.WeightedCoinFlip(parameters.HoldOffTunnelProbability) {
 
-				dialParams.HoldOffTunnelDuration = prng.Period(
+				holdOffTunnelDuration = prng.Period(
 					p.Duration(parameters.HoldOffTunnelMinDuration),
 					p.Duration(parameters.HoldOffTunnelMaxDuration))
 			}
 		}
 
+		if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
+			(common.Contains(
+				p.Strings(parameters.HoldOffDirectServerEntryRegions), serverEntry.Region) ||
+				common.ContainsAny(
+					p.KeyStrings(parameters.HoldOffDirectServerEntryProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region})) {
+
+			if p.WeightedCoinFlip(parameters.HoldOffDirectTunnelProbability) {
+
+				holdOffDirectTunnelDuration = prng.Period(
+					p.Duration(parameters.HoldOffDirectTunnelMinDuration),
+					p.Duration(parameters.HoldOffDirectTunnelMaxDuration))
+			}
+		}
+
+		// Use the longest hold off duration
+		if holdOffTunnelDuration >= holdOffDirectTunnelDuration {
+			dialParams.HoldOffTunnelDuration = holdOffTunnelDuration
+		} else {
+			dialParams.HoldOffTunnelDuration = holdOffDirectTunnelDuration
+		}
 	}
 
 	// OSSH prefix and seed transform are applied only to the OSSH tunnel protocol,

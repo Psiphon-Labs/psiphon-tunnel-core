@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
@@ -461,6 +462,7 @@ type Config struct {
 	periodicGarbageCollection                      time.Duration
 	stopEstablishTunnelsEstablishedClientThreshold int
 	dumpProfilesOnStopEstablishTunnelsDone         int32
+	providerID                                     string
 	frontingProviderID                             string
 	runningProtocols                               []string
 }
@@ -527,6 +529,11 @@ func (config *Config) DumpProfilesOnStopEstablishTunnels(establishedClientsCount
 func (config *Config) GetOwnEncodedServerEntry(serverEntryTag string) (string, bool) {
 	serverEntry, ok := config.OwnEncodedServerEntries[serverEntryTag]
 	return serverEntry, ok
+}
+
+// GetProviderID returns the provider ID associated with the server.
+func (config *Config) GetProviderID() string {
+	return config.providerID
 }
 
 // GetFrontingProviderID returns the fronting provider ID associated with the
@@ -715,6 +722,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if err != nil {
 			return nil, errors.Tracef(
 				"protocol.DecodeServerEntry failed: %s", err)
+		}
+		if config.providerID == "" {
+			config.providerID = serverEntry.ProviderID
+		} else if config.providerID != serverEntry.ProviderID {
+			return nil, errors.Tracef("unsupported multiple ProviderID values")
 		}
 		if config.frontingProviderID == "" {
 			config.frontingProviderID = serverEntry.FrontingProviderID
@@ -1141,6 +1153,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SshObfuscatedKey:              obfuscatedSSHKey,
 		Capabilities:                  capabilities,
 		Region:                        "US",
+		ProviderID:                    prng.HexString(8),
 		MeekServerPort:                meekPort,
 		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             meekObfuscatedKey,

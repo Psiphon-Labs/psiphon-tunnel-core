@@ -705,6 +705,10 @@ func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, liste
 				log.WithTraceFields(LogFields{"error": err}).Error("accept failed")
 				// Temporary error, keep running
 				continue
+			} else if _, ok := err.(restrictedProviderError); ok {
+				log.WithTraceFields(LogFields{"error": err}).Error("accept rejected client")
+				// Restricted provider, keep running
+				continue
 			}
 
 			select {

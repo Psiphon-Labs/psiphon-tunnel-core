@@ -189,6 +189,13 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
 			}
+		case KeyStrings:
+			for key, strings := range v {
+				g := p.Get().KeyStrings(name, key)
+				if !reflect.DeepEqual(strings, g) {
+					t.Fatalf("KeyStrings returned %+v expected %+v", g, strings)
+				}
+			}
 		default:
 			t.Fatalf("Unhandled default type: %s (%T)", name, defaults.value)
 		}

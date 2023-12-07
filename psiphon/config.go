@@ -818,6 +818,19 @@ type Config struct {
 	HoldOffTunnelFrontingProviderIDs     []string
 	HoldOffTunnelProbability             *float64
 
+	// HoldOffDirectTunnelMinDurationMilliseconds and other HoldOffDirectTunnel
+	// fields are for testing purposes.
+	HoldOffDirectTunnelMinDurationMilliseconds *int
+	HoldOffDirectTunnelMaxDurationMilliseconds *int
+	HoldOffDirectServerEntryRegions            []string
+	HoldOffDirectServerEntryProviderRegions    map[string][]string
+	HoldOffDirectTunnelProbability             *float64
+
+	// RestrictDirectProviderIDs and other RestrictDirectProviderIDs fields
+	// are for testing purposes.
+	RestrictDirectProviderIDs                  []string
+	RestrictDirectProviderIDsClientProbability *float64
+
 	// RestrictFrontingProviderIDs and other RestrictFrontingProviderIDs fields
 	// are for testing purposes.
 	RestrictFrontingProviderIDs                  []string
@@ -1927,6 +1940,34 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.HoldOffTunnelProbability] = *config.HoldOffTunnelProbability
 	}
 
+	if config.HoldOffDirectTunnelMinDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffDirectTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffDirectTunnelMinDurationMilliseconds)
+	}
+
+	if config.HoldOffDirectTunnelMaxDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffDirectTunnelMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffDirectTunnelMaxDurationMilliseconds)
+	}
+
+	if len(config.HoldOffDirectServerEntryRegions) > 0 {
+		applyParameters[parameters.HoldOffDirectServerEntryRegions] = config.HoldOffDirectServerEntryRegions
+	}
+
+	if len(config.HoldOffDirectServerEntryProviderRegions) > 0 {
+		applyParameters[parameters.HoldOffDirectServerEntryProviderRegions] = parameters.KeyStrings(config.HoldOffDirectServerEntryProviderRegions)
+	}
+
+	if config.HoldOffDirectTunnelProbability != nil {
+		applyParameters[parameters.HoldOffDirectTunnelProbability] = *config.HoldOffDirectTunnelProbability
+	}
+
+	if len(config.RestrictDirectProviderIDs) > 0 {
+		applyParameters[parameters.RestrictDirectProviderIDs] = config.RestrictDirectProviderIDs
+	}
+
+	if config.RestrictDirectProviderIDsClientProbability != nil {
+		applyParameters[parameters.RestrictDirectProviderIDsClientProbability] = *config.RestrictDirectProviderIDsClientProbability
+	}
+
 	if len(config.RestrictFrontingProviderIDs) > 0 {
 		applyParameters[parameters.RestrictFrontingProviderIDs] = config.RestrictFrontingProviderIDs
 	}
@@ -2414,9 +2455,53 @@ func (config *Config) setDialParametersHash() {
 		}
 	}
 
+	if config.HoldOffDirectTunnelProbability != nil {
+		hash.Write([]byte("HoldOffDirectTunnelProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.HoldOffDirectTunnelProbability)
+	}
+
+	if config.HoldOffDirectTunnelMinDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffDirectTunnelMinDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffDirectTunnelMinDurationMilliseconds))
+	}
+
+	if config.HoldOffDirectTunnelMaxDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffDirectTunnelMaxDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffDirectTunnelMaxDurationMilliseconds))
+	}
+
+	if len(config.HoldOffDirectServerEntryRegions) > 0 {
+		hash.Write([]byte("HoldOffDirectServerEntryRegions"))
+		for _, region := range config.HoldOffDirectServerEntryRegions {
+			hash.Write([]byte(region))
+		}
+	}
+
+	if len(config.HoldOffDirectServerEntryProviderRegions) > 0 {
+		hash.Write([]byte("HoldOffDirectServerEntryProviderRegions"))
+		for providerID, regions := range config.HoldOffDirectServerEntryProviderRegions {
+			hash.Write([]byte(providerID))
+			for _, region := range regions {
+				hash.Write([]byte(region))
+			}
+		}
+	}
+
 	if config.HoldOffTunnelProbability != nil {
 		hash.Write([]byte("HoldOffTunnelProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.HoldOffTunnelProbability)
+	}
+
+	if len(config.RestrictDirectProviderIDs) > 0 {
+		hash.Write([]byte("RestrictDirectProviderIDs"))
+		for _, providerID := range config.RestrictDirectProviderIDs {
+			hash.Write([]byte(providerID))
+		}
+	}
+
+	if config.RestrictDirectProviderIDsClientProbability != nil {
+		hash.Write([]byte("RestrictDirectProviderIDsClientProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.RestrictDirectProviderIDsClientProbability)
 	}
 
 	if len(config.RestrictFrontingProviderIDs) > 0 {
