@@ -134,14 +134,14 @@ type Config struct {
 // "TCP-flags random|<flags>"
 // flags: FSRPAUECN
 //
-// "TCP-<field> random|<base64>"
+// "TCP-<field> random|<hex>"
 // field: srcport, dstport, seq, ack, dataoffset, window, checksum, urgent
 //
-// "TCP-option-<option> random|omit|<base64>"
+// "TCP-option-<option> random|omit|<hex>"
 // option: eol, nop, mss, windowscale, sackpermitted, sack, timestamps,
 // altchecksum, altchecksumdata, md5header, usertimeout
 //
-// "TCP-payload random|<base64>"
+// "TCP-payload random|<hex>"
 //
 // For example, this Geneva strategy:
 //   [TCP:flags:SA]-duplicate(tamper{TCP:flags:replace:R},tamper{TCP:flags:replace:S})-| \/
