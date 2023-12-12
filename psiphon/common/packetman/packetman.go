@@ -222,11 +222,19 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 		transformedTCP := *interceptedTCP
 		var payload gopacket.Payload
 		setCalculatedField := false
+		fixLengths := true
+		computeChecksums := true
 
 		for _, transform := range packetTransformations {
 			transform.apply(&transformedTCP, &payload)
 			if transform.setsCalculatedField() {
 				setCalculatedField = true
+			}
+			if transform.isDataOffset() {
+				fixLengths = false
+			}
+			if transform.isChecksum() {
+				computeChecksums = false
 			}
 		}
 
@@ -237,6 +245,10 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 
 		buffer := gopacket.NewSerializeBuffer()
 		options := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+
+		//warning: first SerializeLayers call may modify transformedTCP, we must copy the TCP DataOffset and Checksum
+		tmpDataOffset := transformedTCP.DataOffset
+		tmpChecksum := transformedTCP.Checksum
 
 		gopacket.SerializeLayers(
 			buffer,
@@ -255,10 +267,12 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 		// from the first round.
 
 		if setCalculatedField {
+			transformedTCP.DataOffset = tmpDataOffset
+			transformedTCP.Checksum = tmpChecksum
 			buffer.Clear()
 			gopacket.SerializeLayers(
 				buffer,
-				gopacket.SerializeOptions{},
+				gopacket.SerializeOptions{FixLengths: fixLengths, ComputeChecksums: computeChecksums},
 				serializableNetworkLayer,
 				&transformedTCP,
 				payload)
@@ -266,13 +280,14 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 
 		packets[i] = buffer.Bytes()
 	}
-
 	return packets, nil
 }
 
 type transformation interface {
 	apply(tcp *layers.TCP, payload *gopacket.Payload)
 	setsCalculatedField() bool
+	isDataOffset() bool
+	isChecksum() bool
 }
 
 const (
@@ -392,6 +407,14 @@ func (t *transformationTCPFlags) setsCalculatedField() bool {
 	return false
 }
 
+func (t *transformationTCPFlags) isDataOffset() bool {
+	return false
+}
+
+func (t *transformationTCPFlags) isChecksum() bool {
+	return false
+}
+
 type transformationTCPField struct {
 	fieldName          string
 	transformationType int
@@ -494,6 +517,14 @@ func (t *transformationTCPField) apply(tcp *layers.TCP, _ *gopacket.Payload) {
 
 func (t *transformationTCPField) setsCalculatedField() bool {
 	return t.fieldName == tcpFieldDataOffset || t.fieldName == tcpFieldChecksum
+}
+
+func (t *transformationTCPField) isDataOffset() bool {
+	return t.fieldName == tcpFieldDataOffset
+}
+
+func (t *transformationTCPField) isChecksum() bool {
+	return t.fieldName == tcpFieldChecksum
 }
 
 type transformationTCPOption struct {
@@ -710,6 +741,14 @@ func (t *transformationTCPOption) setsCalculatedField() bool {
 	return false
 }
 
+func (t *transformationTCPOption) isDataOffset() bool {
+	return false
+}
+
+func (t *transformationTCPOption) isChecksum() bool {
+	return false
+}
+
 type transformationTCPPayload struct {
 	transformationType int
 	value              []byte
@@ -764,6 +803,14 @@ func (t *transformationTCPPayload) apply(tcp *layers.TCP, payload *gopacket.Payl
 }
 
 func (t *transformationTCPPayload) setsCalculatedField() bool {
+	return false
+}
+
+func (t *transformationTCPPayload) isDataOffset() bool {
+	return false
+}
+
+func (t *transformationTCPPayload) isChecksum() bool {
 	return false
 }
 
