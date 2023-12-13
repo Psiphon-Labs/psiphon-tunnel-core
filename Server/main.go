@@ -26,6 +26,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -247,6 +248,16 @@ func main() {
 			os.Exit(exitStatus)
 		}
 		// Else, this is the child process.
+
+		// As of Go 1.19.10, programs with Linux capabilities or setuid do not
+		// dump panic stacks by default. See:
+		// https://github.com/golang/go/commit/a7b1cd452ddc69a6606c2f35ac5786dc892e62cb.
+		// To restore panic stacks, we call SetTraceback("single"), restoring
+		// the default GOTRACKBACK value. The server program is run as a
+		// non-privileged user and with CAP_NET capabilities; neither the
+		// panic stack traces nor register dumps are expected to expose any
+		// unexpected sensitive information.
+		debug.SetTraceback("single")
 
 		err = server.RunServices(configJSON)
 		if err != nil {
