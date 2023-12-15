@@ -474,12 +474,20 @@ func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {
 		atomic.SwapInt64(&sshServer.establishLimitedCount, 0)
 }
 
+// additionalTransportData is additional data gathered at transport level,
+// such as in MeekServer at the HTTP layer, and relayed to the
+// sshServer/sshClient.
+type additionalTransportData struct {
+	overrideTunnelProtocol string
+	steeringIP             string
+}
+
 // runListener is intended to run an a goroutine; it blocks
 // running a particular listener. If an unrecoverable error
 // occurs, it will send the error to the listenerError channel.
 func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError chan<- error) {
 
-	handleClient := func(clientTunnelProtocol string, clientConn net.Conn) {
+	handleClient := func(clientConn net.Conn, transportData *additionalTransportData) {
 
 		// Note: establish tunnel limiter cannot simply stop TCP
 		// listeners in all cases (e.g., meek) since SSH tunnels can
@@ -489,17 +497,6 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 			log.WithTrace().Debug("not establishing tunnels")
 			clientConn.Close()
 			return
-		}
-
-		// tunnelProtocol is used for stats and traffic rules. In many cases, its
-		// value is unambiguously determined by the listener port. In certain cases,
-		// such as multiple fronted protocols with a single backend listener, the
-		// client's reported tunnel protocol value is used. The caller must validate
-		// clientTunnelProtocol with protocol.IsValidClientTunnelProtocol.
-
-		tunnelProtocol := sshListener.tunnelProtocol
-		if clientTunnelProtocol != "" {
-			tunnelProtocol = clientTunnelProtocol
 		}
 
 		// sshListener.tunnelProtocol indictes the tunnel protocol run by the
@@ -520,7 +517,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 		// client may dial a different port for its first hop.
 
 		// Process each client connection concurrently.
-		go sshServer.handleClient(sshListener, tunnelProtocol, clientConn)
+		go sshServer.handleClient(sshListener, clientConn, transportData)
 	}
 
 	// Note: when exiting due to a unrecoverable error, be sure
@@ -568,7 +565,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 
 // runMeekTLSOSSHDemuxListener blocks running a listener which demuxes meek and
 // TLS-OSSH connections received on the same port.
-func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener, listenerError chan<- error, handleClient func(clientTunnelProtocol string, clientConn net.Conn)) {
+func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener, listenerError chan<- error, handleClient func(clientConn net.Conn, transportData *additionalTransportData)) {
 
 	meekClassifier := protocolClassifier{
 		minBytesToMatch: 4,
@@ -687,7 +684,7 @@ func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener
 	wg.Wait()
 }
 
-func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, listenerError chan<- error, overrideTunnelProtocol string, handleClient func(clientTunnelProtocol string, clientConn net.Conn)) {
+func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, listenerError chan<- error, overrideTunnelProtocol string, handleClient func(clientConn net.Conn, transportData *additionalTransportData)) {
 	for {
 		conn, err := listener.Accept()
 
@@ -718,7 +715,14 @@ func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, liste
 			return
 		}
 
-		handleClient(overrideTunnelProtocol, conn)
+		var transportData *additionalTransportData
+		if overrideTunnelProtocol != "" {
+			transportData = &additionalTransportData{
+				overrideTunnelProtocol: overrideTunnelProtocol,
+			}
+		}
+
+		handleClient(conn, transportData)
 	}
 }
 
@@ -1370,7 +1374,19 @@ func (sshServer *sshServer) stopClients() {
 }
 
 func (sshServer *sshServer) handleClient(
-	sshListener *sshListener, tunnelProtocol string, clientConn net.Conn) {
+	sshListener *sshListener,
+	clientConn net.Conn,
+	transportData *additionalTransportData) {
+
+	// overrideTunnelProtocol sets the tunnel protocol to a value other than
+	// the listener tunnel protocol. This is used in fronted meek
+	// configuration, where a single HTTPS listener also handles fronted HTTP
+	// and QUIC traffic; and in the protocol demux case.
+
+	tunnelProtocol := sshListener.tunnelProtocol
+	if transportData != nil && transportData.overrideTunnelProtocol != "" {
+		tunnelProtocol = transportData.overrideTunnelProtocol
+	}
 
 	// Calling clientConn.RemoteAddr at this point, before any Read calls,
 	// satisfies the constraint documented in tapdance.Listen.
@@ -1507,6 +1523,7 @@ func (sshServer *sshServer) handleClient(
 		sshServer,
 		sshListener,
 		tunnelProtocol,
+		transportData,
 		serverPacketManipulation,
 		replayedServerPacketManipulation,
 		clientAddr,
@@ -1562,6 +1579,7 @@ type sshClient struct {
 	sshServer                            *sshServer
 	sshListener                          *sshListener
 	tunnelProtocol                       string
+	additionalTransportData              *additionalTransportData
 	sshConn                              ssh.Conn
 	throttledConn                        *common.ThrottledConn
 	serverPacketManipulation             string
@@ -1706,6 +1724,7 @@ type handshakeStateInfo struct {
 	authorizedAccessTypes    []string
 	upstreamBytesPerSecond   int64
 	downstreamBytesPerSecond int64
+	steeringIP               string
 }
 
 type handshakeState struct {
@@ -1805,6 +1824,7 @@ func newSshClient(
 	sshServer *sshServer,
 	sshListener *sshListener,
 	tunnelProtocol string,
+	transportData *additionalTransportData,
 	serverPacketManipulation string,
 	replayedServerPacketManipulation bool,
 	clientAddr net.Addr,
@@ -1820,6 +1840,7 @@ func newSshClient(
 		sshServer:                        sshServer,
 		sshListener:                      sshListener,
 		tunnelProtocol:                   tunnelProtocol,
+		additionalTransportData:          transportData,
 		serverPacketManipulation:         serverPacketManipulation,
 		replayedServerPacketManipulation: replayedServerPacketManipulation,
 		clientAddr:                       clientAddr,
@@ -3178,6 +3199,11 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		}
 	}
 
+	if sshClient.additionalTransportData != nil &&
+		sshClient.additionalTransportData.steeringIP != "" {
+		logFields["relayed_steering_ip"] = sshClient.additionalTransportData.steeringIP
+	}
+
 	// Retain lock when invoking LogRawFieldsWithTimestamp to block any
 	// concurrent writes to variables referenced by logFields.
 	log.LogRawFieldsWithTimestamp(logFields)
@@ -3583,12 +3609,19 @@ func (sshClient *sshClient) setHandshakeState(
 	// be applied gradually, handling mid-tunnel changes is not a priority.
 	sshClient.setDestinationBytesMetrics()
 
-	return &handshakeStateInfo{
+	info := &handshakeStateInfo{
 		activeAuthorizationIDs:   authorizationIDs,
 		authorizedAccessTypes:    authorizedAccessTypes,
 		upstreamBytesPerSecond:   upstreamBytesPerSecond,
 		downstreamBytesPerSecond: downstreamBytesPerSecond,
-	}, nil
+	}
+
+	// Relay the steering IP to the API handshake handler.
+	if sshClient.additionalTransportData != nil {
+		info.steeringIP = sshClient.additionalTransportData.steeringIP
+	}
+
+	return info, nil
 }
 
 // getHandshaked returns whether the client has completed a handshake API

@@ -600,6 +600,7 @@ type HandshakeResponse struct {
 	TacticsPayload           json.RawMessage     `json:"tactics_payload"`
 	UpstreamBytesPerSecond   int64               `json:"upstream_bytes_per_second"`
 	DownstreamBytesPerSecond int64               `json:"downstream_bytes_per_second"`
+	SteeringIP               string              `json:"steering_ip"`
 	Padding                  string              `json:"padding"`
 }
 

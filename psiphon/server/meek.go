@@ -117,7 +117,7 @@ type MeekServer struct {
 	httpClientIOTimeout             time.Duration
 	tlsConfig                       *tris.Config
 	obfuscatorSeedHistory           *obfuscator.SeedHistory
-	clientHandler                   func(clientTunnelProtocol string, clientConn net.Conn)
+	clientHandler                   func(clientConn net.Conn, data *additionalTransportData)
 	openConns                       *common.Conns
 	stopBroadcast                   <-chan struct{}
 	sessionsLock                    sync.RWMutex
@@ -138,7 +138,7 @@ func NewMeekServer(
 	listenerTunnelProtocol string,
 	listenerPort int,
 	useTLS, isFronted, useObfuscatedSessionTickets, useHTTPNormalizer bool,
-	clientHandler func(clientTunnelProtocol string, clientConn net.Conn),
+	clientHandler func(clientConn net.Conn, data *additionalTransportData),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
 	passthroughAddress := support.Config.TunnelProtocolPassthroughAddresses[listenerTunnelProtocol]
@@ -709,8 +709,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 		return "", nil, nil, "", nil, errors.TraceNew("invalid IP address")
 	}
 
-	if protocol.TunnelProtocolUsesFrontedMeek(server.listenerTunnelProtocol) &&
-		len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
+	if server.isFronted && len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
 
 		// When there are multiple header names in MeekProxyForwardedForHeaders,
 		// the first valid match is preferred. MeekProxyForwardedForHeaders should be
@@ -745,6 +744,27 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 
 	geoIPData := server.support.GeoIPService.Lookup(clientIP)
+
+	// Check for a steering IP header, which contains an alternate dial IP to
+	// be returned to the client via the secure API handshake response.
+	// Steering may be used to load balance CDN traffic.
+	//
+	// The steering IP header is added by a CDN or CDN service process. To
+	// prevent steering IP spoofing, the service process must filter out any
+	// steering IP headers injected into ingress requests.
+	//
+	// Steering IP headers must appear in the first request of a meek session
+	// in order to be recorded here and relayed to the client.
+
+	var steeringIP string
+	if server.isFronted {
+		steeringIP = request.Header.Get("X-Psiphon-Steering-Ip")
+		IP := net.ParseIP(steeringIP)
+		if IP == nil || common.IsBogon(IP) {
+			steeringIP = ""
+			log.WithTraceFields(LogFields{"steeringIP": steeringIP}).Warning("invalid steering IP")
+		}
+	}
 
 	// The session is new (or expired). Treat the cookie value as a new meek
 	// cookie, extract the payload, and create a new session.
@@ -785,29 +805,13 @@ func (server *MeekServer) getSessionOrEndpoint(
 		return "", nil, nil, "", nil, errors.Trace(err)
 	}
 
-	tunnelProtocol := server.listenerTunnelProtocol
-
-	if clientSessionData.ClientTunnelProtocol != "" {
-
-		if !protocol.IsValidClientTunnelProtocol(
-			clientSessionData.ClientTunnelProtocol,
-			server.listenerTunnelProtocol,
-			server.support.Config.GetRunningProtocols()) {
-
-			return "", nil, nil, "", nil, errors.Tracef(
-				"invalid client tunnel protocol: %s", clientSessionData.ClientTunnelProtocol)
-		}
-
-		tunnelProtocol = clientSessionData.ClientTunnelProtocol
-	}
-
 	// Any rate limit is enforced after the meek cookie is validated, so a prober
 	// without the obfuscation secret will be unable to fingerprint the server
 	// based on response time combined with the rate limit configuration. The
 	// rate limit is primarily intended to limit memory resource consumption and
 	// not the overhead incurred by cookie validation.
 
-	if server.rateLimit(clientIP, geoIPData, tunnelProtocol) {
+	if server.rateLimit(clientIP, geoIPData, server.listenerTunnelProtocol) {
 		return "", nil, nil, "", nil, errors.TraceNew("rate limit exceeded")
 	}
 
@@ -860,6 +864,28 @@ func (server *MeekServer) getSessionOrEndpoint(
 				return "", nil, nil, "", nil, errors.TraceNew("restricted fronting provider")
 			}
 		}
+	}
+
+	// The tunnel protocol name is used for stats and traffic rules. In many
+	// cases, its value is unambiguously determined by the listener port. In
+	// certain cases, such as multiple fronted protocols with a single
+	// backend listener, the client's reported tunnel protocol value is used.
+	// The caller must validate clientTunnelProtocol with
+	// protocol.IsValidClientTunnelProtocol.
+
+	var clientTunnelProtocol string
+	if clientSessionData.ClientTunnelProtocol != "" {
+
+		if !protocol.IsValidClientTunnelProtocol(
+			clientSessionData.ClientTunnelProtocol,
+			server.listenerTunnelProtocol,
+			server.support.Config.GetRunningProtocols()) {
+
+			return "", nil, nil, "", nil, errors.Tracef(
+				"invalid client tunnel protocol: %s", clientSessionData.ClientTunnelProtocol)
+		}
+
+		clientTunnelProtocol = clientSessionData.ClientTunnelProtocol
 	}
 
 	// Create a new session
@@ -919,9 +945,17 @@ func (server *MeekServer) getSessionOrEndpoint(
 	server.sessions[sessionID] = session
 	server.sessionsLock.Unlock()
 
+	var additionalData *additionalTransportData
+	if clientTunnelProtocol != "" || steeringIP != "" {
+		additionalData = &additionalTransportData{
+			overrideTunnelProtocol: clientTunnelProtocol,
+			steeringIP:             steeringIP,
+		}
+	}
+
 	// Note: from the tunnel server's perspective, this client connection
 	// will close when session.delete calls Close() on the meekConn.
-	server.clientHandler(clientSessionData.ClientTunnelProtocol, session.clientConn)
+	server.clientHandler(session.clientConn, additionalData)
 
 	return sessionID, session, underlyingConn, "", nil, nil
 }

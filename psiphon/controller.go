@@ -87,6 +87,7 @@ type Controller struct {
 	packetTunnelTransport                   *PacketTunnelTransport
 	staggerMutex                            sync.Mutex
 	resolver                                *resolver.Resolver
+	steeringIPCache                         *lrucache.Cache
 }
 
 // NewController initializes a new controller.
@@ -114,6 +115,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		p.Duration(parameters.SplitTunnelClassificationTTL)
 	splitTunnelClassificationMaxEntries :=
 		p.Int(parameters.SplitTunnelClassificationMaxEntries)
+	steeringIPCacheTTL := p.Duration(parameters.SteeringIPCacheTTL)
+	steeringIPCacheMaxEntries := p.Int(parameters.SteeringIPCacheMaxEntries)
 
 	controller = &Controller{
 		config:       config,
@@ -149,6 +152,11 @@ func NewController(config *Config) (controller *Controller, err error) {
 		// signalRestartEstablishing has a buffer of 1 to ensure sending the
 		// signal doesn't block and receiving won't miss a signal.
 		signalRestartEstablishing: make(chan struct{}, 1),
+
+		steeringIPCache: lrucache.NewWithLRU(
+			steeringIPCacheTTL,
+			1*time.Minute,
+			steeringIPCacheMaxEntries),
 	}
 
 	// Initialize untunneledDialConfig, used by untunneled dials including
@@ -234,6 +242,11 @@ func (controller *Controller) Run(ctx context.Context) {
 	controller.resolver = NewResolver(controller.config, true)
 	defer controller.resolver.Stop()
 	controller.config.SetResolver(controller.resolver)
+
+	// Maintain a cache of steering IPs to be applied to dials. A steering IP
+	// is an alternate dial IP; for example, steering IPs may be specified by
+	// a CDN service and used to load balance CDN traffic.
+	controller.steeringIPCache.Flush()
 
 	// TODO: IPv6 support
 	var listenIP string
@@ -2180,6 +2193,7 @@ loop:
 
 		dialParams, err := MakeDialParameters(
 			controller.config,
+			controller.steeringIPCache,
 			upstreamProxyErrorCallback,
 			canReplay,
 			selectProtocol,
