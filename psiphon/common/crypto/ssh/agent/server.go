@@ -20,7 +20,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 )
 
-// Server wraps an Agent and uses it to implement the agent side of
+// server wraps an Agent and uses it to implement the agent side of
 // the SSH-agent, wire protocol.
 type server struct {
 	agent Agent
@@ -208,7 +208,7 @@ func parseConstraints(constraints []byte) (lifetimeSecs uint32, confirmBeforeUse
 		case agentConstrainConfirm:
 			confirmBeforeUse = true
 			constraints = constraints[1:]
-		case agentConstrainExtension:
+		case agentConstrainExtension, agentConstrainExtensionV00:
 			var msg constrainExtensionAgentMsg
 			if err = ssh.Unmarshal(constraints, &msg); err != nil {
 				return 0, false, nil, err
