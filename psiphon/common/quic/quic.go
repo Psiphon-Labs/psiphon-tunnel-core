@@ -172,8 +172,14 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
+	// Ensure blocked packet writes eventually timeout. Note that quic-go
+	// manages read deadlines; we set only the write deadline here.
+	writeTimeoutUDPConn := &common.WriteTimeoutUDPConn{
+		UDPConn: udpConn,
+	}
+
 	obfuscatedPacketConn, err := NewServerObfuscatedPacketConn(
-		udpConn, true, false, false, obfuscationKey, seed)
+		writeTimeoutUDPConn, true, false, false, obfuscationKey, seed)
 	if err != nil {
 		udpConn.Close()
 		return nil, errors.Trace(err)
