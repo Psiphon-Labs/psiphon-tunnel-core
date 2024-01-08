@@ -15,12 +15,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -62,7 +64,7 @@ func TestRFC_Discover(t *testing.T) {
 		}`, nonce, reg, order, authz, revoke, keychange, metaTerms, metaWebsite, metaCAA)
 	}))
 	defer ts.Close()
-	c := Client{DirectoryURL: ts.URL}
+	c := &Client{DirectoryURL: ts.URL}
 	dir, err := c.Discover(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +148,7 @@ func TestRFC_postKID(t *testing.T) {
 			w.Header().Set("Location", "/account-1")
 			w.Write([]byte(`{"status":"valid"}`))
 		case "/post":
-			b, _ := ioutil.ReadAll(r.Body) // check err later in decodeJWSxxx
+			b, _ := io.ReadAll(r.Body) // check err later in decodeJWSxxx
 			head, err := decodeJWSHead(bytes.NewReader(b))
 			if err != nil {
 				t.Errorf("decodeJWSHead: %v", err)
@@ -175,8 +177,7 @@ func TestRFC_postKID(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	cl := &Client{
 		Key:          testKey,
 		DirectoryURL: ts.URL,
@@ -192,13 +193,13 @@ func TestRFC_postKID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer res.Body.Close()
-	b, _ := ioutil.ReadAll(res.Body) // don't care about err - just checking b
+	b, _ := io.ReadAll(res.Body) // don't care about err - just checking b
 	if string(b) != "pong" {
 		t.Errorf("res.Body = %q; want pong", b)
 	}
 }
 
-// acmeServer simulates a subset of RFC8555 compliant CA.
+// acmeServer simulates a subset of RFC 8555 compliant CA.
 //
 // TODO: We also have x/crypto/acme/autocert/acmetest and startACMEServerStub in autocert_test.go.
 // It feels like this acmeServer is a sweet spot between usefulness and added complexity.
@@ -232,6 +233,7 @@ func (s *acmeServer) start() {
 				"newOrder": %q,
 				"newAuthz": %q,
 				"revokeCert": %q,
+				"keyChange": %q,
 				"meta": {"termsOfService": %q}
 				}`,
 				s.url("/acme/new-nonce"),
@@ -239,6 +241,7 @@ func (s *acmeServer) start() {
 				s.url("/acme/new-order"),
 				s.url("/acme/new-authz"),
 				s.url("/acme/revoke-cert"),
+				s.url("/acme/key-change"),
 				s.url("/terms"),
 			)
 			return
@@ -293,7 +296,7 @@ func TestRFC_Register(t *testing.T) {
 			"orders": %q
 		}`, email, s.url("/accounts/1/orders"))
 
-		b, _ := ioutil.ReadAll(r.Body) // check err later in decodeJWSxxx
+		b, _ := io.ReadAll(r.Body) // check err later in decodeJWSxxx
 		head, err := decodeJWSHead(bytes.NewReader(b))
 		if err != nil {
 			t.Errorf("decodeJWSHead: %v", err)
@@ -312,8 +315,7 @@ func TestRFC_Register(t *testing.T) {
 	s.start()
 	defer s.close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	cl := &Client{
 		Key:          testKeyEC,
 		DirectoryURL: s.url("/"),
@@ -344,7 +346,7 @@ func TestRFC_Register(t *testing.T) {
 	if !didPrompt {
 		t.Error("tos prompt wasn't called")
 	}
-	if v := cl.accountKID(ctx); v != keyID(okAccount.URI) {
+	if v := cl.accountKID(ctx); v != KeyID(okAccount.URI) {
 		t.Errorf("account kid = %q; want %q", v, okAccount.URI)
 	}
 }
@@ -450,8 +452,7 @@ func TestRFC_RegisterExternalAccountBinding(t *testing.T) {
 	s.start()
 	defer s.close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 	cl := &Client{
 		Key:          testKeyEC,
 		DirectoryURL: s.url("/"),
@@ -482,7 +483,7 @@ func TestRFC_RegisterExternalAccountBinding(t *testing.T) {
 	if !didPrompt {
 		t.Error("tos prompt wasn't called")
 	}
-	if v := cl.accountKID(ctx); v != keyID(okAccount.URI) {
+	if v := cl.accountKID(ctx); v != KeyID(okAccount.URI) {
 		t.Errorf("account kid = %q; want %q", v, okAccount.URI)
 	}
 }
@@ -502,7 +503,7 @@ func TestRFC_RegisterExisting(t *testing.T) {
 	if err != ErrAccountAlreadyExists {
 		t.Errorf("err = %v; want %v", err, ErrAccountAlreadyExists)
 	}
-	kid := keyID(s.url("/accounts/1"))
+	kid := KeyID(s.url("/accounts/1"))
 	if v := cl.accountKID(context.Background()); v != kid {
 		t.Errorf("account kid = %q; want %q", v, kid)
 	}
@@ -524,7 +525,7 @@ func TestRFC_UpdateReg(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status": "valid"}`))
 
-		b, _ := ioutil.ReadAll(r.Body) // check err later in decodeJWSxxx
+		b, _ := io.ReadAll(r.Body) // check err later in decodeJWSxxx
 		head, err := decodeJWSHead(bytes.NewReader(b))
 		if err != nil {
 			t.Errorf("decodeJWSHead: %v", err)
@@ -618,6 +619,128 @@ func TestRFC_GetRegOtherError(t *testing.T) {
 	cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
 	if _, err := cl.GetReg(context.Background(), ""); err == nil || err == ErrNoAccount {
 		t.Errorf("GetReg: %v; want any other non-nil err", err)
+	}
+}
+
+func TestRFC_AccountKeyRollover(t *testing.T) {
+	s := newACMEServer()
+	s.handle("/acme/new-account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", s.url("/accounts/1"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status": "valid"}`))
+	})
+	s.handle("/acme/key-change", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	s.start()
+	defer s.close()
+
+	cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
+	if err := cl.AccountKeyRollover(context.Background(), testKeyEC384); err != nil {
+		t.Errorf("AccountKeyRollover: %v, wanted no error", err)
+	} else if cl.Key != testKeyEC384 {
+		t.Error("AccountKeyRollover did not rotate the client key")
+	}
+}
+
+func TestRFC_DeactivateReg(t *testing.T) {
+	const email = "mailto:user@example.org"
+	curStatus := StatusValid
+
+	type account struct {
+		Status    string   `json:"status"`
+		Contact   []string `json:"contact"`
+		AcceptTOS bool     `json:"termsOfServiceAgreed"`
+		Orders    string   `json:"orders"`
+	}
+
+	s := newACMEServer()
+	s.handle("/acme/new-account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", s.url("/accounts/1"))
+		w.WriteHeader(http.StatusOK) // 200 means existing account
+		json.NewEncoder(w).Encode(account{
+			Status:    curStatus,
+			Contact:   []string{email},
+			AcceptTOS: true,
+			Orders:    s.url("/accounts/1/orders"),
+		})
+
+		b, _ := io.ReadAll(r.Body) // check err later in decodeJWSxxx
+		head, err := decodeJWSHead(bytes.NewReader(b))
+		if err != nil {
+			t.Errorf("decodeJWSHead: %v", err)
+			return
+		}
+		if len(head.JWK) == 0 {
+			t.Error("head.JWK is empty")
+		}
+
+		var req struct {
+			Status       string   `json:"status"`
+			Contact      []string `json:"contact"`
+			AcceptTOS    bool     `json:"termsOfServiceAgreed"`
+			OnlyExisting bool     `json:"onlyReturnExisting"`
+		}
+		decodeJWSRequest(t, &req, bytes.NewReader(b))
+		if !req.OnlyExisting {
+			t.Errorf("req.OnlyReturnExisting = %t; want = %t", req.OnlyExisting, true)
+		}
+	})
+	s.handle("/accounts/1", func(w http.ResponseWriter, r *http.Request) {
+		if curStatus == StatusValid {
+			curStatus = StatusDeactivated
+			w.WriteHeader(http.StatusOK)
+		} else {
+			s.error(w, &wireError{
+				Status: http.StatusUnauthorized,
+				Type:   "urn:ietf:params:acme:error:unauthorized",
+			})
+		}
+		var req account
+		b, _ := io.ReadAll(r.Body) // check err later in decodeJWSxxx
+		head, err := decodeJWSHead(bytes.NewReader(b))
+		if err != nil {
+			t.Errorf("decodeJWSHead: %v", err)
+			return
+		}
+		if len(head.JWK) != 0 {
+			t.Error("head.JWK is not empty")
+		}
+		if !strings.HasSuffix(head.KID, "/accounts/1") {
+			t.Errorf("head.KID = %q; want suffix /accounts/1", head.KID)
+		}
+
+		decodeJWSRequest(t, &req, bytes.NewReader(b))
+		if req.Status != StatusDeactivated {
+			t.Errorf("req.Status = %q; want = %q", req.Status, StatusDeactivated)
+		}
+	})
+	s.start()
+	defer s.close()
+
+	cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
+	if err := cl.DeactivateReg(context.Background()); err != nil {
+		t.Errorf("DeactivateReg: %v, wanted no error", err)
+	}
+	if err := cl.DeactivateReg(context.Background()); err == nil {
+		t.Errorf("DeactivateReg: %v, wanted error for unauthorized", err)
+	}
+}
+
+func TestRF_DeactivateRegNoAccount(t *testing.T) {
+	s := newACMEServer()
+	s.handle("/acme/new-account", func(w http.ResponseWriter, r *http.Request) {
+		s.error(w, &wireError{
+			Status: http.StatusBadRequest,
+			Type:   "urn:ietf:params:acme:error:accountDoesNotExist",
+		})
+	})
+	s.start()
+	defer s.close()
+
+	cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
+	if err := cl.DeactivateReg(context.Background()); !errors.Is(err, ErrNoAccount) {
+		t.Errorf("DeactivateReg: %v, wanted ErrNoAccount", err)
 	}
 }
 
@@ -741,24 +864,13 @@ func testWaitOrderStatus(t *testing.T, okStatus string) {
 	s.start()
 	defer s.close()
 
-	var order *Order
-	var err error
-	done := make(chan struct{})
-	go func() {
-		cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
-		order, err = cl.WaitOrder(context.Background(), s.url("/orders/1"))
-		close(done)
-	}()
-	select {
-	case <-time.After(3 * time.Second):
-		t.Fatal("WaitOrder took too long to return")
-	case <-done:
-		if err != nil {
-			t.Fatalf("WaitOrder: %v", err)
-		}
-		if order.Status != okStatus {
-			t.Errorf("order.Status = %q; want %q", order.Status, okStatus)
-		}
+	cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
+	order, err := cl.WaitOrder(context.Background(), s.url("/orders/1"))
+	if err != nil {
+		t.Fatalf("WaitOrder: %v", err)
+	}
+	if order.Status != okStatus {
+		t.Errorf("order.Status = %q; want %q", order.Status, okStatus)
 	}
 }
 
@@ -783,30 +895,20 @@ func TestRFC_WaitOrderError(t *testing.T) {
 	s.start()
 	defer s.close()
 
-	var err error
-	done := make(chan struct{})
-	go func() {
-		cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
-		_, err = cl.WaitOrder(context.Background(), s.url("/orders/1"))
-		close(done)
-	}()
-	select {
-	case <-time.After(3 * time.Second):
-		t.Fatal("WaitOrder took too long to return")
-	case <-done:
-		if err == nil {
-			t.Fatal("WaitOrder returned nil error")
-		}
-		e, ok := err.(*OrderError)
-		if !ok {
-			t.Fatalf("err = %v (%T); want OrderError", err, err)
-		}
-		if e.OrderURL != s.url("/orders/1") {
-			t.Errorf("e.OrderURL = %q; want %q", e.OrderURL, s.url("/orders/1"))
-		}
-		if e.Status != StatusInvalid {
-			t.Errorf("e.Status = %q; want %q", e.Status, StatusInvalid)
-		}
+	cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
+	_, err := cl.WaitOrder(context.Background(), s.url("/orders/1"))
+	if err == nil {
+		t.Fatal("WaitOrder returned nil error")
+	}
+	e, ok := err.(*OrderError)
+	if !ok {
+		t.Fatalf("err = %v (%T); want OrderError", err, err)
+	}
+	if e.OrderURL != s.url("/orders/1") {
+		t.Errorf("e.OrderURL = %q; want %q", e.OrderURL, s.url("/orders/1"))
+	}
+	if e.Status != StatusInvalid {
+		t.Errorf("e.Status = %q; want %q", e.Status, StatusInvalid)
 	}
 }
 
@@ -846,8 +948,7 @@ func TestRFC_CreateOrderCert(t *testing.T) {
 	})
 	s.start()
 	defer s.close()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
 	cl := &Client{Key: testKeyEC, DirectoryURL: s.url("/")}
 	cert, curl, err := cl.CreateOrderCert(ctx, s.url("/pleaseissue"), csr, true)

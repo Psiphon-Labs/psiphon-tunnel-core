@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || plan9
-// +build aix darwin dragonfly freebsd linux netbsd openbsd plan9
+//go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || plan9 || solaris
 
 package test
 
@@ -14,7 +13,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -24,6 +22,7 @@ import (
 	"testing"
 	"text/template"
 
+	"golang.org/x/crypto/internal/testenv"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/testdata"
 )
@@ -35,7 +34,7 @@ Banner {{.Dir}}/banner
 HostKey {{.Dir}}/id_rsa
 HostKey {{.Dir}}/id_dsa
 HostKey {{.Dir}}/id_ecdsa
-HostCertificate {{.Dir}}/id_rsa-cert.pub
+HostCertificate {{.Dir}}/id_rsa-sha2-512-cert.pub
 Pidfile {{.Dir}}/sshd.pid
 #UsePrivilegeSeparation no
 KeyRegenerationInterval 3600
@@ -68,17 +67,13 @@ var configTmpl = map[string]*template.Template{
 
 type server struct {
 	t          *testing.T
-	cleanup    func() // executed during Shutdown
 	configfile string
-	cmd        *exec.Cmd
-	output     bytes.Buffer // holds stderr from sshd process
 
 	testUser     string // test username for sshd
 	testPasswd   string // test password for sshd
 	sshdTestPwSo string // dynamic library to inject a custom password into sshd
 
-	// Client half of the network connection.
-	clientConn net.Conn
+	lastDialConn net.Conn
 }
 
 func username() string {
@@ -151,7 +146,7 @@ func clientConfig() *ssh.ClientConfig {
 // is used for connecting the Go SSH client with sshd without opening
 // ports.
 func unixConnection() (*net.UnixConn, *net.UnixConn, error) {
-	dir, err := ioutil.TempDir("", "unixConnection")
+	dir, err := os.MkdirTemp("", "unixConnection")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -194,15 +189,15 @@ func (s *server) TryDialWithAddr(config *ssh.ClientConfig, addr string) (*ssh.Cl
 		s.t.Fatalf("unixConnection: %v", err)
 	}
 
-	s.cmd = exec.Command(sshd, "-f", s.configfile, "-i", "-e")
+	cmd := testenv.Command(s.t, sshd, "-f", s.configfile, "-i", "-e")
 	f, err := c2.File()
 	if err != nil {
 		s.t.Fatalf("UnixConn.File: %v", err)
 	}
 	defer f.Close()
-	s.cmd.Stdin = f
-	s.cmd.Stdout = f
-	s.cmd.Stderr = &s.output
+	cmd.Stdin = f
+	cmd.Stdout = f
+	cmd.Stderr = new(bytes.Buffer)
 
 	if s.sshdTestPwSo != "" {
 		if s.testUser == "" {
@@ -211,18 +206,29 @@ func (s *server) TryDialWithAddr(config *ssh.ClientConfig, addr string) (*ssh.Cl
 		if s.testPasswd == "" {
 			s.t.Fatal("password missing from sshd_test_pw.so config")
 		}
-		s.cmd.Env = append(os.Environ(),
+		cmd.Env = append(os.Environ(),
 			fmt.Sprintf("LD_PRELOAD=%s", s.sshdTestPwSo),
 			fmt.Sprintf("TEST_USER=%s", s.testUser),
 			fmt.Sprintf("TEST_PASSWD=%s", s.testPasswd))
 	}
 
-	if err := s.cmd.Start(); err != nil {
-		s.t.Fail()
-		s.Shutdown()
+	if err := cmd.Start(); err != nil {
 		s.t.Fatalf("s.cmd.Start: %v", err)
 	}
-	s.clientConn = c1
+	s.lastDialConn = c1
+	s.t.Cleanup(func() {
+		// Don't check for errors; if it fails it's most
+		// likely "os: process already finished", and we don't
+		// care about that. Use os.Interrupt, so child
+		// processes are killed too.
+		cmd.Process.Signal(os.Interrupt)
+		cmd.Wait()
+		if s.t.Failed() {
+			// log any output from sshd process
+			s.t.Logf("sshd:\n%s", cmd.Stderr)
+		}
+	})
+
 	conn, chans, reqs, err := ssh.NewClientConn(c1, addr, config)
 	if err != nil {
 		return nil, err
@@ -233,27 +239,9 @@ func (s *server) TryDialWithAddr(config *ssh.ClientConfig, addr string) (*ssh.Cl
 func (s *server) Dial(config *ssh.ClientConfig) *ssh.Client {
 	conn, err := s.TryDial(config)
 	if err != nil {
-		s.t.Fail()
-		s.Shutdown()
 		s.t.Fatalf("ssh.Client: %v", err)
 	}
 	return conn
-}
-
-func (s *server) Shutdown() {
-	if s.cmd != nil && s.cmd.Process != nil {
-		// Don't check for errors; if it fails it's most
-		// likely "os: process already finished", and we don't
-		// care about that. Use os.Interrupt, so child
-		// processes are killed too.
-		s.cmd.Process.Signal(os.Interrupt)
-		s.cmd.Wait()
-	}
-	if s.t.Failed() {
-		// log any output from sshd process
-		s.t.Logf("sshd: %s", s.output.String())
-	}
-	s.cleanup()
 }
 
 func writeFile(path string, contents []byte) {
@@ -316,7 +304,7 @@ func newServerForConfig(t *testing.T, config string, configVars map[string]strin
 	if uname == "root" {
 		t.Skip("skipping test because current user is root")
 	}
-	dir, err := ioutil.TempDir("", "sshtest")
+	dir, err := os.MkdirTemp("", "sshtest")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,20 +340,20 @@ func newServerForConfig(t *testing.T, config string, configVars map[string]strin
 		authkeys.Write(ssh.MarshalAuthorizedKey(testPublicKeys[k]))
 	}
 	writeFile(filepath.Join(dir, "authorized_keys"), authkeys.Bytes())
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Error(err)
+		}
+	})
 
 	return &server{
 		t:          t,
 		configfile: f.Name(),
-		cleanup: func() {
-			if err := os.RemoveAll(dir); err != nil {
-				t.Error(err)
-			}
-		},
 	}
 }
 
 func newTempSocket(t *testing.T) (string, func()) {
-	dir, err := ioutil.TempDir("", "socket")
+	dir, err := os.MkdirTemp("", "socket")
 	if err != nil {
 		t.Fatal(err)
 	}

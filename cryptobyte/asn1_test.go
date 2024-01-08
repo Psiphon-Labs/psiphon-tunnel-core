@@ -115,6 +115,28 @@ func TestReadASN1OptionalInteger(t *testing.T) {
 	}
 }
 
+const defaultBool = false
+
+var optionalBoolTestData = []readASN1Test{
+	{"empty", []byte{}, 0xa0, true, false},
+	{"invalid", []byte{0xa1, 0x3, 0x1, 0x2, 0x7f}, 0xa1, false, defaultBool},
+	{"missing", []byte{0xa1, 0x3, 0x1, 0x1, 0x7f}, 0xa0, true, defaultBool},
+	{"present", []byte{0xa1, 0x3, 0x1, 0x1, 0xff}, 0xa1, true, true},
+}
+
+func TestReadASN1OptionalBoolean(t *testing.T) {
+	for _, test := range optionalBoolTestData {
+		t.Run(test.name, func(t *testing.T) {
+			in := String(test.in)
+			var out bool
+			ok := in.ReadOptionalASN1Boolean(&out, test.tag, defaultBool)
+			if ok != test.ok || ok && out != test.out.(bool) {
+				t.Errorf("in.ReadOptionalASN1Boolean() = %v, want %v; out = %v, want %v", ok, test.ok, out, test.out)
+			}
+		})
+	}
+}
+
 func TestReadASN1IntegerSigned(t *testing.T) {
 	testData64 := []struct {
 		in  []byte
@@ -150,6 +172,32 @@ func TestReadASN1IntegerSigned(t *testing.T) {
 			ok := in.ReadASN1Integer(&out)
 			if !ok || out.Int64() != test.out {
 				t.Errorf("#%d: in.ReadASN1Integer() = %v, want true; out = %d, want %d", i, ok, out.Int64(), test.out)
+			}
+		}
+	})
+
+	// Repeat the same cases, reading into a []byte.
+	t.Run("bytes", func(t *testing.T) {
+		for i, test := range testData64 {
+			in := String(test.in)
+			var out []byte
+			ok := in.ReadASN1Integer(&out)
+			if test.out < 0 {
+				if ok {
+					t.Errorf("#%d: in.ReadASN1Integer(%d) = %v, want false", i, test.out, ok)
+				}
+				continue
+			}
+			if !ok {
+				t.Errorf("#%d: in.ReadASN1Integer() = %v, want true", i, ok)
+				continue
+			}
+			n := new(big.Int).SetBytes(out).Int64()
+			if n != test.out {
+				t.Errorf("#%d: in.ReadASN1Integer() = %v, want true; out = %x, want %d", i, ok, out, test.out)
+			}
+			if out[0] == 0 && len(out) > 1 {
+				t.Errorf("#%d: in.ReadASN1Integer() = %v; out = %x, has leading zeroes", i, ok, out)
 			}
 		}
 	})
@@ -247,6 +295,10 @@ func TestASN1ObjectIdentifier(t *testing.T) {
 		{[]byte{6, 4, 85, 0x02, 0xc0, 0x00}, true, []int{2, 5, 2, 0x2000}},
 		{[]byte{6, 3, 0x81, 0x34, 0x03}, true, []int{2, 100, 3}},
 		{[]byte{6, 7, 85, 0x02, 0xc0, 0x80, 0x80, 0x80, 0x80}, false, []int{}},
+		{[]byte{6, 7, 85, 0x02, 0x85, 0xc7, 0xcc, 0xfb, 0x01}, true, []int{2, 5, 2, 1492336001}},
+		{[]byte{6, 7, 0x55, 0x02, 0x87, 0xff, 0xff, 0xff, 0x7f}, true, []int{2, 5, 2, 2147483647}}, // 2**31-1
+		{[]byte{6, 7, 0x55, 0x02, 0x88, 0x80, 0x80, 0x80, 0x00}, false, []int{}},                   // 2**31
+		{[]byte{6, 3, 85, 0x80, 0x02}, false, []int{}},                                             // leading 0x80 octet
 	}
 
 	for i, test := range testData {

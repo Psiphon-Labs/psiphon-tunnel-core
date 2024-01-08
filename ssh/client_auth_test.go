@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -104,11 +105,61 @@ func tryAuthBothSides(t *testing.T, config *ClientConfig, gssAPIWithMICConfig *G
 	return err, serverAuthErrors
 }
 
+type loggingAlgorithmSigner struct {
+	used []string
+	AlgorithmSigner
+}
+
+func (l *loggingAlgorithmSigner) Sign(rand io.Reader, data []byte) (*Signature, error) {
+	l.used = append(l.used, "[Sign]")
+	return l.AlgorithmSigner.Sign(rand, data)
+}
+
+func (l *loggingAlgorithmSigner) SignWithAlgorithm(rand io.Reader, data []byte, algorithm string) (*Signature, error) {
+	l.used = append(l.used, algorithm)
+	return l.AlgorithmSigner.SignWithAlgorithm(rand, data, algorithm)
+}
+
 func TestClientAuthPublicKey(t *testing.T) {
+	signer := &loggingAlgorithmSigner{AlgorithmSigner: testSigners["rsa"].(AlgorithmSigner)}
 	config := &ClientConfig{
 		User: "testuser",
 		Auth: []AuthMethod{
-			PublicKeys(testSigners["rsa"]),
+			PublicKeys(signer),
+		},
+		HostKeyCallback: InsecureIgnoreHostKey(),
+	}
+	if err := tryAuth(t, config); err != nil {
+		t.Fatalf("unable to dial remote side: %s", err)
+	}
+	if len(signer.used) != 1 || signer.used[0] != KeyAlgoRSASHA256 {
+		t.Errorf("unexpected Sign/SignWithAlgorithm calls: %q", signer.used)
+	}
+}
+
+// TestClientAuthNoSHA2 tests a ssh-rsa Signer that doesn't implement AlgorithmSigner.
+func TestClientAuthNoSHA2(t *testing.T) {
+	config := &ClientConfig{
+		User: "testuser",
+		Auth: []AuthMethod{
+			PublicKeys(&legacyRSASigner{testSigners["rsa"]}),
+		},
+		HostKeyCallback: InsecureIgnoreHostKey(),
+	}
+	if err := tryAuth(t, config); err != nil {
+		t.Fatalf("unable to dial remote side: %s", err)
+	}
+}
+
+// TestClientAuthThirdKey checks that the third configured can succeed. If we
+// were to do three attempts for each key (rsa-sha2-256, rsa-sha2-512, ssh-rsa),
+// we'd hit the six maximum attempts before reaching it.
+func TestClientAuthThirdKey(t *testing.T) {
+	config := &ClientConfig{
+		User: "testuser",
+		Auth: []AuthMethod{
+			PublicKeys(testSigners["rsa-openssh-format"],
+				testSigners["rsa-openssh-format"], testSigners["rsa"]),
 		},
 		HostKeyCallback: InsecureIgnoreHostKey(),
 	}
@@ -639,7 +690,15 @@ func TestClientAuthMaxAuthTriesPublicKey(t *testing.T) {
 	if err := tryAuth(t, invalidConfig); err == nil {
 		t.Fatalf("client: got no error, want %s", expectedErr)
 	} else if err.Error() != expectedErr.Error() {
-		t.Fatalf("client: got %s, want %s", err, expectedErr)
+		// On Windows we can see a WSAECONNABORTED error
+		// if the client writes another authentication request
+		// before the client goroutine reads the disconnection
+		// message.  See issue 50805.
+		if runtime.GOOS == "windows" && strings.Contains(err.Error(), "wsarecv: An established connection was aborted") {
+			// OK.
+		} else {
+			t.Fatalf("client: got %s, want %s", err, expectedErr)
+		}
 	}
 }
 
@@ -894,5 +953,332 @@ func TestAuthMethodGSSAPIWithMIC(t *testing.T) {
 				t.Errorf("server got error %q, want substring %q, case %d", errStrings, c.serverWantErr, i)
 			}
 		}
+	}
+}
+
+func TestCompatibleAlgoAndSignatures(t *testing.T) {
+	type testcase struct {
+		algo       string
+		sigFormat  string
+		compatible bool
+	}
+	testcases := []*testcase{
+		{
+			KeyAlgoRSA,
+			KeyAlgoRSA,
+			true,
+		},
+		{
+			KeyAlgoRSA,
+			KeyAlgoRSASHA256,
+			true,
+		},
+		{
+			KeyAlgoRSA,
+			KeyAlgoRSASHA512,
+			true,
+		},
+		{
+			KeyAlgoRSASHA256,
+			KeyAlgoRSA,
+			true,
+		},
+		{
+			KeyAlgoRSASHA512,
+			KeyAlgoRSA,
+			true,
+		},
+		{
+			KeyAlgoRSASHA512,
+			KeyAlgoRSASHA256,
+			true,
+		},
+		{
+			KeyAlgoRSASHA256,
+			KeyAlgoRSASHA512,
+			true,
+		},
+		{
+			KeyAlgoRSASHA512,
+			KeyAlgoRSASHA512,
+			true,
+		},
+		{
+			CertAlgoRSAv01,
+			KeyAlgoRSA,
+			true,
+		},
+		{
+			CertAlgoRSAv01,
+			KeyAlgoRSASHA256,
+			true,
+		},
+		{
+			CertAlgoRSAv01,
+			KeyAlgoRSASHA512,
+			true,
+		},
+		{
+			CertAlgoRSASHA256v01,
+			KeyAlgoRSASHA512,
+			true,
+		},
+		{
+			CertAlgoRSASHA512v01,
+			KeyAlgoRSASHA512,
+			true,
+		},
+		{
+			CertAlgoRSASHA512v01,
+			KeyAlgoRSASHA256,
+			true,
+		},
+		{
+			CertAlgoRSASHA256v01,
+			CertAlgoRSAv01,
+			true,
+		},
+		{
+			CertAlgoRSAv01,
+			CertAlgoRSASHA512v01,
+			true,
+		},
+		{
+			KeyAlgoECDSA256,
+			KeyAlgoRSA,
+			false,
+		},
+		{
+			KeyAlgoECDSA256,
+			KeyAlgoECDSA521,
+			false,
+		},
+		{
+			KeyAlgoECDSA256,
+			KeyAlgoECDSA256,
+			true,
+		},
+		{
+			KeyAlgoECDSA256,
+			KeyAlgoED25519,
+			false,
+		},
+		{
+			KeyAlgoED25519,
+			KeyAlgoED25519,
+			true,
+		},
+	}
+
+	for _, c := range testcases {
+		if isAlgoCompatible(c.algo, c.sigFormat) != c.compatible {
+			t.Errorf("algorithm %q, signature format %q, expected compatible to be %t", c.algo, c.sigFormat, c.compatible)
+		}
+	}
+}
+
+func TestPickSignatureAlgorithm(t *testing.T) {
+	type testcase struct {
+		name       string
+		extensions map[string][]byte
+	}
+	cases := []testcase{
+		{
+			name: "server with empty server-sig-algs",
+			extensions: map[string][]byte{
+				"server-sig-algs": []byte(``),
+			},
+		},
+		{
+			name:       "server with no server-sig-algs",
+			extensions: nil,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			signer, ok := testSigners["rsa"].(MultiAlgorithmSigner)
+			if !ok {
+				t.Fatalf("rsa test signer does not implement the MultiAlgorithmSigner interface")
+			}
+			// The signer supports the public key algorithm which is then returned.
+			_, algo, err := pickSignatureAlgorithm(signer, c.extensions)
+			if err != nil {
+				t.Fatalf("got %v, want no error", err)
+			}
+			if algo != signer.PublicKey().Type() {
+				t.Fatalf("got algo %q, want %q", algo, signer.PublicKey().Type())
+			}
+			// Test a signer that uses a certificate algorithm as the public key
+			// type.
+			cert := &Certificate{
+				CertType: UserCert,
+				Key:      signer.PublicKey(),
+			}
+			cert.SignCert(rand.Reader, signer)
+
+			certSigner, err := NewCertSigner(cert, signer)
+			if err != nil {
+				t.Fatalf("error generating cert signer: %v", err)
+			}
+			// The signer supports the public key algorithm and the
+			// public key format is a certificate type so the cerificate
+			// algorithm matching the key format must be returned
+			_, algo, err = pickSignatureAlgorithm(certSigner, c.extensions)
+			if err != nil {
+				t.Fatalf("got %v, want no error", err)
+			}
+			if algo != certSigner.PublicKey().Type() {
+				t.Fatalf("got algo %q, want %q", algo, certSigner.PublicKey().Type())
+			}
+			signer, err = NewSignerWithAlgorithms(signer.(AlgorithmSigner), []string{KeyAlgoRSASHA512, KeyAlgoRSASHA256})
+			if err != nil {
+				t.Fatalf("unable to create signer with algorithms: %v", err)
+			}
+			// The signer does not support the public key algorithm so an error
+			// is returned.
+			_, _, err = pickSignatureAlgorithm(signer, c.extensions)
+			if err == nil {
+				t.Fatal("got no error, no common public key signature algorithm error expected")
+			}
+		})
+	}
+}
+
+// configurablePublicKeyCallback is a public key callback that allows to
+// configure the signature algorithm and format. This way we can emulate the
+// behavior of buggy clients.
+type configurablePublicKeyCallback struct {
+	signer          AlgorithmSigner
+	signatureAlgo   string
+	signatureFormat string
+}
+
+func (cb configurablePublicKeyCallback) method() string {
+	return "publickey"
+}
+
+func (cb configurablePublicKeyCallback) auth(session []byte, user string, c packetConn, rand io.Reader, extensions map[string][]byte) (authResult, []string, error) {
+	pub := cb.signer.PublicKey()
+
+	ok, err := validateKey(pub, cb.signatureAlgo, user, c)
+	if err != nil {
+		return authFailure, nil, err
+	}
+	if !ok {
+		return authFailure, nil, fmt.Errorf("invalid public key")
+	}
+
+	pubKey := pub.Marshal()
+	data := buildDataSignedForAuth(session, userAuthRequestMsg{
+		User:    user,
+		Service: serviceSSH,
+		Method:  cb.method(),
+	}, cb.signatureAlgo, pubKey)
+	sign, err := cb.signer.SignWithAlgorithm(rand, data, underlyingAlgo(cb.signatureFormat))
+	if err != nil {
+		return authFailure, nil, err
+	}
+
+	s := Marshal(sign)
+	sig := make([]byte, stringLength(len(s)))
+	marshalString(sig, s)
+	msg := publickeyAuthMsg{
+		User:     user,
+		Service:  serviceSSH,
+		Method:   cb.method(),
+		HasSig:   true,
+		Algoname: cb.signatureAlgo,
+		PubKey:   pubKey,
+		Sig:      sig,
+	}
+	p := Marshal(&msg)
+	if err := c.writePacket(p); err != nil {
+		return authFailure, nil, err
+	}
+	var success authResult
+	success, methods, err := handleAuthResponse(c)
+	if err != nil {
+		return authFailure, nil, err
+	}
+	if success == authSuccess || !contains(methods, cb.method()) {
+		return success, methods, err
+	}
+
+	return authFailure, methods, nil
+}
+
+func TestPublicKeyAndAlgoCompatibility(t *testing.T) {
+	cert := &Certificate{
+		Key:         testPublicKeys["rsa"],
+		ValidBefore: CertTimeInfinity,
+		CertType:    UserCert,
+	}
+	cert.SignCert(rand.Reader, testSigners["ecdsa"])
+	certSigner, err := NewCertSigner(cert, testSigners["rsa"])
+	if err != nil {
+		t.Fatalf("NewCertSigner: %v", err)
+	}
+
+	clientConfig := &ClientConfig{
+		User:            "user",
+		HostKeyCallback: InsecureIgnoreHostKey(),
+		Auth: []AuthMethod{
+			configurablePublicKeyCallback{
+				signer:          certSigner.(AlgorithmSigner),
+				signatureAlgo:   KeyAlgoRSASHA256,
+				signatureFormat: KeyAlgoRSASHA256,
+			},
+		},
+	}
+	if err := tryAuth(t, clientConfig); err == nil {
+		t.Error("cert login passed with incompatible public key type and algorithm")
+	}
+}
+
+func TestClientAuthGPGAgentCompat(t *testing.T) {
+	clientConfig := &ClientConfig{
+		User:            "testuser",
+		HostKeyCallback: InsecureIgnoreHostKey(),
+		Auth: []AuthMethod{
+			// algorithm rsa-sha2-512 and signature format ssh-rsa.
+			configurablePublicKeyCallback{
+				signer:          testSigners["rsa"].(AlgorithmSigner),
+				signatureAlgo:   KeyAlgoRSASHA512,
+				signatureFormat: KeyAlgoRSA,
+			},
+		},
+	}
+	if err := tryAuth(t, clientConfig); err != nil {
+		t.Fatalf("unable to dial remote side: %s", err)
+	}
+}
+
+func TestCertAuthOpenSSHCompat(t *testing.T) {
+	cert := &Certificate{
+		Key:         testPublicKeys["rsa"],
+		ValidBefore: CertTimeInfinity,
+		CertType:    UserCert,
+	}
+	cert.SignCert(rand.Reader, testSigners["ecdsa"])
+	certSigner, err := NewCertSigner(cert, testSigners["rsa"])
+	if err != nil {
+		t.Fatalf("NewCertSigner: %v", err)
+	}
+
+	clientConfig := &ClientConfig{
+		User:            "user",
+		HostKeyCallback: InsecureIgnoreHostKey(),
+		Auth: []AuthMethod{
+			// algorithm ssh-rsa-cert-v01@openssh.com and signature format
+			// rsa-sha2-256.
+			configurablePublicKeyCallback{
+				signer:          certSigner.(AlgorithmSigner),
+				signatureAlgo:   CertAlgoRSAv01,
+				signatureFormat: KeyAlgoRSASHA256,
+			},
+		},
+	}
+	if err := tryAuth(t, clientConfig); err != nil {
+		t.Fatalf("unable to dial remote side: %s", err)
 	}
 }

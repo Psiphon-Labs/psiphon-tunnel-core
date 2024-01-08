@@ -7,7 +7,7 @@ package acme
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -54,7 +54,7 @@ func TestErrorResponse(t *testing.T) {
 	res := &http.Response{
 		StatusCode: 400,
 		Status:     "400 Bad Request",
-		Body:       ioutil.NopCloser(strings.NewReader(s)),
+		Body:       io.NopCloser(strings.NewReader(s)),
 		Header:     http.Header{"X-Foo": {"bar"}},
 	}
 	err := responseError(res)
@@ -115,8 +115,8 @@ func TestPostWithRetries(t *testing.T) {
 	if _, err := client.Authorize(context.Background(), "example.com"); err != nil {
 		t.Errorf("client.Authorize 1: %v", err)
 	}
-	if count != 4 {
-		t.Errorf("total requests count: %d; want 4", count)
+	if count != 3 {
+		t.Errorf("total requests count: %d; want 3", count)
 	}
 }
 
@@ -224,7 +224,7 @@ func TestUserAgent(t *testing.T) {
 			}
 
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{}`))
+			w.Write([]byte(`{"newOrder": "sure"}`))
 		}))
 		defer ts.Close()
 

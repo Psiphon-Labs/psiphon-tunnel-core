@@ -11,8 +11,8 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -29,8 +29,17 @@ const wycheproofModVer = "v0.0.0-20191219022705-2196000605e4"
 var wycheproofTestVectorsDir string
 
 func TestMain(m *testing.M) {
+	flag.Parse()
+	if flag.Lookup("test.short").Value.(flag.Getter).Get().(bool) {
+		log.Println("skipping test that downloads testdata via 'go mod download' in short mode")
+		os.Exit(0)
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		log.Printf("skipping test because 'go' command is unavailable: %v", err)
+		os.Exit(0)
+	}
+	if os.Getenv("GO_BUILDER_FLAKY_NET") != "" {
+		log.Printf("skipping test because GO_BUILDER_FLAKY_NET is set")
 		os.Exit(0)
 	}
 
@@ -39,8 +48,6 @@ func TestMain(m *testing.M) {
 	// can be used in the following tests.
 	path := "github.com/google/wycheproof@" + wycheproofModVer
 	cmd := exec.Command("go", "mod", "download", "-json", path)
-	// TODO: enable the sumdb once the Trybots proxy supports it.
-	cmd.Env = append(os.Environ(), "GONOSUMDB=*")
 	output, err := cmd.Output()
 	if err != nil {
 		log.Fatalf("failed to run `go mod download -json %s`, output: %s", path, output)
@@ -58,7 +65,7 @@ func TestMain(m *testing.M) {
 }
 
 func readTestVector(t *testing.T, f string, dest interface{}) {
-	b, err := ioutil.ReadFile(filepath.Join(wycheproofTestVectorsDir, f))
+	b, err := os.ReadFile(filepath.Join(wycheproofTestVectorsDir, f))
 	if err != nil {
 		t.Fatalf("failed to read json file: %v", err)
 	}

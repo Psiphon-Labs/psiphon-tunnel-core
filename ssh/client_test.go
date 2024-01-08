@@ -5,6 +5,11 @@
 package ssh
 
 import (
+	"bytes"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 )
@@ -116,6 +121,45 @@ func TestHostKeyCheck(t *testing.T) {
 	}
 }
 
+func TestVerifyHostKeySignature(t *testing.T) {
+	for _, tt := range []struct {
+		key        string
+		signAlgo   string
+		verifyAlgo string
+		wantError  string
+	}{
+		{"rsa", KeyAlgoRSA, KeyAlgoRSA, ""},
+		{"rsa", KeyAlgoRSASHA256, KeyAlgoRSASHA256, ""},
+		{"rsa", KeyAlgoRSA, KeyAlgoRSASHA512, `ssh: invalid signature algorithm "ssh-rsa", expected "rsa-sha2-512"`},
+		{"ed25519", KeyAlgoED25519, KeyAlgoED25519, ""},
+	} {
+		key := testSigners[tt.key].PublicKey()
+		s, ok := testSigners[tt.key].(AlgorithmSigner)
+		if !ok {
+			t.Fatalf("needed an AlgorithmSigner")
+		}
+		sig, err := s.SignWithAlgorithm(rand.Reader, []byte("test"), tt.signAlgo)
+		if err != nil {
+			t.Fatalf("couldn't sign: %q", err)
+		}
+
+		b := bytes.Buffer{}
+		writeString(&b, []byte(sig.Format))
+		writeString(&b, sig.Blob)
+
+		result := kexResult{Signature: b.Bytes(), H: []byte("test")}
+
+		err = verifyHostKeySignature(key, tt.verifyAlgo, &result)
+		if err != nil {
+			if tt.wantError == "" || !strings.Contains(err.Error(), tt.wantError) {
+				t.Errorf("got error %q, expecting %q", err.Error(), tt.wantError)
+			}
+		} else if tt.wantError != "" {
+			t.Errorf("succeeded, but want error string %q", tt.wantError)
+		}
+	}
+}
+
 func TestBannerCallback(t *testing.T) {
 	c1, c2, err := netPipe()
 	if err != nil {
@@ -166,9 +210,12 @@ func TestBannerCallback(t *testing.T) {
 }
 
 func TestNewClientConn(t *testing.T) {
+	errHostKeyMismatch := errors.New("host key mismatch")
+
 	for _, tt := range []struct {
-		name string
-		user string
+		name                    string
+		user                    string
+		simulateHostKeyMismatch HostKeyCallback
 	}{
 		{
 			name: "good user field for ConnMetadata",
@@ -177,6 +224,13 @@ func TestNewClientConn(t *testing.T) {
 		{
 			name: "empty user field for ConnMetadata",
 			user: "",
+		},
+		{
+			name: "host key mismatch",
+			user: "testuser",
+			simulateHostKeyMismatch: func(hostname string, remote net.Addr, key PublicKey) error {
+				return fmt.Errorf("%w: %s", errHostKeyMismatch, bytes.TrimSpace(MarshalAuthorizedKey(key)))
+			},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -202,13 +256,111 @@ func TestNewClientConn(t *testing.T) {
 				},
 				HostKeyCallback: InsecureIgnoreHostKey(),
 			}
+
+			if tt.simulateHostKeyMismatch != nil {
+				clientConf.HostKeyCallback = tt.simulateHostKeyMismatch
+			}
+
 			clientConn, _, _, err := NewClientConn(c2, "", clientConf)
 			if err != nil {
+				if tt.simulateHostKeyMismatch != nil && errors.Is(err, errHostKeyMismatch) {
+					return
+				}
 				t.Fatal(err)
 			}
 
 			if userGot := clientConn.User(); userGot != tt.user {
 				t.Errorf("got user %q; want user %q", userGot, tt.user)
+			}
+		})
+	}
+}
+
+func TestUnsupportedAlgorithm(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		config    Config
+		wantError string
+	}{
+		{
+			"unsupported KEX",
+			Config{
+				KeyExchanges: []string{"unsupported"},
+			},
+			"no common algorithm",
+		},
+		{
+			"unsupported and supported KEXs",
+			Config{
+				KeyExchanges: []string{"unsupported", kexAlgoCurve25519SHA256},
+			},
+			"",
+		},
+		{
+			"unsupported cipher",
+			Config{
+				Ciphers: []string{"unsupported"},
+			},
+			"no common algorithm",
+		},
+		{
+			"unsupported and supported ciphers",
+			Config{
+				Ciphers: []string{"unsupported", chacha20Poly1305ID},
+			},
+			"",
+		},
+		{
+			"unsupported MAC",
+			Config{
+				MACs: []string{"unsupported"},
+				// MAC is used for non AAED ciphers.
+				Ciphers: []string{"aes256-ctr"},
+			},
+			"no common algorithm",
+		},
+		{
+			"unsupported and supported MACs",
+			Config{
+				MACs: []string{"unsupported", "hmac-sha2-256-etm@openssh.com"},
+				// MAC is used for non AAED ciphers.
+				Ciphers: []string{"aes256-ctr"},
+			},
+			"",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c1, c2, err := netPipe()
+			if err != nil {
+				t.Fatalf("netPipe: %v", err)
+			}
+			defer c1.Close()
+			defer c2.Close()
+
+			serverConf := &ServerConfig{
+				Config: tt.config,
+				PasswordCallback: func(conn ConnMetadata, password []byte) (*Permissions, error) {
+					return &Permissions{}, nil
+				},
+			}
+			serverConf.AddHostKey(testSigners["rsa"])
+			go NewServerConn(c1, serverConf)
+
+			clientConf := &ClientConfig{
+				User:   "testuser",
+				Config: tt.config,
+				Auth: []AuthMethod{
+					Password("testpw"),
+				},
+				HostKeyCallback: InsecureIgnoreHostKey(),
+			}
+			_, _, _, err = NewClientConn(c2, "", clientConf)
+			if err != nil {
+				if tt.wantError == "" || !strings.Contains(err.Error(), tt.wantError) {
+					t.Errorf("%s: got error %q, missing %q", tt.name, err.Error(), tt.wantError)
+				}
+			} else if tt.wantError != "" {
+				t.Errorf("%s: succeeded, but want error string %q", tt.name, tt.wantError)
 			}
 		})
 	}

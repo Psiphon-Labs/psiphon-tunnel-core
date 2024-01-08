@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd
-// +build aix darwin dragonfly freebsd linux netbsd openbsd
+//go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris
 
 package test
 
@@ -11,7 +10,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net"
 	"testing"
@@ -24,7 +22,6 @@ type closeWriter interface {
 
 func testPortForward(t *testing.T, n, listenAddr string) {
 	server := newServer(t)
-	defer server.Shutdown()
 	conn := server.Dial(clientConfig())
 	defer conn.Close()
 
@@ -58,7 +55,7 @@ func testPortForward(t *testing.T, n, listenAddr string) {
 
 	readChan := make(chan []byte)
 	go func() {
-		data, _ := ioutil.ReadAll(netConn)
+		data, _ := io.ReadAll(netConn)
 		readChan <- data
 	}()
 
@@ -121,7 +118,6 @@ func TestPortForwardUnix(t *testing.T) {
 
 func testAcceptClose(t *testing.T, n, listenAddr string) {
 	server := newServer(t)
-	defer server.Shutdown()
 	conn := server.Dial(clientConfig())
 
 	sshListener, err := conn.Listen(n, listenAddr)
@@ -163,10 +159,9 @@ func TestAcceptCloseUnix(t *testing.T) {
 // Check that listeners exit if the underlying client transport dies.
 func testPortForwardConnectionClose(t *testing.T, n, listenAddr string) {
 	server := newServer(t)
-	defer server.Shutdown()
-	conn := server.Dial(clientConfig())
+	client := server.Dial(clientConfig())
 
-	sshListener, err := conn.Listen(n, listenAddr)
+	sshListener, err := client.Listen(n, listenAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,14 +180,10 @@ func testPortForwardConnectionClose(t *testing.T, n, listenAddr string) {
 
 	// It would be even nicer if we closed the server side, but it
 	// is more involved as the fd for that side is dup()ed.
-	server.clientConn.Close()
+	server.lastDialConn.Close()
 
-	select {
-	case <-time.After(1 * time.Second):
-		t.Errorf("timeout: listener did not close.")
-	case err := <-quit:
-		t.Logf("quit as expected (error %v)", err)
-	}
+	err = <-quit
+	t.Logf("quit as expected (error %v)", err)
 }
 
 func TestPortForwardConnectionCloseTCP(t *testing.T) {
