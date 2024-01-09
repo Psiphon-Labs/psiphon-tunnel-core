@@ -90,6 +90,10 @@ type Scheme struct {
 	// If empty, the scheme applies to all regions.
 	Regions []string
 
+	// ASNs is a list of client ASNs this scheme applies to.
+	// If empty, the scheme applies to all ASNs.
+	ASNs []string
+
 	// PropagationChannelIDs is a list of client propagtion channel IDs
 	// this scheme applies to. Propagation channel IDs are an input
 	// to SLOK key derivation.
@@ -373,7 +377,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 // sender will not block sending to signalIssueSLOKs; the channel
 // should be appropriately buffered.
 func (config *Config) NewClientSeedState(
-	clientRegion, propagationChannelID string,
+	clientASN, clientRegion, propagationChannelID string,
 	signalIssueSLOKs chan struct{}) *ClientSeedState {
 
 	config.ReloadableFile.RLock()
@@ -389,13 +393,7 @@ func (config *Config) NewClientSeedState(
 	for _, scheme := range config.Schemes {
 
 		// All matching schemes are selected.
-		// Note: this implementation assumes a few simple schemes. For more
-		// schemes with many propagation channel IDs or region filters, use
-		// maps for more efficient lookup.
-		if scheme.epoch.Before(time.Now().UTC()) &&
-			common.Contains(scheme.PropagationChannelIDs, propagationChannelID) &&
-			(len(scheme.Regions) == 0 || common.Contains(scheme.Regions, clientRegion)) {
-
+		if scheme.match(clientASN, clientRegion, propagationChannelID) {
 			// Empty progress is initialized up front for all seed specs. Once
 			// created, the progress structure is read-only (the slice, not the
 			// TrafficValue fields); this permits lock-free operation.
@@ -415,6 +413,28 @@ func (config *Config) NewClientSeedState(
 	}
 
 	return state
+}
+
+// match reports whether the given arguments match the scheme.
+func (scheme *Scheme) match(clientASN, clientRegion, propagationChannelID string) bool {
+
+	// Note: this implementation assumes a simple scheme. For more schemes with
+	// many propagation channel IDs or region filters, use maps for more
+	// efficient lookup.
+
+	if !scheme.epoch.Before(time.Now().UTC()) {
+		return false
+	}
+	if !common.Contains(scheme.PropagationChannelIDs, propagationChannelID) {
+		return false
+	}
+	if len(scheme.Regions) > 0 && !common.Contains(scheme.Regions, clientRegion) {
+		return false
+	}
+	if len(scheme.ASNs) > 0 && !common.Contains(scheme.ASNs, clientASN) {
+		return false
+	}
+	return true
 }
 
 // Hibernate clears references to short-lived objects (currently,
@@ -671,9 +691,7 @@ func (state *ClientSeedState) GetSeedPayload() *SeedPayload {
 	state.issueSLOKs()
 
 	sloks := make([]*SLOK, len(state.payloadSLOKs))
-	for index, slok := range state.payloadSLOKs {
-		sloks[index] = slok
-	}
+	copy(sloks, state.payloadSLOKs)
 
 	return &SeedPayload{
 		SLOKs: sloks,

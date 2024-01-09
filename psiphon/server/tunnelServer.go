@@ -3754,6 +3754,7 @@ func (sshClient *sshClient) setOSLConfig() {
 	//    seed state.
 
 	sshClient.oslClientSeedState = sshClient.sshServer.support.OSLConfig.NewClientSeedState(
+		sshClient.geoIPData.ASN,
 		sshClient.geoIPData.Country,
 		propagationChannelID,
 		sshClient.signalIssueSLOKs)
