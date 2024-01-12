@@ -818,7 +818,7 @@ type Config struct {
 	HoldOffTunnelFrontingProviderIDs     []string
 	HoldOffTunnelProbability             *float64
 
-	// HoldOffDirectTunnelMinDurationMilliseconds and other HoldOffDirectTunnel
+	// HoldOffDirectTunnelMinDurationMilliseconds and other HoldOffDirect
 	// fields are for testing purposes.
 	HoldOffDirectTunnelMinDurationMilliseconds *int
 	HoldOffDirectTunnelMaxDurationMilliseconds *int
@@ -826,9 +826,10 @@ type Config struct {
 	HoldOffDirectServerEntryProviderRegions    map[string][]string
 	HoldOffDirectTunnelProbability             *float64
 
-	// RestrictDirectProviderIDs and other RestrictDirectProviderIDs fields
-	// are for testing purposes.
+	// RestrictDirectProviderIDs and other RestrictDirect fields are for
+	// testing purposes.
 	RestrictDirectProviderIDs                  []string
+	RestrictDirectProviderRegions              map[string][]string
 	RestrictDirectProviderIDsClientProbability *float64
 
 	// RestrictFrontingProviderIDs and other RestrictFrontingProviderIDs fields
@@ -1964,6 +1965,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.RestrictDirectProviderIDs] = config.RestrictDirectProviderIDs
 	}
 
+	if len(config.RestrictDirectProviderRegions) > 0 {
+		applyParameters[parameters.RestrictDirectProviderRegions] = parameters.KeyStrings(config.RestrictDirectProviderRegions)
+	}
+
 	if config.RestrictDirectProviderIDsClientProbability != nil {
 		applyParameters[parameters.RestrictDirectProviderIDsClientProbability] = *config.RestrictDirectProviderIDsClientProbability
 	}
@@ -2496,6 +2501,16 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte("RestrictDirectProviderIDs"))
 		for _, providerID := range config.RestrictDirectProviderIDs {
 			hash.Write([]byte(providerID))
+		}
+	}
+
+	if len(config.RestrictDirectProviderRegions) > 0 {
+		hash.Write([]byte("RestrictDirectProviderRegions"))
+		for providerID, regions := range config.RestrictDirectProviderRegions {
+			hash.Write([]byte(providerID))
+			for _, region := range regions {
+				hash.Write([]byte(region))
+			}
 		}
 	}
 

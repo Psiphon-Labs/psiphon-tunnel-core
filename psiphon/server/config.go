@@ -464,6 +464,7 @@ type Config struct {
 	dumpProfilesOnStopEstablishTunnelsDone         int32
 	providerID                                     string
 	frontingProviderID                             string
+	region                                         string
 	runningProtocols                               []string
 }
 
@@ -540,6 +541,11 @@ func (config *Config) GetProviderID() string {
 // server's fronted protocol(s).
 func (config *Config) GetFrontingProviderID() string {
 	return config.frontingProviderID
+}
+
+// GetRegion returns the region associated with the server.
+func (config *Config) GetRegion() string {
+	return config.region
 }
 
 // GetRunningProtocols returns the list of protcols this server is running.
@@ -732,6 +738,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			config.frontingProviderID = serverEntry.FrontingProviderID
 		} else if config.frontingProviderID != serverEntry.FrontingProviderID {
 			return nil, errors.Tracef("unsupported multiple FrontingProviderID values")
+		}
+		if config.region == "" {
+			config.region = serverEntry.Region
+		} else if config.region != serverEntry.Region {
+			return nil, errors.Tracef("unsupported multiple Region values")
 		}
 	}
 

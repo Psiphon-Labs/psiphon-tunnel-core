@@ -317,6 +317,7 @@ const (
 	HoldOffDirectServerEntryProviderRegions          = "HoldOffDirectServerEntryProviderRegions"
 	HoldOffDirectTunnelProbability                   = "HoldOffDirectTunnelProbability"
 	RestrictDirectProviderIDs                        = "RestrictDirectProviderIDs"
+	RestrictDirectProviderRegions                    = "RestrictDirectProviderRegions"
 	RestrictDirectProviderIDsServerProbability       = "RestrictDirectProviderIDsServerProbability"
 	RestrictDirectProviderIDsClientProbability       = "RestrictDirectProviderIDsClientProbability"
 	RestrictFrontingProviderIDs                      = "RestrictFrontingProviderIDs"
@@ -717,6 +718,7 @@ var defaultParameters = map[string]struct {
 	HoldOffDirectTunnelProbability:          {value: 0.0, minimum: 0.0},
 
 	RestrictDirectProviderIDs:                  {value: []string{}},
+	RestrictDirectProviderRegions:              {value: KeyStrings{}},
 	RestrictDirectProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	RestrictDirectProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
 

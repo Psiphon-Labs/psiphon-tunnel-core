@@ -20,6 +20,7 @@
 package server
 
 import (
+	std_errors "errors"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -30,9 +31,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
-type restrictedProviderError struct{}
-
-func (restrictedProviderError) Error() string { return "restricted provider" }
+var errRestrictedProvider = std_errors.New("restricted provider")
 
 // TacticsListener wraps a net.Listener and applies server-side implementation
 // of certain tactics parameters to accepted connections. Tactics filtering is
@@ -114,20 +113,24 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 	// not be applied to clients using indirect protocols, where the immediate
 	// peer IP is not the original client IP. Indirect protocols must determine
 	// the original client IP before applying GeoIP specific tactics; see the
-	// server-side enforcement of RestrictDirectProviderIDs for fronted meek in
-	// server.MeekServer.getSessionOrEndpoint.
+	// server-side enforcement of RestrictFrontingProviderIDs for fronted meek
+	// in server.MeekServer.getSessionOrEndpoint.
 	//
 	// At this stage, GeoIP tactics filters are active, but handshake API
 	// parameters are not.
 	//
 	// See the comment in server.LoadConfig regarding provider ID limitations.
 	if protocol.TunnelProtocolIsDirect(listener.tunnelProtocol) &&
-		common.Contains(
+		(common.Contains(
 			p.Strings(parameters.RestrictDirectProviderIDs),
-			listener.support.Config.GetProviderID()) {
+			listener.support.Config.GetProviderID()) ||
+			common.ContainsAny(
+				p.KeyStrings(parameters.RestrictDirectProviderRegions, listener.support.Config.GetProviderID()), []string{"", listener.support.Config.GetRegion()})) {
+
 		if p.WeightedCoinFlip(
 			parameters.RestrictDirectProviderIDsServerProbability) {
-			return nil, restrictedProviderError{}
+			conn.Close()
+			return nil, errRestrictedProvider
 		}
 	}
 
