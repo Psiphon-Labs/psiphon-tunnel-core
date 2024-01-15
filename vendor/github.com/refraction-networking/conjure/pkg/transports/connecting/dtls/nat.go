@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/pion/stun"
@@ -58,7 +57,7 @@ func openUDPLimitTTL(ctx context.Context, laddr, addr string, dialer dialFunc) e
 	defer fd.Close()
 
 	// Set the TTL
-	err = syscall.SetsockoptInt(int(fd.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, ttl)
+	err = setSocketTTL(fd, ttl)
 	if err != nil {
 		return err
 	}
@@ -70,7 +69,7 @@ func openUDPLimitTTL(ctx context.Context, laddr, addr string, dialer dialFunc) e
 	}
 
 	// reset TTL
-	err = syscall.SetsockoptInt(int(fd.Fd()), syscall.IPPROTO_IP, syscall.IP_TTL, defaultTTL)
+	err = setSocketTTL(fd, defaultTTL)
 	if err != nil {
 		return err
 	}
