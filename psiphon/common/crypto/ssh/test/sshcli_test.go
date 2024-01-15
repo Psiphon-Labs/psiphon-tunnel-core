@@ -13,9 +13,9 @@ import (
 	"runtime"
 	"testing"
 
-	"golang.org/x/crypto/internal/testenv"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/testdata"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/internal/testenv"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh/testdata"
 )
 
 func sshClient(t *testing.T) string {

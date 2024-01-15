@@ -342,14 +342,10 @@ golang.org/x/crypto/curve25519/internal/field
 golang.org/x/crypto/hkdf
 golang.org/x/crypto/internal/alias
 golang.org/x/crypto/internal/poly1305
-golang.org/x/crypto/internal/testenv
 golang.org/x/crypto/nacl/box
 golang.org/x/crypto/nacl/secretbox
 golang.org/x/crypto/salsa20/salsa
 golang.org/x/crypto/sha3
-golang.org/x/crypto/ssh
-golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
-golang.org/x/crypto/ssh/testdata
 # golang.org/x/exp v0.0.0-20221012211006-4de253d81b95
 ## explicit; go 1.18
 golang.org/x/exp/constraints
