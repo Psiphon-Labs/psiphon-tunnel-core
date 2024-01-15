@@ -134,6 +134,24 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			serverContext.tunnel.dialParams.ServerEntry.Tag
 	}
 
+	// The server will return a signed copy of its own server entry when the
+	// client specifies this 'missing_server_entry_provider_id' parameter.
+	//
+	// The purpose of this mechanism is to rapidly add provider IDs to the
+	// server entries in client local storage, and to ensure that the client has
+	// a provider ID for its currently connected server as required for the
+	// RestrictDirectProviderIDs, RestrictDirectProviderRegions, and
+	// HoldOffDirectServerEntryProviderRegions tactics.
+	//
+	// The server entry will be included in handshakeResponse.EncodedServerList,
+	// along side discovery servers.
+	requestedMissingProviderID := false
+	if !serverContext.tunnel.dialParams.ServerEntry.HasProviderID() {
+		requestedMissingProviderID = true
+		params["missing_server_entry_provider_id"] =
+			serverContext.tunnel.dialParams.ServerEntry.Tag
+	}
+
 	doTactics := !serverContext.tunnel.config.DisableTactics
 
 	networkID := ""
@@ -272,13 +290,14 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			return errors.Trace(err)
 		}
 
-		// Retain the original timestamp and source in the requestedMissingSignature
-		// case, as this server entry was not discovered here.
+		// Retain the original timestamp and source in the
+		// requestedMissingSignature and requestedMissingProviderID
+		// cases, as this server entry was not discovered here.
 		//
 		// Limitation: there is a transient edge case where
-		// requestedMissingSignature will be set for a discovery server entry that
-		// _is_ also discovered here.
-		if requestedMissingSignature &&
+		// requestedMissingSignature and/or requestedMissingProviderID will be
+		// set for a discovery server entry that _is_ also discovered here.
+		if requestedMissingSignature || requestedMissingProviderID &&
 			serverEntryFields.GetIPAddress() == serverContext.tunnel.dialParams.ServerEntry.IpAddress {
 
 			serverEntryFields.SetLocalTimestamp(serverContext.tunnel.dialParams.ServerEntry.LocalTimestamp)

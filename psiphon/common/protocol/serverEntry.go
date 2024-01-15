@@ -61,6 +61,7 @@ type ServerEntry struct {
 	SshObfuscatedKey                string   `json:"sshObfuscatedKey"`
 	Capabilities                    []string `json:"capabilities"`
 	Region                          string   `json:"region"`
+	ProviderID                      string   `json:"providerID"`
 	FrontingProviderID              string   `json:"frontingProviderID"`
 	TlsOSSHPort                     int      `json:"tlsOSSHPort"`
 	MeekServerPort                  int      `json:"meekServerPort"`
@@ -734,6 +735,10 @@ func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 
 func (serverEntry *ServerEntry) HasSignature() bool {
 	return serverEntry.Signature != ""
+}
+
+func (serverEntry *ServerEntry) HasProviderID() bool {
+	return serverEntry.ProviderID != ""
 }
 
 func (serverEntry *ServerEntry) GetDiagnosticID() string {
