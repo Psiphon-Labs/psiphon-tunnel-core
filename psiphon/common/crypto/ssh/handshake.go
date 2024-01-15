@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	// [Psiphon]
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
@@ -601,8 +602,6 @@ func (t *handshakeTransport) sendKexInit() error {
 
 	if t.config.KEXPRNGSeed != nil {
 
-		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
-
 		permute := func(PRNG *prng.PRNG, list []string) []string {
 			newList := make([]string, len(list))
 			perm := PRNG.Perm(len(list))
@@ -633,7 +632,33 @@ func (t *handshakeTransport) sendKexInit() error {
 			return list
 		}
 
-		msg.KexAlgos = truncate(PRNG, permute(PRNG, msg.KexAlgos))
+		firstKexAlgo := func(kexAlgos []string) (string, bool) {
+			for _, kexAlgo := range kexAlgos {
+				switch kexAlgo {
+				case "ext-info-c",
+					"kex-strict-c-v00@openssh.com",
+					"kex-strict-s-v00@openssh.com":
+					// These extensions are not KEX algorithms
+				default:
+					return kexAlgo, true
+				}
+			}
+			return "", false
+		}
+
+		selectKexAlgos := func(PRNG *prng.PRNG, kexAlgos []string) []string {
+			kexAlgos = truncate(PRNG, permute(PRNG, kexAlgos))
+
+			// Ensure an actual KEX algorithm is always selected
+			if _, ok := firstKexAlgo(kexAlgos); ok {
+				return kexAlgos
+			}
+			return retain(PRNG, kexAlgos, permute(PRNG, preferredKexAlgos)[0])
+		}
+
+		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
+
+		msg.KexAlgos = selectKexAlgos(PRNG, msg.KexAlgos)
 		ciphers := truncate(PRNG, permute(PRNG, msg.CiphersClientServer))
 		msg.CiphersClientServer = ciphers
 		msg.CiphersServerClient = ciphers
@@ -663,9 +688,25 @@ func (t *handshakeTransport) sendKexInit() error {
 
 			PeerPRNG := prng.NewPRNGWithSeed(t.config.PeerKEXPRNGSeed)
 
-			peerKexAlgos := truncate(PeerPRNG, permute(PeerPRNG, supportedKexAlgos))
+			// Note that only the client sends "ext-info-c"
+			// and "kex-strict-c-v00@openssh.com" and only the server
+			// sends "kex-strict-s-v00@openssh.com", so these will never
+			// match and do not need to be filtered out before findCommon.
+			//
+			// The following assumes that the server always starts with the
+			// default preferredKexAlgos along with
+			// "kex-strict-s-v00@openssh.com" appended before randomizing.
+
+			serverKexAlgos := append(
+				append([]string(nil), preferredKexAlgos...),
+				"kex-strict-s-v00@openssh.com")
+
+			peerKexAlgos := selectKexAlgos(PeerPRNG, serverKexAlgos)
+
 			if _, err := findCommon("", msg.KexAlgos, peerKexAlgos); err != nil {
-				msg.KexAlgos = retain(PRNG, msg.KexAlgos, peerKexAlgos[0])
+				if kexAlgo, ok := firstKexAlgo(peerKexAlgos); ok {
+					msg.KexAlgos = retain(PRNG, msg.KexAlgos, kexAlgo)
+				}
 			}
 
 			peerCiphers := truncate(PeerPRNG, permute(PeerPRNG, preferredCiphers))
