@@ -253,6 +253,10 @@ func (conn *ObfuscatedPacketConn) Close() error {
 	}
 
 	if conn.isServer {
+
+		// Interrupt any blocked writes.
+		conn.PacketConn.SetWriteDeadline(time.Now())
+
 		close(conn.stopBroadcast)
 		conn.runWaitGroup.Wait()
 	}
