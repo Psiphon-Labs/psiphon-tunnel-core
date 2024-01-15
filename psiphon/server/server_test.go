@@ -1505,7 +1505,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	time.Sleep(100 * time.Millisecond)
 
 	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics
-	expectServerBPFField := ServerBPFEnabled() && doServerTactics
+	expectServerBPFField := ServerBPFEnabled() && protocol.TunnelProtocolIsDirect(runConfig.tunnelProtocol) && doServerTactics
 	expectServerPacketManipulationField := runConfig.doPacketManipulation
 	expectBurstFields := runConfig.doBurstMonitor
 	expectTCPPortForwardDial := runConfig.doTunneledWebRequest
