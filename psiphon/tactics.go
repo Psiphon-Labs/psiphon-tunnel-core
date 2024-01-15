@@ -73,12 +73,12 @@ func GetTactics(ctx context.Context, config *Config) {
 		return
 	}
 
-	// If the context is already Done, don't even start the request.
-	if ctx.Err() != nil {
-		return
-	}
-
 	if tacticsRecord == nil {
+
+		// If the context is already Done, don't even start the request.
+		if ctx.Err() != nil {
+			return
+		}
 
 		iterator, err := NewTacticsServerEntryIterator(config)
 		if err != nil {
@@ -216,6 +216,7 @@ func fetchTactics(
 
 	dialParams, err := MakeDialParameters(
 		config,
+		nil,
 		nil,
 		canReplay,
 		selectProtocol,

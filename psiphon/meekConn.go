@@ -210,6 +210,11 @@ type MeekConfig struct {
 	// HTTPTransformerParameters specifies an HTTP transformer to apply to the
 	// meek connection if it uses HTTP.
 	HTTPTransformerParameters *transforms.HTTPTransformerParameters
+
+	// AdditionalHeaders is a set of additional arbitrary HTTP headers that
+	// are added to all meek HTTP requests. An additional header is ignored
+	// when the header name is already present in a meek request.
+	AdditionalHeaders http.Header
 }
 
 // MeekConn is a network connection that tunnels net.Conn flows over HTTP and supports
@@ -679,6 +684,14 @@ func DialMeek(
 			return nil, errors.Trace(err)
 		}
 		additionalHeaders.Set("X-Psiphon-Fronting-Address", host)
+	}
+
+	if meekConfig.AdditionalHeaders != nil {
+		for name, value := range meekConfig.AdditionalHeaders {
+			if _, ok := additionalHeaders[name]; !ok {
+				additionalHeaders[name] = value
+			}
+		}
 	}
 
 	meek.url = url

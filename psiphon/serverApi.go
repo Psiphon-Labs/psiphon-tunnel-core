@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
+	lrucache "github.com/cognusion/go-cache-lru"
 )
 
 // ServerContext is a utility struct which holds all of the data associated
@@ -395,6 +396,31 @@ func (serverContext *ServerContext) doHandshakeRequest(
 				// from the server. When SetParameters fails, all
 				// previous tactics values are left in place.
 			}
+		}
+	}
+
+	if serverContext.tunnel.dialParams.steeringIPCacheKey != "" {
+
+		// Cache any received steering IP, which will also extend the TTL for
+		// an existing entry.
+		//
+		// As typical tunnel duration is short and dialing can be challenging,
+		// this established tunnel is retained and the steering IP will be
+		// used on any subsequent dial to the same fronting provider,
+		// assuming the TTL has not expired.
+		//
+		// Note: to avoid TTL expiry for long-lived tunnels, the TTL could be
+		// set or extended at the end of the tunnel lifetime; however that
+		// may result in unintended steering.
+
+		IP := net.ParseIP(handshakeResponse.SteeringIP)
+		if IP != nil && !common.IsBogon(IP) {
+			serverContext.tunnel.dialParams.steeringIPCache.Set(
+				serverContext.tunnel.dialParams.steeringIPCacheKey,
+				handshakeResponse.SteeringIP,
+				lrucache.DefaultExpiration)
+		} else {
+			NoticeInfo("ignoring invalid steering IP")
 		}
 	}
 
@@ -994,6 +1020,7 @@ func getBaseAPIParameters(
 		}
 
 		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+
 			meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
 			if meekResolvedIPAddress != "" {
 				params["meek_resolved_ip_address"] = meekResolvedIPAddress
@@ -1102,7 +1129,13 @@ func getBaseAPIParameters(
 			params["conjure_transport"] = dialParams.ConjureTransport
 		}
 
-		if dialParams.ResolveParameters != nil {
+		usedSteeringIP := false
+		if dialParams.SteeringIP != "" {
+			params["steering_ip"] = dialParams.SteeringIP
+			usedSteeringIP = true
+		}
+
+		if dialParams.ResolveParameters != nil && !usedSteeringIP {
 
 			// Log enough information to distinguish several successful or
 			// failed circumvention cases of interest, including preferring
