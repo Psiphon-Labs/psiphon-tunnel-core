@@ -51,7 +51,6 @@ func TestTransformations(t *testing.T) {
              "TCP-dstport ffff",
              "TCP-seq ffffffff",
              "TCP-ack ffffffff",
-             "TCP-dataoffset 0f",
              "TCP-window ffff",
              "TCP-checksum ffff",
              "TCP-urgent ffff",
@@ -64,12 +63,14 @@ func TestTransformations(t *testing.T) {
              "TCP-payload eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
              "TCP-payload ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"],
 
+            ["TCP-dataoffset 0f",
+             "TCP-payload ffffffff"],
+
             ["TCP-flags random",
              "TCP-srcport random",
              "TCP-dstport random",
              "TCP-seq random",
              "TCP-ack random",
-             "TCP-dataoffset random",
              "TCP-window random",
              "TCP-checksum random",
              "TCP-urgent random",
@@ -148,7 +149,7 @@ repeatLoop:
 			t.Fatalf("apply failed: %v", err)
 		}
 
-		if len(injectPackets) != 2 {
+		if len(injectPackets) != 3 {
 			t.Fatalf("unexpected injectPackets count: %d", len(injectPackets))
 		}
 
@@ -157,6 +158,20 @@ repeatLoop:
 			packet := gopacket.NewPacket(packetData, layers.LayerTypeIPv4, gopacket.Default)
 
 			errLayer := packet.ErrorLayer()
+
+			if packetNum == 1 {
+
+				// gopacket.NewPacket is expected to fail to parse the 2nd
+				// injected packet because the transformed data offset
+				// exceeds the packet length.
+				if errLayer == nil ||
+					errLayer.Error().Error() != "TCP data offset greater than packet length" {
+
+					t.Fatalf("Unexpected gopacket.NewPacket error: %v", errLayer.Error())
+				}
+				continue
+			}
+
 			if errLayer != nil {
 				t.Fatalf("gopacket.NewPacket failed: %v", errLayer.Error())
 			}
