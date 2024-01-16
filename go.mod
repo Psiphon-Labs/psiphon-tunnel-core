@@ -14,6 +14,8 @@ require (
 	github.com/Psiphon-Labs/quic-go v0.0.0-20240305203241-7c4a760d03cc
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
+	github.com/buraksezer/consistent v0.10.0
+	github.com/cespare/xxhash v1.1.0
 	github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 	github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea
 	github.com/deckarep/golang-set v0.0.0-20171013212420-1d4478f51bed

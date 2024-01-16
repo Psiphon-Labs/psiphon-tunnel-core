@@ -20,13 +20,12 @@
 // Package psinet implements psinet database services. The psinet database is a
 // JSON-format file containing information about the Psiphon network, including
 // sponsors, home pages, stats regexes, available upgrades, and other servers for
-// discovery. This package also implements the Psiphon discovery algorithm.
+// discovery.
 package psinet
 
 import (
 	"crypto/md5"
 	"encoding/json"
-	"math"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -34,6 +33,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
@@ -59,6 +59,18 @@ type Database struct {
 type DiscoveryServer struct {
 	DiscoveryDateRange []time.Time `json:"discovery_date_range"`
 	EncodedServerEntry string      `json:"encoded_server_entry"`
+
+	IPAddress string `json:"-"`
+}
+
+// consistent.Member implementation.
+// TODO: move to discovery package. Requires bridging to a new type.
+func (s *DiscoveryServer) String() string {
+	// Other options:
+	// - Tag
+	// - EncodedServerEntry
+	// - ...
+	return s.IPAddress
 }
 
 type Sponsor struct {
@@ -121,6 +133,32 @@ func NewDatabase(filename string) (*Database, error) {
 				// security purpose.
 				checksum := md5.Sum(value)
 				sponsor.domainBytesChecksum = checksum[:]
+			}
+
+			// Decode each encoded server entry for its IP address, which is used in
+			// the consistent.Member implementation in the discovery package.
+			//
+			// Also ensure that no servers share the same IP address, which is
+			// a requirement of consistent hashing discovery; otherwise it will
+			// panic in the underlying buraksezer/consistent package.
+			serverIPToDiagnosticID := make(map[string]string)
+			for i, server := range database.DiscoveryServers {
+
+				serverEntry, err := protocol.DecodeServerEntry(server.EncodedServerEntry, "", "")
+				if err != nil {
+					return errors.Trace(err)
+				}
+				if serverEntry.IpAddress == "" {
+					return errors.Tracef("unexpected empty IP address in server entry for %s ", serverEntry.GetDiagnosticID())
+				}
+
+				if diagnosticID, ok := serverIPToDiagnosticID[serverEntry.IpAddress]; ok {
+					return errors.Tracef("unexpected %s and %s shared the same IP address", diagnosticID, serverEntry.GetDiagnosticID())
+				} else {
+					serverIPToDiagnosticID[serverEntry.IpAddress] = serverEntry.GetDiagnosticID()
+				}
+
+				database.DiscoveryServers[i].IPAddress = serverEntry.IpAddress
 			}
 
 			return nil
@@ -335,127 +373,6 @@ func (db *Database) GetDomainBytesChecksum(sponsorID string) []byte {
 	return sponsor.domainBytesChecksum
 }
 
-// DiscoverServers selects new encoded server entries to be "discovered" by
-// the client, using the discoveryValue -- a function of the client's IP
-// address -- as the input into the discovery algorithm.
-func (db *Database) DiscoverServers(discoveryValue int) []string {
-	db.ReloadableFile.RLock()
-	defer db.ReloadableFile.RUnlock()
-
-	var servers []*DiscoveryServer
-
-	discoveryDate := time.Now().UTC()
-	candidateServers := make([]*DiscoveryServer, 0)
-
-	for _, server := range db.DiscoveryServers {
-		// All servers that are discoverable on this day are eligible for discovery
-		if len(server.DiscoveryDateRange) == 2 &&
-			discoveryDate.After(server.DiscoveryDateRange[0]) &&
-			discoveryDate.Before(server.DiscoveryDateRange[1]) {
-
-			candidateServers = append(candidateServers, server)
-		}
-	}
-
-	timeInSeconds := int(discoveryDate.Unix())
-	servers = selectServers(candidateServers, timeInSeconds, discoveryValue)
-
-	encodedServerEntries := make([]string, 0)
-
-	for _, server := range servers {
-		encodedServerEntries = append(encodedServerEntries, server.EncodedServerEntry)
-	}
-
-	return encodedServerEntries
-}
-
-// Combine client IP address and time-of-day strategies to give out different
-// discovery servers to different clients. The aim is to achieve defense against
-// enumerability. We also want to achieve a degree of load balancing clients
-// and these strategies are expected to have reasonably random distribution,
-// even for a cluster of users coming from the same network.
-//
-// We only select one server: multiple results makes enumeration easier; the
-// strategies have a built-in load balancing effect; and date range discoverability
-// means a client will actually learn more servers later even if they happen to
-// always pick the same result at this point.
-//
-// This is a blended strategy: as long as there are enough servers to pick from,
-// both aspects determine which server is selected. IP address is given the
-// priority: if there are only a couple of servers, for example, IP address alone
-// determines the outcome.
-func selectServers(
-	servers []*DiscoveryServer, timeInSeconds, discoveryValue int) []*DiscoveryServer {
-
-	TIME_GRANULARITY := 3600
-
-	if len(servers) == 0 {
-		return nil
-	}
-
-	// Time truncated to an hour
-	timeStrategyValue := timeInSeconds / TIME_GRANULARITY
-
-	// Divide servers into buckets. The bucket count is chosen such that the number
-	// of buckets and the number of items in each bucket are close (using sqrt).
-	// IP address selects the bucket, time selects the item in the bucket.
-
-	// NOTE: this code assumes that the range of possible timeStrategyValues
-	// and discoveryValues are sufficient to index to all bucket items.
-
-	bucketCount := calculateBucketCount(len(servers))
-
-	buckets := bucketizeServerList(servers, bucketCount)
-
-	if len(buckets) == 0 {
-		return nil
-	}
-
-	bucket := buckets[discoveryValue%len(buckets)]
-
-	if len(bucket) == 0 {
-		return nil
-	}
-
-	server := bucket[timeStrategyValue%len(bucket)]
-
-	serverList := make([]*DiscoveryServer, 1)
-	serverList[0] = server
-
-	return serverList
-}
-
-// Number of buckets such that first strategy picks among about the same number
-// of choices as the second strategy. Gives an edge to the "outer" strategy.
-func calculateBucketCount(length int) int {
-	return int(math.Ceil(math.Sqrt(float64(length))))
-}
-
-// bucketizeServerList creates nearly equal sized slices of the input list.
-func bucketizeServerList(servers []*DiscoveryServer, bucketCount int) [][]*DiscoveryServer {
-
-	// This code creates the same partitions as legacy servers:
-	// https://github.com/Psiphon-Inc/psiphon-automation/blob/685f91a85bcdb33a75a200d936eadcb0686eadd7/Automation/psi_ops_discovery.py
-	//
-	// Both use the same algorithm from:
-	// http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
-
-	// TODO: this partition is constant for fixed Database content, so it could
-	// be done once and cached in the Database ReloadableFile reloadAction.
-
-	buckets := make([][]*DiscoveryServer, bucketCount)
-
-	division := float64(len(servers)) / float64(bucketCount)
-
-	for i := 0; i < bucketCount; i++ {
-		start := int((division * float64(i)) + 0.5)
-		end := int((division * (float64(i) + 1)) + 0.5)
-		buckets[i] = servers[start:end]
-	}
-
-	return buckets
-}
-
 // IsValidServerEntryTag checks if the specified server entry tag is valid.
 func (db *Database) IsValidServerEntryTag(serverEntryTag string) bool {
 	db.ReloadableFile.RLock()
@@ -472,4 +389,10 @@ func (db *Database) IsValidServerEntryTag(serverEntryTag string) bool {
 
 	// The tag must be in the map and have the value "true".
 	return db.ValidServerEntryTags[serverEntryTag]
+}
+
+func (db *Database) GetDiscoveryServers() []*DiscoveryServer {
+	db.ReloadableFile.RLock()
+	defer db.ReloadableFile.RUnlock()
+	return db.DiscoveryServers
 }

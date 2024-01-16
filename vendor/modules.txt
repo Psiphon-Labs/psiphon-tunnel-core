@@ -51,6 +51,12 @@ github.com/armon/go-proxyproto
 ## explicit
 github.com/bifurcation/mint
 github.com/bifurcation/mint/syntax
+# github.com/buraksezer/consistent v0.10.0
+## explicit; go 1.9
+github.com/buraksezer/consistent
+# github.com/cespare/xxhash v1.1.0
+## explicit
+github.com/cespare/xxhash
 # github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 ## explicit
 github.com/cheekybits/genny/generic
