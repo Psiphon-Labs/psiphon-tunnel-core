@@ -593,7 +593,7 @@ func (t *handshakeTransport) sendKexInit() error {
 	//
 	// When using obfuscated SSH, where only the initial, unencrypted
 	// packets are obfuscated, NoEncryptThenMACHash should be set.
-	noEncryptThenMACs := []string{"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
+	noEncryptThenMACs := []string{"hmac-sha2-256", "hmac-sha2-512", "hmac-sha1", "hmac-sha1-96"}
 
 	if t.config.NoEncryptThenMACHash {
 		msg.MACsClientServer = noEncryptThenMACs
@@ -656,13 +656,54 @@ func (t *handshakeTransport) sendKexInit() error {
 			return retain(PRNG, kexAlgos, permute(PRNG, preferredKexAlgos)[0])
 		}
 
+		// Downgrade servers to use the algorithm lists used previously in
+		// commits before 435a6a3f. This ensures that (a) the PeerKEXPRNGSeed
+		// mechanism used in all existing clients correctly predicts the
+		// server's algorithms; (b) random truncation by the server doesn't
+		// select only new algorithms unknown to existing clients.
+		//
+		// TODO: add a versioning mechanism, such as a SSHv2 capability, to
+		// allow for servers with new algorithm lists, where older clients
+		// won't try to connect to these servers, and new clients know to use
+		// non-legacy lists in the PeerKEXPRNGSeed mechanism.
+		legacyServerKexAlgos := []string{
+			kexAlgoCurve25519SHA256LibSSH,
+			kexAlgoECDH256, kexAlgoECDH384, kexAlgoECDH521,
+			kexAlgoDH14SHA256, kexAlgoDH14SHA1,
+		}
+		legacyServerCiphers := []string{
+			"aes128-gcm@openssh.com",
+			chacha20Poly1305ID,
+			"aes128-ctr", "aes192-ctr", "aes256-ctr",
+		}
+		legacyServerMACs := []string{
+			"hmac-sha2-256-etm@openssh.com",
+			"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96",
+		}
+		legacyServerNoEncryptThenMACs := []string{
+			"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
+
+		isServer := t.config.PeerKEXPRNGSeed == nil
+
 		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
 
-		msg.KexAlgos = selectKexAlgos(PRNG, msg.KexAlgos)
-		ciphers := truncate(PRNG, permute(PRNG, msg.CiphersClientServer))
+		startingKexAlgos := msg.KexAlgos
+		startingCiphers := msg.CiphersClientServer
+		startingMACs := msg.MACsClientServer
+
+		if isServer {
+			startingKexAlgos = legacyServerKexAlgos
+			startingCiphers = legacyServerCiphers
+			startingMACs = legacyServerMACs
+		}
+
+		msg.KexAlgos = selectKexAlgos(PRNG, startingKexAlgos)
+
+		ciphers := truncate(PRNG, permute(PRNG, startingCiphers))
 		msg.CiphersClientServer = ciphers
 		msg.CiphersServerClient = ciphers
-		MACs := truncate(PRNG, permute(PRNG, msg.MACsClientServer))
+
+		MACs := truncate(PRNG, permute(PRNG, startingMACs))
 		msg.MACsClientServer = MACs
 		msg.MACsServerClient = MACs
 
@@ -700,30 +741,42 @@ func (t *handshakeTransport) sendKexInit() error {
 			serverKexAlgos := append(
 				append([]string(nil), preferredKexAlgos...),
 				"kex-strict-s-v00@openssh.com")
+			serverCiphers := preferredCiphers
+			serverMACS := supportedMACs
+			serverNoEncryptThenMACs := noEncryptThenMACs
 
-			peerKexAlgos := selectKexAlgos(PeerPRNG, serverKexAlgos)
+			// Switch to using the legacy algorithms that the server currently
+			// downgrades to (see comment above).
+			//
+			// TODO: for servers without legacy backwards compatibility
+			// concerns, skip the following lines.
+			serverKexAlgos = legacyServerKexAlgos
+			serverCiphers = legacyServerCiphers
+			serverMACS = legacyServerMACs
+			serverNoEncryptThenMACs = legacyServerNoEncryptThenMACs
 
-			if _, err := findCommon("", msg.KexAlgos, peerKexAlgos); err != nil {
-				if kexAlgo, ok := firstKexAlgo(peerKexAlgos); ok {
+			serverKexAlgos = selectKexAlgos(PeerPRNG, serverKexAlgos)
+
+			if _, err := findCommon("", msg.KexAlgos, serverKexAlgos); err != nil {
+				if kexAlgo, ok := firstKexAlgo(serverKexAlgos); ok {
 					msg.KexAlgos = retain(PRNG, msg.KexAlgos, kexAlgo)
 				}
 			}
 
-			peerCiphers := truncate(PeerPRNG, permute(PeerPRNG, preferredCiphers))
-			if _, err := findCommon("", ciphers, peerCiphers); err != nil {
-				ciphers = retain(PRNG, ciphers, peerCiphers[0])
+			serverCiphers = truncate(PeerPRNG, permute(PeerPRNG, serverCiphers))
+			if _, err := findCommon("", ciphers, serverCiphers); err != nil {
+				ciphers = retain(PRNG, ciphers, serverCiphers[0])
 				msg.CiphersClientServer = ciphers
 				msg.CiphersServerClient = ciphers
 			}
 
-			peerMACs := supportedMACs
 			if t.config.NoEncryptThenMACHash {
-				peerMACs = noEncryptThenMACs
+				serverMACS = serverNoEncryptThenMACs
 			}
 
-			peerMACs = truncate(PeerPRNG, permute(PeerPRNG, peerMACs))
-			if _, err := findCommon("", MACs, peerMACs); err != nil {
-				MACs = retain(PRNG, MACs, peerMACs[0])
+			serverMACS = truncate(PeerPRNG, permute(PeerPRNG, serverMACS))
+			if _, err := findCommon("", MACs, serverMACS); err != nil {
+				MACs = retain(PRNG, MACs, serverMACS[0])
 				msg.MACsClientServer = MACs
 				msg.MACsServerClient = MACs
 			}
