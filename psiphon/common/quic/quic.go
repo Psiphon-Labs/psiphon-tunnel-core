@@ -172,6 +172,13 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
+	// Note that WriteTimeoutUDPConn is not used here in the server case, as
+	// the server UDP conn will have many concurrent writers, and each
+	// SetWriteDeadline call by WriteTimeoutUDPConn would extend the deadline
+	// for all existing blocked writers. ObfuscatedPacketConn.Close calls
+	// SetWriteDeadline once to interrupt any blocked writers to ensure a
+	// timely shutdown.
+
 	obfuscatedPacketConn, err := NewServerObfuscatedPacketConn(
 		udpConn, true, false, false, obfuscationKey, seed)
 	if err != nil {
@@ -1098,10 +1105,10 @@ func (conn *muxPacketConn) SetWriteDeadline(t time.Time) error {
 	return errors.TraceNew("not supported")
 }
 
-// SetReadBuffer and SyscallConn provide passthroughs to the underlying
-// net.UDPConn implementations, used to optimize the UDP receive buffer size.
+// SetReadBuffer, SetWriteBuffer, and SyscallConn provide passthroughs to the
+// underlying net.UDPConn implementations, used to optimize UDP buffer sizes.
 // See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
-// and ietf_quic.setReceiveBuffer. Only the IETF stack will access these
+// and ietf_quic.setReceive/SendBuffer. Only the IETF stack will access these
 // functions.
 //
 // Limitation: due to the relayPackets/ReadFrom scheme, this simple
@@ -1116,6 +1123,16 @@ func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
 		return errors.TraceNew("not supported")
 	}
 	return c.SetReadBuffer(bytes)
+}
+
+func (conn *muxPacketConn) SetWriteBuffer(bytes int) error {
+	c, ok := conn.listener.conn.PacketConn.(interface {
+		SetWriteBuffer(int) error
+	})
+	if !ok {
+		return errors.TraceNew("not supported")
+	}
+	return c.SetWriteBuffer(bytes)
 }
 
 func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {

@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
+	lrucache "github.com/cognusion/go-cache-lru"
 )
 
 // ServerContext is a utility struct which holds all of the data associated
@@ -131,6 +132,24 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	if !serverContext.tunnel.dialParams.ServerEntry.HasSignature() {
 		requestedMissingSignature = true
 		params["missing_server_entry_signature"] =
+			serverContext.tunnel.dialParams.ServerEntry.Tag
+	}
+
+	// The server will return a signed copy of its own server entry when the
+	// client specifies this 'missing_server_entry_provider_id' parameter.
+	//
+	// The purpose of this mechanism is to rapidly add provider IDs to the
+	// server entries in client local storage, and to ensure that the client has
+	// a provider ID for its currently connected server as required for the
+	// RestrictDirectProviderIDs, RestrictDirectProviderRegions, and
+	// HoldOffDirectServerEntryProviderRegions tactics.
+	//
+	// The server entry will be included in handshakeResponse.EncodedServerList,
+	// along side discovery servers.
+	requestedMissingProviderID := false
+	if !serverContext.tunnel.dialParams.ServerEntry.HasProviderID() {
+		requestedMissingProviderID = true
+		params["missing_server_entry_provider_id"] =
 			serverContext.tunnel.dialParams.ServerEntry.Tag
 	}
 
@@ -272,13 +291,14 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			return errors.Trace(err)
 		}
 
-		// Retain the original timestamp and source in the requestedMissingSignature
-		// case, as this server entry was not discovered here.
+		// Retain the original timestamp and source in the
+		// requestedMissingSignature and requestedMissingProviderID
+		// cases, as this server entry was not discovered here.
 		//
 		// Limitation: there is a transient edge case where
-		// requestedMissingSignature will be set for a discovery server entry that
-		// _is_ also discovered here.
-		if requestedMissingSignature &&
+		// requestedMissingSignature and/or requestedMissingProviderID will be
+		// set for a discovery server entry that _is_ also discovered here.
+		if requestedMissingSignature || requestedMissingProviderID &&
 			serverEntryFields.GetIPAddress() == serverContext.tunnel.dialParams.ServerEntry.IpAddress {
 
 			serverEntryFields.SetLocalTimestamp(serverContext.tunnel.dialParams.ServerEntry.LocalTimestamp)
@@ -376,6 +396,31 @@ func (serverContext *ServerContext) doHandshakeRequest(
 				// from the server. When SetParameters fails, all
 				// previous tactics values are left in place.
 			}
+		}
+	}
+
+	if serverContext.tunnel.dialParams.steeringIPCacheKey != "" {
+
+		// Cache any received steering IP, which will also extend the TTL for
+		// an existing entry.
+		//
+		// As typical tunnel duration is short and dialing can be challenging,
+		// this established tunnel is retained and the steering IP will be
+		// used on any subsequent dial to the same fronting provider,
+		// assuming the TTL has not expired.
+		//
+		// Note: to avoid TTL expiry for long-lived tunnels, the TTL could be
+		// set or extended at the end of the tunnel lifetime; however that
+		// may result in unintended steering.
+
+		IP := net.ParseIP(handshakeResponse.SteeringIP)
+		if IP != nil && !common.IsBogon(IP) {
+			serverContext.tunnel.dialParams.steeringIPCache.Set(
+				serverContext.tunnel.dialParams.steeringIPCacheKey,
+				handshakeResponse.SteeringIP,
+				lrucache.DefaultExpiration)
+		} else {
+			NoticeInfo("ignoring invalid steering IP")
 		}
 	}
 
@@ -975,6 +1020,7 @@ func getBaseAPIParameters(
 		}
 
 		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+
 			meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
 			if meekResolvedIPAddress != "" {
 				params["meek_resolved_ip_address"] = meekResolvedIPAddress
@@ -1083,7 +1129,13 @@ func getBaseAPIParameters(
 			params["conjure_transport"] = dialParams.ConjureTransport
 		}
 
-		if dialParams.ResolveParameters != nil {
+		usedSteeringIP := false
+		if dialParams.SteeringIP != "" {
+			params["steering_ip"] = dialParams.SteeringIP
+			usedSteeringIP = true
+		}
+
+		if dialParams.ResolveParameters != nil && !usedSteeringIP {
 
 			// Log enough information to distinguish several successful or
 			// failed circumvention cases of interest, including preferring

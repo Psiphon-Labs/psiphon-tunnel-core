@@ -24,6 +24,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/binary"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -42,6 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/net/bpf"
 )
 
@@ -159,6 +161,10 @@ type DialParameters struct {
 
 	HTTPTransformerParameters *transforms.HTTPTransformerParameters
 
+	SteeringIP         string
+	steeringIPCache    *lrucache.Cache `json:"-"`
+	steeringIPCacheKey string          `json:"-"`
+
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
 }
@@ -182,6 +188,7 @@ type DialParameters struct {
 // when establishment is cancelled.
 func MakeDialParameters(
 	config *Config,
+	steeringIPCache *lrucache.Cache,
 	upstreamProxyErrorCallback func(error),
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
@@ -337,12 +344,6 @@ func MakeDialParameters(
 		dialParams = &DialParameters{}
 	}
 
-	// Point to the current resolver to be used in dials.
-	dialParams.resolver = config.GetResolver()
-	if dialParams.resolver == nil {
-		return nil, errors.TraceNew("missing resolver")
-	}
-
 	if isExchanged {
 		// Set isReplay to false to cause all non-exchanged values to be
 		// initialized; this also causes the exchange case to not log as replay.
@@ -352,6 +353,14 @@ func MakeDialParameters(
 	// Set IsExchanged such that full dial parameters are stored and replayed
 	// upon success.
 	dialParams.IsExchanged = false
+
+	// Point to the current resolver to be used in dials.
+	dialParams.resolver = config.GetResolver()
+	if dialParams.resolver == nil {
+		return nil, errors.TraceNew("missing resolver")
+	}
+
+	dialParams.steeringIPCache = steeringIPCache
 
 	dialParams.ServerEntry = serverEntry
 	dialParams.NetworkID = networkID
@@ -428,8 +437,32 @@ func MakeDialParameters(
 	}
 
 	// Skip this candidate when the clients tactics restrict usage of the
+	// provider ID. See the corresponding server-side enforcement comments in
+	// server.TacticsListener.accept.
+	if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
+		(common.Contains(
+			p.Strings(parameters.RestrictDirectProviderIDs),
+			dialParams.ServerEntry.ProviderID) ||
+			common.ContainsAny(
+				p.KeyStrings(parameters.RestrictDirectProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region})) {
+		if p.WeightedCoinFlip(
+			parameters.RestrictDirectProviderIDsClientProbability) {
+
+			// When skipping, return nil/nil as no error should be logged.
+			// NoticeSkipServerEntry emits each skip reason, regardless
+			// of server entry, at most once per session.
+
+			NoticeSkipServerEntry(
+				"restricted provider ID: %s",
+				dialParams.ServerEntry.ProviderID)
+
+			return nil, nil
+		}
+	}
+
+	// Skip this candidate when the clients tactics restrict usage of the
 	// fronting provider ID. See the corresponding server-side enforcement
-	// comments in server.TacticsListener.accept.
+	// comments in server.MeekServer.getSessionOrEndpoint.
 	if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
 		common.Contains(
 			p.Strings(parameters.RestrictFrontingProviderIDs),
@@ -845,6 +878,9 @@ func MakeDialParameters(
 
 	if !isReplay || !replayHoldOffTunnel {
 
+		var holdOffTunnelDuration time.Duration
+		var holdOffDirectTunnelDuration time.Duration
+
 		if common.Contains(
 			p.TunnelProtocols(parameters.HoldOffTunnelProtocols), dialParams.TunnelProtocol) ||
 
@@ -855,12 +891,32 @@ func MakeDialParameters(
 
 			if p.WeightedCoinFlip(parameters.HoldOffTunnelProbability) {
 
-				dialParams.HoldOffTunnelDuration = prng.Period(
+				holdOffTunnelDuration = prng.Period(
 					p.Duration(parameters.HoldOffTunnelMinDuration),
 					p.Duration(parameters.HoldOffTunnelMaxDuration))
 			}
 		}
 
+		if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
+			(common.Contains(
+				p.Strings(parameters.HoldOffDirectServerEntryRegions), serverEntry.Region) ||
+				common.ContainsAny(
+					p.KeyStrings(parameters.HoldOffDirectServerEntryProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region})) {
+
+			if p.WeightedCoinFlip(parameters.HoldOffDirectTunnelProbability) {
+
+				holdOffDirectTunnelDuration = prng.Period(
+					p.Duration(parameters.HoldOffDirectTunnelMinDuration),
+					p.Duration(parameters.HoldOffDirectTunnelMaxDuration))
+			}
+		}
+
+		// Use the longest hold off duration
+		if holdOffTunnelDuration >= holdOffDirectTunnelDuration {
+			dialParams.HoldOffTunnelDuration = holdOffTunnelDuration
+		} else {
+			dialParams.HoldOffTunnelDuration = holdOffDirectTunnelDuration
+		}
 	}
 
 	// OSSH prefix and seed transform are applied only to the OSSH tunnel protocol,
@@ -1095,6 +1151,94 @@ func MakeDialParameters(
 
 	// Initialize Dial/MeekConfigs to be passed to the corresponding dialers.
 
+	var resolveIP func(ctx context.Context, hostname string) ([]net.IP, error)
+
+	// Determine whether to use a steering IP, and whether to indicate that
+	// this dial remains a replay or not.
+	//
+	// Steering IPs are used only for fronted tunnels and not lower-traffic
+	// tactics requests and signalling steps such as Conjure registration.
+	//
+	// The scope of the steering IP, and the corresponding cache key, is the
+	// fronting provider, tunnel protocol, and the current network ID.
+	//
+	// Currently, steering IPs are obtained and cached in the Psiphon API
+	// handshake response. A modest TTL is applied to cache entries, and, in
+	// the case of a failed tunnel, any corresponding cached steering IP is
+	// removed.
+	//
+	// DialParameters.SteeringIP is set and persisted, but is not used to dial
+	// in a replay case; it's used to determine whether this dial should be
+	// classified as a replay or not. A replay dial remains classified as
+	// replay if a steering IP is not used and no steering IP was used
+	// before; or when a steering IP is used and the same steering IP was
+	// used before.
+	//
+	// When a steering IP is used and none was used before, or vice versa,
+	// DialParameters.IsReplay is cleared so that is_replay is reported as
+	// false, since the dial may be very different in nature: using a
+	// different POP; skipping DNS; etc. Even if DialParameters.IsReplay was
+	// true and is cleared, this MakeDialParameters will have wired up all
+	// other dial parameters with replay values, so the benefit of those
+	// values is not lost.
+
+	var previousSteeringIP, currentSteeringIP string
+	if isReplay {
+		previousSteeringIP = dialParams.SteeringIP
+	}
+	dialParams.SteeringIP = ""
+
+	if !isTactics &&
+		protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
+		dialParams.ServerEntry.FrontingProviderID != "" {
+
+		dialParams.steeringIPCacheKey = fmt.Sprintf("%s %s %s",
+			dialParams.NetworkID,
+			dialParams.ServerEntry.FrontingProviderID,
+			dialParams.TunnelProtocol)
+
+		steeringIPValue, ok := dialParams.steeringIPCache.Get(
+			dialParams.steeringIPCacheKey)
+		if ok {
+			currentSteeringIP = steeringIPValue.(string)
+		}
+
+		// A steering IP probability is applied and may be used to gradually
+		// apply steering IPs. The coin flip is made only to decide to start
+		// using a steering IP, avoiding flip flopping between dials. For any
+		// probability > 0.0, a long enough continuous session will
+		// eventually flip to true and then keep using steering IPs as long
+		// as they remain in the cache.
+
+		if previousSteeringIP == "" && currentSteeringIP != "" &&
+			!p.WeightedCoinFlip(parameters.SteeringIPProbability) {
+
+			currentSteeringIP = ""
+		}
+	}
+
+	if currentSteeringIP != "" {
+		IP := net.ParseIP(currentSteeringIP)
+		if IP == nil {
+			return nil, errors.TraceNew("invalid steering IP")
+		}
+
+		// Since tcpDial and NewUDPConn invoke ResolveIP unconditionally, even
+		// when the hostname is an IP address, a steering IP will be applied
+		// even in that case.
+		resolveIP = func(ctx context.Context, hostname string) ([]net.IP, error) {
+			return []net.IP{IP}, nil
+		}
+
+		// dialParams.SteeringIP will be used as the "previous" steering IP in
+		// the next replay.
+		dialParams.SteeringIP = currentSteeringIP
+	}
+
+	if currentSteeringIP != previousSteeringIP {
+		dialParams.IsReplay = false
+	}
+
 	// Custom ResolveParameters are set only when useResolver is true, but
 	// DialConfig.ResolveIP is required and wired up unconditionally. Any
 	// misconfigured or miscoded domain dial cases will use default
@@ -1103,16 +1247,18 @@ func MakeDialParameters(
 	// ResolveIP will use the networkID obtained above, as it will be used
 	// almost immediately, instead of incurring the overhead of calling
 	// GetNetworkID again.
-	resolveIP := func(ctx context.Context, hostname string) ([]net.IP, error) {
-		IPs, err := dialParams.resolver.ResolveIP(
-			ctx,
-			networkID,
-			dialParams.ResolveParameters,
-			hostname)
-		if err != nil {
-			return nil, errors.Trace(err)
+	if resolveIP == nil {
+		resolveIP = func(ctx context.Context, hostname string) ([]net.IP, error) {
+			IPs, err := dialParams.resolver.ResolveIP(
+				ctx,
+				networkID,
+				dialParams.ResolveParameters,
+				hostname)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return IPs, nil
 		}
-		return IPs, nil
 	}
 
 	// Fragmentor configuration.
@@ -1185,6 +1331,7 @@ func MakeDialParameters(
 			MeekObfuscatorPaddingSeed:     dialParams.MeekObfuscatorPaddingSeed,
 			NetworkLatencyMultiplier:      dialParams.NetworkLatencyMultiplier,
 			HTTPTransformerParameters:     dialParams.HTTPTransformerParameters,
+			AdditionalHeaders:             config.MeekAdditionalHeaders,
 		}
 
 		// Use an asynchronous callback to record the resolved IP address when
@@ -1302,6 +1449,16 @@ func (dialParams *DialParameters) Failed(config *Config) {
 		if err != nil {
 			NoticeWarning("DeleteDialParameters failed: %s", err)
 		}
+	}
+
+	// When a failed tunnel dialed with steering IP, remove the corresponding
+	// cache entry to avoid continuously redialing a potentially blocked or
+	// degraded POP.
+	//
+	// TODO: don't remove, but reduce the TTL to allow for one more dial?
+
+	if dialParams.steeringIPCacheKey != "" {
+		dialParams.steeringIPCache.Delete(dialParams.steeringIPCacheKey)
 	}
 }
 

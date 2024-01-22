@@ -311,6 +311,15 @@ const (
 	HoldOffTunnelProtocols                           = "HoldOffTunnelProtocols"
 	HoldOffTunnelFrontingProviderIDs                 = "HoldOffTunnelFrontingProviderIDs"
 	HoldOffTunnelProbability                         = "HoldOffTunnelProbability"
+	HoldOffDirectTunnelMinDuration                   = "HoldOffDirectTunnelMinDuration"
+	HoldOffDirectTunnelMaxDuration                   = "HoldOffDirectTunnelMaxDuration"
+	HoldOffDirectServerEntryRegions                  = "HoldOffDirectServerEntryRegions"
+	HoldOffDirectServerEntryProviderRegions          = "HoldOffDirectServerEntryProviderRegions"
+	HoldOffDirectTunnelProbability                   = "HoldOffDirectTunnelProbability"
+	RestrictDirectProviderIDs                        = "RestrictDirectProviderIDs"
+	RestrictDirectProviderRegions                    = "RestrictDirectProviderRegions"
+	RestrictDirectProviderIDsServerProbability       = "RestrictDirectProviderIDsServerProbability"
+	RestrictDirectProviderIDsClientProbability       = "RestrictDirectProviderIDsClientProbability"
 	RestrictFrontingProviderIDs                      = "RestrictFrontingProviderIDs"
 	RestrictFrontingProviderIDsServerProbability     = "RestrictFrontingProviderIDsServerProbability"
 	RestrictFrontingProviderIDsClientProbability     = "RestrictFrontingProviderIDsClientProbability"
@@ -356,6 +365,9 @@ const (
 	TLSTunnelMaxTLSPadding                           = "TLSTunnelMaxTLSPadding"
 	TLSFragmentClientHelloProbability                = "TLSFragmentClientHelloProbability"
 	TLSFragmentClientHelloLimitProtocols             = "TLSFragmentClientHelloLimitProtocols"
+	SteeringIPCacheTTL                               = "SteeringIPCacheTTL"
+	SteeringIPCacheMaxEntries                        = "SteeringIPCacheMaxEntries"
+	SteeringIPProbability                            = "SteeringIPProbability"
 
 	// Retired parameters
 
@@ -702,6 +714,17 @@ var defaultParameters = map[string]struct {
 	HoldOffTunnelFrontingProviderIDs: {value: []string{}},
 	HoldOffTunnelProbability:         {value: 0.0, minimum: 0.0},
 
+	HoldOffDirectTunnelMinDuration:          {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffDirectTunnelMaxDuration:          {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffDirectServerEntryRegions:         {value: []string{}},
+	HoldOffDirectServerEntryProviderRegions: {value: KeyStrings{}},
+	HoldOffDirectTunnelProbability:          {value: 0.0, minimum: 0.0},
+
+	RestrictDirectProviderIDs:                  {value: []string{}},
+	RestrictDirectProviderRegions:              {value: KeyStrings{}},
+	RestrictDirectProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
+	RestrictDirectProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
+
 	RestrictFrontingProviderIDs:                  {value: []string{}},
 	RestrictFrontingProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	RestrictFrontingProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
@@ -759,6 +782,10 @@ var defaultParameters = map[string]struct {
 
 	TLSFragmentClientHelloProbability:    {value: 0.0, minimum: 0.0},
 	TLSFragmentClientHelloLimitProtocols: {value: protocol.TunnelProtocols{}},
+
+	SteeringIPCacheTTL:        {value: 1 * time.Hour, minimum: time.Duration(0)},
+	SteeringIPCacheMaxEntries: {value: 65536, minimum: 0},
+	SteeringIPProbability:     {value: 1.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -1079,6 +1106,14 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case KeyValues:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case KeyStrings:
 				err := v.Validate()
 				if err != nil {
 					if skipOnError {

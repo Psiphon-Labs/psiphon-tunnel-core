@@ -477,6 +477,10 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(dialParams.UpstreamProxyCustomHeaderNames, ","))
 		}
 
+		if dialParams.ServerEntry.ProviderID != "" {
+			args = append(args, "providerID", dialParams.ServerEntry.ProviderID)
+		}
+
 		if dialParams.FrontingProviderID != "" {
 			args = append(args, "frontingProviderID", dialParams.FrontingProviderID)
 		}
@@ -486,6 +490,7 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 		}
 
 		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+
 			meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
 			if meekResolvedIPAddress != "" {
 				nonredacted := common.EscapeRedactIPAddressString(meekResolvedIPAddress)
@@ -567,7 +572,15 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "conjureTransport", dialParams.ConjureTransport)
 		}
 
-		if dialParams.ResolveParameters != nil {
+		usedSteeringIP := false
+
+		if dialParams.SteeringIP != "" {
+			nonredacted := common.EscapeRedactIPAddressString(dialParams.SteeringIP)
+			args = append(args, "steeringIP", nonredacted)
+			usedSteeringIP = true
+		}
+
+		if dialParams.ResolveParameters != nil && !usedSteeringIP {
 
 			// See dialParams.ResolveParameters comment in getBaseAPIParameters.
 

@@ -177,7 +177,8 @@ var handshakeRequestParams = append(
 			[]requestParamSpec{
 				// Legacy clients may not send "session_id" in handshake
 				{"session_id", isHexDigits, requestParamOptional},
-				{"missing_server_entry_signature", isBase64String, requestParamOptional}},
+				{"missing_server_entry_signature", isBase64String, requestParamOptional},
+				{"missing_server_entry_provider_id", isBase64String, requestParamOptional}},
 			baseParams...),
 		baseDialParams...),
 	tacticsParams...)
@@ -351,17 +352,27 @@ func handshakeAPIRequestHandler(
 			calculateDiscoveryValue(support.Config.DiscoveryValueHMACKey, clientIP))
 	}
 
-	// When the client indicates that it used an unsigned server entry for this
-	// connection, return a signed copy of the server entry for the client to
-	// upgrade to. See also: comment in psiphon.doHandshakeRequest.
+	// When the client indicates that it used an out-of-date server entry for
+	// this connection, return a signed copy of the server entry for the client
+	// to upgrade to. Out-of-date server entries are either unsigned or missing
+	// a provider ID. See also: comment in psiphon.doHandshakeRequest.
 	//
 	// The missing_server_entry_signature parameter value is a server entry tag,
 	// which is used to select the correct server entry for servers with multiple
 	// entries. Identifying the server entries tags instead of server IPs prevents
 	// an enumeration attack, where a malicious client can abuse this facilty to
 	// check if an arbitrary IP address is a Psiphon server.
+	//
+	// The missing_server_entry_provider_id parameter value is a server entry
+	// tag.
 	serverEntryTag, ok := getOptionalStringRequestParam(
 		params, "missing_server_entry_signature")
+	if !ok {
+		// Do not need to check this case if we'll already return the server
+		// entry due to a missing signature.
+		serverEntryTag, ok = getOptionalStringRequestParam(
+			params, "missing_server_entry_provider_id")
+	}
 	if ok {
 		ownServerEntry, ok := support.Config.GetOwnEncodedServerEntry(serverEntryTag)
 		if ok {
@@ -390,6 +401,7 @@ func handshakeAPIRequestHandler(
 		TacticsPayload:           marshaledTacticsPayload,
 		UpstreamBytesPerSecond:   handshakeStateInfo.upstreamBytesPerSecond,
 		DownstreamBytesPerSecond: handshakeStateInfo.downstreamBytesPerSecond,
+		SteeringIP:               handshakeStateInfo.steeringIP,
 		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
@@ -961,6 +973,7 @@ var baseDialParams = []requestParamSpec{
 	{"tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},
 	{"tls_ossh_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"steering_ip", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.

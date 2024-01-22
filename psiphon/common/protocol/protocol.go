@@ -272,6 +272,16 @@ func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH
 }
 
+func TunnelProtocolIsDirect(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_SSH ||
+		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
+		protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH
+}
+
 func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
@@ -590,6 +600,7 @@ type HandshakeResponse struct {
 	TacticsPayload           json.RawMessage     `json:"tactics_payload"`
 	UpstreamBytesPerSecond   int64               `json:"upstream_bytes_per_second"`
 	DownstreamBytesPerSecond int64               `json:"downstream_bytes_per_second"`
+	SteeringIP               string              `json:"steering_ip"`
 	Padding                  string              `json:"padding"`
 }
 

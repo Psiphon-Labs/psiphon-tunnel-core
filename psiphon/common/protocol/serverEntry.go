@@ -33,6 +33,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -61,6 +62,7 @@ type ServerEntry struct {
 	SshObfuscatedKey                string   `json:"sshObfuscatedKey"`
 	Capabilities                    []string `json:"capabilities"`
 	Region                          string   `json:"region"`
+	ProviderID                      string   `json:"providerID"`
 	FrontingProviderID              string   `json:"frontingProviderID"`
 	TlsOSSHPort                     int      `json:"tlsOSSHPort"`
 	MeekServerPort                  int      `json:"meekServerPort"`
@@ -674,7 +676,7 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 
 	case TUNNEL_PROTOCOL_FRONTED_MEEK,
 		TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH:
-		return 443, nil
+		return int(atomic.LoadInt32(&frontedMeekHTTPSDialPortNumber)), nil
 
 	case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
 		return 80, nil
@@ -686,6 +688,15 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 	}
 
 	return 0, errors.TraceNew("unknown protocol")
+}
+
+var frontedMeekHTTPSDialPortNumber = int32(443)
+
+// SetFrontedMeekHTTPDialPortNumber sets the FRONTED-MEEK-OSSH dial port
+// number, which defaults to 443. Overriding the port number enables running
+// test servers where binding to port 443 is not possible.
+func SetFrontedMeekHTTPDialPortNumber(port int) {
+	atomic.StoreInt32(&frontedMeekHTTPSDialPortNumber, int32(port))
 }
 
 // GetSupportedTacticsProtocols returns a list of tunnel protocols,
@@ -734,6 +745,10 @@ func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 
 func (serverEntry *ServerEntry) HasSignature() bool {
 	return serverEntry.Signature != ""
+}
+
+func (serverEntry *ServerEntry) HasProviderID() bool {
+	return serverEntry.ProviderID != ""
 }
 
 func (serverEntry *ServerEntry) GetDiagnosticID() string {

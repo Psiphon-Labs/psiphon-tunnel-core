@@ -21,7 +21,7 @@ package transforms
 
 import (
 	"bytes"
-	stderrors "errors"
+	std_errors "errors"
 	"io"
 	"net"
 	"net/textproto"
@@ -50,7 +50,7 @@ const (
 	rangeHeader               = "Range"
 )
 
-var ErrPassthroughActive = stderrors.New("passthrough")
+var ErrPassthroughActive = std_errors.New("passthrough")
 
 // HTTPNormalizer wraps a net.Conn, intercepting Read calls, and normalizes any
 // HTTP requests that are read. The HTTP request components preceeding the body
