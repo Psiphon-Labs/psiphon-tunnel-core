@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
@@ -461,7 +462,9 @@ type Config struct {
 	periodicGarbageCollection                      time.Duration
 	stopEstablishTunnelsEstablishedClientThreshold int
 	dumpProfilesOnStopEstablishTunnelsDone         int32
+	providerID                                     string
 	frontingProviderID                             string
+	region                                         string
 	runningProtocols                               []string
 }
 
@@ -529,10 +532,20 @@ func (config *Config) GetOwnEncodedServerEntry(serverEntryTag string) (string, b
 	return serverEntry, ok
 }
 
+// GetProviderID returns the provider ID associated with the server.
+func (config *Config) GetProviderID() string {
+	return config.providerID
+}
+
 // GetFrontingProviderID returns the fronting provider ID associated with the
 // server's fronted protocol(s).
 func (config *Config) GetFrontingProviderID() string {
 	return config.frontingProviderID
+}
+
+// GetRegion returns the region associated with the server.
+func (config *Config) GetRegion() string {
+	return config.region
 }
 
 // GetRunningProtocols returns the list of protcols this server is running.
@@ -716,10 +729,20 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			return nil, errors.Tracef(
 				"protocol.DecodeServerEntry failed: %s", err)
 		}
+		if config.providerID == "" {
+			config.providerID = serverEntry.ProviderID
+		} else if config.providerID != serverEntry.ProviderID {
+			return nil, errors.Tracef("unsupported multiple ProviderID values")
+		}
 		if config.frontingProviderID == "" {
 			config.frontingProviderID = serverEntry.FrontingProviderID
 		} else if config.frontingProviderID != serverEntry.FrontingProviderID {
 			return nil, errors.Tracef("unsupported multiple FrontingProviderID values")
+		}
+		if config.region == "" {
+			config.region = serverEntry.Region
+		} else if config.region != serverEntry.Region {
+			return nil, errors.Tracef("unsupported multiple Region values")
 		}
 	}
 
@@ -1141,6 +1164,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SshObfuscatedKey:              obfuscatedSSHKey,
 		Capabilities:                  capabilities,
 		Region:                        "US",
+		ProviderID:                    prng.HexString(8),
 		MeekServerPort:                meekPort,
 		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             meekObfuscatedKey,

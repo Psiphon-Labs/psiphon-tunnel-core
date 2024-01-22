@@ -20,14 +20,18 @@
 package server
 
 import (
+	std_errors "errors"
 	"net"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
+
+var errRestrictedProvider = std_errors.New("restricted provider")
 
 // TacticsListener wraps a net.Listener and applies server-side implementation
 // of certain tactics parameters to accepted connections. Tactics filtering is
@@ -92,6 +96,42 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 	if p.IsNil() {
 		// No tactics are configured; use the accepted conn without customization.
 		return conn, nil
+	}
+
+	// Disconnect immediately if the tactics for the client restricts usage of
+	// the provider ID with direct protocols. The probability may be used to
+	// influence usage of a given provider with direct protocols; but when only
+	// that provider works for a given client, and the probability is less than
+	// 1.0, the client can  retry until it gets a successful coin flip.
+	//
+	// Clients will also skip direct protocol candidates with restricted
+	// provider IDs.
+	// The client-side probability, RestrictDirectProviderIDsClientProbability,
+	// is applied independently of the server-side coin flip here.
+	//
+	// The selected tactics are for the immediate peer IP and therefore must
+	// not be applied to clients using indirect protocols, where the immediate
+	// peer IP is not the original client IP. Indirect protocols must determine
+	// the original client IP before applying GeoIP specific tactics; see the
+	// server-side enforcement of RestrictFrontingProviderIDs for fronted meek
+	// in server.MeekServer.getSessionOrEndpoint.
+	//
+	// At this stage, GeoIP tactics filters are active, but handshake API
+	// parameters are not.
+	//
+	// See the comment in server.LoadConfig regarding provider ID limitations.
+	if protocol.TunnelProtocolIsDirect(listener.tunnelProtocol) &&
+		(common.Contains(
+			p.Strings(parameters.RestrictDirectProviderIDs),
+			listener.support.Config.GetProviderID()) ||
+			common.ContainsAny(
+				p.KeyStrings(parameters.RestrictDirectProviderRegions, listener.support.Config.GetProviderID()), []string{"", listener.support.Config.GetRegion()})) {
+
+		if p.WeightedCoinFlip(
+			parameters.RestrictDirectProviderIDsServerProbability) {
+			conn.Close()
+			return nil, errRestrictedProvider
+		}
 	}
 
 	// Server-side fragmentation may be synchronized with client-side in two ways.

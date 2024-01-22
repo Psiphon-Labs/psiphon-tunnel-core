@@ -172,6 +172,13 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
+	// Note that WriteTimeoutUDPConn is not used here in the server case, as
+	// the server UDP conn will have many concurrent writers, and each
+	// SetWriteDeadline call by WriteTimeoutUDPConn would extend the deadline
+	// for all existing blocked writers. ObfuscatedPacketConn.Close calls
+	// SetWriteDeadline once to interrupt any blocked writers to ensure a
+	// timely shutdown.
+
 	obfuscatedPacketConn, err := NewServerObfuscatedPacketConn(
 		udpConn, true, false, false, obfuscationKey, seed)
 	if err != nil {

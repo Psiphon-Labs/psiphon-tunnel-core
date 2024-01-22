@@ -21,7 +21,7 @@ package transforms
 
 import (
 	"bytes"
-	stderrors "errors"
+	std_errors "errors"
 	"io"
 	"net"
 	"strings"
@@ -143,7 +143,7 @@ func runHTTPNormalizerTest(tt *httpNormalizerTest, useNormalizer bool) error {
 		// Subsequent writes should not impact conn or passthroughConn
 
 		_, err = normalizer.Write([]byte("ignored"))
-		if !stderrors.Is(err, ErrPassthroughActive) {
+		if !std_errors.Is(err, ErrPassthroughActive) {
 			return errors.Tracef("expected error io.EOF but got %v", err)
 		}
 
@@ -230,20 +230,20 @@ func TestHTTPNormalizerHTTPRequest(t *testing.T) {
 			headerOrder:  []string{"Host", "Content-Length"},
 			wantOutput:   "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 4\r\n\r\nabcd",
 			chunkSize:    1,
-			connReadErrs: []error{stderrors.New("err1"), stderrors.New("err2")},
+			connReadErrs: []error{std_errors.New("err1"), std_errors.New("err2")},
 		},
 		{
 			name:       "Content-Length missing",
 			input:      "POST / HTTP/1.1\r\n\r\nabcd",
 			wantOutput: "POST / HTTP/1.1\r\n\r\nabcd", // set to ensure all bytes are read
-			wantError:  stderrors.New("Content-Length missing"),
+			wantError:  std_errors.New("Content-Length missing"),
 			chunkSize:  1,
 		},
 		{
 			name:       "invalid Content-Length header value",
 			input:      "POST / HTTP/1.1\r\nContent-Length: X\r\n\r\nabcd",
 			wantOutput: "POST / HTTP/1.1\r\nContent-Length: X\r\nHost: example.com\r\n\r\nabcd", // set to ensure all bytes are read
-			wantError:  stderrors.New("strconv.ParseUint: parsing \"X\": invalid syntax"),
+			wantError:  std_errors.New("strconv.ParseUint: parsing \"X\": invalid syntax"),
 			chunkSize:  1,
 		},
 		{
@@ -330,7 +330,7 @@ func TestHTTPNormalizerHTTPRequest(t *testing.T) {
 			maxHeaderSize: 47, // up to end of Cookie header
 			wantOutput:    "POST / HTTP/1.1\r\nContent-Length: 4\r\nCookie: X\r\nRange: 1234 \r\n\r\nabcd",
 			chunkSize:     1,
-			wantError:     stderrors.New("exceeds maxReqLineAndHeadersSize"),
+			wantError:     std_errors.New("exceeds maxReqLineAndHeadersSize"),
 		},
 	}
 
@@ -424,7 +424,7 @@ func TestHTTPNormalizerHTTPServer(t *testing.T) {
 				if string(cookie) == "valid" {
 					return []byte(validateMeekCookieResult), nil
 				}
-				return nil, stderrors.New("invalid cookie")
+				return nil, std_errors.New("invalid cookie")
 			}
 			normalizer.HeaderWriteOrder = []string{"Host", "Cookie", "Content-Length"}
 
@@ -469,7 +469,7 @@ func TestHTTPNormalizerHTTPServer(t *testing.T) {
 
 				_, err = conn.Write([]byte(listenerType))
 				if err != nil {
-					if stderrors.Is(err, ErrPassthroughActive) {
+					if std_errors.Is(err, ErrPassthroughActive) {
 						return
 					}
 					recv <- &listenerState{

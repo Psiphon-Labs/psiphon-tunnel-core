@@ -22,7 +22,7 @@ package server
 import (
 	"bytes"
 	"context"
-	stderrors "errors"
+	std_errors "errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -135,7 +135,7 @@ func runProtocolDemuxTest(tt *protocolDemuxTest) error {
 		defer close(runErr)
 
 		err := mux.run()
-		if err != nil && !stderrors.Is(err, context.Canceled) {
+		if err != nil && !std_errors.Is(err, context.Canceled) {
 			runErr <- err
 		}
 	}()
@@ -153,7 +153,7 @@ func runProtocolDemuxTest(tt *protocolDemuxTest) error {
 	}
 
 	err = <-runErr
-	if err != nil && !stderrors.Is(err, net.ErrClosed) {
+	if err != nil && !std_errors.Is(err, net.ErrClosed) {
 		return errors.Trace(err)
 	}
 
@@ -398,7 +398,7 @@ func (c *testConn) Read(b []byte) (n int, err error) {
 }
 
 func (c *testConn) Write(b []byte) (n int, err error) {
-	return 0, stderrors.New("not supported")
+	return 0, std_errors.New("not supported")
 }
 
 func (c *testConn) Close() error {
