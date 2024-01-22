@@ -683,7 +683,7 @@ func (t *handshakeTransport) sendKexInit() error {
 		legacyServerNoEncryptThenMACs := []string{
 			"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
 
-		isServer := t.config.PeerKEXPRNGSeed == nil
+		isServer := len(t.hostKeys) > 0
 
 		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
 
@@ -707,7 +707,7 @@ func (t *handshakeTransport) sendKexInit() error {
 		msg.MACsClientServer = MACs
 		msg.MACsServerClient = MACs
 
-		if len(t.hostKeys) > 0 {
+		if isServer {
 			msg.ServerHostKeyAlgos = permute(PRNG, msg.ServerHostKeyAlgos)
 		} else {
 			// Must offer KeyAlgoRSA to Psiphon server.
@@ -717,7 +717,7 @@ func (t *handshakeTransport) sendKexInit() error {
 				KeyAlgoRSA)
 		}
 
-		if t.config.PeerKEXPRNGSeed != nil {
+		if !isServer && t.config.PeerKEXPRNGSeed != nil {
 
 			// Generate the peer KEX and make adjustments if negotiation would
 			// fail. This assumes that PeerKEXPRNGSeed remains static (in
