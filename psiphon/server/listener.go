@@ -121,11 +121,8 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 	//
 	// See the comment in server.LoadConfig regarding provider ID limitations.
 	if protocol.TunnelProtocolIsDirect(listener.tunnelProtocol) &&
-		(common.Contains(
-			p.Strings(parameters.RestrictDirectProviderIDs),
-			listener.support.Config.GetProviderID()) ||
-			common.ContainsAny(
-				p.KeyStrings(parameters.RestrictDirectProviderRegions, listener.support.Config.GetProviderID()), []string{"", listener.support.Config.GetRegion()})) {
+		common.ContainsAny(
+			p.KeyStrings(parameters.RestrictDirectProviderRegions, listener.support.Config.GetProviderID()), []string{"", listener.support.Config.GetRegion()}) {
 
 		if p.WeightedCoinFlip(
 			parameters.RestrictDirectProviderIDsServerProbability) {
