@@ -311,18 +311,16 @@ const (
 	HoldOffTunnelProtocols                           = "HoldOffTunnelProtocols"
 	HoldOffTunnelFrontingProviderIDs                 = "HoldOffTunnelFrontingProviderIDs"
 	HoldOffTunnelProbability                         = "HoldOffTunnelProbability"
-	HoldOffDirectTunnelMinDuration                   = "HoldOffDirectTunnelMinDuration"
-	HoldOffDirectTunnelMaxDuration                   = "HoldOffDirectTunnelMaxDuration"
-	HoldOffDirectServerEntryRegions                  = "HoldOffDirectServerEntryRegions"
-	HoldOffDirectServerEntryProviderRegions          = "HoldOffDirectServerEntryProviderRegions"
-	HoldOffDirectTunnelProbability                   = "HoldOffDirectTunnelProbability"
-	RestrictDirectProviderIDs                        = "RestrictDirectProviderIDs"
-	RestrictDirectProviderRegions                    = "RestrictDirectProviderRegions"
-	RestrictDirectProviderIDsServerProbability       = "RestrictDirectProviderIDsServerProbability"
-	RestrictDirectProviderIDsClientProbability       = "RestrictDirectProviderIDsClientProbability"
 	RestrictFrontingProviderIDs                      = "RestrictFrontingProviderIDs"
 	RestrictFrontingProviderIDsServerProbability     = "RestrictFrontingProviderIDsServerProbability"
 	RestrictFrontingProviderIDsClientProbability     = "RestrictFrontingProviderIDsClientProbability"
+	HoldOffDirectTunnelMinDuration                   = "HoldOffDirectTunnelMinDuration"
+	HoldOffDirectTunnelMaxDuration                   = "HoldOffDirectTunnelMaxDuration"
+	HoldOffDirectTunnelProviderRegions               = "HoldOffDirectTunnelProviderRegions"
+	HoldOffDirectTunnelProbability                   = "HoldOffDirectTunnelProbability"
+	RestrictDirectProviderRegions                    = "RestrictDirectProviderRegions"
+	RestrictDirectProviderIDsServerProbability       = "RestrictDirectProviderIDsServerProbability"
+	RestrictDirectProviderIDsClientProbability       = "RestrictDirectProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources          = "UpstreamProxyAllowAllServerEntrySources"
 	DestinationBytesMetricsASN                       = "DestinationBytesMetricsASN"
 	DNSResolverAttemptsPerServer                     = "DNSResolverAttemptsPerServer"
@@ -711,20 +709,18 @@ var defaultParameters = map[string]struct {
 	HoldOffTunnelFrontingProviderIDs: {value: []string{}},
 	HoldOffTunnelProbability:         {value: 0.0, minimum: 0.0},
 
-	HoldOffDirectTunnelMinDuration:          {value: time.Duration(0), minimum: time.Duration(0)},
-	HoldOffDirectTunnelMaxDuration:          {value: time.Duration(0), minimum: time.Duration(0)},
-	HoldOffDirectServerEntryRegions:         {value: []string{}},
-	HoldOffDirectServerEntryProviderRegions: {value: KeyStrings{}},
-	HoldOffDirectTunnelProbability:          {value: 0.0, minimum: 0.0},
-
-	RestrictDirectProviderIDs:                  {value: []string{}},
-	RestrictDirectProviderRegions:              {value: KeyStrings{}},
-	RestrictDirectProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
-	RestrictDirectProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
-
 	RestrictFrontingProviderIDs:                  {value: []string{}},
 	RestrictFrontingProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	RestrictFrontingProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
+
+	HoldOffDirectTunnelMinDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffDirectTunnelMaxDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffDirectTunnelProviderRegions: {value: KeyStrings{}},
+	HoldOffDirectTunnelProbability:     {value: 0.0, minimum: 0.0},
+
+	RestrictDirectProviderRegions:              {value: KeyStrings{}},
+	RestrictDirectProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
+	RestrictDirectProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
 
 	UpstreamProxyAllowAllServerEntrySources: {value: false},
 
