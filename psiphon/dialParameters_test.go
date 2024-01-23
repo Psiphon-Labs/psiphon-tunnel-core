@@ -85,9 +85,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	providerID := prng.HexString(8)
 	frontingProviderID := prng.HexString(8)
 
-	var holdOffDirectServerEntryProviderRegions parameters.KeyStrings
+	var holdOffDirectTunnelProviderRegions parameters.KeyStrings
 	if tunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK {
-		holdOffDirectServerEntryProviderRegions = map[string][]string{providerID: {""}}
+		holdOffDirectTunnelProviderRegions = map[string][]string{providerID: {""}}
 	}
 
 	applyParameters := make(map[string]interface{})
@@ -100,7 +100,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.HoldOffTunnelProbability] = 1.0
 	applyParameters[parameters.HoldOffDirectTunnelMinDuration] = "1ms"
 	applyParameters[parameters.HoldOffDirectTunnelMaxDuration] = "10ms"
-	applyParameters[parameters.HoldOffDirectTunnelProviderRegions] = holdOffDirectServerEntryProviderRegions
+	applyParameters[parameters.HoldOffDirectTunnelProviderRegions] = holdOffDirectTunnelProviderRegions
 	applyParameters[parameters.HoldOffDirectTunnelProbability] = 1.0
 	applyParameters[parameters.DNSResolverAlternateServers] = []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"}
 	applyParameters[parameters.DirectHTTPProtocolTransformProbability] = 1.0
@@ -247,14 +247,14 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	expectHoldOffTunnelProtocols := common.Contains(holdOffTunnelProtocols, tunnelProtocol)
 	expectHoldOffTunnelFrontingProviderIDs := protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol)
-	expectHoldOffDirectServerEntryProviderRegion := protocol.TunnelProtocolIsDirect(tunnelProtocol) &&
+	expectHoldOffDirectTunnelProviderRegion := protocol.TunnelProtocolIsDirect(tunnelProtocol) &&
 		common.ContainsAny(
-			holdOffDirectServerEntryProviderRegions[dialParams.ServerEntry.ProviderID],
+			holdOffDirectTunnelProviderRegions[dialParams.ServerEntry.ProviderID],
 			[]string{"", dialParams.ServerEntry.Region})
 
 	if expectHoldOffTunnelProtocols ||
 		expectHoldOffTunnelFrontingProviderIDs ||
-		expectHoldOffDirectServerEntryProviderRegion {
+		expectHoldOffDirectTunnelProviderRegion {
 		if dialParams.HoldOffTunnelDuration < 1*time.Millisecond ||
 			dialParams.HoldOffTunnelDuration > 10*time.Millisecond {
 			t.Fatalf("unexpected hold-off duration: %v", dialParams.HoldOffTunnelDuration)
