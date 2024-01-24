@@ -440,11 +440,8 @@ func MakeDialParameters(
 	// provider ID. See the corresponding server-side enforcement comments in
 	// server.TacticsListener.accept.
 	if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
-		(common.Contains(
-			p.Strings(parameters.RestrictDirectProviderIDs),
-			dialParams.ServerEntry.ProviderID) ||
-			common.ContainsAny(
-				p.KeyStrings(parameters.RestrictDirectProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region})) {
+		common.ContainsAny(
+			p.KeyStrings(parameters.RestrictDirectProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
 		if p.WeightedCoinFlip(
 			parameters.RestrictDirectProviderIDsClientProbability) {
 
@@ -898,10 +895,8 @@ func MakeDialParameters(
 		}
 
 		if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
-			(common.Contains(
-				p.Strings(parameters.HoldOffDirectServerEntryRegions), serverEntry.Region) ||
-				common.ContainsAny(
-					p.KeyStrings(parameters.HoldOffDirectServerEntryProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region})) {
+			common.ContainsAny(
+				p.KeyStrings(parameters.HoldOffDirectTunnelProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
 
 			if p.WeightedCoinFlip(parameters.HoldOffDirectTunnelProbability) {
 
