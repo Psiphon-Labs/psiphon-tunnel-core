@@ -13,10 +13,12 @@ github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7 h1:Hx/NCZTnvoKZu
 github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7/go.mod h1:alTtZBo3j4AWFvUrAH6F5ZaHcTj4G5Y01nHz8dkU6vU=
 github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464 h1:VmnMMMheFXwLV0noxYhbJbLmkV4iaVW3xNnj6xcCNHo=
 github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464/go.mod h1:Pe5BqN2DdIdChorAXl6bDaQd/wghpCleJfid2NoSli0=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240129160049-e465a08acc16 h1:/uzNbDLPVhmeTieLzcTVYQ9W2m88wcg5Zp3e1rwUfLg=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240129160049-e465a08acc16/go.mod h1:MzvOK7DlXAkfZ7wrgwQmBoBsbo22c9qaz2JYlEXwoTk=
 github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20231117202359-5544003bda6f h1:x33cklt4AZ9K8a9EpmFLjIxjZwPXeWWb124OYstlTmA=
 github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20231117202359-5544003bda6f/go.mod h1:f6akxitY5DYvGtbI+LkDSvw0bctE75P63bX6nb0V+eg=
-github.com/Psiphon-Labs/quic-go v0.0.0-20231117205605-756d3e334a3b h1:5pmQY2Fqucs10whrTUFhTO/7xl4uysLV2+OvfmQoBpU=
-github.com/Psiphon-Labs/quic-go v0.0.0-20231117205605-756d3e334a3b/go.mod h1:Wb77BjnG/Khoag8bfLRnFA4TyT8C9+xAwcmVGGB3Ob0=
+github.com/Psiphon-Labs/quic-go v0.0.0-20240130155801-3197a7943511 h1:G9W0L5vPAUTe3q6WsfiPHWyOR77IPF1WQczrbcpFuvU=
+github.com/Psiphon-Labs/quic-go v0.0.0-20240130155801-3197a7943511/go.mod h1:r1tG/07t55w+vAQ+y4uYSNLWlkXAPYNknfLw/ketvOQ=
 github.com/Psiphon-Labs/tls-tris v0.0.0-20230824155421-58bf6d336a9a h1:BOfU6ghaMsT/c40sWHmf3PXNwIendYXzL6tRv6NbPog=
 github.com/Psiphon-Labs/tls-tris v0.0.0-20230824155421-58bf6d336a9a/go.mod h1:v3y9GXFo9Sf2mO6auD2ExGG7oDgrK8TI7eb49ZnUxrE=
 github.com/andybalholm/brotli v1.0.5 h1:8uQZIdzKmjc/iuPu7O2ioW48L81FgatrcpfFmiq/cCs=

@@ -4,15 +4,16 @@ package qtls
 
 import (
 	"bytes"
-	"crypto/tls"
 	"fmt"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
 )
 
 type (
 	QUICConn                 = tls.QUICConn
 	QUICConfig               = tls.QUICConfig
+	ExtraConfig              = tls.ExtraConfig
 	QUICEvent                = tls.QUICEvent
 	QUICEventKind            = tls.QUICEventKind
 	QUICEncryptionLevel      = tls.QUICEncryptionLevel
@@ -156,4 +157,10 @@ func SendSessionTicket(c *QUICConn, allow0RTT bool) error {
 	return c.SendSessionTicket(tls.QUICSessionTicketOptions{
 		EarlyData: allow0RTT,
 	})
+}
+
+// [Psiphon]
+
+func ReadClientHelloRandom(data []byte) ([]byte, error) {
+	return tls.ReadClientHelloRandom(data)
 }

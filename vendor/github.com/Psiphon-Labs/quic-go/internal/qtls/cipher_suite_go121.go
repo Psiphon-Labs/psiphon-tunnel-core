@@ -5,9 +5,10 @@ package qtls
 import (
 	"crypto"
 	"crypto/cipher"
-	"crypto/tls"
 	"fmt"
 	"unsafe"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 )
 
 type cipherSuiteTLS13 struct {
@@ -17,16 +18,16 @@ type cipherSuiteTLS13 struct {
 	Hash   crypto.Hash
 }
 
-//go:linkname cipherSuiteTLS13ByID crypto/tls.cipherSuiteTLS13ByID
+//go:linkname cipherSuiteTLS13ByID github.com/Psiphon-Labs/psiphon-tls.cipherSuiteTLS13ByID
 func cipherSuiteTLS13ByID(id uint16) *cipherSuiteTLS13
 
-//go:linkname cipherSuitesTLS13 crypto/tls.cipherSuitesTLS13
+//go:linkname cipherSuitesTLS13 github.com/Psiphon-Labs/psiphon-tls.cipherSuitesTLS13
 var cipherSuitesTLS13 []unsafe.Pointer
 
-//go:linkname defaultCipherSuitesTLS13 crypto/tls.defaultCipherSuitesTLS13
+//go:linkname defaultCipherSuitesTLS13 github.com/Psiphon-Labs/psiphon-tls.defaultCipherSuitesTLS13
 var defaultCipherSuitesTLS13 []uint16
 
-//go:linkname defaultCipherSuitesTLS13NoAES crypto/tls.defaultCipherSuitesTLS13NoAES
+//go:linkname defaultCipherSuitesTLS13NoAES github.com/Psiphon-Labs/psiphon-tls.defaultCipherSuitesTLS13NoAES
 var defaultCipherSuitesTLS13NoAES []uint16
 
 var cipherSuitesModified bool

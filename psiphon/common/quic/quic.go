@@ -254,7 +254,10 @@ func Listen(
 			return nil, errors.Trace(err)
 		}
 
-		quicListener = &ietfQUICListener{Listener: listener}
+		quicListener = &ietfQUICListener{
+			Listener:  listener,
+			transport: tr,
+		}
 
 	} else {
 
@@ -343,12 +346,6 @@ func (listener *Listener) Accept() (net.Conn, error) {
 }
 
 func (listener *Listener) Close() error {
-
-	// First close the underlying packet conn to ensure all quic-go goroutines
-	// as well as any blocking Accept call goroutine is interrupted. Note
-	// that muxListener does this as well, so this is for the IETF-only case.
-	_ = listener.obfuscatedPacketConn.Close()
-
 	return listener.quicListener.Close()
 }
 
@@ -907,6 +904,7 @@ type quicRoundTripper interface {
 
 type ietfQUICListener struct {
 	*ietf_quic.Listener
+	transport *ietf_quic.Transport
 }
 
 func (l *ietfQUICListener) Accept() (quicConnection, error) {
@@ -917,6 +915,12 @@ func (l *ietfQUICListener) Accept() (quicConnection, error) {
 		return nil, errors.Trace(err)
 	}
 	return &ietfQUICConnection{Connection: connection}, nil
+}
+
+func (l *ietfQUICListener) Close() error {
+	// All quic-go goroutines will be stopped when the transport is closed.
+	// https://github.com/quic-go/quic-go/issues/3962
+	return l.transport.Close()
 }
 
 type ietfQUICConnection struct {
@@ -1198,7 +1202,10 @@ func newMuxListener(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	listener.ietfQUICListener = &ietfQUICListener{Listener: il}
+	listener.ietfQUICListener = &ietfQUICListener{
+		Listener:  il,
+		transport: tr,
+	}
 
 	listener.gQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 

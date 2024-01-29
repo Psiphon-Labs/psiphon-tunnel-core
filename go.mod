@@ -10,7 +10,7 @@ require (
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/quic-go v0.0.0-20231117205605-756d3e334a3b
+	github.com/Psiphon-Labs/quic-go v0.0.0-20240130155801-3197a7943511
 	github.com/Psiphon-Labs/tls-tris v0.0.0-20230824155421-58bf6d336a9a
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
@@ -53,6 +53,7 @@ require (
 	filippo.io/keygen v0.0.0-20230306160926-5201437acf8e // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20170702084017-28f7e881ca57 // indirect
 	github.com/BurntSushi/toml v1.3.2 // indirect
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240129160049-e465a08acc16 // indirect
 	github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20231117202359-5544003bda6f // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

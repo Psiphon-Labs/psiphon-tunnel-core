@@ -106,14 +106,18 @@ func NewCryptoSetupClient(
 
 	tlsConf = tlsConf.Clone()
 	tlsConf.MinVersion = tls.VersionTLS13
-	quicConf := &qtls.QUICConfig{TLSConfig: tlsConf}
+	quicConf := &qtls.QUICConfig{
+		TLSConfig: tlsConf,
+
+		// [Psiphon]
+		ExtraConfig: &qtls.ExtraConfig{
+			ClientHelloPRNG:      clientHelloPRNG,
+			GetClientHelloRandom: getClientHelloRandom,
+		},
+	}
 	qtls.SetupConfigForClient(quicConf, cs.marshalDataForSessionState, cs.handleDataFromSessionState)
 	cs.tlsConf = tlsConf
 	cs.allow0RTT = enable0RTT
-
-	// [Psiphon]
-	quicConf.ExtraConfig.ClientHelloPRNG = clientHelloPRNG
-	quicConf.ExtraConfig.GetClientHelloRandom = getClientHelloRandom
 
 	cs.conn = qtls.QUICClient(quicConf)
 	cs.conn.SetTransportParameters(cs.ourParams.Marshal(protocol.PerspectiveClient, clientHelloPRNG))
