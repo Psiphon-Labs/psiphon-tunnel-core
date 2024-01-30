@@ -33,8 +33,8 @@ require (
 	github.com/oschwald/maxminddb-golang v1.12.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/pion/sctp v1.8.8
-	github.com/refraction-networking/conjure v0.7.10-0.20231110193225-e4749a9dedc9
-	github.com/refraction-networking/gotapdance v1.7.7
+	github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
+	github.com/refraction-networking/gotapdance v1.7.10
 	github.com/refraction-networking/utls v1.3.3
 	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
 	github.com/sirupsen/logrus v1.9.3
@@ -42,7 +42,7 @@ require (
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 	golang.org/x/crypto v0.18.0
-	golang.org/x/net v0.17.0
+	golang.org/x/net v0.18.0
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.16.0
 	golang.org/x/term v0.16.0

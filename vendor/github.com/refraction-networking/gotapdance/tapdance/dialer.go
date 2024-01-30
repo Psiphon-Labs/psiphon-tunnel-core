@@ -63,6 +63,9 @@ type Dialer struct {
 
 	// Subnet that we want to limit to (or empty if they're all fine)
 	PhantomNet string
+
+	// Whether we want to register and connect to a phantom, or register only
+	RegisterOnly bool
 }
 
 // Dial connects to the address on the named network.
@@ -179,7 +182,7 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.
 		if len(address) == 0 {
 			return nil, errors.New("Dark Decoys require target address to be set")
 		}
-		return DialConjure(ctx, cjSession, d.DarkDecoyRegistrar)
+		return DialConjure(ctx, cjSession, d.DarkDecoyRegistrar, d.RegisterOnly)
 	}
 
 	return nil, errors.New("SplitFlows are not supported")

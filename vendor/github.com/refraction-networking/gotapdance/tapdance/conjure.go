@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
+	ca "github.com/refraction-networking/conjure/pkg/client/assets"
 	"github.com/refraction-networking/conjure/pkg/core"
 	"github.com/refraction-networking/conjure/pkg/core/interfaces"
 	ps "github.com/refraction-networking/conjure/pkg/phantoms"
 	pb "github.com/refraction-networking/conjure/proto"
-	ca "github.com/refraction-networking/conjure/pkg/client/assets"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -44,7 +44,7 @@ func (v *V6) Include() uint {
 const defaultRegWidth = 5
 
 // DialConjure - Perform Registration and Dial on an existing Conjure session
-func DialConjure(ctx context.Context, cjSession *ConjureSession, registrationMethod Registrar) (net.Conn, error) {
+func DialConjure(ctx context.Context, cjSession *ConjureSession, registrationMethod Registrar, registerOnly bool) (net.Conn, error) {
 
 	if cjSession == nil {
 		return nil, fmt.Errorf("No Session Provided")
@@ -63,6 +63,11 @@ func DialConjure(ctx context.Context, cjSession *ConjureSession, registrationMet
 	registration, err := registrationMethod.Register(cjSession, ctx)
 	if err != nil {
 		Logger().Debugf("%v Failed to register: %v", cjSession.IDString(), err)
+		return nil, err
+	}
+
+	if registerOnly {
+		fmt.Printf("%v Successfully registered to use IPv4 phantom: %s:%d or IPv6 phantom: %s:%d", cjSession.IDString(), registration.phantom4.String(), registration.phantomDstPort, registration.phantom6.String(), registration.phantomDstPort)
 		return nil, err
 	}
 

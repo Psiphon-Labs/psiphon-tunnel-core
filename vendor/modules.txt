@@ -260,7 +260,7 @@ github.com/pmezard/go-difflib/difflib
 # github.com/quic-go/qpack v0.4.0
 ## explicit; go 1.18
 github.com/quic-go/qpack
-# github.com/refraction-networking/conjure v0.7.10-0.20231110193225-e4749a9dedc9
+# github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
 ## explicit; go 1.18
 github.com/refraction-networking/conjure/pkg/client/assets
 github.com/refraction-networking/conjure/pkg/core
@@ -288,7 +288,7 @@ github.com/refraction-networking/conjure/proto
 ## explicit; go 1.20
 github.com/refraction-networking/ed25519/edwards25519
 github.com/refraction-networking/ed25519/extra25519
-# github.com/refraction-networking/gotapdance v1.7.7
+# github.com/refraction-networking/gotapdance v1.7.10
 ## explicit; go 1.18
 github.com/refraction-networking/gotapdance/tapdance
 # github.com/refraction-networking/obfs4 v0.1.2
@@ -352,8 +352,8 @@ golang.org/x/exp/constraints
 # golang.org/x/mod v0.8.0
 ## explicit; go 1.17
 golang.org/x/mod/semver
-# golang.org/x/net v0.17.0
-## explicit; go 1.17
+# golang.org/x/net v0.18.0
+## explicit; go 1.18
 golang.org/x/net/bpf
 golang.org/x/net/http/httpguts
 golang.org/x/net/http2
