@@ -221,7 +221,7 @@ func testPassthrough(t *testing.T, legacy bool) {
 		},
 	}
 
-	response, err := httpClient.Get("https://" + webServerAddress)
+	response, err := httpClient.Get("https://127.0.0.1:4000")
 	if err != nil {
 		t.Fatalf("http.Get failed: %s", err)
 	}
