@@ -8,15 +8,21 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"io"
+	"math/big"
+	math_rand "math/rand"
 
 	"golang.org/x/crypto/cryptobyte"
 )
+
+// [Psiphon]
+var obfuscateSessionTickets = true
 
 // A sessionState is a resumable session.
 type SessionState = tls.SessionState
@@ -168,7 +174,33 @@ func (s *sessionState) Bytes() ([]byte, error) {
 			b.AddUint32(s.ageAdd)
 		}
 	}
-	return b.Bytes()
+
+	// [Psiphon]
+	bytes, err := b.Bytes()
+	if err != nil {
+		return nil, err
+	}
+
+	// [Psiphon]
+	// Pad golang TLS session ticket to a more typical size.
+	if obfuscateSessionTickets {
+		paddedSizes := []int{160, 176, 192, 208, 218, 224, 240, 255}
+		initialSize := 120
+		randomInt, err := rand.Int(rand.Reader, big.NewInt(int64(len(paddedSizes))))
+		index := 0
+		if err == nil {
+			index = int(randomInt.Int64())
+		} else {
+			index = math_rand.Intn(len(paddedSizes))
+		}
+		paddingSize := paddedSizes[index] - initialSize
+
+		ret := make([]byte, len(bytes)+paddingSize)
+		copy(ret, bytes)
+		return ret, nil
+	}
+
+	return bytes, nil
 }
 
 func certificatesToBytesSlice(certs []*x509.Certificate) [][]byte {
@@ -268,7 +300,9 @@ func ParseSessionState(data []byte) (*sessionState, error) {
 		ss.alpnProtocol = string(alpn)
 	}
 	if isClient := typ == 2; !isClient {
-		if !s.Empty() {
+		// [Psiphon]
+		// Ignore padding for obfuscated session tickets.
+		if !s.Empty() && !allZeros(s) {
 			return nil, errors.New("tls: invalid session encoding")
 		}
 		return ss, nil
@@ -423,4 +457,117 @@ func NewResumptionState(ticket []byte, state *sessionState) (*ClientSessionState
 		ticket: ticket, session: state,
 	}
 	return toClientSessionState(cs), nil
+}
+
+// [Psiphon]
+type ObfuscatedClientSessionState struct {
+	SessionTicket      []uint8
+	Vers               uint16
+	CipherSuite        uint16
+	MasterSecret       []byte
+	ServerCertificates []*x509.Certificate
+	VerifiedChains     [][]*x509.Certificate
+	UseEMS             bool
+}
+
+var obfuscatedSessionTicketCipherSuite = TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+
+// [Psiphon]
+// NewObfuscatedClientSessionState produces obfuscated session tickets.
+//
+// # Obfuscated Session Tickets
+//
+// Obfuscated session tickets is a network traffic obfuscation protocol that appears
+// to be valid TLS using session tickets. The client actually generates the session
+// ticket and encrypts it with a shared secret, enabling a TLS session that entirely
+// skips the most fingerprintable aspects of TLS.
+// The scheme is described here:
+// https://lists.torproject.org/pipermail/tor-dev/2016-September/011354.html
+//
+// Circumvention notes:
+//   - TLS session ticket implementations are widespread:
+//     https://istlsfastyet.com/#cdn-paas.
+//   - An adversary cannot easily block session ticket capability, as this requires
+//     a downgrade attack against TLS.
+//   - Anti-probing defence is provided, as the adversary must use the correct obfuscation
+//     shared secret to form valid obfuscation session ticket; otherwise server offers
+//     standard session tickets.
+//   - Limitation: an adversary with the obfuscation shared secret can decrypt the session
+//     ticket and observe the plaintext traffic. It's assumed that the adversary will not
+//     learn the obfuscated shared secret without also learning the address of the TLS
+//     server and blocking it anyway; it's also assumed that the TLS payload is not
+//     plaintext but is protected with some other security layer (e.g., SSH).
+//
+// Implementation notes:
+//   - The TLS ClientHello includes an SNI field, even when using session tickets, so
+//     the client should populate the ServerName.
+//   - Server should set its SetSessionTicketKeys with first a standard key, followed by
+//     the obfuscation shared secret.
+//   - Since the client creates the session ticket, it selects parameters that were not
+//     negotiated with the server, such as the cipher suite. It's implicitly assumed that
+//     the server can support the selected parameters.
+//   - Obfuscated session tickets are not supported for TLS 1.3 _clients_, which use a
+//     distinct scheme. Obfuscated session ticket support in this package is intended to
+//     support TLS 1.2 clients.
+func NewObfuscatedClientSessionState(sharedSecret [32]byte) (*ObfuscatedClientSessionState, error) {
+
+	// Create a session ticket that wasn't actually issued by the server.
+	vers := uint16(VersionTLS12)
+	cipherSuite := obfuscatedSessionTicketCipherSuite
+	masterSecret := make([]byte, masterSecretLength)
+	_, err := rand.Read(masterSecret)
+	if err != nil {
+		return nil, err
+	}
+
+	serverState := &sessionState{
+		version:          vers,
+		cipherSuite:      cipherSuite,
+		secret:           masterSecret,
+		peerCertificates: nil,
+	}
+
+	config := &config{}
+	sessionTicketKeys := []ticketKey{config.ticketKeyFromBytes(sharedSecret)}
+
+	ssBytes, err := serverState.Bytes()
+	if err != nil {
+		return nil, err
+	}
+	sessionTicket, err := config.encryptTicket(ssBytes, sessionTicketKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	// ObfuscatedClientSessionState fields are used to construct
+	// ClientSessionState objects for use in ClientSessionCaches. The client will
+	// use this cache to pretend it got that session ticket from the server.
+	clientState := &ObfuscatedClientSessionState{
+		SessionTicket: sessionTicket,
+		Vers:          vers,
+		CipherSuite:   cipherSuite,
+		MasterSecret:  masterSecret,
+	}
+
+	return clientState, nil
+}
+
+func ContainsObfuscatedSessionTicketCipherSuite(cipherSuites []uint16) bool {
+	for _, cipherSuite := range cipherSuites {
+		if cipherSuite == obfuscatedSessionTicketCipherSuite {
+			return true
+		}
+	}
+	return false
+}
+
+// allZeros returns true if remaining bytes are all zero.
+func allZeros(s cryptobyte.String) bool {
+	b := []byte(s)
+	for _, v := range b {
+		if v != 0x0 {
+			return false
+		}
+	}
+	return true
 }

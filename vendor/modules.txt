@@ -20,13 +20,13 @@ github.com/Psiphon-Labs/bolt
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240129160049-e465a08acc16
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240206031303-574af011ca51
 ## explicit; go 1.20
 github.com/Psiphon-Labs/psiphon-tls
 # github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20231117202359-5544003bda6f
 ## explicit; go 1.20
 github.com/Psiphon-Labs/qtls-go1-20
-# github.com/Psiphon-Labs/quic-go v0.0.0-20240130155801-3197a7943511
+# github.com/Psiphon-Labs/quic-go v0.0.0-20240206031737-eae23f995bd7
 ## explicit; go 1.20
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
@@ -44,10 +44,6 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/Psiphon-Labs/tls-tris v0.0.0-20230824155421-58bf6d336a9a
-## explicit
-github.com/Psiphon-Labs/tls-tris
-github.com/Psiphon-Labs/tls-tris/cipherhw
 # github.com/andybalholm/brotli v1.0.5
 ## explicit; go 1.12
 github.com/andybalholm/brotli

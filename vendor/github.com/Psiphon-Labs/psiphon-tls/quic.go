@@ -142,7 +142,7 @@ type quicState struct {
 //
 // The config's MinVersion must be at least TLS 1.3.
 func QUICClient(config *QUICConfig) *QUICConn {
-	return newQUICConn(Client(nil, config.TLSConfig), config.ExtraConfig)
+	return newQUICConn(Client(nil, config.TLSConfig, config.ExtraConfig))
 }
 
 // QUICServer returns a new TLS server side connection using QUICTransport as the
@@ -150,18 +150,14 @@ func QUICClient(config *QUICConfig) *QUICConn {
 //
 // The config's MinVersion must be at least TLS 1.3.
 func QUICServer(config *QUICConfig) *QUICConn {
-	return newQUICConn(Server(nil, config.TLSConfig), config.ExtraConfig)
+	return newQUICConn(Server(nil, config.TLSConfig, config.ExtraConfig))
 }
 
-func newQUICConn(conn *Conn, extraConfig *ExtraConfig) *QUICConn {
+func newQUICConn(conn *Conn) *QUICConn {
 	conn.quic = &quicState{
 		signalc:  make(chan struct{}),
 		blockedc: make(chan struct{}),
 	}
-
-	// [Psiphon]
-	conn.extraConfig = extraConfig
-
 	conn.quic.events = conn.quic.eventArr[:0]
 	return &QUICConn{
 		conn: conn,

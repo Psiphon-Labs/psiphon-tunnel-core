@@ -160,7 +160,6 @@ Psiphon Tunnel Core uses:
 * [bifurcation/mint](https://github.com/bifurcation/mint)
 * [boltdb/bolt](https://github.com/boltdb/bolt)
 * [cheekybits/genny/generic](https://github.com/cheekybits/genny/generic)
-* [cloudflare/tls-tris](https://github.com/cloudflare/tls-tris)
 * [codahale/sss](https://github.com/codahale/sss)
 * [cognusion/go-cache-lru](https://github.com/cognusion/go-cache-lru)
 * [creack/goselect](https://github.com/creack/goselect)

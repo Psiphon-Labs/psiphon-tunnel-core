@@ -831,6 +831,20 @@ func (c *Conn) readFromUntil(r io.Reader, n int) error {
 
 // sendAlertLocked sends a TLS alert message.
 func (c *Conn) sendAlertLocked(err alert) error {
+
+	// [Psiphon]
+	// Do not send TLS alerts before the passthrough state is determined.
+	// Otherwise, an invalid client would receive non-passthrough traffic.
+	//
+	// Limitation: ClientHello-related alerts to legitimate clients are not sent.
+	// This changes the nature of errors that such clients may report when their
+	// TLS handshake fails. This change in behavior is only visible to legitimate
+	// clients.
+	if c.extraConfig != nil && c.extraConfig.PassthroughAddress != "" &&
+		c.conn.(*recorderConn).IsRecording() {
+		return nil
+	}
+
 	if c.quic != nil {
 		return c.out.setErrorLocked(&net.OpError{Op: "local error", Err: err})
 	}

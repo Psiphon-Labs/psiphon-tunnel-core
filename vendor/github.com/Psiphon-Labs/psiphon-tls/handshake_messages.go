@@ -2213,6 +2213,18 @@ func (m *newSessionTicketMsg) marshal() ([]byte, error) {
 	x[9] = uint8(ticketLen)
 	copy(x[10:], m.ticket)
 
+	// [Psiphon]
+	// Set lifetime hint to a more typical value.
+	if obfuscateSessionTickets {
+		hints := []int{300, 1200, 7200, 10800, 64800, 100800, 129600}
+		index := prng.Intn(len(hints))
+		hint := hints[index]
+		x[4] = uint8(hint >> 24)
+		x[5] = uint8(hint >> 16)
+		x[6] = uint8(hint >> 8)
+		x[7] = uint8(hint)
+	}
+
 	m.raw = x
 
 	return m.raw, nil

@@ -33,9 +33,9 @@ import (
 	"testing"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -76,11 +76,13 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 		t.Fatalf("generateCertificate failed: %s", err)
 	}
 
-	serverConfig := &tris.Config{
-		Certificates:                []tris.Certificate{*certificate},
-		NextProtos:                  []string{"http/1.1"},
-		MinVersion:                  utls.VersionTLS12,
-		UseExtendedMasterSecret:     true,
+	serverConfig := &tls.Config{
+		Certificates: []tls.Certificate{*certificate},
+		NextProtos:   []string{"http/1.1"},
+		MinVersion:   utls.VersionTLS12,
+	}
+
+	extraConfig := &tls.ExtraConfig{
 		UseObfuscatedSessionTickets: true,
 	}
 
@@ -106,7 +108,7 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 
 	go func() {
 
-		listener, err := tris.Listen("tcp", ":0", serverConfig)
+		listener, err := tls.Listen("tcp", ":0", serverConfig, extraConfig)
 		if err != nil {
 			report(err)
 			return
@@ -168,7 +170,7 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 			// second connection will use a real session ticket issued by the server.
 			var clientSessionState *utls.ClientSessionState
 			if i == 0 {
-				obfuscatedSessionState, err := tris.NewObfuscatedClientSessionState(
+				obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
 					obfuscatedSessionTicketSharedSecret)
 				if err != nil {
 					report(err)
@@ -200,7 +202,7 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 						}
 					}
 
-					if !isTLS13 && tris.ContainsObfuscatedSessionTicketCipherSuite(
+					if !isTLS13 && tls.ContainsObfuscatedSessionTicketCipherSuite(
 						tlsConn.HandshakeState.Hello.CipherSuites) {
 						break
 					}
@@ -239,7 +241,7 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 	}
 }
 
-func generateCertificate() (*tris.Certificate, error) {
+func generateCertificate() (*tls.Certificate, error) {
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -290,7 +292,7 @@ func generateCertificate() (*tris.Certificate, error) {
 		},
 	)
 
-	keyPair, err := tris.X509KeyPair(certificate, privateKey)
+	keyPair, err := tls.X509KeyPair(certificate, privateKey)
 	if err != nil {
 		return nil, err
 	}
