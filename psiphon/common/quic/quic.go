@@ -346,6 +346,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 }
 
 func (listener *Listener) Close() error {
+	_ = listener.obfuscatedPacketConn.Close()
 	return listener.quicListener.Close()
 }
 
