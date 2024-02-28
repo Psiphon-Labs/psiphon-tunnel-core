@@ -22,27 +22,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // The instance of PsiphonTunnel we'll use for connecting.
     var psiphonTunnel: PsiphonTunnel?
 
-    // OCSP cache for making OCSP requests in certificate revocation checking
-    var ocspCache: OCSPCache = OCSPCache.init(logger: {print("[OCSPCache]:", $0)})
-
-    // Delegate for handling certificate validation.
-    lazy var authURLSessionDelegate: OCSPAuthURLSessionDelegate =
-        OCSPAuthURLSessionDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
-                                        ocspCache: self.ocspCache,
-                                        modifyOCSPURL:{
-                                            assert(self.httpProxyPort > 0)
-
-                                            let encodedTargetURL = URLEncode.encode($0.absoluteString)
-                                            let proxiedURLString = "http://127.0.0.1:\(self.httpProxyPort)/tunneled/\(encodedTargetURL!)"
-                                            let proxiedURL = URL.init(string: proxiedURLString)
-
-                                            print("[OCSP] Updated OCSP URL \($0) to \(proxiedURL!)")
-
-                                            return proxiedURL!
-                                        },
-                                        session:URLSession.shared,
-                                        timeout:10)
-
     @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?
         if (Thread.isMainThread) {
@@ -135,7 +114,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // config.connectionProxyDictionary?[kCFStreamPropertyHTTPSProxyHost as String] = "127.0.0.1"
         // config.connectionProxyDictionary?[kCFStreamPropertyHTTPSProxyPort as String] = self.httpProxyPort
 
-        let session = URLSession.init(configuration: config, delegate: authURLSessionDelegate, delegateQueue: OperationQueue.current)
+        let session = URLSession.init(configuration: config)
 
         // Create the URLSession task that will make the request via the tunnel proxy.
         let task = session.dataTask(with: request) {
@@ -194,7 +173,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         assert(httpProxyPort > 0)
 
         // The target URL must be encoded so as to be valid within a query parameter.
-        let encodedTargetURL = URLEncode.encode(url)
+        // See this SO answer for why we're using this CharacterSet (and not using: https://stackoverflow.com/a/24888789
+        let queryParamCharsAllowed = CharacterSet.init(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+
+        let encodedTargetURL = url.addingPercentEncoding(withAllowedCharacters: queryParamCharsAllowed)
 
         let proxiedURL = "http://127.0.0.1:\(httpProxyPort)/tunneled/\(encodedTargetURL!)"
 

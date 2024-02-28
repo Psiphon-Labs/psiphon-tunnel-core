@@ -2,15 +2,12 @@
 //  TunneledWebView-Bridging-Header.h
 //  TunneledWebView
 //
-//  Created by Miro Kuratczyk on 2017-12-08.
-//  Copyright © 2017 Psiphon Inc. All rights reserved.
-//
+/*
+ Licensed under Creative Commons Zero (CC0).
+ https://creativecommons.org/publicdomain/zero/1.0/
+ */
 
 #ifndef TunneledWebView_Bridging_Header_h
 #define TunneledWebView_Bridging_Header_h
-
-#import "JAHPAuthenticatingHTTPProtocol.h"
-#import "OCSPAuthURLSessionDelegate.h"
-#import "OCSPURLEncode.h"
 
 #endif /* TunneledWebView_Bridging_Header_h */
