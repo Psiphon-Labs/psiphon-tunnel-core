@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
@@ -44,6 +45,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	lrucache "github.com/cognusion/go-cache-lru"
+	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/bpf"
 )
 
@@ -131,6 +133,7 @@ type DialParameters struct {
 	QUICClientHelloSeed                      *prng.Seed
 	ObfuscatedQUICPaddingSeed                *prng.Seed
 	ObfuscatedQUICNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
+	QUICDialEarly                            bool
 	QUICDisablePathMTUDiscovery              bool
 
 	ConjureCachedRegistrationTTL        time.Duration
@@ -165,6 +168,10 @@ type DialParameters struct {
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
 
+	quicTLSSessionCacheKey      string                  `json:"-"`
+	QUICTLSClientSessionCache   tls.ClientSessionCache  `json:"-"`
+	directTLSClientSessionCache utls.ClientSessionCache `json:"-"`
+
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
 }
@@ -189,6 +196,8 @@ type DialParameters struct {
 func MakeDialParameters(
 	config *Config,
 	steeringIPCache *lrucache.Cache,
+	quicTLSClientSessionCache tls.ClientSessionCache,
+	directTLSClientSessionCache utls.ClientSessionCache,
 	upstreamProxyErrorCallback func(error),
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
@@ -361,6 +370,8 @@ func MakeDialParameters(
 	}
 
 	dialParams.steeringIPCache = steeringIPCache
+
+	dialParams.directTLSClientSessionCache = directTLSClientSessionCache
 
 	dialParams.ServerEntry = serverEntry
 	dialParams.NetworkID = networkID
@@ -797,9 +808,21 @@ func MakeDialParameters(
 			}
 		}
 
+		dialParams.QUICDialEarly = p.WeightedCoinFlip(parameters.QUICDialEarlyProbability)
+
 		dialParams.QUICDisablePathMTUDiscovery =
 			protocol.QUICVersionUsesPathMTUDiscovery(dialParams.QUICVersion) &&
 				p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
+	}
+
+	// Sets up client session caching for QUIC with a TLS cache key unique to current endpoint.
+	if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+		dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		dialParams.quicTLSSessionCacheKey = fmt.Sprintf("%s:%d", serverEntry.IpAddress, dialPortNumber)
+		dialParams.QUICTLSClientSessionCache = WrapClientSessionCache(quicTLSClientSessionCache, dialParams.quicTLSSessionCacheKey)
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
@@ -1305,6 +1328,8 @@ func MakeDialParameters(
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
 			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
+			QUICDialEarly:                 dialParams.QUICDialEarly,
+			QuicTlsClientSessionCache:     dialParams.meekConfig.QuicTlsClientSessionCache,
 			QUICDisablePathMTUDiscovery:   dialParams.QUICDisablePathMTUDiscovery,
 			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
@@ -1368,6 +1393,7 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 			NoDefaultTLSSessionID:    &dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed: dialParams.RandomizedTLSProfileSeed,
 			FragmentClientHello:      dialParams.TLSFragmentClientHello,
+			ClientSessionCache:       dialParams.directTLSClientSessionCache,
 		},
 		// Obfuscated session tickets are not used because TLS-OSSH uses TLS 1.3.
 		UseObfuscatedSessionTickets: false,
@@ -1455,6 +1481,12 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	if dialParams.steeringIPCacheKey != "" {
 		dialParams.steeringIPCache.Delete(dialParams.steeringIPCacheKey)
 	}
+
+	// Clear the TLS client session cache to avoid (potentially) reusing failed sessions.
+	if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+		dialParams.QUICTLSClientSessionCache.Put(dialParams.quicTLSSessionCacheKey, nil)
+	}
+
 }
 
 func (dialParams *DialParameters) GetTLSVersionForMetrics() string {
@@ -1938,4 +1970,26 @@ func selectConjureTransport(
 	choice := prng.Intn(len(transports))
 
 	return transports[choice]
+}
+
+type tlsClientSessionCacheWrapper struct {
+	tls.ClientSessionCache
+
+	// sessinoKey specifies the value of the hard-coded TLS session cache key.
+	sessionKey string
+}
+
+func WrapClientSessionCache(cache tls.ClientSessionCache, sessionKey string) tls.ClientSessionCache {
+	return &tlsClientSessionCacheWrapper{
+		ClientSessionCache: cache,
+		sessionKey:         sessionKey,
+	}
+}
+
+func (c *tlsClientSessionCacheWrapper) Get(_ string) (session *tls.ClientSessionState, ok bool) {
+	return c.ClientSessionCache.Get(c.sessionKey)
+}
+
+func (c *tlsClientSessionCacheWrapper) Put(_ string, cs *tls.ClientSessionState) {
+	c.ClientSessionCache.Put(c.sessionKey, cs)
 }

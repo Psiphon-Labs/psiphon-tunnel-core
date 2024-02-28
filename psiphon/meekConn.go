@@ -23,7 +23,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
+	std_tls "crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -37,6 +37,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
@@ -120,6 +121,9 @@ type MeekConfig struct {
 	// QUICClientHelloSeed is used for randomized QUIC Client Hellos.
 	QUICClientHelloSeed *prng.Seed
 
+	// QUICDialEarly indicates whether the client should attempt 0-RTT.
+	QUICDialEarly bool
+
 	// QUICDisablePathMTUDiscovery indicates whether to disable path MTU
 	// discovery in the QUIC client.
 	QUICDisablePathMTUDiscovery bool
@@ -130,6 +134,10 @@ type MeekConfig struct {
 	// TLSProfile specifies the value for CustomTLSConfig.TLSProfile for all
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
+
+	// QuicTlsClientSessionCache specifies the TLS session cache to use
+	// for Meek connections that use HTTP/2 over QUIC.
+	QuicTlsClientSessionCache tls.ClientSessionCache
 
 	// TLSFragmentClientHello specifies whether to fragment the TLS Client Hello.
 	TLSFragmentClientHello bool
@@ -295,6 +303,11 @@ func DialMeek(
 			"invalid config: only one of UseQUIC or UseHTTPS may be set")
 	}
 
+	if meekConfig.UseQUIC && meekConfig.QuicTlsClientSessionCache == nil {
+		return nil, errors.TraceNew(
+			"invalid config: TLSClientSessionCache must be set when UseQUIC is set")
+	}
+
 	if meekConfig.UseQUIC &&
 		(meekConfig.VerifyServerName != "" || len(meekConfig.VerifyPins) > 0) {
 
@@ -406,7 +419,9 @@ func DialMeek(
 			meekConfig.SNIServerName,
 			meekConfig.QUICVersion,
 			meekConfig.QUICClientHelloSeed,
-			meekConfig.QUICDisablePathMTUDiscovery)
+			meekConfig.QUICDisablePathMTUDiscovery,
+			meekConfig.QUICDialEarly,
+			meekConfig.QuicTlsClientSessionCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -540,7 +555,7 @@ func DialMeek(
 		if IsTLSConnUsingHTTP2(preConn) {
 			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DiagnosticID)
 			transport = &http2.Transport{
-				DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
+				DialTLS: func(network, addr string, _ *std_tls.Config) (net.Conn, error) {
 					return cachedTLSDialer.dial(network, addr)
 				},
 			}

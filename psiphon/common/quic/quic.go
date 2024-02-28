@@ -243,7 +243,7 @@ func Listen(
 		// Skipping muxListener also avoids the additional overhead of
 		// pumping read packets though mux channels.
 
-		tlsConfig, ietfQUICConfig := makeIETFConfig(
+		tlsConfig, ietfQUICConfig := makeServerIETFConfig(
 			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate)
 
 		tr := newIETFTransport(obfuscatedPacketConn)
@@ -281,7 +281,7 @@ func Listen(
 	}, nil
 }
 
-func makeIETFConfig(
+func makeServerIETFConfig(
 	conn *ObfuscatedPacketConn,
 	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	tlsCertificate tls.Certificate) (*tls.Config, *ietf_quic.Config) {
@@ -292,6 +292,7 @@ func makeIETFConfig(
 	}
 
 	ietfQUICConfig := &ietf_quic.Config{
+		Allow0RTT:             true,
 		HandshakeIdleTimeout:  SERVER_HANDSHAKE_TIMEOUT,
 		MaxIdleTimeout:        serverIdleTimeout,
 		MaxIncomingStreams:    1,
@@ -369,7 +370,9 @@ func Dial(
 	obfuscationKey string,
 	obfuscationPaddingSeed *prng.Seed,
 	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
-	disablePathMTUDiscovery bool) (net.Conn, error) {
+	disablePathMTUDiscovery bool,
+	dialEarly bool,
+	tlsClientSessionCache tls.ClientSessionCache) (net.Conn, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -488,7 +491,9 @@ func Dial(
 		getClientHelloRandom,
 		maxPacketSizeAdjustment,
 		disablePathMTUDiscovery,
-		false)
+		dialEarly,
+		tlsClientSessionCache)
+
 	if err != nil {
 		packetConn.Close()
 		return nil, errors.Trace(err)
@@ -697,6 +702,8 @@ type QUICTransporter struct {
 	quicVersion             string
 	clientHelloSeed         *prng.Seed
 	disablePathMTUDiscovery bool
+	dialEarly               bool
+	tlsClientSessionCache   tls.ClientSessionCache
 	packetConn              atomic.Value
 
 	mutex sync.Mutex
@@ -711,7 +718,9 @@ func NewQUICTransporter(
 	quicSNIAddress string,
 	quicVersion string,
 	clientHelloSeed *prng.Seed,
-	disablePathMTUDiscovery bool) (*QUICTransporter, error) {
+	disablePathMTUDiscovery bool,
+	dialEarly bool,
+	tlsClientSessionCache tls.ClientSessionCache) (*QUICTransporter, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -733,6 +742,8 @@ func NewQUICTransporter(
 		quicVersion:             quicVersion,
 		clientHelloSeed:         clientHelloSeed,
 		disablePathMTUDiscovery: disablePathMTUDiscovery,
+		dialEarly:               dialEarly,
+		tlsClientSessionCache:   tlsClientSessionCache,
 		ctx:                     ctx,
 	}
 
@@ -836,7 +847,9 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 		nil,
 		0,
 		t.disablePathMTUDiscovery,
-		true)
+		t.dialEarly,
+		t.tlsClientSessionCache)
+
 	if err != nil {
 		packetConn.Close()
 		return nil, errors.Trace(err)
@@ -887,6 +900,7 @@ type quicConnection interface {
 	AcceptStream() (quicStream, error)
 	OpenStream() (quicStream, error)
 	isErrorIndicatingClosed(err error) bool
+	isEarlyDataRejected(err error) bool
 }
 
 type quicStream interface {
@@ -960,6 +974,13 @@ func (c *ietfQUICConnection) isErrorIndicatingClosed(err error) bool {
 		errStr == "timeout: no recent network activity"
 }
 
+func (c *ietfQUICConnection) isEarlyDataRejected(err error) bool {
+	if err == nil {
+		return false
+	}
+	return err == ietf_quic.Err0RTTRejected
+}
+
 func dialQUIC(
 	ctx context.Context,
 	packetConn net.PacketConn,
@@ -971,7 +992,8 @@ func dialQUIC(
 	getClientHelloRandom func() ([]byte, error),
 	clientMaxPacketSizeAdjustment int,
 	disablePathMTUDiscovery bool,
-	dialEarly bool) (quicConnection, error) {
+	dialEarly bool,
+	tlsClientSessionCache tls.ClientSessionCache) (quicConnection, error) {
 
 	if isIETFVersionNumber(versionNumber) {
 		quicConfig := &ietf_quic.Config{
@@ -1004,9 +1026,11 @@ func dialQUIC(
 			InsecureSkipVerify: true,
 			NextProtos:         []string{getALPN(versionNumber)},
 			ServerName:         sni,
+			ClientSessionCache: tlsClientSessionCache,
 		}
 
 		if dialEarly {
+			// Attempting 0-RTT if possible.
 			dialConnection, err = ietf_quic.DialEarly(
 				ctx,
 				packetConn,
@@ -1021,6 +1045,7 @@ func dialQUIC(
 				tlsConfig,
 				quicConfig)
 		}
+
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1195,7 +1220,7 @@ func newMuxListener(
 
 	listener.ietfQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
-	tlsConfig, ietfQUICConfig := makeIETFConfig(
+	tlsConfig, ietfQUICConfig := makeServerIETFConfig(
 		conn, verifyClientHelloRandom, tlsCertificate)
 
 	tr := newIETFTransport(listener.ietfQUICConn)

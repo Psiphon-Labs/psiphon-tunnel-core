@@ -846,6 +846,9 @@ type Config struct {
 	// LimitTunnelDialPortNumbers is for testing purposes.
 	LimitTunnelDialPortNumbers parameters.TunnelProtocolPortLists
 
+	// QUICDialEarlyProbability is for testing purposes.
+	QUICDialEarlyProbability *float64
+
 	// QUICDisablePathMTUDiscoveryProbability is for testing purposes.
 	QUICDisablePathMTUDiscoveryProbability *float64
 
@@ -1989,6 +1992,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.LimitTunnelDialPortNumbers] = config.LimitTunnelDialPortNumbers
 	}
 
+	if config.QUICDialEarlyProbability != nil {
+		applyParameters[parameters.QUICDialEarlyProbability] = *config.QUICDialEarlyProbability
+	}
+
 	if config.QUICDisablePathMTUDiscoveryProbability != nil {
 		applyParameters[parameters.QUICDisableClientPathMTUDiscoveryProbability] = *config.QUICDisablePathMTUDiscoveryProbability
 	}
@@ -2539,6 +2546,11 @@ func (config *Config) setDialParametersHash() {
 		encodedLimitTunnelDialPortNumbers, _ :=
 			json.Marshal(config.LimitTunnelDialPortNumbers)
 		hash.Write(encodedLimitTunnelDialPortNumbers)
+	}
+
+	if config.QUICDialEarlyProbability != nil {
+		hash.Write([]byte("QUICDialEarlyProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.QUICDialEarlyProbability)
 	}
 
 	if config.QUICDisablePathMTUDiscoveryProbability != nil {

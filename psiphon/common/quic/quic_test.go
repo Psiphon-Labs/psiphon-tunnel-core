@@ -203,7 +203,9 @@ func runQUIC(
 				clientObfuscationKey,
 				obfuscationPaddingSeed,
 				nil,
-				disablePathMTUDiscovery)
+				disablePathMTUDiscovery,
+				true,
+				nil)
 
 			if invokeAntiProbing {
 

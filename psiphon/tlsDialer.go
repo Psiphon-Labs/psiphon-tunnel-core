@@ -184,15 +184,15 @@ type CustomTLSConfig struct {
 	// FragmentClientHello specifies whether to fragment the ClientHello.
 	FragmentClientHello bool
 
-	clientSessionCache utls.ClientSessionCache
+	ClientSessionCache utls.ClientSessionCache
 }
 
 // EnableClientSessionCache initializes a cache to use to persist session
 // tickets, enabling TLS session resumability across multiple
 // CustomTLSDial calls or dialers using the same CustomTLSConfig.
 func (config *CustomTLSConfig) EnableClientSessionCache() {
-	if config.clientSessionCache == nil {
-		config.clientSessionCache = utls.NewLRUClientSessionCache(0)
+	if config.ClientSessionCache == nil {
+		config.ClientSessionCache = utls.NewLRUClientSessionCache(0)
 	}
 }
 
@@ -434,7 +434,7 @@ func CustomTLSDial(
 		}
 	}
 
-	clientSessionCache := config.clientSessionCache
+	clientSessionCache := config.ClientSessionCache
 	if clientSessionCache == nil {
 		clientSessionCache = utls.NewLRUClientSessionCache(0)
 	}
