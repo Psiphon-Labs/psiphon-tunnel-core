@@ -1,20 +1,23 @@
 # iOS Library Sample App: TunneledWebView
 
-## Tunneling UIWebView
+## Tunneling WKWebView
 
-*Note: this approach does not work with WKWebView (see [http://www.openradar.me/17190141](http://www.openradar.me/17190141)).*
+***Only available on iOS 17.0+***
 
-This app tunnels UIWebView traffic by proxying requests through the local Psiphon proxies created by [PsiphonTunnel](https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/master/MobileLibrary/iOS/PsiphonTunnel).
+This app tunnels WKWebView traffic by proxying requests through the local Psiphon proxies created by [PsiphonTunnel](https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/master/MobileLibrary/iOS/PsiphonTunnel).
 The listening Psiphon proxy ports can be obtained via TunneledAppDelegate delegate callbacks (see `onListeningSocksProxyPort` and `onListeningHttpProxyPort` in `AppDelegate.swift`).
 
-This is accomplished by registering `NSURLProtocol` subclass `JAHPAuthenticatingHTTPProtocol` with `NSURLProtocol`.
-`JAHPAuthenticatingHTTPProtocol` is then configured to use the local Psiphon proxies.
-This is done by setting the [connectionProxyDictionary](https://developer.apple.com/documentation/foundation/nsurlsessionconfiguration/1411499-connectionproxydictionary?language=objc) of [NSURLSessionConfiguration](https://developer.apple.com/documentation/foundation/nsurlsessionconfiguration).
-See [`+ (JAHPQNSURLSessionDemux *)sharedDemux`](https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/c9c4834fba5e7a8b675c3ae493ac17b5975ab0fb/MobileLibrary/iOS/SampleApps/TunneledWebView/External/JiveAuthenticatingHTTPProtocol/JAHPAuthenticatingHTTPProtocol.m#L157) in `JAHPAuthenticatingHTTPProtocol.m`.
+Tunneling WKWebView traffic was made possible by the introduction of https://developer.apple.com/documentation/network/nwparameters/privacycontext/4156642-proxyconfigurations, which is only available on iOS 17.0+. Tunneling WKWebView traffic on iOS < 17.0 is not supported.
 
-We use a slightly modified version of JiveAuthenticatingProtocol (https://github.com/jivesoftware/JiveAuthenticatingHTTPProtocol), which in turn is largely based on [Apple's CustomHTTPProtocol example](https://developer.apple.com/library/content/samplecode/CustomHTTPProtocol/Introduction/Intro.html). 
+## Tunneling UIWebView
+
+Submissions to App Review that use UIWebView will be rejected by Apple, as it has been fully deprecated. Consequently, our sample app that tunnels UIWebView traffic has been archived, but it can still be found at https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/877122a433a4bc4061b93d2e3f8518900af3e6c7/MobileLibrary/iOS/SampleApps/TunneledWebView.
 
 ## *\*\* Caveats \*\*\*
+
+### WKWebView
+
+WKWebView proxying has not been thoroughly tested for the shortcomings that its predecessor, UIWebView proxying with NSURLProtocol, exhibited. These shortcomings are outlined below.
 
 ### i18n API Leaks Timezone
 

@@ -1,5 +1,11 @@
 # iOS Library Sample App: TunneledWebRequest
 
+## *\*\* Caveats \*\*\*
+
+### Untunneled OCSP Requests
+
+See "Risk of Online Certificate Status Protocol (OCSP) Leaks" in [../../USAGE.md](../../USAGE.md).
+
 ## Configuring, Building, Running
 
 The sample app requires some extra files and configuration before building.

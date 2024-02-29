@@ -7,10 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		4E0CA9681FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.m in Sources */ = {isa = PBXBuildFile; fileRef = 4E0CA9611FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.m */; };
-		4E0CA9691FDE554B00B48BCA /* JAHPCacheStoragePolicy.m in Sources */ = {isa = PBXBuildFile; fileRef = 4E0CA9631FDE554B00B48BCA /* JAHPCacheStoragePolicy.m */; };
-		4E0CA96A1FDE554B00B48BCA /* JAHPCanonicalRequest.m in Sources */ = {isa = PBXBuildFile; fileRef = 4E0CA9651FDE554B00B48BCA /* JAHPCanonicalRequest.m */; };
-		4E0CA96B1FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m in Sources */ = {isa = PBXBuildFile; fileRef = 4E0CA9671FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m */; };
 		4EE9CDD91FE0830600BCE310 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 4EE9CDD81FE0830600BCE310 /* README.md */; };
 		662658EE1DCB8CF300872F6C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662658ED1DCB8CF300872F6C /* AppDelegate.swift */; };
 		662658F01DCB8CF300872F6C /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662658EF1DCB8CF300872F6C /* ViewController.swift */; };
@@ -54,14 +50,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		4E0CA9601FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JAHPAuthenticatingHTTPProtocol.h; sourceTree = "<group>"; };
-		4E0CA9611FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = JAHPAuthenticatingHTTPProtocol.m; sourceTree = "<group>"; };
-		4E0CA9621FDE554B00B48BCA /* JAHPCacheStoragePolicy.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JAHPCacheStoragePolicy.h; sourceTree = "<group>"; };
-		4E0CA9631FDE554B00B48BCA /* JAHPCacheStoragePolicy.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = JAHPCacheStoragePolicy.m; sourceTree = "<group>"; };
-		4E0CA9641FDE554B00B48BCA /* JAHPCanonicalRequest.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JAHPCanonicalRequest.h; sourceTree = "<group>"; };
-		4E0CA9651FDE554B00B48BCA /* JAHPCanonicalRequest.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = JAHPCanonicalRequest.m; sourceTree = "<group>"; };
-		4E0CA9661FDE554B00B48BCA /* JAHPQNSURLSessionDemux.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = JAHPQNSURLSessionDemux.h; sourceTree = "<group>"; };
-		4E0CA9671FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = JAHPQNSURLSessionDemux.m; sourceTree = "<group>"; };
 		4E5A8DF51FDA7541009F8702 /* TunneledWebView-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "TunneledWebView-Bridging-Header.h"; sourceTree = "<group>"; };
 		4EE9CDD81FE0830600BCE310 /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = SOURCE_ROOT; };
 		662658EA1DCB8CF300872F6C /* TunneledWebView.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TunneledWebView.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -110,22 +98,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		4E0CA95F1FDE554B00B48BCA /* JiveAuthenticatingHTTPProtocol */ = {
-			isa = PBXGroup;
-			children = (
-				4E0CA9601FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.h */,
-				4E0CA9611FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.m */,
-				4E0CA9621FDE554B00B48BCA /* JAHPCacheStoragePolicy.h */,
-				4E0CA9631FDE554B00B48BCA /* JAHPCacheStoragePolicy.m */,
-				4E0CA9641FDE554B00B48BCA /* JAHPCanonicalRequest.h */,
-				4E0CA9651FDE554B00B48BCA /* JAHPCanonicalRequest.m */,
-				4E0CA9661FDE554B00B48BCA /* JAHPQNSURLSessionDemux.h */,
-				4E0CA9671FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m */,
-			);
-			name = JiveAuthenticatingHTTPProtocol;
-			path = External/JiveAuthenticatingHTTPProtocol;
-			sourceTree = SOURCE_ROOT;
-		};
 		662658E11DCB8CF300872F6C = {
 			isa = PBXGroup;
 			children = (
@@ -161,7 +133,6 @@
 				662658F91DCB8CF300872F6C /* Info.plist */,
 				6688DBB51DCD684B00721A9E /* psiphon-config.json */,
 				6682D90D1EB1334000329958 /* psiphon-embedded-server-entries.txt */,
-				4E0CA95F1FDE554B00B48BCA /* JiveAuthenticatingHTTPProtocol */,
 			);
 			path = TunneledWebView;
 			sourceTree = "<group>";
@@ -214,7 +185,6 @@
 				662658E81DCB8CF300872F6C /* Resources */,
 				662659221DCBC8CB00872F6C /* CopyFiles */,
 				055465DE48CF8066AB340776 /* [CP] Embed Pods Frameworks */,
-				38F1196294383441FD177AFA /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -348,7 +318,7 @@
 			files = (
 			);
 			inputPaths = (
-				"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView-frameworks.sh",
+				"${PODS_ROOT}/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView-frameworks.sh",
 				"${PODS_ROOT}/PsiphonTunnel/Frameworks/PsiphonTunnel.framework",
 			);
 			name = "[CP] Embed Pods Frameworks";
@@ -357,26 +327,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView-frameworks.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-		38F1196294383441FD177AFA /* [CP] Copy Pods Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "[CP] Copy Pods Resources";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/Pods/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView-resources.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-TunneledWebView/Pods-TunneledWebView-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		5D5B0B0744787E007145BB7C /* [CP] Check Pods Manifest.lock */ = {
@@ -405,11 +356,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				662658F01DCB8CF300872F6C /* ViewController.swift in Sources */,
-				4E0CA96A1FDE554B00B48BCA /* JAHPCanonicalRequest.m in Sources */,
-				4E0CA96B1FDE554B00B48BCA /* JAHPQNSURLSessionDemux.m in Sources */,
 				662658EE1DCB8CF300872F6C /* AppDelegate.swift in Sources */,
-				4E0CA9681FDE554B00B48BCA /* JAHPAuthenticatingHTTPProtocol.m in Sources */,
-				4E0CA9691FDE554B00B48BCA /* JAHPCacheStoragePolicy.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -586,6 +533,7 @@
 					"$(PROJECT_DIR)/TunneledWebView",
 				);
 				INFOPLIST_FILE = TunneledWebView/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebView;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -608,6 +556,7 @@
 					"$(PROJECT_DIR)/TunneledWebView",
 				);
 				INFOPLIST_FILE = TunneledWebView/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = com.psiphon3.ios.TunneledWebView;
 				PRODUCT_NAME = "$(TARGET_NAME)";
