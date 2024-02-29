@@ -315,7 +315,7 @@ func (server *MeekServer) Run() error {
 	var err error
 	if server.tlsConfig != nil {
 		httpsServer := HTTPSServer{Server: httpServer}
-		err = httpsServer.ServeTLS(server.listener, server.tlsConfig)
+		err = httpsServer.ServeTLS(server.listener, server.tlsConfig, server.tlsExtraConfig)
 	} else {
 		err = httpServer.Serve(server.listener)
 	}
