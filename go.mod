@@ -10,8 +10,8 @@ require (
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240206031303-574af011ca51
-	github.com/Psiphon-Labs/quic-go v0.0.0-20240206031737-eae23f995bd7
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240301004115-0bd3fb6285a1
+	github.com/Psiphon-Labs/quic-go v0.0.0-20240301182333-dc6bf1a9bcb8
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9

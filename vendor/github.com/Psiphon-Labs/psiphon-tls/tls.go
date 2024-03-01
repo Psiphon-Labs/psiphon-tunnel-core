@@ -31,19 +31,19 @@ import (
 // using conn as the underlying transport.
 // The configuration config must be non-nil and must include
 // at least one certificate or else set GetCertificate.
-func Server(conn net.Conn, config *Config, extraConfig *ExtraConfig) *Conn {
+func Server(conn net.Conn, config *ExtendedTLSConfig) *Conn {
 
 	// [Psiphon]
 	// Initialize traffic recording to facilitate playback in the case of
 	// passthrough.
-	if extraConfig != nil && extraConfig.PassthroughAddress != "" {
+	if config.ExtraConfig != nil && config.ExtraConfig.PassthroughAddress != "" {
 		conn = newRecorderConn(conn)
 	}
 
 	c := &Conn{
 		conn:        conn,
-		config:      fromConfig(config),
-		extraConfig: extraConfig,
+		config:      fromConfig(config.TLSConfig),
+		extraConfig: config.ExtraConfig,
 	}
 	c.handshakeFn = c.serverHandshake
 	return c
@@ -53,11 +53,11 @@ func Server(conn net.Conn, config *Config, extraConfig *ExtraConfig) *Conn {
 // using conn as the underlying transport.
 // The config cannot be nil: users must set either ServerName or
 // InsecureSkipVerify in the config.
-func Client(conn net.Conn, config *Config, extraConfig *ExtraConfig) *Conn {
+func Client(conn net.Conn, config *ExtendedTLSConfig) *Conn {
 	c := &Conn{
 		conn:        conn,
-		config:      fromConfig(config),
-		extraConfig: extraConfig,
+		config:      fromConfig(config.TLSConfig),
+		extraConfig: config.ExtraConfig,
 		isClient:    true,
 	}
 	c.handshakeFn = c.clientHandshake
@@ -67,8 +67,7 @@ func Client(conn net.Conn, config *Config, extraConfig *ExtraConfig) *Conn {
 // A listener implements a network listener (net.Listener) for TLS connections.
 type listener struct {
 	net.Listener
-	config      *Config
-	extraConfig *ExtraConfig
+	config *ExtendedTLSConfig
 }
 
 // Accept waits for and returns the next incoming TLS connection.
@@ -78,18 +77,17 @@ func (l *listener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Server(c, l.config, l.extraConfig), nil
+	return Server(c, l.config), nil
 }
 
 // NewListener creates a Listener which accepts connections from an inner
 // Listener and wraps each connection with Server.
 // The configuration config must be non-nil and must include
 // at least one certificate or else set GetCertificate.
-func NewListener(inner net.Listener, config *Config, extraConfig *ExtraConfig) net.Listener {
+func NewListener(inner net.Listener, config *ExtendedTLSConfig) net.Listener {
 	l := new(listener)
 	l.Listener = inner
 	l.config = config
-	l.extraConfig = extraConfig
 	return l
 }
 
@@ -97,16 +95,16 @@ func NewListener(inner net.Listener, config *Config, extraConfig *ExtraConfig) n
 // given network address using net.Listen.
 // The configuration config must be non-nil and must include
 // at least one certificate or else set GetCertificate.
-func Listen(network, laddr string, config *Config, extraConfig *ExtraConfig) (net.Listener, error) {
-	if config == nil || len(config.Certificates) == 0 &&
-		config.GetCertificate == nil && config.GetConfigForClient == nil {
+func Listen(network, laddr string, config *ExtendedTLSConfig) (net.Listener, error) {
+	if config == nil || len(config.TLSConfig.Certificates) == 0 &&
+		config.TLSConfig.GetCertificate == nil && config.TLSConfig.GetConfigForClient == nil {
 		return nil, errors.New("tls: neither Certificates, GetCertificate, nor GetConfigForClient set in Config")
 	}
 	l, err := net.Listen(network, laddr)
 	if err != nil {
 		return nil, err
 	}
-	return NewListener(l, config, extraConfig), nil
+	return NewListener(l, config), nil
 }
 
 type timeoutError struct{}
@@ -165,7 +163,7 @@ func dial(ctx context.Context, netDialer *net.Dialer, network, addr string, conf
 		config = c
 	}
 
-	conn := Client(rawConn, config, nil)
+	conn := Client(rawConn, &ExtendedTLSConfig{TLSConfig: config})
 	if err := conn.HandshakeContext(ctx); err != nil {
 		rawConn.Close()
 		return nil, err

@@ -54,8 +54,10 @@ func SetupConfigForServer(conf *QUICConfig, enable0RTT bool, getDataForSessionTi
 }
 
 func SetupConfigForClient(conf *QUICConfig, getDataForSessionState func() []byte, setDataFromSessionState func([]byte) bool) {
-	conf.ExtraConfig.GetAppDataForSessionState = getDataForSessionState
-	conf.ExtraConfig.SetAppDataFromSessionState = setDataFromSessionState
+	conf.ExtraConfig = &qtls.ExtraConfig{
+		GetAppDataForSessionState:  getDataForSessionState,
+		SetAppDataFromSessionState: setDataFromSessionState,
+	}
 }
 
 func QUICServer(config *QUICConfig) *QUICConn {

@@ -807,6 +807,13 @@ type ExtraConfig struct {
 	PassthroughLogInvalidMessage func(clientIP string)
 }
 
+// [Psiphon]
+// ExtendedTLSConfig wraps crypto/tls.Config and Psiphon-specific configurations.
+type ExtendedTLSConfig struct {
+	TLSConfig   *Config
+	ExtraConfig *ExtraConfig
+}
+
 const (
 	// ticketKeyLifetime is how long a ticket key remains valid and can be used to
 	// resume a client connection.

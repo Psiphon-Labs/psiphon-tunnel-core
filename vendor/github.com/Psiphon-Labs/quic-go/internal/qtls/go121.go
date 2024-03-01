@@ -14,6 +14,7 @@ type (
 	QUICConn                 = tls.QUICConn
 	QUICConfig               = tls.QUICConfig
 	ExtraConfig              = tls.ExtraConfig
+	ExtendedTLSConfig        = tls.ExtendedTLSConfig
 	QUICEvent                = tls.QUICEvent
 	QUICEventKind            = tls.QUICEventKind
 	QUICEncryptionLevel      = tls.QUICEncryptionLevel

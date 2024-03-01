@@ -39,8 +39,7 @@ type TLSTunnelServer struct {
 	listenerTunnelProtocol string
 	listenerPort           int
 	passthroughAddress     string
-	tlsConfig              *tls.Config
-	extraConfig            *tls.ExtraConfig
+	tlsConfig              *tls.ExtendedTLSConfig
 	obfuscatorSeedHistory  *obfuscator.SeedHistory
 }
 
@@ -59,7 +58,7 @@ func ListenTLSTunnel(
 		return nil, errors.Trace(err)
 	}
 
-	listener = tls.NewListener(server.listener, server.tlsConfig, server.extraConfig)
+	listener = tls.NewListener(server.listener, server.tlsConfig)
 
 	return NewTLSTunnelListener(listener, server), nil
 }
@@ -82,30 +81,29 @@ func NewTLSTunnelServer(
 		obfuscatorSeedHistory:  obfuscator.NewSeedHistory(nil),
 	}
 
-	tlsConfig, extraConfig, err := tlsServer.makeTLSTunnelConfig()
+	tlsConfig, err := tlsServer.makeTLSTunnelConfig()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	tlsServer.tlsConfig = tlsConfig
-	tlsServer.extraConfig = extraConfig
 
 	return tlsServer, nil
 }
 
 // makeTLSTunnelConfig creates a TLS config for a TLSTunnelServer listener.
-func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, *tls.ExtraConfig, error) {
+func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.ExtendedTLSConfig, error) {
 
 	// Limitation: certificate value changes on restart.
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	tlsCertificate, err := tls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	var minVersion uint16
@@ -120,13 +118,14 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, *tls.ExtraCon
 		minVersion = minVersionCandidates[prng.Intn(len(minVersionCandidates))]
 	}
 
-	config := &tls.Config{
-		Certificates: []tls.Certificate{tlsCertificate},
-		NextProtos:   []string{"http/1.1"},
-		MinVersion:   minVersion,
+	config := &tls.ExtendedTLSConfig{
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{tlsCertificate},
+			NextProtos:   []string{"http/1.1"},
+			MinVersion:   minVersion,
+		},
+		ExtraConfig: &tls.ExtraConfig{},
 	}
-
-	extraConfig := &tls.ExtraConfig{}
 
 	// When configured, initialize passthrough mode, an anti-probing defense.
 	// Clients must prove knowledge of the obfuscated key via a message sent in
@@ -141,9 +140,9 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, *tls.ExtraCon
 
 	if server.passthroughAddress != "" {
 
-		extraConfig.PassthroughAddress = server.passthroughAddress
+		config.ExtraConfig.PassthroughAddress = server.passthroughAddress
 
-		extraConfig.PassthroughVerifyMessage = func(
+		config.ExtraConfig.PassthroughVerifyMessage = func(
 			message []byte) bool {
 
 			return obfuscator.VerifyTLSPassthroughMessage(
@@ -154,7 +153,7 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, *tls.ExtraCon
 				message)
 		}
 
-		extraConfig.PassthroughLogInvalidMessage = func(
+		config.ExtraConfig.PassthroughLogInvalidMessage = func(
 			clientIP string) {
 
 			logIrregularTunnel(
@@ -166,7 +165,7 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, *tls.ExtraCon
 				nil)
 		}
 
-		extraConfig.PassthroughHistoryAddNew = func(
+		config.ExtraConfig.PassthroughHistoryAddNew = func(
 			clientIP string,
 			clientRandom []byte) bool {
 
@@ -198,7 +197,7 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, *tls.ExtraCon
 		}
 	}
 
-	return config, extraConfig, nil
+	return config, nil
 }
 
 // TLSTunnelListener implements the net.Listener interface. Accept returns a

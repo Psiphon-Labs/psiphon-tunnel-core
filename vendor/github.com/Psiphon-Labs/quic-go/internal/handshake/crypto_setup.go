@@ -106,6 +106,7 @@ func NewCryptoSetupClient(
 
 	tlsConf = tlsConf.Clone()
 	tlsConf.MinVersion = tls.VersionTLS13
+
 	quicConf := &qtls.QUICConfig{
 		TLSConfig: tlsConf,
 

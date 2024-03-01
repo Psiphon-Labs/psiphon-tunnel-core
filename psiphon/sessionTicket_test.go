@@ -34,6 +34,7 @@ import (
 	"time"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	utls "github.com/refraction-networking/utls"
@@ -76,21 +77,22 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 		t.Fatalf("generateCertificate failed: %s", err)
 	}
 
-	serverConfig := &tls.Config{
-		Certificates: []tls.Certificate{*certificate},
-		NextProtos:   []string{"http/1.1"},
-		MinVersion:   utls.VersionTLS12,
-	}
-
-	extraConfig := &tls.ExtraConfig{
-		UseObfuscatedSessionTickets: true,
+	serverConfig := &tls.ExtendedTLSConfig{
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{*certificate},
+			NextProtos:   []string{"http/1.1"},
+			MinVersion:   utls.VersionTLS12,
+		},
+		ExtraConfig: &tls.ExtraConfig{
+			UseObfuscatedSessionTickets: true,
+		},
 	}
 
 	// Note: SessionTicketKey needs to be set, or else, it appears,
 	// tris.Config.serverInit() will clobber the value set by
 	// SetSessionTicketKeys.
-	serverConfig.SessionTicketKey = obfuscatedSessionTicketSharedSecret
-	serverConfig.SetSessionTicketKeys([][32]byte{
+	serverConfig.TLSConfig.SessionTicketKey = obfuscatedSessionTicketSharedSecret
+	serverConfig.TLSConfig.SetSessionTicketKeys([][32]byte{
 		standardSessionTicketKey, obfuscatedSessionTicketSharedSecret})
 
 	testMessage := "test"
@@ -108,7 +110,7 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 
 	go func() {
 
-		listener, err := tls.Listen("tcp", ":0", serverConfig, extraConfig)
+		listener, err := tls.Listen("tcp", ":0", serverConfig)
 		if err != nil {
 			report(err)
 			return
