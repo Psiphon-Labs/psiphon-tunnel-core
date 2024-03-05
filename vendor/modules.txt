@@ -20,14 +20,11 @@ github.com/Psiphon-Labs/bolt
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240301004115-0bd3fb6285a1
-## explicit; go 1.20
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240305020009-09f917290799
+## explicit; go 1.21
 github.com/Psiphon-Labs/psiphon-tls
-# github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20231117202359-5544003bda6f
-## explicit; go 1.20
-github.com/Psiphon-Labs/qtls-go1-20
-# github.com/Psiphon-Labs/quic-go v0.0.0-20240301182333-dc6bf1a9bcb8
-## explicit; go 1.20
+# github.com/Psiphon-Labs/quic-go v0.0.0-20240305203241-7c4a760d03cc
+## explicit; go 1.21
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
 github.com/Psiphon-Labs/quic-go/internal/ackhandler
@@ -323,7 +320,7 @@ github.com/wader/filtertransport
 # gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.5.0
 ## explicit; go 1.11
 gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib
-# golang.org/x/crypto v0.18.0
+# golang.org/x/crypto v0.19.0
 ## explicit; go 1.18
 golang.org/x/crypto/blake2b
 golang.org/x/crypto/blake2s
@@ -348,7 +345,7 @@ golang.org/x/exp/rand
 # golang.org/x/mod v0.10.0
 ## explicit; go 1.17
 golang.org/x/mod/semver
-# golang.org/x/net v0.18.0
+# golang.org/x/net v0.21.0
 ## explicit; go 1.18
 golang.org/x/net/bpf
 golang.org/x/net/http/httpguts
@@ -366,14 +363,14 @@ golang.org/x/net/trace
 # golang.org/x/sync v0.2.0
 ## explicit
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.16.0
+# golang.org/x/sys v0.17.0
 ## explicit; go 1.18
 golang.org/x/sys/cpu
 golang.org/x/sys/execabs
 golang.org/x/sys/plan9
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-# golang.org/x/term v0.16.0
+# golang.org/x/term v0.17.0
 ## explicit; go 1.18
 golang.org/x/term
 # golang.org/x/text v0.14.0

@@ -2,7 +2,6 @@ package http3
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"github.com/Psiphon-Labs/quic-go"
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
@@ -254,6 +255,15 @@ func (c *client) maxHeaderBytes() uint64 {
 
 // RoundTripOpt executes a request and returns a response
 func (c *client) RoundTripOpt(req *http.Request, opt RoundTripOpt) (*http.Response, error) {
+	rsp, err := c.roundTripOpt(req, opt)
+	if err != nil && req.Context().Err() != nil {
+		// if the context was canceled, return the context cancellation error
+		err = req.Context().Err()
+	}
+	return rsp, err
+}
+
+func (c *client) roundTripOpt(req *http.Request, opt RoundTripOpt) (*http.Response, error) {
 	if authorityAddr("https", hostnameFromRequest(req)) != c.hostname {
 		return nil, fmt.Errorf("http3 client BUG: RoundTripOpt called for the wrong client (expected %s, got %s)", c.hostname, req.Host)
 	}
@@ -424,7 +434,10 @@ func (c *client) doRequest(req *http.Request, conn quic.EarlyConnection, str qui
 		return nil, newStreamError(ErrCodeMessageError, err)
 	}
 	connState := conn.ConnectionState().TLS
-	res.TLS = &connState
+
+	// [Psiphon]
+	res.TLS = tls.UnsafeFromConnectionState(&connState)
+
 	res.Request = req
 	// Check that the server doesn't send more data in DATA frames than indicated by the Content-Length header (if set).
 	// See section 4.1.2 of RFC 9114.

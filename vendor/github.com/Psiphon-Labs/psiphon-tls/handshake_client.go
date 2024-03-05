@@ -31,7 +31,7 @@ type clientHandshakeState struct {
 	suite        *cipherSuite
 	finishedHash finishedHash
 	masterSecret []byte
-	session      *sessionState // the session being resumed
+	session      *SessionState // the session being resumed
 	ticket       []byte        // a fresh ticket received during this handshake
 }
 
@@ -84,10 +84,11 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, *ecdh.PrivateKey, error) {
 	}
 
 	// [Psiphon]
-	if c.extraConfig != nil {
-		hello.PRNG = c.extraConfig.ClientHelloPRNG
-		if c.extraConfig.GetClientHelloRandom != nil {
-			helloRandom, err := c.extraConfig.GetClientHelloRandom()
+	// TODO! is extraConfig check necessary/
+	if c.config != nil {
+		hello.PRNG = c.config.ClientHelloPRNG
+		if c.config.GetClientHelloRandom != nil {
+			helloRandom, err := c.config.GetClientHelloRandom()
 			if err == nil && len(helloRandom) != 32 {
 				err = errors.New("invalid length")
 			}
@@ -123,8 +124,9 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, *ecdh.PrivateKey, error) {
 	}
 
 	// [Psiphon]
+	// TODO! is config != nil check necessary?
 	var err error
-	if c.extraConfig == nil || c.extraConfig.GetClientHelloRandom == nil {
+	if c.config == nil || c.config.GetClientHelloRandom == nil {
 
 		_, err := io.ReadFull(config.rand(), hello.random)
 		if err != nil {
@@ -192,7 +194,7 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, *ecdh.PrivateKey, error) {
 
 func (c *Conn) clientHandshake(ctx context.Context) (err error) {
 	if c.config == nil {
-		c.config = fromConfig(defaultConfig())
+		c.config = defaultConfig()
 	}
 
 	// This may be a renegotiation handshake, in which case some fields
@@ -299,7 +301,7 @@ func (c *Conn) clientHandshake(ctx context.Context) (err error) {
 }
 
 func (c *Conn) loadSession(hello *clientHelloMsg) (
-	session *sessionState, earlySecret, binderKey []byte, err error) {
+	session *SessionState, earlySecret, binderKey []byte, err error) {
 	if c.config.SessionTicketsDisabled || c.config.ClientSessionCache == nil {
 		return nil, nil, nil, nil
 	}
@@ -328,7 +330,7 @@ func (c *Conn) loadSession(hello *clientHelloMsg) (
 	if !ok || cs == nil {
 		return nil, nil, nil, nil
 	}
-	session = fromClientSessionState(cs).session
+	session = cs.session
 
 	// Check that version used for the previous session is still valid.
 	versOk := false
@@ -367,7 +369,7 @@ func (c *Conn) loadSession(hello *clientHelloMsg) (
 			return nil, nil, nil, nil
 		}
 
-		hello.sessionTicket = fromClientSessionState(cs).ticket
+		hello.sessionTicket = cs.ticket
 		return
 	}
 
@@ -411,7 +413,7 @@ func (c *Conn) loadSession(hello *clientHelloMsg) (
 	// Set the pre_shared_key extension. See RFC 8446, Section 4.2.11.1.
 	ticketAge := c.config.time().Sub(time.Unix(int64(session.createdAt), 0))
 	identity := pskIdentity{
-		label:               fromClientSessionState(cs).ticket,
+		label:               cs.ticket,
 		obfuscatedTicketAge: uint32(ticketAge/time.Millisecond) + session.ageAdd,
 	}
 	hello.pskIdentities = []pskIdentity{identity}
@@ -937,8 +939,8 @@ func (hs *clientHandshakeState) saveSessionTicket() error {
 	}
 	session.secret = hs.masterSecret
 
-	cs := &clientSessionState{ticket: hs.ticket, session: session}
-	c.config.ClientSessionCache.Put(cacheKey, toClientSessionState(cs))
+	cs := &ClientSessionState{ticket: hs.ticket, session: session}
+	c.config.ClientSessionCache.Put(cacheKey, cs)
 	return nil
 }
 
@@ -1038,7 +1040,7 @@ func (c *Conn) verifyServerCertificate(certificates [][]byte) error {
 // certificateRequestInfoFromMsg generates a CertificateRequestInfo from a TLS
 // <= 1.2 CertificateRequest, making an effort to fill in missing information.
 func certificateRequestInfoFromMsg(ctx context.Context, vers uint16, certReq *certificateRequestMsg) *CertificateRequestInfo {
-	cri := &certificateRequestInfo{
+	cri := &CertificateRequestInfo{
 		AcceptableCAs: certReq.certificateAuthorities,
 		Version:       vers,
 		ctx:           ctx,
@@ -1075,7 +1077,7 @@ func certificateRequestInfoFromMsg(ctx context.Context, vers uint16, certReq *ce
 				ECDSAWithP256AndSHA256, ECDSAWithP384AndSHA384, ECDSAWithP521AndSHA512,
 			}
 		}
-		return toCertificateRequestInfo(cri)
+		return cri
 	}
 
 	// Filter the signature schemes based on the certificate types.
@@ -1098,7 +1100,7 @@ func certificateRequestInfoFromMsg(ctx context.Context, vers uint16, certReq *ce
 		}
 	}
 
-	return toCertificateRequestInfo(cri)
+	return cri
 }
 
 func (c *Conn) getClientCertificate(cri *CertificateRequestInfo) (*Certificate, error) {

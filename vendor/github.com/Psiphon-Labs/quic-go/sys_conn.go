@@ -35,7 +35,6 @@ func wrapConn(pc net.PacketConn) (rawConn, error) {
 				if disable, _ := strconv.ParseBool(os.Getenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING")); disable {
 					return
 				}
-
 				// [Psiphon]
 				// Do not emit alert to stderr (was log.Printf).
 				logger.Errorf("%s. See https://github.com/Psiphon-Labs/quic-go/wiki/UDP-Buffer-Sizes for details.", err)
@@ -48,7 +47,6 @@ func wrapConn(pc net.PacketConn) (rawConn, error) {
 				if disable, _ := strconv.ParseBool(os.Getenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING")); disable {
 					return
 				}
-
 				// [Psiphon]
 				// Do not emit alert to stderr (was log.Printf).
 				logger.Errorf("%s. See https://github.com/Psiphon-Labs/quic-go/wiki/UDP-Buffer-Sizes for details.", err)

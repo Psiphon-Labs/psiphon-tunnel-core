@@ -3,12 +3,13 @@ package quic
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
 	"github.com/Psiphon-Labs/quic-go/internal/utils"
@@ -191,7 +192,6 @@ func (t *Transport) dial(ctx context.Context, addr net.Addr, host string, tlsCon
 		onClose = func() { t.Close() }
 	}
 	tlsConf = tlsConf.Clone()
-	tlsConf.MinVersion = tls.VersionTLS13
 	setTLSConfigServerName(tlsConf, addr, host)
 	return dial(ctx, newSendConn(t.conn, addr, packetInfo{}, utils.DefaultLogger), t.connIDGenerator, t.handlerMap, tlsConf, conf, onClose, use0RTT)
 }
@@ -339,7 +339,7 @@ func (t *Transport) listen(conn rawConn) {
 		//nolint:staticcheck // SA1019 ignore this!
 		// TODO: This code is used to ignore wsa errors on Windows.
 		// Since net.Error.Temporary is deprecated as of Go 1.18, we should find a better solution.
-		// See https://github.com/Psiphon-Labs/quic-go/issues/1737 for details.
+		// See https://github.com/quic-go/quic-go/issues/1737 for details.
 		if nerr, ok := err.(net.Error); ok && nerr.Temporary() {
 			t.mutex.Lock()
 			closed := t.closed

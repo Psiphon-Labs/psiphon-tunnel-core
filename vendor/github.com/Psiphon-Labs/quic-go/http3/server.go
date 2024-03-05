@@ -2,7 +2,6 @@ package http3
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"github.com/Psiphon-Labs/quic-go"
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
@@ -30,6 +31,7 @@ var (
 	quicListenAddr = func(addr string, tlsConf *tls.Config, config *quic.Config) (QUICEarlyListener, error) {
 		return quic.ListenAddrEarly(addr, tlsConf, config)
 	}
+	errPanicked = errors.New("panicked")
 )
 
 // NextProtoH3 is the ALPN protocol negotiated during the TLS handshake, for QUIC v1 and v2.
@@ -114,6 +116,16 @@ func (k *contextKey) String() string { return "quic-go/http3 context value " + k
 // started the handler. The associated value will be of
 // type *http3.Server.
 var ServerContextKey = &contextKey{"http3-server"}
+
+// RemoteAddrContextKey is a context key. It can be used in
+// HTTP handlers with Context.Value to access the remote
+// address of the connection. The associated value will be of
+// type net.Addr.
+//
+// Use this value instead of [http.Request.RemoteAddr] if you
+// require access to the remote address of the connection rather
+// than its string representation.
+var RemoteAddrContextKey = &contextKey{"remote-addr"}
 
 type requestError struct {
 	err       error
@@ -200,6 +212,11 @@ type Server struct {
 	// In that case, the stream type will not be set.
 	UniStreamHijacker func(StreamType, quic.Connection, quic.ReceiveStream, error) (hijacked bool)
 
+	// ConnContext optionally specifies a function that modifies
+	// the context used for a new connection c. The provided ctx
+	// has a ServerContextKey value.
+	ConnContext func(ctx context.Context, c quic.Connection) context.Context
+
 	mutex     sync.RWMutex
 	listeners map[*QUICEarlyListener]listenerInfo
 
@@ -273,7 +290,7 @@ func (s *Server) ServeListener(ln QUICEarlyListener) error {
 		}
 		go func() {
 			if err := s.handleConn(conn); err != nil {
-				s.logger.Debugf(err.Error())
+				s.logger.Debugf("handling connection failed: %s", err)
 			}
 		}()
 	}
@@ -407,10 +424,11 @@ func (s *Server) addListener(l *QUICEarlyListener) error {
 		s.listeners = make(map[*QUICEarlyListener]listenerInfo)
 	}
 
-	if port, err := extractPort((*l).Addr().String()); err == nil {
+	laddr := (*l).Addr()
+	if port, err := extractPort(laddr.String()); err == nil {
 		s.listeners[l] = listenerInfo{port}
 	} else {
-		s.logger.Errorf("Unable to extract port from listener %+v, will not be announced using SetQuicHeaders: %s", err)
+		s.logger.Errorf("Unable to extract port from listener %s, will not be announced using SetQuicHeaders: %s", laddr, err)
 		s.listeners[l] = listenerInfo{}
 	}
 	s.generateAltSvcHeader()
@@ -574,7 +592,10 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 	}
 
 	connState := conn.ConnectionState().TLS
-	req.TLS = &connState
+
+	// [Psiphon]
+	req.TLS = tls.UnsafeFromConnectionState(&connState)
+
 	req.RemoteAddr = conn.RemoteAddr().String()
 
 	// Check that the client doesn't send more data in DATA frames than indicated by the Content-Length header (if set).
@@ -597,6 +618,13 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 	ctx := str.Context()
 	ctx = context.WithValue(ctx, ServerContextKey, s)
 	ctx = context.WithValue(ctx, http.LocalAddrContextKey, conn.LocalAddr())
+	ctx = context.WithValue(ctx, RemoteAddrContextKey, conn.RemoteAddr())
+	if s.ConnContext != nil {
+		ctx = s.ConnContext(ctx, conn)
+		if ctx == nil {
+			panic("http3: ConnContext returned nil")
+		}
+	}
 	req = req.WithContext(ctx)
 	r := newResponseWriter(str, conn, s.logger)
 	if req.Method == http.MethodHead {
@@ -641,6 +669,11 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 	}
 	// If the EOF was read by the handler, CancelRead() is a no-op.
 	str.CancelRead(quic.StreamErrorCode(ErrCodeNoError))
+
+	// abort the stream when there is a panic
+	if panicked {
+		return newStreamError(ErrCodeInternalError, errPanicked)
+	}
 	return requestError{}
 }
 
@@ -705,7 +738,7 @@ func ListenAndServeQUIC(addr, certFile, keyFile string, handler http.Handler) er
 	return server.ListenAndServeTLS(certFile, keyFile)
 }
 
-// ListenAndServe listens on the given network address for both, TLS and QUIC
+// ListenAndServe listens on the given network address for both TLS/TCP and QUIC
 // connections in parallel. It returns if one of the two returns an error.
 // http.DefaultServeMux is used when handler is nil.
 // The correct Alt-Svc headers for QUIC are set.
@@ -747,8 +780,8 @@ func ListenAndServe(addr, certFile, keyFile string, handler http.Handler) error 
 		Handler:   handler,
 	}
 
-	hErr := make(chan error)
-	qErr := make(chan error)
+	hErr := make(chan error, 1)
+	qErr := make(chan error, 1)
 	go func() {
 		hErr <- http.ListenAndServeTLS(addr, certFile, keyFile, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			quicServer.SetQuicHeaders(w.Header())

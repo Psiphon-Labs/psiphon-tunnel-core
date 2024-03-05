@@ -2,7 +2,6 @@ package http3
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"golang.org/x/net/http/httpguts"
 
@@ -202,6 +203,7 @@ func (r *RoundTripper) getClient(hostname string, onlyCached bool) (rtc *roundTr
 				MaxHeaderBytes:     r.MaxResponseHeaderBytes,
 				StreamHijacker:     r.StreamHijacker,
 				UniStreamHijacker:  r.UniStreamHijacker,
+				AdditionalSettings: r.AdditionalSettings,
 			},
 			r.QuicConfig,
 			dial,

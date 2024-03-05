@@ -77,22 +77,18 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 		t.Fatalf("generateCertificate failed: %s", err)
 	}
 
-	serverConfig := &tls.ExtendedTLSConfig{
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{*certificate},
-			NextProtos:   []string{"http/1.1"},
-			MinVersion:   utls.VersionTLS12,
-		},
-		ExtraConfig: &tls.ExtraConfig{
-			UseObfuscatedSessionTickets: true,
-		},
+	serverConfig := &tls.Config{
+		Certificates:                []tls.Certificate{*certificate},
+		NextProtos:                  []string{"http/1.1"},
+		MinVersion:                  utls.VersionTLS12,
+		UseObfuscatedSessionTickets: true,
 	}
 
 	// Note: SessionTicketKey needs to be set, or else, it appears,
 	// tris.Config.serverInit() will clobber the value set by
 	// SetSessionTicketKeys.
-	serverConfig.TLSConfig.SessionTicketKey = obfuscatedSessionTicketSharedSecret
-	serverConfig.TLSConfig.SetSessionTicketKeys([][32]byte{
+	serverConfig.SessionTicketKey = obfuscatedSessionTicketSharedSecret
+	serverConfig.SetSessionTicketKeys([][32]byte{
 		standardSessionTicketKey, obfuscatedSessionTicketSharedSecret})
 
 	testMessage := "test"

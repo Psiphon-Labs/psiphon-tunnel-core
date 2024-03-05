@@ -23,7 +23,7 @@ type clientHandshakeStateTLS13 struct {
 	hello       *clientHelloMsg
 	ecdheKey    *ecdh.PrivateKey
 
-	session     *sessionState
+	session     *SessionState
 	earlySecret []byte
 	binderKey   []byte
 
@@ -627,12 +627,12 @@ func (hs *clientHandshakeStateTLS13) sendClientCertificate() error {
 		return nil
 	}
 
-	cert, err := c.getClientCertificate(toCertificateRequestInfo(&certificateRequestInfo{
+	cert, err := c.getClientCertificate(&CertificateRequestInfo{
 		AcceptableCAs:    hs.certReq.certificateAuthorities,
 		SignatureSchemes: hs.certReq.supportedSignatureAlgorithms,
 		Version:          c.vers,
 		ctx:              hs.ctx,
-	}))
+	})
 	if err != nil {
 		return err
 	}
@@ -758,10 +758,10 @@ func (c *Conn) handleNewSessionTicket(msg *newSessionTicketMsgTLS13) error {
 	session.useBy = uint64(c.config.time().Add(lifetime).Unix())
 	session.ageAdd = msg.ageAdd
 	session.EarlyData = c.quic != nil && msg.maxEarlyData == 0xffffffff // RFC 9001, Section 4.6.1
-	cs := &clientSessionState{ticket: msg.label, session: session}
+	cs := &ClientSessionState{ticket: msg.label, session: session}
 
 	if cacheKey := c.clientSessionCacheKey(); cacheKey != "" {
-		c.config.ClientSessionCache.Put(cacheKey, toClientSessionState(cs))
+		c.config.ClientSessionCache.Put(cacheKey, cs)
 	}
 
 	return nil

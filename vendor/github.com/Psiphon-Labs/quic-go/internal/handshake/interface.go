@@ -1,10 +1,11 @@
 package handshake
 
 import (
-	"crypto/tls"
 	"errors"
 	"io"
 	"time"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
 	"github.com/Psiphon-Labs/quic-go/internal/wire"

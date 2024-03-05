@@ -418,10 +418,8 @@ func initTestCertificatesAndWebServer(
 
 	listener = tls.NewListener(
 		listener,
-		&tls.ExtendedTLSConfig{
-			TLSConfig: &tls.Config{
-				Certificates: []tls.Certificate{serverKeyPair},
-			},
+		&tls.Config{
+			Certificates: []tls.Certificate{serverKeyPair},
 		})
 
 	var wg sync.WaitGroup
@@ -516,7 +514,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 			t.Fatalf("net.Listen failed: %v", err)
 		}
 
-		tlsListener := tls.NewListener(tcpListener, &tls.ExtendedTLSConfig{TLSConfig: config})
+		tlsListener := tls.NewListener(tcpListener, config)
 		defer tlsListener.Close()
 
 		address = tlsListener.Addr().String()

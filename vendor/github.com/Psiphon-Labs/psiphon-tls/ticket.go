@@ -11,7 +11,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"io"
@@ -24,9 +23,8 @@ import (
 // [Psiphon]
 var obfuscateSessionTickets = true
 
-// A sessionState is a resumable session.
-type SessionState = tls.SessionState
-type sessionState struct {
+// A SessionState is a resumable session.
+type SessionState struct {
 	// Encoded as a SessionState (in the language of RFC 8446, Section 3).
 	//
 	//   enum { server(1), client(2) } SessionStateType;
@@ -112,7 +110,7 @@ type sessionState struct {
 //
 // The specific encoding should be considered opaque and may change incompatibly
 // between Go versions.
-func (s *sessionState) Bytes() ([]byte, error) {
+func (s *SessionState) Bytes() ([]byte, error) {
 	var b cryptobyte.Builder
 	b.AddUint16(s.version)
 	if s.isClient {
@@ -212,8 +210,8 @@ func certificatesToBytesSlice(certs []*x509.Certificate) [][]byte {
 }
 
 // ParseSessionState parses a [SessionState] encoded by [SessionState.Bytes].
-func ParseSessionState(data []byte) (*sessionState, error) {
-	ss := &sessionState{}
+func ParseSessionState(data []byte) (*SessionState, error) {
+	ss := &SessionState{}
 	s := cryptobyte.String(data)
 	var typ, extMasterSecret, earlyData uint8
 	var cert Certificate
@@ -325,8 +323,8 @@ func ParseSessionState(data []byte) (*sessionState, error) {
 
 // sessionState returns a partially filled-out [SessionState] with information
 // from the current connection.
-func (c *Conn) sessionState() (*sessionState, error) {
-	return &sessionState{
+func (c *Conn) sessionState() (*SessionState, error) {
+	return &SessionState{
 		version:           c.vers,
 		cipherSuite:       c.cipherSuite,
 		createdAt:         uint64(c.config.time().Unix()),
@@ -343,7 +341,7 @@ func (c *Conn) sessionState() (*sessionState, error) {
 
 // EncryptTicket encrypts a ticket with the Config's configured (or default)
 // session ticket keys. It can be used as a [Config.WrapSession] implementation.
-func (c *config) EncryptTicket(cs ConnectionState, ss *sessionState) ([]byte, error) {
+func (c *Config) EncryptTicket(cs ConnectionState, ss *SessionState) ([]byte, error) {
 	ticketKeys := c.ticketKeys(nil)
 	stateBytes, err := ss.Bytes()
 	if err != nil {
@@ -352,7 +350,7 @@ func (c *config) EncryptTicket(cs ConnectionState, ss *sessionState) ([]byte, er
 	return c.encryptTicket(stateBytes, ticketKeys)
 }
 
-func (c *config) encryptTicket(state []byte, ticketKeys []ticketKey) ([]byte, error) {
+func (c *Config) encryptTicket(state []byte, ticketKeys []ticketKey) ([]byte, error) {
 	if len(ticketKeys) == 0 {
 		return nil, errors.New("tls: internal error: session ticket keys unavailable")
 	}
@@ -384,7 +382,7 @@ func (c *config) encryptTicket(state []byte, ticketKeys []ticketKey) ([]byte, er
 // be used as a [Config.UnwrapSession] implementation.
 //
 // If the ticket can't be decrypted or parsed, DecryptTicket returns (nil, nil).
-func (c *config) DecryptTicket(identity []byte, cs ConnectionState) (*sessionState, error) {
+func (c *Config) DecryptTicket(identity []byte, cs ConnectionState) (*SessionState, error) {
 	ticketKeys := c.ticketKeys(nil)
 	stateBytes := c.decryptTicket(identity, ticketKeys)
 	if stateBytes == nil {
@@ -397,7 +395,7 @@ func (c *config) DecryptTicket(identity []byte, cs ConnectionState) (*sessionSta
 	return s, nil
 }
 
-func (c *config) decryptTicket(encrypted []byte, ticketKeys []ticketKey) []byte {
+func (c *Config) decryptTicket(encrypted []byte, ticketKeys []ticketKey) []byte {
 	if len(encrypted) < aes.BlockSize+sha256.Size {
 		return nil
 	}
@@ -429,13 +427,11 @@ func (c *config) decryptTicket(encrypted []byte, ticketKeys []ticketKey) []byte 
 	return nil
 }
 
-type ClientSessionState = tls.ClientSessionState
-
 // ClientSessionState contains the state needed by a client to
 // resume a previous TLS session.
-type clientSessionState struct {
+type ClientSessionState struct {
 	ticket  []byte
-	session *sessionState
+	session *SessionState
 }
 
 // ResumptionState returns the session ticket sent by the server (also known as
@@ -443,7 +439,7 @@ type clientSessionState struct {
 //
 // It can be called by [ClientSessionCache.Put] to serialize (with
 // [SessionState.Bytes]) and store the session.
-func (cs *clientSessionState) ResumptionState() (ticket []byte, state *sessionState, err error) {
+func (cs *ClientSessionState) ResumptionState() (ticket []byte, state *SessionState, err error) {
 	return cs.ticket, cs.session, nil
 }
 
@@ -452,11 +448,10 @@ func (cs *clientSessionState) ResumptionState() (ticket []byte, state *sessionSt
 //
 // state needs to be returned by [ParseSessionState], and the ticket and session
 // state must have been returned by [ClientSessionState.ResumptionState].
-func NewResumptionState(ticket []byte, state *sessionState) (*ClientSessionState, error) {
-	cs := &clientSessionState{
+func NewResumptionState(ticket []byte, state *SessionState) (*ClientSessionState, error) {
+	return &ClientSessionState{
 		ticket: ticket, session: state,
-	}
-	return toClientSessionState(cs), nil
+	}, nil
 }
 
 // [Psiphon]
@@ -520,14 +515,14 @@ func NewObfuscatedClientSessionState(sharedSecret [32]byte) (*ObfuscatedClientSe
 		return nil, err
 	}
 
-	serverState := &sessionState{
+	serverState := &SessionState{
 		version:          vers,
 		cipherSuite:      cipherSuite,
 		secret:           masterSecret,
 		peerCertificates: nil,
 	}
 
-	config := &config{}
+	config := &Config{}
 	sessionTicketKeys := []ticketKey{config.ticketKeyFromBytes(sharedSecret)}
 
 	ssBytes, err := serverState.Bytes()

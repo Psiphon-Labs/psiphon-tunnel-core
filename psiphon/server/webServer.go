@@ -122,7 +122,7 @@ func RunWebServer(
 		defer waitGroup.Done()
 
 		// Note: will be interrupted by listener.Close()
-		err := server.ServeTLS(listener, &tls.ExtendedTLSConfig{TLSConfig: tlsConfig})
+		err := server.ServeTLS(listener, tlsConfig)
 
 		// Can't check for the exact error that Close() will cause in Accept(),
 		// (see: https://code.google.com/p/go/issues/detail?id=4373). So using an

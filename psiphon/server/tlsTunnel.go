@@ -39,7 +39,7 @@ type TLSTunnelServer struct {
 	listenerTunnelProtocol string
 	listenerPort           int
 	passthroughAddress     string
-	tlsConfig              *tls.ExtendedTLSConfig
+	tlsConfig              *tls.Config
 	obfuscatorSeedHistory  *obfuscator.SeedHistory
 }
 
@@ -91,7 +91,7 @@ func NewTLSTunnelServer(
 }
 
 // makeTLSTunnelConfig creates a TLS config for a TLSTunnelServer listener.
-func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.ExtendedTLSConfig, error) {
+func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, error) {
 
 	// Limitation: certificate value changes on restart.
 
@@ -118,13 +118,10 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.ExtendedTLSConfig, er
 		minVersion = minVersionCandidates[prng.Intn(len(minVersionCandidates))]
 	}
 
-	config := &tls.ExtendedTLSConfig{
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{tlsCertificate},
-			NextProtos:   []string{"http/1.1"},
-			MinVersion:   minVersion,
-		},
-		ExtraConfig: &tls.ExtraConfig{},
+	config := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		NextProtos:   []string{"http/1.1"},
+		MinVersion:   minVersion,
 	}
 
 	// When configured, initialize passthrough mode, an anti-probing defense.
@@ -140,9 +137,9 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.ExtendedTLSConfig, er
 
 	if server.passthroughAddress != "" {
 
-		config.ExtraConfig.PassthroughAddress = server.passthroughAddress
+		config.PassthroughAddress = server.passthroughAddress
 
-		config.ExtraConfig.PassthroughVerifyMessage = func(
+		config.PassthroughVerifyMessage = func(
 			message []byte) bool {
 
 			return obfuscator.VerifyTLSPassthroughMessage(
@@ -153,7 +150,7 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.ExtendedTLSConfig, er
 				message)
 		}
 
-		config.ExtraConfig.PassthroughLogInvalidMessage = func(
+		config.PassthroughLogInvalidMessage = func(
 			clientIP string) {
 
 			logIrregularTunnel(
@@ -165,7 +162,7 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.ExtendedTLSConfig, er
 				nil)
 		}
 
-		config.ExtraConfig.PassthroughHistoryAddNew = func(
+		config.PassthroughHistoryAddNew = func(
 			clientIP string,
 			clientRandom []byte) bool {
 

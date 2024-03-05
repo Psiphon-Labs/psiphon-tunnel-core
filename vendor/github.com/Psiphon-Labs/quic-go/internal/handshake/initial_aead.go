@@ -2,7 +2,8 @@ package handshake
 
 import (
 	"crypto"
-	"crypto/tls"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"golang.org/x/crypto/hkdf"
 

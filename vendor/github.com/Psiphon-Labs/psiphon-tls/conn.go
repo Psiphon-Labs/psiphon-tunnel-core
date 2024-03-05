@@ -40,8 +40,7 @@ type Conn struct {
 	handshakeErr   error   // error resulting from handshake
 	vers           uint16  // TLS version
 	haveVers       bool    // version has been negotiated
-	config         *config // configuration passed to constructor
-	extraConfig    *ExtraConfig
+	config         *Config // configuration passed to constructor
 	// handshakes counts the number of handshakes performed on the
 	// connection so far. If renegotiation is disabled then this is either
 	// zero or one.
@@ -840,7 +839,7 @@ func (c *Conn) sendAlertLocked(err alert) error {
 	// This changes the nature of errors that such clients may report when their
 	// TLS handshake fails. This change in behavior is only visible to legitimate
 	// clients.
-	if c.extraConfig != nil && c.extraConfig.PassthroughAddress != "" &&
+	if c.config.PassthroughAddress != "" &&
 		c.conn.(*recorderConn).IsRecording() {
 		return nil
 	}
@@ -1635,7 +1634,7 @@ func (c *Conn) ConnectionState() ConnectionState {
 }
 
 func (c *Conn) connectionStateLocked() ConnectionState {
-	var state connectionState
+	var state ConnectionState
 	state.HandshakeComplete = c.isHandshakeComplete.Load()
 	state.Version = c.vers
 	state.NegotiatedProtocol = c.clientProtocol
@@ -1659,7 +1658,7 @@ func (c *Conn) connectionStateLocked() ConnectionState {
 	} else {
 		state.ekm = c.ekm
 	}
-	return toConnectionState(state)
+	return state
 }
 
 // OCSPResponse returns the stapled OCSP response from the TLS server, if

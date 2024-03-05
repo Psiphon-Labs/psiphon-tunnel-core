@@ -1,6 +1,6 @@
 module github.com/Psiphon-Labs/psiphon-tunnel-core
 
-go 1.20
+go 1.21
 
 replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-20230725223418-2d2e5b4a16ba
 
@@ -10,8 +10,8 @@ require (
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240301004115-0bd3fb6285a1
-	github.com/Psiphon-Labs/quic-go v0.0.0-20240301182333-dc6bf1a9bcb8
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240305020009-09f917290799
+	github.com/Psiphon-Labs/quic-go v0.0.0-20240305203241-7c4a760d03cc
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
@@ -41,11 +41,11 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
-	golang.org/x/crypto v0.18.0
-	golang.org/x/net v0.18.0
+	golang.org/x/crypto v0.19.0
+	golang.org/x/net v0.21.0
 	golang.org/x/sync v0.2.0
-	golang.org/x/sys v0.16.0
-	golang.org/x/term v0.16.0
+	golang.org/x/sys v0.17.0
+	golang.org/x/term v0.17.0
 )
 
 require (
@@ -53,7 +53,6 @@ require (
 	filippo.io/keygen v0.0.0-20230306160926-5201437acf8e // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20170702084017-28f7e881ca57 // indirect
 	github.com/BurntSushi/toml v1.3.2 // indirect
-	github.com/Psiphon-Labs/qtls-go1-20 v0.0.0-20231117202359-5544003bda6f // indirect
 	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect

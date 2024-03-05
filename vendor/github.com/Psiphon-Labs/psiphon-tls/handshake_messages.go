@@ -543,7 +543,7 @@ func (m *clientHelloMsg) marshalRandomized() []byte {
 
 				func() {
 					if m.extendedMasterSecret {
-						// RFC 7627
+						// RFC 7672
 						b.AddUint16(extensionExtendedMasterSecret)
 						b.AddUint16(0) // empty extension_data
 					}

@@ -1,14 +1,12 @@
-//go:build go1.21
-
 package qtls
 
 import (
-	"crypto/tls"
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 )
 
 type clientSessionCache struct {
-	getData func() []byte
-	setData func([]byte) (allowEarlyData bool)
+	getData func(earlyData bool) []byte
+	setData func(data []byte, earlyData bool) (allowEarlyData bool)
 	wrapped tls.ClientSessionCache
 }
 
@@ -24,7 +22,7 @@ func (c clientSessionCache) Put(key string, cs *tls.ClientSessionState) {
 		c.wrapped.Put(key, cs)
 		return
 	}
-	state.Extra = append(state.Extra, addExtraPrefix(c.getData()))
+	state.Extra = append(state.Extra, addExtraPrefix(c.getData(state.EarlyData)))
 	newCS, err := tls.NewResumptionState(ticket, state)
 	if err != nil {
 		// It's not clear why this would error. Just save the original state.
@@ -46,12 +44,13 @@ func (c clientSessionCache) Get(key string) (*tls.ClientSessionState, bool) {
 		c.wrapped.Put(key, nil)
 		return nil, false
 	}
-	var earlyData bool
 	// restore QUIC transport parameters and RTT stored in state.Extra
 	if extra := findExtraData(state.Extra); extra != nil {
-		earlyData = c.setData(extra)
+		earlyData := c.setData(extra, state.EarlyData)
+		if state.EarlyData {
+			state.EarlyData = earlyData
+		}
 	}
-	state.EarlyData = earlyData
 	session, err := tls.NewResumptionState(ticket, state)
 	if err != nil {
 		// It's not clear why this would error.

@@ -289,17 +289,16 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 			break
 		}
 
-		var sessionState *sessionState
+		var sessionState *SessionState
 		if c.config.UnwrapSession != nil {
 			var err error
-			ss, err := c.config.UnwrapSession(identity.label, c.connectionStateLocked())
+			sessionState, err = c.config.UnwrapSession(identity.label, c.connectionStateLocked())
 			if err != nil {
 				return err
 			}
-			if ss == nil {
+			if sessionState == nil {
 				continue
 			}
-			sessionState = fromSessionState(ss)
 		} else {
 			plaintext := c.config.decryptTicket(identity.label, c.ticketKeys)
 			if plaintext == nil {
@@ -434,7 +433,7 @@ func (hs *serverHandshakeStateTLS13) pickCertificate() error {
 		return c.sendAlert(alertMissingExtension)
 	}
 
-	certificate, err := c.config.getCertificate(newClientHelloInfo(hs.ctx, c, hs.clientHello))
+	certificate, err := c.config.getCertificate(clientHelloInfo(hs.ctx, c, hs.clientHello))
 	if err != nil {
 		if err == errNoCertificates {
 			c.sendAlert(alertUnrecognizedName)
@@ -839,7 +838,7 @@ func (c *Conn) sendSessionTicket(earlyData bool) error {
 	state.secret = psk
 	state.EarlyData = earlyData
 	if c.config.WrapSession != nil {
-		m.label, err = c.config.WrapSession(c.connectionStateLocked(), toSessionState(state))
+		m.label, err = c.config.WrapSession(c.connectionStateLocked(), state)
 		if err != nil {
 			return err
 		}

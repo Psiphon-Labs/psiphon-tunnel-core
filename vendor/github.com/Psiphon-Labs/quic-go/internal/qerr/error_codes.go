@@ -3,7 +3,7 @@ package qerr
 import (
 	"fmt"
 
-	"github.com/Psiphon-Labs/quic-go/internal/qtls"
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 )
 
 // TransportErrorCode is a QUIC transport error.
@@ -40,7 +40,7 @@ func (e TransportErrorCode) Message() string {
 	if !e.IsCryptoError() {
 		return ""
 	}
-	return qtls.AlertError(e - 0x100).Error()
+	return tls.AlertError(e - 0x100).Error()
 }
 
 func (e TransportErrorCode) String() string {

@@ -73,7 +73,7 @@ type HTTPSServer struct {
 //
 // Note that the http.Server.TLSConfig field is ignored and the tls.Config
 // parameter is used intead.
-func (server *HTTPSServer) ServeTLS(listener net.Listener, config *tls.ExtendedTLSConfig) error {
+func (server *HTTPSServer) ServeTLS(listener net.Listener, config *tls.Config) error {
 	tlsListener := tls.NewListener(listener, config)
 	return server.Serve(tlsListener)
 }

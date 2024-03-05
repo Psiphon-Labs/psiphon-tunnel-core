@@ -33,7 +33,7 @@ type serverHandshakeState struct {
 	ecSignOk     bool
 	rsaDecryptOk bool
 	rsaSignOk    bool
-	sessionState *sessionState
+	sessionState *SessionState
 	finishedHash finishedHash
 	masterSecret []byte
 	cert         *Certificate
@@ -70,7 +70,7 @@ func (c *Conn) serverHandshake(ctx context.Context) error {
 	// continue reference a net.Conn, albeit one that is closed, so Reads and
 	// Writes will fail.
 
-	if c.extraConfig != nil && c.extraConfig.PassthroughAddress != "" {
+	if c.config.PassthroughAddress != "" {
 
 		doPassthrough := false
 
@@ -83,9 +83,9 @@ func (c *Conn) serverHandshake(ctx context.Context) error {
 		clientIP, _, _ := net.SplitHostPort(clientAddr)
 
 		if !doPassthrough {
-			if !c.extraConfig.PassthroughVerifyMessage(clientHello.random) {
+			if !c.config.PassthroughVerifyMessage(clientHello.random) {
 
-				c.extraConfig.PassthroughLogInvalidMessage(clientIP)
+				c.config.PassthroughLogInvalidMessage(clientIP)
 
 				doPassthrough = true
 				err = errors.New("passthrough: invalid client random")
@@ -93,7 +93,7 @@ func (c *Conn) serverHandshake(ctx context.Context) error {
 		}
 
 		if !doPassthrough {
-			if !c.extraConfig.PassthroughHistoryAddNew(
+			if !c.config.PassthroughHistoryAddNew(
 				clientIP, clientHello.random) {
 
 				doPassthrough = true
@@ -150,7 +150,7 @@ func (c *Conn) serverHandshake(ctx context.Context) error {
 				// is not interrupted.
 				_ = conn.SetDeadline(time.Time{})
 
-				passthroughConn, err := net.Dial("tcp", c.extraConfig.PassthroughAddress)
+				passthroughConn, err := net.Dial("tcp", c.config.PassthroughAddress)
 				if err != nil {
 					return
 				}
@@ -366,15 +366,14 @@ func (c *Conn) readClientHello(ctx context.Context) (*clientHelloMsg, error) {
 		return nil, unexpectedMessageError(clientHello, msg)
 	}
 
-	var configForClient *config
+	var configForClient *Config
 	originalConfig := c.config
 	if c.config.GetConfigForClient != nil {
-		chi := newClientHelloInfo(ctx, c, clientHello)
-		if cfc, err := c.config.GetConfigForClient(chi); err != nil {
+		chi := clientHelloInfo(ctx, c, clientHello)
+		if configForClient, err = c.config.GetConfigForClient(chi); err != nil {
 			c.sendAlert(alertInternalError)
 			return nil, err
-		} else if cfc != nil {
-			configForClient = fromConfig(cfc)
+		} else if configForClient != nil {
 			c.config = configForClient
 		}
 	}
@@ -454,7 +453,7 @@ func (hs *serverHandshakeState) processClientHello() error {
 	hs.hello.alpnProtocol = selectedProto
 	c.clientProtocol = selectedProto
 
-	hs.cert, err = c.config.getCertificate(newClientHelloInfo(hs.ctx, c, hs.clientHello))
+	hs.cert, err = c.config.getCertificate(clientHelloInfo(hs.ctx, c, hs.clientHello))
 	if err != nil {
 		if err == errNoCertificates {
 			c.sendAlert(alertUnrecognizedName)
@@ -538,7 +537,7 @@ func negotiateALPN(serverProtos, clientProtos []string, quic bool) (string, erro
 
 // supportsECDHE returns whether ECDHE key exchanges can be used with this
 // pre-TLS 1.3 client.
-func supportsECDHE(c *config, supportedCurves []CurveID, supportedPoints []uint8) bool {
+func supportsECDHE(c *Config, supportedCurves []CurveID, supportedPoints []uint8) bool {
 	supportsCurve := false
 	for _, curve := range supportedCurves {
 		if c.supportsCurve(curve) {
@@ -634,7 +633,7 @@ func (hs *serverHandshakeState) checkForResumption() error {
 		return nil
 	}
 
-	var sessionState *sessionState
+	var sessionState *SessionState
 	if c.config.UnwrapSession != nil {
 		ss, err := c.config.UnwrapSession(hs.clientHello.sessionTicket, c.connectionStateLocked())
 		if err != nil {
@@ -643,7 +642,7 @@ func (hs *serverHandshakeState) checkForResumption() error {
 		if ss == nil {
 			return nil
 		}
-		sessionState = fromSessionState(ss)
+		sessionState = ss
 	} else {
 		plaintext := c.config.decryptTicket(hs.clientHello.sessionTicket, c.ticketKeys)
 		if plaintext == nil {
@@ -657,8 +656,18 @@ func (hs *serverHandshakeState) checkForResumption() error {
 	}
 
 	// [Psiphon]
+	// *TODO* write a reason why this is commented out.
+	// // TLS 1.2 tickets don't natively have a lifetime, but we want to avoid
+	// // re-wrapping the same master secret in different tickets over and over for
+	// // too long, weakening forward secrecy.
+	// createdAt := time.Unix(int64(sessionState.createdAt), 0)
+	// if c.config.time().Sub(createdAt) > maxSessionTicketLifetime {
+	// 	return nil
+	// }
+
+	// [Psiphon]
 	// Skip ticket lifetime check when using obfuscated session tickets.
-	if c.extraConfig == nil || !c.extraConfig.UseObfuscatedSessionTickets {
+	if !c.config.UseObfuscatedSessionTickets {
 
 		// TLS 1.2 tickets don't natively have a lifetime, but we want to avoid
 		// re-wrapping the same master secret in different tickets over and over for
@@ -711,12 +720,16 @@ func (hs *serverHandshakeState) checkForResumption() error {
 	}
 
 	// RFC 7627, Section 5.3
+	// *TODO* write a reason why this is commented out.
+	// if !sessionState.extMasterSecret && hs.clientHello.extendedMasterSecret {
+	// 	return nil
+	// }
 	// [Psiphon]
 	// When using obfuscated session tickets, the client-generated session ticket
 	// state never uses EMS. ClientHellos vary in EMS support. So, in this mode,
 	// skip this check to ensure the obfuscated session tickets are not
 	// rejected.
-	if c.extraConfig == nil || !c.extraConfig.UseObfuscatedSessionTickets {
+	if !c.config.UseObfuscatedSessionTickets {
 		if !sessionState.extMasterSecret && hs.clientHello.extendedMasterSecret {
 			return nil
 		}
@@ -1052,7 +1065,7 @@ func (hs *serverHandshakeState) sendSessionTicket() error {
 		state.createdAt = hs.sessionState.createdAt
 	}
 	if c.config.WrapSession != nil {
-		m.ticket, err = c.config.WrapSession(c.connectionStateLocked(), toSessionState(state))
+		m.ticket, err = c.config.WrapSession(c.connectionStateLocked(), state)
 		if err != nil {
 			return err
 		}
@@ -1172,13 +1185,13 @@ func (c *Conn) processCertsFromClient(certificate Certificate) error {
 	return nil
 }
 
-func newClientHelloInfo(ctx context.Context, c *Conn, clientHello *clientHelloMsg) *ClientHelloInfo {
+func clientHelloInfo(ctx context.Context, c *Conn, clientHello *clientHelloMsg) *ClientHelloInfo {
 	supportedVersions := clientHello.supportedVersions
 	if len(clientHello.supportedVersions) == 0 {
 		supportedVersions = supportedVersionsFromMax(clientHello.vers)
 	}
 
-	return toClientHelloInfo(&clientHelloInfo{
+	return &ClientHelloInfo{
 		CipherSuites:      clientHello.cipherSuites,
 		ServerName:        clientHello.serverName,
 		SupportedCurves:   clientHello.supportedCurves,
@@ -1187,7 +1200,7 @@ func newClientHelloInfo(ctx context.Context, c *Conn, clientHello *clientHelloMs
 		SupportedProtos:   clientHello.alpnProtocols,
 		SupportedVersions: supportedVersions,
 		Conn:              c.conn,
-		config:            toConfig(c.config),
+		config:            c.config,
 		ctx:               ctx,
-	})
+	}
 }

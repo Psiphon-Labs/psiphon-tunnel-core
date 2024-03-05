@@ -2,13 +2,14 @@ package quic
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"net"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+
 	"github.com/Psiphon-Labs/quic-go/internal/handshake"
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
 	"github.com/Psiphon-Labs/quic-go/logging"
@@ -188,8 +189,12 @@ type Connection interface {
 	// Warning: This API should not be considered stable and might change soon.
 	ConnectionState() ConnectionState
 
-	// SendDatagram sends a message as a datagram, as specified in RFC 9221.
-	SendDatagram([]byte) error
+	// SendDatagram sends a message using a QUIC datagram, as specified in RFC 9221.
+	// There is no delivery guarantee for DATAGRAM frames, they are not retransmitted if lost.
+	// The payload of the datagram needs to fit into a single QUIC packet.
+	// In addition, a datagram may be dropped before being sent out if the available packet size suddenly decreases.
+	// If the payload is too large to be sent at the current time, a DatagramTooLargeError is returned.
+	SendDatagram(payload []byte) error
 	// ReceiveDatagram gets a message received in a datagram, as specified in RFC 9221.
 	ReceiveDatagram(context.Context) ([]byte, error)
 }

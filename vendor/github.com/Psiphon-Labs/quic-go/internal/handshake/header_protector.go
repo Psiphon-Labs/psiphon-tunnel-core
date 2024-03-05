@@ -3,9 +3,10 @@ package handshake
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"golang.org/x/crypto/chacha20"
 

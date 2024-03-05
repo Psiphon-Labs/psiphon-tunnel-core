@@ -115,7 +115,7 @@ type MeekServer struct {
 	skipExtendedTurnAroundThreshold int
 	maxSessionStaleness             time.Duration
 	httpClientIOTimeout             time.Duration
-	tlsConfig                       *tls.ExtendedTLSConfig
+	tlsConfig                       *tls.Config
 	obfuscatorSeedHistory           *obfuscator.SeedHistory
 	clientHandler                   func(clientConn net.Conn, data *additionalTransportData)
 	openConns                       *common.Conns
@@ -1219,7 +1219,7 @@ func (server *MeekServer) getMeekCookiePayload(
 // of the connection is non-circumvention; it's optimized for performance
 // assuming the peer is an uncensored CDN.
 func (server *MeekServer) makeMeekTLSConfig(
-	isFronted bool, useObfuscatedSessionTickets bool) (*tls.ExtendedTLSConfig, error) {
+	isFronted bool, useObfuscatedSessionTickets bool) (*tls.Config, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 	if err != nil {
@@ -1237,13 +1237,10 @@ func (server *MeekServer) makeMeekTLSConfig(
 	minVersionCandidates := []uint16{tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12}
 	minVersion := minVersionCandidates[prng.Intn(len(minVersionCandidates))]
 
-	config := &tls.ExtendedTLSConfig{
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{tlsCertificate},
-			NextProtos:   []string{"http/1.1"},
-			MinVersion:   minVersion,
-		},
-		ExtraConfig: &tls.ExtraConfig{},
+	config := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		NextProtos:   []string{"http/1.1"},
+		MinVersion:   minVersion,
 	}
 
 	if isFronted {
@@ -1258,7 +1255,7 @@ func (server *MeekServer) makeMeekTLSConfig(
 		// unfronted cases we prefer a more natural TLS handshake.
 		//
 		// [*] the list has since been updated, removing CipherSuites using RC4 and 3DES.
-		config.TLSConfig.CipherSuites = []uint16{
+		config.CipherSuites = []uint16{
 			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
@@ -1272,7 +1269,9 @@ func (server *MeekServer) makeMeekTLSConfig(
 			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
 		}
-		config.TLSConfig.PreferServerCipherSuites = true
+
+		// *NOTE* this is deprecated
+		config.PreferServerCipherSuites = true
 	}
 
 	if useObfuscatedSessionTickets {
@@ -1280,7 +1279,7 @@ func (server *MeekServer) makeMeekTLSConfig(
 		// See obfuscated session ticket overview
 		// in NewObfuscatedClientSessionState.
 
-		config.ExtraConfig.UseObfuscatedSessionTickets = true
+		config.UseObfuscatedSessionTickets = true
 
 		var obfuscatedSessionTicketKey [32]byte
 		key, err := hex.DecodeString(server.support.Config.MeekObfuscatedKey)
@@ -1301,8 +1300,8 @@ func (server *MeekServer) makeMeekTLSConfig(
 		// Note: SessionTicketKey needs to be set, or else, it appears,
 		// tris.Config.serverInit() will clobber the value set by
 		// SetSessionTicketKeys.
-		config.TLSConfig.SessionTicketKey = obfuscatedSessionTicketKey
-		config.TLSConfig.SetSessionTicketKeys([][32]byte{
+		config.SessionTicketKey = obfuscatedSessionTicketKey
+		config.SetSessionTicketKeys([][32]byte{
 			standardSessionTicketKey,
 			obfuscatedSessionTicketKey})
 	}
@@ -1320,9 +1319,9 @@ func (server *MeekServer) makeMeekTLSConfig(
 
 	if server.passthroughAddress != "" {
 
-		config.ExtraConfig.PassthroughAddress = server.passthroughAddress
+		config.PassthroughAddress = server.passthroughAddress
 
-		config.ExtraConfig.PassthroughVerifyMessage = func(
+		config.PassthroughVerifyMessage = func(
 			message []byte) bool {
 
 			return obfuscator.VerifyTLSPassthroughMessage(
@@ -1331,7 +1330,7 @@ func (server *MeekServer) makeMeekTLSConfig(
 				message)
 		}
 
-		config.ExtraConfig.PassthroughLogInvalidMessage = func(
+		config.PassthroughLogInvalidMessage = func(
 			clientIP string) {
 
 			logIrregularTunnel(
@@ -1343,7 +1342,7 @@ func (server *MeekServer) makeMeekTLSConfig(
 				nil)
 		}
 
-		config.ExtraConfig.PassthroughHistoryAddNew = func(
+		config.PassthroughHistoryAddNew = func(
 			clientIP string,
 			clientRandom []byte) bool {
 

@@ -3,10 +3,11 @@ package handshake
 import (
 	"crypto"
 	"crypto/cipher"
-	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"github.com/Psiphon-Labs/quic-go/internal/protocol"
 	"github.com/Psiphon-Labs/quic-go/internal/qerr"
@@ -172,7 +173,7 @@ func (a *updatableAEAD) Open(dst, src []byte, rcvTime time.Time, pn protocol.Pac
 		}
 	}
 	if err == nil {
-		a.highestRcvdPN = utils.Max(a.highestRcvdPN, pn)
+		a.highestRcvdPN = max(a.highestRcvdPN, pn)
 	}
 	return dec, err
 }
