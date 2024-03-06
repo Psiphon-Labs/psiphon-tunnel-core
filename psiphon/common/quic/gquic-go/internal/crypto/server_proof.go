@@ -6,11 +6,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
 	"math/big"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 )
 
 type ecdsaSignature struct {

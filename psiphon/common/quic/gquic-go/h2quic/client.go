@@ -1,7 +1,6 @@
 package h2quic
 
 import (
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"

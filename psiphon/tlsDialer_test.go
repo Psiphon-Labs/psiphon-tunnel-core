@@ -24,7 +24,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -42,11 +41,11 @@ import (
 	"testing"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -492,23 +491,22 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 
 	if address == "" {
 
-		// Same tls-tris config as psiphon/server/meek.go
+		// Same tls config as psiphon/server/meek.go
 
 		certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 		if err != nil {
 			t.Fatalf("common.GenerateWebServerCertificate failed: %v", err)
 		}
 
-		tlsCertificate, err := tris.X509KeyPair([]byte(certificate), []byte(privateKey))
+		tlsCertificate, err := tls.X509KeyPair([]byte(certificate), []byte(privateKey))
 		if err != nil {
-			t.Fatalf("tris.X509KeyPair failed: %v", err)
+			t.Fatalf("tls.X509KeyPair failed: %v", err)
 		}
 
-		config := &tris.Config{
-			Certificates:            []tris.Certificate{tlsCertificate},
-			NextProtos:              []string{"http/1.1"},
-			MinVersion:              tris.VersionTLS10,
-			UseExtendedMasterSecret: true,
+		config := &tls.Config{
+			Certificates: []tls.Certificate{tlsCertificate},
+			NextProtos:   []string{"http/1.1"},
+			MinVersion:   tls.VersionTLS10,
 		}
 
 		tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -516,7 +514,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 			t.Fatalf("net.Listen failed: %v", err)
 		}
 
-		tlsListener := tris.NewListener(tcpListener, config)
+		tlsListener := tls.NewListener(tcpListener, config)
 		defer tlsListener.Close()
 
 		address = tlsListener.Addr().String()
@@ -527,9 +525,9 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 				if err != nil {
 					return
 				}
-				err = conn.(*tris.Conn).Handshake()
+				err = conn.(*tls.Conn).Handshake()
 				if err != nil {
-					t.Logf("tris.Conn.Handshake failed: %v", err)
+					t.Logf("tls.Conn.Handshake failed: %v", err)
 				}
 				conn.Close()
 			}

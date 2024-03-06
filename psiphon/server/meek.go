@@ -23,7 +23,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
+	std_tls "crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -39,6 +39,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/monotime"
@@ -48,7 +49,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	tris "github.com/Psiphon-Labs/tls-tris"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/juju/ratelimit"
 	"golang.org/x/crypto/nacl/box"
@@ -115,7 +115,7 @@ type MeekServer struct {
 	skipExtendedTurnAroundThreshold int
 	maxSessionStaleness             time.Duration
 	httpClientIOTimeout             time.Duration
-	tlsConfig                       *tris.Config
+	tlsConfig                       *tls.Config
 	obfuscatorSeedHistory           *obfuscator.SeedHistory
 	clientHandler                   func(clientConn net.Conn, data *additionalTransportData)
 	openConns                       *common.Conns
@@ -306,7 +306,7 @@ func (server *MeekServer) Run() error {
 		},
 
 		// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+		TLSNextProto: make(map[string]func(*http.Server, *std_tls.Conn, http.Handler)),
 	}
 
 	// Note: Serve() will be interrupted by listener.Close() call
@@ -1219,14 +1219,14 @@ func (server *MeekServer) getMeekCookiePayload(
 // of the connection is non-circumvention; it's optimized for performance
 // assuming the peer is an uncensored CDN.
 func (server *MeekServer) makeMeekTLSConfig(
-	isFronted bool, useObfuscatedSessionTickets bool) (*tris.Config, error) {
+	isFronted bool, useObfuscatedSessionTickets bool) (*tls.Config, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	tlsCertificate, err := tris.X509KeyPair(
+	tlsCertificate, err := tls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1234,14 +1234,13 @@ func (server *MeekServer) makeMeekTLSConfig(
 
 	// Vary the minimum version to frustrate scanning/fingerprinting of unfronted servers.
 	// Limitation: like the certificate, this value changes on restart.
-	minVersionCandidates := []uint16{tris.VersionTLS10, tris.VersionTLS11, tris.VersionTLS12}
+	minVersionCandidates := []uint16{tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12}
 	minVersion := minVersionCandidates[prng.Intn(len(minVersionCandidates))]
 
-	config := &tris.Config{
-		Certificates:            []tris.Certificate{tlsCertificate},
-		NextProtos:              []string{"http/1.1"},
-		MinVersion:              minVersion,
-		UseExtendedMasterSecret: true,
+	config := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		NextProtos:   []string{"http/1.1"},
+		MinVersion:   minVersion,
 	}
 
 	if isFronted {
@@ -1257,19 +1256,21 @@ func (server *MeekServer) makeMeekTLSConfig(
 		//
 		// [*] the list has since been updated, removing CipherSuites using RC4 and 3DES.
 		config.CipherSuites = []uint16{
-			tris.TLS_RSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_RSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_RSA_WITH_AES_256_CBC_SHA,
-			tris.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
 		}
+
+		// *NOTE* this is deprecated
 		config.PreferServerCipherSuites = true
 	}
 

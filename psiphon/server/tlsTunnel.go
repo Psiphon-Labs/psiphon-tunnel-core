@@ -22,13 +22,13 @@ package server
 import (
 	"net"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	tris "github.com/Psiphon-Labs/tls-tris"
 )
 
 // TLSTunnelServer tunnels TCP traffic (in the case of Psiphon, Obfuscated SSH
@@ -39,7 +39,7 @@ type TLSTunnelServer struct {
 	listenerTunnelProtocol string
 	listenerPort           int
 	passthroughAddress     string
-	tlsConfig              *tris.Config
+	tlsConfig              *tls.Config
 	obfuscatorSeedHistory  *obfuscator.SeedHistory
 }
 
@@ -58,7 +58,7 @@ func ListenTLSTunnel(
 		return nil, errors.Trace(err)
 	}
 
-	listener = tris.NewListener(server.listener, server.tlsConfig)
+	listener = tls.NewListener(server.listener, server.tlsConfig)
 
 	return NewTLSTunnelListener(listener, server), nil
 }
@@ -91,7 +91,7 @@ func NewTLSTunnelServer(
 }
 
 // makeTLSTunnelConfig creates a TLS config for a TLSTunnelServer listener.
-func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tris.Config, error) {
+func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, error) {
 
 	// Limitation: certificate value changes on restart.
 
@@ -100,7 +100,7 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tris.Config, error) {
 		return nil, errors.Trace(err)
 	}
 
-	tlsCertificate, err := tris.X509KeyPair(
+	tlsCertificate, err := tls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -109,20 +109,19 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tris.Config, error) {
 	var minVersion uint16
 	if protocol.TunnelProtocolUsesTLSOSSH(server.listenerTunnelProtocol) {
 		// Use min TLS 1.3 so cert is not plaintext on the wire.
-		minVersion = tris.VersionTLS13
+		minVersion = tls.VersionTLS13
 	} else {
 		// Need to support older TLS versions for backwards compatibility.
 		// Vary the minimum version to frustrate scanning/fingerprinting of unfronted servers.
 		// Limitation: like the certificate, this value changes on restart.
-		minVersionCandidates := []uint16{tris.VersionTLS10, tris.VersionTLS11, tris.VersionTLS12}
+		minVersionCandidates := []uint16{tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12}
 		minVersion = minVersionCandidates[prng.Intn(len(minVersionCandidates))]
 	}
 
-	config := &tris.Config{
-		Certificates:            []tris.Certificate{tlsCertificate},
-		NextProtos:              []string{"http/1.1"},
-		MinVersion:              minVersion,
-		UseExtendedMasterSecret: true,
+	config := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		NextProtos:   []string{"http/1.1"},
+		MinVersion:   minVersion,
 	}
 
 	// When configured, initialize passthrough mode, an anti-probing defense.
