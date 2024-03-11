@@ -445,6 +445,9 @@ type Config struct {
 	// for testing.
 	AllowBogons bool
 
+	// EnableSteeringIPs enables meek server steering IP support.
+	EnableSteeringIPs bool
+
 	// OwnEncodedServerEntries is a list of the server's own encoded server
 	// entries, idenfified by server entry tag. These values are used in the
 	// handshake API to update clients that don't yet have a signed copy of these

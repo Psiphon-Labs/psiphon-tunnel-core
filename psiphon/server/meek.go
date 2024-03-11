@@ -757,12 +757,14 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// in order to be recorded here and relayed to the client.
 
 	var steeringIP string
-	if server.isFronted {
+	if server.isFronted && server.support.Config.EnableSteeringIPs {
 		steeringIP = request.Header.Get("X-Psiphon-Steering-Ip")
-		IP := net.ParseIP(steeringIP)
-		if IP == nil || common.IsBogon(IP) {
-			steeringIP = ""
-			log.WithTraceFields(LogFields{"steeringIP": steeringIP}).Warning("invalid steering IP")
+		if steeringIP != "" {
+			IP := net.ParseIP(steeringIP)
+			if IP == nil || common.IsBogon(IP) {
+				steeringIP = ""
+				log.WithTraceFields(LogFields{"steeringIP": steeringIP}).Warning("invalid steering IP")
+			}
 		}
 	}
 

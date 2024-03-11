@@ -855,6 +855,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		serverConfig["HostProvider"] = "example-host-provider"
 	}
 
+	if runConfig.doSteeringIP {
+		serverConfig["EnableSteeringIPs"] = true
+	}
+
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
 	uniqueUserLog := make(chan map[string]interface{}, 1)
