@@ -112,6 +112,13 @@ func gQUICDialContext(
 	quicSNIAddress string,
 	versionNumber uint32) (quicConnection, error) {
 
+	// The legacy gquic-go fork expects a port number in the SNI field
+	// (which is then stripped). Add a stub port value if none is present.
+	_, _, err := net.SplitHostPort(quicSNIAddress)
+	if err != nil {
+		quicSNIAddress = net.JoinHostPort(quicSNIAddress, "0")
+	}
+
 	quicConfig := &gquic.Config{
 		HandshakeTimeout: time.Duration(1<<63 - 1),
 		IdleTimeout:      CLIENT_IDLE_TIMEOUT,
