@@ -372,8 +372,6 @@ func ListenAndServe(addr, certFile, keyFile string, handler http.Handler) error 
 	// Start the servers
 	httpServer := &http.Server{
 		Addr: addr,
-		// *TODO* make sure that nil can be passed here. A tls conn is already made above.
-		// TLSConfig: nil,
 	}
 
 	quicServer := &Server{
