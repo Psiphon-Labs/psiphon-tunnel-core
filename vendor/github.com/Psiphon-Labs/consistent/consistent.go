@@ -186,7 +186,11 @@ func (c *Consistent) distributeWithLoad(partID, idx int, partitions map[int]*Mem
 	var count int
 	for {
 		count++
-		if count >= len(c.sortedSet) {
+		// [Psiphon]
+		// Fix: changed ">=" to ">"; otherwise tests showed that 1 member may
+		// be excluded when there is more than one member and that using a
+		// single member results in a crash.
+		if count > len(c.sortedSet) {
 			// User needs to decrease partition count, increase member count or increase load factor.
 			panic("not enough room to distribute partitions")
 		}

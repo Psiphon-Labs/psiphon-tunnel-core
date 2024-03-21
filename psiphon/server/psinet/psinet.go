@@ -140,7 +140,7 @@ func NewDatabase(filename string) (*Database, error) {
 			//
 			// Also ensure that no servers share the same IP address, which is
 			// a requirement of consistent hashing discovery; otherwise it will
-			// panic in the underlying buraksezer/consistent package.
+			// panic in the underlying Psiphon-Labs/consistent package.
 			serverIPToDiagnosticID := make(map[string]string)
 			for i, server := range database.DiscoveryServers {
 

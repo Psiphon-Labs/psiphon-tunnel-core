@@ -17,6 +17,9 @@ github.com/Psiphon-Inc/rotate-safe-writer
 # github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 ## explicit; go 1.12
 github.com/Psiphon-Labs/bolt
+# github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
+## explicit; go 1.9
+github.com/Psiphon-Labs/consistent
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
@@ -51,9 +54,6 @@ github.com/armon/go-proxyproto
 ## explicit
 github.com/bifurcation/mint
 github.com/bifurcation/mint/syntax
-# github.com/buraksezer/consistent v0.10.0
-## explicit; go 1.9
-github.com/buraksezer/consistent
 # github.com/cespare/xxhash v1.1.0
 ## explicit
 github.com/cespare/xxhash

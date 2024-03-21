@@ -53,6 +53,7 @@ Notable Users
 
 * [buraksezer/olric](https://github.com/buraksezer/olric): Embeddable, distributed data structures in Go.
 * [open-telemetry/opentelemetry-operator](https://github.com/open-telemetry/opentelemetry-operator): Kubernetes Operator for OpenTelemetry Collector.
+* [giantswarm/starboard-exporter](https://github.com/giantswarm/starboard-exporter): Exposes Prometheus metrics from [Starboard](https://github.com/aquasecurity/starboard)'s `VulnerabilityReport`, `ConfigAuditReport`, and other custom resources (CRs).
 * [megaease/easegress](https://github.com/megaease/easegress): A Cloud Native traffic orchestration system.
 * [chrislusf/seaweedfs](https://github.com/chrislusf/seaweedfs): SeaweedFS is a distributed storage system for blobs, objects, files, and data warehouse, to store and serve billions of files fast!.
 * [erda-project/erda](https://github.com/erda-project/erda): An enterprise-grade Cloud-Native application platform for Kubernetes.

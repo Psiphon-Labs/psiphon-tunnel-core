@@ -23,8 +23,8 @@ import (
 	"net"
 	"sync"
 
+	"github.com/Psiphon-Labs/consistent"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
-	"github.com/buraksezer/consistent"
 	"github.com/cespare/xxhash"
 )
 
@@ -68,8 +68,8 @@ func (c *consistentHashingDiscovery) serversChanged(newServers []*psinet.Discove
 		// Note: requires full reinitialization because we cannot change
 		// PartitionCount on the fly. Add/Remove do not update PartitionCount
 		// and updating ParitionCount is required to ensure that there is not
-		// a panic in the buraksezer/consistent package and that all servers
-		// are discoverable.
+		// a panic in the consistent package and that all servers are
+		// discoverable.
 		c.config.PartitionCount = len(newServers)
 
 		c.RWMutex.Lock()
