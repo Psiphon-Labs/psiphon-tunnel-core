@@ -581,7 +581,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 			} else {
 
 				tlsVersion := ""
-				version := conn.(*utls.UConn).ConnectionState().Version
+				version := conn.Conn.(*utls.UConn).ConnectionState().Version
 				if version == utls.VersionTLS12 {
 					tlsVersion = "TLS 1.2"
 				} else if version == utls.VersionTLS13 {

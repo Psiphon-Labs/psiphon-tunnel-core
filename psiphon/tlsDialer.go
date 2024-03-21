@@ -197,9 +197,16 @@ func (config *CustomTLSConfig) EnableClientSessionCache() {
 	}
 }
 
+type CustomTLSDialer = func(ctx context.Context, network, addr string) (*CustomTLSConn, error)
+
+type CustomTLSConn struct {
+	net.Conn
+	resumedSession bool
+}
+
 // NewCustomTLSDialer creates a new dialer based on CustomTLSDial.
-func NewCustomTLSDialer(config *CustomTLSConfig) common.Dialer {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+func NewCustomTLSDialer(config *CustomTLSConfig) CustomTLSDialer {
+	return func(ctx context.Context, network, addr string) (*CustomTLSConn, error) {
 		return CustomTLSDial(ctx, network, addr, config)
 	}
 }
@@ -211,7 +218,7 @@ func NewCustomTLSDialer(config *CustomTLSConfig) common.Dialer {
 func CustomTLSDial(
 	ctx context.Context,
 	network, addr string,
-	config *CustomTLSConfig) (net.Conn, error) {
+	config *CustomTLSConfig) (*CustomTLSConn, error) {
 
 	// Note that servers may return a chain which excludes the root CA
 	// cert https://datatracker.ietf.org/doc/html/rfc8446#section-4.4.2.
@@ -436,6 +443,12 @@ func CustomTLSDial(
 	}
 
 	clientSessionCache := config.ClientSessionCache
+	var usedSessionTicket bool
+
+	if wrappedCache, ok := clientSessionCache.(*common.UtlsClientSessionCacheWrapper); ok {
+		// Heuristic to determine if TLS dial is resuming a session.
+		usedSessionTicket = wrappedCache.IsSessionResumptionAvailable()
+	}
 	if clientSessionCache == nil {
 		clientSessionCache = utls.NewLRUClientSessionCache(0)
 	}
@@ -475,6 +488,8 @@ func CustomTLSDial(
 	// it.
 
 	if config.ObfuscatedSessionTicketKey != "" && !isTLS13 {
+
+		usedSessionTicket = true
 
 		var obfuscatedSessionTicketKey [32]byte
 
@@ -639,7 +654,10 @@ func CustomTLSDial(
 		return nil, errors.Trace(err)
 	}
 
-	return conn, nil
+	return &CustomTLSConn{
+		Conn:           conn,
+		resumedSession: usedSessionTicket,
+	}, nil
 }
 
 func verifyLegacyCertificate(rawCerts [][]byte, expectedCertificate *x509.Certificate) error {

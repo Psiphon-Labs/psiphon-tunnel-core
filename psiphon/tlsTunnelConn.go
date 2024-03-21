@@ -49,7 +49,8 @@ type TLSTunnelConfig struct {
 // TLSTunnelConn is a network connection that tunnels net.Conn flows over TLS.
 type TLSTunnelConn struct {
 	net.Conn
-	tlsPadding int
+	tlsPadding        int
+	resumedTLSSession bool
 }
 
 // DialTLSTunnel returns an initialized tls-tunnel connection.
@@ -116,8 +117,9 @@ func DialTLSTunnel(
 	}
 
 	return &TLSTunnelConn{
-		Conn:       conn,
-		tlsPadding: tlsPadding,
+		Conn:              conn,
+		tlsPadding:        tlsPadding,
+		resumedTLSSession: conn.resumedSession,
 	}, nil
 }
 
@@ -161,6 +163,7 @@ func (conn *TLSTunnelConn) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
 
 	logFields["tls_padding"] = conn.tlsPadding
+	logFields["resumed_session"] = conn.resumedTLSSession
 
 	// Include metrics, such as fragmentor metrics, from the underlying dial
 	// conn. Properties of subsequent underlying dial conns are not reflected

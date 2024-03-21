@@ -372,7 +372,7 @@ func Dial(
 	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
-	tlsClientSessionCache tls.ClientSessionCache) (net.Conn, error) {
+	tlsClientSessionCache *common.TlsClientSessionCacheWrapper) (net.Conn, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -691,11 +691,19 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 	return conn.stream.SetWriteDeadline(t)
 }
 
+func (conn *Conn) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+	logFields["resumed_session"] = conn.connection.hasResumedSession()
+	return logFields
+}
+
 // QUICTransporter implements the psiphon.transporter interface, used in
 // psiphon.MeekConn for HTTP requests, which requires a RoundTripper and
 // CloseIdleConnections.
 type QUICTransporter struct {
 	quicRoundTripper
+	resumedSession bool
+
 	noticeEmitter           func(string)
 	udpDialer               func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
 	quicSNIAddress          string
@@ -703,7 +711,7 @@ type QUICTransporter struct {
 	clientHelloSeed         *prng.Seed
 	disablePathMTUDiscovery bool
 	dialEarly               bool
-	tlsClientSessionCache   tls.ClientSessionCache
+	tlsClientSessionCache   *common.TlsClientSessionCacheWrapper
 	packetConn              atomic.Value
 
 	mutex sync.Mutex
@@ -720,7 +728,7 @@ func NewQUICTransporter(
 	clientHelloSeed *prng.Seed,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
-	tlsClientSessionCache tls.ClientSessionCache) (*QUICTransporter, error) {
+	tlsClientSessionCache *common.TlsClientSessionCacheWrapper) (*QUICTransporter, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -786,6 +794,12 @@ func (t *QUICTransporter) closePacketConn() {
 	if p, ok := packetConn.(net.PacketConn); ok {
 		p.Close()
 	}
+}
+
+func (t *QUICTransporter) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+	logFields["resumed_session"] = t.resumedSession
+	return logFields
 }
 
 func (t *QUICTransporter) dialIETFQUIC(
@@ -855,6 +869,10 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 		return nil, errors.Trace(err)
 	}
 
+	if connection.hasResumedSession() {
+		t.resumedSession = true
+	}
+
 	// dialQUIC uses quic-go.DialContext as we must create our own UDP sockets to
 	// set properties such as BIND_TO_DEVICE. However, when DialContext is used,
 	// quic-go does not take responsibiity for closing the underlying packetConn
@@ -901,6 +919,7 @@ type quicConnection interface {
 	OpenStream() (quicStream, error)
 	isErrorIndicatingClosed(err error) bool
 	isEarlyDataRejected(err error) bool
+	hasResumedSession() bool
 }
 
 type quicStream interface {
@@ -940,6 +959,10 @@ func (l *ietfQUICListener) Close() error {
 
 type ietfQUICConnection struct {
 	ietf_quic.Connection
+
+	// resumedSession is true if the TLS session was probably resumed.
+	// This is only used by the clients to gather metrics.
+	resumedSession bool
 }
 
 func (c *ietfQUICConnection) AcceptStream() (quicStream, error) {
@@ -981,6 +1004,10 @@ func (c *ietfQUICConnection) isEarlyDataRejected(err error) bool {
 	return err == ietf_quic.Err0RTTRejected
 }
 
+func (c *ietfQUICConnection) hasResumedSession() bool {
+	return c.resumedSession
+}
+
 func dialQUIC(
 	ctx context.Context,
 	packetConn net.PacketConn,
@@ -993,7 +1020,7 @@ func dialQUIC(
 	clientMaxPacketSizeAdjustment int,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
-	tlsClientSessionCache tls.ClientSessionCache) (quicConnection, error) {
+	tlsClientSessionCache *common.TlsClientSessionCacheWrapper) (quicConnection, error) {
 
 	if isIETFVersionNumber(versionNumber) {
 		quicConfig := &ietf_quic.Config{
@@ -1029,6 +1056,9 @@ func dialQUIC(
 			ClientSessionCache: tlsClientSessionCache,
 		}
 
+		// Heuristic to determine if TLS dial is resuming a session.
+		resumedSession := tlsClientSessionCache.IsSessionResumptionAvailable()
+
 		if dialEarly {
 			// Attempting 0-RTT if possible.
 			dialConnection, err = ietf_quic.DialEarly(
@@ -1050,7 +1080,10 @@ func dialQUIC(
 			return nil, errors.Trace(err)
 		}
 
-		return &ietfQUICConnection{Connection: dialConnection}, nil
+		return &ietfQUICConnection{
+			Connection:     dialConnection,
+			resumedSession: resumedSession,
+		}, nil
 
 	} else {
 

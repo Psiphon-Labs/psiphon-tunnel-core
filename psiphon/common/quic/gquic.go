@@ -110,6 +110,11 @@ func (c *gQUICConnection) isEarlyDataRejected(err error) bool {
 	return false
 }
 
+func (c *gQUICConnection) hasResumedSession() bool {
+	// gQUIC does not support session resumption.
+	return false
+}
+
 func gQUICDialContext(
 	ctx context.Context,
 	packetConn net.PacketConn,

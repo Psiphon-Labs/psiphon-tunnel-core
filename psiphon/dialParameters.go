@@ -168,9 +168,8 @@ type DialParameters struct {
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
 
-	quicTLSSessionCacheKey    string                  `json:"-"`
-	QUICTLSClientSessionCache tls.ClientSessionCache  `json:"-"`
-	tlsClientSessionCache     utls.ClientSessionCache `json:"-"`
+	QUICTLSClientSessionCache *common.TlsClientSessionCacheWrapper  `json:"-"`
+	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
 
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
@@ -370,8 +369,6 @@ func MakeDialParameters(
 	}
 
 	dialParams.steeringIPCache = steeringIPCache
-
-	dialParams.tlsClientSessionCache = tlsClientSessionCache
 
 	dialParams.ServerEntry = serverEntry
 	dialParams.NetworkID = networkID
@@ -688,6 +685,22 @@ func MakeDialParameters(
 		protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration
 
+	if usingTLS {
+		dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		dialParams.tlsClientSessionCache = common.WrapUtlsClientSessionCache(
+			tlsClientSessionCache,
+			serverEntry.IpAddress,
+			dialPortNumber)
+
+		if !isReplay {
+			// Remove the cache entry to make a fresh dial when !isReplay.
+			dialParams.tlsClientSessionCache.RemoveCacheEntry()
+		}
+	}
+
 	if (!isReplay || !replayTLSProfile) && usingTLS {
 
 		dialParams.SelectedTLSProfile = true
@@ -815,14 +828,21 @@ func MakeDialParameters(
 				p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
 	}
 
-	// Sets up client session caching for QUIC with a TLS cache key unique to current endpoint.
 	if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 		dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		dialParams.quicTLSSessionCacheKey = fmt.Sprintf("%s:%d", serverEntry.IpAddress, dialPortNumber)
-		dialParams.QUICTLSClientSessionCache = WrapClientSessionCache(quicTLSClientSessionCache, dialParams.quicTLSSessionCacheKey)
+		dialParams.QUICTLSClientSessionCache = common.WrapClientSessionCache(
+			quicTLSClientSessionCache,
+			serverEntry.IpAddress,
+			dialPortNumber)
+
+		if !isReplay {
+			// Remove the cache entry to make a fresh dial when !isReplay.
+			dialParams.QUICTLSClientSessionCache.RemoveCacheEntry()
+		}
+
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
@@ -1483,9 +1503,19 @@ func (dialParams *DialParameters) Failed(config *Config) {
 		dialParams.steeringIPCache.Delete(dialParams.steeringIPCacheKey)
 	}
 
-	// Clear the TLS client session cache to avoid (potentially) reusing failed sessions.
+	// Clear the TLS client session cache to avoid (potentially) reusing failed sessions for
+	// Meek, TLS-OSSH and QUIC connections.
+
 	if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
-		dialParams.QUICTLSClientSessionCache.Put(dialParams.quicTLSSessionCacheKey, nil)
+		dialParams.QUICTLSClientSessionCache.RemoveCacheEntry()
+	}
+
+	usingTLS := protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
+		protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) ||
+		dialParams.ConjureAPIRegistration
+
+	if usingTLS {
+		dialParams.tlsClientSessionCache.RemoveCacheEntry()
 	}
 
 }
@@ -1971,26 +2001,4 @@ func selectConjureTransport(
 	choice := prng.Intn(len(transports))
 
 	return transports[choice]
-}
-
-type tlsClientSessionCacheWrapper struct {
-	tls.ClientSessionCache
-
-	// sessinoKey specifies the value of the hard-coded TLS session cache key.
-	sessionKey string
-}
-
-func WrapClientSessionCache(cache tls.ClientSessionCache, sessionKey string) tls.ClientSessionCache {
-	return &tlsClientSessionCacheWrapper{
-		ClientSessionCache: cache,
-		sessionKey:         sessionKey,
-	}
-}
-
-func (c *tlsClientSessionCacheWrapper) Get(_ string) (session *tls.ClientSessionState, ok bool) {
-	return c.ClientSessionCache.Get(c.sessionKey)
-}
-
-func (c *tlsClientSessionCacheWrapper) Put(_ string, cs *tls.ClientSessionState) {
-	c.ClientSessionCache.Put(c.sessionKey, cs)
 }

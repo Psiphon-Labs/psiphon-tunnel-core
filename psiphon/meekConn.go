@@ -37,7 +37,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
@@ -48,7 +47,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
-	utls "github.com/refraction-networking/utls"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/net/http2"
 )
@@ -138,11 +136,11 @@ type MeekConfig struct {
 
 	// QUICTLSClientSessionCache specifies the TLS session cache to use
 	// for Meek connections that use HTTP/2 over QUIC.
-	QUICTLSClientSessionCache tls.ClientSessionCache
+	QUICTLSClientSessionCache *common.TlsClientSessionCacheWrapper
 
 	// TLSClientSessionCache specifies the TLS session cache to use for
 	// HTTPS (non-QUIC) Meek connections.
-	TLSClientSessionCache utls.ClientSessionCache
+	TLSClientSessionCache *common.UtlsClientSessionCacheWrapper
 
 	// TLSFragmentClientHello specifies whether to fragment the TLS Client Hello.
 	TLSFragmentClientHello bool
@@ -266,6 +264,10 @@ type MeekConn struct {
 	stopRunning               context.CancelFunc
 	relayWaitGroup            *sync.WaitGroup
 	firstUnderlyingConn       net.Conn
+
+	// resumedTLSSession reprepsents whether the first underlying TLS connection
+	// was resumed for metrics purposes.
+	resumedTLSSession bool
 
 	// For MeekModeObfuscatedRoundTrip
 	meekCookieEncryptionPublicKey string
@@ -560,6 +562,8 @@ func DialMeek(
 			return nil, errors.Trace(err)
 		}
 
+		meek.resumedTLSSession = preConn.resumedSession
+
 		cachedTLSDialer = newCachedTLSDialer(preConn, tlsDialer)
 
 		if IsTLSConnUsingHTTP2(preConn) {
@@ -815,13 +819,13 @@ func (meek *MeekConn) underlyingDial(ctx context.Context, network, addr string) 
 type cachedTLSDialer struct {
 	usedCachedConn int32
 	cachedConn     net.Conn
-	dialer         common.Dialer
+	dialer         CustomTLSDialer
 
 	mutex      sync.Mutex
 	requestCtx context.Context
 }
 
-func newCachedTLSDialer(cachedConn net.Conn, dialer common.Dialer) *cachedTLSDialer {
+func newCachedTLSDialer(cachedConn net.Conn, dialer CustomTLSDialer) *cachedTLSDialer {
 	return &cachedTLSDialer{
 		cachedConn: cachedConn,
 		dialer:     dialer,
@@ -929,6 +933,14 @@ func (meek *MeekConn) GetMetrics() common.LogFields {
 	if ok {
 		logFields.Add(underlyingMetrics.GetMetrics())
 	}
+	if meek.cachedTLSDialer != nil {
+		logFields["resumed_session"] = meek.resumedTLSSession
+	}
+
+	if quicTransport, ok := meek.transport.(*quic.QUICTransporter); ok {
+		logFields.Add(quicTransport.GetMetrics())
+	}
+
 	meek.mutex.Unlock()
 	return logFields
 }
