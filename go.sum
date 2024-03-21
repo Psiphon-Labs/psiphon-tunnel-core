@@ -7,6 +7,8 @@ github.com/AndreasBriese/bbloom v0.0.0-20170702084017-28f7e881ca57/go.mod h1:bOv
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/toml v1.3.2 h1:o7IhLm0Msx3BaB+n3Ag7L8EVlByGnpq14C4YWiu/gL8=
 github.com/BurntSushi/toml v1.3.2/go.mod h1:CxXYINrC8qIiEnFrOxCa7Jy5BFHlXnUU2pbicEuybxQ=
+github.com/OneOfOne/xxhash v1.2.2 h1:KMrpdQIwFcEqXDklaen+P1axHaj9BSKzvpUUfnHldSE=
+github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e h1:NPfqIbzmijrl0VclX2t8eO5EPBhqe47LLGKpRrcVjXk=
 github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e/go.mod h1:ZdY5pBfat/WVzw3eXbIf7N1nZN0XD5H5+X8ZMDWbCs4=
 github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7 h1:Hx/NCZTnvoKZuIBwSmxE58KKoNLXIGG6hBJYN7pj9Ag=
@@ -199,6 +201,8 @@ github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507 h1:ML7ZNtcln
 github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507/go.mod h1:DbI1gxrXI2jRGw7XGEUZQOOMd6PsnKzRrCKabvvMrwM=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
+github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72 h1:qLC7fQah7D6K1B0ujays3HV9gkFtllcxhzImRR7ArPQ=
+github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=
