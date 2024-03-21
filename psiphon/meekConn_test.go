@@ -27,7 +27,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	utls "github.com/refraction-networking/utls"
 )
 
 // MeekModeRelay and MeekModeObfuscatedRoundTrip are tested via meek protocol
@@ -57,14 +59,17 @@ func TestMeekModePlaintextRoundTrip(t *testing.T) {
 		t.Fatalf("parameters.NewParameters failed: %v", err)
 	}
 
+	tlsCache := common.WrapUtlsClientSessionCache(utls.NewLRUClientSessionCache(0), serverAddr)
+
 	meekConfig := &MeekConfig{
-		Parameters:       params,
-		Mode:             MeekModePlaintextRoundTrip,
-		DialAddress:      serverAddr,
-		UseHTTPS:         true,
-		SNIServerName:    "not-" + serverName,
-		VerifyServerName: serverName,
-		VerifyPins:       []string{rootCACertificatePin, serverCertificatePin},
+		Parameters:            params,
+		Mode:                  MeekModePlaintextRoundTrip,
+		DialAddress:           serverAddr,
+		UseHTTPS:              true,
+		SNIServerName:         "not-" + serverName,
+		VerifyServerName:      serverName,
+		VerifyPins:            []string{rootCACertificatePin, serverCertificatePin},
+		TLSClientSessionCache: tlsCache,
 	}
 
 	dialConfig := &DialConfig{

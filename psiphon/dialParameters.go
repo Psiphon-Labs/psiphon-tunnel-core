@@ -168,9 +168,9 @@ type DialParameters struct {
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
 
-	quicTLSSessionCacheKey      string                  `json:"-"`
-	QUICTLSClientSessionCache   tls.ClientSessionCache  `json:"-"`
-	directTLSClientSessionCache utls.ClientSessionCache `json:"-"`
+	quicTLSSessionCacheKey    string                  `json:"-"`
+	QUICTLSClientSessionCache tls.ClientSessionCache  `json:"-"`
+	tlsClientSessionCache     utls.ClientSessionCache `json:"-"`
 
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
@@ -197,7 +197,7 @@ func MakeDialParameters(
 	config *Config,
 	steeringIPCache *lrucache.Cache,
 	quicTLSClientSessionCache tls.ClientSessionCache,
-	directTLSClientSessionCache utls.ClientSessionCache,
+	tlsClientSessionCache utls.ClientSessionCache,
 	upstreamProxyErrorCallback func(error),
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
@@ -371,7 +371,7 @@ func MakeDialParameters(
 
 	dialParams.steeringIPCache = steeringIPCache
 
-	dialParams.directTLSClientSessionCache = directTLSClientSessionCache
+	dialParams.tlsClientSessionCache = tlsClientSessionCache
 
 	dialParams.ServerEntry = serverEntry
 	dialParams.NetworkID = networkID
@@ -1329,7 +1329,8 @@ func MakeDialParameters(
 			QUICVersion:                   dialParams.QUICVersion,
 			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
 			QUICDialEarly:                 dialParams.QUICDialEarly,
-			QuicTlsClientSessionCache:     dialParams.meekConfig.QuicTlsClientSessionCache,
+			QUICTLSClientSessionCache:     dialParams.QUICTLSClientSessionCache,
+			TLSClientSessionCache:         dialParams.tlsClientSessionCache,
 			QUICDisablePathMTUDiscovery:   dialParams.QUICDisablePathMTUDiscovery,
 			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
@@ -1393,7 +1394,7 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 			NoDefaultTLSSessionID:    &dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed: dialParams.RandomizedTLSProfileSeed,
 			FragmentClientHello:      dialParams.TLSFragmentClientHello,
-			ClientSessionCache:       dialParams.directTLSClientSessionCache,
+			ClientSessionCache:       dialParams.tlsClientSessionCache,
 		},
 		// Obfuscated session tickets are not used because TLS-OSSH uses TLS 1.3.
 		UseObfuscatedSessionTickets: false,

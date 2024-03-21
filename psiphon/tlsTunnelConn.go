@@ -87,8 +87,8 @@ func DialTLSTunnel(
 		TLSPadding:                    tlsPadding,
 		TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 		FragmentClientHello:           tlsTunnelConfig.CustomTLSConfig.FragmentClientHello,
+		ClientSessionCache:            tlsTunnelConfig.CustomTLSConfig.ClientSessionCache,
 	}
-	tlsConfig.EnableClientSessionCache()
 
 	if tlsTunnelConfig.UseObfuscatedSessionTickets {
 		tlsConfig.ObfuscatedSessionTicketKey = tlsTunnelConfig.ObfuscatedKey

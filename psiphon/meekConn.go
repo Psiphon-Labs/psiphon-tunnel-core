@@ -48,6 +48,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/upstreamproxy"
+	utls "github.com/refraction-networking/utls"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/net/http2"
 )
@@ -135,9 +136,13 @@ type MeekConfig struct {
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
 
-	// QuicTlsClientSessionCache specifies the TLS session cache to use
+	// QUICTLSClientSessionCache specifies the TLS session cache to use
 	// for Meek connections that use HTTP/2 over QUIC.
-	QuicTlsClientSessionCache tls.ClientSessionCache
+	QUICTLSClientSessionCache tls.ClientSessionCache
+
+	// TLSClientSessionCache specifies the TLS session cache to use for
+	// HTTPS (non-QUIC) Meek connections.
+	TLSClientSessionCache utls.ClientSessionCache
 
 	// TLSFragmentClientHello specifies whether to fragment the TLS Client Hello.
 	TLSFragmentClientHello bool
@@ -303,9 +308,14 @@ func DialMeek(
 			"invalid config: only one of UseQUIC or UseHTTPS may be set")
 	}
 
-	if meekConfig.UseQUIC && meekConfig.QuicTlsClientSessionCache == nil {
+	if meekConfig.UseQUIC && meekConfig.QUICTLSClientSessionCache == nil {
 		return nil, errors.TraceNew(
-			"invalid config: TLSClientSessionCache must be set when UseQUIC is set")
+			"invalid config: QUICTLSClientSessionCache must be set when UseQUIC is set")
+	}
+
+	if meekConfig.UseHTTPS && meekConfig.TLSClientSessionCache == nil {
+		return nil, errors.TraceNew(
+			"invalid config: TLSClientSessionCache must be set when UseHTTPS is set")
 	}
 
 	if meekConfig.UseQUIC &&
@@ -421,7 +431,7 @@ func DialMeek(
 			meekConfig.QUICClientHelloSeed,
 			meekConfig.QUICDisablePathMTUDiscovery,
 			meekConfig.QUICDialEarly,
-			meekConfig.QuicTlsClientSessionCache)
+			meekConfig.QUICTLSClientSessionCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -480,8 +490,8 @@ func DialMeek(
 			TLSPadding:                    meek.tlsPadding,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
 			FragmentClientHello:           meekConfig.TLSFragmentClientHello,
+			ClientSessionCache:            meekConfig.TLSClientSessionCache,
 		}
-		tlsConfig.EnableClientSessionCache()
 
 		if meekConfig.UseObfuscatedSessionTickets {
 			tlsConfig.ObfuscatedSessionTicketKey = meekConfig.MeekObfuscatedKey

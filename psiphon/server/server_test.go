@@ -3298,6 +3298,8 @@ func storePruneServerEntriesTest(
 			clientConfig,
 			nil,
 			nil,
+			nil,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
 			func(serverEntry *protocol.ServerEntry) (string, bool) {
 				return runConfig.tunnelProtocol, true

@@ -184,6 +184,7 @@ type CustomTLSConfig struct {
 	// FragmentClientHello specifies whether to fragment the ClientHello.
 	FragmentClientHello bool
 
+	// ClientSessionCache specifies the cache to use to persist session tickets.
 	ClientSessionCache utls.ClientSessionCache
 }
 

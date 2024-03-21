@@ -168,6 +168,8 @@ func TestDuplicateSessionID(t *testing.T) {
 			clientConfig,
 			nil,
 			nil,
+			nil,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return false },
 			func(_ *protocol.ServerEntry) (string, bool) { return "OSSH", true },
 			serverEntry,
