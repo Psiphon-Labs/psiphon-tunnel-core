@@ -25,9 +25,9 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
-	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 func TestDatabase(t *testing.T) {
@@ -38,7 +38,21 @@ func TestDatabase(t *testing.T) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	databaseJSON := `
+	server1, err := protocol.EncodeServerEntry(&protocol.ServerEntry{
+		IpAddress: "1",
+	})
+	if err != nil {
+		t.Fatalf("EncodeServerEntry failed: %s\n", err)
+	}
+
+	server2, err := protocol.EncodeServerEntry(&protocol.ServerEntry{
+		IpAddress: "2",
+	})
+	if err != nil {
+		t.Fatalf("EncodeServerEntry failed: %s\n", err)
+	}
+
+	databaseJSON := fmt.Sprintf(`
     {
         "sponsors" : {
             "SPONSOR-ID" : {
@@ -92,16 +106,10 @@ func TestDatabase(t *testing.T) {
         },
 
         "discovery_servers" : [
-            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "0"},
-            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "0"},
-            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "0"},
-            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "0"},
-            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "1"},
-            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "1"},
-            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "1"},
-            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "1"}
+            {"discovery_date_range" : ["1900-01-01T00:00:00Z", "2000-01-01T00:00:00Z"], "encoded_server_entry" : "%s"},
+            {"discovery_date_range" : ["2000-01-01T00:00:00Z", "2100-01-01T00:00:00Z"], "encoded_server_entry" : "%s"}
         ]
-    }`
+    }`, server1, server2)
 
 	filename := filepath.Join(testDataDirName, "psinet.json")
 
@@ -214,13 +222,6 @@ func TestDatabase(t *testing.T) {
 		})
 	}
 
-	for i := 0; i < 1000; i++ {
-		encodedServerEntries := db.DiscoverServers(i)
-		if len(encodedServerEntries) != 1 || encodedServerEntries[0] != "1" {
-			t.Fatalf("unexpected discovery server list: %+v", encodedServerEntries)
-		}
-	}
-
 	if !db.IsValidServerEntryTag("SERVER-ENTRY-TAG") {
 		t.Fatalf("unexpected invalid server entry tag")
 	}
@@ -228,113 +229,4 @@ func TestDatabase(t *testing.T) {
 	if db.IsValidServerEntryTag("INVALID-SERVER-ENTRY-TAG") {
 		t.Fatalf("unexpected valid server entry tag")
 	}
-}
-
-func TestDiscoveryBuckets(t *testing.T) {
-
-	checkBuckets := func(buckets [][]*DiscoveryServer, expectedServerEntries [][]int) {
-		if len(buckets) != len(expectedServerEntries) {
-			t.Errorf(
-				"unexpected bucket count: got %d expected %d",
-				len(buckets), len(expectedServerEntries))
-			return
-		}
-		for i := 0; i < len(buckets); i++ {
-			if len(buckets[i]) != len(expectedServerEntries[i]) {
-				t.Errorf(
-					"unexpected bucket %d size: got %d expected %d",
-					i, len(buckets[i]), len(expectedServerEntries[i]))
-				return
-			}
-			for j := 0; j < len(buckets[i]); j++ {
-				expectedServerEntry := strconv.Itoa(expectedServerEntries[i][j])
-				if buckets[i][j].EncodedServerEntry != expectedServerEntry {
-					t.Errorf(
-						"unexpected bucket %d item %d: got %s expected %s",
-						i, j, buckets[i][j].EncodedServerEntry, expectedServerEntry)
-					return
-				}
-			}
-		}
-	}
-
-	// Partition test cases from:
-	// http://stackoverflow.com/questions/2659900/python-slicing-a-list-into-n-nearly-equal-length-partitions
-
-	servers := make([]*DiscoveryServer, 0)
-	for i := 0; i < 105; i++ {
-		servers = append(servers, &DiscoveryServer{EncodedServerEntry: strconv.Itoa(i)})
-	}
-
-	t.Run("5 servers, 5 buckets", func(t *testing.T) {
-		checkBuckets(
-			bucketizeServerList(servers[0:5], 5),
-			[][]int{{0}, {1}, {2}, {3}, {4}})
-	})
-
-	t.Run("5 servers, 2 buckets", func(t *testing.T) {
-		checkBuckets(
-			bucketizeServerList(servers[0:5], 2),
-			[][]int{{0, 1, 2}, {3, 4}})
-	})
-
-	t.Run("5 servers, 3 buckets", func(t *testing.T) {
-		checkBuckets(
-			bucketizeServerList(servers[0:5], 3),
-			[][]int{{0, 1}, {2}, {3, 4}})
-	})
-
-	t.Run("105 servers, 10 buckets", func(t *testing.T) {
-		checkBuckets(
-			bucketizeServerList(servers, 10),
-			[][]int{
-				{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-				{11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
-				{21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31},
-				{32, 33, 34, 35, 36, 37, 38, 39, 40, 41},
-				{42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52},
-				{53, 54, 55, 56, 57, 58, 59, 60, 61, 62},
-				{63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73},
-				{74, 75, 76, 77, 78, 79, 80, 81, 82, 83},
-				{84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94},
-				{95, 96, 97, 98, 99, 100, 101, 102, 103, 104},
-			})
-	})
-
-	t.Run("repeatedly discover with fixed IP address", func(t *testing.T) {
-
-		// For a IP address values, only one bucket should be used; with enough
-		// iterations, all and only the items in a single bucket should be discovered.
-
-		discoveredServers := make(map[string]bool)
-
-		// discoveryValue is derived from the client's IP address and indexes the bucket;
-		// a value of 0 always maps to the first bucket.
-		discoveryValue := 0
-
-		for i := 0; i < 1000; i++ {
-			for _, server := range selectServers(servers, i*int(time.Hour/time.Second), discoveryValue) {
-				discoveredServers[server.EncodedServerEntry] = true
-			}
-		}
-
-		bucketCount := calculateBucketCount(len(servers))
-
-		buckets := bucketizeServerList(servers, bucketCount)
-
-		if len(buckets[0]) != len(discoveredServers) {
-			t.Errorf(
-				"unexpected discovered server count: got %d expected %d",
-				len(discoveredServers), len(buckets[0]))
-			return
-		}
-
-		for _, bucketServer := range buckets[0] {
-			if _, ok := discoveredServers[bucketServer.EncodedServerEntry]; !ok {
-				t.Errorf("unexpected missing discovery server: %s", bucketServer.EncodedServerEntry)
-				return
-			}
-		}
-	})
-
 }
