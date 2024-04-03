@@ -50,6 +50,22 @@ func SRTCPNoReplayProtection() ContextOption {
 	}
 }
 
+// SRTPReplayDetectorFactory sets custom SRTP replay detector.
+func SRTPReplayDetectorFactory(fn func() replaydetector.ReplayDetector) ContextOption { // nolint:revive
+	return func(c *Context) error {
+		c.newSRTPReplayDetector = fn
+		return nil
+	}
+}
+
+// SRTCPReplayDetectorFactory sets custom SRTCP replay detector.
+func SRTCPReplayDetectorFactory(fn func() replaydetector.ReplayDetector) ContextOption {
+	return func(c *Context) error {
+		c.newSRTCPReplayDetector = fn
+		return nil
+	}
+}
+
 type nopReplayDetector struct{}
 
 func (s *nopReplayDetector) Check(uint64) (func(), bool) {

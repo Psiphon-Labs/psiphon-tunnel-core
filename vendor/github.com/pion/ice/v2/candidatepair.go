@@ -35,8 +35,8 @@ func (p *CandidatePair) String() string {
 		return ""
 	}
 
-	return fmt.Sprintf("prio %d (local, prio %d) %s <-> %s (remote, prio %d)",
-		p.priority(), p.Local.Priority(), p.Local, p.Remote, p.Remote.Priority())
+	return fmt.Sprintf("prio %d (local, prio %d) %s <-> %s (remote, prio %d), state: %s, nominated: %v, nominateOnBindingSuccess: %v",
+		p.priority(), p.Local.Priority(), p.Local, p.Remote, p.Remote.Priority(), p.state, p.nominated, p.nominateOnBindingSuccess)
 }
 
 func (p *CandidatePair) equal(other *CandidatePair) bool {
@@ -97,6 +97,6 @@ func (p *CandidatePair) Write(b []byte) (int, error) {
 func (a *Agent) sendSTUN(msg *stun.Message, local, remote Candidate) {
 	_, err := local.writeTo(msg.Raw, remote)
 	if err != nil {
-		a.log.Tracef("failed to send STUN message: %s", err)
+		a.log.Tracef("Failed to send STUN message: %s", err)
 	}
 }

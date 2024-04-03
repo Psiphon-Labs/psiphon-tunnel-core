@@ -86,7 +86,7 @@ func (c *Conn) Write(p []byte) (int, error) {
 	}
 
 	if stun.IsMessage(p) {
-		return 0, errICEWriteSTUNMessage
+		return 0, errWriteSTUNMessageToIceConn
 	}
 
 	pair := c.agent.getSelectedPair()

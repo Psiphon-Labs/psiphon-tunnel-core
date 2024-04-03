@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package sdp
 
 import (
@@ -56,8 +59,9 @@ func extMapURI() map[int]string {
 // some settings that are required by the JSEP spec.
 //
 // Note: Since v2.4.0, session ID has been fixed to use crypto random according to
-//       JSEP spec, so that NewJSEPSessionDescription now returns error as a second
-//       return value.
+//
+//	JSEP spec, so that NewJSEPSessionDescription now returns error as a second
+//	return value.
 func NewJSEPSessionDescription(identity bool) (*SessionDescription, error) {
 	sid, err := newSessionID()
 	if err != nil {
@@ -120,7 +124,7 @@ func (s *SessionDescription) WithMedia(md *MediaDescription) *SessionDescription
 
 // NewJSEPMediaDescription creates a new MediaName with
 // some settings that are required by the JSEP spec.
-func NewJSEPMediaDescription(codecType string, codecPrefs []string) *MediaDescription {
+func NewJSEPMediaDescription(codecType string, _ []string) *MediaDescription {
 	return &MediaDescription{
 		MediaName: MediaName{
 			Media:  codecType,

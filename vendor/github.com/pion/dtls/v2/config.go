@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pion/dtls/v2/pkg/crypto/elliptic"
+	"github.com/pion/dtls/v2/pkg/protocol/handshake"
 	"github.com/pion/logging"
 )
 
@@ -176,6 +177,11 @@ type Config struct {
 	// skip hello verify phase and receive ServerHello after initial ClientHello.
 	// This have implication on DoS attack resistance.
 	InsecureSkipVerifyHello bool
+
+	// [Psiphon]
+	// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
+	// CustomClientHelloRandom optionaly allows the use of custom random bytes in the ClientHello message
+	CustomClientHelloRandom func() [handshake.RandomBytesLength]byte
 }
 
 func defaultConnectContextMaker() (context.Context, func()) {

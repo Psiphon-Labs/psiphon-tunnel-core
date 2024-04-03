@@ -231,9 +231,9 @@ func flight4Generate(c flightConn, state *State, _ *handshakeCache, cfg *handsha
 			Supported: true,
 		})
 	}
-	if state.srtpProtectionProfile != 0 {
+	if state.getSRTPProtectionProfile() != 0 {
 		extensions = append(extensions, &extension.UseSRTP{
-			ProtectionProfiles: []SRTPProtectionProfile{state.srtpProtectionProfile},
+			ProtectionProfiles: []SRTPProtectionProfile{state.getSRTPProtectionProfile()},
 		})
 	}
 	if state.cipherSuite.AuthenticationType() == CipherSuiteAuthenticationTypeCertificate {
@@ -299,6 +299,10 @@ func flight4Generate(c flightConn, state *State, _ *handshakeCache, cfg *handsha
 		certificate, err := cfg.getCertificate(&ClientHelloInfo{
 			ServerName:   state.serverName,
 			CipherSuites: []ciphersuite.ID{state.cipherSuite.ID()},
+
+			// [Psiphon]
+			// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
+			RandomBytes: state.remoteRandom.RandomBytes,
 		})
 		if err != nil {
 			return nil, &alert.Alert{Level: alert.Fatal, Description: alert.HandshakeFailure}, err

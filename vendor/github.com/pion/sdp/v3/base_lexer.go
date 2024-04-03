@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package sdp
 
 import (
@@ -22,12 +25,12 @@ func (e syntaxError) Error() string {
 }
 
 type baseLexer struct {
-	value []byte
+	value string
 	pos   int
 }
 
 func (l baseLexer) syntaxError() error {
-	return syntaxError{s: string(l.value), i: l.pos - 1}
+	return syntaxError{s: l.value, i: l.pos - 1}
 }
 
 func (l *baseLexer) unreadByte() error {
@@ -154,7 +157,7 @@ func (l *baseLexer) readField() (string, error) {
 			break
 		}
 	}
-	return string(l.value[start:stop]), nil
+	return l.value[start:stop], nil
 }
 
 // Returns symbols until line end
@@ -170,50 +173,32 @@ func (l *baseLexer) readLine() (string, error) {
 			trim++
 		}
 		if ch == '\n' {
-			return string(l.value[start : l.pos-trim]), nil
+			return l.value[start : l.pos-trim], nil
 		}
 	}
 }
 
-func (l *baseLexer) readString(until byte) (string, error) {
-	start := l.pos
+func (l *baseLexer) readType() (byte, error) {
 	for {
-		ch, err := l.readByte()
+		firstByte, err := l.readByte()
 		if err != nil {
-			return "", err
-		}
-		if ch == until {
-			return string(l.value[start:l.pos]), nil
-		}
-	}
-}
-
-func (l *baseLexer) readType() (string, error) {
-	for {
-		b, err := l.readByte()
-		if err != nil {
-			return "", err
+			return 0, err
 		}
 
-		if isNewline(b) {
+		if isNewline(firstByte) {
 			continue
 		}
 
-		err = l.unreadByte()
+		secondByte, err := l.readByte()
 		if err != nil {
-			return "", err
+			return 0, err
 		}
 
-		key, err := l.readString('=')
-		if err != nil {
-			return key, err
+		if secondByte != '=' {
+			return firstByte, l.syntaxError()
 		}
 
-		if len(key) == 2 {
-			return key, nil
-		}
-
-		return key, l.syntaxError()
+		return firstByte, nil
 	}
 }
 

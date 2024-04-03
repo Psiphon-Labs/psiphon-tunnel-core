@@ -86,12 +86,12 @@ func UnpackDatagram(buf []byte) ([][]byte, error) {
 
 	for offset := 0; len(buf) != offset; {
 		if len(buf)-offset <= HeaderSize {
-			return nil, errInvalidPacketLength
+			return nil, ErrInvalidPacketLength
 		}
 
 		pktLen := (HeaderSize + int(binary.BigEndian.Uint16(buf[offset+11:])))
 		if offset+pktLen > len(buf) {
-			return nil, errInvalidPacketLength
+			return nil, ErrInvalidPacketLength
 		}
 
 		out = append(out, buf[offset:offset+pktLen])

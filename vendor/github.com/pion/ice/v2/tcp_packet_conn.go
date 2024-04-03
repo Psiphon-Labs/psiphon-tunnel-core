@@ -56,12 +56,12 @@ func (bc *bufferedConn) writeProcess() {
 		}
 
 		if err != nil {
-			bc.logger.Warnf("read buffer error: %s", err)
+			bc.logger.Warnf("Failed to read from buffer: %s", err)
 			continue
 		}
 
 		if _, err := bc.Conn.Write(pktBuf[:n]); err != nil {
-			bc.logger.Warnf("write error: %s", err)
+			bc.logger.Warnf("Failed to write: %s", err)
 			continue
 		}
 	}
@@ -114,7 +114,7 @@ func newTCPPacketConn(params tcpPacketParams) *tcpPacketConn {
 }
 
 func (t *tcpPacketConn) AddConn(conn net.Conn, firstPacketData []byte) error {
-	t.params.Logger.Infof("AddConn: %s remote %s to local %s", conn.RemoteAddr().Network(), conn.RemoteAddr(), conn.LocalAddr())
+	t.params.Logger.Infof("Added connection: %s remote %s to local %s", conn.RemoteAddr().Network(), conn.RemoteAddr(), conn.LocalAddr())
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -160,7 +160,7 @@ func (t *tcpPacketConn) startReading(conn net.Conn) {
 	for {
 		n, err := readStreamingPacket(conn, buf)
 		if err != nil {
-			t.params.Logger.Infof("%v: %s", errReadingStreamingPacket, err)
+			t.params.Logger.Warnf("Failed to read streaming packet: %s", err)
 			t.handleRecv(streamingPacket{nil, conn.RemoteAddr(), err})
 			t.removeConn(conn)
 			return
@@ -231,7 +231,7 @@ func (t *tcpPacketConn) WriteTo(buf []byte, rAddr net.Addr) (n int, err error) {
 
 	n, err = writeStreamingPacket(conn, buf)
 	if err != nil {
-		t.params.Logger.Tracef("%w %s", errWriting, rAddr)
+		t.params.Logger.Tracef("%w %s", errWrite, rAddr)
 		return n, err
 	}
 

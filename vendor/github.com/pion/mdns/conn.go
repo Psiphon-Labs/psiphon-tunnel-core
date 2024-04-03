@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package mdns
 
 import (
@@ -5,7 +8,6 @@ import (
 	"errors"
 	"math/big"
 	"net"
-	"runtime"
 	"sync"
 	"time"
 
@@ -112,11 +114,15 @@ func Server(conn *ipv4.PacketConn, config *Config) (*Conn, error) {
 		c.queryInterval = config.QueryInterval
 	}
 
+	if err := conn.SetControlMessage(ipv4.FlagInterface, true); err != nil {
+		c.log.Warnf("Failed to SetControlMessage on PacketConn %v", err)
+	}
+
 	// https://www.rfc-editor.org/rfc/rfc6762.html#section-17
 	// Multicast DNS messages carried by UDP may be up to the IP MTU of the
 	// physical interface, less the space required for the IP header (20
 	// bytes for IPv4; 40 bytes for IPv6) and the UDP header (8 bytes).
-	go c.start(inboundBufferSize - 20 - 8)
+	go c.start(inboundBufferSize-20-8, config)
 	return c, nil
 }
 
@@ -224,28 +230,46 @@ func (c *Conn) sendQuestion(name string) {
 		return
 	}
 
-	c.writeToSocket(rawQuery)
+	c.writeToSocket(0, rawQuery, false)
 }
 
-const isWindows = runtime.GOOS == "windows"
-
-func (c *Conn) writeToSocket(b []byte) {
-	var wcm ipv4.ControlMessage
-	for i := range c.ifaces {
-		if isWindows {
-			if err := c.socket.SetMulticastInterface(&c.ifaces[i]); err != nil {
-				c.log.Warnf("Failed to set multicast interface for %d: %v", i, err)
-			}
-		} else {
-			wcm.IfIndex = c.ifaces[i].Index
+func (c *Conn) writeToSocket(ifIndex int, b []byte, onlyLooback bool) {
+	if ifIndex != 0 {
+		ifc, err := net.InterfaceByIndex(ifIndex)
+		if err != nil {
+			c.log.Warnf("Failed to get interface interface for %d: %v", ifIndex, err)
+			return
 		}
-		if _, err := c.socket.WriteTo(b, &wcm, c.dstAddr); err != nil {
-			c.log.Warnf("Failed to send mDNS packet on interface %d: %v", i, err)
+		if onlyLooback && ifc.Flags&net.FlagLoopback == 0 {
+			// avoid accidentally tricking the destination that itself is the same as us
+			c.log.Warnf("Interface is not loopback %d", ifIndex)
+			return
+		}
+		if err := c.socket.SetMulticastInterface(ifc); err != nil {
+			c.log.Warnf("Failed to set multicast interface for %d: %v", ifIndex, err)
+		} else {
+			if _, err := c.socket.WriteTo(b, nil, c.dstAddr); err != nil {
+				c.log.Warnf("Failed to send mDNS packet on interface %d: %v", ifIndex, err)
+			}
+		}
+		return
+	}
+	for ifcIdx := range c.ifaces {
+		if onlyLooback && c.ifaces[ifcIdx].Flags&net.FlagLoopback == 0 {
+			// avoid accidentally tricking the destination that itself is the same as us
+			continue
+		}
+		if err := c.socket.SetMulticastInterface(&c.ifaces[ifcIdx]); err != nil {
+			c.log.Warnf("Failed to set multicast interface for %d: %v", c.ifaces[ifcIdx].Index, err)
+		} else {
+			if _, err := c.socket.WriteTo(b, nil, c.dstAddr); err != nil {
+				c.log.Warnf("Failed to send mDNS packet on interface %d: %v", c.ifaces[ifcIdx].Index, err)
+			}
 		}
 	}
 }
 
-func (c *Conn) sendAnswer(name string, dst net.IP) {
+func (c *Conn) sendAnswer(name string, ifIndex int, dst net.IP) {
 	packedName, err := dnsmessage.NewName(name)
 	if err != nil {
 		c.log.Warnf("Failed to construct mDNS packet %v", err)
@@ -278,10 +302,10 @@ func (c *Conn) sendAnswer(name string, dst net.IP) {
 		return
 	}
 
-	c.writeToSocket(rawAnswer)
+	c.writeToSocket(ifIndex, rawAnswer, dst.IsLoopback())
 }
 
-func (c *Conn) start(inboundBufferSize int) { //nolint gocognit
+func (c *Conn) start(inboundBufferSize int, config *Config) { //nolint gocognit
 	defer func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -292,13 +316,17 @@ func (c *Conn) start(inboundBufferSize int) { //nolint gocognit
 	p := dnsmessage.Parser{}
 
 	for {
-		n, _, src, err := c.socket.ReadFrom(b)
+		n, cm, src, err := c.socket.ReadFrom(b)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
 			c.log.Warnf("Failed to ReadFrom %q %v", src, err)
 			continue
+		}
+		var ifIndex int
+		if cm != nil {
+			ifIndex = cm.IfIndex
 		}
 
 		func() {
@@ -321,13 +349,17 @@ func (c *Conn) start(inboundBufferSize int) { //nolint gocognit
 
 				for _, localName := range c.localNames {
 					if localName == q.Name.String() {
-						localAddress, err := interfaceForRemote(src.String())
-						if err != nil {
-							c.log.Warnf("Failed to get local interface to communicate with %s: %v", src.String(), err)
-							continue
-						}
+						if config.LocalAddress != nil {
+							c.sendAnswer(q.Name.String(), ifIndex, config.LocalAddress)
+						} else {
+							localAddress, err := interfaceForRemote(src.String())
+							if err != nil {
+								c.log.Warnf("Failed to get local interface to communicate with %s: %v", src.String(), err)
+								continue
+							}
 
-						c.sendAnswer(q.Name.String(), localAddress)
+							c.sendAnswer(q.Name.String(), ifIndex, localAddress)
+						}
 					}
 				}
 			}

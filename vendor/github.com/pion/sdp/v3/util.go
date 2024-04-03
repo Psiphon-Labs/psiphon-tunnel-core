@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package sdp
 
 import (
@@ -200,7 +203,19 @@ func mergeCodecs(codec Codec, codecs map[uint8]Codec) {
 }
 
 func (s *SessionDescription) buildCodecMap() map[uint8]Codec {
-	codecs := make(map[uint8]Codec)
+	codecs := map[uint8]Codec{
+		// static codecs that do not require a rtpmap
+		0: {
+			PayloadType: 0,
+			Name:        "PCMU",
+			ClockRate:   8000,
+		},
+		8: {
+			PayloadType: 8,
+			Name:        "PCMA",
+			ClockRate:   8000,
+		},
+	}
 
 	for _, m := range s.MediaDescriptions {
 		for _, a := range m.Attributes {
@@ -296,15 +311,16 @@ func (s *SessionDescription) GetPayloadTypeForCodec(wanted Codec) (uint8, error)
 type stateFn func(*lexer) (stateFn, error)
 
 type lexer struct {
-	desc *SessionDescription
+	desc  *SessionDescription
+	cache *unmarshalCache
 	baseLexer
 }
 
-type keyToState func(key string) stateFn
+type keyToState func(key byte) stateFn
 
 func (l *lexer) handleType(fn keyToState) (stateFn, error) {
 	key, err := l.readType()
-	if errors.Is(err, io.EOF) && key == "" {
+	if errors.Is(err, io.EOF) && key == 0 {
 		return nil, nil //nolint:nilnil
 	} else if err != nil {
 		return nil, err

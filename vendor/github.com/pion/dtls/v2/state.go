@@ -22,7 +22,7 @@ type State struct {
 	masterSecret              []byte
 	cipherSuite               CipherSuite // nil if a cipherSuite hasn't been chosen
 
-	srtpProtectionProfile SRTPProtectionProfile // Negotiated SRTPProtectionProfile
+	srtpProtectionProfile atomic.Value // Negotiated SRTPProtectionProfile
 	PeerCertificates      [][]byte
 	IdentityHint          []byte
 	SessionID             []byte
@@ -87,7 +87,7 @@ func (s *State) serialize() *serializedState {
 		SequenceNumber:        atomic.LoadUint64(&s.localSequenceNumber[epoch]),
 		LocalRandom:           localRnd,
 		RemoteRandom:          remoteRnd,
-		SRTPProtectionProfile: uint16(s.srtpProtectionProfile),
+		SRTPProtectionProfile: uint16(s.getSRTPProtectionProfile()),
 		PeerCertificates:      s.PeerCertificates,
 		IdentityHint:          s.IdentityHint,
 		SessionID:             s.SessionID,
@@ -123,7 +123,7 @@ func (s *State) deserialize(serialized serializedState) {
 	s.cipherSuite = cipherSuiteForID(CipherSuiteID(serialized.CipherSuiteID), nil)
 
 	atomic.StoreUint64(&s.localSequenceNumber[epoch], serialized.SequenceNumber)
-	s.srtpProtectionProfile = SRTPProtectionProfile(serialized.SRTPProtectionProfile)
+	s.setSRTPProtectionProfile(SRTPProtectionProfile(serialized.SRTPProtectionProfile))
 
 	// Set remote certificate
 	s.PeerCertificates = serialized.PeerCertificates
@@ -213,4 +213,24 @@ func (s *State) getLocalEpoch() uint16 {
 		return localEpoch
 	}
 	return 0
+}
+
+func (s *State) setSRTPProtectionProfile(profile SRTPProtectionProfile) {
+	s.srtpProtectionProfile.Store(profile)
+}
+
+func (s *State) getSRTPProtectionProfile() SRTPProtectionProfile {
+	if val, ok := s.srtpProtectionProfile.Load().(SRTPProtectionProfile); ok {
+		return val
+	}
+
+	return 0
+}
+
+// [Psiphon]
+// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
+//
+// RemoteRandomBytes returns the random bytes from the client or server hello
+func (s *State) RemoteRandomBytes() [handshake.RandomBytesLength]byte {
+	return s.remoteRandom.RandomBytes
 }

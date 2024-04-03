@@ -121,6 +121,10 @@ func (g *ICEGatherer) createAgent() error {
 		TCPMux:                 g.api.settingEngine.iceTCPMux,
 		UDPMux:                 g.api.settingEngine.iceUDPMux,
 		ProxyDialer:            g.api.settingEngine.iceProxyDialer,
+		DisableActiveTCP:       g.api.settingEngine.iceDisableActiveTCP,
+
+		// [Psiphon] from https://github.com/pion/webrtc/pull/2298
+		UDPMuxSrflx: g.api.settingEngine.iceUDPMuxSrflx,
 	}
 
 	requestedNetworkTypes := g.api.settingEngine.candidates.ICENetworkTypes
@@ -346,7 +350,6 @@ func (g *ICEGatherer) collectStats(collector *statsReportCollector) {
 				Timestamp:     statsTimestampFrom(candidateStats.Timestamp),
 				ID:            candidateStats.ID,
 				Type:          StatsTypeLocalCandidate,
-				NetworkType:   networkType,
 				IP:            candidateStats.IP,
 				Port:          int32(candidateStats.Port),
 				Protocol:      networkType.Protocol(),
@@ -375,7 +378,6 @@ func (g *ICEGatherer) collectStats(collector *statsReportCollector) {
 				Timestamp:     statsTimestampFrom(candidateStats.Timestamp),
 				ID:            candidateStats.ID,
 				Type:          StatsTypeRemoteCandidate,
-				NetworkType:   networkType,
 				IP:            candidateStats.IP,
 				Port:          int32(candidateStats.Port),
 				Protocol:      networkType.Protocol(),

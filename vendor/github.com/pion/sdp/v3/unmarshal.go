@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package sdp
 
 import (
@@ -6,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
@@ -13,57 +17,72 @@ var (
 	errSDPInvalidNumericValue = errors.New("sdp: invalid numeric value")
 	errSDPInvalidValue        = errors.New("sdp: invalid value")
 	errSDPInvalidPortValue    = errors.New("sdp: invalid port value")
+	errSDPCacheInvalid        = errors.New("sdp: invalid cache")
+
+	//nolint: gochecknoglobals
+	unmarshalCachePool = sync.Pool{
+		New: func() interface{} {
+			return &unmarshalCache{}
+		},
+	}
 )
 
-// Unmarshal is the primary function that deserializes the session description
+// UnmarshalString is the primary function that deserializes the session description
 // message and stores it inside of a structured SessionDescription object.
 //
 // The States Transition Table describes the computation flow between functions
 // (namely s1, s2, s3, ...) for a parsing procedure that complies with the
 // specifications laid out by the rfc4566#section-5 as well as by JavaScript
 // Session Establishment Protocol draft. Links:
-// 		https://tools.ietf.org/html/rfc4566#section-5
-// 		https://tools.ietf.org/html/draft-ietf-rtcweb-jsep-24
+//
+//	https://tools.ietf.org/html/rfc4566#section-5
+//	https://tools.ietf.org/html/draft-ietf-rtcweb-jsep-24
 //
 // https://tools.ietf.org/html/rfc4566#section-5
 // Session description
-//    v=  (protocol version)
-//    o=  (originator and session identifier)
-//    s=  (session name)
-//    i=* (session information)
-//    u=* (URI of description)
-//    e=* (email address)
-//    p=* (phone number)
-//    c=* (connection information -- not required if included in
-//         all media)
-//    b=* (zero or more bandwidth information lines)
-//    One or more time descriptions ("t=" and "r=" lines; see below)
-//    z=* (time zone adjustments)
-//    k=* (encryption key)
-//    a=* (zero or more session attribute lines)
-//    Zero or more media descriptions
+//
+//	v=  (protocol version)
+//	o=  (originator and session identifier)
+//	s=  (session name)
+//	i=* (session information)
+//	u=* (URI of description)
+//	e=* (email address)
+//	p=* (phone number)
+//	c=* (connection information -- not required if included in
+//	     all media)
+//	b=* (zero or more bandwidth information lines)
+//	One or more time descriptions ("t=" and "r=" lines; see below)
+//	z=* (time zone adjustments)
+//	k=* (encryption key)
+//	a=* (zero or more session attribute lines)
+//	Zero or more media descriptions
 //
 // Time description
-//    t=  (time the session is active)
-//    r=* (zero or more repeat times)
+//
+//	t=  (time the session is active)
+//	r=* (zero or more repeat times)
 //
 // Media description, if present
-//    m=  (media name and transport address)
-//    i=* (media title)
-//    c=* (connection information -- optional if included at
-//         session level)
-//    b=* (zero or more bandwidth information lines)
-//    k=* (encryption key)
-//    a=* (zero or more media attribute lines)
+//
+//	m=  (media name and transport address)
+//	i=* (media title)
+//	c=* (connection information -- optional if included at
+//	     session level)
+//	b=* (zero or more bandwidth information lines)
+//	k=* (encryption key)
+//	a=* (zero or more media attribute lines)
 //
 // In order to generate the following state table and draw subsequent
 // deterministic finite-state automota ("DFA") the following regex was used to
 // derive the DFA:
-//    vosi?u?e?p?c?b*(tr*)+z?k?a*(mi?c?b*k?a*)*
+//
+//	vosi?u?e?p?c?b*(tr*)+z?k?a*(mi?c?b*k?a*)*
+//
 // possible place and state to exit:
-//                    **   * * *  ** * * * *
-//                    99   1 1 1  11 1 1 1 1
-//                         3 1 1  26 5 5 4 4
+//
+//	**   * * *  ** * * * *
+//	99   1 1 1  11 1 1 1 1
+//	     3 1 1  26 5 5 4 4
 //
 // Please pay close attention to the `k`, and `a` parsing states. In the table
 // below in order to distinguish between the states belonging to the media
@@ -89,10 +108,18 @@ var (
 // |   s15  |    |    14 |    |     | 15 |     |   |    | 12 |   |   |     |   |   |    |   |    |
 // |   s16  |    |    14 |    |     |    |  15 |   |    | 12 |   |   |     |   |   |    |   |    |
 // +--------+----+-------+----+-----+----+-----+---+----+----+---+---+-----+---+---+----+---+----+
-func (s *SessionDescription) Unmarshal(value []byte) error {
+func (s *SessionDescription) UnmarshalString(value string) error {
+	var ok bool
 	l := new(lexer)
+	if l.cache, ok = unmarshalCachePool.Get().(*unmarshalCache); !ok {
+		return errSDPCacheInvalid
+	}
+	defer unmarshalCachePool.Put(l.cache)
+
+	l.cache.reset()
 	l.desc = s
 	l.value = value
+
 	for state := s1; state != nil; {
 		var err error
 		state, err = state(l)
@@ -100,12 +127,21 @@ func (s *SessionDescription) Unmarshal(value []byte) error {
 			return err
 		}
 	}
+
+	s.Attributes = l.cache.cloneSessionAttributes()
+	populateMediaAttributes(l.cache, l.desc)
 	return nil
 }
 
+// Unmarshal converts the value into a []byte and then calls UnmarshalString.
+// Callers should use the more performant UnmarshalString
+func (s *SessionDescription) Unmarshal(value []byte) error {
+	return s.UnmarshalString(string(value))
+}
+
 func s1(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
-		if key == "v=" {
+	return l.handleType(func(key byte) stateFn {
+		if key == 'v' {
 			return unmarshalProtocolVersion
 		}
 		return nil
@@ -113,8 +149,8 @@ func s1(l *lexer) (stateFn, error) {
 }
 
 func s2(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
-		if key == "o=" {
+	return l.handleType(func(key byte) stateFn {
+		if key == 'o' {
 			return unmarshalOrigin
 		}
 		return nil
@@ -122,8 +158,8 @@ func s2(l *lexer) (stateFn, error) {
 }
 
 func s3(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
-		if key == "s=" {
+	return l.handleType(func(key byte) stateFn {
+		if key == 's' {
 			return unmarshalSessionName
 		}
 		return nil
@@ -131,21 +167,21 @@ func s3(l *lexer) (stateFn, error) {
 }
 
 func s4(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "i=":
+		case 'i':
 			return unmarshalSessionInformation
-		case "u=":
+		case 'u':
 			return unmarshalURI
-		case "e=":
+		case 'e':
 			return unmarshalEmail
-		case "p=":
+		case 'p':
 			return unmarshalPhone
-		case "c=":
+		case 'c':
 			return unmarshalSessionConnectionInformation
-		case "b=":
+		case 'b':
 			return unmarshalSessionBandwidth
-		case "t=":
+		case 't':
 			return unmarshalTiming
 		}
 		return nil
@@ -153,11 +189,11 @@ func s4(l *lexer) (stateFn, error) {
 }
 
 func s5(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "b=":
+		case 'b':
 			return unmarshalSessionBandwidth
-		case "t=":
+		case 't':
 			return unmarshalTiming
 		}
 		return nil
@@ -165,15 +201,15 @@ func s5(l *lexer) (stateFn, error) {
 }
 
 func s6(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "p=":
+		case 'p':
 			return unmarshalPhone
-		case "c=":
+		case 'c':
 			return unmarshalSessionConnectionInformation
-		case "b=":
+		case 'b':
 			return unmarshalSessionBandwidth
-		case "t=":
+		case 't':
 			return unmarshalTiming
 		}
 		return nil
@@ -181,19 +217,19 @@ func s6(l *lexer) (stateFn, error) {
 }
 
 func s7(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "u=":
+		case 'u':
 			return unmarshalURI
-		case "e=":
+		case 'e':
 			return unmarshalEmail
-		case "p=":
+		case 'p':
 			return unmarshalPhone
-		case "c=":
+		case 'c':
 			return unmarshalSessionConnectionInformation
-		case "b=":
+		case 'b':
 			return unmarshalSessionBandwidth
-		case "t=":
+		case 't':
 			return unmarshalTiming
 		}
 		return nil
@@ -201,13 +237,13 @@ func s7(l *lexer) (stateFn, error) {
 }
 
 func s8(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "c=":
+		case 'c':
 			return unmarshalSessionConnectionInformation
-		case "b=":
+		case 'b':
 			return unmarshalSessionBandwidth
-		case "t=":
+		case 't':
 			return unmarshalTiming
 		}
 		return nil
@@ -215,19 +251,19 @@ func s8(l *lexer) (stateFn, error) {
 }
 
 func s9(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "z=":
+		case 'z':
 			return unmarshalTimeZones
-		case "k=":
+		case 'k':
 			return unmarshalSessionEncryptionKey
-		case "a=":
+		case 'a':
 			return unmarshalSessionAttribute
-		case "r=":
+		case 'r':
 			return unmarshalRepeatTimes
-		case "t=":
+		case 't':
 			return unmarshalTiming
-		case "m=":
+		case 'm':
 			return unmarshalMediaDescription
 		}
 		return nil
@@ -235,17 +271,17 @@ func s9(l *lexer) (stateFn, error) {
 }
 
 func s10(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "e=":
+		case 'e':
 			return unmarshalEmail
-		case "p=":
+		case 'p':
 			return unmarshalPhone
-		case "c=":
+		case 'c':
 			return unmarshalSessionConnectionInformation
-		case "b=":
+		case 'b':
 			return unmarshalSessionBandwidth
-		case "t=":
+		case 't':
 			return unmarshalTiming
 		}
 		return nil
@@ -253,11 +289,11 @@ func s10(l *lexer) (stateFn, error) {
 }
 
 func s11(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "a=":
+		case 'a':
 			return unmarshalSessionAttribute
-		case "m=":
+		case 'm':
 			return unmarshalMediaDescription
 		}
 		return nil
@@ -265,19 +301,19 @@ func s11(l *lexer) (stateFn, error) {
 }
 
 func s12(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "a=":
+		case 'a':
 			return unmarshalMediaAttribute
-		case "k=":
+		case 'k':
 			return unmarshalMediaEncryptionKey
-		case "b=":
+		case 'b':
 			return unmarshalMediaBandwidth
-		case "c=":
+		case 'c':
 			return unmarshalMediaConnectionInformation
-		case "i=":
+		case 'i':
 			return unmarshalMediaTitle
-		case "m=":
+		case 'm':
 			return unmarshalMediaDescription
 		}
 		return nil
@@ -285,13 +321,13 @@ func s12(l *lexer) (stateFn, error) {
 }
 
 func s13(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "a=":
+		case 'a':
 			return unmarshalSessionAttribute
-		case "k=":
+		case 'k':
 			return unmarshalSessionEncryptionKey
-		case "m=":
+		case 'm':
 			return unmarshalMediaDescription
 		}
 		return nil
@@ -299,23 +335,23 @@ func s13(l *lexer) (stateFn, error) {
 }
 
 func s14(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "a=":
+		case 'a':
 			return unmarshalMediaAttribute
-		case "k=":
+		case 'k':
 			// Non-spec ordering
 			return unmarshalMediaEncryptionKey
-		case "b=":
+		case 'b':
 			// Non-spec ordering
 			return unmarshalMediaBandwidth
-		case "c=":
+		case 'c':
 			// Non-spec ordering
 			return unmarshalMediaConnectionInformation
-		case "i=":
+		case 'i':
 			// Non-spec ordering
 			return unmarshalMediaTitle
-		case "m=":
+		case 'm':
 			return unmarshalMediaDescription
 		}
 		return nil
@@ -323,20 +359,20 @@ func s14(l *lexer) (stateFn, error) {
 }
 
 func s15(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "a=":
+		case 'a':
 			return unmarshalMediaAttribute
-		case "k=":
+		case 'k':
 			return unmarshalMediaEncryptionKey
-		case "b=":
+		case 'b':
 			return unmarshalMediaBandwidth
-		case "c=":
+		case 'c':
 			return unmarshalMediaConnectionInformation
-		case "i=":
+		case 'i':
 			// Non-spec ordering
 			return unmarshalMediaTitle
-		case "m=":
+		case 'm':
 			return unmarshalMediaDescription
 		}
 		return nil
@@ -344,20 +380,20 @@ func s15(l *lexer) (stateFn, error) {
 }
 
 func s16(l *lexer) (stateFn, error) {
-	return l.handleType(func(key string) stateFn {
+	return l.handleType(func(key byte) stateFn {
 		switch key {
-		case "a=":
+		case 'a':
 			return unmarshalMediaAttribute
-		case "k=":
+		case 'k':
 			return unmarshalMediaEncryptionKey
-		case "c=":
+		case 'c':
 			return unmarshalMediaConnectionInformation
-		case "b=":
+		case 'b':
 			return unmarshalMediaBandwidth
-		case "i=":
+		case 'i':
 			// Non-spec ordering
 			return unmarshalMediaTitle
-		case "m=":
+		case 'm':
 			return unmarshalMediaDescription
 		}
 		return nil
@@ -714,18 +750,19 @@ func unmarshalSessionAttribute(l *lexer) (stateFn, error) {
 	}
 
 	i := strings.IndexRune(value, ':')
-	var a Attribute
+	a := l.cache.getSessionAttribute()
 	if i > 0 {
-		a = NewAttribute(value[:i], value[i+1:])
+		a.Key = value[:i]
+		a.Value = value[i+1:]
 	} else {
-		a = NewPropertyAttribute(value)
+		a.Key = value
 	}
 
-	l.desc.Attributes = append(l.desc.Attributes, a)
 	return s11, nil
 }
 
 func unmarshalMediaDescription(l *lexer) (stateFn, error) {
+	populateMediaAttributes(l.cache, l.desc)
 	var newMediaDesc MediaDescription
 
 	// <media>
@@ -853,19 +890,21 @@ func unmarshalMediaAttribute(l *lexer) (stateFn, error) {
 	}
 
 	i := strings.IndexRune(value, ':')
-	var a Attribute
+	a := l.cache.getMediaAttribute()
 	if i > 0 {
-		a = NewAttribute(value[:i], value[i+1:])
+		a.Key = value[:i]
+		a.Value = value[i+1:]
 	} else {
-		a = NewPropertyAttribute(value)
+		a.Key = value
 	}
 
-	latestMediaDesc := l.desc.MediaDescriptions[len(l.desc.MediaDescriptions)-1]
-	latestMediaDesc.Attributes = append(latestMediaDesc.Attributes, a)
 	return s14, nil
 }
 
 func parseTimeUnits(value string) (num int64, err error) {
+	if len(value) == 0 {
+		return 0, fmt.Errorf("%w `%v`", errSDPInvalidValue, value)
+	}
 	k := timeShorthand(value[len(value)-1])
 	if k > 0 {
 		num, err = strconv.ParseInt(value[:len(value)-1], 10, 64)
@@ -907,4 +946,11 @@ func parsePort(value string) (int, error) {
 	}
 
 	return port, nil
+}
+
+func populateMediaAttributes(c *unmarshalCache, s *SessionDescription) {
+	if len(s.MediaDescriptions) != 0 {
+		lastMediaDesc := s.MediaDescriptions[len(s.MediaDescriptions)-1]
+		lastMediaDesc.Attributes = c.cloneMediaAttributes()
+	}
 }

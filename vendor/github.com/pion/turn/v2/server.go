@@ -1,7 +1,11 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 // Package turn contains the public API for pion/turn, a toolkit for building TURN clients and servers
 package turn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -70,7 +74,13 @@ func NewServer(config ServerConfig) (*Server, error) {
 			return nil, fmt.Errorf("failed to create AllocationManager: %w", err)
 		}
 
-		go s.readPacketConn(cfg, am)
+		go func(cfg PacketConnConfig, am *allocation.Manager) {
+			s.readLoop(cfg.PacketConn, am)
+
+			if err := am.Close(); err != nil {
+				s.log.Errorf("Failed to close AllocationManager: %s", err)
+			}
+		}(cfg, am)
 	}
 
 	for _, cfg := range s.listenerConfigs {
@@ -79,7 +89,13 @@ func NewServer(config ServerConfig) (*Server, error) {
 			return nil, fmt.Errorf("failed to create AllocationManager: %w", err)
 		}
 
-		go s.readListener(cfg, am)
+		go func(cfg ListenerConfig, am *allocation.Manager) {
+			s.readListener(cfg.Listener, am)
+
+			if err := am.Close(); err != nil {
+				s.log.Errorf("Failed to close AllocationManager: %s", err)
+			}
+		}(cfg, am)
 	}
 
 	return s, nil
@@ -116,35 +132,27 @@ func (s *Server) Close() error {
 
 	err := errFailedToClose
 	for _, e := range errors {
-		err = fmt.Errorf("%s; close error (%w) ", err, e)
+		err = fmt.Errorf("%s; close error (%w) ", err, e) //nolint:errorlint
 	}
 
 	return err
 }
 
-func (s *Server) readPacketConn(p PacketConnConfig, am *allocation.Manager) {
-	s.readLoop(p.PacketConn, am)
-
-	if err := am.Close(); err != nil {
-		s.log.Errorf("Failed to close AllocationManager: %s", err)
-	}
-}
-
-func (s *Server) readListener(l ListenerConfig, am *allocation.Manager) {
-	defer func() {
-		if err := am.Close(); err != nil {
-			s.log.Errorf("Failed to close AllocationManager: %s", err)
-		}
-	}()
-
+func (s *Server) readListener(l net.Listener, am *allocation.Manager) {
 	for {
-		conn, err := l.Listener.Accept()
+		conn, err := l.Accept()
 		if err != nil {
 			s.log.Debugf("Failed to accept: %s", err)
 			return
 		}
 
-		go s.readLoop(NewSTUNConn(conn), am)
+		go func() {
+			s.readLoop(NewSTUNConn(conn), am)
+
+			if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				s.log.Errorf("Failed to close conn: %s", err)
+			}
+		}()
 	}
 }
 
@@ -174,7 +182,7 @@ func (s *Server) readLoop(p net.PacketConn, allocationManager *allocation.Manage
 		n, addr, err := p.ReadFrom(buf)
 		switch {
 		case err != nil:
-			s.log.Debugf("exit read loop on error: %s", err.Error())
+			s.log.Debugf("Exit read loop on error: %s", err)
 			return
 		case n >= s.inboundMTU:
 			s.log.Debugf("Read bytes exceeded MTU, packet is possibly truncated")
@@ -191,7 +199,7 @@ func (s *Server) readLoop(p net.PacketConn, allocationManager *allocation.Manage
 			ChannelBindTimeout: s.channelBindTimeout,
 			Nonces:             s.nonces,
 		}); err != nil {
-			s.log.Errorf("error when handling datagram: %v", err)
+			s.log.Errorf("Failed to handle datagram: %v", err)
 		}
 	}
 }

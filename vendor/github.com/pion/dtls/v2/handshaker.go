@@ -115,6 +115,10 @@ type handshakeConfig struct {
 	ellipticCurves              []elliptic.Curve
 	insecureSkipHelloVerify     bool
 
+	// [Psiphon]
+	// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
+	customClientHelloRandom func() [handshake.RandomBytesLength]byte
+
 	onFlightState func(flightVal, handshakeState)
 	log           logging.LeveledLogger
 	keyLogWriter  io.Writer

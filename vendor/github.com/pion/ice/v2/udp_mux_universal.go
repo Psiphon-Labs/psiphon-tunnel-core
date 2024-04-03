@@ -72,6 +72,10 @@ func NewUniversalUDPMuxDefault(params UniversalUDPMuxParams) *UniversalUDPMuxDef
 	}
 	m.UDPMuxDefault = NewUDPMuxDefault(udpMuxParams)
 
+	// [Psiphon]
+	// See race condition comment in NewUDPMuxDefault.
+	go m.UDPMuxDefault.connWorker()
+
 	return m
 }
 
@@ -188,9 +192,9 @@ func (m *UniversalUDPMuxDefault) GetXORMappedAddr(serverAddr net.Addr, deadline 
 
 	// Otherwise, make a STUN request to discover the address
 	// or wait for already sent request to complete
-	waitAddrReceived, err := m.sendSTUN(serverAddr)
+	waitAddrReceived, err := m.writeSTUN(serverAddr)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", errSendSTUNPacket, err) //nolint:errorlint
+		return nil, fmt.Errorf("%w: %s", errWriteSTUNMessage, err) //nolint:errorlint
 	}
 
 	// Block until response was handled by the connWorker routine and XORMappedAddress was updated
@@ -209,11 +213,11 @@ func (m *UniversalUDPMuxDefault) GetXORMappedAddr(serverAddr net.Addr, deadline 
 	}
 }
 
-// sendSTUN sends a STUN request via UDP conn.
+// writeSTUN sends a STUN request via UDP conn.
 //
 // The returned channel is closed when the STUN response has been received.
 // Method is safe for concurrent use.
-func (m *UniversalUDPMuxDefault) sendSTUN(serverAddr net.Addr) (chan struct{}, error) {
+func (m *UniversalUDPMuxDefault) writeSTUN(serverAddr net.Addr) (chan struct{}, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

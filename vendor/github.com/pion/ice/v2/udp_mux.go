@@ -89,7 +89,7 @@ func NewUDPMuxDefault(params UDPMuxParams) *UDPMuxDefault {
 			if params.Net == nil {
 				var err error
 				if params.Net, err = stdnet.NewNet(); err != nil {
-					params.Logger.Errorf("failed to get create network: %v", err)
+					params.Logger.Errorf("Failed to get create network: %v", err)
 				}
 			}
 
@@ -99,7 +99,7 @@ func NewUDPMuxDefault(params UDPMuxParams) *UDPMuxDefault {
 					localAddrsForUnspecified = append(localAddrsForUnspecified, &net.UDPAddr{IP: ip, Port: addr.Port})
 				}
 			} else {
-				params.Logger.Errorf("failed to get local interfaces for unspecified addr: %v", err)
+				params.Logger.Errorf("Failed to get local interfaces for unspecified addr: %v", err)
 			}
 		}
 	}
@@ -119,7 +119,43 @@ func NewUDPMuxDefault(params UDPMuxParams) *UDPMuxDefault {
 		localAddrsForUnspecified: localAddrsForUnspecified,
 	}
 
-	go m.connWorker()
+	// [Psiphon]
+	//
+	// - Currently, pion/ice code produces the following race condition due to
+	//   NewUDPMuxDefault launching go m.connWorker() before the called
+	//   assigns m.UDPMuxDefault = NewUDPMuxDefault(udpMuxParams), while
+	//   connWorker may access fields in the
+	//   UniversalUDPMuxDefault.UDPMuxDefault embedded struct.
+	//
+	// - For Psiphon's use case, the simple workaround is to delay launching
+	//   go m.connWorker() until after the assignment in
+	//   NewUniversalUDPMuxDefault. This isn't a general purpose fix since it
+	//   means NewUDPMuxDefault by itself won't work.
+	//
+	// - Note that the IsPsiphon flag/check added for
+	//   gatherCandidatesSrflxUDPMux also checks that this fix is in place.
+	//
+	//
+	// ==================
+	// WARNING: DATA RACE
+	// Read at 0x00c000ee28c0 by goroutine 22319:
+	//   github.com/pion/ice/v2.(*UniversalUDPMuxDefault).isXORMappedResponse()
+	//       /pion/ice/v2/udp_mux_universal.go:136 +0x40
+	//   github.com/pion/ice/v2.(*udpConn).ReadFrom()
+	//       /pion/ice/v2/udp_mux_universal.go:122 +0x234
+	//   github.com/pion/ice/v2.(*UDPMuxDefault).connWorker()
+	//       /pion/ice/v2/udp_mux.go:286 +0xd4
+	//   github.com/pion/ice/v2.NewUDPMuxDefault.func2()
+	//       /pion/ice/v2/udp_mux.go:122 +0x34
+	//
+	// Previous write at 0x00c000ee28c0 by goroutine 22315:
+	//   github.com/pion/ice/v2.NewUniversalUDPMuxDefault()
+	//       /pion/ice/v2/udp_mux_universal.go:73 +0x354
+	//   github.com/pion/webrtc/v3.NewICEUniversalUDPMux()
+	//       /pion/webrtc/v3/icemux.go:39 +0x2b4
+	// ==================
+
+	//go m.connWorker()
 
 	return m
 }
@@ -290,7 +326,7 @@ func (m *UDPMuxDefault) connWorker() {
 			if os.IsTimeout(err) {
 				continue
 			} else if !errors.Is(err, io.EOF) {
-				logger.Errorf("could not read udp packet: %v", err)
+				logger.Errorf("Failed to read UDP packet: %v", err)
 			}
 
 			return
@@ -298,7 +334,7 @@ func (m *UDPMuxDefault) connWorker() {
 
 		udpAddr, ok := addr.(*net.UDPAddr)
 		if !ok {
-			logger.Errorf("underlying PacketConn did not return a UDPAddr")
+			logger.Errorf("Underlying PacketConn did not return a UDPAddr")
 			return
 		}
 
@@ -333,12 +369,12 @@ func (m *UDPMuxDefault) connWorker() {
 		}
 
 		if destinationConn == nil {
-			m.params.Logger.Tracef("dropping packet from %s, addr: %s", udpAddr.String(), addr.String())
+			m.params.Logger.Tracef("Dropping packet from %s, addr: %s", udpAddr.String(), addr.String())
 			continue
 		}
 
 		if err = destinationConn.writePacket(buf[:n], udpAddr); err != nil {
-			m.params.Logger.Errorf("could not write packet: %v", err)
+			m.params.Logger.Errorf("Failed to write packet: %v", err)
 		}
 	}
 }

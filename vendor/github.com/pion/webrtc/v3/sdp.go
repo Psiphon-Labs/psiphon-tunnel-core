@@ -232,12 +232,30 @@ func trackDetailsToRTPReceiveParameters(t *trackDetails) RTPReceiveParameters {
 	return RTPReceiveParameters{Encodings: encodings}
 }
 
-func getRids(media *sdp.MediaDescription) map[string]string {
-	rids := map[string]string{}
+func getRids(media *sdp.MediaDescription) map[string]*simulcastRid {
+	rids := map[string]*simulcastRid{}
+	var simulcastAttr string
 	for _, attr := range media.Attributes {
 		if attr.Key == sdpAttributeRid {
 			split := strings.Split(attr.Value, " ")
-			rids[split[0]] = attr.Value
+			rids[split[0]] = &simulcastRid{attrValue: attr.Value}
+		} else if attr.Key == sdpAttributeSimulcast {
+			simulcastAttr = attr.Value
+		}
+	}
+	// process paused stream like "a=simulcast:send 1;~2;~3"
+	if simulcastAttr != "" {
+		if space := strings.Index(simulcastAttr, " "); space > 0 {
+			simulcastAttr = simulcastAttr[space+1:]
+		}
+		ridStates := strings.Split(simulcastAttr, ";")
+		for _, ridState := range ridStates {
+			if ridState[:1] == "~" {
+				rid := ridState[1:]
+				if r, ok := rids[rid]; ok {
+					r.paused = true
+				}
+			}
 		}
 	}
 	return rids
@@ -379,7 +397,7 @@ func addSenderSDP(
 				sendRids = append(sendRids, encoding.RID)
 			}
 			// Simulcast
-			media.WithValueAttribute("simulcast", "send "+strings.Join(sendRids, ";"))
+			media.WithValueAttribute(sdpAttributeSimulcast, "send "+strings.Join(sendRids, ";"))
 		}
 
 		if !isPlanB {
@@ -475,10 +493,13 @@ func addTransceiverSDP(
 
 		for rid := range mediaSection.ridMap {
 			media.WithValueAttribute(sdpAttributeRid, rid+" recv")
+			if mediaSection.ridMap[rid].paused {
+				rid = "~" + rid
+			}
 			recvRids = append(recvRids, rid)
 		}
 		// Simulcast
-		media.WithValueAttribute("simulcast", "recv "+strings.Join(recvRids, ";"))
+		media.WithValueAttribute(sdpAttributeSimulcast, "recv "+strings.Join(recvRids, ";"))
 	}
 
 	addSenderSDP(mediaSection, isPlanB, media)
@@ -500,15 +521,51 @@ func addTransceiverSDP(
 	return true, nil
 }
 
+type simulcastRid struct {
+	attrValue string
+	paused    bool
+}
+
 type mediaSection struct {
 	id           string
 	transceivers []*RTPTransceiver
 	data         bool
-	ridMap       map[string]string
+	ridMap       map[string]*simulcastRid
+}
+
+func bundleMatchFromRemote(matchBundleGroup *string) func(mid string) bool {
+	if matchBundleGroup == nil {
+		return func(midValue string) bool {
+			return true
+		}
+	}
+	bundleTags := strings.Split(*matchBundleGroup, " ")
+	return func(midValue string) bool {
+		for _, tag := range bundleTags {
+			if tag == midValue {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // populateSDP serializes a PeerConnections state into an SDP
-func populateSDP(d *sdp.SessionDescription, isPlanB bool, dtlsFingerprints []DTLSFingerprint, mediaDescriptionFingerprint bool, isICELite bool, isExtmapAllowMixed bool, mediaEngine *MediaEngine, connectionRole sdp.ConnectionRole, candidates []ICECandidate, iceParams ICEParameters, mediaSections []mediaSection, iceGatheringState ICEGatheringState) (*sdp.SessionDescription, error) {
+func populateSDP(
+	d *sdp.SessionDescription,
+	isPlanB bool,
+	dtlsFingerprints []DTLSFingerprint,
+	mediaDescriptionFingerprint bool,
+	isICELite bool,
+	isExtmapAllowMixed bool,
+	mediaEngine *MediaEngine,
+	connectionRole sdp.ConnectionRole,
+	candidates []ICECandidate,
+	iceParams ICEParameters,
+	mediaSections []mediaSection,
+	iceGatheringState ICEGatheringState,
+	matchBundleGroup *string,
+) (*sdp.SessionDescription, error) {
 	var err error
 	mediaDtlsFingerprints := []DTLSFingerprint{}
 
@@ -518,6 +575,8 @@ func populateSDP(d *sdp.SessionDescription, isPlanB bool, dtlsFingerprints []DTL
 
 	bundleValue := "BUNDLE"
 	bundleCount := 0
+
+	bundleMatch := bundleMatchFromRemote(matchBundleGroup)
 	appendBundle := func(midValue string) {
 		bundleValue += " " + midValue
 		bundleCount++
@@ -544,7 +603,11 @@ func populateSDP(d *sdp.SessionDescription, isPlanB bool, dtlsFingerprints []DTL
 		}
 
 		if shouldAddID {
-			appendBundle(m.id)
+			if bundleMatch(m.id) {
+				appendBundle(m.id)
+			} else {
+				d.MediaDescriptions[len(d.MediaDescriptions)-1].MediaName.Port = sdp.RangedPort{Value: 0}
+			}
 		}
 	}
 
@@ -563,7 +626,10 @@ func populateSDP(d *sdp.SessionDescription, isPlanB bool, dtlsFingerprints []DTL
 		d = d.WithPropertyAttribute(sdp.AttrKeyExtMapAllowMixed)
 	}
 
-	return d.WithValueAttribute(sdp.AttrKeyGroup, bundleValue), nil
+	if bundleCount > 0 {
+		d = d.WithValueAttribute(sdp.AttrKeyGroup, bundleValue)
+	}
+	return d, nil
 }
 
 func getMidValue(media *sdp.MediaDescription) string {

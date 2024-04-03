@@ -191,7 +191,7 @@ func (m *TCPMuxDefault) handleConn(conn net.Conn) {
 	}
 
 	for _, attr := range msg.Attributes {
-		m.params.Logger.Debugf("msg attr: %s", attr.String())
+		m.params.Logger.Debugf("Message attribute: %s", attr.String())
 	}
 
 	attr, err := msg.Get(stun.AttrUsername)

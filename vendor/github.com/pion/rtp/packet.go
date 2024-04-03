@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package rtp
 
 import (
@@ -25,6 +28,9 @@ type Header struct {
 	CSRC             []uint32
 	ExtensionProfile uint16
 	Extensions       []Extension
+
+	// Deprecated: will be removed in a future version.
+	PayloadOffset int
 }
 
 // Packet represents an RTP Packet
@@ -32,6 +38,9 @@ type Packet struct {
 	Header
 	Payload     []byte
 	PaddingSize byte
+
+	// Deprecated: will be removed in a future version.
+	Raw []byte
 }
 
 const (
@@ -140,68 +149,60 @@ func (h *Header) Unmarshal(buf []byte) (n int, err error) { //nolint:gocognit
 		n += 2
 		extensionLength := int(binary.BigEndian.Uint16(buf[n:])) * 4
 		n += 2
+		extensionEnd := n + extensionLength
 
-		if expected := n + extensionLength; len(buf) < expected {
-			return n, fmt.Errorf("size %d < %d: %w",
-				len(buf), expected,
-				errHeaderSizeInsufficientForExtension,
-			)
+		if len(buf) < extensionEnd {
+			return n, fmt.Errorf("size %d < %d: %w", len(buf), extensionEnd, errHeaderSizeInsufficientForExtension)
 		}
 
-		switch h.ExtensionProfile {
-		// RFC 8285 RTP One Byte Header Extension
-		case extensionProfileOneByte:
-			end := n + extensionLength
-			for n < end {
+		if h.ExtensionProfile == extensionProfileOneByte || h.ExtensionProfile == extensionProfileTwoByte {
+			var (
+				extid      uint8
+				payloadLen int
+			)
+
+			for n < extensionEnd {
 				if buf[n] == 0x00 { // padding
 					n++
 					continue
 				}
 
-				extid := buf[n] >> 4
-				len := int(buf[n]&^0xF0 + 1)
-				n++
-
-				if extid == extensionIDReserved {
-					break
-				}
-
-				extension := Extension{id: extid, payload: buf[n : n+len]}
-				h.Extensions = append(h.Extensions, extension)
-				n += len
-			}
-
-		// RFC 8285 RTP Two Byte Header Extension
-		case extensionProfileTwoByte:
-			end := n + extensionLength
-			for n < end {
-				if buf[n] == 0x00 { // padding
+				if h.ExtensionProfile == extensionProfileOneByte {
+					extid = buf[n] >> 4
+					payloadLen = int(buf[n]&^0xF0 + 1)
 					n++
-					continue
+
+					if extid == extensionIDReserved {
+						break
+					}
+				} else {
+					extid = buf[n]
+					n++
+
+					if len(buf) <= n {
+						return n, fmt.Errorf("size %d < %d: %w", len(buf), n, errHeaderSizeInsufficientForExtension)
+					}
+
+					payloadLen = int(buf[n])
+					n++
 				}
 
-				extid := buf[n]
-				n++
+				if extensionPayloadEnd := n + payloadLen; len(buf) <= extensionPayloadEnd {
+					return n, fmt.Errorf("size %d < %d: %w", len(buf), extensionPayloadEnd, errHeaderSizeInsufficientForExtension)
+				}
 
-				len := int(buf[n])
-				n++
-
-				extension := Extension{id: extid, payload: buf[n : n+len]}
+				extension := Extension{id: extid, payload: buf[n : n+payloadLen]}
 				h.Extensions = append(h.Extensions, extension)
-				n += len
+				n += payloadLen
 			}
-
-		default: // RFC3550 Extension
-			if len(buf) < n+extensionLength {
-				return n, fmt.Errorf("%w: %d < %d",
-					errHeaderSizeInsufficientForExtension, len(buf), n+extensionLength)
-			}
-
-			extension := Extension{id: 0, payload: buf[n : n+extensionLength]}
+		} else {
+			// RFC3550 Extension
+			extension := Extension{id: 0, payload: buf[n:extensionEnd]}
 			h.Extensions = append(h.Extensions, extension)
 			n += len(h.Extensions[0].payload)
 		}
 	}
+
 	return n, nil
 }
 
@@ -211,6 +212,7 @@ func (p *Packet) Unmarshal(buf []byte) error {
 	if err != nil {
 		return err
 	}
+
 	end := len(buf)
 	if p.Header.Padding {
 		p.PaddingSize = buf[end-1]
@@ -219,7 +221,9 @@ func (p *Packet) Unmarshal(buf []byte) error {
 	if end < n {
 		return errTooSmall
 	}
+
 	p.Payload = buf[n:end]
+
 	return nil
 }
 
@@ -231,6 +235,7 @@ func (h Header) Marshal() (buf []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return buf[:n], nil
 }
 
@@ -401,10 +406,10 @@ func (h *Header) SetExtension(id uint8, payload []byte) error { //nolint:gocogni
 	// No existing header extensions
 	h.Extension = true
 
-	switch len := len(payload); {
-	case len <= 16:
+	switch payloadLen := len(payload); {
+	case payloadLen <= 16:
 		h.ExtensionProfile = extensionProfileOneByte
-	case len > 16 && len < 256:
+	case payloadLen > 16 && payloadLen < 256:
 		h.ExtensionProfile = extensionProfileTwoByte
 	}
 
@@ -469,8 +474,7 @@ func (p Packet) Marshal() (buf []byte, err error) {
 }
 
 // MarshalTo serializes the packet and writes to the buffer.
-func (p Packet) MarshalTo(buf []byte) (n int, err error) {
-	p.Header.Padding = p.PaddingSize != 0
+func (p *Packet) MarshalTo(buf []byte) (n int, err error) {
 	n, err = p.Header.MarshalTo(buf)
 	if err != nil {
 		return 0, err
@@ -482,6 +486,7 @@ func (p Packet) MarshalTo(buf []byte) (n int, err error) {
 	}
 
 	m := copy(buf[n:], p.Payload)
+
 	if p.Header.Padding {
 		buf[n+m+int(p.PaddingSize-1)] = p.PaddingSize
 	}

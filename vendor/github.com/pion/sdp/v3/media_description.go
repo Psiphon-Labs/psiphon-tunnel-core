@@ -1,8 +1,10 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package sdp
 
 import (
 	"strconv"
-	"strings"
 )
 
 // MediaDescription represents a media type.
@@ -62,6 +64,24 @@ func (p *RangedPort) String() string {
 	return output
 }
 
+func (p RangedPort) marshalInto(b []byte) []byte {
+	b = strconv.AppendInt(b, int64(p.Value), 10)
+	if p.Range != nil {
+		b = append(b, '/')
+		b = strconv.AppendInt(b, int64(*p.Range), 10)
+	}
+	return b
+}
+
+func (p RangedPort) marshalSize() (size int) {
+	size = lenInt(int64(p.Value))
+	if p.Range != nil {
+		size += 1 + lenInt(int64(*p.Range))
+	}
+
+	return
+}
+
 // MediaName describes the "m=" field storage structure.
 type MediaName struct {
 	Media   string
@@ -71,10 +91,38 @@ type MediaName struct {
 }
 
 func (m MediaName) String() string {
-	return strings.Join([]string{
-		m.Media,
-		m.Port.String(),
-		strings.Join(m.Protos, "/"),
-		strings.Join(m.Formats, " "),
-	}, " ")
+	return stringFromMarshal(m.marshalInto, m.marshalSize)
+}
+
+func (m MediaName) marshalInto(b []byte) []byte {
+	appendList := func(list []string, sep byte) {
+		for i, p := range list {
+			if i != 0 && i != len(list) {
+				b = append(b, sep)
+			}
+			b = append(b, p...)
+		}
+	}
+
+	b = append(append(b, m.Media...), ' ')
+	b = append(m.Port.marshalInto(b), ' ')
+	appendList(m.Protos, '/')
+	b = append(b, ' ')
+	appendList(m.Formats, ' ')
+	return b
+}
+
+func (m MediaName) marshalSize() (size int) {
+	listSize := func(list []string) {
+		for _, p := range list {
+			size += 1 + len(p)
+		}
+	}
+
+	size = len(m.Media)
+	size += 1 + m.Port.marshalSize()
+	listSize(m.Protos)
+	listSize(m.Formats)
+
+	return size
 }

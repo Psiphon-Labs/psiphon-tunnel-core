@@ -71,6 +71,7 @@ type SettingEngine struct {
 		clientAuth                *dtls.ClientAuthType
 		clientCAs                 *x509.CertPool
 		rootCAs                   *x509.CertPool
+		keyLogWriter              io.Writer
 	}
 	sctp struct {
 		maxReceiveBufferSize uint32
@@ -86,9 +87,13 @@ type SettingEngine struct {
 	iceTCPMux                                 ice.TCPMux
 	iceUDPMux                                 ice.UDPMux
 	iceProxyDialer                            proxy.Dialer
+	iceDisableActiveTCP                       bool
 	disableMediaEngineCopy                    bool
 	srtpProtectionProfiles                    []dtls.SRTPProtectionProfile
 	receiveMTU                                uint
+
+	// [Psiphon] from https://github.com/pion/webrtc/pull/2298
+	iceUDPMuxSrflx ice.UniversalUDPMux
 }
 
 // getReceiveMTU returns the configured MTU. If SettingEngine's MTU is configured to 0 it returns the default
@@ -343,9 +348,21 @@ func (e *SettingEngine) SetICEUDPMux(udpMux ice.UDPMux) {
 	e.iceUDPMux = udpMux
 }
 
+// [Psiphon] from https://github.com/pion/webrtc/pull/2298
+// SetICEUDPMuxSrflx allows ICE traffic from server reflexive candidates to be
+// multiplexed onto a single port.
+func (e *SettingEngine) SetICEUDPMuxSrflx(udpMuxSrflx ice.UniversalUDPMux) {
+	e.iceUDPMuxSrflx = udpMuxSrflx
+}
+
 // SetICEProxyDialer sets the proxy dialer interface based on golang.org/x/net/proxy.
 func (e *SettingEngine) SetICEProxyDialer(d proxy.Dialer) {
 	e.iceProxyDialer = d
+}
+
+// DisableActiveTCP disables using active TCP for ICE. Active TCP is enabled by default
+func (e *SettingEngine) DisableActiveTCP(isDisabled bool) {
+	e.iceDisableActiveTCP = isDisabled
 }
 
 // DisableMediaEngineCopy stops the MediaEngine from being copied. This allows a user to modify
@@ -414,6 +431,12 @@ func (e *SettingEngine) SetDTLSClientCAs(clientCAs *x509.CertPool) {
 // SetDTLSRootCAs sets the root CA certificate pool for DTLS certificate verification.
 func (e *SettingEngine) SetDTLSRootCAs(rootCAs *x509.CertPool) {
 	e.dtls.rootCAs = rootCAs
+}
+
+// SetDTLSKeyLogWriter sets the destination of the TLS key material for debugging.
+// Logging key material compromises security and should only be use for debugging.
+func (e *SettingEngine) SetDTLSKeyLogWriter(writer io.Writer) {
+	e.dtls.keyLogWriter = writer
 }
 
 // SetSCTPMaxReceiveBufferSize sets the maximum receive buffer size.

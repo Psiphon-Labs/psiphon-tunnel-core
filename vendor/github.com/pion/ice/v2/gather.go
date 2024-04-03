@@ -32,7 +32,7 @@ func closeConnAndLog(c io.Closer, log logging.LeveledLogger, msg string, args ..
 		return
 	}
 
-	log.Warnf(msg)
+	log.Warnf(msg, args...)
 	if err := c.Close(); err != nil {
 		log.Warnf("Failed to close connection: %v", err)
 	}
@@ -73,6 +73,7 @@ func (a *Agent) gatherCandidates(ctx context.Context, done chan struct{}) {
 
 	var wg sync.WaitGroup
 	for _, t := range a.candidateTypes {
+
 		switch t {
 		case CandidateTypeHost:
 			wg.Add(1)
@@ -377,17 +378,48 @@ func (a *Agent) gatherCandidatesSrflxMapped(ctx context.Context, networkTypes []
 	}
 }
 
+// [Psiphon]
+// The API for this Psiphon fork is identical to upstream, apart from this
+// symbol, which may be used to verify that the fork is used when compiling.
+const IsPsiphon = true
+
 func (a *Agent) gatherCandidatesSrflxUDPMux(ctx context.Context, urls []*stun.URI, networkTypes []NetworkType) { //nolint:gocognit
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
 	for _, networkType := range networkTypes {
+
 		if networkType.IsTCP() {
 			continue
 		}
 
 		for i := range urls {
+
 			for _, listenAddr := range a.udpMuxSrflx.GetListenAddresses() {
+
+				// [Psiphon]
+				//
+				// - GetListenAddresses returns both IPv4 and IPv6 addresses,
+				//   but this loop iteration should use only one or the
+				//   other, depending on networkType.
+				//
+				// - Without this patch, we observeget 2x duplicate STUN
+				//   requests and candidates.
+				host, _, err := net.SplitHostPort(listenAddr.String())
+				if err != nil {
+					a.log.Warn("gatherCandidatesSrflxUDPMux: net.SplitHostPort failed")
+					continue
+				}
+				IP := net.ParseIP(host)
+				if IP == nil {
+					a.log.Warn("gatherCandidatesSrflxUDPMux: net.ParseIP failed")
+					continue
+				}
+				if networkType.IsIPv4() != (IP.To4() != nil) {
+					continue
+				}
+				// [Psiphon]
+
 				udpAddr, ok := listenAddr.(*net.UDPAddr)
 				if !ok {
 					a.log.Warn("Failed to cast udpMuxSrflx listen address to UDPAddr")
@@ -400,7 +432,7 @@ func (a *Agent) gatherCandidatesSrflxUDPMux(ctx context.Context, urls []*stun.UR
 					hostPort := fmt.Sprintf("%s:%d", url.Host, url.Port)
 					serverAddr, err := a.net.ResolveUDPAddr(network, hostPort)
 					if err != nil {
-						a.log.Warnf("Failed to resolve STUN host: %s: %v", hostPort, err)
+						a.log.Debugf("Failed to resolve STUN host: %s: %v", hostPort, err)
 						return
 					}
 
@@ -462,7 +494,7 @@ func (a *Agent) gatherCandidatesSrflx(ctx context.Context, urls []*stun.URI, net
 				hostPort := fmt.Sprintf("%s:%d", url.Host, url.Port)
 				serverAddr, err := a.net.ResolveUDPAddr(network, hostPort)
 				if err != nil {
-					a.log.Warnf("Failed to resolve STUN host: %s: %v", hostPort, err)
+					a.log.Debugf("Failed to resolve STUN host: %s: %v", hostPort, err)
 					return
 				}
 

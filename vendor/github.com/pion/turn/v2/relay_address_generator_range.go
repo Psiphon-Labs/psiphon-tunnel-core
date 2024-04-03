@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2023 The Pion community <https://pion.ly>
+// SPDX-License-Identifier: MIT
+
 package turn
 
 import (
@@ -100,6 +103,6 @@ func (r *RelayAddressGeneratorPortRange) AllocatePacketConn(network string, requ
 }
 
 // AllocateConn generates a new Conn to receive traffic on and the IP/Port to populate the allocation response with
-func (r *RelayAddressGeneratorPortRange) AllocateConn(network string, requestedPort int) (net.Conn, net.Addr, error) {
+func (r *RelayAddressGeneratorPortRange) AllocateConn(string, int) (net.Conn, net.Addr, error) {
 	return nil, nil, errTODO
 }

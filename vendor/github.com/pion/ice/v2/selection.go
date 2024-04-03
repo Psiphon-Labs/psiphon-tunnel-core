@@ -51,7 +51,7 @@ func (s *controllingSelector) ContactCandidates() {
 	switch {
 	case s.agent.getSelectedPair() != nil:
 		if s.agent.validateSelectedPair() {
-			s.log.Trace("checking keepalive")
+			s.log.Trace("Checking keepalive")
 			s.agent.checkKeepalive()
 		}
 	case s.nominatedPair != nil:
@@ -87,7 +87,7 @@ func (s *controllingSelector) nominatePair(pair *CandidatePair) {
 		return
 	}
 
-	s.log.Tracef("ping STUN (nominate candidate pair) from %s to %s", pair.Local.String(), pair.Remote.String())
+	s.log.Tracef("Ping STUN (nominate candidate pair) from %s to %s", pair.Local.String(), pair.Remote.String())
 	s.agent.sendBindingRequest(msg, pair.Local, pair.Remote)
 }
 
@@ -130,7 +130,7 @@ func (s *controllingSelector) HandleSuccessResponse(m *stun.Message, local, remo
 		return
 	}
 
-	s.log.Tracef("inbound STUN (SuccessResponse) from %s to %s", remote.String(), local.String())
+	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s", remote.String(), local.String())
 	p := s.agent.findPair(local, remote)
 
 	if p == nil {
@@ -173,7 +173,7 @@ func (s *controlledSelector) Start() {
 func (s *controlledSelector) ContactCandidates() {
 	if s.agent.getSelectedPair() != nil {
 		if s.agent.validateSelectedPair() {
-			s.log.Trace("checking keepalive")
+			s.log.Trace("Checking keepalive")
 			s.agent.checkKeepalive()
 		}
 	} else {
@@ -221,7 +221,7 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 		return
 	}
 
-	s.log.Tracef("inbound STUN (SuccessResponse) from %s to %s", remote.String(), local.String())
+	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s", remote.String(), local.String())
 
 	p := s.agent.findPair(local, remote)
 	if p == nil {
@@ -237,7 +237,7 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 			(selectedPair != p && selectedPair.priority() <= p.priority()) {
 			s.agent.setSelectedPair(p)
 		} else if selectedPair != p {
-			s.log.Tracef("ignore nominate new pair %s, already nominated pair %s", p, selectedPair)
+			s.log.Tracef("Ignore nominate new pair %s, already nominated pair %s", p, selectedPair)
 		}
 	}
 }
@@ -262,7 +262,7 @@ func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote
 				(selectedPair != p && selectedPair.priority() <= p.priority()) {
 				s.agent.setSelectedPair(p)
 			} else if selectedPair != p {
-				s.log.Tracef("ignore nominate new pair %s, already nominated pair %s", p, selectedPair)
+				s.log.Tracef("Ignore nominate new pair %s, already nominated pair %s", p, selectedPair)
 			}
 		} else {
 			// If the received Binding request triggered a new check to be
