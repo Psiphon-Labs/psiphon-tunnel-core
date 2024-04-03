@@ -15,8 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.20.4" ]
-        test-type: [ "detector", "coverage", "memory" ]
+        go: [ "1.21.8" ]
+        test-type: [ "detector", "coverage", "memory", "custom-build-tags" ]
 
     runs-on: ${{ matrix.os }}-latest
 
@@ -32,12 +32,12 @@ jobs:
     steps:
 
       - name: Clone repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
 
       - name: Install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version: ${{ matrix.go }}
 
@@ -95,9 +95,9 @@ jobs:
           go test -v -race ./psiphon/common/values
           go test -v -race ./psiphon/common/wildcard
           go test -v -race ./psiphon/transferstats
-          sudo -E env "PATH=$PATH" go test -v -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 20m -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -race ./psiphon/server/psinet
-          go test -v -race ./psiphon
+          go test -v -timeout 20m -race ./psiphon
           go test -v -race ./ClientLibrary/clientlib
           go test -v -race ./Server/logging/analysis
 
@@ -128,9 +128,9 @@ jobs:
           go test -v -covermode=count -coverprofile=values.coverprofile ./psiphon/common/values
           go test -v -covermode=count -coverprofile=wildcard.coverprofile ./psiphon/common/wildcard
           go test -v -covermode=count -coverprofile=transferstats.coverprofile ./psiphon/transferstats
-          sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 20m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -covermode=count -coverprofile=psinet.coverprofile ./psiphon/server/psinet
-          go test -v -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
+          go test -v -timeout 20m  -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
           go test -v -covermode=count -coverprofile=clientlib.coverprofile ./ClientLibrary/clientlib
           go test -v -covermode=count -coverprofile=analysis.coverprofile ./Server/logging/analysis
           $GOPATH/bin/gover
@@ -142,3 +142,11 @@ jobs:
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
           go test -v ./psiphon/memory_test -run TestReconnectTunnel
           go test -v ./psiphon/memory_test -run TestRestartController
+
+      - name: Compile with custom build tags
+        if: ${{ matrix.test-type == 'custom-build-tags' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient
+          go build -a -v -tags "PSIPHON_DISABLE_QUIC"
+          go build -a -v -tags "PSIPHON_DISABLE_GQUIC"
+          go build -a -v -tags "PSIPHON_ENABLE_REFRACTION_NETWORKING"

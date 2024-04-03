@@ -201,6 +201,26 @@ func TestObfuscatedSSH(t *testing.T) {
 		})
 }
 
+func TestTLS(t *testing.T) {
+
+	t.Skipf("temporarily disabled")
+
+	controllerRun(t,
+		&controllerRunConfig{
+			expectNoServerEntries:    false,
+			protocol:                 protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
+			clientIsLatestVersion:    false,
+			disableUntunneledUpgrade: true,
+			disableEstablishing:      false,
+			disableApi:               false,
+			tunnelPoolSize:           1,
+			useUpstreamProxy:         false,
+			disruptNetwork:           false,
+			transformHostNames:       false,
+			useFragmentor:            false,
+		})
+}
+
 func TestUnfrontedMeek(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
@@ -521,6 +541,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		modifyConfig["LimitTunnelProtocols"] = protocol.TunnelProtocols{runConfig.protocol}
 	}
 
+	modifyConfig["EnableUpgradeDownload"] = true
+	modifyConfig["EnableFeedbackUpload"] = false
+
 	// Override client retry throttle values to speed up automated
 	// tests and ensure tests complete within fixed deadlines.
 	modifyConfig["FetchRemoteServerListRetryPeriodMilliseconds"] = 250
@@ -528,7 +551,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	modifyConfig["EstablishTunnelPausePeriodSeconds"] = 1
 
 	if runConfig.disableUntunneledUpgrade {
-		// Disable untunneled upgrade downloader to ensure tunneled case is tested
+		// Break untunneled upgrade downloader to ensure tunneled case is tested
 		modifyConfig["UpgradeDownloadClientVersionHeader"] = "invalid-value"
 	}
 

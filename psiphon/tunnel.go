@@ -689,6 +689,12 @@ func dialTunnel(
 	burstUpstreamDeadline := p.Duration(parameters.ClientBurstUpstreamDeadline)
 	burstDownstreamTargetBytes := int64(p.Int(parameters.ClientBurstDownstreamTargetBytes))
 	burstDownstreamDeadline := p.Duration(parameters.ClientBurstDownstreamDeadline)
+	tlsOSSHApplyTrafficShaping := p.WeightedCoinFlip(parameters.TLSTunnelTrafficShapingProbability)
+	tlsOSSHMinTLSPadding := p.Int(parameters.TLSTunnelMinTLSPadding)
+	tlsOSSHMaxTLSPadding := p.Int(parameters.TLSTunnelMaxTLSPadding)
+	conjureEnableIPv6Dials := p.Bool(parameters.ConjureEnableIPv6Dials)
+	conjureEnablePortRandomization := p.Bool(parameters.ConjureEnablePortRandomization)
+	conjureEnableRegistrationOverrides := p.Bool(parameters.ConjureEnableRegistrationOverrides)
 	p.Close()
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
@@ -746,7 +752,20 @@ func dialTunnel(
 
 	var dialConn net.Conn
 
-	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
+	if protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) {
+
+		dialConn, err = DialTLSTunnel(
+			ctx,
+			dialParams.GetTLSOSSHConfig(config),
+			dialParams.GetDialConfig(),
+			tlsOSSHApplyTrafficShaping,
+			tlsOSSHMinTLSPadding,
+			tlsOSSHMaxTLSPadding)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	} else if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
 		dialConn, err = DialMeek(
 			ctx,
@@ -759,9 +778,7 @@ func dialTunnel(
 	} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
 		packetConn, remoteAddr, err := NewUDPConn(
-			ctx,
-			dialParams.DirectDialAddress,
-			dialParams.GetDialConfig())
+			ctx, "udp", false, "", dialParams.DirectDialAddress, dialParams.GetDialConfig())
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -787,7 +804,7 @@ func dialTunnel(
 			ctx,
 			config.EmitRefractionNetworkingLogs,
 			config.GetPsiphonDataDirectory(),
-			NewNetDialer(dialParams.GetDialConfig()),
+			NewRefractionNetworkingDialer(dialParams.GetDialConfig()).DialContext,
 			dialParams.DirectDialAddress)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -818,11 +835,16 @@ func dialTunnel(
 		cacheKey := dialParams.NetworkID + "-" + diagnosticID
 
 		conjureConfig := &refraction.ConjureConfig{
-			RegistrationCacheTTL: dialParams.ConjureCachedRegistrationTTL,
-			RegistrationCacheKey: cacheKey,
-			Transport:            dialParams.ConjureTransport,
-			DiagnosticID:         diagnosticID,
-			Logger:               NoticeCommonLogger(),
+			RegistrationCacheTTL:        dialParams.ConjureCachedRegistrationTTL,
+			RegistrationCacheKey:        cacheKey,
+			EnableIPv6Dials:             conjureEnableIPv6Dials,
+			EnablePortRandomization:     conjureEnablePortRandomization,
+			EnableRegistrationOverrides: conjureEnableRegistrationOverrides,
+			Transport:                   dialParams.ConjureTransport,
+			STUNServerAddress:           dialParams.ConjureSTUNServerAddress,
+			DTLSEmptyInitialPacket:      dialParams.ConjureDTLSEmptyInitialPacket,
+			DiagnosticID:                diagnosticID,
+			Logger:                      NoticeCommonLogger(),
 		}
 
 		// Set extraFailureAction, which is invoked whenever the tunnel fails (i.e.,
@@ -912,8 +934,7 @@ func dialTunnel(
 			// the decoy registrar connection, like Tapdance, is not, so force it off.
 			// Any tunnel fragmentation metrics will refer to the "phantom" connection
 			// only.
-			conjureConfig.DecoyRegistrarDialer = NewNetDialer(
-				dialParams.GetDialConfig().WithoutFragmentor())
+			conjureConfig.DoDecoyRegistration = true
 			conjureConfig.DecoyRegistrarWidth = dialParams.ConjureDecoyRegistrarWidth
 			conjureConfig.DecoyRegistrarDelay = dialParams.ConjureDecoyRegistrarDelay
 		}
@@ -922,7 +943,7 @@ func dialTunnel(
 			ctx,
 			config.EmitRefractionNetworkingLogs,
 			config.GetPsiphonDataDirectory(),
-			NewNetDialer(dialParams.GetDialConfig()),
+			NewRefractionNetworkingDialer(dialParams.GetDialConfig()).DialContext,
 			dialParams.DirectDialAddress,
 			conjureConfig)
 		if err != nil {
@@ -983,6 +1004,8 @@ func dialTunnel(
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatorPaddingSeed,
 			dialParams.OSSHObfuscatorSeedTransformerParameters,
+			dialParams.OSSHPrefixSpec,
+			dialParams.OSSHPrefixSplitConfig,
 			&obfuscatedSSHMinPadding,
 			&obfuscatedSSHMaxPadding)
 		if err != nil {

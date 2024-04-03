@@ -21,28 +21,60 @@ package psiphon
 
 import (
 	"context"
-	"math/rand"
 	"net"
 	"strconv"
 	"syscall"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
-// NewUDPConn resolves addr and configures a new *net.UDPConn. The UDP socket
+// NewUDPConn resolves raddr and configures a new *net.UDPConn. The UDP socket
 // is created using options in DialConfig, including DeviceBinder. The
 // returned UDPAddr uses DialConfig options IPv6Synthesizer and
 // ResolvedIPCallback.
 //
-// The UDP conn is not dialed; it is intended for use with WriteTo using the
-// returned UDPAddr, not Write.
+// The network input may be "udp", "udp4", or "udp6". When "udp4" or "udp6" is
+// specified, the raddr host IP address or resolved domain addresses must
+// include IP address of the corresponding type.
+//
+// If laddr is specified, the UDP socket is bound to that local address. Any
+// laddr host must be an IP address.
+//
+// If useDial is specified, the UDP socket is "connected" to the raddr remote
+// address; otherwise the UDP socket is "unconnected", and each write
+// (WriteTo) can specify an arbitrary remote address.
+//
+// The caller should wrap the returned conn with common.WriteTimeoutUDPConn,
+// as appropriate.
 //
 // The returned conn is not a common.Closer; the caller is expected to wrap
 // this conn with another higher-level conn that provides that interface.
 func NewUDPConn(
-	ctx context.Context, addr string, config *DialConfig) (net.PacketConn, *net.UDPAddr, error) {
+	ctx context.Context,
+	network string,
+	dial bool,
+	laddr string,
+	raddr string,
+	config *DialConfig) (*net.UDPConn, *net.UDPAddr, error) {
 
-	host, strPort, err := net.SplitHostPort(addr)
+	switch network {
+	case "udp", "udp4", "udp6":
+	default:
+		return nil, nil, errors.TraceNew("invalid network")
+	}
+
+	if laddr != "" {
+		localHost, _, err := net.SplitHostPort(laddr)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+		if net.ParseIP(localHost) == nil {
+			return nil, nil, errors.TraceNew("invalid local address")
+		}
+	}
+
+	host, strPort, err := net.SplitHostPort(raddr)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
@@ -68,7 +100,37 @@ func NewUDPConn(
 		return nil, nil, errors.TraceNew("no IP address")
 	}
 
-	ipAddr := ipAddrs[rand.Intn(len(ipAddrs))]
+	var ipAddr net.IP
+
+	if network == "udp" {
+
+		// Pick any IP address, IPv4 or IPv6.
+
+		ipAddr = ipAddrs[prng.Intn(len(ipAddrs))]
+
+		network = "udp4"
+		if ipAddr.To4() == nil {
+			network = "udp6"
+		}
+
+	} else {
+
+		// "udp4" or "udp6" was specified, so pick from either IPv4 or IPv6
+		//  candidates.
+
+		prng.Shuffle(len(ipAddrs), func(i, j int) {
+			ipAddrs[i], ipAddrs[j] = ipAddrs[j], ipAddrs[i]
+		})
+		for _, nextIPAddr := range ipAddrs {
+			if (network == "udp6") == (nextIPAddr.To4() == nil) {
+				ipAddr = nextIPAddr
+				break
+			}
+		}
+		if ipAddr == nil {
+			return nil, nil, errors.TraceNew("no IP address for network")
+		}
+	}
 
 	if config.IPv6Synthesizer != nil {
 		if ipAddr.To4() != nil {
@@ -82,66 +144,110 @@ func NewUDPConn(
 		}
 	}
 
-	listen := &net.ListenConfig{
-		Control: func(_, _ string, c syscall.RawConn) error {
-			var controlErr error
-			err := c.Control(func(fd uintptr) {
+	controlFunc := func(_, _ string, c syscall.RawConn) error {
+		var controlErr error
+		err := c.Control(func(fd uintptr) {
 
-				socketFD := int(fd)
+			socketFD := int(fd)
 
-				setAdditionalSocketOptions(socketFD)
+			setAdditionalSocketOptions(socketFD)
 
-				if config.BPFProgramInstructions != nil {
-					err := setSocketBPF(config.BPFProgramInstructions, socketFD)
-					if err != nil {
-						controlErr = errors.Tracef("setSocketBPF failed: %s", err)
-						return
-					}
+			if config.BPFProgramInstructions != nil {
+				err := setSocketBPF(config.BPFProgramInstructions, socketFD)
+				if err != nil {
+					controlErr = errors.Tracef("setSocketBPF failed: %s", err)
+					return
 				}
-
-				if config.DeviceBinder != nil {
-					_, err := config.DeviceBinder.BindToDevice(socketFD)
-					if err != nil {
-						controlErr = errors.Tracef("BindToDevice failed: %s", err)
-						return
-					}
-				}
-			})
-			if controlErr != nil {
-				return errors.Trace(controlErr)
 			}
-			return errors.Trace(err)
-		},
+
+			if config.DeviceBinder != nil {
+				_, err := config.DeviceBinder.BindToDevice(socketFD)
+				if err != nil {
+					controlErr = errors.Tracef("BindToDevice failed: %s", err)
+					return
+				}
+			}
+		})
+		if controlErr != nil {
+			return errors.Trace(controlErr)
+		}
+		return errors.Trace(err)
 	}
 
-	network := "udp4"
-	if ipAddr.To4() == nil {
-		network = "udp6"
-	}
+	var udpConn *net.UDPConn
 
-	// It's necessary to create an "unconnected" UDP socket, for use with
-	// WriteTo, as required by quic-go. As documented in net.ListenUDP: with
-	// an unspecified IP address, the resulting conn "listens on all
-	// available IP addresses of the local system except multicast IP
-	// addresses".
-	//
-	// Limitation: these UDP sockets are not necessarily closed when a device
-	// changes active network (e.g., WiFi to mobile). It's possible that a
-	// QUIC connection does not immediately close on a network change, and
-	// instead outbound packets are sent from a different active interface.
-	// As quic-go does not yet support connection migration, these packets
-	// will be dropped by the server. This situation is mitigated by use of
-	// DeviceBinder; by network change event detection, which initiates new
-	// tunnel connections; and by timeouts/keep-alives.
+	if dial {
 
-	conn, err := listen.ListenPacket(ctx, network, "")
-	if err != nil {
-		return nil, nil, errors.Trace(err)
-	}
+		// Create a "connected" UDP socket, which is associated with a fixed
+		// remote address. Writes will always send to that address.
+		//
+		// This mode is required for the Conjure DTLS transport.
+		//
+		// Unlike non-dial mode, the UDP socket doesn't listen on all local
+		// IPs, and LocalAddr will return an address with a specific IP address.
 
-	udpConn, ok := conn.(*net.UDPConn)
-	if !ok {
-		return nil, nil, errors.Tracef("unexpected conn type: %T", conn)
+		var addr net.Addr
+		if laddr != "" {
+
+			// ResolveUDPAddr won't resolve a domain here -- there's a check
+			// above that the host in laddr must be an IP address.
+			addr, err = net.ResolveUDPAddr(network, laddr)
+			if err != nil {
+				return nil, nil, errors.Trace(err)
+			}
+		}
+
+		dialer := &net.Dialer{
+			Control:   controlFunc,
+			LocalAddr: addr,
+		}
+
+		conn, err := dialer.DialContext(
+			ctx, network, net.JoinHostPort(ipAddr.String(), strPort))
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+
+		var ok bool
+		udpConn, ok = conn.(*net.UDPConn)
+		if !ok {
+			return nil, nil, errors.Tracef("unexpected conn type: %T", conn)
+		}
+
+	} else {
+
+		// Create an "unconnected" UDP socket, which can be used with WriteTo,
+		// which specifies a remote address per write.
+		//
+		// This mode is required by quic-go.
+		//
+		// As documented in net.ListenUDP: with an unspecified IP address, the
+		// resulting conn "listens on all available IP addresses of the local
+		// system except multicast IP addresses".
+		//
+		// Limitation: these UDP sockets are not necessarily closed when a device
+		// changes active network (e.g., WiFi to mobile). It's possible that a
+		// QUIC connection does not immediately close on a network change, and
+		// instead outbound packets are sent from a different active interface.
+		// As quic-go does not yet support connection migration, these packets
+		// will be dropped by the server. This situation is mitigated by use of
+		// DeviceBinder; by network change event detection, which initiates new
+		// tunnel connections; and by timeouts/keep-alives.
+
+		listen := &net.ListenConfig{
+			Control: controlFunc,
+		}
+
+		conn, err := listen.ListenPacket(ctx, network, laddr)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
+
+		var ok bool
+		udpConn, ok = conn.(*net.UDPConn)
+		if !ok {
+			return nil, nil, errors.Tracef("unexpected conn type: %T", conn)
+		}
 	}
 
 	if config.ResolvedIPCallback != nil {

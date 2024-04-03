@@ -34,6 +34,7 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -62,7 +63,9 @@ type ServerEntry struct {
 	SshObfuscatedKey                    string   `json:"sshObfuscatedKey"`
 	Capabilities                        []string `json:"capabilities"`
 	Region                              string   `json:"region"`
+	ProviderID                          string   `json:"providerID"`
 	FrontingProviderID                  string   `json:"frontingProviderID"`
+	TlsOSSHPort                         int      `json:"tlsOSSHPort"`
 	MeekServerPort                      int      `json:"meekServerPort"`
 	MeekCookieEncryptionPublicKey       string   `json:"meekCookieEncryptionPublicKey"`
 	MeekObfuscatedKey                   string   `json:"meekObfuscatedKey"`
@@ -79,6 +82,7 @@ type ServerEntry struct {
 	DisableHTTPTransforms               bool     `json:"disableHTTPTransforms"`
 	DisableObfuscatedQUICTransforms     bool     `json:"disableObfuscatedQUICTransforms"`
 	DisableOSSHTransforms               bool     `json:"disableOSSHTransforms"`
+	DisableOSSHPrefix                   bool     `json:"disableOSSHPrefix"`
 	InProxySessionPublicKey             string   `json:"inProxySessionPublicKey"`
 	InProxySessionRootObfuscationSecret string   `json:"inProxySessionRootObfuscationSecret"`
 
@@ -468,6 +472,8 @@ func GetTacticsCapability(protocol string) string {
 func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 	for _, capability := range serverEntry.Capabilities {
 
+		originalCapability := capability
+
 		capability = strings.ReplaceAll(capability, "-PASSTHROUGH-v2", "")
 		capability = strings.ReplaceAll(capability, "-PASSTHROUGH", "")
 
@@ -477,6 +483,30 @@ func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 		}
 
 		if capability == requiredCapability {
+			return true
+		}
+
+		// Special case: some capabilities may additionally support TLS-OSSH.
+		if requiredCapability == GetCapability(TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH) && capabilitySupportsTLSOSSH(originalCapability) {
+			return true
+		}
+	}
+	return false
+}
+
+// capabilitySupportsTLSOSSH returns true if and only if the given capability
+// supports TLS-OSSH in addition to its primary protocol.
+func capabilitySupportsTLSOSSH(capability string) bool {
+
+	tlsCapabilities := []string{
+		GetCapability(TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS),
+		GetCapability(TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET),
+	}
+
+	for _, tlsCapability := range tlsCapabilities {
+		// The TLS capability is additionally supported by UNFRONTED-MEEK-HTTPS
+		// and UNFRONTED-MEEK-SESSION-TICKET capabilities with passthrough.
+		if capability == tlsCapability+"-PASSTHROUGH-v2" {
 			return true
 		}
 	}
@@ -541,6 +571,10 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 	for _, tunnelProtocol := range SupportedTunnelProtocols {
 
 		if useUpstreamProxy && !TunnelProtocolSupportsUpstreamProxy(tunnelProtocol) {
+			continue
+		}
+
+		if common.Contains(DisabledTunnelProtocols, tunnelProtocol) {
 			continue
 		}
 
@@ -619,6 +653,15 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 
 	switch tunnelProtocol {
 
+	case TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
+		if serverEntry.TlsOSSHPort == 0 {
+			// Special case: a server which supports UNFRONTED-MEEK-HTTPS-OSSH
+			// or UNFRONTED-MEEK-SESSION-TICKET-OSSH also supports TLS-OSSH
+			// over the same port.
+			return serverEntry.MeekServerPort, nil
+		}
+		return serverEntry.TlsOSSHPort, nil
+
 	case TUNNEL_PROTOCOL_SSH:
 		return serverEntry.SshPort, nil
 
@@ -636,7 +679,7 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 
 	case TUNNEL_PROTOCOL_FRONTED_MEEK,
 		TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH:
-		return 443, nil
+		return int(atomic.LoadInt32(&frontedMeekHTTPSDialPortNumber)), nil
 
 	case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
 		return 80, nil
@@ -648,6 +691,15 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 	}
 
 	return 0, errors.TraceNew("unknown protocol")
+}
+
+var frontedMeekHTTPSDialPortNumber = int32(443)
+
+// SetFrontedMeekHTTPDialPortNumber sets the FRONTED-MEEK-OSSH dial port
+// number, which defaults to 443. Overriding the port number enables running
+// test servers where binding to port 443 is not possible.
+func SetFrontedMeekHTTPDialPortNumber(port int) {
+	atomic.StoreInt32(&frontedMeekHTTPSDialPortNumber, int32(port))
 }
 
 // IsValidDialAddress indicates whether the dial destination network/host/port
@@ -779,6 +831,10 @@ func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
 
 func (serverEntry *ServerEntry) HasSignature() bool {
 	return serverEntry.Signature != ""
+}
+
+func (serverEntry *ServerEntry) HasProviderID() bool {
+	return serverEntry.ProviderID != ""
 }
 
 func (serverEntry *ServerEntry) GetDiagnosticID() string {

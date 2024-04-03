@@ -20,6 +20,8 @@
 package refraction
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"time"
 
@@ -67,10 +69,10 @@ type ConjureConfig struct {
 	// should be synchronized with the Conjure station configuration.
 	APIRegistrarDelay time.Duration
 
-	// DecoyRegistrarDialer specifies a custom dialer to be used for decoy
-	// registration. Only one of API registration or decoy registration can be
-	// enabled for a single dial.
-	DecoyRegistrarDialer common.NetDialer
+	// DoDecoyRegistration indicates to use decoy registration instead of API
+	// registration. Only one of API registration or decoy registration can
+	// be enabled for a single dial.
+	DoDecoyRegistration bool
 
 	// DecoyRegistrarWidth specifies how many decoys to use per registration.
 	DecoyRegistrarWidth int
@@ -83,9 +85,32 @@ type ConjureConfig struct {
 	// ignored.
 	DecoyRegistrarDelay time.Duration
 
-	// Transport may be protocol.CONJURE_TRANSPORT_MIN_OSSH or
-	// protocol.CONJURE_TRANSPORT_OBFS4_OSSH.
+	// EnableIPv6Dials specifies whether to attempt to dial an IPv6 phantom in
+	// addition to and concurrent with an IPv4 phantom dial.
+	EnableIPv6Dials bool
+
+	// EnablePortRandomization specifies whether to enable destination port
+	// randomization.
+	EnablePortRandomization bool
+
+	// EnableRegistrationOverrides specifies whether to allow the Conjure
+	// system to provide parameter overrides, such as alternative prefixes,
+	// in the registration response.
+	EnableRegistrationOverrides bool
+
+	// Transport may be protocol.CONJURE_TRANSPORT_MIN_OSSH,
+	// protocol.CONJURE_TRANSPORT_PREFIX_OSSH, or
+	// protocol.CONJURE_TRANSPORT_DTLS_OSSH.
 	Transport string
+
+	// STUNServerAddress specifies the STUN server to use with
+	// protcol.CONJURE_TRANSPORT_DTLS_OSSH.
+	STUNServerAddress string
+
+	// DTLSEmptyInitialPacket specifies whether to prefix the DTLS flow with
+	// an initial empty packet. Used only for
+	// protocol.CONJURE_TRANSPORT_DTLS_OSSH.
+	DTLSEmptyInitialPacket bool
 
 	// DiagnosticID identifies this dial in diagnostics.
 	DiagnosticID string
@@ -93,3 +118,6 @@ type ConjureConfig struct {
 	// Logger is used for logging diagnostics.
 	Logger common.Logger
 }
+
+// Dialer is the dialer function type expected by gotapdance.
+type Dialer func(ctx context.Context, network, laddr, raddr string) (net.Conn, error)

@@ -43,7 +43,6 @@ package quic
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -54,6 +53,7 @@ import (
 	"syscall"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
@@ -69,7 +69,6 @@ const (
 	SERVER_HANDSHAKE_TIMEOUT = 30 * time.Second
 	SERVER_IDLE_TIMEOUT      = 5 * time.Minute
 	CLIENT_IDLE_TIMEOUT      = 30 * time.Second
-	UDP_PACKET_WRITE_TIMEOUT = 1 * time.Second
 )
 
 // Enabled indicates if QUIC functionality is enabled.
@@ -173,6 +172,13 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
+	// Note that WriteTimeoutUDPConn is not used here in the server case, as
+	// the server UDP conn will have many concurrent writers, and each
+	// SetWriteDeadline call by WriteTimeoutUDPConn would extend the deadline
+	// for all existing blocked writers. ObfuscatedPacketConn.Close calls
+	// SetWriteDeadline once to interrupt any blocked writers to ensure a
+	// timely shutdown.
+
 	obfuscatedPacketConn, err := NewServerObfuscatedPacketConn(
 		udpConn, true, false, false, obfuscationKey, seed)
 	if err != nil {
@@ -240,14 +246,18 @@ func Listen(
 		tlsConfig, ietfQUICConfig := makeIETFConfig(
 			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate)
 
-		listener, err := ietf_quic.Listen(
-			obfuscatedPacketConn, tlsConfig, ietfQUICConfig)
+		tr := newIETFTransport(obfuscatedPacketConn)
+
+		listener, err := tr.Listen(tlsConfig, ietfQUICConfig)
 		if err != nil {
 			obfuscatedPacketConn.Close()
 			return nil, errors.Trace(err)
 		}
 
-		quicListener = &ietfQUICListener{Listener: listener}
+		quicListener = &ietfQUICListener{
+			Listener:  listener,
+			transport: tr,
+		}
 
 	} else {
 
@@ -289,6 +299,17 @@ func makeIETFConfig(
 		// TODO: add jitter to keep alive period
 		KeepAlivePeriod: CLIENT_IDLE_TIMEOUT / 2,
 
+		VerifyClientHelloRandom:       verifyClientHelloRandom,
+		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
+	}
+
+	return tlsConfig, ietfQUICConfig
+}
+
+func newIETFTransport(conn net.PacketConn) *ietf_quic.Transport {
+	return &ietf_quic.Transport{
+		Conn: conn,
+
 		// The quic-go server may respond with a version negotiation packet
 		// before reaching the Initial packet processing with its
 		// anti-probing defense. This may happen even for a malformed packet.
@@ -304,12 +325,7 @@ func makeIETFConfig(
 		// the Initial/Client Hello, and then issue any required version
 		// negotiation packet.
 		DisableVersionNegotiationPackets: true,
-
-		VerifyClientHelloRandom:       verifyClientHelloRandom,
-		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
 	}
-
-	return tlsConfig, ietfQUICConfig
 }
 
 // Accept returns a net.Conn that wraps a single QUIC connection and stream.
@@ -330,12 +346,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 }
 
 func (listener *Listener) Close() error {
-
-	// First close the underlying packet conn to ensure all quic-go goroutines
-	// as well as any blocking Accept call goroutine is interrupted. Note
-	// that muxListener does this as well, so this is for the IETF-only case.
 	_ = listener.obfuscatedPacketConn.Close()
-
 	return listener.quicListener.Close()
 }
 
@@ -401,8 +412,9 @@ func Dial(
 		// see ObfuscatedPacketConn.writePacket for the server-side
 		// downstream limitation.
 
-		// Ensure blocked packet writes eventually timeout.
-		packetConn = &writeTimeoutPacketConn{
+		// Ensure blocked packet writes eventually timeout. Note that quic-go
+		// manages read deadlines; we set only the write deadline here.
+		packetConn = &common.WriteTimeoutPacketConn{
 			PacketConn: packetConn,
 		}
 
@@ -415,7 +427,7 @@ func Dial(
 	} else {
 
 		// Ensure blocked packet writes eventually timeout.
-		packetConn = &writeTimeoutUDPConn{
+		packetConn = &common.WriteTimeoutUDPConn{
 			UDPConn: udpConn,
 		}
 	}
@@ -525,83 +537,6 @@ func Dial(
 	}
 
 	return conn, nil
-}
-
-// writeTimeoutUDPConn sets write deadlines before each UDP packet write.
-//
-// Generally, a UDP packet write doesn't block. However, Go's
-// internal/poll.FD.WriteMsg continues to loop when syscall.SendmsgN fails
-// with EAGAIN, which indicates that an OS socket buffer is currently full;
-// in certain OS states this may cause WriteMsgUDP/etc. to block
-// indefinitely. In this scenario, we want to instead behave as if the packet
-// were dropped, so we set a write deadline which will eventually interrupt
-// any EAGAIN loop.
-//
-// Note that quic-go manages read deadlines; we set only the write deadline
-// here.
-type writeTimeoutUDPConn struct {
-	*net.UDPConn
-}
-
-func (conn *writeTimeoutUDPConn) Write(b []byte) (int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.UDPConn.Write(b)
-}
-
-func (conn *writeTimeoutUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (int, int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.UDPConn.WriteMsgUDP(b, oob, addr)
-}
-
-func (conn *writeTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.UDPConn.WriteTo(b, addr)
-}
-
-func (conn *writeTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.UDPConn.WriteToUDP(b, addr)
-}
-
-// writeTimeoutPacketConn is the equivilent of writeTimeoutUDPConn for
-// non-*net.UDPConns.
-type writeTimeoutPacketConn struct {
-	net.PacketConn
-}
-
-func (conn *writeTimeoutPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-
-	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
-	if err != nil {
-		return 0, errors.Trace(err)
-	}
-
-	// Do not wrap any I/O err returned by udpConn
-	return conn.PacketConn.WriteTo(b, addr)
 }
 
 // Conn is a net.Conn and psiphon/common.Closer.
@@ -884,8 +819,9 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 		return nil, errors.Tracef("unexpected packetConn type: %T", packetConn)
 	}
 
-	// Ensure blocked packet writes eventually timeout.
-	packetConn = &writeTimeoutUDPConn{
+	// Ensure blocked packet writes eventually timeout. Note that quic-go
+	// manages read deadlines; we set only the write deadline here.
+	packetConn = &common.WriteTimeoutUDPConn{
 		UDPConn: udpConn,
 	}
 
@@ -968,7 +904,8 @@ type quicRoundTripper interface {
 }
 
 type ietfQUICListener struct {
-	ietf_quic.Listener
+	*ietf_quic.Listener
+	transport *ietf_quic.Transport
 }
 
 func (l *ietfQUICListener) Accept() (quicConnection, error) {
@@ -979,6 +916,12 @@ func (l *ietfQUICListener) Accept() (quicConnection, error) {
 		return nil, errors.Trace(err)
 	}
 	return &ietfQUICConnection{Connection: connection}, nil
+}
+
+func (l *ietfQUICListener) Close() error {
+	// All quic-go goroutines will be stopped when the transport is closed.
+	// https://github.com/quic-go/quic-go/issues/3962
+	return l.transport.Close()
 }
 
 type ietfQUICConnection struct {
@@ -1049,27 +992,32 @@ func dialQUIC(
 			quicConfig.HandshakeIdleTimeout = time.Until(deadline)
 		}
 
+		// Legacy replay values might include a port. If so, strip it.
+		// This was a requirement of legacy quic-go API, but is no longer required.
+		sni, _, err := net.SplitHostPort(quicSNIAddress)
+		if err != nil {
+			sni = quicSNIAddress
+		}
+
 		var dialConnection ietf_quic.Connection
-		var err error
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
 			NextProtos:         []string{getALPN(versionNumber)},
+			ServerName:         sni,
 		}
 
 		if dialEarly {
-			dialConnection, err = ietf_quic.DialEarlyContext(
+			dialConnection, err = ietf_quic.DialEarly(
 				ctx,
 				packetConn,
 				remoteAddr,
-				quicSNIAddress,
 				tlsConfig,
 				quicConfig)
 		} else {
-			dialConnection, err = ietf_quic.DialContext(
+			dialConnection, err = ietf_quic.Dial(
 				ctx,
 				packetConn,
 				remoteAddr,
-				quicSNIAddress,
 				tlsConfig,
 				quicConfig)
 		}
@@ -1169,10 +1117,10 @@ func (conn *muxPacketConn) SetWriteDeadline(t time.Time) error {
 	return errors.TraceNew("not supported")
 }
 
-// SetReadBuffer and SyscallConn provide passthroughs to the underlying
-// net.UDPConn implementations, used to optimize the UDP receive buffer size.
+// SetReadBuffer, SetWriteBuffer, and SyscallConn provide passthroughs to the
+// underlying net.UDPConn implementations, used to optimize UDP buffer sizes.
 // See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
-// and ietf_quic.setReceiveBuffer. Only the IETF stack will access these
+// and ietf_quic.setReceive/SendBuffer. Only the IETF stack will access these
 // functions.
 //
 // Limitation: due to the relayPackets/ReadFrom scheme, this simple
@@ -1187,6 +1135,16 @@ func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
 		return errors.TraceNew("not supported")
 	}
 	return c.SetReadBuffer(bytes)
+}
+
+func (conn *muxPacketConn) SetWriteBuffer(bytes int) error {
+	c, ok := conn.listener.conn.PacketConn.(interface {
+		SetWriteBuffer(int) error
+	})
+	if !ok {
+		return errors.TraceNew("not supported")
+	}
+	return c.SetWriteBuffer(bytes)
 }
 
 func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {
@@ -1240,11 +1198,15 @@ func newMuxListener(
 	tlsConfig, ietfQUICConfig := makeIETFConfig(
 		conn, verifyClientHelloRandom, tlsCertificate)
 
-	il, err := ietf_quic.Listen(listener.ietfQUICConn, tlsConfig, ietfQUICConfig)
+	tr := newIETFTransport(listener.ietfQUICConn)
+	il, err := tr.Listen(tlsConfig, ietfQUICConfig)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	listener.ietfQUICListener = &ietfQUICListener{Listener: il}
+	listener.ietfQUICListener = &ietfQUICListener{
+		Listener:  il,
+		transport: tr,
+	}
 
 	listener.gQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 

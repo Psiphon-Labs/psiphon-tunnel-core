@@ -21,11 +21,13 @@ package obfuscator
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	std_errors "errors"
 	"io"
 	"io/ioutil"
 	"net"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -57,10 +59,11 @@ const (
 // WARNING: doesn't fully conform to net.Conn concurrency semantics: there's
 // no synchronization of access to the read/writeBuffers, so concurrent
 // calls to one of Read or Write will result in undefined behavior.
-//
 type ObfuscatedSSHConn struct {
 	net.Conn
 	mode            ObfuscatedSSHConnMode
+	runCtx          context.Context
+	stopRunning     context.CancelFunc
 	obfuscator      *Obfuscator
 	readDeobfuscate func([]byte)
 	writeObfuscate  func([]byte)
@@ -84,7 +87,8 @@ const (
 type ObfuscatedSSHReadState int
 
 const (
-	OBFUSCATION_READ_STATE_IDENTIFICATION_LINES = iota
+	OBFUSCATION_READ_STATE_CLIENT_READ_PREFIX = iota
+	OBFUSCATION_READ_STATE_IDENTIFICATION_LINES
 	OBFUSCATION_READ_STATE_KEX_PACKETS
 	OBFUSCATION_READ_STATE_FLUSH
 	OBFUSCATION_READ_STATE_FINISHED
@@ -93,8 +97,8 @@ const (
 type ObfuscatedSSHWriteState int
 
 const (
-	OBFUSCATION_WRITE_STATE_CLIENT_SEND_SEED_MESSAGE = iota
-	OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING
+	OBFUSCATION_WRITE_STATE_CLIENT_SEND_PREAMBLE = iota
+	OBFUSCATION_WRITE_STATE_SERVER_SEND_PREFIX_AND_IDENTIFICATION_LINE_PADDING
 	OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE
 	OBFUSCATION_WRITE_STATE_KEX_PACKETS
 	OBFUSCATION_WRITE_STATE_FINISHED
@@ -127,6 +131,9 @@ func NewObfuscatedSSHConn(
 	obfuscationKeyword string,
 	obfuscationPaddingPRNGSeed *prng.Seed,
 	obfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
+	clientPrefixSpec *OSSHPrefixSpec,
+	serverPrefixSepcs transforms.Specs,
+	osshPrefixSplitConfig *OSSHPrefixSplitConfig,
 	minPadding, maxPadding *int,
 	seedHistory *SeedHistory,
 	irregularLogger func(
@@ -139,11 +146,17 @@ func NewObfuscatedSSHConn(
 	var readDeobfuscate, writeObfuscate func([]byte)
 	var writeState ObfuscatedSSHWriteState
 
+	conn = WrapConnWithSkipReader(conn)
+
+	readState := ObfuscatedSSHReadState(OBFUSCATION_READ_STATE_IDENTIFICATION_LINES)
+
 	if mode == OBFUSCATION_CONN_MODE_CLIENT {
 		obfuscator, err = NewClientObfuscator(
 			&ObfuscatorConfig{
 				IsOSSH:                              true,
 				Keyword:                             obfuscationKeyword,
+				ClientPrefixSpec:                    clientPrefixSpec,
+				OSSHPrefixSplitConfig:               osshPrefixSplitConfig,
 				PaddingPRNGSeed:                     obfuscationPaddingPRNGSeed,
 				MinPadding:                          minPadding,
 				MaxPadding:                          maxPadding,
@@ -154,14 +167,21 @@ func NewObfuscatedSSHConn(
 		}
 		readDeobfuscate = obfuscator.ObfuscateServerToClient
 		writeObfuscate = obfuscator.ObfuscateClientToServer
-		writeState = OBFUSCATION_WRITE_STATE_CLIENT_SEND_SEED_MESSAGE
+		writeState = OBFUSCATION_WRITE_STATE_CLIENT_SEND_PREAMBLE
+
+		if obfuscator.osshPrefixHeader != nil {
+			// Client expects prefix with terminator from the server.
+			readState = OBFUSCATION_READ_STATE_CLIENT_READ_PREFIX
+		}
+
 	} else {
 		// NewServerObfuscator reads a seed message from conn
 		obfuscator, err = NewServerObfuscator(
 			&ObfuscatorConfig{
-				Keyword:         obfuscationKeyword,
-				SeedHistory:     seedHistory,
-				IrregularLogger: irregularLogger,
+				Keyword:           obfuscationKeyword,
+				ServerPrefixSpecs: serverPrefixSepcs,
+				SeedHistory:       seedHistory,
+				IrregularLogger:   irregularLogger,
 			},
 			common.IPAddressFromAddr(conn.RemoteAddr()),
 			conn)
@@ -178,7 +198,7 @@ func NewObfuscatedSSHConn(
 		}
 		readDeobfuscate = obfuscator.ObfuscateClientToServer
 		writeObfuscate = obfuscator.ObfuscateServerToClient
-		writeState = OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING
+		writeState = OBFUSCATION_WRITE_STATE_SERVER_SEND_PREFIX_AND_IDENTIFICATION_LINE_PADDING
 	}
 
 	paddingPRNG, err := obfuscator.GetDerivedPRNG("obfuscated-ssh-padding")
@@ -186,13 +206,17 @@ func NewObfuscatedSSHConn(
 		return nil, errors.Trace(err)
 	}
 
+	runCtx, stopRunning := context.WithCancel(context.Background())
+
 	return &ObfuscatedSSHConn{
 		Conn:            conn,
 		mode:            mode,
+		runCtx:          runCtx,
+		stopRunning:     stopRunning,
 		obfuscator:      obfuscator,
 		readDeobfuscate: readDeobfuscate,
 		writeObfuscate:  writeObfuscate,
-		readState:       OBFUSCATION_READ_STATE_IDENTIFICATION_LINES,
+		readState:       readState,
 		writeState:      writeState,
 		readBuffer:      new(bytes.Buffer),
 		writeBuffer:     new(bytes.Buffer),
@@ -209,6 +233,8 @@ func NewClientObfuscatedSSHConn(
 	obfuscationKeyword string,
 	obfuscationPaddingPRNGSeed *prng.Seed,
 	obfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
+	prefixSpec *OSSHPrefixSpec,
+	osshPrefixSplitConfig *OSSHPrefixSplitConfig,
 	minPadding, maxPadding *int) (*ObfuscatedSSHConn, error) {
 
 	return NewObfuscatedSSHConn(
@@ -217,6 +243,9 @@ func NewClientObfuscatedSSHConn(
 		obfuscationKeyword,
 		obfuscationPaddingPRNGSeed,
 		obfuscatorSeedTransformerParameters,
+		prefixSpec,
+		nil,
+		osshPrefixSplitConfig,
 		minPadding, maxPadding,
 		nil,
 		nil)
@@ -228,6 +257,7 @@ func NewServerObfuscatedSSHConn(
 	conn net.Conn,
 	obfuscationKeyword string,
 	seedHistory *SeedHistory,
+	serverPrefixSpecs transforms.Specs,
 	irregularLogger func(
 		clientIP string,
 		err error,
@@ -238,9 +268,18 @@ func NewServerObfuscatedSSHConn(
 		conn,
 		obfuscationKeyword,
 		nil, nil,
+		nil,
+		serverPrefixSpecs,
+		nil,
 		nil, nil,
 		seedHistory,
 		irregularLogger)
+}
+
+// IsOSSHPrefixedStream returns true if client wrote a prefix to the Obfuscated SSH stream,
+// or the server read a prefixed Obfuscated SSH stream.
+func (conn *ObfuscatedSSHConn) IsOSSHPrefixStream() bool {
+	return conn.obfuscator.osshPrefixHeader != nil
 }
 
 // GetDerivedPRNG creates a new PRNG with a seed derived from the
@@ -252,6 +291,27 @@ func NewServerObfuscatedSSHConn(
 // post-initial obfuscator message.
 func (conn *ObfuscatedSSHConn) GetDerivedPRNG(salt string) (*prng.PRNG, error) {
 	return conn.obfuscator.GetDerivedPRNG(salt)
+}
+
+// SetOSSHPrefixSplitConfig sets the OSSHPrefixSplitConfig for the server.
+// This must be called before any data is written.
+func (conn *ObfuscatedSSHConn) SetOSSHPrefixSplitConfig(minDelay, maxDelay time.Duration) error {
+	if conn.mode != OBFUSCATION_CONN_MODE_SERVER {
+		return errors.TraceNew("SetOSSHPrefixSplitConfig() is only valid for server connections")
+	}
+	if conn.writeState != OBFUSCATION_WRITE_STATE_SERVER_SEND_PREFIX_AND_IDENTIFICATION_LINE_PADDING {
+		return errors.TraceNew("SetOSSHPrefixSplitConfig() must be called before any data is written")
+	}
+	seed, err := conn.obfuscator.GetDerivedPRNGSeed("obfuscated-ssh-prefix-split")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	conn.obfuscator.osshPrefixSplitConfig = &OSSHPrefixSplitConfig{
+		Seed:     seed,
+		MinDelay: minDelay,
+		MaxDelay: maxDelay,
+	}
+	return nil
 }
 
 // GetMetrics implements the common.MetricsSource interface.
@@ -298,6 +358,11 @@ func (conn *ObfuscatedSSHConn) Write(buffer []byte) (int, error) {
 	return len(buffer), nil
 }
 
+func (conn *ObfuscatedSSHConn) Close() error {
+	conn.stopRunning()
+	return conn.Conn.Close()
+}
+
 // readAndTransform reads and transforms the downstream bytes stream
 // while in an obfucation state. It parses the stream of bytes read
 // looking for the first SSH_MSG_NEWKEYS packet sent from the peer,
@@ -311,19 +376,25 @@ func (conn *ObfuscatedSSHConn) Write(buffer []byte) (int, error) {
 //
 // Psiphon's server sends extra lines before the version line, as
 // permitted by http://www.ietf.org/rfc/rfc4253.txt sec 4.2:
-//   The server MAY send other lines of data before sending the
-//   version string. [...] Clients MUST be able to process such lines.
+//
+//	The server MAY send other lines of data before sending the
+//	version string. [...] Clients MUST be able to process such lines.
 //
 // A comment in exchangeVersions explains that the golang code doesn't
 // support this:
-//   Contrary to the RFC, we do not ignore lines that don't
-//   start with "SSH-2.0-" to make the library usable with
-//   nonconforming servers.
+//
+//	Contrary to the RFC, we do not ignore lines that don't
+//	start with "SSH-2.0-" to make the library usable with
+//	nonconforming servers.
 //
 // In addition, Psiphon's server sends up to 512 characters per extra
 // line. It's not clear that the 255 max string size in sec 4.2 refers
 // to the extra lines as well, but in any case golang's code only
 // supports 255 character lines.
+//
+// State OBFUSCATION_READ_STATE_CLIENT_READ_PREFIX: the initial
+// state, when the client expects prefix with terminator before the
+// rest of the tunnel. In this state, the prefix is read and discarded.
 //
 // State OBFUSCATION_READ_STATE_IDENTIFICATION_LINES: in this
 // state, extra lines are read and discarded. Once the peer's
@@ -339,10 +410,36 @@ func (conn *ObfuscatedSSHConn) Write(buffer []byte) (int, error) {
 // packet may need to be buffered due to partial reading.
 func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 
+	if conn.readState == OBFUSCATION_READ_STATE_CLIENT_READ_PREFIX {
+		skipReader, ok := conn.Conn.(*SkipReader)
+		if !ok {
+			return 0, errors.TraceNew("expected SkipReader")
+		}
+
+		preambleHeader := make([]byte, PREAMBLE_HEADER_LENGTH)
+		_, err := io.ReadFull(skipReader, preambleHeader)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+
+		terminator, err := makeTerminator(conn.obfuscator.keyword,
+			preambleHeader, OBFUSCATE_SERVER_TO_CLIENT_IV)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+
+		err = skipReader.SkipUpToToken(terminator, PREFIX_TERM_SEARCH_BUF_SIZE, PREFIX_MAX_LENGTH)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		conn.readState = OBFUSCATION_READ_STATE_IDENTIFICATION_LINES
+	}
+
 	nextState := conn.readState
 
 	switch conn.readState {
 	case OBFUSCATION_READ_STATE_IDENTIFICATION_LINES:
+
 		// TODO: only client should accept multiple lines?
 		if conn.readBuffer.Len() == 0 {
 			for {
@@ -410,7 +507,7 @@ func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 // state, when the client has not sent any data. In this state, the seed message
 // is injected into the client output stream.
 //
-// State OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING: the
+// State OBFUSCATION_WRITE_STATE_SERVER_SEND_PREFIX_AND_IDENTIFICATION_LINE_PADDING: the
 // initial state, when the server has not sent any data. In this state, the
 // additional lines of padding are injected into the server output stream.
 // This padding is a partial defense against traffic analysis against the
@@ -426,11 +523,13 @@ func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 // State OBFUSCATION_WRITE_STATE_KEX_PACKETS: follows the binary
 // packet protocol, parsing each packet until the first SSH_MSG_NEWKEYS.
 // http://www.ietf.org/rfc/rfc4253.txt sec 6:
-//     uint32    packet_length
-//     byte      padding_length
-//     byte[n1]  payload; n1 = packet_length - padding_length - 1
-//     byte[n2]  random padding; n2 = padding_length
-//     byte[m]   mac (Message Authentication Code - MAC); m = mac_length
+//
+//	uint32    packet_length
+//	byte      padding_length
+//	byte[n1]  payload; n1 = packet_length - padding_length - 1
+//	byte[n2]  random padding; n2 = padding_length
+//	byte[m]   mac (Message Authentication Code - MAC); m = mac_length
+//
 // m is 0 as no MAC ha yet been negotiated.
 // http://www.ietf.org/rfc/rfc4253.txt sec 7.3, 12:
 // The payload for SSH_MSG_NEWKEYS is one byte, the packet type, value 21.
@@ -441,22 +540,98 @@ func (conn *ObfuscatedSSHConn) readAndTransform(buffer []byte) (int, error) {
 // these packets is authenticated in the "exchange hash").
 func (conn *ObfuscatedSSHConn) transformAndWrite(buffer []byte) error {
 
-	// The seed message (client) and identification line padding (server)
-	// are injected before any standard SSH traffic.
-	if conn.writeState == OBFUSCATION_WRITE_STATE_CLIENT_SEND_SEED_MESSAGE {
-		_, err := conn.Conn.Write(conn.obfuscator.SendSeedMessage())
+	// The preamble (client) and requested prefix with
+	// identification line padding (server) are injected before any standard SSH traffic.
+	if conn.writeState == OBFUSCATION_WRITE_STATE_CLIENT_SEND_PREAMBLE {
+
+		preamble, prefixLen := conn.obfuscator.SendPreamble()
+
+		if prefixLen > 0 {
+
+			// Writes the prefix first, then the rest of the preamble after a delay.
+			_, err := conn.Conn.Write(preamble[:prefixLen])
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			// Adds random delay defined by OSSH prefix split config.
+			if config := conn.obfuscator.osshPrefixSplitConfig; config != nil {
+				rng := prng.NewPRNGWithSeed(config.Seed)
+				delay := rng.Period(config.MinDelay, config.MaxDelay)
+
+				timer := time.NewTimer(delay)
+
+				var err error
+				select {
+				case <-conn.runCtx.Done():
+					err = conn.runCtx.Err()
+				case <-timer.C:
+				}
+				timer.Stop()
+
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+		}
+
+		_, err := conn.Conn.Write(preamble[prefixLen:])
 		if err != nil {
 			return errors.Trace(err)
 		}
+
 		conn.writeState = OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE
-	} else if conn.writeState == OBFUSCATION_WRITE_STATE_SERVER_SEND_IDENTIFICATION_LINE_PADDING {
+
+	} else if conn.writeState == OBFUSCATION_WRITE_STATE_SERVER_SEND_PREFIX_AND_IDENTIFICATION_LINE_PADDING {
+
+		var buffer bytes.Buffer
+
+		if preamble, prefixLen := conn.obfuscator.SendPreamble(); preamble != nil {
+			// Prefix bytes are written to the underlying conn immediately, skipping the buffer.
+			_, err := conn.Conn.Write(preamble[:prefixLen])
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			// Adds random delay defined by OSSH prefix split config.
+			if config := conn.obfuscator.osshPrefixSplitConfig; config != nil {
+				rng := prng.NewPRNGWithSeed(config.Seed)
+				delay := rng.Period(config.MinDelay, config.MaxDelay)
+
+				timer := time.NewTimer(delay)
+
+				var err error
+				select {
+				case <-conn.runCtx.Done():
+					err = conn.runCtx.Err()
+				case <-timer.C:
+				}
+				timer.Stop()
+
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+
+			_, err = buffer.Write(preamble[prefixLen:])
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+
 		padding := makeServerIdentificationLinePadding(conn.paddingPRNG)
 		conn.paddingLength = len(padding)
 		conn.writeObfuscate(padding)
-		_, err := conn.Conn.Write(padding)
+		_, err := buffer.Write(padding)
 		if err != nil {
 			return errors.Trace(err)
 		}
+
+		_, err = conn.Conn.Write(buffer.Bytes())
+		if err != nil {
+			return errors.Trace(err)
+		}
+
 		conn.writeState = OBFUSCATION_WRITE_STATE_IDENTIFICATION_LINE
 	}
 

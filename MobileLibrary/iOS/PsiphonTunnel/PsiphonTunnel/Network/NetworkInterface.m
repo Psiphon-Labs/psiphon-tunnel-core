@@ -226,4 +226,49 @@
     return activeInterface;
 }
 
++ (NSString*)getActiveInterfaceAddressWithReachability:(id<ReachabilityProtocol>)reachability
+                               andCurrentNetworkStatus:(NetworkReachability)currentNetworkStatus
+                                                 error:(NSError *_Nullable *_Nonnull)outError {
+
+    *outError = nil;
+
+    NSError *err;
+    NSString *activeInterface =
+        [NetworkInterface getActiveInterfaceWithReachability:reachability
+                                     andCurrentNetworkStatus:currentNetworkStatus
+                                                       error:&err];
+    if (err != nil) {
+        NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface %@", err.localizedDescription];
+        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                               code:1
+                                           userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+        return @"";
+    } else if (activeInterface == nil) {
+        NSString *localizedDescription = @"active interface nil";
+        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                               code:1
+                                           userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+        return @"";
+    }
+
+    NSString *interfaceAddress = [NetworkInterface getInterfaceAddress:activeInterface
+                                                                 error:&err];
+    if (err != nil) {
+        NSString *localizedDescription =
+            [NSString stringWithFormat:@"error getting interface address %@", err.localizedDescription];
+        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                               code:1
+                                           userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+        return @"";
+    } else if (interfaceAddress == nil) {
+        NSString *localizedDescription = @"interface address nil";
+        *outError = [[NSError alloc] initWithDomain:@"iOSLibrary"
+                                               code:1
+                                           userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+        return @"";
+    }
+
+    return interfaceAddress;
+}
+
 @end

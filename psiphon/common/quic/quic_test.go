@@ -188,11 +188,16 @@ func runQUIC(
 				}
 			}
 
+			quicSNIAddress, _, err := net.SplitHostPort(serverAddress)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
 			conn, err := Dial(
 				ctx,
 				packetConn,
 				remoteAddr,
-				serverAddress,
+				quicSNIAddress,
 				quicVersion,
 				clientHelloSeed,
 				clientObfuscationKey,

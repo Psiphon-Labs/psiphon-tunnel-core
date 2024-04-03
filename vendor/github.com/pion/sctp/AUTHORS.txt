@@ -15,6 +15,7 @@ Hugo Arregui <hugo@decentraland.org>
 Jerko Steiner <jerko.steiner@gmail.com>
 Jerry Tao <taojay315@gmail.com>
 John Bradley <jrb@turrettech.com>
+Juliusz Chroboczek <jch@irif.fr>
 Konstantin Itskov <konstantin.itskov@kovits.com>
 Lukas Herman <lherman.cs@gmail.com>
 Luke Curley <lcurley@twitch.tv>
@@ -23,6 +24,7 @@ ronan <ronan.jezequel@gmail.com>
 Sam Lancia <sam@vaion.com>
 Sean DuBois <seaduboi@amazon.com>
 Sean DuBois <sean@siobud.com>
+Steffen <post@steffenvogel.de>
 Steffen Vogel <post@steffenvogel.de>
 Teddy <richardgeorgeoff@gmail.com>
 Will Forcey <wsforc3y@gmail.com>

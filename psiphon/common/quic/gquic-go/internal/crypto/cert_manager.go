@@ -1,12 +1,12 @@
 package crypto
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"hash/fnv"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/qerr"
 )
 

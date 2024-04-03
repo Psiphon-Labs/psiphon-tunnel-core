@@ -5,6 +5,9 @@ import "time"
 // DesiredReceiveBufferSize is the kernel UDP receive buffer size that we'd like to use.
 const DesiredReceiveBufferSize = (1 << 20) * 2 // 2 MB
 
+// DesiredSendBufferSize is the kernel UDP send buffer size that we'd like to use.
+const DesiredSendBufferSize = (1 << 20) * 2 // 2 MB
+
 // InitialPacketSizeIPv4 is the maximum packet size that we use for sending IPv4 packets.
 const InitialPacketSizeIPv4 = 1252
 
@@ -62,9 +65,6 @@ const MaxAcceptQueueSize = 32
 // TokenValidity is the duration that a (non-retry) token is considered valid
 const TokenValidity = 24 * time.Hour
 
-// RetryTokenValidity is the duration that a retry token is considered valid
-const RetryTokenValidity = 10 * time.Second
-
 // MaxOutstandingSentPackets is maximum number of packets saved for retransmission.
 // When reached, it imposes a soft limit on sending new packets:
 // Sending ACKs and retransmission is still allowed, but now new regular packets can be sent.
@@ -105,9 +105,6 @@ const DefaultIdleTimeout = 30 * time.Second
 // DefaultHandshakeIdleTimeout is the default idle timeout used before handshake completion.
 const DefaultHandshakeIdleTimeout = 5 * time.Second
 
-// DefaultHandshakeTimeout is the default timeout for a connection until the crypto handshake succeeds.
-const DefaultHandshakeTimeout = 10 * time.Second
-
 // MaxKeepAliveInterval is the maximum time until we send a packet to keep a connection alive.
 // It should be shorter than the time that NATs clear their mapping.
 const MaxKeepAliveInterval = 20 * time.Second
@@ -132,13 +129,6 @@ const MaxPostHandshakeCryptoFrameSize = 1000
 // but must ensure that a maximum size ACK frame fits into one packet.
 const MaxAckFrameSize ByteCount = 1000
 
-// MaxDatagramFrameSize is the maximum size of a DATAGRAM frame (RFC 9221).
-// The size is chosen such that a DATAGRAM frame fits into a QUIC packet.
-const MaxDatagramFrameSize ByteCount = 1200
-
-// DatagramRcvQueueLen is the length of the receive queue for DATAGRAM frames (RFC 9221)
-const DatagramRcvQueueLen = 128
-
 // MaxNumAckRanges is the maximum number of ACK ranges that we send in an ACK frame.
 // It also serves as a limit for the packet history.
 // If at any point we keep track of more ranges, old ranges are discarded.
@@ -149,9 +139,10 @@ const MaxNumAckRanges = 32
 // Example: For a packet pacing delay of 200μs, we would send 5 packets at once, wait for 1ms, and so forth.
 const MinPacingDelay = time.Millisecond
 
+// [Psiphon]
 // DefaultConnectionIDLength is the connection ID length that is used for multiplexed connections
 // if no other value is configured.
-const DefaultConnectionIDLength = 4
+const DefaultConnectionIDLength = 8
 
 // MaxActiveConnectionIDs is the number of connection IDs that we're storing.
 const MaxActiveConnectionIDs = 4

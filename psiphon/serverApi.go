@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
+	lrucache "github.com/cognusion/go-cache-lru"
 )
 
 // ServerContext is a utility struct which holds all of the data associated
@@ -131,6 +132,24 @@ func (serverContext *ServerContext) doHandshakeRequest(
 	if !serverContext.tunnel.dialParams.ServerEntry.HasSignature() {
 		requestedMissingSignature = true
 		params["missing_server_entry_signature"] =
+			serverContext.tunnel.dialParams.ServerEntry.Tag
+	}
+
+	// The server will return a signed copy of its own server entry when the
+	// client specifies this 'missing_server_entry_provider_id' parameter.
+	//
+	// The purpose of this mechanism is to rapidly add provider IDs to the
+	// server entries in client local storage, and to ensure that the client has
+	// a provider ID for its currently connected server as required for the
+	// RestrictDirectProviderRegions, and HoldOffDirectTunnelProviderRegions
+	// tactics.
+	//
+	// The server entry will be included in handshakeResponse.EncodedServerList,
+	// along side discovery servers.
+	requestedMissingProviderID := false
+	if !serverContext.tunnel.dialParams.ServerEntry.HasProviderID() {
+		requestedMissingProviderID = true
+		params["missing_server_entry_provider_id"] =
 			serverContext.tunnel.dialParams.ServerEntry.Tag
 	}
 
@@ -272,13 +291,14 @@ func (serverContext *ServerContext) doHandshakeRequest(
 			return errors.Trace(err)
 		}
 
-		// Retain the original timestamp and source in the requestedMissingSignature
-		// case, as this server entry was not discovered here.
+		// Retain the original timestamp and source in the
+		// requestedMissingSignature and requestedMissingProviderID
+		// cases, as this server entry was not discovered here.
 		//
 		// Limitation: there is a transient edge case where
-		// requestedMissingSignature will be set for a discovery server entry that
-		// _is_ also discovered here.
-		if requestedMissingSignature &&
+		// requestedMissingSignature and/or requestedMissingProviderID will be
+		// set for a discovery server entry that _is_ also discovered here.
+		if requestedMissingSignature || requestedMissingProviderID &&
 			serverEntryFields.GetIPAddress() == serverContext.tunnel.dialParams.ServerEntry.IpAddress {
 
 			serverEntryFields.SetLocalTimestamp(serverContext.tunnel.dialParams.ServerEntry.LocalTimestamp)
@@ -376,6 +396,31 @@ func (serverContext *ServerContext) doHandshakeRequest(
 				// from the server. When SetParameters fails, all
 				// previous tactics values are left in place.
 			}
+		}
+	}
+
+	if serverContext.tunnel.dialParams.steeringIPCacheKey != "" {
+
+		// Cache any received steering IP, which will also extend the TTL for
+		// an existing entry.
+		//
+		// As typical tunnel duration is short and dialing can be challenging,
+		// this established tunnel is retained and the steering IP will be
+		// used on any subsequent dial to the same fronting provider,
+		// assuming the TTL has not expired.
+		//
+		// Note: to avoid TTL expiry for long-lived tunnels, the TTL could be
+		// set or extended at the end of the tunnel lifetime; however that
+		// may result in unintended steering.
+
+		IP := net.ParseIP(handshakeResponse.SteeringIP)
+		if IP != nil && !common.IsBogon(IP) {
+			serverContext.tunnel.dialParams.steeringIPCache.Set(
+				serverContext.tunnel.dialParams.steeringIPCacheKey,
+				handshakeResponse.SteeringIP,
+				lrucache.DefaultExpiration)
+		} else {
+			NoticeInfo("ignoring invalid steering IP")
 		}
 	}
 
@@ -680,7 +725,8 @@ func RecordRemoteServerListStat(
 	etag string,
 	bytes int64,
 	duration time.Duration,
-	authenticated bool) error {
+	authenticated bool,
+	additionalParameters common.APIParameters) error {
 
 	if !config.GetParameters().Get().WeightedCoinFlip(
 		parameters.RecordRemoteServerListPersistentStatsProbability) {
@@ -697,6 +743,9 @@ func RecordRemoteServerListStat(
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
 	if config.DeviceRegion != "" {
 		params["device_region"] = config.DeviceRegion
+	}
+	if config.DeviceLocation != "" {
+		params["device_location"] = config.DeviceLocation
 	}
 
 	params["client_download_timestamp"] = common.TruncateTimestampToHour(common.GetCurrentTimestamp())
@@ -717,6 +766,10 @@ func RecordRemoteServerListStat(
 		authenticatedStr = "1"
 	}
 	params["authenticated"] = authenticatedStr
+
+	for k, v := range additionalParameters {
+		params[k] = v
+	}
 
 	remoteServerListStatJson, err := json.Marshal(params)
 	if err != nil {
@@ -933,6 +986,9 @@ func getBaseAPIParameters(
 	if config.DeviceRegion != "" {
 		params["device_region"] = config.DeviceRegion
 	}
+	if config.DeviceLocation != "" {
+		params["device_location"] = config.DeviceLocation
+	}
 
 	if filter == baseParametersAll {
 
@@ -964,6 +1020,7 @@ func getBaseAPIParameters(
 		}
 
 		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+
 			meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
 			if meekResolvedIPAddress != "" {
 				params["meek_resolved_ip_address"] = meekResolvedIPAddress
@@ -986,6 +1043,18 @@ func getBaseAPIParameters(
 				transformedHostName = "1"
 			}
 			params["meek_transformed_host_name"] = transformedHostName
+		}
+
+		if dialParams.TLSOSSHSNIServerName != "" {
+			params["tls_ossh_sni_server_name"] = dialParams.TLSOSSHSNIServerName
+		}
+
+		if dialParams.TLSOSSHTransformedSNIServerName {
+			params["tls_ossh_transformed_host_name"] = "1"
+		}
+
+		if dialParams.TLSFragmentClientHello {
+			params["tls_fragmented"] = "1"
 		}
 
 		if dialParams.SelectedUserAgent {
@@ -1060,53 +1129,65 @@ func getBaseAPIParameters(
 			params["conjure_transport"] = dialParams.ConjureTransport
 		}
 
-		if dialParams.ResolveParameters != nil {
+		usedSteeringIP := false
+		if dialParams.SteeringIP != "" {
+			params["steering_ip"] = dialParams.SteeringIP
+			usedSteeringIP = true
+		}
+
+		if dialParams.ResolveParameters != nil && !usedSteeringIP {
+
+			// Log enough information to distinguish several successful or
+			// failed circumvention cases of interest, including preferring
+			// alternate servers and/or using DNS protocol transforms, and
+			// appropriate for both handshake and failed_tunnel logging:
+			//
+			// - The initial attempt made by Resolver.ResolveIP,
+			//   preferring an alternate DNS server and/or using a
+			//   protocol transform succeeds (dns_result = 0, the initial
+			//   attempt, 0, got the first result).
+			//
+			// - A second attempt may be used, still preferring an
+			//   alternate DNS server but no longer using the protocol
+			//   transform, which presumably failed (dns_result = 1, the
+			//   second attempt, 1, got the first result).
+			//
+			// - Subsequent attempts will use the system DNS server and no
+			//   protocol transforms (dns_result > 2).
+			//
+			// Due to the design of Resolver.ResolveIP, the notion
+			// of "success" is approximate; for example a successful
+			// response may arrive after a subsequent attempt succeeds,
+			// simply due to slow network conditions. It's also possible
+			// that, for a given attemp, only one of the two concurrent
+			// requests (A and AAAA) succeeded.
+			//
+			// Note that ResolveParameters.GetFirstAttemptWithAnswer
+			// semantics assume that dialParams.ResolveParameters wasn't
+			// used by or modified by any other dial.
+			//
+			// Some protocols may use both preresolved DNS as well as actual
+			// DNS requests, such as Conjure with the DTLS transport, which
+			// may resolve STUN server domains while using preresolved DNS
+			// for fronted API registration.
 
 			if dialParams.ResolveParameters.PreresolvedIPAddress != "" {
-				params["dns_preresolved"] = dialParams.ResolveParameters.PreresolvedIPAddress
-
-			} else {
-
-				// Log enough information to distinguish several successful or
-				// failed circumvention cases of interest, including preferring
-				// alternate servers and/or using DNS protocol transforms, and
-				// appropriate for both handshake and failed_tunnel logging:
-				//
-				// - The initial attempt made by Resolver.ResolveIP,
-				//   preferring an alternate DNS server and/or using a
-				//   protocol transform succeeds (dns_result = 0, the initial
-				//   attempt, 0, got the first result).
-				//
-				// - A second attempt may be used, still preferring an
-				//   alternate DNS server but no longer using the protocol
-				//   transform, which presumably failed (dns_result = 1, the
-				//   second attempt, 1, got the first result).
-				//
-				// - Subsequent attempts will use the system DNS server and no
-				//   protocol transforms (dns_result > 2).
-				//
-				// Due to the design of Resolver.ResolveIP, the notion
-				// of "success" is approximate; for example a successful
-				// response may arrive after a subsequent attempt succeeds,
-				// simply due to slow network conditions. It's also possible
-				// that, for a given attemp, only one of the two concurrent
-				// requests (A and AAAA) succeeded.
-				//
-				// Note that ResolveParameters.GetFirstAttemptWithAnswer
-				// semantics assume that dialParams.ResolveParameters wasn't
-				// used by or modified by any other dial.
-
-				if dialParams.ResolveParameters.PreferAlternateDNSServer {
-					params["dns_preferred"] = dialParams.ResolveParameters.AlternateDNSServer
+				meekDialDomain, _, _ := net.SplitHostPort(dialParams.MeekDialAddress)
+				if dialParams.ResolveParameters.PreresolvedDomain == meekDialDomain {
+					params["dns_preresolved"] = dialParams.ResolveParameters.PreresolvedIPAddress
 				}
-
-				if dialParams.ResolveParameters.ProtocolTransformName != "" {
-					params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
-				}
-
-				params["dns_attempt"] = strconv.Itoa(
-					dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 			}
+
+			if dialParams.ResolveParameters.PreferAlternateDNSServer {
+				params["dns_preferred"] = dialParams.ResolveParameters.AlternateDNSServer
+			}
+
+			if dialParams.ResolveParameters.ProtocolTransformName != "" {
+				params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
+			}
+
+			params["dns_attempt"] = strconv.Itoa(
+				dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 		}
 
 		if dialParams.HTTPTransformerParameters != nil {
@@ -1124,6 +1205,12 @@ func getBaseAPIParameters(
 		if dialParams.ObfuscatedQUICNonceTransformerParameters != nil {
 			if dialParams.ObfuscatedQUICNonceTransformerParameters.TransformSpec != nil {
 				params["seed_transform"] = dialParams.ObfuscatedQUICNonceTransformerParameters.TransformName
+			}
+		}
+
+		if dialParams.OSSHPrefixSpec != nil {
+			if dialParams.OSSHPrefixSpec.Spec != nil {
+				params["ossh_prefix"] = dialParams.OSSHPrefixSpec.Name
 			}
 		}
 

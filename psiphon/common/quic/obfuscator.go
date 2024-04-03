@@ -86,6 +86,8 @@ const (
 	NONCE_SIZE = 12
 
 	RANDOM_STREAM_LIMIT = 1<<38 - 64
+
+	CONCURRENT_WRITER_LIMIT = 5000
 )
 
 // ObfuscatedPacketConn wraps a QUIC net.PacketConn with an obfuscation layer
@@ -118,6 +120,7 @@ type ObfuscatedPacketConn struct {
 	nonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
 	decoyPacketCount           int32
 	decoyBuffer                []byte
+	concurrentWriters          int32
 }
 
 type peerMode struct {
@@ -253,6 +256,10 @@ func (conn *ObfuscatedPacketConn) Close() error {
 	}
 
 	if conn.isServer {
+
+		// Interrupt any blocked writes.
+		conn.PacketConn.SetWriteDeadline(time.Now())
+
 		close(conn.stopBroadcast)
 		conn.runWaitGroup.Wait()
 	}
@@ -498,6 +505,14 @@ func (conn *ObfuscatedPacketConn) readPacket(
 			mode, ok := conn.peerModes[address]
 			if !ok {
 				// This is a new flow.
+
+				// See concurrent writer limit comment in writePacket.
+				concurrentWriters := atomic.LoadInt32(&conn.concurrentWriters)
+				if concurrentWriters > CONCURRENT_WRITER_LIMIT {
+					conn.peerModesMutex.Unlock()
+					return 0, 0, 0, nil, true, newTemporaryNetError(errors.TraceNew("too many concurrent writers"))
+				}
+
 				mode = &peerMode{isObfuscated: isObfuscated, isIETF: isIETF}
 				conn.peerModes[address] = mode
 				firstFlowPacket = true
@@ -638,6 +653,45 @@ func (conn *ObfuscatedPacketConn) writePacket(
 	isIETF := true
 
 	if conn.isServer {
+
+		// Drop packets when there are too many concurrent writers.
+		//
+		// Typically, a UDP socket write will complete in microseconds, and
+		// the socket write buffer should rarely fill up. However, Go's
+		// runtime will loop indefinitely on EAGAIN, the error returned when
+		// a UDP socket write buffer is full. Additionally, Go's runtime
+		// serializes socket writes, so once a write blocks, all concurrent
+		// writes also block.
+		//
+		// The EAGAIN condition may arise due to problems with the host's
+		// driver or NIC, among other network issues on the host. We have
+		// observed that, on such problematic hosts, quic-go ends up with an
+		// unbounded number of goroutines blocking on UDP socket writes,
+		// almost all trying to send a final packet when closing a
+		// connection, due to handshake timeout. This condition leads to
+		// excess memory usage on the host and triggers load limiting with
+		// few connected clients.
+		//
+		// To avoid this condition, drop write packets, without calling the
+		// socket write, once there is an excess number of concurrent
+		// writers, presumably all blocked due to EAGAIN. Use a high enough
+		// limit to avoid dropping packets on a busy, healthy host -- there
+		// will always be some number of concurrent writers, since the QUIC
+		// server uses a single socket for all writes.
+		//
+		// The concurrent writer limit is also checked in readPacket and used
+		// to drop packets from new flows, to avoid starting new QUIC
+		// connection handshakes while writes are blocked.
+		//
+		// The WriteTimeoutUDPConn is not used in the server case. While it is
+		// effective at interrupting EAGAIN blocking on the client, its use
+		// of SetWriteDeadline will extend the deadline for all blocked
+		// writers, which fails to clear the server-side backlog.
+		concurrentWriters := atomic.AddInt32(&conn.concurrentWriters, 1)
+		defer atomic.AddInt32(&conn.concurrentWriters, -1)
+		if concurrentWriters > CONCURRENT_WRITER_LIMIT {
+			return 0, 0, newTemporaryNetError(errors.TraceNew("too many concurrent writers"))
+		}
 
 		conn.peerModesMutex.Lock()
 		address := addr.String()

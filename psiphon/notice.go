@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -476,6 +477,10 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "upstreamProxyCustomHeaderNames", strings.Join(dialParams.UpstreamProxyCustomHeaderNames, ","))
 		}
 
+		if dialParams.ServerEntry.ProviderID != "" {
+			args = append(args, "providerID", dialParams.ServerEntry.ProviderID)
+		}
+
 		if dialParams.FrontingProviderID != "" {
 			args = append(args, "frontingProviderID", dialParams.FrontingProviderID)
 		}
@@ -485,6 +490,7 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 		}
 
 		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+
 			meekResolvedIPAddress := dialParams.MeekResolvedIPAddress.Load().(string)
 			if meekResolvedIPAddress != "" {
 				nonredacted := common.EscapeRedactIPAddressString(meekResolvedIPAddress)
@@ -503,6 +509,18 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 		// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
 		if dialParams.MeekDialAddress != "" {
 			args = append(args, "meekTransformedHostName", dialParams.MeekTransformedHostName)
+		}
+
+		if dialParams.TLSOSSHSNIServerName != "" {
+			args = append(args, "tlsOSSHSNIServerName", dialParams.TLSOSSHSNIServerName)
+		}
+
+		if dialParams.TLSOSSHTransformedSNIServerName {
+			args = append(args, "tlsOSSHTransformedSNIServerName", dialParams.TLSOSSHTransformedSNIServerName)
+		}
+
+		if dialParams.TLSFragmentClientHello {
+			args = append(args, "tlsFragmentClientHello", dialParams.TLSFragmentClientHello)
 		}
 
 		if dialParams.SelectedUserAgent {
@@ -554,28 +572,37 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "conjureTransport", dialParams.ConjureTransport)
 		}
 
-		if dialParams.ResolveParameters != nil {
+		usedSteeringIP := false
+
+		if dialParams.SteeringIP != "" {
+			nonredacted := common.EscapeRedactIPAddressString(dialParams.SteeringIP)
+			args = append(args, "steeringIP", nonredacted)
+			usedSteeringIP = true
+		}
+
+		if dialParams.ResolveParameters != nil && !usedSteeringIP {
+
+			// See dialParams.ResolveParameters comment in getBaseAPIParameters.
 
 			if dialParams.ResolveParameters.PreresolvedIPAddress != "" {
-				nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.PreresolvedIPAddress)
-				args = append(args, "DNSPreresolved", nonredacted)
-
-			} else {
-
-				// See dialParams.ResolveParameters comment in getBaseAPIParameters.
-
-				if dialParams.ResolveParameters.PreferAlternateDNSServer {
-					nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.AlternateDNSServer)
-					args = append(args, "DNSPreferred", nonredacted)
+				meekDialDomain, _, _ := net.SplitHostPort(dialParams.MeekDialAddress)
+				if dialParams.ResolveParameters.PreresolvedDomain == meekDialDomain {
+					nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.PreresolvedIPAddress)
+					args = append(args, "DNSPreresolved", nonredacted)
 				}
+			}
 
-				if dialParams.ResolveParameters.ProtocolTransformName != "" {
-					args = append(args, "DNSTransform", dialParams.ResolveParameters.ProtocolTransformName)
-				}
+			if dialParams.ResolveParameters.PreferAlternateDNSServer {
+				nonredacted := common.EscapeRedactIPAddressString(dialParams.ResolveParameters.AlternateDNSServer)
+				args = append(args, "DNSPreferred", nonredacted)
+			}
 
-				if postDial {
-					args = append(args, "DNSAttempt", dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
-				}
+			if dialParams.ResolveParameters.ProtocolTransformName != "" {
+				args = append(args, "DNSTransform", dialParams.ResolveParameters.ProtocolTransformName)
+			}
+
+			if postDial {
+				args = append(args, "DNSAttempt", dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 			}
 		}
 
@@ -594,6 +621,12 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 		if dialParams.ObfuscatedQUICNonceTransformerParameters != nil {
 			if dialParams.ObfuscatedQUICNonceTransformerParameters.TransformSpec != nil {
 				args = append(args, "SeedTransform", dialParams.ObfuscatedQUICNonceTransformerParameters.TransformName)
+			}
+		}
+
+		if dialParams.OSSHPrefixSpec != nil {
+			if dialParams.OSSHPrefixSpec.Spec != nil {
+				args = append(args, "OSSHPrefix", dialParams.OSSHPrefixSpec.Name)
 			}
 		}
 

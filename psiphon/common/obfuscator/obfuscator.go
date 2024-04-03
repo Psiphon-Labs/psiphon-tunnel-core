@@ -23,13 +23,17 @@ import (
 	"bytes"
 	"crypto/rc4"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"io"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
+	"golang.org/x/crypto/hkdf"
 )
 
 const (
@@ -40,7 +44,37 @@ const (
 	OBFUSCATE_MAGIC_VALUE         = 0x0BF5CA7E
 	OBFUSCATE_CLIENT_TO_SERVER_IV = "client_to_server"
 	OBFUSCATE_SERVER_TO_CLIENT_IV = "server_to_client"
+
+	// Preamble header is the first 24 bytes of the connection. If no prefix is applied,
+	// the first 24 bytes are the Obfuscated SSH seed, magic value and padding length.
+	PREAMBLE_HEADER_LENGTH = OBFUSCATE_SEED_LENGTH + 8 // 4 bytes each for magic value and padding length
+
+	PREFIX_TERMINATOR_LENGTH    = 16
+	PREFIX_TERM_SEARCH_BUF_SIZE = 8192
+	PREFIX_MAX_LENGTH           = 65536
+	PREFIX_MAX_HEADER_LENGTH    = 4096
 )
+
+type OSSHPrefixSpec struct {
+	Name string
+	Spec transforms.Spec
+	Seed *prng.Seed
+}
+
+// OSSHPrefixHeader is the prefix header. It is written by the client
+// when a prefix is applied, and read by the server to determine the
+// prefix-spec to use.
+type OSSHPrefixHeader struct {
+	SpecName string
+}
+
+// OSSHPrefixSplitConfig are parameters for splitting the
+// preamble into two writes: prefix followed by rest of the preamble.
+type OSSHPrefixSplitConfig struct {
+	Seed     *prng.Seed
+	MinDelay time.Duration
+	MaxDelay time.Duration
+}
 
 // Obfuscator implements the seed message, key derivation, and
 // stream ciphers for:
@@ -52,7 +86,18 @@ const (
 // with legacy clients. New protocols and schemes should not use this
 // obfuscator.
 type Obfuscator struct {
-	seedMessage          []byte
+	preamble []byte
+
+	// Length of the prefix in the preamble.
+	preambleOSSHPrefixLength int
+
+	// osshPrefixHeader is the prefix header written by the client,
+	// or the prefix header read by the server.
+	osshPrefixHeader *OSSHPrefixHeader
+
+	osshPrefixSplitConfig *OSSHPrefixSplitConfig
+
+	keyword              string
 	paddingLength        int
 	clientToServerCipher *rc4.Cipher
 	serverToClientCipher *rc4.Cipher
@@ -64,6 +109,9 @@ type Obfuscator struct {
 type ObfuscatorConfig struct {
 	IsOSSH                              bool
 	Keyword                             string
+	ClientPrefixSpec                    *OSSHPrefixSpec
+	ServerPrefixSpecs                   transforms.Specs
+	OSSHPrefixSplitConfig               *OSSHPrefixSplitConfig
 	PaddingPRNGSeed                     *prng.Seed
 	MinPadding                          *int
 	MaxPadding                          *int
@@ -138,19 +186,25 @@ func NewClientObfuscator(
 		maxPadding = *config.MaxPadding
 	}
 
-	seedMessage, paddingLength, err := makeSeedMessage(
-		paddingPRNG, minPadding, maxPadding, obfuscatorSeed, clientToServerCipher)
+	preamble, prefixLen, prefixHeader, paddingLength, err := makeClientPreamble(
+		config.Keyword, config.ClientPrefixSpec,
+		paddingPRNG, minPadding, maxPadding, obfuscatorSeed,
+		clientToServerCipher)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	return &Obfuscator{
-		seedMessage:          seedMessage,
-		paddingLength:        paddingLength,
-		clientToServerCipher: clientToServerCipher,
-		serverToClientCipher: serverToClientCipher,
-		paddingPRNGSeed:      config.PaddingPRNGSeed,
-		paddingPRNG:          paddingPRNG}, nil
+		preamble:                 preamble,
+		preambleOSSHPrefixLength: prefixLen,
+		osshPrefixHeader:         prefixHeader,
+		osshPrefixSplitConfig:    config.OSSHPrefixSplitConfig,
+		keyword:                  config.Keyword,
+		paddingLength:            paddingLength,
+		clientToServerCipher:     clientToServerCipher,
+		serverToClientCipher:     serverToClientCipher,
+		paddingPRNGSeed:          config.PaddingPRNGSeed,
+		paddingPRNG:              paddingPRNG}, nil
 }
 
 // NewServerObfuscator creates a new Obfuscator, reading a seed message directly
@@ -169,18 +223,28 @@ func NewServerObfuscator(
 		return nil, errors.TraceNew("missing keyword")
 	}
 
-	clientToServerCipher, serverToClientCipher, paddingPRNGSeed, err := readSeedMessage(
+	clientToServerCipher, serverToClientCipher, paddingPRNGSeed, prefixHeader, err := readPreamble(
 		config, clientIP, clientReader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
+	preamble, prefixLen, err := makeServerPreamble(prefixHeader, config.ServerPrefixSpecs, config.Keyword)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	return &Obfuscator{
-		paddingLength:        -1,
-		clientToServerCipher: clientToServerCipher,
-		serverToClientCipher: serverToClientCipher,
-		paddingPRNGSeed:      paddingPRNGSeed,
-		paddingPRNG:          prng.NewPRNGWithSeed(paddingPRNGSeed),
+		preamble:                 preamble,
+		preambleOSSHPrefixLength: prefixLen,
+		osshPrefixHeader:         prefixHeader,
+		osshPrefixSplitConfig:    config.OSSHPrefixSplitConfig,
+		keyword:                  config.Keyword,
+		paddingLength:            -1,
+		clientToServerCipher:     clientToServerCipher,
+		serverToClientCipher:     serverToClientCipher,
+		paddingPRNGSeed:          paddingPRNGSeed,
+		paddingPRNG:              prng.NewPRNGWithSeed(paddingPRNGSeed),
 	}, nil
 }
 
@@ -192,7 +256,20 @@ func NewServerObfuscator(
 // client, so derived PRNGs may be used to replay sequences post-initial
 // obfuscator message.
 func (obfuscator *Obfuscator) GetDerivedPRNG(salt string) (*prng.PRNG, error) {
-	return prng.NewPRNGWithSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	seed, err := prng.NewPRNGWithSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	return seed, errors.Trace(err)
+}
+
+// GetDerivedPRNGSeed creates a new PRNG seed derived from the obfuscator
+// padding seed and distinguished by the salt, which should be a unique
+// identifier for each usage context.
+//
+// For NewServerObfuscator, the obfuscator padding seed is obtained from the
+// client, so derived seeds may be used to replay sequences post-initial
+// obfuscator message.
+func (obfuscator *Obfuscator) GetDerivedPRNGSeed(salt string) (*prng.Seed, error) {
+	seed, err := prng.NewSaltedSeed(obfuscator.paddingPRNGSeed, salt)
+	return seed, errors.Trace(err)
 }
 
 // GetPaddingLength returns the client seed message padding length. Only valid
@@ -201,12 +278,14 @@ func (obfuscator *Obfuscator) GetPaddingLength() int {
 	return obfuscator.paddingLength
 }
 
-// SendSeedMessage returns the seed message created in NewObfuscatorClient,
-// removing the reference so that it may be garbage collected.
-func (obfuscator *Obfuscator) SendSeedMessage() []byte {
-	seedMessage := obfuscator.seedMessage
-	obfuscator.seedMessage = nil
-	return seedMessage
+// SendPreamble returns the preamble created in NewObfuscatorClient or
+// NewServerObfuscator, removing the reference so that it may be garbage collected.
+func (obfuscator *Obfuscator) SendPreamble() ([]byte, int) {
+	msg := obfuscator.preamble
+	prefixLen := obfuscator.preambleOSSHPrefixLength
+	obfuscator.preamble = nil
+	obfuscator.preambleOSSHPrefixLength = 0
+	return msg, prefixLen
 }
 
 // ObfuscateClientToServer applies the client RC4 stream to the bytes in buffer.
@@ -262,158 +341,437 @@ func deriveKey(obfuscatorSeed, keyword, iv []byte) ([]byte, error) {
 	return digest[0:OBFUSCATE_KEY_LENGTH], nil
 }
 
-func makeSeedMessage(
+// makeClientPreamble generates the preamble bytes for the Obfuscated SSH protocol.
+//
+// If a prefix is applied, preamble bytes refer to the prefix, prefix terminator,
+// followed by the Obufscted SSH initial client message, followed by the
+// prefix header.
+//
+// If a prefix is not applied, preamble bytes refer to the Obfuscated SSH
+// initial client message (referred to as the "seed message" in the original spec):
+// https://github.com/brl/obfuscated-openssh/blob/master/README.obfuscation
+//
+// Obfuscated SSH initial client message (no prefix):
+//
+//	[ 16 byte random seed ][ OSSH magic ][ padding length ][ padding ]
+//	|_____________________||_________________________________________|
+//
+//	        |                                 |
+//	     Plaintext             Encrypted with key derived from seed
+//
+// Prefix + Obfuscated SSH initial client message:
+//
+//	[ 24+ byte prefix ][ terminator ][ OSSH initial client message ][ prefix header ]
+//	|_________________||____________________________________________________________|
+//
+//	        |                                 |
+//	     Plaintext             Encrypted with key derived from first 24 bytes
+//
+// Returns the preamble, the prefix header if a prefix was generated,
+// and the padding length.
+func makeClientPreamble(
+	keyword string,
+	prefixSpec *OSSHPrefixSpec,
 	paddingPRNG *prng.PRNG,
 	minPadding, maxPadding int,
 	obfuscatorSeed []byte,
-	clientToServerCipher *rc4.Cipher) ([]byte, int, error) {
+	clientToServerCipher *rc4.Cipher) ([]byte, int, *OSSHPrefixHeader, int, error) {
 
 	padding := paddingPRNG.Padding(minPadding, maxPadding)
 	buffer := new(bytes.Buffer)
+	magicValueStartIndex := len(obfuscatorSeed)
+
+	prefixLen := 0
+
+	if prefixSpec != nil {
+		var b []byte
+		var err error
+		b, prefixLen, err = makeTerminatedPrefixWithPadding(prefixSpec, keyword, OBFUSCATE_CLIENT_TO_SERVER_IV)
+		if err != nil {
+			return nil, 0, nil, 0, errors.Trace(err)
+		}
+
+		_, err = buffer.Write(b)
+		if err != nil {
+			return nil, 0, nil, 0, errors.Trace(err)
+		}
+
+		magicValueStartIndex += len(b)
+	}
+
 	err := binary.Write(buffer, binary.BigEndian, obfuscatorSeed)
 	if err != nil {
-		return nil, 0, errors.Trace(err)
+		return nil, 0, nil, 0, errors.Trace(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, uint32(OBFUSCATE_MAGIC_VALUE))
 	if err != nil {
-		return nil, 0, errors.Trace(err)
+		return nil, 0, nil, 0, errors.Trace(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, uint32(len(padding)))
 	if err != nil {
-		return nil, 0, errors.Trace(err)
+		return nil, 0, nil, 0, errors.Trace(err)
 	}
 	err = binary.Write(buffer, binary.BigEndian, padding)
 	if err != nil {
-		return nil, 0, errors.Trace(err)
+		return nil, 0, nil, 0, errors.Trace(err)
 	}
-	seedMessage := buffer.Bytes()
-	clientToServerCipher.XORKeyStream(seedMessage[len(obfuscatorSeed):], seedMessage[len(obfuscatorSeed):])
-	return seedMessage, len(padding), nil
+
+	var prefixHeader *OSSHPrefixHeader = nil
+	if prefixSpec != nil {
+		// Writes the prefix header after the padding.
+		err := prefixSpec.writePrefixHeader(buffer)
+		if err != nil {
+			return nil, 0, nil, 0, errors.Trace(err)
+		}
+
+		prefixHeader = &OSSHPrefixHeader{
+			SpecName: prefixSpec.Name,
+		}
+	}
+
+	preamble := buffer.Bytes()
+
+	// Encryptes what comes after the magic value.
+	clientToServerCipher.XORKeyStream(
+		preamble[magicValueStartIndex:],
+		preamble[magicValueStartIndex:])
+
+	return preamble, prefixLen, prefixHeader, len(padding), nil
 }
 
-func readSeedMessage(
-	config *ObfuscatorConfig,
-	clientIP string,
-	clientReader io.Reader) (*rc4.Cipher, *rc4.Cipher, *prng.Seed, error) {
+// makeServerPreamble generates a server preamble (prefix or nil).
+// If the header is nil, nil is returned. Otherwise, prefix is generated
+// from serverSpecs matching the spec name in the header.
+// If the spec name is not found in serverSpecs, random bytes
+// of length PREAMBLE_HEADER_LENGTH are returned.
+func makeServerPreamble(
+	header *OSSHPrefixHeader,
+	serverSpecs transforms.Specs,
+	keyword string) ([]byte, int, error) {
 
-	seed := make([]byte, OBFUSCATE_SEED_LENGTH)
-	_, err := io.ReadFull(clientReader, seed)
-	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
+	if header == nil {
+		return nil, 0, nil
 	}
 
-	// Irregular events that indicate an invalid client are logged via
-	// IrregularLogger. Note that event detection isn't infallible. For example,
-	// a man-in-the-middle may have manipulated the seed message sent by a valid
-	// client; or with a very small probability a valid client may generate a
-	// duplicate seed message.
-	//
-	// Another false positive case: a retired server IP may be recycled and
-	// deployed with a new obfuscation key; legitimate clients may still attempt
-	// to connect using the old obfuscation key; this case is partically
-	// mitigated by the server entry pruning mechanism.
-	//
-	// Network I/O failures (e.g., failure to read the expected number of seed
-	// message bytes) are not considered a reliable indicator of irregular
-	// events.
+	spec, ok := serverSpecs[header.SpecName]
+	if !ok {
+		// Generate a random prefix if the spec is not found.
+		spec = transforms.Spec{{"", fmt.Sprintf(`[\x00-\xff]{%d}`, PREAMBLE_HEADER_LENGTH)}}
+	}
+
+	seed, err := prng.NewSeed()
+	if err != nil {
+		return nil, 0, errors.Trace(err)
+	}
+
+	prefixSpec := &OSSHPrefixSpec{
+		Name: header.SpecName,
+		Spec: spec,
+		Seed: seed,
+	}
+	return makeTerminatedPrefixWithPadding(prefixSpec, keyword, OBFUSCATE_SERVER_TO_CLIENT_IV)
+}
+
+// readPreamble reads the preamble bytes from the client. If it does not detect
+// valid magic value in the first 24 bytes, it assumes that a prefix is applied.
+// If a prefix is applied, it first discard the prefix and the terminator, before
+// looking for a valid Obfuscated SSH initial client message.
+func readPreamble(
+	config *ObfuscatorConfig,
+	clientIP string,
+	clientReader io.Reader) (*rc4.Cipher, *rc4.Cipher, *prng.Seed, *OSSHPrefixHeader, error) {
+	return readPreambleHelper(config, clientIP, clientReader, false)
+}
+
+func readPreambleHelper(
+	config *ObfuscatorConfig,
+	clientIP string,
+	clientReader io.Reader,
+	removedPrefix bool) (*rc4.Cipher, *rc4.Cipher, *prng.Seed, *OSSHPrefixHeader, error) {
 
 	// To distinguish different cases, irregular tunnel logs should indicate
 	// which function called NewServerObfuscator.
 	errBackTrace := "obfuscator.NewServerObfuscator"
 
-	if config.SeedHistory != nil {
-		ok, duplicateLogFields := config.SeedHistory.AddNew(
-			config.StrictHistoryMode, clientIP, "obfuscator-seed", seed)
-		errStr := "duplicate obfuscation seed"
-		if duplicateLogFields != nil {
-			if config.IrregularLogger != nil {
-				config.IrregularLogger(
-					clientIP,
-					errors.BackTraceNew(errBackTrace, errStr),
-					*duplicateLogFields)
-			}
-		}
-		if !ok {
-			return nil, nil, nil, errors.TraceNew(errStr)
-		}
-	}
+	// Since the OSSH stream might be prefixed, the seed might not be the first
+	// 16 bytes of the stream. The stream is read until valid magic value
+	// is detected, PREFIX_MAX_LENGTH is reached, or until the stream is exhausted.
+	// If the magic value is found, the seed is the 16 bytes before the magic value,
+	// and is added to and checked against the seed history.
 
-	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(config, seed)
+	preambleHeader := make([]byte, PREAMBLE_HEADER_LENGTH)
+	_, err := io.ReadFull(clientReader, preambleHeader)
 	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
+		return nil, nil, nil, nil, errors.Trace(err)
 	}
 
-	fixedLengthFields := make([]byte, 8) // 4 bytes each for magic value and padding length
-	_, err = io.ReadFull(clientReader, fixedLengthFields)
+	osshSeed := preambleHeader[:OBFUSCATE_SEED_LENGTH]
+
+	clientToServerCipher, serverToClientCipher, err := initObfuscatorCiphers(
+		config, osshSeed)
 	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
+		return nil, nil, nil, nil, errors.Trace(err)
 	}
 
-	clientToServerCipher.XORKeyStream(fixedLengthFields, fixedLengthFields)
-
-	buffer := bytes.NewReader(fixedLengthFields)
+	osshFixedLengthFields := make([]byte, 8) // 4 bytes each for magic value and padding length
+	clientToServerCipher.XORKeyStream(osshFixedLengthFields, preambleHeader[OBFUSCATE_SEED_LENGTH:])
 
 	// The magic value must be validated before acting on paddingLength as
 	// paddingLength validation is vulnerable to a chosen ciphertext probing
 	// attack: only a fixed number of any possible byte value for each
 	// paddingLength is valid.
 
+	buffer := bytes.NewReader(osshFixedLengthFields)
 	var magicValue, paddingLength int32
 	err = binary.Read(buffer, binary.BigEndian, &magicValue)
 	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
+		return nil, nil, nil, nil, errors.Trace(err)
 	}
 	err = binary.Read(buffer, binary.BigEndian, &paddingLength)
 	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
+		return nil, nil, nil, nil, errors.Trace(err)
 	}
 
-	errStr := ""
-
-	if magicValue != OBFUSCATE_MAGIC_VALUE {
-		errStr = "invalid magic value"
-	}
-
-	if errStr == "" && (paddingLength < 0 || paddingLength > OBFUSCATE_MAX_PADDING) {
-		errStr = "invalid padding length"
-	}
-
-	if errStr != "" {
+	if magicValue != OBFUSCATE_MAGIC_VALUE && removedPrefix {
+		// Prefix terminator was found, but rest of the stream is not valid
+		// Obfuscated SSH.
+		errStr := "invalid magic value"
 		if config.IrregularLogger != nil {
 			config.IrregularLogger(
 				clientIP,
 				errors.BackTraceNew(errBackTrace, errStr),
 				nil)
 		}
-		return nil, nil, nil, errors.TraceNew(errStr)
+		return nil, nil, nil, nil, errors.TraceNew(errStr)
 	}
 
-	padding := make([]byte, paddingLength)
-	_, err = io.ReadFull(clientReader, padding)
-	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
-	}
+	if magicValue == OBFUSCATE_MAGIC_VALUE {
 
-	clientToServerCipher.XORKeyStream(padding, padding)
-
-	// Use the first prng.SEED_LENGTH bytes of padding as a PRNG seed for
-	// subsequent operations. This allows the client to direct server-side
-	// replay of certain protocol attributes.
-	//
-	// Since legacy clients may send < prng.SEED_LENGTH bytes of padding,
-	// generate a new seed in that case.
-
-	var paddingPRNGSeed *prng.Seed
-
-	if len(padding) >= prng.SEED_LENGTH {
-		paddingPRNGSeed = new(prng.Seed)
-		copy(paddingPRNGSeed[:], padding[0:prng.SEED_LENGTH])
-	} else {
-		paddingPRNGSeed, err = prng.NewSeed()
-		if err != nil {
-			return nil, nil, nil, errors.Trace(err)
+		if config.SeedHistory != nil {
+			// Adds the seed to the seed history only if the magic value is valid.
+			// This is to prevent malicious clients from filling up the history cache.
+			ok, duplicateLogFields := config.SeedHistory.AddNew(
+				config.StrictHistoryMode, clientIP, "obfuscator-seed", osshSeed)
+			errStr := "duplicate obfuscation seed"
+			if duplicateLogFields != nil {
+				if config.IrregularLogger != nil {
+					config.IrregularLogger(
+						clientIP,
+						errors.BackTraceNew(errBackTrace, errStr),
+						*duplicateLogFields)
+				}
+			}
+			if !ok {
+				return nil, nil, nil, nil, errors.TraceNew(errStr)
+			}
 		}
+
+		if paddingLength < 0 || paddingLength > OBFUSCATE_MAX_PADDING {
+			errStr := "invalid padding length"
+			if config.IrregularLogger != nil {
+				config.IrregularLogger(
+					clientIP,
+					errors.BackTraceNew(errBackTrace, errStr),
+					nil)
+			}
+			return nil, nil, nil, nil, errors.TraceNew(errStr)
+		}
+
+		padding := make([]byte, paddingLength)
+		_, err = io.ReadFull(clientReader, padding)
+		if err != nil {
+			return nil, nil, nil, nil, errors.Trace(err)
+		}
+		clientToServerCipher.XORKeyStream(padding, padding)
+
+		var prefixHeader *OSSHPrefixHeader = nil
+		if removedPrefix {
+			// This is a valid prefixed OSSH stream.
+			prefixHeader, err = readPrefixHeader(clientReader, clientToServerCipher)
+			if err != nil {
+				if config.IrregularLogger != nil {
+					config.IrregularLogger(
+						clientIP,
+						errors.BackTraceNew(errBackTrace, "invalid prefix header"),
+						nil)
+				}
+				return nil, nil, nil, nil, errors.Trace(err)
+			}
+		}
+
+		// Use the first prng.SEED_LENGTH bytes of padding as a PRNG seed for
+		// subsequent operations. This allows the client to direct server-side
+		// replay of certain protocol attributes.
+		//
+		// Since legacy clients may send < prng.SEED_LENGTH bytes of padding,
+		// generate a new seed in that case.
+
+		var paddingPRNGSeed *prng.Seed
+
+		if len(padding) >= prng.SEED_LENGTH {
+			paddingPRNGSeed = new(prng.Seed)
+			copy(paddingPRNGSeed[:], padding[0:prng.SEED_LENGTH])
+		} else {
+			paddingPRNGSeed, err = prng.NewSeed()
+			if err != nil {
+				return nil, nil, nil, nil, errors.Trace(err)
+			}
+		}
+
+		return clientToServerCipher, serverToClientCipher, paddingPRNGSeed, prefixHeader, nil
 	}
 
-	return clientToServerCipher, serverToClientCipher, paddingPRNGSeed, nil
+	if !removedPrefix {
+		// No magic value found, could be a prefixed OSSH stream.
+		// Skips up to the prefix terminator, and looks for the magic value again.
+
+		clientReader, ok := clientReader.(*SkipReader)
+		if !ok {
+			return nil, nil, nil, nil, errors.TraceNew("expected SkipReader")
+		}
+
+		terminator, err := makeTerminator(config.Keyword, preambleHeader, OBFUSCATE_CLIENT_TO_SERVER_IV)
+		if err != nil {
+			return nil, nil, nil, nil, errors.Trace(err)
+		}
+
+		err = clientReader.SkipUpToToken(terminator, PREFIX_TERM_SEARCH_BUF_SIZE, PREFIX_MAX_LENGTH)
+		if err != nil {
+			// No magic value or prefix terminator found,
+			// log irregular tunnel and return error.
+			errStr := "no prefix terminator or invalid magic value"
+			if config.IrregularLogger != nil {
+				config.IrregularLogger(
+					clientIP,
+					errors.BackTraceNew(errBackTrace, errStr),
+					nil)
+			}
+			return nil, nil, nil, nil, errors.TraceNew(errStr)
+		}
+
+		// Reads OSSH initial client message followed by prefix header.
+		return readPreambleHelper(config, clientIP, clientReader, true)
+	}
+
+	// Should never reach here.
+	return nil, nil, nil, nil, errors.TraceNew("unexpected error")
+}
+
+// makeTerminator generates a prefix terminator used in finding end of prefix
+// placed before OSSH stream.
+// b should be at least PREAMBLE_HEADER_LENGTH bytes and contain enough entropy.
+func makeTerminator(keyword string, b []byte, direction string) ([]byte, error) {
+
+	// Bytes length is at least equal to obfuscator seed message.
+	if len(b) < PREAMBLE_HEADER_LENGTH {
+		return nil, errors.TraceNew("bytes too short")
+	}
+
+	if (direction != OBFUSCATE_CLIENT_TO_SERVER_IV) &&
+		(direction != OBFUSCATE_SERVER_TO_CLIENT_IV) {
+		return nil, errors.TraceNew("invalid direction")
+	}
+
+	hkdf := hkdf.New(sha256.New,
+		[]byte(keyword),
+		b[:PREAMBLE_HEADER_LENGTH],
+		[]byte(direction))
+
+	terminator := make([]byte, PREFIX_TERMINATOR_LENGTH)
+	_, err := io.ReadFull(hkdf, terminator)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return terminator, nil
+}
+
+// makeTerminatedPrefixWithPadding generates bytes starting with the prefix bytes defiend
+// by spec and ending with the generated terminator.
+// If the generated prefix is shorter than PREAMBLE_HEADER_LENGTH, it is padded
+// with random bytes.
+// Returns the generated prefix with teminator, and the length of the prefix if no error.
+func makeTerminatedPrefixWithPadding(spec *OSSHPrefixSpec, keyword, direction string) ([]byte, int, error) {
+
+	prefix, prefixLen, err := spec.Spec.ApplyPrefix(spec.Seed, PREAMBLE_HEADER_LENGTH)
+	if err != nil {
+		return nil, 0, errors.Trace(err)
+	}
+
+	terminator, err := makeTerminator(keyword, prefix, direction)
+
+	if err != nil {
+		return nil, 0, errors.Trace(err)
+	}
+	terminatedPrefix := append(prefix, terminator...)
+
+	return terminatedPrefix, prefixLen, nil
+}
+
+// writePrefixHeader writes the prefix header to the given writer.
+// The prefix header is written in the following format:
+//
+// [ 2 byte version ][4 byte spec-length ][ .. prefix-spec-name ...]
+func (spec *OSSHPrefixSpec) writePrefixHeader(w io.Writer) error {
+	if len(spec.Name) > PREFIX_MAX_HEADER_LENGTH {
+		return errors.TraceNew("prefix name too long")
+	}
+	err := binary.Write(w, binary.BigEndian, uint16(0x01))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	err = binary.Write(w, binary.BigEndian, uint16(len(spec.Name)))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	_, err = w.Write([]byte(spec.Name))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return nil
+}
+
+func readPrefixHeader(
+	clientReader io.Reader,
+	cipher *rc4.Cipher) (*OSSHPrefixHeader, error) {
+
+	fixedLengthFields := make([]byte, 4)
+	_, err := io.ReadFull(clientReader, fixedLengthFields)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cipher.XORKeyStream(fixedLengthFields, fixedLengthFields)
+
+	buffer := bytes.NewBuffer(fixedLengthFields)
+	var version uint16
+	err = binary.Read(buffer, binary.BigEndian, &version)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if version != 0x01 {
+		return nil, errors.TraceNew("invalid version")
+	}
+
+	var specLen uint16
+	err = binary.Read(buffer, binary.BigEndian, &specLen)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if specLen > PREFIX_MAX_HEADER_LENGTH {
+		return nil, errors.TraceNew("invalid header length")
+	}
+
+	// Read the spec name.
+	specName := make([]byte, specLen)
+	_, err = io.ReadFull(clientReader, specName)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	cipher.XORKeyStream(specName, specName)
+
+	return &OSSHPrefixHeader{
+		SpecName: string(specName),
+	}, nil
 }

@@ -1,7 +1,6 @@
 package h2quic
 
 import (
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -11,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	quic "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/internal/protocol"
@@ -38,6 +39,9 @@ var (
 // Server is a HTTP2 server listening for QUIC connections.
 type Server struct {
 	*http.Server
+
+	// Overriding http.Server.TLSConfig to use psiphon-tls fork of crypto/tls.
+	TLSConfig *tls.Config
 
 	// By providing a quic.Config, it is possible to set parameters of the QUIC connection.
 	// If nil, it uses reasonable default values.
@@ -278,7 +282,8 @@ func (s *Server) CloseGracefully(timeout time.Duration) error {
 
 // SetQuicHeaders can be used to set the proper headers that announce that this server supports QUIC.
 // The values that are set depend on the port information from s.Server.Addr, and currently look like this (if Addr has port 443):
-//  Alt-Svc: quic=":443"; ma=2592000; v="33,32,31,30"
+//
+//	Alt-Svc: quic=":443"; ma=2592000; v="33,32,31,30"
 func (s *Server) SetQuicHeaders(hdr http.Header) error {
 	port := atomic.LoadUint32(&s.port)
 
@@ -366,8 +371,7 @@ func ListenAndServe(addr, certFile, keyFile string, handler http.Handler) error 
 
 	// Start the servers
 	httpServer := &http.Server{
-		Addr:      addr,
-		TLSConfig: config,
+		Addr: addr,
 	}
 
 	quicServer := &Server{

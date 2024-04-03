@@ -31,6 +31,12 @@ func NewReader(src io.Reader) *Reader {
 // This permits reusing a Reader rather than allocating a new one.
 // Error is always nil
 func (r *Reader) Reset(src io.Reader) error {
+	if r.error_code < 0 {
+		// There was an unrecoverable error, leaving the Reader's state
+		// undefined. Clear out everything but the buffer.
+		*r = Reader{buf: r.buf}
+	}
+
 	decoderStateInit(r)
 	r.src = src
 	if r.buf == nil {

@@ -37,6 +37,38 @@ type CustomTLSProfile struct {
 
 type CustomTLSProfiles []*CustomTLSProfile
 
+// Redefined uTLS extensions.
+// uTLS added Unmarshaler interface to it's TLS extensions, which is not compatible
+// with currently deployed tactics. We redefine the types to maintain
+// compatibility. This may change in the future.
+type NPNExtensionCompat utls.NPNExtension
+type SNIExtensionCompat utls.SNIExtension
+type StatusRequestExtensionCompat utls.StatusRequestExtension
+type SupportedCurvesExtensionCompat utls.SupportedCurvesExtension
+type SupportedPointsExtensionCompat utls.SupportedPointsExtension
+type SignatureAlgorithmsExtensionCompat utls.SignatureAlgorithmsExtension
+type RenegotiationInfoExtensionCompat utls.RenegotiationInfoExtension
+type ALPNExtensionCompat utls.ALPNExtension
+type SCTExtensionCompat utls.SCTExtension
+type SessionTicketExtensionCompat utls.SessionTicketExtension
+type GenericExtensionCompat utls.GenericExtension
+type UtlsExtendedMasterSecretExtensionCompat utls.UtlsExtendedMasterSecretExtension
+type UtlsGREASEExtensionCompat utls.UtlsGREASEExtension
+type UtlsPaddingExtensionCompat utls.UtlsPaddingExtension
+type PSKKeyExchangeModesExtensionCompat utls.PSKKeyExchangeModesExtension
+type SupportedVersionsExtensionCompat utls.SupportedVersionsExtension
+type FakeChannelIDExtensionCompat utls.FakeChannelIDExtension
+type UtlsCompressCertExtensionCompat utls.UtlsCompressCertExtension
+type FakeRecordSizeLimitExtensionCompat utls.FakeRecordSizeLimitExtension
+type ApplicationSettingsExtensionCompat utls.ApplicationSettingsExtension
+type DelegatedCredentialsExtensionCompat utls.DelegatedCredentialsExtension
+type KeyShareExtensionCompat struct {
+	KeyShares []struct {
+		Group utls.CurveID
+		Data  []byte
+	}
+}
+
 // Validate checks that the profiles in CustomTLSProfiles are initialized and
 // have no name conflicts.
 func (profiles CustomTLSProfiles) Validate() error {
@@ -120,62 +152,69 @@ type UTLSExtension struct {
 func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 	switch e.Name {
 	case "NPN":
-		var extension *utls.NPNExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat NPNExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.NPNExtension(compat)
+		return &extension, nil
 	case "SNI":
 		return &utls.SNIExtension{}, nil
 	case "StatusRequest":
 		return &utls.StatusRequestExtension{}, nil
 	case "SupportedCurves":
-		var extension *utls.SupportedCurvesExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat SupportedCurvesExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.SupportedCurvesExtension(compat)
+		return &extension, nil
 	case "SupportedPoints":
-		var extension *utls.SupportedPointsExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat SupportedPointsExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.SupportedPointsExtension(compat)
+		return &extension, nil
 	case "SignatureAlgorithms":
-		var extension *utls.SignatureAlgorithmsExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat SignatureAlgorithmsExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.SignatureAlgorithmsExtension(compat)
+		return &extension, nil
 	case "RenegotiationInfo":
-		var extension *utls.RenegotiationInfoExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat RenegotiationInfoExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.RenegotiationInfoExtension(compat)
+		return &extension, nil
 	case "ALPN":
-		var extension *utls.ALPNExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat ALPNExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.ALPNExtension(compat)
+		return &extension, nil
 	case "SCT":
 		return &utls.SCTExtension{}, nil
 	case "SessionTicket":
 		return &utls.SessionTicketExtension{}, nil
 	case "Generic":
-		var extension *utls.GenericExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat GenericExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.GenericExtension(compat)
+		return &extension, nil
 	case "ExtendedMasterSecret":
 		return &utls.UtlsExtendedMasterSecretExtension{}, nil
 	case "GREASE":
@@ -183,56 +222,71 @@ func (e *UTLSExtension) GetUTLSExtension() (utls.TLSExtension, error) {
 	case "BoringPadding":
 		return &utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle}, nil
 	case "KeyShare":
-		var extension *utls.KeyShareExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat KeyShareExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.KeyShareExtension{
+			KeyShares: make([]utls.KeyShare, len(compat.KeyShares)),
+		}
+		for i, keyShare := range compat.KeyShares {
+			extension.KeyShares[i] = utls.KeyShare{
+				Group: keyShare.Group,
+				Data:  keyShare.Data,
+			}
+		}
+		return &extension, nil
 	case "PSKKeyExchangeModes":
-		var extension *utls.PSKKeyExchangeModesExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat PSKKeyExchangeModesExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.PSKKeyExchangeModesExtension(compat)
+		return &extension, nil
 	case "SupportedVersions":
-		var extension *utls.SupportedVersionsExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat SupportedVersionsExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.SupportedVersionsExtension(compat)
+		return &extension, nil
 	case "ChannelID":
 		return &utls.FakeChannelIDExtension{}, nil
 	case "CertCompressionAlgs":
-		var extension *utls.UtlsCompressCertExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat UtlsCompressCertExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.UtlsCompressCertExtension(compat)
+		return &extension, nil
 	case "RecordSizeLimit":
-		var extension *utls.FakeRecordSizeLimitExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat FakeRecordSizeLimitExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.FakeRecordSizeLimitExtension(compat)
+		return &extension, nil
 	case "ALPS":
-		var extension *utls.ApplicationSettingsExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat ApplicationSettingsExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.ApplicationSettingsExtension(compat)
+		return &extension, nil
 	case "DelegatedCredentials":
-		var extension *utls.DelegatedCredentialsExtension
-		err := json.Unmarshal(e.Data, &extension)
+		var compat DelegatedCredentialsExtensionCompat
+		err := json.Unmarshal(e.Data, &compat)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return extension, nil
+		extension := utls.DelegatedCredentialsExtension(compat)
+		return &extension, nil
 	}
 
 	return nil, errors.Tracef("unknown utls extension: %s", e.Name)

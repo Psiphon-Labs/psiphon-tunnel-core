@@ -24,10 +24,10 @@ package quic
 
 import (
 	"context"
-	"crypto/tls"
 	"net"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/h2quic"
@@ -111,6 +111,13 @@ func gQUICDialContext(
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
 	versionNumber uint32) (quicConnection, error) {
+
+	// The legacy gquic-go fork expects a port number in the SNI field
+	// (which is then stripped). Add a stub port value if none is present.
+	_, _, err := net.SplitHostPort(quicSNIAddress)
+	if err != nil {
+		quicSNIAddress = net.JoinHostPort(quicSNIAddress, "0")
+	}
 
 	quicConfig := &gquic.Config{
 		HandshakeTimeout: time.Duration(1<<63 - 1),

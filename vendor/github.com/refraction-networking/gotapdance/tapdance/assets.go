@@ -5,16 +5,16 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
 	"strings"
 	"sync"
 
-	"github.com/golang/protobuf/proto"
-	pb "github.com/refraction-networking/gotapdance/protobuf"
-	ps "github.com/refraction-networking/gotapdance/tapdance/phantoms"
+	ps "github.com/refraction-networking/conjure/pkg/phantoms"
+	pb "github.com/refraction-networking/conjure/proto"
+
+	"google.golang.org/protobuf/proto"
 )
 
 type assets struct {
@@ -39,6 +39,11 @@ var assetsOnce sync.Once
 // First access to singleton sets path. Assets(), if called
 // before SetAssetsDir() sets path to "./assets/"
 func Assets() *assets {
+	// We leave this warning here, because only Tapdance should
+	// use this instance. Conjure uses assets provided by
+	// github.com/refraction-networking/conjure/pkg/client/assets
+	// and this Assets (and Tapdance as a whole) is deprecated
+	Logger().Warnf("Loading TapDance Assets...(deprecated; use conjure assets)")
 	var err error
 	_initAssets := func() { err = initAssets("./assets/") }
 	assetsOnce.Do(_initAssets)
@@ -102,11 +107,28 @@ func initAssets(path string) error {
 
 	defaultGeneration := uint32(1)
 	defaultDecoyList := pb.DecoyList{TlsDecoys: defaultDecoys}
+	defaultDnsRegDomain := "r.refraction.network"
+	defaultDnsRegDohUrl := "https://1.1.1.1/dns-query"
+	defaultStunServer := "stun.voip.blackberry.com:3478"
+	defaultDnsRegPubkey := getDefaultKey()
+	defaultDnsRegUtlsDistribution := "3*Firefox_65,1*Firefox_63,1*iOS_12_1"
+	defaultDnsRegMethod := pb.DnsRegMethod_DOH
+
+	defaultDnsRegConf := pb.DnsRegConf{
+		DnsRegMethod:     &defaultDnsRegMethod,
+		Target:           &defaultDnsRegDohUrl,
+		Domain:           &defaultDnsRegDomain,
+		Pubkey:           defaultDnsRegPubkey,
+		UtlsDistribution: &defaultDnsRegUtlsDistribution,
+		StunServer:       &defaultStunServer,
+	}
+
 	defaultClientConf := pb.ClientConf{
 		DecoyList:     &defaultDecoyList,
 		DefaultPubkey: &defaultPubKey,
 		ConjurePubkey: &defaultConjurePubKey,
 		Generation:    &defaultGeneration,
+		DnsRegConf:    &defaultDnsRegConf,
 	}
 
 	assetsInstance = &assets{
@@ -126,23 +148,29 @@ func (a *assets) GetAssetsDir() string {
 	return a.path
 }
 
+func (a *assets) GetDNSRegConf() *pb.DnsRegConf {
+	a.RLock()
+	defer a.RUnlock()
+	return a.config.DnsRegConf
+}
+
 func (a *assets) readConfigs() error {
 	readRoots := func(filename string) error {
-		rootCerts, err := ioutil.ReadFile(filename)
+		rootCerts, err := os.ReadFile(filename)
 		if err != nil {
 			return err
 		}
 		roots := x509.NewCertPool()
 		ok := roots.AppendCertsFromPEM(rootCerts)
 		if !ok {
-			return errors.New("Failed to parse root certificates")
+			return errors.New("failed to parse root certificates")
 		}
 		a.roots = roots
 		return nil
 	}
 
 	readClientConf := func(filename string) error {
-		buf, err := ioutil.ReadFile(filename)
+		buf, err := os.ReadFile(filename)
 		if err != nil {
 			return err
 		}
@@ -381,7 +409,7 @@ func (a *assets) saveClientConf() error {
 	}
 	filename := path.Join(a.path, a.filenameClientConf)
 	tmpFilename := path.Join(a.path, "."+a.filenameClientConf+"."+getRandString(5)+".tmp")
-	err = ioutil.WriteFile(tmpFilename, buf[:], 0644)
+	err = os.WriteFile(tmpFilename, buf[:], 0644)
 	if err != nil {
 		return err
 	}

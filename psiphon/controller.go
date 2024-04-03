@@ -87,6 +87,7 @@ type Controller struct {
 	packetTunnelTransport                   *PacketTunnelTransport
 	staggerMutex                            sync.Mutex
 	resolver                                *resolver.Resolver
+	steeringIPCache                         *lrucache.Cache
 }
 
 // NewController initializes a new controller.
@@ -114,6 +115,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		p.Duration(parameters.SplitTunnelClassificationTTL)
 	splitTunnelClassificationMaxEntries :=
 		p.Int(parameters.SplitTunnelClassificationMaxEntries)
+	steeringIPCacheTTL := p.Duration(parameters.SteeringIPCacheTTL)
+	steeringIPCacheMaxEntries := p.Int(parameters.SteeringIPCacheMaxEntries)
 
 	controller = &Controller{
 		config:       config,
@@ -149,6 +152,11 @@ func NewController(config *Config) (controller *Controller, err error) {
 		// signalRestartEstablishing has a buffer of 1 to ensure sending the
 		// signal doesn't block and receiving won't miss a signal.
 		signalRestartEstablishing: make(chan struct{}, 1),
+
+		steeringIPCache: lrucache.NewWithLRU(
+			steeringIPCacheTTL,
+			1*time.Minute,
+			steeringIPCacheMaxEntries),
 	}
 
 	// Initialize untunneledDialConfig, used by untunneled dials including
@@ -159,8 +167,13 @@ func NewController(config *Config) (controller *Controller, err error) {
 		DeviceBinder:     controller.config.deviceBinder,
 		IPv6Synthesizer:  controller.config.IPv6Synthesizer,
 		ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
+			// Note: when domain fronting would be used for untunneled dials a
+			// copy of untunneledDialConfig should be used instead, which
+			// redefines ResolveIP such that the corresponding fronting
+			// provider ID is passed into UntunneledResolveIP to enable the use
+			// of pre-resolved IPs.
 			IPs, err := UntunneledResolveIP(
-				ctx, controller.config, controller.resolver, hostname)
+				ctx, controller.config, controller.resolver, hostname, "")
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -230,6 +243,11 @@ func (controller *Controller) Run(ctx context.Context) {
 	defer controller.resolver.Stop()
 	controller.config.SetResolver(controller.resolver)
 
+	// Maintain a cache of steering IPs to be applied to dials. A steering IP
+	// is an alternate dial IP; for example, steering IPs may be specified by
+	// a CDN service and used to load balance CDN traffic.
+	controller.steeringIPCache.Flush()
+
 	// TODO: IPv6 support
 	var listenIP string
 	if controller.config.ListenInterface == "" {
@@ -285,7 +303,7 @@ func (controller *Controller) Run(ctx context.Context) {
 		}
 	}
 
-	if controller.config.UpgradeDownloadURLs != nil {
+	if controller.config.EnableUpgradeDownload {
 		controller.runWaitGroup.Add(1)
 		go controller.upgradeDownloader()
 	}
@@ -2175,6 +2193,7 @@ loop:
 
 		dialParams, err := MakeDialParameters(
 			controller.config,
+			controller.steeringIPCache,
 			upstreamProxyErrorCallback,
 			canReplay,
 			selectProtocol,

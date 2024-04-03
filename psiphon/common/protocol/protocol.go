@@ -32,6 +32,7 @@ import (
 const (
 	TUNNEL_PROTOCOL_SSH                              = "SSH"
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH                   = "OSSH"
+	TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH               = "TLS-OSSH"
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK                   = "UNFRONTED-MEEK-OSSH"
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS             = "UNFRONTED-MEEK-HTTPS-OSSH"
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET    = "UNFRONTED-MEEK-SESSION-TICKET-OSSH"
@@ -85,9 +86,6 @@ const (
 
 	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
 
-	CONJURE_TRANSPORT_MIN_OSSH   = "Min-OSSH"
-	CONJURE_TRANSPORT_OBFS4_OSSH = "Obfs4-OSSH"
-
 	CAPABILITY_INPROXY = "inproxy"
 )
 
@@ -109,7 +107,8 @@ type TunnelProtocols []string
 
 func (t TunnelProtocols) Validate() error {
 	for _, p := range t {
-		if !common.Contains(SupportedTunnelProtocols, p) {
+		if !common.Contains(SupportedTunnelProtocols, p) ||
+			common.Contains(DisabledTunnelProtocols, p) {
 			return errors.Tracef("invalid tunnel protocol: %s", p)
 		}
 	}
@@ -119,7 +118,8 @@ func (t TunnelProtocols) Validate() error {
 func (t TunnelProtocols) PruneInvalid() TunnelProtocols {
 	u := make(TunnelProtocols, 0)
 	for _, p := range t {
-		if common.Contains(SupportedTunnelProtocols, p) {
+		if common.Contains(SupportedTunnelProtocols, p) &&
+			!common.Contains(DisabledTunnelProtocols, p) {
 			u = append(u, p)
 		}
 	}
@@ -149,6 +149,7 @@ func (labeledProtocols LabeledTunnelProtocols) PruneInvalid() LabeledTunnelProto
 var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_SSH,
 	TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
 	TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
@@ -166,6 +167,22 @@ var DefaultDisabledTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
 }
 
+// DisabledTunnelProtocols are protocols which are still integrated, but which
+// cannot be enabled in tactics and cannot be selected by clients.
+var DisabledTunnelProtocols = TunnelProtocols{
+
+	// TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH should not be reenabled without
+	// retesting the integration. github.com/refraction-networking/gotapdance
+	// and github.com/refraction-networking/conjure have undergone major
+	// changes since TapDance was last active and tested.
+	//
+	// Furthermore, existing deployed clients will use the same ClientConf for
+	// both TapDance and Conjure, which creates a risk that enabling TapDance
+	// via tactics may cause existing clients to use Conjure ClientConf
+	// decoys for TapDance, which may violate load assumptions.
+	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
+}
+
 func TunnelProtocolUsesTCP(protocol string) bool {
 	return protocol != TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
 		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
@@ -177,6 +194,13 @@ func TunnelProtocolUsesSSH(protocol string) bool {
 
 func TunnelProtocolUsesObfuscatedSSH(protocol string) bool {
 	return protocol != TUNNEL_PROTOCOL_SSH
+}
+
+// NOTE: breaks the naming convention of dropping the OSSH suffix because
+// UsesTLS is ambiguous by itself as there are other protocols which use
+// a TLS layer, e.g. UNFRONTED-MEEK-HTTPS-OSSH.
+func TunnelProtocolUsesTLSOSSH(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH
 }
 
 func TunnelProtocolUsesMeek(protocol string) bool {
@@ -241,6 +265,7 @@ func TunnelProtocolIsResourceIntensive(protocol string) bool {
 func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_SSH ||
 		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
@@ -249,14 +274,29 @@ func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH
 }
 
+func TunnelProtocolIsDirect(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_SSH ||
+		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
+		protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH
+}
+
 func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
+}
+
+func TunnelProtocolRequiresTLS13Support(protocol string) bool {
+	return protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH
 }
 
 func TunnelProtocolSupportsPassthrough(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
-		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
+		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH
 }
 
 func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
@@ -266,6 +306,7 @@ func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
 func TunnelProtocolMayUseServerPacketManipulation(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_SSH ||
 		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
@@ -311,26 +352,28 @@ func IsValidClientTunnelProtocol(
 }
 
 const (
-	TLS_VERSION_12 = "TLSv1.2"
-	TLS_VERSION_13 = "TLSv1.3"
-
-	TLS_PROFILE_IOS_111     = "iOS-11.1"
-	TLS_PROFILE_IOS_121     = "iOS-12.1"
-	TLS_PROFILE_IOS_13      = "iOS-13"
-	TLS_PROFILE_IOS_14      = "iOS-14"
-	TLS_PROFILE_CHROME_58   = "Chrome-58"
-	TLS_PROFILE_CHROME_62   = "Chrome-62"
-	TLS_PROFILE_CHROME_70   = "Chrome-70"
-	TLS_PROFILE_CHROME_72   = "Chrome-72"
-	TLS_PROFILE_CHROME_83   = "Chrome-83"
-	TLS_PROFILE_CHROME_96   = "Chrome-96"
-	TLS_PROFILE_CHROME_102  = "Chrome-102"
-	TLS_PROFILE_FIREFOX_55  = "Firefox-55"
-	TLS_PROFILE_FIREFOX_56  = "Firefox-56"
-	TLS_PROFILE_FIREFOX_65  = "Firefox-65"
-	TLS_PROFILE_FIREFOX_99  = "Firefox-99"
-	TLS_PROFILE_FIREFOX_105 = "Firefox-105"
-	TLS_PROFILE_RANDOMIZED  = "Randomized-v2"
+	TLS_VERSION_12             = "TLSv1.2"
+	TLS_VERSION_13             = "TLSv1.3"
+	TLS_PROFILE_IOS_111        = "iOS-11.1"
+	TLS_PROFILE_IOS_121        = "iOS-12.1"
+	TLS_PROFILE_IOS_13         = "iOS-13"
+	TLS_PROFILE_IOS_14         = "iOS-14"
+	TLS_PROFILE_SAFARI_16      = "Safari-16"
+	TLS_PROFILE_CHROME_58      = "Chrome-58"
+	TLS_PROFILE_CHROME_62      = "Chrome-62"
+	TLS_PROFILE_CHROME_70      = "Chrome-70"
+	TLS_PROFILE_CHROME_72      = "Chrome-72"
+	TLS_PROFILE_CHROME_83      = "Chrome-83"
+	TLS_PROFILE_CHROME_96      = "Chrome-96"
+	TLS_PROFILE_CHROME_102     = "Chrome-102"
+	TLS_PROFILE_CHROME_106     = "Chrome-106"
+	TLS_PROFILE_CHROME_112_PSK = "Chrome-112_PSK"
+	TLS_PROFILE_FIREFOX_55     = "Firefox-55"
+	TLS_PROFILE_FIREFOX_56     = "Firefox-56"
+	TLS_PROFILE_FIREFOX_65     = "Firefox-65"
+	TLS_PROFILE_FIREFOX_99     = "Firefox-99"
+	TLS_PROFILE_FIREFOX_105    = "Firefox-105"
+	TLS_PROFILE_RANDOMIZED     = "Randomized-v2"
 )
 
 var SupportedTLSProfiles = TLSProfiles{
@@ -338,6 +381,7 @@ var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_IOS_121,
 	TLS_PROFILE_IOS_13,
 	TLS_PROFILE_IOS_14,
+	TLS_PROFILE_SAFARI_16,
 	TLS_PROFILE_CHROME_58,
 	TLS_PROFILE_CHROME_62,
 	TLS_PROFILE_CHROME_70,
@@ -345,6 +389,8 @@ var SupportedTLSProfiles = TLSProfiles{
 	TLS_PROFILE_CHROME_83,
 	TLS_PROFILE_CHROME_96,
 	TLS_PROFILE_CHROME_102,
+	TLS_PROFILE_CHROME_106,
+	TLS_PROFILE_CHROME_112_PSK,
 	TLS_PROFILE_FIREFOX_55,
 	TLS_PROFILE_FIREFOX_56,
 	TLS_PROFILE_FIREFOX_65,
@@ -505,6 +551,43 @@ func (labeledVersions LabeledQUICVersions) PruneInvalid() LabeledQUICVersions {
 	return l
 }
 
+const (
+	CONJURE_TRANSPORT_MIN_OSSH    = "Min-OSSH"
+	CONJURE_TRANSPORT_PREFIX_OSSH = "Prefix-OSSH"
+	CONJURE_TRANSPORT_DTLS_OSSH   = "DTLS-OSSH"
+)
+
+var SupportedConjureTransports = ConjureTransports{
+	CONJURE_TRANSPORT_MIN_OSSH,
+	CONJURE_TRANSPORT_PREFIX_OSSH,
+	CONJURE_TRANSPORT_DTLS_OSSH,
+}
+
+func ConjureTransportUsesSTUN(transport string) bool {
+	return transport == CONJURE_TRANSPORT_DTLS_OSSH
+}
+
+type ConjureTransports []string
+
+func (transports ConjureTransports) Validate() error {
+	for _, t := range transports {
+		if !common.Contains(SupportedConjureTransports, t) {
+			return errors.Tracef("invalid Conjure transport: %s", t)
+		}
+	}
+	return nil
+}
+
+func (transports ConjureTransports) PruneInvalid() ConjureTransports {
+	u := make(ConjureTransports, 0)
+	for _, t := range transports {
+		if common.Contains(SupportedConjureTransports, t) {
+			u = append(u, t)
+		}
+	}
+	return u
+}
+
 type HandshakeResponse struct {
 	SSHSessionID             string              `json:"ssh_session_id"`
 	Homepages                []string            `json:"homepages"`
@@ -519,6 +602,7 @@ type HandshakeResponse struct {
 	TacticsPayload           json.RawMessage     `json:"tactics_payload"`
 	UpstreamBytesPerSecond   int64               `json:"upstream_bytes_per_second"`
 	DownstreamBytesPerSecond int64               `json:"downstream_bytes_per_second"`
+	SteeringIP               string              `json:"steering_ip"`
 	Padding                  string              `json:"padding"`
 }
 

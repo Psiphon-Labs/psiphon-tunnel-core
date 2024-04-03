@@ -24,7 +24,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -42,11 +41,11 @@ import (
 	"testing"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -156,7 +155,7 @@ func TestTLSCertificateVerification(t *testing.T) {
 		t.Errorf("unexpected success without invalid pin")
 	}
 
-	// Test: with the root CA certirficate pinned, the TLS dial succeeds.
+	// Test: with the root CA certificate pinned, the TLS dial succeeds.
 
 	conn, err = CustomTLSDial(
 		context.Background(), "tcp", serverAddr,
@@ -209,25 +208,80 @@ func TestTLSCertificateVerification(t *testing.T) {
 	} else {
 		conn.Close()
 	}
+
+	// Test: with DisableSystemRootCAs set and without VerifyServerName or
+	// VerifyPins set, the TLS dial succeeds.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:           params,
+			Dial:                 dialer,
+			SNIServerName:        "not-" + serverName,
+			DisableSystemRootCAs: true,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %v", err)
+	} else {
+		conn.Close()
+	}
+
+	// Test: with DisableSystemRootCAs set along with VerifyServerName and
+	// VerifyPins, the TLS dial fails.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:           params,
+			Dial:                 dialer,
+			SNIServerName:        serverName,
+			DisableSystemRootCAs: true,
+			VerifyServerName:     serverName,
+			VerifyPins:           []string{rootCACertificatePin},
+		})
+
+	if err == nil {
+		conn.Close()
+		t.Errorf("unexpected success with DisableSystemRootCAs set along with VerifyServerName and VerifyPins")
+	}
+
+	// Test: with DisableSystemRootCAs set, SNI changed, and without
+	// VerifyServerName or VerifyPins set, the TLS dial succeeds.
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:           params,
+			Dial:                 dialer,
+			SNIServerName:        "not-" + serverName,
+			DisableSystemRootCAs: true,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %v", err)
+	} else {
+		conn.Close()
+	}
 }
 
 // initTestCertificatesAndWebServer creates a Root CA, a web server
 // certificate, for serverName, signed by that Root CA, and runs a web server
 // that uses that server certificate. initRootCAandWebServer returns:
 //
-// - the file name containing the Root CA, to be used with
-//   CustomTLSConfig.TrustedCACertificatesFilename
+//   - the file name containing the Root CA, to be used with
+//     CustomTLSConfig.TrustedCACertificatesFilename
 //
-// - pin values for the Root CA and server certificare, to be used with
-//   CustomTLSConfig.VerifyPins
+//   - pin values for the Root CA and server certificare, to be used with
+//     CustomTLSConfig.VerifyPins
 //
-// - a shutdown function which the caller must invoked to terminate the web
-//   server
+//   - a shutdown function which the caller must invoked to terminate the web
+//     server
 //
 // - the web server dial address: serverName and port
 //
-// - and a dialer function, which bypasses DNS resolution of serverName, to be
-//   used with CustomTLSConfig.Dial
+//   - and a dialer function, which bypasses DNS resolution of serverName, to be
+//     used with CustomTLSConfig.Dial
 func initTestCertificatesAndWebServer(
 	t *testing.T,
 	testDataDirName string,
@@ -336,6 +390,9 @@ func initTestCertificatesAndWebServer(
 
 	// Run an HTTPS server with the server certificate.
 
+	// Do not include the Root CA certificate in the certificate chain returned
+	// by the server to the client in the TLS handshake by excluding it from
+	// the key pair, which matches the behavior observed in the wild.
 	serverKeyPair, err := tls.X509KeyPair(
 		pemServerCertificate, pemServerPrivateKey)
 	if err != nil {
@@ -397,7 +454,8 @@ func initTestCertificatesAndWebServer(
 
 func TestTLSDialerCompatibility(t *testing.T) {
 
-	// This test checks that each TLS profile can successfully complete a TLS
+	// This test checks that each TLS profile in combination with TLS ClientHello
+	// fragmentation can successfully complete a TLS
 	// handshake with various servers. By default, only the "psiphon" case is
 	// run, which runs the same TLS listener used by a Psiphon server.
 	//
@@ -411,42 +469,44 @@ func TestTLSDialerCompatibility(t *testing.T) {
 		configAddresses = strings.Split(string(config), "\n")
 	}
 
-	runner := func(address string) func(t *testing.T) {
+	runner := func(address string, fragmentClientHello bool) func(t *testing.T) {
 		return func(t *testing.T) {
-			testTLSDialerCompatibility(t, address)
+			testTLSDialerCompatibility(t, address, fragmentClientHello)
 		}
 	}
 
 	for _, address := range configAddresses {
-		if len(address) > 0 {
-			t.Run(address, runner(address))
+		for _, fragmentClientHello := range []bool{false, true} {
+			if len(address) > 0 {
+				t.Run(fmt.Sprintf("%s (fragmentClientHello: %v)", address, fragmentClientHello),
+					runner(address, fragmentClientHello))
+			}
 		}
 	}
 
-	t.Run("psiphon", runner(""))
+	t.Run("psiphon", runner("", false))
 }
 
-func testTLSDialerCompatibility(t *testing.T, address string) {
+func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHello bool) {
 
 	if address == "" {
 
-		// Same tls-tris config as psiphon/server/meek.go
+		// Same tls config as psiphon/server/meek.go
 
 		certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 		if err != nil {
 			t.Fatalf("common.GenerateWebServerCertificate failed: %v", err)
 		}
 
-		tlsCertificate, err := tris.X509KeyPair([]byte(certificate), []byte(privateKey))
+		tlsCertificate, err := tls.X509KeyPair([]byte(certificate), []byte(privateKey))
 		if err != nil {
-			t.Fatalf("tris.X509KeyPair failed: %v", err)
+			t.Fatalf("tls.X509KeyPair failed: %v", err)
 		}
 
-		config := &tris.Config{
-			Certificates:            []tris.Certificate{tlsCertificate},
-			NextProtos:              []string{"http/1.1"},
-			MinVersion:              tris.VersionTLS10,
-			UseExtendedMasterSecret: true,
+		config := &tls.Config{
+			Certificates: []tls.Certificate{tlsCertificate},
+			NextProtos:   []string{"http/1.1"},
+			MinVersion:   tls.VersionTLS10,
 		}
 
 		tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -454,7 +514,7 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			t.Fatalf("net.Listen failed: %v", err)
 		}
 
-		tlsListener := tris.NewListener(tcpListener, config)
+		tlsListener := tls.NewListener(tcpListener, config)
 		defer tlsListener.Close()
 
 		address = tlsListener.Addr().String()
@@ -465,9 +525,9 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 				if err != nil {
 					return
 				}
-				err = conn.(*tris.Conn).Handshake()
+				err = conn.(*tls.Conn).Handshake()
 				if err != nil {
-					t.Logf("tris.Conn.Handshake failed: %v", err)
+					t.Logf("tls.Conn.Handshake failed: %v", err)
 				}
 				conn.Close()
 			}
@@ -498,10 +558,11 @@ func testTLSDialerCompatibility(t *testing.T, address string) {
 			transformHostname := i%2 == 0
 
 			tlsConfig := &CustomTLSConfig{
-				Parameters: params,
-				Dial:       dialer,
-				SkipVerify: true,
-				TLSProfile: tlsProfile,
+				Parameters:          params,
+				Dial:                dialer,
+				SkipVerify:          true,
+				TLSProfile:          tlsProfile,
+				FragmentClientHello: fragmentClientHello,
 			}
 
 			if transformHostname {
@@ -565,7 +626,13 @@ func TestSelectTLSProfile(t *testing.T) {
 	numSelections := 10000
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
+		}
 		selected[profile] += 1
 	}
 
@@ -614,7 +681,9 @@ func TestSelectTLSProfile(t *testing.T) {
 		}
 
 		var unexpectedClientHelloID, unexpectedClientHelloSpec bool
-		if i < len(protocol.SupportedTLSProfiles) {
+
+		// TLS_PROFILE_CHROME_112_PSK profile is a special case. Check getUTLSClientHelloID for details.
+		if i < len(protocol.SupportedTLSProfiles) && profile != protocol.TLS_PROFILE_CHROME_112_PSK {
 			if utlsClientHelloID == utls.HelloCustom {
 				unexpectedClientHelloID = true
 			}
@@ -644,9 +713,15 @@ func TestSelectTLSProfile(t *testing.T) {
 	customTLSProfileNames := params.Get().CustomTLSProfileNames()
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
 		if !common.Contains(customTLSProfileNames, profile) {
 			t.Errorf("unexpected non-custom TLS profile selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
 		}
 	}
 
@@ -663,20 +738,130 @@ func TestSelectTLSProfile(t *testing.T) {
 	}
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(false, true, frontingProviderID, params.Get())
+		profile, _, seed, err := SelectTLSProfile(false, false, true, frontingProviderID, params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
 		if common.Contains(disableTLSProfiles, profile) {
 			t.Errorf("unexpected disabled TLS profile selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
 		}
 	}
 
 	// Session ticket incapable TLS 1.2 profiles should not be selected
 
 	for i := 0; i < numSelections; i++ {
-		profile := SelectTLSProfile(true, false, "", params.Get())
+		profile, _, seed, err := SelectTLSProfile(true, false, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
 		if protocol.TLS12ProfileOmitsSessionTickets(profile) {
 			t.Errorf("unexpected session ticket incapable TLS profile selected")
 		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
+		}
 	}
+
+	// Only TLS 1.3 profiles should be selected
+
+	for i := 0; i < numSelections; i++ {
+		profile, tlsVersion, seed, err := SelectTLSProfile(false, true, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
+		if tlsVersion != protocol.TLS_VERSION_13 {
+			t.Errorf("expected TLS 1.3 profile to be selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
+		}
+	}
+
+	// Only TLS 1.3 profiles should be selected. All TLS 1.3 profiles should be
+	// session ticket capable.
+
+	for i := 0; i < numSelections; i++ {
+		profile, tlsVersion, seed, err := SelectTLSProfile(true, true, false, "", params.Get())
+		if err != nil {
+			t.Fatalf("SelectTLSProfile failed: %v", err)
+		}
+		if protocol.TLS12ProfileOmitsSessionTickets(profile) {
+			t.Errorf("unexpected session ticket incapable TLS profile selected")
+		}
+		if tlsVersion != protocol.TLS_VERSION_13 {
+			t.Errorf("expected TLS 1.3 profile to be selected")
+		}
+		if protocol.TLSProfileIsRandomized(profile) && seed == nil {
+			t.Errorf("expected non-nil seed for randomized TLS profile")
+		}
+	}
+}
+
+func TestTLSFragmentorWithoutSNI(t *testing.T) {
+	testDataDirName, err := ioutil.TempDir("", "psiphon-tls-certificate-verification-test")
+	if err != nil {
+		t.Fatalf("TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	serverName := "example.org"
+
+	rootCAsFileName,
+		_,
+		serverCertificatePin,
+		shutdown,
+		serverAddr,
+		dialer := initTestCertificatesAndWebServer(
+		t, testDataDirName, serverName)
+	defer shutdown()
+
+	params, err := parameters.NewParameters(nil)
+	if err != nil {
+		t.Fatalf("parameters.NewParameters failed: %v", err)
+	}
+
+	// Test: missing SNI, the TLS dial fails
+
+	conn, err := CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			SNIServerName:                 "",
+			VerifyServerName:              serverName,
+			VerifyPins:                    []string{serverCertificatePin},
+			TrustedCACertificatesFilename: rootCAsFileName,
+			FragmentClientHello:           true,
+		})
+
+	if err == nil {
+		t.Errorf("unexpected success without SNI")
+		conn.Close()
+	}
+
+	// Test: with SNI, the TLS dial succeeds
+
+	conn, err = CustomTLSDial(
+		context.Background(), "tcp", serverAddr,
+		&CustomTLSConfig{
+			Parameters:                    params,
+			Dial:                          dialer,
+			SNIServerName:                 serverName,
+			VerifyServerName:              serverName,
+			VerifyPins:                    []string{serverCertificatePin},
+			TrustedCACertificatesFilename: rootCAsFileName,
+			FragmentClientHello:           true,
+		})
+
+	if err != nil {
+		t.Errorf("CustomTLSDial failed: %v", err)
+	} else {
+		conn.Close()
+	}
+
 }
 
 func BenchmarkRandomizedGetClientHelloVersion(b *testing.B) {

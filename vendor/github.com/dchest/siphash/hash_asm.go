@@ -1,3 +1,4 @@
+//go:build amd64 && !appengine && !gccgo
 // +build amd64,!appengine,!gccgo
 
 // Written in 2012 by Dmitry Chestnykh.

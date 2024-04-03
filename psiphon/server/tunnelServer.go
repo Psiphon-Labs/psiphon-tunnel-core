@@ -50,6 +50,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/marusama/semaphore"
 	cache "github.com/patrickmn/go-cache"
@@ -115,7 +116,7 @@ func NewTunnelServer(
 }
 
 // Run runs the tunnel server; this function blocks while running a selection of
-// listeners that handle connection using various obfuscation protocols.
+// listeners that handle connections using various obfuscation protocols.
 //
 // Run listens on each designated tunnel port and spawns new goroutines to handle
 // each client connection. It halts when shutdownBroadcast is signaled. A list of active
@@ -187,6 +188,13 @@ func (server *TunnelServer) Run() error {
 			// Only direct, unfronted protocol listeners use TCP BPF circumvention
 			// programs.
 			listener, BPFProgramName, err = newTCPListenerWithBPF(support, localAddress)
+
+			if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+				listener, err = ListenTLSTunnel(support, listener, tunnelProtocol, listenPort)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
 		}
 
 		if err != nil {
@@ -466,12 +474,20 @@ func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {
 		atomic.SwapInt64(&sshServer.establishLimitedCount, 0)
 }
 
+// additionalTransportData is additional data gathered at transport level,
+// such as in MeekServer at the HTTP layer, and relayed to the
+// sshServer/sshClient.
+type additionalTransportData struct {
+	overrideTunnelProtocol string
+	steeringIP             string
+}
+
 // runListener is intended to run an a goroutine; it blocks
 // running a particular listener. If an unrecoverable error
 // occurs, it will send the error to the listenerError channel.
 func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError chan<- error) {
 
-	handleClient := func(clientTunnelProtocol string, clientConn net.Conn) {
+	handleClient := func(clientConn net.Conn, transportData *additionalTransportData) {
 
 		// Note: establish tunnel limiter cannot simply stop TCP
 		// listeners in all cases (e.g., meek) since SSH tunnels can
@@ -481,17 +497,6 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 			log.WithTrace().Debug("not establishing tunnels")
 			clientConn.Close()
 			return
-		}
-
-		// tunnelProtocol is used for stats and traffic rules. In many cases, its
-		// value is unambiguously determined by the listener port. In certain cases,
-		// such as multiple fronted protocols with a single backend listener, the
-		// client's reported tunnel protocol value is used. The caller must validate
-		// clientTunnelProtocol with protocol.IsValidClientTunnelProtocol.
-
-		tunnelProtocol := sshListener.tunnelProtocol
-		if clientTunnelProtocol != "" {
-			tunnelProtocol = clientTunnelProtocol
 		}
 
 		// sshListener.tunnelProtocol indictes the tunnel protocol run by the
@@ -512,7 +517,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 		// client may dial a different port for its first hop.
 
 		// Process each client connection concurrently.
-		go sshServer.handleClient(sshListener, tunnelProtocol, clientConn)
+		go sshServer.handleClient(sshListener, clientConn, transportData)
 	}
 
 	// Note: when exiting due to a unrecoverable error, be sure
@@ -520,15 +525,143 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) ||
-		protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) || protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
+
+		if sshServer.tunnelProtocolUsesTLSDemux(sshListener.tunnelProtocol) {
+
+			sshServer.runMeekTLSOSSHDemuxListener(sshListener, listenerError, handleClient)
+
+		} else {
+			meekServer, err := NewMeekServer(
+				sshServer.support,
+				sshListener.Listener,
+				sshListener.tunnelProtocol,
+				sshListener.port,
+				protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol),
+				protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol),
+				protocol.TunnelProtocolUsesObfuscatedSessionTickets(sshListener.tunnelProtocol),
+				true,
+				handleClient,
+				sshServer.shutdownBroadcast)
+
+			if err == nil {
+				err = meekServer.Run()
+			}
+
+			if err != nil {
+				select {
+				case listenerError <- errors.Trace(err):
+				default:
+				}
+				return
+			}
+		}
+
+	} else {
+
+		runListener(sshListener.Listener, sshServer.shutdownBroadcast, listenerError, "", handleClient)
+	}
+}
+
+// runMeekTLSOSSHDemuxListener blocks running a listener which demuxes meek and
+// TLS-OSSH connections received on the same port.
+func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener, listenerError chan<- error, handleClient func(clientConn net.Conn, transportData *additionalTransportData)) {
+
+	meekClassifier := protocolClassifier{
+		minBytesToMatch: 4,
+		maxBytesToMatch: 4,
+		match: func(b []byte) bool {
+
+			// NOTE: HTTP transforms are only applied to plain HTTP
+			// meek so they are not a concern here.
+
+			return bytes.Contains(b, []byte("POST"))
+		},
+	}
+
+	tlsClassifier := protocolClassifier{
+		// NOTE: technically +1 not needed if detectors are evaluated
+		// in order by index in classifier array, which they are.
+		minBytesToMatch: meekClassifier.maxBytesToMatch + 1,
+		maxBytesToMatch: meekClassifier.maxBytesToMatch + 1,
+		match: func(b []byte) bool {
+			return len(b) > 4 // if not classified as meek, then tls
+		},
+	}
+
+	listener, err := ListenTLSTunnel(sshServer.support, sshListener.Listener, sshListener.tunnelProtocol, sshListener.port)
+	if err != nil {
+		select {
+		case listenerError <- errors.Trace(err):
+		default:
+		}
+		return
+	}
+
+	mux, listeners := newProtocolDemux(context.Background(), listener, []protocolClassifier{meekClassifier, tlsClassifier}, sshServer.support.Config.sshHandshakeTimeout)
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+
+	go func() {
+
+		// handle shutdown gracefully
+
+		defer wg.Done()
+
+		<-sshServer.shutdownBroadcast
+		err := mux.Close()
+		if err != nil {
+			log.WithTraceFields(LogFields{"error": err}).Error("close failed")
+		}
+	}()
+
+	wg.Add(1)
+
+	go func() {
+
+		// start demultiplexing TLS-OSSH and meek HTTPS connections
+
+		defer wg.Done()
+
+		err := mux.run()
+		if err != nil {
+			select {
+			case listenerError <- errors.Trace(err):
+			default:
+			}
+			return
+		}
+	}()
+
+	wg.Add(1)
+
+	go func() {
+
+		// start handling TLS-OSSH connections as they are demultiplexed
+
+		defer wg.Done()
+
+		// Override the listener tunnel protocol to report TLS-OSSH instead.
+		runListener(listeners[1], sshServer.shutdownBroadcast, listenerError, protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH, handleClient)
+	}()
+
+	wg.Add(1)
+
+	go func() {
+
+		// start handling meek HTTPS connections as they are
+		// demultiplexed
+
+		defer wg.Done()
 
 		meekServer, err := NewMeekServer(
 			sshServer.support,
-			sshListener.Listener,
+			listeners[0],
 			sshListener.tunnelProtocol,
 			sshListener.port,
-			protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol),
+			false,
 			protocol.TunnelProtocolUsesFrontedMeek(sshListener.tunnelProtocol),
 			protocol.TunnelProtocolUsesObfuscatedSessionTickets(sshListener.tunnelProtocol),
 			true,
@@ -546,37 +679,50 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 			}
 			return
 		}
+	}()
 
-	} else {
+	wg.Wait()
+}
 
-		for {
-			conn, err := sshListener.Listener.Accept()
+func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, listenerError chan<- error, overrideTunnelProtocol string, handleClient func(clientConn net.Conn, transportData *additionalTransportData)) {
+	for {
+		conn, err := listener.Accept()
+
+		select {
+		case <-shutdownBroadcast:
+			if err == nil {
+				conn.Close()
+			}
+			return
+		default:
+		}
+
+		if err != nil {
+			if e, ok := err.(net.Error); ok && e.Temporary() {
+				log.WithTraceFields(LogFields{"error": err}).Error("accept failed")
+				// Temporary error, keep running
+				continue
+			} else if std_errors.Is(err, errRestrictedProvider) {
+				log.WithTraceFields(LogFields{"error": err}).Error("accept rejected client")
+				// Restricted provider, keep running
+				continue
+			}
 
 			select {
-			case <-sshServer.shutdownBroadcast:
-				if err == nil {
-					conn.Close()
-				}
-				return
+			case listenerError <- errors.Trace(err):
 			default:
 			}
-
-			if err != nil {
-				if e, ok := err.(net.Error); ok && e.Temporary() {
-					log.WithTraceFields(LogFields{"error": err}).Error("accept failed")
-					// Temporary error, keep running
-					continue
-				}
-
-				select {
-				case listenerError <- errors.Trace(err):
-				default:
-				}
-				return
-			}
-
-			handleClient("", conn)
+			return
 		}
+
+		var transportData *additionalTransportData
+		if overrideTunnelProtocol != "" {
+			transportData = &additionalTransportData{
+				overrideTunnelProtocol: overrideTunnelProtocol,
+			}
+		}
+
+		handleClient(conn, transportData)
 	}
 }
 
@@ -779,6 +925,10 @@ func (sshServer *sshServer) getLoadStats() (
 		stats["ALL"] = zeroClientStats()
 		for tunnelProtocol := range sshServer.support.Config.TunnelProtocolPorts {
 			stats[tunnelProtocol] = zeroClientStats()
+
+			if sshServer.tunnelProtocolUsesTLSDemux(tunnelProtocol) {
+				stats[protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH] = zeroClientStats()
+			}
 		}
 		return stats
 	}
@@ -1224,7 +1374,19 @@ func (sshServer *sshServer) stopClients() {
 }
 
 func (sshServer *sshServer) handleClient(
-	sshListener *sshListener, tunnelProtocol string, clientConn net.Conn) {
+	sshListener *sshListener,
+	clientConn net.Conn,
+	transportData *additionalTransportData) {
+
+	// overrideTunnelProtocol sets the tunnel protocol to a value other than
+	// the listener tunnel protocol. This is used in fronted meek
+	// configuration, where a single HTTPS listener also handles fronted HTTP
+	// and QUIC traffic; and in the protocol demux case.
+
+	tunnelProtocol := sshListener.tunnelProtocol
+	if transportData != nil && transportData.overrideTunnelProtocol != "" {
+		tunnelProtocol = transportData.overrideTunnelProtocol
+	}
 
 	// Calling clientConn.RemoteAddr at this point, before any Read calls,
 	// satisfies the constraint documented in tapdance.Listen.
@@ -1361,6 +1523,7 @@ func (sshServer *sshServer) handleClient(
 		sshServer,
 		sshListener,
 		tunnelProtocol,
+		transportData,
 		serverPacketManipulation,
 		replayedServerPacketManipulation,
 		clientAddr,
@@ -1400,11 +1563,23 @@ func (sshServer *sshServer) monitorPortForwardDialError(err error) {
 	}
 }
 
+// tunnelProtocolUsesTLSDemux returns true if the server demultiplexes the given
+// protocol and TLS-OSSH over the same port.
+func (sshServer *sshServer) tunnelProtocolUsesTLSDemux(tunnelProtocol string) bool {
+	// Only use meek/TLS-OSSH demux if unfronted meek HTTPS with non-legacy passthrough.
+	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) && !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		_, passthroughEnabled := sshServer.support.Config.TunnelProtocolPassthroughAddresses[tunnelProtocol]
+		return passthroughEnabled && !sshServer.support.Config.LegacyPassthrough
+	}
+	return false
+}
+
 type sshClient struct {
 	sync.Mutex
 	sshServer                            *sshServer
 	sshListener                          *sshListener
 	tunnelProtocol                       string
+	additionalTransportData              *additionalTransportData
 	sshConn                              ssh.Conn
 	throttledConn                        *common.ThrottledConn
 	serverPacketManipulation             string
@@ -1549,6 +1724,7 @@ type handshakeStateInfo struct {
 	authorizedAccessTypes    []string
 	upstreamBytesPerSecond   int64
 	downstreamBytesPerSecond int64
+	steeringIP               string
 }
 
 type handshakeState struct {
@@ -1648,6 +1824,7 @@ func newSshClient(
 	sshServer *sshServer,
 	sshListener *sshListener,
 	tunnelProtocol string,
+	transportData *additionalTransportData,
 	serverPacketManipulation string,
 	replayedServerPacketManipulation bool,
 	clientAddr net.Addr,
@@ -1663,6 +1840,7 @@ func newSshClient(
 		sshServer:                        sshServer,
 		sshListener:                      sshListener,
 		tunnelProtocol:                   tunnelProtocol,
+		additionalTransportData:          transportData,
 		serverPacketManipulation:         serverPacketManipulation,
 		replayedServerPacketManipulation: replayedServerPacketManipulation,
 		clientAddr:                       clientAddr,
@@ -1791,7 +1969,7 @@ func (sshClient *sshClient) run(
 	if isReplayCandidate {
 
 		getFragmentorSeed := func() *prng.Seed {
-			fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+			fragmentor, ok := baseConn.(common.FragmentorAccessor)
 			if ok {
 				fragmentorSeed, _ := fragmentor.GetReplay()
 				return fragmentorSeed
@@ -1830,7 +2008,7 @@ func (sshClient *sshClient) run(
 
 				replayedFragmentation := false
 				if sshClient.tunnelProtocol != protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
-					fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+					fragmentor, ok := baseConn.(common.FragmentorAccessor)
 					if ok {
 						_, replayedFragmentation = fragmentor.GetReplay()
 					}
@@ -1907,12 +2085,33 @@ func (sshClient *sshClient) run(
 
 		if err == nil && protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 
+			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+
+			// Log error, but continue. A default prefix spec will be used by the server.
+			if err != nil {
+				log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
+					"ServerTacticsParametersCache.Get failed")
+			}
+
+			var osshPrefixEnableFragmentor bool = false
+			var serverOsshPrefixSpecs transforms.Specs = nil
+			var minDelay, maxDelay time.Duration
+			if !p.IsNil() {
+				osshPrefixEnableFragmentor = p.Bool(parameters.OSSHPrefixEnableFragmentor)
+				serverOsshPrefixSpecs = p.ProtocolTransformSpecs(parameters.ServerOSSHPrefixSpecs)
+				minDelay = p.Duration(parameters.OSSHPrefixSplitMinDelay)
+				maxDelay = p.Duration(parameters.OSSHPrefixSplitMaxDelay)
+				// Allow garbage collection.
+				p.Close()
+			}
+
 			// Note: NewServerObfuscatedSSHConn blocks on network I/O
 			// TODO: ensure this won't block shutdown
 			result.obfuscatedSSHConn, err = obfuscator.NewServerObfuscatedSSHConn(
 				conn,
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
+				serverOsshPrefixSpecs,
 				func(clientIP string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,
@@ -1929,12 +2128,22 @@ func (sshClient *sshClient) run(
 				conn = result.obfuscatedSSHConn
 			}
 
+			// Set the OSSH prefix split config.
+			if err == nil && result.obfuscatedSSHConn.IsOSSHPrefixStream() {
+				err = result.obfuscatedSSHConn.SetOSSHPrefixSplitConfig(minDelay, maxDelay)
+				// Log error, but continue.
+				if err != nil {
+					log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
+						"SetOSSHPrefixSplitConfig failed")
+				}
+			}
+
 			// Seed the fragmentor, when present, with seed derived from initial
 			// obfuscator message. See tactics.Listener.Accept. This must preceed
 			// ssh.NewServerConn to ensure fragmentor is seeded before downstream bytes
 			// are written.
 			if err == nil && sshClient.tunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
-				fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+				fragmentor, ok := baseConn.(common.FragmentorAccessor)
 				if ok {
 					var fragmentorPRNG *prng.PRNG
 					fragmentorPRNG, err = result.obfuscatedSSHConn.GetDerivedPRNG("server-side-fragmentor")
@@ -1943,6 +2152,12 @@ func (sshClient *sshClient) run(
 					} else {
 						fragmentor.SetReplay(fragmentorPRNG)
 					}
+
+					// Stops the fragmentor if disabled for prefixed OSSH streams.
+					if !osshPrefixEnableFragmentor && result.obfuscatedSSHConn.IsOSSHPrefixStream() {
+						fragmentor.StopFragmenting()
+					}
+
 				}
 			}
 		}
@@ -2051,7 +2266,7 @@ func (sshClient *sshClient) run(
 
 	replayMetrics := make(LogFields)
 	replayedFragmentation := false
-	fragmentor, ok := baseConn.(common.FragmentorReplayAccessor)
+	fragmentor, ok := baseConn.(common.FragmentorAccessor)
 	if ok {
 		_, replayedFragmentation = fragmentor.GetReplay()
 	}
@@ -2984,6 +3199,11 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		}
 	}
 
+	if sshClient.additionalTransportData != nil &&
+		sshClient.additionalTransportData.steeringIP != "" {
+		logFields["relayed_steering_ip"] = sshClient.additionalTransportData.steeringIP
+	}
+
 	// Retain lock when invoking LogRawFieldsWithTimestamp to block any
 	// concurrent writes to variables referenced by logFields.
 	log.LogRawFieldsWithTimestamp(logFields)
@@ -2999,6 +3219,7 @@ var blocklistHitsStatParams = []requestParamSpec{
 	{"client_features", isAnyString, requestParamOptional | requestParamArray},
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"device_region", isAnyString, requestParamOptional},
+	{"device_location", isGeoHashString, requestParamOptional},
 	{"egress_region", isRegionCode, requestParamOptional},
 	{"session_id", isHexDigits, 0},
 	{"last_connected", isLastConnected, requestParamOptional},
@@ -3388,12 +3609,19 @@ func (sshClient *sshClient) setHandshakeState(
 	// be applied gradually, handling mid-tunnel changes is not a priority.
 	sshClient.setDestinationBytesMetrics()
 
-	return &handshakeStateInfo{
+	info := &handshakeStateInfo{
 		activeAuthorizationIDs:   authorizationIDs,
 		authorizedAccessTypes:    authorizedAccessTypes,
 		upstreamBytesPerSecond:   upstreamBytesPerSecond,
 		downstreamBytesPerSecond: downstreamBytesPerSecond,
-	}, nil
+	}
+
+	// Relay the steering IP to the API handshake handler.
+	if sshClient.additionalTransportData != nil {
+		info.steeringIP = sshClient.additionalTransportData.steeringIP
+	}
+
+	return info, nil
 }
 
 // getHandshaked returns whether the client has completed a handshake API

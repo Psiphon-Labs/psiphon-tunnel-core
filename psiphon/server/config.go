@@ -40,6 +40,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
@@ -156,7 +157,7 @@ type Config struct {
 	// TunnelProtocolPorts specifies which tunnel protocols to run
 	// and which ports to listen on for each protocol. Valid tunnel
 	// protocols include:
-	// "SSH", "OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
+	// "SSH", "OSSH", "TLS-OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
 	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
 	// "TAPDANCE-OSSH", abd "CONJURE-OSSH".
@@ -168,8 +169,8 @@ type Config struct {
 	// the passthrough target when the client fails anti-probing tests.
 	//
 	// TunnelProtocolPassthroughAddresses is supported for:
-	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-	// "UNFRONTED-MEEK-OSSH".
+	// "TLS-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
+	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "UNFRONTED-MEEK-OSSH".
 	TunnelProtocolPassthroughAddresses map[string]string
 
 	// LegacyPassthrough indicates whether to expect legacy passthrough messages
@@ -225,6 +226,12 @@ type Config struct {
 	// MeekObfuscatedKey is the secret key used for obfuscating
 	// meek cookies sent from clients. The same key is used for all
 	// meek protocols run by this server instance.
+	//
+	// NOTE: this key is also used by the TLS-OSSH protocol, which allows
+	// clients with legacy unfronted meek-https server entries, that have the
+	// passthrough capability, to connect with TLS-OSSH to the servers
+	// corresponding to those server entries, which now support TLS-OSSH by
+	// demultiplexing meek-https and TLS-OSSH over the meek-https port.
 	MeekObfuscatedKey string
 
 	// MeekProhibitedHeaders is a list of HTTP headers to check for
@@ -438,6 +445,9 @@ type Config struct {
 	// for testing.
 	AllowBogons bool
 
+	// EnableSteeringIPs enables meek server steering IP support.
+	EnableSteeringIPs bool
+
 	// OwnEncodedServerEntries is a list of the server's own encoded server
 	// entries, idenfified by server entry tag. These values are used in the
 	// handshake API to update clients that don't yet have a signed copy of these
@@ -455,7 +465,9 @@ type Config struct {
 	periodicGarbageCollection                      time.Duration
 	stopEstablishTunnelsEstablishedClientThreshold int
 	dumpProfilesOnStopEstablishTunnelsDone         int32
+	providerID                                     string
 	frontingProviderID                             string
+	region                                         string
 	runningProtocols                               []string
 }
 
@@ -523,10 +535,20 @@ func (config *Config) GetOwnEncodedServerEntry(serverEntryTag string) (string, b
 	return serverEntry, ok
 }
 
+// GetProviderID returns the provider ID associated with the server.
+func (config *Config) GetProviderID() string {
+	return config.providerID
+}
+
 // GetFrontingProviderID returns the fronting provider ID associated with the
 // server's fronted protocol(s).
 func (config *Config) GetFrontingProviderID() string {
 	return config.frontingProviderID
+}
+
+// GetRegion returns the region associated with the server.
+func (config *Config) GetRegion() string {
+	return config.region
 }
 
 // GetRunningProtocols returns the list of protcols this server is running.
@@ -590,6 +612,15 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			if config.ObfuscatedSSHKey == "" {
 				return nil, errors.Tracef(
 					"Tunnel protocol %s requires ObfuscatedSSHKey",
+					tunnelProtocol)
+			}
+		}
+		if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+			// Meek obfuscated key used for legacy reasons. See comment for
+			// MeekObfuscatedKey.
+			if config.MeekObfuscatedKey == "" {
+				return nil, errors.Tracef(
+					"Tunnel protocol %s requires MeekObfuscatedKey",
 					tunnelProtocol)
 			}
 		}
@@ -701,10 +732,20 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			return nil, errors.Tracef(
 				"protocol.DecodeServerEntry failed: %s", err)
 		}
+		if config.providerID == "" {
+			config.providerID = serverEntry.ProviderID
+		} else if config.providerID != serverEntry.ProviderID {
+			return nil, errors.Tracef("unsupported multiple ProviderID values")
+		}
 		if config.frontingProviderID == "" {
 			config.frontingProviderID = serverEntry.FrontingProviderID
 		} else if config.frontingProviderID != serverEntry.FrontingProviderID {
 			return nil, errors.Tracef("unsupported multiple FrontingProviderID values")
+		}
+		if config.region == "" {
+			config.region = serverEntry.Region
+		} else if config.region != serverEntry.Region {
+			return nil, errors.Tracef("unsupported multiple Region values")
 		}
 	}
 
@@ -737,22 +778,24 @@ func validateNetworkAddress(address string, requireIPaddress bool) error {
 // GenerateConfigParams specifies customizations to be applied to
 // a generated server config.
 type GenerateConfigParams struct {
-	LogFilename                 string
-	SkipPanickingLogWriter      bool
-	LogLevel                    string
-	ServerIPAddress             string
-	WebServerPort               int
-	EnableSSHAPIRequests        bool
-	TunnelProtocolPorts         map[string]int
-	TrafficRulesConfigFilename  string
-	OSLConfigFilename           string
-	TacticsConfigFilename       string
-	TacticsRequestPublicKey     string
-	TacticsRequestObfuscatedKey string
-	Passthrough                 bool
-	LegacyPassthrough           bool
-	LimitQUICVersions           protocol.QUICVersions
-	EnableGQUIC                 bool
+	LogFilename                        string
+	SkipPanickingLogWriter             bool
+	LogLevel                           string
+	ServerIPAddress                    string
+	WebServerPort                      int
+	EnableSSHAPIRequests               bool
+	TunnelProtocolPorts                map[string]int
+	TunnelProtocolPassthroughAddresses map[string]string
+	TrafficRulesConfigFilename         string
+	OSLConfigFilename                  string
+	TacticsConfigFilename              string
+	TacticsRequestPublicKey            string
+	TacticsRequestObfuscatedKey        string
+	Passthrough                        bool
+	LegacyPassthrough                  bool
+	LimitQUICVersions                  protocol.QUICVersions
+	EnableGQUIC                        bool
+	FrontingProviderID                 string
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON encoded
@@ -784,6 +827,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	}
 
 	usingMeek := false
+	usingTLSOSSH := false
 
 	for tunnelProtocol, port := range params.TunnelProtocolPorts {
 
@@ -795,6 +839,10 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 			return nil, nil, nil, nil, nil, errors.TraceNew("duplicate listening port")
 		}
 		usedPort[port] = true
+
+		if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+			usingTLSOSSH = true
+		}
 
 		if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) ||
 			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
@@ -889,7 +937,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 		meekCookieEncryptionPublicKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPublicKey[:])
 		meekCookieEncryptionPrivateKey = base64.StdEncoding.EncodeToString(rawMeekCookieEncryptionPrivateKey[:])
+	}
 
+	if usingMeek || usingTLSOSSH {
 		meekObfuscatedKeyBytes, err := common.MakeSecureRandomBytes(SSH_OBFUSCATED_KEY_BYTE_LENGTH)
 		if err != nil {
 			return nil, nil, nil, nil, nil, errors.Trace(err)
@@ -920,37 +970,38 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	createMode := 0666
 
 	config := &Config{
-		LogLevel:                       logLevel,
-		LogFilename:                    params.LogFilename,
-		LogFileCreateMode:              &createMode,
-		SkipPanickingLogWriter:         params.SkipPanickingLogWriter,
-		GeoIPDatabaseFilenames:         nil,
-		HostID:                         "example-host-id",
-		ServerIPAddress:                params.ServerIPAddress,
-		DiscoveryValueHMACKey:          discoveryValueHMACKey,
-		WebServerPort:                  params.WebServerPort,
-		WebServerSecret:                webServerSecret,
-		WebServerCertificate:           webServerCertificate,
-		WebServerPrivateKey:            webServerPrivateKey,
-		WebServerPortForwardAddress:    webServerPortForwardAddress,
-		SSHPrivateKey:                  string(sshPrivateKey),
-		SSHServerVersion:               sshServerVersion,
-		SSHUserName:                    sshUserName,
-		SSHPassword:                    sshPassword,
-		ObfuscatedSSHKey:               obfuscatedSSHKey,
-		TunnelProtocolPorts:            params.TunnelProtocolPorts,
-		DNSResolverIPAddress:           "8.8.8.8",
-		UDPInterceptUdpgwServerAddress: "127.0.0.1:7300",
-		MeekCookieEncryptionPrivateKey: meekCookieEncryptionPrivateKey,
-		MeekObfuscatedKey:              meekObfuscatedKey,
-		MeekProhibitedHeaders:          nil,
-		MeekProxyForwardedForHeaders:   []string{"X-Forwarded-For"},
-		LoadMonitorPeriodSeconds:       300,
-		TrafficRulesFilename:           params.TrafficRulesConfigFilename,
-		OSLConfigFilename:              params.OSLConfigFilename,
-		TacticsConfigFilename:          params.TacticsConfigFilename,
-		LegacyPassthrough:              params.LegacyPassthrough,
-		EnableGQUIC:                    params.EnableGQUIC,
+		LogLevel:                           logLevel,
+		LogFilename:                        params.LogFilename,
+		LogFileCreateMode:                  &createMode,
+		SkipPanickingLogWriter:             params.SkipPanickingLogWriter,
+		GeoIPDatabaseFilenames:             nil,
+		HostID:                             "example-host-id",
+		ServerIPAddress:                    params.ServerIPAddress,
+		DiscoveryValueHMACKey:              discoveryValueHMACKey,
+		WebServerPort:                      params.WebServerPort,
+		WebServerSecret:                    webServerSecret,
+		WebServerCertificate:               webServerCertificate,
+		WebServerPrivateKey:                webServerPrivateKey,
+		WebServerPortForwardAddress:        webServerPortForwardAddress,
+		SSHPrivateKey:                      string(sshPrivateKey),
+		SSHServerVersion:                   sshServerVersion,
+		SSHUserName:                        sshUserName,
+		SSHPassword:                        sshPassword,
+		ObfuscatedSSHKey:                   obfuscatedSSHKey,
+		TunnelProtocolPorts:                params.TunnelProtocolPorts,
+		TunnelProtocolPassthroughAddresses: params.TunnelProtocolPassthroughAddresses,
+		DNSResolverIPAddress:               "8.8.8.8",
+		UDPInterceptUdpgwServerAddress:     "127.0.0.1:7300",
+		MeekCookieEncryptionPrivateKey:     meekCookieEncryptionPrivateKey,
+		MeekObfuscatedKey:                  meekObfuscatedKey,
+		MeekProhibitedHeaders:              nil,
+		MeekProxyForwardedForHeaders:       []string{"X-Forwarded-For"},
+		LoadMonitorPeriodSeconds:           300,
+		TrafficRulesFilename:               params.TrafficRulesConfigFilename,
+		OSLConfigFilename:                  params.OSLConfigFilename,
+		TacticsConfigFilename:              params.TacticsConfigFilename,
+		LegacyPassthrough:                  params.LegacyPassthrough,
+		EnableGQUIC:                        params.EnableGQUIC,
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
@@ -1043,6 +1094,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		capabilities = append(capabilities, protocol.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
 	}
 
+	var frontingProviderID string
+
 	for tunnelProtocol := range params.TunnelProtocolPorts {
 
 		capability := protocol.GetCapability(tunnelProtocol)
@@ -1068,11 +1121,16 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 			capabilities = append(capabilities, protocol.GetTacticsCapability(tunnelProtocol))
 		}
+
+		if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+			frontingProviderID = params.FrontingProviderID
+		}
 	}
 
 	sshPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_SSH]
 	obfuscatedSSHPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH]
 	obfuscatedSSHQUICPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH]
+	tlsOSSHPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH]
 
 	// Meek port limitations
 	// - fronted meek protocols are hard-wired in the client to be port 443 or 80.
@@ -1105,6 +1163,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		WebServerPort:                 serverEntryWebServerPort,
 		WebServerSecret:               webServerSecret,
 		WebServerCertificate:          strippedWebServerCertificate,
+		TlsOSSHPort:                   tlsOSSHPort,
 		SshPort:                       sshPort,
 		SshUsername:                   sshUserName,
 		SshPassword:                   sshPassword,
@@ -1115,6 +1174,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SshObfuscatedKey:              obfuscatedSSHKey,
 		Capabilities:                  capabilities,
 		Region:                        "US",
+		ProviderID:                    prng.HexString(8),
+		FrontingProviderID:            frontingProviderID,
 		MeekServerPort:                meekPort,
 		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             meekObfuscatedKey,

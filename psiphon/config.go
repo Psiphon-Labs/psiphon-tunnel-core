@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 const (
@@ -173,7 +175,7 @@ type Config struct {
 	NetworkLatencyMultiplier float64
 
 	// LimitTunnelProtocols indicates which protocols to use. Valid values
-	// include: "SSH", "OSSH", "UNFRONTED-MEEK-OSSH",
+	// include: "SSH", "OSSH", "TLS-OSSH", "UNFRONTED-MEEK-OSSH",
 	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "TAPDANCE-OSSH", and "CONJURE-OSSH".
@@ -268,6 +270,11 @@ type Config struct {
 	// added to all plaintext HTTP requests and requests made through an HTTP
 	// upstream proxy when specified by UpstreamProxyURL.
 	CustomHeaders http.Header
+
+	// MeekAdditionalHeaders is a set of additional arbitrary HTTP headers
+	// that are added to all meek HTTP requests. An additional header is
+	// ignored when the header name is already present in a meek request.
+	MeekAdditionalHeaders http.Header
 
 	// NetworkConnectivityChecker is an interface that enables tunnel-core to
 	// call into the host application to check for network connectivity. See:
@@ -372,6 +379,12 @@ type Config struct {
 	// OnlyAfterAttempts = 0.
 	ObfuscatedServerListRootURLs parameters.TransferURLs
 
+	// EnableUpgradeDownload indicates whether to check for and download
+	// upgrades. When set, UpgradeDownloadURLs and
+	// UpgradeDownloadClientVersionHeader must also be set. ClientPlatform
+	// and ClientVersion should also be set.
+	EnableUpgradeDownload bool
+
 	// UpgradeDownloadURLs is list of URLs which specify locations from which
 	// to download a host client upgrade file, when one is available. The core
 	// tunnel controller provides a resumable download facility which
@@ -394,6 +407,11 @@ type Config struct {
 	// a client upgrade download after a failure. If omitted, a default value
 	// is used. This value is typical overridden for testing.
 	FetchUpgradeRetryPeriodMilliseconds *int
+
+	// EnableFeedbackUpload indicates whether to enable uploading feedback
+	// data. When set, FeedbackUploadURLs and FeedbackEncryptionPublicKey
+	// must also be set.
+	EnableFeedbackUpload bool
 
 	// FeedbackUploadURLs is a list of SecureTransferURLs which specify
 	// locations where feedback data can be uploaded, pairing with each
@@ -418,20 +436,26 @@ type Config struct {
 	// operating system.
 	TrustedCACertificatesFilename string
 
-	// TransferURLsAlwaysSkipVerify, when true, forces TransferURL.SkipVerify
-	// to true for all remote server list downloads, upgrade downloads, and
-	// feedback uploads. Each of these transfers has additional security at
-	// the payload level. Verifying TLS certificates is preferred, as an
-	// additional security and circumvention layer; set
-	// TransferURLsAlwaysSkipVerify only in cases where system root CAs
-	// cannot be loaded; for example, if unsupported (iOS < 12) or
-	// insufficient memory (VPN extension on iOS < 15).
-	TransferURLsAlwaysSkipVerify bool
+	// DisableSystemRootCAs, when true, disables loading system root CAs when
+	// verifying TLS certificates for all remote server list downloads, upgrade
+	// downloads, and feedback uploads. Each of these transfers has additional
+	// security at the payload level. Verifying TLS certificates is preferred,
+	// as an additional security and circumvention layer; set
+	// DisableSystemRootCAs only in cases where system root CAs cannot be
+	// loaded; for example, if unsupported (iOS < 12) or insufficient memory
+	// (VPN extension on iOS < 15).
+	DisableSystemRootCAs bool
 
 	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive
 	// every 1-2 minutes, when the tunnel is idle. If the SSH keepalive times
 	// out, the tunnel is considered to have failed.
 	DisablePeriodicSshKeepAlive bool
+
+	// DeviceLocation is the optional, reported location the host device is
+	// running in. This input value should be a string representing location
+	// geohash. The device location is reported to the server in the connected
+	// request and recorded for Psiphon stats.
+	DeviceLocation string
 
 	// DeviceRegion is the optional, reported region the host device is
 	// running in. This input value should be a ISO 3166-1 alpha-2 country
@@ -784,6 +808,12 @@ type Config struct {
 	ConjureDecoyRegistrarWidth                *int
 	ConjureDecoyRegistrarMinDelayMilliseconds *int
 	ConjureDecoyRegistrarMaxDelayMilliseconds *int
+	ConjureEnableIPv6Dials                    *bool
+	ConjureEnablePortRandomization            *bool
+	ConjureEnableRegistrationOverrides        *bool
+	ConjureLimitTransports                    protocol.ConjureTransports
+	ConjureSTUNServerAddresses                []string
+	ConjureDTLSEmptyInitialPacketProbability  *float64
 
 	// HoldOffTunnelMinDurationMilliseconds and other HoldOffTunnel fields are
 	// for testing purposes.
@@ -797,6 +827,18 @@ type Config struct {
 	// are for testing purposes.
 	RestrictFrontingProviderIDs                  []string
 	RestrictFrontingProviderIDsClientProbability *float64
+
+	// HoldOffDirectTunnelMinDurationMilliseconds and other HoldOffDirect
+	// fields are for testing purposes.
+	HoldOffDirectTunnelMinDurationMilliseconds *int
+	HoldOffDirectTunnelMaxDurationMilliseconds *int
+	HoldOffDirectTunnelProviderRegions         map[string][]string
+	HoldOffDirectTunnelProbability             *float64
+
+	// RestrictDirectProviderRegions and other RestrictDirect fields are for
+	// testing purposes.
+	RestrictDirectProviderRegions              map[string][]string
+	RestrictDirectProviderIDsClientProbability *float64
 
 	// UpstreamProxyAllowAllServerEntrySources is for testing purposes.
 	UpstreamProxyAllowAllServerEntrySources *bool
@@ -839,6 +881,31 @@ type Config struct {
 	ObfuscatedQUICNonceTransformSpecs           transforms.Specs
 	ObfuscatedQUICNonceTransformScopedSpecNames transforms.ScopedSpecNames
 	ObfuscatedQUICNonceTransformProbability     *float64
+
+	// OSSHPrefix parameters are for testing purposes only.
+	OSSHPrefixSpecs                     transforms.Specs
+	OSSHPrefixScopedSpecNames           transforms.ScopedSpecNames
+	OSSHPrefixProbability               *float64
+	OSSHPrefixSplitMinDelayMilliseconds *int
+	OSSHPrefixSplitMaxDelayMilliseconds *int
+	OSSHPrefixEnableFragmentor          *bool
+
+	// TLSTunnelTrafficShapingProbability and associated fields are for testing.
+	TLSTunnelTrafficShapingProbability *float64
+	TLSTunnelMinTLSPadding             *int
+	TLSTunnelMaxTLSPadding             *int
+
+	// TLSFragmentClientHello fields are for testing purposes only.
+	TLSFragmentClientHelloProbability    *float64
+	TLSFragmentClientHelloLimitProtocols []string
+
+	// AdditionalParameters is used for testing.
+	AdditionalParameters string
+
+	// SteeringIP fields are for testing purposes only.
+	SteeringIPCacheTTLSeconds *int
+	SteeringIPCacheMaxEntries *int
+	SteeringIPProbability     *float64
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -943,6 +1010,12 @@ func (config *Config) IsCommitted() bool {
 // be re-populated over time.
 func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
+	// Apply any additional parameters first
+	additionalParametersInfoMsgs, err := config.applyAdditionalParameters()
+	if err != nil {
+		return errors.TraceMsg(err, "failed to apply additional parameters")
+	}
+
 	// Do SetEmitDiagnosticNotices first, to ensure config file errors are
 	// emitted.
 	if config.EmitDiagnosticNotices {
@@ -1028,6 +1101,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	}
 
 	// Emit notices now that notice files are set if configured
+	for _, msg := range additionalParametersInfoMsgs {
+		NoticeInfo(msg)
+	}
 	for _, msg := range noticeMigrationAlertMsgs {
 		NoticeWarning(msg)
 	}
@@ -1119,7 +1195,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("sponsor ID is missing from the configuration file")
 	}
 
-	_, err := strconv.Atoi(config.ClientVersion)
+	_, err = strconv.Atoi(config.ClientVersion)
 	if err != nil {
 		return errors.Tracef("invalid client version: %s", err)
 	}
@@ -1146,13 +1222,19 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		}
 	}
 
-	if config.UpgradeDownloadURLs != nil {
+	if config.EnableUpgradeDownload {
+		if len(config.UpgradeDownloadURLs) == 0 {
+			return errors.TraceNew("missing UpgradeDownloadURLs")
+		}
 		if config.UpgradeDownloadClientVersionHeader == "" {
 			return errors.TraceNew("missing UpgradeDownloadClientVersionHeader")
 		}
 	}
 
-	if config.FeedbackUploadURLs != nil {
+	if config.EnableFeedbackUpload {
+		if len(config.FeedbackUploadURLs) == 0 {
+			return errors.TraceNew("missing FeedbackUploadURLs")
+		}
 		if config.FeedbackEncryptionPublicKey == "" {
 			return errors.TraceNew("missing FeedbackEncryptionPublicKey")
 		}
@@ -1595,16 +1677,13 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	}
 
-	if config.UpgradeDownloadURLs != nil {
-		applyParameters[parameters.UpgradeDownloadClientVersionHeader] = config.UpgradeDownloadClientVersionHeader
+	if config.EnableUpgradeDownload {
 		applyParameters[parameters.UpgradeDownloadURLs] = config.UpgradeDownloadURLs
+		applyParameters[parameters.UpgradeDownloadClientVersionHeader] = config.UpgradeDownloadClientVersionHeader
 	}
 
-	if len(config.FeedbackUploadURLs) > 0 {
+	if config.EnableFeedbackUpload {
 		applyParameters[parameters.FeedbackUploadURLs] = config.FeedbackUploadURLs
-	}
-
-	if config.FeedbackEncryptionPublicKey != "" {
 		applyParameters[parameters.FeedbackEncryptionPublicKey] = config.FeedbackEncryptionPublicKey
 	}
 
@@ -1826,6 +1905,30 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ConjureDecoyRegistrarMaxDelay] = fmt.Sprintf("%dms", *config.ConjureDecoyRegistrarMaxDelayMilliseconds)
 	}
 
+	if config.ConjureEnableIPv6Dials != nil {
+		applyParameters[parameters.ConjureEnableIPv6Dials] = *config.ConjureEnableIPv6Dials
+	}
+
+	if config.ConjureEnablePortRandomization != nil {
+		applyParameters[parameters.ConjureEnablePortRandomization] = *config.ConjureEnablePortRandomization
+	}
+
+	if config.ConjureEnableRegistrationOverrides != nil {
+		applyParameters[parameters.ConjureEnableRegistrationOverrides] = *config.ConjureEnableRegistrationOverrides
+	}
+
+	if config.ConjureLimitTransports != nil {
+		applyParameters[parameters.ConjureLimitTransports] = config.ConjureLimitTransports
+	}
+
+	if config.ConjureSTUNServerAddresses != nil {
+		applyParameters[parameters.ConjureSTUNServerAddresses] = config.ConjureSTUNServerAddresses
+	}
+
+	if config.ConjureDTLSEmptyInitialPacketProbability != nil {
+		applyParameters[parameters.ConjureDTLSEmptyInitialPacketProbability] = *config.ConjureDTLSEmptyInitialPacketProbability
+	}
+
 	if config.HoldOffTunnelMinDurationMilliseconds != nil {
 		applyParameters[parameters.HoldOffTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelMinDurationMilliseconds)
 	}
@@ -1844,6 +1947,30 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.HoldOffTunnelProbability != nil {
 		applyParameters[parameters.HoldOffTunnelProbability] = *config.HoldOffTunnelProbability
+	}
+
+	if config.HoldOffDirectTunnelMinDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffDirectTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffDirectTunnelMinDurationMilliseconds)
+	}
+
+	if config.HoldOffDirectTunnelMaxDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffDirectTunnelMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffDirectTunnelMaxDurationMilliseconds)
+	}
+
+	if len(config.HoldOffDirectTunnelProviderRegions) > 0 {
+		applyParameters[parameters.HoldOffDirectTunnelProviderRegions] = parameters.KeyStrings(config.HoldOffDirectTunnelProviderRegions)
+	}
+
+	if config.HoldOffDirectTunnelProbability != nil {
+		applyParameters[parameters.HoldOffDirectTunnelProbability] = *config.HoldOffDirectTunnelProbability
+	}
+
+	if len(config.RestrictDirectProviderRegions) > 0 {
+		applyParameters[parameters.RestrictDirectProviderRegions] = parameters.KeyStrings(config.RestrictDirectProviderRegions)
+	}
+
+	if config.RestrictDirectProviderIDsClientProbability != nil {
+		applyParameters[parameters.RestrictDirectProviderIDsClientProbability] = *config.RestrictDirectProviderIDsClientProbability
 	}
 
 	if len(config.RestrictFrontingProviderIDs) > 0 {
@@ -1974,6 +2101,62 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ObfuscatedQUICNonceTransformProbability] = *config.ObfuscatedQUICNonceTransformProbability
 	}
 
+	if config.OSSHPrefixSpecs != nil {
+		applyParameters[parameters.OSSHPrefixSpecs] = config.OSSHPrefixSpecs
+	}
+
+	if config.OSSHPrefixScopedSpecNames != nil {
+		applyParameters[parameters.OSSHPrefixScopedSpecNames] = config.OSSHPrefixScopedSpecNames
+	}
+
+	if config.OSSHPrefixProbability != nil {
+		applyParameters[parameters.OSSHPrefixProbability] = *config.OSSHPrefixProbability
+	}
+
+	if config.OSSHPrefixSplitMinDelayMilliseconds != nil {
+		applyParameters[parameters.OSSHPrefixSplitMinDelay] = fmt.Sprintf("%dms", *config.OSSHPrefixSplitMinDelayMilliseconds)
+	}
+
+	if config.OSSHPrefixSplitMaxDelayMilliseconds != nil {
+		applyParameters[parameters.OSSHPrefixSplitMaxDelay] = fmt.Sprintf("%dms", *config.OSSHPrefixSplitMaxDelayMilliseconds)
+	}
+
+	if config.OSSHPrefixEnableFragmentor != nil {
+		applyParameters[parameters.OSSHPrefixEnableFragmentor] = *config.OSSHPrefixEnableFragmentor
+	}
+
+	if config.TLSTunnelTrafficShapingProbability != nil {
+		applyParameters[parameters.TLSTunnelTrafficShapingProbability] = *config.TLSTunnelTrafficShapingProbability
+	}
+
+	if config.TLSTunnelMinTLSPadding != nil {
+		applyParameters[parameters.TLSTunnelMinTLSPadding] = *config.TLSTunnelMinTLSPadding
+	}
+
+	if config.TLSTunnelMaxTLSPadding != nil {
+		applyParameters[parameters.TLSTunnelMaxTLSPadding] = *config.TLSTunnelMaxTLSPadding
+	}
+
+	if config.TLSFragmentClientHelloProbability != nil {
+		applyParameters[parameters.TLSFragmentClientHelloProbability] = *config.TLSFragmentClientHelloProbability
+	}
+
+	if len(config.TLSFragmentClientHelloLimitProtocols) > 0 {
+		applyParameters[parameters.TLSFragmentClientHelloLimitProtocols] = protocol.TunnelProtocols(config.TLSFragmentClientHelloLimitProtocols)
+	}
+
+	if config.SteeringIPCacheTTLSeconds != nil {
+		applyParameters[parameters.SteeringIPCacheTTL] = fmt.Sprintf("%ds", *config.SteeringIPCacheTTLSeconds)
+	}
+
+	if config.SteeringIPCacheMaxEntries != nil {
+		applyParameters[parameters.SteeringIPCacheMaxEntries] = *config.SteeringIPCacheMaxEntries
+	}
+
+	if config.SteeringIPProbability != nil {
+		applyParameters[parameters.SteeringIPProbability] = *config.SteeringIPProbability
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2096,7 +2279,7 @@ func (config *Config) setDialParametersHash() {
 
 	if config.MeekTrafficShapingProbability != nil {
 		hash.Write([]byte("MeekTrafficShapingProbability"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.MeekTrafficShapingProbability))
+		binary.Write(hash, binary.LittleEndian, *config.MeekTrafficShapingProbability)
 	}
 
 	if len(config.MeekTrafficShapingLimitProtocols) > 0 {
@@ -2251,6 +2434,20 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, int64(*config.ConjureDecoyRegistrarMaxDelayMilliseconds))
 	}
 
+	if config.ConjureLimitTransports != nil {
+		hash.Write([]byte("ConjureLimitTransports"))
+		for _, transport := range config.ConjureLimitTransports {
+			hash.Write([]byte(transport))
+		}
+	}
+
+	if config.ConjureSTUNServerAddresses != nil {
+		hash.Write([]byte("ConjureSTUNServerAddresses"))
+		for _, address := range config.ConjureSTUNServerAddresses {
+			hash.Write([]byte(address))
+		}
+	}
+
 	if config.HoldOffTunnelMinDurationMilliseconds != nil {
 		hash.Write([]byte("HoldOffTunnelMinDurationMilliseconds"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelMinDurationMilliseconds))
@@ -2275,9 +2472,49 @@ func (config *Config) setDialParametersHash() {
 		}
 	}
 
+	if config.HoldOffDirectTunnelProbability != nil {
+		hash.Write([]byte("HoldOffDirectTunnelProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.HoldOffDirectTunnelProbability)
+	}
+
+	if config.HoldOffDirectTunnelMinDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffDirectTunnelMinDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffDirectTunnelMinDurationMilliseconds))
+	}
+
+	if config.HoldOffDirectTunnelMaxDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffDirectTunnelMaxDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffDirectTunnelMaxDurationMilliseconds))
+	}
+
+	if len(config.HoldOffDirectTunnelProviderRegions) > 0 {
+		hash.Write([]byte("HoldOffDirectTunnelProviderRegions"))
+		for providerID, regions := range config.HoldOffDirectTunnelProviderRegions {
+			hash.Write([]byte(providerID))
+			for _, region := range regions {
+				hash.Write([]byte(region))
+			}
+		}
+	}
+
 	if config.HoldOffTunnelProbability != nil {
 		hash.Write([]byte("HoldOffTunnelProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.HoldOffTunnelProbability)
+	}
+
+	if len(config.RestrictDirectProviderRegions) > 0 {
+		hash.Write([]byte("RestrictDirectProviderRegions"))
+		for providerID, regions := range config.RestrictDirectProviderRegions {
+			hash.Write([]byte(providerID))
+			for _, region := range regions {
+				hash.Write([]byte(region))
+			}
+		}
+	}
+
+	if config.RestrictDirectProviderIDsClientProbability != nil {
+		hash.Write([]byte("RestrictDirectProviderIDsClientProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.RestrictDirectProviderIDsClientProbability)
 	}
 
 	if len(config.RestrictFrontingProviderIDs) > 0 {
@@ -2356,7 +2593,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.DNSResolverProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("DNSResolverProtocolTransformScopedSpecNames"))
 		encodedDNSResolverProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.DNSResolverProtocolTransformScopedSpecNames)
 		hash.Write(encodedDNSResolverProtocolTransformScopedSpecNames)
@@ -2390,7 +2627,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.DirectHTTPProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("DirectHTTPProtocolTransformScopedSpecNames"))
 		encodedDirectHTTPProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.DirectHTTPProtocolTransformScopedSpecNames)
 		hash.Write(encodedDirectHTTPProtocolTransformScopedSpecNames)
@@ -2409,7 +2646,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.FrontedHTTPProtocolTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("FrontedHTTPProtocolTransformScopedSpecNames"))
 		encodedFrontedHTTPProtocolTransformScopedSpecNames, _ :=
 			json.Marshal(config.FrontedHTTPProtocolTransformScopedSpecNames)
 		hash.Write(encodedFrontedHTTPProtocolTransformScopedSpecNames)
@@ -2428,7 +2665,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.OSSHObfuscatorSeedTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("OSSHObfuscatorSeedTransformScopedSpecNames"))
 		encodedOSSHObfuscatorSeedTransformScopedSpecNames, _ :=
 			json.Marshal(config.OSSHObfuscatorSeedTransformScopedSpecNames)
 		hash.Write(encodedOSSHObfuscatorSeedTransformScopedSpecNames)
@@ -2447,7 +2684,7 @@ func (config *Config) setDialParametersHash() {
 	}
 
 	if config.ObfuscatedQUICNonceTransformScopedSpecNames != nil {
-		hash.Write([]byte(""))
+		hash.Write([]byte("ObfuscatedQUICNonceTransformScopedSpecNames"))
 		encodedObfuscatedQUICNonceTransformScopedSpecNames, _ :=
 			json.Marshal(config.ObfuscatedQUICNonceTransformScopedSpecNames)
 		hash.Write(encodedObfuscatedQUICNonceTransformScopedSpecNames)
@@ -2458,7 +2695,124 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, *config.ObfuscatedQUICNonceTransformProbability)
 	}
 
+	if config.OSSHPrefixSpecs != nil {
+		hash.Write([]byte("OSSHPrefixSpecs"))
+		encodedOSSHPrefixSpecs, _ := json.Marshal(config.OSSHPrefixSpecs)
+		hash.Write(encodedOSSHPrefixSpecs)
+	}
+
+	if config.OSSHPrefixScopedSpecNames != nil {
+		hash.Write([]byte("OSSHPrefixScopedSpecNames"))
+		encodedOSSHPrefixScopedSpecNames, _ := json.Marshal(config.OSSHPrefixScopedSpecNames)
+		hash.Write(encodedOSSHPrefixScopedSpecNames)
+	}
+
+	if config.OSSHPrefixProbability != nil {
+		hash.Write([]byte("OSSHPrefixProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixProbability)
+	}
+
+	if config.OSSHPrefixSplitMinDelayMilliseconds != nil {
+		hash.Write([]byte("OSSHPrefixSplitMinDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.OSSHPrefixSplitMinDelayMilliseconds))
+	}
+
+	if config.OSSHPrefixSplitMaxDelayMilliseconds != nil {
+		hash.Write([]byte("OSSHPrefixSplitMaxDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.OSSHPrefixSplitMaxDelayMilliseconds))
+	}
+
+	if config.OSSHPrefixEnableFragmentor != nil {
+		hash.Write([]byte("OSSHPrefixEnableFragmentor"))
+		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixEnableFragmentor)
+	}
+
+	if config.TLSTunnelTrafficShapingProbability != nil {
+		hash.Write([]byte("TLSTunnelTrafficShapingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.TLSTunnelTrafficShapingProbability)
+	}
+
+	if config.TLSTunnelMinTLSPadding != nil {
+		hash.Write([]byte("TLSTunnelMinTLSPadding"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelMinTLSPadding))
+	}
+
+	if config.TLSTunnelMaxTLSPadding != nil {
+		hash.Write([]byte("TLSTunnelMaxTLSPadding"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.TLSTunnelMaxTLSPadding))
+	}
+
+	if config.TLSFragmentClientHelloProbability != nil {
+		hash.Write([]byte("TLSFragmentClientHelloProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.TLSFragmentClientHelloProbability)
+	}
+
+	if len(config.TLSFragmentClientHelloLimitProtocols) > 0 {
+		hash.Write([]byte("TLSFragmentClientHelloLimitProtocols"))
+		for _, protocol := range config.TLSFragmentClientHelloLimitProtocols {
+			hash.Write([]byte(protocol))
+		}
+	}
+
+	// Steering IPs are ephemeral and not replayed, so steering IP parameters
+	// are excluded here.
+
 	config.dialParametersHash = hash.Sum(nil)
+}
+
+// applyAdditionalParameters decodes and applies any additional parameters
+// stored in config.AdditionalParameter to the Config and returns an array
+// of notices which should be logged at the info level. If there is no error,
+// then config.AdditionalParameter is set to "" to conserve memory and further
+// calls will do nothing. This function should only be called once.
+//
+// If there is an error, the existing Config is left entirely unmodified.
+func (config *Config) applyAdditionalParameters() ([]string, error) {
+
+	if config.AdditionalParameters == "" {
+		return nil, nil
+	}
+
+	b, err := base64.StdEncoding.DecodeString(config.AdditionalParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if len(b) < 32 {
+		return nil, errors.Tracef("invalid length, len(b) == %d", len(b))
+	}
+
+	var key [32]byte
+	copy(key[:], b[:32])
+
+	decrypted, ok := secretbox.Open(nil, b[32:], &[24]byte{}, &key)
+	if !ok {
+		return nil, errors.TraceNew("secretbox.Open failed")
+	}
+
+	var additionalParameters Config
+	err = json.Unmarshal(decrypted, &additionalParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	src := reflect.ValueOf(&additionalParameters).Elem()
+	dest := reflect.ValueOf(config).Elem()
+
+	var infoNotices []string
+
+	for i := 0; i < src.NumField(); i++ {
+		if !src.Field(i).IsZero() {
+			dest.Field(i).Set(src.Field(i))
+			infoNotice := fmt.Sprintf("%s overridden by AdditionalParameters", dest.Type().Field(i).Name)
+			infoNotices = append(infoNotices, infoNotice)
+		}
+	}
+
+	// Reset field to conserve memory since this is a one-time operation.
+	config.AdditionalParameters = ""
+
+	return infoNotices, nil
 }
 
 func promoteLegacyTransferURL(URL string) parameters.TransferURLs {

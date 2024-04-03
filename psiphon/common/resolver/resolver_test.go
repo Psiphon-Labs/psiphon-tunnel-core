@@ -62,6 +62,7 @@ func TestPublicDNSServers(t *testing.T) {
 func runTestMakeResolveParameters() error {
 
 	frontingProviderID := "frontingProvider"
+	frontingDialDomain := exampleDomain
 	alternateDNSServer := "172.16.0.1"
 	alternateDNSServerWithPort := net.JoinHostPort(alternateDNSServer, resolverDNSPort)
 	preferredAlternateDNSServer := "172.16.0.2"
@@ -95,7 +96,7 @@ func runTestMakeResolveParameters() error {
 	defer resolver.Stop()
 
 	resolverParams, err := resolver.MakeResolveParameters(
-		params.Get(), frontingProviderID)
+		params.Get(), frontingProviderID, frontingDialDomain)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -112,11 +113,7 @@ func runTestMakeResolveParameters() error {
 		resolverParams.RequestTimeout != 5*time.Second ||
 		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		!CIDRContainsIP(exampleIPv4CIDR, resolverParams.PreresolvedIPAddress) ||
-		resolverParams.AlternateDNSServer != "" ||
-		resolverParams.PreferAlternateDNSServer != false ||
-		resolverParams.ProtocolTransformName != "" ||
-		resolverParams.ProtocolTransformSpec != nil ||
-		resolverParams.IncludeEDNS0 != false {
+		resolverParams.PreresolvedDomain != frontingDialDomain {
 		return errors.Tracef("unexpected resolver parameters: %+v", resolverParams)
 	}
 
@@ -145,7 +142,7 @@ func runTestMakeResolveParameters() error {
 	}
 
 	resolverParams, err = resolver.MakeResolveParameters(
-		params.Get(), frontingProviderID)
+		params.Get(), frontingProviderID, frontingDialDomain)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -155,6 +152,7 @@ func runTestMakeResolveParameters() error {
 		resolverParams.RequestTimeout != 5*time.Second ||
 		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
+		resolverParams.PreresolvedDomain != "" ||
 		resolverParams.AlternateDNSServer != preferredAlternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != true ||
 		resolverParams.ProtocolTransformName != transformName ||
@@ -175,7 +173,7 @@ func runTestMakeResolveParameters() error {
 	}
 
 	resolverParams, err = resolver.MakeResolveParameters(
-		params.Get(), frontingProviderID)
+		params.Get(), frontingProviderID, frontingDialDomain)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -185,6 +183,7 @@ func runTestMakeResolveParameters() error {
 		resolverParams.RequestTimeout != 5*time.Second ||
 		resolverParams.AwaitTimeout != 10*time.Millisecond ||
 		resolverParams.PreresolvedIPAddress != "" ||
+		resolverParams.PreresolvedDomain != "" ||
 		resolverParams.AlternateDNSServer != alternateDNSServerWithPort ||
 		resolverParams.PreferAlternateDNSServer != false ||
 		resolverParams.ProtocolTransformName != "" ||
@@ -331,6 +330,7 @@ func runTestResolver() error {
 	beforeMetrics = resolver.metrics
 
 	params.PreresolvedIPAddress = exampleIPv4
+	params.PreresolvedDomain = exampleDomain
 
 	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
 	if err != nil {
@@ -349,6 +349,33 @@ func runTestResolver() error {
 	}
 
 	params.PreresolvedIPAddress = ""
+
+	// Test: PreresolvedIPAddress set for different domain
+
+	beforeMetrics = resolver.metrics
+
+	params.PreresolvedIPAddress = exampleIPv4
+	params.PreresolvedDomain = "not.example.com"
+
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if resolver.metrics.resolves != beforeMetrics.resolves+1 ||
+		resolver.metrics.cacheHits != beforeMetrics.cacheHits+1 ||
+		resolver.metrics.requestsIPv4 != beforeMetrics.requestsIPv4 ||
+		resolver.metrics.requestsIPv6 != beforeMetrics.requestsIPv6 {
+		return errors.Tracef("unexpected metrics: %+v", resolver.metrics)
+	}
+
+	params.PreresolvedIPAddress = ""
+	params.PreresolvedDomain = ""
 
 	// Test: change network ID, which must clear cache
 

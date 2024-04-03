@@ -54,16 +54,29 @@ type Specs map[string]Spec
 
 // Validate checks that all entries in a set of Specs is well-formed, with
 // valid regular expressions.
-func (specs Specs) Validate() error {
+func (specs Specs) Validate(prefixMode bool) error {
 	seed, err := prng.NewSeed()
 	if err != nil {
 		return errors.Trace(err)
 	}
+
 	for _, spec := range specs {
+
 		// Call Apply to compile/validate the regular expressions and generators.
-		_, err := spec.ApplyString(seed, "")
-		if err != nil {
-			return errors.Trace(err)
+
+		if prefixMode {
+			if len(spec) != 1 || len(spec[0]) != 2 {
+				return errors.TraceNew("prefix mode requires exactly one transform")
+			}
+			_, _, err := spec.ApplyPrefix(seed, 0)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		} else {
+			_, err := spec.ApplyString(seed, "")
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 	}
 
@@ -140,6 +153,45 @@ func (specs Specs) Select(scope string, scopedSpecs ScopedSpecNames) (string, Sp
 		return "", nil
 	}
 	return specName, spec
+}
+
+// ApplyPrefix unlike other Apply methods, does not apply the Spec to an input.
+// It instead generates a sequence of bytes according to the Spec, and returns
+// at least minLength bytes if the Spec generates fewer than minLength bytes.
+//
+// The input seed is used for all random number generation. The same seed can be
+// supplied to produce the same output, for replay.
+func (spec Spec) ApplyPrefix(seed *prng.Seed, minLength int) ([]byte, int, error) {
+
+	if len(spec) != 1 || len(spec[0]) != 2 {
+		return nil, 0, errors.TraceNew("prefix mode requires exactly one transform")
+	}
+
+	rng := prng.NewPRNGWithSeed(seed)
+
+	args := &regen.GeneratorArgs{
+		RngSource: rng,
+		ByteMode:  true,
+	}
+	gen, err := regen.NewGenerator(spec[0][1], args)
+	if err != nil {
+		return nil, 0, errors.Trace(err)
+	}
+
+	prefix, err := gen.Generate()
+	if err != nil {
+		return nil, 0, errors.Trace(err)
+	}
+
+	prefixLen := len(prefix)
+
+	if len(prefix) < minLength {
+		// Add random padding to fill up to minLength.
+		padding := rng.Bytes(minLength - len(prefix))
+		prefix = append(prefix, padding...)
+	}
+
+	return prefix, prefixLen, nil
 }
 
 // ApplyString applies the Spec to the input string, producing the output string.

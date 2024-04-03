@@ -131,6 +131,9 @@ type MeekConfig struct {
 	// underlying TLS connections created by this meek connection.
 	TLSProfile string
 
+	// TLSFragmentClientHello specifies whether to fragment the TLS Client Hello.
+	TLSFragmentClientHello bool
+
 	// LegacyPassthrough indicates that the server expects a legacy passthrough
 	// message.
 	LegacyPassthrough bool
@@ -176,6 +179,16 @@ type MeekConfig struct {
 	// etc.
 	VerifyPins []string
 
+	// DisableSystemRootCAs, when true, disables loading system root CAs when
+	// verifying the server certificate chain. Set DisableSystemRootCAs only in
+	// cases where system root CAs cannot be loaded and there is additional
+	// security at the payload level; for example, if unsupported (iOS < 12) or
+	// insufficient memory (VPN extension on iOS < 15).
+	//
+	// When DisableSystemRootCAs is set, both VerifyServerName and VerifyPins
+	// must not be set.
+	DisableSystemRootCAs bool
+
 	// ClientTunnelProtocol is the protocol the client is using. It's included in
 	// the meek cookie for optional use by the server, in cases where the server
 	// cannot unambiguously determine the tunnel protocol. ClientTunnelProtocol
@@ -197,6 +210,11 @@ type MeekConfig struct {
 	// HTTPTransformerParameters specifies an HTTP transformer to apply to the
 	// meek connection if it uses HTTP.
 	HTTPTransformerParameters *transforms.HTTPTransformerParameters
+
+	// AdditionalHeaders is a set of additional arbitrary HTTP headers that
+	// are added to all meek HTTP requests. An additional header is ignored
+	// when the header name is already present in a meek request.
+	AdditionalHeaders http.Header
 }
 
 // MeekConn is a network connection that tunnels net.Conn flows over HTTP and supports
@@ -292,10 +310,16 @@ func DialMeek(
 			"invalid config: VerifyServerName must be set when VerifyPins is set")
 	}
 
-	if meekConfig.Mode == MeekModePlaintextRoundTrip &&
-		(!meekConfig.UseHTTPS || skipVerify) {
+	if meekConfig.DisableSystemRootCAs &&
+		(len(meekConfig.VerifyServerName) > 0 || len(meekConfig.VerifyPins) > 0) {
 		return nil, errors.TraceNew(
-			"invalid config: MeekModePlaintextRoundTrip requires UseHTTPS and VerifyServerName")
+			"invalid config: VerifyServerName and VerifyPins must not be set when DisableSystemRootCAs is set")
+	}
+
+	if meekConfig.Mode == MeekModePlaintextRoundTrip &&
+		(!meekConfig.UseHTTPS || (skipVerify && !meekConfig.DisableSystemRootCAs)) {
+		return nil, errors.TraceNew(
+			"invalid config: MeekModePlaintextRoundTrip requires UseHTTPS and VerifyServerName when system root CAs can be loaded")
 	}
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
@@ -365,17 +389,12 @@ func DialMeek(
 
 		udpDialer := func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error) {
 			packetConn, remoteAddr, err := NewUDPConn(
-				ctx,
-				meekConfig.DialAddress,
-				dialConfig)
+				ctx, "udp", false, "", meekConfig.DialAddress, dialConfig)
 			if err != nil {
 				return nil, nil, errors.Trace(err)
 			}
 			return packetConn, remoteAddr, nil
 		}
-
-		_, port, _ := net.SplitHostPort(meekConfig.DialAddress)
-		quicDialSNIAddress := fmt.Sprintf("%s:%s", meekConfig.SNIServerName, port)
 
 		var err error
 		transport, err = quic.NewQUICTransporter(
@@ -384,7 +403,7 @@ func DialMeek(
 				NoticeInfo(message)
 			},
 			udpDialer,
-			quicDialSNIAddress,
+			meekConfig.SNIServerName,
 			meekConfig.QUICVersion,
 			meekConfig.QUICClientHelloSeed,
 			meekConfig.QUICDisablePathMTUDiscovery)
@@ -439,11 +458,13 @@ func DialMeek(
 			SkipVerify:                    skipVerify,
 			VerifyServerName:              meekConfig.VerifyServerName,
 			VerifyPins:                    meekConfig.VerifyPins,
+			DisableSystemRootCAs:          meekConfig.DisableSystemRootCAs,
 			TLSProfile:                    meekConfig.TLSProfile,
 			NoDefaultTLSSessionID:         &meekConfig.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed:      meekConfig.RandomizedTLSProfileSeed,
 			TLSPadding:                    meek.tlsPadding,
 			TrustedCACertificatesFilename: dialConfig.TrustedCACertificatesFilename,
+			FragmentClientHello:           meekConfig.TLSFragmentClientHello,
 		}
 		tlsConfig.EnableClientSessionCache()
 
@@ -663,6 +684,14 @@ func DialMeek(
 			return nil, errors.Trace(err)
 		}
 		additionalHeaders.Set("X-Psiphon-Fronting-Address", host)
+	}
+
+	if meekConfig.AdditionalHeaders != nil {
+		for name, value := range meekConfig.AdditionalHeaders {
+			if _, ok := additionalHeaders[name]; !ok {
+				additionalHeaders[name] = value
+			}
+		}
 	}
 
 	meek.url = url
@@ -1679,7 +1708,7 @@ func makeMeekObfuscationValues(
 	if err != nil {
 		return nil, "", 0, 0, 0.0, errors.Trace(err)
 	}
-	obfuscatedCookie := obfuscator.SendSeedMessage()
+	obfuscatedCookie, _ := obfuscator.SendPreamble()
 	seedLen := len(obfuscatedCookie)
 	obfuscatedCookie = append(obfuscatedCookie, encryptedCookie...)
 	obfuscator.ObfuscateClientToServer(obfuscatedCookie[seedLen:])

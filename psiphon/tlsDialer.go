@@ -57,17 +57,21 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	std_errors "errors"
+	"io"
 	"io/ioutil"
+	"math"
 	"net"
+	"sync/atomic"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -97,6 +101,16 @@ type CustomTLSConfig struct {
 	// the server_name is an IP address.
 	// SNIServerName is ignored when UseDialAddrSNI is true.
 	SNIServerName string
+
+	// DisableSystemRootCAs, when true, disables loading system root CAs when
+	// verifying the server certificate chain. Set DisableSystemRootCAs only in
+	// cases where system root CAs cannot be loaded and there is additional
+	// security at the payload level; for example, if unsupported (iOS < 12) or
+	// insufficient memory (VPN extension on iOS < 15).
+	//
+	// When DisableSystemRootCAs is set, VerifyServerName, VerifyPins, and
+	// VerifyLegacyCertificate must not be set.
+	DisableSystemRootCAs bool
 
 	// VerifyServerName specifies a domain name that must appear in the server
 	// certificate. When specified, certificate verification checks for
@@ -167,6 +181,9 @@ type CustomTLSConfig struct {
 	// obfuscator.MakeTLSPassthroughMessage.
 	PassthroughMessage []byte
 
+	// FragmentClientHello specifies whether to fragment the ClientHello.
+	FragmentClientHello bool
+
 	clientSessionCache utls.ClientSessionCache
 }
 
@@ -195,13 +212,31 @@ func CustomTLSDial(
 	network, addr string,
 	config *CustomTLSConfig) (net.Conn, error) {
 
-	if (config.SkipVerify &&
+	// Note that servers may return a chain which excludes the root CA
+	// cert https://datatracker.ietf.org/doc/html/rfc8446#section-4.4.2.
+	// It will not be possible to verify the certificate chain when
+	// system root CAs cannot be loaded and the server omits the root CA
+	// certificate from the chain.
+	//
+	// TODO: attempt to do some amount of certificate verification when
+	// config.DisableSystemRootCAs is set. It would be possible to
+	// verify the certificate chain, server name, and pins, when
+	// config.TrustedCACertificatesFilename is set and contains the root
+	// CA certificate of the certificate chain returned by the server. Also,
+	// verifying legacy certificates does not require system root CAs, but
+	// there is no code path which uses config.DisableSystemRootCAs in
+	// conjuction with config.VerifyLegacyCertificate. As it stands
+	// config.DisableSystemRootCAs is only used on iOS < 15 and
+	// config.VerifyLegacyCertificate is only used for Windows VPN mode.
+	skipVerify := config.SkipVerify || config.DisableSystemRootCAs
+
+	if (skipVerify &&
 		(config.VerifyLegacyCertificate != nil ||
 			len(config.VerifyServerName) > 0 ||
 			len(config.VerifyPins) > 0)) ||
 
 		(config.VerifyLegacyCertificate != nil &&
-			(config.SkipVerify ||
+			(skipVerify ||
 				len(config.VerifyServerName) > 0 ||
 				len(config.VerifyPins) > 0)) {
 
@@ -220,6 +255,10 @@ func CustomTLSDial(
 		return nil, errors.Trace(err)
 	}
 
+	if config.FragmentClientHello {
+		rawConn = NewTLSFragmentorConn(rawConn)
+	}
+
 	hostname, _, err := net.SplitHostPort(dialAddr)
 	if err != nil {
 		rawConn.Close()
@@ -227,7 +266,7 @@ func CustomTLSDial(
 	}
 
 	var tlsConfigRootCAs *x509.CertPool
-	if !config.SkipVerify &&
+	if !skipVerify &&
 		config.VerifyLegacyCertificate == nil &&
 		config.TrustedCACertificatesFilename != "" {
 
@@ -239,7 +278,7 @@ func CustomTLSDial(
 		tlsConfigRootCAs.AppendCertsFromPEM(certData)
 	}
 
-	// In some cases, config.SkipVerify is false, but
+	// In some cases, skipVerify is false, but
 	// utls.Config.InsecureSkipVerify will be set to true to disable verification
 	// in utls that will otherwise fail: when SNI is omitted, and when
 	// VerifyServerName differs from SNI. In these cases, the certificate chain
@@ -249,7 +288,7 @@ func CustomTLSDial(
 	tlsConfigServerName := ""
 	verifyServerName := hostname
 
-	if config.SkipVerify {
+	if skipVerify {
 		tlsConfigInsecureSkipVerify = true
 	}
 
@@ -287,7 +326,7 @@ func CustomTLSDial(
 	// verification; and abort the handshake at the same point, if custom
 	// verification fails.
 	var tlsConfigVerifyPeerCertificate func([][]byte, [][]*x509.Certificate) error
-	if !config.SkipVerify {
+	if !skipVerify {
 		tlsConfigVerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 
 			if config.VerifyLegacyCertificate != nil {
@@ -330,10 +369,14 @@ func CustomTLSDial(
 		VerifyPeerCertificate: tlsConfigVerifyPeerCertificate,
 	}
 
+	var randomizedTLSProfileSeed *prng.Seed
 	selectedTLSProfile := config.TLSProfile
 
 	if selectedTLSProfile == "" {
-		selectedTLSProfile = SelectTLSProfile(false, false, "", p)
+		selectedTLSProfile, _, randomizedTLSProfileSeed, err = SelectTLSProfile(false, false, false, "", p)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
@@ -342,11 +385,14 @@ func CustomTLSDial(
 		return nil, errors.Trace(err)
 	}
 
-	var randomizedTLSProfileSeed *prng.Seed
 	isRandomized := protocol.TLSProfileIsRandomized(selectedTLSProfile)
 	if isRandomized {
 
-		randomizedTLSProfileSeed = config.RandomizedTLSProfileSeed
+		// Give config.RandomizedTLSProfileSeed precedence over the seed
+		// generated by SelectTLSProfile if selectedTLSProfile == "".
+		if config.RandomizedTLSProfileSeed != nil {
+			randomizedTLSProfileSeed = config.RandomizedTLSProfileSeed
+		}
 
 		if randomizedTLSProfileSeed == nil {
 
@@ -358,6 +404,10 @@ func CustomTLSDial(
 
 		utlsClientHelloID.Seed = new(utls.PRNGSeed)
 		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+
+		weights := utls.DefaultWeights
+		weights.TLSVersMax_Set_VersionTLS13 = 0.5
+		utlsClientHelloID.Weights = &weights
 	}
 
 	// As noted here,
@@ -436,7 +486,7 @@ func CustomTLSDial(
 		}
 		copy(obfuscatedSessionTicketKey[:], key)
 
-		obfuscatedSessionState, err := tris.NewObfuscatedClientSessionState(
+		obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
 			obfuscatedSessionTicketKey)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -462,7 +512,7 @@ func CustomTLSDial(
 		// utls/tls.Conn.loadSession. If these requirements are not met the
 		// obfuscation session ticket would be ignored, so fail.
 
-		if !tris.ContainsObfuscatedSessionTicketCipherSuite(
+		if !tls.ContainsObfuscatedSessionTicketCipherSuite(
 			conn.HandshakeState.Hello.CipherSuites) {
 			return nil, errors.TraceNew(
 				"missing obfuscated session ticket cipher suite")
@@ -601,6 +651,8 @@ func verifyLegacyCertificate(rawCerts [][]byte, expectedCertificate *x509.Certif
 	return nil
 }
 
+// verifyServerCertificate parses and verifies the provided chain. If
+// successful, it returns the verified chains that were built.
 func verifyServerCertificate(
 	rootCAs *x509.CertPool, rawCerts [][]byte, verifyServerName string) ([][]*x509.Certificate, error) {
 
@@ -660,12 +712,44 @@ func IsTLSConnUsingHTTP2(conn net.Conn) bool {
 	return false
 }
 
-// SelectTLSProfile picks a TLS profile at random from the available candidates.
+// SelectTLSProfile picks and returns a TLS profile at random from the
+// available candidates along with its version and a newly generated PRNG seed
+// if the profile is randomized, i.e. protocol.TLSProfileIsRandomized is true,
+// which should be used when generating a randomized TLS ClientHello.
 func SelectTLSProfile(
+	requireTLS12SessionTickets bool,
+	requireTLS13Support bool,
+	isFronted bool,
+	frontingProviderID string,
+	p parameters.ParametersAccessor) (tlsProfile, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
+
+	for {
+		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err = selectTLSProfile(requireTLS12SessionTickets, isFronted, frontingProviderID, p)
+		if err != nil {
+			return "", "", nil, errors.Trace(err)
+		}
+
+		if requireTLS13Support && tlsVersion != protocol.TLS_VERSION_13 {
+			// Continue picking profiles at random until an eligible one is
+			// chosen. It is okay to loop in this way because the probability of
+			// selecting a TLS 1.3 profile is high enough that it should not
+			// take too many iterations until one is chosen.
+			continue
+		}
+
+		return
+	}
+}
+
+// selectTLSProfile is a helper that picks and returns a TLS profile at random
+// from the available candidates along with its version and a newly generated
+// PRNG seed if the profile is randomized, i.e. protocol.TLSProfileIsRandomized
+// is true.
+func selectTLSProfile(
 	requireTLS12SessionTickets bool,
 	isFronted bool,
 	frontingProviderID string,
-	p parameters.ParametersAccessor) string {
+	p parameters.ParametersAccessor) (tlsProfile string, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
 
 	// Two TLS profile lists are constructed, subject to limit constraints:
 	// stock, fixed parrots (non-randomized SupportedTLSProfiles) and custom
@@ -745,14 +829,39 @@ func SelectTLSProfile(
 		(len(parrotTLSProfiles) == 0 ||
 			p.WeightedCoinFlip(parameters.SelectRandomizedTLSProfileProbability)) {
 
-		return randomizedTLSProfiles[prng.Intn(len(randomizedTLSProfiles))]
+		tlsProfile = randomizedTLSProfiles[prng.Intn(len(randomizedTLSProfiles))]
 	}
 
-	if len(parrotTLSProfiles) == 0 {
-		return ""
+	if tlsProfile == "" {
+		if len(parrotTLSProfiles) == 0 {
+			return "", "", nil, nil
+		} else {
+			tlsProfile = parrotTLSProfiles[prng.Intn(len(parrotTLSProfiles))]
+		}
 	}
 
-	return parrotTLSProfiles[prng.Intn(len(parrotTLSProfiles))]
+	utlsClientHelloID, utlsClientHelloSpec, err := getUTLSClientHelloID(
+		p, tlsProfile)
+	if err != nil {
+		return "", "", nil, errors.Trace(err)
+	}
+
+	if protocol.TLSProfileIsRandomized(tlsProfile) {
+		randomizedTLSProfileSeed, err = prng.NewSeed()
+		if err != nil {
+			return "", "", nil, errors.Trace(err)
+		}
+		utlsClientHelloID.Seed = new(utls.PRNGSeed)
+		*utlsClientHelloID.Seed = [32]byte(*randomizedTLSProfileSeed)
+	}
+
+	tlsVersion, err = getClientHelloVersion(
+		utlsClientHelloID, utlsClientHelloSpec)
+	if err != nil {
+		return "", "", nil, errors.Trace(err)
+	}
+
+	return tlsProfile, tlsVersion, randomizedTLSProfileSeed, nil
 }
 
 func getUTLSClientHelloID(
@@ -772,6 +881,8 @@ func getUTLSClientHelloID(
 		return utls.HelloIOS_13, nil, nil
 	case protocol.TLS_PROFILE_IOS_14:
 		return utls.HelloIOS_14, nil, nil
+	case protocol.TLS_PROFILE_SAFARI_16:
+		return utls.HelloSafari_16_0, nil, nil
 	case protocol.TLS_PROFILE_CHROME_58:
 		return utls.HelloChrome_58, nil, nil
 	case protocol.TLS_PROFILE_CHROME_62:
@@ -786,6 +897,32 @@ func getUTLSClientHelloID(
 		return utls.HelloChrome_96, nil, nil
 	case protocol.TLS_PROFILE_CHROME_102:
 		return utls.HelloChrome_102, nil, nil
+	case protocol.TLS_PROFILE_CHROME_106:
+		return utls.HelloChrome_106_Shuffle, nil, nil
+	case protocol.TLS_PROFILE_CHROME_112_PSK:
+		preset, err := utls.UTLSIdToSpec(utls.HelloChrome_112_PSK_Shuf)
+		if err != nil {
+			return utls.ClientHelloID{}, nil, err
+		}
+
+		// Generates typical PSK extension values.
+		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
+		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
+		obfuscatedTicketAge := prng.RangeUint32(13029567, math.MaxUint32)
+
+		binder := prng.Bytes(33)
+		binder[0] = 0x20 // Binder's length
+
+		if pskExt, ok := preset.Extensions[len(preset.Extensions)-1].(*utls.FakePreSharedKeyExtension); ok {
+			pskExt.PskIdentities = []utls.PskIdentity{
+				{
+					Label:               label,
+					ObfuscatedTicketAge: obfuscatedTicketAge,
+				},
+			}
+			pskExt.PskBinders = [][]byte{binder}
+		}
+		return utls.HelloCustom, &preset, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
@@ -805,7 +942,7 @@ func getUTLSClientHelloID(
 
 	customTLSProfile := p.CustomTLSProfile(tlsProfile)
 	if customTLSProfile == nil {
-		return utls.HelloCustom,
+		return utls.ClientHelloID{},
 			nil,
 			errors.Tracef("unknown TLS profile: %s", tlsProfile)
 	}
@@ -833,7 +970,8 @@ func getClientHelloVersion(
 		utls.HelloChrome_83, utls.HelloChrome_96,
 		utls.HelloChrome_102, utls.HelloFirefox_65,
 		utls.HelloFirefox_99, utls.HelloFirefox_105,
-		utls.HelloGolang:
+		utls.HelloChrome_106_Shuffle, utls.HelloGolang,
+		utls.HelloSafari_16_0:
 		return protocol.TLS_VERSION_13, nil
 	}
 
@@ -879,4 +1017,227 @@ func init() {
 	// layer; users of CustomTLSDial, including meek and remote server list
 	// downloads, don't depend on this TLS for its security properties.
 	utls.EnableWeakCiphers()
+}
+
+type TLSFragmentorConn struct {
+	net.Conn
+	clientHelloSent int32
+}
+
+func NewTLSFragmentorConn(
+	conn net.Conn,
+) net.Conn {
+	return &TLSFragmentorConn{
+		Conn: conn,
+	}
+}
+
+func (c *TLSFragmentorConn) Close() error {
+	return c.Conn.Close()
+}
+
+func (c *TLSFragmentorConn) Read(b []byte) (n int, err error) {
+	return c.Conn.Read(b)
+}
+
+// Write transparently splits the first TLS record containing ClientHello into
+// two fragments and writes them separately to the underlying conn.
+// The second fragment contains the data portion of the SNI extension (i.e. the server name).
+// Write assumes a non-fragmented and complete ClientHello on the first call.
+func (c *TLSFragmentorConn) Write(b []byte) (n int, err error) {
+
+	if atomic.LoadInt32(&c.clientHelloSent) == 0 {
+
+		buf := bytes.NewReader(b)
+
+		var contentType uint8
+		err := binary.Read(buf, binary.BigEndian, &contentType)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if contentType != 0x16 {
+			return 0, errors.TraceNew("expected Handshake content type")
+		}
+
+		var version uint16
+		err = binary.Read(buf, binary.BigEndian, &version)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if version != 0x0303 && version != 0x0302 && version != 0x0301 {
+			return 0, errors.TraceNew("expected TLS version 0x0303 or 0x0302 or 0x0301")
+		}
+
+		var msgLen uint16
+		err = binary.Read(buf, binary.BigEndian, &msgLen)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if len(b) != int(msgLen)+5 {
+			return 0, errors.TraceNew("unexpected TLS message length")
+		}
+
+		var handshakeType uint8
+		err = binary.Read(buf, binary.BigEndian, &handshakeType)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if handshakeType != 0x01 {
+			return 0, errors.TraceNew("expected ClientHello(1) handshake type")
+		}
+
+		var handshakeLen uint32
+		err = binary.Read(buf, binary.BigEndian, &handshakeLen)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		handshakeLen >>= 8 // 24-bit value
+		buf.UnreadByte()   // Unread the last byte
+
+		var legacyVersion uint16
+		err = binary.Read(buf, binary.BigEndian, &legacyVersion)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if legacyVersion != 0x0303 {
+			return 0, errors.TraceNew("expected TLS version 0x0303")
+		}
+
+		// Skip random
+		_, err = buf.Seek(32, io.SeekCurrent)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+
+		var sessionIdLen uint8
+		err = binary.Read(buf, binary.BigEndian, &sessionIdLen)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if sessionIdLen > 32 {
+			return 0, errors.TraceNew("unexpected session ID length")
+		}
+
+		// Skip session ID
+		_, err = buf.Seek(int64(sessionIdLen), io.SeekCurrent)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+
+		var cipherSuitesLen uint16
+		err = binary.Read(buf, binary.BigEndian, &cipherSuitesLen)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if cipherSuitesLen < 2 || cipherSuitesLen > 65535 {
+			return 0, errors.TraceNew("unexpected cipher suites length")
+		}
+
+		// Skip cipher suites
+		_, err = buf.Seek(int64(cipherSuitesLen), io.SeekCurrent)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+
+		var compressionMethodsLen int8
+		err = binary.Read(buf, binary.BigEndian, &compressionMethodsLen)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if compressionMethodsLen < 1 || compressionMethodsLen > 32 {
+			return 0, errors.TraceNew("unexpected compression methods length")
+		}
+
+		// Skip compression methods
+		_, err = buf.Seek(int64(compressionMethodsLen), io.SeekCurrent)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+
+		var extensionsLen uint16
+		err = binary.Read(buf, binary.BigEndian, &extensionsLen)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		if extensionsLen < 2 || extensionsLen > 65535 {
+			return 0, errors.TraceNew("unexpected extensions length")
+		}
+
+		// Finds SNI extension.
+		for {
+			if buf.Len() == 0 {
+				return 0, errors.TraceNew("missing SNI extension")
+			}
+
+			var extensionType uint16
+			err = binary.Read(buf, binary.BigEndian, &extensionType)
+			if err != nil {
+				return 0, errors.Trace(err)
+			}
+
+			var extensionLen uint16
+			err = binary.Read(buf, binary.BigEndian, &extensionLen)
+			if err != nil {
+				return 0, errors.Trace(err)
+			}
+
+			// server_name(0) extension type
+			if extensionType == 0x0000 {
+				break
+			}
+
+			// Skip extension data
+			_, err = buf.Seek(int64(extensionLen), io.SeekCurrent)
+			if err != nil {
+				return 0, errors.Trace(err)
+			}
+		}
+
+		sniStartIndex := len(b) - buf.Len()
+
+		// Splits the ClientHello message into two fragments at sniStartIndex,
+		// and writes them separately to the underlying conn.
+		tlsMessage := b[5:]
+		frag1, frag2, err := splitTLSMessage(contentType, version, tlsMessage, sniStartIndex)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+		n, err = c.Conn.Write(frag1)
+		if err != nil {
+			return n, errors.Trace(err)
+		}
+		n2, err := c.Conn.Write(frag2)
+		if err != nil {
+			return n + n2, errors.Trace(err)
+		}
+
+		atomic.CompareAndSwapInt32(&c.clientHelloSent, 0, 1)
+
+		return len(b), nil
+	}
+
+	return c.Conn.Write(b)
+}
+
+// splitTLSMessage splits a TLS message into two fragments.
+// The two fragments are wrapped in TLS records.
+func splitTLSMessage(contentType uint8, version uint16, msg []byte, splitIndex int) ([]byte, []byte, error) {
+	if splitIndex > len(msg)-1 {
+		return nil, nil, errors.TraceNew("split index out of range")
+	}
+
+	frag1 := make([]byte, splitIndex+5)
+	frag2 := make([]byte, len(msg)-splitIndex+5)
+
+	frag1[0] = byte(contentType)
+	binary.BigEndian.PutUint16(frag1[1:3], version)
+	binary.BigEndian.PutUint16(frag1[3:5], uint16(splitIndex))
+	copy(frag1[5:], msg[:splitIndex])
+
+	frag2[0] = byte(contentType)
+	binary.BigEndian.PutUint16(frag2[1:3], version)
+	binary.BigEndian.PutUint16(frag2[3:5], uint16(len(msg)-splitIndex))
+	copy(frag2[5:], msg[splitIndex:])
+
+	return frag1, frag2, nil
 }

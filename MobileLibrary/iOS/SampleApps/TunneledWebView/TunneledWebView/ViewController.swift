@@ -9,10 +9,11 @@
 
 
 import UIKit
+import WebKit
 
 class ViewController: UIViewController {
-    
-    @IBOutlet var webView: UIWebView!
+
+    @IBOutlet var webView: WKWebView!
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -26,8 +27,14 @@ class ViewController: UIViewController {
         // Dispose of any resources that can be recreated.
     }
 
+    func useProxyConfiguration(_ proxyConfig: ProxyConfiguration) {
+        let websiteDataStore = WKWebsiteDataStore.default()
+        websiteDataStore.proxyConfigurations = [proxyConfig]
+        webView.configuration.websiteDataStore = websiteDataStore
+    }
+
     func loadUrl(_ url: URL) {
         let request = URLRequest.init(url: url)
-        self.webView.loadRequest(request)
+        self.webView.load(request)
     }
 }

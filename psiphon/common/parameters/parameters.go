@@ -228,7 +228,6 @@ const (
 	ReplayObfuscatorPadding                          = "ReplayObfuscatorPadding"
 	ReplayFragmentor                                 = "ReplayFragmentor"
 	ReplayTLSProfile                                 = "ReplayTLSProfile"
-	ReplayRandomizedTLSProfile                       = "ReplayRandomizedTLSProfile"
 	ReplayFronting                                   = "ReplayFronting"
 	ReplayHostname                                   = "ReplayHostname"
 	ReplayQUICVersion                                = "ReplayQUICVersion"
@@ -243,6 +242,8 @@ const (
 	ReplayResolveParameters                          = "ReplayResolveParameters"
 	ReplayHTTPTransformerParameters                  = "ReplayHTTPTransformerParameters"
 	ReplayOSSHSeedTransformerParameters              = "ReplayOSSHSeedTransformerParameters"
+	ReplayOSSHPrefix                                 = "ReplayOSSHPrefix"
+	ReplayTLSFragmentClientHello                     = "ReplayTLSFragmentClientHello"
 	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
 	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
 	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
@@ -295,7 +296,13 @@ const (
 	ConjureDecoyRegistrarWidth                       = "ConjureDecoyRegistrarWidth"
 	ConjureDecoyRegistrarMinDelay                    = "ConjureDecoyRegistrarMinDelay"
 	ConjureDecoyRegistrarMaxDelay                    = "ConjureDecoyRegistrarMaxDelay"
-	ConjureTransportObfs4Probability                 = "ConjureTransportObfs4Probability"
+	ConjureEnableIPv6Dials                           = "ConjureEnableIPv6Dials"
+	ConjureEnablePortRandomization                   = "ConjureEnablePortRandomization"
+	ConjureEnableRegistrationOverrides               = "ConjureEnableRegistrationOverrides"
+	ConjureLimitTransportsProbability                = "ConjureLimitTransportsProbability"
+	ConjureLimitTransports                           = "ConjureLimitTransports"
+	ConjureSTUNServerAddresses                       = "ConjureSTUNServerAddresses"
+	ConjureDTLSEmptyInitialPacketProbability         = "ConjureDTLSEmptyInitialPacketProbability"
 	CustomHostNameRegexes                            = "CustomHostNameRegexes"
 	CustomHostNameProbability                        = "CustomHostNameProbability"
 	CustomHostNameLimitProtocols                     = "CustomHostNameLimitProtocols"
@@ -307,6 +314,13 @@ const (
 	RestrictFrontingProviderIDs                      = "RestrictFrontingProviderIDs"
 	RestrictFrontingProviderIDsServerProbability     = "RestrictFrontingProviderIDsServerProbability"
 	RestrictFrontingProviderIDsClientProbability     = "RestrictFrontingProviderIDsClientProbability"
+	HoldOffDirectTunnelMinDuration                   = "HoldOffDirectTunnelMinDuration"
+	HoldOffDirectTunnelMaxDuration                   = "HoldOffDirectTunnelMaxDuration"
+	HoldOffDirectTunnelProviderRegions               = "HoldOffDirectTunnelProviderRegions"
+	HoldOffDirectTunnelProbability                   = "HoldOffDirectTunnelProbability"
+	RestrictDirectProviderRegions                    = "RestrictDirectProviderRegions"
+	RestrictDirectProviderIDsServerProbability       = "RestrictDirectProviderIDsServerProbability"
+	RestrictDirectProviderIDsClientProbability       = "RestrictDirectProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources          = "UpstreamProxyAllowAllServerEntrySources"
 	DestinationBytesMetricsASN                       = "DestinationBytesMetricsASN"
 	DNSResolverAttemptsPerServer                     = "DNSResolverAttemptsPerServer"
@@ -337,6 +351,25 @@ const (
 	ObfuscatedQUICNonceTransformSpecs                = "ObfuscatedQUICNonceTransformSpecs"
 	ObfuscatedQUICNonceTransformScopedSpecNames      = "ObfuscatedQUICNonceTransformScopedSpecNames"
 	ObfuscatedQUICNonceTransformProbability          = "ObfuscatedQUICNonceTransformProbability"
+	OSSHPrefixSpecs                                  = "OSSHPrefixSpecs"
+	OSSHPrefixScopedSpecNames                        = "OSSHPrefixScopedSpecNames"
+	OSSHPrefixProbability                            = "OSSHPrefixProbability"
+	OSSHPrefixSplitMinDelay                          = "OSSHPrefixSplitMinDelay"
+	OSSHPrefixSplitMaxDelay                          = "OSSHPrefixSplitMaxDelay"
+	OSSHPrefixEnableFragmentor                       = "OSSHPrefixEnableFragmentor"
+	ServerOSSHPrefixSpecs                            = "ServerOSSHPrefixSpecs"
+	TLSTunnelTrafficShapingProbability               = "TLSTunnelTrafficShapingProbability"
+	TLSTunnelMinTLSPadding                           = "TLSTunnelMinTLSPadding"
+	TLSTunnelMaxTLSPadding                           = "TLSTunnelMaxTLSPadding"
+	TLSFragmentClientHelloProbability                = "TLSFragmentClientHelloProbability"
+	TLSFragmentClientHelloLimitProtocols             = "TLSFragmentClientHelloLimitProtocols"
+	SteeringIPCacheTTL                               = "SteeringIPCacheTTL"
+	SteeringIPCacheMaxEntries                        = "SteeringIPCacheMaxEntries"
+	SteeringIPProbability                            = "SteeringIPProbability"
+
+	// Retired parameters
+
+	ReplayRandomizedTLSProfile = "ReplayRandomizedTLSProfile"
 )
 
 const (
@@ -580,7 +613,6 @@ var defaultParameters = map[string]struct {
 	ReplayObfuscatorPadding:                {value: true},
 	ReplayFragmentor:                       {value: true},
 	ReplayTLSProfile:                       {value: true},
-	ReplayRandomizedTLSProfile:             {value: true},
 	ReplayFronting:                         {value: true},
 	ReplayHostname:                         {value: true},
 	ReplayQUICVersion:                      {value: true},
@@ -595,6 +627,8 @@ var defaultParameters = map[string]struct {
 	ReplayResolveParameters:                {value: true},
 	ReplayHTTPTransformerParameters:        {value: true},
 	ReplayOSSHSeedTransformerParameters:    {value: true},
+	ReplayOSSHPrefix:                       {value: true},
+	ReplayTLSFragmentClientHello:           {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -651,17 +685,22 @@ var defaultParameters = map[string]struct {
 	ConjureCachedRegistrationTTL: {value: time.Duration(0), minimum: time.Duration(0)},
 	// ConjureAPIRegistrarURL parameter is obsoleted by ConjureAPIRegistrarBidirectionalURL.
 	// TODO: remove once no longer required for older clients.
-	ConjureAPIRegistrarURL:              {value: ""},
-	ConjureAPIRegistrarBidirectionalURL: {value: ""},
-	ConjureAPIRegistrarFrontingSpecs:    {value: FrontingSpecs{}},
-	ConjureAPIRegistrarMinDelay:         {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureAPIRegistrarMaxDelay:         {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureDecoyRegistrarProbability:    {value: 0.0, minimum: 0.0},
-	ConjureDecoyRegistrarWidth:          {value: 5, minimum: 0},
-	ConjureDecoyRegistrarMinDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-	ConjureDecoyRegistrarMaxDelay:       {value: time.Duration(0), minimum: time.Duration(0)},
-
-	ConjureTransportObfs4Probability: {value: 0.0, minimum: 0.0},
+	ConjureAPIRegistrarURL:                   {value: ""},
+	ConjureAPIRegistrarBidirectionalURL:      {value: ""},
+	ConjureAPIRegistrarFrontingSpecs:         {value: FrontingSpecs{}},
+	ConjureAPIRegistrarMinDelay:              {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureAPIRegistrarMaxDelay:              {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarProbability:         {value: 0.0, minimum: 0.0},
+	ConjureDecoyRegistrarWidth:               {value: 5, minimum: 0},
+	ConjureDecoyRegistrarMinDelay:            {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureDecoyRegistrarMaxDelay:            {value: time.Duration(0), minimum: time.Duration(0)},
+	ConjureEnableIPv6Dials:                   {value: true},
+	ConjureEnablePortRandomization:           {value: true},
+	ConjureEnableRegistrationOverrides:       {value: false},
+	ConjureLimitTransportsProbability:        {value: 1.0, minimum: 0.0},
+	ConjureLimitTransports:                   {value: protocol.ConjureTransports{}},
+	ConjureSTUNServerAddresses:               {value: []string{}},
+	ConjureDTLSEmptyInitialPacketProbability: {value: 0.0, minimum: 0.0},
 
 	CustomHostNameRegexes:        {value: RegexStrings{}},
 	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},
@@ -676,6 +715,15 @@ var defaultParameters = map[string]struct {
 	RestrictFrontingProviderIDs:                  {value: []string{}},
 	RestrictFrontingProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	RestrictFrontingProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
+
+	HoldOffDirectTunnelMinDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffDirectTunnelMaxDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffDirectTunnelProviderRegions: {value: KeyStrings{}},
+	HoldOffDirectTunnelProbability:     {value: 0.0, minimum: 0.0},
+
+	RestrictDirectProviderRegions:              {value: KeyStrings{}},
+	RestrictDirectProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
+	RestrictDirectProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
 
 	UpstreamProxyAllowAllServerEntrySources: {value: false},
 
@@ -713,6 +761,27 @@ var defaultParameters = map[string]struct {
 	ObfuscatedQUICNonceTransformSpecs:           {value: transforms.Specs{}},
 	ObfuscatedQUICNonceTransformScopedSpecNames: {value: transforms.ScopedSpecNames{}},
 	ObfuscatedQUICNonceTransformProbability:     {value: 0.0, minimum: 0.0},
+
+	OSSHPrefixSpecs:            {value: transforms.Specs{}},
+	OSSHPrefixScopedSpecNames:  {value: transforms.ScopedSpecNames{}},
+	OSSHPrefixProbability:      {value: 0.0, minimum: 0.0},
+	OSSHPrefixSplitMinDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
+	OSSHPrefixSplitMaxDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
+	OSSHPrefixEnableFragmentor: {value: false},
+	ServerOSSHPrefixSpecs:      {value: transforms.Specs{}, flags: serverSideOnly},
+
+	// TLSTunnelMinTLSPadding/TLSTunnelMaxTLSPadding are subject to TLS server limitations.
+
+	TLSTunnelTrafficShapingProbability: {value: 1.0, minimum: 0.0},
+	TLSTunnelMinTLSPadding:             {value: 0, minimum: 0},
+	TLSTunnelMaxTLSPadding:             {value: 0, minimum: 0},
+
+	TLSFragmentClientHelloProbability:    {value: 0.0, minimum: 0.0},
+	TLSFragmentClientHelloLimitProtocols: {value: protocol.TunnelProtocols{}},
+
+	SteeringIPCacheTTL:        {value: 1 * time.Hour, minimum: time.Duration(0)},
+	SteeringIPCacheMaxEntries: {value: 65536, minimum: 0},
+	SteeringIPProbability:     {value: 1.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -926,6 +995,13 @@ func (p *Parameters) Set(
 	obfuscatedQuicNonceTransformSpecs, _ :=
 		obfuscatedQuicNonceTransformSpecsValue.(transforms.Specs)
 
+	osshPrefixSpecsValue, err := getAppliedValue(
+		OSSHPrefixSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	osshPrefixSpecs, _ := osshPrefixSpecsValue.(transforms.Specs)
+
 	for i := 0; i < len(applyParameters); i++ {
 
 		count := 0
@@ -1033,6 +1109,14 @@ func (p *Parameters) Set(
 					}
 					return nil, errors.Trace(err)
 				}
+			case KeyStrings:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
 			case *BPFProgramSpec:
 				if v != nil {
 					err := v.Validate()
@@ -1098,7 +1182,11 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case transforms.Specs:
-				err := v.Validate()
+				prefixMode := false
+				if name == OSSHPrefixSpecs || name == ServerOSSHPrefixSpecs {
+					prefixMode = true
+				}
+				err := v.Validate(prefixMode)
 				if err != nil {
 					if skipOnError {
 						continue
@@ -1118,6 +1206,8 @@ func (p *Parameters) Set(
 					specs = osshObfuscatorSeedTransformSpecs
 				} else if name == ObfuscatedQUICNonceTransformScopedSpecNames {
 					specs = obfuscatedQuicNonceTransformSpecs
+				} else if name == OSSHPrefixScopedSpecNames {
+					specs = osshPrefixSpecs
 				}
 
 				err := v.Validate(specs)
@@ -1126,6 +1216,15 @@ func (p *Parameters) Set(
 						continue
 					}
 					return nil, errors.Trace(err)
+				}
+			case protocol.ConjureTransports:
+				if skipOnError {
+					newValue = v.PruneInvalid()
+				} else {
+					err := v.Validate()
+					if err != nil {
+						return nil, errors.Trace(err)
+					}
 				}
 			}
 
@@ -1642,6 +1741,35 @@ func (p ParametersAccessor) ProtocolTransformSpecs(name string) transforms.Specs
 // parameter value.
 func (p ParametersAccessor) ProtocolTransformScopedSpecNames(name string) transforms.ScopedSpecNames {
 	value := transforms.ScopedSpecNames{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// ConjureTransports returns a protocol.ConjureTransports parameter value. If
+// there is a corresponding Probability value, a weighted coin flip will be
+// performed and, depending on the result, the value or the parameter default
+// will be returned.
+func (p ParametersAccessor) ConjureTransports(name string) protocol.ConjureTransports {
+
+	probabilityName := name + "Probability"
+	_, ok := p.snapshot.parameters[probabilityName]
+	if ok {
+		probabilityValue := float64(1.0)
+		p.snapshot.getValue(probabilityName, &probabilityValue)
+		if !prng.FlipWeightedCoin(probabilityValue) {
+			defaultParameter, ok := defaultParameters[name]
+			if ok {
+				defaultValue, ok := defaultParameter.value.(protocol.ConjureTransports)
+				if ok {
+					value := make(protocol.ConjureTransports, len(defaultValue))
+					copy(value, defaultValue)
+					return value
+				}
+			}
+		}
+	}
+
+	value := protocol.ConjureTransports{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

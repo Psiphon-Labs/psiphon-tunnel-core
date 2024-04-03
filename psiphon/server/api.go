@@ -177,7 +177,8 @@ var handshakeRequestParams = append(
 			[]requestParamSpec{
 				// Legacy clients may not send "session_id" in handshake
 				{"session_id", isHexDigits, requestParamOptional},
-				{"missing_server_entry_signature", isBase64String, requestParamOptional}},
+				{"missing_server_entry_signature", isBase64String, requestParamOptional},
+				{"missing_server_entry_provider_id", isBase64String, requestParamOptional}},
 			baseParams...),
 		baseDialParams...),
 	tacticsParams...)
@@ -351,17 +352,27 @@ func handshakeAPIRequestHandler(
 			calculateDiscoveryValue(support.Config.DiscoveryValueHMACKey, clientIP))
 	}
 
-	// When the client indicates that it used an unsigned server entry for this
-	// connection, return a signed copy of the server entry for the client to
-	// upgrade to. See also: comment in psiphon.doHandshakeRequest.
+	// When the client indicates that it used an out-of-date server entry for
+	// this connection, return a signed copy of the server entry for the client
+	// to upgrade to. Out-of-date server entries are either unsigned or missing
+	// a provider ID. See also: comment in psiphon.doHandshakeRequest.
 	//
 	// The missing_server_entry_signature parameter value is a server entry tag,
 	// which is used to select the correct server entry for servers with multiple
 	// entries. Identifying the server entries tags instead of server IPs prevents
 	// an enumeration attack, where a malicious client can abuse this facilty to
 	// check if an arbitrary IP address is a Psiphon server.
+	//
+	// The missing_server_entry_provider_id parameter value is a server entry
+	// tag.
 	serverEntryTag, ok := getOptionalStringRequestParam(
 		params, "missing_server_entry_signature")
+	if !ok {
+		// Do not need to check this case if we'll already return the server
+		// entry due to a missing signature.
+		serverEntryTag, ok = getOptionalStringRequestParam(
+			params, "missing_server_entry_provider_id")
+	}
 	if ok {
 		ownServerEntry, ok := support.Config.GetOwnEncodedServerEntry(serverEntryTag)
 		if ok {
@@ -390,6 +401,7 @@ func handshakeAPIRequestHandler(
 		TacticsPayload:           marshaledTacticsPayload,
 		UpstreamBytesPerSecond:   handshakeStateInfo.upstreamBytesPerSecond,
 		DownstreamBytesPerSecond: handshakeStateInfo.downstreamBytesPerSecond,
+		SteeringIP:               handshakeStateInfo.steeringIP,
 		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
@@ -532,15 +544,27 @@ var remoteServerListStatParams = append(
 		{"etag", isAnyString, 0},
 		{"bytes", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
-		{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool}},
+		{"authenticated", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+		{"fronting_provider_id", isAnyString, requestParamOptional},
+		{"meek_dial_address", isDialAddress, requestParamOptional},
+		{"meek_resolved_ip_address", isIPAddress, requestParamOptional},
+		{"meek_sni_server_name", isDomain, requestParamOptional},
+		{"meek_host_header", isHostHeader, requestParamOptional},
+		{"meek_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+		{"user_agent", isAnyString, requestParamOptional},
+		{"tls_profile", isAnyString, requestParamOptional},
+		{"tls_version", isAnyString, requestParamOptional},
+		{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	},
+
 	baseSessionParams...)
 
 // Backwards compatibility case: legacy clients do not include these fields in
 // the remote_server_list_stats entries. Use the values from the outer status
 // request as an approximation (these values reflect the client at persistent
 // stat shipping time, which may differ from the client at persistent stat
-// recording time). Note that all but client_build_rev and device_region are
-// required fields.
+// recording time). Note that all but client_build_rev, device_region, and
+// device_location are required fields.
 var remoteServerListStatBackwardsCompatibilityParamNames = []string{
 	"session_id",
 	"propagation_channel_id",
@@ -549,6 +573,7 @@ var remoteServerListStatBackwardsCompatibilityParamNames = []string{
 	"client_platform",
 	"client_build_rev",
 	"device_region",
+	"device_location",
 }
 
 var failedTunnelStatParams = append(
@@ -871,6 +896,7 @@ var baseParams = []requestParamSpec{
 	{"client_features", isAnyString, requestParamOptional | requestParamArray},
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"device_region", isAnyString, requestParamOptional},
+	{"device_location", isGeoHashString, requestParamOptional},
 }
 
 // baseSessionParams adds to baseParams the required session_id parameter. For
@@ -929,6 +955,11 @@ var baseDialParams = []requestParamSpec{
 	{"conjure_cached", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"conjure_delay", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"conjure_transport", isAnyString, requestParamOptional},
+	{"conjure_prefix", isAnyString, requestParamOptional},
+	{"conjure_stun", isAnyString, requestParamOptional},
+	{"conjure_empty_packet", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"conjure_network", isAnyString, requestParamOptional},
+	{"conjure_port_number", isAnyString, requestParamOptional},
 	{"split_tunnel", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"split_tunnel_regions", isRegionCode, requestParamOptional | requestParamArray},
 	{"dns_preresolved", isAnyString, requestParamOptional},
@@ -937,6 +968,12 @@ var baseDialParams = []requestParamSpec{
 	{"dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"http_transform", isAnyString, requestParamOptional},
 	{"seed_transform", isAnyString, requestParamOptional},
+	{"ossh_prefix", isAnyString, requestParamOptional},
+	{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},
+	{"tls_ossh_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"steering_ip", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.
@@ -1544,4 +1581,20 @@ func isISO8601Date(_ *Config, value string) bool {
 
 func isLastConnected(_ *Config, value string) bool {
 	return value == "None" || isISO8601Date(nil, value)
+}
+
+const geohashAlphabet = "0123456789bcdefghjkmnpqrstuvwxyz"
+
+func isGeoHashString(_ *Config, value string) bool {
+	// Verify that the string is between 1 and 12 characters long
+	// and contains only characters from the geohash alphabet.
+	if len(value) < 1 || len(value) > 12 {
+		return false
+	}
+	for _, c := range value {
+		if strings.Index(geohashAlphabet, string(c)) == -1 {
+			return false
+		}
+	}
+	return true
 }
