@@ -103,7 +103,7 @@ type Scheme struct {
 	// SeedSpecs is the set of different client network activity patterns
 	// that will result in issuing SLOKs. For a given time period, a distinct
 	// SLOK is issued for each SeedSpec.
-	// Duplicate subnets may appear in multiple SeedSpecs.
+	// Duplicate subnets and asns may appear in multiple SeedSpecs.
 	SeedSpecs []*SeedSpec
 
 	// SeedSpecThreshold is the threshold scheme for combining SLOKs to
@@ -135,7 +135,7 @@ type Scheme struct {
 	//   SeedPeriodNanoseconds = 100,000,000 = 100 milliseconds
 	//   SeedPeriodKeySplits = [{10, 7}, {60, 5}]
 	//
-	//   In these scheme, up to 3 distinct SLOKs, one per spec, are issued
+	//   In this scheme, up to 3 distinct SLOKs, one per spec, are issued
 	//   every 100 milliseconds.
 	//
 	//   Distinct OSLs are paved for every minute (60 seconds). Each OSL
@@ -149,6 +149,7 @@ type Scheme struct {
 
 	epoch                 time.Time
 	subnetLookups         []common.SubnetLookup
+	asnLookups            [][]string
 	derivedSLOKCacheMutex sync.RWMutex
 	derivedSLOKCache      map[slokReference]*SLOK
 }
@@ -156,15 +157,16 @@ type Scheme struct {
 // SeedSpec defines a client traffic pattern that results in a seeded SLOK.
 // For each time period, a unique SLOK is issued to a client that meets the
 // traffic levels specified in Targets. All upstream port forward traffic to
-// UpstreamSubnets is counted towards the targets.
+// UpstreamSubnets and UpstreamASNs are counted towards the targets.
 //
 // ID is a SLOK key derivation component and must be 32 random bytes, base64
-// encoded. UpstreamSubnets is a list of CIDRs. Description is not used; it's
-// for JSON config file comments.
+// encoded. UpstreamSubnets is a list of CIDRs. UpstreamASNs is a list of
+// ASNs. Description is not used; it's for JSON config file comments.
 type SeedSpec struct {
 	Description     string
 	ID              []byte
 	UpstreamSubnets []string
+	UpstreamASNs    []string
 	Targets         TrafficValues
 }
 
@@ -198,6 +200,7 @@ type ClientSeedState struct {
 	signalIssueSLOKs     chan struct{}
 	issuedSLOKs          map[string]*SLOK
 	payloadSLOKs         []*SLOK
+	lookupASN            func(net.IP) string
 }
 
 // ClientSeedProgress tracks client progress towards seeding SLOKs for
@@ -213,7 +216,7 @@ type ClientSeedProgress struct {
 
 // ClientSeedPortForward map a client port forward, which is relaying
 // traffic to a specific upstream address, to all seed state progress
-// counters for SeedSpecs with subnets containing the upstream address.
+// counters for SeedSpecs with subnets and asns containing the upstream address.
 // As traffic is relayed through the port forwards, the bytes transferred
 // and duration count towards the progress of these SeedSpecs and
 // associated SLOKs.
@@ -319,6 +322,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 		scheme.epoch = epoch
 		scheme.subnetLookups = make([]common.SubnetLookup, len(scheme.SeedSpecs))
+		scheme.asnLookups = make([][]string, len(scheme.SeedSpecs))
 		scheme.derivedSLOKCache = make(map[slokReference]*SLOK)
 
 		if len(scheme.MasterKey) != KEY_LENGTH_BYTES {
@@ -342,6 +346,18 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			}
 
 			scheme.subnetLookups[index] = subnetLookup
+
+			// Ensure there are no duplicates.
+			asns := make(map[string]struct{}, len(seedSpec.UpstreamASNs))
+			for _, asn := range seedSpec.UpstreamASNs {
+				if _, ok := asns[asn]; ok {
+					return nil, errors.Tracef("invalid upstream asns, duplicate asn: %s", asn)
+				} else {
+					asns[asn] = struct{}{}
+				}
+			}
+
+			scheme.asnLookups[index] = seedSpec.UpstreamASNs
 		}
 
 		if !isValidShamirSplit(len(scheme.SeedSpecs), scheme.SeedSpecThreshold) {
@@ -374,7 +390,8 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 // should be appropriately buffered.
 func (config *Config) NewClientSeedState(
 	clientRegion, propagationChannelID string,
-	signalIssueSLOKs chan struct{}) *ClientSeedState {
+	signalIssueSLOKs chan struct{},
+	lookupASN func(net.IP) string) *ClientSeedState {
 
 	config.ReloadableFile.RLock()
 	defer config.ReloadableFile.RUnlock()
@@ -384,6 +401,7 @@ func (config *Config) NewClientSeedState(
 		signalIssueSLOKs:     signalIssueSLOKs,
 		issuedSLOKs:          make(map[string]*SLOK),
 		payloadSLOKs:         nil,
+		lookupASN:            lookupASN,
 	}
 
 	for _, scheme := range config.Schemes {
@@ -450,7 +468,7 @@ func (state *ClientSeedState) Resume(
 // NewClientSeedPortForward creates a new client port forward
 // traffic progress tracker. Port forward progress reported to the
 // ClientSeedPortForward is added to seed state progress for all
-// seed specs containing upstreamIPAddress in their subnets.
+// seed specs containing upstreamIPAddress in their subnets or asns.
 // The return value will be nil when activity for upstreamIPAddress
 // does not count towards any progress.
 // NewClientSeedPortForward may be invoked concurrently by many
@@ -467,18 +485,42 @@ func (state *ClientSeedState) NewClientSeedPortForward(
 
 	var progressReferences []progressReference
 
-	// Determine which seed spec subnets contain upstreamIPAddress
+	// Determine which seed spec subnets and asns contain upstreamIPAddress
 	// and point to the progress for each. When progress is reported,
 	// it is added directly to all of these TrafficValues instances.
-	// Assumes state.progress entries correspond 1-to-1 with
-	// state.scheme.subnetLookups.
+	// Assumes state.seedProgress entries correspond 1-to-1 with
+	// state.scheme.subnetLookups and state.scheme.asnLookups.
 	// Note: this implementation assumes a small number of schemes and
 	// seed specs. For larger numbers, instead of N SubnetLookups, create
 	// a single SubnetLookup which returns, for a given IP address, all
 	// matching subnets and associated seed specs.
 	for seedProgressIndex, seedProgress := range state.seedProgress {
-		for trafficProgressIndex, subnetLookup := range seedProgress.scheme.subnetLookups {
-			if subnetLookup.ContainsIPAddress(upstreamIPAddress) {
+
+		var upstreamASN *string
+
+		for trafficProgressIndex := range seedProgress.scheme.SeedSpecs {
+
+			matchesSeedSpec := false
+
+			// First check for subnet match before performing more expensive
+			// check for ASN match.
+			subnetLookup := seedProgress.scheme.subnetLookups[trafficProgressIndex]
+			matchesSeedSpec = subnetLookup.ContainsIPAddress(upstreamIPAddress)
+
+			if !matchesSeedSpec && state.lookupASN != nil {
+				// No subnet match. Check for ASN match.
+				asnLookup := seedProgress.scheme.asnLookups[trafficProgressIndex]
+				if len(asnLookup) > 0 {
+					// Lookup ASN on demand and only once.
+					if upstreamASN == nil {
+						upstreamASN = new(string)
+						*upstreamASN = state.lookupASN(upstreamIPAddress)
+					}
+					matchesSeedSpec = common.Contains(asnLookup, *upstreamASN)
+				}
+			}
+
+			if matchesSeedSpec {
 				progressReferences = append(
 					progressReferences,
 					progressReference{
@@ -671,9 +713,7 @@ func (state *ClientSeedState) GetSeedPayload() *SeedPayload {
 	state.issueSLOKs()
 
 	sloks := make([]*SLOK, len(state.payloadSLOKs))
-	for index, slok := range state.payloadSLOKs {
-		sloks[index] = slok
-	}
+	copy(sloks, state.payloadSLOKs)
 
 	return &SeedPayload{
 		SLOKs: sloks,

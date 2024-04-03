@@ -3753,10 +3753,15 @@ func (sshClient *sshClient) setOSLConfig() {
 	//    port forwards will not send progress to the new client
 	//    seed state.
 
+	lookupASN := func(IPAddress net.IP) string {
+		return sshClient.sshServer.support.GeoIPService.LookupISPForIP(IPAddress).ASN
+	}
+
 	sshClient.oslClientSeedState = sshClient.sshServer.support.OSLConfig.NewClientSeedState(
 		sshClient.geoIPData.Country,
 		propagationChannelID,
-		sshClient.signalIssueSLOKs)
+		sshClient.signalIssueSLOKs,
+		lookupASN)
 }
 
 // newClientSeedPortForward will return nil when no seeding is

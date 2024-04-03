@@ -62,6 +62,7 @@ func TestOSL(t *testing.T) {
           "Description": "spec2",
           "ID" : "qvpIcORLE2Pi5TZmqRtVkEp+OKov0MhfsYPLNV7FYtI=",
           "UpstreamSubnets" : ["192.168.0.0/16", "10.0.0.0/8"],
+          "UpstreamASNs" : ["0000"],
           "Targets" :
           {
               "BytesRead" : 10,
@@ -171,9 +172,14 @@ func TestOSL(t *testing.T) {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
 
+	portForwardASN := new(string)
+	lookupASN := func(net.IP) string {
+		return *portForwardASN
+	}
+
 	t.Run("ineligible client, sufficient transfer", func(t *testing.T) {
 
-		clientSeedState := config.NewClientSeedState("US", "C5E8D2EDFD093B50D8D65CF59D0263CA", nil)
+		clientSeedState := config.NewClientSeedState("US", "C5E8D2EDFD093B50D8D65CF59D0263CA", nil, lookupASN)
 
 		seedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
 
@@ -184,7 +190,7 @@ func TestOSL(t *testing.T) {
 
 	// This clientSeedState is used across multiple tests.
 	signalIssueSLOKs := make(chan struct{}, 1)
-	clientSeedState := config.NewClientSeedState("US", "2995DB0C968C59C4F23E87988D9C0D41", signalIssueSLOKs)
+	clientSeedState := config.NewClientSeedState("US", "2995DB0C968C59C4F23E87988D9C0D41", signalIssueSLOKs, lookupASN)
 
 	t.Run("eligible client, no transfer", func(t *testing.T) {
 
@@ -219,7 +225,7 @@ func TestOSL(t *testing.T) {
 		}
 	})
 
-	t.Run("eligible client, sufficient transfer, one port forward", func(t *testing.T) {
+	t.Run("eligible client, sufficient transfer, one port forward, match by ip", func(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
@@ -240,6 +246,63 @@ func TestOSL(t *testing.T) {
 		}
 	})
 
+	t.Run("eligible client, sufficient transfer, one port forward, match by asn", func(t *testing.T) {
+
+		rolloverToNextSLOKTime()
+
+		*portForwardASN = "0000"
+
+		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("11.0.0.1"))
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		*portForwardASN = ""
+
+		select {
+		case <-signalIssueSLOKs:
+		default:
+			t.Fatalf("expected issue SLOKs signal")
+		}
+
+		// Expect 2 SLOKS: 1 new, and 1 remaining in payload.
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 2 {
+			t.Fatalf("expected 2 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		}
+	})
+
+	t.Run("eligible client, sufficient transfer, one port forward, match by ip and asn", func(t *testing.T) {
+
+		rolloverToNextSLOKTime()
+
+		*portForwardASN = "0000"
+
+		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"))
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		// Check that progress is not double counted.
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 2 {
+			t.Fatalf("expected 2 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		}
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		*portForwardASN = ""
+
+		select {
+		case <-signalIssueSLOKs:
+		default:
+			t.Fatalf("expected issue SLOKs signal")
+		}
+
+		// Expect 3 SLOKS: 1 new, and 2 remaining in payload.
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 3 {
+			t.Fatalf("expected 3 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		}
+	})
+
 	t.Run("eligible client, sufficient transfer, multiple port forwards", func(t *testing.T) {
 
 		rolloverToNextSLOKTime()
@@ -254,9 +317,9 @@ func TestOSL(t *testing.T) {
 			t.Fatalf("expected issue SLOKs signal")
 		}
 
-		// Expect 2 SLOKS: 1 new, and 1 remaining in payload.
-		if len(clientSeedState.GetSeedPayload().SLOKs) != 2 {
-			t.Fatalf("expected 2 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		// Expect 4 SLOKS: 1 new, and 3 remaining in payload.
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 4 {
+			t.Fatalf("expected 4 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
 		}
 	})
 
@@ -274,9 +337,9 @@ func TestOSL(t *testing.T) {
 			t.Fatalf("expected issue SLOKs signal")
 		}
 
-		// Expect 4 SLOKS: 2 new, and 2 remaining in payload.
-		if len(clientSeedState.GetSeedPayload().SLOKs) != 4 {
-			t.Fatalf("expected 4 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		// Expect 6 SLOKS: 2 new, and 4 remaining in payload.
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 6 {
+			t.Fatalf("expected 6 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
 		}
 	})
 
@@ -292,7 +355,7 @@ func TestOSL(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState := config.NewClientSeedState("US", "36F1CF2DF1250BF0C7BA0629CE3DC657", nil)
+		clientSeedState := config.NewClientSeedState("US", "36F1CF2DF1250BF0C7BA0629CE3DC657", nil, lookupASN)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 1 {
 			t.Fatalf("expected 1 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
@@ -303,7 +366,7 @@ func TestOSL(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState := config.NewClientSeedState("US", "B4A780E67695595FA486E9B900EA7335", nil)
+		clientSeedState := config.NewClientSeedState("US", "B4A780E67695595FA486E9B900EA7335", nil, lookupASN)
 
 		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
 
