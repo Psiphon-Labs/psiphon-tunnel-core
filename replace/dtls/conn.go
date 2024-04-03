@@ -188,6 +188,10 @@ func createConn(ctx context.Context, nextConn net.Conn, config *Config, isClient
 		localGetCertificate:         config.GetCertificate,
 		localGetClientCertificate:   config.GetClientCertificate,
 		insecureSkipHelloVerify:     config.InsecureSkipVerifyHello,
+
+		// [Psiphon]
+		// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
+		customClientHelloRandom: config.CustomClientHelloRandom,
 	}
 
 	// rfc5246#section-7.4.3
@@ -374,14 +378,12 @@ func (c *Conn) ConnectionState() State {
 
 // SelectedSRTPProtectionProfile returns the selected SRTPProtectionProfile
 func (c *Conn) SelectedSRTPProtectionProfile() (SRTPProtectionProfile, bool) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-
-	if c.state.srtpProtectionProfile == 0 {
+	profile := c.state.getSRTPProtectionProfile()
+	if profile == 0 {
 		return 0, false
 	}
 
-	return c.state.srtpProtectionProfile, true
+	return profile, true
 }
 
 func (c *Conn) writePackets(ctx context.Context, pkts []*packet) error {
@@ -883,7 +885,11 @@ func (c *Conn) handshake(ctx context.Context, cfg *handshakeConfig, initialFligh
 					}
 				} else {
 					switch {
-					case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, io.EOF):
+					case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, io.EOF), errors.Is(err, net.ErrClosed):
+					case errors.Is(err, recordlayer.ErrInvalidPacketLength):
+						// Decode error must be silently discarded
+						// [RFC6347 Section-4.1.2.7]
+						continue
 					default:
 						if c.isHandshakeCompletedSuccessfully() {
 							// Keep read loop and pass the read error to Read()

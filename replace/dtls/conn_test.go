@@ -401,6 +401,71 @@ func TestHandshakeWithAlert(t *testing.T) {
 	}
 }
 
+func TestHandshakeWithInvalidRecord(t *testing.T) {
+	// Limit runtime in case of deadlocks
+	lim := test.TimeOut(time.Second * 20)
+	defer lim.Stop()
+
+	// Check for leaking routines
+	report := test.CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	type result struct {
+		c   *Conn
+		err error
+	}
+	clientErr := make(chan result, 1)
+	ca, cb := dpipe.Pipe()
+	caWithInvalidRecord := &connWithCallback{Conn: ca}
+
+	var msgSeq atomic.Int32
+	// Send invalid record after first message
+	caWithInvalidRecord.onWrite = func(b []byte) {
+		if msgSeq.Add(1) == 2 {
+			if _, err := ca.Write([]byte{0x01, 0x02}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	go func() {
+		client, err := testClient(ctx, caWithInvalidRecord, &Config{
+			CipherSuites: []CipherSuiteID{TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
+		}, true)
+		clientErr <- result{client, err}
+	}()
+
+	server, errServer := testServer(ctx, cb, &Config{
+		CipherSuites: []CipherSuiteID{TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
+	}, true)
+
+	errClient := <-clientErr
+
+	defer func() {
+		if server != nil {
+			if err := server.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if errClient.c != nil {
+			if err := errClient.c.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}()
+
+	if errServer != nil {
+		t.Fatalf("Server failed(%v)", errServer)
+	}
+
+	if errClient.err != nil {
+		t.Fatalf("Client failed(%v)", errClient.err)
+	}
+}
+
 func TestExportKeyingMaterial(t *testing.T) {
 	// Check for leaking routines
 	report := test.CheckRoutines(t)
@@ -2972,4 +3037,16 @@ func TestSkipHelloVerify(t *testing.T) {
 	if err = client.Close(); err != nil {
 		t.Error(err)
 	}
+}
+
+type connWithCallback struct {
+	net.Conn
+	onWrite func([]byte)
+}
+
+func (c *connWithCallback) Write(b []byte) (int, error) {
+	if c.onWrite != nil {
+		c.onWrite(b)
+	}
+	return c.Conn.Write(b)
 }

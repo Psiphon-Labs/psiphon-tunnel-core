@@ -50,6 +50,11 @@ func flight1Parse(ctx context.Context, c flightConn, state *State, cache *handsh
 	return 0, &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}, nil
 }
 
+// [Psiphon]
+// The API for this Psiphon fork is identical to upstream, apart from this
+// symbol, which may be used to verify that the fork is used when compiling.
+const IsPsiphon = true
+
 func flight1Generate(c flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	var zeroEpoch uint16
 	state.localEpoch.Store(zeroEpoch)
@@ -59,6 +64,12 @@ func flight1Generate(c flightConn, state *State, _ *handshakeCache, cfg *handsha
 
 	if err := state.localRandom.Populate(); err != nil {
 		return nil, nil, err
+	}
+
+	// [Psiphon]
+	// Conjure DTLS support, from: https://github.com/mingyech/dtls/commit/a56eccc1
+	if state.isClient && cfg.customClientHelloRandom != nil {
+		state.localRandom.RandomBytes = cfg.customClientHelloRandom()
 	}
 
 	extensions := []extension.Extension{
