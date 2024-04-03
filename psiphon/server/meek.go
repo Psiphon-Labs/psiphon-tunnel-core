@@ -23,13 +23,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	std_tls "crypto/tls"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	std_errors "errors"
 	"hash/crc64"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"runtime"
@@ -42,11 +43,13 @@ import (
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	lrucache "github.com/cognusion/go-cache-lru"
@@ -90,6 +93,7 @@ const (
 	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH              = 65536
 	MEEK_DEFAULT_POOL_BUFFER_LENGTH                  = 65536
 	MEEK_DEFAULT_POOL_BUFFER_COUNT                   = 2048
+	MEEK_ENDPOINT_MAX_REQUEST_PAYLOAD_LENGTH         = 65536
 )
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
@@ -129,6 +133,7 @@ type MeekServer struct {
 	rateLimitCount                  int
 	rateLimitSignalGC               chan struct{}
 	normalizer                      *transforms.HTTPNormalizerListener
+	inproxyBroker                   *inproxy.Broker
 }
 
 // NewMeekServer initializes a new meek server.
@@ -140,6 +145,17 @@ func NewMeekServer(
 	useTLS, isFronted, useObfuscatedSessionTickets, useHTTPNormalizer bool,
 	clientHandler func(clientConn net.Conn, data *additionalTransportData),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
+
+	// With fronting, MeekRequiredHeaders can be used to ensure that the
+	// request is coming through a CDN that's configured to add the
+	// specified, secret header values. Configuring the MeekRequiredHeaders
+	// scheme is required when running an in-proxy broker.
+	if isFronted &&
+		support.Config.MeekServerRunInproxyBroker &&
+		len(support.Config.MeekRequiredHeaders) < 1 {
+
+		return nil, errors.TraceNew("missing required header")
+	}
 
 	passthroughAddress := support.Config.TunnelProtocolPassthroughAddresses[listenerTunnelProtocol]
 
@@ -247,7 +263,67 @@ func NewMeekServer(
 		meekServer.listener = normalizer
 	}
 
+	// Initialize in-proxy broker service
+
+	if support.Config.MeekServerRunInproxyBroker {
+
+		if support.Config.InproxyBrokerAllowCommonASNMatching {
+			inproxy.SetAllowCommonASNMatching(true)
+		}
+
+		sessionPrivateKey, err := inproxy.SessionPrivateKeyFromString(
+			support.Config.InproxyBrokerSessionPrivateKey)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		obfuscationRootSecret, err := inproxy.ObfuscationSecretFromString(
+			support.Config.InproxyBrokerObfuscationRootSecret)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		lookupGeoIPData := func(IP string) common.GeoIPData {
+			return common.GeoIPData(support.GeoIPService.Lookup(IP))
+		}
+
+		inproxyBroker, err := inproxy.NewBroker(
+			&inproxy.BrokerConfig{
+				Logger:                         CommonLogger(log),
+				AllowProxy:                     meekServer.inproxyBrokerAllowProxy,
+				AllowClient:                    meekServer.inproxyBrokerAllowClient,
+				AllowDomainFrontedDestinations: meekServer.inproxyBrokerAllowDomainFrontedDestinations,
+				LookupGeoIP:                    lookupGeoIPData,
+				APIParameterValidator:          getInproxyBrokerAPIParameterValidator(support.Config),
+				APIParameterLogFieldFormatter:  getInproxyBrokerAPIParameterLogFieldFormatter(),
+				IsValidServerEntryTag:          support.PsinetDatabase.IsValidServerEntryTag,
+				GetTactics:                     meekServer.inproxyBrokerGetTactics,
+				PrivateKey:                     sessionPrivateKey,
+				ObfuscationRootSecret:          obfuscationRootSecret,
+				ServerEntrySignaturePublicKey:  support.Config.InproxyBrokerServerEntrySignaturePublicKey,
+			})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		meekServer.inproxyBroker = inproxyBroker
+
+		// inproxyReloadTactics initializes compartment ID, timeouts, and
+		// other broker parameter values from tactics.
+		err = meekServer.inproxyReloadTactics()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	}
+
 	return meekServer, nil
+}
+
+// ReloadTactics signals components to reload tactics and reinitialize as
+// required when tactics may have changed.
+func (server *MeekServer) ReloadTactics() error {
+	return errors.Trace(server.inproxyReloadTactics())
 }
 
 type meekContextKey struct {
@@ -287,14 +363,30 @@ func (server *MeekServer) Run() error {
 		server.rateLimitWorker()
 	}()
 
+	if server.inproxyBroker != nil {
+		err := server.inproxyBroker.Start()
+		if err != nil {
+			return errors.Trace(err)
+		}
+		defer server.inproxyBroker.Stop()
+	}
+
 	// Serve HTTP or HTTPS
 	//
 	// - WriteTimeout may include time awaiting request, as per:
 	//   https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts
+	//
 	// - Legacy meek-server wrapped each client HTTP connection with an explicit idle
 	//   timeout net.Conn and didn't use http.Server timeouts. We could do the same
 	//   here (use ActivityMonitoredConn) but the stock http.Server timeouts should
 	//   now be sufficient.
+	//
+	// - HTTP/2 is enabled (the default), which is required for efficient
+	//   in-proxy broker connection sharing.
+	//
+	// - Any CDN fronting a meek server running an in-proxy broker should be
+	//   configured with timeouts that accomodate the proxy announcement
+	//   request long polling.
 
 	httpServer := &http.Server{
 		ReadTimeout:  server.httpClientIOTimeout,
@@ -304,9 +396,6 @@ func (server *MeekServer) Run() error {
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
 			return context.WithValue(ctx, meekNetConnContextKey, conn)
 		},
-
-		// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-		TLSNextProto: make(map[string]func(*http.Server, *std_tls.Conn, http.Handler)),
 	}
 
 	// Note: Serve() will be interrupted by listener.Close() call
@@ -355,7 +444,14 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	if len(server.support.Config.MeekRequiredHeaders) > 0 {
 		for header, value := range server.support.Config.MeekRequiredHeaders {
 			requestValue := request.Header.Get(header)
-			if requestValue != value {
+
+			// There's no ConstantTimeCompare for strings. While the
+			// conversion from string to byte slice may leak the length of
+			// the expected value, ConstantTimeCompare also takes time that's
+			// a function of the length of the input byte slices; leaking the
+			// expected value length isn't a vulnerability as long as the
+			// secret is long enough and random.
+			if subtle.ConstantTimeCompare([]byte(requestValue), []byte(value)) != 1 {
 				log.WithTraceFields(LogFields{
 					"header": header,
 					"value":  requestValue,
@@ -366,19 +462,35 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 		}
 	}
 
-	// Check for the expected meek/session ID cookie.
-	// Also check for prohibited HTTP headers.
+	// Check for the expected meek/session ID cookie. in-proxy broker requests
+	// do not use or expect a meek cookie (the broker session protocol
+	// encapsulated in the HTTP request/response payloads has its own
+	// obfuscation and anti-replay mechanisms).
+	//
+	// TODO: log irregular tunnels for unexpected cookie cases?
 
 	var meekCookie *http.Cookie
 	for _, c := range request.Cookies() {
 		meekCookie = c
 		break
 	}
-	if meekCookie == nil || len(meekCookie.Value) == 0 {
+
+	if (meekCookie == nil || len(meekCookie.Value) == 0) &&
+		!server.support.Config.MeekServerRunInproxyBroker {
+
 		log.WithTrace().Warning("missing meek cookie")
 		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
+
+	if meekCookie != nil && server.support.Config.MeekServerInproxyBrokerOnly {
+
+		log.WithTrace().Warning("unexpected meek cookie")
+		common.TerminateHTTPConnection(responseWriter, request)
+		return
+	}
+
+	// Check for prohibited HTTP headers.
 
 	if len(server.support.Config.MeekProhibitedHeaders) > 0 {
 		for _, header := range server.support.Config.MeekProhibitedHeaders {
@@ -403,11 +515,32 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	//
 	// 3. A request to an endpoint. This meek connection is not for relaying
 	// tunnel traffic. Instead, the request is handed off to a custom handler.
+	//
+	// In the in-proxy broker case, there is no meek cookie, which avoids the
+	// size and resource overhead of sending and processing a meek cookie
+	// with each endpoint request.
+	//
+	// The broker session protocol encapsulated in the HTTP request/response
+	// payloads has its own obfuscation and anti-replay mechanisms.
+	//
+	// In RunInproxyBroker mode, non-meek cookie requests are routed to the
+	// in-proxy broker. getSessionOrEndpoint is still invoked in all cases,
+	// to process GeoIP headers, invoke the meek rate limiter, etc.
+	//
+	// Limitations:
+	//
+	// - Adding arbirary cookies, as camouflage for plain HTTP for example, is
+	//   not supported.
+	//
+	// - the HTTP normalizer depends on the meek cookie
+	//   (see makeMeekHTTPNormalizerListener) so RunInproxyBroker mode is
+	//   incompatible with the HTTP normalizer.
 
 	sessionID,
 		session,
 		underlyingConn,
 		endPoint,
+		endPointClientIP,
 		endPointGeoIPData,
 		err := server.getSessionOrEndpoint(request, meekCookie)
 
@@ -421,15 +554,40 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	if endPoint != "" {
 
-		// Endpoint mode. Currently, this means it's handled by the tactics
-		// request handler.
+		// Route to endpoint handlers and return.
 
-		handled := server.support.TacticsServer.HandleEndPoint(
-			endPoint, common.GeoIPData(*endPointGeoIPData), responseWriter, request)
+		handled := false
+
+		switch endPoint {
+		case tactics.TACTICS_END_POINT, tactics.SPEED_TEST_END_POINT:
+			handled = server.support.TacticsServer.HandleEndPoint(
+				endPoint,
+				common.GeoIPData(*endPointGeoIPData),
+				responseWriter,
+				request)
+			// Currently, TacticsServer.HandleEndPoint handles returning a 404 instead
+			// leaving that up to server.handleError.
+			//
+			// TODO: call server.handleError, for its isFronting special case.
+
+		case inproxy.BrokerEndPointName:
+			handled = true
+			err := server.inproxyBrokerHandler(
+				endPointClientIP,
+				common.GeoIPData(*endPointGeoIPData),
+				responseWriter,
+				request)
+			if err != nil {
+				log.WithTraceFields(LogFields{"error": err}).Warning("inproxyBrokerHandler failed")
+				server.handleError(responseWriter, request)
+			}
+		}
+
 		if !handled {
-			log.WithTraceFields(LogFields{"endPoint": endPoint}).Info("unhandled endpoint")
+			log.WithTraceFields(LogFields{"endPoint": endPoint}).Warning("unhandled endpoint")
 			server.handleError(responseWriter, request)
 		}
+
 		return
 	}
 
@@ -670,27 +828,39 @@ func checkRangeHeader(request *http.Request) (int, bool) {
 // meek cookie. A new session is created when the meek cookie indicates relay
 // mode; or the endpoint is returned when the meek cookie indicates endpoint
 // mode.
+//
+// For performance reasons, in-proxy broker requests are allowed to omit the
+// meek cookie and pass in nil for meekCookie; getSessionOrEndpoint still
+// performs rate limiting and header handling for the in-proxy broker case.
 func (server *MeekServer) getSessionOrEndpoint(
-	request *http.Request, meekCookie *http.Cookie) (string, *meekSession, net.Conn, string, *GeoIPData, error) {
+	request *http.Request,
+	meekCookie *http.Cookie) (string, *meekSession, net.Conn, string, string, *GeoIPData, error) {
 
 	underlyingConn := request.Context().Value(meekNetConnContextKey).(net.Conn)
 
-	// Check for an existing session.
+	// Check for an existing meek tunnel session.
 
-	server.sessionsLock.RLock()
-	existingSessionID := meekCookie.Value
-	session, ok := server.sessions[existingSessionID]
-	server.sessionsLock.RUnlock()
-	if ok {
-		// TODO: can multiple http client connections using same session cookie
-		// cause race conditions on session struct?
-		session.touch()
-		return existingSessionID, session, underlyingConn, "", nil, nil
+	if meekCookie != nil {
+
+		server.sessionsLock.RLock()
+		existingSessionID := meekCookie.Value
+		session, ok := server.sessions[existingSessionID]
+		server.sessionsLock.RUnlock()
+		if ok {
+			// TODO: can multiple http client connections using same session cookie
+			// cause race conditions on session struct?
+			session.touch()
+			return existingSessionID, session, underlyingConn, "", "", nil, nil
+		}
 	}
 
-	// Determine the client remote address, which is used for geolocation
-	// stats, rate limiting, anti-probing, discovery, and tactics selection
-	// logic.
+	// TODO: rename clientIP to peerIP to reflect the new terminology used in
+	// psiphon/server code where the immediate peer may be an in-proxy proxy,
+	// not the client.
+
+	// Determine the client or peer remote address, which is used for
+	// geolocation stats, rate limiting, anti-probing, discovery, and tactics
+	// selection logic.
 	//
 	// When an intermediate proxy or CDN is in use, we may be
 	// able to determine the original client address by inspecting HTTP
@@ -703,10 +873,10 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	clientIP, _, err := net.SplitHostPort(request.RemoteAddr)
 	if err != nil {
-		return "", nil, nil, "", nil, errors.Trace(err)
+		return "", nil, nil, "", "", nil, errors.Trace(err)
 	}
 	if net.ParseIP(clientIP) == nil {
-		return "", nil, nil, "", nil, errors.TraceNew("invalid IP address")
+		return "", nil, nil, "", "", nil, errors.TraceNew("invalid IP address")
 	}
 
 	if server.isFronted && len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
@@ -784,6 +954,9 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	if server.normalizer != nil {
 
+		// Limitation: RunInproxyBroker mode with no meek cookies is not
+		// compatible with the HTTP normalizer.
+
 		// NOTE: operates on the assumption that the normalizer is not wrapped
 		// with a further conn.
 		underlyingConn := request.Context().Value(meekNetConnContextKey).(net.Conn)
@@ -792,9 +965,12 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	} else {
 
-		payloadJSON, err = server.getMeekCookiePayload(clientIP, meekCookie.Value)
-		if err != nil {
-			return "", nil, nil, "", nil, errors.Trace(err)
+		if meekCookie != nil {
+
+			payloadJSON, err = server.getMeekCookiePayload(clientIP, meekCookie.Value)
+			if err != nil {
+				return "", nil, nil, "", "", nil, errors.Trace(err)
+			}
 		}
 	}
 
@@ -802,9 +978,17 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// and PsiphonServerAddress.
 	var clientSessionData protocol.MeekCookieData
 
-	err = json.Unmarshal(payloadJSON, &clientSessionData)
-	if err != nil {
-		return "", nil, nil, "", nil, errors.Trace(err)
+	if meekCookie != nil {
+
+		err = json.Unmarshal(payloadJSON, &clientSessionData)
+		if err != nil {
+			return "", nil, nil, "", "", nil, errors.Trace(err)
+		}
+
+	} else {
+
+		// Assume the in-proxy broker endpoint when there's no meek cookie.
+		clientSessionData.EndPoint = inproxy.BrokerEndPointName
 	}
 
 	// Any rate limit is enforced after the meek cookie is validated, so a prober
@@ -814,7 +998,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// not the overhead incurred by cookie validation.
 
 	if server.rateLimit(clientIP, geoIPData, server.listenerTunnelProtocol) {
-		return "", nil, nil, "", nil, errors.TraceNew("rate limit exceeded")
+		return "", nil, nil, "", "", nil, errors.TraceNew("rate limit exceeded")
 	}
 
 	// Handle endpoints before enforcing CheckEstablishTunnels.
@@ -822,7 +1006,13 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// handled by servers which would otherwise reject new tunnels.
 
 	if clientSessionData.EndPoint != "" {
-		return "", nil, nil, clientSessionData.EndPoint, &geoIPData, nil
+		return "", nil, nil, clientSessionData.EndPoint, clientIP, &geoIPData, nil
+	}
+
+	// After this point, for the meek tunnel new session case, a meek cookie
+	// is required and meekCookie must not be nil.
+	if meekCookie == nil {
+		return "", nil, nil, "", "", nil, errors.TraceNew("missing meek cookie")
 	}
 
 	// Don't create new sessions when not establishing. A subsequent SSH handshake
@@ -830,7 +1020,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 	if server.support.TunnelServer != nil &&
 		!server.support.TunnelServer.CheckEstablishTunnels() {
-		return "", nil, nil, "", nil, errors.TraceNew("not establishing tunnels")
+		return "", nil, nil, "", "", nil, errors.TraceNew("not establishing tunnels")
 	}
 
 	// Disconnect immediately if the tactics for the client restricts usage of
@@ -854,7 +1044,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 
 		p, err := server.support.ServerTacticsParametersCache.Get(geoIPData)
 		if err != nil {
-			return "", nil, nil, "", nil, errors.Trace(err)
+			return "", nil, nil, "", "", nil, errors.Trace(err)
 		}
 
 		if !p.IsNil() &&
@@ -863,7 +1053,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 				server.support.Config.GetFrontingProviderID()) {
 			if p.WeightedCoinFlip(
 				parameters.RestrictFrontingProviderIDsServerProbability) {
-				return "", nil, nil, "", nil, errors.TraceNew("restricted fronting provider")
+				return "", nil, nil, "", "", nil, errors.TraceNew("restricted fronting provider")
 			}
 		}
 	}
@@ -883,7 +1073,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 			server.listenerTunnelProtocol,
 			server.support.Config.GetRunningProtocols()) {
 
-			return "", nil, nil, "", nil, errors.Tracef(
+			return "", nil, nil, "", "", nil, errors.Tracef(
 				"invalid client tunnel protocol: %s", clientSessionData.ClientTunnelProtocol)
 		}
 
@@ -898,7 +1088,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 	cachedResponse := NewCachedResponse(bufferLength, server.bufferPool)
 
-	session = &meekSession{
+	session := &meekSession{
 		meekProtocolVersion: clientSessionData.MeekProtocolVersion,
 		sessionIDSent:       false,
 		cachedResponse:      cachedResponse,
@@ -939,7 +1129,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	if clientSessionData.MeekProtocolVersion >= MEEK_PROTOCOL_VERSION_2 {
 		sessionID, err = makeMeekSessionID()
 		if err != nil {
-			return "", nil, nil, "", nil, errors.Trace(err)
+			return "", nil, nil, "", "", nil, errors.Trace(err)
 		}
 	}
 
@@ -959,7 +1149,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 	// will close when session.delete calls Close() on the meekConn.
 	server.clientHandler(session.clientConn, additionalData)
 
-	return sessionID, session, underlyingConn, "", nil, nil
+	return sessionID, session, underlyingConn, "", "", nil, nil
 }
 
 func (server *MeekServer) rateLimit(
@@ -1223,9 +1413,18 @@ func (server *MeekServer) getMeekCookiePayload(
 func (server *MeekServer) makeMeekTLSConfig(
 	isFronted bool, useObfuscatedSessionTickets bool) (*tls.Config, error) {
 
-	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
-	if err != nil {
-		return nil, errors.Trace(err)
+	var certificate, privateKey string
+
+	if server.support.Config.MeekServerCertificate != "" {
+		certificate = server.support.Config.MeekServerCertificate
+		privateKey = server.support.Config.MeekServerPrivateKey
+
+	} else {
+		var err error
+		certificate, privateKey, _, err = common.GenerateWebServerCertificate(values.GetHostName())
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 	}
 
 	tlsCertificate, err := tls.X509KeyPair(
@@ -1466,6 +1665,172 @@ func (server *MeekServer) makeMeekHTTPNormalizerListener() *transforms.HTTPNorma
 	}
 
 	return normalizer
+}
+
+func (server *MeekServer) inproxyReloadTactics() error {
+
+	// Assumes no GeoIP targeting for InproxyAllCommonCompartmentIDs and other
+	// general broker tactics.
+
+	p, err := server.support.ServerTacticsParametersCache.Get(NewGeoIPData())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if p.IsNil() {
+		return nil
+	}
+
+	commonCompartmentIDs, err := inproxy.IDsFromStrings(
+		p.Strings(parameters.InproxyAllCommonCompartmentIDs))
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	server.inproxyBroker.SetCommonCompartmentIDs(commonCompartmentIDs)
+
+	server.inproxyBroker.SetTimeouts(
+		p.Duration(parameters.InproxyProxyAnnounceRequestTimeout),
+		p.Duration(parameters.InproxyClientOfferRequestTimeout),
+		p.Duration(parameters.InproxyBrokerPendingServerRequestsTTL))
+
+	nonlimitedProxyIDs, err := inproxy.IDsFromStrings(
+		p.Strings(parameters.InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	server.inproxyBroker.SetLimits(
+		p.Int(parameters.InproxyBrokerMatcherAnnouncementLimitEntryCount),
+		p.Int(parameters.InproxyBrokerMatcherAnnouncementRateLimitQuantity),
+		p.Duration(parameters.InproxyBrokerMatcherAnnouncementRateLimitInterval),
+		nonlimitedProxyIDs,
+		p.Int(parameters.InproxyBrokerMatcherOfferLimitEntryCount),
+		p.Int(parameters.InproxyBrokerMatcherOfferRateLimitQuantity),
+		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval))
+
+	return nil
+}
+
+func (server *MeekServer) lookupAllowTactic(geoIPData common.GeoIPData, parameterName string) bool {
+	// Fallback to not-allow on failure or nil tactics.
+	p, err := server.support.ServerTacticsParametersCache.Get(GeoIPData(geoIPData))
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": err}).Warning("ServerTacticsParametersCache.Get failed")
+		return false
+	}
+	if p.IsNil() {
+		return false
+	}
+	return p.Bool(parameterName)
+}
+
+func (server *MeekServer) inproxyBrokerAllowProxy(proxyGeoIPData common.GeoIPData) bool {
+	return server.lookupAllowTactic(proxyGeoIPData, parameters.InproxyAllowProxy)
+}
+
+func (server *MeekServer) inproxyBrokerAllowClient(clientGeoIPData common.GeoIPData) bool {
+	return server.lookupAllowTactic(clientGeoIPData, parameters.InproxyAllowClient)
+}
+
+func (server *MeekServer) inproxyBrokerAllowDomainFrontedDestinations(clientGeoIPData common.GeoIPData) bool {
+	return server.lookupAllowTactic(clientGeoIPData, parameters.InproxyAllowDomainFrontedDestinations)
+}
+
+// inproxyBrokerGetTactics is a callback used by the in-proxy broker to
+// provide tactics to proxies.
+//
+// The proxy sends its current tactics tag in apiParameters, and, when there
+// are new tactics, inproxyBrokerGetTactics returns the payload and the new
+// tactics tag. The broker should log new_tactics_tag in its ProxyAnnounce
+// handler.
+func (server *MeekServer) inproxyBrokerGetTactics(
+	geoIPData common.GeoIPData,
+	apiParameters common.APIParameters) ([]byte, string, error) {
+
+	tacticsPayload, err := server.support.TacticsServer.GetTacticsPayload(
+		geoIPData, apiParameters)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	newTacticsTag := ""
+	if tacticsPayload.Tactics != nil {
+		newTacticsTag = tacticsPayload.Tag
+	}
+
+	var marshaledTacticsPayload []byte
+	marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	return marshaledTacticsPayload, newTacticsTag, nil
+}
+
+// inproxyBrokerHandler reads an in-proxy broker session protocol message from
+// the HTTP request body, dispatches the message to the broker, and writes
+// the broker session response message to the HTTP response body.
+//
+// The HTTP response write timeout may be extended be the broker, as required.
+// Error cases can return without writing any HTTP response. The caller
+// should invoke server.handleError when an error is returned.
+func (server *MeekServer) inproxyBrokerHandler(
+	clientIP string,
+	geoIPData common.GeoIPData,
+	w http.ResponseWriter,
+	r *http.Request) (retErr error) {
+
+	// Don't read more than MEEK_ENDPOINT_MAX_REQUEST_PAYLOAD_LENGTH bytes, as
+	// a sanity check and defense against potential resource exhaustion.
+	packet, err := ioutil.ReadAll(http.MaxBytesReader(
+		w, r.Body, MEEK_ENDPOINT_MAX_REQUEST_PAYLOAD_LENGTH))
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	extendTimeout := func(timeout time.Duration) {
+
+		// Extend the HTTP response write timeout to accomodate the timeout
+		// specified by the broker, such as in the case of the ProxyAnnounce
+		// request long poll. The base httpClientIOTimeout value is added, as
+		// it covers HTTP transport network operations, which are not
+		// necessarily included in the broker's timeouts.
+		//
+		// Note that any existing write timeout of httpClientIOTimeout would
+		// have been set before the body read, which may have consumed time,
+		// so adding the full httpClientIOTimeout value again may exceed the
+		// original httpClientIOTimeout target.
+
+		http.NewResponseController(w).SetWriteDeadline(
+			time.Now().Add(server.httpClientIOTimeout + timeout))
+	}
+
+	// Per https://pkg.go.dev/net/http#Request.Context, the request context is
+	// canceled when the client's connection closes or an HTTP/2 request is
+	// canceled. So it is expected that the broker operation will abort and
+	// stop waiting (in the case of long polling) if the client disconnects
+	// for any reason before a response is sent.
+	//
+	// When fronted by a CDN using persistent connections used to multiplex
+	// many clients, it is expected that CDNs will perform an HTTP/3 request
+	// cancellation in this scenario.
+
+	packet, err = server.inproxyBroker.HandleSessionPacket(
+		r.Context(),
+		extendTimeout,
+		clientIP,
+		geoIPData,
+		packet)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(packet)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
 }
 
 type meekSession struct {

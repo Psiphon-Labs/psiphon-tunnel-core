@@ -41,9 +41,9 @@ type NATDiscoverConfig struct {
 	// Logger is used to log events.
 	Logger common.Logger
 
-	// DialParameters specifies specific STUN and discovery and
+	// WebRTCDialCoordinator specifies specific STUN and discovery and
 	// settings, and receives discovery results.
-	DialParameters DialParameters
+	WebRTCDialCoordinator WebRTCDialCoordinator
 
 	// SkipPortMapping indicates whether to skip port mapping type discovery,
 	// as clients do since they will gather the same stats during the WebRTC
@@ -53,11 +53,11 @@ type NATDiscoverConfig struct {
 
 // NATDiscover runs NAT type and port mapping type discovery operations.
 //
-// Successfuly results are delivered to NATDiscoverConfig.DialParameters
+// Successfuly results are delivered to NATDiscoverConfig.WebRTCDialCoordinator
 // callbacks, SetNATType and SetPortMappingTypes, which should cache results
 // associated with the current network, by network ID.
 //
-// NAT discovery will invoke DialParameter callbacks
+// NAT discovery will invoke WebRTCDialCoordinator callbacks
 // STUNServerAddressSucceeded and STUNServerAddressFailed, which may be used
 // to mark or unmark STUN servers for replay.
 func NATDiscover(
@@ -68,13 +68,13 @@ func NATDiscover(
 	// mapping discovery are run concurrently.
 
 	discoverCtx, cancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(config.DialParameters.DiscoverNATTimeout(), discoverNATTimeout))
+		ctx, common.ValueOrDefault(config.WebRTCDialCoordinator.DiscoverNATTimeout(), discoverNATTimeout))
 	defer cancelFunc()
 
 	discoveryWaitGroup := new(sync.WaitGroup)
 
-	if config.DialParameters.NATType().NeedsDiscovery() &&
-		!config.DialParameters.DisableSTUN() {
+	if config.WebRTCDialCoordinator.NATType().NeedsDiscovery() &&
+		!config.WebRTCDialCoordinator.DisableSTUN() {
 
 		discoveryWaitGroup.Add(1)
 		go func() {
@@ -83,9 +83,9 @@ func NATDiscover(
 			natType, err := discoverNATType(discoverCtx, config)
 
 			if err == nil {
-				// Deliver the result. The DialParameters provider may cache
+				// Deliver the result. The WebRTCDialCoordinator provider may cache
 				// this result, associated wih the current networkID.
-				config.DialParameters.SetNATType(natType)
+				config.WebRTCDialCoordinator.SetNATType(natType)
 			}
 
 			config.Logger.WithTraceFields(common.LogFields{
@@ -97,8 +97,8 @@ func NATDiscover(
 	}
 
 	if !config.SkipPortMapping &&
-		config.DialParameters.PortMappingTypes().NeedsDiscovery() &&
-		!config.DialParameters.DisablePortMapping() {
+		config.WebRTCDialCoordinator.PortMappingTypes().NeedsDiscovery() &&
+		!config.WebRTCDialCoordinator.DisablePortMapping() {
 
 		discoveryWaitGroup.Add(1)
 		go func() {
@@ -108,9 +108,9 @@ func NATDiscover(
 				discoverCtx, config.Logger)
 
 			if err == nil {
-				// Deliver the result. The DialParameters provider may cache
+				// Deliver the result. The WebRTCDialCoordinator provider may cache
 				// this result, associated wih the current networkID.
-				config.DialParameters.SetPortMappingTypes(portMappingTypes)
+				config.WebRTCDialCoordinator.SetPortMappingTypes(portMappingTypes)
 			}
 
 			config.Logger.WithTraceFields(common.LogFields{
@@ -129,14 +129,14 @@ func discoverNATType(
 	config *NATDiscoverConfig) (NATType, error) {
 
 	RFC5780 := true
-	stunServerAddress := config.DialParameters.STUNServerAddress(RFC5780)
+	stunServerAddress := config.WebRTCDialCoordinator.STUNServerAddress(RFC5780)
 
 	if stunServerAddress == "" {
 		return NATTypeUnknown, errors.TraceNew("no RFC5780 STUN server")
 	}
 
-	serverAddress, err := config.DialParameters.ResolveAddress(
-		ctx, stunServerAddress)
+	serverAddress, err := config.WebRTCDialCoordinator.ResolveAddress(
+		ctx, "ip", stunServerAddress)
 	if err != nil {
 		return NATTypeUnknown, errors.Trace(err)
 	}
@@ -192,13 +192,13 @@ func discoverNATType(
 	// discoverNATFiltering, and so there's a limited gain from running these
 	// two top-level tests concurrently.
 
-	mappingConn, err := config.DialParameters.UDPListen()
+	mappingConn, err := config.WebRTCDialCoordinator.UDPListen(ctx)
 	if err != nil {
 		return NATTypeUnknown, errors.Trace(err)
 	}
 	defer mappingConn.Close()
 
-	filteringConn, err := config.DialParameters.UDPListen()
+	filteringConn, err := config.WebRTCDialCoordinator.UDPListen(ctx)
 	if err != nil {
 		return NATTypeUnknown, errors.Trace(err)
 	}
@@ -245,12 +245,12 @@ func discoverNATType(
 
 	if r.err != nil {
 
-		config.DialParameters.STUNServerAddressFailed(RFC5780, stunServerAddress)
+		config.WebRTCDialCoordinator.STUNServerAddressFailed(RFC5780, stunServerAddress)
 
 		return NATTypeUnknown, errors.Trace(err)
 	}
 
-	config.DialParameters.STUNServerAddressSucceeded(RFC5780, stunServerAddress)
+	config.WebRTCDialCoordinator.STUNServerAddressSucceeded(RFC5780, stunServerAddress)
 
 	return r.NATType, nil
 }
@@ -304,6 +304,14 @@ func discoverNATMapping(
 	}
 
 	otherAddress := responseFields.otherAddr
+
+	// Verify that otherAddress, specified by STUN server, is a valid public
+	// IP before sending a packet to it. This prevents the STUN server
+	// (or injected response) from redirecting the flow to an internal network.
+
+	if common.IsBogon(otherAddress.IP) {
+		return NATMappingUnknown, errors.TraceNew("OTHER-ADDRESS is bogon")
+	}
 
 	// Test II: Send binding request to the other address but primary port
 
@@ -447,6 +455,14 @@ func doSTUNRoundTrip(
 	err = response.Decode()
 	if err != nil {
 		return nil, false, errors.Trace(err)
+	}
+
+	// Verify that the response packet has the expected transaction ID, to
+	// partially mitigate against phony injected responses.
+
+	if response.TransactionID != request.TransactionID {
+		return nil, false, errors.TraceNew(
+			"unexpected response transaction ID")
 	}
 
 	return response, false, nil

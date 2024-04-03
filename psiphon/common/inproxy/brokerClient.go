@@ -21,28 +21,39 @@ package inproxy
 
 import (
 	"context"
+	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+)
+
+// Timeouts should be aligned with Broker timeouts.
+
+const (
+	proxyAnnounceRequestTimeout       = 2 * time.Minute
+	proxyAnswerRequestTimeout         = 10 * time.Second
+	clientOfferRequestTimeout         = 10 * time.Second
+	clientRelayedPacketRequestTimeout = 10 * time.Second
 )
 
 // BrokerClient is used to make requests to a broker.
 //
 // Each BrokerClient maintains a secure broker session. A BrokerClient and its
 // session may be used for multiple concurrent requests. Session key material
-// is provided by DialParameters and must remain static for the lifetime of
-// the BrokerClient.
+// is provided by BrokerDialCoordinator and must remain static for the
+// lifetime of the BrokerClient.
 //
 // Round trips between the BrokerClient and broker are provided by
-// BrokerClientRoundTripper from DialParameters. The RoundTripper must
+// BrokerClientRoundTripper from BrokerDialCoordinator. The RoundTripper must
 // maintain the association between a request payload and the corresponding
 // response payload. The canonical RoundTripper is an HTTP client, with
 // HTTP/2 or HTTP/3 used to multiplex concurrent requests.
 //
-// When the DialParameters BrokerClientRoundTripperSucceeded call back is
-// invoked, the RoundTripper provider may mark the RoundTripper dial
+// When the BrokerDialCoordinator BrokerClientRoundTripperSucceeded call back
+// is invoked, the RoundTripper provider may mark the RoundTripper dial
 // properties for replay.
 //
-// When the DialParameters BrokerClientRoundTripperFailed call back is
+// When the BrokerDialCoordinator BrokerClientRoundTripperFailed call back is
 // invoked, the RoundTripper provider should clear any replay state and also
 // create a new RoundTripper to be returned from BrokerClientRoundTripper.
 //
@@ -53,20 +64,20 @@ import (
 // and uniformly random payload content. The RoundTripper is expected to add
 // its own obfuscation layer; for example, domain fronting.
 type BrokerClient struct {
-	dialParams DialParameters
-	sessions   *InitiatorSessions
+	coordinator BrokerDialCoordinator
+	sessions    *InitiatorSessions
 }
 
 // NewBrokerClient initializes a new BrokerClient with the provided
-// DialParameters.
-func NewBrokerClient(dialParams DialParameters) (*BrokerClient, error) {
+// BrokerDialCoordinator.
+func NewBrokerClient(coordinator BrokerDialCoordinator) (*BrokerClient, error) {
 
 	// A client is expected to use an ephemeral key, and can return a
 	// zero-value private key. Each proxy should use a peristent key, as the
 	// corresponding public key is the proxy ID, which is used to credit the
 	// proxy for its service.
 
-	privateKey := dialParams.BrokerClientPrivateKey()
+	privateKey := coordinator.BrokerClientPrivateKey()
 	if privateKey.IsZero() {
 		var err error
 		privateKey, err = GenerateSessionPrivateKey()
@@ -76,9 +87,15 @@ func NewBrokerClient(dialParams DialParameters) (*BrokerClient, error) {
 	}
 
 	return &BrokerClient{
-		dialParams: dialParams,
-		sessions:   NewInitiatorSessions(privateKey),
+		coordinator: coordinator,
+		sessions:    NewInitiatorSessions(privateKey),
 	}, nil
+}
+
+// GetBrokerDialCoordinator returns the BrokerDialCoordinator associated with
+// the BrokerClient.
+func (b *BrokerClient) GetBrokerDialCoordinator() BrokerDialCoordinator {
+	return b.coordinator
 }
 
 // ProxyAnnounce sends a ProxyAnnounce request and returns the response.
@@ -91,7 +108,13 @@ func (b *BrokerClient) ProxyAnnounce(
 		return nil, errors.Trace(err)
 	}
 
-	responsePayload, err := b.roundTrip(ctx, requestPayload)
+	requestCtx, requestCancelFunc := context.WithTimeout(
+		ctx, common.ValueOrDefault(
+			b.coordinator.AnnounceRequestTimeout(),
+			proxyAnnounceRequestTimeout))
+	defer requestCancelFunc()
+
+	responsePayload, err := b.roundTrip(requestCtx, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -114,7 +137,13 @@ func (b *BrokerClient) ClientOffer(
 		return nil, errors.Trace(err)
 	}
 
-	responsePayload, err := b.roundTrip(ctx, requestPayload)
+	requestCtx, requestCancelFunc := context.WithTimeout(
+		ctx, common.ValueOrDefault(
+			b.coordinator.OfferRequestTimeout(),
+			clientOfferRequestTimeout))
+	defer requestCancelFunc()
+
+	responsePayload, err := b.roundTrip(requestCtx, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -137,7 +166,13 @@ func (b *BrokerClient) ProxyAnswer(
 		return nil, errors.Trace(err)
 	}
 
-	responsePayload, err := b.roundTrip(ctx, requestPayload)
+	requestCtx, requestCancelFunc := context.WithTimeout(
+		ctx, common.ValueOrDefault(
+			b.coordinator.AnswerRequestTimeout(),
+			proxyAnswerRequestTimeout))
+	defer requestCancelFunc()
+
+	responsePayload, err := b.roundTrip(requestCtx, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -161,7 +196,13 @@ func (b *BrokerClient) ClientRelayedPacket(
 		return nil, errors.Trace(err)
 	}
 
-	responsePayload, err := b.roundTrip(ctx, requestPayload)
+	requestCtx, requestCancelFunc := context.WithTimeout(
+		ctx, common.ValueOrDefault(
+			b.coordinator.RelayedPacketRequestTimeout(),
+			clientRelayedPacketRequestTimeout))
+	defer requestCancelFunc()
+
+	responsePayload, err := b.roundTrip(requestCtx, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -181,7 +222,7 @@ func (b *BrokerClient) roundTrip(
 	// The round tripper may need to establish a transport-level connection;
 	// or this may already be established.
 
-	roundTripper, err := b.dialParams.BrokerClientRoundTripper()
+	roundTripper, err := b.coordinator.BrokerClientRoundTripper()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -195,6 +236,11 @@ func (b *BrokerClient) roundTrip(
 	// When a concurrent BrokerClient request is currently performing a
 	// session handshake, InitiatorSessions.RoundTrip will await completion
 	// of that handshake before sending the application-layer request.
+	//
+	// Note the waitToShareSession limitation, documented in
+	// InitiatorSessions.RoundTrip: a new session must complete a full,
+	// application-level round trip (e.g., ProxyAnnounce/ClientOffer), not
+	// just the session handshake, before a session becomes ready to share.
 	//
 	// Retries are built in to InitiatorSessions.RoundTrip: if there's an
 	// existing session and it's expired, there will be additional round
@@ -210,25 +256,25 @@ func (b *BrokerClient) roundTrip(
 	response, err := b.sessions.RoundTrip(
 		ctx,
 		roundTripper,
-		b.dialParams.BrokerPublicKey(),
-		b.dialParams.BrokerRootObfuscationSecret(),
+		b.coordinator.BrokerPublicKey(),
+		b.coordinator.BrokerRootObfuscationSecret(),
 		waitToShareSession,
 		request)
 	if err != nil {
 
-		// The DialParameters provider should close the existing
+		// The BrokerDialCoordinator provider should close the existing
 		// BrokerClientRoundTripper and create a new RoundTripper to return
 		// in the next BrokerClientRoundTripper call.
 		//
 		// The session will be closed, if necessary, by InitiatorSessions.
 		// It's possible that the session remains valid and only the
 		// RoundTripper transport layer needs to be reset.
-		b.dialParams.BrokerClientRoundTripperFailed(roundTripper)
+		b.coordinator.BrokerClientRoundTripperFailed(roundTripper)
 
 		return nil, errors.Trace(err)
 	}
 
-	b.dialParams.BrokerClientRoundTripperSucceeded(roundTripper)
+	b.coordinator.BrokerClientRoundTripperSucceeded(roundTripper)
 
 	return response, nil
 }

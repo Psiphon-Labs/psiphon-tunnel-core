@@ -221,6 +221,8 @@ func fetchTactics(
 		canReplay,
 		selectProtocol,
 		serverEntry,
+		nil,
+		nil,
 		true,
 		0,
 		0)

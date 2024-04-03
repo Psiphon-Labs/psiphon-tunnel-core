@@ -304,8 +304,8 @@ func TestTactics(t *testing.T) {
 			t.Fatalf("Unexpected probability: %f", r.Tactics.Probability)
 		}
 
-		// skipOnError is true for Psiphon clients
-		counts, err := p.Set(r.Tag, true, r.Tactics.Parameters)
+		// ValidationSkipOnError is set for Psiphon clients
+		counts, err := p.Set(r.Tag, parameters.ValidationSkipOnError, r.Tactics.Parameters)
 		if err != nil {
 			t.Fatalf("Apply failed: %s", err)
 		}
@@ -1122,6 +1122,10 @@ func (l *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
 
 func (l *testLogger) LogMetric(metric string, fields common.LogFields) {
 	fmt.Printf("METRIC: %s: fields=%+v\n", metric, fields)
+}
+
+func (l *testLogger) IsLogLevelDebug() bool {
+	return true
 }
 
 type testLoggerTrace struct {

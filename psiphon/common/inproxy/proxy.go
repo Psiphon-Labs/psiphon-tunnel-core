@@ -29,19 +29,16 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/pion/webrtc/v3"
 )
 
-// Timeouts should be aligned with Broker timeouts.
-
 const (
-	proxyAnnounceRequestTimeout = 2 * time.Minute
-	proxyAnnounceRetryDelay     = 1 * time.Second
+	proxyAnnounceRetryDelay     = 2 * time.Second
 	proxyAnnounceRetryJitter    = 0.3
+	proxyAnnounceMaxRetryDelay  = 6 * time.Hour
 	proxyWebRTCAnswerTimeout    = 20 * time.Second
-	proxyAnswerRequestTimeout   = 10 * time.Second
-	proxyClientConnectTimeout   = 30 * time.Second
-	proxyDestinationDialTimeout = 30 * time.Second
+	proxyDestinationDialTimeout = 20 * time.Second
 )
 
 // Proxy is the in-proxy proxying component, which relays traffic from a
@@ -58,8 +55,11 @@ type Proxy struct {
 	connectedClients  int32
 
 	config                *ProxyConfig
-	brokerClient          *BrokerClient
 	activityUpdateWrapper *activityUpdateWrapper
+
+	networkDiscoveryMutex     sync.Mutex
+	networkDiscoveryRunOnce   bool
+	networkDiscoveryNetworkID string
 }
 
 // TODO: add PublicNetworkAddress/ListenNetworkAddress to facilitate manually
@@ -71,25 +71,43 @@ type ProxyConfig struct {
 	// Logger is used to log events.
 	Logger common.Logger
 
-	// BaseMetrics should be populated with Psiphon handshake metrics
-	// parameters. These will be sent to and logger by the Broker.
-	BaseMetrics common.APIParameters
+	// GetBrokerClient provides a BrokerClient which the proxy will use for
+	// making broker requests. If GetBrokerClient returns a shared
+	// BrokerClient instance, the BrokerClient must support multiple,
+	// concurrent round trips, as the proxy will use it to concurrently
+	// announce many proxy instances. The BrokerClient should be implemented
+	// using multiplexing over a shared network connection -- for example,
+	// HTTP/2 --  and a shared broker session for optimal performance.
+	GetBrokerClient func() (*BrokerClient, error)
+
+	// GetBaseAPIParameters returns Psiphon API parameters to be sent to and
+	// logged by the broker. Expected parameters include client/proxy
+	// application and build version information. GetBaseAPIParameters also
+	// returns the network ID, corresponding to the parameters, to be used in
+	// tactics logic; the network ID is not sent to the broker.
+	GetBaseAPIParameters func() (common.APIParameters, string, error)
+
+	// MakeWebRTCDialCoordinator provides a WebRTCDialCoordinator which
+	// specifies WebRTC-related dial parameters, including selected STUN
+	// server addresses; network topology information for the current netork;
+	// NAT logic settings; and other settings.
+	//
+	// MakeWebRTCDialCoordinator is invoked for each proxy/client connection,
+	// and the provider can select new parameters per connection as reqired.
+	MakeWebRTCDialCoordinator func() (WebRTCDialCoordinator, error)
+
+	// HandleTacticsPayload is a callback that receives any tactics payload,
+	// provided by the broker in proxy announcement request responses.
+	// HandleTacticsPayload must return true when the tacticsPayload includes
+	// new tactics, indicating that the proxy should reinitialize components
+	// controlled by tactics parameters.
+	HandleTacticsPayload func(networkID string, tacticsPayload []byte) bool
 
 	// OperatorMessageHandler is a callback that is invoked with any user
 	// message JSON object that is sent to the Proxy from the Broker. This
 	// facility may be used to alert proxy operators when required. The JSON
 	// object schema is arbitrary and not defined here.
 	OperatorMessageHandler func(messageJSON string)
-
-	// DialParameters specifies specific broker and WebRTC dial configuration
-	// and strategies and settings; DialParameters also facilities dial
-	// replay by receiving callbacks when individual dial steps succeed or
-	// fail.
-	//
-	// As a DialParameters is associated with one network ID, it is expected
-	// that the proxy will be stopped and restarted when a network change is
-	// detected.
-	DialParameters DialParameters
 
 	// MaxClients is the maximum number of clients that are allowed to connect
 	// to the proxy.
@@ -123,19 +141,8 @@ type ActivityUpdater func(
 // NewProxy initializes a new Proxy with the specified configuration.
 func NewProxy(config *ProxyConfig) (*Proxy, error) {
 
-	// Create one BrokerClient which will be shared for all requests. When the
-	// round tripper supports multiplexing -- for example HTTP/2 -- many
-	// concurrent requests can share the same TLS network connection and
-	// established session.
-
-	brokerClient, err := NewBrokerClient(config.DialParameters)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	p := &Proxy{
-		config:       config,
-		brokerClient: brokerClient,
+		config: config,
 	}
 
 	p.activityUpdateWrapper = &activityUpdateWrapper{p: p}
@@ -156,59 +163,37 @@ func (w *activityUpdateWrapper) UpdateProgress(bytesRead, bytesWritten int64, _ 
 	atomic.AddInt64(&w.p.bytesDown, bytesRead)
 }
 
-// Run runs the Proxy. The proxy sends requests to the Broker announcing its
+// Run runs the proxy. The proxy sends requests to the Broker announcing its
 // availability; the Broker matches the proxy with clients, and facilitates
 // an exchange of WebRTC connection information; the proxy and each client
 // attempt to establish a connection; and the client's traffic is relayed to
 // Psiphon server.
 //
-// Run ends when ctx is Done. When a network change is detected, Run should be
-// stopped and a new Proxy configured and started. This minimizes dangling
-// client connections running over the previous network; provides an
-// opportunity to gather fresh NAT/port mapping metrics for the new network;
-// and allows for a new DialParameters, associated with the new network, to
-// be configured.
+// Run ends when ctx is Done. A proxy run may continue across underlying
+// network changes assuming that the ProxyConfig GetBrokerClient and
+// MakeWebRTCDialCoordinator callbacks react to network changes and provide
+// instances that are reflect network changes.
 func (p *Proxy) Run(ctx context.Context) {
-
-	// Reset and configure port mapper component, as required. See
-	// initPortMapper comment.
-	initPortMapper(p.config.DialParameters)
-
-	// Gather local network NAT/port mapping metrics before sending any
-	// announce requests. NAT topology metrics are used by the Broker to
-	// optimize client and in-proxy matching. Unlike the client, we always
-	// perform this synchronous step here, since waiting doesn't necessarily
-	// block a client tunnel dial.
-
-	initWaitGroup := new(sync.WaitGroup)
-	initWaitGroup.Add(1)
-	go func() {
-		defer initWaitGroup.Done()
-
-		// NATDiscover may use cached NAT type/port mapping values from
-		// DialParameters, based on the network ID. If discovery is not
-		// successful, the proxy still proceeds to announce.
-
-		NATDiscover(
-			ctx,
-			&NATDiscoverConfig{
-				Logger:         p.config.Logger,
-				DialParameters: p.config.DialParameters,
-			})
-
-	}()
-	initWaitGroup.Wait()
 
 	// Run MaxClient proxying workers. Each worker handles one client at a time.
 
 	proxyWaitGroup := new(sync.WaitGroup)
 
 	for i := 0; i < p.config.MaxClients; i++ {
+
+		// Give the very first announcement a head start, by delaying the
+		// others, so that the first announcement request can obtain and
+		// apply any new tactics first, avoiding all MaxClients initial
+		// announcement requests returning with potentially no match and new
+		// tactics responses. After this initial launch point, we assume
+		// proxy announcement requests are somewhat staggered.
+		delayFirstAnnounce := i > 0
+
 		proxyWaitGroup.Add(1)
-		go func() {
+		go func(delayFirstAnnounce bool) {
 			defer proxyWaitGroup.Done()
-			p.proxyClients(ctx)
-		}()
+			p.proxyClients(ctx, delayFirstAnnounce)
+		}(delayFirstAnnounce)
 	}
 
 	// Capture activity updates every second, which is the required frequency
@@ -230,6 +215,24 @@ loop:
 	}
 
 	proxyWaitGroup.Wait()
+}
+
+// getAnnounceDelayParameters is a helper that fetches the proxy announcement
+// delay parameters from the current broker client.
+//
+// getAnnounceDelayParameters is used to configure a delay when
+// proxyOneClient fails. As having no broker clients is a possible
+// proxyOneClient failure case, GetBrokerClient errors are ignored here and
+// defaults used in that case.
+func (p *Proxy) getAnnounceDelayParameters() (time.Duration, float64) {
+	brokerClient, err := p.config.GetBrokerClient()
+	if err != nil {
+		return proxyAnnounceRetryDelay, proxyAnnounceRetryJitter
+	}
+	brokerCoordinator := brokerClient.GetBrokerDialCoordinator()
+	return common.ValueOrDefault(brokerCoordinator.AnnounceRetryDelay(), proxyAnnounceRetryDelay),
+		common.ValueOrDefault(brokerCoordinator.AnnounceRetryJitter(), proxyAnnounceRetryJitter)
+
 }
 
 func (p *Proxy) activityUpdate(period time.Duration) {
@@ -270,7 +273,7 @@ func greaterThanSwapInt64(addr *int64, new int64) bool {
 	return false
 }
 
-func (p *Proxy) proxyClients(ctx context.Context) {
+func (p *Proxy) proxyClients(ctx context.Context, delayFirstAnnounce bool) {
 
 	// Proxy one client, repeating until ctx is done.
 	//
@@ -294,27 +297,156 @@ func (p *Proxy) proxyClients(ctx context.Context) {
 	// Another enhancement could be a signal from the client, to the broker,
 	// relayed to the proxy, when a dial is aborted.
 
-	for ctx.Err() == nil {
-		err := p.proxyOneClient(ctx)
+	failureDelayFactor := time.Duration(1)
+
+	for i := 0; ctx.Err() == nil; i++ {
+
+		// When delayFirstAnnounce is true, the very first proxyOneClient
+		// proxy announcement is delayed to give another, concurrent
+		// proxyClients proxy announcment a head start in order to fetch and
+		// apply any new tactics.
+		//
+		// This delay is distinct from the post-failure delay, although both
+		// use the same delay parameter settings.
+
+		relayedTraffic, err := p.proxyOneClient(ctx, delayFirstAnnounce && i == 0)
+
 		if err != nil && ctx.Err() == nil {
+
 			p.config.Logger.WithTraceFields(
 				common.LogFields{
 					"error": err.Error(),
 				}).Error("proxy client failed")
 
-			// Delay briefly, to avoid unintentionally overloading the broker
-			// in some recurring failure case. Use a jitter to avoid a
-			// regular traffic period.
+			// Apply a simple exponential backoff base on whether
+			// proxyOneClient failed to relay client traffic. The
+			// proxyOneClient failure could range from local configuration
+			// (no broker clients) to network issues(failure to completely
+			// establish WebRTC connection) and this backoff prevents both
+			// excess local logging and churning in the former case and
+			// excessive bad service to clients or unintentionally
+			// overloading the broker in the latter case.
+			//
+			// TODO: specific tactics parameters to control this logic.
 
-			common.SleepWithJitter(
-				ctx,
-				common.ValueOrDefault(p.config.DialParameters.AnnounceRetryDelay(), proxyAnnounceRetryDelay),
-				common.ValueOrDefault(p.config.DialParameters.AnnounceRetryJitter(), proxyAnnounceRetryJitter))
+			delay, jitter := p.getAnnounceDelayParameters()
+
+			if relayedTraffic {
+				failureDelayFactor = 1
+			}
+			delay = delay * failureDelayFactor
+			if delay > proxyAnnounceMaxRetryDelay {
+				delay = proxyAnnounceMaxRetryDelay
+			}
+			if failureDelayFactor < 1<<20 {
+				failureDelayFactor *= 2
+			}
+
+			common.SleepWithJitter(ctx, delay, jitter)
 		}
 	}
 }
 
-func (p *Proxy) proxyOneClient(ctx context.Context) error {
+// resetNetworkDiscovery resets the network discovery state, which will force
+// another network discovery when doNetworkDiscovery is invoked.
+// resetNetworkDiscovery is called when new tactics have been received from
+// the broker, as new tactics may change parameters that control network
+// discovery.
+func (p *Proxy) resetNetworkDiscovery() {
+	p.networkDiscoveryMutex.Lock()
+	defer p.networkDiscoveryMutex.Unlock()
+
+	p.networkDiscoveryRunOnce = false
+	p.networkDiscoveryNetworkID = ""
+}
+
+func (p *Proxy) doNetworkDiscovery(
+	ctx context.Context,
+	webRTCCoordinator WebRTCDialCoordinator) {
+
+	// Allow only one concurrent network discovery. In practise, this may
+	// block all other proxyOneClient goroutines while one single goroutine
+	// runs doNetworkDiscovery. Subsequently, all other goroutines will find
+	// networkDiscoveryRunOnce is true and use the cached results.
+	p.networkDiscoveryMutex.Lock()
+	defer p.networkDiscoveryMutex.Unlock()
+
+	networkID := webRTCCoordinator.NetworkID()
+
+	if p.networkDiscoveryRunOnce &&
+		p.networkDiscoveryNetworkID == networkID {
+		// Already ran discovery for this network.
+		return
+	}
+
+	// Reset and configure port mapper component, as required. See
+	// initPortMapper comment.
+	initPortMapper(webRTCCoordinator)
+
+	// Gather local network NAT/port mapping metrics before sending any
+	// announce requests. NAT topology metrics are used by the Broker to
+	// optimize client and in-proxy matching. Unlike the client, we always
+	// perform this synchronous step here, since waiting doesn't necessarily
+	// block a client tunnel dial.
+
+	waitGroup := new(sync.WaitGroup)
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+
+		// NATDiscover may use cached NAT type/port mapping values from
+		// DialParameters, based on the network ID. If discovery is not
+		// successful, the proxy still proceeds to announce.
+
+		NATDiscover(
+			ctx,
+			&NATDiscoverConfig{
+				Logger:                p.config.Logger,
+				WebRTCDialCoordinator: webRTCCoordinator,
+			})
+
+	}()
+	waitGroup.Wait()
+
+	p.networkDiscoveryNetworkID = networkID
+}
+
+func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, error) {
+
+	relayedTraffic := false
+
+	// Get a new WebRTCDialCoordinator, which should be configured with the
+	// latest network tactics.
+	webRTCCoordinator, err := p.config.MakeWebRTCDialCoordinator()
+	if err != nil {
+		return relayedTraffic, errors.Trace(err)
+	}
+
+	// Perform network discovery, to determine NAT type and other network
+	// topology information that is reported to the broker in the proxy
+	// announcement and used to optimize proxy/client matching. Unlike
+	// clients, which can't easily delay dials in the tunnel establishment
+	// horse race, proxies will always perform network discovery.
+	// doNetworkDiscovery allows only one concurrent discovery and caches
+	// results for the current network (as determined by
+	// WebRTCCoordinator.GetNetworkID), so when multiple proxyOneClient
+	// goroutines call doNetworkDiscovery, at most one discovery is performed
+	// per network.
+	p.doNetworkDiscovery(ctx, webRTCCoordinator)
+
+	// delayAnnounce delays the proxy announcement request in order to give a
+	// concurrent request a head start. See comments in Run and proxyClients.
+	// This head start delay is applied here, after doNetworkDiscovery, as
+	// otherwise the delay might be negated if the head-start proxyOneClient
+	// blocks on doNetworkDiscovery and subsequently this proxyOneClient
+	// quickly finds cached results in doNetworkDiscovery.
+	if delayAnnounce {
+		announceRetryDelay, announceRetryJitter := p.getAnnounceDelayParameters()
+		common.SleepWithJitter(
+			ctx,
+			common.ValueOrDefault(announceRetryDelay, proxyAnnounceRetryDelay),
+			common.ValueOrDefault(announceRetryJitter, proxyAnnounceRetryJitter))
+	}
 
 	// Send the announce request
 
@@ -342,36 +474,73 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 	// proxy should be able to send keep alives to extend the port mapping
 	// lifetime.
 
-	announceRequestCtx, announceRequestCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(p.config.DialParameters.AnnounceRequestTimeout(), proxyAnnounceRequestTimeout))
-	defer announceRequestCancelFunc()
-
-	metrics, err := p.getMetrics()
+	brokerClient, err := p.config.GetBrokerClient()
 	if err != nil {
-		return errors.Trace(err)
+		return relayedTraffic, errors.Trace(err)
+	}
+
+	brokerCoordinator := brokerClient.GetBrokerDialCoordinator()
+
+	// Get the base Psiphon API parameters and additional proxy metrics,
+	// including performance information, which is sent to the broker in the
+	// proxy announcment.
+	//
+	// tacticsNetworkID is the exact network ID that corresponds to the
+	// tactics tag sent in the base parameters; this is passed to
+	// HandleTacticsPayload in order to double check that any tactics
+	// returned in the proxy announcment response are associated and stored
+	// with the original network ID.
+
+	metrics, tacticsNetworkID, err := p.getMetrics(webRTCCoordinator)
+	if err != nil {
+		return relayedTraffic, errors.Trace(err)
 	}
 
 	// A proxy ID is implicitly sent with requests; it's the proxy's session
 	// public key.
-
-	announceResponse, err := p.brokerClient.ProxyAnnounce(
-		announceRequestCtx,
+	//
+	// ProxyAnnounce applies an additional request timeout to facilitate
+	// long-polling.
+	announceResponse, err := brokerClient.ProxyAnnounce(
+		ctx,
 		&ProxyAnnounceRequest{
-			PersonalCompartmentIDs: p.config.DialParameters.PersonalCompartmentIDs(),
+			PersonalCompartmentIDs: brokerCoordinator.PersonalCompartmentIDs(),
 			Metrics:                metrics,
 		})
 	if err != nil {
-		return errors.Trace(err)
-	}
-
-	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
-		return errors.Tracef(
-			"Unsupported proxy protocol version: %d",
-			announceResponse.ClientProxyProtocolVersion)
+		return relayedTraffic, errors.Trace(err)
 	}
 
 	if announceResponse.OperatorMessageJSON != "" {
 		p.config.OperatorMessageHandler(announceResponse.OperatorMessageJSON)
+	}
+
+	if len(announceResponse.TacticsPayload) > 0 {
+
+		// The TacticsPayload may include new tactics, or may simply signal,
+		// to the Psiphon client, that its tactics tag remains up-to-date and
+		// to extend cached tactics TTL. HandleTacticsPayload returns true
+		// when tactics haved changed; in this case we clear cached network
+		// discovery but proceed with handling the proxy announcement
+		// response as there may still be a match.
+
+		if p.config.HandleTacticsPayload(tacticsNetworkID, announceResponse.TacticsPayload) {
+			p.resetNetworkDiscovery()
+		}
+	}
+
+	if announceResponse.NoMatch {
+
+		// While "no match" may be an expected outcome in many scenarios,
+		// still return an error so that the event is logged and the next
+		// announcement is delayed.
+		return relayedTraffic, errors.TraceNew("no match")
+	}
+
+	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
+		return relayedTraffic, errors.Tracef(
+			"Unsupported proxy protocol version: %d",
+			announceResponse.ClientProxyProtocolVersion)
 	}
 
 	// For activity updates, indicate that a client connection is now underway.
@@ -387,14 +556,14 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 	// Initialize WebRTC using the client's offer SDP
 
 	webRTCAnswerCtx, webRTCAnswerCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(p.config.DialParameters.WebRTCAnswerTimeout(), proxyWebRTCAnswerTimeout))
+		ctx, common.ValueOrDefault(webRTCCoordinator.WebRTCAnswerTimeout(), proxyWebRTCAnswerTimeout))
 	defer webRTCAnswerCancelFunc()
 
 	webRTCConn, SDP, SDPMetrics, webRTCErr := NewWebRTCConnWithAnswer(
 		webRTCAnswerCtx,
 		&WebRTCConfig{
 			Logger:                      p.config.Logger,
-			DialParameters:              p.config.DialParameters,
+			WebRTCDialCoordinator:       webRTCCoordinator,
 			ClientRootObfuscationSecret: announceResponse.ClientRootObfuscationSecret,
 			DoDTLSRandomization:         announceResponse.DoDTLSRandomization,
 			TrafficShapingParameters:    announceResponse.TrafficShapingParameters,
@@ -412,12 +581,8 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 
 	// Send answer request with SDP or error.
 
-	answerRequestCtx, answerRequestCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(p.config.DialParameters.AnswerRequestTimeout(), proxyAnswerRequestTimeout))
-	defer answerRequestCancelFunc()
-
-	_, err = p.brokerClient.ProxyAnswer(
-		answerRequestCtx,
+	_, err = brokerClient.ProxyAnswer(
+		ctx,
 		&ProxyAnswerRequest{
 			ConnectionID:                 announceResponse.ConnectionID,
 			SelectedProxyProtocolVersion: announceResponse.ClientProxyProtocolVersion,
@@ -428,15 +593,15 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 	if err != nil {
 		if webRTCErr != nil {
 			// Prioritize returning any WebRTC error for logging.
-			return webRTCErr
+			return relayedTraffic, webRTCErr
 		}
-		return errors.Trace(err)
+		return relayedTraffic, errors.Trace(err)
 	}
 
 	// Now that an answer is sent, stop if WebRTC initialization failed.
 
 	if webRTCErr != nil {
-		return webRTCErr
+		return relayedTraffic, webRTCErr
 	}
 
 	// Await the WebRTC connection.
@@ -449,13 +614,15 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 	// create wasted load on destination Psiphon servers, particularly when
 	// WebRTC connections fail.
 
-	clientConnectCtx, clientConnectCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(p.config.DialParameters.ProxyClientConnectTimeout(), proxyClientConnectTimeout))
-	defer clientConnectCancelFunc()
+	awaitDataChannelCtx, awaitDataChannelCancelFunc := context.WithTimeout(
+		ctx,
+		common.ValueOrDefault(
+			webRTCCoordinator.WebRTCAwaitDataChannelTimeout(), dataChannelAwaitTimeout))
+	defer awaitDataChannelCancelFunc()
 
-	err = webRTCConn.AwaitInitialDataChannel(clientConnectCtx)
+	err = webRTCConn.AwaitInitialDataChannel(awaitDataChannelCtx)
 	if err != nil {
-		return errors.Trace(err)
+		return relayedTraffic, errors.Trace(err)
 	}
 
 	p.config.Logger.WithTraceFields(common.LogFields{
@@ -466,7 +633,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 	// dial destination is a Psiphon server.
 
 	destinationDialContext, destinationDialCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(p.config.DialParameters.ProxyDestinationDialTimeout(), proxyDestinationDialTimeout))
+		ctx, common.ValueOrDefault(webRTCCoordinator.ProxyDestinationDialTimeout(), proxyDestinationDialTimeout))
 	defer destinationDialCancelFunc()
 
 	// Use the custom resolver when resolving destination hostnames, such as
@@ -484,9 +651,10 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 	// - Any DNSResolverPreresolved tactics applied will be relative to the
 	//   in-proxy location.
 
-	destinationAddress, err := p.config.DialParameters.ResolveAddress(ctx, announceResponse.DestinationAddress)
+	destinationAddress, err := webRTCCoordinator.ResolveAddress(
+		ctx, "ip", announceResponse.DestinationAddress)
 	if err != nil {
-		return errors.Trace(err)
+		return relayedTraffic, errors.Trace(err)
 	}
 
 	var dialer net.Dialer
@@ -495,7 +663,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 		announceResponse.NetworkProtocol.String(),
 		destinationAddress)
 	if err != nil {
-		return errors.Trace(err)
+		return relayedTraffic, errors.Trace(err)
 	}
 	defer destinationConn.Close()
 
@@ -533,7 +701,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 	destinationConn, err = common.NewActivityMonitoredConn(
 		destinationConn, 0, false, nil, p.activityUpdateWrapper)
 	if err != nil {
-		return errors.Trace(err)
+		return relayedTraffic, errors.Trace(err)
 	}
 
 	// Relay the client traffic to the destination. The client traffic is a
@@ -556,6 +724,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 
 	waitGroup := new(sync.WaitGroup)
 	relayErrors := make(chan error, 2)
+	var relayedUp, relayedDown int32
 
 	waitGroup.Add(1)
 	go func() {
@@ -570,21 +739,29 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 		// less than the maximum. Calls to ClientConn.Write are also expected
 		// to use io.Copy, keeping messages at most 32K in size.
 
-		_, err := io.Copy(webRTCConn, destinationConn)
-		if err != nil {
-			relayErrors <- errors.Trace(err)
-			return
+		// io.Copy doesn't return an error on EOF, but we still want to signal
+		// that relaying is done, so in this case a nil error is sent to the
+		// channel.
+		//
+		// Limitation: if one io.Copy goproutine sends nil and the other
+		// io.Copy goroutine sends a non-nil error concurrently, the non-nil
+		// error isn't prioritized.
+
+		n, err := io.Copy(webRTCConn, destinationConn)
+		if n > 0 {
+			atomic.StoreInt32(&relayedDown, 1)
 		}
+		relayErrors <- errors.Trace(err)
 	}()
 
 	waitGroup.Add(1)
 	go func() {
 		defer waitGroup.Done()
-		_, err := io.Copy(destinationConn, webRTCConn)
-		if err != nil {
-			relayErrors <- errors.Trace(err)
-			return
+		n, err := io.Copy(destinationConn, webRTCConn)
+		if n > 0 {
+			atomic.StoreInt32(&relayedUp, 1)
 		}
+		relayErrors <- errors.Trace(err)
 	}()
 
 	select {
@@ -602,21 +779,31 @@ func (p *Proxy) proxyOneClient(ctx context.Context) error {
 		"connectionID": announceResponse.ConnectionID,
 	}).Info("connection closed")
 
-	return err
+	relayedTraffic = atomic.LoadInt32(&relayedUp) == 1 && atomic.LoadInt32(&relayedDown) == 1
+
+	return relayedTraffic, err
 }
 
-func (p *Proxy) getMetrics() (*ProxyMetrics, error) {
+func (p *Proxy) getMetrics(webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetrics, string, error) {
 
-	baseMetrics, err := EncodeBaseMetrics(p.config.BaseMetrics)
+	// tacticsNetworkID records the exact network ID that corresponds to the
+	// tactics tag sent in the base parameters, and is used when applying any
+	// new tactics returned by the broker.
+	baseParams, tacticsNetworkID, err := p.config.GetBaseAPIParameters()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, "", errors.Trace(err)
+	}
+
+	packedBaseParams, err := protocol.EncodePackedAPIParameters(baseParams)
+	if err != nil {
+		return nil, "", errors.Trace(err)
 	}
 
 	return &ProxyMetrics{
-		BaseMetrics:                   baseMetrics,
+		BaseAPIParameters:             packedBaseParams,
 		ProxyProtocolVersion:          ProxyProtocolVersion1,
-		NATType:                       p.config.DialParameters.NATType(),
-		PortMappingTypes:              p.config.DialParameters.PortMappingTypes(),
+		NATType:                       webRTCCoordinator.NATType(),
+		PortMappingTypes:              webRTCCoordinator.PortMappingTypes(),
 		MaxClients:                    int32(p.config.MaxClients),
 		ConnectingClients:             atomic.LoadInt32(&p.connectingClients),
 		ConnectedClients:              atomic.LoadInt32(&p.connectedClients),
@@ -624,5 +811,5 @@ func (p *Proxy) getMetrics() (*ProxyMetrics, error) {
 		LimitDownstreamBytesPerSecond: int64(p.config.LimitDownstreamBytesPerSecond),
 		PeakUpstreamBytesPerSecond:    atomic.LoadInt64(&p.peakBytesUp),
 		PeakDownstreamBytesPerSecond:  atomic.LoadInt64(&p.peakBytesDown),
-	}, nil
+	}, tacticsNetworkID, nil
 }

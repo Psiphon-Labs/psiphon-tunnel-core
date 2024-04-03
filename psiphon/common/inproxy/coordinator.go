@@ -33,17 +33,37 @@ type RoundTripper interface {
 	RoundTrip(ctx context.Context, requestPayload []byte) (responsePayload []byte, err error)
 }
 
-// DialParameters provides in-proxy dial parameters and configuration, used by
-// both clients and proxies, and an interface for signaling when parameters
-// are successful or not, to facilitate replay of successful parameters.
+// BrokerDialCoordinator provides in-proxy dial parameters and configuration,
+// used by both clients and proxies, and an interface for signaling when
+// parameters are successful or not, to facilitate replay of successful
+// parameters.
 //
-// Each DialParameters should provide values selected in the context of a
-// single network, as identified by a network ID. A distinct DialParameters
-// should be created for each client in-proxy dial, with new or replayed
-// parameters selected as appropriate. One proxy run uses a single
-// DialParameters for all proxied connections. The proxy should be restarted
-// with a new DialParameters when the underlying network changes.
-type DialParameters interface {
+// Each BrokerDialCoordinator should provide values selected in the context of
+// a single network, as identified by a network ID. A distinct
+// BrokerDialCoordinator should be created for each in-proxy broker dial,
+// with new or replayed parameters selected as appropriate. Multiple in-proxy
+// client dials and/or proxy runs may share a single BrokerDialCoordinator,
+// reducing round trips required to make broker requests. A
+// BrokerDialCoordinator implementation must be safe for concurrent calls.
+//
+// The Psiphon client is expected to create a new BrokerDialCoordinator for
+// use by in-proxy clients when the underlying network changes and tunnels
+// are redialed. Similarly, in-proxy proxies should be restarted with a new
+// BrokerDialCoordinator when the underlying network changes.
+type BrokerDialCoordinator interface {
+
+	// Returns the network ID for the network this BrokerDialCoordinator is
+	// associated with. For a single BrokerDialCoordinator, the NetworkID value
+	// should not change. Replay-facilitating calls, Succeeded/Failed, all
+	// assume the network and network ID remain static. The network ID value
+	// is used by in-proxy dials to track internal state that depends on the
+	// current network; this includes the port mapping types supported by the
+	// network.
+	NetworkID() string
+
+	// Returns the network type for the current network, or NetworkTypeUnknown
+	// if unknown.
+	NetworkType() NetworkType
 
 	// CommonCompartmentIDs is the list of common, Psiphon-managed, in-proxy
 	// compartment IDs known to a client. These IDs are delivered through
@@ -67,19 +87,6 @@ type DialParameters interface {
 	// cases, both clients and proxies will specify a single personal
 	// compartment ID.
 	PersonalCompartmentIDs() []ID
-
-	// Returns the network ID for the network this DialParameters is
-	// associated with. For a single DialParameters, the NetworkID value
-	// should not change. Replay-facilitating calls, Succeeded/Failed, all
-	// assume the network and network ID remain static. The network ID value
-	// is used by in-proxy dials to track internal state that depends on the
-	// current network; this includes the port mapping types supported by the
-	// network.
-	NetworkID() string
-
-	// Returns the network type for the current network, or NetworkTypeUnknown
-	// if unknown.
-	NetworkType() NetworkType
 
 	// BrokerClientPrivateKey is the client or proxy's private key to be used
 	// in the secure session established with a broker. Clients should
@@ -109,6 +116,10 @@ type DialParameters interface {
 	// Clients and proxies make round trips to establish a secure session with
 	// the broker, on top of the provided transport, and to exchange API
 	// requests with the broker.
+	//
+	// The implementation must return a RoundTripper connecting to the same
+	// broker for every call, as multiple-request sequences such as
+	// ProxyAnnounce and ProxyAnswer depend on broker state.
 	BrokerClientRoundTripper() (RoundTripper, error)
 
 	// BrokerClientRoundTripperSucceeded is called after a successful round
@@ -125,6 +136,45 @@ type DialParameters interface {
 	// BrokerClientRoundTripper call, discarding the current RoundTripper
 	// after closing its network resources.
 	BrokerClientRoundTripperFailed(roundTripper RoundTripper)
+
+	AnnounceRequestTimeout() time.Duration
+	AnnounceRetryDelay() time.Duration
+	AnnounceRetryJitter() float64
+	AnswerRequestTimeout() time.Duration
+	OfferRequestTimeout() time.Duration
+	OfferRetryDelay() time.Duration
+	OfferRetryJitter() float64
+	RelayedPacketRequestTimeout() time.Duration
+}
+
+// WebRTCDialCoordinator provides in-proxy dial parameters and configuration,
+// used by both clients and proxies, and an interface for signaling when
+// parameters are successful or not, to facilitate replay of successful
+// parameters.
+//
+// Each WebRTCDialCoordinator should provide values selected in the context of
+// a single network, as identified by a network ID. A distinct
+// WebRTCDialCoordinator should be created for each client in-proxy dial, with
+// new or replayed parameters selected as appropriate. One proxy run uses a
+// single WebRTCDialCoordinator for all proxied connections. The proxy should
+// be restarted with a new WebRTCDialCoordinator when the underlying network
+// changes.
+//
+// A WebRTCDialCoordinator implementation must be safe for concurrent calls.
+type WebRTCDialCoordinator interface {
+
+	// Returns the network ID for the network this WebRTCDialCoordinator is
+	// associated with. For a single WebRTCDialCoordinator, the NetworkID
+	// value should not change. Replay-facilitating calls, Succeeded/Failed,
+	// all assume the network and network ID remain static. The network ID
+	// value is used by in-proxy dials to track internal state that depends
+	// on the current network; this includes the port mapping types supported
+	// by the network.
+	NetworkID() string
+
+	// Returns the network type for the current network, or NetworkTypeUnknown
+	// if unknown.
+	NetworkType() NetworkType
 
 	// ClientRootObfuscationSecret is the root obfuscation secret generated by
 	// or replayed by the client, which will be used to drive and replay
@@ -182,7 +232,7 @@ type DialParameters interface {
 	// DisableSTUN indicates whether to skip STUN operations.
 	DisableSTUN() bool
 
-	// DisableSTUN indicates whether to skip port mapping operations.
+	// DisablePortMapping indicates whether to skip port mapping operations.
 	DisablePortMapping() bool
 
 	// DisableInboundForMobleNetworks indicates that all attempts to set up
@@ -191,6 +241,9 @@ type DialParameters interface {
 	// operations that can slow down dials and and unlikely to succeed on
 	// most mobile networks with CGNAT.
 	DisableInboundForMobleNetworks() bool
+
+	// DisableIPv6ICECandidates omits all IPv6 ICE candidates.
+	DisableIPv6ICECandidates() bool
 
 	// NATType returns any persisted NAT type for the current network, as set
 	// by SetNATType. When NATTypeUnknown is returned, NAT discovery may be
@@ -221,12 +274,12 @@ type DialParameters interface {
 	// and proxies may use this to hook into the Psiphon custom resolver. The
 	// provider adds the custom resolver tactics and network ID parameters
 	// required by psiphon/common.Resolver.
-	ResolveAddress(ctx context.Context, address string) (string, error)
+	ResolveAddress(ctx context.Context, network, address string) (string, error)
 
-	// UDPListen dials a local UDP socket. The socket should be bound to a
+	// UDPListen creates a local UDP socket. The socket should be bound to a
 	// specific interface as required for VPN modes, and set a write timeout
 	// to mitigate the issue documented in psiphon/common.WriteTimeoutUDPConn.
-	UDPListen() (net.PacketConn, error)
+	UDPListen(ctx context.Context) (net.PacketConn, error)
 
 	// BindToDevice binds a socket, specified by the file descriptor, to an
 	// interface that isn't routed through a VPN when Psiphon is running in
@@ -235,14 +288,7 @@ type DialParameters interface {
 	BindToDevice(fileDescriptor int) error
 
 	DiscoverNATTimeout() time.Duration
-	OfferRequestTimeout() time.Duration
-	OfferRetryDelay() time.Duration
-	OfferRetryJitter() float64
-	AnnounceRequestTimeout() time.Duration
-	AnnounceRetryDelay() time.Duration
-	AnnounceRetryJitter() float64
 	WebRTCAnswerTimeout() time.Duration
-	AnswerRequestTimeout() time.Duration
-	ProxyClientConnectTimeout() time.Duration
+	WebRTCAwaitDataChannelTimeout() time.Duration
 	ProxyDestinationDialTimeout() time.Duration
 }

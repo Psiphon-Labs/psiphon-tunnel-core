@@ -104,10 +104,11 @@ proxy is trusted to report the original client IP or the proxy ID.
 
 Instead of having the broker connect out to Psiphon servers, and trying to
 synchronize reliable arrival of these messages, the broker uses the client to
-relay secure session packets -- the message and response, preceded by a
-session handshake if required. These session packets piggyback on top of
-client/broker and client/server round trips that happen anyway, including the
-Psiphon API handshake.
+relay secure session packets -- the message, preceded by a session handshake
+if required -- inline, in the client/broker and client/server tunnel
+connections. These session packets piggyback on top of client/broker and
+client/server round trips that happen anyway, including the Psiphon API
+handshake.
 
 Psiphon servers with in-proxy capabilities should be configured, on in-proxy
 listeners, to require receipt of this broker message before finalizing
@@ -115,12 +116,26 @@ traffic rules, issuing tactics, issuing OSL progress, or allowing traffic
 tunneling. The original client IP reported by the broker should be used for
 all client GeoIP policy decisions and logging.
 
-The proxy ID is the proxy's secure session public key; the proxy proves
-possession of the corresponding private key in the session handshake. Proxy
-IDs are not revealed to clients; only to brokers and Psiphon servers. A proxy
-may maintain a long-term key pair and corresponding proxy ID, and that may be
-used by Psiphon to assign reputation to well-performing proxies or to issue
-rewards for proxies.
+The proxy ID corresponds to the proxy's secure session public key; the proxy
+proves possession of the corresponding private key in the session handshake.
+Proxy IDs are not revealed to clients; only to brokers and Psiphon servers. A
+proxy may maintain a long-term key pair and corresponding proxy ID, and that
+may be used by Psiphon to assign reputation to well-performing proxies or to
+issue rewards for proxies.
+
+Each secure session public key is an Ed25519 public key. This public key is
+used for signatures, including the session reset token in the session
+protocol. This signing key may also be used, externally, in a
+challenge/response registration process where a proxy operator can
+demonstrate ownership of a proxy public key and its corresponding proxy ID.
+For use in ECDH in the Noise protocol, the Ed25519 public key is converted to
+the corresponding, unique Curve25519 public key.
+
+Logged proxy ID values will be the Curve25519 representation of the public
+key. Since Curve25519 public keys don't uniquely map back to Ed25519 public
+keys, any external proxy registration system should store the Ed25519 public
+key and derive the corresponding Curve25519 when mapping server tunnel proxy
+IDs back to the Ed25519 proxy public key.
 
 The proxy is designed to be bundled with the tunnel-core client, run
 optionally, and integrated with its tactics, data store, and logging. The

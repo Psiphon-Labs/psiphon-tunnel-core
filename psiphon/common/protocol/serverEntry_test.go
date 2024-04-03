@@ -296,14 +296,20 @@ func testServerEntryListSignatures(t *testing.T, setExplicitTag bool) {
 	}
 }
 
-func TestIsValidDialAddress(t *testing.T) {
+func TestIsValidInproxyDialAddress(t *testing.T) {
 
 	serverEntry := &ServerEntry{
-		IpAddress:                  "192.168.0.1",
-		SshPort:                    1,
-		SshObfuscatedPort:          2,
-		SshObfuscatedQUICPort:      3,
-		Capabilities:               []string{"handshake", "SSH", "OSSH", "QUIC", "FRONTED-MEEK"},
+		IpAddress:       "192.168.0.1",
+		InproxySSHPort:  1,
+		InproxyOSSHPort: 2,
+		InproxyQUICPort: 3,
+		Capabilities: []string{
+			"handshake",
+			"INPROXY-WEBRTC-SSH",
+			"INPROXY-WEBRTC-OSSH",
+			"INPROXY-WEBRTC-QUIC-OSSH",
+			"INPROXY-WEBRTC-FRONTED-MEEK-OSSH",
+		},
 		MeekFrontingAddressesRegex: "[ab]+",
 		MeekServerPort:             443,
 	}
@@ -327,7 +333,7 @@ func TestIsValidDialAddress(t *testing.T) {
 		},
 		{
 			"valid UDP dial",
-			"tcp", "192.168.0.1", 1,
+			"udp", "192.168.0.1", 3,
 			true,
 		},
 		{
@@ -364,10 +370,10 @@ func TestIsValidDialAddress(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.description, func(t *testing.T) {
-			if testCase.isValid != serverEntry.IsValidDialAddress(
+			if testCase.isValid != serverEntry.IsValidInproxyDialAddress(
 				testCase.networkProtocol, testCase.dialHost, testCase.dialPortNumber) {
 
-				t.Errorf("unexpected IsValidDialAddress result")
+				t.Errorf("unexpected IsValidInproxyDialAddress result")
 			}
 		})
 	}

@@ -38,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	inproxy_dtls "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy/dtls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -112,19 +113,6 @@ type DialConfig struct {
 	// other DialConfig parameters; for example MeekConfig still uses
 	// TrustedCACertificatesFilename.
 	CustomDialer common.Dialer
-}
-
-// WithoutFragmentor returns a copy of the DialConfig with any fragmentor
-// configuration disabled. The return value is not a deep copy and may be the
-// input DialConfig; it should not be modified.
-func (config *DialConfig) WithoutFragmentor() *DialConfig {
-	if config.FragmentorConfig == nil {
-		return config
-	}
-	newConfig := new(DialConfig)
-	*newConfig = *config
-	newConfig.FragmentorConfig = nil
-	return newConfig
 }
 
 // NetworkConnectivityChecker defines the interface to the external
@@ -229,6 +217,14 @@ func (d *RefractionNetworkingDialer) DialContext(
 		conn := &common.WriteTimeoutUDPConn{
 			UDPConn: udpConn,
 		}
+
+		// Conjure doesn't use the DTLS seed scheme, which supports in-proxy
+		// DTLS randomization. But every DTLS dial expects to find a seed
+		// state, so set the no-seed state.
+		deadline, _ := ctx.Deadline()
+		dtlsSeedTTL := time.Until(deadline)
+		inproxy_dtls.SetNoDTLSSeed(conn.LocalAddr(), dtlsSeedTTL)
+
 		return conn, nil
 
 	default:
@@ -385,7 +381,7 @@ func UntunneledResolveIP(
 	frontingProviderID string) ([]net.IP, error) {
 
 	// Limitations: for untunneled resolves, there is currently no resolve
-	// parameter replay, and no support for pre-resolved IPs.
+	// parameter replay.
 
 	params, err := resolver.MakeResolveParameters(
 		config.GetParameters().Get(), frontingProviderID, hostname)
@@ -430,6 +426,7 @@ func makeFrontedHTTPClient(
 	disableSystemRootCAs bool) (*http.Client, func() common.APIParameters, error) {
 
 	frontingProviderID,
+		frontingTransport,
 		meekFrontingDialAddress,
 		meekSNIServerName,
 		meekVerifyServerName,
@@ -437,6 +434,10 @@ func makeFrontedHTTPClient(
 		meekFrontingHost, err := parameters.FrontingSpecs(frontingSpecs).SelectParameters()
 	if err != nil {
 		return nil, nil, errors.Trace(err)
+	}
+
+	if frontingTransport != protocol.FRONTING_TRANSPORT_HTTPS {
+		return nil, nil, errors.TraceNew("unsupported fronting transport")
 	}
 
 	if selectedFrontingProviderID != nil {

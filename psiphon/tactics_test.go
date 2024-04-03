@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 func TestStandAloneGetTactics(t *testing.T) {
@@ -61,6 +62,10 @@ func TestStandAloneGetTactics(t *testing.T) {
 	if config.ClientPlatform == "" {
 		config.ClientPlatform = testClientPlatform
 	}
+
+	// Use the legacy encoding to both exercise that case, and facilitate a
+	// gradual network upgrade to new encoding support.
+	config.TargetAPIEncoding = protocol.PSIPHON_API_ENCODING_JSON
 
 	err = config.Commit(false)
 	if err != nil {

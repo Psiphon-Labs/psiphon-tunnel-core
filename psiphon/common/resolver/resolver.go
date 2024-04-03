@@ -453,11 +453,15 @@ func (r *Resolver) MakeResolveParameters(
 // ResolveAddress splits the input host:port address, calls ResolveIP to
 // resolve the IP address of the host, selects an IP if there are multiple,
 // and returns a rejoined IP:port.
+//
+// IP address selection is random. When network input is set
+// to "ip4"/"tcp4"/"udp4" or "ip6"/"tcp6"/"udp6", selection is limited to
+// IPv4 or IPv6, respectively.
 func (r *Resolver) ResolveAddress(
 	ctx context.Context,
 	networkID string,
 	params *ResolveParameters,
-	address string) (string, error) {
+	network, address string) (string, error) {
 
 	hostname, port, err := net.SplitHostPort(address)
 	if err != nil {
@@ -469,7 +473,37 @@ func (r *Resolver) ResolveAddress(
 		return "", errors.Trace(err)
 	}
 
-	return net.JoinHostPort(IPs[prng.Intn(len(IPs))].String(), port), nil
+	copyIPs := append([]net.IP(nil), IPs...)
+	prng.Shuffle(len(copyIPs), func(i, j int) {
+		copyIPs[i], copyIPs[j] = copyIPs[j], copyIPs[i]
+	})
+
+	index := 0
+
+	switch network {
+	case "ip4", "tcp4", "udp4":
+		index = -1
+		for i, IP := range IPs {
+			if IP.To4() != nil {
+				index = i
+				break
+			}
+		}
+	case "ip6", "tcp6", "udp6":
+		index = -1
+		for i, IP := range IPs {
+			if IP.To4() == nil {
+				index = i
+				break
+			}
+		}
+	}
+
+	if index == -1 {
+		return "", errors.TraceNew("no IP for network")
+	}
+
+	return net.JoinHostPort(IPs[index].String(), port), nil
 }
 
 // ResolveIP resolves a domain name.
@@ -495,11 +529,14 @@ func (r *Resolver) ResolveAddress(
 // often blocked or less common. Instead, ResolveIP makes a best effort to
 // evade plaintext UDP DNS interference by ignoring invalid responses and by
 // optionally applying protocol transforms that may evade blocking.
+//
+// Due to internal caching, the caller must not mutate returned net.IP slice
+// or entries.
 func (r *Resolver) ResolveIP(
 	ctx context.Context,
 	networkID string,
 	params *ResolveParameters,
-	hostname string) (x []net.IP, y error) {
+	hostname string) ([]net.IP, error) {
 
 	// ResolveIP does _not_ lock r.mutex for the lifetime of the function, to
 	// ensure many ResolveIP calls can run concurrently.

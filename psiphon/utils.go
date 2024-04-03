@@ -28,6 +28,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -270,4 +271,36 @@ func DoFileMigration(migration FileMigration) error {
 	}
 
 	return nil
+}
+
+// GetNetworkType returns a network type name, suitable for metrics, which is
+// derived from the network ID.
+func GetNetworkType(networkID string) string {
+
+	// Unlike the logic in loggingNetworkIDGetter.GetNetworkID, we don't take the
+	// arbitrary text before the first "-" since some platforms without network
+	// detection support stub in random values to enable tactics. Instead we
+	// check for and use the common network type prefixes currently used in
+	// NetworkIDGetter implementations.
+
+	if strings.HasPrefix(networkID, "VPN") {
+		return "VPN"
+	}
+	if strings.HasPrefix(networkID, "WIFI") {
+		return "WIFI"
+	}
+	if strings.HasPrefix(networkID, "MOBILE") {
+		return "MOBILE"
+	}
+	return "UNKNOWN"
+}
+
+// IsInproxyCompatibleNetworkType indicates if the network type for the given
+// network ID is compatible with in-proxy operation.
+func IsInproxyCompatibleNetworkType(networkID string) bool {
+
+	// When the network type is "VPN", the outer client (or MobileLibrary) has
+	// detected that some other, non-Psiphon VPN is active. In this case,
+	// most in-proxy operations are expected to fail.
+	return GetNetworkType(networkID) != "VPN"
 }

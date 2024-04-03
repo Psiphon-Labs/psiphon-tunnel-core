@@ -21,54 +21,49 @@ package inproxy
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"net"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Labs/consistent"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/buraksezer/consistent"
 	"github.com/cespare/xxhash"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"github.com/fxamacker/cbor/v2"
 )
 
 const (
-
-	// BrokerReadTimeout is the read timeout, the duration before a request is
-	// fully read, that should be applied by the provided broker transport.
-	// For example, when the provided transport is net/http, set
-	// http.Server.ReadTimeout to at least BrokerReadTimeout.
-	BrokerReadTimeout = 5 * time.Second
-
-	// BrokerWriteTimeout is the write timeout, the duration before a response
-	// is fully written, that should be applied by the provided broker
-	// transport. This timeout accomodates the long polling performed by the
-	// proxy announce request. Both the immediate transport provider and any
-	// front (e.g., a CDN) must be configured to use this timeout.
-	BrokerWriteTimeout = (brokerProxyAnnounceTimeout + 5*time.Second)
-
-	// BrokerIdleTimeout is the idle timeout, the duration before an idle
-	// persistent connection is closed, that should be applied by the
-	// provided broker transport.
-	BrokerIdleTimeout = 2 * time.Minute
 
 	// BrokerMaxRequestBodySize is the maximum request size, that should be
 	// enforced by the provided broker transport.
 	BrokerMaxRequestBodySize = 65536
 
-	brokerProxyAnnounceTimeout         = 2 * time.Minute
-	brokerClientOfferTimeout           = 10 * time.Second
-	brokerPendingServerRequestsTTL     = 60 * time.Second
-	brokerPendingServerRequestsMaxSize = 100000
-	brokerMetricName                   = "in-proxy-broker"
+	// BrokerEndPointName is the standard name for referencing an endpoint
+	// that services broker requests.
+	BrokerEndPointName = "inproxy-broker"
+
+	brokerProxyAnnounceTimeout        = 2 * time.Minute
+	brokerClientOfferTimeout          = 10 * time.Second
+	brokerPendingServerReportsTTL     = 60 * time.Second
+	brokerPendingServerReportsMaxSize = 100000
+	brokerMetricName                  = "inproxy-broker"
 )
 
 // LookupGeoIP is a callback for providing GeoIP lookup service.
 type LookupGeoIP func(IP string) common.GeoIPData
+
+// ExtendTransportTimeout is a callback that extends the timeout for a
+// server-side broker transport handler, facilitating request-specific
+// timeouts including long-polling for proxy announcements.
+type ExtendTransportTimeout func(timeout time.Duration)
+
+// GetTactics is a callback which returns the appropriate tactics for the
+// specified client/proxy GeoIP data and API parameters.
+type GetTactics func(common.GeoIPData, common.APIParameters) ([]byte, string, error)
 
 // Broker is the in-proxy broker component, which matches clients and proxies
 // and provides WebRTC signaling functionalty.
@@ -80,12 +75,18 @@ type LookupGeoIP func(IP string) common.GeoIPData
 // runs a Broker and calls Broker.HandleSessionPacket to handle web requests
 // encapsulating secure session packets.
 type Broker struct {
-	config                *BrokerConfig
-	initiatorSessions     *InitiatorSessions
-	responderSessions     *ResponderSessions
-	matcher               *Matcher
-	pendingServerRequests *lrucache.Cache
-	commonCompartments    *consistent.Consistent
+	config               *BrokerConfig
+	initiatorSessions    *InitiatorSessions
+	responderSessions    *ResponderSessions
+	matcher              *Matcher
+	pendingServerReports *lrucache.Cache
+
+	commonCompartmentsMutex sync.Mutex
+	commonCompartments      *consistent.Consistent
+
+	proxyAnnounceTimeout    int64
+	clientOfferTimeout      int64
+	pendingServerReportsTTL int64
 }
 
 // BrokerConfig specifies the configuration for a Broker.
@@ -99,6 +100,14 @@ type BrokerConfig struct {
 	// compartment IDs are managed by Psiphon and distributed to clients via
 	// tactics or embedded in OSLs. Clients must supply a valid compartment
 	// ID to match with a proxy.
+	//
+	// A BrokerConfig must supply at least one compartment ID, or
+	// SetCompartmentIDs must be called with at least one compartment ID
+	// before calling Start.
+	//
+	// When only one, single common compartment ID is configured, it can serve
+	// as an (obfuscation) secret that clients must obtain, via tactics, to
+	// enable in-proxy participation.
 	CommonCompartmentIDs []ID
 
 	// AllowProxy is a callback which can indicate whether a proxy with the
@@ -112,15 +121,15 @@ type BrokerConfig struct {
 	// compartment ID.
 	AllowClient func(common.GeoIPData) bool
 
-	// AllowDomainDestination is a callback which can indicate whether a
-	// client with the given GeoIP data is allowed to specify a proxied
-	// destination with a domain name. When false, only IP address
-	// destinations are allowed.
+	// AllowDomainFrontedDestinations is a callback which can indicate whether
+	// a client with the given GeoIP data is allowed to specify a proxied
+	// destination for a domain fronted protocol. When false, only direct
+	// address destinations are allowed.
 	//
 	// While tactics may may be set to instruct clients to use only direct
 	// server tunnel protocols, with IP address destinations, this callback
 	// adds server-side enforcement.
-	AllowDomainDestination func(common.GeoIPData) bool
+	AllowDomainFrontedDestinations func(common.GeoIPData) bool
 
 	// LookupGeoIP provides GeoIP lookup service.
 	LookupGeoIP LookupGeoIP
@@ -131,11 +140,13 @@ type BrokerConfig struct {
 	// APIParameterValidator is a callback that formats base API metrics.
 	APIParameterLogFieldFormatter common.APIParameterLogFieldFormatter
 
-	// TransportSecret is a value that must be supplied by the provided
-	// transport. In the case of domain fronting, this is used to validate
-	// that the peer is a trusted CDN, and so it's relayed client IP
-	// (e.g, X-Forwarded-For header) is legitimate.
-	TransportSecret TransportSecret
+	// GetTactics provides a tactics lookup service.
+	GetTactics GetTactics
+
+	// IsValidServerEntryTag is a callback which checks if the specified
+	// server entry tag is on the list of valid and active Psiphon server
+	// entry tags.
+	IsValidServerEntryTag func(serverEntryTag string) bool
 
 	// PrivateKey is the broker's secure session long term private key.
 	PrivateKey SessionPrivateKey
@@ -147,30 +158,28 @@ type BrokerConfig struct {
 	// entry signatures.
 	ServerEntrySignaturePublicKey string
 
-	// IsValidServerEntryTag is a callback which checks if the specified
-	// server entry tag is on the list of valid and active Psiphon server
-	// entry tags.
-	IsValidServerEntryTag func(serverEntryTag string) bool
-
 	// These timeout parameters may be used to override defaults.
-	ProxyAnnounceTimeout     time.Duration
-	ClientOfferTimeout       time.Duration
-	PendingServerRequestsTTL time.Duration
+	ProxyAnnounceTimeout    time.Duration
+	ClientOfferTimeout      time.Duration
+	PendingServerReportsTTL time.Duration
+
+	// Announcement queue limit configuration.
+	MatcherAnnouncementLimitEntryCount    int
+	MatcherAnnouncementRateLimitQuantity  int
+	MatcherAnnouncementRateLimitInterval  time.Duration
+	MatcherAnnouncementNonlimitedProxyIDs []ID
+
+	// Offer queue limit configuration.
+	MatcherOfferLimitEntryCount   int
+	MatcherOfferRateLimitQuantity int
+	MatcherOfferRateLimitInterval time.Duration
 }
 
 // NewBroker initializes a new Broker.
 func NewBroker(config *BrokerConfig) (*Broker, error) {
 
-	// At least one common compatment ID is required. At a minimum, one ID
-	// will be used and distributed to clients via tactics, limiting matching
-	// to those clients targeted to receive that tactic parameters.
-
-	if len(config.CommonCompartmentIDs) == 0 {
-		return nil, errors.TraceNew("missing common compartment IDs")
-	}
-
 	// initiatorSessions are secure sessions initiated by the broker and used
-	// to send BrokerServerRequests to servers. The servers will be
+	// to send BrokerServerReports to servers. The servers will be
 	// configured to establish sessions only with brokers with specified
 	// public keys.
 
@@ -180,7 +189,8 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 	// and used to send requests to the broker. Clients and proxies are
 	// configured to establish sessions only with specified broker public keys.
 
-	responderSessions, err := NewResponderSessions(config.PrivateKey, config.ObfuscationRootSecret)
+	responderSessions, err := NewResponderSessions(
+		config.PrivateKey, config.ObfuscationRootSecret)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -191,21 +201,42 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		responderSessions: responderSessions,
 		matcher: NewMatcher(&MatcherConfig{
 			Logger: config.Logger,
+
+			AnnouncementLimitEntryCount:    config.MatcherAnnouncementLimitEntryCount,
+			AnnouncementRateLimitQuantity:  config.MatcherAnnouncementRateLimitQuantity,
+			AnnouncementRateLimitInterval:  config.MatcherAnnouncementRateLimitInterval,
+			AnnouncementNonlimitedProxyIDs: config.MatcherAnnouncementNonlimitedProxyIDs,
+			OfferLimitEntryCount:           config.MatcherOfferLimitEntryCount,
+			OfferRateLimitQuantity:         config.MatcherOfferRateLimitQuantity,
+			OfferRateLimitInterval:         config.MatcherOfferRateLimitInterval,
 		}),
+
+		proxyAnnounceTimeout:    int64(config.ProxyAnnounceTimeout),
+		clientOfferTimeout:      int64(config.ClientOfferTimeout),
+		pendingServerReportsTTL: int64(config.PendingServerReportsTTL),
 	}
 
-	b.pendingServerRequests = lrucache.NewWithLRU(
-		common.ValueOrDefault(config.PendingServerRequestsTTL, brokerPendingServerRequestsTTL),
+	b.pendingServerReports = lrucache.NewWithLRU(
+		common.ValueOrDefault(config.PendingServerReportsTTL, brokerPendingServerReportsTTL),
 		1*time.Minute,
-		brokerPendingServerRequestsMaxSize)
-	b.pendingServerRequests.OnEvicted(b.evictedPendingServerRequest)
+		brokerPendingServerReportsMaxSize)
 
-	b.initializeCommonCompartmentIDHashing()
+	if len(config.CommonCompartmentIDs) > 0 {
+		err = b.initializeCommonCompartmentIDHashing(config.CommonCompartmentIDs)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
 
 	return b, nil
 }
 
 func (b *Broker) Start() error {
+
+	if !b.isCommonCompartmentIDHashingInitialized() {
+		return errors.TraceNew("missing common compartment IDs")
+	}
+
 	return errors.Trace(b.matcher.Start())
 }
 
@@ -213,10 +244,59 @@ func (b *Broker) Stop() {
 	b.matcher.Stop()
 }
 
+// SetCommonCompartmentIDs sets a new list of common compartment IDs,
+// replacing the previous configuration.
+func (b *Broker) SetCommonCompartmentIDs(commonCompartmentIDs []ID) error {
+
+	// TODO: initializeCommonCompartmentIDHashing is called regardless whether
+	// commonCompartmentIDs changes the previous configuration. To avoid the
+	// overhead of consistent hashing initialization in
+	// initializeCommonCompartmentIDHashing, add a mechanism to first quickly
+	// check for changes?
+
+	return errors.Trace(b.initializeCommonCompartmentIDHashing(commonCompartmentIDs))
+}
+
+// SetTimeouts sets new timeout values, replacing the previous configuration.
+// New timeout values do not apply to currently active announcement or offer
+// requests.
+func (b *Broker) SetTimeouts(
+	proxyAnnounceTimeout time.Duration,
+	clientOfferTimeout time.Duration,
+	pendingServerReportsTTL time.Duration) {
+
+	atomic.StoreInt64(&b.proxyAnnounceTimeout, int64(proxyAnnounceTimeout))
+	atomic.StoreInt64(&b.clientOfferTimeout, int64(clientOfferTimeout))
+	atomic.StoreInt64(&b.pendingServerReportsTTL, int64(pendingServerReportsTTL))
+}
+
+// SetLimits sets new queue limit values, replacing the previous
+// configuration. New limits are only partially applied to existing queue
+// states; see Matcher.SetLimits.
+func (b *Broker) SetLimits(
+	matcherAnnouncementLimitEntryCount int,
+	matcherAnnouncementRateLimitQuantity int,
+	matcherAnnouncementRateLimitInterval time.Duration,
+	matcherAnnouncementNonlimitedProxyIDs []ID,
+	matcherOfferLimitEntryCount int,
+	matcherOfferRateLimitQuantity int,
+	matcherOfferRateLimitInterval time.Duration) {
+
+	b.matcher.SetLimits(
+		matcherAnnouncementLimitEntryCount,
+		matcherAnnouncementRateLimitQuantity,
+		matcherAnnouncementRateLimitInterval,
+		matcherAnnouncementNonlimitedProxyIDs,
+		matcherOfferLimitEntryCount,
+		matcherOfferRateLimitQuantity,
+		matcherOfferRateLimitInterval)
+}
+
 // HandleSessionPacket handles a session packet from a client or proxy and
 // provides a response packet. The packet is part of a secure session and may
-// be a session handshake message, or a session-wrapped request payload.
-// Request payloads are routed to API request endpoints.
+// be a session handshake message, an expired session reset token, or a
+// session-wrapped request payload. Request payloads are routed to API
+// request endpoints.
 //
 // The caller is expected to provide a transport obfuscation layer, such as
 // domain fronted HTTPs. The session has an obfuscation layer that ensures
@@ -236,35 +316,14 @@ func (b *Broker) Stop() {
 // timeout; net/http does this.
 //
 // When HandleSessionPacket returns an error, the transport provider should
-// apply anti-probing mechanisms, since the client/proxy may be a prober or
-// scanner. When a client/proxy tries to use an existing session that has
-// expired on the broker, this results in an error. This failure must be
-// relayed to the client/proxy, which will then start establishing a new
-// session. No specifics about the expiry error case need to be or should be
-// transmitted by the transport. For example, with an HTTP-type transport, a
-// generic 404 error should suffice both as an anti-probing response and as a
-// signal that a session is expired. Furthermore, HTTP-type transports may
-// keep underlying network connections open in both the anti-probing and
-// expired session cases, which facilitates a fast re-establishment by
-// legitimate clients/proxies.
+// apply anti-probing mechanisms, as the client/proxy may be a prober or
+// scanner.
 func (b *Broker) HandleSessionPacket(
 	ctx context.Context,
-	transportSecret TransportSecret,
+	extendTransportTimeout ExtendTransportTimeout,
 	brokerClientIP string,
 	geoIPData common.GeoIPData,
 	inPacket []byte) ([]byte, error) {
-
-	// Check that the transport peer has supplied the expected transport secret.
-	// In the case of CDN domain fronting, the trusted CDN is configured to
-	// add an HTTP header containing the secret. The original client IP and
-	// derived GeoIP information is only trusted when the correct transport
-	// secret is supplied. The security of the secret depends on the
-	// transport; for example, HTTPS between the CDN and the broker; the
-	// transport secret cannot be injected into a secure session.
-
-	if !b.config.TransportSecret.Equal(transportSecret) {
-		return nil, errors.TraceNew("invalid transport secret")
-	}
 
 	// handleUnwrappedRequest handles requests after session unwrapping.
 	// responderSessions.HandlePacket handles both session establishment and
@@ -279,22 +338,26 @@ func (b *Broker) HandleSessionPacket(
 
 		switch recordType {
 		case recordTypeAPIProxyAnnounceRequest:
-			responsePayload, err = b.handleProxyAnnounce(ctx, geoIPData, initiatorID, unwrappedRequestPayload)
+			responsePayload, err = b.handleProxyAnnounce(
+				ctx, extendTransportTimeout, brokerClientIP, geoIPData, initiatorID, unwrappedRequestPayload)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 		case recordTypeAPIProxyAnswerRequest:
-			responsePayload, err = b.handleProxyAnswer(ctx, brokerClientIP, geoIPData, initiatorID, unwrappedRequestPayload)
+			responsePayload, err = b.handleProxyAnswer(
+				ctx, extendTransportTimeout, brokerClientIP, geoIPData, initiatorID, unwrappedRequestPayload)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 		case recordTypeAPIClientOfferRequest:
-			responsePayload, err = b.handleClientOffer(ctx, brokerClientIP, geoIPData, initiatorID, unwrappedRequestPayload)
+			responsePayload, err = b.handleClientOffer(
+				ctx, extendTransportTimeout, brokerClientIP, geoIPData, initiatorID, unwrappedRequestPayload)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 		case recordTypeAPIClientRelayedPacketRequest:
-			responsePayload, err = b.handleClientRelayedPacket(ctx, geoIPData, initiatorID, unwrappedRequestPayload)
+			responsePayload, err = b.handleClientRelayedPacket(
+				ctx, extendTransportTimeout, geoIPData, initiatorID, unwrappedRequestPayload)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -306,17 +369,19 @@ func (b *Broker) HandleSessionPacket(
 
 	}
 
+	// HandlePacket returns both a packet and an error in the expired session
+	// reset token case. Log the error here, clear it, and return the
+	// packetto be relayed back to the broker client.
+
 	outPacket, err := b.responderSessions.HandlePacket(
 		inPacket, handleUnwrappedRequest)
 	if err != nil {
-
-		// An error here could be due to invalid session traffic or an expired
-		// session, which is expected. For anti-probing purposes, the
-		// transport response should be the same in either case.
-
-		return nil, errors.Trace(err)
+		if outPacket == nil {
+			return nil, errors.Trace(err)
+		}
+		b.config.Logger.WithTraceFields(common.LogFields{"error": err}).Warning(
+			"HandlePacket returned packet and error")
 	}
-
 	return outPacket, nil
 }
 
@@ -326,6 +391,8 @@ func (b *Broker) HandleSessionPacket(
 // arrives.
 func (b *Broker) handleProxyAnnounce(
 	ctx context.Context,
+	extendTransportTimeout ExtendTransportTimeout,
+	proxyIP string,
 	geoIPData common.GeoIPData,
 	initiatorID ID,
 	requestPayload []byte) (retResponse []byte, retErr error) {
@@ -333,7 +400,9 @@ func (b *Broker) handleProxyAnnounce(
 	startTime := time.Now()
 
 	var logFields common.LogFields
+	var newTacticsTag string
 	var clientOffer *MatchOffer
+	var timedOut bool
 
 	// As a future enhancement, a broker could initiate its own test
 	// connection to the proxy to verify its effectiveness, including
@@ -376,10 +445,16 @@ func (b *Broker) handleProxyAnnounce(
 		logFields["proxy_id"] = proxyID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		logFields["connection_id"] = connectionID
+		if newTacticsTag != "" {
+			logFields["new_tactics_tag"] = newTacticsTag
+		}
 		if clientOffer != nil {
 			// Log the target Psiphon server ID (diagnostic ID). The presence
 			// of this field indicates that a match was made.
 			logFields["destination_server_id"] = clientOffer.DestinationServerID
+		}
+		if timedOut {
+			logFields["timed_out"] = true
 		}
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
@@ -398,6 +473,34 @@ func (b *Broker) handleProxyAnnounce(
 		geoIPData)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	// Fetch new tactics for the proxy, if required, using the tactics tag
+	// that should be included with the API parameters. A tacticsPayload may
+	// be returned when there are no new tactics, and this is relayed back to
+	// the proxy, after matching, so that it can extend the TTL for its
+	// existing, cached tactics. In the case where tactics have changed,
+	// don't enqueue the proxy announcement and return no-match so that the
+	// proxy can store and apply the new tactics before announcing again.
+
+	var tacticsPayload []byte
+	tacticsPayload, newTacticsTag, err = b.config.GetTactics(
+		geoIPData, common.APIParameters(logFields))
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if tacticsPayload != nil && newTacticsTag != "" {
+		responsePayload, err := MarshalProxyAnnounceResponse(
+			&ProxyAnnounceResponse{
+				TacticsPayload: tacticsPayload,
+				NoMatch:        true,
+			})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
 	}
 
 	// AllowProxy may be used to disallow proxies from certain geolocations,
@@ -427,18 +530,22 @@ func (b *Broker) handleProxyAnnounce(
 
 	// Await client offer.
 
-	accounceCtx, cancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(b.config.ProxyAnnounceTimeout, brokerProxyAnnounceTimeout))
+	timeout := common.ValueOrDefault(
+		time.Duration(atomic.LoadInt64(&b.proxyAnnounceTimeout)),
+		brokerProxyAnnounceTimeout)
+	announceCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
+	extendTransportTimeout(timeout)
 
 	clientOffer, err = b.matcher.Announce(
-		accounceCtx,
+		announceCtx,
+		proxyIP,
 		&MatchAnnouncement{
 			Properties: MatchProperties{
 				CommonCompartmentIDs:   commonCompartmentIDs,
 				PersonalCompartmentIDs: announceRequest.PersonalCompartmentIDs,
 				GeoIPData:              geoIPData,
-				NetworkType:            announceRequest.Metrics.BaseMetrics.GetNetworkType(),
+				NetworkType:            GetNetworkType(announceRequest.Metrics.BaseAPIParameters),
 				NATType:                announceRequest.Metrics.NATType,
 				PortMappingTypes:       announceRequest.Metrics.PortMappingTypes,
 			},
@@ -447,7 +554,33 @@ func (b *Broker) handleProxyAnnounce(
 			ProxyProtocolVersion: announceRequest.Metrics.ProxyProtocolVersion,
 		})
 	if err != nil {
-		return nil, errors.Trace(err)
+
+		if announceCtx.Err() == nil {
+			return nil, errors.Trace(err)
+		}
+
+		timedOut = true
+
+		// Time out awaiting match. Still send a no-match response, as this is
+		// not an unexpected outcome and the proxy should not incorrectly
+		// flag its BrokerClient as having failed.
+		//
+		// Note: the respective proxy and broker timeouts,
+		// InproxyBrokerProxyAnnounceTimeout and
+		// InproxyProxyAnnounceRequestTimeout in tactics, should be
+		// configured so that the broker will timeout first and have an
+		// opportunity to send this response before the proxy times out.
+
+		responsePayload, err := MarshalProxyAnnounceResponse(
+			&ProxyAnnounceResponse{
+				TacticsPayload: tacticsPayload,
+				NoMatch:        true,
+			})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
 	}
 
 	// Respond with the client offer. The proxy will follow up with an answer
@@ -462,6 +595,7 @@ func (b *Broker) handleProxyAnnounce(
 
 	responsePayload, err := MarshalProxyAnnounceResponse(
 		&ProxyAnnounceResponse{
+			TacticsPayload:              tacticsPayload,
 			ConnectionID:                connectionID,
 			ClientProxyProtocolVersion:  clientOffer.ClientProxyProtocolVersion,
 			ClientOfferSDP:              clientOffer.ClientOfferSDP,
@@ -485,6 +619,7 @@ func (b *Broker) handleProxyAnnounce(
 // connect immediately and is also trying other candidates.
 func (b *Broker) handleClientOffer(
 	ctx context.Context,
+	extendTransportTimeout ExtendTransportTimeout,
 	clientIP string,
 	geoIPData common.GeoIPData,
 	initiatorID ID,
@@ -507,6 +642,7 @@ func (b *Broker) handleClientOffer(
 	var clientMatchOffer *MatchOffer
 	var proxyMatchAnnouncement *MatchAnnouncement
 	var proxyAnswer *MatchAnswer
+	var timedOut bool
 
 	// Always log the outcome.
 	defer func() {
@@ -521,7 +657,7 @@ func (b *Broker) handleClientOffer(
 		if proxyAnswer != nil {
 
 			// The presence of these fields indicate that a match was made,
-			// the proxy delivered and answer, and the client was still
+			// the proxy delivered an answer, and the client was still
 			// waiting for it.
 
 			logFields["connection_id"] = proxyAnswer.ConnectionID
@@ -534,6 +670,9 @@ func (b *Broker) handleClientOffer(
 
 			// TODO: also log proxy ice_candidate_types and has_IPv6; for the
 			// client, these values are added by ValidateAndGetLogFields.
+		}
+		if timedOut {
+			logFields["timed_out"] = true
 		}
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
@@ -578,7 +717,7 @@ func (b *Broker) handleClientOffer(
 
 	serverParams, err = b.validateDestination(
 		geoIPData,
-		offerRequest.DestinationServerEntryJSON,
+		offerRequest.PackedDestinationServerEntry,
 		offerRequest.NetworkProtocol,
 		offerRequest.DestinationAddress)
 	if err != nil {
@@ -588,16 +727,19 @@ func (b *Broker) handleClientOffer(
 	// Enqueue the client offer and await a proxy matching and subsequent
 	// proxy answer.
 
-	offerCtx, cancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(b.config.ClientOfferTimeout, brokerClientOfferTimeout))
+	timeout := common.ValueOrDefault(
+		time.Duration(atomic.LoadInt64(&b.clientOfferTimeout)),
+		brokerClientOfferTimeout)
+	offerCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
+	extendTransportTimeout(timeout)
 
 	clientMatchOffer = &MatchOffer{
 		Properties: MatchProperties{
 			CommonCompartmentIDs:   commonCompartmentIDs,
 			PersonalCompartmentIDs: offerRequest.PersonalCompartmentIDs,
 			GeoIPData:              geoIPData,
-			NetworkType:            offerRequest.Metrics.BaseMetrics.GetNetworkType(),
+			NetworkType:            GetNetworkType(offerRequest.Metrics.BaseAPIParameters),
 			NATType:                offerRequest.Metrics.NATType,
 			PortMappingTypes:       offerRequest.Metrics.PortMappingTypes,
 		},
@@ -612,9 +754,34 @@ func (b *Broker) handleClientOffer(
 	}
 
 	proxyAnswer, proxyMatchAnnouncement, err = b.matcher.Offer(
-		offerCtx, clientMatchOffer)
+		offerCtx,
+		clientIP,
+		clientMatchOffer)
 	if err != nil {
-		return nil, errors.Trace(err)
+
+		if offerCtx.Err() == nil {
+			return nil, errors.Trace(err)
+		}
+
+		timedOut = true
+
+		// Time out awaiting match. Still send a no-match response, as this is
+		// not an unexpected outcome and the client should not incorrectly
+		// flag its BrokerClient as having failed.
+		//
+		// Note: the respective client and broker timeouts,
+		// InproxyBrokerClientOfferTimeout and
+		// InproxyClientOfferRequestTimeout in tactics, should be configured
+		// so that the broker will timeout first and have an opportunity to
+		// send this response before the client times out.
+
+		responsePayload, err := MarshalClientOfferResponse(
+			&ClientOfferResponse{NoMatch: true})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
 	}
 
 	// Log the type of compartment matching that occurred. As
@@ -631,21 +798,33 @@ func (b *Broker) handleClientOffer(
 		proxyMatchAnnouncement.Properties.PersonalCompartmentIDs,
 		clientMatchOffer.Properties.PersonalCompartmentIDs)
 
-	// Initiate a BrokerServerRequest, which reports important information
+	// Initiate a BrokerServerReport, which sends important information
 	// about the connection, including the original client IP, plus other
-	// values to be logged with server_tunne, to the server. The request is
+	// values to be logged with server_tunne, to the server. The report is
 	// sent through a secure session established between the broker and the
-	// server.
+	// server, relayed by the client.
 	//
-	// The broker may already have an established session with the server. In
-	// this case, only one relay round trip between the client and server
-	// will be necessary; the first round trip will be embedded in the
-	// Psiphon handshake.
 
-	relayPacket, err := b.initiateRelayedServerRequest(
+	// The first relay message will be embedded in the Psiphon handshake. The
+	// broker may already have an established session with the server. In
+	// this case, only only that initial message is required. The
+	// BrokerServerReport is a one-way message, which avoids extra untunneled
+	// client/broker traffic.
+	//
+	// Limitations, due to the one-way message:
+	// - the broker can't actively clean up pendingServerReports as
+	//   tunnels are established and must rely on cache expiry.
+	// - the broker doesn't learn that the server accepted the report, and
+	//   so cannot log a final connection status or signal the proxy to
+	//   disconnect the client in any misuse cases.
+	//
+	// As a future enhancement, consider adding a _tunneled_ client relay
+	// of a server response acknowledging the broker report.
+
+	relayPacket, err := b.initiateRelayedServerReport(
 		serverParams,
 		proxyAnswer.ConnectionID,
-		&BrokerServerRequest{
+		&BrokerServerReport{
 			ProxyID:                     proxyAnswer.ProxyID,
 			ConnectionID:                proxyAnswer.ConnectionID,
 			MatchedCommonCompartments:   matchedCommonCompartments,
@@ -681,6 +860,7 @@ func (b *Broker) handleClientOffer(
 // client.
 func (b *Broker) handleProxyAnswer(
 	ctx context.Context,
+	extendTransportTimeout ExtendTransportTimeout,
 	proxyIP string,
 	geoIPData common.GeoIPData,
 	initiatorID ID,
@@ -743,6 +923,9 @@ func (b *Broker) handleProxyAnswer(
 
 		// Deliver the answer to the client.
 
+		// Note that neither ProxyID nor ProxyIP is returned to the client.
+		// These fields are used internally in the matcher.
+
 		proxyAnswer = &MatchAnswer{
 			ProxyIP:                      proxyIP,
 			ProxyID:                      initiatorID,
@@ -772,15 +955,16 @@ func (b *Broker) handleProxyAnswer(
 
 // handleClientRelayedPacket facilitates broker/server sessions. The initial
 // packet from the broker is sent to the client in the ClientOfferResponse.
-// The client sends that to the server in the Psiphon handshake and receives
-// a server packet in the handshake response. That server packet is then
-// delivered to the broker in a ClientRelayedPacketRequest. If the session
-// was already established, the relay ends here. If the session needs to be
-// [re-]negotiated, there are additional ClientRelayedPacket round trips
-// until the session is established and the BrokerServerRequest is securely
-// exchanged between the broker and server.
+// The client sends that to the server in the Psiphon handshake. If the
+// session was already established, the relay ends there. Otherwise, the
+// client receives any packet sent back by the server and that server packet
+// is then delivered to the broker in a ClientRelayedPacketRequest. If the
+// session needs to be [re-]negotiated, there are additional
+// ClientRelayedPacket round trips until the session is established and the
+// BrokerServerReport is securely exchanged between the broker and server.
 func (b *Broker) handleClientRelayedPacket(
 	ctx context.Context,
+	extendTransportTimeout ExtendTransportTimeout,
 	geoIPData common.GeoIPData,
 	initiatorID ID,
 	requestPayload []byte) (retResponse []byte, retErr error) {
@@ -789,7 +973,6 @@ func (b *Broker) handleClientRelayedPacket(
 
 	var logFields common.LogFields
 	var relayedPacketRequest *ClientRelayedPacketRequest
-	var serverResponse *BrokerServerResponse
 	var serverID string
 
 	// Always log the outcome.
@@ -801,9 +984,6 @@ func (b *Broker) handleClientRelayedPacket(
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		if relayedPacketRequest != nil {
 			logFields["connection_id"] = relayedPacketRequest.ConnectionID
-		}
-		if serverResponse != nil {
-			logFields["server_response"] = true
 		}
 		if serverID != "" {
 			logFields["server_id"] = serverID
@@ -831,23 +1011,22 @@ func (b *Broker) handleClientRelayedPacket(
 
 	strConnectionID := string(relayedPacketRequest.ConnectionID[:])
 
-	entry, ok := b.pendingServerRequests.Get(strConnectionID)
+	entry, ok := b.pendingServerReports.Get(strConnectionID)
 	if !ok {
 		// The relay state is not found; it may have been evicted from the
 		// cache. The client will receive a generic error in this case and
 		// should stop relaying. Assuming the server is configured to require
-		// a BrokerServerRequest, the tunnel will be terminated, so the
+		// a BrokerServerReport, the tunnel will be terminated, so the
 		// client should also abandon the dial.
-		return nil, errors.TraceNew("no pending request")
+		return nil, errors.TraceNew("no pending report")
 	}
-	pendingServerRequest := entry.(*pendingServerRequest)
+	pendingServerReport := entry.(*pendingServerReport)
 
-	serverID = pendingServerRequest.serverID
+	serverID = pendingServerReport.serverID
 
-	// When the broker tries to use an existing session that is expired on the
-	// server, the server will indicate that the session is invalid. The
+	// When the broker tried to use an existing session that was expired on the
+	// server, the server will respond here with a signed session reset token. The
 	// broker resets the session and starts to establish a new session.
-	// There's only one reset and re-establish attempt.
 	//
 	// The non-waiting session establishment mode is used for broker/server
 	// sessions: if multiple clients concurrently try to relay new sessions,
@@ -855,59 +1034,26 @@ func (b *Broker) handleClientRelayedPacket(
 	// to wait for one client to lead the establishment. The last established
 	// session will be retained for reuse.
 	//
-	// The client can forge the SessionInvalid flag, but has no incentive to
-	// do so.
-
-	if relayedPacketRequest.SessionInvalid &&
-		atomic.CompareAndSwapInt32(&pendingServerRequest.resetSession, 0, 1) {
-
-		pendingServerRequest.roundTrip.ResetSession()
-	}
+	// If there is an error, the relayed packet is invalid. Drop the packet
+	// and return an error to be logged. Do _not_ reset the session,
+	// otherwise a malicious client could interrupt a valid broker/server
+	// session with a malformed packet.
 
 	// Next is given a nil ctx since we're not waiting for any other client to
 	// establish the session.
-	out, err := pendingServerRequest.roundTrip.Next(
+	out, err := pendingServerReport.roundTrip.Next(
 		nil, relayedPacketRequest.PacketFromServer)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	// When out is nil, the exchange is over and the BrokerServer response
-	// from the server should be available.
 	if out == nil {
 
-		// Removed the cached state. Setting the deleted flag skips a cache
-		// eviction log.
+		// The BrokerServerReport is a one-way message, As a result, the relay
+		// never ends with broker receiving a response; it's either
+		// (re)handshaking or sending the one-way report.
 
-		atomic.StoreInt32(&pendingServerRequest.deleted, 1)
-		b.pendingServerRequests.Delete(strConnectionID)
-
-		// Get the response cached in the session round tripper.
-
-		serverResponsePayload, err := pendingServerRequest.roundTrip.Response()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		serverResponse, err = UnmarshalBrokerServerResponse(serverResponsePayload)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		// If ErrorMessage is set, the server has rejected the connection.
-
-		if serverResponse.ErrorMessage != "" {
-			return nil, errors.Tracef("server error: %s", serverResponse.ErrorMessage)
-		}
-
-		// Check that the server has acknowledged the expected connection ID.
-
-		if relayedPacketRequest.ConnectionID != serverResponse.ConnectionID {
-			return nil, errors.Tracef(
-				"expected connection ID: %v, got: %v",
-				relayedPacketRequest.ConnectionID,
-				serverResponse.ConnectionID)
-		}
+		return nil, errors.TraceNew("unexpected nil packet")
 	}
 
 	// Return the next broker packet for the client to relay to the server.
@@ -924,20 +1070,18 @@ func (b *Broker) handleClientRelayedPacket(
 	return responsePayload, nil
 }
 
-type pendingServerRequest struct {
-	serverID      string
-	serverRequest *BrokerServerRequest
-	roundTrip     *InitiatorRoundTrip
-	resetSession  int32
-	deleted       int32
+type pendingServerReport struct {
+	serverID     string
+	serverReport *BrokerServerReport
+	roundTrip    *InitiatorRoundTrip
 }
 
-func (b *Broker) initiateRelayedServerRequest(
+func (b *Broker) initiateRelayedServerReport(
 	serverParams *serverParams,
 	connectionID ID,
-	serverRequest *BrokerServerRequest) ([]byte, error) {
+	serverReport *BrokerServerReport) ([]byte, error) {
 
-	requestPayload, err := MarshalBrokerServerRequest(serverRequest)
+	reportPayload, err := MarshalBrokerServerReport(serverReport)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -954,7 +1098,7 @@ func (b *Broker) initiateRelayedServerRequest(
 		serverParams.sessionPublicKey,
 		serverParams.sessionRootObfuscationSecret,
 		waitToShareSession,
-		requestPayload)
+		reportPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -966,37 +1110,16 @@ func (b *Broker) initiateRelayedServerRequest(
 
 	strConnectionID := string(connectionID[:])
 
-	b.pendingServerRequests.Set(
+	b.pendingServerReports.Set(
 		strConnectionID,
-		&pendingServerRequest{
-			serverID:      serverParams.serverID,
-			serverRequest: serverRequest,
-			roundTrip:     roundTrip,
+		&pendingServerReport{
+			serverID:     serverParams.serverID,
+			serverReport: serverReport,
+			roundTrip:    roundTrip,
 		},
-		lrucache.DefaultExpiration)
+		time.Duration(atomic.LoadInt64(&b.pendingServerReportsTTL)))
 
 	return relayPacket, nil
-}
-
-func (b *Broker) evictedPendingServerRequest(
-	connectionID string, entry interface{}) {
-
-	pendingServerRequest := entry.(*pendingServerRequest)
-
-	// Don't log when the entry was removed by handleClientRelayedPacket due
-	// to completion (this OnEvicted callback gets called in that case).
-	if atomic.LoadInt32(&pendingServerRequest.deleted) == 1 {
-		return
-	}
-
-	b.config.Logger.WithTraceFields(common.LogFields{
-		"server_id":     pendingServerRequest.serverID,
-		"connection_id": connectionID,
-	}).Info("pending server request timed out")
-
-	// TODO: consider adding a signal from the broker to the proxy to
-	// terminate this proxied connection when the BrokerServerResponse does
-	// not arrive in time.
 }
 
 type serverParams struct {
@@ -1007,16 +1130,20 @@ type serverParams struct {
 
 // validateDestination checks that the client's specified proxy dial
 // destination is valid destination address for a tunnel protocol in the
-// specified signed abd valid Psiphon server entry.
+// specified signed and valid Psiphon server entry.
 func (b *Broker) validateDestination(
 	geoIPData common.GeoIPData,
-	destinationServerEntryJSON []byte,
+	packedDestinationServerEntry []byte,
 	networkProtocol NetworkProtocol,
 	destinationAddress string) (*serverParams, error) {
 
-	var serverEntryFields protocol.ServerEntryFields
+	var packedServerEntry protocol.PackedServerEntryFields
+	err := cbor.Unmarshal(packedDestinationServerEntry, &packedServerEntry)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
-	err := json.Unmarshal(destinationServerEntryJSON, &serverEntryFields)
+	serverEntryFields, err := protocol.DecodePackedServerEntryFields(packedServerEntry)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1062,16 +1189,6 @@ func (b *Broker) validateDestination(
 		return nil, errors.Trace(err)
 	}
 
-	// The server entry must include the in-proxy capability. This capability
-	// is set for only a subset of all Psiphon servers, to limited the number
-	// of servers a proxy can observe and enumerate. Well-behaved clients
-	// will not send any server entries lacking this capability, but here the
-	// broker enforces it.
-
-	if !serverEntry.SupportsInProxy() {
-		return nil, errors.TraceNew("missing inproxy capability")
-	}
-
 	// Validate the dial host (IP or domain) and port matches a tunnel
 	// protocol offered by the server entry.
 
@@ -1090,17 +1207,24 @@ func (b *Broker) validateDestination(
 	// to avoid disallowed domain dial address cases, but here the broker
 	// enforces it.
 	//
-	// TODO: this issue could be further mitigated by signaling the proxy to
-	// terminate client connections that fail to deliver a timely
-	// BrokerServerResponse from the expected Psiphon server. See the comment
-	// in evictedPendingServerRequest.
+	// TODO: this issue could be further mitigated with a server
+	// acknowledgement of the broker's report, with no acknowledgement
+	// followed by signaling the proxy to terminate client connection.
 
+	// This assumes that any domain dial is for domain fronting.
 	isDomain := net.ParseIP(destHost) == nil
-	if isDomain && !b.config.AllowDomainDestination(geoIPData) {
-		return nil, errors.TraceNew("domain destination disallowed")
+	if isDomain && !b.config.AllowDomainFrontedDestinations(geoIPData) {
+		return nil, errors.TraceNew("domain fronted destinations disallowed")
 	}
 
-	if !serverEntry.IsValidDialAddress(networkProtocol.String(), destHost, destPortNum) {
+	// The server entry must include an in-proxy tunnel protocol capability
+	// and corresponding dial port number. In-proxy capacity may be set for
+	// only a subset of all Psiphon servers, to limited the number of servers
+	// a proxy can observe and enumerate. Well-behaved clients will not send
+	// any server entries lacking this capability, but here the broker
+	// enforces it.
+
+	if !serverEntry.IsValidInproxyDialAddress(networkProtocol.String(), destHost, destPortNum) {
 		return nil, errors.TraceNew("invalid destination address")
 	}
 
@@ -1112,31 +1236,48 @@ func (b *Broker) validateDestination(
 		serverID: serverID,
 	}
 
-	sessionPublicKey, err := base64.StdEncoding.DecodeString(
-		serverEntry.InProxySessionPublicKey)
+	params.sessionPublicKey, err = SessionPublicKeyFromString(
+		serverEntry.InproxySessionPublicKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	if len(sessionPublicKey) != len(params.sessionPublicKey) {
-		return nil, errors.TraceNew("invalid session public key length")
-	}
 
-	sessionRootObfuscationSecret, err := base64.StdEncoding.DecodeString(
-		serverEntry.InProxySessionRootObfuscationSecret)
+	params.sessionRootObfuscationSecret, err = ObfuscationSecretFromString(
+		serverEntry.InproxySessionRootObfuscationSecret)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	if len(sessionRootObfuscationSecret) != len(params.sessionRootObfuscationSecret) {
-		return nil, errors.TraceNew("invalid session root obfuscation secret length")
-	}
-
-	copy(params.sessionPublicKey[:], sessionPublicKey)
-	copy(params.sessionRootObfuscationSecret[:], sessionRootObfuscationSecret)
 
 	return params, nil
 }
 
-func (b *Broker) initializeCommonCompartmentIDHashing() {
+func (b *Broker) isCommonCompartmentIDHashingInitialized() bool {
+	b.commonCompartmentsMutex.Lock()
+	defer b.commonCompartmentsMutex.Unlock()
+	return b.commonCompartments != nil
+}
+
+func (b *Broker) initializeCommonCompartmentIDHashing(
+	commonCompartmentIDs []ID) error {
+
+	b.commonCompartmentsMutex.Lock()
+	defer b.commonCompartmentsMutex.Unlock()
+
+	// At least one common compartment ID is required. At a minimum, one ID
+	// will be used and distributed to clients via tactics, limiting matching
+	// to those clients targeted to receive that tactic parameters.
+	if len(commonCompartmentIDs) == 0 {
+		return errors.TraceNew("missing common compartment IDs")
+	}
+
+	// The consistent package doesn't allow duplicate members.
+	checkDup := make(map[ID]bool, len(commonCompartmentIDs))
+	for _, compartmentID := range commonCompartmentIDs {
+		if checkDup[compartmentID] {
+			return errors.TraceNew("duplicate common compartment IDs")
+		}
+		checkDup[compartmentID] = true
+	}
 
 	// Proxies without personal compartment IDs are randomly assigned to the
 	// set of common, Psiphon-specified, compartment IDs. These common
@@ -1151,19 +1292,21 @@ func (b *Broker) initializeCommonCompartmentIDHashing() {
 	// Even with consistent hashing, a subset of proxies will still change
 	// assignment when CommonCompartmentIDs changes.
 
-	consistentMembers := make([]consistent.Member, len(b.config.CommonCompartmentIDs))
-	for i, compartmentID := range b.config.CommonCompartmentIDs {
+	consistentMembers := make([]consistent.Member, len(commonCompartmentIDs))
+	for i, compartmentID := range commonCompartmentIDs {
 		consistentMembers[i] = consistentMember(compartmentID.String())
 	}
 
 	b.commonCompartments = consistent.New(
 		consistentMembers,
 		consistent.Config{
-			PartitionCount:    consistent.DefaultPartitionCount,
-			ReplicationFactor: consistent.DefaultReplicationFactor,
-			Load:              consistent.DefaultLoad,
+			PartitionCount:    len(consistentMembers),
+			ReplicationFactor: 1,
+			Load:              1,
 			Hasher:            xxhasher{},
 		})
+
+	return nil
 }
 
 // xxhasher wraps github.com/cespare/xxhash.Sum64 in the interface expected by
@@ -1184,6 +1327,9 @@ func (m consistentMember) String() string {
 }
 
 func (b *Broker) selectCommonCompartmentID(proxyID ID) (ID, error) {
+
+	b.commonCompartmentsMutex.Lock()
+	defer b.commonCompartmentsMutex.Unlock()
 
 	compartmentID, err := IDFromString(
 		b.commonCompartments.LocateKey(proxyID[:]).String())

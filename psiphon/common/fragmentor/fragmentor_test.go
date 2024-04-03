@@ -62,7 +62,7 @@ func TestFragmentor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parameters.NewParameters failed: %s", err)
 	}
-	_, err = params.Set("", false, map[string]interface{}{
+	_, err = params.Set("", 0, map[string]interface{}{
 		"FragmentorProbability":              1.0,
 		"FragmentorLimitProtocols":           protocol.TunnelProtocols{tunnelProtocol},
 		"FragmentorMinTotalBytes":            bytesToFragment,

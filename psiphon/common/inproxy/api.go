@@ -22,11 +22,11 @@ package inproxy
 import (
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
-	"fmt"
+	"encoding/base64"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -41,41 +41,68 @@ type ID [32]byte
 // MakeID generates a new ID using crypto/rand.
 func MakeID() (ID, error) {
 	var id ID
-	_, err := rand.Read(id[:])
-	if err != nil {
-		return id, errors.Trace(err)
+	for {
+		_, err := rand.Read(id[:])
+		if err != nil {
+			return id, errors.Trace(err)
+		}
+		if !id.Zero() {
+			return id, nil
+		}
 	}
-	return id, nil
 }
 
 // IDFromString returns an ID given its string encoding.
 func IDFromString(s string) (ID, error) {
 	var id ID
-	value, err := hex.DecodeString(s)
-	if err != nil {
-		return id, errors.Trace(err)
-	}
-	if len(value) != len(id) {
-		return id, errors.TraceNew("invalid length")
-	}
-	copy(id[:], value)
-	return id, nil
+	return id, errors.Trace(fromBase64String(s, id[:]))
 }
 
-// MarshalText emits IDs as hex.
+func fromBase64String(s string, b []byte) error {
+	value, err := base64.RawStdEncoding.DecodeString(s)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if len(value) != len(b) {
+		return errors.TraceNew("invalid length")
+	}
+	copy(b, value)
+	return nil
+}
+
+// IDsFromStrings returns a list of IDs given a list of string encodings.
+func IDsFromStrings(strs []string) ([]ID, error) {
+	var ids []ID
+	for _, str := range strs {
+		id, err := IDFromString(str)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// MarshalText emits IDs as base64.
 func (id ID) MarshalText() ([]byte, error) {
 	return []byte(id.String()), nil
 }
 
-// String emits IDs as hex.
+// String emits IDs as base64.
 func (id ID) String() string {
-	return fmt.Sprintf("%x", []byte(id[:]))
+	return base64.RawStdEncoding.EncodeToString([]byte(id[:]))
 }
 
 // Equal indicates whether two IDs are equal. It uses a constant time
 // comparison.
 func (id ID) Equal(x ID) bool {
 	return subtle.ConstantTimeCompare(id[:], x[:]) == 1
+}
+
+// Zero indicates whether the ID is the zero value.
+func (id ID) Zero() bool {
+	var zero ID
+	return id.Equal(zero)
 }
 
 // HaveCommonIDs indicates whether two lists of IDs have a common entry.
@@ -90,16 +117,6 @@ func HaveCommonIDs(a, b []ID) bool {
 		}
 	}
 	return false
-}
-
-// TransportSecret is a value used to validate a broker transport front, such
-// as a CDN.
-type TransportSecret [32]byte
-
-// Equal indicates whether two TransportSecrets are equal. It uses a constant
-// time comparison.
-func (s TransportSecret) Equal(t TransportSecret) bool {
-	return subtle.ConstantTimeCompare(s[:], t[:]) == 1
 }
 
 // NetworkType is the type of a network, such as WiFi or Mobile. This enum is
@@ -150,27 +167,27 @@ func (p NetworkProtocol) String() string {
 // proxy to a broker. The broker uses this information when matching proxies
 // and clients.
 type ProxyMetrics struct {
-	BaseMetrics                   BaseMetrics      `cbor:"1,keyasint,omitempty"`
-	ProxyProtocolVersion          int32            `cbor:"2,keyasint,omitempty"`
-	NATType                       NATType          `cbor:"3,keyasint,omitempty"`
-	PortMappingTypes              PortMappingTypes `cbor:"4,keyasint,omitempty"`
-	MaxClients                    int32            `cbor:"6,keyasint,omitempty"`
-	ConnectingClients             int32            `cbor:"7,keyasint,omitempty"`
-	ConnectedClients              int32            `cbor:"8,keyasint,omitempty"`
-	LimitUpstreamBytesPerSecond   int64            `cbor:"9,keyasint,omitempty"`
-	LimitDownstreamBytesPerSecond int64            `cbor:"10,keyasint,omitempty"`
-	PeakUpstreamBytesPerSecond    int64            `cbor:"11,keyasint,omitempty"`
-	PeakDownstreamBytesPerSecond  int64            `cbor:"12,keyasint,omitempty"`
+	BaseAPIParameters             protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
+	ProxyProtocolVersion          int32                        `cbor:"2,keyasint,omitempty"`
+	NATType                       NATType                      `cbor:"3,keyasint,omitempty"`
+	PortMappingTypes              PortMappingTypes             `cbor:"4,keyasint,omitempty"`
+	MaxClients                    int32                        `cbor:"6,keyasint,omitempty"`
+	ConnectingClients             int32                        `cbor:"7,keyasint,omitempty"`
+	ConnectedClients              int32                        `cbor:"8,keyasint,omitempty"`
+	LimitUpstreamBytesPerSecond   int64                        `cbor:"9,keyasint,omitempty"`
+	LimitDownstreamBytesPerSecond int64                        `cbor:"10,keyasint,omitempty"`
+	PeakUpstreamBytesPerSecond    int64                        `cbor:"11,keyasint,omitempty"`
+	PeakDownstreamBytesPerSecond  int64                        `cbor:"12,keyasint,omitempty"`
 }
 
 // ClientMetrics are network topolology metrics provided by a client to a
 // broker. The broker uses this information when matching proxies and
 // clients.
 type ClientMetrics struct {
-	BaseMetrics          BaseMetrics      `cbor:"1,keyasint,omitempty"`
-	ProxyProtocolVersion int32            `cbor:"2,keyasint,omitempty"`
-	NATType              NATType          `cbor:"3,keyasint,omitempty"`
-	PortMappingTypes     PortMappingTypes `cbor:"4,keyasint,omitempty"`
+	BaseAPIParameters    protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
+	ProxyProtocolVersion int32                        `cbor:"2,keyasint,omitempty"`
+	NATType              NATType                      `cbor:"3,keyasint,omitempty"`
+	PortMappingTypes     PortMappingTypes             `cbor:"4,keyasint,omitempty"`
 }
 
 // ProxyAnnounceRequest is an API request sent from a proxy to a broker,
@@ -212,14 +229,16 @@ type ProxyAnnounceRequest struct {
 // operator of configuration issue; the JSON schema is not defined here.
 type ProxyAnnounceResponse struct {
 	OperatorMessageJSON         string                               `cbor:"1,keyasint,omitempty"`
-	ConnectionID                ID                                   `cbor:"2,keyasint,omitempty"`
-	ClientProxyProtocolVersion  int32                                `cbor:"3,keyasint,omitempty"`
-	ClientOfferSDP              webrtc.SessionDescription            `cbor:"4,keyasint,omitempty"`
-	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"5,keyasint,omitempty"`
-	DoDTLSRandomization         bool                                 `cbor:"7,keyasint,omitempty"`
-	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"8,keyasint,omitempty"`
-	NetworkProtocol             NetworkProtocol                      `cbor:"9,keyasint,omitempty"`
-	DestinationAddress          string                               `cbor:"10,keyasint,omitempty"`
+	TacticsPayload              []byte                               `cbor:"2,keyasint,omitempty"`
+	NoMatch                     bool                                 `cbor:"3,keyasint,omitempty"`
+	ConnectionID                ID                                   `cbor:"4,keyasint,omitempty"`
+	ClientProxyProtocolVersion  int32                                `cbor:"5,keyasint,omitempty"`
+	ClientOfferSDP              webrtc.SessionDescription            `cbor:"6,keyasint,omitempty"`
+	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"7,keyasint,omitempty"`
+	DoDTLSRandomization         bool                                 `cbor:"8,keyasint,omitempty"`
+	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"9,keyasint,omitempty"`
+	NetworkProtocol             NetworkProtocol                      `cbor:"10,keyasint,omitempty"`
+	DestinationAddress          string                               `cbor:"11,keyasint,omitempty"`
 }
 
 // ClientOfferRequest is an API request sent from a client to a broker,
@@ -243,17 +262,17 @@ type ProxyAnnounceResponse struct {
 // domain, and destination port for a valid Psiphon tunnel protocol run by
 // the specified server entry.
 type ClientOfferRequest struct {
-	Metrics                     *ClientMetrics                       `cbor:"1,keyasint,omitempty"`
-	CommonCompartmentIDs        []ID                                 `cbor:"2,keyasint,omitempty"`
-	PersonalCompartmentIDs      []ID                                 `cbor:"3,keyasint,omitempty"`
-	ClientOfferSDP              webrtc.SessionDescription            `cbor:"4,keyasint,omitempty"`
-	ICECandidateTypes           ICECandidateTypes                    `cbor:"5,keyasint,omitempty"`
-	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"6,keyasint,omitempty"`
-	DoDTLSRandomization         bool                                 `cbor:"7,keyasint,omitempty"`
-	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"8,keyasint,omitempty"`
-	DestinationServerEntryJSON  []byte                               `cbor:"9,keyasint,omitempty"`
-	NetworkProtocol             NetworkProtocol                      `cbor:"10,keyasint,omitempty"`
-	DestinationAddress          string                               `cbor:"11,keyasint,omitempty"`
+	Metrics                      *ClientMetrics                       `cbor:"1,keyasint,omitempty"`
+	CommonCompartmentIDs         []ID                                 `cbor:"2,keyasint,omitempty"`
+	PersonalCompartmentIDs       []ID                                 `cbor:"3,keyasint,omitempty"`
+	ClientOfferSDP               webrtc.SessionDescription            `cbor:"4,keyasint,omitempty"`
+	ICECandidateTypes            ICECandidateTypes                    `cbor:"5,keyasint,omitempty"`
+	ClientRootObfuscationSecret  ObfuscationSecret                    `cbor:"6,keyasint,omitempty"`
+	DoDTLSRandomization          bool                                 `cbor:"7,keyasint,omitempty"`
+	TrafficShapingParameters     *DataChannelTrafficShapingParameters `cbor:"8,keyasint,omitempty"`
+	PackedDestinationServerEntry []byte                               `cbor:"9,keyasint,omitempty"`
+	NetworkProtocol              NetworkProtocol                      `cbor:"10,keyasint,omitempty"`
+	DestinationAddress           string                               `cbor:"11,keyasint,omitempty"`
 }
 
 // DataChannelTrafficShapingParameters specifies a data channel traffic
@@ -272,26 +291,26 @@ type DataChannelTrafficShapingParameters struct {
 	DecoyMessageProbability float64 `cbor:"9,keyasint,omitempty"`
 }
 
-// TODO: Encode SDPs using CBOR without field names, simliar to base metrics
-// transformation? Same with DestinationServerEntryJSON.
-
 // ClientOfferResponse returns the connecting information for a matched proxy.
 // The proxy's WebRTC SDP is an answer to the offer sent in
 // ClientOfferRequest and is used to begin dialing the WebRTC connection.
 //
 // Once the client completes its connection to the Psiphon server, it must
-// relay a BrokerServerRequest to the server on behalf of the broker. This
+// relay a BrokerServerReport to the server on behalf of the broker. This
 // relay is conducted within a secure session. First, the client sends
-// RelayPacketToServer to the server. Then the client relays the response to
+// RelayPacketToServer to the server. Then the client relays any responses to
 // the broker using ClientRelayedPacketRequests and continues to relay using
 // ClientRelayedPacketRequests until complete. ConnectionID identifies this
-// connection and its relayed BrokerServerRequest.
+// connection and its relayed BrokerServerReport.
 type ClientOfferResponse struct {
-	ConnectionID                 ID                        `cbor:"1,keyasint,omitempty"`
-	SelectedProxyProtocolVersion int32                     `cbor:"2,keyasint,omitempty"`
-	ProxyAnswerSDP               webrtc.SessionDescription `cbor:"3,keyasint,omitempty"`
-	RelayPacketToServer          []byte                    `cbor:"4,keyasint,omitempty"`
+	NoMatch                      bool                      `cbor:"1,keyasint,omitempty"`
+	ConnectionID                 ID                        `cbor:"2,keyasint,omitempty"`
+	SelectedProxyProtocolVersion int32                     `cbor:"3,keyasint,omitempty"`
+	ProxyAnswerSDP               webrtc.SessionDescription `cbor:"4,keyasint,omitempty"`
+	RelayPacketToServer          []byte                    `cbor:"5,keyasint,omitempty"`
 }
+
+// TODO: Encode SDPs using CBOR without field names, simliar to packed metrics?
 
 // ProxyAnswerRequest is an API request sent from a proxy to a broker,
 // following ProxyAnnounceResponse, with the WebRTC answer SDP corresponding
@@ -317,14 +336,15 @@ type ProxyAnswerResponse struct {
 // broker, relaying a secure session packet from the Psiphon server to the
 // broker. This relay is a continuation of the broker/server exchange begun
 // with ClientOfferResponse.RelayPacketToServer. PacketFromServer is the next
-// packet from the server. SessionInvalid indicates, to the broker, that the
-// session is invalid -- it may have expired -- and so the broker should
-// begin establishing a new session, and then send its BrokerServerRequest in
-// that new session.
+// packet from the server.
+//
+// When a broker attempts to use an existing session which has expired on the
+// server, the packet from the server may contain a signed reset session
+// token, which is used to automatically reset and start establishing a new
+// session before relaying the payload.
 type ClientRelayedPacketRequest struct {
 	ConnectionID     ID     `cbor:"1,keyasint,omitempty"`
 	PacketFromServer []byte `cbor:"2,keyasint,omitempty"`
-	SessionInvalid   bool   `cbor:"3,keyasint,omitempty"`
 }
 
 // ClientRelayedPacketResponse returns the next packet from the broker to the
@@ -334,16 +354,27 @@ type ClientRelayedPacketResponse struct {
 	PacketToServer []byte `cbor:"1,keyasint,omitempty"`
 }
 
-// BrokerServerRequest is an API request sent from a broker to a Psiphon
-// server. This delivers, to the server, information that neither the client
-// nor the proxy is trusted to report. ProxyID is the proxy ID to be logged
-// with server_tunnel to attribute traffic to a specific proxy. ClientIP is
-// the original client IP as seen by the broker; this is the IP value to be
-// used in GeoIP-related operations including traffic rules, tactics, and OSL
-// progress. ProxyIP is the proxy IP as seen by the broker; this value should
-// match the Psiphon's server observed client IP. Additional fields are
-// metrics to be logged with server_tunnel.
-type BrokerServerRequest struct {
+// BrokerServerReport is a one-way API call sent from a broker to a
+// Psiphon server. This delivers, to the server, information that neither the
+// client nor the proxy is trusted to report. ProxyID is the proxy ID to be
+// logged with server_tunnel to attribute traffic to a specific proxy.
+// ClientIP is the original client IP as seen by the broker; this is the IP
+// value to be used in GeoIP-related operations including traffic rules,
+// tactics, and OSL progress. ProxyIP is the proxy IP as seen by the broker;
+// this value should match the Psiphon's server observed client IP.
+// Additional fields are metrics to be logged with server_tunnel.
+//
+// Using a one-way message here means that, once a broker/server session is
+// established, the entire relay can be encasulated in a single additional
+// field sent in the Psiphon API handshake. This minimizes observable and
+// potentially fingerprintable traffic flows as the client does not need to
+// relay any further session packets before starting the tunnel. The
+// trade-off is that the broker doesn't get an indication from the server
+// that the message was accepted or rejects and cannot directly, in real time
+// log any tunnel error associated with the server rejecting the message, or
+// log that the relay was completed successfully. These events can be logged
+// on the server and logs reconciled using the in-proxy Connection ID.
+type BrokerServerReport struct {
 	ProxyID                     ID               `cbor:"1,keyasint,omitempty"`
 	ConnectionID                ID               `cbor:"2,keyasint,omitempty"`
 	MatchedCommonCompartments   bool             `cbor:"3,keyasint,omitempty"`
@@ -356,73 +387,21 @@ type BrokerServerRequest struct {
 	ProxyIP                     string           `cbor:"10,keyasint,omitempty"`
 }
 
-// BrokerServerResponse returns an acknowledgement of the BrokerServerRequest
-// to the broker from the Psiphon server. The ConnectionID must match the
-// value in the BrokerServerRequest.
-type BrokerServerResponse struct {
-	ConnectionID ID     `cbor:"1,keyasint,omitempty"`
-	ErrorMessage string `cbor:"2,keyasint,omitempty"`
-}
-
-// BaseMetrics is a compact encoding of Psiphon base API metrics, such as
-// sponsor_id, client_platform, and so on.
-type BaseMetrics map[int]interface{}
-
-// GetNetworkType extracts the network_type from base metrics and returns a
-// corresponding NetworkType. This is the one base metric that is used in the
-// broker logic, and not simply logged.
-func (metrics BaseMetrics) GetNetworkType() NetworkType {
-	key, ok := baseMetricsNameToInt["network_type"]
+// GetNetworkType extracts the network_type from base API metrics and returns
+// a corresponding NetworkType. This is the one base metric that is used in
+// the broker logic, and not simply logged.
+func GetNetworkType(packedBaseParams protocol.PackedAPIParameters) NetworkType {
+	baseNetworkType, ok := packedBaseParams.GetNetworkType()
 	if !ok {
 		return NetworkTypeUnknown
 	}
-	value, ok := metrics[key]
-	if !ok {
-		return NetworkTypeUnknown
-	}
-	strValue, ok := value.(string)
-	if !ok {
-		return NetworkTypeUnknown
-	}
-	switch strValue {
+	switch baseNetworkType {
 	case "WIFI":
 		return NetworkTypeWiFi
 	case "MOBILE":
 		return NetworkTypeMobile
 	}
 	return NetworkTypeUnknown
-}
-
-func EncodeBaseMetrics(params common.APIParameters) (BaseMetrics, error) {
-	metrics := BaseMetrics{}
-	for name, value := range params {
-		key, ok := baseMetricsNameToInt[name]
-		if !ok {
-			// The API metric to be sent is not in baseMetricsNameToInt. This
-			// will occur if baseMetricsNameToInt is not updated when new API
-			// metrics are added. Fail the operation and, ultimately, the
-			// dial rather than proceeding without the metric.
-			return nil, errors.Tracef("unknown name: %s", name)
-		}
-		metrics[key] = value
-
-	}
-	return metrics, nil
-}
-
-func DecodeBaseMetrics(metrics BaseMetrics) common.APIParameters {
-	params := common.APIParameters{}
-	for key, value := range metrics {
-		name, ok := baseMetricsIntToName[key]
-		if !ok {
-			// The API metric received is not in baseMetricsNameToInt. Skip
-			// logging it and proceed.
-			continue
-		}
-		params[name] = value
-
-	}
-	return params
 }
 
 // Sanity check values.
@@ -439,17 +418,20 @@ const (
 // ValidateAndGetLogFields validates the ProxyMetrics and returns
 // common.LogFields for logging.
 func (metrics *ProxyMetrics) ValidateAndGetLogFields(
-	baseMetricsValidator common.APIParameterValidator,
+	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
-	if metrics.BaseMetrics == nil {
-		return nil, errors.TraceNew("missing base metrics")
+	if metrics.BaseAPIParameters == nil {
+		return nil, errors.TraceNew("missing base API parameters")
 	}
 
-	baseMetrics := DecodeBaseMetrics(metrics.BaseMetrics)
+	baseParams, err := protocol.DecodePackedAPIParameters(metrics.BaseAPIParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
-	err := baseMetricsValidator(baseMetrics)
+	err = baseAPIParameterValidator(baseParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -470,7 +452,7 @@ func (metrics *ProxyMetrics) ValidateAndGetLogFields(
 		return nil, errors.Tracef("invalid portmapping types: %v", metrics.PortMappingTypes)
 	}
 
-	logFields := formatter(geoIPData, baseMetrics)
+	logFields := formatter(geoIPData, baseParams)
 
 	logFields["proxy_protocol_version"] = metrics.ProxyProtocolVersion
 	logFields["nat_type"] = metrics.NATType
@@ -489,17 +471,20 @@ func (metrics *ProxyMetrics) ValidateAndGetLogFields(
 // ValidateAndGetLogFields validates the ClientMetrics and returns
 // common.LogFields for logging.
 func (metrics *ClientMetrics) ValidateAndGetLogFields(
-	baseMetricsValidator common.APIParameterValidator,
+	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
-	if metrics.BaseMetrics == nil {
-		return nil, errors.TraceNew("missing base metrics")
+	if metrics.BaseAPIParameters == nil {
+		return nil, errors.TraceNew("missing base API parameters")
 	}
 
-	baseMetrics := DecodeBaseMetrics(metrics.BaseMetrics)
+	baseParams, err := protocol.DecodePackedAPIParameters(metrics.BaseAPIParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
-	err := baseMetricsValidator(baseMetrics)
+	err = baseAPIParameterValidator(baseParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -520,7 +505,7 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 		return nil, errors.Tracef("invalid portmapping types: %v", metrics.PortMappingTypes)
 	}
 
-	logFields := formatter(geoIPData, baseMetrics)
+	logFields := formatter(geoIPData, baseParams)
 
 	logFields["proxy_protocol_version"] = metrics.ProxyProtocolVersion
 	logFields["nat_type"] = metrics.NATType
@@ -532,7 +517,7 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 // ValidateAndGetLogFields validates the ProxyAnnounceRequest and returns
 // common.LogFields for logging.
 func (request *ProxyAnnounceRequest) ValidateAndGetLogFields(
-	baseMetricsValidator common.APIParameterValidator,
+	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
@@ -545,7 +530,7 @@ func (request *ProxyAnnounceRequest) ValidateAndGetLogFields(
 	}
 
 	logFields, err := request.Metrics.ValidateAndGetLogFields(
-		baseMetricsValidator, formatter, geoIPData)
+		baseAPIParameterValidator, formatter, geoIPData)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -564,7 +549,7 @@ func (request *ProxyAnnounceRequest) ValidateAndGetLogFields(
 // common.LogFields for logging.
 func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
-	baseMetricsValidator common.APIParameterValidator,
+	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
@@ -597,7 +582,7 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	}
 
 	logFields, err := request.Metrics.ValidateAndGetLogFields(
-		baseMetricsValidator, formatter, geoIPData)
+		baseAPIParameterValidator, formatter, geoIPData)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -660,7 +645,7 @@ func (params *DataChannelTrafficShapingParameters) Validate() error {
 // common.LogFields for logging.
 func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
-	baseMetricsValidator common.APIParameterValidator,
+	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
@@ -697,21 +682,20 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 // ValidateAndGetLogFields validates the ClientRelayedPacketRequest and returns
 // common.LogFields for logging.
 func (request *ClientRelayedPacketRequest) ValidateAndGetLogFields(
-	baseMetricsValidator common.APIParameterValidator,
+	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
 	logFields := formatter(geoIPData, common.APIParameters{})
 
 	logFields["connection_id"] = request.ConnectionID
-	logFields["session_invalid"] = request.SessionInvalid
 
 	return logFields, nil
 }
 
-// ValidateAndGetLogFields validates the BrokerServerRequest and returns
+// ValidateAndGetLogFields validates the BrokerServerReport and returns
 // common.LogFields for logging.
-func (request *BrokerServerRequest) ValidateAndGetLogFields() (common.LogFields, error) {
+func (request *BrokerServerReport) ValidateAndGetLogFields() (common.LogFields, error) {
 
 	if !request.ProxyNATType.IsValid() {
 		return nil, errors.Tracef("invalid proxy NAT type: %v", request.ProxyNATType)
@@ -833,106 +817,13 @@ func UnmarshalClientRelayedPacketResponse(payload []byte) (*ClientRelayedPacketR
 	return response, errors.Trace(err)
 }
 
-func MarshalBrokerServerRequest(request *BrokerServerRequest) ([]byte, error) {
-	payload, err := marshalRecord(request, recordTypeAPIBrokerServerRequest)
+func MarshalBrokerServerReport(request *BrokerServerReport) ([]byte, error) {
+	payload, err := marshalRecord(request, recordTypeAPIBrokerServerReport)
 	return payload, errors.Trace(err)
 }
 
-func UnmarshalBrokerServerRequest(payload []byte) (*BrokerServerRequest, error) {
-	var request *BrokerServerRequest
-	err := unmarshalRecord(recordTypeAPIBrokerServerRequest, payload, &request)
+func UnmarshalBrokerServerReport(payload []byte) (*BrokerServerReport, error) {
+	var request *BrokerServerReport
+	err := unmarshalRecord(recordTypeAPIBrokerServerReport, payload, &request)
 	return request, errors.Trace(err)
-}
-
-func MarshalBrokerServerResponse(response *BrokerServerResponse) ([]byte, error) {
-	payload, err := marshalRecord(response, recordTypeAPIBrokerServerResponse)
-	return payload, errors.Trace(err)
-}
-
-func UnmarshalBrokerServerResponse(payload []byte) (*BrokerServerResponse, error) {
-	var response *BrokerServerResponse
-	err := unmarshalRecord(recordTypeAPIBrokerServerResponse, payload, &response)
-	return response, errors.Trace(err)
-}
-
-var (
-	baseMetricsNameToInt map[string]int
-	baseMetricsIntToName map[int]string
-)
-
-func init() {
-
-	// Initialize maps from base metrics JSON field names to CBOR field
-	// numbers. This list must be updated when new base metrics are added,
-	// and the new metrics must be appended so as to maintain the field
-	// number ordering.
-
-	names := []string{
-		"server_secret",
-		"client_session_id",
-		"propagation_channel_id",
-		"sponsor_id",
-		"client_version",
-		"client_platform",
-		"client_features",
-		"client_build_rev",
-		"device_region",
-		"session_id",
-		"relay_protocol",
-		"ssh_client_version",
-		"upstream_proxy_type",
-		"upstream_proxy_custom_header_names",
-		"fronting_provider_id",
-		"meek_dial_address",
-		"meek_resolved_ip_address",
-		"meek_sni_server_name",
-		"meek_host_header",
-		"meek_transformed_host_name",
-		"user_agent",
-		"tls_profile",
-		"tls_version",
-		"server_entry_region",
-		"server_entry_source",
-		"server_entry_timestamp",
-		"applied_tactics_tag",
-		"dial_port_number",
-		"quic_version",
-		"quic_dial_sni_address",
-		"quic_disable_client_path_mtu_discovery",
-		"upstream_bytes_fragmented",
-		"upstream_min_bytes_written",
-		"upstream_max_bytes_written",
-		"upstream_min_delayed",
-		"upstream_max_delayed",
-		"padding",
-		"pad_response",
-		"is_replay",
-		"egress_region",
-		"dial_duration",
-		"candidate_number",
-		"established_tunnels_count",
-		"upstream_ossh_padding",
-		"meek_cookie_size",
-		"meek_limit_request",
-		"meek_tls_padding",
-		"network_latency_multiplier",
-		"client_bpf",
-		"network_type",
-		"conjure_cached",
-		"conjure_delay",
-		"conjure_transport",
-		"split_tunnel",
-		"split_tunnel_regions",
-		"dns_preresolved",
-		"dns_preferred",
-		"dns_transform",
-		"dns_attempt",
-	}
-
-	baseMetricsNameToInt = make(map[string]int)
-	baseMetricsIntToName = make(map[int]string)
-	for i, name := range names {
-		baseMetricsNameToInt[name] = i
-		baseMetricsIntToName[i] = name
-	}
 }

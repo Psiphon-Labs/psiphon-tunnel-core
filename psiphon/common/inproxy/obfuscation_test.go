@@ -371,10 +371,7 @@ func runTestObfuscationReplayHistory() error {
 			return errors.Tracef("value found on iteration %d", i)
 		}
 
-		err := replayHistory.Insert(value)
-		if err != nil {
-			return errors.Trace(err)
-		}
+		replayHistory.Insert(value)
 
 		if !replayHistory.Lookup(value) {
 			return errors.Tracef("value not found on iteration %d", i)

@@ -32,24 +32,24 @@ import (
 
 // initPortMapper resets port mapping metrics state associated with the
 // current network when the network changes, as indicated by
-// DialParameters.NetworkID. initPortMapper also configures the port mapping
-// routines to use DialParameters.BindToDevice. Varying
-// DialParameters.BindToDevice between dials in a single process is not
+// WebRTCDialCoordinator.NetworkID. initPortMapper also configures the port
+// mapping routines to use WebRTCDialCoordinator.BindToDevice. Varying
+// WebRTCDialCoordinator.BindToDevice between dials in a single process is not
 // supported.
-func initPortMapper(dialParams DialParameters) {
+func initPortMapper(coordinator WebRTCDialCoordinator) {
 
 	// It's safe for multiple, concurrent client dials to call
 	// resetRespondingPortMappingTypes: as long as the network ID does not
 	// change, calls won't clear any valid port mapping type metrics that
 	// were just recorded.
-	resetRespondingPortMappingTypes(dialParams.NetworkID())
+	resetRespondingPortMappingTypes(coordinator.NetworkID())
 
-	// DialParameters.BindToDevice is set as a global variable in
+	// WebRTCDialCoordinator.BindToDevice is set as a global variable in
 	// tailscale.com/net/portmapper. It's safe to repeatedly call
 	// setPortMapperBindToDevice here, under the assumption that
-	// DialParameters.BindToDevice is the same single, static function for
-	// all dials. This assumption is true for Psiphon.
-	setPortMapperBindToDevice(dialParams)
+	// WebRTCDialCoordinator.BindToDevice is the same single, static function
+	// for all dials. This assumption is true for Psiphon.
+	setPortMapperBindToDevice(coordinator)
 }
 
 // portMapper represents a UDP port mapping from a local port to an external,

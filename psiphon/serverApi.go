@@ -37,8 +37,10 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -84,7 +86,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 	// accessing the Psiphon API via the web service.
 	var psiphonHttpsClient *http.Client
 	if !tunnel.dialParams.ServerEntry.SupportsSSHAPIRequests() ||
-		tunnel.config.TargetApiProtocol == protocol.PSIPHON_WEB_API_PROTOCOL {
+		tunnel.config.TargetAPIProtocol == protocol.PSIPHON_API_PROTOCOL_WEB {
 
 		var err error
 		psiphonHttpsClient, err = makePsiphonHttpsClient(tunnel)
@@ -113,8 +115,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 // doHandshakeRequest performs the "handshake" API request. The handshake
 // returns upgrade info, newly discovered server entries -- which are
 // stored -- and sponsor info (home pages, stat regexes).
-func (serverContext *ServerContext) doHandshakeRequest(
-	ignoreStatsRegexps bool) error {
+func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) error {
 
 	params := serverContext.getBaseAPIParameters(baseParametersAll)
 
@@ -196,6 +197,20 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		params["split_tunnel_regions"] = serverContext.tunnel.config.SplitTunnelRegions
 	}
 
+	// Add the in-proxy broker/server relay packet, which contains either the
+	// immediate broker report payload, for established sessions, or a new
+	// session handshake packet. The broker report securely relays the
+	// original client IP and the relaying proxy ID to the Psiphon server.
+	// inproxy_relay_packet is a required field for in-proxy tunnel protocols.
+	if protocol.TunnelProtocolUsesInproxy(serverContext.tunnel.dialParams.TunnelProtocol) {
+		inproxyConn := serverContext.tunnel.dialParams.inproxyConn.Load()
+		if inproxyConn != nil {
+			packet := base64.RawStdEncoding.EncodeToString(
+				inproxyConn.(*inproxy.ClientConn).InitialRelayPacket())
+			params["inproxy_relay_packet"] = packet
+		}
+	}
+
 	var response []byte
 	if serverContext.psiphonHttpsClient == nil {
 
@@ -251,7 +266,11 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		return errors.Trace(err)
 	}
 
-	if serverContext.tunnel.config.EmitClientAddress {
+	// Limitation: ClientAddress is not supported for in-proxy tunnel
+	// protocols; see comment in server.handshakeAPIRequestHandler.
+	if serverContext.tunnel.config.EmitClientAddress &&
+		!protocol.TunnelProtocolUsesInproxy(serverContext.tunnel.dialParams.TunnelProtocol) {
+
 		NoticeClientAddress(handshakeResponse.ClientAddress)
 	}
 
@@ -618,6 +637,12 @@ func makeStatusRequestPayload(
 	config *Config,
 	serverId string) ([]byte, *statusRequestPayloadInfo, error) {
 
+	// The status request payload is always JSON encoded. As it is sent after
+	// the initial handshake and is multiplexed with other tunnel traffic,
+	// its size is less of a fingerprinting concern.
+	//
+	// TODO: pack and CBOR encode the status request payload.
+
 	transferStats := transferstats.TakeOutStatsForServer(serverId)
 	hostBytes := transferStats.GetStatsForStatusRequest()
 
@@ -912,14 +937,30 @@ func (serverContext *ServerContext) doPostRequest(
 	return responseBody, nil
 }
 
-// makeSSHAPIRequestPayload makes a JSON payload for an SSH API request.
+// makeSSHAPIRequestPayload makes an encoded payload for an SSH API request.
 func (serverContext *ServerContext) makeSSHAPIRequestPayload(
 	params common.APIParameters) ([]byte, error) {
-	jsonPayload, err := json.Marshal(params)
+
+	// CBOR encoding is the default and is preferred as its smaller size gives
+	// more space for variable padding to mitigate potential fingerprinting
+	// based on API message sizes.
+
+	if !serverContext.tunnel.dialParams.ServerEntry.SupportsSSHAPIRequests() ||
+		serverContext.tunnel.config.TargetAPIEncoding == protocol.PSIPHON_API_ENCODING_JSON {
+
+		jsonPayload, err := json.Marshal(params)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return jsonPayload, nil
+	}
+
+	payload, err := protocol.MakePackedAPIParametersRequestPayload(params)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return jsonPayload, nil
+
+	return payload, nil
 }
 
 type baseParametersFilter int
@@ -964,6 +1005,9 @@ func (serverContext *ServerContext) getBaseAPIParameters(
 // getBaseAPIParameters returns all the common API parameters that are
 // included with each Psiphon API request. These common parameters are used
 // for metrics.
+//
+// The input dialPatrams may be nil when the filter has
+// baseParametersNoDialParameters.
 func getBaseAPIParameters(
 	filter baseParametersFilter,
 	config *Config,
@@ -973,13 +1017,24 @@ func getBaseAPIParameters(
 
 	params["session_id"] = config.SessionID
 	params["client_session_id"] = config.SessionID
-	params["server_secret"] = dialParams.ServerEntry.WebServerSecret
 	params["propagation_channel_id"] = config.PropagationChannelId
 	params["sponsor_id"] = config.GetSponsorID()
 	params["client_version"] = config.ClientVersion
 	params["client_platform"] = config.ClientPlatform
 	params["client_features"] = config.clientFeatures
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
+
+	// The server secret is deprecated and included only in legacy JSON
+	// encoded API messages for backwards compatibility. SSH login proves
+	// client possession of the server entry; the server secret was for the
+	// legacy web API with no SSH login. Note that we can't check
+	// SupportsSSHAPIRequests in the baseParametersNoDialParameters case, but
+	// that case is used by in-proxy dials, which implies support.
+
+	if (dialParams != nil && !dialParams.ServerEntry.SupportsSSHAPIRequests()) ||
+		config.TargetAPIEncoding == protocol.PSIPHON_API_ENCODING_JSON {
+		params["server_secret"] = dialParams.ServerEntry.WebServerSecret
+	}
 
 	// Blank parameters must be omitted.
 
@@ -991,6 +1046,14 @@ func getBaseAPIParameters(
 	}
 
 	if filter == baseParametersAll {
+
+		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
+			inproxyConn := dialParams.inproxyConn.Load()
+			if inproxyConn != nil {
+				params["inproxy_connection_id"] =
+					inproxyConn.(*inproxy.ClientConn).GetConnectionID()
+			}
+		}
 
 		params["relay_protocol"] = dialParams.TunnelProtocol
 		params["network_type"] = dialParams.GetNetworkType()
@@ -1228,6 +1291,13 @@ func getBaseAPIParameters(
 			}
 		}
 
+		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
+			metrics := dialParams.GetInproxyMetrics()
+			for name, value := range metrics {
+				params[name] = fmt.Sprintf("%v", value)
+			}
+		}
+
 	} else if filter == baseParametersOnlyUpstreamFragmentorDialParameters {
 
 		if dialParams.DialConnMetrics != nil {
@@ -1337,23 +1407,36 @@ func makePsiphonHttpsClient(tunnel *Tunnel) (httpsClient *http.Client, err error
 }
 
 func HandleServerRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, name string, payload []byte) error {
+	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) {
 
-	switch name {
+	var err error
+
+	switch request.Type {
 	case protocol.PSIPHON_API_OSL_REQUEST_NAME:
-		return HandleOSLRequest(tunnelOwner, tunnel, payload)
+		err = HandleOSLRequest(tunnelOwner, tunnel, request)
 	case protocol.PSIPHON_API_ALERT_REQUEST_NAME:
-		return HandleAlertRequest(tunnelOwner, tunnel, payload)
+		err = HandleAlertRequest(tunnelOwner, tunnel, request)
+	default:
+		err = errors.Tracef("invalid request name")
 	}
 
-	return errors.Tracef("invalid request name: %s", name)
+	if err != nil {
+		NoticeWarning(
+			"HandleServerRequest for %s failed: %s", request.Type, errors.Trace(err))
+	}
 }
 
 func HandleOSLRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, payload []byte) error {
+	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) (retErr error) {
+
+	defer func() {
+		if retErr != nil {
+			request.Reply(false, nil)
+		}
+	}()
 
 	var oslRequest protocol.OSLRequest
-	err := json.Unmarshal(payload, &oslRequest)
+	err := json.Unmarshal(request.Payload, &oslRequest)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1382,14 +1465,22 @@ func HandleOSLRequest(
 		tunnelOwner.SignalSeededNewSLOK()
 	}
 
+	request.Reply(true, nil)
+
 	return nil
 }
 
 func HandleAlertRequest(
-	tunnelOwner TunnelOwner, tunnel *Tunnel, payload []byte) error {
+	tunnelOwner TunnelOwner, tunnel *Tunnel, request *ssh.Request) (retErr error) {
+
+	defer func() {
+		if retErr != nil {
+			request.Reply(false, nil)
+		}
+	}()
 
 	var alertRequest protocol.AlertRequest
-	err := json.Unmarshal(payload, &alertRequest)
+	err := json.Unmarshal(request.Payload, &alertRequest)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -1397,6 +1488,8 @@ func HandleAlertRequest(
 	if tunnel.config.EmitServerAlerts {
 		NoticeServerAlert(alertRequest)
 	}
+
+	request.Reply(true, nil)
 
 	return nil
 }

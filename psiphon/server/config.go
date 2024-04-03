@@ -27,7 +27,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -39,6 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -123,36 +123,6 @@ type Config struct {
 
 	// ServerIPAddress is the public IP address of the server.
 	ServerIPAddress string
-
-	// WebServerPort is the listening port of the web server.
-	// When <= 0, no web server component is run.
-	WebServerPort int
-
-	// WebServerSecret is the unique secret value that the client
-	// must supply to make requests to the web server.
-	WebServerSecret string
-
-	// WebServerCertificate is the certificate the client uses to
-	// authenticate the web server.
-	WebServerCertificate string
-
-	// WebServerPrivateKey is the private key the web server uses to
-	// authenticate itself to clients.
-	WebServerPrivateKey string
-
-	// WebServerPortForwardAddress specifies the expected network
-	// address ("<host>:<port>") specified in a client's port forward
-	// HostToConnect and PortToConnect when the client is making a
-	// tunneled connection to the web server. This address is always
-	// exempted from validation against SSH_DISALLOWED_PORT_FORWARD_HOSTS
-	// and AllowTCPPorts.
-	WebServerPortForwardAddress string
-
-	// WebServerPortForwardRedirectAddress specifies an alternate
-	// destination address to be substituted and dialed instead of
-	// the original destination when the port forward destination is
-	// WebServerPortForwardAddress.
-	WebServerPortForwardRedirectAddress string
 
 	// TunnelProtocolPorts specifies which tunnel protocols to run
 	// and which ports to listen on for each protocol. Valid tunnel
@@ -242,6 +212,17 @@ type Config struct {
 	// MeekRequiredHeaders is a list of HTTP header names and values that must
 	// appear in requests. This is used to defend against abuse.
 	MeekRequiredHeaders map[string]string
+
+	// MeekServerCertificate specifies an optional certificate to use for meek
+	// servers, in place of the default, randomly generate certificate. When
+	// specified, the corresponding private key must be supplied in
+	// MeekServerPrivateKey. Any specified certificate is used for all meek
+	// listeners.
+	MeekServerCertificate string
+
+	// MeekServerPrivateKey is the private key corresponding to the optional
+	// MeekServerCertificate parameter.
+	MeekServerPrivateKey string
 
 	// MeekProxyForwardedForHeaders is a list of HTTP headers which
 	// may be added by downstream HTTP proxies or CDNs in front
@@ -459,6 +440,47 @@ type Config struct {
 	// entries are stored on a Psiphon server.
 	OwnEncodedServerEntries map[string]string
 
+	// MeekServerRunInproxyBroker indicates whether to run an in-proxy broker
+	// endpoint and service under the meek server.
+	MeekServerRunInproxyBroker bool
+
+	// MeekServerInproxyBrokerOnly indicates whether to run only an in-proxy
+	// broker under the meek server, and not run any meek tunnel protocol. To
+	// run the meek listener, a meek server protocol and port must still be
+	// specified in TunnelProtocolPorts, but no other tunnel protocol
+	// parameters are required.
+	MeekServerInproxyBrokerOnly bool
+
+	// InproxyBrokerSessionPrivateKey specifies the broker's in-proxy session
+	// private key and derived public key used by in-proxy clients and
+	// proxies. This value is required when running an in-proxy broker.
+	InproxyBrokerSessionPrivateKey string
+
+	// InproxyBrokerObfuscationRootSecret specifies the broker's in-proxy
+	// session root obfuscation secret used by in-proxy clients and proxies.
+	// This value is required when running an in-proxy broker.
+	InproxyBrokerObfuscationRootSecret string
+
+	// InproxyBrokerServerEntrySignaturePublicKey specifies the public key
+	// used to verify Psiphon server entry signature. This value is required
+	// when running an in-proxy broker.
+	InproxyBrokerServerEntrySignaturePublicKey string
+
+	// InproxyBrokerAllowCommonASNMatching overrides the default broker
+	// matching behavior which doesn't match non-personal in-proxy clients
+	// and proxies from the same ASN. This parameter is for testing only.
+	InproxyBrokerAllowCommonASNMatching bool
+
+	// InproxyServerSessionPrivateKey specifies the server's in-proxy session
+	// private key and derived public key used by brokers. This value is
+	// required when running in-proxy tunnel protocols.
+	InproxyServerSessionPrivateKey string
+
+	// InproxyServerObfuscationRootSecret specifies the server's in-proxy
+	// session root obfuscation secret used by brokers. This value is
+	// required when running in-proxy tunnel protocols.
+	InproxyServerObfuscationRootSecret string
+
 	sshBeginHandshakeTimeout                       time.Duration
 	sshHandshakeTimeout                            time.Duration
 	peakUpstreamFailureRateMinimumSampleSize       int
@@ -497,11 +519,6 @@ func (config *Config) GetLogFileReopenConfig() (int, bool, os.FileMode) {
 		mode = os.FileMode(*config.LogFileCreateMode)
 	}
 	return retries, create, mode
-}
-
-// RunWebServer indicates whether to run a web server component.
-func (config *Config) RunWebServer() bool {
-	return config.WebServerPort > 0
 }
 
 // RunLoadMonitor indicates whether to monitor and log server load.
@@ -570,28 +587,33 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		return nil, errors.TraceNew("ServerIPAddress is required")
 	}
 
-	if config.WebServerPort > 0 && (config.WebServerSecret == "" || config.WebServerCertificate == "" ||
-		config.WebServerPrivateKey == "") {
+	if config.MeekServerRunInproxyBroker {
+		if config.InproxyBrokerSessionPrivateKey == "" {
+			return nil, errors.TraceNew("Inproxy Broker requires InproxyBrokerSessionPrivateKey")
+		}
+		if config.InproxyBrokerObfuscationRootSecret == "" {
+			return nil, errors.TraceNew("Inproxy Broker requires InproxyBrokerObfuscationRootSecret")
+		}
 
-		return nil, errors.TraceNew(
-			"Web server requires WebServerSecret, WebServerCertificate, WebServerPrivateKey")
-	}
-
-	if config.WebServerPortForwardAddress != "" {
-		if err := validateNetworkAddress(config.WebServerPortForwardAddress, false); err != nil {
-			return nil, errors.TraceNew("WebServerPortForwardAddress is invalid")
+		// There must be at least one meek tunnel protocol configured for
+		// MeekServer to run and host an in-proxy broker. Since each
+		// MeekServer instance runs its own in-proxy Broker instance, allow
+		// at most one meek tunnel protocol to be configured so all
+		// connections to the broker use the same, unambiguous instance.
+		meekServerCount := 0
+		for tunnelProtocol, _ := range config.TunnelProtocolPorts {
+			if protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
+				meekServerCount += 1
+			}
+		}
+		if meekServerCount != 1 {
+			return nil, errors.TraceNew("Inproxy Broker requires one MeekServer instance")
 		}
 	}
 
-	if config.WebServerPortForwardRedirectAddress != "" {
-
-		if config.WebServerPortForwardAddress == "" {
-			return nil, errors.TraceNew(
-				"WebServerPortForwardRedirectAddress requires WebServerPortForwardAddress")
-		}
-
-		if err := validateNetworkAddress(config.WebServerPortForwardRedirectAddress, false); err != nil {
-			return nil, errors.TraceNew("WebServerPortForwardRedirectAddress is invalid")
+	if config.MeekServerInproxyBrokerOnly {
+		if !config.MeekServerRunInproxyBroker {
+			return nil, errors.TraceNew("Inproxy Broker-only mode requires MeekServerRunInproxyBroker")
 		}
 	}
 
@@ -599,6 +621,14 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
 			return nil, errors.Tracef("Unsupported tunnel protocol: %s", tunnelProtocol)
 		}
+
+		if config.MeekServerInproxyBrokerOnly && protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
+			// In in-proxy broker-only mode, the TunnelProtocolPorts must be
+			// specified in order to run the MeekServer, but none of the
+			// following meek tunnel parameters are required.
+			continue
+		}
+
 		if protocol.TunnelProtocolUsesSSH(tunnelProtocol) ||
 			protocol.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 			if config.SSHPrivateKey == "" || config.SSHServerVersion == "" ||
@@ -781,9 +811,9 @@ type GenerateConfigParams struct {
 	LogFilename                        string
 	SkipPanickingLogWriter             bool
 	LogLevel                           string
+	ServerEntrySignaturePublicKey      string
+	ServerEntrySignaturePrivateKey     string
 	ServerIPAddress                    string
-	WebServerPort                      int
-	EnableSSHAPIRequests               bool
 	TunnelProtocolPorts                map[string]int
 	TunnelProtocolPassthroughAddresses map[string]string
 	TrafficRulesConfigFilename         string
@@ -822,12 +852,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	}
 
 	usedPort := make(map[int]bool)
-	if params.WebServerPort != 0 {
-		usedPort[params.WebServerPort] = true
-	}
-
 	usingMeek := false
 	usingTLSOSSH := false
+	usingInproxy := false
 
 	for tunnelProtocol, port := range params.TunnelProtocolPorts {
 
@@ -848,6 +875,10 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 			protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 			usingMeek = true
 		}
+
+		if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
+			usingInproxy = true
+		}
 	}
 
 	// One test mode populates the tactics config file; this will generate
@@ -856,27 +887,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	if (params.TacticsConfigFilename != "") &&
 		(params.TacticsRequestPublicKey != "" || params.TacticsRequestObfuscatedKey != "") {
 		return nil, nil, nil, nil, nil, errors.TraceNew("invalid tactics parameters")
-	}
-
-	// Web server config
-
-	var webServerSecret, webServerCertificate,
-		webServerPrivateKey, webServerPortForwardAddress string
-
-	if params.WebServerPort != 0 {
-		webServerSecretBytes, err := common.MakeSecureRandomBytes(WEB_SERVER_SECRET_BYTE_LENGTH)
-		if err != nil {
-			return nil, nil, nil, nil, nil, errors.Trace(err)
-		}
-		webServerSecret = hex.EncodeToString(webServerSecretBytes)
-
-		webServerCertificate, webServerPrivateKey, err = common.GenerateWebServerCertificate("")
-		if err != nil {
-			return nil, nil, nil, nil, nil, errors.Trace(err)
-		}
-
-		webServerPortForwardAddress = net.JoinHostPort(
-			params.ServerIPAddress, strconv.Itoa(params.WebServerPort))
 	}
 
 	// SSH config
@@ -947,6 +957,30 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		meekObfuscatedKey = hex.EncodeToString(meekObfuscatedKeyBytes)
 	}
 
+	// Inproxy config
+
+	var inproxyServerSessionPublicKey,
+		inproxyServerSessionPrivateKey,
+		inproxyServerObfuscationRootSecret string
+
+	if usingInproxy {
+		privateKey, err := inproxy.GenerateSessionPrivateKey()
+		if err != nil {
+			return nil, nil, nil, nil, nil, errors.Trace(err)
+		}
+		inproxyServerSessionPrivateKey = privateKey.String()
+		publicKey, err := privateKey.GetPublicKey()
+		if err != nil {
+			return nil, nil, nil, nil, nil, errors.Trace(err)
+		}
+		inproxyServerSessionPublicKey = publicKey.String()
+		obfuscationRootSecret, err := inproxy.GenerateRootObfuscationSecret()
+		if err != nil {
+			return nil, nil, nil, nil, nil, errors.Trace(err)
+		}
+		inproxyServerObfuscationRootSecret = obfuscationRootSecret.String()
+	}
+
 	// Other config
 
 	discoveryValueHMACKeyBytes, err := common.MakeSecureRandomBytes(DISCOVERY_VALUE_KEY_BYTE_LENGTH)
@@ -954,6 +988,14 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}
 	discoveryValueHMACKey := base64.StdEncoding.EncodeToString(discoveryValueHMACKeyBytes)
+
+	// Generate a legacy web server secret, to accomodate test cases, such as deriving
+	// a server entry tag when no tag is present.
+	webServerSecretBytes, err := common.MakeSecureRandomBytes(WEB_SERVER_SECRET_BYTE_LENGTH)
+	if err != nil {
+		return nil, nil, nil, nil, nil, errors.Trace(err)
+	}
+	webServerSecret := hex.EncodeToString(webServerSecretBytes)
 
 	// Assemble configs and server entry
 
@@ -978,11 +1020,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		HostID:                             "example-host-id",
 		ServerIPAddress:                    params.ServerIPAddress,
 		DiscoveryValueHMACKey:              discoveryValueHMACKey,
-		WebServerPort:                      params.WebServerPort,
-		WebServerSecret:                    webServerSecret,
-		WebServerCertificate:               webServerCertificate,
-		WebServerPrivateKey:                webServerPrivateKey,
-		WebServerPortForwardAddress:        webServerPortForwardAddress,
 		SSHPrivateKey:                      string(sshPrivateKey),
 		SSHServerVersion:                   sshServerVersion,
 		SSHUserName:                        sshUserName,
@@ -1002,6 +1039,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		TacticsConfigFilename:              params.TacticsConfigFilename,
 		LegacyPassthrough:                  params.LegacyPassthrough,
 		EnableGQUIC:                        params.EnableGQUIC,
+		InproxyServerSessionPrivateKey:     inproxyServerSessionPrivateKey,
+		InproxyServerObfuscationRootSecret: inproxyServerObfuscationRootSecret,
 	}
 
 	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
@@ -1084,15 +1123,9 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		}
 	}
 
-	capabilities := []string{}
+	// Capabilities
 
-	if params.EnableSSHAPIRequests {
-		capabilities = append(capabilities, protocol.CAPABILITY_SSH_API_REQUESTS)
-	}
-
-	if params.WebServerPort != 0 {
-		capabilities = append(capabilities, protocol.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
-	}
+	capabilities := []string{protocol.CAPABILITY_SSH_API_REQUESTS}
 
 	var frontingProviderID string
 
@@ -1100,24 +1133,34 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 		capability := protocol.GetCapability(tunnelProtocol)
 
-		// Note: do not add passthrough annotation if HTTP unfronted meek
-		// because it would result in an invalid capability.
-		if params.Passthrough && protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) && tunnelProtocol != protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK {
-			if !params.LegacyPassthrough {
-				capability += "-PASSTHROUGH-v2"
-			} else {
-				capability += "-PASSTHROUGH"
-			}
-		}
+		// In-proxy tunnel protocol capabilities don't include
+		// v1/-PASSTHROUGHv2 suffixes; see comments in ServerEntry.hasCapability.
+		if !protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
 
-		if tunnelProtocol == protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH && !params.EnableGQUIC {
-			capability += "v1"
+			// Note: do not add passthrough annotation if HTTP unfronted meek
+			// because it would result in an invalid capability.
+			if params.Passthrough &&
+				protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) &&
+				tunnelProtocol != protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK {
+
+				if !params.LegacyPassthrough {
+					capability += "-PASSTHROUGH-v2"
+				} else {
+					capability += "-PASSTHROUGH"
+				}
+			}
+
+			if tunnelProtocol == protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
+				!params.EnableGQUIC {
+
+				capability += "v1"
+			}
 		}
 
 		capabilities = append(capabilities, capability)
 
 		if params.TacticsRequestPublicKey != "" && params.TacticsRequestObfuscatedKey != "" &&
-			protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
+			protocol.TunnelProtocolSupportsTactics(tunnelProtocol) {
 
 			capabilities = append(capabilities, protocol.GetTacticsCapability(tunnelProtocol))
 		}
@@ -1127,64 +1170,109 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		}
 	}
 
-	sshPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_SSH]
-	obfuscatedSSHPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH]
-	obfuscatedSSHQUICPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH]
-	tlsOSSHPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH]
+	// Tunnel protocol ports
 
-	// Meek port limitations
-	// - fronted meek protocols are hard-wired in the client to be port 443 or 80.
-	// - only one other meek port may be specified.
-	meekPort := params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK]
-	if meekPort == 0 {
-		meekPort = params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS]
-	}
-	if meekPort == 0 {
-		meekPort = params.TunnelProtocolPorts[protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET]
+	// Limitations:
+	// - Only one meek port may be specified per server entry.
+	// - Neither fronted meek nor Conjuure protocols are supported here.
+
+	var sshPort, obfuscatedSSHPort, meekPort, obfuscatedSSHQUICPort, tlsOSSHPort int
+	var inproxySSHPort, inproxyOSSHPort, inproxyQUICPort, inproxyMeekPort, inproxyTlsOSSHPort int
+
+	for tunnelProtocol, port := range params.TunnelProtocolPorts {
+
+		if !protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
+			switch tunnelProtocol {
+			case protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
+				tlsOSSHPort = port
+			case protocol.TUNNEL_PROTOCOL_SSH:
+				sshPort = port
+			case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+				obfuscatedSSHPort = port
+			case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+				obfuscatedSSHQUICPort = port
+			case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
+				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+				meekPort = port
+			}
+		} else {
+			switch protocol.TunnelProtocolMinusInproxy(tunnelProtocol) {
+			case protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
+				inproxyTlsOSSHPort = port
+			case protocol.TUNNEL_PROTOCOL_SSH:
+				inproxySSHPort = port
+			case protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+				inproxyOSSHPort = port
+			case protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+				inproxyQUICPort = port
+			case protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
+				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+				inproxyMeekPort = port
+			}
+		}
 	}
 
 	// Note: fronting params are a stub; this server entry will exercise
 	// client and server fronting code paths, but not actually traverse
 	// a fronting hop.
 
-	serverEntryWebServerPort := ""
-	strippedWebServerCertificate := ""
-
-	if params.WebServerPort != 0 {
-		serverEntryWebServerPort = fmt.Sprintf("%d", params.WebServerPort)
-
-		// Server entry format omits the BEGIN/END lines and newlines
-		lines := strings.Split(webServerCertificate, "\n")
-		strippedWebServerCertificate = strings.Join(lines[1:len(lines)-2], "")
+	serverEntry := &protocol.ServerEntry{
+		Tag:                                 prng.Base64String(32),
+		IpAddress:                           params.ServerIPAddress,
+		WebServerSecret:                     webServerSecret,
+		TlsOSSHPort:                         tlsOSSHPort,
+		SshPort:                             sshPort,
+		SshUsername:                         sshUserName,
+		SshPassword:                         sshPassword,
+		SshHostKey:                          base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
+		SshObfuscatedPort:                   obfuscatedSSHPort,
+		SshObfuscatedQUICPort:               obfuscatedSSHQUICPort,
+		LimitQUICVersions:                   params.LimitQUICVersions,
+		SshObfuscatedKey:                    obfuscatedSSHKey,
+		Capabilities:                        capabilities,
+		Region:                              "US",
+		ProviderID:                          strings.ToUpper(prng.HexString(8)),
+		FrontingProviderID:                  frontingProviderID,
+		MeekServerPort:                      meekPort,
+		MeekCookieEncryptionPublicKey:       meekCookieEncryptionPublicKey,
+		MeekObfuscatedKey:                   meekObfuscatedKey,
+		MeekFrontingHosts:                   []string{params.ServerIPAddress},
+		MeekFrontingAddresses:               []string{params.ServerIPAddress},
+		MeekFrontingDisableSNI:              false,
+		TacticsRequestPublicKey:             tacticsRequestPublicKey,
+		TacticsRequestObfuscatedKey:         tacticsRequestObfuscatedKey,
+		ConfigurationVersion:                1,
+		InproxySessionPublicKey:             inproxyServerSessionPublicKey,
+		InproxySessionRootObfuscationSecret: inproxyServerObfuscationRootSecret,
+		InproxySSHPort:                      inproxySSHPort,
+		InproxyOSSHPort:                     inproxyOSSHPort,
+		InproxyQUICPort:                     inproxyQUICPort,
+		InproxyMeekPort:                     inproxyMeekPort,
+		InproxyTlsOSSHPort:                  inproxyTlsOSSHPort,
 	}
 
-	serverEntry := &protocol.ServerEntry{
-		IpAddress:                     params.ServerIPAddress,
-		WebServerPort:                 serverEntryWebServerPort,
-		WebServerSecret:               webServerSecret,
-		WebServerCertificate:          strippedWebServerCertificate,
-		TlsOSSHPort:                   tlsOSSHPort,
-		SshPort:                       sshPort,
-		SshUsername:                   sshUserName,
-		SshPassword:                   sshPassword,
-		SshHostKey:                    base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
-		SshObfuscatedPort:             obfuscatedSSHPort,
-		SshObfuscatedQUICPort:         obfuscatedSSHQUICPort,
-		LimitQUICVersions:             params.LimitQUICVersions,
-		SshObfuscatedKey:              obfuscatedSSHKey,
-		Capabilities:                  capabilities,
-		Region:                        "US",
-		ProviderID:                    prng.HexString(8),
-		FrontingProviderID:            frontingProviderID,
-		MeekServerPort:                meekPort,
-		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
-		MeekObfuscatedKey:             meekObfuscatedKey,
-		MeekFrontingHosts:             []string{params.ServerIPAddress},
-		MeekFrontingAddresses:         []string{params.ServerIPAddress},
-		MeekFrontingDisableSNI:        false,
-		TacticsRequestPublicKey:       tacticsRequestPublicKey,
-		TacticsRequestObfuscatedKey:   tacticsRequestObfuscatedKey,
-		ConfigurationVersion:          1,
+	if params.ServerEntrySignaturePublicKey != "" {
+		serverEntryJSON, err := json.Marshal(serverEntry)
+		if err != nil {
+			return nil, nil, nil, nil, nil, errors.Trace(err)
+		}
+		var serverEntryFields protocol.ServerEntryFields
+		err = json.Unmarshal(serverEntryJSON, &serverEntryFields)
+		if err != nil {
+			return nil, nil, nil, nil, nil, errors.Trace(err)
+		}
+		err = serverEntryFields.AddSignature(
+			params.ServerEntrySignaturePublicKey, params.ServerEntrySignaturePrivateKey)
+		if err != nil {
+			return nil, nil, nil, nil, nil, errors.Trace(err)
+		}
+
+		serverEntry, err = serverEntryFields.GetServerEntry()
+		if err != nil {
+			return nil, nil, nil, nil, nil, errors.Trace(err)
+		}
 	}
 
 	encodedServerEntry, err := protocol.EncodeServerEntry(serverEntry)

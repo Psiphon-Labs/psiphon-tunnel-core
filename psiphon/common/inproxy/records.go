@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -45,15 +46,12 @@ const (
 	recordTypeAPIClientOfferResponse         = 8
 	recordTypeAPIClientRelayedPacketRequest  = 9
 	recordTypeAPIClientRelayedPacketResponse = 10
-	recordTypeAPIBrokerServerRequest         = 11
-	recordTypeAPIBrokerServerResponse        = 12
-	recordTypeLast                           = 12
+	recordTypeAPIBrokerServerReport          = 11
+	recordTypeLast                           = 11
 )
 
-var cborEncoding, _ = cbor.CTAP2EncOptions().EncMode()
-
 func marshalRecord(record interface{}, recordType int) ([]byte, error) {
-	payload, err := cborEncoding.Marshal(record)
+	payload, err := protocol.CBOREncoding.Marshal(record)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

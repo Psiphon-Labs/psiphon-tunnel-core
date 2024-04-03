@@ -24,6 +24,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"io"
 	"sync"
@@ -31,18 +32,29 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/panmari/cuckoofilter"
+	"github.com/bits-and-blooms/bloom/v3"
 	"golang.org/x/crypto/hkdf"
 )
 
 const (
 	obfuscationSessionPacketNonceSize = 12
 	obfuscationAntiReplayTimePeriod   = 10 * time.Minute
-	obfuscationAntiReplayHistorySize  = 10000000
+	obfuscationAntiReplayHistorySize  = 10_000_000
 )
 
 // ObfuscationSecret is shared, semisecret value used in obfuscation layers.
 type ObfuscationSecret [32]byte
+
+// ObfuscationSecretFromString returns an ObfuscationSecret given its string encoding.
+func ObfuscationSecretFromString(s string) (ObfuscationSecret, error) {
+	var secret ObfuscationSecret
+	return secret, errors.Trace(fromBase64String(s, secret[:]))
+}
+
+// String emits ObfuscationSecrets as base64.
+func (secret ObfuscationSecret) String() string {
+	return base64.RawStdEncoding.EncodeToString([]byte(secret[:]))
+}
 
 // GenerateRootObfuscationSecret creates a new ObfuscationSecret using
 // crypto/rand.
@@ -291,10 +303,7 @@ func deobfuscateSessionPacket(
 		// Now that it's validated, add this packet to the replay history. The
 		// nonce is expected to be unique, so it's used as the history key.
 
-		err = replayHistory.Insert(nonce)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+		replayHistory.Insert(nonce)
 	}
 
 	return plaintext[offset:], nil
@@ -325,61 +334,52 @@ func imitateDeobfuscateSessionPacketDuration(replayHistory *obfuscationReplayHis
 // replayed, will fail to deobfuscate due to using an expired timestamp.
 type obfuscationReplayHistory struct {
 	mutex         sync.Mutex
-	filters       [2]*cuckoo.Filter
+	filters       [2]*bloom.BloomFilter
 	currentFilter int
 	switchTime    time.Time
 }
 
 func newObfuscationReplayHistory() *obfuscationReplayHistory {
 
-	// Replay history is implemented using cuckoo filters, which use fixed
+	// Replay history is implemented using bloom filters, which use fixed
 	// space overhead, and less space overhead than storing nonces explictly
-	// under anticipated loads. With cuckoo filters, false positive lookups
+	// under anticipated loads. With bloom filters, false positive lookups
 	// are possible, but false negative lookups are not. So there's a small
 	// chance that a non-replayed nonce will be flagged as in the history,
 	// but no chance that a replayed nonce will pass as not in the history.
 	//
-	// From github.com/panmari/cuckoofilter:
-	//   > With the 16 bit fingerprint size in this repository, you can expect r
-	//   > ~= 0.0001. Other implementations use 8 bit, which correspond to a
-	//   > false positive rate of r ~= 0.03. NewFilter returns a new
-	//   > cuckoofilter suitable for the given number of elements. When
-	//   > inserting more elements, insertion speed will drop significantly and
-	//   > insertions might fail altogether. A capacity of 1000000 is a normal
-	//   > default, which allocates about ~2MB on 64-bit machines.
+	// With obfuscationAntiReplayHistorySize set to 10M and a false positive
+	// rate of 0.001, the session_test test case with 10k clients making 100
+	// requests each all within one time period consistently produces no
+	// false positives.
 	//
-	// With obfuscationAntiReplayHistorySize set to 10M, the session_test test
-	// case with 10k clients making 100 requests each all within one time
-	// period consistently produces no false positives.
+	// Memory overhead is approximately 18MB per bloom filter, so 18MB x 2.
+	// From:
 	//
-	// To accomodate the rolling time factor window, there are two cuckoo
-	// filters, the "current" filter and the "next" filter. New nonces are
-	// inserted into both the current and next filter. Every
-	// antiReplayTimeFactorPeriodSeconds, the next filter replaces the
-	// current filter. The previous current filter is reset and becomes the
-	// new next filter.
+	// m, _ := bloom.EstimateParameters(10_000_000, 0.001) --> 143775876
+	// bitset.New(143775876).BinaryStorageSize() --> approx. 18MB in terms of
+	// underlying bits-and-blooms/bitset.BitSet
+	//
+	// To accomodate the rolling time factor window, there are two rotating
+	// bloom filters.
 
 	return &obfuscationReplayHistory{
-		filters: [2]*cuckoo.Filter{
-			cuckoo.NewFilter(obfuscationAntiReplayHistorySize),
-			cuckoo.NewFilter(obfuscationAntiReplayHistorySize),
+		filters: [2]*bloom.BloomFilter{
+			bloom.NewWithEstimates(obfuscationAntiReplayHistorySize, 0.001),
+			bloom.NewWithEstimates(obfuscationAntiReplayHistorySize, 0.001),
 		},
 		currentFilter: 0,
 		switchTime:    time.Now(),
 	}
 }
 
-func (h *obfuscationReplayHistory) Insert(value []byte) error {
+func (h *obfuscationReplayHistory) Insert(value []byte) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
 	h.switchFilters()
 
-	if !h.filters[0].Insert(value) || !h.filters[1].Insert(value) {
-		return errors.TraceNew("replay history insert failed")
-	}
-
-	return nil
+	h.filters[h.currentFilter].Add(value)
 }
 
 func (h *obfuscationReplayHistory) Lookup(value []byte) bool {
@@ -388,7 +388,8 @@ func (h *obfuscationReplayHistory) Lookup(value []byte) bool {
 
 	h.switchFilters()
 
-	return h.filters[h.currentFilter].Lookup(value)
+	return h.filters[0].Test(value) ||
+		h.filters[1].Test(value)
 }
 
 func (h *obfuscationReplayHistory) switchFilters() {
@@ -397,8 +398,8 @@ func (h *obfuscationReplayHistory) switchFilters() {
 
 	now := time.Now()
 	if h.switchTime.Before(now.Add(-time.Duration(antiReplayTimeFactorPeriodSeconds) * time.Second)) {
-		h.filters[h.currentFilter].Reset()
 		h.currentFilter = (h.currentFilter + 1) % 2
+		h.filters[h.currentFilter].ClearAll()
 		h.switchTime = now
 	}
 }

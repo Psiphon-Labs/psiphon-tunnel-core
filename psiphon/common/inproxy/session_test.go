@@ -22,7 +22,6 @@ package inproxy
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"fmt"
 	"math"
 	"strings"
@@ -51,7 +50,7 @@ func runTestSessions() error {
 		return errors.Trace(err)
 	}
 
-	responderPublicKey, err := GetSessionPublicKey(responderPrivateKey)
+	responderPublicKey, err := responderPrivateKey.GetPublicKey()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -72,7 +71,7 @@ func runTestSessions() error {
 		return errors.Trace(err)
 	}
 
-	initiatorPublicKey, err := GetSessionPublicKey(initiatorPrivateKey)
+	initiatorPublicKey, err := initiatorPrivateKey.GetPublicKey()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -150,6 +149,62 @@ func runTestSessions() error {
 
 	if !bytes.Equal(response, roundTripper.ExpectedResponse(request)) {
 		return errors.TraceNew("unexpected response")
+	}
+
+	// Test: expected known initiator public key using SetKnownInitiatorPublicKeys
+
+	initiatorSessions = NewInitiatorSessions(initiatorPrivateKey)
+
+	responderSessions, err = NewResponderSessionsForKnownInitiators(
+		responderPrivateKey,
+		responderRootObfuscationSecret,
+		[]SessionPublicKey{})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	responderSessions.SetKnownInitiatorPublicKeys([]SessionPublicKey{initiatorPublicKey})
+
+	roundTripper = newTestSessionRoundTripper(responderSessions, &initiatorPublicKey)
+
+	request = roundTripper.MakeRequest()
+
+	response, err = initiatorSessions.RoundTrip(
+		context.Background(),
+		roundTripper,
+		responderPublicKey,
+		responderRootObfuscationSecret,
+		waitToShareSession,
+		request)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if !bytes.Equal(response, roundTripper.ExpectedResponse(request)) {
+		return errors.TraceNew("unexpected response")
+	}
+
+	// The existing session should not be dropped as the original key remains valid.
+	responderSessions.SetKnownInitiatorPublicKeys([]SessionPublicKey{initiatorPublicKey})
+
+	if responderSessions.sessions.ItemCount() != 1 {
+		return errors.TraceNew("unexpected session cache state")
+	}
+
+	otherKnownInitiatorPrivateKey, err := GenerateSessionPrivateKey()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	otherKnownInitiatorPublicKey, err := otherKnownInitiatorPrivateKey.GetPublicKey()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// The existing session should be dropped as the original key is not longer valid.
+	responderSessions.SetKnownInitiatorPublicKeys([]SessionPublicKey{otherKnownInitiatorPublicKey})
+
+	if responderSessions.sessions.ItemCount() != 0 {
+		return errors.TraceNew("unexpected session cache state")
 	}
 
 	// Test: wrong known initiator public key
@@ -302,7 +357,13 @@ func (t *testSessionRoundTripper) RoundTrip(ctx context.Context, requestPayload 
 	unwrappedRequestHandler := func(initiatorID ID, unwrappedRequest []byte) ([]byte, error) {
 
 		if t.expectedPeerPublicKey != nil {
-			if !bytes.Equal(initiatorID[:], (*t.expectedPeerPublicKey)[:]) {
+
+			curve25519, err := (*t.expectedPeerPublicKey).ToCurve25519()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if !bytes.Equal(initiatorID[:], curve25519[:]) {
 				return nil, errors.TraceNew("unexpected initiator ID")
 			}
 		}
@@ -312,11 +373,13 @@ func (t *testSessionRoundTripper) RoundTrip(ctx context.Context, requestPayload 
 
 	responsePayload, err := t.sessions.HandlePacket(requestPayload, unwrappedRequestHandler)
 	if err != nil {
-		// Errors here are expected; e.g., in the session expired case.
-		fmt.Printf("HandlePacket failed: %v\n", err)
-		return nil, errors.Trace(err)
+		if responsePayload == nil {
+			return nil, errors.Trace(err)
+		} else {
+			fmt.Printf("HandlePacket returned packet and error: %v\n", err)
+			// Continue to relay packets
+		}
 	}
-
 	return responsePayload, nil
 }
 
@@ -336,14 +399,38 @@ func runTestNoise() error {
 
 	prologue := []byte("psiphon-inproxy-session")
 
-	initiatorKeys, err := noise.DH25519.GenerateKeypair(rand.Reader)
+	initiatorPrivateKey, err := GenerateSessionPrivateKey()
 	if err != nil {
 		return errors.Trace(err)
 	}
-
-	responderKeys, err := noise.DH25519.GenerateKeypair(rand.Reader)
+	initiatorPublicKey, err := initiatorPrivateKey.GetPublicKey()
 	if err != nil {
 		return errors.Trace(err)
+	}
+	curve25519InitiatorPublicKey, err := initiatorPublicKey.ToCurve25519()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	initiatorKeys := noise.DHKey{
+		Public:  curve25519InitiatorPublicKey[:],
+		Private: initiatorPrivateKey.ToCurve25519()[:],
+	}
+
+	responderPrivateKey, err := GenerateSessionPrivateKey()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	responderPublicKey, err := responderPrivateKey.GetPublicKey()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	curve25519ResponderPublicKey, err := responderPublicKey.ToCurve25519()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	responderKeys := noise.DHKey{
+		Public:  curve25519ResponderPublicKey[:],
+		Private: responderPrivateKey.ToCurve25519()[:],
 	}
 
 	initiatorHandshake, err := noise.NewHandshakeState(

@@ -560,7 +560,8 @@ func (server *Server) Validate() error {
 				applyParameters, filteredTactics.Parameters)
 		}
 
-		_, err = params.Set("", false, applyParameters...)
+		_, err = params.Set(
+			"", parameters.ValidationServerSide, applyParameters...)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -1307,7 +1308,7 @@ func SetTacticsAPIParameters(
 // HandleTacticsPayload updates the stored tactics with the given payload.
 // If the payload has a new tag/tactics, this is stored and a new expiry
 // time is set. If the payload has the same tag, the existing tactics are
-// retained and the exipry is extended using the previous TTL.
+// retained and the expiry is extended using the previous TTL.
 // HandleTacticsPayload is called by the Psiphon client to handle the
 // tactics payload in the handshake response.
 func HandleTacticsPayload(
@@ -1688,6 +1689,22 @@ func applyTacticsPayload(
 	// Replace the tactics data when the tags differ.
 
 	if payload.Tag != record.Tag {
+
+		// There is a potential race condition that may arise with multiple
+		// concurrent requests which may return tactics, such as in-proxy
+		// proxy announcements. In this scenario, an in-flight request
+		// matches the existing current tactics tag; then a concurrent
+		// request is sent while new tactics become available and its
+		// response returns new tactics and a new tag; the client applies the
+		// new tags and tactics; then, finally, the response for the first
+		// request arrives with a now apparently different tag -- the
+		// original tag -- but no tactics payload. In this case, simply fail
+		// the apply operation.
+
+		if payload.Tactics == nil {
+			return errors.TraceNew("missing tactics")
+		}
+
 		record.Tag = payload.Tag
 		record.Tactics = Tactics{}
 		err := json.Unmarshal(payload.Tactics, &record.Tactics)

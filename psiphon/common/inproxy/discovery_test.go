@@ -37,7 +37,7 @@ func TestNATDiscovery(t *testing.T) {
 		stunServerAddressSucceededCallCount,
 		stunServerAddressFailedCallCount int32
 
-	dialParams := &testDialParameters{
+	coordinator := &testWebRTCDialCoordinator{
 		stunServerAddress:        stunServerAddress,
 		stunServerAddressRFC5780: stunServerAddress,
 
@@ -95,13 +95,13 @@ func TestNATDiscovery(t *testing.T) {
 	}
 
 	config := &NATDiscoverConfig{
-		Logger:         newTestLogger(),
-		DialParameters: dialParams,
+		Logger:                newTestLogger(),
+		WebRTCDialCoordinator: coordinator,
 	}
 
 	// Should do STUN only
 
-	dialParams.disablePortMapping = true
+	coordinator.disablePortMapping = true
 
 	NATDiscover(context.Background(), config)
 
@@ -109,22 +109,22 @@ func TestNATDiscovery(t *testing.T) {
 
 	// Should do port mapping only
 
-	dialParams.disableSTUN = true
-	dialParams.disablePortMapping = false
+	coordinator.disableSTUN = true
+	coordinator.disablePortMapping = false
 
 	NATDiscover(context.Background(), config)
 
 	checkCallCounts(1, 1, 1, 0)
 
-	// Should skip both and use values cached in DialParameters
+	// Should skip both and use values cached in WebRTCDialCoordinator
 
-	dialParams.disableSTUN = false
-	dialParams.disablePortMapping = false
+	coordinator.disableSTUN = false
+	coordinator.disablePortMapping = false
 
 	NATDiscover(context.Background(), config)
 
 	checkCallCounts(1, 1, 1, 0)
 
-	t.Logf("NAT Type: %s", dialParams.NATType())
-	t.Logf("Port Mapping Types: %s", dialParams.PortMappingTypes())
+	t.Logf("NAT Type: %s", coordinator.NATType())
+	t.Logf("Port Mapping Types: %s", coordinator.PortMappingTypes())
 }

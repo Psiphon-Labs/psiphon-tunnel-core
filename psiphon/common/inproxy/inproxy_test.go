@@ -24,13 +24,14 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -44,30 +45,28 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func TestInProxy(t *testing.T) {
-	err := runTestInProxy()
+func TestInproxy(t *testing.T) {
+	err := runTestInproxy()
 	if err != nil {
 		t.Errorf(errors.Trace(err).Error())
 	}
 }
 
-func runTestInProxy() error {
+func runTestInproxy() error {
 
 	// Note: use the environment variable PION_LOG_TRACE=all to emit WebRTC logging.
 
 	numProxies := 5
-	proxyMaxClients := 2
+	proxyMaxClients := 3
 	numClients := 10
 
 	bytesToSend := 1 << 20
 	targetElapsedSeconds := 2
 
-	baseMetrics := common.APIParameters{
-		"sponsor_id":      "test-sponsor-id",
+	baseAPIParameters := common.APIParameters{
+		"sponsor_id":      strings.ToUpper(prng.HexString(8)),
 		"client_platform": "test-client-platform",
 	}
-
-	testTransportSecret, _ := MakeID()
 
 	testCompartmentID, _ := MakeID()
 	testCommonCompartmentIDs := []ID{testCompartmentID}
@@ -77,6 +76,10 @@ func runTestInProxy() error {
 	testNATType := NATTypeUnknown
 	testSTUNServerAddress := "stun.nextcloud.com:443"
 	testDisableSTUN := false
+
+	testNewTacticsPayload := []byte(prng.HexString(100))
+	testNewTacticsTag := "new-tactics-tag"
+	testUnchangedTacticsPayload := []byte(prng.HexString(100))
 
 	// TODO: test port mapping
 
@@ -96,11 +99,16 @@ func runTestInProxy() error {
 	testGroup := new(errgroup.Group)
 
 	// Enable test to run without requiring host firewall exceptions
-	setAllowLoopbackWebRTCConnections(true)
+	SetAllowBogonWebRTCConnections(true)
 
-	// Init logging
+	// Init logging and profiling
 
 	logger := newTestLogger()
+
+	pprofListener, err := net.Listen("tcp", "127.0.0.1:0")
+	go http.Serve(pprofListener, nil)
+	defer pprofListener.Close()
+	logger.WithTrace().Info(fmt.Sprintf("PPROF: http://%s/debug/pprof", pprofListener.Addr()))
 
 	// Start echo servers
 
@@ -125,7 +133,7 @@ func runTestInProxy() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	serverPublicKey, err := GetSessionPublicKey(serverPrivateKey)
+	serverPublicKey, err := serverPrivateKey.GetPublicKey()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -138,11 +146,11 @@ func runTestInProxy() error {
 	serverEntry["ipAddress"] = "127.0.0.1"
 	_, tcpPort, _ := net.SplitHostPort(tcpEchoListener.Addr().String())
 	_, udpPort, _ := net.SplitHostPort(quicEchoServer.Addr().String())
-	serverEntry["sshObfuscatedPort"], _ = strconv.Atoi(tcpPort)
-	serverEntry["sshObfuscatedQUICPort"], _ = strconv.Atoi(udpPort)
-	serverEntry["capabilities"] = []string{"OSSH", "QUIC", "inproxy"}
-	serverEntry["inProxySessionPublicKey"] = base64.StdEncoding.EncodeToString(serverPublicKey[:])
-	serverEntry["inProxySessionRootObfuscationSecret"] = base64.StdEncoding.EncodeToString(serverRootObfuscationSecret[:])
+	serverEntry["inproxyOSSHPort"], _ = strconv.Atoi(tcpPort)
+	serverEntry["inproxyQUICPort"], _ = strconv.Atoi(udpPort)
+	serverEntry["capabilities"] = []string{"INPROXY-WEBRTC-OSSH", "INPROXY-WEBRTC-QUIC-OSSH"}
+	serverEntry["inproxySessionPublicKey"] = base64.RawStdEncoding.EncodeToString(serverPublicKey[:])
+	serverEntry["inproxySessionRootObfuscationSecret"] = base64.RawStdEncoding.EncodeToString(serverRootObfuscationSecret[:])
 	testServerEntryTag := prng.HexString(16)
 	serverEntry["tag"] = testServerEntryTag
 
@@ -156,18 +164,24 @@ func runTestInProxy() error {
 		return errors.Trace(err)
 	}
 
-	serverEntryJSON, err := json.Marshal(serverEntry)
+	packedServerEntryFields, err := protocol.EncodePackedServerEntryFields(serverEntry)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	packedDestinationServerEntry, err := protocol.CBOREncoding.Marshal(packedServerEntryFields)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	// Start broker
 
+	logger.WithTrace().Info("START BROKER")
+
 	brokerPrivateKey, err := GenerateSessionPrivateKey()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	brokerPublicKey, err := GetSessionPublicKey(brokerPrivateKey)
+	brokerPublicKey, err := brokerPrivateKey.GetPublicKey()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -189,12 +203,16 @@ func runTestInProxy() error {
 		CommonCompartmentIDs: testCommonCompartmentIDs,
 
 		APIParameterValidator: func(params common.APIParameters) error {
-			if len(params) != len(baseMetrics) {
-				return errors.TraceNew("unexpected base metrics")
+			if len(params) != len(baseAPIParameters) {
+				return errors.TraceNew("unexpected base API parameter count")
 			}
 			for name, value := range params {
-				if value.(string) != baseMetrics[name].(string) {
-					return errors.TraceNew("unexpected base metrics")
+				if value.(string) != baseAPIParameters[name].(string) {
+					return errors.Tracef(
+						"unexpected base API parameter: %v: %v != %v",
+						name,
+						value.(string),
+						baseAPIParameters[name].(string))
 				}
 			}
 			return nil
@@ -205,7 +223,15 @@ func runTestInProxy() error {
 			return common.LogFields(params)
 		},
 
-		TransportSecret: TransportSecret(testTransportSecret),
+		GetTactics: func(_ common.GeoIPData, _ common.APIParameters) ([]byte, string, error) {
+			// Exercise both new and unchanged tactics
+			if prng.FlipCoin() {
+				return testNewTacticsPayload, testNewTacticsTag, nil
+			}
+			return testUnchangedTacticsPayload, "", nil
+		},
+
+		IsValidServerEntryTag: func(serverEntryTag string) bool { return serverEntryTag == testServerEntryTag },
 
 		PrivateKey: brokerPrivateKey,
 
@@ -213,11 +239,9 @@ func runTestInProxy() error {
 
 		ServerEntrySignaturePublicKey: serverEntrySignaturePublicKey,
 
-		IsValidServerEntryTag: func(serverEntryTag string) bool { return serverEntryTag == testServerEntryTag },
-
-		AllowProxy:             func(common.GeoIPData) bool { return true },
-		AllowClient:            func(common.GeoIPData) bool { return true },
-		AllowDomainDestination: func(common.GeoIPData) bool { return true },
+		AllowProxy:                     func(common.GeoIPData) bool { return true },
+		AllowClient:                    func(common.GeoIPData) bool { return true },
+		AllowDomainFrontedDestinations: func(common.GeoIPData) bool { return true },
 	}
 
 	broker, err := NewBroker(brokerConfig)
@@ -249,39 +273,82 @@ func runTestInProxy() error {
 		return errors.Trace(err)
 	}
 
-	var pendingBrokerServerRequestsMutex sync.Mutex
-	pendingBrokerServerRequests := make(map[ID]bool)
+	var pendingBrokerServerReportsMutex sync.Mutex
+	pendingBrokerServerReports := make(map[ID]bool)
 
-	addPendingBrokerServerRequest := func(connectionID ID) {
-		pendingBrokerServerRequestsMutex.Lock()
-		defer pendingBrokerServerRequestsMutex.Unlock()
-		pendingBrokerServerRequests[connectionID] = true
+	addPendingBrokerServerReport := func(connectionID ID) {
+		pendingBrokerServerReportsMutex.Lock()
+		defer pendingBrokerServerReportsMutex.Unlock()
+		pendingBrokerServerReports[connectionID] = true
 	}
 
-	hasPendingBrokerServerRequests := func() bool {
-		pendingBrokerServerRequestsMutex.Lock()
-		defer pendingBrokerServerRequestsMutex.Unlock()
-		return len(pendingBrokerServerRequests) > 0
+	hasPendingBrokerServerReports := func() bool {
+		pendingBrokerServerReportsMutex.Lock()
+		defer pendingBrokerServerReportsMutex.Unlock()
+		return len(pendingBrokerServerReports) > 0
 	}
 
-	handleBrokerServerRequests := func(in []byte, clientConnectionID ID) ([]byte, error) {
+	handleBrokerServerReports := func(in []byte, clientConnectionID ID) ([]byte, error) {
 
 		handler := func(brokerVerifiedOriginalClientIP string, logFields common.LogFields) {
-			pendingBrokerServerRequestsMutex.Lock()
-			defer pendingBrokerServerRequestsMutex.Unlock()
+			pendingBrokerServerReportsMutex.Lock()
+			defer pendingBrokerServerReportsMutex.Unlock()
 
-			// Mark the request as no longer outstanding
-			delete(pendingBrokerServerRequests, clientConnectionID)
+			// Mark the report as no longer outstanding
+			delete(pendingBrokerServerReports, clientConnectionID)
 		}
 
 		out, err := serverSessions.HandlePacket(logger, in, clientConnectionID, handler)
-		if err != nil {
-			return nil, errors.Trace(err)
+		return out, errors.Trace(err)
+	}
+
+	// Check that the tactics round trip succeeds
+
+	var pendingProxyTacticsCallbacksMutex sync.Mutex
+	pendingProxyTacticsCallbacks := make(map[SessionPrivateKey]bool)
+
+	addPendingProxyTacticsCallback := func(proxyPrivateKey SessionPrivateKey) {
+		pendingProxyTacticsCallbacksMutex.Lock()
+		defer pendingProxyTacticsCallbacksMutex.Unlock()
+		pendingProxyTacticsCallbacks[proxyPrivateKey] = true
+	}
+
+	hasPendingProxyTacticsCallbacks := func() bool {
+		pendingProxyTacticsCallbacksMutex.Lock()
+		defer pendingProxyTacticsCallbacksMutex.Unlock()
+		return len(pendingProxyTacticsCallbacks) > 0
+	}
+
+	makeHandleTacticsPayload := func(
+		proxyPrivateKey SessionPrivateKey,
+		tacticsNetworkID string) func(_ string, _ []byte) bool {
+
+		return func(networkID string, tacticsPayload []byte) bool {
+			pendingProxyTacticsCallbacksMutex.Lock()
+			defer pendingProxyTacticsCallbacksMutex.Unlock()
+
+			// Check that the correct networkID is passed around; if not,
+			// skip the delete, which will fail the test
+			if networkID == tacticsNetworkID {
+
+				// Certain state is reset when new tactics are applied -- the
+				// return true case; exercise both cases
+				if bytes.Equal(tacticsPayload, testNewTacticsPayload) {
+					delete(pendingProxyTacticsCallbacks, proxyPrivateKey)
+					return true
+				}
+				if bytes.Equal(tacticsPayload, testUnchangedTacticsPayload) {
+					delete(pendingProxyTacticsCallbacks, proxyPrivateKey)
+					return false
+				}
+			}
+			panic("unexpected tactics payload")
 		}
-		return out, nil
 	}
 
 	// Start proxies
+
+	logger.WithTrace().Info("START PROXIES")
 
 	for i := 0; i < numProxies; i++ {
 
@@ -290,7 +357,19 @@ func runTestInProxy() error {
 			return errors.Trace(err)
 		}
 
-		dialParams := &testDialParameters{
+		brokerCoordinator := &testBrokerDialCoordinator{
+			networkID:                   testNetworkID,
+			networkType:                 testNetworkType,
+			brokerClientPrivateKey:      proxyPrivateKey,
+			brokerPublicKey:             brokerPublicKey,
+			brokerRootObfuscationSecret: brokerRootObfuscationSecret,
+			brokerClientRoundTripper: newHTTPRoundTripper(
+				brokerListener.Addr().String(), "proxy"),
+			brokerClientRoundTripperSucceeded: roundTripperSucceded,
+			brokerClientRoundTripperFailed:    roundTripperFailed,
+		}
+
+		webRTCCoordinator := &testWebRTCDialCoordinator{
 			networkID:                  testNetworkID,
 			networkType:                testNetworkType,
 			natType:                    testNATType,
@@ -299,27 +378,41 @@ func runTestInProxy() error {
 			stunServerAddressRFC5780:   testSTUNServerAddress,
 			stunServerAddressSucceeded: stunServerAddressSucceeded,
 			stunServerAddressFailed:    stunServerAddressFailed,
-
-			brokerClientPrivateKey:      proxyPrivateKey,
-			brokerPublicKey:             brokerPublicKey,
-			brokerRootObfuscationSecret: brokerRootObfuscationSecret,
-			brokerClientRoundTripper: newHTTPRoundTripper(
-				brokerListener.Addr().String(), "proxy"),
-			brokerClientRoundTripperSucceeded: roundTripperSucceded,
-			brokerClientRoundTripperFailed:    roundTripperFailed,
-
-			setNATType:          func(NATType) {},
-			setPortMappingTypes: func(PortMappingTypes) {},
-			bindToDevice:        func(int) error { return nil },
+			setNATType:                 func(NATType) {},
+			setPortMappingTypes:        func(PortMappingTypes) {},
+			bindToDevice:               func(int) error { return nil },
 		}
 
+		// Each proxy has its own broker client
+		brokerClient, err := NewBrokerClient(brokerCoordinator)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		tacticsNetworkID := prng.HexString(32)
+
 		proxy, err := NewProxy(&ProxyConfig{
-			Logger:                        logger,
-			BaseMetrics:                   baseMetrics,
-			DialParameters:                dialParams,
+
+			Logger: logger,
+
+			GetBrokerClient: func() (*BrokerClient, error) {
+				return brokerClient, nil
+			},
+
+			GetBaseAPIParameters: func() (common.APIParameters, string, error) {
+				return baseAPIParameters, tacticsNetworkID, nil
+			},
+
+			MakeWebRTCDialCoordinator: func() (WebRTCDialCoordinator, error) {
+				return webRTCCoordinator, nil
+			},
+
+			HandleTacticsPayload: makeHandleTacticsPayload(proxyPrivateKey, tacticsNetworkID),
+
 			MaxClients:                    proxyMaxClients,
 			LimitUpstreamBytesPerSecond:   bytesToSend / targetElapsedSeconds,
 			LimitDownstreamBytesPerSecond: bytesToSend / targetElapsedSeconds,
+
 			ActivityUpdater: func(connectingClients int32, connectedClients int32,
 				bytesUp int64, bytesDown int64, bytesDuration time.Duration) {
 
@@ -332,21 +425,43 @@ func runTestInProxy() error {
 			return errors.Trace(err)
 		}
 
+		addPendingProxyTacticsCallback(proxyPrivateKey)
+
 		testGroup.Go(func() error {
 			proxy.Run(testCtx)
 			return nil
 		})
 	}
 
-	// Run clients
+	// Await proxy announcements before starting clients
+	//
+	// - Announcements may delay due to proxyAnnounceRetryDelay in Proxy.Run,
+	//   plus NAT discovery
+	//
+	// - Don't wait for > numProxies announcements due to
+	//   InitiatorSessions.NewRoundTrip waitToShareSession limitation
+
+	for {
+		time.Sleep(100 * time.Millisecond)
+		broker.matcher.announcementQueueMutex.Lock()
+		n := broker.matcher.announcementQueue.Len()
+		broker.matcher.announcementQueueMutex.Unlock()
+		if n >= numProxies {
+			break
+		}
+	}
+
+	// Start clients
+
+	logger.WithTrace().Info("START CLIENTS")
 
 	clientsGroup := new(errgroup.Group)
 
 	makeClientFunc := func(
 		isTCP bool,
 		isMobile bool,
-		dialParams DialParameters,
-		brokerClient *BrokerClient) func() error {
+		brokerClient *BrokerClient,
+		webRTCCoordinator WebRTCDialCoordinator) func() error {
 
 		var networkProtocol NetworkProtocol
 		var addr string
@@ -362,20 +477,20 @@ func runTestInProxy() error {
 
 		return func() error {
 
-			dialCtx, cancelDial := context.WithTimeout(testCtx, 30*time.Second)
+			dialCtx, cancelDial := context.WithTimeout(testCtx, 60*time.Second)
 			defer cancelDial()
 
 			conn, err := DialClient(
 				dialCtx,
 				&ClientConfig{
-					Logger:                     logger,
-					BaseMetrics:                baseMetrics,
-					DialParameters:             dialParams,
-					BrokerClient:               brokerClient,
-					ReliableTransport:          isTCP,
-					DialNetworkProtocol:        networkProtocol,
-					DialAddress:                addr,
-					DestinationServerEntryJSON: serverEntryJSON,
+					Logger:                       logger,
+					BaseAPIParameters:            baseAPIParameters,
+					BrokerClient:                 brokerClient,
+					WebRTCDialCoordinator:        webRTCCoordinator,
+					ReliableTransport:            isTCP,
+					DialNetworkProtocol:          networkProtocol,
+					DialAddress:                  addr,
+					PackedDestinationServerEntry: packedDestinationServerEntry,
 				})
 			if err != nil {
 				return errors.Trace(err)
@@ -396,7 +511,7 @@ func runTestInProxy() error {
 				relayConn = quicConn
 			}
 
-			addPendingBrokerServerRequest(conn.GetConnectionID())
+			addPendingBrokerServerReport(conn.GetConnectionID())
 			signalRelayComplete := make(chan struct{})
 
 			clientsGroup.Go(func() error {
@@ -404,17 +519,22 @@ func runTestInProxy() error {
 
 				in := conn.InitialRelayPacket()
 				for in != nil {
-					out, err := handleBrokerServerRequests(in, conn.GetConnectionID())
-
-					// In general, trying to use an expired session results in an expected error...
-					sessionInvalid := err != nil
-
-					// ...but no error is expected in this test run.
+					out, err := handleBrokerServerReports(in, conn.GetConnectionID())
 					if err != nil {
-						fmt.Printf("handleBrokerServerRequests failed: %v\n", err)
+						if out == nil {
+							return errors.Trace(err)
+						} else {
+							fmt.Printf("HandlePacket returned packet and error: %v\n", err)
+							// Proceed with reset session token packet
+						}
 					}
 
-					in, err = conn.RelayPacket(testCtx, out, sessionInvalid)
+					if out == nil {
+						// Relay is complete
+						break
+					}
+
+					in, err = conn.RelayPacket(testCtx, out)
 					if err != nil {
 						return errors.Trace(err)
 					}
@@ -473,7 +593,7 @@ func runTestInProxy() error {
 		}
 	}
 
-	newClientParams := func(isMobile bool) (*testDialParameters, *BrokerClient, error) {
+	newClientParams := func(isMobile bool) (*BrokerClient, *testWebRTCDialCoordinator, error) {
 
 		clientPrivateKey, err := GenerateSessionPrivateKey()
 		if err != nil {
@@ -485,17 +605,11 @@ func runTestInProxy() error {
 			return nil, nil, errors.Trace(err)
 		}
 
-		dialParams := &testDialParameters{
-			commonCompartmentIDs: testCommonCompartmentIDs,
+		brokerCoordinator := &testBrokerDialCoordinator{
+			networkID:   testNetworkID,
+			networkType: testNetworkType,
 
-			networkID:                  testNetworkID,
-			networkType:                testNetworkType,
-			natType:                    testNATType,
-			disableSTUN:                testDisableSTUN,
-			stunServerAddress:          testSTUNServerAddress,
-			stunServerAddressRFC5780:   testSTUNServerAddress,
-			stunServerAddressSucceeded: stunServerAddressSucceeded,
-			stunServerAddressFailed:    stunServerAddressFailed,
+			commonCompartmentIDs: testCommonCompartmentIDs,
 
 			brokerClientPrivateKey:      clientPrivateKey,
 			brokerPublicKey:             brokerPublicKey,
@@ -504,9 +618,21 @@ func runTestInProxy() error {
 				brokerListener.Addr().String(), "client"),
 			brokerClientRoundTripperSucceeded: roundTripperSucceded,
 			brokerClientRoundTripperFailed:    roundTripperFailed,
+		}
+
+		webRTCCoordinator := &testWebRTCDialCoordinator{
+			networkID:   testNetworkID,
+			networkType: testNetworkType,
+
+			natType:                    testNATType,
+			disableSTUN:                testDisableSTUN,
+			stunServerAddress:          testSTUNServerAddress,
+			stunServerAddressRFC5780:   testSTUNServerAddress,
+			stunServerAddressSucceeded: stunServerAddressSucceeded,
+			stunServerAddressFailed:    stunServerAddressFailed,
 
 			clientRootObfuscationSecret: clientRootObfuscationSecret,
-			doDTLSRandomization:         true,
+			doDTLSRandomization:         prng.FlipCoin(),
 			trafficShapingParameters: &DataChannelTrafficShapingParameters{
 				MinPaddedMessages:       0,
 				MaxPaddedMessages:       10,
@@ -522,27 +648,33 @@ func runTestInProxy() error {
 			setNATType:          func(NATType) {},
 			setPortMappingTypes: func(PortMappingTypes) {},
 			bindToDevice:        func(int) error { return nil },
+
+			// With STUN enabled (testDisableSTUN = false), there are cases
+			// where the WebRTC Data Channel is not successfully established.
+			// With a short enough timeout here, clients will redial and
+			// eventually succceed.
+			webRTCAwaitDataChannelTimeout: 5 * time.Second,
 		}
 
 		if isMobile {
-			dialParams.networkType = NetworkTypeMobile
-			dialParams.disableInboundForMobleNetworks = true
+			webRTCCoordinator.networkType = NetworkTypeMobile
+			webRTCCoordinator.disableInboundForMobleNetworks = true
 		}
 
-		brokerClient, err := NewBrokerClient(dialParams)
+		brokerClient, err := NewBrokerClient(brokerCoordinator)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
 
-		return dialParams, brokerClient, nil
+		return brokerClient, webRTCCoordinator, nil
 	}
 
-	clientDialParams, clientBrokerClient, err := newClientParams(false)
+	clientBrokerClient, clientWebRTCCoordinator, err := newClientParams(false)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	clientMobileDialParams, clientMobileBrokerClient, err := newClientParams(true)
+	clientMobileBrokerClient, clientMobileWebRTCCoordinator, err := newClientParams(true)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -558,53 +690,53 @@ func runTestInProxy() error {
 		// Exercise BrokerClients shared by multiple clients, but also create
 		// several broker clients.
 		if i%8 == 0 {
-			clientDialParams, clientBrokerClient, err = newClientParams(false)
+			clientBrokerClient, clientWebRTCCoordinator, err = newClientParams(false)
 			if err != nil {
 				return errors.Trace(err)
 			}
 
-			clientMobileDialParams, clientMobileBrokerClient, err = newClientParams(true)
+			clientMobileBrokerClient, clientMobileWebRTCCoordinator, err = newClientParams(true)
 			if err != nil {
 				return errors.Trace(err)
 			}
 		}
 
-		dialParams := clientDialParams
 		brokerClient := clientBrokerClient
+		webRTCCoordinator := clientWebRTCCoordinator
 		if isMobile {
-			dialParams = clientMobileDialParams
 			brokerClient = clientMobileBrokerClient
+			webRTCCoordinator = clientMobileWebRTCCoordinator
 		}
 
-		clientsGroup.Go(makeClientFunc(isTCP, isMobile, dialParams, brokerClient))
+		clientsGroup.Go(makeClientFunc(isTCP, isMobile, brokerClient, webRTCCoordinator))
 	}
 
 	// Await client transfers complete
+
+	logger.WithTrace().Info("AWAIT DATA TRANSFER")
 
 	err = clientsGroup.Wait()
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	if hasPendingBrokerServerRequests() {
+	logger.WithTrace().Info("DONE DATA TRANSFER")
+
+	if hasPendingBrokerServerReports() {
 		return errors.TraceNew("unexpected pending broker server requests")
 	}
 
-	// Await shutdowns
-
-	stopTest()
-	brokerListener.Close()
-
-	err = testGroup.Wait()
-	if err != nil {
-		return errors.Trace(err)
+	if hasPendingProxyTacticsCallbacks() {
+		return errors.TraceNew("unexpected pending proxy tactics callback")
 	}
 
 	// TODO: check that elapsed time is consistent with rate limit (+/-)
 
 	// Check if STUN server replay callbacks were triggered
-	if atomic.LoadInt32(&stunServerAddressSucceededCount) < 1 {
-		return errors.TraceNew("unexpected STUN server succeeded count")
+	if !testDisableSTUN {
+		if atomic.LoadInt32(&stunServerAddressSucceededCount) < 1 {
+			return errors.TraceNew("unexpected STUN server succeeded count")
+		}
 	}
 	if atomic.LoadInt32(&stunServerAddressFailedCount) > 0 {
 		return errors.TraceNew("unexpected STUN server failed count")
@@ -618,51 +750,70 @@ func runTestInProxy() error {
 		return errors.TraceNew("unexpected round tripper failed count")
 	}
 
+	// Await shutdowns
+
+	stopTest()
+	brokerListener.Close()
+
+	err = testGroup.Wait()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	return nil
 }
 
 func runHTTPServer(listener net.Listener, broker *Broker) error {
 
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		// For this test, clients set the path to "/client" and proxies
+		// set the path to "/proxy" and we use that to create stub GeoIP
+		// data to pass the not-same-ASN condition.
+		var geoIPData common.GeoIPData
+		geoIPData.ASN = r.URL.Path
+
+		requestPayload, err := ioutil.ReadAll(
+			http.MaxBytesReader(w, r.Body, BrokerMaxRequestBodySize))
+		if err != nil {
+			fmt.Printf("runHTTPServer ioutil.ReadAll failed: %v\n", err)
+			http.Error(w, "", http.StatusNotFound)
+			return
+		}
+
+		clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+
+		extendTimeout := func(timeout time.Duration) {
+			// TODO: set insufficient initial timeout, so extension is
+			// required for success
+			http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout))
+		}
+
+		responsePayload, err := broker.HandleSessionPacket(
+			r.Context(),
+			extendTimeout,
+			clientIP,
+			geoIPData,
+			requestPayload)
+		if err != nil {
+			fmt.Printf("runHTTPServer HandleSessionPacket failed: %v\n", err)
+			http.Error(w, "", http.StatusNotFound)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(responsePayload)
+	})
+
+	// WriteTimeout will be extended via extendTimeout.
 	httpServer := &http.Server{
-		ReadTimeout:  BrokerReadTimeout,
-		WriteTimeout: BrokerWriteTimeout,
-		IdleTimeout:  BrokerIdleTimeout,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-			// For this test, clients set the path to "/client" and proxies
-			// set the path to "/proxy" and we use that to create stub GeoIP
-			// data to pass the not-same-ASN condition.
-			var geoIPData common.GeoIPData
-			geoIPData.ASN = r.URL.Path
-
-			// Not an actual HTTP header in this test.
-			transportSecret := broker.config.TransportSecret
-
-			requestPayload, err := ioutil.ReadAll(
-				http.MaxBytesReader(w, r.Body, BrokerMaxRequestBodySize))
-			if err != nil {
-				fmt.Printf("runHTTPServer ioutil.ReadAll failed: %v\n", err)
-				http.Error(w, "", http.StatusNotFound)
-				return
-			}
-			clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-			responsePayload, err := broker.HandleSessionPacket(
-				r.Context(),
-				transportSecret,
-				clientIP,
-				geoIPData,
-				requestPayload)
-			if err != nil {
-				fmt.Printf("runHTTPServer HandleSessionPacket failed: %v", err)
-				http.Error(w, "", http.StatusNotFound)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			w.Write(responsePayload)
-		}),
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 10 * time.Millisecond,
+		IdleTimeout:  1 * time.Minute,
+		Handler:      handler,
 	}
 
-	certificate, privateKey, err := common.GenerateWebServerCertificate("www.example.com")
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate("www.example.com")
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -691,7 +842,7 @@ func newHTTPRoundTripper(endpointAddr string, path string) *httpRoundTripper {
 			Transport: &http.Transport{
 				ForceAttemptHTTP2:   true,
 				MaxIdleConns:        2,
-				IdleConnTimeout:     BrokerIdleTimeout,
+				IdleConnTimeout:     1 * time.Minute,
 				TLSHandshakeTimeout: 1 * time.Second,
 				TLSClientConfig: &tls.Config{
 					InsecureSkipVerify: true,

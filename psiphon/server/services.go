@@ -226,18 +226,6 @@ func RunServices(configJSON []byte) (retErr error) {
 		}()
 	}
 
-	if config.RunWebServer() {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			err := RunWebServer(support, shutdownBroadcast)
-			select {
-			case errorChannel <- err:
-			default:
-			}
-		}()
-	}
-
 	// The tunnel server is always run; it launches multiple
 	// listeners, depending on which tunnel protocols are enabled.
 	waitGroup.Add(1)
@@ -457,7 +445,7 @@ func logIrregularTunnel(
 	support *SupportServices,
 	listenerTunnelProtocol string,
 	listenerPort int,
-	clientIP string,
+	peerIP string,
 	tunnelError error,
 	logFields LogFields) {
 
@@ -468,8 +456,12 @@ func logIrregularTunnel(
 	logFields["event_name"] = "irregular_tunnel"
 	logFields["listener_protocol"] = listenerTunnelProtocol
 	logFields["listener_port_number"] = listenerPort
-	support.GeoIPService.Lookup(clientIP).SetLogFields(logFields)
 	logFields["tunnel_error"] = tunnelError.Error()
+
+	// Note: logging with the "client_" prefix for legacy compatibility; it
+	// would be more correct to use the prefix "peer_".
+	support.GeoIPService.Lookup(peerIP).SetClientLogFields(logFields)
+
 	log.LogRawFieldsWithTimestamp(logFields)
 }
 
@@ -578,6 +570,13 @@ func (support *SupportServices) Reload() {
 		// Don't use stale tactics.
 		support.ReplayCache.Flush()
 		support.ServerTacticsParametersCache.Flush()
+
+		err := support.TunnelServer.ReloadTactics()
+		if err != nil {
+			log.WithTraceFields(
+				LogFields{"error": errors.Trace(err)}).Warning(
+				"failed to reload tunnel server tactics")
+		}
 
 		if support.Config.RunPacketManipulator {
 			err := reloadPacketManipulationSpecs(support)

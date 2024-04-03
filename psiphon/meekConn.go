@@ -520,14 +520,10 @@ func DialMeek(
 		// session to preserve, and establishment will simply try another server.
 		// Note that the underlying TCPDial may still try multiple IP addreses when
 		// the destination is a domain and it resolves to multiple IP adresses.
-
+		//
 		// The pre-dial is made within the parent dial context, so that DialMeek
 		// may be interrupted. Subsequent dials are made within the meek round trip
-		// request context. Since http.DialTLS doesn't take a context argument
-		// (yet; as of Go 1.9 this issue is still open: https://github.com/golang/go/issues/21526),
-		// cachedTLSDialer is used as a conduit to send the request context.
-		// meekConn.relayRoundTrip sets its request context into cachedTLSDialer,
-		// and cachedTLSDialer.dial uses that context.
+		// request context.
 
 		// As DialAddr is set in the CustomTLSConfig, no address is required here.
 		preConn, err := tlsDialer(ctx, "tcp", "")
@@ -540,14 +536,16 @@ func DialMeek(
 		if IsTLSConnUsingHTTP2(preConn) {
 			NoticeInfo("negotiated HTTP/2 for %s", meekConfig.DiagnosticID)
 			transport = &http2.Transport{
-				DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
-					return cachedTLSDialer.dial(network, addr)
+				DialTLSContext: func(
+					ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+					return cachedTLSDialer.dial(ctx, network, addr)
 				},
 			}
 		} else {
 			transport = &http.Transport{
-				DialTLS: func(network, addr string) (net.Conn, error) {
-					return cachedTLSDialer.dial(network, addr)
+				DialTLSContext: func(
+					ctx context.Context, network, addr string) (net.Conn, error) {
+					return cachedTLSDialer.dial(ctx, network, addr)
 				},
 			}
 		}
@@ -791,9 +789,6 @@ type cachedTLSDialer struct {
 	usedCachedConn int32
 	cachedConn     net.Conn
 	dialer         common.Dialer
-
-	mutex      sync.Mutex
-	requestCtx context.Context
 }
 
 func newCachedTLSDialer(cachedConn net.Conn, dialer common.Dialer) *cachedTLSDialer {
@@ -803,25 +798,11 @@ func newCachedTLSDialer(cachedConn net.Conn, dialer common.Dialer) *cachedTLSDia
 	}
 }
 
-func (c *cachedTLSDialer) setRequestContext(requestCtx context.Context) {
-	// Note: not using sync.Value since underlying type of requestCtx may change.
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	c.requestCtx = requestCtx
-}
-
-func (c *cachedTLSDialer) dial(network, addr string) (net.Conn, error) {
+func (c *cachedTLSDialer) dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	if atomic.CompareAndSwapInt32(&c.usedCachedConn, 0, 1) {
 		conn := c.cachedConn
 		c.cachedConn = nil
 		return conn, nil
-	}
-
-	c.mutex.Lock()
-	ctx := c.requestCtx
-	c.mutex.Unlock()
-	if ctx == nil {
-		ctx = context.Background()
 	}
 
 	return c.dialer(ctx, network, addr)
@@ -853,9 +834,10 @@ func (meek *MeekConn) Close() (err error) {
 
 		// stopRunning interrupts HTTP requests in progress by closing the context
 		// associated with the request. In the case of h2quic.RoundTripper, testing
-		// indicates that quic-go.receiveStream.readImpl in _not_ interrupted in
+		// indicates that quic-go.receiveStream.readImpl is _not_ interrupted in
 		// this case, and so an in-flight FRONTED-MEEK-QUIC round trip may hang shutdown
 		// in relayRoundTrip->readPayload->...->quic-go.receiveStream.readImpl.
+		// TODO: check if this is still the case in newer quic-go versions.
 		//
 		// To workaround this, we call CloseIdleConnections _before_ Wait, as, in
 		// the case of QUICTransporter, this closes the underlying UDP sockets which
@@ -927,10 +909,8 @@ func (meek *MeekConn) GetNoticeMetrics() common.LogFields {
 // plaintext in the meek traffic. The caller is responsible for securing and
 // obfuscating the request body.
 //
-// ObfuscatedRoundTrip is not safe for concurrent use. The caller must ensure
-// only one ObfuscatedRoundTrip call is active at once. If Close is called
-// before or concurrent with ObfuscatedRoundTrip, or before the response body
-// is read, idle connections may be left open.
+// If Close is called before or concurrent with ObfuscatedRoundTrip, or before
+// the response body is read, idle connections may be left open.
 func (meek *MeekConn) ObfuscatedRoundTrip(
 	requestCtx context.Context, endPoint string, requestBody []byte) ([]byte, error) {
 
@@ -948,14 +928,6 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	// Note:
-	//
-	// - multiple, concurrent ObfuscatedRoundTrip calls are unsafe due to the
-	//   setDialerRequestContext calls in newRequest.
-	//
-	// At this time, ObfuscatedRoundTrip is used for tactics in Controller and
-	// the concurrency constraints are satisfied.
 
 	request, err := meek.newRequest(
 		requestCtx, cookie, contentType, bytes.NewReader(requestBody), 0)
@@ -988,10 +960,8 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 // used when TLS and server certificate verification are configured. RoundTrip
 // does not implement any security or obfuscation at the HTTP layer.
 //
-// RoundTrip is not safe for concurrent use. The caller must ensure only one
-// RoundTrip call is active at once. If Close is called before or concurrent
-// with RoundTrip, or before the response body is read, idle connections may
-// be left open.
+// If Close is called before or concurrent with RoundTrip, or before the
+// response body is read, idle connections may be left open.
 func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
 
 	if meek.mode != MeekModePlaintextRoundTrip {
@@ -1003,12 +973,6 @@ func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
 	// Clone the request to apply addtional headers without modifying the input.
 	request = request.Clone(requestCtx)
 	meek.addAdditionalHeaders(request)
-
-	// The setDialerRequestContext/CloseIdleConnections concurrency note in
-	// ObfuscatedRoundTrip applies to RoundTrip as well.
-
-	// Ensure dials are made within the request context.
-	meek.setDialerRequestContext(requestCtx)
 
 	meek.scheduleQUICCloseIdle(request)
 
@@ -1298,9 +1262,6 @@ func (meek *MeekConn) newRequest(
 	body io.Reader,
 	contentLength int) (*http.Request, error) {
 
-	// Ensure dials are made within the request context.
-	meek.setDialerRequestContext(requestCtx)
-
 	request, err := http.NewRequest("POST", meek.url.String(), body)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1324,17 +1285,6 @@ func (meek *MeekConn) newRequest(
 	request.AddCookie(cookie)
 
 	return request, nil
-}
-
-// setDialerRequestContext ensures that underlying TLS/QUIC dials operate
-// within the context of the request context. setDialerRequestContext must not
-// be called while another request is already in flight.
-func (meek *MeekConn) setDialerRequestContext(requestCtx context.Context) {
-	if meek.isQUIC {
-		meek.transport.(*quic.QUICTransporter).SetRequestContext(requestCtx)
-	} else if meek.cachedTLSDialer != nil {
-		meek.cachedTLSDialer.setRequestContext(requestCtx)
-	}
 }
 
 // Workaround for h2quic.RoundTripper context issue. See comment in

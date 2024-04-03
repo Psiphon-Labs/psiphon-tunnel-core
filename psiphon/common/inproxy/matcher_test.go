@@ -21,6 +21,7 @@ package inproxy
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -40,11 +41,23 @@ func TestMatcher(t *testing.T) {
 
 func runTestMatcher() error {
 
+	limitEntryCount := 50
+	rateLimitQuantity := 100
+	rateLimitInterval := 500 * time.Millisecond
+
 	logger := newTestLogger()
 
 	m := NewMatcher(
 		&MatcherConfig{
 			Logger: logger,
+
+			AnnouncementLimitEntryCount:   limitEntryCount,
+			AnnouncementRateLimitQuantity: rateLimitQuantity,
+			AnnouncementRateLimitInterval: rateLimitInterval,
+
+			OfferLimitEntryCount:   limitEntryCount,
+			OfferRateLimitQuantity: rateLimitQuantity,
+			OfferRateLimitInterval: rateLimitInterval,
 		})
 	err := m.Start()
 	if err != nil {
@@ -75,8 +88,11 @@ func runTestMatcher() error {
 		}
 	}
 
+	proxyIP := randomIPAddress()
+
 	proxyFunc := func(
 		resultChan chan error,
+		proxyIP string,
 		matchProperties *MatchProperties,
 		timeout time.Duration,
 		waitBeforeAnswer chan struct{},
@@ -86,7 +102,7 @@ func runTestMatcher() error {
 		defer cancelFunc()
 
 		announcement := makeAnnouncement(matchProperties)
-		offer, err := m.Announce(ctx, announcement)
+		offer, err := m.Announce(ctx, proxyIP, announcement)
 		if err != nil {
 			resultChan <- errors.Trace(err)
 			return
@@ -109,8 +125,11 @@ func runTestMatcher() error {
 		resultChan <- errors.Trace(err)
 	}
 
+	clientIP := randomIPAddress()
+
 	clientFunc := func(
 		resultChan chan error,
+		clientIP string,
 		matchProperties *MatchProperties,
 		timeout time.Duration) {
 
@@ -118,7 +137,7 @@ func runTestMatcher() error {
 		defer cancelFunc()
 
 		offer := makeOffer(matchProperties)
-		answer, _, err := m.Offer(ctx, offer)
+		answer, _, err := m.Offer(ctx, clientIP, offer)
 		if err != nil {
 			resultChan <- errors.Trace(err)
 			return
@@ -134,7 +153,7 @@ func runTestMatcher() error {
 
 	proxyResultChan := make(chan error)
 
-	go proxyFunc(proxyResultChan, &MatchProperties{}, 1*time.Microsecond, nil, true)
+	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 1*time.Microsecond, nil, true)
 
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -144,11 +163,63 @@ func runTestMatcher() error {
 		return errors.TraceNew("unexpected queue size")
 	}
 
+	// Test: limit announce entries by IP
+
+	time.Sleep(rateLimitInterval)
+
+	maxEntries := limitEntryCount
+	maxEntriesProxyResultChan := make(chan error, maxEntries)
+
+	// fill the queue with max entries for one IP; the first one will timeout sooner
+	go proxyFunc(maxEntriesProxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
+	for i := 0; i < maxEntries-1; i++ {
+		go proxyFunc(maxEntriesProxyResultChan, proxyIP, &MatchProperties{}, 100*time.Millisecond, nil, true)
+	}
+
+	// await goroutines filling queue
+	for {
+		time.Sleep(10 * time.Microsecond)
+		m.announcementQueueMutex.Lock()
+		queueLen := m.announcementQueue.Len()
+		m.announcementQueueMutex.Unlock()
+		if queueLen == maxEntries {
+			break
+		}
+	}
+
+	// the next enqueue should fail with "max entries"
+	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
+	err = <-proxyResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "max entries for IP") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// wait for first entry to timeout
+	err = <-maxEntriesProxyResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// now another enqueue succeeds as expected
+	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
+	err = <-proxyResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// drain remaining entries
+	for i := 0; i < maxEntries-1; i++ {
+		err = <-maxEntriesProxyResultChan
+		if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+			return errors.Tracef("unexpected result: %v", err)
+		}
+	}
+
 	// Test: offer timeout
 
 	clientResultChan := make(chan error)
 
-	go clientFunc(clientResultChan, &MatchProperties{}, 1*time.Microsecond)
+	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 1*time.Microsecond)
 
 	err = <-clientResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -157,6 +228,107 @@ func runTestMatcher() error {
 	if m.offerQueue.Len() != 0 {
 		return errors.TraceNew("unexpected queue size")
 	}
+
+	// Test: limit offer entries by IP
+
+	time.Sleep(rateLimitInterval)
+
+	maxEntries = limitEntryCount
+	maxEntriesClientResultChan := make(chan error, maxEntries)
+
+	// fill the queue with max entries for one IP; the first one will timeout sooner
+	go clientFunc(maxEntriesClientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)
+	for i := 0; i < maxEntries-1; i++ {
+		go clientFunc(maxEntriesClientResultChan, clientIP, &MatchProperties{}, 100*time.Millisecond)
+	}
+
+	// await goroutines filling queue
+	for {
+		time.Sleep(10 * time.Microsecond)
+
+		m.offerQueueMutex.Lock()
+		queueLen := m.offerQueue.Len()
+		m.offerQueueMutex.Unlock()
+		if queueLen == maxEntries {
+			break
+		}
+	}
+
+	// enqueue should fail with "max entries"
+	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)
+	err = <-clientResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "max entries for IP") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// wait for first entry to timeout
+	err = <-maxEntriesClientResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// now another enqueue succeeds as expected
+	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)
+	err = <-clientResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// drain remaining entries
+	for i := 0; i < maxEntries-1; i++ {
+		err = <-maxEntriesClientResultChan
+		if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+			return errors.Tracef("unexpected result: %v", err)
+		}
+	}
+
+	// Test: announcement rate limit
+
+	m.SetLimits(
+		0, rateLimitQuantity, rateLimitInterval, []ID{},
+		0, rateLimitQuantity, rateLimitInterval)
+
+	time.Sleep(rateLimitInterval)
+
+	maxEntries = rateLimitQuantity
+	maxEntriesProxyResultChan = make(chan error, maxEntries)
+
+	for i := 0; i < maxEntries; i++ {
+		go proxyFunc(maxEntriesProxyResultChan, proxyIP, &MatchProperties{}, 1*time.Microsecond, nil, true)
+	}
+
+	time.Sleep(rateLimitInterval / 2)
+
+	// the next enqueue should fail with "rate exceeded"
+	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
+	err = <-proxyResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "rate exceeded for IP") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// Test: offer rate limit
+
+	maxEntries = rateLimitQuantity
+	maxEntriesClientResultChan = make(chan error, maxEntries)
+
+	for i := 0; i < rateLimitQuantity; i++ {
+		go clientFunc(maxEntriesClientResultChan, clientIP, &MatchProperties{}, 1*time.Microsecond)
+	}
+
+	time.Sleep(rateLimitInterval / 2)
+
+	// enqueue should fail with "rate exceeded"
+	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)
+	err = <-clientResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "rate exceeded for IP") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	time.Sleep(rateLimitInterval)
+
+	m.SetLimits(
+		limitEntryCount, rateLimitQuantity, rateLimitInterval, []ID{},
+		limitEntryCount, rateLimitQuantity, rateLimitInterval)
 
 	// Test: basic match
 
@@ -172,8 +344,8 @@ func runTestMatcher() error {
 		CommonCompartmentIDs: basicCommonCompartmentIDs,
 	}
 
-	go proxyFunc(proxyResultChan, geoIPData1, 10*time.Millisecond, nil, true)
-	go clientFunc(clientResultChan, geoIPData2, 10*time.Millisecond)
+	go proxyFunc(proxyResultChan, proxyIP, geoIPData1, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, geoIPData2, 10*time.Millisecond)
 
 	err = <-proxyResultChan
 	if err != nil {
@@ -187,8 +359,8 @@ func runTestMatcher() error {
 
 	// Test: answer error
 
-	go proxyFunc(proxyResultChan, geoIPData1, 10*time.Millisecond, nil, false)
-	go clientFunc(clientResultChan, geoIPData2, 10*time.Millisecond)
+	go proxyFunc(proxyResultChan, proxyIP, geoIPData1, 10*time.Millisecond, nil, false)
+	go clientFunc(clientResultChan, clientIP, geoIPData2, 10*time.Millisecond)
 
 	err = <-proxyResultChan
 	if err != nil {
@@ -204,8 +376,8 @@ func runTestMatcher() error {
 
 	waitBeforeAnswer := make(chan struct{})
 
-	go proxyFunc(proxyResultChan, geoIPData1, 100*time.Millisecond, waitBeforeAnswer, true)
-	go clientFunc(clientResultChan, geoIPData2, 10*time.Millisecond)
+	go proxyFunc(proxyResultChan, proxyIP, geoIPData1, 100*time.Millisecond, waitBeforeAnswer, true)
+	go clientFunc(clientResultChan, clientIP, geoIPData2, 10*time.Millisecond)
 
 	err = <-clientResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -233,8 +405,8 @@ func runTestMatcher() error {
 		PersonalCompartmentIDs: []ID{makeID()},
 	}
 
-	go proxyFunc(proxyResultChan, compartment1, 10*time.Millisecond, nil, true)
-	go clientFunc(clientResultChan, compartment2, 10*time.Millisecond)
+	go proxyFunc(proxyResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, compartment2, 10*time.Millisecond)
 
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -253,8 +425,8 @@ func runTestMatcher() error {
 		CommonCompartmentIDs: []ID{compartment1.CommonCompartmentIDs[0], compartment2.CommonCompartmentIDs[0]},
 	}
 
-	go proxyFunc(proxyResultChan, compartment1, 10*time.Millisecond, nil, true)
-	go clientFunc(clientResultChan, compartment1And2, 10*time.Millisecond)
+	go proxyFunc(proxyResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, compartment1And2, 10*time.Millisecond)
 
 	err = <-proxyResultChan
 	if err != nil {
@@ -273,8 +445,8 @@ func runTestMatcher() error {
 		PersonalCompartmentIDs: []ID{compartment1.PersonalCompartmentIDs[0], compartment2.PersonalCompartmentIDs[0]},
 	}
 
-	go proxyFunc(proxyResultChan, compartment1, 10*time.Millisecond, nil, true)
-	go clientFunc(clientResultChan, compartment1And2, 10*time.Millisecond)
+	go proxyFunc(proxyResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, compartment1And2, 10*time.Millisecond)
 
 	err = <-proxyResultChan
 	if err != nil {
@@ -310,10 +482,10 @@ func runTestMatcher() error {
 	proxy1ResultChan := make(chan error)
 	proxy2ResultChan := make(chan error)
 
-	go proxyFunc(proxy1ResultChan, compartment1Common, 10*time.Millisecond, nil, true)
-	go proxyFunc(proxy2ResultChan, compartment1Personal, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxy1ResultChan, proxyIP, compartment1Common, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxy2ResultChan, proxyIP, compartment1Personal, 10*time.Millisecond, nil, true)
 	time.Sleep(5 * time.Millisecond) // Hack to ensure both proxies are enqueued
-	go clientFunc(client1ResultChan, compartment1CommonAndPersonal, 10*time.Millisecond)
+	go clientFunc(client1ResultChan, clientIP, compartment1CommonAndPersonal, 10*time.Millisecond)
 
 	err = <-proxy1ResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -333,8 +505,8 @@ func runTestMatcher() error {
 
 	// Test: no same-ASN match
 
-	go proxyFunc(proxyResultChan, geoIPData1, 10*time.Millisecond, nil, true)
-	go clientFunc(clientResultChan, geoIPData1, 10*time.Millisecond)
+	go proxyFunc(proxyResultChan, proxyIP, geoIPData1, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, geoIPData1, 10*time.Millisecond)
 
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -372,10 +544,10 @@ func runTestMatcher() error {
 		CommonCompartmentIDs: basicCommonCompartmentIDs,
 	}
 
-	go proxyFunc(proxy1ResultChan, proxy1Properties, 10*time.Millisecond, nil, true)
-	go proxyFunc(proxy2ResultChan, proxy2Properties, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxy1ResultChan, proxyIP, proxy1Properties, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxy2ResultChan, proxyIP, proxy2Properties, 10*time.Millisecond, nil, true)
 	time.Sleep(5 * time.Millisecond) // Hack to ensure both proxies are enqueued
-	go clientFunc(client1ResultChan, client1Properties, 10*time.Millisecond)
+	go clientFunc(client1ResultChan, clientIP, client1Properties, 10*time.Millisecond)
 
 	err = <-proxy1ResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -395,10 +567,17 @@ func runTestMatcher() error {
 
 	// Test: client preferred NAT match
 
-	go proxyFunc(client1ResultChan, client1Properties, 10*time.Millisecond, nil, true)
-	go proxyFunc(client2ResultChan, client2Properties, 10*time.Millisecond, nil, true)
-	time.Sleep(500 * time.Microsecond) // Hack to ensure both clients are enqueued
-	go clientFunc(proxy1ResultChan, proxy1Properties, 10*time.Millisecond)
+	// Limitation: the current Matcher.matchAllOffers logic matches the first
+	// enqueued client against the best proxy match, regardless of whether
+	// there is another client in the queue that's a better match for that
+	// proxy. As a result, this test only passes when the preferred matching
+	// client is enqueued first, and the test is currently of limited utility.
+
+	go clientFunc(client2ResultChan, clientIP, client2Properties, 20*time.Millisecond)
+	time.Sleep(5 * time.Millisecond) // Hack to client is enqueued
+	go clientFunc(client1ResultChan, clientIP, client1Properties, 20*time.Millisecond)
+	time.Sleep(5 * time.Millisecond) // Hack to client is enqueued
+	go proxyFunc(proxy1ResultChan, proxyIP, proxy1Properties, 20*time.Millisecond, nil, true)
 
 	err = <-proxy1ResultChan
 	if err != nil {
@@ -433,11 +612,11 @@ func runTestMatcher() error {
 
 		// Don't simply alternate enqueuing a proxy and a client
 		if proxyCount > 0 && (clientCount == 0 || prng.FlipCoin()) {
-			go proxyFunc(proxyResultChan, geoIPData1, 10*time.Second, nil, true)
+			go proxyFunc(proxyResultChan, randomIPAddress(), geoIPData1, 10*time.Second, nil, true)
 			proxyCount -= 1
 
 		} else if clientCount > 0 {
-			go clientFunc(clientResultChan, geoIPData2, 10*time.Second)
+			go clientFunc(clientResultChan, randomIPAddress(), geoIPData2, 10*time.Second)
 			clientCount -= 1
 		}
 	}
@@ -455,4 +634,12 @@ func runTestMatcher() error {
 	}
 
 	return nil
+}
+
+func randomIPAddress() string {
+	return fmt.Sprintf("%d.%d.%d.%d",
+		prng.Range(0, 255),
+		prng.Range(0, 255),
+		prng.Range(0, 255),
+		prng.Range(0, 255))
 }

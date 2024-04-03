@@ -24,6 +24,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -331,7 +332,7 @@ func (conn *WriteTimeoutUDPConn) Write(b []byte) (int, error) {
 		return 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by UDPConn
 	return conn.UDPConn.Write(b)
 }
 
@@ -342,8 +343,19 @@ func (conn *WriteTimeoutUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (
 		return 0, 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by UDPConn
 	return conn.UDPConn.WriteMsgUDP(b, oob, addr)
+}
+
+func (conn *WriteTimeoutUDPConn) WriteMsgUDPAddrPort(b, oob []byte, addr netip.AddrPort) (int, int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by UDPConn
+	return conn.UDPConn.WriteMsgUDPAddrPort(b, oob, addr)
 }
 
 func (conn *WriteTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
@@ -353,8 +365,19 @@ func (conn *WriteTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 		return 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by UDPConn
 	return conn.UDPConn.WriteTo(b, addr)
+}
+
+func (conn *WriteTimeoutUDPConn) WriteToUDPAddrPort(b []byte, addr netip.AddrPort) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by UDPConn
+	return conn.UDPConn.WriteToUDPAddrPort(b, addr)
 }
 
 func (conn *WriteTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, error) {
@@ -364,7 +387,7 @@ func (conn *WriteTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, e
 		return 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by UDPConn
 	return conn.UDPConn.WriteToUDP(b, addr)
 }
 
@@ -383,6 +406,21 @@ func (conn *WriteTimeoutPacketConn) WriteTo(b []byte, addr net.Addr) (int, error
 		return 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by PacketConn
 	return conn.PacketConn.WriteTo(b, addr)
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *WriteTimeoutPacketConn) GetMetrics() LogFields {
+
+	logFields := make(LogFields)
+
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
+	underlyingMetrics, ok := conn.PacketConn.(MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
+
+	return logFields
 }

@@ -23,9 +23,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	std_errors "errors"
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,17 +36,35 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	inproxy_dtls "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy/dtls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 	"github.com/pion/datachannel"
+	"github.com/pion/dtls/v2"
 	"github.com/pion/ice/v2"
 	"github.com/pion/sdp/v3"
+	"github.com/pion/transport/v2"
 	"github.com/pion/webrtc/v3"
-	"github.com/wader/filtertransport"
+	"github.com/wlynxg/anet"
 )
 
 const (
+	dataChannelAwaitTimeout                      = 20 * time.Second
 	dataChannelBufferedAmountLowThreshold uint64 = 512 * 1024
 	dataChannelMaxBufferedAmount          uint64 = 1024 * 1024
 	dataChannelMaxMessageSize                    = 65536
+
+	// Psiphon uses a fork of github.com/pion/dtls/v2, selected with go mod
+	// replace, which has an idential API apart from dtls.IsPsiphon. If
+	// dtls.IsPsiphon is undefined, the build is not using the fork.
+	//
+	// Limitation: this doesn't check that the vendored code is exactly the
+	// same code as the fork.
+	assertDTLSFork = dtls.IsPsiphon
+
+	// Similarly, check for the fork of github.com/pion/ice/v2.
+	assertICEFork = ice.IsPsiphon
+
+	// Note that Psiphon also uses a fork of github.com/pion/webrtc/v3, but it
+	// has an API change which will cause builds to fail when not present.
 )
 
 // WebRTCConn is a WebRTC connection between two peers, with a data channel
@@ -80,6 +100,11 @@ type WebRTCConn struct {
 	paddedMessageCount   int
 	decoyMessageCount    int
 	trafficShapingDone   bool
+
+	paddedMessagesSent     int32
+	paddedMessagesReceived int32
+	decoyMessagesSent      int32
+	decoyMessagesReceived  int32
 }
 
 // WebRTCConfig specifies the configuration for a WebRTC dial.
@@ -88,10 +113,10 @@ type WebRTCConfig struct {
 	// Logger is used to log events.
 	Logger common.Logger
 
-	// DialParameters specifies specific WebRTC dial strategies and
-	// settings; DialParameters also facilities dial replay by receiving
-	// callbacks when individual dial steps succeed or fail.
-	DialParameters DialParameters
+	// WebRTCDialCoordinator specifies specific WebRTC dial strategies and
+	// settings; WebRTCDialCoordinator also facilities dial replay by
+	// receiving callbacks when individual dial steps succeed or fail.
+	WebRTCDialCoordinator WebRTCDialCoordinator
 
 	// ClientRootObfuscationSecret is generated (or replayed) by the client
 	// and sent to the proxy and used to drive obfuscation operations.
@@ -155,7 +180,7 @@ func newWebRTCConn(
 
 	isOffer := peerSDP == nil
 
-	udpConn, err := config.DialParameters.UDPListen()
+	udpConn, err := config.WebRTCDialCoordinator.UDPListen(ctx)
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
@@ -185,10 +210,10 @@ func newWebRTCConn(
 
 	// UDPMux Limitations:
 	//
-	// For Psiphon, DialParameters.UDPListen will call
+	// For Psiphon, WebRTCDialCoordinator.UDPListen will call
 	// https://pkg.go.dev/net#ListenUDP with an unspecified IP address, in
 	// order to listen on all available interfaces, both IPv4 and IPv6.
-	// However, using webrtc.NewICEUDPMux and a UDP conn with an unspecifed
+	// However, using webrtc.NewICEUDPMux and a UDP conn with an unspecified
 	// IP address results in this log warning: "UDPMuxDefault should not
 	// listening on unspecified address, use NewMultiUDPMuxFromPort instead".
 	//
@@ -225,6 +250,21 @@ func newWebRTCConn(
 	// successful data channel connection. Since we need to use a Mux API on
 	// both clients and proxies, we can't yet use MultiUDPMux.
 	//
+	// We patch pion/webrtc to add the SetICEUDPMuxSrflx functionality from
+	// the currently unmerged https://github.com/pion/webrtc/pull/2298.
+	// Without SetICEUDPMuxSrflx, STUN operations don't use the mux.
+	//
+	// We patch pion/ice gatherCandidatesSrflxUDPMux vendor patch to include
+	// only the correct network type (IPv4 or IPv6) address candidates.
+	// Without this patch, we observed up to 2x duplicate/redundant STUN
+	// candidates.
+	//
+	// TODO: implement and try using transport.Net UDP dial functions in place
+	// of NewICEUDPMux and pre-dialed UDP conn; track all dialed UDP
+	// connections to close on WebRTCConn.Close; this approach would require
+	// an alternative approach to injecting port mapping candidates, which
+	// currently depends on the mux UDP socket being available outside of pion.
+
 	// Another limitation and issue with NewICEUDPMux is that its enumeration
 	// of all local interfaces and IPs includes many IPv6 addresses for
 	// certain interfaces. For example, on macOS,
@@ -247,15 +287,25 @@ func newWebRTCConn(
 	// that the the first IPv6 address passed to the filter would be the
 	// non-deprecated temporary address.
 	//
-	// TODO: get interface IP addresses using native code, apply proper IPv6
-	// filtering, and pass in to pion.
+	// To workaround net.Interface issues, we use SettingEngine.SetNet to plug
+	// in an alternative implementation of net.Interface which selects only
+	// one IPv4 and one IPv6 active interface and IP address and uses the
+	// anet package for Android. See pionNetwork for more details.
 
-	udpMux := webrtc.NewICEUDPMux(&webrtcLogger{logger: config.Logger}, udpConn)
+	deadline, _ := ctx.Deadline()
+	TTL := time.Until(deadline)
+
+	pionLogger := newPionLogger(config.Logger)
+	pionNetwork := newPionNetwork(ctx, pionLogger, config.WebRTCDialCoordinator)
+
+	udpMux := webrtc.NewICEUniversalUDPMux(pionLogger, udpConn, TTL, pionNetwork)
 
 	settingEngine := webrtc.SettingEngine{}
+	settingEngine.SetNet(pionNetwork)
 	settingEngine.DetachDataChannels()
 	settingEngine.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 	settingEngine.SetICEUDPMux(udpMux)
+	settingEngine.SetICEUDPMuxSrflx(udpMux)
 	// Set this behavior to look like common web browser WebRTC stacks.
 	settingEngine.SetDTLSInsecureSkipHelloVerify(true)
 
@@ -288,9 +338,6 @@ func newWebRTCConn(
 	// pion/dtl fork treats no-seed as an error, as a check against the local
 	// address lookup mechanism.
 
-	deadline, _ := ctx.Deadline()
-	dtlsSeedTTL := time.Until(deadline)
-
 	if config.DoDTLSRandomization {
 
 		dtlsObfuscationSecret, err := deriveObfuscationSecret(
@@ -307,7 +354,7 @@ func newWebRTCConn(
 		// each address.
 		for _, localAddr := range udpMux.GetListenAddresses() {
 			err := inproxy_dtls.SetDTLSSeed(
-				localAddr, &baseSeed, isOffer, dtlsSeedTTL)
+				localAddr, &baseSeed, isOffer, TTL)
 			if err != nil {
 				return nil, nil, nil, errors.Trace(err)
 			}
@@ -316,7 +363,7 @@ func newWebRTCConn(
 	} else {
 
 		for _, localAddr := range udpMux.GetListenAddresses() {
-			inproxy_dtls.SetNoDTLSSeed(localAddr, dtlsSeedTTL)
+			inproxy_dtls.SetNoDTLSSeed(localAddr, TTL)
 		}
 	}
 
@@ -360,8 +407,8 @@ func newWebRTCConn(
 	// neither STUN nor port mapping will be effective. It's faster to not
 	// wait for something that ultimately won't work.
 
-	disableInbound := config.DialParameters.DisableInboundForMobleNetworks() &&
-		config.DialParameters.NetworkType() == NetworkTypeMobile
+	disableInbound := config.WebRTCDialCoordinator.DisableInboundForMobleNetworks() &&
+		config.WebRTCDialCoordinator.NetworkType() == NetworkTypeMobile
 
 	// Try to establish a port mapping (UPnP-IGD, PCP, or NAT-PMP). The port
 	// mapper will attempt to identify the local gateway and query various
@@ -373,7 +420,7 @@ func newWebRTCConn(
 	localPort := udpConn.LocalAddr().(*net.UDPAddr).Port
 	portMapper := newPortMapper(config.Logger, localPort)
 
-	doPortMapping := !disableInbound && !config.DialParameters.DisablePortMapping()
+	doPortMapping := !disableInbound && !config.WebRTCDialCoordinator.DisablePortMapping()
 
 	if doPortMapping {
 		portMapper.start()
@@ -384,8 +431,8 @@ func newWebRTCConn(
 	//
 	// Each dial trys only one STUN server; in Psiphon tunnel establishment,
 	// other, concurrent in-proxy dials may select alternative STUN servers
-	// via DialParameters. When the STUN server operation is successful,
-	// DialParameters will be signaled so that it may configure the STUN
+	// via WebRTCDialCoordinator. When the STUN server operation is successful,
+	// WebRTCDialCoordinator will be signaled so that it may configure the STUN
 	// server selection for replay.
 	//
 	// The STUN server will observe proxy IP addresses. Enumeration is
@@ -394,29 +441,19 @@ func newWebRTCConn(
 	// ephemeral than Psiphon servers.
 
 	RFC5780 := false
-	stunServerAddress := config.DialParameters.STUNServerAddress(RFC5780)
+	stunServerAddress := config.WebRTCDialCoordinator.STUNServerAddress(RFC5780)
 
 	// Proceed even when stunServerAddress is "" and !DisableSTUN, as ICE may
 	// find other host candidates.
 
-	doSTUN := stunServerAddress != "" && !disableInbound && !config.DialParameters.DisableSTUN()
+	doSTUN := stunServerAddress != "" && !disableInbound && !config.WebRTCDialCoordinator.DisableSTUN()
 
 	var ICEServers []webrtc.ICEServer
 
 	if doSTUN {
-
-		// Use the Psiphon custom resolver to resolve any STUN server domains.
-		serverAddress, err := config.DialParameters.ResolveAddress(
-			ctx, stunServerAddress)
-		if err != nil {
-			return nil, nil, nil, errors.Trace(err)
-		}
-
-		ICEServers = []webrtc.ICEServer{
-			webrtc.ICEServer{
-				URLs: []string{"stun:" + serverAddress},
-			},
-		}
+		// stunServerAddress domain names are resolved with the Psiphon custom
+		// resolver via pionNetwork.ResolveUDPAddr
+		ICEServers = []webrtc.ICEServer{{URLs: []string{"stun:" + stunServerAddress}}}
 	}
 
 	peerConnection, err := webRTCAPI.NewPeerConnection(
@@ -454,14 +491,14 @@ func newWebRTCConn(
 			// Cleanup on early return
 			conn.Close()
 
-			// Notify the DialParameters that the operation failed so that it
-			// can clear replay for that STUN server selection.
+			// Notify the WebRTCDialCoordinator that the operation failed so
+			// that it can clear replay for that STUN server selection.
 			//
 			// Limitation: the error here may be due to failures unrelated to
 			// the STUN server.
 
 			if ctx.Err() == nil && doSTUN {
-				config.DialParameters.STUNServerAddressFailed(RFC5780, stunServerAddress)
+				config.WebRTCDialCoordinator.STUNServerAddressFailed(RFC5780, stunServerAddress)
 			}
 		}
 	}()
@@ -564,8 +601,8 @@ func newWebRTCConn(
 		//
 		// Limitation: if there are multiple responding protocol types, it's
 		// not known here which was used for this dial.
-		config.DialParameters.SetPortMappingTypes(
-			getRespondingPortMappingTypes(config.DialParameters.NetworkID()))
+		config.WebRTCDialCoordinator.SetPortMappingTypes(
+			getRespondingPortMappingTypes(config.WebRTCDialCoordinator.NetworkID()))
 
 	case <-ctx.Done():
 		return nil, nil, nil, errors.Trace(ctx.Err())
@@ -584,15 +621,17 @@ func newWebRTCConn(
 	// Adjust the SDP, removing local network addresses and adding any
 	// port mapping candidate.
 
-	adjustedSDP, metrics, err := PrepareSDPAddresses([]byte(
-		localDescription.SDP), portMappingExternalAddr)
+	adjustedSDP, metrics, err := PrepareSDPAddresses(
+		[]byte(localDescription.SDP),
+		portMappingExternalAddr,
+		config.WebRTCDialCoordinator.DisableIPv6ICECandidates())
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
 
 	// When STUN was attempted, ICE completed, and a STUN server-reflexive
-	// candidate is present, notify the DialParameters so that it can set
-	// replay for that STUN server selection.
+	// candidate is present, notify the WebRTCDialCoordinator so that it can
+	// set replay for that STUN server selection.
 
 	if iceCompleted && doSTUN {
 		hasServerReflexive := false
@@ -602,9 +641,9 @@ func newWebRTCConn(
 			}
 		}
 		if hasServerReflexive {
-			config.DialParameters.STUNServerAddressSucceeded(RFC5780, stunServerAddress)
+			config.WebRTCDialCoordinator.STUNServerAddressSucceeded(RFC5780, stunServerAddress)
 		} else {
-			config.DialParameters.STUNServerAddressFailed(RFC5780, stunServerAddress)
+			config.WebRTCDialCoordinator.STUNServerAddressFailed(RFC5780, stunServerAddress)
 		}
 	}
 
@@ -690,13 +729,6 @@ func (conn *WebRTCConn) Close() error {
 		return nil
 	}
 
-	// Close the udpConn to interrupt any blocking DTLS handshake:
-	// https://github.com/pion/webrtc/blob/c1467e4871c78ee3f463b50d858d13dc6f2874a4/dtlstransport.go#L334-L340
-
-	if conn.udpConn != nil {
-		conn.udpConn.Close()
-	}
-
 	if conn.portMapper != nil {
 		conn.portMapper.close()
 	}
@@ -711,11 +743,28 @@ func (conn *WebRTCConn) Close() error {
 		conn.peerConnection.Close()
 	}
 
+	// Close the udpConn to interrupt any blocking DTLS handshake:
+	// https://github.com/pion/webrtc/blob/c1467e4871c78ee3f463b50d858d13dc6f2874a4/dtlstransport.go#L334-L340
+	//
+	// Limitation: there is no guarantee that pion sends any closing packets
+	// before the UDP socket is closed here.
+
+	if conn.udpConn != nil {
+		conn.udpConn.Close()
+	}
+
 	close(conn.closedSignal)
 
 	conn.isClosed = true
 
 	return nil
+}
+
+func (conn *WebRTCConn) IsClosed() bool {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	return conn.isClosed
 }
 
 func (conn *WebRTCConn) Read(p []byte) (int, error) {
@@ -780,6 +829,11 @@ func (conn *WebRTCConn) readMessage(p []byte) (int, error) {
 			} else {
 
 				conn.readOffset += n + int(paddingSize)
+
+				atomic.AddInt32(&conn.paddedMessagesReceived, 1)
+				if conn.readOffset == conn.readLength {
+					atomic.AddInt32(&conn.decoyMessagesReceived, 1)
+				}
 			}
 		}
 	}
@@ -820,6 +874,19 @@ func (conn *WebRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
 
 	if p != nil && decoy {
 		return 0, errors.TraceNew("invalid write parameters")
+	}
+
+	// pion/sctp doesn't handle 0-byte writes correctly, so drop/skip at this level.
+	//
+	// Testing shows that the SCTP connection stalls after a 0-byte write. In
+	// the pion/sctp implementation,
+	// https://github.com/pion/sctp/blob/v1.8.8/stream.go#L254-L278 and
+	// https://github.com/pion/sctp/blob/v1.8.8/stream.go#L280-L336, it
+	// appears that a zero-byte write won't send an SCTP messages but does
+	// increment a sequence number.
+
+	if len(p) == 0 && !decoy {
+		return 0, nil
 	}
 
 	// Don't hold this lock, or else concurrent Reads will be blocked.
@@ -923,20 +990,23 @@ func (conn *WebRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
 
 	if doPadding {
 
-		// Reduce, if necessary, to stay within the maximum data channel
-		// message size. This is not expected to happen for the io.Copy use
-		// case, with 32K message size, plus reasonable padding sizes.
+		if paddingSize > 0 {
 
-		if writeSize+binary.MaxVarintLen32+paddingSize > dataChannelMaxMessageSize {
-			paddingSize -= (writeSize + binary.MaxVarintLen32 + paddingSize) - dataChannelMaxMessageSize
-			if paddingSize < 0 {
-				paddingSize = 0
+			// Reduce, if necessary, to stay within the maximum data channel
+			// message size. This is not expected to happen for the io.Copy use
+			// case, with 32K message size, plus reasonable padding sizes.
+
+			if writeSize+binary.MaxVarintLen32+paddingSize > dataChannelMaxMessageSize {
+				paddingSize -= (writeSize + binary.MaxVarintLen32 + paddingSize) - dataChannelMaxMessageSize
+				if paddingSize < 0 {
+					paddingSize = 0
+				}
 			}
+
+			// Add padding overhead to total writeSize before the flow control check.
+
+			writeSize += paddingSize
 		}
-
-		// Add padding overhead to total writeSize before the flow control check.
-
-		writeSize += paddingSize
 
 		paddingHeaderSize = binary.PutVarint(paddingHeader[:], int64(paddingSize))
 		writeSize += paddingHeaderSize
@@ -993,6 +1063,12 @@ func (conn *WebRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
 	// Limitation: see above; len(p) + padding must be <= 65536.
 	_, err := dataChannelConn.Write(conn.trafficShapingBuffer.Bytes())
 
+	if decoy {
+		atomic.AddInt32(&conn.decoyMessagesSent, 1)
+	} else if doPadding && paddingSize > 0 {
+		atomic.AddInt32(&conn.paddedMessagesSent, 1)
+	}
+
 	if conn.paddedMessageCount == 0 && conn.decoyMessageCount == 0 && paddingSize == -1 {
 
 		// Set flag indicating -1 padding size was sent and release traffic
@@ -1041,6 +1117,30 @@ func (conn *WebRTCConn) SetWriteDeadline(t time.Time) error {
 	defer conn.mutex.Unlock()
 
 	return errors.TraceNew("not supported")
+}
+
+// GetMetrics implements the common.MetricsSource interface and returns log
+// fields detailing the WebRTC dial parameters.
+func (conn *WebRTCConn) GetMetrics() common.LogFields {
+
+	// TODO: determine which WebRTC ICE candidate was chosen, and log its
+	// type (host, server reflexive, etc.), port number(s), and whether it's
+	// IPv6.
+
+	logFields := make(common.LogFields)
+
+	randomizeDTLS := "0"
+	if conn.config.DoDTLSRandomization {
+		randomizeDTLS = "1"
+	}
+	logFields["inproxy_webrtc_randomize_dtls"] = randomizeDTLS
+
+	logFields["inproxy_webrtc_padded_messages_sent"] = atomic.LoadInt32(&conn.paddedMessagesSent)
+	logFields["inproxy_webrtc_padded_messages_received"] = atomic.LoadInt32(&conn.paddedMessagesReceived)
+	logFields["inproxy_webrtc_decoy_messages_sent"] = atomic.LoadInt32(&conn.decoyMessagesSent)
+	logFields["inproxy_webrtc_decoy_messages_received"] = atomic.LoadInt32(&conn.decoyMessagesReceived)
+
+	return logFields
 }
 
 func (conn *WebRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState) {
@@ -1121,8 +1221,10 @@ func (conn *WebRTCConn) onDataChannelOpen() {
 }
 
 func (conn *WebRTCConn) onDataChannelClose() {
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
+
+	// Close the WebRTCConn when the data channel is closed. Close will lock
+	// conn.mutex, so do lot aquire the lock here.
+	conn.Close()
 
 	conn.config.Logger.WithTrace().Info("data channel closed")
 }
@@ -1131,10 +1233,11 @@ func (conn *WebRTCConn) onDataChannelClose() {
 // adding any port mapping as a host candidate.
 func PrepareSDPAddresses(
 	encodedSDP []byte,
-	portMappingExternalAddr string) ([]byte, *SDPMetrics, error) {
+	portMappingExternalAddr string,
+	disableIPv6Candidates bool) ([]byte, *SDPMetrics, error) {
 
 	modifiedSDP, metrics, err := processSDPAddresses(
-		encodedSDP, portMappingExternalAddr, false, nil, common.GeoIPData{})
+		encodedSDP, portMappingExternalAddr, disableIPv6Candidates, false, nil, common.GeoIPData{})
 	return modifiedSDP, metrics, errors.Trace(err)
 }
 
@@ -1146,7 +1249,7 @@ func ValidateSDPAddresses(
 	lookupGeoIP LookupGeoIP,
 	expectedGeoIPData common.GeoIPData) (*SDPMetrics, error) {
 
-	_, metrics, err := processSDPAddresses(encodedSDP, "", true, lookupGeoIP, expectedGeoIPData)
+	_, metrics, err := processSDPAddresses(encodedSDP, "", false, true, lookupGeoIP, expectedGeoIPData)
 	return metrics, errors.Trace(err)
 }
 
@@ -1197,6 +1300,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 func processSDPAddresses(
 	encodedSDP []byte,
 	portMappingExternalAddr string,
+	disableIPv6Candidates bool,
 	errorOnBogon bool,
 	lookupGeoIP LookupGeoIP,
 	expectedGeoIPData common.GeoIPData) ([]byte, *SDPMetrics, error) {
@@ -1289,6 +1393,9 @@ func processSDPAddresses(
 				}
 
 				if candidateIP.To4() == nil {
+					if disableIPv6Candidates {
+						continue
+					}
 					hasIPv6 = true
 				}
 
@@ -1299,8 +1406,8 @@ func processSDPAddresses(
 				// Well-behaved clients and proxies will strip these values;
 				// the broker enforces this and uses errorOnBogon.
 
-				if !getAllowLoopbackWebRTCConnections() &&
-					isBogon(candidateIP) {
+				if !GetAllowBogonWebRTCConnections() &&
+					common.IsBogon(candidateIP) {
 
 					if errorOnBogon {
 						return nil, nil, errors.TraceNew("unexpected bogon")
@@ -1366,74 +1473,288 @@ func processSDPAddresses(
 	return encodedSDP, metrics, nil
 }
 
-var allowLoopbackWebRTCConnections int32
-
-func getAllowLoopbackWebRTCConnections() bool {
-	return atomic.LoadInt32(&allowLoopbackWebRTCConnections) == 1
-}
-
-// setAllowLoopbackWebRTCConnections is for testing only, to allow the
-// end-to-end inproxy_test to run with a restrictive OS firewall in place. Do
-// not export.
-func setAllowLoopbackWebRTCConnections(allow bool) {
-	value := int32(0)
-	if allow {
-		value = 1
-	}
-	atomic.StoreInt32(&allowLoopbackWebRTCConnections, value)
-}
-
-func isBogon(IP net.IP) bool {
-	if IP == nil {
-		return false
-	}
-	return filtertransport.FindIPNet(
-		filtertransport.DefaultFilteredNetworks, IP)
-}
-
-// webrtcLogger wraps common.Logger and implements
+// pionLogger wraps common.Logger and implements
 // https://pkg.go.dev/github.com/pion/logging#LeveledLogger for passing into
 // pion.
-type webrtcLogger struct {
+type pionLogger struct {
 	logger common.Logger
 }
 
-func (l *webrtcLogger) Trace(msg string) {
+func newPionLogger(logger common.Logger) *pionLogger {
+	return &pionLogger{logger: logger}
+}
+
+func (l *pionLogger) Trace(msg string) {
 	// Ignored.
 }
 
-func (l *webrtcLogger) Tracef(format string, args ...interface{}) {
+func (l *pionLogger) Tracef(format string, args ...interface{}) {
 	// Ignored.
 }
 
-func (l *webrtcLogger) Debug(msg string) {
+func (l *pionLogger) Debug(msg string) {
 	l.logger.WithTrace().Debug("webRTC: " + msg)
 }
 
-func (l *webrtcLogger) Debugf(format string, args ...interface{}) {
+func (l *pionLogger) Debugf(format string, args ...interface{}) {
 	l.logger.WithTrace().Debug("webRTC: " + fmt.Sprintf(format, args...))
 }
 
-func (l *webrtcLogger) Info(msg string) {
+func (l *pionLogger) Info(msg string) {
 	l.logger.WithTrace().Info("webRTC: " + msg)
 }
 
-func (l *webrtcLogger) Infof(format string, args ...interface{}) {
+func (l *pionLogger) Infof(format string, args ...interface{}) {
 	l.logger.WithTrace().Info("webRTC: " + fmt.Sprintf(format, args...))
 }
 
-func (l *webrtcLogger) Warn(msg string) {
+func (l *pionLogger) Warn(msg string) {
 	l.logger.WithTrace().Warning("webRTC: " + msg)
 }
 
-func (l *webrtcLogger) Warnf(format string, args ...interface{}) {
+func (l *pionLogger) Warnf(format string, args ...interface{}) {
 	l.logger.WithTrace().Warning("webRTC: " + fmt.Sprintf(format, args...))
 }
 
-func (l *webrtcLogger) Error(msg string) {
+func (l *pionLogger) Error(msg string) {
 	l.logger.WithTrace().Error("webRTC: " + msg)
 }
 
-func (l *webrtcLogger) Errorf(format string, args ...interface{}) {
+func (l *pionLogger) Errorf(format string, args ...interface{}) {
 	l.logger.WithTrace().Error("webRTC: " + fmt.Sprintf(format, args...))
+}
+
+// pionNetwork implements pion/transport.Net.
+//
+// Via the SettingsEngine, pion is configured to use a pionNetwork instance,
+// which providing alternative implementations for various network functions.
+// The Interfaces implementation provides a workaround for Android
+// net.Interfaces issues and reduces the number of IPv6 candidates to avoid
+// excess STUN requests; and the ResolveUDPAddr implementation hooks into the
+// Psiphon custom resolver.
+type pionNetwork struct {
+	dialCtx               context.Context
+	logger                *pionLogger
+	webRTCDialCoordinator WebRTCDialCoordinator
+}
+
+func newPionNetwork(
+	dialCtx context.Context,
+	logger *pionLogger,
+	webRTCDialCoordinator WebRTCDialCoordinator) *pionNetwork {
+
+	return &pionNetwork{
+		dialCtx:               dialCtx,
+		logger:                logger,
+		webRTCDialCoordinator: webRTCDialCoordinator,
+	}
+}
+
+func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
+
+	// To determine the active IPv4 and IPv6 interfaces, let the OS bind IPv4
+	// and IPv6 UDP sockets with a specified external destination address.
+	// Then iterate over all interfaces, but return interface info for only
+	// the interfaces those sockets were bound to.
+	//
+	// The destination IPs are the IPs that currently resolve for example.com.
+	// No actual traffic to these IPs or example.com is sent, as the UDP
+	// sockets are not used to send any packets.
+	//
+	// This scheme should select just one IPv4 and one IPv6 address, which
+	// should be the active, externally routable addresses, and the IPv6
+	// address should be the preferred, non-deprecated temporary IPv6 address.
+	//
+	// The anet package is used to work around net.Interfaces not working on
+	// Android at this time: https://github.com/golang/go/issues/40569.
+	//
+	// In post-ICE gathering processing, processSDPAddresses will also strip
+	// all bogon addresses, so there is no explicit bogon check here.
+	//
+	// Limitations:
+	//
+	// - The active interface could change between the socket operation and
+	//   iterating over all interfaces. Higher-level code is expected to
+	//   react to active network changes.
+	//
+	// - The public IPs for example.com may not be robust in all routing
+	//   situations. Alternatively, we could use the configured STUN server
+	//   as the test destination, but the STUN server domain is not resolved
+	//   at this point and STUN is not always configured and used.
+	//
+	// - The results could be cached and reused.
+
+	var defaultIPv4, defaultIPv6 net.IP
+
+	udpConnIPv4, err := net.Dial("udp4", "93.184.216.34:3478")
+	if err == nil {
+		defaultIPv4 = udpConnIPv4.LocalAddr().(*net.UDPAddr).IP
+		udpConnIPv4.Close()
+	}
+	udpConnIPv6, err := net.Dial("udp6", "[2606:2800:220:1:248:1893:25c8:1946]:3478")
+	if err == nil {
+		defaultIPv6 = udpConnIPv6.LocalAddr().(*net.UDPAddr).IP
+		udpConnIPv6.Close()
+	}
+
+	transportInterfaces := []*transport.Interface{}
+
+	netInterfaces, err := anet.Interfaces()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	for _, netInterface := range netInterfaces {
+		if (netInterface.Flags&net.FlagUp == 0) ||
+			(netInterface.Flags&net.FlagPointToPoint != 0) ||
+			(!GetAllowBogonWebRTCConnections() && (netInterface.Flags&net.FlagLoopback != 0)) {
+			continue
+		}
+		addrs, err := netInterface.Addrs()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		var transportInterface *transport.Interface
+		for _, addr := range addrs {
+			IP, _, err := net.ParseCIDR(addr.String())
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			if IP.Equal(defaultIPv4) || IP.Equal(defaultIPv6) ||
+				(GetAllowBogonWebRTCConnections() && (netInterface.Flags&net.FlagLoopback != 0)) {
+				if transportInterface == nil {
+					transportInterface = transport.NewInterface(netInterface)
+				}
+				transportInterface.AddAddress(addr)
+			}
+		}
+		if transportInterface != nil {
+			transportInterfaces = append(transportInterfaces, transportInterface)
+		}
+	}
+
+	return transportInterfaces, nil
+}
+
+func (p *pionNetwork) ResolveUDPAddr(network, address string) (retAddr *net.UDPAddr, retErr error) {
+
+	defer func() {
+		if retErr != nil {
+			// Explicitly log an error since certain pion operations -- e.g.,
+			// ICE gathering -- don't propagate all pion/transport.Net errors.
+			p.logger.Errorf("pionNetwork.ResolveUDPAddr failed: %v", retErr)
+		}
+	}()
+
+	// Currently, pion appears to call ResolveUDPAddr with "udp4"/udp6"
+	// instead of "ip4"/"ip6", as expected by, e.g., net.Resolver.LookupIP.
+	// Convert to "ip4"/"ip6".
+
+	// Specifying v4/v6 ensures that the resolved IP address is the correct
+	// type. In the case of STUN servers, the correct type is required in
+	// order to create the correct IPv4 or IPv6 whole punch address.
+
+	switch network {
+	case "udp4", "tcp4":
+		network = "ip4"
+	case "udp6", "tcp6":
+		network = "ip6"
+	default:
+		network = "ip"
+	}
+
+	// Currently, pion appears to call ResolveUDPAddr with an improperly
+	// formatted address, <IPv6>:443 not [<IPv6>]:443; handle this case.
+	index := strings.LastIndex(address, ":")
+	if index != -1 {
+		address = net.JoinHostPort(address[:index], address[index+1:])
+	}
+
+	// Use the Psiphon custom resolver to resolve any STUN server domains.
+	resolvedAddress, err := p.webRTCDialCoordinator.ResolveAddress(
+		p.dialCtx, network, address)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	IPStr, portStr, err := net.SplitHostPort(resolvedAddress)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	IP := net.ParseIP(IPStr)
+	if IP == nil {
+		return nil, errors.TraceNew("invalid IP address")
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return &net.UDPAddr{IP: IP, Port: port}, nil
+}
+
+var errNotSupported = std_errors.New("not supported")
+
+func (p *pionNetwork) ListenPacket(network string, address string) (net.PacketConn, error) {
+	// Explicitly log an error since certain pion operations -- e.g., ICE
+	// gathering -- don't propagate all pion/transport.Net errors.
+	p.logger.Errorf("unexpected pionNetwork.ListenPacket call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) ListenUDP(network string, locAddr *net.UDPAddr) (transport.UDPConn, error) {
+	p.logger.Errorf("unexpected pionNetwork.ListenUDP call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) ListenTCP(network string, laddr *net.TCPAddr) (transport.TCPListener, error) {
+	p.logger.Errorf("unexpected pionNetwork.ListenTCP call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) Dial(network, address string) (net.Conn, error) {
+	p.logger.Errorf("unexpected pionNetwork.Dial call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) DialUDP(network string, laddr, raddr *net.UDPAddr) (transport.UDPConn, error) {
+	p.logger.Errorf("unexpected pionNetwork.DialUDP call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) DialTCP(network string, laddr, raddr *net.TCPAddr) (transport.TCPConn, error) {
+	p.logger.Errorf("unexpected pionNetwork.DialTCP call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) ResolveIPAddr(network, address string) (*net.IPAddr, error) {
+	p.logger.Errorf("unexpected pionNetwork.ResolveIPAddr call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) ResolveTCPAddr(network, address string) (*net.TCPAddr, error) {
+	p.logger.Errorf("unexpected pionNetwork.ResolveTCPAddr call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) InterfaceByIndex(index int) (*transport.Interface, error) {
+	p.logger.Errorf("unexpected pionNetwork.InterfaceByIndex call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) InterfaceByName(name string) (*transport.Interface, error) {
+	p.logger.Errorf("unexpected pionNetwork.InterfaceByName call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
+}
+
+func (p *pionNetwork) CreateDialer(dialer *net.Dialer) transport.Dialer {
+	return &pionNetworkDialer{pionNetwork: p}
+}
+
+type pionNetworkDialer struct {
+	pionNetwork *pionNetwork
+}
+
+func (d pionNetworkDialer) Dial(network, address string) (net.Conn, error) {
+	d.pionNetwork.logger.Errorf("unexpected pionNetworkDialer.Dial call from %s", stacktrace.GetParentFunctionName())
+	return nil, errors.Trace(errNotSupported)
 }

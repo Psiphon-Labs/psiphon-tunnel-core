@@ -51,6 +51,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -63,24 +64,13 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-var serverIPAddress, testDataDirName string
-var mockWebServerURL, mockWebServerExpectedResponse string
-var mockWebServerPort = "8080"
+var testDataDirName string
+var mockWebServerURL, mockWebServerPort, mockWebServerExpectedResponse string
 
 func TestMain(m *testing.M) {
 	flag.Parse()
 
-	serverIPv4Address, serverIPv6Address, err := common.GetRoutableInterfaceIPAddresses()
-	if err != nil {
-		fmt.Printf("error getting server IP address: %s\n", err)
-		os.Exit(1)
-	}
-	if serverIPv4Address != nil {
-		serverIPAddress = serverIPv4Address.String()
-	} else {
-		serverIPAddress = serverIPv6Address.String()
-	}
-
+	var err error
 	testDataDirName, err = ioutil.TempDir("", "psiphon-server-test")
 	if err != nil {
 		fmt.Printf("TempDir failed: %s\n", err)
@@ -103,16 +93,23 @@ func runMockWebServer() (string, string) {
 	serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(responseBody))
 	})
-	webServerAddress := net.JoinHostPort(serverIPAddress, mockWebServerPort)
 	server := &http.Server{
-		Addr:    webServerAddress,
 		Handler: serveMux,
 	}
 
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Printf("net.Listen failed: %s\n", err)
+		os.Exit(1)
+	}
+
+	listenAddress := listener.Addr().String()
+	_, mockWebServerPort, _ = net.SplitHostPort(listenAddress)
+
 	go func() {
-		err := server.ListenAndServe()
+		err := server.Serve(listener)
 		if err != nil {
-			fmt.Printf("error running mock web server: %s\n", err)
+			fmt.Printf("http.Server.Serve failed: %s\n", err)
 			os.Exit(1)
 		}
 	}()
@@ -120,7 +117,7 @@ func runMockWebServer() (string, string) {
 	// TODO: properly synchronize with web server readiness
 	time.Sleep(1 * time.Second)
 
-	return fmt.Sprintf("http://%s/", webServerAddress), responseBody
+	return fmt.Sprintf("http://%s/", listenAddress), responseBody
 }
 
 // Note: not testing fronted meek protocols, which client is
@@ -130,7 +127,6 @@ func TestSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "SSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -143,7 +139,6 @@ func TestOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -156,7 +151,6 @@ func TestFragmentedOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -170,7 +164,6 @@ func TestPrefixedOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -185,7 +178,6 @@ func TestFragmentedPrefixedOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -205,7 +197,6 @@ func TestTLSOSSH(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "TLS-OSSH",
 			passthrough:          true,
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -217,7 +208,6 @@ func TestUnfrontedMeek(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -230,7 +220,6 @@ func TestFragmentedUnfrontedMeek(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -245,7 +234,6 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -259,7 +247,6 @@ func TestFragmentedUnfrontedMeekHTTPS(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_RANDOMIZED,
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -274,7 +261,6 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -288,7 +274,6 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_CHROME_58,
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -302,7 +287,6 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -318,7 +302,6 @@ func TestTLSOSSHOverUnfrontedMeekHTTPSDemux(t *testing.T) {
 			clientTunnelProtocol: "TLS-OSSH",
 			passthrough:          true,
 			tlsProfile:           protocol.TLS_PROFILE_CHROME_96, // TLS-OSSH requires TLS 1.3 support
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -333,7 +316,6 @@ func TestTLSOSSHOverUnfrontedMeekSessionTicketDemux(t *testing.T) {
 			clientTunnelProtocol: "TLS-OSSH",
 			passthrough:          true,
 			tlsProfile:           protocol.TLS_PROFILE_CHROME_96, // TLS-OSSH requires TLS 1.3 support
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -348,7 +330,6 @@ func TestQUICOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "QUIC-OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -363,7 +344,6 @@ func TestLimitedQUICOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "QUIC-OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -372,13 +352,49 @@ func TestLimitedQUICOSSH(t *testing.T) {
 		})
 }
 
-func TestWebTransportAPIRequests(t *testing.T) {
+func TestInproxyOSSH(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "OSSH",
-			omitAuthorization:    true,
+			tunnelProtocol:       "INPROXY-WEBRTC-OSSH",
+			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+			doLogHostProvider:    true,
+		})
+}
+
+func TestInproxyQUICOSSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "INPROXY-WEBRTC-QUIC-OSSH",
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doLogHostProvider:    true,
+		})
+}
+
+func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "INPROXY-WEBRTC-UNFRONTED-MEEK-HTTPS-OSSH",
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+			doLogHostProvider:    true,
+		})
+}
+
+func TestInproxyTLSOSSH(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "INPROXY-WEBRTC-TLS-OSSH",
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 		})
 }
@@ -387,7 +403,6 @@ func TestHotReload(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
@@ -400,7 +415,6 @@ func TestDefaultSponsorID(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			doDefaultSponsorID:   true,
 			requireAuthorization: true,
@@ -414,7 +428,6 @@ func TestDenyTrafficRules(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			denyTrafficRules:     true,
 			requireAuthorization: true,
@@ -428,7 +441,6 @@ func TestOmitAuthorization(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			requireAuthorization: true,
 			omitAuthorization:    true,
@@ -442,7 +454,6 @@ func TestNoAuthorization(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			omitAuthorization:    true,
 			doTunneledWebRequest: true,
@@ -455,7 +466,6 @@ func TestUnusedAuthorization(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -467,7 +477,6 @@ func TestTCPOnlySLOK(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doLogHostProvider:    true,
@@ -478,7 +487,6 @@ func TestUDPOnlySLOK(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
@@ -489,7 +497,6 @@ func TestLivenessTest(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -502,7 +509,6 @@ func TestPruneServerEntries(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -516,7 +522,6 @@ func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -531,7 +536,6 @@ func TestChangeBytesConfig(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -546,7 +550,6 @@ func TestSplitTunnel(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -560,12 +563,10 @@ func TestOmitProvider(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
-			doSplitTunnel:        true,
 		})
 }
 
@@ -573,7 +574,6 @@ func TestSteeringIP(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "FRONTED-MEEK-OSSH",
-			enableSSHAPIRequests: true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
@@ -589,7 +589,6 @@ type runServerConfig struct {
 	clientTunnelProtocol string
 	passthrough          bool
 	tlsProfile           string
-	enableSSHAPIRequests bool
 	doHotReload          bool
 	doDefaultSponsorID   bool
 	denyTrafficRules     bool
@@ -631,6 +630,45 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	serverRuns += 1
 
+	psiphonServerIPAddress := "127.0.0.1"
+	psiphonServerPort := 4000
+
+	// initialize server entry signing
+
+	serverEntrySignaturePublicKey,
+		serverEntrySignaturePrivateKey, err := protocol.NewServerEntrySignatureKeyPair()
+	if err != nil {
+		t.Fatalf("error generating server entry signature key pair: %s", err)
+	}
+
+	// generate inproxy configuration
+
+	doInproxy := protocol.TunnelProtocolUsesInproxy(runConfig.tunnelProtocol)
+
+	var inproxyTestConfig *inproxyTestConfig
+	if doInproxy {
+
+		addMeekServerForBroker := true
+		brokerIPAddress := "127.0.0.1"
+		brokerPort := 4001
+
+		if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
+			// Use the existing meek server as the broker server
+			addMeekServerForBroker = false
+			brokerPort = 4000
+		}
+
+		var err error
+		inproxyTestConfig, err = generateInproxyTestConfig(
+			addMeekServerForBroker,
+			brokerIPAddress,
+			brokerPort,
+			serverEntrySignaturePublicKey)
+		if err != nil {
+			t.Fatalf("error generating inproxy test config: %s", err)
+		}
+	}
+
 	// configure authorized access
 
 	accessType := "test-access-type"
@@ -656,13 +694,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	authorizationIDStr := base64.StdEncoding.EncodeToString(authorizationID)
 
-	// Enable tactics when the test protocol is meek. Both the client and the
-	// server will be configured to support tactics. The client config will be
-	// set with a nonfunctional config so that the tactics request must
-	// succeed, overriding the nonfunctional values, for the tunnel to
-	// establish.
+	// Enable tactics when the test protocol is meek or uses inproxy. Both the
+	// client and the server will be configured to support tactics. The
+	// client config will be set with a nonfunctional config so that the
+	// tactics request must succeed, overriding the nonfunctional values, for
+	// the tunnel to establish.
 
-	doClientTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol)
+	doClientTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) ||
+		doInproxy
+
 	doServerTactics := doClientTactics ||
 		runConfig.applyPrefix ||
 		runConfig.forceFragmenting ||
@@ -682,13 +722,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	// create a server
-
-	psiphonServerIPAddress := serverIPAddress
-	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {
-		// Workaround for macOS firewall.
-		psiphonServerIPAddress = "127.0.0.1"
-	}
-	psiphonServerPort := 4000
 
 	var limitQUICVersions protocol.QUICVersions
 	if runConfig.limitQUICVersions {
@@ -716,11 +749,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
+	tunnelProtocolPorts := map[string]int{runConfig.tunnelProtocol: psiphonServerPort}
+	if doInproxy && inproxyTestConfig.addMeekServerForBroker {
+		tunnelProtocolPorts["UNFRONTED-MEEK-HTTPS-OSSH"] = inproxyTestConfig.brokerPort
+	}
+
 	generateConfigParams := &GenerateConfigParams{
+		ServerEntrySignaturePublicKey:      serverEntrySignaturePublicKey,
+		ServerEntrySignaturePrivateKey:     serverEntrySignaturePrivateKey,
 		ServerIPAddress:                    psiphonServerIPAddress,
-		EnableSSHAPIRequests:               runConfig.enableSSHAPIRequests,
-		WebServerPort:                      8000,
-		TunnelProtocolPorts:                map[string]int{runConfig.tunnelProtocol: psiphonServerPort},
+		TunnelProtocolPorts:                tunnelProtocolPorts,
 		TunnelProtocolPassthroughAddresses: tunnelProtocolPassthroughAddresses,
 		Passthrough:                        runConfig.passthrough,
 		LimitQUICVersions:                  limitQUICVersions,
@@ -771,6 +809,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		livenessTestSize)
 
 	var tacticsConfigFilename string
+	var inproxyTacticsParametersJSON string
 
 	// Only pave the tactics config when tactics are required. This exercises the
 	// case where the tactics config is omitted.
@@ -780,6 +819,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		tacticsTunnelProtocol := runConfig.tunnelProtocol
 		if runConfig.clientTunnelProtocol != "" {
 			tacticsTunnelProtocol = runConfig.clientTunnelProtocol
+		}
+
+		if doInproxy {
+			inproxyTacticsParametersJSON = inproxyTestConfig.tacticsParametersJSON
 		}
 
 		paveTacticsConfigFile(
@@ -795,7 +838,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.doDestinationBytes,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
-		)
+			inproxyTacticsParametersJSON)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -858,6 +901,34 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if runConfig.doSteeringIP {
 		serverConfig["EnableSteeringIPs"] = true
 	}
+
+	// In-proxy setup.
+
+	if doInproxy {
+
+		serverConfig["MeekServerRunInproxyBroker"] = true
+
+		// Limitation: can't exercise MeekServerInproxyBrokerOnly, as the
+		// single meek server must also provide a tactics endpoint.
+
+		serverConfig["MeekServerCertificate"] = inproxyTestConfig.brokerServerCertificate
+		serverConfig["MeekServerPrivateKey"] = inproxyTestConfig.brokerServerPrivateKey
+		serverConfig["MeekRequiredHeaders"] = inproxyTestConfig.brokerMeekRequiredHeaders
+
+		serverConfig["InproxyBrokerSessionPrivateKey"] =
+			inproxyTestConfig.brokerSessionPrivateKey
+
+		serverConfig["InproxyBrokerObfuscationRootSecret"] =
+			inproxyTestConfig.brokerObfuscationRootSecret
+
+		serverConfig["InproxyBrokerServerEntrySignaturePublicKey"] =
+			inproxyTestConfig.brokerServerEntrySignaturePublicKey
+
+		serverConfig["InproxyBrokerAllowCommonASNMatching"] = true
+	}
+
+	// Uncomment to enable SIGUSR2 profile dumps
+	//serverConfig["ProcessProfileOutputDirectory"] = "/tmp"
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
@@ -927,7 +998,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		err := RunServices(serverConfigJSON)
 		if err != nil {
 			// TODO: wrong goroutine for t.FatalNow()
-			t.Errorf("error running server: %s", err)
+			t.Fatalf("error running server: %s", err)
 		}
 	}()
 
@@ -949,7 +1020,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		select {
 		case <-shutdownOk:
 		case <-shutdownTimeout.C:
-			t.Errorf("server shutdown timeout exceeded")
+			t.Fatalf("server shutdown timeout exceeded")
 		}
 	}
 
@@ -1034,8 +1105,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         "ClientPlatform" : "Android_10_com.test.app",
         "ClientVersion" : "0",
         "ClientFeatures" : %s,
-        "SponsorId" : "0",
-        "PropagationChannelId" : "0",
+        "SponsorId" : "0000000000000000",
+        "PropagationChannelId" : "0000000000000000",
         "DeviceLocation" : "gzzzz",
         "DeviceRegion" : "US",
         "DisableRemoteServerListFetcher" : true,
@@ -1050,6 +1121,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientTunnelProtocol,
 		jsonLimitTLSProfiles,
 		jsonNetworkID)
+
+	// Don't print initial config setup notices
+	psiphon.SetNoticeWriter(io.Discard)
 
 	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
 	if err != nil {
@@ -1112,6 +1186,42 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		headers := make(http.Header)
 		headers.Set("X-Psiphon-Steering-Ip", testSteeringIP)
 		clientConfig.MeekAdditionalHeaders = headers
+	}
+
+	if doInproxy {
+
+		// Limitation: can't exercise DisableTunnels = true since the client
+		// is a singleton and so the single instance must act as both a
+		// client and proxy. This self-proxy scheme also requires setting
+		// InproxySkipAwaitFullyConnected.
+
+		clientConfig.DisableTunnels = false
+		clientConfig.InproxyEnableProxy = true
+		clientConfig.InproxySkipAwaitFullyConnected = true
+
+		clientConfig.InproxyProxySessionPrivateKey = inproxyTestConfig.proxySessionPrivateKey
+		clientConfig.InproxyMaxClients = 1
+		clientConfig.InproxyLimitUpstreamBytesPerSecond = 0
+		clientConfig.InproxyLimitDownstreamBytesPerSecond = 0
+		clientConfig.ServerEntrySignaturePublicKey = inproxyTestConfig.brokerServerEntrySignaturePublicKey
+
+		// Simulate a CDN adding required HTTP headers by injecting them at
+		// the client.
+		headers := make(http.Header)
+		for name, value := range inproxyTestConfig.brokerMeekRequiredHeaders {
+			headers.Add(name, value)
+		}
+		clientConfig.MeekAdditionalHeaders = headers
+
+		// Configure the CAs required to verify the broker TLS certificate.
+		clientConfig.TrustedCACertificatesFilename = filepath.Join(testDataDirName, "rootCAs")
+		err = ioutil.WriteFile(
+			clientConfig.TrustedCACertificatesFilename,
+			[]byte(inproxyTestConfig.brokerServerCertificate),
+			0600)
+		if err != nil {
+			t.Fatalf("WriteFile failed: %s", err)
+		}
 	}
 
 	err = clientConfig.Commit(false)
@@ -1222,6 +1332,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	connectedServer := make(chan struct{}, 1)
+	inproxyActivity := make(chan struct{}, 1)
 	tunnelsEstablished := make(chan struct{}, 1)
 	homepageReceived := make(chan struct{}, 1)
 	slokSeeded := make(chan struct{}, 1)
@@ -1233,12 +1344,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
-			//fmt.Printf("%s\n", string(notice))
-
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
 				return
 			}
+
+			printNotice := false
 
 			switch noticeType {
 
@@ -1275,7 +1386,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				}
 
 			case "ServerAlert":
-
 				reason := payload["reason"].(string)
 				actionURLsPayload := payload["actionURLs"].([]interface{})
 				actionURLs := make([]string, len(actionURLsPayload))
@@ -1290,6 +1400,21 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			case "Untunneled":
 				sendNotificationReceived(untunneledPortForward)
 
+			case "InproxyProxyActivity":
+
+				// This assumes that both non-zero bytes up and down are
+				// reported in at least same notice, although there's some
+				// unlikely chance it's only one or the other.
+				connectedClients := int(payload["connectedClients"].(float64))
+				bytesUp := int(payload["bytesUp"].(float64))
+				bytesDown := int(payload["bytesDown"].(float64))
+				if connectedClients == 1 && bytesUp > 0 && bytesDown > 0 {
+					sendNotificationReceived(inproxyActivity)
+				}
+			}
+
+			if printNotice {
+				fmt.Printf("%s\n", string(notice))
 			}
 		}))
 
@@ -1339,6 +1464,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}()
 
 	waitOnNotification(t, connectedServer, timeoutSignal, "connected server timeout exceeded")
+	if doInproxy {
+		waitOnNotification(t, inproxyActivity, timeoutSignal, "inproxy activity timeout exceeded")
+	}
 	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
 	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
 
@@ -1375,7 +1503,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			livenessTestSize,
 			runConfig.doBurstMonitor,
 			false,
-			false, false)
+			runConfig.applyPrefix,
+			runConfig.forceFragmenting,
+			inproxyTacticsParametersJSON)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -1385,9 +1515,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	expectTrafficFailure := runConfig.denyTrafficRules || (runConfig.omitAuthorization && runConfig.requireAuthorization)
-
-	// The client still reports zero domain_bytes when no port forwards are allowed (expectTrafficFailure)
-	expectDomainBytes := !runConfig.doChangeBytesConfig
 
 	if runConfig.doTunneledWebRequest {
 
@@ -1522,6 +1649,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	expectDestinationBytesFields := runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig
 
+	// The client still reports zero domain_bytes when no port forwards are
+	// allowed (expectTrafficFailure).
+	//
+	// Limitation: this check is disabled in the in-proxy case since, in the
+	// self-proxy scheme, the proxy shuts down before the client can send its
+	// final status request.
+	expectDomainBytes := !runConfig.doChangeBytesConfig && !doInproxy
+
 	select {
 	case logFields := <-serverTunnelLog:
 		err := checkExpectedServerTunnelLogFields(
@@ -1536,6 +1671,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectQUICVersion,
 			expectDestinationBytesFields,
 			passthroughAddress,
+			inproxyTestConfig,
 			logFields)
 		if err != nil {
 			t.Fatalf("invalid server tunnel log fields: %s", err)
@@ -1703,6 +1839,7 @@ func checkExpectedServerTunnelLogFields(
 	expectQUICVersion string,
 	expectDestinationBytesFields bool,
 	expectPassthroughAddress *string,
+	inproxyTestConfig *inproxyTestConfig,
 	fields map[string]interface{}) error {
 
 	// Limitations:
@@ -1888,7 +2025,8 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) && (runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
+	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) &&
+		(runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
 
 		for _, name := range []string{
 			"user_agent",
@@ -1939,7 +2077,8 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) && (runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
+	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) &&
+		(runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
 
 		for _, name := range []string{
 			"tls_profile",
@@ -2012,6 +2151,50 @@ func checkExpectedServerTunnelLogFields(
 		hostName := fields["tls_ossh_sni_server_name"].(string)
 		if regexp.MustCompile(testCustomHostNameRegex).FindString(hostName) != hostName {
 			return fmt.Errorf("unexpected tls_ossh_sni_server_name '%s'", fields["tls_ossh_sni_server_name"])
+		}
+	}
+
+	if protocol.TunnelProtocolUsesInproxy(runConfig.tunnelProtocol) {
+
+		for _, name := range []string{
+
+			// Fields sent by the broker and populated via
+			// inproxy.ServerBrokerSessions.HandlePacket
+
+			"inproxy_broker_id",
+			"inproxy_connection_id",
+			"inproxy_proxy_id",
+			"inproxy_matched_common_compartments",
+			"inproxy_proxy_nat_type",
+			"inproxy_client_nat_type",
+
+			// Fields sent by the client
+
+			"inproxy_broker_transport",
+			"inproxy_broker_fronting_provider_id",
+			"inproxy_broker_dial_address",
+			"inproxy_broker_resolved_ip_address",
+			"inproxy_webrtc_randomize_dtls",
+			"inproxy_webrtc_padded_messages_sent",
+			"inproxy_webrtc_padded_messages_received",
+			"inproxy_webrtc_decoy_messages_sent",
+			"inproxy_webrtc_decoy_messages_received",
+		} {
+			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+				return fmt.Errorf("missing expected field '%s'", name)
+			}
+		}
+
+		if fields["inproxy_broker_id"].(string) != inproxyTestConfig.brokerSessionPublicKeyCurve25519 {
+			return fmt.Errorf("unexpected inproxy_broker_id '%s'", fields["inproxy_broker_id"])
+		}
+
+		if fields["inproxy_proxy_id"].(string) != inproxyTestConfig.proxySessionPublicKeyCurve25519 {
+			return fmt.Errorf("unexpected inproxy_proxy_id '%s'", fields["inproxy_proxy_id"])
+		}
+
+		if fields["inproxy_broker_fronting_provider_id"].(string) != inproxyTestConfig.brokerFrontingProviderID {
+			return fmt.Errorf("unexpected inproxy_broker_fronting_provider_id '%s'", fields["inproxy_broker_fronting_provider_id"])
 		}
 	}
 
@@ -2552,7 +2735,7 @@ func pavePsinetDatabaseFile(
 	validServerEntryTags []string) (string, string) {
 
 	if sponsorID == "" {
-		sponsorID = prng.HexString(8)
+		sponsorID = strings.ToUpper(prng.HexString(8))
 	}
 
 	defaultSponsorID := ""
@@ -2799,7 +2982,7 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
     }
     `
 
-	propagationChannelID := prng.HexString(8)
+	propagationChannelID := strings.ToUpper(prng.HexString(8))
 
 	now := time.Now().UTC()
 	epoch := now.Truncate(720 * time.Hour)
@@ -2819,15 +3002,19 @@ func paveOSLConfigFile(t *testing.T, oslConfigFilename string) string {
 }
 
 func paveTacticsConfigFile(
-	t *testing.T, tacticsConfigFilename string,
-	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey string,
+	t *testing.T,
+	tacticsConfigFilename string,
+	tacticsRequestPublicKey string,
+	tacticsRequestPrivateKey string,
+	tacticsRequestObfuscatedKey string,
 	tunnelProtocol string,
 	propagationChannelID string,
 	livenessTestSize int,
 	doBurstMonitor bool,
 	doDestinationBytes bool,
 	applyOsshPrefix bool,
-	enableOsshPrefixFragmenting bool) {
+	enableOsshPrefixFragmenting bool,
+	inproxyParametersJSON string) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -2843,7 +3030,8 @@ func paveTacticsConfigFile(
         "Parameters" : {
           %s
           %s
-					%s
+          %s
+          %s
           "LimitTunnelProtocols" : ["%s"],
           "FragmentorLimitProtocols" : ["%s"],
           "FragmentorProbability" : 1.0,
@@ -2945,14 +3133,20 @@ func paveTacticsConfigFile(
 
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
-		tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey,
+		tacticsRequestPublicKey,
+		tacticsRequestPrivateKey,
+		tacticsRequestObfuscatedKey,
 		burstParameters,
 		destinationBytesParameters,
 		osshPrefix,
+		inproxyParametersJSON,
 		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,
-		livenessTestSize, livenessTestSize, livenessTestSize, livenessTestSize,
+		livenessTestSize,
+		livenessTestSize,
+		livenessTestSize,
+		livenessTestSize,
 		propagationChannelID,
 		strings.ReplaceAll(testCustomHostNameRegex, `\`, `\\`),
 		tunnelProtocol)
@@ -2972,6 +3166,177 @@ func paveBlocklistFile(t *testing.T, blocklistFilename string) {
 	if err != nil {
 		t.Fatalf("error paving blocklist file: %s", err)
 	}
+}
+
+type inproxyTestConfig struct {
+	tacticsParametersJSON string
+
+	addMeekServerForBroker              bool
+	brokerIPAddress                     string
+	brokerPort                          int
+	brokerSessionPublicKey              string
+	brokerSessionPublicKeyCurve25519    string
+	brokerSessionPrivateKey             string
+	brokerObfuscationRootSecret         string
+	brokerServerEntrySignaturePublicKey string
+	brokerFrontingProviderID            string
+	brokerServerCertificate             string
+	brokerServerPrivateKey              string
+	brokerMeekRequiredHeaders           map[string]string
+
+	proxySessionPublicKey           string
+	proxySessionPublicKeyCurve25519 string
+	proxySessionPrivateKey          string
+}
+
+func generateInproxyTestConfig(
+	addMeekServerForBroker bool,
+	brokerIPAddress string,
+	brokerPort int,
+	serverEntrySignaturePublicKey string) (*inproxyTestConfig, error) {
+
+	// Generate in-proxy configuration.
+	//
+	// In this test, a single common compartment ID is issued to all clients;
+	// the test client will get it via tactics.
+	//
+	// TODO: exercise personal compartment IDs
+	//
+	// Because of singletons in the Psiphon client, there can only be a single
+	// Psiphon client instance in this test process, and so it must act as
+	// it's own in-proxy proxy.
+	//
+	// To minimize external dependencies, STUN testing is disabled here; it is
+	// exercised in the common/inproxy package tests.
+	//
+	// InproxyBrokerAllowCommonASNMatching must be set to true in the
+	// server/broker config, to allow matches with the same local network
+	// address. InproxyDisableIPv6ICECandidates is turned on, in tactics,
+	// since the test GeoIP database is IPv4-only (see paveGeoIPDatabaseFiles).
+
+	commonCompartmentID, err := inproxy.MakeID()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	commonCompartmentIDStr := commonCompartmentID.String()
+
+	brokerSessionPrivateKey, err := inproxy.GenerateSessionPrivateKey()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	brokerSessionPrivateKeyStr := brokerSessionPrivateKey.String()
+
+	brokerSessionPublicKey, err := brokerSessionPrivateKey.GetPublicKey()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	brokerSessionPublicKeyStr := brokerSessionPublicKey.String()
+
+	brokerSessionPublicKeyCurve25519, err := brokerSessionPublicKey.ToCurve25519()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	brokerSessionPublicKeyCurve25519Str := brokerSessionPublicKeyCurve25519.String()
+
+	brokerRootObfuscationSecret, err := inproxy.GenerateRootObfuscationSecret()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	brokerRootObfuscationSecretStr := brokerRootObfuscationSecret.String()
+
+	brokerFrontingProviderID := strings.ToUpper(prng.HexString(8))
+
+	brokerFrontingHostName := values.GetHostName()
+
+	brokerServerCertificate, brokerServerPrivateKey, brokerVerifyPin, err :=
+		common.GenerateWebServerCertificate(brokerFrontingHostName)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	brokerMeekRequiredHeaders := map[string]string{"X-MeekRequiredHeader": prng.HexString(32)}
+
+	proxySessionPrivateKey, err := inproxy.GenerateSessionPrivateKey()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	proxySessionPrivateKeyStr := proxySessionPrivateKey.String()
+
+	proxySessionPublicKey, err := proxySessionPrivateKey.GetPublicKey()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	proxySessionPublicKeyStr := proxySessionPublicKey.String()
+
+	proxySessionPublicKeyCurve25519, err := proxySessionPublicKey.ToCurve25519()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	proxySessionPublicKeyCurve25519Str := proxySessionPublicKeyCurve25519.String()
+
+	tacticsParametersJSONFormat := `
+            "InproxyAllowProxy": true,
+            "InproxyAllowClient": true,
+            "InproxyTunnelProtocolSelectionProbability": 1.0,
+            "InproxyAllBrokerPublicKeys": ["%s"],
+            "InproxyBrokerSpecs": [{
+                "BrokerPublicKey": "%s",
+                "BrokerRootObfuscationSecret": "%s",
+                "BrokerFrontingSpecs": [{
+                    "FrontingProviderID": "%s",
+                    "Addresses": ["%s"],
+                    "DisableSNI": true,
+                    "VerifyServerName": "%s",
+                    "VerifyPins": ["%s"],
+                    "Host": "%s"
+                }]
+            }],
+            "InproxyAllCommonCompartmentIDs": ["%s"],
+            "InproxyCommonCompartmentIDs": ["%s"],
+            "InproxyClientDiscoverNATProbability": 0.0,
+            "InproxyDisableSTUN": true,
+            "InproxyDisablePortMapping": true,
+            "InproxyDisableIPv6ICECandidates": true,
+    `
+
+	address := net.JoinHostPort(brokerIPAddress, strconv.Itoa(brokerPort))
+	addressRegex := strings.ReplaceAll(address, ".", "\\\\.")
+
+	tacticsParametersJSON := fmt.Sprintf(
+		tacticsParametersJSONFormat,
+		brokerSessionPublicKeyStr,
+		brokerSessionPublicKeyStr,
+		brokerRootObfuscationSecretStr,
+		brokerFrontingProviderID,
+		addressRegex,
+		brokerFrontingHostName,
+		brokerVerifyPin,
+		brokerFrontingHostName,
+		commonCompartmentIDStr,
+		commonCompartmentIDStr)
+
+	config := &inproxyTestConfig{
+		tacticsParametersJSON:               tacticsParametersJSON,
+		addMeekServerForBroker:              addMeekServerForBroker,
+		brokerIPAddress:                     brokerIPAddress,
+		brokerPort:                          brokerPort,
+		brokerSessionPrivateKey:             brokerSessionPrivateKeyStr,
+		brokerSessionPublicKey:              brokerSessionPublicKeyStr,
+		brokerSessionPublicKeyCurve25519:    brokerSessionPublicKeyCurve25519Str,
+		brokerObfuscationRootSecret:         brokerRootObfuscationSecretStr,
+		brokerServerEntrySignaturePublicKey: serverEntrySignaturePublicKey,
+		brokerFrontingProviderID:            brokerFrontingProviderID,
+		brokerServerCertificate:             brokerServerCertificate,
+		brokerServerPrivateKey:              brokerServerPrivateKey,
+		brokerMeekRequiredHeaders:           brokerMeekRequiredHeaders,
+		proxySessionPublicKey:               proxySessionPublicKeyStr,
+		proxySessionPublicKeyCurve25519:     proxySessionPublicKeyCurve25519Str,
+		proxySessionPrivateKey:              proxySessionPrivateKeyStr,
+	}
+
+	inproxy.SetAllowBogonWebRTCConnections(true)
+
+	return config, nil
 }
 
 type pruneServerEntryTestCase struct {
@@ -3032,7 +3397,6 @@ func initializePruneServerEntriesTest(
 		_, _, _, _, encodedServerEntry, err := GenerateConfig(
 			&GenerateConfigParams{
 				ServerIPAddress:     testCase.IPAddress,
-				WebServerPort:       8000,
 				TunnelProtocolPorts: map[string]int{runConfig.tunnelProtocol: dialPort},
 			})
 		if err != nil {
@@ -3051,6 +3415,10 @@ func initializePruneServerEntriesTest(
 		if err != nil {
 			t.Fatalf("DecodeServerEntryFields failed: %s", err)
 		}
+
+		// GenerateConfig now generates an explict tag for each server entry.
+		// To test the legacy case with no tag, delete it here.
+		delete(serverEntryFields, "tag")
 
 		if testCase.ExplicitTag {
 			testCase.ExpectedTag = prng.Base64String(32)
@@ -3158,6 +3526,8 @@ func storePruneServerEntriesTest(
 				return runConfig.tunnelProtocol, true
 			},
 			serverEntry,
+			nil,
+			nil,
 			false,
 			0,
 			0)

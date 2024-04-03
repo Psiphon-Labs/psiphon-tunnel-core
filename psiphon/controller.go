@@ -25,6 +25,7 @@ package psiphon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
@@ -35,10 +36,12 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	lrucache "github.com/cognusion/go-cache-lru"
 )
@@ -88,6 +91,11 @@ type Controller struct {
 	staggerMutex                            sync.Mutex
 	resolver                                *resolver.Resolver
 	steeringIPCache                         *lrucache.Cache
+	inproxyProxyBrokerClientManager         *InproxyBrokerClientManager
+	inproxyClientBrokerClientManager        *InproxyBrokerClientManager
+	inproxyNATStateManager                  *InproxyNATStateManager
+	inproxyHandleTacticsMutex               sync.Mutex
+	inproxyLastStoredTactics                time.Time
 }
 
 // NewController initializes a new controller.
@@ -207,6 +215,49 @@ func NewController(config *Config) (controller *Controller, err error) {
 		controller.packetTunnelTransport = packetTunnelTransport
 	}
 
+	// Initialize shared in-proxy broker clients to be used for all in-proxy
+	// client dials and in-proxy proxy operations.
+	//
+	// Using shared broker connections minimizes the overhead of establishing
+	// broker connections at the start of an in-proxy dial or operation. By
+	// design, established broker connections will be retained for up to the
+	// entire lifetime of the controller run, so past the end of client
+	// tunnel establishment.
+	//
+	// No network operations are performed by NewInproxyBrokerClientManager or
+	// NewInproxyNATStateManager; each manager operates on demand, when
+	// in-proxy dials or operations are invoked.
+	//
+	// The controller run may include client tunnel establishment, in-proxy
+	// proxy operations, or both.
+	//
+	// Due to the inproxy.InitiatorSessions.NewRoundTrip waitToShareSession
+	// application-level round trip limitation, there is one broker client
+	// manager for each of the client and proxy cases, so that neither
+	// initially blocks while trying to share the others session.
+	//
+	// One NAT state manager is shared between both the in-proxy client and
+	// proxy. While each may have different network discovery policies, any
+	// discovered network state is valid and useful for both consumers.
+
+	// Both broker client and NAT state managers may require resets and update
+	// when tactics change.
+	var tacticAppliedReceivers []TacticsAppliedReceiver
+
+	isProxy := false
+	controller.inproxyClientBrokerClientManager = NewInproxyBrokerClientManager(config, isProxy)
+	tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyClientBrokerClientManager)
+	controller.inproxyNATStateManager = NewInproxyNATStateManager(config)
+	tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyNATStateManager)
+
+	if config.InproxyEnableProxy {
+		isProxy = true
+		controller.inproxyProxyBrokerClientManager = NewInproxyBrokerClientManager(config, isProxy)
+		tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyProxyBrokerClientManager)
+	}
+
+	controller.config.SetTacticsAppliedReceivers(tacticAppliedReceivers)
+
 	return controller, nil
 }
 
@@ -266,62 +317,78 @@ func (controller *Controller) Run(ctx context.Context) {
 		listenIP = IPv4Address.String()
 	}
 
-	if !controller.config.DisableLocalSocksProxy {
-		socksProxy, err := NewSocksProxy(controller.config, controller, listenIP)
-		if err != nil {
-			NoticeError("error initializing local SOCKS proxy: %v", errors.Trace(err))
-			return
+	// The controller run may include client tunnel establishment, in-proxy
+	// proxy operations, or both. Local tactics are shared between both modes
+	// and both modes can fetch tactics.
+	//
+	// Limitation: the upgrade downloader is not enabled when client tunnel
+	// establishment is disabled; upgrade version information is not
+	// currently distributed to in-proxy proxies
+
+	if !controller.config.DisableTunnels {
+
+		if !controller.config.DisableLocalSocksProxy {
+			socksProxy, err := NewSocksProxy(controller.config, controller, listenIP)
+			if err != nil {
+				NoticeError("error initializing local SOCKS proxy: %v", errors.Trace(err))
+				return
+			}
+			defer socksProxy.Close()
 		}
-		defer socksProxy.Close()
-	}
 
-	if !controller.config.DisableLocalHTTPProxy {
-		httpProxy, err := NewHttpProxy(controller.config, controller, listenIP)
-		if err != nil {
-			NoticeError("error initializing local HTTP proxy: %v", errors.Trace(err))
-			return
+		if !controller.config.DisableLocalHTTPProxy {
+			httpProxy, err := NewHttpProxy(controller.config, controller, listenIP)
+			if err != nil {
+				NoticeError("error initializing local HTTP proxy: %v", errors.Trace(err))
+				return
+			}
+			defer httpProxy.Close()
 		}
-		defer httpProxy.Close()
-	}
 
-	if !controller.config.DisableRemoteServerListFetcher {
+		if !controller.config.DisableRemoteServerListFetcher {
 
-		if controller.config.RemoteServerListURLs != nil {
+			if controller.config.RemoteServerListURLs != nil {
+				controller.runWaitGroup.Add(1)
+				go controller.remoteServerListFetcher(
+					"common",
+					FetchCommonRemoteServerList,
+					controller.signalFetchCommonRemoteServerList)
+			}
+
+			if controller.config.ObfuscatedServerListRootURLs != nil {
+				controller.runWaitGroup.Add(1)
+				go controller.remoteServerListFetcher(
+					"obfuscated",
+					FetchObfuscatedServerLists,
+					controller.signalFetchObfuscatedServerLists)
+			}
+		}
+
+		if controller.config.EnableUpgradeDownload {
 			controller.runWaitGroup.Add(1)
-			go controller.remoteServerListFetcher(
-				"common",
-				FetchCommonRemoteServerList,
-				controller.signalFetchCommonRemoteServerList)
+			go controller.upgradeDownloader()
 		}
 
-		if controller.config.ObfuscatedServerListRootURLs != nil {
-			controller.runWaitGroup.Add(1)
-			go controller.remoteServerListFetcher(
-				"obfuscated",
-				FetchObfuscatedServerLists,
-				controller.signalFetchObfuscatedServerLists)
-		}
-	}
-
-	if controller.config.EnableUpgradeDownload {
 		controller.runWaitGroup.Add(1)
-		go controller.upgradeDownloader()
+		go controller.serverEntriesReporter()
+
+		controller.runWaitGroup.Add(1)
+		go controller.connectedReporter()
+
+		controller.runWaitGroup.Add(1)
+		go controller.establishTunnelWatcher()
+
+		controller.runWaitGroup.Add(1)
+		go controller.runTunnels()
+
+		if controller.packetTunnelClient != nil {
+			controller.packetTunnelClient.Start()
+		}
 	}
 
-	controller.runWaitGroup.Add(1)
-	go controller.serverEntriesReporter()
-
-	controller.runWaitGroup.Add(1)
-	go controller.connectedReporter()
-
-	controller.runWaitGroup.Add(1)
-	go controller.establishTunnelWatcher()
-
-	controller.runWaitGroup.Add(1)
-	go controller.runTunnels()
-
-	if controller.packetTunnelClient != nil {
-		controller.packetTunnelClient.Start()
+	if controller.config.InproxyEnableProxy {
+		controller.runWaitGroup.Add(1)
+		go controller.runInproxyProxy()
 	}
 
 	// Wait while running
@@ -1153,6 +1220,29 @@ func (controller *Controller) isFullyEstablished() bool {
 	return len(controller.tunnels) >= controller.tunnelPoolSize
 }
 
+// awaitFullyEstablished blocks until isFullyEstablished is true or the
+// controller run ends.
+func (controller *Controller) awaitFullyEstablished() bool {
+
+	// TODO: don't poll, add a signal
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		if controller.isFullyEstablished() {
+			return true
+		}
+
+		select {
+		case <-ticker.C:
+			// Check isFullyEstablished again
+		case <-controller.runCtx.Done():
+			return false
+		}
+	}
+}
+
 // numTunnels returns the number of active and outstanding tunnels.
 // Oustanding is the number of tunnels required to fill the pool of
 // active tunnels.
@@ -1314,18 +1404,22 @@ func (controller *Controller) Dial(
 	// When the countries do not match, the server establishes a port forward, as
 	// it does for all port forwards in non-split tunnel mode. There is no
 	// additional round trip for tunneled port forwards.
-
-	splitTunnelHost, _, err := net.SplitHostPort(remoteAddr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	//
+	// Each destination includes a host and port. Since there are special
+	// cases where the server performs transparent redirection for specific
+	// host:port combinations, including UDPInterceptUdpgwServerAddress, the
+	// classification can differ for the same host but different ports and so
+	// the classification is cached using the full address, host:port, as the
+	// key. While this results in additional classification round trips for
+	// destinations with the same domain but differing ports, in practise
+	// most destinations use only port 443.
 
 	untunneledCache := controller.untunneledSplitTunnelClassifications
 
-	// If the destination hostname is in the untunneled split tunnel
-	// classifications cache, skip the round trip to the server and do the
-	// direct, untunneled dial immediately.
-	_, cachedUntunneled := untunneledCache.Get(splitTunnelHost)
+	// If the destination is in the untunneled split tunnel classifications
+	// cache, skip the round trip to the server and do the direct, untunneled
+	// dial immediately.
+	_, cachedUntunneled := untunneledCache.Get(remoteAddr)
 
 	if !cachedUntunneled {
 
@@ -1337,9 +1431,9 @@ func (controller *Controller) Dial(
 
 		if !splitTunnel {
 
-			// Clear any cached untunneled classification entry for this destination
-			// hostname, as the server is now classifying it as tunneled.
-			untunneledCache.Delete(splitTunnelHost)
+			// Clear any cached untunneled classification entry for this
+			// destination, as the server is now classifying it as tunneled.
+			untunneledCache.Delete(remoteAddr)
 
 			return tunneledConn, nil
 		}
@@ -1347,10 +1441,10 @@ func (controller *Controller) Dial(
 		// The server has indicated that the client should make a direct,
 		// untunneled dial. Cache the classification to avoid this round trip in
 		// the immediate future.
-		untunneledCache.Add(splitTunnelHost, true, lrucache.DefaultExpiration)
+		untunneledCache.Add(remoteAddr, true, lrucache.DefaultExpiration)
 	}
 
-	NoticeUntunneled(splitTunnelHost)
+	NoticeUntunneled(remoteAddr)
 
 	untunneledConn, err := controller.DirectDial(remoteAddr)
 	if err != nil {
@@ -1426,7 +1520,8 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 			p.initialLimitTunnelProtocols,
 			p.limitTunnelDialPortNumbers,
 			p.limitQUICVersions,
-			excludeIntensive)) > 0
+			excludeIntensive,
+			false)) > 0
 }
 
 func (p *protocolSelectionConstraints) isCandidate(
@@ -1439,7 +1534,8 @@ func (p *protocolSelectionConstraints) isCandidate(
 		p.limitTunnelProtocols,
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,
-		excludeIntensive)) > 0
+		excludeIntensive,
+		false)) > 0
 }
 
 func (p *protocolSelectionConstraints) canReplay(
@@ -1453,13 +1549,15 @@ func (p *protocolSelectionConstraints) canReplay(
 	}
 
 	return common.Contains(
-		p.supportedProtocols(connectTunnelCount, excludeIntensive, serverEntry),
+		p.supportedProtocols(
+			connectTunnelCount, excludeIntensive, false, serverEntry),
 		replayProtocol)
 }
 
 func (p *protocolSelectionConstraints) supportedProtocols(
 	connectTunnelCount int,
 	excludeIntensive bool,
+	excludeInproxy bool,
 	serverEntry *protocol.ServerEntry) []string {
 
 	limitTunnelProtocols := p.limitTunnelProtocols
@@ -1476,15 +1574,18 @@ func (p *protocolSelectionConstraints) supportedProtocols(
 		limitTunnelProtocols,
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,
-		excludeIntensive)
+		excludeIntensive,
+		excludeInproxy)
 }
 
 func (p *protocolSelectionConstraints) selectProtocol(
 	connectTunnelCount int,
 	excludeIntensive bool,
+	excludeInproxy bool,
 	serverEntry *protocol.ServerEntry) (string, bool) {
 
-	candidateProtocols := p.supportedProtocols(connectTunnelCount, excludeIntensive, serverEntry)
+	candidateProtocols := p.supportedProtocols(
+		connectTunnelCount, excludeIntensive, excludeInproxy, serverEntry)
 
 	if len(candidateProtocols) == 0 {
 		return "", false
@@ -1499,7 +1600,6 @@ func (p *protocolSelectionConstraints) selectProtocol(
 	index := prng.Intn(len(candidateProtocols))
 
 	return candidateProtocols[index], true
-
 }
 
 type candidateServerEntry struct {
@@ -1635,11 +1735,33 @@ func (controller *Controller) launchEstablishing() {
 		initialLimitTunnelProtocols:               p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
 		initialLimitTunnelProtocolsCandidateCount: p.Int(parameters.InitialLimitTunnelProtocolsCandidateCount),
 		limitTunnelProtocols:                      p.TunnelProtocols(parameters.LimitTunnelProtocols),
-
 		limitTunnelDialPortNumbers: protocol.TunnelProtocolPortLists(
 			p.TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers)),
 
 		replayCandidateCount: p.Int(parameters.ReplayCandidateCount),
+	}
+
+	// Adjust protocol limits for in-proxy personal proxy mode. In this mode,
+	// the client will make connections only through a proxy with the
+	// corresponding personal compartment ID, so non-in-proxy tunnel
+	// protocols are disabled.
+
+	if len(controller.config.InproxyPersonalCompartmentIDs) > 0 {
+
+		if len(controller.protocolSelectionConstraints.initialLimitTunnelProtocols) > 0 {
+			controller.protocolSelectionConstraints.initialLimitTunnelProtocols =
+				controller.protocolSelectionConstraints.
+					initialLimitTunnelProtocols.OnlyInproxyTunnelProtocols()
+		}
+
+		if len(controller.protocolSelectionConstraints.limitTunnelProtocols) > 0 {
+			controller.protocolSelectionConstraints.limitTunnelProtocols =
+				controller.protocolSelectionConstraints.
+					limitTunnelProtocols.OnlyInproxyTunnelProtocols()
+		} else {
+			controller.protocolSelectionConstraints.limitTunnelProtocols =
+				protocol.InproxyTunnelProtocols
+		}
 	}
 
 	// ConnectionWorkerPoolSize may be set by tactics.
@@ -1934,7 +2056,7 @@ loop:
 				break
 			}
 
-			if controller.config.TargetApiProtocol == protocol.PSIPHON_SSH_API_PROTOCOL &&
+			if controller.config.TargetAPIProtocol == protocol.PSIPHON_API_PROTOCOL_SSH &&
 				!serverEntry.SupportsSSHAPIRequests() {
 				continue
 			}
@@ -2144,8 +2266,12 @@ loop:
 		// intensive. In this case, a StaggerConnectionWorkersMilliseconds
 		// delay may still be incurred.
 
-		limitIntensiveConnectionWorkers := controller.config.GetParameters().Get().Int(
-			parameters.LimitIntensiveConnectionWorkers)
+		p := controller.config.GetParameters().Get()
+		limitIntensiveConnectionWorkers := p.Int(parameters.LimitIntensiveConnectionWorkers)
+		inproxySelectionProbability := p.Float(parameters.InproxyTunnelProtocolSelectionProbability)
+		staggerPeriod := p.Duration(parameters.StaggerConnectionWorkersPeriod)
+		staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
+		p.Close()
 
 		controller.concurrentEstablishTunnelsMutex.Lock()
 
@@ -2164,9 +2290,18 @@ loop:
 		}
 
 		selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
+
+			// The in-proxy protocol selection probability allows for
+			// tuning/limiting in-proxy usage independent of
+			// LimitTunnelProtocol targeting.
+
+			onlyInproxy := len(controller.config.InproxyPersonalCompartmentIDs) > 0
+			includeInproxy := onlyInproxy || prng.FlipWeightedCoin(inproxySelectionProbability)
+
 			return controller.protocolSelectionConstraints.selectProtocol(
 				controller.establishConnectTunnelCount,
 				excludeIntensive,
+				!includeInproxy,
 				serverEntry)
 		}
 
@@ -2198,6 +2333,8 @@ loop:
 			canReplay,
 			selectProtocol,
 			candidateServerEntry.serverEntry,
+			controller.inproxyClientBrokerClientManager,
+			controller.inproxyNATStateManager,
 			false,
 			controller.establishConnectTunnelCount,
 			int(atomic.LoadInt32(&controller.establishedTunnelsCount)))
@@ -2255,11 +2392,6 @@ loop:
 		//
 		// The stagger is applied when establishConnectTunnelCount > 0 -- that
 		// is, for all but the first dial.
-
-		p := controller.config.GetParameters().Get()
-		staggerPeriod := p.Duration(parameters.StaggerConnectionWorkersPeriod)
-		staggerJitter := p.Float(parameters.StaggerConnectionWorkersJitter)
-		p.Close()
 
 		if establishConnectTunnelCount > 0 && staggerPeriod != 0 {
 			controller.staggerMutex.Lock()
@@ -2355,4 +2487,284 @@ func (controller *Controller) isStopEstablishing() bool {
 	default:
 	}
 	return false
+}
+
+func (controller *Controller) runInproxyProxy() {
+	defer controller.runWaitGroup.Done()
+
+	if !controller.config.DisableTactics {
+
+		// Obtain and apply tactics before connecting to the broker and
+		// announcing proxies.
+
+		if controller.config.DisableTunnels {
+
+			// When not running client tunnel establishment, perform an OOB tactics
+			// fetch, if required, here.
+
+			GetTactics(controller.runCtx, controller.config)
+
+		} else if !controller.config.InproxySkipAwaitFullyConnected {
+
+			// When running client tunnel establishment, await establishment
+			// as this guarantees fresh tactics from either an OOB request or
+			// a handshake response.
+			//
+			// While it may be possible to proceed sooner, using cached
+			// tactics, waiting until establishment is complete avoids
+			// potential races between tactics updates.
+
+			if !controller.awaitFullyEstablished() {
+				// Controller is shutting down
+				return
+			}
+
+		} else {
+
+			// InproxySkipAwaitFullyConnected is a special case to support
+			// server/server_test, where a client mus be its own proxy; in
+			// this case, awaitFullyEstablished will block forever.
+			// inproxyAwaitBrokerSpecs simply waits until any broker specs
+			// become available, which is sufficient for the test but is not
+			// as robust as awaiting fresh tactics.
+
+			if !controller.inproxyAwaitBrokerSpecs() {
+				// Controller is shutting down
+				return
+			}
+		}
+	}
+
+	// Don't announce proxies if tactics indicates it won't be allowed. This
+	// is also enforced on the broker; this client-side check cuts down on
+	// load from well-behaved proxies.
+
+	p := controller.config.GetParameters().Get()
+	allowProxy := p.Bool(parameters.InproxyAllowProxy)
+	p.Close()
+
+	// Don't announce proxies when running on an incompatible network, such as
+	// a non-Psiphon VPN.
+
+	compatibleNetwork := IsInproxyCompatibleNetworkType(controller.config.GetNetworkID())
+
+	if !allowProxy || !compatibleNetwork {
+		if !allowProxy {
+			NoticeError("inproxy proxy: not allowed")
+		} else {
+			NoticeError("inproxy proxy: not run due to incompatible network")
+		}
+		if controller.config.DisableTunnels {
+			// Signal failure -- and shutdown -- only if running in proxy-only mode. If also
+			// running a tunnel, keep running without proxies.
+			controller.SignalComponentFailure()
+		}
+		return
+	}
+
+	config := &inproxy.ProxyConfig{
+		Logger:                        NoticeCommonLogger(),
+		GetBrokerClient:               controller.inproxyGetProxyBrokerClient,
+		GetBaseAPIParameters:          controller.inproxyGetAPIParameters,
+		MakeWebRTCDialCoordinator:     controller.inproxyMakeWebRTCDialCoordinator,
+		HandleTacticsPayload:          controller.inproxyHandleTacticsPayload,
+		MaxClients:                    controller.config.InproxyMaxClients,
+		LimitUpstreamBytesPerSecond:   controller.config.InproxyLimitUpstreamBytesPerSecond,
+		LimitDownstreamBytesPerSecond: controller.config.InproxyLimitDownstreamBytesPerSecond,
+
+		OperatorMessageHandler: func(messageJSON string) {
+			NoticeInproxyOperatorMessage(messageJSON)
+		},
+
+		ActivityUpdater: func(
+			connectingClients int32,
+			connectedClients int32,
+			bytesUp int64,
+			bytesDown int64,
+			bytesDuration time.Duration) {
+			NoticeInproxyProxyActivity(connectingClients, connectedClients, bytesUp, bytesDown, bytesDuration)
+		},
+	}
+
+	proxy, err := inproxy.NewProxy(config)
+	if err != nil {
+		NoticeError("inproxy.NewProxy failed: %v", errors.Trace(err))
+		controller.SignalComponentFailure()
+		return
+	}
+
+	NoticeInfo("inproxy proxy: running")
+
+	proxy.Run(controller.runCtx)
+
+	NoticeInfo("inproxy proxy: stopped")
+}
+
+func (controller *Controller) inproxyAwaitBrokerSpecs() bool {
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		p := controller.config.GetParameters().Get()
+		brokerSpecs := p.InproxyBrokerSpecs(parameters.InproxyBrokerSpecs)
+		p.Close()
+
+		if len(brokerSpecs) > 0 {
+			return true
+		}
+
+		select {
+		case <-ticker.C:
+			// Check isFullyEstablished again
+		case <-controller.runCtx.Done():
+			return false
+		}
+	}
+}
+
+// inproxyGetProxyBrokerClient returns the broker client shared by all proxy
+// operations.
+func (controller *Controller) inproxyGetProxyBrokerClient() (*inproxy.BrokerClient, error) {
+
+	brokerClient, _, err := controller.inproxyProxyBrokerClientManager.GetBrokerClient(
+		controller.config.GetNetworkID())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return brokerClient, nil
+}
+
+func (controller *Controller) inproxyGetAPIParameters() (common.APIParameters, string, error) {
+
+	// TODO: include broker fronting dial parameters to be logged by the
+	// broker.
+	params := getBaseAPIParameters(baseParametersNoDialParameters, controller.config, nil)
+
+	if controller.config.DisableTactics {
+		return params, "", nil
+	}
+
+	// Add the known tactics tag, so that the broker can return new tactics if
+	// available.
+	//
+	// The active network ID is recorded returned and rechecked for
+	// consistency when storing any new tactics returned from the broker;
+	// other tactics fetches have this same check.
+
+	networkID := controller.config.GetNetworkID()
+	err := tactics.SetTacticsAPIParameters(GetTacticsStorer(controller.config), networkID, params)
+	if err != nil {
+		return nil, "", errors.Trace(err)
+	}
+
+	return params, networkID, nil
+}
+
+func (controller *Controller) inproxyMakeWebRTCDialCoordinator() (inproxy.WebRTCDialCoordinator, error) {
+
+	// nil is passed in for both InproxySTUNDialParameters and
+	// InproxyWebRTCDialParameters, so those parameters will be newly
+	// auto-generated for each client/proxy connection attempt. Unlike the
+	// in-proxy client, there is currently no replay of STUN or WebRTC dial
+	// parameters.
+
+	isProxy := true
+	webRTCDialInstance, err := NewInproxyWebRTCDialInstance(
+		controller.config,
+		controller.config.GetNetworkID(),
+		isProxy,
+		controller.inproxyNATStateManager,
+		nil,
+		nil)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return webRTCDialInstance, nil
+}
+
+// inproxyHandleTacticsPayload handles new tactics returned from the proxy and
+// returns when tactics have changed.
+//
+// inproxyHandleTacticsPayload duplicates some tactics-handling code from
+// doHandshakeRequest.
+func (controller *Controller) inproxyHandleTacticsPayload(
+	networkID string, tacticsPayload []byte) bool {
+
+	if controller.config.DisableTactics {
+		return false
+	}
+
+	if controller.config.GetNetworkID() != networkID {
+		// Ignore the tactics if the network ID has changed.
+		return false
+	}
+
+	var payload *tactics.Payload
+	err := json.Unmarshal(tacticsPayload, &payload)
+	if err != nil {
+		NoticeError("unmarshal tactics payload failed: %v", errors.Trace(err))
+		return false
+	}
+
+	if payload == nil {
+		// See "null" comment in doHandshakeRequest.
+		return false
+	}
+
+	// The in-proxy proxy implementation arranges for the first ProxyAnnounce
+	// request to get a head start in case there are new tactics available
+	// from the broker. Additional requests are also staggered.
+	//
+	// It can still happen that concurrent in-flight ProxyAnnounce requests
+	// receive duplicate new-tactics responses.
+	//
+	// TODO: detect this case and avoid resetting the broker client and NAT
+	// state managers more than necessary.
+
+	// Serialize processing of tactics from ProxyAnnounce responses.
+	controller.inproxyHandleTacticsMutex.Lock()
+	defer controller.inproxyHandleTacticsMutex.Unlock()
+
+	// When tactics are unchanged, the broker, as in the handshake case,
+	// returns a tactics payload, but without new tactics. As in the
+	// handshake case, HandleTacticsPayload is called in order to extend the
+	// TTL of the locally cached, unchanged tactics. Due to the potential
+	// high frequency and concurrency of ProxyAnnnounce requests vs.
+	// handshakes, a limit is added to update the data store's tactics TTL no
+	// more than one per minute.
+
+	appliedNewTactics := payload.Tactics != nil
+	now := time.Now()
+	if !appliedNewTactics && now.Sub(controller.inproxyLastStoredTactics) > 1*time.Minute {
+		// Skip TTL-only disk write.
+		return false
+	}
+	controller.inproxyLastStoredTactics = now
+
+	tacticsRecord, err := tactics.HandleTacticsPayload(
+		GetTacticsStorer(controller.config), networkID, payload)
+	if err != nil {
+		NoticeError("HandleTacticsPayloadfailed: %v", errors.Trace(err))
+		return false
+	}
+
+	if tacticsRecord != nil &&
+		prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+
+		// SetParameters signals registered components, including broker
+		// client and NAT state managers, that must reset upon tactics changes.
+
+		err := controller.config.SetParameters(
+			tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
+		if err != nil {
+			NoticeInfo("apply inproxy broker tactics failed: %s", err)
+			return false
+		}
+	} else {
+		appliedNewTactics = false
+	}
+
+	return appliedNewTactics
 }

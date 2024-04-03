@@ -132,6 +132,9 @@ func NewUDPConn(
 		}
 	}
 
+	// When configured, attempt to synthesize IPv6 addresses from
+	// an IPv4 addresses for compatibility on DNS64/NAT64 networks.
+	// If synthesize fails, try the original addresses.
 	if config.IPv6Synthesizer != nil {
 		if ipAddr.To4() != nil {
 			synthesizedIPAddress := config.IPv6Synthesizer.IPv6Synthesize(ipAddr.String())
@@ -151,14 +154,6 @@ func NewUDPConn(
 			socketFD := int(fd)
 
 			setAdditionalSocketOptions(socketFD)
-
-			if config.BPFProgramInstructions != nil {
-				err := setSocketBPF(config.BPFProgramInstructions, socketFD)
-				if err != nil {
-					controlErr = errors.Tracef("setSocketBPF failed: %s", err)
-					return
-				}
-			}
 
 			if config.DeviceBinder != nil {
 				_, err := config.DeviceBinder.BindToDevice(socketFD)

@@ -27,14 +27,12 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
-// clientOfferRequestTimeout should be set to no more than brokerClientOfferTimeout
-
 const (
-	clientOfferRequestTimeout = 10 * time.Second
-	clientOfferRetryDelay     = 1 * time.Second
-	clientOfferRetryJitter    = 0.3
+	clientOfferRetryDelay  = 1 * time.Second
+	clientOfferRetryJitter = 0.3
 )
 
 // ClientConn is a network connection to an in-proxy, which is relayed to a
@@ -59,19 +57,19 @@ type ClientConfig struct {
 	// Logger is used to log events.
 	Logger common.Logger
 
-	// BaseMetrics should be populated with Psiphon handshake metrics
+	// BaseAPIParameters should be populated with Psiphon handshake metrics
 	// parameters. These will be sent to and logger by the broker.
-	BaseMetrics common.APIParameters
-
-	// DialParameters specifies specific WebRTC dial strategies and
-	// settings; DialParameters also facilities dial replay by receiving
-	// callbacks when individual dial steps succeed or fail.
-	DialParameters DialParameters
+	BaseAPIParameters common.APIParameters
 
 	// BrokerClient is the BrokerClient to use for broker API calls. The
 	// BrokerClient may be shared with other client dials, allowing for
 	// connection and session reuse.
 	BrokerClient *BrokerClient
+
+	// WebRTCDialCoordinator specifies specific WebRTC dial strategies and
+	// settings; WebRTCDialCoordinator also facilities dial replay by
+	// receiving callbacks when individual dial steps succeed or fail.
+	WebRTCDialCoordinator WebRTCDialCoordinator
 
 	// ReliableTransport specifies whether to use reliable delivery with the
 	// underlying WebRTC DataChannel that relays the ClientConn traffic. When
@@ -90,13 +88,15 @@ type ClientConfig struct {
 	// will relay traffic to.
 	DialAddress string
 
-	// DestinationServerEntryJSON is a signed Psiphon server entry
+	// PackedDestinationServerEntry is a signed Psiphon server entry
 	// corresponding to the destination dial address. This signed server
 	// entry is sent to the broker, which will use it to validate that the
 	// server is a valid in-proxy destination.
-	// ServerEntryFields.RemoveUnsignedFields can be called to prune local
-	// fields before sending.
-	DestinationServerEntryJSON []byte
+	//
+	// The expected format is CBOR-encoded protoco.PackedServerEntryFields,
+	// with the caller invoking  ServerEntryFields.RemoveUnsignedFields to
+	// prune local, unnsigned fields before sending.
+	PackedDestinationServerEntry []byte
 }
 
 // DialClient establishes an in-proxy connection for relaying traffic to the
@@ -109,7 +109,7 @@ func DialClient(
 
 	// Reset and configure port mapper component, as required. See
 	// initPortMapper comment.
-	initPortMapper(config.DialParameters)
+	initPortMapper(config.WebRTCDialCoordinator)
 
 	// Future improvements:
 	//
@@ -124,7 +124,7 @@ func DialClient(
 	//   client offer request, in case that request or WebRTC connections
 	//   fails, so that the offer is immediately ready for a retry.
 
-	if config.DialParameters.DiscoverNAT() {
+	if config.WebRTCDialCoordinator.DiscoverNAT() {
 
 		// NAT discovery, using the RFC5780 algorithms is optional and
 		// conditional on the DiscoverNAT flag. Discovery is performed
@@ -135,7 +135,7 @@ func DialClient(
 		// ICE) and since this step delays the dial. Clients should to cache
 		// their NAT discovery outcomes, associated with the current network
 		// by network ID, so metrics can be reported even without a discovery
-		// step; this is facilitated by DialParameters.
+		// step; this is facilitated by WebRTCDialCoordinator.
 		//
 		// NAT topology metrics are used by the broker to optimize client and
 		// in-proxy matching.
@@ -147,9 +147,9 @@ func DialClient(
 		NATDiscover(
 			ctx,
 			&NATDiscoverConfig{
-				Logger:          config.Logger,
-				DialParameters:  config.DialParameters,
-				SkipPortMapping: true,
+				Logger:                config.Logger,
+				WebRTCDialCoordinator: config.WebRTCDialCoordinator,
+				SkipPortMapping:       true,
 			})
 	}
 
@@ -159,11 +159,11 @@ func DialClient(
 		// Repeatedly try to establish in-proxy/WebRTC connection until the
 		// dial context is canceled or times out.
 		//
-		// If a broker request fails, the
-		// DialParameters.BrokerClientRoundTripperFailed callback will be
-		// invoked, so the Psiphon client will have an opportunity to select
-		// new broker connection parameters before a retry. Similarly, when
-		// STUN servers fail, DialParameters.STUNServerAddressFailed will be
+		// If a broker request fails, the WebRTCDialCoordinator
+		// BrokerClientRoundTripperFailed callback will be invoked, so the
+		// Psiphon client will have an opportunity to select new broker
+		// connection parameters before a retry. Similarly, when STUN servers
+		// fail, WebRTCDialCoordinator STUNServerAddressFailed will be
 		// invoked, giving the Psiphon client an opportunity to select new
 		// STUN server parameter -- although, in this failure case, the
 		// WebRTC connection attemp can succeed with other ICE candidates or
@@ -187,10 +187,11 @@ func DialClient(
 			// repeated requests. A jitter is applied to mitigate a traffic
 			// fingerprint.
 
+			brokerCoordinator := config.BrokerClient.GetBrokerDialCoordinator()
 			common.SleepWithJitter(
 				ctx,
-				common.ValueOrDefault(config.DialParameters.OfferRetryDelay(), clientOfferRetryDelay),
-				common.ValueOrDefault(config.DialParameters.OfferRetryJitter(), clientOfferRetryJitter))
+				common.ValueOrDefault(brokerCoordinator.OfferRetryDelay(), clientOfferRetryDelay),
+				common.ValueOrDefault(brokerCoordinator.OfferRetryJitter(), clientOfferRetryJitter))
 
 			continue
 		}
@@ -235,7 +236,7 @@ func (conn *ClientConn) InitialRelayPacket() []byte {
 //
 // If RelayPacket fails, the client should close the ClientConn and redial.
 func (conn *ClientConn) RelayPacket(
-	ctx context.Context, in []byte, sessionInvalid bool) ([]byte, error) {
+	ctx context.Context, in []byte) ([]byte, error) {
 
 	// Future improvement: the client relaying these packets back to the
 	// broker is potentially an inter-flow fingerprint, alternating between
@@ -249,12 +250,14 @@ func (conn *ClientConn) RelayPacket(
 	conn.relayMutex.Lock()
 	defer conn.relayMutex.Unlock()
 
+	// ClientRelayedPacket applies
+	// BrokerDialCoordinator.RelayedPacketRequestTimeout as the request
+	// timeout.
 	relayResponse, err := conn.config.BrokerClient.ClientRelayedPacket(
 		ctx,
 		&ClientRelayedPacketRequest{
 			ConnectionID:     conn.connectionID,
 			PacketFromServer: in,
-			SessionInvalid:   sessionInvalid,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -275,14 +278,14 @@ func dialClientWebRTCConn(
 
 	// Initialize the WebRTC offer
 
-	doTLSRandomization := config.DialParameters.DoDTLSRandomization()
-	trafficShapingParameters := config.DialParameters.DataChannelTrafficShapingParameters()
-	clientRootObfuscationSecret := config.DialParameters.ClientRootObfuscationSecret()
+	doTLSRandomization := config.WebRTCDialCoordinator.DoDTLSRandomization()
+	trafficShapingParameters := config.WebRTCDialCoordinator.DataChannelTrafficShapingParameters()
+	clientRootObfuscationSecret := config.WebRTCDialCoordinator.ClientRootObfuscationSecret()
 
 	webRTCConn, SDP, SDPMetrics, err := NewWebRTCConnWithOffer(
 		ctx, &WebRTCConfig{
 			Logger:                      config.Logger,
-			DialParameters:              config.DialParameters,
+			WebRTCDialCoordinator:       config.WebRTCDialCoordinator,
 			ClientRootObfuscationSecret: clientRootObfuscationSecret,
 			DoDTLSRandomization:         doTLSRandomization,
 			TrafficShapingParameters:    trafficShapingParameters,
@@ -300,42 +303,46 @@ func dialClientWebRTCConn(
 
 	// Send the ClientOffer request to the broker
 
-	offerRequestCtx, offerRequestCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(config.DialParameters.OfferRequestTimeout(), clientOfferRequestTimeout))
-	defer offerRequestCancelFunc()
+	brokerCoordinator := config.BrokerClient.GetBrokerDialCoordinator()
 
-	baseMetrics, err := EncodeBaseMetrics(config.BaseMetrics)
+	packedBaseParams, err := protocol.EncodePackedAPIParameters(config.BaseAPIParameters)
 	if err != nil {
 		return nil, false, errors.Trace(err)
 	}
 
-	// Here, DialParameters.NATType may be populated from discovery, or
+	// Here, WebRTCDialCoordinator.NATType may be populated from discovery, or
 	// replayed from a previous run on the same network ID.
-	// DialParameters.PortMappingTypes may be populated via
+	// WebRTCDialCoordinator.PortMappingTypes may be populated via
 	// newWebRTCConnWithOffer.
 
+	// ClientOffer applies BrokerDialCoordinator.OfferRequestTimeout as the
+	// request timeout.
 	offerResponse, err := config.BrokerClient.ClientOffer(
-		offerRequestCtx,
+		ctx,
 		&ClientOfferRequest{
 			Metrics: &ClientMetrics{
-				BaseMetrics:          baseMetrics,
+				BaseAPIParameters:    packedBaseParams,
 				ProxyProtocolVersion: ProxyProtocolVersion1,
-				NATType:              config.DialParameters.NATType(),
-				PortMappingTypes:     config.DialParameters.PortMappingTypes(),
+				NATType:              config.WebRTCDialCoordinator.NATType(),
+				PortMappingTypes:     config.WebRTCDialCoordinator.PortMappingTypes(),
 			},
-			CommonCompartmentIDs:        config.DialParameters.CommonCompartmentIDs(),
-			PersonalCompartmentIDs:      config.DialParameters.PersonalCompartmentIDs(),
-			ClientOfferSDP:              SDP,
-			ICECandidateTypes:           SDPMetrics.ICECandidateTypes,
-			ClientRootObfuscationSecret: clientRootObfuscationSecret,
-			DoDTLSRandomization:         doTLSRandomization,
-			TrafficShapingParameters:    trafficShapingParameters,
-			DestinationServerEntryJSON:  config.DestinationServerEntryJSON,
-			NetworkProtocol:             config.DialNetworkProtocol,
-			DestinationAddress:          config.DialAddress,
+			CommonCompartmentIDs:         brokerCoordinator.CommonCompartmentIDs(),
+			PersonalCompartmentIDs:       brokerCoordinator.PersonalCompartmentIDs(),
+			ClientOfferSDP:               SDP,
+			ICECandidateTypes:            SDPMetrics.ICECandidateTypes,
+			ClientRootObfuscationSecret:  clientRootObfuscationSecret,
+			DoDTLSRandomization:          doTLSRandomization,
+			TrafficShapingParameters:     trafficShapingParameters,
+			PackedDestinationServerEntry: config.PackedDestinationServerEntry,
+			NetworkProtocol:              config.DialNetworkProtocol,
+			DestinationAddress:           config.DialAddress,
 		})
 	if err != nil {
 		return nil, false, errors.Trace(err)
+	}
+
+	if offerResponse.NoMatch {
+		return nil, false, errors.TraceNew("no proxy match")
 	}
 
 	if offerResponse.SelectedProxyProtocolVersion != ProxyProtocolVersion1 {
@@ -351,7 +358,13 @@ func dialClientWebRTCConn(
 		return nil, true, errors.Trace(err)
 	}
 
-	err = webRTCConn.AwaitInitialDataChannel(ctx)
+	awaitDataChannelCtx, awaitDataChannelCancelFunc := context.WithTimeout(
+		ctx,
+		common.ValueOrDefault(
+			config.WebRTCDialCoordinator.WebRTCAwaitDataChannelTimeout(), dataChannelAwaitTimeout))
+	defer awaitDataChannelCancelFunc()
+
+	err = webRTCConn.AwaitInitialDataChannel(awaitDataChannelCtx)
 	if err != nil {
 		return nil, true, errors.Trace(err)
 	}
@@ -365,15 +378,15 @@ func dialClientWebRTCConn(
 
 // GetMetrics implements the common.MetricsSource interface.
 func (conn *ClientConn) GetMetrics() common.LogFields {
-
-	// TODO: determine which WebRTC ICE candidate was chosen, and log its
-	// type (host, server reflexive, etc.), and whether it's IPv6.
-
-	return common.LogFields{}
+	return conn.webRTCConn.GetMetrics()
 }
 
 func (conn *ClientConn) Close() error {
 	return errors.Trace(conn.webRTCConn.Close())
+}
+
+func (conn *ClientConn) IsClosed() bool {
+	return conn.webRTCConn.IsClosed()
 }
 
 func (conn *ClientConn) Read(p []byte) (int, error) {

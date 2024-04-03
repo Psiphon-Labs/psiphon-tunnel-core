@@ -122,10 +122,8 @@ func runServerReplayTest(
 	// Run Psiphon server
 
 	generateConfigParams := &GenerateConfigParams{
-		ServerIPAddress:      "127.0.0.1",
-		EnableSSHAPIRequests: true,
-		WebServerPort:        8000,
-		TunnelProtocolPorts:  map[string]int{tunnelProtocol: 4000},
+		ServerIPAddress:     "127.0.0.1",
+		TunnelProtocolPorts: map[string]int{tunnelProtocol: 4000},
 	}
 
 	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
@@ -282,8 +280,8 @@ func runServerReplayClient(
         "DataRootDirectory" : "%s",
         "ClientPlatform" : "Windows",
         "ClientVersion" : "0",
-        "SponsorId" : "0",
-        "PropagationChannelId" : "0",
+        "SponsorId" : "0000000000000000",
+        "PropagationChannelId" : "0000000000000000",
         "TargetServerEntry" : "%s"
     }`, dataRootDir, string(encodedServerEntry))
 

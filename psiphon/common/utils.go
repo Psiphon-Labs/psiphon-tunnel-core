@@ -260,3 +260,19 @@ func ValueOrDefault[T comparable](value, defaultValue T) T {
 	}
 	return value
 }
+
+// MergeContextCancel returns a context which has the properties of the 1st
+// input content and merges in the cancellation signal of the 2nd context, so
+// the returned context is cancelled when either input context is cancelled.
+//
+// See (and adapted from): https://pkg.go.dev/context#example-AfterFunc-Merge
+func MergeContextCancel(ctx, cancelCtx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	stop := context.AfterFunc(cancelCtx, func() {
+		cancel(context.Cause(cancelCtx))
+	})
+	return ctx, func() {
+		stop()
+		cancel(context.Canceled)
+	}
+}

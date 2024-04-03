@@ -650,6 +650,13 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 				args = append(args, name, value)
 			}
 		}
+
+		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
+			metrics := dialParams.GetInproxyMetrics()
+			for name, value := range metrics {
+				args = append(args, name, value)
+			}
+		}
 	}
 
 	singletonNoticeLogger.outputNotice(
@@ -1065,6 +1072,32 @@ func NoticeSkipServerEntry(format string, args ...interface{}) {
 	outputRepetitiveNotice(
 		repetitionKey, "", 0,
 		"SkipServerEntry", 0, "reason", reason)
+}
+
+// NoticeInproxyOperatorMessage emits a message to be displayed to the proxy
+// operator.
+func NoticeInproxyOperatorMessage(messageJSON string) {
+	singletonNoticeLogger.outputNotice(
+		"InproxyOperatorMessage", noticeIsDiagnostic,
+		"message", messageJSON)
+}
+
+// NoticeInproxyProxyActivity reports proxy usage statistics. The stats are
+// for activity since the last NoticeInproxyProxyActivity report.
+func NoticeInproxyProxyActivity(
+	connectingClients int32,
+	connectedClients int32,
+	bytesUp int64,
+	bytesDown int64,
+	bytesDuration time.Duration) {
+
+	singletonNoticeLogger.outputNotice(
+		"InproxyProxyActivity", noticeIsDiagnostic,
+		"connectingClients", connectingClients,
+		"connectedClients", connectedClients,
+		"bytesUp", bytesUp,
+		"bytesDown", bytesDown,
+		"bytesDuration", bytesDuration)
 }
 
 type repetitiveNoticeState struct {

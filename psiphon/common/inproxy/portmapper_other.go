@@ -21,7 +21,7 @@
 
 package inproxy
 
-func setPortMapperBindToDevice(dialParams DialParameters) {
+func setPortMapperBindToDevice(_ WebRTCDialCoordinator) {
 	// BindToDevice is not applied on iOS as tailscale.com/net/netns does not
 	// have an equivilent to SetAndroidProtectFunc for iOS. At this time,
 	// BindToDevice operations on iOS are legacy code and not required.

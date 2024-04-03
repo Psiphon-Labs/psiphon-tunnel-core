@@ -25,6 +25,6 @@ import (
 	"tailscale.com/net/netns"
 )
 
-func setPortMapperBindToDevice(dialParams DialParameters) {
-	netns.SetAndroidProtectFunc(dialParams.BindToDevice)
+func setPortMapperBindToDevice(coordinator WebRTCDialCoordinator) {
+	netns.SetAndroidProtectFunc(coordinator.BindToDevice)
 }

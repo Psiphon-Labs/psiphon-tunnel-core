@@ -20,6 +20,7 @@ package inproxy
 
 import (
 	"context"
+	"net"
 	"sync"
 	"time"
 
@@ -27,16 +28,20 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/gammazero/deque"
+	"github.com/juju/ratelimit"
 	"github.com/pion/webrtc/v3"
 )
 
 // TTLs should be aligned with STUN hole punch lifetimes.
 
 const (
-	matcherAnnouncementQueueMaxSize = 100000
-	matcherOfferQueueMaxSize        = 100000
+	matcherAnnouncementQueueMaxSize = 5000000
+	matcherOfferQueueMaxSize        = 5000000
 	matcherPendingAnswersTTL        = 30 * time.Second
 	matcherPendingAnswersMaxSize    = 100000
+
+	matcherRateLimiterReapHistoryFrequencySeconds = 300
+	matcherRateLimiterMaxCacheEntries             = 1000000
 )
 
 // Matcher matches proxy announcements with client offers. Matcher also
@@ -50,6 +55,9 @@ const (
 // IDs. Personal compartment matching is preferred. Common compartments are
 // managed by Psiphon and can be obtained via a tactics parameter or via an
 // OSL embedding.
+//
+// A client may opt form personal-only matching by not supplying any common
+// compartment IDs.
 //
 // Matching prefers to pair proxies and clients in a way that maximizes total
 // possible matches. For a client or proxy with less-limited NAT traversal, a
@@ -79,6 +87,12 @@ type Matcher struct {
 
 	announcementQueueMutex                      sync.Mutex
 	announcementQueue                           *deque.Deque[*announcementEntry]
+	announcementQueueEntryCountByIP             map[string]int
+	announcementQueueRateLimiters               *lrucache.Cache
+	announcementLimitEntryCount                 int
+	announcementRateLimitQuantity               int
+	announcementRateLimitInterval               time.Duration
+	announcementNonlimitedProxyIDs              map[ID]struct{}
 	announcementsPersonalCompartmentalizedCount int
 	announcementsUnlimitedNATCount              int
 	announcementsPartiallyLimitedNATCount       int
@@ -88,8 +102,13 @@ type Matcher struct {
 	// and announcement queue are required since either announcements or
 	// offers can arrive while there are no available pairings.
 
-	offerQueueMutex sync.Mutex
-	offerQueue      *deque.Deque[*offerEntry]
+	offerQueueMutex          sync.Mutex
+	offerQueue               *deque.Deque[*offerEntry]
+	offerQueueEntryCountByIP map[string]int
+	offerQueueRateLimiters   *lrucache.Cache
+	offerLimitEntryCount     int
+	offerRateLimitQuantity   int
+	offerRateLimitInterval   time.Duration
 
 	matchSignal chan struct{}
 
@@ -187,6 +206,7 @@ type MatchAnswer struct {
 // associated lifetime context and signaling channel.
 type announcementEntry struct {
 	ctx          context.Context
+	limitIP      string
 	announcement *MatchAnnouncement
 	offerChan    chan *MatchOffer
 }
@@ -195,6 +215,7 @@ type announcementEntry struct {
 // context and signaling channel.
 type offerEntry struct {
 	ctx        context.Context
+	limitIP    string
 	offer      *MatchOffer
 	answerChan chan *answerInfo
 }
@@ -217,18 +238,40 @@ type MatcherConfig struct {
 
 	// Logger is used to log events.
 	Logger common.Logger
+
+	// Accouncement queue limits.
+	AnnouncementLimitEntryCount    int
+	AnnouncementRateLimitQuantity  int
+	AnnouncementRateLimitInterval  time.Duration
+	AnnouncementNonlimitedProxyIDs []ID
+
+	// Offer queue limits.
+	OfferLimitEntryCount   int
+	OfferRateLimitQuantity int
+	OfferRateLimitInterval time.Duration
 }
 
 // NewMatcher creates a new Matcher.
 func NewMatcher(config *MatcherConfig) *Matcher {
 
-	return &Matcher{
+	m := &Matcher{
 		config: config,
 
 		waitGroup: new(sync.WaitGroup),
 
-		announcementQueue: deque.New[*announcementEntry](),
-		offerQueue:        deque.New[*offerEntry](),
+		announcementQueue:               deque.New[*announcementEntry](),
+		announcementQueueEntryCountByIP: make(map[string]int),
+		announcementQueueRateLimiters: lrucache.NewWithLRU(
+			0,
+			time.Duration(matcherRateLimiterReapHistoryFrequencySeconds)*time.Second,
+			matcherRateLimiterMaxCacheEntries),
+
+		offerQueue:               deque.New[*offerEntry](),
+		offerQueueEntryCountByIP: make(map[string]int),
+		offerQueueRateLimiters: lrucache.NewWithLRU(
+			0,
+			time.Duration(matcherRateLimiterReapHistoryFrequencySeconds)*time.Second,
+			matcherRateLimiterMaxCacheEntries),
 
 		matchSignal: make(chan struct{}, 1),
 
@@ -241,6 +284,50 @@ func NewMatcher(config *MatcherConfig) *Matcher {
 			1*time.Minute,
 			matcherPendingAnswersMaxSize),
 	}
+
+	m.SetLimits(
+		config.AnnouncementLimitEntryCount,
+		config.AnnouncementRateLimitQuantity,
+		config.AnnouncementRateLimitInterval,
+		config.AnnouncementNonlimitedProxyIDs,
+		config.OfferLimitEntryCount,
+		config.OfferRateLimitQuantity,
+		config.OfferRateLimitInterval)
+
+	return m
+}
+
+// SetLimits sets new queue limits, replacing the previous configuration.
+// Existing, cached rate limiters retain their existing rate limit state. New
+// entries will use the new quantity/interval configuration. In addition,
+// currently enqueued items may exceed any new, lower maximum entry count
+// until naturally dequeued.
+func (m *Matcher) SetLimits(
+	announcementLimitEntryCount int,
+	announcementRateLimitQuantity int,
+	announcementRateLimitInterval time.Duration,
+	announcementNonlimitedProxyIDs []ID,
+	offerLimitEntryCount int,
+	offerRateLimitQuantity int,
+	offerRateLimitInterval time.Duration) {
+
+	nonlimitedProxyIDs := make(map[ID]struct{})
+	for _, proxyID := range announcementNonlimitedProxyIDs {
+		nonlimitedProxyIDs[proxyID] = struct{}{}
+	}
+
+	m.announcementQueueMutex.Lock()
+	m.announcementLimitEntryCount = announcementLimitEntryCount
+	m.announcementRateLimitQuantity = announcementRateLimitQuantity
+	m.announcementRateLimitInterval = announcementRateLimitInterval
+	m.announcementNonlimitedProxyIDs = nonlimitedProxyIDs
+	m.announcementQueueMutex.Unlock()
+
+	m.offerQueueMutex.Lock()
+	m.offerLimitEntryCount = offerLimitEntryCount
+	m.offerRateLimitQuantity = offerRateLimitQuantity
+	m.offerRateLimitInterval = offerRateLimitInterval
+	m.offerQueueMutex.Unlock()
 }
 
 // Start starts running the Matcher. The Matcher runs a goroutine which
@@ -288,15 +375,20 @@ func (m *Matcher) Stop() {
 // answer back to the broker, which calls Answer with that value.
 func (m *Matcher) Announce(
 	ctx context.Context,
+	proxyIP string,
 	proxyAnnouncement *MatchAnnouncement) (*MatchOffer, error) {
 
 	announcementEntry := &announcementEntry{
 		ctx:          ctx,
+		limitIP:      getRateLimitIP(proxyIP),
 		announcement: proxyAnnouncement,
 		offerChan:    make(chan *MatchOffer, 1),
 	}
 
-	m.addAnnouncementEntry(announcementEntry)
+	err := m.addAnnouncementEntry(announcementEntry)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	// Await client offer.
 
@@ -322,15 +414,20 @@ func (m *Matcher) Announce(
 // match properties can be logged.
 func (m *Matcher) Offer(
 	ctx context.Context,
+	clientIP string,
 	clientOffer *MatchOffer) (*MatchAnswer, *MatchAnnouncement, error) {
 
 	offerEntry := &offerEntry{
 		ctx:        ctx,
+		limitIP:    getRateLimitIP(clientIP),
 		offer:      clientOffer,
 		answerChan: make(chan *answerInfo, 1),
 	}
 
-	m.addOfferEntry(offerEntry)
+	err := m.addOfferEntry(offerEntry)
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
 
 	// Await proxy answer.
 
@@ -346,6 +443,7 @@ func (m *Matcher) Offer(
 		// timeout.
 
 		return nil, nil, errors.Trace(ctx.Err())
+
 	case proxyAnswerInfo = <-offerEntry.answerChan:
 	}
 
@@ -422,10 +520,10 @@ func (m *Matcher) matchWorker(ctx context.Context) {
 	for {
 		select {
 		case <-m.matchSignal:
+			m.matchAllOffers()
 		case <-ctx.Done():
 			return
 		}
-		m.matchAllOffers()
 	}
 }
 
@@ -456,7 +554,7 @@ func (m *Matcher) matchAllOffers() {
 		// based on the same ctx.
 
 		if offerEntry.ctx.Err() != nil {
-			m.offerQueue.Remove(i)
+			m.removeOfferEntryByIndex(i)
 			end -= 1
 			continue
 		}
@@ -508,13 +606,13 @@ func (m *Matcher) matchAllOffers() {
 
 		announcementEntry.offerChan <- offerEntry.offer
 
-		m.announcementQueue.Remove(j)
-		m.adjustAnnouncementCounts(announcementEntry, -1)
+		m.removeAnnouncementEntryByIndex(j)
 
 		// Remove the matched offer from the queue and match the next offer,
 		// now first in the queue.
 
-		m.offerQueue.Remove(i)
+		m.removeOfferEntryByIndex(i)
+
 		end -= 1
 	}
 }
@@ -526,7 +624,11 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 	// Check each announcement in turn, and select a match. There is an
 	// implicit preference for older proxy announcments, sooner to timeout, at the
 	// front of the queue.
-
+	//
+	// Limitation: since this logic matches each enqueued client in turn, it will
+	// only make the optimal NAT match for the oldest enqueued client vs. all
+	// proxies, and not do optimal N x M matching for all clients and all proxies.
+	//
 	// Future matching enhancements could include more sophisticated GeoIP
 	// rules, such as a configuration encoding knowledge of an ASN's NAT
 	// type, or preferred client/proxy country/ASN matches.
@@ -557,21 +659,12 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 		// it will exit based on the same ctx.
 
 		if announcementEntry.ctx.Err() != nil {
-			m.announcementQueue.Remove(i)
+			m.removeAnnouncementEntryByIndex(i)
 			end -= 1
 			continue
 		}
 
 		announcementProperties := &announcementEntry.announcement.Properties
-
-		// Disallow matching the same country and ASN
-
-		if offerProperties.GeoIPData.Country ==
-			announcementProperties.GeoIPData.Country &&
-			offerProperties.GeoIPData.ASN ==
-				announcementProperties.GeoIPData.ASN {
-			continue
-		}
 
 		// There must be a compartment match. If there is a personal
 		// compartment match, this match will be preferred.
@@ -584,10 +677,26 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 			continue
 		}
 
+		// Disallow matching the same country and ASN, except for personal
+		// compartment ID matches.
+		//
+		// For common matching, hopping through the same ISP is assumed to
+		// have no circumvention benefit. For personal matching, the user may
+		// wish to hop their their own or their friend's proxy regardless.
+
+		if !matchPersonalCompartment &&
+			!GetAllowCommonASNMatching() &&
+			(offerProperties.GeoIPData.Country ==
+				announcementProperties.GeoIPData.Country &&
+				offerProperties.GeoIPData.ASN ==
+					announcementProperties.GeoIPData.ASN) {
+			continue
+		}
+
 		// Check if this is a preferred NAT match. Ultimately, a match may be
 		// made with potentially incompatible NATs, but the client/proxy
 		// reported NAT types may be incorrect or unknown; the client will
-		// oftern skip NAT discovery.
+		// often skip NAT discovery.
 
 		matchNAT := offerProperties.IsPreferredNATMatch(announcementProperties)
 
@@ -635,15 +744,93 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 	return bestMatch, bestMatch != -1
 }
 
-func (m *Matcher) addAnnouncementEntry(announcementEntry *announcementEntry) bool {
+func (m *Matcher) applyLimits(isAnnouncement bool, limitIP string, proxyID ID) error {
+
+	// Assumes the m.announcementQueueMutex or m.offerQueue mutex is locked.
+
+	var entryCountByIP map[string]int
+	var queueRateLimiters *lrucache.Cache
+	var limitEntryCount int
+	var quantity int
+	var interval time.Duration
+
+	if isAnnouncement {
+
+		// Skip limit checks for non-limited proxies.
+		if _, ok := m.announcementNonlimitedProxyIDs[proxyID]; ok {
+			return nil
+		}
+
+		entryCountByIP = m.announcementQueueEntryCountByIP
+		queueRateLimiters = m.announcementQueueRateLimiters
+		limitEntryCount = m.announcementLimitEntryCount
+		quantity = m.announcementRateLimitQuantity
+		interval = m.announcementRateLimitInterval
+
+	} else {
+		entryCountByIP = m.offerQueueEntryCountByIP
+		queueRateLimiters = m.offerQueueRateLimiters
+		limitEntryCount = m.offerLimitEntryCount
+		quantity = m.offerRateLimitQuantity
+		interval = m.offerRateLimitInterval
+	}
+
+	// The rate limit is checked first, before the max count check, to ensure
+	// that the rate limit state is updated regardless of the max count check
+	// outcome.
+
+	if quantity > 0 && interval > 0 {
+
+		var rateLimiter *ratelimit.Bucket
+
+		entry, ok := queueRateLimiters.Get(limitIP)
+		if ok {
+			rateLimiter = entry.(*ratelimit.Bucket)
+		} else {
+			rateLimiter = ratelimit.NewBucketWithQuantum(
+				interval, int64(quantity), int64(quantity))
+			queueRateLimiters.Set(
+				limitIP, rateLimiter, interval)
+		}
+
+		if rateLimiter.TakeAvailable(1) < 1 {
+			return errors.TraceNew("rate exceeded for IP")
+		}
+	}
+
+	if limitEntryCount > 0 {
+		entryCount, ok := entryCountByIP[limitIP]
+		if ok && entryCount >= limitEntryCount {
+			return errors.TraceNew("max entries for IP")
+		}
+	}
+
+	return nil
+}
+
+func (m *Matcher) addAnnouncementEntry(announcementEntry *announcementEntry) error {
 
 	m.announcementQueueMutex.Lock()
 	defer m.announcementQueueMutex.Unlock()
 
+	// Ensure the queue doesn't grow larger than the max size.
 	if m.announcementQueue.Len() >= matcherAnnouncementQueueMaxSize {
-		return false
+		return errors.TraceNew("queue full")
 	}
+
+	// Ensure no single peer IP can enqueue a large number of entries or
+	// rapidly enqueue beyond the configured rate.
+	isAnnouncement := true
+	err := m.applyLimits(
+		isAnnouncement, announcementEntry.limitIP, announcementEntry.announcement.ProxyID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	m.announcementQueue.PushBack(announcementEntry)
+
+	m.announcementQueueEntryCountByIP[announcementEntry.limitIP] += 1
+
 	m.adjustAnnouncementCounts(announcementEntry, 1)
 
 	select {
@@ -651,7 +838,7 @@ func (m *Matcher) addAnnouncementEntry(announcementEntry *announcementEntry) boo
 	default:
 	}
 
-	return true
+	return nil
 }
 
 func (m *Matcher) removeAnnouncementEntry(announcementEntry *announcementEntry) {
@@ -662,8 +849,7 @@ func (m *Matcher) removeAnnouncementEntry(announcementEntry *announcementEntry) 
 	found := false
 	for i := 0; i < m.announcementQueue.Len(); i++ {
 		if m.announcementQueue.At(i) == announcementEntry {
-			m.announcementQueue.Remove(i)
-			m.adjustAnnouncementCounts(announcementEntry, -1)
+			m.removeAnnouncementEntryByIndex(i)
 			found = true
 			break
 		}
@@ -689,6 +875,26 @@ func (m *Matcher) removeAnnouncementEntry(announcementEntry *announcementEntry) 
 	}
 }
 
+func (m *Matcher) removeAnnouncementEntryByIndex(i int) {
+
+	// Assumes s.announcementQueueMutex lock is held.
+
+	announcementEntry := m.announcementQueue.At(i)
+
+	// This should be only direct call to Remove, as following adjustments
+	// must always be made when removing.
+	m.announcementQueue.Remove(i)
+
+	// Adjust entry counts by peer IP, used to enforce
+	// matcherAnnouncementQueueMaxEntriesPerIP.
+	m.announcementQueueEntryCountByIP[announcementEntry.limitIP] -= 1
+	if m.announcementQueueEntryCountByIP[announcementEntry.limitIP] == 0 {
+		delete(m.announcementQueueEntryCountByIP, announcementEntry.limitIP)
+	}
+
+	m.adjustAnnouncementCounts(announcementEntry, -1)
+}
+
 func (m *Matcher) adjustAnnouncementCounts(
 	announcementEntry *announcementEntry, delta int) {
 
@@ -708,22 +914,35 @@ func (m *Matcher) adjustAnnouncementCounts(
 	}
 }
 
-func (m *Matcher) addOfferEntry(offerEntry *offerEntry) bool {
+func (m *Matcher) addOfferEntry(offerEntry *offerEntry) error {
 
 	m.offerQueueMutex.Lock()
 	defer m.offerQueueMutex.Unlock()
 
+	// Ensure the queue doesn't grow larger than the max size.
 	if m.offerQueue.Len() >= matcherOfferQueueMaxSize {
-		return false
+		return errors.TraceNew("queue full")
 	}
+
+	// Ensure no single peer IP can enqueue a large number of entries or
+	// rapidly enqueue beyond the configured rate.
+	isAnnouncement := false
+	err := m.applyLimits(
+		isAnnouncement, offerEntry.limitIP, ID{})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	m.offerQueue.PushBack(offerEntry)
+
+	m.offerQueueEntryCountByIP[offerEntry.limitIP] += 1
 
 	select {
 	case m.matchSignal <- struct{}{}:
 	default:
 	}
 
-	return true
+	return nil
 }
 
 func (m *Matcher) removeOfferEntry(offerEntry *offerEntry) {
@@ -733,9 +952,27 @@ func (m *Matcher) removeOfferEntry(offerEntry *offerEntry) {
 
 	for i := 0; i < m.offerQueue.Len(); i++ {
 		if m.offerQueue.At(i) == offerEntry {
-			m.offerQueue.Remove(i)
+			m.removeOfferEntryByIndex(i)
 			break
 		}
+	}
+}
+
+func (m *Matcher) removeOfferEntryByIndex(i int) {
+
+	// Assumes s.offerQueueMutex lock is held.
+
+	offerEntry := m.offerQueue.At(i)
+
+	// This should be only direct call to Remove, as following adjustments
+	// must always be made when removing.
+	m.offerQueue.Remove(i)
+
+	// Adjust entry counts by peer IP, used to enforce
+	// matcherOfferQueueMaxEntriesPerIP.
+	m.offerQueueEntryCountByIP[offerEntry.limitIP] -= 1
+	if m.offerQueueEntryCountByIP[offerEntry.limitIP] == 0 {
+		delete(m.offerQueueEntryCountByIP, offerEntry.limitIP)
 	}
 }
 
@@ -748,4 +985,16 @@ func (m *Matcher) pendingAnswerKey(proxyID ID, connectionID ID) string {
 	// as a proxy may have multiple, concurrent pending answers.
 
 	return string(proxyID[:]) + string(connectionID[:])
+}
+
+func getRateLimitIP(strIP string) string {
+
+	IP := net.ParseIP(strIP)
+	if IP == nil || IP.To4() != nil {
+		return strIP
+	}
+
+	// With IPv6, individual users or sites are users commonly allocated a /64
+	// or /56, so rate limit by /56.
+	return IP.Mask(net.CIDRMask(56, 128)).String()
 }

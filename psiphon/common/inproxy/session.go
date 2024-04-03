@@ -22,12 +22,19 @@ package inproxy
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"math"
 	"sync"
 	"time"
 
+	"filippo.io/edwards25519"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/flynn/noise"
 	"golang.org/x/crypto/curve25519"
@@ -40,6 +47,9 @@ const (
 
 	sessionObfuscationPaddingMinSize = 0
 	sessionObfuscationPaddingMaxSize = 256
+
+	resetSessionTokenName      = "psiphon-inproxy-session-reset-session-token"
+	resetSessionTokenNonceSize = 32
 )
 
 const (
@@ -58,9 +68,10 @@ type SessionPrologue struct {
 // SessionPacket is a Noise protocol message, which may be a session handshake
 // message, or secured application data, a SessionRoundTrip.
 type SessionPacket struct {
-	SessionID ID     `cbor:"1,keyasint,omitempty"`
-	Nonce     uint64 `cbor:"2,keyasint,omitempty"`
-	Payload   []byte `cbor:"3,keyasint,omitempty"`
+	SessionID         ID     `cbor:"1,keyasint,omitempty"`
+	Nonce             uint64 `cbor:"2,keyasint,omitempty"`
+	Payload           []byte `cbor:"3,keyasint,omitempty"`
+	ResetSessionToken []byte `cbor:"4,keyasint,omitempty"`
 }
 
 // SessionRoundTrip is an application data request or response, which is
@@ -72,10 +83,50 @@ type SessionRoundTrip struct {
 }
 
 // SessionPrivateKey is a Noise protocol private key.
-type SessionPrivateKey [32]byte
+type SessionPrivateKey [ed25519.PrivateKeySize]byte
 
-// SessionPublicKey is a Noise protocol private key.
-type SessionPublicKey [32]byte
+// GenerateSessionPrivateKey creates a new session private key using
+// crypto/rand.
+//
+// GenerateSessionPrivateKey generates an Ed25519 private key, which is used
+// directly for digital signatures and, when converted to Curve25519, as the
+// Noise protocol ECDH private key.
+//
+// The Ed25519 representation is the canonical representation since there's a
+// 1:1 conversion from Ed25519 to Curve25519, but not the other way.
+//
+// Digital signing use cases include signing a reset session token. In
+// addition, externally, digital signing can be used in a challenge/response
+// protocol that demonstrates ownership of a proxy private key corresponding
+// to a claimed proxy public key.
+func GenerateSessionPrivateKey() (SessionPrivateKey, error) {
+
+	var k SessionPrivateKey
+
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return k, errors.Trace(err)
+	}
+
+	if len(privateKey) != len(k) {
+		return k, errors.TraceNew("unexpected private key length")
+	}
+	copy(k[:], privateKey)
+
+	return k, nil
+}
+
+// SessionPrivateKeyFromString returns a SessionPrivateKey given its base64
+// string encoding.
+func SessionPrivateKeyFromString(s string) (SessionPrivateKey, error) {
+	var k SessionPrivateKey
+	return k, errors.Trace(fromBase64String(s, k[:]))
+}
+
+// String emits SessionPrivateKey as base64.
+func (k SessionPrivateKey) String() string {
+	return base64.RawStdEncoding.EncodeToString([]byte(k[:]))
+}
 
 // IsZero indicates if the private key is zero-value.
 func (k SessionPrivateKey) IsZero() bool {
@@ -83,42 +134,82 @@ func (k SessionPrivateKey) IsZero() bool {
 	return bytes.Equal(k[:], zero[:])
 }
 
-// GenerateSessionPrivateKey creates a new Noise protocol session private key
-// using crypto/rand.
-func GenerateSessionPrivateKey() (SessionPrivateKey, error) {
-
-	var privateKey SessionPrivateKey
-
-	keyPair, err := noise.DH25519.GenerateKeypair(rand.Reader)
-	if err != nil {
-		return privateKey, errors.Trace(err)
-	}
-
-	if len(keyPair.Private) != len(privateKey) {
-		return privateKey, errors.TraceNew("unexpected private key length")
-	}
-	copy(privateKey[:], keyPair.Private)
-
-	return privateKey, nil
-}
-
-// GetSessionPublicKey returns the public key corresponding to the private
-// key.
-func GetSessionPublicKey(privateKey SessionPrivateKey) (SessionPublicKey, error) {
+// GetPublicKey returns the public key corresponding to the private key.
+func (k SessionPrivateKey) GetPublicKey() (SessionPublicKey, error) {
 
 	var sessionPublicKey SessionPublicKey
 
-	publicKey, err := curve25519.X25519(privateKey[:], curve25519.Basepoint)
-	if err != nil {
-		return sessionPublicKey, errors.Trace(err)
-	}
-
-	if len(publicKey) != len(sessionPublicKey) {
-		return sessionPublicKey, errors.TraceNew("unexpected public key length")
-	}
-	copy(sessionPublicKey[:], publicKey)
+	// See ed25519.PrivateKey.Public.
+	copy(sessionPublicKey[:], k[32:])
 
 	return sessionPublicKey, nil
+}
+
+// ToCurve25519 converts the Ed25519 SessionPrivateKey to the unique
+// corresponding Curve25519 private key for use in the Noise protocol.
+func (k SessionPrivateKey) ToCurve25519() []byte {
+	h := sha512.New()
+	h.Write(ed25519.PrivateKey(k[:]).Seed())
+	return h.Sum(nil)[:curve25519.ScalarSize]
+}
+
+// SessionPublicKey is a Noise protocol public key.
+type SessionPublicKey [ed25519.PublicKeySize]byte
+
+// SessionPublicKeyFromString returns a SessionPublicKey given its base64
+// string encoding.
+func SessionPublicKeyFromString(s string) (SessionPublicKey, error) {
+	var k SessionPublicKey
+	return k, errors.Trace(fromBase64String(s, k[:]))
+}
+
+// SessionPublicKeysFromStrings returns a list of SessionPublicKeys given the
+// base64 string encodings.
+func SessionPublicKeysFromStrings(strs []string) ([]SessionPublicKey, error) {
+	keys := make([]SessionPublicKey, len(strs))
+	for i, s := range strs {
+		err := fromBase64String(s, keys[i][:])
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+	return keys, nil
+}
+
+// String emits SessionPublicKey as base64.
+func (k SessionPublicKey) String() string {
+	return base64.RawStdEncoding.EncodeToString([]byte(k[:]))
+}
+
+// ToCurve25519 converts the Ed25519 SessionPublicKey to the unique
+// corresponding Curve25519 public key for use in the Noise protocol.
+func (k SessionPublicKey) ToCurve25519() (SessionPublicKeyCurve25519, error) {
+
+	var c SessionPublicKeyCurve25519
+
+	// Copyright 2019 The age Authors. All rights reserved.
+	// Use of this source code is governed by a BSD-style
+	// license that can be found in the LICENSE file.
+	//
+	// See https://blog.filippo.io/using-ed25519-keys-for-encryption and
+	// https://pkg.go.dev/filippo.io/edwards25519#Point.BytesMontgomery.
+	p, err := new(edwards25519.Point).SetBytes(k[:])
+	if err != nil {
+		return c, err
+	}
+
+	copy(c[:], p.BytesMontgomery())
+
+	return c, nil
+}
+
+// SessionPublicKeyCurve25519 is a representation of a Curve25519 public key
+// as a fixed-size array that may be used as a map key.
+type SessionPublicKeyCurve25519 [curve25519.PointSize]byte
+
+// String emits SessionPublicKeyCurve25519 as base64.
+func (k SessionPublicKeyCurve25519) String() string {
+	return base64.RawStdEncoding.EncodeToString([]byte(k[:]))
 }
 
 // InitiatorSessions is a set of secure Noise protocol sessions for an
@@ -162,7 +253,7 @@ type InitiatorSessions struct {
 	privateKey SessionPrivateKey
 
 	mutex    sync.Mutex
-	sessions sessionLookup
+	sessions map[SessionPublicKey]*session
 }
 
 // NewInitiatorSessions creates a new InitiatorSessions with the specified
@@ -172,7 +263,7 @@ func NewInitiatorSessions(
 
 	return &InitiatorSessions{
 		privateKey: initiatorPrivateKey,
-		sessions:   make(sessionLookup),
+		sessions:   make(map[SessionPublicKey]*session),
 	}
 }
 
@@ -203,8 +294,6 @@ func (s *InitiatorSessions) RoundTrip(
 		return nil, errors.Trace(err)
 	}
 
-	didResetSession := false
-
 	var in []byte
 	for {
 		out, err := rt.Next(ctx, in)
@@ -221,22 +310,15 @@ func (s *InitiatorSessions) RoundTrip(
 		in, err = roundTripper.RoundTrip(ctx, out)
 		if err != nil {
 
-			// Perform at most one session reset, to accomodate the expected
-			// case where the initator reuses an established session that is
-			// expired for the responder.
-			//
-			// Higher levels implicitly provide additional retries to cover
-			// other cases; Psiphon client tunnel establishment will retry
-			// in-proxy dials; the proxy will retry its announce request if
-			// it fails -- after an appropriate delay.
+			// There are no explicit retries here. Retrying in the case where
+			// the initiator attempts to use an expired session is covered by
+			// the reset session token logic in InitiatorRoundTrip. Higher
+			// levels implicitly provide additional retries to cover other
+			// cases; Psiphon client tunnel establishment will retry in-proxy
+			// dials; the proxy will retry its announce request if it
+			// fails -- after an appropriate delay.
 
-			if didResetSession == false {
-				// TODO: log reset
-				rt.ResetSession()
-				didResetSession = true
-			} else {
-				return nil, errors.Trace(err)
-			}
+			return nil, errors.Trace(err)
 		}
 	}
 }
@@ -248,6 +330,19 @@ func (s *InitiatorSessions) RoundTrip(
 //
 // When waitToShareSession is true, InitiatorRoundTrip.Next will block until
 // an existing, non-established session is available to be shared.
+//
+// Limitation with waitToShareSession: currently, any new session must
+// complete an _application-level_ round trip (e.g., ProxyAnnounce/ClientOffer
+// request _and_ response) before the session becomes ready to share since
+// the first application-level request is sent in the same packet as the last
+// handshake message and ready-to-share is only signalled after a subsequent
+// packet is received. This means that, for example, a long-polling
+// ProxyAnnounce will block any additional ProxyAnnounce requests attempting
+// to share the same InitiatorSessions. In practice, an initial
+// ProxyAnnounce/ClientOffer request is expected to block only as long as
+// there is no match, so the impact of blocking other concurrent requests is
+// limited. See comment in InitiatorRoundTrip.Next for a related future
+// enhancement.
 //
 // NewRoundTrip does not block or perform any session operations; the
 // operations begin on the first InitiatorRoundTrip.Next call. The content of
@@ -349,51 +444,11 @@ type InitiatorRoundTrip struct {
 	roundTripID                    ID
 	requestPayload                 []byte
 
-	mutex           sync.Mutex
-	sharingSession  bool
-	didResetSession bool
-	session         *session
-	response        []byte
-}
-
-// ResetSession clears the InitiatorRoundTrip session. Call ResetSession when
-// the responder indicates an error in response to session packet. Errors are
-// sent at the transport level. An error is expected when the initator reuses
-// an established session that is expired for the responder. After calling
-// ResetSession, the following Next call will being establishing a new
-// session. The expected session expiry scenario should occur at most once
-// per round trip.
-//
-// Limitation: since session errors/failures are handled at the transport
-// level, they may be forged, depending on the security provided by the
-// transport layer. For client and proxy sessions with a broker, if domain
-// fronting is used then security depends on the HTTPS layer and CDNs can
-// forge a session error. For broker sessions with Psiphon servers, the
-// relaying client could forge a server error -- but that would deny service
-// to the client when the BrokerServerRequest fails.
-//
-// ResetSession is ignored if response already received or if ResetSession
-// already called before.
-//
-// Higher levels implicitly provide additional round trip retries to cover
-// other cases; Psiphon client tunnel establishment will retry in-proxy
-// dials; the proxy will retry its announce request if it fails -- after an
-// appropriate delay.
-func (r *InitiatorRoundTrip) ResetSession() {
-
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	if r.didResetSession || r.response != nil {
-		return
-	}
-
-	if r.session != nil {
-
-		r.initiatorSessions.removeIfSession(r.responderPublicKey, r.session)
-		r.didResetSession = true
-		r.session = nil
-	}
+	mutex          sync.Mutex
+	sharingSession bool
+	session        *session
+	lastSentPacket bytes.Buffer
+	response       []byte
 }
 
 // Next advances a round trip, as well as any session handshake that may be
@@ -416,24 +471,20 @@ func (r *InitiatorRoundTrip) Next(
 	ctx context.Context,
 	receivedPacket []byte) (retSendPacket []byte, retErr error) {
 
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	// Note: don't clear or reset a session in the event of a bad/rejected
+	// packet as that would allow a malicious relay client to interrupt a
+	// valid broker/server session with a malformed packet. Just drop the
+	// packet and return an error.
 
-	if ctx != nil {
-		err := ctx.Err()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-	}
+	// beginOrShareSession returns the next packet to send.
+	beginOrShareSession := func() ([]byte, error) {
 
-	if r.session == nil {
-
-		// If the session is nil, this is the first call to Next, and no
-		// packet from the peer is expected.
-
-		if receivedPacket != nil {
-			return nil, errors.TraceNew("unexpected received packet")
-		}
+		// Check for an existing session, or create a new one if there's no
+		// existing session.
+		//
+		// To ensure the concurrent waitToShareSession cases don't start
+		// multiple handshakes, getSession populates the initiatorSessions
+		// session map with a new, unestablished session.
 
 		newSession := func() (*session, error) {
 
@@ -458,13 +509,6 @@ func (r *InitiatorRoundTrip) Next(
 			}
 			return session, nil
 		}
-
-		// Check for an existing session, or create a new one if there's no
-		// existing session.
-		//
-		// To ensure the concurrent waitToShareSession cases don't start
-		// multiple handshakes, getSession populates the initiatorSessions
-		// session map with a new, unestablished session.
 
 		session, isNew, isReady, err := r.initiatorSessions.getSession(
 			r.responderPublicKey, newSession)
@@ -499,6 +543,20 @@ func (r *InitiatorRoundTrip) Next(
 					// Wait for the owning InitiatorRoundTrip to complete the
 					// session handshake and then share the session.
 
+					// Limitation with waitToShareSession: isReadyToShare
+					// becomes true only once the session completes
+					// an _application-level_ round trip
+					// (e.g., ProxyAnnounce/ClientOffer request _and_
+					// response) since the first application-level request is
+					// bundled with the last handshake message and
+					// ready-to-share is true only after a subsequent packet
+					// is received, guaranteeing that the handshake is completed.
+					//
+					// Future enhancement: for shared sessions, don't bundle
+					// the request payload with the handshake. This implies
+					// one extra round trip for the initial requester, but
+					// allows all sharers to proceed at once.
+
 					signal := make(chan struct{})
 					if !session.isReadyToShare(signal) {
 						select {
@@ -532,12 +590,52 @@ func (r *InitiatorRoundTrip) Next(
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
+
 			return sendPacket, nil
 		}
 
 		// Begin the handshake for a new session.
 
 		_, sendPacket, _, err := r.session.nextHandshakePacket(nil)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return sendPacket, nil
+
+	}
+
+	// Return immediately if the context is already done.
+	if ctx != nil {
+		err := ctx.Err()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	// Store the output send packet, which is used to verify that any
+	// subsequent ResetSessionToken isn't replayed.
+	defer func() {
+		if retSendPacket != nil {
+			r.lastSentPacket.Reset()
+			r.lastSentPacket.Write(retSendPacket)
+		}
+	}()
+
+	if r.session == nil {
+
+		// If the session is nil, this is the first call to Next, and no
+		// packet from the peer is expected.
+
+		if receivedPacket != nil {
+			return nil, errors.TraceNew("unexpected received packet")
+		}
+
+		sendPacket, err := beginOrShareSession()
+
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -557,7 +655,39 @@ func (r *InitiatorRoundTrip) Next(
 		// session is eastablished, the next packet is post-handshake and
 		// should be the round trip request response.
 
-		responsePayload, err := r.session.receivePacket(receivedPacket)
+		// Pre-unwrap here to check for a ResetSessionToken packet.
+
+		sessionPacket, err := unwrapSessionPacket(
+			r.session.receiveObfuscationSecret, true, nil, receivedPacket)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// Reset the session when the packet is a valid ResetSessionToken. The
+		// responder sends a ResetSessionToken when this initiator attempts
+		// to use an expired session. A ResetSessionToken is valid when it's
+		// signed by the responder's public key and is bound to the last
+		// packet sent from this initiator (which protects against replay).
+
+		if sessionPacket.ResetSessionToken != nil &&
+			isValidResetSessionToken(
+				r.responderPublicKey,
+				r.lastSentPacket.Bytes(),
+				sessionPacket.ResetSessionToken) {
+
+			// removeIfSession won't clobber any other, concurrently
+			// established session for the same responder.
+			r.initiatorSessions.removeIfSession(r.responderPublicKey, r.session)
+			r.session = nil
+
+			sendPacket, err := beginOrShareSession()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return sendPacket, nil
+		}
+
+		responsePayload, err := r.session.receiveUnmarshaledPacket(sessionPacket)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -645,7 +775,7 @@ type ResponderSessions struct {
 	receiveObfuscationSecret    ObfuscationSecret
 	applyTTL                    bool
 	obfuscationReplayHistory    *obfuscationReplayHistory
-	expectedInitiatorPublicKeys sessionPublicKeyLookup
+	expectedInitiatorPublicKeys *sessionPublicKeyLookup
 
 	mutex    sync.Mutex
 	sessions *lrucache.Cache
@@ -693,20 +823,63 @@ func NewResponderSessionsForKnownInitiators(
 		return nil, errors.Trace(err)
 	}
 
-	expectedPublicKeys := make(sessionPublicKeyLookup)
-	for _, publicKey := range initiatorPublicKeys {
-		expectedPublicKeys[publicKey] = struct{}{}
+	s.expectedInitiatorPublicKeys, err = newSessionPublicKeyLookup(initiatorPublicKeys)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
-	s.expectedInitiatorPublicKeys = expectedPublicKeys
-
 	return s, nil
+}
+
+// SetKnownInitiatorPublicKeys updates the set of initiator public keys which
+// are allowed to establish sessions with the responder. Any existing
+// sessions with keys not in the new list are deleted. Existing sessions with
+// keys which remain in the list are retained.
+func (s *ResponderSessions) SetKnownInitiatorPublicKeys(
+	initiatorPublicKeys []SessionPublicKey) error {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	changed, err := s.expectedInitiatorPublicKeys.set(initiatorPublicKeys)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if !changed {
+		// With an identical public key set there are no sessions to be reset
+		return nil
+	}
+
+	// Delete sessions for removed keys; retain established sessions for
+	// still-valid keys.
+	//
+	// Limitations:
+	// - Doesn't interrupt a concurrent request in progress which has already
+	//   called getSession
+	// - lrucache doesn't have iterator; Items creates a full copy of the
+	//   cache state
+
+	for sessionIDStr, entry := range s.sessions.Items() {
+
+		// Each session.hasUnexpectedInitiatorPublicKey indirectly references
+		// s.expectedInitiatorPublicKeys, which was updated above with the
+		// new set of valid public keys.
+		if entry.Object.(*session).hasUnexpectedInitiatorPublicKey() {
+			s.sessions.Delete(sessionIDStr)
+		}
+	}
+
+	return nil
 }
 
 // RequestHandler is an application-level handler that receives the decrypted
 // request payload and returns a response payload to be encrypted and sent to
 // the initiator. The initiatorID is the authenticated identifier of the
 // initiator: client, proxy, or broker.
+//
+// In cases where a request is a one-way message, with no response, such as a
+// BrokerServerReport, RequestHandler should return a nil packet.
 type RequestHandler func(initiatorID ID, request []byte) ([]byte, error)
 
 // HandlePacket takes a session packet, as received at the transport level,
@@ -718,7 +891,8 @@ type RequestHandler func(initiatorID ID, request []byte) ([]byte, error)
 // request payload is passed to the RequestHandler for application-level
 // processing. The response received from the RequestHandler will be
 // encrypted with the session and returned from HandlePacket as the next
-// packet to send back over the transport.
+// packet to send back over the transport. If there is no response to
+// be returned, HandlePacket returns a nil packet.
 //
 // The session packet contains a session ID that is used to route packets from
 // many initiators to the correct session state.
@@ -734,8 +908,9 @@ type RequestHandler func(initiatorID ID, request []byte) ([]byte, error)
 //
 // There is one expected error case with legitimate initiators: when an
 // initiator reuses a session that is expired or no longer in the responder
-// cache. In this case the error response should be the same; the initiator
-// knows to attempt one session re-establishment in this case.
+// cache. In this case HandlePacket will return a reset session token in
+// outPacket along with an error, and the caller should log the error and
+// also send the packet to the initiator.
 //
 // The HandlePacket caller should implement initiator rate limiting in its
 // transport level.
@@ -809,7 +984,30 @@ func (s *ResponderSessions) HandlePacket(
 		isEstablished, outPacket, payload, err :=
 			session.nextUnmarshaledHandshakePacket(sessionPacket)
 		if err != nil {
-			return nil, errors.Trace(err)
+
+			if _, ok := err.(potentialExpiredSessionError); !ok {
+				return nil, errors.Trace(err)
+			}
+
+			// The initiator may be trying to use a previously valid session
+			// which is now expired or flushed, due to a full cache or a
+			// server reboot. Craft and send a secure reset session token,
+			// signed with the responder public key (the Ed25519
+			// representation), bound to the packet just received from the
+			// initiator (to defend against replay).
+
+			outPacket, wrapErr := wrapSessionPacket(
+				s.sendObfuscationSecret,
+				false,
+				&SessionPacket{
+					SessionID:         sessionPacket.SessionID,
+					ResetSessionToken: makeResetSessionToken(s.privateKey, inPacket),
+				})
+			if wrapErr != nil {
+				return nil, errors.Trace(wrapErr)
+			}
+
+			return outPacket, errors.Trace(err)
 		}
 
 		if outPacket != nil {
@@ -863,6 +1061,11 @@ func (s *ResponderSessions) HandlePacket(
 		return nil, errors.Trace(err)
 	}
 
+	if response == nil {
+		// There is no response.
+		return nil, nil
+	}
+
 	// The response is assigned the same RoundTripID as the request.
 	sessionRoundTrip = SessionRoundTrip{
 		RoundTripID: sessionRoundTrip.RoundTripID,
@@ -890,6 +1093,19 @@ func (s *ResponderSessions) touchSession(sessionID ID, session *session) {
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
+	if !session.hasUnexpectedInitiatorPublicKey() {
+
+		// In this case, SetKnownInitiatorPublicKeys was called concurrent to
+		// HandlePacket, after HandlePacket's getSession, and now the known
+		// initiator public key for this session is no longer valid; don't
+		// cache or extend the session, as that could revert a session flush
+		// performed in SetKnownInitiatorPublicKeys.
+		//
+		// Limitation: this won't interrupt a handshake in progress, which may
+		// complete, but then ultimately fail.
+		return
+	}
 
 	TTL := lrucache.DefaultExpiration
 	if !s.applyTTL {
@@ -941,6 +1157,135 @@ func (s *ResponderSessions) removeSession(sessionID ID) {
 	s.sessions.Delete(string(sessionID[:]))
 }
 
+// makeResetSessionToken creates a secure reset session token.
+//
+// This token is used for a responder to signal to an initiator that a session
+// has expired, or is no longer valid and that a new session should be
+// established. Securing this signal is particularly important for the
+// broker/server sessions relayed by untrusted clients, as it prevents a
+// malicious client from injecting invalid reset tokens and
+// interrupting/degrading session performance.
+//
+// A reset token is signed by the responder's Ed25519 public key. The signature covers:
+//   - The last packet received from the initiator, mitigating replay attacks
+//   - A context name, resetSessionTokenName, and nonce which mitigates against
+//     directly signing arbitrary data in the untrusted last packet received
+//     from the initiator
+//
+// Reset session tokens are not part of the Noise protocol, but are sent as
+// session packets.
+func makeResetSessionToken(
+	privateKey SessionPrivateKey,
+	receivedPacket []byte) []byte {
+
+	var token bytes.Buffer
+	token.Write(prng.Bytes(resetSessionTokenNonceSize))
+
+	h := sha256.New()
+	h.Write([]byte(resetSessionTokenName))
+	h.Write(token.Bytes()[:resetSessionTokenNonceSize])
+	h.Write(receivedPacket)
+
+	token.Write(ed25519.Sign(privateKey[:], h.Sum(nil)))
+
+	return token.Bytes()
+}
+
+// isValidResetSessionToken checks if a reset session token is valid, given
+// the specified responder public key and last packet sent to the responder.
+func isValidResetSessionToken(
+	publicKey SessionPublicKey,
+	lastSentPacket []byte,
+	token []byte) bool {
+
+	if len(token) <= resetSessionTokenNonceSize {
+		return false
+	}
+
+	h := sha256.New()
+	h.Write([]byte(resetSessionTokenName))
+	h.Write(token[:resetSessionTokenNonceSize])
+	h.Write(lastSentPacket)
+
+	return ed25519.Verify(publicKey[:], h.Sum(nil), token[resetSessionTokenNonceSize:])
+}
+
+// sessionPublicKeyLookup implements set membership lookup for session public
+// keys, and is used to lookup expected public keys for optional responder
+// access control. The sessionPublicKeyLookup is initialized with a list of
+// Ed25519 session public keys, the canonical representation, while the
+// lookup is done with Curve25519 public keys, the representation that is
+// received via the Noise protocol.
+type sessionPublicKeyLookup struct {
+	mutex     sync.Mutex
+	lookupMap map[SessionPublicKeyCurve25519]struct{}
+}
+
+func newSessionPublicKeyLookup(publicKeys []SessionPublicKey) (*sessionPublicKeyLookup, error) {
+	s := &sessionPublicKeyLookup{
+		lookupMap: make(map[SessionPublicKeyCurve25519]struct{}),
+	}
+	_, err := s.set(publicKeys)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return s, nil
+}
+
+// set modifies the lookup set of session public keys and returns true if the
+// set has changed.
+func (s *sessionPublicKeyLookup) set(publicKeys []SessionPublicKey) (bool, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Convert the Ed25519 public key to its Curve25519 representation, which
+	// is what's looked up. SessionPublicKeyCurve25519 is a fixed-size array
+	// which can be used as a map key.
+	var curve25519PublicKeys []SessionPublicKeyCurve25519
+	for _, publicKey := range publicKeys {
+		k, err := publicKey.ToCurve25519()
+		if err != nil {
+			return false, errors.Trace(err)
+		}
+		curve25519PublicKeys = append(curve25519PublicKeys, k)
+	}
+
+	// Check if the set of public keys has changed. This check and return
+	// value is used by ResponderSessions.SetKnownInitiatorPublicKeys to skip
+	// checking for sessions to be revoked in the case of an overall tactics
+	// reload in which configured expected public keys did not change.
+	if len(curve25519PublicKeys) == len(s.lookupMap) {
+		allFound := true
+		for _, k := range curve25519PublicKeys {
+			if _, ok := s.lookupMap[k]; !ok {
+				allFound = false
+				break
+			}
+		}
+		if allFound {
+			return false, nil
+		}
+	}
+
+	lookupMap := make(map[SessionPublicKeyCurve25519]struct{})
+	for _, k := range curve25519PublicKeys {
+
+		lookupMap[k] = struct{}{}
+	}
+
+	s.lookupMap = lookupMap
+
+	return true, nil
+}
+
+func (s *sessionPublicKeyLookup) lookup(k SessionPublicKeyCurve25519) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	_, ok := s.lookupMap[k]
+	return ok
+}
+
 type sessionState int
 
 const (
@@ -964,10 +1309,6 @@ const (
 	sessionStateResponder_XK_recv_s_se_payload
 	sessionStateResponder_XK_established
 )
-
-type sessionPublicKeyLookup map[SessionPublicKey]struct{}
-
-type sessionLookup map[SessionPublicKey]*session
 
 // session represents a Noise protocol session, including its initial
 // handshake state.
@@ -1003,13 +1344,24 @@ type sessionLookup map[SessionPublicKey]*session
 //
 // There is no state for the obfuscation layer; each packet is obfuscated
 // independently since session packets may arrive at a peer out-of-order.
+//
+// There are independent replay defenses at both the obfuscation layer
+// (to mitigate active probing replays) and at the Noise protocol layer
+// (to defend against replay of Noise protocol packets). The obfuscation
+// anti-replay covers all obfuscated packet nonce values, and the Noise
+// anti-replay filter covers post-handshake packet message sequence number
+// nonces. The Noise layer anti-replay filter uses a sliding window of size
+// ~8000, allowing for approximately that degree of out-of-order packets as
+// could happen with concurrent requests in a shared session.
+//
+// Future enhancement: use a single anti-replay mechanism for both use cases?
 type session struct {
 	isInitiator                 bool
 	sessionID                   ID
 	sendObfuscationSecret       ObfuscationSecret
 	receiveObfuscationSecret    ObfuscationSecret
 	replayHistory               *obfuscationReplayHistory
-	expectedInitiatorPublicKeys sessionPublicKeyLookup
+	expectedInitiatorPublicKeys *sessionPublicKeyLookup
 
 	mutex               sync.Mutex
 	state               sessionState
@@ -1035,7 +1387,7 @@ func newSession(
 
 	// Responder
 	peerSessionID *ID,
-	expectedInitiatorPublicKeys sessionPublicKeyLookup) (*session, error) {
+	expectedInitiatorPublicKeys *sessionPublicKeyLookup) (*session, error) {
 
 	if isInitiator {
 		if peerSessionID != nil ||
@@ -1063,7 +1415,7 @@ func newSession(
 
 	// The prologue binds the session ID and other meta data to the session.
 
-	prologue, err := cborEncoding.Marshal(SessionPrologue{
+	prologue, err := protocol.CBOREncoding.Marshal(SessionPrologue{
 		SessionProtocolName:    SessionProtocolName,
 		SessionProtocolVersion: SessionProtocolVersion1,
 		SessionID:              *sessionID,
@@ -1072,7 +1424,13 @@ func newSession(
 		return nil, errors.Trace(err)
 	}
 
-	publicKey, err := GetSessionPublicKey(privateKey)
+	publicKey, err := privateKey.GetPublicKey()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	privateKeyCurve25519 := privateKey.ToCurve25519()
+	publicKeyCurve25519, err := publicKey.ToCurve25519()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1085,12 +1443,16 @@ func newSession(
 		Initiator:   isInitiator,
 		Prologue:    prologue,
 		StaticKeypair: noise.DHKey{
-			Public:  publicKey[:],
-			Private: privateKey[:]},
+			Public:  publicKeyCurve25519[:],
+			Private: privateKeyCurve25519},
 	}
 
 	if expectedResponderPublicKey != nil {
-		config.PeerStatic = (*expectedResponderPublicKey)[:]
+		k, err := (*expectedResponderPublicKey).ToCurve25519()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		config.PeerStatic = k[:]
 	}
 
 	handshake, err := noise.NewHandshakeState(config)
@@ -1190,6 +1552,31 @@ func (s *session) getPeerID() (ID, error) {
 	copy(peerID[:], s.peerPublicKey)
 
 	return peerID, nil
+}
+
+// hasUnexpectedInitiatorPublicKey indicates whether the session is
+// established (and so has obtained a peer public key),
+// expectedInitiatorPublicKeys is configured, and the session initiator's
+// public key is not in/no longer in expectedInitiatorPublicKeys.
+func (s *session) hasUnexpectedInitiatorPublicKey() bool {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.expectedInitiatorPublicKeys == nil {
+		// Not expecting specific initiator public keys
+		return false
+	}
+
+	if s.handshake != nil {
+		// Peer public key not known yet
+		return false
+	}
+
+	var k SessionPublicKeyCurve25519
+	copy(k[:], s.peerPublicKey)
+
+	return !s.expectedInitiatorPublicKeys.lookup(k)
 }
 
 // sendPacket prepares a session packet to be sent to the peer, containing the
@@ -1321,6 +1708,16 @@ func (s *session) nextHandshakePacket(inPacket []byte) (
 	return isEstablished, outPacket, payload, nil
 }
 
+// potentialExpiredSessionError is packet error that indicates a potential
+// expired session condition which should be handled with a reset session
+// token. This includes the responder expecting a handshake packet for a new
+// session, but receiving a non-handshake packet.
+// Non-potentialExpiredSessionError errors include
+// "unexpected initiator public key".
+type potentialExpiredSessionError struct {
+	error
+}
+
 func (s *session) nextUnmarshaledHandshakePacket(sessionPacket *SessionPacket) (
 	isEstablished bool, outPacket []byte, payload []byte, err error) {
 
@@ -1380,7 +1777,14 @@ func (s *session) nextUnmarshaledHandshakePacket(sessionPacket *SessionPacket) (
 	case sessionStateResponder_XK_recv_e_es_send_e_ee:
 		_, _, _, err := s.handshake.ReadMessage(nil, in)
 		if err != nil {
-			return false, nil, nil, errors.Trace(err)
+
+			// A handshake message was expected, but and invalid message type
+			// was received. Flag this as a potential expired session case, a
+			// candidate for a reset session token. Limitation: there's no
+			// check that the invalid message was, in fact, a valid message
+			// for an expired session; this may not be possible given the
+			// established-session Noise protocol message is encrypted/random.
+			return false, nil, nil, potentialExpiredSessionError{errors.Trace(err)}
 		}
 		out, _, _, err := s.handshake.WriteMessage(nil, nil)
 		if err != nil {
@@ -1424,10 +1828,10 @@ func (s *session) checkExpectedInitiatorPublicKeys(peerPublicKey []byte) error {
 		return nil
 	}
 
-	var publicKey SessionPublicKey
-	copy(publicKey[:], peerPublicKey)
+	var k SessionPublicKeyCurve25519
+	copy(k[:], peerPublicKey)
 
-	_, ok := s.expectedInitiatorPublicKeys[publicKey]
+	ok := s.expectedInitiatorPublicKeys.lookup(k)
 
 	if !ok {
 		return errors.TraceNew("unexpected initiator public key")
@@ -1470,6 +1874,25 @@ func (s *session) wrapPacket(sessionPacket *SessionPacket) ([]byte, error) {
 
 	// No lock. References only static session fields.
 
+	obfuscatedPacket, err := wrapSessionPacket(
+		s.sendObfuscationSecret,
+		s.isInitiator,
+		sessionPacket)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return obfuscatedPacket, nil
+
+}
+
+// Marshal and obfuscated a SessionPacket. wrapSessionPacket is used by
+// responders to wrap reset session token packets.
+func wrapSessionPacket(
+	sendObfuscationSecret ObfuscationSecret,
+	isInitiator bool,
+	sessionPacket *SessionPacket) ([]byte, error) {
+
 	marshaledPacket, err := marshalRecord(
 		sessionPacket, recordTypeSessionPacket)
 	if err != nil {
@@ -1477,8 +1900,8 @@ func (s *session) wrapPacket(sessionPacket *SessionPacket) ([]byte, error) {
 	}
 
 	obfuscatedPacket, err := obfuscateSessionPacket(
-		s.sendObfuscationSecret,
-		s.isInitiator,
+		sendObfuscationSecret,
+		isInitiator,
 		marshaledPacket,
 		sessionObfuscationPaddingMinSize,
 		sessionObfuscationPaddingMaxSize)
@@ -1487,7 +1910,6 @@ func (s *session) wrapPacket(sessionPacket *SessionPacket) ([]byte, error) {
 	}
 
 	return obfuscatedPacket, nil
-
 }
 
 // Deobfuscate and unmarshal a SessionPacket.
