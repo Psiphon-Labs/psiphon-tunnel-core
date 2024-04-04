@@ -120,6 +120,48 @@ func runTestSessions() error {
 		return errors.TraceNew("unexpected response")
 	}
 
+	// Test: RoundTrips with waitToShareSession are interrupted when session
+	// fails
+
+	responderSessions.sessions.Flush()
+
+	initiatorSessions = NewInitiatorSessions(initiatorPrivateKey)
+
+	failingRoundTripper := newTestSessionRoundTripper(nil, &initiatorPublicKey)
+
+	roundTripCount := 100
+
+	results := make(chan error, roundTripCount)
+
+	for i := 0; i < roundTripCount; i++ {
+		go func() {
+			time.Sleep(prng.DefaultPRNG().Period(0, 10*time.Millisecond))
+			waitToShareSession := true
+			_, err := initiatorSessions.RoundTrip(
+				context.Background(),
+				failingRoundTripper,
+				responderPublicKey,
+				responderRootObfuscationSecret,
+				waitToShareSession,
+				roundTripper.MakeRequest())
+			results <- err
+		}()
+	}
+
+	waitToShareSessionFailed := false
+	for i := 0; i < roundTripCount; i++ {
+		err := <-results
+		if err == nil {
+			return errors.TraceNew("unexpected success")
+		}
+		if strings.HasSuffix(err.Error(), "waitToShareSession failed") {
+			waitToShareSessionFailed = true
+		}
+	}
+	if !waitToShareSessionFailed {
+		return errors.TraceNew("missing waitToShareSession failed error")
+	}
+
 	// Test: expected known initiator public key
 
 	initiatorSessions = NewInitiatorSessions(initiatorPrivateKey)
@@ -352,6 +394,10 @@ func (t *testSessionRoundTripper) RoundTrip(ctx context.Context, requestPayload 
 	err := ctx.Err()
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if t.sessions == nil {
+		return nil, errors.TraceNew("closed")
 	}
 
 	unwrappedRequestHandler := func(initiatorID ID, unwrappedRequest []byte) ([]byte, error) {

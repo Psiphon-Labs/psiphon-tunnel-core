@@ -318,6 +318,11 @@ func (s *InitiatorSessions) RoundTrip(
 			// dials; the proxy will retry its announce request if it
 			// fails -- after an appropriate delay.
 
+			// If this round trip owns its session and there are any
+			// waitToShareSession initiators awaiting the session, signal them
+			// that the session will not become ready.
+			rt.TransportFailed()
+
 			return nil, errors.Trace(err)
 		}
 	}
@@ -389,7 +394,7 @@ func (s *InitiatorSessions) NewRoundTrip(
 func (s *InitiatorSessions) getSession(
 	publicKey SessionPublicKey,
 	newSession func() (*session, error)) (
-	retSession *session, retisNew bool, retIsReady bool, retErr error) {
+	retSession *session, retIsNew bool, retIsReady bool, retErr error) {
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -561,6 +566,17 @@ func (r *InitiatorRoundTrip) Next(
 					if !session.isReadyToShare(signal) {
 						select {
 						case <-signal:
+							if !session.isReadyToShare(nil) {
+
+								// The session failed to become ready to share due to a transport
+								// failure during the handshake. Fail this round trip. Don't
+								// create a new, unshared session since waitToShareSession was
+								// specified. It's expected that there will be retries by the
+								// RoundTrip caller.
+
+								return nil, errors.TraceNew("waitToShareSession failed")
+							}
+							// else, use the session
 						case <-ctx.Done():
 							return nil, errors.Trace(ctx.Err())
 						}
@@ -735,6 +751,22 @@ func (r *InitiatorRoundTrip) Next(
 	}
 
 	return sendPacket, nil
+}
+
+// TransportFailed marks any owned, not yet ready-to-share session as failed
+// and signals any other initiators waiting to share the session.
+//
+// TransportFailed should be called when using waitToShareSession and when
+// there is a transport level failure to relay a session packet.
+func (r *InitiatorRoundTrip) TransportFailed() {
+
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if !r.sharingSession && !r.session.isReadyToShare(nil) {
+		r.session.transportFailed()
+		r.initiatorSessions.removeIfSession(r.responderPublicKey, r.session)
+	}
 }
 
 // Response returns the round trip response. Call Response after Next returns
@@ -1304,6 +1336,7 @@ const (
 	sessionStateInitiator_XK_send_e_es = iota
 	sessionStateInitiator_XK_recv_e_ee_send_s_se_payload
 	sessionStateInitiator_XK_established
+	sessionStateInitiator_failed
 
 	sessionStateResponder_XK_recv_e_es_send_e_ee
 	sessionStateResponder_XK_recv_s_se_payload
@@ -1365,7 +1398,7 @@ type session struct {
 
 	mutex               sync.Mutex
 	state               sessionState
-	signalOnEstablished []chan struct{}
+	signalAwaitingReady []chan struct{}
 	handshake           *noise.HandshakeState
 	firstPayload        []byte
 	peerPublicKey       []byte
@@ -1475,7 +1508,7 @@ func newSession(
 		replayHistory:               replayHistory,
 		expectedInitiatorPublicKeys: expectedInitiatorPublicKeys,
 		state:                       state,
-		signalOnEstablished:         make([]chan struct{}, 0), // must be non-nil
+		signalAwaitingReady:         make([]chan struct{}, 0), // must be non-nil
 		handshake:                   handshake,
 		firstPayload:                firstPayload,
 	}, nil
@@ -1510,25 +1543,68 @@ func (s *session) isEstablished() bool {
 // isReadyToShare becomes true once the round trip performing the handshake
 // receives its round trip response, which demonstrates that the responder
 // received the final message.
+//
+// When a signal channel is specified, it is registered and signaled once the
+// session becomes ready to share _or_ the session fails to become ready due
+// to a transport failure. When signaled, the caller must call isReadyToShare
+// once again to distinguish between these two outcomes.
 func (s *session) isReadyToShare(signal chan struct{}) bool {
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if !s.isInitiator {
+	if !s.isInitiator || s.state == sessionStateInitiator_failed {
+		// Signal immediately if transportFailed was already called.
+		if signal != nil {
+			close(signal)
+		}
 		return false
 	}
 
-	if s.handshake == nil && s.signalOnEstablished == nil {
+	if s.handshake == nil && s.signalAwaitingReady == nil {
 		return true
 	}
 
 	if signal != nil {
-		s.signalOnEstablished = append(
-			s.signalOnEstablished, signal)
+		s.signalAwaitingReady = append(
+			s.signalAwaitingReady, signal)
 	}
 
 	return false
+}
+
+// transportFailed marks the session as failed and signals any initiators
+// waiting to share the session.
+//
+// transportFailed is ignored if the session is already ready to share, as any
+// transport failures past that point affect only one application-level round
+// trip and not the session.
+func (s *session) transportFailed() {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if !s.isInitiator {
+		return
+	}
+
+	// Already ready to share, so ignore the transport failure.
+	if s.handshake == nil && s.signalAwaitingReady == nil {
+		return
+	}
+
+	if s.state == sessionStateInitiator_failed {
+		return
+	}
+
+	// In the sessionStateInitiator_failed state, nextHandshakePacket will
+	// always fail.
+	s.state = sessionStateInitiator_failed
+
+	for _, signal := range s.signalAwaitingReady {
+		close(signal)
+	}
+	s.signalAwaitingReady = nil
 }
 
 // getPeerID returns the peer's public key, in the form of an ID. A given peer
@@ -1859,14 +1935,18 @@ func (s *session) readyToShare() {
 
 	// Assumes s.mutex lock is held.
 
-	if s.signalOnEstablished == nil {
+	if !s.isInitiator {
 		return
 	}
 
-	for _, signal := range s.signalOnEstablished {
+	if s.signalAwaitingReady == nil {
+		return
+	}
+
+	for _, signal := range s.signalAwaitingReady {
 		close(signal)
 	}
-	s.signalOnEstablished = nil
+	s.signalAwaitingReady = nil
 }
 
 // Marshal and obfuscate a SessionPacket.

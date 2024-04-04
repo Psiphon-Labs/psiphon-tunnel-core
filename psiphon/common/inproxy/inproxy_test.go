@@ -807,8 +807,8 @@ func runHTTPServer(listener net.Listener, broker *Broker) error {
 
 	// WriteTimeout will be extended via extendTimeout.
 	httpServer := &http.Server{
-		ReadTimeout:  1 * time.Second,
-		WriteTimeout: 10 * time.Millisecond,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  1 * time.Minute,
 		Handler:      handler,
 	}
@@ -843,7 +843,7 @@ func newHTTPRoundTripper(endpointAddr string, path string) *httpRoundTripper {
 				ForceAttemptHTTP2:   true,
 				MaxIdleConns:        2,
 				IdleConnTimeout:     1 * time.Minute,
-				TLSHandshakeTimeout: 1 * time.Second,
+				TLSHandshakeTimeout: 10 * time.Second,
 				TLSClientConfig: &tls.Config{
 					InsecureSkipVerify: true,
 				},
