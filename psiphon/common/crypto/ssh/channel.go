@@ -30,30 +30,30 @@ const (
 
 // [Psiphon]
 //
-// - Use a smaller initial/max channel window size.
-// - Testing with the full Psiphon stack shows that
-//   this smaller channel window size is more performant
-//   for low bandwidth connections while still adequate for
-//   higher bandwidth connections.
-// - In Psiphon, a single SSH connection is used for all
-//   client port forwards. Bulk data transfers with large
-//   channel windows can immediately backlog the connection
-//   with many large SSH packets, introducing large latency
-//   for opening new channels. For Psiphon, we don't wish to
-//   optimize for a single bulk transfer throughput.
-// - TODO: can we implement some sort of adaptive max
-//   channel window size, starting with this small initial
-//   value and only growing based on connection properties?
-// - channelWindowSize directly defines the local channel
-//   window initial and max size. We also cap remote channel
-//   window sizes via an extra customization in the
-//   channelOpenConfirmMsg handler. Both upstream and
-//   downstream bulk data transfers have the same latency
-//   issue.
-// - For packet tunnel, use a larger channel window size,
-//   since all tunneled traffic flows through a single
-//   channel; we still select a size smaller than the stock
-//   channelWindowSize due to client memory constraints.
+//   - Use a smaller initial/max channel window size.
+//   - Testing with the full Psiphon stack shows that
+//     this smaller channel window size is more performant
+//     for low bandwidth connections while still adequate for
+//     higher bandwidth connections.
+//   - In Psiphon, a single SSH connection is used for all
+//     client port forwards. Bulk data transfers with large
+//     channel windows can immediately backlog the connection
+//     with many large SSH packets, introducing large latency
+//     for opening new channels. For Psiphon, we don't wish to
+//     optimize for a single bulk transfer throughput.
+//   - TODO: can we implement some sort of adaptive max
+//     channel window size, starting with this small initial
+//     value and only growing based on connection properties?
+//   - channelWindowSize directly defines the local channel
+//     window initial and max size. We also cap remote channel
+//     window sizes via an extra customization in the
+//     channelOpenConfirmMsg handler. Both upstream and
+//     downstream bulk data transfers have the same latency
+//     issue.
+//   - For packet tunnel, use a larger channel window size,
+//     since all tunneled traffic flows through a single
+//     channel; we still select a size smaller than the stock
+//     channelWindowSize due to client memory constraints.
 func getChannelWindowSize(chanType string) int {
 
 	// From "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol".
@@ -230,9 +230,11 @@ type channel struct {
 	pending    *buffer
 	extPending *buffer
 
-	// windowMu protects myWindow, the flow-control window.
-	windowMu sync.Mutex
-	myWindow uint32
+	// windowMu protects myWindow, the flow-control window, and myConsumed,
+	// the number of bytes consumed since we last increased myWindow
+	windowMu   sync.Mutex
+	myWindow   uint32
+	myConsumed uint32
 
 	// writeMu serializes calls to mux.conn.writePacket() and
 	// protects sentClose and packetPool. This mutex must be
@@ -375,14 +377,25 @@ func (ch *channel) handleData(packet []byte) error {
 	return nil
 }
 
-func (c *channel) adjustWindow(n uint32) error {
+func (c *channel) adjustWindow(adj uint32) error {
 	c.windowMu.Lock()
-	// Since myWindow is managed on our side, and can never exceed
-	// the initial window setting, we don't worry about overflow.
-	c.myWindow += uint32(n)
+	// Since myConsumed and myWindow are managed on our side, and can never
+	// exceed the initial window setting, we don't worry about overflow.
+	c.myConsumed += adj
+	var sendAdj uint32
+	channelWindowSize := uint32(getChannelWindowSize(c.chanType))
+	if (channelWindowSize-c.myWindow > 3*c.maxIncomingPayload) ||
+		(c.myWindow < channelWindowSize/2) {
+		sendAdj = c.myConsumed
+		c.myConsumed = 0
+		c.myWindow += sendAdj
+	}
 	c.windowMu.Unlock()
+	if sendAdj == 0 {
+		return nil
+	}
 	return c.sendMessage(windowAdjustMsg{
-		AdditionalBytes: uint32(n),
+		AdditionalBytes: sendAdj,
 	})
 }
 

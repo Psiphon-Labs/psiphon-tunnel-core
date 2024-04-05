@@ -23,7 +23,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
+	std_tls "crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -39,6 +39,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/monotime"
@@ -48,7 +49,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	tris "github.com/Psiphon-Labs/tls-tris"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/juju/ratelimit"
 	"golang.org/x/crypto/nacl/box"
@@ -115,9 +115,9 @@ type MeekServer struct {
 	skipExtendedTurnAroundThreshold int
 	maxSessionStaleness             time.Duration
 	httpClientIOTimeout             time.Duration
-	tlsConfig                       *tris.Config
+	tlsConfig                       *tls.Config
 	obfuscatorSeedHistory           *obfuscator.SeedHistory
-	clientHandler                   func(clientTunnelProtocol string, clientConn net.Conn)
+	clientHandler                   func(clientConn net.Conn, data *additionalTransportData)
 	openConns                       *common.Conns
 	stopBroadcast                   <-chan struct{}
 	sessionsLock                    sync.RWMutex
@@ -138,7 +138,7 @@ func NewMeekServer(
 	listenerTunnelProtocol string,
 	listenerPort int,
 	useTLS, isFronted, useObfuscatedSessionTickets, useHTTPNormalizer bool,
-	clientHandler func(clientTunnelProtocol string, clientConn net.Conn),
+	clientHandler func(clientConn net.Conn, data *additionalTransportData),
 	stopBroadcast <-chan struct{}) (*MeekServer, error) {
 
 	passthroughAddress := support.Config.TunnelProtocolPassthroughAddresses[listenerTunnelProtocol]
@@ -306,7 +306,7 @@ func (server *MeekServer) Run() error {
 		},
 
 		// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+		TLSNextProto: make(map[string]func(*http.Server, *std_tls.Conn, http.Handler)),
 	}
 
 	// Note: Serve() will be interrupted by listener.Close() call
@@ -709,8 +709,7 @@ func (server *MeekServer) getSessionOrEndpoint(
 		return "", nil, nil, "", nil, errors.TraceNew("invalid IP address")
 	}
 
-	if protocol.TunnelProtocolUsesFrontedMeek(server.listenerTunnelProtocol) &&
-		len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
+	if server.isFronted && len(server.support.Config.MeekProxyForwardedForHeaders) > 0 {
 
 		// When there are multiple header names in MeekProxyForwardedForHeaders,
 		// the first valid match is preferred. MeekProxyForwardedForHeaders should be
@@ -745,6 +744,29 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 
 	geoIPData := server.support.GeoIPService.Lookup(clientIP)
+
+	// Check for a steering IP header, which contains an alternate dial IP to
+	// be returned to the client via the secure API handshake response.
+	// Steering may be used to load balance CDN traffic.
+	//
+	// The steering IP header is added by a CDN or CDN service process. To
+	// prevent steering IP spoofing, the service process must filter out any
+	// steering IP headers injected into ingress requests.
+	//
+	// Steering IP headers must appear in the first request of a meek session
+	// in order to be recorded here and relayed to the client.
+
+	var steeringIP string
+	if server.isFronted && server.support.Config.EnableSteeringIPs {
+		steeringIP = request.Header.Get("X-Psiphon-Steering-Ip")
+		if steeringIP != "" {
+			IP := net.ParseIP(steeringIP)
+			if IP == nil || common.IsBogon(IP) {
+				steeringIP = ""
+				log.WithTraceFields(LogFields{"steeringIP": steeringIP}).Warning("invalid steering IP")
+			}
+		}
+	}
 
 	// The session is new (or expired). Treat the cookie value as a new meek
 	// cookie, extract the payload, and create a new session.
@@ -785,29 +807,13 @@ func (server *MeekServer) getSessionOrEndpoint(
 		return "", nil, nil, "", nil, errors.Trace(err)
 	}
 
-	tunnelProtocol := server.listenerTunnelProtocol
-
-	if clientSessionData.ClientTunnelProtocol != "" {
-
-		if !protocol.IsValidClientTunnelProtocol(
-			clientSessionData.ClientTunnelProtocol,
-			server.listenerTunnelProtocol,
-			server.support.Config.GetRunningProtocols()) {
-
-			return "", nil, nil, "", nil, errors.Tracef(
-				"invalid client tunnel protocol: %s", clientSessionData.ClientTunnelProtocol)
-		}
-
-		tunnelProtocol = clientSessionData.ClientTunnelProtocol
-	}
-
 	// Any rate limit is enforced after the meek cookie is validated, so a prober
 	// without the obfuscation secret will be unable to fingerprint the server
 	// based on response time combined with the rate limit configuration. The
 	// rate limit is primarily intended to limit memory resource consumption and
 	// not the overhead incurred by cookie validation.
 
-	if server.rateLimit(clientIP, geoIPData, tunnelProtocol) {
+	if server.rateLimit(clientIP, geoIPData, server.listenerTunnelProtocol) {
 		return "", nil, nil, "", nil, errors.TraceNew("rate limit exceeded")
 	}
 
@@ -860,6 +866,28 @@ func (server *MeekServer) getSessionOrEndpoint(
 				return "", nil, nil, "", nil, errors.TraceNew("restricted fronting provider")
 			}
 		}
+	}
+
+	// The tunnel protocol name is used for stats and traffic rules. In many
+	// cases, its value is unambiguously determined by the listener port. In
+	// certain cases, such as multiple fronted protocols with a single
+	// backend listener, the client's reported tunnel protocol value is used.
+	// The caller must validate clientTunnelProtocol with
+	// protocol.IsValidClientTunnelProtocol.
+
+	var clientTunnelProtocol string
+	if clientSessionData.ClientTunnelProtocol != "" {
+
+		if !protocol.IsValidClientTunnelProtocol(
+			clientSessionData.ClientTunnelProtocol,
+			server.listenerTunnelProtocol,
+			server.support.Config.GetRunningProtocols()) {
+
+			return "", nil, nil, "", nil, errors.Tracef(
+				"invalid client tunnel protocol: %s", clientSessionData.ClientTunnelProtocol)
+		}
+
+		clientTunnelProtocol = clientSessionData.ClientTunnelProtocol
 	}
 
 	// Create a new session
@@ -919,9 +947,17 @@ func (server *MeekServer) getSessionOrEndpoint(
 	server.sessions[sessionID] = session
 	server.sessionsLock.Unlock()
 
+	var additionalData *additionalTransportData
+	if clientTunnelProtocol != "" || steeringIP != "" {
+		additionalData = &additionalTransportData{
+			overrideTunnelProtocol: clientTunnelProtocol,
+			steeringIP:             steeringIP,
+		}
+	}
+
 	// Note: from the tunnel server's perspective, this client connection
 	// will close when session.delete calls Close() on the meekConn.
-	server.clientHandler(clientSessionData.ClientTunnelProtocol, session.clientConn)
+	server.clientHandler(session.clientConn, additionalData)
 
 	return sessionID, session, underlyingConn, "", nil, nil
 }
@@ -1185,14 +1221,14 @@ func (server *MeekServer) getMeekCookiePayload(
 // of the connection is non-circumvention; it's optimized for performance
 // assuming the peer is an uncensored CDN.
 func (server *MeekServer) makeMeekTLSConfig(
-	isFronted bool, useObfuscatedSessionTickets bool) (*tris.Config, error) {
+	isFronted bool, useObfuscatedSessionTickets bool) (*tls.Config, error) {
 
 	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	tlsCertificate, err := tris.X509KeyPair(
+	tlsCertificate, err := tls.X509KeyPair(
 		[]byte(certificate), []byte(privateKey))
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1200,14 +1236,13 @@ func (server *MeekServer) makeMeekTLSConfig(
 
 	// Vary the minimum version to frustrate scanning/fingerprinting of unfronted servers.
 	// Limitation: like the certificate, this value changes on restart.
-	minVersionCandidates := []uint16{tris.VersionTLS10, tris.VersionTLS11, tris.VersionTLS12}
+	minVersionCandidates := []uint16{tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12}
 	minVersion := minVersionCandidates[prng.Intn(len(minVersionCandidates))]
 
-	config := &tris.Config{
-		Certificates:            []tris.Certificate{tlsCertificate},
-		NextProtos:              []string{"http/1.1"},
-		MinVersion:              minVersion,
-		UseExtendedMasterSecret: true,
+	config := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		NextProtos:   []string{"http/1.1"},
+		MinVersion:   minVersion,
 	}
 
 	if isFronted {
@@ -1223,20 +1258,19 @@ func (server *MeekServer) makeMeekTLSConfig(
 		//
 		// [*] the list has since been updated, removing CipherSuites using RC4 and 3DES.
 		config.CipherSuites = []uint16{
-			tris.TLS_RSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_RSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_RSA_WITH_AES_256_CBC_SHA,
-			tris.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tris.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tris.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-			tris.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			tris.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
 		}
-		config.PreferServerCipherSuites = true
 	}
 
 	if useObfuscatedSessionTickets {

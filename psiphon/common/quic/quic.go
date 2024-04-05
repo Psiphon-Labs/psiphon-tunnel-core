@@ -43,7 +43,6 @@ package quic
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -54,6 +53,7 @@ import (
 	"syscall"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
@@ -246,14 +246,18 @@ func Listen(
 		tlsConfig, ietfQUICConfig := makeIETFConfig(
 			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate)
 
-		listener, err := ietf_quic.Listen(
-			obfuscatedPacketConn, tlsConfig, ietfQUICConfig)
+		tr := newIETFTransport(obfuscatedPacketConn)
+
+		listener, err := tr.Listen(tlsConfig, ietfQUICConfig)
 		if err != nil {
 			obfuscatedPacketConn.Close()
 			return nil, errors.Trace(err)
 		}
 
-		quicListener = &ietfQUICListener{Listener: listener}
+		quicListener = &ietfQUICListener{
+			Listener:  listener,
+			transport: tr,
+		}
 
 	} else {
 
@@ -295,6 +299,17 @@ func makeIETFConfig(
 		// TODO: add jitter to keep alive period
 		KeepAlivePeriod: CLIENT_IDLE_TIMEOUT / 2,
 
+		VerifyClientHelloRandom:       verifyClientHelloRandom,
+		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
+	}
+
+	return tlsConfig, ietfQUICConfig
+}
+
+func newIETFTransport(conn net.PacketConn) *ietf_quic.Transport {
+	return &ietf_quic.Transport{
+		Conn: conn,
+
 		// The quic-go server may respond with a version negotiation packet
 		// before reaching the Initial packet processing with its
 		// anti-probing defense. This may happen even for a malformed packet.
@@ -310,12 +325,7 @@ func makeIETFConfig(
 		// the Initial/Client Hello, and then issue any required version
 		// negotiation packet.
 		DisableVersionNegotiationPackets: true,
-
-		VerifyClientHelloRandom:       verifyClientHelloRandom,
-		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
 	}
-
-	return tlsConfig, ietfQUICConfig
 }
 
 // Accept returns a net.Conn that wraps a single QUIC connection and stream.
@@ -336,12 +346,7 @@ func (listener *Listener) Accept() (net.Conn, error) {
 }
 
 func (listener *Listener) Close() error {
-
-	// First close the underlying packet conn to ensure all quic-go goroutines
-	// as well as any blocking Accept call goroutine is interrupted. Note
-	// that muxListener does this as well, so this is for the IETF-only case.
 	_ = listener.obfuscatedPacketConn.Close()
-
 	return listener.quicListener.Close()
 }
 
@@ -900,6 +905,7 @@ type quicRoundTripper interface {
 
 type ietfQUICListener struct {
 	*ietf_quic.Listener
+	transport *ietf_quic.Transport
 }
 
 func (l *ietfQUICListener) Accept() (quicConnection, error) {
@@ -910,6 +916,12 @@ func (l *ietfQUICListener) Accept() (quicConnection, error) {
 		return nil, errors.Trace(err)
 	}
 	return &ietfQUICConnection{Connection: connection}, nil
+}
+
+func (l *ietfQUICListener) Close() error {
+	// All quic-go goroutines will be stopped when the transport is closed.
+	// https://github.com/quic-go/quic-go/issues/3962
+	return l.transport.Close()
 }
 
 type ietfQUICConnection struct {
@@ -1105,10 +1117,10 @@ func (conn *muxPacketConn) SetWriteDeadline(t time.Time) error {
 	return errors.TraceNew("not supported")
 }
 
-// SetReadBuffer and SyscallConn provide passthroughs to the underlying
-// net.UDPConn implementations, used to optimize the UDP receive buffer size.
+// SetReadBuffer, SetWriteBuffer, and SyscallConn provide passthroughs to the
+// underlying net.UDPConn implementations, used to optimize UDP buffer sizes.
 // See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
-// and ietf_quic.setReceiveBuffer. Only the IETF stack will access these
+// and ietf_quic.setReceive/SendBuffer. Only the IETF stack will access these
 // functions.
 //
 // Limitation: due to the relayPackets/ReadFrom scheme, this simple
@@ -1123,6 +1135,16 @@ func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
 		return errors.TraceNew("not supported")
 	}
 	return c.SetReadBuffer(bytes)
+}
+
+func (conn *muxPacketConn) SetWriteBuffer(bytes int) error {
+	c, ok := conn.listener.conn.PacketConn.(interface {
+		SetWriteBuffer(int) error
+	})
+	if !ok {
+		return errors.TraceNew("not supported")
+	}
+	return c.SetWriteBuffer(bytes)
 }
 
 func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {
@@ -1176,11 +1198,15 @@ func newMuxListener(
 	tlsConfig, ietfQUICConfig := makeIETFConfig(
 		conn, verifyClientHelloRandom, tlsCertificate)
 
-	il, err := ietf_quic.Listen(listener.ietfQUICConn, tlsConfig, ietfQUICConfig)
+	tr := newIETFTransport(listener.ietfQUICConn)
+	il, err := tr.Listen(tlsConfig, ietfQUICConfig)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	listener.ietfQUICListener = &ietfQUICListener{Listener: il}
+	listener.ietfQUICListener = &ietfQUICListener{
+		Listener:  il,
+		transport: tr,
+	}
 
 	listener.gQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 

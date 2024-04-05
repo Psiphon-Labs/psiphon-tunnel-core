@@ -363,6 +363,9 @@ const (
 	TLSTunnelMaxTLSPadding                           = "TLSTunnelMaxTLSPadding"
 	TLSFragmentClientHelloProbability                = "TLSFragmentClientHelloProbability"
 	TLSFragmentClientHelloLimitProtocols             = "TLSFragmentClientHelloLimitProtocols"
+	SteeringIPCacheTTL                               = "SteeringIPCacheTTL"
+	SteeringIPCacheMaxEntries                        = "SteeringIPCacheMaxEntries"
+	SteeringIPProbability                            = "SteeringIPProbability"
 
 	// Retired parameters
 
@@ -775,6 +778,10 @@ var defaultParameters = map[string]struct {
 
 	TLSFragmentClientHelloProbability:    {value: 0.0, minimum: 0.0},
 	TLSFragmentClientHelloLimitProtocols: {value: protocol.TunnelProtocols{}},
+
+	SteeringIPCacheTTL:        {value: 1 * time.Hour, minimum: time.Duration(0)},
+	SteeringIPCacheMaxEntries: {value: 65536, minimum: 0},
+	SteeringIPProbability:     {value: 1.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

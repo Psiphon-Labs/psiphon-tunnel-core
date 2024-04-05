@@ -44,6 +44,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
@@ -57,6 +58,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/miekg/dns"
 	"golang.org/x/net/proxy"
 )
@@ -567,6 +569,21 @@ func TestOmitProvider(t *testing.T) {
 		})
 }
 
+func TestSteeringIP(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "FRONTED-MEEK-OSSH",
+			enableSSHAPIRequests: true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			forceFragmenting:     true,
+			doDanglingTCPConn:    true,
+			doLogHostProvider:    true,
+			doSteeringIP:         true,
+		})
+}
+
 type runServerConfig struct {
 	tunnelProtocol       string
 	clientTunnelProtocol string
@@ -593,6 +610,7 @@ type runServerConfig struct {
 	doChangeBytesConfig  bool
 	doLogHostProvider    bool
 	inspectFlows         bool
+	doSteeringIP         bool
 }
 
 var (
@@ -602,6 +620,9 @@ var (
 	testCustomHostNameRegex              = `[a-z0-9]{5,10}\.example\.org`
 	testClientFeatures                   = []string{"feature 1", "feature 2"}
 	testDisallowedTrafficAlertActionURLs = []string{"https://example.org/disallowed"}
+
+	// A steering IP must not be a bogon; this address is not dialed.
+	testSteeringIP = "1.1.1.1"
 )
 
 var serverRuns = 0
@@ -709,6 +730,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if doServerTactics {
 		generateConfigParams.TacticsRequestPublicKey = tacticsRequestPublicKey
 		generateConfigParams.TacticsRequestObfuscatedKey = tacticsRequestObfuscatedKey
+	}
+
+	if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
+		generateConfigParams.FrontingProviderID = prng.HexString(8)
 	}
 
 	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
@@ -828,6 +853,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if runConfig.doLogHostProvider {
 		serverConfig["HostProvider"] = "example-host-provider"
+	}
+
+	if runConfig.doSteeringIP {
+		serverConfig["EnableSteeringIPs"] = true
 	}
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
@@ -985,7 +1014,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Use a distinct suffix for network ID for each test run to ensure tactics
 	// from different runs don't apply; this is a workaround for the singleton
 	// datastore.
-	jsonNetworkID := fmt.Sprintf(`,"NetworkID" : "WIFI-%s"`, time.Now().String())
+	networkID := fmt.Sprintf("WIFI-%s", time.Now().String())
+	jsonNetworkID := fmt.Sprintf(`,"NetworkID" : "%s"`, networkID)
 
 	jsonLimitTLSProfiles := ""
 	if runConfig.tlsProfile != "" {
@@ -1063,6 +1093,25 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		customHostNameProbability := 1.0
 		clientConfig.CustomHostNameProbability = &customHostNameProbability
 		clientConfig.CustomHostNameLimitProtocols = []string{clientTunnelProtocol}
+	}
+
+	if runConfig.doSteeringIP {
+
+		if runConfig.tunnelProtocol != protocol.TUNNEL_PROTOCOL_FRONTED_MEEK {
+			t.Fatalf("steering IP test requires FRONTED-MEEK-OSSH")
+		}
+
+		protocol.SetFrontedMeekHTTPDialPortNumber(psiphonServerPort)
+
+		// Note that in an actual fronting deployment, the steering IP header
+		// is added to the HTTP request by the CDN and any ingress steering
+		// IP header would be stripped to avoid spoofing. To facilitate this
+		// test case, we just have the client add the steering IP header as
+		// if it were the CDN.
+
+		headers := make(http.Header)
+		headers.Set("X-Psiphon-Steering-Ip", testSteeringIP)
+		clientConfig.MeekAdditionalHeaders = headers
 	}
 
 	err = clientConfig.Commit(false)
@@ -1460,7 +1509,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	time.Sleep(100 * time.Millisecond)
 
 	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics
-	expectServerBPFField := ServerBPFEnabled() && doServerTactics
+	expectServerBPFField := ServerBPFEnabled() && protocol.TunnelProtocolIsDirect(runConfig.tunnelProtocol) && doServerTactics
 	expectServerPacketManipulationField := runConfig.doPacketManipulation
 	expectBurstFields := runConfig.doBurstMonitor
 	expectTCPPortForwardDial := runConfig.doTunneledWebRequest
@@ -1590,6 +1639,35 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				t.Fatalf("server write delay after prefix too high: %f ms",
 					serverFlows.flows[1].timeDelta.Seconds()*1e3)
 			}
+		}
+	}
+
+	if runConfig.doSteeringIP {
+
+		// Access the unexported controller.steeringIPCache
+		controllerStruct := reflect.ValueOf(controller).Elem()
+		steeringIPCacheField := controllerStruct.Field(40)
+		steeringIPCacheField = reflect.NewAt(
+			steeringIPCacheField.Type(), unsafe.Pointer(steeringIPCacheField.UnsafeAddr())).Elem()
+		steeringIPCache := steeringIPCacheField.Interface().(*lrucache.Cache)
+
+		if steeringIPCache.ItemCount() != 1 {
+			t.Fatalf("unexpected steering IP cache size: %d", steeringIPCache.ItemCount())
+		}
+
+		key := fmt.Sprintf(
+			"%s %s %s",
+			networkID,
+			generateConfigParams.FrontingProviderID,
+			runConfig.tunnelProtocol)
+
+		entry, ok := steeringIPCache.Get(key)
+		if !ok {
+			t.Fatalf("no entry for steering IP cache key: %s", key)
+		}
+
+		if entry.(string) != testSteeringIP {
+			t.Fatalf("unexpected cached steering IP: %v", entry)
 		}
 	}
 }
@@ -1849,12 +1927,14 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected meek_host_header '%s'", fields["meek_host_header"])
 		}
 
-		for _, name := range []string{
-			"meek_dial_ip_address",
-			"meek_resolved_ip_address",
-		} {
-			if fields[name] != nil {
-				return fmt.Errorf("unexpected field '%s'", name)
+		if !protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
+			for _, name := range []string{
+				"meek_dial_ip_address",
+				"meek_resolved_ip_address",
+			} {
+				if fields[name] != nil {
+					return fmt.Errorf("unexpected field '%s'", name)
+				}
 			}
 		}
 	}
@@ -1876,13 +1956,15 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected meek_sni_server_name '%s'", fields["meek_sni_server_name"])
 		}
 
-		for _, name := range []string{
-			"meek_dial_ip_address",
-			"meek_resolved_ip_address",
-			"meek_host_header",
-		} {
-			if fields[name] != nil {
-				return fmt.Errorf("unexpected field '%s'", name)
+		if !protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
+			for _, name := range []string{
+				"meek_dial_ip_address",
+				"meek_resolved_ip_address",
+				"meek_host_header",
+			} {
+				if fields[name] != nil {
+					return fmt.Errorf("unexpected field '%s'", name)
+				}
 			}
 		}
 
@@ -2121,6 +2203,20 @@ func checkExpectedServerTunnelLogFields(
 		}
 	} else {
 		name := "provider"
+		if fields[name] != nil {
+			return fmt.Errorf("unexpected field '%s'", name)
+		}
+	}
+
+	if runConfig.doSteeringIP {
+		name := "relayed_steering_ip"
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
+		if fields[name] != testSteeringIP {
+			return fmt.Errorf("unexpected field value %s: %v != %v", name, fields[name], testSteeringIP)
+		}
+		name = "steering_ip"
 		if fields[name] != nil {
 			return fmt.Errorf("unexpected field '%s'", name)
 		}
@@ -3055,6 +3151,7 @@ func storePruneServerEntriesTest(
 
 		dialParams, err := psiphon.MakeDialParameters(
 			clientConfig,
+			nil,
 			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },
 			func(serverEntry *protocol.ServerEntry) (string, bool) {

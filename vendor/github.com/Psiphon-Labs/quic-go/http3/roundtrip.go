@@ -2,7 +2,6 @@ package http3
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 
 	"golang.org/x/net/http/httpguts"
 
@@ -52,7 +53,7 @@ type RoundTripper struct {
 
 	// Enable support for HTTP/3 datagrams.
 	// If set to true, QuicConfig.EnableDatagram will be set.
-	// See https://www.ietf.org/archive/id/draft-schinazi-masque-h3-datagram-02.html.
+	// See https://datatracker.ietf.org/doc/html/rfc9297.
 	EnableDatagrams bool
 
 	// Additional HTTP/3 settings.
@@ -202,6 +203,7 @@ func (r *RoundTripper) getClient(hostname string, onlyCached bool) (rtc *roundTr
 				MaxHeaderBytes:     r.MaxResponseHeaderBytes,
 				StreamHijacker:     r.StreamHijacker,
 				UniStreamHijacker:  r.UniStreamHijacker,
+				AdditionalSettings: r.AdditionalSettings,
 			},
 			r.QuicConfig,
 			dial,

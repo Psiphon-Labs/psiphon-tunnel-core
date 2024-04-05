@@ -401,6 +401,7 @@ func handshakeAPIRequestHandler(
 		TacticsPayload:           marshaledTacticsPayload,
 		UpstreamBytesPerSecond:   handshakeStateInfo.upstreamBytesPerSecond,
 		DownstreamBytesPerSecond: handshakeStateInfo.downstreamBytesPerSecond,
+		SteeringIP:               handshakeStateInfo.steeringIP,
 		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
@@ -972,6 +973,7 @@ var baseDialParams = []requestParamSpec{
 	{"tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},
 	{"tls_ossh_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"steering_ip", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
 }
 
 // baseSessionAndDialParams adds baseDialParams to baseSessionParams.

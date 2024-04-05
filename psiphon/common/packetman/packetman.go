@@ -134,14 +134,14 @@ type Config struct {
 // "TCP-flags random|<flags>"
 // flags: FSRPAUECN
 //
-// "TCP-<field> random|<base64>"
+// "TCP-<field> random|<hex>"
 // field: srcport, dstport, seq, ack, dataoffset, window, checksum, urgent
 //
-// "TCP-option-<option> random|omit|<base64>"
+// "TCP-option-<option> random|omit|<hex>"
 // option: eol, nop, mss, windowscale, sackpermitted, sack, timestamps,
 // altchecksum, altchecksumdata, md5header, usertimeout
 //
-// "TCP-payload random|<base64>"
+// "TCP-payload random|<hex>"
 //
 // For example, this Geneva strategy:
 //   [TCP:flags:SA]-duplicate(tamper{TCP:flags:replace:R},tamper{TCP:flags:replace:S})-| \/
@@ -222,10 +222,17 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 		transformedTCP := *interceptedTCP
 		var payload gopacket.Payload
 		setCalculatedField := false
+		fixLengths := true
+		computeChecksums := true
 
 		for _, transform := range packetTransformations {
 			transform.apply(&transformedTCP, &payload)
-			if transform.setsCalculatedField() {
+			if t, ok := transform.(*transformationTCPField); ok && t.fieldName == tcpFieldDataOffset {
+				fixLengths = false
+				setCalculatedField = true
+			}
+			if t, ok := transform.(*transformationTCPField); ok && t.fieldName == tcpFieldChecksum {
+				computeChecksums = false
 				setCalculatedField = true
 			}
 		}
@@ -237,6 +244,10 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 
 		buffer := gopacket.NewSerializeBuffer()
 		options := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+
+		//warning: first SerializeLayers call may modify transformedTCP, we must copy the TCP DataOffset and Checksum
+		tmpDataOffset := transformedTCP.DataOffset
+		tmpChecksum := transformedTCP.Checksum
 
 		gopacket.SerializeLayers(
 			buffer,
@@ -255,10 +266,12 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 		// from the first round.
 
 		if setCalculatedField {
+			transformedTCP.DataOffset = tmpDataOffset
+			transformedTCP.Checksum = tmpChecksum
 			buffer.Clear()
 			gopacket.SerializeLayers(
 				buffer,
-				gopacket.SerializeOptions{},
+				gopacket.SerializeOptions{FixLengths: fixLengths, ComputeChecksums: computeChecksums},
 				serializableNetworkLayer,
 				&transformedTCP,
 				payload)
@@ -266,13 +279,11 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 
 		packets[i] = buffer.Bytes()
 	}
-
 	return packets, nil
 }
 
 type transformation interface {
 	apply(tcp *layers.TCP, payload *gopacket.Payload)
-	setsCalculatedField() bool
 }
 
 const (
@@ -388,10 +399,6 @@ func (t *transformationTCPFlags) apply(tcp *layers.TCP, _ *gopacket.Payload) {
 	tcp.NS = strings.Index(t.flags, "N") != -1
 }
 
-func (t *transformationTCPFlags) setsCalculatedField() bool {
-	return false
-}
-
 type transformationTCPField struct {
 	fieldName          string
 	transformationType int
@@ -490,10 +497,6 @@ func (t *transformationTCPField) apply(tcp *layers.TCP, _ *gopacket.Payload) {
 	case tcpFieldUrgent:
 		tcp.Urgent = binary.BigEndian.Uint16(value[:])
 	}
-}
-
-func (t *transformationTCPField) setsCalculatedField() bool {
-	return t.fieldName == tcpFieldDataOffset || t.fieldName == tcpFieldChecksum
 }
 
 type transformationTCPOption struct {
@@ -706,10 +709,6 @@ func (t *transformationTCPOption) apply(tcp *layers.TCP, _ *gopacket.Payload) {
 	tcp.Options = options
 }
 
-func (t *transformationTCPOption) setsCalculatedField() bool {
-	return false
-}
-
 type transformationTCPPayload struct {
 	transformationType int
 	value              []byte
@@ -761,10 +760,6 @@ func (t *transformationTCPPayload) apply(tcp *layers.TCP, payload *gopacket.Payl
 		// Change the payload.
 		*payload = append([]byte(nil), value...)
 	}
-}
-
-func (t *transformationTCPPayload) setsCalculatedField() bool {
-	return false
 }
 
 func stripEOLOption(packet gopacket.Packet) {

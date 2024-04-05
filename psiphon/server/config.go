@@ -445,6 +445,9 @@ type Config struct {
 	// for testing.
 	AllowBogons bool
 
+	// EnableSteeringIPs enables meek server steering IP support.
+	EnableSteeringIPs bool
+
 	// OwnEncodedServerEntries is a list of the server's own encoded server
 	// entries, idenfified by server entry tag. These values are used in the
 	// handshake API to update clients that don't yet have a signed copy of these
@@ -792,6 +795,7 @@ type GenerateConfigParams struct {
 	LegacyPassthrough                  bool
 	LimitQUICVersions                  protocol.QUICVersions
 	EnableGQUIC                        bool
+	FrontingProviderID                 string
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON encoded
@@ -1090,6 +1094,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		capabilities = append(capabilities, protocol.CAPABILITY_UNTUNNELED_WEB_API_REQUESTS)
 	}
 
+	var frontingProviderID string
+
 	for tunnelProtocol := range params.TunnelProtocolPorts {
 
 		capability := protocol.GetCapability(tunnelProtocol)
@@ -1114,6 +1120,10 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 			protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
 
 			capabilities = append(capabilities, protocol.GetTacticsCapability(tunnelProtocol))
+		}
+
+		if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+			frontingProviderID = params.FrontingProviderID
 		}
 	}
 
@@ -1165,6 +1175,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		Capabilities:                  capabilities,
 		Region:                        "US",
 		ProviderID:                    prng.HexString(8),
+		FrontingProviderID:            frontingProviderID,
 		MeekServerPort:                meekPort,
 		MeekCookieEncryptionPublicKey: meekCookieEncryptionPublicKey,
 		MeekObfuscatedKey:             meekObfuscatedKey,

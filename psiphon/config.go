@@ -271,6 +271,11 @@ type Config struct {
 	// upstream proxy when specified by UpstreamProxyURL.
 	CustomHeaders http.Header
 
+	// MeekAdditionalHeaders is a set of additional arbitrary HTTP headers
+	// that are added to all meek HTTP requests. An additional header is
+	// ignored when the header name is already present in a meek request.
+	MeekAdditionalHeaders http.Header
+
 	// NetworkConnectivityChecker is an interface that enables tunnel-core to
 	// call into the host application to check for network connectivity. See:
 	// NetworkConnectivityChecker doc.
@@ -896,6 +901,11 @@ type Config struct {
 
 	// AdditionalParameters is used for testing.
 	AdditionalParameters string
+
+	// SteeringIP fields are for testing purposes only.
+	SteeringIPCacheTTLSeconds *int
+	SteeringIPCacheMaxEntries *int
+	SteeringIPProbability     *float64
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -2135,6 +2145,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.TLSFragmentClientHelloLimitProtocols] = protocol.TunnelProtocols(config.TLSFragmentClientHelloLimitProtocols)
 	}
 
+	if config.SteeringIPCacheTTLSeconds != nil {
+		applyParameters[parameters.SteeringIPCacheTTL] = fmt.Sprintf("%ds", *config.SteeringIPCacheTTLSeconds)
+	}
+
+	if config.SteeringIPCacheMaxEntries != nil {
+		applyParameters[parameters.SteeringIPCacheMaxEntries] = *config.SteeringIPCacheMaxEntries
+	}
+
+	if config.SteeringIPProbability != nil {
+		applyParameters[parameters.SteeringIPProbability] = *config.SteeringIPProbability
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2731,6 +2753,9 @@ func (config *Config) setDialParametersHash() {
 			hash.Write([]byte(protocol))
 		}
 	}
+
+	// Steering IPs are ephemeral and not replayed, so steering IP parameters
+	// are excluded here.
 
 	config.dialParametersHash = hash.Sum(nil)
 }

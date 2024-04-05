@@ -24,10 +24,10 @@ package quic
 
 import (
 	"context"
-	"crypto/tls"
 	"net"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 

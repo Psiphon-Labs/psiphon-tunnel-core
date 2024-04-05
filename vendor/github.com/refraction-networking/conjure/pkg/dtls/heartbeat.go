@@ -3,6 +3,9 @@ package dtls
 import (
 	"bytes"
 	"errors"
+	"io"
+	"net"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -13,6 +16,9 @@ const recvChBufSize = 64
 
 type hbConn struct {
 	stream msgStream
+
+	closeOnce sync.Once
+	closed    chan struct{}
 
 	recvCh         chan errBytes
 	waiting        uint32
@@ -34,6 +40,7 @@ func heartbeatServer(stream msgStream, config *heartbeatConfig, maxMessageSize i
 		recvCh:         make(chan errBytes, recvChBufSize),
 		timeout:        conf.Interval,
 		hb:             conf.Heartbeat,
+		closed:         make(chan struct{}),
 		maxMessageSize: maxMessageSize,
 	}
 
@@ -48,12 +55,19 @@ func heartbeatServer(stream msgStream, config *heartbeatConfig, maxMessageSize i
 func (c *hbConn) hbLoop() {
 	for {
 		if atomic.LoadUint32(&c.waiting) == 0 {
-			c.stream.Close()
+			c.Close()
 			return
 		}
 
 		atomic.StoreUint32(&c.waiting, 0)
-		time.Sleep(c.timeout)
+		timer := time.NewTimer(c.timeout)
+		select {
+		case <-c.closed:
+			timer.Stop()
+			return
+		case <-timer.C:
+			continue
+		}
 	}
 
 }
@@ -71,6 +85,12 @@ func (c *hbConn) recvLoop() {
 
 		if err != nil {
 			c.recvCh <- errBytes{nil, err}
+			switch {
+			case errors.Is(err, net.ErrClosed):
+			case errors.Is(err, io.EOF):
+				c.Close()
+				return
+			}
 		}
 
 		c.recvCh <- errBytes{buffer[:n], err}
@@ -79,6 +99,7 @@ func (c *hbConn) recvLoop() {
 }
 
 func (c *hbConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
 	return c.stream.Close()
 }
 
@@ -117,19 +138,44 @@ func (c *hbConn) OnBufferedAmountLow(f func()) {
 	c.stream.OnBufferedAmountLow(f)
 }
 
-// heartbeatClient sends heartbeats over conn with config
-func heartbeatClient(conn msgStream, config *heartbeatConfig) error {
-	conf := validate(config)
-	go func() {
-		for {
-			_, err := conn.Write(conf.Heartbeat)
-			if err != nil {
-				return
-			}
+type hbClient struct {
+	msgStream
+	conf heartbeatConfig
 
-			time.Sleep(conf.Interval / 2)
+	closeOnce sync.Once
+	closed    chan struct{}
+}
+
+// heartbeatClient sends heartbeats over conn with config
+func heartbeatClient(conn msgStream, config *heartbeatConfig) (msgStream, error) {
+	conf := validate(config)
+	client := &hbClient{msgStream: conn,
+		conf:   conf,
+		closed: make(chan struct{}),
+	}
+	go client.sendLoop()
+	return client, nil
+}
+
+func (c *hbClient) sendLoop() {
+	for {
+		_, err := c.Write(c.conf.Heartbeat)
+		if err != nil {
+			return
 		}
 
-	}()
-	return nil
+		timer := time.NewTimer(c.conf.Interval / 2)
+		select {
+		case <-c.closed:
+			timer.Stop()
+			return
+		case <-timer.C:
+			continue
+		}
+	}
+}
+
+func (c *hbClient) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return c.msgStream.Close()
 }

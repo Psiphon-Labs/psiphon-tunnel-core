@@ -288,7 +288,7 @@ func testMeekResiliency(t *testing.T, spec *transforms.HTTPTransformerParameters
 
 	var serverClientConn atomic.Value
 
-	clientHandler := func(_ string, conn net.Conn) {
+	clientHandler := func(conn net.Conn, _ *additionalTransportData) {
 		serverClientConn.Store(conn)
 		name := "server"
 		relayWaitGroup.Add(1)
@@ -583,7 +583,7 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider, missing
 		isFronted,
 		useObfuscatedSessionTickets,
 		useHTTPNormalizer,
-		func(_ string, conn net.Conn) {
+		func(conn net.Conn, _ *additionalTransportData) {
 			go func() {
 				for {
 					buffer := make([]byte, 1)

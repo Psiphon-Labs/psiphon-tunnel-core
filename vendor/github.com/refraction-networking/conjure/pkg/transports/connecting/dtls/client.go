@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -241,7 +240,8 @@ func (t *ClientTransport) WrapDial(dialer dialFunc) (dialFunc, error) {
 			return second.conn, nil
 		}
 
-		return nil, fmt.Errorf(strings.Join([]string{first.err.Error(), second.err.Error()}, "; "))
+		// TODO: once our minimum golang version is >= 1.20 change this to "%w; %w"
+		return nil, fmt.Errorf("%w; %s", first.err, second.err)
 	}
 
 	return dtlsDialer, nil

@@ -10,13 +10,7 @@ import (
 // InfDuration is a duration of infinite length
 const InfDuration = time.Duration(math.MaxInt64)
 
-func Max[T constraints.Ordered](a, b T) T {
-	if a < b {
-		return b
-	}
-	return a
-}
-
+// [Psiphon]
 func Min[T constraints.Ordered](a, b T) T {
 	if a < b {
 		return a
@@ -32,15 +26,7 @@ func MinNonZeroDuration(a, b time.Duration) time.Duration {
 	if b == 0 {
 		return a
 	}
-	return Min(a, b)
-}
-
-// AbsDuration returns the absolute value of a time duration
-func AbsDuration(d time.Duration) time.Duration {
-	if d >= 0 {
-		return d
-	}
-	return -d
+	return min(a, b)
 }
 
 // MinTime returns the earlier time
