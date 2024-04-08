@@ -1,3 +1,4 @@
+//go:build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
 // +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
 
 /*
@@ -29,7 +30,6 @@ func TestServerPacketManipulation(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			enableSSHAPIRequests: true,
 			doHotReload:          false,
 			doDefaultSponsorID:   false,
 			denyTrafficRules:     false,

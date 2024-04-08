@@ -1635,7 +1635,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// without this delay.
 	time.Sleep(100 * time.Millisecond)
 
-	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics
+	// For in-proxy tunnel protocols, client BPF tactics are currently ignored and not applied by the 2nd hop.
+	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics && !protocol.TunnelProtocolUsesInproxy(runConfig.tunnelProtocol)
 	expectServerBPFField := ServerBPFEnabled() && protocol.TunnelProtocolIsDirect(runConfig.tunnelProtocol) && doServerTactics
 	expectServerPacketManipulationField := runConfig.doPacketManipulation
 	expectBurstFields := runConfig.doBurstMonitor

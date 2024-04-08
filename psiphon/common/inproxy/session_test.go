@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/flynn/noise"
@@ -287,6 +288,12 @@ func runTestSessions() error {
 	clientCount := 10000
 	requestCount := 100
 	concurrentRequestCount := 5
+
+	if common.IsRaceDetectorEnabled {
+		// Workaround for very high memory usage and OOM that occurs only with
+		// the race detector enabled.
+		clientCount = 100
+	}
 
 	resultChan := make(chan error, clientCount)
 
