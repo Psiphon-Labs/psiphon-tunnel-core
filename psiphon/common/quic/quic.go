@@ -997,6 +997,9 @@ func (c *ietfQUICConnection) isErrorIndicatingClosed(err error) bool {
 		errStr == "timeout: no recent network activity"
 }
 
+// TODO: TLS handshake still completes even if 0-RTT is rejected.
+// By checking this error, we can start a new QUIC connection (EarlyConnection.NextConnection)
+// and resend any data already sent in the "early_data".
 func (c *ietfQUICConnection) isEarlyDataRejected(err error) bool {
 	if err == nil {
 		return false
