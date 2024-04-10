@@ -323,7 +323,13 @@ func NewMeekServer(
 // ReloadTactics signals components to reload tactics and reinitialize as
 // required when tactics may have changed.
 func (server *MeekServer) ReloadTactics() error {
-	return errors.Trace(server.inproxyReloadTactics())
+	if server.support.Config.MeekServerRunInproxyBroker {
+		err := server.inproxyReloadTactics()
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+	return nil
 }
 
 type meekContextKey struct {
