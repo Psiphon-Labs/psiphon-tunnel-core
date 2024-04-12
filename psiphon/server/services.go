@@ -126,12 +126,7 @@ func RunServices(configJSON []byte) (retErr error) {
 		support.PacketManipulator = packetManipulator
 	}
 
-	discovery, err := newDiscovery(support)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	support.discovery = discovery
+	support.discovery = makeDiscovery(support)
 
 	// After this point, errors should be delivered to the errors channel and
 	// orderly shutdown should flow through to the end of the function to ensure
@@ -162,6 +157,21 @@ func RunServices(configJSON []byte) (retErr error) {
 				support.PacketManipulator.Stop()
 			}()
 		}
+	}
+
+	err = support.discovery.Start()
+	if err != nil {
+		select {
+		case errorChannel <- err:
+		default:
+		}
+	} else {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			<-shutdownBroadcast
+			support.discovery.Stop()
+		}()
 	}
 
 	if config.RunLoadMonitor() {
@@ -486,6 +496,8 @@ func logIrregularTunnel(
 // components, which allows these data components to be refreshed
 // without restarting the server process.
 type SupportServices struct {
+	// TODO: make all fields non-exported, none are accessed outside
+	// of this package.
 	Config                       *Config
 	TrafficRulesSet              *TrafficRulesSet
 	OSLConfig                    *osl.Config

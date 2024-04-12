@@ -36,6 +36,7 @@ func (h hasher) Sum64(data []byte) uint64 {
 }
 
 type consistentHashingDiscovery struct {
+	clk    clock
 	config *consistent.Config
 	ring   *consistent.Consistent
 
@@ -43,7 +44,12 @@ type consistentHashingDiscovery struct {
 }
 
 func NewConsistentHashingDiscovery() (*consistentHashingDiscovery, error) {
+	return newConsistentHashingDiscovery(realClock{})
+}
+
+func newConsistentHashingDiscovery(clk clock) (*consistentHashingDiscovery, error) {
 	return &consistentHashingDiscovery{
+		clk: clk,
 		config: &consistent.Config{
 			PartitionCount:    0, // set in serversChanged
 			ReplicationFactor: 1, // ensure all servers are discoverable
@@ -68,8 +74,8 @@ func (c *consistentHashingDiscovery) serversChanged(newServers []*psinet.Discove
 		// Note: requires full reinitialization because we cannot change
 		// PartitionCount on the fly. Add/Remove do not update PartitionCount
 		// and updating ParitionCount is required to ensure that there is not
-		// a panic in the consistent package and that all servers are
-		// discoverable.
+		// a panic in the Psiphon-Labs/consistent package and that all servers
+		// are discoverable.
 		c.config.PartitionCount = len(newServers)
 
 		c.RWMutex.Lock()
@@ -88,12 +94,21 @@ func (c *consistentHashingDiscovery) selectServers(clientIP net.IP) []*psinet.Di
 		return nil
 	}
 
-	server := c.ring.LocateKey(clientIP)
-	if server == nil {
+	member := c.ring.LocateKey(clientIP)
+	if member == nil {
 		// Should never happen.
 		return nil
 	}
 
-	// TODO: consider checking that server is in its discover window
-	return []*psinet.DiscoveryServer{server.(*psinet.DiscoveryServer)}
+	server := member.(*psinet.DiscoveryServer)
+
+	discoveryDate := c.clk.Now()
+
+	// Double check that server is discoverable at this time.
+	if discoveryDate.Before(server.DiscoveryDateRange[0]) ||
+		!discoveryDate.Before(server.DiscoveryDateRange[1]) {
+		return nil
+	}
+
+	return []*psinet.DiscoveryServer{server}
 }

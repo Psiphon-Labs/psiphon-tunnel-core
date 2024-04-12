@@ -816,7 +816,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.doDestinationBytes,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
-			"consistent",
+			"classic",
 		)
 	}
 
@@ -902,6 +902,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		if logFields["event_name"] == nil {
+			if logFields["discovery_strategy"] != nil {
+				select {
+				case discoveryLog <- logFields:
+				default:
+				}
+			}
 			return
 		}
 
@@ -919,11 +925,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		case "server_tunnel":
 			select {
 			case serverTunnelLog <- logFields:
-			default:
-			}
-		case "discovery_strategy":
-			select {
-			case discoveryLog <- logFields:
 			default:
 			}
 		}
@@ -1040,7 +1041,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				runConfig.doDestinationBytes,
 				runConfig.applyPrefix,
 				runConfig.forceFragmenting,
-				"classic",
+				"consistent",
 			)
 		}
 
@@ -1430,7 +1431,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.doBurstMonitor,
 			false,
 			false, false,
-			"classic")
+			"consistent")
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -1641,33 +1642,33 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Check logs emitted by discovery.
 
-	var expectedDiscoveryLogs []string
+	var expectedDiscoveryStrategy []string
 
 	// Discovery emits 1 log on startup.
 	if doServerTactics {
-		expectedDiscoveryLogs = append(expectedDiscoveryLogs, "consistent")
+		expectedDiscoveryStrategy = append(expectedDiscoveryStrategy, "classic")
 	} else {
-		expectedDiscoveryLogs = append(expectedDiscoveryLogs, "classic")
+		expectedDiscoveryStrategy = append(expectedDiscoveryStrategy, "consistent")
 	}
 	if runConfig.doHotReload {
 		if doServerTactics {
 			// Discovery emits 1 log when tactics are reloaded, which happens
 			// before the psinet database is reloaded.
-			expectedDiscoveryLogs = append(expectedDiscoveryLogs, "consistent")
+			expectedDiscoveryStrategy = append(expectedDiscoveryStrategy, "classic")
 		}
 		// Discovery emits 1 when the psinet database is reloaded.
-		expectedDiscoveryLogs = append(expectedDiscoveryLogs, "classic")
+		expectedDiscoveryStrategy = append(expectedDiscoveryStrategy, "consistent")
 	}
 
-	for _, expectedLog := range expectedDiscoveryLogs {
+	for _, expectedStrategy := range expectedDiscoveryStrategy {
 		select {
 		case logFields := <-discoveryLog:
-			if v, ok := logFields["msg"].(string); ok {
-				if !strings.Contains(v, expectedLog) {
-					t.Fatalf("expected discovery log to contain \"%s\"", expectedLog)
+			if strategy, ok := logFields["discovery_strategy"].(string); ok {
+				if strategy != expectedStrategy {
+					t.Fatalf("expected discovery strategy \"%s\"", expectedStrategy)
 				}
 			} else {
-				t.Fatalf("missing msg field")
+				t.Fatalf("missing discovery_strategy field")
 			}
 		default:
 			t.Fatalf("missing discovery log")

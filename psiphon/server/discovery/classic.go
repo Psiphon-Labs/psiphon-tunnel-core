@@ -25,6 +25,7 @@ import (
 	"math"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 )
@@ -37,7 +38,11 @@ type classicDiscovery struct {
 	sync.RWMutex
 }
 
-func NewClassicDiscovery(discoveryValueHMACKey string, clk clock) (*classicDiscovery, error) {
+func NewClassicDiscovery(discoveryValueHMACKey string) (*classicDiscovery, error) {
+	return newClassicDiscovery(discoveryValueHMACKey, realClock{})
+}
+
+func newClassicDiscovery(discoveryValueHMACKey string, clk clock) (*classicDiscovery, error) {
 	return &classicDiscovery{
 		clk:                   clk,
 		discoveryValueHMACKey: discoveryValueHMACKey,
@@ -91,7 +96,7 @@ func (c *classicDiscovery) discoverServers(discoveryValue int) []*psinet.Discove
 	}
 
 	timeInSeconds := int(discoveryDate.Unix())
-	servers := selectServers(buckets, timeInSeconds, discoveryValue)
+	servers := selectServers(buckets, timeInSeconds, discoveryValue, discoveryDate)
 
 	return servers
 }
@@ -112,7 +117,10 @@ func (c *classicDiscovery) discoverServers(discoveryValue int) []*psinet.Discove
 // priority: if there are only a couple of servers, for example, IP address alone
 // determines the outcome.
 func selectServers(
-	buckets [][]*psinet.DiscoveryServer, timeInSeconds, discoveryValue int) []*psinet.DiscoveryServer {
+	buckets [][]*psinet.DiscoveryServer,
+	timeInSeconds,
+	discoveryValue int,
+	discoveryDate time.Time) []*psinet.DiscoveryServer {
 
 	TIME_GRANULARITY := 3600
 
@@ -131,9 +139,13 @@ func selectServers(
 	if len(bucket) == 0 {
 		return nil
 	}
-
-	// TODO: consider checking that server is in its discover window
 	server := bucket[timeStrategyValue%len(bucket)]
+
+	// Double check that server is discoverable at this time.
+	if discoveryDate.Before(server.DiscoveryDateRange[0]) ||
+		!discoveryDate.Before(server.DiscoveryDateRange[1]) {
+		return nil
+	}
 
 	serverList := make([]*psinet.DiscoveryServer, 1)
 	serverList[0] = server

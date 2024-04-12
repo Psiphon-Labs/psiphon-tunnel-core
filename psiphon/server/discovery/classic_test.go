@@ -60,7 +60,10 @@ func TestDiscoveryBuckets(t *testing.T) {
 
 	servers := make([]*psinet.DiscoveryServer, 0)
 	for i := 0; i < 105; i++ {
-		servers = append(servers, &psinet.DiscoveryServer{EncodedServerEntry: strconv.Itoa(i)})
+		servers = append(servers, &psinet.DiscoveryServer{
+			EncodedServerEntry: strconv.Itoa(i),
+			DiscoveryDateRange: []time.Time{time.Time{}, time.Now()},
+		})
 	}
 
 	t.Run("5 servers, 5 buckets", func(t *testing.T) {
@@ -113,7 +116,7 @@ func TestDiscoveryBuckets(t *testing.T) {
 
 			buckets := bucketizeServerList(servers, calculateBucketCount(len(servers)))
 
-			for _, server := range selectServers(buckets, i*int(time.Hour/time.Second), discoveryValue) {
+			for _, server := range selectServers(buckets, i*int(time.Hour/time.Second), discoveryValue, time.Time{}) {
 				discoveredServers[server.EncodedServerEntry] = true
 			}
 		}

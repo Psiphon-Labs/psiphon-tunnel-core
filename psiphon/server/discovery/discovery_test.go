@@ -20,7 +20,6 @@
 package discovery
 
 import (
-	"context"
 	"math/rand"
 	"net"
 	"sync"
@@ -145,13 +144,9 @@ func runDiscoveryTest(tt *discoveryTest, now time.Time) error {
 		return errors.Trace(err)
 	}
 
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	defer cancelFunc()
+	discovery := makeDiscovery(&clk, tt.servers, strategy)
 
-	discovery, err := NewDiscovery(ctx, &clk, tt.servers, strategy)
-	if err != nil {
-		return errors.Trace(err)
-	}
+	discovery.Start()
 
 	for _, check := range tt.checks {
 		time.Sleep(1 * time.Second) // let async code complete
@@ -183,6 +178,8 @@ func runDiscoveryTest(tt *discoveryTest, now time.Time) error {
 			return errors.Tracef("expected %d of %s to be discovered at %s but discovered servers are %s", expectedMatches, check.ips, check.t, discoveredIPs)
 		}
 	}
+
+	discovery.Stop()
 
 	return nil
 }
@@ -225,7 +222,7 @@ func TestDiscoveryTestClock(t *testing.T) {
 		{
 			name: "classic",
 			newDiscoveryStrategy: func(clk clock) (DiscoveryStrategy, error) {
-				return NewClassicDiscovery("discoveryValueHMACKey", clk)
+				return newClassicDiscovery("discoveryValueHMACKey", clk)
 			},
 			servers: []*psinet.DiscoveryServer{
 				server1,
@@ -266,7 +263,7 @@ func TestDiscoveryTestClock(t *testing.T) {
 		{
 			name: "consistent",
 			newDiscoveryStrategy: func(clk clock) (DiscoveryStrategy, error) {
-				return NewConsistentHashingDiscovery()
+				return newConsistentHashingDiscovery(clk)
 			},
 			servers: []*psinet.DiscoveryServer{
 				server1,

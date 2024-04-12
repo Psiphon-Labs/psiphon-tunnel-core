@@ -20,7 +20,6 @@
 package server
 
 import (
-	"context"
 	"net"
 	"sync"
 
@@ -40,23 +39,25 @@ type Discovery struct {
 	support         *SupportServices
 	currentStrategy string
 	discovery       *discovery.Discovery
-	cancelFunc      context.CancelFunc
 
 	sync.RWMutex
 }
 
-func newDiscovery(support *SupportServices) (*Discovery, error) {
-
-	d := &Discovery{
+func makeDiscovery(support *SupportServices) *Discovery {
+	return &Discovery{
 		support: support,
 	}
+}
+
+// Start starts discovery.
+func (d *Discovery) Start() error {
 
 	err := d.reload(false)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return errors.Trace(err)
 	}
 
-	return d, nil
+	return nil
 }
 
 // reload reinitializes the underlying discovery component. If reloadedTactics
@@ -64,7 +65,8 @@ func newDiscovery(support *SupportServices) (*Discovery, error) {
 // underlying discovery component is not reinitialized.
 func (d *Discovery) reload(reloadedTactics bool) error {
 
-	// Determine which discovery strategy to use
+	// Determine which discovery strategy to use. Assumes no GeoIP targeting
+	// for the ServerDiscoveryStrategy tactic.
 
 	p, err := d.support.ServerTacticsParametersCache.Get(NewGeoIPData())
 	if err != nil {
@@ -76,8 +78,8 @@ func (d *Discovery) reload(reloadedTactics bool) error {
 		strategy = p.String(parameters.ServerDiscoveryStrategy)
 	}
 	if strategy == "" {
-		// No tactics are configured; default to classic discovery.
-		strategy = DISCOVERY_STRATEGY_CLASSIC
+		// No tactics are configured; default to consistent discovery.
+		strategy = DISCOVERY_STRATEGY_CONSISTENT
 	}
 
 	// Do not reinitialize underlying discovery component if only tactics have
@@ -97,8 +99,7 @@ func (d *Discovery) reload(reloadedTactics bool) error {
 		}
 	} else if strategy == DISCOVERY_STRATEGY_CLASSIC {
 		discoveryStrategy, err = discovery.NewClassicDiscovery(
-			d.support.Config.DiscoveryValueHMACKey,
-			discovery.RealClock{})
+			d.support.Config.DiscoveryValueHMACKey)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -109,40 +110,40 @@ func (d *Discovery) reload(reloadedTactics bool) error {
 	// Initialize and set underlying discovery component. Replaces old
 	// component if discovery is already initialized.
 
-	ctx, cancelFunc := context.WithCancel(context.Background())
+	oldDiscovery := d.discovery
 
-	discovery, err := discovery.NewDiscovery(
-		ctx,
-		discovery.RealClock{},
+	discovery := discovery.MakeDiscovery(
 		d.support.PsinetDatabase.GetDiscoveryServers(),
 		discoveryStrategy)
-	if err != nil {
-		cancelFunc()
-		return errors.Trace(err)
-	}
+
+	discovery.Start()
 
 	d.Lock()
 
-	// Ensure resources used by previous underlying discovery component are
-	// cleaned up.
-	// Note: a more efficient impementation would not reinitialize the underlying
-	// discovery entirely if the discovery strategy has not changed, but
-	// instead would update the underlying set of discovery servers if the set
-	// of discovery servers has changed.
-	if d.cancelFunc != nil {
-		d.cancelFunc()
-	}
-
 	d.discovery = discovery
-	d.cancelFunc = cancelFunc
 	d.currentStrategy = strategy
 
 	d.Unlock()
 
+	// Ensure resources used by previous underlying discovery component are
+	// cleaned up.
+	// Note: a more efficient impementation would not recreate the underlying
+	// discovery instance if the discovery strategy has not changed, but
+	// instead would update the underlying set of discovery servers if the set
+	// of discovery servers has changed.
+	if oldDiscovery != nil {
+		oldDiscovery.Stop()
+	}
+
 	log.WithTraceFields(
-		LogFields{"event_name": "discovery_strategy"}).Infof("using %s discovery", strategy)
+		LogFields{"discovery_strategy": strategy}).Infof("reloaded discovery")
 
 	return nil
+}
+
+// Stop stops discovery and cleans up underlying resources.
+func (d *Discovery) Stop() {
+	d.discovery.Stop()
 }
 
 // DiscoverServers selects new encoded server entries to be "discovered" by

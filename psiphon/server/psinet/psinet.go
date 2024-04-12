@@ -40,9 +40,11 @@ const (
 	MAX_DATABASE_AGE_FOR_SERVER_ENTRY_VALIDITY = 48 * time.Hour
 )
 
-// Database serves Psiphon API data requests. It's safe for
-// concurrent usage. The Reload function supports hot reloading
-// of Psiphon network data while the server is running.
+// Database serves Psiphon API data requests. The Reload function supports hot
+// reloading of Psiphon network data while the server is running.
+//
+// All of the methods on Database are thread-safe, but callers must not mutate
+// any returned data. The struct may be safely shared across goroutines.
 type Database struct {
 	common.ReloadableFile
 
