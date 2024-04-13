@@ -1649,6 +1649,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		expectQUICVersion = limitQUICVersions[0]
 	}
 	expectDestinationBytesFields := runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig
+	expectMeekHTTPVersion := ""
+	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
+		if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
+			expectMeekHTTPVersion = "HTTP/2.0"
+		} else {
+			expectMeekHTTPVersion = "HTTP/1.1"
+		}
+	}
 
 	// The client still reports zero domain_bytes when no port forwards are
 	// allowed (expectTrafficFailure).
@@ -1672,6 +1680,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectQUICVersion,
 			expectDestinationBytesFields,
 			passthroughAddress,
+			expectMeekHTTPVersion,
 			inproxyTestConfig,
 			logFields)
 		if err != nil {
@@ -1840,6 +1849,7 @@ func checkExpectedServerTunnelLogFields(
 	expectQUICVersion string,
 	expectDestinationBytesFields bool,
 	expectPassthroughAddress *string,
+	expectMeekHTTPVersion string,
 	inproxyTestConfig *inproxyTestConfig,
 	fields map[string]interface{}) error {
 
@@ -2035,6 +2045,7 @@ func checkExpectedServerTunnelLogFields(
 			"meek_cookie_size",
 			"meek_limit_request",
 			"meek_underlying_connection_count",
+			"meek_server_http_version",
 			tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME,
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
@@ -2044,6 +2055,10 @@ func checkExpectedServerTunnelLogFields(
 
 		if !common.Contains(testUserAgents, fields["user_agent"].(string)) {
 			return fmt.Errorf("unexpected user_agent '%s'", fields["user_agent"])
+		}
+
+		if fields["meek_server_http_version"].(string) != expectMeekHTTPVersion {
+			return fmt.Errorf("unexpected meek_server_http_version '%s'", fields["meek_server_http_version"])
 		}
 	}
 

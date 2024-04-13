@@ -24,6 +24,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -40,7 +41,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	tls "github.com/Psiphon-Labs/psiphon-tls"
+	psiphon_tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
@@ -119,7 +120,8 @@ type MeekServer struct {
 	skipExtendedTurnAroundThreshold int
 	maxSessionStaleness             time.Duration
 	httpClientIOTimeout             time.Duration
-	tlsConfig                       *tls.Config
+	stdTLSConfig                    *tls.Config
+	psiphonTLSConfig                *psiphon_tls.Config
 	obfuscatorSeedHistory           *obfuscator.SeedHistory
 	clientHandler                   func(clientConn net.Conn, data *additionalTransportData)
 	openConns                       *common.Conns
@@ -248,12 +250,45 @@ func NewMeekServer(
 	}
 
 	if useTLS {
-		tlsConfig, err := meekServer.makeMeekTLSConfig(
-			isFronted, useObfuscatedSessionTickets)
-		if err != nil {
-			return nil, errors.Trace(err)
+
+		// For fronted meek servers, crypto/tls is used to ensure that
+		// net/http.Server.Serve will find *crypto/tls.Conn types, as
+		// required for enabling HTTP/2. The fronted case does not not
+		// support or require the TLS passthrough or obfuscated session
+		// ticket mechanisms, which are implemented in psiphon-tls. HTTP/2 is
+		// preferred for fronted meek servers in order to multiplex many
+		// concurrent requests, either from many tunnel clients or
+		// many/individual in-proxy broker clients, over a single network
+		// connection.
+		//
+		// For direct meek servers, psiphon-tls is used to provide the TLS
+		// passthrough or obfuscated session ticket obfuscation mechanisms.
+		// Direct meek servers do not enable HTTP/1.1 Each individual meek
+		// tunnel client will have its own network connection and each client
+		// has only a single in-flight meek request at a time.
+
+		if isFronted {
+
+			if useObfuscatedSessionTickets {
+				return nil, errors.TraceNew("obfuscated session tickets unsupported")
+			}
+			if meekServer.passthroughAddress != "" {
+				return nil, errors.TraceNew("passthrough unsupported")
+			}
+			tlsConfig, err := meekServer.makeFrontedMeekTLSConfig()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			meekServer.stdTLSConfig = tlsConfig
+		} else {
+
+			tlsConfig, err := meekServer.makeDirectMeekTLSConfig(
+				useObfuscatedSessionTickets)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			meekServer.psiphonTLSConfig = tlsConfig
 		}
-		meekServer.tlsConfig = tlsConfig
 	}
 
 	if useHTTPNormalizer && protocol.TunnelProtocolUsesMeekHTTPNormalizer(listenerTunnelProtocol) {
@@ -404,14 +439,17 @@ func (server *MeekServer) Run() error {
 		},
 	}
 
-	// Note: Serve() will be interrupted by listener.Close() call
-	var err error
-	if server.tlsConfig != nil {
-		httpsServer := HTTPSServer{Server: httpServer}
-		err = httpsServer.ServeTLS(server.listener, server.tlsConfig)
-	} else {
-		err = httpServer.Serve(server.listener)
+	// Note: Serve() will be interrupted by server.listener.Close() call
+	listener := server.listener
+	if server.stdTLSConfig != nil {
+		listener = tls.NewListener(server.listener, server.stdTLSConfig)
+	} else if server.psiphonTLSConfig != nil {
+		listener = psiphon_tls.NewListener(server.listener, server.psiphonTLSConfig)
+
+		// Disable auto HTTP/2
+		httpServer.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 	}
+	err := httpServer.Serve(listener)
 
 	// Can't check for the exact error that Close() will cause in Accept(),
 	// (see: https://code.google.com/p/go/issues/detail?id=4373). So using an
@@ -462,6 +500,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 					"header": header,
 					"value":  requestValue,
 				}).Warning("invalid required meek header")
+
 				common.TerminateHTTPConnection(responseWriter, request)
 				return
 			}
@@ -1094,12 +1133,17 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 	cachedResponse := NewCachedResponse(bufferLength, server.bufferPool)
 
+	// The cookie name, Content-Type, and HTTP version of the first request in
+	// the session are recorded for stats. It's possible, but not expected,
+	// that later requests will have different values.
+
 	session := &meekSession{
 		meekProtocolVersion: clientSessionData.MeekProtocolVersion,
 		sessionIDSent:       false,
 		cachedResponse:      cachedResponse,
 		cookieName:          meekCookie.Name,
 		contentType:         request.Header.Get("Content-Type"),
+		httpVersion:         request.Proto,
 	}
 
 	session.touch()
@@ -1412,12 +1456,7 @@ func (server *MeekServer) getMeekCookiePayload(
 	return payload, nil
 }
 
-// makeMeekTLSConfig creates a TLS config for a meek HTTPS listener.
-// Currently, this config is optimized for fronted meek where the nature
-// of the connection is non-circumvention; it's optimized for performance
-// assuming the peer is an uncensored CDN.
-func (server *MeekServer) makeMeekTLSConfig(
-	isFronted bool, useObfuscatedSessionTickets bool) (*tls.Config, error) {
+func (server *MeekServer) getWebServerCertificate() ([]byte, []byte, error) {
 
 	var certificate, privateKey string
 
@@ -1429,8 +1468,20 @@ func (server *MeekServer) makeMeekTLSConfig(
 		var err error
 		certificate, privateKey, _, err = common.GenerateWebServerCertificate(values.GetHostName())
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, nil, errors.Trace(err)
 		}
+	}
+
+	return []byte(certificate), []byte(privateKey), nil
+}
+
+// makeFrontedMeekTLSConfig creates a TLS config for a fronted meek HTTPS
+// listener.
+func (server *MeekServer) makeFrontedMeekTLSConfig() (*tls.Config, error) {
+
+	certificate, privateKey, err := server.getWebServerCertificate()
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	tlsCertificate, err := tls.X509KeyPair(
@@ -1444,38 +1495,71 @@ func (server *MeekServer) makeMeekTLSConfig(
 	minVersionCandidates := []uint16{tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12}
 	minVersion := minVersionCandidates[prng.Intn(len(minVersionCandidates))]
 
-	config := &tls.Config{
-		Certificates: []tls.Certificate{tlsCertificate},
-		NextProtos:   []string{"http/1.1"},
-		MinVersion:   minVersion,
+	// This is a reordering of the supported CipherSuites in golang 1.6[*]. Non-ephemeral key
+	// CipherSuites greatly reduce server load, and we try to select these since the meek
+	// protocol is providing obfuscation, not privacy/integrity (this is provided by the
+	// tunneled SSH), so we don't benefit from the perfect forward secrecy property provided
+	// by ephemeral key CipherSuites.
+	// https://github.com/golang/go/blob/1cb3044c9fcd88e1557eca1bf35845a4108bc1db/src/crypto/tls/cipher_suites.go#L75
+	//
+	// This optimization is applied only when there's a CDN in front of the meek server; in
+	// unfronted cases we prefer a more natural TLS handshake.
+	//
+	// [*] the list has since been updated, removing CipherSuites using RC4 and 3DES.
+	cipherSuites := []uint16{
+		tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+		tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+		tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+		tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+		tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+		tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
 	}
 
-	if isFronted {
-		// This is a reordering of the supported CipherSuites in golang 1.6[*]. Non-ephemeral key
-		// CipherSuites greatly reduce server load, and we try to select these since the meek
-		// protocol is providing obfuscation, not privacy/integrity (this is provided by the
-		// tunneled SSH), so we don't benefit from the perfect forward secrecy property provided
-		// by ephemeral key CipherSuites.
-		// https://github.com/golang/go/blob/1cb3044c9fcd88e1557eca1bf35845a4108bc1db/src/crypto/tls/cipher_suites.go#L75
-		//
-		// This optimization is applied only when there's a CDN in front of the meek server; in
-		// unfronted cases we prefer a more natural TLS handshake.
-		//
-		// [*] the list has since been updated, removing CipherSuites using RC4 and 3DES.
-		config.CipherSuites = []uint16{
-			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-		}
+	config := &tls.Config{
+		Certificates: []tls.Certificate{tlsCertificate},
+		// Offer and prefer "h2" for HTTP/2 support.
+		NextProtos:   []string{"h2", "http/1.1"},
+		MinVersion:   minVersion,
+		CipherSuites: cipherSuites,
+	}
+
+	return config, nil
+}
+
+// makeDirectMeekTLSConfig creates a TLS config for a direct meek HTTPS
+// listener.
+func (server *MeekServer) makeDirectMeekTLSConfig(
+	useObfuscatedSessionTickets bool) (*psiphon_tls.Config, error) {
+
+	certificate, privateKey, err := server.getWebServerCertificate()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	tlsCertificate, err := psiphon_tls.X509KeyPair(
+		[]byte(certificate), []byte(privateKey))
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Vary the minimum version to frustrate scanning/fingerprinting of unfronted servers.
+	// Limitation: like the certificate, this value changes on restart.
+	minVersionCandidates := []uint16{tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12}
+	minVersion := minVersionCandidates[prng.Intn(len(minVersionCandidates))]
+
+	config := &psiphon_tls.Config{
+		Certificates: []psiphon_tls.Certificate{tlsCertificate},
+		// Omit "h2", so HTTP/2 is not negotiated. Note that the
+		// negotiated-ALPN extension in the ServerHello is plaintext, even in
+		// TLS 1.3.
+		NextProtos: []string{"http/1.1"},
+		MinVersion: minVersion,
 	}
 
 	if useObfuscatedSessionTickets {
@@ -1820,9 +1904,14 @@ func (server *MeekServer) inproxyBrokerHandler(
 	// many clients, it is expected that CDNs will perform an HTTP/3 request
 	// cancellation in this scenario.
 
+	transportLogFields := common.LogFields{
+		"meek_server_http_version": r.Proto,
+	}
+
 	packet, err = server.inproxyBroker.HandleSessionPacket(
 		r.Context(),
 		extendTimeout,
+		transportLogFields,
 		clientIP,
 		geoIPData,
 		packet)
@@ -1860,6 +1949,7 @@ type meekSession struct {
 	cachedResponse                   *CachedResponse
 	cookieName                       string
 	contentType                      string
+	httpVersion                      string
 }
 
 func (session *meekSession) touch() {
@@ -1930,6 +2020,7 @@ func (session *meekSession) GetMetrics() common.LogFields {
 	logFields["meek_underlying_connection_count"] = atomic.LoadInt64(&session.metricUnderlyingConnCount)
 	logFields["meek_cookie_name"] = session.cookieName
 	logFields["meek_content_type"] = session.contentType
+	logFields["meek_server_http_version"] = session.httpVersion
 	return logFields
 }
 

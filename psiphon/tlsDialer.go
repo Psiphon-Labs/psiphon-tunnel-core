@@ -723,10 +723,12 @@ func verifyCertificatePins(pins []string, verifiedChains [][]*x509.Certificate) 
 }
 
 func IsTLSConnUsingHTTP2(conn net.Conn) bool {
-	if c, ok := conn.(*utls.UConn); ok {
-		state := c.ConnectionState()
-		return state.NegotiatedProtocolIsMutual &&
-			state.NegotiatedProtocol == "h2"
+	if t, ok := conn.(*tlsConn); ok {
+		if u, ok := t.Conn.(*utls.UConn); ok {
+			state := u.ConnectionState()
+			return state.NegotiatedProtocolIsMutual &&
+				state.NegotiatedProtocol == "h2"
+		}
 	}
 	return false
 }

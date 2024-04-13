@@ -143,7 +143,9 @@ func (s *ServerBrokerSessions) HandlePacket(
 		logFields["inproxy_client_nat_type"] = brokerReport.ClientNATType
 		logFields["inproxy_client_port_mapping_types"] = brokerReport.ClientPortMappingTypes
 
-		// TODO: log IPv4 vs. IPv6 information.
+		// TODO:
+		// - log IPv4 vs. IPv6 information
+		// - relay and log broker transport stats, such as meek HTTP version
 
 		ok := true
 

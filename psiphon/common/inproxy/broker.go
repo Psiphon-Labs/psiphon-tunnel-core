@@ -321,6 +321,7 @@ func (b *Broker) SetLimits(
 func (b *Broker) HandleSessionPacket(
 	ctx context.Context,
 	extendTransportTimeout ExtendTransportTimeout,
+	transportLogFields common.LogFields,
 	brokerClientIP string,
 	geoIPData common.GeoIPData,
 	inPacket []byte) ([]byte, error) {
@@ -339,25 +340,48 @@ func (b *Broker) HandleSessionPacket(
 		switch recordType {
 		case recordTypeAPIProxyAnnounceRequest:
 			responsePayload, err = b.handleProxyAnnounce(
-				ctx, extendTransportTimeout, brokerClientIP, geoIPData, initiatorID, unwrappedRequestPayload)
+				ctx,
+				extendTransportTimeout,
+				transportLogFields,
+				brokerClientIP,
+				geoIPData,
+				initiatorID,
+				unwrappedRequestPayload)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 		case recordTypeAPIProxyAnswerRequest:
 			responsePayload, err = b.handleProxyAnswer(
-				ctx, extendTransportTimeout, brokerClientIP, geoIPData, initiatorID, unwrappedRequestPayload)
+				ctx,
+				extendTransportTimeout,
+				transportLogFields,
+				brokerClientIP,
+				geoIPData,
+				initiatorID,
+				unwrappedRequestPayload)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 		case recordTypeAPIClientOfferRequest:
 			responsePayload, err = b.handleClientOffer(
-				ctx, extendTransportTimeout, brokerClientIP, geoIPData, initiatorID, unwrappedRequestPayload)
+				ctx,
+				extendTransportTimeout,
+				transportLogFields,
+				brokerClientIP,
+				geoIPData,
+				initiatorID,
+				unwrappedRequestPayload)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
 		case recordTypeAPIClientRelayedPacketRequest:
 			responsePayload, err = b.handleClientRelayedPacket(
-				ctx, extendTransportTimeout, geoIPData, initiatorID, unwrappedRequestPayload)
+				ctx,
+				extendTransportTimeout,
+				transportLogFields,
+				geoIPData,
+				initiatorID,
+				unwrappedRequestPayload)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -392,6 +416,7 @@ func (b *Broker) HandleSessionPacket(
 func (b *Broker) handleProxyAnnounce(
 	ctx context.Context,
 	extendTransportTimeout ExtendTransportTimeout,
+	transportLogFields common.LogFields,
 	proxyIP string,
 	geoIPData common.GeoIPData,
 	initiatorID ID,
@@ -459,6 +484,7 @@ func (b *Broker) handleProxyAnnounce(
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
 		}
+		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
 	}()
 
@@ -620,6 +646,7 @@ func (b *Broker) handleProxyAnnounce(
 func (b *Broker) handleClientOffer(
 	ctx context.Context,
 	extendTransportTimeout ExtendTransportTimeout,
+	transportLogFields common.LogFields,
 	clientIP string,
 	geoIPData common.GeoIPData,
 	initiatorID ID,
@@ -677,7 +704,7 @@ func (b *Broker) handleClientOffer(
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
 		}
-
+		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
 	}()
 
@@ -861,6 +888,7 @@ func (b *Broker) handleClientOffer(
 func (b *Broker) handleProxyAnswer(
 	ctx context.Context,
 	extendTransportTimeout ExtendTransportTimeout,
+	transportLogFields common.LogFields,
 	proxyIP string,
 	geoIPData common.GeoIPData,
 	initiatorID ID,
@@ -894,6 +922,7 @@ func (b *Broker) handleProxyAnswer(
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
 		}
+		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
 	}()
 
@@ -965,6 +994,7 @@ func (b *Broker) handleProxyAnswer(
 func (b *Broker) handleClientRelayedPacket(
 	ctx context.Context,
 	extendTransportTimeout ExtendTransportTimeout,
+	transportLogFields common.LogFields,
 	geoIPData common.GeoIPData,
 	initiatorID ID,
 	requestPayload []byte) (retResponse []byte, retErr error) {
@@ -991,6 +1021,7 @@ func (b *Broker) handleClientRelayedPacket(
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
 		}
+		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
 	}()
 

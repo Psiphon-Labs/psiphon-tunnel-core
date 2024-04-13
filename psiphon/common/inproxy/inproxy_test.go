@@ -792,6 +792,7 @@ func runHTTPServer(listener net.Listener, broker *Broker) error {
 		responsePayload, err := broker.HandleSessionPacket(
 			r.Context(),
 			extendTimeout,
+			nil,
 			clientIP,
 			geoIPData,
 			requestPayload)

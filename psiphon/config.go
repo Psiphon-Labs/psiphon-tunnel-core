@@ -631,7 +631,7 @@ type Config struct {
 	// ephemeral key will be generated.
 	InproxyProxySessionPrivateKey string
 
-	// InproxyMaxClients specifies the maximum number of in-rpxoy clients to
+	// InproxyMaxClients specifies the maximum number of in-proxy clients to
 	// be proxied concurrently.
 	InproxyMaxClients int
 
