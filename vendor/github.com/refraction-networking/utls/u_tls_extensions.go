@@ -11,7 +11,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/gaukas/godicttls"
+	"github.com/refraction-networking/utls/dicttls"
 	"golang.org/x/crypto/cryptobyte"
 )
 
@@ -37,18 +37,20 @@ func ExtensionFromID(id uint16) TLSExtension {
 		return &SCTExtension{}
 	case utlsExtensionPadding:
 		return &UtlsPaddingExtension{}
-	case utlsExtensionExtendedMasterSecret:
-		return &UtlsExtendedMasterSecretExtension{}
+	case extensionExtendedMasterSecret:
+		return &ExtendedMasterSecretExtension{}
 	case fakeExtensionTokenBinding:
 		return &FakeTokenBindingExtension{}
 	case utlsExtensionCompressCertificate:
 		return &UtlsCompressCertExtension{}
+	case fakeRecordSizeLimit:
+		return &FakeRecordSizeLimitExtension{}
 	case fakeExtensionDelegatedCredentials:
 		return &FakeDelegatedCredentialsExtension{}
 	case extensionSessionTicket:
 		return &SessionTicketExtension{}
-	case fakeExtensionPreSharedKey:
-		return &FakePreSharedKeyExtension{}
+	case extensionPreSharedKey:
+		return (PreSharedKeyExtension)(&FakePreSharedKeyExtension{}) // To use the result, caller needs further inspection to decide between Fake or Utls.
 	// case extensionEarlyData:
 	// 	return &EarlyDataExtension{}
 	case extensionSupportedVersions:
@@ -63,6 +65,8 @@ func ExtensionFromID(id uint16) TLSExtension {
 		return &SignatureAlgorithmsCertExtension{}
 	case extensionKeyShare:
 		return &KeyShareExtension{}
+	case extensionQUICTransportParameters:
+		return &QUICTransportParametersExtension{}
 	case extensionNextProtoNeg:
 		return &NPNExtension{}
 	case utlsExtensionApplicationSettings:
@@ -71,8 +75,8 @@ func ExtensionFromID(id uint16) TLSExtension {
 		return &FakeChannelIDExtension{true}
 	case fakeExtensionChannelID:
 		return &FakeChannelIDExtension{}
-	case fakeRecordSizeLimit:
-		return &FakeRecordSizeLimitExtension{}
+	case utlsExtensionECH:
+		return &GREASEEncryptedClientHelloExtension{}
 	case extensionRenegotiationInfo:
 		return &RenegotiationInfoExtension{}
 	default:
@@ -98,8 +102,11 @@ type TLSExtension interface {
 type TLSExtensionWriter interface {
 	TLSExtension
 
-	// Write writes up to len(b) bytes from b.
+	// Write writes the extension data as a byte slice, up to len(b) bytes from b.
 	// It returns the number of bytes written (0 <= n <= len(b)) and any error encountered.
+	//
+	// The implementation MUST NOT silently drop data if consumed less than len(b) bytes,
+	// instead, it MUST return an error.
 	Write(b []byte) (n int, err error)
 }
 
@@ -289,7 +296,7 @@ func (e *SupportedCurvesExtension) UnmarshalJSON(data []byte) error {
 			continue
 		}
 
-		if group, ok := godicttls.DictSupportedGroupsNameIndexed[namedGroup]; ok {
+		if group, ok := dicttls.DictSupportedGroupsNameIndexed[namedGroup]; ok {
 			e.Curves = append(e.Curves, CurveID(group))
 		} else {
 			return fmt.Errorf("unknown named group: %s", namedGroup)
@@ -358,7 +365,7 @@ func (e *SupportedPointsExtension) UnmarshalJSON(data []byte) error {
 	}
 
 	for _, pointFormat := range pointFormatList.ECPointFormatList {
-		if format, ok := godicttls.DictECPointFormatNameIndexed[pointFormat]; ok {
+		if format, ok := dicttls.DictECPointFormatNameIndexed[pointFormat]; ok {
 			e.SupportedPoints = append(e.SupportedPoints, format)
 		} else {
 			return fmt.Errorf("unknown point format: %s", pointFormat)
@@ -426,7 +433,7 @@ func (e *SignatureAlgorithmsExtension) UnmarshalJSON(data []byte) error {
 			continue
 		}
 
-		if scheme, ok := godicttls.DictSignatureSchemeNameIndexed[sigScheme]; ok {
+		if scheme, ok := dicttls.DictSignatureSchemeNameIndexed[sigScheme]; ok {
 			e.SupportedSignatureAlgorithms = append(e.SupportedSignatureAlgorithms, SignatureScheme(scheme))
 		} else {
 			return fmt.Errorf("unknown signature scheme: %s", sigScheme)
@@ -499,11 +506,7 @@ func (e *StatusRequestV2Extension) Write(b []byte) (int, error) {
 	// RFC 4366, Section 3.6
 	var statusType uint8
 	var ignored cryptobyte.String
-	if !extData.ReadUint16LengthPrefixed(&ignored) ||
-		!extData.ReadUint8(&statusType) ||
-		!extData.ReadUint16LengthPrefixed(&ignored) ||
-		!extData.ReadUint16LengthPrefixed(&ignored) ||
-		!extData.ReadUint16LengthPrefixed(&ignored) {
+	if !extData.ReadUint16LengthPrefixed(&ignored) || !ignored.ReadUint8(&statusType) {
 		return fullLen, errors.New("unable to read status request v2 extension data")
 	}
 
@@ -560,7 +563,7 @@ func (e *SignatureAlgorithmsCertExtension) UnmarshalJSON(data []byte) error {
 			continue
 		}
 
-		if scheme, ok := godicttls.DictSignatureSchemeNameIndexed[sigScheme]; ok {
+		if scheme, ok := dicttls.DictSignatureSchemeNameIndexed[sigScheme]; ok {
 			e.SupportedSignatureAlgorithms = append(e.SupportedSignatureAlgorithms, SignatureScheme(scheme))
 		} else {
 			return fmt.Errorf("unknown cert signature scheme: %s", sigScheme)
@@ -795,52 +798,6 @@ func (e *SCTExtension) Write(_ []byte) (int, error) {
 	return 0, nil
 }
 
-// SessionTicketExtension implements session_ticket (35)
-type SessionTicketExtension struct {
-	Session *ClientSessionState
-}
-
-func (e *SessionTicketExtension) writeToUConn(uc *UConn) error {
-	if e.Session != nil {
-		uc.HandshakeState.Session = e.Session
-		uc.HandshakeState.Hello.SessionTicket = e.Session.sessionTicket
-	}
-	return nil
-}
-
-func (e *SessionTicketExtension) Len() int {
-	if e.Session != nil {
-		return 4 + len(e.Session.sessionTicket)
-	}
-	return 4
-}
-
-func (e *SessionTicketExtension) Read(b []byte) (int, error) {
-	if len(b) < e.Len() {
-		return 0, io.ErrShortBuffer
-	}
-
-	extBodyLen := e.Len() - 4
-
-	b[0] = byte(extensionSessionTicket >> 8)
-	b[1] = byte(extensionSessionTicket)
-	b[2] = byte(extBodyLen >> 8)
-	b[3] = byte(extBodyLen)
-	if extBodyLen > 0 {
-		copy(b[4:], e.Session.sessionTicket)
-	}
-	return e.Len(), io.EOF
-}
-
-func (e *SessionTicketExtension) UnmarshalJSON(_ []byte) error {
-	return nil // no-op
-}
-
-func (e *SessionTicketExtension) Write(_ []byte) (int, error) {
-	// RFC 5077, Section 3.2
-	return 0, nil
-}
-
 // GenericExtension allows to include in ClientHello arbitrary unsupported extensions.
 // It is not defined in TLS RFCs nor by IANA.
 // If a server echoes this extension back, the handshake will likely fail due to no further support.
@@ -882,7 +839,7 @@ func (e *GenericExtension) UnmarshalJSON(b []byte) error {
 	}
 
 	// lookup extension ID by name
-	if id, ok := godicttls.DictExtTypeNameIndexed[genericExtension.Name]; ok {
+	if id, ok := dicttls.DictExtTypeNameIndexed[genericExtension.Name]; ok {
 		e.Id = id
 	} else {
 		return fmt.Errorf("unknown extension name %s", genericExtension.Name)
@@ -891,42 +848,45 @@ func (e *GenericExtension) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// UtlsExtendedMasterSecretExtension implements extended_master_secret (23)
-type UtlsExtendedMasterSecretExtension struct {
+// ExtendedMasterSecretExtension implements extended_master_secret (23)
+//
+// Was named as ExtendedMasterSecretExtension, renamed due to crypto/tls
+// implemented this extension's support.
+type ExtendedMasterSecretExtension struct {
 }
 
 // TODO: update when this extension is implemented in crypto/tls
 // but we probably won't have to enable it in Config
-func (e *UtlsExtendedMasterSecretExtension) writeToUConn(uc *UConn) error {
+func (e *ExtendedMasterSecretExtension) writeToUConn(uc *UConn) error {
 	uc.HandshakeState.Hello.Ems = true
 	return nil
 }
 
-func (e *UtlsExtendedMasterSecretExtension) Len() int {
+func (e *ExtendedMasterSecretExtension) Len() int {
 	return 4
 }
 
-func (e *UtlsExtendedMasterSecretExtension) Read(b []byte) (int, error) {
+func (e *ExtendedMasterSecretExtension) Read(b []byte) (int, error) {
 	if len(b) < e.Len() {
 		return 0, io.ErrShortBuffer
 	}
 	// https://tools.ietf.org/html/rfc7627
-	b[0] = byte(utlsExtensionExtendedMasterSecret >> 8)
-	b[1] = byte(utlsExtensionExtendedMasterSecret)
+	b[0] = byte(extensionExtendedMasterSecret >> 8)
+	b[1] = byte(extensionExtendedMasterSecret)
 	// The length is 0
 	return e.Len(), io.EOF
 }
 
-func (e *UtlsExtendedMasterSecretExtension) UnmarshalJSON(_ []byte) error {
+func (e *ExtendedMasterSecretExtension) UnmarshalJSON(_ []byte) error {
 	return nil // no-op
 }
 
-func (e *UtlsExtendedMasterSecretExtension) Write(_ []byte) (int, error) {
+func (e *ExtendedMasterSecretExtension) Write(_ []byte) (int, error) {
 	// https://tools.ietf.org/html/rfc7627
 	return 0, nil
 }
 
-var extendedMasterSecretLabel = []byte("extended master secret")
+// var extendedMasterSecretLabel = []byte("extended master secret")
 
 // extendedMasterFromPreMasterSecret generates the master secret from the pre-master
 // secret and session hash. See https://tools.ietf.org/html/rfc7627#section-4
@@ -1104,6 +1064,23 @@ func BoringPaddingStyle(unpaddedLen int) (int, bool) {
 	return 0, false
 }
 
+// AlwaysPadToLen could be used for parsed ClientHello, since some fingerprints
+// might not use BoringSSL padding style and we want to pad to a the same length.
+func AlwaysPadToLen(padToLen int) func(int) (int, bool) {
+	return func(unpaddedLen int) (int, bool) {
+		if unpaddedLen < padToLen {
+			paddingLen := padToLen - unpaddedLen
+			if paddingLen >= 4+1 {
+				paddingLen -= 4
+			} else {
+				paddingLen = 1
+			}
+			return paddingLen, true
+		}
+		return 0, false
+	}
+}
+
 // UtlsCompressCertExtension implements compress_certificate (27) and is only implemented client-side
 // for server certificates. Alternate certificate message formats
 // (https://datatracker.ietf.org/doc/html/rfc7250) are not supported.
@@ -1179,7 +1156,7 @@ func (e *UtlsCompressCertExtension) UnmarshalJSON(b []byte) error {
 	}
 
 	for _, algorithm := range certificateCompressionAlgorithms.Algorithms {
-		if alg, ok := godicttls.DictCertificateCompressionAlgorithmNameIndexed[algorithm]; ok {
+		if alg, ok := dicttls.DictCertificateCompressionAlgorithmNameIndexed[algorithm]; ok {
 			e.Algorithms = append(e.Algorithms, CertCompressionAlgo(alg))
 		} else {
 			return fmt.Errorf("unknown certificate compression algorithm %s", algorithm)
@@ -1285,7 +1262,7 @@ func (e *KeyShareExtension) UnmarshalJSON(b []byte) error {
 			continue
 		}
 
-		if groupID, ok := godicttls.DictSupportedGroupsNameIndexed[clientShare.Group]; ok {
+		if groupID, ok := dicttls.DictSupportedGroupsNameIndexed[clientShare.Group]; ok {
 			ks := KeyShare{
 				Group: CurveID(groupID),
 				Data:  clientShare.KeyExchange,
@@ -1295,6 +1272,44 @@ func (e *KeyShareExtension) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("unknown group %s", clientShare.Group)
 		}
 	}
+	return nil
+}
+
+// QUICTransportParametersExtension implements quic_transport_parameters (57).
+//
+// Currently, it works as a fake extension and does not support parsing, since
+// the QUICConn provided by this package does not really understand these
+// parameters.
+type QUICTransportParametersExtension struct {
+	TransportParameters TransportParameters
+
+	marshalResult []byte // TransportParameters will be marshaled into this slice
+}
+
+func (e *QUICTransportParametersExtension) Len() int {
+	if e.marshalResult == nil {
+		e.marshalResult = e.TransportParameters.Marshal()
+	}
+	return 4 + len(e.marshalResult)
+}
+
+func (e *QUICTransportParametersExtension) Read(b []byte) (int, error) {
+	if len(b) < e.Len() {
+		return 0, io.ErrShortBuffer
+	}
+
+	b[0] = byte(extensionQUICTransportParameters >> 8)
+	b[1] = byte(extensionQUICTransportParameters)
+	// e.Len() is called before so that e.marshalResult is set
+	b[2] = byte((len(e.marshalResult)) >> 8)
+	b[3] = byte(len(e.marshalResult))
+	copy(b[4:], e.marshalResult)
+
+	return e.Len(), io.EOF
+}
+
+func (e *QUICTransportParametersExtension) writeToUConn(*UConn) error {
+	// no need to set *UConn.quic.transportParams, since it is unused
 	return nil
 }
 
@@ -1361,7 +1376,7 @@ func (e *PSKKeyExchangeModesExtension) UnmarshalJSON(b []byte) error {
 	}
 
 	for _, mode := range pskKeyExchangeModes.Modes {
-		if modeID, ok := godicttls.DictPSKKeyExchangeModeNameIndexed[mode]; ok {
+		if modeID, ok := dicttls.DictPSKKeyExchangeModeNameIndexed[mode]; ok {
 			e.Modes = append(e.Modes, modeID)
 		} else {
 			return fmt.Errorf("unknown PSK Key Exchange Mode %s", mode)
@@ -1548,11 +1563,11 @@ type RenegotiationInfoExtension struct {
 	// If this is the initial handshake for a connection, then the
 	// "renegotiated_connection" field is of zero length in both the
 	// ClientHello and the ServerHello.
-	// RenegotiatedConnection []byte
+	RenegotiatedConnection []byte
 }
 
 func (e *RenegotiationInfoExtension) Len() int {
-	return 5 // + len(e.RenegotiatedConnection)
+	return 5 + len(e.RenegotiatedConnection)
 }
 
 func (e *RenegotiationInfoExtension) Read(b []byte) (int, error) {
@@ -1560,15 +1575,15 @@ func (e *RenegotiationInfoExtension) Read(b []byte) (int, error) {
 		return 0, io.ErrShortBuffer
 	}
 
-	// dataLen := len(e.RenegotiatedConnection)
-	extBodyLen := 1 // + len(dataLen)
+	dataLen := len(e.RenegotiatedConnection)
+	extBodyLen := 1 + dataLen
 
 	b[0] = byte(extensionRenegotiationInfo >> 8)
 	b[1] = byte(extensionRenegotiationInfo & 0xff)
 	b[2] = byte(extBodyLen >> 8)
 	b[3] = byte(extBodyLen)
-	// b[4] = byte(dataLen)
-	// copy(b[5:], e.RenegotiatedConnection)
+	b[4] = byte(dataLen)
+	copy(b[5:], e.RenegotiatedConnection)
 
 	return e.Len(), io.EOF
 }
@@ -1578,7 +1593,7 @@ func (e *RenegotiationInfoExtension) UnmarshalJSON(_ []byte) error {
 	return nil
 }
 
-func (e *RenegotiationInfoExtension) Write(_ []byte) (int, error) {
+func (e *RenegotiationInfoExtension) Write(b []byte) (int, error) {
 	e.Renegotiation = RenegotiateOnceAsClient // none empty or other modes are unsupported
 	// extData := cryptobyte.String(b)
 	// var renegotiatedConnection cryptobyte.String
@@ -1587,7 +1602,10 @@ func (e *RenegotiationInfoExtension) Write(_ []byte) (int, error) {
 	// }
 	// e.RenegotiatedConnection = make([]byte, len(renegotiatedConnection))
 	// copy(e.RenegotiatedConnection, renegotiatedConnection)
-	return 0, nil
+
+	// we don't really want to parse it at all.
+
+	return len(b), nil
 }
 
 func (e *RenegotiationInfoExtension) writeToUConn(uc *UConn) error {
@@ -1597,6 +1615,10 @@ func (e *RenegotiationInfoExtension) writeToUConn(uc *UConn) error {
 		fallthrough
 	case RenegotiateFreelyAsClient:
 		uc.HandshakeState.Hello.SecureRenegotiationSupported = true
+		// TODO: don't do backward propagation here
+		if uc.handshakes > 0 {
+			e.RenegotiatedConnection = uc.clientFinished[:]
+		}
 	case RenegotiateNever:
 	default:
 	}
@@ -1839,183 +1861,11 @@ func (e *FakeDelegatedCredentialsExtension) UnmarshalJSON(data []byte) error {
 			continue
 		}
 
-		if scheme, ok := godicttls.DictSignatureSchemeNameIndexed[sigScheme]; ok {
+		if scheme, ok := dicttls.DictSignatureSchemeNameIndexed[sigScheme]; ok {
 			e.SupportedSignatureAlgorithms = append(e.SupportedSignatureAlgorithms, SignatureScheme(scheme))
 		} else {
 			return fmt.Errorf("unknown delegated credentials signature scheme: %s", sigScheme)
 		}
 	}
-	return nil
-}
-
-// FakePreSharedKeyExtension is an extension used to set the PSK extension in the
-// ClientHello.
-//
-// Unfortunately, even when the PSK extension is set, there will be no PSK-based
-// resumption since crypto/tls does not implement PSK.
-type FakePreSharedKeyExtension struct {
-	PskIdentities []PskIdentity `json:"identities"`
-	PskBinders    [][]byte      `json:"binders"`
-}
-
-func (e *FakePreSharedKeyExtension) writeToUConn(uc *UConn) error {
-	if uc.config.ClientSessionCache == nil {
-		return nil // don't write the extension if there is no session cache
-	}
-	if session, ok := uc.config.ClientSessionCache.Get(clientSessionCacheKey(uc.conn.RemoteAddr(), uc.config)); !ok || session == nil {
-		return nil // don't write the extension if there is no session cache available for this session
-	}
-	uc.HandshakeState.Hello.PskIdentities = e.PskIdentities
-	uc.HandshakeState.Hello.PskBinders = e.PskBinders
-	return nil
-}
-
-func (e *FakePreSharedKeyExtension) Len() int {
-	length := 4 // extension type + extension length
-	length += 2 // identities length
-	for _, identity := range e.PskIdentities {
-		length += 2 + len(identity.Label) + 4 // identity length + identity + obfuscated ticket age
-	}
-	length += 2 // binders length
-	for _, binder := range e.PskBinders {
-		length += len(binder)
-	}
-	return length
-}
-
-func (e *FakePreSharedKeyExtension) Read(b []byte) (int, error) {
-	if len(b) < e.Len() {
-		return 0, io.ErrShortBuffer
-	}
-
-	b[0] = byte(extensionPreSharedKey >> 8)
-	b[1] = byte(extensionPreSharedKey)
-	b[2] = byte((e.Len() - 4) >> 8)
-	b[3] = byte(e.Len() - 4)
-
-	// identities length
-	identitiesLength := 0
-	for _, identity := range e.PskIdentities {
-		identitiesLength += 2 + len(identity.Label) + 4 // identity length + identity + obfuscated ticket age
-	}
-	b[4] = byte(identitiesLength >> 8)
-	b[5] = byte(identitiesLength)
-
-	// identities
-	offset := 6
-	for _, identity := range e.PskIdentities {
-		b[offset] = byte(len(identity.Label) >> 8)
-		b[offset+1] = byte(len(identity.Label))
-		offset += 2
-		copy(b[offset:], identity.Label)
-		offset += len(identity.Label)
-		b[offset] = byte(identity.ObfuscatedTicketAge >> 24)
-		b[offset+1] = byte(identity.ObfuscatedTicketAge >> 16)
-		b[offset+2] = byte(identity.ObfuscatedTicketAge >> 8)
-		b[offset+3] = byte(identity.ObfuscatedTicketAge)
-		offset += 4
-	}
-
-	// binders length
-	bindersLength := 0
-	for _, binder := range e.PskBinders {
-		bindersLength += len(binder)
-	}
-	b[offset] = byte(bindersLength >> 8)
-	b[offset+1] = byte(bindersLength)
-	offset += 2
-
-	// binders
-	for _, binder := range e.PskBinders {
-		copy(b[offset:], binder)
-		offset += len(binder)
-	}
-
-	return e.Len(), io.EOF
-}
-
-func (e *FakePreSharedKeyExtension) Write(b []byte) (n int, err error) {
-	fullLen := len(b)
-	s := cryptobyte.String(b)
-
-	var identitiesLength uint16
-	if !s.ReadUint16(&identitiesLength) {
-		return 0, errors.New("tls: invalid PSK extension")
-	}
-
-	// identities
-	for identitiesLength > 0 {
-		var identityLength uint16
-		if !s.ReadUint16(&identityLength) {
-			return 0, errors.New("tls: invalid PSK extension")
-		}
-		identitiesLength -= 2
-
-		if identityLength > identitiesLength {
-			return 0, errors.New("tls: invalid PSK extension")
-		}
-
-		var identity []byte
-		if !s.ReadBytes(&identity, int(identityLength)) {
-			return 0, errors.New("tls: invalid PSK extension")
-		}
-
-		identitiesLength -= identityLength // identity
-
-		var obfuscatedTicketAge uint32
-		if !s.ReadUint32(&obfuscatedTicketAge) {
-			return 0, errors.New("tls: invalid PSK extension")
-		}
-
-		e.PskIdentities = append(e.PskIdentities, PskIdentity{
-			Label:               identity,
-			ObfuscatedTicketAge: obfuscatedTicketAge,
-		})
-
-		identitiesLength -= 4 // obfuscated ticket age
-	}
-
-	var bindersLength uint16
-	if !s.ReadUint16(&bindersLength) {
-		return 0, errors.New("tls: invalid PSK extension")
-	}
-
-	// binders
-	for bindersLength > 0 {
-		var binderLength uint8
-		if !s.ReadUint8(&binderLength) {
-			return 0, errors.New("tls: invalid PSK extension")
-		}
-		bindersLength -= 1
-
-		if uint16(binderLength) > bindersLength {
-			return 0, errors.New("tls: invalid PSK extension")
-		}
-
-		var binder []byte
-		if !s.ReadBytes(&binder, int(binderLength)) {
-			return 0, errors.New("tls: invalid PSK extension")
-		}
-
-		e.PskBinders = append(e.PskBinders, binder)
-
-		bindersLength -= uint16(binderLength)
-	}
-
-	return fullLen, nil
-}
-
-func (e *FakePreSharedKeyExtension) UnmarshalJSON(data []byte) error {
-	var pskAccepter struct {
-		PskIdentities []PskIdentity `json:"identities"`
-		PskBinders    [][]byte      `json:"binders"`
-	}
-
-	if err := json.Unmarshal(data, &pskAccepter); err != nil {
-		return err
-	}
-
-	e.PskIdentities = pskAccepter.PskIdentities
-	e.PskBinders = pskAccepter.PskBinders
 	return nil
 }

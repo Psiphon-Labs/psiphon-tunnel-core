@@ -44,7 +44,7 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/andybalholm/brotli v1.0.5
+# github.com/andybalholm/brotli v1.0.6
 ## explicit; go 1.12
 github.com/andybalholm/brotli
 # github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
@@ -60,6 +60,48 @@ github.com/cespare/xxhash
 # github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 ## explicit
 github.com/cheekybits/genny/generic
+# github.com/cloudflare/circl v1.3.7
+## explicit; go 1.19
+github.com/cloudflare/circl/dh/x25519
+github.com/cloudflare/circl/dh/x448
+github.com/cloudflare/circl/ecc/goldilocks
+github.com/cloudflare/circl/ecc/p384
+github.com/cloudflare/circl/hpke
+github.com/cloudflare/circl/internal/conv
+github.com/cloudflare/circl/internal/sha3
+github.com/cloudflare/circl/kem
+github.com/cloudflare/circl/kem/hybrid
+github.com/cloudflare/circl/kem/kyber/kyber1024
+github.com/cloudflare/circl/kem/kyber/kyber512
+github.com/cloudflare/circl/kem/kyber/kyber768
+github.com/cloudflare/circl/math
+github.com/cloudflare/circl/math/fp25519
+github.com/cloudflare/circl/math/fp448
+github.com/cloudflare/circl/math/mlsbset
+github.com/cloudflare/circl/pke/kyber/internal/common
+github.com/cloudflare/circl/pke/kyber/internal/common/params
+github.com/cloudflare/circl/pke/kyber/kyber1024
+github.com/cloudflare/circl/pke/kyber/kyber1024/internal
+github.com/cloudflare/circl/pke/kyber/kyber512
+github.com/cloudflare/circl/pke/kyber/kyber512/internal
+github.com/cloudflare/circl/pke/kyber/kyber768
+github.com/cloudflare/circl/pke/kyber/kyber768/internal
+github.com/cloudflare/circl/pki
+github.com/cloudflare/circl/sign
+github.com/cloudflare/circl/sign/dilithium/internal/common
+github.com/cloudflare/circl/sign/dilithium/internal/common/params
+github.com/cloudflare/circl/sign/dilithium/mode2
+github.com/cloudflare/circl/sign/dilithium/mode2/internal
+github.com/cloudflare/circl/sign/dilithium/mode3
+github.com/cloudflare/circl/sign/dilithium/mode3/internal
+github.com/cloudflare/circl/sign/ed25519
+github.com/cloudflare/circl/sign/ed448
+github.com/cloudflare/circl/sign/eddilithium2
+github.com/cloudflare/circl/sign/eddilithium3
+github.com/cloudflare/circl/sign/schemes
+github.com/cloudflare/circl/simd/keccakf1600
+github.com/cloudflare/circl/xof
+github.com/cloudflare/circl/xof/k12
 # github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea
 ## explicit
 github.com/cognusion/go-cache-lru
@@ -96,9 +138,6 @@ github.com/florianl/go-nfqueue/internal/unix
 # github.com/flynn/noise v1.0.0
 ## explicit; go 1.16
 github.com/flynn/noise
-# github.com/gaukas/godicttls v0.0.4
-## explicit; go 1.19
-github.com/gaukas/godicttls
 # github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572
 ## explicit; go 1.13
 github.com/go-task/slim-sprig
@@ -148,8 +187,8 @@ github.com/juju/ratelimit
 # github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 ## explicit
 github.com/kardianos/osext
-# github.com/klauspost/compress v1.16.7
-## explicit; go 1.18
+# github.com/klauspost/compress v1.17.4
+## explicit; go 1.19
 github.com/klauspost/compress
 github.com/klauspost/compress/fse
 github.com/klauspost/compress/huff0
@@ -299,10 +338,14 @@ github.com/refraction-networking/obfs4/common/replayfilter
 github.com/refraction-networking/obfs4/transports/base
 github.com/refraction-networking/obfs4/transports/obfs4
 github.com/refraction-networking/obfs4/transports/obfs4/framing
-# github.com/refraction-networking/utls v1.3.3
-## explicit; go 1.19
+# github.com/refraction-networking/utls v1.6.4
+## explicit; go 1.21
 github.com/refraction-networking/utls
+github.com/refraction-networking/utls/dicttls
+github.com/refraction-networking/utls/internal/boring
 github.com/refraction-networking/utls/internal/helper
+github.com/refraction-networking/utls/internal/quicvarint
+github.com/refraction-networking/utls/internal/quicvarint/protocol
 # github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
 ## explicit
 github.com/ryanuber/go-glob
@@ -326,6 +369,8 @@ github.com/wader/filtertransport
 # gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.5.0
 ## explicit; go 1.11
 gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib
+# go.uber.org/mock v0.4.0
+## explicit; go 1.20
 # golang.org/x/crypto v0.22.0
 ## explicit; go 1.18
 golang.org/x/crypto/blake2b
@@ -348,7 +393,7 @@ golang.org/x/crypto/sha3
 ## explicit; go 1.18
 golang.org/x/exp/constraints
 golang.org/x/exp/rand
-# golang.org/x/mod v0.10.0
+# golang.org/x/mod v0.11.0
 ## explicit; go 1.17
 golang.org/x/mod/semver
 # golang.org/x/net v0.24.0

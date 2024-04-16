@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gaukas/godicttls"
+	"github.com/refraction-networking/utls/dicttls"
 )
 
 var ErrUnknownExtension = errors.New("extension name is unknown to the dictionary")
@@ -45,7 +45,7 @@ func (c *CipherSuitesJSONUnmarshaler) UnmarshalJSON(jsonStr []byte) error {
 			continue
 		}
 
-		if id, ok := godicttls.DictCipherSuiteNameIndexed[name]; ok {
+		if id, ok := dicttls.DictCipherSuiteNameIndexed[name]; ok {
 			c.cipherSuites = append(c.cipherSuites, id)
 		} else {
 			return fmt.Errorf("unknown cipher suite name: %s", name)
@@ -70,7 +70,7 @@ func (c *CompressionMethodsJSONUnmarshaler) UnmarshalJSON(jsonStr []byte) error 
 	}
 
 	for _, name := range compressionMethodNames {
-		if id, ok := godicttls.DictCompMethNameIndexed[name]; ok {
+		if id, ok := dicttls.DictCompMethNameIndexed[name]; ok {
 			c.compressionMethods = append(c.compressionMethods, id)
 		} else {
 			return fmt.Errorf("unknown compression method name: %s", name)
@@ -85,7 +85,9 @@ func (c *CompressionMethodsJSONUnmarshaler) CompressionMethods() []uint8 {
 }
 
 type TLSExtensionsJSONUnmarshaler struct {
-	extensions []TLSExtensionJSON
+	AllowUnknownExt bool // if set, unknown extensions will be added as GenericExtension, without recovering ext payload
+	UseRealPSK      bool // if set, PSK extension will be real PSK extension, otherwise it will be fake PSK extension
+	extensions      []TLSExtensionJSON
 }
 
 func (e *TLSExtensionsJSONUnmarshaler) UnmarshalJSON(jsonStr []byte) error {
@@ -101,20 +103,34 @@ func (e *TLSExtensionsJSONUnmarshaler) UnmarshalJSON(jsonStr []byte) error {
 			continue
 		}
 
-		if extID, ok := godicttls.DictExtTypeNameIndexed[accepter.extNameOnly.Name]; !ok {
+		if extID, ok := dicttls.DictExtTypeNameIndexed[accepter.extNameOnly.Name]; !ok {
 			return fmt.Errorf("%w: %s", ErrUnknownExtension, accepter.extNameOnly.Name)
 		} else {
 			// get extension type from ID
 			var ext TLSExtension = ExtensionFromID(extID)
 			if ext == nil {
-				// fallback to generic extension
-				ext = genericExtension(extID, accepter.extNameOnly.Name)
+				if e.AllowUnknownExt {
+					// fallback to generic extension, without recovering ext payload
+					ext = genericExtension(extID, accepter.extNameOnly.Name)
+				} else {
+					return fmt.Errorf("extension %s (%d) is not JSON compatible", accepter.extNameOnly.Name, extID)
+				}
+			}
+
+			switch extID {
+			case extensionPreSharedKey:
+				// PSK extension, need to see if we do real or fake PSK
+				if e.UseRealPSK {
+					ext = &UtlsPreSharedKeyExtension{}
+				} else {
+					ext = &FakePreSharedKeyExtension{}
+				}
 			}
 
 			if extJsonCompatible, ok := ext.(TLSExtensionJSON); ok {
 				exts = append(exts, extJsonCompatible)
 			} else {
-				return fmt.Errorf("extension %d (%s) is not JSON compatible", extID, accepter.extNameOnly.Name)
+				return fmt.Errorf("extension %s (%d) is not JSON compatible", accepter.extNameOnly.Name, extID)
 			}
 		}
 	}

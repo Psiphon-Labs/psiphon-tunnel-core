@@ -929,17 +929,17 @@ func getUTLSClientHelloID(
 		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
 		obfuscatedTicketAge := prng.RangeUint32(13029567, math.MaxUint32)
 
-		binder := prng.Bytes(33)
-		binder[0] = 0x20 // Binder's length
-
-		if pskExt, ok := preset.Extensions[len(preset.Extensions)-1].(*utls.FakePreSharedKeyExtension); ok {
-			pskExt.PskIdentities = []utls.PskIdentity{
-				{
-					Label:               label,
-					ObfuscatedTicketAge: obfuscatedTicketAge,
+		if _, ok := preset.Extensions[len(preset.Extensions)-1].(*utls.UtlsPreSharedKeyExtension); ok {
+			pskExt := &utls.FakePreSharedKeyExtension{
+				Identities: []utls.PskIdentity{
+					{
+						Label:               label,
+						ObfuscatedTicketAge: obfuscatedTicketAge,
+					},
 				},
+				Binders: [][]byte{prng.Bytes(32)},
 			}
-			pskExt.PskBinders = [][]byte{binder}
+			preset.Extensions[len(preset.Extensions)-1] = pskExt
 		}
 		return utls.HelloCustom, &preset, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
