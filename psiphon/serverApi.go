@@ -1028,12 +1028,15 @@ func getBaseAPIParameters(
 	// encoded API messages for backwards compatibility. SSH login proves
 	// client possession of the server entry; the server secret was for the
 	// legacy web API with no SSH login. Note that we can't check
-	// SupportsSSHAPIRequests in the baseParametersNoDialParameters case, but
+	// dialParams.ServerEntry in the baseParametersNoDialParameters case, but
 	// that case is used by in-proxy dials, which implies support.
 
-	if (dialParams != nil && !dialParams.ServerEntry.SupportsSSHAPIRequests()) ||
-		config.TargetAPIEncoding == protocol.PSIPHON_API_ENCODING_JSON {
-		params["server_secret"] = dialParams.ServerEntry.WebServerSecret
+	if dialParams != nil {
+		if !dialParams.ServerEntry.SupportsSSHAPIRequests() ||
+			config.TargetAPIEncoding == protocol.PSIPHON_API_ENCODING_JSON {
+
+			params["server_secret"] = dialParams.ServerEntry.WebServerSecret
+		}
 	}
 
 	// Blank parameters must be omitted.

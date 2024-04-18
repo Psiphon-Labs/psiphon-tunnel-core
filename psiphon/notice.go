@@ -219,8 +219,16 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	obj["timestamp"] = time.Now().UTC().Format(common.RFC3339Milli)
 	for i := 0; i < len(args)-1; i += 2 {
 		name, ok := args[i].(string)
-		value := args[i+1]
 		if ok {
+
+			value := args[i+1]
+
+			// encoding/json marshals error types as "{}", so convert to error
+			// message string.
+			if err, isError := value.(error); isError {
+				value = err.Error()
+			}
+
 			noticeData[name] = value
 		}
 	}

@@ -50,7 +50,7 @@ const (
 	brokerClientOfferTimeout          = 10 * time.Second
 	brokerPendingServerReportsTTL     = 60 * time.Second
 	brokerPendingServerReportsMaxSize = 100000
-	brokerMetricName                  = "inproxy-broker"
+	brokerMetricName                  = "inproxy_broker"
 )
 
 // LookupGeoIP is a callback for providing GeoIP lookup service.

@@ -561,9 +561,13 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 		return nil, errors.Tracef("invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
+	// The client offer SDP may contain no ICE candidates.
+	errorOnNoCandidates := false
+
 	// Client offer SDP candidate addresses must match the country and ASN of
 	// the client. Don't facilitate connections to arbitrary destinations.
-	sdpMetrics, err := ValidateSDPAddresses([]byte(request.ClientOfferSDP.SDP), lookupGeoIP, geoIPData)
+	sdpMetrics, err := ValidateSDPAddresses(
+		[]byte(request.ClientOfferSDP.SDP), errorOnNoCandidates, lookupGeoIP, geoIPData)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -649,9 +653,13 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
+	// The proxy answer SDP must contain at least one ICE candidate.
+	errorOnNoCandidates := true
+
 	// Proxy answer SDP candidate addresses must match the country and ASN of
 	// the proxy. Don't facilitate connections to arbitrary destinations.
-	sdpMetrics, err := ValidateSDPAddresses([]byte(request.ProxyAnswerSDP.SDP), lookupGeoIP, geoIPData)
+	sdpMetrics, err := ValidateSDPAddresses(
+		[]byte(request.ProxyAnswerSDP.SDP), errorOnNoCandidates, lookupGeoIP, geoIPData)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

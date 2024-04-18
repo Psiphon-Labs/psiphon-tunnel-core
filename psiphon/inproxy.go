@@ -1553,6 +1553,38 @@ func (w *InproxyWebRTCDialInstance) UDPListen(ctx context.Context) (net.PacketCo
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) UDPConn(
+	ctx context.Context, network, remoteAddress string) (net.PacketConn, error) {
+
+	// Create a new UDPConn bound to the specified remote address. This UDP
+	// conn is used, by the inproxy package, to determine the local address
+	// of the active interface the OS will select for the specified remote
+	// destination.
+	//
+	// Only IP address destinations are supported. ResolveIP is wired up only
+	// because NewUDPConn requires a non-nil resolver.
+
+	dialConfig := &DialConfig{
+		DeviceBinder:    w.config.deviceBinder,
+		IPv6Synthesizer: w.config.IPv6Synthesizer,
+		ResolveIP: func(_ context.Context, hostname string) ([]net.IP, error) {
+			IP := net.ParseIP(hostname)
+			if IP == nil {
+				return nil, errors.TraceNew("not supported")
+			}
+			return []net.IP{IP}, nil
+		},
+	}
+
+	conn, _, err := NewUDPConn(ctx, network, true, "", remoteAddress, dialConfig)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return conn, nil
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) BindToDevice(fileDescriptor int) error {
 
 	// Use config.deviceBinder, with wired up logging, not

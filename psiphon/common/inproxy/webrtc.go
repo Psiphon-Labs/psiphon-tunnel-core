@@ -619,10 +619,14 @@ func newWebRTCConn(
 	localDescription := conn.peerConnection.LocalDescription()
 
 	// Adjust the SDP, removing local network addresses and adding any
-	// port mapping candidate.
+	// port mapping candidate. Clients (offer) are permitted to have
+	// no ICE candidates but proxies (answer) must have at least one
+	//candidate.
+	errorOnNoCandidates := !isOffer
 
 	adjustedSDP, metrics, err := PrepareSDPAddresses(
 		[]byte(localDescription.SDP),
+		errorOnNoCandidates,
 		portMappingExternalAddr,
 		config.WebRTCDialCoordinator.DisableIPv6ICECandidates())
 	if err != nil {
@@ -667,9 +671,6 @@ func (conn *WebRTCConn) setDataChannel(dataChannel *webrtc.DataChannel) {
 	// conn.
 
 	conn.dataChannel = dataChannel
-	conn.dataChannel.OnOpen(conn.onDataChannelOpen)
-	conn.dataChannel.OnClose(conn.onDataChannelClose)
-
 	conn.dataChannel.OnOpen(conn.onDataChannelOpen)
 	conn.dataChannel.OnClose(conn.onDataChannelClose)
 
@@ -1233,11 +1234,18 @@ func (conn *WebRTCConn) onDataChannelClose() {
 // adding any port mapping as a host candidate.
 func PrepareSDPAddresses(
 	encodedSDP []byte,
+	errorOnNoCandidates bool,
 	portMappingExternalAddr string,
 	disableIPv6Candidates bool) ([]byte, *SDPMetrics, error) {
 
 	modifiedSDP, metrics, err := processSDPAddresses(
-		encodedSDP, portMappingExternalAddr, disableIPv6Candidates, false, nil, common.GeoIPData{})
+		encodedSDP,
+		portMappingExternalAddr,
+		disableIPv6Candidates,
+		false, // bogons are expected, and stripped out
+		errorOnNoCandidates,
+		nil,
+		common.GeoIPData{})
 	return modifiedSDP, metrics, errors.Trace(err)
 }
 
@@ -1246,10 +1254,18 @@ func PrepareSDPAddresses(
 // for the specified expectedGeoIPData.
 func ValidateSDPAddresses(
 	encodedSDP []byte,
+	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
 	expectedGeoIPData common.GeoIPData) (*SDPMetrics, error) {
 
-	_, metrics, err := processSDPAddresses(encodedSDP, "", false, true, lookupGeoIP, expectedGeoIPData)
+	_, metrics, err := processSDPAddresses(
+		encodedSDP,
+		"",
+		false,
+		true, // bogons should already by stripped out
+		errorOnNoCandidates,
+		lookupGeoIP,
+		expectedGeoIPData)
 	return metrics, errors.Trace(err)
 }
 
@@ -1302,6 +1318,7 @@ func processSDPAddresses(
 	portMappingExternalAddr string,
 	disableIPv6Candidates bool,
 	errorOnBogon bool,
+	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
 	expectedGeoIPData common.GeoIPData) ([]byte, *SDPMetrics, error) {
 
@@ -1454,7 +1471,7 @@ func processSDPAddresses(
 		mediaDescription.Attributes = attributes
 	}
 
-	if candidateCount == 0 {
+	if errorOnNoCandidates && candidateCount == 0 {
 		return nil, nil, errors.TraceNew("no candidates")
 	}
 
@@ -1586,12 +1603,15 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 
 	var defaultIPv4, defaultIPv6 net.IP
 
-	udpConnIPv4, err := net.Dial("udp4", "93.184.216.34:3478")
+	udpConnIPv4, err := p.webRTCDialCoordinator.UDPConn(
+		context.Background(), "udp4", "93.184.216.34:3478")
 	if err == nil {
 		defaultIPv4 = udpConnIPv4.LocalAddr().(*net.UDPAddr).IP
 		udpConnIPv4.Close()
 	}
-	udpConnIPv6, err := net.Dial("udp6", "[2606:2800:220:1:248:1893:25c8:1946]:3478")
+
+	udpConnIPv6, err := p.webRTCDialCoordinator.UDPConn(
+		context.Background(), "udp6", "[2606:2800:220:1:248:1893:25c8:1946]:3478")
 	if err == nil {
 		defaultIPv6 = udpConnIPv6.LocalAddr().(*net.UDPAddr).IP
 		udpConnIPv6.Close()
@@ -1600,17 +1620,19 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 	transportInterfaces := []*transport.Interface{}
 
 	netInterfaces, err := anet.Interfaces()
+
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	for _, netInterface := range netInterfaces {
+		// Note: don't exclude interfaces with the net.FlagPointToPoint flag,
+		// which is set for certain mobile networks
 		if (netInterface.Flags&net.FlagUp == 0) ||
-			(netInterface.Flags&net.FlagPointToPoint != 0) ||
 			(!GetAllowBogonWebRTCConnections() && (netInterface.Flags&net.FlagLoopback != 0)) {
 			continue
 		}
-		addrs, err := netInterface.Addrs()
+		addrs, err := anet.InterfaceAddrsByInterface(&netInterface)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

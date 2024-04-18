@@ -322,6 +322,18 @@ func (t *testWebRTCDialCoordinator) UDPListen(_ context.Context) (net.PacketConn
 	return conn, errors.Trace(err)
 }
 
+func (t *testWebRTCDialCoordinator) UDPConn(_ context.Context, network, remoteAddress string) (net.PacketConn, error) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	switch network {
+	case "udp", "udp4", "udp6":
+	default:
+		return nil, errors.TraceNew("invalid network")
+	}
+	conn, err := net.Dial(network, remoteAddress)
+	return conn.(*net.UDPConn), errors.Trace(err)
+}
+
 func (t *testWebRTCDialCoordinator) BindToDevice(fileDescriptor int) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()

@@ -281,6 +281,14 @@ type WebRTCDialCoordinator interface {
 	// to mitigate the issue documented in psiphon/common.WriteTimeoutUDPConn.
 	UDPListen(ctx context.Context) (net.PacketConn, error)
 
+	// UDPConn creates a local UDP socket "connected" to the specified remote
+	// address. The socket should be excluded from VPN routing. This socket
+	// is used to determine the local address of the active interface the OS
+	// will select for the specified network ("udp4" for IPv4 or "udp6" for
+	// IPv6) and remote destination. For this use case, the socket will not
+	// be used to send network traffic.
+	UDPConn(ctx context.Context, network, remoteAddress string) (net.PacketConn, error)
+
 	// BindToDevice binds a socket, specified by the file descriptor, to an
 	// interface that isn't routed through a VPN when Psiphon is running in
 	// VPN mode. BindToDevice is used in cases where a custom dialer cannot

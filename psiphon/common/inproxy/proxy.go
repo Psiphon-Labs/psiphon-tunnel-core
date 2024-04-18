@@ -309,7 +309,7 @@ func (p *Proxy) proxyClients(ctx context.Context, delayFirstAnnounce bool) {
 		// This delay is distinct from the post-failure delay, although both
 		// use the same delay parameter settings.
 
-		relayedTraffic, err := p.proxyOneClient(ctx, delayFirstAnnounce && i == 0)
+		backOff, err := p.proxyOneClient(ctx, delayFirstAnnounce && i == 0)
 
 		if err != nil && ctx.Err() == nil {
 
@@ -319,19 +319,21 @@ func (p *Proxy) proxyClients(ctx context.Context, delayFirstAnnounce bool) {
 				}).Error("proxy client failed")
 
 			// Apply a simple exponential backoff base on whether
-			// proxyOneClient failed to relay client traffic. The
-			// proxyOneClient failure could range from local configuration
-			// (no broker clients) to network issues(failure to completely
-			// establish WebRTC connection) and this backoff prevents both
-			// excess local logging and churning in the former case and
-			// excessive bad service to clients or unintentionally
+			// proxyOneClient either relayed client traffic or got no match,
+			// or encountered a failure.
+			//
+			// The proxyOneClient failure could range from local
+			// configuration (no broker clients) to network issues(failure to
+			// completely establish WebRTC connection) and this backoff
+			// prevents both excess local logging and churning in the former
+			// case and excessive bad service to clients or unintentionally
 			// overloading the broker in the latter case.
 			//
 			// TODO: specific tactics parameters to control this logic.
 
 			delay, jitter := p.getAnnounceDelayParameters()
 
-			if relayedTraffic {
+			if !backOff {
 				failureDelayFactor = 1
 			}
 			delay = delay * failureDelayFactor
@@ -413,13 +415,13 @@ func (p *Proxy) doNetworkDiscovery(
 
 func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, error) {
 
-	relayedTraffic := false
+	backOff := true
 
 	// Get a new WebRTCDialCoordinator, which should be configured with the
 	// latest network tactics.
 	webRTCCoordinator, err := p.config.MakeWebRTCDialCoordinator()
 	if err != nil {
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 
 	// Perform network discovery, to determine NAT type and other network
@@ -476,7 +478,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 
 	brokerClient, err := p.config.GetBrokerClient()
 	if err != nil {
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 
 	brokerCoordinator := brokerClient.GetBrokerDialCoordinator()
@@ -493,7 +495,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 
 	metrics, tacticsNetworkID, err := p.getMetrics(webRTCCoordinator)
 	if err != nil {
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 
 	// A proxy ID is implicitly sent with requests; it's the proxy's session
@@ -508,7 +510,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 			Metrics:                metrics,
 		})
 	if err != nil {
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 
 	if announceResponse.OperatorMessageJSON != "" {
@@ -531,14 +533,16 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 
 	if announceResponse.NoMatch {
 
-		// While "no match" may be an expected outcome in many scenarios,
-		// still return an error so that the event is logged and the next
-		// announcement is delayed.
-		return relayedTraffic, errors.TraceNew("no match")
+		// Don't apply a back off delay to the next announcement since this
+		// iteration successfully received a no-match response for the broker,
+		// and a client may soon arrive at the broker.
+		backOff = false
+
+		return backOff, errors.TraceNew("no match")
 	}
 
 	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
-		return relayedTraffic, errors.Tracef(
+		return backOff, errors.Tracef(
 			"Unsupported proxy protocol version: %d",
 			announceResponse.ClientProxyProtocolVersion)
 	}
@@ -559,7 +563,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 		ctx, common.ValueOrDefault(webRTCCoordinator.WebRTCAnswerTimeout(), proxyWebRTCAnswerTimeout))
 	defer webRTCAnswerCancelFunc()
 
-	webRTCConn, SDP, SDPMetrics, webRTCErr := NewWebRTCConnWithAnswer(
+	webRTCConn, SDP, sdpMetrics, webRTCErr := NewWebRTCConnWithAnswer(
 		webRTCAnswerCtx,
 		&WebRTCConfig{
 			Logger:                      p.config.Logger,
@@ -574,10 +578,12 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 		webRTCErr = errors.Trace(webRTCErr)
 		webRTCRequestErr = webRTCErr.Error()
 		SDP = webrtc.SessionDescription{}
+		sdpMetrics = &SDPMetrics{}
 		// Continue to report the error to the broker. The broker will respond
 		// with failure to the client's offer request.
+	} else {
+		defer webRTCConn.Close()
 	}
-	defer webRTCConn.Close()
 
 	// Send answer request with SDP or error.
 
@@ -587,21 +593,21 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 			ConnectionID:                 announceResponse.ConnectionID,
 			SelectedProxyProtocolVersion: announceResponse.ClientProxyProtocolVersion,
 			ProxyAnswerSDP:               SDP,
-			ICECandidateTypes:            SDPMetrics.ICECandidateTypes,
+			ICECandidateTypes:            sdpMetrics.ICECandidateTypes,
 			AnswerError:                  webRTCRequestErr,
 		})
 	if err != nil {
 		if webRTCErr != nil {
 			// Prioritize returning any WebRTC error for logging.
-			return relayedTraffic, webRTCErr
+			return backOff, webRTCErr
 		}
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 
 	// Now that an answer is sent, stop if WebRTC initialization failed.
 
 	if webRTCErr != nil {
-		return relayedTraffic, webRTCErr
+		return backOff, webRTCErr
 	}
 
 	// Await the WebRTC connection.
@@ -622,7 +628,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 
 	err = webRTCConn.AwaitInitialDataChannel(awaitDataChannelCtx)
 	if err != nil {
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 
 	p.config.Logger.WithTraceFields(common.LogFields{
@@ -654,7 +660,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 	destinationAddress, err := webRTCCoordinator.ResolveAddress(
 		ctx, "ip", announceResponse.DestinationAddress)
 	if err != nil {
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 
 	var dialer net.Dialer
@@ -663,7 +669,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 		announceResponse.NetworkProtocol.String(),
 		destinationAddress)
 	if err != nil {
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 	defer destinationConn.Close()
 
@@ -701,7 +707,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 	destinationConn, err = common.NewActivityMonitoredConn(
 		destinationConn, 0, false, nil, p.activityUpdateWrapper)
 	if err != nil {
-		return relayedTraffic, errors.Trace(err)
+		return backOff, errors.Trace(err)
 	}
 
 	// Relay the client traffic to the destination. The client traffic is a
@@ -779,9 +785,13 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 		"connectionID": announceResponse.ConnectionID,
 	}).Info("connection closed")
 
-	relayedTraffic = atomic.LoadInt32(&relayedUp) == 1 && atomic.LoadInt32(&relayedDown) == 1
+	// Don't apply a back off delay to the next announcement since this
+	// iteration successfully relayed bytes.
+	if atomic.LoadInt32(&relayedUp) == 1 || atomic.LoadInt32(&relayedDown) == 1 {
+		backOff = false
+	}
 
-	return relayedTraffic, err
+	return backOff, err
 }
 
 func (p *Proxy) getMetrics(webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetrics, string, error) {

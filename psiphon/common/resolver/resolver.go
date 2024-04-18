@@ -1361,7 +1361,9 @@ func hasRoutableIPv6Interface() (bool, error) {
 	for _, in := range interfaces {
 
 		if (in.Flags&net.FlagUp == 0) ||
-			(in.Flags&(net.FlagLoopback|net.FlagPointToPoint)) != 0 {
+			// Note: don't exclude interfaces with the net.FlagPointToPoint
+			// flag, which is set for certain mobile networks
+			(in.Flags&net.FlagLoopback != 0) {
 			continue
 		}
 
