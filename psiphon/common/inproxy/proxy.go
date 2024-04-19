@@ -415,7 +415,15 @@ func (p *Proxy) doNetworkDiscovery(
 
 func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, error) {
 
-	backOff := true
+	// Do not trigger back-off unless the proxy successfully announces and
+	// only then performs poorly.
+	//
+	// A no-match response should not trigger back-off, nor should broker
+	// request transport errors which may include non-200 responses due to
+	// CDN timeout mismatches or TLS errors due to CDN TLS fingerprint
+	// incompatibility.
+
+	backOff := false
 
 	// Get a new WebRTCDialCoordinator, which should be configured with the
 	// latest network tactics.
@@ -532,12 +540,6 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 	}
 
 	if announceResponse.NoMatch {
-
-		// Don't apply a back off delay to the next announcement since this
-		// iteration successfully received a no-match response for the broker,
-		// and a client may soon arrive at the broker.
-		backOff = false
-
 		return backOff, errors.TraceNew("no match")
 	}
 
@@ -546,6 +548,16 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 			"Unsupported proxy protocol version: %d",
 			announceResponse.ClientProxyProtocolVersion)
 	}
+
+	// Trigger back-off if the following WebRTC operations fail to establish a
+	// connections.
+	//
+	// Limitation: the proxy answer request to the broker may fail due to the
+	// non-back-off reasons documented above for the proxy announcment request;
+	// however, these should be unlikely assuming that the broker client is
+	// using a persistent transport connection.
+
+	backOff = true
 
 	// For activity updates, indicate that a client connection is now underway.
 
@@ -785,7 +797,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 		"connectionID": announceResponse.ConnectionID,
 	}).Info("connection closed")
 
-	// Don't apply a back off delay to the next announcement since this
+	// Don't apply a back-off delay to the next announcement since this
 	// iteration successfully relayed bytes.
 	if atomic.LoadInt32(&relayedUp) == 1 || atomic.LoadInt32(&relayedDown) == 1 {
 		backOff = false
