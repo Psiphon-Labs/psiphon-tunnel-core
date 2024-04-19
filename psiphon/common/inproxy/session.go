@@ -42,8 +42,8 @@ import (
 )
 
 const (
-	sessionsTTL     = 5 * time.Minute
-	sessionsMaxSize = 100000
+	sessionsTTL     = 24 * time.Hour
+	sessionsMaxSize = 1000000
 
 	sessionObfuscationPaddingMinSize = 0
 	sessionObfuscationPaddingMaxSize = 256
@@ -1806,7 +1806,12 @@ func (s *session) nextUnmarshaledHandshakePacket(sessionPacket *SessionPacket) (
 			return false, nil, nil, errors.Tracef("unexpected sessionID")
 		}
 		if sessionPacket.Nonce != 0 {
-			return false, nil, nil, errors.TraceNew("unexpected nonce")
+
+			// A handshake message was expected, but this packet contains a
+			// post-handshake nonce, Flag this as a potential expired session
+			// case. See comment below for limitation.
+			return false, nil, nil,
+				potentialExpiredSessionError{errors.TraceNew("unexpected nonce")}
 		}
 		in = sessionPacket.Payload
 	}

@@ -101,6 +101,44 @@ func runTestSessions() error {
 	}
 
 	// Test: session expires; new one negotiated
+	//
+	// sessionStateResponder_XK_recv_e_es_send_e_ee case, when Nonce = 0
+
+	responderSessions.sessions.Flush()
+
+	request = roundTripper.MakeRequest()
+
+	response, err = initiatorSessions.RoundTrip(
+		context.Background(),
+		roundTripper,
+		responderPublicKey,
+		responderRootObfuscationSecret,
+		waitToShareSession,
+		request)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if !bytes.Equal(response, roundTripper.ExpectedResponse(request)) {
+		return errors.TraceNew("unexpected response")
+	}
+
+	// Test: session expires; new one negotiated
+	//
+	// "unexpected nonce" case, when Nonce > 0
+
+	for i := 0; i < 10; i++ {
+		_, err = initiatorSessions.RoundTrip(
+			context.Background(),
+			roundTripper,
+			responderPublicKey,
+			responderRootObfuscationSecret,
+			waitToShareSession,
+			roundTripper.MakeRequest())
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
 
 	responderSessions.sessions.Flush()
 
