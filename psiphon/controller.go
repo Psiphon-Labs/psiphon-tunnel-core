@@ -2528,7 +2528,8 @@ func (controller *Controller) runInproxyProxy() {
 			// become available, which is sufficient for the test but is not
 			// as robust as awaiting fresh tactics.
 
-			if !controller.inproxyAwaitBrokerSpecs() {
+			isProxy := true
+			if !controller.inproxyAwaitBrokerSpecs(isProxy) {
 				// Controller is shutting down
 				return
 			}
@@ -2608,14 +2609,21 @@ func (controller *Controller) runInproxyProxy() {
 	NoticeInfo("inproxy proxy: stopped")
 }
 
-func (controller *Controller) inproxyAwaitBrokerSpecs() bool {
+func (controller *Controller) inproxyAwaitBrokerSpecs(isProxy bool) bool {
 
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		p := controller.config.GetParameters().Get()
-		brokerSpecs := p.InproxyBrokerSpecs(parameters.InproxyBrokerSpecs)
+		var brokerSpecs parameters.InproxyBrokerSpecsValue
+		if isProxy {
+			brokerSpecs = p.InproxyBrokerSpecs(
+				parameters.InproxyProxyBrokerSpecs, parameters.InproxyBrokerSpecs)
+		} else {
+			brokerSpecs = p.InproxyBrokerSpecs(
+				parameters.InproxyClientBrokerSpecs, parameters.InproxyBrokerSpecs)
+		}
 		p.Close()
 
 		if len(brokerSpecs) > 0 {

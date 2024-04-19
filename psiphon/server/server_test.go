@@ -361,6 +361,7 @@ func TestInproxyOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doTargetBrokerSpecs:  true,
 		})
 }
 
@@ -610,6 +611,7 @@ type runServerConfig struct {
 	doLogHostProvider    bool
 	inspectFlows         bool
 	doSteeringIP         bool
+	doTargetBrokerSpecs  bool
 }
 
 var (
@@ -661,6 +663,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		var err error
 		inproxyTestConfig, err = generateInproxyTestConfig(
 			addMeekServerForBroker,
+			runConfig.doTargetBrokerSpecs,
 			brokerIPAddress,
 			brokerPort,
 			serverEntrySignaturePublicKey)
@@ -3207,6 +3210,7 @@ type inproxyTestConfig struct {
 
 func generateInproxyTestConfig(
 	addMeekServerForBroker bool,
+	doTargetBrokerSpecs bool,
 	brokerIPAddress string,
 	brokerPort int,
 	serverEntrySignaturePublicKey string) (*inproxyTestConfig, error) {
@@ -3290,12 +3294,11 @@ func generateInproxyTestConfig(
 	}
 	proxySessionPublicKeyCurve25519Str := proxySessionPublicKeyCurve25519.String()
 
-	tacticsParametersJSONFormat := `
-            "InproxyAllowProxy": true,
-            "InproxyAllowClient": true,
-            "InproxyTunnelProtocolSelectionProbability": 1.0,
-            "InproxyAllBrokerPublicKeys": ["%s"],
-            "InproxyBrokerSpecs": [{
+	address := net.JoinHostPort(brokerIPAddress, strconv.Itoa(brokerPort))
+	addressRegex := strings.ReplaceAll(address, ".", "\\\\.")
+
+	brokerSpecsJSONFormat := `
+            [{
                 "BrokerPublicKey": "%s",
                 "BrokerRootObfuscationSecret": "%s",
                 "BrokerFrontingSpecs": [{
@@ -3306,7 +3309,54 @@ func generateInproxyTestConfig(
                     "VerifyPins": ["%s"],
                     "Host": "%s"
                 }]
-            }],
+            }]
+    `
+
+	validBrokerSpecsJSON := fmt.Sprintf(
+		brokerSpecsJSONFormat,
+		brokerSessionPublicKeyStr,
+		brokerRootObfuscationSecretStr,
+		brokerFrontingProviderID,
+		addressRegex,
+		brokerFrontingHostName,
+		brokerVerifyPin,
+		brokerFrontingHostName)
+
+	otherSessionPrivateKey, _ := inproxy.GenerateSessionPrivateKey()
+	otherSessionPublicKey, _ := otherSessionPrivateKey.GetPublicKey()
+	otherRootObfuscationSecret, _ := inproxy.GenerateRootObfuscationSecret()
+
+	invalidBrokerSpecsJSON := fmt.Sprintf(
+		brokerSpecsJSONFormat,
+		otherSessionPublicKey.String(),
+		otherRootObfuscationSecret.String(),
+		prng.HexString(16),
+		prng.HexString(16),
+		prng.HexString(16),
+		prng.HexString(16),
+		prng.HexString(16))
+
+	var brokerSpecsJSON, proxyBrokerSpecsJSON, clientBrokerSpecsJSON string
+	if doTargetBrokerSpecs {
+		// invalidBrokerSpecsJSON should be ignored when specific proxy/client
+		// broker specs are set.
+		brokerSpecsJSON = invalidBrokerSpecsJSON
+		proxyBrokerSpecsJSON = validBrokerSpecsJSON
+		clientBrokerSpecsJSON = validBrokerSpecsJSON
+	} else {
+		brokerSpecsJSON = validBrokerSpecsJSON
+		proxyBrokerSpecsJSON = "[]"
+		clientBrokerSpecsJSON = "[]"
+	}
+
+	tacticsParametersJSONFormat := `
+            "InproxyAllowProxy": true,
+            "InproxyAllowClient": true,
+            "InproxyTunnelProtocolSelectionProbability": 1.0,
+            "InproxyAllBrokerPublicKeys": ["%s", "%s"],
+            "InproxyBrokerSpecs": %s,
+            "InproxyProxyBrokerSpecs": %s,
+            "InproxyClientBrokerSpecs": %s,
             "InproxyAllCommonCompartmentIDs": ["%s"],
             "InproxyCommonCompartmentIDs": ["%s"],
             "InproxyClientDiscoverNATProbability": 0.0,
@@ -3315,19 +3365,13 @@ func generateInproxyTestConfig(
             "InproxyDisableIPv6ICECandidates": true,
     `
 
-	address := net.JoinHostPort(brokerIPAddress, strconv.Itoa(brokerPort))
-	addressRegex := strings.ReplaceAll(address, ".", "\\\\.")
-
 	tacticsParametersJSON := fmt.Sprintf(
 		tacticsParametersJSONFormat,
 		brokerSessionPublicKeyStr,
-		brokerSessionPublicKeyStr,
-		brokerRootObfuscationSecretStr,
-		brokerFrontingProviderID,
-		addressRegex,
-		brokerFrontingHostName,
-		brokerVerifyPin,
-		brokerFrontingHostName,
+		otherSessionPublicKey.String(),
+		brokerSpecsJSON,
+		proxyBrokerSpecsJSON,
+		clientBrokerSpecsJSON,
 		commonCompartmentIDStr,
 		commonCompartmentIDStr)
 

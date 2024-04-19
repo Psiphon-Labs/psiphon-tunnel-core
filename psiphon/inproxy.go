@@ -221,8 +221,14 @@ func NewInproxyBrokerClientInstance(
 	// Select the broker to use, optionally favoring brokers with replay
 	// data.
 
-	brokerSpecs := p.InproxyBrokerSpecs(parameters.InproxyBrokerSpecs)
-
+	var brokerSpecs parameters.InproxyBrokerSpecsValue
+	if isProxy {
+		brokerSpecs = p.InproxyBrokerSpecs(
+			parameters.InproxyProxyBrokerSpecs, parameters.InproxyBrokerSpecs)
+	} else {
+		brokerSpecs = p.InproxyBrokerSpecs(
+			parameters.InproxyClientBrokerSpecs, parameters.InproxyBrokerSpecs)
+	}
 	if len(brokerSpecs) == 0 {
 		return nil, errors.TraceNew("no broker specs")
 	}
@@ -1635,19 +1641,22 @@ func MakeInproxySTUNDialParameters(
 	p parameters.ParametersAccessor,
 	isProxy bool) (*InproxySTUNDialParameters, error) {
 
-	stunServerAddressesParam := parameters.InproxyClientSTUNServerAddresses
-	stunServerAddressesRFC5780Param := parameters.InproxyClientSTUNServerAddressesRFC5780
+	var stunServerAddresses, stunServerAddressesRFC5780 []string
 	if isProxy {
-		stunServerAddressesParam = parameters.InproxyProxySTUNServerAddresses
-		stunServerAddressesRFC5780Param = parameters.InproxyProxySTUNServerAddressesRFC5780
+		stunServerAddresses = p.Strings(
+			parameters.InproxyProxySTUNServerAddresses, parameters.InproxySTUNServerAddresses)
+		stunServerAddressesRFC5780 = p.Strings(
+			parameters.InproxyProxySTUNServerAddressesRFC5780, parameters.InproxySTUNServerAddressesRFC5780)
+	} else {
+		stunServerAddresses = p.Strings(
+			parameters.InproxyClientSTUNServerAddresses, parameters.InproxySTUNServerAddresses)
+		stunServerAddressesRFC5780 = p.Strings(
+			parameters.InproxyClientSTUNServerAddressesRFC5780, parameters.InproxySTUNServerAddressesRFC5780)
 	}
 
 	// Empty STUN server address lists are not an error condition. When used
 	// for WebRTC, the STUN ICE candidate gathering will be skipped but the
 	// WebRTC connection may still be established via other candidate types.
-
-	stunServerAddresses := p.Strings(stunServerAddressesParam)
-	stunServerAddressesRFC5780 := p.Strings(stunServerAddressesRFC5780Param)
 
 	var stunServerAddress, stunServerAddressRFC5780 string
 

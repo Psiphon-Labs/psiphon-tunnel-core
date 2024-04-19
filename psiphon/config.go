@@ -952,6 +952,8 @@ type Config struct {
 	InproxyAllowClient                                     *bool
 	InproxyTunnelProtocolSelectionProbability              *float64
 	InproxyBrokerSpecs                                     parameters.InproxyBrokerSpecsValue
+	InproxyClientBrokerSpecs                               parameters.InproxyBrokerSpecsValue
+	InproxyProxyBrokerSpecs                                parameters.InproxyBrokerSpecsValue
 	InproxyReplayBrokerDialParametersTTLSeconds            *int
 	InproxyReplayBrokerUpdateFrequencySeconds              *int
 	InproxyReplayBrokerDialParametersProbability           *float64
@@ -969,6 +971,8 @@ type Config struct {
 	InproxyDTLSRandomizationProbability                    *float64
 	InproxyDataChannelTrafficShapingProbability            *float64
 	InproxyDataChannelTrafficShapingParameters             *parameters.InproxyDataChannelTrafficShapingParametersValue
+	InproxySTUNServerAddresses                             []string
+	InproxySTUNServerAddressesRFC5780                      []string
 	InproxyProxySTUNServerAddresses                        []string
 	InproxyProxySTUNServerAddressesRFC5780                 []string
 	InproxyClientSTUNServerAddresses                       []string
@@ -2316,6 +2320,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyBrokerSpecs] = config.InproxyBrokerSpecs
 	}
 
+	if len(config.InproxyProxyBrokerSpecs) > 0 {
+		applyParameters[parameters.InproxyProxyBrokerSpecs] = config.InproxyProxyBrokerSpecs
+	}
+
+	if len(config.InproxyClientBrokerSpecs) > 0 {
+		applyParameters[parameters.InproxyClientBrokerSpecs] = config.InproxyClientBrokerSpecs
+	}
+
 	if config.InproxyReplayBrokerDialParametersTTLSeconds != nil {
 		applyParameters[parameters.InproxyReplayBrokerDialParametersTTL] = fmt.Sprintf("%ds", *config.InproxyReplayBrokerDialParametersTTLSeconds)
 	}
@@ -2382,6 +2394,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyDataChannelTrafficShapingParameters != nil {
 		applyParameters[parameters.InproxyDataChannelTrafficShapingParameters] = *config.InproxyDataChannelTrafficShapingParameters
+	}
+
+	if len(config.InproxySTUNServerAddresses) > 0 {
+		applyParameters[parameters.InproxySTUNServerAddresses] = config.InproxySTUNServerAddresses
+	}
+
+	if len(config.InproxySTUNServerAddressesRFC5780) > 0 {
+		applyParameters[parameters.InproxySTUNServerAddressesRFC5780] = config.InproxySTUNServerAddressesRFC5780
 	}
 
 	if len(config.InproxyProxySTUNServerAddresses) > 0 {

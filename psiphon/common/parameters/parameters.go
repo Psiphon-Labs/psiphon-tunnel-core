@@ -374,6 +374,8 @@ const (
 	InproxyTunnelProtocolSelectionProbability          = "InproxyTunnelProtocolSelectionProbability"
 	InproxyAllBrokerPublicKeys                         = "InproxyAllBrokerPublicKeys"
 	InproxyBrokerSpecs                                 = "InproxyBrokerSpecs"
+	InproxyProxyBrokerSpecs                            = "InproxyProxyBrokerSpecs"
+	InproxyClientBrokerSpecs                           = "InproxyClientBrokerSpecs"
 	InproxyReplayBrokerDialParametersTTL               = "InproxyReplayBrokerDialParametersTTL"
 	InproxyReplayBrokerUpdateFrequency                 = "InproxyReplayBrokerUpdateFrequency"
 	InproxyReplayBrokerDialParametersProbability       = "InproxyReplayBrokerDialParametersProbability"
@@ -402,6 +404,8 @@ const (
 	InproxyDTLSRandomizationProbability                = "InproxyDTLSRandomizationProbability"
 	InproxyDataChannelTrafficShapingProbability        = "InproxyDataChannelTrafficShapingProbability"
 	InproxyDataChannelTrafficShapingParameters         = "InproxyDataChannelTrafficShapingParameters"
+	InproxySTUNServerAddresses                         = "InproxySTUNServerAddresses"
+	InproxySTUNServerAddressesRFC5780                  = "InproxySTUNServerAddressesRFC5780"
 	InproxyProxySTUNServerAddresses                    = "InproxyProxySTUNServerAddresses"
 	InproxyProxySTUNServerAddressesRFC5780             = "InproxyProxySTUNServerAddressesRFC5780"
 	InproxyClientSTUNServerAddresses                   = "InproxyClientSTUNServerAddresses"
@@ -848,6 +852,8 @@ var defaultParameters = map[string]struct {
 	InproxyTunnelProtocolSelectionProbability:          {value: 0.5, minimum: 0.0},
 	InproxyAllBrokerPublicKeys:                         {value: []string{}, flags: serverSideOnly},
 	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
+	InproxyProxyBrokerSpecs:                            {value: InproxyBrokerSpecsValue{}},
+	InproxyClientBrokerSpecs:                           {value: InproxyBrokerSpecsValue{}},
 	InproxyReplayBrokerDialParametersTTL:               {value: 24 * time.Hour, minimum: time.Duration(0)},
 	InproxyReplayBrokerUpdateFrequency:                 {value: 5 * time.Minute, minimum: time.Duration(0)},
 	InproxyReplayBrokerDialParametersProbability:       {value: 1.0, minimum: 0.0},
@@ -876,6 +882,8 @@ var defaultParameters = map[string]struct {
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
 	InproxyDataChannelTrafficShapingProbability:        {value: 0.5, minimum: 0.0},
 	InproxyDataChannelTrafficShapingParameters:         {value: InproxyDataChannelTrafficShapingParametersValue{0, 10, 0, 1500, 0, 10, 1, 1500, 0.5}},
+	InproxySTUNServerAddresses:                         {value: []string{}},
+	InproxySTUNServerAddressesRFC5780:                  {value: []string{}},
 	InproxyProxySTUNServerAddresses:                    {value: []string{}},
 	InproxyProxySTUNServerAddressesRFC5780:             {value: []string{}},
 	InproxyClientSTUNServerAddresses:                   {value: []string{}},
@@ -1607,9 +1615,16 @@ func (p ParametersAccessor) String(name string) string {
 	return value
 }
 
-func (p ParametersAccessor) Strings(name string) []string {
+// Strings returns a []string parameter value. If multiple parameter names are
+// specified, the first name with a non-empty value is used.
+func (p ParametersAccessor) Strings(names ...string) []string {
 	value := []string{}
-	p.snapshot.getValue(name, &value)
+	for _, name := range names {
+		p.snapshot.getValue(name, &value)
+		if len(value) > 0 {
+			break
+		}
+	}
 	return value
 }
 
@@ -1963,10 +1978,17 @@ func (p ParametersAccessor) ConjureTransports(name string) protocol.ConjureTrans
 	return value
 }
 
-// InproxyBrokerSpecs returns a InproxyBrokerSpecs parameter value.
-func (p ParametersAccessor) InproxyBrokerSpecs(name string) InproxyBrokerSpecsValue {
+// InproxyBrokerSpecs returns a InproxyBrokerSpecs parameter value. If
+// multiple parameter names are specified, the first name with a non-empty
+// value is used.
+func (p ParametersAccessor) InproxyBrokerSpecs(names ...string) InproxyBrokerSpecsValue {
 	value := InproxyBrokerSpecsValue{}
-	p.snapshot.getValue(name, &value)
+	for _, name := range names {
+		p.snapshot.getValue(name, &value)
+		if len(value) > 0 {
+			break
+		}
+	}
 	return value
 }
 
