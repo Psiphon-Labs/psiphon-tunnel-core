@@ -87,6 +87,8 @@ type Broker struct {
 	proxyAnnounceTimeout    int64
 	clientOfferTimeout      int64
 	pendingServerReportsTTL int64
+
+	maxCompartmentIDs int64
 }
 
 // BrokerConfig specifies the configuration for a Broker.
@@ -173,6 +175,11 @@ type BrokerConfig struct {
 	MatcherOfferLimitEntryCount   int
 	MatcherOfferRateLimitQuantity int
 	MatcherOfferRateLimitInterval time.Duration
+
+	// MaxCompartmentIDs specifies the maximum number of compartment IDs that
+	// can be included, per list, in one request. If 0, the value
+	// MaxCompartmentIDs is used.
+	MaxCompartmentIDs int
 }
 
 // NewBroker initializes a new Broker.
@@ -214,6 +221,8 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		proxyAnnounceTimeout:    int64(config.ProxyAnnounceTimeout),
 		clientOfferTimeout:      int64(config.ClientOfferTimeout),
 		pendingServerReportsTTL: int64(config.PendingServerReportsTTL),
+
+		maxCompartmentIDs: int64(common.ValueOrDefault(config.MaxCompartmentIDs, MaxCompartmentIDs)),
 	}
 
 	b.pendingServerReports = lrucache.NewWithLRU(
@@ -280,7 +289,8 @@ func (b *Broker) SetLimits(
 	matcherAnnouncementNonlimitedProxyIDs []ID,
 	matcherOfferLimitEntryCount int,
 	matcherOfferRateLimitQuantity int,
-	matcherOfferRateLimitInterval time.Duration) {
+	matcherOfferRateLimitInterval time.Duration,
+	maxCompartmentIDs int) {
 
 	b.matcher.SetLimits(
 		matcherAnnouncementLimitEntryCount,
@@ -290,6 +300,10 @@ func (b *Broker) SetLimits(
 		matcherOfferLimitEntryCount,
 		matcherOfferRateLimitQuantity,
 		matcherOfferRateLimitInterval)
+
+	atomic.StoreInt64(
+		&b.maxCompartmentIDs,
+		int64(common.ValueOrDefault(maxCompartmentIDs, MaxCompartmentIDs)))
 }
 
 // HandleSessionPacket handles a session packet from a client or proxy and
@@ -494,6 +508,7 @@ func (b *Broker) handleProxyAnnounce(
 	}
 
 	logFields, err = announceRequest.ValidateAndGetLogFields(
+		int(atomic.LoadInt64(&b.maxCompartmentIDs)),
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,
 		geoIPData)
@@ -714,6 +729,7 @@ func (b *Broker) handleClientOffer(
 	}
 
 	logFields, err = offerRequest.ValidateAndGetLogFields(
+		int(atomic.LoadInt64(&b.maxCompartmentIDs)),
 		b.config.LookupGeoIP,
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,

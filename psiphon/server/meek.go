@@ -1795,7 +1795,8 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		nonlimitedProxyIDs,
 		p.Int(parameters.InproxyBrokerMatcherOfferLimitEntryCount),
 		p.Int(parameters.InproxyBrokerMatcherOfferRateLimitQuantity),
-		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval))
+		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval),
+		p.Int(parameters.InproxyMaxCompartmentIDListLength))
 
 	return nil
 }

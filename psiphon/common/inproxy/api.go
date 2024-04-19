@@ -517,11 +517,12 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 // ValidateAndGetLogFields validates the ProxyAnnounceRequest and returns
 // common.LogFields for logging.
 func (request *ProxyAnnounceRequest) ValidateAndGetLogFields(
+	maxCompartmentIDs int,
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
-	if len(request.PersonalCompartmentIDs) > MaxCompartmentIDs {
+	if len(request.PersonalCompartmentIDs) > maxCompartmentIDs {
 		return nil, errors.Tracef("invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
@@ -548,16 +549,17 @@ func (request *ProxyAnnounceRequest) ValidateAndGetLogFields(
 // ValidateAndGetLogFields validates the ClientOfferRequest and returns
 // common.LogFields for logging.
 func (request *ClientOfferRequest) ValidateAndGetLogFields(
+	maxCompartmentIDs int,
 	lookupGeoIP LookupGeoIP,
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
-	if len(request.CommonCompartmentIDs) > MaxCompartmentIDs {
+	if len(request.CommonCompartmentIDs) > maxCompartmentIDs {
 		return nil, errors.Tracef("invalid compartment IDs length: %d", len(request.CommonCompartmentIDs))
 	}
 
-	if len(request.PersonalCompartmentIDs) > MaxCompartmentIDs {
+	if len(request.PersonalCompartmentIDs) > maxCompartmentIDs {
 		return nil, errors.Tracef("invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
