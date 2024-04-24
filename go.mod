@@ -11,7 +11,7 @@ require (
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240305020009-09f917290799
-	github.com/Psiphon-Labs/quic-go v0.0.0-20240305203241-7c4a760d03cc
+	github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
