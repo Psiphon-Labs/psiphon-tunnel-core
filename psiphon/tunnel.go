@@ -1306,7 +1306,7 @@ func dialConjure(
 		STUNServerAddress:           dialParams.ConjureSTUNServerAddress,
 		DTLSEmptyInitialPacket:      dialParams.ConjureDTLSEmptyInitialPacket,
 		DiagnosticID:                diagnosticID,
-		Logger:                      NoticeCommonLogger(),
+		Logger:                      NoticeCommonLogger(false),
 	}
 
 	if dialParams.ConjureAPIRegistration {
@@ -1519,8 +1519,15 @@ func dialInproxy(
 	// server_tunnel if the subsequent WebRTC dials fail.
 	params := getBaseAPIParameters(baseParametersNoDialParameters, config, nil)
 
+	// The debugLogging flag is passed to both NoticeCommonLogger and to the
+	// inproxy package as well; skipping debug logs in the inproxy package,
+	// before calling into the notice logger, avoids unnecessary allocations
+	// and formatting when debug logging is off.
+	debugLogging := config.InproxyEnableWebRTCDebugLogging
+
 	clientConfig := &inproxy.ClientConfig{
-		Logger:                       NoticeCommonLogger(),
+		Logger:                       NoticeCommonLogger(debugLogging),
+		EnableWebRTCDebugLogging:     debugLogging,
 		BaseAPIParameters:            params,
 		BrokerClient:                 dialParams.inproxyBrokerClient,
 		WebRTCDialCoordinator:        webRTCDialInstance,

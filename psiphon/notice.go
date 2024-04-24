@@ -1273,23 +1273,28 @@ func (writer *NoticeWriter) Write(p []byte) (n int, err error) {
 // NoticeCommonLogger maps the common.Logger interface to the notice facility.
 // This is used to make the notice facility available to other packages that
 // don't import the "psiphon" package.
-func NoticeCommonLogger() common.Logger {
-	return &commonLogger{}
+func NoticeCommonLogger(debugLogging bool) common.Logger {
+	return &commonLogger{
+		debugLogging: debugLogging,
+	}
 }
 
 type commonLogger struct {
+	debugLogging bool
 }
 
 func (logger *commonLogger) WithTrace() common.LogTrace {
 	return &commonLogTrace{
-		trace: stacktrace.GetParentFunctionName(),
+		trace:        stacktrace.GetParentFunctionName(),
+		debugLogging: logger.debugLogging,
 	}
 }
 
 func (logger *commonLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
 	return &commonLogTrace{
-		trace:  stacktrace.GetParentFunctionName(),
-		fields: fields,
+		trace:        stacktrace.GetParentFunctionName(),
+		fields:       fields,
+		debugLogging: logger.debugLogging,
 	}
 }
 
@@ -1300,8 +1305,7 @@ func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
 }
 
 func (log *commonLogger) IsLogLevelDebug() bool {
-	// There are no debug-level notices
-	return false
+	return log.debugLogging
 }
 
 func listCommonFields(fields common.LogFields) []interface{} {
@@ -1313,8 +1317,9 @@ func listCommonFields(fields common.LogFields) []interface{} {
 }
 
 type commonLogTrace struct {
-	trace  string
-	fields common.LogFields
+	trace        string
+	fields       common.LogFields
+	debugLogging bool
 }
 
 func (log *commonLogTrace) outputNotice(
@@ -1330,7 +1335,10 @@ func (log *commonLogTrace) outputNotice(
 }
 
 func (log *commonLogTrace) Debug(args ...interface{}) {
-	// Ignored.
+	if !log.debugLogging {
+		return
+	}
+	log.outputNotice("Debug", args...)
 }
 
 func (log *commonLogTrace) Info(args ...interface{}) {

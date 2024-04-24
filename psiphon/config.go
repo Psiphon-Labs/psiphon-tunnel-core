@@ -989,6 +989,7 @@ type Config struct {
 	InproxyProxyDestinationDialTimeoutMilliseconds         *int
 	InproxyPsiphonAPIRequestTimeoutMilliseconds            *int
 	InproxySkipAwaitFullyConnected                         bool
+	InproxyEnableWebRTCDebugLogging                        bool
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.

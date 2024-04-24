@@ -201,7 +201,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 		packetTunnelTransport := NewPacketTunnelTransport()
 
 		packetTunnelClient, err := tun.NewClient(&tun.ClientConfig{
-			Logger:                    NoticeCommonLogger(),
+			Logger:                    NoticeCommonLogger(false),
 			TunFileDescriptor:         config.PacketTunnelTunFileDescriptor,
 			TransparentDNSIPv4Address: config.PacketTunnelTransparentDNSIPv4Address,
 			TransparentDNSIPv6Address: config.PacketTunnelTransparentDNSIPv6Address,
@@ -2571,8 +2571,15 @@ func (controller *Controller) runInproxyProxy() {
 		return
 	}
 
+	// The debugLogging flag is passed to both NoticeCommonLogger and to the
+	// inproxy package as well; skipping debug logs in the inproxy package,
+	// before calling into the notice logger, avoids unnecessary allocations
+	// and formatting when debug logging is off.
+	debugLogging := controller.config.InproxyEnableWebRTCDebugLogging
+
 	config := &inproxy.ProxyConfig{
-		Logger:                        NoticeCommonLogger(),
+		Logger:                        NoticeCommonLogger(debugLogging),
+		EnableWebRTCDebugLogging:      debugLogging,
 		GetBrokerClient:               controller.inproxyGetProxyBrokerClient,
 		GetBaseAPIParameters:          controller.inproxyGetAPIParameters,
 		MakeWebRTCDialCoordinator:     controller.inproxyMakeWebRTCDialCoordinator,

@@ -40,6 +40,7 @@ import (
 	"github.com/pion/datachannel"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/ice/v2"
+	pion_logging "github.com/pion/logging"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/transport/v2"
 	"github.com/pion/webrtc/v3"
@@ -112,6 +113,11 @@ type WebRTCConfig struct {
 
 	// Logger is used to log events.
 	Logger common.Logger
+
+	// EnableDebugLogging indicates whether to log pion/webrtc debug and trace
+	// events. When enabled, these events will be logged to the specified
+	// Logger at a Debug log level.
+	EnableDebugLogging bool
 
 	// WebRTCDialCoordinator specifies specific WebRTC dial strategies and
 	// settings; WebRTCDialCoordinator also facilities dial replay by
@@ -295,12 +301,19 @@ func newWebRTCConn(
 	deadline, _ := ctx.Deadline()
 	TTL := time.Until(deadline)
 
-	pionLogger := newPionLogger(config.Logger)
-	pionNetwork := newPionNetwork(ctx, pionLogger, config.WebRTCDialCoordinator)
+	pionLoggerFactory := newPionLoggerFactory(
+		config.Logger,
+		config.EnableDebugLogging)
 
-	udpMux := webrtc.NewICEUniversalUDPMux(pionLogger, udpConn, TTL, pionNetwork)
+	pionNetwork := newPionNetwork(
+		ctx, pionLoggerFactory.NewLogger("net"), config.WebRTCDialCoordinator)
 
-	settingEngine := webrtc.SettingEngine{}
+	udpMux := webrtc.NewICEUniversalUDPMux(
+		pionLoggerFactory.NewLogger("mux"), udpConn, TTL, pionNetwork)
+
+	settingEngine := webrtc.SettingEngine{
+		LoggerFactory: pionLoggerFactory,
+	}
 	settingEngine.SetNet(pionNetwork)
 	settingEngine.DetachDataChannels()
 	settingEngine.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
@@ -1490,55 +1503,89 @@ func processSDPAddresses(
 	return encodedSDP, metrics, nil
 }
 
+type pionLoggerFactory struct {
+	logger       common.Logger
+	debugLogging bool
+}
+
+func newPionLoggerFactory(logger common.Logger, debugLogging bool) *pionLoggerFactory {
+	return &pionLoggerFactory{
+		logger:       logger,
+		debugLogging: debugLogging,
+	}
+}
+
+func (f *pionLoggerFactory) NewLogger(scope string) pion_logging.LeveledLogger {
+	return newPionLogger(scope, f.logger, f.debugLogging)
+}
+
 // pionLogger wraps common.Logger and implements
 // https://pkg.go.dev/github.com/pion/logging#LeveledLogger for passing into
 // pion.
 type pionLogger struct {
-	logger common.Logger
+	scope        string
+	logger       common.Logger
+	debugLogging bool
 }
 
-func newPionLogger(logger common.Logger) *pionLogger {
-	return &pionLogger{logger: logger}
+func newPionLogger(scope string, logger common.Logger, debugLogging bool) *pionLogger {
+	return &pionLogger{
+		scope:        scope,
+		logger:       logger,
+		debugLogging: debugLogging,
+	}
 }
 
 func (l *pionLogger) Trace(msg string) {
-	// Ignored.
+	if !l.debugLogging {
+		return
+	}
+	l.logger.WithTrace().Debug(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Tracef(format string, args ...interface{}) {
-	// Ignored.
+	if !l.debugLogging {
+		return
+	}
+	l.logger.WithTrace().Debug(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 func (l *pionLogger) Debug(msg string) {
-	l.logger.WithTrace().Debug("webRTC: " + msg)
+	if !l.debugLogging {
+		return
+	}
+	l.logger.WithTrace().Debug(fmt.Sprintf("[webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Debugf(format string, args ...interface{}) {
-	l.logger.WithTrace().Debug("webRTC: " + fmt.Sprintf(format, args...))
+	if !l.debugLogging {
+		return
+	}
+	l.logger.WithTrace().Debug(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 func (l *pionLogger) Info(msg string) {
-	l.logger.WithTrace().Info("webRTC: " + msg)
+	l.logger.WithTrace().Info(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Infof(format string, args ...interface{}) {
-	l.logger.WithTrace().Info("webRTC: " + fmt.Sprintf(format, args...))
+	l.logger.WithTrace().Info(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 func (l *pionLogger) Warn(msg string) {
-	l.logger.WithTrace().Warning("webRTC: " + msg)
+	l.logger.WithTrace().Warning(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Warnf(format string, args ...interface{}) {
-	l.logger.WithTrace().Warning("webRTC: " + fmt.Sprintf(format, args...))
+	l.logger.WithTrace().Warning(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 func (l *pionLogger) Error(msg string) {
-	l.logger.WithTrace().Error("webRTC: " + msg)
+	l.logger.WithTrace().Error(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Errorf(format string, args ...interface{}) {
-	l.logger.WithTrace().Error("webRTC: " + fmt.Sprintf(format, args...))
+	l.logger.WithTrace().Error(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 // pionNetwork implements pion/transport.Net.
@@ -1551,13 +1598,13 @@ func (l *pionLogger) Errorf(format string, args ...interface{}) {
 // Psiphon custom resolver.
 type pionNetwork struct {
 	dialCtx               context.Context
-	logger                *pionLogger
+	logger                pion_logging.LeveledLogger
 	webRTCDialCoordinator WebRTCDialCoordinator
 }
 
 func newPionNetwork(
 	dialCtx context.Context,
-	logger *pionLogger,
+	logger pion_logging.LeveledLogger,
 	webRTCDialCoordinator WebRTCDialCoordinator) *pionNetwork {
 
 	return &pionNetwork{

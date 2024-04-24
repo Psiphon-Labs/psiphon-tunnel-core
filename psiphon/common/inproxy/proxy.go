@@ -71,6 +71,9 @@ type ProxyConfig struct {
 	// Logger is used to log events.
 	Logger common.Logger
 
+	// EnableWebRTCDebugLogging indicates whether to emit WebRTC debug logs.
+	EnableWebRTCDebugLogging bool
+
 	// GetBrokerClient provides a BrokerClient which the proxy will use for
 	// making broker requests. If GetBrokerClient returns a shared
 	// BrokerClient instance, the BrokerClient must support multiple,
@@ -579,6 +582,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 		webRTCAnswerCtx,
 		&WebRTCConfig{
 			Logger:                      p.config.Logger,
+			EnableDebugLogging:          p.config.EnableWebRTCDebugLogging,
 			WebRTCDialCoordinator:       webRTCCoordinator,
 			ClientRootObfuscationSecret: announceResponse.ClientRootObfuscationSecret,
 			DoDTLSRandomization:         announceResponse.DoDTLSRandomization,

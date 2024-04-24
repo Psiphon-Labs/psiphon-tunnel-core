@@ -57,6 +57,9 @@ type ClientConfig struct {
 	// Logger is used to log events.
 	Logger common.Logger
 
+	// EnableWebRTCDebugLogging indicates whether to emit WebRTC debug logs.
+	EnableWebRTCDebugLogging bool
+
 	// BaseAPIParameters should be populated with Psiphon handshake metrics
 	// parameters. These will be sent to and logger by the broker.
 	BaseAPIParameters common.APIParameters
@@ -285,6 +288,7 @@ func dialClientWebRTCConn(
 	webRTCConn, SDP, SDPMetrics, err := NewWebRTCConnWithOffer(
 		ctx, &WebRTCConfig{
 			Logger:                      config.Logger,
+			EnableDebugLogging:          config.EnableWebRTCDebugLogging,
 			WebRTCDialCoordinator:       config.WebRTCDialCoordinator,
 			ClientRootObfuscationSecret: clientRootObfuscationSecret,
 			DoDTLSRandomization:         doTLSRandomization,
