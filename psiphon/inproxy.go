@@ -1625,6 +1625,9 @@ func (w *InproxyWebRTCDialInstance) ProxyDestinationDialTimeout() time.Duration 
 // InproxySTUNDialParameters is compatible with DialParameters JSON
 // marshaling. For client in-proxy tunnel dials, DialParameters will manage
 // STUN dial parameter selection and replay.
+//
+// When an instance of InproxySTUNDialParameters is unmarshaled from JSON,
+// Prepare must be called to initialize the instance for use.
 type InproxySTUNDialParameters struct {
 	ResolveParameters        *resolver.ResolveParameters
 	STUNServerAddress        string
@@ -1716,10 +1719,16 @@ func MakeInproxySTUNDialParameters(
 		STUNServerAddressRFC5780: stunServerAddressRFC5780,
 	}
 
-	dialParams.STUNServerResolvedIPAddress.Store("")
-	dialParams.STUNServerRFC5780ResolvedIPAddress.Store("")
+	dialParams.Prepare()
 
 	return dialParams, nil
+}
+
+// Prepare initializes an InproxySTUNDialParameters for use. Prepare should be
+// called for any InproxySTUNDialParameters instance unmarshaled from JSON.
+func (dialParams *InproxySTUNDialParameters) Prepare() {
+	dialParams.STUNServerResolvedIPAddress.Store("")
+	dialParams.STUNServerRFC5780ResolvedIPAddress.Store("")
 }
 
 // IsValidClientReplay checks that the selected STUN servers remain configured

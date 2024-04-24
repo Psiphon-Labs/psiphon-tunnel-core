@@ -2522,7 +2522,7 @@ func (controller *Controller) runInproxyProxy() {
 		} else {
 
 			// InproxySkipAwaitFullyConnected is a special case to support
-			// server/server_test, where a client mus be its own proxy; in
+			// server/server_test, where a client must be its own proxy; in
 			// this case, awaitFullyEstablished will block forever.
 			// inproxyAwaitBrokerSpecs simply waits until any broker specs
 			// become available, which is sufficient for the test but is not

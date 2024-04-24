@@ -995,7 +995,7 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 	}
 }
 
-var inproxyBrokerRequestParams = append([]requestParamSpec(nil), baseParams...)
+var inproxyBrokerRequestParams = append([]requestParamSpec(nil), baseSessionParams...)
 
 func getInproxyBrokerAPIParameterValidator(config *Config) common.APIParameterValidator {
 	return func(params common.APIParameters) error {
@@ -1151,7 +1151,7 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_broker_tls_version", isAnyString, requestParamOptional},
 	{"inproxy_broker_tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"inproxy_broker_client_bpf", isAnyString, requestParamOptional},
-	{"inproxy_broker_upstream_bytes_fragmented", isAnyString, requestParamOptional},
+	{"inproxy_broker_upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_broker_http_transform", isAnyString, requestParamOptional},
 	{"inproxy_broker_dns_preresolved", isAnyString, requestParamOptional},
 	{"inproxy_broker_dns_preferred", isAnyString, requestParamOptional},

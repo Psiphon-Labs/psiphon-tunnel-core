@@ -20,6 +20,7 @@
 package psiphon
 
 import (
+    "encoding/json"
     "io/ioutil"
     "os"
     "regexp"
@@ -38,7 +39,12 @@ func TestInproxyComponents(t *testing.T) {
     // replay; actual in-proxy broker round trips are exercised in the
     // psiphon/server end-to-end tests.
 
-    err := runInproxyBrokerTest()
+    err := runInproxyBrokerDialParametersTest()
+    if err != nil {
+        t.Fatalf(errors.Trace(err).Error())
+    }
+
+    err = runInproxySTUNDialParametersTest()
     if err != nil {
         t.Fatalf(errors.Trace(err).Error())
     }
@@ -51,7 +57,7 @@ func TestInproxyComponents(t *testing.T) {
     // TODO: test inproxyUDPConn multiplexed IPv6Synthesizer
 }
 
-func runInproxyBrokerTest() error {
+func runInproxyBrokerDialParametersTest() error {
 
     testDataDirName, err := ioutil.TempDir("", "psiphon-inproxy-broker-test")
     if err != nil {
@@ -148,6 +154,8 @@ func runInproxyBrokerTest() error {
         return errors.TraceNew("unexpected compartment IDs")
     }
 
+    _ = brokerDialParams.GetMetrics()
+
     // Test: replay on success
 
     previousFrontingDialAddress := brokerDialParams.FrontingDialAddress
@@ -179,6 +187,8 @@ func runInproxyBrokerTest() error {
         return errors.TraceNew("unexpected replayed TLSProfile")
     }
 
+    _ = brokerDialParams.GetMetrics()
+
     // Test: manager's broker client and dial parameters reinitialized after
     // network ID change
 
@@ -205,6 +215,8 @@ func runInproxyBrokerTest() error {
         return errors.TraceNew("unexpected non-replayed FrontingDialAddress")
     }
 
+    _ = brokerDialParams.GetMetrics()
+
     // Test: another replay after switch back to previous network ID
 
     networkID = previousNetworkID
@@ -226,6 +238,8 @@ func runInproxyBrokerTest() error {
     if brokerDialParams.TLSProfile != previousTLSProfile {
         return errors.TraceNew("unexpected replayed TLSProfile")
     }
+
+    _ = brokerDialParams.GetMetrics()
 
     // Test: clear replay
 
@@ -250,6 +264,8 @@ func runInproxyBrokerTest() error {
     if brokerDialParams.FrontingDialAddress == previousFrontingDialAddress {
         return errors.TraceNew("unexpected non-replayed FrontingDialAddress")
     }
+
+    _ = brokerDialParams.GetMetrics()
 
     // Test: no common compartment IDs sent when personal ID is set
 
@@ -296,6 +312,63 @@ func runInproxyBrokerTest() error {
             commonCompartmentID.String() {
         return errors.TraceNew("unexpected compartment IDs")
     }
+
+    _ = brokerDialParams.GetMetrics()
+
+    return nil
+}
+
+func runInproxySTUNDialParametersTest() error {
+
+    testDataDirName, err := ioutil.TempDir("", "psiphon-inproxy-stun-test")
+    if err != nil {
+        return errors.Trace(err)
+    }
+    defer os.RemoveAll(testDataDirName)
+
+    propagationChannelID := prng.HexString(8)
+    sponsorID := prng.HexString(8)
+    networkID := "NETWORK1"
+    stunServerAddresses := []string{"example.org"}
+
+    config := &Config{
+        DataRootDirectory:                 testDataDirName,
+        PropagationChannelId:              propagationChannelID,
+        SponsorId:                         sponsorID,
+        NetworkID:                         networkID,
+        InproxySTUNServerAddresses:        stunServerAddresses,
+        InproxySTUNServerAddressesRFC5780: stunServerAddresses,
+    }
+    err = config.Commit(false)
+    if err != nil {
+        return errors.Trace(err)
+    }
+    config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
+
+    p := config.GetParameters().Get()
+    defer p.Close()
+
+    dialParams, err := MakeInproxySTUNDialParameters(config, p, false)
+    if err != nil {
+        return errors.Trace(err)
+    }
+
+    _ = dialParams.GetMetrics()
+
+    dialParamsJSON, err := json.Marshal(dialParams)
+    if err != nil {
+        return errors.Trace(err)
+    }
+
+    var replayDialParams *InproxySTUNDialParameters
+    err = json.Unmarshal(dialParamsJSON, &replayDialParams)
+    if err != nil {
+        return errors.Trace(err)
+    }
+
+    replayDialParams.Prepare()
+
+    _ = replayDialParams.GetMetrics()
 
     return nil
 }

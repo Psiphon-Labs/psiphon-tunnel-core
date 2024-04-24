@@ -1032,7 +1032,7 @@ func (b *Broker) handleClientRelayedPacket(
 			logFields["connection_id"] = relayedPacketRequest.ConnectionID
 		}
 		if serverID != "" {
-			logFields["server_id"] = serverID
+			logFields["destination_server_id"] = serverID
 		}
 		if retErr != nil {
 			logFields["error"] = retErr.Error()

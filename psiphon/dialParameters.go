@@ -1143,6 +1143,8 @@ func MakeDialParameters(
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
+		} else if dialParams.InproxySTUNDialParameters != nil {
+			dialParams.InproxySTUNDialParameters.Prepare()
 		}
 
 		if !isReplay || !replayInproxyWebRTC {
