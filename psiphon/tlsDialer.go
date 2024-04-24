@@ -455,6 +455,22 @@ func CustomTLSDial(
 
 	conn.SetSessionCache(clientSessionCache)
 
+	if hasPskExt(utlsClientHelloID, utlsClientHelloSpec) {
+		// Generates typical PSK extension values.
+		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
+		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
+
+		conn.SetPskExtension(&utls.FakePreSharedKeyExtension{
+			Identities: []utls.PskIdentity{
+				{
+					Label:               label,
+					ObfuscatedTicketAge: prng.RangeUint32(13029567, math.MaxUint32),
+				},
+			},
+			Binders: [][]byte{prng.Bytes(32)},
+		})
+	}
+
 	// TODO: can conn.SetClientRandom be made to take effect if called here? In
 	// testing, the random value appears to be overwritten. As is, the overhead
 	// of needRemarshal is now always required to handle
@@ -919,29 +935,11 @@ func getUTLSClientHelloID(
 	case protocol.TLS_PROFILE_CHROME_106:
 		return utls.HelloChrome_106_Shuffle, nil, nil
 	case protocol.TLS_PROFILE_CHROME_112_PSK:
-		preset, err := utls.UTLSIdToSpec(utls.HelloChrome_112_PSK_Shuf)
-		if err != nil {
-			return utls.ClientHelloID{}, nil, err
-		}
-
-		// Generates typical PSK extension values.
-		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
-		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
-		obfuscatedTicketAge := prng.RangeUint32(13029567, math.MaxUint32)
-
-		if _, ok := preset.Extensions[len(preset.Extensions)-1].(*utls.UtlsPreSharedKeyExtension); ok {
-			pskExt := &utls.FakePreSharedKeyExtension{
-				Identities: []utls.PskIdentity{
-					{
-						Label:               label,
-						ObfuscatedTicketAge: obfuscatedTicketAge,
-					},
-				},
-				Binders: [][]byte{prng.Bytes(32)},
-			}
-			preset.Extensions[len(preset.Extensions)-1] = pskExt
-		}
-		return utls.HelloCustom, &preset, nil
+		return utls.HelloChrome_112_PSK_Shuf, nil, nil
+	case protocol.TLS_PROFILE_CHROME_120:
+		return utls.HelloChrome_120, nil, nil
+	case protocol.TLS_PROFILE_CHROME_120_PQ:
+		return utls.HelloChrome_120_PQ, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
@@ -990,6 +988,7 @@ func getClientHelloVersion(
 		utls.HelloChrome_102, utls.HelloFirefox_65,
 		utls.HelloFirefox_99, utls.HelloFirefox_105,
 		utls.HelloChrome_106_Shuffle, utls.HelloGolang,
+		utls.HelloChrome_112_PSK_Shuf,
 		utls.HelloSafari_16_0:
 		return protocol.TLS_VERSION_13, nil
 	}
@@ -1259,4 +1258,22 @@ func splitTLSMessage(contentType uint8, version uint16, msg []byte, splitIndex i
 	copy(frag2[5:], msg[splitIndex:])
 
 	return frag1, frag2, nil
+}
+
+// hasPskExt returns true if the ClientHelloSpec has a PreSharedKeyExtension.
+// If spec is nil, the ClientHelloSpec is obtained from the ClientHelloID.
+func hasPskExt(id utls.ClientHelloID, spec *utls.ClientHelloSpec) bool {
+	if spec == nil {
+		myspec, err := utls.UTLSIdToSpec(id)
+		if err != nil {
+			return false
+		}
+		spec = &myspec
+	}
+	for _, ext := range spec.Extensions {
+		if _, ok := ext.(utls.PreSharedKeyExtension); ok {
+			return true
+		}
+	}
+	return false
 }
