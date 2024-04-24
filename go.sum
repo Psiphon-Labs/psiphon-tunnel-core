@@ -15,6 +15,8 @@ github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464 h1:VmnMMMheFX
 github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464/go.mod h1:Pe5BqN2DdIdChorAXl6bDaQd/wghpCleJfid2NoSli0=
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240305020009-09f917290799 h1:dHFQz6jeIr2RdtlioyGIdJw2UfKF7G+g7GYnQxhbgrk=
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240305020009-09f917290799/go.mod h1:ECTyVpleBW9oR/iHi185js4Fs7YD5T8A6tujOUzltxs=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240424193802-52b2602ec60c h1:+SEszyxW7yu+smufzSlAszj/WmOYJ054DJjb5jllulc=
+github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240424193802-52b2602ec60c/go.mod h1:AaKKoshr8RI1LZTheeNDtNuZ39qNVPWVK4uir2c2XIs=
 github.com/Psiphon-Labs/quic-go v0.0.0-20240305203241-7c4a760d03cc h1:o9jpHz1Vuum0oasqBX4kKB8VQrR+VJzEJsBg6XAz5YU=
 github.com/Psiphon-Labs/quic-go v0.0.0-20240305203241-7c4a760d03cc/go.mod h1:1gvBCJ18gsMqvZXkPkq0u9/BQKvjNS5RFWwF5uLl2Ys=
 github.com/Psiphon-Labs/quic-go v0.0.0-20240424180206-cfb2699b1a70 h1:xe7qczglTNDPIbQgCh2Wb/nw81uFbAMHzekkCfQc/04=
