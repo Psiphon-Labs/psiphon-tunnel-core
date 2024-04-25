@@ -798,12 +798,17 @@ func (conn *WebRTCConn) readMessage(p []byte) (int, error) {
 
 	// Don't hold this lock, or else concurrent Writes will be blocked.
 	conn.mutex.Lock()
+	isClosed := conn.isClosed
 	dataChannelConn := conn.dataChannelConn
 	decoyDone := conn.decoyDone
 	conn.mutex.Unlock()
 
+	if isClosed {
+		return 0, errors.TraceNew("closed")
+	}
+
 	if dataChannelConn == nil {
-		return 0, errors.TraceNew("not connected")
+		return 0, errors.TraceNew("no data channel")
 	}
 
 	// The input read buffer, p, may not be the same length as the message
@@ -910,8 +915,12 @@ func (conn *WebRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
 	dataChannelConn := conn.dataChannelConn
 	conn.mutex.Unlock()
 
+	if isClosed {
+		return 0, errors.TraceNew("closed")
+	}
+
 	if dataChannelConn == nil {
-		return 0, errors.TraceNew("not connected")
+		return 0, errors.TraceNew("no data channel")
 	}
 
 	// Only proceed with a decoy message when no pending writes are buffered.
