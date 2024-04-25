@@ -457,6 +457,10 @@ func CustomTLSDial(
 
 	// Set fake pre-shared key extension if required.
 	if !usedSessionTicket && hasPskExt(utlsClientHelloID, utlsClientHelloSpec) {
+
+		// Implicitly true.
+		usedSessionTicket = true
+
 		// Generates typical PSK extension values.
 		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
 		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
