@@ -153,7 +153,7 @@ The github.com/Psiphon-Labs/psiphon-tunnel-core Go module may be imported into
 other Go programs. Due to legacy release tags predating use of Go modules in
 this repository, neither `go get ...@latest` nor `go get ...@tag` are
 supported at this time. To use the psiphon-tunnel-core Go module and its
-dependencies, reference a specific comment, or reference the `staging-client`
+dependencies, reference a specific commit, or reference the `staging-client`
 branch, which is the client-side, production-ready branch:
 
 ```
