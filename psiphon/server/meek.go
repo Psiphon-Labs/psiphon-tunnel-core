@@ -1843,15 +1843,19 @@ func (server *MeekServer) inproxyBrokerGetTactics(
 		return nil, "", errors.Trace(err)
 	}
 
-	newTacticsTag := ""
-	if tacticsPayload.Tactics != nil {
-		newTacticsTag = tacticsPayload.Tag
-	}
-
 	var marshaledTacticsPayload []byte
-	marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
-	if err != nil {
-		return nil, "", errors.Trace(err)
+	newTacticsTag := ""
+
+	if tacticsPayload != nil {
+
+		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		if err != nil {
+			return nil, "", errors.Trace(err)
+		}
+
+		if len(tacticsPayload.Tactics) > 0 {
+			newTacticsTag = tacticsPayload.Tag
+		}
 	}
 
 	return marshaledTacticsPayload, newTacticsTag, nil

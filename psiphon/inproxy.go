@@ -414,7 +414,11 @@ func prepareCompartmentIDs(
 
 	maxCompartmentIDListLength := p.Int(parameters.InproxyMaxCompartmentIDListLength)
 
-	personalCompartmentIDs, err := inproxy.IDsFromStrings(config.InproxyPersonalCompartmentIDs)
+	configPersonalCompartmentIDs := config.InproxyProxyPersonalCompartmentIDs
+	if !isProxy {
+		configPersonalCompartmentIDs = config.InproxyClientPersonalCompartmentIDs
+	}
+	personalCompartmentIDs, err := inproxy.IDsFromStrings(configPersonalCompartmentIDs)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}

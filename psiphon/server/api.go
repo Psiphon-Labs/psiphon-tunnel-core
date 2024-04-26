@@ -995,7 +995,9 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 	}
 }
 
-var inproxyBrokerRequestParams = append([]requestParamSpec(nil), baseSessionParams...)
+var inproxyBrokerRequestParams = append(
+	append([]requestParamSpec(nil), tacticsParams...),
+	baseSessionParams...)
 
 func getInproxyBrokerAPIParameterValidator(config *Config) common.APIParameterValidator {
 	return func(params common.APIParameters) error {

@@ -262,7 +262,7 @@ func main() {
 			psiphon.NoticeInfo("write profiles")
 			profileSampleDurationSeconds := 5
 			common.WriteRuntimeProfiles(
-				psiphon.NoticeCommonLogger(),
+				psiphon.NoticeCommonLogger(false),
 				config.DataRootDirectory,
 				"",
 				profileSampleDurationSeconds,

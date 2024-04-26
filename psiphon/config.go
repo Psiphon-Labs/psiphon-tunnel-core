@@ -643,16 +643,21 @@ type Config struct {
 	// transfer rate limit for each proxied client. When 0, there is no limit.
 	InproxyLimitDownstreamBytesPerSecond int
 
-	// InproxyPersonalCompartmentIDs specifies the personal compartment IDs
-	// used by an in-proxy client or proxy. Personal compartment IDs are
+	// InproxyProxyPersonalCompartmentIDs specifies the personal compartment
+	// IDs used by an in-proxy proxy. Personal compartment IDs are
 	// distributed from proxy operators to client users out-of-band and
-	// provide a mechanism to allow only certain clients to use a proxy, or
-	// to ensure a client only uses a certain proxy.
+	// provide a mechanism to allow only certain clients to use a proxy.
+	InproxyProxyPersonalCompartmentIDs []string
+
+	// InproxyClientPersonalCompartmentIDs specifies the personal compartment
+	// IDs used by an in-proxy client. Personal compartment IDs are
+	// distributed from proxy operators to client users out-of-band and
+	// provide a mechanism to ensure a client only uses a certain proxy.
 	//
-	// When InproxyPersonalCompartmentIDs is set, the client will use only
-	// in-proxy protocols, ensuring that all connections go through the proxy
-	// or proxiues with the same personal compartment IDs.
-	InproxyPersonalCompartmentIDs []string
+	// When InproxyClientPersonalCompartmentIDs is set, the client will use
+	// only in-proxy protocols, ensuring that all connections go through the
+	// proxy or proxies with the same personal compartment IDs.
+	InproxyClientPersonalCompartmentIDs []string
 
 	//
 	// The following parameters are deprecated.
@@ -1341,6 +1346,21 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		}
 	}
 
+	if config.ObfuscatedSSHAlgorithms != nil &&
+		len(config.ObfuscatedSSHAlgorithms) != 4 {
+		// TODO: validate each algorithm?
+		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
+	}
+
+	if !config.DisableTunnels && config.InproxyEnableProxy &&
+		common.ContainsAny(
+			config.InproxyProxyPersonalCompartmentIDs,
+			config.InproxyClientPersonalCompartmentIDs) {
+
+		// Don't allow an in-proxy client and proxy run in the same app to match.
+		return errors.TraceNew("invalid overlapping personal compartment IDs")
+	}
+
 	// This constraint is expected by logic in Controller.runTunnels().
 
 	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
@@ -1372,12 +1392,6 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	config.paramsMutex.Unlock()
 	if err != nil {
 		return errors.Trace(err)
-	}
-
-	if config.ObfuscatedSSHAlgorithms != nil &&
-		len(config.ObfuscatedSSHAlgorithms) != 4 {
-		// TODO: validate each algorithm?
-		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
 	// parametersParameters.Set will validate the config fields applied to

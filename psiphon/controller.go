@@ -1746,7 +1746,7 @@ func (controller *Controller) launchEstablishing() {
 	// corresponding personal compartment ID, so non-in-proxy tunnel
 	// protocols are disabled.
 
-	if len(controller.config.InproxyPersonalCompartmentIDs) > 0 {
+	if len(controller.config.InproxyClientPersonalCompartmentIDs) > 0 {
 
 		if len(controller.protocolSelectionConstraints.initialLimitTunnelProtocols) > 0 {
 			controller.protocolSelectionConstraints.initialLimitTunnelProtocols =
@@ -1758,7 +1758,13 @@ func (controller *Controller) launchEstablishing() {
 			controller.protocolSelectionConstraints.limitTunnelProtocols =
 				controller.protocolSelectionConstraints.
 					limitTunnelProtocols.OnlyInproxyTunnelProtocols()
-		} else {
+		}
+
+		// This covers two cases: if there was no limitTunnelProtocols to
+		// start, then limit to any in-proxy tunnel protocol; or, if there
+		// was a limit but OnlyInproxyTunnelProtocols evaluates to an empty
+		// list, also set the limit to any in-proxy tunnel protocol.
+		if len(controller.protocolSelectionConstraints.limitTunnelProtocols) == 0 {
 			controller.protocolSelectionConstraints.limitTunnelProtocols =
 				protocol.InproxyTunnelProtocols
 		}
@@ -2295,7 +2301,7 @@ loop:
 			// tuning/limiting in-proxy usage independent of
 			// LimitTunnelProtocol targeting.
 
-			onlyInproxy := len(controller.config.InproxyPersonalCompartmentIDs) > 0
+			onlyInproxy := len(controller.config.InproxyClientPersonalCompartmentIDs) > 0
 			includeInproxy := onlyInproxy || prng.FlipWeightedCoin(inproxySelectionProbability)
 
 			return controller.protocolSelectionConstraints.selectProtocol(
@@ -2769,7 +2775,7 @@ func (controller *Controller) inproxyHandleTacticsPayload(
 	tacticsRecord, err := tactics.HandleTacticsPayload(
 		GetTacticsStorer(controller.config), networkID, payload)
 	if err != nil {
-		NoticeError("HandleTacticsPayloadfailed: %v", errors.Trace(err))
+		NoticeError("HandleTacticsPayload failed: %v", errors.Trace(err))
 		return false
 	}
 

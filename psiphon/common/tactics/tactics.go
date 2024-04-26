@@ -1701,7 +1701,10 @@ func applyTacticsPayload(
 		// original tag -- but no tactics payload. In this case, simply fail
 		// the apply operation.
 
-		if payload.Tactics == nil {
+		// A nil payload.Tactics, of type json.RawMessage, can be serialized
+		// as the JSON "null".
+		if payload.Tactics == nil ||
+			bytes.Equal(payload.Tactics, []byte("null")) {
 			return errors.TraceNew("missing tactics")
 		}
 
