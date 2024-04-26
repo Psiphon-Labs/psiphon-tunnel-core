@@ -221,7 +221,7 @@ func flight4Parse(ctx context.Context, c flightConn, state *State, cache *handsh
 	return flight6, nil, nil
 }
 
-func flight4Generate(c flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight4Generate(ctx context.Context, c flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	extensions := []extension.Extension{&extension.RenegotiationInfo{
 		RenegotiatedConnection: 0,
 	}}
@@ -265,7 +265,7 @@ func flight4Generate(c flightConn, state *State, _ *handshakeCache, cfg *handsha
 
 	// [Psiphon]
 	// Randomize ServerHello
-	seed, err := inproxy_dtls.GetDTLSSeed(c.LocalAddr())
+	seed, err := inproxy_dtls.GetDTLSSeed(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

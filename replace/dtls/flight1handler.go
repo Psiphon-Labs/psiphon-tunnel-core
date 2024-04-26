@@ -55,7 +55,7 @@ func flight1Parse(ctx context.Context, c flightConn, state *State, cache *handsh
 // symbol, which may be used to verify that the fork is used when compiling.
 const IsPsiphon = true
 
-func flight1Generate(c flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight1Generate(ctx context.Context, c flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	var zeroEpoch uint16
 	state.localEpoch.Store(zeroEpoch)
 	state.remoteEpoch.Store(zeroEpoch)
@@ -137,7 +137,7 @@ func flight1Generate(c flightConn, state *State, _ *handshakeCache, cfg *handsha
 
 	// [Psiphon]
 	// Randomize ClientHello
-	seed, err := inproxy_dtls.GetDTLSSeed(c.LocalAddr())
+	seed, err := inproxy_dtls.GetDTLSSeed(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

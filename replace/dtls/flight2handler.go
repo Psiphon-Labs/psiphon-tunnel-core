@@ -45,7 +45,7 @@ func flight2Parse(ctx context.Context, c flightConn, state *State, cache *handsh
 	return flight4, nil, nil
 }
 
-func flight2Generate(_ flightConn, state *State, _ *handshakeCache, _ *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight2Generate(_ context.Context, _ flightConn, state *State, _ *handshakeCache, _ *handshakeConfig) ([]*packet, *alert.Alert, error) {
 
 	// [Psiphon]
 	// With SetDTLSInsecureSkipHelloVerify set, this should never be called,

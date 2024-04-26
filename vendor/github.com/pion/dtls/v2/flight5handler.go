@@ -65,7 +65,7 @@ func flight5Parse(_ context.Context, c flightConn, state *State, cache *handshak
 	return flight5, nil, nil
 }
 
-func flight5Generate(c flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) { //nolint:gocognit
+func flight5Generate(_ context.Context, c flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) { //nolint:gocognit
 	var privateKey crypto.PrivateKey
 	var pkts []*packet
 	if state.remoteRequestedCertificate {

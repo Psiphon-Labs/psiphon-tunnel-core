@@ -116,7 +116,7 @@ func handleHelloResume(sessionID []byte, state *State, cfg *handshakeConfig, nex
 	return next, nil, nil
 }
 
-func flight0Generate(_ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight0Generate(_ context.Context, _ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	// Initialize
 	if !cfg.insecureSkipHelloVerify {
 		state.cookie = make([]byte, cookieLength)

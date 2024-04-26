@@ -221,7 +221,9 @@ func (s *handshakeFSM) prepare(ctx context.Context, c flightConn) (handshakeStat
 		err = errFlight
 		a = &alert.Alert{Level: alert.Fatal, Description: alert.InternalError}
 	} else {
-		pkts, a, err = gen(c, s.state, s.cache, s.cfg)
+		// [Psiphon]
+		// Pass in dial context for GetDTLSSeed.
+		pkts, a, err = gen(ctx, c, s.state, s.cache, s.cfg)
 		s.retransmit = retransmit
 	}
 	if a != nil {

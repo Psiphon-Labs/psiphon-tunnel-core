@@ -30,7 +30,7 @@ func flight6Parse(_ context.Context, _ flightConn, state *State, cache *handshak
 	return flight6, nil, nil
 }
 
-func flight6Generate(_ flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight6Generate(_ context.Context, _ flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	var pkts []*packet
 
 	pkts = append(pkts,

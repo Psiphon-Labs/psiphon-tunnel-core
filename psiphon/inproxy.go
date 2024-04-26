@@ -1820,8 +1820,11 @@ func MakeInproxyWebRTCDialParameters(
 		return nil, errors.Trace(err)
 	}
 
-	trafficShapingParameters := p.InproxyDataChannelTrafficShapingParameters(
-		parameters.InproxyDataChannelTrafficShapingParameters)
+	var trafficShapingParameters parameters.InproxyDataChannelTrafficShapingParametersValue
+	if p.WeightedCoinFlip(parameters.InproxyDataChannelTrafficShapingProbability) {
+		trafficShapingParameters = p.InproxyDataChannelTrafficShapingParameters(
+			parameters.InproxyDataChannelTrafficShapingParameters)
+	}
 
 	doDTLSRandomization := p.WeightedCoinFlip(parameters.InproxyDTLSRandomizationProbability)
 

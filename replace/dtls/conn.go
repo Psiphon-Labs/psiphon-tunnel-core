@@ -839,7 +839,9 @@ func (c *Conn) handshake(ctx context.Context, cfg *handshakeConfig, initialFligh
 		}
 	}
 
-	ctxHs, cancel := context.WithCancel(context.Background())
+	// [Psiphon]
+	// Pass dial context into handshake goroutine for GetDTLSSeed.
+	ctxHs, cancel := context.WithCancel(ctx)
 	c.cancelHandshaker = cancel
 
 	firstErr := make(chan error, 1)

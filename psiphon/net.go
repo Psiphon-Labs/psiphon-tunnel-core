@@ -38,7 +38,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
-	inproxy_dtls "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy/dtls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -177,7 +176,6 @@ type NetworkIDGetter interface {
 }
 
 // RefractionNetworkingDialer implements psiphon/common/refraction.Dialer.
-
 type RefractionNetworkingDialer struct {
 	config *DialConfig
 }
@@ -217,14 +215,6 @@ func (d *RefractionNetworkingDialer) DialContext(
 		conn := &common.WriteTimeoutUDPConn{
 			UDPConn: udpConn,
 		}
-
-		// Conjure doesn't use the DTLS seed scheme, which supports in-proxy
-		// DTLS randomization. But every DTLS dial expects to find a seed
-		// state, so set the no-seed state.
-		deadline, _ := ctx.Deadline()
-		dtlsSeedTTL := time.Until(deadline)
-		inproxy_dtls.SetNoDTLSSeed(conn.LocalAddr(), dtlsSeedTTL)
-
 		return conn, nil
 
 	default:

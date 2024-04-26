@@ -706,6 +706,10 @@ func ConjureTransportUsesSTUN(transport string) bool {
 	return transport == CONJURE_TRANSPORT_DTLS_OSSH
 }
 
+func ConjureTransportUsesDTLS(transport string) bool {
+	return transport == CONJURE_TRANSPORT_DTLS_OSSH
+}
+
 type ConjureTransports []string
 
 func (transports ConjureTransports) Validate() error {

@@ -47,7 +47,7 @@ func flight4bParse(_ context.Context, _ flightConn, state *State, cache *handsha
 	return flight4b, nil, nil
 }
 
-func flight4bGenerate(_ flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight4bGenerate(_ context.Context, _ flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 	var pkts []*packet
 
 	extensions := []extension.Extension{&extension.RenegotiationInfo{

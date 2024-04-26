@@ -322,12 +322,6 @@ func newWebRTCConn(
 	// Set this behavior to look like common web browser WebRTC stacks.
 	settingEngine.SetDTLSInsecureSkipHelloVerify(true)
 
-	// TODO: set settingEngine.SetDTLSConnectContextMaker?
-
-	webRTCAPI := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
-
-	dataChannelLabel := "in-proxy-data-channel"
-
 	// Initialize data channel obfuscation
 
 	config.Logger.WithTraceFields(common.LogFields{
@@ -344,13 +338,14 @@ func newWebRTCConn(
 	// (so each peer's randomization will be distinct).
 	//
 	// To avoid forking many pion repos in order to pass the seed through to
-	// the DTLS implementation, SetDTLSSeed populates a cache that's keyed by
-	// the UDP conn.
+	// the DTLS implementation, SetDTLSSeed attaches the seed to the DTLS
+	// dial context.
 	//
 	// Either SetDTLSSeed or SetNoDTLSSeed should be set for each conn, as the
-	// pion/dtl fork treats no-seed as an error, as a check against the local
-	// address lookup mechanism.
+	// pion/dtl fork treats no-seed as an error, as a check against the
+	// context value mechanism.
 
+	var dtlsCtx context.Context
 	if config.DoDTLSRandomization {
 
 		dtlsObfuscationSecret, err := deriveObfuscationSecret(
@@ -361,24 +356,19 @@ func newWebRTCConn(
 
 		baseSeed := prng.Seed(dtlsObfuscationSecret)
 
-		// We don't specify a listen address, so the UDP conn listens on all
-		// interfaces. Internally, pion/ice expands the UDPConn's LocalAddr
-		// to a concrete IP address per interface. We must set DTLS seeds for
-		// each address.
-		for _, localAddr := range udpMux.GetListenAddresses() {
-			err := inproxy_dtls.SetDTLSSeed(
-				localAddr, &baseSeed, isOffer, TTL)
-			if err != nil {
-				return nil, nil, nil, errors.Trace(err)
-			}
+		dtlsCtx, err = inproxy_dtls.SetDTLSSeed(ctx, &baseSeed, isOffer)
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
 		}
 
 	} else {
 
-		for _, localAddr := range udpMux.GetListenAddresses() {
-			inproxy_dtls.SetNoDTLSSeed(localAddr, TTL)
-		}
+		dtlsCtx = inproxy_dtls.SetNoDTLSSeed(ctx)
 	}
+	settingEngine.SetDTLSConnectContextMaker(func() (context.Context, func()) {
+		return context.WithCancel(dtlsCtx)
+	})
+	webRTCAPI := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 
 	// Configure traffic shaping, which adds random padding and decoy messages
 	// to data channel message flows.
@@ -540,6 +530,9 @@ func newWebRTCConn(
 			maxRetransmits := uint16(0)
 			dataChannelInit.MaxRetransmits = &maxRetransmits
 		}
+
+		// TODO: randomize length?
+		dataChannelLabel := "in-proxy-data-channel"
 
 		dataChannel, err := peerConnection.CreateDataChannel(
 			dataChannelLabel, dataChannelInit)

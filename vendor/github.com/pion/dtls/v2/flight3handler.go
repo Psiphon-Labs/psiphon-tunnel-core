@@ -228,7 +228,7 @@ func handleServerKeyExchange(_ flightConn, state *State, cfg *handshakeConfig, h
 	return nil, nil //nolint:nilnil
 }
 
-func flight3Generate(_ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
+func flight3Generate(_ context.Context, _ flightConn, state *State, _ *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) {
 
 	// [Psiphon]
 	// With SetDTLSInsecureSkipHelloVerify set, this should never be called,

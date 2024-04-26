@@ -30,7 +30,7 @@ func flight5bParse(_ context.Context, _ flightConn, state *State, cache *handsha
 	return flight5b, nil, nil
 }
 
-func flight5bGenerate(_ flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) { //nolint:gocognit
+func flight5bGenerate(_ context.Context, _ flightConn, state *State, cache *handshakeCache, cfg *handshakeConfig) ([]*packet, *alert.Alert, error) { //nolint:gocognit
 	var pkts []*packet
 
 	pkts = append(pkts,
