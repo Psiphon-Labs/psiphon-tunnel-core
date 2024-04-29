@@ -2630,7 +2630,7 @@ func (sshClient *sshClient) handleTCPPortForwards(
 	//
 	//    The manager enforces the concurrent TCP dial limit: when at the limit, the
 	//    manager blocks waiting for the number of dials to drop below the limit before
-	//    dispatching the request to handleTCPPortForward(), which will run in its own
+	//    dispatching the request to handleTCPChannel(), which will run in its own
 	//    goroutine and will dial and relay the port forward.
 	//
 	//    The block delays the current request and also halts dequeuing of subsequent
@@ -2643,7 +2643,7 @@ func (sshClient *sshClient) handleTCPPortForwards(
 	//    the dial timeout. If the dial timeout has expired before the dial begins, the
 	//    port forward is rejected and a stat is recorded.
 	//
-	// 3. handleTCPPortForward() performs the port forward dial and relaying.
+	// 3. handleTCPChannel() performs the port forward dial and relaying.
 	//
 	//     a. Dial the target, using the dial timeout remaining after queue and blocking
 	//        time is deducted.
