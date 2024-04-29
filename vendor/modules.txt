@@ -23,10 +23,10 @@ github.com/Psiphon-Labs/consistent
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240305020009-09f917290799
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240424193802-52b2602ec60c
 ## explicit; go 1.21
 github.com/Psiphon-Labs/psiphon-tls
-# github.com/Psiphon-Labs/quic-go v0.0.0-20240305203241-7c4a760d03cc
+# github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536
 ## explicit; go 1.21
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
@@ -416,10 +416,12 @@ github.com/x448/float16
 # gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.5.0
 ## explicit; go 1.11
 gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib
+# go.uber.org/mock v0.4.0
+## explicit; go 1.20
 # go4.org/mem v0.0.0-20210711025021-927187094b94
 ## explicit; go 1.14
 go4.org/mem
-# golang.org/x/crypto v0.19.0
+# golang.org/x/crypto v0.22.0
 ## explicit; go 1.18
 golang.org/x/crypto/blake2b
 golang.org/x/crypto/blake2s
@@ -442,7 +444,7 @@ golang.org/x/crypto/sha3
 golang.org/x/exp/constraints
 golang.org/x/exp/rand
 golang.org/x/exp/slices
-# golang.org/x/net v0.21.0
+# golang.org/x/net v0.24.0
 ## explicit; go 1.18
 golang.org/x/net/bpf
 golang.org/x/net/dns/dnsmessage
@@ -463,7 +465,7 @@ golang.org/x/net/trace
 # golang.org/x/sync v0.3.0
 ## explicit; go 1.17
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.17.0
+# golang.org/x/sys v0.19.0
 ## explicit; go 1.18
 golang.org/x/sys/cpu
 golang.org/x/sys/plan9
@@ -472,7 +474,7 @@ golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
 golang.org/x/sys/windows/svc
 golang.org/x/sys/windows/svc/mgr
-# golang.org/x/term v0.17.0
+# golang.org/x/term v0.19.0
 ## explicit; go 1.18
 golang.org/x/term
 # golang.org/x/text v0.14.0

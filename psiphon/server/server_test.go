@@ -59,6 +59,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/miekg/dns"
 	"golang.org/x/net/proxy"
@@ -404,6 +405,19 @@ func TestHotReload(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
+			doHotReload:          true,
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doLogHostProvider:    true,
+		})
+}
+
+func TestHotReloadWithTactics(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
+			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
@@ -784,6 +798,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// customize server config
 
+	discoveryServers, err := newDiscoveryServers([]string{"1.1.1.1", "2.2.2.2"})
+	if err != nil {
+		t.Fatalf("newDiscoveryServers failed: %s\n", err)
+	}
+
 	// Initialize prune server entry test cases and associated data to pave into psinet.
 	pruneServerEntryTestCases, psinetValidServerEntryTags, expectedNumPruneNotices :=
 		initializePruneServerEntriesTest(t, runConfig)
@@ -791,7 +810,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Pave psinet with random values to test handshake homepages.
 	psinetFilename := filepath.Join(testDataDirName, "psinet.json")
 	sponsorID, expectedHomepageURL := pavePsinetDatabaseFile(
-		t, psinetFilename, "", runConfig.doDefaultSponsorID, true, psinetValidServerEntryTags)
+		t, psinetFilename, "", runConfig.doDefaultSponsorID, true, psinetValidServerEntryTags, discoveryServers)
 
 	// Pave OSL config for SLOK testing
 	oslConfigFilename := filepath.Join(testDataDirName, "osl_config.json")
@@ -812,6 +831,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		livenessTestSize)
 
 	var tacticsConfigFilename string
+	var tacticsTunnelProtocol string
 	var inproxyTacticsParametersJSON string
 
 	// Only pave the tactics config when tactics are required. This exercises the
@@ -819,9 +839,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if doServerTactics {
 		tacticsConfigFilename = filepath.Join(testDataDirName, "tactics_config.json")
 
-		tacticsTunnelProtocol := runConfig.tunnelProtocol
 		if runConfig.clientTunnelProtocol != "" {
 			tacticsTunnelProtocol = runConfig.clientTunnelProtocol
+		} else {
+			tacticsTunnelProtocol = runConfig.tunnelProtocol
 		}
 
 		if doInproxy {
@@ -841,6 +862,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.doDestinationBytes,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
+			"classic",
 			inproxyTacticsParametersJSON)
 	}
 
@@ -938,6 +960,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	uniqueUserLog := make(chan map[string]interface{}, 1)
 	domainBytesLog := make(chan map[string]interface{}, 1)
 	serverTunnelLog := make(chan map[string]interface{}, 1)
+	// Max 3 discovery logs:
+	// 1. server startup
+	// 2. hot reload of psinet db (runConfig.doHotReload)
+	// 3. hot reload of server tactics (runConfig.doHotReload && doServerTactics)
+	discoveryLog := make(chan map[string]interface{}, 3)
 
 	setLogCallback(func(log []byte) {
 
@@ -949,6 +976,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		if logFields["event_name"] == nil {
+			if logFields["discovery_strategy"] != nil {
+				select {
+				case discoveryLog <- logFields:
+				default:
+				}
+			}
 			return
 		}
 
@@ -1043,9 +1076,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if runConfig.doHotReload {
 
+		// Change discovery servers. Tests that discovery switches over to
+		// these new servers.
+		discoveryServers, err = newDiscoveryServers([]string{"3.3.3.3"})
+		if err != nil {
+			t.Fatalf("newDiscoveryServers failed: %s\n", err)
+		}
+
 		// Pave new config files with different random values.
 		sponsorID, expectedHomepageURL = pavePsinetDatabaseFile(
-			t, psinetFilename, "", runConfig.doDefaultSponsorID, true, psinetValidServerEntryTags)
+			t, psinetFilename, "", runConfig.doDefaultSponsorID, true, psinetValidServerEntryTags, discoveryServers)
 
 		propagationChannelID = paveOSLConfigFile(t, oslConfigFilename)
 
@@ -1058,6 +1098,26 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.requireAuthorization,
 			runConfig.denyTrafficRules,
 			livenessTestSize)
+
+		if doServerTactics {
+			// Pave new tactics file with different discovery strategy. Tests
+			// that discovery switches over to the new strategy.
+			paveTacticsConfigFile(
+				t,
+				tacticsConfigFilename,
+				tacticsRequestPublicKey,
+				tacticsRequestPrivateKey,
+				tacticsRequestObfuscatedKey,
+				tacticsTunnelProtocol,
+				propagationChannelID,
+				livenessTestSize,
+				runConfig.doBurstMonitor,
+				runConfig.doDestinationBytes,
+				runConfig.applyPrefix,
+				runConfig.forceFragmenting,
+				"consistent",
+				inproxyTacticsParametersJSON)
+		}
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -1487,12 +1547,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// random homepage URLs will change, but this has no effect on the
 		// already connected client.
 		_, _ = pavePsinetDatabaseFile(
-			t, psinetFilename, sponsorID, runConfig.doDefaultSponsorID, false, psinetValidServerEntryTags)
-
-		tacticsTunnelProtocol := runConfig.tunnelProtocol
-		if runConfig.clientTunnelProtocol != "" {
-			tacticsTunnelProtocol = runConfig.clientTunnelProtocol
-		}
+			t, psinetFilename, sponsorID, runConfig.doDefaultSponsorID, false, psinetValidServerEntryTags, discoveryServers)
 
 		// Pave tactics without destination bytes.
 		paveTacticsConfigFile(
@@ -1508,6 +1563,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			false,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
+			"consistent",
 			inproxyTacticsParametersJSON)
 
 		p, _ := os.FindProcess(os.Getpid())
@@ -1733,6 +1789,41 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
+	// Check logs emitted by discovery.
+
+	var expectedDiscoveryStrategy []string
+
+	// Discovery emits 1 log on startup.
+	if doServerTactics {
+		expectedDiscoveryStrategy = append(expectedDiscoveryStrategy, "classic")
+	} else {
+		expectedDiscoveryStrategy = append(expectedDiscoveryStrategy, "consistent")
+	}
+	if runConfig.doHotReload {
+		if doServerTactics {
+			// Discovery emits 1 log when tactics are reloaded, which happens
+			// before the psinet database is reloaded.
+			expectedDiscoveryStrategy = append(expectedDiscoveryStrategy, "classic")
+		}
+		// Discovery emits 1 when the psinet database is reloaded.
+		expectedDiscoveryStrategy = append(expectedDiscoveryStrategy, "consistent")
+	}
+
+	for _, expectedStrategy := range expectedDiscoveryStrategy {
+		select {
+		case logFields := <-discoveryLog:
+			if strategy, ok := logFields["discovery_strategy"].(string); ok {
+				if strategy != expectedStrategy {
+					t.Fatalf("expected discovery strategy \"%s\"", expectedStrategy)
+				}
+			} else {
+				t.Fatalf("missing discovery_strategy field")
+			}
+		default:
+			t.Fatalf("missing discovery log")
+		}
+	}
+
 	// Check that datastore had retained/pruned server entries as expected.
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
 
@@ -1818,6 +1909,49 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if entry.(string) != testSteeringIP {
 			t.Fatalf("unexpected cached steering IP: %v", entry)
 		}
+	}
+
+	// Check that the client discovered one of the discovery servers.
+
+	discoveredServers := make(map[string]*protocol.ServerEntry)
+
+	// Otherwise NewServerEntryIterator only returns TargetServerEntry.
+	clientConfig.TargetServerEntry = ""
+
+	_, iterator, err := psiphon.NewServerEntryIterator(clientConfig)
+	if err != nil {
+		t.Fatalf("NewServerEntryIterator failed: %s", err)
+	}
+	defer iterator.Close()
+
+	for {
+		serverEntry, err := iterator.Next()
+		if err != nil {
+			t.Fatalf("ServerIterator.Next failed: %s", err)
+		}
+		if serverEntry == nil {
+			break
+		}
+		discoveredServers[serverEntry.IpAddress] = serverEntry
+	}
+
+	foundOne := false
+	for _, server := range discoveryServers {
+
+		serverEntry, err := protocol.DecodeServerEntry(server.EncodedServerEntry, "", "")
+		if err != nil {
+			t.Fatalf("protocol.DecodeServerEntry failed: %s", err)
+		}
+
+		if v, ok := discoveredServers[serverEntry.IpAddress]; ok {
+			if v.Tag == serverEntry.Tag {
+				foundOne = true
+				break
+			}
+		}
+	}
+	if !foundOne {
+		t.Fatalf("expected client to discover at least one server")
 	}
 }
 
@@ -2751,7 +2885,8 @@ func pavePsinetDatabaseFile(
 	sponsorID string,
 	useDefaultSponsorID bool,
 	doDomainBytes bool,
-	validServerEntryTags []string) (string, string) {
+	validServerEntryTags []string,
+	discoveryServers []*psinet.DiscoveryServer) (string, string) {
 
 	if sponsorID == "" {
 		sponsorID = strings.ToUpper(prng.HexString(8))
@@ -2765,6 +2900,11 @@ func pavePsinetDatabaseFile(
 	fakeDomain := prng.HexString(4)
 	fakePath := prng.HexString(4)
 	expectedHomepageURL := fmt.Sprintf("https://%s.com/%s", fakeDomain, fakePath)
+
+	discoverServersJSON, err := json.Marshal(discoveryServers)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %s\n", err)
+	}
 
 	psinetJSONFormat := `
     {
@@ -2787,7 +2927,8 @@ func pavePsinetDatabaseFile(
         },
         "valid_server_entry_tags" : {
             %s
-        }
+        },
+        "discovery_servers" : %s
     }
 	`
 
@@ -2821,9 +2962,10 @@ func pavePsinetDatabaseFile(
 		expectedHomepageURL,
 		protocol.PSIPHON_API_ALERT_DISALLOWED_TRAFFIC,
 		actionURLsJSON,
-		validServerEntryTagsJSON)
+		validServerEntryTagsJSON,
+		discoverServersJSON)
 
-	err := ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
+	err = ioutil.WriteFile(psinetFilename, []byte(psinetJSON), 0600)
 	if err != nil {
 		t.Fatalf("error paving psinet database file: %s", err)
 	}
@@ -3033,6 +3175,7 @@ func paveTacticsConfigFile(
 	doDestinationBytes bool,
 	applyOsshPrefix bool,
 	enableOsshPrefixFragmenting bool,
+	discoveryStategy string,
 	inproxyParametersJSON string) {
 
 	// Setting LimitTunnelProtocols passively exercises the
@@ -3084,7 +3227,8 @@ func paveTacticsConfigFile(
           "BPFClientTCPProbability" : 1.0,
           "ServerPacketManipulationSpecs" : [{"Name": "test-packetman-spec", "PacketSpecs": [["TCP-flags S"]]}],
           "ServerPacketManipulationProbability" : 1.0,
-          "ServerProtocolPacketManipulations": {"All" : ["test-packetman-spec"]}
+          "ServerProtocolPacketManipulations": {"All" : ["test-packetman-spec"]},
+          "ServerDiscoveryStrategy": "%s"
         }
       },
       "FilteredTactics" : [
@@ -3166,6 +3310,7 @@ func paveTacticsConfigFile(
 		livenessTestSize,
 		livenessTestSize,
 		livenessTestSize,
+		discoveryStategy,
 		propagationChannelID,
 		strings.ReplaceAll(testCustomHostNameRegex, `\`, `\\`),
 		tunnelProtocol)
@@ -3910,4 +4055,31 @@ func (f *flows) Write(p []byte) (n int, err error) {
 	f.lastTime = curTime
 
 	return n, err
+}
+
+// newDiscoveryServers returns len(ipAddresses) discovery servers with the
+// given IP addresses and randomly generated tags.
+func newDiscoveryServers(ipAddresses []string) ([]*psinet.DiscoveryServer, error) {
+
+	servers := make([]*psinet.DiscoveryServer, len(ipAddresses))
+
+	for i, ipAddress := range ipAddresses {
+
+		encodedServer, err := protocol.EncodeServerEntry(&protocol.ServerEntry{
+			IpAddress: ipAddress,
+			Tag:       prng.HexString(16),
+		})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		servers[i] = &psinet.DiscoveryServer{
+			DiscoveryDateRange: []time.Time{
+				time.Now().Add(-time.Hour).UTC(),
+				time.Now().Add(time.Hour).UTC(),
+			},
+			EncodedServerEntry: encodedServer,
+		}
+	}
+	return servers, nil
 }

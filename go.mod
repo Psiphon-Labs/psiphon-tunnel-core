@@ -17,7 +17,9 @@ replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-2023072
 // psiphon/common/inproxy/newWebRTCConn for details.
 
 replace github.com/pion/dtls/v2 => ./replace/dtls
+
 replace github.com/pion/ice/v2 => ./replace/ice
+
 replace github.com/pion/webrtc/v3 => ./replace/webrtc
 
 require (
@@ -26,8 +28,8 @@ require (
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240305020009-09f917290799
-	github.com/Psiphon-Labs/quic-go v0.0.0-20240305203241-7c4a760d03cc
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240424193802-52b2602ec60c
+	github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/bits-and-blooms/bloom/v3 v3.6.0
@@ -56,6 +58,7 @@ require (
 	github.com/pion/datachannel v1.5.5
 	github.com/pion/dtls/v2 v2.2.7
 	github.com/pion/ice/v2 v2.3.12
+	github.com/pion/logging v0.2.2
 	github.com/pion/sctp v1.8.12
 	github.com/pion/sdp/v3 v3.0.8
 	github.com/pion/stun v0.6.1
@@ -70,11 +73,11 @@ require (
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 	github.com/wlynxg/anet v0.0.1
-	golang.org/x/crypto v0.19.0
-	golang.org/x/net v0.21.0
+	golang.org/x/crypto v0.22.0
+	golang.org/x/net v0.24.0
 	golang.org/x/sync v0.3.0
-	golang.org/x/sys v0.17.0
-	golang.org/x/term v0.17.0
+	golang.org/x/sys v0.19.0
+	golang.org/x/term v0.19.0
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
 	tailscale.com v1.40.0
 )
@@ -106,7 +109,6 @@ require (
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pion/interceptor v0.1.25 // indirect
-	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/mdns v0.0.9 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.12 // indirect
@@ -122,6 +124,7 @@ require (
 	github.com/tailscale/goupnp v1.0.1-0.20210804011211-c64d0f06ea05 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/goptlib v1.5.0 // indirect
+	go.uber.org/mock v0.4.0 // indirect
 	go4.org/mem v0.0.0-20210711025021-927187094b94 // indirect
 	golang.org/x/exp v0.0.0-20221205204356-47842c84f3db // indirect
 	golang.org/x/text v0.14.0 // indirect

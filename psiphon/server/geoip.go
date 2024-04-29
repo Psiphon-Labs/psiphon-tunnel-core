@@ -218,7 +218,8 @@ func (geoIP *GeoIPService) LookupIP(IP net.IP) GeoIPData {
 
 // LookupISPForIP determines a GeoIPData for a given client IP address. Only
 // ISP, ASN, and ASO fields will be populated. This lookup is faster than a
-// full lookup.
+// full lookup. Benchmarks show this lookup is <= ~1 microsecond against the
+// production geo IP database.
 func (geoIP *GeoIPService) LookupISPForIP(IP net.IP) GeoIPData {
 	return geoIP.lookupIP(IP, true)
 }

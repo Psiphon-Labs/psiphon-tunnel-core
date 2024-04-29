@@ -368,6 +368,7 @@ const (
 	SteeringIPCacheTTL                                 = "SteeringIPCacheTTL"
 	SteeringIPCacheMaxEntries                          = "SteeringIPCacheMaxEntries"
 	SteeringIPProbability                              = "SteeringIPProbability"
+	ServerDiscoveryStrategy                            = "ServerDiscoveryStrategy"
 	InproxyAllowProxy                                  = "InproxyAllowProxy"
 	InproxyAllowClient                                 = "InproxyAllowClient"
 	InproxyAllowDomainFrontedDestinations              = "InproxyAllowDomainFrontedDestinations"
@@ -839,6 +840,8 @@ var defaultParameters = map[string]struct {
 	SteeringIPCacheTTL:        {value: 1 * time.Hour, minimum: time.Duration(0)},
 	SteeringIPCacheMaxEntries: {value: 65536, minimum: 0},
 	SteeringIPProbability:     {value: 1.0, minimum: 0.0},
+
+	ServerDiscoveryStrategy: {value: "", flags: serverSideOnly},
 
 	// For inproxy tactics, there is no proxyOnly flag, since Psiphon apps may
 	// run both clients and inproxy proxies.
