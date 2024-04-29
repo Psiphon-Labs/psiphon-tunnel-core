@@ -1401,7 +1401,7 @@ func (w *InproxyWebRTCDialInstance) DoDTLSRandomization() bool {
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) DataChannelTrafficShapingParameters() *inproxy.DataChannelTrafficShapingParameters {
-	return &w.webRTCDialParameters.DataChannelTrafficShapingParameters
+	return w.webRTCDialParameters.DataChannelTrafficShapingParameters
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -1807,7 +1807,7 @@ func (dialParams *InproxySTUNDialParameters) GetMetrics() common.LogFields {
 // WebRTC dial parameter selection and replay.
 type InproxyWebRTCDialParameters struct {
 	RootObfuscationSecret               inproxy.ObfuscationSecret
-	DataChannelTrafficShapingParameters inproxy.DataChannelTrafficShapingParameters
+	DataChannelTrafficShapingParameters *inproxy.DataChannelTrafficShapingParameters
 	DoDTLSRandomization                 bool
 }
 
@@ -1820,17 +1820,18 @@ func MakeInproxyWebRTCDialParameters(
 		return nil, errors.Trace(err)
 	}
 
-	var trafficShapingParameters parameters.InproxyDataChannelTrafficShapingParametersValue
+	var trafficSharingParams inproxy.DataChannelTrafficShapingParameters
 	if p.WeightedCoinFlip(parameters.InproxyDataChannelTrafficShapingProbability) {
-		trafficShapingParameters = p.InproxyDataChannelTrafficShapingParameters(
-			parameters.InproxyDataChannelTrafficShapingParameters)
+		trafficSharingParams = inproxy.DataChannelTrafficShapingParameters(
+			p.InproxyDataChannelTrafficShapingParameters(
+				parameters.InproxyDataChannelTrafficShapingParameters))
 	}
 
 	doDTLSRandomization := p.WeightedCoinFlip(parameters.InproxyDTLSRandomizationProbability)
 
 	return &InproxyWebRTCDialParameters{
 		RootObfuscationSecret:               rootObfuscationSecret,
-		DataChannelTrafficShapingParameters: inproxy.DataChannelTrafficShapingParameters(trafficShapingParameters),
+		DataChannelTrafficShapingParameters: &trafficSharingParams,
 		DoDTLSRandomization:                 doDTLSRandomization,
 	}, nil
 }

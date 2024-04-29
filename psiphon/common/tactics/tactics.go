@@ -1305,12 +1305,17 @@ func SetTacticsAPIParameters(
 	return nil
 }
 
-// HandleTacticsPayload updates the stored tactics with the given payload.
-// If the payload has a new tag/tactics, this is stored and a new expiry
-// time is set. If the payload has the same tag, the existing tactics are
-// retained and the expiry is extended using the previous TTL.
-// HandleTacticsPayload is called by the Psiphon client to handle the
-// tactics payload in the handshake response.
+// HandleTacticsPayload updates the stored tactics with the given payload. If
+// the payload has a new tag/tactics, this is stored and a new expiry time is
+// set. If the payload has the same tag, the existing tactics are retained,
+// the expiry is extended using the previous TTL, and a nil record is
+// rerturned.
+//
+// HandleTacticsPayload is called by the Psiphon client to handle the tactics
+// payload in the API handshake and inproxy broker responses. As the Psiphon
+// client has already called UseStoredTactics/FetchTactics and applied
+// tactics, the nil record return value allows the caller to skip an
+// unnecessary tactics parameters application.
 func HandleTacticsPayload(
 	storer Storer,
 	networkID string,
@@ -1339,16 +1344,25 @@ func HandleTacticsPayload(
 		return nil, errors.Trace(err)
 	}
 
-	err = applyTacticsPayload(storer, networkID, record, payload)
+	newTactics, err := applyTacticsPayload(storer, networkID, record, payload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	// TODO: if tags match, just set an expiry record, not the whole tactics record?
+	// Store the tactics record, which may contain new tactics, and always
+	// contains an extended TTL.
+	//
+	// TODO: if tags match, just set an expiry record, not the whole tactics
+	// record?
 
 	err = setStoredTacticsRecord(storer, networkID, record)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if !newTactics {
+		// Don't return a tactics record when the tactics have not changed.
+		record = nil
 	}
 
 	return record, nil
@@ -1516,7 +1530,7 @@ func FetchTactics(
 		return nil, errors.Trace(err)
 	}
 
-	err = applyTacticsPayload(storer, networkID, record, payload)
+	_, err = applyTacticsPayload(storer, networkID, record, payload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1680,10 +1694,12 @@ func applyTacticsPayload(
 	storer Storer,
 	networkID string,
 	record *Record,
-	payload *Payload) error {
+	payload *Payload) (bool, error) {
+
+	newTactics := false
 
 	if payload.Tag == "" {
-		return errors.TraceNew("invalid tag")
+		return newTactics, errors.TraceNew("invalid tag")
 	}
 
 	// Replace the tactics data when the tags differ.
@@ -1705,35 +1721,37 @@ func applyTacticsPayload(
 		// as the JSON "null".
 		if payload.Tactics == nil ||
 			bytes.Equal(payload.Tactics, []byte("null")) {
-			return errors.TraceNew("missing tactics")
+			return newTactics, errors.TraceNew("missing tactics")
 		}
 
 		record.Tag = payload.Tag
 		record.Tactics = Tactics{}
 		err := json.Unmarshal(payload.Tactics, &record.Tactics)
 		if err != nil {
-			return errors.Trace(err)
+			return newTactics, errors.Trace(err)
 		}
+
+		newTactics = true
 	}
 
 	// Note: record.Tactics.TTL is validated by server
 	ttl, err := time.ParseDuration(record.Tactics.TTL)
 	if err != nil {
-		return errors.Trace(err)
+		return newTactics, errors.Trace(err)
 	}
 
 	if ttl <= 0 {
-		return errors.TraceNew("invalid TTL")
+		return newTactics, errors.TraceNew("invalid TTL")
 	}
 	if record.Tactics.Probability <= 0.0 {
-		return errors.TraceNew("invalid probability")
+		return newTactics, errors.TraceNew("invalid probability")
 	}
 
 	// Set or extend the expiry.
 
 	record.Expiry = time.Now().UTC().Add(ttl)
 
-	return nil
+	return newTactics, nil
 }
 
 func setStoredTacticsRecord(

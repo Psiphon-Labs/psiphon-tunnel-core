@@ -500,7 +500,7 @@ func (r *Resolver) ResolveAddress(
 	}
 
 	if index == -1 {
-		return "", errors.TraceNew("no IP for network")
+		return "", errors.Tracef("no IP for network '%s'", network)
 	}
 
 	return net.JoinHostPort(IPs[index].String(), port), nil

@@ -1618,14 +1618,14 @@ func (p ParametersAccessor) String(name string) string {
 // Strings returns a []string parameter value. If multiple parameter names are
 // specified, the first name with a non-empty value is used.
 func (p ParametersAccessor) Strings(names ...string) []string {
-	value := []string{}
 	for _, name := range names {
+		value := []string{}
 		p.snapshot.getValue(name, &value)
 		if len(value) > 0 {
-			break
+			return value
 		}
 	}
-	return value
+	return []string{}
 }
 
 // Int returns an int parameter value.
@@ -1982,14 +1982,14 @@ func (p ParametersAccessor) ConjureTransports(name string) protocol.ConjureTrans
 // multiple parameter names are specified, the first name with a non-empty
 // value is used.
 func (p ParametersAccessor) InproxyBrokerSpecs(names ...string) InproxyBrokerSpecsValue {
-	value := InproxyBrokerSpecsValue{}
 	for _, name := range names {
+		value := InproxyBrokerSpecsValue{}
 		p.snapshot.getValue(name, &value)
 		if len(value) > 0 {
-			break
+			return value
 		}
 	}
-	return value
+	return InproxyBrokerSpecsValue{}
 }
 
 // InproxyBrokerSpecs returns a InproxyBrokerSpecs parameter value.

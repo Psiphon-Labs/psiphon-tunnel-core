@@ -3087,6 +3087,14 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte("InproxyBrokerSpecs"))
 		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyBrokerSpecs)))
 	}
+	if len(config.InproxyProxyBrokerSpecs) > 0 {
+		hash.Write([]byte("InproxyProxyBrokerSpecs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxyBrokerSpecs)))
+	}
+	if len(config.InproxyClientBrokerSpecs) > 0 {
+		hash.Write([]byte("InproxyClientBrokerSpecs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyClientBrokerSpecs)))
+	}
 	if config.InproxyReplayBrokerDialParametersTTLSeconds != nil {
 		hash.Write([]byte("InproxyReplayBrokerDialParametersTTLSeconds"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyReplayBrokerDialParametersTTLSeconds))
@@ -3154,6 +3162,14 @@ func (config *Config) setDialParametersHash() {
 	if config.InproxyDataChannelTrafficShapingParameters != nil {
 		hash.Write([]byte("InproxyDataChannelTrafficShapingParameters"))
 		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyDataChannelTrafficShapingParameters)))
+	}
+	if config.InproxySTUNServerAddresses != nil {
+		hash.Write([]byte("InproxySTUNServerAddresses"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxySTUNServerAddresses)))
+	}
+	if config.InproxySTUNServerAddressesRFC5780 != nil {
+		hash.Write([]byte("InproxySTUNServerAddressesRFC5780"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxySTUNServerAddressesRFC5780)))
 	}
 	if config.InproxyProxySTUNServerAddresses != nil {
 		hash.Write([]byte("InproxyProxySTUNServerAddresses"))
