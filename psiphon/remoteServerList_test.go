@@ -229,7 +229,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 		t.Fatalf("unexpected server entries")
 	}
 
-	seedState := oslConfig.NewClientSeedState("", propagationChannelID, nil)
+	seedState := oslConfig.NewClientSeedState("", propagationChannelID, nil, nil)
 	seedPortForward := seedState.NewClientSeedPortForward(net.ParseIP("0.0.0.0"))
 	seedPortForward.UpdateProgress(1, 1, 1)
 	payload := seedState.GetSeedPayload()
