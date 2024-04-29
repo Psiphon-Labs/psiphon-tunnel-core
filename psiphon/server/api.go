@@ -361,7 +361,7 @@ func handshakeAPIRequestHandler(
 			return nil, errors.TraceNew("invalid client IP")
 		}
 
-		encodedServerList = support.discovery.DiscoverServers(clientIP)
+		encodedServerList = support.discovery.DiscoverServers(IP)
 	}
 
 	// When the client indicates that it used an out-of-date server entry for

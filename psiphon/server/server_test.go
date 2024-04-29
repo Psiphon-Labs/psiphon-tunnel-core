@@ -417,7 +417,6 @@ func TestHotReloadWithTactics(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
-			enableSSHAPIRequests: true,
 			doHotReload:          true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
