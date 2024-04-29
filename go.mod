@@ -9,11 +9,13 @@ replace github.com/pion/dtls/v2 => github.com/mingyech/dtls/v2 v2.0.0
 require (
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
+	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240424193802-52b2602ec60c
 	github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
+	github.com/cespare/xxhash v1.1.0
 	github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 	github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea
 	github.com/deckarep/golang-set v0.0.0-20171013212420-1d4478f51bed

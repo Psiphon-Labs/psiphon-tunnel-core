@@ -20,8 +20,6 @@
 package server
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
@@ -348,8 +346,7 @@ func handshakeAPIRequestHandler(
 			return nil, errors.TraceNew("missing client IP")
 		}
 
-		encodedServerList = db.DiscoverServers(
-			calculateDiscoveryValue(support.Config.DiscoveryValueHMACKey, clientIP))
+		encodedServerList = support.discovery.DiscoverServers(clientIP)
 	}
 
 	// When the client indicates that it used an out-of-date server entry for
@@ -411,21 +408,6 @@ func handshakeAPIRequestHandler(
 	}
 
 	return responsePayload, nil
-}
-
-// calculateDiscoveryValue derives a value from the client IP address to be
-// used as input in the server discovery algorithm.
-// See https://github.com/Psiphon-Inc/psiphon-automation/tree/master/Automation/psi_ops_discovery.py
-// for full details.
-func calculateDiscoveryValue(discoveryValueHMACKey string, ipAddress net.IP) int {
-	// From: psi_ops_discovery.calculate_ip_address_strategy_value:
-	//     # Mix bits from all octets of the client IP address to determine the
-	//     # bucket. An HMAC is used to prevent pre-calculation of buckets for IPs.
-	//     return ord(hmac.new(HMAC_KEY, ip_address, hashlib.sha256).digest()[0])
-	// TODO: use 3-octet algorithm?
-	hash := hmac.New(sha256.New, []byte(discoveryValueHMACKey))
-	hash.Write([]byte(ipAddress.String()))
-	return int(hash.Sum(nil)[0])
 }
 
 // uniqueUserParams are the connected request parameters which are logged for

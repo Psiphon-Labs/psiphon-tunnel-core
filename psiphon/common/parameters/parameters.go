@@ -366,6 +366,7 @@ const (
 	SteeringIPCacheTTL                               = "SteeringIPCacheTTL"
 	SteeringIPCacheMaxEntries                        = "SteeringIPCacheMaxEntries"
 	SteeringIPProbability                            = "SteeringIPProbability"
+	ServerDiscoveryStrategy                          = "ServerDiscoveryStrategy"
 
 	// Retired parameters
 
@@ -782,6 +783,8 @@ var defaultParameters = map[string]struct {
 	SteeringIPCacheTTL:        {value: 1 * time.Hour, minimum: time.Duration(0)},
 	SteeringIPCacheMaxEntries: {value: 65536, minimum: 0},
 	SteeringIPProbability:     {value: 1.0, minimum: 0.0},
+
+	ServerDiscoveryStrategy: {value: "", flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
