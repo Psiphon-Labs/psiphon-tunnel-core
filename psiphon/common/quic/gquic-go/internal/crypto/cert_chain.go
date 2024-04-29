@@ -1,9 +1,10 @@
 package crypto
 
 import (
-	"crypto/tls"
 	"errors"
 	"strings"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 )
 
 // A CertChain holds a certificate and a private key

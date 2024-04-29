@@ -126,6 +126,8 @@ func RunServices(configJSON []byte) (retErr error) {
 		support.PacketManipulator = packetManipulator
 	}
 
+	support.discovery = makeDiscovery(support)
+
 	// After this point, errors should be delivered to the errors channel and
 	// orderly shutdown should flow through to the end of the function to ensure
 	// all workers are synchronously stopped.
@@ -155,6 +157,21 @@ func RunServices(configJSON []byte) (retErr error) {
 				support.PacketManipulator.Stop()
 			}()
 		}
+	}
+
+	err = support.discovery.Start()
+	if err != nil {
+		select {
+		case errorChannel <- err:
+		default:
+		}
+	} else {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			<-shutdownBroadcast
+			support.discovery.Stop()
+		}()
 	}
 
 	if config.RunLoadMonitor() {
@@ -479,6 +496,8 @@ func logIrregularTunnel(
 // components, which allows these data components to be refreshed
 // without restarting the server process.
 type SupportServices struct {
+	// TODO: make all fields non-exported, none are accessed outside
+	// of this package.
 	Config                       *Config
 	TrafficRulesSet              *TrafficRulesSet
 	OSLConfig                    *osl.Config
@@ -492,6 +511,8 @@ type SupportServices struct {
 	PacketManipulator            *packetman.Manipulator
 	ReplayCache                  *ReplayCache
 	ServerTacticsParametersCache *ServerTacticsParametersCache
+
+	discovery *Discovery
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -569,6 +590,16 @@ func (support *SupportServices) Reload() {
 			support.Blocklist},
 		support.GeoIPService.Reloaders()...)
 
+	reloadDiscovery := func(reloadedTactics bool) {
+		err := support.discovery.reload(reloadedTactics)
+		if err != nil {
+			log.WithTraceFields(
+				LogFields{"error": errors.Trace(err)}).Warning(
+				"failed to reload discovery")
+			return
+		}
+	}
+
 	// Note: established clients aren't notified when tactics change after a
 	// reload; new tactics will be obtained on the next client handshake or
 	// tactics request.
@@ -587,15 +618,22 @@ func (support *SupportServices) Reload() {
 					"failed to reload packet manipulation specs")
 			}
 		}
+
+		reloadDiscovery(true)
 	}
 
 	// Take these actions only after the corresponding Reloader has reloaded.
 	// In both the traffic rules and OSL cases, there is some impact from state
 	// reset, so the reset should be avoided where possible.
+	//
+	// Note: if both tactics and psinet are reloaded at the same time and
+	// the discovery strategy tactic has changed, then discovery will be reloaded
+	// twice.
 	reloadPostActions := map[common.Reloader]func(){
 		support.TrafficRulesSet: func() { support.TunnelServer.ResetAllClientTrafficRules() },
 		support.OSLConfig:       func() { support.TunnelServer.ResetAllClientOSLConfigs() },
 		support.TacticsServer:   reloadTactics,
+		support.PsinetDatabase:  func() { reloadDiscovery(false) },
 	}
 
 	for _, reloader := range reloaders {

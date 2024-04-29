@@ -10,38 +10,27 @@
 import UIKit
 
 import PsiphonTunnel
+import Network
 
+
+enum ProxyType {
+    case http
+    case socks
+}
+
+struct Proxy {
+    var host: NWEndpoint.Host
+    var type: ProxyType
+}
 
 @UIApplicationMain
 @objc class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
-    @objc public var socksProxyPort: Int = 0
-    @objc public var httpProxyPort: Int = 0
+    var proxy: Proxy?
 
     // The instance of PsiphonTunnel we'll use for connecting.
     var psiphonTunnel: PsiphonTunnel?
-
-    // OCSP cache for making OCSP requests in certificate revocation checking
-    var ocspCache: OCSPCache = OCSPCache.init(logger: {print("[OCSPCache]:", $0)})
-
-    // Delegate for handling certificate validation.
-    @objc public lazy var authURLSessionDelegate: OCSPAuthURLSessionDelegate =
-        OCSPAuthURLSessionDelegate.init(logger: {print("[AuthURLSessionTaskDelegate]:", $0)},
-                                        ocspCache: self.ocspCache,
-                                        // Unlike TunneledWebRequest we do not need to manually
-                                        // update the OCSP request to be proxied through the local
-                                        // HTTP proxy. Since JAHPAuthenticatingHTTPProtocol
-                                        // subclasses and registers itself with NSURLProtocol, all
-                                        // URL requests made manually (using the foundation
-                                        // framework) will be proxied automatically.
-                                        //
-                                        // Since the OCSPCache library makes requests using
-                                        // NSURLSessionDataTask, the OCSP requests will be proxied
-                                        // automatically.
-                                        modifyOCSPURL:nil,
-                                        session:nil,
-                                        timeout:10)
     
     @objc public class func sharedDelegate() -> AppDelegate {
         var delegate: AppDelegate?
@@ -58,32 +47,11 @@ import PsiphonTunnel
     internal func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
 
-        // Set the class delegate and register NSURL subclass
-        // JAHPAuthenticatingHTTPProtocol with NSURLProtocol.
-        // See comments for `setDelegate` and `start` in
-        // JAHPAuthenticatingHTTPProtocol.h
-        /*******************************************************/
-        /*****                                             *****/
-        /*****               !!! WARNING !!!               *****/
-        /*****                                             *****/
-        /*******************************************************/
-        /*****                                             *****/
-        /*****  This methood of proxying UIWebView is not  *****/
-        /*****  officially supported and requires extra    *****/
-        /*****  steps to proxy audio / video content.      *****/
-        /*****  Otherwise audio / video fetching may be    *****/
-        /*****  untunneled!                                *****/
-        /*****                                             *****/
-        /*****  It is strongly advised that you read the   *****/
-        /*****  "Caveats" section of README.md before      *****/
-        /*****  using PsiphonTunnel to proxy UIWebView     *****/
-        /*****  traffic.                                   *****/
-        /*****                                             *****/
-        /*******************************************************/
-        JAHPAuthenticatingHTTPProtocol.setDelegate(self)
-        JAHPAuthenticatingHTTPProtocol.start()
-
         self.psiphonTunnel = PsiphonTunnel.newPsiphonTunnel(self)
+
+        // Choose which proxy to use. Callback from PsiphonTunnel will determine the proxy port.
+        // If not set, then WKWebView requests are not proxied.
+        self.proxy = Proxy(host: "127.0.0.1", type: .http)
 
         return true
     }
@@ -128,12 +96,6 @@ import PsiphonTunnel
         // Clean up the tunnel
         NSLog("Stopping tunnel")
         self.psiphonTunnel?.stop()
-    }
-}
-
-extension AppDelegate: JAHPAuthenticatingHTTPProtocolDelegate {
-    func authenticatingHTTPProtocol(_ authenticatingHTTPProtocol: JAHPAuthenticatingHTTPProtocol?, logMessage message: String) {
-        NSLog("[JAHPAuthenticatingHTTPProtocol] %@", message)
     }
 }
 
@@ -191,16 +153,40 @@ extension AppDelegate: TunneledAppDelegate {
     }
 
     func onListeningSocksProxyPort(_ port: Int) {
-        DispatchQueue.main.async {
-            JAHPAuthenticatingHTTPProtocol.resetSharedDemux()
-            self.socksProxyPort = port
+        NSLog("onListeningSocksProxyPort: %d", port)
+
+        if case.socks = self.proxy?.type {
+
+            NSLog("Configuring WKWebView to use SOCKS proxy %@:%d", self.proxy!.host.debugDescription, port)
+
+            DispatchQueue.main.async {
+                let endpoint = NWEndpoint.hostPort(
+                    host: self.proxy!.host,
+                    port: NWEndpoint.Port(rawValue:UInt16(port))!)
+                let proxyConfig = ProxyConfiguration(socksv5Proxy: endpoint)
+
+                let mainView = self.window?.rootViewController as! ViewController
+                mainView.useProxyConfiguration(proxyConfig)
+            }
         }
     }
 
     func onListeningHttpProxyPort(_ port: Int) {
-        DispatchQueue.main.async {
-            JAHPAuthenticatingHTTPProtocol.resetSharedDemux()
-            self.httpProxyPort = port
+        NSLog("onListeningHttpProxyPort: %d", port)
+
+        if case.http = self.proxy?.type {
+
+            NSLog("Configuring WKWebView to use HTTP proxy %@:%d", self.proxy!.host.debugDescription, port)
+
+            DispatchQueue.main.async {
+                let endpoint = NWEndpoint.hostPort(
+                    host: self.proxy!.host,
+                    port: NWEndpoint.Port(rawValue:UInt16(port))!)
+                let proxyConfig = ProxyConfiguration(httpCONNECTProxy: endpoint)
+
+                let mainView = self.window?.rootViewController as! ViewController
+                mainView.useProxyConfiguration(proxyConfig)
+            }
         }
     }
 }

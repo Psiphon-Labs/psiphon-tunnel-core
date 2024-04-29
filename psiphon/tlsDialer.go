@@ -66,12 +66,12 @@ import (
 	"net"
 	"sync/atomic"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	tris "github.com/Psiphon-Labs/tls-tris"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -486,7 +486,7 @@ func CustomTLSDial(
 		}
 		copy(obfuscatedSessionTicketKey[:], key)
 
-		obfuscatedSessionState, err := tris.NewObfuscatedClientSessionState(
+		obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
 			obfuscatedSessionTicketKey)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -512,7 +512,7 @@ func CustomTLSDial(
 		// utls/tls.Conn.loadSession. If these requirements are not met the
 		// obfuscation session ticket would be ignored, so fail.
 
-		if !tris.ContainsObfuscatedSessionTicketCipherSuite(
+		if !tls.ContainsObfuscatedSessionTicketCipherSuite(
 			conn.HandshakeState.Hello.CipherSuites) {
 			return nil, errors.TraceNew(
 				"missing obfuscated session ticket cipher suite")

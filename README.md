@@ -146,6 +146,22 @@ $ ./ConsoleClient -config ./client.config
 Use the local SOCKS proxy (port 1080) or HTTP proxy (port 8080) to tunnel traffic.
 
 
+Using Psiphon with Go modules
+--------------------------------------------------------------------------------
+
+The github.com/Psiphon-Labs/psiphon-tunnel-core Go module may be imported into
+other Go programs. Due to legacy release tags predating use of Go modules in
+this repository, neither `go get ...@latest` nor `go get ...@tag` are
+supported at this time. To use the psiphon-tunnel-core Go module and its
+dependencies, reference a specific commit, or reference the `staging-client`
+branch, which is the client-side, production-ready branch:
+
+```
+% go get github.com/Psiphon-Labs/psiphon-tunnel-core@staging-client
+go: added github.com/Psiphon-Labs/psiphon-tunnel-core v1.0.11-0.20240424194431-3612a5a6fb4c
+```
+
+
 Acknowledgements
 --------------------------------------------------------------------------------
 
@@ -160,7 +176,6 @@ Psiphon Tunnel Core uses:
 * [bifurcation/mint](https://github.com/bifurcation/mint)
 * [boltdb/bolt](https://github.com/boltdb/bolt)
 * [cheekybits/genny/generic](https://github.com/cheekybits/genny/generic)
-* [cloudflare/tls-tris](https://github.com/cloudflare/tls-tris)
 * [codahale/sss](https://github.com/codahale/sss)
 * [cognusion/go-cache-lru](https://github.com/cognusion/go-cache-lru)
 * [creack/goselect](https://github.com/creack/goselect)

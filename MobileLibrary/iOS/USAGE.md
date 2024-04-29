@@ -41,31 +41,19 @@ The following architecture targets are compiled into the Library's framework bin
 
 When run in a simulator, there may be errors shown in the device log. This does not seem to affect the execution of the app (or Library).
 
-
-## Online Certificate Status Protocol (OCSP) Leaks
-
-### Background
-
-On iOS, requests which use HTTPS can trigger remote certificate revocation checks. Currently, the OS does this automatically by making plaintext HTTP [OCSP requests](https://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol).
-
-Unfortunately, these OCSP requests do not respect [connection proxy dictionary settings](https://developer.apple.com/documentation/foundation/nsurlsessionconfiguration/1411499-connectionproxydictionary?language=objc) or [NSURLProtocol](https://developer.apple.com/documentation/foundation/nsurlprotocol) subclasses; they are likely performed out of process. The payload in each plaintext OCSP request leaks the identity of the certificate that is being validated.
-
-The risk is that an observer can [map the certificate's serial number back to the certificate](https://github.com/OnionBrowser/OnionBrowser/issues/178#issue-437802301) to find more information about the website or server being accessed.
-
-### Fix
-
-A fix has been implemented in both sample apps: [TunneledWebRequest](SampleApps/TunneledWebRequest) and [TunneledWebView](SampleApps/TunneledWebView). This is done by implementing [URLSession:task:didReceiveChallenge:completionHandler:](https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate/1411595-urlsession?language=objc) of the [NSURLSessionTaskDelegate](https://developer.apple.com/documentation/foundation/nsurlsessiontaskdelegate) protocol; this allows us to control how revocation checking is performed.
-
-This allows us to perform OCSP requests manually and ensure that they are tunneled. See the comments in [OCSPAuthURLSessionDelegate.h](https://github.com/Psiphon-Labs/OCSPCache/blob/b945a5784cd88ed5693a62a931617bd371f3c9a8/OCSPCache/Classes/OCSPAuthURLSessionDelegate.h) and both sample apps for a reference implementation.
-
-OCSPAuthURLSessionDelegate is part of [OCSPCache](https://github.com/Psiphon-Labs/OCSPCache), which is a CocoaPod developed for constructing OCSP requests and caching OCSP responses.
-
-
 ## Proxying a web view
 
-`WKWebView` _cannot_ be proxied. `UIWebView` _can_ be. Some [googling](https://www.google.ca/search?q=uiwebview+nsurlprotocol+proxy) should provide many example of how to do this. Here is some extensive information for [Objective-C](https://www.raywenderlich.com/59982/nsurlprotocol-tutorial) and [Swift](https://www.raywenderlich.com/76735/using-nsurlprotocol-swift).
+We have provided a reference implementation for proxying `WKWebView` in [TunneledWebView](SampleApps/TunneledWebView). The shortcomings of this implementation are discussed in [SampleApps/TunneledWebView/README.md](SampleApps/TunneledWebView/README.md#-caveats-).
 
-We have provided a reference implementation for proxying `UIWebView` in [TunneledWebView](SampleApps/TunneledWebView). The shortcomings of this implementation are discussed in [SampleApps/TunneledWebView/README.md](SampleApps/TunneledWebView/README.md#-caveats-).
+## *\*\* Caveats \*\*\*
+
+### Risk of Online Certificate Status Protocol (OCSP) Leaks
+
+On iOS, remote certificate revocation checks may be performed by the system when server certificates are validated. For example, when making an HTTPS request. When [OCSP](https://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol) is used to determine the revocation status of a certificate the system will make a plaintext HTTP OCSP request if an OCSP response is not cached or [stapled](https://en.wikipedia.org/wiki/OCSP_stapling).
+
+Unfortunately, these OCSP requests do not respect [connection proxy dictionary settings](https://developer.apple.com/documentation/foundation/nsurlsessionconfiguration/1411499-connectionproxydictionary?language=objc) or [NSURLProtocol](https://developer.apple.com/documentation/foundation/nsurlprotocol) subclasses; instead they are [performed out of process](https://openradar.appspot.com/716337334). The payload in each plaintext OCSP request leaks the identity of the certificate that is being validated.
+
+The risk is that an observer can [map the certificate's serial number back to the certificate](https://github.com/OnionBrowser/OnionBrowser/issues/178#issue-437802301) to find more information about the website or server being accessed.
 
 ## Other notes
 

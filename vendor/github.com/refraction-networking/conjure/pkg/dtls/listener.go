@@ -217,7 +217,7 @@ func (l *Listener) registerChannel(connID [handshake.RandomBytesLength]byte) (<-
 		return nil, fmt.Errorf("seed already registered")
 	}
 
-	connChan := make(chan net.Conn)
+	connChan := make(chan net.Conn, 1)
 	l.connMap[connID] = connChan
 
 	return connChan, nil

@@ -20,7 +20,6 @@
 package server
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"io/ioutil"
 	golanglog "log"
@@ -30,10 +29,12 @@ import (
 	"sync"
 	"time"
 
+	std_tls "crypto/tls"
+
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	tris "github.com/Psiphon-Labs/tls-tris"
 )
 
 const WEB_SERVER_IO_TIMEOUT = 10 * time.Second
@@ -55,7 +56,6 @@ type webServer struct {
 //
 // Note: new features, including authorizations, are not supported in the
 // web API transport.
-//
 func RunWebServer(
 	support *SupportServices,
 	shutdownBroadcast <-chan struct{}) error {
@@ -70,15 +70,15 @@ func RunWebServer(
 	serveMux.HandleFunc("/status", webServer.statusHandler)
 	serveMux.HandleFunc("/client_verification", webServer.clientVerificationHandler)
 
-	certificate, err := tris.X509KeyPair(
+	certificate, err := tls.X509KeyPair(
 		[]byte(support.Config.WebServerCertificate),
 		[]byte(support.Config.WebServerPrivateKey))
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	tlsConfig := &tris.Config{
-		Certificates: []tris.Certificate{certificate},
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{certificate},
 	}
 
 	// TODO: inherits global log config?
@@ -97,7 +97,7 @@ func RunWebServer(
 			ErrorLog:       golanglog.New(logWriter, "", 0),
 
 			// Disable auto HTTP/2 (https://golang.org/doc/go1.6)
-			TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)),
+			TLSNextProto: make(map[string]func(*http.Server, *std_tls.Conn, http.Handler)),
 		},
 	}
 
