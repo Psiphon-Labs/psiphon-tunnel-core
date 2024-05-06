@@ -953,7 +953,9 @@ var tacticsParams = []requestParamSpec{
 }
 
 var tacticsRequestParams = append(
-	append([]requestParamSpec(nil), tacticsParams...),
+	append(
+		[]requestParamSpec(nil),
+		tacticsParams...),
 	baseSessionAndDialParams...)
 
 func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidator {
@@ -978,7 +980,10 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 }
 
 var inproxyBrokerRequestParams = append(
-	append([]requestParamSpec(nil), tacticsParams...),
+	append(
+		[]requestParamSpec{
+			{"network_type", isAnyString, requestParamOptional}},
+		tacticsParams...),
 	baseSessionParams...)
 
 func getInproxyBrokerAPIParameterValidator(config *Config) common.APIParameterValidator {

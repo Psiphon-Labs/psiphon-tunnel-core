@@ -85,6 +85,7 @@ type tcpPacketConn struct {
 	wg         sync.WaitGroup
 	closedChan chan struct{}
 	closeOnce  sync.Once
+	aliveTimer *time.Timer
 }
 
 type streamingPacket struct {
@@ -94,10 +95,11 @@ type streamingPacket struct {
 }
 
 type tcpPacketParams struct {
-	ReadBuffer  int
-	LocalAddr   net.Addr
-	Logger      logging.LeveledLogger
-	WriteBuffer int
+	ReadBuffer    int
+	LocalAddr     net.Addr
+	Logger        logging.LeveledLogger
+	WriteBuffer   int
+	AliveDuration time.Duration
 }
 
 func newTCPPacketConn(params tcpPacketParams) *tcpPacketConn {
@@ -110,7 +112,22 @@ func newTCPPacketConn(params tcpPacketParams) *tcpPacketConn {
 		closedChan: make(chan struct{}),
 	}
 
+	if params.AliveDuration > 0 {
+		p.aliveTimer = time.AfterFunc(params.AliveDuration, func() {
+			p.params.Logger.Warn("close tcp packet conn by alive timeout")
+			_ = p.Close()
+		})
+	}
+
 	return p
+}
+
+func (t *tcpPacketConn) ClearAliveTimer() {
+	t.mu.Lock()
+	if t.aliveTimer != nil {
+		t.aliveTimer.Stop()
+	}
+	t.mu.Unlock()
 }
 
 func (t *tcpPacketConn) AddConn(conn net.Conn, firstPacketData []byte) error {
@@ -261,6 +278,9 @@ func (t *tcpPacketConn) Close() error {
 	t.closeOnce.Do(func() {
 		close(t.closedChan)
 		shouldCloseRecvChan = true
+		if t.aliveTimer != nil {
+			t.aliveTimer.Stop()
+		}
 	})
 
 	for _, conn := range t.conns {

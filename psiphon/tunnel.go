@@ -1528,6 +1528,8 @@ func dialInproxy(
 	// server_tunnel if the subsequent WebRTC dials fail.
 	params := getBaseAPIParameters(baseParametersNoDialParameters, config, nil)
 
+	params["network_type"] = dialParams.GetNetworkType()
+
 	// The debugLogging flag is passed to both NoticeCommonLogger and to the
 	// inproxy package as well; skipping debug logs in the inproxy package,
 	// before calling into the notice logger, avoids unnecessary allocations

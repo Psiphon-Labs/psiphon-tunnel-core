@@ -188,6 +188,13 @@ type AgentConfig struct {
 	// DisableActiveTCP can be used to disable Active TCP candidates. Otherwise when TCP is enabled
 	// Active TCP candidates will be created when a new passive TCP remote candidate is added.
 	DisableActiveTCP bool
+
+	// BindingRequestHandler allows applications to perform logic on incoming STUN Binding Requests
+	// This was implemented to allow users to
+	// * Log incoming Binding Requests for debugging
+	// * Implement draft-thatcher-ice-renomination
+	// * Implement custom CandidatePair switching logic
+	BindingRequestHandler func(m *stun.Message, local, remote Candidate, pair *CandidatePair) bool
 }
 
 // initWithDefaults populates an agent and falls back to defaults if fields are unset

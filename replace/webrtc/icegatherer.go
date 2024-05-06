@@ -122,9 +122,11 @@ func (g *ICEGatherer) createAgent() error {
 		UDPMux:                 g.api.settingEngine.iceUDPMux,
 		ProxyDialer:            g.api.settingEngine.iceProxyDialer,
 		DisableActiveTCP:       g.api.settingEngine.iceDisableActiveTCP,
+		BindingRequestHandler:  g.api.settingEngine.iceBindingRequestHandler,
 
-		// [Psiphon] from https://github.com/pion/webrtc/pull/2298
-		UDPMuxSrflx: g.api.settingEngine.iceUDPMuxSrflx,
+		// [Psiphon] from https://github.com/pion/webrtc/pull/2298, https://github.com/pion/webrtc/commit/906f20c4
+		UDPMuxSrflx:        g.api.settingEngine.iceUDPMuxSrflx,
+		MaxBindingRequests: g.api.settingEngine.iceMaxBindingRequests,
 	}
 
 	requestedNetworkTypes := g.api.settingEngine.candidates.ICENetworkTypes

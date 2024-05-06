@@ -736,6 +736,17 @@ func (r *Resolver) ResolveIP(
 			go func(attempt int, questionType resolverQuestionType, useProtocolTransform bool) {
 				defer waitGroup.Done()
 
+				// Always send a result back to the main loop, even if this
+				// attempt fails, so the main loop proceeds to the next
+				// iteration immediately. Nil is sent in failure cases.
+				var a *answer
+				defer func() {
+					select {
+					case answerChan <- a:
+					default:
+					}
+				}()
+
 				// We must decrement inFlight only after sending an answer and
 				// setting awaitA or awaitAAAA to ensure that the await logic
 				// in the outer goroutine will see inFlight 0 only once those
@@ -771,7 +782,8 @@ func (r *Resolver) ResolveIP(
 				// request conns so that they can be closed, and any blocking
 				// network I/O interrupted, below, if resolveCtx is done.
 				if !conns.Add(conn) {
-					// Add fails when conns is already closed.
+					// Add fails when conns is already closed. Do not
+					// overwrite lastErr in this case.
 					return
 				}
 
@@ -828,13 +840,6 @@ func (r *Resolver) ResolveIP(
 					return
 				}
 
-				if len(IPs) > 0 {
-					select {
-					case answerChan <- &answer{attempt: attempt, IPs: IPs, TTLs: TTLs}:
-					default:
-					}
-				}
-
 				// Mark no longer awaiting A or AAAA as long as there is a
 				// valid response, even if there are no IPs in the IPv6 case.
 				switch questionType {
@@ -847,6 +852,11 @@ func (r *Resolver) ResolveIP(
 				default:
 				}
 
+				// Send the answer back to the main loop.
+				if len(IPs) > 0 {
+					a = &answer{attempt: attempt, IPs: IPs, TTLs: TTLs}
+				}
+
 			}(i+1, questionType, useProtocolTransform)
 		}
 
@@ -854,6 +864,10 @@ func (r *Resolver) ResolveIP(
 
 		select {
 		case result = <-answerChan:
+			if result == nil {
+				// The attempt failed with an error.
+				break
+			}
 			// When the first answer, a response with valid IPs, arrives, exit
 			// the attempts loop. The following await branch may collect
 			// additional answers.
@@ -887,8 +901,10 @@ func (r *Resolver) ResolveIP(
 		for loop := true; loop; {
 			select {
 			case nextAnswer := <-answerChan:
-				result.IPs = append(result.IPs, nextAnswer.IPs...)
-				result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+				if nextAnswer != nil {
+					result.IPs = append(result.IPs, nextAnswer.IPs...)
+					result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+				}
 			default:
 				loop = false
 			}
@@ -915,8 +931,10 @@ func (r *Resolver) ResolveIP(
 			stop := false
 			select {
 			case nextAnswer := <-answerChan:
-				result.IPs = append(result.IPs, nextAnswer.IPs...)
-				result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+				if nextAnswer != nil {
+					result.IPs = append(result.IPs, nextAnswer.IPs...)
+					result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+				}
 			case <-timer.C:
 				timerDrained = true
 				stop = true
@@ -1096,6 +1114,13 @@ func (r *Resolver) updateNetworkState(networkID string) {
 	// similarly use NAT 64 (on iOS; on Android, 464XLAT will handle this
 	// transparently).
 	if updateIPv6Route {
+
+		// TODO: the HasIPv6Route callback provides hasRoutableIPv6Interface
+		// functionality on platforms where that internal implementation
+		// fails. In particular, "route ip+net: netlinkrib: permission
+		// denied" on Android; see Go issue 40569). This Android case can be
+		// fixed, and the callback retired, by sharing the workaround now
+		// implemented in inproxy.pionNetwork.Interfaces.
 
 		if r.networkConfig.HasIPv6Route != nil {
 

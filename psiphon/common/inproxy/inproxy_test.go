@@ -658,7 +658,7 @@ func runTestInproxy() error {
 
 		if isMobile {
 			webRTCCoordinator.networkType = NetworkTypeMobile
-			webRTCCoordinator.disableInboundForMobleNetworks = true
+			webRTCCoordinator.disableInboundForMobileNetworks = true
 		}
 
 		brokerClient, err := NewBrokerClient(brokerCoordinator)
@@ -682,7 +682,7 @@ func runTestInproxy() error {
 	for i := 0; i < numClients; i++ {
 
 		// Test a mix of TCP and UDP proxying; also test the
-		// DisableInboundForMobleNetworks code path.
+		// DisableInboundForMobileNetworks code path.
 
 		isTCP := i%2 == 0
 		isMobile := i%4 == 0

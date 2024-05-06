@@ -66,7 +66,15 @@ func (t AbsCaptureTimeExtension) EstimatedCaptureClockOffsetDuration() *time.Dur
 		return nil
 	}
 	offset := *t.EstimatedCaptureClockOffset
+	negative := false
+	if offset < 0 {
+		offset = -offset
+		negative = true
+	}
 	duration := time.Duration(offset/(1<<32))*time.Second + time.Duration((offset&0xFFFFFFFF)*1e9/(1<<32))*time.Nanosecond
+	if negative {
+		duration = -duration
+	}
 	return &duration
 }
 
@@ -80,9 +88,17 @@ func NewAbsCaptureTimeExtension(captureTime time.Time) *AbsCaptureTimeExtension 
 // NewAbsCaptureTimeExtensionWithCaptureClockOffset makes new AbsCaptureTimeExtension from time.Time and a clock offset.
 func NewAbsCaptureTimeExtensionWithCaptureClockOffset(captureTime time.Time, captureClockOffset time.Duration) *AbsCaptureTimeExtension {
 	ns := captureClockOffset.Nanoseconds()
+	negative := false
+	if ns < 0 {
+		ns = -ns
+		negative = true
+	}
 	lsb := (ns / 1e9) & 0xFFFFFFFF
 	msb := (((ns % 1e9) * (1 << 32)) / 1e9) & 0xFFFFFFFF
 	offset := (lsb << 32) | msb
+	if negative {
+		offset = -offset
+	}
 	return &AbsCaptureTimeExtension{
 		Timestamp:                   toNtpTime(captureTime),
 		EstimatedCaptureClockOffset: &offset,

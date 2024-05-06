@@ -89,7 +89,7 @@ func NATDiscover(
 			}
 
 			config.Logger.WithTraceFields(common.LogFields{
-				"nat_type": natType.String(),
+				"nat_type": natType,
 				"error":    err,
 			}).Info("NAT type discovery")
 
@@ -114,7 +114,7 @@ func NATDiscover(
 			}
 
 			config.Logger.WithTraceFields(common.LogFields{
-				"port_mapping_types": portMappingTypes.String(),
+				"port_mapping_types": portMappingTypes,
 				"error":              err,
 			}).Info("Port mapping type discovery")
 

@@ -12,7 +12,7 @@ replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-2023072
 // This fork also includes the mingyech/dtls Conjure customizations.
 //
 // In addition, ice/v2 and webrtc/v3 are replaced by forks, based on
-// github.com/pion/ice/v2 v2.3.12 and github.com/pion/webrtc/v3 v3.2.24
+// github.com/pion/ice/v2 v2.3.24 and github.com/pion/webrtc/v3 v3.2.40
 // respectively, containing Psiphon customizations. See comments in
 // psiphon/common/inproxy/newWebRTCConn for details.
 
@@ -57,13 +57,13 @@ require (
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/pion/datachannel v1.5.5
 	github.com/pion/dtls/v2 v2.2.7
-	github.com/pion/ice/v2 v2.3.12
+	github.com/pion/ice/v2 v2.3.24
 	github.com/pion/logging v0.2.2
-	github.com/pion/sctp v1.8.12
-	github.com/pion/sdp/v3 v3.0.8
+	github.com/pion/sctp v1.8.16
+	github.com/pion/sdp/v3 v3.0.9
 	github.com/pion/stun v0.6.1
 	github.com/pion/transport/v2 v2.2.4
-	github.com/pion/webrtc/v3 v3.2.24
+	github.com/pion/webrtc/v3 v3.2.40
 	github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
 	github.com/refraction-networking/gotapdance v1.7.10
 	github.com/refraction-networking/utls v1.3.3
@@ -109,10 +109,10 @@ require (
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pion/interceptor v0.1.25 // indirect
-	github.com/pion/mdns v0.0.9 // indirect
+	github.com/pion/mdns v0.0.12 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.12 // indirect
-	github.com/pion/rtp v1.8.3 // indirect
+	github.com/pion/rtp v1.8.5 // indirect
 	github.com/pion/srtp/v2 v2.0.18 // indirect
 	github.com/pion/turn/v2 v2.1.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

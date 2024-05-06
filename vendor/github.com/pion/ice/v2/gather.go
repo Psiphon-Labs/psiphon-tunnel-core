@@ -73,7 +73,6 @@ func (a *Agent) gatherCandidates(ctx context.Context, done chan struct{}) {
 
 	var wg sync.WaitGroup
 	for _, t := range a.candidateTypes {
-
 		switch t {
 		case CandidateTypeHost:
 			wg.Add(1)

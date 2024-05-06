@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pion/logging"
 	"github.com/pion/stun"
@@ -52,12 +53,30 @@ type TCPMuxParams struct {
 	// if the write buffer is full, the subsequent write packet will be dropped until it has enough space.
 	// a default 4MB is recommended.
 	WriteBufferSize int
+
+	// A new established connection will be removed if the first STUN binding request is not received within this timeout,
+	// avoiding the client with bad network or attacker to create a lot of empty connections.
+	// Default 30s timeout will be used if not set.
+	FirstStunBindTimeout time.Duration
+
+	// TCPMux will create connection from STUN binding request with an unknown username, if
+	// the connection is not used in the timeout, it will be removed to avoid resource leak / attack.
+	// Default 30s timeout will be used if not set.
+	AliveDurationForConnFromStun time.Duration
 }
 
 // NewTCPMuxDefault creates a new instance of TCPMuxDefault.
 func NewTCPMuxDefault(params TCPMuxParams) *TCPMuxDefault {
 	if params.Logger == nil {
 		params.Logger = logging.NewDefaultLoggerFactory().NewLogger("ice")
+	}
+
+	if params.FirstStunBindTimeout == 0 {
+		params.FirstStunBindTimeout = 30 * time.Second
+	}
+
+	if params.AliveDurationForConnFromStun == 0 {
+		params.AliveDurationForConnFromStun = 30 * time.Second
 	}
 
 	m := &TCPMuxDefault{
@@ -110,13 +129,14 @@ func (m *TCPMuxDefault) GetConnByUfrag(ufrag string, isIPv6 bool, local net.IP) 
 	}
 
 	if conn, ok := m.getConn(ufrag, isIPv6, local); ok {
+		conn.ClearAliveTimer()
 		return conn, nil
 	}
 
-	return m.createConn(ufrag, isIPv6, local)
+	return m.createConn(ufrag, isIPv6, local, false)
 }
 
-func (m *TCPMuxDefault) createConn(ufrag string, isIPv6 bool, local net.IP) (*tcpPacketConn, error) {
+func (m *TCPMuxDefault) createConn(ufrag string, isIPv6 bool, local net.IP, fromStun bool) (*tcpPacketConn, error) {
 	addr, ok := m.LocalAddr().(*net.TCPAddr)
 	if !ok {
 		return nil, ErrGetTransportAddress
@@ -124,11 +144,17 @@ func (m *TCPMuxDefault) createConn(ufrag string, isIPv6 bool, local net.IP) (*tc
 	localAddr := *addr
 	localAddr.IP = local
 
+	var alive time.Duration
+	if fromStun {
+		alive = m.params.AliveDurationForConnFromStun
+	}
+
 	conn := newTCPPacketConn(tcpPacketParams{
-		ReadBuffer:  m.params.ReadBufferSize,
-		WriteBuffer: m.params.WriteBufferSize,
-		LocalAddr:   &localAddr,
-		Logger:      m.params.Logger,
+		ReadBuffer:    m.params.ReadBufferSize,
+		WriteBuffer:   m.params.WriteBufferSize,
+		LocalAddr:     &localAddr,
+		Logger:        m.params.Logger,
+		AliveDuration: alive,
 	})
 
 	var conns map[ipAddr]*tcpPacketConn
@@ -163,12 +189,25 @@ func (m *TCPMuxDefault) closeAndLogError(closer io.Closer) {
 }
 
 func (m *TCPMuxDefault) handleConn(conn net.Conn) {
-	buf := make([]byte, receiveMTU)
+	buf := make([]byte, 512)
 
+	if m.params.FirstStunBindTimeout > 0 {
+		if err := conn.SetReadDeadline(time.Now().Add(m.params.FirstStunBindTimeout)); err != nil {
+			m.params.Logger.Warnf("Failed to set read deadline for first STUN message: %s to %s , err: %s", conn.RemoteAddr(), conn.LocalAddr(), err)
+		}
+	}
 	n, err := readStreamingPacket(conn, buf)
 	if err != nil {
-		m.params.Logger.Warnf("Error reading first packet from %s: %s", conn.RemoteAddr().String(), err)
+		if errors.Is(err, io.ErrShortBuffer) {
+			m.params.Logger.Warnf("Buffer too small for first packet from %s: %s", conn.RemoteAddr(), err)
+		} else {
+			m.params.Logger.Warnf("Error reading first packet from %s: %s", conn.RemoteAddr(), err)
+		}
+		m.closeAndLogError(conn)
 		return
+	}
+	if err = conn.SetReadDeadline(time.Time{}); err != nil {
+		m.params.Logger.Warnf("Failed to reset read deadline from %s: %s", conn.RemoteAddr(), err)
 	}
 
 	buf = buf[:n]
@@ -204,9 +243,6 @@ func (m *TCPMuxDefault) handleConn(conn net.Conn) {
 	ufrag := strings.Split(string(attr), ":")[0]
 	m.params.Logger.Debugf("Ufrag: %s", ufrag)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	host, _, err := net.SplitHostPort(conn.RemoteAddr().String())
 	if err != nil {
 		m.closeAndLogError(conn)
@@ -222,15 +258,18 @@ func (m *TCPMuxDefault) handleConn(conn net.Conn) {
 		m.params.Logger.Warnf("Failed to get local tcp address in STUN message from %s to %s", conn.RemoteAddr(), conn.LocalAddr())
 		return
 	}
+	m.mu.Lock()
 	packetConn, ok := m.getConn(ufrag, isIPv6, localAddr.IP)
 	if !ok {
-		packetConn, err = m.createConn(ufrag, isIPv6, localAddr.IP)
+		packetConn, err = m.createConn(ufrag, isIPv6, localAddr.IP, true)
 		if err != nil {
+			m.mu.Unlock()
 			m.closeAndLogError(conn)
 			m.params.Logger.Warnf("Failed to create packetConn for STUN message from %s to %s", conn.RemoteAddr(), conn.LocalAddr())
 			return
 		}
 	}
+	m.mu.Unlock()
 
 	if err := packetConn.AddConn(conn, buf); err != nil {
 		m.closeAndLogError(conn)

@@ -86,6 +86,16 @@ func (c Codec) String() string {
 	return fmt.Sprintf("%d %s/%d/%s (%s) [%s]", c.PayloadType, c.Name, c.ClockRate, c.EncodingParameters, c.Fmtp, strings.Join(c.RTCPFeedback, ", "))
 }
 
+func (c *Codec) appendRTCPFeedback(rtcpFeedback string) {
+	for _, existingRTCPFeedback := range c.RTCPFeedback {
+		if existingRTCPFeedback == rtcpFeedback {
+			return
+		}
+	}
+
+	c.RTCPFeedback = append(c.RTCPFeedback, rtcpFeedback)
+}
+
 func parseRtpmap(rtpmap string) (Codec, error) {
 	var codec Codec
 	parsingFailed := errExtractCodecRtpmap
@@ -153,30 +163,33 @@ func parseFmtp(fmtp string) (Codec, error) {
 	return codec, nil
 }
 
-func parseRtcpFb(rtcpFb string) (Codec, error) {
-	var codec Codec
-	parsingFailed := errExtractCodecRtcpFb
+func parseRtcpFb(rtcpFb string) (codec Codec, isWildcard bool, err error) {
+	var ptInt uint64
+	err = errExtractCodecRtcpFb
 
 	// a=ftcp-fb:<payload type> <RTCP feedback type> [<RTCP feedback parameter>]
 	split := strings.SplitN(rtcpFb, " ", 2)
 	if len(split) != 2 {
-		return codec, parsingFailed
+		return
 	}
 
 	ptSplit := strings.Split(split[0], ":")
 	if len(ptSplit) != 2 {
-		return codec, parsingFailed
+		return
 	}
 
-	ptInt, err := strconv.ParseUint(ptSplit[1], 10, 8)
-	if err != nil {
-		return codec, parsingFailed
+	isWildcard = ptSplit[1] == "*"
+	if !isWildcard {
+		ptInt, err = strconv.ParseUint(ptSplit[1], 10, 8)
+		if err != nil {
+			return
+		}
+
+		codec.PayloadType = uint8(ptInt)
 	}
 
-	codec.PayloadType = uint8(ptInt)
 	codec.RTCPFeedback = append(codec.RTCPFeedback, split[1])
-
-	return codec, nil
+	return codec, isWildcard, nil
 }
 
 func mergeCodecs(codec Codec, codecs map[uint8]Codec) {
@@ -217,6 +230,7 @@ func (s *SessionDescription) buildCodecMap() map[uint8]Codec {
 		},
 	}
 
+	wildcardRTCPFeedback := []string{}
 	for _, m := range s.MediaDescriptions {
 		for _, a := range m.Attributes {
 			attr := a.String()
@@ -232,12 +246,24 @@ func (s *SessionDescription) buildCodecMap() map[uint8]Codec {
 					mergeCodecs(codec, codecs)
 				}
 			case strings.HasPrefix(attr, "rtcp-fb:"):
-				codec, err := parseRtcpFb(attr)
-				if err == nil {
+				codec, isWildcard, err := parseRtcpFb(attr)
+				switch {
+				case err != nil:
+				case isWildcard:
+					wildcardRTCPFeedback = append(wildcardRTCPFeedback, codec.RTCPFeedback...)
+				default:
 					mergeCodecs(codec, codecs)
 				}
 			}
 		}
+	}
+
+	for i, codec := range codecs {
+		for _, newRTCPFeedback := range wildcardRTCPFeedback {
+			codec.appendRTCPFeedback(newRTCPFeedback)
+		}
+
+		codecs[i] = codec
 	}
 
 	return codecs

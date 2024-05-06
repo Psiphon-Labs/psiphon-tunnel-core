@@ -110,46 +110,6 @@ func TestUDPMux(t *testing.T) {
 	}
 }
 
-func TestAddressEncoding(t *testing.T) {
-	cases := []struct {
-		name string
-		addr net.UDPAddr
-	}{
-		{
-			name: "empty address",
-		},
-		{
-			name: "ipv4",
-			addr: net.UDPAddr{
-				IP:   net.IPv4(244, 120, 0, 5),
-				Port: 6000,
-				Zone: "",
-			},
-		},
-		{
-			name: "ipv6",
-			addr: net.UDPAddr{
-				IP:   net.IPv6loopback,
-				Port: 2500,
-				Zone: "zone",
-			},
-		},
-	}
-
-	for _, c := range cases {
-		addr := c.addr
-		t.Run(c.name, func(t *testing.T) {
-			buf := make([]byte, maxAddrSize)
-			n, err := encodeUDPAddr(&addr, buf)
-			require.NoError(t, err)
-
-			parsedAddr, err := decodeUDPAddr(buf[:n])
-			require.NoError(t, err)
-			require.EqualValues(t, &addr, parsedAddr)
-		})
-	}
-}
-
 func testMuxConnection(t *testing.T, udpMux *UDPMuxDefault, ufrag string, network string) {
 	pktConn, err := udpMux.GetConn(ufrag, udpMux.LocalAddr())
 	require.NoError(t, err, "error retrieving muxed connection for ufrag")

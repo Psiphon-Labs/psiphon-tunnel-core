@@ -17,6 +17,7 @@ import (
 	dtlsElliptic "github.com/pion/dtls/v2/pkg/crypto/elliptic"
 	"github.com/pion/ice/v2"
 	"github.com/pion/logging"
+	"github.com/pion/stun"
 	"github.com/pion/transport/v2"
 	"github.com/pion/transport/v2/packetio"
 	"github.com/pion/transport/v2/vnet"
@@ -75,6 +76,7 @@ type SettingEngine struct {
 	}
 	sctp struct {
 		maxReceiveBufferSize uint32
+		enableZeroChecksum   bool
 	}
 	sdpMediaLevelFingerprints                 bool
 	answeringDTLSRole                         DTLSRole
@@ -88,12 +90,14 @@ type SettingEngine struct {
 	iceUDPMux                                 ice.UDPMux
 	iceProxyDialer                            proxy.Dialer
 	iceDisableActiveTCP                       bool
+	iceBindingRequestHandler                  func(m *stun.Message, local, remote ice.Candidate, pair *ice.CandidatePair) bool
 	disableMediaEngineCopy                    bool
 	srtpProtectionProfiles                    []dtls.SRTPProtectionProfile
 	receiveMTU                                uint
 
-	// [Psiphon] from https://github.com/pion/webrtc/pull/2298
-	iceUDPMuxSrflx ice.UniversalUDPMux
+	// [Psiphon] from https://github.com/pion/webrtc/pull/2298, https://github.com/pion/webrtc/commit/906f20c4
+	iceUDPMuxSrflx        ice.UniversalUDPMux
+	iceMaxBindingRequests *uint16
 }
 
 // getReceiveMTU returns the configured MTU. If SettingEngine's MTU is configured to 0 it returns the default
@@ -355,6 +359,13 @@ func (e *SettingEngine) SetICEUDPMuxSrflx(udpMuxSrflx ice.UniversalUDPMux) {
 	e.iceUDPMuxSrflx = udpMuxSrflx
 }
 
+// [Psiphon] from https://github.com/pion/webrtc/commit/906f20c4
+// SetICEMaxBindingRequests sets the maximum amount of binding requests
+// that can be sent on a candidate before it is considered invalid.
+func (e *SettingEngine) SetICEMaxBindingRequests(d uint16) {
+	e.iceMaxBindingRequests = &d
+}
+
 // SetICEProxyDialer sets the proxy dialer interface based on golang.org/x/net/proxy.
 func (e *SettingEngine) SetICEProxyDialer(d proxy.Dialer) {
 	e.iceProxyDialer = d
@@ -443,4 +454,20 @@ func (e *SettingEngine) SetDTLSKeyLogWriter(writer io.Writer) {
 // Leave this 0 for the default maxReceiveBufferSize.
 func (e *SettingEngine) SetSCTPMaxReceiveBufferSize(maxReceiveBufferSize uint32) {
 	e.sctp.maxReceiveBufferSize = maxReceiveBufferSize
+}
+
+// SetSCTPZeroChecksum enables the zero checksum feature in SCTP.
+// This removes the need to checksum every incoming/outgoing packet and will reduce
+// latency and CPU usage. This feature is not backwards compatible so is disabled by default
+func (e *SettingEngine) EnableSCTPZeroChecksum(isEnabled bool) {
+	e.sctp.enableZeroChecksum = isEnabled
+}
+
+// SetICEBindingRequestHandler sets a callback that is fired on a STUN BindingRequest
+// This allows users to do things like
+// - Log incoming Binding Requests for debugging
+// - Implement draft-thatcher-ice-renomination
+// - Implement custom CandidatePair switching logic
+func (e *SettingEngine) SetICEBindingRequestHandler(bindingRequestHandler func(m *stun.Message, local, remote ice.Candidate, pair *ice.CandidatePair) bool) {
+	e.iceBindingRequestHandler = bindingRequestHandler
 }

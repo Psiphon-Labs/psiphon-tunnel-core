@@ -414,7 +414,7 @@ const (
 	InproxyClientDiscoverNATProbability                = "InproxyClientDiscoverNATProbability"
 	InproxyDisableSTUN                                 = "InproxyDisableSTUN"
 	InproxyDisablePortMapping                          = "InproxyDisablePortMapping"
-	InproxyDisableInboundForMobleNetworks              = "InproxyDisableInboundForMobleNetworks"
+	InproxyDisableInboundForMobileNetworks             = "InproxyDisableInboundForMobileNetworks"
 	InproxyDisableIPv6ICECandidates                    = "InproxyDisableIPv6ICECandidates"
 	InproxyDiscoverNATTimeout                          = "InproxyDiscoverNATTimeout"
 	InproxyWebRTCAnswerTimeout                         = "InproxyWebRTCAnswerTimeout"
@@ -894,7 +894,7 @@ var defaultParameters = map[string]struct {
 	InproxyClientDiscoverNATProbability:                {value: 0.0, minimum: 0.0},
 	InproxyDisableSTUN:                                 {value: false},
 	InproxyDisablePortMapping:                          {value: false},
-	InproxyDisableInboundForMobleNetworks:              {value: false},
+	InproxyDisableInboundForMobileNetworks:             {value: false},
 	InproxyDisableIPv6ICECandidates:                    {value: false},
 	InproxyDiscoverNATTimeout:                          {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyWebRTCAnswerTimeout:                         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},

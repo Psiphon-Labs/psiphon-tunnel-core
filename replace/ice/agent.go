@@ -8,6 +8,7 @@ package ice
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -124,6 +125,10 @@ type Agent struct {
 	done         chan struct{}
 	taskLoopDone chan struct{}
 	err          atomicx.Error
+
+	// Callback that allows user to implement custom behavior
+	// for STUN Binding Requests
+	userBindingRequestHandler func(m *stun.Message, local, remote Candidate, pair *CandidatePair) bool
 
 	gatherCandidateCancel func()
 	gatherCandidateDone   chan struct{}
@@ -321,6 +326,8 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 		includeLoopback: config.IncludeLoopback,
 
 		disableActiveTCP: config.DisableActiveTCP,
+
+		userBindingRequestHandler: config.BindingRequestHandler,
 	}
 
 	if a.net == nil {
@@ -456,6 +463,9 @@ func (a *Agent) connectivityChecks() {
 		}
 	}
 
+	t := time.NewTimer(math.MaxInt64)
+	t.Stop()
+
 	for {
 		interval := defaultKeepaliveInterval
 
@@ -476,10 +486,13 @@ func (a *Agent) connectivityChecks() {
 		updateInterval(a.disconnectedTimeout)
 		updateInterval(a.failedTimeout)
 
-		t := time.NewTimer(interval)
+		t.Reset(interval)
+
 		select {
 		case <-a.forceCandidateContact:
-			t.Stop()
+			if !t.Stop() {
+				<-t.C
+			}
 			contact()
 		case <-t.C:
 			contact()
@@ -814,7 +827,7 @@ func (a *Agent) addCandidate(ctx context.Context, c Candidate, candidateConn net
 		set := a.localCandidates[c.NetworkType()]
 		for _, candidate := range set {
 			if candidate.Equal(c) {
-				a.log.Debugf("Ignore duplicate candidate: %s", c.String())
+				a.log.Debugf("Ignore duplicate candidate: %s", c)
 				if err := c.close(); err != nil {
 					a.log.Warnf("Failed to close duplicate candidate: %v", err)
 				}
@@ -981,7 +994,7 @@ func (a *Agent) findRemoteCandidate(networkType NetworkType, addr net.Addr) Cand
 }
 
 func (a *Agent) sendBindingRequest(m *stun.Message, local, remote Candidate) {
-	a.log.Tracef("Ping STUN from %s to %s", local.String(), remote.String())
+	a.log.Tracef("Ping STUN from %s to %s", local, remote)
 
 	a.invalidatePendingBindingRequests(time.Now())
 	a.pendingBindingRequests = append(a.pendingBindingRequests, bindingRequest{
@@ -1096,7 +1109,7 @@ func (a *Agent) handleInbound(m *stun.Message, local Candidate, remote net.Addr)
 
 		a.selector.HandleSuccessResponse(m, local, remoteCandidate, remote)
 	} else if m.Type.Class == stun.ClassRequest {
-		a.log.Tracef("Inbound STUN (Request) from %s to %s, useCandidate: %v", remote.String(), local.String(), m.Contains(stun.AttrUseCandidate))
+		a.log.Tracef("Inbound STUN (Request) from %s to %s, useCandidate: %v", remote, local, m.Contains(stun.AttrUseCandidate))
 
 		if err = stunx.AssertUsername(m, a.localUfrag+":"+a.remoteUfrag); err != nil {
 			a.log.Warnf("Discard message from (%s), %v", remote, err)

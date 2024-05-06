@@ -6,7 +6,7 @@ package mdns
 import (
 	"context"
 	"errors"
-	"math/big"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -26,7 +26,7 @@ type Conn struct {
 
 	queryInterval time.Duration
 	localNames    []string
-	queries       []query
+	queries       []*query
 	ifaces        []net.Interface
 
 	closed chan interface{}
@@ -47,26 +47,42 @@ const (
 	destinationAddress   = "224.0.0.251:5353"
 	maxMessageRecords    = 3
 	responseTTL          = 120
+	// maxPacketSize is the maximum size of a mdns packet.
+	// From RFC 6762:
+	// Even when fragmentation is used, a Multicast DNS packet, including IP
+	// and UDP headers, MUST NOT exceed 9000 bytes.
+	// https://datatracker.ietf.org/doc/html/rfc6762#section-17
+	maxPacketSize = 9000
 )
 
 var errNoPositiveMTUFound = errors.New("no positive MTU found")
 
-// Server establishes a mDNS connection over an existing conn
+// Server establishes a mDNS connection over an existing conn.
+//
+// Currently, the server only supports listening on an IPv4 connection, but internally
+// it supports answering with IPv6 AAAA records if this were ever to change.
 func Server(conn *ipv4.PacketConn, config *Config) (*Conn, error) {
 	if config == nil {
 		return nil, errNilConfig
 	}
 
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, err
+	ifaces := config.Interfaces
+	if ifaces == nil {
+		var err error
+		ifaces, err = net.Interfaces()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	inboundBufferSize := 0
 	joinErrCount := 0
 	ifacesToUse := make([]net.Interface, 0, len(ifaces))
 	for i, ifc := range ifaces {
-		if err = conn.JoinGroup(&ifaces[i], &net.UDPAddr{IP: net.IPv4(224, 0, 0, 251)}); err != nil {
+		if !config.IncludeLoopback && ifc.Flags&net.FlagLoopback == net.FlagLoopback {
+			continue
+		}
+		if err := conn.JoinGroup(&ifaces[i], &net.UDPAddr{IP: net.IPv4(224, 0, 0, 251)}); err != nil {
 			joinErrCount++
 			continue
 		}
@@ -80,6 +96,9 @@ func Server(conn *ipv4.PacketConn, config *Config) (*Conn, error) {
 
 	if inboundBufferSize == 0 {
 		return nil, errNoPositiveMTUFound
+	}
+	if inboundBufferSize > maxPacketSize {
+		inboundBufferSize = maxPacketSize
 	}
 	if joinErrCount >= len(ifaces) {
 		return nil, errJoiningMulticastGroup
@@ -102,7 +121,7 @@ func Server(conn *ipv4.PacketConn, config *Config) (*Conn, error) {
 
 	c := &Conn{
 		queryInterval: defaultQueryInterval,
-		queries:       []query{},
+		queries:       []*query{},
 		socket:        conn,
 		dstAddr:       dstAddr,
 		localNames:    localNames,
@@ -116,6 +135,14 @@ func Server(conn *ipv4.PacketConn, config *Config) (*Conn, error) {
 
 	if err := conn.SetControlMessage(ipv4.FlagInterface, true); err != nil {
 		c.log.Warnf("Failed to SetControlMessage on PacketConn %v", err)
+	}
+
+	if config.IncludeLoopback {
+		// this is an efficient way for us to send ourselves a message faster instead of it going
+		// further out into the network stack.
+		if err := conn.SetMulticastLoopback(true); err != nil {
+			c.log.Warnf("Failed to SetMulticastLoopback(true) on PacketConn %v; this may cause inefficient network path communications", err)
+		}
 	}
 
 	// https://www.rfc-editor.org/rfc/rfc6762.html#section-17
@@ -154,11 +181,22 @@ func (c *Conn) Query(ctx context.Context, name string) (dnsmessage.ResourceHeade
 	nameWithSuffix := name + "."
 
 	queryChan := make(chan queryResult, 1)
+	query := &query{nameWithSuffix, queryChan}
 	c.mu.Lock()
-	c.queries = append(c.queries, query{nameWithSuffix, queryChan})
-	ticker := time.NewTicker(c.queryInterval)
+	c.queries = append(c.queries, query)
 	c.mu.Unlock()
 
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for i := len(c.queries) - 1; i >= 0; i-- {
+			if c.queries[i] == query {
+				c.queries = append(c.queries[:i], c.queries[i+1:]...)
+			}
+		}
+	}()
+
+	ticker := time.NewTicker(c.queryInterval)
 	defer ticker.Stop()
 
 	c.sendQuestion(nameWithSuffix)
@@ -169,6 +207,11 @@ func (c *Conn) Query(ctx context.Context, name string) (dnsmessage.ResourceHeade
 		case <-c.closed:
 			return dnsmessage.ResourceHeader{}, nil, errConnectionClosed
 		case res := <-queryChan:
+			// Given https://datatracker.ietf.org/doc/html/draft-ietf-mmusic-mdns-ice-candidates#section-3.2.2-2
+			// An ICE agent SHOULD ignore candidates where the hostname resolution returns more than one IP address.
+			//
+			// We will take the first we receive which could result in a race between two suitable addresses where
+			// one is better than the other (e.g. localhost vs LAN).
 			return res.answer, res.addr, nil
 		case <-ctx.Done():
 			return dnsmessage.ResourceHeader{}, nil, errContextElapsed
@@ -176,16 +219,37 @@ func (c *Conn) Query(ctx context.Context, name string) (dnsmessage.ResourceHeade
 	}
 }
 
-func ipToBytes(ip net.IP) (out [4]byte) {
+type ipToBytesError struct {
+	ip           net.IP
+	expectedType string
+}
+
+func (err ipToBytesError) Error() string {
+	return fmt.Sprintf("ip (%s) is not %s", err.ip, err.expectedType)
+}
+
+func ipv4ToBytes(ip net.IP) ([4]byte, error) {
 	rawIP := ip.To4()
 	if rawIP == nil {
-		return
+		return [4]byte{}, ipToBytesError{ip, "IPv4"}
 	}
 
-	ipInt := big.NewInt(0)
-	ipInt.SetBytes(rawIP)
-	copy(out[:], ipInt.Bytes())
-	return
+	// net.IPs are stored in big endian / network byte order
+	var out [4]byte
+	copy(out[:], rawIP[:])
+	return out, nil
+}
+
+func ipv6ToBytes(ip net.IP) ([16]byte, error) {
+	rawIP := ip.To16()
+	if rawIP == nil {
+		return [16]byte{}, ipToBytesError{ip, "IPv6"}
+	}
+
+	// net.IPs are stored in big endian / network byte order
+	var out [16]byte
+	copy(out[:], rawIP[:])
+	return out, nil
 }
 
 func interfaceForRemote(remote string) (net.IP, error) {
@@ -233,14 +297,14 @@ func (c *Conn) sendQuestion(name string) {
 	c.writeToSocket(0, rawQuery, false)
 }
 
-func (c *Conn) writeToSocket(ifIndex int, b []byte, onlyLooback bool) {
+func (c *Conn) writeToSocket(ifIndex int, b []byte, srcIfcIsLoopback bool) {
 	if ifIndex != 0 {
 		ifc, err := net.InterfaceByIndex(ifIndex)
 		if err != nil {
-			c.log.Warnf("Failed to get interface interface for %d: %v", ifIndex, err)
+			c.log.Warnf("Failed to get interface for %d: %v", ifIndex, err)
 			return
 		}
-		if onlyLooback && ifc.Flags&net.FlagLoopback == 0 {
+		if srcIfcIsLoopback && ifc.Flags&net.FlagLoopback == 0 {
 			// avoid accidentally tricking the destination that itself is the same as us
 			c.log.Warnf("Interface is not loopback %d", ifIndex)
 			return
@@ -255,7 +319,7 @@ func (c *Conn) writeToSocket(ifIndex int, b []byte, onlyLooback bool) {
 		return
 	}
 	for ifcIdx := range c.ifaces {
-		if onlyLooback && c.ifaces[ifcIdx].Flags&net.FlagLoopback == 0 {
+		if srcIfcIsLoopback && c.ifaces[ifcIdx].Flags&net.FlagLoopback == 0 {
 			// avoid accidentally tricking the destination that itself is the same as us
 			continue
 		}
@@ -269,11 +333,10 @@ func (c *Conn) writeToSocket(ifIndex int, b []byte, onlyLooback bool) {
 	}
 }
 
-func (c *Conn) sendAnswer(name string, ifIndex int, dst net.IP) {
+func createAnswer(name string, addr net.IP) (dnsmessage.Message, error) {
 	packedName, err := dnsmessage.NewName(name)
 	if err != nil {
-		c.log.Warnf("Failed to construct mDNS packet %v", err)
-		return
+		return dnsmessage.Message{}, err
 	}
 
 	msg := dnsmessage.Message{
@@ -289,20 +352,45 @@ func (c *Conn) sendAnswer(name string, ifIndex int, dst net.IP) {
 					Name:  packedName,
 					TTL:   responseTTL,
 				},
-				Body: &dnsmessage.AResource{
-					A: ipToBytes(dst),
-				},
 			},
 		},
 	}
 
-	rawAnswer, err := msg.Pack()
+	if ip4 := addr.To4(); ip4 != nil {
+		ipBuf, err := ipv4ToBytes(addr)
+		if err != nil {
+			return dnsmessage.Message{}, err
+		}
+		msg.Answers[0].Body = &dnsmessage.AResource{
+			A: ipBuf,
+		}
+	} else {
+		ipBuf, err := ipv6ToBytes(addr)
+		if err != nil {
+			return dnsmessage.Message{}, err
+		}
+		msg.Answers[0].Body = &dnsmessage.AAAAResource{
+			AAAA: ipBuf,
+		}
+	}
+
+	return msg, nil
+}
+
+func (c *Conn) sendAnswer(name string, ifIndex int, addr net.IP) {
+	answer, err := createAnswer(name, addr)
+	if err != nil {
+		c.log.Warnf("Failed to create mDNS answer %v", err)
+		return
+	}
+
+	rawAnswer, err := answer.Pack()
 	if err != nil {
 		c.log.Warnf("Failed to construct mDNS packet %v", err)
 		return
 	}
 
-	c.writeToSocket(ifIndex, rawAnswer, dst.IsLoopback())
+	c.writeToSocket(ifIndex, rawAnswer, addr.IsLoopback())
 }
 
 func (c *Conn) start(inboundBufferSize int, config *Config) { //nolint gocognit
@@ -328,6 +416,17 @@ func (c *Conn) start(inboundBufferSize int, config *Config) { //nolint gocognit
 		if cm != nil {
 			ifIndex = cm.IfIndex
 		}
+		var srcIP net.IP
+		switch addr := src.(type) {
+		case *net.UDPAddr:
+			srcIP = addr.IP
+		case *net.TCPAddr:
+			srcIP = addr.IP
+		default:
+			c.log.Warnf("Failed to determine address type %T for source address %s", src, src)
+			continue
+		}
+		srcIsIPv4 := srcIP.To4() != nil
 
 		func() {
 			c.mu.RLock()
@@ -352,10 +451,70 @@ func (c *Conn) start(inboundBufferSize int, config *Config) { //nolint gocognit
 						if config.LocalAddress != nil {
 							c.sendAnswer(q.Name.String(), ifIndex, config.LocalAddress)
 						} else {
-							localAddress, err := interfaceForRemote(src.String())
-							if err != nil {
-								c.log.Warnf("Failed to get local interface to communicate with %s: %v", src.String(), err)
-								continue
+							var localAddress net.IP
+
+							// prefer the address of the interface if we know its index, but otherwise
+							// derive it from the address we read from. We do this because even if
+							// multicast loopback is in use or we send from a loopback interface,
+							// there are still cases where the IP packet will contain the wrong
+							// source IP (e.g. a LAN interface).
+							// For example, we can have a packet that has:
+							// Source: 192.168.65.3
+							// Destination: 224.0.0.251
+							// Interface Index: 1
+							// Interface Addresses @ 1: [127.0.0.1/8 ::1/128]
+							if ifIndex != 0 {
+								ifc, netErr := net.InterfaceByIndex(ifIndex)
+								if netErr != nil {
+									c.log.Warnf("Failed to get interface for %d: %v", ifIndex, netErr)
+									continue
+								}
+								addrs, addrsErr := ifc.Addrs()
+								if addrsErr != nil {
+									c.log.Warnf("Failed to get addresses for interface %d: %v", ifIndex, addrsErr)
+									continue
+								}
+								if len(addrs) == 0 {
+									c.log.Warnf("Expected more than one address for interface %d", ifIndex)
+									continue
+								}
+								var selectedIP net.IP
+								for _, addr := range addrs {
+									var ip net.IP
+									switch addr := addr.(type) {
+									case *net.IPNet:
+										ip = addr.IP
+									case *net.IPAddr:
+										ip = addr.IP
+									default:
+										c.log.Warnf("Failed to determine address type %T from interface %d", addr, ifIndex)
+										continue
+									}
+
+									// match up respective IP types
+									if ipv4 := ip.To4(); ipv4 == nil {
+										if srcIsIPv4 {
+											continue
+										} else if !isSupportedIPv6(ip) {
+											continue
+										}
+									} else if !srcIsIPv4 {
+										continue
+									}
+									selectedIP = ip
+									break
+								}
+								if selectedIP == nil {
+									c.log.Warnf("Failed to find suitable IP for interface %d; deriving address from source address instead", ifIndex)
+								} else {
+									localAddress = selectedIP
+								}
+							} else if ifIndex == 0 || localAddress == nil {
+								localAddress, err = interfaceForRemote(src.String())
+								if err != nil {
+									c.log.Warnf("Failed to get local interface to communicate with %s: %v", src.String(), err)
+									continue
+								}
 							}
 
 							c.sendAnswer(q.Name.String(), ifIndex, localAddress)
@@ -403,7 +562,7 @@ func ipFromAnswerHeader(a dnsmessage.ResourceHeader, p dnsmessage.Parser) (ip []
 		if err != nil {
 			return nil, err
 		}
-		ip = net.IP(resource.A[:])
+		ip = resource.A[:]
 	} else {
 		resource, err := p.AAAAResource()
 		if err != nil {
@@ -413,4 +572,26 @@ func ipFromAnswerHeader(a dnsmessage.ResourceHeader, p dnsmessage.Parser) (ip []
 	}
 
 	return
+}
+
+// The conditions of invalidation written below are defined in
+// https://tools.ietf.org/html/rfc8445#section-5.1.1.1
+func isSupportedIPv6(ip net.IP) bool {
+	if len(ip) != net.IPv6len ||
+		isZeros(ip[0:12]) || // !(IPv4-compatible IPv6)
+		ip[0] == 0xfe && ip[1]&0xc0 == 0xc0 || // !(IPv6 site-local unicast)
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() {
+		return false
+	}
+	return true
+}
+
+func isZeros(ip net.IP) bool {
+	for i := 0; i < len(ip); i++ {
+		if ip[i] != 0 {
+			return false
+		}
+	}
+	return true
 }

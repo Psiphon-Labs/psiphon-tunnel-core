@@ -32,4 +32,10 @@ type Config struct {
 	LocalAddress net.IP
 
 	LoggerFactory logging.LoggerFactory
+
+	// IncludeLoopback will include loopback interfaces to be eligble for queries and answers.
+	IncludeLoopback bool
+
+	// Interfaces will override the interfaces used for queries and answers.
+	Interfaces []net.Interface
 }

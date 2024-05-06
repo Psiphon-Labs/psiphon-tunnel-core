@@ -59,7 +59,7 @@ func (s *controllingSelector) ContactCandidates() {
 	default:
 		p := s.agent.getBestValidCandidatePair()
 		if p != nil && s.isNominatable(p.Local) && s.isNominatable(p.Remote) {
-			s.log.Tracef("Nominatable pair found, nominating (%s, %s)", p.Local.String(), p.Remote.String())
+			s.log.Tracef("Nominatable pair found, nominating (%s, %s)", p.Local, p.Remote)
 			p.nominated = true
 			s.nominatedPair = p
 			s.nominatePair(p)
@@ -87,7 +87,7 @@ func (s *controllingSelector) nominatePair(pair *CandidatePair) {
 		return
 	}
 
-	s.log.Tracef("Ping STUN (nominate candidate pair) from %s to %s", pair.Local.String(), pair.Remote.String())
+	s.log.Tracef("Ping STUN (nominate candidate pair) from %s to %s", pair.Local, pair.Remote)
 	s.agent.sendBindingRequest(msg, pair.Local, pair.Remote)
 }
 
@@ -106,10 +106,15 @@ func (s *controllingSelector) HandleBindingRequest(m *stun.Message, local, remot
 		if bestPair == nil {
 			s.log.Tracef("No best pair available")
 		} else if bestPair.equal(p) && s.isNominatable(p.Local) && s.isNominatable(p.Remote) {
-			s.log.Tracef("The candidate (%s, %s) is the best candidate available, marking it as nominated",
-				p.Local.String(), p.Remote.String())
+			s.log.Tracef("The candidate (%s, %s) is the best candidate available, marking it as nominated", p.Local, p.Remote)
 			s.nominatedPair = p
 			s.nominatePair(p)
+		}
+	}
+
+	if s.agent.userBindingRequestHandler != nil {
+		if shouldSwitch := s.agent.userBindingRequestHandler(m, local, remote, p); shouldSwitch {
+			s.agent.setSelectedPair(p)
 		}
 	}
 }
@@ -130,7 +135,7 @@ func (s *controllingSelector) HandleSuccessResponse(m *stun.Message, local, remo
 		return
 	}
 
-	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s", remote.String(), local.String())
+	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s", remote, local)
 	p := s.agent.findPair(local, remote)
 
 	if p == nil {
@@ -221,7 +226,7 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 		return
 	}
 
-	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s", remote.String(), local.String())
+	s.log.Tracef("Inbound STUN (SuccessResponse) from %s to %s", remote, local)
 
 	p := s.agent.findPair(local, remote)
 	if p == nil {
@@ -243,14 +248,12 @@ func (s *controlledSelector) HandleSuccessResponse(m *stun.Message, local, remot
 }
 
 func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote Candidate) {
-	useCandidate := m.Contains(stun.AttrUseCandidate)
-
 	p := s.agent.findPair(local, remote)
 	if p == nil {
 		p = s.agent.addPair(local, remote)
 	}
 
-	if useCandidate {
+	if m.Contains(stun.AttrUseCandidate) {
 		// https://tools.ietf.org/html/rfc8445#section-7.3.1.5
 
 		if p.state == CandidatePairStateSucceeded {
@@ -258,8 +261,8 @@ func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote
 			// previously sent by this pair produced a successful response and
 			// generated a valid pair (Section 7.2.5.3.2).  The agent sets the
 			// nominated flag value of the valid pair to true.
-			if selectedPair := s.agent.getSelectedPair(); selectedPair == nil ||
-				(selectedPair != p && selectedPair.priority() <= p.priority()) {
+			selectedPair := s.agent.getSelectedPair()
+			if selectedPair == nil || (selectedPair != p && selectedPair.priority() <= p.priority()) {
 				s.agent.setSelectedPair(p)
 			} else if selectedPair != p {
 				s.log.Tracef("Ignore nominate new pair %s, already nominated pair %s", p, selectedPair)
@@ -279,6 +282,12 @@ func (s *controlledSelector) HandleBindingRequest(m *stun.Message, local, remote
 
 	s.agent.sendBindingSuccess(m, local, remote)
 	s.PingCandidate(local, remote)
+
+	if s.agent.userBindingRequestHandler != nil {
+		if shouldSwitch := s.agent.userBindingRequestHandler(m, local, remote, p); shouldSwitch {
+			s.agent.setSelectedPair(p)
+		}
+	}
 }
 
 type liteSelector struct {

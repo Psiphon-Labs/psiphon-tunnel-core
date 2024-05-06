@@ -235,12 +235,12 @@ type WebRTCDialCoordinator interface {
 	// DisablePortMapping indicates whether to skip port mapping operations.
 	DisablePortMapping() bool
 
-	// DisableInboundForMobleNetworks indicates that all attempts to set up
+	// DisableInboundForMobileNetworks indicates that all attempts to set up
 	// inbound operations -- including STUN and port mapping -- should be
 	// skipped when the network type is NetworkTypeMobile. This skips
 	// operations that can slow down dials and and unlikely to succeed on
 	// most mobile networks with CGNAT.
-	DisableInboundForMobleNetworks() bool
+	DisableInboundForMobileNetworks() bool
 
 	// DisableIPv6ICECandidates omits all IPv6 ICE candidates.
 	DisableIPv6ICECandidates() bool

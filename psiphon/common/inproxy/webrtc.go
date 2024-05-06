@@ -42,6 +42,7 @@ import (
 	"github.com/pion/ice/v2"
 	pion_logging "github.com/pion/logging"
 	"github.com/pion/sdp/v3"
+	"github.com/pion/stun"
 	"github.com/pion/transport/v2"
 	"github.com/pion/webrtc/v3"
 	"github.com/wlynxg/anet"
@@ -319,8 +320,45 @@ func newWebRTCConn(
 	settingEngine.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 	settingEngine.SetICEUDPMux(udpMux)
 	settingEngine.SetICEUDPMuxSrflx(udpMux)
+
 	// Set this behavior to look like common web browser WebRTC stacks.
 	settingEngine.SetDTLSInsecureSkipHelloVerify(true)
+
+	settingEngine.EnableSCTPZeroChecksum(true)
+
+	// Timeout, retry, and delay adjustments
+	//
+	// - Add some jitter to timed operations to avoid a trivial pion timing
+	//   fingerprint.
+	//
+	// - Reduce the wait time for STUN and peer reflexive candidates from the
+	//   default 500ms and 1s.
+	//
+	// - Reduce keepalives from the default 2s to +/-15s and increase
+	//   disconnect timeout from the default 5s to 3x15s.
+	//
+	// TODO:
+	//
+	// - Configuration via tactics.
+	//
+	// - While the RFC,
+	//   https://datatracker.ietf.org/doc/html/rfc5245#section-10, calls for
+	//   keep alives no less than 15s, implementations such as Chrome send
+	//   keep alives much more frequently,
+	//   https://issues.webrtc.org/issues/42221718.
+	//
+	// - Varying the period bewteen each keepalive, as is done with SSH via
+	//   SSHKeepAlivePeriodMin/Max, requires changes to pion/dtls.
+	//
+	// - Some traffic-related timeouts are not yet exposed via settingEngine,
+	//   including ice.defaultSTUNGatherTimeout, ice.maxBindingRequestTimeout.
+
+	settingEngine.SetDTLSRetransmissionInterval(prng.JitterDuration(100*time.Millisecond, 0.1))
+	settingEngine.SetHostAcceptanceMinWait(0)
+	settingEngine.SetSrflxAcceptanceMinWait(prng.JitterDuration(100*time.Millisecond, 0.1))
+	settingEngine.SetPrflxAcceptanceMinWait(prng.JitterDuration(200*time.Millisecond, 0.1))
+	settingEngine.SetICETimeouts(45*time.Second, 0, prng.JitterDuration(15*time.Second, 0.2))
+	settingEngine.SetICEMaxBindingRequests(10)
 
 	// Initialize data channel obfuscation
 
@@ -368,7 +406,6 @@ func newWebRTCConn(
 	settingEngine.SetDTLSConnectContextMaker(func() (context.Context, func()) {
 		return context.WithCancel(dtlsCtx)
 	})
-	webRTCAPI := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 
 	// Configure traffic shaping, which adds random padding and decoy messages
 	// to data channel message flows.
@@ -379,6 +416,8 @@ func newWebRTCConn(
 	decoyMessageCount := 0
 
 	if config.TrafficShapingParameters != nil {
+
+		// TODO: also use pion/dtls.Config.PaddingLengthGenerator?
 
 		trafficShapingContext := "in-proxy-data-channel-traffic-shaping-offer"
 		if !isOffer {
@@ -405,12 +444,12 @@ func newWebRTCConn(
 
 	// NAT traversal setup
 
-	// When DisableInboundForMobleNetworks is set, skip both STUN and port
+	// When DisableInboundForMobileNetworks is set, skip both STUN and port
 	// mapping for mobile networks. Most mobile networks use CGNAT and
 	// neither STUN nor port mapping will be effective. It's faster to not
 	// wait for something that ultimately won't work.
 
-	disableInbound := config.WebRTCDialCoordinator.DisableInboundForMobleNetworks() &&
+	disableInbound := config.WebRTCDialCoordinator.DisableInboundForMobileNetworks() &&
 		config.WebRTCDialCoordinator.NetworkType() == NetworkTypeMobile
 
 	// Try to establish a port mapping (UPnP-IGD, PCP, or NAT-PMP). The port
@@ -459,21 +498,12 @@ func newWebRTCConn(
 		ICEServers = []webrtc.ICEServer{{URLs: []string{"stun:" + stunServerAddress}}}
 	}
 
-	peerConnection, err := webRTCAPI.NewPeerConnection(
-		webrtc.Configuration{
-			ICEServers: ICEServers,
-		})
-	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
-	}
-
 	conn := &WebRTCConn{
 		config: config,
 
 		udpConn:                      udpConn,
 		portMapper:                   portMapper,
 		closedSignal:                 make(chan struct{}),
-		peerConnection:               peerConnection,
 		dataChannelOpenedSignal:      make(chan struct{}),
 		dataChannelWriteBufferSignal: make(chan struct{}, 1),
 
@@ -506,6 +536,19 @@ func newWebRTCConn(
 		}
 	}()
 
+	settingEngine.SetICEBindingRequestHandler(conn.onICEBindingRequest)
+
+	// All settingEngine configuration must be done before calling NewAPI.
+	webRTCAPI := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+
+	conn.peerConnection, err = webRTCAPI.NewPeerConnection(
+		webrtc.Configuration{
+			ICEServers: ICEServers,
+		})
+	if err != nil {
+		return nil, nil, nil, errors.Trace(err)
+	}
+
 	conn.peerConnection.OnConnectionStateChange(conn.onConnectionStateChange)
 	conn.peerConnection.OnICECandidate(conn.onICECandidate)
 	conn.peerConnection.OnICEConnectionStateChange(conn.onICEConnectionStateChange)
@@ -534,7 +577,7 @@ func newWebRTCConn(
 		// TODO: randomize length?
 		dataChannelLabel := "in-proxy-data-channel"
 
-		dataChannel, err := peerConnection.CreateDataChannel(
+		dataChannel, err := conn.peerConnection.CreateDataChannel(
 			dataChannelLabel, dataChannelInit)
 		if err != nil {
 			return nil, nil, nil, errors.Trace(err)
@@ -1161,7 +1204,16 @@ func (conn *WebRTCConn) GetMetrics() common.LogFields {
 
 func (conn *WebRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState) {
 
-	if state == webrtc.PeerConnectionStateFailed {
+	// Close the WebRTCConn when the connection is no longer connected. Close
+	// will lock conn.mutex, so do lot aquire the lock here.
+	//
+	// Currently, ICE Restart is not used, and there is no transition from
+	// Disconnected back to Connected.
+
+	switch state {
+	case webrtc.PeerConnectionStateDisconnected,
+		webrtc.PeerConnectionStateFailed,
+		webrtc.PeerConnectionStateClosed:
 		conn.Close()
 	}
 
@@ -1171,10 +1223,39 @@ func (conn *WebRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState
 }
 
 func (conn *WebRTCConn) onICECandidate(candidate *webrtc.ICECandidate) {
+	if candidate == nil {
+		return
+	}
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
-		"candidate": candidate,
+		"candidate": candidate.String(),
 	}).Info("new ICE candidate")
+}
+
+func (conn *WebRTCConn) onICEBindingRequest(m *stun.Message, local, remote ice.Candidate, pair *ice.CandidatePair) bool {
+
+	// SetICEBindingRequestHandler is used to hook onICEBindingRequest into
+	// STUN bind events for logging. The return values is always false as
+	// this callback makes no adjustments to ICE candidate selection. When
+	// the data channel has already opened, skip logging events, as this
+	// callback appears to be invoked for keepalive pings.
+
+	if local == nil || remote == nil {
+		return false
+	}
+
+	select {
+	case <-conn.dataChannelOpenedSignal:
+		return false
+	default:
+	}
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"local_candidate":  local.String(),
+		"remote_candidate": remote.String(),
+	}).Info("new ICE STUN binding request")
+
+	return false
 }
 
 func (conn *WebRTCConn) onICEConnectionStateChange(state webrtc.ICEConnectionState) {

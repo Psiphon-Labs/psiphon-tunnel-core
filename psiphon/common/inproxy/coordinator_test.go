@@ -164,30 +164,30 @@ func (t *testBrokerDialCoordinator) RelayedPacketRequestTimeout() time.Duration 
 }
 
 type testWebRTCDialCoordinator struct {
-	mutex                          sync.Mutex
-	networkID                      string
-	networkType                    NetworkType
-	clientRootObfuscationSecret    ObfuscationSecret
-	doDTLSRandomization            bool
-	trafficShapingParameters       *DataChannelTrafficShapingParameters
-	stunServerAddress              string
-	stunServerAddressRFC5780       string
-	stunServerAddressSucceeded     func(RFC5780 bool, address string)
-	stunServerAddressFailed        func(RFC5780 bool, address string)
-	discoverNAT                    bool
-	disableSTUN                    bool
-	disablePortMapping             bool
-	disableInboundForMobleNetworks bool
-	disableIPv6ICECandidates       bool
-	natType                        NATType
-	setNATType                     func(NATType)
-	portMappingTypes               PortMappingTypes
-	setPortMappingTypes            func(PortMappingTypes)
-	bindToDevice                   func(int) error
-	discoverNATTimeout             time.Duration
-	webRTCAnswerTimeout            time.Duration
-	webRTCAwaitDataChannelTimeout  time.Duration
-	proxyDestinationDialTimeout    time.Duration
+	mutex                           sync.Mutex
+	networkID                       string
+	networkType                     NetworkType
+	clientRootObfuscationSecret     ObfuscationSecret
+	doDTLSRandomization             bool
+	trafficShapingParameters        *DataChannelTrafficShapingParameters
+	stunServerAddress               string
+	stunServerAddressRFC5780        string
+	stunServerAddressSucceeded      func(RFC5780 bool, address string)
+	stunServerAddressFailed         func(RFC5780 bool, address string)
+	discoverNAT                     bool
+	disableSTUN                     bool
+	disablePortMapping              bool
+	disableInboundForMobileNetworks bool
+	disableIPv6ICECandidates        bool
+	natType                         NATType
+	setNATType                      func(NATType)
+	portMappingTypes                PortMappingTypes
+	setPortMappingTypes             func(PortMappingTypes)
+	bindToDevice                    func(int) error
+	discoverNATTimeout              time.Duration
+	webRTCAnswerTimeout             time.Duration
+	webRTCAwaitDataChannelTimeout   time.Duration
+	proxyDestinationDialTimeout     time.Duration
 }
 
 func (t *testWebRTCDialCoordinator) NetworkID() string {
@@ -259,10 +259,10 @@ func (t *testWebRTCDialCoordinator) DisablePortMapping() bool {
 	return t.disablePortMapping
 }
 
-func (t *testWebRTCDialCoordinator) DisableInboundForMobleNetworks() bool {
+func (t *testWebRTCDialCoordinator) DisableInboundForMobileNetworks() bool {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	return t.disableInboundForMobleNetworks
+	return t.disableInboundForMobileNetworks
 }
 
 func (t *testWebRTCDialCoordinator) DisableIPv6ICECandidates() bool {

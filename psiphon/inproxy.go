@@ -1302,15 +1302,15 @@ type InproxyWebRTCDialInstance struct {
 	stunDialParameters   *InproxySTUNDialParameters
 	webRTCDialParameters *InproxyWebRTCDialParameters
 
-	discoverNAT                    bool
-	disableSTUN                    bool
-	disablePortMapping             bool
-	disableInboundForMobleNetworks bool
-	disableIPv6ICECandidates       bool
-	discoverNATTimeout             time.Duration
-	webRTCAnswerTimeout            time.Duration
-	awaitDataChannelTimeout        time.Duration
-	proxyDestinationDialTimeout    time.Duration
+	discoverNAT                     bool
+	disableSTUN                     bool
+	disablePortMapping              bool
+	disableInboundForMobileNetworks bool
+	disableIPv6ICECandidates        bool
+	discoverNATTimeout              time.Duration
+	webRTCAnswerTimeout             time.Duration
+	awaitDataChannelTimeout         time.Duration
+	proxyDestinationDialTimeout     time.Duration
 }
 
 // NewInproxyWebRTCDialInstance creates a new InproxyWebRTCDialInstance.
@@ -1367,15 +1367,15 @@ func NewInproxyWebRTCDialInstance(
 		stunDialParameters:   stunDialParameters,
 		webRTCDialParameters: webRTCDialParameters,
 
-		discoverNAT:                    p.WeightedCoinFlip(parameters.InproxyClientDiscoverNATProbability),
-		disableSTUN:                    p.Bool(parameters.InproxyDisableSTUN),
-		disablePortMapping:             p.Bool(parameters.InproxyDisablePortMapping),
-		disableInboundForMobleNetworks: p.Bool(parameters.InproxyDisableInboundForMobleNetworks),
-		disableIPv6ICECandidates:       p.Bool(parameters.InproxyDisableIPv6ICECandidates),
-		discoverNATTimeout:             p.Duration(parameters.InproxyDiscoverNATTimeout),
-		webRTCAnswerTimeout:            p.Duration(parameters.InproxyWebRTCAnswerTimeout),
-		awaitDataChannelTimeout:        awaitDataChannelTimeout,
-		proxyDestinationDialTimeout:    p.Duration(parameters.InproxyProxyDestinationDialTimeout),
+		discoverNAT:                     p.WeightedCoinFlip(parameters.InproxyClientDiscoverNATProbability),
+		disableSTUN:                     p.Bool(parameters.InproxyDisableSTUN),
+		disablePortMapping:              p.Bool(parameters.InproxyDisablePortMapping),
+		disableInboundForMobileNetworks: p.Bool(parameters.InproxyDisableInboundForMobileNetworks),
+		disableIPv6ICECandidates:        p.Bool(parameters.InproxyDisableIPv6ICECandidates),
+		discoverNATTimeout:              p.Duration(parameters.InproxyDiscoverNATTimeout),
+		webRTCAnswerTimeout:             p.Duration(parameters.InproxyWebRTCAnswerTimeout),
+		awaitDataChannelTimeout:         awaitDataChannelTimeout,
+		proxyDestinationDialTimeout:     p.Duration(parameters.InproxyProxyDestinationDialTimeout),
 	}, nil
 }
 
@@ -1472,8 +1472,8 @@ func (w *InproxyWebRTCDialInstance) DisablePortMapping() bool {
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
-func (w *InproxyWebRTCDialInstance) DisableInboundForMobleNetworks() bool {
-	return w.disableInboundForMobleNetworks
+func (w *InproxyWebRTCDialInstance) DisableInboundForMobileNetworks() bool {
+	return w.disableInboundForMobileNetworks
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -1518,7 +1518,7 @@ func (w *InproxyWebRTCDialInstance) ResolveAddress(ctx context.Context, network,
 	// In the in-proxy proxy case, ResolveAddress is invoked for the upstream,
 	// 2nd hop dial as well as for STUN server addresses.
 	//
-	// Limitation: there's ResolveParameters, including no preresolved DNS
+	// Limitation: there's no ResolveParameters, including no preresolved DNS
 	// tactics, for 2nd hop dials.
 
 	isSTUNServerAddress := address == w.stunDialParameters.STUNServerAddress

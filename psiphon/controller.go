@@ -2670,6 +2670,9 @@ func (controller *Controller) inproxyGetAPIParameters() (common.APIParameters, s
 	// broker.
 	params := getBaseAPIParameters(baseParametersNoDialParameters, controller.config, nil)
 
+	networkID := controller.config.GetNetworkID()
+	params["network_type"] = GetNetworkType(networkID)
+
 	if controller.config.DisableTactics {
 		return params, "", nil
 	}
@@ -2681,7 +2684,6 @@ func (controller *Controller) inproxyGetAPIParameters() (common.APIParameters, s
 	// consistency when storing any new tactics returned from the broker;
 	// other tactics fetches have this same check.
 
-	networkID := controller.config.GetNetworkID()
 	err := tactics.SetTacticsAPIParameters(GetTacticsStorer(controller.config), networkID, params)
 	if err != nil {
 		return nil, "", errors.Trace(err)

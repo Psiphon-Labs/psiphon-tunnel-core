@@ -985,7 +985,7 @@ type Config struct {
 	InproxyClientDiscoverNATProbability                    *float64
 	InproxyDisableSTUN                                     *bool
 	InproxyDisablePortMapping                              *bool
-	InproxyDisableInboundForMobleNetworks                  *bool
+	InproxyDisableInboundForMobileNetworks                 *bool
 	InproxyDisableIPv6ICECandidates                        *bool
 	InproxyDiscoverNATTimeoutMilliseconds                  *int
 	InproxyWebRTCAnswerTimeoutMilliseconds                 *int
@@ -2447,8 +2447,8 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyDisablePortMapping] = *config.InproxyDisablePortMapping
 	}
 
-	if config.InproxyDisableInboundForMobleNetworks != nil {
-		applyParameters[parameters.InproxyDisableInboundForMobleNetworks] = *config.InproxyDisableInboundForMobleNetworks
+	if config.InproxyDisableInboundForMobileNetworks != nil {
+		applyParameters[parameters.InproxyDisableInboundForMobileNetworks] = *config.InproxyDisableInboundForMobileNetworks
 	}
 
 	if config.InproxyDisableIPv6ICECandidates != nil {
@@ -3199,9 +3199,9 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte("InproxyDisablePortMapping"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyDisablePortMapping)
 	}
-	if config.InproxyDisableInboundForMobleNetworks != nil {
-		hash.Write([]byte("InproxyDisableInboundForMobleNetworks"))
-		binary.Write(hash, binary.LittleEndian, *config.InproxyDisableInboundForMobleNetworks)
+	if config.InproxyDisableInboundForMobileNetworks != nil {
+		hash.Write([]byte("InproxyDisableInboundForMobileNetworks"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyDisableInboundForMobileNetworks)
 	}
 	if config.InproxyDisableIPv6ICECandidates != nil {
 		hash.Write([]byte("InproxyDisableIPv6ICECandidates"))

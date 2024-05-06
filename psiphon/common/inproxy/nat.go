@@ -21,7 +21,6 @@ package inproxy
 
 import (
 	"fmt"
-	"strings"
 )
 
 // NATMapping is a NAT mapping behavior defined in RFC 4787, section 4.1.
@@ -322,20 +321,6 @@ func (t PortMappingTypes) Available() bool {
 	return false
 }
 
-func (t PortMappingTypes) String() string {
-	s := make([]string, len(t))
-	for i, portMappingType := range t {
-		s[i] = portMappingType.String()
-	}
-	return strings.Join(s, ",")
-}
-
-// MarshalText ensures the string representation of the value is logged in
-// JSON.
-func (t PortMappingTypes) MarshalText() ([]byte, error) {
-	return []byte(t.String()), nil
-}
-
 func (t PortMappingTypes) IsValid() bool {
 	for _, portMappingType := range t {
 		if !portMappingType.IsValid() {
@@ -381,20 +366,6 @@ func (t ICECandidateType) IsValid() bool {
 
 // ICECandidateTypes is a list of ICE candidate types.
 type ICECandidateTypes []ICECandidateType
-
-func (t ICECandidateTypes) String() string {
-	s := make([]string, len(t))
-	for i, candidateType := range t {
-		s[i] = candidateType.String()
-	}
-	return strings.Join(s, ",")
-}
-
-// MarshalText ensures the string representation of the value is logged in
-// JSON.
-func (t ICECandidateTypes) MarshalText() ([]byte, error) {
-	return []byte(t.String()), nil
-}
 
 func (t ICECandidateTypes) IsValid() bool {
 	for _, candidateType := range t {

@@ -254,7 +254,7 @@ github.com/pion/dtls/v2/pkg/protocol/alert
 github.com/pion/dtls/v2/pkg/protocol/extension
 github.com/pion/dtls/v2/pkg/protocol/handshake
 github.com/pion/dtls/v2/pkg/protocol/recordlayer
-# github.com/pion/ice/v2 v2.3.12 => ./replace/ice
+# github.com/pion/ice/v2 v2.3.24 => ./replace/ice
 ## explicit; go 1.13
 github.com/pion/ice/v2
 github.com/pion/ice/v2/internal/atomic
@@ -271,8 +271,8 @@ github.com/pion/interceptor/pkg/twcc
 # github.com/pion/logging v0.2.2
 ## explicit; go 1.12
 github.com/pion/logging
-# github.com/pion/mdns v0.0.9
-## explicit; go 1.12
+# github.com/pion/mdns v0.0.12
+## explicit; go 1.19
 github.com/pion/mdns
 # github.com/pion/randutil v0.1.0
 ## explicit; go 1.14
@@ -280,15 +280,15 @@ github.com/pion/randutil
 # github.com/pion/rtcp v1.2.12
 ## explicit; go 1.13
 github.com/pion/rtcp
-# github.com/pion/rtp v1.8.3
+# github.com/pion/rtp v1.8.5
 ## explicit; go 1.19
 github.com/pion/rtp
 github.com/pion/rtp/codecs
 github.com/pion/rtp/codecs/av1/obu
-# github.com/pion/sctp v1.8.12
-## explicit; go 1.13
+# github.com/pion/sctp v1.8.16
+## explicit; go 1.19
 github.com/pion/sctp
-# github.com/pion/sdp/v3 v3.0.8
+# github.com/pion/sdp/v3 v3.0.9
 ## explicit; go 1.13
 github.com/pion/sdp/v3
 # github.com/pion/srtp/v2 v2.0.18
@@ -317,8 +317,8 @@ github.com/pion/turn/v2/internal/client
 github.com/pion/turn/v2/internal/ipnet
 github.com/pion/turn/v2/internal/proto
 github.com/pion/turn/v2/internal/server
-# github.com/pion/webrtc/v3 v3.2.24 => ./replace/webrtc
-## explicit; go 1.13
+# github.com/pion/webrtc/v3 v3.2.40 => ./replace/webrtc
+## explicit; go 1.17
 github.com/pion/webrtc/v3
 github.com/pion/webrtc/v3/internal/fmtp
 github.com/pion/webrtc/v3/internal/mux

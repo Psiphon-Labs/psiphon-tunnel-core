@@ -1512,10 +1512,12 @@ public class PsiphonTunnel {
                 // 40569). hasIPv6Route provides the same functionality via a
                 // callback into Java code.
 
+                // Note: don't exclude interfaces with the isPointToPoint
+                // property, which is true for certain mobile networks.
+
                 for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
                     if (netInterface.isUp() &&
-                        !netInterface.isLoopback() &&
-                        !netInterface.isPointToPoint()) {
+                        !netInterface.isLoopback()) {
                         for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
 
                             // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
