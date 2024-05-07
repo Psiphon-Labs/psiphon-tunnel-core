@@ -434,6 +434,15 @@ func (fields ServerEntryFields) RemoveUnsignedFields() {
 	delete(fields, "isLocalDerivedTag")
 }
 
+// ToSignedFields checks for a signature and calls RemoveUnsignedFields.
+func (fields ServerEntryFields) ToSignedFields() error {
+	if !fields.HasSignature() {
+		return errors.TraceNew("missing signature field")
+	}
+	fields.RemoveUnsignedFields()
+	return nil
+}
+
 // NewServerEntrySignatureKeyPair creates an ed25519 key pair for use in
 // server entry signing and verification.
 func NewServerEntrySignatureKeyPair() (string, string, error) {
@@ -897,40 +906,6 @@ func (serverEntry *ServerEntry) HasProviderID() bool {
 
 func (serverEntry *ServerEntry) HasSignature() bool {
 	return serverEntry.Signature != ""
-}
-
-// GetSignedServerEntryFields converts a signed ServerEntry into
-// ServerEntryFields.
-//
-// Limitation: a ServerEntry loaded from the local datastore may be missing
-// unmarshaled fields in the case where the server entry JSON contains fields
-// introduced in newer code; the ServerEntryFields in the db will contain
-// these fields, but not the ServerEntry. Prefer loading the
-// ServerEntryFields from psiphon.GetSignedServerEntryFields, which will
-// include all these fields, which may be included in the signature.
-//
-// GetSignedServerEntryFields is intended for use with limited cases such as
-// testing with TargetServerEntry.
-func (serverEntry *ServerEntry) GetSignedServerEntryFields() (ServerEntryFields, error) {
-
-	if !serverEntry.HasSignature() {
-		return nil, errors.TraceNew("missing signature")
-	}
-
-	serverEntryJSON, err := json.Marshal(serverEntry)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	var serverEntryFields ServerEntryFields
-	err = json.Unmarshal(serverEntryJSON, &serverEntryFields)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	serverEntryFields.RemoveUnsignedFields()
-
-	return serverEntryFields, nil
 }
 
 func (serverEntry *ServerEntry) GetDiagnosticID() string {

@@ -1096,19 +1096,30 @@ func MakeDialParameters(
 		}
 
 		// Load the signed server entry to be presented to the broker as proof
-		// that the in-proxy destination is a Psiphon server. For all but
-		// TARGET server entries, load the JSON server entry fields from the
-		// local data store, since the signature may include fields, added
-		// after this client version, which are in the JSON but not in the
-		// protocol.ServerEntry. In the TARGET case, the protocol.ServerEntry
-		// is used as the source.
+		// that the in-proxy destination is a Psiphon server. The original
+		// JSON server entry fields are loaded from the local data store
+		// (or from config.TargetServerEntry), since the signature may
+		// include fields, added after this client version, which are in the
+		// JSON but not in the protocol.ServerEntry.
+
 		var serverEntryFields protocol.ServerEntryFields
 		if serverEntry.LocalSource == protocol.SERVER_ENTRY_SOURCE_TARGET {
-			serverEntryFields, err = serverEntry.GetSignedServerEntryFields()
+
+			serverEntryFields, err = protocol.DecodeServerEntryFields(
+				config.TargetServerEntry, "", protocol.SERVER_ENTRY_SOURCE_TARGET)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
+			if serverEntryFields.GetIPAddress() != serverEntry.IpAddress {
+				return nil, errors.TraceNew("unexpected TargetServerEntry")
+			}
+			err = serverEntryFields.ToSignedFields()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
 		} else {
+
 			serverEntryFields, err = GetSignedServerEntryFields(serverEntry.IpAddress)
 			if err != nil {
 				return nil, errors.Trace(err)

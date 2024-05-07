@@ -2092,13 +2092,10 @@ func GetSignedServerEntryFields(ipAddress string) (protocol.ServerEntryFields, e
 		return nil, errors.Trace(err)
 	}
 
-	if !serverEntryFields.HasSignature() {
-		return nil, errors.TraceNew("server entry not signed")
+	err = serverEntryFields.ToSignedFields()
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
-
-	// RemoveUnsignedFields also removes potentially sensitive local fields, so
-	// explicitly strip these.
-	serverEntryFields.RemoveUnsignedFields()
 
 	return serverEntryFields, nil
 }
