@@ -693,7 +693,7 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 
 func (conn *Conn) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
-	logFields["resumed_session"] = conn.connection.hasResumedSession()
+	logFields["quic_resumed_session"] = conn.connection.hasResumedSession()
 	return logFields
 }
 
@@ -798,7 +798,7 @@ func (t *QUICTransporter) closePacketConn() {
 
 func (t *QUICTransporter) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
-	logFields["resumed_session"] = t.resumedSession
+	logFields["quic_resumed_session"] = t.resumedSession
 	return logFields
 }
 
