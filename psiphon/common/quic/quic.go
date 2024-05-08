@@ -702,7 +702,7 @@ func (conn *Conn) GetMetrics() common.LogFields {
 // CloseIdleConnections.
 type QUICTransporter struct {
 	quicRoundTripper
-	resumedSession bool
+	resumedSession atomic.Bool
 
 	noticeEmitter           func(string)
 	udpDialer               func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
@@ -798,7 +798,7 @@ func (t *QUICTransporter) closePacketConn() {
 
 func (t *QUICTransporter) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
-	logFields["quic_resumed_session"] = t.resumedSession
+	logFields["quic_resumed_session"] = t.resumedSession.Load()
 	return logFields
 }
 
@@ -870,7 +870,7 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 	}
 
 	if connection.hasResumedSession() {
-		t.resumedSession = true
+		t.resumedSession.Store(true)
 	}
 
 	// dialQUIC uses quic-go.DialContext as we must create our own UDP sockets to
