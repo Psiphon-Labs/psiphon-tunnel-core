@@ -685,7 +685,7 @@ func MakeDialParameters(
 		protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration
 
-	if usingTLS {
+	if tlsClientSessionCache != nil && usingTLS {
 		dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -826,7 +826,7 @@ func MakeDialParameters(
 				p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
 	}
 
-	if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+	if quicTLSClientSessionCache != nil && protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 		dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -1505,7 +1505,9 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// Meek, TLS-OSSH and QUIC connections.
 
 	if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
-		dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
+		if dialParams.quicTLSClientSessionCache != nil {
+			dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
+		}
 	}
 
 	usingTLS := protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
@@ -1513,7 +1515,9 @@ func (dialParams *DialParameters) Failed(config *Config) {
 		dialParams.ConjureAPIRegistration
 
 	if usingTLS {
-		dialParams.tlsClientSessionCache.RemoveCacheEntry()
+		if dialParams.tlsClientSessionCache != nil {
+			dialParams.tlsClientSessionCache.RemoveCacheEntry()
+		}
 	}
 
 }
