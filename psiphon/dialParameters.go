@@ -168,7 +168,7 @@ type DialParameters struct {
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
 
-	QUICTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
+	quicTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
 	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
 
 	dialConfig *DialConfig `json:"-"`
@@ -832,13 +832,13 @@ func MakeDialParameters(
 			return nil, errors.Trace(err)
 		}
 		sessionKey := net.JoinHostPort(serverEntry.IpAddress, strconv.Itoa(dialPortNumber))
-		dialParams.QUICTLSClientSessionCache = common.WrapClientSessionCache(
+		dialParams.quicTLSClientSessionCache = common.WrapClientSessionCache(
 			quicTLSClientSessionCache,
 			sessionKey)
 
 		if !isReplay {
 			// Remove the cache entry to make a fresh dial when !isReplay.
-			dialParams.QUICTLSClientSessionCache.RemoveCacheEntry()
+			dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
 		}
 
 	}
@@ -1347,7 +1347,7 @@ func MakeDialParameters(
 			QUICVersion:                   dialParams.QUICVersion,
 			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
 			QUICDialEarly:                 dialParams.QUICDialEarly,
-			QUICTLSClientSessionCache:     dialParams.QUICTLSClientSessionCache,
+			QUICTLSClientSessionCache:     dialParams.quicTLSClientSessionCache,
 			TLSClientSessionCache:         dialParams.tlsClientSessionCache,
 			QUICDisablePathMTUDiscovery:   dialParams.QUICDisablePathMTUDiscovery,
 			UseHTTPS:                      usingTLS,
@@ -1505,7 +1505,7 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// Meek, TLS-OSSH and QUIC connections.
 
 	if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
-		dialParams.QUICTLSClientSessionCache.RemoveCacheEntry()
+		dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
 	}
 
 	usingTLS := protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
