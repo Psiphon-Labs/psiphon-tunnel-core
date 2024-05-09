@@ -136,7 +136,7 @@ type MeekConfig struct {
 
 	// QUICTLSClientSessionCache specifies the TLS session cache to use
 	// for Meek connections that use HTTP/2 over QUIC.
-	QUICTLSClientSessionCache *common.TlsClientSessionCacheWrapper
+	QUICTLSClientSessionCache *common.TLSClientSessionCacheWrapper
 
 	// TLSClientSessionCache specifies the TLS session cache to use for
 	// HTTPS (non-QUIC) Meek connections.

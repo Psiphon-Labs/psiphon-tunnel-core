@@ -168,7 +168,7 @@ type DialParameters struct {
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
 
-	QUICTLSClientSessionCache *common.TlsClientSessionCacheWrapper  `json:"-"`
+	QUICTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
 	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
 
 	dialConfig *DialConfig `json:"-"`

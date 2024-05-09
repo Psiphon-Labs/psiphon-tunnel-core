@@ -26,10 +26,10 @@ import (
 	utls "github.com/refraction-networking/utls"
 )
 
-// TlsClientSessionCacheWrapper is a wrapper around tls.ClientSessionCache
+// TLSClientSessionCacheWrapper is a wrapper around tls.ClientSessionCache
 // that provides a hard-coded key for the cache.
 // It implements the TLSClientSessionCacheWrapper interface.
-type TlsClientSessionCacheWrapper struct {
+type TLSClientSessionCacheWrapper struct {
 	tls.ClientSessionCache
 
 	// sessinoKey specifies the value of the hard-coded TLS session cache key.
@@ -41,29 +41,29 @@ type TlsClientSessionCacheWrapper struct {
 func WrapClientSessionCache(
 	cache tls.ClientSessionCache,
 	ipAddress string,
-	dialPortNumber int) *TlsClientSessionCacheWrapper {
+	dialPortNumber int) *TLSClientSessionCacheWrapper {
 
-	return &TlsClientSessionCacheWrapper{
+	return &TLSClientSessionCacheWrapper{
 		ClientSessionCache: cache,
 		sessionKey:         sessionKey(ipAddress, dialPortNumber),
 	}
 }
 
-func (c *TlsClientSessionCacheWrapper) Get(_ string) (session *tls.ClientSessionState, ok bool) {
+func (c *TLSClientSessionCacheWrapper) Get(_ string) (session *tls.ClientSessionState, ok bool) {
 	return c.ClientSessionCache.Get(c.sessionKey)
 }
 
-func (c *TlsClientSessionCacheWrapper) Put(_ string, cs *tls.ClientSessionState) {
+func (c *TLSClientSessionCacheWrapper) Put(_ string, cs *tls.ClientSessionState) {
 	c.ClientSessionCache.Put(c.sessionKey, cs)
 }
 
-func (c *TlsClientSessionCacheWrapper) IsSessionResumptionAvailable() bool {
+func (c *TLSClientSessionCacheWrapper) IsSessionResumptionAvailable() bool {
 	// Ignore the ok return value, as the session may still be till if ok is true.
 	session, _ := c.Get(c.sessionKey)
 	return session != nil
 }
 
-func (c *TlsClientSessionCacheWrapper) RemoveCacheEntry() {
+func (c *TLSClientSessionCacheWrapper) RemoveCacheEntry() {
 	c.ClientSessionCache.Put(c.sessionKey, nil)
 }
 

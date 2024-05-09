@@ -372,7 +372,7 @@ func Dial(
 	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
-	tlsClientSessionCache *common.TlsClientSessionCacheWrapper) (net.Conn, error) {
+	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (net.Conn, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -711,7 +711,7 @@ type QUICTransporter struct {
 	clientHelloSeed         *prng.Seed
 	disablePathMTUDiscovery bool
 	dialEarly               bool
-	tlsClientSessionCache   *common.TlsClientSessionCacheWrapper
+	tlsClientSessionCache   *common.TLSClientSessionCacheWrapper
 	packetConn              atomic.Value
 
 	mutex sync.Mutex
@@ -728,7 +728,7 @@ func NewQUICTransporter(
 	clientHelloSeed *prng.Seed,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
-	tlsClientSessionCache *common.TlsClientSessionCacheWrapper) (*QUICTransporter, error) {
+	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (*QUICTransporter, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -1023,7 +1023,7 @@ func dialQUIC(
 	clientMaxPacketSizeAdjustment int,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
-	tlsClientSessionCache *common.TlsClientSessionCacheWrapper) (quicConnection, error) {
+	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (quicConnection, error) {
 
 	if isIETFVersionNumber(versionNumber) {
 		quicConfig := &ietf_quic.Config{
