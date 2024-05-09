@@ -265,7 +265,7 @@ type MeekConn struct {
 	relayWaitGroup            *sync.WaitGroup
 	firstUnderlyingConn       net.Conn
 
-	// resumedTLSSession reprepsents whether the first underlying TLS connection
+	// resumedTLSSession represents whether the first underlying TLS connection
 	// was resumed for metrics purposes.
 	resumedTLSSession bool
 
