@@ -1514,20 +1514,12 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// Clear the TLS client session cache to avoid (potentially) reusing failed sessions for
 	// Meek, TLS-OSSH and QUIC connections.
 
-	if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
-		if dialParams.quicTLSClientSessionCache != nil {
-			dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
-		}
+	if dialParams.quicTLSClientSessionCache != nil {
+		dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
 	}
 
-	usingTLS := protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
-		protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) ||
-		dialParams.ConjureAPIRegistration
-
-	if usingTLS {
-		if dialParams.tlsClientSessionCache != nil {
-			dialParams.tlsClientSessionCache.RemoveCacheEntry()
-		}
+	if dialParams.tlsClientSessionCache != nil {
+		dialParams.tlsClientSessionCache.RemoveCacheEntry()
 	}
 
 }
