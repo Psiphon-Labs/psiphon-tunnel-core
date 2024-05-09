@@ -690,10 +690,8 @@ func MakeDialParameters(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		dialParams.tlsClientSessionCache = common.WrapUtlsClientSessionCache(
-			tlsClientSessionCache,
-			serverEntry.IpAddress,
-			dialPortNumber)
+		sessionKey := net.JoinHostPort(serverEntry.IpAddress, strconv.Itoa(dialPortNumber))
+		dialParams.tlsClientSessionCache = common.WrapUtlsClientSessionCache(tlsClientSessionCache, sessionKey)
 
 		if !isReplay {
 			// Remove the cache entry to make a fresh dial when !isReplay.
@@ -833,10 +831,10 @@ func MakeDialParameters(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+		sessionKey := net.JoinHostPort(serverEntry.IpAddress, strconv.Itoa(dialPortNumber))
 		dialParams.QUICTLSClientSessionCache = common.WrapClientSessionCache(
 			quicTLSClientSessionCache,
-			serverEntry.IpAddress,
-			dialPortNumber)
+			sessionKey)
 
 		if !isReplay {
 			// Remove the cache entry to make a fresh dial when !isReplay.

@@ -20,8 +20,6 @@
 package common
 
 import (
-	"fmt"
-
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	utls "github.com/refraction-networking/utls"
 )
@@ -32,7 +30,7 @@ import (
 type TLSClientSessionCacheWrapper struct {
 	tls.ClientSessionCache
 
-	// sessinoKey specifies the value of the hard-coded TLS session cache key.
+	// sessionKey specifies the value of the hard-coded TLS session cache key.
 	sessionKey string
 }
 
@@ -40,12 +38,12 @@ type TLSClientSessionCacheWrapper struct {
 // derived from the ipAddress and dialPortNumber.
 func WrapClientSessionCache(
 	cache tls.ClientSessionCache,
-	ipAddress string,
-	dialPortNumber int) *TLSClientSessionCacheWrapper {
+	hardCodedSessionKey string,
+) *TLSClientSessionCacheWrapper {
 
 	return &TLSClientSessionCacheWrapper{
 		ClientSessionCache: cache,
-		sessionKey:         sessionKey(ipAddress, dialPortNumber),
+		sessionKey:         hardCodedSessionKey,
 	}
 }
 
@@ -81,12 +79,12 @@ type UtlsClientSessionCacheWrapper struct {
 // derived from the ipAddress and dialPortNumber.
 func WrapUtlsClientSessionCache(
 	cache utls.ClientSessionCache,
-	ipAddress string,
-	dialPortNumber int) *UtlsClientSessionCacheWrapper {
+	hardCodedSessionKey string,
+) *UtlsClientSessionCacheWrapper {
 
 	return &UtlsClientSessionCacheWrapper{
 		ClientSessionCache: cache,
-		sessionKey:         sessionKey(ipAddress, dialPortNumber),
+		sessionKey:         hardCodedSessionKey,
 	}
 }
 
@@ -106,8 +104,4 @@ func (c *UtlsClientSessionCacheWrapper) IsSessionResumptionAvailable() bool {
 
 func (c *UtlsClientSessionCacheWrapper) RemoveCacheEntry() {
 	c.ClientSessionCache.Put(c.sessionKey, nil)
-}
-
-func sessionKey(ipAddress string, dialPortNumber int) string {
-	return fmt.Sprintf("%s:%d", ipAddress, dialPortNumber)
 }
