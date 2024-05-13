@@ -321,6 +321,7 @@ func (s *InitiatorSessions) RoundTrip(
 			// If this round trip owns its session and there are any
 			// waitToShareSession initiators awaiting the session, signal them
 			// that the session will not become ready.
+
 			rt.TransportFailed()
 
 			return nil, errors.Trace(err)

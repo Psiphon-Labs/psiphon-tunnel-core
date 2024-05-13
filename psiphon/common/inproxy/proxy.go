@@ -74,6 +74,11 @@ type ProxyConfig struct {
 	// EnableWebRTCDebugLogging indicates whether to emit WebRTC debug logs.
 	EnableWebRTCDebugLogging bool
 
+	// WaitForNetworkConnectivity is a callback that should block until there
+	// is network connectivity or shutdown. The return value is true when
+	// there is network connectivity, and false for shutdown.
+	WaitForNetworkConnectivity func() bool
+
 	// GetBrokerClient provides a BrokerClient which the proxy will use for
 	// making broker requests. If GetBrokerClient returns a shared
 	// BrokerClient instance, the BrokerClient must support multiple,
@@ -303,6 +308,10 @@ func (p *Proxy) proxyClients(ctx context.Context, delayFirstAnnounce bool) {
 	failureDelayFactor := time.Duration(1)
 
 	for i := 0; ctx.Err() == nil; i++ {
+
+		if !p.config.WaitForNetworkConnectivity() {
+			break
+		}
 
 		// When delayFirstAnnounce is true, the very first proxyOneClient
 		// proxy announcement is delayed to give another, concurrent

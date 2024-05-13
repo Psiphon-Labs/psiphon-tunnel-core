@@ -28,7 +28,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -100,6 +99,8 @@ func NewInproxyBrokerClientManager(
 // called when tactics have changed, which triggers a broker client reset in
 // order to apply potentially changed parameters.
 func (b *InproxyBrokerClientManager) TacticsApplied() error {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 
 	// TODO: as a future future enhancement, don't reset when the tactics
 	// brokerSpecs.Hash() is unchanged?
@@ -133,7 +134,7 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 		nil
 }
 
-func (b *InproxyBrokerClientManager) resetBrokerClientOnRoundTripFailed() error {
+func (b *InproxyBrokerClientManager) resetBrokerClientOnRoundTripperFailed() error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -143,6 +144,16 @@ func (b *InproxyBrokerClientManager) resetBrokerClientOnRoundTripFailed() error 
 func (b *InproxyBrokerClientManager) reset() error {
 
 	// Assumes b.mutex lock is held.
+
+	if b.brokerClientInstance != nil {
+
+		// Close the existing broker client. This will close all underlying
+		// network connections, interrupting any in-flight requests. This
+		// close is invoked in the resetBrokerClientOnRoundTripperFailed
+		// case, where it's expected that the round tripped has permanently
+		// failed.
+		b.brokerClientInstance.Close()
+	}
 
 	// Any existing broker client is removed, even if
 	// NewInproxyBrokerClientInstance fails. This ensures, for example, that
@@ -167,7 +178,7 @@ func (b *InproxyBrokerClientManager) reset() error {
 
 // InproxyBrokerClientInstance pairs an inproxy.BrokerClient instance with an
 // implementation of the inproxy.BrokerDialCoordinator interface and the
-// associated, underlying broker dial paramaters. InproxyBrokerClientInstance
+// associated, underlying broker dial parameters. InproxyBrokerClientInstance
 // implements broker client dial replay.
 type InproxyBrokerClientInstance struct {
 	config                        *Config
@@ -358,8 +369,8 @@ func NewInproxyBrokerClientInstance(
 
 	// Initialize broker client. This will start with a fresh broker session.
 	//
-	// When resetBrokerClientOnRoundTripFailed is invoked due to a failure at
-	// the transport level -- TLS or domain fronting --
+	// When resetBrokerClientOnRoundTripperFailed is invoked due to a failure
+	// at the transport level -- TLS or domain fronting --
 	// NewInproxyBrokerClientInstance is invoked, resetting both the broker
 	// client round tripper and the broker session. As a future enhancement,
 	// consider distinguishing between transport and session errors and
@@ -370,16 +381,6 @@ func NewInproxyBrokerClientInstance(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	// Set a finalizer to close any open network resources associated with the
-	// round tripper once the InproxyBrokerClientInstance is no longer
-	// referenced. Note that there's no explicit call to close in
-	// InproxyBrokerClientManager.reset when a new instance is created in
-	// case the old insstance is still in use.
-
-	runtime.SetFinalizer(b, func(b *InproxyBrokerClientInstance) {
-		_ = b.roundTripper.Close()
-	})
 
 	return b, nil
 }
@@ -492,6 +493,14 @@ func prepareCompartmentIDs(
 	}
 
 	return commonCompartmentIDs, personalCompartmentIDs, nil
+}
+
+// Close closes the broker client round tripped, including closing all
+// underlying network connections, which will interrupt any in-flight round
+// trips.
+func (b *InproxyBrokerClientInstance) Close() error {
+	err := b.roundTripper.Close()
+	return errors.Trace(err)
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.
@@ -623,7 +632,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 		}
 	}
 
-	// Invoke resetBrokerClientOnRoundTripFailed to signal the
+	// Invoke resetBrokerClientOnRoundTripperFailed to signal the
 	// InproxyBrokerClientManager to create a new
 	// InproxyBrokerClientInstance, with new dial parameters and a new round
 	// tripper, after a failure.
@@ -635,7 +644,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 	// Limitation: a transport-level failure may unnecessarily reset the
 	// broker session state; see comment in NewInproxyBrokerClientInstance.
 
-	err := b.brokerClientManager.resetBrokerClientOnRoundTripFailed()
+	err := b.brokerClientManager.resetBrokerClientOnRoundTripperFailed()
 	if err != nil {
 		NoticeWarning("reset broker client failed: %v", errors.Trace(err))
 		// Continue with old broker client instance.
@@ -1218,7 +1227,7 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 	// connection, while concurrent round trips over HTTP connections may
 	// spawn additional TLS persistent connections.
 	//
-	// There is no retry here is DialMeek fails, as higher levels will invoke
+	// There is no retry here if DialMeek fails, as higher levels will invoke
 	// BrokerClientRoundTripperFailed on failure, clear any replay, select
 	// new dial parameters, and retry.
 
@@ -1273,8 +1282,27 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 	if err == nil {
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusOK {
+
+			// This case is treated as a temporary round tripper failure,
+			// since we received a response from the CDN, secured with TLS
+			// and VerifyPins, or from broker itself. One common scenario is
+			// the CDN returning a temporary gateway failed or timeout error.
+			// In this scenario, we can reuse the existing round tripper and
+			// it may be counterproductive to return a RoundTripperFailedError
+			// which will trigger a clearing of any broker dial replay
+			// parameters as well as reseting the round tripper.
+
 			err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
 		}
+	} else if ctx.Err() != context.Canceled {
+
+		// Other round trip errors, including TLS failures and client-side
+		// timeouts,  but excluding a cancelled context as happens on
+		// shutdown, are classified as RoundTripperFailedErrors, which will
+		// invoke BrokerClientRoundTripperFailed, resetting the round tripper
+		// and clearing replay parameters.
+
+		err = inproxy.NewRoundTripperFailedError(err)
 	}
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1282,6 +1310,7 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 
 	responsePayload, err := io.ReadAll(response.Body)
 	if err != nil {
+		err = inproxy.NewRoundTripperFailedError(err)
 		return nil, errors.Trace(err)
 	}
 

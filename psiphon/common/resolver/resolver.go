@@ -671,7 +671,7 @@ func (r *Resolver) ResolveIP(
 	resolveCtx, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
 	waitGroup := new(sync.WaitGroup)
-	conns := common.NewConns()
+	conns := common.NewConns[net.Conn]()
 	type answer struct {
 		attempt int
 		IPs     []net.IP

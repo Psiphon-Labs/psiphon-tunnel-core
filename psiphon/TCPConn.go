@@ -106,7 +106,7 @@ func DialTCP(
 func proxiedTcpDial(
 	ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
-	interruptConns := common.NewConns()
+	interruptConns := common.NewConns[net.Conn]()
 
 	// Note: using interruptConns to interrupt a proxy dial assumes
 	// that the underlying proxy code will immediately exit with an

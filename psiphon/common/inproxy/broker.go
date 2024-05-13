@@ -507,7 +507,8 @@ func (b *Broker) handleProxyAnnounce(
 		return nil, errors.Trace(err)
 	}
 
-	logFields, err = announceRequest.ValidateAndGetLogFields(
+	var apiParams common.APIParameters
+	apiParams, logFields, err = announceRequest.ValidateAndGetParametersAndLogFields(
 		int(atomic.LoadInt64(&b.maxCompartmentIDs)),
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,
@@ -525,8 +526,7 @@ func (b *Broker) handleProxyAnnounce(
 	// proxy can store and apply the new tactics before announcing again.
 
 	var tacticsPayload []byte
-	tacticsPayload, newTacticsTag, err = b.config.GetTactics(
-		geoIPData, common.APIParameters(logFields))
+	tacticsPayload, newTacticsTag, err = b.config.GetTactics(geoIPData, apiParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

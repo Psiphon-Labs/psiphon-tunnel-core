@@ -920,6 +920,7 @@ func (server *Server) GetTactics(
 
 			var speedTestSamples []SpeedTestSample
 			err := getJSONRequestParam(apiParams, SPEED_TEST_SAMPLES_PARAMETER_NAME, &speedTestSamples)
+
 			if err != nil {
 				// TODO: log speed test parameter errors?
 				// This API param is not explicitly validated elsewhere.
@@ -981,7 +982,7 @@ func getJSONRequestParam(apiParams common.APIParameters, name string, value inte
 
 	// Remarshal the parameter from common.APIParameters, as the initial API parameter
 	// unmarshal will not have known the correct target type. I.e., instead of doing
-	// unmarhsal-into-struct, common.APIParameters will have an unmarshal-into-interface
+	// unmarshal-into-struct, common.APIParameters will have an unmarshal-into-interface
 	// value as described here: https://golang.org/pkg/encoding/json/#Unmarshal.
 
 	jsonValue, err := json.Marshal(apiParams[name])

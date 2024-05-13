@@ -395,6 +395,10 @@ func runTestInproxy() error {
 
 			Logger: logger,
 
+			WaitForNetworkConnectivity: func() bool {
+				return true
+			},
+
 			GetBrokerClient: func() (*BrokerClient, error) {
 				return brokerClient, nil
 			},

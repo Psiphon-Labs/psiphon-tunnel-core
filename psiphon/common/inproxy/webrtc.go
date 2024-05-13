@@ -365,7 +365,7 @@ func newWebRTCConn(
 	config.Logger.WithTraceFields(common.LogFields{
 		"dtls_randomization":           config.DoDTLSRandomization,
 		"data_channel_traffic_shaping": config.TrafficShapingParameters != nil,
-	}).Info("data_channel_obfuscation")
+	}).Info("webrtc_data_channel_obfuscation")
 
 	// Facilitate DTLS Client/ServerHello randomization. The client decides
 	// whether to do DTLS randomization and generates and the proxy receives
@@ -662,6 +662,11 @@ func newWebRTCConn(
 		portMapper.close()
 		conn.portMapper = nil
 	}
+
+	config.Logger.WithTraceFields(common.LogFields{
+		"ice_completed": iceCompleted,
+		"port_mapping":  portMappingExternalAddr != "",
+	}).Info("webrtc_candidates_gathered")
 
 	// Get the offer or answer, now populated with any ICE candidates.
 

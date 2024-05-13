@@ -21,6 +21,7 @@ package inproxy
 
 import (
 	"context"
+	std_errors "errors"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -262,14 +263,19 @@ func (b *BrokerClient) roundTrip(
 		request)
 	if err != nil {
 
-		// The BrokerDialCoordinator provider should close the existing
-		// BrokerClientRoundTripper and create a new RoundTripper to return
-		// in the next BrokerClientRoundTripper call.
-		//
-		// The session will be closed, if necessary, by InitiatorSessions.
-		// It's possible that the session remains valid and only the
-		// RoundTripper transport layer needs to be reset.
-		b.coordinator.BrokerClientRoundTripperFailed(roundTripper)
+		var failedError *RoundTripperFailedError
+		failed := std_errors.As(err, &failedError)
+
+		if failed {
+			// The BrokerDialCoordinator provider should close the existing
+			// BrokerClientRoundTripper and create a new RoundTripper to return
+			// in the next BrokerClientRoundTripper call.
+			//
+			// The session will be closed, if necessary, by InitiatorSessions.
+			// It's possible that the session remains valid and only the
+			// RoundTripper transport layer needs to be reset.
+			b.coordinator.BrokerClientRoundTripperFailed(roundTripper)
+		}
 
 		return nil, errors.Trace(err)
 	}

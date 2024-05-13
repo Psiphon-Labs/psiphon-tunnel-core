@@ -124,7 +124,7 @@ type MeekServer struct {
 	psiphonTLSConfig                *psiphon_tls.Config
 	obfuscatorSeedHistory           *obfuscator.SeedHistory
 	clientHandler                   func(clientConn net.Conn, data *additionalTransportData)
-	openConns                       *common.Conns
+	openConns                       *common.Conns[net.Conn]
 	stopBroadcast                   <-chan struct{}
 	sessionsLock                    sync.RWMutex
 	sessions                        map[string]*meekSession
@@ -240,7 +240,7 @@ func NewMeekServer(
 		httpClientIOTimeout:             httpClientIOTimeout,
 		obfuscatorSeedHistory:           obfuscator.NewSeedHistory(nil),
 		clientHandler:                   clientHandler,
-		openConns:                       common.NewConns(),
+		openConns:                       common.NewConns[net.Conn](),
 		stopBroadcast:                   stopBroadcast,
 		sessions:                        make(map[string]*meekSession),
 		checksumTable:                   checksumTable,

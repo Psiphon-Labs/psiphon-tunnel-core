@@ -33,6 +33,23 @@ type RoundTripper interface {
 	RoundTrip(ctx context.Context, requestPayload []byte) (responsePayload []byte, err error)
 }
 
+// RoundTripperFailedError is an error type that should be returned from
+// RoundTripper.RoundTrip when the round trip transport has permanently
+// failed. When RoundTrip returns an error of type RoundTripperFailedError to
+// a broker client, the broker client will invoke
+// BrokerClientRoundTripperFailed.
+type RoundTripperFailedError struct {
+	err error
+}
+
+func NewRoundTripperFailedError(err error) *RoundTripperFailedError {
+	return &RoundTripperFailedError{err: err}
+}
+
+func (e RoundTripperFailedError) Error() string {
+	return e.err.Error()
+}
+
 // BrokerDialCoordinator provides in-proxy dial parameters and configuration,
 // used by both clients and proxies, and an interface for signaling when
 // parameters are successful or not, to facilitate replay of successful

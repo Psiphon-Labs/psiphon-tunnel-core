@@ -501,6 +501,42 @@ func unpackRawJSON(v interface{}) (interface{}, error) {
 	return unmarshaledJSON, nil
 }
 
+func unpackSliceOfJSONCompatibleMaps(v interface{}) (interface{}, error) {
+
+	// For compatibility with the legacy JSON encoding as used for tactics
+	// speed test sample parameters. This converts CBOR maps of type map
+	// [interface{}]interface{} to JSON-compatible maps of type map
+	// [string]interface{}.
+
+	if v == nil {
+		return nil, nil
+	}
+
+	packedEntries, ok := v.([]interface{})
+	if !ok {
+		return nil, errors.Tracef("expected []interface{} type")
+	}
+
+	entries := make([]map[string]interface{}, len(packedEntries))
+
+	for i, packedEntry := range packedEntries {
+		entry, ok := packedEntry.(map[interface{}]interface{})
+		if !ok {
+			return nil, errors.Tracef("expected map[interface{}]interface{} type")
+		}
+		entries[i] = make(map[string]interface{})
+		for key, value := range entry {
+			strKey, ok := key.(string)
+			if !ok {
+				return nil, errors.Tracef("expected string type")
+			}
+			entries[i][strKey] = value
+		}
+	}
+
+	return entries, nil
+}
+
 func stringOrTextMarshal(v interface{}) (string, error) {
 	switch value := v.(type) {
 	case string:
@@ -528,14 +564,15 @@ var (
 	packedServerEntryFieldsNameToSpec = make(map[string]packSpec)
 	packedServerEntryFieldsKeyToSpec  = make(map[int]packSpec)
 
-	intConverter            = &packConverter{packInt, unpackInt}
-	floatConverter          = &packConverter{packFloat, unpackFloat}
-	lowerHexConverter       = &packConverter{packHex, unpackHexLower}
-	upperHexConverter       = &packConverter{packHex, unpackHexUpper}
-	base64Converter         = &packConverter{packBase64, unpackBase64}
-	unpaddedBase64Converter = &packConverter{packUnpaddedBase64, unpackUnpaddedBase64}
-	authorizationsConverter = &packConverter{packAuthorizations, unpackAuthorizations}
-	rawJSONConverter        = &packConverter{packNoop, unpackRawJSON}
+	intConverter               = &packConverter{packInt, unpackInt}
+	floatConverter             = &packConverter{packFloat, unpackFloat}
+	lowerHexConverter          = &packConverter{packHex, unpackHexLower}
+	upperHexConverter          = &packConverter{packHex, unpackHexUpper}
+	base64Converter            = &packConverter{packBase64, unpackBase64}
+	unpaddedBase64Converter    = &packConverter{packUnpaddedBase64, unpackUnpaddedBase64}
+	authorizationsConverter    = &packConverter{packAuthorizations, unpackAuthorizations}
+	rawJSONConverter           = &packConverter{packNoop, unpackRawJSON}
+	compatibleJSONMapConverter = &packConverter{packNoop, unpackSliceOfJSONCompatibleMaps}
 )
 
 func init() {
@@ -563,7 +600,7 @@ func init() {
 		// tactics.STORED_TACTICS_TAG_PARAMETER_NAME
 
 		{2, "stored_tactics_tag", lowerHexConverter},
-		{3, "speed_test_samples", nil},
+		{3, "speed_test_samples", compatibleJSONMapConverter},
 		{4, "applied_tactics_tag", lowerHexConverter},
 
 		// Specs: server.baseParams

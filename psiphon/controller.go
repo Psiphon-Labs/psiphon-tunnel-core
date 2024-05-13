@@ -2586,6 +2586,7 @@ func (controller *Controller) runInproxyProxy() {
 	config := &inproxy.ProxyConfig{
 		Logger:                        NoticeCommonLogger(debugLogging),
 		EnableWebRTCDebugLogging:      debugLogging,
+		WaitForNetworkConnectivity:    controller.inproxyWaitForNetworkConnectivity,
 		GetBrokerClient:               controller.inproxyGetProxyBrokerClient,
 		GetBaseAPIParameters:          controller.inproxyGetAPIParameters,
 		MakeWebRTCDialCoordinator:     controller.inproxyMakeWebRTCDialCoordinator,
@@ -2650,6 +2651,12 @@ func (controller *Controller) inproxyAwaitBrokerSpecs(isProxy bool) bool {
 			return false
 		}
 	}
+}
+
+func (controller *Controller) inproxyWaitForNetworkConnectivity() bool {
+	return WaitForNetworkConnectivity(
+		controller.runCtx,
+		controller.config.NetworkConnectivityChecker)
 }
 
 // inproxyGetProxyBrokerClient returns the broker client shared by all proxy

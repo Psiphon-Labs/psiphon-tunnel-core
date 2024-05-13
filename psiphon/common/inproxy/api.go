@@ -415,41 +415,41 @@ const (
 	maxDecoySize      = 16384
 )
 
-// ValidateAndGetLogFields validates the ProxyMetrics and returns
-// common.LogFields for logging.
-func (metrics *ProxyMetrics) ValidateAndGetLogFields(
+// ValidateAndGetParametersAndLogFields validates the ProxyMetrics and returns
+// Psiphon API parameters for processing and common.LogFields for logging.
+func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
-	geoIPData common.GeoIPData) (common.LogFields, error) {
+	geoIPData common.GeoIPData) (common.APIParameters, common.LogFields, error) {
 
 	if metrics.BaseAPIParameters == nil {
-		return nil, errors.TraceNew("missing base API parameters")
+		return nil, nil, errors.TraceNew("missing base API parameters")
 	}
 
 	baseParams, err := protocol.DecodePackedAPIParameters(metrics.BaseAPIParameters)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	err = baseAPIParameterValidator(baseParams)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	if metrics.ProxyProtocolVersion != ProxyProtocolVersion1 {
-		return nil, errors.Tracef("invalid proxy protocol version: %v", metrics.ProxyProtocolVersion)
+		return nil, nil, errors.Tracef("invalid proxy protocol version: %v", metrics.ProxyProtocolVersion)
 	}
 
 	if !metrics.NATType.IsValid() {
-		return nil, errors.Tracef("invalid NAT type: %v", metrics.NATType)
+		return nil, nil, errors.Tracef("invalid NAT type: %v", metrics.NATType)
 	}
 
 	if len(metrics.PortMappingTypes) > maxPortMappingTypes {
-		return nil, errors.Tracef("invalid portmapping types length: %d", len(metrics.PortMappingTypes))
+		return nil, nil, errors.Tracef("invalid portmapping types length: %d", len(metrics.PortMappingTypes))
 	}
 
 	if !metrics.PortMappingTypes.IsValid() {
-		return nil, errors.Tracef("invalid portmapping types: %v", metrics.PortMappingTypes)
+		return nil, nil, errors.Tracef("invalid portmapping types: %v", metrics.PortMappingTypes)
 	}
 
 	logFields := formatter(geoIPData, baseParams)
@@ -465,7 +465,7 @@ func (metrics *ProxyMetrics) ValidateAndGetLogFields(
 	logFields["peak_upstream_bytes_per_second"] = metrics.PeakUpstreamBytesPerSecond
 	logFields["peak_downstream_bytes_per_second"] = metrics.PeakDownstreamBytesPerSecond
 
-	return logFields, nil
+	return baseParams, logFields, nil
 }
 
 // ValidateAndGetLogFields validates the ClientMetrics and returns
@@ -514,26 +514,27 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 	return logFields, nil
 }
 
-// ValidateAndGetLogFields validates the ProxyAnnounceRequest and returns
-// common.LogFields for logging.
-func (request *ProxyAnnounceRequest) ValidateAndGetLogFields(
+// ValidateAndGetParametersAndLogFields validates the ProxyAnnounceRequest and
+// returns Psiphon API parameters for processing and common.LogFields for
+// logging.
+func (request *ProxyAnnounceRequest) ValidateAndGetParametersAndLogFields(
 	maxCompartmentIDs int,
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
-	geoIPData common.GeoIPData) (common.LogFields, error) {
+	geoIPData common.GeoIPData) (common.APIParameters, common.LogFields, error) {
 
 	if len(request.PersonalCompartmentIDs) > maxCompartmentIDs {
-		return nil, errors.Tracef("invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
+		return nil, nil, errors.Tracef("invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
 	if request.Metrics == nil {
-		return nil, errors.TraceNew("missing metrics")
+		return nil, nil, errors.TraceNew("missing metrics")
 	}
 
-	logFields, err := request.Metrics.ValidateAndGetLogFields(
+	apiParams, logFields, err := request.Metrics.ValidateAndGetParametersAndLogFields(
 		baseAPIParameterValidator, formatter, geoIPData)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	// PersonalCompartmentIDs are user-generated and shared out-of-band;
@@ -543,7 +544,7 @@ func (request *ProxyAnnounceRequest) ValidateAndGetLogFields(
 
 	logFields["has_personal_compartment_ids"] = hasPersonalCompartmentIDs
 
-	return logFields, nil
+	return apiParams, logFields, nil
 }
 
 // ValidateAndGetLogFields validates the ClientOfferRequest and returns
