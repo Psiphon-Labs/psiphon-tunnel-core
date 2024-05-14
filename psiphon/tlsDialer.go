@@ -197,16 +197,9 @@ func (config *CustomTLSConfig) EnableClientSessionCache() {
 	}
 }
 
-type CustomTLSDialer = func(ctx context.Context, network, addr string) (*CustomTLSConn, error)
-
-type CustomTLSConn struct {
-	net.Conn
-	resumedSession bool
-}
-
 // NewCustomTLSDialer creates a new dialer based on CustomTLSDial.
-func NewCustomTLSDialer(config *CustomTLSConfig) CustomTLSDialer {
-	return func(ctx context.Context, network, addr string) (*CustomTLSConn, error) {
+func NewCustomTLSDialer(config *CustomTLSConfig) common.Dialer {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return CustomTLSDial(ctx, network, addr, config)
 	}
 }
@@ -218,7 +211,7 @@ func NewCustomTLSDialer(config *CustomTLSConfig) CustomTLSDialer {
 func CustomTLSDial(
 	ctx context.Context,
 	network, addr string,
-	config *CustomTLSConfig) (*CustomTLSConn, error) {
+	config *CustomTLSConfig) (net.Conn, error) {
 
 	// Note that servers may return a chain which excludes the root CA
 	// cert https://datatracker.ietf.org/doc/html/rfc8446#section-4.4.2.
@@ -675,10 +668,23 @@ func CustomTLSDial(
 		return nil, errors.Trace(err)
 	}
 
-	return &CustomTLSConn{
+	return &tlsConn{
 		Conn:           conn,
+		underlyingConn: rawConn,
 		resumedSession: usedSessionTicket,
 	}, nil
+}
+
+type tlsConn struct {
+	net.Conn
+	underlyingConn net.Conn
+	resumedSession bool
+}
+
+func (conn *tlsConn) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+	logFields["tls_resumed_session"] = conn.resumedSession
+	return logFields
 }
 
 func verifyLegacyCertificate(rawCerts [][]byte, expectedCertificate *x509.Certificate) error {

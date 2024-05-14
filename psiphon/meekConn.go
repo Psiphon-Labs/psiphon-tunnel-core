@@ -265,10 +265,6 @@ type MeekConn struct {
 	relayWaitGroup            *sync.WaitGroup
 	firstUnderlyingConn       net.Conn
 
-	// resumedTLSSession represents whether the first underlying TLS connection
-	// was resumed for metrics purposes.
-	resumedTLSSession bool
-
 	// For MeekModeObfuscatedRoundTrip
 	meekCookieEncryptionPublicKey string
 	meekObfuscatedKey             string
@@ -562,8 +558,6 @@ func DialMeek(
 			return nil, errors.Trace(err)
 		}
 
-		meek.resumedTLSSession = preConn.resumedSession
-
 		cachedTLSDialer = newCachedTLSDialer(preConn, tlsDialer)
 
 		if IsTLSConnUsingHTTP2(preConn) {
@@ -819,16 +813,26 @@ func (meek *MeekConn) underlyingDial(ctx context.Context, network, addr string) 
 type cachedTLSDialer struct {
 	usedCachedConn int32
 	cachedConn     net.Conn
-	dialer         CustomTLSDialer
+	dialer         common.Dialer
+
+	// cachedConnMetrics records cachedConn metrics.
+	// These metrics do not change after the first dial.
+	cachedConnMetrics common.LogFields
 
 	mutex      sync.Mutex
 	requestCtx context.Context
 }
 
-func newCachedTLSDialer(cachedConn net.Conn, dialer CustomTLSDialer) *cachedTLSDialer {
+func newCachedTLSDialer(cachedConn net.Conn, dialer common.Dialer) *cachedTLSDialer {
+	cachedConnMetrics, ok := cachedConn.(common.MetricsSource)
+	metrics := make(common.LogFields)
+	if ok {
+		metrics = cachedConnMetrics.GetMetrics()
+	}
 	return &cachedTLSDialer{
-		cachedConn: cachedConn,
-		dialer:     dialer,
+		cachedConn:        cachedConn,
+		dialer:            dialer,
+		cachedConnMetrics: metrics,
 	}
 }
 
@@ -933,14 +937,12 @@ func (meek *MeekConn) GetMetrics() common.LogFields {
 	if ok {
 		logFields.Add(underlyingMetrics.GetMetrics())
 	}
-	if meek.cachedTLSDialer != nil {
-		logFields["tls_resumed_session"] = meek.resumedTLSSession
-	}
-
 	if quicTransport, ok := meek.transport.(*quic.QUICTransporter); ok {
 		logFields.Add(quicTransport.GetMetrics())
+	} else {
+		// For non-QUIC transports, include the TLS session resumption status.
+		logFields.Add(meek.cachedTLSDialer.cachedConnMetrics)
 	}
-
 	meek.mutex.Unlock()
 	return logFields
 }
