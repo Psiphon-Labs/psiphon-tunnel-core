@@ -269,7 +269,8 @@ func runInproxyBrokerDialParametersTest() error {
 
     // Test: no common compartment IDs sent when personal ID is set
 
-    config.InproxyPersonalCompartmentIDs = personalCompartmentIDs
+    config.InproxyClientPersonalCompartmentIDs = personalCompartmentIDs
+    config.InproxyProxyPersonalCompartmentIDs = personalCompartmentIDs
 
     manager = NewInproxyBrokerClientManager(config, isProxy)
 
