@@ -71,7 +71,7 @@ func (c *TLSClientSessionCacheWrapper) RemoveCacheEntry() {
 type UtlsClientSessionCacheWrapper struct {
 	utls.ClientSessionCache
 
-	// sessinoKey specifies the value of the hard-coded TLS session cache key.
+	// sessionKey specifies the value of the hard-coded TLS session cache key.
 	sessionKey string
 }
 
