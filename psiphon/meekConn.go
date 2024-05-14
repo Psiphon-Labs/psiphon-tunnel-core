@@ -934,7 +934,7 @@ func (meek *MeekConn) GetMetrics() common.LogFields {
 		logFields.Add(underlyingMetrics.GetMetrics())
 	}
 	if meek.cachedTLSDialer != nil {
-		logFields["resumed_session"] = meek.resumedTLSSession
+		logFields["tls_resumed_session"] = meek.resumedTLSSession
 	}
 
 	if quicTransport, ok := meek.transport.(*quic.QUICTransporter); ok {

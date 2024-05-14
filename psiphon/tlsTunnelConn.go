@@ -163,7 +163,7 @@ func (conn *TLSTunnelConn) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
 
 	logFields["tls_padding"] = conn.tlsPadding
-	logFields["resumed_session"] = conn.resumedTLSSession
+	logFields["tls_resumed_session"] = conn.resumedTLSSession
 
 	// Include metrics, such as fragmentor metrics, from the underlying dial
 	// conn. Properties of subsequent underlying dial conns are not reflected
