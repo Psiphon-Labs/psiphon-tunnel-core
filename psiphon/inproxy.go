@@ -152,6 +152,7 @@ func (b *InproxyBrokerClientManager) reset() error {
 		// close is invoked in the resetBrokerClientOnRoundTripperFailed
 		// case, where it's expected that the round tripped has permanently
 		// failed.
+
 		b.brokerClientInstance.Close()
 	}
 
@@ -314,7 +315,7 @@ func NewInproxyBrokerClientInstance(
 		return nil, errors.Trace(err)
 	}
 
-	roundTripper := NewInproxyBrokerRoundTripper(brokerDialParams)
+	roundTripper := NewInproxyBrokerRoundTripper(p, brokerDialParams)
 
 	// Clients always generate an ephemeral session key pair. Proxies may opt
 	// to use a long-lived key pair for proxied traffic attribution.
@@ -1147,6 +1148,7 @@ type InproxyBrokerRoundTripper struct {
 	dialCompleted    chan struct{}
 	dialErr          error
 	conn             *MeekConn
+	failureThreshold time.Duration
 }
 
 // NewInproxyBrokerRoundTripper creates a new InproxyBrokerRoundTripper. The
@@ -1156,6 +1158,7 @@ type InproxyBrokerRoundTripper struct {
 // The input brokerDialParams dial parameter and config fields must not
 // modifed after NewInproxyBrokerRoundTripper is called.
 func NewInproxyBrokerRoundTripper(
+	p parameters.ParametersAccessor,
 	brokerDialParams *InproxyBrokerDialParameters) *InproxyBrokerRoundTripper {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
@@ -1165,6 +1168,8 @@ func NewInproxyBrokerRoundTripper(
 		runCtx:           runCtx,
 		stopRunning:      stopRunning,
 		dialCompleted:    make(chan struct{}),
+		failureThreshold: p.Duration(
+			parameters.InproxyBrokerRoundTripStatusCodeFailureThreshold),
 	}
 }
 
@@ -1240,6 +1245,17 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 			rt.brokerDialParams.meekConfig,
 			rt.brokerDialParams.dialConfig)
 
+		if err != nil && ctx.Err() != context.Canceled {
+
+			// DialMeek performs an initial TLS handshake. DialMeek errors,
+			// excluding a cancelled context as happens on shutdown, are
+			// classified as as RoundTripperFailedErrors, which will invoke
+			// BrokerClientRoundTripperFailed, resetting the round tripper
+			// and clearing replay parameters.
+
+			err = inproxy.NewRoundTripperFailedError(err)
+		}
+
 		rt.conn = conn
 		rt.dialErr = err
 		close(rt.dialCompleted)
@@ -1259,6 +1275,11 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 		}
 
 		if rt.dialErr != nil {
+
+			// There is no NewRoundTripperFailedError wrapping here, as the
+			// DialMeek caller will wrap its error and
+			// BrokerClientRoundTripperFailed will be invoked already.
+
 			return nil, errors.Trace(rt.dialErr)
 		}
 	}
@@ -1278,29 +1299,44 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 		return nil, errors.Trace(err)
 	}
 
+	startTime := time.Now()
 	response, err := rt.conn.RoundTrip(request)
+	roundTripDuration := time.Since(startTime)
+
 	if err == nil {
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusOK {
 
-			// This case is treated as a temporary round tripper failure,
-			// since we received a response from the CDN, secured with TLS
-			// and VerifyPins, or from broker itself. One common scenario is
-			// the CDN returning a temporary gateway failed or timeout error.
+			err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+
+			// Depending on the round trip duration, this case is treated as a
+			// temporary round tripper failure, since we received a response
+			// from the CDN, secured with TLS and VerifyPins, or from broker
+			// itself. One common scenario is the CDN returning a temporary
+			// timeout error, as can happen when CDN timeouts and broker
+			// timeouts are misaligned, especially for long-polling requests.
+			//
 			// In this scenario, we can reuse the existing round tripper and
 			// it may be counterproductive to return a RoundTripperFailedError
 			// which will trigger a clearing of any broker dial replay
 			// parameters as well as reseting the round tripper.
+			//
+			// When the round trip duration is sufficiently short, much
+			// shorter than expected round trip timeouts, this is still
+			// classified as a RoundTripperFailedError error, as it is more
+			// likely due to a more serious issue between the CDN and broker.
 
-			err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+			if rt.failureThreshold > 0 &&
+				roundTripDuration <= rt.failureThreshold {
+
+				err = inproxy.NewRoundTripperFailedError(err)
+			}
 		}
 	} else if ctx.Err() != context.Canceled {
 
 		// Other round trip errors, including TLS failures and client-side
-		// timeouts,  but excluding a cancelled context as happens on
-		// shutdown, are classified as RoundTripperFailedErrors, which will
-		// invoke BrokerClientRoundTripperFailed, resetting the round tripper
-		// and clearing replay parameters.
+		// timeouts, but excluding a cancelled context as happens on
+		// shutdown, are classified as RoundTripperFailedErrors.
 
 		err = inproxy.NewRoundTripperFailedError(err)
 	}
@@ -1697,23 +1733,12 @@ func MakeInproxySTUNDialParameters(
 	var stunServerAddress, stunServerAddressRFC5780 string
 
 	if len(stunServerAddresses) > 0 {
-		prng.Shuffle(
-			len(stunServerAddresses),
-			func(i, j int) {
-				stunServerAddresses[i], stunServerAddresses[j] =
-					stunServerAddresses[j], stunServerAddresses[i]
-			})
-		stunServerAddress = stunServerAddresses[0]
+		stunServerAddress = stunServerAddresses[prng.Range(0, len(stunServerAddresses)-1)]
 	}
 
 	if len(stunServerAddressesRFC5780) > 0 {
-		prng.Shuffle(
-			len(stunServerAddressesRFC5780),
-			func(i, j int) {
-				stunServerAddressesRFC5780[i], stunServerAddressesRFC5780[j] =
-					stunServerAddressesRFC5780[j], stunServerAddressesRFC5780[i]
-			})
-		stunServerAddressRFC5780 = stunServerAddressesRFC5780[0]
+		stunServerAddressRFC5780 =
+			stunServerAddressesRFC5780[prng.Range(0, len(stunServerAddressesRFC5780)-1)]
 	}
 
 	// Create DNS resolver dial parameters to use when resolving STUN server

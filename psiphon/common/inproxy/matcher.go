@@ -20,6 +20,7 @@ package inproxy
 
 import (
 	"context"
+	std_errors "errors"
 	"net"
 	"sync"
 	"time"
@@ -744,6 +745,20 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 	return bestMatch, bestMatch != -1
 }
 
+// MatcherLimitError is the error type returned by Announce or Offer when the
+// caller has exceeded configured queue entry or rate limits.
+type MatcherLimitError struct {
+	err error
+}
+
+func NewMatcherLimitError(err error) *MatcherLimitError {
+	return &MatcherLimitError{err: err}
+}
+
+func (e MatcherLimitError) Error() string {
+	return e.err.Error()
+}
+
 func (m *Matcher) applyLimits(isAnnouncement bool, limitIP string, proxyID ID) error {
 
 	// Assumes the m.announcementQueueMutex or m.offerQueue mutex is locked.
@@ -794,14 +809,16 @@ func (m *Matcher) applyLimits(isAnnouncement bool, limitIP string, proxyID ID) e
 		}
 
 		if rateLimiter.TakeAvailable(1) < 1 {
-			return errors.TraceNew("rate exceeded for IP")
+			return errors.Trace(
+				NewMatcherLimitError(std_errors.New("rate exceeded for IP")))
 		}
 	}
 
 	if limitEntryCount > 0 {
 		entryCount, ok := entryCountByIP[limitIP]
 		if ok && entryCount >= limitEntryCount {
-			return errors.TraceNew("max entries for IP")
+			return errors.Trace(
+				NewMatcherLimitError(std_errors.New("max entries for IP")))
 		}
 	}
 

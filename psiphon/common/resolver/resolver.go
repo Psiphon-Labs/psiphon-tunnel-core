@@ -668,8 +668,8 @@ func (r *Resolver) ResolveIP(
 
 	// Orchestrate the DNS requests
 
-	resolveCtx, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
+	resolveCtx, cancelFunc := context.WithCancelCause(ctx)
+	defer cancelFunc(nil)
 	waitGroup := new(sync.WaitGroup)
 	conns := common.NewConns[net.Conn]()
 	type answer struct {
@@ -883,7 +883,8 @@ func (r *Resolver) ResolveIP(
 			//
 			// Append the existing lastErr, which may convey useful
 			// information to be reported in a failed_tunnel error message.
-			lastErr.Store(errors.Tracef("%v (lastErr: %v)", ctx.Err(), lastErr.Load()))
+			lastErr.Store(errors.Tracef(
+				"%v (lastErr: %v)", context.Cause(resolveCtx), lastErr.Load()))
 			stop = true
 		}
 	}
@@ -955,13 +956,16 @@ func (r *Resolver) ResolveIP(
 	}
 
 	// Interrupt all workers.
-	cancelFunc()
+	cancelFunc(errors.TraceNew("resolve canceled"))
 	conns.CloseAll()
 	waitGroup.Wait()
 
 	// When there's no answer, return the last error.
 	if result == nil {
 		err := lastErr.Load()
+		if err == nil {
+			err = context.Cause(resolveCtx)
+		}
 		if err == nil {
 			err = errors.TraceNew("unexpected missing error")
 		}
@@ -1515,7 +1519,7 @@ func performDNSQuery(
 			// information about why a response was rejected.
 			err := lastErr
 			if err == nil {
-				err = errors.Trace(resolveCtx.Err())
+				err = errors.Trace(context.Cause(resolveCtx))
 			}
 
 			return nil, nil, RTT, err

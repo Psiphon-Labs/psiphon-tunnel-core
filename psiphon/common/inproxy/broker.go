@@ -21,6 +21,7 @@ package inproxy
 
 import (
 	"context"
+	std_errors "errors"
 	"net"
 	"strconv"
 	"sync"
@@ -596,21 +597,37 @@ func (b *Broker) handleProxyAnnounce(
 		})
 	if err != nil {
 
-		if announceCtx.Err() == nil {
+		var limitError *MatcherLimitError
+		limited := std_errors.As(err, &limitError)
+
+		timeout := announceCtx.Err() == context.DeadlineExceeded
+
+		if !limited && !timeout {
 			return nil, errors.Trace(err)
 		}
 
-		timedOut = true
+		if timeout {
 
-		// Time out awaiting match. Still send a no-match response, as this is
-		// not an unexpected outcome and the proxy should not incorrectly
-		// flag its BrokerClient as having failed.
-		//
-		// Note: the respective proxy and broker timeouts,
-		// InproxyBrokerProxyAnnounceTimeout and
-		// InproxyProxyAnnounceRequestTimeout in tactics, should be
-		// configured so that the broker will timeout first and have an
-		// opportunity to send this response before the proxy times out.
+			// Time out awaiting match. Still send a no-match response, as this is
+			// not an unexpected outcome and the proxy should not incorrectly
+			// flag its BrokerClient as having failed.
+			//
+			// Note: the respective proxy and broker timeouts,
+			// InproxyBrokerProxyAnnounceTimeout and
+			// InproxyProxyAnnounceRequestTimeout in tactics, should be
+			// configured so that the broker will timeout first and have an
+			// opportunity to send this response before the proxy times out.
+
+			timedOut = true
+
+		} else if limited {
+
+			// The limit error case also returns a no-match response, so the
+			// proxy doesn't receive a 404 flag its BrokerClient as having failed.
+
+			b.config.Logger.WithTraceFields(
+				common.LogFields{"err": err.Error()}).Info("announcement limited")
+		}
 
 		responsePayload, err := MarshalProxyAnnounceResponse(
 			&ProxyAnnounceResponse{
@@ -802,21 +819,37 @@ func (b *Broker) handleClientOffer(
 		clientMatchOffer)
 	if err != nil {
 
-		if offerCtx.Err() == nil {
+		var limitError *MatcherLimitError
+		limited := std_errors.As(err, &limitError)
+
+		timeout := offerCtx.Err() == context.DeadlineExceeded
+
+		if !limited && !timeout {
 			return nil, errors.Trace(err)
 		}
 
-		timedOut = true
+		if timeout {
 
-		// Time out awaiting match. Still send a no-match response, as this is
-		// not an unexpected outcome and the client should not incorrectly
-		// flag its BrokerClient as having failed.
-		//
-		// Note: the respective client and broker timeouts,
-		// InproxyBrokerClientOfferTimeout and
-		// InproxyClientOfferRequestTimeout in tactics, should be configured
-		// so that the broker will timeout first and have an opportunity to
-		// send this response before the client times out.
+			// Time out awaiting match. Still send a no-match response, as this is
+			// not an unexpected outcome and the client should not incorrectly
+			// flag its BrokerClient as having failed.
+			//
+			// Note: the respective client and broker timeouts,
+			// InproxyBrokerClientOfferTimeout and
+			// InproxyClientOfferRequestTimeout in tactics, should be configured
+			// so that the broker will timeout first and have an opportunity to
+			// send this response before the client times out.
+
+			timedOut = true
+
+		} else if limited {
+
+			// The limit error case also returns a no-match response, so the
+			// client doesn't receive a 404 flag its BrokerClient as having failed.
+
+			b.config.Logger.WithTraceFields(
+				common.LogFields{"err": err.Error()}).Info("offer limited")
+		}
 
 		responsePayload, err := MarshalClientOfferResponse(
 			&ClientOfferResponse{NoMatch: true})

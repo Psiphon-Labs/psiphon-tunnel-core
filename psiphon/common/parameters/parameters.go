@@ -402,6 +402,7 @@ const (
 	InproxyClientOfferRetryDelay                       = "InproxyClientOfferRetryDelay"
 	InproxyClientOfferRetryJitter                      = "InproxyClientOfferRetryJitter"
 	InproxyClientRelayedPacketRequestTimeout           = "InproxyCloientRelayedPacketRequestTimeout"
+	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
 	InproxyDTLSRandomizationProbability                = "InproxyDTLSRandomizationProbability"
 	InproxyDataChannelTrafficShapingProbability        = "InproxyDataChannelTrafficShapingProbability"
 	InproxyDataChannelTrafficShapingParameters         = "InproxyDataChannelTrafficShapingParameters"
@@ -882,6 +883,7 @@ var defaultParameters = map[string]struct {
 	InproxyClientOfferRetryDelay:                       {value: 1 * time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRetryJitter:                      {value: 0.3, minimum: 0.0},
 	InproxyClientRelayedPacketRequestTimeout:           {value: 10 * time.Second, minimum: time.Duration(0)},
+	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
 	InproxyDataChannelTrafficShapingProbability:        {value: 0.5, minimum: 0.0},
 	InproxyDataChannelTrafficShapingParameters:         {value: InproxyDataChannelTrafficShapingParametersValue{0, 10, 0, 1500, 0, 10, 1, 1500, 0.5}},
