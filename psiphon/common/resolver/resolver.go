@@ -473,26 +473,24 @@ func (r *Resolver) ResolveAddress(
 		return "", errors.Trace(err)
 	}
 
-	copyIPs := append([]net.IP(nil), IPs...)
-	prng.Shuffle(len(copyIPs), func(i, j int) {
-		copyIPs[i], copyIPs[j] = copyIPs[j], copyIPs[i]
-	})
+	// Don't shuffle or otherwise mutate the slice returned by ResolveIP.
+	permutedIndexes := prng.Perm(len(IPs))
 
 	index := 0
 
 	switch network {
 	case "ip4", "tcp4", "udp4":
 		index = -1
-		for i, IP := range IPs {
-			if IP.To4() != nil {
+		for _, i := range permutedIndexes {
+			if IPs[i].To4() != nil {
 				index = i
 				break
 			}
 		}
 	case "ip6", "tcp6", "udp6":
 		index = -1
-		for i, IP := range IPs {
-			if IP.To4() == nil {
+		for _, i := range permutedIndexes {
+			if IPs[i].To4() == nil {
 				index = i
 				break
 			}
@@ -625,6 +623,8 @@ func (r *Resolver) ResolveIP(
 	// logic.
 	IPs := r.getCache(hostname)
 	if IPs != nil {
+		// TODO: it would be safer to make and return a copy of the cached
+		// slice, instead of depending on all callers to not mutate the slice.
 		return IPs, nil
 	}
 

@@ -118,12 +118,12 @@ func NewUDPConn(
 		// "udp4" or "udp6" was specified, so pick from either IPv4 or IPv6
 		//  candidates.
 
-		prng.Shuffle(len(ipAddrs), func(i, j int) {
-			ipAddrs[i], ipAddrs[j] = ipAddrs[j], ipAddrs[i]
-		})
-		for _, nextIPAddr := range ipAddrs {
-			if (network == "udp6") == (nextIPAddr.To4() == nil) {
-				ipAddr = nextIPAddr
+		// Don't shuffle or otherwise mutate the slice returned by ResolveIP.
+		permutedIndexes := prng.Perm(len(ipAddrs))
+
+		for _, i := range permutedIndexes {
+			if (network == "udp6") == (ipAddrs[i].To4() == nil) {
+				ipAddr = ipAddrs[i]
 				break
 			}
 		}

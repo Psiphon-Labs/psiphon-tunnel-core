@@ -2196,13 +2196,13 @@ func SetNetworkReplayParameters[R any](networkID, replayID string, replayParams 
 }
 
 // ShuffleAndGetNetworkReplayParameters takes a list of candidate objects and
-// selects one. The candidates are shuffled. The first post-shuffle candidate
-// with a valid replay record is returned, along with its replay parameters.
-// The caller provides isValidReplay which should indicate if replay
-// parameters remain valid; the caller should check for expiry and changes to
-// the underlhying tactics. When no valid replay parameters are found,
-// ShuffleAndGetNetworkReplayParameters returns a candidate and nil replay
-// parameters.
+// selects one. The candidates are considered in random order. The first
+// candidate with a valid replay record is returned, along with its replay
+// parameters. The caller provides isValidReplay which should indicate if
+// replay parameters remain valid; the caller should check for expiry and
+// changes to the underlhying tactics. When no valid replay parameters are
+// found, ShuffleAndGetNetworkReplayParameters returns a candidate and nil
+// replay parameters.
 func ShuffleAndGetNetworkReplayParameters[C, R any](
 	networkID string,
 	replayEnabled bool,
@@ -2214,11 +2214,11 @@ func ShuffleAndGetNetworkReplayParameters[C, R any](
 		return nil, nil, errors.TraceNew("no candidates")
 	}
 
-	prng.Shuffle(
-		len(candidates),
-		func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
+	// Don't shuffle or otherwise mutate the candidates slice, which may be a
+	// tactics parameter.
+	permutedIndexes := prng.Perm(len(candidates))
 
-	candidate := candidates[0]
+	candidate := candidates[permutedIndexes[0]]
 	var replay *R
 
 	if !replayEnabled {
@@ -2231,7 +2231,8 @@ func ShuffleAndGetNetworkReplayParameters[C, R any](
 
 		bucket := tx.bucket(datastoreNetworkReplayParametersBucket)
 
-		for _, c := range candidates {
+		for _, i := range permutedIndexes {
+			c := candidates[i]
 			key := makeNetworkReplayParametersKey[R](networkID, getReplayID(c))
 			value := bucket.get(key)
 			if value == nil {
