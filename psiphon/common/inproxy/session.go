@@ -977,8 +977,10 @@ func (s *ResponderSessions) HandlePacket(
 		return nil, errors.Trace(err)
 	}
 
+	retainSession := false
+
 	defer func() {
-		if retErr != nil {
+		if retErr != nil && !retainSession {
 
 			// If an error is returned, the session has failed, so don't
 			// retain it in the cache as it could be more recently used than
@@ -1091,6 +1093,13 @@ func (s *ResponderSessions) HandlePacket(
 
 	response, err := requestHandler(initiatorID, request)
 	if err != nil {
+
+		// Don't delete the session if the application-level request handler
+		// returns an error, as there is no problem with the Noise session.
+		// Non-failure application-level errors can include cases like a
+		// fronting CDN aborting a request due to timeout misalignment.
+		retainSession = true
+
 		return nil, errors.Trace(err)
 	}
 
