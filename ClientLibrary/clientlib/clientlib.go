@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	std_errors "errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"sync"
 
@@ -65,6 +66,12 @@ type Parameters struct {
 	// notices to noticeReceiver. Has no effect unless the tunnel
 	// config.EmitDiagnosticNotices flag is set.
 	EmitDiagnosticNoticesToFiles bool
+
+	// DisableLocalSocksProxy disables running the local SOCKS proxy.
+	DisableLocalSocksProxy *bool
+
+	// DisableLocalHTTPProxy disables running the local HTTP proxy.
+	DisableLocalHTTPProxy *bool
 }
 
 // PsiphonTunnel is the tunnel object. It can be used for stopping the tunnel and
@@ -73,6 +80,7 @@ type PsiphonTunnel struct {
 	embeddedServerListWaitGroup sync.WaitGroup
 	controllerWaitGroup         sync.WaitGroup
 	stopController              context.CancelFunc
+	controllerDial              func(string, net.Conn) (net.Conn, error)
 
 	// The port on which the HTTP proxy is running
 	HTTPProxyPort int
@@ -154,6 +162,14 @@ func StartTunnel(
 			RotatingFileSize:      0,
 			RotatingSyncFrequency: 0,
 		}
+	} // else use the value in the config
+
+	if params.DisableLocalSocksProxy != nil {
+		config.DisableLocalSocksProxy = *params.DisableLocalSocksProxy
+	} // else use the value in the config
+
+	if params.DisableLocalHTTPProxy != nil {
+		config.DisableLocalHTTPProxy = *params.DisableLocalHTTPProxy
 	} // else use the value in the config
 
 	// config.Commit must be called before calling config.SetParameters
@@ -280,6 +296,8 @@ func StartTunnel(
 		return nil, errors.TraceMsg(err, "psiphon.NewController failed")
 	}
 
+	tunnel.controllerDial = controller.Dial
+
 	// Begin tunnel connection
 	tunnel.controllerWaitGroup.Add(1)
 	go func() {
@@ -331,4 +349,9 @@ func (tunnel *PsiphonTunnel) Stop() {
 	tunnel.controllerWaitGroup.Wait()
 	tunnel.embeddedServerListWaitGroup.Wait()
 	psiphon.CloseDataStore()
+}
+
+// Dial connects to the specified address through the Psiphon tunnel.
+func (tunnel *PsiphonTunnel) Dial(remoteAddr string) (conn net.Conn, err error) {
+	return tunnel.controllerDial(remoteAddr, nil)
 }

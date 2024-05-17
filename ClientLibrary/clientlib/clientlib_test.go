@@ -22,7 +22,6 @@ package clientlib
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"testing"
 	"time"
@@ -35,8 +34,9 @@ func TestStartTunnel(t *testing.T) {
 	networkID := "UNKNOWN"
 	timeout := 60
 	quickTimeout := 1
+	trueVal := true
 
-	configJSON, err := ioutil.ReadFile("../../psiphon/controller_test.config")
+	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
 	if err != nil {
 		// Skip, don't fail, if config file is not present
 		t.Skipf("error loading configuration file: %s", err)
@@ -45,7 +45,7 @@ func TestStartTunnel(t *testing.T) {
 	// Initialize a fresh datastore and create a modified config which cannot
 	// connect without known servers, to be used in timeout cases.
 
-	testDataDirName, err := ioutil.TempDir("", "psiphon-clientlib-test")
+	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
 	if err != nil {
 		t.Fatalf("ioutil.TempDir failed: %v", err)
 	}
@@ -130,6 +130,64 @@ func TestStartTunnel(t *testing.T) {
 			wantTunnel:  true,
 			expectedErr: nil,
 		},
+		{
+			name: "Success: disable SOCKS proxy",
+			args: args{
+				ctxTimeout:              0,
+				configJSON:              configJSON,
+				embeddedServerEntryList: "",
+				params: Parameters{
+					DataRootDirectory:             &testDataDirName,
+					ClientPlatform:                &clientPlatform,
+					NetworkID:                     &networkID,
+					EstablishTunnelTimeoutSeconds: &timeout,
+					DisableLocalSocksProxy:        &trueVal,
+				},
+				paramsDelta:    nil,
+				noticeReceiver: nil,
+			},
+			wantTunnel:  true,
+			expectedErr: nil,
+		},
+		{
+			name: "Success: disable HTTP proxy",
+			args: args{
+				ctxTimeout:              0,
+				configJSON:              configJSON,
+				embeddedServerEntryList: "",
+				params: Parameters{
+					DataRootDirectory:             &testDataDirName,
+					ClientPlatform:                &clientPlatform,
+					NetworkID:                     &networkID,
+					EstablishTunnelTimeoutSeconds: &timeout,
+					DisableLocalHTTPProxy:         &trueVal,
+				},
+				paramsDelta:    nil,
+				noticeReceiver: nil,
+			},
+			wantTunnel:  true,
+			expectedErr: nil,
+		},
+		{
+			name: "Success: disable SOCKS and HTTP proxies",
+			args: args{
+				ctxTimeout:              0,
+				configJSON:              configJSON,
+				embeddedServerEntryList: "",
+				params: Parameters{
+					DataRootDirectory:             &testDataDirName,
+					ClientPlatform:                &clientPlatform,
+					NetworkID:                     &networkID,
+					EstablishTunnelTimeoutSeconds: &timeout,
+					DisableLocalSocksProxy:        &trueVal,
+					DisableLocalHTTPProxy:         &trueVal,
+				},
+				paramsDelta:    nil,
+				noticeReceiver: nil,
+			},
+			wantTunnel:  true,
+			expectedErr: nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -167,6 +225,95 @@ func TestStartTunnel(t *testing.T) {
 				return
 			}
 
+			if tunnel == nil {
+				return
+			}
+
+			if tt.args.params.DisableLocalSocksProxy != nil && *tt.args.params.DisableLocalSocksProxy {
+				if tunnel.SOCKSProxyPort != 0 {
+					t.Fatalf("should not have started SOCKS proxy")
+				}
+			} else {
+				if tunnel.SOCKSProxyPort == 0 {
+					t.Fatalf("failed to start SOCKS proxy")
+				}
+			}
+
+			if tt.args.params.DisableLocalHTTPProxy != nil && *tt.args.params.DisableLocalHTTPProxy {
+				if tunnel.HTTPProxyPort != 0 {
+					t.Fatalf("should not have started HTTP proxy")
+				}
+			} else {
+				if tunnel.HTTPProxyPort == 0 {
+					t.Fatalf("failed to start HTTP proxy")
+				}
+			}
+		})
+	}
+}
+
+func TestPsiphonTunnel_Dial(t *testing.T) {
+	trueVal := true
+	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
+	if err != nil {
+		// Skip, don't fail, if config file is not present
+		t.Skipf("error loading configuration file: %s", err)
+	}
+
+	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
+	if err != nil {
+		t.Fatalf("ioutil.TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	type args struct {
+		remoteAddr string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name:    "Success: example.com",
+			args:    args{remoteAddr: "example.com:443"},
+			wantErr: false,
+		},
+		{
+			name:    "Failure: invalid address",
+			args:    args{remoteAddr: "example.com:99999"},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tunnel, err := StartTunnel(
+				context.Background(),
+				configJSON,
+				"",
+				Parameters{
+					DataRootDirectory: &testDataDirName,
+					// Don't need local proxies for dial tests
+					// (and this is likely the configuration that will be used by consumers of the library who utilitize Dial).
+					DisableLocalSocksProxy: &trueVal,
+					DisableLocalHTTPProxy:  &trueVal,
+				},
+				nil,
+				nil)
+			if err != nil {
+				t.Fatalf("StartTunnel() error = %v", err)
+			}
+			defer tunnel.Stop()
+
+			conn, err := tunnel.Dial(tt.args.remoteAddr)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("PsiphonTunnel.Dial() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr != (conn == nil) {
+				t.Fatalf("PsiphonTunnel.Dial() conn = %v, wantConn %v", conn, !tt.wantErr)
+			}
 		})
 	}
 }
