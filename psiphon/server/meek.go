@@ -1779,8 +1779,8 @@ func (server *MeekServer) inproxyReloadTactics() error {
 	server.inproxyBroker.SetCommonCompartmentIDs(commonCompartmentIDs)
 
 	server.inproxyBroker.SetTimeouts(
-		p.Duration(parameters.InproxyProxyAnnounceRequestTimeout),
-		p.Duration(parameters.InproxyClientOfferRequestTimeout),
+		p.Duration(parameters.InproxyBrokerProxyAnnounceTimeout),
+		p.Duration(parameters.InproxyBrokerClientOfferTimeout),
 		p.Duration(parameters.InproxyBrokerPendingServerRequestsTTL))
 
 	nonlimitedProxyIDs, err := inproxy.IDsFromStrings(
