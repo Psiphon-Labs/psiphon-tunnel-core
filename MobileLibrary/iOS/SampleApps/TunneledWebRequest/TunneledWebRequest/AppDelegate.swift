@@ -365,4 +365,8 @@ extension AppDelegate: TunneledAppDelegate {
             self.httpProxyPort = port
         }
     }
+
+    func onConnectedServerRegion(_ region: String) {
+        NSLog("onConnectedServerRegion(%@)", region)
+    }
 }
