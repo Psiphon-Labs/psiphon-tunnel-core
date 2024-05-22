@@ -40,6 +40,6 @@ dependencies {
     // in the Psiphon-Labs/psiphon-tunnel-core repository, copy the ca.psiphon.aar artifact to
     // the libs folder under the app module and replace the above line
     // (e.g. replace implementation 'ca.psiphon:psiphontunnel:2.+')
-    //  with the following line:
-//    implementation files('libs/ca.psiphon.aar')
+    // with the following line:
+    // implementation files('libs/ca.psiphon.aar')
 }
