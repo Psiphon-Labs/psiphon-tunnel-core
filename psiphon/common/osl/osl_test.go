@@ -62,6 +62,7 @@ func TestOSL(t *testing.T) {
           "Description": "spec2",
           "ID" : "qvpIcORLE2Pi5TZmqRtVkEp+OKov0MhfsYPLNV7FYtI=",
           "UpstreamSubnets" : ["192.168.0.0/16", "10.0.0.0/8"],
+          "UpstreamASNs" : ["0000"],
           "Targets" :
           {
               "BytesRead" : 10,
@@ -171,11 +172,16 @@ func TestOSL(t *testing.T) {
 		t.Fatalf("LoadConfig failed: %s", err)
 	}
 
+	portForwardASN := new(string)
+	lookupASN := func(net.IP) string {
+		return *portForwardASN
+	}
+
 	t.Run("ineligible client, sufficient transfer", func(t *testing.T) {
 
 		clientSeedState := config.NewClientSeedState("US", "C5E8D2EDFD093B50D8D65CF59D0263CA", nil)
 
-		seedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
+		seedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"), lookupASN)
 
 		if seedPortForward != nil {
 			t.Fatalf("expected nil client seed port forward")
@@ -195,7 +201,7 @@ func TestOSL(t *testing.T) {
 
 	t.Run("eligible client, insufficient transfer", func(t *testing.T) {
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"), lookupASN).UpdateProgress(5, 5, 5)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 0 {
 			t.Fatalf("expected 0 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
@@ -212,18 +218,18 @@ func TestOSL(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"), lookupASN).UpdateProgress(5, 5, 5)
 
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 0 {
 			t.Fatalf("expected 0 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
 		}
 	})
 
-	t.Run("eligible client, sufficient transfer, one port forward", func(t *testing.T) {
+	t.Run("eligible client, sufficient transfer, one port forward, match by ip", func(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"))
+		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"), lookupASN)
 
 		clientSeedPortForward.UpdateProgress(5, 5, 5)
 
@@ -240,13 +246,19 @@ func TestOSL(t *testing.T) {
 		}
 	})
 
-	t.Run("eligible client, sufficient transfer, multiple port forwards", func(t *testing.T) {
+	t.Run("eligible client, sufficient transfer, one port forward, match by asn", func(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
+		*portForwardASN = "0000"
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
+		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("11.0.0.1"), lookupASN)
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		*portForwardASN = ""
 
 		select {
 		case <-signalIssueSLOKs:
@@ -260,13 +272,24 @@ func TestOSL(t *testing.T) {
 		}
 	})
 
-	t.Run("eligible client, sufficient transfer multiple SLOKs", func(t *testing.T) {
+	t.Run("eligible client, sufficient transfer, one port forward, match by ip and asn", func(t *testing.T) {
 
 		rolloverToNextSLOKTime()
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1")).UpdateProgress(5, 5, 5)
+		*portForwardASN = "0000"
 
-		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1")).UpdateProgress(5, 5, 5)
+		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"), lookupASN)
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		// Check that progress is not double counted.
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 2 {
+			t.Fatalf("expected 2 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		}
+
+		clientSeedPortForward.UpdateProgress(5, 5, 5)
+
+		*portForwardASN = ""
 
 		select {
 		case <-signalIssueSLOKs:
@@ -274,9 +297,49 @@ func TestOSL(t *testing.T) {
 			t.Fatalf("expected issue SLOKs signal")
 		}
 
-		// Expect 4 SLOKS: 2 new, and 2 remaining in payload.
+		// Expect 3 SLOKS: 1 new, and 2 remaining in payload.
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 3 {
+			t.Fatalf("expected 3 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		}
+	})
+
+	t.Run("eligible client, sufficient transfer, multiple port forwards", func(t *testing.T) {
+
+		rolloverToNextSLOKTime()
+
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"), lookupASN).UpdateProgress(5, 5, 5)
+
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"), lookupASN).UpdateProgress(5, 5, 5)
+
+		select {
+		case <-signalIssueSLOKs:
+		default:
+			t.Fatalf("expected issue SLOKs signal")
+		}
+
+		// Expect 4 SLOKS: 1 new, and 3 remaining in payload.
 		if len(clientSeedState.GetSeedPayload().SLOKs) != 4 {
 			t.Fatalf("expected 4 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
+		}
+	})
+
+	t.Run("eligible client, sufficient transfer multiple SLOKs", func(t *testing.T) {
+
+		rolloverToNextSLOKTime()
+
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"), lookupASN).UpdateProgress(5, 5, 5)
+
+		clientSeedState.NewClientSeedPortForward(net.ParseIP("10.0.0.1"), lookupASN).UpdateProgress(5, 5, 5)
+
+		select {
+		case <-signalIssueSLOKs:
+		default:
+			t.Fatalf("expected issue SLOKs signal")
+		}
+
+		// Expect 6 SLOKS: 2 new, and 4 remaining in payload.
+		if len(clientSeedState.GetSeedPayload().SLOKs) != 6 {
+			t.Fatalf("expected 6 SLOKs, got %d", len(clientSeedState.GetSeedPayload().SLOKs))
 		}
 	})
 
@@ -305,7 +368,7 @@ func TestOSL(t *testing.T) {
 
 		clientSeedState := config.NewClientSeedState("US", "B4A780E67695595FA486E9B900EA7335", nil)
 
-		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"))
+		clientSeedPortForward := clientSeedState.NewClientSeedPortForward(net.ParseIP("192.168.0.1"), lookupASN)
 
 		clientSeedPortForward.UpdateProgress(10, 10, 10)
 

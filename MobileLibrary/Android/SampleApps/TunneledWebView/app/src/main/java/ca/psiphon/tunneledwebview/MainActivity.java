@@ -8,6 +8,8 @@ package ca.psiphon.tunneledwebview;
 import android.content.Context;
 import android.os.Bundle;
 import androidx.appcompat.app.AppCompatActivity;
+
+import android.util.Log;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.ArrayAdapter;
@@ -61,6 +63,7 @@ import ca.psiphon.PsiphonTunnel;
 public class MainActivity extends AppCompatActivity
         implements PsiphonTunnel.HostService {
 
+    private static final String TAG = "TunneledWebView";
     private ListView mListView;
     private WebView mWebView;
 
@@ -152,6 +155,7 @@ public class MainActivity extends AppCompatActivity
             public void run() {
                 mLogMessages.add(message);
                 mListView.setSelection(mLogMessages.getCount() - 1);
+                Log.d(TAG, "logMessage: " + message);
             }
         });
     }
@@ -247,6 +251,11 @@ public class MainActivity extends AppCompatActivity
     public void onConnected() {
         logMessage("connected");
         loadWebView();
+    }
+
+    @Override
+    public void onConnectedServerRegion(String region) {
+        logMessage("connected server region: " + region);
     }
 
     @Override

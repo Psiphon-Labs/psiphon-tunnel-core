@@ -35,4 +35,11 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.0.0'
     // always specify exact library version in your real project to avoid non-deterministic builds
     implementation 'ca.psiphon:psiphontunnel:2.+'
+
+    // For the latest version compile the library from source, see MobileLibrary/Android/README.md
+    // in the Psiphon-Labs/psiphon-tunnel-core repository, copy the ca.psiphon.aar artifact to
+    // the libs folder under the app module and replace the above line
+    // (e.g. replace implementation 'ca.psiphon:psiphontunnel:2.+')
+    // with the following line:
+    // implementation files('libs/ca.psiphon.aar')
 }
