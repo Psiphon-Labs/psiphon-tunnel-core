@@ -299,6 +299,12 @@ WWAN or vice versa or VPN state changed
  */
 - (void)onApplicationParameters:(NSDictionary * _Nonnull)parameters;
 
+
+/*!
+ Called when tunnel-core reports connected server region information
+ @param region The server region received.
+ */
+- (void)onConnectedServerRegion:(NSString * _Nonnull)region;
 @end
 
 /*!
