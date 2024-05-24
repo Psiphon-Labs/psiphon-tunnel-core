@@ -88,6 +88,7 @@ type WebRTCConn struct {
 	dataChannelOpenedOnce        sync.Once
 	dataChannelWriteBufferSignal chan struct{}
 	decoyDone                    bool
+	iceCandidatePairMetrics      common.LogFields
 
 	readMutex       sync.Mutex
 	readBuffer      []byte
@@ -762,17 +763,119 @@ func (conn *WebRTCConn) AwaitInitialDataChannel(ctx context.Context) error {
 	case <-conn.dataChannelOpenedSignal:
 
 		// The data channel is connected.
-		//
-		// TODO: for metrics, determine which end was the network connection
-		// initiator; and determine which type of ICE candidate was
-		// successful (note that peer-reflexive candidates aren't in either
-		// SDP and emerge only during ICE negotiation).
+
+		err := conn.recordSelectedICECandidateStats()
+		if err != nil {
+			conn.config.Logger.WithTraceFields(common.LogFields{
+				"error": err.Error()}).Warning("recordCandidateStats failed")
+			// Continue without log
+		}
 
 	case <-ctx.Done():
 		return errors.Trace(ctx.Err())
 	case <-conn.closedSignal:
 		return errors.TraceNew("connection has closed")
 	}
+	return nil
+}
+
+func (conn *WebRTCConn) recordSelectedICECandidateStats() error {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	statsReport := conn.peerConnection.GetStats()
+	foundNominatedPair := false
+	for key, stats := range statsReport {
+
+		// Uses the pion StatsReport key formats "candidate:<ID>"
+		// and "candidate:<ID>-candidate:<ID>"
+
+		key, found := strings.CutPrefix(key, "candidate:")
+		if !found {
+			continue
+		}
+		candidateIDs := strings.Split(key, "-candidate:")
+		if len(candidateIDs) != 2 {
+			continue
+		}
+
+		candidatePairStats, ok := stats.(webrtc.ICECandidatePairStats)
+		if !ok ||
+			candidatePairStats.State != webrtc.StatsICECandidatePairStateSucceeded ||
+			!candidatePairStats.Nominated {
+			continue
+		}
+
+		localKey := fmt.Sprintf("candidate:%s", candidateIDs[0])
+		stats, ok := statsReport[localKey]
+		if !ok {
+			return errors.TraceNew("missing local ICECandidateStats")
+		}
+		localCandidateStats, ok := stats.(webrtc.ICECandidateStats)
+		if !ok {
+			return errors.TraceNew("unexpected local ICECandidateStats")
+		}
+
+		remoteKey := fmt.Sprintf("candidate:%s", candidateIDs[1])
+		stats, ok = statsReport[remoteKey]
+		if !ok {
+			return errors.TraceNew("missing remote ICECandidateStats")
+		}
+		remoteCandidateStats, ok := stats.(webrtc.ICECandidateStats)
+		if !ok {
+			return errors.TraceNew("unexpected remote ICECandidateStats")
+		}
+
+		// Use the same ICE candidate type names as logged in broker logs.
+		logCandidateType := func(
+			iceCandidateType webrtc.ICECandidateType) string {
+			logType := ICECandidateUnknown
+			switch iceCandidateType {
+			case webrtc.ICECandidateTypeHost:
+				logType = ICECandidateHost
+			case webrtc.ICECandidateTypeSrflx:
+				logType = ICECandidateServerReflexive
+			case webrtc.ICECandidateTypePrflx:
+				logType = ICECandidatePeerReflexive
+			}
+			return logType.String()
+		}
+
+		conn.iceCandidatePairMetrics = common.LogFields{}
+
+		// TODO: log which of local/remote candidate is initiator
+
+		conn.iceCandidatePairMetrics["inproxy_webrtc_local_ice_candidate_type"] =
+			logCandidateType(localCandidateStats.CandidateType)
+		localIP := net.ParseIP(localCandidateStats.IP)
+		isIPv6 := "0"
+		if localIP != nil && localIP.To4() == nil {
+			isIPv6 = "1"
+		}
+		conn.iceCandidatePairMetrics["inproxy_webrtc_local_ice_candidate_is_IPv6"] =
+			isIPv6
+		conn.iceCandidatePairMetrics["inproxy_webrtc_local_ice_candidate_port"] =
+			localCandidateStats.Port
+
+		conn.iceCandidatePairMetrics["inproxy_webrtc_remote_ice_candidate_type"] =
+			logCandidateType(remoteCandidateStats.CandidateType)
+		remoteIP := net.ParseIP(remoteCandidateStats.IP)
+		isIPv6 = "0"
+		if remoteIP != nil && remoteIP.To4() == nil {
+			isIPv6 = "1"
+		}
+		conn.iceCandidatePairMetrics["inproxy_webrtc_remote_ice_candidate_is_IPv6"] =
+			isIPv6
+		conn.iceCandidatePairMetrics["inproxy_webrtc_remote_ice_candidate_port"] =
+			remoteCandidateStats.Port
+
+		foundNominatedPair = true
+		break
+	}
+	if !foundNominatedPair {
+		return errors.TraceNew("missing nominated ICECandidateStatsPair")
+	}
+
 	return nil
 }
 
@@ -1173,7 +1276,16 @@ func (conn *WebRTCConn) SetReadDeadline(t time.Time) error {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
-	return errors.TraceNew("not supported")
+	if conn.isClosed {
+		return errors.TraceNew("closed")
+	}
+
+	readDeadliner, ok := conn.dataChannelConn.(datachannel.ReadDeadliner)
+	if !ok {
+		return errors.TraceNew("no data channel")
+	}
+
+	return readDeadliner.SetReadDeadline(t)
 }
 
 func (conn *WebRTCConn) SetWriteDeadline(t time.Time) error {
@@ -1186,12 +1298,12 @@ func (conn *WebRTCConn) SetWriteDeadline(t time.Time) error {
 // GetMetrics implements the common.MetricsSource interface and returns log
 // fields detailing the WebRTC dial parameters.
 func (conn *WebRTCConn) GetMetrics() common.LogFields {
-
-	// TODO: determine which WebRTC ICE candidate was chosen, and log its
-	// type (host, server reflexive, etc.), port number(s), and whether it's
-	// IPv6.
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
 
 	logFields := make(common.LogFields)
+
+	logFields.Add(conn.iceCandidatePairMetrics)
 
 	randomizeDTLS := "0"
 	if conn.config.DoDTLSRandomization {

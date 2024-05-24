@@ -443,6 +443,7 @@ func (b *Broker) handleProxyAnnounce(
 	var newTacticsTag string
 	var clientOffer *MatchOffer
 	var timedOut bool
+	var limitedErr error
 
 	// As a future enhancement, a broker could initiate its own test
 	// connection to the proxy to verify its effectiveness, including
@@ -498,6 +499,8 @@ func (b *Broker) handleProxyAnnounce(
 		}
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
+		} else if limitedErr != nil {
+			logFields["error"] = limitedErr.Error()
 		}
 		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
@@ -606,12 +609,14 @@ func (b *Broker) handleProxyAnnounce(
 			return nil, errors.Trace(err)
 		}
 
+		// A no-match response is sent in the case of a timeout awaiting a
+		// match. The faster-failing rate or entry limiting case also results
+		// in a no-match response, rather than an error return from
+		// handleProxyAnnounce, so that the proxy doesn't receive a 404 and
+		// flag its BrokerClient as having failed.
+
 		if timeout {
 
-			// Time out awaiting match. Still send a no-match response, as this is
-			// not an unexpected outcome and the proxy should not incorrectly
-			// flag its BrokerClient as having failed.
-			//
 			// Note: the respective proxy and broker timeouts,
 			// InproxyBrokerProxyAnnounceTimeout and
 			// InproxyProxyAnnounceRequestTimeout in tactics, should be
@@ -622,11 +627,9 @@ func (b *Broker) handleProxyAnnounce(
 
 		} else if limited {
 
-			// The limit error case also returns a no-match response, so the
-			// proxy doesn't receive a 404 flag its BrokerClient as having failed.
+			// Record the specific limit error in the proxy-announce broker event.
 
-			b.config.Logger.WithTraceFields(
-				common.LogFields{"err": err.Error()}).Info("announcement limited")
+			limitedErr = err
 		}
 
 		responsePayload, err := MarshalProxyAnnounceResponse(
@@ -702,6 +705,7 @@ func (b *Broker) handleClientOffer(
 	var proxyMatchAnnouncement *MatchAnnouncement
 	var proxyAnswer *MatchAnswer
 	var timedOut bool
+	var limitedErr error
 
 	// Always log the outcome.
 	defer func() {
@@ -735,6 +739,8 @@ func (b *Broker) handleClientOffer(
 		}
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
+		} else if limitedErr != nil {
+			logFields["error"] = limitedErr.Error()
 		}
 		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
@@ -828,12 +834,14 @@ func (b *Broker) handleClientOffer(
 			return nil, errors.Trace(err)
 		}
 
+		// A no-match response is sent in the case of a timeout awaiting a
+		// match. The faster-failing rate or entry limiting case also results
+		// in a no-match response, rather than an error return from
+		// handleClientOffer, so that the client doesn't receive a 404 and
+		// flag its BrokerClient as having failed.
+
 		if timeout {
 
-			// Time out awaiting match. Still send a no-match response, as this is
-			// not an unexpected outcome and the client should not incorrectly
-			// flag its BrokerClient as having failed.
-			//
 			// Note: the respective client and broker timeouts,
 			// InproxyBrokerClientOfferTimeout and
 			// InproxyClientOfferRequestTimeout in tactics, should be configured
@@ -844,11 +852,9 @@ func (b *Broker) handleClientOffer(
 
 		} else if limited {
 
-			// The limit error case also returns a no-match response, so the
-			// client doesn't receive a 404 flag its BrokerClient as having failed.
+			// Record the specific limit error in the client-offer broker event.
 
-			b.config.Logger.WithTraceFields(
-				common.LogFields{"err": err.Error()}).Info("offer limited")
+			limitedErr = err
 		}
 
 		responsePayload, err := MarshalClientOfferResponse(

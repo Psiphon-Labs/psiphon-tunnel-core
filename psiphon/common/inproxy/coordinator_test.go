@@ -46,8 +46,8 @@ type testBrokerDialCoordinator struct {
 	brokerClientRoundTripperSucceeded func(RoundTripper)
 	brokerClientRoundTripperFailed    func(RoundTripper)
 	announceRequestTimeout            time.Duration
-	announceRetryDelay                time.Duration
-	announceRetryJitter               float64
+	announceDelay                     time.Duration
+	announceDelayJitter               float64
 	answerRequestTimeout              time.Duration
 	offerRequestTimeout               time.Duration
 	offerRetryDelay                   time.Duration
@@ -121,16 +121,16 @@ func (t *testBrokerDialCoordinator) AnnounceRequestTimeout() time.Duration {
 	return t.announceRequestTimeout
 }
 
-func (t *testBrokerDialCoordinator) AnnounceRetryDelay() time.Duration {
+func (t *testBrokerDialCoordinator) AnnounceDelay() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	return t.announceRetryDelay
+	return t.announceDelay
 }
 
-func (t *testBrokerDialCoordinator) AnnounceRetryJitter() float64 {
+func (t *testBrokerDialCoordinator) AnnounceDelayJitter() float64 {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	return t.announceRetryJitter
+	return t.announceDelayJitter
 }
 
 func (t *testBrokerDialCoordinator) AnswerRequestTimeout() time.Duration {

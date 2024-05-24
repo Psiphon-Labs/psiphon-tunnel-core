@@ -1159,6 +1159,13 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_webrtc_padded_messages_received", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_decoy_messages_sent", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_decoy_messages_received", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_local_ice_candidate_type", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_local_ice_candidate_is_initiator", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_local_ice_candidate_is_IPv6", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_local_ice_candidate_port", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_remote_ice_candidate_type", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_remote_ice_candidate_is_IPv6", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_remote_ice_candidate_port", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 // baseSessionAndDialParams adds baseDialParams and inproxyDialParams to baseSessionParams.

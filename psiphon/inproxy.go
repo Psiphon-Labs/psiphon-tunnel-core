@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -134,9 +135,18 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 		nil
 }
 
-func (b *InproxyBrokerClientManager) resetBrokerClientOnRoundTripperFailed() error {
+func (b *InproxyBrokerClientManager) resetBrokerClientOnRoundTripperFailed(
+	brokerClientInstance *InproxyBrokerClientInstance) error {
+
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
+
+	if b.brokerClientInstance != brokerClientInstance {
+		// Ignore the reset if the signal comes from the non-current
+		// brokerClientInstance, which may occur when multiple in-flight
+		// round trips fail in close proximity.
+		return nil
+	}
 
 	return errors.Trace(b.reset())
 }
@@ -196,8 +206,8 @@ type InproxyBrokerClientInstance struct {
 	personalCompartmentIDs        []inproxy.ID
 	commonCompartmentIDs          []inproxy.ID
 	announceRequestTimeout        time.Duration
-	announceRetryDelay            time.Duration
-	announceRetryJitter           float64
+	announceDelay                 time.Duration
+	announceDelayJitter           float64
 	answerRequestTimeout          time.Duration
 	offerRequestTimeout           time.Duration
 	offerRetryDelay               time.Duration
@@ -357,8 +367,8 @@ func NewInproxyBrokerClientInstance(
 		commonCompartmentIDs:        commonCompartmentIDs,
 
 		announceRequestTimeout:        p.Duration(parameters.InproxyProxyAnnounceRequestTimeout),
-		announceRetryDelay:            p.Duration(parameters.InproxyProxyAnnounceRetryDelay),
-		announceRetryJitter:           p.Float(parameters.InproxyProxyAnnounceRetryJitter),
+		announceDelay:                 p.Duration(parameters.InproxyProxyAnnounceDelay),
+		announceDelayJitter:           p.Float(parameters.InproxyProxyAnnounceDelayJitter),
 		answerRequestTimeout:          p.Duration(parameters.InproxyProxyAnswerRequestTimeout),
 		offerRequestTimeout:           p.Duration(parameters.InproxyClientOfferRequestTimeout),
 		offerRetryDelay:               p.Duration(parameters.InproxyClientOfferRetryDelay),
@@ -556,7 +566,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	if roundTripper != b.roundTripper {
+	if rt, ok := roundTripper.(*InproxyBrokerRoundTripper); !ok || rt != b.roundTripper {
 		// Passing in the round tripper obtained from BrokerClientRoundTripper
 		// is just used for sanity check in this implementation, since each
 		// InproxyBrokerClientInstance has exactly one round tripper.
@@ -602,7 +612,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	if roundTripper != b.roundTripper {
+	if rt, ok := roundTripper.(*InproxyBrokerRoundTripper); !ok || rt != b.roundTripper {
 		// Passing in the round tripper obtained from BrokerClientRoundTripper
 		// is just used for sanity check in this implementation, since each
 		// InproxyBrokerClientInstance has exactly one round tripper.
@@ -645,7 +655,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 	// Limitation: a transport-level failure may unnecessarily reset the
 	// broker session state; see comment in NewInproxyBrokerClientInstance.
 
-	err := b.brokerClientManager.resetBrokerClientOnRoundTripperFailed()
+	err := b.brokerClientManager.resetBrokerClientOnRoundTripperFailed(b)
 	if err != nil {
 		NoticeWarning("reset broker client failed: %v", errors.Trace(err))
 		// Continue with old broker client instance.
@@ -658,13 +668,13 @@ func (b *InproxyBrokerClientInstance) AnnounceRequestTimeout() time.Duration {
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.
-func (b *InproxyBrokerClientInstance) AnnounceRetryDelay() time.Duration {
-	return b.announceRetryDelay
+func (b *InproxyBrokerClientInstance) AnnounceDelay() time.Duration {
+	return b.announceDelay
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.
-func (b *InproxyBrokerClientInstance) AnnounceRetryJitter() float64 {
-	return b.announceRetryJitter
+func (b *InproxyBrokerClientInstance) AnnounceDelayJitter() float64 {
+	return b.announceDelayJitter
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.
@@ -1209,13 +1219,30 @@ func (rt *InproxyBrokerRoundTripper) Close() error {
 // RoundTrip transports a request to the broker endpoint and returns a
 // response.
 func (rt *InproxyBrokerRoundTripper) RoundTrip(
-	ctx context.Context, requestPayload []byte) ([]byte, error) {
+	ctx context.Context,
+	preRoundTrip inproxy.PreRoundTripCallback,
+	requestPayload []byte) (_ []byte, retErr error) {
+
+	defer func() {
+		// Log any error which results in invoking BrokerClientRoundTripperFailed.
+		var failedError *inproxy.RoundTripperFailedError
+		if std_errors.As(retErr, &failedError) {
+			NoticeWarning("RoundTripperFailedError: %v", retErr)
+		}
+	}()
 
 	// Cancel DialMeek or MeekConn.RoundTrip when:
 	// - Close is called
 	// - the input context is done
 	ctx, cancelFunc := common.MergeContextCancel(ctx, rt.runCtx)
 	defer cancelFunc()
+
+	// Invoke the pre-round trip callback. Currently, this callback is used to
+	// apply an announce request delay post-waitToShareSession, pre-network
+	// round trip, and cancelable by the above merged context.
+	if preRoundTrip != nil {
+		preRoundTrip(ctx)
+	}
 
 	// The first RoundTrip caller will perform the DialMeek step, which
 	// establishes the TLS trasport connection to the fronted endpoint.
@@ -1307,7 +1334,10 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusOK {
 
-			err = fmt.Errorf("unexpected response status code: %d", response.StatusCode)
+			err = fmt.Errorf(
+				"unexpected response status code %d after %v",
+				response.StatusCode,
+				roundTripDuration)
 
 			// Depending on the round trip duration, this case is treated as a
 			// temporary round tripper failure, since we received a response

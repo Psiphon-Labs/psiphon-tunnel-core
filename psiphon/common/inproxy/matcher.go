@@ -570,22 +570,36 @@ func (m *Matcher) matchAllOffers() {
 			continue
 		}
 
-		if m.config.Logger.IsLogLevelDebug() {
-			m.config.Logger.WithTraceFields(common.LogFields{
-				"match_index":             j,
-				"offer_queue_size":        m.offerQueue.Len(),
-				"announcement_queue_size": m.announcementQueue.Len(),
-			}).Debug("match metrics")
-		}
-
 		// Remove the matched announcement from the queue. Send the offer to
-		// the announcment entry's offerChan, which will deliver it to the
+		// the announcement entry's offerChan, which will deliver it to the
 		// blocked Announce call. Add a pending answers entry to await the
 		// proxy's follow up Answer call. The TTL for the pending answer
 		// entry is set to the matched Offer call's ctx, as the answer is
 		// only useful as long as the client is still waiting.
 
 		announcementEntry := m.announcementQueue.At(j)
+
+		if m.config.Logger.IsLogLevelDebug() {
+
+			announcementProxyID :=
+				announcementEntry.announcement.ProxyID
+			announcementConnectionID :=
+				announcementEntry.announcement.ConnectionID
+			announcementCommonCompartmentIDs :=
+				announcementEntry.announcement.Properties.CommonCompartmentIDs
+			offerCommonCompartmentIDs :=
+				offerEntry.offer.Properties.CommonCompartmentIDs
+
+			m.config.Logger.WithTraceFields(common.LogFields{
+				"announcement_proxy_id":               announcementProxyID,
+				"announcement_connection_id":          announcementConnectionID,
+				"announcement_common_compartment_ids": announcementCommonCompartmentIDs,
+				"offer_common_compartment_ids":        offerCommonCompartmentIDs,
+				"match_index":                         j,
+				"announcement_queue_size":             m.announcementQueue.Len(),
+				"offer_queue_size":                    m.offerQueue.Len(),
+			}).Debug("match metrics")
+		}
 
 		expiry := lrucache.DefaultExpiration
 		deadline, ok := offerEntry.ctx.Deadline()
@@ -737,7 +751,9 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 		// Stop as soon as we have the best possible match.
 
 		if (bestMatchNAT || !existsPreferredNATMatch) &&
-			(matchPersonalCompartment || m.announcementsPersonalCompartmentalizedCount == 0) {
+			(matchPersonalCompartment ||
+				m.announcementsPersonalCompartmentalizedCount == 0 ||
+				len(offerProperties.PersonalCompartmentIDs) == 0) {
 			break
 		}
 	}
@@ -815,6 +831,12 @@ func (m *Matcher) applyLimits(isAnnouncement bool, limitIP string, proxyID ID) e
 	}
 
 	if limitEntryCount > 0 {
+
+		// Limitation: non-limited proxy ID entries are counted in
+		// entryCountByIP. If both a limited and non-limited proxy ingress
+		// from the same limitIP, then the non-limited entries will count
+		// against the limited proxy's limitEntryCount.
+
 		entryCount, ok := entryCountByIP[limitIP]
 		if ok && entryCount >= limitEntryCount {
 			return errors.Trace(

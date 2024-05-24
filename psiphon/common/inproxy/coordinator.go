@@ -30,8 +30,17 @@ import (
 // fronted HTTPS. RoundTripper is used by clients and proxies to make
 // requests to brokers.
 type RoundTripper interface {
-	RoundTrip(ctx context.Context, requestPayload []byte) (responsePayload []byte, err error)
+	RoundTrip(
+		ctx context.Context,
+		preRoundTrip PreRoundTripCallback,
+		requestPayload []byte) (responsePayload []byte, err error)
 }
+
+// PreRoundTripCallback is a callback that is invoked by the RoundTripper
+// immediately before the network round trip, and which takes a context that
+// will be canceled both in the case the request is canceled and in case the
+// round tripper is closed.
+type PreRoundTripCallback func(context.Context)
 
 // RoundTripperFailedError is an error type that should be returned from
 // RoundTripper.RoundTrip when the round trip transport has permanently
@@ -155,8 +164,8 @@ type BrokerDialCoordinator interface {
 	BrokerClientRoundTripperFailed(roundTripper RoundTripper)
 
 	AnnounceRequestTimeout() time.Duration
-	AnnounceRetryDelay() time.Duration
-	AnnounceRetryJitter() float64
+	AnnounceDelay() time.Duration
+	AnnounceDelayJitter() float64
 	AnswerRequestTimeout() time.Duration
 	OfferRequestTimeout() time.Duration
 	OfferRetryDelay() time.Duration

@@ -280,6 +280,7 @@ func NewInitiatorSessions(
 func (s *InitiatorSessions) RoundTrip(
 	ctx context.Context,
 	roundTripper RoundTripper,
+	preRoundTrip PreRoundTripCallback,
 	responderPublicKey SessionPublicKey,
 	responderRootObfuscationSecret ObfuscationSecret,
 	waitToShareSession bool,
@@ -307,7 +308,7 @@ func (s *InitiatorSessions) RoundTrip(
 			}
 			return response, nil
 		}
-		in, err = roundTripper.RoundTrip(ctx, out)
+		in, err = roundTripper.RoundTrip(ctx, preRoundTrip, out)
 		if err != nil {
 
 			// There are no explicit retries here. Retrying in the case where
@@ -315,8 +316,8 @@ func (s *InitiatorSessions) RoundTrip(
 			// the reset session token logic in InitiatorRoundTrip. Higher
 			// levels implicitly provide additional retries to cover other
 			// cases; Psiphon client tunnel establishment will retry in-proxy
-			// dials; the proxy will retry its announce request if it
-			// fails -- after an appropriate delay.
+			// dials; the proxy will retry its announce requests if they
+			// fail.
 
 			// If this round trip owns its session and there are any
 			// waitToShareSession initiators awaiting the session, signal them

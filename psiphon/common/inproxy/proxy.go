@@ -29,16 +29,17 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/pion/webrtc/v3"
 )
 
 const (
-	proxyAnnounceRetryDelay     = 2 * time.Second
-	proxyAnnounceRetryJitter    = 0.3
-	proxyAnnounceMaxRetryDelay  = 6 * time.Hour
-	proxyWebRTCAnswerTimeout    = 20 * time.Second
-	proxyDestinationDialTimeout = 20 * time.Second
+	proxyAnnounceDelay           = 1 * time.Second
+	proxyAnnounceDelayJitter     = 0.5
+	proxyAnnounceMaxBackoffDelay = 1 * time.Hour
+	proxyWebRTCAnswerTimeout     = 20 * time.Second
+	proxyDestinationDialTimeout  = 20 * time.Second
 )
 
 // Proxy is the in-proxy proxying component, which relays traffic from a
@@ -60,6 +61,9 @@ type Proxy struct {
 	networkDiscoveryMutex     sync.Mutex
 	networkDiscoveryRunOnce   bool
 	networkDiscoveryNetworkID string
+
+	nextAnnounceMutex sync.Mutex
+	nextAnnounceTime  time.Time
 }
 
 // TODO: add PublicNetworkAddress/ListenNetworkAddress to facilitate manually
@@ -187,21 +191,43 @@ func (p *Proxy) Run(ctx context.Context) {
 
 	proxyWaitGroup := new(sync.WaitGroup)
 
-	for i := 0; i < p.config.MaxClients; i++ {
+	// Launch the first proxy worker, passing a signal to be triggered once
+	// the very first announcement round trip is complete. The first round
+	// trip is awaited so that:
+	//
+	// - The first announce response will arrive with any new tactics,
+	//   avoiding a start up case where MaxClients initial, concurrent
+	//   announces all return with no-match and a tactics payload.
+	//
+	// - The first worker gets no announcement delay and is also guaranteed to
+	//   be the shared session establisher. Since the announcement delays are
+	//   applied _after_ waitToShareSession, it would otherwise be possible,
+	//   with a race of MaxClient initial, concurrent announces, for the
+	//   session establisher to be a different worker than the no-delay worker.
 
-		// Give the very first announcement a head start, by delaying the
-		// others, so that the first announcement request can obtain and
-		// apply any new tactics first, avoiding all MaxClients initial
-		// announcement requests returning with potentially no match and new
-		// tactics responses. After this initial launch point, we assume
-		// proxy announcement requests are somewhat staggered.
-		delayFirstAnnounce := i > 0
+	signalFirstAnnounceCtx, signalFirstAnnounceDone :=
+		context.WithCancel(context.Background())
 
+	proxyWaitGroup.Add(1)
+	go func() {
+		defer proxyWaitGroup.Done()
+		p.proxyClients(ctx, signalFirstAnnounceDone)
+	}()
+
+	select {
+	case <-signalFirstAnnounceCtx.Done():
+	case <-ctx.Done():
+		return
+	}
+
+	// Launch the remaining workers.
+
+	for i := 0; i < p.config.MaxClients-1; i++ {
 		proxyWaitGroup.Add(1)
-		go func(delayFirstAnnounce bool) {
+		go func() {
 			defer proxyWaitGroup.Done()
-			p.proxyClients(ctx, delayFirstAnnounce)
-		}(delayFirstAnnounce)
+			p.proxyClients(ctx, nil)
+		}()
 	}
 
 	// Capture activity updates every second, which is the required frequency
@@ -235,11 +261,11 @@ loop:
 func (p *Proxy) getAnnounceDelayParameters() (time.Duration, float64) {
 	brokerClient, err := p.config.GetBrokerClient()
 	if err != nil {
-		return proxyAnnounceRetryDelay, proxyAnnounceRetryJitter
+		return proxyAnnounceDelay, proxyAnnounceDelayJitter
 	}
 	brokerCoordinator := brokerClient.GetBrokerDialCoordinator()
-	return common.ValueOrDefault(brokerCoordinator.AnnounceRetryDelay(), proxyAnnounceRetryDelay),
-		common.ValueOrDefault(brokerCoordinator.AnnounceRetryJitter(), proxyAnnounceRetryJitter)
+	return common.ValueOrDefault(brokerCoordinator.AnnounceDelay(), proxyAnnounceDelay),
+		common.ValueOrDefault(brokerCoordinator.AnnounceDelayJitter(), proxyAnnounceDelayJitter)
 
 }
 
@@ -281,7 +307,8 @@ func greaterThanSwapInt64(addr *int64, new int64) bool {
 	return false
 }
 
-func (p *Proxy) proxyClients(ctx context.Context, delayFirstAnnounce bool) {
+func (p *Proxy) proxyClients(
+	ctx context.Context, signalAnnounceDone func()) {
 
 	// Proxy one client, repeating until ctx is done.
 	//
@@ -313,15 +340,7 @@ func (p *Proxy) proxyClients(ctx context.Context, delayFirstAnnounce bool) {
 			break
 		}
 
-		// When delayFirstAnnounce is true, the very first proxyOneClient
-		// proxy announcement is delayed to give another, concurrent
-		// proxyClients proxy announcment a head start in order to fetch and
-		// apply any new tactics.
-		//
-		// This delay is distinct from the post-failure delay, although both
-		// use the same delay parameter settings.
-
-		backOff, err := p.proxyOneClient(ctx, delayFirstAnnounce && i == 0)
+		backOff, err := p.proxyOneClient(ctx, signalAnnounceDone)
 
 		if err != nil && ctx.Err() == nil {
 
@@ -330,7 +349,7 @@ func (p *Proxy) proxyClients(ctx context.Context, delayFirstAnnounce bool) {
 					"error": err.Error(),
 				}).Error("proxy client failed")
 
-			// Apply a simple exponential backoff base on whether
+			// Apply a simple exponential backoff based on whether
 			// proxyOneClient either relayed client traffic or got no match,
 			// or encountered a failure.
 			//
@@ -349,8 +368,8 @@ func (p *Proxy) proxyClients(ctx context.Context, delayFirstAnnounce bool) {
 				failureDelayFactor = 1
 			}
 			delay = delay * failureDelayFactor
-			if delay > proxyAnnounceMaxRetryDelay {
-				delay = proxyAnnounceMaxRetryDelay
+			if delay > proxyAnnounceMaxBackoffDelay {
+				delay = proxyAnnounceMaxBackoffDelay
 			}
 			if failureDelayFactor < 1<<20 {
 				failureDelayFactor *= 2
@@ -425,7 +444,8 @@ func (p *Proxy) doNetworkDiscovery(
 	p.networkDiscoveryNetworkID = networkID
 }
 
-func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, error) {
+func (p *Proxy) proxyOneClient(
+	ctx context.Context, signalAnnounceDone func()) (bool, error) {
 
 	// Do not trigger back-off unless the proxy successfully announces and
 	// only then performs poorly.
@@ -455,20 +475,6 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 	// goroutines call doNetworkDiscovery, at most one discovery is performed
 	// per network.
 	p.doNetworkDiscovery(ctx, webRTCCoordinator)
-
-	// delayAnnounce delays the proxy announcement request in order to give a
-	// concurrent request a head start. See comments in Run and proxyClients.
-	// This head start delay is applied here, after doNetworkDiscovery, as
-	// otherwise the delay might be negated if the head-start proxyOneClient
-	// blocks on doNetworkDiscovery and subsequently this proxyOneClient
-	// quickly finds cached results in doNetworkDiscovery.
-	if delayAnnounce {
-		announceRetryDelay, announceRetryJitter := p.getAnnounceDelayParameters()
-		common.SleepWithJitter(
-			ctx,
-			common.ValueOrDefault(announceRetryDelay, proxyAnnounceRetryDelay),
-			common.ValueOrDefault(announceRetryJitter, proxyAnnounceRetryJitter))
-	}
 
 	// Send the announce request
 
@@ -518,6 +524,40 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 		return backOff, errors.Trace(err)
 	}
 
+	// Set a delay before announcing, to stagger the announce request times.
+	// The delay helps to avoid triggering rate limits or similar errors from
+	// any intermediate CDN between the proxy and the broker; and provides a
+	// nudge towards better load balancing across multiple large MaxClients
+	// proxies, as the broker primarily matches enqueued announces in FIFO
+	// order, since older announces expire earlier.
+	//
+	// The delay is intended to be applied after doNetworkDiscovery, which has
+	// no reason to be delayed; and also after any waitToShareSession delay,
+	// as delaying before waitToShareSession can result in the announce
+	// request times collapsing back together. Delaying after
+	// waitToShareSession is handled by brokerClient.ProxyAnnounce, which
+	// will also extend the base request timeout, as required, to account for
+	// any deliberate delay.
+
+	announceRequestDelay := time.Duration(0)
+	announceDelay, announceDelayJitter := p.getAnnounceDelayParameters()
+	p.nextAnnounceMutex.Lock()
+	delay := prng.JitterDuration(announceDelay, announceDelayJitter)
+	if p.nextAnnounceTime.IsZero() {
+		// No delay for the very first announce request.
+		p.nextAnnounceTime = time.Now().Add(delay)
+
+	} else {
+		announceRequestDelay = time.Until(p.nextAnnounceTime)
+		if announceRequestDelay < 0 {
+			p.nextAnnounceTime = time.Now().Add(delay)
+			announceRequestDelay = 0
+		} else {
+			p.nextAnnounceTime = p.nextAnnounceTime.Add(delay)
+		}
+	}
+	p.nextAnnounceMutex.Unlock()
+
 	// A proxy ID is implicitly sent with requests; it's the proxy's session
 	// public key.
 	//
@@ -525,6 +565,7 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 	// long-polling.
 	announceResponse, err := brokerClient.ProxyAnnounce(
 		ctx,
+		announceRequestDelay,
 		&ProxyAnnounceRequest{
 			PersonalCompartmentIDs: brokerCoordinator.PersonalCompartmentIDs(),
 			Metrics:                metrics,
@@ -549,6 +590,13 @@ func (p *Proxy) proxyOneClient(ctx context.Context, delayAnnounce bool) (bool, e
 		if p.config.HandleTacticsPayload(tacticsNetworkID, announceResponse.TacticsPayload) {
 			p.resetNetworkDiscovery()
 		}
+	}
+
+	// Signal that the announce round trip is complete. At this point, the
+	// broker Noise session should be established and any fresh tactics
+	// applied.
+	if signalAnnounceDone != nil {
+		signalAnnounceDone()
 	}
 
 	if announceResponse.NoMatch {

@@ -395,8 +395,8 @@ const (
 	InproxyBrokerClientOfferTimeout                    = "InproxyBrokerClientOfferTimeout"
 	InproxyBrokerPendingServerRequestsTTL              = "InproxyBrokerPendingServerRequestsTTL"
 	InproxyProxyAnnounceRequestTimeout                 = "InproxyProxyAnnounceRequestTimeout"
-	InproxyProxyAnnounceRetryDelay                     = "InproxyProxyAnnounceRetryDelay"
-	InproxyProxyAnnounceRetryJitter                    = "InproxyProxyAnnounceRetryJitter"
+	InproxyProxyAnnounceDelay                          = "InproxyProxyAnnounceDelay"
+	InproxyProxyAnnounceDelayJitter                    = "InproxyProxyAnnounceDelayJitter"
 	InproxyProxyAnswerRequestTimeout                   = "InproxyProxyAnswerRequestTimeout"
 	InproxyClientOfferRequestTimeout                   = "InproxyClientOfferRequestTimeout"
 	InproxyClientOfferRetryDelay                       = "InproxyClientOfferRetryDelay"
@@ -876,8 +876,8 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerPendingServerRequestsTTL:              {value: 60 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyProxyAnnounceRequestTimeout:                 {value: 2*time.Minute + 10*time.Second, minimum: time.Duration(0)},
-	InproxyProxyAnnounceRetryDelay:                     {value: 2 * time.Second, minimum: time.Duration(0)},
-	InproxyProxyAnnounceRetryJitter:                    {value: 0.3, minimum: 0.0},
+	InproxyProxyAnnounceDelay:                          {value: 1 * time.Second, minimum: time.Duration(0)},
+	InproxyProxyAnnounceDelayJitter:                    {value: 0.5, minimum: 0.0},
 	InproxyProxyAnswerRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRetryDelay:                       {value: 1 * time.Second, minimum: time.Duration(0)},

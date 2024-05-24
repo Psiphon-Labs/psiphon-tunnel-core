@@ -350,7 +350,7 @@ func unpackInt(v interface{}) (interface{}, error) {
 	case uint64:
 		return strconv.FormatUint(i, 10), nil
 	default:
-		return "", errors.TraceNew(
+		return nil, errors.TraceNew(
 			"expected int, int64, or uint64 type")
 	}
 }
@@ -374,7 +374,7 @@ func packFloat(v interface{}) (interface{}, error) {
 func unpackFloat(v interface{}) (interface{}, error) {
 	f, ok := v.(float64)
 	if !ok {
-		return "", errors.TraceNew("expected int type")
+		return nil, errors.TraceNew("expected int type")
 	}
 	return fmt.Sprintf("%f", f), nil
 }
@@ -396,7 +396,7 @@ func packHex(v interface{}) (interface{}, error) {
 func unpackHexLower(v interface{}) (interface{}, error) {
 	b, ok := v.([]byte)
 	if !ok {
-		return "", errors.TraceNew("expected []byte type")
+		return nil, errors.TraceNew("expected []byte type")
 	}
 	return hex.EncodeToString(b), nil
 }
@@ -404,7 +404,7 @@ func unpackHexLower(v interface{}) (interface{}, error) {
 func unpackHexUpper(v interface{}) (interface{}, error) {
 	s, err := unpackHexLower(v)
 	if err != nil {
-		return "", errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 	return strings.ToUpper(s.(string)), nil
 }
@@ -426,7 +426,7 @@ func packBase64(v interface{}) (interface{}, error) {
 func unpackBase64(v interface{}) (interface{}, error) {
 	b, ok := v.([]byte)
 	if !ok {
-		return "", errors.TraceNew("expected []byte type")
+		return nil, errors.TraceNew("expected []byte type")
 	}
 	return base64.StdEncoding.EncodeToString(b), nil
 }
@@ -449,7 +449,7 @@ func packUnpaddedBase64(v interface{}) (interface{}, error) {
 func unpackUnpaddedBase64(v interface{}) (interface{}, error) {
 	b, ok := v.([]byte)
 	if !ok {
-		return "", errors.TraceNew("expected []byte type")
+		return nil, errors.TraceNew("expected []byte type")
 	}
 	return base64.RawStdEncoding.EncodeToString(b), nil
 }
@@ -457,7 +457,7 @@ func unpackUnpaddedBase64(v interface{}) (interface{}, error) {
 func packAuthorizations(v interface{}) (interface{}, error) {
 	auths, ok := v.([]string)
 	if !ok {
-		return "", errors.TraceNew("expected []string type")
+		return nil, errors.TraceNew("expected []string type")
 	}
 	packedAuths, err := accesscontrol.PackAuthorizations(auths, CBOREncoding)
 	if err != nil {
@@ -514,7 +514,7 @@ func unpackSliceOfJSONCompatibleMaps(v interface{}) (interface{}, error) {
 
 	packedEntries, ok := v.([]interface{})
 	if !ok {
-		return nil, errors.Tracef("expected []interface{} type")
+		return nil, errors.TraceNew("expected []interface{} type")
 	}
 
 	entries := make([]map[string]interface{}, len(packedEntries))
@@ -522,13 +522,13 @@ func unpackSliceOfJSONCompatibleMaps(v interface{}) (interface{}, error) {
 	for i, packedEntry := range packedEntries {
 		entry, ok := packedEntry.(map[interface{}]interface{})
 		if !ok {
-			return nil, errors.Tracef("expected map[interface{}]interface{} type")
+			return nil, errors.TraceNew("expected map[interface{}]interface{} type")
 		}
 		entries[i] = make(map[string]interface{})
 		for key, value := range entry {
 			strKey, ok := key.(string)
 			if !ok {
-				return nil, errors.Tracef("expected string type")
+				return nil, errors.TraceNew("expected string type")
 			}
 			entries[i][strKey] = value
 		}
@@ -733,31 +733,38 @@ func init() {
 		{112, "inproxy_webrtc_padded_messages_received", intConverter},
 		{113, "inproxy_webrtc_decoy_messages_sent", intConverter},
 		{114, "inproxy_webrtc_decoy_messages_received", intConverter},
+		{115, "inproxy_webrtc_local_ice_candidate_type", nil},
+		{116, "inproxy_webrtc_local_ice_candidate_is_initiator", intConverter},
+		{117, "inproxy_webrtc_local_ice_candidate_is_IPv6", intConverter},
+		{118, "inproxy_webrtc_local_ice_candidate_port", intConverter},
+		{119, "inproxy_webrtc_remote_ice_candidate_type", nil},
+		{120, "inproxy_webrtc_remote_ice_candidate_is_IPv6", intConverter},
+		{121, "inproxy_webrtc_remote_ice_candidate_port", intConverter},
 
 		// Specs: server.handshakeRequestParams
 
-		{115, "missing_server_entry_signature", base64Converter},
-		{116, "missing_server_entry_provider_id", base64Converter},
+		{122, "missing_server_entry_signature", base64Converter},
+		{123, "missing_server_entry_provider_id", base64Converter},
 
 		// Specs: server.uniqueUserParams
 		//
 		// - future enhancement: add a timestamp converter from RFC3339 to and
 		//   from 64-bit Unix time?
 
-		{117, "last_connected", nil},
+		{124, "last_connected", nil},
 
 		// Specs: server.connectedRequestParams
 
-		{118, "establishment_duration", intConverter},
+		{125, "establishment_duration", intConverter},
 
 		// Specs: server.remoteServerListStatParams
 
-		{119, "client_download_timestamp", nil},
-		{120, "tunneled", intConverter},
-		{121, "url", nil},
-		{122, "etag", nil},
-		{123, "bytes", intConverter},
-		{124, "duration", intConverter},
+		{126, "client_download_timestamp", nil},
+		{127, "tunneled", intConverter},
+		{128, "url", nil},
+		{129, "etag", nil},
+		{130, "bytes", intConverter},
+		{131, "duration", intConverter},
 
 		// Specs: server.failedTunnelStatParams
 		//
@@ -767,23 +774,25 @@ func init() {
 		//   key encodings; however, we prioritize reducing the handshake
 		//   size, since it comes earlier in the tunnel flow.
 
-		{125, "server_entry_tag", base64Converter},
-		{126, "client_failed_timestamp", nil},
-		{127, "record_probability", floatConverter},
-		{128, "liveness_test_upstream_bytes", intConverter},
-		{129, "liveness_test_sent_upstream_bytes", intConverter},
-		{130, "liveness_test_downstream_bytes", intConverter},
-		{131, "liveness_test_received_downstream_bytes", intConverter},
-		{132, "bytes_up", intConverter},
-		{133, "bytes_down", intConverter},
-		{134, "tunnel_error", nil},
+		{132, "server_entry_tag", base64Converter},
+		{133, "client_failed_timestamp", nil},
+		{134, "record_probability", floatConverter},
+		{135, "liveness_test_upstream_bytes", intConverter},
+		{136, "liveness_test_sent_upstream_bytes", intConverter},
+		{137, "liveness_test_downstream_bytes", intConverter},
+		{138, "liveness_test_received_downstream_bytes", intConverter},
+		{139, "bytes_up", intConverter},
+		{140, "bytes_down", intConverter},
+		{141, "tunnel_error", nil},
 
 		// Specs: status request payload
 		//
 		// - future enhancement: pack the statusData payload, which is
 		//   currently sent as unpacked JSON.
 
-		{135, "statusData", rawJSONConverter},
+		{142, "statusData", rawJSONConverter},
+
+		// Last key value = 142
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

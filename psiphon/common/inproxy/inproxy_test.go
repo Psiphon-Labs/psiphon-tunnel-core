@@ -860,7 +860,13 @@ func newHTTPRoundTripper(endpointAddr string, path string) *httpRoundTripper {
 }
 
 func (r *httpRoundTripper) RoundTrip(
-	ctx context.Context, requestPayload []byte) ([]byte, error) {
+	ctx context.Context,
+	preRoundTrip PreRoundTripCallback,
+	requestPayload []byte) ([]byte, error) {
+
+	if preRoundTrip != nil {
+		preRoundTrip(ctx)
+	}
 
 	url := fmt.Sprintf("https://%s/%s", r.endpointAddr, r.path)
 

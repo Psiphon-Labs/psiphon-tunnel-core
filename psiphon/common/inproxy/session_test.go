@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,6 +78,11 @@ func runTestSessions() error {
 		return errors.Trace(err)
 	}
 
+	var preRoundTripCalls atomic.Int64
+	preRoundTrip := func(_ context.Context) {
+		preRoundTripCalls.Add(1)
+	}
+
 	initiatorSessions := NewInitiatorSessions(initiatorPrivateKey)
 
 	roundTripper := newTestSessionRoundTripper(responderSessions, &initiatorPublicKey)
@@ -88,6 +94,7 @@ func runTestSessions() error {
 	response, err := initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
+		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
@@ -111,6 +118,7 @@ func runTestSessions() error {
 	response, err = initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
+		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
@@ -131,6 +139,7 @@ func runTestSessions() error {
 		_, err = initiatorSessions.RoundTrip(
 			context.Background(),
 			roundTripper,
+			preRoundTrip,
 			responderPublicKey,
 			responderRootObfuscationSecret,
 			waitToShareSession,
@@ -147,6 +156,7 @@ func runTestSessions() error {
 	response, err = initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
+		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
@@ -179,6 +189,7 @@ func runTestSessions() error {
 			_, err := initiatorSessions.RoundTrip(
 				context.Background(),
 				failingRoundTripper,
+				preRoundTrip,
 				responderPublicKey,
 				responderRootObfuscationSecret,
 				waitToShareSession,
@@ -220,6 +231,7 @@ func runTestSessions() error {
 	response, err = initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
+		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
@@ -253,6 +265,7 @@ func runTestSessions() error {
 	response, err = initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
+		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
@@ -305,6 +318,7 @@ func runTestSessions() error {
 	response, err = unknownInitiatorSessions.RoundTrip(
 		ctx,
 		roundTripper,
+		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
@@ -365,6 +379,7 @@ func runTestSessions() error {
 						response, err := initiatorSessions.RoundTrip(
 							context.Background(),
 							roundTripper,
+							preRoundTrip,
 							responderPublicKey,
 							responderRootObfuscationSecret,
 							waitToShareSession,
@@ -403,6 +418,10 @@ func runTestSessions() error {
 		}
 	}
 
+	if preRoundTripCalls.Load() < int64(clientCount*requestCount) {
+		return errors.TraceNew("unexpected pre-round trip call count")
+	}
+
 	return nil
 }
 
@@ -434,7 +453,10 @@ func (t *testSessionRoundTripper) ExpectedResponse(requestPayload []byte) []byte
 	return responsePayload
 }
 
-func (t *testSessionRoundTripper) RoundTrip(ctx context.Context, requestPayload []byte) ([]byte, error) {
+func (t *testSessionRoundTripper) RoundTrip(
+	ctx context.Context,
+	preRoundTrip PreRoundTripCallback,
+	requestPayload []byte) ([]byte, error) {
 
 	err := ctx.Err()
 	if err != nil {
@@ -443,6 +465,10 @@ func (t *testSessionRoundTripper) RoundTrip(ctx context.Context, requestPayload 
 
 	if t.sessions == nil {
 		return nil, errors.TraceNew("closed")
+	}
+
+	if preRoundTrip != nil {
+		preRoundTrip(ctx)
 	}
 
 	unwrappedRequestHandler := func(initiatorID ID, unwrappedRequest []byte) ([]byte, error) {

@@ -102,6 +102,7 @@ func (b *BrokerClient) GetBrokerDialCoordinator() BrokerDialCoordinator {
 // ProxyAnnounce sends a ProxyAnnounce request and returns the response.
 func (b *BrokerClient) ProxyAnnounce(
 	ctx context.Context,
+	requestDelay time.Duration,
 	request *ProxyAnnounceRequest) (*ProxyAnnounceResponse, error) {
 
 	requestPayload, err := MarshalProxyAnnounceRequest(request)
@@ -109,13 +110,18 @@ func (b *BrokerClient) ProxyAnnounce(
 		return nil, errors.Trace(err)
 	}
 
-	requestCtx, requestCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(
-			b.coordinator.AnnounceRequestTimeout(),
-			proxyAnnounceRequestTimeout))
+	timeout := common.ValueOrDefault(
+		b.coordinator.AnnounceRequestTimeout(),
+		proxyAnnounceRequestTimeout)
+
+	// Increase the timeout to account for requestDelay, which is applied
+	// before the actual network round trip.
+	timeout += requestDelay
+
+	requestCtx, requestCancelFunc := context.WithTimeout(ctx, timeout)
 	defer requestCancelFunc()
 
-	responsePayload, err := b.roundTrip(requestCtx, requestPayload)
+	responsePayload, err := b.roundTrip(requestCtx, requestDelay, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -144,7 +150,7 @@ func (b *BrokerClient) ClientOffer(
 			clientOfferRequestTimeout))
 	defer requestCancelFunc()
 
-	responsePayload, err := b.roundTrip(requestCtx, requestPayload)
+	responsePayload, err := b.roundTrip(requestCtx, 0, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -173,7 +179,7 @@ func (b *BrokerClient) ProxyAnswer(
 			proxyAnswerRequestTimeout))
 	defer requestCancelFunc()
 
-	responsePayload, err := b.roundTrip(requestCtx, requestPayload)
+	responsePayload, err := b.roundTrip(requestCtx, 0, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -203,7 +209,7 @@ func (b *BrokerClient) ClientRelayedPacket(
 			clientRelayedPacketRequestTimeout))
 	defer requestCancelFunc()
 
-	responsePayload, err := b.roundTrip(requestCtx, requestPayload)
+	responsePayload, err := b.roundTrip(requestCtx, 0, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -218,6 +224,7 @@ func (b *BrokerClient) ClientRelayedPacket(
 
 func (b *BrokerClient) roundTrip(
 	ctx context.Context,
+	requestDelay time.Duration,
 	request []byte) ([]byte, error) {
 
 	// The round tripper may need to establish a transport-level connection;
@@ -252,11 +259,31 @@ func (b *BrokerClient) roundTrip(
 	// response are tagged with a RoundTripID which is checked to ensure the
 	// association is maintained.
 
+	var preRoundTrip func(context.Context)
+	if requestDelay > 0 {
+
+		// Use the pre-round trip callback apply the requestDelay _after_ any
+		// waitToShareSession delay, otherwise any waitToShareSession may
+		// collapse staggered requests back together.
+		//
+		// The context passed to preRoundTrip should cancel the delay both in
+		// the case where the request is canceled and and in the case where
+		// the round tripper is closed.
+		//
+		// It's assumed that the caller has adjusted the ctx deadline to
+		// account for requestDelay.
+
+		preRoundTrip = func(ctx context.Context) {
+			common.SleepWithContext(ctx, requestDelay)
+		}
+	}
+
 	waitToShareSession := true
 
 	response, err := b.sessions.RoundTrip(
 		ctx,
 		roundTripper,
+		preRoundTrip,
 		b.coordinator.BrokerPublicKey(),
 		b.coordinator.BrokerRootObfuscationSecret(),
 		waitToShareSession,

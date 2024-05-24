@@ -333,23 +333,30 @@ func (t PortMappingTypes) IsValid() bool {
 // ICECandidateType is an ICE candidate type: host for public addresses, port
 // mapping for when a port mapping protocol was used to establish a public
 // address, or server reflexive when STUN hole punching was used to create a
-// public address.
+// public address. Peer reflexive candidates emerge during the ICE
+// negotiation process and are not SDP entries.
 type ICECandidateType int32
 
 const (
-	ICECandidateHost ICECandidateType = iota
+	ICECandidateUnknown ICECandidateType = iota
+	ICECandidateHost
 	ICECandidatePortMapping
 	ICECandidateServerReflexive
+	ICECandidatePeerReflexive
 )
 
 func (t ICECandidateType) String() string {
 	switch t {
+	case ICECandidateUnknown:
+		return "Unknown"
 	case ICECandidateHost:
 		return "Host"
 	case ICECandidatePortMapping:
 		return "PortMapping"
 	case ICECandidateServerReflexive:
 		return "ServerReflexive"
+	case ICECandidatePeerReflexive:
+		return "PeerReflexive"
 	}
 	return ""
 }

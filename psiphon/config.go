@@ -966,8 +966,8 @@ type Config struct {
 	InproxyCommonCompartmentIDs                            parameters.InproxyCompartmentIDsValue
 	InproxyMaxCompartmentIDListLength                      *int
 	InproxyProxyAnnounceRequestTimeoutMilliseconds         *int
-	InproxyProxyAnnounceRetryDelayMilliseconds             *int
-	InproxyProxyAnnounceRetryJitter                        *float64
+	InproxyProxyAnnounceDelayMilliseconds                  *int
+	InproxyProxyAnnounceDelayJitter                        *float64
 	InproxyProxyAnswerRequestTimeoutMilliseconds           *int
 	InproxyClientOfferRequestTimeoutMilliseconds           *int
 	InproxyClientOfferRetryDelayMilliseconds               *int
@@ -2371,12 +2371,12 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyProxyAnnounceRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyAnnounceRequestTimeoutMilliseconds)
 	}
 
-	if config.InproxyProxyAnnounceRetryDelayMilliseconds != nil {
-		applyParameters[parameters.InproxyProxyAnnounceRetryDelay] = fmt.Sprintf("%dms", *config.InproxyProxyAnnounceRetryDelayMilliseconds)
+	if config.InproxyProxyAnnounceDelayMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyAnnounceDelay] = fmt.Sprintf("%dms", *config.InproxyProxyAnnounceDelayMilliseconds)
 	}
 
-	if config.InproxyProxyAnnounceRetryJitter != nil {
-		applyParameters[parameters.InproxyProxyAnnounceRetryJitter] = *config.InproxyProxyAnnounceRetryJitter
+	if config.InproxyProxyAnnounceDelayJitter != nil {
+		applyParameters[parameters.InproxyProxyAnnounceDelayJitter] = *config.InproxyProxyAnnounceDelayJitter
 	}
 
 	if config.InproxyProxyAnswerRequestTimeoutMilliseconds != nil {
@@ -3123,13 +3123,13 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte("InproxyProxyAnnounceRequestTimeoutMilliseconds"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnnounceRequestTimeoutMilliseconds))
 	}
-	if config.InproxyProxyAnnounceRetryDelayMilliseconds != nil {
-		hash.Write([]byte("InproxyProxyAnnounceRetryDelayMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnnounceRetryDelayMilliseconds))
+	if config.InproxyProxyAnnounceDelayMilliseconds != nil {
+		hash.Write([]byte("InproxyProxyAnnounceDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnnounceDelayMilliseconds))
 	}
-	if config.InproxyProxyAnnounceRetryJitter != nil {
-		hash.Write([]byte("InproxyProxyAnnounceRetryJitter"))
-		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyAnnounceRetryJitter)
+	if config.InproxyProxyAnnounceDelayJitter != nil {
+		hash.Write([]byte("InproxyProxyAnnounceDelayJitter"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyAnnounceDelayJitter)
 	}
 	if config.InproxyProxyAnswerRequestTimeoutMilliseconds != nil {
 		hash.Write([]byte("InproxyProxyAnswerRequestTimeoutMilliseconds"))
