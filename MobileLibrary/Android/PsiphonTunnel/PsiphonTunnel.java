@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, Psiphon Inc.
+ * Copyright (c) 2024, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,7 +19,6 @@
 
 package ca.psiphon;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
@@ -31,60 +30,43 @@ import android.net.VpnService;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
-import android.os.ParcelFileDescriptor;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
-import android.util.Base64;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
-import java.security.KeyStore;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Enumeration;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 import psi.Psi;
 import psi.PsiphonProvider;
+import psi.PsiphonProviderFeedbackHandler;
 import psi.PsiphonProviderNetwork;
 import psi.PsiphonProviderNoticeHandler;
-import psi.PsiphonProviderFeedbackHandler;
 
 public class PsiphonTunnel {
-
     public interface HostLogger {
-        default public void onDiagnosticMessage(String message) {}
+        default void onDiagnosticMessage(String message) {}
     }
 
     // Protocol used to communicate the outcome of feedback upload operations to the application
@@ -92,89 +74,78 @@ public class PsiphonTunnel {
     public interface HostFeedbackHandler {
         // Callback which is invoked once the feedback upload has completed.
         // If the exception is non-null, then the upload failed.
-        default public void sendFeedbackCompleted(java.lang.Exception e) {}
+        default void sendFeedbackCompleted(java.lang.Exception e) {}
     }
 
     public interface HostLibraryLoader {
-        default public void loadLibrary(String library) {
+        default void loadLibrary(String library) {
             System.loadLibrary(library);
         }
     }
 
     public interface HostService extends HostLogger, HostLibraryLoader {
+        Context getContext();
+        String getPsiphonConfig();
+        // Optional getter for the VpnService instance to be used by bindToDevice
+        default VpnService getVpnService() {return null;}
 
-        public String getAppName();
-        public Context getContext();
-        public String getPsiphonConfig();
-
-        default public Object getVpnService() {return null;} // Object must be a VpnService (Android < 4 cannot reference this class name)
-        default public Object newVpnServiceBuilder() {return null;} // Object must be a VpnService.Builder (Android < 4 cannot reference this class name)
-        default public void onAvailableEgressRegions(List<String> regions) {}
-        default public void onSocksProxyPortInUse(int port) {}
-        default public void onHttpProxyPortInUse(int port) {}
-        default public void onListeningSocksProxyPort(int port) {}
-        default public void onListeningHttpProxyPort(int port) {}
-        default public void onUpstreamProxyError(String message) {}
-        default public void onConnecting() {}
-        default public void onConnected() {}
-        default public void onHomepage(String url) {}
-        default public void onClientRegion(String region) {}
-        default public void onClientAddress(String address) {}
-        default public void onClientUpgradeDownloaded(String filename) {}
-        default public void onClientIsLatestVersion() {}
-        default public void onSplitTunnelRegions(List<String> regions) {}
-        default public void onUntunneledAddress(String address) {}
-        default public void onBytesTransferred(long sent, long received) {}
-        default public void onStartedWaitingForNetworkConnectivity() {}
-        default public void onStoppedWaitingForNetworkConnectivity() {}
-        default public void onActiveAuthorizationIDs(List<String> authorizations) {}
-        default public void onTrafficRateLimits(long upstreamBytesPerSecond, long downstreamBytesPerSecond) {}
-        default public void onApplicationParameters(Object parameters) {}
-        default public void onServerAlert(String reason, String subject, List<String> actionURLs) {}
+        // Tunnel core notice handler callbacks
+        default void onAvailableEgressRegions(List<String> regions) {}
+        default void onSocksProxyPortInUse(int port) {}
+        default void onHttpProxyPortInUse(int port) {}
+        default void onListeningSocksProxyPort(int port) {}
+        default void onListeningHttpProxyPort(int port) {}
+        default void onUpstreamProxyError(String message) {}
+        default void onConnecting() {}
+        default void onConnected() {}
+        default void onHomepage(String url) {}
+        default void onClientRegion(String region) {}
+        default void onClientAddress(String address) {}
+        default void onClientUpgradeDownloaded(String filename) {}
+        default void onClientIsLatestVersion() {}
+        default void onSplitTunnelRegions(List<String> regions) {}
+        default void onUntunneledAddress(String address) {}
+        default void onBytesTransferred(long sent, long received) {}
+        default void onStartedWaitingForNetworkConnectivity() {}
+        default void onStoppedWaitingForNetworkConnectivity() {}
+        default void onActiveAuthorizationIDs(List<String> authorizations) {}
+        default void onTrafficRateLimits(long upstreamBytesPerSecond, long downstreamBytesPerSecond) {}
+        default void onApplicationParameters(Object parameters) {}
+        default void onServerAlert(String reason, String subject, List<String> actionURLs) {}
         /**
          * Called when tunnel-core reports connected server region information.
          * @param region The server region received.
          */
-        default public void onConnectedServerRegion(String region) {}
-        default public void onExiting() {}
+        default void onConnectedServerRegion(String region) {}
+        default void onIsTcs(boolean isTcs) {}
+        default void onExiting() {}
     }
 
     private final HostService mHostService;
-    private AtomicBoolean mVpnMode;
-    private PrivateAddress mPrivateAddress;
-    private AtomicReference<ParcelFileDescriptor> mTunFd;
-    private AtomicInteger mLocalSocksProxyPort;
-    private AtomicBoolean mRoutingThroughTunnel;
-    private Thread mTun2SocksThread;
-    private AtomicBoolean mIsWaitingForNetworkConnectivity;
-    private AtomicReference<String> mClientPlatformPrefix;
-    private AtomicReference<String> mClientPlatformSuffix;
-    private final boolean mShouldRouteThroughTunnelAutomatically;
-    private final NetworkMonitor mNetworkMonitor;
-    private AtomicReference<String> mActiveNetworkType;
-    private AtomicReference<String> mActiveNetworkDNSServers;
+    private final AtomicBoolean mVpnMode;
+    private final AtomicInteger mLocalSocksProxyPort;
+    private final AtomicBoolean mIsWaitingForNetworkConnectivity;
+    private final AtomicReference<String> mClientPlatformPrefix;
+    private final AtomicReference<String> mClientPlatformSuffix;
 
-    // Only one PsiphonVpn instance may exist at a time, as the underlying
-    // psi.Psi and tun2socks implementations each contain global state.
-    private static PsiphonTunnel mPsiphonTunnel;
+    private final NetworkMonitor mNetworkMonitor;
+    private final AtomicReference<String> mActiveNetworkType;
+    private final AtomicReference<String> mActiveNetworkDNSServers;
+
+    // Only one PsiphonTunnel instance may exist at a time, as the underlying psi.Psi contains
+    // global state.
+    private static PsiphonTunnel INSTANCE = null;
 
     public static synchronized PsiphonTunnel newPsiphonTunnel(HostService hostService) {
-        return newPsiphonTunnelImpl(hostService, true);
-    }
-
-    // The two argument override in case the host app wants to take control over calling routeThroughTunnel()
-    public static synchronized PsiphonTunnel newPsiphonTunnel(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
-        return newPsiphonTunnelImpl(hostService, shouldRouteThroughTunnelAutomatically);
-    }
-
-    private static PsiphonTunnel newPsiphonTunnelImpl(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
-        if (mPsiphonTunnel != null) {
-            mPsiphonTunnel.stop();
+        if (INSTANCE != null) {
+            INSTANCE.stop();
         }
-        // Load the native go code embedded in psi.aar
-        hostService.loadLibrary("gojni");
-        mPsiphonTunnel = new PsiphonTunnel(hostService, shouldRouteThroughTunnelAutomatically);
-        return mPsiphonTunnel;
+        INSTANCE = new PsiphonTunnel(hostService);
+        return INSTANCE;
+    }
+
+    public void setVpnMode(boolean isVpnMode) {
+        this.mVpnMode.set(isVpnMode);
     }
 
     // Returns default path where upgrade downloads will be paved. Only applicable if
@@ -194,18 +165,18 @@ public class PsiphonTunnel {
         return context.getFileStreamPath("ca.psiphon.PsiphonTunnel.tunnel-core");
     }
 
-    private PsiphonTunnel(HostService hostService, boolean shouldRouteThroughTunnelAutomatically) {
+    private PsiphonTunnel(HostService hostService) {
+        // Load the native go code embedded in psi.aar
+        hostService.loadLibrary("gojni");
+
         mHostService = hostService;
         mVpnMode = new AtomicBoolean(false);
-        mTunFd = new AtomicReference<ParcelFileDescriptor>();
         mLocalSocksProxyPort = new AtomicInteger(0);
-        mRoutingThroughTunnel = new AtomicBoolean(false);
         mIsWaitingForNetworkConnectivity = new AtomicBoolean(false);
-        mClientPlatformPrefix = new AtomicReference<String>("");
-        mClientPlatformSuffix = new AtomicReference<String>("");
-        mShouldRouteThroughTunnelAutomatically = shouldRouteThroughTunnelAutomatically;
-        mActiveNetworkType = new AtomicReference<String>("");
-        mActiveNetworkDNSServers = new AtomicReference<String>("");
+        mClientPlatformPrefix = new AtomicReference<>("");
+        mClientPlatformSuffix = new AtomicReference<>("");
+        mActiveNetworkType = new AtomicReference<>("");
+        mActiveNetworkDNSServers = new AtomicReference<>("");
         mNetworkMonitor = new NetworkMonitor(new NetworkMonitor.NetworkChangeListener() {
             @Override
             public void onChanged() {
@@ -226,72 +197,8 @@ public class PsiphonTunnel {
     // Public API
     //----------------------------------------------------------------------------------------------
 
-    // To start, call in sequence: startRouting(), then startTunneling(). After startRouting()
-    // succeeds, the caller must call stop() to clean up. These functions should not be called
-    // concurrently. Do not call stop() while startRouting() or startTunneling() is in progress.
-    // In case the host application requests manual control of routing through tunnel by calling
-    // PsiphonTunnel.newPsiphonTunnel(HostService hostservice, shouldRouteThroughTunnelAutomatically = false)
-    // it should also call routeThroughTunnel() at some point, usually after receiving onConnected() callback,
-    // otherwise it will be called automatically.
-
-    // Returns true when the VPN routing is established; returns false if the VPN could not
-    // be started due to lack of prepare or revoked permissions (called should re-prepare and
-    // try again); throws exception for other error conditions.
-    public synchronized boolean startRouting() throws Exception {
-        // Load tun2socks library embedded in the aar
-        // If this method is called more than once with the same library name, the second and subsequent calls are ignored.
-        // http://docs.oracle.com/javase/7/docs/api/java/lang/Runtime.html#loadLibrary%28java.lang.String%29
-        mHostService.loadLibrary("tun2socks");
-        return startVpn();
-    }
-
-    // Starts routing traffic via tunnel by starting tun2socks if it is not running already.
-    // This will be called automatically right after tunnel gets connected in case the host application
-    // did not request a manual control over this functionality, see PsiphonTunnel.newPsiphonTunnel
-    public void routeThroughTunnel() {
-        if (!mRoutingThroughTunnel.compareAndSet(false, true)) {
-            return;
-        }
-        ParcelFileDescriptor tunFd = mTunFd.get();
-        if (tunFd == null) {
-            return;
-        }
-
-        String socksServerAddress = "127.0.0.1:" + Integer.toString(mLocalSocksProxyPort.get());
-        String udpgwServerAddress = "127.0.0.1:" + Integer.toString(UDPGW_SERVER_PORT);
-
-        // We may call routeThroughTunnel and stopRouteThroughTunnel more than once within the same
-        // VPN session. Since stopTun2Socks() closes the FD passed to startTun2Socks() we will use a
-        // dup of the original tun FD and close the original only when we call stopVpn().
-        //
-        // Note that ParcelFileDescriptor.dup() may throw an IOException.
-        try {
-            startTun2Socks(
-                    tunFd.dup(),
-                    VPN_INTERFACE_MTU,
-                    mPrivateAddress.mRouter,
-                    VPN_INTERFACE_NETMASK,
-                    socksServerAddress,
-                    udpgwServerAddress,
-                    true);
-            mHostService.onDiagnosticMessage("routing through tunnel");
-
-            // TODO: should double-check tunnel routing; see:
-            // https://bitbucket.org/psiphon/psiphon-circumvention-system/src/1dc5e4257dca99790109f3bf374e8ab3a0ead4d7/Android/PsiphonAndroidLibrary/src/com/psiphon3/psiphonlibrary/TunnelCore.java?at=default#cl-779
-        } catch (IOException e) {
-            mHostService.onDiagnosticMessage("routing through tunnel error: " + e);
-        }
-    }
-
-    public void stopRouteThroughTunnel() {
-        if (mRoutingThroughTunnel.compareAndSet(true, false)) {
-            stopTun2Socks();
-        }
-    }
-
-    // Throws an exception in error conditions. In the case of an exception, the routing
-    // started by startRouting() is not immediately torn down (this allows the caller to control
-    // exactly when VPN routing is stopped); caller should call stop() to clean up.
+    // Throws an exception if start fails. The caller may examine the exception message
+    // to determine the cause of the error.
     public synchronized void startTunneling(String embeddedServerEntries) throws Exception {
         startPsiphon(embeddedServerEntries);
     }
@@ -303,7 +210,6 @@ public class PsiphonTunnel {
     // waits for Notice callback invoker to stop, meanwhile the callback thread has blocked waiting
     // for stop().
     public synchronized void stop() {
-        stopVpn();
         stopPsiphon();
         mVpnMode.set(false);
         mLocalSocksProxyPort.set(0);
@@ -335,8 +241,8 @@ public class PsiphonTunnel {
     // Writes Go runtime profile information to a set of files in the specifiec output directory.
     // cpuSampleDurationSeconds and blockSampleDurationSeconds determines how to long to wait and
     // sample profiles that require active sampling. When set to 0, these profiles are skipped.
-    public void writeRuntimeProfiles(String outputDirectory, int cpuSampleDurationSeconnds, int blockSampleDurationSeconds) {
-        Psi.writeRuntimeProfiles(outputDirectory, cpuSampleDurationSeconnds, blockSampleDurationSeconds);
+    public void writeRuntimeProfiles(String outputDirectory, int cpuSampleDurationSeconds, int blockSampleDurationSeconds) {
+        Psi.writeRuntimeProfiles(outputDirectory, cpuSampleDurationSeconds, blockSampleDurationSeconds);
     }
 
     // The interface for managing the Psiphon feedback upload operations.
@@ -356,7 +262,6 @@ public class PsiphonTunnel {
                     // Wait a while for tasks to respond to being cancelled
                     if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
                         System.err.println("PsiphonTunnelFeedback: pool did not terminate");
-                        return;
                     }
                 }
             } catch (InterruptedException ie) {
@@ -388,15 +293,15 @@ public class PsiphonTunnel {
         // the same time and result in non-fatal errors in one, or both, of the migration
         // operations.
         public void startSendFeedback(Context context, HostFeedbackHandler feedbackHandler, HostLogger logger,
-                                      String feedbackConfigJson, String diagnosticsJson, String uploadPath,
-                                      String clientPlatformPrefix, String clientPlatformSuffix) {
+                String feedbackConfigJson, String diagnosticsJson, String uploadPath,
+                String clientPlatformPrefix, String clientPlatformSuffix) {
             workQueue.execute(new Runnable() {
                 @Override
                 public void run() {
                     try {
                         // Adds fields used in feedback upload, e.g. client platform.
-                        String psiphonConfig = buildPsiphonConfig(context, logger, feedbackConfigJson,
-                                clientPlatformPrefix, clientPlatformSuffix, false, 0);
+                        String psiphonConfig = buildPsiphonConfig(context, feedbackConfigJson,
+                                clientPlatformPrefix, clientPlatformSuffix, 0);
 
                         Psi.startSendFeedback(psiphonConfig, diagnosticsJson, uploadPath,
                                 new PsiphonProviderFeedbackHandler() {
@@ -475,16 +380,10 @@ public class PsiphonTunnel {
                                             JSONObject notice = new JSONObject(noticeJSON);
 
                                             String noticeType = notice.getString("noticeType");
-                                            if (noticeType == null) {
-                                                return;
-                                            }
 
                                             JSONObject data = notice.getJSONObject("data");
-                                            if (data == null) {
-                                                return;
-                                            }
 
-                                            String diagnosticMessage = noticeType + ": " + data.toString();
+                                            String diagnosticMessage = noticeType + ": " + data;
                                             try {
                                                 callbackQueue.execute(new Runnable() {
                                                     @Override
@@ -499,7 +398,7 @@ public class PsiphonTunnel {
                                                 callbackQueue.execute(new Runnable() {
                                                     @Override
                                                     public void run() {
-                                                        logger.onDiagnosticMessage("Error handling notice " + e.toString());
+                                                        logger.onDiagnosticMessage("Error handling notice " + e);
                                                     }
                                                 });
                                             } catch (RejectedExecutionException ignored) {
@@ -509,7 +408,7 @@ public class PsiphonTunnel {
                                 },
                                 false,   // Do not use IPv6 synthesizer for Android
                                 true     // Use hasIPv6Route on Android
-                                );
+                        );
                     } catch (java.lang.Exception e) {
                         try {
                             callbackQueue.execute(new Runnable() {
@@ -541,105 +440,6 @@ public class PsiphonTunnel {
         }
     }
 
-    //----------------------------------------------------------------------------------------------
-    // VPN Routing
-    //----------------------------------------------------------------------------------------------
-
-    private final static String VPN_INTERFACE_NETMASK = "255.255.255.0";
-    private final static int VPN_INTERFACE_MTU = 1500;
-    private final static int UDPGW_SERVER_PORT = 7300;
-
-    // Note: Atomic variables used for getting/setting local proxy port, routing flag, and
-    // tun fd, as these functions may be called via PsiphonProvider callbacks. Do not use
-    // synchronized functions as stop() is synchronized and a deadlock is possible as callbacks
-    // can be called while stop holds the lock.
-
-    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
-    private boolean startVpn() throws Exception {
-
-        mVpnMode.set(true);
-        mPrivateAddress = selectPrivateAddress();
-
-        Locale previousLocale = Locale.getDefault();
-
-        final String errorMessage = "startVpn failed";
-        try {
-            // Workaround for https://code.google.com/p/android/issues/detail?id=61096
-            Locale.setDefault(new Locale("en"));
-
-            int mtu = VPN_INTERFACE_MTU;
-            String dnsResolver = mPrivateAddress.mRouter;
-
-            ParcelFileDescriptor tunFd =
-                    ((VpnService.Builder) mHostService.newVpnServiceBuilder())
-                            .setSession(mHostService.getAppName())
-                            .setMtu(mtu)
-                            .addAddress(mPrivateAddress.mIpAddress, mPrivateAddress.mPrefixLength)
-                            .addRoute("0.0.0.0", 0)
-                            .addRoute(mPrivateAddress.mSubnet, mPrivateAddress.mPrefixLength)
-                            .addDnsServer(dnsResolver)
-                            .establish();
-            if (tunFd == null) {
-                // As per http://developer.android.com/reference/android/net/VpnService.Builder.html#establish%28%29,
-                // this application is no longer prepared or was revoked.
-                return false;
-            }
-            mTunFd.set(tunFd);
-            mRoutingThroughTunnel.set(false);
-
-            mHostService.onDiagnosticMessage("VPN established");
-
-        } catch(IllegalArgumentException e) {
-            throw new Exception(errorMessage, e);
-        } catch(IllegalStateException e) {
-            throw new Exception(errorMessage, e);
-        } catch(SecurityException e) {
-            throw new Exception(errorMessage, e);
-        } finally {
-            // Restore the original locale.
-            Locale.setDefault(previousLocale);
-        }
-
-        return true;
-    }
-
-    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
-    private ParcelFileDescriptor startDummyVpn(VpnService.Builder vpnServiceBuilder) throws Exception {
-        PrivateAddress privateAddress = selectPrivateAddress();
-
-        Locale previousLocale = Locale.getDefault();
-
-        final String errorMessage = "startDummyVpn failed";
-        final ParcelFileDescriptor tunFd;
-        try {
-            // Workaround for https://code.google.com/p/android/issues/detail?id=61096
-            Locale.setDefault(new Locale("en"));
-
-            int mtu = VPN_INTERFACE_MTU;
-            String dnsResolver = privateAddress.mRouter;
-
-            tunFd = vpnServiceBuilder
-                            .setSession(mHostService.getAppName())
-                            .setMtu(mtu)
-                            .addAddress(privateAddress.mIpAddress, privateAddress.mPrefixLength)
-                            .addRoute("0.0.0.0", 0)
-                            .addRoute(privateAddress.mSubnet, privateAddress.mPrefixLength)
-                            .addDnsServer(dnsResolver)
-                            .establish();
-        } catch(IllegalArgumentException e) {
-            throw new Exception(errorMessage, e);
-        } catch(IllegalStateException e) {
-            throw new Exception(errorMessage, e);
-        } catch(SecurityException e) {
-            throw new Exception(errorMessage, e);
-        } finally {
-            // Restore the original locale.
-            Locale.setDefault(previousLocale);
-        }
-
-        return tunFd;
-    }
-
     private boolean isVpnMode() {
         return mVpnMode.get();
     }
@@ -648,16 +448,8 @@ public class PsiphonTunnel {
         mLocalSocksProxyPort.set(port);
     }
 
-    private void stopVpn() {
-        stopTun2Socks();
-        ParcelFileDescriptor tunFd = mTunFd.getAndSet(null);
-        if (tunFd != null) {
-            try {
-                tunFd.close();
-            } catch (IOException e) {
-            }
-        }
-        mRoutingThroughTunnel.set(false);
+    public int getLocalSocksProxyPort() {
+        return mLocalSocksProxyPort.get();
     }
 
     //----------------------------------------------------------------------------------------------
@@ -669,8 +461,7 @@ public class PsiphonTunnel {
     // PsiphonProviderShim is used as a wrapper.
 
     private class PsiphonProviderShim implements PsiphonProvider {
-
-        private PsiphonTunnel mPsiphonTunnel;
+        private final PsiphonTunnel mPsiphonTunnel;
 
         public PsiphonProviderShim(PsiphonTunnel psiphonTunnel) {
             mPsiphonTunnel = psiphonTunnel;
@@ -716,9 +507,8 @@ public class PsiphonTunnel {
         handlePsiphonNotice(noticeJSON);
     }
 
-    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH)
     private String bindToDevice(long fileDescriptor) throws Exception {
-        if (!((VpnService)mHostService.getVpnService()).protect((int)fileDescriptor)) {
+        if (!mHostService.getVpnService().protect((int)fileDescriptor)) {
             throw new Exception("protect socket failed");
         }
         return "";
@@ -783,7 +573,6 @@ public class PsiphonTunnel {
     }
 
     private static String getNetworkID(Context context, boolean isVpnMode) {
-
         // TODO: getActiveNetworkInfo is deprecated in API 29; once
         // getActiveNetworkInfo is no longer available, use
         // mActiveNetworkType which is updated by mNetworkMonitor.
@@ -828,11 +617,14 @@ public class PsiphonTunnel {
         }
 
         if (activeNetworkInfo != null && activeNetworkInfo.getType() == ConnectivityManager.TYPE_WIFI) {
-
             networkID = "WIFI";
 
             try {
-                WifiManager wifiManager = (WifiManager)context.getSystemService(Context.WIFI_SERVICE);
+                // Use the application context here to avoid lint warning:
+                // "The WIFI_SERVICE must be looked up on the application context to prevent
+                // memory leaks on devices running Android versions earlier than N."
+                WifiManager wifiManager = (WifiManager) context.getApplicationContext()
+                        .getSystemService(Context.WIFI_SERVICE);
                 WifiInfo wifiInfo = wifiManager.getConnectionInfo();
                 if (wifiInfo != null) {
                     String wifiNetworkID = wifiInfo.getBSSID();
@@ -849,9 +641,7 @@ public class PsiphonTunnel {
                 // May get exceptions due to missing permissions like android.permission.ACCESS_WIFI_STATE.
                 // Fall through and use just "WIFI"
             }
-
         } else if (activeNetworkInfo != null && activeNetworkInfo.getType() == ConnectivityManager.TYPE_MOBILE) {
-
             networkID = "MOBILE";
 
             try {
@@ -888,7 +678,7 @@ public class PsiphonTunnel {
                     isVpnMode(),
                     false,   // Do not use IPv6 synthesizer for Android
                     true     // Use hasIPv6Route on Android
-                    );
+            );
         } catch (java.lang.Exception e) {
             throw new Exception("failed to start Psiphon library", e);
         }
@@ -904,17 +694,15 @@ public class PsiphonTunnel {
     }
 
     private String loadPsiphonConfig(Context context)
-            throws IOException, JSONException, Exception {
+            throws JSONException, Exception {
 
-        return buildPsiphonConfig(context, mHostService, mHostService.getPsiphonConfig(),
-                mClientPlatformPrefix.get(), mClientPlatformSuffix.get(), isVpnMode(),
-                mLocalSocksProxyPort.get());
+        return buildPsiphonConfig(context, mHostService.getPsiphonConfig(),
+                mClientPlatformPrefix.get(), mClientPlatformSuffix.get(), mLocalSocksProxyPort.get());
     }
 
-    private static String buildPsiphonConfig(Context context, HostLogger logger, String psiphonConfig,
-                                             String clientPlatformPrefix, String clientPlatformSuffix,
-                                             boolean isVpnMode, Integer localSocksProxyPort)
-            throws IOException, JSONException, Exception {
+    private static String buildPsiphonConfig(Context context, String psiphonConfig,
+            String clientPlatformPrefix, String clientPlatformSuffix,
+            Integer localSocksProxyPort) throws JSONException, Exception {
 
         // Load settings from the raw resource JSON config file and
         // update as necessary. Then write JSON to disk for the Go client.
@@ -928,7 +716,8 @@ public class PsiphonTunnel {
             if (!dataRootDirectory.exists()) {
                 boolean created = dataRootDirectory.mkdir();
                 if (!created) {
-                    throw new Exception("failed to create data root directory: " + dataRootDirectory.getPath());
+                    throw new Exception(
+                            "failed to create data root directory: " + dataRootDirectory.getPath());
                 }
             }
             json.put("DataRootDirectory", defaultDataRootDirectory(context));
@@ -942,7 +731,8 @@ public class PsiphonTunnel {
         // Migrate remote server list downloads from legacy location.
         if (!json.has("RemoteServerListDownloadFilename")) {
             File remoteServerListDownload = new File(context.getFilesDir(), "remote_server_list");
-            json.put("MigrateRemoteServerListDownloadFilename", remoteServerListDownload.getAbsolutePath());
+            json.put("MigrateRemoteServerListDownloadFilename",
+                    remoteServerListDownload.getAbsolutePath());
         }
 
         // Migrate obfuscated server list download files from legacy directory.
@@ -956,22 +746,13 @@ public class PsiphonTunnel {
 
         json.put("EmitBytesTransferred", true);
 
-        if (localSocksProxyPort != 0 && (!json.has("LocalSocksProxyPort") || json.getInt("LocalSocksProxyPort") == 0)) {
+        if (localSocksProxyPort != 0 && (!json.has("LocalSocksProxyPort") || json.getInt(
+                "LocalSocksProxyPort") == 0)) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
             // A side-effect of this is that changing the SOCKS port preference
             // has no effect with restartPsiphon(), a full stop() is necessary.
             json.put("LocalSocksProxyPort", localSocksProxyPort);
-        }
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
-            try {
-                json.put(
-                        "TrustedCACertificatesFilename",
-                        setupTrustedCertificates(context, logger));
-            } catch (Exception e) {
-                logger.onDiagnosticMessage(e.getMessage());
-            }
         }
 
         json.put("DeviceRegion", getDeviceRegion(context));
@@ -1010,16 +791,13 @@ public class PsiphonTunnel {
                 if (count == 0) {
                     mHostService.onConnecting();
                 } else if (count == 1) {
-                    if (isVpnMode() && mShouldRouteThroughTunnelAutomatically) {
-                        routeThroughTunnel();
-                    }
                     mHostService.onConnected();
                 }
                 // count > 1 is an additional multi-tunnel establishment, and not reported.
 
             } else if (noticeType.equals("AvailableEgressRegions")) {
                 JSONArray egressRegions = notice.getJSONObject("data").getJSONArray("regions");
-                ArrayList<String> regions = new ArrayList<String>();
+                ArrayList<String> regions = new ArrayList<>();
                 for (int i=0; i<egressRegions.length(); i++) {
                     regions.add(egressRegions.getString(i));
                 }
@@ -1051,7 +829,7 @@ public class PsiphonTunnel {
                 mHostService.onClientAddress(notice.getJSONObject("data").getString("address"));
             } else if (noticeType.equals("SplitTunnelRegions")) {
                 JSONArray splitTunnelRegions = notice.getJSONObject("data").getJSONArray("regions");
-                ArrayList<String> regions = new ArrayList<String>();
+                ArrayList<String> regions = new ArrayList<>();
                 for (int i=0; i<splitTunnelRegions.length(); i++) {
                     regions.add(splitTunnelRegions.getString(i));
                 }
@@ -1065,7 +843,7 @@ public class PsiphonTunnel {
                 mHostService.onBytesTransferred(data.getLong("sent"), data.getLong("received"));
             } else if (noticeType.equals("ActiveAuthorizationIDs")) {
                 JSONArray activeAuthorizationIDs = notice.getJSONObject("data").getJSONArray("IDs");
-                ArrayList<String> authorizations = new ArrayList<String>();
+                ArrayList<String> authorizations = new ArrayList<>();
                 for (int i=0; i<activeAuthorizationIDs.length(); i++) {
                     authorizations.add(activeAuthorizationIDs.getString(i));
                 }
@@ -1073,124 +851,36 @@ public class PsiphonTunnel {
             } else if (noticeType.equals("TrafficRateLimits")) {
                 JSONObject data = notice.getJSONObject("data");
                 mHostService.onTrafficRateLimits(
-                    data.getLong("upstreamBytesPerSecond"), data.getLong("downstreamBytesPerSecond"));
+                        data.getLong("upstreamBytesPerSecond"), data.getLong("downstreamBytesPerSecond"));
             } else if (noticeType.equals("Exiting")) {
                 mHostService.onExiting();
             } else if (noticeType.equals("ActiveTunnel")) {
-                if (isVpnMode()) {
-                    if (notice.getJSONObject("data").getBoolean("isTCS")) {
-                      disableUdpGwKeepalive();
-                    } else {
-                      enableUdpGwKeepalive();
-                    }
-                }
+                mHostService.onIsTcs(notice.getJSONObject("data").getBoolean("isTCS"));
                 // Also report the tunnel's egress region to the host service
                 mHostService.onConnectedServerRegion(
                         notice.getJSONObject("data").getString("serverRegion"));
             } else if (noticeType.equals("ApplicationParameters")) {
                 mHostService.onApplicationParameters(
-                    notice.getJSONObject("data").get("parameters"));
+                        notice.getJSONObject("data").get("parameters"));
             } else if (noticeType.equals("ServerAlert")) {
                 JSONArray actionURLs = notice.getJSONObject("data").getJSONArray("actionURLs");
-                ArrayList<String> actionURLsList = new ArrayList<String>();
+                ArrayList<String> actionURLsList = new ArrayList<>();
                 for (int i=0; i<actionURLs.length(); i++) {
                     actionURLsList.add(actionURLs.getString(i));
                 }
                 mHostService.onServerAlert(
-                    notice.getJSONObject("data").getString("reason"),
-                    notice.getJSONObject("data").getString("subject"),
-                    actionURLsList);
+                        notice.getJSONObject("data").getString("reason"),
+                        notice.getJSONObject("data").getString("subject"),
+                        actionURLsList);
             }
 
             if (diagnostic) {
-                String diagnosticMessage = noticeType + ": " + notice.getJSONObject("data").toString();
+                String diagnosticMessage = noticeType + ": " + notice.getJSONObject("data");
                 mHostService.onDiagnosticMessage(diagnosticMessage);
             }
 
         } catch (JSONException e) {
             // Ignore notice
-        }
-    }
-
-    private static String setupTrustedCertificates(Context context, HostLogger logger) throws Exception {
-
-        // Copy the Android system CA store to a local, private cert bundle file.
-        //
-        // This results in a file that can be passed to SSL_CTX_load_verify_locations
-        // for use with OpenSSL modes in tunnel-core.
-        // https://www.openssl.org/docs/manmaster/ssl/SSL_CTX_load_verify_locations.html
-        //
-        // TODO: to use the path mode of load_verify_locations would require emulating
-        // the filename scheme used by c_rehash:
-        // https://www.openssl.org/docs/manmaster/apps/c_rehash.html
-        // http://stackoverflow.com/questions/19237167/the-new-subject-hash-openssl-algorithm-differs
-
-        File directory = context.getDir("PsiphonCAStore", Context.MODE_PRIVATE);
-
-        final String errorMessage = "copy AndroidCAStore failed";
-        try {
-
-            File file = new File(directory, "certs.dat");
-
-            // Pave a fresh copy on every run, which ensures we're not using old certs.
-            // Note: assumes KeyStore doesn't return revoked certs.
-            //
-            // TODO: this takes under 1 second, but should we avoid repaving every time?
-            file.delete();
-
-            PrintStream output = null;
-            try {
-                output = new PrintStream(new FileOutputStream(file));
-
-                KeyStore keyStore;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
-                    keyStore = KeyStore.getInstance("AndroidCAStore");
-                    keyStore.load(null, null);
-                } else {
-                    keyStore = KeyStore.getInstance("BKS");
-                    FileInputStream inputStream = new FileInputStream("/etc/security/cacerts.bks");
-                    try {
-                        keyStore.load(inputStream, "changeit".toCharArray());
-                    } finally {
-                        if (inputStream != null) {
-                            inputStream.close();
-                        }
-                    }
-                }
-
-                Enumeration<String> aliases = keyStore.aliases();
-                while (aliases.hasMoreElements()) {
-                    String alias = aliases.nextElement();
-                    X509Certificate cert = (X509Certificate) keyStore.getCertificate(alias);
-
-                    output.println("-----BEGIN CERTIFICATE-----");
-                    String pemCert = new String(Base64.encode(cert.getEncoded(), Base64.NO_WRAP), "UTF-8");
-                    // OpenSSL appears to reject the default linebreaking done by Base64.encode,
-                    // so we manually linebreak every 64 characters
-                    for (int i = 0; i < pemCert.length() ; i+= 64) {
-                        output.println(pemCert.substring(i, Math.min(i + 64, pemCert.length())));
-                    }
-                    output.println("-----END CERTIFICATE-----");
-                }
-
-                logger.onDiagnosticMessage("prepared PsiphonCAStore");
-
-                return file.getAbsolutePath();
-
-            } finally {
-                if (output != null) {
-                    output.close();
-                }
-            }
-
-        } catch (KeyStoreException e) {
-            throw new Exception(errorMessage, e);
-        } catch (NoSuchAlgorithmException e) {
-            throw new Exception(errorMessage, e);
-        } catch (CertificateException e) {
-            throw new Exception(errorMessage, e);
-        } catch (IOException e) {
-            throw new Exception(errorMessage, e);
         }
     }
 
@@ -1225,70 +915,6 @@ public class PsiphonTunnel {
         return region.toUpperCase(Locale.US);
     }
 
-    //----------------------------------------------------------------------------------------------
-    // Tun2Socks
-    //----------------------------------------------------------------------------------------------
-
-    @TargetApi(Build.VERSION_CODES.HONEYCOMB_MR1)
-    private void startTun2Socks(
-            final ParcelFileDescriptor vpnInterfaceFileDescriptor,
-            final int vpnInterfaceMTU,
-            final String vpnIpAddress,
-            final String vpnNetMask,
-            final String socksServerAddress,
-            final String udpgwServerAddress,
-            final boolean udpgwTransparentDNS) {
-        if (mTun2SocksThread != null) {
-            return;
-        }
-        mTun2SocksThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                runTun2Socks(
-                        vpnInterfaceFileDescriptor.detachFd(),
-                        vpnInterfaceMTU,
-                        vpnIpAddress,
-                        vpnNetMask,
-                        socksServerAddress,
-                        udpgwServerAddress,
-                        udpgwTransparentDNS ? 1 : 0);
-            }
-        });
-        mTun2SocksThread.start();
-        mHostService.onDiagnosticMessage("tun2socks started");
-    }
-
-    private void stopTun2Socks() {
-        if (mTun2SocksThread != null) {
-            try {
-                terminateTun2Socks();
-                mTun2SocksThread.join();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            mTun2SocksThread = null;
-            mHostService.onDiagnosticMessage("tun2socks stopped");
-        }
-    }
-
-    public static void logTun2Socks(String level, String channel, String msg) {
-        String logMsg = "tun2socks: " + level + "(" + channel + "): " + msg;
-        mPsiphonTunnel.mHostService.onDiagnosticMessage(logMsg);
-    }
-
-    private native static int runTun2Socks(
-            int vpnInterfaceFileDescriptor,
-            int vpnInterfaceMTU,
-            String vpnIpAddress,
-            String vpnNetMask,
-            String socksServerAddress,
-            String udpgwServerAddress,
-            int udpgwTransparentDNS);
-
-    private native static int terminateTun2Socks();
-
-    private native static int enableUdpGwKeepalive();
-    private native static int disableUdpGwKeepalive();
 
     //----------------------------------------------------------------------------------------------
     // Implementation: Network Utils
@@ -1304,71 +930,10 @@ public class PsiphonTunnel {
         return networkInfo != null && networkInfo.isConnected();
     }
 
-    private static class PrivateAddress {
-        final public String mIpAddress;
-        final public String mSubnet;
-        final public int mPrefixLength;
-        final public String mRouter;
-        public PrivateAddress(String ipAddress, String subnet, int prefixLength, String router) {
-            mIpAddress = ipAddress;
-            mSubnet = subnet;
-            mPrefixLength = prefixLength;
-            mRouter = router;
-        }
-    }
-
-    private static PrivateAddress selectPrivateAddress() throws Exception {
-        // Select one of 10.0.0.1, 172.16.0.1, or 192.168.0.1 depending on
-        // which private address range isn't in use.
-
-        Map<String, PrivateAddress> candidates = new HashMap<String, PrivateAddress>();
-        candidates.put( "10", new PrivateAddress("10.0.0.1",    "10.0.0.0",     8, "10.0.0.2"));
-        candidates.put("172", new PrivateAddress("172.16.0.1",  "172.16.0.0",  12, "172.16.0.2"));
-        candidates.put("192", new PrivateAddress("192.168.0.1", "192.168.0.0", 16, "192.168.0.2"));
-        candidates.put("169", new PrivateAddress("169.254.1.1", "169.254.1.0", 24, "169.254.1.2"));
-
-        Enumeration<NetworkInterface> netInterfaces;
-        try {
-            netInterfaces = NetworkInterface.getNetworkInterfaces();
-        } catch (SocketException e) {
-            throw new Exception("selectPrivateAddress failed", e);
-        }
-
-        if (netInterfaces == null) {
-            throw new Exception("no network interfaces found");
-        }
-
-        for (NetworkInterface netInterface : Collections.list(netInterfaces)) {
-            for (InetAddress inetAddress : Collections.list(netInterface.getInetAddresses())) {
-                if (inetAddress instanceof Inet4Address) {
-                    String ipAddress = inetAddress.getHostAddress();
-                    if (ipAddress.startsWith("10.")) {
-                        candidates.remove("10");
-                    }
-                    else if (
-                            ipAddress.length() >= 6 &&
-                                    ipAddress.substring(0, 6).compareTo("172.16") >= 0 &&
-                                    ipAddress.substring(0, 6).compareTo("172.31") <= 0) {
-                        candidates.remove("172");
-                    }
-                    else if (ipAddress.startsWith("192.168")) {
-                        candidates.remove("192");
-                    }
-                }
-            }
-        }
-
-        if (candidates.size() > 0) {
-            return candidates.values().iterator().next();
-        }
-
-        throw new Exception("no private address available");
-    }
-
     private static Collection<String> getActiveNetworkDNSServers(Context context, boolean isVpnMode)
             throws Exception {
 
-        ArrayList<String> servers = new ArrayList<String>();
+        ArrayList<String> servers = new ArrayList<>();
         for (InetAddress serverAddress : getActiveNetworkDNSServerAddresses(context, isVpnMode)) {
             String server = serverAddress.toString();
             // strip the leading slash e.g., "/192.168.1.1"
@@ -1389,7 +954,7 @@ public class PsiphonTunnel {
             throws Exception {
 
         final String errorMessage = "getActiveNetworkDNSServerAddresses failed";
-        ArrayList<InetAddress> dnsAddresses = new ArrayList<InetAddress>();
+        ArrayList<InetAddress> dnsAddresses = new ArrayList<>();
 
         ConnectivityManager connectivityManager =
                 (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -1414,8 +979,10 @@ public class PsiphonTunnel {
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
                     Method getDnsesMethod = LinkPropertiesClass.getMethod("getDnses", new Class []{});
                     Collection<?> dnses = (Collection<?>)getDnsesMethod.invoke(linkProperties);
-                    for (Object dns : dnses) {
-                        dnsAddresses.add((InetAddress)dns);
+                    if (dnses != null) {
+                        for (Object dns : dnses) {
+                            dnsAddresses.add((InetAddress)dns);
+                        }
                     }
                 } else {
                     // LinkProperties is public in API 21 (and the DNS function signature has changed)
@@ -1454,7 +1021,7 @@ public class PsiphonTunnel {
             //     constraints
 
             NetworkRequest.Builder networkRequestBuilder = new NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
 
             if (isVpnMode) {
                 // In VPN mode, we want the DNS servers for the underlying physical network.
@@ -1477,15 +1044,14 @@ public class PsiphonTunnel {
             // in artificial conditions while rapidly starting and stopping
             // PsiphonTunnel.
 
-            ArrayList<InetAddress> callbackDnsAddresses = new ArrayList<InetAddress>();
+            ArrayList<InetAddress> callbackDnsAddresses = new ArrayList<>();
 
             final CountDownLatch countDownLatch = new CountDownLatch(1);
             try {
                 ConnectivityManager.NetworkCallback networkCallback =
                         new ConnectivityManager.NetworkCallback() {
                             @Override
-                            public void onLinkPropertiesChanged(Network network,
-                                                                LinkProperties linkProperties) {
+                            public void onLinkPropertiesChanged(Network network, LinkProperties linkProperties) {
                                 synchronized (callbackDnsAddresses) {
                                     callbackDnsAddresses.addAll(linkProperties.getDnsServers());
                                 }
@@ -1512,43 +1078,43 @@ public class PsiphonTunnel {
 
     private static boolean hasIPv6Route(Context context) throws Exception {
 
-            try {
-                // This logic mirrors the logic in
-                // psiphon/common/resolver.hasRoutableIPv6Interface. That
-                // function currently doesn't work on Android due to Go's
-                // net.InterfaceAddrs failing on Android SDK 30+ (see Go issue
-                // 40569). hasIPv6Route provides the same functionality via a
-                // callback into Java code.
+        try {
+            // This logic mirrors the logic in
+            // psiphon/common/resolver.hasRoutableIPv6Interface. That
+            // function currently doesn't work on Android due to Go's
+            // net.InterfaceAddrs failing on Android SDK 30+ (see Go issue
+            // 40569). hasIPv6Route provides the same functionality via a
+            // callback into Java code.
 
-                for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                    if (netInterface.isUp() &&
+            for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (netInterface.isUp() &&
                         !netInterface.isLoopback() &&
                         !netInterface.isPointToPoint()) {
-                        for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
+                    for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
 
-                            // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
-                            // "Java will never return an IPv4-mapped address.
-                            //  These classes can take an IPv4-mapped address as
-                            //  input, both in byte array and text
-                            //  representation. However, it will be converted
-                            //  into an IPv4 address." As such, when the type of
-                            //  the IP address is Inet6Address, this should be
-                            //  an actual IPv6 address.
+                        // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
+                        // "Java will never return an IPv4-mapped address.
+                        //  These classes can take an IPv4-mapped address as
+                        //  input, both in byte array and text
+                        //  representation. However, it will be converted
+                        //  into an IPv4 address." As such, when the type of
+                        //  the IP address is Inet6Address, this should be
+                        //  an actual IPv6 address.
 
-                            if (address instanceof Inet6Address &&
+                        if (address instanceof Inet6Address &&
                                 !address.isLinkLocalAddress() &&
                                 !address.isSiteLocalAddress() &&
                                 !address.isMulticastAddress ()) {
-                                return true;
-                            }
+                            return true;
                         }
                     }
                 }
-                } catch (SocketException e) {
-                throw new Exception("hasIPv6Route failed", e);
             }
+        } catch (SocketException e) {
+            throw new Exception("hasIPv6Route failed", e);
+        }
 
-            return false;
+        return false;
     }
 
     //----------------------------------------------------------------------------------------------
@@ -1573,7 +1139,7 @@ public class PsiphonTunnel {
         private final NetworkChangeListener listener;
         private ConnectivityManager.NetworkCallback networkCallback;
         public NetworkMonitor(
-            NetworkChangeListener listener) {
+                NetworkChangeListener listener) {
             this.listener = listener;
         }
 
@@ -1622,13 +1188,11 @@ public class PsiphonTunnel {
                     currentActiveNetwork = network;
 
                     if (network == null) {
-
-                        mPsiphonTunnel.mActiveNetworkType.set("NONE");
-                        mPsiphonTunnel.mActiveNetworkDNSServers.set("");
-                        mPsiphonTunnel.mHostService.onDiagnosticMessage("NetworkMonitor: clear current active network");
+                        INSTANCE.mActiveNetworkType.set("NONE");
+                        INSTANCE.mActiveNetworkDNSServers.set("");
+                        INSTANCE.mHostService.onDiagnosticMessage("NetworkMonitor: clear current active network");
 
                     } else {
-
                         String networkType = "UNKNOWN";
                         try {
                             // Limitation: a network may have both CELLULAR
@@ -1637,39 +1201,45 @@ public class PsiphonTunnel {
                             // mimics the type determination logic in
                             // getNetworkID.
                             NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
-                            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-                                networkType = "VPN";
-                            } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-                                networkType = "MOBILE";
-                            } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                                networkType = "WIFI";
+                            if (capabilities != null) {
+                                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                                    networkType = "VPN";
+                                } else if (capabilities.hasTransport(
+                                        NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                                    networkType = "MOBILE";
+                                } else if (capabilities.hasTransport(
+                                        NetworkCapabilities.TRANSPORT_WIFI)) {
+                                    networkType = "WIFI";
+                                }
                             }
                         } catch (java.lang.Exception e) {
                         }
-                        mPsiphonTunnel.mActiveNetworkType.set(networkType);
+                        INSTANCE.mActiveNetworkType.set(networkType);
 
-                        ArrayList<String> servers = new ArrayList<String>();
+                        ArrayList<String> servers = new ArrayList<>();
                         try {
                             LinkProperties linkProperties = connectivityManager.getLinkProperties(network);
-                            List<InetAddress> serverAddresses = linkProperties.getDnsServers();
-                            for (InetAddress serverAddress : serverAddresses) {
-                                String server = serverAddress.toString();
-                                if (server.startsWith("/")) {
-                                    server = server.substring(1);
+                            if (linkProperties != null) {
+                                List<InetAddress> serverAddresses = linkProperties.getDnsServers();
+                                for (InetAddress serverAddress : serverAddresses) {
+                                    String server = serverAddress.toString();
+                                    if (server.startsWith("/")) {
+                                        server = server.substring(1);
+                                    }
+                                    servers.add(server);
                                 }
-                                servers.add(server);
                             }
-                        } catch (java.lang.Exception e) {
+                        } catch (java.lang.Exception ignored) {
                         }
                         // Use the workaround, comma-delimited format required for gobind.
-                        mPsiphonTunnel.mActiveNetworkDNSServers.set(TextUtils.join(",", servers));
+                        INSTANCE.mActiveNetworkDNSServers.set(TextUtils.join(",", servers));
 
                         String message = "NetworkMonitor: set current active network " + networkType;
                         if (!servers.isEmpty()) {
                             // The DNS server address is potential PII and not logged.
                             message += " with DNS";
                         }
-                        mPsiphonTunnel.mHostService.onDiagnosticMessage(message);
+                        INSTANCE.mHostService.onDiagnosticMessage(message);
                     }
                     setNetworkPropertiesCountDownLatch.countDown();
                 }
@@ -1717,7 +1287,7 @@ public class PsiphonTunnel {
                         // Indicates that this network should be able to reach the internet.
                         .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
 
-                if (mPsiphonTunnel.mVpnMode.get()) {
+                if (INSTANCE.mVpnMode.get()) {
                     // If we are in the VPN mode then ensure we monitor only the VPN's underlying
                     // active networks and not self.
                     builder.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
