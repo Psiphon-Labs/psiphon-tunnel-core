@@ -117,7 +117,6 @@ public class PsiphonTunnel {
          * @param region The server region received.
          */
         default void onConnectedServerRegion(String region) {}
-        default void onIsTcs(boolean isTcs) {}
         default void onExiting() {}
     }
 
@@ -855,8 +854,7 @@ public class PsiphonTunnel {
             } else if (noticeType.equals("Exiting")) {
                 mHostService.onExiting();
             } else if (noticeType.equals("ActiveTunnel")) {
-                mHostService.onIsTcs(notice.getJSONObject("data").getBoolean("isTCS"));
-                // Also report the tunnel's egress region to the host service
+                // Report the tunnel's egress region to the host service
                 mHostService.onConnectedServerRegion(
                         notice.getJSONObject("data").getString("serverRegion"));
             } else if (noticeType.equals("ApplicationParameters")) {
