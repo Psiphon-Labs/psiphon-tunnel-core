@@ -1462,14 +1462,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			case "Untunneled":
 				sendNotificationReceived(untunneledPortForward)
 
-			case "InproxyProxyActivity":
+			case "InproxyProxyTotalActivity":
 
 				// This assumes that both non-zero bytes up and down are
 				// reported in at least same notice, although there's some
 				// unlikely chance it's only one or the other.
 				connectedClients := int(payload["connectedClients"].(float64))
-				bytesUp := int(payload["bytesUp"].(float64))
-				bytesDown := int(payload["bytesDown"].(float64))
+				bytesUp := int(payload["totalBytesUp"].(float64))
+				bytesDown := int(payload["totalBytesDown"].(float64))
 				if connectedClients == 1 && bytesUp > 0 && bytesDown > 0 {
 					sendNotificationReceived(inproxyActivity)
 				}

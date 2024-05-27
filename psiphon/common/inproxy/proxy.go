@@ -62,8 +62,9 @@ type Proxy struct {
 	networkDiscoveryRunOnce   bool
 	networkDiscoveryNetworkID string
 
-	nextAnnounceMutex sync.Mutex
-	nextAnnounceTime  time.Time
+	nextAnnounceMutex        sync.Mutex
+	nextAnnounceBrokerClient *BrokerClient
+	nextAnnounceNotBefore    time.Time
 }
 
 // TODO: add PublicNetworkAddress/ListenNetworkAddress to facilitate manually
@@ -441,6 +442,7 @@ func (p *Proxy) doNetworkDiscovery(
 	}()
 	waitGroup.Wait()
 
+	p.networkDiscoveryRunOnce = true
 	p.networkDiscoveryNetworkID = networkID
 }
 
@@ -543,17 +545,24 @@ func (p *Proxy) proxyOneClient(
 	announceDelay, announceDelayJitter := p.getAnnounceDelayParameters()
 	p.nextAnnounceMutex.Lock()
 	delay := prng.JitterDuration(announceDelay, announceDelayJitter)
-	if p.nextAnnounceTime.IsZero() {
-		// No delay for the very first announce request.
-		p.nextAnnounceTime = time.Now().Add(delay)
-
+	if p.nextAnnounceBrokerClient != brokerClient {
+		// Reset the delay when the broker client changes.
+		p.nextAnnounceNotBefore = time.Time{}
+		p.nextAnnounceBrokerClient = brokerClient
+	}
+	if p.nextAnnounceNotBefore.IsZero() {
+		p.nextAnnounceNotBefore = time.Now().Add(delay)
+		// No delay for the very first announce request, so leave
+		// announceRequestDelay set to 0.
 	} else {
-		announceRequestDelay = time.Until(p.nextAnnounceTime)
+		announceRequestDelay = time.Until(p.nextAnnounceNotBefore)
 		if announceRequestDelay < 0 {
-			p.nextAnnounceTime = time.Now().Add(delay)
+			// This announce did not arrive until after the next delay already
+			// passed, so proceed with no delay.
+			p.nextAnnounceNotBefore = time.Now().Add(delay)
 			announceRequestDelay = 0
 		} else {
-			p.nextAnnounceTime = p.nextAnnounceTime.Add(delay)
+			p.nextAnnounceNotBefore = p.nextAnnounceNotBefore.Add(delay)
 		}
 	}
 	p.nextAnnounceMutex.Unlock()

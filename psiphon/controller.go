@@ -2583,6 +2583,43 @@ func (controller *Controller) runInproxyProxy() {
 	// and formatting when debug logging is off.
 	debugLogging := controller.config.InproxyEnableWebRTCDebugLogging
 
+	activityNoticePeriod := p.Duration(parameters.InproxyProxyTotalActivityNoticePeriod)
+	var lastActivityNotice time.Time
+	var lastActivityConnectingClients, lastActivityConnectedClients int32
+	var activityTotalBytesUp, activityTotalBytesDown int64
+	activityUpdater := func(
+		connectingClients int32,
+		connectedClients int32,
+		bytesUp int64,
+		bytesDown int64,
+		_ time.Duration) {
+
+		// This emit logic mirrors the logic for NoticeBytesTransferred and
+		// NoticeTotalBytesTransferred in tunnel.operateTunnel.
+
+		if controller.config.EmitInproxyProxyActivity &&
+			(bytesUp > 0 || bytesDown > 0) {
+
+			NoticeInproxyProxyActivity(
+				connectingClients, connectedClients, bytesUp, bytesDown)
+		}
+
+		activityTotalBytesUp += bytesUp
+		activityTotalBytesDown += bytesDown
+
+		if lastActivityNotice.Add(activityNoticePeriod).Before(time.Now()) ||
+			connectingClients != lastActivityConnectingClients ||
+			connectedClients != lastActivityConnectedClients {
+
+			NoticeInproxyProxyTotalActivity(
+				connectingClients, connectedClients,
+				activityTotalBytesUp, activityTotalBytesDown)
+			lastActivityNotice = time.Now()
+		}
+		lastActivityConnectingClients = connectingClients
+		lastActivityConnectedClients = connectedClients
+	}
+
 	config := &inproxy.ProxyConfig{
 		Logger:                        NoticeCommonLogger(debugLogging),
 		EnableWebRTCDebugLogging:      debugLogging,
@@ -2599,14 +2636,7 @@ func (controller *Controller) runInproxyProxy() {
 			NoticeInproxyOperatorMessage(messageJSON)
 		},
 
-		ActivityUpdater: func(
-			connectingClients int32,
-			connectedClients int32,
-			bytesUp int64,
-			bytesDown int64,
-			bytesDuration time.Duration) {
-			NoticeInproxyProxyActivity(connectingClients, connectedClients, bytesUp, bytesDown, bytesDuration)
-		},
+		ActivityUpdater: activityUpdater,
 	}
 
 	proxy, err := inproxy.NewProxy(config)
@@ -2619,6 +2649,11 @@ func (controller *Controller) runInproxyProxy() {
 	NoticeInfo("inproxy proxy: running")
 
 	proxy.Run(controller.runCtx)
+
+	// Emit one last NoticeInproxyProxyTotalActivity with the final byte counts.
+	NoticeInproxyProxyTotalActivity(
+		lastActivityConnectingClients, lastActivityConnectedClients,
+		activityTotalBytesUp, activityTotalBytesDown)
 
 	NoticeInfo("inproxy proxy: stopped")
 }

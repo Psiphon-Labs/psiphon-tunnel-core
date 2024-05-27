@@ -1092,20 +1092,39 @@ func NoticeInproxyOperatorMessage(messageJSON string) {
 
 // NoticeInproxyProxyActivity reports proxy usage statistics. The stats are
 // for activity since the last NoticeInproxyProxyActivity report.
+//
+// This is not a diagnostic notice: the user app has requested this notice
+// with EmitproxyActivity for functionality such as traffic display; and this
+// frequent notice is not intended to be included with feedback.
 func NoticeInproxyProxyActivity(
 	connectingClients int32,
 	connectedClients int32,
 	bytesUp int64,
-	bytesDown int64,
-	bytesDuration time.Duration) {
+	bytesDown int64) {
 
 	singletonNoticeLogger.outputNotice(
 		"InproxyProxyActivity", noticeIsDiagnostic,
 		"connectingClients", connectingClients,
 		"connectedClients", connectedClients,
 		"bytesUp", bytesUp,
-		"bytesDown", bytesDown,
-		"bytesDuration", bytesDuration)
+		"bytesDown", bytesDown)
+}
+
+// NoticeInproxyProxyTotalActivity reports how many proxied bytes have been
+// transferred in total up to this point; in addition to current connection
+// status. This is a diagnostic notice.
+func NoticeInproxyProxyTotalActivity(
+	connectingClients int32,
+	connectedClients int32,
+	totalBytesUp int64,
+	totalBytesDown int64) {
+
+	singletonNoticeLogger.outputNotice(
+		"InproxyProxyTotalActivity", noticeIsDiagnostic,
+		"connectingClients", connectingClients,
+		"connectedClients", connectedClients,
+		"totalBytesUp", totalBytesUp,
+		"totalBytesDown", totalBytesDown)
 }
 
 type repetitiveNoticeState struct {

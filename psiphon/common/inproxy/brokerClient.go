@@ -116,7 +116,9 @@ func (b *BrokerClient) ProxyAnnounce(
 
 	// Increase the timeout to account for requestDelay, which is applied
 	// before the actual network round trip.
-	timeout += requestDelay
+	if requestDelay > 0 {
+		timeout += requestDelay
+	}
 
 	requestCtx, requestCancelFunc := context.WithTimeout(ctx, timeout)
 	defer requestCancelFunc()

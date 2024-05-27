@@ -423,6 +423,7 @@ const (
 	InproxyClientWebRTCAwaitDataChannelTimeout         = "InproxyClientWebRTCAwaitDataChannelTimeout"
 	InproxyProxyDestinationDialTimeout                 = "InproxyProxyDestinationDialTimeout"
 	InproxyPsiphonAPIRequestTimeout                    = "InproxyPsiphonAPIRequestTimeout"
+	InproxyProxyTotalActivityNoticePeriod              = "InproxyProxyTotalActivityNoticePeriod"
 
 	// Retired parameters
 
@@ -876,12 +877,12 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerPendingServerRequestsTTL:              {value: 60 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyProxyAnnounceRequestTimeout:                 {value: 2*time.Minute + 10*time.Second, minimum: time.Duration(0)},
-	InproxyProxyAnnounceDelay:                          {value: 1 * time.Second, minimum: time.Duration(0)},
+	InproxyProxyAnnounceDelay:                          {value: 100 * time.Millisecond, minimum: time.Duration(0)},
 	InproxyProxyAnnounceDelayJitter:                    {value: 0.5, minimum: 0.0},
 	InproxyProxyAnswerRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
-	InproxyClientOfferRetryDelay:                       {value: 1 * time.Second, minimum: time.Duration(0)},
-	InproxyClientOfferRetryJitter:                      {value: 0.3, minimum: 0.0},
+	InproxyClientOfferRetryDelay:                       {value: 100 * time.Millisecond, minimum: time.Duration(0)},
+	InproxyClientOfferRetryJitter:                      {value: 0.5, minimum: 0.0},
 	InproxyClientRelayedPacketRequestTimeout:           {value: 10 * time.Second, minimum: time.Duration(0)},
 	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
@@ -904,6 +905,7 @@ var defaultParameters = map[string]struct {
 	InproxyClientWebRTCAwaitDataChannelTimeout:         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyDestinationDialTimeout:                 {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyPsiphonAPIRequestTimeout:                    {value: 10 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	InproxyProxyTotalActivityNoticePeriod:              {value: 5 * time.Minute, minimum: 1 * time.Second},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

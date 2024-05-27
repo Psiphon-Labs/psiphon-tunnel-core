@@ -169,7 +169,7 @@ func DialClient(
 		// fail, WebRTCDialCoordinator STUNServerAddressFailed will be
 		// invoked, giving the Psiphon client an opportunity to select new
 		// STUN server parameter -- although, in this failure case, the
-		// WebRTC connection attemp can succeed with other ICE candidates or
+		// WebRTC connection attempt can succeed with other ICE candidates or
 		// no ICE candidates.
 
 		err := ctx.Err()

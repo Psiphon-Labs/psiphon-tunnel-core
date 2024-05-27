@@ -484,7 +484,7 @@ type Config struct {
 	// distributed or displayed to users. Default is off.
 	EmitDiagnosticNetworkParameters bool
 
-	// EmitBytesTransferred indicates whether to emit periodic notices showing
+	// EmitBytesTransferred indicates whether to emit frequent notices showing
 	// bytes sent and received.
 	EmitBytesTransferred bool
 
@@ -658,6 +658,10 @@ type Config struct {
 	// only in-proxy protocols, ensuring that all connections go through the
 	// proxy or proxies with the same personal compartment IDs.
 	InproxyClientPersonalCompartmentIDs []string
+
+	// EmitInproxyProxyActivity indicates whether to emit frequent notices
+	// showing proxy connection information and bytes transferred.
+	EmitInproxyProxyActivity bool
 
 	//
 	// The following parameters are deprecated.
@@ -993,8 +997,10 @@ type Config struct {
 	InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds *int
 	InproxyProxyDestinationDialTimeoutMilliseconds         *int
 	InproxyPsiphonAPIRequestTimeoutMilliseconds            *int
-	InproxySkipAwaitFullyConnected                         bool
-	InproxyEnableWebRTCDebugLogging                        bool
+	InproxyProxyTotalActivityNoticePeriodMilliseconds      *int
+
+	InproxySkipAwaitFullyConnected  bool
+	InproxyEnableWebRTCDebugLogging bool
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -2477,6 +2483,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyPsiphonAPIRequestTimeoutMilliseconds != nil {
 		applyParameters[parameters.InproxyPsiphonAPIRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyPsiphonAPIRequestTimeoutMilliseconds)
+	}
+
+	if config.InproxyProxyTotalActivityNoticePeriodMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyTotalActivityNoticePeriod] = fmt.Sprintf("%dms", *config.InproxyProxyTotalActivityNoticePeriodMilliseconds)
 	}
 
 	// When adding new config dial parameters that may override tactics, also
