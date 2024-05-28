@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,26 +77,32 @@ func runTestSessions() error {
 		return errors.Trace(err)
 	}
 
-	var preRoundTripCalls atomic.Int64
-	preRoundTrip := func(_ context.Context) {
-		preRoundTripCalls.Add(1)
-	}
-
 	initiatorSessions := NewInitiatorSessions(initiatorPrivateKey)
 
-	roundTripper := newTestSessionRoundTripper(responderSessions, &initiatorPublicKey)
-
 	waitToShareSession := true
+
+	sessionHandshakeTimeout := 100 * time.Millisecond
+	requestDelay := 1 * time.Microsecond
+	requestTimeout := 200 * time.Millisecond
+
+	roundTripper := newTestSessionRoundTripper(
+		responderSessions,
+		&initiatorPublicKey,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout)
 
 	request := roundTripper.MakeRequest()
 
 	response, err := initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
-		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout,
 		request)
 	if err != nil {
 		return errors.Trace(err)
@@ -118,10 +123,12 @@ func runTestSessions() error {
 	response, err = initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
-		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout,
 		request)
 	if err != nil {
 		return errors.Trace(err)
@@ -139,10 +146,12 @@ func runTestSessions() error {
 		_, err = initiatorSessions.RoundTrip(
 			context.Background(),
 			roundTripper,
-			preRoundTrip,
 			responderPublicKey,
 			responderRootObfuscationSecret,
 			waitToShareSession,
+			sessionHandshakeTimeout,
+			requestDelay,
+			requestTimeout,
 			roundTripper.MakeRequest())
 		if err != nil {
 			return errors.Trace(err)
@@ -156,10 +165,12 @@ func runTestSessions() error {
 	response, err = initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
-		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout,
 		request)
 	if err != nil {
 		return errors.Trace(err)
@@ -176,7 +187,12 @@ func runTestSessions() error {
 
 	initiatorSessions = NewInitiatorSessions(initiatorPrivateKey)
 
-	failingRoundTripper := newTestSessionRoundTripper(nil, &initiatorPublicKey)
+	failingRoundTripper := newTestSessionRoundTripper(
+		nil,
+		&initiatorPublicKey,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout)
 
 	roundTripCount := 100
 
@@ -189,10 +205,12 @@ func runTestSessions() error {
 			_, err := initiatorSessions.RoundTrip(
 				context.Background(),
 				failingRoundTripper,
-				preRoundTrip,
 				responderPublicKey,
 				responderRootObfuscationSecret,
 				waitToShareSession,
+				sessionHandshakeTimeout,
+				requestDelay,
+				requestTimeout,
 				roundTripper.MakeRequest())
 			results <- err
 		}()
@@ -224,17 +242,24 @@ func runTestSessions() error {
 		return errors.Trace(err)
 	}
 
-	roundTripper = newTestSessionRoundTripper(responderSessions, &initiatorPublicKey)
+	roundTripper = newTestSessionRoundTripper(
+		responderSessions,
+		&initiatorPublicKey,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout)
 
 	request = roundTripper.MakeRequest()
 
 	response, err = initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
-		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout,
 		request)
 	if err != nil {
 		return errors.Trace(err)
@@ -258,17 +283,24 @@ func runTestSessions() error {
 
 	responderSessions.SetKnownInitiatorPublicKeys([]SessionPublicKey{initiatorPublicKey})
 
-	roundTripper = newTestSessionRoundTripper(responderSessions, &initiatorPublicKey)
+	roundTripper = newTestSessionRoundTripper(
+		responderSessions,
+		&initiatorPublicKey,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout)
 
 	request = roundTripper.MakeRequest()
 
 	response, err = initiatorSessions.RoundTrip(
 		context.Background(),
 		roundTripper,
-		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout,
 		request)
 	if err != nil {
 		return errors.Trace(err)
@@ -318,10 +350,12 @@ func runTestSessions() error {
 	response, err = unknownInitiatorSessions.RoundTrip(
 		ctx,
 		roundTripper,
-		preRoundTrip,
 		responderPublicKey,
 		responderRootObfuscationSecret,
 		waitToShareSession,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout,
 		request)
 	if err == nil || !strings.HasSuffix(err.Error(), "unexpected initiator public key") {
 		return errors.Tracef("unexpected result: %v", err)
@@ -335,7 +369,12 @@ func runTestSessions() error {
 		return errors.Trace(err)
 	}
 
-	roundTripper = newTestSessionRoundTripper(responderSessions, nil)
+	roundTripper = newTestSessionRoundTripper(
+		responderSessions,
+		nil,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout)
 
 	clientCount := 10000
 	requestCount := 100
@@ -379,10 +418,12 @@ func runTestSessions() error {
 						response, err := initiatorSessions.RoundTrip(
 							context.Background(),
 							roundTripper,
-							preRoundTrip,
 							responderPublicKey,
 							responderRootObfuscationSecret,
 							waitToShareSession,
+							sessionHandshakeTimeout,
+							requestDelay,
+							requestTimeout,
 							request)
 						if err != nil {
 							requestResultChan <- errors.Trace(err)
@@ -418,25 +459,30 @@ func runTestSessions() error {
 		}
 	}
 
-	if preRoundTripCalls.Load() < int64(clientCount*requestCount) {
-		return errors.TraceNew("unexpected pre-round trip call count")
-	}
-
 	return nil
 }
 
 type testSessionRoundTripper struct {
-	sessions              *ResponderSessions
-	expectedPeerPublicKey *SessionPublicKey
+	sessions                        *ResponderSessions
+	expectedPeerPublicKey           *SessionPublicKey
+	expectedSessionHandshakeTimeout time.Duration
+	expectedRequestDelay            time.Duration
+	expectedRequestTimeout          time.Duration
 }
 
 func newTestSessionRoundTripper(
 	sessions *ResponderSessions,
-	expectedPeerPublicKey *SessionPublicKey) *testSessionRoundTripper {
+	expectedPeerPublicKey *SessionPublicKey,
+	expectedSessionHandshakeTimeout time.Duration,
+	expectedRequestDelay time.Duration,
+	expectedRequestTimeout time.Duration) *testSessionRoundTripper {
 
 	return &testSessionRoundTripper{
-		sessions:              sessions,
-		expectedPeerPublicKey: expectedPeerPublicKey,
+		sessions:                        sessions,
+		expectedPeerPublicKey:           expectedPeerPublicKey,
+		expectedSessionHandshakeTimeout: expectedSessionHandshakeTimeout,
+		expectedRequestDelay:            expectedRequestDelay,
+		expectedRequestTimeout:          expectedRequestTimeout,
 	}
 }
 
@@ -455,7 +501,8 @@ func (t *testSessionRoundTripper) ExpectedResponse(requestPayload []byte) []byte
 
 func (t *testSessionRoundTripper) RoundTrip(
 	ctx context.Context,
-	preRoundTrip PreRoundTripCallback,
+	roundTripDelay time.Duration,
+	roundTripTimeout time.Duration,
 	requestPayload []byte) ([]byte, error) {
 
 	err := ctx.Err()
@@ -467,9 +514,14 @@ func (t *testSessionRoundTripper) RoundTrip(
 		return nil, errors.TraceNew("closed")
 	}
 
-	if preRoundTrip != nil {
-		preRoundTrip(ctx)
+	if roundTripDelay > 0 {
+		common.SleepWithContext(ctx, roundTripDelay)
 	}
+
+	_, requestCancelFunc := context.WithTimeout(ctx, roundTripTimeout)
+	defer requestCancelFunc()
+
+	isRequestRoundTrip := false
 
 	unwrappedRequestHandler := func(initiatorID ID, unwrappedRequest []byte) ([]byte, error) {
 
@@ -485,6 +537,8 @@ func (t *testSessionRoundTripper) RoundTrip(
 			}
 		}
 
+		isRequestRoundTrip = true
+
 		return t.ExpectedResponse(unwrappedRequest), nil
 	}
 
@@ -496,7 +550,27 @@ func (t *testSessionRoundTripper) RoundTrip(
 			fmt.Printf("HandlePacket returned packet and error: %v\n", err)
 			// Continue to relay packets
 		}
+	} else {
+
+		// Handshake round trips and request payload round trips should have the
+		// appropriate delays/timeouts.
+		if isRequestRoundTrip {
+			if roundTripDelay != t.expectedRequestDelay {
+				return nil, errors.TraceNew("unexpected round trip delay")
+			}
+			if roundTripTimeout != t.expectedRequestTimeout {
+				return nil, errors.TraceNew("unexpected round trip timeout")
+			}
+		} else {
+			if roundTripDelay != time.Duration(0) {
+				return nil, errors.TraceNew("unexpected round trip delay")
+			}
+			if roundTripTimeout != t.expectedSessionHandshakeTimeout {
+				return nil, errors.TraceNew("unexpected round trip timeout")
+			}
+		}
 	}
+
 	return responsePayload, nil
 }
 

@@ -205,6 +205,7 @@ type InproxyBrokerClientInstance struct {
 	roundTripper                  *InproxyBrokerRoundTripper
 	personalCompartmentIDs        []inproxy.ID
 	commonCompartmentIDs          []inproxy.ID
+	sessionHandshakeTimeout       time.Duration
 	announceRequestTimeout        time.Duration
 	announceDelay                 time.Duration
 	announceDelayJitter           float64
@@ -366,6 +367,7 @@ func NewInproxyBrokerClientInstance(
 		personalCompartmentIDs:      personalCompartmentIDs,
 		commonCompartmentIDs:        commonCompartmentIDs,
 
+		sessionHandshakeTimeout:       p.Duration(parameters.InproxySessionHandshakeRoundTripTimeout),
 		announceRequestTimeout:        p.Duration(parameters.InproxyProxyAnnounceRequestTimeout),
 		announceDelay:                 p.Duration(parameters.InproxyProxyAnnounceDelay),
 		announceDelayJitter:           p.Float(parameters.InproxyProxyAnnounceDelayJitter),
@@ -665,6 +667,11 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 // Implements the inproxy.BrokerDialCoordinator interface.
 func (b *InproxyBrokerClientInstance) AnnounceRequestTimeout() time.Duration {
 	return b.announceRequestTimeout
+}
+
+// Implements the inproxy.BrokerDialCoordinator interface.
+func (b *InproxyBrokerClientInstance) SessionHandshakeRoundTripTimeout() time.Duration {
+	return b.sessionHandshakeTimeout
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.
@@ -1220,7 +1227,8 @@ func (rt *InproxyBrokerRoundTripper) Close() error {
 // response.
 func (rt *InproxyBrokerRoundTripper) RoundTrip(
 	ctx context.Context,
-	preRoundTrip inproxy.PreRoundTripCallback,
+	roundTripDelay time.Duration,
+	roundTripTimeout time.Duration,
 	requestPayload []byte) (_ []byte, retErr error) {
 
 	defer func() {
@@ -1237,11 +1245,28 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 	ctx, cancelFunc := common.MergeContextCancel(ctx, rt.runCtx)
 	defer cancelFunc()
 
-	// Invoke the pre-round trip callback. Currently, this callback is used to
-	// apply an announce request delay post-waitToShareSession, pre-network
-	// round trip, and cancelable by the above merged context.
-	if preRoundTrip != nil {
-		preRoundTrip(ctx)
+	// Apply any round trip delay. Currently, this is used to apply an
+	// announce request delay post-waitToShareSession, pre-network round
+	// trip, and cancelable by the above merged context.
+	if roundTripDelay > 0 {
+		common.SleepWithContext(ctx, roundTripDelay)
+	}
+
+	// Apply the round trip timeout after any delay is complete.
+	//
+	// This timeout includes any TLS handshake network round trips, as
+	// performed by the initial DialMeek and may be performed subsequently by
+	// net/http via MeekConn.RoundTrip. These extra round trips should be
+	// accounted for in the in the difference between client-side request
+	// timeouts, such as InproxyProxyAnswerRequestTimeout, and broker-side
+	// handler timeouts, such as InproxyBrokerProxyAnnounceTimeout, with the
+	// former allowing more time for network round trips.
+
+	requestCtx := ctx
+	if roundTripTimeout > 0 {
+		var requestCancelFunc context.CancelFunc
+		requestCtx, requestCancelFunc = context.WithTimeout(ctx, roundTripTimeout)
+		defer requestCancelFunc()
 	}
 
 	// The first RoundTrip caller will perform the DialMeek step, which
@@ -1268,7 +1293,7 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 		// DialMeek hasn't been called yet.
 
 		conn, err := DialMeek(
-			ctx,
+			requestCtx,
 			rt.brokerDialParams.meekConfig,
 			rt.brokerDialParams.dialConfig)
 
@@ -1321,7 +1346,7 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 		inproxy.BrokerEndPointName)
 
 	request, err := http.NewRequestWithContext(
-		ctx, "POST", url, bytes.NewBuffer(requestPayload))
+		requestCtx, "POST", url, bytes.NewBuffer(requestPayload))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

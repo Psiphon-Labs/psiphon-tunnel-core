@@ -541,28 +541,28 @@ func (p *Proxy) proxyOneClient(
 	// will also extend the base request timeout, as required, to account for
 	// any deliberate delay.
 
-	announceRequestDelay := time.Duration(0)
+	requestDelay := time.Duration(0)
 	announceDelay, announceDelayJitter := p.getAnnounceDelayParameters()
 	p.nextAnnounceMutex.Lock()
-	delay := prng.JitterDuration(announceDelay, announceDelayJitter)
+	nextDelay := prng.JitterDuration(announceDelay, announceDelayJitter)
 	if p.nextAnnounceBrokerClient != brokerClient {
 		// Reset the delay when the broker client changes.
 		p.nextAnnounceNotBefore = time.Time{}
 		p.nextAnnounceBrokerClient = brokerClient
 	}
 	if p.nextAnnounceNotBefore.IsZero() {
-		p.nextAnnounceNotBefore = time.Now().Add(delay)
+		p.nextAnnounceNotBefore = time.Now().Add(nextDelay)
 		// No delay for the very first announce request, so leave
 		// announceRequestDelay set to 0.
 	} else {
-		announceRequestDelay = time.Until(p.nextAnnounceNotBefore)
-		if announceRequestDelay < 0 {
+		requestDelay = time.Until(p.nextAnnounceNotBefore)
+		if requestDelay < 0 {
 			// This announce did not arrive until after the next delay already
 			// passed, so proceed with no delay.
-			p.nextAnnounceNotBefore = time.Now().Add(delay)
-			announceRequestDelay = 0
+			p.nextAnnounceNotBefore = time.Now().Add(nextDelay)
+			requestDelay = 0
 		} else {
-			p.nextAnnounceNotBefore = p.nextAnnounceNotBefore.Add(delay)
+			p.nextAnnounceNotBefore = p.nextAnnounceNotBefore.Add(nextDelay)
 		}
 	}
 	p.nextAnnounceMutex.Unlock()
@@ -574,7 +574,7 @@ func (p *Proxy) proxyOneClient(
 	// long-polling.
 	announceResponse, err := brokerClient.ProxyAnnounce(
 		ctx,
-		announceRequestDelay,
+		requestDelay,
 		&ProxyAnnounceRequest{
 			PersonalCompartmentIDs: brokerCoordinator.PersonalCompartmentIDs(),
 			Metrics:                metrics,
@@ -608,14 +608,24 @@ func (p *Proxy) proxyOneClient(
 		signalAnnounceDone()
 	}
 
-	if announceResponse.NoMatch {
-		return backOff, errors.TraceNew("no match")
-	}
+	// Trigger back-off back off when rate/entry limited or when the proxy
+	// protocols is incompatible; no back-off for no-match.
 
-	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
+	if announceResponse.Limited {
+
+		backOff = true
+		return backOff, errors.TraceNew("limited")
+
+	} else if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
+
+		backOff = true
 		return backOff, errors.Tracef(
 			"Unsupported proxy protocol version: %d",
 			announceResponse.ClientProxyProtocolVersion)
+
+	} else if announceResponse.NoMatch {
+
+		return backOff, errors.TraceNew("no match")
 	}
 
 	// Trigger back-off if the following WebRTC operations fail to establish a

@@ -31,6 +31,7 @@ import (
 // Timeouts should be aligned with Broker timeouts.
 
 const (
+	sessionHandshakeRoundTripTimeout  = 10 * time.Second
 	proxyAnnounceRequestTimeout       = 2 * time.Minute
 	proxyAnswerRequestTimeout         = 10 * time.Second
 	clientOfferRequestTimeout         = 10 * time.Second
@@ -110,20 +111,12 @@ func (b *BrokerClient) ProxyAnnounce(
 		return nil, errors.Trace(err)
 	}
 
-	timeout := common.ValueOrDefault(
+	requestTimeout := common.ValueOrDefault(
 		b.coordinator.AnnounceRequestTimeout(),
 		proxyAnnounceRequestTimeout)
 
-	// Increase the timeout to account for requestDelay, which is applied
-	// before the actual network round trip.
-	if requestDelay > 0 {
-		timeout += requestDelay
-	}
-
-	requestCtx, requestCancelFunc := context.WithTimeout(ctx, timeout)
-	defer requestCancelFunc()
-
-	responsePayload, err := b.roundTrip(requestCtx, requestDelay, requestPayload)
+	responsePayload, err := b.roundTrip(
+		ctx, requestDelay, requestTimeout, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -146,13 +139,12 @@ func (b *BrokerClient) ClientOffer(
 		return nil, errors.Trace(err)
 	}
 
-	requestCtx, requestCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(
-			b.coordinator.OfferRequestTimeout(),
-			clientOfferRequestTimeout))
-	defer requestCancelFunc()
+	requestTimeout := common.ValueOrDefault(
+		b.coordinator.OfferRequestTimeout(),
+		clientOfferRequestTimeout)
 
-	responsePayload, err := b.roundTrip(requestCtx, 0, requestPayload)
+	responsePayload, err := b.roundTrip(
+		ctx, 0, requestTimeout, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -175,13 +167,12 @@ func (b *BrokerClient) ProxyAnswer(
 		return nil, errors.Trace(err)
 	}
 
-	requestCtx, requestCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(
-			b.coordinator.AnswerRequestTimeout(),
-			proxyAnswerRequestTimeout))
-	defer requestCancelFunc()
+	requestTimeout := common.ValueOrDefault(
+		b.coordinator.AnswerRequestTimeout(),
+		proxyAnswerRequestTimeout)
 
-	responsePayload, err := b.roundTrip(requestCtx, 0, requestPayload)
+	responsePayload, err := b.roundTrip(
+		ctx, 0, requestTimeout, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -205,13 +196,12 @@ func (b *BrokerClient) ClientRelayedPacket(
 		return nil, errors.Trace(err)
 	}
 
-	requestCtx, requestCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(
-			b.coordinator.RelayedPacketRequestTimeout(),
-			clientRelayedPacketRequestTimeout))
-	defer requestCancelFunc()
+	requestTimeout := common.ValueOrDefault(
+		b.coordinator.RelayedPacketRequestTimeout(),
+		clientRelayedPacketRequestTimeout)
 
-	responsePayload, err := b.roundTrip(requestCtx, 0, requestPayload)
+	responsePayload, err := b.roundTrip(
+		ctx, 0, requestTimeout, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -227,6 +217,7 @@ func (b *BrokerClient) ClientRelayedPacket(
 func (b *BrokerClient) roundTrip(
 	ctx context.Context,
 	requestDelay time.Duration,
+	requestTimeout time.Duration,
 	request []byte) ([]byte, error) {
 
 	// The round tripper may need to establish a transport-level connection;
@@ -260,35 +251,29 @@ func (b *BrokerClient) roundTrip(
 	// request/response association, the application-level request and
 	// response are tagged with a RoundTripID which is checked to ensure the
 	// association is maintained.
-
-	var preRoundTrip func(context.Context)
-	if requestDelay > 0 {
-
-		// Use the pre-round trip callback apply the requestDelay _after_ any
-		// waitToShareSession delay, otherwise any waitToShareSession may
-		// collapse staggered requests back together.
-		//
-		// The context passed to preRoundTrip should cancel the delay both in
-		// the case where the request is canceled and and in the case where
-		// the round tripper is closed.
-		//
-		// It's assumed that the caller has adjusted the ctx deadline to
-		// account for requestDelay.
-
-		preRoundTrip = func(ctx context.Context) {
-			common.SleepWithContext(ctx, requestDelay)
-		}
-	}
+	//
+	// InitiatorSessions.RoundTrip will apply sessionHandshakeTimeout to any
+	// round trips required for Noise session handshakes; apply requestDelay
+	// before the application-level request round trip; and apply
+	// requestTimeout to the network round trip following the delay, if any.
+	// Any time spent blocking on waitToShareSession is not included in
+	// requestDelay or requestTimeout.
 
 	waitToShareSession := true
+
+	sessionHandshakeTimeout := common.ValueOrDefault(
+		b.coordinator.SessionHandshakeRoundTripTimeout(),
+		sessionHandshakeRoundTripTimeout)
 
 	response, err := b.sessions.RoundTrip(
 		ctx,
 		roundTripper,
-		preRoundTrip,
 		b.coordinator.BrokerPublicKey(),
 		b.coordinator.BrokerRootObfuscationSecret(),
 		waitToShareSession,
+		sessionHandshakeTimeout,
+		requestDelay,
+		requestTimeout,
 		request)
 	if err != nil {
 

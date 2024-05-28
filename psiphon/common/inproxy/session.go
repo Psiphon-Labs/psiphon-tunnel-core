@@ -276,14 +276,32 @@ func NewInitiatorSessions(
 // When waitToShareSession is true, RoundTrip will block until an existing,
 // non-established session is available to be shared.
 //
+// When making initial network round trips to establish a session,
+// sessionHandshakeTimeout is applied as the round trip timeout.
+//
+// When making the application-level request round trip, requestDelay, when >
+// 0, is applied before the request network round trip begins; requestDelay
+// may be used to spread out many concurrent requests, such as batch proxy
+// announcements, to avoid CDN rate limits.
+//
+// requestTimeout is applied to the application-level request network round
+// trip, and excludes any requestDelay; the distinct requestTimeout may be
+// used to set a longer timeout for long-polling requests, such as proxy
+// announcements.
+//
+// Any time spent blocking on waitToShareSession is not included in
+// requestDelay or requestTimeout.
+//
 // RoundTrip returns immediately when ctx becomes done.
 func (s *InitiatorSessions) RoundTrip(
 	ctx context.Context,
 	roundTripper RoundTripper,
-	preRoundTrip PreRoundTripCallback,
 	responderPublicKey SessionPublicKey,
 	responderRootObfuscationSecret ObfuscationSecret,
 	waitToShareSession bool,
+	sessionHandshakeTimeout time.Duration,
+	requestDelay time.Duration,
+	requestTimeout time.Duration,
 	request []byte) ([]byte, error) {
 
 	rt, err := s.NewRoundTrip(
@@ -297,7 +315,7 @@ func (s *InitiatorSessions) RoundTrip(
 
 	var in []byte
 	for {
-		out, err := rt.Next(ctx, in)
+		out, isRequestPacket, err := rt.Next(ctx, in)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -308,7 +326,38 @@ func (s *InitiatorSessions) RoundTrip(
 			}
 			return response, nil
 		}
-		in, err = roundTripper.RoundTrip(ctx, preRoundTrip, out)
+
+		// At this point, if sharing a session, any blocking on
+		// waitToShareSession is complete, and time elapsed in that blocking
+		// will not collapse delays or reduce timeouts. If not sharing, and
+		// establishing a new session, Noise session handshake round trips
+		// are required before the request payload round trip.
+		//
+		// Select the delay and timeout. For Noise session handshake round
+		// trips, use sessionHandshakeTimeout, which should be appropriate
+		// for a fast turn-around from the broker, and no delay. When sending
+		// the application-level request packet, use requestDelay and
+		// requestTimeout, which allows for applying a delay -- to spread out
+		// requests -- and a potentially longer timeout appropriate for a
+		// long-polling, slower turn-around from the broker.
+		//
+		// Delays and timeouts are passed down into the round tripper
+		// provider. Having the round tripper perform the delay sleep allows
+		// all delays to be interruped by any round tripper close, due to an
+		// overall broker client reset. Passing the timeout seperately, as
+		// opposed to adding to ctx, explicitly ensures that the timeout is
+		// applied only right before the network round trip and no sooner.
+
+		var delay, timeout time.Duration
+		if isRequestPacket {
+			delay = requestDelay
+			timeout = requestTimeout
+		} else {
+			// No delay for session handshake packet round trips.
+			timeout = sessionHandshakeTimeout
+		}
+
+		in, err = roundTripper.RoundTrip(ctx, delay, timeout, out)
 		if err != nil {
 
 			// There are no explicit retries here. Retrying in the case where
@@ -476,7 +525,7 @@ type InitiatorRoundTrip struct {
 // Next returns immediately when ctx becomes done.
 func (r *InitiatorRoundTrip) Next(
 	ctx context.Context,
-	receivedPacket []byte) (retSendPacket []byte, retErr error) {
+	receivedPacket []byte) (retSendPacket []byte, retIsRequestPacket bool, retErr error) {
 
 	// Note: don't clear or reset a session in the event of a bad/rejected
 	// packet as that would allow a malicious relay client to interrupt a
@@ -484,7 +533,7 @@ func (r *InitiatorRoundTrip) Next(
 	// packet and return an error.
 
 	// beginOrShareSession returns the next packet to send.
-	beginOrShareSession := func() ([]byte, error) {
+	beginOrShareSession := func() ([]byte, bool, error) {
 
 		// Check for an existing session, or create a new one if there's no
 		// existing session.
@@ -520,7 +569,7 @@ func (r *InitiatorRoundTrip) Next(
 		session, isNew, isReady, err := r.initiatorSessions.getSession(
 			r.responderPublicKey, newSession)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
 		if isNew {
@@ -576,11 +625,11 @@ func (r *InitiatorRoundTrip) Next(
 								// specified. It's expected that there will be retries by the
 								// RoundTrip caller.
 
-								return nil, errors.TraceNew("waitToShareSession failed")
+								return nil, false, errors.TraceNew("waitToShareSession failed")
 							}
 							// else, use the session
 						case <-ctx.Done():
-							return nil, errors.Trace(ctx.Err())
+							return nil, false, errors.Trace(ctx.Err())
 						}
 					}
 					r.session = session
@@ -592,7 +641,7 @@ func (r *InitiatorRoundTrip) Next(
 
 					r.session, err = newSession()
 					if err != nil {
-						return nil, errors.Trace(err)
+						return nil, false, errors.Trace(err)
 					}
 					r.sharingSession = false
 				}
@@ -606,20 +655,20 @@ func (r *InitiatorRoundTrip) Next(
 
 			sendPacket, err := r.session.sendPacket(r.requestPayload)
 			if err != nil {
-				return nil, errors.Trace(err)
+				return nil, false, errors.Trace(err)
 			}
 
-			return sendPacket, nil
+			return sendPacket, true, nil
 		}
 
 		// Begin the handshake for a new session.
 
 		_, sendPacket, _, err := r.session.nextHandshakePacket(nil)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
-		return sendPacket, nil
+		return sendPacket, false, nil
 
 	}
 
@@ -627,7 +676,7 @@ func (r *InitiatorRoundTrip) Next(
 	if ctx != nil {
 		err := ctx.Err()
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 	}
 
@@ -649,28 +698,28 @@ func (r *InitiatorRoundTrip) Next(
 		// packet from the peer is expected.
 
 		if receivedPacket != nil {
-			return nil, errors.TraceNew("unexpected received packet")
+			return nil, false, errors.TraceNew("unexpected received packet")
 		}
 
-		sendPacket, err := beginOrShareSession()
+		sendPacket, isRequestPacket, err := beginOrShareSession()
 
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
-		return sendPacket, nil
+		return sendPacket, isRequestPacket, nil
 
 	}
 
 	// Not the first Next call, so a packet from the peer is expected.
 
 	if receivedPacket == nil {
-		return nil, errors.TraceNew("missing received packet")
+		return nil, false, errors.TraceNew("missing received packet")
 	}
 
 	if r.sharingSession || r.session.isEstablished() {
 
 		// When sharing an established and ready session, or once an owned
-		// session is eastablished, the next packet is post-handshake and
+		// session is established, the next packet is post-handshake and
 		// should be the round trip request response.
 
 		// Pre-unwrap here to check for a ResetSessionToken packet.
@@ -678,7 +727,7 @@ func (r *InitiatorRoundTrip) Next(
 		sessionPacket, err := unwrapSessionPacket(
 			r.session.receiveObfuscationSecret, true, nil, receivedPacket)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
 		// Reset the session when the packet is a valid ResetSessionToken. The
@@ -698,34 +747,34 @@ func (r *InitiatorRoundTrip) Next(
 			r.initiatorSessions.removeIfSession(r.responderPublicKey, r.session)
 			r.session = nil
 
-			sendPacket, err := beginOrShareSession()
+			sendPacket, isRequestPacket, err := beginOrShareSession()
 			if err != nil {
-				return nil, errors.Trace(err)
+				return nil, false, errors.Trace(err)
 			}
-			return sendPacket, nil
+			return sendPacket, isRequestPacket, nil
 		}
 
 		responsePayload, err := r.session.receiveUnmarshaledPacket(sessionPacket)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
 		var sessionRoundTrip SessionRoundTrip
 		err = unmarshalRecord(recordTypeSessionRoundTrip, responsePayload, &sessionRoundTrip)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, false, errors.Trace(err)
 		}
 
 		// Check that the response RoundTripID matches the request RoundTripID.
 
 		if sessionRoundTrip.RoundTripID != r.roundTripID {
-			return nil, errors.TraceNew("unexpected round trip ID")
+			return nil, false, errors.TraceNew("unexpected round trip ID")
 		}
 
 		// Store the response so it can be retrieved later.
 
 		r.response = sessionRoundTrip.Payload
-		return nil, nil
+		return nil, false, nil
 	}
 
 	// Continue the handshake. Since the first payload is sent to the
@@ -737,7 +786,7 @@ func (r *InitiatorRoundTrip) Next(
 
 	isEstablished, sendPacket, _, err := r.session.nextHandshakePacket(receivedPacket)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, false, errors.Trace(err)
 	}
 
 	if isEstablished {
@@ -752,7 +801,7 @@ func (r *InitiatorRoundTrip) Next(
 		r.initiatorSessions.setSession(r.responderPublicKey, r.session)
 	}
 
-	return sendPacket, nil
+	return sendPacket, isEstablished, nil
 }
 
 // TransportFailed marks any owned, not yet ready-to-share session as failed

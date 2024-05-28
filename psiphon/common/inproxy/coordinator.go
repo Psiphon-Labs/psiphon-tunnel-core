@@ -29,18 +29,17 @@ import (
 // blocking circumvention capabilities. A typical implementation is domain
 // fronted HTTPS. RoundTripper is used by clients and proxies to make
 // requests to brokers.
+//
+// The round trip implementation must apply any specified delay before the
+// network round trip begins; and apply the specified timeout to the network
+// round trip, excluding any delay.
 type RoundTripper interface {
 	RoundTrip(
 		ctx context.Context,
-		preRoundTrip PreRoundTripCallback,
+		roundTripDelay time.Duration,
+		roundTripTimeout time.Duration,
 		requestPayload []byte) (responsePayload []byte, err error)
 }
-
-// PreRoundTripCallback is a callback that is invoked by the RoundTripper
-// immediately before the network round trip, and which takes a context that
-// will be canceled both in the case the request is canceled and in case the
-// round tripper is closed.
-type PreRoundTripCallback func(context.Context)
 
 // RoundTripperFailedError is an error type that should be returned from
 // RoundTripper.RoundTrip when the round trip transport has permanently
@@ -163,6 +162,7 @@ type BrokerDialCoordinator interface {
 	// after closing its network resources.
 	BrokerClientRoundTripperFailed(roundTripper RoundTripper)
 
+	SessionHandshakeRoundTripTimeout() time.Duration
 	AnnounceRequestTimeout() time.Duration
 	AnnounceDelay() time.Duration
 	AnnounceDelayJitter() float64

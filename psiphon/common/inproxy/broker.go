@@ -611,11 +611,14 @@ func (b *Broker) handleProxyAnnounce(
 
 		// A no-match response is sent in the case of a timeout awaiting a
 		// match. The faster-failing rate or entry limiting case also results
-		// in a no-match response, rather than an error return from
-		// handleProxyAnnounce, so that the proxy doesn't receive a 404 and
-		// flag its BrokerClient as having failed.
+		// in a response, rather than an error return from handleProxyAnnounce,
+		// so that the proxy doesn't receive a 404 and flag its BrokerClient as
+		// having failed.
+		//
+		// When the timeout and limit case coincide, limit takes precedence in
+		// the response.
 
-		if timeout {
+		if timeout && !limited {
 
 			// Note: the respective proxy and broker timeouts,
 			// InproxyBrokerProxyAnnounceTimeout and
@@ -625,7 +628,7 @@ func (b *Broker) handleProxyAnnounce(
 
 			timedOut = true
 
-		} else if limited {
+		} else {
 
 			// Record the specific limit error in the proxy-announce broker event.
 
@@ -635,7 +638,8 @@ func (b *Broker) handleProxyAnnounce(
 		responsePayload, err := MarshalProxyAnnounceResponse(
 			&ProxyAnnounceResponse{
 				TacticsPayload: tacticsPayload,
-				NoMatch:        true,
+				Limited:        limited,
+				NoMatch:        timeout && !limited,
 			})
 		if err != nil {
 			return nil, errors.Trace(err)
@@ -836,11 +840,14 @@ func (b *Broker) handleClientOffer(
 
 		// A no-match response is sent in the case of a timeout awaiting a
 		// match. The faster-failing rate or entry limiting case also results
-		// in a no-match response, rather than an error return from
-		// handleClientOffer, so that the client doesn't receive a 404 and
-		// flag its BrokerClient as having failed.
+		// in a response, rather than an error return from handleClientOffer,
+		// so that the client doesn't receive a 404 and flag its BrokerClient
+		// as having failed.
+		//
+		// When the timeout and limit case coincide, limit takes precedence in
+		// the response.
 
-		if timeout {
+		if timeout && !limited {
 
 			// Note: the respective client and broker timeouts,
 			// InproxyBrokerClientOfferTimeout and
@@ -850,7 +857,7 @@ func (b *Broker) handleClientOffer(
 
 			timedOut = true
 
-		} else if limited {
+		} else {
 
 			// Record the specific limit error in the client-offer broker event.
 
@@ -858,7 +865,10 @@ func (b *Broker) handleClientOffer(
 		}
 
 		responsePayload, err := MarshalClientOfferResponse(
-			&ClientOfferResponse{NoMatch: true})
+			&ClientOfferResponse{
+				Limited: limited,
+				NoMatch: timeout && !limited,
+			})
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1127,7 +1137,7 @@ func (b *Broker) handleClientRelayedPacket(
 
 	// Next is given a nil ctx since we're not waiting for any other client to
 	// establish the session.
-	out, err := pendingServerReport.roundTrip.Next(
+	out, _, err := pendingServerReport.roundTrip.Next(
 		nil, relayedPacketRequest.PacketFromServer)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1189,7 +1199,7 @@ func (b *Broker) initiateRelayedServerReport(
 		return nil, errors.Trace(err)
 	}
 
-	relayPacket, err := roundTrip.Next(nil, nil)
+	relayPacket, _, err := roundTrip.Next(nil, nil)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

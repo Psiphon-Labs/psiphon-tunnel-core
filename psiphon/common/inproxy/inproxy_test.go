@@ -861,17 +861,21 @@ func newHTTPRoundTripper(endpointAddr string, path string) *httpRoundTripper {
 
 func (r *httpRoundTripper) RoundTrip(
 	ctx context.Context,
-	preRoundTrip PreRoundTripCallback,
+	roundTripDelay time.Duration,
+	roundTripTimeout time.Duration,
 	requestPayload []byte) ([]byte, error) {
 
-	if preRoundTrip != nil {
-		preRoundTrip(ctx)
+	if roundTripDelay > 0 {
+		common.SleepWithContext(ctx, roundTripDelay)
 	}
+
+	requestCtx, requestCancelFunc := context.WithTimeout(ctx, roundTripTimeout)
+	defer requestCancelFunc()
 
 	url := fmt.Sprintf("https://%s/%s", r.endpointAddr, r.path)
 
 	request, err := http.NewRequestWithContext(
-		ctx, "POST", url, bytes.NewReader(requestPayload))
+		requestCtx, "POST", url, bytes.NewReader(requestPayload))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

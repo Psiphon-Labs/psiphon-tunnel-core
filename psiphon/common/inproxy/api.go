@@ -230,15 +230,16 @@ type ProxyAnnounceRequest struct {
 type ProxyAnnounceResponse struct {
 	OperatorMessageJSON         string                               `cbor:"1,keyasint,omitempty"`
 	TacticsPayload              []byte                               `cbor:"2,keyasint,omitempty"`
-	NoMatch                     bool                                 `cbor:"3,keyasint,omitempty"`
-	ConnectionID                ID                                   `cbor:"4,keyasint,omitempty"`
-	ClientProxyProtocolVersion  int32                                `cbor:"5,keyasint,omitempty"`
-	ClientOfferSDP              webrtc.SessionDescription            `cbor:"6,keyasint,omitempty"`
-	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"7,keyasint,omitempty"`
-	DoDTLSRandomization         bool                                 `cbor:"8,keyasint,omitempty"`
-	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"9,keyasint,omitempty"`
-	NetworkProtocol             NetworkProtocol                      `cbor:"10,keyasint,omitempty"`
-	DestinationAddress          string                               `cbor:"11,keyasint,omitempty"`
+	Limited                     bool                                 `cbor:"3,keyasint,omitempty"`
+	NoMatch                     bool                                 `cbor:"4,keyasint,omitempty"`
+	ConnectionID                ID                                   `cbor:"5,keyasint,omitempty"`
+	ClientProxyProtocolVersion  int32                                `cbor:"6,keyasint,omitempty"`
+	ClientOfferSDP              webrtc.SessionDescription            `cbor:"7,keyasint,omitempty"`
+	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"8,keyasint,omitempty"`
+	DoDTLSRandomization         bool                                 `cbor:"9,keyasint,omitempty"`
+	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"10,keyasint,omitempty"`
+	NetworkProtocol             NetworkProtocol                      `cbor:"11,keyasint,omitempty"`
+	DestinationAddress          string                               `cbor:"12,keyasint,omitempty"`
 }
 
 // ClientOfferRequest is an API request sent from a client to a broker,
@@ -303,11 +304,12 @@ type DataChannelTrafficShapingParameters struct {
 // ClientRelayedPacketRequests until complete. ConnectionID identifies this
 // connection and its relayed BrokerServerReport.
 type ClientOfferResponse struct {
-	NoMatch                      bool                      `cbor:"1,keyasint,omitempty"`
-	ConnectionID                 ID                        `cbor:"2,keyasint,omitempty"`
-	SelectedProxyProtocolVersion int32                     `cbor:"3,keyasint,omitempty"`
-	ProxyAnswerSDP               webrtc.SessionDescription `cbor:"4,keyasint,omitempty"`
-	RelayPacketToServer          []byte                    `cbor:"5,keyasint,omitempty"`
+	Limited                      bool                      `cbor:"1,keyasint,omitempty"`
+	NoMatch                      bool                      `cbor:"2,keyasint,omitempty"`
+	ConnectionID                 ID                        `cbor:"3,keyasint,omitempty"`
+	SelectedProxyProtocolVersion int32                     `cbor:"4,keyasint,omitempty"`
+	ProxyAnswerSDP               webrtc.SessionDescription `cbor:"5,keyasint,omitempty"`
+	RelayPacketToServer          []byte                    `cbor:"6,keyasint,omitempty"`
 }
 
 // TODO: Encode SDPs using CBOR without field names, simliar to packed metrics?
