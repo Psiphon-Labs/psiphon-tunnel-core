@@ -345,21 +345,24 @@ func dialClientWebRTCConn(
 		return nil, false, errors.Trace(err)
 	}
 
-	// No retry when rate/entry limited or when the proxy protocols is
-	// incompatible; do retry on no-match, as a match may soon appear.
+	// No retry when rate/entry limited; do retry on no-match, as a match may
+	// soon appear.
 
 	if offerResponse.Limited {
 		return nil, false, errors.TraceNew("limited")
 
-	} else if offerResponse.SelectedProxyProtocolVersion != ProxyProtocolVersion1 {
-
-		return nil, false, errors.Tracef(
-			"Unsupported proxy protocol version: %d",
-			offerResponse.SelectedProxyProtocolVersion)
-
 	} else if offerResponse.NoMatch {
 
 		return nil, true, errors.TraceNew("no proxy match")
+
+	}
+
+	if offerResponse.SelectedProxyProtocolVersion != ProxyProtocolVersion1 {
+		// This case is currently unexpected, as all clients and proxies use
+		// ProxyProtocolVersion1.
+		return nil, false, errors.Tracef(
+			"Unsupported proxy protocol version: %d",
+			offerResponse.SelectedProxyProtocolVersion)
 	}
 
 	// Establish the WebRTC DataChannel connection

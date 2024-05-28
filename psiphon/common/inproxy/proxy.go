@@ -608,24 +608,27 @@ func (p *Proxy) proxyOneClient(
 		signalAnnounceDone()
 	}
 
-	// Trigger back-off back off when rate/entry limited or when the proxy
-	// protocols is incompatible; no back-off for no-match.
+	// Trigger back-off back off when rate/entry limited; no back-off for
+	// no-match.
 
 	if announceResponse.Limited {
 
 		backOff = true
 		return backOff, errors.TraceNew("limited")
 
-	} else if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
+	} else if announceResponse.NoMatch {
 
+		return backOff, errors.TraceNew("no match")
+
+	}
+
+	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
+		// This case is currently unexpected, as all clients and proxies use
+		// ProxyProtocolVersion1.
 		backOff = true
 		return backOff, errors.Tracef(
 			"Unsupported proxy protocol version: %d",
 			announceResponse.ClientProxyProtocolVersion)
-
-	} else if announceResponse.NoMatch {
-
-		return backOff, errors.TraceNew("no match")
 	}
 
 	// Trigger back-off if the following WebRTC operations fail to establish a
