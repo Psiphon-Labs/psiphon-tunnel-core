@@ -53,6 +53,7 @@ const (
 	dataChannelBufferedAmountLowThreshold uint64 = 512 * 1024
 	dataChannelMaxBufferedAmount          uint64 = 1024 * 1024
 	dataChannelMaxMessageSize                    = 65536
+	dataChannelMaxLabelLength                    = 512
 
 	// Psiphon uses a fork of github.com/pion/dtls/v2, selected with go mod
 	// replace, which has an idential API apart from dtls.IsPsiphon. If
@@ -575,8 +576,18 @@ func newWebRTCConn(
 			dataChannelInit.MaxRetransmits = &maxRetransmits
 		}
 
-		// TODO: randomize length?
-		dataChannelLabel := "in-proxy-data-channel"
+		// Generate a random length label, to vary the DATA_CHANNEL_OPEN
+		// message length. The label is derived from and replayed via
+		// ClientRootObfuscationSecret.
+		labelObfuscationSecret, err := deriveObfuscationSecret(
+			config.ClientRootObfuscationSecret, "in-proxy-data-channel-label")
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+		seed := prng.Seed(labelObfuscationSecret)
+		labelPRNG := prng.NewPRNGWithSeed(&seed)
+		dataChannelLabel := labelPRNG.HexString(
+			labelPRNG.Range(1, dataChannelMaxLabelLength/2))
 
 		dataChannel, err := conn.peerConnection.CreateDataChannel(
 			dataChannelLabel, dataChannelInit)
