@@ -1,4 +1,4 @@
-//go:build android
+//go:build PSIPHON_ENABLE_INPROXY && android
 
 /*
  * Copyright (c) 2023, Psiphon Inc.

@@ -1,7 +1,7 @@
-//go:build PSIPHON_ENABLE_INPROXY && !android
+//go:build PSIPHON_ENABLE_INPROXY
 
 /*
- * Copyright (c) 2023, Psiphon Inc.
+ * Copyright (c) 2024, Psiphon Inc.
  * All rights reserved.
  *
  * This program is free software: you can redistribute it and/or modify
@@ -21,8 +21,7 @@
 
 package inproxy
 
-func setPortMapperBindToDevice(_ WebRTCDialCoordinator) {
-	// BindToDevice is not applied on iOS as tailscale.com/net/netns does not
-	// have an equivilent to SetAndroidProtectFunc for iOS. At this time,
-	// BindToDevice operations on iOS are legacy code and not required.
+// Enabled indicates if in-proxy functionality is enabled.
+func Enabled() bool {
+	return true
 }

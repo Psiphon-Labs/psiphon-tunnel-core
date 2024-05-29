@@ -2559,7 +2559,7 @@ func (controller *Controller) runInproxyProxy() {
 
 	useUpstreamProxy := controller.config.UseUpstreamProxy()
 
-	if !allowProxy || !compatibleNetwork || useUpstreamProxy {
+	if !allowProxy || !compatibleNetwork || useUpstreamProxy || !inproxy.Enabled() {
 		if !allowProxy {
 			NoticeError("inproxy proxy: not allowed")
 		}
@@ -2568,6 +2568,9 @@ func (controller *Controller) runInproxyProxy() {
 		}
 		if useUpstreamProxy {
 			NoticeError("inproxy proxy: not run due to upstream proxy configuration")
+		}
+		if !inproxy.Enabled() {
+			NoticeError("inproxy proxy: inproxy implementation is not enabled")
 		}
 		if controller.config.DisableTunnels {
 			// Signal failure -- and shutdown -- only if running in proxy-only mode. If also

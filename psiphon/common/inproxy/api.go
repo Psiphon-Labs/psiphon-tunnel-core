@@ -27,7 +27,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/pion/webrtc/v3"
 )
 
 const (
@@ -208,6 +207,14 @@ type ProxyAnnounceRequest struct {
 	Metrics                *ProxyMetrics `cbor:"2,keyasint,omitempty"`
 }
 
+// WebRTCSessionDescription is compatible with pion/webrtc.SessionDescription
+// and facilitates the PSIPHON_ENABLE_INPROXY build tag exclusion of pion
+// dependencies.
+type WebRTCSessionDescription struct {
+	Type int    `cbor:"1,keyasint,omitempty"`
+	SDP  string `cbor:"2,keyasint,omitempty"`
+}
+
 // TODO: send ProxyAnnounceRequest/ClientOfferRequest.Metrics only with the
 // first request in a session and cache.
 
@@ -234,7 +241,7 @@ type ProxyAnnounceResponse struct {
 	NoMatch                     bool                                 `cbor:"4,keyasint,omitempty"`
 	ConnectionID                ID                                   `cbor:"5,keyasint,omitempty"`
 	ClientProxyProtocolVersion  int32                                `cbor:"6,keyasint,omitempty"`
-	ClientOfferSDP              webrtc.SessionDescription            `cbor:"7,keyasint,omitempty"`
+	ClientOfferSDP              WebRTCSessionDescription             `cbor:"7,keyasint,omitempty"`
 	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"8,keyasint,omitempty"`
 	DoDTLSRandomization         bool                                 `cbor:"9,keyasint,omitempty"`
 	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"10,keyasint,omitempty"`
@@ -266,7 +273,7 @@ type ClientOfferRequest struct {
 	Metrics                      *ClientMetrics                       `cbor:"1,keyasint,omitempty"`
 	CommonCompartmentIDs         []ID                                 `cbor:"2,keyasint,omitempty"`
 	PersonalCompartmentIDs       []ID                                 `cbor:"3,keyasint,omitempty"`
-	ClientOfferSDP               webrtc.SessionDescription            `cbor:"4,keyasint,omitempty"`
+	ClientOfferSDP               WebRTCSessionDescription             `cbor:"4,keyasint,omitempty"`
 	ICECandidateTypes            ICECandidateTypes                    `cbor:"5,keyasint,omitempty"`
 	ClientRootObfuscationSecret  ObfuscationSecret                    `cbor:"6,keyasint,omitempty"`
 	DoDTLSRandomization          bool                                 `cbor:"7,keyasint,omitempty"`
@@ -304,12 +311,12 @@ type DataChannelTrafficShapingParameters struct {
 // ClientRelayedPacketRequests until complete. ConnectionID identifies this
 // connection and its relayed BrokerServerReport.
 type ClientOfferResponse struct {
-	Limited                      bool                      `cbor:"1,keyasint,omitempty"`
-	NoMatch                      bool                      `cbor:"2,keyasint,omitempty"`
-	ConnectionID                 ID                        `cbor:"3,keyasint,omitempty"`
-	SelectedProxyProtocolVersion int32                     `cbor:"4,keyasint,omitempty"`
-	ProxyAnswerSDP               webrtc.SessionDescription `cbor:"5,keyasint,omitempty"`
-	RelayPacketToServer          []byte                    `cbor:"6,keyasint,omitempty"`
+	Limited                      bool                     `cbor:"1,keyasint,omitempty"`
+	NoMatch                      bool                     `cbor:"2,keyasint,omitempty"`
+	ConnectionID                 ID                       `cbor:"3,keyasint,omitempty"`
+	SelectedProxyProtocolVersion int32                    `cbor:"4,keyasint,omitempty"`
+	ProxyAnswerSDP               WebRTCSessionDescription `cbor:"5,keyasint,omitempty"`
+	RelayPacketToServer          []byte                   `cbor:"6,keyasint,omitempty"`
 }
 
 // TODO: Encode SDPs using CBOR without field names, simliar to packed metrics?
@@ -323,11 +330,11 @@ type ClientOfferResponse struct {
 // reason, it should still send ProxyAnswerRequest with AnswerError
 // populated; the broker will signal the client to abort this connection.
 type ProxyAnswerRequest struct {
-	ConnectionID                 ID                        `cbor:"1,keyasint,omitempty"`
-	SelectedProxyProtocolVersion int32                     `cbor:"2,keyasint,omitempty"`
-	ProxyAnswerSDP               webrtc.SessionDescription `cbor:"3,keyasint,omitempty"`
-	ICECandidateTypes            ICECandidateTypes         `cbor:"4,keyasint,omitempty"`
-	AnswerError                  string                    `cbor:"5,keyasint,omitempty"`
+	ConnectionID                 ID                       `cbor:"1,keyasint,omitempty"`
+	SelectedProxyProtocolVersion int32                    `cbor:"2,keyasint,omitempty"`
+	ProxyAnswerSDP               WebRTCSessionDescription `cbor:"3,keyasint,omitempty"`
+	ICECandidateTypes            ICECandidateTypes        `cbor:"4,keyasint,omitempty"`
+	AnswerError                  string                   `cbor:"5,keyasint,omitempty"`
 }
 
 // ProxyAnswerResponse is the acknowledgement for a ProxyAnswerRequest.
@@ -571,7 +578,7 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 
 	// Client offer SDP candidate addresses must match the country and ASN of
 	// the client. Don't facilitate connections to arbitrary destinations.
-	sdpMetrics, err := ValidateSDPAddresses(
+	sdpMetrics, err := validateSDPAddresses(
 		[]byte(request.ClientOfferSDP.SDP), errorOnNoCandidates, lookupGeoIP, geoIPData)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -614,7 +621,7 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	logFields["has_common_compartment_ids"] = hasCommonCompartmentIDs
 	logFields["has_personal_compartment_ids"] = hasPersonalCompartmentIDs
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
-	logFields["has_IPv6"] = sdpMetrics.HasIPv6
+	logFields["has_IPv6"] = sdpMetrics.hasIPv6
 
 	return logFields, nil
 }
@@ -663,7 +670,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 
 	// Proxy answer SDP candidate addresses must match the country and ASN of
 	// the proxy. Don't facilitate connections to arbitrary destinations.
-	sdpMetrics, err := ValidateSDPAddresses(
+	sdpMetrics, err := validateSDPAddresses(
 		[]byte(request.ProxyAnswerSDP.SDP), errorOnNoCandidates, lookupGeoIP, geoIPData)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -686,7 +693,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 
 	logFields["connection_id"] = request.ConnectionID
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
-	logFields["has_IPv6"] = sdpMetrics.HasIPv6
+	logFields["has_IPv6"] = sdpMetrics.hasIPv6
 	logFields["answer_error"] = request.AnswerError
 
 	return logFields, nil

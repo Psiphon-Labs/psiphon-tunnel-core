@@ -1,3 +1,5 @@
+//go:build PSIPHON_ENABLE_INPROXY
+
 /*
  * Copyright (c) 2023, Psiphon Inc.
  * All rights reserved.
@@ -117,7 +119,7 @@ func (p *portMapper) start() {
 	_, _ = p.client.GetCachedMappingOrStartCreatingOne()
 }
 
-// portMappingExternalAddress returns a channel which recieves a successful
+// portMappingExternalAddress returns a channel which receives a successful
 // port mapping external address, if any.
 func (p *portMapper) portMappingExternalAddress() <-chan string {
 	return p.portMappingAddress

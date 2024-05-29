@@ -354,6 +354,9 @@ func TestLimitedQUICOSSH(t *testing.T) {
 }
 
 func TestInproxyOSSH(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "INPROXY-WEBRTC-OSSH",
@@ -367,6 +370,12 @@ func TestInproxyOSSH(t *testing.T) {
 }
 
 func TestInproxyQUICOSSH(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "INPROXY-WEBRTC-QUIC-OSSH",
@@ -378,6 +387,9 @@ func TestInproxyQUICOSSH(t *testing.T) {
 }
 
 func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "INPROXY-WEBRTC-UNFRONTED-MEEK-HTTPS-OSSH",
@@ -390,6 +402,9 @@ func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
 }
 
 func TestInproxyTLSOSSH(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "INPROXY-WEBRTC-TLS-OSSH",

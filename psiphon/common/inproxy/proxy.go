@@ -31,7 +31,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/pion/webrtc/v3"
 )
 
 const (
@@ -657,9 +656,9 @@ func (p *Proxy) proxyOneClient(
 		ctx, common.ValueOrDefault(webRTCCoordinator.WebRTCAnswerTimeout(), proxyWebRTCAnswerTimeout))
 	defer webRTCAnswerCancelFunc()
 
-	webRTCConn, SDP, sdpMetrics, webRTCErr := NewWebRTCConnWithAnswer(
+	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnWithAnswer(
 		webRTCAnswerCtx,
-		&WebRTCConfig{
+		&webRTCConfig{
 			Logger:                      p.config.Logger,
 			EnableDebugLogging:          p.config.EnableWebRTCDebugLogging,
 			WebRTCDialCoordinator:       webRTCCoordinator,
@@ -672,8 +671,8 @@ func (p *Proxy) proxyOneClient(
 	if webRTCErr != nil {
 		webRTCErr = errors.Trace(webRTCErr)
 		webRTCRequestErr = webRTCErr.Error()
-		SDP = webrtc.SessionDescription{}
-		sdpMetrics = &SDPMetrics{}
+		SDP = WebRTCSessionDescription{}
+		sdpMetrics = &webRTCSDPMetrics{}
 		// Continue to report the error to the broker. The broker will respond
 		// with failure to the client's offer request.
 	} else {
@@ -688,7 +687,7 @@ func (p *Proxy) proxyOneClient(
 			ConnectionID:                 announceResponse.ConnectionID,
 			SelectedProxyProtocolVersion: announceResponse.ClientProxyProtocolVersion,
 			ProxyAnswerSDP:               SDP,
-			ICECandidateTypes:            sdpMetrics.ICECandidateTypes,
+			ICECandidateTypes:            sdpMetrics.iceCandidateTypes,
 			AnswerError:                  webRTCRequestErr,
 		})
 	if err != nil {

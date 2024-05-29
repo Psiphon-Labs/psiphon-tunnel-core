@@ -2,6 +2,9 @@ module github.com/Psiphon-Labs/psiphon-tunnel-core
 
 go 1.21
 
+// The following replace is required only when the build tag
+// PSIPHON_ENABLE_REFRACTION_NETWORKING is specified.
+
 replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-20230725223418-2d2e5b4a16ba
 
 // When this is the main module, github.com/pion/dtls/v2, used by
@@ -15,11 +18,13 @@ replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-2023072
 // github.com/pion/ice/v2 v2.3.24 and github.com/pion/webrtc/v3 v3.2.40
 // respectively, containing Psiphon customizations. See comments in
 // psiphon/common/inproxy/newWebRTCConn for details.
+//
+// The following replaces are required only when the build tags
+// PSIPHON_ENABLE_REFRACTION_NETWORKING (dtls/v2 only) or
+// PSIPHON_ENABLE_INPROXY are specified.
 
 replace github.com/pion/dtls/v2 => ./replace/dtls
-
 replace github.com/pion/ice/v2 => ./replace/ice
-
 replace github.com/pion/webrtc/v3 => ./replace/webrtc
 
 require (

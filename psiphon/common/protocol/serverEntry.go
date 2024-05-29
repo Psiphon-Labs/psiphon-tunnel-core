@@ -584,6 +584,7 @@ func (serverEntry *ServerEntry) SupportsOnlyQUICv1() bool {
 type ConditionallyEnabledComponents interface {
 	QUICEnabled() bool
 	RefractionNetworkingEnabled() bool
+	InproxyEnabled() bool
 }
 
 // TunnelProtocolPortLists is a map from tunnel protocol names (or "All") to a
@@ -635,9 +636,14 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 			continue
 		}
 
-		if (TunnelProtocolUsesQUIC(tunnelProtocol) && !conditionallyEnabled.QUICEnabled()) ||
+		if (TunnelProtocolUsesQUIC(tunnelProtocol) &&
+			!conditionallyEnabled.QUICEnabled()) ||
+
 			(TunnelProtocolUsesRefractionNetworking(tunnelProtocol) &&
-				!conditionallyEnabled.RefractionNetworkingEnabled()) {
+				!conditionallyEnabled.RefractionNetworkingEnabled()) ||
+
+			(TunnelProtocolUsesInproxy(tunnelProtocol) &&
+				!conditionallyEnabled.InproxyEnabled()) {
 			continue
 		}
 

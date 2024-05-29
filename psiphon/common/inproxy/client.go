@@ -44,7 +44,7 @@ const (
 type ClientConn struct {
 	config       *ClientConfig
 	brokerClient *BrokerClient
-	webRTCConn   *WebRTCConn
+	webRTCConn   *webRTCConn
 	connectionID ID
 
 	relayMutex         sync.Mutex
@@ -270,7 +270,7 @@ func (conn *ClientConn) RelayPacket(
 }
 
 type clientWebRTCDialResult struct {
-	conn         *WebRTCConn
+	conn         *webRTCConn
 	connectionID ID
 	relayPacket  []byte
 }
@@ -285,8 +285,8 @@ func dialClientWebRTCConn(
 	trafficShapingParameters := config.WebRTCDialCoordinator.DataChannelTrafficShapingParameters()
 	clientRootObfuscationSecret := config.WebRTCDialCoordinator.ClientRootObfuscationSecret()
 
-	webRTCConn, SDP, SDPMetrics, err := NewWebRTCConnWithOffer(
-		ctx, &WebRTCConfig{
+	webRTCConn, SDP, SDPMetrics, err := newWebRTCConnWithOffer(
+		ctx, &webRTCConfig{
 			Logger:                      config.Logger,
 			EnableDebugLogging:          config.EnableWebRTCDebugLogging,
 			WebRTCDialCoordinator:       config.WebRTCDialCoordinator,
@@ -333,7 +333,7 @@ func dialClientWebRTCConn(
 			CommonCompartmentIDs:         brokerCoordinator.CommonCompartmentIDs(),
 			PersonalCompartmentIDs:       brokerCoordinator.PersonalCompartmentIDs(),
 			ClientOfferSDP:               SDP,
-			ICECandidateTypes:            SDPMetrics.ICECandidateTypes,
+			ICECandidateTypes:            SDPMetrics.iceCandidateTypes,
 			ClientRootObfuscationSecret:  clientRootObfuscationSecret,
 			DoDTLSRandomization:          doTLSRandomization,
 			TrafficShapingParameters:     trafficShapingParameters,

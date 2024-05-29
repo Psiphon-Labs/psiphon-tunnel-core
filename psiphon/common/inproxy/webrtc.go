@@ -1,3 +1,5 @@
+//go:build PSIPHON_ENABLE_INPROXY
+
 /*
  * Copyright (c) 2023, Psiphon Inc.
  * All rights reserved.
@@ -70,11 +72,11 @@ const (
 	// has an API change which will cause builds to fail when not present.
 )
 
-// WebRTCConn is a WebRTC connection between two peers, with a data channel
+// webRTCConn is a WebRTC connection between two peers, with a data channel
 // used to relay streams or packets between them. WebRTCConn implements the
 // net.Conn interface.
-type WebRTCConn struct {
-	config                   *WebRTCConfig
+type webRTCConn struct {
+	config                   *webRTCConfig
 	trafficShapingParameters *DataChannelTrafficShapingParameters
 
 	mutex                        sync.Mutex
@@ -111,8 +113,8 @@ type WebRTCConn struct {
 	decoyMessagesReceived  int32
 }
 
-// WebRTCConfig specifies the configuration for a WebRTC dial.
-type WebRTCConfig struct {
+// webRTCConfig specifies the configuration for a WebRTC dial.
+type webRTCConfig struct {
 
 	// Logger is used to log events.
 	Logger common.Logger
@@ -144,47 +146,53 @@ type WebRTCConfig struct {
 	ReliableTransport bool
 }
 
-// NewWebRTCConnWithOffer initiates a new WebRTC connection. An offer SDP is
+// webRTCSDPMetrics are network capability metrics values for an SDP.
+type webRTCSDPMetrics struct {
+	iceCandidateTypes []ICECandidateType
+	hasIPv6           bool
+}
+
+// newWebRTCConnWithOffer initiates a new WebRTC connection. An offer SDP is
 // returned, to be sent to the peer. After the offer SDP is forwarded and an
 // answer SDP received in response, call SetRemoteSDP with the answer SDP and
 // then call AwaitInitialDataChannel to await the eventual WebRTC connection
 // establishment.
-func NewWebRTCConnWithOffer(
+func newWebRTCConnWithOffer(
 	ctx context.Context,
-	config *WebRTCConfig) (
-	*WebRTCConn, webrtc.SessionDescription, *SDPMetrics, error) {
+	config *webRTCConfig) (
+	*webRTCConn, WebRTCSessionDescription, *webRTCSDPMetrics, error) {
 
 	conn, SDP, metrics, err := newWebRTCConn(ctx, config, nil)
 	if err != nil {
-		return nil, webrtc.SessionDescription{}, nil, errors.Trace(err)
+		return nil, WebRTCSessionDescription{}, nil, errors.Trace(err)
 	}
 	return conn, *SDP, metrics, nil
 }
 
-// NewWebRTCConnWithAnswer creates a new WebRTC connection initiated by a peer
+// newWebRTCConnWithAnswer creates a new WebRTC connection initiated by a peer
 // that provided an offer SDP. An answer SDP is returned to be sent to the
 // peer. After the answer SDP is forwarded, call AwaitInitialDataChannel to
 // await the eventual WebRTC connection establishment.
-func NewWebRTCConnWithAnswer(
+func newWebRTCConnWithAnswer(
 	ctx context.Context,
-	config *WebRTCConfig,
-	peerSDP webrtc.SessionDescription) (
-	*WebRTCConn, webrtc.SessionDescription, *SDPMetrics, error) {
+	config *webRTCConfig,
+	peerSDP WebRTCSessionDescription) (
+	*webRTCConn, WebRTCSessionDescription, *webRTCSDPMetrics, error) {
 
 	conn, SDP, metrics, err := newWebRTCConn(ctx, config, &peerSDP)
 	if err != nil {
-		return nil, webrtc.SessionDescription{}, nil, errors.Trace(err)
+		return nil, WebRTCSessionDescription{}, nil, errors.Trace(err)
 	}
 	return conn, *SDP, metrics, nil
 }
 
 func newWebRTCConn(
 	ctx context.Context,
-	config *WebRTCConfig,
-	peerSDP *webrtc.SessionDescription) (
-	retConn *WebRTCConn,
-	retSDP *webrtc.SessionDescription,
-	retMetrics *SDPMetrics,
+	config *webRTCConfig,
+	peerSDP *WebRTCSessionDescription) (
+	retconn *webRTCConn,
+	retSDP *WebRTCSessionDescription,
+	retMetrics *webRTCSDPMetrics,
 	retErr error) {
 
 	isOffer := peerSDP == nil
@@ -500,7 +508,7 @@ func newWebRTCConn(
 		ICEServers = []webrtc.ICEServer{{URLs: []string{"stun:" + stunServerAddress}}}
 	}
 
-	conn := &WebRTCConn{
+	conn := &webRTCConn{
 		config: config,
 
 		udpConn:                      udpConn,
@@ -626,7 +634,12 @@ func newWebRTCConn(
 
 	} else {
 
-		err = conn.peerConnection.SetRemoteDescription(*peerSDP)
+		pionSessionDescription := webrtc.SessionDescription{
+			Type: webrtc.SDPType(peerSDP.Type),
+			SDP:  peerSDP.SDP,
+		}
+
+		err = conn.peerConnection.SetRemoteDescription(pionSessionDescription)
 		if err != nil {
 			return nil, nil, nil, errors.Trace(err)
 		}
@@ -690,7 +703,7 @@ func newWebRTCConn(
 	//candidate.
 	errorOnNoCandidates := !isOffer
 
-	adjustedSDP, metrics, err := PrepareSDPAddresses(
+	adjustedSDP, metrics, err := prepareSDPAddresses(
 		[]byte(localDescription.SDP),
 		errorOnNoCandidates,
 		portMappingExternalAddr,
@@ -705,7 +718,7 @@ func newWebRTCConn(
 
 	if iceCompleted && doSTUN {
 		hasServerReflexive := false
-		for _, candidateType := range metrics.ICECandidateTypes {
+		for _, candidateType := range metrics.iceCandidateTypes {
 			if candidateType == ICECandidateServerReflexive {
 				hasServerReflexive = true
 			}
@@ -723,15 +736,15 @@ func newWebRTCConn(
 	// the data channel establishment.
 
 	return conn,
-		&webrtc.SessionDescription{
-			Type: localDescription.Type,
+		&WebRTCSessionDescription{
+			Type: int(localDescription.Type),
 			SDP:  string(adjustedSDP),
 		},
 		metrics,
 		nil
 }
 
-func (conn *WebRTCConn) setDataChannel(dataChannel *webrtc.DataChannel) {
+func (conn *webRTCConn) setDataChannel(dataChannel *webrtc.DataChannel) {
 
 	// Assumes the caller holds conn.mutex, or is newWebRTCConn, creating the
 	// conn.
@@ -753,11 +766,16 @@ func (conn *WebRTCConn) setDataChannel(dataChannel *webrtc.DataChannel) {
 // SetRemoteSDP takes the answer SDP that is received in response to an offer
 // SDP. SetRemoteSDP initiates the WebRTC connection establishment on the
 // offer end.
-func (conn *WebRTCConn) SetRemoteSDP(peerSDP webrtc.SessionDescription) error {
+func (conn *webRTCConn) SetRemoteSDP(peerSDP WebRTCSessionDescription) error {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
-	err := conn.peerConnection.SetRemoteDescription(peerSDP)
+	pionSessionDescription := webrtc.SessionDescription{
+		Type: webrtc.SDPType(peerSDP.Type),
+		SDP:  peerSDP.SDP,
+	}
+
+	err := conn.peerConnection.SetRemoteDescription(pionSessionDescription)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -766,7 +784,7 @@ func (conn *WebRTCConn) SetRemoteSDP(peerSDP webrtc.SessionDescription) error {
 
 // AwaitInitialDataChannel returns when the data channel is established, or
 // when an error has occured.
-func (conn *WebRTCConn) AwaitInitialDataChannel(ctx context.Context) error {
+func (conn *webRTCConn) AwaitInitialDataChannel(ctx context.Context) error {
 
 	// Don't lock the mutex, or else necessary operations will deadlock.
 
@@ -790,7 +808,7 @@ func (conn *WebRTCConn) AwaitInitialDataChannel(ctx context.Context) error {
 	return nil
 }
 
-func (conn *WebRTCConn) recordSelectedICECandidateStats() error {
+func (conn *webRTCConn) recordSelectedICECandidateStats() error {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
@@ -890,7 +908,7 @@ func (conn *WebRTCConn) recordSelectedICECandidateStats() error {
 	return nil
 }
 
-func (conn *WebRTCConn) Close() error {
+func (conn *webRTCConn) Close() error {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
@@ -929,14 +947,14 @@ func (conn *WebRTCConn) Close() error {
 	return nil
 }
 
-func (conn *WebRTCConn) IsClosed() bool {
+func (conn *webRTCConn) IsClosed() bool {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
 	return conn.isClosed
 }
 
-func (conn *WebRTCConn) Read(p []byte) (int, error) {
+func (conn *webRTCConn) Read(p []byte) (int, error) {
 
 	for {
 
@@ -949,7 +967,7 @@ func (conn *WebRTCConn) Read(p []byte) (int, error) {
 	}
 }
 
-func (conn *WebRTCConn) readMessage(p []byte) (int, error) {
+func (conn *webRTCConn) readMessage(p []byte) (int, error) {
 
 	// Don't hold this lock, or else concurrent Writes will be blocked.
 	conn.mutex.Lock()
@@ -1040,11 +1058,11 @@ func (conn *WebRTCConn) readMessage(p []byte) (int, error) {
 	return n, errors.Trace(err)
 }
 
-func (conn *WebRTCConn) Write(p []byte) (int, error) {
+func (conn *webRTCConn) Write(p []byte) (int, error) {
 	return conn.writeMessage(p, false)
 }
 
-func (conn *WebRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
+func (conn *webRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
 
 	if p != nil && decoy {
 		return 0, errors.TraceNew("invalid write parameters")
@@ -1260,7 +1278,7 @@ func (conn *WebRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
 	return len(p), errors.Trace(err)
 }
 
-func (conn *WebRTCConn) LocalAddr() net.Addr {
+func (conn *webRTCConn) LocalAddr() net.Addr {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
@@ -1268,7 +1286,7 @@ func (conn *WebRTCConn) LocalAddr() net.Addr {
 	return conn.udpConn.LocalAddr()
 }
 
-func (conn *WebRTCConn) RemoteAddr() net.Addr {
+func (conn *webRTCConn) RemoteAddr() net.Addr {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
@@ -1276,14 +1294,14 @@ func (conn *WebRTCConn) RemoteAddr() net.Addr {
 	return nil
 }
 
-func (conn *WebRTCConn) SetDeadline(t time.Time) error {
+func (conn *webRTCConn) SetDeadline(t time.Time) error {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
 	return errors.TraceNew("not supported")
 }
 
-func (conn *WebRTCConn) SetReadDeadline(t time.Time) error {
+func (conn *webRTCConn) SetReadDeadline(t time.Time) error {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
@@ -1299,7 +1317,7 @@ func (conn *WebRTCConn) SetReadDeadline(t time.Time) error {
 	return readDeadliner.SetReadDeadline(t)
 }
 
-func (conn *WebRTCConn) SetWriteDeadline(t time.Time) error {
+func (conn *webRTCConn) SetWriteDeadline(t time.Time) error {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
@@ -1308,7 +1326,7 @@ func (conn *WebRTCConn) SetWriteDeadline(t time.Time) error {
 
 // GetMetrics implements the common.MetricsSource interface and returns log
 // fields detailing the WebRTC dial parameters.
-func (conn *WebRTCConn) GetMetrics() common.LogFields {
+func (conn *webRTCConn) GetMetrics() common.LogFields {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
@@ -1330,7 +1348,7 @@ func (conn *WebRTCConn) GetMetrics() common.LogFields {
 	return logFields
 }
 
-func (conn *WebRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState) {
+func (conn *webRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState) {
 
 	// Close the WebRTCConn when the connection is no longer connected. Close
 	// will lock conn.mutex, so do lot aquire the lock here.
@@ -1350,7 +1368,7 @@ func (conn *WebRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState
 	}).Info("peer connection state changed")
 }
 
-func (conn *WebRTCConn) onICECandidate(candidate *webrtc.ICECandidate) {
+func (conn *webRTCConn) onICECandidate(candidate *webrtc.ICECandidate) {
 	if candidate == nil {
 		return
 	}
@@ -1360,7 +1378,7 @@ func (conn *WebRTCConn) onICECandidate(candidate *webrtc.ICECandidate) {
 	}).Info("new ICE candidate")
 }
 
-func (conn *WebRTCConn) onICEBindingRequest(m *stun.Message, local, remote ice.Candidate, pair *ice.CandidatePair) bool {
+func (conn *webRTCConn) onICEBindingRequest(m *stun.Message, local, remote ice.Candidate, pair *ice.CandidatePair) bool {
 
 	// SetICEBindingRequestHandler is used to hook onICEBindingRequest into
 	// STUN bind events for logging. The return values is always false as
@@ -1386,33 +1404,33 @@ func (conn *WebRTCConn) onICEBindingRequest(m *stun.Message, local, remote ice.C
 	return false
 }
 
-func (conn *WebRTCConn) onICEConnectionStateChange(state webrtc.ICEConnectionState) {
+func (conn *webRTCConn) onICEConnectionStateChange(state webrtc.ICEConnectionState) {
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"state": state.String(),
 	}).Info("ICE connection state changed")
 }
 
-func (conn *WebRTCConn) onICEGatheringStateChange(state webrtc.ICEGathererState) {
+func (conn *webRTCConn) onICEGatheringStateChange(state webrtc.ICEGathererState) {
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"state": state.String(),
 	}).Info("ICE gathering state changed")
 }
 
-func (conn *WebRTCConn) onNegotiationNeeded() {
+func (conn *webRTCConn) onNegotiationNeeded() {
 
 	conn.config.Logger.WithTrace().Info("negotiation needed")
 }
 
-func (conn *WebRTCConn) onSignalingStateChange(state webrtc.SignalingState) {
+func (conn *webRTCConn) onSignalingStateChange(state webrtc.SignalingState) {
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"state": state.String(),
 	}).Info("signaling state changed")
 }
 
-func (conn *WebRTCConn) onDataChannel(dataChannel *webrtc.DataChannel) {
+func (conn *webRTCConn) onDataChannel(dataChannel *webrtc.DataChannel) {
 
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
@@ -1425,7 +1443,7 @@ func (conn *WebRTCConn) onDataChannel(dataChannel *webrtc.DataChannel) {
 	}).Info("new data channel")
 }
 
-func (conn *WebRTCConn) onDataChannelOpen() {
+func (conn *webRTCConn) onDataChannelOpen() {
 
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
@@ -1445,7 +1463,7 @@ func (conn *WebRTCConn) onDataChannelOpen() {
 	}).Info("data channel open")
 }
 
-func (conn *WebRTCConn) onDataChannelClose() {
+func (conn *webRTCConn) onDataChannelClose() {
 
 	// Close the WebRTCConn when the data channel is closed. Close will lock
 	// conn.mutex, so do lot aquire the lock here.
@@ -1454,13 +1472,13 @@ func (conn *WebRTCConn) onDataChannelClose() {
 	conn.config.Logger.WithTrace().Info("data channel closed")
 }
 
-// PrepareSDPAddresses adjusts the SDP, pruning local network addresses and
+// prepareSDPAddresses adjusts the SDP, pruning local network addresses and
 // adding any port mapping as a host candidate.
-func PrepareSDPAddresses(
+func prepareSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	portMappingExternalAddr string,
-	disableIPv6Candidates bool) ([]byte, *SDPMetrics, error) {
+	disableIPv6Candidates bool) ([]byte, *webRTCSDPMetrics, error) {
 
 	modifiedSDP, metrics, err := processSDPAddresses(
 		encodedSDP,
@@ -1473,14 +1491,14 @@ func PrepareSDPAddresses(
 	return modifiedSDP, metrics, errors.Trace(err)
 }
 
-// ValidateSDPAddresses checks that the SDP does not contain an empty list of
+// validateSDPAddresses checks that the SDP does not contain an empty list of
 // candidates, bogon candidates, or candidates outside of the country and ASN
 // for the specified expectedGeoIPData.
-func ValidateSDPAddresses(
+func validateSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
-	expectedGeoIPData common.GeoIPData) (*SDPMetrics, error) {
+	expectedGeoIPData common.GeoIPData) (*webRTCSDPMetrics, error) {
 
 	_, metrics, err := processSDPAddresses(
 		encodedSDP,
@@ -1491,12 +1509,6 @@ func ValidateSDPAddresses(
 		lookupGeoIP,
 		expectedGeoIPData)
 	return metrics, errors.Trace(err)
-}
-
-// SDPMetrics are network capability metrics values for an SDP.
-type SDPMetrics struct {
-	ICECandidateTypes []ICECandidateType
-	HasIPv6           bool
 }
 
 // processSDPAddresses is based on snowflake/common/util.StripLocalAddresses
@@ -1544,7 +1556,7 @@ func processSDPAddresses(
 	errorOnBogon bool,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
-	expectedGeoIPData common.GeoIPData) ([]byte, *SDPMetrics, error) {
+	expectedGeoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, error) {
 
 	var sessionDescription sdp.SessionDescription
 	err := sessionDescription.Unmarshal(encodedSDP)
@@ -1704,11 +1716,11 @@ func processSDPAddresses(
 		return nil, nil, errors.Trace(err)
 	}
 
-	metrics := &SDPMetrics{
-		HasIPv6: hasIPv6,
+	metrics := &webRTCSDPMetrics{
+		hasIPv6: hasIPv6,
 	}
 	for candidateType := range candidateTypes {
-		metrics.ICECandidateTypes = append(metrics.ICECandidateTypes, candidateType)
+		metrics.iceCandidateTypes = append(metrics.iceCandidateTypes, candidateType)
 	}
 
 	return encodedSDP, metrics, nil

@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
@@ -213,6 +214,10 @@ func (c conditionallyEnabledComponents) QUICEnabled() bool {
 
 func (c conditionallyEnabledComponents) RefractionNetworkingEnabled() bool {
 	return refraction.Enabled()
+}
+
+func (c conditionallyEnabledComponents) InproxyEnabled() bool {
+	return inproxy.Enabled()
 }
 
 // FileMigration represents the action of moving a file, or directory, to a new

@@ -30,7 +30,6 @@ import (
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/gammazero/deque"
 	"github.com/juju/ratelimit"
-	"github.com/pion/webrtc/v3"
 )
 
 // TTLs should be aligned with STUN hole punch lifetimes.
@@ -184,7 +183,7 @@ type MatchAnnouncement struct {
 type MatchOffer struct {
 	Properties                  MatchProperties
 	ClientProxyProtocolVersion  int32
-	ClientOfferSDP              webrtc.SessionDescription
+	ClientOfferSDP              WebRTCSessionDescription
 	ClientRootObfuscationSecret ObfuscationSecret
 	DoDTLSRandomization         bool
 	TrafficShapingParameters    *DataChannelTrafficShapingParameters
@@ -200,7 +199,7 @@ type MatchAnswer struct {
 	ProxyID                      ID
 	ConnectionID                 ID
 	SelectedProxyProtocolVersion int32
-	ProxyAnswerSDP               webrtc.SessionDescription
+	ProxyAnswerSDP               WebRTCSessionDescription
 }
 
 // announcementEntry is an announcement queue entry, an announcement with its
@@ -647,6 +646,10 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 	// Future matching enhancements could include more sophisticated GeoIP
 	// rules, such as a configuration encoding knowledge of an ASN's NAT
 	// type, or preferred client/proxy country/ASN matches.
+
+	// TODO: match supported protocol versions. Currently, all announces and
+	// offers must specify ProxyProtocolVersion1, so there's no protocol
+	// version match logic.
 
 	offerProperties := &offerEntry.offer.Properties
 
