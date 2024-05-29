@@ -299,6 +299,30 @@ WWAN or vice versa or VPN state changed
  */
 - (void)onApplicationParameters:(NSDictionary * _Nonnull)parameters;
 
+
+/*!
+ Called when tunnel-core emits a message to be displayed to the in-proxy operator
+ @param message The operator message received.
+ */
+- (void)onInproxyOperatorMessage:(NSString * _Nonnull)message;
+
+/*!
+ Called when tunnel-core reports in-proxy usage statistics
+ @param connectingClients Number of clients connecting to the proxy.
+ @param connectedClients Number of clients currently connected to the proxy.
+ @param bytesUp Bytes uploaded through the proxy since the last report.
+ @param bytesDown Bytes downloaded through the proxy since the last report.
+ */
+- (void)onInproxyProxyActivity:(int)connectingClients
+              connectedClients:(int)connectedClients
+                       bytesUp:(long)bytesUp
+                     bytesDown:(long)bytesDown;
+
+/*!
+ Called when tunnel-core reports connected server region information
+ @param region The server region received.
+ */
+- (void)onConnectedServerRegion:(NSString * _Nonnull)region;
 @end
 
 /*!

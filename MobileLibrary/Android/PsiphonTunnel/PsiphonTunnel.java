@@ -131,6 +131,20 @@ public class PsiphonTunnel {
         default public void onTrafficRateLimits(long upstreamBytesPerSecond, long downstreamBytesPerSecond) {}
         default public void onApplicationParameters(Object parameters) {}
         default public void onServerAlert(String reason, String subject, List<String> actionURLs) {}
+        /**
+         * Called when tunnel-core emits a message to be displayed to the in-proxy operator.
+         * @param message The operator message received.
+         */
+        default void onInproxyOperatorMessage(String message) {}
+
+        /**
+         * Called when tunnel-core reports proxy usage statistics.
+         * @param connectingClients Number of clients connecting to the proxy.
+         * @param connectedClients Number of clients currently connected to the proxy.
+         * @param bytesUp  Bytes uploaded through the proxy since the last report.
+         * @param bytesDown Bytes downloaded through the proxy since the last report.
+         */
+        default void onInproxyProxyActivity(int connectingClients, int connectedClients,long bytesUp, long bytesDown) {}
         default public void onExiting() {}
     }
 
@@ -1092,6 +1106,15 @@ public class PsiphonTunnel {
                     notice.getJSONObject("data").getString("reason"),
                     notice.getJSONObject("data").getString("subject"),
                     actionURLsList);
+            } else if (noticeType.equals("InproxyOperatorMessage")) {
+                mHostService.onInproxyOperatorMessage( notice.getJSONObject("data").getString("message"));
+            } else if (noticeType.equals("InproxyProxyActivity")) {
+                JSONObject data = notice.getJSONObject("data");
+                mHostService.onInproxyProxyActivity(
+                        data.getInt("connectingClients"),
+                        data.getInt("connectedClients"),
+                        data.getLong("bytesUp"),
+                        data.getLong("bytesDown"));
             }
 
             if (diagnostic) {
