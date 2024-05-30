@@ -965,6 +965,9 @@ public class PsiphonTunnel {
 
         json.put("EmitBytesTransferred", true);
 
+        // Emit in-proxy activity stats
+        json.put("EmitInproxyProxyActivity", true);
+
         if (localSocksProxyPort != 0 && (!json.has("LocalSocksProxyPort") || json.getInt("LocalSocksProxyPort") == 0)) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
             // to use that port value. So we force use of the same port.
