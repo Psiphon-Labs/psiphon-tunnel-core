@@ -1103,7 +1103,7 @@ func NoticeInproxyProxyActivity(
 	bytesDown int64) {
 
 	singletonNoticeLogger.outputNotice(
-		"InproxyProxyActivity", noticeIsDiagnostic,
+		"InproxyProxyActivity", 0,
 		"connectingClients", connectingClients,
 		"connectedClients", connectedClients,
 		"bytesUp", bytesUp,

@@ -2589,6 +2589,7 @@ func (controller *Controller) runInproxyProxy() {
 	activityNoticePeriod := p.Duration(parameters.InproxyProxyTotalActivityNoticePeriod)
 	var lastActivityNotice time.Time
 	var lastActivityConnectingClients, lastActivityConnectedClients int32
+	var lastActivityConnectingClientsTotal, lastActivityConnectedClientsTotal int32
 	var activityTotalBytesUp, activityTotalBytesDown int64
 	activityUpdater := func(
 		connectingClients int32,
@@ -2600,27 +2601,44 @@ func (controller *Controller) runInproxyProxy() {
 		// This emit logic mirrors the logic for NoticeBytesTransferred and
 		// NoticeTotalBytesTransferred in tunnel.operateTunnel.
 
+		// InproxyProxyActivity frequently emits bytes transferred since the
+		// last notice, when not idle; in addition to the current number of
+		// connecting and connected clients, whenever that changes. This
+		// frequent notice is excluded from diagnostics and is for UI
+		// activity display.
+
 		if controller.config.EmitInproxyProxyActivity &&
-			(bytesUp > 0 || bytesDown > 0) {
+			(bytesUp > 0 || bytesDown > 0) ||
+			connectingClients != lastActivityConnectingClients ||
+			connectedClients != lastActivityConnectedClients {
 
 			NoticeInproxyProxyActivity(
 				connectingClients, connectedClients, bytesUp, bytesDown)
+
+			lastActivityConnectingClients = connectingClients
+			lastActivityConnectedClients = connectedClients
 		}
 
 		activityTotalBytesUp += bytesUp
 		activityTotalBytesDown += bytesDown
 
+		// InproxyProxyTotalActivity periodically emits total bytes
+		// transferred since starting; in addition to the current number of
+		// connecting and connected clients, whenever that changes. This
+		// notice is for diagnostics.
+
 		if lastActivityNotice.Add(activityNoticePeriod).Before(time.Now()) ||
-			connectingClients != lastActivityConnectingClients ||
-			connectedClients != lastActivityConnectedClients {
+			connectingClients != lastActivityConnectingClientsTotal ||
+			connectedClients != lastActivityConnectedClientsTotal {
 
 			NoticeInproxyProxyTotalActivity(
 				connectingClients, connectedClients,
 				activityTotalBytesUp, activityTotalBytesDown)
 			lastActivityNotice = time.Now()
+
+			lastActivityConnectingClientsTotal = connectingClients
+			lastActivityConnectedClientsTotal = connectedClients
 		}
-		lastActivityConnectingClients = connectingClients
-		lastActivityConnectedClients = connectedClients
 	}
 
 	config := &inproxy.ProxyConfig{
