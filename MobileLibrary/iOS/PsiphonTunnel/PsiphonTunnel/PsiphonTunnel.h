@@ -308,6 +308,8 @@ WWAN or vice versa or VPN state changed
 
 /*!
  Called when tunnel-core reports in-proxy usage statistics
+ By default onInproxyProxyActivity is disabled. Enable it by setting
+ EmitInproxyProxyActivity to true in the Psiphon config.
  @param connectingClients Number of clients connecting to the proxy.
  @param connectedClients Number of clients currently connected to the proxy.
  @param bytesUp Bytes uploaded through the proxy since the last report.

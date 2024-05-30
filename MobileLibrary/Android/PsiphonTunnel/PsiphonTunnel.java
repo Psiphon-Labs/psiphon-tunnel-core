@@ -139,6 +139,8 @@ public class PsiphonTunnel {
 
         /**
          * Called when tunnel-core reports proxy usage statistics.
+         * By default onInproxyProxyActivity is disabled. Enable it by setting
+         * EmitInproxyProxyActivity to true in the Psiphon config.
          * @param connectingClients Number of clients connecting to the proxy.
          * @param connectedClients Number of clients currently connected to the proxy.
          * @param bytesUp  Bytes uploaded through the proxy since the last report.
@@ -964,9 +966,6 @@ public class PsiphonTunnel {
         }
 
         json.put("EmitBytesTransferred", true);
-
-        // Emit in-proxy activity stats
-        json.put("EmitInproxyProxyActivity", true);
 
         if (localSocksProxyPort != 0 && (!json.has("LocalSocksProxyPort") || json.getInt("LocalSocksProxyPort") == 0)) {
             // When mLocalSocksProxyPort is set, tun2socks is already configured
