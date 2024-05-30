@@ -105,6 +105,14 @@ public class PsiphonTunnel {
         default void onClientIsLatestVersion() {}
         default void onSplitTunnelRegions(List<String> regions) {}
         default void onUntunneledAddress(String address) {}
+        /**
+         * Called to report how many bytes have been transferred since the last time
+         * this function was called.
+         * By default onBytesTransferred is disabled. Enable it by setting
+         * EmitBytesTransferred to true in the Psiphon config.
+         * @param sent The number of bytes sent since the last call to onBytesTransferred.
+         * @param received The number of bytes received since the last call to onBytesTransferred.
+         */
         default void onBytesTransferred(long sent, long received) {}
         default void onStartedWaitingForNetworkConnectivity() {}
         default void onStoppedWaitingForNetworkConnectivity() {}
@@ -742,8 +750,6 @@ public class PsiphonTunnel {
         if (!json.has("EstablishTunnelTimeoutSeconds")) {
             json.put("EstablishTunnelTimeoutSeconds", 0);
         }
-
-        json.put("EmitBytesTransferred", true);
 
         if (localSocksProxyPort != 0 && (!json.has("LocalSocksProxyPort") || json.getInt(
                 "LocalSocksProxyPort") == 0)) {
