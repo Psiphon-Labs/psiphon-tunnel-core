@@ -1519,6 +1519,19 @@ func dialInproxy(
 		dialAddress = dialParams.MeekDialAddress
 	}
 
+	// Specify the value to be returned by inproxy.ClientConn.RemoteAddr.
+	// Currently, the one caller of RemoteAddr is utls, which uses the
+	// RemoteAddr as a TLS session cache key when there is no SNI.
+	// GetTLSSessionCacheKeyAddress returns a cache key value that is a valid
+	// address and that is also a more appropriate TLS session cache key than
+	// the proxy address.
+
+	remoteAddrOverride, err := dialParams.ServerEntry.GetTLSSessionCacheKeyAddress(
+		dialParams.TunnelProtocol)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	// Unlike the proxy broker case, clients already actively fetch tactics
 	// during tunnel estalishment, so no tactics tags are sent to the broker
 	// and no tactics are returned by the broker.
@@ -1545,6 +1558,7 @@ func dialInproxy(
 		ReliableTransport:            reliableTransport,
 		DialNetworkProtocol:          networkProtocol,
 		DialAddress:                  dialAddress,
+		RemoteAddrOverride:           remoteAddrOverride,
 		PackedDestinationServerEntry: dialParams.inproxyPackedSignedServerEntry,
 	}
 

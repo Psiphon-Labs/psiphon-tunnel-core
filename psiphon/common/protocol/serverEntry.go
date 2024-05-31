@@ -33,6 +33,7 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -790,6 +791,32 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 	}
 
 	return 0, errors.TraceNew("unknown protocol")
+}
+
+// GetTLSSessionCacheKeyAddress returns a network address (IP:port) that is
+// suitable to use as a TLS session cache key.
+//
+// By default, TLS implementations, including crypto/tls and utls use SNI as a
+// session cache key, but this is not a suitable key when SNI is manipulated.
+// When SNI is not present, these implementations fall back to using the peer
+// remote address, which is also not a suitable key in cases where there is a
+// non-TLS-terminating temporary intermediary, such as an in-proxy proxy.
+//
+// The key is unique to the Psiphon server and tunnel protocol listener. For
+// direct tunnel protocols, the key precisely maps TLS sessions to the
+// corresponding TLS server. For indirect tunnel protocols, with an
+// intermediate TLS server, the key is an approximate map which assumes the
+// redials will mostly use the same intermediate TLS server.
+//
+// Do not use the GetTLSSessionCacheKeyAddress value for dialing.
+func (serverEntry *ServerEntry) GetTLSSessionCacheKeyAddress(tunnelProtocol string) (string, error) {
+
+	port, err := serverEntry.GetDialPortNumber(tunnelProtocol)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+
+	return net.JoinHostPort(serverEntry.IpAddress, strconv.Itoa(port)), nil
 }
 
 // IsValidInproxyDialAddress indicates whether the dial destination

@@ -22,6 +22,7 @@ package inproxy
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -46,6 +47,7 @@ type ClientConn struct {
 	brokerClient *BrokerClient
 	webRTCConn   *webRTCConn
 	connectionID ID
+	remoteAddr   net.Addr
 
 	relayMutex         sync.Mutex
 	initialRelayPacket []byte
@@ -91,6 +93,11 @@ type ClientConfig struct {
 	// will relay traffic to.
 	DialAddress string
 
+	// RemoteAddrOverride, when specified, is the address to be returned by
+	// ClientConn.RemoteAddr. When not specified, ClientConn.RemoteAddr
+	// returns a zero-value address.
+	RemoteAddrOverride string
+
 	// PackedDestinationServerEntry is a signed Psiphon server entry
 	// corresponding to the destination dial address. This signed server
 	// entry is sent to the broker, which will use it to validate that the
@@ -109,6 +116,33 @@ type ClientConfig struct {
 func DialClient(
 	ctx context.Context,
 	config *ClientConfig) (retConn *ClientConn, retErr error) {
+
+	// Configure the value returned by ClientConn.RemoteAddr. If no
+	// config.RemoteAddrOverride is specified, RemoteAddr will return a
+	// zero-value, non-nil net.Addr. The underlying webRTCConn.RemoteAddr
+	// returns only nil.
+
+	var remoteAddr net.Addr
+	var addrPort netip.AddrPort
+	if config.RemoteAddrOverride != "" {
+
+		// ParseAddrPort does not perform any domain resolution. The addr
+		// portion must be an IP address.
+		var err error
+		addrPort, err = netip.ParseAddrPort(config.RemoteAddrOverride)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	switch config.DialNetworkProtocol {
+	case NetworkProtocolTCP:
+		remoteAddr = net.TCPAddrFromAddrPort(addrPort)
+	case NetworkProtocolUDP:
+		remoteAddr = net.UDPAddrFromAddrPort(addrPort)
+	default:
+		return nil, errors.TraceNew("unexpected DialNetworkProtocol")
+	}
 
 	// Reset and configure port mapper component, as required. See
 	// initPortMapper comment.
@@ -207,6 +241,7 @@ func DialClient(
 		webRTCConn:         result.conn,
 		connectionID:       result.connectionID,
 		initialRelayPacket: result.relayPacket,
+		remoteAddr:         remoteAddr,
 	}, nil
 }
 
@@ -420,7 +455,12 @@ func (conn *ClientConn) LocalAddr() net.Addr {
 }
 
 func (conn *ClientConn) RemoteAddr() net.Addr {
-	return conn.webRTCConn.RemoteAddr()
+
+	// *TEMP*
+	return nil
+
+	// Do not return conn.webRTCConn.RemoteAddr(), which is always nil.
+	return conn.remoteAddr
 }
 
 func (conn *ClientConn) SetDeadline(t time.Time) error {
