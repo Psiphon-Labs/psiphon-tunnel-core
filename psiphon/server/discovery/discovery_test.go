@@ -149,9 +149,9 @@ func runDiscoveryTest(tt *discoveryTest, now time.Time) error {
 	discovery.Start()
 
 	for _, check := range tt.checks {
-		time.Sleep(1 * time.Second) // let async code complete
+		time.Sleep(10 * time.Millisecond) // let async code complete
 		clk.SetNow(check.t)
-		time.Sleep(1 * time.Second) // let async code complete
+		time.Sleep(10 * time.Millisecond) // let async code complete
 		discovered := discovery.SelectServers(net.IP{})
 		discoveredIPs := make([]string, len(discovered))
 		for i := range discovered {

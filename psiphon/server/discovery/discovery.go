@@ -167,7 +167,8 @@ func (d *Discovery) Start() {
 			// Note: servers with a discovery date range in the past are not
 			// removed from d.all in case the wall clock has drifted;
 			// otherwise, we risk removing them prematurely.
-			servers, nextUpdate := discoverableServers(d.all, d.clk)
+			var servers []*psinet.DiscoveryServer
+			servers, nextUpdate = discoverableServers(d.all, d.clk)
 
 			// Update the set of discoverable servers.
 			d.strategy.serversChanged(servers)
