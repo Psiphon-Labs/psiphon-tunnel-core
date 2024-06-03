@@ -693,12 +693,13 @@ func NoticeRequestedTactics(dialParams *DialParameters) {
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool) {
+func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool, serverRegion string) {
 	singletonNoticeLogger.outputNotice(
 		"ActiveTunnel", noticeIsDiagnostic,
 		"diagnosticID", diagnosticID,
 		"protocol", protocol,
-		"isTCS", isTCS)
+		"isTCS", isTCS,
+		"serverRegion", serverRegion)
 }
 
 // NoticeSocksProxyPortInUse is a failure to use the configured LocalSocksProxyPort

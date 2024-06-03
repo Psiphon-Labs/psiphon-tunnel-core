@@ -136,7 +136,6 @@ public class PsiphonTunnel {
          * @param message The operator message received.
          */
         default void onInproxyOperatorMessage(String message) {}
-
         /**
          * Called when tunnel-core reports proxy usage statistics.
          * By default onInproxyProxyActivity is disabled. Enable it by setting
@@ -147,6 +146,11 @@ public class PsiphonTunnel {
          * @param bytesDown Bytes downloaded through the proxy since the last report.
          */
         default void onInproxyProxyActivity(int connectingClients, int connectedClients,long bytesUp, long bytesDown) {}
+        /**
+         * Called when tunnel-core reports connected server region information.
+         * @param region The server region received.
+         */
+        default public void onConnectedServerRegion(String region) {}
         default public void onExiting() {}
     }
 
@@ -1095,6 +1099,9 @@ public class PsiphonTunnel {
                       enableUdpGwKeepalive();
                     }
                 }
+                // Also report the tunnel's egress region to the host service
+                mHostService.onConnectedServerRegion(
+                        notice.getJSONObject("data").getString("serverRegion"));
             } else if (noticeType.equals("ApplicationParameters")) {
                 mHostService.onApplicationParameters(
                     notice.getJSONObject("data").get("parameters"));
