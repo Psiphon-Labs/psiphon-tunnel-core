@@ -1174,6 +1174,18 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
+    else if ([noticeType isEqualToString:@"ActiveTunnel"]) {
+        id region = [notice valueForKeyPath:@"data.serverRegion"];
+        if (![region isKindOfClass:[NSString class]]) {
+            [self logMessage:[NSString stringWithFormat: @"ActiveTunnel notice missing data.serverRegion: %@", noticeJSON]];
+            return;
+        }
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnectedServerRegion:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onConnectedServerRegion:region];
+            });
+        }
+    }
     else if ([noticeType isEqualToString:@"InternalError"]) {
         internalError = TRUE;
     }

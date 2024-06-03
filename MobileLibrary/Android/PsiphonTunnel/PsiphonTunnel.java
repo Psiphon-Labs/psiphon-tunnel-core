@@ -131,6 +131,11 @@ public class PsiphonTunnel {
         default public void onTrafficRateLimits(long upstreamBytesPerSecond, long downstreamBytesPerSecond) {}
         default public void onApplicationParameters(Object parameters) {}
         default public void onServerAlert(String reason, String subject, List<String> actionURLs) {}
+        /**
+         * Called when tunnel-core reports connected server region information.
+         * @param region The server region received.
+         */
+        default public void onConnectedServerRegion(String region) {}
         default public void onExiting() {}
     }
 
@@ -1079,6 +1084,9 @@ public class PsiphonTunnel {
                       enableUdpGwKeepalive();
                     }
                 }
+                // Also report the tunnel's egress region to the host service
+                mHostService.onConnectedServerRegion(
+                        notice.getJSONObject("data").getString("serverRegion"));
             } else if (noticeType.equals("ApplicationParameters")) {
                 mHostService.onApplicationParameters(
                     notice.getJSONObject("data").get("parameters"));
