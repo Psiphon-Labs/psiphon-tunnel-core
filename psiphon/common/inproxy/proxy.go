@@ -581,8 +581,8 @@ func (p *Proxy) proxyOneClient(
 		})
 
 	p.config.Logger.WithTraceFields(common.LogFields{
-		"delay":       requestDelay,
-		"elapsedTime": time.Since(announceStartTime),
+		"delay":       requestDelay.String(),
+		"elapsedTime": time.Since(announceStartTime).String(),
 	}).Info("announcement request")
 
 	if err != nil {
