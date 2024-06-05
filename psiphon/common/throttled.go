@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/juju/ratelimit"
+	"golang.org/x/time/rate"
 )
 
 // RateLimits specify the rate limits for a ThrottledConn.
@@ -72,20 +72,28 @@ type ThrottledConn struct {
 	writeBytesPerSecond   int64
 	closeAfterExhausted   int32
 	readLock              sync.Mutex
-	readRateLimiter       *ratelimit.Bucket
+	readRateLimiter       *rate.Limiter
 	readDelayTimer        *time.Timer
 	writeLock             sync.Mutex
-	writeRateLimiter      *ratelimit.Bucket
+	writeRateLimiter      *rate.Limiter
 	writeDelayTimer       *time.Timer
 	isClosed              int32
 	stopBroadcast         chan struct{}
+	isStream              bool
 	net.Conn
 }
 
 // NewThrottledConn initializes a new ThrottledConn.
-func NewThrottledConn(conn net.Conn, limits RateLimits) *ThrottledConn {
+//
+// Set isStreamConn to true when conn is stream-oriented, such as TCP, and
+// false when the conn is packet-oriented, such as UDP. When conn is a
+// stream, reads and writes may be split to accomodate rate limits.
+func NewThrottledConn(
+	conn net.Conn, isStream bool, limits RateLimits) *ThrottledConn {
+
 	throttledConn := &ThrottledConn{
 		Conn:          conn,
+		isStream:      isStream,
 		stopBroadcast: make(chan struct{}),
 	}
 	throttledConn.SetLimits(limits)
@@ -137,10 +145,8 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 	conn.readLock.Lock()
 	defer conn.readLock.Unlock()
 
-	select {
-	case <-conn.stopBroadcast:
+	if atomic.LoadInt32(&conn.isClosed) == 1 {
 		return 0, errors.TraceNew("throttled conn closed")
-	default:
 	}
 
 	// Use the base conn until the unthrottled count is
@@ -158,34 +164,68 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
-	rate := atomic.SwapInt64(&conn.readBytesPerSecond, -1)
+	readRate := atomic.SwapInt64(&conn.readBytesPerSecond, -1)
 
-	if rate != -1 {
+	if readRate != -1 {
 		// SetLimits has been called and a new rate limiter
 		// must be initialized. When no limit is specified,
 		// the reader/writer is simply the base conn.
 		// No state is retained from the previous rate limiter,
 		// so a pending I/O throttle sleep may be skipped when
 		// the old and new rate are similar.
-		if rate == 0 {
+		if readRate == 0 {
 			conn.readRateLimiter = nil
 		} else {
 			conn.readRateLimiter =
-				ratelimit.NewBucketWithRate(float64(rate), rate)
+				rate.NewLimiter(rate.Limit(readRate), int(readRate))
+		}
+	}
+
+	// The number of bytes read cannot exceed the rate limiter burst size,
+	// which is enforced by rate.Limiter.ReserveN. Reduce any read buffer
+	// size to be at most the burst size.
+	//
+	// Read should still return as soon as read bytes are available; and the
+	// number of bytes that will be received is unknown; so there is no loop
+	// here to read more bytes. Reducing the read buffer size minimizes
+	// latency for the up-to-burst-size bytes read, whereas allowing a full
+	// read followed by multiple ReserveN calls and sleeps would increase
+	// latency.
+	//
+	// In practise, with Psiphon tunnels, throttling is not applied until
+	// after the Psiphon API handshake, so read buffer reductions won't
+	// impact early obfuscation traffic shaping; and reads are on the order
+	// of one SSH "packet", up to 32K, unlikely to be split for all but the
+	// most restrictive of rate limits.
+
+	if conn.readRateLimiter != nil {
+		burst := conn.readRateLimiter.Burst()
+		if len(buffer) > burst {
+			if !conn.isStream {
+				return 0, errors.TraceNew("non-stream read buffer exceeds burst")
+			}
+			buffer = buffer[:burst]
 		}
 	}
 
 	n, err := conn.Conn.Read(buffer)
 
-	// Sleep to enforce the rate limit. This is the same logic as implemented in
-	// ratelimit.Reader, but using a timer and a close signal instead of an
-	// uninterruptible time.Sleep.
-	//
-	// The readDelayTimer is always expired/stopped and drained after this code
-	// block and is ready to be Reset on the next call.
+	if n > 0 && conn.readRateLimiter != nil {
 
-	if n >= 0 && conn.readRateLimiter != nil {
-		sleepDuration := conn.readRateLimiter.Take(int64(n))
+		// While rate.Limiter.WaitN would be simpler to use, internally Wait
+		// creates a new timer for every call which must sleep, which is
+		// expected to be most calls. Instead, call ReserveN to get the sleep
+		// time and reuse one timer without allocation.
+		//
+		// TODO: avoid allocation: ReserveN allocates a *Reservation; while
+		// the internal reserveN returns a struct, not a pointer.
+
+		reservation := conn.readRateLimiter.ReserveN(time.Now(), n)
+		if !reservation.OK() {
+			// This error is not expected, given the buffer size adjustment.
+			return 0, errors.TraceNew("burst size exceeded")
+		}
+		sleepDuration := reservation.Delay()
 		if sleepDuration > 0 {
 			if conn.readDelayTimer == nil {
 				conn.readDelayTimer = time.NewTimer(sleepDuration)
@@ -202,7 +242,8 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 		}
 	}
 
-	return n, errors.Trace(err)
+	// Don't wrap I/O errors
+	return n, err
 }
 
 func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
@@ -212,10 +253,8 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 	conn.writeLock.Lock()
 	defer conn.writeLock.Unlock()
 
-	select {
-	case <-conn.stopBroadcast:
+	if atomic.LoadInt32(&conn.isClosed) == 1 {
 		return 0, errors.TraceNew("throttled conn closed")
-	default:
 	}
 
 	if atomic.LoadInt64(&conn.writeUnthrottledBytes) > 0 {
@@ -229,19 +268,58 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
-	rate := atomic.SwapInt64(&conn.writeBytesPerSecond, -1)
+	writeRate := atomic.SwapInt64(&conn.writeBytesPerSecond, -1)
 
-	if rate != -1 {
-		if rate == 0 {
+	if writeRate != -1 {
+		if writeRate == 0 {
 			conn.writeRateLimiter = nil
 		} else {
 			conn.writeRateLimiter =
-				ratelimit.NewBucketWithRate(float64(rate), rate)
+				rate.NewLimiter(rate.Limit(writeRate), int(writeRate))
 		}
 	}
 
-	if len(buffer) >= 0 && conn.writeRateLimiter != nil {
-		sleepDuration := conn.writeRateLimiter.Take(int64(len(buffer)))
+	if conn.writeRateLimiter == nil {
+		n, err := conn.Conn.Write(buffer)
+		// Don't wrap I/O errors
+		return n, err
+	}
+
+	// The number of bytes written cannot exceed the rate limiter burst size,
+	// which is enforced by rate.Limiter.ReserveN. Split writes to be at most
+	// the burst size.
+	//
+	// Splitting writes may have some effect on the shape of TCP packets sent
+	// on the network.
+	//
+	// In practise, with Psiphon tunnels, throttling is not applied until
+	// after the Psiphon API handshake, so write splits won't impact early
+	// obfuscation traffic shaping; and writes are on the order of one
+	// SSH "packet", up to 32K, unlikely to be split for all but the most
+	// restrictive of rate limits.
+
+	burst := conn.writeRateLimiter.Burst()
+	if !conn.isStream && len(buffer) > burst {
+		return 0, errors.TraceNew("non-stream write exceeds burst")
+	}
+	totalWritten := 0
+	for i := 0; i < len(buffer); i += burst {
+
+		j := i + burst
+		if j > len(buffer) {
+			j = len(buffer)
+		}
+		b := buffer[i:j]
+
+		// See comment in Read regarding rate.Limiter.ReserveN vs.
+		// rate.Limiter.WaitN.
+
+		reservation := conn.writeRateLimiter.ReserveN(time.Now(), len(b))
+		if !reservation.OK() {
+			// This error is not expected, given the write split adjustments.
+			return 0, errors.TraceNew("burst size exceeded")
+		}
+		sleepDuration := reservation.Delay()
 		if sleepDuration > 0 {
 			if conn.writeDelayTimer == nil {
 				conn.writeDelayTimer = time.NewTimer(sleepDuration)
@@ -256,11 +334,16 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 				}
 			}
 		}
+
+		n, err := conn.Conn.Write(b)
+		totalWritten += n
+		if err != nil {
+			// Don't wrap I/O errors
+			return totalWritten, err
+		}
 	}
 
-	n, err := conn.Conn.Write(buffer)
-
-	return n, errors.Trace(err)
+	return totalWritten, nil
 }
 
 func (conn *ThrottledConn) Close() error {

@@ -23,13 +23,14 @@ import (
 	std_errors "errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/gammazero/deque"
-	"github.com/juju/ratelimit"
+	"golang.org/x/time/rate"
 )
 
 // TTLs should be aligned with STUN hole punch lifetimes.
@@ -48,7 +49,7 @@ const (
 // coordinates pending proxy answers and routes answers to the awaiting
 // client offer handler.
 //
-// Matching prioritizes selecting the oldest announcments and client offers,
+// Matching prioritizes selecting the oldest announcements and client offers,
 // as they are closest to timing out.
 //
 // The client and proxy must supply matching personal or common compartment
@@ -65,7 +66,7 @@ const (
 // Candidates with unknown NAT types and mobile network types are assumed to
 // have the most limited NAT traversal capability.
 //
-// Preferred matchings take priority over announcment age.
+// Preferred matchings take priority over announcement age.
 //
 // The client and proxy will not match if they are in the same country and
 // ASN, as it's assumed that doesn't provide any blocking circumvention
@@ -202,6 +203,28 @@ type MatchAnswer struct {
 	ProxyAnswerSDP               WebRTCSessionDescription
 }
 
+// MatchMetrics records statistics about the match queue state at the time a
+// match is made.
+type MatchMetrics struct {
+	OfferMatchIndex        int
+	OfferQueueSize         int
+	AnnouncementMatchIndex int
+	AnnouncementQueueSize  int
+}
+
+// GetMetrics converts MatchMetrics to loggable fields.
+func (metrics *MatchMetrics) GetMetrics() common.LogFields {
+	if metrics == nil {
+		return nil
+	}
+	return common.LogFields{
+		"offer_match_index":        metrics.OfferMatchIndex,
+		"offer_queue_size":         metrics.OfferQueueSize,
+		"announcement_match_index": metrics.AnnouncementMatchIndex,
+		"announcement_queue_size":  metrics.AnnouncementQueueSize,
+	}
+}
+
 // announcementEntry is an announcement queue entry, an announcement with its
 // associated lifetime context and signaling channel.
 type announcementEntry struct {
@@ -209,15 +232,27 @@ type announcementEntry struct {
 	limitIP      string
 	announcement *MatchAnnouncement
 	offerChan    chan *MatchOffer
+	matchMetrics atomic.Value
+}
+
+func (announcementEntry *announcementEntry) getMatchMetrics() *MatchMetrics {
+	matchMetrics, _ := announcementEntry.matchMetrics.Load().(*MatchMetrics)
+	return matchMetrics
 }
 
 // offerEntry is an offer queue entry, an offer with its associated lifetime
 // context and signaling channel.
 type offerEntry struct {
-	ctx        context.Context
-	limitIP    string
-	offer      *MatchOffer
-	answerChan chan *answerInfo
+	ctx          context.Context
+	limitIP      string
+	offer        *MatchOffer
+	answerChan   chan *answerInfo
+	matchMetrics atomic.Value
+}
+
+func (offerEntry *offerEntry) getMatchMetrics() *MatchMetrics {
+	matchMetrics, _ := offerEntry.matchMetrics.Load().(*MatchMetrics)
+	return matchMetrics
 }
 
 // answerInfo is an answer and its associated announcement.
@@ -373,10 +408,13 @@ func (m *Matcher) Stop() {
 //
 // The offer is sent to the proxy by the broker, and then the proxy sends its
 // answer back to the broker, which calls Answer with that value.
+//
+// The returned MatchMetrics is nil unless a match is made; and non-nil if a
+// match is made, even if there is a later error.
 func (m *Matcher) Announce(
 	ctx context.Context,
 	proxyIP string,
-	proxyAnnouncement *MatchAnnouncement) (*MatchOffer, error) {
+	proxyAnnouncement *MatchAnnouncement) (*MatchOffer, *MatchMetrics, error) {
 
 	announcementEntry := &announcementEntry{
 		ctx:          ctx,
@@ -387,7 +425,7 @@ func (m *Matcher) Announce(
 
 	err := m.addAnnouncementEntry(announcementEntry)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	// Await client offer.
@@ -397,12 +435,12 @@ func (m *Matcher) Announce(
 	select {
 	case <-ctx.Done():
 		m.removeAnnouncementEntry(announcementEntry)
-		return nil, errors.Trace(ctx.Err())
+		return nil, announcementEntry.getMatchMetrics(), errors.Trace(ctx.Err())
 
 	case clientOffer = <-announcementEntry.offerChan:
 	}
 
-	return clientOffer, nil
+	return clientOffer, announcementEntry.getMatchMetrics(), nil
 }
 
 // Offer enqueues the client offer and blocks until it is matched with a
@@ -412,10 +450,13 @@ func (m *Matcher) Announce(
 // The answer is returned to the client by the broker, and the WebRTC
 // connection is dialed. The original announcement is also returned, so its
 // match properties can be logged.
+//
+// The returned MatchMetrics is nil unless a match is made; and non-nil if a
+// match is made, even if there is a later error.
 func (m *Matcher) Offer(
 	ctx context.Context,
 	clientIP string,
-	clientOffer *MatchOffer) (*MatchAnswer, *MatchAnnouncement, error) {
+	clientOffer *MatchOffer) (*MatchAnswer, *MatchAnnouncement, *MatchMetrics, error) {
 
 	offerEntry := &offerEntry{
 		ctx:        ctx,
@@ -426,7 +467,7 @@ func (m *Matcher) Offer(
 
 	err := m.addOfferEntry(offerEntry)
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, nil, nil, errors.Trace(err)
 	}
 
 	// Await proxy answer.
@@ -442,7 +483,8 @@ func (m *Matcher) Offer(
 		// get removed. But a client may abort its request earlier than the
 		// timeout.
 
-		return nil, nil, errors.Trace(ctx.Err())
+		return nil, nil,
+			offerEntry.getMatchMetrics(), errors.Trace(ctx.Err())
 
 	case proxyAnswerInfo = <-offerEntry.answerChan:
 	}
@@ -450,18 +492,23 @@ func (m *Matcher) Offer(
 	if proxyAnswerInfo == nil {
 
 		// nil will be delivered to the channel when either the proxy
-		// announcment request concurrently timed out, or the answer
+		// announcement request concurrently timed out, or the answer
 		// indicated a proxy error, or the answer did not arrive in time.
-		return nil, nil, errors.TraceNew("no answer")
+		return nil, nil,
+			offerEntry.getMatchMetrics(), errors.TraceNew("no answer")
 	}
 
 	// This is a sanity check and not expected to fail.
 	if !proxyAnswerInfo.answer.ConnectionID.Equal(
 		proxyAnswerInfo.announcement.ConnectionID) {
-		return nil, nil, errors.TraceNew("unexpected connection ID")
+		return nil, nil,
+			offerEntry.getMatchMetrics(), errors.TraceNew("unexpected connection ID")
 	}
 
-	return proxyAnswerInfo.answer, proxyAnswerInfo.announcement, nil
+	return proxyAnswerInfo.answer,
+		proxyAnswerInfo.announcement,
+		offerEntry.getMatchMetrics(),
+		nil
 }
 
 // Answer delivers an answer from the proxy for a previously matched offer.
@@ -569,36 +616,28 @@ func (m *Matcher) matchAllOffers() {
 			continue
 		}
 
+		// Get the matched announcement entry.
+
+		announcementEntry := m.announcementQueue.At(j)
+
+		// Record match metrics.
+
+		matchMetrics := &MatchMetrics{
+			OfferMatchIndex:        i,
+			OfferQueueSize:         m.offerQueue.Len(),
+			AnnouncementMatchIndex: j,
+			AnnouncementQueueSize:  m.announcementQueue.Len(),
+		}
+
+		offerEntry.matchMetrics.Store(matchMetrics)
+		announcementEntry.matchMetrics.Store(matchMetrics)
+
 		// Remove the matched announcement from the queue. Send the offer to
 		// the announcement entry's offerChan, which will deliver it to the
 		// blocked Announce call. Add a pending answers entry to await the
 		// proxy's follow up Answer call. The TTL for the pending answer
 		// entry is set to the matched Offer call's ctx, as the answer is
 		// only useful as long as the client is still waiting.
-
-		announcementEntry := m.announcementQueue.At(j)
-
-		if m.config.Logger.IsLogLevelDebug() {
-
-			announcementProxyID :=
-				announcementEntry.announcement.ProxyID
-			announcementConnectionID :=
-				announcementEntry.announcement.ConnectionID
-			announcementCommonCompartmentIDs :=
-				announcementEntry.announcement.Properties.CommonCompartmentIDs
-			offerCommonCompartmentIDs :=
-				offerEntry.offer.Properties.CommonCompartmentIDs
-
-			m.config.Logger.WithTraceFields(common.LogFields{
-				"announcement_proxy_id":               announcementProxyID,
-				"announcement_connection_id":          announcementConnectionID,
-				"announcement_common_compartment_ids": announcementCommonCompartmentIDs,
-				"offer_common_compartment_ids":        offerCommonCompartmentIDs,
-				"match_index":                         j,
-				"announcement_queue_size":             m.announcementQueue.Len(),
-				"offer_queue_size":                    m.offerQueue.Len(),
-			}).Debug("match metrics")
-		}
 
 		expiry := lrucache.DefaultExpiration
 		deadline, ok := offerEntry.ctx.Deadline()
@@ -636,8 +675,8 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 	// Assumes the caller has the queue mutexed locked.
 
 	// Check each announcement in turn, and select a match. There is an
-	// implicit preference for older proxy announcments, sooner to timeout, at the
-	// front of the queue.
+	// implicit preference for older proxy announcements, sooner to timeout,
+	// at the front of the queue.
 	//
 	// Limitation: since this logic matches each enqueued client in turn, it will
 	// only make the optimal NAT match for the oldest enqueued client vs. all
@@ -667,6 +706,14 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (int, bool) {
 	bestMatchCompartment := false
 
 	end := m.announcementQueue.Len()
+
+	// TODO: add queue indexing to facilitate skipping ahead to a matching
+	// personal compartment ID, if any, when personal-only matching is
+	// required. Personal matching may often require near-full queue scans
+	// when looking for a match. Common compartment matching may also benefit
+	// from indexing, although with a handful of common compartment IDs more
+	// or less uniformly distributed, frequent long scans are not expected in
+	// practise.
 
 	for i := 0; i < end; i++ {
 
@@ -815,19 +862,19 @@ func (m *Matcher) applyLimits(isAnnouncement bool, limitIP string, proxyID ID) e
 
 	if quantity > 0 && interval > 0 {
 
-		var rateLimiter *ratelimit.Bucket
+		var rateLimiter *rate.Limiter
 
 		entry, ok := queueRateLimiters.Get(limitIP)
 		if ok {
-			rateLimiter = entry.(*ratelimit.Bucket)
+			rateLimiter = entry.(*rate.Limiter)
 		} else {
-			rateLimiter = ratelimit.NewBucketWithQuantum(
-				interval, int64(quantity), int64(quantity))
+			limit := float64(quantity) / interval.Seconds()
+			rateLimiter = rate.NewLimiter(rate.Limit(limit), quantity)
 			queueRateLimiters.Set(
 				limitIP, rateLimiter, interval)
 		}
 
-		if rateLimiter.TakeAvailable(1) < 1 {
+		if !rateLimiter.Allow() {
 			return errors.Trace(
 				NewMatcherLimitError(std_errors.New("rate exceeded for IP")))
 		}

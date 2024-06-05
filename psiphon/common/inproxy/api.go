@@ -162,6 +162,18 @@ func (p NetworkProtocol) String() string {
 	return ""
 }
 
+// IsStream indicates if the NetworkProtocol is stream-oriented (e.g., TCP)
+// and not packet-oriented (e.g., UDP).
+func (p NetworkProtocol) IsStream() bool {
+	switch p {
+	case NetworkProtocolTCP:
+		return true
+	case NetworkProtocolUDP:
+		return false
+	}
+	return false
+}
+
 // ProxyMetrics are network topolology and resource metrics provided by a
 // proxy to a broker. The broker uses this information when matching proxies
 // and clients.

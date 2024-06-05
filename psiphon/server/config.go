@@ -471,6 +471,11 @@ type Config struct {
 	// and proxies from the same ASN. This parameter is for testing only.
 	InproxyBrokerAllowCommonASNMatching bool
 
+	// InproxyBrokerAllowBogonWebRTCConnections overrides the default broker
+	// SDP validation behavior, which doesn't allow private network WebRTC
+	// candidates. This parameter is for testing only.
+	InproxyBrokerAllowBogonWebRTCConnections bool
+
 	// InproxyServerSessionPrivateKey specifies the server's in-proxy session
 	// private key and derived public key used by brokers. This value is
 	// required when running in-proxy tunnel protocols.

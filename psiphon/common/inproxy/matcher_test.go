@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func runTestMatcher() error {
 
 	limitEntryCount := 50
 	rateLimitQuantity := 100
-	rateLimitInterval := 500 * time.Millisecond
+	rateLimitInterval := 1000 * time.Millisecond
 
 	logger := newTestLogger()
 
@@ -88,6 +89,13 @@ func runTestMatcher() error {
 		}
 	}
 
+	checkMatchMetrics := func(metrics *MatchMetrics) error {
+		if metrics.OfferQueueSize < 1 || metrics.AnnouncementQueueSize < 1 {
+			return errors.TraceNew("unexpected match metrics")
+		}
+		return nil
+	}
+
 	proxyIP := randomIPAddress()
 
 	proxyFunc := func(
@@ -102,10 +110,16 @@ func runTestMatcher() error {
 		defer cancelFunc()
 
 		announcement := makeAnnouncement(matchProperties)
-		offer, err := m.Announce(ctx, proxyIP, announcement)
+		offer, matchMetrics, err := m.Announce(ctx, proxyIP, announcement)
 		if err != nil {
 			resultChan <- errors.Trace(err)
 			return
+		} else {
+			err := checkMatchMetrics(matchMetrics)
+			if err != nil {
+				resultChan <- errors.Trace(err)
+				return
+			}
 		}
 
 		if waitBeforeAnswer != nil {
@@ -137,7 +151,7 @@ func runTestMatcher() error {
 		defer cancelFunc()
 
 		offer := makeOffer(matchProperties)
-		answer, _, err := m.Offer(ctx, clientIP, offer)
+		answer, _, matchMetrics, err := m.Offer(ctx, clientIP, offer)
 		if err != nil {
 			resultChan <- errors.Trace(err)
 			return
@@ -145,6 +159,12 @@ func runTestMatcher() error {
 		if answer.SelectedProxyProtocolVersion != offer.ClientProxyProtocolVersion {
 			resultChan <- errors.TraceNew("unexpected selected proxy protocol version")
 			return
+		} else {
+			err := checkMatchMetrics(matchMetrics)
+			if err != nil {
+				resultChan <- errors.Trace(err)
+				return
+			}
 		}
 		resultChan <- nil
 	}
@@ -293,11 +313,19 @@ func runTestMatcher() error {
 	maxEntries = rateLimitQuantity
 	maxEntriesProxyResultChan = make(chan error, maxEntries)
 
+	waitGroup := new(sync.WaitGroup)
 	for i := 0; i < maxEntries; i++ {
-		go proxyFunc(maxEntriesProxyResultChan, proxyIP, &MatchProperties{}, 1*time.Microsecond, nil, true)
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			proxyFunc(maxEntriesProxyResultChan, proxyIP, &MatchProperties{}, 1*time.Microsecond, nil, true)
+		}()
 	}
 
-	time.Sleep(rateLimitInterval / 2)
+	// Use a wait group to ensure all maxEntries have hit the rate limiter
+	// without sleeping before the next attempt, as any sleep can increase
+	// the rate limiter token count.
+	waitGroup.Wait()
 
 	// the next enqueue should fail with "rate exceeded"
 	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
@@ -311,11 +339,16 @@ func runTestMatcher() error {
 	maxEntries = rateLimitQuantity
 	maxEntriesClientResultChan = make(chan error, maxEntries)
 
+	waitGroup = new(sync.WaitGroup)
 	for i := 0; i < rateLimitQuantity; i++ {
-		go clientFunc(maxEntriesClientResultChan, clientIP, &MatchProperties{}, 1*time.Microsecond)
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			clientFunc(maxEntriesClientResultChan, clientIP, &MatchProperties{}, 1*time.Microsecond)
+		}()
 	}
 
-	time.Sleep(rateLimitInterval / 2)
+	waitGroup.Wait()
 
 	// enqueue should fail with "rate exceeded"
 	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)

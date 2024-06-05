@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
+	"github.com/shirou/gopsutil/v4/cpu"
 )
 
 // RunServices initializes support functions including logging and GeoIP services;
@@ -182,10 +183,12 @@ func RunServices(configJSON []byte) (retErr error) {
 			defer ticker.Stop()
 
 			logNetworkBytes := true
+			logCPU := true
 
 			previousNetworkBytesReceived, previousNetworkBytesSent, err := getNetworkBytesTransferred()
 			if err != nil {
-				log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error("failed to get initial network bytes transferred")
+				log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error(
+					"failed to get initial network bytes transferred")
 
 				// If getNetworkBytesTransferred fails, stop logging network
 				// bytes for the lifetime of this process, in case there's a
@@ -194,24 +197,49 @@ func RunServices(configJSON []byte) (retErr error) {
 				logNetworkBytes = false
 			}
 
+			// Establish initial previous CPU stats. The previous CPU stats
+			// are stored internally by gopsutil/cpu.
+			_, err = getCPUPercent()
+			if err != nil {
+				log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error(
+					"failed to get initial CPU percent")
+
+				logCPU = false
+			}
+
 			for {
 				select {
 				case <-shutdownBroadcast:
 					return
 				case <-ticker.C:
-					var networkBytesReceived, networkBytesSent int64
 
+					var networkBytesReceived, networkBytesSent int64
 					if logNetworkBytes {
 						currentNetworkBytesReceived, currentNetworkBytesSent, err := getNetworkBytesTransferred()
 						if err != nil {
-							log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error("failed to get current network bytes transferred")
+							log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error(
+								"failed to get current network bytes transferred")
 							logNetworkBytes = false
 
 						} else {
 							networkBytesReceived = currentNetworkBytesReceived - previousNetworkBytesReceived
 							networkBytesSent = currentNetworkBytesSent - previousNetworkBytesSent
 
-							previousNetworkBytesReceived, previousNetworkBytesSent = currentNetworkBytesReceived, currentNetworkBytesSent
+							previousNetworkBytesReceived, previousNetworkBytesSent =
+								currentNetworkBytesReceived, currentNetworkBytesSent
+						}
+					}
+
+					var CPUPercent float64
+					if logCPU {
+						recentCPUPercent, err := getCPUPercent()
+						if err != nil {
+							log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Error(
+								"failed to get recent CPU percent")
+							logCPU = false
+
+						} else {
+							CPUPercent = recentCPUPercent
 						}
 					}
 
@@ -220,7 +248,8 @@ func RunServices(configJSON []byte) (retErr error) {
 					// networkBytesSent may be < 0. logServerLoad will not
 					// log these negative values.
 
-					logServerLoad(support, logNetworkBytes, networkBytesReceived, networkBytesSent)
+					logServerLoad(
+						support, logNetworkBytes, networkBytesReceived, networkBytesSent, logCPU, CPUPercent)
 				}
 			}
 		}()
@@ -324,7 +353,7 @@ loop:
 			case signalProcessProfiles <- struct{}{}:
 			default:
 			}
-			logServerLoad(support, false, 0, 0)
+			logServerLoad(support, false, 0, 0, false, 0)
 
 		case <-systemStopSignal:
 			log.WithTrace().Info("shutdown by system")
@@ -402,7 +431,26 @@ func outputProcessProfiles(config *Config, filenameSuffix string) {
 	}
 }
 
-func logServerLoad(support *SupportServices, logNetworkBytes bool, networkBytesReceived int64, networkBytesSent int64) {
+// getCPUPercent returns the overall system CPU percent (not the percent used
+// by this process), across all cores.
+func getCPUPercent() (float64, error) {
+	values, err := cpu.Percent(0, false)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	if len(values) != 1 {
+		return 0, errors.TraceNew("unexpected cpu.Percent return value")
+	}
+	return values[0], nil
+}
+
+func logServerLoad(
+	support *SupportServices,
+	logNetworkBytes bool,
+	networkBytesReceived int64,
+	networkBytesSent int64,
+	logCPU bool,
+	CPUPercent float64) {
 
 	serverLoad := getRuntimeMetrics()
 
@@ -419,6 +467,10 @@ func logServerLoad(support *SupportServices, logNetworkBytes bool, networkBytesR
 		if networkBytesSent >= 0 {
 			serverLoad["network_bytes_sent"] = networkBytesSent
 		}
+	}
+
+	if logCPU {
+		serverLoad["cpu_percent"] = CPUPercent
 	}
 
 	establishTunnels, establishLimitedCount :=

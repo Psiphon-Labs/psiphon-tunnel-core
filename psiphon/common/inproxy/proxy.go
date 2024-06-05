@@ -571,6 +571,7 @@ func (p *Proxy) proxyOneClient(
 	//
 	// ProxyAnnounce applies an additional request timeout to facilitate
 	// long-polling.
+	announceStartTime := time.Now()
 	announceResponse, err := brokerClient.ProxyAnnounce(
 		ctx,
 		requestDelay,
@@ -578,6 +579,12 @@ func (p *Proxy) proxyOneClient(
 			PersonalCompartmentIDs: brokerCoordinator.PersonalCompartmentIDs(),
 			Metrics:                metrics,
 		})
+
+	p.config.Logger.WithTraceFields(common.LogFields{
+		"delay":       requestDelay,
+		"elapsedTime": time.Since(announceStartTime),
+	}).Info("announcement request")
+
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}
@@ -787,6 +794,7 @@ func (p *Proxy) proxyOneClient(
 
 	destinationConn = common.NewThrottledConn(
 		destinationConn,
+		announceResponse.NetworkProtocol.IsStream(),
 		common.RateLimits{
 			ReadBytesPerSecond:  int64(p.config.LimitUpstreamBytesPerSecond),
 			WriteBytesPerSecond: int64(p.config.LimitDownstreamBytesPerSecond),

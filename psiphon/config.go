@@ -647,16 +647,57 @@ type Config struct {
 	// IDs used by an in-proxy proxy. Personal compartment IDs are
 	// distributed from proxy operators to client users out-of-band and
 	// provide a mechanism to allow only certain clients to use a proxy.
+	//
+	// See InproxyClientPersonalCompartmentIDs comment for limitations.
 	InproxyProxyPersonalCompartmentIDs []string
 
 	// InproxyClientPersonalCompartmentIDs specifies the personal compartment
 	// IDs used by an in-proxy client. Personal compartment IDs are
 	// distributed from proxy operators to client users out-of-band and
-	// provide a mechanism to ensure a client only uses a certain proxy.
+	// provide a mechanism to ensure a client uses only a certain proxy for
+	// all tunnels connections.
 	//
 	// When InproxyClientPersonalCompartmentIDs is set, the client will use
 	// only in-proxy protocols, ensuring that all connections go through the
 	// proxy or proxies with the same personal compartment IDs.
+	//
+	// Limitations:
+	//
+	// - While fully functional, the personal pairing mode has a number of
+	//   limitations that make the current implementation less suitable for
+	//   large scale deployment.
+	//
+	// - Since the mode requires an in-proxy connection to a proxy, announcing
+	//   with the corresponding personal compartment ID, not only must that
+	//   proxy be available, but also a broker, and both the client and proxy
+	//   must rendezvous at the same broker.
+	//
+	// - Currently, the client tunnel establishment algorithm does not launch
+	//   an untunneled tactics request as long as there is a cached tactics
+	//   with a valid TTL. The assumption, in regular mode, is that the
+	//   cached tactics will suffice, and any new tactics will be obtained
+	//   from any Psiphon server connection. Since broker specs are obtained
+	//   solely from tactics, if brokers are removed, reconfigured, or even
+	//   if the order is changed, personal mode may fail to connect until
+	//   cached tactics expire.
+	//
+	// - In personal mode, clients and proxies use a simplistic approach to
+	//   rendezvous: always select the first broker spec. This works, but is
+	//   not robust in terms of load balancing, and fails if the first broker
+	//   is unreachable or overloaded. Non-personal in-proxy dials can simply
+	//   use any available broker.
+	//
+	// - The broker matching queues lack compartment ID indexing. For a
+	//   handful of common compartment IDs, this is not expected to be an
+	//   issue. For personal compartment IDs, this may lead to frequency
+	//   near-full scans of the queues when looking for a match.
+	//
+	// - In personal mode, all establishment candidates must be in-proxy
+	//   dials, all using the same broker. Many concurrent, fronted broker
+	//   requests may result in CDN rate limiting, requiring some mechanism
+	//   to delay or spread the requests, as is currently done only for
+	//   batches of proxy announcements.
+	//
 	InproxyClientPersonalCompartmentIDs []string
 
 	// EmitInproxyProxyActivity indicates whether to emit frequent notices

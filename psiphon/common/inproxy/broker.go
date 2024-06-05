@@ -442,6 +442,7 @@ func (b *Broker) handleProxyAnnounce(
 	var logFields common.LogFields
 	var newTacticsTag string
 	var clientOffer *MatchOffer
+	var matchMetrics *MatchMetrics
 	var timedOut bool
 	var limitedErr error
 
@@ -503,6 +504,7 @@ func (b *Broker) handleProxyAnnounce(
 			logFields["error"] = limitedErr.Error()
 		}
 		logFields.Add(transportLogFields)
+		logFields.Add(matchMetrics.GetMetrics())
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
 	}()
 
@@ -582,7 +584,7 @@ func (b *Broker) handleProxyAnnounce(
 	defer cancelFunc()
 	extendTransportTimeout(timeout)
 
-	clientOffer, err = b.matcher.Announce(
+	clientOffer, matchMetrics, err = b.matcher.Announce(
 		announceCtx,
 		proxyIP,
 		&MatchAnnouncement{
@@ -708,6 +710,7 @@ func (b *Broker) handleClientOffer(
 	var clientMatchOffer *MatchOffer
 	var proxyMatchAnnouncement *MatchAnnouncement
 	var proxyAnswer *MatchAnswer
+	var matchMetrics *MatchMetrics
 	var timedOut bool
 	var limitedErr error
 
@@ -747,6 +750,7 @@ func (b *Broker) handleClientOffer(
 			logFields["error"] = limitedErr.Error()
 		}
 		logFields.Add(transportLogFields)
+		logFields.Add(matchMetrics.GetMetrics())
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
 	}()
 
@@ -823,7 +827,7 @@ func (b *Broker) handleClientOffer(
 		DestinationServerID:         serverParams.serverID,
 	}
 
-	proxyAnswer, proxyMatchAnnouncement, err = b.matcher.Offer(
+	proxyAnswer, proxyMatchAnnouncement, matchMetrics, err = b.matcher.Offer(
 		offerCtx,
 		clientIP,
 		clientMatchOffer)

@@ -964,6 +964,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			inproxyTestConfig.brokerServerEntrySignaturePublicKey
 
 		serverConfig["InproxyBrokerAllowCommonASNMatching"] = true
+		serverConfig["InproxyBrokerAllowBogonWebRTCConnections"] = true
 	}
 
 	// Uncomment to enable SIGUSR2 profile dumps
@@ -3388,7 +3389,8 @@ func generateInproxyTestConfig(
 	// To minimize external dependencies, STUN testing is disabled here; it is
 	// exercised in the common/inproxy package tests.
 	//
-	// InproxyBrokerAllowCommonASNMatching must be set to true in the
+	// InproxyBrokerAllowCommonASNMatching and
+	// InproxyBrokerAllowBogonWebRTCConnections must be set to true in the
 	// server/broker config, to allow matches with the same local network
 	// address. InproxyDisableIPv6ICECandidates is turned on, in tactics,
 	// since the test GeoIP database is IPv4-only (see paveGeoIPDatabaseFiles).
@@ -3552,8 +3554,6 @@ func generateInproxyTestConfig(
 		proxySessionPublicKeyCurve25519:     proxySessionPublicKeyCurve25519Str,
 		proxySessionPrivateKey:              proxySessionPrivateKeyStr,
 	}
-
-	inproxy.SetAllowBogonWebRTCConnections(true)
 
 	return config, nil
 }
