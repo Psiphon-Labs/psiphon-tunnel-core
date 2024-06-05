@@ -252,6 +252,64 @@ func TestStartTunnel(t *testing.T) {
 	}
 }
 
+func TestMultpleStartTunnel(t *testing.T) {
+	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
+	if err != nil {
+		// What to do if config file is not present?
+		t.Skipf("error loading configuration file: %s", err)
+	}
+
+	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
+	if err != nil {
+		t.Fatalf("ioutil.TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	ctx := context.Background()
+
+	tunnel1, err := StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err != nil {
+		t.Fatalf("first StartTunnel() error = %v", err)
+	}
+
+	// We have not stopped the tunnel, so a second StartTunnel() should fail
+	_, err = StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err != errMultipleStart {
+		t.Fatalf("second StartTunnel() should have failed with errMultipleStart; got %v", err)
+	}
+
+	// Stop the tunnel and try again
+	tunnel1.Stop()
+	tunnel3, err := StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err != nil {
+		t.Fatalf("third StartTunnel() error = %v", err)
+	}
+
+	// Stop the tunnel so it doesn't interfere with other tests
+	tunnel3.Stop()
+}
+
 func TestPsiphonTunnel_Dial(t *testing.T) {
 	trueVal := true
 	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
