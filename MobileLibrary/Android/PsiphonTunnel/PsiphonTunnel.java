@@ -1099,7 +1099,7 @@ public class PsiphonTunnel {
                       enableUdpGwKeepalive();
                     }
                 }
-                // Also report the tunnel's egress region to the host service
+            } else if (noticeType.equals("ConnectedServerRegion")) {
                 mHostService.onConnectedServerRegion(
                         notice.getJSONObject("data").getString("serverRegion"));
             } else if (noticeType.equals("ApplicationParameters")) {

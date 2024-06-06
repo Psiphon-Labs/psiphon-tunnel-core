@@ -1068,8 +1068,9 @@ loop:
 			NoticeActiveTunnel(
 				connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(),
 				connectedTunnel.dialParams.TunnelProtocol,
-				connectedTunnel.dialParams.ServerEntry.SupportsSSHAPIRequests(),
-				connectedTunnel.dialParams.ServerEntry.Region)
+				connectedTunnel.dialParams.ServerEntry.SupportsSSHAPIRequests())
+
+			NoticeConnectedServerRegion(connectedTunnel.dialParams.ServerEntry.Region)
 
 			if isFirstTunnel {
 
