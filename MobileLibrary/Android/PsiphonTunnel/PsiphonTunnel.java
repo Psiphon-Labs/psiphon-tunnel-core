@@ -859,8 +859,7 @@ public class PsiphonTunnel {
                         data.getLong("upstreamBytesPerSecond"), data.getLong("downstreamBytesPerSecond"));
             } else if (noticeType.equals("Exiting")) {
                 mHostService.onExiting();
-            } else if (noticeType.equals("ActiveTunnel")) {
-                // Report the tunnel's egress region to the host service
+            } else if (noticeType.equals("ConnectedServerRegion")) {
                 mHostService.onConnectedServerRegion(
                         notice.getJSONObject("data").getString("serverRegion"));
             } else if (noticeType.equals("ApplicationParameters")) {

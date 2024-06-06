@@ -198,11 +198,12 @@ func setNoticeFiles(
 }
 
 const (
-	noticeIsDiagnostic   = 1
-	noticeIsHomepage     = 2
-	noticeClearHomepages = 4
-	noticeSyncHomepages  = 8
-	noticeSkipRedaction  = 16
+	noticeIsDiagnostic    = 1
+	noticeIsHomepage      = 2
+	noticeClearHomepages  = 4
+	noticeSyncHomepages   = 8
+	noticeSkipRedaction   = 16
+	noticeIsNotDiagnostic = 32
 )
 
 // outputNotice encodes a notice in JSON and writes it to the output writer.
@@ -279,17 +280,22 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	if nl.rotatingFile != nil {
 
 		if !skipWriter {
-			skipWriter = (noticeFlags&noticeIsDiagnostic != 0)
+			// Skip writing to the host application if the notice is diagnostic
+			// and not explicitly marked as not diagnostic
+			skipWriter = (noticeFlags&noticeIsDiagnostic != 0) && (noticeFlags&noticeIsNotDiagnostic == 0)
 		}
 
 		if !skipRedaction {
+			// Only write to the rotating file if the notice is not explicitly marked as not diagnostic.
+			if noticeFlags&noticeIsNotDiagnostic == 0 {
 
-			err := nl.outputNoticeToRotatingFile(output)
+				err := nl.outputNoticeToRotatingFile(output)
 
-			if err != nil {
-				output := makeNoticeInternalError(
-					fmt.Sprintf("write rotating file failed: %s", err))
-				nl.writer.Write(output)
+				if err != nil {
+					output := makeNoticeInternalError(
+						fmt.Sprintf("write rotating file failed: %s", err))
+					nl.writer.Write(output)
+				}
 			}
 		}
 	}
@@ -678,11 +684,17 @@ func NoticeRequestedTactics(dialParams *DialParameters) {
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(diagnosticID, protocol string, serverRegion string) {
+func NoticeActiveTunnel(diagnosticID, protocol string) {
 	singletonNoticeLogger.outputNotice(
 		"ActiveTunnel", noticeIsDiagnostic,
 		"diagnosticID", diagnosticID,
-		"protocol", protocol,
+		"protocol", protocol)
+}
+
+// NoticeConnectedServerRegion reports the region of the connected server
+func NoticeConnectedServerRegion(serverRegion string) {
+	singletonNoticeLogger.outputNotice(
+		"ConnectedServerRegion", 0,
 		"serverRegion", serverRegion)
 }
 
@@ -831,10 +843,12 @@ func NoticeClientUpgradeDownloaded(filename string) {
 // transferred since the last NoticeBytesTransferred. This is not a diagnostic
 // notice: the user app has requested this notice with EmitBytesTransferred
 // for functionality such as traffic display; and this frequent notice is not
-// intended to be included with feedback.
+// intended to be included with feedback. The noticeIsNotDiagnostic flag
+// ensures that these notices are emitted to the host application but not written
+// to the diagnostic file to avoid cluttering it with frequent updates.
 func NoticeBytesTransferred(diagnosticID string, sent, received int64) {
 	singletonNoticeLogger.outputNotice(
-		"BytesTransferred", 0,
+		"BytesTransferred", noticeIsNotDiagnostic,
 		"diagnosticID", diagnosticID,
 		"sent", sent,
 		"received", received)

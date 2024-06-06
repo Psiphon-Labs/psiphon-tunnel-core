@@ -1000,8 +1000,9 @@ loop:
 
 			NoticeActiveTunnel(
 				connectedTunnel.dialParams.ServerEntry.GetDiagnosticID(),
-				connectedTunnel.dialParams.TunnelProtocol,
-				connectedTunnel.dialParams.ServerEntry.Region)
+				connectedTunnel.dialParams.TunnelProtocol)
+
+			NoticeConnectedServerRegion(connectedTunnel.dialParams.ServerEntry.Region)
 
 			if isFirstTunnel {
 
