@@ -112,6 +112,8 @@ func makeTestPackValue(t *testing.T, spec packSpec) interface{} {
 		return []string{auth1, auth2}
 	case rawJSONConverter:
 		return []byte(fmt.Sprintf(`{"A":%d, "B":%d}`, prng.Intn(1>>32), prng.Intn(1>>32)))
+	case compatibleJSONMapConverter:
+		return []any{map[any]any{"a": 1, "b": 2}, map[any]any{"a": 3, "b": 4}}
 	}
 	t.Fatalf("unexpected converter")
 	return nil
@@ -125,6 +127,7 @@ func checkTestPackValues(
 
 	for name, spec := range specs {
 		originalValue := originalValues[name]
+		unpackedValue := unpackedValues[name]
 		if spec.converter == rawJSONConverter {
 
 			// Special case: for rawJSONConverter, the input is bytes while
@@ -132,10 +135,29 @@ func checkTestPackValues(
 			var unmarshaledJSON map[string]interface{}
 			_ = json.Unmarshal(originalValue.([]byte), &unmarshaledJSON)
 			originalValue = unmarshaledJSON
+
+		} else if spec.converter == compatibleJSONMapConverter {
+
+			// Special case: for compatibleJSONMapConverter, reverse the
+			// conversion to produce the original value with the same type.
+			unpackedSlice, ok := unpackedValue.([]map[string]interface{})
+			if !ok {
+				t.Errorf("expected []map[string]interface {} type")
+				return
+			}
+			entries := make([]interface{}, len(unpackedSlice))
+			for i, unpackedEntry := range unpackedSlice {
+				entry := make(map[interface{}]interface{})
+				for key, value := range unpackedEntry {
+					entry[key] = value
+				}
+				entries[i] = entry
+			}
+			unpackedValue = entries
 		}
-		if !reflect.DeepEqual(originalValue, unpackedValues[name]) {
+		if !reflect.DeepEqual(originalValue, unpackedValue) {
 			t.Errorf("decoded value %s not equal: %T %+v != %T %+v",
-				name, originalValue, originalValue, unpackedValues[name], unpackedValues[name])
+				name, originalValue, originalValue, unpackedValue, unpackedValue)
 		}
 	}
 }

@@ -48,7 +48,10 @@ func TestStandAloneGetTactics(t *testing.T) {
 	}
 
 	var modifyConfig map[string]interface{}
-	json.Unmarshal(configJSON, &modifyConfig)
+	err = json.Unmarshal(configJSON, &modifyConfig)
+	if err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
 
 	modifyConfig["DataRootDirectory"] = testDataDirName
 

@@ -541,8 +541,19 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("HandleTacticsPayload failed: %s", err)
 	}
 
-	if handshakeTacticsRecord == nil {
-		t.Fatalf("expected tactics record")
+	// When tactic parameters are unchanged, HandleTacticsPayload returns nil,
+	// so that callers do not apply tactics unnecessarily.
+	//
+	// Check that nil is returned, but then directly load the record stored by
+	// HandleTacticsPayload in order to check metadata including the updated
+	// TTL.
+
+	if handshakeTacticsRecord != nil {
+		t.Fatalf("unexpected tactics record")
+	}
+	handshakeTacticsRecord, err = getStoredTacticsRecord(storer, networkID)
+	if err != nil {
+		t.Fatalf("getStoredTacticsRecord failed: %s", err)
 	}
 
 	if fetchTacticsRecord.Tag != handshakeTacticsRecord.Tag {
