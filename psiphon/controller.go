@@ -1004,6 +1004,8 @@ loop:
 				connectedTunnel.dialParams.ServerEntry.SupportsSSHAPIRequests(),
 				connectedTunnel.dialParams.ServerEntry.Region)
 
+			NoticeConnectedServerRegion(connectedTunnel.dialParams.ServerEntry.Region)
+
 			if isFirstTunnel {
 
 				// Signal a connected request on each 1st tunnel establishment. For

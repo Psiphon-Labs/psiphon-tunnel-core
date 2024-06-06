@@ -687,6 +687,13 @@ func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool, serverRegion 
 		"serverRegion", serverRegion)
 }
 
+// NoticeConnectedServerRegion reports the region of the connected server
+func NoticeConnectedServerRegion(serverRegion string) {
+	singletonNoticeLogger.outputNotice(
+		"ConnectedServerRegion", 0,
+		"serverRegion", serverRegion)
+}
+
 // NoticeSocksProxyPortInUse is a failure to use the configured LocalSocksProxyPort
 func NoticeSocksProxyPortInUse(port int) {
 	singletonNoticeLogger.outputNotice(
