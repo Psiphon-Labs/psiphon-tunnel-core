@@ -1087,7 +1087,7 @@ func NoticeSkipServerEntry(format string, args ...interface{}) {
 // operator.
 func NoticeInproxyOperatorMessage(messageJSON string) {
 	singletonNoticeLogger.outputNotice(
-		"InproxyOperatorMessage", noticeIsDiagnostic,
+		"InproxyOperatorMessage", 0,
 		"message", messageJSON)
 }
 
