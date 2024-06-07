@@ -110,8 +110,6 @@ func (d *Discovery) reload(reloadedTactics bool) error {
 	// Initialize and set underlying discovery component. Replaces old
 	// component if discovery is already initialized.
 
-	oldDiscovery := d.discovery
-
 	discovery := discovery.MakeDiscovery(
 		d.support.PsinetDatabase.GetDiscoveryServers(),
 		discoveryStrategy)
@@ -120,6 +118,7 @@ func (d *Discovery) reload(reloadedTactics bool) error {
 
 	d.Lock()
 
+	oldDiscovery := d.discovery
 	d.discovery = discovery
 	d.currentStrategy = strategy
 
@@ -143,6 +142,8 @@ func (d *Discovery) reload(reloadedTactics bool) error {
 
 // Stop stops discovery and cleans up underlying resources.
 func (d *Discovery) Stop() {
+	d.Lock()
+	defer d.Unlock()
 	d.discovery.Stop()
 }
 
