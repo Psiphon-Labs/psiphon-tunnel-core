@@ -103,6 +103,12 @@ func (b *InproxyBrokerClientManager) TacticsApplied() error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
+	// Don't reset when not yet initialized; b.brokerClientInstance is
+	// initialized only on demand.
+	if b.brokerClientInstance == nil {
+		return nil
+	}
+
 	// TODO: as a future future enhancement, don't reset when the tactics
 	// brokerSpecs.Hash() is unchanged?
 
