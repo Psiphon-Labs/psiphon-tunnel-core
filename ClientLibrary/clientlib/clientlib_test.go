@@ -252,7 +252,7 @@ func TestStartTunnel(t *testing.T) {
 	}
 }
 
-func TestMultpleStartTunnel(t *testing.T) {
+func TestMultipleStartTunnel(t *testing.T) {
 	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
 	if err != nil {
 		// What to do if config file is not present?
