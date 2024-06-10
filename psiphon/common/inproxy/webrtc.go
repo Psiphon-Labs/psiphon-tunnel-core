@@ -816,7 +816,7 @@ func (conn *webRTCConn) getICECandidatePairsSummary() string {
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
-	var stateCounts map[webrtc.StatsICECandidatePairState]int
+	stateCounts := map[webrtc.StatsICECandidatePairState]int{}
 
 	statsReport := conn.peerConnection.GetStats()
 	for key, stats := range statsReport {
