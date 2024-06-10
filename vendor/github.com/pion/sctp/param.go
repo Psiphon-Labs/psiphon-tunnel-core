@@ -38,6 +38,8 @@ func buildParam(t paramType, rawParam []byte) (param, error) {
 		return (&paramOutgoingResetRequest{}).unmarshal(rawParam)
 	case reconfigResp:
 		return (&paramReconfigResponse{}).unmarshal(rawParam)
+	case zeroChecksumAcceptable:
+		return (&paramZeroChecksumAcceptable{}).unmarshal(rawParam)
 	default:
 		return nil, fmt.Errorf("%w: %v", ErrParamTypeUnhandled, t)
 	}

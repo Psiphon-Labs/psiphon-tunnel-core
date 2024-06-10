@@ -10,13 +10,40 @@ import (
 	"fmt"
 )
 
+type paramHeaderUnrecognizedAction byte
+
 type paramHeader struct {
-	typ paramType
-	len int
-	raw []byte
+	typ                paramType
+	unrecognizedAction paramHeaderUnrecognizedAction
+	len                int
+	raw                []byte
 }
 
+/*
+	 The Parameter Types are encoded such that the highest-order 2 bits specify
+	 the action that is taken if the processing endpoint does not recognize the
+	 Parameter Type.
+
+	 00 - Stop processing this parameter and do not process any further parameters within this chunk.
+
+	 01 - Stop processing this parameter, do not process any further parameters within this chunk, and
+		  report the unrecognized parameter, as described in Section 3.2.2.
+
+	 10 - Skip this parameter and continue processing.
+
+	 11 - Skip this parameter and continue processing, but report the unrecognized
+		  parameter, as described in Section 3.2.2.
+
+	 https://www.rfc-editor.org/rfc/rfc9260.html#section-3.2.1
+*/
+
 const (
+	paramHeaderUnrecognizedActionMask                                        = 0b11000000
+	paramHeaderUnrecognizedActionStop          paramHeaderUnrecognizedAction = 0b00000000
+	paramHeaderUnrecognizedActionStopAndReport paramHeaderUnrecognizedAction = 0b01000000
+	paramHeaderUnrecognizedActionSkip          paramHeaderUnrecognizedAction = 0b10000000
+	paramHeaderUnrecognizedActionSkipAndReport paramHeaderUnrecognizedAction = 0b11000000
+
 	paramHeaderLength = 4
 )
 
@@ -57,6 +84,7 @@ func (p *paramHeader) unmarshal(raw []byte) error {
 		return fmt.Errorf("%w: %v", ErrParamHeaderParseFailed, err) //nolint:errorlint
 	}
 	p.typ = typ
+	p.unrecognizedAction = paramHeaderUnrecognizedAction(raw[0] & paramHeaderUnrecognizedActionMask)
 	p.raw = raw[paramHeaderLength:paramLengthPlusHeader]
 	p.len = int(paramLengthPlusHeader)
 

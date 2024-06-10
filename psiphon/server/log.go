@@ -163,6 +163,10 @@ func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
 	logger.traceLogger.LogRawFieldsWithTimestamp(LogFields(fields))
 }
 
+func (logger *commonLogger) IsLogLevelDebug() bool {
+	return logger.traceLogger.Level == logrus.DebugLevel
+}
+
 // CommonLogger wraps a TraceLogger instance with an interface that conforms
 // to common.Logger. This is used to make the TraceLogger available to other
 // packages that don't import the "server" package.
@@ -332,7 +336,7 @@ func InitLogging(config *Config) (retErr error) {
 }
 
 func IsLogLevelDebug() bool {
-	return log.Logger.Level == logrus.DebugLevel
+	return log.Level == logrus.DebugLevel
 }
 
 func init() {

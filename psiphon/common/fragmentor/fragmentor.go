@@ -195,22 +195,28 @@ func (c *Conn) GetMetrics() common.LogFields {
 
 	logFields := make(common.LogFields)
 
-	if c.bytesFragmented == 0 {
-		return logFields
+	if c.bytesFragmented > 0 {
+
+		var prefix string
+		if c.config.isUpstream {
+			prefix = "upstream_"
+		} else {
+			prefix = "downstream_"
+		}
+
+		logFields[prefix+"bytes_fragmented"] = c.bytesFragmented
+		logFields[prefix+"min_bytes_written"] = c.minBytesWritten
+		logFields[prefix+"max_bytes_written"] = c.maxBytesWritten
+		logFields[prefix+"min_delayed"] = int(c.minDelayed / time.Microsecond)
+		logFields[prefix+"max_delayed"] = int(c.maxDelayed / time.Microsecond)
 	}
 
-	var prefix string
-	if c.config.isUpstream {
-		prefix = "upstream_"
-	} else {
-		prefix = "downstream_"
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
+	underlyingMetrics, ok := c.Conn.(common.MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
 	}
-
-	logFields[prefix+"bytes_fragmented"] = c.bytesFragmented
-	logFields[prefix+"min_bytes_written"] = c.minBytesWritten
-	logFields[prefix+"max_bytes_written"] = c.maxBytesWritten
-	logFields[prefix+"min_delayed"] = int(c.minDelayed / time.Microsecond)
-	logFields[prefix+"max_delayed"] = int(c.maxDelayed / time.Microsecond)
 
 	return logFields
 }

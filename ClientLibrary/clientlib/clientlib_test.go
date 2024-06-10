@@ -26,6 +26,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 func TestStartTunnel(t *testing.T) {
@@ -56,7 +58,18 @@ func TestStartTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Unmarshal failed: %v", err)
 	}
+
+	// Use the legacy encoding to both exercise that case, and facilitate a
+	// gradual network upgrade to new encoding support.
+	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
+
+	configJSON, err = json.Marshal(config)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
 	config["DisableRemoteServerListFetcher"] = true
+
 	configJSONNoFetcher, err := json.Marshal(config)
 	if err != nil {
 		t.Fatalf("json.Marshal failed: %v", err)

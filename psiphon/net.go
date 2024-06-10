@@ -114,19 +114,6 @@ type DialConfig struct {
 	CustomDialer common.Dialer
 }
 
-// WithoutFragmentor returns a copy of the DialConfig with any fragmentor
-// configuration disabled. The return value is not a deep copy and may be the
-// input DialConfig; it should not be modified.
-func (config *DialConfig) WithoutFragmentor() *DialConfig {
-	if config.FragmentorConfig == nil {
-		return config
-	}
-	newConfig := new(DialConfig)
-	*newConfig = *config
-	newConfig.FragmentorConfig = nil
-	return newConfig
-}
-
 // NetworkConnectivityChecker defines the interface to the external
 // HasNetworkConnectivity provider, which call into the host application to
 // check for network connectivity.
@@ -189,7 +176,6 @@ type NetworkIDGetter interface {
 }
 
 // RefractionNetworkingDialer implements psiphon/common/refraction.Dialer.
-
 type RefractionNetworkingDialer struct {
 	config *DialConfig
 }
@@ -385,7 +371,7 @@ func UntunneledResolveIP(
 	frontingProviderID string) ([]net.IP, error) {
 
 	// Limitations: for untunneled resolves, there is currently no resolve
-	// parameter replay, and no support for pre-resolved IPs.
+	// parameter replay.
 
 	params, err := resolver.MakeResolveParameters(
 		config.GetParameters().Get(), frontingProviderID, hostname)
@@ -430,6 +416,7 @@ func makeFrontedHTTPClient(
 	disableSystemRootCAs bool) (*http.Client, func() common.APIParameters, error) {
 
 	frontingProviderID,
+		frontingTransport,
 		meekFrontingDialAddress,
 		meekSNIServerName,
 		meekVerifyServerName,
@@ -437,6 +424,10 @@ func makeFrontedHTTPClient(
 		meekFrontingHost, err := parameters.FrontingSpecs(frontingSpecs).SelectParameters()
 	if err != nil {
 		return nil, nil, errors.Trace(err)
+	}
+
+	if frontingTransport != protocol.FRONTING_TRANSPORT_HTTPS {
+		return nil, nil, errors.TraceNew("unsupported fronting transport")
 	}
 
 	if selectedFrontingProviderID != nil {

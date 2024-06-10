@@ -817,6 +817,10 @@ func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
 	}
 }
 
+func (l *testLogger) IsLogLevelDebug() bool {
+	return true
+}
+
 func (logger *testLogger) getLastPacketMetrics() common.LogFields {
 	if logger.packetMetrics == nil {
 		return nil

@@ -1,3 +1,4 @@
+//go:build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
 // +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
 
 /*
@@ -175,6 +176,10 @@ func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTra
 }
 
 func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
+}
+
+func (logger *testLogger) IsLogLevelDebug() bool {
+	return true
 }
 
 type testLogTrace struct {

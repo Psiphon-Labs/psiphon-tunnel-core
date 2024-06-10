@@ -53,6 +53,10 @@ func (logger *testLogger) LogMetric(metric string, fields LogFields) {
 	panic("unexpected log call")
 }
 
+func (logger *testLogger) IsLogLevelDebug() bool {
+	return true
+}
+
 type testLoggerTrace struct {
 }
 

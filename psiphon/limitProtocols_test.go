@@ -98,8 +98,8 @@ func TestLimitTunnelProtocols(t *testing.T) {
     {
         "ClientPlatform" : "Windows",
         "ClientVersion" : "0",
-        "SponsorId" : "0",
-        "PropagationChannelId" : "0",
+        "SponsorId" : "0000000000000000",
+        "PropagationChannelId" : "0000000000000000",
         "DisableRemoteServerListFetcher" : true
     }`
 	clientConfig, err := LoadConfig([]byte(clientConfigJSON))
@@ -145,10 +145,8 @@ func TestLimitTunnelProtocols(t *testing.T) {
 
 		_, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 			&server.GenerateConfigParams{
-				ServerIPAddress:      fmt.Sprintf("0.1.0.0"),
-				EnableSSHAPIRequests: true,
-				WebServerPort:        8000,
-				TunnelProtocolPorts:  map[string]int{tunnelProtocol: 4000},
+				ServerIPAddress:     fmt.Sprintf("0.1.0.0"),
+				TunnelProtocolPorts: map[string]int{tunnelProtocol: 4000},
 			})
 		if err != nil {
 			t.Fatalf("error generating server config: %s", err)

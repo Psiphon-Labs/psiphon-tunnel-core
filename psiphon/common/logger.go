@@ -28,6 +28,10 @@ type Logger interface {
 	WithTrace() LogTrace
 	WithTraceFields(fields LogFields) LogTrace
 	LogMetric(metric string, fields LogFields)
+
+	// IsLogLevelDebug is used to skip formatting debug-level log messages in
+	// cases where performance would be impacted.
+	IsLogLevelDebug() bool
 }
 
 // LogTrace is interface-compatible with the return values from

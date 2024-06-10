@@ -155,11 +155,22 @@ func (r *reassemblyQueue) push(chunk *chunkPayloadData) bool {
 		return false
 	}
 
-	// Check if a chunkSet with the SSN already exists
-	for _, set := range r.ordered {
-		if set.ssn == chunk.streamSequenceNumber {
-			cset = set
-			break
+	// Check if a fragmented chunkSet with the fragmented SSN already exists
+	if chunk.isFragmented() {
+		for _, set := range r.ordered {
+			// nolint:godox
+			// TODO: add caution around SSN wrapping here... this helps only a little bit
+			// by ensuring we don't add to an unfragmented cset (1 chunk). There's
+			// a case where if the SSN does wrap around, we may see the same SSN
+			// for a different chunk.
+
+			// nolint:godox
+			// TODO: this slice can get pretty big; it may be worth maintaining a map
+			// for O(1) lookups at the cost of 2x memory.
+			if set.ssn == chunk.streamSequenceNumber && set.chunks[0].isFragmented() {
+				cset = set
+				break
+			}
 		}
 	}
 

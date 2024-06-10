@@ -95,7 +95,7 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, error) {
 
 	// Limitation: certificate value changes on restart.
 
-	certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate(values.GetHostName())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

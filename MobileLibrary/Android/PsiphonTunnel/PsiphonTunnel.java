@@ -132,6 +132,21 @@ public class PsiphonTunnel {
         default public void onApplicationParameters(Object parameters) {}
         default public void onServerAlert(String reason, String subject, List<String> actionURLs) {}
         /**
+         * Called when tunnel-core emits a message to be displayed to the in-proxy operator.
+         * @param message The operator message received.
+         */
+        default void onInproxyOperatorMessage(String message) {}
+        /**
+         * Called when tunnel-core reports proxy usage statistics.
+         * By default onInproxyProxyActivity is disabled. Enable it by setting
+         * EmitInproxyProxyActivity to true in the Psiphon config.
+         * @param connectingClients Number of clients connecting to the proxy.
+         * @param connectedClients Number of clients currently connected to the proxy.
+         * @param bytesUp  Bytes uploaded through the proxy since the last report.
+         * @param bytesDown Bytes downloaded through the proxy since the last report.
+         */
+        default void onInproxyProxyActivity(int connectingClients, int connectedClients,long bytesUp, long bytesDown) {}
+        /**
          * Called when tunnel-core reports connected server region information.
          * @param region The server region received.
          */
@@ -1100,6 +1115,15 @@ public class PsiphonTunnel {
                     notice.getJSONObject("data").getString("reason"),
                     notice.getJSONObject("data").getString("subject"),
                     actionURLsList);
+            } else if (noticeType.equals("InproxyOperatorMessage")) {
+                mHostService.onInproxyOperatorMessage( notice.getJSONObject("data").getString("message"));
+            } else if (noticeType.equals("InproxyProxyActivity")) {
+                JSONObject data = notice.getJSONObject("data");
+                mHostService.onInproxyProxyActivity(
+                        data.getInt("connectingClients"),
+                        data.getInt("connectedClients"),
+                        data.getLong("bytesUp"),
+                        data.getLong("bytesDown"));
             }
 
             if (diagnostic) {
@@ -1520,10 +1544,12 @@ public class PsiphonTunnel {
                 // 40569). hasIPv6Route provides the same functionality via a
                 // callback into Java code.
 
+                // Note: don't exclude interfaces with the isPointToPoint
+                // property, which is true for certain mobile networks.
+
                 for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
                     if (netInterface.isUp() &&
-                        !netInterface.isLoopback() &&
-                        !netInterface.isPointToPoint()) {
+                        !netInterface.isLoopback()) {
                         for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
 
                             // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
