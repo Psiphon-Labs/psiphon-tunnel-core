@@ -801,11 +801,55 @@ func (conn *webRTCConn) AwaitInitialDataChannel(ctx context.Context) error {
 		}
 
 	case <-ctx.Done():
-		return errors.Trace(ctx.Err())
+		return errors.Tracef("with ICE candidate pairs %s: %w",
+			conn.getICECandidatePairsSummary(),
+			ctx.Err())
+
 	case <-conn.closedSignal:
 		return errors.TraceNew("connection has closed")
 	}
+
 	return nil
+}
+
+func (conn *webRTCConn) getICECandidatePairsSummary() string {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	var stateCounts map[webrtc.StatsICECandidatePairState]int
+
+	statsReport := conn.peerConnection.GetStats()
+	for key, stats := range statsReport {
+
+		// Uses the pion StatsReport key formats "candidate:<ID>"
+		// and "candidate:<ID>-candidate:<ID>"
+
+		key, found := strings.CutPrefix(key, "candidate:")
+		if !found {
+			continue
+		}
+		candidateIDs := strings.Split(key, "-candidate:")
+		if len(candidateIDs) != 2 {
+			continue
+		}
+
+		candidatePairStats, ok := stats.(webrtc.ICECandidatePairStats)
+		if !ok {
+			continue
+		}
+
+		stateCounts[candidatePairStats.State] += 1
+	}
+
+	if len(stateCounts) == 0 {
+		return "(none)"
+	}
+
+	var strs []string
+	for state, count := range stateCounts {
+		strs = append(strs, fmt.Sprintf("%s(%d)", state, count))
+	}
+	return strings.Join(strs, ", ")
 }
 
 func (conn *webRTCConn) recordSelectedICECandidateStats() error {
