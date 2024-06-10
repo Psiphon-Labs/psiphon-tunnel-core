@@ -198,7 +198,7 @@ func StartTunnel(
 	}
 
 	// Will be closed when the tunnel has successfully connected
-	connectedCh := make(chan struct{})
+	connectedSignal := make(chan struct{})
 	// Will receive a value if an error occurs during the connection sequence
 	erroredCh := make(chan error, 1)
 
@@ -235,7 +235,7 @@ func StartTunnel(
 			} else if event.Type == "Tunnels" {
 				count := event.Data["count"].(float64)
 				if count > 0 {
-					close(connectedCh)
+					close(connectedSignal)
 				}
 			}
 
@@ -343,7 +343,7 @@ func StartTunnel(
 
 	// Wait for an active tunnel or error
 	select {
-	case <-connectedCh:
+	case <-connectedSignal:
 		return tunnel, nil
 	case err := <-erroredCh:
 		if err != ErrTimeout {
