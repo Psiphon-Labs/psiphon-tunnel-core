@@ -1723,12 +1723,61 @@ func (w *InproxyWebRTCDialInstance) UDPConn(
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) BindToDevice(fileDescriptor int) error {
 
+	if w.config.deviceBinder == nil {
+		return nil
+	}
+
 	// Use config.deviceBinder, with wired up logging, not
 	// config.DeviceBinder; other tunnel-core dials do this indirectly via
 	// psiphon.DialConfig.
 
 	_, err := w.config.deviceBinder.BindToDevice(fileDescriptor)
 	return errors.Trace(err)
+}
+
+func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
+	ctx context.Context, network, address string) (net.Conn, error) {
+
+	// This implementation of ProxyUpstreamDial applies additional socket
+	// options and BindToDevice as required, but is otherwise a stock dialer.
+	//
+	// TODO: Use custom UDP and TCP dialers, and wire up TCP/UDP-level
+	// tactics, including BPF and the custom resolver, which may be enabled
+	// for the proxy's ISP or geolocation. Orchestrating preresolved DNS
+	// requires additional information from either from the broker, the
+	// FrontingProviderID, to be applied to any
+	// DNSResolverPreresolvedIPAddressCIDRs proxy tactics. In addition,
+	// replay the selected upstream dial tactics parameters.
+
+	dialer := net.Dialer{
+		Control: func(_, _ string, c syscall.RawConn) error {
+			var controlErr error
+			err := c.Control(func(fd uintptr) {
+
+				socketFD := int(fd)
+
+				setAdditionalSocketOptions(socketFD)
+
+				if w.config.deviceBinder != nil {
+					_, err := w.config.deviceBinder.BindToDevice(socketFD)
+					if err != nil {
+						controlErr = errors.Tracef("BindToDevice failed: %s", err)
+						return
+					}
+				}
+			})
+			if controlErr != nil {
+				return errors.Trace(controlErr)
+			}
+			return errors.Trace(err)
+		},
+	}
+
+	conn, err := dialer.DialContext(ctx, network, address)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return conn, nil
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.

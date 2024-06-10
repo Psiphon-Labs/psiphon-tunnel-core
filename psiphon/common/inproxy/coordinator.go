@@ -318,8 +318,19 @@ type WebRTCDialCoordinator interface {
 	// BindToDevice binds a socket, specified by the file descriptor, to an
 	// interface that isn't routed through a VPN when Psiphon is running in
 	// VPN mode. BindToDevice is used in cases where a custom dialer cannot
-	// be used, and UDPListen cannot be called.
+	// be used, and UDPListen cannot be called. If no file descriptor
+	// operation is required, BindToDevice should take no action and return
+	// nil.
 	BindToDevice(fileDescriptor int) error
+
+	// ProxyUpstreamDial is used by the proxy when dialing a TCP or UDP
+	// upstream connection to a destination Psiphon server. This dial
+	// callback allows for TCP/UDP-level dial tactics parameters to be
+	// applied, as appropriate, to the upstream dial from the proxy vantage
+	// point; and possible replay of those parameters. In addition,
+	// underlying sockets should be bound to a specific interface as required
+	// when the proxy app is also running a VPN.
+	ProxyUpstreamDial(ctx context.Context, network, address string) (net.Conn, error)
 
 	DiscoverNATTimeout() time.Duration
 	WebRTCAnswerTimeout() time.Duration

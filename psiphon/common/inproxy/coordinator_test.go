@@ -353,6 +353,15 @@ func (t *testWebRTCDialCoordinator) BindToDevice(fileDescriptor int) error {
 	return errors.Trace(t.bindToDevice(fileDescriptor))
 }
 
+func (t *testWebRTCDialCoordinator) ProxyUpstreamDial(ctx context.Context, network, address string) (net.Conn, error) {
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, network, address)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return conn, nil
+}
+
 func (t *testWebRTCDialCoordinator) DiscoverNATTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()

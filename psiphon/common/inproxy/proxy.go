@@ -22,7 +22,6 @@ package inproxy
 import (
 	"context"
 	"io"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -764,8 +763,7 @@ func (p *Proxy) proxyOneClient(
 		return backOff, errors.Trace(err)
 	}
 
-	var dialer net.Dialer
-	destinationConn, err := dialer.DialContext(
+	destinationConn, err := webRTCCoordinator.ProxyUpstreamDial(
 		destinationDialContext,
 		announceResponse.NetworkProtocol.String(),
 		destinationAddress)
