@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	std_errors "errors"
 	"fmt"
+	"io"
 	"net"
 	"path/filepath"
 	"sync"
@@ -142,7 +143,7 @@ func StartTunnel(
 
 	config, err := psiphon.LoadConfig(configJSON)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config file: %w", err)
+		return nil, errors.TraceMsg(err, "failed to load config file")
 	}
 
 	// Use params.DataRootDirectory to set related config values.
@@ -186,14 +187,14 @@ func StartTunnel(
 	// or attempting to connect.
 	err = config.Commit(true)
 	if err != nil {
-		return nil, fmt.Errorf("config.Commit failed: %w", err)
+		return nil, errors.TraceMsg(err, "config.Commit failed")
 	}
 
 	// If supplied, apply the parameters delta
 	if len(paramsDelta) > 0 {
 		err = config.SetParameters("", false, paramsDelta)
 		if err != nil {
-			return nil, fmt.Errorf("SetParameters failed for delta: %v; %w", paramsDelta, err)
+			return nil, errors.TraceMsg(err, fmt.Sprintf("SetParameters failed for delta: %v", paramsDelta))
 		}
 	}
 
@@ -213,7 +214,7 @@ func StartTunnel(
 			if err != nil {
 				// This is unexpected and probably indicates something fatal has occurred.
 				// We'll interpret it as a connection error and abort.
-				err = fmt.Errorf("failed to unmarshal notice JSON: %w", err)
+				err = errors.TraceMsg(err, "failed to unmarshal notice JSON")
 				select {
 				case erroredCh <- err:
 				default:
@@ -248,7 +249,7 @@ func StartTunnel(
 
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open data store: %w", err)
+		return nil, errors.TraceMsg(err, "failed to open data store")
 	}
 
 	// Create a cancelable context that will be used for stopping the tunnel
@@ -308,7 +309,7 @@ func StartTunnel(
 	// Create the Psiphon controller
 	controller, err := psiphon.NewController(config)
 	if err != nil {
-		return nil, fmt.Errorf("psiphon.NewController failed: %w", err)
+		return nil, errors.TraceMsg(err, "psiphon.NewController failed")
 	}
 
 	tunnel.controllerDial = controller.Dial
@@ -347,7 +348,7 @@ func StartTunnel(
 		return tunnel, nil
 	case err := <-erroredCh:
 		if err != ErrTimeout {
-			err = fmt.Errorf("tunnel start produced error: %w", err)
+			err = errors.TraceMsg(err, "tunnel start produced error")
 		}
 		return nil, err
 	}
@@ -357,17 +358,26 @@ func StartTunnel(
 // It is safe to call Stop multiple times.
 // It is safe to call concurrently with Dial and with itself.
 func (tunnel *PsiphonTunnel) Stop() {
+	// Holding a lock while calling the stop function ensures that any concurrent call
+	// to Stop will wait for the first call to finish before returning, rather than
+	// returning immediately (because tunnel.stop is nil) and thereby indicating
+	// (erroneously) that the tunnel has been stopped.
+	// Stopping a tunnel happens quickly enough that this processing block shouldn't be
+	// a problem.
 	tunnel.mu.Lock()
-	stop := tunnel.stop
-	tunnel.stop = nil
-	tunnel.controllerDial = nil
-	tunnel.mu.Unlock()
+	defer tunnel.mu.Unlock()
 
-	if stop == nil {
+	if tunnel.stop == nil {
 		return
 	}
 
-	stop()
+	tunnel.stop()
+	tunnel.stop = nil
+	tunnel.controllerDial = nil
+
+	// Clear our notice receiver, as it is no longer needed and we should let it be
+	// garbage-collected.
+	psiphon.SetNoticeWriter(io.Discard)
 }
 
 // Dial connects to the specified address through the Psiphon tunnel.
