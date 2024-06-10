@@ -455,10 +455,6 @@ func (conn *ClientConn) LocalAddr() net.Addr {
 }
 
 func (conn *ClientConn) RemoteAddr() net.Addr {
-
-	// *TEMP*
-	return nil
-
 	// Do not return conn.webRTCConn.RemoteAddr(), which is always nil.
 	return conn.remoteAddr
 }
