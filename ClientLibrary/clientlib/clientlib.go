@@ -108,7 +108,7 @@ type NoticeEvent struct {
 var ErrTimeout = std_errors.New("clientlib: tunnel establishment timeout")
 var errMultipleStart = std_errors.New("clientlib: StartTunnel called multiple times")
 
-// started is used to ensure StartTunnel is called only once
+// started is used to ensure that only one tunnel is started at a time
 var started atomic.Bool
 
 // StartTunnel establishes a Psiphon tunnel. It returns an error if the establishment
@@ -327,14 +327,14 @@ func StartTunnel(
 		// EstablishTunnelTimeout event, ErrTimeout is guaranteed to be sent to
 		// errored before this next error and will be the StartTunnel return value.
 
-		var err error
-		switch ctx.Err() {
+		err := ctx.Err()
+		switch err {
 		case context.DeadlineExceeded:
 			err = ErrTimeout
 		case context.Canceled:
-			err = errors.TraceNew("StartTunnel canceled")
+			err = errors.TraceMsg(err, "StartTunnel canceled")
 		default:
-			err = errors.TraceNew("controller.Run exited unexpectedly")
+			err = errors.TraceMsg(err, "controller.Run exited unexpectedly")
 		}
 		select {
 		case erroredCh <- err:
