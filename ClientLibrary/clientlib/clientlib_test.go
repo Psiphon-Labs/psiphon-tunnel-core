@@ -56,7 +56,9 @@ func TestStartTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Unmarshal failed: %v", err)
 	}
+
 	config["DisableRemoteServerListFetcher"] = true
+
 	configJSONNoFetcher, err := json.Marshal(config)
 	if err != nil {
 		t.Fatalf("json.Marshal failed: %v", err)
@@ -259,21 +261,6 @@ func TestMultipleStartTunnel(t *testing.T) {
 		t.Skipf("error loading configuration file: %s", err)
 	}
 
-	var config map[string]interface{}
-	err = json.Unmarshal(configJSON, &config)
-	if err != nil {
-		t.Fatalf("json.Unmarshal failed: %v", err)
-	}
-
-	// Use the legacy encoding to both exercise that case, and facilitate a
-	// gradual network upgrade to new encoding support.
-	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
-
-	configJSON, err = json.Marshal(config)
-	if err != nil {
-		t.Fatalf("json.Marshal failed: %v", err)
-	}
-
 	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
 	if err != nil {
 		t.Fatalf("ioutil.TempDir failed: %v", err)
@@ -331,21 +318,6 @@ func TestPsiphonTunnel_Dial(t *testing.T) {
 	if err != nil {
 		// Skip, don't fail, if config file is not present
 		t.Skipf("error loading configuration file: %s", err)
-	}
-
-	var config map[string]interface{}
-	err = json.Unmarshal(configJSON, &config)
-	if err != nil {
-		t.Fatalf("json.Unmarshal failed: %v", err)
-	}
-
-	// Use the legacy encoding to both exercise that case, and facilitate a
-	// gradual network upgrade to new encoding support.
-	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
-
-	configJSON, err = json.Marshal(config)
-	if err != nil {
-		t.Fatalf("json.Marshal failed: %v", err)
 	}
 
 	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
