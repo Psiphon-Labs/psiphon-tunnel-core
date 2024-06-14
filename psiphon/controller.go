@@ -719,7 +719,7 @@ loop:
 
 			NoticeCandidateServers(
 				controller.config.EgressRegion,
-				controller.protocolSelectionConstraints,
+				constraints,
 				response.initialCandidates,
 				response.candidates,
 				duration)

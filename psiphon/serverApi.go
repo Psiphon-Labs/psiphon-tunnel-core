@@ -390,7 +390,7 @@ func (serverContext *ServerContext) doHandshakeRequest(
 				err := serverContext.tunnel.config.SetParameters(
 					tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
 				if err != nil {
-					NoticeInfo("apply handshake tactics failed: %s", err)
+					NoticeWarning("apply handshake tactics failed: %s", err)
 				}
 				// The error will be due to invalid tactics values
 				// from the server. When SetParameters fails, all
@@ -399,28 +399,34 @@ func (serverContext *ServerContext) doHandshakeRequest(
 		}
 	}
 
-	if serverContext.tunnel.dialParams.steeringIPCacheKey != "" {
+	if handshakeResponse.SteeringIP != "" {
 
-		// Cache any received steering IP, which will also extend the TTL for
-		// an existing entry.
-		//
-		// As typical tunnel duration is short and dialing can be challenging,
-		// this established tunnel is retained and the steering IP will be
-		// used on any subsequent dial to the same fronting provider,
-		// assuming the TTL has not expired.
-		//
-		// Note: to avoid TTL expiry for long-lived tunnels, the TTL could be
-		// set or extended at the end of the tunnel lifetime; however that
-		// may result in unintended steering.
+		if serverContext.tunnel.dialParams.steeringIPCacheKey == "" {
+			NoticeWarning("unexpected steering IP")
 
-		IP := net.ParseIP(handshakeResponse.SteeringIP)
-		if IP != nil && !common.IsBogon(IP) {
-			serverContext.tunnel.dialParams.steeringIPCache.Set(
-				serverContext.tunnel.dialParams.steeringIPCacheKey,
-				handshakeResponse.SteeringIP,
-				lrucache.DefaultExpiration)
 		} else {
-			NoticeInfo("ignoring invalid steering IP")
+
+			// Cache any received steering IP, which will also extend the TTL for
+			// an existing entry.
+			//
+			// As typical tunnel duration is short and dialing can be challenging,
+			// this established tunnel is retained and the steering IP will be
+			// used on any subsequent dial to the same fronting provider,
+			// assuming the TTL has not expired.
+			//
+			// Note: to avoid TTL expiry for long-lived tunnels, the TTL could be
+			// set or extended at the end of the tunnel lifetime; however that
+			// may result in unintended steering.
+
+			IP := net.ParseIP(handshakeResponse.SteeringIP)
+			if IP != nil && !common.IsBogon(IP) {
+				serverContext.tunnel.dialParams.steeringIPCache.Set(
+					serverContext.tunnel.dialParams.steeringIPCacheKey,
+					handshakeResponse.SteeringIP,
+					lrucache.DefaultExpiration)
+			} else {
+				NoticeWarning("ignoring invalid steering IP")
+			}
 		}
 	}
 
