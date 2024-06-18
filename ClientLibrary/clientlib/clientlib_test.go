@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -417,4 +418,118 @@ func TestPsiphonTunnel_Dial(t *testing.T) {
 			}
 		})
 	}
+}
+
+// We had a problem where config-related notices were being printed to stderr before we
+// set the NoticeWriter. We want to make sure that no longer happens.
+func TestStartTunnelNoOutput(t *testing.T) {
+	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
+	if err != nil {
+		// What to do if config file is not present?
+		t.Skipf("error loading configuration file: %s", err)
+	}
+
+	var config map[string]interface{}
+	err = json.Unmarshal(configJSON, &config)
+	if err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	// Before starting the tunnel, set up a notice receiver. If it receives anything at
+	// all, that means that it would have been printed to stderr.
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+		func(notice []byte) {
+			t.Fatalf("Received notice: %v", string(notice))
+		}))
+
+	// Use the legacy encoding to both exercise that case, and facilitate a
+	// gradual network upgrade to new encoding support.
+	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
+
+	configJSON, err = json.Marshal(config)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
+	if err != nil {
+		t.Fatalf("ioutil.TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	ctx := context.Background()
+
+	tunnel, err := StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err != nil {
+		t.Fatalf("StartTunnel() error = %v", err)
+	}
+	tunnel.Stop()
+}
+
+// We had a problem where a very early error could result in `started` being set to true
+// and not be set back to false, preventing StartTunnel from being re-callable.
+func TestStartTunnelReentry(t *testing.T) {
+	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
+	if err != nil {
+		t.Fatalf("ioutil.TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	configJSON := []byte("BAD CONFIG JSON")
+
+	ctx := context.Background()
+
+	_, err = StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err == nil {
+		t.Fatalf("expected config error")
+	}
+
+	// Call again with a good config. Should work.
+	configJSON, err = os.ReadFile("../../psiphon/controller_test.config")
+	if err != nil {
+		// What to do if config file is not present?
+		t.Skipf("error loading configuration file: %s", err)
+	}
+
+	var config map[string]interface{}
+	err = json.Unmarshal(configJSON, &config)
+	if err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	// Use the legacy encoding to both exercise that case, and facilitate a
+	// gradual network upgrade to new encoding support.
+	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
+
+	configJSON, err = json.Marshal(config)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	tunnel, err := StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err != nil {
+		t.Fatalf("StartTunnel() error = %v", err)
+	}
+	tunnel.Stop()
 }
