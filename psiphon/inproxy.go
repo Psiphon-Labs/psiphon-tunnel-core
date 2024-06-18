@@ -972,26 +972,19 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 		p, equivilentTunnelProtocol, brokerDialParams.FragmentorSeed)
 
 	// Resolver
+	//
+	// DialConfig.ResolveIP is required and called even when the destination
+	// is an IP address.
 
-	var resolveIP func(ctx context.Context, hostname string) ([]net.IP, error)
+	resolver := config.GetResolver()
+	if resolver == nil {
+		return errors.TraceNew("missing resolver")
+	}
 
-	if net.ParseIP(brokerDialParams.FrontingDialAddress) == nil {
-
-		resolver := config.GetResolver()
-		if resolver == nil {
-			return errors.TraceNew("missing resolver")
-		}
-
-		resolveIP = func(ctx context.Context, hostname string) ([]net.IP, error) {
-			IPs, err := resolver.ResolveIP(
-				ctx, networkID, brokerDialParams.ResolveParameters, hostname)
-			return IPs, errors.Trace(err)
-		}
-
-	} else {
-		resolveIP = func(ctx context.Context, hostname string) ([]net.IP, error) {
-			return nil, errors.TraceNew("unexpected resolve")
-		}
+	resolveIP := func(ctx context.Context, hostname string) ([]net.IP, error) {
+		IPs, err := resolver.ResolveIP(
+			ctx, networkID, brokerDialParams.ResolveParameters, hostname)
+		return IPs, errors.Trace(err)
 	}
 
 	// DialConfig
