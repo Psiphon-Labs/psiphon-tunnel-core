@@ -36,7 +36,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 // memory_test is a memory stress test suite that repeatedly reestablishes
@@ -113,10 +112,6 @@ func runMemoryTest(t *testing.T, testMode int) {
 	modifyConfig["LimitMeekBufferSizes"] = true
 	modifyConfig["StaggerConnectionWorkersMilliseconds"] = 100
 	modifyConfig["IgnoreHandshakeStatsRegexps"] = true
-
-	// Use the legacy encoding to both exercise that case, and facilitate a
-	// gradual network upgrade to new encoding support.
-	modifyConfig["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
 
 	configJSON, _ = json.Marshal(modifyConfig)
 

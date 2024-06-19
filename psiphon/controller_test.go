@@ -351,6 +351,14 @@ func TestTunnelPool(t *testing.T) {
 		})
 }
 
+func TestLegacyAPIEncoding(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			protocol:             protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+			useLegacyAPIEncoding: true,
+		})
+}
+
 type controllerRunConfig struct {
 	expectNoServerEntries    bool
 	protocol                 string
@@ -363,6 +371,7 @@ type controllerRunConfig struct {
 	disruptNetwork           bool
 	transformHostNames       bool
 	useFragmentor            bool
+	useLegacyAPIEncoding     bool
 }
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
@@ -426,9 +435,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		modifyConfig["ObfuscatedSSHMaxPadding"] = 8192
 	}
 
-	// Use the legacy encoding to both exercise that case, and facilitate a
-	// gradual network upgrade to new encoding support.
-	modifyConfig["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
+	if runConfig.useLegacyAPIEncoding {
+		modifyConfig["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
+	}
 
 	configJSON, _ = json.Marshal(modifyConfig)
 

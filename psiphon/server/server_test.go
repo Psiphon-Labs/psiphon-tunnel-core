@@ -613,6 +613,19 @@ func TestSteeringIP(t *testing.T) {
 		})
 }
 
+func TestLegacyAPIEncoding(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "OSSH",
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+			doLogHostProvider:    true,
+			useLegacyAPIEncoding: true,
+		})
+}
+
 type runServerConfig struct {
 	tunnelProtocol       string
 	clientTunnelProtocol string
@@ -640,6 +653,7 @@ type runServerConfig struct {
 	inspectFlows         bool
 	doSteeringIP         bool
 	doTargetBrokerSpecs  bool
+	useLegacyAPIEncoding bool
 }
 
 var (
@@ -1264,6 +1278,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		headers := make(http.Header)
 		headers.Set("X-Psiphon-Steering-Ip", testSteeringIP)
 		clientConfig.MeekAdditionalHeaders = headers
+	}
+
+	if runConfig.useLegacyAPIEncoding {
+		clientConfig.TargetAPIEncoding = protocol.PSIPHON_API_ENCODING_JSON
 	}
 
 	if doInproxy {

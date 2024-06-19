@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 func setupConfig(t *testing.T, disableFetcher bool) []byte {
@@ -44,10 +43,6 @@ func setupConfig(t *testing.T, disableFetcher bool) []byte {
 	if err != nil {
 		t.Fatalf("json.Unmarshal failed: %v", err)
 	}
-
-	// Use the legacy encoding to both exercise that case, and facilitate a gradual
-	// network upgrade to new encoding support.
-	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
 
 	if disableFetcher {
 		config["DisableRemoteServerListFetcher"] = true
