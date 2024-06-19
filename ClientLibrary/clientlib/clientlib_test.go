@@ -22,27 +22,56 @@ package clientlib
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
+func setupConfig(t *testing.T, disableFetcher bool) []byte {
+	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
+	if err != nil {
+		// What to do if config file is not present?
+		t.Skipf("error loading configuration file: %s", err)
+	}
+
+	var config map[string]interface{}
+	err = json.Unmarshal(configJSON, &config)
+	if err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	// Use the legacy encoding to both exercise that case, and facilitate a gradual
+	// network upgrade to new encoding support.
+	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
+
+	if disableFetcher {
+		config["DisableRemoteServerListFetcher"] = true
+	}
+
+	configJSON, err = json.Marshal(config)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	return configJSON
+}
+
 func TestStartTunnel(t *testing.T) {
 	// TODO: More comprehensive tests. This is only a smoke test.
+
+	configJSON := setupConfig(t, false)
+	configJSONNoFetcher := setupConfig(t, true)
 
 	clientPlatform := "clientlib_test.go"
 	networkID := "UNKNOWN"
 	timeout := 60
 	quickTimeout := 1
 	trueVal := true
-
-	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
-	if err != nil {
-		// Skip, don't fail, if config file is not present
-		t.Skipf("error loading configuration file: %s", err)
-	}
 
 	// Initialize a fresh datastore and create a modified config which cannot
 	// connect without known servers, to be used in timeout cases.
@@ -53,26 +82,11 @@ func TestStartTunnel(t *testing.T) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	var config map[string]interface{}
-	err = json.Unmarshal(configJSON, &config)
-	if err != nil {
-		t.Fatalf("json.Unmarshal failed: %v", err)
+	paramsDeltaErr := func(err error) bool {
+		return strings.Contains(err.Error(), "SetParameters failed for delta")
 	}
-
-	// Use the legacy encoding to both exercise that case, and facilitate a
-	// gradual network upgrade to new encoding support.
-	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
-
-	configJSON, err = json.Marshal(config)
-	if err != nil {
-		t.Fatalf("json.Marshal failed: %v", err)
-	}
-
-	config["DisableRemoteServerListFetcher"] = true
-
-	configJSONNoFetcher, err := json.Marshal(config)
-	if err != nil {
-		t.Fatalf("json.Marshal failed: %v", err)
+	timeoutErr := func(err error) bool {
+		return errors.Is(err, ErrTimeout)
 	}
 
 	type args struct {
@@ -87,7 +101,7 @@ func TestStartTunnel(t *testing.T) {
 		name        string
 		args        args
 		wantTunnel  bool
-		expectedErr error
+		expectedErr func(error) bool
 	}{
 		{
 			name: "Failure: context timeout",
@@ -105,7 +119,7 @@ func TestStartTunnel(t *testing.T) {
 				noticeReceiver: nil,
 			},
 			wantTunnel:  false,
-			expectedErr: ErrTimeout,
+			expectedErr: timeoutErr,
 		},
 		{
 			name: "Failure: config timeout",
@@ -123,7 +137,7 @@ func TestStartTunnel(t *testing.T) {
 				noticeReceiver: nil,
 			},
 			wantTunnel:  false,
-			expectedErr: ErrTimeout,
+			expectedErr: timeoutErr,
 		},
 		{
 			name: "Success: simple",
@@ -201,6 +215,42 @@ func TestStartTunnel(t *testing.T) {
 			wantTunnel:  true,
 			expectedErr: nil,
 		},
+		{
+			name: "Success: good ParametersDelta",
+			args: args{
+				ctxTimeout:              0,
+				configJSON:              configJSON,
+				embeddedServerEntryList: "",
+				params: Parameters{
+					DataRootDirectory:             &testDataDirName,
+					ClientPlatform:                &clientPlatform,
+					NetworkID:                     &networkID,
+					EstablishTunnelTimeoutSeconds: &timeout,
+				},
+				paramsDelta:    ParametersDelta{"NetworkLatencyMultiplierMin": 1},
+				noticeReceiver: nil,
+			},
+			wantTunnel:  true,
+			expectedErr: nil,
+		},
+		{
+			name: "Failure: bad ParametersDelta",
+			args: args{
+				ctxTimeout:              0,
+				configJSON:              configJSON,
+				embeddedServerEntryList: "",
+				params: Parameters{
+					DataRootDirectory:             &testDataDirName,
+					ClientPlatform:                &clientPlatform,
+					NetworkID:                     &networkID,
+					EstablishTunnelTimeoutSeconds: &timeout,
+				},
+				paramsDelta:    ParametersDelta{"invalidParam": 1},
+				noticeReceiver: nil,
+			},
+			wantTunnel:  false,
+			expectedErr: paramsDeltaErr,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -233,8 +283,16 @@ func TestStartTunnel(t *testing.T) {
 				t.Errorf("StartTunnel() gotTunnel = %v, wantTunnel %v", err, tt.wantTunnel)
 			}
 
-			if err != tt.expectedErr {
-				t.Fatalf("StartTunnel() error = %v, expectedErr %v", err, tt.expectedErr)
+			if tt.expectedErr == nil {
+				if err != nil {
+					t.Fatalf("StartTunnel() returned unexpected error: %v", err)
+				}
+			} else if !tt.expectedErr(err) {
+				t.Fatalf("StartTunnel() error: %v", err)
+				return
+			}
+
+			if err != nil {
 				return
 			}
 
@@ -266,27 +324,7 @@ func TestStartTunnel(t *testing.T) {
 }
 
 func TestMultipleStartTunnel(t *testing.T) {
-	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
-	if err != nil {
-		// What to do if config file is not present?
-		t.Skipf("error loading configuration file: %s", err)
-	}
-
-	var config map[string]interface{}
-	err = json.Unmarshal(configJSON, &config)
-	if err != nil {
-		t.Fatalf("json.Unmarshal failed: %v", err)
-	}
-
-	// Use the legacy encoding to both exercise that case, and facilitate a
-	// gradual network upgrade to new encoding support.
-	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
-
-	configJSON, err = json.Marshal(config)
-	if err != nil {
-		t.Fatalf("json.Marshal failed: %v", err)
-	}
-
+	configJSON := setupConfig(t, false)
 	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
 	if err != nil {
 		t.Fatalf("ioutil.TempDir failed: %v", err)
@@ -339,27 +377,8 @@ func TestMultipleStartTunnel(t *testing.T) {
 }
 
 func TestPsiphonTunnel_Dial(t *testing.T) {
+	configJSON := setupConfig(t, false)
 	trueVal := true
-	configJSON, err := os.ReadFile("../../psiphon/controller_test.config")
-	if err != nil {
-		// Skip, don't fail, if config file is not present
-		t.Skipf("error loading configuration file: %s", err)
-	}
-
-	var config map[string]interface{}
-	err = json.Unmarshal(configJSON, &config)
-	if err != nil {
-		t.Fatalf("json.Unmarshal failed: %v", err)
-	}
-
-	// Use the legacy encoding to both exercise that case, and facilitate a
-	// gradual network upgrade to new encoding support.
-	config["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
-
-	configJSON, err = json.Marshal(config)
-	if err != nil {
-		t.Fatalf("json.Marshal failed: %v", err)
-	}
 
 	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
 	if err != nil {
@@ -371,9 +390,10 @@ func TestPsiphonTunnel_Dial(t *testing.T) {
 		remoteAddr string
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
+		name          string
+		args          args
+		wantErr       bool
+		tunnelStopped bool
 	}{
 		{
 			name:    "Success: example.com",
@@ -384,6 +404,12 @@ func TestPsiphonTunnel_Dial(t *testing.T) {
 			name:    "Failure: invalid address",
 			args:    args{remoteAddr: "example.com:99999"},
 			wantErr: true,
+		},
+		{
+			name:          "Failure: tunnel not started",
+			args:          args{remoteAddr: "example.com:443"},
+			wantErr:       true,
+			tunnelStopped: true,
 		},
 	}
 	for _, tt := range tests {
@@ -406,6 +432,10 @@ func TestPsiphonTunnel_Dial(t *testing.T) {
 			}
 			defer tunnel.Stop()
 
+			if tt.tunnelStopped {
+				tunnel.Stop()
+			}
+
 			conn, err := tunnel.Dial(tt.args.remoteAddr)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("PsiphonTunnel.Dial() error = %v, wantErr %v", err, tt.wantErr)
@@ -417,4 +447,80 @@ func TestPsiphonTunnel_Dial(t *testing.T) {
 			}
 		})
 	}
+}
+
+// We had a problem where config-related notices were being printed to stderr before we
+// set the NoticeWriter. We want to make sure that no longer happens.
+func TestStartTunnelNoOutput(t *testing.T) {
+	// Before starting the tunnel, set up a notice receiver. If it receives anything at
+	// all, that means that it would have been printed to stderr.
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+		func(notice []byte) {
+			t.Fatalf("Received notice: %v", string(notice))
+		}))
+
+	configJSON := setupConfig(t, false)
+
+	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
+	if err != nil {
+		t.Fatalf("ioutil.TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	ctx := context.Background()
+
+	tunnel, err := StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err != nil {
+		t.Fatalf("StartTunnel() error = %v", err)
+	}
+	tunnel.Stop()
+}
+
+// We had a problem where a very early error could result in `started` being set to true
+// and not be set back to false, preventing StartTunnel from being re-callable.
+func TestStartTunnelReentry(t *testing.T) {
+	testDataDirName, err := os.MkdirTemp("", "psiphon-clientlib-test")
+	if err != nil {
+		t.Fatalf("ioutil.TempDir failed: %v", err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
+	configJSON := []byte("BAD CONFIG JSON")
+
+	ctx := context.Background()
+
+	_, err = StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err == nil {
+		t.Fatalf("expected config error")
+	}
+
+	// Call again with a good config. Should work.
+	configJSON = setupConfig(t, false)
+
+	tunnel, err := StartTunnel(
+		ctx,
+		configJSON,
+		"",
+		Parameters{DataRootDirectory: &testDataDirName},
+		nil,
+		nil)
+
+	if err != nil {
+		t.Fatalf("StartTunnel() error = %v", err)
+	}
+	tunnel.Stop()
 }
