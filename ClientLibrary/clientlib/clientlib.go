@@ -140,6 +140,87 @@ func StartTunnel(
 	if !started.CompareAndSwap(false, true) {
 		return nil, errMultipleStart
 	}
+	// There _must_ not be an early return between here and where tunnel.stop is deferred,
+	// otherwise `started` will not get set back to false and we will be unable to call
+	// StartTunnel again.
+
+	// Will be closed when the tunnel has successfully connected
+	connectedSignal := make(chan struct{})
+	// Will receive a value if an error occurs during the connection sequence
+	erroredCh := make(chan error, 1)
+
+	// Create the tunnel object
+	tunnel := new(PsiphonTunnel)
+
+	// Set up notice handling. It is important to do this before config operations, as
+	// otherwise they will write notices to stderr.
+	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+		func(notice []byte) {
+			var event NoticeEvent
+			err := json.Unmarshal(notice, &event)
+			if err != nil {
+				// This is unexpected and probably indicates something fatal has occurred.
+				// We'll interpret it as a connection error and abort.
+				err = errors.TraceMsg(err, "failed to unmarshal notice JSON")
+				select {
+				case erroredCh <- err:
+				default:
+				}
+				return
+			}
+
+			if event.Type == "ListeningHttpProxyPort" {
+				port := event.Data["port"].(float64)
+				tunnel.HTTPProxyPort = int(port)
+			} else if event.Type == "ListeningSocksProxyPort" {
+				port := event.Data["port"].(float64)
+				tunnel.SOCKSProxyPort = int(port)
+			} else if event.Type == "EstablishTunnelTimeout" {
+				select {
+				case erroredCh <- ErrTimeout:
+				default:
+				}
+			} else if event.Type == "Tunnels" {
+				count := event.Data["count"].(float64)
+				if count > 0 {
+					close(connectedSignal)
+				}
+			}
+
+			// Some users of this package may need to add special processing of notices.
+			// If the caller has requested it, we'll pass on the notices.
+			if noticeReceiver != nil {
+				noticeReceiver(event)
+			}
+		}))
+
+	// Create a cancelable context that will be used for stopping the tunnel
+	tunnelCtx, cancelTunnelCtx := context.WithCancel(ctx)
+
+	// Because the tunnel object is only returned on success, there are at least two
+	// problems that we don't need to worry about:
+	// 1. This stop function is called both by the error-defer here and by a call to the
+	//    tunnel's Stop method.
+	// 2. This stop function is called via the tunnel's Stop method before the WaitGroups
+	//    are incremented (causing a race condition).
+	tunnel.stop = func() {
+		cancelTunnelCtx()
+		tunnel.embeddedServerListWaitGroup.Wait()
+		tunnel.controllerWaitGroup.Wait()
+		// This is safe to call even if the data store hasn't been opened
+		psiphon.CloseDataStore()
+		started.Store(false)
+		// Clear our notice receiver, as it is no longer needed and we should let it be
+		// garbage-collected.
+		psiphon.SetNoticeWriter(io.Discard)
+	}
+
+	defer func() {
+		if retErr != nil {
+			tunnel.stop()
+		}
+	}()
+	// We have now set up our on-error cleanup and it is safe to have early error returns.
 
 	config, err := psiphon.LoadConfig(configJSON)
 	if err != nil {
@@ -198,82 +279,10 @@ func StartTunnel(
 		}
 	}
 
-	// Will be closed when the tunnel has successfully connected
-	connectedSignal := make(chan struct{})
-	// Will receive a value if an error occurs during the connection sequence
-	erroredCh := make(chan error, 1)
-
-	// Create the tunnel object
-	tunnel := new(PsiphonTunnel)
-
-	// Set up notice handling
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
-		func(notice []byte) {
-			var event NoticeEvent
-			err := json.Unmarshal(notice, &event)
-			if err != nil {
-				// This is unexpected and probably indicates something fatal has occurred.
-				// We'll interpret it as a connection error and abort.
-				err = errors.TraceMsg(err, "failed to unmarshal notice JSON")
-				select {
-				case erroredCh <- err:
-				default:
-				}
-				return
-			}
-
-			if event.Type == "ListeningHttpProxyPort" {
-				port := event.Data["port"].(float64)
-				tunnel.HTTPProxyPort = int(port)
-			} else if event.Type == "ListeningSocksProxyPort" {
-				port := event.Data["port"].(float64)
-				tunnel.SOCKSProxyPort = int(port)
-			} else if event.Type == "EstablishTunnelTimeout" {
-				select {
-				case erroredCh <- ErrTimeout:
-				default:
-				}
-			} else if event.Type == "Tunnels" {
-				count := event.Data["count"].(float64)
-				if count > 0 {
-					close(connectedSignal)
-				}
-			}
-
-			// Some users of this package may need to add special processing of notices.
-			// If the caller has requested it, we'll pass on the notices.
-			if noticeReceiver != nil {
-				noticeReceiver(event)
-			}
-		}))
-
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
 		return nil, errors.TraceMsg(err, "failed to open data store")
 	}
-
-	// Create a cancelable context that will be used for stopping the tunnel
-	tunnelCtx, cancelTunnelCtx := context.WithCancel(ctx)
-
-	// Because the tunnel object is only returned on success, there are at least two
-	// problems that we don't need to worry about:
-	// 1. This stop function is called both by the error-defer here and by a call to the
-	//    tunnel's Stop method.
-	// 2. This stop function is called via the tunnel's Stop method before the WaitGroups
-	//    are incremented (causing a race condition).
-	tunnel.stop = func() {
-		cancelTunnelCtx()
-		tunnel.embeddedServerListWaitGroup.Wait()
-		tunnel.controllerWaitGroup.Wait()
-		psiphon.CloseDataStore()
-		started.Store(false)
-	}
-
-	defer func() {
-		if retErr != nil {
-			tunnel.stop()
-		}
-	}()
 
 	// If specified, the embedded server list is loaded and stored. When there
 	// are no server candidates at all, we wait for this import to complete
@@ -374,10 +383,6 @@ func (tunnel *PsiphonTunnel) Stop() {
 	tunnel.stop()
 	tunnel.stop = nil
 	tunnel.controllerDial = nil
-
-	// Clear our notice receiver, as it is no longer needed and we should let it be
-	// garbage-collected.
-	psiphon.SetNoticeWriter(io.Discard)
 }
 
 // Dial connects to the specified address through the Psiphon tunnel.
