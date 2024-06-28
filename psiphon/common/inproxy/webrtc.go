@@ -1689,10 +1689,12 @@ func processSDPAddresses(
 					return nil, nil, errors.TraceNew("unexpected non-IP")
 				}
 
+				candidateIsIPv6 := false
 				if candidateIP.To4() == nil {
 					if disableIPv6Candidates {
 						continue
 					}
+					candidateIsIPv6 = true
 					hasIPv6 = true
 				}
 
@@ -1715,18 +1717,27 @@ func processSDPAddresses(
 				// The broker will check that clients and proxies specify only
 				// candidates that map to the same GeoIP country and ASN as
 				// the client/proxy connection to the broker. This limits
-				// misuse of candidate to connect to other locations.
+				// misuse of candidates to connect to other locations.
 				// Legitimate candidates will not all have the exact same IP
 				// address, as there could be a mix of IPv4 and IPv6, as well
 				// as potentially different NAT paths.
 
 				if lookupGeoIP != nil {
 					candidateGeoIPData := lookupGeoIP(candidate.Address())
-					if candidateGeoIPData.Country != expectedGeoIPData.Country {
-						return nil, nil, errors.TraceNew("unexpected GeoIP country")
-					}
-					if candidateGeoIPData.ASN != expectedGeoIPData.ASN {
-						return nil, nil, errors.TraceNew("unexpected GeoIP ASN")
+
+					if candidateGeoIPData.Country != expectedGeoIPData.Country ||
+						candidateGeoIPData.ASN != expectedGeoIPData.ASN {
+
+						version := "IPv4"
+						if candidateIsIPv6 {
+							version = "IPv6"
+						}
+						errStr := fmt.Sprintf(
+							"unexpected GeoIP for %s candidate: %s, %s",
+							version,
+							candidateGeoIPData.Country,
+							candidateGeoIPData.ASN)
+						return nil, nil, errors.TraceNew(errStr)
 					}
 				}
 

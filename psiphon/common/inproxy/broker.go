@@ -481,7 +481,7 @@ func (b *Broker) handleProxyAnnounce(
 	// Always log the outcome.
 	defer func() {
 		if logFields == nil {
-			logFields = make(common.LogFields)
+			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-announce"
 		logFields["proxy_id"] = proxyID
@@ -717,7 +717,7 @@ func (b *Broker) handleClientOffer(
 	// Always log the outcome.
 	defer func() {
 		if logFields == nil {
-			logFields = make(common.LogFields)
+			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "client-offer"
 		if serverParams != nil {
@@ -976,7 +976,7 @@ func (b *Broker) handleProxyAnswer(
 	// Always log the outcome.
 	defer func() {
 		if logFields == nil {
-			logFields = make(common.LogFields)
+			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-answer"
 		logFields["proxy_id"] = proxyID
@@ -1077,7 +1077,7 @@ func (b *Broker) handleClientRelayedPacket(
 	// Always log the outcome.
 	defer func() {
 		if logFields == nil {
-			logFields = make(common.LogFields)
+			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "client-relayed-packet"
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
