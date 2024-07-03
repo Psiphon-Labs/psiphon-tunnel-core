@@ -1692,7 +1692,8 @@ func processSDPAddresses(
 				candidateIsIPv6 := false
 				if candidateIP.To4() == nil {
 					if disableIPv6Candidates {
-						reason := "disabled IPv6"
+						reason := fmt.Sprintf("disabled %s IPv6",
+							candidate.Type().String())
 						filteredCandidateReasons[reason] += 1
 						continue
 					}
@@ -1713,7 +1714,8 @@ func processSDPAddresses(
 					if candidateIsIPv6 {
 						version = "IPv6"
 					}
-					reason := fmt.Sprintf("bogon %s", version)
+					reason := fmt.Sprintf("bogon %s %s",
+						candidate.Type().String(), version)
 					filteredCandidateReasons[reason] += 1
 					continue
 				}
@@ -1747,7 +1749,8 @@ func processSDPAddresses(
 							version = "IPv6"
 						}
 						reason := fmt.Sprintf(
-							"unexpected GeoIP for %s candidate: %s/%s",
+							"unexpected GeoIP %s %s: %s/%s",
+							candidate.Type().String(),
 							version,
 							candidateGeoIPData.Country,
 							candidateGeoIPData.ASN)

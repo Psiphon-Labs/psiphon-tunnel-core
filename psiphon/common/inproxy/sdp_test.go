@@ -73,7 +73,7 @@ func runTestProcessSDP() error {
 
 		found := false
 		for _, reason := range metrics.filteredICECandidates {
-			if strings.Contains(reason, "disabled IPv6") {
+			if strings.Contains(reason, "disabled") {
 				found = true
 				break
 			}
