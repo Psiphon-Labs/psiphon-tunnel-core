@@ -3476,6 +3476,15 @@ func generateInproxyTestConfig(
 	address := net.JoinHostPort(brokerIPAddress, strconv.Itoa(brokerPort))
 	addressRegex := strings.ReplaceAll(address, ".", "\\\\.")
 
+	skipVerify := false
+	verifyServerName := brokerFrontingHostName
+	verifyPins := fmt.Sprintf("[\"%s\"]", brokerVerifyPin)
+	if prng.FlipCoin() {
+		skipVerify = true
+		verifyServerName = ""
+		verifyPins = "[]"
+	}
+
 	brokerSpecsJSONFormat := `
             [{
                 "BrokerPublicKey": "%s",
@@ -3484,8 +3493,9 @@ func generateInproxyTestConfig(
                     "FrontingProviderID": "%s",
                     "Addresses": ["%s"],
                     "DisableSNI": true,
+                    "SkipVerify": %v,
                     "VerifyServerName": "%s",
-                    "VerifyPins": ["%s"],
+                    "VerifyPins": %s,
                     "Host": "%s"
                 }]
             }]
@@ -3497,8 +3507,9 @@ func generateInproxyTestConfig(
 		brokerRootObfuscationSecretStr,
 		brokerFrontingProviderID,
 		addressRegex,
-		brokerFrontingHostName,
-		brokerVerifyPin,
+		skipVerify,
+		verifyServerName,
+		verifyPins,
 		brokerFrontingHostName)
 
 	otherSessionPrivateKey, _ := inproxy.GenerateSessionPrivateKey()
@@ -3511,8 +3522,9 @@ func generateInproxyTestConfig(
 		otherRootObfuscationSecret.String(),
 		prng.HexString(16),
 		prng.HexString(16),
+		false,
 		prng.HexString(16),
-		prng.HexString(16),
+		fmt.Sprintf("[\"%s\"]", prng.HexString(16)),
 		prng.HexString(16))
 
 	var brokerSpecsJSON, proxyBrokerSpecsJSON, clientBrokerSpecsJSON string

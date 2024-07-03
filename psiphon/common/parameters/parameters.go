@@ -1328,7 +1328,11 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case FrontingSpecs:
-				err := v.Validate()
+				// By default, FrontingSpecs are not permitted to specify
+				// SkipVerify. This includes the ConjureAPIRegistrarFrontingSpecs
+				// case which uses MeekModePlaintextRoundTrip.
+				allowSkipVerify := false
+				err := v.Validate(allowSkipVerify)
 				if err != nil {
 					if skipOnError {
 						continue

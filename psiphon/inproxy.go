@@ -821,11 +821,9 @@ func MakeInproxyBrokerDialParameters(
 	// At this time, the broker client, the transport is limited to fronted
 	// HTTPS.
 	//
-	// MeekModePlaintextRoundTrip currently disallows HTTP, as it must for
-	// Conjure's request payloads, but the in-proxy broker session payload is
-	// obfuscated. As a future enhancement, allow HTTP for the in-proxy
-	// broker case, skip selecting TLS tactics and select HTTP tactics such
-	// as HTTPTransformerParameters.
+	// As a future enhancement, allow HTTP for the in-proxy broker case, skip
+	// selecting TLS tactics and select HTTP tactics such as
+	// HTTPTransformerParameters.
 
 	if brokerDialParams.BrokerTransport == protocol.FRONTING_TRANSPORT_HTTP {
 		return nil, errors.TraceNew("unsupported fronting transport")
@@ -1007,9 +1005,9 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 
 	// MeekDialConfig
 	//
-	// The broker round trips use MeekModePlaintextRoundTrip without meek
-	// cookies, so meek obfuscation is not configured. The in-proxy broker
-	// session payloads have their own obfuscation layer.
+	// The broker round trips use MeekModeWrappedPlaintextRoundTrip without
+	// meek cookies, so meek obfuscation is not configured. The in-proxy
+	// broker session payloads have their own obfuscation layer.
 
 	addPsiphonFrontingHeader := false
 	if brokerDialParams.FrontingProviderID != "" {
@@ -1021,7 +1019,7 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 	}
 
 	brokerDialParams.meekConfig = &MeekConfig{
-		Mode:                     MeekModePlaintextRoundTrip,
+		Mode:                     MeekModeWrappedPlaintextRoundTrip,
 		DiagnosticID:             brokerDialParams.FrontingProviderID,
 		Parameters:               config.GetParameters(),
 		DialAddress:              brokerDialParams.DialAddress,
