@@ -83,6 +83,12 @@ func (c *classicDiscovery) selectServers(clientIP net.IP) []*psinet.DiscoverySer
 // discoverServers selects new encoded server entries to be "discovered" by
 // the client, using the discoveryValue -- a function of the client's IP
 // address -- as the input into the discovery algorithm.
+//
+// Warning: if discoverServers is called as the set of discoverable servers
+// changes, i.e. a new server becomes un/discoverable, then there's a remote
+// possibility that discoverServers returns nil because of a race between
+// the timer that updates c.buckets firing and discoverServers obtaining a
+// reference to the value of c.buckets.
 func (c *classicDiscovery) discoverServers(discoveryValue int) []*psinet.DiscoveryServer {
 
 	discoveryDate := c.clk.Now().UTC()
@@ -96,6 +102,7 @@ func (c *classicDiscovery) discoverServers(discoveryValue int) []*psinet.Discove
 	}
 
 	timeInSeconds := int(discoveryDate.Unix())
+	// TODO: ensure that each server in buckets is discoverable on discoveryDate.
 	servers := selectServers(buckets, timeInSeconds, discoveryValue, discoveryDate)
 
 	return servers
@@ -116,6 +123,11 @@ func (c *classicDiscovery) discoverServers(discoveryValue int) []*psinet.Discove
 // both aspects determine which server is selected. IP address is given the
 // priority: if there are only a couple of servers, for example, IP address alone
 // determines the outcome.
+//
+// Warning: If discoveryDate does not fall within the discovery date range of the
+// selected server, then nil will be returned. For this reason, an attempt should
+// be made to ensure that buckets only contains discovery servers that are
+// discoverable on discoveryDate.
 func selectServers(
 	buckets [][]*psinet.DiscoveryServer,
 	timeInSeconds,
