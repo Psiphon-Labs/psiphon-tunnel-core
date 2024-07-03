@@ -2648,9 +2648,9 @@ func (controller *Controller) runInproxyProxy() {
 		EnableWebRTCDebugLogging:      debugLogging,
 		WaitForNetworkConnectivity:    controller.inproxyWaitForNetworkConnectivity,
 		GetBrokerClient:               controller.inproxyGetProxyBrokerClient,
-		GetBaseAPIParameters:          controller.inproxyGetAPIParameters,
-		MakeWebRTCDialCoordinator:     controller.inproxyMakeWebRTCDialCoordinator,
-		HandleTacticsPayload:          controller.inproxyHandleTacticsPayload,
+		GetBaseAPIParameters:          controller.inproxyGetProxyAPIParameters,
+		MakeWebRTCDialCoordinator:     controller.inproxyMakeProxyWebRTCDialCoordinator,
+		HandleTacticsPayload:          controller.inproxyHandleProxyTacticsPayload,
 		MaxClients:                    controller.config.InproxyMaxClients,
 		LimitUpstreamBytesPerSecond:   controller.config.InproxyLimitUpstreamBytesPerSecond,
 		LimitDownstreamBytesPerSecond: controller.config.InproxyLimitDownstreamBytesPerSecond,
@@ -2729,27 +2729,28 @@ func (controller *Controller) inproxyGetProxyBrokerClient() (*inproxy.BrokerClie
 	return brokerClient, nil
 }
 
-func (controller *Controller) inproxyGetAPIParameters() (common.APIParameters, string, error) {
+func (controller *Controller) inproxyGetProxyAPIParameters() (
+	common.APIParameters, string, error) {
 
 	// TODO: include broker fronting dial parameters to be logged by the
 	// broker.
 	params := getBaseAPIParameters(baseParametersNoDialParameters, controller.config, nil)
 
-	networkID := controller.config.GetNetworkID()
-	params["network_type"] = GetNetworkType(networkID)
-
 	if controller.config.DisableTactics {
 		return params, "", nil
 	}
 
-	// Add the known tactics tag, so that the broker can return new tactics if
+	// Add the stored tactics tag, so that the broker can return new tactics if
 	// available.
 	//
 	// The active network ID is recorded returned and rechecked for
 	// consistency when storing any new tactics returned from the broker;
 	// other tactics fetches have this same check.
 
-	err := tactics.SetTacticsAPIParameters(GetTacticsStorer(controller.config), networkID, params)
+	networkID := controller.config.GetNetworkID()
+
+	err := tactics.SetTacticsAPIParameters(
+		GetTacticsStorer(controller.config), networkID, params)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
@@ -2757,7 +2758,8 @@ func (controller *Controller) inproxyGetAPIParameters() (common.APIParameters, s
 	return params, networkID, nil
 }
 
-func (controller *Controller) inproxyMakeWebRTCDialCoordinator() (inproxy.WebRTCDialCoordinator, error) {
+func (controller *Controller) inproxyMakeProxyWebRTCDialCoordinator() (
+	inproxy.WebRTCDialCoordinator, error) {
 
 	// nil is passed in for both InproxySTUNDialParameters and
 	// InproxyWebRTCDialParameters, so those parameters will be newly
@@ -2780,12 +2782,12 @@ func (controller *Controller) inproxyMakeWebRTCDialCoordinator() (inproxy.WebRTC
 	return webRTCDialInstance, nil
 }
 
-// inproxyHandleTacticsPayload handles new tactics returned from the proxy and
-// returns when tactics have changed.
+// inproxyHandleProxyTacticsPayload handles new tactics returned from the
+// proxy and returns when tactics have changed.
 //
 // inproxyHandleTacticsPayload duplicates some tactics-handling code from
 // doHandshakeRequest.
-func (controller *Controller) inproxyHandleTacticsPayload(
+func (controller *Controller) inproxyHandleProxyTacticsPayload(
 	networkID string, tacticsPayload []byte) bool {
 
 	if controller.config.DisableTactics {

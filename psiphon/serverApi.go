@@ -1029,6 +1029,15 @@ func getBaseAPIParameters(
 	params["client_platform"] = config.ClientPlatform
 	params["client_features"] = config.clientFeatures
 	params["client_build_rev"] = buildinfo.GetBuildInfo().BuildRev
+	if dialParams != nil {
+		// Prefer the dialParams network ID snapshot if available.
+		params["network_type"] = dialParams.GetNetworkType()
+	} else {
+		params["network_type"] = GetNetworkType(config.GetNetworkID())
+	}
+	// TODO: snapshot tactics tag used when dialParams initialized.
+	params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] =
+		config.GetParameters().Get().Tag()
 
 	// The server secret is deprecated and included only in legacy JSON
 	// encoded API messages for backwards compatibility. SSH login proves
@@ -1065,7 +1074,6 @@ func getBaseAPIParameters(
 		}
 
 		params["relay_protocol"] = dialParams.TunnelProtocol
-		params["network_type"] = dialParams.GetNetworkType()
 
 		if dialParams.BPFProgramName != "" {
 			params["client_bpf"] = dialParams.BPFProgramName
@@ -1155,9 +1163,6 @@ func getBaseAPIParameters(
 		if localServerEntryTimestamp != "" {
 			params["server_entry_timestamp"] = localServerEntryTimestamp
 		}
-
-		params[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME] =
-			config.GetParameters().Get().Tag()
 
 		if dialParams.DialPortNumber != "" {
 			params["dial_port_number"] = dialParams.DialPortNumber

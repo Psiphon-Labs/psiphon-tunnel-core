@@ -981,8 +981,7 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 
 var inproxyBrokerRequestParams = append(
 	append(
-		[]requestParamSpec{
-			{"network_type", isAnyString, requestParamOptional}},
+		[]requestParamSpec{},
 		tacticsParams...),
 	baseSessionParams...)
 
@@ -1041,6 +1040,8 @@ var baseParams = []requestParamSpec{
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"device_region", isAnyString, requestParamOptional},
 	{"device_location", isGeoHashString, requestParamOptional},
+	{"network_type", isAnyString, requestParamOptional},
+	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 }
 
 // baseSessionParams adds to baseParams the required session_id parameter. For
@@ -1071,7 +1072,6 @@ var baseDialParams = []requestParamSpec{
 	{"server_entry_region", isRegionCode, requestParamOptional},
 	{"server_entry_source", isServerEntrySource, requestParamOptional},
 	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
-	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 	{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"quic_version", isAnyString, requestParamOptional},
 	{"quic_dial_sni_address", isAnyString, requestParamOptional},
@@ -1095,7 +1095,6 @@ var baseDialParams = []requestParamSpec{
 	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
-	{"network_type", isAnyString, requestParamOptional},
 	{"conjure_cached", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"conjure_delay", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"conjure_transport", isAnyString, requestParamOptional},

@@ -1762,6 +1762,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	case logFields := <-serverTunnelLog:
 		err := checkExpectedServerTunnelLogFields(
 			runConfig,
+			doClientTactics,
 			expectClientBPFField,
 			expectServerBPFField,
 			expectServerPacketManipulationField,
@@ -2009,6 +2010,7 @@ func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutM
 
 func checkExpectedServerTunnelLogFields(
 	runConfig *runServerConfig,
+	expectAppliedTacticsTag bool,
 	expectClientBPFField bool,
 	expectServerBPFField bool,
 	expectServerPacketManipulationField bool,
@@ -2064,6 +2066,11 @@ func checkExpectedServerTunnelLogFields(
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
 		}
+	}
+
+	appliedTacticsTag := len(fields[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME].(string)) > 0
+	if expectAppliedTacticsTag != appliedTacticsTag {
+		return fmt.Errorf("unexpected applied_tactics_tag")
 	}
 
 	if fields["host_id"].(string) != "example-host-id" {
@@ -2216,7 +2223,6 @@ func checkExpectedServerTunnelLogFields(
 			"meek_limit_request",
 			"meek_underlying_connection_count",
 			"meek_server_http_version",
-			tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME,
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
