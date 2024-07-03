@@ -1465,10 +1465,43 @@ func NewInproxyWebRTCDialInstance(
 		}
 	}
 
-	var awaitDataChannelTimeout time.Duration
+	disableSTUN := p.Bool(parameters.InproxyDisableSTUN)
+	disablePortMapping := p.Bool(parameters.InproxyDisablePortMapping)
+	disableInboundForMobileNetworks := p.Bool(parameters.InproxyDisableInboundForMobileNetworks)
+	disableIPv6ICECandidates := p.Bool(parameters.InproxyDisableIPv6ICECandidates)
+
+	var discoverNATTimeout, awaitDataChannelTimeout time.Duration
+
 	if isProxy {
+
+		disableSTUN = disableSTUN || p.Bool(parameters.InproxyProxyDisableSTUN)
+
+		disablePortMapping = disablePortMapping || p.Bool(parameters.InproxyProxyDisablePortMapping)
+
+		disableInboundForMobileNetworks = disableInboundForMobileNetworks ||
+			p.Bool(parameters.InproxyProxyDisableInboundForMobileNetworks)
+
+		disableIPv6ICECandidates = disableIPv6ICECandidates ||
+			p.Bool(parameters.InproxyProxyDisableIPv6ICECandidates)
+
+		discoverNATTimeout = p.Duration(parameters.InproxyProxyDiscoverNATTimeout)
+
 		awaitDataChannelTimeout = p.Duration(parameters.InproxyProxyWebRTCAwaitDataChannelTimeout)
+
 	} else {
+
+		disableSTUN = disableSTUN || p.Bool(parameters.InproxyClientDisableSTUN)
+
+		disablePortMapping = disablePortMapping || p.Bool(parameters.InproxyClientDisablePortMapping)
+
+		disableInboundForMobileNetworks = disableInboundForMobileNetworks ||
+			p.Bool(parameters.InproxyClientDisableInboundForMobileNetworks)
+
+		disableIPv6ICECandidates = disableIPv6ICECandidates ||
+			p.Bool(parameters.InproxyClientDisableIPv6ICECandidates)
+
+		discoverNATTimeout = p.Duration(parameters.InproxyClientDiscoverNATTimeout)
+
 		awaitDataChannelTimeout = p.Duration(parameters.InproxyClientWebRTCAwaitDataChannelTimeout)
 	}
 
@@ -1484,12 +1517,16 @@ func NewInproxyWebRTCDialInstance(
 		stunDialParameters:   stunDialParameters,
 		webRTCDialParameters: webRTCDialParameters,
 
+		// discoverNAT is ignored by proxies, which always attempt discovery.
+		// webRTCAnswerTimeout and proxyDestinationDialTimeout are used only
+		// by proxies.
+
 		discoverNAT:                     p.WeightedCoinFlip(parameters.InproxyClientDiscoverNATProbability),
-		disableSTUN:                     p.Bool(parameters.InproxyDisableSTUN),
-		disablePortMapping:              p.Bool(parameters.InproxyDisablePortMapping),
-		disableInboundForMobileNetworks: p.Bool(parameters.InproxyDisableInboundForMobileNetworks),
-		disableIPv6ICECandidates:        p.Bool(parameters.InproxyDisableIPv6ICECandidates),
-		discoverNATTimeout:              p.Duration(parameters.InproxyDiscoverNATTimeout),
+		disableSTUN:                     disableSTUN,
+		disablePortMapping:              disablePortMapping,
+		disableInboundForMobileNetworks: disableInboundForMobileNetworks,
+		disableIPv6ICECandidates:        disableIPv6ICECandidates,
+		discoverNATTimeout:              discoverNATTimeout,
 		webRTCAnswerTimeout:             p.Duration(parameters.InproxyWebRTCAnswerTimeout),
 		awaitDataChannelTimeout:         awaitDataChannelTimeout,
 		proxyDestinationDialTimeout:     p.Duration(parameters.InproxyProxyDestinationDialTimeout),

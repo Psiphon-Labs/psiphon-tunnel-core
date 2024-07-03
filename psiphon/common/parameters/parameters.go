@@ -418,7 +418,16 @@ const (
 	InproxyDisablePortMapping                          = "InproxyDisablePortMapping"
 	InproxyDisableInboundForMobileNetworks             = "InproxyDisableInboundForMobileNetworks"
 	InproxyDisableIPv6ICECandidates                    = "InproxyDisableIPv6ICECandidates"
-	InproxyDiscoverNATTimeout                          = "InproxyDiscoverNATTimeout"
+	InproxyProxyDisableSTUN                            = "InproxyProxyDisableSTUN"
+	InproxyProxyDisablePortMapping                     = "InproxyProxyDisablePortMapping"
+	InproxyProxyDisableInboundForMobileNetworks        = "InproxyProxyDisableInboundForMobileNetworks"
+	InproxyProxyDisableIPv6ICECandidates               = "InproxyProxyDisableIPv6ICECandidates"
+	InproxyClientDisableSTUN                           = "InproxyClientDisableSTUN"
+	InproxyClientDisablePortMapping                    = "InproxyClientDisablePortMapping"
+	InproxyClientDisableInboundForMobileNetworks       = "InproxyClientDisableInboundForMobileNetworks"
+	InproxyClientDisableIPv6ICECandidates              = "InproxyClientDisableIPv6ICECandidates"
+	InproxyProxyDiscoverNATTimeout                     = "InproxyProxyDiscoverNATTimeout"
+	InproxyClientDiscoverNATTimeout                    = "InproxyClientDiscoverNATTimeout"
 	InproxyWebRTCAnswerTimeout                         = "InproxyWebRTCAnswerTimeout"
 	InproxyProxyWebRTCAwaitDataChannelTimeout          = "InproxyProxyWebRTCAwaitDataChannelTimeout"
 	InproxyClientWebRTCAwaitDataChannelTimeout         = "InproxyClientWebRTCAwaitDataChannelTimeout"
@@ -901,7 +910,16 @@ var defaultParameters = map[string]struct {
 	InproxyDisablePortMapping:                          {value: false},
 	InproxyDisableInboundForMobileNetworks:             {value: false},
 	InproxyDisableIPv6ICECandidates:                    {value: false},
-	InproxyDiscoverNATTimeout:                          {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyProxyDisableSTUN:                            {value: false},
+	InproxyProxyDisablePortMapping:                     {value: false},
+	InproxyProxyDisableInboundForMobileNetworks:        {value: false},
+	InproxyProxyDisableIPv6ICECandidates:               {value: false},
+	InproxyClientDisableSTUN:                           {value: false},
+	InproxyClientDisablePortMapping:                    {value: false},
+	InproxyClientDisableInboundForMobileNetworks:       {value: false},
+	InproxyClientDisableIPv6ICECandidates:              {value: false},
+	InproxyProxyDiscoverNATTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyClientDiscoverNATTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyWebRTCAnswerTimeout:                         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyWebRTCAwaitDataChannelTimeout:          {value: 30 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyClientWebRTCAwaitDataChannelTimeout:         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},

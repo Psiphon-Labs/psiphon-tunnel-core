@@ -1032,7 +1032,16 @@ type Config struct {
 	InproxyDisablePortMapping                              *bool
 	InproxyDisableInboundForMobileNetworks                 *bool
 	InproxyDisableIPv6ICECandidates                        *bool
-	InproxyDiscoverNATTimeoutMilliseconds                  *int
+	InproxyProxyDisableSTUN                                *bool
+	InproxyProxyDisablePortMapping                         *bool
+	InproxyProxyDisableInboundForMobileNetworks            *bool
+	InproxyProxyDisableIPv6ICECandidates                   *bool
+	InproxyClientDisableSTUN                               *bool
+	InproxyClientDisablePortMapping                        *bool
+	InproxyClientDisableInboundForMobileNetworks           *bool
+	InproxyClientDisableIPv6ICECandidates                  *bool
+	InproxyProxyDiscoverNATTimeoutMilliseconds             *int
+	InproxyClientDiscoverNATTimeoutMilliseconds            *int
 	InproxyWebRTCAnswerTimeoutMilliseconds                 *int
 	InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds  *int
 	InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds *int
@@ -2502,8 +2511,44 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyDisableIPv6ICECandidates] = *config.InproxyDisableIPv6ICECandidates
 	}
 
-	if config.InproxyDiscoverNATTimeoutMilliseconds != nil {
-		applyParameters[parameters.InproxyDiscoverNATTimeout] = fmt.Sprintf("%dms", *config.InproxyDiscoverNATTimeoutMilliseconds)
+	if config.InproxyProxyDisableSTUN != nil {
+		applyParameters[parameters.InproxyProxyDisableSTUN] = *config.InproxyProxyDisableSTUN
+	}
+
+	if config.InproxyProxyDisablePortMapping != nil {
+		applyParameters[parameters.InproxyProxyDisablePortMapping] = *config.InproxyProxyDisablePortMapping
+	}
+
+	if config.InproxyProxyDisableInboundForMobileNetworks != nil {
+		applyParameters[parameters.InproxyProxyDisableInboundForMobileNetworks] = *config.InproxyProxyDisableInboundForMobileNetworks
+	}
+
+	if config.InproxyProxyDisableIPv6ICECandidates != nil {
+		applyParameters[parameters.InproxyProxyDisableIPv6ICECandidates] = *config.InproxyProxyDisableIPv6ICECandidates
+	}
+
+	if config.InproxyClientDisableSTUN != nil {
+		applyParameters[parameters.InproxyClientDisableSTUN] = *config.InproxyClientDisableSTUN
+	}
+
+	if config.InproxyClientDisablePortMapping != nil {
+		applyParameters[parameters.InproxyClientDisablePortMapping] = *config.InproxyClientDisablePortMapping
+	}
+
+	if config.InproxyClientDisableInboundForMobileNetworks != nil {
+		applyParameters[parameters.InproxyClientDisableInboundForMobileNetworks] = *config.InproxyClientDisableInboundForMobileNetworks
+	}
+
+	if config.InproxyClientDisableIPv6ICECandidates != nil {
+		applyParameters[parameters.InproxyClientDisableIPv6ICECandidates] = *config.InproxyClientDisableIPv6ICECandidates
+	}
+
+	if config.InproxyProxyDiscoverNATTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyDiscoverNATTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyDiscoverNATTimeoutMilliseconds)
+	}
+
+	if config.InproxyClientDiscoverNATTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyClientDiscoverNATTimeout] = fmt.Sprintf("%dms", *config.InproxyClientDiscoverNATTimeoutMilliseconds)
 	}
 
 	if config.InproxyWebRTCAnswerTimeoutMilliseconds != nil {
@@ -3258,9 +3303,45 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte("InproxyDisableIPv6ICECandidates"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyDisableIPv6ICECandidates)
 	}
-	if config.InproxyDiscoverNATTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyDiscoverNATTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyDiscoverNATTimeoutMilliseconds))
+	if config.InproxyProxyDisableSTUN != nil {
+		hash.Write([]byte("InproxyProxyDisableSTUN"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisableSTUN)
+	}
+	if config.InproxyProxyDisablePortMapping != nil {
+		hash.Write([]byte("InproxyProxyDisablePortMapping"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisablePortMapping)
+	}
+	if config.InproxyProxyDisableInboundForMobileNetworks != nil {
+		hash.Write([]byte("InproxyProxyDisableInboundForMobileNetworks"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisableInboundForMobileNetworks)
+	}
+	if config.InproxyProxyDisableIPv6ICECandidates != nil {
+		hash.Write([]byte("InproxyProxyDisableIPv6ICECandidates"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisableIPv6ICECandidates)
+	}
+	if config.InproxyClientDisableSTUN != nil {
+		hash.Write([]byte("InproxyClientDisableSTUN"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableSTUN)
+	}
+	if config.InproxyClientDisablePortMapping != nil {
+		hash.Write([]byte("InproxyClientDisablePortMapping"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisablePortMapping)
+	}
+	if config.InproxyClientDisableInboundForMobileNetworks != nil {
+		hash.Write([]byte("InproxyClientDisableInboundForMobileNetworks"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableInboundForMobileNetworks)
+	}
+	if config.InproxyClientDisableIPv6ICECandidates != nil {
+		hash.Write([]byte("InproxyClientDisableIPv6ICECandidates"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableIPv6ICECandidates)
+	}
+	if config.InproxyProxyDiscoverNATTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyProxyDiscoverNATTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyDiscoverNATTimeoutMilliseconds))
+	}
+	if config.InproxyClientDiscoverNATTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyClientDiscoverNATTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientDiscoverNATTimeoutMilliseconds))
 	}
 	if config.InproxyWebRTCAnswerTimeoutMilliseconds != nil {
 		hash.Write([]byte("InproxyWebRTCAnswerTimeoutMilliseconds"))
