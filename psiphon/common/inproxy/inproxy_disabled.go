@@ -119,8 +119,9 @@ func (conn *webRTCConn) GetMetrics() common.LogFields {
 }
 
 type webRTCSDPMetrics struct {
-	iceCandidateTypes []ICECandidateType
-	hasIPv6           bool
+	iceCandidateTypes     []ICECandidateType
+	hasIPv6               bool
+	filteredICECandidates []string
 }
 
 func newWebRTCConnWithOffer(
@@ -139,12 +140,12 @@ func newWebRTCConnWithAnswer(
 	return nil, WebRTCSessionDescription{}, nil, errors.Trace(errNotEnabled)
 }
 
-func validateSDPAddresses(
+func filterSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
-	expectedGeoIPData common.GeoIPData) (*webRTCSDPMetrics, error) {
-	return nil, errors.Trace(errNotEnabled)
+	expectedGeoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, error) {
+	return nil, nil, errors.Trace(errNotEnabled)
 }
 
 func initPortMapper(coordinator WebRTCDialCoordinator) {

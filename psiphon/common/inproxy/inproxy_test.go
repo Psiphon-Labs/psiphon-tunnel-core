@@ -102,6 +102,7 @@ func runTestInproxy() error {
 
 	// Enable test to run without requiring host firewall exceptions
 	SetAllowBogonWebRTCConnections(true)
+	defer SetAllowBogonWebRTCConnections(false)
 
 	// Init logging and profiling
 

@@ -575,14 +575,16 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
-	geoIPData common.GeoIPData) (common.LogFields, error) {
+	geoIPData common.GeoIPData) ([]byte, common.LogFields, error) {
 
 	if len(request.CommonCompartmentIDs) > maxCompartmentIDs {
-		return nil, errors.Tracef("invalid compartment IDs length: %d", len(request.CommonCompartmentIDs))
+		return nil, nil, errors.Tracef(
+			"invalid compartment IDs length: %d", len(request.CommonCompartmentIDs))
 	}
 
 	if len(request.PersonalCompartmentIDs) > maxCompartmentIDs {
-		return nil, errors.Tracef("invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
+		return nil, nil, errors.Tracef(
+			"invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
 	// The client offer SDP may contain no ICE candidates.
@@ -590,10 +592,10 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 
 	// Client offer SDP candidate addresses must match the country and ASN of
 	// the client. Don't facilitate connections to arbitrary destinations.
-	sdpMetrics, err := validateSDPAddresses(
+	filteredSDP, sdpMetrics, err := filterSDPAddresses(
 		[]byte(request.ClientOfferSDP.SDP), errorOnNoCandidates, lookupGeoIP, geoIPData)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	// The client's self-reported ICECandidateTypes are used instead of the
@@ -602,23 +604,24 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	// indistinguishable from host candidate types.
 
 	if !request.ICECandidateTypes.IsValid() {
-		return nil, errors.Tracef("invalid ICE candidate types: %v", request.ICECandidateTypes)
+		return nil, nil, errors.Tracef(
+			"invalid ICE candidate types: %v", request.ICECandidateTypes)
 	}
 
 	if request.Metrics == nil {
-		return nil, errors.TraceNew("missing metrics")
+		return nil, nil, errors.TraceNew("missing metrics")
 	}
 
 	logFields, err := request.Metrics.ValidateAndGetLogFields(
 		baseAPIParameterValidator, formatter, geoIPData)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	if request.TrafficShapingParameters != nil {
 		err := request.TrafficShapingParameters.Validate()
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, nil, errors.Trace(err)
 		}
 	}
 
@@ -634,8 +637,9 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	logFields["has_personal_compartment_ids"] = hasPersonalCompartmentIDs
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["has_IPv6"] = sdpMetrics.hasIPv6
+	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
 
-	return logFields, nil
+	return filteredSDP, logFields, nil
 }
 
 // Validate validates the that client has not specified excess traffic shaping
@@ -675,17 +679,17 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
-	geoIPData common.GeoIPData) (common.LogFields, error) {
+	geoIPData common.GeoIPData) ([]byte, common.LogFields, error) {
 
 	// The proxy answer SDP must contain at least one ICE candidate.
 	errorOnNoCandidates := true
 
 	// Proxy answer SDP candidate addresses must match the country and ASN of
 	// the proxy. Don't facilitate connections to arbitrary destinations.
-	sdpMetrics, err := validateSDPAddresses(
+	filteredSDP, sdpMetrics, err := filterSDPAddresses(
 		[]byte(request.ProxyAnswerSDP.SDP), errorOnNoCandidates, lookupGeoIP, geoIPData)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	// The proxy's self-reported ICECandidateTypes are used instead of the
@@ -694,11 +698,13 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	// indistinguishable from host candidate types.
 
 	if !request.ICECandidateTypes.IsValid() {
-		return nil, errors.Tracef("invalid ICE candidate types: %v", request.ICECandidateTypes)
+		return nil, nil, errors.Tracef(
+			"invalid ICE candidate types: %v", request.ICECandidateTypes)
 	}
 
 	if request.SelectedProxyProtocolVersion != ProxyProtocolVersion1 {
-		return nil, errors.Tracef("invalid select proxy protocol version: %v", request.SelectedProxyProtocolVersion)
+		return nil, nil, errors.Tracef(
+			"invalid select proxy protocol version: %v", request.SelectedProxyProtocolVersion)
 	}
 
 	logFields := formatter(geoIPData, common.APIParameters{})
@@ -706,9 +712,10 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	logFields["connection_id"] = request.ConnectionID
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["has_IPv6"] = sdpMetrics.hasIPv6
+	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
 	logFields["answer_error"] = request.AnswerError
 
-	return logFields, nil
+	return filteredSDP, logFields, nil
 }
 
 // ValidateAndGetLogFields validates the ClientRelayedPacketRequest and returns
