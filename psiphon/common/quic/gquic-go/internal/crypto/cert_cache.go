@@ -1,15 +1,19 @@
 package crypto
 
 import (
-	"fmt"
 	"hash/fnv"
+	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic/gquic-go/internal/protocol"
-	"github.com/hashicorp/golang-lru"
+	"github.com/golang/groupcache/lru"
 )
 
 var (
-	compressedCertsCache *lru.Cache
+	// [Psiphon]
+	// Replace github.com/hashicorp/golang-lru with github.com/golang/groupcache/lru,
+	// adding mutex for safe concurrent access.
+	compressedCertsCacheMutex sync.Mutex
+	compressedCertsCache      *lru.Cache
 )
 
 func getCompressedCert(chain [][]byte, pCommonSetHashes, pCachedHashes []byte) ([]byte, error) {
@@ -24,7 +28,9 @@ func getCompressedCert(chain [][]byte, pCommonSetHashes, pCachedHashes []byte) (
 
 	var result []byte
 
+	compressedCertsCacheMutex.Lock()
 	resultI, isCached := compressedCertsCache.Get(hash)
+	compressedCertsCacheMutex.Unlock()
 	if isCached {
 		result = resultI.([]byte)
 	} else {
@@ -33,16 +39,14 @@ func getCompressedCert(chain [][]byte, pCommonSetHashes, pCachedHashes []byte) (
 		if err != nil {
 			return nil, err
 		}
+		compressedCertsCacheMutex.Lock()
 		compressedCertsCache.Add(hash, result)
+		compressedCertsCacheMutex.Unlock()
 	}
 
 	return result, nil
 }
 
 func init() {
-	var err error
-	compressedCertsCache, err = lru.New(protocol.NumCachedCertificates)
-	if err != nil {
-		panic(fmt.Sprintf("fatal error in quic-go: could not create lru cache: %s", err.Error()))
-	}
+	compressedCertsCache = lru.New(protocol.NumCachedCertificates)
 }
