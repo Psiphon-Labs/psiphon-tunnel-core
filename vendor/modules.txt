@@ -159,10 +159,6 @@ github.com/google/uuid
 # github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
 ## explicit
 github.com/grafov/m3u8
-# github.com/hashicorp/golang-lru v1.0.2
-## explicit; go 1.12
-github.com/hashicorp/golang-lru
-github.com/hashicorp/golang-lru/simplelru
 # github.com/josharian/native v1.1.1-0.20230202152459-5c7d0dd6ab86
 ## explicit; go 1.13
 github.com/josharian/native
