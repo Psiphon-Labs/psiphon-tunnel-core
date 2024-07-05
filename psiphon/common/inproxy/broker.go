@@ -349,6 +349,9 @@ func (b *Broker) HandleSessionPacket(
 	handleUnwrappedRequest := func(initiatorID ID, unwrappedRequestPayload []byte) ([]byte, error) {
 
 		recordType, err := peekRecordPreambleType(unwrappedRequestPayload)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 
 		var responsePayload []byte
 

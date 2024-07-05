@@ -100,7 +100,7 @@ type MeekConfig struct {
 	// HTTP level; TLS and server certificate verification is required; the
 	// origin server may be any HTTP(S) server.
 	//
-	// MeekModeWrappedPlaintextRoundTrip: is equivilent to
+	// MeekModeWrappedPlaintextRoundTrip: is equivalent to
 	// MeekModePlaintextRoundTrip, except skipping of server certificate
 	// verification is permitted. In this mode, the caller is asserting that
 	// the HTTP plaintext payload is wrapped in its own transport security

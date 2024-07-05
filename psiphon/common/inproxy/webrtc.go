@@ -1620,7 +1620,10 @@ func processSDPAddresses(
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
-		port, _ := strconv.Atoi(portStr)
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
 
 		// Only IPv4 port mapping addresses are supported due to the
 		// NewCandidateHost limitation noted below. It is expected that port
@@ -1735,7 +1738,7 @@ func processSDPAddresses(
 				// network addresses misuse non-private IP ranges (so are
 				// technically not bogons). Instead of outright rejecting
 				// SDPs containing unexpected GeoIP candidates, they are
-				// instead stripped out and the the resulting filtered SDP is
+				// instead stripped out and the resulting filtered SDP is
 				// used.
 
 				if lookupGeoIP != nil {
