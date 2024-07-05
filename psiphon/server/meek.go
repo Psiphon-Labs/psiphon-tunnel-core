@@ -50,8 +50,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	lrucache "github.com/cognusion/go-cache-lru"
-	"github.com/juju/ratelimit"
 	"golang.org/x/crypto/nacl/box"
+	"golang.org/x/time/rate"
 )
 
 // MeekServer is based on meek-server.go from Tor and Psiphon:
@@ -1026,22 +1026,25 @@ func (server *MeekServer) rateLimit(
 	// (as well as synchronizing access to rateLimitCount).
 	server.rateLimitLock.Lock()
 
-	var rateLimiter *ratelimit.Bucket
+	var rateLimiter *rate.Limiter
 	entry, ok := server.rateLimitHistory.Get(rateLimitIP)
 	if ok {
-		rateLimiter = entry.(*ratelimit.Bucket)
+		rateLimiter = entry.(*rate.Limiter)
 	} else {
-		rateLimiter = ratelimit.NewBucketWithQuantum(
-			time.Duration(thresholdSeconds)*time.Second,
-			int64(historySize),
-			int64(historySize))
+
+		// Set bursts to 1, which is appropriate for new meek tunnels and
+		// tactics requests.
+
+		limit := float64(historySize) / float64(thresholdSeconds)
+		bursts := 1
+		rateLimiter = rate.NewLimiter(rate.Limit(limit), bursts)
 		server.rateLimitHistory.Set(
 			rateLimitIP,
 			rateLimiter,
 			time.Duration(thresholdSeconds)*time.Second)
 	}
 
-	limit := rateLimiter.TakeAvailable(1) < 1
+	limit := !rateLimiter.Allow()
 
 	triggerGC := false
 	if limit {

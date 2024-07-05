@@ -27,7 +27,6 @@ require (
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
 	github.com/google/gopacket v1.1.19
 	github.com/grafov/m3u8 v0.0.0-20171211212457-6ab8f28ed427
-	github.com/juju/ratelimit v1.0.2
 	github.com/marusama/semaphore v0.0.0-20171214154724-565ffd8e868a
 	github.com/miekg/dns v1.1.44-0.20210804161652-ab67aa642300
 	github.com/mitchellh/panicwrap v0.0.0-20170106182340-fce601fe5557
@@ -47,6 +46,7 @@ require (
 	golang.org/x/sync v0.2.0
 	golang.org/x/sys v0.19.0
 	golang.org/x/term v0.19.0
+	golang.org/x/time v0.5.0
 )
 
 require (

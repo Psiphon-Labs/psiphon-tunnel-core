@@ -138,9 +138,6 @@ github.com/grafov/m3u8
 # github.com/josharian/native v1.0.0
 ## explicit; go 1.13
 github.com/josharian/native
-# github.com/juju/ratelimit v1.0.2
-## explicit
-github.com/juju/ratelimit
 # github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 ## explicit
 github.com/kardianos/osext
@@ -381,6 +378,9 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
+# golang.org/x/time v0.5.0
+## explicit; go 1.18
+golang.org/x/time/rate
 # golang.org/x/tools v0.9.1
 ## explicit; go 1.18
 golang.org/x/tools/go/analysis

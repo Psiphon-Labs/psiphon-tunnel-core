@@ -22,6 +22,7 @@ package common
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"net"
@@ -113,7 +114,7 @@ func runRateLimitsTest(t *testing.T, rateLimits RateLimits) {
 		if err != nil {
 			return conn, err
 		}
-		return NewThrottledConn(conn, rateLimits), nil
+		return NewThrottledConn(conn, true, rateLimits), nil
 	}
 
 	client := &http.Client{
@@ -204,27 +205,27 @@ func TestThrottledConnClose(t *testing.T) {
 	n := 4
 	b := make([]byte, n+1)
 
-	throttledConn := NewThrottledConn(&testConn{}, rateLimits)
+	throttledConn := NewThrottledConn(&testConn{}, true, rateLimits)
 
 	now := time.Now()
-	_, err := throttledConn.Read(b)
+	_, err := io.ReadFull(throttledConn, b)
 	elapsed := time.Since(now)
 	if err != nil || elapsed < time.Duration(n)*time.Second {
 		t.Errorf("unexpected interrupted read: %s, %v", elapsed, err)
 	}
 
 	now = time.Now()
-	go func() {
+	go func(conn net.Conn) {
 		time.Sleep(500 * time.Millisecond)
-		throttledConn.Close()
-	}()
+		conn.Close()
+	}(throttledConn)
 	_, err = throttledConn.Read(b)
 	elapsed = time.Since(now)
 	if elapsed > 1*time.Second {
 		t.Errorf("unexpected uninterrupted read: %s, %v", elapsed, err)
 	}
 
-	throttledConn = NewThrottledConn(&testConn{}, rateLimits)
+	throttledConn = NewThrottledConn(&testConn{}, true, rateLimits)
 
 	now = time.Now()
 	_, err = throttledConn.Write(b)
@@ -234,14 +235,31 @@ func TestThrottledConnClose(t *testing.T) {
 	}
 
 	now = time.Now()
-	go func() {
+	go func(conn net.Conn) {
 		time.Sleep(500 * time.Millisecond)
-		throttledConn.Close()
-	}()
+		conn.Close()
+	}(throttledConn)
 	_, err = throttledConn.Write(b)
 	elapsed = time.Since(now)
 	if elapsed > 1*time.Second {
 		t.Errorf("unexpected uninterrupted write: %s, %v", elapsed, err)
+	}
+}
+
+func TestNonStreamThrottledConn(t *testing.T) {
+
+	MTU := int64(1500)
+
+	rateLimits := RateLimits{
+		ReadBytesPerSecond:  MTU - 1,
+		WriteBytesPerSecond: MTU - 1,
+	}
+
+	throttledConn := NewThrottledConn(&testConn{}, false, rateLimits)
+
+	_, err := throttledConn.Write(make([]byte, MTU))
+	if err == nil {
+		t.Errorf("unexpected split write")
 	}
 }
 

@@ -1937,9 +1937,11 @@ func (sshClient *sshClient) run(
 	// Allow garbage collection.
 	p.Close()
 
-	// Further wrap the connection in a rate limiting ThrottledConn.
+	// Further wrap the connection in a rate limiting ThrottledConn. The
+	// underlying dialConn is always a stream, even when the network conn
+	// uses UDP.
 
-	throttledConn := common.NewThrottledConn(conn, sshClient.rateLimits())
+	throttledConn := common.NewThrottledConn(conn, true, sshClient.rateLimits())
 	conn = throttledConn
 
 	// Replay of server-side parameters is set or extended after a new tunnel

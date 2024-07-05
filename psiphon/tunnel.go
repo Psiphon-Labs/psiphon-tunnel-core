@@ -991,9 +991,11 @@ func dialTunnel(
 		burstUpstreamTargetBytes, burstUpstreamDeadline,
 		burstDownstreamTargetBytes, burstDownstreamDeadline)
 
-	// Apply throttling (if configured)
+	// Apply throttling (if configured). The underlying dialConn is always a
+	// stream, even when the network conn uses UDP.
 	throttledConn := common.NewThrottledConn(
 		monitoredConn,
+		true,
 		rateLimits)
 
 	// Add obfuscated SSH layer
