@@ -1762,6 +1762,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	case logFields := <-serverTunnelLog:
 		err := checkExpectedServerTunnelLogFields(
 			runConfig,
+			doClientTactics,
 			expectClientBPFField,
 			expectServerBPFField,
 			expectServerPacketManipulationField,
@@ -2009,6 +2010,7 @@ func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutM
 
 func checkExpectedServerTunnelLogFields(
 	runConfig *runServerConfig,
+	expectAppliedTacticsTag bool,
 	expectClientBPFField bool,
 	expectServerBPFField bool,
 	expectServerPacketManipulationField bool,
@@ -2064,6 +2066,11 @@ func checkExpectedServerTunnelLogFields(
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
 		}
+	}
+
+	appliedTacticsTag := len(fields[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME].(string)) > 0
+	if expectAppliedTacticsTag != appliedTacticsTag {
+		return fmt.Errorf("unexpected applied_tactics_tag")
 	}
 
 	if fields["host_id"].(string) != "example-host-id" {
@@ -2216,7 +2223,6 @@ func checkExpectedServerTunnelLogFields(
 			"meek_limit_request",
 			"meek_underlying_connection_count",
 			"meek_server_http_version",
-			tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME,
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
@@ -3476,6 +3482,15 @@ func generateInproxyTestConfig(
 	address := net.JoinHostPort(brokerIPAddress, strconv.Itoa(brokerPort))
 	addressRegex := strings.ReplaceAll(address, ".", "\\\\.")
 
+	skipVerify := false
+	verifyServerName := brokerFrontingHostName
+	verifyPins := fmt.Sprintf("[\"%s\"]", brokerVerifyPin)
+	if prng.FlipCoin() {
+		skipVerify = true
+		verifyServerName = ""
+		verifyPins = "[]"
+	}
+
 	brokerSpecsJSONFormat := `
             [{
                 "BrokerPublicKey": "%s",
@@ -3484,8 +3499,9 @@ func generateInproxyTestConfig(
                     "FrontingProviderID": "%s",
                     "Addresses": ["%s"],
                     "DisableSNI": true,
+                    "SkipVerify": %v,
                     "VerifyServerName": "%s",
-                    "VerifyPins": ["%s"],
+                    "VerifyPins": %s,
                     "Host": "%s"
                 }]
             }]
@@ -3497,8 +3513,9 @@ func generateInproxyTestConfig(
 		brokerRootObfuscationSecretStr,
 		brokerFrontingProviderID,
 		addressRegex,
-		brokerFrontingHostName,
-		brokerVerifyPin,
+		skipVerify,
+		verifyServerName,
+		verifyPins,
 		brokerFrontingHostName)
 
 	otherSessionPrivateKey, _ := inproxy.GenerateSessionPrivateKey()
@@ -3511,8 +3528,9 @@ func generateInproxyTestConfig(
 		otherRootObfuscationSecret.String(),
 		prng.HexString(16),
 		prng.HexString(16),
+		false,
 		prng.HexString(16),
-		prng.HexString(16),
+		fmt.Sprintf("[\"%s\"]", prng.HexString(16)),
 		prng.HexString(16))
 
 	var brokerSpecsJSON, proxyBrokerSpecsJSON, clientBrokerSpecsJSON string

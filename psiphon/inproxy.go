@@ -821,11 +821,9 @@ func MakeInproxyBrokerDialParameters(
 	// At this time, the broker client, the transport is limited to fronted
 	// HTTPS.
 	//
-	// MeekModePlaintextRoundTrip currently disallows HTTP, as it must for
-	// Conjure's request payloads, but the in-proxy broker session payload is
-	// obfuscated. As a future enhancement, allow HTTP for the in-proxy
-	// broker case, skip selecting TLS tactics and select HTTP tactics such
-	// as HTTPTransformerParameters.
+	// As a future enhancement, allow HTTP for the in-proxy broker case, skip
+	// selecting TLS tactics and select HTTP tactics such as
+	// HTTPTransformerParameters.
 
 	if brokerDialParams.BrokerTransport == protocol.FRONTING_TRANSPORT_HTTP {
 		return nil, errors.TraceNew("unsupported fronting transport")
@@ -1007,9 +1005,9 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 
 	// MeekDialConfig
 	//
-	// The broker round trips use MeekModePlaintextRoundTrip without meek
-	// cookies, so meek obfuscation is not configured. The in-proxy broker
-	// session payloads have their own obfuscation layer.
+	// The broker round trips use MeekModeWrappedPlaintextRoundTrip without
+	// meek cookies, so meek obfuscation is not configured. The in-proxy
+	// broker session payloads have their own obfuscation layer.
 
 	addPsiphonFrontingHeader := false
 	if brokerDialParams.FrontingProviderID != "" {
@@ -1021,7 +1019,7 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 	}
 
 	brokerDialParams.meekConfig = &MeekConfig{
-		Mode:                     MeekModePlaintextRoundTrip,
+		Mode:                     MeekModeWrappedPlaintextRoundTrip,
 		DiagnosticID:             brokerDialParams.FrontingProviderID,
 		Parameters:               config.GetParameters(),
 		DialAddress:              brokerDialParams.DialAddress,
@@ -1467,10 +1465,43 @@ func NewInproxyWebRTCDialInstance(
 		}
 	}
 
-	var awaitDataChannelTimeout time.Duration
+	disableSTUN := p.Bool(parameters.InproxyDisableSTUN)
+	disablePortMapping := p.Bool(parameters.InproxyDisablePortMapping)
+	disableInboundForMobileNetworks := p.Bool(parameters.InproxyDisableInboundForMobileNetworks)
+	disableIPv6ICECandidates := p.Bool(parameters.InproxyDisableIPv6ICECandidates)
+
+	var discoverNATTimeout, awaitDataChannelTimeout time.Duration
+
 	if isProxy {
+
+		disableSTUN = disableSTUN || p.Bool(parameters.InproxyProxyDisableSTUN)
+
+		disablePortMapping = disablePortMapping || p.Bool(parameters.InproxyProxyDisablePortMapping)
+
+		disableInboundForMobileNetworks = disableInboundForMobileNetworks ||
+			p.Bool(parameters.InproxyProxyDisableInboundForMobileNetworks)
+
+		disableIPv6ICECandidates = disableIPv6ICECandidates ||
+			p.Bool(parameters.InproxyProxyDisableIPv6ICECandidates)
+
+		discoverNATTimeout = p.Duration(parameters.InproxyProxyDiscoverNATTimeout)
+
 		awaitDataChannelTimeout = p.Duration(parameters.InproxyProxyWebRTCAwaitDataChannelTimeout)
+
 	} else {
+
+		disableSTUN = disableSTUN || p.Bool(parameters.InproxyClientDisableSTUN)
+
+		disablePortMapping = disablePortMapping || p.Bool(parameters.InproxyClientDisablePortMapping)
+
+		disableInboundForMobileNetworks = disableInboundForMobileNetworks ||
+			p.Bool(parameters.InproxyClientDisableInboundForMobileNetworks)
+
+		disableIPv6ICECandidates = disableIPv6ICECandidates ||
+			p.Bool(parameters.InproxyClientDisableIPv6ICECandidates)
+
+		discoverNATTimeout = p.Duration(parameters.InproxyClientDiscoverNATTimeout)
+
 		awaitDataChannelTimeout = p.Duration(parameters.InproxyClientWebRTCAwaitDataChannelTimeout)
 	}
 
@@ -1486,12 +1517,16 @@ func NewInproxyWebRTCDialInstance(
 		stunDialParameters:   stunDialParameters,
 		webRTCDialParameters: webRTCDialParameters,
 
+		// discoverNAT is ignored by proxies, which always attempt discovery.
+		// webRTCAnswerTimeout and proxyDestinationDialTimeout are used only
+		// by proxies.
+
 		discoverNAT:                     p.WeightedCoinFlip(parameters.InproxyClientDiscoverNATProbability),
-		disableSTUN:                     p.Bool(parameters.InproxyDisableSTUN),
-		disablePortMapping:              p.Bool(parameters.InproxyDisablePortMapping),
-		disableInboundForMobileNetworks: p.Bool(parameters.InproxyDisableInboundForMobileNetworks),
-		disableIPv6ICECandidates:        p.Bool(parameters.InproxyDisableIPv6ICECandidates),
-		discoverNATTimeout:              p.Duration(parameters.InproxyDiscoverNATTimeout),
+		disableSTUN:                     disableSTUN,
+		disablePortMapping:              disablePortMapping,
+		disableInboundForMobileNetworks: disableInboundForMobileNetworks,
+		disableIPv6ICECandidates:        disableIPv6ICECandidates,
+		discoverNATTimeout:              discoverNATTimeout,
 		webRTCAnswerTimeout:             p.Duration(parameters.InproxyWebRTCAnswerTimeout),
 		awaitDataChannelTimeout:         awaitDataChannelTimeout,
 		proxyDestinationDialTimeout:     p.Duration(parameters.InproxyProxyDestinationDialTimeout),

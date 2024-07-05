@@ -52,7 +52,11 @@ func (specs InproxyBrokerSpecsValue) Validate(checkBrokerPublicKeyList *[]string
 		if len(spec.BrokerFrontingSpecs) == 0 {
 			return errors.TraceNew("missing broker fronting spec")
 		}
-		err := spec.BrokerFrontingSpecs.Validate()
+		// Broker fronting specs may specify SkipVerify, since the meek
+		// payload has it's own transport security layer, the Noise sessions.
+		// Broker fronting dials use MeekModeWrappedPlaintextRoundTrip.
+		allowSkipVerify := true
+		err := spec.BrokerFrontingSpecs.Validate(allowSkipVerify)
 		if err != nil {
 			return errors.Trace(err)
 		}

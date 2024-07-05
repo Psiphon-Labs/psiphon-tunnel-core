@@ -66,6 +66,7 @@ const (
 	MeekModeRelay = iota
 	MeekModeObfuscatedRoundTrip
 	MeekModePlaintextRoundTrip
+	MeekModeWrappedPlaintextRoundTrip
 )
 
 // MeekConfig specifies the behavior of a MeekConn.
@@ -99,9 +100,16 @@ type MeekConfig struct {
 	// HTTP level; TLS and server certificate verification is required; the
 	// origin server may be any HTTP(S) server.
 	//
-	// As with the other modes, MeekModePlaintextRoundTrip supports HTTP/2 with
-	// utls, and integration with DialParameters for replay -- which are not
-	// otherwise implemented if using just CustomTLSDialer and net.http.
+	// MeekModeWrappedPlaintextRoundTrip: is equivalent to
+	// MeekModePlaintextRoundTrip, except skipping of server certificate
+	// verification is permitted. In this mode, the caller is asserting that
+	// the HTTP plaintext payload is wrapped in its own transport security
+	// layer.
+	//
+	// As with the other modes, MeekMode[Wrapped]PlaintextRoundTrip supports
+	// HTTP/2 with utls, and integration with DialParameters for replay --
+	// which are not otherwise implemented if using just CustomTLSDialer and
+	// net.http.
 	Mode MeekMode
 
 	// DialAddress is the actual network address to dial to establish a
@@ -148,7 +156,8 @@ type MeekConfig struct {
 	RandomizedTLSProfileSeed *prng.Seed
 
 	// UseObfuscatedSessionTickets indicates whether to use obfuscated session
-	// tickets. Assumes UseHTTPS is true. Ignored for MeekModePlaintextRoundTrip.
+	// tickets. Assumes UseHTTPS is true.
+	// Ignored for MeekMode[Wrapped]PlaintextRoundTrip.
 	UseObfuscatedSessionTickets bool
 
 	// SNIServerName is the value to place in the TLS/QUIC SNI server_name field
@@ -191,8 +200,8 @@ type MeekConfig struct {
 	// ClientTunnelProtocol is the protocol the client is using. It's included in
 	// the meek cookie for optional use by the server, in cases where the server
 	// cannot unambiguously determine the tunnel protocol. ClientTunnelProtocol
-	// is used when selecting tactics targeted at specific protocols. Ignored for
-	// MeekModePlaintextRoundTrip.
+	// is used when selecting tactics targeted at specific protocols.
+	// Ignored for MeekMode[Wrapped]PlaintextRoundTrip.
 	ClientTunnelProtocol string
 
 	// NetworkLatencyMultiplier specifies a custom network latency multiplier to
@@ -200,7 +209,7 @@ type MeekConfig struct {
 	NetworkLatencyMultiplier float64
 
 	// The following values are used to create the obfuscated meek cookie.
-	// Ignored for MeekModePlaintextRoundTrip.
+	// Ignored for MeekMode[Wrapped]PlaintextRoundTrip.
 
 	MeekCookieEncryptionPublicKey string
 	MeekObfuscatedKey             string
@@ -470,6 +479,7 @@ func DialMeek(
 		}
 
 		if meekConfig.Mode != MeekModePlaintextRoundTrip &&
+			meekConfig.Mode != MeekModeWrappedPlaintextRoundTrip &&
 			meekConfig.MeekObfuscatedKey != "" {
 
 			// As the passthrough message is unique and indistinguishable from a normal
@@ -747,12 +757,13 @@ func DialMeek(
 		meek.meekObfuscatorPaddingSeed = meekConfig.MeekObfuscatorPaddingSeed
 		meek.clientTunnelProtocol = meekConfig.ClientTunnelProtocol
 
-	} else if meek.mode == MeekModePlaintextRoundTrip {
+	} else if meek.mode == MeekModePlaintextRoundTrip ||
+		meek.mode == MeekModeWrappedPlaintextRoundTrip {
 
 		// MeekModeRelay and MeekModeObfuscatedRoundTrip set the Host header
-		// implicitly via meek.url; MeekModePlaintextRoundTrip does not use
-		// meek.url; it uses the RoundTrip input request.URL instead. So the
-		// Host header is set to meekConfig.HostHeader explicitly here.
+		// implicitly via meek.url; MeekMode[Wrapped]PlaintextRoundTrip does
+		// not use meek.url; it uses the RoundTrip input request.URL instead.
+		// So the Host header is set to meekConfig.HostHeader explicitly here.
 		meek.additionalHeaders.Add("Host", meekConfig.HostHeader)
 	}
 
@@ -1056,7 +1067,8 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 // response body is read, idle connections may be left open.
 func (meek *MeekConn) RoundTrip(request *http.Request) (*http.Response, error) {
 
-	if meek.mode != MeekModePlaintextRoundTrip {
+	if meek.mode != MeekModePlaintextRoundTrip &&
+		meek.mode != MeekModeWrappedPlaintextRoundTrip {
 		return nil, errors.TraceNew("operation unsupported")
 	}
 

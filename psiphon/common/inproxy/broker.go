@@ -349,6 +349,9 @@ func (b *Broker) HandleSessionPacket(
 	handleUnwrappedRequest := func(initiatorID ID, unwrappedRequestPayload []byte) ([]byte, error) {
 
 		recordType, err := peekRecordPreambleType(unwrappedRequestPayload)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 
 		var responsePayload []byte
 
@@ -759,7 +762,15 @@ func (b *Broker) handleClientOffer(
 		return nil, errors.Trace(err)
 	}
 
-	logFields, err = offerRequest.ValidateAndGetLogFields(
+	// The filtered SDP is the request SDP with any invalid (bogon, unexpected
+	// GeoIP) ICE candidates filtered out. In some cases, clients cannot
+	// avoid submitting invalid candidates (see comment in
+	// processSDPAddresses), so all invalid candidates are removed and the
+	// remaining SDP is used. Filtered candidate information is logged in
+	// logFields.
+
+	var filteredSDP []byte
+	filteredSDP, logFields, err = offerRequest.ValidateAndGetLogFields(
 		int(atomic.LoadInt64(&b.maxCompartmentIDs)),
 		b.config.LookupGeoIP,
 		b.config.APIParameterValidator,
@@ -768,6 +779,9 @@ func (b *Broker) handleClientOffer(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	offerSDP := offerRequest.ClientOfferSDP
+	offerSDP.SDP = string(filteredSDP)
 
 	// AllowClient may be used to disallow clients from certain geolocations
 	// from offering. Clients are always allowed to match proxies with shared
@@ -818,7 +832,7 @@ func (b *Broker) handleClientOffer(
 			PortMappingTypes:       offerRequest.Metrics.PortMappingTypes,
 		},
 		ClientProxyProtocolVersion:  offerRequest.Metrics.ProxyProtocolVersion,
-		ClientOfferSDP:              offerRequest.ClientOfferSDP,
+		ClientOfferSDP:              offerSDP,
 		ClientRootObfuscationSecret: offerRequest.ClientRootObfuscationSecret,
 		DoDTLSRandomization:         offerRequest.DoDTLSRandomization,
 		TrafficShapingParameters:    offerRequest.TrafficShapingParameters,
@@ -1000,7 +1014,15 @@ func (b *Broker) handleProxyAnswer(
 		return nil, errors.Trace(err)
 	}
 
-	logFields, err = answerRequest.ValidateAndGetLogFields(
+	// The filtered SDP is the request SDP with any invalid (bogon, unexpected
+	// GeoIP) ICE candidates filtered out. In some cases, proxies cannot
+	// avoid submitting invalid candidates (see comment in
+	// processSDPAddresses), so all invalid candidates are removed and the
+	// remaining SDP is used. Filtered candidate information is logged in
+	// logFields.
+
+	var filteredSDP []byte
+	filteredSDP, logFields, err = answerRequest.ValidateAndGetLogFields(
 		b.config.LookupGeoIP,
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,
@@ -1008,6 +1030,9 @@ func (b *Broker) handleProxyAnswer(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	answerSDP := answerRequest.ProxyAnswerSDP
+	answerSDP.SDP = string(filteredSDP)
 
 	if answerRequest.AnswerError != "" {
 
@@ -1029,7 +1054,7 @@ func (b *Broker) handleProxyAnswer(
 			ProxyID:                      initiatorID,
 			ConnectionID:                 answerRequest.ConnectionID,
 			SelectedProxyProtocolVersion: answerRequest.SelectedProxyProtocolVersion,
-			ProxyAnswerSDP:               answerRequest.ProxyAnswerSDP,
+			ProxyAnswerSDP:               answerSDP,
 		}
 
 		err = b.matcher.Answer(proxyAnswer)

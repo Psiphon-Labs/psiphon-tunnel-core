@@ -73,6 +73,16 @@ func (t TransferURLs) DecodeAndValidate() error {
 
 	hasOnlyAfterZero := false
 	for _, transferURL := range t {
+
+		// Currently, TransferURL FrontingSpecs are not permitted to specify
+		// SkipVerify as psiphon.makeFrontedHTTPClient uses
+		// MeekModePlaintextRoundTrip.
+		allowSkipVerify := false
+		err := transferURL.FrontingSpecs.Validate(allowSkipVerify)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
 		if transferURL.OnlyAfterAttempts == 0 {
 			hasOnlyAfterZero = true
 		}

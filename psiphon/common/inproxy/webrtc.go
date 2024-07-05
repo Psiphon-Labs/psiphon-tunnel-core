@@ -146,12 +146,6 @@ type webRTCConfig struct {
 	ReliableTransport bool
 }
 
-// webRTCSDPMetrics are network capability metrics values for an SDP.
-type webRTCSDPMetrics struct {
-	iceCandidateTypes []ICECandidateType
-	hasIPv6           bool
-}
-
 // newWebRTCConnWithOffer initiates a new WebRTC connection. An offer SDP is
 // returned, to be sent to the peer. After the offer SDP is forwarded and an
 // answer SDP received in response, call SetRemoteSDP with the answer SDP and
@@ -1528,31 +1522,37 @@ func prepareSDPAddresses(
 		encodedSDP,
 		portMappingExternalAddr,
 		disableIPv6Candidates,
-		false, // bogons are expected, and stripped out
 		errorOnNoCandidates,
 		nil,
 		common.GeoIPData{})
 	return modifiedSDP, metrics, errors.Trace(err)
 }
 
-// validateSDPAddresses checks that the SDP does not contain an empty list of
+// filterSDPAddresses checks that the SDP does not contain an empty list of
 // candidates, bogon candidates, or candidates outside of the country and ASN
-// for the specified expectedGeoIPData.
-func validateSDPAddresses(
+// for the specified expectedGeoIPData. Invalid candidates are stripped and a
+// filtered SDP is returned.
+func filterSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
-	expectedGeoIPData common.GeoIPData) (*webRTCSDPMetrics, error) {
+	expectedGeoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, error) {
 
-	_, metrics, err := processSDPAddresses(
+	filteredSDP, metrics, err := processSDPAddresses(
 		encodedSDP,
 		"",
 		false,
-		true, // bogons should already by stripped out
 		errorOnNoCandidates,
 		lookupGeoIP,
 		expectedGeoIPData)
-	return metrics, errors.Trace(err)
+	return filteredSDP, metrics, errors.Trace(err)
+}
+
+// webRTCSDPMetrics are network capability metrics values for an SDP.
+type webRTCSDPMetrics struct {
+	iceCandidateTypes     []ICECandidateType
+	hasIPv6               bool
+	filteredICECandidates []string
 }
 
 // processSDPAddresses is based on snowflake/common/util.StripLocalAddresses
@@ -1592,12 +1592,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 
 */
-
 func processSDPAddresses(
 	encodedSDP []byte,
 	portMappingExternalAddr string,
 	disableIPv6Candidates bool,
-	errorOnBogon bool,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
 	expectedGeoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, error) {
@@ -1610,17 +1608,22 @@ func processSDPAddresses(
 
 	candidateTypes := map[ICECandidateType]bool{}
 	hasIPv6 := false
+	filteredCandidateReasons := make(map[string]int)
 
 	var portMappingICECandidates []sdp.Attribute
 	if portMappingExternalAddr != "" {
 
-		// Prepare ICE candidate attibute pair for the port mapping, modeled after the definition of host candidates.
+		// Prepare ICE candidate attibute pair for the port mapping, modeled
+		// after the definition of host candidates.
 
 		host, portStr, err := net.SplitHostPort(portMappingExternalAddr)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
-		port, _ := strconv.Atoi(portStr)
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
 
 		// Only IPv4 port mapping addresses are supported due to the
 		// NewCandidateHost limitation noted below. It is expected that port
@@ -1631,7 +1634,7 @@ func processSDPAddresses(
 
 			for _, component := range []webrtc.ICEComponent{webrtc.ICEComponentRTP, webrtc.ICEComponentRTCP} {
 
-				// The candidate ID is generated and the priorty and foundation
+				// The candidate ID is generated and the priority and foundation
 				// use the default for hosts.
 				//
 				// Limitation: NewCandidateHost initializes the networkType to
@@ -1692,25 +1695,31 @@ func processSDPAddresses(
 				candidateIsIPv6 := false
 				if candidateIP.To4() == nil {
 					if disableIPv6Candidates {
+						reason := fmt.Sprintf("disabled %s IPv6",
+							candidate.Type().String())
+						filteredCandidateReasons[reason] += 1
 						continue
 					}
 					candidateIsIPv6 = true
-					hasIPv6 = true
 				}
 
 				// Strip non-routable bogons, including LAN addresses.
 				// Same-LAN client/proxy hops are not expected to be useful,
 				// and this also avoids unnecessary local network traffic.
 				//
-				// Well-behaved clients and proxies will strip these values;
-				// the broker enforces this and uses errorOnBogon.
+				// Well-behaved clients and proxies should strip these values;
+				// the broker enforces this with filtering.
 
 				if !GetAllowBogonWebRTCConnections() &&
 					common.IsBogon(candidateIP) {
 
-					if errorOnBogon {
-						return nil, nil, errors.TraceNew("unexpected bogon")
+					version := "IPv4"
+					if candidateIsIPv6 {
+						version = "IPv6"
 					}
+					reason := fmt.Sprintf("bogon %s %s",
+						candidate.Type().String(), version)
+					filteredCandidateReasons[reason] += 1
 					continue
 				}
 
@@ -1721,6 +1730,16 @@ func processSDPAddresses(
 				// Legitimate candidates will not all have the exact same IP
 				// address, as there could be a mix of IPv4 and IPv6, as well
 				// as potentially different NAT paths.
+				//
+				// In some cases, legitimate clients and proxies may
+				// unintentionally submit candidates with mismatching GeoIP.
+				// This can occur, for example, when a STUN candidate is only
+				// a partial hole punch through double NAT, and when internal
+				// network addresses misuse non-private IP ranges (so are
+				// technically not bogons). Instead of outright rejecting
+				// SDPs containing unexpected GeoIP candidates, they are
+				// instead stripped out and the resulting filtered SDP is
+				// used.
 
 				if lookupGeoIP != nil {
 					candidateGeoIPData := lookupGeoIP(candidate.Address())
@@ -1732,13 +1751,19 @@ func processSDPAddresses(
 						if candidateIsIPv6 {
 							version = "IPv6"
 						}
-						errStr := fmt.Sprintf(
-							"unexpected GeoIP for %s candidate: %s, %s",
+						reason := fmt.Sprintf(
+							"unexpected GeoIP %s %s: %s/%s",
+							candidate.Type().String(),
 							version,
 							candidateGeoIPData.Country,
 							candidateGeoIPData.ASN)
-						return nil, nil, errors.TraceNew(errStr)
+						filteredCandidateReasons[reason] += 1
+						continue
 					}
+				}
+
+				if candidateIsIPv6 {
+					hasIPv6 = true
 				}
 
 				// These types are not reported:
@@ -1776,6 +1801,10 @@ func processSDPAddresses(
 	}
 	for candidateType := range candidateTypes {
 		metrics.iceCandidateTypes = append(metrics.iceCandidateTypes, candidateType)
+	}
+	for reason, count := range filteredCandidateReasons {
+		metrics.filteredICECandidates = append(metrics.filteredICECandidates,
+			fmt.Sprintf("%s: %d", reason, count))
 	}
 
 	return encodedSDP, metrics, nil

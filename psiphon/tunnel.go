@@ -1535,15 +1535,13 @@ func dialInproxy(
 	}
 
 	// Unlike the proxy broker case, clients already actively fetch tactics
-	// during tunnel estalishment, so no tactics tags are sent to the broker
-	// and no tactics are returned by the broker.
+	// during tunnel estalishment, so tactics.SetTacticsAPIParameters are not
+	// sent to the broker and no tactics are returned by the broker.
 	//
 	// TODO: include broker fronting dial parameters to be logged by the
 	// broker -- as successful parameters might not otherwise by logged via
 	// server_tunnel if the subsequent WebRTC dials fail.
 	params := getBaseAPIParameters(baseParametersNoDialParameters, config, nil)
-
-	params["network_type"] = dialParams.GetNetworkType()
 
 	// The debugLogging flag is passed to both NoticeCommonLogger and to the
 	// inproxy package as well; skipping debug logs in the inproxy package,
