@@ -420,6 +420,10 @@ func makeFrontedHTTPClient(
 	disableSystemRootCAs,
 	payloadSecure bool) (*http.Client, func() common.APIParameters, error) {
 
+	if !payloadSecure && (skipVerify || disableSystemRootCAs) {
+		return nil, nil, errors.TraceNew("cannot skip certificate verification if payload insecure")
+	}
+
 	frontingProviderID,
 		frontingTransport,
 		meekFrontingDialAddress,
