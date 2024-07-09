@@ -732,7 +732,6 @@ func (transports ConjureTransports) PruneInvalid() ConjureTransports {
 }
 
 type HandshakeResponse struct {
-	SSHSessionID             string              `json:"ssh_session_id"`
 	Homepages                []string            `json:"homepages"`
 	UpgradeClientVersion     string              `json:"upgrade_client_version"`
 	PageViewRegexes          []map[string]string `json:"page_view_regexes"`
