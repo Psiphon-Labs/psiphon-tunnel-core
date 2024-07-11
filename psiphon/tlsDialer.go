@@ -62,7 +62,6 @@ import (
 	std_errors "errors"
 	"io"
 	"io/ioutil"
-	"math"
 	"net"
 	"sync/atomic"
 
@@ -364,10 +363,12 @@ func CustomTLSDial(
 	}
 
 	tlsConfig := &utls.Config{
-		RootCAs:               tlsConfigRootCAs,
-		InsecureSkipVerify:    tlsConfigInsecureSkipVerify,
-		ServerName:            tlsConfigServerName,
-		VerifyPeerCertificate: tlsConfigVerifyPeerCertificate,
+		RootCAs:                tlsConfigRootCAs,
+		InsecureSkipVerify:     tlsConfigInsecureSkipVerify,
+		InsecureSkipTimeVerify: tlsConfigInsecureSkipVerify,
+		ServerName:             tlsConfigServerName,
+		VerifyPeerCertificate:  tlsConfigVerifyPeerCertificate,
+		OmitEmptyPsk:           true,
 	}
 
 	var randomizedTLSProfileSeed *prng.Seed
@@ -448,27 +449,6 @@ func CustomTLSDial(
 
 	conn.SetSessionCache(clientSessionCache)
 
-	// Set fake pre-shared key extension if required.
-	if !usedSessionTicket && hasPskExt(utlsClientHelloID, utlsClientHelloSpec) {
-
-		// Implicitly true.
-		usedSessionTicket = true
-
-		// Generates typical PSK extension values.
-		labelLengths := []int{192, 208, 224, 226, 235, 240, 273, 421, 429, 441}
-		label := prng.Bytes(labelLengths[prng.Intn(len(labelLengths))])
-
-		conn.SetPskExtension(&utls.FakePreSharedKeyExtension{
-			Identities: []utls.PskIdentity{
-				{
-					Label:               label,
-					ObfuscatedTicketAge: prng.RangeUint32(13029567, math.MaxUint32),
-				},
-			},
-			Binders: [][]byte{prng.Bytes(32)},
-		})
-	}
-
 	// TODO: can conn.SetClientRandom be made to take effect if called here? In
 	// testing, the random value appears to be overwritten. As is, the overhead
 	// of needRemarshal is now always required to handle
@@ -478,7 +458,7 @@ func CustomTLSDial(
 	// to determine whether the following customizations may be applied. Don't use
 	// getClientHelloVersion, since that may incur additional overhead.
 
-	err = conn.BuildHandshakeState()
+	err = conn.BuildHandshakeStateWithoutSession()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -491,6 +471,8 @@ func CustomTLSDial(
 		}
 	}
 
+	useEms := conn.HandshakeState.Hello.Ems
+
 	// Add the obfuscated session ticket only when using TLS 1.2.
 	//
 	// Obfuscated session tickets are not currently supported in TLS 1.3, but we
@@ -501,9 +483,7 @@ func CustomTLSDial(
 	// 1.3, the Psiphon server, in these direct protocol cases, will negotiate
 	// it.
 
-	if config.ObfuscatedSessionTicketKey != "" && !isTLS13 {
-
-		usedSessionTicket = true
+	if config.ObfuscatedSessionTicketKey != "" {
 
 		var obfuscatedSessionTicketKey [32]byte
 
@@ -514,22 +494,45 @@ func CustomTLSDial(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		copy(obfuscatedSessionTicketKey[:], key)
+		copy(obfuscatedSessionTicketKey[:], key) // shared secret
 
 		obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
-			obfuscatedSessionTicketKey)
+			obfuscatedSessionTicketKey, isTLS13, useEms)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		conn.SetSessionState(
-			utls.MakeClientSessionState(
-				obfuscatedSessionState.SessionTicket,
-				obfuscatedSessionState.Vers,
-				obfuscatedSessionState.CipherSuite,
-				obfuscatedSessionState.MasterSecret,
-				nil,
-				nil))
+		ss := utls.MakeClientSessionState(
+			obfuscatedSessionState.SessionTicket,
+			obfuscatedSessionState.Vers,
+			obfuscatedSessionState.CipherSuite,
+			obfuscatedSessionState.MasterSecret,
+			nil, nil)
+		ss.SetCreatedAt(obfuscatedSessionState.CreatedAt)
+		ss.SetEMS(obfuscatedSessionState.ExtMasterSecret)
+		// TLS 1.3-only fields
+		ss.SetAgeAdd(obfuscatedSessionState.AgeAdd)
+		ss.SetUseBy(obfuscatedSessionState.UseBy)
+
+		if isTLS13 {
+			// Sets OOB PSK if required.
+			if containsPSKExt(utlsClientHelloID, utlsClientHelloSpec) {
+
+				// Implicitly true.
+				usedSessionTicket = true
+
+				if wrappedCache, ok := clientSessionCache.(*common.UtlsClientSessionCacheWrapper); ok {
+					wrappedCache.Put("", ss)
+				} else {
+					return nil, errors.TraceNew("unexpected clientSessionCache type")
+				}
+			}
+		} else {
+			// Implicitly true.
+			usedSessionTicket = true
+
+			conn.SetSessionState(ss)
+		}
 
 		// Apply changes to utls
 		err = conn.BuildHandshakeState()
@@ -537,19 +540,32 @@ func CustomTLSDial(
 			return nil, errors.Trace(err)
 		}
 
-		// Ensure that TLS ClientHello has required session ticket extension and
-		// obfuscated session ticket cipher suite; the latter is required by
+		// Ensure that TLS ClientHello has required session ticket or PSK extension and
+		// obfuscated session ticket or PSK cipher suite; the latter is required by
 		// utls/tls.Conn.loadSession. If these requirements are not met the
 		// obfuscation session ticket would be ignored, so fail.
+		if isTLS13 {
+			if containsPSKExt(utlsClientHelloID, utlsClientHelloSpec) {
+				if !tls.ContainsObfuscatedPSKCipherSuite(
+					conn.HandshakeState.Hello.CipherSuites) {
+					return nil, errors.TraceNew("missing obfuscated PSK cipher suite")
+				}
 
-		if !tls.ContainsObfuscatedSessionTicketCipherSuite(
-			conn.HandshakeState.Hello.CipherSuites) {
-			return nil, errors.TraceNew(
-				"missing obfuscated session ticket cipher suite")
-		}
+				if len(conn.HandshakeState.Hello.PskIdentities) == 0 {
+					return nil, errors.TraceNew("missing PSK extension")
+				}
+			}
 
-		if len(conn.HandshakeState.Hello.SessionTicket) == 0 {
-			return nil, errors.TraceNew("missing session ticket extension")
+		} else {
+			if !tls.ContainsObfuscatedSessionTicketCipherSuite(
+				conn.HandshakeState.Hello.CipherSuites) {
+				return nil, errors.TraceNew(
+					"missing obfuscated session ticket cipher suite")
+			}
+
+			if len(conn.HandshakeState.Hello.SessionTicket) == 0 {
+				return nil, errors.TraceNew("missing session ticket extension")
+			}
 		}
 	}
 
@@ -989,6 +1005,8 @@ func getClientHelloVersion(
 
 	switch utlsClientHelloID {
 
+	// TODO! missing: iOS-13, iOS-14
+
 	case utls.HelloIOS_11_1, utls.HelloIOS_12_1,
 		utls.HelloChrome_58, utls.HelloChrome_62,
 		utls.HelloFirefox_55, utls.HelloFirefox_56:
@@ -996,11 +1014,11 @@ func getClientHelloVersion(
 
 	case utls.HelloChrome_70, utls.HelloChrome_72,
 		utls.HelloChrome_83, utls.HelloChrome_96,
-		utls.HelloChrome_102, utls.HelloFirefox_65,
+		utls.HelloChrome_102, utls.HelloChrome_120,
+		utls.HelloChrome_120_PQ, utls.HelloChrome_106_Shuffle,
+		utls.HelloChrome_112_PSK_Shuf, utls.HelloFirefox_65,
 		utls.HelloFirefox_99, utls.HelloFirefox_105,
-		utls.HelloChrome_106_Shuffle, utls.HelloGolang,
-		utls.HelloChrome_112_PSK_Shuf,
-		utls.HelloSafari_16_0:
+		utls.HelloSafari_16_0, utls.HelloGolang:
 		return protocol.TLS_VERSION_13, nil
 	}
 
@@ -1271,9 +1289,9 @@ func splitTLSMessage(contentType uint8, version uint16, msg []byte, splitIndex i
 	return frag1, frag2, nil
 }
 
-// hasPskExt returns true if the ClientHelloSpec has a PreSharedKeyExtension.
+// containsPSKExt returns true if the ClientHelloSpec has a PreSharedKeyExtension.
 // If spec is nil, the ClientHelloSpec is obtained from the ClientHelloID.
-func hasPskExt(id utls.ClientHelloID, spec *utls.ClientHelloSpec) bool {
+func containsPSKExt(id utls.ClientHelloID, spec *utls.ClientHelloSpec) bool {
 	if spec == nil {
 		myspec, err := utls.UTLSIdToSpec(id)
 		if err != nil {
