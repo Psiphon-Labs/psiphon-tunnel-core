@@ -37,7 +37,7 @@ require (
 	github.com/pion/sctp v1.8.8
 	github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
 	github.com/refraction-networking/gotapdance v1.7.10
-	github.com/refraction-networking/utls v1.6.4
+	github.com/refraction-networking/utls v1.6.7
 	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.4

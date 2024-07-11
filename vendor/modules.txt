@@ -338,7 +338,7 @@ github.com/refraction-networking/obfs4/common/replayfilter
 github.com/refraction-networking/obfs4/transports/base
 github.com/refraction-networking/obfs4/transports/obfs4
 github.com/refraction-networking/obfs4/transports/obfs4/framing
-# github.com/refraction-networking/utls v1.6.4
+# github.com/refraction-networking/utls v1.6.7
 ## explicit; go 1.21
 github.com/refraction-networking/utls
 github.com/refraction-networking/utls/dicttls
