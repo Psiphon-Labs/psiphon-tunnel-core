@@ -451,7 +451,7 @@ func runTestInproxy() error {
 	for {
 		time.Sleep(100 * time.Millisecond)
 		broker.matcher.announcementQueueMutex.Lock()
-		n := broker.matcher.announcementQueue.Len()
+		n := broker.matcher.announcementQueue.getLen()
 		broker.matcher.announcementQueueMutex.Unlock()
 		if n >= numProxies {
 			break

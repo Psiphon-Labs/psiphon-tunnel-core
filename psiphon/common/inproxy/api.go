@@ -544,8 +544,12 @@ func (request *ProxyAnnounceRequest) ValidateAndGetParametersAndLogFields(
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.APIParameters, common.LogFields, error) {
 
-	if len(request.PersonalCompartmentIDs) > maxCompartmentIDs {
-		return nil, nil, errors.Tracef("invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
+	// A proxy may specify at most 1 personal compartment ID. This is
+	// currently a limitation of the multi-queue implementation; see comment
+	// in announcementMultiQueue.enqueue.
+	if len(request.PersonalCompartmentIDs) > 1 {
+		return nil, nil, errors.Tracef(
+			"invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
 	if request.Metrics == nil {

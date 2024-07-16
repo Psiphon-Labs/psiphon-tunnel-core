@@ -587,6 +587,9 @@ func (b *Broker) handleProxyAnnounce(
 	defer cancelFunc()
 	extendTransportTimeout(timeout)
 
+	// Note that matcher.Announce assumes a monotonically increasing
+	// announceCtx.Deadline input for each successive call.
+
 	clientOffer, matchMetrics, err = b.matcher.Announce(
 		announceCtx,
 		proxyIP,

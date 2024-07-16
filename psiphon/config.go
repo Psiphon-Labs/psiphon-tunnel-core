@@ -648,7 +648,9 @@ type Config struct {
 	// distributed from proxy operators to client users out-of-band and
 	// provide a mechanism to allow only certain clients to use a proxy.
 	//
-	// See InproxyClientPersonalCompartmentIDs comment for limitations.
+	// Limitation: currently, at most 1 personal compartment may be specified.
+	// See InproxyClientPersonalCompartmentIDs comment for additional
+	// personal pairing limitations.
 	InproxyProxyPersonalCompartmentIDs []string
 
 	// InproxyClientPersonalCompartmentIDs specifies the personal compartment
@@ -686,11 +688,6 @@ type Config struct {
 	//   not robust in terms of load balancing, and fails if the first broker
 	//   is unreachable or overloaded. Non-personal in-proxy dials can simply
 	//   use any available broker.
-	//
-	// - The broker matching queues lack compartment ID indexing. For a
-	//   handful of common compartment IDs, this is not expected to be an
-	//   issue. For personal compartment IDs, this may lead to frequency
-	//   near-full scans of the queues when looking for a match.
 	//
 	// - In personal mode, all establishment candidates must be in-proxy
 	//   dials, all using the same broker. Many concurrent, fronted broker
@@ -1415,6 +1412,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 		// Don't allow an in-proxy client and proxy run in the same app to match.
 		return errors.TraceNew("invalid overlapping personal compartment IDs")
+	}
+
+	if len(config.InproxyProxyPersonalCompartmentIDs) > 1 {
+		return errors.TraceNew("invalid proxy personal compartment ID count")
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels().

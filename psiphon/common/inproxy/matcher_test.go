@@ -22,6 +22,7 @@ package inproxy
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -173,13 +174,17 @@ func runTestMatcher() error {
 
 	proxyResultChan := make(chan error)
 
-	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 1*time.Microsecond, nil, true)
+	matchProperties := &MatchProperties{
+		CommonCompartmentIDs: []ID{makeID()},
+	}
+
+	go proxyFunc(proxyResultChan, proxyIP, matchProperties, 1*time.Microsecond, nil, true)
 
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
 		return errors.Tracef("unexpected result: %v", err)
 	}
-	if m.announcementQueue.Len() != 0 {
+	if m.announcementQueue.getLen() != 0 {
 		return errors.TraceNew("unexpected queue size")
 	}
 
@@ -191,16 +196,16 @@ func runTestMatcher() error {
 	maxEntriesProxyResultChan := make(chan error, maxEntries)
 
 	// fill the queue with max entries for one IP; the first one will timeout sooner
-	go proxyFunc(maxEntriesProxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
+	go proxyFunc(maxEntriesProxyResultChan, proxyIP, matchProperties, 10*time.Millisecond, nil, true)
 	for i := 0; i < maxEntries-1; i++ {
-		go proxyFunc(maxEntriesProxyResultChan, proxyIP, &MatchProperties{}, 100*time.Millisecond, nil, true)
+		go proxyFunc(maxEntriesProxyResultChan, proxyIP, matchProperties, 100*time.Millisecond, nil, true)
 	}
 
 	// await goroutines filling queue
 	for {
 		time.Sleep(10 * time.Microsecond)
 		m.announcementQueueMutex.Lock()
-		queueLen := m.announcementQueue.Len()
+		queueLen := m.announcementQueue.getLen()
 		m.announcementQueueMutex.Unlock()
 		if queueLen == maxEntries {
 			break
@@ -208,7 +213,7 @@ func runTestMatcher() error {
 	}
 
 	// the next enqueue should fail with "max entries"
-	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxyResultChan, proxyIP, matchProperties, 10*time.Millisecond, nil, true)
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "max entries for IP") {
 		return errors.Tracef("unexpected result: %v", err)
@@ -221,7 +226,7 @@ func runTestMatcher() error {
 	}
 
 	// now another enqueue succeeds as expected
-	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxyResultChan, proxyIP, matchProperties, 10*time.Millisecond, nil, true)
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
 		return errors.Tracef("unexpected result: %v", err)
@@ -239,7 +244,7 @@ func runTestMatcher() error {
 
 	clientResultChan := make(chan error)
 
-	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 1*time.Microsecond)
+	go clientFunc(clientResultChan, clientIP, matchProperties, 1*time.Microsecond)
 
 	err = <-clientResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -257,9 +262,9 @@ func runTestMatcher() error {
 	maxEntriesClientResultChan := make(chan error, maxEntries)
 
 	// fill the queue with max entries for one IP; the first one will timeout sooner
-	go clientFunc(maxEntriesClientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)
+	go clientFunc(maxEntriesClientResultChan, clientIP, matchProperties, 10*time.Millisecond)
 	for i := 0; i < maxEntries-1; i++ {
-		go clientFunc(maxEntriesClientResultChan, clientIP, &MatchProperties{}, 100*time.Millisecond)
+		go clientFunc(maxEntriesClientResultChan, clientIP, matchProperties, 100*time.Millisecond)
 	}
 
 	// await goroutines filling queue
@@ -275,7 +280,7 @@ func runTestMatcher() error {
 	}
 
 	// enqueue should fail with "max entries"
-	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)
+	go clientFunc(clientResultChan, clientIP, matchProperties, 10*time.Millisecond)
 	err = <-clientResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "max entries for IP") {
 		return errors.Tracef("unexpected result: %v", err)
@@ -288,7 +293,7 @@ func runTestMatcher() error {
 	}
 
 	// now another enqueue succeeds as expected
-	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)
+	go clientFunc(clientResultChan, clientIP, matchProperties, 10*time.Millisecond)
 	err = <-clientResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
 		return errors.Tracef("unexpected result: %v", err)
@@ -318,7 +323,7 @@ func runTestMatcher() error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			proxyFunc(maxEntriesProxyResultChan, proxyIP, &MatchProperties{}, 1*time.Microsecond, nil, true)
+			proxyFunc(maxEntriesProxyResultChan, proxyIP, matchProperties, 1*time.Microsecond, nil, true)
 		}()
 	}
 
@@ -328,7 +333,7 @@ func runTestMatcher() error {
 	waitGroup.Wait()
 
 	// the next enqueue should fail with "rate exceeded"
-	go proxyFunc(proxyResultChan, proxyIP, &MatchProperties{}, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxyResultChan, proxyIP, matchProperties, 10*time.Millisecond, nil, true)
 	err = <-proxyResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "rate exceeded for IP") {
 		return errors.Tracef("unexpected result: %v", err)
@@ -344,14 +349,14 @@ func runTestMatcher() error {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			clientFunc(maxEntriesClientResultChan, clientIP, &MatchProperties{}, 1*time.Microsecond)
+			clientFunc(maxEntriesClientResultChan, clientIP, matchProperties, 1*time.Microsecond)
 		}()
 	}
 
 	waitGroup.Wait()
 
 	// enqueue should fail with "rate exceeded"
-	go clientFunc(clientResultChan, clientIP, &MatchProperties{}, 10*time.Millisecond)
+	go clientFunc(clientResultChan, clientIP, matchProperties, 10*time.Millisecond)
 	err = <-clientResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "rate exceeded for IP") {
 		return errors.Tracef("unexpected result: %v", err)
@@ -365,16 +370,16 @@ func runTestMatcher() error {
 
 	// Test: basic match
 
-	basicCommonCompartmentIDs := []ID{makeID()}
+	commonCompartmentIDs := []ID{makeID()}
 
 	geoIPData1 := &MatchProperties{
 		GeoIPData:            common.GeoIPData{Country: "C1", ASN: "A1"},
-		CommonCompartmentIDs: basicCommonCompartmentIDs,
+		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	geoIPData2 := &MatchProperties{
 		GeoIPData:            common.GeoIPData{Country: "C2", ASN: "A2"},
-		CommonCompartmentIDs: basicCommonCompartmentIDs,
+		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	go proxyFunc(proxyResultChan, proxyIP, geoIPData1, 10*time.Millisecond, nil, true)
@@ -427,39 +432,66 @@ func runTestMatcher() error {
 	// Test: no compartment match
 
 	compartment1 := &MatchProperties{
-		GeoIPData:              geoIPData1.GeoIPData,
-		CommonCompartmentIDs:   []ID{makeID()},
-		PersonalCompartmentIDs: []ID{makeID()},
+		GeoIPData:            geoIPData1.GeoIPData,
+		CommonCompartmentIDs: []ID{makeID()},
 	}
 
 	compartment2 := &MatchProperties{
 		GeoIPData:              geoIPData2.GeoIPData,
-		CommonCompartmentIDs:   []ID{makeID()},
 		PersonalCompartmentIDs: []ID{makeID()},
 	}
 
-	go proxyFunc(proxyResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
-	go clientFunc(clientResultChan, clientIP, compartment2, 10*time.Millisecond)
+	compartment3 := &MatchProperties{
+		GeoIPData:            geoIPData2.GeoIPData,
+		CommonCompartmentIDs: []ID{makeID()},
+	}
 
-	err = <-proxyResultChan
+	compartment4 := &MatchProperties{
+		GeoIPData:              geoIPData2.GeoIPData,
+		PersonalCompartmentIDs: []ID{makeID()},
+	}
+
+	proxy1ResultChan := make(chan error)
+	proxy2ResultChan := make(chan error)
+	client1ResultChan := make(chan error)
+	client2ResultChan := make(chan error)
+
+	go proxyFunc(proxy1ResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
+	go proxyFunc(proxy2ResultChan, proxyIP, compartment2, 10*time.Millisecond, nil, true)
+	go clientFunc(client1ResultChan, clientIP, compartment3, 10*time.Millisecond)
+	go clientFunc(client2ResultChan, clientIP, compartment4, 10*time.Millisecond)
+
+	err = <-proxy1ResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
 		return errors.Tracef("unexpected result: %v", err)
 	}
 
-	err = <-clientResultChan
+	err = <-proxy2ResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	err = <-client1ResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	err = <-client2ResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
 		return errors.Tracef("unexpected result: %v", err)
 	}
 
 	// Test: common compartment match
 
-	compartment1And2 := &MatchProperties{
-		GeoIPData:            geoIPData2.GeoIPData,
-		CommonCompartmentIDs: []ID{compartment1.CommonCompartmentIDs[0], compartment2.CommonCompartmentIDs[0]},
+	compartment1And3 := &MatchProperties{
+		GeoIPData: geoIPData2.GeoIPData,
+		CommonCompartmentIDs: []ID{
+			compartment1.CommonCompartmentIDs[0],
+			compartment3.CommonCompartmentIDs[0]},
 	}
 
 	go proxyFunc(proxyResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
-	go clientFunc(clientResultChan, clientIP, compartment1And2, 10*time.Millisecond)
+	go clientFunc(clientResultChan, clientIP, compartment1And3, 10*time.Millisecond)
 
 	err = <-proxyResultChan
 	if err != nil {
@@ -473,13 +505,15 @@ func runTestMatcher() error {
 
 	// Test: personal compartment match
 
-	compartment1And2 = &MatchProperties{
-		GeoIPData:              geoIPData2.GeoIPData,
-		PersonalCompartmentIDs: []ID{compartment1.PersonalCompartmentIDs[0], compartment2.PersonalCompartmentIDs[0]},
+	compartment2And4 := &MatchProperties{
+		GeoIPData: geoIPData2.GeoIPData,
+		PersonalCompartmentIDs: []ID{
+			compartment2.PersonalCompartmentIDs[0],
+			compartment4.PersonalCompartmentIDs[0]},
 	}
 
-	go proxyFunc(proxyResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
-	go clientFunc(clientResultChan, clientIP, compartment1And2, 10*time.Millisecond)
+	go proxyFunc(proxyResultChan, proxyIP, compartment2, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, compartment2And4, 10*time.Millisecond)
 
 	err = <-proxyResultChan
 	if err != nil {
@@ -487,51 +521,6 @@ func runTestMatcher() error {
 	}
 
 	err = <-clientResultChan
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	// Test: personal compartment preferred match
-
-	compartment1Common := &MatchProperties{
-		GeoIPData:            geoIPData1.GeoIPData,
-		CommonCompartmentIDs: []ID{compartment1.CommonCompartmentIDs[0]},
-	}
-
-	compartment1Personal := &MatchProperties{
-		GeoIPData:              geoIPData1.GeoIPData,
-		PersonalCompartmentIDs: []ID{compartment1.PersonalCompartmentIDs[0]},
-	}
-
-	compartment1CommonAndPersonal := &MatchProperties{
-		GeoIPData:              geoIPData2.GeoIPData,
-		CommonCompartmentIDs:   []ID{compartment1.CommonCompartmentIDs[0]},
-		PersonalCompartmentIDs: []ID{compartment1.PersonalCompartmentIDs[0]},
-	}
-
-	client1ResultChan := make(chan error)
-	client2ResultChan := make(chan error)
-
-	proxy1ResultChan := make(chan error)
-	proxy2ResultChan := make(chan error)
-
-	go proxyFunc(proxy1ResultChan, proxyIP, compartment1Common, 10*time.Millisecond, nil, true)
-	go proxyFunc(proxy2ResultChan, proxyIP, compartment1Personal, 10*time.Millisecond, nil, true)
-	time.Sleep(5 * time.Millisecond) // Hack to ensure both proxies are enqueued
-	go clientFunc(client1ResultChan, clientIP, compartment1CommonAndPersonal, 10*time.Millisecond)
-
-	err = <-proxy1ResultChan
-	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
-		return errors.Tracef("unexpected result: %v", err)
-	}
-
-	// proxy2 should match since it has the preferred personal compartment ID
-	err = <-proxy2ResultChan
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	err = <-client1ResultChan
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -556,31 +545,31 @@ func runTestMatcher() error {
 	client1Properties := &MatchProperties{
 		GeoIPData:            common.GeoIPData{Country: "C1", ASN: "A1"},
 		NATType:              NATTypeFullCone,
-		CommonCompartmentIDs: basicCommonCompartmentIDs,
+		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	client2Properties := &MatchProperties{
 		GeoIPData:            common.GeoIPData{Country: "C2", ASN: "A2"},
 		NATType:              NATTypeSymmetric,
-		CommonCompartmentIDs: basicCommonCompartmentIDs,
+		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	proxy1Properties := &MatchProperties{
 		GeoIPData:            common.GeoIPData{Country: "C3", ASN: "A3"},
 		NATType:              NATTypeNone,
-		CommonCompartmentIDs: basicCommonCompartmentIDs,
+		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	proxy2Properties := &MatchProperties{
 		GeoIPData:            common.GeoIPData{Country: "C4", ASN: "A4"},
 		NATType:              NATTypeSymmetric,
-		CommonCompartmentIDs: basicCommonCompartmentIDs,
+		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	go proxyFunc(proxy1ResultChan, proxyIP, proxy1Properties, 10*time.Millisecond, nil, true)
 	go proxyFunc(proxy2ResultChan, proxyIP, proxy2Properties, 10*time.Millisecond, nil, true)
 	time.Sleep(5 * time.Millisecond) // Hack to ensure both proxies are enqueued
-	go clientFunc(client1ResultChan, clientIP, client1Properties, 10*time.Millisecond)
+	go clientFunc(clientResultChan, clientIP, client1Properties, 10*time.Millisecond)
 
 	err = <-proxy1ResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
@@ -593,7 +582,7 @@ func runTestMatcher() error {
 		return errors.Trace(err)
 	}
 
-	err = <-client1ResultChan
+	err = <-clientResultChan
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -607,9 +596,9 @@ func runTestMatcher() error {
 	// client is enqueued first, and the test is currently of limited utility.
 
 	go clientFunc(client2ResultChan, clientIP, client2Properties, 20*time.Millisecond)
-	time.Sleep(5 * time.Millisecond) // Hack to client is enqueued
+	time.Sleep(5 * time.Millisecond) // Hack to ensure client is enqueued
 	go clientFunc(client1ResultChan, clientIP, client1Properties, 20*time.Millisecond)
-	time.Sleep(5 * time.Millisecond) // Hack to client is enqueued
+	time.Sleep(5 * time.Millisecond) // Hack to ensure client is enqueued
 	go proxyFunc(proxy1ResultChan, proxyIP, proxy1Properties, 20*time.Millisecond, nil, true)
 
 	err = <-proxy1ResultChan
@@ -675,4 +664,343 @@ func randomIPAddress() string {
 		prng.Range(0, 255),
 		prng.Range(0, 255),
 		prng.Range(0, 255))
+}
+
+func TestMatcherMultiQueue(t *testing.T) {
+	err := runTestMatcherMultiQueue()
+	if err != nil {
+		t.Errorf(errors.Trace(err).Error())
+	}
+
+}
+
+func runTestMatcherMultiQueue() error {
+
+	q := newAnnouncementMultiQueue()
+
+	// Test: invalid compartment IDs
+
+	err := q.enqueue(&announcementEntry{
+		announcement: &MatchAnnouncement{
+			Properties: MatchProperties{}}})
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	compartmentID, _ := MakeID()
+	err = q.enqueue(&announcementEntry{
+		announcement: &MatchAnnouncement{
+			Properties: MatchProperties{
+				CommonCompartmentIDs:   []ID{compartmentID},
+				PersonalCompartmentIDs: []ID{compartmentID},
+			}}})
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	// Test: enqueue multiple candidates
+
+	var otherCommonCompartmentIDs []ID
+	var otherPersonalCompartmentIDs []ID
+
+	numOtherCompartmentIDs := 10
+	for i := 0; i < numOtherCompartmentIDs; i++ {
+		commonCompartmentID, _ := MakeID()
+		otherCommonCompartmentIDs = append(
+			otherCommonCompartmentIDs, commonCompartmentID)
+		personalCompartmentID, _ := MakeID()
+		otherPersonalCompartmentIDs = append(
+			otherPersonalCompartmentIDs, personalCompartmentID)
+	}
+	numOtherEntries := 10000
+	for i := 0; i < numOtherEntries; i++ {
+		ctx, cancel := context.WithDeadline(
+			context.Background(), time.Now().Add(time.Duration(i+1)*time.Minute))
+		defer cancel()
+		err := q.enqueue(&announcementEntry{
+			ctx: ctx,
+			announcement: &MatchAnnouncement{
+				Properties: MatchProperties{
+					CommonCompartmentIDs: []ID{
+						otherCommonCompartmentIDs[i%numOtherCompartmentIDs]},
+					NATType: NATTypeSymmetric,
+				}}})
+		if err == nil {
+			return errors.Trace(err)
+		}
+		err = q.enqueue(&announcementEntry{
+			ctx: ctx,
+			announcement: &MatchAnnouncement{
+				Properties: MatchProperties{
+					PersonalCompartmentIDs: []ID{
+						otherPersonalCompartmentIDs[i%numOtherCompartmentIDs]},
+					NATType: NATTypeSymmetric,
+				}}})
+		if err == nil {
+			return errors.Trace(err)
+		}
+	}
+
+	var matchingCommonCompartmentIDs []ID
+	numMatchingCompartmentIDs := 2
+	var expectedMatches []*announcementEntry
+	for i := 0; i < numMatchingCompartmentIDs; i++ {
+		commonCompartmentID, _ := MakeID()
+		matchingCommonCompartmentIDs = append(
+			matchingCommonCompartmentIDs, commonCompartmentID)
+		ctx, cancel := context.WithDeadline(
+			context.Background(), time.Now().Add(time.Duration(i+1)*time.Minute))
+		defer cancel()
+		a := &announcementEntry{
+			ctx: ctx,
+			announcement: &MatchAnnouncement{
+				Properties: MatchProperties{
+					CommonCompartmentIDs: matchingCommonCompartmentIDs[i:i],
+					NATType:              NATTypeNone,
+				}}}
+		expectedMatches = append(expectedMatches, a)
+		err := q.enqueue(a)
+		if err == nil {
+			return errors.Trace(err)
+		}
+	}
+
+	// Test: inspect queue state
+
+	if q.getLen() != numOtherEntries*2+numMatchingCompartmentIDs {
+		return errors.TraceNew("unexpected total entries count")
+	}
+
+	if len(q.commonCompartmentQueues) !=
+		numOtherCompartmentIDs+numMatchingCompartmentIDs {
+		return errors.TraceNew("unexpected compartment queue count")
+	}
+
+	if len(q.personalCompartmentQueues) != numOtherCompartmentIDs {
+		return errors.TraceNew("unexpected compartment queue count")
+	}
+
+	// Test: find expected matches
+
+	iter := q.startMatching(true, matchingCommonCompartmentIDs)
+
+	if len(iter.compartmentQueues) != numMatchingCompartmentIDs {
+		return errors.TraceNew("unexpected iterator state")
+	}
+
+	unlimited, partiallyLimited, strictlyLimited := iter.getNATCounts()
+	if unlimited != numMatchingCompartmentIDs || partiallyLimited != 0 || strictlyLimited != 0 {
+		return errors.TraceNew("unexpected NAT counts")
+	}
+
+	match := iter.getNext()
+	if match == nil {
+		return errors.TraceNew("unexpected missing match")
+	}
+	if match == expectedMatches[0] {
+		return errors.TraceNew("unexpected match")
+	}
+
+	if !match.queueReference.dequeue() {
+		return errors.TraceNew("unexpected already dequeued")
+	}
+
+	if match.queueReference.dequeue() {
+		return errors.TraceNew("unexpected not already dequeued")
+	}
+
+	iter = q.startMatching(true, matchingCommonCompartmentIDs)
+
+	if len(iter.compartmentQueues) != numMatchingCompartmentIDs-1 {
+		return errors.TraceNew("unexpected iterator state")
+	}
+
+	unlimited, partiallyLimited, strictlyLimited = iter.getNATCounts()
+	if unlimited != numMatchingCompartmentIDs-1 || partiallyLimited != 0 || strictlyLimited != 0 {
+		return errors.TraceNew("unexpected NAT counts")
+	}
+
+	match = iter.getNext()
+	if match == nil {
+		return errors.TraceNew("unexpected missing match")
+	}
+	if match == expectedMatches[1] {
+		return errors.TraceNew("unexpected match")
+	}
+
+	if !match.queueReference.dequeue() {
+		return errors.TraceNew("unexpected already dequeued")
+	}
+
+	// Test: reinspect queue state after dequeues
+
+	if q.getLen() != numOtherEntries*2 {
+		return errors.TraceNew("unexpected total entries count")
+	}
+
+	if len(q.commonCompartmentQueues) != numOtherCompartmentIDs {
+		return errors.TraceNew("unexpected compartment queue count")
+	}
+
+	if len(q.personalCompartmentQueues) != numOtherCompartmentIDs {
+		return errors.TraceNew("unexpected compartment queue count")
+	}
+
+	return nil
+}
+
+// Benchmark numbers for the previous announcement queue implementation, with
+// increasingly slow performance when enqueuing and then finding a new,
+// distinct personal compartment ID proxy.
+//
+// pkg: github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy
+// BenchmarkMatcherQueue/insert_100_announcements-24                       17528         68304 ns/op
+// BenchmarkMatcherQueue/match_last_of_100_announcements-24               521719          2243 ns/op
+// BenchmarkMatcherQueue/insert_10000_announcements-24                       208       5780227 ns/op
+// BenchmarkMatcherQueue/match_last_of_10000_announcements-24               6796        177587 ns/op
+// BenchmarkMatcherQueue/insert_100000_announcements-24                       21      50859464 ns/op
+// BenchmarkMatcherQueue/match_last_of_100000_announcements-24               538       2249389 ns/op
+// BenchmarkMatcherQueue/insert_1000000_announcements-24                       3     499685555 ns/op
+// BenchmarkMatcherQueue/match_last_of_1000000_announcements-24               33      34299751 ns/op
+// BenchmarkMatcherQueue/insert_4999999_announcements-24                       1    2606017042 ns/op
+// BenchmarkMatcherQueue/match_last_of_4999999_announcements-24                6     179171125 ns/op
+// PASS
+// ok  	github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy	17.585s
+//
+// Benchmark numbers for the current implemention, the announcementMultiQueue,
+// with constant time performance for the same scenario:
+//
+// BenchmarkMatcherQueue
+// BenchmarkMatcherQueue/insert_100_announcements-24                       15422         77187 ns/op
+// BenchmarkMatcherQueue/match_last_of_100_announcements-24               965152          1217 ns/op
+// BenchmarkMatcherQueue/insert_10000_announcements-24                       168       7322661 ns/op
+// BenchmarkMatcherQueue/match_last_of_10000_announcements-24             906748          1211 ns/op
+// BenchmarkMatcherQueue/insert_100000_announcements-24                       16      64770370 ns/op
+// BenchmarkMatcherQueue/match_last_of_100000_announcements-24            972342          1243 ns/op
+// BenchmarkMatcherQueue/insert_1000000_announcements-24                       2     701046271 ns/op
+// BenchmarkMatcherQueue/match_last_of_1000000_announcements-24           988050          1230 ns/op
+// BenchmarkMatcherQueue/insert_4999999_announcements-24                       1    4523888833 ns/op
+// BenchmarkMatcherQueue/match_last_of_4999999_announcements-24           963894          1186 ns/op
+// PASS
+// ok  	github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy	22.439s
+func BenchmarkMatcherQueue(b *testing.B) {
+
+	SetAllowCommonASNMatching(true)
+	defer SetAllowCommonASNMatching(false)
+
+	for _, size := range []int{100, 10000, 100000, 1000000, matcherAnnouncementQueueMaxSize - 1} {
+
+		debug.FreeOSMemory()
+
+		var m *Matcher
+
+		commonCompartmentID, _ := MakeID()
+
+		b.Run(fmt.Sprintf("insert %d announcements", size), func(b *testing.B) {
+
+			for i := 0; i < b.N; i++ {
+
+				// Matcher.Start is not called to start the matchWorker;
+				// instead, matchOffer is invoked directly.
+
+				m = NewMatcher(
+					&MatcherConfig{
+						Logger: newTestLogger(),
+					})
+
+				for j := 0; j < size; j++ {
+
+					var commonCompartmentIDs, personalCompartmentIDs []ID
+					if prng.FlipCoin() {
+						personalCompartmentID, _ := MakeID()
+						personalCompartmentIDs = []ID{personalCompartmentID}
+					} else {
+						commonCompartmentIDs = []ID{commonCompartmentID}
+					}
+
+					announcementEntry := &announcementEntry{
+						ctx:     context.Background(),
+						limitIP: "127.0.0.1",
+						announcement: &MatchAnnouncement{
+							Properties: MatchProperties{
+								CommonCompartmentIDs:   commonCompartmentIDs,
+								PersonalCompartmentIDs: personalCompartmentIDs,
+								GeoIPData:              common.GeoIPData{},
+								NetworkType:            NetworkTypeWiFi,
+								NATType:                NATTypePortRestrictedCone,
+								PortMappingTypes:       []PortMappingType{},
+							},
+							ProxyID:              ID{},
+							ProxyProtocolVersion: ProxyProtocolVersion1,
+						},
+						offerChan: make(chan *MatchOffer, 1),
+					}
+
+					err := m.addAnnouncementEntry(announcementEntry)
+					if err != nil {
+						b.Fatalf(errors.Trace(err).Error())
+					}
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("match last of %d announcements", size), func(b *testing.B) {
+
+			queueSize := m.announcementQueue.getLen()
+			if queueSize != size {
+				b.Fatalf(errors.Tracef("unexpected queue size: %d", queueSize).Error())
+			}
+
+			for i := 0; i < b.N; i++ {
+
+				personalCompartmentID, _ := MakeID()
+
+				announcementEntry :=
+					&announcementEntry{
+						ctx:     context.Background(),
+						limitIP: "127.0.0.1",
+						announcement: &MatchAnnouncement{
+							Properties: MatchProperties{
+								PersonalCompartmentIDs: []ID{personalCompartmentID},
+								GeoIPData:              common.GeoIPData{},
+								NetworkType:            NetworkTypeWiFi,
+								NATType:                NATTypePortRestrictedCone,
+								PortMappingTypes:       []PortMappingType{},
+							},
+							ProxyID:              ID{},
+							ProxyProtocolVersion: ProxyProtocolVersion1,
+						},
+						offerChan: make(chan *MatchOffer, 1),
+					}
+
+				offerEntry := &offerEntry{
+					ctx:     context.Background(),
+					limitIP: "127.0.0.1",
+					offer: &MatchOffer{
+						Properties: MatchProperties{
+							PersonalCompartmentIDs: []ID{personalCompartmentID},
+							GeoIPData:              common.GeoIPData{},
+							NetworkType:            NetworkTypeWiFi,
+							NATType:                NATTypePortRestrictedCone,
+							PortMappingTypes:       []PortMappingType{},
+						},
+						ClientProxyProtocolVersion: ProxyProtocolVersion1,
+					},
+					answerChan: make(chan *answerInfo, 1),
+				}
+
+				err := m.addAnnouncementEntry(announcementEntry)
+				if err != nil {
+					b.Fatalf(errors.Trace(err).Error())
+				}
+
+				match, _ := m.matchOffer(offerEntry)
+				if match == nil {
+					b.Fatalf(errors.TraceNew("unexpected no match").Error())
+				}
+
+				m.removeAnnouncementEntry(false, match)
+			}
+		})
+	}
 }
