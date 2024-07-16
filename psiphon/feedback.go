@@ -204,12 +204,14 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			feedbackUploadTimeout)
 		defer cancelFunc()
 
+		payloadSecure := true
 		client, _, err := MakeUntunneledHTTPClient(
 			feedbackUploadCtx,
 			config,
 			untunneledDialConfig,
 			uploadURL.SkipVerify,
 			config.DisableSystemRootCAs,
+			payloadSecure,
 			uploadURL.FrontingSpecs,
 			func(frontingProviderID string) {
 				NoticeInfo(

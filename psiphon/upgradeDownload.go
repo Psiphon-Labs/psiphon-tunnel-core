@@ -87,6 +87,7 @@ func DownloadUpgrade(
 
 	downloadURL := urls.Select(attempt)
 
+	payloadSecure := true
 	httpClient, _, _, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
@@ -94,6 +95,7 @@ func DownloadUpgrade(
 		untunneledDialConfig,
 		downloadURL.SkipVerify,
 		config.DisableSystemRootCAs,
+		payloadSecure,
 		downloadURL.FrontingSpecs,
 		func(frontingProviderID string) {
 			NoticeInfo(

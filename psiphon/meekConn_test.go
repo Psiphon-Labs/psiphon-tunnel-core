@@ -57,50 +57,72 @@ func TestMeekModePlaintextRoundTrip(t *testing.T) {
 		t.Fatalf("parameters.NewParameters failed: %v", err)
 	}
 
-	meekConfig := &MeekConfig{
-		Parameters:       params,
-		Mode:             MeekModePlaintextRoundTrip,
-		DialAddress:      serverAddr,
-		UseHTTPS:         true,
-		SNIServerName:    "not-" + serverName,
-		VerifyServerName: serverName,
-		VerifyPins:       []string{rootCACertificatePin, serverCertificatePin},
+	testCases := []struct {
+		description      string
+		meekMode         MeekMode
+		verifyServerName string
+		verifyPins       []string
+	}{
+		{
+			meekMode:         MeekModePlaintextRoundTrip,
+			verifyServerName: serverName,
+			verifyPins:       []string{rootCACertificatePin, serverCertificatePin},
+		},
+		{
+			meekMode:         MeekModeWrappedPlaintextRoundTrip,
+			verifyServerName: "",
+			verifyPins:       nil,
+		},
 	}
 
-	dialConfig := &DialConfig{
-		TrustedCACertificatesFilename: rootCAsFileName,
-		CustomDialer:                  dialer,
-	}
+	for _, testCase := range testCases {
+		t.Run(testCase.description, func(t *testing.T) {
+			meekConfig := &MeekConfig{
+				Parameters:       params,
+				Mode:             testCase.meekMode,
+				DialAddress:      serverAddr,
+				UseHTTPS:         true,
+				SNIServerName:    "not-" + serverName,
+				VerifyServerName: testCase.verifyServerName,
+				VerifyPins:       testCase.verifyPins,
+			}
 
-	for _, tlsFragmentClientHello := range []bool{false, true} {
+			dialConfig := &DialConfig{
+				TrustedCACertificatesFilename: rootCAsFileName,
+				CustomDialer:                  dialer,
+			}
 
-		ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
-		defer cancelFunc()
+			for _, tlsFragmentClientHello := range []bool{false, true} {
 
-		meekConfig.TLSFragmentClientHello = tlsFragmentClientHello
+				ctx, cancelFunc := context.WithTimeout(context.Background(), 1*time.Second)
+				defer cancelFunc()
 
-		meekConn, err := DialMeek(ctx, meekConfig, dialConfig)
-		if err != nil {
-			t.Fatalf("DialMeek failed: %v", err)
-		}
+				meekConfig.TLSFragmentClientHello = tlsFragmentClientHello
 
-		client := &http.Client{
-			Transport: meekConn,
-		}
+				meekConn, err := DialMeek(ctx, meekConfig, dialConfig)
+				if err != nil {
+					t.Fatalf("DialMeek failed: %v", err)
+				}
 
-		response, err := client.Get("https://" + serverAddr + "/")
-		if err != nil {
-			t.Fatalf("http.Client.Get failed: %v", err)
-		}
-		response.Body.Close()
+				client := &http.Client{
+					Transport: meekConn,
+				}
 
-		if response.StatusCode != http.StatusOK {
-			t.Fatalf("unexpected response code: %v", response.StatusCode)
-		}
+				response, err := client.Get("https://" + serverAddr + "/")
+				if err != nil {
+					t.Fatalf("http.Client.Get failed: %v", err)
+				}
+				response.Body.Close()
 
-		err = meekConn.Close()
-		if err != nil {
-			t.Fatalf("MeekConn.Close failed: %v", err)
-		}
+				if response.StatusCode != http.StatusOK {
+					t.Fatalf("unexpected response code: %v", response.StatusCode)
+				}
+
+				err = meekConn.Close()
+				if err != nil {
+					t.Fatalf("MeekConn.Close failed: %v", err)
+				}
+			}
+		})
 	}
 }
