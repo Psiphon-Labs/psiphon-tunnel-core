@@ -23,7 +23,7 @@ github.com/Psiphon-Labs/consistent
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240424193802-52b2602ec60c
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240716162946-891a0d5db073
 ## explicit; go 1.21
 github.com/Psiphon-Labs/psiphon-tls
 # github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536
