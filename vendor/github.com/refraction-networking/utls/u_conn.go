@@ -32,6 +32,7 @@ type UConn struct {
 	sessionController *sessionController
 
 	clientHelloBuildStatus ClientHelloBuildStatus
+	clientHelloSpec        *ClientHelloSpec
 
 	HandshakeState PubClientHandshakeState
 
@@ -154,9 +155,9 @@ func (uconn *UConn) buildHandshakeState(loadSession bool) error {
 		if loadSession {
 			uconn.uApplyPatch()
 			uconn.sessionController.finalCheck()
+			uconn.clientHelloBuildStatus = BuildByUtls
 		}
 
-		uconn.clientHelloBuildStatus = BuildByUtls
 	}
 	return nil
 }
