@@ -44,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"golang.org/x/time/rate"
 )
 
 // Controller is a tunnel lifecycle coordinator. It manages lists of servers to
@@ -96,6 +97,8 @@ type Controller struct {
 	inproxyNATStateManager                  *InproxyNATStateManager
 	inproxyHandleTacticsMutex               sync.Mutex
 	inproxyLastStoredTactics                time.Time
+	establishSignalForceTacticsFetch        chan struct{}
+	inproxyClientDialRateLimiter            *rate.Limiter
 }
 
 // NewController initializes a new controller.
@@ -116,7 +119,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// ensures no tactics request is attempted now.
 	doneContext, cancelFunc := context.WithCancel(context.Background())
 	cancelFunc()
-	GetTactics(doneContext, config)
+	GetTactics(doneContext, config, true)
 
 	p := config.GetParameters().Get()
 	splitTunnelClassificationTTL :=
@@ -1505,6 +1508,8 @@ type protocolSelectionConstraints struct {
 	limitTunnelDialPortNumbers                protocol.TunnelProtocolPortLists
 	limitQUICVersions                         protocol.QUICVersions
 	replayCandidateCount                      int
+	isInproxyPersonalPairingMode              bool
+	inproxyClientDialRateLimiter              *rate.Limiter
 }
 
 func (p *protocolSelectionConstraints) hasInitialProtocols() bool {
@@ -1556,24 +1561,30 @@ func (p *protocolSelectionConstraints) canReplay(
 		replayProtocol)
 }
 
+func (p *protocolSelectionConstraints) getLimitTunnelProtocols(
+	connectTunnelCount int) protocol.TunnelProtocols {
+
+	protocols := p.limitTunnelProtocols
+
+	if len(p.initialLimitTunnelProtocols) > 0 &&
+		p.initialLimitTunnelProtocolsCandidateCount > connectTunnelCount {
+
+		protocols = p.initialLimitTunnelProtocols
+	}
+
+	return protocols
+}
+
 func (p *protocolSelectionConstraints) supportedProtocols(
 	connectTunnelCount int,
 	excludeIntensive bool,
 	excludeInproxy bool,
 	serverEntry *protocol.ServerEntry) []string {
 
-	limitTunnelProtocols := p.limitTunnelProtocols
-
-	if len(p.initialLimitTunnelProtocols) > 0 &&
-		p.initialLimitTunnelProtocolsCandidateCount > connectTunnelCount {
-
-		limitTunnelProtocols = p.initialLimitTunnelProtocols
-	}
-
 	return serverEntry.GetSupportedProtocols(
 		conditionallyEnabledComponents{},
 		p.useUpstreamProxy,
-		limitTunnelProtocols,
+		p.getLimitTunnelProtocols(connectTunnelCount),
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,
 		excludeIntensive,
@@ -1584,13 +1595,13 @@ func (p *protocolSelectionConstraints) selectProtocol(
 	connectTunnelCount int,
 	excludeIntensive bool,
 	excludeInproxy bool,
-	serverEntry *protocol.ServerEntry) (string, bool) {
+	serverEntry *protocol.ServerEntry) (string, time.Duration, bool) {
 
 	candidateProtocols := p.supportedProtocols(
 		connectTunnelCount, excludeIntensive, excludeInproxy, serverEntry)
 
 	if len(candidateProtocols) == 0 {
-		return "", false
+		return "", 0, false
 	}
 
 	// Pick at random from the supported protocols. This ensures that we'll
@@ -1599,9 +1610,62 @@ func (p *protocolSelectionConstraints) selectProtocol(
 	// through multi-capability servers, and a simpler ranked preference of
 	// protocols could lead to that protocol never being selected.
 
-	index := prng.Intn(len(candidateProtocols))
+	selectedProtocol := candidateProtocols[prng.Intn(len(candidateProtocols))]
 
-	return candidateProtocols[index], true
+	if !protocol.TunnelProtocolUsesInproxy(selectedProtocol) ||
+		p.inproxyClientDialRateLimiter == nil {
+
+		return selectedProtocol, 0, true
+	}
+
+	// Rate limit in-proxy dials. This avoids triggering rate limits or
+	// similar errors from any intermediate CDN between the client and the
+	// broker. And avoids unnecessarily triggering the broker's
+	// application-level rate limiter, which will incur some overhead logging
+	// an event and returning a response.
+	//
+	// In personal pairing mode, or when protocol limits yield only in-proxy
+	// tunnel protocol candidates, no non-in-proxy protocol can be selected,
+	// so delay the dial. In other cases, skip the candidate and pick a
+	// non-in-proxy tunnel protocol.
+	//
+	// The delay is not applied here since the caller is holding the
+	// concurrentEstablishTunnelsMutex lock, potentially blocking other
+	// establishment workers. Instead the delay is returned and applied
+	// outside of the lock. This also allows for the delay to be reduced when
+	// the StaggerConnectionWorkers facility is active.
+
+	if p.isInproxyPersonalPairingMode ||
+		p.getLimitTunnelProtocols(connectTunnelCount).IsOnlyInproxyTunnelProtocols() {
+
+		r := p.inproxyClientDialRateLimiter.Reserve()
+		if !r.OK() {
+			NoticeInfo("in-proxy protocol selection rate limited: burst size exceeded")
+			return "", 0, false
+		}
+		delay := r.Delay()
+		if delay > 0 {
+			NoticeInfo("in-proxy protocol selection rate limited: %v", delay)
+		}
+		return selectedProtocol, delay, true
+
+	} else if !p.inproxyClientDialRateLimiter.Allow() {
+
+		NoticeInfo("in-proxy protocol selection skipped due to rate limit")
+
+		excludeInproxy = true
+
+		candidateProtocols = p.supportedProtocols(
+			connectTunnelCount, excludeIntensive, excludeInproxy, serverEntry)
+
+		if len(candidateProtocols) == 0 {
+			return "", 0, false
+		}
+
+		return candidateProtocols[prng.Intn(len(candidateProtocols))], 0, true
+	}
+
+	return selectedProtocol, 0, true
 }
 
 type candidateServerEntry struct {
@@ -1667,6 +1731,30 @@ func (controller *Controller) startEstablishing() {
 	// controller.serverAffinityDoneBroadcast.
 	controller.serverAffinityDoneBroadcast = make(chan struct{})
 
+	// TODO: Add a buffer of 1 so we don't miss a signal while worker is
+	// starting? Trade-off is potential back-to-back fetches. As-is,
+	// establish will eventually signal another fetch.
+	controller.establishSignalForceTacticsFetch = make(chan struct{})
+
+	// Initialize the in-proxy client dial rate limiter. Rate limits are used in
+	// protocolSelectionConstraints.selectProtocol. When
+	// InproxyClientDialRateLimitQuantity is 0, there is no rate limit.
+	//
+	// The rate limiter is reset for each establishment, which ensures no
+	// delays carry over from a previous establishment run. However, this
+	// does mean that very frequent re-establishments may exceed the rate
+	// limit overall.
+
+	p := controller.config.GetParameters().Get()
+	inproxyRateLimitQuantity := p.Int(parameters.InproxyClientDialRateLimitQuantity)
+	inproxyRateLimitInterval := p.Duration(parameters.InproxyClientDialRateLimitInterval)
+	if inproxyRateLimitQuantity > 0 {
+		controller.inproxyClientDialRateLimiter = rate.NewLimiter(
+			rate.Limit(float64(inproxyRateLimitQuantity)/inproxyRateLimitInterval.Seconds()),
+			inproxyRateLimitQuantity)
+	}
+	p.Close()
+
 	controller.establishWaitGroup.Add(1)
 	go controller.launchEstablishing()
 }
@@ -1675,8 +1763,9 @@ func (controller *Controller) launchEstablishing() {
 
 	defer controller.establishWaitGroup.Done()
 
-	// Before starting the establish tunnel workers, get and apply
-	// tactics, launching a tactics request if required.
+	// Before starting the establish tunnel workers, get and apply tactics,
+	// launching a tactics request if required -- when there are no tactics,
+	// or the cached tactics have expired.
 	//
 	// Wait only TacticsWaitPeriod for the tactics request to complete (or
 	// fail) before proceeding with tunnel establishment, in case the tactics
@@ -1691,25 +1780,75 @@ func (controller *Controller) launchEstablishing() {
 	//
 	// Any in-flight tactics request or pending retry will be
 	// canceled when establishment is stopped.
+	//
+	// In some cases, no tunnel establishment can succeed without a fresh
+	// tactics fetch, even if there is existing, non-expired cached tactics.
+	// Currently, cases include in-proxy personal pairing mode and limiting
+	// tunnel protocols to in-proxy, where broker specs are both required and
+	// obtained exclusively from tactics. It is possible that cached tactics
+	// are found and used, but broker configurations have recently changed
+	// away from the broker specs in cached tactics.
+	//
+	// Another scenario, with exclusively in-proxy tunnel protocols, is a
+	// fresh start with no embedded server entries, where the initial
+	// GetTactics will fail with "no capable servers".
+	//
+	// To handle these cases, when cached tactics are used or no tactics can
+	// be fetched, the tactics worker goroutine will remain running and await
+	// a signal to force a tactics fetch that ignores any stored/cached
+	// tactics. Multiple signals and fetch attempts are supported, to retry
+	// when a GetTactics fetch iteration fails, including the "no capable
+	// servers" case, which may only succeed after a concurrent server list
+	// fetch completes.
+	//
+	// Limitation: this mechanism doesn't force repeated tactics fetches after
+	// one success, which risks being excessive. There's at most one
+	// successful fetch per establishment run. As such, it remains remotely
+	// possible that a tactics change, such as new broker specs, deployed in
+	// the middle of an establishment run, won't be fetched. A user-initiated
+	// stop/start toggle will work around this.
 
 	if !controller.config.DisableTactics {
 
 		timeout := controller.config.GetParameters().Get().Duration(
 			parameters.TacticsWaitPeriod)
 
-		tacticsDone := make(chan struct{})
+		initialTacticsDone := make(chan struct{})
 		tacticsWaitPeriod := time.NewTimer(timeout)
 		defer tacticsWaitPeriod.Stop()
 
 		controller.establishWaitGroup.Add(1)
 		go func() {
 			defer controller.establishWaitGroup.Done()
-			defer close(tacticsDone)
-			GetTactics(controller.establishCtx, controller.config)
+
+			useStoredTactics := true
+			fetched := GetTactics(
+				controller.establishCtx, controller.config, useStoredTactics)
+			close(initialTacticsDone)
+
+			if fetched {
+				return
+			}
+
+			for {
+				select {
+				case <-controller.establishCtx.Done():
+					return
+				case <-controller.establishSignalForceTacticsFetch:
+				}
+
+				useStoredTactics = false
+				fetched = GetTactics(
+					controller.establishCtx, controller.config, useStoredTactics)
+				if fetched {
+					// No more forced tactics fetches after the first success.
+					break
+				}
+			}
 		}()
 
 		select {
-		case <-tacticsDone:
+		case <-initialTacticsDone:
 		case <-tacticsWaitPeriod.C:
 		}
 
@@ -1741,6 +1880,9 @@ func (controller *Controller) launchEstablishing() {
 			p.TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers)),
 
 		replayCandidateCount: p.Int(parameters.ReplayCandidateCount),
+
+		isInproxyPersonalPairingMode: controller.config.IsInproxyPersonalPairingMode(),
+		inproxyClientDialRateLimiter: controller.inproxyClientDialRateLimiter,
 	}
 
 	// Adjust protocol limits for in-proxy personal proxy mode. In this mode,
@@ -1748,18 +1890,18 @@ func (controller *Controller) launchEstablishing() {
 	// corresponding personal compartment ID, so non-in-proxy tunnel
 	// protocols are disabled.
 
-	if len(controller.config.InproxyClientPersonalCompartmentIDs) > 0 {
+	if controller.config.IsInproxyPersonalPairingMode() {
 
 		if len(controller.protocolSelectionConstraints.initialLimitTunnelProtocols) > 0 {
 			controller.protocolSelectionConstraints.initialLimitTunnelProtocols =
 				controller.protocolSelectionConstraints.
-					initialLimitTunnelProtocols.OnlyInproxyTunnelProtocols()
+					initialLimitTunnelProtocols.PruneNonInproxyTunnelProtocols()
 		}
 
 		if len(controller.protocolSelectionConstraints.limitTunnelProtocols) > 0 {
 			controller.protocolSelectionConstraints.limitTunnelProtocols =
 				controller.protocolSelectionConstraints.
-					limitTunnelProtocols.OnlyInproxyTunnelProtocols()
+					limitTunnelProtocols.PruneNonInproxyTunnelProtocols()
 		}
 
 		// This covers two cases: if there was no limitTunnelProtocols to
@@ -1773,8 +1915,17 @@ func (controller *Controller) launchEstablishing() {
 	}
 
 	// ConnectionWorkerPoolSize may be set by tactics.
+	//
+	// In-proxy personal pairing mode uses a distinct parameter which is
+	// typically configured to a lower number, limiting concurrent load and
+	// announcement consumption for personal proxies.
 
-	workerPoolSize := p.Int(parameters.ConnectionWorkerPoolSize)
+	var workerPoolSize int
+	if controller.config.IsInproxyPersonalPairingMode() {
+		workerPoolSize = p.Int(parameters.InproxyPersonalPairingConnectionWorkerPoolSize)
+	} else {
+		workerPoolSize = p.Int(parameters.ConnectionWorkerPoolSize)
+	}
 
 	// When TargetServerEntry is used, override any worker pool size config or
 	// tactic parameter and use a pool size of 1. The typical use case for
@@ -1950,6 +2101,8 @@ func (controller *Controller) stopEstablishing() {
 	controller.establishWaitGroup = nil
 	controller.candidateServerEntries = nil
 	controller.serverAffinityDoneBroadcast = nil
+	controller.establishSignalForceTacticsFetch = nil
+	controller.inproxyClientDialRateLimiter = nil
 
 	controller.concurrentEstablishTunnelsMutex.Lock()
 	peakConcurrent := controller.peakConcurrentEstablishTunnels
@@ -2141,11 +2294,56 @@ loop:
 		// No fetches are triggered when TargetServerEntry is specified. In that
 		// case, we're only trying to connect to a specific server entry.
 
-		if (candidateServerEntryCount == 0 ||
-			time.Since(controller.establishStartTime)-totalNetworkWaitDuration > workTime) &&
-			controller.config.TargetServerEntry == "" {
+		if candidateServerEntryCount == 0 ||
+			time.Since(controller.establishStartTime)-totalNetworkWaitDuration > workTime {
 
-			controller.triggerFetches()
+			if controller.config.TargetServerEntry == "" {
+				controller.triggerFetches()
+			}
+
+			// Trigger a forced tactics fetch. Currently, this is done only
+			// for cases where in-proxy tunnel protocols must be selected.
+			// When there were no server entries, wait until a server entry
+			// fetch has completed.
+
+			// Lock required to access controller.establishConnectTunnelCount.
+			controller.concurrentEstablishTunnelsMutex.Lock()
+			limitInproxyOnly := controller.protocolSelectionConstraints.getLimitTunnelProtocols(
+				controller.establishConnectTunnelCount).IsOnlyInproxyTunnelProtocols()
+			controller.concurrentEstablishTunnelsMutex.Unlock()
+
+			if limitInproxyOnly || controller.config.IsInproxyPersonalPairingMode() {
+
+				// Simply sleep and poll for any imported server entries;
+				// perform one sleep after HasServerEntries, in order to give
+				// the import some extra time. Limitation: if the sleep loop
+				// ends too soon, the tactics fetch won't find a
+				// tactics-capable server entry; in this case, workTime must
+				// elapse before another tactics fetch is triggered.
+				//
+				// TODO: synchronize with server list fetch/import complete;
+				// or use ScanServerEntries (but see function comment about
+				// performance concern) to check for at least one
+				// tactics-capable server entry.
+
+				if candidateServerEntryCount == 0 {
+					stopWaiting := false
+					for {
+						if HasServerEntries() {
+							stopWaiting = true
+						}
+						common.SleepWithContext(controller.establishCtx, 1*time.Second)
+						if stopWaiting || controller.establishCtx.Err() != nil {
+							break
+						}
+					}
+				}
+
+				select {
+				case controller.establishSignalForceTacticsFetch <- struct{}{}:
+				default:
+				}
+			}
 		}
 
 		// After a complete iteration of candidate servers, pause before iterating again.
@@ -2297,20 +2495,32 @@ loop:
 				replayProtocol)
 		}
 
+		// The dial rate limit delay, determined by protocolSelectionConstraints.selectProtocol, is
+		// not applied within that function since this worker holds the concurrentEstablishTunnelsMutex
+		// lock when that's called. Instead, the required delay is passed out and applied below.
+		// It's safe for the selectProtocol callback to write to dialRateLimitDelay without
+		// synchronization since this worker goroutine invokes the callback.
+
+		var dialRateLimitDelay time.Duration
+
 		selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
 
 			// The in-proxy protocol selection probability allows for
 			// tuning/limiting in-proxy usage independent of
 			// LimitTunnelProtocol targeting.
 
-			onlyInproxy := len(controller.config.InproxyClientPersonalCompartmentIDs) > 0
+			onlyInproxy := controller.config.IsInproxyPersonalPairingMode()
 			includeInproxy := onlyInproxy || prng.FlipWeightedCoin(inproxySelectionProbability)
 
-			return controller.protocolSelectionConstraints.selectProtocol(
+			selectedProtocol, rateLimitDelay, ok := controller.protocolSelectionConstraints.selectProtocol(
 				controller.establishConnectTunnelCount,
 				excludeIntensive,
 				!includeInproxy,
 				serverEntry)
+
+			dialRateLimitDelay = rateLimitDelay
+
+			return selectedProtocol, ok
 		}
 
 		// MakeDialParameters may return a replay instance, if the server
@@ -2390,6 +2600,8 @@ loop:
 
 		controller.concurrentEstablishTunnelsMutex.Unlock()
 
+		startStagger := time.Now()
+
 		// Apply stagger only now that we're past MakeDialParameters and
 		// protocol selection logic which may have caused the candidate to be
 		// skipped. The stagger logic delays dialing, and we don't want to
@@ -2410,6 +2622,15 @@ loop:
 			}
 			timer.Stop()
 			controller.staggerMutex.Unlock()
+		}
+
+		// Apply any dial rate limit delay now, after unlocking
+		// concurrentEstablishTunnelsMutex. The delay may be reduced by the
+		// time spent waiting to stagger.
+
+		dialRateLimitDelay -= time.Since(startStagger)
+		if dialRateLimitDelay > 0 {
+			common.SleepWithContext(controller.establishCtx, dialRateLimitDelay)
 		}
 
 		// ConnectTunnel will allocate significant memory, so first attempt to
@@ -2510,7 +2731,7 @@ func (controller *Controller) runInproxyProxy() {
 			// When not running client tunnel establishment, perform an OOB tactics
 			// fetch, if required, here.
 
-			GetTactics(controller.runCtx, controller.config)
+			GetTactics(controller.runCtx, controller.config, true)
 
 		} else if !controller.config.InproxySkipAwaitFullyConnected {
 
@@ -2849,8 +3070,7 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 		return false
 	}
 
-	if tacticsRecord != nil &&
-		prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+	if tacticsRecord != nil {
 
 		// SetParameters signals registered components, including broker
 		// client and NAT state managers, that must reset upon tactics changes.

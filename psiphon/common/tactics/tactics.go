@@ -112,12 +112,6 @@ tactics. Each time the tactics changes, this process is repeated so that
 obsolete tactics parameters are not retained in the client's Parameters
 instance.
 
-Tactics has a probability parameter that is used in a weighted coin flip to
-determine if the tactics is to be applied or skipped for the current client
-session. This allows for experimenting with provisional tactics; and obtaining
-non-tactic sample metrics in situations which would otherwise always use a
-tactic.
-
 Speed test data is used in filtered tactics for selection of parameters such as
 timeouts.
 
@@ -217,8 +211,8 @@ var (
 // matching filter are merged into the client tactics.
 //
 // The merge operation replaces any existing item in Parameter with a Parameter specified in
-// the newest matching tactics. The TTL and Probability of the newest matching tactics is taken,
-// although all but the DefaultTactics can omit the TTL and Probability fields.
+// the newest matching tactics. The TTL of the newest matching tactics is taken, although all
+// but the DefaultTactics can omit the TTL field.
 type Server struct {
 	common.ReloadableFile
 
@@ -232,7 +226,7 @@ type Server struct {
 	RequestObfuscatedKey []byte
 
 	// DefaultTactics is the baseline tactics for all clients. It must include a
-	// TTL and Probability.
+	// TTL.
 	DefaultTactics Tactics
 
 	// FilteredTactics is an ordered list of filter/tactics pairs. For a client,
@@ -362,10 +356,6 @@ type Tactics struct {
 	// expiry when a tactics request or handshake response returns
 	// no tactics data when the tag is unchanged.
 	TTL string
-
-	// Probability specifies the probability [0.0 - 1.0] with which
-	// the client should apply the tactics in a new session.
-	Probability float64
 
 	// Parameters specify client parameters to override. These must
 	// be a subset of parameter.ClientParameter values and follow
@@ -538,13 +528,6 @@ func (server *Server) Validate() error {
 			}
 			// For merging logic, Normalize any 0 duration to "".
 			tactics.TTL = ""
-		}
-
-		if (validatingDefault && tactics.Probability == 0.0) ||
-			tactics.Probability < 0.0 ||
-			tactics.Probability > 1.0 {
-
-			return errors.TraceNew("invalid probability")
 		}
 
 		params, err := parameters.NewParameters(nil)
@@ -1079,8 +1062,7 @@ func medianSampleRTTMilliseconds(samples []SpeedTestSample) int {
 func (t *Tactics) clone(includeServerSideOnly bool) *Tactics {
 
 	u := &Tactics{
-		TTL:         t.TTL,
-		Probability: t.Probability,
+		TTL: t.TTL,
 	}
 
 	// Note: there is no deep copy of parameter values; the the returned
@@ -1102,10 +1084,6 @@ func (t *Tactics) merge(includeServerSideOnly bool, u *Tactics) {
 
 	if u.TTL != "" {
 		t.TTL = u.TTL
-	}
-
-	if u.Probability != 0.0 {
-		t.Probability = u.Probability
 	}
 
 	// Note: there is no deep copy of parameter values; the the returned
@@ -1743,9 +1721,6 @@ func applyTacticsPayload(
 
 	if ttl <= 0 {
 		return newTactics, errors.TraceNew("invalid TTL")
-	}
-	if record.Tactics.Probability <= 0.0 {
-		return newTactics, errors.TraceNew("invalid probability")
 	}
 
 	// Set or extend the expiry.

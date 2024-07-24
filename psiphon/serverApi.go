@@ -403,8 +403,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 				return errors.Trace(err)
 			}
 
-			if tacticsRecord != nil &&
-				prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+			if tacticsRecord != nil {
 
 				err := serverContext.tunnel.config.SetParameters(
 					tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
@@ -1024,6 +1023,14 @@ func getBaseAPIParameters(
 	dialParams *DialParameters) common.APIParameters {
 
 	params := make(common.APIParameters)
+
+	// Temporary measure: unconditionally include legacy session_id and
+	// client_session_id fields for compatibility with existing servers used
+	// in CI.
+	//
+	// TODO: remove once necessary servers are upgraded
+	params["session_id"] = config.SessionID
+	params["client_session_id"] = config.SessionID
 
 	if includeSessionID {
 		// The session ID is included in non-SSH API requests only. For SSH

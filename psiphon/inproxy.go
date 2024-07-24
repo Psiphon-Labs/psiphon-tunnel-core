@@ -247,16 +247,39 @@ func NewInproxyBrokerClientInstance(
 		return nil, errors.Trace(err)
 	}
 
-	// Select the broker to use, optionally favoring brokers with replay
-	// data.
+	// Select the broker to use, optionally favoring brokers with replay data.
+	// In the InproxyBrokerSpecs calls, the first non-empty tactics parameter
+	// list is used.
+	//
+	// Optional broker specs may be used to specify broker(s) dedicated to
+	// personal pairing, a configuration which can be used to reserve more
+	// capacity for personal pairing, given the simple rendezvous scheme below.
 
 	var brokerSpecs parameters.InproxyBrokerSpecsValue
 	if isProxy {
-		brokerSpecs = p.InproxyBrokerSpecs(
-			parameters.InproxyProxyBrokerSpecs, parameters.InproxyBrokerSpecs)
+		if config.IsInproxyPersonalPairingMode() {
+			brokerSpecs = p.InproxyBrokerSpecs(
+				parameters.InproxyProxyPersonalPairingBrokerSpecs,
+				parameters.InproxyPersonalPairingBrokerSpecs,
+				parameters.InproxyProxyBrokerSpecs,
+				parameters.InproxyBrokerSpecs)
+		} else {
+			brokerSpecs = p.InproxyBrokerSpecs(
+				parameters.InproxyProxyBrokerSpecs,
+				parameters.InproxyBrokerSpecs)
+		}
 	} else {
-		brokerSpecs = p.InproxyBrokerSpecs(
-			parameters.InproxyClientBrokerSpecs, parameters.InproxyBrokerSpecs)
+		if config.IsInproxyPersonalPairingMode() {
+			brokerSpecs = p.InproxyBrokerSpecs(
+				parameters.InproxyClientPersonalPairingBrokerSpecs,
+				parameters.InproxyPersonalPairingBrokerSpecs,
+				parameters.InproxyClientBrokerSpecs,
+				parameters.InproxyBrokerSpecs)
+		} else {
+			brokerSpecs = p.InproxyBrokerSpecs(
+				parameters.InproxyClientBrokerSpecs,
+				parameters.InproxyBrokerSpecs)
+		}
 	}
 	if len(brokerSpecs) == 0 {
 		return nil, errors.TraceNew("no broker specs")
