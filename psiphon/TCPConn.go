@@ -106,7 +106,7 @@ func DialTCP(
 func proxiedTcpDial(
 	ctx context.Context, addr string, config *DialConfig) (net.Conn, error) {
 
-	interruptConns := common.NewConns()
+	interruptConns := common.NewConns[net.Conn]()
 
 	// Note: using interruptConns to interrupt a proxy dial assumes
 	// that the underlying proxy code will immediately exit with an
@@ -259,6 +259,7 @@ func tcpDial(ctx context.Context, addr string, config *DialConfig) (net.Conn, er
 	// Controller.establishCandidateGenerator will retry a candidate
 	// tunnel server dials.
 
+	// Don't shuffle or otherwise mutate the slice returned by ResolveIP.
 	permutedIndexes := prng.Perm(len(ipAddrs))
 
 	lastErr := errors.TraceNew("unknown error")

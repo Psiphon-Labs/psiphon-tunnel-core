@@ -195,7 +195,7 @@ func (p *PRNG) Int63() int64 {
 	return int64(i & (1<<63 - 1))
 }
 
-// Int63 is equivilent to math/rand.Uint64.
+// Uint64 is equivilent to math/rand.Uint64.
 func (p *PRNG) Uint64() uint64 {
 	var b [8]byte
 	p.Read(b[:])

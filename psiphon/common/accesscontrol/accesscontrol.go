@@ -33,16 +33,15 @@
 // An authorization is represented in JSON, which is then base64-encoded
 // for transport:
 //
-// {
-//   "Authorization" : {
-// 	 "ID" : <derived unique ID>,
-// 	 "AccessType" : <access type name; e.g., "my-access">,
-// 	 "Expires" : <RFC3339-encoded UTC time value>
-//   },
-//   "SigningKeyID" : <unique key ID>,
-//   "Signature" : <Ed25519 digital signature>
-// }
-//
+//	{
+//	  "Authorization" : {
+//		 "ID" : <derived unique ID>,
+//		 "AccessType" : <access type name; e.g., "my-access">,
+//		 "Expires" : <RFC3339-encoded UTC time value>
+//	  },
+//	  "SigningKeyID" : <unique key ID>,
+//	  "Signature" : <Ed25519 digital signature>
+//	}
 package accesscontrol
 
 import (
@@ -56,6 +55,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/fxamacker/cbor/v2"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -287,7 +287,6 @@ func VerifyAuthorization(
 	}
 
 	var auth Authorization
-
 	err = json.Unmarshal(signedAuth.Authorization, &auth)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -310,4 +309,100 @@ func VerifyAuthorization(
 	}
 
 	return &auth, nil
+}
+
+type packedAuthorization struct {
+	ID           []byte    `cbor:"1,keyasint,omitempty"`
+	AccessType   string    `cbor:"2,keyasint,omitempty"`
+	Expires      time.Time `cbor:"3,keyasint,omitempty"`
+	SigningKeyID []byte    `cbor:"4,keyasint,omitempty"`
+	Signature    []byte    `cbor:"5,keyasint,omitempty"`
+}
+
+// PackAuthorizations re-encodes a list of authorizations using the more
+// compact encoding that is used in protocol.EncodePackedAPIParameters.
+func PackAuthorizations(
+	auths []string,
+	cborEncoding cbor.EncMode) ([]byte, error) {
+
+	// Note: not using protocol.CBOREncoding directly due to import cycle.
+
+	packedAuths := make([]packedAuthorization, len(auths))
+
+	for i, authBase64 := range auths {
+
+		authJSON, err := base64.StdEncoding.DecodeString(authBase64)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		var signedAuth signedAuthorization
+		err = json.Unmarshal(authJSON, &signedAuth)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		var auth Authorization
+		err = json.Unmarshal(signedAuth.Authorization, &auth)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		packedAuths[i] = packedAuthorization{
+			ID:           auth.ID,
+			AccessType:   auth.AccessType,
+			Expires:      auth.Expires,
+			SigningKeyID: signedAuth.SigningKeyID,
+			Signature:    signedAuth.Signature,
+		}
+	}
+
+	packedAuthsCBOR, err := cborEncoding.Marshal(packedAuths)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return packedAuthsCBOR, nil
+}
+
+// UnpackAuthorizations re-encodes a list of authorizations encoded with
+// PackAuthorizations back to the standard, IssueAuthorization encoding.
+func UnpackAuthorizations(packedAuthsCBOR []byte) ([]string, error) {
+
+	var packedAuths []packedAuthorization
+	err := cbor.Unmarshal(packedAuthsCBOR, &packedAuths)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	auths := make([]string, len(packedAuths))
+
+	for i, packedAuth := range packedAuths {
+
+		auth := Authorization{
+			ID:         packedAuth.ID,
+			AccessType: packedAuth.AccessType,
+			Expires:    packedAuth.Expires,
+		}
+
+		authJSON, err := json.Marshal(&auth)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		signedAuth := signedAuthorization{
+			Authorization: authJSON,
+			SigningKeyID:  packedAuth.SigningKeyID,
+			Signature:     packedAuth.Signature,
+		}
+
+		signedAuthJSON, err := json.Marshal(&signedAuth)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		auths[i] = base64.StdEncoding.EncodeToString(signedAuthJSON)
+	}
+
+	return auths, nil
 }

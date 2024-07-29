@@ -49,6 +49,7 @@ type chunkInitCommon struct {
 	numInboundStreams              uint16
 	initialTSN                     uint32
 	params                         []param
+	unrecognizedParams             []paramHeader
 }
 
 const (
@@ -59,7 +60,6 @@ const (
 // Init chunk errors
 var (
 	ErrInitChunkParseParamTypeFailed = errors.New("failed to parse param type")
-	ErrInitChunkUnmarshalParam       = errors.New("failed unmarshalling param in Init Chunk")
 	ErrInitAckMarshalParam           = errors.New("unable to marshal parameter for INIT/INITACK")
 )
 
@@ -91,18 +91,21 @@ func (i *chunkInitCommon) unmarshal(raw []byte) error {
 	remaining := len(raw) - offset
 	for remaining > 0 {
 		if remaining > initOptionalVarHeaderLength {
-			pType, err := parseParamType(raw[offset:])
-			if err != nil {
+			var pHeader paramHeader
+			if err := pHeader.unmarshal(raw[offset:]); err != nil {
 				return fmt.Errorf("%w: %v", ErrInitChunkParseParamTypeFailed, err) //nolint:errorlint
 			}
-			p, err := buildParam(pType, raw[offset:])
+
+			p, err := buildParam(pHeader.typ, raw[offset:])
 			if err != nil {
-				return fmt.Errorf("%w: %v", ErrInitChunkUnmarshalParam, err) //nolint:errorlint
+				i.unrecognizedParams = append(i.unrecognizedParams, pHeader)
+			} else {
+				i.params = append(i.params, p)
 			}
-			i.params = append(i.params, p)
-			padding := getPadding(p.length())
-			offset += p.length() + padding
-			remaining -= p.length() + padding
+
+			padding := getPadding(pHeader.length())
+			offset += pHeader.length() + padding
+			remaining -= pHeader.length() + padding
 		} else {
 			break
 		}

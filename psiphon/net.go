@@ -114,19 +114,6 @@ type DialConfig struct {
 	CustomDialer common.Dialer
 }
 
-// WithoutFragmentor returns a copy of the DialConfig with any fragmentor
-// configuration disabled. The return value is not a deep copy and may be the
-// input DialConfig; it should not be modified.
-func (config *DialConfig) WithoutFragmentor() *DialConfig {
-	if config.FragmentorConfig == nil {
-		return config
-	}
-	newConfig := new(DialConfig)
-	*newConfig = *config
-	newConfig.FragmentorConfig = nil
-	return newConfig
-}
-
 // NetworkConnectivityChecker defines the interface to the external
 // HasNetworkConnectivity provider, which call into the host application to
 // check for network connectivity.
@@ -189,7 +176,6 @@ type NetworkIDGetter interface {
 }
 
 // RefractionNetworkingDialer implements psiphon/common/refraction.Dialer.
-
 type RefractionNetworkingDialer struct {
 	config *DialConfig
 }
@@ -385,7 +371,7 @@ func UntunneledResolveIP(
 	frontingProviderID string) ([]net.IP, error) {
 
 	// Limitations: for untunneled resolves, there is currently no resolve
-	// parameter replay, and no support for pre-resolved IPs.
+	// parameter replay.
 
 	params, err := resolver.MakeResolveParameters(
 		config.GetParameters().Get(), frontingProviderID, hostname)
@@ -415,6 +401,10 @@ func UntunneledResolveIP(
 // The context is applied to underlying TCP dials. The caller is responsible
 // for applying the context to requests made with the returned http.Client.
 //
+// payloadSecure must only be set if all HTTP plaintext payloads sent through
+// the returned net/http.Client will be wrapped in their own transport security
+// layer, which permits skipping of server certificate verification.
+//
 // Warning: it is not safe to call makeFrontedHTTPClient concurrently with the
 // same dialConfig when tunneled is true because dialConfig will be used
 // directly, instead of copied, which can lead to a crash when fields not safe
@@ -426,10 +416,16 @@ func makeFrontedHTTPClient(
 	dialConfig *DialConfig,
 	frontingSpecs parameters.FrontingSpecs,
 	selectedFrontingProviderID func(string),
-	skipVerify bool,
-	disableSystemRootCAs bool) (*http.Client, func() common.APIParameters, error) {
+	skipVerify,
+	disableSystemRootCAs,
+	payloadSecure bool) (*http.Client, func() common.APIParameters, error) {
+
+	if !payloadSecure && (skipVerify || disableSystemRootCAs) {
+		return nil, nil, errors.TraceNew("cannot skip certificate verification if payload insecure")
+	}
 
 	frontingProviderID,
+		frontingTransport,
 		meekFrontingDialAddress,
 		meekSNIServerName,
 		meekVerifyServerName,
@@ -437,6 +433,10 @@ func makeFrontedHTTPClient(
 		meekFrontingHost, err := parameters.FrontingSpecs(frontingSpecs).SelectParameters()
 	if err != nil {
 		return nil, nil, errors.Trace(err)
+	}
+
+	if frontingTransport != protocol.FRONTING_TRANSPORT_HTTPS {
+		return nil, nil, errors.TraceNew("unsupported fronting transport")
 	}
 
 	if selectedFrontingProviderID != nil {
@@ -503,10 +503,15 @@ func makeFrontedHTTPClient(
 		}
 	}
 
+	var meekMode MeekMode = MeekModePlaintextRoundTrip
+	if payloadSecure {
+		meekMode = MeekModeWrappedPlaintextRoundTrip
+	}
+
 	meekConfig := &MeekConfig{
 		DiagnosticID:             frontingProviderID,
 		Parameters:               config.GetParameters(),
-		Mode:                     MeekModePlaintextRoundTrip,
+		Mode:                     meekMode,
 		DialAddress:              meekDialAddress,
 		UseHTTPS:                 true,
 		TLSProfile:               tlsProfile,
@@ -689,6 +694,7 @@ func MakeUntunneledHTTPClient(
 	untunneledDialConfig *DialConfig,
 	skipVerify bool,
 	disableSystemRootCAs bool,
+	payloadSecure bool,
 	frontingSpecs parameters.FrontingSpecs,
 	selectedFrontingProviderID func(string)) (*http.Client, func() common.APIParameters, error) {
 
@@ -704,7 +710,8 @@ func MakeUntunneledHTTPClient(
 			frontingSpecs,
 			selectedFrontingProviderID,
 			false,
-			disableSystemRootCAs)
+			disableSystemRootCAs,
+			payloadSecure)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
@@ -750,8 +757,9 @@ func MakeTunneledHTTPClient(
 	ctx context.Context,
 	config *Config,
 	tunnel *Tunnel,
-	skipVerify bool,
-	disableSystemRootCAs bool,
+	skipVerify,
+	disableSystemRootCAs,
+	payloadSecure bool,
 	frontingSpecs parameters.FrontingSpecs,
 	selectedFrontingProviderID func(string)) (*http.Client, func() common.APIParameters, error) {
 
@@ -784,7 +792,8 @@ func MakeTunneledHTTPClient(
 			frontingSpecs,
 			selectedFrontingProviderID,
 			false,
-			disableSystemRootCAs)
+			disableSystemRootCAs,
+			payloadSecure)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
@@ -827,7 +836,8 @@ func MakeDownloadHTTPClient(
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
 	skipVerify,
-	disableSystemRootCAs bool,
+	disableSystemRootCAs,
+	payloadSecure bool,
 	frontingSpecs parameters.FrontingSpecs,
 	selectedFrontingProviderID func(string)) (*http.Client, bool, func() common.APIParameters, error) {
 
@@ -845,6 +855,7 @@ func MakeDownloadHTTPClient(
 			tunnel,
 			skipVerify || disableSystemRootCAs,
 			disableSystemRootCAs,
+			payloadSecure,
 			frontingSpecs,
 			selectedFrontingProviderID)
 		if err != nil {
@@ -858,6 +869,7 @@ func MakeDownloadHTTPClient(
 			untunneledDialConfig,
 			skipVerify,
 			disableSystemRootCAs,
+			payloadSecure,
 			frontingSpecs,
 			selectedFrontingProviderID)
 		if err != nil {

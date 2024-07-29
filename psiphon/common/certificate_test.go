@@ -26,7 +26,9 @@ import (
 
 func TestGenerateWebServerCertificate(t *testing.T) {
 
-	certificate, privateKey, err := GenerateWebServerCertificate("www.example.com")
+	// Note: pin is tested in psiphon.testTLSDialerCompatibility
+
+	certificate, privateKey, _, err := GenerateWebServerCertificate("www.example.com")
 	if err != nil {
 		t.Errorf("GenerateWebServerCertificate failed: %s", err)
 	}

@@ -10,14 +10,28 @@ import (
 )
 
 const (
-	rtoInitial     float64 = 3.0 * 1000  // msec
-	rtoMin         float64 = 1.0 * 1000  // msec
-	rtoMax         float64 = 60.0 * 1000 // msec
-	rtoAlpha       float64 = 0.125
-	rtoBeta        float64 = 0.25
-	maxInitRetrans uint    = 8
-	pathMaxRetrans uint    = 5
-	noMaxRetrans   uint    = 0
+	// RTO.Initial in msec
+	rtoInitial float64 = 1.0 * 1000
+
+	// RTO.Min in msec
+	rtoMin float64 = 1.0 * 1000
+
+	// RTO.Max in msec
+	defaultRTOMax float64 = 60.0 * 1000
+
+	// RTO.Alpha
+	rtoAlpha float64 = 0.125
+
+	// RTO.Beta
+	rtoBeta float64 = 0.25
+
+	// Max.Init.Retransmits:
+	maxInitRetrans uint = 8
+
+	// Path.Max.Retrans
+	pathMaxRetrans uint = 5
+
+	noMaxRetrans uint = 0
 )
 
 // rtoManager manages Rtx timeout values.
@@ -28,13 +42,19 @@ type rtoManager struct {
 	rto      float64
 	noUpdate bool
 	mutex    sync.RWMutex
+	rtoMax   float64
 }
 
 // newRTOManager creates a new rtoManager.
-func newRTOManager() *rtoManager {
-	return &rtoManager{
-		rto: rtoInitial,
+func newRTOManager(rtoMax float64) *rtoManager {
+	mgr := rtoManager{
+		rto:    rtoInitial,
+		rtoMax: rtoMax,
 	}
+	if mgr.rtoMax == 0 {
+		mgr.rtoMax = defaultRTOMax
+	}
+	return &mgr
 }
 
 // setNewRTT takes a newly measured RTT then adjust the RTO in msec.
@@ -55,7 +75,7 @@ func (m *rtoManager) setNewRTT(rtt float64) float64 {
 		m.rttvar = (1-rtoBeta)*m.rttvar + rtoBeta*(math.Abs(m.srtt-rtt))
 		m.srtt = (1-rtoAlpha)*m.srtt + rtoAlpha*rtt
 	}
-	m.rto = math.Min(math.Max(m.srtt+4*m.rttvar, rtoMin), rtoMax)
+	m.rto = math.Min(math.Max(m.srtt+4*m.rttvar, rtoMin), m.rtoMax)
 	return m.srtt
 }
 
@@ -106,6 +126,7 @@ type rtxTimer struct {
 	stopFunc   stopTimerLoop
 	closed     bool
 	mutex      sync.RWMutex
+	rtoMax     float64
 }
 
 type stopTimerLoop func()
@@ -113,12 +134,19 @@ type stopTimerLoop func()
 // newRTXTimer creates a new retransmission timer.
 // if maxRetrans is set to 0, it will keep retransmitting until stop() is called.
 // (it will never make onRetransmissionFailure() callback.
-func newRTXTimer(id int, observer rtxTimerObserver, maxRetrans uint) *rtxTimer {
-	return &rtxTimer{
+func newRTXTimer(id int, observer rtxTimerObserver, maxRetrans uint,
+	rtoMax float64,
+) *rtxTimer {
+	timer := rtxTimer{
 		id:         id,
 		observer:   observer,
 		maxRetrans: maxRetrans,
+		rtoMax:     rtoMax,
 	}
+	if timer.rtoMax == 0 {
+		timer.rtoMax = defaultRTOMax
+	}
+	return &timer
 }
 
 // start starts the timer.
@@ -147,9 +175,12 @@ func (t *rtxTimer) start(rto float64) bool {
 	go func() {
 		canceling := false
 
+		timer := time.NewTimer(math.MaxInt64)
+		timer.Stop()
+
 		for !canceling {
-			timeout := calculateNextTimeout(rto, nRtos)
-			timer := time.NewTimer(time.Duration(timeout) * time.Millisecond)
+			timeout := calculateNextTimeout(rto, nRtos, t.rtoMax)
+			timer.Reset(time.Duration(timeout) * time.Millisecond)
 
 			select {
 			case <-timer.C:
@@ -208,7 +239,7 @@ func (t *rtxTimer) isRunning() bool {
 	return (t.stopFunc != nil)
 }
 
-func calculateNextTimeout(rto float64, nRtos uint) float64 {
+func calculateNextTimeout(rto float64, nRtos uint, rtoMax float64) float64 {
 	// RFC 4096 sec 6.3.3.  Handle T3-rtx Expiration
 	//   E2)  For the destination address for which the timer expires, set RTO
 	//        <- RTO * 2 ("back off the timer").  The maximum value discussed

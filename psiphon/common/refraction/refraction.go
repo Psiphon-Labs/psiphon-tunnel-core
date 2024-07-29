@@ -866,7 +866,7 @@ type dialManager struct {
 	runCtx         context.Context
 	stopRunning    context.CancelFunc
 
-	conns *common.Conns
+	conns *common.Conns[net.Conn]
 }
 
 func newDialManager() *dialManager {
@@ -874,7 +874,7 @@ func newDialManager() *dialManager {
 	return &dialManager{
 		runCtx:      runCtx,
 		stopRunning: stopRunning,
-		conns:       common.NewConns(),
+		conns:       common.NewConns[net.Conn](),
 	}
 }
 

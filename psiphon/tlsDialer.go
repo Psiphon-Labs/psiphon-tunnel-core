@@ -250,18 +250,18 @@ func CustomTLSDial(
 		dialAddr = config.DialAddr
 	}
 
-	rawConn, err := config.Dial(ctx, network, dialAddr)
+	underlyingConn, err := config.Dial(ctx, network, dialAddr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	if config.FragmentClientHello {
-		rawConn = NewTLSFragmentorConn(rawConn)
+		underlyingConn = NewTLSFragmentorConn(underlyingConn)
 	}
 
 	hostname, _, err := net.SplitHostPort(dialAddr)
 	if err != nil {
-		rawConn.Close()
+		underlyingConn.Close()
 		return nil, errors.Trace(err)
 	}
 
@@ -427,7 +427,7 @@ func CustomTLSDial(
 		tlsConfig.DynamicRecordSizingDisabled = true
 	}
 
-	conn := utls.UClient(rawConn, tlsConfig, utlsClientHelloID)
+	conn := utls.UClient(underlyingConn, tlsConfig, utlsClientHelloID)
 
 	if utlsClientHelloSpec != nil {
 		err := conn.ApplyPreset(utlsClientHelloSpec)
@@ -675,20 +675,20 @@ func CustomTLSDial(
 	case <-ctx.Done():
 		err = ctx.Err()
 		// Interrupt the goroutine
-		rawConn.Close()
+		underlyingConn.Close()
 		<-resultChannel
 	}
 
 	if err != nil {
-		rawConn.Close()
+		underlyingConn.Close()
 		return nil, errors.Trace(err)
 	}
 
 	return &tlsConn{
 		Conn:           conn,
-		underlyingConn: rawConn,
+		underlyingConn: underlyingConn,
 		resumedSession: usedSessionTicket,
-	}, nil
+		}, nil
 }
 
 type tlsConn struct {
@@ -699,7 +699,15 @@ type tlsConn struct {
 
 func (conn *tlsConn) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
+
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
+	underlyingMetrics, ok := conn.underlyingConn.(common.MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
 	logFields["tls_resumed_session"] = conn.resumedSession
+
 	return logFields
 }
 
@@ -766,10 +774,12 @@ func verifyCertificatePins(pins []string, verifiedChains [][]*x509.Certificate) 
 }
 
 func IsTLSConnUsingHTTP2(conn net.Conn) bool {
-	if c, ok := conn.(*utls.UConn); ok {
-		state := c.ConnectionState()
-		return state.NegotiatedProtocolIsMutual &&
-			state.NegotiatedProtocol == "h2"
+	if t, ok := conn.(*tlsConn); ok {
+		if u, ok := t.Conn.(*utls.UConn); ok {
+			state := u.ConnectionState()
+			return state.NegotiatedProtocolIsMutual &&
+				state.NegotiatedProtocol == "h2"
+		}
 	}
 	return false
 }
@@ -1085,6 +1095,18 @@ func (c *TLSFragmentorConn) Close() error {
 
 func (c *TLSFragmentorConn) Read(b []byte) (n int, err error) {
 	return c.Conn.Read(b)
+}
+
+func (c *TLSFragmentorConn) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
+	underlyingMetrics, ok := c.Conn.(common.MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
+	return logFields
 }
 
 // Write transparently splits the first TLS record containing ClientHello into

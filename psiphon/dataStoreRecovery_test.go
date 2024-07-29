@@ -55,8 +55,8 @@ func TestBoltResiliency(t *testing.T) {
 	clientConfigJSON := `
     {
         "ClientPlatform" : "",
-        "ClientVersion" : "0",
-        "SponsorId" : "0",
+        "ClientVersion" : "0000000000000000",
+        "SponsorId" : "0000000000000000",
         "PropagationChannelId" : "0",
         "ConnectionWorkerPoolSize" : 10,
         "EstablishTunnelTimeoutSeconds" : 1,

@@ -272,7 +272,7 @@ type resolverMetrics struct {
 	responsesIPv6           int
 	defaultResolves         int
 	defaultSuccesses        int
-	peakInFlight            int64
+	peakInFlight            int
 	minRTT                  time.Duration
 	maxRTT                  time.Duration
 }
@@ -453,11 +453,15 @@ func (r *Resolver) MakeResolveParameters(
 // ResolveAddress splits the input host:port address, calls ResolveIP to
 // resolve the IP address of the host, selects an IP if there are multiple,
 // and returns a rejoined IP:port.
+//
+// IP address selection is random. When network input is set
+// to "ip4"/"tcp4"/"udp4" or "ip6"/"tcp6"/"udp6", selection is limited to
+// IPv4 or IPv6, respectively.
 func (r *Resolver) ResolveAddress(
 	ctx context.Context,
 	networkID string,
 	params *ResolveParameters,
-	address string) (string, error) {
+	network, address string) (string, error) {
 
 	hostname, port, err := net.SplitHostPort(address)
 	if err != nil {
@@ -469,7 +473,35 @@ func (r *Resolver) ResolveAddress(
 		return "", errors.Trace(err)
 	}
 
-	return net.JoinHostPort(IPs[prng.Intn(len(IPs))].String(), port), nil
+	// Don't shuffle or otherwise mutate the slice returned by ResolveIP.
+	permutedIndexes := prng.Perm(len(IPs))
+
+	index := 0
+
+	switch network {
+	case "ip4", "tcp4", "udp4":
+		index = -1
+		for _, i := range permutedIndexes {
+			if IPs[i].To4() != nil {
+				index = i
+				break
+			}
+		}
+	case "ip6", "tcp6", "udp6":
+		index = -1
+		for _, i := range permutedIndexes {
+			if IPs[i].To4() == nil {
+				index = i
+				break
+			}
+		}
+	}
+
+	if index == -1 {
+		return "", errors.Tracef("no IP for network '%s'", network)
+	}
+
+	return net.JoinHostPort(IPs[index].String(), port), nil
 }
 
 // ResolveIP resolves a domain name.
@@ -495,11 +527,14 @@ func (r *Resolver) ResolveAddress(
 // often blocked or less common. Instead, ResolveIP makes a best effort to
 // evade plaintext UDP DNS interference by ignoring invalid responses and by
 // optionally applying protocol transforms that may evade blocking.
+//
+// Due to internal caching, the caller must not mutate returned net.IP slice
+// or entries.
 func (r *Resolver) ResolveIP(
 	ctx context.Context,
 	networkID string,
 	params *ResolveParameters,
-	hostname string) (x []net.IP, y error) {
+	hostname string) ([]net.IP, error) {
 
 	// ResolveIP does _not_ lock r.mutex for the lifetime of the function, to
 	// ensure many ResolveIP calls can run concurrently.
@@ -588,6 +623,8 @@ func (r *Resolver) ResolveIP(
 	// logic.
 	IPs := r.getCache(hostname)
 	if IPs != nil {
+		// TODO: it would be safer to make and return a copy of the cached
+		// slice, instead of depending on all callers to not mutate the slice.
 		return IPs, nil
 	}
 
@@ -631,14 +668,15 @@ func (r *Resolver) ResolveIP(
 
 	// Orchestrate the DNS requests
 
-	resolveCtx, cancelFunc := context.WithCancel(ctx)
-	defer cancelFunc()
+	resolveCtx, cancelFunc := context.WithCancelCause(ctx)
+	defer cancelFunc(nil)
 	waitGroup := new(sync.WaitGroup)
-	conns := common.NewConns()
+	conns := common.NewConns[net.Conn]()
 	type answer struct {
-		attempt int
-		IPs     []net.IP
-		TTLs    []time.Duration
+		attempt      int
+		questionType resolverQuestionType
+		IPs          []net.IP
+		TTLs         []time.Duration
 	}
 	var maxAttempts int
 	if params.PreferAlternateDNSServer {
@@ -648,14 +686,31 @@ func (r *Resolver) ResolveIP(
 		maxAttempts = len(servers) * params.AttemptsPerServer
 	}
 	answerChan := make(chan *answer, maxAttempts*2)
-	inFlight := int64(0)
-	awaitA := int32(1)
-	awaitAAAA := int32(1)
-	if !hasIPv6Route {
-		awaitAAAA = 0
-	}
+	inFlight := 0
+	awaitA := true
+	awaitAAAA := hasIPv6Route
 	var result *answer
 	var lastErr atomic.Value
+
+	trackResult := func(a *answer) {
+
+		// A result is sent from every attempt goroutine that is launched,
+		// even in the case of an error, in which case the result is nil.
+		// Update the number of in-flight attempts as results are received.
+		// Mark no longer awaiting A or AAAA as long as there is a valid
+		// response, even if there are no IPs in the IPv6 case.
+		if inFlight > 0 {
+			inFlight -= 1
+		}
+		if a != nil {
+			switch a.questionType {
+			case resolverQuestionTypeA:
+				awaitA = false
+			case resolverQuestionTypeAAAA:
+				awaitAAAA = false
+			}
+		}
+	}
 
 	stop := false
 	for i := 0; !stop && i < maxAttempts; i++ {
@@ -694,20 +749,28 @@ func (r *Resolver) ResolveIP(
 			// correct, we must increment inFlight in this outer goroutine to
 			// ensure the await logic sees either inFlight > 0 or an answer
 			// in the channel.
-			r.updateMetricPeakInFlight(atomic.AddInt64(&inFlight, 1))
+			inFlight += 1
+			r.updateMetricPeakInFlight(inFlight)
 
 			go func(attempt int, questionType resolverQuestionType, useProtocolTransform bool) {
 				defer waitGroup.Done()
 
-				// We must decrement inFlight only after sending an answer and
-				// setting awaitA or awaitAAAA to ensure that the await logic
-				// in the outer goroutine will see inFlight 0 only once those
-				// operations are complete.
-				//
-				// We cannot wait and decrement inFlight when the outer
-				// goroutine receives answers, as no answer is sent in some
-				// cases, such as when the resolve fails due to NXDOMAIN.
-				defer atomic.AddInt64(&inFlight, -1)
+				// Always send a result back to the main loop, even if this
+				// attempt fails, so the main loop proceeds to the next
+				// iteration immediately. Nil is sent in failure cases. When
+				// the answer is not nil, it's already been sent.
+				var a *answer
+				defer func() {
+					if a == nil {
+						// The channel should have sufficient buffering for
+						// the send to never block; the default case is used
+						// to avoid a hang in the case of a bug.
+						select {
+						case answerChan <- a:
+						default:
+						}
+					}
+				}()
 
 				// The request count metric counts the _intention_ to send
 				// requests, as there's a possibility that newResolverConn or
@@ -734,7 +797,8 @@ func (r *Resolver) ResolveIP(
 				// request conns so that they can be closed, and any blocking
 				// network I/O interrupted, below, if resolveCtx is done.
 				if !conns.Add(conn) {
-					// Add fails when conns is already closed.
+					// Add fails when conns is already closed. Do not
+					// overwrite lastErr in this case.
 					return
 				}
 
@@ -791,23 +855,29 @@ func (r *Resolver) ResolveIP(
 					return
 				}
 
-				if len(IPs) > 0 {
-					select {
-					case answerChan <- &answer{attempt: attempt, IPs: IPs, TTLs: TTLs}:
-					default:
-					}
-				}
-
-				// Mark no longer awaiting A or AAAA as long as there is a
-				// valid response, even if there are no IPs in the IPv6 case.
+				// Update response stats.
 				switch questionType {
 				case resolverQuestionTypeA:
 					r.updateMetricResponsesIPv4()
-					atomic.StoreInt32(&awaitA, 0)
 				case resolverQuestionTypeAAAA:
 					r.updateMetricResponsesIPv6()
-					atomic.StoreInt32(&awaitAAAA, 0)
-				default:
+				}
+
+				// Send the answer back to the main loop.
+				if len(IPs) > 0 || questionType == resolverQuestionTypeAAAA {
+					a = &answer{
+						attempt:      attempt,
+						questionType: questionType,
+						IPs:          IPs,
+						TTLs:         TTLs}
+
+					// The channel should have sufficient buffering for
+					// the send to never block; the default case is used
+					// to avoid a hang in the case of a bug.
+					select {
+					case answerChan <- a:
+					default:
+					}
 				}
 
 			}(i+1, questionType, useProtocolTransform)
@@ -817,11 +887,14 @@ func (r *Resolver) ResolveIP(
 
 		select {
 		case result = <-answerChan:
-			// When the first answer, a response with valid IPs, arrives, exit
-			// the attempts loop. The following await branch may collect
-			// additional answers.
-			params.setFirstAttemptWithAnswer(result.attempt)
-			stop = true
+			trackResult(result)
+			if result != nil {
+				// When the first answer, a response with valid IPs, arrives, exit
+				// the attempts loop. The following await branch may collect
+				// additional answers.
+				params.setFirstAttemptWithAnswer(result.attempt)
+				stop = true
+			}
 		case <-timer.C:
 			// When requestTimeout arrives, loop around and launch the next
 			// attempt; leave the existing requests running in case they
@@ -832,7 +905,8 @@ func (r *Resolver) ResolveIP(
 			//
 			// Append the existing lastErr, which may convey useful
 			// information to be reported in a failed_tunnel error message.
-			lastErr.Store(errors.Tracef("%v (lastErr: %v)", ctx.Err(), lastErr.Load()))
+			lastErr.Store(errors.Tracef(
+				"%v (lastErr: %v)", context.Cause(resolveCtx), lastErr.Load()))
 			stop = true
 		}
 	}
@@ -850,8 +924,11 @@ func (r *Resolver) ResolveIP(
 		for loop := true; loop; {
 			select {
 			case nextAnswer := <-answerChan:
-				result.IPs = append(result.IPs, nextAnswer.IPs...)
-				result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+				trackResult(nextAnswer)
+				if nextAnswer != nil {
+					result.IPs = append(result.IPs, nextAnswer.IPs...)
+					result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+				}
 			default:
 				loop = false
 			}
@@ -867,8 +944,8 @@ func (r *Resolver) ResolveIP(
 	// have an answer.
 	if result != nil &&
 		resolveCtx.Err() == nil &&
-		atomic.LoadInt64(&inFlight) > 0 &&
-		(atomic.LoadInt32(&awaitA) != 0 || atomic.LoadInt32(&awaitAAAA) != 0) &&
+		inFlight > 0 &&
+		(awaitA || awaitAAAA) &&
 		params.AwaitTimeout > 0 {
 
 		resetTimer(params.AwaitTimeout)
@@ -878,8 +955,11 @@ func (r *Resolver) ResolveIP(
 			stop := false
 			select {
 			case nextAnswer := <-answerChan:
-				result.IPs = append(result.IPs, nextAnswer.IPs...)
-				result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+				trackResult(nextAnswer)
+				if nextAnswer != nil {
+					result.IPs = append(result.IPs, nextAnswer.IPs...)
+					result.TTLs = append(result.TTLs, nextAnswer.TTLs...)
+				}
 			case <-timer.C:
 				timerDrained = true
 				stop = true
@@ -887,9 +967,8 @@ func (r *Resolver) ResolveIP(
 				stop = true
 			}
 
-			if stop ||
-				atomic.LoadInt64(&inFlight) == 0 ||
-				(atomic.LoadInt32(&awaitA) == 0 && atomic.LoadInt32(&awaitAAAA) == 0) {
+			if stop || inFlight == 0 || (!awaitA && !awaitAAAA) {
+
 				break
 			}
 		}
@@ -900,13 +979,16 @@ func (r *Resolver) ResolveIP(
 	}
 
 	// Interrupt all workers.
-	cancelFunc()
+	cancelFunc(errors.TraceNew("resolve canceled"))
 	conns.CloseAll()
 	waitGroup.Wait()
 
 	// When there's no answer, return the last error.
 	if result == nil {
 		err := lastErr.Load()
+		if err == nil {
+			err = context.Cause(resolveCtx)
+		}
 		if err == nil {
 			err = errors.TraceNew("unexpected missing error")
 		}
@@ -1059,6 +1141,13 @@ func (r *Resolver) updateNetworkState(networkID string) {
 	// similarly use NAT 64 (on iOS; on Android, 464XLAT will handle this
 	// transparently).
 	if updateIPv6Route {
+
+		// TODO: the HasIPv6Route callback provides hasRoutableIPv6Interface
+		// functionality on platforms where that internal implementation
+		// fails. In particular, "route ip+net: netlinkrib: permission
+		// denied" on Android; see Go issue 40569). This Android case can be
+		// fixed, and the callback retired, by sharing the workaround now
+		// implemented in inproxy.pionNetwork.Interfaces.
 
 		if r.networkConfig.HasIPv6Route != nil {
 
@@ -1286,7 +1375,7 @@ func (r *Resolver) updateMetricDefaultResolver(success bool) {
 	}
 }
 
-func (r *Resolver) updateMetricPeakInFlight(inFlight int64) {
+func (r *Resolver) updateMetricPeakInFlight(inFlight int) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -1324,7 +1413,9 @@ func hasRoutableIPv6Interface() (bool, error) {
 	for _, in := range interfaces {
 
 		if (in.Flags&net.FlagUp == 0) ||
-			(in.Flags&(net.FlagLoopback|net.FlagPointToPoint)) != 0 {
+			// Note: don't exclude interfaces with the net.FlagPointToPoint
+			// flag, which is set for certain mobile networks
+			(in.Flags&net.FlagLoopback != 0) {
 			continue
 		}
 
@@ -1451,7 +1542,7 @@ func performDNSQuery(
 			// information about why a response was rejected.
 			err := lastErr
 			if err == nil {
-				err = errors.Trace(resolveCtx.Err())
+				err = errors.Trace(context.Cause(resolveCtx))
 			}
 
 			return nil, nil, RTT, err

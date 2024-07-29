@@ -493,7 +493,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 
 		// Same tls config as psiphon/server/meek.go
 
-		certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
+		certificate, privateKey, _, err := common.GenerateWebServerCertificate(values.GetHostName())
 		if err != nil {
 			t.Fatalf("common.GenerateWebServerCertificate failed: %v", err)
 		}
@@ -935,7 +935,7 @@ func makeCustomTLSProfilesParameters(
 		applyParameters[parameters.DisableFrontingProviderTLSProfiles] = disabledTLSProfiles
 	}
 
-	_, err = params.Set("", false, applyParameters)
+	_, err = params.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
