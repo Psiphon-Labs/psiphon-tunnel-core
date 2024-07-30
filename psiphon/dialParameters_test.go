@@ -567,7 +567,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	}
 
 	dialParams, err = MakeDialParameters(
-		clientConfig, steeringIPCache, nil, canReplay, selectProtocol, serverEntries[0], nil, nil, false, 0, 0)
+		clientConfig, steeringIPCache, nil, nil, nil, canReplay, selectProtocol, serverEntries[0], nil, nil, false, 0, 0)
 
 	if protocol.TunnelProtocolIsDirect(tunnelProtocol) {
 		if err == nil {

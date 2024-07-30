@@ -703,7 +703,11 @@ func (conn *Conn) GetMetrics() common.LogFields {
 		logFields.Add(underlyingMetrics.GetMetrics())
 	}
 
-	logFields["quic_resumed_session"] = conn.connection.hasResumedSession()
+	quicResumedSession := "0"
+	if conn.connection.hasResumedSession() {
+		quicResumedSession = "1"
+	}
+	logFields["quic_resumed_session"] = quicResumedSession
 
 	return logFields
 }

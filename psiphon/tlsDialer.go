@@ -688,7 +688,7 @@ func CustomTLSDial(
 		Conn:           conn,
 		underlyingConn: underlyingConn,
 		resumedSession: usedSessionTicket,
-		}, nil
+	}, nil
 }
 
 type tlsConn struct {
@@ -706,7 +706,12 @@ func (conn *tlsConn) GetMetrics() common.LogFields {
 	if ok {
 		logFields.Add(underlyingMetrics.GetMetrics())
 	}
-	logFields["tls_resumed_session"] = conn.resumedSession
+
+	resumedSession := "0"
+	if conn.resumedSession {
+		resumedSession = "1"
+	}
+	logFields["tls_resumed_session"] = resumedSession
 
 	return logFields
 }

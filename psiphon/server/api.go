@@ -1117,6 +1117,8 @@ var baseDialParams = []requestParamSpec{
 	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},
 	{"tls_ossh_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"steering_ip", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
+	{"tls_resumed_session", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_resumed_session", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 var inproxyDialParams = []requestParamSpec{
