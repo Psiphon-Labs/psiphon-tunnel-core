@@ -732,16 +732,11 @@ func MakeDialParameters(
 		dialParams.ConjureAPIRegistration
 
 	if tlsClientSessionCache != nil && usingTLS {
-		dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
+		sessionKey, err := serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		// Rationale for using fixed <ip>:<port> as the session key:
-		// The usual session key is the dialed domain or SNI, but those may vary between dials;
-		// for direct protocols, that fixed key always exactly maps to that TLS server;
-		// and for fronted protocols, we're assuming that a fronted domain dial typically
-		// ends up at the same CDN edge TLS server.
-		sessionKey := net.JoinHostPort(serverEntry.IpAddress, strconv.Itoa(dialPortNumber))
+
 		dialParams.tlsClientSessionCache = common.WrapUtlsClientSessionCache(tlsClientSessionCache, sessionKey)
 
 		if !isReplay {
@@ -879,16 +874,12 @@ func MakeDialParameters(
 	}
 
 	if quicTLSClientSessionCache != nil && protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
-		dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
+
+		sessionKey, err := serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		// Rationale for using fixed <ip>:<port> as the session key:
-		// The usual session key is the dialed domain or SNI, but those may vary between dials;
-		// for direct protocols, that fixed key always exactly maps to that QUIC server;
-		// and for fronted protocols, we're assuming that a fronted domain dial typically
-		// ends up at the same CDN edge QUIC server.
-		sessionKey := net.JoinHostPort(serverEntry.IpAddress, strconv.Itoa(dialPortNumber))
+
 		dialParams.quicTLSClientSessionCache = common.WrapClientSessionCache(
 			quicTLSClientSessionCache,
 			sessionKey)
