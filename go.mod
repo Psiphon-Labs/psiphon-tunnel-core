@@ -29,6 +29,8 @@ replace github.com/pion/ice/v2 => ./replace/ice
 
 replace github.com/pion/webrtc/v3 => ./replace/webrtc
 
+replace github.com/refraction-networking/utls => github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17
+
 require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e

@@ -22,6 +22,8 @@ github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240716162946-891a0d5db073 h1:qOr7Ja
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240716162946-891a0d5db073/go.mod h1:AaKKoshr8RI1LZTheeNDtNuZ39qNVPWVK4uir2c2XIs=
 github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536 h1:pM5ex1QufkHV8lDR6Tc1Crk1bW5lYZjrFIJGZNBWE9k=
 github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536/go.mod h1:2MTiPsgoOqWs3Bo6Xr3ElMBX6zzfjd3YkDFpQJLwHdQ=
+github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17 h1:7XPQc6Izr5cMOWdggqFxXIyNQmzabPre5kwXHhV3pl4=
+github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17/go.mod h1:BC3O4vQzye5hqpmDTWUqi4P5DDhzJfkV1tdqtawQIH0=
 github.com/alexbrainman/sspi v0.0.0-20210105120005-909beea2cc74 h1:Kk6a4nehpJ3UuJRqlA3JxYxBZEqCeOmATOvrbT4p9RA=
 github.com/alexbrainman/sspi v0.0.0-20210105120005-909beea2cc74/go.mod h1:cEWa1LVoE5KvSD9ONXsZrj0z6KqySlCCNKHlLzbqAt4=
 github.com/andybalholm/brotli v1.0.6 h1:Yf9fFpf49Zrxb9NlQaluyE92/+X7UVHlhMNJN2sxfOI=
@@ -222,8 +224,6 @@ github.com/refraction-networking/gotapdance v1.7.10 h1:vPtvuihP95SqrnnpX//KI1PTq
 github.com/refraction-networking/gotapdance v1.7.10/go.mod h1:N7Xmt+/bLv+1VctiBHtsaL6YBknW2ox5LRLzPTISMzY=
 github.com/refraction-networking/obfs4 v0.1.2 h1:J842O4fGSkd2W8ogYj0KN6gqVVY+Cpqodw9qFGL7wVU=
 github.com/refraction-networking/obfs4 v0.1.2/go.mod h1:wAl/+gWiLsrcykJA3nKJHx89f5/gXGM8UKvty7+mvbM=
-github.com/refraction-networking/utls v1.6.8-0.20240720032424-23de245734c7 h1:2D69ZJ8F+kPHFTQp4jF6GQ80eZWXDUwWf1JWsGMak0M=
-github.com/refraction-networking/utls v1.6.8-0.20240720032424-23de245734c7/go.mod h1:BC3O4vQzye5hqpmDTWUqi4P5DDhzJfkV1tdqtawQIH0=
 github.com/rogpeppe/go-charset v0.0.0-20180617210344-2471d30d28b4/go.mod h1:qgYeAmZ5ZIpBWTGllZSQnw97Dj+woV0toclVaRGI8pc=
 github.com/rogpeppe/go-internal v1.6.1/go.mod h1:xXDCJY+GAPziupqXw64V24skbSoqbTEfhy4qGm1nDQc=
 github.com/rogpeppe/go-internal v1.9.0 h1:73kH8U+JUqXU8lRuOHeVHaa/SZPifC7BkcraZVejAe8=

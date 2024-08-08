@@ -417,7 +417,7 @@ github.com/refraction-networking/obfs4/common/replayfilter
 github.com/refraction-networking/obfs4/transports/base
 github.com/refraction-networking/obfs4/transports/obfs4
 github.com/refraction-networking/obfs4/transports/obfs4/framing
-# github.com/refraction-networking/utls v1.6.8-0.20240720032424-23de245734c7
+# github.com/refraction-networking/utls v1.6.8-0.20240720032424-23de245734c7 => github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17
 ## explicit; go 1.21
 github.com/refraction-networking/utls
 github.com/refraction-networking/utls/dicttls
@@ -635,3 +635,4 @@ tailscale.com/version/distro
 # github.com/pion/dtls/v2 => ./replace/dtls
 # github.com/pion/ice/v2 => ./replace/ice
 # github.com/pion/webrtc/v3 => ./replace/webrtc
+# github.com/refraction-networking/utls => github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17
