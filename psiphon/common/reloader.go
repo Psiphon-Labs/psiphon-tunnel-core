@@ -62,11 +62,11 @@ type Reloader interface {
 //
 // reloadAction must ensure that data structures revert to their previous state when
 // a reload fails.
-//
 type ReloadableFile struct {
 	sync.RWMutex
 	filename        string
 	loadFileContent bool
+	hasLoaded       bool
 	checksum        uint64
 	reloadAction    func([]byte, time.Time) error
 }
@@ -122,6 +122,7 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 
 	reloadable.RLock()
 	filename := reloadable.filename
+	hasLoaded := reloadable.hasLoaded
 	previousChecksum := reloadable.checksum
 	reloadable.RUnlock()
 
@@ -148,7 +149,7 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 
 	checksum := hash.Sum64()
 
-	if checksum == previousChecksum {
+	if hasLoaded && checksum == previousChecksum {
 		return false, nil
 	}
 
@@ -181,6 +182,7 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 		return false, errors.Trace(err)
 	}
 
+	reloadable.hasLoaded = true
 	reloadable.checksum = checksum
 
 	return true, nil
