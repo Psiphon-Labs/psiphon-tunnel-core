@@ -43,21 +43,49 @@ import (
 
 func TestObfuscatedSessionTicket(t *testing.T) {
 
-	tlsProfiles := []string{
-		protocol.TLS_PROFILE_CHROME_58,
-		protocol.TLS_PROFILE_FIREFOX_55,
-		protocol.TLS_PROFILE_RANDOMIZED,
-		protocol.TLS_PROFILE_CHROME_112_PSK, // PSK test
+	type Test struct {
+		name               string
+		tlsProfile         string
+		mutateServerConfig func(*tls.Config)
 	}
 
-	for _, tlsProfile := range tlsProfiles {
-		t.Run(tlsProfile, func(t *testing.T) {
-			runObfuscatedSessionTicket(t, tlsProfile)
+	tests := []Test{
+		{
+			name:       "Chrome-58",
+			tlsProfile: protocol.TLS_PROFILE_CHROME_58,
+		},
+		{
+			name:       "Firefox-55",
+			tlsProfile: protocol.TLS_PROFILE_FIREFOX_55,
+		},
+		{
+			name:       "Randomized",
+			tlsProfile: protocol.TLS_PROFILE_RANDOMIZED,
+		},
+		{
+			name:       "Chrome-112-PSK",
+			tlsProfile: protocol.TLS_PROFILE_CHROME_112_PSK,
+		},
+		{
+			name:       "Chrome-112-PSK with HRR",
+			tlsProfile: protocol.TLS_PROFILE_CHROME_112_PSK,
+			mutateServerConfig: func(config *tls.Config) {
+				// Choose a curve that is not sent by the client in the
+				// key_share extension to trigger a HelloRetryRequest.
+				config.CurvePreferences = []tls.CurveID{tls.CurveP256}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runObfuscatedSessionTicket(t, test.tlsProfile, test.mutateServerConfig)
 		})
 	}
+
 }
 
-func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
+func runObfuscatedSessionTicket(t *testing.T, tlsProfile string, mutateServerConfig func(*tls.Config)) {
 
 	params, err := parameters.NewParameters(nil)
 	if err != nil {
@@ -94,6 +122,10 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 	serverConfig.SessionTicketKey = obfuscatedSessionTicketSharedSecret
 	serverConfig.SetSessionTicketKeys([][32]byte{
 		standardSessionTicketKey, obfuscatedSessionTicketSharedSecret})
+
+	if mutateServerConfig != nil {
+		mutateServerConfig(serverConfig)
+	}
 
 	testMessage := "test"
 
