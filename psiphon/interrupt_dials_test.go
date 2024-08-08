@@ -83,12 +83,15 @@ func TestInterruptDials(t *testing.T) {
 	}
 
 	makeDialers["TLS"] = func(string) common.Dialer {
-		return NewCustomTLSDialer(
-			&CustomTLSConfig{
-				Parameters:               params,
-				Dial:                     NewTCPDialer(&DialConfig{ResolveIP: resolveIP}),
-				RandomizedTLSProfileSeed: seed,
-			})
+		// Cast CustomTLSDialer to common.Dialer.
+		return func(context context.Context, network, addr string) (net.Conn, error) {
+			return NewCustomTLSDialer(
+				&CustomTLSConfig{
+					Parameters:               params,
+					Dial:                     NewTCPDialer(&DialConfig{ResolveIP: resolveIP}),
+					RandomizedTLSProfileSeed: seed,
+				})(context, network, addr)
+		}
 	}
 
 	dialGoroutineFunctionNames := []string{"NewTCPDialer", "NewCustomTLSDialer"}

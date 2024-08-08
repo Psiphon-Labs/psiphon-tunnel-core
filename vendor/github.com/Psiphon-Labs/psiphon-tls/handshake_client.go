@@ -84,7 +84,6 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, *ecdh.PrivateKey, error) {
 	}
 
 	// [Psiphon]
-	// TODO! is extraConfig check necessary/
 	if c.config != nil {
 		hello.PRNG = c.config.ClientHelloPRNG
 		if c.config.GetClientHelloRandom != nil {
@@ -124,7 +123,6 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, *ecdh.PrivateKey, error) {
 	}
 
 	// [Psiphon]
-	// TODO! is config != nil check necessary?
 	var err error
 	if c.config == nil || c.config.GetClientHelloRandom == nil {
 

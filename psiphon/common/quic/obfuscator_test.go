@@ -132,6 +132,8 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 				TransformSpec: transforms.Spec{{"^.{24}", "ffff00000000000000000000"}},
 			},
 			false,
+			false,
+			nil,
 		)
 
 		return nil

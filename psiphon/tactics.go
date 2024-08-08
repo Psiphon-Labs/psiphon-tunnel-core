@@ -218,6 +218,8 @@ func fetchTactics(
 		config,
 		nil,
 		nil,
+		nil,
+		nil,
 		canReplay,
 		selectProtocol,
 		serverEntry,

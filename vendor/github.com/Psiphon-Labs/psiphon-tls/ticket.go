@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
+	"encoding/binary"
 	"errors"
 	"io"
 	"math/big"
@@ -459,16 +460,22 @@ type ObfuscatedClientSessionState struct {
 	SessionTicket      []uint8
 	Vers               uint16
 	CipherSuite        uint16
+	CreatedAt          uint64 // seconds since UNIX epoch
 	MasterSecret       []byte
 	ServerCertificates []*x509.Certificate
 	VerifiedChains     [][]*x509.Certificate
-	UseEMS             bool
+	ExtMasterSecret    bool
+
+	// Client-side TLS 1.3-only fields.
+	UseBy  uint64 // seconds since UNIX epoch
+	AgeAdd uint32
 }
 
-var obfuscatedSessionTicketCipherSuite = TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+var obfuscatedSessionTicketCipherSuite_TLS12 = TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+var obfuscatedSessionTicketCipherSuite_TLS13 = TLS_AES_128_GCM_SHA256
 
 // [Psiphon]
-// NewObfuscatedClientSessionState produces obfuscated session tickets.
+// NewObfuscatedClientSessionState produces obfuscated session tickets or PSK.
 //
 // # Obfuscated Session Tickets
 //
@@ -501,28 +508,47 @@ var obfuscatedSessionTicketCipherSuite = TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 //   - Since the client creates the session ticket, it selects parameters that were not
 //     negotiated with the server, such as the cipher suite. It's implicitly assumed that
 //     the server can support the selected parameters.
-//   - Obfuscated session tickets are not supported for TLS 1.3 _clients_, which use a
-//     distinct scheme. Obfuscated session ticket support in this package is intended to
-//     support TLS 1.2 clients.
-func NewObfuscatedClientSessionState(sharedSecret [32]byte) (*ObfuscatedClientSessionState, error) {
+func NewObfuscatedClientSessionState(
+	sharedSecret [32]byte, isTLS13 bool, extMasterSecret bool) (*ObfuscatedClientSessionState, error) {
 
 	// Create a session ticket that wasn't actually issued by the server.
 	vers := uint16(VersionTLS12)
-	cipherSuite := obfuscatedSessionTicketCipherSuite
+	cipherSuite := obfuscatedSessionTicketCipherSuite_TLS12
+	if isTLS13 {
+		vers = VersionTLS13
+		cipherSuite = obfuscatedSessionTicketCipherSuite_TLS13
+	}
+
 	masterSecret := make([]byte, masterSecretLength)
 	_, err := rand.Read(masterSecret)
 	if err != nil {
 		return nil, err
 	}
 
-	serverState := &SessionState{
-		version:          vers,
-		cipherSuite:      cipherSuite,
-		secret:           masterSecret,
-		peerCertificates: nil,
+	config := &Config{}
+
+	ageAdd := make([]byte, 4)
+	_, err = config.rand().Read(ageAdd)
+	if err != nil {
+		return nil, err
 	}
 
-	config := &Config{}
+	lifetime := maxSessionTicketLifetime
+
+	serverState := &SessionState{
+		version:          vers,
+		isClient:         false,
+		cipherSuite:      cipherSuite,
+		createdAt:        uint64(config.time().Unix()),
+		secret:           masterSecret,
+		peerCertificates: nil,
+		extMasterSecret:  extMasterSecret,
+
+		// TLS 1.3 fields
+		useBy:  uint64(config.time().Add(lifetime).Unix()),
+		ageAdd: binary.LittleEndian.Uint32(ageAdd),
+	}
+
 	sessionTicketKeys := []ticketKey{config.ticketKeyFromBytes(sharedSecret)}
 
 	ssBytes, err := serverState.Bytes()
@@ -538,10 +564,14 @@ func NewObfuscatedClientSessionState(sharedSecret [32]byte) (*ObfuscatedClientSe
 	// ClientSessionState objects for use in ClientSessionCaches. The client will
 	// use this cache to pretend it got that session ticket from the server.
 	clientState := &ObfuscatedClientSessionState{
-		SessionTicket: sessionTicket,
-		Vers:          vers,
-		CipherSuite:   cipherSuite,
-		MasterSecret:  masterSecret,
+		SessionTicket:   sessionTicket,
+		Vers:            vers,
+		CipherSuite:     cipherSuite,
+		MasterSecret:    masterSecret,
+		ExtMasterSecret: extMasterSecret,
+		UseBy:           serverState.useBy,
+		AgeAdd:          serverState.ageAdd,
+		CreatedAt:       serverState.createdAt,
 	}
 
 	return clientState, nil
@@ -549,7 +579,16 @@ func NewObfuscatedClientSessionState(sharedSecret [32]byte) (*ObfuscatedClientSe
 
 func ContainsObfuscatedSessionTicketCipherSuite(cipherSuites []uint16) bool {
 	for _, cipherSuite := range cipherSuites {
-		if cipherSuite == obfuscatedSessionTicketCipherSuite {
+		if cipherSuite == obfuscatedSessionTicketCipherSuite_TLS12 {
+			return true
+		}
+	}
+	return false
+}
+
+func ContainsObfuscatedPSKCipherSuite(cipherSuites []uint16) bool {
+	for _, cipherSuite := range cipherSuites {
+		if cipherSuite == obfuscatedSessionTicketCipherSuite_TLS13 {
 			return true
 		}
 	}

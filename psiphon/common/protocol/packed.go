@@ -792,6 +792,9 @@ func init() {
 
 		{142, "statusData", rawJSONConverter},
 
+		{143, "tls_resumed_session", intConverter},
+		{144, "quic_resumed_session", intConverter},
+
 		// Last key value = 142
 	}
 

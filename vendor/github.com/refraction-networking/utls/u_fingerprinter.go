@@ -8,7 +8,6 @@ package tls
 type Fingerprinter struct {
 	// AllowBluntMimicry will ensure that unknown extensions are
 	// passed along into the resulting ClientHelloSpec as-is
-	// It will not ensure that the PSK is passed along, if you require that, use KeepPSK
 	// WARNING: there could be numerous subtle issues with ClientHelloSpecs
 	// that are generated with this flag which could compromise security and/or mimicry
 	AllowBluntMimicry bool
@@ -18,6 +17,8 @@ type Fingerprinter struct {
 	// have any padding, but you suspect that other changes you make to the final hello
 	// (including things like different SNI lengths) would cause padding to be necessary
 	AlwaysAddPadding bool
+
+	RealPSKResumption bool // if set, PSK extension (if any) will be real PSK extension, otherwise it will be fake PSK extension
 }
 
 // FingerprintClientHello returns a ClientHelloSpec which is based on the
@@ -43,7 +44,8 @@ func (f *Fingerprinter) FingerprintClientHello(data []byte) (clientHelloSpec *Cl
 // as a more precise name for the function
 func (f *Fingerprinter) RawClientHello(raw []byte) (clientHelloSpec *ClientHelloSpec, err error) {
 	clientHelloSpec = &ClientHelloSpec{}
-	err = clientHelloSpec.FromRaw(raw, f.AllowBluntMimicry)
+
+	err = clientHelloSpec.FromRaw(raw, f.AllowBluntMimicry, f.RealPSKResumption)
 	if err != nil {
 		return nil, err
 	}
