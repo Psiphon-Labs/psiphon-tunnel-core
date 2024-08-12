@@ -667,6 +667,13 @@ type Config struct {
 	// testing or in combination with VerifyConnection or VerifyPeerCertificate.
 	InsecureSkipVerify bool
 
+	// [Psiphon]
+	// InsecureSkipTimeVerify controls whether a client verifies the server's
+	// certificate chain against time when loading a session.
+	// If InsecureSkipTimeVerify is true crypto/tls accepts the certificate
+	// even when it is expired.
+	InsecureSkipTimeVerify bool
+
 	// CipherSuites is a list of enabled TLS 1.0–1.2 cipher suites. The order of
 	// the list is ignored. Note that TLS 1.3 ciphersuites are not configurable.
 	//
@@ -902,6 +909,7 @@ func (c *Config) Clone() *Config {
 		ClientAuth:                  c.ClientAuth,
 		ClientCAs:                   c.ClientCAs,
 		InsecureSkipVerify:          c.InsecureSkipVerify,
+		InsecureSkipTimeVerify:      c.InsecureSkipTimeVerify,
 		CipherSuites:                c.CipherSuites,
 		PreferServerCipherSuites:    c.PreferServerCipherSuites,
 		SessionTicketsDisabled:      c.SessionTicketsDisabled,

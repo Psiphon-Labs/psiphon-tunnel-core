@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -41,21 +43,26 @@ import (
 
 func TestQUIC(t *testing.T) {
 	for quicVersion := range supportedVersionNumbers {
-		t.Run(fmt.Sprintf("%s", quicVersion), func(t *testing.T) {
-			if isGQUIC(quicVersion) && !GQUICEnabled() {
-				t.Skipf("gQUIC is not enabled")
+
+		for _, disableObfuscatedPSK := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s|PSK disabled=%v", quicVersion, disableObfuscatedPSK), func(t *testing.T) {
+				if isGQUIC(quicVersion) && !GQUICEnabled() {
+					t.Skipf("gQUIC is not enabled")
+				}
+				runQUIC(t, quicVersion, GQUICEnabled(), disableObfuscatedPSK, false)
+			})
+			if isIETF(quicVersion) {
+				t.Run(fmt.Sprintf("%s (invoke anti-probing)|PSK disabled=%v", quicVersion, disableObfuscatedPSK), func(t *testing.T) {
+					fmt.Printf("quic version: %s\n", quicVersion)
+					runQUIC(t, quicVersion, GQUICEnabled(), true, disableObfuscatedPSK)
+				})
 			}
-			runQUIC(t, quicVersion, GQUICEnabled(), false)
-		})
-		if isIETF(quicVersion) {
-			t.Run(fmt.Sprintf("%s (invoke anti-probing)", quicVersion), func(t *testing.T) {
-				runQUIC(t, quicVersion, GQUICEnabled(), true)
-			})
-		}
-		if isIETF(quicVersion) {
-			t.Run(fmt.Sprintf("%s (disable gQUIC)", quicVersion), func(t *testing.T) {
-				runQUIC(t, quicVersion, false, false)
-			})
+			if isIETF(quicVersion) {
+				t.Run(fmt.Sprintf("%s (disable gQUIC)|PSK disabled=%v", quicVersion, disableObfuscatedPSK), func(t *testing.T) {
+					fmt.Printf("quic version: %s\n", quicVersion)
+					runQUIC(t, quicVersion, false, false, disableObfuscatedPSK)
+				})
+			}
 		}
 	}
 }
@@ -64,7 +71,8 @@ func runQUIC(
 	t *testing.T,
 	quicVersion string,
 	enableGQUIC bool,
-	invokeAntiProbing bool) {
+	invokeAntiProbing bool,
+	disableObfuscatedPSK bool) {
 
 	initGoroutines := getGoroutines()
 
@@ -193,6 +201,8 @@ func runQUIC(
 				return errors.Trace(err)
 			}
 
+			clientSessionCache := common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "localhost")
+
 			conn, err := Dial(
 				ctx,
 				packetConn,
@@ -205,7 +215,8 @@ func runQUIC(
 				nil,
 				disablePathMTUDiscovery,
 				true,
-				nil)
+				disableObfuscatedPSK,
+				clientSessionCache)
 
 			if invokeAntiProbing {
 

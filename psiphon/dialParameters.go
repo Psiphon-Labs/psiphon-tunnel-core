@@ -133,6 +133,7 @@ type DialParameters struct {
 	ObfuscatedQUICPaddingSeed                *prng.Seed
 	ObfuscatedQUICNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
 	QUICDialEarly                            bool
+	QUICDisableObfuscatedPSK                 bool
 	QUICDisablePathMTUDiscovery              bool
 
 	ConjureCachedRegistrationTTL        time.Duration
@@ -864,6 +865,12 @@ func MakeDialParameters(
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
+		}
+
+		if isFronted {
+			dialParams.QUICDisableObfuscatedPSK = true
+		} else {
+			dialParams.QUICDisableObfuscatedPSK = p.Bool(parameters.QUICDisableObfuscatedPSK)
 		}
 
 		dialParams.QUICDialEarly = p.WeightedCoinFlip(parameters.QUICDialEarlyProbability)

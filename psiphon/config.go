@@ -939,6 +939,9 @@ type Config struct {
 	// QUICDialEarlyProbability is for testing purposes.
 	QUICDialEarlyProbability *float64
 
+	// QUICDisableObfuscatedPSK is for testing purposes.
+	QUICDisableObfuscatedPSK *bool
+
 	// QUICDisablePathMTUDiscoveryProbability is for testing purposes.
 	QUICDisablePathMTUDiscoveryProbability *float64
 
@@ -2214,6 +2217,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.QUICDialEarlyProbability] = *config.QUICDialEarlyProbability
 	}
 
+	if config.QUICDisableObfuscatedPSK != nil {
+		applyParameters[parameters.QUICDisableObfuscatedPSK] = *config.QUICDisableObfuscatedPSK
+	}
+
 	if config.QUICDisablePathMTUDiscoveryProbability != nil {
 		applyParameters[parameters.QUICDisableClientPathMTUDiscoveryProbability] = *config.QUICDisablePathMTUDiscoveryProbability
 	}
@@ -2969,6 +2976,11 @@ func (config *Config) setDialParametersHash() {
 	if config.QUICDialEarlyProbability != nil {
 		hash.Write([]byte("QUICDialEarlyProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.QUICDialEarlyProbability)
+	}
+
+	if config.QUICDisableObfuscatedPSK != nil {
+		hash.Write([]byte("QUICDisableObfuscatedPSK"))
+		binary.Write(hash, binary.LittleEndian, *config.QUICDisableObfuscatedPSK)
 	}
 
 	if config.QUICDisablePathMTUDiscoveryProbability != nil {

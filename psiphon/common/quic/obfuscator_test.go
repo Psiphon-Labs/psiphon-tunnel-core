@@ -133,6 +133,7 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 			},
 			false,
 			false,
+			true, // Disable obfuscated PSK
 			nil,
 		)
 
