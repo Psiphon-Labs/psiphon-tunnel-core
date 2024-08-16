@@ -416,6 +416,23 @@ func TestInproxyTLSOSSH(t *testing.T) {
 		})
 }
 
+func TestInproxyPersonalPairing(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "INPROXY-WEBRTC-OSSH",
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+			doLogHostProvider:    true,
+			doTargetBrokerSpecs:  true,
+			doPersonalPairing:    true,
+		})
+}
+
 func TestHotReload(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
@@ -654,6 +671,7 @@ type runServerConfig struct {
 	doSteeringIP         bool
 	doTargetBrokerSpecs  bool
 	useLegacyAPIEncoding bool
+	doPersonalPairing    bool
 }
 
 var (
@@ -1300,6 +1318,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientConfig.InproxyLimitUpstreamBytesPerSecond = 0
 		clientConfig.InproxyLimitDownstreamBytesPerSecond = 0
 		clientConfig.ServerEntrySignaturePublicKey = inproxyTestConfig.brokerServerEntrySignaturePublicKey
+
+		if runConfig.doPersonalPairing {
+
+			psiphon.SetAllowOverlappingPersonalCompartmentIDs(true)
+			defer psiphon.SetAllowOverlappingPersonalCompartmentIDs(false)
+
+			clientConfig.InproxyClientPersonalCompartmentIDs = []string{inproxyTestConfig.personalCompartmentID}
+			clientConfig.InproxyProxyPersonalCompartmentIDs = []string{inproxyTestConfig.personalCompartmentID}
+		}
 
 		// Simulate a CDN adding required HTTP headers by injecting them at
 		// the client.
@@ -2385,6 +2412,10 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected inproxy_proxy_id '%s'", fields["inproxy_proxy_id"])
 		}
 
+		if fields["inproxy_matched_common_compartments"].(bool) != !runConfig.doPersonalPairing {
+			return fmt.Errorf("unexpected inproxy_matched_common_compartments '%s'", fields["inproxy_matched_common_compartments"])
+		}
+
 		if fields["inproxy_broker_fronting_provider_id"].(string) != inproxyTestConfig.brokerFrontingProviderID {
 			return fmt.Errorf("unexpected inproxy_broker_fronting_provider_id '%s'", fields["inproxy_broker_fronting_provider_id"])
 		}
@@ -3390,6 +3421,8 @@ type inproxyTestConfig struct {
 	proxySessionPublicKey           string
 	proxySessionPublicKeyCurve25519 string
 	proxySessionPrivateKey          string
+
+	personalCompartmentID string
 }
 
 func generateInproxyTestConfig(
@@ -3403,8 +3436,6 @@ func generateInproxyTestConfig(
 	//
 	// In this test, a single common compartment ID is issued to all clients;
 	// the test client will get it via tactics.
-	//
-	// TODO: exercise personal compartment IDs
 	//
 	// Because of singletons in the Psiphon client, there can only be a single
 	// Psiphon client instance in this test process, and so it must act as
@@ -3424,6 +3455,12 @@ func generateInproxyTestConfig(
 		return nil, errors.Trace(err)
 	}
 	commonCompartmentIDStr := commonCompartmentID.String()
+
+	personalCompartmentID, err := inproxy.MakeID()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	personalCompartmentIDStr := personalCompartmentID.String()
 
 	brokerSessionPrivateKey, err := inproxy.GenerateSessionPrivateKey()
 	if err != nil {
@@ -3589,6 +3626,7 @@ func generateInproxyTestConfig(
 		proxySessionPublicKey:               proxySessionPublicKeyStr,
 		proxySessionPublicKeyCurve25519:     proxySessionPublicKeyCurve25519Str,
 		proxySessionPrivateKey:              proxySessionPrivateKeyStr,
+		personalCompartmentID:               personalCompartmentIDStr,
 	}
 
 	return config, nil

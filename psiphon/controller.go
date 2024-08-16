@@ -260,6 +260,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 	}
 
 	controller.config.SetTacticsAppliedReceivers(tacticAppliedReceivers)
+	controller.config.SetSignalComponentFailure(controller.SignalComponentFailure)
 
 	return controller, nil
 }
@@ -2875,12 +2876,8 @@ func (controller *Controller) runInproxyProxy() {
 		MaxClients:                    controller.config.InproxyMaxClients,
 		LimitUpstreamBytesPerSecond:   controller.config.InproxyLimitUpstreamBytesPerSecond,
 		LimitDownstreamBytesPerSecond: controller.config.InproxyLimitDownstreamBytesPerSecond,
-
-		OperatorMessageHandler: func(messageJSON string) {
-			NoticeInproxyOperatorMessage(messageJSON)
-		},
-
-		ActivityUpdater: activityUpdater,
+		MustUpgrade:                   controller.config.OnInproxyMustUpgrade,
+		ActivityUpdater:               activityUpdater,
 	}
 
 	proxy, err := inproxy.NewProxy(config)

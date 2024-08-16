@@ -114,11 +114,11 @@ type ProxyConfig struct {
 	// controlled by tactics parameters.
 	HandleTacticsPayload func(networkID string, tacticsPayload []byte) bool
 
-	// OperatorMessageHandler is a callback that is invoked with any user
-	// message JSON object that is sent to the Proxy from the Broker. This
-	// facility may be used to alert proxy operators when required. The JSON
-	// object schema is arbitrary and not defined here.
-	OperatorMessageHandler func(messageJSON string)
+	// MustUpgrade is a callback that is invoked when a MustUpgrade flag is
+	// received from the broker. When MustUpgrade is received, the proxy
+	// should be stopped and the user should be prompted to upgrade before
+	// restarting the proxy.
+	MustUpgrade func()
 
 	// MaxClients is the maximum number of clients that are allowed to connect
 	// to the proxy.
@@ -571,11 +571,12 @@ func (p *Proxy) proxyOneClient(
 	// ProxyAnnounce applies an additional request timeout to facilitate
 	// long-polling.
 	announceStartTime := time.Now()
+	personalCompartmentIDs := brokerCoordinator.PersonalCompartmentIDs()
 	announceResponse, err := brokerClient.ProxyAnnounce(
 		ctx,
 		requestDelay,
 		&ProxyAnnounceRequest{
-			PersonalCompartmentIDs: brokerCoordinator.PersonalCompartmentIDs(),
+			PersonalCompartmentIDs: personalCompartmentIDs,
 			Metrics:                metrics,
 		})
 
@@ -586,10 +587,6 @@ func (p *Proxy) proxyOneClient(
 
 	if err != nil {
 		return backOff, errors.Trace(err)
-	}
-
-	if announceResponse.OperatorMessageJSON != "" {
-		p.config.OperatorMessageHandler(announceResponse.OperatorMessageJSON)
 	}
 
 	if len(announceResponse.TacticsPayload) > 0 {
@@ -613,8 +610,8 @@ func (p *Proxy) proxyOneClient(
 		signalAnnounceDone()
 	}
 
-	// Trigger back-off back off when rate/entry limited; no back-off for
-	// no-match.
+	// Trigger back-off back off when rate/entry limited or must upgrade; no
+	// back-off for no-match.
 
 	if announceResponse.Limited {
 
@@ -625,6 +622,14 @@ func (p *Proxy) proxyOneClient(
 
 		return backOff, errors.TraceNew("no match")
 
+	} else if announceResponse.MustUpgrade {
+
+		if p.config.MustUpgrade != nil {
+			p.config.MustUpgrade()
+		}
+
+		backOff = true
+		return backOff, errors.TraceNew("must upgrade")
 	}
 
 	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
@@ -662,6 +667,10 @@ func (p *Proxy) proxyOneClient(
 		ctx, common.ValueOrDefault(webRTCCoordinator.WebRTCAnswerTimeout(), proxyWebRTCAnswerTimeout))
 	defer webRTCAnswerCancelFunc()
 
+	// In personal pairing mode, RFC 1918/4193 private IP addresses are
+	// included in SDPs.
+	hasPersonalCompartmentIDs := len(personalCompartmentIDs) > 0
+
 	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnWithAnswer(
 		webRTCAnswerCtx,
 		&webRTCConfig{
@@ -672,7 +681,8 @@ func (p *Proxy) proxyOneClient(
 			DoDTLSRandomization:         announceResponse.DoDTLSRandomization,
 			TrafficShapingParameters:    announceResponse.TrafficShapingParameters,
 		},
-		announceResponse.ClientOfferSDP)
+		announceResponse.ClientOfferSDP,
+		hasPersonalCompartmentIDs)
 	var webRTCRequestErr string
 	if webRTCErr != nil {
 		webRTCErr = errors.Trace(webRTCErr)

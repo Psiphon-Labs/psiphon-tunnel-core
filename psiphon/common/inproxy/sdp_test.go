@@ -23,6 +23,7 @@ package inproxy
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -48,13 +49,19 @@ func runTestProcessSDP() error {
 		},
 	}
 
+	hasPersonalCompartmentIDs := false
+	errorOnNoCandidates := true
+	disableIPv6Candidates := false
+	allowPrivateIPAddressCandidates := false
+	filterPrivateIPAddressCandidates := false
+
 	// Create a valid, base SDP, including private network (bogon) candidates.
 
 	SetAllowBogonWebRTCConnections(true)
 	defer SetAllowBogonWebRTCConnections(false)
 
 	conn, webRTCSDP, metrics, err := newWebRTCConnWithOffer(
-		context.Background(), config)
+		context.Background(), config, hasPersonalCompartmentIDs)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -64,9 +71,15 @@ func runTestProcessSDP() error {
 
 	// Test disallow IPv6
 
+	disableIPv6Candidates = true
+
 	if metrics.hasIPv6 {
 		preparedSDP, metrics, err := prepareSDPAddresses(
-			SDP, true, "", true)
+			SDP,
+			errorOnNoCandidates,
+			"",
+			disableIPv6Candidates,
+			allowPrivateIPAddressCandidates)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -87,6 +100,8 @@ func runTestProcessSDP() error {
 		}
 	}
 
+	disableIPv6Candidates = false
+
 	// Test filter unexpected GeoIP
 
 	// This IP must not be a bogon; this address is not dialed.
@@ -101,13 +116,22 @@ func runTestProcessSDP() error {
 
 	// Add the testIP as a port mapping candidate.
 	preparedSDP, metrics, err := prepareSDPAddresses(
-		SDP, true, net.JoinHostPort(testIP, "80"), false)
+		SDP,
+		errorOnNoCandidates,
+		net.JoinHostPort(testIP, "80"),
+		disableIPv6Candidates,
+		allowPrivateIPAddressCandidates)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	filteredSDP, metrics, err := filterSDPAddresses(
-		preparedSDP, true, lookupGeoIP, expectedGeoIP)
+		preparedSDP,
+		errorOnNoCandidates,
+		lookupGeoIP,
+		expectedGeoIP,
+		allowPrivateIPAddressCandidates,
+		filterPrivateIPAddressCandidates)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -131,9 +155,16 @@ func runTestProcessSDP() error {
 
 	SetAllowBogonWebRTCConnections(false)
 
-	// Allow no candidates (errorOnNoCandidates = false)
+	// Allow no candidates
+	errorOnNoCandidates = false
+
 	filteredSDP, metrics, err = filterSDPAddresses(
-		SDP, false, nil, common.GeoIPData{})
+		SDP,
+		errorOnNoCandidates,
+		nil,
+		common.GeoIPData{},
+		allowPrivateIPAddressCandidates,
+		filterPrivateIPAddressCandidates)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -149,7 +180,53 @@ func runTestProcessSDP() error {
 		return errors.TraceNew("unexpected filteredICECandidates")
 	}
 
-	if len(filteredSDP) >= len(preparedSDP) {
+	if len(filteredSDP) >= len(SDP) {
+		return errors.TraceNew("unexpected SDP length")
+	}
+
+	errorOnNoCandidates = true
+
+	// Test private IP addresses
+
+	SetAllowBogonWebRTCConnections(false)
+
+	hasPersonalCompartmentIDs = true
+	allowPrivateIPAddressCandidates = true
+	filterPrivateIPAddressCandidates = true
+
+	conn, webRTCSDP, metrics, err = newWebRTCConnWithOffer(
+		context.Background(), config, hasPersonalCompartmentIDs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer conn.Close()
+
+	SDP = []byte(webRTCSDP.SDP)
+
+	hasPrivateIP := metrics.hasPrivateIP
+
+	if !hasPrivateIP {
+		// Test may run on host without RFC 1918/4193 private IP address
+		fmt.Printf("No private IP address\n")
+	}
+
+	// Filter should retain any private IP address(es)
+	filteredSDP, metrics, err = filterSDPAddresses(
+		SDP,
+		errorOnNoCandidates,
+		nil,
+		common.GeoIPData{},
+		allowPrivateIPAddressCandidates,
+		filterPrivateIPAddressCandidates)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if hasPrivateIP != metrics.hasPrivateIP {
+		return errors.TraceNew("unexpected metrics.hasPrivateIP")
+	}
+
+	if len(filteredSDP) != len(SDP) {
 		return errors.TraceNew("unexpected SDP length")
 	}
 

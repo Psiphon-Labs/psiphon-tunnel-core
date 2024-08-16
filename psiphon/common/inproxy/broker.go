@@ -771,6 +771,9 @@ func (b *Broker) handleClientOffer(
 	// processSDPAddresses), so all invalid candidates are removed and the
 	// remaining SDP is used. Filtered candidate information is logged in
 	// logFields.
+	//
+	// In personal pairing mode, RFC 1918/4193 private IP addresses are
+	// permitted in exchanged SDPs and not filtered out.
 
 	var filteredSDP []byte
 	filteredSDP, logFields, err = offerRequest.ValidateAndGetLogFields(
@@ -1023,13 +1026,23 @@ func (b *Broker) handleProxyAnswer(
 	// processSDPAddresses), so all invalid candidates are removed and the
 	// remaining SDP is used. Filtered candidate information is logged in
 	// logFields.
+	//
+	// In personal pairing mode, RFC 1918/4193 private IP addresses are
+	// permitted in exchanged SDPs and not filtered out.
+
+	hasPersonalCompartmentIDs, err := b.matcher.AnnouncementHasPersonalCompartmentIDs(
+		initiatorID, answerRequest.ConnectionID)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	var filteredSDP []byte
 	filteredSDP, logFields, err = answerRequest.ValidateAndGetLogFields(
 		b.config.LookupGeoIP,
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,
-		geoIPData)
+		geoIPData,
+		hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

@@ -1097,12 +1097,16 @@ func NoticeSkipServerEntry(format string, args ...interface{}) {
 		"SkipServerEntry", 0, "reason", reason)
 }
 
-// NoticeInproxyOperatorMessage emits a message to be displayed to the proxy
-// operator.
-func NoticeInproxyOperatorMessage(messageJSON string) {
+// NoticeInproxyMustUpgrade reports that an in-proxy component requires an app
+// upgrade. Currently this includes running a proxy; and running a client in
+// personal pairing mode. The receiver should alert the user to upgrade the
+// app.
+//
+// There is at most one InproxyMustUpgrade notice emitted per controller run,
+// and an InproxyMustUpgrade notice is followed by a tunnel-core shutdown.
+func NoticeInproxyMustUpgrade() {
 	singletonNoticeLogger.outputNotice(
-		"InproxyOperatorMessage", 0,
-		"message", messageJSON)
+		"InproxyMustUpgrade", 0)
 }
 
 // NoticeInproxyProxyActivity reports proxy usage statistics. The stats are

@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -1072,6 +1073,10 @@ type Config struct {
 
 	tacticsAppliedReceiversMutex sync.Mutex
 	tacticsAppliedReceivers      []TacticsAppliedReceiver
+
+	signalComponentFailure atomic.Value
+
+	inproxyMustUpgradePosted int32
 }
 
 // TacticsAppliedReceiver specifies the interface for a component that is
@@ -1112,6 +1117,8 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	config.loadTimestamp = common.TruncateTimestampToHour(
 		common.GetCurrentTimestamp())
+
+	config.signalComponentFailure.Store(func() {})
 
 	return &config, nil
 }
@@ -1400,7 +1407,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
-	if !config.DisableTunnels && config.InproxyEnableProxy &&
+	if !config.DisableTunnels &&
+		config.InproxyEnableProxy &&
+		!GetAllowOverlappingPersonalCompartmentIDs() &&
 		common.ContainsAny(
 			config.InproxyProxyPersonalCompartmentIDs,
 			config.InproxyClientPersonalCompartmentIDs) {
@@ -1782,11 +1791,34 @@ func (config *Config) GetNetworkID() string {
 	return config.networkIDGetter.GetNetworkID()
 }
 
+func (config *Config) SetSignalComponentFailure(signalComponentFailure func()) {
+	config.signalComponentFailure.Store(signalComponentFailure)
+}
+
 // IsInproxyPersonalPairingMode indicates that the client is in in-proxy
 // personal pairing mode, where connections are made only through in-proxy
 // proxies with corresponding personal compartment IDs.
 func (config *Config) IsInproxyPersonalPairingMode() bool {
 	return len(config.InproxyClientPersonalCompartmentIDs) > 0
+}
+
+// OnInproxyMustUpgrade is invoked when the in-proxy broker returns the
+// MustUpgrade response. When either running a proxy, or when running a
+// client in personal-pairing mode -- two states that require in-proxy
+// functionality -- onInproxyMustUpgrade initiates a shutdown after emitting
+// the InproxyMustUpgrade notice.
+func (config *Config) OnInproxyMustUpgrade() {
+
+	// TODO: check if LimitTunnelProtocols is set to allow only INPROXY tunnel
+	// protocols; this is another case where in-proxy functionality is
+	// required.
+
+	if config.InproxyEnableProxy || config.IsInproxyPersonalPairingMode() {
+		if atomic.CompareAndSwapInt32(&config.inproxyMustUpgradePosted, 0, 1) {
+			NoticeInproxyMustUpgrade()
+		}
+		config.signalComponentFailure.Load().(func())()
+	}
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {

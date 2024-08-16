@@ -56,8 +56,8 @@ const (
 // The client and proxy must supply matching personal or common compartment
 // IDs. Common compartments are managed by Psiphon and can be obtained via a
 // tactics parameter or via an OSL embedding. Each proxy announcement or
-// client offer may specify only one of either common or personal compartment
-// IDs.
+// client offer may specify only one compartment ID type, either common or
+// personal.
 //
 // Matching prefers to pair proxies and clients in a way that maximizes total
 // possible matches. For a client or proxy with less-limited NAT traversal, a
@@ -159,12 +159,6 @@ func (p *MatchProperties) IsPreferredNATMatch(
 
 	return p.EffectiveNATType().IsPreferredMatch(
 		peerMatchProperties.EffectiveNATType())
-}
-
-// IsPersonalCompartmentalized indicates whether the candidate has personal
-// compartment IDs.
-func (p *MatchProperties) IsPersonalCompartmentalized() bool {
-	return len(p.PersonalCompartmentIDs) > 0
 }
 
 // MatchAnnouncement is a proxy announcement to be queued for matching.
@@ -424,8 +418,9 @@ func (m *Matcher) Announce(
 	proxyAnnouncement *MatchAnnouncement) (*MatchOffer, *MatchMetrics, error) {
 
 	// An announcement must specify exactly one compartment ID, of one type,
-	// common or personal. This is currently a limitation of the multi-queue
-	// implementation; see comment in announcementMultiQueue.enqueue.
+	// common or personal. The limit of one is currently a limitation of the
+	// multi-queue implementation; see comment in
+	// announcementMultiQueue.enqueue.
 	compartmentIDs := proxyAnnouncement.Properties.CommonCompartmentIDs
 	if len(compartmentIDs) == 0 {
 		compartmentIDs = proxyAnnouncement.Properties.PersonalCompartmentIDs
@@ -543,6 +538,31 @@ func (m *Matcher) Offer(
 		nil
 }
 
+// AnnouncementHasPersonalCompartmentIDs looks for a pending answer for an
+// announcement identified by the specified proxy ID and connection ID and
+// returns whether the announcement has personal compartment IDs, indicating
+// personal pairing mode.
+//
+// If no pending answer is found, an error is returned.
+func (m *Matcher) AnnouncementHasPersonalCompartmentIDs(
+	proxyID ID, connectionID ID) (bool, error) {
+
+	key := m.pendingAnswerKey(proxyID, connectionID)
+	pendingAnswerValue, ok := m.pendingAnswers.Get(key)
+	if !ok {
+		// The input IDs don't correspond to a pending answer, or the client
+		// is no longer awaiting the response.
+		return false, errors.TraceNew("no pending answer")
+	}
+
+	pendingAnswer := pendingAnswerValue.(*pendingAnswer)
+
+	hasPersonalCompartmentIDs := len(
+		pendingAnswer.announcement.Properties.PersonalCompartmentIDs) > 0
+
+	return hasPersonalCompartmentIDs, nil
+}
+
 // Answer delivers an answer from the proxy for a previously matched offer.
 // The ProxyID and ConnectionID must correspond to the original announcement.
 // The caller must not mutate the answer after calling Answer. Answer does
@@ -556,8 +576,9 @@ func (m *Matcher) Answer(
 	key := m.pendingAnswerKey(proxyAnswer.ProxyID, proxyAnswer.ConnectionID)
 	pendingAnswerValue, ok := m.pendingAnswers.Get(key)
 	if !ok {
-		// The client is no longer awaiting the response.
-		return errors.TraceNew("no client")
+		// The input IDs don't correspond to a pending answer, or the client
+		// is no longer awaiting the response.
+		return errors.TraceNew("no pending answer")
 	}
 
 	m.pendingAnswers.Delete(key)
