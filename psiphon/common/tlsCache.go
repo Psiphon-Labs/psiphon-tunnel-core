@@ -34,8 +34,9 @@ type TLSClientSessionCacheWrapper struct {
 	sessionKey string
 }
 
-// WrapClientSessionCache wraps a tls.ClientSessionCache with a hard-coded key
-// derived from the ipAddress and dialPortNumber.
+// WrapClientSessionCache wraps a tls.ClientSessionCache with an alternative
+// key, ignoring the SNI-based key that crypto/tls passes to Put/Get, which
+// may be incompatible with SNI obfuscation transforms.
 func WrapClientSessionCache(
 	cache tls.ClientSessionCache,
 	hardCodedSessionKey string,
@@ -75,8 +76,9 @@ type UtlsClientSessionCacheWrapper struct {
 	sessionKey string
 }
 
-// WrapUtlsClientSessionCache wraps a utls.ClientSessionCache with a hard-coded key
-// derived from the ipAddress and dialPortNumber.
+// WrapUtlsClientSessionCache wraps a utls.ClientSessionCache with an alternative
+// key, ignoring the SNI-based key that crypto/tls passes to Put/Get, which
+// may be incompatible with SNI obfuscation transforms.
 func WrapUtlsClientSessionCache(
 	cache utls.ClientSessionCache,
 	hardCodedSessionKey string,

@@ -93,8 +93,8 @@ type Controller struct {
 	staggerMutex                            sync.Mutex
 	resolver                                *resolver.Resolver
 	steeringIPCache                         *lrucache.Cache
-	tlsClientSessionCache                   tls.ClientSessionCache
-	utlsClientSessionCache                  utls.ClientSessionCache
+	tlsClientSessionCache                   utls.ClientSessionCache
+	quicTLSClientSessionCache               tls.ClientSessionCache
 	inproxyProxyBrokerClientManager         *InproxyBrokerClientManager
 	inproxyClientBrokerClientManager        *InproxyBrokerClientManager
 	inproxyNATStateManager                  *InproxyNATStateManager
@@ -170,8 +170,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 			1*time.Minute,
 			steeringIPCacheMaxEntries),
 
-		tlsClientSessionCache:  tls.NewLRUClientSessionCache(0),
-		utlsClientSessionCache: utls.NewLRUClientSessionCache(0),
+		tlsClientSessionCache:     utls.NewLRUClientSessionCache(0),
+		quicTLSClientSessionCache: tls.NewLRUClientSessionCache(0),
 	}
 
 	// Initialize untunneledDialConfig, used by untunneled dials including
@@ -2344,8 +2344,8 @@ loop:
 		dialParams, err := MakeDialParameters(
 			controller.config,
 			controller.steeringIPCache,
+			controller.quicTLSClientSessionCache,
 			controller.tlsClientSessionCache,
-			controller.utlsClientSessionCache,
 			upstreamProxyErrorCallback,
 			canReplay,
 			selectProtocol,
