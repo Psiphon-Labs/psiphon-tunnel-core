@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/bpf"
 )
 
@@ -728,8 +729,8 @@ func MakeUntunneledHTTPClient(
 		SkipVerify:                    skipVerify,
 		DisableSystemRootCAs:          disableSystemRootCAs,
 		TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
+		ClientSessionCache:            utls.NewLRUClientSessionCache(0),
 	}
-	tlsConfig.EnableClientSessionCache()
 
 	tlsDialer := NewCustomTLSDialer(tlsConfig)
 

@@ -187,15 +187,6 @@ type CustomTLSConfig struct {
 	ClientSessionCache utls.ClientSessionCache
 }
 
-// EnableClientSessionCache initializes a cache to use to persist session
-// tickets, enabling TLS session resumability across multiple
-// CustomTLSDial calls or dialers using the same CustomTLSConfig.
-func (config *CustomTLSConfig) EnableClientSessionCache() {
-	if config.ClientSessionCache == nil {
-		config.ClientSessionCache = utls.NewLRUClientSessionCache(0)
-	}
-}
-
 // NewCustomTLSDialer creates a new dialer based on CustomTLSDial.
 func NewCustomTLSDialer(config *CustomTLSConfig) common.Dialer {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
