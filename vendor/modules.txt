@@ -44,6 +44,14 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
+# github.com/Psiphon-Labs/utls v1.1.1-0.20240818221737-55b85574734b
+## explicit; go 1.21
+github.com/Psiphon-Labs/utls
+github.com/Psiphon-Labs/utls/dicttls
+github.com/Psiphon-Labs/utls/internal/boring
+github.com/Psiphon-Labs/utls/internal/helper
+github.com/Psiphon-Labs/utls/internal/quicvarint
+github.com/Psiphon-Labs/utls/internal/quicvarint/protocol
 # github.com/alexbrainman/sspi v0.0.0-20210105120005-909beea2cc74
 ## explicit; go 1.13
 github.com/alexbrainman/sspi
@@ -155,6 +163,9 @@ github.com/fxamacker/cbor/v2
 # github.com/gammazero/deque v0.2.1
 ## explicit; go 1.18
 github.com/gammazero/deque
+# github.com/gaukas/godicttls v0.0.4
+## explicit; go 1.19
+github.com/gaukas/godicttls
 # github.com/go-ole/go-ole v1.2.6
 ## explicit; go 1.12
 github.com/go-ole/go-ole
@@ -417,14 +428,10 @@ github.com/refraction-networking/obfs4/common/replayfilter
 github.com/refraction-networking/obfs4/transports/base
 github.com/refraction-networking/obfs4/transports/obfs4
 github.com/refraction-networking/obfs4/transports/obfs4/framing
-# github.com/refraction-networking/utls v1.6.8-0.20240720032424-23de245734c7 => github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17
-## explicit; go 1.21
+# github.com/refraction-networking/utls v1.3.3
+## explicit; go 1.19
 github.com/refraction-networking/utls
-github.com/refraction-networking/utls/dicttls
-github.com/refraction-networking/utls/internal/boring
 github.com/refraction-networking/utls/internal/helper
-github.com/refraction-networking/utls/internal/quicvarint
-github.com/refraction-networking/utls/internal/quicvarint/protocol
 # github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
 ## explicit
 github.com/ryanuber/go-glob
@@ -635,4 +642,3 @@ tailscale.com/version/distro
 # github.com/pion/dtls/v2 => ./replace/dtls
 # github.com/pion/ice/v2 => ./replace/ice
 # github.com/pion/webrtc/v3 => ./replace/webrtc
-# github.com/refraction-networking/utls => github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17

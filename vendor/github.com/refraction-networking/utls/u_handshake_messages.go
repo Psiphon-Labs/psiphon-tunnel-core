@@ -56,7 +56,6 @@ func (m *utlsCompressedCertificateMsg) unmarshal(data []byte) bool {
 type utlsEncryptedExtensionsMsgExtraFields struct {
 	hasApplicationSettings bool
 	applicationSettings    []byte
-	echRetryConfigs        []ECHConfig
 	customExtension        []byte
 }
 
@@ -65,12 +64,6 @@ func (m *encryptedExtensionsMsg) utlsUnmarshal(extension uint16, extData cryptob
 	case utlsExtensionApplicationSettings:
 		m.utls.hasApplicationSettings = true
 		m.utls.applicationSettings = []byte(extData)
-	case utlsExtensionECH:
-		var err error
-		m.utls.echRetryConfigs, err = UnmarshalECHConfigs([]byte(extData))
-		if err != nil {
-			return false
-		}
 	}
 	return true // success/unknown extension
 }

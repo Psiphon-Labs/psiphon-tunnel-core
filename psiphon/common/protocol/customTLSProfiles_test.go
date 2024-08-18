@@ -25,7 +25,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 func TestCustomTLSProfiles(t *testing.T) {

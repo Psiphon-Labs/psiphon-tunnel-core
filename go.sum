@@ -22,8 +22,8 @@ github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240812172553-e7a4dbd0bf2b h1:OJBiXS
 github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240812172553-e7a4dbd0bf2b/go.mod h1:AaKKoshr8RI1LZTheeNDtNuZ39qNVPWVK4uir2c2XIs=
 github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536 h1:pM5ex1QufkHV8lDR6Tc1Crk1bW5lYZjrFIJGZNBWE9k=
 github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536/go.mod h1:2MTiPsgoOqWs3Bo6Xr3ElMBX6zzfjd3YkDFpQJLwHdQ=
-github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17 h1:7XPQc6Izr5cMOWdggqFxXIyNQmzabPre5kwXHhV3pl4=
-github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17/go.mod h1:BC3O4vQzye5hqpmDTWUqi4P5DDhzJfkV1tdqtawQIH0=
+github.com/Psiphon-Labs/utls v1.1.1-0.20240818221737-55b85574734b h1:NU9LaY5CPpffrIhsBQN2vW0EqnTSQt6VMZSaho53q9A=
+github.com/Psiphon-Labs/utls v1.1.1-0.20240818221737-55b85574734b/go.mod h1:dxmztdV9lf59cq44YY8r21m3b+xSjhg98cgZW8WK1p0=
 github.com/alexbrainman/sspi v0.0.0-20210105120005-909beea2cc74 h1:Kk6a4nehpJ3UuJRqlA3JxYxBZEqCeOmATOvrbT4p9RA=
 github.com/alexbrainman/sspi v0.0.0-20210105120005-909beea2cc74/go.mod h1:cEWa1LVoE5KvSD9ONXsZrj0z6KqySlCCNKHlLzbqAt4=
 github.com/andybalholm/brotli v1.0.6 h1:Yf9fFpf49Zrxb9NlQaluyE92/+X7UVHlhMNJN2sxfOI=
@@ -81,6 +81,8 @@ github.com/fxamacker/cbor/v2 v2.5.0 h1:oHsG0V/Q6E/wqTS2O1Cozzsy69nqCiguo5Q1a1ADi
 github.com/fxamacker/cbor/v2 v2.5.0/go.mod h1:TA1xS00nchWmaBnEIxPSE5oHLuJBAVvqrtAnWBwBCVo=
 github.com/gammazero/deque v0.2.1 h1:qSdsbG6pgp6nL7A0+K/B7s12mcCY/5l5SIUpMOl+dC0=
 github.com/gammazero/deque v0.2.1/go.mod h1:LFroj8x4cMYCukHJDbxFCkT+r9AndaJnFMuZDV34tuU=
+github.com/gaukas/godicttls v0.0.4 h1:NlRaXb3J6hAnTmWdsEKb9bcSBD6BvcIjdGdeb0zfXbk=
+github.com/gaukas/godicttls v0.0.4/go.mod h1:l6EenT4TLWgTdwslVb4sEMOCf7Bv0JAK67deKr9/NCI=
 github.com/go-logr/logr v1.2.4 h1:g01GSCwiDw2xSZfjJ2/T9M+S6pFdcNtFYsp+Y43HYDQ=
 github.com/go-logr/logr v1.2.4/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-ole/go-ole v1.2.6 h1:/Fpf6oFPoeFik9ty7siob0G6Ke8QvQEuVcuChpwXzpY=
@@ -224,6 +226,8 @@ github.com/refraction-networking/gotapdance v1.7.10 h1:vPtvuihP95SqrnnpX//KI1PTq
 github.com/refraction-networking/gotapdance v1.7.10/go.mod h1:N7Xmt+/bLv+1VctiBHtsaL6YBknW2ox5LRLzPTISMzY=
 github.com/refraction-networking/obfs4 v0.1.2 h1:J842O4fGSkd2W8ogYj0KN6gqVVY+Cpqodw9qFGL7wVU=
 github.com/refraction-networking/obfs4 v0.1.2/go.mod h1:wAl/+gWiLsrcykJA3nKJHx89f5/gXGM8UKvty7+mvbM=
+github.com/refraction-networking/utls v1.3.3 h1:f/TBLX7KBciRyFH3bwupp+CE4fzoYKCirhdRcC490sw=
+github.com/refraction-networking/utls v1.3.3/go.mod h1:DlecWW1LMlMJu+9qpzzQqdHDT/C2LAe03EdpLUz/RL8=
 github.com/rogpeppe/go-charset v0.0.0-20180617210344-2471d30d28b4/go.mod h1:qgYeAmZ5ZIpBWTGllZSQnw97Dj+woV0toclVaRGI8pc=
 github.com/rogpeppe/go-internal v1.6.1/go.mod h1:xXDCJY+GAPziupqXw64V24skbSoqbTEfhy4qGm1nDQc=
 github.com/rogpeppe/go-internal v1.9.0 h1:73kH8U+JUqXU8lRuOHeVHaa/SZPifC7BkcraZVejAe8=

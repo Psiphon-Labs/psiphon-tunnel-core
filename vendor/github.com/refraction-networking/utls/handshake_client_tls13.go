@@ -8,87 +8,43 @@ import (
 	"bytes"
 	"context"
 	"crypto"
-	"crypto/ecdh"
 	"crypto/hmac"
 	"crypto/rsa"
 	"errors"
 	"fmt"
 	"hash"
-	"log"
+	"sync/atomic"
 	"time"
-
-	"github.com/cloudflare/circl/kem"
 )
 
 // [uTLS SECTION START]
-// KeySharesParameters serves as a in-memory storage for generated keypairs by UTLS when generating
-// ClientHello. It is used to store both ecdhe and kem keypairs.
-type KeySharesParameters struct {
-	ecdhePrivKeymap map[CurveID]*ecdh.PrivateKey
-	ecdhePubKeymap  map[CurveID]*ecdh.PublicKey
+type KeySharesEcdheParameters map[CurveID]ecdheParameters
 
-	// based on cloudflare/go
-	kemPrivKeymap map[CurveID]kem.PrivateKey
-	kemPubKeymap  map[CurveID]kem.PublicKey
+func (keymap KeySharesEcdheParameters) AddEcdheParams(curveID CurveID, params ecdheParameters) {
+	keymap[curveID] = params
 }
-
-func NewKeySharesParameters() *KeySharesParameters {
-	return &KeySharesParameters{
-		ecdhePrivKeymap: make(map[CurveID]*ecdh.PrivateKey),
-		ecdhePubKeymap:  make(map[CurveID]*ecdh.PublicKey),
-
-		kemPrivKeymap: make(map[CurveID]kem.PrivateKey),
-		kemPubKeymap:  make(map[CurveID]kem.PublicKey),
-	}
-}
-
-func (ksp *KeySharesParameters) AddEcdheKeypair(curveID CurveID, ecdheKey *ecdh.PrivateKey, ecdhePubKey *ecdh.PublicKey) {
-	ksp.ecdhePrivKeymap[curveID] = ecdheKey
-	ksp.ecdhePubKeymap[curveID] = ecdhePubKey
-}
-
-func (ksp *KeySharesParameters) GetEcdheKey(curveID CurveID) (ecdheKey *ecdh.PrivateKey, ok bool) {
-	ecdheKey, ok = ksp.ecdhePrivKeymap[curveID]
+func (keymap KeySharesEcdheParameters) GetEcdheParams(curveID CurveID) (params ecdheParameters, ok bool) {
+	params, ok = keymap[curveID]
 	return
 }
-
-func (ksp *KeySharesParameters) GetEcdhePubkey(curveID CurveID) (params *ecdh.PublicKey, ok bool) {
-	params, ok = ksp.ecdhePubKeymap[curveID]
-	return
-}
-
-func (ksp *KeySharesParameters) AddKemKeypair(curveID CurveID, kemKey kem.PrivateKey, kemPubKey kem.PublicKey) {
-	if curveIdToCirclScheme(curveID) != nil { // only store for circl schemes
-		ksp.kemPrivKeymap[curveID] = kemKey
-		ksp.kemPubKeymap[curveID] = kemPubKey
-	}
-}
-
-func (ksp *KeySharesParameters) GetKemKey(curveID CurveID) (kemKey kem.PrivateKey, ok bool) {
-	kemKey, ok = ksp.kemPrivKeymap[curveID]
-	return
-}
-
-func (ksp *KeySharesParameters) GetKemPubkey(curveID CurveID) (params kem.PublicKey, ok bool) {
-	params, ok = ksp.kemPubKeymap[curveID]
+func (keymap KeySharesEcdheParameters) GetPublicEcdheParams(curveID CurveID) (params EcdheParameters, ok bool) {
+	params, ok = keymap[curveID]
 	return
 }
 
 // [uTLS SECTION END]
 
 type clientHandshakeStateTLS13 struct {
-	c               *Conn
-	ctx             context.Context
-	serverHello     *serverHelloMsg
-	hello           *clientHelloMsg
-	ecdheKey        *ecdh.PrivateKey
-	kemKey          *kemPrivateKey       // [uTLS] ported from cloudflare/go
-	keySharesParams *KeySharesParameters // [uTLS] support both ecdhe and kem
+	c                    *Conn
+	ctx                  context.Context
+	serverHello          *serverHelloMsg
+	hello                *clientHelloMsg
+	ecdheParams          ecdheParameters
+	keySharesEcdheParams KeySharesEcdheParameters // [uTLS]
 
-	session       *SessionState
-	earlySecret   []byte
-	binderKey     []byte
-	selectedGroup CurveID // [uTLS] ported from cloudflare/go
+	session     *ClientSessionState
+	earlySecret []byte
+	binderKey   []byte
 
 	certReq       *certificateRequestMsgTLS13
 	usingPSK      bool
@@ -101,7 +57,7 @@ type clientHandshakeStateTLS13 struct {
 	uconn *UConn // [uTLS]
 }
 
-// handshake requires hs.c, hs.hello, hs.serverHello, hs.ecdheKey, and,
+// handshake requires hs.c, hs.hello, hs.serverHello, hs.ecdheParams, and,
 // optionally, hs.session, hs.earlySecret and hs.binderKey to be set.
 func (hs *clientHandshakeStateTLS13) handshake() error {
 	c := hs.c
@@ -118,23 +74,15 @@ func (hs *clientHandshakeStateTLS13) handshake() error {
 	}
 
 	// [uTLS SECTION START]
+
 	// set echdheParams to what we received from server
-	if ecdheKey, ok := hs.keySharesParams.GetEcdheKey(hs.serverHello.serverShare.group); ok {
-		hs.ecdheKey = ecdheKey
-		hs.kemKey = nil // unset kemKey if any
-	}
-	// set kemParams to what we received from server
-	if kemKey, ok := hs.keySharesParams.GetKemKey(hs.serverHello.serverShare.group); ok {
-		hs.kemKey = &kemPrivateKey{
-			secretKey: kemKey,
-			curveID:   hs.serverHello.serverShare.group,
-		}
-		hs.ecdheKey = nil // unset ecdheKey if any
+	if ecdheParams, ok := hs.keySharesEcdheParams.GetEcdheParams(hs.serverHello.serverShare.group); ok {
+		hs.ecdheParams = ecdheParams
 	}
 	// [uTLS SECTION END]
 
 	// Consistency check on the presence of a keyShare and its parameters.
-	if (hs.ecdheKey == nil && hs.kemKey == nil) || len(hs.hello.keyShares) < 1 { // [uTLS]
+	if hs.ecdheParams == nil || len(hs.hello.keyShares) < 1 { // [uTLS]
 		// keyshares "< 1" instead of "!= 1", as uTLS may send multiple
 		return c.sendAlert(alertInternalError)
 	}
@@ -196,7 +144,7 @@ func (hs *clientHandshakeStateTLS13) handshake() error {
 		return err
 	}
 
-	c.isHandshakeComplete.Store(true)
+	atomic.StoreUint32(&c.handshakeStatus, 1)
 
 	return nil
 }
@@ -223,7 +171,6 @@ func (hs *clientHandshakeStateTLS13) checkServerHelloOrHRR() error {
 
 	if hs.serverHello.ocspStapling ||
 		hs.serverHello.ticketSupported ||
-		hs.serverHello.extendedMasterSecret ||
 		hs.serverHello.secureRenegotiationSupported ||
 		len(hs.serverHello.secureRenegotiation) != 0 ||
 		len(hs.serverHello.alpnProtocol) != 0 ||
@@ -260,9 +207,6 @@ func (hs *clientHandshakeStateTLS13) checkServerHelloOrHRR() error {
 // sendDummyChangeCipherSpec sends a ChangeCipherSpec record for compatibility
 // with middleboxes that didn't implement TLS correctly. See RFC 8446, Appendix D.4.
 func (hs *clientHandshakeStateTLS13) sendDummyChangeCipherSpec() error {
-	if hs.c.quic != nil {
-		return nil
-	}
 	if hs.sentDummyCCS {
 		return nil
 	}
@@ -299,6 +243,18 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 		hs.hello.cookie = hs.serverHello.cookie
 	}
 
+	// The only HelloRetryRequest extensions we support are key_share and
+	// cookie, and clients must abort the handshake if the HRR would not result
+	// in any change in the ClientHello.
+	if hs.serverHello.selectedGroup == 0 && hs.serverHello.cookie == nil {
+		c.sendAlert(alertIllegalParameter)
+		return errors.New("tls: server sent an unnecessary HelloRetryRequest message")
+	}
+
+	if hs.serverHello.cookie != nil {
+		hs.hello.cookie = hs.serverHello.cookie
+	}
+
 	if hs.serverHello.serverShare.group != 0 {
 		c.sendAlert(alertDecodeError)
 		return errors.New("tls: received malformed key_share extension")
@@ -319,55 +275,21 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 			c.sendAlert(alertIllegalParameter)
 			return errors.New("tls: server selected unsupported group")
 		}
-
-		// [UTLS SECTION BEGINS]
-		// ported from cloudflare/go, slightly modified to maintain compatibility with crypto/tls upstream
-		if hs.ecdheKey != nil {
-			if sentID, _ := curveIDForCurve(hs.ecdheKey.Curve()); sentID == curveID {
-				c.sendAlert(alertIllegalParameter)
-				return errors.New("tls: server sent an unnecessary HelloRetryRequest key_share")
-			}
-		} else if hs.kemKey != nil {
-			if clientKeySharePrivateCurveID(hs.kemKey) == curveID {
-				c.sendAlert(alertIllegalParameter)
-				return errors.New("tls: server sent an unnecessary HelloRetryRequest key_share")
-			}
-		} else {
+		if hs.ecdheParams.CurveID() == curveID {
+			c.sendAlert(alertIllegalParameter)
+			return errors.New("tls: server sent an unnecessary HelloRetryRequest key_share")
+		}
+		if _, ok := curveForCurveID(curveID); curveID != X25519 && !ok {
 			c.sendAlert(alertInternalError)
-			return errors.New("tls: ecdheKey and kemKey are both nil")
+			return errors.New("tls: CurvePreferences includes unsupported curve")
 		}
-
-		if scheme := curveIdToCirclScheme(curveID); scheme != nil {
-			pk, sk, err := generateKemKeyPair(scheme, curveID, c.config.rand())
-			if err != nil {
-				c.sendAlert(alertInternalError)
-				return fmt.Errorf("HRR generateKemKeyPair %s: %w",
-					scheme.Name(), err)
-			}
-			packedPk, err := pk.MarshalBinary()
-			if err != nil {
-				c.sendAlert(alertInternalError)
-				return fmt.Errorf("HRR pack circl public key %s: %w",
-					scheme.Name(), err)
-			}
-			hs.kemKey = sk
-			hs.ecdheKey = nil // unset ecdheKey if any
-			hs.hello.keyShares = []keyShare{{group: curveID, data: packedPk}}
-		} else {
-			if _, ok := curveForCurveID(curveID); !ok {
-				c.sendAlert(alertInternalError)
-				return errors.New("tls: CurvePreferences includes unsupported curve")
-			}
-			key, err := generateECDHEKey(c.config.rand(), curveID)
-			if err != nil {
-				c.sendAlert(alertInternalError)
-				return err
-			}
-			hs.ecdheKey = key
-			hs.kemKey = nil // unset kemKey if any
-			hs.hello.keyShares = []keyShare{{group: curveID, data: key.PublicKey().Bytes()}}
+		params, err := generateECDHEParameters(c.config.rand(), curveID)
+		if err != nil {
+			c.sendAlert(alertInternalError)
+			return err
 		}
-		// [UTLS SECTION ENDS]
+		hs.ecdheParams = params
+		hs.hello.keyShares = []keyShare{{group: curveID, data: params.PublicKey()}}
 	}
 
 	hs.hello.raw = nil
@@ -378,13 +300,13 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 		}
 		if pskSuite.hash == hs.suite.hash {
 			// Update binders and obfuscated_ticket_age.
-			ticketAge := c.config.time().Sub(time.Unix(int64(hs.session.createdAt), 0))
-			hs.hello.pskIdentities[0].obfuscatedTicketAge = uint32(ticketAge/time.Millisecond) + hs.session.ageAdd
+			ticketAge := uint32(c.config.time().Sub(hs.session.receivedAt) / time.Millisecond)
+			hs.hello.pskIdentities[0].obfuscatedTicketAge = ticketAge + hs.session.ageAdd
 
 			transcript := hs.suite.hash.New()
 			transcript.Write([]byte{typeMessageHash, 0, 0, uint8(len(chHash))})
 			transcript.Write(chHash)
-			if err := transcriptMsg(hs.serverHello, transcript); err != nil {
+			if err := transcriptMsg(hs.serverHello, hs.transcript); err != nil {
 				return err
 			}
 			helloBytes, err := hs.hello.marshalWithoutBinders()
@@ -411,6 +333,11 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 	// and utlsExtensionPadding are supposed to change
 	if hs.uconn != nil {
 		if hs.uconn.ClientHelloID != HelloGolang {
+			if len(hs.hello.pskIdentities) > 0 {
+				// TODO: wait for someone who cares about PSK to implement
+				return errors.New("uTLS does not support reprocessing of PSK key triggered by HelloRetryRequest")
+			}
+
 			keyShareExtFound := false
 			for _, ext := range hs.uconn.Extensions {
 				// new ks seems to be generated either way
@@ -455,30 +382,10 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 			if err := hs.uconn.MarshalClientHello(); err != nil {
 				return err
 			}
-
-			if len(hs.hello.pskIdentities) > 0 {
-				for _, ext := range hs.uconn.Extensions {
-					if psk, ok := ext.(PreSharedKeyExtension); ok {
-						if err := psk.UpdateOnHRR(chHash, hs, c.config.time()); err != nil {
-							hs.uconn.HandshakeState.Hello.PskIdentities = nil
-							hs.uconn.HandshakeState.Hello.PskBinders = nil
-							log.Printf("[Error] PreSharedKeyExtension.UpdateOnHRR failed: %v", err)
-						} else {
-							psk.PatchBuiltHello(hs.uconn.HandshakeState.Hello)
-						}
-						break
-					}
-				}
-			}
-
 			hs.hello.raw = hs.uconn.HandshakeState.Hello.Raw
 		}
 	}
 	// [uTLS SECTION ENDS]
-	if hs.hello.earlyData {
-		hs.hello.earlyData = false
-		c.quicRejectedEarlyData()
-	}
 
 	if _, err := hs.c.writeHandshakeRecord(hs.hello, hs.transcript); err != nil {
 		return err
@@ -526,22 +433,10 @@ func (hs *clientHandshakeStateTLS13) processServerHello() error {
 		c.sendAlert(alertIllegalParameter)
 		return errors.New("tls: server did not send a key share")
 	}
-
-	// [UTLS SECTION BEGINS]
-	var supportedGroupCompatible bool
-	if hs.ecdheKey != nil { // if we did send ECDHE KeyShare
-		if sentID, _ := curveIDForCurve(hs.ecdheKey.Curve()); hs.serverHello.serverShare.group == sentID { // and server selected ECDHE KeyShare
-			supportedGroupCompatible = true
-		}
-	}
-	if hs.kemKey != nil && clientKeySharePrivateCurveID(hs.kemKey) == hs.serverHello.serverShare.group { // we did send KEM KeyShare and server selected KEM KeyShare
-		supportedGroupCompatible = true
-	}
-	if !supportedGroupCompatible { // none matched
+	if hs.serverHello.serverShare.group != hs.ecdheParams.CurveID() {
 		c.sendAlert(alertIllegalParameter)
 		return errors.New("tls: server selected unsupported group")
 	}
-	// [UTLS SECTION ENDS]
 
 	if !hs.serverHello.selectedIdentityPresent {
 		return nil
@@ -566,8 +461,7 @@ func (hs *clientHandshakeStateTLS13) processServerHello() error {
 
 	hs.usingPSK = true
 	c.didResume = true
-	c.peerCertificates = hs.session.peerCertificates
-	c.activeCertHandles = hs.session.activeCertHandles
+	c.peerCertificates = hs.session.serverCertificates
 	c.verifiedChains = hs.session.verifiedChains
 	c.ocspResponse = hs.session.ocspResponse
 	c.scts = hs.session.scts
@@ -577,38 +471,11 @@ func (hs *clientHandshakeStateTLS13) processServerHello() error {
 func (hs *clientHandshakeStateTLS13) establishHandshakeKeys() error {
 	c := hs.c
 
-	// [UTLS SECTION BEGINS]
-	// ported from cloudflare/go, slightly modified to maintain compatibility with crypto/tls upstream
-	var sharedKey []byte
-	var err error
-
-	if hs.ecdheKey != nil {
-		if ecdheCurveID, _ := curveIDForCurve(hs.ecdheKey.Curve()); ecdheCurveID == hs.serverHello.serverShare.group {
-			peerKey, err := hs.ecdheKey.Curve().NewPublicKey(hs.serverHello.serverShare.data)
-			if err != nil {
-				c.sendAlert(alertIllegalParameter)
-				return errors.New("tls: invalid server key share")
-			}
-			sharedKey, err = hs.ecdheKey.ECDH(peerKey)
-			if err != nil {
-				c.sendAlert(alertIllegalParameter)
-				return errors.New("tls: invalid server key share")
-			}
-		}
-	}
-	if sharedKey == nil && hs.kemKey != nil && clientKeySharePrivateCurveID(hs.kemKey) == hs.serverHello.serverShare.group {
-		sk := hs.kemKey.secretKey
-		sharedKey, err = sk.Scheme().Decapsulate(sk, hs.serverHello.serverShare.data)
-		if err != nil {
-			c.sendAlert(alertIllegalParameter)
-			return fmt.Errorf("%s decaps: %w", sk.Scheme().Name(), err)
-		}
-	}
+	sharedKey := hs.ecdheParams.SharedKey(hs.serverHello.serverShare.data)
 	if sharedKey == nil {
-		c.sendAlert(alertInternalError)
-		return errors.New("tls: ecdheKey and circlKey are both nil")
+		c.sendAlert(alertIllegalParameter)
+		return errors.New("tls: invalid server key share")
 	}
-	// [UTLS SECTION ENDS]
 
 	earlySecret := hs.earlySecret
 	if !hs.usingPSK {
@@ -620,20 +487,12 @@ func (hs *clientHandshakeStateTLS13) establishHandshakeKeys() error {
 
 	clientSecret := hs.suite.deriveSecret(handshakeSecret,
 		clientHandshakeTrafficLabel, hs.transcript)
-	c.out.setTrafficSecret(hs.suite, QUICEncryptionLevelHandshake, clientSecret)
+	c.out.setTrafficSecret(hs.suite, clientSecret)
 	serverSecret := hs.suite.deriveSecret(handshakeSecret,
 		serverHandshakeTrafficLabel, hs.transcript)
-	c.in.setTrafficSecret(hs.suite, QUICEncryptionLevelHandshake, serverSecret)
+	c.in.setTrafficSecret(hs.suite, serverSecret)
 
-	if c.quic != nil {
-		if c.hand.Len() != 0 {
-			c.sendAlert(alertUnexpectedMessage)
-		}
-		c.quicSetWriteSecret(QUICEncryptionLevelHandshake, hs.suite.id, clientSecret)
-		c.quicSetReadSecret(QUICEncryptionLevelHandshake, hs.suite.id, serverSecret)
-	}
-
-	err = c.config.writeKeyLog(keyLogLabelClientHandshake, hs.hello.random, clientSecret)
+	err := c.config.writeKeyLog(keyLogLabelClientHandshake, hs.hello.random, clientSecret)
 	if err != nil {
 		c.sendAlert(alertInternalError)
 		return err
@@ -664,12 +523,8 @@ func (hs *clientHandshakeStateTLS13) readServerParameters() error {
 		return unexpectedMessageError(encryptedExtensions, msg)
 	}
 
-	if err := checkALPN(hs.hello.alpnProtocols, encryptedExtensions.alpnProtocol, c.quic != nil); err != nil {
-		// RFC 8446 specifies that no_application_protocol is sent by servers, but
-		// does not specify how clients handle the selection of an incompatible protocol.
-		// RFC 9001 Section 8.1 specifies that QUIC clients send no_application_protocol
-		// in this case. Always sending no_application_protocol seems reasonable.
-		c.sendAlert(alertNoApplicationProtocol)
+	if err := checkALPN(hs.hello.alpnProtocols, encryptedExtensions.alpnProtocol); err != nil {
+		c.sendAlert(alertUnsupportedExtension)
 		return err
 	}
 	c.clientProtocol = encryptedExtensions.alpnProtocol
@@ -683,39 +538,6 @@ func (hs *clientHandshakeStateTLS13) readServerParameters() error {
 		}
 	}
 	// [UTLS SECTION ENDS]
-
-	if c.quic != nil {
-		if encryptedExtensions.quicTransportParameters == nil {
-			// RFC 9001 Section 8.2.
-			c.sendAlert(alertMissingExtension)
-			return errors.New("tls: server did not send a quic_transport_parameters extension")
-		}
-		c.quicSetTransportParameters(encryptedExtensions.quicTransportParameters)
-	} else {
-		if encryptedExtensions.quicTransportParameters != nil {
-			c.sendAlert(alertUnsupportedExtension)
-			return errors.New("tls: server sent an unexpected quic_transport_parameters extension")
-		}
-	}
-
-	if !hs.hello.earlyData && encryptedExtensions.earlyData {
-		c.sendAlert(alertUnsupportedExtension)
-		return errors.New("tls: server sent an unexpected early_data extension")
-	}
-	if hs.hello.earlyData && !encryptedExtensions.earlyData {
-		c.quicRejectedEarlyData()
-	}
-	if encryptedExtensions.earlyData {
-		if hs.session.cipherSuite != c.cipherSuite {
-			c.sendAlert(alertHandshakeFailure)
-			return errors.New("tls: server accepted 0-RTT with the wrong cipher suite")
-		}
-		if hs.session.alpnProtocol != c.clientProtocol {
-			c.sendAlert(alertHandshakeFailure)
-			return errors.New("tls: server accepted 0-RTT with the wrong ALPN")
-		}
-	}
-
 	return nil
 }
 
@@ -810,7 +632,7 @@ func (hs *clientHandshakeStateTLS13) readServerCertificate() error {
 	}
 
 	// See RFC 8446, Section 4.4.3.
-	if !isSupportedSignatureAlgorithm(certVerify.signatureAlgorithm, c.config.supportedSignatureAlgorithms()) { // [UTLS] ported from cloudflare/go
+	if !isSupportedSignatureAlgorithm(certVerify.signatureAlgorithm, supportedSignatureAlgorithms()) {
 		c.sendAlert(alertIllegalParameter)
 		return errors.New("tls: certificate used with invalid signature algorithm")
 	}
@@ -869,7 +691,7 @@ func (hs *clientHandshakeStateTLS13) readServerFinished() error {
 		clientApplicationTrafficLabel, hs.transcript)
 	serverSecret := hs.suite.deriveSecret(hs.masterSecret,
 		serverApplicationTrafficLabel, hs.transcript)
-	c.in.setTrafficSecret(hs.suite, QUICEncryptionLevelApplication, serverSecret)
+	c.in.setTrafficSecret(hs.suite, serverSecret)
 
 	err = c.config.writeKeyLog(keyLogLabelClientTraffic, hs.hello.random, hs.trafficSecret)
 	if err != nil {
@@ -965,18 +787,11 @@ func (hs *clientHandshakeStateTLS13) sendClientFinished() error {
 		return err
 	}
 
-	c.out.setTrafficSecret(hs.suite, QUICEncryptionLevelApplication, hs.trafficSecret)
+	c.out.setTrafficSecret(hs.suite, hs.trafficSecret)
 
 	if !c.config.SessionTicketsDisabled && c.config.ClientSessionCache != nil {
 		c.resumptionSecret = hs.suite.deriveSecret(hs.masterSecret,
 			resumptionLabel, hs.transcript)
-	}
-
-	if c.quic != nil {
-		if c.hand.Len() != 0 {
-			c.sendAlert(alertUnexpectedMessage)
-		}
-		c.quicSetWriteSecret(QUICEncryptionLevelApplication, hs.suite.id, hs.trafficSecret)
 	}
 
 	return nil
@@ -1002,34 +817,32 @@ func (c *Conn) handleNewSessionTicket(msg *newSessionTicketMsgTLS13) error {
 		return errors.New("tls: received a session ticket with invalid lifetime")
 	}
 
-	// RFC 9001, Section 4.6.1
-	if c.quic != nil && msg.maxEarlyData != 0 && msg.maxEarlyData != 0xffffffff {
-		c.sendAlert(alertIllegalParameter)
-		return errors.New("tls: invalid early data for QUIC connection")
-	}
-
 	cipherSuite := cipherSuiteTLS13ByID(c.cipherSuite)
 	if cipherSuite == nil || c.resumptionSecret == nil {
 		return c.sendAlert(alertInternalError)
 	}
 
-	psk := cipherSuite.expandLabel(c.resumptionSecret, "resumption",
-		msg.nonce, cipherSuite.hash.Size())
-
-	session, err := c.sessionState()
-	if err != nil {
-		c.sendAlert(alertInternalError)
-		return err
+	// Save the resumption_master_secret and nonce instead of deriving the PSK
+	// to do the least amount of work on NewSessionTicket messages before we
+	// know if the ticket will be used. Forward secrecy of resumed connections
+	// is guaranteed by the requirement for pskModeDHE.
+	session := &ClientSessionState{
+		sessionTicket:      msg.label,
+		vers:               c.vers,
+		cipherSuite:        c.cipherSuite,
+		masterSecret:       c.resumptionSecret,
+		serverCertificates: c.peerCertificates,
+		verifiedChains:     c.verifiedChains,
+		receivedAt:         c.config.time(),
+		nonce:              msg.nonce,
+		useBy:              c.config.time().Add(lifetime),
+		ageAdd:             msg.ageAdd,
+		ocspResponse:       c.ocspResponse,
+		scts:               c.scts,
 	}
-	session.secret = psk
-	session.useBy = uint64(c.config.time().Add(lifetime).Unix())
-	session.ageAdd = msg.ageAdd
-	session.EarlyData = c.quic != nil && msg.maxEarlyData == 0xffffffff // RFC 9001, Section 4.6.1
-	cs := &ClientSessionState{ticket: msg.label, session: session}
 
-	if cacheKey := c.clientSessionCacheKey(); cacheKey != "" {
-		c.config.ClientSessionCache.Put(cacheKey, cs)
-	}
+	cacheKey := clientSessionCacheKey(c.conn.RemoteAddr(), c.config)
+	c.config.ClientSessionCache.Put(cacheKey, session)
 
 	return nil
 }

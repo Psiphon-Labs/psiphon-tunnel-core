@@ -38,7 +38,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 func TestObfuscatedSessionTicket(t *testing.T) {

@@ -29,7 +29,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // MeekModeRelay and MeekModeObfuscatedRoundTrip are tested via meek protocol
@@ -82,13 +82,13 @@ func TestMeekModePlaintextRoundTrip(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.description, func(t *testing.T) {
 			meekConfig := &MeekConfig{
-				Parameters:       params,
-				Mode:             testCase.meekMode,
-				DialAddress:      serverAddr,
-				UseHTTPS:         true,
-				SNIServerName:    "not-" + serverName,
-				VerifyServerName: testCase.verifyServerName,
-				VerifyPins:       testCase.verifyPins,
+				Parameters:            params,
+				Mode:                  testCase.meekMode,
+				DialAddress:           serverAddr,
+				UseHTTPS:              true,
+				SNIServerName:         "not-" + serverName,
+				VerifyServerName:      testCase.verifyServerName,
+				VerifyPins:            testCase.verifyPins,
 				TLSClientSessionCache: tlsCache,
 			}
 

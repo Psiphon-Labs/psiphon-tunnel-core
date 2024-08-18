@@ -6,12 +6,8 @@ package tls
 
 import (
 	"crypto"
-	"crypto/ecdh"
 	"crypto/x509"
 	"hash"
-	"time"
-
-	"github.com/cloudflare/circl/kem"
 )
 
 // ClientHandshakeState includes both TLS 1.3-only and TLS 1.2-only states,
@@ -28,7 +24,7 @@ type PubClientHandshakeState struct {
 	ServerHello  *PubServerHelloMsg
 	Hello        *PubClientHelloMsg
 	MasterSecret []byte
-	Session      *SessionState
+	Session      *ClientSessionState
 
 	State12 TLS12OnlyState
 	State13 TLS13OnlyState
@@ -38,17 +34,16 @@ type PubClientHandshakeState struct {
 
 // TLS 1.3 only
 type TLS13OnlyState struct {
-	Suite           *PubCipherSuiteTLS13
-	EcdheKey        *ecdh.PrivateKey
-	KeySharesParams *KeySharesParameters
-	KEMKey          *KemPrivateKey
-	EarlySecret     []byte
-	BinderKey       []byte
-	CertReq         *CertificateRequestMsgTLS13
-	UsingPSK        bool // don't set this field when building client hello
-	SentDummyCCS    bool
-	Transcript      hash.Hash
-	TrafficSecret   []byte // client_application_traffic_secret_0
+	Suite                *PubCipherSuiteTLS13
+	EcdheParams          EcdheParameters
+	KeySharesEcdheParams KeySharesEcdheParameters
+	EarlySecret          []byte
+	BinderKey            []byte
+	CertReq              *CertificateRequestMsgTLS13
+	UsingPSK             bool
+	SentDummyCCS         bool
+	Transcript           hash.Hash
+	TrafficSecret        []byte // client_application_traffic_secret_0
 }
 
 // TLS 1.2 and before only
@@ -62,12 +57,11 @@ func (chs *PubClientHandshakeState) toPrivate13() *clientHandshakeStateTLS13 {
 		return nil
 	} else {
 		return &clientHandshakeStateTLS13{
-			c:               chs.C,
-			serverHello:     chs.ServerHello.getPrivatePtr(),
-			hello:           chs.Hello.getPrivatePtr(),
-			ecdheKey:        chs.State13.EcdheKey,
-			keySharesParams: chs.State13.KeySharesParams,
-			kemKey:          chs.State13.KEMKey.ToPrivate(),
+			c:                    chs.C,
+			serverHello:          chs.ServerHello.getPrivatePtr(),
+			hello:                chs.Hello.getPrivatePtr(),
+			ecdheParams:          chs.State13.EcdheParams,
+			keySharesEcdheParams: chs.State13.KeySharesEcdheParams,
 
 			session:     chs.Session,
 			earlySecret: chs.State13.EarlySecret,
@@ -91,17 +85,16 @@ func (chs13 *clientHandshakeStateTLS13) toPublic13() *PubClientHandshakeState {
 		return nil
 	} else {
 		tls13State := TLS13OnlyState{
-			KeySharesParams: chs13.keySharesParams,
-			EcdheKey:        chs13.ecdheKey,
-			KEMKey:          chs13.kemKey.ToPublic(),
-			EarlySecret:     chs13.earlySecret,
-			BinderKey:       chs13.binderKey,
-			CertReq:         chs13.certReq.toPublic(),
-			UsingPSK:        chs13.usingPSK,
-			SentDummyCCS:    chs13.sentDummyCCS,
-			Suite:           chs13.suite.toPublic(),
-			TrafficSecret:   chs13.trafficSecret,
-			Transcript:      chs13.transcript,
+			KeySharesEcdheParams: chs13.keySharesEcdheParams,
+			EcdheParams:          chs13.ecdheParams,
+			EarlySecret:          chs13.earlySecret,
+			BinderKey:            chs13.binderKey,
+			CertReq:              chs13.certReq.toPublic(),
+			UsingPSK:             chs13.usingPSK,
+			SentDummyCCS:         chs13.sentDummyCCS,
+			Suite:                chs13.suite.toPublic(),
+			TrafficSecret:        chs13.trafficSecret,
+			Transcript:           chs13.transcript,
 		}
 		return &PubClientHandshakeState{
 			C:           chs13.c,
@@ -163,9 +156,9 @@ func (chs12 *clientHandshakeState) toPublic12() *PubClientHandshakeState {
 	}
 }
 
-// type EcdheParameters interface {
-// 	ecdheParameters
-// }
+type EcdheParameters interface {
+	ecdheParameters
+}
 
 type CertificateRequestMsgTLS13 struct {
 	Raw                              []byte
@@ -250,8 +243,8 @@ type PubServerHelloMsg struct {
 	NextProtos                   []string
 	OcspStapling                 bool
 	Scts                         [][]byte
-	ExtendedMasterSecret         bool
-	TicketSupported              bool // used by go tls to determine whether to add the session ticket ext
+	Ems                          bool
+	TicketSupported              bool
 	SecureRenegotiation          []byte
 	SecureRenegotiationSupported bool
 	AlpnProtocol                 string
@@ -281,7 +274,7 @@ func (shm *PubServerHelloMsg) getPrivatePtr() *serverHelloMsg {
 			nextProtos:                   shm.NextProtos,
 			ocspStapling:                 shm.OcspStapling,
 			scts:                         shm.Scts,
-			extendedMasterSecret:         shm.ExtendedMasterSecret,
+			ems:                          shm.Ems,
 			ticketSupported:              shm.TicketSupported,
 			secureRenegotiation:          shm.SecureRenegotiation,
 			secureRenegotiationSupported: shm.SecureRenegotiationSupported,
@@ -311,7 +304,7 @@ func (shm *serverHelloMsg) getPublicPtr() *PubServerHelloMsg {
 			NextProtos:                   shm.nextProtos,
 			OcspStapling:                 shm.ocspStapling,
 			Scts:                         shm.scts,
-			ExtendedMasterSecret:         shm.extendedMasterSecret,
+			Ems:                          shm.ems,
 			TicketSupported:              shm.ticketSupported,
 			SecureRenegotiation:          shm.secureRenegotiation,
 			SecureRenegotiationSupported: shm.secureRenegotiationSupported,
@@ -356,57 +349,42 @@ type PubClientHelloMsg struct {
 	PskModes                         []uint8
 	PskIdentities                    []PskIdentity
 	PskBinders                       [][]byte
-	QuicTransportParameters          []byte
-
-	cachedPrivateHello *clientHelloMsg // todo: further optimize to reduce clientHelloMsg construction
 }
 
 func (chm *PubClientHelloMsg) getPrivatePtr() *clientHelloMsg {
 	if chm == nil {
 		return nil
 	} else {
-		private := &clientHelloMsg{
-			raw:                              chm.Raw,
-			vers:                             chm.Vers,
-			random:                           chm.Random,
-			sessionId:                        chm.SessionId,
-			cipherSuites:                     chm.CipherSuites,
-			compressionMethods:               chm.CompressionMethods,
-			serverName:                       chm.ServerName,
-			ocspStapling:                     chm.OcspStapling,
-			supportedCurves:                  chm.SupportedCurves,
-			supportedPoints:                  chm.SupportedPoints,
-			ticketSupported:                  chm.TicketSupported,
-			sessionTicket:                    chm.SessionTicket,
-			supportedSignatureAlgorithms:     chm.SupportedSignatureAlgorithms,
+		return &clientHelloMsg{
+			raw:                          chm.Raw,
+			vers:                         chm.Vers,
+			random:                       chm.Random,
+			sessionId:                    chm.SessionId,
+			cipherSuites:                 chm.CipherSuites,
+			compressionMethods:           chm.CompressionMethods,
+			nextProtoNeg:                 chm.NextProtoNeg,
+			serverName:                   chm.ServerName,
+			ocspStapling:                 chm.OcspStapling,
+			scts:                         chm.Scts,
+			ems:                          chm.Ems,
+			supportedCurves:              chm.SupportedCurves,
+			supportedPoints:              chm.SupportedPoints,
+			ticketSupported:              chm.TicketSupported,
+			sessionTicket:                chm.SessionTicket,
+			supportedSignatureAlgorithms: chm.SupportedSignatureAlgorithms,
+			secureRenegotiation:          chm.SecureRenegotiation,
+			secureRenegotiationSupported: chm.SecureRenegotiationSupported,
+			alpnProtocols:                chm.AlpnProtocols,
+
 			supportedSignatureAlgorithmsCert: chm.SupportedSignatureAlgorithmsCert,
-			secureRenegotiationSupported:     chm.SecureRenegotiationSupported,
-			secureRenegotiation:              chm.SecureRenegotiation,
-			extendedMasterSecret:             chm.Ems,
-			alpnProtocols:                    chm.AlpnProtocols,
-			scts:                             chm.Scts,
-
-			supportedVersions:       chm.SupportedVersions,
-			cookie:                  chm.Cookie,
-			keyShares:               KeyShares(chm.KeyShares).ToPrivate(),
-			earlyData:               chm.EarlyData,
-			pskModes:                chm.PskModes,
-			pskIdentities:           PskIdentities(chm.PskIdentities).ToPrivate(),
-			pskBinders:              chm.PskBinders,
-			quicTransportParameters: chm.QuicTransportParameters,
-
-			nextProtoNeg: chm.NextProtoNeg,
+			supportedVersions:                chm.SupportedVersions,
+			cookie:                           chm.Cookie,
+			keyShares:                        KeyShares(chm.KeyShares).ToPrivate(),
+			earlyData:                        chm.EarlyData,
+			pskModes:                         chm.PskModes,
+			pskIdentities:                    PskIdentities(chm.PskIdentities).ToPrivate(),
+			pskBinders:                       chm.PskBinders,
 		}
-		chm.cachedPrivateHello = private
-		return private
-	}
-}
-
-func (chm *PubClientHelloMsg) getCachedPrivatePtr() *clientHelloMsg {
-	if chm == nil {
-		return nil
-	} else {
-		return chm.cachedPrivateHello
 	}
 }
 
@@ -425,7 +403,7 @@ func (chm *clientHelloMsg) getPublicPtr() *PubClientHelloMsg {
 			ServerName:                   chm.serverName,
 			OcspStapling:                 chm.ocspStapling,
 			Scts:                         chm.scts,
-			Ems:                          chm.extendedMasterSecret,
+			Ems:                          chm.ems,
 			SupportedCurves:              chm.supportedCurves,
 			SupportedPoints:              chm.supportedPoints,
 			TicketSupported:              chm.ticketSupported,
@@ -443,8 +421,6 @@ func (chm *clientHelloMsg) getPublicPtr() *PubClientHelloMsg {
 			PskModes:                         chm.pskModes,
 			PskIdentities:                    pskIdentities(chm.pskIdentities).ToPublic(),
 			PskBinders:                       chm.pskBinders,
-			QuicTransportParameters:          chm.quicTransportParameters,
-			cachedPrivateHello:               chm,
 		}
 	}
 }
@@ -625,127 +601,71 @@ func MakeClientSessionState(
 	MasterSecret []byte,
 	ServerCertificates []*x509.Certificate,
 	VerifiedChains [][]*x509.Certificate) *ClientSessionState {
-	// TODO: Add EMS to this constructor in uTLS v2
-	css := &ClientSessionState{
-		ticket: SessionTicket,
-		session: &SessionState{
-			version:          Vers,
-			cipherSuite:      CipherSuite,
-			secret:           MasterSecret,
-			peerCertificates: ServerCertificates,
-			verifiedChains:   VerifiedChains,
-		},
-	}
-	return css
+	css := ClientSessionState{sessionTicket: SessionTicket,
+		vers:               Vers,
+		cipherSuite:        CipherSuite,
+		masterSecret:       MasterSecret,
+		serverCertificates: ServerCertificates,
+		verifiedChains:     VerifiedChains}
+	return &css
 }
 
 // Encrypted ticket used for session resumption with server
 func (css *ClientSessionState) SessionTicket() []uint8 {
-	return css.ticket
+	return css.sessionTicket
 }
 
 // SSL/TLS version negotiated for the session
 func (css *ClientSessionState) Vers() uint16 {
-	return css.session.version
+	return css.vers
 }
 
 // Ciphersuite negotiated for the session
 func (css *ClientSessionState) CipherSuite() uint16 {
-	return css.session.cipherSuite
+	return css.cipherSuite
 }
 
 // MasterSecret generated by client on a full handshake
 func (css *ClientSessionState) MasterSecret() []byte {
-	return css.session.secret
-}
-
-func (css *ClientSessionState) EMS() bool {
-	return css.session.extMasterSecret
+	return css.masterSecret
 }
 
 // Certificate chain presented by the server
 func (css *ClientSessionState) ServerCertificates() []*x509.Certificate {
-	return css.session.peerCertificates
+	return css.serverCertificates
 }
 
 // Certificate chains we built for verification
 func (css *ClientSessionState) VerifiedChains() [][]*x509.Certificate {
-	return css.session.verifiedChains
+	return css.verifiedChains
 }
 
 func (css *ClientSessionState) SetSessionTicket(SessionTicket []uint8) {
-	css.ticket = SessionTicket
+	css.sessionTicket = SessionTicket
 }
-
 func (css *ClientSessionState) SetVers(Vers uint16) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.version = Vers
+	css.vers = Vers
 }
-
 func (css *ClientSessionState) SetCipherSuite(CipherSuite uint16) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.cipherSuite = CipherSuite
+	css.cipherSuite = CipherSuite
 }
-
-func (css *ClientSessionState) SetCreatedAt(createdAt uint64) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.createdAt = createdAt
-}
-
 func (css *ClientSessionState) SetMasterSecret(MasterSecret []byte) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.secret = MasterSecret
+	css.masterSecret = MasterSecret
 }
-
-func (css *ClientSessionState) SetEMS(ems bool) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.extMasterSecret = ems
-}
-
 func (css *ClientSessionState) SetServerCertificates(ServerCertificates []*x509.Certificate) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.peerCertificates = ServerCertificates
+	css.serverCertificates = ServerCertificates
 }
-
 func (css *ClientSessionState) SetVerifiedChains(VerifiedChains [][]*x509.Certificate) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.verifiedChains = VerifiedChains
-}
-
-func (css *ClientSessionState) SetUseBy(useBy uint64) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.useBy = useBy
-}
-
-func (css *ClientSessionState) SetAgeAdd(ageAdd uint32) {
-	if css.session == nil {
-		css.session = &SessionState{}
-	}
-	css.session.ageAdd = ageAdd
+	css.verifiedChains = VerifiedChains
 }
 
 // TicketKey is the internal representation of a session ticket key.
 type TicketKey struct {
+	// KeyName is an opaque byte string that serves to identify the session
+	// ticket key. It's exposed as plaintext in every session ticket.
+	KeyName [ticketKeyNameLen]byte
 	AesKey  [16]byte
 	HmacKey [16]byte
-	// created is the time at which this ticket key was created. See Config.ticketKeys.
-	Created time.Time
 }
 
 type TicketKeys []TicketKey
@@ -761,17 +681,17 @@ func TicketKeyFromBytes(b [32]byte) TicketKey {
 
 func (tk ticketKey) ToPublic() TicketKey {
 	return TicketKey{
+		KeyName: tk.keyName,
 		AesKey:  tk.aesKey,
 		HmacKey: tk.hmacKey,
-		Created: tk.created,
 	}
 }
 
 func (TK TicketKey) ToPrivate() ticketKey {
 	return ticketKey{
+		keyName: TK.KeyName,
 		aesKey:  TK.AesKey,
 		hmacKey: TK.HmacKey,
-		created: TK.Created,
 	}
 }
 
@@ -789,31 +709,4 @@ func (TKS TicketKeys) ToPrivate() []ticketKey {
 		tks = append(tks, TK.ToPrivate())
 	}
 	return tks
-}
-
-type KemPrivateKey struct {
-	SecretKey kem.PrivateKey
-	CurveID   CurveID
-}
-
-func (kpk *KemPrivateKey) ToPrivate() *kemPrivateKey {
-	if kpk == nil {
-		return nil
-	} else {
-		return &kemPrivateKey{
-			secretKey: kpk.SecretKey,
-			curveID:   kpk.CurveID,
-		}
-	}
-}
-
-func (kpk *kemPrivateKey) ToPublic() *KemPrivateKey {
-	if kpk == nil {
-		return nil
-	} else {
-		return &KemPrivateKey{
-			SecretKey: kpk.secretKey,
-			CurveID:   kpk.curveID,
-		}
-	}
 }

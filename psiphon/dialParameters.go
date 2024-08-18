@@ -44,8 +44,8 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	utls "github.com/Psiphon-Labs/utls"
 	lrucache "github.com/cognusion/go-cache-lru"
-	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/bpf"
 )
 

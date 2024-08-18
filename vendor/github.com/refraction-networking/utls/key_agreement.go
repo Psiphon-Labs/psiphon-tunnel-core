@@ -6,7 +6,6 @@ package tls
 
 import (
 	"crypto"
-	"crypto/ecdh"
 	"crypto/md5"
 	"crypto/rsa"
 	"crypto/sha1"
@@ -130,7 +129,7 @@ func md5SHA1Hash(slices [][]byte) []byte {
 // the sigType (for earlier TLS versions). For Ed25519 signatures, which don't
 // do pre-hashing, it returns the concatenation of the slices.
 func hashForServerKeyExchange(sigType uint8, hashFunc crypto.Hash, version uint16, slices ...[]byte) []byte {
-	if sigType == signatureEd25519 || circlSchemeBySigType(sigType) != nil { // [UTLS] ported from cloudflare/go
+	if sigType == signatureEd25519 {
 		var signed []byte
 		for _, slice := range slices {
 			signed = append(signed, slice...)
@@ -158,7 +157,7 @@ func hashForServerKeyExchange(sigType uint8, hashFunc crypto.Hash, version uint1
 type ecdheKeyAgreement struct {
 	version uint16
 	isRSA   bool
-	key     *ecdh.PrivateKey
+	params  ecdheParameters
 
 	// ckx and preMasterSecret are generated in processServerKeyExchange
 	// and returned in generateClientKeyExchange.
@@ -169,7 +168,7 @@ type ecdheKeyAgreement struct {
 func (ka *ecdheKeyAgreement) generateServerKeyExchange(config *Config, cert *Certificate, clientHello *clientHelloMsg, hello *serverHelloMsg) (*serverKeyExchangeMsg, error) {
 	var curveID CurveID
 	for _, c := range clientHello.supportedCurves {
-		if config.supportsCurve(c) && curveIdToCirclScheme(c) == nil { // [uTLS] ported from cloudflare/go
+		if config.supportsCurve(c) {
 			curveID = c
 			break
 		}
@@ -178,18 +177,18 @@ func (ka *ecdheKeyAgreement) generateServerKeyExchange(config *Config, cert *Cer
 	if curveID == 0 {
 		return nil, errors.New("tls: no supported elliptic curves offered")
 	}
-	if _, ok := curveForCurveID(curveID); !ok {
+	if _, ok := curveForCurveID(curveID); curveID != X25519 && !ok {
 		return nil, errors.New("tls: CurvePreferences includes unsupported curve")
 	}
 
-	key, err := generateECDHEKey(config.rand(), curveID)
+	params, err := generateECDHEParameters(config.rand(), curveID)
 	if err != nil {
 		return nil, err
 	}
-	ka.key = key
+	ka.params = params
 
 	// See RFC 4492, Section 5.4.
-	ecdhePublic := key.PublicKey().Bytes()
+	ecdhePublic := params.PublicKey()
 	serverECDHEParams := make([]byte, 1+2+1+len(ecdhePublic))
 	serverECDHEParams[0] = 3 // named curve
 	serverECDHEParams[1] = byte(curveID >> 8)
@@ -260,12 +259,8 @@ func (ka *ecdheKeyAgreement) processClientKeyExchange(config *Config, cert *Cert
 		return nil, errClientKeyExchange
 	}
 
-	peerKey, err := ka.key.Curve().NewPublicKey(ckx.ciphertext[1:])
-	if err != nil {
-		return nil, errClientKeyExchange
-	}
-	preMasterSecret, err := ka.key.ECDH(peerKey)
-	if err != nil {
+	preMasterSecret := ka.params.SharedKey(ckx.ciphertext[1:])
+	if preMasterSecret == nil {
 		return nil, errClientKeyExchange
 	}
 
@@ -293,26 +288,22 @@ func (ka *ecdheKeyAgreement) processServerKeyExchange(config *Config, clientHell
 		return errServerKeyExchange
 	}
 
-	if _, ok := curveForCurveID(curveID); !ok {
+	if _, ok := curveForCurveID(curveID); curveID != X25519 && !ok {
 		return errors.New("tls: server selected unsupported curve")
 	}
 
-	key, err := generateECDHEKey(config.rand(), curveID)
+	params, err := generateECDHEParameters(config.rand(), curveID)
 	if err != nil {
 		return err
 	}
-	ka.key = key
+	ka.params = params
 
-	peerKey, err := key.Curve().NewPublicKey(publicKey)
-	if err != nil {
-		return errServerKeyExchange
-	}
-	ka.preMasterSecret, err = key.ECDH(peerKey)
-	if err != nil {
+	ka.preMasterSecret = params.SharedKey(publicKey)
+	if ka.preMasterSecret == nil {
 		return errServerKeyExchange
 	}
 
-	ourPublicKey := key.PublicKey().Bytes()
+	ourPublicKey := params.PublicKey()
 	ka.ckx = new(clientKeyExchangeMsg)
 	ka.ckx.ciphertext = make([]byte, 1+len(ourPublicKey))
 	ka.ckx.ciphertext[0] = byte(len(ourPublicKey))

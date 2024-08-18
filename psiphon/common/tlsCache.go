@@ -21,7 +21,7 @@ package common
 
 import (
 	tls "github.com/Psiphon-Labs/psiphon-tls"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // TLSClientSessionCacheWrapper is a wrapper around tls.ClientSessionCache

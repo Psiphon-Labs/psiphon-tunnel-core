@@ -29,8 +29,6 @@ replace github.com/pion/ice/v2 => ./replace/ice
 
 replace github.com/pion/webrtc/v3 => ./replace/webrtc
 
-replace github.com/refraction-networking/utls => github.com/Psiphon-Labs/utls v1.1.1-0.20240807185429-185b54f73f17
-
 require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
@@ -39,6 +37,7 @@ require (
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240812172553-e7a4dbd0bf2b
 	github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536
+	github.com/Psiphon-Labs/utls v1.1.1-0.20240818221737-55b85574734b
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/bits-and-blooms/bloom/v3 v3.6.0
@@ -73,7 +72,6 @@ require (
 	github.com/pion/webrtc/v3 v3.2.40
 	github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
 	github.com/refraction-networking/gotapdance v1.7.10
-	github.com/refraction-networking/utls v1.6.8-0.20240720032424-23de245734c7
 	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
 	github.com/shirou/gopsutil/v4 v4.24.5
 	github.com/sirupsen/logrus v1.9.3
@@ -102,6 +100,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
+	github.com/gaukas/godicttls v0.0.4 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
@@ -132,6 +131,7 @@ require (
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/refraction-networking/ed25519 v0.1.2 // indirect
 	github.com/refraction-networking/obfs4 v0.1.2 // indirect
+	github.com/refraction-networking/utls v1.3.3 // indirect
 	github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/tailscale/goupnp v1.0.1-0.20210804011211-c64d0f06ea05 // indirect

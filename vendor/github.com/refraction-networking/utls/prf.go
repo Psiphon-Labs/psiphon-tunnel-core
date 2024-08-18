@@ -80,7 +80,6 @@ const (
 )
 
 var masterSecretLabel = []byte("master secret")
-var extendedMasterSecretLabel = []byte("extended master secret")
 var keyExpansionLabel = []byte("key expansion")
 var clientFinishedLabel = []byte("client finished")
 var serverFinishedLabel = []byte("server finished")
@@ -113,14 +112,6 @@ func masterFromPreMasterSecret(version uint16, suite *cipherSuite, preMasterSecr
 
 	masterSecret := make([]byte, masterSecretLength)
 	prfForVersion(version, suite)(masterSecret, preMasterSecret, masterSecretLabel, seed)
-	return masterSecret
-}
-
-// extMasterFromPreMasterSecret generates the extended master secret from the
-// pre-master secret. See RFC 7627.
-func extMasterFromPreMasterSecret(version uint16, suite *cipherSuite, preMasterSecret, transcript []byte) []byte {
-	masterSecret := make([]byte, masterSecretLength)
-	prfForVersion(version, suite)(masterSecret, preMasterSecret, extendedMasterSecretLabel, transcript)
 	return masterSecret
 }
 
@@ -224,12 +215,12 @@ func (h finishedHash) serverSum(masterSecret []byte) []byte {
 
 // hashForClientCertificate returns the handshake messages so far, pre-hashed if
 // necessary, suitable for signing by a TLS client certificate.
-func (h finishedHash) hashForClientCertificate(sigType uint8, hashAlg crypto.Hash) []byte {
-	if (h.version >= VersionTLS12 || sigType == signatureEd25519 || circlSchemeBySigType(sigType) != nil) && h.buffer == nil { // [UTLS] ported from cloudflare/go
+func (h finishedHash) hashForClientCertificate(sigType uint8, hashAlg crypto.Hash, masterSecret []byte) []byte {
+	if (h.version >= VersionTLS12 || sigType == signatureEd25519) && h.buffer == nil {
 		panic("tls: handshake hash for a client certificate requested after discarding the handshake buffer")
 	}
 
-	if sigType == signatureEd25519 || circlSchemeBySigType(sigType) != nil { // [UTLS] ported from cloudflare/go
+	if sigType == signatureEd25519 {
 		return h.buffer
 	}
 
@@ -252,18 +243,11 @@ func (h *finishedHash) discardHandshakeBuffer() {
 	h.buffer = nil
 }
 
-// noEKMBecauseRenegotiation is used as a value of
+// noExportedKeyingMaterial is used as a value of
 // ConnectionState.ekm when renegotiation is enabled and thus
 // we wish to fail all key-material export requests.
-func noEKMBecauseRenegotiation(label string, context []byte, length int) ([]byte, error) {
+func noExportedKeyingMaterial(label string, context []byte, length int) ([]byte, error) {
 	return nil, errors.New("crypto/tls: ExportKeyingMaterial is unavailable when renegotiation is enabled")
-}
-
-// noEKMBecauseNoEMS is used as a value of ConnectionState.ekm when Extended
-// Master Secret is not negotiated and thus we wish to fail all key-material
-// export requests.
-func noEKMBecauseNoEMS(label string, context []byte, length int) ([]byte, error) {
-	return nil, errors.New("crypto/tls: ExportKeyingMaterial is unavailable when neither TLS 1.3 nor Extended Master Secret are negotiated; override with GODEBUG=tlsunsafeekm=1")
 }
 
 // ekmFromMasterSecret generates exported keying material as defined in RFC 5705.

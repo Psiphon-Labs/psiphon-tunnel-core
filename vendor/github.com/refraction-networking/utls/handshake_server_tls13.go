@@ -12,9 +12,9 @@ import (
 	"crypto/rsa"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"hash"
 	"io"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,11 +30,9 @@ type serverHandshakeStateTLS13 struct {
 	hello           *serverHelloMsg
 	sentDummyCCS    bool
 	usingPSK        bool
-	earlyData       bool
 	suite           *cipherSuiteTLS13
 	cert            *Certificate
 	sigAlg          SignatureScheme
-	selectedGroup   CurveID
 	earlySecret     []byte
 	sharedKey       []byte
 	handshakeSecret []byte
@@ -84,7 +82,7 @@ func (hs *serverHandshakeStateTLS13) handshake() error {
 		return err
 	}
 
-	c.isHandshakeComplete.Store(true)
+	atomic.StoreUint32(&c.handshakeStatus, 1)
 
 	return nil
 }
@@ -142,12 +140,7 @@ func (hs *serverHandshakeStateTLS13) processClientHello() error {
 		return errors.New("tls: initial handshake had non-empty renegotiation extension")
 	}
 
-	if hs.clientHello.earlyData && c.quic != nil {
-		if len(hs.clientHello.pskIdentities) == 0 {
-			c.sendAlert(alertIllegalParameter)
-			return errors.New("tls: early_data without pre_shared_key")
-		}
-	} else if hs.clientHello.earlyData {
+	if hs.clientHello.earlyData {
 		// See RFC 8446, Section 4.2.10 for the complicated behavior required
 		// here. The scenario is that a different server at our address offered
 		// to accept early data in the past, which we can't handle. For now, all
@@ -164,9 +157,6 @@ func (hs *serverHandshakeStateTLS13) processClientHello() error {
 	preferenceList := defaultCipherSuitesTLS13
 	if !hasAESGCMHardwareSupport || !aesgcmPreferred(hs.clientHello.cipherSuites) {
 		preferenceList = defaultCipherSuitesTLS13NoAES
-	}
-	if needFIPS() {
-		preferenceList = defaultCipherSuitesTLS13FIPS
 	}
 	for _, suiteID := range preferenceList {
 		hs.suite = mutualCipherSuiteTLS13(hs.clientHello.cipherSuites, suiteID)
@@ -216,64 +206,20 @@ GroupSelection:
 		clientKeyShare = &hs.clientHello.keyShares[0]
 	}
 
-	// [uTLS SECTION BEGIN]
-	// ported from cloudflare/go
-	if _, ok := curveForCurveID(selectedGroup); selectedGroup != X25519 && curveIdToCirclScheme(selectedGroup) == nil && !ok {
+	if _, ok := curveForCurveID(selectedGroup); selectedGroup != X25519 && !ok {
 		c.sendAlert(alertInternalError)
 		return errors.New("tls: CurvePreferences includes unsupported curve")
 	}
-	if kem := curveIdToCirclScheme(selectedGroup); kem != nil {
-		ct, ss, alert, err := encapsulateForKem(kem, c.config.rand(), clientKeyShare.data)
-		if err != nil {
-			c.sendAlert(alert)
-			return fmt.Errorf("%s encap: %w", kem.Name(), err)
-		}
-		hs.hello.serverShare = keyShare{group: selectedGroup, data: ct}
-		hs.sharedKey = ss
-	} else {
-		key, err := generateECDHEKey(c.config.rand(), selectedGroup)
-		if err != nil {
-			c.sendAlert(alertInternalError)
-			return err
-		}
-		hs.hello.serverShare = keyShare{group: selectedGroup, data: key.PublicKey().Bytes()}
-		peerKey, err := key.Curve().NewPublicKey(clientKeyShare.data)
-		if err == nil {
-			hs.sharedKey, _ = key.ECDH(peerKey)
-		}
+	params, err := generateECDHEParameters(c.config.rand(), selectedGroup)
+	if err != nil {
+		c.sendAlert(alertInternalError)
+		return err
 	}
+	hs.hello.serverShare = keyShare{group: selectedGroup, data: params.PublicKey()}
+	hs.sharedKey = params.SharedKey(clientKeyShare.data)
 	if hs.sharedKey == nil {
 		c.sendAlert(alertIllegalParameter)
 		return errors.New("tls: invalid client key share")
-	}
-	// [uTLS SECTION END]
-
-	selectedProto, err := negotiateALPN(c.config.NextProtos, hs.clientHello.alpnProtocols, c.quic != nil)
-	if err != nil {
-		c.sendAlert(alertNoApplicationProtocol)
-		return err
-	}
-	c.clientProtocol = selectedProto
-
-	if c.quic != nil {
-		// RFC 9001 Section 4.2: Clients MUST NOT offer TLS versions older than 1.3.
-		for _, v := range hs.clientHello.supportedVersions {
-			if v < VersionTLS13 {
-				c.sendAlert(alertProtocolVersion)
-				return errors.New("tls: client offered TLS version older than TLS 1.3")
-			}
-		}
-		// RFC 9001 Section 8.2.
-		if hs.clientHello.quicTransportParameters == nil {
-			c.sendAlert(alertMissingExtension)
-			return errors.New("tls: client did not send a quic_transport_parameters extension")
-		}
-		c.quicSetTransportParameters(hs.clientHello.quicTransportParameters)
-	} else {
-		if hs.clientHello.quicTransportParameters != nil {
-			c.sendAlert(alertUnsupportedExtension)
-			return errors.New("tls: client sent an unexpected quic_transport_parameters extension")
-		}
 	}
 
 	c.serverName = hs.clientHello.serverName
@@ -311,29 +257,12 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 			break
 		}
 
-		var sessionState *SessionState
-		if c.config.UnwrapSession != nil {
-			var err error
-			sessionState, err = c.config.UnwrapSession(identity.label, c.connectionStateLocked())
-			if err != nil {
-				return err
-			}
-			if sessionState == nil {
-				continue
-			}
-		} else {
-			plaintext := c.config.decryptTicket(identity.label, c.ticketKeys)
-			if plaintext == nil {
-				continue
-			}
-			var err error
-			sessionState, err = ParseSessionState(plaintext)
-			if err != nil {
-				continue
-			}
+		plaintext, _ := c.decryptTicket(identity.label)
+		if plaintext == nil {
+			continue
 		}
-
-		if sessionState.version != VersionTLS13 {
+		sessionState := new(sessionStateTLS13)
+		if ok := sessionState.unmarshal(plaintext); !ok {
 			continue
 		}
 
@@ -341,6 +270,10 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 		if c.config.time().Sub(createdAt) > maxSessionTicketLifetime {
 			continue
 		}
+
+		// We don't check the obfuscated ticket age because it's affected by
+		// clock skew and it's only a freshness signal useful for shrinking the
+		// window for replay attacks, which don't affect us as we don't do 0-RTT.
 
 		pskSuite := cipherSuiteTLS13ByID(sessionState.cipherSuite)
 		if pskSuite == nil || pskSuite.hash != hs.suite.hash {
@@ -350,7 +283,7 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 		// PSK connections don't re-establish client certificates, but carry
 		// them over in the session ticket. Ensure the presence of client certs
 		// in the ticket is consistent with the configured requirements.
-		sessionHasClientCerts := len(sessionState.peerCertificates) != 0
+		sessionHasClientCerts := len(sessionState.certificate.Certificate) != 0
 		needClientCerts := requiresClientCert(c.config.ClientAuth)
 		if needClientCerts && !sessionHasClientCerts {
 			continue
@@ -358,15 +291,10 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 		if sessionHasClientCerts && c.config.ClientAuth == NoClientCert {
 			continue
 		}
-		if sessionHasClientCerts && c.config.time().After(sessionState.peerCertificates[0].NotAfter) {
-			continue
-		}
-		if sessionHasClientCerts && c.config.ClientAuth >= VerifyClientCertIfGiven &&
-			len(sessionState.verifiedChains) == 0 {
-			continue
-		}
 
-		hs.earlySecret = hs.suite.extract(sessionState.secret, nil)
+		psk := hs.suite.expandLabel(sessionState.resumptionSecret, "resumption",
+			nil, hs.suite.hash.Size())
+		hs.earlySecret = hs.suite.extract(psk, nil)
 		binderKey := hs.suite.deriveSecret(hs.earlySecret, resumptionBinderLabel, nil)
 		// Clone the transcript in case a HelloRetryRequest was recorded.
 		transcript := cloneHash(hs.transcript, hs.suite.hash)
@@ -386,24 +314,10 @@ func (hs *serverHandshakeStateTLS13) checkForResumption() error {
 			return errors.New("tls: invalid PSK binder")
 		}
 
-		if c.quic != nil && hs.clientHello.earlyData && i == 0 &&
-			sessionState.EarlyData && sessionState.cipherSuite == hs.suite.id &&
-			sessionState.alpnProtocol == c.clientProtocol {
-			hs.earlyData = true
-
-			transcript := hs.suite.hash.New()
-			if err := transcriptMsg(hs.clientHello, transcript); err != nil {
-				return err
-			}
-			earlyTrafficSecret := hs.suite.deriveSecret(hs.earlySecret, clientEarlyTrafficLabel, transcript)
-			c.quicSetReadSecret(QUICEncryptionLevelEarly, hs.suite.id, earlyTrafficSecret)
-		}
-
 		c.didResume = true
-		c.peerCertificates = sessionState.peerCertificates
-		c.ocspResponse = sessionState.ocspResponse
-		c.scts = sessionState.scts
-		c.verifiedChains = sessionState.verifiedChains
+		if err := c.processCertsFromClient(sessionState.certificate); err != nil {
+			return err
+		}
 
 		hs.hello.selectedIdentityPresent = true
 		hs.hello.selectedIdentity = uint16(i)
@@ -479,9 +393,6 @@ func (hs *serverHandshakeStateTLS13) pickCertificate() error {
 // sendDummyChangeCipherSpec sends a ChangeCipherSpec record for compatibility
 // with middleboxes that didn't implement TLS correctly. See RFC 8446, Appendix D.4.
 func (hs *serverHandshakeStateTLS13) sendDummyChangeCipherSpec() error {
-	if hs.c.quic != nil {
-		return nil
-	}
 	if hs.sentDummyCCS {
 		return nil
 	}
@@ -633,18 +544,10 @@ func (hs *serverHandshakeStateTLS13) sendServerParameters() error {
 
 	clientSecret := hs.suite.deriveSecret(hs.handshakeSecret,
 		clientHandshakeTrafficLabel, hs.transcript)
-	c.in.setTrafficSecret(hs.suite, QUICEncryptionLevelHandshake, clientSecret)
+	c.in.setTrafficSecret(hs.suite, clientSecret)
 	serverSecret := hs.suite.deriveSecret(hs.handshakeSecret,
 		serverHandshakeTrafficLabel, hs.transcript)
-	c.out.setTrafficSecret(hs.suite, QUICEncryptionLevelHandshake, serverSecret)
-
-	if c.quic != nil {
-		if c.hand.Len() != 0 {
-			c.sendAlert(alertUnexpectedMessage)
-		}
-		c.quicSetWriteSecret(QUICEncryptionLevelHandshake, hs.suite.id, serverSecret)
-		c.quicSetReadSecret(QUICEncryptionLevelHandshake, hs.suite.id, clientSecret)
-	}
+	c.out.setTrafficSecret(hs.suite, serverSecret)
 
 	err := c.config.writeKeyLog(keyLogLabelClientHandshake, hs.clientHello.random, clientSecret)
 	if err != nil {
@@ -658,16 +561,14 @@ func (hs *serverHandshakeStateTLS13) sendServerParameters() error {
 	}
 
 	encryptedExtensions := new(encryptedExtensionsMsg)
-	encryptedExtensions.alpnProtocol = c.clientProtocol
 
-	if c.quic != nil {
-		p, err := c.quicGetTransportParameters()
-		if err != nil {
-			return err
-		}
-		encryptedExtensions.quicTransportParameters = p
-		encryptedExtensions.earlyData = hs.earlyData
+	selectedProto, err := negotiateALPN(c.config.NextProtos, hs.clientHello.alpnProtocols)
+	if err != nil {
+		c.sendAlert(alertNoApplicationProtocol)
+		return err
 	}
+	encryptedExtensions.alpnProtocol = selectedProto
+	c.clientProtocol = selectedProto
 
 	if _, err := hs.c.writeHandshakeRecord(encryptedExtensions, hs.transcript); err != nil {
 		return err
@@ -693,7 +594,7 @@ func (hs *serverHandshakeStateTLS13) sendServerCertificate() error {
 		certReq := new(certificateRequestMsgTLS13)
 		certReq.ocspStapling = true
 		certReq.scts = true
-		certReq.supportedSignatureAlgorithms = c.config.supportedSignatureAlgorithms() // [UTLS] ported from cloudflare/go
+		certReq.supportedSignatureAlgorithms = supportedSignatureAlgorithms()
 		if c.config.ClientCAs != nil {
 			certReq.certificateAuthorities = c.config.ClientCAs.Subjects()
 		}
@@ -767,15 +668,7 @@ func (hs *serverHandshakeStateTLS13) sendServerFinished() error {
 		clientApplicationTrafficLabel, hs.transcript)
 	serverSecret := hs.suite.deriveSecret(hs.masterSecret,
 		serverApplicationTrafficLabel, hs.transcript)
-	c.out.setTrafficSecret(hs.suite, QUICEncryptionLevelApplication, serverSecret)
-
-	if c.quic != nil {
-		if c.hand.Len() != 0 {
-			// TODO: Handle this in setTrafficSecret?
-			c.sendAlert(alertUnexpectedMessage)
-		}
-		c.quicSetWriteSecret(QUICEncryptionLevelApplication, hs.suite.id, serverSecret)
-	}
+	c.out.setTrafficSecret(hs.suite, serverSecret)
 
 	err := c.config.writeKeyLog(keyLogLabelClientTraffic, hs.clientHello.random, hs.trafficSecret)
 	if err != nil {
@@ -807,11 +700,6 @@ func (hs *serverHandshakeStateTLS13) shouldSendSessionTickets() bool {
 		return false
 	}
 
-	// QUIC tickets are sent by QUICConn.SendSessionTicket, not automatically.
-	if hs.c.quic != nil {
-		return false
-	}
-
 	// Don't send tickets the client wouldn't use. See RFC 8446, Section 4.2.9.
 	for _, pskMode := range hs.clientHello.pskModes {
 		if pskMode == pskModeDHE {
@@ -832,48 +720,37 @@ func (hs *serverHandshakeStateTLS13) sendSessionTickets() error {
 		return err
 	}
 
-	c.resumptionSecret = hs.suite.deriveSecret(hs.masterSecret,
-		resumptionLabel, hs.transcript)
-
 	if !hs.shouldSendSessionTickets() {
 		return nil
 	}
-	return c.sendSessionTicket(false)
-}
 
-func (c *Conn) sendSessionTicket(earlyData bool) error {
-	suite := cipherSuiteTLS13ByID(c.cipherSuite)
-	if suite == nil {
-		return errors.New("tls: internal error: unknown cipher suite")
-	}
-	// ticket_nonce, which must be unique per connection, is always left at
-	// zero because we only ever send one ticket per connection.
-	psk := suite.expandLabel(c.resumptionSecret, "resumption",
-		nil, suite.hash.Size())
+	resumptionSecret := hs.suite.deriveSecret(hs.masterSecret,
+		resumptionLabel, hs.transcript)
 
 	m := new(newSessionTicketMsgTLS13)
 
-	state, err := c.sessionState()
+	var certsFromClient [][]byte
+	for _, cert := range c.peerCertificates {
+		certsFromClient = append(certsFromClient, cert.Raw)
+	}
+	state := sessionStateTLS13{
+		cipherSuite:      hs.suite.id,
+		createdAt:        uint64(c.config.time().Unix()),
+		resumptionSecret: resumptionSecret,
+		certificate: Certificate{
+			Certificate:                 certsFromClient,
+			OCSPStaple:                  c.ocspResponse,
+			SignedCertificateTimestamps: c.scts,
+		},
+	}
+	stateBytes, err := state.marshal()
 	if err != nil {
+		c.sendAlert(alertInternalError)
 		return err
 	}
-	state.secret = psk
-	state.EarlyData = earlyData
-	if c.config.WrapSession != nil {
-		m.label, err = c.config.WrapSession(c.connectionStateLocked(), state)
-		if err != nil {
-			return err
-		}
-	} else {
-		stateBytes, err := state.Bytes()
-		if err != nil {
-			c.sendAlert(alertInternalError)
-			return err
-		}
-		m.label, err = c.config.encryptTicket(stateBytes, c.ticketKeys)
-		if err != nil {
-			return err
-		}
+	m.label, err = c.encryptTicket(stateBytes)
+	if err != nil {
+		return err
 	}
 	m.lifetime = uint32(maxSessionTicketLifetime / time.Second)
 
@@ -881,16 +758,14 @@ func (c *Conn) sendSessionTicket(earlyData bool) error {
 	// The value is not stored anywhere; we never need to check the ticket age
 	// because 0-RTT is not supported.
 	ageAdd := make([]byte, 4)
-	_, err = c.config.rand().Read(ageAdd)
+	_, err = hs.c.config.rand().Read(ageAdd)
 	if err != nil {
 		return err
 	}
 	m.ageAdd = binary.LittleEndian.Uint32(ageAdd)
 
-	if earlyData {
-		// RFC 9001, Section 4.6.1
-		m.maxEarlyData = 0xffffffff
-	}
+	// ticket_nonce, which must be unique per connection, is always left at
+	// zero because we only ever send one ticket per connection.
 
 	if _, err := c.writeHandshakeRecord(m, nil); err != nil {
 		return err
@@ -955,7 +830,7 @@ func (hs *serverHandshakeStateTLS13) readClientCertificate() error {
 		}
 
 		// See RFC 8446, Section 4.4.3.
-		if !isSupportedSignatureAlgorithm(certVerify.signatureAlgorithm, c.config.supportedSignatureAlgorithms()) { // [UTLS] ported from cloudflare/go
+		if !isSupportedSignatureAlgorithm(certVerify.signatureAlgorithm, supportedSignatureAlgorithms()) {
 			c.sendAlert(alertIllegalParameter)
 			return errors.New("tls: client certificate used with invalid signature algorithm")
 		}
@@ -1008,7 +883,7 @@ func (hs *serverHandshakeStateTLS13) readClientFinished() error {
 		return errors.New("tls: invalid client finished hash")
 	}
 
-	c.in.setTrafficSecret(hs.suite, QUICEncryptionLevelApplication, hs.trafficSecret)
+	c.in.setTrafficSecret(hs.suite, hs.trafficSecret)
 
 	return nil
 }
