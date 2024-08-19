@@ -1935,6 +1935,7 @@ type pionLogger struct {
 	scope        string
 	logger       common.Logger
 	debugLogging bool
+	warnNoPairs  int32
 }
 
 func newPionLogger(scope string, logger common.Logger, debugLogging bool) *pionLogger {
@@ -1982,6 +1983,13 @@ func (l *pionLogger) Infof(format string, args ...interface{}) {
 }
 
 func (l *pionLogger) Warn(msg string) {
+
+	// To reduce diagnostic log noise, only log this message once per dial attempt.
+	if msg == "Failed to ping without candidate pairs. Connection is not possible yet." &&
+		!atomic.CompareAndSwapInt32(&l.warnNoPairs, 0, 1) {
+		return
+	}
+
 	l.logger.WithTrace().Warning(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 

@@ -36,6 +36,8 @@ const (
 	proxyAnnounceDelay           = 1 * time.Second
 	proxyAnnounceDelayJitter     = 0.5
 	proxyAnnounceMaxBackoffDelay = 1 * time.Hour
+	proxyAnnounceLogSampleSize   = 2
+	proxyAnnounceLogSamplePeriod = 30 * time.Minute
 	proxyWebRTCAnswerTimeout     = 20 * time.Second
 	proxyDestinationDialTimeout  = 20 * time.Second
 )
@@ -333,20 +335,56 @@ func (p *Proxy) proxyClients(
 
 	failureDelayFactor := time.Duration(1)
 
-	for i := 0; ctx.Err() == nil; i++ {
+	// To reduce diagnostic log noise, only log an initial sample of
+	// announcement request timings (delays/elapsed time) and a periodic
+	// sample of repeating errors such as "no match".
+	logAnnounceCount := proxyAnnounceLogSampleSize
+	logErrorsCount := proxyAnnounceLogSampleSize
+	lastErrMsg := ""
+	startLogSampleTime := time.Now()
+	logAnnounce := func() bool {
+		if logAnnounceCount > 0 {
+			logAnnounceCount -= 1
+			return true
+		}
+		return false
+	}
+
+	for ctx.Err() == nil {
 
 		if !p.config.WaitForNetworkConnectivity() {
 			break
 		}
 
-		backOff, err := p.proxyOneClient(ctx, signalAnnounceDone)
+		if time.Since(startLogSampleTime) >= proxyAnnounceLogSamplePeriod {
+			logAnnounceCount = proxyAnnounceLogSampleSize
+			logErrorsCount = proxyAnnounceLogSampleSize
+			lastErrMsg = ""
+			startLogSampleTime = time.Now()
+		}
+
+		backOff, err := p.proxyOneClient(
+			ctx, logAnnounce, signalAnnounceDone)
 
 		if err != nil && ctx.Err() == nil {
 
-			p.config.Logger.WithTraceFields(
-				common.LogFields{
-					"error": err.Error(),
-				}).Error("proxy client failed")
+			// Limitation: the lastErrMsg string comparison isn't compatible
+			// with errors with minor variations, such as "unexpected
+			// response status code %d after %v" from
+			// InproxyBrokerRoundTripper.RoundTrip, with a time duration in
+			// the second parameter.
+			errMsg := err.Error()
+			if lastErrMsg != errMsg {
+				logErrorsCount = proxyAnnounceLogSampleSize
+				lastErrMsg = errMsg
+			}
+			if logErrorsCount > 0 {
+				p.config.Logger.WithTraceFields(
+					common.LogFields{
+						"error": errMsg,
+					}).Error("proxy client failed")
+				logErrorsCount -= 1
+			}
 
 			// Apply a simple exponential backoff based on whether
 			// proxyOneClient either relayed client traffic or got no match,
@@ -445,7 +483,9 @@ func (p *Proxy) doNetworkDiscovery(
 }
 
 func (p *Proxy) proxyOneClient(
-	ctx context.Context, signalAnnounceDone func()) (bool, error) {
+	ctx context.Context,
+	logAnnounce func() bool,
+	signalAnnounceDone func()) (bool, error) {
 
 	// Do not trigger back-off unless the proxy successfully announces and
 	// only then performs poorly.
@@ -579,12 +619,12 @@ func (p *Proxy) proxyOneClient(
 			PersonalCompartmentIDs: personalCompartmentIDs,
 			Metrics:                metrics,
 		})
-
-	p.config.Logger.WithTraceFields(common.LogFields{
-		"delay":       requestDelay.String(),
-		"elapsedTime": time.Since(announceStartTime).String(),
-	}).Info("announcement request")
-
+	if logAnnounce() {
+		p.config.Logger.WithTraceFields(common.LogFields{
+			"delay":       requestDelay.String(),
+			"elapsedTime": time.Since(announceStartTime).String(),
+		}).Info("announcement request")
+	}
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}
