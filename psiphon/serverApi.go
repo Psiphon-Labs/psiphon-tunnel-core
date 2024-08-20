@@ -1025,6 +1025,14 @@ func getBaseAPIParameters(
 
 	params := make(common.APIParameters)
 
+	// Temporary measure: unconditionally include legacy session_id and
+	// client_session_id fields for compatibility with existing servers used
+	// in CI.
+	//
+	// TODO: remove once necessary servers are upgraded
+	params["session_id"] = config.SessionID
+	params["client_session_id"] = config.SessionID
+
 	if includeSessionID {
 		// The session ID is included in non-SSH API requests only. For SSH
 		// API requests, the Psiphon server already has the client's session ID.
