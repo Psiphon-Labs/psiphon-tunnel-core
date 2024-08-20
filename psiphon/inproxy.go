@@ -2099,7 +2099,8 @@ func (s *InproxyNATStateManager) TacticsApplied() error {
 
 func (s *InproxyNATStateManager) reset() {
 
-	// Assumes s.mutex lock is held.
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
 	networkID := s.config.GetNetworkID()
 
