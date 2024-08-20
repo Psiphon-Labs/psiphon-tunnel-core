@@ -297,6 +297,11 @@ type Config struct {
 	// is 0.
 	MeekCachedResponsePoolBufferCount int
 
+	// MeekCachedResponsePoolBufferClientLimit is the maximum number of of
+	// shared buffers a single client may consume at once. A default of 32 is
+	// used when MeekCachedResponsePoolBufferClientLimit is 0.
+	MeekCachedResponsePoolBufferClientLimit int
+
 	// UDPInterceptUdpgwServerAddress specifies the network address of
 	// a udpgw server which clients may be port forwarding to. When
 	// specified, these TCP port forwards are intercepted and handled

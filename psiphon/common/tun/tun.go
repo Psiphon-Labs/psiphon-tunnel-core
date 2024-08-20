@@ -2377,7 +2377,7 @@ func processPacket(
 		dataOffset := 0
 
 		if protocol == internetProtocolTCP {
-			if len(packet) < 33 {
+			if len(packet) < 38 {
 				metrics.rejectedPacket(direction, packetRejectTCPProtocolLength)
 				return false
 			}
@@ -2431,7 +2431,7 @@ func processPacket(
 		dataOffset := 0
 
 		if protocol == internetProtocolTCP {
-			if len(packet) < 53 {
+			if len(packet) < 58 {
 				metrics.rejectedPacket(direction, packetRejectTCPProtocolLength)
 				return false
 			}

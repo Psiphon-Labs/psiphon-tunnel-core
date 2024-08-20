@@ -2734,7 +2734,8 @@ func (controller *Controller) inproxyGetProxyAPIParameters() (
 
 	// TODO: include broker fronting dial parameters to be logged by the
 	// broker.
-	params := getBaseAPIParameters(baseParametersNoDialParameters, controller.config, nil)
+	params := getBaseAPIParameters(
+		baseParametersNoDialParameters, true, controller.config, nil)
 
 	if controller.config.DisableTactics {
 		return params, "", nil

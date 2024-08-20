@@ -94,7 +94,9 @@ const (
 	MEEK_DEFAULT_RESPONSE_BUFFER_LENGTH              = 65536
 	MEEK_DEFAULT_POOL_BUFFER_LENGTH                  = 65536
 	MEEK_DEFAULT_POOL_BUFFER_COUNT                   = 2048
+	MEEK_DEFAULT_POOL_BUFFER_CLIENT_LIMIT            = 32
 	MEEK_ENDPOINT_MAX_REQUEST_PAYLOAD_LENGTH         = 65536
+	MEEK_MAX_SESSION_COUNT                           = 1000000
 )
 
 // MeekServer implements the meek protocol, which tunnels TCP traffic (in the case of Psiphon,
@@ -216,6 +218,11 @@ func NewMeekServer(
 		bufferCount = support.Config.MeekCachedResponsePoolBufferCount
 	}
 
+	bufferPoolClientLimit := MEEK_DEFAULT_POOL_BUFFER_CLIENT_LIMIT
+	if support.Config.MeekCachedResponsePoolBufferClientLimit != 0 {
+		bufferPoolClientLimit = support.Config.MeekCachedResponsePoolBufferClientLimit
+	}
+
 	_, thresholdSeconds, _, _, _, _, _, _, reapFrequencySeconds, maxEntries :=
 		support.TrafficRulesSet.GetMeekRateLimiterConfig()
 
@@ -224,7 +231,14 @@ func NewMeekServer(
 		time.Duration(reapFrequencySeconds)*time.Second,
 		maxEntries)
 
-	bufferPool := NewCachedResponseBufferPool(bufferLength, bufferCount)
+	bufferPool := NewCachedResponseBufferPool(
+		bufferLength, bufferCount, bufferPoolClientLimit)
+
+	// Limitation: rate limiting and resource limiting are handled by external
+	// components, and MeekServer enforces only a sanity check limit on the
+	// number the number of entries in MeekServer.sessions.
+	//
+	// See comment in newSSHServer for more details.
 
 	meekServer := &MeekServer{
 		support:                         support,
@@ -784,12 +798,8 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 		responseWriter.WriteHeader(http.StatusPartialContent)
 
-		// TODO:
-		// - enforce a max extended buffer count per client, for
-		//   fairness? Throttling may make this unnecessary.
-		// - cachedResponse can now start releasing extended buffers,
-		//   as response bytes before "position" will never be requested
-		//   again?
+		// TODO: cachedResponse can now start releasing extended buffers, as
+		// response bytes before "position" will never be requested again?
 
 		responseSize, responseError = session.cachedResponse.CopyFromPosition(position, responseWriter)
 		greaterThanSwapInt64(&session.metricPeakCachedResponseHitSize, int64(responseSize))
@@ -818,6 +828,19 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 		// pumpWrites causes a TunnelServer/SSH goroutine blocking on a Write to
 		// write its downstream traffic through to the response body.
+
+		// Limitation: pumpWrites may write more response bytes than can be
+		// cached for future retries, either due to no extended buffers
+		// available, or exceeding the per-client extended buffer limit. In
+		// practice, with throttling in place and servers running under load
+		// limiting, metrics indicate that this rarely occurs. A potential
+		// future enhancement could be for pumpWrites to stop writing and
+		// send the response once there's no buffers remaining, favoring
+		// connection resilience over performance.
+		//
+		// TODO: use geo-targeted per-client extended buffer limit to reserve
+		// extended cache buffers for regions or ISPs with active or expected
+		// network connection interruptions?
 
 		responseSize, responseError = session.clientConn.pumpWrites(multiWriter, skipExtendedTurnAround)
 		greaterThanSwapInt64(&session.metricPeakResponseSize, int64(responseSize))
@@ -1202,6 +1225,17 @@ func (server *MeekServer) getSessionOrEndpoint(
 	}
 
 	server.sessionsLock.Lock()
+
+	// MEEK_MAX_SESSION_COUNT is a simple sanity check and failsafe. Load
+	// limiting tuned to each server's host resources is provided by external
+	// components. See comment in newSSHServer for more details.
+	if len(server.sessions) >= MEEK_MAX_SESSION_COUNT {
+		server.sessionsLock.Unlock()
+		err := std_errors.New("MEEK_MAX_SESSION_COUNT exceeded")
+		log.WithTrace().Warning(err.Error())
+		return "", nil, nil, "", "", nil, errors.Trace(err)
+	}
+
 	server.sessions[sessionID] = session
 	server.sessionsLock.Unlock()
 
@@ -1439,6 +1473,10 @@ func (server *MeekServer) getMeekCookiePayload(
 					errors.Trace(err),
 					LogFields(logFields))
 			},
+
+			// To allow for meek retries, replay of the same meek cookie is
+			// permitted (but only from the same source IP).
+			DisableStrictHistoryMode: true,
 		},
 		clientIP,
 		reader)

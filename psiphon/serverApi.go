@@ -117,7 +117,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 // stored -- and sponsor info (home pages, stat regexes).
 func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) error {
 
-	params := serverContext.getBaseAPIParameters(baseParametersAll)
+	params := serverContext.getBaseAPIParameters(baseParametersAll, false)
 
 	// The server will return a signed copy of its own server entry when the
 	// client specifies this 'missing_server_entry_signature' parameter.
@@ -491,7 +491,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	defer serverContext.tunnel.SetInFlightConnectedRequest(nil)
 
 	params := serverContext.getBaseAPIParameters(
-		baseParametersOnlyUpstreamFragmentorDialParameters)
+		baseParametersOnlyUpstreamFragmentorDialParameters, false)
 
 	lastConnected, err := getLastConnected()
 	if err != nil {
@@ -563,7 +563,8 @@ func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
 // DoStatusRequest makes a "status" API request to the server, sending session stats.
 func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
-	params := serverContext.getBaseAPIParameters(baseParametersNoDialParameters)
+	params := serverContext.getBaseAPIParameters(
+		baseParametersNoDialParameters, false)
 
 	// Note: ensure putBackStatusRequestPayload is called, to replace
 	// payload for future attempt, in all failure cases.
@@ -847,7 +848,7 @@ func RecordFailedTunnelStat(
 		return errors.Trace(err)
 	}
 
-	params := getBaseAPIParameters(baseParametersAll, config, dialParams)
+	params := getBaseAPIParameters(baseParametersAll, true, config, dialParams)
 
 	delete(params, "server_secret")
 	params["server_entry_tag"] = dialParams.ServerEntry.Tag
@@ -978,10 +979,12 @@ const (
 )
 
 func (serverContext *ServerContext) getBaseAPIParameters(
-	filter baseParametersFilter) common.APIParameters {
+	filter baseParametersFilter,
+	includeSessionID bool) common.APIParameters {
 
 	params := getBaseAPIParameters(
 		filter,
+		includeSessionID,
 		serverContext.tunnel.config,
 		serverContext.tunnel.dialParams)
 
@@ -1016,13 +1019,17 @@ func (serverContext *ServerContext) getBaseAPIParameters(
 // baseParametersNoDialParameters.
 func getBaseAPIParameters(
 	filter baseParametersFilter,
+	includeSessionID bool,
 	config *Config,
 	dialParams *DialParameters) common.APIParameters {
 
 	params := make(common.APIParameters)
 
-	params["session_id"] = config.SessionID
-	params["client_session_id"] = config.SessionID
+	if includeSessionID {
+		// The session ID is included in non-SSH API requests only. For SSH
+		// API requests, the Psiphon server already has the client's session ID.
+		params["session_id"] = config.SessionID
+	}
 	params["propagation_channel_id"] = config.PropagationChannelId
 	params["sponsor_id"] = config.GetSponsorID()
 	params["client_version"] = config.ClientVersion

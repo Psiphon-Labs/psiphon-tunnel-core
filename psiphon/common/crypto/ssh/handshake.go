@@ -16,6 +16,7 @@ import (
 
 	// [Psiphon]
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
@@ -467,6 +468,12 @@ const (
 	kexStrictServer = "kex-strict-s-v00@openssh.com"
 )
 
+// [Psiphon]
+// For testing only. Enables testing support for legacy clients, which have
+// only the legacy algorithm lists and no weak-MAC or new-server-algos logic.
+// Not safe for concurrent access.
+var testLegacyClient = false
+
 // sendKexInit sends a key change message.
 func (t *handshakeTransport) sendKexInit() error {
 	t.mu.Lock()
@@ -550,8 +557,8 @@ func (t *handshakeTransport) sendKexInit() error {
 	// its KEX using the specified seed; deterministically adjust own
 	// randomized KEX to ensure negotiation succeeds.
 	//
-	// When NoEncryptThenMACHash is specified, do not use Encrypt-then-MAC has
-	// algorithms.
+	// When NoEncryptThenMACHash is specified, do not use Encrypt-then-MAC
+	// hash algorithms.
 	//
 	// Limitations:
 	//
@@ -632,6 +639,59 @@ func (t *handshakeTransport) sendKexInit() error {
 			return list
 		}
 
+		avoid := func(PRNG *prng.PRNG, list, avoidList, addList []string) []string {
+
+			// Avoid negotiating items in avoidList, by moving a non-avoid
+			// item to the front of the list; either by swapping with a
+			// later, non-avoid item, or inserting a new item.
+
+			if len(list) < 1 {
+				return list
+			}
+			if !common.Contains(avoidList, list[0]) {
+				// The first item isn't on the avoid list.
+				return list
+			}
+			for i := 1; i < len(list); i++ {
+				if !common.Contains(avoidList, list[i]) {
+					// Swap with a later, existing non-avoid item.
+					list[0], list[i] = list[i], list[0]
+					return list
+				}
+			}
+			for _, item := range permute(PRNG, addList) {
+				if !common.Contains(avoidList, item) {
+					// Insert a randomly selected non-avoid item.
+					return append([]string{item}, list...)
+				}
+			}
+			// Can't avoid.
+			return list
+		}
+
+		addSome := func(PRNG *prng.PRNG, list, addList []string) []string {
+			newList := list
+			for _, item := range addList {
+				if PRNG.FlipCoin() {
+					index := PRNG.Range(0, len(newList))
+					newList = append(
+						newList[:index],
+						append([]string{item}, newList[index:]...)...)
+				}
+			}
+			return newList
+		}
+
+		toFront := func(list []string, item string) []string {
+			for index, existingItem := range list {
+				if existingItem == item {
+					list[0], list[index] = list[index], list[0]
+					return list
+				}
+			}
+			return append([]string{item}, list...)
+		}
+
 		firstKexAlgo := func(kexAlgos []string) (string, bool) {
 			for _, kexAlgo := range kexAlgos {
 				switch kexAlgo {
@@ -662,10 +722,9 @@ func (t *handshakeTransport) sendKexInit() error {
 		// server's algorithms; (b) random truncation by the server doesn't
 		// select only new algorithms unknown to existing clients.
 		//
-		// TODO: add a versioning mechanism, such as a SSHv2 capability, to
-		// allow for servers with new algorithm lists, where older clients
-		// won't try to connect to these servers, and new clients know to use
-		// non-legacy lists in the PeerKEXPRNGSeed mechanism.
+		// New algorithms are then randomly inserted only after the legacy
+		// lists are processed in legacy PRNG state order.
+
 		legacyServerKexAlgos := []string{
 			kexAlgoCurve25519SHA256LibSSH,
 			kexAlgoECDH256, kexAlgoECDH384, kexAlgoECDH521,
@@ -681,9 +740,11 @@ func (t *handshakeTransport) sendKexInit() error {
 			"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96",
 		}
 		legacyServerNoEncryptThenMACs := []string{
-			"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96"}
-
-		isServer := len(t.hostKeys) > 0
+			"hmac-sha2-256", "hmac-sha1", "hmac-sha1-96",
+		}
+		if t.config.NoEncryptThenMACHash {
+			legacyServerMACs = legacyServerNoEncryptThenMACs
+		}
 
 		PRNG := prng.NewPRNGWithSeed(t.config.KEXPRNGSeed)
 
@@ -691,95 +752,163 @@ func (t *handshakeTransport) sendKexInit() error {
 		startingCiphers := msg.CiphersClientServer
 		startingMACs := msg.MACsClientServer
 
-		if isServer {
+		// testLegacyClient: legacy clients are older clients which start with
+		// the same algorithm lists as legacyServer and have neither the
+		// newServer-algorithm nor the weak-MAC KEX prediction logic.
+
+		if isServer || testLegacyClient {
 			startingKexAlgos = legacyServerKexAlgos
 			startingCiphers = legacyServerCiphers
 			startingMACs = legacyServerMACs
+			if t.config.NoEncryptThenMACHash {
+				startingMACs = legacyServerNoEncryptThenMACs
+			}
 		}
 
-		msg.KexAlgos = selectKexAlgos(PRNG, startingKexAlgos)
+		kexAlgos := selectKexAlgos(PRNG, startingKexAlgos)
 
 		ciphers := truncate(PRNG, permute(PRNG, startingCiphers))
-		msg.CiphersClientServer = ciphers
-		msg.CiphersServerClient = ciphers
 
 		MACs := truncate(PRNG, permute(PRNG, startingMACs))
-		msg.MACsClientServer = MACs
-		msg.MACsServerClient = MACs
 
+		var hostKeyAlgos []string
 		if isServer {
-			msg.ServerHostKeyAlgos = permute(PRNG, msg.ServerHostKeyAlgos)
+			hostKeyAlgos = permute(PRNG, msg.ServerHostKeyAlgos)
 		} else {
 			// Must offer KeyAlgoRSA to Psiphon server.
-			msg.ServerHostKeyAlgos = retain(
+			hostKeyAlgos = retain(
 				PRNG,
 				truncate(PRNG, permute(PRNG, msg.ServerHostKeyAlgos)),
 				KeyAlgoRSA)
 		}
 
+		// To ensure compatibility with server KEX prediction in legacy
+		// clients, all preceeding PRNG operations must be performed in the
+		// given order, and all before the following operations.
+
+		// Avoid negotiating weak MAC algorithms. Servers will ensure that no
+		// weakMACs are the highest priority item. Clients will make
+		// adjustments after predicting the server KEX.
+
+		weakMACs := []string{"hmac-sha1-96"}
+
+		if isServer {
+			MACs = avoid(PRNG, MACs, weakMACs, startingMACs)
+		}
+
+		// Randomly insert new algorithms. For servers, the preceeding legacy
+		// operations will ensure selection of at least one legacy algorithm
+		// of each type, ensuring compatibility with legacy clients.
+
+		newServerKexAlgos := []string{
+			kexAlgoCurve25519SHA256, kexAlgoDH16SHA512,
+			"kex-strict-s-v00@openssh.com",
+		}
+		newServerCiphers := []string{
+			gcm256CipherID,
+		}
+		newServerMACs := []string{
+			"hmac-sha2-512-etm@openssh.com", "hmac-sha2-512",
+		}
+		newServerNoEncryptThenMACs := []string{
+			"hmac-sha2-512",
+		}
+		if t.config.NoEncryptThenMACHash {
+			newServerMACs = newServerNoEncryptThenMACs
+		}
+
+		if isServer {
+			kexAlgos = addSome(PRNG, kexAlgos, newServerKexAlgos)
+			ciphers = addSome(PRNG, ciphers, newServerCiphers)
+			MACs = addSome(PRNG, MACs, newServerMACs)
+		}
+
+		msg.KexAlgos = kexAlgos
+		msg.CiphersClientServer = ciphers
+		msg.CiphersServerClient = ciphers
+		msg.MACsClientServer = MACs
+		msg.MACsServerClient = MACs
+		msg.ServerHostKeyAlgos = hostKeyAlgos
+
 		if !isServer && t.config.PeerKEXPRNGSeed != nil {
 
-			// Generate the peer KEX and make adjustments if negotiation would
-			// fail. This assumes that PeerKEXPRNGSeed remains static (in
-			// Psiphon, the peer is the server and PeerKEXPRNGSeed is derived
-			// from the server entry); and that the PRNG is invoked in the
-			// exact same order on the peer (i.e., the code block immediately
-			// above is what the peer runs); and that the peer sets
-			// NoEncryptThenMACHash in the same cases.
-
-			PeerPRNG := prng.NewPRNGWithSeed(t.config.PeerKEXPRNGSeed)
-
+			// Generate the server KEX and make adjustments if negotiation
+			// would fail. This assumes that PeerKEXPRNGSeed remains static
+			// (in Psiphon, the peer is the server and PeerKEXPRNGSeed is
+			// derived from the server entry); and that the PRNG is invoked
+			// in the exact same order on the server (i.e., the code block
+			// immediately above is what the peer runs); and that the server
+			// sets NoEncryptThenMACHash in the same cases.
+			//
 			// Note that only the client sends "ext-info-c"
 			// and "kex-strict-c-v00@openssh.com" and only the server
 			// sends "kex-strict-s-v00@openssh.com", so these will never
 			// match and do not need to be filtered out before findCommon.
-			//
-			// The following assumes that the server always starts with the
-			// default preferredKexAlgos along with
-			// "kex-strict-s-v00@openssh.com" appended before randomizing.
 
-			serverKexAlgos := append(
-				append([]string(nil), preferredKexAlgos...),
-				"kex-strict-s-v00@openssh.com")
-			serverCiphers := preferredCiphers
-			serverMACS := supportedMACs
-			serverNoEncryptThenMACs := noEncryptThenMACs
+			PeerPRNG := prng.NewPRNGWithSeed(t.config.PeerKEXPRNGSeed)
 
-			// Switch to using the legacy algorithms that the server currently
-			// downgrades to (see comment above).
-			//
-			// TODO: for servers without legacy backwards compatibility
-			// concerns, skip the following lines.
-			serverKexAlgos = legacyServerKexAlgos
-			serverCiphers = legacyServerCiphers
-			serverMACS = legacyServerMACs
-			serverNoEncryptThenMACs = legacyServerNoEncryptThenMACs
+			startingKexAlgos := legacyServerKexAlgos
+			startingCiphers := legacyServerCiphers
+			startingMACs := legacyServerMACs
+			if t.config.NoEncryptThenMACHash {
+				startingMACs = legacyServerNoEncryptThenMACs
+			}
 
-			serverKexAlgos = selectKexAlgos(PeerPRNG, serverKexAlgos)
+			// The server populates msg.ServerHostKeyAlgos based on the host
+			// key type, which, for Psiphon servers, is "ssh-rsa", so
+			// algorithmsForKeyFormat("ssh-rsa") predicts the server
+			// msg.ServerHostKeyAlgos value.
+			startingHostKeyAlgos := algorithmsForKeyFormat("ssh-rsa")
+
+			serverKexAlgos := selectKexAlgos(PeerPRNG, startingKexAlgos)
+			serverCiphers := truncate(PeerPRNG, permute(PeerPRNG, startingCiphers))
+			serverMACs := truncate(PeerPRNG, permute(PeerPRNG, startingMACs))
+
+			if !testLegacyClient {
+
+				// This value is not used, but the identical PRNG operation must be
+				// performed in order to predict the PeerPRNG state.
+				_ = permute(PeerPRNG, startingHostKeyAlgos)
+
+				serverMACs = avoid(PeerPRNG, serverMACs, weakMACs, startingMACs)
+
+				serverKexAlgos = addSome(PeerPRNG, serverKexAlgos, newServerKexAlgos)
+				serverCiphers = addSome(PeerPRNG, serverCiphers, newServerCiphers)
+				serverMACs = addSome(PeerPRNG, serverMACs, newServerMACs)
+			}
+
+			// Adjust to ensure compatibility with the server KEX.
 
 			if _, err := findCommon("", msg.KexAlgos, serverKexAlgos); err != nil {
 				if kexAlgo, ok := firstKexAlgo(serverKexAlgos); ok {
-					msg.KexAlgos = retain(PRNG, msg.KexAlgos, kexAlgo)
+					kexAlgos = retain(PRNG, msg.KexAlgos, kexAlgo)
 				}
 			}
 
-			serverCiphers = truncate(PeerPRNG, permute(PeerPRNG, serverCiphers))
 			if _, err := findCommon("", ciphers, serverCiphers); err != nil {
 				ciphers = retain(PRNG, ciphers, serverCiphers[0])
-				msg.CiphersClientServer = ciphers
-				msg.CiphersServerClient = ciphers
 			}
 
-			if t.config.NoEncryptThenMACHash {
-				serverMACS = serverNoEncryptThenMACs
+			if _, err := findCommon("", MACs, serverMACs); err != nil {
+				MACs = retain(PRNG, MACs, serverMACs[0])
 			}
 
-			serverMACS = truncate(PeerPRNG, permute(PeerPRNG, serverMACS))
-			if _, err := findCommon("", MACs, serverMACS); err != nil {
-				MACs = retain(PRNG, MACs, serverMACS[0])
-				msg.MACsClientServer = MACs
-				msg.MACsServerClient = MACs
+			// Avoid negotiating weak MAC algorithms.
+			//
+			// Legacy clients, without this logic, may still select only weak
+			// MACs or predict only weak MACs for the server KEX.
+
+			commonMAC, _ := findCommon("", MACs, serverMACs)
+			if common.Contains(weakMACs, commonMAC) {
+				// serverMACs[0] is not in weakMACs.
+				MACs = toFront(MACs, serverMACs[0])
 			}
+
+			msg.KexAlgos = kexAlgos
+			msg.CiphersClientServer = ciphers
+			msg.CiphersServerClient = ciphers
+			msg.MACsClientServer = MACs
+			msg.MACsServerClient = MACs
 		}
 
 		// Offer "zlib@openssh.com", which is offered by OpenSSH. Compression
