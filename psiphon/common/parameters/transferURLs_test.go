@@ -66,6 +66,49 @@ func TestTransferURLs(t *testing.T) {
 			1,
 		},
 		{
+			"single URL, multiple attempts, fronting spec",
+			TransferURLs{
+				{
+					URL:               encodedA,
+					OnlyAfterAttempts: 0,
+					FrontingSpecs: []*FrontingSpec{
+						{
+							FrontingProviderID: "frontingProvider",
+							Addresses:          []string{"example.org"},
+							VerifyServerName:   "example.com",
+							Host:               "example.org",
+							SkipVerify:         false,
+						},
+					},
+				},
+			},
+			2,
+			true,
+			decodedA,
+			1,
+		},
+		{
+			"single URL, multiple attempts, fronting spec, skip verify set",
+			TransferURLs{
+				{
+					URL:               encodedA,
+					OnlyAfterAttempts: 0,
+					FrontingSpecs: []*FrontingSpec{
+						{
+							FrontingProviderID: "frontingProvider",
+							Addresses:          []string{"example.org"},
+							Host:               "example.org",
+							SkipVerify:         true,
+						},
+					},
+				},
+			},
+			2,
+			true,
+			decodedA,
+			1,
+		},
+		{
 			"multiple URLs, single attempt",
 			TransferURLs{
 				{

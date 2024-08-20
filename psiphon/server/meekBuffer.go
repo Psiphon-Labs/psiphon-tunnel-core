@@ -225,9 +225,12 @@ func (response *CachedResponse) Write(data []byte) (int, error) {
 			if response.writeBufferIndex == len(response.buffers)-1 &&
 				!response.overwriting {
 
-				extendedBuffer := response.extendedBufferPool.Get()
-				if extendedBuffer != nil {
-					response.buffers = append(response.buffers, extendedBuffer)
+				extendedBufferCount := len(response.buffers) - 1
+				if extendedBufferCount < response.extendedBufferPool.limit {
+					extendedBuffer := response.extendedBufferPool.Get()
+					if extendedBuffer != nil {
+						response.buffers = append(response.buffers, extendedBuffer)
+					}
 				}
 			}
 
@@ -257,13 +260,14 @@ func (response *CachedResponse) Write(data []byte) (int, error) {
 type CachedResponseBufferPool struct {
 	bufferSize int
 	buffers    chan []byte
+	limit      int
 }
 
 // NewCachedResponseBufferPool creates a new CachedResponseBufferPool
 // with the specified number of buffers. Buffers are allocated on
 // demand and once allocated remain allocated.
 func NewCachedResponseBufferPool(
-	bufferSize, bufferCount int) *CachedResponseBufferPool {
+	bufferSize, bufferCount int, limit int) *CachedResponseBufferPool {
 
 	buffers := make(chan []byte, bufferCount)
 	for i := 0; i < bufferCount; i++ {
@@ -273,6 +277,7 @@ func NewCachedResponseBufferPool(
 	return &CachedResponseBufferPool{
 		bufferSize: bufferSize,
 		buffers:    buffers,
+		limit:      limit,
 	}
 }
 

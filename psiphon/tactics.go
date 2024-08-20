@@ -221,6 +221,8 @@ func fetchTactics(
 		canReplay,
 		selectProtocol,
 		serverEntry,
+		nil,
+		nil,
 		true,
 		0,
 		0)
@@ -269,7 +271,7 @@ func fetchTactics(
 	defer meekConn.Close()
 
 	apiParams := getBaseAPIParameters(
-		baseParametersAll, config, dialParams)
+		baseParametersAll, true, config, dialParams)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,

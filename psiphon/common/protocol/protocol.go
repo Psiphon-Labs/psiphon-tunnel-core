@@ -22,11 +22,14 @@ package protocol
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/fxamacker/cbor/v2"
 )
 
 const (
@@ -43,7 +46,13 @@ const (
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH          = "TAPDANCE-OSSH"
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH           = "CONJURE-OSSH"
 
+	FRONTING_TRANSPORT_HTTPS = "FRONTED-HTTPS"
+	FRONTING_TRANSPORT_HTTP  = "FRONTED-HTTP"
+	FRONTING_TRANSPORT_QUIC  = "FRONTED-QUIC"
+
 	TUNNEL_PROTOCOLS_ALL = "All"
+
+	INPROXY_PROTOCOL_WEBRTC = "INPROXY-WEBRTC"
 
 	SERVER_ENTRY_SOURCE_EMBEDDED   = "EMBEDDED"
 	SERVER_ENTRY_SOURCE_REMOTE     = "REMOTE"
@@ -57,11 +66,12 @@ const (
 
 	CLIENT_CAPABILITY_SERVER_REQUESTS = "server-requests"
 
-	PSIPHON_API_HANDSHAKE_REQUEST_NAME = "psiphon-handshake"
-	PSIPHON_API_CONNECTED_REQUEST_NAME = "psiphon-connected"
-	PSIPHON_API_STATUS_REQUEST_NAME    = "psiphon-status"
-	PSIPHON_API_OSL_REQUEST_NAME       = "psiphon-osl"
-	PSIPHON_API_ALERT_REQUEST_NAME     = "psiphon-alert"
+	PSIPHON_API_HANDSHAKE_REQUEST_NAME     = "psiphon-handshake"
+	PSIPHON_API_CONNECTED_REQUEST_NAME     = "psiphon-connected"
+	PSIPHON_API_STATUS_REQUEST_NAME        = "psiphon-status"
+	PSIPHON_API_OSL_REQUEST_NAME           = "psiphon-osl"
+	PSIPHON_API_ALERT_REQUEST_NAME         = "psiphon-alert"
+	PSIPHON_API_INPROXY_RELAY_REQUEST_NAME = "psiphon-inproxy-relay"
 
 	PSIPHON_API_ALERT_DISALLOWED_TRAFFIC = "disallowed-traffic"
 	PSIPHON_API_ALERT_UNSAFE_TRAFFIC     = "unsafe-traffic"
@@ -71,8 +81,10 @@ const (
 
 	PSIPHON_API_CLIENT_SESSION_ID_LENGTH = 16
 
-	PSIPHON_SSH_API_PROTOCOL = "ssh"
-	PSIPHON_WEB_API_PROTOCOL = "web"
+	PSIPHON_API_PROTOCOL_SSH  = "ssh"
+	PSIPHON_API_PROTOCOL_WEB  = "web"
+	PSIPHON_API_ENCODING_CBOR = "cbor"
+	PSIPHON_API_ENCODING_JSON = "json"
 
 	PACKET_TUNNEL_CHANNEL_TYPE            = "tun@psiphon.ca"
 	RANDOM_STREAM_CHANNEL_TYPE            = "random@psiphon.ca"
@@ -101,6 +113,16 @@ func AllowServerEntrySourceWithUpstreamProxy(source string) bool {
 		source == SERVER_ENTRY_SOURCE_REMOTE
 }
 
+func PsiphonAPIProtocolIsValid(protocol string) bool {
+	return protocol == PSIPHON_API_PROTOCOL_SSH ||
+		protocol == PSIPHON_API_PROTOCOL_WEB
+}
+
+func PsiphonAPIEncodingIsValid(protocol string) bool {
+	return protocol == PSIPHON_API_ENCODING_CBOR ||
+		protocol == PSIPHON_API_ENCODING_JSON
+}
+
 type TunnelProtocols []string
 
 func (t TunnelProtocols) Validate() error {
@@ -118,6 +140,16 @@ func (t TunnelProtocols) PruneInvalid() TunnelProtocols {
 	for _, p := range t {
 		if common.Contains(SupportedTunnelProtocols, p) &&
 			!common.Contains(DisabledTunnelProtocols, p) {
+			u = append(u, p)
+		}
+	}
+	return u
+}
+
+func (t TunnelProtocols) OnlyInproxyTunnelProtocols() TunnelProtocols {
+	u := make(TunnelProtocols, 0)
+	for _, p := range t {
+		if TunnelProtocolUsesInproxy(p) {
 			u = append(u, p)
 		}
 	}
@@ -181,7 +213,52 @@ var DisabledTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 }
 
+var InproxyTunnelProtocols = TunnelProtocols{
+	// Populated by init.
+}
+
+func init() {
+
+	// Instead of duplicating most TUNNEL_PROTOCOL* constants,
+	// programmatically add in-proxy variants of all (compatible) tunnel
+	// protocols. All in-proxy variants are default disabled.
+
+	for _, p := range SupportedTunnelProtocols {
+		if TunnelProtocolIsCompatibleWithInproxy(p) {
+			InproxyTunnelProtocols = append(
+				InproxyTunnelProtocols, TunnelProtocolPlusInproxyWebRTC(p))
+		}
+	}
+	SupportedTunnelProtocols = append(SupportedTunnelProtocols, InproxyTunnelProtocols...)
+	DefaultDisabledTunnelProtocols = append(DefaultDisabledTunnelProtocols, InproxyTunnelProtocols...)
+}
+
+func TunnelProtocolPlusInproxyWebRTC(protocol string) string {
+	return fmt.Sprintf("%s-%s", INPROXY_PROTOCOL_WEBRTC, protocol)
+}
+
+func TunnelProtocolMinusInproxy(protocol string) string {
+	// Remove the in-proxy 1st hop portion of the protocol name, which
+	// currently is always "INPROXY-WEBRTC".
+	protocol, _ = strings.CutPrefix(protocol, fmt.Sprintf("%s-", INPROXY_PROTOCOL_WEBRTC))
+	return protocol
+}
+
+func TunnelProtocolUsesInproxy(protocol string) bool {
+	// Check for the in-proxy 1st hop portion of the protocol name, which
+	// currently can only be "INPROXY-WEBRTC".
+	return strings.HasPrefix(protocol, INPROXY_PROTOCOL_WEBRTC)
+}
+
+func TunnelProtocolIsCompatibleWithInproxy(protocol string) bool {
+	// The TapDance and Conjure destination addresses are not included
+	// in the server entry, so TAPDANCE-OSSH and CONJURE-OSSH dial
+	// destinations cannot be validated for inproxy use.
+	return !TunnelProtocolUsesRefractionNetworking(protocol)
+}
+
 func TunnelProtocolUsesTCP(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol != TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
 		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
@@ -190,7 +267,13 @@ func TunnelProtocolUsesSSH(protocol string) bool {
 	return true
 }
 
+func TunnelProtocolIsObfuscatedSSH(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
+	return protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH
+}
+
 func TunnelProtocolUsesObfuscatedSSH(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol != TUNNEL_PROTOCOL_SSH
 }
 
@@ -198,46 +281,55 @@ func TunnelProtocolUsesObfuscatedSSH(protocol string) bool {
 // UsesTLS is ambiguous by itself as there are other protocols which use
 // a TLS layer, e.g. UNFRONTED-MEEK-HTTPS-OSSH.
 func TunnelProtocolUsesTLSOSSH(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH
 }
 
 func TunnelProtocolUsesMeek(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return TunnelProtocolUsesMeekHTTP(protocol) ||
 		TunnelProtocolUsesMeekHTTPS(protocol) ||
 		TunnelProtocolUsesFrontedMeekQUIC(protocol)
 }
 
 func TunnelProtocolUsesFrontedMeek(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
 
 func TunnelProtocolUsesMeekHTTP(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP
 }
 
 func TunnelProtocolUsesMeekHTTPNormalizer(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK
 }
 
 func TunnelProtocolUsesMeekHTTPS(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
 func TunnelProtocolUsesObfuscatedSessionTickets(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
 func TunnelProtocolUsesQUIC(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
 
 func TunnelProtocolUsesFrontedMeekQUIC(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
 
@@ -257,10 +349,12 @@ func TunnelProtocolUsesConjure(protocol string) bool {
 func TunnelProtocolIsResourceIntensive(protocol string) bool {
 	return TunnelProtocolUsesMeek(protocol) ||
 		TunnelProtocolUsesQUIC(protocol) ||
-		TunnelProtocolUsesRefractionNetworking(protocol)
+		TunnelProtocolUsesRefractionNetworking(protocol) ||
+		TunnelProtocolUsesInproxy(protocol)
 }
 
 func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_SSH ||
 		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
@@ -283,6 +377,7 @@ func TunnelProtocolIsDirect(protocol string) bool {
 }
 
 func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 }
 
@@ -291,6 +386,7 @@ func TunnelProtocolRequiresTLS13Support(protocol string) bool {
 }
 
 func TunnelProtocolSupportsPassthrough(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
@@ -298,16 +394,30 @@ func TunnelProtocolSupportsPassthrough(protocol string) bool {
 }
 
 func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
-	return !TunnelProtocolUsesQUIC(protocol)
+	return !TunnelProtocolUsesInproxy(protocol) &&
+		!TunnelProtocolUsesQUIC(protocol)
+}
+
+func TunnelProtocolSupportsTactics(protocol string) bool {
+	return TunnelProtocolUsesMeek(protocol)
 }
 
 func TunnelProtocolMayUseServerPacketManipulation(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_SSH ||
 		protocol == TUNNEL_PROTOCOL_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
+}
+
+func TunnelProtocolMayUseClientBPF(protocol string) bool {
+	if TunnelProtocolUsesInproxy(protocol) {
+		return false
+	}
+	return protocol != TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH &&
+		protocol != TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
 
 func IsValidClientTunnelProtocol(
@@ -347,6 +457,38 @@ func IsValidClientTunnelProtocol(
 	}
 
 	return false
+}
+
+// FrontingTransports are transport protocols used for non-tunnel, fronted
+// connections such as in-proxy broker requests.
+type FrontingTransports []string
+
+func (transports FrontingTransports) Validate() error {
+	for _, t := range transports {
+		switch t {
+		case FRONTING_TRANSPORT_HTTPS,
+			FRONTING_TRANSPORT_HTTP,
+			FRONTING_TRANSPORT_QUIC:
+		default:
+			return errors.Tracef("invalid fronting transport: %s", t)
+		}
+	}
+	return nil
+}
+
+// EquivilentTunnelProtocol returns the tunnel protocol equivilent of a
+// fronting transport. This value may be used to select tactics, defined for
+// the tunnel protocol, for the fronting transport.
+func EquivilentTunnelProtocol(t string) (string, error) {
+	switch t {
+	case FRONTING_TRANSPORT_HTTPS:
+		return TUNNEL_PROTOCOL_FRONTED_MEEK, nil
+	case FRONTING_TRANSPORT_HTTP:
+		return TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP, nil
+	case FRONTING_TRANSPORT_QUIC:
+		return TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH, nil
+	}
+	return "", errors.Tracef("invalid fronting transport: %s", t)
 }
 
 const (
@@ -422,7 +564,6 @@ func TLS12ProfileOmitsSessionTickets(tlsProfile string) bool {
 type TLSProfiles []string
 
 func (profiles TLSProfiles) Validate(customTLSProfiles []string) error {
-
 	for _, p := range profiles {
 		if !common.Contains(SupportedTLSProfiles, p) &&
 			!common.Contains(customTLSProfiles, p) &&
@@ -565,6 +706,10 @@ func ConjureTransportUsesSTUN(transport string) bool {
 	return transport == CONJURE_TRANSPORT_DTLS_OSSH
 }
 
+func ConjureTransportUsesDTLS(transport string) bool {
+	return transport == CONJURE_TRANSPORT_DTLS_OSSH
+}
+
 type ConjureTransports []string
 
 func (transports ConjureTransports) Validate() error {
@@ -587,7 +732,6 @@ func (transports ConjureTransports) PruneInvalid() ConjureTransports {
 }
 
 type HandshakeResponse struct {
-	SSHSessionID             string              `json:"ssh_session_id"`
 	Homepages                []string            `json:"homepages"`
 	UpgradeClientVersion     string              `json:"upgrade_client_version"`
 	PageViewRegexes          []map[string]string `json:"page_view_regexes"`
@@ -640,6 +784,28 @@ type AlertRequest struct {
 	Reason     string   `json:"reason"`
 	Subject    string   `json:"subject"`
 	ActionURLs []string `json:"action"`
+}
+
+// CBOREncoding defines the specific CBDR encoding used for all Psiphon CBOR
+// message encoding. This is initialized to FIDO2 CTAP2 Canonical CBOR.
+var CBOREncoding cbor.EncMode
+
+func init() {
+	encOptions := cbor.CTAP2EncOptions()
+
+	// TimeRFC3339Nano matches the JSON encoding time format and is required
+	// for accesscontrol.packedAuthorization types, which marshal a time.Time.
+	encOptions.Time = cbor.TimeRFC3339Nano
+
+	CBOREncoding, _ = encOptions.EncMode()
+}
+
+type InproxyRelayRequest struct {
+	Packet []byte `cbor:"1,keyasint,omitempty"`
+}
+
+type InproxyRelayResponse struct {
+	Packet []byte `cbor:"1,keyasint,omitempty"`
 }
 
 func DeriveSSHServerKEXPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {

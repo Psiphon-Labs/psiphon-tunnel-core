@@ -22,8 +22,10 @@ package common
 import (
 	"container/list"
 	"context"
+	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -150,51 +152,68 @@ func PortFromAddr(addr net.Addr) int {
 // close a set of open connections, etc.
 // Once the list is closed, no more items may be added to the
 // list (unless it is reset).
-type Conns struct {
+type Conns[T interface {
+	comparable
+	io.Closer
+}] struct {
 	mutex    sync.Mutex
 	isClosed bool
-	conns    map[net.Conn]bool
+	conns    map[T]bool
 }
 
 // NewConns initializes a new Conns.
-func NewConns() *Conns {
-	return &Conns{}
+func NewConns[T interface {
+	comparable
+	io.Closer
+}]() *Conns[T] {
+	return &Conns[T]{}
 }
 
-func (conns *Conns) Reset() {
+func (conns *Conns[T]) Reset() {
 	conns.mutex.Lock()
 	defer conns.mutex.Unlock()
 	conns.isClosed = false
-	conns.conns = make(map[net.Conn]bool)
+	conns.conns = make(map[T]bool)
 }
 
-func (conns *Conns) Add(conn net.Conn) bool {
+func (conns *Conns[T]) Add(conn T) bool {
 	conns.mutex.Lock()
 	defer conns.mutex.Unlock()
 	if conns.isClosed {
 		return false
 	}
 	if conns.conns == nil {
-		conns.conns = make(map[net.Conn]bool)
+		conns.conns = make(map[T]bool)
 	}
 	conns.conns[conn] = true
 	return true
 }
 
-func (conns *Conns) Remove(conn net.Conn) {
+func (conns *Conns[T]) Remove(conn T) {
 	conns.mutex.Lock()
 	defer conns.mutex.Unlock()
 	delete(conns.conns, conn)
 }
 
-func (conns *Conns) CloseAll() {
+func (conns *Conns[T]) CloseAll() {
+
+	conns.mutex.Lock()
+	conns.isClosed = true
+	closeConns := conns.conns
+	conns.conns = make(map[T]bool)
+	conns.mutex.Unlock()
+
+	// Close is invoked outside of the mutex in case a member conn's Close
+	// invokes Remove.
+	for conn := range closeConns {
+		_ = conn.Close()
+	}
+}
+
+func (conns *Conns[T]) IsClosed() bool {
 	conns.mutex.Lock()
 	defer conns.mutex.Unlock()
-	conns.isClosed = true
-	for conn := range conns.conns {
-		conn.Close()
-	}
-	conns.conns = make(map[net.Conn]bool)
+	return conns.isClosed
 }
 
 // LRUConns is a concurrency-safe list of net.Conns ordered
@@ -331,7 +350,7 @@ func (conn *WriteTimeoutUDPConn) Write(b []byte) (int, error) {
 		return 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by UDPConn
 	return conn.UDPConn.Write(b)
 }
 
@@ -342,8 +361,19 @@ func (conn *WriteTimeoutUDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (
 		return 0, 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by UDPConn
 	return conn.UDPConn.WriteMsgUDP(b, oob, addr)
+}
+
+func (conn *WriteTimeoutUDPConn) WriteMsgUDPAddrPort(b, oob []byte, addr netip.AddrPort) (int, int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by UDPConn
+	return conn.UDPConn.WriteMsgUDPAddrPort(b, oob, addr)
 }
 
 func (conn *WriteTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
@@ -353,8 +383,19 @@ func (conn *WriteTimeoutUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 		return 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by UDPConn
 	return conn.UDPConn.WriteTo(b, addr)
+}
+
+func (conn *WriteTimeoutUDPConn) WriteToUDPAddrPort(b []byte, addr netip.AddrPort) (int, error) {
+
+	err := conn.SetWriteDeadline(time.Now().Add(UDP_PACKET_WRITE_TIMEOUT))
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Do not wrap any I/O err returned by UDPConn
+	return conn.UDPConn.WriteToUDPAddrPort(b, addr)
 }
 
 func (conn *WriteTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, error) {
@@ -364,7 +405,7 @@ func (conn *WriteTimeoutUDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, e
 		return 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by UDPConn
 	return conn.UDPConn.WriteToUDP(b, addr)
 }
 
@@ -383,6 +424,21 @@ func (conn *WriteTimeoutPacketConn) WriteTo(b []byte, addr net.Addr) (int, error
 		return 0, errors.Trace(err)
 	}
 
-	// Do not wrap any I/O err returned by udpConn
+	// Do not wrap any I/O err returned by PacketConn
 	return conn.PacketConn.WriteTo(b, addr)
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *WriteTimeoutPacketConn) GetMetrics() LogFields {
+
+	logFields := make(LogFields)
+
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
+	underlyingMetrics, ok := conn.PacketConn.(MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
+
+	return logFields
 }

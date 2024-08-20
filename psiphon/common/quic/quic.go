@@ -144,7 +144,7 @@ func Listen(
 	obfuscationKey string,
 	enableGQUIC bool) (net.Listener, error) {
 
-	certificate, privateKey, err := common.GenerateWebServerCertificate(
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate(
 		values.GetHostName())
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -180,7 +180,7 @@ func Listen(
 	// timely shutdown.
 
 	obfuscatedPacketConn, err := NewServerObfuscatedPacketConn(
-		udpConn, true, false, false, obfuscationKey, seed)
+		udpConn, false, false, obfuscationKey, seed)
 	if err != nil {
 		udpConn.Close()
 		return nil, errors.Trace(err)
@@ -219,8 +219,10 @@ func Listen(
 		// The non-strict case where ok is true and logFields is not nil is
 		// ignored, and nothing is logged in that scenario.
 
+		strictMode := false
+
 		ok, logFields := clientRandomHistory.AddNew(
-			false, remoteAddr.String(), "client-hello-random", clientHelloRandom)
+			strictMode, remoteAddr.String(), "client-hello-random", clientHelloRandom)
 		if !ok && logFields != nil {
 			irregularTunnelLogger(
 				common.IPAddressFromAddr(remoteAddr),
@@ -437,7 +439,7 @@ func Dial(
 	if isObfuscated(quicVersion) {
 		obfuscatedPacketConn, err := NewClientObfuscatedPacketConn(
 			packetConn,
-			false,
+			remoteAddr,
 			isIETFVersionNumber(versionNumber),
 			isDecoy(quicVersion),
 			obfuscationKey,
@@ -684,6 +686,21 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 	}
 
 	return conn.stream.SetWriteDeadline(t)
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *Conn) GetMetrics() common.LogFields {
+
+	logFields := make(common.LogFields)
+
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
+	underlyingMetrics, ok := conn.packetConn.(common.MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
+
+	return logFields
 }
 
 // QUICTransporter implements the psiphon.transporter interface, used in

@@ -488,7 +488,7 @@ func GetPacketTunnelMTU() int {
 // If called before Start, log notices will emit to stderr.
 func WriteRuntimeProfiles(outputDirectory string, cpuSampleDurationSeconds, blockSampleDurationSeconds int) {
 	common.WriteRuntimeProfiles(
-		psiphon.NoticeCommonLogger(),
+		psiphon.NoticeCommonLogger(false),
 		outputDirectory,
 		"",
 		cpuSampleDurationSeconds,

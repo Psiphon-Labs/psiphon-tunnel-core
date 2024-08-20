@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/wildcard"
 )
 
@@ -236,5 +237,42 @@ func SleepWithContext(ctx context.Context, duration time.Duration) {
 	select {
 	case <-timer.C:
 	case <-ctx.Done():
+	}
+}
+
+// SleepWithJitter returns after the specified duration, with random jitter
+// applied, or once the input ctx is done, whichever is first.
+func SleepWithJitter(ctx context.Context, duration time.Duration, jitter float64) {
+	timer := time.NewTimer(prng.JitterDuration(duration, jitter))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+// ValueOrDefault returns the input value, or, when value is the zero value of
+// its type, defaultValue.
+func ValueOrDefault[T comparable](value, defaultValue T) T {
+	var zero T
+	if value == zero {
+		return defaultValue
+	}
+	return value
+}
+
+// MergeContextCancel returns a context which has the properties of the 1st
+// input content and merges in the cancellation signal of the 2nd context, so
+// the returned context is cancelled when either input context is cancelled.
+//
+// See (and adapted from): https://pkg.go.dev/context#example-AfterFunc-Merge
+func MergeContextCancel(ctx, cancelCtx context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	stop := context.AfterFunc(cancelCtx, func() {
+		cancel(context.Cause(cancelCtx))
+	})
+	return ctx, func() {
+		stop()
+		cancel(context.Canceled)
 	}
 }

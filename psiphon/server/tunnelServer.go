@@ -32,6 +32,7 @@ import (
 	"io/ioutil"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -41,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/monotime"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
@@ -67,11 +69,13 @@ const (
 	SSH_KEEP_ALIVE_PAYLOAD_MAX_BYTES      = 256
 	SSH_SEND_OSL_INITIAL_RETRY_DELAY      = 30 * time.Second
 	SSH_SEND_OSL_RETRY_FACTOR             = 2
+	GEOIP_SESSION_CACHE_TTL               = 60 * time.Minute
 	OSL_SESSION_CACHE_TTL                 = 5 * time.Minute
 	MAX_AUTHORIZATIONS                    = 16
 	PRE_HANDSHAKE_RANDOM_STREAM_MAX_COUNT = 1
 	RANDOM_STREAM_MAX_BYTES               = 10485760
 	ALERT_REQUEST_QUEUE_BUFFER_SIZE       = 16
+	SSH_MAX_CLIENT_COUNT                  = 100000
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -163,17 +167,20 @@ func (server *TunnelServer) Run() error {
 
 		} else if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
 
+			// in-proxy QUIC tunnel protocols don't support gQUIC.
+			enableGQUIC := support.Config.EnableGQUIC && !protocol.TunnelProtocolUsesInproxy(tunnelProtocol)
+
 			logTunnelProtocol := tunnelProtocol
 			listener, err = quic.Listen(
 				CommonLogger(log),
-				func(clientAddress string, err error, logFields common.LogFields) {
+				func(peerAddress string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
-						support, logTunnelProtocol, listenPort, clientAddress,
+						support, logTunnelProtocol, listenPort, peerAddress,
 						errors.Trace(err), LogFields(logFields))
 				},
 				localAddress,
 				support.Config.ObfuscatedSSHKey,
-				support.Config.EnableGQUIC)
+				enableGQUIC)
 
 		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
 
@@ -299,58 +306,10 @@ func (server *TunnelServer) ResetAllClientOSLConfigs() {
 	server.sshServer.resetAllClientOSLConfigs()
 }
 
-// SetClientHandshakeState sets the handshake state -- that it completed and
-// what parameters were passed -- in sshClient. This state is used for allowing
-// port forwards and for future traffic rule selection. SetClientHandshakeState
-// also triggers an immediate traffic rule re-selection, as the rules selected
-// upon tunnel establishment may no longer apply now that handshake values are
-// set.
-//
-// The authorizations received from the client handshake are verified and the
-// resulting list of authorized access types are applied to the client's tunnel
-// and traffic rules.
-//
-// A list of active authorization IDs, authorized access types, and traffic
-// rate limits are returned for responding to the client and logging.
-func (server *TunnelServer) SetClientHandshakeState(
-	sessionID string,
-	state handshakeState,
-	authorizations []string) (*handshakeStateInfo, error) {
-
-	return server.sshServer.setClientHandshakeState(sessionID, state, authorizations)
-}
-
-// GetClientHandshaked indicates whether the client has completed a handshake
-// and whether its traffic rules are immediately exhausted.
-func (server *TunnelServer) GetClientHandshaked(
-	sessionID string) (bool, bool, error) {
-
-	return server.sshServer.getClientHandshaked(sessionID)
-}
-
-// GetClientDisableDiscovery indicates whether discovery is disabled for the
-// client corresponding to sessionID.
-func (server *TunnelServer) GetClientDisableDiscovery(
-	sessionID string) (bool, error) {
-
-	return server.sshServer.getClientDisableDiscovery(sessionID)
-}
-
-// UpdateClientAPIParameters updates the recorded handshake API parameters for
-// the client corresponding to sessionID.
-func (server *TunnelServer) UpdateClientAPIParameters(
-	sessionID string,
-	apiParams common.APIParameters) error {
-
-	return server.sshServer.updateClientAPIParameters(sessionID, apiParams)
-}
-
-// AcceptClientDomainBytes indicates whether to accept domain bytes reported
-// by the client.
-func (server *TunnelServer) AcceptClientDomainBytes(
-	sessionID string) (bool, error) {
-
-	return server.sshServer.acceptClientDomainBytes(sessionID)
+// ReloadTactics signals components that use server-side tactics for one-time
+// initialization to reload and use potentially changed parameters.
+func (server *TunnelServer) ReloadTactics() error {
+	return errors.Trace(server.sshServer.reloadTactics())
 }
 
 // SetEstablishTunnels sets whether new tunnels may be established or not.
@@ -376,23 +335,32 @@ type sshServer struct {
 	// Note: 64-bit ints used with atomic operations are placed
 	// at the start of struct to ensure 64-bit alignment.
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastAuthLog                  int64
-	authFailedCount              int64
-	establishLimitedCount        int64
-	support                      *SupportServices
-	establishTunnels             int32
-	concurrentSSHHandshakes      semaphore.Semaphore
-	shutdownBroadcast            <-chan struct{}
-	sshHostKey                   ssh.Signer
-	clientsMutex                 sync.Mutex
-	stoppingClients              bool
-	acceptedClientCounts         map[string]map[string]int64
-	clients                      map[string]*sshClient
-	oslSessionCacheMutex         sync.Mutex
-	oslSessionCache              *cache.Cache
+	lastAuthLog             int64
+	authFailedCount         int64
+	establishLimitedCount   int64
+	support                 *SupportServices
+	establishTunnels        int32
+	concurrentSSHHandshakes semaphore.Semaphore
+	shutdownBroadcast       <-chan struct{}
+	sshHostKey              ssh.Signer
+	obfuscatorSeedHistory   *obfuscator.SeedHistory
+	inproxyBrokerSessions   *inproxy.ServerBrokerSessions
+
+	clientsMutex         sync.Mutex
+	stoppingClients      bool
+	acceptedClientCounts map[string]map[string]int64
+	clients              map[string]*sshClient
+
+	geoIPSessionCache *cache.Cache
+
+	oslSessionCacheMutex sync.Mutex
+	oslSessionCache      *cache.Cache
+
 	authorizationSessionIDsMutex sync.Mutex
 	authorizationSessionIDs      map[string]string
-	obfuscatorSeedHistory        *obfuscator.SeedHistory
+
+	meekServersMutex sync.Mutex
+	meekServers      []*MeekServer
 }
 
 func newSSHServer(
@@ -415,6 +383,18 @@ func newSSHServer(
 		concurrentSSHHandshakes = semaphore.New(support.Config.MaxConcurrentSSHHandshakes)
 	}
 
+	// The geoIPSessionCache replaces the legacy cache that used to be in
+	// GeoIPServices and was used for the now-retired web API. That cache was
+	// also used for, and now geoIPSessionCache provides:
+	// - Determining first-tunnel-in-session (from a single server's point of
+	//   view)
+	// - GeoIP for duplicate authorizations logic.
+	//
+	// TODO: combine geoIPSessionCache with oslSessionCache; need to deal with
+	// OSL flush on hot reload and reconcile differing TTLs.
+
+	geoIPSessionCache := cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute)
+
 	// The OSL session cache temporarily retains OSL seed state
 	// progress for disconnected clients. This enables clients
 	// that disconnect and immediately reconnect to the same
@@ -428,7 +408,72 @@ func newSSHServer(
 	// were known, infer some activity.
 	oslSessionCache := cache.New(OSL_SESSION_CACHE_TTL, 1*time.Minute)
 
-	return &sshServer{
+	// inproxyBrokerSessions are the secure in-proxy broker/server sessions
+	// used to relay information from the broker to the server, including the
+	// original in-proxy client IP and the in-proxy proxy ID.
+	//
+	// Only brokers with public keys configured in the
+	// InproxyAllBrokerPublicKeys tactic parameter are allowed to connect to
+	// the server, and brokers verify the server's public key via the
+	// InproxySessionPublicKey server entry field.
+	//
+	// Sessions are initialized and run for all psiphond instances running any
+	// in-proxy tunnel protocol.
+
+	var inproxyBrokerSessions *inproxy.ServerBrokerSessions
+
+	runningInproxy := false
+	for tunnelProtocol, _ := range support.Config.TunnelProtocolPorts {
+		if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
+			runningInproxy = true
+			break
+		}
+	}
+
+	if runningInproxy {
+
+		inproxyPrivateKey, err := inproxy.SessionPrivateKeyFromString(
+			support.Config.InproxyServerSessionPrivateKey)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		inproxyObfuscationSecret, err := inproxy.ObfuscationSecretFromString(
+			support.Config.InproxyServerObfuscationRootSecret)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// The expected broker public keys are set in reloadTactics directly
+		// below, so none are set here.
+		inproxyBrokerSessions, err = inproxy.NewServerBrokerSessions(
+			inproxyPrivateKey, inproxyObfuscationSecret, nil)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	// Limitation: rate limiting and resource limiting are handled by external
+	// components, and sshServer enforces only a sanity check limit on the
+	// number of entries in sshServer.clients; and no limit on the number of
+	// entries in sshServer.geoIPSessionCache or sshServer.oslSessionCache.
+	//
+	// To avoid resource exhaustion, this implementation relies on:
+	//
+	// - Per-peer IP address and/or overall network connection rate limiting,
+	//   provided by iptables as configured by Psiphon automation
+	//   (https://github.com/Psiphon-Inc/psiphon-automation/blob/
+	//   4d913d13339d7d54c053a01e5a928e343045cde8/Automation/psi_ops_install.py#L1451).
+	//
+	// - Host CPU/memory/network monitoring and signalling, installed Psiphon
+	//   automation
+	//   (https://github.com/Psiphon-Inc/psiphon-automation/blob/
+	//    4d913d13339d7d54c053a01e5a928e343045cde8/Automation/psi_ops_install.py#L935).
+	//   When resource usage meets certain thresholds, the monitoring signals
+	//   this process with SIGTSTP or SIGCONT, and handlers call
+	//   sshServer.setEstablishTunnels to stop or resume accepting new clients.
+
+	sshServer := &sshServer{
 		support:                 support,
 		establishTunnels:        1,
 		concurrentSSHHandshakes: concurrentSSHHandshakes,
@@ -436,10 +481,21 @@ func newSSHServer(
 		sshHostKey:              signer,
 		acceptedClientCounts:    make(map[string]map[string]int64),
 		clients:                 make(map[string]*sshClient),
+		geoIPSessionCache:       geoIPSessionCache,
 		oslSessionCache:         oslSessionCache,
 		authorizationSessionIDs: make(map[string]string),
 		obfuscatorSeedHistory:   obfuscator.NewSeedHistory(nil),
-	}, nil
+		inproxyBrokerSessions:   inproxyBrokerSessions,
+	}
+
+	// Initialize components that use server-side tactics and which reload on
+	// tactics change events.
+	err = sshServer.reloadTactics()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return sshServer, nil
 }
 
 func (sshServer *sshServer) setEstablishTunnels(establish bool) {
@@ -487,15 +543,17 @@ type additionalTransportData struct {
 // occurs, it will send the error to the listenerError channel.
 func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError chan<- error) {
 
-	handleClient := func(clientConn net.Conn, transportData *additionalTransportData) {
+	handleClient := func(conn net.Conn, transportData *additionalTransportData) {
 
 		// Note: establish tunnel limiter cannot simply stop TCP
 		// listeners in all cases (e.g., meek) since SSH tunnels can
 		// span multiple TCP connections.
 
 		if !sshServer.checkEstablishTunnels() {
-			log.WithTrace().Debug("not establishing tunnels")
-			clientConn.Close()
+			if IsLogLevelDebug() {
+				log.WithTrace().Debug("not establishing tunnels")
+			}
+			conn.Close()
 			return
 		}
 
@@ -517,7 +575,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 		// client may dial a different port for its first hop.
 
 		// Process each client connection concurrently.
-		go sshServer.handleClient(sshListener, clientConn, transportData)
+		go sshServer.handleClient(sshListener, conn, transportData)
 	}
 
 	// Note: when exiting due to a unrecoverable error, be sure
@@ -525,7 +583,8 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 	// TunnelServer.Run will properly shut down instead of remaining
 	// running.
 
-	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) || protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(sshListener.tunnelProtocol) ||
+		protocol.TunnelProtocolUsesMeekHTTPS(sshListener.tunnelProtocol) {
 
 		if sshServer.tunnelProtocolUsesTLSDemux(sshListener.tunnelProtocol) {
 
@@ -545,6 +604,7 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 				sshServer.shutdownBroadcast)
 
 			if err == nil {
+				sshServer.registerMeekServer(meekServer)
 				err = meekServer.Run()
 			}
 
@@ -565,7 +625,10 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 
 // runMeekTLSOSSHDemuxListener blocks running a listener which demuxes meek and
 // TLS-OSSH connections received on the same port.
-func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener, listenerError chan<- error, handleClient func(clientConn net.Conn, transportData *additionalTransportData)) {
+func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(
+	sshListener *sshListener,
+	listenerError chan<- error,
+	handleClient func(conn net.Conn, transportData *additionalTransportData)) {
 
 	meekClassifier := protocolClassifier{
 		minBytesToMatch: 4,
@@ -589,7 +652,11 @@ func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener
 		},
 	}
 
-	listener, err := ListenTLSTunnel(sshServer.support, sshListener.Listener, sshListener.tunnelProtocol, sshListener.port)
+	listener, err := ListenTLSTunnel(
+		sshServer.support,
+		sshListener.Listener,
+		sshListener.tunnelProtocol,
+		sshListener.port)
 	if err != nil {
 		select {
 		case listenerError <- errors.Trace(err):
@@ -598,7 +665,11 @@ func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener
 		return
 	}
 
-	mux, listeners := newProtocolDemux(context.Background(), listener, []protocolClassifier{meekClassifier, tlsClassifier}, sshServer.support.Config.sshHandshakeTimeout)
+	mux, listeners := newProtocolDemux(
+		context.Background(),
+		listener,
+		[]protocolClassifier{meekClassifier, tlsClassifier},
+		sshServer.support.Config.sshHandshakeTimeout)
 
 	var wg sync.WaitGroup
 
@@ -644,7 +715,11 @@ func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener
 		defer wg.Done()
 
 		// Override the listener tunnel protocol to report TLS-OSSH instead.
-		runListener(listeners[1], sshServer.shutdownBroadcast, listenerError, protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH, handleClient)
+		runListener(
+			listeners[1],
+			sshServer.shutdownBroadcast,
+			listenerError,
+			protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH, handleClient)
 	}()
 
 	wg.Add(1)
@@ -669,6 +744,7 @@ func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener
 			sshServer.shutdownBroadcast)
 
 		if err == nil {
+			sshServer.registerMeekServer(meekServer)
 			err = meekServer.Run()
 		}
 
@@ -684,7 +760,13 @@ func (sshServer *sshServer) runMeekTLSOSSHDemuxListener(sshListener *sshListener
 	wg.Wait()
 }
 
-func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, listenerError chan<- error, overrideTunnelProtocol string, handleClient func(clientConn net.Conn, transportData *additionalTransportData)) {
+func runListener(
+	listener net.Listener,
+	shutdownBroadcast <-chan struct{},
+	listenerError chan<- error,
+	overrideTunnelProtocol string,
+	handleClient func(conn net.Conn, transportData *additionalTransportData)) {
+
 	for {
 		conn, err := listener.Accept()
 
@@ -726,8 +808,32 @@ func runListener(listener net.Listener, shutdownBroadcast <-chan struct{}, liste
 	}
 }
 
-// An accepted client has completed a direct TCP or meek connection and has a net.Conn. Registration
-// is for tracking the number of connections.
+// registerMeekServer registers a MeekServer instance to receive tactics
+// reload signals.
+func (sshServer *sshServer) registerMeekServer(meekServer *MeekServer) {
+	sshServer.meekServersMutex.Lock()
+	defer sshServer.meekServersMutex.Unlock()
+
+	sshServer.meekServers = append(sshServer.meekServers, meekServer)
+}
+
+// reloadMeekServerTactics signals each registered MeekServer instance that
+// tactics have reloaded and may have changed.
+func (sshServer *sshServer) reloadMeekServerTactics() error {
+	sshServer.meekServersMutex.Lock()
+	defer sshServer.meekServersMutex.Unlock()
+
+	for _, meekServer := range sshServer.meekServers {
+		err := meekServer.ReloadTactics()
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+	return nil
+}
+
+// An accepted client has completed a direct TCP or meek connection and has a
+// net.Conn. Registration is for tracking the number of connections.
 func (sshServer *sshServer) registerAcceptedClient(tunnelProtocol, region string) {
 
 	sshServer.clientsMutex.Lock()
@@ -787,7 +893,7 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 		// - existingClient is invoking handshakeAPIRequestHandler
 		// - sshServer.clients[client.sessionID] is updated to point to new client
 		// - existingClient's handshakeAPIRequestHandler invokes
-		//   SetClientHandshakeState but sets the handshake parameters for new
+		//   setHandshakeState but sets the handshake parameters for new
 		//   client
 		// - as a result, the new client handshake will fail (only a single handshake
 		//   is permitted) and the new client server_tunnel log will contain an
@@ -831,6 +937,14 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 		// level.
 		log.WithTrace().Warning(
 			"aborting new client with duplicate session ID")
+		return false
+	}
+
+	// SSH_MAX_CLIENT_COUNT is a simple sanity check and failsafe. Load
+	// limiting tuned to each server's host resources is provided by external
+	// components. See comment in newSSHServer for more details.
+	if len(sshServer.clients) >= SSH_MAX_CLIENT_COUNT {
+		log.WithTrace().Warning("SSH_MAX_CLIENT_COUNT exceeded")
 		return false
 	}
 
@@ -947,6 +1061,10 @@ func (sshServer *sshServer) getLoadStats() (
 
 	// Note: as currently tracked/counted, each established client is also an accepted client
 
+	// Accepted client counts use peer GeoIP data, which in the case of
+	// in-proxy tunnel protocols is the proxy, not the client. The original
+	// client IP is only obtained after the tunnel handshake has completed.
+
 	for tunnelProtocol, regionAcceptedClientCounts := range sshServer.acceptedClientCounts {
 		for region, acceptedClientCount := range regionAcceptedClientCounts {
 
@@ -968,8 +1086,13 @@ func (sshServer *sshServer) getLoadStats() (
 
 		client.Lock()
 
+		// Limitation: registerEstablishedClient is called before the
+		// handshake API completes; as a result, in the case of in-proxy
+		// tunnel protocol, clientGeoIPData may not yet be initialized and
+		// will count as None.
+
 		tunnelProtocol := client.tunnelProtocol
-		region := client.geoIPData.Country
+		region := client.clientGeoIPData.Country
 
 		if regionStats[region] == nil {
 			regionStats[region] = zeroProtocolStats()
@@ -1174,9 +1297,11 @@ func (sshServer *sshServer) getLoadStats() (
 		//   session_id. Concurrent proximate clients may be considered an
 		//   exact number of other _network connections_, even from the same
 		//   client.
+		//
+		// - For in-proxy tunnel protocols, the same GeoIP caveats
+		//   (see comments above) apply.
 
-		region := client.geoIPData.Country
-		stats := regionStats[region]["ALL"]
+		stats := regionStats[client.peerGeoIPData.Country]["ALL"]
 
 		n := stats["accepted_clients"].(int64) - 1
 		if n >= 0 {
@@ -1190,6 +1315,8 @@ func (sshServer *sshServer) getLoadStats() (
 				*client.peakMetrics.concurrentProximateAcceptedClients = n
 			}
 		}
+
+		stats = regionStats[client.clientGeoIPData.Country]["ALL"]
 
 		n = stats["established_clients"].(int64) - 1
 		if n >= 0 {
@@ -1252,71 +1379,57 @@ func (sshServer *sshServer) resetAllClientOSLConfigs() {
 	}
 }
 
-func (sshServer *sshServer) setClientHandshakeState(
-	sessionID string,
-	state handshakeState,
-	authorizations []string) (*handshakeStateInfo, error) {
+// reloadTactics signals/invokes components that use server-side tactics for
+// one-time initialization to reload and use potentially changed parameters.
+func (sshServer *sshServer) reloadTactics() error {
 
-	sshServer.clientsMutex.Lock()
-	client := sshServer.clients[sessionID]
-	sshServer.clientsMutex.Unlock()
+	// The following in-proxy components use server-side tactics with a
+	// one-time initialization:
+	//
+	// - For servers running in-proxy tunnel protocols,
+	//   sshServer.inproxyBrokerSessions are the broker/server sessions and
+	//   the set of expected broker public keys is set from tactics.
+	// - For servers running a broker within MeekServer, broker operational
+	//   configuration is set from tactics.
+	//
+	// For these components, one-time initialization is more efficient than
+	// constantly fetching tactics. Instead, these components reinitialize
+	// when tactics change.
 
-	if client == nil {
-		return nil, errors.TraceNew("unknown session ID")
+	// sshServer.inproxyBrokerSessions is not nil when the server is running
+	// in-proxy tunnel protocols.
+	if sshServer.inproxyBrokerSessions != nil {
+
+		// Get InproxyAllBrokerPublicKeys from tactics.
+		//
+		// Limitation: assumes no GeoIP targeting for InproxyAllBrokerPublicKeys.
+
+		p, err := sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if !p.IsNil() {
+
+			brokerPublicKeys, err := inproxy.SessionPublicKeysFromStrings(
+				p.Strings(parameters.InproxyAllBrokerPublicKeys))
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			// SetKnownBrokerPublicKeys will terminate any existing sessions
+			// for broker public keys no longer in the known/expected list;
+			// but will retain any existing sessions for broker public keys
+			// that remain in the list.
+			sshServer.inproxyBrokerSessions.SetKnownBrokerPublicKeys(brokerPublicKeys)
+
+		}
 	}
 
-	handshakeStateInfo, err := client.setHandshakeState(
-		state, authorizations)
+	err := sshServer.reloadMeekServerTactics()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return errors.Trace(err)
 	}
-
-	return handshakeStateInfo, nil
-}
-
-func (sshServer *sshServer) getClientHandshaked(
-	sessionID string) (bool, bool, error) {
-
-	sshServer.clientsMutex.Lock()
-	client := sshServer.clients[sessionID]
-	sshServer.clientsMutex.Unlock()
-
-	if client == nil {
-		return false, false, errors.TraceNew("unknown session ID")
-	}
-
-	completed, exhausted := client.getHandshaked()
-
-	return completed, exhausted, nil
-}
-
-func (sshServer *sshServer) getClientDisableDiscovery(
-	sessionID string) (bool, error) {
-
-	sshServer.clientsMutex.Lock()
-	client := sshServer.clients[sessionID]
-	sshServer.clientsMutex.Unlock()
-
-	if client == nil {
-		return false, errors.TraceNew("unknown session ID")
-	}
-
-	return client.getDisableDiscovery(), nil
-}
-
-func (sshServer *sshServer) updateClientAPIParameters(
-	sessionID string,
-	apiParams common.APIParameters) error {
-
-	sshServer.clientsMutex.Lock()
-	client := sshServer.clients[sessionID]
-	sshServer.clientsMutex.Unlock()
-
-	if client == nil {
-		return errors.TraceNew("unknown session ID")
-	}
-
-	client.updateAPIParameters(apiParams)
 
 	return nil
 }
@@ -1346,20 +1459,6 @@ func (sshServer *sshServer) revokeClientAuthorizations(sessionID string) {
 	client.setTrafficRules()
 }
 
-func (sshServer *sshServer) acceptClientDomainBytes(
-	sessionID string) (bool, error) {
-
-	sshServer.clientsMutex.Lock()
-	client := sshServer.clients[sessionID]
-	sshServer.clientsMutex.Unlock()
-
-	if client == nil {
-		return false, errors.TraceNew("unknown session ID")
-	}
-
-	return client.acceptDomainBytes(), nil
-}
-
 func (sshServer *sshServer) stopClients() {
 
 	sshServer.clientsMutex.Lock()
@@ -1375,7 +1474,7 @@ func (sshServer *sshServer) stopClients() {
 
 func (sshServer *sshServer) handleClient(
 	sshListener *sshListener,
-	clientConn net.Conn,
+	conn net.Conn,
 	transportData *additionalTransportData) {
 
 	// overrideTunnelProtocol sets the tunnel protocol to a value other than
@@ -1388,10 +1487,10 @@ func (sshServer *sshServer) handleClient(
 		tunnelProtocol = transportData.overrideTunnelProtocol
 	}
 
-	// Calling clientConn.RemoteAddr at this point, before any Read calls,
+	// Calling conn.RemoteAddr at this point, before any Read calls,
 	// satisfies the constraint documented in tapdance.Listen.
 
-	clientAddr := clientConn.RemoteAddr()
+	peerAddr := conn.RemoteAddr()
 
 	// Check if there were irregularities during the network connection
 	// establishment. When present, log and then behave as Obfuscated SSH does
@@ -1400,7 +1499,7 @@ func (sshServer *sshServer) handleClient(
 	// One concrete irregular case is failure to send a PROXY protocol header for
 	// TAPDANCE-OSSH.
 
-	if indicator, ok := clientConn.(common.IrregularIndicator); ok {
+	if indicator, ok := conn.(common.IrregularIndicator); ok {
 
 		tunnelErr := indicator.IrregularTunnelError()
 
@@ -1410,18 +1509,18 @@ func (sshServer *sshServer) handleClient(
 				sshServer.support,
 				sshListener.tunnelProtocol,
 				sshListener.port,
-				common.IPAddressFromAddr(clientAddr),
+				common.IPAddressFromAddr(peerAddr),
 				errors.Trace(tunnelErr),
 				nil)
 
 			var afterFunc *time.Timer
 			if sshServer.support.Config.sshHandshakeTimeout > 0 {
 				afterFunc = time.AfterFunc(sshServer.support.Config.sshHandshakeTimeout, func() {
-					clientConn.Close()
+					conn.Close()
 				})
 			}
-			io.Copy(ioutil.Discard, clientConn)
-			clientConn.Close()
+			io.Copy(ioutil.Discard, conn)
+			conn.Close()
 			afterFunc.Stop()
 
 			return
@@ -1430,6 +1529,10 @@ func (sshServer *sshServer) handleClient(
 
 	// Get any packet manipulation values from GetAppliedSpecName as soon as
 	// possible due to the expiring TTL.
+	//
+	// In the case of in-proxy tunnel protocols, the remote address will be
+	// the proxy, not the client, and GeoIP targeted packet manipulation will
+	// apply to the 2nd hop.
 
 	serverPacketManipulation := ""
 	replayedServerPacketManipulation := false
@@ -1448,13 +1551,13 @@ func (sshServer *sshServer) handleClient(
 
 		var localAddr, remoteAddr *net.TCPAddr
 		var ok bool
-		underlying, ok := clientConn.(common.UnderlyingTCPAddrSource)
+		underlying, ok := conn.(common.UnderlyingTCPAddrSource)
 		if ok {
 			localAddr, remoteAddr, ok = underlying.GetUnderlyingTCPAddrs()
 		} else {
-			localAddr, ok = clientConn.LocalAddr().(*net.TCPAddr)
+			localAddr, ok = conn.LocalAddr().(*net.TCPAddr)
 			if ok {
-				remoteAddr, ok = clientConn.RemoteAddr().(*net.TCPAddr)
+				remoteAddr, ok = conn.RemoteAddr().(*net.TCPAddr)
 			}
 		}
 
@@ -1468,11 +1571,14 @@ func (sshServer *sshServer) handleClient(
 		}
 	}
 
-	geoIPData := sshServer.support.GeoIPService.Lookup(
-		common.IPAddressFromAddr(clientAddr))
+	// For in-proxy tunnel protocols, accepted client GeoIP reflects the proxy
+	// address, not the client.
 
-	sshServer.registerAcceptedClient(tunnelProtocol, geoIPData.Country)
-	defer sshServer.unregisterAcceptedClient(tunnelProtocol, geoIPData.Country)
+	peerGeoIPData := sshServer.support.GeoIPService.Lookup(
+		common.IPAddressFromAddr(peerAddr))
+
+	sshServer.registerAcceptedClient(tunnelProtocol, peerGeoIPData.Country)
+	defer sshServer.unregisterAcceptedClient(tunnelProtocol, peerGeoIPData.Country)
 
 	// When configured, enforce a cap on the number of concurrent SSH
 	// handshakes. This limits load spikes on busy servers when many clients
@@ -1507,7 +1613,7 @@ func (sshServer *sshServer) handleClient(
 
 		err := sshServer.concurrentSSHHandshakes.Acquire(ctx, 1)
 		if err != nil {
-			clientConn.Close()
+			conn.Close()
 			// This is a debug log as the only possible error is context timeout.
 			log.WithTraceFields(LogFields{"error": err}).Debug(
 				"acquire SSH handshake semaphore failed")
@@ -1526,14 +1632,14 @@ func (sshServer *sshServer) handleClient(
 		transportData,
 		serverPacketManipulation,
 		replayedServerPacketManipulation,
-		clientAddr,
-		geoIPData)
+		peerAddr,
+		peerGeoIPData)
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
 	// in any error case; or, as soon as the SSH handshake phase has successfully
 	// completed.
 
-	sshClient.run(clientConn, onSSHHandshakeFinished)
+	sshClient.run(conn, onSSHHandshakeFinished)
 }
 
 func (sshServer *sshServer) monitorPortForwardDialError(err error) {
@@ -1566,12 +1672,57 @@ func (sshServer *sshServer) monitorPortForwardDialError(err error) {
 // tunnelProtocolUsesTLSDemux returns true if the server demultiplexes the given
 // protocol and TLS-OSSH over the same port.
 func (sshServer *sshServer) tunnelProtocolUsesTLSDemux(tunnelProtocol string) bool {
-	// Only use meek/TLS-OSSH demux if unfronted meek HTTPS with non-legacy passthrough.
-	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) && !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+
+	// Only use meek/TLS-OSSH demux if unfronted meek HTTPS with non-legacy
+	// passthrough, and not in-proxy.
+	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) &&
+		!protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) &&
+		!protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
 		_, passthroughEnabled := sshServer.support.Config.TunnelProtocolPassthroughAddresses[tunnelProtocol]
 		return passthroughEnabled && !sshServer.support.Config.LegacyPassthrough
 	}
 	return false
+}
+
+// setGeoIPSessionCache adds the sessionID/geoIPData pair to the session
+// cache. This value will not expire; the caller must call
+// markGeoIPSessionCacheToExpire to initiate expiry. Calling
+// setGeoIPSessionCache for an existing sessionID will replace the previous
+// value and reset any expiry.
+func (sshServer *sshServer) setGeoIPSessionCache(sessionID string, geoIPData GeoIPData) {
+	sshServer.geoIPSessionCache.Set(sessionID, geoIPData, cache.NoExpiration)
+}
+
+// markGeoIPSessionCacheToExpire initiates expiry for an existing session
+// cache entry, if the session ID is found in the cache. Concurrency note:
+// setGeoIPSessionCache and markGeoIPSessionCacheToExpire should not be
+// called concurrently for a single session ID.
+func (sshServer *sshServer) markGeoIPSessionCacheToExpire(sessionID string) {
+	geoIPData, found := sshServer.geoIPSessionCache.Get(sessionID)
+	// Note: potential race condition between Get and Set. In practice,
+	// the tunnel server won't clobber a SetSessionCache value by calling
+	// MarkSessionCacheToExpire concurrently.
+	if found {
+		sshServer.geoIPSessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
+	}
+}
+
+// getGeoIPSessionCache returns the cached GeoIPData for the specified session
+// ID; a blank GeoIPData is returned if the session ID is not found in the
+// cache.
+func (sshServer *sshServer) getGeoIPSessionCache(sessionID string) GeoIPData {
+	geoIPData, found := sshServer.geoIPSessionCache.Get(sessionID)
+	if !found {
+		return NewGeoIPData()
+	}
+	return geoIPData.(GeoIPData)
+}
+
+// inGeoIPSessionCache returns whether the session ID is present in the
+// session cache.
+func (sshServer *sshServer) inGeoIPSessionCache(sessionID string) bool {
+	_, found := sshServer.geoIPSessionCache.Get(sessionID)
+	return found
 }
 
 type sshClient struct {
@@ -1579,13 +1730,15 @@ type sshClient struct {
 	sshServer                            *sshServer
 	sshListener                          *sshListener
 	tunnelProtocol                       string
+	isInproxyTunnelProtocol              bool
 	additionalTransportData              *additionalTransportData
 	sshConn                              ssh.Conn
 	throttledConn                        *common.ThrottledConn
 	serverPacketManipulation             string
 	replayedServerPacketManipulation     bool
-	clientAddr                           net.Addr
-	geoIPData                            GeoIPData
+	peerAddr                             net.Addr
+	peerGeoIPData                        GeoIPData
+	clientGeoIPData                      GeoIPData
 	sessionID                            string
 	isFirstTunnelInSession               bool
 	supportsServerRequests               bool
@@ -1738,6 +1891,10 @@ type handshakeState struct {
 	establishedTunnelsCount int
 	splitTunnelLookup       *splitTunnelLookup
 	deviceRegion            string
+	newTacticsTag           string
+	inproxyClientIP         string
+	inproxyClientGeoIPData  GeoIPData
+	inproxyRelayLogFields   common.LogFields
 }
 
 type destinationBytesMetrics struct {
@@ -1827,8 +1984,8 @@ func newSshClient(
 	transportData *additionalTransportData,
 	serverPacketManipulation string,
 	replayedServerPacketManipulation bool,
-	clientAddr net.Addr,
-	geoIPData GeoIPData) *sshClient {
+	peerAddr net.Addr,
+	peerGeoIPData GeoIPData) *sshClient {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
@@ -1840,11 +1997,11 @@ func newSshClient(
 		sshServer:                        sshServer,
 		sshListener:                      sshListener,
 		tunnelProtocol:                   tunnelProtocol,
+		isInproxyTunnelProtocol:          protocol.TunnelProtocolUsesInproxy(tunnelProtocol),
 		additionalTransportData:          transportData,
 		serverPacketManipulation:         serverPacketManipulation,
 		replayedServerPacketManipulation: replayedServerPacketManipulation,
-		clientAddr:                       clientAddr,
-		geoIPData:                        geoIPData,
+		peerAddr:                         peerAddr,
 		isFirstTunnelInSession:           true,
 		qualityMetrics:                   newQualityMetrics(),
 		tcpPortForwardLRU:                common.NewLRUConns(),
@@ -1859,7 +2016,28 @@ func newSshClient(
 	client.tcpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
 	client.udpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
 
+	// In the case of in-proxy tunnel protocols, clientGeoIPData is not set
+	// until the original client IP is relayed from the broker during the
+	// handshake. In other cases, clientGeoIPData is the peerGeoIPData
+	// (this includes fronted meek).
+
+	client.peerGeoIPData = peerGeoIPData
+	if !client.isInproxyTunnelProtocol {
+		client.clientGeoIPData = peerGeoIPData
+	}
+
 	return client
+}
+
+// getClientGeoIPData gets sshClient.clientGeoIPData. Use this helper when
+// accessing this field without already holding a lock on the sshClient
+// mutex. Unlike older code and unlike with client.peerGeoIPData,
+// sshClient.clientGeoIPData is not static and may get set during the
+// handshake, and it is not safe to access it without a lock.
+func (sshClient *sshClient) getClientGeoIPData() GeoIPData {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+	return sshClient.clientGeoIPData
 }
 
 func (sshClient *sshClient) run(
@@ -1904,12 +2082,18 @@ func (sshClient *sshClient) run(
 
 	// Further wrap the connection with burst monitoring, when enabled.
 	//
-	// Limitation: burst parameters are fixed for the duration of the tunnel
-	// and do not change after a tactics hot reload.
+	// Limitations:
+	//
+	// - Burst parameters are fixed for the duration of the tunnel and do not
+	//   change after a tactics hot reload.
+	//
+	// - In the case of in-proxy tunnel protocols, the original client IP is
+	//   not yet known, and so burst monitoring GeoIP targeting uses the peer
+	//   IP, which is the proxy, not the client.
 
 	var burstConn *common.BurstMonitoredConn
 
-	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.peerGeoIPData)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": errors.Trace(err)}).Warning(
 			"ServerTacticsParametersCache.Get failed")
@@ -1964,9 +2148,13 @@ func (sshClient *sshClient) run(
 	//
 	// A tunnel which fails to meet the targets but successfully completes any
 	// liveness test and the API handshake is ignored in terms of replay scoring.
+	//
+	// In the case of in-proxy tunnel protocols, the peer address will be the
+	// proxy, not the client, and GeoIP targeted replay will apply to the 2nd
+	// hop.
 
 	isReplayCandidate, replayWaitDuration, replayTargetDuration :=
-		sshClient.sshServer.support.ReplayCache.GetReplayTargetDuration(sshClient.geoIPData)
+		sshClient.sshServer.support.ReplayCache.GetReplayTargetDuration(sshClient.peerGeoIPData)
 
 	if isReplayCandidate {
 
@@ -1991,7 +2179,7 @@ func (sshClient *sshClient) run(
 
 					sshClient.sshServer.support.ReplayCache.SetReplayParameters(
 						sshClient.tunnelProtocol,
-						sshClient.geoIPData,
+						sshClient.peerGeoIPData,
 						sshClient.serverPacketManipulation,
 						getFragmentorSeed(),
 						bytesUp,
@@ -2020,7 +2208,7 @@ func (sshClient *sshClient) run(
 				if usedReplay {
 					sshClient.sshServer.support.ReplayCache.FailedReplayParameters(
 						sshClient.tunnelProtocol,
-						sshClient.geoIPData,
+						sshClient.peerGeoIPData,
 						sshClient.serverPacketManipulation,
 						getFragmentorSeed())
 				}
@@ -2087,7 +2275,14 @@ func (sshClient *sshClient) run(
 
 		if err == nil && protocol.TunnelProtocolUsesObfuscatedSSH(sshClient.tunnelProtocol) {
 
-			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+			// In the case of in-proxy tunnel protocols, the peer address will
+			// be the proxy, not the client, and GeoIP targeted server-side
+			// OSSH tactics, including prefixes, will apply to the 2nd hop.
+			//
+			// It is recommended to set ServerOSSHPrefixSpecs, etc., in default
+			// tactics.
+
+			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.peerGeoIPData)
 
 			// Log error, but continue. A default prefix spec will be used by the server.
 			if err != nil {
@@ -2114,12 +2309,12 @@ func (sshClient *sshClient) run(
 				sshClient.sshServer.support.Config.ObfuscatedSSHKey,
 				sshClient.sshServer.obfuscatorSeedHistory,
 				serverOsshPrefixSpecs,
-				func(clientIP string, err error, logFields common.LogFields) {
+				func(peerIP string, err error, logFields common.LogFields) {
 					logIrregularTunnel(
 						sshClient.sshServer.support,
 						sshClient.sshListener.tunnelProtocol,
 						sshClient.sshListener.port,
-						clientIP,
+						peerIP,
 						errors.Trace(err),
 						LogFields(logFields))
 				})
@@ -2144,7 +2339,7 @@ func (sshClient *sshClient) run(
 			// obfuscator message. See tactics.Listener.Accept. This must preceed
 			// ssh.NewServerConn to ensure fragmentor is seeded before downstream bytes
 			// are written.
-			if err == nil && sshClient.tunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+			if err == nil && protocol.TunnelProtocolIsObfuscatedSSH(sshClient.tunnelProtocol) {
 				fragmentor, ok := baseConn.(common.FragmentorAccessor)
 				if ok {
 					var fragmentorPRNG *prng.PRNG
@@ -2299,10 +2494,11 @@ func (sshClient *sshClient) run(
 	}
 	sshClient.Unlock()
 
-	// Initiate cleanup of the GeoIP session cache. To allow for post-tunnel
-	// final status requests, the lifetime of cached GeoIP records exceeds the
-	// lifetime of the sshClient.
-	sshClient.sshServer.support.GeoIPService.MarkSessionCacheToExpire(sshClient.sessionID)
+	// Set the GeoIP session cache to expire; up to this point, the entry for
+	// this session ID has no expiry; retaining entries after the tunnel
+	// disconnects supports first-tunnel-in-session and duplicate
+	// authorization logic.
+	sshClient.sshServer.markGeoIPSessionCacheToExpire(sshClient.sessionID)
 }
 
 func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
@@ -2344,11 +2540,8 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	sessionID := sshPasswordPayload.SessionId
 
 	// The GeoIP session cache will be populated if there was a previous tunnel
-	// with this session ID. This will be true up to GEOIP_SESSION_CACHE_TTL, which
-	// is currently much longer than the OSL session cache, another option to use if
-	// the GeoIP session cache is retired (the GeoIP session cache currently only
-	// supports legacy use cases).
-	isFirstTunnelInSession := !sshClient.sshServer.support.GeoIPService.InSessionCache(sessionID)
+	// with this session ID. This will be true up to GEOIP_SESSION_CACHE_TTL.
+	isFirstTunnelInSession := !sshClient.sshServer.inGeoIPSessionCache(sessionID)
 
 	supportsServerRequests := common.Contains(
 		sshPasswordPayload.ClientCapabilities, protocol.CLIENT_CAPABILITY_SERVER_REQUESTS)
@@ -2361,17 +2554,12 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	sshClient.isFirstTunnelInSession = isFirstTunnelInSession
 	sshClient.supportsServerRequests = supportsServerRequests
 
-	geoIPData := sshClient.geoIPData
-
 	sshClient.Unlock()
 
-	// Store the GeoIP data associated with the session ID. This makes
-	// the GeoIP data available to the web server for web API requests.
-	// A cache that's distinct from the sshClient record is used to allow
-	// for or post-tunnel final status requests.
-	// If the client is reconnecting with the same session ID, this call
-	// will undo the expiry set by MarkSessionCacheToExpire.
-	sshClient.sshServer.support.GeoIPService.SetSessionCache(sessionID, geoIPData)
+	// Initially, in the case of in-proxy tunnel protocols, the GeoIP session
+	// cache entry will be the proxy's GeoIPData. This is updated to be the
+	// client's GeoIPData in setHandshakeState.
+	sshClient.sshServer.setGeoIPSessionCache(sessionID, sshClient.peerGeoIPData)
 
 	return nil, nil
 }
@@ -2559,23 +2747,9 @@ func (sshClient *sshClient) handleSSHRequests(requests <-chan *ssh.Request) {
 
 			// All other requests are assumed to be API requests.
 
-			sshClient.Lock()
-			authorizedAccessTypes := sshClient.handshakeState.authorizedAccessTypes
-			sshClient.Unlock()
-
-			// Note: unlock before use is only safe as long as referenced sshClient data,
-			// such as slices in handshakeState, is read-only after initially set.
-
-			clientAddr := ""
-			if sshClient.clientAddr != nil {
-				clientAddr = sshClient.clientAddr.String()
-			}
-
 			responsePayload, err = sshAPIRequestHandler(
 				sshClient.sshServer.support,
-				clientAddr,
-				sshClient.geoIPData,
-				authorizedAccessTypes,
+				sshClient,
 				request.Type,
 				request.Payload)
 		}
@@ -3078,18 +3252,34 @@ var serverTunnelStatParams = append(
 	[]requestParamSpec{
 		{"last_connected", isLastConnected, requestParamOptional},
 		{"establishment_duration", isIntString, requestParamOptional}},
-	baseSessionAndDialParams...)
+	baseAndDialParams...)
 
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	sshClient.Lock()
 
+	// For in-proxy tunnel protocols, two sets of GeoIP fields are logged, one
+	// for the client and one for the proxy. The client GeoIP fields will
+	// be "None" if handshake did not complete.
+
 	logFields := getRequestLogFields(
 		"server_tunnel",
-		sshClient.geoIPData,
+		sshClient.sessionID,
+		sshClient.clientGeoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
 		serverTunnelStatParams)
+
+	if sshClient.isInproxyTunnelProtocol {
+		sshClient.peerGeoIPData.SetLogFieldsWithPrefix("", "proxy", logFields)
+		logFields.Add(
+			LogFields(sshClient.handshakeState.inproxyRelayLogFields))
+	}
+
+	// new_tactics_tag indicates that the handshake returned new tactics.
+	if sshClient.handshakeState.newTacticsTag != "" {
+		logFields["new_tactics_tag"] = sshClient.handshakeState.newTacticsTag
+	}
 
 	// "relay_protocol" is sent with handshake API parameters. In pre-
 	// handshake logTunnel cases, this value is not yet known. As
@@ -3103,7 +3293,6 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	if sshClient.sshListener.BPFProgramName != "" {
 		logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
 	}
-	logFields["session_id"] = sshClient.sessionID
 	logFields["is_first_tunnel_in_session"] = sshClient.isFirstTunnelInSession
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
@@ -3145,7 +3334,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 		logDestBytes := true
 		if sshClient.sshServer.support.ServerTacticsParametersCache != nil {
-			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.geoIPData)
+
+			// Target this using the client, not peer, GeoIP. In the case of
+			// in-proxy tunnel protocols, the client GeoIP fields will be None
+			// if the handshake does not complete. In that case, no bytes will
+			// have transferred.
+
+			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.clientGeoIPData)
 			if err != nil || p.IsNil() ||
 				sshClient.destinationBytesMetricsASN != p.String(parameters.DestinationBytesMetricsASN) {
 				logDestBytes = false
@@ -3223,7 +3418,6 @@ var blocklistHitsStatParams = []requestParamSpec{
 	{"device_region", isAnyString, requestParamOptional},
 	{"device_location", isGeoHashString, requestParamOptional},
 	{"egress_region", isRegionCode, requestParamOptional},
-	{"session_id", isHexDigits, 0},
 	{"last_connected", isLastConnected, requestParamOptional},
 }
 
@@ -3231,14 +3425,18 @@ func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []Bl
 
 	sshClient.Lock()
 
+	// Log this using the client, not peer, GeoIP. In the case of in-proxy
+	// tunnel protocols, the client GeoIP fields will be None if the
+	// handshake does not complete. In that case, no port forwarding will
+	// occur and there will not be any blocklist hits.
+
 	logFields := getRequestLogFields(
 		"server_blocklist_hit",
-		sshClient.geoIPData,
+		sshClient.sessionID,
+		sshClient.clientGeoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
 		blocklistHitsStatParams)
-
-	logFields["session_id"] = sshClient.sessionID
 
 	// Note: see comment in logTunnel regarding unlock and concurrent access.
 
@@ -3413,14 +3611,16 @@ func (sshClient *sshClient) getAlertActionURLs(alertReason string) []string {
 	sshClient.Lock()
 	sponsorID, _ := getStringRequestParam(
 		sshClient.handshakeState.apiParams, "sponsor_id")
+	clientGeoIPData := sshClient.clientGeoIPData
+	deviceRegion := sshClient.handshakeState.deviceRegion
 	sshClient.Unlock()
 
 	return sshClient.sshServer.support.PsinetDatabase.GetAlertActionURLs(
 		alertReason,
 		sponsorID,
-		sshClient.geoIPData.Country,
-		sshClient.geoIPData.ASN,
-		sshClient.handshakeState.deviceRegion)
+		clientGeoIPData.Country,
+		clientGeoIPData.ASN,
+		deviceRegion)
 }
 
 func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessage string) {
@@ -3433,22 +3633,35 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessa
 	reason := ssh.Prohibited
 
 	// Note: Debug level, as logMessage may contain user traffic destination address information
-	log.WithTraceFields(
-		LogFields{
-			"channelType":  newChannel.ChannelType(),
-			"logMessage":   logMessage,
-			"rejectReason": reason.String(),
-		}).Debug("reject new channel")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(
+			LogFields{
+				"channelType":  newChannel.ChannelType(),
+				"logMessage":   logMessage,
+				"rejectReason": reason.String(),
+			}).Debug("reject new channel")
+	}
 
 	// Note: logMessage is internal, for logging only; just the reject reason is sent to the client.
 	newChannel.Reject(reason, reason.String())
 }
 
-// setHandshakeState records that a client has completed a handshake API request.
-// Some parameters from the handshake request may be used in future traffic rule
-// selection. Port forwards are disallowed until a handshake is complete. The
-// handshake parameters are included in the session summary log recorded in
-// sshClient.stop().
+// setHandshakeState sets the handshake state -- that it completed and
+// what parameters were passed -- in sshClient. This state is used for allowing
+// port forwards and for future traffic rule selection. setHandshakeState
+// also triggers an immediate traffic rule re-selection, as the rules selected
+// upon tunnel establishment may no longer apply now that handshake values are
+// set.
+//
+// The authorizations received from the client handshake are verified and the
+// resulting list of authorized access types are applied to the client's tunnel
+// and traffic rules.
+//
+// A list of active authorization IDs, authorized access types, and traffic
+// rate limits are returned for responding to the client and logging.
+//
+// All slices in the returnd handshakeStateInfo are read-only, as readers may
+// reference slice contents outside of locks.
 func (sshClient *sshClient) setHandshakeState(
 	state handshakeState,
 	authorizations []string) (*handshakeStateInfo, error) {
@@ -3457,6 +3670,19 @@ func (sshClient *sshClient) setHandshakeState(
 	completed := sshClient.handshakeState.completed
 	if !completed {
 		sshClient.handshakeState = state
+
+		if sshClient.isInproxyTunnelProtocol {
+
+			// Set the client GeoIP data to the value obtained using the
+			// original client IP, from the broker, in the handshake. Also
+			// update the GeoIP session hash to use the client GeoIP data.
+
+			sshClient.clientGeoIPData =
+				sshClient.handshakeState.inproxyClientGeoIPData
+
+			sshClient.sshServer.setGeoIPSessionCache(
+				sshClient.sessionID, sshClient.clientGeoIPData)
+		}
 	}
 	sshClient.Unlock()
 
@@ -3547,10 +3773,16 @@ func (sshClient *sshClient) setHandshakeState(
 				"tunnel_error":               "duplicate active authorization",
 				"duplicate_authorization_id": authorizationID,
 			}
-			sshClient.geoIPData.SetLogFields(logFields)
-			duplicateGeoIPData := sshClient.sshServer.support.GeoIPService.GetSessionCache(sessionID)
-			if duplicateGeoIPData != sshClient.geoIPData {
-				duplicateGeoIPData.SetLogFieldsWithPrefix("duplicate_authorization_", logFields)
+
+			// Log this using client, not peer, GeoIP data. In the case of
+			// in-proxy tunnel protocols, the client GeoIP fields will be None
+			// if a handshake does not complete. However, presense of a
+			// (duplicate) authorization implies that the handshake completed.
+
+			sshClient.getClientGeoIPData().SetClientLogFields(logFields)
+			duplicateClientGeoIPData := sshClient.sshServer.getGeoIPSessionCache(sessionID)
+			if duplicateClientGeoIPData != sshClient.getClientGeoIPData() {
+				duplicateClientGeoIPData.SetClientLogFieldsWithPrefix("duplicate_authorization_", logFields)
 			}
 			log.LogRawFieldsWithTimestamp(logFields)
 
@@ -3755,8 +3987,12 @@ func (sshClient *sshClient) setOSLConfig() {
 	//    port forwards will not send progress to the new client
 	//    seed state.
 
+	// Use the client, not peer, GeoIP data. In the case of in-proxy tunnel
+	// protocols, the client GeoIP fields will be populated using the
+	// original client IP already received, from the broker, in the handshake.
+
 	sshClient.oslClientSeedState = sshClient.sshServer.support.OSLConfig.NewClientSeedState(
-		sshClient.geoIPData.Country,
+		sshClient.clientGeoIPData.Country,
 		propagationChannelID,
 		sshClient.signalIssueSLOKs)
 }
@@ -3816,7 +4052,11 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 		return
 	}
 
-	p, err := tacticsCache.Get(sshClient.geoIPData)
+	// Use the client, not peer, GeoIP data. In the case of in-proxy tunnel
+	// protocols, the client GeoIP fields will be populated using the
+	// original client IP already received, from the broker, in the handshake.
+
+	p, err := tacticsCache.Get(sshClient.clientGeoIPData)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": err}).Warning("get tactics failed")
 		return
@@ -3873,10 +4113,19 @@ func (sshClient *sshClient) setTrafficRules() (int64, int64) {
 	isFirstTunnelInSession := sshClient.isFirstTunnelInSession &&
 		sshClient.handshakeState.establishedTunnelsCount == 0
 
+	// In the case of in-proxy tunnel protocols, the client GeoIP data is None
+	// until the handshake completes. Pre-handhake, the rate limit is
+	// determined by EstablishmentRead/WriteBytesPerSecond, which default to
+	// unthrottled, the recommended setting; in addition, no port forwards
+	// are permitted until after the handshake completes, at which time
+	// setTrafficRules will be called again with the client GeoIP data
+	// populated using the original client IP received from the in-proxy
+	// broker.
+
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
 		isFirstTunnelInSession,
 		sshClient.tunnelProtocol,
-		sshClient.geoIPData,
+		sshClient.clientGeoIPData,
 		sshClient.handshakeState)
 
 	if sshClient.throttledConn != nil {
@@ -3997,11 +4246,13 @@ func (sshClient *sshClient) isPortForwardPermitted(
 
 	sshClient.enqueueDisallowedTrafficAlertRequest()
 
-	log.WithTraceFields(
-		LogFields{
-			"type": portForwardType,
-			"port": port,
-		}).Debug("port forward denied by traffic rules")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(
+			LogFields{
+				"type": portForwardType,
+				"port": port,
+			}).Debug("port forward denied by traffic rules")
+	}
 
 	return false
 }
@@ -4017,6 +4268,13 @@ func (sshClient *sshClient) isDomainPermitted(domain string) (bool, string) {
 	// TODO: validate with dns.IsDomainName?
 	if len(domain) > 255 {
 		return false, "invalid domain name"
+	}
+
+	// Don't even attempt to resolve the default mDNS top-level domain.
+	// Non-default cases won't be caught here but should fail to resolve due
+	// to the PreferGo setting in net.Resolver.
+	if strings.HasSuffix(domain, ".local") {
+		return false, "port forward not permitted"
 	}
 
 	tags := sshClient.sshServer.support.Blocklist.LookupDomain(domain)
@@ -4207,7 +4465,10 @@ func (sshClient *sshClient) establishedPortForward(
 	if !sshClient.allocatePortForward(portForwardType) {
 
 		portForwardLRU.CloseOldest()
-		log.WithTrace().Debug("closed LRU port forward")
+
+		if IsLogLevelDebug() {
+			log.WithTrace().Debug("closed LRU port forward")
+		}
 
 		state.availablePortForwardCond.L.Lock()
 		for !sshClient.allocatePortForward(portForwardType) {
@@ -4338,24 +4599,6 @@ func (sshClient *sshClient) handleTCPChannel(
 		}
 	}()
 
-	// Transparently redirect web API request connections.
-
-	isWebServerPortForward := false
-	config := sshClient.sshServer.support.Config
-	if config.WebServerPortForwardAddress != "" {
-		destination := net.JoinHostPort(hostToConnect, strconv.Itoa(portToConnect))
-		if destination == config.WebServerPortForwardAddress {
-			isWebServerPortForward = true
-			if config.WebServerPortForwardRedirectAddress != "" {
-				// Note: redirect format is validated when config is loaded
-				host, portStr, _ := net.SplitHostPort(config.WebServerPortForwardRedirectAddress)
-				port, _ := strconv.Atoi(portStr)
-				hostToConnect = host
-				portToConnect = port
-			}
-		}
-	}
-
 	// Validate the domain name and check the domain blocklist before dialing.
 	//
 	// The IP blocklist is checked in isPortForwardPermitted, which also provides
@@ -4369,8 +4612,7 @@ func (sshClient *sshClient) handleTCPChannel(
 	// handle DNS-over-TCP; in the DNS-over-TCP case, a client may bypass the
 	// block list check.
 
-	if !isWebServerPortForward &&
-		net.ParseIP(hostToConnect) == nil {
+	if net.ParseIP(hostToConnect) == nil {
 
 		ok, rejectMessage := sshClient.isDomainPermitted(hostToConnect)
 		if !ok {
@@ -4397,10 +4639,19 @@ func (sshClient *sshClient) handleTCPChannel(
 
 		// Resolve the hostname
 
-		log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
+		// PreferGo, equivalent to GODEBUG=netdns=go, is specified in order to
+		// avoid any cases where Go's resolver fails over to the cgo-based
+		// resolver (see https://pkg.go.dev/net#hdr-Name_Resolution). Such
+		// cases, if they resolve at all, may be expected to resolve to bogon
+		// IPs that won't be permitted; but the cgo invocation will consume
+		// an OS thread, which is a performance hit we can avoid.
+
+		if IsLogLevelDebug() {
+			log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
+		}
 
 		ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
-		IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
+		IPs, err := (&net.Resolver{PreferGo: true}).LookupIPAddr(ctx, hostToConnect)
 		cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 		resolveElapsedTime := time.Since(dialStartTime)
@@ -4480,7 +4731,13 @@ func (sshClient *sshClient) handleTCPChannel(
 
 		destinationGeoIPData := sshClient.sshServer.support.GeoIPService.LookupIP(IP)
 
-		if sshClient.geoIPData.Country != GEOIP_UNKNOWN_VALUE &&
+		// Use the client, not peer, GeoIP data. In the case of in-proxy tunnel
+		// protocols, the client GeoIP fields will be populated using the
+		// original client IP already received, from the broker, in the handshake.
+
+		clientGeoIPData := sshClient.getClientGeoIPData()
+
+		if clientGeoIPData.Country != GEOIP_UNKNOWN_VALUE &&
 			sshClient.handshakeState.splitTunnelLookup.lookup(
 				destinationGeoIPData.Country) {
 
@@ -4499,11 +4756,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	// Enforce traffic rules, using the resolved IP address.
 
-	if !isWebServerPortForward &&
-		!sshClient.isPortForwardPermitted(
-			portForwardTypeTCP,
-			IP,
-			portToConnect) {
+	if !sshClient.isPortForwardPermitted(
+		portForwardTypeTCP, IP, portToConnect) {
+
 		// Note: not recording a port forward failure in this case
 		sshClient.rejectNewChannel(newChannel, "port forward not permitted")
 		return
@@ -4513,7 +4768,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	remoteAddr := net.JoinHostPort(IP.String(), strconv.Itoa(portToConnect))
 
-	log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
+	}
 
 	ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 	fwdConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", remoteAddr)
@@ -4590,7 +4847,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	// Relay channel to forwarded connection.
 
-	log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	}
 
 	// TODO: relay errors to fwdChannel.Stderr()?
 	relayWaitGroup := new(sync.WaitGroup)
@@ -4605,7 +4864,9 @@ func (sshClient *sshClient) handleTCPChannel(
 		atomic.AddInt64(&bytesDown, bytes)
 		if err != nil && err != io.EOF {
 			// Debug since errors such as "connection reset by peer" occur during normal operation
-			log.WithTraceFields(LogFields{"error": err}).Debug("downstream TCP relay failed")
+			if IsLogLevelDebug() {
+				log.WithTraceFields(LogFields{"error": err}).Debug("downstream TCP relay failed")
+			}
 		}
 		// Interrupt upstream io.Copy when downstream is shutting down.
 		// TODO: this is done to quickly cleanup the port forward when
@@ -4617,7 +4878,9 @@ func (sshClient *sshClient) handleTCPChannel(
 		fwdConn, fwdChannel, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 	atomic.AddInt64(&bytesUp, bytes)
 	if err != nil && err != io.EOF {
-		log.WithTraceFields(LogFields{"error": err}).Debug("upstream TCP relay failed")
+		if IsLogLevelDebug() {
+			log.WithTraceFields(LogFields{"error": err}).Debug("upstream TCP relay failed")
+		}
 	}
 	// Shutdown special case: fwdChannel will be closed and return EOF when
 	// the SSH connection is closed, but we need to explicitly close fwdConn
@@ -4627,9 +4890,11 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	relayWaitGroup.Wait()
 
-	log.WithTraceFields(
-		LogFields{
-			"remoteAddr": remoteAddr,
-			"bytesUp":    atomic.LoadInt64(&bytesUp),
-			"bytesDown":  atomic.LoadInt64(&bytesDown)}).Debug("exiting")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(
+			LogFields{
+				"remoteAddr": remoteAddr,
+				"bytesUp":    atomic.LoadInt64(&bytesUp),
+				"bytesDown":  atomic.LoadInt64(&bytesDown)}).Debug("exiting")
+	}
 }

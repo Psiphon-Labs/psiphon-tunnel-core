@@ -69,7 +69,6 @@ import (
 	"fmt"
 	"go/token"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -79,7 +78,6 @@ import (
 
 	"golang.org/x/tools/go/expect"
 	"golang.org/x/tools/go/packages"
-	"golang.org/x/tools/internal/span"
 	"golang.org/x/tools/internal/testenv"
 )
 
@@ -129,7 +127,7 @@ type Exported struct {
 	primary  string                       // the first non GOROOT module that was exported
 	written  map[string]map[string]string // the full set of exported files
 	notes    []*expect.Note               // The list of expectations extracted from go source files
-	markers  map[string]span.Range        // The set of markers extracted from go source files
+	markers  map[string]Range             // The set of markers extracted from go source files
 }
 
 // Exporter implementations are responsible for converting from the generic description of some
@@ -149,7 +147,7 @@ type Exporter interface {
 
 // All is the list of known exporters.
 // This is used by TestAll to run tests with all the exporters.
-var All []Exporter
+var All = []Exporter{GOPATH, Modules}
 
 // TestAll invokes the testing function once for each exporter registered in
 // the All global.
@@ -199,7 +197,7 @@ func Export(t testing.TB, exporter Exporter, modules []Module) *Exported {
 
 	dirname := strings.Replace(t.Name(), "/", "_", -1)
 	dirname = strings.Replace(dirname, "#", "_", -1) // duplicate subtests get a #NNN suffix.
-	temp, err := ioutil.TempDir("", dirname)
+	temp, err := os.MkdirTemp("", dirname)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,6 +215,9 @@ func Export(t testing.TB, exporter Exporter, modules []Module) *Exported {
 		primary:       modules[0].Name,
 		written:       map[string]map[string]string{},
 		ExpectFileSet: token.NewFileSet(),
+	}
+	if testing.Verbose() {
+		exported.Config.Logf = t.Logf
 	}
 	defer func() {
 		if t.Failed() || t.Skipped() {
@@ -252,7 +253,7 @@ func Export(t testing.TB, exporter Exporter, modules []Module) *Exported {
 					t.Fatal(err)
 				}
 			case string:
-				if err := ioutil.WriteFile(fullpath, []byte(value), 0644); err != nil {
+				if err := os.WriteFile(fullpath, []byte(value), 0644); err != nil {
 					t.Fatal(err)
 				}
 			default:
@@ -276,7 +277,7 @@ func Export(t testing.TB, exporter Exporter, modules []Module) *Exported {
 // It is intended for source files that are shell scripts.
 func Script(contents string) Writer {
 	return func(filename string) error {
-		return ioutil.WriteFile(filename, []byte(contents), 0755)
+		return os.WriteFile(filename, []byte(contents), 0755)
 	}
 }
 
@@ -657,7 +658,7 @@ func (e *Exported) FileContents(filename string) ([]byte, error) {
 	if content, found := e.Config.Overlay[filename]; found {
 		return content, nil
 	}
-	content, err := ioutil.ReadFile(filename)
+	content, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
