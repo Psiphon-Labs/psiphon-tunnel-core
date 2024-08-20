@@ -57,7 +57,7 @@ func testPassthrough(t *testing.T, legacy bool) {
 
 	// Run passthrough web server
 
-	webServerCertificate, webServerPrivateKey, err := common.GenerateWebServerCertificate("example.org")
+	webServerCertificate, webServerPrivateKey, _, err := common.GenerateWebServerCertificate("example.org")
 	if err != nil {
 		t.Fatalf("common.GenerateWebServerCertificate failed: %s", err)
 	}
@@ -96,12 +96,10 @@ func testPassthrough(t *testing.T, legacy bool) {
 	tunnelProtocol := protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
 
 	generateConfigParams := &GenerateConfigParams{
-		ServerIPAddress:      "127.0.0.1",
-		EnableSSHAPIRequests: true,
-		WebServerPort:        8000,
-		TunnelProtocolPorts:  map[string]int{tunnelProtocol: 4000},
-		Passthrough:          true,
-		LegacyPassthrough:    legacy,
+		ServerIPAddress:     "127.0.0.1",
+		TunnelProtocolPorts: map[string]int{tunnelProtocol: 4000},
+		Passthrough:         true,
+		LegacyPassthrough:   legacy,
 	}
 
 	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
@@ -144,8 +142,8 @@ func testPassthrough(t *testing.T, legacy bool) {
 		    	"DataRootDirectory" : "%s",
 		        "ClientPlatform" : "Windows",
 		        "ClientVersion" : "0",
-		        "SponsorId" : "0",
-		        "PropagationChannelId" : "0",
+		        "SponsorId" : "0000000000000000",
+		        "PropagationChannelId" : "0000000000000000",
 		        "TargetServerEntry" : "%s"
 		    }`, testDataDirName, string(encodedServerEntry))
 

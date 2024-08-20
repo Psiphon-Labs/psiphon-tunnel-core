@@ -198,11 +198,12 @@ func setNoticeFiles(
 }
 
 const (
-	noticeIsDiagnostic   = 1
-	noticeIsHomepage     = 2
-	noticeClearHomepages = 4
-	noticeSyncHomepages  = 8
-	noticeSkipRedaction  = 16
+	noticeIsDiagnostic    = 1
+	noticeIsHomepage      = 2
+	noticeClearHomepages  = 4
+	noticeSyncHomepages   = 8
+	noticeSkipRedaction   = 16
+	noticeIsNotDiagnostic = 32
 )
 
 // outputNotice encodes a notice in JSON and writes it to the output writer.
@@ -219,8 +220,16 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	obj["timestamp"] = time.Now().UTC().Format(common.RFC3339Milli)
 	for i := 0; i < len(args)-1; i += 2 {
 		name, ok := args[i].(string)
-		value := args[i+1]
 		if ok {
+
+			value := args[i+1]
+
+			// encoding/json marshals error types as "{}", so convert to error
+			// message string.
+			if err, isError := value.(error); isError {
+				value = err.Error()
+			}
+
 			noticeData[name] = value
 		}
 	}
@@ -279,17 +288,22 @@ func (nl *noticeLogger) outputNotice(noticeType string, noticeFlags uint32, args
 	if nl.rotatingFile != nil {
 
 		if !skipWriter {
-			skipWriter = (noticeFlags&noticeIsDiagnostic != 0)
+			// Skip writing to the host application if the notice is diagnostic
+			// and not explicitly marked as not diagnostic
+			skipWriter = (noticeFlags&noticeIsDiagnostic != 0) && (noticeFlags&noticeIsNotDiagnostic == 0)
 		}
 
 		if !skipRedaction {
+			// Only write to the rotating file if the notice is not explicitly marked as not diagnostic.
+			if noticeFlags&noticeIsNotDiagnostic == 0 {
 
-			err := nl.outputNoticeToRotatingFile(output)
+				err := nl.outputNoticeToRotatingFile(output)
 
-			if err != nil {
-				output := makeNoticeInternalError(
-					fmt.Sprintf("write rotating file failed: %s", err))
-				nl.writer.Write(output)
+				if err != nil {
+					output := makeNoticeInternalError(
+						fmt.Sprintf("write rotating file failed: %s", err))
+					nl.writer.Write(output)
+				}
 			}
 		}
 	}
@@ -650,6 +664,13 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 				args = append(args, name, value)
 			}
 		}
+
+		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
+			metrics := dialParams.GetInproxyMetrics()
+			for name, value := range metrics {
+				args = append(args, name, value)
+			}
+		}
 	}
 
 	singletonNoticeLogger.outputNotice(
@@ -678,12 +699,18 @@ func NoticeRequestedTactics(dialParams *DialParameters) {
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool, serverRegion string) {
+func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool) {
 	singletonNoticeLogger.outputNotice(
 		"ActiveTunnel", noticeIsDiagnostic,
 		"diagnosticID", diagnosticID,
 		"protocol", protocol,
-		"isTCS", isTCS,
+		"isTCS", isTCS)
+}
+
+// NoticeConnectedServerRegion reports the region of the connected server
+func NoticeConnectedServerRegion(serverRegion string) {
+	singletonNoticeLogger.outputNotice(
+		"ConnectedServerRegion", 0,
 		"serverRegion", serverRegion)
 }
 
@@ -832,10 +859,12 @@ func NoticeClientUpgradeDownloaded(filename string) {
 // transferred since the last NoticeBytesTransferred. This is not a diagnostic
 // notice: the user app has requested this notice with EmitBytesTransferred
 // for functionality such as traffic display; and this frequent notice is not
-// intended to be included with feedback.
+// intended to be included with feedback. The noticeIsNotDiagnostic flag
+// ensures that these notices are emitted to the host application but not written
+// to the diagnostic file to avoid cluttering it with frequent updates.
 func NoticeBytesTransferred(diagnosticID string, sent, received int64) {
 	singletonNoticeLogger.outputNotice(
-		"BytesTransferred", 0,
+		"BytesTransferred", noticeIsNotDiagnostic,
 		"diagnosticID", diagnosticID,
 		"sent", sent,
 		"received", received)
@@ -1068,6 +1097,51 @@ func NoticeSkipServerEntry(format string, args ...interface{}) {
 		"SkipServerEntry", 0, "reason", reason)
 }
 
+// NoticeInproxyOperatorMessage emits a message to be displayed to the proxy
+// operator.
+func NoticeInproxyOperatorMessage(messageJSON string) {
+	singletonNoticeLogger.outputNotice(
+		"InproxyOperatorMessage", 0,
+		"message", messageJSON)
+}
+
+// NoticeInproxyProxyActivity reports proxy usage statistics. The stats are
+// for activity since the last NoticeInproxyProxyActivity report.
+//
+// This is not a diagnostic notice: the user app has requested this notice
+// with EmitproxyActivity for functionality such as traffic display; and this
+// frequent notice is not intended to be included with feedback.
+func NoticeInproxyProxyActivity(
+	connectingClients int32,
+	connectedClients int32,
+	bytesUp int64,
+	bytesDown int64) {
+
+	singletonNoticeLogger.outputNotice(
+		"InproxyProxyActivity", noticeIsNotDiagnostic,
+		"connectingClients", connectingClients,
+		"connectedClients", connectedClients,
+		"bytesUp", bytesUp,
+		"bytesDown", bytesDown)
+}
+
+// NoticeInproxyProxyTotalActivity reports how many proxied bytes have been
+// transferred in total up to this point; in addition to current connection
+// status. This is a diagnostic notice.
+func NoticeInproxyProxyTotalActivity(
+	connectingClients int32,
+	connectedClients int32,
+	totalBytesUp int64,
+	totalBytesDown int64) {
+
+	singletonNoticeLogger.outputNotice(
+		"InproxyProxyTotalActivity", noticeIsDiagnostic,
+		"connectingClients", connectingClients,
+		"connectedClients", connectedClients,
+		"totalBytesUp", totalBytesUp,
+		"totalBytesDown", totalBytesDown)
+}
+
 type repetitiveNoticeState struct {
 	message string
 	repeats int
@@ -1233,23 +1307,28 @@ func (writer *NoticeWriter) Write(p []byte) (n int, err error) {
 // NoticeCommonLogger maps the common.Logger interface to the notice facility.
 // This is used to make the notice facility available to other packages that
 // don't import the "psiphon" package.
-func NoticeCommonLogger() common.Logger {
-	return &commonLogger{}
+func NoticeCommonLogger(debugLogging bool) common.Logger {
+	return &commonLogger{
+		debugLogging: debugLogging,
+	}
 }
 
 type commonLogger struct {
+	debugLogging bool
 }
 
 func (logger *commonLogger) WithTrace() common.LogTrace {
 	return &commonLogTrace{
-		trace: stacktrace.GetParentFunctionName(),
+		trace:        stacktrace.GetParentFunctionName(),
+		debugLogging: logger.debugLogging,
 	}
 }
 
 func (logger *commonLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
 	return &commonLogTrace{
-		trace:  stacktrace.GetParentFunctionName(),
-		fields: fields,
+		trace:        stacktrace.GetParentFunctionName(),
+		fields:       fields,
+		debugLogging: logger.debugLogging,
 	}
 }
 
@@ -1257,6 +1336,10 @@ func (logger *commonLogger) LogMetric(metric string, fields common.LogFields) {
 	singletonNoticeLogger.outputNotice(
 		metric, noticeIsDiagnostic,
 		listCommonFields(fields)...)
+}
+
+func (log *commonLogger) IsLogLevelDebug() bool {
+	return log.debugLogging
 }
 
 func listCommonFields(fields common.LogFields) []interface{} {
@@ -1268,8 +1351,9 @@ func listCommonFields(fields common.LogFields) []interface{} {
 }
 
 type commonLogTrace struct {
-	trace  string
-	fields common.LogFields
+	trace        string
+	fields       common.LogFields
+	debugLogging bool
 }
 
 func (log *commonLogTrace) outputNotice(
@@ -1285,7 +1369,10 @@ func (log *commonLogTrace) outputNotice(
 }
 
 func (log *commonLogTrace) Debug(args ...interface{}) {
-	// Ignored.
+	if !log.debugLogging {
+		return
+	}
+	log.outputNotice("Debug", args...)
 }
 
 func (log *commonLogTrace) Info(args ...interface{}) {

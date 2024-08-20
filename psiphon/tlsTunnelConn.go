@@ -162,10 +162,8 @@ func (conn *TLSTunnelConn) GetMetrics() common.LogFields {
 
 	logFields["tls_padding"] = conn.tlsPadding
 
-	// Include metrics, such as fragmentor metrics, from the underlying dial
-	// conn. Properties of subsequent underlying dial conns are not reflected
-	// in these metrics; we assume that the first dial conn, which most likely
-	// transits the various protocol handshakes, is most significant.
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
 	underlyingMetrics, ok := conn.Conn.(common.MetricsSource)
 	if ok {
 		logFields.Add(underlyingMetrics.GetMetrics())

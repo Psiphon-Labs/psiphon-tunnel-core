@@ -125,8 +125,8 @@ func TestObfuscator(t *testing.T) {
 	irregularLogFields = nil
 
 	_, err = NewServerObfuscator(config, clientIP, bytes.NewReader(preamble))
-	if err != nil {
-		t.Fatalf("NewServerObfuscator failed: %s", err)
+	if err == nil {
+		t.Fatalf("NewServerObfuscator unexpectedly succeeded")
 	}
 
 	duplicateClientID := irregularLogFields["duplicate_client_ip"]
@@ -540,11 +540,11 @@ func TestIrregularConnections(t *testing.T) {
 
 	irregularLogFields = nil
 
-	// Test: replayed prefixd connection with same IP
+	// Test: replayed prefixed connection with same IP
 	clientReader = WrapConnWithSkipReader(newConn(preamble))
 	_, err = NewServerObfuscator(config, clientIP, clientReader)
-	if err != nil {
-		t.Fatalf("NewServerObfuscator failed: %s", err)
+	if err == nil {
+		t.Fatalf("NewServerObfuscator unexpectedly succeeded")
 	}
 
 	duplicateClientID := irregularLogFields["duplicate_client_ip"]

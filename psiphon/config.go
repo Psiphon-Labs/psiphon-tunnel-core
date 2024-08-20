@@ -338,7 +338,7 @@ type Config struct {
 	// (Windows VPN mode).
 	DisableApi bool
 
-	// TargetApiProtocol specifies whether to force use of "ssh" or "web" API
+	// TargetAPIProtocol specifies whether to force use of "ssh" or "web" API
 	// protocol. When blank, the default, the optimal API protocol is used.
 	// Note that this capability check is not applied before the
 	// "CandidateServers" count is emitted.
@@ -346,7 +346,12 @@ type Config struct {
 	// This parameter is intended for testing and debugging only. Not all
 	// parameters are supported in the legacy "web" API protocol, including
 	// speed test samples.
-	TargetApiProtocol string
+	TargetAPIProtocol string
+
+	// TargetAPIProtocol specifies whether to use "json" or "cbor" API
+	// protocol parameter encodings. When blank, the default is to use "cbor"
+	// where supported.
+	TargetAPIEncoding string
 
 	// RemoteServerListURLs is list of URLs which specify locations to fetch
 	// out-of-band server entries. This facility is used when a tunnel cannot
@@ -479,7 +484,7 @@ type Config struct {
 	// distributed or displayed to users. Default is off.
 	EmitDiagnosticNetworkParameters bool
 
-	// EmitBytesTransferred indicates whether to emit periodic notices showing
+	// EmitBytesTransferred indicates whether to emit frequent notices showing
 	// bytes sent and received.
 	EmitBytesTransferred bool
 
@@ -613,6 +618,91 @@ type Config struct {
 	// Note: see comment for config.Commit() for a description of how file
 	// migrations are performed.
 	MigrateUpgradeDownloadFilename string
+
+	// DisableTunnels disables establishing a client tunnel. Set
+	// DisableTunnels when running a stand-alone in-proxy proxy.
+	DisableTunnels bool
+
+	// InproxyEnableProxy enables running an in-proxy proxy.
+	InproxyEnableProxy bool
+
+	// InproxyProxySessionPrivateKey specifies a long-term in-proxy proxy
+	// private key and corresponding, derived proxy ID to use. If blank, an
+	// ephemeral key will be generated.
+	InproxyProxySessionPrivateKey string
+
+	// InproxyMaxClients specifies the maximum number of in-proxy clients to
+	// be proxied concurrently.
+	InproxyMaxClients int
+
+	// InproxyLimitUpstreamBytesPerSecond specifies the upstream byte transfer
+	// rate limit for each proxied client. When 0, there is no limit.
+	InproxyLimitUpstreamBytesPerSecond int
+
+	// InproxyLimitDownstreamBytesPerSecond specifies the downstream byte
+	// transfer rate limit for each proxied client. When 0, there is no limit.
+	InproxyLimitDownstreamBytesPerSecond int
+
+	// InproxyProxyPersonalCompartmentIDs specifies the personal compartment
+	// IDs used by an in-proxy proxy. Personal compartment IDs are
+	// distributed from proxy operators to client users out-of-band and
+	// provide a mechanism to allow only certain clients to use a proxy.
+	//
+	// See InproxyClientPersonalCompartmentIDs comment for limitations.
+	InproxyProxyPersonalCompartmentIDs []string
+
+	// InproxyClientPersonalCompartmentIDs specifies the personal compartment
+	// IDs used by an in-proxy client. Personal compartment IDs are
+	// distributed from proxy operators to client users out-of-band and
+	// provide a mechanism to ensure a client uses only a certain proxy for
+	// all tunnels connections.
+	//
+	// When InproxyClientPersonalCompartmentIDs is set, the client will use
+	// only in-proxy protocols, ensuring that all connections go through the
+	// proxy or proxies with the same personal compartment IDs.
+	//
+	// Limitations:
+	//
+	// - While fully functional, the personal pairing mode has a number of
+	//   limitations that make the current implementation less suitable for
+	//   large scale deployment.
+	//
+	// - Since the mode requires an in-proxy connection to a proxy, announcing
+	//   with the corresponding personal compartment ID, not only must that
+	//   proxy be available, but also a broker, and both the client and proxy
+	//   must rendezvous at the same broker.
+	//
+	// - Currently, the client tunnel establishment algorithm does not launch
+	//   an untunneled tactics request as long as there is a cached tactics
+	//   with a valid TTL. The assumption, in regular mode, is that the
+	//   cached tactics will suffice, and any new tactics will be obtained
+	//   from any Psiphon server connection. Since broker specs are obtained
+	//   solely from tactics, if brokers are removed, reconfigured, or even
+	//   if the order is changed, personal mode may fail to connect until
+	//   cached tactics expire.
+	//
+	// - In personal mode, clients and proxies use a simplistic approach to
+	//   rendezvous: always select the first broker spec. This works, but is
+	//   not robust in terms of load balancing, and fails if the first broker
+	//   is unreachable or overloaded. Non-personal in-proxy dials can simply
+	//   use any available broker.
+	//
+	// - The broker matching queues lack compartment ID indexing. For a
+	//   handful of common compartment IDs, this is not expected to be an
+	//   issue. For personal compartment IDs, this may lead to frequency
+	//   near-full scans of the queues when looking for a match.
+	//
+	// - In personal mode, all establishment candidates must be in-proxy
+	//   dials, all using the same broker. Many concurrent, fronted broker
+	//   requests may result in CDN rate limiting, requiring some mechanism
+	//   to delay or spread the requests, as is currently done only for
+	//   batches of proxy announcements.
+	//
+	InproxyClientPersonalCompartmentIDs []string
+
+	// EmitInproxyProxyActivity indicates whether to emit frequent notices
+	// showing proxy connection information and bytes transferred.
+	EmitInproxyProxyActivity bool
 
 	//
 	// The following parameters are deprecated.
@@ -907,12 +997,68 @@ type Config struct {
 	SteeringIPCacheMaxEntries *int
 	SteeringIPProbability     *float64
 
+	// The following in-proxy fields are for testing purposes only.
+	InproxyAllowProxy                                      *bool
+	InproxyAllowClient                                     *bool
+	InproxyTunnelProtocolSelectionProbability              *float64
+	InproxyBrokerSpecs                                     parameters.InproxyBrokerSpecsValue
+	InproxyClientBrokerSpecs                               parameters.InproxyBrokerSpecsValue
+	InproxyProxyBrokerSpecs                                parameters.InproxyBrokerSpecsValue
+	InproxyReplayBrokerDialParametersTTLSeconds            *int
+	InproxyReplayBrokerUpdateFrequencySeconds              *int
+	InproxyReplayBrokerDialParametersProbability           *float64
+	InproxyReplayBrokerRetainFailedProbability             *float64
+	InproxyCommonCompartmentIDs                            parameters.InproxyCompartmentIDsValue
+	InproxyMaxCompartmentIDListLength                      *int
+	InproxyProxyAnnounceRequestTimeoutMilliseconds         *int
+	InproxyProxyAnnounceDelayMilliseconds                  *int
+	InproxyProxyAnnounceDelayJitter                        *float64
+	InproxyProxyAnswerRequestTimeoutMilliseconds           *int
+	InproxyClientOfferRequestTimeoutMilliseconds           *int
+	InproxyClientOfferRetryDelayMilliseconds               *int
+	InproxyClientOfferRetryJitter                          *float64
+	InproxyClientRelayedPacketRequestTimeoutMilliseconds   *int
+	InproxyDTLSRandomizationProbability                    *float64
+	InproxyDataChannelTrafficShapingProbability            *float64
+	InproxyDataChannelTrafficShapingParameters             *parameters.InproxyDataChannelTrafficShapingParametersValue
+	InproxySTUNServerAddresses                             []string
+	InproxySTUNServerAddressesRFC5780                      []string
+	InproxyProxySTUNServerAddresses                        []string
+	InproxyProxySTUNServerAddressesRFC5780                 []string
+	InproxyClientSTUNServerAddresses                       []string
+	InproxyClientSTUNServerAddressesRFC5780                []string
+	InproxyClientDiscoverNATProbability                    *float64
+	InproxyDisableSTUN                                     *bool
+	InproxyDisablePortMapping                              *bool
+	InproxyDisableInboundForMobileNetworks                 *bool
+	InproxyDisableIPv6ICECandidates                        *bool
+	InproxyProxyDisableSTUN                                *bool
+	InproxyProxyDisablePortMapping                         *bool
+	InproxyProxyDisableInboundForMobileNetworks            *bool
+	InproxyProxyDisableIPv6ICECandidates                   *bool
+	InproxyClientDisableSTUN                               *bool
+	InproxyClientDisablePortMapping                        *bool
+	InproxyClientDisableInboundForMobileNetworks           *bool
+	InproxyClientDisableIPv6ICECandidates                  *bool
+	InproxyProxyDiscoverNATTimeoutMilliseconds             *int
+	InproxyClientDiscoverNATTimeoutMilliseconds            *int
+	InproxyWebRTCAnswerTimeoutMilliseconds                 *int
+	InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds  *int
+	InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds *int
+	InproxyProxyDestinationDialTimeoutMilliseconds         *int
+	InproxyPsiphonAPIRequestTimeoutMilliseconds            *int
+	InproxyProxyTotalActivityNoticePeriodMilliseconds      *int
+
+	InproxySkipAwaitFullyConnected  bool
+	InproxyEnableWebRTCDebugLogging bool
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
 	// New tactics must be applied by calling Config.SetParameters; calling
 	// params.Set directly will fail to add config values.
-	params *parameters.Parameters
+	paramsMutex sync.Mutex
+	params      *parameters.Parameters
 
 	dialParametersHash []byte
 
@@ -931,6 +1077,17 @@ type Config struct {
 	committed bool
 
 	loadTimestamp string
+
+	tacticsAppliedReceiversMutex sync.Mutex
+	tacticsAppliedReceivers      []TacticsAppliedReceiver
+}
+
+// TacticsAppliedReceiver specifies the interface for a component that is
+// signaled when tactics are applied. TacticsApplied is invoked when any
+// tactics are applied after initial start up, and then whenever new tactics
+// are received and applied while running.
+type TacticsAppliedReceiver interface {
+	TacticsApplied() error
 }
 
 // Config field which specifies if notice files should be used and at which
@@ -1200,11 +1357,16 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.Tracef("invalid client version: %s", err)
 	}
 
-	if !common.Contains(
-		[]string{"", protocol.PSIPHON_SSH_API_PROTOCOL, protocol.PSIPHON_WEB_API_PROTOCOL},
-		config.TargetApiProtocol) {
+	if config.TargetAPIProtocol != "" &&
+		!protocol.PsiphonAPIProtocolIsValid(config.TargetAPIProtocol) {
 
-		return errors.TraceNew("invalid TargetApiProtocol")
+		return errors.TraceNew("invalid TargetAPIProtocol")
+	}
+
+	if config.TargetAPIEncoding != "" &&
+		!protocol.PsiphonAPIEncodingIsValid(config.TargetAPIEncoding) {
+
+		return errors.TraceNew("invalid TargetAPIEncoding")
 	}
 
 	if !config.DisableRemoteServerListFetcher {
@@ -1240,6 +1402,21 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		}
 	}
 
+	if config.ObfuscatedSSHAlgorithms != nil &&
+		len(config.ObfuscatedSSHAlgorithms) != 4 {
+		// TODO: validate each algorithm?
+		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
+	}
+
+	if !config.DisableTunnels && config.InproxyEnableProxy &&
+		common.ContainsAny(
+			config.InproxyProxyPersonalCompartmentIDs,
+			config.InproxyClientPersonalCompartmentIDs) {
+
+		// Don't allow an in-proxy client and proxy run in the same app to match.
+		return errors.TraceNew("invalid overlapping personal compartment IDs")
+	}
+
 	// This constraint is expected by logic in Controller.runTunnels().
 
 	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
@@ -1263,18 +1440,14 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid SessionID")
 	}
 
+	config.paramsMutex.Lock()
 	config.params, err = parameters.NewParameters(
 		func(err error) {
 			NoticeWarning("Parameters getValue failed: %s", err)
 		})
+	config.paramsMutex.Unlock()
 	if err != nil {
 		return errors.Trace(err)
-	}
-
-	if config.ObfuscatedSSHAlgorithms != nil &&
-		len(config.ObfuscatedSSHAlgorithms) != 4 {
-		// TODO: validate each algorithm?
-		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
 	// parametersParameters.Set will validate the config fields applied to
@@ -1404,6 +1577,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 // GetParameters returns the current parameters.Parameters.
 func (config *Config) GetParameters() *parameters.Parameters {
+	config.paramsMutex.Lock()
+	defer config.paramsMutex.Unlock()
+
 	return config.params
 }
 
@@ -1427,15 +1603,27 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 		setParameters = append(setParameters, applyParameters)
 	}
 
-	counts, err := config.params.Set(tag, skipOnError, setParameters...)
+	// Don't hold the lock on config.paramsMutex when signalling
+	// GetTacticsAppliedReceivers, or else GetParameters will deadlock.
+	// Releasing the lock early here also ensures we don't hold the lock when
+	// posting notices.
+
+	config.paramsMutex.Lock()
+	validationFlags := 0
+	if skipOnError {
+		validationFlags |= parameters.ValidationSkipOnError
+	}
+	counts, err := config.params.Set(tag, validationFlags, setParameters...)
 	if err != nil {
+		config.paramsMutex.Unlock()
 		return errors.Trace(err)
 	}
+	p := config.params.Get()
+	config.paramsMutex.Unlock()
 
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
 
 	// Emit certain individual parameter values for quick reference in diagnostics.
-	p := config.params.Get()
 	NoticeInfo(
 		"NetworkLatencyMultiplier Min/Max/Lambda: %f/%f/%f",
 		p.Float(parameters.NetworkLatencyMultiplierMin),
@@ -1447,6 +1635,21 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 	// Emit these now, as notices.
 	if p.WeightedCoinFlip(parameters.ApplicationParametersProbability) {
 		NoticeApplicationParameters(p.KeyValues(parameters.ApplicationParameters))
+	} else {
+		// The front end may persist Application Parameters, so clear any previously
+		// persisted values.
+		NoticeApplicationParameters(parameters.KeyValues{})
+	}
+
+	// Signal all registered TacticsAppliedReceivers that new tactics have
+	// been applied. Each receiver is responsible for checking if its
+	// individual tactics parameters have actually changed.
+	for _, receiver := range config.GetTacticsAppliedReceivers() {
+		err := receiver.TacticsApplied()
+		if err != nil {
+			NoticeError("TacticsApplied failed: %v", err)
+			// Log and continue running.
+		}
 	}
 
 	return nil
@@ -1464,6 +1667,21 @@ func (config *Config) GetResolver() *resolver.Resolver {
 	config.resolverMutex.Lock()
 	defer config.resolverMutex.Unlock()
 	return config.resolver
+}
+
+// SetTacticsAppliedReceivers registers the list of TacticsAppliedReceivers.
+func (config *Config) SetTacticsAppliedReceivers(receivers []TacticsAppliedReceiver) {
+	config.tacticsAppliedReceiversMutex.Lock()
+	defer config.tacticsAppliedReceiversMutex.Unlock()
+	config.tacticsAppliedReceivers = receivers
+}
+
+// GetTacticsAppliedReceivers gets the list of registered
+// TacticsAppliedReceivers.
+func (config *Config) GetTacticsAppliedReceivers() []TacticsAppliedReceiver {
+	config.tacticsAppliedReceiversMutex.Lock()
+	defer config.tacticsAppliedReceiversMutex.Unlock()
+	return config.tacticsAppliedReceivers
 }
 
 // SetDynamicConfig sets the current client sponsor ID and authorizations.
@@ -2157,6 +2375,206 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.SteeringIPProbability] = *config.SteeringIPProbability
 	}
 
+	if config.InproxyAllowProxy != nil {
+		applyParameters[parameters.InproxyAllowProxy] = *config.InproxyAllowProxy
+	}
+
+	if config.InproxyAllowClient != nil {
+		applyParameters[parameters.InproxyAllowClient] = *config.InproxyAllowClient
+	}
+
+	if config.InproxyTunnelProtocolSelectionProbability != nil {
+		applyParameters[parameters.InproxyTunnelProtocolSelectionProbability] = *config.InproxyTunnelProtocolSelectionProbability
+	}
+
+	if len(config.InproxyBrokerSpecs) > 0 {
+		applyParameters[parameters.InproxyBrokerSpecs] = config.InproxyBrokerSpecs
+	}
+
+	if len(config.InproxyProxyBrokerSpecs) > 0 {
+		applyParameters[parameters.InproxyProxyBrokerSpecs] = config.InproxyProxyBrokerSpecs
+	}
+
+	if len(config.InproxyClientBrokerSpecs) > 0 {
+		applyParameters[parameters.InproxyClientBrokerSpecs] = config.InproxyClientBrokerSpecs
+	}
+
+	if config.InproxyReplayBrokerDialParametersTTLSeconds != nil {
+		applyParameters[parameters.InproxyReplayBrokerDialParametersTTL] = fmt.Sprintf("%ds", *config.InproxyReplayBrokerDialParametersTTLSeconds)
+	}
+
+	if config.InproxyReplayBrokerUpdateFrequencySeconds != nil {
+		applyParameters[parameters.InproxyReplayBrokerUpdateFrequency] = fmt.Sprintf("%ds", *config.InproxyReplayBrokerUpdateFrequencySeconds)
+	}
+
+	if config.InproxyReplayBrokerDialParametersProbability != nil {
+		applyParameters[parameters.InproxyReplayBrokerDialParametersProbability] = *config.InproxyReplayBrokerDialParametersProbability
+	}
+
+	if config.InproxyReplayBrokerRetainFailedProbability != nil {
+		applyParameters[parameters.InproxyReplayBrokerRetainFailedProbability] = *config.InproxyReplayBrokerRetainFailedProbability
+	}
+
+	if len(config.InproxyCommonCompartmentIDs) > 0 {
+		applyParameters[parameters.InproxyCommonCompartmentIDs] = config.InproxyCommonCompartmentIDs
+	}
+
+	if config.InproxyMaxCompartmentIDListLength != nil {
+		applyParameters[parameters.InproxyMaxCompartmentIDListLength] = *config.InproxyMaxCompartmentIDListLength
+	}
+
+	if config.InproxyProxyAnnounceRequestTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyAnnounceRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyAnnounceRequestTimeoutMilliseconds)
+	}
+
+	if config.InproxyProxyAnnounceDelayMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyAnnounceDelay] = fmt.Sprintf("%dms", *config.InproxyProxyAnnounceDelayMilliseconds)
+	}
+
+	if config.InproxyProxyAnnounceDelayJitter != nil {
+		applyParameters[parameters.InproxyProxyAnnounceDelayJitter] = *config.InproxyProxyAnnounceDelayJitter
+	}
+
+	if config.InproxyProxyAnswerRequestTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyAnswerRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyAnswerRequestTimeoutMilliseconds)
+	}
+
+	if config.InproxyClientOfferRequestTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyClientOfferRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyClientOfferRequestTimeoutMilliseconds)
+	}
+
+	if config.InproxyClientOfferRetryDelayMilliseconds != nil {
+		applyParameters[parameters.InproxyClientOfferRetryDelay] = fmt.Sprintf("%dms", *config.InproxyClientOfferRetryDelayMilliseconds)
+	}
+
+	if config.InproxyClientOfferRetryJitter != nil {
+		applyParameters[parameters.InproxyClientOfferRetryJitter] = *config.InproxyClientOfferRetryJitter
+	}
+
+	if config.InproxyClientRelayedPacketRequestTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyClientRelayedPacketRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyClientRelayedPacketRequestTimeoutMilliseconds)
+	}
+
+	if config.InproxyDTLSRandomizationProbability != nil {
+		applyParameters[parameters.InproxyDTLSRandomizationProbability] = *config.InproxyDTLSRandomizationProbability
+	}
+
+	if config.InproxyDataChannelTrafficShapingProbability != nil {
+		applyParameters[parameters.InproxyDataChannelTrafficShapingProbability] = *config.InproxyDataChannelTrafficShapingProbability
+	}
+
+	if config.InproxyDataChannelTrafficShapingParameters != nil {
+		applyParameters[parameters.InproxyDataChannelTrafficShapingParameters] = *config.InproxyDataChannelTrafficShapingParameters
+	}
+
+	if len(config.InproxySTUNServerAddresses) > 0 {
+		applyParameters[parameters.InproxySTUNServerAddresses] = config.InproxySTUNServerAddresses
+	}
+
+	if len(config.InproxySTUNServerAddressesRFC5780) > 0 {
+		applyParameters[parameters.InproxySTUNServerAddressesRFC5780] = config.InproxySTUNServerAddressesRFC5780
+	}
+
+	if len(config.InproxyProxySTUNServerAddresses) > 0 {
+		applyParameters[parameters.InproxyProxySTUNServerAddresses] = config.InproxyProxySTUNServerAddresses
+	}
+
+	if len(config.InproxyProxySTUNServerAddressesRFC5780) > 0 {
+		applyParameters[parameters.InproxyProxySTUNServerAddressesRFC5780] = config.InproxyProxySTUNServerAddressesRFC5780
+	}
+
+	if len(config.InproxyClientSTUNServerAddresses) > 0 {
+		applyParameters[parameters.InproxyClientSTUNServerAddresses] = config.InproxyClientSTUNServerAddresses
+	}
+
+	if len(config.InproxyClientSTUNServerAddressesRFC5780) > 0 {
+		applyParameters[parameters.InproxyClientSTUNServerAddressesRFC5780] = config.InproxyClientSTUNServerAddressesRFC5780
+	}
+
+	if config.InproxyClientDiscoverNATProbability != nil {
+		applyParameters[parameters.InproxyClientDiscoverNATProbability] = *config.InproxyClientDiscoverNATProbability
+	}
+
+	if config.InproxyDisableSTUN != nil {
+		applyParameters[parameters.InproxyDisableSTUN] = *config.InproxyDisableSTUN
+	}
+
+	if config.InproxyDisablePortMapping != nil {
+		applyParameters[parameters.InproxyDisablePortMapping] = *config.InproxyDisablePortMapping
+	}
+
+	if config.InproxyDisableInboundForMobileNetworks != nil {
+		applyParameters[parameters.InproxyDisableInboundForMobileNetworks] = *config.InproxyDisableInboundForMobileNetworks
+	}
+
+	if config.InproxyDisableIPv6ICECandidates != nil {
+		applyParameters[parameters.InproxyDisableIPv6ICECandidates] = *config.InproxyDisableIPv6ICECandidates
+	}
+
+	if config.InproxyProxyDisableSTUN != nil {
+		applyParameters[parameters.InproxyProxyDisableSTUN] = *config.InproxyProxyDisableSTUN
+	}
+
+	if config.InproxyProxyDisablePortMapping != nil {
+		applyParameters[parameters.InproxyProxyDisablePortMapping] = *config.InproxyProxyDisablePortMapping
+	}
+
+	if config.InproxyProxyDisableInboundForMobileNetworks != nil {
+		applyParameters[parameters.InproxyProxyDisableInboundForMobileNetworks] = *config.InproxyProxyDisableInboundForMobileNetworks
+	}
+
+	if config.InproxyProxyDisableIPv6ICECandidates != nil {
+		applyParameters[parameters.InproxyProxyDisableIPv6ICECandidates] = *config.InproxyProxyDisableIPv6ICECandidates
+	}
+
+	if config.InproxyClientDisableSTUN != nil {
+		applyParameters[parameters.InproxyClientDisableSTUN] = *config.InproxyClientDisableSTUN
+	}
+
+	if config.InproxyClientDisablePortMapping != nil {
+		applyParameters[parameters.InproxyClientDisablePortMapping] = *config.InproxyClientDisablePortMapping
+	}
+
+	if config.InproxyClientDisableInboundForMobileNetworks != nil {
+		applyParameters[parameters.InproxyClientDisableInboundForMobileNetworks] = *config.InproxyClientDisableInboundForMobileNetworks
+	}
+
+	if config.InproxyClientDisableIPv6ICECandidates != nil {
+		applyParameters[parameters.InproxyClientDisableIPv6ICECandidates] = *config.InproxyClientDisableIPv6ICECandidates
+	}
+
+	if config.InproxyProxyDiscoverNATTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyDiscoverNATTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyDiscoverNATTimeoutMilliseconds)
+	}
+
+	if config.InproxyClientDiscoverNATTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyClientDiscoverNATTimeout] = fmt.Sprintf("%dms", *config.InproxyClientDiscoverNATTimeoutMilliseconds)
+	}
+
+	if config.InproxyWebRTCAnswerTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyWebRTCAnswerTimeout] = fmt.Sprintf("%dms", *config.InproxyWebRTCAnswerTimeoutMilliseconds)
+	}
+
+	if config.InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyWebRTCAwaitDataChannelTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds)
+	}
+
+	if config.InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyClientWebRTCAwaitDataChannelTimeout] = fmt.Sprintf("%dms", *config.InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds)
+	}
+
+	if config.InproxyProxyDestinationDialTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyDestinationDialTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyDestinationDialTimeoutMilliseconds)
+	}
+
+	if config.InproxyPsiphonAPIRequestTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyPsiphonAPIRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyPsiphonAPIRequestTimeoutMilliseconds)
+	}
+
+	if config.InproxyProxyTotalActivityNoticePeriodMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyTotalActivityNoticePeriod] = fmt.Sprintf("%dms", *config.InproxyProxyTotalActivityNoticePeriodMilliseconds)
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -2756,6 +3174,195 @@ func (config *Config) setDialParametersHash() {
 
 	// Steering IPs are ephemeral and not replayed, so steering IP parameters
 	// are excluded here.
+
+	if config.InproxyTunnelProtocolSelectionProbability != nil {
+		hash.Write([]byte("InproxyTunnelProtocolSelectionProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyTunnelProtocolSelectionProbability)
+	}
+	if len(config.InproxyBrokerSpecs) > 0 {
+		hash.Write([]byte("InproxyBrokerSpecs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyBrokerSpecs)))
+	}
+	if len(config.InproxyProxyBrokerSpecs) > 0 {
+		hash.Write([]byte("InproxyProxyBrokerSpecs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxyBrokerSpecs)))
+	}
+	if len(config.InproxyClientBrokerSpecs) > 0 {
+		hash.Write([]byte("InproxyClientBrokerSpecs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyClientBrokerSpecs)))
+	}
+	if config.InproxyReplayBrokerDialParametersTTLSeconds != nil {
+		hash.Write([]byte("InproxyReplayBrokerDialParametersTTLSeconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyReplayBrokerDialParametersTTLSeconds))
+	}
+	if config.InproxyReplayBrokerUpdateFrequencySeconds != nil {
+		hash.Write([]byte("InproxyReplayBrokerUpdateFrequencySeconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyReplayBrokerUpdateFrequencySeconds))
+	}
+	if config.InproxyReplayBrokerDialParametersProbability != nil {
+		hash.Write([]byte("InproxyReplayBrokerDialParametersProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyReplayBrokerDialParametersProbability)
+	}
+	if config.InproxyReplayBrokerRetainFailedProbability != nil {
+		hash.Write([]byte("InproxyReplayBrokerRetainFailedProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyReplayBrokerRetainFailedProbability)
+	}
+	if len(config.InproxyCommonCompartmentIDs) > 0 {
+		hash.Write([]byte("InproxyCommonCompartmentIDs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyCommonCompartmentIDs)))
+	}
+	if config.InproxyMaxCompartmentIDListLength != nil {
+		hash.Write([]byte("InproxyMaxCompartmentIDListLength"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyMaxCompartmentIDListLength))
+	}
+	if config.InproxyProxyAnnounceRequestTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyProxyAnnounceRequestTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnnounceRequestTimeoutMilliseconds))
+	}
+	if config.InproxyProxyAnnounceDelayMilliseconds != nil {
+		hash.Write([]byte("InproxyProxyAnnounceDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnnounceDelayMilliseconds))
+	}
+	if config.InproxyProxyAnnounceDelayJitter != nil {
+		hash.Write([]byte("InproxyProxyAnnounceDelayJitter"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyAnnounceDelayJitter)
+	}
+	if config.InproxyProxyAnswerRequestTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyProxyAnswerRequestTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnswerRequestTimeoutMilliseconds))
+	}
+	if config.InproxyClientOfferRequestTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyClientOfferRequestTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientOfferRequestTimeoutMilliseconds))
+	}
+	if config.InproxyClientOfferRetryDelayMilliseconds != nil {
+		hash.Write([]byte("InproxyClientOfferRetryDelayMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientOfferRetryDelayMilliseconds))
+	}
+	if config.InproxyClientOfferRetryJitter != nil {
+		hash.Write([]byte("InproxyClientOfferRetryJitter"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientOfferRetryJitter)
+	}
+	if config.InproxyClientRelayedPacketRequestTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyClientRelayedPacketRequestTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientRelayedPacketRequestTimeoutMilliseconds))
+	}
+	if config.InproxyDTLSRandomizationProbability != nil {
+		hash.Write([]byte("InproxyDTLSRandomizationProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyDTLSRandomizationProbability)
+	}
+	if config.InproxyDataChannelTrafficShapingProbability != nil {
+		hash.Write([]byte("InproxyDataChannelTrafficShapingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyDataChannelTrafficShapingProbability)
+	}
+	if config.InproxyDataChannelTrafficShapingParameters != nil {
+		hash.Write([]byte("InproxyDataChannelTrafficShapingParameters"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyDataChannelTrafficShapingParameters)))
+	}
+	if config.InproxySTUNServerAddresses != nil {
+		hash.Write([]byte("InproxySTUNServerAddresses"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxySTUNServerAddresses)))
+	}
+	if config.InproxySTUNServerAddressesRFC5780 != nil {
+		hash.Write([]byte("InproxySTUNServerAddressesRFC5780"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxySTUNServerAddressesRFC5780)))
+	}
+	if config.InproxyProxySTUNServerAddresses != nil {
+		hash.Write([]byte("InproxyProxySTUNServerAddresses"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxySTUNServerAddresses)))
+	}
+	if config.InproxyProxySTUNServerAddressesRFC5780 != nil {
+		hash.Write([]byte("InproxyProxySTUNServerAddressesRFC5780"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxySTUNServerAddressesRFC5780)))
+	}
+	if config.InproxyClientSTUNServerAddresses != nil {
+		hash.Write([]byte("InproxyClientSTUNServerAddresses"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyClientSTUNServerAddresses)))
+	}
+	if config.InproxyClientSTUNServerAddressesRFC5780 != nil {
+		hash.Write([]byte("InproxyClientSTUNServerAddressesRFC5780"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyClientSTUNServerAddressesRFC5780)))
+	}
+	if config.InproxyClientDiscoverNATProbability != nil {
+		hash.Write([]byte("InproxyClientDiscoverNATProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDiscoverNATProbability)
+	}
+	if config.InproxyDisableSTUN != nil {
+		hash.Write([]byte("InproxyDisableSTUN"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyDisableSTUN)
+	}
+	if config.InproxyDisablePortMapping != nil {
+		hash.Write([]byte("InproxyDisablePortMapping"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyDisablePortMapping)
+	}
+	if config.InproxyDisableInboundForMobileNetworks != nil {
+		hash.Write([]byte("InproxyDisableInboundForMobileNetworks"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyDisableInboundForMobileNetworks)
+	}
+	if config.InproxyDisableIPv6ICECandidates != nil {
+		hash.Write([]byte("InproxyDisableIPv6ICECandidates"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyDisableIPv6ICECandidates)
+	}
+	if config.InproxyProxyDisableSTUN != nil {
+		hash.Write([]byte("InproxyProxyDisableSTUN"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisableSTUN)
+	}
+	if config.InproxyProxyDisablePortMapping != nil {
+		hash.Write([]byte("InproxyProxyDisablePortMapping"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisablePortMapping)
+	}
+	if config.InproxyProxyDisableInboundForMobileNetworks != nil {
+		hash.Write([]byte("InproxyProxyDisableInboundForMobileNetworks"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisableInboundForMobileNetworks)
+	}
+	if config.InproxyProxyDisableIPv6ICECandidates != nil {
+		hash.Write([]byte("InproxyProxyDisableIPv6ICECandidates"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyDisableIPv6ICECandidates)
+	}
+	if config.InproxyClientDisableSTUN != nil {
+		hash.Write([]byte("InproxyClientDisableSTUN"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableSTUN)
+	}
+	if config.InproxyClientDisablePortMapping != nil {
+		hash.Write([]byte("InproxyClientDisablePortMapping"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisablePortMapping)
+	}
+	if config.InproxyClientDisableInboundForMobileNetworks != nil {
+		hash.Write([]byte("InproxyClientDisableInboundForMobileNetworks"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableInboundForMobileNetworks)
+	}
+	if config.InproxyClientDisableIPv6ICECandidates != nil {
+		hash.Write([]byte("InproxyClientDisableIPv6ICECandidates"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableIPv6ICECandidates)
+	}
+	if config.InproxyProxyDiscoverNATTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyProxyDiscoverNATTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyDiscoverNATTimeoutMilliseconds))
+	}
+	if config.InproxyClientDiscoverNATTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyClientDiscoverNATTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientDiscoverNATTimeoutMilliseconds))
+	}
+	if config.InproxyWebRTCAnswerTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyWebRTCAnswerTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyWebRTCAnswerTimeoutMilliseconds))
+	}
+	if config.InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds))
+	}
+	if config.InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds))
+	}
+	if config.InproxyProxyDestinationDialTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyProxyDestinationDialTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyDestinationDialTimeoutMilliseconds))
+	}
+	if config.InproxyPsiphonAPIRequestTimeoutMilliseconds != nil {
+		hash.Write([]byte("InproxyPsiphonAPIRequestTimeoutMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyPsiphonAPIRequestTimeoutMilliseconds))
+	}
 
 	config.dialParametersHash = hash.Sum(nil)
 }

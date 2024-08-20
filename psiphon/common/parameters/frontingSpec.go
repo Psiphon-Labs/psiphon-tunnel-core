@@ -24,6 +24,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/regen"
 )
 
@@ -42,11 +43,16 @@ type FrontingSpecs []*FrontingSpec
 // ServerEntry.MeekFrontingAddresses: multiple candidates are supported, and
 // each candidate may be a regex, or a static value (with regex syntax).
 type FrontingSpec struct {
+
+	// Optional/new fields use omitempty to minimize tactics tag churn.
+
 	FrontingProviderID string
+	Transports         protocol.FrontingTransports `json:",omitempty"`
 	Addresses          []string
-	DisableSNI         bool
-	VerifyServerName   string
-	VerifyPins         []string
+	DisableSNI         bool     `json:",omitempty"`
+	SkipVerify         bool     `json:",omitempty"`
+	VerifyServerName   string   `json:",omitempty"`
+	VerifyPins         []string `json:",omitempty"`
 	Host               string
 }
 
@@ -56,27 +62,35 @@ type FrontingSpec struct {
 //
 // The return values are:
 // - Dial Address (domain or IP address)
+// - Transport (e.g., protocol.FRONTING_TRANSPORT_HTTPS)
 // - SNI (which may be transformed; unless it is "", which indicates omit SNI)
 // - VerifyServerName (see psiphon.CustomTLSConfig)
 // - VerifyPins (see psiphon.CustomTLSConfig)
 // - Host (Host header value)
 func (specs FrontingSpecs) SelectParameters() (
-	string, string, string, string, []string, string, error) {
+	string, string, string, string, string, []string, string, error) {
 
 	if len(specs) == 0 {
-		return "", "", "", "", nil, "", errors.TraceNew("missing fronting spec")
+		return "", "", "", "", "", nil, "", errors.TraceNew("missing fronting spec")
 	}
 
 	spec := specs[prng.Intn(len(specs))]
 
 	if len(spec.Addresses) == 0 {
-		return "", "", "", "", nil, "", errors.TraceNew("missing fronting address")
+		return "", "", "", "", "", nil, "", errors.TraceNew("missing fronting address")
+	}
+
+	// For backwards compatibility, the transport type defaults
+	// to "FRONTED-HTTPS" when the FrontingSpec specifies no transport types.
+	transport := protocol.FRONTING_TRANSPORT_HTTPS
+	if len(spec.Transports) > 0 {
+		transport = spec.Transports[prng.Intn(len(spec.Transports))]
 	}
 
 	frontingDialAddr, err := regen.GenerateString(
 		spec.Addresses[prng.Intn(len(spec.Addresses))])
 	if err != nil {
-		return "", "", "", "", nil, "", errors.Trace(err)
+		return "", "", "", "", "", nil, "", errors.Trace(err)
 	}
 
 	SNIServerName := frontingDialAddr
@@ -84,7 +98,13 @@ func (specs FrontingSpecs) SelectParameters() (
 		SNIServerName = ""
 	}
 
+	// When SkipVerify is true, VerifyServerName and VerifyPins must be empty,
+	// as checked in Validate. When dialing in any mode, MeekConn will set
+	// CustomTLSConfig.SkipVerify to true as long as VerifyServerName is "".
+	// So SkipVerify does not need to be explicitly returned.
+
 	return spec.FrontingProviderID,
+		transport,
 		frontingDialAddr,
 		SNIServerName,
 		spec.VerifyServerName,
@@ -94,7 +114,7 @@ func (specs FrontingSpecs) SelectParameters() (
 }
 
 // Validate checks that the JSON values are well-formed.
-func (specs FrontingSpecs) Validate() error {
+func (specs FrontingSpecs) Validate(allowSkipVerify bool) error {
 
 	// An empty FrontingSpecs is allowed as a tactics setting, but
 	// SelectParameters will fail at runtime: code that uses FrontingSpecs must
@@ -105,6 +125,10 @@ func (specs FrontingSpecs) Validate() error {
 		if len(spec.FrontingProviderID) == 0 {
 			return errors.TraceNew("empty fronting provider ID")
 		}
+		err := spec.Transports.Validate()
+		if err != nil {
+			return errors.Trace(err)
+		}
 		if len(spec.Addresses) == 0 {
 			return errors.TraceNew("missing fronting addresses")
 		}
@@ -113,13 +137,25 @@ func (specs FrontingSpecs) Validate() error {
 				return errors.TraceNew("empty fronting address")
 			}
 		}
-		if len(spec.VerifyServerName) == 0 {
-			return errors.TraceNew("empty verify server name")
-		}
-		// An empty VerifyPins is allowed.
-		for _, pin := range spec.VerifyPins {
-			if len(pin) == 0 {
-				return errors.TraceNew("empty verify pin")
+		if spec.SkipVerify {
+			if !allowSkipVerify {
+				return errors.TraceNew("invalid skip verify")
+			}
+			if len(spec.VerifyServerName) != 0 {
+				return errors.TraceNew("unexpected verify server name")
+			}
+			if len(spec.VerifyPins) != 0 {
+				return errors.TraceNew("unexpected verify pins")
+			}
+		} else {
+			if len(spec.VerifyServerName) == 0 {
+				return errors.TraceNew("empty verify server name")
+			}
+			// An empty VerifyPins is allowed.
+			for _, pin := range spec.VerifyPins {
+				if len(pin) == 0 {
+					return errors.TraceNew("empty verify pin")
+				}
 			}
 		}
 		if len(spec.Host) == 0 {

@@ -87,7 +87,7 @@ func runTestMakeResolveParameters() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	_, err = params.Set("", false, paramValues)
+	_, err = params.Set("", 0, paramValues)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -136,7 +136,7 @@ func runTestMakeResolveParameters() error {
 
 	paramValues["DNSResolverPreresolvedIPAddressProbability"] = 0.0
 
-	_, err = params.Set("", false, paramValues)
+	_, err = params.Set("", 0, paramValues)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -167,7 +167,7 @@ func runTestMakeResolveParameters() error {
 	paramValues["DNSResolverProtocolTransformProbability"] = 0.0
 	paramValues["DNSResolverIncludeEDNS0Probability"] = 0.0
 
-	_, err = params.Set("", false, paramValues)
+	_, err = params.Set("", 0, paramValues)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -505,7 +505,7 @@ func runTestResolver() error {
 
 	domainAddress := net.JoinHostPort(exampleDomain, "443")
 
-	address, err := resolver.ResolveAddress(ctx, networkID, params, domainAddress)
+	address, err := resolver.ResolveAddress(ctx, networkID, params, "", domainAddress)
 	if err != nil {
 		return errors.Trace(err)
 	}

@@ -34,6 +34,10 @@ const (
 	HISTORY_CLIENT_IP_MAX_ENTRIES = 10000
 )
 
+// TODO: rename clientIP to peerIP to reflect newer terminology in
+// psiphon/server where the immediate network peer may be an in-proxy proxy,
+// not the client.
+
 // SeedHistory maintains a history of recently observed obfuscation seed values.
 // This history is used to identify duplicate seed messages.
 //

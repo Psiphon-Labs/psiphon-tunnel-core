@@ -5,9 +5,9 @@
 package packagestest
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,12 +15,11 @@ import (
 	"strings"
 
 	"golang.org/x/tools/internal/gocommand"
-	"golang.org/x/tools/internal/packagesinternal"
 	"golang.org/x/tools/internal/proxydir"
 )
 
 // Modules is the exporter that produces module layouts.
-// Each "repository" is put in it's own module, and the module file generated
+// Each "repository" is put in its own module, and the module file generated
 // will have replace directives for all other modules.
 // Given the two files
 //
@@ -90,17 +89,18 @@ func (modules) Finalize(exported *Exported) error {
 	// If the primary module already has a go.mod, write the contents to a temp
 	// go.mod for now and then we will reset it when we are getting all the markers.
 	if gomod := exported.written[exported.primary]["go.mod"]; gomod != "" {
-		contents, err := ioutil.ReadFile(gomod)
+		contents, err := os.ReadFile(gomod)
 		if err != nil {
 			return err
 		}
-		if err := ioutil.WriteFile(gomod+".temp", contents, 0644); err != nil {
+		if err := os.WriteFile(gomod+".temp", contents, 0644); err != nil {
 			return err
 		}
 	}
 
 	exported.written[exported.primary]["go.mod"] = filepath.Join(primaryDir, "go.mod")
-	primaryGomod := "module " + exported.primary + "\nrequire (\n"
+	var primaryGomod bytes.Buffer
+	fmt.Fprintf(&primaryGomod, "module %s\nrequire (\n", exported.primary)
 	for other := range exported.written {
 		if other == exported.primary {
 			continue
@@ -112,10 +112,10 @@ func (modules) Finalize(exported *Exported) error {
 			other = v.module
 			version = v.version
 		}
-		primaryGomod += fmt.Sprintf("\t%v %v\n", other, version)
+		fmt.Fprintf(&primaryGomod, "\t%v %v\n", other, version)
 	}
-	primaryGomod += ")\n"
-	if err := ioutil.WriteFile(filepath.Join(primaryDir, "go.mod"), []byte(primaryGomod), 0644); err != nil {
+	fmt.Fprintf(&primaryGomod, ")\n")
+	if err := os.WriteFile(filepath.Join(primaryDir, "go.mod"), primaryGomod.Bytes(), 0644); err != nil {
 		return err
 	}
 
@@ -136,7 +136,7 @@ func (modules) Finalize(exported *Exported) error {
 		if v, ok := versions[module]; ok {
 			module = v.module
 		}
-		if err := ioutil.WriteFile(modfile, []byte("module "+module+"\n"), 0644); err != nil {
+		if err := os.WriteFile(modfile, []byte("module "+module+"\n"), 0644); err != nil {
 			return err
 		}
 		files["go.mod"] = modfile
@@ -172,8 +172,6 @@ func (modules) Finalize(exported *Exported) error {
 		"GOPROXY="+proxydir.ToURL(modProxyDir),
 		"GOSUMDB=off",
 	)
-	gocmdRunner := &gocommand.Runner{}
-	packagesinternal.SetGoCmdRunner(exported.Config, gocmdRunner)
 
 	// Run go mod download to recreate the mod cache dir with all the extra
 	// stuff in cache. All the files created by Export should be recreated.
@@ -184,16 +182,14 @@ func (modules) Finalize(exported *Exported) error {
 		BuildFlags: exported.Config.BuildFlags,
 		WorkingDir: exported.Config.Dir,
 	}
-	if _, err := gocmdRunner.Run(context.Background(), inv); err != nil {
-		return err
-	}
-	return nil
+	_, err := new(gocommand.Runner).Run(context.Background(), inv)
+	return err
 }
 
 func writeModuleFiles(rootDir, module, ver string, filePaths map[string]string) error {
 	fileData := make(map[string][]byte)
 	for name, path := range filePaths {
-		contents, err := ioutil.ReadFile(path)
+		contents, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}

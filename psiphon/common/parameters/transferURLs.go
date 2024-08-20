@@ -73,6 +73,15 @@ func (t TransferURLs) DecodeAndValidate() error {
 
 	hasOnlyAfterZero := false
 	for _, transferURL := range t {
+
+		// TransferURL FrontingSpecs are permitted to specify SkipVerify
+		// because transfers have additional security at the payload level.
+		allowSkipVerify := true
+		err := transferURL.FrontingSpecs.Validate(allowSkipVerify)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
 		if transferURL.OnlyAfterAttempts == 0 {
 			hasOnlyAfterZero = true
 		}

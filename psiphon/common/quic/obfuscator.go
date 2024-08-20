@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/Yawning/chacha20"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -106,6 +107,7 @@ const (
 // introducing some risk of fragmentation and/or dropped packets.
 type ObfuscatedPacketConn struct {
 	net.PacketConn
+	remoteAddr                 *net.UDPAddr
 	isServer                   bool
 	isIETFClient               bool
 	isDecoyClient              bool
@@ -135,7 +137,7 @@ func (p *peerMode) isStale() bool {
 
 func NewClientObfuscatedPacketConn(
 	packetConn net.PacketConn,
-	isServer bool,
+	remoteAddr *net.UDPAddr,
 	isIETFClient bool,
 	isDecoyClient bool,
 	obfuscationKey string,
@@ -145,7 +147,8 @@ func NewClientObfuscatedPacketConn(
 
 	return newObfuscatedPacketConn(
 		packetConn,
-		isServer,
+		remoteAddr,
+		false,
 		isIETFClient,
 		isDecoyClient,
 		obfuscationKey,
@@ -156,7 +159,6 @@ func NewClientObfuscatedPacketConn(
 
 func NewServerObfuscatedPacketConn(
 	packetConn net.PacketConn,
-	isServer bool,
 	isIETFClient bool,
 	isDecoyClient bool,
 	obfuscationKey string,
@@ -164,7 +166,8 @@ func NewServerObfuscatedPacketConn(
 
 	return newObfuscatedPacketConn(
 		packetConn,
-		isServer,
+		nil,
+		true,
 		isIETFClient,
 		isDecoyClient,
 		obfuscationKey,
@@ -176,6 +179,7 @@ func NewServerObfuscatedPacketConn(
 // newObfuscatedPacketConn creates a new ObfuscatedPacketConn.
 func newObfuscatedPacketConn(
 	packetConn net.PacketConn,
+	remoteAddr *net.UDPAddr,
 	isServer bool,
 	isIETFClient bool,
 	isDecoyClient bool,
@@ -183,6 +187,13 @@ func newObfuscatedPacketConn(
 	paddingSeed *prng.Seed,
 	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 ) (*ObfuscatedPacketConn, error) {
+
+	// Store the specified remoteAddr, which is used to implement
+	// net.Conn.RemoteAddr, as the input packetConn may return a nil remote
+	// addr from ReadFrom. This must be set and is only set for clients.
+	if isServer != (remoteAddr == nil) {
+		return nil, errors.TraceNew("invalid remoteAddr")
+	}
 
 	// There is no replay of obfuscation "encryption", just padding.
 	nonceSeed, err := prng.NewSeed()
@@ -192,6 +203,7 @@ func newObfuscatedPacketConn(
 
 	conn := &ObfuscatedPacketConn{
 		PacketConn:                 packetConn,
+		remoteAddr:                 remoteAddr,
 		isServer:                   isServer,
 		isIETFClient:               isIETFClient,
 		isDecoyClient:              isDecoyClient,
@@ -313,9 +325,9 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 // for x/net/internal/socket.Message and quic-go uses this one type for both
 // IPv4 and IPv6 packets.
 //
-// Read, Write, and RemoteAddr are present to satisfy the net.Conn interface,
-// to which ObfuscatedPacketConn is converted internally, via quic-go, in
-// x/net/ipv[4|6] for OOB manipulation. These functions do not need to be
+// Read and Write are present to satisfy the net.Conn interface, to which
+// ObfuscatedPacketConn is converted internally, via quic-go, in x/net/ipv
+// [4|6] for OOB manipulation. These functions do not need to be
 // implemented.
 
 func (conn *ObfuscatedPacketConn) ReadMsgUDP(p, oob []byte) (int, int, int, *net.UDPAddr, error) {
@@ -362,7 +374,22 @@ func (conn *ObfuscatedPacketConn) Write(_ []byte) (int, error) {
 }
 
 func (conn *ObfuscatedPacketConn) RemoteAddr() net.Addr {
-	return nil
+	return conn.remoteAddr
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *ObfuscatedPacketConn) GetMetrics() common.LogFields {
+
+	logFields := make(common.LogFields)
+
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
+	underlyingMetrics, ok := conn.PacketConn.(common.MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
+
+	return logFields
 }
 
 func (conn *ObfuscatedPacketConn) readPacketWithType(
@@ -370,6 +397,13 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 
 	for {
 		n, oobn, flags, addr, isIETF, err := conn.readPacket(p, oob)
+
+		// Use the remoteAddr specified in NewClientObfuscatedPacketConn when
+		// the underlying ReadFrom does not return a remote addr. This is the
+		// case with inproxy.ClientConn.
+		if addr == nil {
+			addr = conn.remoteAddr
+		}
 
 		// When enabled, and when a packet is received, sometimes immediately
 		// respond with a decoy packet, which is entirely random. Sending a
@@ -812,7 +846,9 @@ func (conn *ObfuscatedPacketConn) writePacket(
 
 func getMaxPreDiscoveryPacketSize(addr net.Addr) int {
 	maxPacketSize := MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4
-	if udpAddr, ok := addr.(*net.UDPAddr); ok && udpAddr.IP.To4() == nil {
+	if udpAddr, ok := addr.(*net.UDPAddr); ok &&
+		udpAddr != nil && udpAddr.IP != nil && udpAddr.IP.To4() == nil {
+
 		maxPacketSize = MAX_PRE_DISCOVERY_PACKET_SIZE_IPV6
 	}
 	return maxPacketSize

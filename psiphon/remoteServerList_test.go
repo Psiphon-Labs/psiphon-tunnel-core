@@ -89,12 +89,10 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
 	serverConfigJSON, _, _, _, encodedServerEntry, err := server.GenerateConfig(
 		&server.GenerateConfigParams{
-			ServerIPAddress:      serverIPAddress,
-			EnableSSHAPIRequests: true,
-			WebServerPort:        int(atomic.AddInt32(&nextServerPort, 1)),
-			TunnelProtocolPorts:  map[string]int{"OSSH": int(atomic.AddInt32(&nextServerPort, 1))},
-			LogFilename:          filepath.Join(testDataDirName, "psiphond.log"),
-			LogLevel:             "debug",
+			ServerIPAddress:     serverIPAddress,
+			TunnelProtocolPorts: map[string]int{"OSSH": int(atomic.AddInt32(&nextServerPort, 1))},
+			LogFilename:         filepath.Join(testDataDirName, "psiphond.log"),
+			LogLevel:            "debug",
 
 			// "defer os.RemoveAll" will cause a log write error
 			SkipPanickingLogWriter: true,
@@ -389,8 +387,8 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
     {
         "ClientPlatform" : "",
         "ClientVersion" : "0",
-        "SponsorId" : "0",
-        "PropagationChannelId" : "0",
+        "SponsorId" : "0000000000000000",
+        "PropagationChannelId" : "0000000000000000",
         "ConnectionWorkerPoolSize" : 1,
         "EstablishTunnelPausePeriodSeconds" : 1,
         "FetchRemoteServerListRetryPeriodMilliseconds" : 250,

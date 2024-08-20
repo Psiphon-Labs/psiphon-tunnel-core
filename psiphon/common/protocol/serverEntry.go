@@ -32,6 +32,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -45,43 +47,50 @@ import (
 // several protocols. Server entries are JSON records downloaded from
 // various sources.
 type ServerEntry struct {
-	Tag                             string   `json:"tag"`
-	IpAddress                       string   `json:"ipAddress"`
-	WebServerPort                   string   `json:"webServerPort"` // not an int
-	WebServerSecret                 string   `json:"webServerSecret"`
-	WebServerCertificate            string   `json:"webServerCertificate"`
-	SshPort                         int      `json:"sshPort"`
-	SshUsername                     string   `json:"sshUsername"`
-	SshPassword                     string   `json:"sshPassword"`
-	SshHostKey                      string   `json:"sshHostKey"`
-	SshObfuscatedPort               int      `json:"sshObfuscatedPort"`
-	SshObfuscatedQUICPort           int      `json:"sshObfuscatedQUICPort"`
-	LimitQUICVersions               []string `json:"limitQUICVersions"`
-	SshObfuscatedTapDancePort       int      `json:"sshObfuscatedTapdancePort"`
-	SshObfuscatedConjurePort        int      `json:"sshObfuscatedConjurePort"`
-	SshObfuscatedKey                string   `json:"sshObfuscatedKey"`
-	Capabilities                    []string `json:"capabilities"`
-	Region                          string   `json:"region"`
-	ProviderID                      string   `json:"providerID"`
-	FrontingProviderID              string   `json:"frontingProviderID"`
-	TlsOSSHPort                     int      `json:"tlsOSSHPort"`
-	MeekServerPort                  int      `json:"meekServerPort"`
-	MeekCookieEncryptionPublicKey   string   `json:"meekCookieEncryptionPublicKey"`
-	MeekObfuscatedKey               string   `json:"meekObfuscatedKey"`
-	MeekFrontingHost                string   `json:"meekFrontingHost"`
-	MeekFrontingHosts               []string `json:"meekFrontingHosts"`
-	MeekFrontingDomain              string   `json:"meekFrontingDomain"`
-	MeekFrontingAddresses           []string `json:"meekFrontingAddresses"`
-	MeekFrontingAddressesRegex      string   `json:"meekFrontingAddressesRegex"`
-	MeekFrontingDisableSNI          bool     `json:"meekFrontingDisableSNI"`
-	TacticsRequestPublicKey         string   `json:"tacticsRequestPublicKey"`
-	TacticsRequestObfuscatedKey     string   `json:"tacticsRequestObfuscatedKey"`
-	ConfigurationVersion            int      `json:"configurationVersion"`
-	Signature                       string   `json:"signature"`
-	DisableHTTPTransforms           bool     `json:"disableHTTPTransforms"`
-	DisableObfuscatedQUICTransforms bool     `json:"disableObfuscatedQUICTransforms"`
-	DisableOSSHTransforms           bool     `json:"disableOSSHTransforms"`
-	DisableOSSHPrefix               bool     `json:"disableOSSHPrefix"`
+	Tag                                 string   `json:"tag,omitempty"`
+	IpAddress                           string   `json:"ipAddress,omitempty"`
+	WebServerPort                       string   `json:"webServerPort,omitempty"` // not an int
+	WebServerSecret                     string   `json:"webServerSecret,omitempty"`
+	WebServerCertificate                string   `json:"webServerCertificate,omitempty"`
+	SshPort                             int      `json:"sshPort,omitempty"`
+	SshUsername                         string   `json:"sshUsername,omitempty"`
+	SshPassword                         string   `json:"sshPassword,omitempty"`
+	SshHostKey                          string   `json:"sshHostKey,omitempty"`
+	SshObfuscatedPort                   int      `json:"sshObfuscatedPort,omitempty"`
+	SshObfuscatedQUICPort               int      `json:"sshObfuscatedQUICPort,omitempty"`
+	LimitQUICVersions                   []string `json:"limitQUICVersions,omitempty"`
+	SshObfuscatedTapDancePort           int      `json:"sshObfuscatedTapdancePort,omitempty"`
+	SshObfuscatedConjurePort            int      `json:"sshObfuscatedConjurePort,omitempty"`
+	SshObfuscatedKey                    string   `json:"sshObfuscatedKey,omitempty"`
+	Capabilities                        []string `json:"capabilities,omitempty"`
+	Region                              string   `json:"region,omitempty"`
+	ProviderID                          string   `json:"providerID,omitempty"`
+	FrontingProviderID                  string   `json:"frontingProviderID,omitempty"`
+	TlsOSSHPort                         int      `json:"tlsOSSHPort,omitempty"`
+	MeekServerPort                      int      `json:"meekServerPort,omitempty"`
+	MeekCookieEncryptionPublicKey       string   `json:"meekCookieEncryptionPublicKey,omitempty"`
+	MeekObfuscatedKey                   string   `json:"meekObfuscatedKey,omitempty"`
+	MeekFrontingHost                    string   `json:"meekFrontingHost,omitempty"`
+	MeekFrontingHosts                   []string `json:"meekFrontingHosts,omitempty"`
+	MeekFrontingDomain                  string   `json:"meekFrontingDomain,omitempty"`
+	MeekFrontingAddresses               []string `json:"meekFrontingAddresses,omitempty"`
+	MeekFrontingAddressesRegex          string   `json:"meekFrontingAddressesRegex,omitempty"`
+	MeekFrontingDisableSNI              bool     `json:"meekFrontingDisableSNI,omitempty"`
+	TacticsRequestPublicKey             string   `json:"tacticsRequestPublicKey,omitempty"`
+	TacticsRequestObfuscatedKey         string   `json:"tacticsRequestObfuscatedKey,omitempty"`
+	ConfigurationVersion                int      `json:"configurationVersion,omitempty"`
+	Signature                           string   `json:"signature,omitempty"`
+	DisableHTTPTransforms               bool     `json:"disableHTTPTransforms,omitempty"`
+	DisableObfuscatedQUICTransforms     bool     `json:"disableObfuscatedQUICTransforms,omitempty"`
+	DisableOSSHTransforms               bool     `json:"disableOSSHTransforms,omitempty"`
+	DisableOSSHPrefix                   bool     `json:"disableOSSHPrefix,omitempty"`
+	InproxySessionPublicKey             string   `json:"inproxySessionPublicKey,omitempty"`
+	InproxySessionRootObfuscationSecret string   `json:"inproxySessionRootObfuscationSecret,omitempty"`
+	InproxySSHPort                      int      `json:"inproxySSHPort,omitempty"`
+	InproxyOSSHPort                     int      `json:"inproxyOSSHPort,omitempty"`
+	InproxyQUICPort                     int      `json:"inproxyQUICPort,omitempty"`
+	InproxyMeekPort                     int      `json:"inproxyMeekPort,omitempty"`
+	InproxyTlsOSSHPort                  int      `json:"inproxyTlsOSSHPort,omitempty"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
@@ -426,6 +435,15 @@ func (fields ServerEntryFields) RemoveUnsignedFields() {
 	delete(fields, "isLocalDerivedTag")
 }
 
+// ToSignedFields checks for a signature and calls RemoveUnsignedFields.
+func (fields ServerEntryFields) ToSignedFields() error {
+	if !fields.HasSignature() {
+		return errors.TraceNew("missing signature field")
+	}
+	fields.RemoveUnsignedFields()
+	return nil
+}
+
 // NewServerEntrySignatureKeyPair creates an ed25519 key pair for use in
 // server entry signing and verification.
 func NewServerEntrySignatureKeyPair() (string, string, error) {
@@ -443,6 +461,17 @@ func NewServerEntrySignatureKeyPair() (string, string, error) {
 // GetCapability returns the server capability corresponding
 // to the tunnel protocol.
 func GetCapability(protocol string) string {
+
+	// The "-OSSH" suffix drop is for legacy compatibility. Newer protocols,
+	// including in-proxy protocols, use the full protocol name as the
+	// capability. This avoids ambiguities such as in the case
+	// of "INPROXY-WEBRTC-OSSH", where a truncated "INPROXY-WEBRTC" is
+	// ambiguous.
+
+	if TunnelProtocolUsesInproxy(protocol) {
+		return protocol
+	}
+
 	return strings.TrimSuffix(protocol, "-OSSH")
 }
 
@@ -454,7 +483,7 @@ func GetTacticsCapability(protocol string) string {
 
 // hasCapability indicates if the server entry has the specified capability.
 //
-// Any internal "PASSTHROUGH-v2 or "PASSTHROUGH" componant in the server
+// Any internal "PASSTHROUGH-v2 or "PASSTHROUGH" component in the server
 // entry's capabilities is ignored. These PASSTHROUGH components are used to
 // mask protocols which are running the passthrough mechanisms from older
 // clients which do not implement the passthrough messages. Older clients
@@ -466,6 +495,10 @@ func GetTacticsCapability(protocol string) string {
 // New clients must check SupportsOnlyQUICv1 before selecting a QUIC version;
 // for "QUICv1", this ensures that new clients also do not select gQUIC to
 // QUICv1-only servers.
+//
+// In-proxy tunnel protocols omit the "v1" and "PASSTHROUGH" suffixes. For
+// in-proxy QUIC, gQUIC is never used; and for in-proxy HTTPS/TLS, clients
+// always apply PASSTHROUGH-v2.
 func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 	for _, capability := range serverEntry.Capabilities {
 
@@ -484,7 +517,9 @@ func (serverEntry *ServerEntry) hasCapability(requiredCapability string) bool {
 		}
 
 		// Special case: some capabilities may additionally support TLS-OSSH.
-		if requiredCapability == GetCapability(TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH) && capabilitySupportsTLSOSSH(originalCapability) {
+		// This does not apply to in-proxy TLS-OSSH.
+		if requiredCapability == GetCapability(TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH) &&
+			capabilitySupportsTLSOSSH(originalCapability) {
 			return true
 		}
 	}
@@ -536,6 +571,9 @@ func (serverEntry *ServerEntry) ProtocolUsesLegacyPassthrough(protocol string) b
 // SupportsOnlyQUICv1 indicates that the QUIC-OSSH server supports only QUICv1
 // and gQUIC versions should not be selected, as they will fail to connect
 // while sending atypical traffic to the server.
+//
+// SupportsOnlyQUICv1 strictly applies to QUIC-OSSH and not the in-proxy
+// variant.
 func (serverEntry *ServerEntry) SupportsOnlyQUICv1() bool {
 	quicCapability := GetCapability(TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH)
 	return common.Contains(serverEntry.Capabilities, quicCapability+"v1") &&
@@ -547,6 +585,7 @@ func (serverEntry *ServerEntry) SupportsOnlyQUICv1() bool {
 type ConditionallyEnabledComponents interface {
 	QUICEnabled() bool
 	RefractionNetworkingEnabled() bool
+	InproxyEnabled() bool
 }
 
 // TunnelProtocolPortLists is a map from tunnel protocol names (or "All") to a
@@ -561,7 +600,8 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 	limitTunnelProtocols TunnelProtocols,
 	limitTunnelDialPortNumbers TunnelProtocolPortLists,
 	limitQUICVersions QUICVersions,
-	excludeIntensive bool) TunnelProtocols {
+	excludeIntensive bool,
+	excludeInproxy bool) TunnelProtocols {
 
 	supportedProtocols := make(TunnelProtocols, 0)
 
@@ -589,9 +629,22 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 			continue
 		}
 
-		if (TunnelProtocolUsesQUIC(tunnelProtocol) && !conditionallyEnabled.QUICEnabled()) ||
+		// While in-proxy protocols are TunnelProtocolIsResourceIntensive,
+		// there's an additional use case for excluding in-proxy protocols as
+		// controlled by InproxyTunnelProtocolSelectionProbability.
+
+		if excludeInproxy && TunnelProtocolUsesInproxy(tunnelProtocol) {
+			continue
+		}
+
+		if (TunnelProtocolUsesQUIC(tunnelProtocol) &&
+			!conditionallyEnabled.QUICEnabled()) ||
+
 			(TunnelProtocolUsesRefractionNetworking(tunnelProtocol) &&
-				!conditionallyEnabled.RefractionNetworkingEnabled()) {
+				!conditionallyEnabled.RefractionNetworkingEnabled()) ||
+
+			(TunnelProtocolUsesInproxy(tunnelProtocol) &&
+				!conditionallyEnabled.InproxyEnabled()) {
 			continue
 		}
 
@@ -639,55 +692,8 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 		supportedProtocols = append(supportedProtocols, tunnelProtocol)
 
 	}
+
 	return supportedProtocols
-}
-
-func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, error) {
-
-	if !serverEntry.SupportsProtocol(tunnelProtocol) {
-		return 0, errors.TraceNew("protocol not supported")
-	}
-
-	switch tunnelProtocol {
-
-	case TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
-		if serverEntry.TlsOSSHPort == 0 {
-			// Special case: a server which supports UNFRONTED-MEEK-HTTPS-OSSH
-			// or UNFRONTED-MEEK-SESSION-TICKET-OSSH also supports TLS-OSSH
-			// over the same port.
-			return serverEntry.MeekServerPort, nil
-		}
-		return serverEntry.TlsOSSHPort, nil
-
-	case TUNNEL_PROTOCOL_SSH:
-		return serverEntry.SshPort, nil
-
-	case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
-		return serverEntry.SshObfuscatedPort, nil
-
-	case TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
-		return serverEntry.SshObfuscatedTapDancePort, nil
-
-	case TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH:
-		return serverEntry.SshObfuscatedConjurePort, nil
-
-	case TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
-		return serverEntry.SshObfuscatedQUICPort, nil
-
-	case TUNNEL_PROTOCOL_FRONTED_MEEK,
-		TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH:
-		return int(atomic.LoadInt32(&frontedMeekHTTPSDialPortNumber)), nil
-
-	case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
-		return 80, nil
-
-	case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
-		TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
-		TUNNEL_PROTOCOL_UNFRONTED_MEEK:
-		return serverEntry.MeekServerPort, nil
-	}
-
-	return 0, errors.TraceNew("unknown protocol")
 }
 
 var frontedMeekHTTPSDialPortNumber = int32(443)
@@ -697,6 +703,204 @@ var frontedMeekHTTPSDialPortNumber = int32(443)
 // test servers where binding to port 443 is not possible.
 func SetFrontedMeekHTTPDialPortNumber(port int) {
 	atomic.StoreInt32(&frontedMeekHTTPSDialPortNumber, int32(port))
+}
+
+func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, error) {
+
+	if !serverEntry.SupportsProtocol(tunnelProtocol) {
+		return 0, errors.TraceNew("protocol not supported")
+	}
+
+	if !TunnelProtocolUsesInproxy(tunnelProtocol) {
+
+		switch tunnelProtocol {
+
+		case TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
+			if serverEntry.TlsOSSHPort == 0 {
+				// Special case: a server which supports UNFRONTED-MEEK-HTTPS-OSSH
+				// or UNFRONTED-MEEK-SESSION-TICKET-OSSH also supports TLS-OSSH
+				// over the same port.
+				return serverEntry.MeekServerPort, nil
+			}
+			return serverEntry.TlsOSSHPort, nil
+
+		case TUNNEL_PROTOCOL_SSH:
+			return serverEntry.SshPort, nil
+
+		case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+			return serverEntry.SshObfuscatedPort, nil
+
+		case TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH:
+			return serverEntry.SshObfuscatedTapDancePort, nil
+
+		case TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH:
+			return serverEntry.SshObfuscatedConjurePort, nil
+
+		case TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+			return serverEntry.SshObfuscatedQUICPort, nil
+
+		case TUNNEL_PROTOCOL_FRONTED_MEEK,
+			TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH:
+			return int(atomic.LoadInt32(&frontedMeekHTTPSDialPortNumber)), nil
+
+		case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+			return 80, nil
+
+		case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+			TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
+			TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+			return serverEntry.MeekServerPort, nil
+		}
+
+	} else {
+
+		// Distinct dial/listening ports are used for tunnel protocols when
+		// used as an in-proxy 2nd hop, as the server will require a relayed
+		// in-proxy broker report for in-proxy 2nd hops.
+
+		switch TunnelProtocolMinusInproxy(tunnelProtocol) {
+
+		case TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
+			if serverEntry.InproxyTlsOSSHPort == 0 {
+				return serverEntry.InproxyMeekPort, nil
+			}
+			return serverEntry.InproxyTlsOSSHPort, nil
+
+		case TUNNEL_PROTOCOL_SSH:
+			return serverEntry.InproxySSHPort, nil
+
+		case TUNNEL_PROTOCOL_OBFUSCATED_SSH:
+			return serverEntry.InproxyOSSHPort, nil
+
+		case TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH:
+			return serverEntry.InproxyQUICPort, nil
+
+		case TUNNEL_PROTOCOL_FRONTED_MEEK,
+			TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH:
+			return int(atomic.LoadInt32(&frontedMeekHTTPSDialPortNumber)), nil
+
+		case TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP:
+			return 80, nil
+
+		case TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+			TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
+			TUNNEL_PROTOCOL_UNFRONTED_MEEK:
+			return serverEntry.InproxyMeekPort, nil
+		}
+
+	}
+
+	return 0, errors.TraceNew("unknown protocol")
+}
+
+// GetTLSSessionCacheKeyAddress returns a network address (IP:port) that is
+// suitable to use as a TLS session cache key.
+//
+// By default, TLS implementations, including crypto/tls and utls use SNI as a
+// session cache key, but this is not a suitable key when SNI is manipulated.
+// When SNI is not present, these implementations fall back to using the peer
+// remote address, which is also not a suitable key in cases where there is a
+// non-TLS-terminating temporary intermediary, such as an in-proxy proxy.
+//
+// The key is unique to the Psiphon server and tunnel protocol listener. For
+// direct tunnel protocols, the key precisely maps TLS sessions to the
+// corresponding TLS server. For indirect tunnel protocols, with an
+// intermediate TLS server, the key is an approximate map which assumes the
+// redials will mostly use the same intermediate TLS server.
+//
+// Do not use the GetTLSSessionCacheKeyAddress value for dialing.
+func (serverEntry *ServerEntry) GetTLSSessionCacheKeyAddress(tunnelProtocol string) (string, error) {
+
+	port, err := serverEntry.GetDialPortNumber(tunnelProtocol)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+
+	return net.JoinHostPort(serverEntry.IpAddress, strconv.Itoa(port)), nil
+}
+
+// IsValidInproxyDialAddress indicates whether the dial destination
+// network/host/port matches the dial parameters for any of the tunnel
+// protocols supported by the server entry.
+//
+// Limitations:
+// - TAPDANCE-OSSH and CONJURE-OSSH are not supported.
+// - The host header is not considered in the case of fronted protocols.
+func (serverEntry *ServerEntry) IsValidInproxyDialAddress(
+	networkProtocol string, dialHost string, dialPortNumber int) bool {
+
+	// The TapDance and Conjure destination addresses are not included
+	// in the server entry, so TAPDANCE-OSSH and CONJURE-OSSH dial
+	// destinations cannot be validated for in-proxy use.
+
+	for _, tunnelProtocol := range SupportedTunnelProtocols {
+
+		if !TunnelProtocolUsesInproxy(tunnelProtocol) {
+			continue
+		}
+
+		if !serverEntry.SupportsProtocol(tunnelProtocol) {
+			continue
+		}
+
+		usesTCP := TunnelProtocolUsesTCP(tunnelProtocol)
+		if (usesTCP && networkProtocol != "tcp") || (!usesTCP && networkProtocol != "udp") {
+			continue
+		}
+
+		tunnelPortNumber, err := serverEntry.GetDialPortNumber(tunnelProtocol)
+		if err != nil || tunnelPortNumber != dialPortNumber {
+			// Silently fail on error as the server entry should be well-formed.
+			continue
+		}
+
+		if !TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+
+			// For all direct protocols, the destination host must be the
+			// server IP address.
+
+			if serverEntry.IpAddress != dialHost {
+				continue
+			}
+
+		} else {
+
+			// For fronted protocols, the destination host may be domain and
+			// must match either MeekFrontingAddressesRegex or
+			// MeekFrontingAddresses. As in psiphon.selectFrontingParameters,
+			// MeekFrontingAddressesRegex takes precedence when not empty.
+			//
+			// As the host header value is not checked here, additional
+			// measures must be taken to ensure the destination is a Psiphon server.
+
+			if len(serverEntry.MeekFrontingAddressesRegex) > 0 {
+
+				re, err := regexp.Compile(serverEntry.MeekFrontingAddressesRegex)
+				if err != nil {
+					continue
+				}
+
+				// The entire dialHost string must match the regex.
+				re.Longest()
+				match := re.FindString(dialHost)
+				if match == "" || match != dialHost {
+					continue
+				}
+
+			} else {
+
+				if !common.Contains(serverEntry.MeekFrontingAddresses, dialHost) {
+					continue
+				}
+			}
+		}
+
+		// When all of the checks pass for this protocol, the input is a valid
+		// dial destination.
+		return true
+	}
+
+	return false
 }
 
 // GetSupportedTacticsProtocols returns a list of tunnel protocols,
@@ -729,26 +933,12 @@ func (serverEntry *ServerEntry) SupportsSSHAPIRequests() bool {
 	return serverEntry.hasCapability(CAPABILITY_SSH_API_REQUESTS)
 }
 
-func (serverEntry *ServerEntry) GetUntunneledWebRequestPorts() []string {
-	ports := make([]string, 0)
-	if serverEntry.hasCapability(CAPABILITY_UNTUNNELED_WEB_API_REQUESTS) {
-		// Server-side configuration quirk: there's a port forward from
-		// port 443 to the web server, which we can try, except on servers
-		// running FRONTED_MEEK, which listens on port 443.
-		if !serverEntry.SupportsProtocol(TUNNEL_PROTOCOL_FRONTED_MEEK) {
-			ports = append(ports, "443")
-		}
-		ports = append(ports, serverEntry.WebServerPort)
-	}
-	return ports
+func (serverEntry *ServerEntry) HasProviderID() bool {
+	return serverEntry.ProviderID != ""
 }
 
 func (serverEntry *ServerEntry) HasSignature() bool {
 	return serverEntry.Signature != ""
-}
-
-func (serverEntry *ServerEntry) HasProviderID() bool {
-	return serverEntry.ProviderID != ""
 }
 
 func (serverEntry *ServerEntry) GetDiagnosticID() string {

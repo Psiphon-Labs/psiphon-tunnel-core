@@ -32,11 +32,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	maxminddb "github.com/oschwald/maxminddb-golang"
-	cache "github.com/patrickmn/go-cache"
 )
 
 const (
-	GEOIP_SESSION_CACHE_TTL = 60 * time.Minute
 	GEOIP_UNKNOWN_VALUE     = "None"
 	GEOIP_DATABASE_TYPE_ISP = "GeoIP2-ISP"
 )
@@ -65,22 +63,35 @@ func NewGeoIPData() GeoIPData {
 	}
 }
 
-// SetLogFields adds the GeoIPData fields to LogFields, following Psiphon
-// metric field name and format conventions.
-func (g GeoIPData) SetLogFields(logFields LogFields) {
-	g.SetLogFieldsWithPrefix("", logFields)
+// SetClientLogFields adds the GeoIPData fields to LogFields, following
+// Psiphon field name and format conventions. For example, GeoIPData.Country
+// is logged as client_region.
+func (g GeoIPData) SetClientLogFields(logFields LogFields) {
+	g.SetClientLogFieldsWithPrefix("", logFields)
 }
 
-func (g GeoIPData) SetLogFieldsWithPrefix(prefix string, logFields LogFields) {
+// SetClientLogFieldsWithPrefix adds the GeoIPData fields to LogFields,
+// following Psiphon field name and format conventions and with the specified
+// prefix. For example, GeoIPData.Country is logged as
+// duplicate_authorization_client_region for the prefix "duplicate_authorization_".
+func (g GeoIPData) SetClientLogFieldsWithPrefix(prefix string, logFields LogFields) {
+	g.SetLogFieldsWithPrefix(prefix, "client", logFields)
+}
+
+// SetLogFieldsWithPrefix adds the GeoIPData fields to LogFields, following
+// Psiphon field name and format conventions and with the specified prefix
+// and name. For example, GeoIPData.Country is logged as proxy_region for the
+// prefix "" and name "proxy".
+func (g GeoIPData) SetLogFieldsWithPrefix(prefix string, name string, logFields LogFields) {
 
 	// In psi_web, the space replacement was done to accommodate space
 	// delimited logging, which is no longer required; we retain the
 	// transformation so that stats aggregation isn't impacted.
-	logFields[prefix+"client_region"] = strings.Replace(g.Country, " ", "_", -1)
-	logFields[prefix+"client_city"] = strings.Replace(g.City, " ", "_", -1)
-	logFields[prefix+"client_isp"] = strings.Replace(g.ISP, " ", "_", -1)
-	logFields[prefix+"client_asn"] = strings.Replace(g.ASN, " ", "_", -1)
-	logFields[prefix+"client_aso"] = strings.Replace(g.ASO, " ", "_", -1)
+	logFields[fmt.Sprintf("%s%s_region", prefix, name)] = strings.Replace(g.Country, " ", "_", -1)
+	logFields[fmt.Sprintf("%s%s_city", prefix, name)] = strings.Replace(g.City, " ", "_", -1)
+	logFields[fmt.Sprintf("%s%s_isp", prefix, name)] = strings.Replace(g.ISP, " ", "_", -1)
+	logFields[fmt.Sprintf("%s%s_asn", prefix, name)] = strings.Replace(g.ASN, " ", "_", -1)
+	logFields[fmt.Sprintf("%s%s_aso", prefix, name)] = strings.Replace(g.ASO, " ", "_", -1)
 }
 
 // GeoIPService implements GeoIP lookup and session/GeoIP caching.
@@ -88,8 +99,7 @@ func (g GeoIPData) SetLogFieldsWithPrefix(prefix string, logFields LogFields) {
 // supports hot reloading of MaxMind data while the server is
 // running.
 type GeoIPService struct {
-	databases    []*geoIPDatabase
-	sessionCache *cache.Cache
+	databases []*geoIPDatabase
 }
 
 type geoIPDatabase struct {
@@ -105,8 +115,7 @@ type geoIPDatabase struct {
 func NewGeoIPService(databaseFilenames []string) (*GeoIPService, error) {
 
 	geoIP := &GeoIPService{
-		databases:    make([]*geoIPDatabase, len(databaseFilenames)),
-		sessionCache: cache.New(GEOIP_SESSION_CACHE_TTL, 1*time.Minute),
+		databases: make([]*geoIPDatabase, len(databaseFilenames)),
 	}
 
 	for i, filename := range databaseFilenames {
@@ -278,45 +287,4 @@ func (geoIP *GeoIPService) lookupIP(IP net.IP, ISPOnly bool) GeoIPData {
 	}
 
 	return result
-}
-
-// SetSessionCache adds the sessionID/geoIPData pair to the
-// session cache. This value will not expire; the caller must
-// call MarkSessionCacheToExpire to initiate expiry.
-// Calling SetSessionCache for an existing sessionID will
-// replace the previous value and reset any expiry.
-func (geoIP *GeoIPService) SetSessionCache(sessionID string, geoIPData GeoIPData) {
-	geoIP.sessionCache.Set(sessionID, geoIPData, cache.NoExpiration)
-}
-
-// MarkSessionCacheToExpire initiates expiry for an existing
-// session cache entry, if the session ID is found in the cache.
-// Concurrency note: SetSessionCache and MarkSessionCacheToExpire
-// should not be called concurrently for a single session ID.
-func (geoIP *GeoIPService) MarkSessionCacheToExpire(sessionID string) {
-	geoIPData, found := geoIP.sessionCache.Get(sessionID)
-	// Note: potential race condition between Get and Set. In practice,
-	// the tunnel server won't clobber a SetSessionCache value by calling
-	// MarkSessionCacheToExpire concurrently.
-	if found {
-		geoIP.sessionCache.Set(sessionID, geoIPData, cache.DefaultExpiration)
-	}
-}
-
-// GetSessionCache returns the cached GeoIPData for the
-// specified session ID; a blank GeoIPData is returned
-// if the session ID is not found in the cache.
-func (geoIP *GeoIPService) GetSessionCache(sessionID string) GeoIPData {
-	geoIPData, found := geoIP.sessionCache.Get(sessionID)
-	if !found {
-		return NewGeoIPData()
-	}
-	return geoIPData.(GeoIPData)
-}
-
-// InSessionCache returns whether the session ID is present
-// in the session cache.
-func (geoIP *GeoIPService) InSessionCache(sessionID string) bool {
-	_, found := geoIP.sessionCache.Get(sessionID)
-	return found
 }
