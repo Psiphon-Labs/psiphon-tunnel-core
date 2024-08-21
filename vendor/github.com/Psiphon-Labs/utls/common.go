@@ -237,6 +237,13 @@ const (
 // include downgrade canaries even if it's using its highers supported version.
 var testingOnlyForceDowngradeCanary bool
 
+// [Psiphon]
+type ConnectionMetrics struct {
+	// ClientSentTicket is true if the client has sent a TLS 1.2 session ticket
+	// or a TLS 1.3 PSK in the ClientHello successfully.
+	ClientSentTicket bool
+}
+
 // ConnectionState records basic TLS details about the connection.
 type ConnectionState struct {
 	// Version is the TLS version used by the connection (e.g. VersionTLS12).
@@ -244,10 +251,6 @@ type ConnectionState struct {
 
 	// HandshakeComplete is true if the handshake has concluded.
 	HandshakeComplete bool
-
-	// ClientSentTicket is true if the client has sent a TLS 1.2 session ticket
-	// or a TLS 1.3 PSK in the ClientHello.
-	ClientSentTicket bool
 
 	// DidResume is true if this connection was successfully resumed from a
 	// previous session with a session ticket or similar mechanism.

@@ -235,6 +235,15 @@ const (
 // include downgrade canaries even if it's using its highers supported version.
 var testingOnlyForceDowngradeCanary bool
 
+// [Psiphon]
+// ConnectionMetrics reprsents metrics of interest about the connection
+// that are not available from ConnectionState.
+type ConnectionMetrics struct {
+	// ClientSentTicket is true if the client has sent a TLS 1.2 session ticket
+	// or a TLS 1.3 PSK in the ClientHello successfully.
+	ClientSentTicket bool
+}
+
 // ConnectionState records basic TLS details about the connection.
 type ConnectionState struct {
 	// Version is the TLS version used by the connection (e.g. VersionTLS12).

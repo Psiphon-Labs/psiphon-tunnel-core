@@ -229,6 +229,11 @@ func (c *Conn) clientHandshake(ctx context.Context) (err error) {
 		return err
 	}
 
+	// [Psiphon]
+	if session != nil {
+		c.clientSentTicket = true
+	}
+
 	if hello.earlyData {
 		suite := cipherSuiteTLS13ByID(session.cipherSuite)
 		transcript := suite.hash.New()

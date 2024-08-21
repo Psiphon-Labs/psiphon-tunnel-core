@@ -23,10 +23,10 @@ github.com/Psiphon-Labs/consistent
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240821050307-f762bf7b8128
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240821051046-09ca7d11918f
 ## explicit; go 1.21
 github.com/Psiphon-Labs/psiphon-tls
-# github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536
+# github.com/Psiphon-Labs/quic-go v0.0.0-20240821052333-b6316b594e39
 ## explicit; go 1.21
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
@@ -44,7 +44,7 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/Psiphon-Labs/utls v1.1.1-0.20240818221737-55b85574734b
+# github.com/Psiphon-Labs/utls v1.1.1-0.20240821052800-443a34df921f
 ## explicit; go 1.21
 github.com/Psiphon-Labs/utls
 github.com/Psiphon-Labs/utls/dicttls

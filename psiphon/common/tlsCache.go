@@ -56,12 +56,6 @@ func (c *TLSClientSessionCacheWrapper) Put(_ string, cs *tls.ClientSessionState)
 	c.ClientSessionCache.Put(c.sessionKey, cs)
 }
 
-func (c *TLSClientSessionCacheWrapper) IsSessionResumptionAvailable() bool {
-	// Ignore the ok return value, as the session may still be till if ok is true.
-	session, _ := c.Get(c.sessionKey)
-	return session != nil
-}
-
 func (c *TLSClientSessionCacheWrapper) RemoveCacheEntry() {
 	c.ClientSessionCache.Put(c.sessionKey, nil)
 }
@@ -96,12 +90,6 @@ func (c *UtlsClientSessionCacheWrapper) Get(_ string) (session *utls.ClientSessi
 
 func (c *UtlsClientSessionCacheWrapper) Put(_ string, cs *utls.ClientSessionState) {
 	c.ClientSessionCache.Put(c.sessionKey, cs)
-}
-
-func (c *UtlsClientSessionCacheWrapper) IsSessionResumptionAvailable() bool {
-	// Ignore the ok return value, as the session may still be till if ok is true.
-	session, _ := c.Get(c.sessionKey)
-	return session != nil
 }
 
 func (c *UtlsClientSessionCacheWrapper) RemoveCacheEntry() {

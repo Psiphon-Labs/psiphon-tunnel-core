@@ -428,12 +428,6 @@ func CustomTLSDial(
 	}
 
 	clientSessionCache := config.ClientSessionCache
-	var usedSessionTicket bool
-
-	if wrappedCache, ok := clientSessionCache.(*common.UtlsClientSessionCacheWrapper); ok {
-		// Heuristic to determine if TLS dial is resuming a session.
-		usedSessionTicket = wrappedCache.IsSessionResumptionAvailable()
-	}
 	if clientSessionCache == nil {
 		clientSessionCache = utls.NewLRUClientSessionCache(0)
 	}
@@ -508,10 +502,6 @@ func CustomTLSDial(
 		if isTLS13 {
 			// Sets OOB PSK if required.
 			if containsPSKExt(utlsClientHelloID, utlsClientHelloSpec) {
-
-				// Implicitly true.
-				usedSessionTicket = true
-
 				if wrappedCache, ok := clientSessionCache.(*common.UtlsClientSessionCacheWrapper); ok {
 					wrappedCache.Put("", ss)
 				} else {
@@ -519,9 +509,6 @@ func CustomTLSDial(
 				}
 			}
 		} else {
-			// Implicitly true.
-			usedSessionTicket = true
-
 			conn.SetSessionState(ss)
 		}
 
@@ -675,17 +662,25 @@ func CustomTLSDial(
 		return nil, errors.Trace(err)
 	}
 
+	clientSentTicket := conn.ConnectionMetrics().ClientSentTicket
+	didResume := conn.ConnectionState().DidResume
+
 	return &tlsConn{
 		Conn:           conn,
 		underlyingConn: underlyingConn,
-		resumedSession: usedSessionTicket,
+		sentTicket:     clientSentTicket,
+		didResume:      didResume,
 	}, nil
 }
 
 type tlsConn struct {
 	net.Conn
 	underlyingConn net.Conn
-	resumedSession bool
+
+	// TLS handshake states
+
+	sentTicket bool
+	didResume  bool
 }
 
 func (conn *tlsConn) GetMetrics() common.LogFields {
@@ -698,11 +693,17 @@ func (conn *tlsConn) GetMetrics() common.LogFields {
 		logFields.Add(underlyingMetrics.GetMetrics())
 	}
 
-	resumedSession := "0"
-	if conn.resumedSession {
-		resumedSession = "1"
+	sentTicket := "0"
+	if conn.sentTicket {
+		sentTicket = "1"
 	}
-	logFields["tls_resumed_session"] = resumedSession
+	logFields["tls_sent_ticket"] = sentTicket
+
+	didResume := "0"
+	if conn.didResume {
+		didResume = "1"
+	}
+	logFields["tls_did_resume"] = didResume
 
 	return logFields
 }

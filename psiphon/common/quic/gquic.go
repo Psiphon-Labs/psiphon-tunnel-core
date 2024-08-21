@@ -110,9 +110,9 @@ func (c *gQUICConnection) isEarlyDataRejected(err error) bool {
 	return false
 }
 
-func (c *gQUICConnection) hasResumedSession() bool {
-	// gQUIC does not support session resumption.
-	return false
+func (c *gQUICConnection) connectionMetrics() quicConnectionMetrics {
+	// Not supported by gQUIC.
+	return quicConnectionMetrics{}
 }
 
 func gQUICDialContext(
