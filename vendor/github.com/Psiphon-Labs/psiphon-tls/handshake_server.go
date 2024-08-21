@@ -655,15 +655,12 @@ func (hs *serverHandshakeState) checkForResumption() error {
 		sessionState = ss
 	}
 
-	// [Psiphon]
-	// *TODO* write a reason why this is commented out.
-	// // TLS 1.2 tickets don't natively have a lifetime, but we want to avoid
 	// // re-wrapping the same master secret in different tickets over and over for
 	// // too long, weakening forward secrecy.
-	// createdAt := time.Unix(int64(sessionState.createdAt), 0)
-	// if c.config.time().Sub(createdAt) > maxSessionTicketLifetime {
-	// 	return nil
-	// }
+	createdAt := time.Unix(int64(sessionState.createdAt), 0)
+	if c.config.time().Sub(createdAt) > maxSessionTicketLifetime {
+		return nil
+	}
 
 	// [Psiphon]
 	// Skip ticket lifetime check when using obfuscated session tickets.
@@ -720,10 +717,10 @@ func (hs *serverHandshakeState) checkForResumption() error {
 	}
 
 	// RFC 7627, Section 5.3
-	// *TODO* write a reason why this is commented out.
-	// if !sessionState.extMasterSecret && hs.clientHello.extendedMasterSecret {
-	// 	return nil
-	// }
+	if !sessionState.extMasterSecret && hs.clientHello.extendedMasterSecret {
+		return nil
+	}
+
 	// [Psiphon]
 	// When using obfuscated session tickets, the client-generated session ticket
 	// state never uses EMS. ClientHellos vary in EMS support. So, in this mode,
