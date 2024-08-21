@@ -1119,7 +1119,10 @@ var baseDialParams = []requestParamSpec{
 	{"steering_ip", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
 	{"tls_sent_ticket", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"tls_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-	{"quic_resumed_session", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_sent_ticket", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_dial_early", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_obfuscated_psk", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 var inproxyDialParams = []requestParamSpec{
