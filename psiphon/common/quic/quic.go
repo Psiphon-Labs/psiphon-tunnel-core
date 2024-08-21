@@ -746,6 +746,12 @@ func (conn *Conn) GetMetrics() common.LogFields {
 
 	metrics := conn.connection.connectionMetrics()
 
+	dialEarly := "0"
+	if metrics.dialEarly {
+		dialEarly = "1"
+	}
+	logFields["quic_dial_early"] = dialEarly
+
 	quicSentTicket := "0"
 	if metrics.tlsClientSentTicket {
 		quicSentTicket = "1"
@@ -866,6 +872,13 @@ func (t *QUICTransporter) GetMetrics() common.LogFields {
 
 	metrics := t.quicConnectionMetrics.Load()
 	if m, ok := metrics.(*quicConnectionMetrics); ok {
+
+		dialEarly := "0"
+		if m.dialEarly {
+			dialEarly = "1"
+		}
+		logFields["quic_dial_early"] = dialEarly
+
 		quicSentTicket := "0"
 		if m.tlsClientSentTicket {
 			quicSentTicket = "1"
@@ -996,6 +1009,7 @@ type quicListener interface {
 // quicConnectionMetircs provides metrics for a QUIC connection,
 // after a dial has been made.
 type quicConnectionMetrics struct {
+	dialEarly           bool
 	tlsClientSentTicket bool
 	tlsDidResume        bool
 }
@@ -1203,6 +1217,7 @@ func dialQUIC(
 		}
 
 		metrics := quicConnectionMetrics{
+			dialEarly:           dialEarly,
 			tlsClientSentTicket: dialConnection.ConnectionState().TLS.DidResume,
 			tlsDidResume:        dialConnection.TLSConnectionMetrics().ClientSentTicket,
 		}
