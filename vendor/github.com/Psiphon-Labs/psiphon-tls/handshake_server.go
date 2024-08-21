@@ -655,25 +655,12 @@ func (hs *serverHandshakeState) checkForResumption() error {
 		sessionState = ss
 	}
 
-	// // re-wrapping the same master secret in different tickets over and over for
-	// // too long, weakening forward secrecy.
+	// TLS 1.2 tickets don't natively have a lifetime, but we want to avoid
+	// re-wrapping the same master secret in different tickets over and over for
+	// too long, weakening forward secrecy.
 	createdAt := time.Unix(int64(sessionState.createdAt), 0)
 	if c.config.time().Sub(createdAt) > maxSessionTicketLifetime {
 		return nil
-	}
-
-	// [Psiphon]
-	// Skip ticket lifetime check when using obfuscated session tickets.
-	if !c.config.UseObfuscatedSessionTickets {
-
-		// TLS 1.2 tickets don't natively have a lifetime, but we want to avoid
-		// re-wrapping the same master secret in different tickets over and over for
-		// too long, weakening forward secrecy.
-		createdAt := time.Unix(int64(sessionState.createdAt), 0)
-		if c.config.time().Sub(createdAt) > maxSessionTicketLifetime {
-			return nil
-		}
-
 	}
 
 	// Never resume a session for a different TLS version.
