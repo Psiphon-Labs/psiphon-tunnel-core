@@ -1598,6 +1598,9 @@ func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
 
 func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelConfig {
 
+	p := config.GetParameters().Get()
+	useObfuscatedPSK := p.WeightedCoinFlip(parameters.TLSTunnelObfuscatedPSKProbability)
+
 	// TLSTunnelConfig isn't pre-created in MakeDialParameters to avoid holding a long
 	// term reference to TLSTunnelConfig.Parameters.
 
@@ -1615,8 +1618,7 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 			FragmentClientHello:      dialParams.TLSFragmentClientHello,
 			ClientSessionCache:       dialParams.tlsClientSessionCache,
 		},
-		// Obfuscated session tickets are not used because TLS-OSSH uses TLS 1.3.
-		UseObfuscatedSessionTickets: false,
+		UseObfuscatedSessionTickets: useObfuscatedPSK,
 		// Meek obfuscated key used to allow clients with legacy unfronted
 		// meek-https server entries, that have the passthrough capability, to
 		// connect with TLS-OSSH to the servers corresponding to those server

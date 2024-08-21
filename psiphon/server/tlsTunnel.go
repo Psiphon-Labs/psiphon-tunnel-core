@@ -20,6 +20,9 @@
 package server
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	std_errors "errors"
 	"net"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
@@ -81,7 +84,7 @@ func NewTLSTunnelServer(
 		obfuscatorSeedHistory:  obfuscator.NewSeedHistory(nil),
 	}
 
-	tlsConfig, err := tlsServer.makeTLSTunnelConfig()
+	tlsConfig, err := tlsServer.makeTLSTunnelConfig(support.Config.MeekObfuscatedKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -91,7 +94,7 @@ func NewTLSTunnelServer(
 }
 
 // makeTLSTunnelConfig creates a TLS config for a TLSTunnelServer listener.
-func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, error) {
+func (server *TLSTunnelServer) makeTLSTunnelConfig(sessionTicketKey string) (*tls.Config, error) {
 
 	// Limitation: certificate value changes on restart.
 
@@ -122,6 +125,34 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig() (*tls.Config, error) {
 		Certificates: []tls.Certificate{tlsCertificate},
 		NextProtos:   []string{"http/1.1"},
 		MinVersion:   minVersion,
+	}
+
+	if sessionTicketKey != "" {
+		// See obfuscated session ticket overview
+		// in NewObfuscatedClientSessionState.
+
+		config.UseObfuscatedSessionTickets = true
+
+		var obfuscatedSessionTicketKey [32]byte
+		key, err := hex.DecodeString(server.support.Config.MeekObfuscatedKey)
+		if err == nil && len(key) != 32 {
+			err = std_errors.New("invalid obfuscated session key length")
+		}
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		copy(obfuscatedSessionTicketKey[:], key)
+
+		var standardSessionTicketKey [32]byte
+		_, err = rand.Read(standardSessionTicketKey[:])
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		config.SessionTicketKey = obfuscatedSessionTicketKey
+		config.SetSessionTicketKeys([][32]byte{
+			standardSessionTicketKey,
+			obfuscatedSessionTicketKey})
 	}
 
 	// When configured, initialize passthrough mode, an anti-probing defense.

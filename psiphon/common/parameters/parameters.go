@@ -362,6 +362,7 @@ const (
 	OSSHPrefixSplitMaxDelay                            = "OSSHPrefixSplitMaxDelay"
 	OSSHPrefixEnableFragmentor                         = "OSSHPrefixEnableFragmentor"
 	ServerOSSHPrefixSpecs                              = "ServerOSSHPrefixSpecs"
+	TLSTunnelObfuscatedPSKProbability                  = "TLSTunnelObfuscatedPSKProbability"
 	TLSTunnelTrafficShapingProbability                 = "TLSTunnelTrafficShapingProbability"
 	TLSTunnelMinTLSPadding                             = "TLSTunnelMinTLSPadding"
 	TLSTunnelMaxTLSPadding                             = "TLSTunnelMaxTLSPadding"
@@ -846,6 +847,7 @@ var defaultParameters = map[string]struct {
 
 	// TLSTunnelMinTLSPadding/TLSTunnelMaxTLSPadding are subject to TLS server limitations.
 
+	TLSTunnelObfuscatedPSKProbability:  {value: 0.5, minimum: 0.0},
 	TLSTunnelTrafficShapingProbability: {value: 1.0, minimum: 0.0},
 	TLSTunnelMinTLSPadding:             {value: 0, minimum: 0},
 	TLSTunnelMaxTLSPadding:             {value: 0, minimum: 0},

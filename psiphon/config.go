@@ -987,6 +987,7 @@ type Config struct {
 	OSSHPrefixEnableFragmentor          *bool
 
 	// TLSTunnelTrafficShapingProbability and associated fields are for testing.
+	TLSTunnelObfuscatedPSKProbability  *float64
 	TLSTunnelTrafficShapingProbability *float64
 	TLSTunnelMinTLSPadding             *int
 	TLSTunnelMaxTLSPadding             *int
@@ -2357,6 +2358,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.OSSHPrefixEnableFragmentor] = *config.OSSHPrefixEnableFragmentor
 	}
 
+	if config.TLSTunnelObfuscatedPSKProbability != nil {
+		applyParameters[parameters.TLSTunnelObfuscatedPSKProbability] = *config.TLSTunnelObfuscatedPSKProbability
+	}
+
 	if config.TLSTunnelTrafficShapingProbability != nil {
 		applyParameters[parameters.TLSTunnelTrafficShapingProbability] = *config.TLSTunnelTrafficShapingProbability
 	}
@@ -3167,6 +3172,11 @@ func (config *Config) setDialParametersHash() {
 	if config.OSSHPrefixEnableFragmentor != nil {
 		hash.Write([]byte("OSSHPrefixEnableFragmentor"))
 		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixEnableFragmentor)
+	}
+
+	if config.TLSTunnelObfuscatedPSKProbability != nil {
+		hash.Write([]byte("TLSTunnelObfuscatedPSKProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.TLSTunnelObfuscatedPSKProbability)
 	}
 
 	if config.TLSTunnelTrafficShapingProbability != nil {
