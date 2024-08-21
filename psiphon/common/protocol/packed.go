@@ -797,8 +797,9 @@ func init() {
 		{145, "quic_sent_ticket", intConverter},
 		{146, "quic_did_resume", intConverter},
 		{147, "quic_dial_early", intConverter},
+		{148, "quic_obfuscated_psk", intConverter},
 
-		// Last key value = 147
+		// Last key value = 148
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

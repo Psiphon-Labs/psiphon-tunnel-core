@@ -113,7 +113,7 @@ const (
 	LimitQUICVersions                                  = "LimitQUICVersions"
 	DisableFrontingProviderQUICVersions                = "DisableFrontingProviderQUICVersions"
 	QUICDialEarlyProbability                           = "QUICDialEarlyProbability"
-	QUICDisableObfuscatedPSK                           = "QUICDisableObfuscatedPSK"
+	QUICObfuscatedPSKProbability                       = "QUICObfuscatedPSKProbability"
 	QUICDisableClientPathMTUDiscoveryProbability       = "QUICDisableClientPathMTUDiscoveryProbability"
 	FragmentorProbability                              = "FragmentorProbability"
 	FragmentorLimitProtocols                           = "FragmentorLimitProtocols"
@@ -522,7 +522,7 @@ var defaultParameters = map[string]struct {
 	LimitQUICVersions:                            {value: protocol.QUICVersions{}},
 	DisableFrontingProviderQUICVersions:          {value: protocol.LabeledQUICVersions{}},
 	QUICDialEarlyProbability:                     {value: 1.0, minimum: 0.0},
-	QUICDisableObfuscatedPSK:                     {value: false},
+	QUICObfuscatedPSKProbability:                 {value: 0.5, minimum: 0.0},
 	QUICDisableClientPathMTUDiscoveryProbability: {value: 0.0, minimum: 0.0},
 
 	FragmentorProbability:              {value: 0.5, minimum: 0.0},

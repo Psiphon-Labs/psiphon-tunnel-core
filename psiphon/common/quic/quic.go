@@ -404,7 +404,7 @@ func Dial(
 	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
-	disableObfuscatedPSK bool,
+	useObfuscatedPSK bool,
 	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (net.Conn, error) {
 
 	if quicVersion == "" {
@@ -513,9 +513,9 @@ func Dial(
 		}
 	}
 
-	obfuscatedSessionTicketKey := obfuscationKey
-	if disableObfuscatedPSK {
-		obfuscatedSessionTicketKey = ""
+	obfuscatedPSKKey := ""
+	if useObfuscatedPSK {
+		obfuscatedPSKKey = obfuscationKey
 	}
 
 	connection, err := dialQUIC(
@@ -530,7 +530,7 @@ func Dial(
 		maxPacketSizeAdjustment,
 		disablePathMTUDiscovery,
 		dialEarly,
-		obfuscatedSessionTicketKey,
+		obfuscatedPSKKey,
 		tlsClientSessionCache)
 
 	if err != nil {
@@ -761,6 +761,12 @@ func (conn *Conn) GetMetrics() common.LogFields {
 		quicDidResume = "1"
 	}
 	logFields["quic_did_resume"] = quicDidResume
+
+	obfuscatedPSK := "0"
+	if metrics.obfuscatedPSK {
+		obfuscatedPSK = "1"
+	}
+	logFields["quic_obfuscated_psk"] = obfuscatedPSK
 
 	return logFields
 }
@@ -1010,6 +1016,7 @@ type quicConnectionMetrics struct {
 	dialEarly           bool
 	tlsClientSentTicket bool
 	tlsDidResume        bool
+	obfuscatedPSK       bool
 }
 
 type quicConnection interface {
@@ -1121,7 +1128,7 @@ func dialQUIC(
 	clientMaxPacketSizeAdjustment int,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
-	obfuscatedSessionTicketKey string,
+	obfuscatedPSKKey string,
 	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (quicConnection, error) {
 
 	if tlsClientSessionCache == nil {
@@ -1165,11 +1172,11 @@ func dialQUIC(
 
 		// Creating a session state and storing it in the TLS cache to be used
 		// for PSK (Pre-Shared Key) resumption.
-		if obfuscatedSessionTicketKey != "" {
+		if obfuscatedPSKKey != "" {
 			var sharedSecret [32]byte
-			key, err := hex.DecodeString(obfuscatedSessionTicketKey)
+			key, err := hex.DecodeString(obfuscatedPSKKey)
 			if err == nil && len(key) != 32 {
-				err = std_errors.New("invalid obfuscated session key length")
+				err = std_errors.New("invalid obfuscated PSK key length")
 			}
 			if err != nil {
 				return nil, errors.Trace(err)
@@ -1218,6 +1225,7 @@ func dialQUIC(
 			dialEarly:           dialEarly,
 			tlsClientSentTicket: dialConnection.ConnectionState().TLS.DidResume,
 			tlsDidResume:        dialConnection.TLSConnectionMetrics().ClientSentTicket,
+			obfuscatedPSK:       obfuscatedPSKKey != "",
 		}
 
 		return &ietfQUICConnection{

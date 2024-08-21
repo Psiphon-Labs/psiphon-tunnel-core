@@ -44,23 +44,23 @@ import (
 func TestQUIC(t *testing.T) {
 	for quicVersion := range supportedVersionNumbers {
 
-		for _, disableObfuscatedPSK := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s|PSK disabled=%v", quicVersion, disableObfuscatedPSK), func(t *testing.T) {
+		for _, useObfuscatedPSK := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s|PSK=%v", quicVersion, useObfuscatedPSK), func(t *testing.T) {
 				if isGQUIC(quicVersion) && !GQUICEnabled() {
 					t.Skipf("gQUIC is not enabled")
 				}
-				runQUIC(t, quicVersion, GQUICEnabled(), disableObfuscatedPSK, false)
+				runQUIC(t, quicVersion, GQUICEnabled(), useObfuscatedPSK, false)
 			})
 			if isIETF(quicVersion) {
-				t.Run(fmt.Sprintf("%s (invoke anti-probing)|PSK disabled=%v", quicVersion, disableObfuscatedPSK), func(t *testing.T) {
+				t.Run(fmt.Sprintf("%s (invoke anti-probing)|PSK=%v", quicVersion, useObfuscatedPSK), func(t *testing.T) {
 					fmt.Printf("quic version: %s\n", quicVersion)
-					runQUIC(t, quicVersion, GQUICEnabled(), true, disableObfuscatedPSK)
+					runQUIC(t, quicVersion, GQUICEnabled(), true, useObfuscatedPSK)
 				})
 			}
 			if isIETF(quicVersion) {
-				t.Run(fmt.Sprintf("%s (disable gQUIC)|PSK disabled=%v", quicVersion, disableObfuscatedPSK), func(t *testing.T) {
+				t.Run(fmt.Sprintf("%s (disable gQUIC)|PSK=%v", quicVersion, useObfuscatedPSK), func(t *testing.T) {
 					fmt.Printf("quic version: %s\n", quicVersion)
-					runQUIC(t, quicVersion, false, false, disableObfuscatedPSK)
+					runQUIC(t, quicVersion, false, false, useObfuscatedPSK)
 				})
 			}
 		}
@@ -72,7 +72,7 @@ func runQUIC(
 	quicVersion string,
 	enableGQUIC bool,
 	invokeAntiProbing bool,
-	disableObfuscatedPSK bool) {
+	useObfuscatedPSK bool) {
 
 	initGoroutines := getGoroutines()
 
@@ -215,7 +215,7 @@ func runQUIC(
 				nil,
 				disablePathMTUDiscovery,
 				true,
-				disableObfuscatedPSK,
+				useObfuscatedPSK,
 				clientSessionCache)
 
 			if invokeAntiProbing {
