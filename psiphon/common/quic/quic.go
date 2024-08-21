@@ -236,8 +236,6 @@ func Listen(
 
 	var quicListener quicListener
 
-	enableGQUIC = true
-
 	if !enableGQUIC {
 
 		// When gQUIC is disabled, skip the muxListener entirely. This allows
