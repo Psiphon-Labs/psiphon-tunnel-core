@@ -874,29 +874,25 @@ func (t *QUICTransporter) closePacketConn() {
 func (t *QUICTransporter) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
 
-	metrics := t.quicConnectionMetrics.Load()
-	if m, ok := metrics.(*quicConnectionMetrics); ok {
+	metrics := t.quicConnectionMetrics.Load().(*quicConnectionMetrics)
 
-		dialEarly := "0"
-		if m.dialEarly {
-			dialEarly = "1"
-		}
-		logFields["quic_dial_early"] = dialEarly
-
-		quicSentTicket := "0"
-		if m.tlsClientSentTicket {
-			quicSentTicket = "1"
-		}
-		logFields["quic_sent_ticket"] = quicSentTicket
-
-		quicDidResume := "0"
-		if m.tlsClientSentTicket {
-			quicDidResume = "1"
-		}
-		logFields["quic_did_resume"] = quicDidResume
-	} else {
-		fmt.Printf("QUICTransporter.GetMetrics: unexpected quicConnectionMetrics type: %T\n", metrics)
+	dialEarly := "0"
+	if metrics.dialEarly {
+		dialEarly = "1"
 	}
+	logFields["quic_dial_early"] = dialEarly
+
+	quicSentTicket := "0"
+	if metrics.tlsClientSentTicket {
+		quicSentTicket = "1"
+	}
+	logFields["quic_sent_ticket"] = quicSentTicket
+
+	quicDidResume := "0"
+	if metrics.tlsClientSentTicket {
+		quicDidResume = "1"
+	}
+	logFields["quic_did_resume"] = quicDidResume
 
 	return logFields
 }
