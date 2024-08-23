@@ -357,6 +357,12 @@ type Tactics struct {
 	// no tactics data when the tag is unchanged.
 	TTL string
 
+	// Probability is an obsolete field which is no longer used, as overall
+	// tactics are now applied unconditionally; but it must be present, and
+	// greater than zero, in marshaled tactics, sent by the server, for
+	// compatibility with legacy client tactics validation.
+	Probability float64
+
 	// Parameters specify client parameters to override. These must
 	// be a subset of parameter.ClientParameter values and follow
 	// the corresponding data type and minimum value constraints.
@@ -942,6 +948,9 @@ func (server *Server) GetTactics(
 
 		// Continue to apply more matches. Last matching tactics has priority for any field.
 	}
+
+	// See Tactics.Probability doc comment.
+	tactics.Probability = 1.0
 
 	return tactics, nil
 }
