@@ -1298,8 +1298,18 @@ func (sshServer *sshServer) getLoadStats() (
 		//   exact number of other _network connections_, even from the same
 		//   client.
 		//
-		// - For in-proxy tunnel protocols, the same GeoIP caveats
-		//   (see comments above) apply.
+		//   Futhermore, since client.Locks aren't held between the previous
+		//   loop and this one, it's also possible that the client's
+		//   clientGeoIPData was None in the previous loop and is now not
+		//   None. In this case, the regionStats may not be populated at all
+		//   for the client's current region; if so, the client is skipped.
+		//   This scenario can also result in a proximate undercount by one,
+		//   when the regionStats _is_ populated: this client was counted
+		//   under None, not the current client.peerGeoIPData.Country, so
+		//   the -1 subtracts some _other_ client from the populated regionStats.
+		//
+		// - For in-proxy protocols, the accepted proximate metric uses the
+		//   peer GeoIP, which represents the proxy, not the client.
 
 		stats := regionStats[client.peerGeoIPData.Country]["ALL"]
 
@@ -1314,6 +1324,15 @@ func (sshServer *sshServer) getLoadStats() (
 
 				*client.peakMetrics.concurrentProximateAcceptedClients = n
 			}
+		}
+
+		// Handle the in-proxy None and None/not-None cases (and any other
+		// potential scenario where regionStats[client.clientGeoIPData.Country]
+		// may not be populated).
+		if client.clientGeoIPData.Country == GEOIP_UNKNOWN_VALUE ||
+			regionStats[client.clientGeoIPData.Country] == nil {
+			client.Unlock()
+			continue
 		}
 
 		stats = regionStats[client.clientGeoIPData.Country]["ALL"]
