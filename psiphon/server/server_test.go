@@ -2310,11 +2310,29 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
+	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) ||
+		protocol.TunnelProtocolUsesTLSOSSH(runConfig.tunnelProtocol) {
+
+		for _, name := range []string{
+			"tls_sent_ticket",
+			"tls_did_resume",
+		} {
+			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+				return fmt.Errorf("missing expected field '%s'", name)
+			}
+		}
+
+	}
+
 	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {
 
 		for _, name := range []string{
 			"quic_version",
 			"quic_dial_sni_address",
+			"quic_dial_early",
+			"quic_sent_ticket",
+			"quic_did_resume",
+			"quic_obfuscated_psk",
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
