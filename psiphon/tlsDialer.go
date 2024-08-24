@@ -458,9 +458,15 @@ func CustomTLSDial(
 
 	useEms := conn.HandshakeState.Hello.Ems
 
-	// Add the obfuscated session ticket or obfuscated PSK.
+	if config.ObfuscatedSessionTicketKey == "" {
+		err = conn.BuildHandshakeState()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 
-	if config.ObfuscatedSessionTicketKey != "" {
+	} else {
+
+		// Add the obfuscated session ticket or obfuscated PSK.
 
 		var obfuscatedSessionTicketKey [32]byte
 
