@@ -458,15 +458,7 @@ func CustomTLSDial(
 
 	useEms := conn.HandshakeState.Hello.Ems
 
-	// Add the obfuscated session ticket only when using TLS 1.2.
-	//
-	// Obfuscated session tickets are not currently supported in TLS 1.3, but we
-	// allow UNFRONTED-MEEK-SESSION-TICKET-OSSH to use TLS 1.3 profiles for
-	// additional diversity/capacity; TLS 1.3 encrypts the server certificate,
-	// so the desired obfuscated session tickets property of obfuscating server
-	// certificates is satisfied. We know that when the ClientHello offers TLS
-	// 1.3, the Psiphon server, in these direct protocol cases, will negotiate
-	// it.
+	// Add the obfuscated session ticket or obfuscated PSK.
 
 	if config.ObfuscatedSessionTicketKey != "" {
 
