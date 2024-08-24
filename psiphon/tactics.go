@@ -23,12 +23,14 @@ import (
 	"context"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // GetTactics attempts to apply tactics, for the current network, to the given
@@ -217,8 +219,8 @@ func fetchTactics(
 	dialParams, err := MakeDialParameters(
 		config,
 		nil,
-		nil,
-		nil,
+		tls.NewLRUClientSessionCache(0),
+		utls.NewLRUClientSessionCache(0),
 		nil,
 		canReplay,
 		selectProtocol,
