@@ -42,9 +42,6 @@ type serverHandshakeState struct {
 // serverHandshake performs a TLS handshake as a server.
 func (c *Conn) serverHandshake(ctx context.Context) error {
 	clientHello, err := c.readClientHello(ctx)
-	if err != nil {
-		return err
-	}
 
 	// [Psiphon]
 	// The ClientHello with the passthrough message is now available. Route the
