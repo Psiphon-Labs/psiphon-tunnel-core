@@ -682,7 +682,6 @@ func TestSelectTLSProfile(t *testing.T) {
 
 		var unexpectedClientHelloID, unexpectedClientHelloSpec bool
 
-		// TLS_PROFILE_CHROME_112_PSK profile is a special case. Check getUTLSClientHelloID for details.
 		if i < len(protocol.SupportedTLSProfiles) {
 			if utlsClientHelloID == utls.HelloCustom {
 				unexpectedClientHelloID = true
