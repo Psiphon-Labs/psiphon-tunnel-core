@@ -425,7 +425,7 @@ func runTestMatcher() error {
 	close(waitBeforeAnswer)
 
 	err = <-proxyResultChan
-	if err == nil || !strings.HasSuffix(err.Error(), "no client") {
+	if err == nil || !strings.HasSuffix(err.Error(), "no pending answer") {
 		return errors.Tracef("unexpected result: %v", err)
 	}
 
