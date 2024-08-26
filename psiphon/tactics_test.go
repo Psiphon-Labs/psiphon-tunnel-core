@@ -117,7 +117,7 @@ func TestStandAloneGetTactics(t *testing.T) {
 	// operations in GetTactics.
 	CloseDataStore()
 
-	GetTactics(ctx, config)
+	GetTactics(ctx, config, true)
 
 	if atomic.LoadInt32(&gotTactics) != 1 {
 		t.Fatalf("failed to get tactics")

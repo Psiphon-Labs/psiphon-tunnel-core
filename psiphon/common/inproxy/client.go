@@ -107,6 +107,16 @@ type ClientConfig struct {
 	// with the caller invoking  ServerEntryFields.RemoveUnsignedFields to
 	// prune local, unnsigned fields before sending.
 	PackedDestinationServerEntry []byte
+
+	// MustUpgrade is a callback that is invoked when a MustUpgrade flag is
+	// received from the broker. When MustUpgrade is received, the client
+	// should be stopped and the user should be prompted to upgrade before
+	// restarting the client.
+	//
+	// In Psiphon, MustUpgrade may be ignored when not running in
+	// in-proxy-only personal pairing mode, as other tunnel protocols remain
+	// available.
+	MustUpgrade func()
 }
 
 // DialClient establishes an in-proxy connection for relaying traffic to the
@@ -314,6 +324,13 @@ func dialClientWebRTCConn(
 	ctx context.Context,
 	config *ClientConfig) (retResult *clientWebRTCDialResult, retRetry bool, retErr error) {
 
+	brokerCoordinator := config.BrokerClient.GetBrokerDialCoordinator()
+	personalCompartmentIDs := brokerCoordinator.PersonalCompartmentIDs()
+
+	// In personal pairing mode, RFC 1918/4193 private IP addresses are
+	// included in SDPs.
+	hasPersonalCompartmentIDs := len(personalCompartmentIDs) > 0
+
 	// Initialize the WebRTC offer
 
 	doTLSRandomization := config.WebRTCDialCoordinator.DoDTLSRandomization()
@@ -329,7 +346,8 @@ func dialClientWebRTCConn(
 			DoDTLSRandomization:         doTLSRandomization,
 			TrafficShapingParameters:    trafficShapingParameters,
 			ReliableTransport:           config.ReliableTransport,
-		})
+		},
+		hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, true, errors.Trace(err)
 	}
@@ -341,8 +359,6 @@ func dialClientWebRTCConn(
 	}()
 
 	// Send the ClientOffer request to the broker
-
-	brokerCoordinator := config.BrokerClient.GetBrokerDialCoordinator()
 
 	packedBaseParams, err := protocol.EncodePackedAPIParameters(config.BaseAPIParameters)
 	if err != nil {
@@ -366,7 +382,7 @@ func dialClientWebRTCConn(
 				PortMappingTypes:     config.WebRTCDialCoordinator.PortMappingTypes(),
 			},
 			CommonCompartmentIDs:         brokerCoordinator.CommonCompartmentIDs(),
-			PersonalCompartmentIDs:       brokerCoordinator.PersonalCompartmentIDs(),
+			PersonalCompartmentIDs:       personalCompartmentIDs,
 			ClientOfferSDP:               SDP,
 			ICECandidateTypes:            SDPMetrics.iceCandidateTypes,
 			ClientRootObfuscationSecret:  clientRootObfuscationSecret,
@@ -380,8 +396,8 @@ func dialClientWebRTCConn(
 		return nil, false, errors.Trace(err)
 	}
 
-	// No retry when rate/entry limited; do retry on no-match, as a match may
-	// soon appear.
+	// No retry when rate/entry limited or must upgrade; do retry on no-match,
+	// as a match may soon appear.
 
 	if offerResponse.Limited {
 		return nil, false, errors.TraceNew("limited")
@@ -390,6 +406,13 @@ func dialClientWebRTCConn(
 
 		return nil, true, errors.TraceNew("no proxy match")
 
+	} else if offerResponse.MustUpgrade {
+
+		if config.MustUpgrade != nil {
+			config.MustUpgrade()
+		}
+
+		return nil, false, errors.TraceNew("must upgrade")
 	}
 
 	if offerResponse.SelectedProxyProtocolVersion != ProxyProtocolVersion1 {
@@ -402,7 +425,8 @@ func dialClientWebRTCConn(
 
 	// Establish the WebRTC DataChannel connection
 
-	err = webRTCConn.SetRemoteSDP(offerResponse.ProxyAnswerSDP)
+	err = webRTCConn.SetRemoteSDP(
+		offerResponse.ProxyAnswerSDP, hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, true, errors.Trace(err)
 	}

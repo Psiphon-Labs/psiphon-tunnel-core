@@ -1174,15 +1174,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
-    else if ([noticeType isEqualToString:@"InproxyOperatorMessage"]) {
-        id message = [notice valueForKeyPath:@"data.message"];
-        if (![message isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"InproxyOperatorMessage notice missing data.message: %@", noticeJSON]];
-            return;
-        }
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInproxyOperatorMessage:)]) {
+    else if ([noticeType isEqualToString:@"InproxyMustUpgrade"]) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInproxyMustUpgrade)]) {
             dispatch_sync(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onInproxyOperatorMessage:message];
+                [self.tunneledAppDelegate onInproxyMustUpgrade];
             });
         }
     }

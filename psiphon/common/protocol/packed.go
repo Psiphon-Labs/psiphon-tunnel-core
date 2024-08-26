@@ -792,7 +792,10 @@ func init() {
 
 		{142, "statusData", rawJSONConverter},
 
-		// Last key value = 142
+		{143, "inproxy_webrtc_local_ice_candidate_is_private_IP", intConverter},
+		{144, "inproxy_webrtc_remote_ice_candidate_is_private_IP", intConverter},
+
+		// Next key value = 145
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

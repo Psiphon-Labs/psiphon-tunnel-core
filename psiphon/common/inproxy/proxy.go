@@ -36,6 +36,8 @@ const (
 	proxyAnnounceDelay           = 1 * time.Second
 	proxyAnnounceDelayJitter     = 0.5
 	proxyAnnounceMaxBackoffDelay = 1 * time.Hour
+	proxyAnnounceLogSampleSize   = 2
+	proxyAnnounceLogSamplePeriod = 30 * time.Minute
 	proxyWebRTCAnswerTimeout     = 20 * time.Second
 	proxyDestinationDialTimeout  = 20 * time.Second
 )
@@ -114,11 +116,11 @@ type ProxyConfig struct {
 	// controlled by tactics parameters.
 	HandleTacticsPayload func(networkID string, tacticsPayload []byte) bool
 
-	// OperatorMessageHandler is a callback that is invoked with any user
-	// message JSON object that is sent to the Proxy from the Broker. This
-	// facility may be used to alert proxy operators when required. The JSON
-	// object schema is arbitrary and not defined here.
-	OperatorMessageHandler func(messageJSON string)
+	// MustUpgrade is a callback that is invoked when a MustUpgrade flag is
+	// received from the broker. When MustUpgrade is received, the proxy
+	// should be stopped and the user should be prompted to upgrade before
+	// restarting the proxy.
+	MustUpgrade func()
 
 	// MaxClients is the maximum number of clients that are allowed to connect
 	// to the proxy.
@@ -333,20 +335,56 @@ func (p *Proxy) proxyClients(
 
 	failureDelayFactor := time.Duration(1)
 
-	for i := 0; ctx.Err() == nil; i++ {
+	// To reduce diagnostic log noise, only log an initial sample of
+	// announcement request timings (delays/elapsed time) and a periodic
+	// sample of repeating errors such as "no match".
+	logAnnounceCount := proxyAnnounceLogSampleSize
+	logErrorsCount := proxyAnnounceLogSampleSize
+	lastErrMsg := ""
+	startLogSampleTime := time.Now()
+	logAnnounce := func() bool {
+		if logAnnounceCount > 0 {
+			logAnnounceCount -= 1
+			return true
+		}
+		return false
+	}
+
+	for ctx.Err() == nil {
 
 		if !p.config.WaitForNetworkConnectivity() {
 			break
 		}
 
-		backOff, err := p.proxyOneClient(ctx, signalAnnounceDone)
+		if time.Since(startLogSampleTime) >= proxyAnnounceLogSamplePeriod {
+			logAnnounceCount = proxyAnnounceLogSampleSize
+			logErrorsCount = proxyAnnounceLogSampleSize
+			lastErrMsg = ""
+			startLogSampleTime = time.Now()
+		}
+
+		backOff, err := p.proxyOneClient(
+			ctx, logAnnounce, signalAnnounceDone)
 
 		if err != nil && ctx.Err() == nil {
 
-			p.config.Logger.WithTraceFields(
-				common.LogFields{
-					"error": err.Error(),
-				}).Error("proxy client failed")
+			// Limitation: the lastErrMsg string comparison isn't compatible
+			// with errors with minor variations, such as "unexpected
+			// response status code %d after %v" from
+			// InproxyBrokerRoundTripper.RoundTrip, with a time duration in
+			// the second parameter.
+			errMsg := err.Error()
+			if lastErrMsg != errMsg {
+				logErrorsCount = proxyAnnounceLogSampleSize
+				lastErrMsg = errMsg
+			}
+			if logErrorsCount > 0 {
+				p.config.Logger.WithTraceFields(
+					common.LogFields{
+						"error": errMsg,
+					}).Error("proxy client failed")
+				logErrorsCount -= 1
+			}
 
 			// Apply a simple exponential backoff based on whether
 			// proxyOneClient either relayed client traffic or got no match,
@@ -445,7 +483,9 @@ func (p *Proxy) doNetworkDiscovery(
 }
 
 func (p *Proxy) proxyOneClient(
-	ctx context.Context, signalAnnounceDone func()) (bool, error) {
+	ctx context.Context,
+	logAnnounce func() bool,
+	signalAnnounceDone func()) (bool, error) {
 
 	// Do not trigger back-off unless the proxy successfully announces and
 	// only then performs poorly.
@@ -571,25 +611,22 @@ func (p *Proxy) proxyOneClient(
 	// ProxyAnnounce applies an additional request timeout to facilitate
 	// long-polling.
 	announceStartTime := time.Now()
+	personalCompartmentIDs := brokerCoordinator.PersonalCompartmentIDs()
 	announceResponse, err := brokerClient.ProxyAnnounce(
 		ctx,
 		requestDelay,
 		&ProxyAnnounceRequest{
-			PersonalCompartmentIDs: brokerCoordinator.PersonalCompartmentIDs(),
+			PersonalCompartmentIDs: personalCompartmentIDs,
 			Metrics:                metrics,
 		})
-
-	p.config.Logger.WithTraceFields(common.LogFields{
-		"delay":       requestDelay.String(),
-		"elapsedTime": time.Since(announceStartTime).String(),
-	}).Info("announcement request")
-
+	if logAnnounce() {
+		p.config.Logger.WithTraceFields(common.LogFields{
+			"delay":       requestDelay.String(),
+			"elapsedTime": time.Since(announceStartTime).String(),
+		}).Info("announcement request")
+	}
 	if err != nil {
 		return backOff, errors.Trace(err)
-	}
-
-	if announceResponse.OperatorMessageJSON != "" {
-		p.config.OperatorMessageHandler(announceResponse.OperatorMessageJSON)
 	}
 
 	if len(announceResponse.TacticsPayload) > 0 {
@@ -613,8 +650,8 @@ func (p *Proxy) proxyOneClient(
 		signalAnnounceDone()
 	}
 
-	// Trigger back-off back off when rate/entry limited; no back-off for
-	// no-match.
+	// Trigger back-off back off when rate/entry limited or must upgrade; no
+	// back-off for no-match.
 
 	if announceResponse.Limited {
 
@@ -625,6 +662,14 @@ func (p *Proxy) proxyOneClient(
 
 		return backOff, errors.TraceNew("no match")
 
+	} else if announceResponse.MustUpgrade {
+
+		if p.config.MustUpgrade != nil {
+			p.config.MustUpgrade()
+		}
+
+		backOff = true
+		return backOff, errors.TraceNew("must upgrade")
 	}
 
 	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
@@ -662,6 +707,10 @@ func (p *Proxy) proxyOneClient(
 		ctx, common.ValueOrDefault(webRTCCoordinator.WebRTCAnswerTimeout(), proxyWebRTCAnswerTimeout))
 	defer webRTCAnswerCancelFunc()
 
+	// In personal pairing mode, RFC 1918/4193 private IP addresses are
+	// included in SDPs.
+	hasPersonalCompartmentIDs := len(personalCompartmentIDs) > 0
+
 	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnWithAnswer(
 		webRTCAnswerCtx,
 		&webRTCConfig{
@@ -672,7 +721,8 @@ func (p *Proxy) proxyOneClient(
 			DoDTLSRandomization:         announceResponse.DoDTLSRandomization,
 			TrafficShapingParameters:    announceResponse.TrafficShapingParameters,
 		},
-		announceResponse.ClientOfferSDP)
+		announceResponse.ClientOfferSDP,
+		hasPersonalCompartmentIDs)
 	var webRTCRequestErr string
 	if webRTCErr != nil {
 		webRTCErr = errors.Trace(webRTCErr)

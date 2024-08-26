@@ -49,7 +49,15 @@ import (
 // and without blocking the Controller from starting. Accessing tactics is
 // most critical for untunneled network operations; when a Controller is
 // running, a tunnel may be used. See TacticsStorer for more details.
-func GetTactics(ctx context.Context, config *Config) {
+//
+// When the useStoredTactics input flag is false, any locally cached tactics
+// are ignored, regardless of TTL, and a fetch is always performed. GetTactics
+// returns true when a fetch was performed and false otherwise (either cached
+// tactics were found and applied, or there was a failure). This combination
+// of useStoredTactics input and fetchedTactics output is used by the
+// caller to force a fetch if one was not already performed to handle states
+// where no tunnels can be established due to missing tactics.
+func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fetchedTactics bool) {
 
 	// Limitation: GetNetworkID may not account for device VPN status, so
 	// Psiphon-over-Psiphon or Psiphon-over-other-VPN scenarios can encounter
@@ -61,16 +69,21 @@ func GetTactics(ctx context.Context, config *Config) {
 	//    network ID remains the same. Initial applied tactics will be for the
 	//    remote egress region/ISP, not the local region/ISP.
 
-	tacticsRecord, err := tactics.UseStoredTactics(
-		GetTacticsStorer(config),
-		config.GetNetworkID())
-	if err != nil {
-		NoticeWarning("get stored tactics failed: %s", err)
+	var tacticsRecord *tactics.Record
 
-		// The error will be due to a local datastore problem.
-		// While we could proceed with the tactics request, this
-		// could result in constant tactics requests. So, abort.
-		return
+	if useStoredTactics {
+		var err error
+		tacticsRecord, err = tactics.UseStoredTactics(
+			GetTacticsStorer(config),
+			config.GetNetworkID())
+		if err != nil {
+			NoticeWarning("get stored tactics failed: %s", err)
+
+			// The error will be due to a local datastore problem.
+			// While we could proceed with the tactics request, this
+			// could result in constant tactics requests. So, abort.
+			return
+		}
 	}
 
 	if tacticsRecord == nil {
@@ -125,6 +138,13 @@ func GetTactics(ctx context.Context, config *Config) {
 
 			if err == nil {
 				if tacticsRecord != nil {
+
+					// Set the return value indicating a successful fetch.
+					// Note that applying the tactics below may still fail,
+					// but this is not an expected case and we don't want the
+					// caller to continuously force refetches after this point.
+					fetchedTactics = true
+
 					// The fetch succeeded, so exit the fetch loop and apply
 					// the result.
 					break
@@ -163,8 +183,7 @@ func GetTactics(ctx context.Context, config *Config) {
 		}
 	}
 
-	if tacticsRecord != nil &&
-		prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+	if tacticsRecord != nil {
 
 		err := config.SetParameters(
 			tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
@@ -184,6 +203,8 @@ func GetTactics(ctx context.Context, config *Config) {
 	// to be proceeding to the memory-intensive tunnel establishment phase.
 	DoGarbageCollection()
 	emitMemoryMetrics()
+
+	return
 }
 
 // fetchTactics performs a tactics request using the specified server entry.

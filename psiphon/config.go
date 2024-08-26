@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -226,7 +227,7 @@ type Config struct {
 	EstablishTunnelServerAffinityGracePeriodMilliseconds *int
 
 	// ConnectionWorkerPoolSize specifies how many connection attempts to
-	// attempt in parallel. If omitted of when 0, a default is used; this is
+	// attempt in parallel. If omitted or when 0, a default is used; this is
 	// recommended.
 	ConnectionWorkerPoolSize int
 
@@ -648,7 +649,9 @@ type Config struct {
 	// distributed from proxy operators to client users out-of-band and
 	// provide a mechanism to allow only certain clients to use a proxy.
 	//
-	// See InproxyClientPersonalCompartmentIDs comment for limitations.
+	// Limitation: currently, at most 1 personal compartment may be specified.
+	// See InproxyClientPersonalCompartmentIDs comment for additional
+	// personal pairing limitations.
 	InproxyProxyPersonalCompartmentIDs []string
 
 	// InproxyClientPersonalCompartmentIDs specifies the personal compartment
@@ -663,42 +666,27 @@ type Config struct {
 	//
 	// Limitations:
 	//
-	// - While fully functional, the personal pairing mode has a number of
-	//   limitations that make the current implementation less suitable for
-	//   large scale deployment.
+	// While fully functional, the personal pairing mode has a number of
+	// limitations that make the current implementation less suitable for
+	// large scale deployment.
 	//
-	// - Since the mode requires an in-proxy connection to a proxy, announcing
-	//   with the corresponding personal compartment ID, not only must that
-	//   proxy be available, but also a broker, and both the client and proxy
-	//   must rendezvous at the same broker.
+	// Since the mode requires an in-proxy connection to a proxy, announcing
+	// with the corresponding personal compartment ID, not only must that
+	// proxy be available, but also a broker, and both the client and proxy
+	// must rendezvous at the same broker.
 	//
-	// - Currently, the client tunnel establishment algorithm does not launch
-	//   an untunneled tactics request as long as there is a cached tactics
-	//   with a valid TTL. The assumption, in regular mode, is that the
-	//   cached tactics will suffice, and any new tactics will be obtained
-	//   from any Psiphon server connection. Since broker specs are obtained
-	//   solely from tactics, if brokers are removed, reconfigured, or even
-	//   if the order is changed, personal mode may fail to connect until
-	//   cached tactics expire.
-	//
-	// - In personal mode, clients and proxies use a simplistic approach to
-	//   rendezvous: always select the first broker spec. This works, but is
-	//   not robust in terms of load balancing, and fails if the first broker
-	//   is unreachable or overloaded. Non-personal in-proxy dials can simply
-	//   use any available broker.
-	//
-	// - The broker matching queues lack compartment ID indexing. For a
-	//   handful of common compartment IDs, this is not expected to be an
-	//   issue. For personal compartment IDs, this may lead to frequency
-	//   near-full scans of the queues when looking for a match.
-	//
-	// - In personal mode, all establishment candidates must be in-proxy
-	//   dials, all using the same broker. Many concurrent, fronted broker
-	//   requests may result in CDN rate limiting, requiring some mechanism
-	//   to delay or spread the requests, as is currently done only for
-	//   batches of proxy announcements.
+	// In personal mode, clients and proxies use a simplistic approach to
+	// rendezvous: always select the first broker spec. This works, but is
+	// not robust in terms of load balancing, and fails if the first broker
+	// is unreachable or overloaded. Non-personal in-proxy dials can simply
+	// use any available broker.
 	//
 	InproxyClientPersonalCompartmentIDs []string
+
+	// InproxyPersonalPairingConnectionWorkerPoolSize specifies the value for
+	// ConnectionWorkerPoolSize in personal pairing mode. If omitted or when
+	// 0, a default is used; this is recommended.
+	InproxyPersonalPairingConnectionWorkerPoolSize int
 
 	// EmitInproxyProxyActivity indicates whether to emit frequent notices
 	// showing proxy connection information and bytes transferred.
@@ -1002,8 +990,11 @@ type Config struct {
 	InproxyAllowClient                                     *bool
 	InproxyTunnelProtocolSelectionProbability              *float64
 	InproxyBrokerSpecs                                     parameters.InproxyBrokerSpecsValue
-	InproxyClientBrokerSpecs                               parameters.InproxyBrokerSpecsValue
+	InproxyPersonalPairingBrokerSpecs                      parameters.InproxyBrokerSpecsValue
 	InproxyProxyBrokerSpecs                                parameters.InproxyBrokerSpecsValue
+	InproxyProxyPersonalPairingBrokerSpecs                 parameters.InproxyBrokerSpecsValue
+	InproxyClientBrokerSpecs                               parameters.InproxyBrokerSpecsValue
+	InproxyClientPersonalPairingBrokerSpecs                parameters.InproxyBrokerSpecsValue
 	InproxyReplayBrokerDialParametersTTLSeconds            *int
 	InproxyReplayBrokerUpdateFrequencySeconds              *int
 	InproxyReplayBrokerDialParametersProbability           *float64
@@ -1048,6 +1039,8 @@ type Config struct {
 	InproxyProxyDestinationDialTimeoutMilliseconds         *int
 	InproxyPsiphonAPIRequestTimeoutMilliseconds            *int
 	InproxyProxyTotalActivityNoticePeriodMilliseconds      *int
+	InproxyClientDialRateLimitQuantity                     *int
+	InproxyClientDialRateLimitIntervalMilliseconds         *int
 
 	InproxySkipAwaitFullyConnected  bool
 	InproxyEnableWebRTCDebugLogging bool
@@ -1080,6 +1073,10 @@ type Config struct {
 
 	tacticsAppliedReceiversMutex sync.Mutex
 	tacticsAppliedReceivers      []TacticsAppliedReceiver
+
+	signalComponentFailure atomic.Value
+
+	inproxyMustUpgradePosted int32
 }
 
 // TacticsAppliedReceiver specifies the interface for a component that is
@@ -1120,6 +1117,8 @@ func LoadConfig(configJson []byte) (*Config, error) {
 
 	config.loadTimestamp = common.TruncateTimestampToHour(
 		common.GetCurrentTimestamp())
+
+	config.signalComponentFailure.Store(func() {})
 
 	return &config, nil
 }
@@ -1408,13 +1407,19 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
-	if !config.DisableTunnels && config.InproxyEnableProxy &&
+	if !config.DisableTunnels &&
+		config.InproxyEnableProxy &&
+		!GetAllowOverlappingPersonalCompartmentIDs() &&
 		common.ContainsAny(
 			config.InproxyProxyPersonalCompartmentIDs,
 			config.InproxyClientPersonalCompartmentIDs) {
 
 		// Don't allow an in-proxy client and proxy run in the same app to match.
 		return errors.TraceNew("invalid overlapping personal compartment IDs")
+	}
+
+	if len(config.InproxyProxyPersonalCompartmentIDs) > 1 {
+		return errors.TraceNew("invalid proxy personal compartment ID count")
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels().
@@ -1784,6 +1789,36 @@ func (config *Config) UseUpstreamProxy() bool {
 // value is returned.
 func (config *Config) GetNetworkID() string {
 	return config.networkIDGetter.GetNetworkID()
+}
+
+func (config *Config) SetSignalComponentFailure(signalComponentFailure func()) {
+	config.signalComponentFailure.Store(signalComponentFailure)
+}
+
+// IsInproxyPersonalPairingMode indicates that the client is in in-proxy
+// personal pairing mode, where connections are made only through in-proxy
+// proxies with corresponding personal compartment IDs.
+func (config *Config) IsInproxyPersonalPairingMode() bool {
+	return len(config.InproxyClientPersonalCompartmentIDs) > 0
+}
+
+// OnInproxyMustUpgrade is invoked when the in-proxy broker returns the
+// MustUpgrade response. When either running a proxy, or when running a
+// client in personal-pairing mode -- two states that require in-proxy
+// functionality -- onInproxyMustUpgrade initiates a shutdown after emitting
+// the InproxyMustUpgrade notice.
+func (config *Config) OnInproxyMustUpgrade() {
+
+	// TODO: check if LimitTunnelProtocols is set to allow only INPROXY tunnel
+	// protocols; this is another case where in-proxy functionality is
+	// required.
+
+	if config.InproxyEnableProxy || config.IsInproxyPersonalPairingMode() {
+		if atomic.CompareAndSwapInt32(&config.inproxyMustUpgradePosted, 0, 1) {
+			NoticeInproxyMustUpgrade()
+		}
+		config.signalComponentFailure.Load().(func())()
+	}
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {
@@ -2375,6 +2410,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.SteeringIPProbability] = *config.SteeringIPProbability
 	}
 
+	if config.InproxyPersonalPairingConnectionWorkerPoolSize != 0 {
+		applyParameters[parameters.InproxyPersonalPairingConnectionWorkerPoolSize] = config.InproxyPersonalPairingConnectionWorkerPoolSize
+	}
+
 	if config.InproxyAllowProxy != nil {
 		applyParameters[parameters.InproxyAllowProxy] = *config.InproxyAllowProxy
 	}
@@ -2391,12 +2430,24 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyBrokerSpecs] = config.InproxyBrokerSpecs
 	}
 
+	if len(config.InproxyPersonalPairingBrokerSpecs) > 0 {
+		applyParameters[parameters.InproxyPersonalPairingBrokerSpecs] = config.InproxyPersonalPairingBrokerSpecs
+	}
+
 	if len(config.InproxyProxyBrokerSpecs) > 0 {
 		applyParameters[parameters.InproxyProxyBrokerSpecs] = config.InproxyProxyBrokerSpecs
 	}
 
+	if len(config.InproxyProxyPersonalPairingBrokerSpecs) > 0 {
+		applyParameters[parameters.InproxyProxyPersonalPairingBrokerSpecs] = config.InproxyProxyPersonalPairingBrokerSpecs
+	}
+
 	if len(config.InproxyClientBrokerSpecs) > 0 {
 		applyParameters[parameters.InproxyClientBrokerSpecs] = config.InproxyClientBrokerSpecs
+	}
+
+	if len(config.InproxyClientPersonalPairingBrokerSpecs) > 0 {
+		applyParameters[parameters.InproxyClientPersonalPairingBrokerSpecs] = config.InproxyClientPersonalPairingBrokerSpecs
 	}
 
 	if config.InproxyReplayBrokerDialParametersTTLSeconds != nil {
@@ -2573,6 +2624,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyProxyTotalActivityNoticePeriodMilliseconds != nil {
 		applyParameters[parameters.InproxyProxyTotalActivityNoticePeriod] = fmt.Sprintf("%dms", *config.InproxyProxyTotalActivityNoticePeriodMilliseconds)
+	}
+
+	if config.InproxyClientDialRateLimitQuantity != nil {
+		applyParameters[parameters.InproxyClientDialRateLimitQuantity] = *config.InproxyClientDialRateLimitQuantity
+	}
+
+	if config.InproxyClientDialRateLimitIntervalMilliseconds != nil {
+		applyParameters[parameters.InproxyClientDialRateLimitInterval] = fmt.Sprintf("%dms", *config.InproxyClientDialRateLimitIntervalMilliseconds)
 	}
 
 	// When adding new config dial parameters that may override tactics, also
@@ -3183,13 +3242,25 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte("InproxyBrokerSpecs"))
 		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyBrokerSpecs)))
 	}
+	if len(config.InproxyPersonalPairingBrokerSpecs) > 0 {
+		hash.Write([]byte("InproxyPersonalPairingBrokerSpecs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyPersonalPairingBrokerSpecs)))
+	}
 	if len(config.InproxyProxyBrokerSpecs) > 0 {
 		hash.Write([]byte("InproxyProxyBrokerSpecs"))
 		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxyBrokerSpecs)))
 	}
+	if len(config.InproxyProxyPersonalPairingBrokerSpecs) > 0 {
+		hash.Write([]byte("InproxyProxyPersonalPairingBrokerSpecs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxyPersonalPairingBrokerSpecs)))
+	}
 	if len(config.InproxyClientBrokerSpecs) > 0 {
 		hash.Write([]byte("InproxyClientBrokerSpecs"))
 		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyClientBrokerSpecs)))
+	}
+	if len(config.InproxyClientPersonalPairingBrokerSpecs) > 0 {
+		hash.Write([]byte("InproxyClientPersonalPairingBrokerSpecs"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyClientPersonalPairingBrokerSpecs)))
 	}
 	if config.InproxyReplayBrokerDialParametersTTLSeconds != nil {
 		hash.Write([]byte("InproxyReplayBrokerDialParametersTTLSeconds"))
