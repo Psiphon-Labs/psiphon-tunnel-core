@@ -157,7 +157,8 @@ func newWebRTCConnWithOffer(
 	hasPersonalCompartmentIDs bool) (
 	*webRTCConn, WebRTCSessionDescription, *webRTCSDPMetrics, error) {
 
-	conn, SDP, metrics, err := newWebRTCConn(ctx, config, nil, false)
+	conn, SDP, metrics, err := newWebRTCConn(
+		ctx, config, nil, hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, WebRTCSessionDescription{}, nil, errors.Trace(err)
 	}
