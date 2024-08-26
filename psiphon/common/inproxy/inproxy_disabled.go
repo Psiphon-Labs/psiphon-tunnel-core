@@ -68,7 +68,10 @@ type webRTCConfig struct {
 	ReliableTransport           bool
 }
 
-func (conn *webRTCConn) SetRemoteSDP(peerSDP WebRTCSessionDescription) error {
+func (conn *webRTCConn) SetRemoteSDP(
+	peerSDP WebRTCSessionDescription,
+	hasPersonalCompartmentIDs bool) error {
+
 	return errors.Trace(errNotEnabled)
 }
 
@@ -121,12 +124,14 @@ func (conn *webRTCConn) GetMetrics() common.LogFields {
 type webRTCSDPMetrics struct {
 	iceCandidateTypes     []ICECandidateType
 	hasIPv6               bool
+	hasPrivateIP          bool
 	filteredICECandidates []string
 }
 
 func newWebRTCConnWithOffer(
 	ctx context.Context,
-	config *webRTCConfig) (
+	config *webRTCConfig,
+	hasPersonalCompartmentIDs bool) (
 	*webRTCConn, WebRTCSessionDescription, *webRTCSDPMetrics, error) {
 	return nil, WebRTCSessionDescription{}, nil, errors.Trace(errNotEnabled)
 }
@@ -134,7 +139,8 @@ func newWebRTCConnWithOffer(
 func newWebRTCConnWithAnswer(
 	ctx context.Context,
 	config *webRTCConfig,
-	peerSDP WebRTCSessionDescription) (
+	peerSDP WebRTCSessionDescription,
+	hasPersonalCompartmentIDs bool) (
 	*webRTCConn, WebRTCSessionDescription, *webRTCSDPMetrics, error) {
 
 	return nil, WebRTCSessionDescription{}, nil, errors.Trace(errNotEnabled)
@@ -144,7 +150,9 @@ func filterSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
-	expectedGeoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, error) {
+	expectedGeoIPData common.GeoIPData,
+	allowPrivateIPAddressCandidates bool,
+	filterPrivateIPAddressCandidates bool) ([]byte, *webRTCSDPMetrics, error) {
 	return nil, nil, errors.Trace(errNotEnabled)
 }
 

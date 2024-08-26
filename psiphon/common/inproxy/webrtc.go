@@ -153,10 +153,11 @@ type webRTCConfig struct {
 // establishment.
 func newWebRTCConnWithOffer(
 	ctx context.Context,
-	config *webRTCConfig) (
+	config *webRTCConfig,
+	hasPersonalCompartmentIDs bool) (
 	*webRTCConn, WebRTCSessionDescription, *webRTCSDPMetrics, error) {
 
-	conn, SDP, metrics, err := newWebRTCConn(ctx, config, nil)
+	conn, SDP, metrics, err := newWebRTCConn(ctx, config, nil, false)
 	if err != nil {
 		return nil, WebRTCSessionDescription{}, nil, errors.Trace(err)
 	}
@@ -170,10 +171,12 @@ func newWebRTCConnWithOffer(
 func newWebRTCConnWithAnswer(
 	ctx context.Context,
 	config *webRTCConfig,
-	peerSDP WebRTCSessionDescription) (
+	peerSDP WebRTCSessionDescription,
+	hasPersonalCompartmentIDs bool) (
 	*webRTCConn, WebRTCSessionDescription, *webRTCSDPMetrics, error) {
 
-	conn, SDP, metrics, err := newWebRTCConn(ctx, config, &peerSDP)
+	conn, SDP, metrics, err := newWebRTCConn(
+		ctx, config, &peerSDP, hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, WebRTCSessionDescription{}, nil, errors.Trace(err)
 	}
@@ -183,7 +186,8 @@ func newWebRTCConnWithAnswer(
 func newWebRTCConn(
 	ctx context.Context,
 	config *webRTCConfig,
-	peerSDP *WebRTCSessionDescription) (
+	peerSDP *WebRTCSessionDescription,
+	hasPersonalCompartmentIDs bool) (
 	retconn *webRTCConn,
 	retSDP *WebRTCSessionDescription,
 	retMetrics *webRTCSDPMetrics,
@@ -628,9 +632,33 @@ func newWebRTCConn(
 
 	} else {
 
+		SDP := peerSDP.SDP
+		if hasPersonalCompartmentIDs {
+
+			// In personal pairing mode, the peer SDP may include private IP
+			// addresses. To avoid unnecessary network traffic, filter out
+			// any peer private IP addresses for which there is no
+			// corresponding local, active interface.
+
+			errorOnNoCandidates := false
+			allowPrivateIPAddressCandidates := true
+			filterPrivateIPAddressCandidates := true
+			adjustedSDP, _, err := filterSDPAddresses(
+				[]byte(peerSDP.SDP),
+				errorOnNoCandidates,
+				nil,
+				common.GeoIPData{},
+				allowPrivateIPAddressCandidates,
+				filterPrivateIPAddressCandidates)
+			if err != nil {
+				return nil, nil, nil, errors.Trace(err)
+			}
+			SDP = string(adjustedSDP)
+		}
+
 		pionSessionDescription := webrtc.SessionDescription{
 			Type: webrtc.SDPType(peerSDP.Type),
-			SDP:  peerSDP.SDP,
+			SDP:  SDP,
 		}
 
 		err = conn.peerConnection.SetRemoteDescription(pionSessionDescription)
@@ -701,7 +729,8 @@ func newWebRTCConn(
 		[]byte(localDescription.SDP),
 		errorOnNoCandidates,
 		portMappingExternalAddr,
-		config.WebRTCDialCoordinator.DisableIPv6ICECandidates())
+		config.WebRTCDialCoordinator.DisableIPv6ICECandidates(),
+		hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
@@ -760,13 +789,40 @@ func (conn *webRTCConn) setDataChannel(dataChannel *webrtc.DataChannel) {
 // SetRemoteSDP takes the answer SDP that is received in response to an offer
 // SDP. SetRemoteSDP initiates the WebRTC connection establishment on the
 // offer end.
-func (conn *webRTCConn) SetRemoteSDP(peerSDP WebRTCSessionDescription) error {
+func (conn *webRTCConn) SetRemoteSDP(
+	peerSDP WebRTCSessionDescription,
+	hasPersonalCompartmentIDs bool) error {
+
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
 
+	SDP := peerSDP.SDP
+	if hasPersonalCompartmentIDs {
+
+		// In personal pairing mode, the peer SDP may include private IP
+		// addresses. To avoid unnecessary network traffic, filter out any
+		// peer private IP addresses for which there is no corresponding
+		// local, active interface.
+
+		errorOnNoCandidates := false
+		allowPrivateIPAddressCandidates := true
+		filterPrivateIPAddressCandidates := true
+		adjustedSDP, _, err := filterSDPAddresses(
+			[]byte(peerSDP.SDP),
+			errorOnNoCandidates,
+			nil,
+			common.GeoIPData{},
+			allowPrivateIPAddressCandidates,
+			filterPrivateIPAddressCandidates)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		SDP = string(adjustedSDP)
+	}
+
 	pionSessionDescription := webrtc.SessionDescription{
 		Type: webrtc.SDPType(peerSDP.Type),
-		SDP:  peerSDP.SDP,
+		SDP:  SDP,
 	}
 
 	err := conn.peerConnection.SetRemoteDescription(pionSessionDescription)
@@ -919,8 +975,14 @@ func (conn *webRTCConn) recordSelectedICECandidateStats() error {
 		if localIP != nil && localIP.To4() == nil {
 			isIPv6 = "1"
 		}
+		isPrivate := "0"
+		if localIP != nil && localIP.IsPrivate() {
+			isPrivate = "1"
+		}
 		conn.iceCandidatePairMetrics["inproxy_webrtc_local_ice_candidate_is_IPv6"] =
 			isIPv6
+		conn.iceCandidatePairMetrics["inproxy_webrtc_local_ice_candidate_is_private_IP"] =
+			isPrivate
 		conn.iceCandidatePairMetrics["inproxy_webrtc_local_ice_candidate_port"] =
 			localCandidateStats.Port
 
@@ -931,8 +993,14 @@ func (conn *webRTCConn) recordSelectedICECandidateStats() error {
 		if remoteIP != nil && remoteIP.To4() == nil {
 			isIPv6 = "1"
 		}
+		isPrivate = "0"
+		if remoteIP != nil && remoteIP.IsPrivate() {
+			isPrivate = "1"
+		}
 		conn.iceCandidatePairMetrics["inproxy_webrtc_remote_ice_candidate_is_IPv6"] =
 			isIPv6
+		conn.iceCandidatePairMetrics["inproxy_webrtc_remote_ice_candidate_is_private_IP"] =
+			isPrivate
 		conn.iceCandidatePairMetrics["inproxy_webrtc_remote_ice_candidate_port"] =
 			remoteCandidateStats.Port
 
@@ -1516,13 +1584,16 @@ func prepareSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	portMappingExternalAddr string,
-	disableIPv6Candidates bool) ([]byte, *webRTCSDPMetrics, error) {
+	disableIPv6Candidates bool,
+	allowPrivateIPAddressCandidates bool) ([]byte, *webRTCSDPMetrics, error) {
 
 	modifiedSDP, metrics, err := processSDPAddresses(
 		encodedSDP,
+		errorOnNoCandidates,
 		portMappingExternalAddr,
 		disableIPv6Candidates,
-		errorOnNoCandidates,
+		allowPrivateIPAddressCandidates,
+		false,
 		nil,
 		common.GeoIPData{})
 	return modifiedSDP, metrics, errors.Trace(err)
@@ -1536,13 +1607,17 @@ func filterSDPAddresses(
 	encodedSDP []byte,
 	errorOnNoCandidates bool,
 	lookupGeoIP LookupGeoIP,
-	expectedGeoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, error) {
+	expectedGeoIPData common.GeoIPData,
+	allowPrivateIPAddressCandidates bool,
+	filterPrivateIPAddressCandidates bool) ([]byte, *webRTCSDPMetrics, error) {
 
 	filteredSDP, metrics, err := processSDPAddresses(
 		encodedSDP,
+		errorOnNoCandidates,
 		"",
 		false,
-		errorOnNoCandidates,
+		allowPrivateIPAddressCandidates,
+		filterPrivateIPAddressCandidates,
 		lookupGeoIP,
 		expectedGeoIPData)
 	return filteredSDP, metrics, errors.Trace(err)
@@ -1552,6 +1627,7 @@ func filterSDPAddresses(
 type webRTCSDPMetrics struct {
 	iceCandidateTypes     []ICECandidateType
 	hasIPv6               bool
+	hasPrivateIP          bool
 	filteredICECandidates []string
 }
 
@@ -1594,9 +1670,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 func processSDPAddresses(
 	encodedSDP []byte,
+	errorOnNoCandidates bool,
 	portMappingExternalAddr string,
 	disableIPv6Candidates bool,
-	errorOnNoCandidates bool,
+	allowPrivateIPAddressCandidates bool,
+	filterPrivateIPAddressCandidates bool,
 	lookupGeoIP LookupGeoIP,
 	expectedGeoIPData common.GeoIPData) ([]byte, *webRTCSDPMetrics, error) {
 
@@ -1608,6 +1686,7 @@ func processSDPAddresses(
 
 	candidateTypes := map[ICECandidateType]bool{}
 	hasIPv6 := false
+	hasPrivateIP := true
 	filteredCandidateReasons := make(map[string]int)
 
 	var portMappingICECandidates []sdp.Attribute
@@ -1703,14 +1782,21 @@ func processSDPAddresses(
 					candidateIsIPv6 = true
 				}
 
-				// Strip non-routable bogons, including LAN addresses.
-				// Same-LAN client/proxy hops are not expected to be useful,
-				// and this also avoids unnecessary local network traffic.
+				// Strip non-routable bogons, including RFC 1918/4193 private
+				// IP addresses. Same-LAN client/proxy hops are not expected
+				// to be useful, and this also avoids unnecessary network traffic.
 				//
 				// Well-behaved clients and proxies should strip these values;
 				// the broker enforces this with filtering.
+				//
+				// In personal pairing mode, private IP addresses are allowed,
+				// as connection may be made between devices the same LAN and
+				// not all routers support NAT hairpinning.
+
+				candidateIsPrivateIP := candidateIP.IsPrivate()
 
 				if !GetAllowBogonWebRTCConnections() &&
+					!(candidateIsPrivateIP && allowPrivateIPAddressCandidates) &&
 					common.IsBogon(candidateIP) {
 
 					version := "IPv4"
@@ -1721,6 +1807,18 @@ func processSDPAddresses(
 						candidate.Type().String(), version)
 					filteredCandidateReasons[reason] += 1
 					continue
+				}
+
+				// In personal pairing mode, filter out any private IP
+				// addresses for which there is no corresponding local,
+				// active interface. This avoids unnecessary network traffic.
+				// This filtering option is applied post-broker exchange,
+				// with the SDP received, via the broker, from the peer.
+
+				if candidateIsPrivateIP && filterPrivateIPAddressCandidates {
+					if !hasInterfaceForPrivateIPAddress(candidateIP) {
+						continue
+					}
 				}
 
 				// The broker will check that clients and proxies specify only
@@ -1765,6 +1863,9 @@ func processSDPAddresses(
 				if candidateIsIPv6 {
 					hasIPv6 = true
 				}
+				if candidateIsPrivateIP {
+					hasPrivateIP = true
+				}
 
 				// These types are not reported:
 				// - CandidateTypeRelay: TURN servers are not used.
@@ -1797,7 +1898,8 @@ func processSDPAddresses(
 	}
 
 	metrics := &webRTCSDPMetrics{
-		hasIPv6: hasIPv6,
+		hasIPv6:      hasIPv6,
+		hasPrivateIP: hasPrivateIP,
 	}
 	for candidateType := range candidateTypes {
 		metrics.iceCandidateTypes = append(metrics.iceCandidateTypes, candidateType)
@@ -1833,6 +1935,7 @@ type pionLogger struct {
 	scope        string
 	logger       common.Logger
 	debugLogging bool
+	warnNoPairs  int32
 }
 
 func newPionLogger(scope string, logger common.Logger, debugLogging bool) *pionLogger {
@@ -1880,6 +1983,13 @@ func (l *pionLogger) Infof(format string, args ...interface{}) {
 }
 
 func (l *pionLogger) Warn(msg string) {
+
+	// To reduce diagnostic log noise, only log this message once per dial attempt.
+	if msg == "Failed to ping without candidate pairs. Connection is not possible yet." &&
+		!atomic.CompareAndSwapInt32(&l.warnNoPairs, 0, 1) {
+		return
+	}
+
 	l.logger.WithTrace().Warning(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 
@@ -1893,6 +2003,48 @@ func (l *pionLogger) Error(msg string) {
 
 func (l *pionLogger) Errorf(format string, args ...interface{}) {
 	l.logger.WithTrace().Error(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
+}
+
+func hasInterfaceForPrivateIPAddress(IP net.IP) bool {
+
+	if !IP.IsPrivate() {
+		return false
+	}
+
+	// The anet package is used to work around net.Interfaces not working on
+	// Android at this time: https://github.com/golang/go/issues/40569.
+	//
+	// Any errors are silently dropped; the caller will proceed without using
+	// the input private IP; and equivilent anet calls are made in
+	// pionNetwork.Interfaces, with errors logged.
+
+	netInterfaces, err := anet.Interfaces()
+	if err != nil {
+		return false
+	}
+
+	for _, netInterface := range netInterfaces {
+		// Note: don't exclude interfaces with the net.FlagPointToPoint flag,
+		// which is set for certain mobile networks
+		if netInterface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, err := anet.InterfaceAddrsByInterface(&netInterface)
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			_, IPNet, err := net.ParseCIDR(addr.String())
+			if err != nil {
+				continue
+			}
+			if IPNet.Contains(IP) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // pionNetwork implements pion/transport.Net.
@@ -1936,9 +2088,6 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 	// should be the active, externally routable addresses, and the IPv6
 	// address should be the preferred, non-deprecated temporary IPv6 address.
 	//
-	// The anet package is used to work around net.Interfaces not working on
-	// Android at this time: https://github.com/golang/go/issues/40569.
-	//
 	// In post-ICE gathering processing, processSDPAddresses will also strip
 	// all bogon addresses, so there is no explicit bogon check here.
 	//
@@ -1971,10 +2120,12 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 		udpConnIPv6.Close()
 	}
 
+	// The anet package is used to work around net.Interfaces not working on
+	// Android at this time: https://github.com/golang/go/issues/40569.
+
 	transportInterfaces := []*transport.Interface{}
 
 	netInterfaces, err := anet.Interfaces()
-
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

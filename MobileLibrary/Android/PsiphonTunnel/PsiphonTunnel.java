@@ -132,10 +132,14 @@ public class PsiphonTunnel {
         default public void onApplicationParameters(Object parameters) {}
         default public void onServerAlert(String reason, String subject, List<String> actionURLs) {}
         /**
-         * Called when tunnel-core emits a message to be displayed to the in-proxy operator.
-         * @param message The operator message received.
+         * Called when tunnel-core reports that a selected in-proxy mode --
+         * including running a proxy; or running a client in personal pairing
+         * mode -- cannot function without an app upgrade. The receiver
+         * should alert the user to upgrade the app and/or disable the
+         * unsupported mode(s). This callback is followed by a tunnel-core
+         * shutdown.
          */
-        default void onInproxyOperatorMessage(String message) {}
+        default void onInproxyMustUpgrade() {}
         /**
          * Called when tunnel-core reports proxy usage statistics.
          * By default onInproxyProxyActivity is disabled. Enable it by setting
@@ -1115,8 +1119,8 @@ public class PsiphonTunnel {
                     notice.getJSONObject("data").getString("reason"),
                     notice.getJSONObject("data").getString("subject"),
                     actionURLsList);
-            } else if (noticeType.equals("InproxyOperatorMessage")) {
-                mHostService.onInproxyOperatorMessage( notice.getJSONObject("data").getString("message"));
+            } else if (noticeType.equals("InproxyMustUpgrade")) {
+                mHostService.onInproxyMustUpgrade();
             } else if (noticeType.equals("InproxyProxyActivity")) {
                 JSONObject data = notice.getJSONObject("data");
                 mHostService.onInproxyProxyActivity(

@@ -1129,8 +1129,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 			RequestPrivateKey:    decodedTacticsRequestPrivateKey,
 			RequestObfuscatedKey: decodedTacticsRequestObfuscatedKey,
 			DefaultTactics: tactics.Tactics{
-				TTL:         "1m",
-				Probability: 1.0,
+				TTL: "1m",
 			},
 		}
 

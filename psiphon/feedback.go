@@ -142,7 +142,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 	//   or a network ID of "VPN" if some other non-Psiphon VPN is running
 	//   (the caller should ensure a network ID of "VPN" in this case).
 
-	GetTactics(getTacticsCtx, config)
+	GetTactics(getTacticsCtx, config, true)
 
 	// Get the latest client parameters
 	p = config.GetParameters().Get()
