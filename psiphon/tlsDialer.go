@@ -970,8 +970,6 @@ func getUTLSClientHelloID(
 		return utls.HelloChrome_112_PSK_Shuf, nil, nil
 	case protocol.TLS_PROFILE_CHROME_120:
 		return utls.HelloChrome_120, nil, nil
-	case protocol.TLS_PROFILE_CHROME_120_PQ:
-		return utls.HelloChrome_120_PQ, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_55:
 		return utls.HelloFirefox_55, nil, nil
 	case protocol.TLS_PROFILE_FIREFOX_56:
