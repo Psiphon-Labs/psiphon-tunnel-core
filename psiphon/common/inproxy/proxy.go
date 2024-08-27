@@ -123,7 +123,7 @@ type ProxyConfig struct {
 	MustUpgrade func()
 
 	// MaxClients is the maximum number of clients that are allowed to connect
-	// to the proxy.
+	// to the proxy. Must be > 0.
 	MaxClients int
 
 	// LimitUpstreamBytesPerSecond limits the upstream data transfer rate for
@@ -153,6 +153,10 @@ type ActivityUpdater func(
 
 // NewProxy initializes a new Proxy with the specified configuration.
 func NewProxy(config *ProxyConfig) (*Proxy, error) {
+
+	if config.MaxClients <= 0 {
+		return nil, errors.TraceNew("invalid MaxClients")
+	}
 
 	p := &Proxy{
 		config: config,

@@ -633,7 +633,7 @@ type Config struct {
 	InproxyProxySessionPrivateKey string
 
 	// InproxyMaxClients specifies the maximum number of in-proxy clients to
-	// be proxied concurrently.
+	// be proxied concurrently. Must be > 0 when InproxyEnableProxy is set.
 	InproxyMaxClients int
 
 	// InproxyLimitUpstreamBytesPerSecond specifies the upstream byte transfer
@@ -1405,6 +1405,10 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		len(config.ObfuscatedSSHAlgorithms) != 4 {
 		// TODO: validate each algorithm?
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
+	}
+
+	if config.InproxyEnableProxy && config.InproxyMaxClients <= 0 {
+		return errors.TraceNew("invalid InproxyMaxClients")
 	}
 
 	if !config.DisableTunnels &&
