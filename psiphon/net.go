@@ -525,6 +525,7 @@ func makeFrontedHTTPClient(
 		TransformedHostName:      meekTransformedHostName,
 		ClientTunnelProtocol:     effectiveTunnelProtocol,
 		NetworkLatencyMultiplier: networkLatencyMultiplier,
+		TLSClientSessionCache:    common.WrapUtlsClientSessionCache(utls.NewLRUClientSessionCache(0), meekDialAddress),
 	}
 
 	if !skipVerify {

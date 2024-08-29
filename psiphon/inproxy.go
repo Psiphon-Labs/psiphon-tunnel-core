@@ -43,6 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	utls "github.com/Psiphon-Labs/utls"
 	"github.com/cespare/xxhash"
 	"golang.org/x/net/bpf"
 )
@@ -1034,6 +1035,7 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 		TransformedHostName:      brokerDialParams.TransformedHostName,
 		NetworkLatencyMultiplier: brokerDialParams.NetworkLatencyMultiplier,
 		AdditionalHeaders:        config.MeekAdditionalHeaders,
+		TLSClientSessionCache:    common.WrapUtlsClientSessionCache(utls.NewLRUClientSessionCache(0), brokerDialParams.DialAddress),
 	}
 
 	switch brokerDialParams.BrokerTransport {
