@@ -654,10 +654,19 @@ func (p *Proxy) proxyOneClient(
 		signalAnnounceDone()
 	}
 
-	// Trigger back-off back off when rate/entry limited or must upgrade; no
-	// back-off for no-match.
+	// MustUpgrade has precedence over other cases, to ensure the callback is
+	// invoked. Trigger back-off back off when rate/entry limited or must
+	// upgrade; no back-off for no-match.
 
-	if announceResponse.Limited {
+	if announceResponse.MustUpgrade {
+
+		if p.config.MustUpgrade != nil {
+			p.config.MustUpgrade()
+		}
+		backOff = true
+		return backOff, errors.TraceNew("must upgrade")
+
+	} else if announceResponse.Limited {
 
 		backOff = true
 		return backOff, errors.TraceNew("limited")
@@ -666,14 +675,6 @@ func (p *Proxy) proxyOneClient(
 
 		return backOff, errors.TraceNew("no match")
 
-	} else if announceResponse.MustUpgrade {
-
-		if p.config.MustUpgrade != nil {
-			p.config.MustUpgrade()
-		}
-
-		backOff = true
-		return backOff, errors.TraceNew("must upgrade")
 	}
 
 	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
@@ -965,7 +966,7 @@ func (p *Proxy) getMetrics(webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetri
 
 	return &ProxyMetrics{
 		BaseAPIParameters:             packedBaseParams,
-		ProxyProtocolVersion:          ProxyProtocolVersion1,
+		ProxyProtocolVersion:          proxyProtocolVersion,
 		NATType:                       webRTCCoordinator.NATType(),
 		PortMappingTypes:              webRTCCoordinator.PortMappingTypes(),
 		MaxClients:                    int32(p.config.MaxClients),

@@ -526,6 +526,22 @@ func (b *Broker) handleProxyAnnounce(
 		return nil, errors.Trace(err)
 	}
 
+	// Return MustUpgrade when the proxy's protocol version is less than the
+	// minimum required.
+	if announceRequest.Metrics.ProxyProtocolVersion < MinimumProxyProtocolVersion {
+		responsePayload, err := MarshalProxyAnnounceResponse(
+			&ProxyAnnounceResponse{
+				NoMatch:     true,
+				MustUpgrade: true,
+			})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
+
+	}
+
 	// Fetch new tactics for the proxy, if required, using the tactics tag
 	// that should be included with the API parameters. A tacticsPayload may
 	// be returned when there are no new tactics, and this is relayed back to
@@ -816,6 +832,21 @@ func (b *Broker) handleClientOffer(
 		offerRequest.DestinationAddress)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	// Return MustUpgrade when the client's protocol version is less than the
+	// minimum required.
+	if offerRequest.Metrics.ProxyProtocolVersion < MinimumProxyProtocolVersion {
+		responsePayload, err := MarshalClientOfferResponse(
+			&ClientOfferResponse{
+				NoMatch:     true,
+				MustUpgrade: true,
+			})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
 	}
 
 	// Enqueue the client offer and await a proxy matching and subsequent

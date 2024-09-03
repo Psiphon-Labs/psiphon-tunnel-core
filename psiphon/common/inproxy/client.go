@@ -377,7 +377,7 @@ func dialClientWebRTCConn(
 		&ClientOfferRequest{
 			Metrics: &ClientMetrics{
 				BaseAPIParameters:    packedBaseParams,
-				ProxyProtocolVersion: ProxyProtocolVersion1,
+				ProxyProtocolVersion: proxyProtocolVersion,
 				NATType:              config.WebRTCDialCoordinator.NATType(),
 				PortMappingTypes:     config.WebRTCDialCoordinator.PortMappingTypes(),
 			},
@@ -396,28 +396,28 @@ func dialClientWebRTCConn(
 		return nil, false, errors.Trace(err)
 	}
 
-	// No retry when rate/entry limited or must upgrade; do retry on no-match,
-	// as a match may soon appear.
+	// MustUpgrade has precedence over other cases to ensure the callback is
+	// invoked. No retry when rate/entry limited or must upgrade; do retry on
+	// no-match, as a match may soon appear.
 
-	if offerResponse.Limited {
-		return nil, false, errors.TraceNew("limited")
-
-	} else if offerResponse.NoMatch {
-
-		return nil, true, errors.TraceNew("no proxy match")
-
-	} else if offerResponse.MustUpgrade {
+	if offerResponse.MustUpgrade {
 
 		if config.MustUpgrade != nil {
 			config.MustUpgrade()
 		}
-
 		return nil, false, errors.TraceNew("must upgrade")
+
+	} else if offerResponse.Limited {
+
+		return nil, false, errors.TraceNew("limited")
+
+	} else if offerResponse.NoMatch {
+
+		return nil, true, errors.TraceNew("no match")
 	}
 
-	if offerResponse.SelectedProxyProtocolVersion != ProxyProtocolVersion1 {
-		// This case is currently unexpected, as all clients and proxies use
-		// ProxyProtocolVersion1.
+	if offerResponse.SelectedProxyProtocolVersion < MinimumProxyProtocolVersion ||
+		offerResponse.SelectedProxyProtocolVersion > proxyProtocolVersion {
 		return nil, false, errors.Tracef(
 			"Unsupported proxy protocol version: %d",
 			offerResponse.SelectedProxyProtocolVersion)

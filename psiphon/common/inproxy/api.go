@@ -30,9 +30,20 @@ import (
 )
 
 const (
-	ProxyProtocolVersion1 = 1
-	MaxCompartmentIDs     = 10
+
+	// ProxyProtocolVersion1 represents protocol version 1.
+	ProxyProtocolVersion1 = int32(1)
+
+	// MinimumProxyProtocolVersion is the minimum supported version number.
+	MinimumProxyProtocolVersion = ProxyProtocolVersion1
+
+	MaxCompartmentIDs = 10
 )
+
+// proxyProtocolVersion is the current protocol version number.
+// proxyProtocolVersion is variable, to enable overriding the value in tests.
+// This value should not be overridden outside of test cases.
+var proxyProtocolVersion = ProxyProtocolVersion1
 
 // ID is a unique identifier used to identify inproxy connections and actors.
 type ID [32]byte
@@ -468,7 +479,7 @@ func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 		return nil, nil, errors.Trace(err)
 	}
 
-	if metrics.ProxyProtocolVersion != ProxyProtocolVersion1 {
+	if metrics.ProxyProtocolVersion < 0 || metrics.ProxyProtocolVersion > proxyProtocolVersion {
 		return nil, nil, errors.Tracef("invalid proxy protocol version: %v", metrics.ProxyProtocolVersion)
 	}
 
@@ -521,7 +532,7 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 		return nil, errors.Trace(err)
 	}
 
-	if metrics.ProxyProtocolVersion != ProxyProtocolVersion1 {
+	if metrics.ProxyProtocolVersion < 0 || metrics.ProxyProtocolVersion > proxyProtocolVersion {
 		return nil, errors.Tracef("invalid proxy protocol version: %v", metrics.ProxyProtocolVersion)
 	}
 
