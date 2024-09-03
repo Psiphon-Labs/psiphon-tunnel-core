@@ -29,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
@@ -117,7 +119,7 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 
 		// Dial with nonce transformer
 
-		Dial(
+		_, _ = Dial(
 			ctx,
 			packetConn,
 			serverAddress,
@@ -134,7 +136,7 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 			false,
 			false,
 			false, // Disable obfuscated PSK
-			nil,
+			common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "test"),
 		)
 
 		return nil
