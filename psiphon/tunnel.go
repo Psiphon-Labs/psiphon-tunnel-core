@@ -1568,6 +1568,7 @@ func dialInproxy(
 		DialAddress:                  dialAddress,
 		RemoteAddrOverride:           remoteAddrOverride,
 		PackedDestinationServerEntry: dialParams.inproxyPackedSignedServerEntry,
+		MustUpgrade:                  config.OnInproxyMustUpgrade,
 	}
 
 	conn, err := inproxy.DialClient(ctx, clientConfig)

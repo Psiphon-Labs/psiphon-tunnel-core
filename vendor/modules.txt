@@ -110,9 +110,6 @@ github.com/flynn/noise
 # github.com/fxamacker/cbor/v2 v2.5.0
 ## explicit; go 1.12
 github.com/fxamacker/cbor/v2
-# github.com/gammazero/deque v0.2.1
-## explicit; go 1.18
-github.com/gammazero/deque
 # github.com/gaukas/godicttls v0.0.4
 ## explicit; go 1.19
 github.com/gaukas/godicttls

@@ -146,7 +146,7 @@ func (t TunnelProtocols) PruneInvalid() TunnelProtocols {
 	return u
 }
 
-func (t TunnelProtocols) OnlyInproxyTunnelProtocols() TunnelProtocols {
+func (t TunnelProtocols) PruneNonInproxyTunnelProtocols() TunnelProtocols {
 	u := make(TunnelProtocols, 0)
 	for _, p := range t {
 		if TunnelProtocolUsesInproxy(p) {
@@ -154,6 +154,15 @@ func (t TunnelProtocols) OnlyInproxyTunnelProtocols() TunnelProtocols {
 		}
 	}
 	return u
+}
+
+func (t TunnelProtocols) IsOnlyInproxyTunnelProtocols() bool {
+	for _, p := range t {
+		if !TunnelProtocolUsesInproxy(p) {
+			return false
+		}
+	}
+	return true
 }
 
 type LabeledTunnelProtocols map[string]TunnelProtocols

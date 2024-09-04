@@ -30,9 +30,20 @@ import (
 )
 
 const (
-	ProxyProtocolVersion1 = 1
-	MaxCompartmentIDs     = 10
+
+	// ProxyProtocolVersion1 represents protocol version 1.
+	ProxyProtocolVersion1 = int32(1)
+
+	// MinimumProxyProtocolVersion is the minimum supported version number.
+	MinimumProxyProtocolVersion = ProxyProtocolVersion1
+
+	MaxCompartmentIDs = 10
 )
+
+// proxyProtocolVersion is the current protocol version number.
+// proxyProtocolVersion is variable, to enable overriding the value in tests.
+// This value should not be overridden outside of test cases.
+var proxyProtocolVersion = ProxyProtocolVersion1
 
 // ID is a unique identifier used to identify inproxy connections and actors.
 type ID [32]byte
@@ -243,14 +254,17 @@ type WebRTCSessionDescription struct {
 // to relay client traffic with. The broker validates that the dial address
 // corresponds to a valid Psiphon server.
 //
-// OperatorMessageJSON is an optional message bundle to be forwarded to the
-// user interface for display to the user; for example, to alert the proxy
-// operator of configuration issue; the JSON schema is not defined here.
+// MustUpgrade is an optional flag that is set by the broker, based on the
+// submitted ProxyProtocolVersion, when the proxy app must be upgraded in
+// order to function properly. Potential must-upgrade scenarios include
+// changes to the personal pairing broker rendezvous algorithm, where no
+// protocol backwards compatibility accommodations can ensure a rendezvous
+// and match. When MustUpgrade is set, NoMatch is implied.
 type ProxyAnnounceResponse struct {
-	OperatorMessageJSON         string                               `cbor:"1,keyasint,omitempty"`
 	TacticsPayload              []byte                               `cbor:"2,keyasint,omitempty"`
 	Limited                     bool                                 `cbor:"3,keyasint,omitempty"`
 	NoMatch                     bool                                 `cbor:"4,keyasint,omitempty"`
+	MustUpgrade                 bool                                 `cbor:"13,keyasint,omitempty"`
 	ConnectionID                ID                                   `cbor:"5,keyasint,omitempty"`
 	ClientProxyProtocolVersion  int32                                `cbor:"6,keyasint,omitempty"`
 	ClientOfferSDP              WebRTCSessionDescription             `cbor:"7,keyasint,omitempty"`
@@ -322,9 +336,17 @@ type DataChannelTrafficShapingParameters struct {
 // the broker using ClientRelayedPacketRequests and continues to relay using
 // ClientRelayedPacketRequests until complete. ConnectionID identifies this
 // connection and its relayed BrokerServerReport.
+//
+// MustUpgrade is an optional flag that is set by the broker, based on the
+// submitted ProxyProtocolVersion, when the client app must be upgraded in
+// order to function properly. Potential must-upgrade scenarios include
+// changes to the personal pairing broker rendezvous algorithm, where no
+// protocol backwards compatibility accommodations can ensure a rendezvous
+// and match. When MustUpgrade is set, NoMatch is implied.
 type ClientOfferResponse struct {
 	Limited                      bool                     `cbor:"1,keyasint,omitempty"`
 	NoMatch                      bool                     `cbor:"2,keyasint,omitempty"`
+	MustUpgrade                  bool                     `cbor:"7,keyasint,omitempty"`
 	ConnectionID                 ID                       `cbor:"3,keyasint,omitempty"`
 	SelectedProxyProtocolVersion int32                    `cbor:"4,keyasint,omitempty"`
 	ProxyAnswerSDP               WebRTCSessionDescription `cbor:"5,keyasint,omitempty"`
@@ -457,7 +479,7 @@ func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 		return nil, nil, errors.Trace(err)
 	}
 
-	if metrics.ProxyProtocolVersion != ProxyProtocolVersion1 {
+	if metrics.ProxyProtocolVersion < 0 || metrics.ProxyProtocolVersion > proxyProtocolVersion {
 		return nil, nil, errors.Tracef("invalid proxy protocol version: %v", metrics.ProxyProtocolVersion)
 	}
 
@@ -510,7 +532,7 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 		return nil, errors.Trace(err)
 	}
 
-	if metrics.ProxyProtocolVersion != ProxyProtocolVersion1 {
+	if metrics.ProxyProtocolVersion < 0 || metrics.ProxyProtocolVersion > proxyProtocolVersion {
 		return nil, errors.Tracef("invalid proxy protocol version: %v", metrics.ProxyProtocolVersion)
 	}
 
@@ -544,8 +566,12 @@ func (request *ProxyAnnounceRequest) ValidateAndGetParametersAndLogFields(
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.APIParameters, common.LogFields, error) {
 
-	if len(request.PersonalCompartmentIDs) > maxCompartmentIDs {
-		return nil, nil, errors.Tracef("invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
+	// A proxy may specify at most 1 personal compartment ID. This is
+	// currently a limitation of the multi-queue implementation; see comment
+	// in announcementMultiQueue.enqueue.
+	if len(request.PersonalCompartmentIDs) > 1 {
+		return nil, nil, errors.Tracef(
+			"invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
 	if request.Metrics == nil {
@@ -587,13 +613,31 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 			"invalid compartment IDs length: %d", len(request.PersonalCompartmentIDs))
 	}
 
+	if len(request.CommonCompartmentIDs) > 0 && len(request.PersonalCompartmentIDs) > 0 {
+		return nil, nil, errors.TraceNew("multiple compartment ID types")
+	}
+
 	// The client offer SDP may contain no ICE candidates.
 	errorOnNoCandidates := false
+
+	// The client offer SDP may include RFC 1918/4193 private IP addresses in
+	// personal pairing mode. filterSDPAddresses should not filter out
+	// private IP addresses based on the broker's local interfaces; this
+	// filtering occurs on the proxy that receives the SDP.
+	allowPrivateIPAddressCandidates :=
+		len(request.PersonalCompartmentIDs) > 0 &&
+			len(request.CommonCompartmentIDs) == 0
+	filterPrivateIPAddressCandidates := false
 
 	// Client offer SDP candidate addresses must match the country and ASN of
 	// the client. Don't facilitate connections to arbitrary destinations.
 	filteredSDP, sdpMetrics, err := filterSDPAddresses(
-		[]byte(request.ClientOfferSDP.SDP), errorOnNoCandidates, lookupGeoIP, geoIPData)
+		[]byte(request.ClientOfferSDP.SDP),
+		errorOnNoCandidates,
+		lookupGeoIP,
+		geoIPData,
+		allowPrivateIPAddressCandidates,
+		filterPrivateIPAddressCandidates)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
@@ -637,6 +681,7 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	logFields["has_personal_compartment_ids"] = hasPersonalCompartmentIDs
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["has_IPv6"] = sdpMetrics.hasIPv6
+	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
 
 	return filteredSDP, logFields, nil
@@ -679,15 +724,28 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
-	geoIPData common.GeoIPData) ([]byte, common.LogFields, error) {
+	geoIPData common.GeoIPData,
+	proxyAnnouncementHasPersonalCompartmentIDs bool) ([]byte, common.LogFields, error) {
 
 	// The proxy answer SDP must contain at least one ICE candidate.
 	errorOnNoCandidates := true
 
+	// The proxy answer SDP may include RFC 1918/4193 private IP addresses in
+	// personal pairing mode. filterSDPAddresses should not filter out
+	// private IP addresses based on the broker's local interfaces; this
+	// filtering occurs on the client that receives the SDP.
+	allowPrivateIPAddressCandidates := proxyAnnouncementHasPersonalCompartmentIDs
+	filterPrivateIPAddressCandidates := false
+
 	// Proxy answer SDP candidate addresses must match the country and ASN of
 	// the proxy. Don't facilitate connections to arbitrary destinations.
 	filteredSDP, sdpMetrics, err := filterSDPAddresses(
-		[]byte(request.ProxyAnswerSDP.SDP), errorOnNoCandidates, lookupGeoIP, geoIPData)
+		[]byte(request.ProxyAnswerSDP.SDP),
+		errorOnNoCandidates,
+		lookupGeoIP,
+		geoIPData,
+		allowPrivateIPAddressCandidates,
+		filterPrivateIPAddressCandidates)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
@@ -712,6 +770,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	logFields["connection_id"] = request.ConnectionID
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["has_IPv6"] = sdpMetrics.hasIPv6
+	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
 	logFields["answer_error"] = request.AnswerError
 

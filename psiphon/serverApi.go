@@ -403,8 +403,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 				return errors.Trace(err)
 			}
 
-			if tacticsRecord != nil &&
-				prng.FlipWeightedCoin(tacticsRecord.Tactics.Probability) {
+			if tacticsRecord != nil {
 
 				err := serverContext.tunnel.config.SetParameters(
 					tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)

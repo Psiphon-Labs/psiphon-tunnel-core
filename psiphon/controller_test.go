@@ -39,6 +39,7 @@ import (
 
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/elazarl/goproxy"
@@ -300,29 +301,37 @@ func TestFrontedQUIC(t *testing.T) {
 
 func TestInproxyOSSH(t *testing.T) {
 
-	t.Skipf("temporarily disabled")
+	if !inproxy.Enabled() {
+		t.Skip("In-proxy is not enabled")
+	}
 
 	controllerRun(t,
 		&controllerRunConfig{
 			protocol:                 "INPROXY-WEBRTC-OSSH",
 			disableUntunneledUpgrade: true,
+			useInproxyDialRateLimit:  true,
 		})
 }
 
 func TestInproxyQUICOSSH(t *testing.T) {
 
-	t.Skipf("temporarily disabled")
+	if !inproxy.Enabled() {
+		t.Skip("In-proxy is not enabled")
+	}
 
 	controllerRun(t,
 		&controllerRunConfig{
 			protocol:                 "INPROXY-WEBRTC-QUIC-OSSH",
 			disableUntunneledUpgrade: true,
+			useInproxyDialRateLimit:  true,
 		})
 }
 
 func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
 
-	t.Skipf("temporarily disabled")
+	if !inproxy.Enabled() {
+		t.Skip("In-proxy is not enabled")
+	}
 
 	controllerRun(t,
 		&controllerRunConfig{
@@ -333,7 +342,9 @@ func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
 
 func TestInproxyTLSOSSH(t *testing.T) {
 
-	t.Skipf("temporarily disabled")
+	if !inproxy.Enabled() {
+		t.Skip("In-proxy is not enabled")
+	}
 
 	controllerRun(t,
 		&controllerRunConfig{
@@ -372,6 +383,7 @@ type controllerRunConfig struct {
 	transformHostNames       bool
 	useFragmentor            bool
 	useLegacyAPIEncoding     bool
+	useInproxyDialRateLimit  bool
 }
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
@@ -437,6 +449,11 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	if runConfig.useLegacyAPIEncoding {
 		modifyConfig["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
+	}
+
+	if runConfig.useInproxyDialRateLimit {
+		modifyConfig["InproxyClientDialRateLimitQuantity"] = 2
+		modifyConfig["InproxyClientDialRateLimitIntervalMilliseconds"] = 1000
 	}
 
 	configJSON, _ = json.Marshal(modifyConfig)
