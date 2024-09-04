@@ -105,7 +105,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 		for iteration := 0; ; iteration++ {
 
 			if !WaitForNetworkConnectivity(
-				ctx, config.NetworkConnectivityChecker) {
+				ctx, config.NetworkConnectivityChecker, nil) {
 				return
 			}
 

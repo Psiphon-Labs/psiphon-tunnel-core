@@ -517,7 +517,8 @@ fetcherLoop:
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
 				controller.runCtx,
-				controller.config.NetworkConnectivityChecker) {
+				controller.config.NetworkConnectivityChecker,
+				nil) {
 				break fetcherLoop
 			}
 
@@ -604,7 +605,8 @@ downloadLoop:
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
 				controller.runCtx,
-				controller.config.NetworkConnectivityChecker) {
+				controller.config.NetworkConnectivityChecker,
+				nil) {
 				break downloadLoop
 			}
 
@@ -1592,6 +1594,15 @@ func (p *protocolSelectionConstraints) selectProtocol(
 	// establishment workers. Instead the delay is returned and applied
 	// outside of the lock. This also allows for the delay to be reduced when
 	// the StaggerConnectionWorkers facility is active.
+	//
+	// Limitation: fast dial failures cause excess rate limiting, since tokens
+	// are consumed even though the dial immediately fails. This is most
+	// noticable in edge cases such as when no broker specs are configured in
+	// tactics. WaitForNetworkConnectivity, when configured, should pause
+	// calls to selectProtocol, although there are other possible fast fail
+	// cases.
+	//
+	// TODO: replace token on fast failure that doesn't reach the broker?
 
 	if p.isInproxyPersonalPairingMode ||
 		p.getLimitTunnelProtocols(connectTunnelCount).IsOnlyInproxyTunnelProtocols() {
@@ -2196,7 +2207,8 @@ loop:
 			networkWaitStartTime := time.Now()
 			if !WaitForNetworkConnectivity(
 				controller.establishCtx,
-				controller.config.NetworkConnectivityChecker) {
+				controller.config.NetworkConnectivityChecker,
+				nil) {
 				break loop
 			}
 			networkWaitDuration := time.Since(networkWaitStartTime)
@@ -2770,26 +2782,21 @@ func (controller *Controller) runInproxyProxy() {
 	// Don't announce proxies if tactics indicates it won't be allowed. This
 	// is also enforced on the broker; this client-side check cuts down on
 	// load from well-behaved proxies.
+	//
+	// Limitation: InproxyAllowProxy is only checked on start up, but tactics
+	// may change while running.
 
 	p := controller.config.GetParameters().Get()
 	allowProxy := p.Bool(parameters.InproxyAllowProxy)
 	p.Close()
 
-	// Don't announce proxies when running on an incompatible network, such as
-	// a non-Psiphon VPN.
-
-	compatibleNetwork := IsInproxyCompatibleNetworkType(controller.config.GetNetworkID())
-
 	// Running an unstream proxy is also an incompatible case.
 
 	useUpstreamProxy := controller.config.UseUpstreamProxy()
 
-	if !allowProxy || !compatibleNetwork || useUpstreamProxy || !inproxy.Enabled() {
+	if !allowProxy || useUpstreamProxy || !inproxy.Enabled() {
 		if !allowProxy {
 			NoticeError("inproxy proxy: not allowed")
-		}
-		if !compatibleNetwork {
-			NoticeError("inproxy proxy: not run due to incompatible network")
 		}
 		if useUpstreamProxy {
 			NoticeError("inproxy proxy: not run due to upstream proxy configuration")
@@ -2931,9 +2938,23 @@ func (controller *Controller) inproxyAwaitBrokerSpecs(isProxy bool) bool {
 }
 
 func (controller *Controller) inproxyWaitForNetworkConnectivity() bool {
+
+	// Pause announcing proxies when currently running on an incompatible
+	// network, such as a non-Psiphon VPN.
+	emitted := false
+	isCompatibleNetwork := func() bool {
+		compatibleNetwork := IsInproxyCompatibleNetworkType(controller.config.GetNetworkID())
+		if !compatibleNetwork && !emitted {
+			NoticeInfo("inproxy proxy: waiting due to incompatible network")
+			emitted = true
+		}
+		return compatibleNetwork
+	}
+
 	return WaitForNetworkConnectivity(
 		controller.runCtx,
-		controller.config.NetworkConnectivityChecker)
+		controller.config.NetworkConnectivityChecker,
+		isCompatibleNetwork)
 }
 
 // inproxyGetProxyBrokerClient returns the broker client shared by all proxy

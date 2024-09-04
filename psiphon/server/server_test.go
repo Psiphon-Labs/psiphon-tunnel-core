@@ -1253,6 +1253,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	clientConfig.EmitSLOKs = true
 	clientConfig.EmitServerAlerts = true
 
+	// Exercise the WaitForNetworkConnectivity wired-up code path.
+	clientConfig.NetworkConnectivityChecker = &networkConnectivityChecker{}
+
 	if runConfig.inspectFlows {
 		trueVal := true
 		clientConfig.UpstreamProxyURL = fmt.Sprintf("socks5://%s", flowInspectorProxy.listener.Addr())
@@ -2033,6 +2036,13 @@ func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutM
 			t.Fatalf(timeoutMessage)
 		}
 	}
+}
+
+type networkConnectivityChecker struct {
+}
+
+func (c *networkConnectivityChecker) HasNetworkConnectivity() int {
+	return 1
 }
 
 func checkExpectedServerTunnelLogFields(
