@@ -51,7 +51,6 @@ require (
 	github.com/florianl/go-nfqueue v1.1.1-0.20200829120558-a2f196e98ab0
 	github.com/flynn/noise v1.0.1-0.20220214164934-d803f5c4b0f4
 	github.com/fxamacker/cbor/v2 v2.5.0
-	github.com/gammazero/deque v0.2.1
 	github.com/gobwas/glob v0.2.4-0.20180402141543-f00a7392b439
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/google/gopacket v1.1.19

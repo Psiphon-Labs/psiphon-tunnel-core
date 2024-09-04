@@ -526,6 +526,22 @@ func (b *Broker) handleProxyAnnounce(
 		return nil, errors.Trace(err)
 	}
 
+	// Return MustUpgrade when the proxy's protocol version is less than the
+	// minimum required.
+	if announceRequest.Metrics.ProxyProtocolVersion < MinimumProxyProtocolVersion {
+		responsePayload, err := MarshalProxyAnnounceResponse(
+			&ProxyAnnounceResponse{
+				NoMatch:     true,
+				MustUpgrade: true,
+			})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
+
+	}
+
 	// Fetch new tactics for the proxy, if required, using the tactics tag
 	// that should be included with the API parameters. A tacticsPayload may
 	// be returned when there are no new tactics, and this is relayed back to
@@ -586,6 +602,9 @@ func (b *Broker) handleProxyAnnounce(
 	announceCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 	extendTransportTimeout(timeout)
+
+	// Note that matcher.Announce assumes a monotonically increasing
+	// announceCtx.Deadline input for each successive call.
 
 	clientOffer, matchMetrics, err = b.matcher.Announce(
 		announceCtx,
@@ -768,6 +787,9 @@ func (b *Broker) handleClientOffer(
 	// processSDPAddresses), so all invalid candidates are removed and the
 	// remaining SDP is used. Filtered candidate information is logged in
 	// logFields.
+	//
+	// In personal pairing mode, RFC 1918/4193 private IP addresses are
+	// permitted in exchanged SDPs and not filtered out.
 
 	var filteredSDP []byte
 	filteredSDP, logFields, err = offerRequest.ValidateAndGetLogFields(
@@ -810,6 +832,21 @@ func (b *Broker) handleClientOffer(
 		offerRequest.DestinationAddress)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	// Return MustUpgrade when the client's protocol version is less than the
+	// minimum required.
+	if offerRequest.Metrics.ProxyProtocolVersion < MinimumProxyProtocolVersion {
+		responsePayload, err := MarshalClientOfferResponse(
+			&ClientOfferResponse{
+				NoMatch:     true,
+				MustUpgrade: true,
+			})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
 	}
 
 	// Enqueue the client offer and await a proxy matching and subsequent
@@ -1020,13 +1057,23 @@ func (b *Broker) handleProxyAnswer(
 	// processSDPAddresses), so all invalid candidates are removed and the
 	// remaining SDP is used. Filtered candidate information is logged in
 	// logFields.
+	//
+	// In personal pairing mode, RFC 1918/4193 private IP addresses are
+	// permitted in exchanged SDPs and not filtered out.
+
+	hasPersonalCompartmentIDs, err := b.matcher.AnnouncementHasPersonalCompartmentIDs(
+		initiatorID, answerRequest.ConnectionID)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	var filteredSDP []byte
 	filteredSDP, logFields, err = answerRequest.ValidateAndGetLogFields(
 		b.config.LookupGeoIP,
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,
-		geoIPData)
+		geoIPData,
+		hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

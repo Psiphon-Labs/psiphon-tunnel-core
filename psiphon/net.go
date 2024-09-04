@@ -293,13 +293,17 @@ func RelayCopyBuffer(config *Config, dst io.Writer, src io.Reader) (int64, error
 }
 
 // WaitForNetworkConnectivity uses a NetworkConnectivityChecker to
-// periodically check for network connectivity. It returns true if
-// no NetworkConnectivityChecker is provided (waiting is disabled)
-// or when NetworkConnectivityChecker.HasNetworkConnectivity()
-// indicates connectivity. It waits and polls the checker once a second.
-// When the context is done, false is returned immediately.
+// periodically check for network connectivity. It returns true if no
+// NetworkConnectivityChecker is provided (waiting is disabled) or when
+// NetworkConnectivityChecker.HasNetworkConnectivity() indicates
+// connectivity. It waits and polls the checker once a second. When
+// additionalConditionChecker is not nil, it must also return true for
+// WaitForNetworkConnectivity to return true. When the context is done, false
+// is returned immediately.
 func WaitForNetworkConnectivity(
-	ctx context.Context, connectivityChecker NetworkConnectivityChecker) bool {
+	ctx context.Context,
+	connectivityChecker NetworkConnectivityChecker,
+	additionalConditionChecker func() bool) bool {
 
 	if connectivityChecker == nil || connectivityChecker.HasNetworkConnectivity() == 1 {
 		return true
@@ -311,7 +315,8 @@ func WaitForNetworkConnectivity(
 	defer ticker.Stop()
 
 	for {
-		if connectivityChecker.HasNetworkConnectivity() == 1 {
+		if connectivityChecker.HasNetworkConnectivity() == 1 &&
+			(additionalConditionChecker == nil || additionalConditionChecker()) {
 			return true
 		}
 

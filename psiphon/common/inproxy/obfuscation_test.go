@@ -78,7 +78,7 @@ func FuzzSessionPacketDeobfuscation(f *testing.F) {
 		}
 
 		if (err == nil) != inOriginals {
-			f.Errorf("unexpected deobfuscation result")
+			t.Errorf("unexpected deobfuscation result")
 		}
 	})
 }

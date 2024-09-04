@@ -140,23 +140,12 @@ func sshAPIRequestHandler(
 
 var handshakeRequestParams = append(
 	append(
-		append(
-			[]requestParamSpec{
-				// Legacy clients may not send "session_id" in handshake
-				{"session_id", isHexDigits, requestParamOptional},
-				{"missing_server_entry_signature", isBase64String, requestParamOptional},
-				{"missing_server_entry_provider_id", isBase64String, requestParamOptional},
-			},
-			baseParams...),
-		baseDialParams...),
+		[]requestParamSpec{
+			{"missing_server_entry_signature", isBase64String, requestParamOptional},
+			{"missing_server_entry_provider_id", isBase64String, requestParamOptional},
+		},
+		baseAndDialParams...),
 	tacticsParams...)
-
-// inproxyHandshakeRequestParams adds inproxyDialParams to handshakeRequestParams.
-var inproxyHandshakeRequestParams = append(
-	append(
-		[]requestParamSpec{},
-		handshakeRequestParams...),
-	inproxyDialParams...)
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
 // Clients make the handshake immediately after establishing a tunnel
@@ -229,17 +218,11 @@ func handshakeAPIRequestHandler(
 
 	// Note: ignoring legacy "known_servers" params
 
-	expectedParams := handshakeRequestParams
-	if sshClient.isInproxyTunnelProtocol {
-		expectedParams = inproxyHandshakeRequestParams
-	}
-
-	err := validateRequestParams(support.Config, params, expectedParams)
+	err := validateRequestParams(support.Config, params, handshakeRequestParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	sessionID, _ := getStringRequestParam(params, "client_session_id")
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
@@ -304,7 +287,7 @@ func handshakeAPIRequestHandler(
 	// Flag the SSH client as having completed its handshake. This
 	// may reselect traffic rules and starts allowing port forwards.
 
-	apiParams := copyBaseSessionAndDialParams(params)
+	apiParams := copyBaseAndDialParams(params)
 
 	handshakeStateInfo, err := sshClient.setHandshakeState(
 		handshakeState{
@@ -333,13 +316,16 @@ func handshakeAPIRequestHandler(
 	// common API parameters and "handshake_completed" flag, this handshake
 	// log is mostly redundant and set to debug level.
 
-	log.WithTraceFields(
-		getRequestLogFields(
+	if IsLogLevelDebug() {
+		logFields := getRequestLogFields(
 			"",
+			sshClient.sessionID,
 			clientGeoIPData,
 			handshakeStateInfo.authorizedAccessTypes,
 			params,
-			handshakeRequestParams)).Debug("handshake")
+			handshakeRequestParams)
+		log.WithTraceFields(logFields).Debug("handshake")
+	}
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
@@ -431,7 +417,6 @@ func handshakeAPIRequestHandler(
 	}
 
 	handshakeResponse := protocol.HandshakeResponse{
-		SSHSessionID:             sessionID,
 		Homepages:                homepages,
 		UpgradeClientVersion:     db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		PageViewRegexes:          make([]map[string]string, 0),
@@ -562,7 +547,7 @@ func doHandshakeInproxyBrokerRelay(
 var uniqueUserParams = append(
 	[]requestParamSpec{
 		{"last_connected", isLastConnected, 0}},
-	baseSessionParams...)
+	baseParams...)
 
 var connectedRequestParams = append(
 	[]requestParamSpec{
@@ -640,6 +625,7 @@ func connectedAPIRequestHandler(
 		log.LogRawFieldsWithTimestamp(
 			getRequestLogFields(
 				"unique_user",
+				sshClient.sessionID,
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				params,
@@ -661,10 +647,12 @@ func connectedAPIRequestHandler(
 	return responsePayload, nil
 }
 
-var statusRequestParams = baseSessionParams
+var statusRequestParams = baseParams
 
 var remoteServerListStatParams = append(
 	[]requestParamSpec{
+		// Legacy clients don't record the session_id with remote_server_list_stats entries.
+		{"session_id", isHexDigits, requestParamOptional},
 		{"client_download_timestamp", isISO8601Date, 0},
 		{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"url", isAnyString, 0},
@@ -684,7 +672,7 @@ var remoteServerListStatParams = append(
 		{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	},
 
-	baseSessionParams...)
+	baseParams...)
 
 // Backwards compatibility case: legacy clients do not include these fields in
 // the remote_server_list_stats entries. Use the values from the outer status
@@ -693,7 +681,6 @@ var remoteServerListStatParams = append(
 // recording time). Note that all but client_build_rev, device_region, and
 // device_location are required fields.
 var remoteServerListStatBackwardsCompatibilityParamNames = []string{
-	"session_id",
 	"propagation_channel_id",
 	"sponsor_id",
 	"client_version",
@@ -717,7 +704,7 @@ var failedTunnelStatParams = append(
 		{"bytes_up", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"bytes_down", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"tunnel_error", isAnyString, 0}},
-	baseSessionAndDialParams...)
+	baseAndDialParams...)
 
 // statusAPIRequestHandler implements the "status" API request.
 // Clients make periodic status requests which deliver client-side
@@ -768,6 +755,7 @@ func statusAPIRequestHandler(
 
 			domainBytesFields := getRequestLogFields(
 				"domain_bytes",
+				sshClient.sessionID,
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				params,
@@ -802,10 +790,6 @@ func statusAPIRequestHandler(
 				}
 			}
 
-			// For validation, copy expected fields from the outer
-			// statusRequestParams.
-			remoteServerListStat["client_session_id"] = params["client_session_id"]
-
 			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
 			if err != nil {
 				// Occasionally, clients may send corrupt persistent stat data. Do not
@@ -816,6 +800,7 @@ func statusAPIRequestHandler(
 
 			remoteServerListFields := getRequestLogFields(
 				"remote_server_list",
+				"", // Use the session_id the client recorded with the event
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				remoteServerListStat,
@@ -856,6 +841,7 @@ func statusAPIRequestHandler(
 
 			failedTunnelFields := getRequestLogFields(
 				"failed_tunnel",
+				"", // Use the session_id the client recorded with the event
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				failedTunnelStat,
@@ -941,9 +927,9 @@ func statusAPIRequestHandler(
 // clientVerificationAPIRequestHandler is just a compliance stub
 // for older Android clients that still send verification requests
 func clientVerificationAPIRequestHandler(
-	support *SupportServices,
-	sshClient *sshClient,
-	params common.APIParameters) ([]byte, error) {
+	_ *SupportServices,
+	_ *sshClient,
+	_ common.APIParameters) ([]byte, error) {
 	return make([]byte, 0), nil
 }
 
@@ -954,9 +940,10 @@ var tacticsParams = []requestParamSpec{
 
 var tacticsRequestParams = append(
 	append(
-		[]requestParamSpec(nil),
+		[]requestParamSpec{
+			{"session_id", isHexDigits, 0}},
 		tacticsParams...),
-	baseSessionAndDialParams...)
+	baseAndDialParams...)
 
 func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidator {
 	return func(params common.APIParameters) error {
@@ -970,6 +957,7 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 
 		logFields := getRequestLogFields(
 			tactics.TACTICS_METRIC_EVENT_NAME,
+			"", // Use the session_id the client reported
 			GeoIPData(geoIPData),
 			nil, // authorizedAccessTypes are not known yet
 			params,
@@ -981,9 +969,10 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 
 var inproxyBrokerRequestParams = append(
 	append(
-		[]requestParamSpec{},
+		[]requestParamSpec{
+			{"session_id", isHexDigits, 0}},
 		tacticsParams...),
-	baseSessionParams...)
+	baseParams...)
 
 func getInproxyBrokerAPIParameterValidator(config *Config) common.APIParameterValidator {
 	return func(params common.APIParameters) error {
@@ -997,6 +986,7 @@ func getInproxyBrokerAPIParameterLogFieldFormatter() common.APIParameterLogField
 
 		logFields := getRequestLogFields(
 			"inproxy_broker",
+			"", // Use the session_id the client reported
 			GeoIPData(geoIPData),
 			nil,
 			params,
@@ -1031,7 +1021,6 @@ const (
 // baseParams are the basic request parameters that are expected for all API
 // requests and log events.
 var baseParams = []requestParamSpec{
-	{"client_session_id", isHexDigits, requestParamNotLogged},
 	{"propagation_channel_id", isHexDigits, 0},
 	{"sponsor_id", isHexDigits, 0},
 	{"client_version", isIntString, requestParamLogStringAsInt},
@@ -1043,14 +1032,6 @@ var baseParams = []requestParamSpec{
 	{"network_type", isAnyString, requestParamOptional},
 	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 }
-
-// baseSessionParams adds to baseParams the required session_id parameter. For
-// all requests except handshake, all existing clients are expected to send
-// session_id. Legacy clients may not send "session_id" in handshake.
-var baseSessionParams = append(
-	[]requestParamSpec{
-		{"session_id", isHexDigits, 0}},
-	baseParams...)
 
 // baseDialParams are the dial parameters, per-tunnel network protocol and
 // obfuscation metrics which are logged with server_tunnel, failed_tunnel, and
@@ -1173,12 +1154,12 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_webrtc_remote_ice_candidate_port", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
-// baseSessionAndDialParams adds baseDialParams and inproxyDialParams to baseSessionParams.
-var baseSessionAndDialParams = append(
+// baseAndDialParams adds baseDialParams and inproxyDialParams to baseParams.
+var baseAndDialParams = append(
 	append(
 		append(
 			[]requestParamSpec{},
-			baseSessionParams...),
+			baseParams...),
 		baseDialParams...),
 	inproxyDialParams...)
 
@@ -1219,14 +1200,14 @@ func validateRequestParams(
 	return nil
 }
 
-// copyBaseSessionAndDialParams makes a copy of the params which includes only
-// the baseSessionAndDialParams.
-func copyBaseSessionAndDialParams(params common.APIParameters) common.APIParameters {
+// copyBaseAndDialParams makes a copy of the params which includes only
+// the baseAndDialParams.
+func copyBaseAndDialParams(params common.APIParameters) common.APIParameters {
 
 	// Note: not a deep copy; assumes baseSessionAndDialParams values are all
 	// scalar types (int, string, etc.)
 	paramsCopy := make(common.APIParameters)
-	for _, baseParam := range baseSessionAndDialParams {
+	for _, baseParam := range baseAndDialParams {
 		value := params[baseParam.name]
 		if value == nil {
 			continue
@@ -1287,12 +1268,25 @@ func validateStringArrayRequestParam(
 // the legacy psi_web and current ELK naming conventions.
 func getRequestLogFields(
 	eventName string,
+	sessionID string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters,
 	expectedParams []requestParamSpec) LogFields {
 
 	logFields := make(LogFields)
+
+	// A sessionID is specified for SSH API requests, where the Psiphon server
+	// has already received a session ID in the SSH auth payload. In this
+	// case, use that session ID.
+	//
+	// sessionID is "" for other, non-SSH server cases including tactics,
+	// in-proxy broker, and client-side store and forward events including
+	// remote server list and failed tunnel.
+
+	if sessionID != "" {
+		logFields["session_id"] = sessionID
+	}
 
 	if eventName != "" {
 		logFields["event_name"] = eventName

@@ -851,7 +851,8 @@ func TestLimitTunnelDialPortNumbers(t *testing.T) {
 	}
 
 	selectProtocol := func(serverEntry *protocol.ServerEntry) (string, bool) {
-		return constraints.selectProtocol(0, false, false, serverEntry)
+		protocol, _, ok := constraints.selectProtocol(0, false, false, serverEntry)
+		return protocol, ok
 	}
 
 	for _, tunnelProtocol := range protocol.SupportedTunnelProtocols {

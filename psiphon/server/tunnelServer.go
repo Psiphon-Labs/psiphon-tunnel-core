@@ -32,6 +32,7 @@ import (
 	"io/ioutil"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -74,6 +75,7 @@ const (
 	PRE_HANDSHAKE_RANDOM_STREAM_MAX_COUNT = 1
 	RANDOM_STREAM_MAX_BYTES               = 10485760
 	ALERT_REQUEST_QUEUE_BUFFER_SIZE       = 16
+	SSH_MAX_CLIENT_COUNT                  = 100000
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -451,6 +453,26 @@ func newSSHServer(
 		}
 	}
 
+	// Limitation: rate limiting and resource limiting are handled by external
+	// components, and sshServer enforces only a sanity check limit on the
+	// number of entries in sshServer.clients; and no limit on the number of
+	// entries in sshServer.geoIPSessionCache or sshServer.oslSessionCache.
+	//
+	// To avoid resource exhaustion, this implementation relies on:
+	//
+	// - Per-peer IP address and/or overall network connection rate limiting,
+	//   provided by iptables as configured by Psiphon automation
+	//   (https://github.com/Psiphon-Inc/psiphon-automation/blob/
+	//   4d913d13339d7d54c053a01e5a928e343045cde8/Automation/psi_ops_install.py#L1451).
+	//
+	// - Host CPU/memory/network monitoring and signalling, installed Psiphon
+	//   automation
+	//   (https://github.com/Psiphon-Inc/psiphon-automation/blob/
+	//    4d913d13339d7d54c053a01e5a928e343045cde8/Automation/psi_ops_install.py#L935).
+	//   When resource usage meets certain thresholds, the monitoring signals
+	//   this process with SIGTSTP or SIGCONT, and handlers call
+	//   sshServer.setEstablishTunnels to stop or resume accepting new clients.
+
 	sshServer := &sshServer{
 		support:                 support,
 		establishTunnels:        1,
@@ -528,7 +550,9 @@ func (sshServer *sshServer) runListener(sshListener *sshListener, listenerError 
 		// span multiple TCP connections.
 
 		if !sshServer.checkEstablishTunnels() {
-			log.WithTrace().Debug("not establishing tunnels")
+			if IsLogLevelDebug() {
+				log.WithTrace().Debug("not establishing tunnels")
+			}
 			conn.Close()
 			return
 		}
@@ -916,6 +940,14 @@ func (sshServer *sshServer) registerEstablishedClient(client *sshClient) bool {
 		return false
 	}
 
+	// SSH_MAX_CLIENT_COUNT is a simple sanity check and failsafe. Load
+	// limiting tuned to each server's host resources is provided by external
+	// components. See comment in newSSHServer for more details.
+	if len(sshServer.clients) >= SSH_MAX_CLIENT_COUNT {
+		log.WithTrace().Warning("SSH_MAX_CLIENT_COUNT exceeded")
+		return false
+	}
+
 	sshServer.clients[client.sessionID] = client
 
 	return true
@@ -1266,8 +1298,18 @@ func (sshServer *sshServer) getLoadStats() (
 		//   exact number of other _network connections_, even from the same
 		//   client.
 		//
-		// - For in-proxy tunnel protocols, the same GeoIP caveats
-		//   (see comments above) apply.
+		//   Futhermore, since client.Locks aren't held between the previous
+		//   loop and this one, it's also possible that the client's
+		//   clientGeoIPData was None in the previous loop and is now not
+		//   None. In this case, the regionStats may not be populated at all
+		//   for the client's current region; if so, the client is skipped.
+		//   This scenario can also result in a proximate undercount by one,
+		//   when the regionStats _is_ populated: this client was counted
+		//   under None, not the current client.peerGeoIPData.Country, so
+		//   the -1 subtracts some _other_ client from the populated regionStats.
+		//
+		// - For in-proxy protocols, the accepted proximate metric uses the
+		//   peer GeoIP, which represents the proxy, not the client.
 
 		stats := regionStats[client.peerGeoIPData.Country]["ALL"]
 
@@ -1282,6 +1324,15 @@ func (sshServer *sshServer) getLoadStats() (
 
 				*client.peakMetrics.concurrentProximateAcceptedClients = n
 			}
+		}
+
+		// Handle the in-proxy None and None/not-None cases (and any other
+		// potential scenario where regionStats[client.clientGeoIPData.Country]
+		// may not be populated).
+		if client.clientGeoIPData.Country == GEOIP_UNKNOWN_VALUE ||
+			regionStats[client.clientGeoIPData.Country] == nil {
+			client.Unlock()
+			continue
 		}
 
 		stats = regionStats[client.clientGeoIPData.Country]["ALL"]
@@ -3220,7 +3271,7 @@ var serverTunnelStatParams = append(
 	[]requestParamSpec{
 		{"last_connected", isLastConnected, requestParamOptional},
 		{"establishment_duration", isIntString, requestParamOptional}},
-	baseSessionAndDialParams...)
+	baseAndDialParams...)
 
 func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
@@ -3232,6 +3283,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	logFields := getRequestLogFields(
 		"server_tunnel",
+		sshClient.sessionID,
 		sshClient.clientGeoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
@@ -3260,7 +3312,6 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	if sshClient.sshListener.BPFProgramName != "" {
 		logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
 	}
-	logFields["session_id"] = sshClient.sessionID
 	logFields["is_first_tunnel_in_session"] = sshClient.isFirstTunnelInSession
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
@@ -3386,7 +3437,6 @@ var blocklistHitsStatParams = []requestParamSpec{
 	{"device_region", isAnyString, requestParamOptional},
 	{"device_location", isGeoHashString, requestParamOptional},
 	{"egress_region", isRegionCode, requestParamOptional},
-	{"session_id", isHexDigits, 0},
 	{"last_connected", isLastConnected, requestParamOptional},
 }
 
@@ -3401,12 +3451,11 @@ func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []Bl
 
 	logFields := getRequestLogFields(
 		"server_blocklist_hit",
+		sshClient.sessionID,
 		sshClient.clientGeoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
 		sshClient.handshakeState.apiParams,
 		blocklistHitsStatParams)
-
-	logFields["session_id"] = sshClient.sessionID
 
 	// Note: see comment in logTunnel regarding unlock and concurrent access.
 
@@ -3603,12 +3652,14 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessa
 	reason := ssh.Prohibited
 
 	// Note: Debug level, as logMessage may contain user traffic destination address information
-	log.WithTraceFields(
-		LogFields{
-			"channelType":  newChannel.ChannelType(),
-			"logMessage":   logMessage,
-			"rejectReason": reason.String(),
-		}).Debug("reject new channel")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(
+			LogFields{
+				"channelType":  newChannel.ChannelType(),
+				"logMessage":   logMessage,
+				"rejectReason": reason.String(),
+			}).Debug("reject new channel")
+	}
 
 	// Note: logMessage is internal, for logging only; just the reject reason is sent to the client.
 	newChannel.Reject(reason, reason.String())
@@ -4214,11 +4265,13 @@ func (sshClient *sshClient) isPortForwardPermitted(
 
 	sshClient.enqueueDisallowedTrafficAlertRequest()
 
-	log.WithTraceFields(
-		LogFields{
-			"type": portForwardType,
-			"port": port,
-		}).Debug("port forward denied by traffic rules")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(
+			LogFields{
+				"type": portForwardType,
+				"port": port,
+			}).Debug("port forward denied by traffic rules")
+	}
 
 	return false
 }
@@ -4234,6 +4287,13 @@ func (sshClient *sshClient) isDomainPermitted(domain string) (bool, string) {
 	// TODO: validate with dns.IsDomainName?
 	if len(domain) > 255 {
 		return false, "invalid domain name"
+	}
+
+	// Don't even attempt to resolve the default mDNS top-level domain.
+	// Non-default cases won't be caught here but should fail to resolve due
+	// to the PreferGo setting in net.Resolver.
+	if strings.HasSuffix(domain, ".local") {
+		return false, "port forward not permitted"
 	}
 
 	tags := sshClient.sshServer.support.Blocklist.LookupDomain(domain)
@@ -4424,7 +4484,10 @@ func (sshClient *sshClient) establishedPortForward(
 	if !sshClient.allocatePortForward(portForwardType) {
 
 		portForwardLRU.CloseOldest()
-		log.WithTrace().Debug("closed LRU port forward")
+
+		if IsLogLevelDebug() {
+			log.WithTrace().Debug("closed LRU port forward")
+		}
 
 		state.availablePortForwardCond.L.Lock()
 		for !sshClient.allocatePortForward(portForwardType) {
@@ -4595,10 +4658,19 @@ func (sshClient *sshClient) handleTCPChannel(
 
 		// Resolve the hostname
 
-		log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
+		// PreferGo, equivalent to GODEBUG=netdns=go, is specified in order to
+		// avoid any cases where Go's resolver fails over to the cgo-based
+		// resolver (see https://pkg.go.dev/net#hdr-Name_Resolution). Such
+		// cases, if they resolve at all, may be expected to resolve to bogon
+		// IPs that won't be permitted; but the cgo invocation will consume
+		// an OS thread, which is a performance hit we can avoid.
+
+		if IsLogLevelDebug() {
+			log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
+		}
 
 		ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
-		IPs, err := (&net.Resolver{}).LookupIPAddr(ctx, hostToConnect)
+		IPs, err := (&net.Resolver{PreferGo: true}).LookupIPAddr(ctx, hostToConnect)
 		cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
 
 		resolveElapsedTime := time.Since(dialStartTime)
@@ -4715,7 +4787,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	remoteAddr := net.JoinHostPort(IP.String(), strconv.Itoa(portToConnect))
 
-	log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("dialing")
+	}
 
 	ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
 	fwdConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", remoteAddr)
@@ -4792,7 +4866,9 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	// Relay channel to forwarded connection.
 
-	log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(LogFields{"remoteAddr": remoteAddr}).Debug("relaying")
+	}
 
 	// TODO: relay errors to fwdChannel.Stderr()?
 	relayWaitGroup := new(sync.WaitGroup)
@@ -4807,7 +4883,9 @@ func (sshClient *sshClient) handleTCPChannel(
 		atomic.AddInt64(&bytesDown, bytes)
 		if err != nil && err != io.EOF {
 			// Debug since errors such as "connection reset by peer" occur during normal operation
-			log.WithTraceFields(LogFields{"error": err}).Debug("downstream TCP relay failed")
+			if IsLogLevelDebug() {
+				log.WithTraceFields(LogFields{"error": err}).Debug("downstream TCP relay failed")
+			}
 		}
 		// Interrupt upstream io.Copy when downstream is shutting down.
 		// TODO: this is done to quickly cleanup the port forward when
@@ -4819,7 +4897,9 @@ func (sshClient *sshClient) handleTCPChannel(
 		fwdConn, fwdChannel, make([]byte, SSH_TCP_PORT_FORWARD_COPY_BUFFER_SIZE))
 	atomic.AddInt64(&bytesUp, bytes)
 	if err != nil && err != io.EOF {
-		log.WithTraceFields(LogFields{"error": err}).Debug("upstream TCP relay failed")
+		if IsLogLevelDebug() {
+			log.WithTraceFields(LogFields{"error": err}).Debug("upstream TCP relay failed")
+		}
 	}
 	// Shutdown special case: fwdChannel will be closed and return EOF when
 	// the SSH connection is closed, but we need to explicitly close fwdConn
@@ -4829,9 +4909,11 @@ func (sshClient *sshClient) handleTCPChannel(
 
 	relayWaitGroup.Wait()
 
-	log.WithTraceFields(
-		LogFields{
-			"remoteAddr": remoteAddr,
-			"bytesUp":    atomic.LoadInt64(&bytesUp),
-			"bytesDown":  atomic.LoadInt64(&bytesDown)}).Debug("exiting")
+	if IsLogLevelDebug() {
+		log.WithTraceFields(
+			LogFields{
+				"remoteAddr": remoteAddr,
+				"bytesUp":    atomic.LoadInt64(&bytesUp),
+				"bytesDown":  atomic.LoadInt64(&bytesDown)}).Debug("exiting")
+	}
 }

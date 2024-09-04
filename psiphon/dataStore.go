@@ -1302,7 +1302,7 @@ func deleteServerEntryHelper(
 //
 // ScanServerEntries may be slow to execute, particularly for older devices
 // and/or very large server lists. Callers should avoid blocking on
-// ScanServerEntries where possible; and use the canel option to interrupt
+// ScanServerEntries where possible; and use the cancel option to interrupt
 // scans that are no longer required.
 func ScanServerEntries(callback func(*protocol.ServerEntry) bool) error {
 

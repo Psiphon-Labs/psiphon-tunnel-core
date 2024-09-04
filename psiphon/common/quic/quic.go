@@ -222,8 +222,10 @@ func Listen(
 		// The non-strict case where ok is true and logFields is not nil is
 		// ignored, and nothing is logged in that scenario.
 
+		strictMode := false
+
 		ok, logFields := clientRandomHistory.AddNew(
-			false, remoteAddr.String(), "client-hello-random", clientHelloRandom)
+			strictMode, remoteAddr.String(), "client-hello-random", clientHelloRandom)
 		if !ok && logFields != nil {
 			irregularTunnelLogger(
 				common.IPAddressFromAddr(remoteAddr),

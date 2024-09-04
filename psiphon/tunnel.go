@@ -1060,6 +1060,13 @@ func dialTunnel(
 			return false
 		},
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
+
+			// The remote address input isn't checked. In the case of fronted
+			// protocols, the immediate remote peer won't be the Psiphon
+			// server. In direct cases, the client has just dialed the IP
+			// address and expected public key both taken from the same
+			// trusted, signed server entry.
+
 			if !bytes.Equal(expectedPublicKey, publicKey.Marshal()) {
 				return errors.TraceNew("unexpected host public key")
 			}
@@ -1107,7 +1114,7 @@ func dialTunnel(
 	} else {
 		// For TUNNEL_PROTOCOL_SSH only, the server is expected to randomize
 		// its KEX; setting PeerKEXPRNGSeed will ensure successful negotiation
-		// betweem two randomized KEXes.
+		// between two randomized KEXes.
 		if dialParams.ServerEntry.SshObfuscatedKey != "" {
 			sshClientConfig.PeerKEXPRNGSeed, err = protocol.DeriveSSHServerKEXPRNGSeed(
 				dialParams.ServerEntry.SshObfuscatedKey)
@@ -1544,7 +1551,8 @@ func dialInproxy(
 	// TODO: include broker fronting dial parameters to be logged by the
 	// broker -- as successful parameters might not otherwise by logged via
 	// server_tunnel if the subsequent WebRTC dials fail.
-	params := getBaseAPIParameters(baseParametersNoDialParameters, config, nil)
+	params := getBaseAPIParameters(
+		baseParametersNoDialParameters, true, config, nil)
 
 	// The debugLogging flag is passed to both NoticeCommonLogger and to the
 	// inproxy package as well; skipping debug logs in the inproxy package,
@@ -1563,6 +1571,7 @@ func dialInproxy(
 		DialAddress:                  dialAddress,
 		RemoteAddrOverride:           remoteAddrOverride,
 		PackedDestinationServerEntry: dialParams.inproxyPackedSignedServerEntry,
+		MustUpgrade:                  config.OnInproxyMustUpgrade,
 	}
 
 	conn, err := inproxy.DialClient(ctx, clientConfig)

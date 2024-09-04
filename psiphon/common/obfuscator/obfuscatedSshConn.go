@@ -175,7 +175,10 @@ func NewObfuscatedSSHConn(
 		}
 
 	} else {
-		// NewServerObfuscator reads a seed message from conn
+		// NewServerObfuscator reads a seed message from conn.
+		//
+		// DisableStrictHistoryMode is not set, as legitimate clients never
+		// retry OSSH dials using a previous seed.
 		obfuscator, err = NewServerObfuscator(
 			&ObfuscatorConfig{
 				Keyword:           obfuscationKeyword,

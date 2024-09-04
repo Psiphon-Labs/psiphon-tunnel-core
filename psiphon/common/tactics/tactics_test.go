@@ -56,7 +56,6 @@ func TestTactics(t *testing.T) {
       "RequestObfuscatedKey" : "%s",
       "DefaultTactics" : {
         "TTL" : "1s",
-        "Probability" : %0.1f,
         "Parameters" : {
           "NetworkLatencyMultiplier" : %0.1f,
           "ServerPacketManipulationSpecs" : [{"Name": "test-packetman-spec", "PacketSpecs": [["TCP-flags S"]]}]
@@ -126,7 +125,6 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("GenerateKeys failed: %s", err)
 	}
 
-	tacticsProbability := 0.5
 	tacticsNetworkLatencyMultiplier := 2.0
 	tacticsConnectionWorkerPoolSize := 5
 	tacticsLimitTunnelProtocols := protocol.TunnelProtocols{"OSSH", "SSH"}
@@ -139,7 +137,6 @@ func TestTactics(t *testing.T) {
 		encodedRequestPublicKey,
 		encodedRequestPrivateKey,
 		encodedObfuscatedKey,
-		tacticsProbability,
 		tacticsNetworkLatencyMultiplier,
 		tacticsConnectionWorkerPoolSize,
 		jsonTacticsLimitTunnelProtocols,
@@ -300,10 +297,6 @@ func TestTactics(t *testing.T) {
 			t.Fatalf("NewParameters failed: %s", err)
 		}
 
-		if r.Tactics.Probability != tacticsProbability {
-			t.Fatalf("Unexpected probability: %f", r.Tactics.Probability)
-		}
-
 		// ValidationSkipOnError is set for Psiphon clients
 		counts, err := p.Set(r.Tag, parameters.ValidationSkipOnError, r.Tactics.Parameters)
 		if err != nil {
@@ -462,7 +455,6 @@ func TestTactics(t *testing.T) {
 		encodedRequestPublicKey,
 		encodedRequestPrivateKey,
 		encodedObfuscatedKey,
-		tacticsProbability,
 		tacticsNetworkLatencyMultiplier,
 		tacticsConnectionWorkerPoolSize,
 		jsonTacticsLimitTunnelProtocols,
@@ -689,7 +681,6 @@ func TestTactics(t *testing.T) {
 		"",
 		"",
 		"",
-		tacticsProbability,
 		tacticsNetworkLatencyMultiplier,
 		tacticsConnectionWorkerPoolSize,
 		jsonTacticsLimitTunnelProtocols,
@@ -741,8 +732,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
       "DefaultTactics" : {
-        "TTL" : "60s",
-        "Probability" : 1.0
+        "TTL" : "60s"
       },
       %%s
     }

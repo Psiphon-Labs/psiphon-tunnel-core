@@ -203,9 +203,10 @@ func (server *TLSTunnelServer) makeTLSTunnelConfig(sessionTicketKey string) (*tl
 
 			// strictMode is true as legitimate clients never retry TLS
 			// connections using a previous random value.
+			strictMode := true
 
 			ok, logFields := server.obfuscatorSeedHistory.AddNewWithTTL(
-				true,
+				strictMode,
 				clientIP,
 				"client-random",
 				clientRandom,

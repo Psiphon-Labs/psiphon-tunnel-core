@@ -378,8 +378,11 @@ const (
 	InproxyTunnelProtocolSelectionProbability          = "InproxyTunnelProtocolSelectionProbability"
 	InproxyAllBrokerPublicKeys                         = "InproxyAllBrokerPublicKeys"
 	InproxyBrokerSpecs                                 = "InproxyBrokerSpecs"
+	InproxyPersonalPairingBrokerSpecs                  = "InproxyPersonalPairingBrokerSpecs"
 	InproxyProxyBrokerSpecs                            = "InproxyProxyBrokerSpecs"
+	InproxyProxyPersonalPairingBrokerSpecs             = "InproxyProxyPersonalPairingBrokerSpecs"
 	InproxyClientBrokerSpecs                           = "InproxyClientBrokerSpecs"
+	InproxyClientPersonalPairingBrokerSpecs            = "InproxyClientPersonalPairingBrokerSpecs"
 	InproxyReplayBrokerDialParametersTTL               = "InproxyReplayBrokerDialParametersTTL"
 	InproxyReplayBrokerUpdateFrequency                 = "InproxyReplayBrokerUpdateFrequency"
 	InproxyReplayBrokerDialParametersProbability       = "InproxyReplayBrokerDialParametersProbability"
@@ -437,6 +440,9 @@ const (
 	InproxyProxyDestinationDialTimeout                 = "InproxyProxyDestinationDialTimeout"
 	InproxyPsiphonAPIRequestTimeout                    = "InproxyPsiphonAPIRequestTimeout"
 	InproxyProxyTotalActivityNoticePeriod              = "InproxyProxyTotalActivityNoticePeriod"
+	InproxyPersonalPairingConnectionWorkerPoolSize     = "InproxyPersonalPairingConnectionWorkerPoolSize"
+	InproxyClientDialRateLimitQuantity                 = "InproxyClientDialRateLimitQuantity"
+	InproxyClientDialRateLimitInterval                 = "InproxyClientDialRateLimitInterval"
 
 	// Retired parameters
 
@@ -873,8 +879,11 @@ var defaultParameters = map[string]struct {
 	InproxyTunnelProtocolSelectionProbability:          {value: 0.5, minimum: 0.0},
 	InproxyAllBrokerPublicKeys:                         {value: []string{}, flags: serverSideOnly},
 	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
+	InproxyPersonalPairingBrokerSpecs:                  {value: InproxyBrokerSpecsValue{}},
 	InproxyProxyBrokerSpecs:                            {value: InproxyBrokerSpecsValue{}},
+	InproxyProxyPersonalPairingBrokerSpecs:             {value: InproxyBrokerSpecsValue{}},
 	InproxyClientBrokerSpecs:                           {value: InproxyBrokerSpecsValue{}},
+	InproxyClientPersonalPairingBrokerSpecs:            {value: InproxyBrokerSpecsValue{}},
 	InproxyReplayBrokerDialParametersTTL:               {value: 24 * time.Hour, minimum: time.Duration(0)},
 	InproxyReplayBrokerUpdateFrequency:                 {value: 5 * time.Minute, minimum: time.Duration(0)},
 	InproxyReplayBrokerDialParametersProbability:       {value: 1.0, minimum: 0.0},
@@ -888,7 +897,7 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs: {value: []string{}, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferLimitEntryCount:           {value: 10, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitQuantity:         {value: 50, minimum: 0, flags: serverSideOnly},
-	InproxyBrokerMatcherOfferRateLimitInterval:         {value: 1 * time.Minute, minimum: time.Duration(0)},
+	InproxyBrokerMatcherOfferRateLimitInterval:         {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerProxyAnnounceTimeout:                  {value: 2 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerPendingServerRequestsTTL:              {value: 60 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
@@ -932,6 +941,9 @@ var defaultParameters = map[string]struct {
 	InproxyProxyDestinationDialTimeout:                 {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyPsiphonAPIRequestTimeout:                    {value: 10 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	InproxyProxyTotalActivityNoticePeriod:              {value: 5 * time.Minute, minimum: 1 * time.Second},
+	InproxyPersonalPairingConnectionWorkerPoolSize:     {value: 2, minimum: 1},
+	InproxyClientDialRateLimitQuantity:                 {value: 10, minimum: 0},
+	InproxyClientDialRateLimitInterval:                 {value: 1 * time.Minute, minimum: time.Duration(0)},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
