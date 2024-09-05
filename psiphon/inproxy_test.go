@@ -78,11 +78,11 @@ func runInproxyBrokerDialParametersTest() error {
 	publicKey, _ := privateKey.GetPublicKey()
 	obfuscationSecret, _ := inproxy.GenerateRootObfuscationSecret()
 	brokerSpecs := []*parameters.InproxyBrokerSpec{
-		&parameters.InproxyBrokerSpec{
+		{
 			BrokerPublicKey:             publicKey.String(),
 			BrokerRootObfuscationSecret: obfuscationSecret.String(),
 			BrokerFrontingSpecs: []*parameters.FrontingSpec{
-				&parameters.FrontingSpec{
+				{
 					FrontingProviderID: prng.HexString(8),
 					Addresses:          []string{addressRegex},
 					VerifyServerName:   "example.org",

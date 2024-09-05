@@ -521,7 +521,7 @@ func LoadConfigMigrateTest(oslDirChildrenPreMigration []FileTree, oslDirChildren
 	// The set of expected file paths and set of actual  file paths should be
 	// identical.
 
-	for k, _ := range expectedTestDirectoryFilePaths {
+	for k := range expectedTestDirectoryFilePaths {
 		_, ok := testDirectoryFilePaths[k]
 		if ok {
 			// Prevent redundant checks
@@ -531,7 +531,7 @@ func LoadConfigMigrateTest(oslDirChildrenPreMigration []FileTree, oslDirChildren
 		}
 	}
 
-	for k, _ := range testDirectoryFilePaths {
+	for k := range testDirectoryFilePaths {
 		if _, ok := expectedTestDirectoryFilePaths[k]; !ok {
 			suite.T().Errorf("%s in directory but not expected", k)
 		}

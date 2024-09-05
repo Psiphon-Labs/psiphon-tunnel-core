@@ -611,7 +611,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		// at most one meek tunnel protocol to be configured so all
 		// connections to the broker use the same, unambiguous instance.
 		meekServerCount := 0
-		for tunnelProtocol, _ := range config.TunnelProtocolPorts {
+		for tunnelProtocol := range config.TunnelProtocolPorts {
 			if protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
 				meekServerCount += 1
 			}
@@ -627,7 +627,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
-	for tunnelProtocol, _ := range config.TunnelProtocolPorts {
+	for tunnelProtocol := range config.TunnelProtocolPorts {
 		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
 			return nil, errors.Tracef("Unsupported tunnel protocol: %s", tunnelProtocol)
 		}
