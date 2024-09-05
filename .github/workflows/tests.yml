@@ -157,8 +157,8 @@ jobs:
         if: ${{ matrix.test-type == 'code-vetting' }}
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
-          if [ "$(gofmt -s -l ./psiphon | wc -l)" -gt 0 ]; then
-            gofmt -s -l ./psiphon
+          if [ "$(gofmt -s -l ./psiphon ./ClientLibrary ./ConsoleClient ./MobileLibrary/psi ./Server | wc -l)" -gt 0 ]; then
+            gofmt -s -l ./psiphon ./ClientLibrary ./ConsoleClient ./MobileLibrary/psi ./Server
             exit 1
           fi
 
