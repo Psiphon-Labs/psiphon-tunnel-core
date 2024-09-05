@@ -991,6 +991,16 @@ func dialTunnel(
 			return nil, errors.Trace(err)
 		}
 
+	} else if protocol.TunnelProtocolUsesShadowsocks(dialParams.TunnelProtocol) {
+
+		dialConn, err = DialShadowsocksTunnel(
+			ctx,
+			dialParams.GetShadowsocksConfig(),
+		)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
 	} else {
 
 		// Use NewTCPDialer and don't use DialTCP directly, to ensure that

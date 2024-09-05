@@ -205,6 +205,17 @@ func TestTLSOSSH(t *testing.T) {
 		})
 }
 
+func TestShadowsocks(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:       "SHADOWSOCKS-SSH",
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+		})
+}
+
 func TestUnfrontedMeek(t *testing.T) {
 	runServer(t,
 		&runServerConfig{

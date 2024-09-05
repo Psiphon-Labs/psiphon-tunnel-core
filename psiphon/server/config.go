@@ -130,7 +130,7 @@ type Config struct {
 	// "SSH", "OSSH", "TLS-OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
 	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
-	// "TAPDANCE-OSSH", abd "CONJURE-OSSH".
+	// "TAPDANCE-OSSH", "CONJURE-OSSH", and "SHADOWSOCKS-SSH".
 	TunnelProtocolPorts map[string]int
 
 	// TunnelProtocolPassthroughAddresses specifies passthrough addresses to be
@@ -187,6 +187,8 @@ type Config struct {
 	// SSH protocol. The same secret key is used for all protocols,
 	// run by this server instance, which use Obfuscated SSH.
 	ObfuscatedSSHKey string
+
+	ShadowsocksKey string
 
 	// MeekCookieEncryptionPrivateKey is the NaCl private key used
 	// to decrypt meek cookie payload sent from clients. The same
@@ -966,6 +968,17 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	}
 	obfuscatedSSHKey := hex.EncodeToString(obfuscatedSSHKeyBytes)
 
+	// Shadowsocks config
+
+	// TODO: assuming shadowsocks.NewEncryptionKey is deterministic for now
+	shadowsocksKey := "test1234"
+
+	// TODO: use proper secret text
+	// shadowsocksKey, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, "test1234")
+	// if err != nil {
+	// 	return nil, nil, nil, nil, nil, errors.Trace(err)
+	// }
+
 	// Meek config
 
 	var meekCookieEncryptionPublicKey, meekCookieEncryptionPrivateKey, meekObfuscatedKey string
@@ -1056,6 +1069,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SSHServerVersion:                   sshServerVersion,
 		SSHUserName:                        sshUserName,
 		SSHPassword:                        sshPassword,
+		ShadowsocksKey:                     shadowsocksKey,
 		ObfuscatedSSHKey:                   obfuscatedSSHKey,
 		TunnelProtocolPorts:                params.TunnelProtocolPorts,
 		TunnelProtocolPassthroughAddresses: params.TunnelProtocolPassthroughAddresses,
@@ -1207,8 +1221,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	// - Only one meek port may be specified per server entry.
 	// - Neither fronted meek nor Conjuure protocols are supported here.
 
-	var sshPort, obfuscatedSSHPort, meekPort, obfuscatedSSHQUICPort, tlsOSSHPort int
-	var inproxySSHPort, inproxyOSSHPort, inproxyQUICPort, inproxyMeekPort, inproxyTlsOSSHPort int
+	var sshPort, obfuscatedSSHPort, meekPort, obfuscatedSSHQUICPort, tlsOSSHPort, shadowsocksSSHPort int
+	var inproxySSHPort, inproxyOSSHPort, inproxyQUICPort, inproxyMeekPort, inproxyTlsOSSHPort, inproxyShadowsocksPort int
 
 	for tunnelProtocol, port := range params.TunnelProtocolPorts {
 
@@ -1226,6 +1240,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 				meekPort = port
+			case protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_SSH:
+				shadowsocksSSHPort = port
 			}
 		} else {
 			switch protocol.TunnelProtocolMinusInproxy(tunnelProtocol) {
@@ -1241,6 +1257,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 				inproxyMeekPort = port
+			case protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_SSH:
+				inproxyShadowsocksPort = port
 			}
 		}
 	}
@@ -1260,6 +1278,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SshHostKey:                          base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
 		SshObfuscatedPort:                   obfuscatedSSHPort,
 		SshObfuscatedQUICPort:               obfuscatedSSHQUICPort,
+		SshShadowsocksKey:                   shadowsocksKey,
+		SshShadowsocksPort:                  shadowsocksSSHPort,
 		LimitQUICVersions:                   params.LimitQUICVersions,
 		SshObfuscatedKey:                    obfuscatedSSHKey,
 		Capabilities:                        capabilities,
@@ -1282,6 +1302,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		InproxyQUICPort:                     inproxyQUICPort,
 		InproxyMeekPort:                     inproxyMeekPort,
 		InproxyTlsOSSHPort:                  inproxyTlsOSSHPort,
+		InproxyShadowsocksPort:              inproxyShadowsocksPort,
 	}
 
 	if params.ServerEntrySignaturePublicKey != "" {

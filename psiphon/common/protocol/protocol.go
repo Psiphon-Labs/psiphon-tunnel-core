@@ -45,6 +45,7 @@ const (
 	TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH = "FRONTED-MEEK-QUIC-OSSH"
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH          = "TAPDANCE-OSSH"
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH           = "CONJURE-OSSH"
+	TUNNEL_PROTOCOL_SHADOWSOCKS_SSH                  = "SHADOWSOCKS-SSH"
 
 	FRONTING_TRANSPORT_HTTPS = "FRONTED-HTTPS"
 	FRONTING_TRANSPORT_HTTP  = "FRONTED-HTTP"
@@ -198,6 +199,7 @@ var SupportedTunnelProtocols = TunnelProtocols{
 	TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 	TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
+	TUNNEL_PROTOCOL_SHADOWSOCKS_SSH,
 }
 
 var DefaultDisabledTunnelProtocols = TunnelProtocols{
@@ -355,6 +357,11 @@ func TunnelProtocolUsesConjure(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH
 }
 
+func TunnelProtocolUsesShadowsocks(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
+	return protocol == TUNNEL_PROTOCOL_SHADOWSOCKS_SSH
+}
+
 func TunnelProtocolIsResourceIntensive(protocol string) bool {
 	return TunnelProtocolUsesMeek(protocol) ||
 		TunnelProtocolUsesQUIC(protocol) ||
@@ -372,7 +379,8 @@ func TunnelProtocolIsCompatibleWithFragmentor(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP ||
-		protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH
+		protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_SHADOWSOCKS_SSH
 }
 
 func TunnelProtocolIsDirect(protocol string) bool {
@@ -382,7 +390,8 @@ func TunnelProtocolIsDirect(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
-		protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH
+		protocol == TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH ||
+		protocol == TUNNEL_PROTOCOL_SHADOWSOCKS_SSH
 }
 
 func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {
@@ -419,7 +428,8 @@ func TunnelProtocolMayUseServerPacketManipulation(protocol string) bool {
 		protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK ||
 		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS ||
-		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET
+		protocol == TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET ||
+		protocol == TUNNEL_PROTOCOL_SHADOWSOCKS_SSH
 }
 
 func TunnelProtocolMayUseClientBPF(protocol string) bool {

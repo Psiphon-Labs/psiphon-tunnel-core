@@ -11,6 +11,11 @@ filippo.io/keygen
 # github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96
 ## explicit
 github.com/AndreasBriese/bbloom
+# github.com/Jigsaw-Code/outline-sdk v0.0.16
+## explicit; go 1.20
+github.com/Jigsaw-Code/outline-sdk/internal/slicepool
+github.com/Jigsaw-Code/outline-sdk/transport
+github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks
 # github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 ## explicit
 github.com/Psiphon-Inc/rotate-safe-writer
@@ -450,6 +455,9 @@ github.com/ryanuber/go-glob
 # github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507
 ## explicit
 github.com/sergeyfrolov/bsbuffer
+# github.com/shadowsocks/go-shadowsocks2 v0.1.5
+## explicit; go 1.16
+github.com/shadowsocks/go-shadowsocks2/socks
 # github.com/shirou/gopsutil/v4 v4.24.5
 ## explicit; go 1.18
 github.com/shirou/gopsutil/v4/common

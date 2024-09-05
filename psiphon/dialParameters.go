@@ -31,6 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Jigsaw-Code/outline-sdk/transport"
+	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -1314,7 +1316,8 @@ func MakeDialParameters(
 		protocol.TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH,
 		protocol.TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
 		protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
-		protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH:
+		protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
+		protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_SSH:
 
 		dialParams.DirectDialAddress = net.JoinHostPort(serverEntry.IpAddress, dialParams.DialPortNumber)
 
@@ -1704,6 +1707,23 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 		// TLS-OSSH over the meek-https port.
 		ObfuscatedKey:         dialParams.ServerEntry.MeekObfuscatedKey,
 		ObfuscatorPaddingSeed: dialParams.TLSOSSHObfuscatorPaddingSeed,
+	}
+}
+
+func (dialParams *DialParameters) GetShadowsocksConfig() *ShadowsockConfig {
+
+	key, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, dialParams.ServerEntry.SshShadowsocksKey)
+	if err != nil {
+		// TODO: parse key in MakeDialParameters
+		panic(err)
+	}
+
+	return &ShadowsockConfig{
+		endpoint: &transport.TCPEndpoint{
+			Address: dialParams.DirectDialAddress,
+			// Dialer:  net.Dialer{}, // TODO: pass in custom TLS dialer?
+		},
+		key: key,
 	}
 }
 

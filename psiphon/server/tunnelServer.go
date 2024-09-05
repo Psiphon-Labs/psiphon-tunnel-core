@@ -231,6 +231,11 @@ func (server *TunnelServer) Run() error {
 				if err != nil {
 					return errors.Trace(err)
 				}
+			} else if protocol.TunnelProtocolUsesShadowsocks(tunnelProtocol) {
+				listener, err = ListenShadowsocks(support, listener, support.Config.ShadowsocksKey)
+				if err != nil {
+					return errors.Trace(err)
+				}
 			}
 		}
 

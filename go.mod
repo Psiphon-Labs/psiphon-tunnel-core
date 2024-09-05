@@ -31,6 +31,7 @@ replace github.com/pion/webrtc/v3 => ./replace/webrtc
 
 require (
 	filippo.io/edwards25519 v1.1.0
+	github.com/Jigsaw-Code/outline-sdk v0.0.16
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
@@ -73,6 +74,7 @@ require (
 	github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
 	github.com/refraction-networking/gotapdance v1.7.10
 	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
+	github.com/shadowsocks/go-shadowsocks2 v0.1.5
 	github.com/shirou/gopsutil/v4 v4.24.5
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
