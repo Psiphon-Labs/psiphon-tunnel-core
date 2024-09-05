@@ -549,12 +549,12 @@ type FileTree struct {
 //
 // For example:
 //
-//   a
-//   ├── b
-//   │   ├── 1
-//   │   └── 2
-//   └── c
-//       └── 3
+//	a
+//	├── b
+//	│   ├── 1
+//	│   └── 2
+//	└── c
+//	    └── 3
 //
 // Will result in: ["a", "a/b", "a/b/1", "a/b/2", "a/c", "a/c/3"].
 func traverseFileTree(f func(node FileTree, nodePath string), basePath string, tree FileTree) {

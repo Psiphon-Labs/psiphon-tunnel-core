@@ -18,10 +18,8 @@
  */
 
 /*
-
 Package errors provides error wrapping helpers that add inline, single frame
 stack trace information to error messages.
-
 */
 package errors
 

@@ -64,12 +64,11 @@ type DNSResolver struct {
 // more than 5 seconds before the last Get(), which is similar to
 // frequencies in other implementations:
 //
-// - https://golang.org/src/net/dnsclient_unix.go,
-//   resolverConfig.tryUpdate: 5 seconds
+//   - https://golang.org/src/net/dnsclient_unix.go,
+//     resolverConfig.tryUpdate: 5 seconds
 //
-// - https://github.com/ambrop72/badvpn/blob/master/udpgw/udpgw.c,
-//   maybe_update_dns: 2 seconds
-//
+//   - https://github.com/ambrop72/badvpn/blob/master/udpgw/udpgw.c,
+//     maybe_update_dns: 2 seconds
 func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 
 	dns := &DNSResolver{

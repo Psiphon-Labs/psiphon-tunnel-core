@@ -20,426 +20,426 @@
 package psiphon
 
 import (
-    "encoding/json"
-    "io/ioutil"
-    "os"
-    "regexp"
-    "testing"
+	"encoding/json"
+	"io/ioutil"
+	"os"
+	"regexp"
+	"testing"
 
-    "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-    "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
-    "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
-    "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-    "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 )
 
 func TestInproxyComponents(t *testing.T) {
 
-    // This is a unit test of the in-proxy components internals, such as
-    // replay; actual in-proxy broker round trips are exercised in the
-    // psiphon/server end-to-end tests.
+	// This is a unit test of the in-proxy components internals, such as
+	// replay; actual in-proxy broker round trips are exercised in the
+	// psiphon/server end-to-end tests.
 
-    err := runInproxyBrokerDialParametersTest()
-    if err != nil {
-        t.Fatalf(errors.Trace(err).Error())
-    }
+	err := runInproxyBrokerDialParametersTest()
+	if err != nil {
+		t.Fatalf(errors.Trace(err).Error())
+	}
 
-    err = runInproxySTUNDialParametersTest()
-    if err != nil {
-        t.Fatalf(errors.Trace(err).Error())
-    }
+	err = runInproxySTUNDialParametersTest()
+	if err != nil {
+		t.Fatalf(errors.Trace(err).Error())
+	}
 
-    err = runInproxyNATStateTest()
-    if err != nil {
-        t.Fatalf(errors.Trace(err).Error())
-    }
+	err = runInproxyNATStateTest()
+	if err != nil {
+		t.Fatalf(errors.Trace(err).Error())
+	}
 
-    // TODO: test inproxyUDPConn multiplexed IPv6Synthesizer
+	// TODO: test inproxyUDPConn multiplexed IPv6Synthesizer
 }
 
 func runInproxyBrokerDialParametersTest() error {
 
-    testDataDirName, err := ioutil.TempDir("", "psiphon-inproxy-broker-test")
-    if err != nil {
-        return errors.Trace(err)
-    }
-    defer os.RemoveAll(testDataDirName)
+	testDataDirName, err := ioutil.TempDir("", "psiphon-inproxy-broker-test")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer os.RemoveAll(testDataDirName)
 
-    isProxy := false
-    propagationChannelID := prng.HexString(8)
-    sponsorID := prng.HexString(8)
-    networkID := "NETWORK1"
-    addressRegex := `[a-z0-9]{5,10}\.example\.org`
-    commonCompartmentID, _ := inproxy.MakeID()
-    personalCompartmentID, _ := inproxy.MakeID()
-    commonCompartmentIDs := []string{commonCompartmentID.String()}
-    personalCompartmentIDs := []string{personalCompartmentID.String()}
-    privateKey, _ := inproxy.GenerateSessionPrivateKey()
-    publicKey, _ := privateKey.GetPublicKey()
-    obfuscationSecret, _ := inproxy.GenerateRootObfuscationSecret()
-    brokerSpecs := []*parameters.InproxyBrokerSpec{
-        &parameters.InproxyBrokerSpec{
-            BrokerPublicKey:             publicKey.String(),
-            BrokerRootObfuscationSecret: obfuscationSecret.String(),
-            BrokerFrontingSpecs: []*parameters.FrontingSpec{
-                &parameters.FrontingSpec{
-                    FrontingProviderID: prng.HexString(8),
-                    Addresses:          []string{addressRegex},
-                    VerifyServerName:   "example.org",
-                    Host:               "example.org",
-                },
-            },
-        },
-    }
-    retainFailed := float64(0.0)
+	isProxy := false
+	propagationChannelID := prng.HexString(8)
+	sponsorID := prng.HexString(8)
+	networkID := "NETWORK1"
+	addressRegex := `[a-z0-9]{5,10}\.example\.org`
+	commonCompartmentID, _ := inproxy.MakeID()
+	personalCompartmentID, _ := inproxy.MakeID()
+	commonCompartmentIDs := []string{commonCompartmentID.String()}
+	personalCompartmentIDs := []string{personalCompartmentID.String()}
+	privateKey, _ := inproxy.GenerateSessionPrivateKey()
+	publicKey, _ := privateKey.GetPublicKey()
+	obfuscationSecret, _ := inproxy.GenerateRootObfuscationSecret()
+	brokerSpecs := []*parameters.InproxyBrokerSpec{
+		&parameters.InproxyBrokerSpec{
+			BrokerPublicKey:             publicKey.String(),
+			BrokerRootObfuscationSecret: obfuscationSecret.String(),
+			BrokerFrontingSpecs: []*parameters.FrontingSpec{
+				&parameters.FrontingSpec{
+					FrontingProviderID: prng.HexString(8),
+					Addresses:          []string{addressRegex},
+					VerifyServerName:   "example.org",
+					Host:               "example.org",
+				},
+			},
+		},
+	}
+	retainFailed := float64(0.0)
 
-    config := &Config{
-        DataRootDirectory:    testDataDirName,
-        PropagationChannelId: propagationChannelID,
-        SponsorId:            sponsorID,
-        NetworkID:            networkID,
-    }
-    err = config.Commit(false)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	config := &Config{
+		DataRootDirectory:    testDataDirName,
+		PropagationChannelId: propagationChannelID,
+		SponsorId:            sponsorID,
+		NetworkID:            networkID,
+	}
+	err = config.Commit(false)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    err = OpenDataStore(config)
-    if err != nil {
-        return errors.Trace(err)
-    }
-    defer CloseDataStore()
+	err = OpenDataStore(config)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer CloseDataStore()
 
-    manager := NewInproxyBrokerClientManager(config, isProxy)
+	manager := NewInproxyBrokerClientManager(config, isProxy)
 
-    // Test: no broker specs
+	// Test: no broker specs
 
-    _, _, err = manager.GetBrokerClient(networkID)
-    if err == nil {
-        return errors.TraceNew("unexpected success")
-    }
+	_, _, err = manager.GetBrokerClient(networkID)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
 
-    // Test: select broker and common compartment IDs
+	// Test: select broker and common compartment IDs
 
-    config = &Config{
-        DataRootDirectory:           testDataDirName,
-        PropagationChannelId:        propagationChannelID,
-        SponsorId:                   sponsorID,
-        NetworkID:                   networkID,
-        InproxyBrokerSpecs:          brokerSpecs,
-        InproxyCommonCompartmentIDs: commonCompartmentIDs,
-        InproxyReplayBrokerRetainFailedProbability: &retainFailed,
-    }
-    err = config.Commit(false)
-    if err != nil {
-        return errors.Trace(err)
-    }
-    config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
+	config = &Config{
+		DataRootDirectory:           testDataDirName,
+		PropagationChannelId:        propagationChannelID,
+		SponsorId:                   sponsorID,
+		NetworkID:                   networkID,
+		InproxyBrokerSpecs:          brokerSpecs,
+		InproxyCommonCompartmentIDs: commonCompartmentIDs,
+		InproxyReplayBrokerRetainFailedProbability: &retainFailed,
+	}
+	err = config.Commit(false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
 
-    manager = NewInproxyBrokerClientManager(config, isProxy)
+	manager = NewInproxyBrokerClientManager(config, isProxy)
 
-    brokerClient, brokerDialParams, err := manager.GetBrokerClient(networkID)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	brokerClient, brokerDialParams, err := manager.GetBrokerClient(networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    if !regexp.MustCompile(addressRegex).Copy().Match(
-        []byte(brokerDialParams.FrontingDialAddress)) {
-        return errors.TraceNew("unexpected FrontingDialAddress")
-    }
+	if !regexp.MustCompile(addressRegex).Copy().Match(
+		[]byte(brokerDialParams.FrontingDialAddress)) {
+		return errors.TraceNew("unexpected FrontingDialAddress")
+	}
 
-    if len(brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()) != 1 ||
-        brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()[0].String() !=
-            commonCompartmentID.String() {
-        return errors.TraceNew("unexpected compartment IDs")
-    }
+	if len(brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()) != 1 ||
+		brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()[0].String() !=
+			commonCompartmentID.String() {
+		return errors.TraceNew("unexpected compartment IDs")
+	}
 
-    _ = brokerDialParams.GetMetrics()
+	_ = brokerDialParams.GetMetrics()
 
-    // Test: replay on success
+	// Test: replay on success
 
-    previousFrontingDialAddress := brokerDialParams.FrontingDialAddress
-    previousTLSProfile := brokerDialParams.TLSProfile
+	previousFrontingDialAddress := brokerDialParams.FrontingDialAddress
+	previousTLSProfile := brokerDialParams.TLSProfile
 
-    roundTripper, err := brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripper()
-    if err != nil {
-        return errors.Trace(err)
-    }
+	roundTripper, err := brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripper()
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripperSucceeded(roundTripper)
+	brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripperSucceeded(roundTripper)
 
-    manager = NewInproxyBrokerClientManager(config, isProxy)
+	manager = NewInproxyBrokerClientManager(config, isProxy)
 
-    brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    if !brokerDialParams.isReplay {
-        return errors.TraceNew("unexpected non-replay")
-    }
+	if !brokerDialParams.isReplay {
+		return errors.TraceNew("unexpected non-replay")
+	}
 
-    if brokerDialParams.FrontingDialAddress != previousFrontingDialAddress {
-        return errors.TraceNew("unexpected replayed FrontingDialAddress")
-    }
+	if brokerDialParams.FrontingDialAddress != previousFrontingDialAddress {
+		return errors.TraceNew("unexpected replayed FrontingDialAddress")
+	}
 
-    if brokerDialParams.TLSProfile != previousTLSProfile {
-        return errors.TraceNew("unexpected replayed TLSProfile")
-    }
+	if brokerDialParams.TLSProfile != previousTLSProfile {
+		return errors.TraceNew("unexpected replayed TLSProfile")
+	}
 
-    _ = brokerDialParams.GetMetrics()
+	_ = brokerDialParams.GetMetrics()
 
-    // Test: manager's broker client and dial parameters reinitialized after
-    // network ID change
+	// Test: manager's broker client and dial parameters reinitialized after
+	// network ID change
 
-    previousBrokerClient := brokerClient
-    previousNetworkID := networkID
-    networkID = "NETWORK2"
-    config.networkIDGetter = newStaticNetworkGetter(networkID)
-    config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
+	previousBrokerClient := brokerClient
+	previousNetworkID := networkID
+	networkID = "NETWORK2"
+	config.networkIDGetter = newStaticNetworkGetter(networkID)
+	config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
 
-    brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    if brokerClient == previousBrokerClient {
-        return errors.TraceNew("unexpected brokerClient")
-    }
+	if brokerClient == previousBrokerClient {
+		return errors.TraceNew("unexpected brokerClient")
+	}
 
-    if brokerDialParams.isReplay {
-        return errors.TraceNew("unexpected replay")
-    }
+	if brokerDialParams.isReplay {
+		return errors.TraceNew("unexpected replay")
+	}
 
-    if brokerDialParams.FrontingDialAddress == previousFrontingDialAddress {
-        return errors.TraceNew("unexpected non-replayed FrontingDialAddress")
-    }
+	if brokerDialParams.FrontingDialAddress == previousFrontingDialAddress {
+		return errors.TraceNew("unexpected non-replayed FrontingDialAddress")
+	}
 
-    _ = brokerDialParams.GetMetrics()
+	_ = brokerDialParams.GetMetrics()
 
-    // Test: another replay after switch back to previous network ID
+	// Test: another replay after switch back to previous network ID
 
-    networkID = previousNetworkID
-    config.networkIDGetter = newStaticNetworkGetter(networkID)
+	networkID = previousNetworkID
+	config.networkIDGetter = newStaticNetworkGetter(networkID)
 
-    brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    if !brokerDialParams.isReplay {
-        return errors.TraceNew("unexpected non-replay")
-    }
+	if !brokerDialParams.isReplay {
+		return errors.TraceNew("unexpected non-replay")
+	}
 
-    if brokerDialParams.FrontingDialAddress != previousFrontingDialAddress {
-        return errors.TraceNew("unexpected replayed FrontingDialAddress")
-    }
+	if brokerDialParams.FrontingDialAddress != previousFrontingDialAddress {
+		return errors.TraceNew("unexpected replayed FrontingDialAddress")
+	}
 
-    if brokerDialParams.TLSProfile != previousTLSProfile {
-        return errors.TraceNew("unexpected replayed TLSProfile")
-    }
+	if brokerDialParams.TLSProfile != previousTLSProfile {
+		return errors.TraceNew("unexpected replayed TLSProfile")
+	}
 
-    _ = brokerDialParams.GetMetrics()
+	_ = brokerDialParams.GetMetrics()
 
-    // Test: clear replay
+	// Test: clear replay
 
-    roundTripper, err = brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripper()
-    if err != nil {
-        return errors.Trace(err)
-    }
+	roundTripper, err = brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripper()
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripperFailed(roundTripper)
+	brokerClient.GetBrokerDialCoordinator().BrokerClientRoundTripperFailed(roundTripper)
 
-    manager = NewInproxyBrokerClientManager(config, isProxy)
+	manager = NewInproxyBrokerClientManager(config, isProxy)
 
-    brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    if brokerDialParams.isReplay {
-        return errors.TraceNew("unexpected replay")
-    }
+	if brokerDialParams.isReplay {
+		return errors.TraceNew("unexpected replay")
+	}
 
-    if brokerDialParams.FrontingDialAddress == previousFrontingDialAddress {
-        return errors.TraceNew("unexpected non-replayed FrontingDialAddress")
-    }
+	if brokerDialParams.FrontingDialAddress == previousFrontingDialAddress {
+		return errors.TraceNew("unexpected non-replayed FrontingDialAddress")
+	}
 
-    _ = brokerDialParams.GetMetrics()
+	_ = brokerDialParams.GetMetrics()
 
-    // Test: no common compartment IDs sent when personal ID is set
+	// Test: no common compartment IDs sent when personal ID is set
 
-    config.InproxyClientPersonalCompartmentIDs = personalCompartmentIDs
-    config.InproxyProxyPersonalCompartmentIDs = personalCompartmentIDs
+	config.InproxyClientPersonalCompartmentIDs = personalCompartmentIDs
+	config.InproxyProxyPersonalCompartmentIDs = personalCompartmentIDs
 
-    manager = NewInproxyBrokerClientManager(config, isProxy)
+	manager = NewInproxyBrokerClientManager(config, isProxy)
 
-    brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    if len(brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()) != 0 ||
-        len(brokerClient.GetBrokerDialCoordinator().PersonalCompartmentIDs()) != 1 ||
-        brokerClient.GetBrokerDialCoordinator().PersonalCompartmentIDs()[0].String() !=
-            personalCompartmentID.String() {
-        return errors.TraceNew("unexpected compartment IDs")
-    }
+	if len(brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()) != 0 ||
+		len(brokerClient.GetBrokerDialCoordinator().PersonalCompartmentIDs()) != 1 ||
+		brokerClient.GetBrokerDialCoordinator().PersonalCompartmentIDs()[0].String() !=
+			personalCompartmentID.String() {
+		return errors.TraceNew("unexpected compartment IDs")
+	}
 
-    // Test: use persisted common compartment IDs
+	// Test: use persisted common compartment IDs
 
-    config = &Config{
-        PropagationChannelId: propagationChannelID,
-        SponsorId:            sponsorID,
-        NetworkID:            networkID,
-    }
-    config.InproxyBrokerSpecs = brokerSpecs
-    config.InproxyCommonCompartmentIDs = nil
-    err = config.Commit(false)
-    if err != nil {
-        return errors.Trace(err)
-    }
-    config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
+	config = &Config{
+		PropagationChannelId: propagationChannelID,
+		SponsorId:            sponsorID,
+		NetworkID:            networkID,
+	}
+	config.InproxyBrokerSpecs = brokerSpecs
+	config.InproxyCommonCompartmentIDs = nil
+	err = config.Commit(false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
 
-    manager = NewInproxyBrokerClientManager(config, isProxy)
+	manager = NewInproxyBrokerClientManager(config, isProxy)
 
-    brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    if len(brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()) != 1 ||
-        brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()[0].String() !=
-            commonCompartmentID.String() {
-        return errors.TraceNew("unexpected compartment IDs")
-    }
+	if len(brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()) != 1 ||
+		brokerClient.GetBrokerDialCoordinator().CommonCompartmentIDs()[0].String() !=
+			commonCompartmentID.String() {
+		return errors.TraceNew("unexpected compartment IDs")
+	}
 
-    _ = brokerDialParams.GetMetrics()
+	_ = brokerDialParams.GetMetrics()
 
-    return nil
+	return nil
 }
 
 func runInproxySTUNDialParametersTest() error {
 
-    testDataDirName, err := ioutil.TempDir("", "psiphon-inproxy-stun-test")
-    if err != nil {
-        return errors.Trace(err)
-    }
-    defer os.RemoveAll(testDataDirName)
+	testDataDirName, err := ioutil.TempDir("", "psiphon-inproxy-stun-test")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer os.RemoveAll(testDataDirName)
 
-    propagationChannelID := prng.HexString(8)
-    sponsorID := prng.HexString(8)
-    networkID := "NETWORK1"
-    stunServerAddresses := []string{"example.org"}
+	propagationChannelID := prng.HexString(8)
+	sponsorID := prng.HexString(8)
+	networkID := "NETWORK1"
+	stunServerAddresses := []string{"example.org"}
 
-    config := &Config{
-        DataRootDirectory:                 testDataDirName,
-        PropagationChannelId:              propagationChannelID,
-        SponsorId:                         sponsorID,
-        NetworkID:                         networkID,
-        InproxySTUNServerAddresses:        stunServerAddresses,
-        InproxySTUNServerAddressesRFC5780: stunServerAddresses,
-    }
-    err = config.Commit(false)
-    if err != nil {
-        return errors.Trace(err)
-    }
-    config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
+	config := &Config{
+		DataRootDirectory:                 testDataDirName,
+		PropagationChannelId:              propagationChannelID,
+		SponsorId:                         sponsorID,
+		NetworkID:                         networkID,
+		InproxySTUNServerAddresses:        stunServerAddresses,
+		InproxySTUNServerAddressesRFC5780: stunServerAddresses,
+	}
+	err = config.Commit(false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
 
-    p := config.GetParameters().Get()
-    defer p.Close()
+	p := config.GetParameters().Get()
+	defer p.Close()
 
-    dialParams, err := MakeInproxySTUNDialParameters(config, p, false)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	dialParams, err := MakeInproxySTUNDialParameters(config, p, false)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    _ = dialParams.GetMetrics()
+	_ = dialParams.GetMetrics()
 
-    dialParamsJSON, err := json.Marshal(dialParams)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	dialParamsJSON, err := json.Marshal(dialParams)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    var replayDialParams *InproxySTUNDialParameters
-    err = json.Unmarshal(dialParamsJSON, &replayDialParams)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	var replayDialParams *InproxySTUNDialParameters
+	err = json.Unmarshal(dialParamsJSON, &replayDialParams)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    replayDialParams.Prepare()
+	replayDialParams.Prepare()
 
-    _ = replayDialParams.GetMetrics()
+	_ = replayDialParams.GetMetrics()
 
-    return nil
+	return nil
 }
 
 func runInproxyNATStateTest() error {
 
-    propagationChannelID := prng.HexString(8)
-    sponsorID := prng.HexString(8)
-    networkID := "NETWORK1"
+	propagationChannelID := prng.HexString(8)
+	sponsorID := prng.HexString(8)
+	networkID := "NETWORK1"
 
-    config := &Config{
-        PropagationChannelId: propagationChannelID,
-        SponsorId:            sponsorID,
-        NetworkID:            networkID,
-    }
-    err := config.Commit(false)
-    if err != nil {
-        return errors.Trace(err)
-    }
+	config := &Config{
+		PropagationChannelId: propagationChannelID,
+		SponsorId:            sponsorID,
+		NetworkID:            networkID,
+	}
+	err := config.Commit(false)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-    manager := NewInproxyNATStateManager(config)
+	manager := NewInproxyNATStateManager(config)
 
-    // Test: set values stored and cached
+	// Test: set values stored and cached
 
-    manager.setNATType(networkID, inproxy.NATTypeSymmetric)
-    manager.setPortMappingTypes(networkID, inproxy.PortMappingTypes{inproxy.PortMappingTypeUPnP})
+	manager.setNATType(networkID, inproxy.NATTypeSymmetric)
+	manager.setPortMappingTypes(networkID, inproxy.PortMappingTypes{inproxy.PortMappingTypeUPnP})
 
-    if manager.getNATType(networkID) != inproxy.NATTypeSymmetric {
-        return errors.TraceNew("unexpected NAT type")
-    }
+	if manager.getNATType(networkID) != inproxy.NATTypeSymmetric {
+		return errors.TraceNew("unexpected NAT type")
+	}
 
-    portMappingTypes := manager.getPortMappingTypes(networkID)
-    if len(portMappingTypes) != 1 || portMappingTypes[0] != inproxy.PortMappingTypeUPnP {
-        return errors.TraceNew("unexpected port mapping types")
-    }
+	portMappingTypes := manager.getPortMappingTypes(networkID)
+	if len(portMappingTypes) != 1 || portMappingTypes[0] != inproxy.PortMappingTypeUPnP {
+		return errors.TraceNew("unexpected port mapping types")
+	}
 
-    // Test: set values ignored when network ID is changing
+	// Test: set values ignored when network ID is changing
 
-    otherNetworkID := "NETWORK2"
+	otherNetworkID := "NETWORK2"
 
-    manager.setNATType(otherNetworkID, inproxy.NATTypePortRestrictedCone)
-    manager.setPortMappingTypes(otherNetworkID, inproxy.PortMappingTypes{inproxy.PortMappingTypePMP})
+	manager.setNATType(otherNetworkID, inproxy.NATTypePortRestrictedCone)
+	manager.setPortMappingTypes(otherNetworkID, inproxy.PortMappingTypes{inproxy.PortMappingTypePMP})
 
-    if manager.getNATType(networkID) != inproxy.NATTypeSymmetric {
-        return errors.TraceNew("unexpected NAT type")
-    }
+	if manager.getNATType(networkID) != inproxy.NATTypeSymmetric {
+		return errors.TraceNew("unexpected NAT type")
+	}
 
-    portMappingTypes = manager.getPortMappingTypes(networkID)
-    if len(portMappingTypes) != 1 || portMappingTypes[0] != inproxy.PortMappingTypeUPnP {
-        return errors.TraceNew("unexpected port mapping types")
-    }
+	portMappingTypes = manager.getPortMappingTypes(networkID)
+	if len(portMappingTypes) != 1 || portMappingTypes[0] != inproxy.PortMappingTypeUPnP {
+		return errors.TraceNew("unexpected port mapping types")
+	}
 
-    // Test: reset
+	// Test: reset
 
-    networkID = "NETWORK2"
-    config.networkIDGetter = newStaticNetworkGetter(networkID)
+	networkID = "NETWORK2"
+	config.networkIDGetter = newStaticNetworkGetter(networkID)
 
-    manager.reset()
+	manager.reset()
 
-    if manager.networkID != networkID {
-        return errors.TraceNew("unexpected network ID")
-    }
+	if manager.networkID != networkID {
+		return errors.TraceNew("unexpected network ID")
+	}
 
-    if manager.getNATType(networkID) != inproxy.NATTypeUnknown {
-        return errors.TraceNew("unexpected NAT type")
-    }
+	if manager.getNATType(networkID) != inproxy.NATTypeUnknown {
+		return errors.TraceNew("unexpected NAT type")
+	}
 
-    if len(manager.getPortMappingTypes(networkID)) != 0 {
-        return errors.TraceNew("unexpected port mapping types")
-    }
+	if len(manager.getPortMappingTypes(networkID)) != 0 {
+		return errors.TraceNew("unexpected port mapping types")
+	}
 
-    return nil
+	return nil
 }

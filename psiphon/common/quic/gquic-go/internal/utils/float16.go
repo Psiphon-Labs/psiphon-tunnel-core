@@ -12,9 +12,10 @@ import (
 // bit) and denormals, but without signs, transfinites or fractions. Wire format
 // 16 bits (little-endian byte order) are split into exponent (high 5) and
 // mantissa (low 11) and decoded as:
-//   uint64_t value;
-//   if (exponent == 0) value = mantissa;
-//   else value = (mantissa | 1 << 11) << (exponent - 1)
+//
+//	uint64_t value;
+//	if (exponent == 0) value = mantissa;
+//	else value = (mantissa | 1 << 11) << (exponent - 1)
 const uFloat16ExponentBits = 5
 const uFloat16MaxExponent = (1 << uFloat16ExponentBits) - 2                                        // 30
 const uFloat16MantissaBits = 16 - uFloat16ExponentBits                                             // 11

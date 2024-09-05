@@ -29,7 +29,7 @@ func parseBlockedFrameLegacy(r *bytes.Reader, _ protocol.VersionNumber) (Frame, 
 	return &StreamBlockedFrame{StreamID: protocol.StreamID(streamID)}, nil
 }
 
-//Write writes a BLOCKED frame
+// Write writes a BLOCKED frame
 func (f *blockedFrameLegacy) Write(b *bytes.Buffer, _ protocol.VersionNumber) error {
 	b.WriteByte(0x05)
 	utils.BigEndian.WriteUint32(b, uint32(f.StreamID))
