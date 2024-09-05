@@ -65,7 +65,7 @@ func TestNTLMv2(t *testing.T) {
 	challengeMessageBytes, _ := hex.DecodeString("4e544c4d53535000020000000c000c003800000033828ae20123456789abcdef00000000000000002400240044000000060070170000000f53006500720076006500720002000c0044006f006d00610069006e0001000c0053006500720076006500720000000000")
 	challengeMessage, err := ParseChallengeMessage(challengeMessageBytes)
 	if err == nil {
-		challengeMessage.String()
+		_ = challengeMessage.String()
 	} else {
 		t.Errorf("Could not parse challenge message: %s", err)
 	}
@@ -100,7 +100,7 @@ func TestNTLMv2(t *testing.T) {
 
 	authenticateMessage, err := ParseAuthenticateMessage(authenticateMessageBytes, 2)
 	if err == nil {
-		authenticateMessage.String()
+		_ = authenticateMessage.String()
 	} else {
 		t.Errorf("Could not parse authenticate message: %s", err)
 	}
@@ -119,7 +119,7 @@ func TestNTLMv2(t *testing.T) {
 
 	// Have the server generate an initial challenge message
 	challenge, err := server.GenerateChallengeMessage()
-	challenge.String()
+	_ = challenge.String()
 
 	// Have the client process this server challenge message
 	client = new(V2ClientSession)

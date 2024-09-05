@@ -1081,7 +1081,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		err := RunServices(serverConfigJSON)
 		if err != nil {
 			// TODO: wrong goroutine for t.FatalNow()
-			t.Fatalf("error running server: %s", err)
+			t.Errorf("error running server: %s", err)
 		}
 	}()
 

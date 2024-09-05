@@ -36,7 +36,6 @@ limitations under the License.
 package regen
 
 import (
-	"encoding/hex"
 	"fmt"
 	"math"
 	"math/rand"
@@ -58,7 +57,7 @@ const (
 	MaxSupportedRepeatCount = 1000
 )
 
-func ExampleGenerate() {
+func ExampleGenerateString() {
 	pattern := "[ab]{5}"
 	bytes, _ := GenerateString(pattern)
 
@@ -92,22 +91,6 @@ func ExampleNewGenerator() {
 
 	// Output:
 	// Matches!
-}
-
-func ExampleByteModeGenerator() {
-	for i := 0; i < 100; i++ {
-		gen, err := NewGenerator(`([\x00-\x6a])\x00\x01\x02[\x00-\xff]{5}`, &GeneratorArgs{
-			ByteMode: true,
-		})
-		if err != nil {
-			panic(err)
-		}
-		x, err := gen.Generate()
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println(hex.EncodeToString(x))
-	}
 }
 
 func ExampleNewGenerator_perl() {

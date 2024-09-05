@@ -115,11 +115,8 @@ func discoverNATMapping(
 	response3Fields := parseSTUNMessage(response3)
 	if response3Fields.xorAddr.String() == response2Fields.xorAddr.String() {
 		return NATMappingAddressDependent, nil
-	} else {
-		return NATMappingAddressPortDependent, nil
 	}
-
-	return NATMappingUnknown, nil
+	return NATMappingAddressPortDependent, nil
 }
 
 // RFC5780: 4.4.  Determining NAT Filtering Behavior
