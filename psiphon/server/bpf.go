@@ -63,8 +63,6 @@ func newTCPListenerWithBPF(
 
 	if havePBFProgram {
 
-		programName = programName
-
 		// Tactics parameters validation ensures BPFProgramInstructions has len >= 1.
 		listenConfig.Control = func(network, address string, c syscall.RawConn) error {
 			var setSockOptError error
