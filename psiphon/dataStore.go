@@ -424,8 +424,6 @@ func StreamingStoreServerEntries(
 			n = 0
 		}
 	}
-
-	return nil
 }
 
 // ImportEmbeddedServerEntries loads, decodes, and stores a list of server

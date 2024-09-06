@@ -110,10 +110,10 @@ func TestTransformations(t *testing.T) {
 		SYN: true,
 		ACK: true,
 		Options: []layers.TCPOption{
-			layers.TCPOption{OptionType: layers.TCPOptionKindNop, OptionLength: 1},
-			layers.TCPOption{OptionType: layers.TCPOptionKindSACKPermitted, OptionLength: 2},
-			layers.TCPOption{OptionType: layers.TCPOptionKindSACK, OptionLength: 10, OptionData: bytes.Repeat([]byte{0}, 8)},
-			layers.TCPOption{OptionType: layers.TCPOptionKindTimestamps, OptionLength: 10, OptionData: bytes.Repeat([]byte{0}, 8)},
+			{OptionType: layers.TCPOptionKindNop, OptionLength: 1},
+			{OptionType: layers.TCPOptionKindSACKPermitted, OptionLength: 2},
+			{OptionType: layers.TCPOptionKindSACK, OptionLength: 10, OptionData: bytes.Repeat([]byte{0}, 8)},
+			{OptionType: layers.TCPOptionKindTimestamps, OptionLength: 10, OptionData: bytes.Repeat([]byte{0}, 8)},
 		},
 	}
 
@@ -219,12 +219,12 @@ repeatLoop:
 				// omitted.
 
 				expectedOptions := []layers.TCPOption{
-					layers.TCPOption{OptionType: layers.TCPOptionKindSACKPermitted, OptionLength: 2},
-					layers.TCPOption{OptionType: layers.TCPOptionKindSACK, OptionLength: 10, OptionData: bytes.Repeat([]byte{0xff}, 8)},
-					layers.TCPOption{OptionType: layers.TCPOptionKindTimestamps, OptionLength: 10, OptionData: bytes.Repeat([]byte{0xff}, 8)},
-					layers.TCPOption{OptionType: layers.TCPOptionKindMSS, OptionLength: 4, OptionData: bytes.Repeat([]byte{0xff}, 2)},
-					layers.TCPOption{OptionType: layers.TCPOptionKindWindowScale, OptionLength: 3, OptionData: bytes.Repeat([]byte{0xff}, 1)},
-					layers.TCPOption{OptionType: layers.TCPOptionKindEndList, OptionLength: 1},
+					{OptionType: layers.TCPOptionKindSACKPermitted, OptionLength: 2},
+					{OptionType: layers.TCPOptionKindSACK, OptionLength: 10, OptionData: bytes.Repeat([]byte{0xff}, 8)},
+					{OptionType: layers.TCPOptionKindTimestamps, OptionLength: 10, OptionData: bytes.Repeat([]byte{0xff}, 8)},
+					{OptionType: layers.TCPOptionKindMSS, OptionLength: 4, OptionData: bytes.Repeat([]byte{0xff}, 2)},
+					{OptionType: layers.TCPOptionKindWindowScale, OptionLength: 3, OptionData: bytes.Repeat([]byte{0xff}, 1)},
+					{OptionType: layers.TCPOptionKindEndList, OptionLength: 1},
 				}
 
 				if tcp.SrcPort != 0xffff ||

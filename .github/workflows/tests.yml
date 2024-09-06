@@ -16,7 +16,7 @@ jobs:
       matrix:
         os: [ "ubuntu" ]
         go: [ "1.22.4" ]
-        test-type: [ "detector", "coverage", "memory", "custom-build-tags" ]
+        test-type: [ "detector", "coverage", "memory", "custom-build-tags", "code-vetting" ]
 
     runs-on: ${{ matrix.os }}-latest
 
@@ -152,3 +152,39 @@ jobs:
           go build -a -v -tags "PSIPHON_DISABLE_QUIC"
           go build -a -v -tags "PSIPHON_DISABLE_GQUIC"
           go build -a -v -tags "PSIPHON_ENABLE_REFRACTION_NETWORKING"
+
+      - name: Check Go fmt
+        if: ${{ matrix.test-type == 'code-vetting' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          if [ "$(gofmt -s -l ./psiphon ./ClientLibrary ./ConsoleClient ./MobileLibrary/psi ./Server | wc -l)" -gt 0 ]; then
+            gofmt -s -l ./psiphon ./ClientLibrary ./ConsoleClient ./MobileLibrary/psi ./Server
+            exit 1
+          fi
+
+      - name: Check Go vet
+        if: ${{ matrix.test-type == 'code-vetting' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          go vet -tags "PSIPHON_ENABLE_INPROXY PSIPHON_ENABLE_REFRACTION_NETWORKING" ./psiphon/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi ./Server/...
+
+      # License check ignore cases:
+      #
+      # - github.com/Psiphon-Labs,github.com/Psiphon-Inc: Psiphon code with
+      #   GPL 3 license; any dependencies within (subtree or copy) must be
+      #   manually vetted
+      #
+      # - golang.org/x,filippo.io/edwards25519,github.com/klauspost/compress:
+      #   fail with "contains non-Go code that can't be inspected for further
+      #   dependencies"; manually vetted
+      #
+      # - github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu:
+      #   ISC and MPL-2.0 respectively; allowed for server only (there is an
+      #   extra pass, without this exclusion, over the main client packages)
+      #
+      - name: Check licenses
+        if: ${{ matrix.test-type == 'code-vetting' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          go run github.com/google/go-licenses@latest check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,golang.org/x,filippo.io/edwards25519,github.com/klauspost/compress,github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,MIT ./...
+          go run github.com/google/go-licenses@latest check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,golang.org/x,filippo.io/edwards25519,github.com/klauspost/compress --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,MIT ./psiphon ./psiphon/common/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi

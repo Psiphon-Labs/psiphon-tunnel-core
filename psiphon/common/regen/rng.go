@@ -23,9 +23,11 @@ This source seeds very quickly, and only uses a single variable, so concurrent
 modification by multiple goroutines is possible.
 
 To create a seeded source:
+
 	randSource := xorShift64Source(mySeed)
 
 To create a source with the default seed:
+
 	var randSource xorShift64Source
 */
 type xorShift64Source uint64

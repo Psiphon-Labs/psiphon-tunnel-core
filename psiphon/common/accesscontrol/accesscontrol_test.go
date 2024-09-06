@@ -75,7 +75,7 @@ func TestAuthorization(t *testing.T) {
 	// Test: invalid key ring
 
 	invalidKeyRing := &VerificationKeyRing{
-		Keys: []*VerificationKey{&VerificationKey{}},
+		Keys: []*VerificationKey{{}},
 	}
 
 	err = ValidateVerificationKeyRing(invalidKeyRing)
