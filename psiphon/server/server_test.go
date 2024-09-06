@@ -2114,12 +2114,15 @@ func checkExpectedServerTunnelLogFields(
 		return fmt.Errorf("unexpected host_id '%s'", fields["host_id"])
 	}
 
-	expectedRelayProtocol := runConfig.tunnelProtocol
+	tunnelProtocol := runConfig.tunnelProtocol
 	if runConfig.clientTunnelProtocol != "" {
-		expectedRelayProtocol = runConfig.clientTunnelProtocol
+		// In cases such as UNFRONTED-HTTPS-OSSH/TLS-OSSH demux,
+		// runConfig.tunnelProtocol is the server listening protocol and
+		// runConfig.clientTunnelProtocol is the actual tunnel protocol.
+		tunnelProtocol = runConfig.clientTunnelProtocol
 	}
 
-	if fields["relay_protocol"].(string) != expectedRelayProtocol {
+	if fields["relay_protocol"].(string) != tunnelProtocol {
 		return fmt.Errorf("unexpected relay_protocol '%s'", fields["relay_protocol"])
 	}
 
@@ -2238,7 +2241,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesObfuscatedSSH(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 
 		for _, name := range []string{
 			"padding",
@@ -2250,8 +2253,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) &&
-		(runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
+	if protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
 
 		for _, name := range []string{
 			"user_agent",
@@ -2275,7 +2277,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTP(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) {
 
 		for _, name := range []string{
 			"meek_host_header",
@@ -2294,7 +2296,7 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected meek_host_header '%s'", fields["meek_host_header"])
 		}
 
-		if !protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
+		if !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 			for _, name := range []string{
 				"meek_dial_ip_address",
 				"meek_resolved_ip_address",
@@ -2306,12 +2308,10 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) &&
-		(runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
+	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 
 		for _, name := range []string{
-			"tls_profile",
-			"tls_version",
+			"meek_tls_padding",
 			"meek_sni_server_name",
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
@@ -2324,7 +2324,7 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected meek_sni_server_name '%s'", fields["meek_sni_server_name"])
 		}
 
-		if !protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
+		if !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 			for _, name := range []string{
 				"meek_dial_ip_address",
 				"meek_resolved_ip_address",
@@ -2333,6 +2333,21 @@ func checkExpectedServerTunnelLogFields(
 				if fields[name] != nil {
 					return fmt.Errorf("unexpected field '%s'", name)
 				}
+			}
+		}
+	}
+
+	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) ||
+		protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+
+		for _, name := range []string{
+			"tls_profile",
+			"tls_version",
+			"tls_sent_ticket",
+			"tls_did_resume",
+		} {
+			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+				return fmt.Errorf("missing expected field '%s'", name)
 			}
 		}
 
@@ -2347,21 +2362,24 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) ||
-		protocol.TunnelProtocolUsesTLSOSSH(runConfig.tunnelProtocol) {
-
+	if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
 		for _, name := range []string{
-			"tls_sent_ticket",
-			"tls_did_resume",
+			"tls_padding",
+			"tls_ossh_sni_server_name",
+			"tls_ossh_transformed_host_name",
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
 			}
 		}
 
+		hostName := fields["tls_ossh_sni_server_name"].(string)
+		if regexp.MustCompile(testCustomHostNameRegex).FindString(hostName) != hostName {
+			return fmt.Errorf("unexpected tls_ossh_sni_server_name '%s'", fields["tls_ossh_sni_server_name"])
+		}
 	}
 
-	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
 
 		for _, name := range []string{
 			"quic_version",
@@ -2384,24 +2402,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesTLSOSSH(expectedRelayProtocol) {
-		for _, name := range []string{
-			"tls_padding",
-			"tls_ossh_sni_server_name",
-			"tls_ossh_transformed_host_name",
-		} {
-			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
-				return fmt.Errorf("missing expected field '%s'", name)
-			}
-		}
-
-		hostName := fields["tls_ossh_sni_server_name"].(string)
-		if regexp.MustCompile(testCustomHostNameRegex).FindString(hostName) != hostName {
-			return fmt.Errorf("unexpected tls_ossh_sni_server_name '%s'", fields["tls_ossh_sni_server_name"])
-		}
-	}
-
-	if protocol.TunnelProtocolUsesInproxy(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
 
 		for _, name := range []string{
 
