@@ -62,7 +62,10 @@ func Dial(
 	_ string,
 	_ *prng.Seed,
 	_ *transforms.ObfuscatorSeedTransformerParameters,
-	_ bool) (net.Conn, error) {
+	_ bool,
+	_ bool,
+	_ bool,
+	_ *common.TLSClientSessionCacheWrapper) (net.Conn, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }
@@ -87,7 +90,9 @@ func NewQUICTransporter(
 	_ string,
 	_ string,
 	_ *prng.Seed,
-	_ bool) (*QUICTransporter, error) {
+	_ bool,
+	_ bool,
+	_ *common.TLSClientSessionCacheWrapper) (*QUICTransporter, error) {
 
 	return nil, errors.TraceNew("operation is not enabled")
 }

@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/hex"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,7 +120,7 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 
 		// Dial with nonce transformer
 
-		_, _ = Dial(
+		_, err = Dial(
 			ctx,
 			packetConn,
 			serverAddress,
@@ -138,6 +139,13 @@ func runNonceTransformer(t *testing.T, quicVersion string) {
 			false, // Disable obfuscated PSK
 			common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "test"),
 		)
+
+		// A timeout (deadline exceeded) is expected since the stub server
+		// just reads the prefix and doesn't perform a QUIC handshake. Any
+		// other dial error is a failure.
+		if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+			return errors.Trace(err)
+		}
 
 		return nil
 	})

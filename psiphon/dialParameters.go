@@ -170,7 +170,7 @@ type DialParameters struct {
 
 	quicTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
 	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
-	
+
 	inproxyDialInitialized         bool                         `json:"-"`
 	inproxyBrokerClient            *inproxy.BrokerClient        `json:"-"`
 	inproxyBrokerDialParameters    *InproxyBrokerDialParameters `json:"-"`
