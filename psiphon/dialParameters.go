@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
@@ -43,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	utls "github.com/Psiphon-Labs/utls"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/net/bpf"
 )
@@ -130,6 +132,8 @@ type DialParameters struct {
 	QUICClientHelloSeed                      *prng.Seed
 	ObfuscatedQUICPaddingSeed                *prng.Seed
 	ObfuscatedQUICNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
+	QUICDialEarly                            bool
+	QUICUseObfuscatedPSK                     bool
 	QUICDisablePathMTUDiscovery              bool
 
 	ConjureCachedRegistrationTTL        time.Duration
@@ -164,6 +168,9 @@ type DialParameters struct {
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
 
+	quicTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
+	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
+	
 	inproxyDialInitialized         bool                         `json:"-"`
 	inproxyBrokerClient            *inproxy.BrokerClient        `json:"-"`
 	inproxyBrokerDialParameters    *InproxyBrokerDialParameters `json:"-"`
@@ -197,6 +204,8 @@ type DialParameters struct {
 func MakeDialParameters(
 	config *Config,
 	steeringIPCache *lrucache.Cache,
+	quicTLSClientSessionCache tls.ClientSessionCache,
+	tlsClientSessionCache utls.ClientSessionCache,
 	upstreamProxyErrorCallback func(error),
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
@@ -723,6 +732,20 @@ func MakeDialParameters(
 		protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration
 
+	if tlsClientSessionCache != nil && usingTLS {
+		sessionKey, err := serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		dialParams.tlsClientSessionCache = common.WrapUtlsClientSessionCache(tlsClientSessionCache, sessionKey)
+
+		if !isReplay {
+			// Remove the cache entry to make a fresh dial when !isReplay.
+			dialParams.tlsClientSessionCache.RemoveCacheEntry()
+		}
+	}
+
 	if (!isReplay || !replayTLSProfile) && usingTLS {
 
 		dialParams.SelectedTLSProfile = true
@@ -844,9 +867,34 @@ func MakeDialParameters(
 			}
 		}
 
+		// Coin-flip for obfuscated PSK use for non-fronted QUIC.
+		if !isFronted {
+			dialParams.QUICUseObfuscatedPSK = p.WeightedCoinFlip(parameters.QUICObfuscatedPSKProbability)
+		}
+
+		dialParams.QUICDialEarly = p.WeightedCoinFlip(parameters.QUICDialEarlyProbability)
+
 		dialParams.QUICDisablePathMTUDiscovery =
 			protocol.QUICVersionUsesPathMTUDiscovery(dialParams.QUICVersion) &&
 				p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
+	}
+
+	if quicTLSClientSessionCache != nil && protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+
+		sessionKey, err := serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		dialParams.quicTLSClientSessionCache = common.WrapClientSessionCache(
+			quicTLSClientSessionCache,
+			sessionKey)
+
+		if !isReplay {
+			// Remove the cache entry to make a fresh dial when !isReplay.
+			dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
+		}
+
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
@@ -1479,6 +1527,9 @@ func MakeDialParameters(
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
 			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
+			QUICDialEarly:                 dialParams.QUICDialEarly,
+			QUICTLSClientSessionCache:     dialParams.quicTLSClientSessionCache,
+			TLSClientSessionCache:         dialParams.tlsClientSessionCache,
 			QUICDisablePathMTUDiscovery:   dialParams.QUICDisablePathMTUDiscovery,
 			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
@@ -1546,6 +1597,9 @@ func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
 
 func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelConfig {
 
+	p := config.GetParameters().Get()
+	useObfuscatedPSK := p.WeightedCoinFlip(parameters.TLSTunnelObfuscatedPSKProbability)
+
 	// TLSTunnelConfig isn't pre-created in MakeDialParameters to avoid holding a long
 	// term reference to TLSTunnelConfig.Parameters.
 
@@ -1561,9 +1615,9 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 			NoDefaultTLSSessionID:    &dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed: dialParams.RandomizedTLSProfileSeed,
 			FragmentClientHello:      dialParams.TLSFragmentClientHello,
+			ClientSessionCache:       dialParams.tlsClientSessionCache,
 		},
-		// Obfuscated session tickets are not used because TLS-OSSH uses TLS 1.3.
-		UseObfuscatedSessionTickets: false,
+		UseObfuscatedSessionTickets: useObfuscatedPSK,
 		// Meek obfuscated key used to allow clients with legacy unfronted
 		// meek-https server entries, that have the passthrough capability, to
 		// connect with TLS-OSSH to the servers corresponding to those server
@@ -1659,6 +1713,18 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	if dialParams.steeringIPCacheKey != "" {
 		dialParams.steeringIPCache.Delete(dialParams.steeringIPCacheKey)
 	}
+
+	// Clear the TLS client session cache to avoid (potentially) reusing failed sessions for
+	// Meek, TLS-OSSH and QUIC connections.
+
+	if dialParams.quicTLSClientSessionCache != nil {
+		dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
+	}
+
+	if dialParams.tlsClientSessionCache != nil {
+		dialParams.tlsClientSessionCache.RemoveCacheEntry()
+	}
+
 }
 
 // ExchangedDialParameters represents the subset of DialParameters that is

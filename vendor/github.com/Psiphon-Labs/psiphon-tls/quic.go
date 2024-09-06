@@ -280,6 +280,13 @@ func (q *QUICConn) ConnectionState() ConnectionState {
 	return q.conn.ConnectionState()
 }
 
+// [Psiphon]
+// TLSConnectionMetrics returns metrics of interest about the connection
+// that are not available from ConnectionState.
+func (q *QUICConn) TLSConnectionMetrics() ConnectionMetrics {
+	return q.conn.ConnectionMetrics()
+}
+
 // SetTransportParameters sets the transport parameters to send to the peer.
 //
 // Server connections may delay setting the transport parameters until after

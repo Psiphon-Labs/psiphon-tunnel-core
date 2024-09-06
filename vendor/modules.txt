@@ -23,10 +23,10 @@ github.com/Psiphon-Labs/consistent
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240424193802-52b2602ec60c
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240824224428-ca6969e315a9
 ## explicit; go 1.21
 github.com/Psiphon-Labs/psiphon-tls
-# github.com/Psiphon-Labs/quic-go v0.0.0-20240424181006-45545f5e1536
+# github.com/Psiphon-Labs/quic-go v0.0.0-20240821052333-b6316b594e39
 ## explicit; go 1.21
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
@@ -44,12 +44,20 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
+# github.com/Psiphon-Labs/utls v1.1.1-0.20240821052800-443a34df921f
+## explicit; go 1.21
+github.com/Psiphon-Labs/utls
+github.com/Psiphon-Labs/utls/dicttls
+github.com/Psiphon-Labs/utls/internal/boring
+github.com/Psiphon-Labs/utls/internal/helper
+github.com/Psiphon-Labs/utls/internal/quicvarint
+github.com/Psiphon-Labs/utls/internal/quicvarint/protocol
 # github.com/alexbrainman/sspi v0.0.0-20210105120005-909beea2cc74
 ## explicit; go 1.13
 github.com/alexbrainman/sspi
 github.com/alexbrainman/sspi/internal/common
 github.com/alexbrainman/sspi/negotiate
-# github.com/andybalholm/brotli v1.0.5
+# github.com/andybalholm/brotli v1.0.6
 ## explicit; go 1.12
 github.com/andybalholm/brotli
 # github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
@@ -71,6 +79,48 @@ github.com/cespare/xxhash
 # github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 ## explicit
 github.com/cheekybits/genny/generic
+# github.com/cloudflare/circl v1.3.7
+## explicit; go 1.19
+github.com/cloudflare/circl/dh/x25519
+github.com/cloudflare/circl/dh/x448
+github.com/cloudflare/circl/ecc/goldilocks
+github.com/cloudflare/circl/ecc/p384
+github.com/cloudflare/circl/hpke
+github.com/cloudflare/circl/internal/conv
+github.com/cloudflare/circl/internal/sha3
+github.com/cloudflare/circl/kem
+github.com/cloudflare/circl/kem/hybrid
+github.com/cloudflare/circl/kem/kyber/kyber1024
+github.com/cloudflare/circl/kem/kyber/kyber512
+github.com/cloudflare/circl/kem/kyber/kyber768
+github.com/cloudflare/circl/math
+github.com/cloudflare/circl/math/fp25519
+github.com/cloudflare/circl/math/fp448
+github.com/cloudflare/circl/math/mlsbset
+github.com/cloudflare/circl/pke/kyber/internal/common
+github.com/cloudflare/circl/pke/kyber/internal/common/params
+github.com/cloudflare/circl/pke/kyber/kyber1024
+github.com/cloudflare/circl/pke/kyber/kyber1024/internal
+github.com/cloudflare/circl/pke/kyber/kyber512
+github.com/cloudflare/circl/pke/kyber/kyber512/internal
+github.com/cloudflare/circl/pke/kyber/kyber768
+github.com/cloudflare/circl/pke/kyber/kyber768/internal
+github.com/cloudflare/circl/pki
+github.com/cloudflare/circl/sign
+github.com/cloudflare/circl/sign/dilithium/internal/common
+github.com/cloudflare/circl/sign/dilithium/internal/common/params
+github.com/cloudflare/circl/sign/dilithium/mode2
+github.com/cloudflare/circl/sign/dilithium/mode2/internal
+github.com/cloudflare/circl/sign/dilithium/mode3
+github.com/cloudflare/circl/sign/dilithium/mode3/internal
+github.com/cloudflare/circl/sign/ed25519
+github.com/cloudflare/circl/sign/ed448
+github.com/cloudflare/circl/sign/eddilithium2
+github.com/cloudflare/circl/sign/eddilithium3
+github.com/cloudflare/circl/sign/schemes
+github.com/cloudflare/circl/simd/keccakf1600
+github.com/cloudflare/circl/xof
+github.com/cloudflare/circl/xof/k12
 # github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea
 ## explicit
 github.com/cognusion/go-cache-lru
@@ -166,8 +216,8 @@ github.com/jsimonetti/rtnetlink/internal/unix
 # github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 ## explicit
 github.com/kardianos/osext
-# github.com/klauspost/compress v1.16.7
-## explicit; go 1.18
+# github.com/klauspost/compress v1.17.4
+## explicit; go 1.19
 github.com/klauspost/compress
 github.com/klauspost/compress/fse
 github.com/klauspost/compress/huff0

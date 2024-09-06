@@ -575,6 +575,11 @@ func (s *stubCryptoSetup) ConnectionState() handshake.ConnectionState {
 	return handshake.ConnectionState{}
 }
 
+// [Psiphon]
+func (s *stubCryptoSetup) TLSConnectionMetrics() tls.ConnectionMetrics {
+	return tls.ConnectionMetrics{}
+}
+
 func (s *stubCryptoSetup) GetInitialOpener() (handshake.LongHeaderOpener, error) {
 	return s.initialOpener, nil
 }

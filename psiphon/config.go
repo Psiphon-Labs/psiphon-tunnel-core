@@ -924,6 +924,12 @@ type Config struct {
 	// LimitTunnelDialPortNumbers is for testing purposes.
 	LimitTunnelDialPortNumbers parameters.TunnelProtocolPortLists
 
+	// QUICDialEarlyProbability is for testing purposes.
+	QUICDialEarlyProbability *float64
+
+	// QUICObfuscatedPSKProbability is for testing purposes.
+	QUICObfuscatedPSKProbability *float64
+
 	// QUICDisablePathMTUDiscoveryProbability is for testing purposes.
 	QUICDisablePathMTUDiscoveryProbability *float64
 
@@ -969,6 +975,7 @@ type Config struct {
 	OSSHPrefixEnableFragmentor          *bool
 
 	// TLSTunnelTrafficShapingProbability and associated fields are for testing.
+	TLSTunnelObfuscatedPSKProbability  *float64
 	TLSTunnelTrafficShapingProbability *float64
 	TLSTunnelMinTLSPadding             *int
 	TLSTunnelMaxTLSPadding             *int
@@ -2246,6 +2253,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.LimitTunnelDialPortNumbers] = config.LimitTunnelDialPortNumbers
 	}
 
+	if config.QUICDialEarlyProbability != nil {
+		applyParameters[parameters.QUICDialEarlyProbability] = *config.QUICDialEarlyProbability
+	}
+
+	if config.QUICObfuscatedPSKProbability != nil {
+		applyParameters[parameters.QUICObfuscatedPSKProbability] = *config.QUICObfuscatedPSKProbability
+	}
+
 	if config.QUICDisablePathMTUDiscoveryProbability != nil {
 		applyParameters[parameters.QUICDisableClientPathMTUDiscoveryProbability] = *config.QUICDisablePathMTUDiscoveryProbability
 	}
@@ -2380,6 +2395,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.OSSHPrefixEnableFragmentor != nil {
 		applyParameters[parameters.OSSHPrefixEnableFragmentor] = *config.OSSHPrefixEnableFragmentor
+	}
+
+	if config.TLSTunnelObfuscatedPSKProbability != nil {
+		applyParameters[parameters.TLSTunnelObfuscatedPSKProbability] = *config.TLSTunnelObfuscatedPSKProbability
 	}
 
 	if config.TLSTunnelTrafficShapingProbability != nil {
@@ -3022,6 +3041,16 @@ func (config *Config) setDialParametersHash() {
 		hash.Write(encodedLimitTunnelDialPortNumbers)
 	}
 
+	if config.QUICDialEarlyProbability != nil {
+		hash.Write([]byte("QUICDialEarlyProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.QUICDialEarlyProbability)
+	}
+
+	if config.QUICObfuscatedPSKProbability != nil {
+		hash.Write([]byte("QUICObfuscatedPSKProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.QUICObfuscatedPSKProbability)
+	}
+
 	if config.QUICDisablePathMTUDiscoveryProbability != nil {
 		hash.Write([]byte("QUICDisablePathMTUDiscoveryProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.QUICDisablePathMTUDiscoveryProbability)
@@ -3206,6 +3235,11 @@ func (config *Config) setDialParametersHash() {
 	if config.OSSHPrefixEnableFragmentor != nil {
 		hash.Write([]byte("OSSHPrefixEnableFragmentor"))
 		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixEnableFragmentor)
+	}
+
+	if config.TLSTunnelObfuscatedPSKProbability != nil {
+		hash.Write([]byte("TLSTunnelObfuscatedPSKProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.TLSTunnelObfuscatedPSKProbability)
 	}
 
 	if config.TLSTunnelTrafficShapingProbability != nil {

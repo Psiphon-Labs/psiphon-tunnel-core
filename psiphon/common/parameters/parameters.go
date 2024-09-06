@@ -112,6 +112,8 @@ const (
 	LimitQUICVersionsProbability                       = "LimitQUICVersionsProbability"
 	LimitQUICVersions                                  = "LimitQUICVersions"
 	DisableFrontingProviderQUICVersions                = "DisableFrontingProviderQUICVersions"
+	QUICDialEarlyProbability                           = "QUICDialEarlyProbability"
+	QUICObfuscatedPSKProbability                       = "QUICObfuscatedPSKProbability"
 	QUICDisableClientPathMTUDiscoveryProbability       = "QUICDisableClientPathMTUDiscoveryProbability"
 	FragmentorProbability                              = "FragmentorProbability"
 	FragmentorLimitProtocols                           = "FragmentorLimitProtocols"
@@ -360,6 +362,7 @@ const (
 	OSSHPrefixSplitMaxDelay                            = "OSSHPrefixSplitMaxDelay"
 	OSSHPrefixEnableFragmentor                         = "OSSHPrefixEnableFragmentor"
 	ServerOSSHPrefixSpecs                              = "ServerOSSHPrefixSpecs"
+	TLSTunnelObfuscatedPSKProbability                  = "TLSTunnelObfuscatedPSKProbability"
 	TLSTunnelTrafficShapingProbability                 = "TLSTunnelTrafficShapingProbability"
 	TLSTunnelMinTLSPadding                             = "TLSTunnelMinTLSPadding"
 	TLSTunnelMaxTLSPadding                             = "TLSTunnelMaxTLSPadding"
@@ -524,6 +527,8 @@ var defaultParameters = map[string]struct {
 	LimitQUICVersionsProbability:                 {value: 1.0, minimum: 0.0},
 	LimitQUICVersions:                            {value: protocol.QUICVersions{}},
 	DisableFrontingProviderQUICVersions:          {value: protocol.LabeledQUICVersions{}},
+	QUICDialEarlyProbability:                     {value: 1.0, minimum: 0.0},
+	QUICObfuscatedPSKProbability:                 {value: 0.5, minimum: 0.0},
 	QUICDisableClientPathMTUDiscoveryProbability: {value: 0.0, minimum: 0.0},
 
 	FragmentorProbability:              {value: 0.5, minimum: 0.0},
@@ -848,6 +853,7 @@ var defaultParameters = map[string]struct {
 
 	// TLSTunnelMinTLSPadding/TLSTunnelMaxTLSPadding are subject to TLS server limitations.
 
+	TLSTunnelObfuscatedPSKProbability:  {value: 0.5, minimum: 0.0},
 	TLSTunnelTrafficShapingProbability: {value: 1.0, minimum: 0.0},
 	TLSTunnelMinTLSPadding:             {value: 0, minimum: 0},
 	TLSTunnelMaxTLSPadding:             {value: 0, minimum: 0},

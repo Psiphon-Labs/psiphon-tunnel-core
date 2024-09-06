@@ -933,7 +933,10 @@ func dialTunnel(
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatedQUICPaddingSeed,
 			dialParams.ObfuscatedQUICNonceTransformerParameters,
-			dialParams.QUICDisablePathMTUDiscovery)
+			dialParams.QUICDisablePathMTUDiscovery,
+			dialParams.QUICDialEarly,
+			dialParams.QUICUseObfuscatedPSK,
+			dialParams.quicTLSClientSessionCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

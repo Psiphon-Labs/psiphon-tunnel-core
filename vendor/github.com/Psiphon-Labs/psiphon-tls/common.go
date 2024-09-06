@@ -235,6 +235,15 @@ const (
 // include downgrade canaries even if it's using its highers supported version.
 var testingOnlyForceDowngradeCanary bool
 
+// [Psiphon]
+// ConnectionMetrics reprsents metrics of interest about the connection
+// that are not available from ConnectionState.
+type ConnectionMetrics struct {
+	// ClientSentTicket is true if the client has sent a TLS 1.2 session ticket
+	// or a TLS 1.3 PSK in the ClientHello successfully.
+	ClientSentTicket bool
+}
+
 // ConnectionState records basic TLS details about the connection.
 type ConnectionState struct {
 	// Version is the TLS version used by the connection (e.g. VersionTLS12).
@@ -667,6 +676,13 @@ type Config struct {
 	// testing or in combination with VerifyConnection or VerifyPeerCertificate.
 	InsecureSkipVerify bool
 
+	// [Psiphon]
+	// InsecureSkipTimeVerify controls whether a client verifies the server's
+	// certificate chain against time when loading a session.
+	// If InsecureSkipTimeVerify is true crypto/tls accepts the certificate
+	// even when it is expired.
+	InsecureSkipTimeVerify bool
+
 	// CipherSuites is a list of enabled TLS 1.0–1.2 cipher suites. The order of
 	// the list is ignored. Note that TLS 1.3 ciphersuites are not configurable.
 	//
@@ -902,6 +918,7 @@ func (c *Config) Clone() *Config {
 		ClientAuth:                  c.ClientAuth,
 		ClientCAs:                   c.ClientCAs,
 		InsecureSkipVerify:          c.InsecureSkipVerify,
+		InsecureSkipTimeVerify:      c.InsecureSkipTimeVerify,
 		CipherSuites:                c.CipherSuites,
 		PreferServerCipherSuites:    c.PreferServerCipherSuites,
 		SessionTicketsDisabled:      c.SessionTicketsDisabled,

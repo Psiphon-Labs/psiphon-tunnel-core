@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/bpf"
 )
 
@@ -529,6 +530,12 @@ func makeFrontedHTTPClient(
 		TransformedHostName:      meekTransformedHostName,
 		ClientTunnelProtocol:     effectiveTunnelProtocol,
 		NetworkLatencyMultiplier: networkLatencyMultiplier,
+		// TODO: Change hard-coded session key be something like FrontingProviderID + BrokerID.
+		// This is necessary once longer-term TLS caches are added.
+		// meekDialAddress, based on meekFrontingDialAddress has couple of issues. For some providers there's
+		// only a couple or even just one possible value, in other cases there are millions of possible values
+		// and cached values wont' be used as often as they ought to be.
+		TLSClientSessionCache: common.WrapUtlsClientSessionCache(utls.NewLRUClientSessionCache(0), meekDialAddress),
 	}
 
 	if !skipVerify {
@@ -733,8 +740,8 @@ func MakeUntunneledHTTPClient(
 		SkipVerify:                    skipVerify,
 		DisableSystemRootCAs:          disableSystemRootCAs,
 		TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
+		ClientSessionCache:            utls.NewLRUClientSessionCache(0),
 	}
-	tlsConfig.EnableClientSessionCache()
 
 	tlsDialer := NewCustomTLSDialer(tlsConfig)
 

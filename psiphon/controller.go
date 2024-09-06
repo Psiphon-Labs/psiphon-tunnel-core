@@ -34,6 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
@@ -43,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	utls "github.com/Psiphon-Labs/utls"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/time/rate"
 )
@@ -92,6 +94,8 @@ type Controller struct {
 	staggerMutex                            sync.Mutex
 	resolver                                *resolver.Resolver
 	steeringIPCache                         *lrucache.Cache
+	tlsClientSessionCache                   utls.ClientSessionCache
+	quicTLSClientSessionCache               tls.ClientSessionCache
 	inproxyProxyBrokerClientManager         *InproxyBrokerClientManager
 	inproxyClientBrokerClientManager        *InproxyBrokerClientManager
 	inproxyNATStateManager                  *InproxyNATStateManager
@@ -168,6 +172,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 			steeringIPCacheTTL,
 			1*time.Minute,
 			steeringIPCacheMaxEntries),
+
+		tlsClientSessionCache:     utls.NewLRUClientSessionCache(0),
+		quicTLSClientSessionCache: tls.NewLRUClientSessionCache(0),
 	}
 
 	// Initialize untunneledDialConfig, used by untunneled dials including
@@ -2557,6 +2564,8 @@ loop:
 		dialParams, err := MakeDialParameters(
 			controller.config,
 			controller.steeringIPCache,
+			controller.quicTLSClientSessionCache,
+			controller.tlsClientSessionCache,
 			upstreamProxyErrorCallback,
 			canReplay,
 			selectProtocol,
