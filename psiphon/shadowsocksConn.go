@@ -28,8 +28,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
+// TODO: do fields need to be exported for replay?
 type ShadowsockConfig struct {
-	endpoint *transport.TCPEndpoint
+	dialAddr string
 
 	key *shadowsocks.EncryptionKey
 }
@@ -38,26 +39,23 @@ type shadowsocksConn struct {
 	net.Conn
 }
 
-func DialShadowsocksTunnel(ctx context.Context, shadowsocksConfig *ShadowsockConfig) (*shadowsocksConn, error) {
+func DialShadowsocksTunnel(
+	ctx context.Context,
+	shadowsocksConfig *ShadowsockConfig,
+	dialConfig *DialConfig) (*shadowsocksConn, error) {
 
-	// Connects to ss server
-	// TODO: ss also supports UDP with NewPacketListener
-	d, err := shadowsocks.NewStreamDialer(shadowsocksConfig.endpoint, shadowsocksConfig.key)
+	conn, err := DialTCP(ctx, shadowsocksConfig.dialAddr, dialConfig)
 	if err != nil {
-		return nil, errors.TraceMsg(err, "failed to create StreamDialer")
+		return nil, errors.Trace(err)
 	}
 
-	// Connects to target endpoint beyond ss server. We can use a phony address
-	// here, which will be ignored on the server, and pass data through this
-	// Conn.
-	phonyTargetAddr := "phony.local:1111"
-	conn, err := d.DialStream(context.Background(), phonyTargetAddr)
-	if err != nil {
-		return nil, errors.TraceMsg(err, "StreamDialer.Dial failed")
-	}
-	// conn.SetReadDeadline(time.Now().Add(time.Second * 5))
+	// Based on shadowsocks.DialStream
+	// TODO: explicitly set SaltGenerator?
+	ssw := shadowsocks.NewWriter(conn, shadowsocksConfig.key)
+	ssr := shadowsocks.NewReader(conn, shadowsocksConfig.key)
+	ssConn := transport.WrapConn(conn.(*TCPConn).Conn.(*net.TCPConn), ssr, ssw)
 
 	return &shadowsocksConn{
-		Conn: conn,
+		Conn: ssConn,
 	}, nil
 }

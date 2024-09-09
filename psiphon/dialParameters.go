@@ -31,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -118,6 +117,8 @@ type DialParameters struct {
 	TLSOSSHTransformedSNIServerName bool
 	TLSOSSHSNIServerName            string
 	TLSOSSHObfuscatorPaddingSeed    *prng.Seed
+
+	ShadowsocksEncryptionKey *shadowsocks.EncryptionKey
 
 	SelectedUserAgent bool
 	UserAgent         string
@@ -625,6 +626,14 @@ func MakeDialParameters(
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
+		}
+	}
+
+	if !isReplay && protocol.TunnelProtocolUsesShadowsocks(dialParams.TunnelProtocol) {
+		// TODO: will ShadowsocksEncryptionKey work with replay?
+		dialParams.ShadowsocksEncryptionKey, err = shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, dialParams.ServerEntry.SshShadowsocksKey)
+		if err != nil {
+			return nil, errors.Trace(err)
 		}
 	}
 
@@ -1711,19 +1720,9 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 }
 
 func (dialParams *DialParameters) GetShadowsocksConfig() *ShadowsockConfig {
-
-	key, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, dialParams.ServerEntry.SshShadowsocksKey)
-	if err != nil {
-		// TODO: parse key in MakeDialParameters
-		panic(err)
-	}
-
 	return &ShadowsockConfig{
-		endpoint: &transport.TCPEndpoint{
-			Address: dialParams.DirectDialAddress,
-			// Dialer:  net.Dialer{}, // TODO: pass in custom TLS dialer?
-		},
-		key: key,
+		dialAddr: dialParams.DirectDialAddress,
+		key:      dialParams.ShadowsocksEncryptionKey,
 	}
 }
 

@@ -996,6 +996,7 @@ func dialTunnel(
 		dialConn, err = DialShadowsocksTunnel(
 			ctx,
 			dialParams.GetShadowsocksConfig(),
+			dialParams.GetDialConfig(),
 		)
 		if err != nil {
 			return nil, errors.Trace(err)

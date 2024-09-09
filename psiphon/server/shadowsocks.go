@@ -26,7 +26,6 @@ import (
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/shadowsocks/go-shadowsocks2/socks"
 )
 
 type ShadowsocksServer struct {
@@ -99,8 +98,7 @@ func (l *ShadowsocksListener) Accept() (net.Conn, error) {
 // ShadowsocksConn implements the net.Conn and common.MetricsSource interfaces.
 type ShadowsocksConn struct {
 	net.Conn
-	readTargetAddr bool // TODO: atomic?
-	server         *ShadowsocksServer
+	server *ShadowsocksServer
 }
 
 // NewShadowsocksConn initializes a new NewShadowsocksConn.
@@ -112,15 +110,6 @@ func NewShadowsocksConn(conn net.Conn, server *ShadowsocksServer) *ShadowsocksCo
 }
 
 func (conn *ShadowsocksConn) Read(b []byte) (int, error) {
-	// First read and discard target address
-	if !conn.readTargetAddr {
-		_, err := socks.ReadAddr(conn.Conn)
-		if err != nil {
-			return 0, errors.Trace(err)
-		}
-		// TODO: check target address is what we expect
-		conn.readTargetAddr = true
-	}
 	return conn.Conn.Read(b)
 }
 
