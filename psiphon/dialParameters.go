@@ -31,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -117,8 +116,6 @@ type DialParameters struct {
 	TLSOSSHTransformedSNIServerName bool
 	TLSOSSHSNIServerName            string
 	TLSOSSHObfuscatorPaddingSeed    *prng.Seed
-
-	ShadowsocksEncryptionKey *shadowsocks.EncryptionKey
 
 	SelectedUserAgent bool
 	UserAgent         string
@@ -626,14 +623,6 @@ func MakeDialParameters(
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-		}
-	}
-
-	if !isReplay && protocol.TunnelProtocolUsesShadowsocks(dialParams.TunnelProtocol) {
-		// TODO: will ShadowsocksEncryptionKey work with replay?
-		dialParams.ShadowsocksEncryptionKey, err = shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, dialParams.ServerEntry.SshShadowsocksKey)
-		if err != nil {
-			return nil, errors.Trace(err)
 		}
 	}
 
@@ -1326,7 +1315,7 @@ func MakeDialParameters(
 		protocol.TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH,
 		protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
 		protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
-		protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_SSH:
+		protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH:
 
 		dialParams.DirectDialAddress = net.JoinHostPort(serverEntry.IpAddress, dialParams.DialPortNumber)
 
@@ -1722,7 +1711,7 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 func (dialParams *DialParameters) GetShadowsocksConfig() *ShadowsockConfig {
 	return &ShadowsockConfig{
 		dialAddr: dialParams.DirectDialAddress,
-		key:      dialParams.ShadowsocksEncryptionKey,
+		key:      dialParams.ServerEntry.SshShadowsocksKey,
 	}
 }
 

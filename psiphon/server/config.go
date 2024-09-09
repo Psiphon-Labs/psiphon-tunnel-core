@@ -60,6 +60,7 @@ const (
 	SSH_PASSWORD_BYTE_LENGTH                            = 32
 	SSH_RSA_HOST_KEY_BITS                               = 2048
 	SSH_OBFUSCATED_KEY_BYTE_LENGTH                      = 32
+	SHADOWSOCKS_KEY_BYTE_LENGTH                         = 32
 	PEAK_UPSTREAM_FAILURE_RATE_MINIMUM_SAMPLE_SIZE      = 10
 	PERIODIC_GARBAGE_COLLECTION                         = 120 * time.Second
 	STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD = 20
@@ -130,7 +131,7 @@ type Config struct {
 	// "SSH", "OSSH", "TLS-OSSH", "UNFRONTED-MEEK-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
 	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
-	// "TAPDANCE-OSSH", "CONJURE-OSSH", and "SHADOWSOCKS-SSH".
+	// "TAPDANCE-OSSH", "CONJURE-OSSH", and "SHADOWSOCKS-OSSH".
 	TunnelProtocolPorts map[string]int
 
 	// TunnelProtocolPassthroughAddresses specifies passthrough addresses to be
@@ -188,6 +189,8 @@ type Config struct {
 	// run by this server instance, which use Obfuscated SSH.
 	ObfuscatedSSHKey string
 
+	// ShadowsocksKey is the secret key for use in the Shadowsocks
+	// protocol.
 	ShadowsocksKey string
 
 	// MeekCookieEncryptionPrivateKey is the NaCl private key used
@@ -970,14 +973,12 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	// Shadowsocks config
 
-	// TODO: assuming shadowsocks.NewEncryptionKey is deterministic for now
-	shadowsocksKey := "test1234"
-
-	// TODO: use proper secret text
-	// shadowsocksKey, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, "test1234")
-	// if err != nil {
-	// 	return nil, nil, nil, nil, nil, errors.Trace(err)
-	// }
+	// TODO: double check there are enough bytes of entropy
+	shadowsocksKeyBytes, err := common.MakeSecureRandomBytes(SHADOWSOCKS_KEY_BYTE_LENGTH)
+	if err != nil {
+		return nil, nil, nil, nil, nil, errors.Trace(err)
+	}
+	shadowsocksKey := hex.EncodeToString(shadowsocksKeyBytes)
 
 	// Meek config
 
@@ -1221,7 +1222,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	// - Only one meek port may be specified per server entry.
 	// - Neither fronted meek nor Conjuure protocols are supported here.
 
-	var sshPort, obfuscatedSSHPort, meekPort, obfuscatedSSHQUICPort, tlsOSSHPort, shadowsocksSSHPort int
+	var sshPort, obfuscatedSSHPort, meekPort, obfuscatedSSHQUICPort, tlsOSSHPort, shadowsocksPort int
 	var inproxySSHPort, inproxyOSSHPort, inproxyQUICPort, inproxyMeekPort, inproxyTlsOSSHPort, inproxyShadowsocksPort int
 
 	for tunnelProtocol, port := range params.TunnelProtocolPorts {
@@ -1240,8 +1241,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 				meekPort = port
-			case protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_SSH:
-				shadowsocksSSHPort = port
+			case protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH:
+				shadowsocksPort = port
 			}
 		} else {
 			switch protocol.TunnelProtocolMinusInproxy(tunnelProtocol) {
@@ -1257,7 +1258,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 				inproxyMeekPort = port
-			case protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_SSH:
+			case protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH:
 				inproxyShadowsocksPort = port
 			}
 		}
@@ -1279,7 +1280,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SshObfuscatedPort:                   obfuscatedSSHPort,
 		SshObfuscatedQUICPort:               obfuscatedSSHQUICPort,
 		SshShadowsocksKey:                   shadowsocksKey,
-		SshShadowsocksPort:                  shadowsocksSSHPort,
+		SshShadowsocksPort:                  shadowsocksPort,
 		LimitQUICVersions:                   params.LimitQUICVersions,
 		SshObfuscatedKey:                    obfuscatedSSHKey,
 		Capabilities:                        capabilities,

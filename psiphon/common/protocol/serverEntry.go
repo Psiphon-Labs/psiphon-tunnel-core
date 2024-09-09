@@ -754,7 +754,7 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 			TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 			return serverEntry.MeekServerPort, nil
 
-		case TUNNEL_PROTOCOL_SHADOWSOCKS_SSH:
+		case TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH:
 			return serverEntry.SshShadowsocksPort, nil
 		}
 
@@ -793,7 +793,7 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 			TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 			return serverEntry.InproxyMeekPort, nil
 
-		case TUNNEL_PROTOCOL_SHADOWSOCKS_SSH:
+		case TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH:
 			return serverEntry.InproxyShadowsocksPort, nil
 		}
 

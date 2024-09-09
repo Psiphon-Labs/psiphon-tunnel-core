@@ -28,12 +28,15 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
+// ShadowsocksServer tunnels TCP traffic (in the case of Psiphon, SSH traffic)
+// over Shadowsocks.
 type ShadowsocksServer struct {
 	support  *SupportServices
 	listener net.Listener
 	key      *shadowsocks.EncryptionKey
 }
 
+// ListenShadowsocks returns the listener of a new ShadowsocksServer.
 func ListenShadowsocks(
 	support *SupportServices,
 	listener net.Listener,
@@ -54,6 +57,7 @@ func NewShadowsocksServer(
 	listener net.Listener,
 	ssEncryptionKey string) (*ShadowsocksServer, error) {
 
+	// TODO: consider using other AEAD ciphers; client cipher needs to match.
 	key, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, ssEncryptionKey)
 	if err != nil {
 		return nil, errors.TraceMsg(err, "shadowsocks.NewEncryptionKey failed")
@@ -68,6 +72,8 @@ func NewShadowsocksServer(
 	return shadowsocksServer, nil
 }
 
+// ShadowsocksListener implements the net.Listener interface. Accept returns a
+// net.Conn which implements the common.MetricsSource interface.
 type ShadowsocksListener struct {
 	net.Listener
 	server *ShadowsocksServer

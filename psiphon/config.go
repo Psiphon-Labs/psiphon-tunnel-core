@@ -183,7 +183,7 @@ type Config struct {
 	// "UNFRONTED-MEEK-HTTPS-OSSH", "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
 	// "FRONTED-MEEK-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "TAPDANCE-OSSH", "CONJURE-OSSH", and
-	// "SHADOWSOCKS-SSH".
+	// "SHADOWSOCKS-OSSH".
 	// For the default, an empty list, all protocols are used.
 	LimitTunnelProtocols []string
 

@@ -28,21 +28,28 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
 
-// TODO: do fields need to be exported for replay?
+// ShadowsockConfig specifies the behavior of a shadowsocksConn.
 type ShadowsockConfig struct {
 	dialAddr string
-
-	key *shadowsocks.EncryptionKey
+	key      string
 }
 
+// shadowsocksConn is a network connection that tunnels net.Conn flows over Shadowsocks.
 type shadowsocksConn struct {
 	net.Conn
 }
 
+// DialShadowsocksTunnel returns an initialized Shadowsocks connection.
 func DialShadowsocksTunnel(
 	ctx context.Context,
 	shadowsocksConfig *ShadowsockConfig,
 	dialConfig *DialConfig) (*shadowsocksConn, error) {
+
+	// TODO: consider using other AEAD ciphers; server cipher needs to match.
+	key, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, shadowsocksConfig.key)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	conn, err := DialTCP(ctx, shadowsocksConfig.dialAddr, dialConfig)
 	if err != nil {
@@ -51,8 +58,9 @@ func DialShadowsocksTunnel(
 
 	// Based on shadowsocks.DialStream
 	// TODO: explicitly set SaltGenerator?
-	ssw := shadowsocks.NewWriter(conn, shadowsocksConfig.key)
-	ssr := shadowsocks.NewReader(conn, shadowsocksConfig.key)
+	ssw := shadowsocks.NewWriter(conn, key)
+	ssr := shadowsocks.NewReader(conn, key)
+	// TODO: is this cast correct/safe?
 	ssConn := transport.WrapConn(conn.(*TCPConn).Conn.(*net.TCPConn), ssr, ssw)
 
 	return &shadowsocksConn{
