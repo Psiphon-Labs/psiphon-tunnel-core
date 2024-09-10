@@ -195,6 +195,7 @@ type testWebRTCDialCoordinator struct {
 	webRTCAnswerTimeout             time.Duration
 	webRTCAwaitDataChannelTimeout   time.Duration
 	proxyDestinationDialTimeout     time.Duration
+	proxyRelayInactivityTimeout     time.Duration
 }
 
 func (t *testWebRTCDialCoordinator) NetworkID() string {
@@ -384,6 +385,12 @@ func (t *testWebRTCDialCoordinator) ProxyDestinationDialTimeout() time.Duration 
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.proxyDestinationDialTimeout
+}
+
+func (t *testWebRTCDialCoordinator) ProxyRelayInactivityTimeout() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.proxyRelayInactivityTimeout
 }
 
 type testLogger struct {

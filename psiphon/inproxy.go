@@ -1453,6 +1453,7 @@ type InproxyWebRTCDialInstance struct {
 	webRTCAnswerTimeout             time.Duration
 	awaitDataChannelTimeout         time.Duration
 	proxyDestinationDialTimeout     time.Duration
+	proxyRelayInactivityTimeout     time.Duration
 }
 
 // NewInproxyWebRTCDialInstance creates a new InproxyWebRTCDialInstance.
@@ -1543,8 +1544,8 @@ func NewInproxyWebRTCDialInstance(
 		webRTCDialParameters: webRTCDialParameters,
 
 		// discoverNAT is ignored by proxies, which always attempt discovery.
-		// webRTCAnswerTimeout and proxyDestinationDialTimeout are used only
-		// by proxies.
+		// webRTCAnswerTimeout, proxyDestinationDialTimeout, and
+		// proxyRelayInactivityTimeout are used only by proxies.
 
 		discoverNAT:                     p.WeightedCoinFlip(parameters.InproxyClientDiscoverNATProbability),
 		disableSTUN:                     disableSTUN,
@@ -1555,6 +1556,7 @@ func NewInproxyWebRTCDialInstance(
 		webRTCAnswerTimeout:             p.Duration(parameters.InproxyWebRTCAnswerTimeout),
 		awaitDataChannelTimeout:         awaitDataChannelTimeout,
 		proxyDestinationDialTimeout:     p.Duration(parameters.InproxyProxyDestinationDialTimeout),
+		proxyRelayInactivityTimeout:     p.Duration(parameters.InproxyProxyRelayInactivityTimeout),
 	}, nil
 }
 
@@ -1851,6 +1853,11 @@ func (w *InproxyWebRTCDialInstance) WebRTCAwaitDataChannelTimeout() time.Duratio
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) ProxyDestinationDialTimeout() time.Duration {
 	return w.proxyDestinationDialTimeout
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) ProxyRelayInactivityTimeout() time.Duration {
+	return w.proxyRelayInactivityTimeout
 }
 
 // InproxySTUNDialParameters is a set of STUN dial parameters.

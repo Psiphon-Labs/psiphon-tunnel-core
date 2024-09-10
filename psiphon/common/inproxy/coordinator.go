@@ -336,4 +336,5 @@ type WebRTCDialCoordinator interface {
 	WebRTCAnswerTimeout() time.Duration
 	WebRTCAwaitDataChannelTimeout() time.Duration
 	ProxyDestinationDialTimeout() time.Duration
+	ProxyRelayInactivityTimeout() time.Duration
 }
