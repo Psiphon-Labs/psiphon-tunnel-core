@@ -241,11 +241,15 @@ func NewInproxyBrokerClientInstance(
 	p := config.GetParameters().Get()
 	defer p.Close()
 
-	// Select common or personal compartment IDs.
+	// Select common or personal compartment IDs. Clients must provide at
+	// least on compartment ID.
 
 	commonCompartmentIDs, personalCompartmentIDs, err := prepareCompartmentIDs(config, p, isProxy)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+	if !isProxy && len(commonCompartmentIDs) == 0 && len(personalCompartmentIDs) == 0 {
+		return nil, errors.TraceNew("no compartment IDs")
 	}
 
 	// Select the broker to use, optionally favoring brokers with replay data.
