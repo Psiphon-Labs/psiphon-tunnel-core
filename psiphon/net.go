@@ -39,8 +39,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/bpf"
@@ -410,258 +408,34 @@ func UntunneledResolveIP(
 // payloadSecure must only be set if all HTTP plaintext payloads sent through
 // the returned net/http.Client will be wrapped in their own transport security
 // layer, which permits skipping of server certificate verification.
-//
-// Warning: it is not safe to call makeFrontedHTTPClient concurrently with the
-// same dialConfig when tunneled is true because dialConfig will be used
-// directly, instead of copied, which can lead to a crash when fields not safe
-// for concurrent use are present.
 func makeFrontedHTTPClient(
-	ctx context.Context,
 	config *Config,
-	tunneled bool,
-	dialConfig *DialConfig,
+	tunnel *Tunnel,
 	frontingSpecs parameters.FrontingSpecs,
 	selectedFrontingProviderID func(string),
+	useDeviceBinder,
 	skipVerify,
 	disableSystemRootCAs,
 	payloadSecure bool) (*http.Client, func() common.APIParameters, error) {
 
-	if !payloadSecure && (skipVerify || disableSystemRootCAs) {
-		return nil, nil, errors.TraceNew("cannot skip certificate verification if payload insecure")
-	}
-
-	frontingProviderID,
-		frontingTransport,
-		meekFrontingDialAddress,
-		meekSNIServerName,
-		meekVerifyServerName,
-		meekVerifyPins,
-		meekFrontingHost, err := parameters.FrontingSpecs(frontingSpecs).SelectParameters()
+	frontedHTTPClient, err := newFrontedHTTPClientInstance(
+		config, tunnel, frontingSpecs, selectedFrontingProviderID,
+		useDeviceBinder, skipVerify, disableSystemRootCAs, payloadSecure)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
 
-	if frontingTransport != protocol.FRONTING_TRANSPORT_HTTPS {
-		return nil, nil, errors.TraceNew("unsupported fronting transport")
-	}
-
-	if selectedFrontingProviderID != nil {
-		selectedFrontingProviderID(frontingProviderID)
-	}
-
-	meekDialAddress := net.JoinHostPort(meekFrontingDialAddress, "443")
-	meekHostHeader := meekFrontingHost
-
-	p := config.GetParameters().Get()
-	effectiveTunnelProtocol := protocol.TUNNEL_PROTOCOL_FRONTED_MEEK
-
-	requireTLS12SessionTickets := protocol.TunnelProtocolRequiresTLS12SessionTickets(
-		effectiveTunnelProtocol)
-	requireTLS13Support := protocol.TunnelProtocolRequiresTLS13Support(effectiveTunnelProtocol)
-	isFronted := true
-
-	tlsProfile, tlsVersion, randomizedTLSProfileSeed, err := SelectTLSProfile(
-		requireTLS12SessionTickets, requireTLS13Support, isFronted, frontingProviderID, p)
-	if err != nil {
-		return nil, nil, errors.Trace(err)
-	}
-
-	if tlsProfile == "" && (requireTLS12SessionTickets || requireTLS13Support) {
-		return nil, nil, errors.TraceNew("required TLS profile not found")
-	}
-
-	noDefaultTLSSessionID := p.WeightedCoinFlip(
-		parameters.NoDefaultTLSSessionIDProbability)
-
-	// For a FrontingSpec, an SNI value of "" indicates to disable/omit SNI, so
-	// never transform in that case.
-	var meekTransformedHostName bool
-	if meekSNIServerName != "" {
-		if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
-			meekSNIServerName = selectHostName(effectiveTunnelProtocol, p)
-			meekTransformedHostName = true
-		}
-	}
-
-	addPsiphonFrontingHeader := false
-	if frontingProviderID != "" {
-		addPsiphonFrontingHeader = common.Contains(
-			p.LabeledTunnelProtocols(
-				parameters.AddFrontingProviderPsiphonFrontingHeader, frontingProviderID),
-			effectiveTunnelProtocol)
-	}
-
-	networkLatencyMultiplierMin := p.Float(parameters.NetworkLatencyMultiplierMin)
-	networkLatencyMultiplierMax := p.Float(parameters.NetworkLatencyMultiplierMax)
-
-	networkLatencyMultiplier := prng.ExpFloat64Range(
-		networkLatencyMultiplierMin,
-		networkLatencyMultiplierMax,
-		p.Float(parameters.NetworkLatencyMultiplierLambda))
-
-	tlsFragmentClientHello := false
-	if meekSNIServerName != "" {
-		tlsFragmentorLimitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
-		if len(tlsFragmentorLimitProtocols) == 0 || common.Contains(tlsFragmentorLimitProtocols, effectiveTunnelProtocol) {
-			if net.ParseIP(meekSNIServerName) == nil {
-				tlsFragmentClientHello = p.WeightedCoinFlip(parameters.TLSFragmentClientHelloProbability)
-			}
-		}
-	}
-
-	var meekMode MeekMode = MeekModePlaintextRoundTrip
-	if payloadSecure {
-		meekMode = MeekModeWrappedPlaintextRoundTrip
-	}
-
-	meekConfig := &MeekConfig{
-		DiagnosticID:             frontingProviderID,
-		Parameters:               config.GetParameters(),
-		Mode:                     meekMode,
-		DialAddress:              meekDialAddress,
-		UseHTTPS:                 true,
-		TLSProfile:               tlsProfile,
-		TLSFragmentClientHello:   tlsFragmentClientHello,
-		NoDefaultTLSSessionID:    noDefaultTLSSessionID,
-		RandomizedTLSProfileSeed: randomizedTLSProfileSeed,
-		SNIServerName:            meekSNIServerName,
-		AddPsiphonFrontingHeader: addPsiphonFrontingHeader,
-		HostHeader:               meekHostHeader,
-		TransformedHostName:      meekTransformedHostName,
-		ClientTunnelProtocol:     effectiveTunnelProtocol,
-		NetworkLatencyMultiplier: networkLatencyMultiplier,
-		// TODO: Change hard-coded session key be something like FrontingProviderID + BrokerID.
-		// This is necessary once longer-term TLS caches are added.
-		// meekDialAddress, based on meekFrontingDialAddress has couple of issues. For some providers there's
-		// only a couple or even just one possible value, in other cases there are millions of possible values
-		// and cached values wont' be used as often as they ought to be.
-		TLSClientSessionCache: common.WrapUtlsClientSessionCache(utls.NewLRUClientSessionCache(0), meekDialAddress),
-	}
-
-	if !skipVerify {
-		meekConfig.DisableSystemRootCAs = disableSystemRootCAs
-		if !meekConfig.DisableSystemRootCAs {
-			meekConfig.VerifyServerName = meekVerifyServerName
-			meekConfig.VerifyPins = meekVerifyPins
-		}
-	}
-
-	var resolvedIPAddress atomic.Value
-	resolvedIPAddress.Store("")
-
-	var meekDialConfig *DialConfig
-	if tunneled {
-		meekDialConfig = dialConfig
-	} else {
-		// The default untunneled dial config does not support pre-resolved IPs so
-		// redefine the dial config to override ResolveIP with an implementation
-		// that enables their use by passing the fronting provider ID into
-		// UntunneledResolveIP.
-		meekDialConfig = &DialConfig{
-			UpstreamProxyURL: dialConfig.UpstreamProxyURL,
-			CustomHeaders:    makeDialCustomHeaders(config, p),
-			DeviceBinder:     dialConfig.DeviceBinder,
-			IPv6Synthesizer:  dialConfig.IPv6Synthesizer,
-			ResolveIP: func(ctx context.Context, hostname string) ([]net.IP, error) {
-				IPs, err := UntunneledResolveIP(
-					ctx, config, config.GetResolver(), hostname, frontingProviderID)
-				if err != nil {
-					return nil, errors.Trace(err)
-				}
-				return IPs, nil
-			},
-			ResolvedIPCallback: func(IPAddress string) {
-				resolvedIPAddress.Store(IPAddress)
-			},
-		}
-	}
-
-	selectedUserAgent, userAgent := selectUserAgentIfUnset(p, meekDialConfig.CustomHeaders)
-	if selectedUserAgent {
-		if meekDialConfig.CustomHeaders == nil {
-			meekDialConfig.CustomHeaders = make(http.Header)
-		}
-		meekDialConfig.CustomHeaders.Set("User-Agent", userAgent)
-	}
-
-	// Use MeekConn to domain front requests.
-	//
-	// DialMeek will create a TLS connection immediately. We will delay
-	// initializing the MeekConn-based RoundTripper until we know it's needed.
-	// This is implemented by passing in a RoundTripper that establishes a
-	// MeekConn when RoundTrip is called.
-	//
-	// Resources are cleaned up when the response body is closed.
-	roundTrip := func(request *http.Request) (*http.Response, error) {
-
-		conn, err := DialMeek(
-			ctx, meekConfig, meekDialConfig)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		response, err := conn.RoundTrip(request)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		// Do not read the response body into memory all at once because it may
-		// be large. Instead allow the caller to stream the response.
-		response.Body = newMeekHTTPResponseReadCloser(conn, response.Body)
-
-		return response, nil
-	}
-
-	params := func() common.APIParameters {
+	getParams := func() common.APIParameters {
 		params := make(common.APIParameters)
-
-		params["fronting_provider_id"] = frontingProviderID
-
-		if meekConfig.DialAddress != "" {
-			params["meek_dial_address"] = meekConfig.DialAddress
+		for k, v := range frontedHTTPClient.frontedHTTPDialParameters.FrontedMeekDialParameters.GetMetrics() {
+			params[k] = v
 		}
-
-		meekResolvedIPAddress := resolvedIPAddress.Load()
-		if meekResolvedIPAddress != "" {
-			params["meek_resolved_ip_address"] = meekResolvedIPAddress
-		}
-
-		if meekConfig.SNIServerName != "" {
-			params["meek_sni_server_name"] = meekConfig.SNIServerName
-		}
-
-		if meekConfig.HostHeader != "" {
-			params["meek_host_header"] = meekConfig.HostHeader
-		}
-
-		transformedHostName := "0"
-		if meekTransformedHostName {
-			transformedHostName = "1"
-		}
-		params["meek_transformed_host_name"] = transformedHostName
-
-		if meekConfig.TLSProfile != "" {
-			params["tls_profile"] = meekConfig.TLSProfile
-		}
-
-		if selectedUserAgent {
-			params["user_agent"] = userAgent
-		}
-
-		if tlsVersion != "" {
-			params["tls_version"] = getTLSVersionForMetrics(tlsVersion, meekConfig.NoDefaultTLSSessionID)
-		}
-
-		if meekConfig.TLSFragmentClientHello {
-			params["tls_fragmented"] = "1"
-		}
-
 		return params
 	}
 
 	return &http.Client{
-		Transport: common.NewHTTPRoundTripper(roundTrip),
-	}, params, nil
+		Transport: common.NewHTTPRoundTripper(frontedHTTPClient.RoundTrip),
+	}, getParams, nil
 }
 
 // meekHTTPResponseReadCloser wraps an http.Response.Body received over a
@@ -708,19 +482,24 @@ func MakeUntunneledHTTPClient(
 	disableSystemRootCAs bool,
 	payloadSecure bool,
 	frontingSpecs parameters.FrontingSpecs,
+	frontingUseDeviceBinder bool,
 	selectedFrontingProviderID func(string)) (*http.Client, func() common.APIParameters, error) {
+
+	if untunneledDialConfig != nil && len(frontingSpecs) != 0 ||
+		untunneledDialConfig == nil && len(frontingSpecs) == 0 {
+		return nil, nil, errors.TraceNew("expected either dial configuration or fronting specs")
+	}
 
 	if len(frontingSpecs) > 0 {
 
 		// Ignore skipVerify because it only applies when there are no
 		// fronting specs.
 		httpClient, getParams, err := makeFrontedHTTPClient(
-			ctx,
 			config,
-			false,
-			untunneledDialConfig,
+			nil,
 			frontingSpecs,
 			selectedFrontingProviderID,
+			frontingUseDeviceBinder,
 			false,
 			disableSystemRootCAs,
 			payloadSecure)
@@ -778,31 +557,16 @@ func MakeTunneledHTTPClient(
 	// Note: there is no dial context since SSH port forward dials cannot
 	// be interrupted directly. Closing the tunnel will interrupt the dials.
 
-	tunneledDialer := func(_, addr string) (net.Conn, error) {
-		// Set alwaysTunneled to ensure the http.Client traffic is always tunneled,
-		// even when split tunnel mode is enabled.
-		conn, _, err := tunnel.DialTCPChannel(addr, true, nil)
-		return conn, errors.Trace(err)
-	}
-
 	if len(frontingSpecs) > 0 {
-
-		dialConfig := &DialConfig{
-			TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-			CustomDialer: func(_ context.Context, _, addr string) (net.Conn, error) {
-				return tunneledDialer("", addr)
-			},
-		}
 
 		// Ignore skipVerify because it only applies when there are no
 		// fronting specs.
 		httpClient, getParams, err := makeFrontedHTTPClient(
-			ctx,
 			config,
-			true,
-			dialConfig,
+			tunnel,
 			frontingSpecs,
 			selectedFrontingProviderID,
+			false,
 			false,
 			disableSystemRootCAs,
 			payloadSecure)
@@ -810,6 +574,13 @@ func MakeTunneledHTTPClient(
 			return nil, nil, errors.Trace(err)
 		}
 		return httpClient, getParams, nil
+	}
+
+	tunneledDialer := func(_, addr string) (net.Conn, error) {
+		// Set alwaysTunneled to ensure the http.Client traffic is always tunneled,
+		// even when split tunnel mode is enabled.
+		conn, _, err := tunnel.DialTCPChannel(addr, true, nil)
+		return conn, errors.Trace(err)
 	}
 
 	transport := &http.Transport{
@@ -851,6 +622,7 @@ func MakeDownloadHTTPClient(
 	disableSystemRootCAs,
 	payloadSecure bool,
 	frontingSpecs parameters.FrontingSpecs,
+	frontingUseDeviceBinder bool,
 	selectedFrontingProviderID func(string)) (*http.Client, bool, func() common.APIParameters, error) {
 
 	var httpClient *http.Client
@@ -875,14 +647,22 @@ func MakeDownloadHTTPClient(
 		}
 
 	} else {
+
+		var dialConfig *DialConfig
+		if len(frontingSpecs) == 0 {
+			// Must only set DialConfig if there are no fronting specs.
+			dialConfig = untunneledDialConfig
+		}
+
 		httpClient, getParams, err = MakeUntunneledHTTPClient(
 			ctx,
 			config,
-			untunneledDialConfig,
+			dialConfig,
 			skipVerify,
 			disableSystemRootCAs,
 			payloadSecure,
 			frontingSpecs,
+			frontingUseDeviceBinder,
 			selectedFrontingProviderID)
 		if err != nil {
 			return nil, false, nil, errors.Trace(err)
