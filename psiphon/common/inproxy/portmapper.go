@@ -92,7 +92,7 @@ func newPortMapper(
 	// GetCachedMappingOrStartCreatingOne call in portMapper.start; and so
 	// the p.client reference within callback will be valid.
 
-	client := portmapper.NewClient(portMappingLogger, nil, nil, func() {
+	client := portmapper.NewClient(portMappingLogger, nil, nil, nil, func() {
 		p.havePortMappingOnce.Do(func() {
 			address, ok := p.client.GetCachedMappingOrStartCreatingOne()
 			if ok {
@@ -165,7 +165,7 @@ func probePortMapping(
 			"port mapping probe: " + formatPortMappingLog(format, args...))
 	}
 
-	client := portmapper.NewClient(portMappingLogger, nil, nil, nil)
+	client := portmapper.NewClient(portMappingLogger, nil, nil, nil, nil)
 	defer client.Close()
 
 	result, err := client.Probe(ctx)

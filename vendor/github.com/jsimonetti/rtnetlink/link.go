@@ -199,16 +199,28 @@ func (l *LinkService) List() ([]LinkMessage, error) {
 // LinkAttributes contains all attributes for an interface.
 type LinkAttributes struct {
 	Address          net.HardwareAddr // Interface L2 address
+	Alias            *string          // Interface alias name
 	Broadcast        net.HardwareAddr // L2 broadcast address
-	Name             string           // Device name
+	Carrier          *uint8           // Current physical link state of the interface.
+	CarrierChanges   *uint32          // Number of times the link has seen a change from UP to DOWN and vice versa
+	CarrierUpCount   *uint32          // Number of times the link has been up
+	CarrierDownCount *uint32          // Number of times the link has been down
+	Index            *uint32          // System-wide interface unique index identifier
+	Info             *LinkInfo        // Detailed Interface Information
+	LinkMode         *uint8           // Interface link mode
 	MTU              uint32           // MTU of the device
-	Type             uint32           // Link type
+	Name             string           // Device name
+	NetDevGroup      *uint32          // Interface network device group
+	OperationalState OperationalState // Interface operation state
+	PhysPortID       *string          // Interface unique physical port identifier within the NIC
+	PhysPortName     *string          // Interface physical port name within the NIC
+	PhysSwitchID     *string          // Unique physical switch identifier of a switch this port belongs to
 	QueueDisc        string           // Queueing discipline
 	Master           *uint32          // Master device index (0 value un-enslaves)
-	OperationalState OperationalState // Interface operation state
 	Stats            *LinkStats       // Interface Statistics
 	Stats64          *LinkStats64     // Interface Statistics (64 bits version)
-	Info             *LinkInfo        // Detailed Interface Information
+	TxQueueLen       *uint32          // Interface transmit queue len in number of packets
+	Type             uint32           // Link type
 	XDP              *LinkXDP         // Express Data Patch Information
 }
 
@@ -240,22 +252,58 @@ func (a *LinkAttributes) decode(ad *netlink.AttributeDecoder) error {
 				return errInvalidLinkMessageAttr
 			}
 			a.Address = ad.Bytes()
+		case unix.IFLA_IFALIAS:
+			v := ad.String()
+			a.Alias = &v
 		case unix.IFLA_BROADCAST:
 			l := len(ad.Bytes())
 			if l < 4 || l > 32 {
 				return errInvalidLinkMessageAttr
 			}
 			a.Broadcast = ad.Bytes()
-		case unix.IFLA_IFNAME:
-			a.Name = ad.String()
+		case unix.IFLA_CARRIER:
+			v := ad.Uint8()
+			a.Carrier = &v
+		case unix.IFLA_CARRIER_CHANGES:
+			v := ad.Uint32()
+			a.CarrierChanges = &v
+		case unix.IFLA_CARRIER_UP_COUNT:
+			v := ad.Uint32()
+			a.CarrierUpCount = &v
+		case unix.IFLA_CARRIER_DOWN_COUNT:
+			v := ad.Uint32()
+			a.CarrierDownCount = &v
+		case unix.IFLA_GROUP:
+			v := ad.Uint32()
+			a.NetDevGroup = &v
 		case unix.IFLA_MTU:
 			a.MTU = ad.Uint32()
+		case unix.IFLA_IFNAME:
+			a.Name = ad.String()
 		case unix.IFLA_LINK:
 			a.Type = ad.Uint32()
-		case unix.IFLA_QDISC:
-			a.QueueDisc = ad.String()
+		case unix.IFLA_LINKINFO:
+			a.Info = &LinkInfo{}
+			ad.Nested(a.Info.decode)
+		case unix.IFLA_LINKMODE:
+			v := ad.Uint8()
+			a.LinkMode = &v
+		case unix.IFLA_MASTER:
+			v := ad.Uint32()
+			a.Master = &v
 		case unix.IFLA_OPERSTATE:
 			a.OperationalState = OperationalState(ad.Uint8())
+		case unix.IFLA_PHYS_PORT_ID:
+			v := ad.String()
+			a.PhysPortID = &v
+		case unix.IFLA_PHYS_SWITCH_ID:
+			v := ad.String()
+			a.PhysSwitchID = &v
+		case unix.IFLA_PHYS_PORT_NAME:
+			v := ad.String()
+			a.PhysPortName = &v
+		case unix.IFLA_QDISC:
+			a.QueueDisc = ad.String()
 		case unix.IFLA_STATS:
 			a.Stats = &LinkStats{}
 			err := a.Stats.unmarshalBinary(ad.Bytes())
@@ -268,12 +316,9 @@ func (a *LinkAttributes) decode(ad *netlink.AttributeDecoder) error {
 			if err != nil {
 				return err
 			}
-		case unix.IFLA_LINKINFO:
-			a.Info = &LinkInfo{}
-			ad.Nested(a.Info.decode)
-		case unix.IFLA_MASTER:
+		case unix.IFLA_TXQLEN:
 			v := ad.Uint32()
-			a.Master = &v
+			a.TxQueueLen = &v
 		case unix.IFLA_XDP:
 			a.XDP = &LinkXDP{}
 			ad.Nested(a.XDP.decode)
@@ -383,7 +428,7 @@ type LinkStats struct {
 func (a *LinkStats) unmarshalBinary(b []byte) error {
 	l := len(b)
 	if l != 92 && l != 96 {
-		return fmt.Errorf("incorrect size, want: 92 or 96")
+		return fmt.Errorf("incorrect LinkMessage size, want: 92 or 96, got: %d", len(b))
 	}
 
 	a.RXPackets = nativeEndian.Uint32(b[0:4])
@@ -413,7 +458,7 @@ func (a *LinkStats) unmarshalBinary(b []byte) error {
 	a.RXCompressed = nativeEndian.Uint32(b[84:88])
 	a.TXCompressed = nativeEndian.Uint32(b[88:92])
 
-	if l == 96 {
+	if l == 96 { // kernel 4.6+
 		a.RXNoHandler = nativeEndian.Uint32(b[92:96])
 	}
 
@@ -453,13 +498,15 @@ type LinkStats64 struct {
 	TXCompressed uint64
 
 	RXNoHandler uint64 // dropped, no handler found
+
+	RXOtherhostDropped uint64 // Number of packets dropped due to mismatch in destination MAC address.
 }
 
 // unmarshalBinary unmarshals the contents of a byte slice into a LinkMessage.
 func (a *LinkStats64) unmarshalBinary(b []byte) error {
 	l := len(b)
-	if l != 184 && l != 192 {
-		return fmt.Errorf("incorrect size, want: 184 or 192")
+	if l != 184 && l != 192 && l != 200 {
+		return fmt.Errorf("incorrect size, want: 184 or 192 or 200")
 	}
 
 	a.RXPackets = nativeEndian.Uint64(b[0:8])
@@ -489,8 +536,12 @@ func (a *LinkStats64) unmarshalBinary(b []byte) error {
 	a.RXCompressed = nativeEndian.Uint64(b[168:176])
 	a.TXCompressed = nativeEndian.Uint64(b[176:184])
 
-	if l == 192 {
+	if l > 191 { // kernel 4.6+
 		a.RXNoHandler = nativeEndian.Uint64(b[184:192])
+	}
+
+	if l > 199 { // kernel 5.19+
+		a.RXOtherhostDropped = nativeEndian.Uint64(b[192:200])
 	}
 
 	return nil
