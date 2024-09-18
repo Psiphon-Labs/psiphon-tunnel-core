@@ -206,6 +206,27 @@ func obfuscateSessionPacket(
 	return obfuscatedPacket, nil
 }
 
+// DeobfuscationAnomoly is an error type that is returned when an anomalous
+// condition is encountered while deobfuscating a session packet. This may
+// include malformed packets; packets obfuscated without knowledge of the
+// correct obfuscation secret; replay of valid packets; etc.
+//
+// On the server side, Broker.HandleSessionPacket already specifies that
+// anti-probing mechanisms should be applied on any error return; the
+// DeobfuscationAnomoly error type enables further error filtering before
+// logging an irregular tunnel event.
+type DeobfuscationAnomoly struct {
+	err error
+}
+
+func NewDeobfuscationAnomoly(err error) *DeobfuscationAnomoly {
+	return &DeobfuscationAnomoly{err: err}
+}
+
+func (e DeobfuscationAnomoly) Error() string {
+	return e.err.Error()
+}
+
 // deobfuscateSessionPacket deobfuscates a session packet obfuscated with
 // obfuscateSessionPacket and the same deobfuscateSessionPacket.
 //
@@ -234,14 +255,16 @@ func deobfuscateSessionPacket(
 
 	if len(obfuscatedPacket) < obfuscationSessionPacketNonceSize {
 		imitateDeobfuscateSessionPacketDuration(replayHistory)
-		return nil, errors.TraceNew("invalid nonce")
+		return nil, NewDeobfuscationAnomoly(
+			errors.TraceNew("invalid nonce"))
 	}
 
 	nonce := obfuscatedPacket[:obfuscationSessionPacketNonceSize]
 
 	if replayHistory != nil && replayHistory.Lookup(nonce) {
 		imitateDeobfuscateSessionPacketDuration(nil)
-		return nil, errors.TraceNew("replayed nonce")
+		return nil, NewDeobfuscationAnomoly(
+			errors.TraceNew("replayed nonce"))
 	}
 
 	// As an AEAD, AES-GCM authenticates that the sender used the expected
@@ -272,17 +295,20 @@ func deobfuscateSessionPacket(
 	if replayHistory != nil {
 		timestamp, n = binary.Varint(plaintext[offset:])
 		if timestamp == 0 && n <= 0 {
-			return nil, errors.TraceNew("invalid timestamp")
+			return nil, NewDeobfuscationAnomoly(
+				errors.TraceNew("invalid timestamp"))
 		}
 		offset += n
 	}
 	paddingSize, n := binary.Uvarint(plaintext[offset:])
 	if n < 1 {
-		return nil, errors.TraceNew("invalid padding size")
+		return nil, NewDeobfuscationAnomoly(
+			errors.TraceNew("invalid padding size"))
 	}
 	offset += n
 	if len(plaintext[offset:]) < int(paddingSize) {
-		return nil, errors.TraceNew("invalid padding")
+		return nil, NewDeobfuscationAnomoly(
+			errors.TraceNew("invalid padding"))
 	}
 	offset += int(paddingSize)
 
@@ -294,10 +320,12 @@ func deobfuscateSessionPacket(
 
 		now := time.Now().Unix()
 		if timestamp+antiReplayTimeFactorPeriodSeconds/2 < now {
-			return nil, errors.TraceNew("timestamp behind")
+			return nil, NewDeobfuscationAnomoly(
+				errors.TraceNew("timestamp behind"))
 		}
 		if timestamp-antiReplayTimeFactorPeriodSeconds/2 > now {
-			return nil, errors.TraceNew("timestamp ahead")
+			return nil, NewDeobfuscationAnomoly(
+				errors.TraceNew("timestamp ahead"))
 		}
 
 		// Now that it's validated, add this packet to the replay history. The

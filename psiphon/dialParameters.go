@@ -1653,15 +1653,22 @@ func (dialParams *DialParameters) GetInproxyMetrics() common.LogFields {
 		return inproxyMetrics
 	}
 
-	for _, metrics := range []common.LogFields{
-		dialParams.inproxyBrokerDialParameters.GetMetrics(),
-		dialParams.InproxySTUNDialParameters.GetMetrics(),
-		dialParams.InproxyWebRTCDialParameters.GetMetrics(),
-	} {
-		for name, value := range metrics {
-			inproxyMetrics[name] = value
-		}
+	inproxyMetrics.Add(dialParams.inproxyBrokerDialParameters.GetMetrics())
+	inproxyMetrics.Add(dialParams.InproxySTUNDialParameters.GetMetrics())
+	inproxyMetrics.Add(dialParams.InproxyWebRTCDialParameters.GetMetrics())
+
+	return inproxyMetrics
+}
+
+func (dialParams *DialParameters) GetInproxyBrokerMetrics() common.LogFields {
+	inproxyMetrics := common.LogFields{}
+
+	if !dialParams.inproxyDialInitialized {
+		return inproxyMetrics
 	}
+
+	inproxyMetrics.Add(dialParams.inproxyBrokerDialParameters.GetBrokerMetrics())
+
 	return inproxyMetrics
 }
 

@@ -71,9 +71,8 @@ func runInproxyBrokerDialParametersTest() error {
 	networkID := "NETWORK1"
 	addressRegex := `[a-z0-9]{5,10}\.example\.org`
 	commonCompartmentID, _ := inproxy.MakeID()
-	personalCompartmentID, _ := inproxy.MakeID()
 	commonCompartmentIDs := []string{commonCompartmentID.String()}
-	personalCompartmentIDs := []string{personalCompartmentID.String()}
+	personalCompartmentID, _ := inproxy.MakeID()
 	privateKey, _ := inproxy.GenerateSessionPrivateKey()
 	publicKey, _ := privateKey.GetPublicKey()
 	obfuscationSecret, _ := inproxy.GenerateRootObfuscationSecret()
@@ -269,8 +268,8 @@ func runInproxyBrokerDialParametersTest() error {
 
 	// Test: no common compartment IDs sent when personal ID is set
 
-	config.InproxyClientPersonalCompartmentIDs = personalCompartmentIDs
-	config.InproxyProxyPersonalCompartmentIDs = personalCompartmentIDs
+	config.InproxyClientPersonalCompartmentID = personalCompartmentID.String()
+	config.InproxyProxyPersonalCompartmentID = personalCompartmentID.String()
 
 	manager = NewInproxyBrokerClientManager(config, isProxy)
 

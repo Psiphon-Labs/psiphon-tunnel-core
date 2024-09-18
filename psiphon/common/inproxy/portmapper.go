@@ -24,6 +24,7 @@ package inproxy
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -62,6 +63,7 @@ type portMapper struct {
 	havePortMappingOnce sync.Once
 	portMappingAddress  chan string
 	client              *portmapper.Client
+	portMappingLogger   func(format string, args ...any)
 }
 
 // newPortMapper initializes a new port mapper, configured to map to the
@@ -72,11 +74,13 @@ func newPortMapper(
 	localPort int) *portMapper {
 
 	portMappingLogger := func(format string, args ...any) {
-		logger.WithTrace().Info("port mapping: " + fmt.Sprintf(format, args))
+		logger.WithTrace().Info(
+			"port mapping: " + formatPortMappingLog(format, args...))
 	}
 
 	p := &portMapper{
 		portMappingAddress: make(chan string, 1),
+		portMappingLogger:  portMappingLogger,
 	}
 
 	// This code assumes assumes tailscale NewClient call does only
@@ -94,6 +98,7 @@ func newPortMapper(
 			if ok {
 				// With sync.Once and a buffer size of 1, this send won't block.
 				p.portMappingAddress <- address.String()
+				portMappingLogger("address obtained")
 			} else {
 
 				// This is not an expected case; there should be a port
@@ -116,6 +121,7 @@ func newPortMapper(
 
 // start initiates the port mapping attempt.
 func (p *portMapper) start() {
+	p.portMappingLogger("started")
 	_, _ = p.client.GetCachedMappingOrStartCreatingOne()
 }
 
@@ -127,7 +133,18 @@ func (p *portMapper) portMappingExternalAddress() <-chan string {
 
 // close releases the port mapping
 func (p *portMapper) close() error {
-	return errors.Trace(p.client.Close())
+	err := p.client.Close()
+	p.portMappingLogger("closed")
+	return errors.Trace(err)
+}
+
+func formatPortMappingLog(format string, args ...any) string {
+	truncatePrefix := "[v1] UPnP reply"
+	if strings.HasPrefix(format, truncatePrefix) {
+		// Omit packet portion of this log, but still log the event
+		return truncatePrefix
+	}
+	return fmt.Sprintf(format, args...)
 }
 
 // probePortMapping discovers and reports which port mapping protocols are
@@ -144,7 +161,8 @@ func probePortMapping(
 	logger common.Logger) (PortMappingTypes, error) {
 
 	portMappingLogger := func(format string, args ...any) {
-		logger.WithTrace().Info("port mapping probe: " + fmt.Sprintf(format, args))
+		logger.WithTrace().Info(
+			"port mapping probe: " + formatPortMappingLog(format, args...))
 	}
 
 	client := portmapper.NewClient(portMappingLogger, nil, nil, nil)

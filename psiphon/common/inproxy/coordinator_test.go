@@ -45,12 +45,14 @@ type testBrokerDialCoordinator struct {
 	brokerClientRoundTripper          RoundTripper
 	brokerClientRoundTripperSucceeded func(RoundTripper)
 	brokerClientRoundTripperFailed    func(RoundTripper)
+	brokerClientNoMatch               func(RoundTripper)
 	sessionHandshakeRoundTripTimeout  time.Duration
 	announceRequestTimeout            time.Duration
 	announceDelay                     time.Duration
 	announceDelayJitter               float64
 	answerRequestTimeout              time.Duration
 	offerRequestTimeout               time.Duration
+	offerRequestPersonalTimeout       time.Duration
 	offerRetryDelay                   time.Duration
 	offerRetryJitter                  float64
 	relayedPacketRequestTimeout       time.Duration
@@ -116,6 +118,12 @@ func (t *testBrokerDialCoordinator) BrokerClientRoundTripperFailed(roundTripper 
 	t.brokerClientRoundTripperFailed(roundTripper)
 }
 
+func (t *testBrokerDialCoordinator) BrokerClientNoMatch(roundTripper RoundTripper) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.brokerClientNoMatch(roundTripper)
+}
+
 func (t *testBrokerDialCoordinator) SessionHandshakeRoundTripTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -150,6 +158,12 @@ func (t *testBrokerDialCoordinator) OfferRequestTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.offerRequestTimeout
+}
+
+func (t *testBrokerDialCoordinator) OfferRequestPersonalTimeout() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.offerRequestPersonalTimeout
 }
 
 func (t *testBrokerDialCoordinator) OfferRetryDelay() time.Duration {

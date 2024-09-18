@@ -21,6 +21,7 @@ package parameters
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
@@ -33,6 +34,31 @@ func (keyValues KeyValues) Validate() error {
 	for _, value := range keyValues {
 		var v interface{}
 		err := json.Unmarshal(value, &v)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+	return nil
+}
+
+// KeyStrings represents a set of key/strings pairs.
+type KeyStrings map[string][]string
+
+// Validates that the keys and values are well formed.
+func (keyStrings KeyStrings) Validate() error {
+	// Always succeeds because KeyStrings is generic and does not impose any
+	// restrictions on keys/values. Consider imposing limits like maximum
+	// map/array/string sizes.
+	return nil
+}
+
+// KeyDurations represents a set of key/duration pairs.
+type KeyDurations map[string]string
+
+// Validates that the keys and durations are well formed.
+func (keyDurations KeyDurations) Validate() error {
+	for _, value := range keyDurations {
+		_, err := time.ParseDuration(value)
 		if err != nil {
 			return errors.Trace(err)
 		}

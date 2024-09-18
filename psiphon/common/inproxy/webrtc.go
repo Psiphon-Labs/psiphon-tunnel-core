@@ -1687,7 +1687,7 @@ func processSDPAddresses(
 
 	candidateTypes := map[ICECandidateType]bool{}
 	hasIPv6 := false
-	hasPrivateIP := true
+	hasPrivateIP := false
 	filteredCandidateReasons := make(map[string]int)
 
 	var portMappingICECandidates []sdp.Attribute

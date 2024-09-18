@@ -102,6 +102,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 	roundTripperSucceded := func(RoundTripper) { atomic.AddInt32(&roundTripperSucceededCount, 1) }
 	roundTripperFailedCount := int32(0)
 	roundTripperFailed := func(RoundTripper) { atomic.AddInt32(&roundTripperFailedCount, 1) }
+	noMatch := func(RoundTripper) {}
 
 	var receivedProxyMustUpgrade chan struct{}
 	var receivedClientMustUpgrade chan struct{}
@@ -667,6 +668,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 				brokerListener.Addr().String(), "client"),
 			brokerClientRoundTripperSucceeded: roundTripperSucceded,
 			brokerClientRoundTripperFailed:    roundTripperFailed,
+			brokerClientNoMatch:               noMatch,
 		}
 
 		webRTCCoordinator := &testWebRTCDialCoordinator{

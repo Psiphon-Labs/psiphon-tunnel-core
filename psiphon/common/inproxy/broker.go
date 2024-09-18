@@ -85,9 +85,11 @@ type Broker struct {
 	commonCompartmentsMutex sync.Mutex
 	commonCompartments      *consistent.Consistent
 
-	proxyAnnounceTimeout    int64
-	clientOfferTimeout      int64
-	pendingServerReportsTTL int64
+	proxyAnnounceTimeout       int64
+	clientOfferTimeout         int64
+	clientOfferPersonalTimeout int64
+	pendingServerReportsTTL    int64
+	maxRequestTimeouts         atomic.Value
 
 	maxCompartmentIDs int64
 }
@@ -162,9 +164,10 @@ type BrokerConfig struct {
 	ServerEntrySignaturePublicKey string
 
 	// These timeout parameters may be used to override defaults.
-	ProxyAnnounceTimeout    time.Duration
-	ClientOfferTimeout      time.Duration
-	PendingServerReportsTTL time.Duration
+	ProxyAnnounceTimeout       time.Duration
+	ClientOfferTimeout         time.Duration
+	ClientOfferPersonalTimeout time.Duration
+	PendingServerReportsTTL    time.Duration
 
 	// Announcement queue limit configuration.
 	MatcherAnnouncementLimitEntryCount    int
@@ -219,9 +222,10 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 			OfferRateLimitInterval:         config.MatcherOfferRateLimitInterval,
 		}),
 
-		proxyAnnounceTimeout:    int64(config.ProxyAnnounceTimeout),
-		clientOfferTimeout:      int64(config.ClientOfferTimeout),
-		pendingServerReportsTTL: int64(config.PendingServerReportsTTL),
+		proxyAnnounceTimeout:       int64(config.ProxyAnnounceTimeout),
+		clientOfferTimeout:         int64(config.ClientOfferTimeout),
+		clientOfferPersonalTimeout: int64(config.ClientOfferPersonalTimeout),
+		pendingServerReportsTTL:    int64(config.PendingServerReportsTTL),
 
 		maxCompartmentIDs: int64(common.ValueOrDefault(config.MaxCompartmentIDs, MaxCompartmentIDs)),
 	}
@@ -273,11 +277,15 @@ func (b *Broker) SetCommonCompartmentIDs(commonCompartmentIDs []ID) error {
 func (b *Broker) SetTimeouts(
 	proxyAnnounceTimeout time.Duration,
 	clientOfferTimeout time.Duration,
-	pendingServerReportsTTL time.Duration) {
+	clientOfferPersonalTimeout time.Duration,
+	pendingServerReportsTTL time.Duration,
+	maxRequestTimeouts map[string]time.Duration) {
 
 	atomic.StoreInt64(&b.proxyAnnounceTimeout, int64(proxyAnnounceTimeout))
 	atomic.StoreInt64(&b.clientOfferTimeout, int64(clientOfferTimeout))
+	atomic.StoreInt64(&b.clientOfferPersonalTimeout, int64(clientOfferPersonalTimeout))
 	atomic.StoreInt64(&b.pendingServerReportsTTL, int64(pendingServerReportsTTL))
+	b.maxRequestTimeouts.Store(maxRequestTimeouts)
 }
 
 // SetLimits sets new queue limit values, replacing the previous
@@ -413,7 +421,7 @@ func (b *Broker) HandleSessionPacket(
 
 	// HandlePacket returns both a packet and an error in the expired session
 	// reset token case. Log the error here, clear it, and return the
-	// packetto be relayed back to the broker client.
+	// packet to be relayed back to the broker client.
 
 	outPacket, err := b.responderSessions.HandlePacket(
 		inPacket, handleUnwrappedRequest)
@@ -599,6 +607,11 @@ func (b *Broker) handleProxyAnnounce(
 	timeout := common.ValueOrDefault(
 		time.Duration(atomic.LoadInt64(&b.proxyAnnounceTimeout)),
 		brokerProxyAnnounceTimeout)
+
+	// Adjust the timeout to respect any shorter maximum request timeouts for
+	// the fronting provider.
+	timeout = b.adjustRequestTimeout(logFields, timeout)
+
 	announceCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 	extendTransportTimeout(timeout)
@@ -852,9 +865,21 @@ func (b *Broker) handleClientOffer(
 	// Enqueue the client offer and await a proxy matching and subsequent
 	// proxy answer.
 
-	timeout := common.ValueOrDefault(
-		time.Duration(atomic.LoadInt64(&b.clientOfferTimeout)),
-		brokerClientOfferTimeout)
+	// The Client Offer timeout may be configured with a shorter value in
+	// personal pairing mode, to facilitate a faster no-match result and
+	// resulting broker rotation.
+	var timeout time.Duration
+	if len(offerRequest.PersonalCompartmentIDs) > 0 {
+		timeout = time.Duration(atomic.LoadInt64(&b.clientOfferPersonalTimeout))
+	} else {
+		timeout = time.Duration(atomic.LoadInt64(&b.clientOfferTimeout))
+	}
+	timeout = common.ValueOrDefault(timeout, brokerClientOfferTimeout)
+
+	// Adjust the timeout to respect any shorter maximum request timeouts for
+	// the fronting provider.
+	timeout = b.adjustRequestTimeout(logFields, timeout)
+
 	offerCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 	extendTransportTimeout(timeout)
@@ -1240,6 +1265,33 @@ func (b *Broker) handleClientRelayedPacket(
 	}
 
 	return responsePayload, nil
+}
+
+func (b *Broker) adjustRequestTimeout(
+	logFields common.LogFields, timeout time.Duration) time.Duration {
+
+	// Adjust long-polling request timeouts to respect any maximum request
+	// timeout supported by the provider fronting the request.
+	//
+	// Limitation: the client is trusted to provide the correct fronting
+	// provider ID.
+
+	maxRequestTimeouts, ok := b.maxRequestTimeouts.Load().(map[string]time.Duration)
+	if !ok || maxRequestTimeouts == nil {
+		return timeout
+	}
+
+	frontingProviderID, ok := logFields["fronting_provider_id"].(string)
+	if !ok {
+		return timeout
+	}
+
+	maxRequestTimeout, ok := maxRequestTimeouts[frontingProviderID]
+	if !ok || maxRequestTimeout <= 0 || timeout <= maxRequestTimeout {
+		return timeout
+	}
+
+	return maxRequestTimeout
 }
 
 type pendingServerReport struct {

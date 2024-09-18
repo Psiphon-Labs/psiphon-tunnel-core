@@ -370,8 +370,8 @@ func dialClientWebRTCConn(
 	// WebRTCDialCoordinator.PortMappingTypes may be populated via
 	// newWebRTCConnWithOffer.
 
-	// ClientOffer applies BrokerDialCoordinator.OfferRequestTimeout as the
-	// request timeout.
+	// ClientOffer applies BrokerDialCoordinator.OfferRequestTimeout or
+	// OfferRequestPersonalTimeout as the request timeout.
 	offerResponse, err := config.BrokerClient.ClientOffer(
 		ctx,
 		&ClientOfferRequest{
@@ -391,7 +391,8 @@ func dialClientWebRTCConn(
 			PackedDestinationServerEntry: config.PackedDestinationServerEntry,
 			NetworkProtocol:              config.DialNetworkProtocol,
 			DestinationAddress:           config.DialAddress,
-		})
+		},
+		hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, false, errors.Trace(err)
 	}

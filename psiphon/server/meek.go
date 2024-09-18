@@ -1840,7 +1840,9 @@ func (server *MeekServer) inproxyReloadTactics() error {
 	server.inproxyBroker.SetTimeouts(
 		p.Duration(parameters.InproxyBrokerProxyAnnounceTimeout),
 		p.Duration(parameters.InproxyBrokerClientOfferTimeout),
-		p.Duration(parameters.InproxyBrokerPendingServerRequestsTTL))
+		p.Duration(parameters.InproxyBrokerClientOfferPersonalTimeout),
+		p.Duration(parameters.InproxyBrokerPendingServerRequestsTTL),
+		p.KeyDurations(parameters.InproxyFrontingProviderServerMaxRequestTimeouts))
 
 	nonlimitedProxyIDs, err := inproxy.IDsFromStrings(
 		p.Strings(parameters.InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs))
@@ -1980,6 +1982,19 @@ func (server *MeekServer) inproxyBrokerHandler(
 		geoIPData,
 		packet)
 	if err != nil {
+
+		var deobfuscationAnomoly *inproxy.DeobfuscationAnomoly
+		isAnomolous := std_errors.As(err, &deobfuscationAnomoly)
+		if isAnomolous {
+			logIrregularTunnel(
+				server.support,
+				server.listenerTunnelProtocol,
+				server.listenerPort,
+				clientIP,
+				errors.Trace(err),
+				nil)
+		}
+
 		return errors.Trace(err)
 	}
 

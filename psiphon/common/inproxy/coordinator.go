@@ -162,12 +162,21 @@ type BrokerDialCoordinator interface {
 	// after closing its network resources.
 	BrokerClientRoundTripperFailed(roundTripper RoundTripper)
 
+	// BrokerClientNoMatch is called after a Client Offer fails due to no
+	// match. This signal may be used to rotate to a new broker in order to
+	// find a match. In personal pairing mode, clients should rotate on no
+	// match, as the corresponding proxy may be announcing only on another
+	// broker. In common pairing mode, clients may rotate, in case common
+	// proxies are not well balanced across brokers.
+	BrokerClientNoMatch(roundTripper RoundTripper)
+
 	SessionHandshakeRoundTripTimeout() time.Duration
 	AnnounceRequestTimeout() time.Duration
 	AnnounceDelay() time.Duration
 	AnnounceDelayJitter() float64
 	AnswerRequestTimeout() time.Duration
 	OfferRequestTimeout() time.Duration
+	OfferRequestPersonalTimeout() time.Duration
 	OfferRetryDelay() time.Duration
 	OfferRetryJitter() float64
 	RelayedPacketRequestTimeout() time.Duration
