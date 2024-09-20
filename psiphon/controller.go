@@ -1975,7 +1975,7 @@ func (controller *Controller) launchEstablishing() {
 			constraints: &copyConstraints,
 		})
 
-	if controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount > 0 ||
+	if controller.protocolSelectionConstraints.hasInitialProtocols() ||
 		tunnelPoolSize > 1 {
 
 		// Perform a synchronous scan over server entries in order to check if
@@ -2009,7 +2009,7 @@ func (controller *Controller) doConstraintsScan() {
 	// to happen quickly in the typical case.
 
 	hasInitialLimitTunnelProtocols :=
-		controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount > 0
+		controller.protocolSelectionConstraints.hasInitialProtocols()
 	tunnelPoolSize := controller.getTunnelPoolSize()
 
 	scanCount := 0
