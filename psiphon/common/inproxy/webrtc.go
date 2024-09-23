@@ -51,6 +51,8 @@ import (
 )
 
 const (
+	portMappingAwaitTimeout = 2 * time.Second
+
 	dataChannelAwaitTimeout                      = 20 * time.Second
 	dataChannelBufferedAmountLowThreshold uint64 = 512 * 1024
 	dataChannelMaxBufferedAmount          uint64 = 1024 * 1024
@@ -151,7 +153,7 @@ type webRTCConfig struct {
 // answer SDP received in response, call SetRemoteSDP with the answer SDP and
 // then call AwaitInitialDataChannel to await the eventual WebRTC connection
 // establishment.
-func newWebRTCConnWithOffer(
+func newWebRTCConnForOffer(
 	ctx context.Context,
 	config *webRTCConfig,
 	hasPersonalCompartmentIDs bool) (
@@ -169,7 +171,7 @@ func newWebRTCConnWithOffer(
 // that provided an offer SDP. An answer SDP is returned to be sent to the
 // peer. After the answer SDP is forwarded, call AwaitInitialDataChannel to
 // await the eventual WebRTC connection establishment.
-func newWebRTCConnWithAnswer(
+func newWebRTCConnForAnswer(
 	ctx context.Context,
 	config *webRTCConfig,
 	peerSDP WebRTCSessionDescription,
@@ -461,20 +463,34 @@ func newWebRTCConn(
 	disableInbound := config.WebRTCDialCoordinator.DisableInboundForMobileNetworks() &&
 		config.WebRTCDialCoordinator.NetworkType() == NetworkTypeMobile
 
-	// Try to establish a port mapping (UPnP-IGD, PCP, or NAT-PMP). The port
-	// mapper will attempt to identify the local gateway and query various
-	// port mapping protocols. portMapper.start launches this process and
-	// does not block. Port mappings are not part of the WebRTC standard, or
-	// supported by pion/webrtc. Instead, if a port mapping is established,
-	// it's edited into the SDP as a new host-type ICE candidate.
+	// Try to establish a port mapping (UPnP-IGD, PCP, or NAT-PMP), using port
+	// mapping services previously found and recorded in PortMappingProbe.
+	// Note that portMapper may perform additional probes. portMapper.start
+	// launches the process of creating a new port mapping and does not
+	// block. Port mappings are not part of the WebRTC standard, or supported
+	// by pion/webrtc. Instead, if a port mapping is established, it's edited
+	// into the SDP as a new host-type ICE candidate.
 
-	localPort := udpConn.LocalAddr().(*net.UDPAddr).Port
-	portMapper := newPortMapper(config.Logger, localPort)
+	portMappingProbe := config.WebRTCDialCoordinator.PortMappingProbe()
 
-	doPortMapping := !disableInbound && !config.WebRTCDialCoordinator.DisablePortMapping()
+	doPortMapping := !disableInbound &&
+		!config.WebRTCDialCoordinator.DisablePortMapping() &&
+		portMappingProbe != nil
 
+	var portMapper *portMapper
 	if doPortMapping {
-		portMapper.start()
+		localPort := udpConn.LocalAddr().(*net.UDPAddr).Port
+		portMapper, err = newPortMapper(config.Logger, portMappingProbe, localPort)
+		if err != nil {
+			config.Logger.WithTraceFields(common.LogFields{
+				"error": err,
+			}).Warning("newPortMapper failed")
+			// Continue without port mapper
+		} else {
+			portMapper.start()
+			// On early return, portMapper will be closed by the following
+			// deferred conn.Close.
+		}
 	}
 
 	// Select a STUN server for ICE hole punching. The STUN server to be used
@@ -688,27 +704,74 @@ func newWebRTCConn(
 	iceCompleted := false
 	portMappingExternalAddr := ""
 
-	select {
-	case <-iceComplete:
-		iceCompleted = true
+	if portMapper == nil {
 
-	case portMappingExternalAddr = <-portMapper.portMappingExternalAddress():
+		select {
+		case <-iceComplete:
+			iceCompleted = true
+		case <-ctx.Done():
+			return nil, nil, nil, errors.Trace(ctx.Err())
+		}
 
-		// Set responding port mapping types for metrics.
+	} else {
+
+		select {
+		case <-iceComplete:
+			iceCompleted = true
+		case portMappingExternalAddr = <-portMapper.portMappingExternalAddress():
+		case <-ctx.Done():
+			return nil, nil, nil, errors.Trace(ctx.Err())
+		}
+
+		// When STUN is skipped and a port mapping is expected to be
+		// available, await a port mapping for a short period. In this
+		// scenario, pion ICE gathering may complete first, since it's only
+		// gathering local host candidates.
 		//
-		// Limitation: if there are multiple responding protocol types, it's
-		// not known here which was used for this dial.
-		config.WebRTCDialCoordinator.SetPortMappingTypes(
-			getRespondingPortMappingTypes(config.WebRTCDialCoordinator.NetworkID()))
+		// It remains possible that these local candidates are sufficient, if
+		// they are public IPs or private IPs on the same LAN as the peer in
+		// the case of personal pairing. For that reason, the await timeout
+		// should be no more than a couple of seconds.
+		//
+		// TODO: also await port mappings when doSTUN, in case there are no
+		// STUN candidates; see hasServerReflexive check below; as it stands,
+		// in this case, it's more likely that port mapping won the previous
+		// select race.
 
-	case <-ctx.Done():
-		return nil, nil, nil, errors.Trace(ctx.Err())
-	}
+		if iceCompleted && portMappingExternalAddr == "" && !doSTUN && doPortMapping {
 
-	// Release any port mapping resources when not using it.
-	if portMapper != nil && portMappingExternalAddr == "" {
-		portMapper.close()
-		conn.portMapper = nil
+			timer := time.NewTimer(
+				common.ValueOrDefault(
+					config.WebRTCDialCoordinator.WebRTCAwaitPortMappingTimeout(),
+					portMappingAwaitTimeout))
+			defer timer.Stop()
+
+			select {
+			case portMappingExternalAddr = <-portMapper.portMappingExternalAddress():
+			case <-timer.C:
+				// Continue without port mapping
+			case <-ctx.Done():
+				return nil, nil, nil, errors.Trace(ctx.Err())
+			}
+			timer.Stop()
+		}
+
+		if portMapper != nil && portMappingExternalAddr == "" {
+
+			// Release any port mapping resources when not using it.
+			portMapper.close()
+			conn.portMapper = nil
+
+		} else if portMappingExternalAddr != "" {
+
+			// Update responding port mapping types for metrics.
+			//
+			// Limitation: if there are multiple responding protocol types, it's
+			// not known here which was used for this dial.
+			config.WebRTCDialCoordinator.SetPortMappingTypes(
+				getRespondingPortMappingTypes(config.WebRTCDialCoordinator.NetworkID()))
+
+		}
 	}
 
 	config.Logger.WithTraceFields(common.LogFields{

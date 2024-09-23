@@ -1667,6 +1667,7 @@ type InproxyWebRTCDialInstance struct {
 	disableIPv6ICECandidates        bool
 	discoverNATTimeout              time.Duration
 	webRTCAnswerTimeout             time.Duration
+	webRTCAwaitPortMappingTimeout   time.Duration
 	awaitDataChannelTimeout         time.Duration
 	proxyDestinationDialTimeout     time.Duration
 	proxyRelayInactivityTimeout     time.Duration
@@ -1770,6 +1771,7 @@ func NewInproxyWebRTCDialInstance(
 		disableIPv6ICECandidates:        disableIPv6ICECandidates,
 		discoverNATTimeout:              discoverNATTimeout,
 		webRTCAnswerTimeout:             p.Duration(parameters.InproxyWebRTCAnswerTimeout),
+		webRTCAwaitPortMappingTimeout:   p.Duration(parameters.InproxyWebRTCAwaitPortMappingTimeout),
 		awaitDataChannelTimeout:         awaitDataChannelTimeout,
 		proxyDestinationDialTimeout:     p.Duration(parameters.InproxyProxyDestinationDialTimeout),
 		proxyRelayInactivityTimeout:     p.Duration(parameters.InproxyProxyRelayInactivityTimeout),
@@ -1894,8 +1896,20 @@ func (w *InproxyWebRTCDialInstance) PortMappingTypes() inproxy.PortMappingTypes 
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
-func (w *InproxyWebRTCDialInstance) SetPortMappingTypes(portMappingTypes inproxy.PortMappingTypes) {
+func (w *InproxyWebRTCDialInstance) SetPortMappingTypes(
+	portMappingTypes inproxy.PortMappingTypes) {
 	w.natStateManager.setPortMappingTypes(w.networkID, portMappingTypes)
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) PortMappingProbe() *inproxy.PortMappingProbe {
+	return w.natStateManager.getPortMappingProbe(w.networkID)
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) SetPortMappingProbe(
+	portMappingProbe *inproxy.PortMappingProbe) {
+	w.natStateManager.setPortMappingProbe(w.networkID, portMappingProbe)
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -2059,6 +2073,11 @@ func (w *InproxyWebRTCDialInstance) DiscoverNATTimeout() time.Duration {
 // Implements the inproxy.WebRTCDialCoordinator interface.
 func (w *InproxyWebRTCDialInstance) WebRTCAnswerTimeout() time.Duration {
 	return w.webRTCAnswerTimeout
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) WebRTCAwaitPortMappingTimeout() time.Duration {
+	return w.webRTCAwaitPortMappingTimeout
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -2298,6 +2317,7 @@ type InproxyNATStateManager struct {
 	networkID        string
 	natType          inproxy.NATType
 	portMappingTypes inproxy.PortMappingTypes
+	portMappingProbe *inproxy.PortMappingProbe
 }
 
 // NewInproxyNATStateManager creates a new InproxyNATStateManager.
@@ -2374,7 +2394,8 @@ func (s *InproxyNATStateManager) getPortMappingTypes(
 }
 
 func (s *InproxyNATStateManager) setPortMappingTypes(
-	networkID string, portMappingTypes inproxy.PortMappingTypes) {
+	networkID string,
+	portMappingTypes inproxy.PortMappingTypes) {
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -2384,6 +2405,33 @@ func (s *InproxyNATStateManager) setPortMappingTypes(
 	}
 
 	s.portMappingTypes = portMappingTypes
+}
+
+func (s *InproxyNATStateManager) getPortMappingProbe(
+	networkID string) *inproxy.PortMappingProbe {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.networkID != networkID {
+		return nil
+	}
+
+	return s.portMappingProbe
+}
+
+func (s *InproxyNATStateManager) setPortMappingProbe(
+	networkID string,
+	portMappingProbe *inproxy.PortMappingProbe) {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.networkID != networkID {
+		return
+	}
+
+	s.portMappingProbe = portMappingProbe
 }
 
 // inproxyUDPConn is based on NewUDPConn and includes the write timeout

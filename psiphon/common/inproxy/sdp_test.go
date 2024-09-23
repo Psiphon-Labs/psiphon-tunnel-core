@@ -60,7 +60,7 @@ func runTestProcessSDP() error {
 	SetAllowBogonWebRTCConnections(true)
 	defer SetAllowBogonWebRTCConnections(false)
 
-	conn, webRTCSDP, metrics, err := newWebRTCConnWithOffer(
+	conn, webRTCSDP, metrics, err := newWebRTCConnForOffer(
 		context.Background(), config, hasPersonalCompartmentIDs)
 	if err != nil {
 		return errors.Trace(err)
@@ -194,7 +194,7 @@ func runTestProcessSDP() error {
 	allowPrivateIPAddressCandidates = true
 	filterPrivateIPAddressCandidates = true
 
-	conn, webRTCSDP, metrics, err = newWebRTCConnWithOffer(
+	conn, webRTCSDP, metrics, err = newWebRTCConnForOffer(
 		context.Background(), config, hasPersonalCompartmentIDs)
 	if err != nil {
 		return errors.Trace(err)

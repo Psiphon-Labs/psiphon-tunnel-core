@@ -451,6 +451,8 @@ func (p *Proxy) doNetworkDiscovery(
 	if p.networkDiscoveryRunOnce &&
 		p.networkDiscoveryNetworkID == networkID {
 		// Already ran discovery for this network.
+		//
+		// TODO: periodically re-probe for port mapping services?
 		return
 	}
 
@@ -458,11 +460,11 @@ func (p *Proxy) doNetworkDiscovery(
 	// initPortMapper comment.
 	initPortMapper(webRTCCoordinator)
 
-	// Gather local network NAT/port mapping metrics before sending any
-	// announce requests. NAT topology metrics are used by the Broker to
-	// optimize client and in-proxy matching. Unlike the client, we always
-	// perform this synchronous step here, since waiting doesn't necessarily
-	// block a client tunnel dial.
+	// Gather local network NAT/port mapping metrics and configuration before
+	// sending any announce requests. NAT topology metrics are used by the
+	// Broker to optimize client and in-proxy matching. Unlike the client, we
+	// always perform this synchronous step here, since waiting doesn't
+	// necessarily block a client tunnel dial.
 
 	waitGroup := new(sync.WaitGroup)
 	waitGroup.Add(1)
@@ -472,7 +474,6 @@ func (p *Proxy) doNetworkDiscovery(
 		// NATDiscover may use cached NAT type/port mapping values from
 		// DialParameters, based on the network ID. If discovery is not
 		// successful, the proxy still proceeds to announce.
-
 		NATDiscover(
 			ctx,
 			&NATDiscoverConfig{
@@ -717,7 +718,7 @@ func (p *Proxy) proxyOneClient(
 	// included in SDPs.
 	hasPersonalCompartmentIDs := len(personalCompartmentIDs) > 0
 
-	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnWithAnswer(
+	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnForAnswer(
 		webRTCAnswerCtx,
 		&webRTCConfig{
 			Logger:                      p.config.Logger,

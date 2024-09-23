@@ -437,6 +437,7 @@ const (
 	InproxyProxyDiscoverNATTimeout                     = "InproxyProxyDiscoverNATTimeout"
 	InproxyClientDiscoverNATTimeout                    = "InproxyClientDiscoverNATTimeout"
 	InproxyWebRTCAnswerTimeout                         = "InproxyWebRTCAnswerTimeout"
+	InproxyWebRTCAwaitPortMappingTimeout               = "InproxyWebRTCAwaitPortMappingTimeout"
 	InproxyProxyWebRTCAwaitDataChannelTimeout          = "InproxyProxyWebRTCAwaitDataChannelTimeout"
 	InproxyClientWebRTCAwaitDataChannelTimeout         = "InproxyClientWebRTCAwaitDataChannelTimeout"
 	InproxyProxyDestinationDialTimeout                 = "InproxyProxyDestinationDialTimeout"
@@ -945,6 +946,7 @@ var defaultParameters = map[string]struct {
 	InproxyProxyDiscoverNATTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyClientDiscoverNATTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyWebRTCAnswerTimeout:                         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyWebRTCAwaitPortMappingTimeout:               {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyWebRTCAwaitDataChannelTimeout:          {value: 30 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyClientWebRTCAwaitDataChannelTimeout:         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyDestinationDialTimeout:                 {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},

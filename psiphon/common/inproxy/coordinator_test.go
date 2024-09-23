@@ -203,10 +203,12 @@ type testWebRTCDialCoordinator struct {
 	natType                         NATType
 	setNATType                      func(NATType)
 	portMappingTypes                PortMappingTypes
+	portMappingProbe                *PortMappingProbe
 	setPortMappingTypes             func(PortMappingTypes)
 	bindToDevice                    func(int) error
 	discoverNATTimeout              time.Duration
 	webRTCAnswerTimeout             time.Duration
+	webRTCAwaitPortMappingTimeout   time.Duration
 	webRTCAwaitDataChannelTimeout   time.Duration
 	proxyDestinationDialTimeout     time.Duration
 	proxyRelayInactivityTimeout     time.Duration
@@ -319,6 +321,18 @@ func (t *testWebRTCDialCoordinator) SetPortMappingTypes(portMappingTypes PortMap
 	t.setPortMappingTypes(portMappingTypes)
 }
 
+func (t *testWebRTCDialCoordinator) PortMappingProbe() *PortMappingProbe {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.portMappingProbe
+}
+
+func (t *testWebRTCDialCoordinator) SetPortMappingProbe(portMappingProbe *PortMappingProbe) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.portMappingProbe = portMappingProbe
+}
+
 func (t *testWebRTCDialCoordinator) ResolveAddress(ctx context.Context, network, address string) (string, error) {
 
 	// Note: can't use common/resolver due to import cycle
@@ -387,6 +401,12 @@ func (t *testWebRTCDialCoordinator) WebRTCAnswerTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.webRTCAnswerTimeout
+}
+
+func (t *testWebRTCDialCoordinator) WebRTCAwaitPortMappingTimeout() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.webRTCAwaitPortMappingTimeout
 }
 
 func (t *testWebRTCDialCoordinator) WebRTCAwaitDataChannelTimeout() time.Duration {

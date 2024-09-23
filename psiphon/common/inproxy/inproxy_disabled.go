@@ -128,7 +128,7 @@ type webRTCSDPMetrics struct {
 	filteredICECandidates []string
 }
 
-func newWebRTCConnWithOffer(
+func newWebRTCConnForOffer(
 	ctx context.Context,
 	config *webRTCConfig,
 	hasPersonalCompartmentIDs bool) (
@@ -136,7 +136,7 @@ func newWebRTCConnWithOffer(
 	return nil, WebRTCSessionDescription{}, nil, errors.Trace(errNotEnabled)
 }
 
-func newWebRTCConnWithAnswer(
+func newWebRTCConnForAnswer(
 	ctx context.Context,
 	config *webRTCConfig,
 	peerSDP WebRTCSessionDescription,
@@ -159,11 +159,14 @@ func filterSDPAddresses(
 func initPortMapper(coordinator WebRTCDialCoordinator) {
 }
 
+type PortMappingProbe struct {
+}
+
 func probePortMapping(
 	ctx context.Context,
-	logger common.Logger) (PortMappingTypes, error) {
+	logger common.Logger) (PortMappingTypes, *PortMappingProbe, error) {
 
-	return nil, errors.Trace(errNotEnabled)
+	return nil, nil, errors.Trace(errNotEnabled)
 }
 
 func discoverNATMapping(

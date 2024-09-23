@@ -2799,7 +2799,7 @@ func (controller *Controller) runInproxyProxy() {
 	allowProxy := p.Bool(parameters.InproxyAllowProxy)
 	p.Close()
 
-	// Running an unstream proxy is also an incompatible case.
+	// Running an upstream proxy is also an incompatible case.
 
 	useUpstreamProxy := controller.config.UseUpstreamProxy()
 

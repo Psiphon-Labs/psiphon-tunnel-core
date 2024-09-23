@@ -305,6 +305,15 @@ type WebRTCDialCoordinator interface {
 	// re-run port mapping discovery.
 	SetPortMappingTypes(t PortMappingTypes)
 
+	// PortMappingProbe returns any persisted PortMappingProbe for the current
+	// network, which is used to establish port mappings.
+	PortMappingProbe() *PortMappingProbe
+
+	// SetPortMappingProbe receives a PortMappingProbe instance, which caches
+	// complete port mapping service details and is a required input for
+	// subsequent port mapping establishment on the current network.
+	SetPortMappingProbe(p *PortMappingProbe)
+
 	// ResolveAddress resolves a domain and returns its IP address. Clients
 	// and proxies may use this to hook into the Psiphon custom resolver. The
 	// provider adds the custom resolver tactics and network ID parameters
@@ -343,6 +352,7 @@ type WebRTCDialCoordinator interface {
 
 	DiscoverNATTimeout() time.Duration
 	WebRTCAnswerTimeout() time.Duration
+	WebRTCAwaitPortMappingTimeout() time.Duration
 	WebRTCAwaitDataChannelTimeout() time.Duration
 	ProxyDestinationDialTimeout() time.Duration
 	ProxyRelayInactivityTimeout() time.Duration
