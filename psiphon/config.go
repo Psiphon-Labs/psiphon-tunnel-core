@@ -39,6 +39,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
@@ -1409,6 +1410,18 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 
 		// Don't allow an in-proxy client and proxy run in the same app to match.
 		return errors.TraceNew("invalid overlapping personal compartment IDs")
+	}
+
+	if len(config.InproxyProxyPersonalCompartmentID) > 0 &&
+		!inproxy.Enabled() {
+
+		// When in-proxy personal pairing mode is on, fail if the build was
+		// made without the PSIPHON_ENABLE_INPROXY build tag.
+		//
+		// Note that this check could also be enforced in the case of a
+		// LimitTunnelProtocols.IsOnlyInproxyTunnelProtocols configuration,
+		// but that can be overridden by tactics so we allow it.
+		return errors.TraceNew("build does not enable required in-proxy functionality")
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels().
