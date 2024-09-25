@@ -311,7 +311,8 @@ func NewInproxyBrokerClientInstance(
 	// Select common or personal compartment IDs. Clients must provide at
 	// least on compartment ID.
 
-	commonCompartmentIDs, personalCompartmentIDs, err := prepareCompartmentIDs(config, p, isProxy)
+	commonCompartmentIDs, personalCompartmentIDs, err :=
+		prepareInproxyCompartmentIDs(config, p, isProxy)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -330,32 +331,7 @@ func NewInproxyBrokerClientInstance(
 	// personal pairing, a configuration which can be used to reserve more
 	// capacity for personal pairing, given the simple rendezvous scheme below.
 
-	var brokerSpecs parameters.InproxyBrokerSpecsValue
-	if isProxy {
-		if config.IsInproxyPersonalPairingMode() {
-			brokerSpecs = p.InproxyBrokerSpecs(
-				parameters.InproxyProxyPersonalPairingBrokerSpecs,
-				parameters.InproxyPersonalPairingBrokerSpecs,
-				parameters.InproxyProxyBrokerSpecs,
-				parameters.InproxyBrokerSpecs)
-		} else {
-			brokerSpecs = p.InproxyBrokerSpecs(
-				parameters.InproxyProxyBrokerSpecs,
-				parameters.InproxyBrokerSpecs)
-		}
-	} else {
-		if config.IsInproxyPersonalPairingMode() {
-			brokerSpecs = p.InproxyBrokerSpecs(
-				parameters.InproxyClientPersonalPairingBrokerSpecs,
-				parameters.InproxyPersonalPairingBrokerSpecs,
-				parameters.InproxyClientBrokerSpecs,
-				parameters.InproxyBrokerSpecs)
-		} else {
-			brokerSpecs = p.InproxyBrokerSpecs(
-				parameters.InproxyClientBrokerSpecs,
-				parameters.InproxyBrokerSpecs)
-		}
-	}
+	brokerSpecs := getInproxyBrokerSpecs(config, p, isProxy)
 	if len(brokerSpecs) == 0 {
 		return nil, errors.TraceNew("no broker specs")
 	}
@@ -583,7 +559,61 @@ func NewInproxyBrokerClientInstance(
 	return b, nil
 }
 
-func prepareCompartmentIDs(
+func haveInproxyProxyBrokerSpecs(config *Config) bool {
+	p := config.GetParameters().Get()
+	defer p.Close()
+	return len(getInproxyBrokerSpecs(config, p, true)) > 0
+}
+
+func haveInproxyClientBrokerSpecs(config *Config) bool {
+	p := config.GetParameters().Get()
+	defer p.Close()
+	return len(getInproxyBrokerSpecs(config, p, false)) > 0
+}
+
+func getInproxyBrokerSpecs(
+	config *Config,
+	p parameters.ParametersAccessor,
+	isProxy bool) parameters.InproxyBrokerSpecsValue {
+
+	if isProxy {
+		if config.IsInproxyPersonalPairingMode() {
+			return p.InproxyBrokerSpecs(
+				parameters.InproxyProxyPersonalPairingBrokerSpecs,
+				parameters.InproxyPersonalPairingBrokerSpecs,
+				parameters.InproxyProxyBrokerSpecs,
+				parameters.InproxyBrokerSpecs)
+		} else {
+			return p.InproxyBrokerSpecs(
+				parameters.InproxyProxyBrokerSpecs,
+				parameters.InproxyBrokerSpecs)
+		}
+	} else {
+		if config.IsInproxyPersonalPairingMode() {
+			return p.InproxyBrokerSpecs(
+				parameters.InproxyClientPersonalPairingBrokerSpecs,
+				parameters.InproxyPersonalPairingBrokerSpecs,
+				parameters.InproxyClientBrokerSpecs,
+				parameters.InproxyBrokerSpecs)
+		} else {
+			return p.InproxyBrokerSpecs(
+				parameters.InproxyClientBrokerSpecs,
+				parameters.InproxyBrokerSpecs)
+		}
+	}
+}
+
+func haveInproxyCommonCompartmentIDs(config *Config) bool {
+	p := config.GetParameters().Get()
+	defer p.Close()
+	if len(p.InproxyCompartmentIDs(parameters.InproxyCommonCompartmentIDs)) > 0 {
+		return true
+	}
+	commonCompartmentIDs, _ := LoadInproxyCommonCompartmentIDs()
+	return len(commonCompartmentIDs) > 0
+}
+
+func prepareInproxyCompartmentIDs(
 	config *Config,
 	p parameters.ParametersAccessor,
 	isProxy bool) ([]inproxy.ID, []inproxy.ID, error) {
