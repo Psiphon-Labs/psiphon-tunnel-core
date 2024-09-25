@@ -252,7 +252,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 			return common.LogFields(params)
 		},
 
-		GetTactics: func(_ common.GeoIPData, _ common.APIParameters) ([]byte, string, error) {
+		GetTacticsPayload: func(_ common.GeoIPData, _ common.APIParameters) ([]byte, string, error) {
 			// Exercise both new and unchanged tactics
 			if prng.FlipCoin() {
 				return testNewTacticsPayload, testNewTacticsTag, nil

@@ -357,7 +357,7 @@ func NewMeekServer(
 				APIParameterValidator:          getInproxyBrokerAPIParameterValidator(support.Config),
 				APIParameterLogFieldFormatter:  getInproxyBrokerAPIParameterLogFieldFormatter(),
 				IsValidServerEntryTag:          support.PsinetDatabase.IsValidServerEntryTag,
-				GetTactics:                     meekServer.inproxyBrokerGetTactics,
+				GetTacticsPayload:              meekServer.inproxyBrokerGetTacticsPayload,
 				PrivateKey:                     sessionPrivateKey,
 				ObfuscationRootSecret:          obfuscationRootSecret,
 				ServerEntrySignaturePublicKey:  support.Config.InproxyBrokerServerEntrySignaturePublicKey,
@@ -1887,14 +1887,14 @@ func (server *MeekServer) inproxyBrokerAllowDomainFrontedDestinations(clientGeoI
 	return server.lookupAllowTactic(clientGeoIPData, parameters.InproxyAllowDomainFrontedDestinations)
 }
 
-// inproxyBrokerGetTactics is a callback used by the in-proxy broker to
+// inproxyBrokerGetTacticsPayload is a callback used by the in-proxy broker to
 // provide tactics to proxies.
 //
 // The proxy sends its current tactics tag in apiParameters, and, when there
-// are new tactics, inproxyBrokerGetTactics returns the payload and the new
+// are new tactics, inproxyBrokerGetTacticsPayload returns the payload and the new
 // tactics tag. The broker should log new_tactics_tag in its ProxyAnnounce
 // handler.
-func (server *MeekServer) inproxyBrokerGetTactics(
+func (server *MeekServer) inproxyBrokerGetTacticsPayload(
 	geoIPData common.GeoIPData,
 	apiParameters common.APIParameters) ([]byte, string, error) {
 

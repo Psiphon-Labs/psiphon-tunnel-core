@@ -62,9 +62,10 @@ type LookupGeoIP func(IP string) common.GeoIPData
 // timeouts including long-polling for proxy announcements.
 type ExtendTransportTimeout func(timeout time.Duration)
 
-// GetTactics is a callback which returns the appropriate tactics for the
-// specified client/proxy GeoIP data and API parameters.
-type GetTactics func(common.GeoIPData, common.APIParameters) ([]byte, string, error)
+// GetTacticsPayload is a callback which returns the appropriate tactics
+// payload for the specified client/proxy GeoIP data and API parameters.
+type GetTacticsPayload func(
+	common.GeoIPData, common.APIParameters) ([]byte, string, error)
 
 // Broker is the in-proxy broker component, which matches clients and proxies
 // and provides WebRTC signaling functionalty.
@@ -145,8 +146,8 @@ type BrokerConfig struct {
 	// APIParameterValidator is a callback that formats base API metrics.
 	APIParameterLogFieldFormatter common.APIParameterLogFieldFormatter
 
-	// GetTactics provides a tactics lookup service.
-	GetTactics GetTactics
+	// GetTacticsPayload provides a tactics lookup service.
+	GetTacticsPayload GetTacticsPayload
 
 	// IsValidServerEntryTag is a callback which checks if the specified
 	// server entry tag is on the list of valid and active Psiphon server
@@ -559,7 +560,7 @@ func (b *Broker) handleProxyAnnounce(
 	// proxy can store and apply the new tactics before announcing again.
 
 	var tacticsPayload []byte
-	tacticsPayload, newTacticsTag, err = b.config.GetTactics(geoIPData, apiParams)
+	tacticsPayload, newTacticsTag, err = b.config.GetTacticsPayload(geoIPData, apiParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
