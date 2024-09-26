@@ -119,11 +119,13 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// tunnels established by the controller.
 	NoticeSessionId(config.SessionID)
 
-	// Attempt to apply any valid, local stored tactics. The pre-done context
-	// ensures no tactics request is attempted now.
-	doneContext, cancelFunc := context.WithCancel(context.Background())
-	cancelFunc()
-	GetTactics(doneContext, config, true)
+	if !config.DisableTactics {
+		// Attempt to apply any valid, local stored tactics. The pre-done context
+		// ensures no tactics request is attempted now.
+		doneContext, cancelFunc := context.WithCancel(context.Background())
+		cancelFunc()
+		GetTactics(doneContext, config, true)
+	}
 
 	p := config.GetParameters().Get()
 	splitTunnelClassificationTTL :=
