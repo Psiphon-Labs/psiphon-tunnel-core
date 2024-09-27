@@ -78,6 +78,7 @@ type GetTacticsPayload func(
 // encapsulating secure session packets.
 type Broker struct {
 	config               *BrokerConfig
+	brokerID             ID
 	initiatorSessions    *InitiatorSessions
 	responderSessions    *ResponderSessions
 	matcher              *Matcher
@@ -207,8 +208,16 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		return nil, errors.Trace(err)
 	}
 
+	// The broker ID is the broker's session public key.
+	publicKey, err := config.PrivateKey.GetPublicKey()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	brokerID := ID(publicKey)
+
 	b := &Broker{
 		config:            config,
+		brokerID:          brokerID,
 		initiatorSessions: initiatorSessions,
 		responderSessions: responderSessions,
 		matcher: NewMatcher(&MatcherConfig{
@@ -496,6 +505,7 @@ func (b *Broker) handleProxyAnnounce(
 			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-announce"
+		logFields["broker_id"] = b.brokerID
 		logFields["proxy_id"] = proxyID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		logFields["connection_id"] = connectionID
@@ -756,6 +766,7 @@ func (b *Broker) handleClientOffer(
 			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "client-offer"
+		logFields["broker_id"] = b.brokerID
 		if serverParams != nil {
 			logFields["destination_server_id"] = serverParams.serverID
 		}
@@ -1056,6 +1067,7 @@ func (b *Broker) handleProxyAnswer(
 			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-answer"
+		logFields["broker_id"] = b.brokerID
 		logFields["proxy_id"] = proxyID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		if proxyAnswer != nil {
@@ -1178,6 +1190,7 @@ func (b *Broker) handleClientRelayedPacket(
 			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "client-relayed-packet"
+		logFields["broker_id"] = b.brokerID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		if relayedPacketRequest != nil {
 			logFields["connection_id"] = relayedPacketRequest.ConnectionID
