@@ -192,8 +192,10 @@ NetworkReachability nw_interface_type_network_reachability(nw_interface_type_t i
         // Note: this monitor cannot be used after being cancelled. Its update handler will not
         // fire again and cannot be restarted with nw_path_monitor_start. A new monitor must be
         // created and started.
-        nw_path_monitor_cancel(self->monitor);
-        self->monitor = nil;
+        if (self->monitor != nil) {
+            nw_path_monitor_cancel(self->monitor);
+            self->monitor = nil;
+        }
     }
 }
 
