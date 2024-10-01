@@ -451,6 +451,7 @@ const (
 	InproxyClientNoMatchFailoverPersonalProbability    = "InproxyClientNoMatchFailoverPersonalProbability"
 	InproxyFrontingProviderClientMaxRequestTimeouts    = "InproxyFrontingProviderClientMaxRequestTimeouts"
 	InproxyFrontingProviderServerMaxRequestTimeouts    = "InproxyFrontingProviderServerMaxRequestTimeouts"
+	InproxyProxyOnBrokerClientFailedRetryPeriod        = "InproxyProxyOnBrokerClientFailedRetryPeriod"
 
 	// Retired parameters
 
@@ -960,6 +961,7 @@ var defaultParameters = map[string]struct {
 	InproxyClientNoMatchFailoverPersonalProbability:    {value: 1.0, minimum: 0.0},
 	InproxyFrontingProviderClientMaxRequestTimeouts:    {value: KeyDurations{}},
 	InproxyFrontingProviderServerMaxRequestTimeouts:    {value: KeyDurations{}, flags: serverSideOnly},
+	InproxyProxyOnBrokerClientFailedRetryPeriod:        {value: 30 * time.Second, minimum: time.Duration(0)},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

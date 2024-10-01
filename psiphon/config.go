@@ -972,65 +972,66 @@ type Config struct {
 	SteeringIPProbability     *float64
 
 	// The following in-proxy fields are for testing purposes only.
-	InproxyAllowProxy                                      *bool
-	InproxyAllowClient                                     *bool
-	InproxyTunnelProtocolSelectionProbability              *float64
-	InproxyBrokerSpecs                                     parameters.InproxyBrokerSpecsValue
-	InproxyPersonalPairingBrokerSpecs                      parameters.InproxyBrokerSpecsValue
-	InproxyProxyBrokerSpecs                                parameters.InproxyBrokerSpecsValue
-	InproxyProxyPersonalPairingBrokerSpecs                 parameters.InproxyBrokerSpecsValue
-	InproxyClientBrokerSpecs                               parameters.InproxyBrokerSpecsValue
-	InproxyClientPersonalPairingBrokerSpecs                parameters.InproxyBrokerSpecsValue
-	InproxyReplayBrokerDialParametersTTLSeconds            *int
-	InproxyReplayBrokerUpdateFrequencySeconds              *int
-	InproxyReplayBrokerDialParametersProbability           *float64
-	InproxyReplayBrokerRetainFailedProbability             *float64
-	InproxyCommonCompartmentIDs                            parameters.InproxyCompartmentIDsValue
-	InproxyMaxCompartmentIDListLength                      *int
-	InproxyProxyAnnounceRequestTimeoutMilliseconds         *int
-	InproxyProxyAnnounceDelayMilliseconds                  *int
-	InproxyProxyAnnounceDelayJitter                        *float64
-	InproxyProxyAnswerRequestTimeoutMilliseconds           *int
-	InproxyClientOfferRequestTimeoutMilliseconds           *int
-	InproxyClientOfferRequestPersonalTimeoutMilliseconds   *int
-	InproxyClientOfferRetryDelayMilliseconds               *int
-	InproxyClientOfferRetryJitter                          *float64
-	InproxyClientRelayedPacketRequestTimeoutMilliseconds   *int
-	InproxyDTLSRandomizationProbability                    *float64
-	InproxyDataChannelTrafficShapingProbability            *float64
-	InproxyDataChannelTrafficShapingParameters             *parameters.InproxyDataChannelTrafficShapingParametersValue
-	InproxySTUNServerAddresses                             []string
-	InproxySTUNServerAddressesRFC5780                      []string
-	InproxyProxySTUNServerAddresses                        []string
-	InproxyProxySTUNServerAddressesRFC5780                 []string
-	InproxyClientSTUNServerAddresses                       []string
-	InproxyClientSTUNServerAddressesRFC5780                []string
-	InproxyClientDiscoverNATProbability                    *float64
-	InproxyDisableSTUN                                     *bool
-	InproxyDisablePortMapping                              *bool
-	InproxyDisableInboundForMobileNetworks                 *bool
-	InproxyDisableIPv6ICECandidates                        *bool
-	InproxyProxyDisableSTUN                                *bool
-	InproxyProxyDisablePortMapping                         *bool
-	InproxyProxyDisableInboundForMobileNetworks            *bool
-	InproxyProxyDisableIPv6ICECandidates                   *bool
-	InproxyClientDisableSTUN                               *bool
-	InproxyClientDisablePortMapping                        *bool
-	InproxyClientDisableInboundForMobileNetworks           *bool
-	InproxyClientDisableIPv6ICECandidates                  *bool
-	InproxyProxyDiscoverNATTimeoutMilliseconds             *int
-	InproxyClientDiscoverNATTimeoutMilliseconds            *int
-	InproxyWebRTCAnswerTimeoutMilliseconds                 *int
-	InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds  *int
-	InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds *int
-	InproxyProxyDestinationDialTimeoutMilliseconds         *int
-	InproxyPsiphonAPIRequestTimeoutMilliseconds            *int
-	InproxyProxyTotalActivityNoticePeriodMilliseconds      *int
-	InproxyClientDialRateLimitQuantity                     *int
-	InproxyClientDialRateLimitIntervalMilliseconds         *int
-	InproxyClientNoMatchFailoverProbability                *float64
-	InproxyClientNoMatchFailoverPersonalProbability        *float64
-	InproxyFrontingProviderClientMaxRequestTimeouts        map[string]string
+	InproxyAllowProxy                                       *bool
+	InproxyAllowClient                                      *bool
+	InproxyTunnelProtocolSelectionProbability               *float64
+	InproxyBrokerSpecs                                      parameters.InproxyBrokerSpecsValue
+	InproxyPersonalPairingBrokerSpecs                       parameters.InproxyBrokerSpecsValue
+	InproxyProxyBrokerSpecs                                 parameters.InproxyBrokerSpecsValue
+	InproxyProxyPersonalPairingBrokerSpecs                  parameters.InproxyBrokerSpecsValue
+	InproxyClientBrokerSpecs                                parameters.InproxyBrokerSpecsValue
+	InproxyClientPersonalPairingBrokerSpecs                 parameters.InproxyBrokerSpecsValue
+	InproxyReplayBrokerDialParametersTTLSeconds             *int
+	InproxyReplayBrokerUpdateFrequencySeconds               *int
+	InproxyReplayBrokerDialParametersProbability            *float64
+	InproxyReplayBrokerRetainFailedProbability              *float64
+	InproxyCommonCompartmentIDs                             parameters.InproxyCompartmentIDsValue
+	InproxyMaxCompartmentIDListLength                       *int
+	InproxyProxyAnnounceRequestTimeoutMilliseconds          *int
+	InproxyProxyAnnounceDelayMilliseconds                   *int
+	InproxyProxyAnnounceDelayJitter                         *float64
+	InproxyProxyAnswerRequestTimeoutMilliseconds            *int
+	InproxyClientOfferRequestTimeoutMilliseconds            *int
+	InproxyClientOfferRequestPersonalTimeoutMilliseconds    *int
+	InproxyClientOfferRetryDelayMilliseconds                *int
+	InproxyClientOfferRetryJitter                           *float64
+	InproxyClientRelayedPacketRequestTimeoutMilliseconds    *int
+	InproxyDTLSRandomizationProbability                     *float64
+	InproxyDataChannelTrafficShapingProbability             *float64
+	InproxyDataChannelTrafficShapingParameters              *parameters.InproxyDataChannelTrafficShapingParametersValue
+	InproxySTUNServerAddresses                              []string
+	InproxySTUNServerAddressesRFC5780                       []string
+	InproxyProxySTUNServerAddresses                         []string
+	InproxyProxySTUNServerAddressesRFC5780                  []string
+	InproxyClientSTUNServerAddresses                        []string
+	InproxyClientSTUNServerAddressesRFC5780                 []string
+	InproxyClientDiscoverNATProbability                     *float64
+	InproxyDisableSTUN                                      *bool
+	InproxyDisablePortMapping                               *bool
+	InproxyDisableInboundForMobileNetworks                  *bool
+	InproxyDisableIPv6ICECandidates                         *bool
+	InproxyProxyDisableSTUN                                 *bool
+	InproxyProxyDisablePortMapping                          *bool
+	InproxyProxyDisableInboundForMobileNetworks             *bool
+	InproxyProxyDisableIPv6ICECandidates                    *bool
+	InproxyClientDisableSTUN                                *bool
+	InproxyClientDisablePortMapping                         *bool
+	InproxyClientDisableInboundForMobileNetworks            *bool
+	InproxyClientDisableIPv6ICECandidates                   *bool
+	InproxyProxyDiscoverNATTimeoutMilliseconds              *int
+	InproxyClientDiscoverNATTimeoutMilliseconds             *int
+	InproxyWebRTCAnswerTimeoutMilliseconds                  *int
+	InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds   *int
+	InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds  *int
+	InproxyProxyDestinationDialTimeoutMilliseconds          *int
+	InproxyPsiphonAPIRequestTimeoutMilliseconds             *int
+	InproxyProxyTotalActivityNoticePeriodMilliseconds       *int
+	InproxyClientDialRateLimitQuantity                      *int
+	InproxyClientDialRateLimitIntervalMilliseconds          *int
+	InproxyClientNoMatchFailoverProbability                 *float64
+	InproxyClientNoMatchFailoverPersonalProbability         *float64
+	InproxyFrontingProviderClientMaxRequestTimeouts         map[string]string
+	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int
 
 	InproxySkipAwaitFullyConnected  bool
 	InproxyEnableWebRTCDebugLogging bool
@@ -2662,6 +2663,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyFrontingProviderClientMaxRequestTimeouts != nil {
 		applyParameters[parameters.InproxyFrontingProviderClientMaxRequestTimeouts] = config.InproxyFrontingProviderClientMaxRequestTimeouts
+	}
+
+	if config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyOnBrokerClientFailedRetryPeriod] = fmt.Sprintf("%dms", *config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds)
 	}
 
 	// When adding new config dial parameters that may override tactics, also

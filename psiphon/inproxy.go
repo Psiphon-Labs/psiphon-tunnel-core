@@ -288,9 +288,11 @@ type InproxyBrokerClientInstance struct {
 	relayedPacketRequestTimeout   time.Duration
 	replayRetainFailedProbability float64
 	replayUpdateFrequency         time.Duration
+	retryOnFailedPeriod           time.Duration
 
 	mutex           sync.Mutex
 	lastStoreReplay time.Time
+	lastSuccess     time.Time
 }
 
 // NewInproxyBrokerClientInstance creates a new InproxyBrokerClientInstance.
@@ -441,6 +443,10 @@ func NewInproxyBrokerClientInstance(
 		brokerSpec = brokerSpecs[0]
 	}
 
+	// The broker ID is the broker's session public key.
+	brokerID := brokerSpec.BrokerPublicKey
+	NoticeInfo("inproxy: selected broker %s", brokerID)
+
 	// Generate new broker dial parameters if not replaying. Later, isReplay
 	// is used to report the replay metric.
 
@@ -523,6 +529,12 @@ func NewInproxyBrokerClientInstance(
 		relayedPacketRequestTimeout:   p.Duration(parameters.InproxyClientRelayedPacketRequestTimeout),
 		replayRetainFailedProbability: p.Float(parameters.InproxyReplayBrokerRetainFailedProbability),
 		replayUpdateFrequency:         p.Duration(parameters.InproxyReplayBrokerUpdateFrequency),
+	}
+
+	if isProxy && !config.IsInproxyPersonalPairingMode() {
+		// This retry is applied only for proxies and only in common pairing
+		// mode. See comment in BrokerClientRoundTripperFailed.
+		b.retryOnFailedPeriod = p.Duration(parameters.InproxyProxyOnBrokerClientFailedRetryPeriod)
 	}
 
 	// Adjust long-polling request timeouts to respect any maximum request
@@ -811,6 +823,9 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 		return
 	}
 
+	now := time.Now()
+	b.lastSuccess = now
+
 	// Set replay or extend the broker dial parameters replay TTL after a
 	// success. With tunnel dial parameters, the replay TTL is extended after
 	// every successful tunnel connection. Since there are potentially more
@@ -818,7 +833,6 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 	// extended after some target duration has elapsed, to avoid excessive
 	// datastore writes.
 
-	now := time.Now()
 	if b.replayEnabled && now.Sub(b.lastStoreReplay) > b.replayUpdateFrequency {
 		b.brokerDialParams.LastUsedTimestamp = time.Now()
 
@@ -854,6 +868,39 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 		// is just used for sanity check in this implementation, since each
 		// InproxyBrokerClientInstance has exactly one round tripper.
 		NoticeError("BrokerClientRoundTripperFailed: roundTripper instance mismatch")
+		return
+	}
+
+	// For common pairing proxies, skip both the replay deletion and the
+	// InproxyBrokerClientInstance reset for a short duration after a recent
+	// round trip success. In this case, subsequent broker requests will use
+	// the existing round tripper, wired up with the same dial parameters and
+	// fronting provider selection. If the failure was due to a transient
+	// TLS/TCP network failure, the net/http round tripper should establish a
+	// new connection on the next request.
+	//
+	// This retry is intended to retain proxy affinity with its currently
+	// selected broker in cases such as broker service upgrades/restarts or
+	// brief network interruptions, mitigating load balancing issues that
+	// otherwise occur (e.g., all proxies fail over to other brokers, leaving
+	// no supply on a restarted broker).
+	//
+	// In common pairing mode, clients do not perform this retry and
+	// immediately reset, as is appropriate for the tunnel establishment
+	// race. In personal pairing mode, neither proxies nor clients retry and
+	// instead follow the personal pairing broker selection scheme in an
+	// effort to rendezvous at the same broker with minimal delay.
+	//
+	// A delay before retrying announce requests is appropriate, but there is
+	// no delay added here since Proxy.proxyOneClient already schedule delays
+	// between announcements.
+	if b.brokerClientManager.isProxy &&
+		!b.config.IsInproxyPersonalPairingMode() &&
+		b.retryOnFailedPeriod > 0 &&
+		!b.lastSuccess.IsZero() &&
+		time.Since(b.lastSuccess) <= b.retryOnFailedPeriod {
+
+		NoticeWarning("BrokerClientRoundTripperFailed: retry roundTripper")
 		return
 	}
 
