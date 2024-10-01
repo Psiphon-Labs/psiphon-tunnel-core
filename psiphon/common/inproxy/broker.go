@@ -208,16 +208,19 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		return nil, errors.Trace(err)
 	}
 
-	// The broker ID is the broker's session public key.
+	// The broker ID is the broker's session public key in Curve25519 form.
 	publicKey, err := config.PrivateKey.GetPublicKey()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	brokerID := ID(publicKey)
+	brokerID, err := publicKey.ToCurve25519()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	b := &Broker{
 		config:            config,
-		brokerID:          brokerID,
+		brokerID:          ID(brokerID),
 		initiatorSessions: initiatorSessions,
 		responderSessions: responderSessions,
 		matcher: NewMatcher(&MatcherConfig{

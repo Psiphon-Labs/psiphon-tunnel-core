@@ -443,10 +443,6 @@ func NewInproxyBrokerClientInstance(
 		brokerSpec = brokerSpecs[0]
 	}
 
-	// The broker ID is the broker's session public key.
-	brokerID := brokerSpec.BrokerPublicKey
-	NoticeInfo("inproxy: selected broker %s", brokerID)
-
 	// Generate new broker dial parameters if not replaying. Later, isReplay
 	// is used to report the replay metric.
 
@@ -567,6 +563,13 @@ func NewInproxyBrokerClientInstance(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	// The broker ID is the broker's session public key in Curve25519 form.
+	brokerID, err := brokerPublicKey.ToCurve25519()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	NoticeInfo("inproxy: selected broker %s", inproxy.ID(brokerID))
 
 	return b, nil
 }
@@ -894,6 +897,19 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 	// A delay before retrying announce requests is appropriate, but there is
 	// no delay added here since Proxy.proxyOneClient already schedule delays
 	// between announcements.
+	//
+	// Limitation: BrokerClientRoundTripperSucceeded is not invoked -- and no
+	// recent last success time is set -- for proxies which announce, don't
+	// match, and then hit the misaligned fronting provider request timeout
+	// issue. See the ""unexpected response status code" case and comment in
+	// InproxyBrokerRoundTripper.RoundTrip. This case should be mitigated by
+	// configuring InproxyFrontingProviderServerMaxRequestTimeouts.
+	//
+	// TODO: also retry after initial startup, with no previous success? This
+	// would further retain random load balancing of proxies newly starting
+	// at the same time that their initially selected broker is restarted or
+	// briefly unavailable.
+
 	if b.brokerClientManager.isProxy &&
 		!b.config.IsInproxyPersonalPairingMode() &&
 		b.retryOnFailedPeriod > 0 &&
