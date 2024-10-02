@@ -222,9 +222,11 @@ type InproxyBrokerClientInstance struct {
 	relayedPacketRequestTimeout   time.Duration
 	replayRetainFailedProbability float64
 	replayUpdateFrequency         time.Duration
+	retryOnFailedPeriod           time.Duration
 
 	mutex           sync.Mutex
 	lastStoreReplay time.Time
+	lastSuccess     time.Time
 }
 
 // NewInproxyBrokerClientInstance creates a new InproxyBrokerClientInstance.
@@ -409,6 +411,12 @@ func NewInproxyBrokerClientInstance(
 		replayUpdateFrequency:         p.Duration(parameters.InproxyReplayBrokerUpdateFrequency),
 	}
 
+	if isProxy && !config.IsInproxyPersonalPairingMode() {
+		// This retry is applied only for proxies and only in common pairing
+		// mode. See comment in BrokerClientRoundTripperFailed.
+		b.retryOnFailedPeriod = p.Duration(parameters.InproxyProxyOnBrokerClientFailedRetryPeriod)
+	}
+
 	// Initialize broker client. This will start with a fresh broker session.
 	//
 	// When resetBrokerClientOnRoundTripperFailed is invoked due to a failure
@@ -423,6 +431,13 @@ func NewInproxyBrokerClientInstance(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	// The broker ID is the broker's session public key in Curve25519 form.
+	brokerID, err := brokerPublicKey.ToCurve25519()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	NoticeInfo("inproxy: selected broker %s", inproxy.ID(brokerID))
 
 	return b, nil
 }
@@ -605,6 +620,9 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 		return
 	}
 
+	now := time.Now()
+	b.lastSuccess = now
+
 	// Set replay or extend the broker dial parameters replay TTL after a
 	// success. With tunnel dial parameters, the replay TTL is extended after
 	// every successful tunnel connection. Since there are potentially more
@@ -612,7 +630,6 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 	// extended after some target duration has elapsed, to avoid excessive
 	// datastore writes.
 
-	now := time.Now()
 	if b.replayEnabled && now.Sub(b.lastStoreReplay) > b.replayUpdateFrequency {
 		b.brokerDialParams.LastUsedTimestamp = time.Now()
 
@@ -648,6 +665,52 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 		// is just used for sanity check in this implementation, since each
 		// InproxyBrokerClientInstance has exactly one round tripper.
 		NoticeError("BrokerClientRoundTripperFailed: roundTripper instance mismatch")
+		return
+	}
+
+	// For common pairing proxies, skip both the replay deletion and the
+	// InproxyBrokerClientInstance reset for a short duration after a recent
+	// round trip success. In this case, subsequent broker requests will use
+	// the existing round tripper, wired up with the same dial parameters and
+	// fronting provider selection. If the failure was due to a transient
+	// TLS/TCP network failure, the net/http round tripper should establish a
+	// new connection on the next request.
+	//
+	// This retry is intended to retain proxy affinity with its currently
+	// selected broker in cases such as broker service upgrades/restarts or
+	// brief network interruptions, mitigating load balancing issues that
+	// otherwise occur (e.g., all proxies fail over to other brokers, leaving
+	// no supply on a restarted broker).
+	//
+	// In common pairing mode, clients do not perform this retry and
+	// immediately reset, as is appropriate for the tunnel establishment
+	// race. In personal pairing mode, neither proxies nor clients retry and
+	// instead follow the personal pairing broker selection scheme in an
+	// effort to rendezvous at the same broker with minimal delay.
+	//
+	// A delay before retrying announce requests is appropriate, but there is
+	// no delay added here since Proxy.proxyOneClient already schedule delays
+	// between announcements.
+	//
+	// Limitation: BrokerClientRoundTripperSucceeded is not invoked -- and no
+	// recent last success time is set -- for proxies which announce, don't
+	// match, and then hit the misaligned fronting provider request timeout
+	// issue. See the ""unexpected response status code" case and comment in
+	// InproxyBrokerRoundTripper.RoundTrip. This case should be mitigated by
+	// configuring InproxyFrontingProviderServerMaxRequestTimeouts.
+	//
+	// TODO: also retry after initial startup, with no previous success? This
+	// would further retain random load balancing of proxies newly starting
+	// at the same time that their initially selected broker is restarted or
+	// briefly unavailable.
+
+	if b.brokerClientManager.isProxy &&
+		!b.config.IsInproxyPersonalPairingMode() &&
+		b.retryOnFailedPeriod > 0 &&
+		!b.lastSuccess.IsZero() &&
+		time.Since(b.lastSuccess) <= b.retryOnFailedPeriod {
+
+		NoticeWarning("BrokerClientRoundTripperFailed: retry roundTripper")
 		return
 	}
 

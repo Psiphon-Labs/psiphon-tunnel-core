@@ -440,6 +440,7 @@ const (
 	InproxyPersonalPairingConnectionWorkerPoolSize     = "InproxyPersonalPairingConnectionWorkerPoolSize"
 	InproxyClientDialRateLimitQuantity                 = "InproxyClientDialRateLimitQuantity"
 	InproxyClientDialRateLimitInterval                 = "InproxyClientDialRateLimitInterval"
+	InproxyProxyOnBrokerClientFailedRetryPeriod        = "InproxyProxyOnBrokerClientFailedRetryPeriod"
 
 	// Retired parameters
 
@@ -938,6 +939,7 @@ var defaultParameters = map[string]struct {
 	InproxyPersonalPairingConnectionWorkerPoolSize:     {value: 2, minimum: 1},
 	InproxyClientDialRateLimitQuantity:                 {value: 10, minimum: 0},
 	InproxyClientDialRateLimitInterval:                 {value: 1 * time.Minute, minimum: time.Duration(0)},
+	InproxyProxyOnBrokerClientFailedRetryPeriod:        {value: 30 * time.Second, minimum: time.Duration(0)},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
