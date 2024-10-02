@@ -358,25 +358,6 @@ func (controller *Controller) Run(ctx context.Context) {
 			defer httpProxy.Close()
 		}
 
-		if !controller.config.DisableRemoteServerListFetcher {
-
-			if controller.config.RemoteServerListURLs != nil {
-				controller.runWaitGroup.Add(1)
-				go controller.remoteServerListFetcher(
-					"common",
-					FetchCommonRemoteServerList,
-					controller.signalFetchCommonRemoteServerList)
-			}
-
-			if controller.config.ObfuscatedServerListRootURLs != nil {
-				controller.runWaitGroup.Add(1)
-				go controller.remoteServerListFetcher(
-					"obfuscated",
-					FetchObfuscatedServerLists,
-					controller.signalFetchObfuscatedServerLists)
-			}
-		}
-
 		if controller.config.EnableUpgradeDownload {
 			controller.runWaitGroup.Add(1)
 			go controller.upgradeDownloader()
@@ -396,6 +377,25 @@ func (controller *Controller) Run(ctx context.Context) {
 
 		if controller.packetTunnelClient != nil {
 			controller.packetTunnelClient.Start()
+		}
+	}
+
+	if !controller.config.DisableRemoteServerListFetcher {
+
+		if controller.config.RemoteServerListURLs != nil {
+			controller.runWaitGroup.Add(1)
+			go controller.remoteServerListFetcher(
+				"common",
+				FetchCommonRemoteServerList,
+				controller.signalFetchCommonRemoteServerList)
+		}
+
+		if controller.config.ObfuscatedServerListRootURLs != nil {
+			controller.runWaitGroup.Add(1)
+			go controller.remoteServerListFetcher(
+				"obfuscated",
+				FetchObfuscatedServerLists,
+				controller.signalFetchObfuscatedServerLists)
 		}
 	}
 
