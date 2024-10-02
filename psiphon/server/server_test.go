@@ -1048,6 +1048,21 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			case serverTunnelLog <- logFields:
 			default:
 			}
+		case "inproxy_broker":
+			// Check that broker receives the correct fronting provider ID.
+			//
+			// TODO: check inproxy_broker logs received when expected and
+			// check more fields
+			event, ok := logFields["broker_event"].(string)
+			if !ok {
+				t.Errorf("missing inproxy_broker.broker_event")
+			}
+			if event == "client_offer" || event == "proxy_announce" {
+				fronting_provider_id, ok := logFields["fronting_provider_id"].(string)
+				if !ok || fronting_provider_id != inproxyTestConfig.brokerFrontingProviderID {
+					t.Errorf("unexpected inproxy_broker.fronting_provider_id")
+				}
+			}
 		}
 	})
 
@@ -1327,8 +1342,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			psiphon.SetAllowOverlappingPersonalCompartmentIDs(true)
 			defer psiphon.SetAllowOverlappingPersonalCompartmentIDs(false)
 
-			clientConfig.InproxyClientPersonalCompartmentIDs = []string{inproxyTestConfig.personalCompartmentID}
-			clientConfig.InproxyProxyPersonalCompartmentIDs = []string{inproxyTestConfig.personalCompartmentID}
+			clientConfig.InproxyClientPersonalCompartmentID = inproxyTestConfig.personalCompartmentID
+			clientConfig.InproxyProxyPersonalCompartmentID = inproxyTestConfig.personalCompartmentID
 		}
 
 		// Simulate a CDN adding required HTTP headers by injecting them at
@@ -3612,6 +3627,18 @@ func generateInproxyTestConfig(
 		clientBrokerSpecsJSON = "[]"
 	}
 
+	maxRequestTimeoutsJSON := ""
+	if prng.FlipCoin() {
+		maxRequestTimeoutsJSONFormat := `
+            "InproxyFrontingProviderClientMaxRequestTimeouts": {"%s": "10s"},
+            "InproxyFrontingProviderServerMaxRequestTimeouts": {"%s": "5s"},
+        `
+		maxRequestTimeoutsJSON = fmt.Sprintf(
+			maxRequestTimeoutsJSONFormat,
+			brokerFrontingProviderID,
+			brokerFrontingProviderID)
+	}
+
 	tacticsParametersJSONFormat := `
             "InproxyAllowProxy": true,
             "InproxyAllowClient": true,
@@ -3626,6 +3653,7 @@ func generateInproxyTestConfig(
             "InproxyDisableSTUN": true,
             "InproxyDisablePortMapping": true,
             "InproxyDisableIPv6ICECandidates": true,
+            %s
     `
 
 	tacticsParametersJSON := fmt.Sprintf(
@@ -3636,7 +3664,8 @@ func generateInproxyTestConfig(
 		proxyBrokerSpecsJSON,
 		clientBrokerSpecsJSON,
 		commonCompartmentIDStr,
-		commonCompartmentIDStr)
+		commonCompartmentIDStr,
+		maxRequestTimeoutsJSON)
 
 	config := &inproxyTestConfig{
 		tacticsParametersJSON:               tacticsParametersJSON,

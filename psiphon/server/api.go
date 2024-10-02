@@ -970,7 +970,8 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 var inproxyBrokerRequestParams = append(
 	append(
 		[]requestParamSpec{
-			{"session_id", isHexDigits, 0}},
+			{"session_id", isHexDigits, 0},
+			{"fronting_provider_id", isAnyString, requestParamOptional}},
 		tacticsParams...),
 	baseParams...)
 

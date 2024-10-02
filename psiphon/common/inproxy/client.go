@@ -178,25 +178,21 @@ func DialClient(
 		// synchronously, so that NAT topology metrics can be reported to the
 		// broker in the ClientOffer request. For clients, NAT discovery is
 		// intended to be performed at a low sampling rate, since the RFC5780
-		// traffic may be unusual(differs from standard STUN requests for
-		// ICE) and since this step delays the dial. Clients should to cache
-		// their NAT discovery outcomes, associated with the current network
-		// by network ID, so metrics can be reported even without a discovery
-		// step; this is facilitated by WebRTCDialCoordinator.
+		// traffic may be unusual (differs from standard STUN requests for
+		// ICE), the port mapping probe traffic may be unusual, and since
+		// this step delays the dial. Clients should to cache their NAT
+		// discovery outcomes, associated with the current network by network
+		// ID, so metrics can be reported even without a discovery step; this
+		// is facilitated by WebRTCDialCoordinator.
 		//
 		// NAT topology metrics are used by the broker to optimize client and
 		// in-proxy matching.
-		//
-		// For client NAT discovery, port mapping type discovery is skipped
-		// since port mappings are attempted when preparing the WebRTC offer,
-		// which also happens before the ClientOffer request.
 
 		NATDiscover(
 			ctx,
 			&NATDiscoverConfig{
 				Logger:                config.Logger,
 				WebRTCDialCoordinator: config.WebRTCDialCoordinator,
-				SkipPortMapping:       true,
 			})
 	}
 
@@ -337,7 +333,7 @@ func dialClientWebRTCConn(
 	trafficShapingParameters := config.WebRTCDialCoordinator.DataChannelTrafficShapingParameters()
 	clientRootObfuscationSecret := config.WebRTCDialCoordinator.ClientRootObfuscationSecret()
 
-	webRTCConn, SDP, SDPMetrics, err := newWebRTCConnWithOffer(
+	webRTCConn, SDP, SDPMetrics, err := newWebRTCConnForOffer(
 		ctx, &webRTCConfig{
 			Logger:                      config.Logger,
 			EnableDebugLogging:          config.EnableWebRTCDebugLogging,
@@ -367,11 +363,11 @@ func dialClientWebRTCConn(
 
 	// Here, WebRTCDialCoordinator.NATType may be populated from discovery, or
 	// replayed from a previous run on the same network ID.
-	// WebRTCDialCoordinator.PortMappingTypes may be populated via
-	// newWebRTCConnWithOffer.
+	// WebRTCDialCoordinator.PortMappingTypes/PortMappingProbe may be
+	// populated via the optional NATDiscover run above or in a previous dial.
 
-	// ClientOffer applies BrokerDialCoordinator.OfferRequestTimeout as the
-	// request timeout.
+	// ClientOffer applies BrokerDialCoordinator.OfferRequestTimeout or
+	// OfferRequestPersonalTimeout as the request timeout.
 	offerResponse, err := config.BrokerClient.ClientOffer(
 		ctx,
 		&ClientOfferRequest{
@@ -391,7 +387,8 @@ func dialClientWebRTCConn(
 			PackedDestinationServerEntry: config.PackedDestinationServerEntry,
 			NetworkProtocol:              config.DialNetworkProtocol,
 			DestinationAddress:           config.DialAddress,
-		})
+		},
+		hasPersonalCompartmentIDs)
 	if err != nil {
 		return nil, false, errors.Trace(err)
 	}

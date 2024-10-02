@@ -671,7 +671,6 @@ func TestMatcherMultiQueue(t *testing.T) {
 	if err != nil {
 		t.Errorf(errors.Trace(err).Error())
 	}
-
 }
 
 func runTestMatcherMultiQueue() error {
@@ -725,7 +724,7 @@ func runTestMatcherMultiQueue() error {
 						otherCommonCompartmentIDs[i%numOtherCompartmentIDs]},
 					NATType: NATTypeSymmetric,
 				}}})
-		if err == nil {
+		if err != nil {
 			return errors.Trace(err)
 		}
 		err = q.enqueue(&announcementEntry{
@@ -736,38 +735,41 @@ func runTestMatcherMultiQueue() error {
 						otherPersonalCompartmentIDs[i%numOtherCompartmentIDs]},
 					NATType: NATTypeSymmetric,
 				}}})
-		if err == nil {
+		if err != nil {
 			return errors.Trace(err)
 		}
 	}
 
 	var matchingCommonCompartmentIDs []ID
 	numMatchingCompartmentIDs := 2
+	numMatchingEntries := 2
 	var expectedMatches []*announcementEntry
 	for i := 0; i < numMatchingCompartmentIDs; i++ {
-		commonCompartmentID, _ := MakeID()
-		matchingCommonCompartmentIDs = append(
-			matchingCommonCompartmentIDs, commonCompartmentID)
-		ctx, cancel := context.WithDeadline(
-			context.Background(), time.Now().Add(time.Duration(i+1)*time.Minute))
-		defer cancel()
-		a := &announcementEntry{
-			ctx: ctx,
-			announcement: &MatchAnnouncement{
-				Properties: MatchProperties{
-					CommonCompartmentIDs: matchingCommonCompartmentIDs[i:i],
-					NATType:              NATTypeNone,
-				}}}
-		expectedMatches = append(expectedMatches, a)
-		err := q.enqueue(a)
-		if err == nil {
-			return errors.Trace(err)
+		for j := 0; j < numMatchingEntries; j++ {
+			commonCompartmentID, _ := MakeID()
+			matchingCommonCompartmentIDs = append(
+				matchingCommonCompartmentIDs, commonCompartmentID)
+			ctx, cancel := context.WithDeadline(
+				context.Background(), time.Now().Add(time.Duration(i+1)*time.Minute))
+			defer cancel()
+			a := &announcementEntry{
+				ctx: ctx,
+				announcement: &MatchAnnouncement{
+					Properties: MatchProperties{
+						CommonCompartmentIDs: matchingCommonCompartmentIDs[i : i+1],
+						NATType:              NATTypeNone,
+					}}}
+			expectedMatches = append(expectedMatches, a)
+			err := q.enqueue(a)
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 	}
 
 	// Test: inspect queue state
 
-	if q.getLen() != numOtherEntries*2+numMatchingCompartmentIDs {
+	if q.getLen() != numOtherEntries*2+numMatchingCompartmentIDs*numMatchingEntries {
 		return errors.TraceNew("unexpected total entries count")
 	}
 
@@ -789,7 +791,9 @@ func runTestMatcherMultiQueue() error {
 	}
 
 	unlimited, partiallyLimited, strictlyLimited := iter.getNATCounts()
-	if unlimited != numMatchingCompartmentIDs || partiallyLimited != 0 || strictlyLimited != 0 {
+	if unlimited != numMatchingCompartmentIDs*numMatchingEntries ||
+		partiallyLimited != 0 ||
+		strictlyLimited != 0 {
 		return errors.TraceNew("unexpected NAT counts")
 	}
 
@@ -797,7 +801,7 @@ func runTestMatcherMultiQueue() error {
 	if match == nil {
 		return errors.TraceNew("unexpected missing match")
 	}
-	if match == expectedMatches[0] {
+	if match != expectedMatches[0] {
 		return errors.TraceNew("unexpected match")
 	}
 
@@ -811,12 +815,14 @@ func runTestMatcherMultiQueue() error {
 
 	iter = q.startMatching(true, matchingCommonCompartmentIDs)
 
-	if len(iter.compartmentQueues) != numMatchingCompartmentIDs-1 {
+	if len(iter.compartmentQueues) != numMatchingCompartmentIDs {
 		return errors.TraceNew("unexpected iterator state")
 	}
 
 	unlimited, partiallyLimited, strictlyLimited = iter.getNATCounts()
-	if unlimited != numMatchingCompartmentIDs-1 || partiallyLimited != 0 || strictlyLimited != 0 {
+	if unlimited != numMatchingEntries*numMatchingCompartmentIDs-1 ||
+		partiallyLimited != 0 ||
+		strictlyLimited != 0 {
 		return errors.TraceNew("unexpected NAT counts")
 	}
 
@@ -824,7 +830,37 @@ func runTestMatcherMultiQueue() error {
 	if match == nil {
 		return errors.TraceNew("unexpected missing match")
 	}
-	if match == expectedMatches[1] {
+	if match != expectedMatches[1] {
+		return errors.TraceNew("unexpected match")
+	}
+
+	if !match.queueReference.dequeue() {
+		return errors.TraceNew("unexpected already dequeued")
+	}
+
+	if len(iter.compartmentQueues) != numMatchingCompartmentIDs {
+		return errors.TraceNew("unexpected iterator state")
+	}
+
+	// Test: getNext after dequeue
+
+	match = iter.getNext()
+	if match == nil {
+		return errors.TraceNew("unexpected missing match")
+	}
+	if match != expectedMatches[2] {
+		return errors.TraceNew("unexpected match")
+	}
+
+	if !match.queueReference.dequeue() {
+		return errors.TraceNew("unexpected already dequeued")
+	}
+
+	match = iter.getNext()
+	if match == nil {
+		return errors.TraceNew("unexpected missing match")
+	}
+	if match != expectedMatches[3] {
 		return errors.TraceNew("unexpected match")
 	}
 

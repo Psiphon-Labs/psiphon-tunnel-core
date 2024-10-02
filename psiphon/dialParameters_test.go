@@ -846,6 +846,7 @@ func TestLimitTunnelDialPortNumbers(t *testing.T) {
 	}
 
 	constraints := &protocolSelectionConstraints{
+		config: clientConfig,
 		limitTunnelDialPortNumbers: protocol.TunnelProtocolPortLists(
 			clientConfig.GetParameters().Get().TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers)),
 	}

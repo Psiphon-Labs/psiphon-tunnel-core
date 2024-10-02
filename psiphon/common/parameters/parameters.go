@@ -399,6 +399,7 @@ const (
 	InproxyBrokerMatcherOfferRateLimitInterval         = "InproxyBrokerMatcherOfferRateLimitInterval"
 	InproxyBrokerProxyAnnounceTimeout                  = "InproxyBrokerProxyAnnounceTimeout"
 	InproxyBrokerClientOfferTimeout                    = "InproxyBrokerClientOfferTimeout"
+	InproxyBrokerClientOfferPersonalTimeout            = "InproxyBrokerClientOfferPersonalTimeout"
 	InproxyBrokerPendingServerRequestsTTL              = "InproxyBrokerPendingServerRequestsTTL"
 	InproxySessionHandshakeRoundTripTimeout            = "InproxySessionHandshakeRoundTripTimeout"
 	InproxyProxyAnnounceRequestTimeout                 = "InproxyProxyAnnounceRequestTimeout"
@@ -406,6 +407,7 @@ const (
 	InproxyProxyAnnounceDelayJitter                    = "InproxyProxyAnnounceDelayJitter"
 	InproxyProxyAnswerRequestTimeout                   = "InproxyProxyAnswerRequestTimeout"
 	InproxyClientOfferRequestTimeout                   = "InproxyClientOfferRequestTimeout"
+	InproxyClientOfferRequestPersonalTimeout           = "InproxyClientOfferRequestPersonalTimeout"
 	InproxyClientOfferRetryDelay                       = "InproxyClientOfferRetryDelay"
 	InproxyClientOfferRetryJitter                      = "InproxyClientOfferRetryJitter"
 	InproxyClientRelayedPacketRequestTimeout           = "InproxyCloientRelayedPacketRequestTimeout"
@@ -435,14 +437,21 @@ const (
 	InproxyProxyDiscoverNATTimeout                     = "InproxyProxyDiscoverNATTimeout"
 	InproxyClientDiscoverNATTimeout                    = "InproxyClientDiscoverNATTimeout"
 	InproxyWebRTCAnswerTimeout                         = "InproxyWebRTCAnswerTimeout"
+	InproxyWebRTCAwaitPortMappingTimeout               = "InproxyWebRTCAwaitPortMappingTimeout"
 	InproxyProxyWebRTCAwaitDataChannelTimeout          = "InproxyProxyWebRTCAwaitDataChannelTimeout"
 	InproxyClientWebRTCAwaitDataChannelTimeout         = "InproxyClientWebRTCAwaitDataChannelTimeout"
 	InproxyProxyDestinationDialTimeout                 = "InproxyProxyDestinationDialTimeout"
+	InproxyProxyRelayInactivityTimeout                 = "InproxyProxyRelayInactivityTimeout"
 	InproxyPsiphonAPIRequestTimeout                    = "InproxyPsiphonAPIRequestTimeout"
 	InproxyProxyTotalActivityNoticePeriod              = "InproxyProxyTotalActivityNoticePeriod"
 	InproxyPersonalPairingConnectionWorkerPoolSize     = "InproxyPersonalPairingConnectionWorkerPoolSize"
 	InproxyClientDialRateLimitQuantity                 = "InproxyClientDialRateLimitQuantity"
 	InproxyClientDialRateLimitInterval                 = "InproxyClientDialRateLimitInterval"
+	InproxyClientNoMatchFailoverProbability            = "InproxyClientNoMatchFailoverProbability"
+	InproxyClientNoMatchFailoverPersonalProbability    = "InproxyClientNoMatchFailoverPersonalProbability"
+	InproxyFrontingProviderClientMaxRequestTimeouts    = "InproxyFrontingProviderClientMaxRequestTimeouts"
+	InproxyFrontingProviderServerMaxRequestTimeouts    = "InproxyFrontingProviderServerMaxRequestTimeouts"
+	InproxyProxyOnBrokerClientFailedRetryPeriod        = "InproxyProxyOnBrokerClientFailedRetryPeriod"
 
 	// Retired parameters
 
@@ -900,6 +909,7 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerMatcherOfferRateLimitInterval:         {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerProxyAnnounceTimeout:                  {value: 2 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerClientOfferPersonalTimeout:            {value: 5 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerPendingServerRequestsTTL:              {value: 60 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxySessionHandshakeRoundTripTimeout:            {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyAnnounceRequestTimeout:                 {value: 2*time.Minute + 10*time.Second, minimum: time.Duration(0)},
@@ -907,6 +917,7 @@ var defaultParameters = map[string]struct {
 	InproxyProxyAnnounceDelayJitter:                    {value: 0.5, minimum: 0.0},
 	InproxyProxyAnswerRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
+	InproxyClientOfferRequestPersonalTimeout:           {value: 5*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRetryDelay:                       {value: 100 * time.Millisecond, minimum: time.Duration(0)},
 	InproxyClientOfferRetryJitter:                      {value: 0.5, minimum: 0.0},
 	InproxyClientRelayedPacketRequestTimeout:           {value: 10 * time.Second, minimum: time.Duration(0)},
@@ -936,14 +947,21 @@ var defaultParameters = map[string]struct {
 	InproxyProxyDiscoverNATTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyClientDiscoverNATTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyWebRTCAnswerTimeout:                         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyWebRTCAwaitPortMappingTimeout:               {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyWebRTCAwaitDataChannelTimeout:          {value: 30 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyClientWebRTCAwaitDataChannelTimeout:         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyDestinationDialTimeout:                 {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyProxyRelayInactivityTimeout:                 {value: 5 * time.Minute, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyPsiphonAPIRequestTimeout:                    {value: 10 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	InproxyProxyTotalActivityNoticePeriod:              {value: 5 * time.Minute, minimum: 1 * time.Second},
 	InproxyPersonalPairingConnectionWorkerPoolSize:     {value: 2, minimum: 1},
 	InproxyClientDialRateLimitQuantity:                 {value: 10, minimum: 0},
 	InproxyClientDialRateLimitInterval:                 {value: 1 * time.Minute, minimum: time.Duration(0)},
+	InproxyClientNoMatchFailoverProbability:            {value: 0.5, minimum: 0.0},
+	InproxyClientNoMatchFailoverPersonalProbability:    {value: 1.0, minimum: 0.0},
+	InproxyFrontingProviderClientMaxRequestTimeouts:    {value: KeyDurations{}},
+	InproxyFrontingProviderServerMaxRequestTimeouts:    {value: KeyDurations{}, flags: serverSideOnly},
+	InproxyProxyOnBrokerClientFailedRetryPeriod:        {value: 30 * time.Second, minimum: time.Duration(0)},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -1316,6 +1334,14 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case KeyStrings:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case KeyDurations:
 				err := v.Validate()
 				if err != nil {
 					if skipOnError {
@@ -1902,6 +1928,30 @@ func (p ParametersAccessor) KeyValues(name string) KeyValues {
 	value := KeyValues{}
 	p.snapshot.getValue(name, &value)
 	return value
+}
+
+// KeyStrings returns a KeyStrings parameter value.
+func (p ParametersAccessor) KeyStrings(name, key string) []string {
+	value := KeyStrings{}
+	p.snapshot.getValue(name, &value)
+	return value[key]
+}
+
+// KeyDurations returns a KeyDurations parameter value, with string durations
+// converted to time.Duration.
+func (p ParametersAccessor) KeyDurations(name string) map[string]time.Duration {
+	value := KeyDurations{}
+	p.snapshot.getValue(name, &value)
+	durations := make(map[string]time.Duration)
+	for key, duration := range value {
+		d, err := time.ParseDuration(duration)
+		if err != nil {
+			// Skip invalid duration. Not expected with validation.
+			continue
+		}
+		durations[key] = d
+	}
+	return durations
 }
 
 // BPFProgram returns an assembled BPF program corresponding to a

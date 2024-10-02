@@ -2193,17 +2193,26 @@ func SetNetworkReplayParameters[R any](networkID, replayID string, replayParams 
 	return setBucketValue(datastoreNetworkReplayParametersBucket, key, data)
 }
 
-// ShuffleAndGetNetworkReplayParameters takes a list of candidate objects and
-// selects one. The candidates are considered in random order. The first
-// candidate with a valid replay record is returned, along with its replay
-// parameters. The caller provides isValidReplay which should indicate if
-// replay parameters remain valid; the caller should check for expiry and
-// changes to the underlhying tactics. When no valid replay parameters are
-// found, ShuffleAndGetNetworkReplayParameters returns a candidate and nil
-// replay parameters.
-func ShuffleAndGetNetworkReplayParameters[C, R any](
+// SelectCandidateWithNetworkReplayParameters takes a list of candidate
+// objects and selects one. The candidates are considered in the specified
+// order. The first candidate with a valid replay record is returned, along
+// with its replay parameters.
+//
+// The caller provides isValidReplay which should indicate if replay
+// parameters remain valid; the caller should check for expiry and changes to
+// the underlhying tactics.
+//
+// When no candidates with valid replay parameters are found,
+// SelectCandidateWithNetworkReplayParameters returns the first candidate and
+// nil replay parameters.
+//
+// When selectFirstCandidate is specified,
+// SelectCandidateWithNetworkReplayParameters will check for valid replay
+// parameters for the first candidate only, and then select the first
+// candidate.
+func SelectCandidateWithNetworkReplayParameters[C, R any](
 	networkID string,
-	replayEnabled bool,
+	selectFirstCandidate bool,
 	candidates []*C,
 	getReplayID func(*C) string,
 	isValidReplay func(*C, *R) bool) (*C, *R, error) {
@@ -2212,25 +2221,14 @@ func ShuffleAndGetNetworkReplayParameters[C, R any](
 		return nil, nil, errors.TraceNew("no candidates")
 	}
 
-	// Don't shuffle or otherwise mutate the candidates slice, which may be a
-	// tactics parameter.
-	permutedIndexes := prng.Perm(len(candidates))
-
-	candidate := candidates[permutedIndexes[0]]
+	candidate := candidates[0]
 	var replay *R
-
-	if !replayEnabled {
-		// If replay is disabled, return the first post-shuffle candidate with
-		// nil replay parameters.
-		return candidate, replay, nil
-	}
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
 
 		bucket := tx.bucket(datastoreNetworkReplayParametersBucket)
 
-		for _, i := range permutedIndexes {
-			c := candidates[i]
+		for _, c := range candidates {
 			key := makeNetworkReplayParametersKey[R](networkID, getReplayID(c))
 			value := bucket.get(key)
 			if value == nil {
@@ -2243,9 +2241,9 @@ func ShuffleAndGetNetworkReplayParameters[C, R any](
 				// Delete the record. This avoids continually checking it.
 				// Note that the deletes performed here won't prune records
 				// for old candidates which are no longer passed in to
-				// ShuffleAndGetNetworkReplayParameters.
+				// SelectCandidateWithNetworkReplayParameters.
 				NoticeWarning(
-					"ShuffleAndGetNetworkReplayParameters: unmarshal failed: %s",
+					"SelectCandidateWithNetworkReplayParameters: unmarshal failed: %s",
 					errors.Trace(err))
 				_ = bucket.delete(key)
 				continue
@@ -2253,6 +2251,8 @@ func ShuffleAndGetNetworkReplayParameters[C, R any](
 			if isValidReplay(c, r) {
 				candidate = c
 				replay = r
+				return nil
+			} else if selectFirstCandidate {
 				return nil
 			} else {
 

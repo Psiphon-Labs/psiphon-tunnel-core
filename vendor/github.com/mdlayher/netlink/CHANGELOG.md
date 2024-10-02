@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.7.2
+
+- [Improvement]: updated dependencies, test with Go 1.20.
+
 ## v1.7.1
 
 - [Bug Fix]: test only changes to avoid failures on big endian machines.
