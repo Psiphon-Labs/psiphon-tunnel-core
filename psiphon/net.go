@@ -426,11 +426,7 @@ func makeFrontedHTTPClient(
 	}
 
 	getParams := func() common.APIParameters {
-		params := make(common.APIParameters)
-		for k, v := range frontedHTTPClient.frontedHTTPDialParameters.FrontedMeekDialParameters.GetMetrics() {
-			params[k] = v
-		}
-		return params
+		return common.APIParameters(frontedHTTPClient.frontedHTTPDialParameters.GetMetrics())
 	}
 
 	return &http.Client{

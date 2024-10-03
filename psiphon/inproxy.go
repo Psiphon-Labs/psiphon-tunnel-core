@@ -30,7 +30,6 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -1169,13 +1168,7 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 
 	// Add underlying log fields, which must be renamed to be scoped to the
 	// broker.
-	for k, v := range brokerDialParams.FrontedHTTPDialParameters.GetMetrics() {
-		// 1. Remove meek prefix, if any
-		name, _ := strings.CutPrefix(k, "meek_")
-		// 2. Add inproxy broker prefix
-		name = "inproxy_broker_" + name
-		logFields[name] = v
-	}
+	logFields.Add(brokerDialParams.FrontedHTTPDialParameters.GetMetrics("inproxy_broker_"))
 
 	logFields["inproxy_broker_transport"] = brokerDialParams.FrontedHTTPDialParameters.FrontingTransport
 

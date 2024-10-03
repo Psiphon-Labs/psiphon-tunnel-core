@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -67,17 +68,17 @@ func newFrontedHTTPClientInstance(
 	var spec *parameters.FrontingSpec
 	var dialParams *frontedHTTPDialParameters
 
-	// Replay is disabled when the TTL, TransferURLReplayDialParametersTTL,
+	// Replay is disabled when the TTL, FrontedHTTPClientReplayDialParametersTTL,
 	// is 0.
 	now := time.Now()
-	ttl := p.Duration(parameters.TransferURLReplayDialParametersTTL)
+	ttl := p.Duration(parameters.FrontedHTTPClientReplayDialParametersTTL)
 	networkID := config.GetNetworkID()
 
 	// Replay is disabled if there is an active tunnel.
 	replayEnabled := tunnel == nil &&
 		ttl > 0 &&
 		!config.DisableReplay &&
-		prng.FlipWeightedCoin(p.Float(parameters.TransferURLReplayDialParametersProbability))
+		prng.FlipWeightedCoin(p.Float(parameters.FrontedHTTPClientReplayDialParametersProbability))
 
 	if replayEnabled {
 		selectFirstCandidate := false
@@ -146,8 +147,8 @@ func newFrontedHTTPClientInstance(
 		frontedHTTPDialParameters: dialParams,
 		replayEnabled:             replayEnabled,
 
-		replayRetainFailedProbability: p.Float(parameters.TransferURLReplayRetainFailedProbability),
-		replayUpdateFrequency:         p.Duration(parameters.TransferURLReplayUpdateFrequency),
+		replayRetainFailedProbability: p.Float(parameters.FrontedHTTPClientReplayRetainFailedProbability),
+		replayUpdateFrequency:         p.Duration(parameters.FrontedHTTPClientReplayUpdateFrequency),
 	}, nil
 }
 
@@ -196,7 +197,19 @@ func (f *frontedHTTPClientInstance) RoundTrip(request *http.Request) (*http.Resp
 	// response body.
 	response.Body = newFrontedHTTPClientResponseReadCloser(f, body)
 
-	if response.StatusCode == http.StatusOK {
+	// HTTP status codes other than 200 may indicate success depending on the
+	// semantics of the operation. E.g., resumeable downloads are considered
+	// successful if the HTTP server returns 200, 206, 304, 412, or 416.
+	//
+	// TODO: have the caller determine success and failure cases because this
+	// is not always determined by the HTTP status code; e.g., HTTP server
+	// returns 200 but payload signature check fails.
+	if response.StatusCode == http.StatusOK ||
+		response.StatusCode == http.StatusPartialContent ||
+		response.StatusCode == http.StatusRequestedRangeNotSatisfiable ||
+		response.StatusCode == http.StatusPreconditionFailed ||
+		response.StatusCode == http.StatusNotModified {
+
 		f.frontedHTTPClientRoundTripperSucceeded()
 	} else {
 		// TODO: do not clear replay parameters on temporary round tripper
@@ -308,4 +321,125 @@ func hashFrontingSpec(spec *parameters.FrontingSpec) []byte {
 		hash[:],
 		uint64(xxhash.Sum64String(fmt.Sprintf("%+v", spec))))
 	return hash[:]
+}
+
+// frontedHTTPDialParameters represents a selected fronting transport and dial
+// parameters.
+//
+// frontedHTTPDialParameters is used to configure dialers; as a persistent
+// record to store successful dial parameters for replay; and to report dial
+// stats in notices and Psiphon API calls.
+//
+// frontedHTTPDialParameters is similar to tunnel DialParameters, but is
+// specific to fronted HTTP. It should be used for all fronted HTTP dials,
+// apart from the tunnel DialParameters cases.
+type frontedHTTPDialParameters struct {
+	isReplay bool `json:"-"`
+
+	LastUsedTimestamp        time.Time
+	LastUsedFrontingSpecHash []byte
+
+	FrontedMeekDialParameters *FrontedMeekDialParameters
+}
+
+// makeFrontedHTTPDialParameters creates a new frontedHTTPDialParameters for
+// configuring a fronted HTTP client, including selecting a fronting transport
+// and all the various protocol attributes.
+//
+// payloadSecure must only be set if all HTTP plaintext payloads sent through
+// the returned net/http.Client will be wrapped in their own transport security
+// layer, which permits skipping of server certificate verification.
+func makeFrontedHTTPDialParameters(
+	config *Config,
+	p parameters.ParametersAccessor,
+	tunnel *Tunnel,
+	frontingSpec *parameters.FrontingSpec,
+	selectedFrontingProviderID func(string),
+	useDeviceBinder,
+	skipVerify,
+	disableSystemRootCAs,
+	payloadSecure bool) (*frontedHTTPDialParameters, error) {
+
+	currentTimestamp := time.Now()
+
+	dialParams := &frontedHTTPDialParameters{
+		LastUsedTimestamp:        currentTimestamp,
+		LastUsedFrontingSpecHash: hashFrontingSpec(frontingSpec),
+	}
+
+	var err error
+	dialParams.FrontedMeekDialParameters, err = makeFrontedMeekDialParameters(
+		config,
+		p,
+		tunnel,
+		parameters.FrontingSpecs{frontingSpec},
+		selectedFrontingProviderID,
+		useDeviceBinder,
+		skipVerify,
+		disableSystemRootCAs,
+		payloadSecure,
+	)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Initialize Dial/MeekConfigs to be passed to the corresponding dialers.
+
+	err = dialParams.prepareDialConfigs(
+		config,
+		p,
+		false,
+		tunnel,
+		skipVerify,
+		disableSystemRootCAs,
+		useDeviceBinder,
+		payloadSecure)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return dialParams, nil
+}
+
+// prepareDialConfigs is called for both new and replayed dial parameters.
+func (dialParams *frontedHTTPDialParameters) prepareDialConfigs(
+	config *Config,
+	p parameters.ParametersAccessor,
+	isReplay bool,
+	tunnel *Tunnel,
+	useDeviceBinder,
+	skipVerify,
+	disableSystemRootCAs,
+	payloadSecure bool) error {
+
+	dialParams.isReplay = isReplay
+
+	if isReplay {
+
+		// Initialize Dial/MeekConfigs to be passed to the corresponding dialers.
+
+		err := dialParams.FrontedMeekDialParameters.prepareDialConfigs(
+			config, p, tunnel, nil, useDeviceBinder, skipVerify,
+			disableSystemRootCAs, payloadSecure)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	return nil
+}
+
+// GetMetrics implements the common.MetricsSource interface and returns log
+// fields detailing the fronted HTTP dial parameters.
+func (dialParams *frontedHTTPDialParameters) GetMetrics() common.LogFields {
+
+	logFields := dialParams.FrontedMeekDialParameters.GetMetrics("")
+
+	isReplay := "0"
+	if dialParams.isReplay {
+		isReplay = "1"
+	}
+	logFields["is_replay"] = isReplay
+
+	return logFields
 }

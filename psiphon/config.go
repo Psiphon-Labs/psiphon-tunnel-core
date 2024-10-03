@@ -971,6 +971,13 @@ type Config struct {
 	SteeringIPCacheMaxEntries *int
 	SteeringIPProbability     *float64
 
+	// FrontedHTTPClientReplayDialParametersTTL and other TransferURL fields are for
+	// testing purposes only.
+	FrontedHTTPClientReplayDialParametersTTLSeconds  *int
+	FrontedHTTPClientReplayUpdateFrequencySeconds    *int
+	FrontedHTTPClientReplayDialParametersProbability *float64
+	FrontedHTTPClientReplayRetainFailedProbability   *float64
+
 	// The following in-proxy fields are for testing purposes only.
 	InproxyAllowProxy                                       *bool
 	InproxyAllowClient                                      *bool
@@ -2423,6 +2430,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.SteeringIPProbability != nil {
 		applyParameters[parameters.SteeringIPProbability] = *config.SteeringIPProbability
+	}
+
+	if config.FrontedHTTPClientReplayDialParametersTTLSeconds != nil {
+		applyParameters[parameters.FrontedHTTPClientReplayDialParametersTTL] = fmt.Sprintf("%ds", *config.FrontedHTTPClientReplayDialParametersTTLSeconds)
+	}
+
+	if config.FrontedHTTPClientReplayUpdateFrequencySeconds != nil {
+		applyParameters[parameters.FrontedHTTPClientReplayUpdateFrequency] = fmt.Sprintf("%ds", *config.FrontedHTTPClientReplayUpdateFrequencySeconds)
+	}
+
+	if config.FrontedHTTPClientReplayDialParametersProbability != nil {
+		applyParameters[parameters.FrontedHTTPClientReplayDialParametersProbability] = *config.FrontedHTTPClientReplayDialParametersProbability
+	}
+
+	if config.FrontedHTTPClientReplayRetainFailedProbability != nil {
+		applyParameters[parameters.FrontedHTTPClientReplayRetainFailedProbability] = *config.FrontedHTTPClientReplayRetainFailedProbability
 	}
 
 	if config.InproxyPersonalPairingConnectionWorkerPoolSize != 0 {

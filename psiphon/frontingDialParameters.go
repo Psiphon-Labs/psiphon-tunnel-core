@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"sync/atomic"
-	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -19,119 +18,29 @@ import (
 	"golang.org/x/net/bpf"
 )
 
-// frontedHTTPDialParameters represents a selected fronting transport and dial
-// parameters.
+// FrontedMeekDialParameters represents a selected fronting transport and all
+// the related protocol attributes, many chosen at random, for a fronted dial
+// attempt.
 //
-// frontedHTTPDialParameters is used to configure dialers; as a persistent
-// record to store successful dial parameters for replay; and to report dial
-// stats in notices and Psiphon API calls.
-//
-// frontedHTTPDialParameters is similar to tunnel DialParameters, but is
-// specific to TransferURLs.
-type frontedHTTPDialParameters struct {
-	isReplay bool `json:"-"`
-
-	LastUsedTimestamp        time.Time
-	LastUsedFrontingSpecHash []byte
-
-	FrontedMeekDialParameters *FrontedMeekDialParameters
-}
-
-// makeFrontedHTTPDialParameters creates a new frontedHTTPDialParameters for
-// configuring a fronted HTTP client, including selecting a fronting transport
-// and all the various protocol attributes.
-//
-// payloadSecure must only be set if all HTTP plaintext payloads sent through
-// the returned net/http.Client will be wrapped in their own transport security
-// layer, which permits skipping of server certificate verification.
-func makeFrontedHTTPDialParameters(
-	config *Config,
-	p parameters.ParametersAccessor,
-	tunnel *Tunnel,
-	frontingSpec *parameters.FrontingSpec,
-	selectedFrontingProviderID func(string),
-	useDeviceBinder,
-	skipVerify,
-	disableSystemRootCAs,
-	payloadSecure bool) (*frontedHTTPDialParameters, error) {
-
-	currentTimestamp := time.Now()
-
-	dialParams := &frontedHTTPDialParameters{
-		LastUsedTimestamp:        currentTimestamp,
-		LastUsedFrontingSpecHash: hashFrontingSpec(frontingSpec),
-	}
-
-	var err error
-	dialParams.FrontedMeekDialParameters, err = makeFrontedMeekDialParameters(
-		config,
-		p,
-		tunnel,
-		parameters.FrontingSpecs{frontingSpec},
-		selectedFrontingProviderID,
-		useDeviceBinder,
-		skipVerify,
-		disableSystemRootCAs,
-		payloadSecure,
-	)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	// Initialize Dial/MeekConfigs to be passed to the corresponding dialers.
-
-	err = dialParams.prepareDialConfigs(
-		config,
-		p,
-		false,
-		tunnel,
-		skipVerify,
-		disableSystemRootCAs,
-		useDeviceBinder,
-		payloadSecure)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return dialParams, nil
-}
-
-// prepareDialConfigs is called for both new and replayed dial parameters.
-func (dialParams *frontedHTTPDialParameters) prepareDialConfigs(
-	config *Config,
-	p parameters.ParametersAccessor,
-	isReplay bool,
-	tunnel *Tunnel,
-	useDeviceBinder,
-	skipVerify,
-	disableSystemRootCAs,
-	payloadSecure bool) error {
-
-	dialParams.isReplay = isReplay
-
-	if isReplay {
-
-		// Initialize Dial/MeekConfigs to be passed to the corresponding dialers.
-
-		err := dialParams.FrontedMeekDialParameters.prepareDialConfigs(
-			config, p, tunnel, nil, useDeviceBinder, skipVerify,
-			disableSystemRootCAs, payloadSecure)
-		if err != nil {
-			return errors.Trace(err)
-		}
-	}
-
-	return nil
-}
-
-// FrontedMeekDialParameters represents a selected fronting transport and dial
-// parameters.
-//
-// FrontedMeekDialParameters is used to configure dialers; and to report dial
-// stats in notices and Psiphon API calls.
+// FrontedMeekDialParameters is used:
+// - to configure dialers
+// - as a persistent record to store successful dial parameters for replay
+// - to report dial stats in notices and Psiphon API calls.
 //
 // FrontedMeekDialParameters is similar to tunnel DialParameters, but is
-// specific to the in-proxy broker dial phase and TransferURLs.
+// specific to fronted meek. It should be used for all fronted meek dials,
+// apart from the tunnel DialParameters cases.
+//
+// prepareDialConfigs must be called on any unmarshaled
+// FrontedMeekDialParameters. For example, when unmarshaled from a replay
+// record.
+//
+// resolvedIPAddress is set asynchronously, as it is not known until the dial
+// process has begun. The atomic.Value will contain a string, initialized to
+// "", and set to the resolved IP address once that part of the dial process
+// has completed.
+//
+// FrontedMeekDialParameters is not safe for concurrent use.
 type FrontedMeekDialParameters struct {
 	NetworkLatencyMultiplier float64
 
@@ -523,49 +432,58 @@ func (f *FrontedMeekDialParameters) prepareDialConfigs(
 	return nil
 }
 
-// GetMetrics implements the common.MetricsSource interface and returns log
-// fields detailing the fronted meek dial parameters.
-func (meekDialParameters *FrontedMeekDialParameters) GetMetrics() common.LogFields {
+// GetMetrics returns log fields detailing the fronted meek dial parameters.
+// All log field names are prefixed with overridePrefix, when specified, which
+// also overrides any default prefixes.
+func (meekDialParameters *FrontedMeekDialParameters) GetMetrics(overridePrefix string) common.LogFields {
+
+	prefix := ""
+	meekPrefix := "meek_"
+
+	if overridePrefix != "" {
+		prefix = overridePrefix
+		meekPrefix = overridePrefix
+	}
 
 	logFields := make(common.LogFields)
 
-	logFields["fronting_provider_id"] = meekDialParameters.FrontingProviderID
+	logFields[prefix+"fronting_provider_id"] = meekDialParameters.FrontingProviderID
 
 	if meekDialParameters.DialAddress != "" {
-		logFields["meek_dial_address"] = meekDialParameters.DialAddress
+		logFields[meekPrefix+"dial_address"] = meekDialParameters.DialAddress
 	}
 
 	meekResolvedIPAddress := meekDialParameters.resolvedIPAddress.Load().(string)
 	if meekResolvedIPAddress != "" {
-		logFields["meek_resolved_ip_address"] = meekResolvedIPAddress
+		logFields[meekPrefix+"resolved_ip_address"] = meekResolvedIPAddress
 	}
 
 	if meekDialParameters.SNIServerName != "" {
-		logFields["meek_sni_server_name"] = meekDialParameters.SNIServerName
+		logFields[meekPrefix+"sni_server_name"] = meekDialParameters.SNIServerName
 	}
 
 	if meekDialParameters.HostHeader != "" {
-		logFields["meek_host_header"] = meekDialParameters.HostHeader
+		logFields[meekPrefix+"host_header"] = meekDialParameters.HostHeader
 	}
 
 	transformedHostName := "0"
 	if meekDialParameters.TransformedHostName {
 		transformedHostName = "1"
 	}
-	logFields["meek_transformed_host_name"] = transformedHostName
+	logFields[meekPrefix+"transformed_host_name"] = transformedHostName
 
 	if meekDialParameters.SelectedUserAgent {
-		logFields["user_agent"] = meekDialParameters.UserAgent
+		logFields[prefix+"user_agent"] = meekDialParameters.UserAgent
 	}
 
 	if meekDialParameters.FrontingTransport == protocol.FRONTING_TRANSPORT_HTTPS {
 
 		if meekDialParameters.TLSProfile != "" {
-			logFields["tls_profile"] = meekDialParameters.TLSProfile
+			logFields[prefix+"tls_profile"] = meekDialParameters.TLSProfile
 		}
 
 		if meekDialParameters.TLSVersion != "" {
-			logFields["tls_version"] =
+			logFields[prefix+"tls_version"] =
 				getTLSVersionForMetrics(meekDialParameters.TLSVersion, meekDialParameters.NoDefaultTLSSessionID)
 		}
 
@@ -573,11 +491,11 @@ func (meekDialParameters *FrontedMeekDialParameters) GetMetrics() common.LogFiel
 		if meekDialParameters.TLSFragmentClientHello {
 			tlsFragmented = "1"
 		}
-		logFields["tls_fragmented"] = tlsFragmented
+		logFields[prefix+"tls_fragmented"] = tlsFragmented
 	}
 
 	if meekDialParameters.BPFProgramName != "" {
-		logFields["client_bpf"] = meekDialParameters.BPFProgramName
+		logFields[prefix+"client_bpf"] = meekDialParameters.BPFProgramName
 	}
 
 	if meekDialParameters.ResolveParameters != nil {
@@ -588,19 +506,19 @@ func (meekDialParameters *FrontedMeekDialParameters) GetMetrics() common.LogFiel
 		if meekDialParameters.ResolveParameters.PreresolvedIPAddress != "" {
 			dialDomain, _, _ := net.SplitHostPort(meekDialParameters.meekConfig.DialAddress)
 			if meekDialParameters.ResolveParameters.PreresolvedDomain == dialDomain {
-				logFields["dns_preresolved"] = meekDialParameters.ResolveParameters.PreresolvedIPAddress
+				logFields[prefix+"dns_preresolved"] = meekDialParameters.ResolveParameters.PreresolvedIPAddress
 			}
 		}
 
 		if meekDialParameters.ResolveParameters.PreferAlternateDNSServer {
-			logFields["dns_preferred"] = meekDialParameters.ResolveParameters.AlternateDNSServer
+			logFields[prefix+"dns_preferred"] = meekDialParameters.ResolveParameters.AlternateDNSServer
 		}
 
 		if meekDialParameters.ResolveParameters.ProtocolTransformName != "" {
-			logFields["dns_transform"] = meekDialParameters.ResolveParameters.ProtocolTransformName
+			logFields[prefix+"dns_transform"] = meekDialParameters.ResolveParameters.ProtocolTransformName
 		}
 
-		logFields["dns_attempt"] = strconv.Itoa(
+		logFields[prefix+"dns_attempt"] = strconv.Itoa(
 			meekDialParameters.ResolveParameters.GetFirstAttemptWithAnswer())
 	}
 
