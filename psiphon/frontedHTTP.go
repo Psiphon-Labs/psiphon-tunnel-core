@@ -46,6 +46,10 @@ func newFrontedHTTPClientInstance(
 	payloadSecure bool,
 ) (*frontedHTTPClientInstance, error) {
 
+	if len(frontingSpecs) == 0 {
+		return nil, errors.TraceNew("no fronting specs")
+	}
+
 	// This function duplicates some code from NewInproxyBrokerClientInstance.
 	//
 	// TODO: merge common functionality?
@@ -104,7 +108,7 @@ func newFrontedHTTPClientInstance(
 	// Select the first fronting spec in the shuffle when replay is not enabled
 	// or in case SelectCandidateWithNetworkReplayParameters fails.
 	if spec == nil {
-		spec = frontingSpecs[prng.Intn(len(frontingSpecs)-1)]
+		spec = frontingSpecs[0]
 	}
 
 	// Generate new fronted HTTP dial parameters if not replaying. Later,

@@ -971,8 +971,8 @@ type Config struct {
 	SteeringIPCacheMaxEntries *int
 	SteeringIPProbability     *float64
 
-	// FrontedHTTPClientReplayDialParametersTTL and other TransferURL fields are for
-	// testing purposes only.
+	// FrontedHTTPClientReplayDialParametersTTL and other FrontedHTTPClient
+	// fields are for testing purposes only.
 	FrontedHTTPClientReplayDialParametersTTLSeconds  *int
 	FrontedHTTPClientReplayUpdateFrequencySeconds    *int
 	FrontedHTTPClientReplayDialParametersProbability *float64
