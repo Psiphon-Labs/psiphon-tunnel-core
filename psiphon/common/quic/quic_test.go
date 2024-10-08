@@ -33,6 +33,8 @@ import (
 	"testing"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -41,21 +43,28 @@ import (
 
 func TestQUIC(t *testing.T) {
 	for quicVersion := range supportedVersionNumbers {
+
 		t.Run(fmt.Sprintf("%s", quicVersion), func(t *testing.T) {
 			if isGQUIC(quicVersion) && !GQUICEnabled() {
 				t.Skipf("gQUIC is not enabled")
 			}
-			runQUIC(t, quicVersion, GQUICEnabled(), false)
+			runQUIC(t, quicVersion, GQUICEnabled(),
+				false,
+				false, // obfuscated PSK not supproted in gQUIC
+			)
 		})
-		if isIETF(quicVersion) {
-			t.Run(fmt.Sprintf("%s (invoke anti-probing)", quicVersion), func(t *testing.T) {
-				runQUIC(t, quicVersion, GQUICEnabled(), true)
-			})
-		}
-		if isIETF(quicVersion) {
-			t.Run(fmt.Sprintf("%s (disable gQUIC)", quicVersion), func(t *testing.T) {
-				runQUIC(t, quicVersion, false, false)
-			})
+
+		for _, useObfuscatedPSK := range []bool{false, true} {
+			if isIETF(quicVersion) {
+				t.Run(fmt.Sprintf("%s (invoke anti-probing)|PSK=%v", quicVersion, useObfuscatedPSK), func(t *testing.T) {
+					runQUIC(t, quicVersion, GQUICEnabled(), true, useObfuscatedPSK)
+				})
+			}
+			if isIETF(quicVersion) {
+				t.Run(fmt.Sprintf("%s (disable gQUIC)|PSK=%v", quicVersion, useObfuscatedPSK), func(t *testing.T) {
+					runQUIC(t, quicVersion, false, false, useObfuscatedPSK)
+				})
+			}
 		}
 	}
 }
@@ -64,7 +73,8 @@ func runQUIC(
 	t *testing.T,
 	quicVersion string,
 	enableGQUIC bool,
-	invokeAntiProbing bool) {
+	invokeAntiProbing bool,
+	useObfuscatedPSK bool) {
 
 	initGoroutines := getGoroutines()
 
@@ -193,6 +203,8 @@ func runQUIC(
 				return errors.Trace(err)
 			}
 
+			clientSessionCache := common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), "localhost")
+
 			conn, err := Dial(
 				ctx,
 				packetConn,
@@ -203,7 +215,10 @@ func runQUIC(
 				clientObfuscationKey,
 				obfuscationPaddingSeed,
 				nil,
-				disablePathMTUDiscovery)
+				disablePathMTUDiscovery,
+				true,
+				useObfuscatedPSK,
+				clientSessionCache)
 
 			if invokeAntiProbing {
 

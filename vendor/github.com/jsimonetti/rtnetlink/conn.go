@@ -17,6 +17,7 @@ type Conn struct {
 	Address *AddressService
 	Route   *RouteService
 	Neigh   *NeighService
+	Rule    *RuleService
 }
 
 var _ conn = &netlink.Conn{}
@@ -54,6 +55,7 @@ func newConn(c conn) *Conn {
 	rtc.Address = &AddressService{c: rtc}
 	rtc.Route = &RouteService{c: rtc}
 	rtc.Neigh = &NeighService{c: rtc}
+	rtc.Rule = &RuleService{c: rtc}
 
 	return rtc
 }
@@ -179,6 +181,8 @@ func unpackMessages(msgs []netlink.Message) ([]Message, error) {
 			m = &RouteMessage{}
 		case unix.RTM_GETNEIGH, unix.RTM_NEWNEIGH, unix.RTM_DELNEIGH:
 			m = &NeighMessage{}
+		case unix.RTM_GETRULE, unix.RTM_NEWRULE, unix.RTM_DELRULE:
+			m = &RuleMessage{}
 		default:
 			continue
 		}

@@ -1675,19 +1675,11 @@ func (s *session) getPeerID() (ID, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	var peerID ID
-
 	if s.handshake != nil {
-		return peerID, errors.TraceNew("not established")
+		return ID{}, errors.TraceNew("not established")
 	}
 
-	if len(s.peerPublicKey) != len(peerID) {
-		return peerID, errors.TraceNew("invalid peer public key")
-	}
-
-	copy(peerID[:], s.peerPublicKey)
-
-	return peerID, nil
+	return ID(s.peerPublicKey), nil
 }
 
 // hasUnexpectedInitiatorPublicKey indicates whether the session is

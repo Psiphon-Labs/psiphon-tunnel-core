@@ -933,7 +933,10 @@ func dialTunnel(
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatedQUICPaddingSeed,
 			dialParams.ObfuscatedQUICNonceTransformerParameters,
-			dialParams.QUICDisablePathMTUDiscovery)
+			dialParams.QUICDisablePathMTUDiscovery,
+			dialParams.QUICDialEarly,
+			dialParams.QUICUseObfuscatedPSK,
+			dialParams.quicTLSClientSessionCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1544,12 +1547,10 @@ func dialInproxy(
 	// Unlike the proxy broker case, clients already actively fetch tactics
 	// during tunnel estalishment, so tactics.SetTacticsAPIParameters are not
 	// sent to the broker and no tactics are returned by the broker.
-	//
-	// TODO: include broker fronting dial parameters to be logged by the
-	// broker -- as successful parameters might not otherwise by logged via
-	// server_tunnel if the subsequent WebRTC dials fail.
 	params := getBaseAPIParameters(
 		baseParametersNoDialParameters, true, config, nil)
+
+	common.LogFields(params).Add(dialParams.GetInproxyBrokerMetrics())
 
 	// The debugLogging flag is passed to both NoticeCommonLogger and to the
 	// inproxy package as well; skipping debug logs in the inproxy package,

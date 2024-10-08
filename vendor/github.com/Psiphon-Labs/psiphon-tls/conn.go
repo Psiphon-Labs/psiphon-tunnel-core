@@ -44,8 +44,12 @@ type Conn struct {
 	// handshakes counts the number of handshakes performed on the
 	// connection so far. If renegotiation is disabled then this is either
 	// zero or one.
-	handshakes       int
-	extMasterSecret  bool
+	handshakes      int
+	extMasterSecret bool
+
+	// [Psiphon]
+	clientSentTicket bool // whether the client sent a session ticket or a PSK in the Client Hello successfully.
+
 	didResume        bool // whether this connection was a session resumption
 	cipherSuite      uint16
 	ocspResponse     []byte   // stapled OCSP response
@@ -1624,6 +1628,18 @@ func (c *Conn) handshakeContext(ctx context.Context) (ret error) {
 	}
 
 	return c.handshakeErr
+}
+
+// [Psiphon]
+// ConnectionMetrics returns metrics of interest about the connection
+// that are not available from ConnectionState.
+func (c *Conn) ConnectionMetrics() ConnectionMetrics {
+	c.handshakeMutex.Lock()
+	defer c.handshakeMutex.Unlock()
+
+	return ConnectionMetrics{
+		ClientSentTicket: c.clientSentTicket,
+	}
 }
 
 // ConnectionState returns basic TLS details about the connection.

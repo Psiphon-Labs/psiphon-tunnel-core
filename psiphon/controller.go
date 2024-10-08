@@ -34,6 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
@@ -43,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	utls "github.com/Psiphon-Labs/utls"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/time/rate"
 )
@@ -92,6 +94,8 @@ type Controller struct {
 	staggerMutex                            sync.Mutex
 	resolver                                *resolver.Resolver
 	steeringIPCache                         *lrucache.Cache
+	tlsClientSessionCache                   utls.ClientSessionCache
+	quicTLSClientSessionCache               tls.ClientSessionCache
 	inproxyProxyBrokerClientManager         *InproxyBrokerClientManager
 	inproxyClientBrokerClientManager        *InproxyBrokerClientManager
 	inproxyNATStateManager                  *InproxyNATStateManager
@@ -115,11 +119,13 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// tunnels established by the controller.
 	NoticeSessionId(config.SessionID)
 
-	// Attempt to apply any valid, local stored tactics. The pre-done context
-	// ensures no tactics request is attempted now.
-	doneContext, cancelFunc := context.WithCancel(context.Background())
-	cancelFunc()
-	GetTactics(doneContext, config, true)
+	if !config.DisableTactics {
+		// Attempt to apply any valid, local stored tactics. The pre-done context
+		// ensures no tactics request is attempted now.
+		doneContext, cancelFunc := context.WithCancel(context.Background())
+		cancelFunc()
+		GetTactics(doneContext, config, true)
+	}
 
 	p := config.GetParameters().Get()
 	splitTunnelClassificationTTL :=
@@ -168,6 +174,9 @@ func NewController(config *Config) (controller *Controller, err error) {
 			steeringIPCacheTTL,
 			1*time.Minute,
 			steeringIPCacheMaxEntries),
+
+		tlsClientSessionCache:     utls.NewLRUClientSessionCache(0),
+		quicTLSClientSessionCache: tls.NewLRUClientSessionCache(0),
 	}
 
 	// Initialize untunneledDialConfig, used by untunneled dials including
@@ -349,25 +358,6 @@ func (controller *Controller) Run(ctx context.Context) {
 			defer httpProxy.Close()
 		}
 
-		if !controller.config.DisableRemoteServerListFetcher {
-
-			if controller.config.RemoteServerListURLs != nil {
-				controller.runWaitGroup.Add(1)
-				go controller.remoteServerListFetcher(
-					"common",
-					FetchCommonRemoteServerList,
-					controller.signalFetchCommonRemoteServerList)
-			}
-
-			if controller.config.ObfuscatedServerListRootURLs != nil {
-				controller.runWaitGroup.Add(1)
-				go controller.remoteServerListFetcher(
-					"obfuscated",
-					FetchObfuscatedServerLists,
-					controller.signalFetchObfuscatedServerLists)
-			}
-		}
-
 		if controller.config.EnableUpgradeDownload {
 			controller.runWaitGroup.Add(1)
 			go controller.upgradeDownloader()
@@ -387,6 +377,25 @@ func (controller *Controller) Run(ctx context.Context) {
 
 		if controller.packetTunnelClient != nil {
 			controller.packetTunnelClient.Start()
+		}
+	}
+
+	if !controller.config.DisableRemoteServerListFetcher {
+
+		if controller.config.RemoteServerListURLs != nil {
+			controller.runWaitGroup.Add(1)
+			go controller.remoteServerListFetcher(
+				"common",
+				FetchCommonRemoteServerList,
+				controller.signalFetchCommonRemoteServerList)
+		}
+
+		if controller.config.ObfuscatedServerListRootURLs != nil {
+			controller.runWaitGroup.Add(1)
+			go controller.remoteServerListFetcher(
+				"obfuscated",
+				FetchObfuscatedServerLists,
+				controller.signalFetchObfuscatedServerLists)
 		}
 	}
 
@@ -517,7 +526,8 @@ fetcherLoop:
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
 				controller.runCtx,
-				controller.config.NetworkConnectivityChecker) {
+				controller.config.NetworkConnectivityChecker,
+				nil) {
 				break fetcherLoop
 			}
 
@@ -604,7 +614,8 @@ downloadLoop:
 			// to avoid alert notice noise.
 			if !WaitForNetworkConnectivity(
 				controller.runCtx,
-				controller.config.NetworkConnectivityChecker) {
+				controller.config.NetworkConnectivityChecker,
+				nil) {
 				break downloadLoop
 			}
 
@@ -644,16 +655,7 @@ downloadLoop:
 }
 
 type serverEntriesReportRequest struct {
-	constraints   *protocolSelectionConstraints
-	awaitResponse chan *serverEntriesReportResponse
-}
-
-type serverEntriesReportResponse struct {
-	err                              error
-	candidates                       int
-	initialCandidates                int
-	initialCandidatesAnyEgressRegion int
-	availableEgressRegions           []string
+	constraints *protocolSelectionConstraints
 }
 
 // serverEntriesReporter performs scans over all server entries to report on
@@ -669,21 +671,16 @@ type serverEntriesReportResponse struct {
 // serverEntriesReporter also serves to combine these scans, which would
 // otherwise be logically independent, due to the performance impact of scans.
 //
-// The underlying datastore implementation _may_ block write transactions
-// while there are open read transactions. For example, bolt write
-// transactions which need to  re-map the data file (when the datastore grows)
-// will block on open read transactions. In these scenarios, a slow scan will
-// still block other operations.
+// Limitation: The underlying datastore implementation _may_ block write
+// transactions while there are open read transactions. For example, bolt
+// write transactions which need to re-map the data file (when the datastore
+// grows) will block on open read transactions. In these scenarios, a slow
+// scan will still block other operations.
 //
 // serverEntriesReporter runs beyond the establishment phase, since it's
 // important for notices such as AvailableEgressRegions to eventually emit
 // even if already established. serverEntriesReporter scans are cancellable,
 // so controller shutdown is not blocked by slow scans.
-//
-// In some special cases, establishment cannot begin without candidate counts
-// up front. In these cases only, the request contains a non-nil
-// awaitResponse, a channel which is used by the requester to block until the
-// scan is complete and the candidate counts are available.
 func (controller *Controller) serverEntriesReporter() {
 	defer controller.runWaitGroup.Done()
 
@@ -701,9 +698,10 @@ loop:
 		egressRegion := controller.config.EgressRegion
 		constraints := request.constraints
 
-		var response serverEntriesReportResponse
-
 		regions := make(map[string]bool)
+
+		initialCandidates := 0
+		candidates := 0
 
 		callback := func(serverEntry *protocol.ServerEntry) bool {
 
@@ -716,16 +714,12 @@ loop:
 			isInitialCandidate := constraints.isInitialCandidate(excludeIntensive, serverEntry)
 			isCandidate := constraints.isCandidate(excludeIntensive, serverEntry)
 
-			if isInitialCandidate {
-				response.initialCandidatesAnyEgressRegion += 1
-			}
-
 			if egressRegion == "" || serverEntry.Region == egressRegion {
 				if isInitialCandidate {
-					response.initialCandidates += 1
+					initialCandidates += 1
 				}
 				if isCandidate {
-					response.candidates += 1
+					candidates += 1
 				}
 			}
 
@@ -754,70 +748,44 @@ loop:
 
 		startTime := time.Now()
 
-		response.err = ScanServerEntries(callback)
+		err := ScanServerEntries(callback)
+		if err != nil {
+			NoticeWarning("ScanServerEntries failed: %v", errors.Trace(err))
+			continue
+		}
 
 		// Report this duration in CandidateServers as an indication of datastore
 		// performance.
 		duration := time.Since(startTime)
 
-		response.availableEgressRegions = make([]string, 0, len(regions))
+		NoticeCandidateServers(
+			controller.config.EgressRegion,
+			constraints,
+			initialCandidates,
+			candidates,
+			duration)
+
+		availableEgressRegions := make([]string, 0, len(regions))
 		for region := range regions {
-			response.availableEgressRegions = append(response.availableEgressRegions, region)
+			availableEgressRegions = append(availableEgressRegions, region)
 		}
 
-		if response.err != nil {
-
-			// For diagnostics, we'll post this even when cancelled due to shutdown.
-			NoticeWarning("ScanServerEntries failed: %v", errors.Trace(response.err))
-
-			// Continue and send error reponse. Clear any partial data to avoid
-			// misuse.
-			response.candidates = 0
-			response.initialCandidates = 0
-			response.initialCandidatesAnyEgressRegion = 0
-			response.availableEgressRegions = []string{}
-		}
-
-		if request.awaitResponse != nil {
-			select {
-			case request.awaitResponse <- &response:
-			case <-controller.runCtx.Done():
-				// The receiver may be gone when shutting down.
-			}
-		}
-
-		if response.err == nil {
-
-			NoticeCandidateServers(
-				controller.config.EgressRegion,
-				constraints,
-				response.initialCandidates,
-				response.candidates,
-				duration)
-
-			NoticeAvailableEgressRegions(
-				response.availableEgressRegions)
-		}
+		NoticeAvailableEgressRegions(
+			availableEgressRegions)
 	}
 
 	NoticeInfo("exiting server entries reporter")
 }
 
-// signalServerEntriesReporter triggers a new server entry report. Set
-// request.awaitResponse to obtain the report output. When awaitResponse is
-// set, signalServerEntriesReporter blocks until the reporter receives the
-// request, guaranteeing the new report runs. Otherwise, the report is
-// considered to be informational and may or may not run, depending on whether
-// another run is already in progress.
-func (controller *Controller) signalServerEntriesReporter(request *serverEntriesReportRequest) {
+// signalServerEntriesReporter triggers a new server entry report.The report
+// is considered to be informational and may or may not run, depending on
+// whether another run is already in progress.
+func (controller *Controller) signalServerEntriesReporter(
+	request *serverEntriesReportRequest) {
 
-	if request.awaitResponse == nil {
-		select {
-		case controller.signalReportServerEntries <- request:
-		default:
-		}
-	} else {
-		controller.signalReportServerEntries <- request
+	select {
+	case controller.signalReportServerEntries <- request:
+	default:
 	}
 }
 
@@ -1502,14 +1470,13 @@ func (controller *Controller) triggerFetches() {
 }
 
 type protocolSelectionConstraints struct {
-	useUpstreamProxy                          bool
+	config                                    *Config
 	initialLimitTunnelProtocols               protocol.TunnelProtocols
 	initialLimitTunnelProtocolsCandidateCount int
 	limitTunnelProtocols                      protocol.TunnelProtocols
 	limitTunnelDialPortNumbers                protocol.TunnelProtocolPortLists
 	limitQUICVersions                         protocol.QUICVersions
 	replayCandidateCount                      int
-	isInproxyPersonalPairingMode              bool
 	inproxyClientDialRateLimiter              *rate.Limiter
 }
 
@@ -1524,7 +1491,7 @@ func (p *protocolSelectionConstraints) isInitialCandidate(
 	return p.hasInitialProtocols() &&
 		len(serverEntry.GetSupportedProtocols(
 			conditionallyEnabledComponents{},
-			p.useUpstreamProxy,
+			p.config.UseUpstreamProxy(),
 			p.initialLimitTunnelProtocols,
 			p.limitTunnelDialPortNumbers,
 			p.limitQUICVersions,
@@ -1538,7 +1505,7 @@ func (p *protocolSelectionConstraints) isCandidate(
 
 	return len(serverEntry.GetSupportedProtocols(
 		conditionallyEnabledComponents{},
-		p.useUpstreamProxy,
+		p.config.UseUpstreamProxy(),
 		p.limitTunnelProtocols,
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,
@@ -1584,7 +1551,7 @@ func (p *protocolSelectionConstraints) supportedProtocols(
 
 	return serverEntry.GetSupportedProtocols(
 		conditionallyEnabledComponents{},
-		p.useUpstreamProxy,
+		p.config.UseUpstreamProxy(),
 		p.getLimitTunnelProtocols(connectTunnelCount),
 		p.limitTunnelDialPortNumbers,
 		p.limitQUICVersions,
@@ -1635,9 +1602,33 @@ func (p *protocolSelectionConstraints) selectProtocol(
 	// establishment workers. Instead the delay is returned and applied
 	// outside of the lock. This also allows for the delay to be reduced when
 	// the StaggerConnectionWorkers facility is active.
+	//
+	// Limitation: potential fast dial failures may cause excess rate
+	// limiting, since tokens are consumed even if the dial fails before a
+	// request arrives at the broker. WaitForNetworkConnectivity, when
+	// configured, should pause calls to selectProtocol, although there are
+	// other possible fast fail cases.
+	//
+	// TODO: replace token on fast failure that doesn't reach the broker?
 
-	if p.isInproxyPersonalPairingMode ||
+	if p.config.IsInproxyPersonalPairingMode() ||
 		p.getLimitTunnelProtocols(connectTunnelCount).IsOnlyInproxyTunnelProtocols() {
+
+		// Check for missing in-proxy broker request requirements before
+		// consuming a rate limit token.
+		//
+		// As a potential future enhancement, these checks, particularly
+		// haveInproxyCommonCompartmentIDs which reads and unmarshals a data
+		// store record, could be cached.
+		if !haveInproxyClientBrokerSpecs(p.config) {
+			NoticeInfo("in-proxy protocol selection failed: no broker specs")
+			return "", 0, false
+		}
+		if !p.config.IsInproxyPersonalPairingMode() &&
+			!haveInproxyCommonCompartmentIDs(p.config) {
+			NoticeInfo("in-proxy protocol selection failed: no common compartment IDs")
+			return "", 0, false
+		}
 
 		r := p.inproxyClientDialRateLimiter.Reserve()
 		if !r.OK() {
@@ -1650,20 +1641,34 @@ func (p *protocolSelectionConstraints) selectProtocol(
 		}
 		return selectedProtocol, delay, true
 
-	} else if !p.inproxyClientDialRateLimiter.Allow() {
+	} else {
 
-		NoticeInfo("in-proxy protocol selection skipped due to rate limit")
-
-		excludeInproxy = true
-
-		candidateProtocols = p.supportedProtocols(
-			connectTunnelCount, excludeIntensive, excludeInproxy, serverEntry)
-
-		if len(candidateProtocols) == 0 {
-			return "", 0, false
+		// Check for missing in-proxy broker request requirements before
+		// consuming a rate limit token.
+		skip := true
+		if !haveInproxyClientBrokerSpecs(p.config) {
+			NoticeInfo("in-proxy protocol selection skipped: no broker specs")
+		} else if !haveInproxyCommonCompartmentIDs(p.config) {
+			NoticeInfo("in-proxy protocol selection skipped: no common compartment IDs")
+		} else if !p.inproxyClientDialRateLimiter.Allow() {
+			NoticeInfo("in-proxy protocol selection skipped: rate limit exceeded")
+		} else {
+			skip = false
 		}
 
-		return candidateProtocols[prng.Intn(len(candidateProtocols))], 0, true
+		if skip {
+
+			excludeInproxy = true
+
+			candidateProtocols = p.supportedProtocols(
+				connectTunnelCount, excludeIntensive, excludeInproxy, serverEntry)
+
+			if len(candidateProtocols) == 0 {
+				return "", 0, false
+			}
+
+			return candidateProtocols[prng.Intn(len(candidateProtocols))], 0, true
+		}
 	}
 
 	return selectedProtocol, 0, true
@@ -1873,7 +1878,8 @@ func (controller *Controller) launchEstablishing() {
 	p := controller.config.GetParameters().Get()
 
 	controller.protocolSelectionConstraints = &protocolSelectionConstraints{
-		useUpstreamProxy:                          controller.config.UseUpstreamProxy(),
+		config: controller.config,
+
 		initialLimitTunnelProtocols:               p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
 		initialLimitTunnelProtocolsCandidateCount: p.Int(parameters.InitialLimitTunnelProtocolsCandidateCount),
 		limitTunnelProtocols:                      p.TunnelProtocols(parameters.LimitTunnelProtocols),
@@ -1882,7 +1888,6 @@ func (controller *Controller) launchEstablishing() {
 
 		replayCandidateCount: p.Int(parameters.ReplayCandidateCount),
 
-		isInproxyPersonalPairingMode: controller.config.IsInproxyPersonalPairingMode(),
 		inproxyClientDialRateLimiter: controller.inproxyClientDialRateLimiter,
 	}
 
@@ -1955,18 +1960,14 @@ func (controller *Controller) launchEstablishing() {
 		controller.config.TargetServerEntry != "" {
 		tunnelPoolSize = 1
 	}
+	controller.setTunnelPoolSize(tunnelPoolSize)
 
 	p.Close()
 
 	// Trigger CandidateServers and AvailableEgressRegions notices. By default,
 	// this is an asynchronous operation, as the underlying full server entry
-	// list enumeration may be a slow operation. In certain cases, where
-	// candidate counts are required up front, await the result before
-	// proceeding.
-
-	awaitResponse := tunnelPoolSize > 1 ||
-		controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount > 0
-
+	// list enumeration may be a slow operation.
+	//
 	// AvailableEgressRegions: after a fresh install, the outer client may not
 	// have a list of regions to display; and LimitTunnelProtocols may reduce the
 	// number of available regions.
@@ -1989,88 +1990,31 @@ func (controller *Controller) launchEstablishing() {
 	// necessary protocol capabilities (either locally or from a remote server
 	// list fetch).
 
-	// Concurrency note: controller.protocolSelectionConstraints may be
-	// overwritten before serverEntriesReporter reads it, and so cannot be
-	// accessed directly by serverEntriesReporter.
-	reportRequest := &serverEntriesReportRequest{
-		constraints: controller.protocolSelectionConstraints,
-	}
+	// Concurrency note: controller.protocolSelectionConstraints and its
+	// fields may be overwritten before serverEntriesReporter reads it, and
+	// so cannot be accessed directly by serverEntriesReporter.
+	//
+	// Limitation: the non-deep copy here shares slices (tunnel protocol
+	// lists) with the original; the contents of these slices don't change
+	// past this point. The rate limiter should not be used by
+	// serverEntriesReporter, but is cleared just in case.
+	copyConstraints := *controller.protocolSelectionConstraints
+	copyConstraints.inproxyClientDialRateLimiter = nil
+	controller.signalServerEntriesReporter(
+		&serverEntriesReportRequest{
+			constraints: &copyConstraints,
+		})
 
-	if awaitResponse {
-		// Buffer size of 1 ensures the sender, serverEntryReporter, won't block on
-		// sending the response in the case where launchEstablishing exits due to
-		// stopping establishment.
-		reportRequest.awaitResponse = make(chan *serverEntriesReportResponse, 1)
-	}
+	if controller.protocolSelectionConstraints.hasInitialProtocols() ||
+		tunnelPoolSize > 1 {
 
-	controller.signalServerEntriesReporter(reportRequest)
-
-	if awaitResponse {
-
-		var reportResponse *serverEntriesReportResponse
-		select {
-		case reportResponse = <-reportRequest.awaitResponse:
-		case <-controller.establishCtx.Done():
-			// The sender may be gone when shutting down, or may not send until after
-			// stopping establishment.
-			return
-		}
-		if reportResponse.err != nil {
-			NoticeError("failed to report server entries: %v",
-				errors.Trace(reportResponse.err))
-			controller.SignalComponentFailure()
-			return
-		}
-
-		// Make adjustments based on candidate counts.
-
-		if tunnelPoolSize > 1 {
-			// Initial canidate count is ignored as count candidates will eventually
-			// become available.
-			if reportResponse.candidates < tunnelPoolSize {
-				tunnelPoolSize = reportResponse.candidates
-			}
-			if tunnelPoolSize < 1 {
-				tunnelPoolSize = 1
-			}
-		}
-		controller.setTunnelPoolSize(tunnelPoolSize)
-
-		// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
-		// skip the initial phase in this establishment. This avoids spinning,
-		// unable to connect, in this case. InitialLimitTunnelProtocols is
-		// intended to prioritize certain protocols, but not strictly select them.
-		//
-		// The candidate count check ignores egress region selection. When an egress
-		// region is selected, it's the responsibility of the outer client to react
-		// to the following ReportAvailableRegions output and clear the user's
-		// selected region to prevent spinning, unable to connect. The initial phase
-		// is skipped only when InitialLimitTunnelProtocols cannot be satisfied
-		// _regardless_ of region selection.
-		//
-		// We presume that, in practise, most clients will have embedded server
-		// entries with capabilities for most protocols; and that clients will
-		// often perform RSL checks. So clients should most often have the
-		// necessary capabilities to satisfy InitialLimitTunnelProtocols. When
-		// this check fails, RSL/OSL/upgrade checks are triggered in order to gain
-		// new capabilities.
-		//
-		// LimitTunnelProtocols remains a hard limit, as using prohibited
-		// protocols may have some bad effect, such as a firewall blocking all
-		// traffic from a host.
-
-		if controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount > 0 {
-
-			if reportResponse.initialCandidatesAnyEgressRegion == 0 {
-				NoticeWarning("skipping initial limit tunnel protocols")
-				controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount = 0
-
-				// Since we were unable to satisfy the InitialLimitTunnelProtocols
-				// tactic, trigger RSL, OSL, and upgrade fetches to potentially
-				// gain new capabilities.
-				controller.triggerFetches()
-			}
-		}
+		// Perform a synchronous scan over server entries in order to check if
+		// there are sufficient candidates to satisfy any initial tunnel
+		// protocol limit constraint and/or tunnel pool size > 1. If these
+		// requirements can't be met, the constraint and/or pool size are
+		// adjusted in order to avoid spinning unable to select any protocol
+		// or trying to establish more tunnels than is possible.
+		controller.doConstraintsScan()
 	}
 
 	for i := 0; i < workerPoolSize; i++ {
@@ -2080,6 +2024,107 @@ func (controller *Controller) launchEstablishing() {
 
 	controller.establishWaitGroup.Add(1)
 	go controller.establishCandidateGenerator()
+}
+
+func (controller *Controller) doConstraintsScan() {
+
+	// Scan over server entries in order to check and adjust any initial
+	// tunnel protocol limit and tunnel pool size.
+	//
+	// The scan in serverEntriesReporter is _not_ used for these checks,
+	// since it takes too long to complete with 1000s of server entries,
+	// greatly delaying the start(or restart, if already scanning) of
+	// establishment. Instead a 2nd ScanServerEntries is run here, with an
+	// early exit when sufficient candidates are found, which is expected
+	// to happen quickly in the typical case.
+
+	hasInitialLimitTunnelProtocols :=
+		controller.protocolSelectionConstraints.hasInitialProtocols()
+	tunnelPoolSize := controller.getTunnelPoolSize()
+
+	scanCount := 0
+	scanCancelled := false
+	candidates := 0
+
+	callback := func(serverEntry *protocol.ServerEntry) bool {
+
+		scanCount += 1
+
+		// As in serverEntryReporter:
+		// - egress region is ignored, since AvailableEgressRegion alerts
+		//   the front end client when unable to connect due to egress
+		//   region constraints.
+		// - excludeIntensive is false, as any intensive candidate will
+		//   eventually be an available candidate.
+
+		excludeIntensive := false
+		if (hasInitialLimitTunnelProtocols &&
+			controller.protocolSelectionConstraints.isInitialCandidate(excludeIntensive, serverEntry)) ||
+			(!hasInitialLimitTunnelProtocols &&
+				controller.protocolSelectionConstraints.isCandidate(excludeIntensive, serverEntry)) {
+			candidates += 1
+		}
+
+		if candidates >= tunnelPoolSize {
+			// Exit the scan early once sufficient candidates have been found.
+			scanCancelled = true
+			return false
+		}
+
+		select {
+		case <-controller.runCtx.Done():
+			// Don't block controller shutdown: cancel the scan.
+			return false
+		default:
+			return true
+		}
+	}
+
+	startTime := time.Now()
+	scanErr := ScanServerEntries(callback)
+	if scanErr != nil && !scanCancelled {
+		NoticeWarning("ScanServerEntries failed: %v", errors.Trace(scanErr))
+		// Continue and make adjustments based on any partial results.
+	}
+	NoticeInfo("Awaited ScanServerEntries: scanned %d entries in %v", scanCount, time.Since(startTime))
+
+	// Make adjustments based on candidate counts.
+
+	if tunnelPoolSize > candidates && candidates > 0 {
+		tunnelPoolSize = candidates
+	}
+
+	// If InitialLimitTunnelProtocols is configured but cannot be satisfied,
+	// skip the initial phase in this establishment. This avoids spinning,
+	// unable to connect, in this case. InitialLimitTunnelProtocols is
+	// intended to prioritize certain protocols, but not strictly select them.
+	//
+	// The candidate count check ignores egress region selection. When an egress
+	// region is selected, it's the responsibility of the outer client to react
+	// to the following ReportAvailableRegions output and clear the user's
+	// selected region to prevent spinning, unable to connect. The initial phase
+	// is skipped only when InitialLimitTunnelProtocols cannot be satisfied
+	// _regardless_ of region selection.
+	//
+	// We presume that, in practise, most clients will have embedded server
+	// entries with capabilities for most protocols; and that clients will
+	// often perform RSL checks. So clients should most often have the
+	// necessary capabilities to satisfy InitialLimitTunnelProtocols. When
+	// this check fails, RSL/OSL/upgrade checks are triggered in order to gain
+	// new capabilities.
+	//
+	// LimitTunnelProtocols remains a hard limit, as using prohibited
+	// protocols may have some bad effect, such as a firewall blocking all
+	// traffic from a host.
+
+	if hasInitialLimitTunnelProtocols && candidates == 0 {
+		NoticeWarning("skipping initial limit tunnel protocols")
+		controller.protocolSelectionConstraints.initialLimitTunnelProtocolsCandidateCount = 0
+		// Since we were unable to satisfy the InitialLimitTunnelProtocols
+		// tactic, trigger RSL, OSL, and upgrade fetches to potentially
+		// gain new capabilities.
+		controller.triggerFetches()
+	}
 }
 
 // stopEstablishing signals the establish goroutines to stop and waits
@@ -2199,7 +2244,8 @@ loop:
 			networkWaitStartTime := time.Now()
 			if !WaitForNetworkConnectivity(
 				controller.establishCtx,
-				controller.config.NetworkConnectivityChecker) {
+				controller.config.NetworkConnectivityChecker,
+				nil) {
 				break loop
 			}
 			networkWaitDuration := time.Since(networkWaitStartTime)
@@ -2548,6 +2594,8 @@ loop:
 		dialParams, err := MakeDialParameters(
 			controller.config,
 			controller.steeringIPCache,
+			controller.quicTLSClientSessionCache,
+			controller.tlsClientSessionCache,
 			upstreamProxyErrorCallback,
 			canReplay,
 			selectProtocol,
@@ -2583,6 +2631,10 @@ loop:
 		// Increment establishConnectTunnelCount only after selectProtocol has
 		// succeeded to ensure InitialLimitTunnelProtocolsCandidateCount
 		// candidates use InitialLimitTunnelProtocols.
+		//
+		// TODO: add escape from initial limit to cover cases where the
+		// initial scan indicates there are sufficient candidates, but then
+		// server entries are deleted.
 		establishConnectTunnelCount := controller.establishConnectTunnelCount
 		controller.establishConnectTunnelCount += 1
 
@@ -2722,83 +2774,89 @@ func (controller *Controller) isStopEstablishing() bool {
 func (controller *Controller) runInproxyProxy() {
 	defer controller.runWaitGroup.Done()
 
-	if !controller.config.DisableTactics {
+	// Obtain and apply tactics before connecting to the broker and
+	// announcing proxies.
 
-		// Obtain and apply tactics before connecting to the broker and
-		// announcing proxies.
+	if !controller.config.DisableTunnels &&
+		!controller.config.InproxySkipAwaitFullyConnected {
 
-		if controller.config.DisableTunnels {
+		// When running client tunnel establishment, awaiting establishment
+		// guarantees fresh tactics from either an OOB request or a handshake
+		// response.
+		//
+		// While it may be possible to proceed sooner, using cached tactics,
+		// waiting until establishment is complete avoids potential races
+		// between tactics updates.
 
-			// When not running client tunnel establishment, perform an OOB tactics
-			// fetch, if required, here.
+		if !controller.awaitFullyEstablished() {
+			// Controller is shutting down
+			return
+		}
 
-			GetTactics(controller.runCtx, controller.config, true)
+	} else {
 
-		} else if !controller.config.InproxySkipAwaitFullyConnected {
+		// Await the necessary proxy broker specs. These may already be
+		// available in cached tactics.
+		//
+		// When not already available, and when not also running client tunnel
+		// establishment, i.e., when DisableTunnels is set,
+		// inproxyAwaitProxyBrokerSpecs will perform tactics fetches, in
+		// addition to triggering remote server list fetches in case
+		// tactics-capable server entries are not available. In this mode,
+		// inproxyAwaitProxyBrokerSpecs can return, after a fresh tactics
+		// fetch yielding no broker specs, without broker specs.
+		// haveInproxyProxyBrokerSpecs is checked again below.
+		//
+		// InproxySkipAwaitFullyConnected is a special testing case to support
+		// server/server_test, where a client must be its own proxy; in this
+		// case, awaitFullyEstablished will block forever and can't be used.
+		// When InproxySkipAwaitFullyConnected is set and when also running
+		// client tunnel establishment, inproxyAwaitProxyBrokerSpecs simply
+		// waits until any broker specs become available, which is sufficient
+		// for the test but is not as robust as awaiting fresh tactics.
 
-			// When running client tunnel establishment, await establishment
-			// as this guarantees fresh tactics from either an OOB request or
-			// a handshake response.
-			//
-			// While it may be possible to proceed sooner, using cached
-			// tactics, waiting until establishment is complete avoids
-			// potential races between tactics updates.
-
-			if !controller.awaitFullyEstablished() {
-				// Controller is shutting down
-				return
-			}
-
-		} else {
-
-			// InproxySkipAwaitFullyConnected is a special case to support
-			// server/server_test, where a client must be its own proxy; in
-			// this case, awaitFullyEstablished will block forever.
-			// inproxyAwaitBrokerSpecs simply waits until any broker specs
-			// become available, which is sufficient for the test but is not
-			// as robust as awaiting fresh tactics.
-
-			isProxy := true
-			if !controller.inproxyAwaitBrokerSpecs(isProxy) {
-				// Controller is shutting down
-				return
-			}
+		if !controller.inproxyAwaitProxyBrokerSpecs() {
+			// Controller is shutting down
+			return
 		}
 	}
 
 	// Don't announce proxies if tactics indicates it won't be allowed. This
 	// is also enforced on the broker; this client-side check cuts down on
 	// load from well-behaved proxies.
+	//
+	// Limitation: InproxyAllowProxy is only checked on start up, but tactics
+	// may change while running.
 
 	p := controller.config.GetParameters().Get()
 	allowProxy := p.Bool(parameters.InproxyAllowProxy)
 	p.Close()
 
-	// Don't announce proxies when running on an incompatible network, such as
-	// a non-Psiphon VPN.
-
-	compatibleNetwork := IsInproxyCompatibleNetworkType(controller.config.GetNetworkID())
-
-	// Running an unstream proxy is also an incompatible case.
-
+	// Running an upstream proxy is also an incompatible case.
 	useUpstreamProxy := controller.config.UseUpstreamProxy()
 
-	if !allowProxy || !compatibleNetwork || useUpstreamProxy || !inproxy.Enabled() {
+	// In both the awaitFullyEstablished and inproxyAwaitProxyBrokerSpecs
+	// cases, we may arrive at this point without broker specs, and must
+	// recheck.
+	haveBrokerSpecs := haveInproxyProxyBrokerSpecs(controller.config)
+
+	if !allowProxy || useUpstreamProxy || !haveBrokerSpecs || !inproxy.Enabled() {
 		if !allowProxy {
 			NoticeError("inproxy proxy: not allowed")
-		}
-		if !compatibleNetwork {
-			NoticeError("inproxy proxy: not run due to incompatible network")
 		}
 		if useUpstreamProxy {
 			NoticeError("inproxy proxy: not run due to upstream proxy configuration")
 		}
+		if haveBrokerSpecs {
+			NoticeError("inproxy proxy: no proxy broker specs")
+		}
 		if !inproxy.Enabled() {
 			NoticeError("inproxy proxy: inproxy implementation is not enabled")
 		}
+		// Signal failure -- and shutdown -- only if running in proxy-only
+		// mode. If also running a tunnel, keep running without proxies.
 		if controller.config.DisableTunnels {
-			// Signal failure -- and shutdown -- only if running in proxy-only mode. If also
-			// running a tunnel, keep running without proxies.
+			NoticeError("inproxy proxy: aborting")
 			controller.SignalComponentFailure()
 		}
 		return
@@ -2899,40 +2957,135 @@ func (controller *Controller) runInproxyProxy() {
 	NoticeInfo("inproxy proxy: stopped")
 }
 
-func (controller *Controller) inproxyAwaitBrokerSpecs(isProxy bool) bool {
+// inproxyAwaitProxyBrokerSpecs awaits proxy broker specs or a fresh tactics
+// fetch indicating that there are no proxy broker specs. The caller should
+// check haveInproxyProxyBrokerSpecs to determine which is the case.
+//
+// inproxyAwaitProxyBrokerSpecs is intended for use either when DisableTunnels
+// is set or when InproxySkipAwaitFullyConnected is set.
+//
+// In the DisableTunnels case, inproxyAwaitProxyBrokerSpecs will perform
+// tactics fetches and trigger remote server list fetches in case
+// tactics-capable server entries are required. The DisableTunnels case
+// assumes client tunnel establishment is not also running, as the tactics
+// operations could otherwise conflict.
+//
+// In the InproxySkipAwaitFullyConnected case, which is intended only to
+// support testing, inproxyAwaitProxyBrokerSpecs simply polls forever for
+// proxy broker specs expected, in the test, to be obtained from concurrent
+// client tunnel establishment operations.
+//
+// inproxyAwaitProxyBrokerSpecs returns false when the Controller is
+// stopping.
+func (controller *Controller) inproxyAwaitProxyBrokerSpecs() bool {
 
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+	NoticeInfo("inproxy proxy: await tactics with proxy broker specs")
+
+	// Check for any broker specs in cached tactics or config parameters
+	// already loaded by NewController or Config.Commit.
+	if haveInproxyProxyBrokerSpecs(controller.config) {
+		return true
+	}
+
+	// If there are no broker specs in config parameters and tactics are
+	// disabled, there is nothing more to await.
+	if controller.config.DisableTactics {
+		NoticeWarning("inproxy proxy: no broker specs and tactics disabled")
+		return true
+	}
+
+	// Orchestrating fetches roughly follows the same pattern as
+	// establishCandidateGenerator, with a WaitForNetworkConnectivity check,
+	// followed by the fetch operation; and a remote server list trigger when
+	// that fails, followed by a short pause.
+	doFetches := controller.config.DisableTunnels
+
+	// pollPeriod for InproxySkipAwaitFullyConnected case.
+	pollPeriod := 100 * time.Millisecond
 
 	for {
-		p := controller.config.GetParameters().Get()
-		var brokerSpecs parameters.InproxyBrokerSpecsValue
-		if isProxy {
-			brokerSpecs = p.InproxyBrokerSpecs(
-				parameters.InproxyProxyBrokerSpecs, parameters.InproxyBrokerSpecs)
-		} else {
-			brokerSpecs = p.InproxyBrokerSpecs(
-				parameters.InproxyClientBrokerSpecs, parameters.InproxyBrokerSpecs)
+		fetched := false
+		if doFetches {
+			if !WaitForNetworkConnectivity(
+				controller.runCtx,
+				controller.config.NetworkConnectivityChecker,
+				nil) {
+				// Controller is shutting down
+				return false
+			}
+			// Force a fetch for the latest tactics, since cached tactics, if
+			// any, did not yield proxy broker specs.
+			useStoredTactics := false
+			fetched = GetTactics(controller.runCtx, controller.config, useStoredTactics)
 		}
-		p.Close()
 
-		if len(brokerSpecs) > 0 {
+		if haveInproxyProxyBrokerSpecs(controller.config) {
+			return true
+		} else if fetched {
+			// If fresh tactics yielded no proxy broker specs, there is
+			// nothing more to await.
+			NoticeWarning("inproxy proxy: no broker specs in tactics")
 			return true
 		}
 
+		timeout := pollPeriod
+		if doFetches {
+
+			// Trigger remote server list fetches in case the tactics fetch
+			// failed due to "no capable servers". Repeated triggers will
+			// have no effect, subject to FetchRemoteServerListStalePeriod.
+			//
+			// While triggerFetches also triggers upgrade downloads, currently
+			// the upgrade downloader is not enabled when DisableTunnels is
+			// set. See Controller.Run.
+			//
+			// TODO: make the trigger conditional on the specific "no capable
+			// servers" failure condition.
+			controller.triggerFetches()
+
+			// Pause before attempting to fetch tactics again. This helps
+			// avoid some busy wait loop conditions, allows some time for
+			// network conditions to change, and also allows for remote server
+			// list fetches to complete. The EstablishTunnelPausePeriod and
+			// Jitter parameters used in establishCandidateGenerator are also
+			// appropriate in this instance.
+			p := controller.config.GetParameters().Get()
+			timeout = prng.JitterDuration(
+				p.Duration(parameters.EstablishTunnelPausePeriod),
+				p.Float(parameters.EstablishTunnelPausePeriodJitter))
+			p.Close()
+		}
+
+		timer := time.NewTimer(timeout)
 		select {
-		case <-ticker.C:
-			// Check isFullyEstablished again
+		case <-timer.C:
 		case <-controller.runCtx.Done():
+			timer.Stop()
+			// Controller is shutting down
 			return false
 		}
+		timer.Stop()
 	}
 }
 
 func (controller *Controller) inproxyWaitForNetworkConnectivity() bool {
+
+	// Pause announcing proxies when currently running on an incompatible
+	// network, such as a non-Psiphon VPN.
+	emitted := false
+	isCompatibleNetwork := func() bool {
+		compatibleNetwork := IsInproxyCompatibleNetworkType(controller.config.GetNetworkID())
+		if !compatibleNetwork && !emitted {
+			NoticeInfo("inproxy proxy: waiting due to incompatible network")
+			emitted = true
+		}
+		return compatibleNetwork
+	}
+
 	return WaitForNetworkConnectivity(
 		controller.runCtx,
-		controller.config.NetworkConnectivityChecker)
+		controller.config.NetworkConnectivityChecker,
+		isCompatibleNetwork)
 }
 
 // inproxyGetProxyBrokerClient returns the broker client shared by all proxy

@@ -46,7 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 func TestTLSCertificateVerification(t *testing.T) {
@@ -682,8 +682,7 @@ func TestSelectTLSProfile(t *testing.T) {
 
 		var unexpectedClientHelloID, unexpectedClientHelloSpec bool
 
-		// TLS_PROFILE_CHROME_112_PSK profile is a special case. Check getUTLSClientHelloID for details.
-		if i < len(protocol.SupportedTLSProfiles) && profile != protocol.TLS_PROFILE_CHROME_112_PSK {
+		if i < len(protocol.SupportedTLSProfiles) {
 			if utlsClientHelloID == utls.HelloCustom {
 				unexpectedClientHelloID = true
 			}

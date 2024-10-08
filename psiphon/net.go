@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	utls "github.com/Psiphon-Labs/utls"
 	"golang.org/x/net/bpf"
 )
 
@@ -292,13 +293,17 @@ func RelayCopyBuffer(config *Config, dst io.Writer, src io.Reader) (int64, error
 }
 
 // WaitForNetworkConnectivity uses a NetworkConnectivityChecker to
-// periodically check for network connectivity. It returns true if
-// no NetworkConnectivityChecker is provided (waiting is disabled)
-// or when NetworkConnectivityChecker.HasNetworkConnectivity()
-// indicates connectivity. It waits and polls the checker once a second.
-// When the context is done, false is returned immediately.
+// periodically check for network connectivity. It returns true if no
+// NetworkConnectivityChecker is provided (waiting is disabled) or when
+// NetworkConnectivityChecker.HasNetworkConnectivity() indicates
+// connectivity. It waits and polls the checker once a second. When
+// additionalConditionChecker is not nil, it must also return true for
+// WaitForNetworkConnectivity to return true. When the context is done, false
+// is returned immediately.
 func WaitForNetworkConnectivity(
-	ctx context.Context, connectivityChecker NetworkConnectivityChecker) bool {
+	ctx context.Context,
+	connectivityChecker NetworkConnectivityChecker,
+	additionalConditionChecker func() bool) bool {
 
 	if connectivityChecker == nil || connectivityChecker.HasNetworkConnectivity() == 1 {
 		return true
@@ -310,7 +315,8 @@ func WaitForNetworkConnectivity(
 	defer ticker.Stop()
 
 	for {
-		if connectivityChecker.HasNetworkConnectivity() == 1 {
+		if connectivityChecker.HasNetworkConnectivity() == 1 &&
+			(additionalConditionChecker == nil || additionalConditionChecker()) {
 			return true
 		}
 
@@ -524,6 +530,12 @@ func makeFrontedHTTPClient(
 		TransformedHostName:      meekTransformedHostName,
 		ClientTunnelProtocol:     effectiveTunnelProtocol,
 		NetworkLatencyMultiplier: networkLatencyMultiplier,
+		// TODO: Change hard-coded session key be something like FrontingProviderID + BrokerID.
+		// This is necessary once longer-term TLS caches are added.
+		// meekDialAddress, based on meekFrontingDialAddress has couple of issues. For some providers there's
+		// only a couple or even just one possible value, in other cases there are millions of possible values
+		// and cached values wont' be used as often as they ought to be.
+		TLSClientSessionCache: common.WrapUtlsClientSessionCache(utls.NewLRUClientSessionCache(0), meekDialAddress),
 	}
 
 	if !skipVerify {
@@ -728,8 +740,8 @@ func MakeUntunneledHTTPClient(
 		SkipVerify:                    skipVerify,
 		DisableSystemRootCAs:          disableSystemRootCAs,
 		TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
+		ClientSessionCache:            utls.NewLRUClientSessionCache(0),
 	}
-	tlsConfig.EnableClientSessionCache()
 
 	tlsDialer := NewCustomTLSDialer(tlsConfig)
 

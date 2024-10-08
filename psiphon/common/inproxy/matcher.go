@@ -977,7 +977,7 @@ func (m *Matcher) addAnnouncementEntry(announcementEntry *announcementEntry) err
 
 func (m *Matcher) removeAnnouncementEntry(aborting bool, announcementEntry *announcementEntry) {
 
-	// In the aborting case, the queue isn't already locked. Otherise, assume
+	// In the aborting case, the queue isn't already locked. Otherwise, assume
 	// it is locked.
 	if aborting {
 		m.announcementQueueMutex.Lock()
@@ -1119,6 +1119,8 @@ type announcementMultiQueue struct {
 // announcements, which are used, when matching, to determine when better NAT
 // matches may be possible.
 type announcementCompartmentQueue struct {
+	isCommonCompartment      bool
+	compartmentID            ID
 	entries                  *list.List
 	unlimitedNATCount        int
 	partiallyLimitedNATCount int
@@ -1177,12 +1179,14 @@ func (q *announcementMultiQueue) enqueue(announcementEntry *announcementEntry) e
 		return errors.TraceNew("announcement must specify exactly one compartment ID")
 	}
 
+	isCommonCompartment := true
 	var compartmentID ID
 	var compartmentQueues map[ID]*announcementCompartmentQueue
 	if len(commonCompartmentIDs) > 0 {
 		compartmentID = commonCompartmentIDs[0]
 		compartmentQueues = q.commonCompartmentQueues
 	} else {
+		isCommonCompartment = false
 		compartmentID = personalCompartmentIDs[0]
 		compartmentQueues = q.personalCompartmentQueues
 	}
@@ -1190,7 +1194,9 @@ func (q *announcementMultiQueue) enqueue(announcementEntry *announcementEntry) e
 	compartmentQueue, ok := compartmentQueues[compartmentID]
 	if !ok {
 		compartmentQueue = &announcementCompartmentQueue{
-			entries: list.New(),
+			isCommonCompartment: isCommonCompartment,
+			compartmentID:       compartmentID,
+			entries:             list.New(),
 		}
 		compartmentQueues[compartmentID] = compartmentQueue
 	}
@@ -1221,7 +1227,7 @@ func (q *announcementMultiQueue) enqueue(announcementEntry *announcementEntry) e
 }
 
 // announcementQueueReference returns false if the item is already dequeued.
-func (r announcementQueueReference) dequeue() bool {
+func (r *announcementQueueReference) dequeue() bool {
 
 	if r.entry == nil {
 		// Already dequeued.
@@ -1241,6 +1247,15 @@ func (r announcementQueueReference) dequeue() bool {
 	}
 
 	r.compartmentQueue.entries.Remove(r.entry)
+
+	if r.compartmentQueue.entries.Len() == 0 {
+		// Remove empty compartment queue.
+		queues := r.multiQueue.commonCompartmentQueues
+		if !r.compartmentQueue.isCommonCompartment {
+			queues = r.multiQueue.personalCompartmentQueues
+		}
+		delete(queues, r.compartmentQueue.compartmentID)
+	}
 
 	r.multiQueue.totalEntries -= 1
 
@@ -1319,14 +1334,14 @@ func (iter *announcementMatchIterator) getNext() *announcementEntry {
 
 	// Select the oldest item, by deadline, from all the candidate queue head
 	// items. This operation is linear in the number of matching compartment
-	// ID queues, which is currently bounded by This is a linear time
-	// operation, bounded by the length of matching compartment IDs (no more
-	// than maxCompartmentIDs, as enforced in
+	// ID queues, which is currently bounded by the length of matching
+	// compartment IDs (no more than maxCompartmentIDs, as enforced in
 	// ClientOfferRequest.ValidateAndGetLogFields).
 	//
 	// A potential future enhancement is to add more iterator state to track
 	// which queue has the next oldest time to select on the following
-	// getNext call.
+	// getNext call. Another potential enhancement is to remove fully
+	// consumed queues from compartmentQueues/compartmentIDs/nextEntries.
 
 	var selectedCandidate *announcementEntry
 	selectedIndex := -1

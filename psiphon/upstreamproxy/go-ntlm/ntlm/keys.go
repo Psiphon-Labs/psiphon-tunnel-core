@@ -41,7 +41,7 @@ func signKey(flags uint32, randomSessionKey []byte, mode string) (signKey []byte
 	return
 }
 
-// 	Define SEALKEY(NegotiateFlags, RandomSessionKey, Mode) as
+// Define SEALKEY(NegotiateFlags, RandomSessionKey, Mode) as
 func sealKey(flags uint32, randomSessionKey []byte, mode string) (sealKey []byte) {
 	if NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY.IsSet(flags) {
 		if NTLMSSP_NEGOTIATE_128.IsSet(flags) {

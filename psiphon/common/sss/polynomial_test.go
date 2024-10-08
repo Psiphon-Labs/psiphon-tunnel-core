@@ -78,9 +78,9 @@ func TestGenerateFullSize(t *testing.T) {
 
 func TestInterpolate(t *testing.T) {
 	in := []pair{
-		pair{x: 1, y: 1},
-		pair{x: 2, y: 2},
-		pair{x: 3, y: 3},
+		{x: 1, y: 1},
+		{x: 2, y: 2},
+		{x: 3, y: 3},
 	}
 
 	if v, want := interpolate(in, 0), byte(0); v != want {

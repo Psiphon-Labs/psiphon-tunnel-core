@@ -266,7 +266,9 @@ func configureServerInterface(
 	tunDeviceName string) error {
 
 	// TODO: fix or remove the following broken code
-	return errors.Trace(errUnsupported)
+	if true {
+		return errors.Trace(errUnsupported)
+	}
 
 	// Set tun device network addresses and MTU
 
@@ -388,7 +390,9 @@ func configureClientInterface(
 	tunDeviceName string) error {
 
 	// TODO: fix or remove the following broken code
-	return errors.Trace(errUnsupported)
+	if true {
+		return errors.Trace(errUnsupported)
+	}
 
 	// Set tun device network addresses and MTU
 

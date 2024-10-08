@@ -795,7 +795,14 @@ func init() {
 		{143, "inproxy_webrtc_local_ice_candidate_is_private_IP", intConverter},
 		{144, "inproxy_webrtc_remote_ice_candidate_is_private_IP", intConverter},
 
-		// Next key value = 145
+		{145, "tls_sent_ticket", intConverter},
+		{146, "tls_did_resume", intConverter},
+		{147, "quic_sent_ticket", intConverter},
+		{148, "quic_did_resume", intConverter},
+		{149, "quic_dial_early", intConverter},
+		{150, "quic_obfuscated_psk", intConverter},
+
+		// Next key value = 151
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

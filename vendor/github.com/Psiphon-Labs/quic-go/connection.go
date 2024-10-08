@@ -62,6 +62,9 @@ type cryptoStreamHandler interface {
 	DiscardInitialKeys()
 	io.Closer
 	ConnectionState() handshake.ConnectionState
+
+	// [Psiphon]
+	TLSConnectionMetrics() tls.ConnectionMetrics
 }
 
 type receivedPacket struct {
@@ -710,6 +713,13 @@ func (s *connection) ConnectionState() ConnectionState {
 	s.connState.Used0RTT = cs.Used0RTT
 	s.connState.GSO = s.conn.capabilities().GSO
 	return s.connState
+}
+
+// [Psiphon]
+func (s *connection) TLSConnectionMetrics() tls.ConnectionMetrics {
+	s.connStateMutex.Lock()
+	defer s.connStateMutex.Unlock()
+	return s.cryptoStreamHandler.TLSConnectionMetrics()
 }
 
 // Time when the connection should time out

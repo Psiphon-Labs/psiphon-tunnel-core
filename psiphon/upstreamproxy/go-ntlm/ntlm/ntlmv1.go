@@ -376,7 +376,7 @@ func ntowfv1(passwd string) []byte {
 	return md4(utf16FromString(passwd))
 }
 
-//	ConcatenationOf( DES( UpperCase( Passwd)[0..6],"KGS!@#$%"), DES( UpperCase( Passwd)[7..13],"KGS!@#$%"))
+// ConcatenationOf( DES( UpperCase( Passwd)[0..6],"KGS!@#$%"), DES( UpperCase( Passwd)[7..13],"KGS!@#$%"))
 func lmowfv1(passwd string) ([]byte, error) {
 	asciiPassword := []byte(strings.ToUpper(passwd))
 	keyBytes := zeroPaddedBytes(asciiPassword, 0, 14)

@@ -105,6 +105,9 @@ type CryptoSetup interface {
 	SetHandshakeConfirmed()
 	ConnectionState() ConnectionState
 
+	// [Psiphon]
+	TLSConnectionMetrics() tls.ConnectionMetrics
+
 	GetInitialOpener() (LongHeaderOpener, error)
 	GetHandshakeOpener() (LongHeaderOpener, error)
 	Get0RTTOpener() (LongHeaderOpener, error)
