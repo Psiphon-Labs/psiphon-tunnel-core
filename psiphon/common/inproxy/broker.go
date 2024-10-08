@@ -62,9 +62,10 @@ type LookupGeoIP func(IP string) common.GeoIPData
 // timeouts including long-polling for proxy announcements.
 type ExtendTransportTimeout func(timeout time.Duration)
 
-// GetTactics is a callback which returns the appropriate tactics for the
-// specified client/proxy GeoIP data and API parameters.
-type GetTactics func(common.GeoIPData, common.APIParameters) ([]byte, string, error)
+// GetTacticsPayload is a callback which returns the appropriate tactics
+// payload for the specified client/proxy GeoIP data and API parameters.
+type GetTacticsPayload func(
+	common.GeoIPData, common.APIParameters) ([]byte, string, error)
 
 // Broker is the in-proxy broker component, which matches clients and proxies
 // and provides WebRTC signaling functionalty.
@@ -77,6 +78,7 @@ type GetTactics func(common.GeoIPData, common.APIParameters) ([]byte, string, er
 // encapsulating secure session packets.
 type Broker struct {
 	config               *BrokerConfig
+	brokerID             ID
 	initiatorSessions    *InitiatorSessions
 	responderSessions    *ResponderSessions
 	matcher              *Matcher
@@ -85,9 +87,11 @@ type Broker struct {
 	commonCompartmentsMutex sync.Mutex
 	commonCompartments      *consistent.Consistent
 
-	proxyAnnounceTimeout    int64
-	clientOfferTimeout      int64
-	pendingServerReportsTTL int64
+	proxyAnnounceTimeout       int64
+	clientOfferTimeout         int64
+	clientOfferPersonalTimeout int64
+	pendingServerReportsTTL    int64
+	maxRequestTimeouts         atomic.Value
 
 	maxCompartmentIDs int64
 }
@@ -143,8 +147,8 @@ type BrokerConfig struct {
 	// APIParameterValidator is a callback that formats base API metrics.
 	APIParameterLogFieldFormatter common.APIParameterLogFieldFormatter
 
-	// GetTactics provides a tactics lookup service.
-	GetTactics GetTactics
+	// GetTacticsPayload provides a tactics lookup service.
+	GetTacticsPayload GetTacticsPayload
 
 	// IsValidServerEntryTag is a callback which checks if the specified
 	// server entry tag is on the list of valid and active Psiphon server
@@ -162,9 +166,10 @@ type BrokerConfig struct {
 	ServerEntrySignaturePublicKey string
 
 	// These timeout parameters may be used to override defaults.
-	ProxyAnnounceTimeout    time.Duration
-	ClientOfferTimeout      time.Duration
-	PendingServerReportsTTL time.Duration
+	ProxyAnnounceTimeout       time.Duration
+	ClientOfferTimeout         time.Duration
+	ClientOfferPersonalTimeout time.Duration
+	PendingServerReportsTTL    time.Duration
 
 	// Announcement queue limit configuration.
 	MatcherAnnouncementLimitEntryCount    int
@@ -203,8 +208,19 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		return nil, errors.Trace(err)
 	}
 
+	// The broker ID is the broker's session public key in Curve25519 form.
+	publicKey, err := config.PrivateKey.GetPublicKey()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	brokerID, err := publicKey.ToCurve25519()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	b := &Broker{
 		config:            config,
+		brokerID:          ID(brokerID),
 		initiatorSessions: initiatorSessions,
 		responderSessions: responderSessions,
 		matcher: NewMatcher(&MatcherConfig{
@@ -219,9 +235,10 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 			OfferRateLimitInterval:         config.MatcherOfferRateLimitInterval,
 		}),
 
-		proxyAnnounceTimeout:    int64(config.ProxyAnnounceTimeout),
-		clientOfferTimeout:      int64(config.ClientOfferTimeout),
-		pendingServerReportsTTL: int64(config.PendingServerReportsTTL),
+		proxyAnnounceTimeout:       int64(config.ProxyAnnounceTimeout),
+		clientOfferTimeout:         int64(config.ClientOfferTimeout),
+		clientOfferPersonalTimeout: int64(config.ClientOfferPersonalTimeout),
+		pendingServerReportsTTL:    int64(config.PendingServerReportsTTL),
 
 		maxCompartmentIDs: int64(common.ValueOrDefault(config.MaxCompartmentIDs, MaxCompartmentIDs)),
 	}
@@ -273,11 +290,15 @@ func (b *Broker) SetCommonCompartmentIDs(commonCompartmentIDs []ID) error {
 func (b *Broker) SetTimeouts(
 	proxyAnnounceTimeout time.Duration,
 	clientOfferTimeout time.Duration,
-	pendingServerReportsTTL time.Duration) {
+	clientOfferPersonalTimeout time.Duration,
+	pendingServerReportsTTL time.Duration,
+	maxRequestTimeouts map[string]time.Duration) {
 
 	atomic.StoreInt64(&b.proxyAnnounceTimeout, int64(proxyAnnounceTimeout))
 	atomic.StoreInt64(&b.clientOfferTimeout, int64(clientOfferTimeout))
+	atomic.StoreInt64(&b.clientOfferPersonalTimeout, int64(clientOfferPersonalTimeout))
 	atomic.StoreInt64(&b.pendingServerReportsTTL, int64(pendingServerReportsTTL))
+	b.maxRequestTimeouts.Store(maxRequestTimeouts)
 }
 
 // SetLimits sets new queue limit values, replacing the previous
@@ -413,7 +434,7 @@ func (b *Broker) HandleSessionPacket(
 
 	// HandlePacket returns both a packet and an error in the expired session
 	// reset token case. Log the error here, clear it, and return the
-	// packetto be relayed back to the broker client.
+	// packet to be relayed back to the broker client.
 
 	outPacket, err := b.responderSessions.HandlePacket(
 		inPacket, handleUnwrappedRequest)
@@ -487,6 +508,7 @@ func (b *Broker) handleProxyAnnounce(
 			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-announce"
+		logFields["broker_id"] = b.brokerID
 		logFields["proxy_id"] = proxyID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		logFields["connection_id"] = connectionID
@@ -551,7 +573,7 @@ func (b *Broker) handleProxyAnnounce(
 	// proxy can store and apply the new tactics before announcing again.
 
 	var tacticsPayload []byte
-	tacticsPayload, newTacticsTag, err = b.config.GetTactics(geoIPData, apiParams)
+	tacticsPayload, newTacticsTag, err = b.config.GetTacticsPayload(geoIPData, apiParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -599,6 +621,11 @@ func (b *Broker) handleProxyAnnounce(
 	timeout := common.ValueOrDefault(
 		time.Duration(atomic.LoadInt64(&b.proxyAnnounceTimeout)),
 		brokerProxyAnnounceTimeout)
+
+	// Adjust the timeout to respect any shorter maximum request timeouts for
+	// the fronting provider.
+	timeout = b.adjustRequestTimeout(logFields, timeout)
+
 	announceCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 	extendTransportTimeout(timeout)
@@ -742,6 +769,7 @@ func (b *Broker) handleClientOffer(
 			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "client-offer"
+		logFields["broker_id"] = b.brokerID
 		if serverParams != nil {
 			logFields["destination_server_id"] = serverParams.serverID
 		}
@@ -852,9 +880,21 @@ func (b *Broker) handleClientOffer(
 	// Enqueue the client offer and await a proxy matching and subsequent
 	// proxy answer.
 
-	timeout := common.ValueOrDefault(
-		time.Duration(atomic.LoadInt64(&b.clientOfferTimeout)),
-		brokerClientOfferTimeout)
+	// The Client Offer timeout may be configured with a shorter value in
+	// personal pairing mode, to facilitate a faster no-match result and
+	// resulting broker rotation.
+	var timeout time.Duration
+	if len(offerRequest.PersonalCompartmentIDs) > 0 {
+		timeout = time.Duration(atomic.LoadInt64(&b.clientOfferPersonalTimeout))
+	} else {
+		timeout = time.Duration(atomic.LoadInt64(&b.clientOfferTimeout))
+	}
+	timeout = common.ValueOrDefault(timeout, brokerClientOfferTimeout)
+
+	// Adjust the timeout to respect any shorter maximum request timeouts for
+	// the fronting provider.
+	timeout = b.adjustRequestTimeout(logFields, timeout)
+
 	offerCtx, cancelFunc := context.WithTimeout(ctx, timeout)
 	defer cancelFunc()
 	extendTransportTimeout(timeout)
@@ -1030,6 +1070,7 @@ func (b *Broker) handleProxyAnswer(
 			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-answer"
+		logFields["broker_id"] = b.brokerID
 		logFields["proxy_id"] = proxyID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		if proxyAnswer != nil {
@@ -1152,6 +1193,7 @@ func (b *Broker) handleClientRelayedPacket(
 			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
 		}
 		logFields["broker_event"] = "client-relayed-packet"
+		logFields["broker_id"] = b.brokerID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		if relayedPacketRequest != nil {
 			logFields["connection_id"] = relayedPacketRequest.ConnectionID
@@ -1240,6 +1282,33 @@ func (b *Broker) handleClientRelayedPacket(
 	}
 
 	return responsePayload, nil
+}
+
+func (b *Broker) adjustRequestTimeout(
+	logFields common.LogFields, timeout time.Duration) time.Duration {
+
+	// Adjust long-polling request timeouts to respect any maximum request
+	// timeout supported by the provider fronting the request.
+	//
+	// Limitation: the client is trusted to provide the correct fronting
+	// provider ID.
+
+	maxRequestTimeouts, ok := b.maxRequestTimeouts.Load().(map[string]time.Duration)
+	if !ok || maxRequestTimeouts == nil {
+		return timeout
+	}
+
+	frontingProviderID, ok := logFields["fronting_provider_id"].(string)
+	if !ok {
+		return timeout
+	}
+
+	maxRequestTimeout, ok := maxRequestTimeouts[frontingProviderID]
+	if !ok || maxRequestTimeout <= 0 || timeout <= maxRequestTimeout {
+		return timeout
+	}
+
+	return maxRequestTimeout
 }
 
 type pendingServerReport struct {

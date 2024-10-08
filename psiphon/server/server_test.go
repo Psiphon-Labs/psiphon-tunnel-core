@@ -1048,6 +1048,21 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			case serverTunnelLog <- logFields:
 			default:
 			}
+		case "inproxy_broker":
+			// Check that broker receives the correct fronting provider ID.
+			//
+			// TODO: check inproxy_broker logs received when expected and
+			// check more fields
+			event, ok := logFields["broker_event"].(string)
+			if !ok {
+				t.Errorf("missing inproxy_broker.broker_event")
+			}
+			if event == "client_offer" || event == "proxy_announce" {
+				fronting_provider_id, ok := logFields["fronting_provider_id"].(string)
+				if !ok || fronting_provider_id != inproxyTestConfig.brokerFrontingProviderID {
+					t.Errorf("unexpected inproxy_broker.fronting_provider_id")
+				}
+			}
 		}
 	})
 
@@ -1081,7 +1096,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		err := RunServices(serverConfigJSON)
 		if err != nil {
 			// TODO: wrong goroutine for t.FatalNow()
-			t.Fatalf("error running server: %s", err)
+			t.Errorf("error running server: %s", err)
 		}
 	}()
 
@@ -1327,8 +1342,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			psiphon.SetAllowOverlappingPersonalCompartmentIDs(true)
 			defer psiphon.SetAllowOverlappingPersonalCompartmentIDs(false)
 
-			clientConfig.InproxyClientPersonalCompartmentIDs = []string{inproxyTestConfig.personalCompartmentID}
-			clientConfig.InproxyProxyPersonalCompartmentIDs = []string{inproxyTestConfig.personalCompartmentID}
+			clientConfig.InproxyClientPersonalCompartmentID = inproxyTestConfig.personalCompartmentID
+			clientConfig.InproxyProxyPersonalCompartmentID = inproxyTestConfig.personalCompartmentID
 		}
 
 		// Simulate a CDN adding required HTTP headers by injecting them at
@@ -2114,12 +2129,15 @@ func checkExpectedServerTunnelLogFields(
 		return fmt.Errorf("unexpected host_id '%s'", fields["host_id"])
 	}
 
-	expectedRelayProtocol := runConfig.tunnelProtocol
+	tunnelProtocol := runConfig.tunnelProtocol
 	if runConfig.clientTunnelProtocol != "" {
-		expectedRelayProtocol = runConfig.clientTunnelProtocol
+		// In cases such as UNFRONTED-HTTPS-OSSH/TLS-OSSH demux,
+		// runConfig.tunnelProtocol is the server listening protocol and
+		// runConfig.clientTunnelProtocol is the actual tunnel protocol.
+		tunnelProtocol = runConfig.clientTunnelProtocol
 	}
 
-	if fields["relay_protocol"].(string) != expectedRelayProtocol {
+	if fields["relay_protocol"].(string) != tunnelProtocol {
 		return fmt.Errorf("unexpected relay_protocol '%s'", fields["relay_protocol"])
 	}
 
@@ -2238,7 +2256,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesObfuscatedSSH(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
 
 		for _, name := range []string{
 			"padding",
@@ -2250,8 +2268,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) &&
-		(runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
+	if protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
 
 		for _, name := range []string{
 			"user_agent",
@@ -2275,7 +2292,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTP(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) {
 
 		for _, name := range []string{
 			"meek_host_header",
@@ -2294,7 +2311,7 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected meek_host_header '%s'", fields["meek_host_header"])
 		}
 
-		if !protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
+		if !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 			for _, name := range []string{
 				"meek_dial_ip_address",
 				"meek_resolved_ip_address",
@@ -2306,12 +2323,10 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTPS(runConfig.tunnelProtocol) &&
-		(runConfig.clientTunnelProtocol == "" || protocol.TunnelProtocolUsesMeekHTTPS(runConfig.clientTunnelProtocol)) {
+	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
 
 		for _, name := range []string{
-			"tls_profile",
-			"tls_version",
+			"meek_tls_padding",
 			"meek_sni_server_name",
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
@@ -2324,7 +2339,7 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected meek_sni_server_name '%s'", fields["meek_sni_server_name"])
 		}
 
-		if !protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
+		if !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 			for _, name := range []string{
 				"meek_dial_ip_address",
 				"meek_resolved_ip_address",
@@ -2333,6 +2348,21 @@ func checkExpectedServerTunnelLogFields(
 				if fields[name] != nil {
 					return fmt.Errorf("unexpected field '%s'", name)
 				}
+			}
+		}
+	}
+
+	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) ||
+		protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+
+		for _, name := range []string{
+			"tls_profile",
+			"tls_version",
+			"tls_sent_ticket",
+			"tls_did_resume",
+		} {
+			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+				return fmt.Errorf("missing expected field '%s'", name)
 			}
 		}
 
@@ -2347,26 +2377,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) {
-
-		for _, name := range []string{
-			"quic_version",
-			"quic_dial_sni_address",
-		} {
-			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
-				return fmt.Errorf("missing expected field '%s'", name)
-			}
-		}
-
-		quicVersion := fields["quic_version"].(string)
-		if !common.Contains(protocol.SupportedQUICVersions, quicVersion) ||
-			(runConfig.limitQUICVersions && quicVersion != expectQUICVersion) {
-
-			return fmt.Errorf("unexpected quic_version '%s'", fields["quic_version"])
-		}
-	}
-
-	if protocol.TunnelProtocolUsesTLSOSSH(expectedRelayProtocol) {
+	if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
 		for _, name := range []string{
 			"tls_padding",
 			"tls_ossh_sni_server_name",
@@ -2383,7 +2394,30 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesInproxy(runConfig.tunnelProtocol) {
+	if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
+
+		for _, name := range []string{
+			"quic_version",
+			"quic_dial_sni_address",
+			"quic_dial_early",
+			"quic_sent_ticket",
+			"quic_did_resume",
+			"quic_obfuscated_psk",
+		} {
+			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+				return fmt.Errorf("missing expected field '%s'", name)
+			}
+		}
+
+		quicVersion := fields["quic_version"].(string)
+		if !common.Contains(protocol.SupportedQUICVersions, quicVersion) ||
+			(runConfig.limitQUICVersions && quicVersion != expectQUICVersion) {
+
+			return fmt.Errorf("unexpected quic_version '%s'", fields["quic_version"])
+		}
+	}
+
+	if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
 
 		for _, name := range []string{
 
@@ -2581,11 +2615,11 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
 		}
 		for _, pair := range [][]string{
-			[]string{"dest_bytes_up_tcp", "bytes_up_tcp"},
-			[]string{"dest_bytes_down_tcp", "bytes_down_tcp"},
-			[]string{"dest_bytes_up_udp", "bytes_up_udp"},
-			[]string{"dest_bytes_down_udp", "bytes_down_udp"},
-			[]string{"dest_bytes", "bytes"},
+			{"dest_bytes_up_tcp", "bytes_up_tcp"},
+			{"dest_bytes_down_tcp", "bytes_down_tcp"},
+			{"dest_bytes_up_udp", "bytes_up_udp"},
+			{"dest_bytes_down_udp", "bytes_down_udp"},
+			{"dest_bytes", "bytes"},
 		} {
 			value0 := int64(fields[pair[0]].(float64))
 			value1 := int64(fields[pair[1]].(float64))
@@ -3593,6 +3627,18 @@ func generateInproxyTestConfig(
 		clientBrokerSpecsJSON = "[]"
 	}
 
+	maxRequestTimeoutsJSON := ""
+	if prng.FlipCoin() {
+		maxRequestTimeoutsJSONFormat := `
+            "InproxyFrontingProviderClientMaxRequestTimeouts": {"%s": "10s"},
+            "InproxyFrontingProviderServerMaxRequestTimeouts": {"%s": "5s"},
+        `
+		maxRequestTimeoutsJSON = fmt.Sprintf(
+			maxRequestTimeoutsJSONFormat,
+			brokerFrontingProviderID,
+			brokerFrontingProviderID)
+	}
+
 	tacticsParametersJSONFormat := `
             "InproxyAllowProxy": true,
             "InproxyAllowClient": true,
@@ -3607,6 +3653,7 @@ func generateInproxyTestConfig(
             "InproxyDisableSTUN": true,
             "InproxyDisablePortMapping": true,
             "InproxyDisableIPv6ICECandidates": true,
+            %s
     `
 
 	tacticsParametersJSON := fmt.Sprintf(
@@ -3617,7 +3664,8 @@ func generateInproxyTestConfig(
 		proxyBrokerSpecsJSON,
 		clientBrokerSpecsJSON,
 		commonCompartmentIDStr,
-		commonCompartmentIDStr)
+		commonCompartmentIDStr,
+		maxRequestTimeoutsJSON)
 
 	config := &inproxyTestConfig{
 		tacticsParametersJSON:               tacticsParametersJSON,
@@ -3675,19 +3723,19 @@ func initializePruneServerEntriesTest(
 	// - DialPort0: set dial port to 0, a special prune case (see statusAPIRequestHandler)
 
 	pruneServerEntryTestCases := []*pruneServerEntryTestCase{
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.1", ExplicitTag: true, LocalTimestamp: newTimeStamp, PsinetValid: true, ExpectPrune: false},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.2", ExplicitTag: false, LocalTimestamp: newTimeStamp, PsinetValid: true, ExpectPrune: false},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.3", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: false},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.4", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: false},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.5", ExplicitTag: true, LocalTimestamp: newTimeStamp, PsinetValid: false, ExpectPrune: false},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.6", ExplicitTag: false, LocalTimestamp: newTimeStamp, PsinetValid: false, ExpectPrune: false},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.7", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: false},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.8", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: false},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.9", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: true},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.10", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: true},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.11", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: false, DialPort0: true},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.12", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: true, DialPort0: true},
-		&pruneServerEntryTestCase{IPAddress: "192.0.2.13", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: true, DialPort0: true},
+		{IPAddress: "192.0.2.1", ExplicitTag: true, LocalTimestamp: newTimeStamp, PsinetValid: true, ExpectPrune: false},
+		{IPAddress: "192.0.2.2", ExplicitTag: false, LocalTimestamp: newTimeStamp, PsinetValid: true, ExpectPrune: false},
+		{IPAddress: "192.0.2.3", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: false},
+		{IPAddress: "192.0.2.4", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: false},
+		{IPAddress: "192.0.2.5", ExplicitTag: true, LocalTimestamp: newTimeStamp, PsinetValid: false, ExpectPrune: false},
+		{IPAddress: "192.0.2.6", ExplicitTag: false, LocalTimestamp: newTimeStamp, PsinetValid: false, ExpectPrune: false},
+		{IPAddress: "192.0.2.7", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: false},
+		{IPAddress: "192.0.2.8", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: false},
+		{IPAddress: "192.0.2.9", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: true},
+		{IPAddress: "192.0.2.10", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: false, ExpectPrune: true, IsEmbedded: true},
+		{IPAddress: "192.0.2.11", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: false, DialPort0: true},
+		{IPAddress: "192.0.2.12", ExplicitTag: false, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: true, DialPort0: true},
+		{IPAddress: "192.0.2.13", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: true, DialPort0: true},
 	}
 
 	for _, testCase := range pruneServerEntryTestCases {
@@ -3822,6 +3870,8 @@ func storePruneServerEntriesTest(
 
 		dialParams, err := psiphon.MakeDialParameters(
 			clientConfig,
+			nil,
+			nil,
 			nil,
 			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return true },

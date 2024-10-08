@@ -18,9 +18,7 @@
  */
 
 /*
-
 Package stacktrace provides helpers for handling stack trace information.
-
 */
 package stacktrace
 

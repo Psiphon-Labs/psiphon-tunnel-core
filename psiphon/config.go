@@ -39,6 +39,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
@@ -644,44 +645,22 @@ type Config struct {
 	// transfer rate limit for each proxied client. When 0, there is no limit.
 	InproxyLimitDownstreamBytesPerSecond int
 
-	// InproxyProxyPersonalCompartmentIDs specifies the personal compartment
-	// IDs used by an in-proxy proxy. Personal compartment IDs are
+	// InproxyProxyPersonalCompartmentID specifies the personal compartment
+	// ID used by an in-proxy proxy. Personal compartment IDs are
 	// distributed from proxy operators to client users out-of-band and
 	// provide a mechanism to allow only certain clients to use a proxy.
-	//
-	// Limitation: currently, at most 1 personal compartment may be specified.
-	// See InproxyClientPersonalCompartmentIDs comment for additional
-	// personal pairing limitations.
-	InproxyProxyPersonalCompartmentIDs []string
+	InproxyProxyPersonalCompartmentID string
 
-	// InproxyClientPersonalCompartmentIDs specifies the personal compartment
-	// IDs used by an in-proxy client. Personal compartment IDs are
+	// InproxyClientPersonalCompartmentID specifies the personal compartment
+	// ID used by an in-proxy client. Personal compartment IDs are
 	// distributed from proxy operators to client users out-of-band and
 	// provide a mechanism to ensure a client uses only a certain proxy for
 	// all tunnels connections.
 	//
-	// When InproxyClientPersonalCompartmentIDs is set, the client will use
+	// When an InproxyClientPersonalCompartmentID is set, the client will use
 	// only in-proxy protocols, ensuring that all connections go through the
-	// proxy or proxies with the same personal compartment IDs.
-	//
-	// Limitations:
-	//
-	// While fully functional, the personal pairing mode has a number of
-	// limitations that make the current implementation less suitable for
-	// large scale deployment.
-	//
-	// Since the mode requires an in-proxy connection to a proxy, announcing
-	// with the corresponding personal compartment ID, not only must that
-	// proxy be available, but also a broker, and both the client and proxy
-	// must rendezvous at the same broker.
-	//
-	// In personal mode, clients and proxies use a simplistic approach to
-	// rendezvous: always select the first broker spec. This works, but is
-	// not robust in terms of load balancing, and fails if the first broker
-	// is unreachable or overloaded. Non-personal in-proxy dials can simply
-	// use any available broker.
-	//
-	InproxyClientPersonalCompartmentIDs []string
+	// proxy or proxies with the same personal compartment ID.
+	InproxyClientPersonalCompartmentID string
 
 	// InproxyPersonalPairingConnectionWorkerPoolSize specifies the value for
 	// ConnectionWorkerPoolSize in personal pairing mode. If omitted or when
@@ -924,6 +903,12 @@ type Config struct {
 	// LimitTunnelDialPortNumbers is for testing purposes.
 	LimitTunnelDialPortNumbers parameters.TunnelProtocolPortLists
 
+	// QUICDialEarlyProbability is for testing purposes.
+	QUICDialEarlyProbability *float64
+
+	// QUICObfuscatedPSKProbability is for testing purposes.
+	QUICObfuscatedPSKProbability *float64
+
 	// QUICDisablePathMTUDiscoveryProbability is for testing purposes.
 	QUICDisablePathMTUDiscoveryProbability *float64
 
@@ -969,6 +954,7 @@ type Config struct {
 	OSSHPrefixEnableFragmentor          *bool
 
 	// TLSTunnelTrafficShapingProbability and associated fields are for testing.
+	TLSTunnelObfuscatedPSKProbability  *float64
 	TLSTunnelTrafficShapingProbability *float64
 	TLSTunnelMinTLSPadding             *int
 	TLSTunnelMaxTLSPadding             *int
@@ -1006,6 +992,7 @@ type Config struct {
 	InproxyProxyAnnounceDelayJitter                         *float64
 	InproxyProxyAnswerRequestTimeoutMilliseconds            *int
 	InproxyClientOfferRequestTimeoutMilliseconds            *int
+	InproxyClientOfferRequestPersonalTimeoutMilliseconds    *int
 	InproxyClientOfferRetryDelayMilliseconds                *int
 	InproxyClientOfferRetryJitter                           *float64
 	InproxyClientRelayedPacketRequestTimeoutMilliseconds    *int
@@ -1041,6 +1028,9 @@ type Config struct {
 	InproxyProxyTotalActivityNoticePeriodMilliseconds       *int
 	InproxyClientDialRateLimitQuantity                      *int
 	InproxyClientDialRateLimitIntervalMilliseconds          *int
+	InproxyClientNoMatchFailoverProbability                 *float64
+	InproxyClientNoMatchFailoverPersonalProbability         *float64
+	InproxyFrontingProviderClientMaxRequestTimeouts         map[string]string
 	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int
 
 	InproxySkipAwaitFullyConnected  bool
@@ -1415,16 +1405,24 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	if !config.DisableTunnels &&
 		config.InproxyEnableProxy &&
 		!GetAllowOverlappingPersonalCompartmentIDs() &&
-		common.ContainsAny(
-			config.InproxyProxyPersonalCompartmentIDs,
-			config.InproxyClientPersonalCompartmentIDs) {
+		len(config.InproxyProxyPersonalCompartmentID) > 0 &&
+		config.InproxyProxyPersonalCompartmentID ==
+			config.InproxyClientPersonalCompartmentID {
 
 		// Don't allow an in-proxy client and proxy run in the same app to match.
 		return errors.TraceNew("invalid overlapping personal compartment IDs")
 	}
 
-	if len(config.InproxyProxyPersonalCompartmentIDs) > 1 {
-		return errors.TraceNew("invalid proxy personal compartment ID count")
+	if len(config.InproxyProxyPersonalCompartmentID) > 0 &&
+		!inproxy.Enabled() {
+
+		// When in-proxy personal pairing mode is on, fail if the build was
+		// made without the PSIPHON_ENABLE_INPROXY build tag.
+		//
+		// Note that this check could also be enforced in the case of a
+		// LimitTunnelProtocols.IsOnlyInproxyTunnelProtocols configuration,
+		// but that can be overridden by tactics so we allow it.
+		return errors.TraceNew("build does not enable required in-proxy functionality")
 	}
 
 	// This constraint is expected by logic in Controller.runTunnels().
@@ -1802,9 +1800,9 @@ func (config *Config) SetSignalComponentFailure(signalComponentFailure func()) {
 
 // IsInproxyPersonalPairingMode indicates that the client is in in-proxy
 // personal pairing mode, where connections are made only through in-proxy
-// proxies with corresponding personal compartment IDs.
+// proxies with the corresponding personal compartment ID.
 func (config *Config) IsInproxyPersonalPairingMode() bool {
-	return len(config.InproxyClientPersonalCompartmentIDs) > 0
+	return len(config.InproxyClientPersonalCompartmentID) > 0
 }
 
 // OnInproxyMustUpgrade is invoked when the in-proxy broker returns the
@@ -2247,6 +2245,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.LimitTunnelDialPortNumbers] = config.LimitTunnelDialPortNumbers
 	}
 
+	if config.QUICDialEarlyProbability != nil {
+		applyParameters[parameters.QUICDialEarlyProbability] = *config.QUICDialEarlyProbability
+	}
+
+	if config.QUICObfuscatedPSKProbability != nil {
+		applyParameters[parameters.QUICObfuscatedPSKProbability] = *config.QUICObfuscatedPSKProbability
+	}
+
 	if config.QUICDisablePathMTUDiscoveryProbability != nil {
 		applyParameters[parameters.QUICDisableClientPathMTUDiscoveryProbability] = *config.QUICDisablePathMTUDiscoveryProbability
 	}
@@ -2383,6 +2389,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.OSSHPrefixEnableFragmentor] = *config.OSSHPrefixEnableFragmentor
 	}
 
+	if config.TLSTunnelObfuscatedPSKProbability != nil {
+		applyParameters[parameters.TLSTunnelObfuscatedPSKProbability] = *config.TLSTunnelObfuscatedPSKProbability
+	}
+
 	if config.TLSTunnelTrafficShapingProbability != nil {
 		applyParameters[parameters.TLSTunnelTrafficShapingProbability] = *config.TLSTunnelTrafficShapingProbability
 	}
@@ -2497,6 +2507,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyClientOfferRequestTimeoutMilliseconds != nil {
 		applyParameters[parameters.InproxyClientOfferRequestTimeout] = fmt.Sprintf("%dms", *config.InproxyClientOfferRequestTimeoutMilliseconds)
+	}
+
+	if config.InproxyClientOfferRequestPersonalTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyClientOfferRequestPersonalTimeout] = fmt.Sprintf("%dms", *config.InproxyClientOfferRequestPersonalTimeoutMilliseconds)
 	}
 
 	if config.InproxyClientOfferRetryDelayMilliseconds != nil {
@@ -2637,6 +2651,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyClientDialRateLimitIntervalMilliseconds != nil {
 		applyParameters[parameters.InproxyClientDialRateLimitInterval] = fmt.Sprintf("%dms", *config.InproxyClientDialRateLimitIntervalMilliseconds)
+	}
+
+	if config.InproxyClientNoMatchFailoverProbability != nil {
+		applyParameters[parameters.InproxyClientNoMatchFailoverProbability] = *config.InproxyClientNoMatchFailoverProbability
+	}
+
+	if config.InproxyClientNoMatchFailoverPersonalProbability != nil {
+		applyParameters[parameters.InproxyClientNoMatchFailoverPersonalProbability] = *config.InproxyClientNoMatchFailoverPersonalProbability
+	}
+
+	if config.InproxyFrontingProviderClientMaxRequestTimeouts != nil {
+		applyParameters[parameters.InproxyFrontingProviderClientMaxRequestTimeouts] = config.InproxyFrontingProviderClientMaxRequestTimeouts
 	}
 
 	if config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds != nil {
@@ -3027,6 +3053,16 @@ func (config *Config) setDialParametersHash() {
 		hash.Write(encodedLimitTunnelDialPortNumbers)
 	}
 
+	if config.QUICDialEarlyProbability != nil {
+		hash.Write([]byte("QUICDialEarlyProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.QUICDialEarlyProbability)
+	}
+
+	if config.QUICObfuscatedPSKProbability != nil {
+		hash.Write([]byte("QUICObfuscatedPSKProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.QUICObfuscatedPSKProbability)
+	}
+
 	if config.QUICDisablePathMTUDiscoveryProbability != nil {
 		hash.Write([]byte("QUICDisablePathMTUDiscoveryProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.QUICDisablePathMTUDiscoveryProbability)
@@ -3213,6 +3249,11 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixEnableFragmentor)
 	}
 
+	if config.TLSTunnelObfuscatedPSKProbability != nil {
+		hash.Write([]byte("TLSTunnelObfuscatedPSKProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.TLSTunnelObfuscatedPSKProbability)
+	}
+
 	if config.TLSTunnelTrafficShapingProbability != nil {
 		hash.Write([]byte("TLSTunnelTrafficShapingProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.TLSTunnelTrafficShapingProbability)
@@ -3294,38 +3335,6 @@ func (config *Config) setDialParametersHash() {
 	if config.InproxyMaxCompartmentIDListLength != nil {
 		hash.Write([]byte("InproxyMaxCompartmentIDListLength"))
 		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyMaxCompartmentIDListLength))
-	}
-	if config.InproxyProxyAnnounceRequestTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyProxyAnnounceRequestTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnnounceRequestTimeoutMilliseconds))
-	}
-	if config.InproxyProxyAnnounceDelayMilliseconds != nil {
-		hash.Write([]byte("InproxyProxyAnnounceDelayMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnnounceDelayMilliseconds))
-	}
-	if config.InproxyProxyAnnounceDelayJitter != nil {
-		hash.Write([]byte("InproxyProxyAnnounceDelayJitter"))
-		binary.Write(hash, binary.LittleEndian, *config.InproxyProxyAnnounceDelayJitter)
-	}
-	if config.InproxyProxyAnswerRequestTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyProxyAnswerRequestTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyAnswerRequestTimeoutMilliseconds))
-	}
-	if config.InproxyClientOfferRequestTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyClientOfferRequestTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientOfferRequestTimeoutMilliseconds))
-	}
-	if config.InproxyClientOfferRetryDelayMilliseconds != nil {
-		hash.Write([]byte("InproxyClientOfferRetryDelayMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientOfferRetryDelayMilliseconds))
-	}
-	if config.InproxyClientOfferRetryJitter != nil {
-		hash.Write([]byte("InproxyClientOfferRetryJitter"))
-		binary.Write(hash, binary.LittleEndian, *config.InproxyClientOfferRetryJitter)
-	}
-	if config.InproxyClientRelayedPacketRequestTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyClientRelayedPacketRequestTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientRelayedPacketRequestTimeoutMilliseconds))
 	}
 	if config.InproxyDTLSRandomizationProbability != nil {
 		hash.Write([]byte("InproxyDTLSRandomizationProbability"))
@@ -3414,34 +3423,6 @@ func (config *Config) setDialParametersHash() {
 	if config.InproxyClientDisableIPv6ICECandidates != nil {
 		hash.Write([]byte("InproxyClientDisableIPv6ICECandidates"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyClientDisableIPv6ICECandidates)
-	}
-	if config.InproxyProxyDiscoverNATTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyProxyDiscoverNATTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyDiscoverNATTimeoutMilliseconds))
-	}
-	if config.InproxyClientDiscoverNATTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyClientDiscoverNATTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientDiscoverNATTimeoutMilliseconds))
-	}
-	if config.InproxyWebRTCAnswerTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyWebRTCAnswerTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyWebRTCAnswerTimeoutMilliseconds))
-	}
-	if config.InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds))
-	}
-	if config.InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds))
-	}
-	if config.InproxyProxyDestinationDialTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyProxyDestinationDialTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyProxyDestinationDialTimeoutMilliseconds))
-	}
-	if config.InproxyPsiphonAPIRequestTimeoutMilliseconds != nil {
-		hash.Write([]byte("InproxyPsiphonAPIRequestTimeoutMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyPsiphonAPIRequestTimeoutMilliseconds))
 	}
 
 	config.dialParametersHash = hash.Sum(nil)

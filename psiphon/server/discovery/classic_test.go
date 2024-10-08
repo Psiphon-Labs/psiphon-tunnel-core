@@ -62,7 +62,7 @@ func TestDiscoveryBuckets(t *testing.T) {
 	for i := 0; i < 105; i++ {
 		servers = append(servers, &psinet.DiscoveryServer{
 			EncodedServerEntry: strconv.Itoa(i),
-			DiscoveryDateRange: []time.Time{time.Time{}, time.Now()},
+			DiscoveryDateRange: []time.Time{{}, time.Now()},
 		})
 	}
 

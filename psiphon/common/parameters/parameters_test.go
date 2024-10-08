@@ -128,6 +128,23 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("KeyValues returned %+v expected %+v", g, v)
 			}
+		case KeyStrings:
+			for key, strings := range v {
+				g := p.Get().KeyStrings(name, key)
+				if !reflect.DeepEqual(strings, g) {
+					t.Fatalf("KeyStrings returned %+v expected %+v", g, strings)
+				}
+			}
+		case KeyDurations:
+			g := p.Get().KeyDurations(name)
+			durations := make(map[string]time.Duration)
+			for key, duration := range v {
+				d, _ := time.ParseDuration(duration)
+				durations[key] = d
+			}
+			if !reflect.DeepEqual(durations, g) {
+				t.Fatalf("KeyDurations returned %+v expected %+v", g, durations)
+			}
 		case *BPFProgramSpec:
 			ok, name, rawInstructions := p.Get().BPFProgram(name)
 			if v != nil || ok || name != "" || rawInstructions != nil {
@@ -188,13 +205,6 @@ func TestGetDefaultParameters(t *testing.T) {
 			g := p.Get().ConjureTransports(name)
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
-			}
-		case KeyStrings:
-			for key, strings := range v {
-				g := p.Get().KeyStrings(name, key)
-				if !reflect.DeepEqual(strings, g) {
-					t.Fatalf("KeyStrings returned %+v expected %+v", g, strings)
-				}
 			}
 		case InproxyBrokerSpecsValue:
 			g := p.Get().InproxyBrokerSpecs(name)

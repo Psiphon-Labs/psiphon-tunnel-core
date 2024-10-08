@@ -16,7 +16,7 @@ if [ -n "${TS_USE_TOOLCHAIN:-}" ]; then
 	go="./tool/go"
 fi
 
-eval `GOOS=$($go env GOHOSTOS) GOARCH=$($go env GOHOSTARCH) $go run ./cmd/mkversion`
+eval `CGO_ENABLED=0 GOOS=$($go env GOHOSTOS) GOARCH=$($go env GOHOSTARCH) $go run ./cmd/mkversion`
 
 if [ "$1" = "shellvars" ]; then
 	cat <<EOF
@@ -49,4 +49,4 @@ while [ "$#" -gt 1 ]; do
 	esac
 done
 
-exec ./tool/go build ${tags:+-tags=$tags} -ldflags "$ldflags" "$@"
+exec $go build ${tags:+-tags=$tags} -ldflags "$ldflags" "$@"

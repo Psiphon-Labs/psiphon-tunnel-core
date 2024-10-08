@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 )
 
-//Supported negotiate flags
+// Supported negotiate flags
 const (
 	NEGOTIATE_FLAG_REQUEST_NTLMv1           = 0x00000200
 	NEGOTIATE_FLAG_REQUEST_NTLM2_SESSION    = 0x00080000

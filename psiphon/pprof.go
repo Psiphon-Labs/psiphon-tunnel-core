@@ -1,3 +1,4 @@
+//go:build PSIPHON_RUN_PPROF
 // +build PSIPHON_RUN_PPROF
 
 /*

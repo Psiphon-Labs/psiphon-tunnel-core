@@ -45,12 +45,14 @@ type testBrokerDialCoordinator struct {
 	brokerClientRoundTripper          RoundTripper
 	brokerClientRoundTripperSucceeded func(RoundTripper)
 	brokerClientRoundTripperFailed    func(RoundTripper)
+	brokerClientNoMatch               func(RoundTripper)
 	sessionHandshakeRoundTripTimeout  time.Duration
 	announceRequestTimeout            time.Duration
 	announceDelay                     time.Duration
 	announceDelayJitter               float64
 	answerRequestTimeout              time.Duration
 	offerRequestTimeout               time.Duration
+	offerRequestPersonalTimeout       time.Duration
 	offerRetryDelay                   time.Duration
 	offerRetryJitter                  float64
 	relayedPacketRequestTimeout       time.Duration
@@ -116,6 +118,12 @@ func (t *testBrokerDialCoordinator) BrokerClientRoundTripperFailed(roundTripper 
 	t.brokerClientRoundTripperFailed(roundTripper)
 }
 
+func (t *testBrokerDialCoordinator) BrokerClientNoMatch(roundTripper RoundTripper) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.brokerClientNoMatch(roundTripper)
+}
+
 func (t *testBrokerDialCoordinator) SessionHandshakeRoundTripTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -150,6 +158,12 @@ func (t *testBrokerDialCoordinator) OfferRequestTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.offerRequestTimeout
+}
+
+func (t *testBrokerDialCoordinator) OfferRequestPersonalTimeout() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.offerRequestPersonalTimeout
 }
 
 func (t *testBrokerDialCoordinator) OfferRetryDelay() time.Duration {
@@ -189,12 +203,15 @@ type testWebRTCDialCoordinator struct {
 	natType                         NATType
 	setNATType                      func(NATType)
 	portMappingTypes                PortMappingTypes
+	portMappingProbe                *PortMappingProbe
 	setPortMappingTypes             func(PortMappingTypes)
 	bindToDevice                    func(int) error
 	discoverNATTimeout              time.Duration
 	webRTCAnswerTimeout             time.Duration
+	webRTCAwaitPortMappingTimeout   time.Duration
 	webRTCAwaitDataChannelTimeout   time.Duration
 	proxyDestinationDialTimeout     time.Duration
+	proxyRelayInactivityTimeout     time.Duration
 }
 
 func (t *testWebRTCDialCoordinator) NetworkID() string {
@@ -304,6 +321,18 @@ func (t *testWebRTCDialCoordinator) SetPortMappingTypes(portMappingTypes PortMap
 	t.setPortMappingTypes(portMappingTypes)
 }
 
+func (t *testWebRTCDialCoordinator) PortMappingProbe() *PortMappingProbe {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.portMappingProbe
+}
+
+func (t *testWebRTCDialCoordinator) SetPortMappingProbe(portMappingProbe *PortMappingProbe) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	t.portMappingProbe = portMappingProbe
+}
+
 func (t *testWebRTCDialCoordinator) ResolveAddress(ctx context.Context, network, address string) (string, error) {
 
 	// Note: can't use common/resolver due to import cycle
@@ -374,6 +403,12 @@ func (t *testWebRTCDialCoordinator) WebRTCAnswerTimeout() time.Duration {
 	return t.webRTCAnswerTimeout
 }
 
+func (t *testWebRTCDialCoordinator) WebRTCAwaitPortMappingTimeout() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.webRTCAwaitPortMappingTimeout
+}
+
 func (t *testWebRTCDialCoordinator) WebRTCAwaitDataChannelTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -384,6 +419,12 @@ func (t *testWebRTCDialCoordinator) ProxyDestinationDialTimeout() time.Duration 
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.proxyDestinationDialTimeout
+}
+
+func (t *testWebRTCDialCoordinator) ProxyRelayInactivityTimeout() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.proxyRelayInactivityTimeout
 }
 
 type testLogger struct {

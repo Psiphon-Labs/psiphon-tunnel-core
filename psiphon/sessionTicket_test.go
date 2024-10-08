@@ -35,27 +35,57 @@ import (
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 func TestObfuscatedSessionTicket(t *testing.T) {
 
-	tlsProfiles := []string{
-		protocol.TLS_PROFILE_CHROME_58,
-		protocol.TLS_PROFILE_FIREFOX_55,
-		protocol.TLS_PROFILE_RANDOMIZED,
+	type Test struct {
+		name               string
+		tlsProfile         string
+		mutateServerConfig func(*tls.Config)
 	}
 
-	for _, tlsProfile := range tlsProfiles {
-		t.Run(tlsProfile, func(t *testing.T) {
-			runObfuscatedSessionTicket(t, tlsProfile)
+	tests := []Test{
+		{
+			name:       "Chrome-58",
+			tlsProfile: protocol.TLS_PROFILE_CHROME_58,
+		},
+		{
+			name:       "Firefox-55",
+			tlsProfile: protocol.TLS_PROFILE_FIREFOX_55,
+		},
+		{
+			name:       "Randomized",
+			tlsProfile: protocol.TLS_PROFILE_RANDOMIZED,
+		},
+		{
+			name:       "Chrome-112-PSK",
+			tlsProfile: protocol.TLS_PROFILE_CHROME_112_PSK,
+		},
+		{
+			name:       "Chrome-112-PSK with HRR",
+			tlsProfile: protocol.TLS_PROFILE_CHROME_112_PSK,
+			mutateServerConfig: func(config *tls.Config) {
+				// Choose a curve that is not sent by the client in the
+				// key_share extension to trigger a HelloRetryRequest.
+				config.CurvePreferences = []tls.CurveID{tls.CurveP256}
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runObfuscatedSessionTicket(t, test.tlsProfile, test.mutateServerConfig)
 		})
 	}
+
 }
 
-func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
+func runObfuscatedSessionTicket(t *testing.T, tlsProfile string, mutateServerConfig func(*tls.Config)) {
 
 	params, err := parameters.NewParameters(nil)
 	if err != nil {
@@ -69,7 +99,9 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 	rand.Read(obfuscatedSessionTicketSharedSecret[:])
 
 	clientConfig := &utls.Config{
-		InsecureSkipVerify: true,
+		OmitEmptyPsk:           true,
+		InsecureSkipVerify:     true,
+		InsecureSkipTimeVerify: true,
 	}
 
 	certificate, err := generateCertificate()
@@ -90,6 +122,10 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 	serverConfig.SessionTicketKey = obfuscatedSessionTicketSharedSecret
 	serverConfig.SetSessionTicketKeys([][32]byte{
 		standardSessionTicketKey, obfuscatedSessionTicketSharedSecret})
+
+	if mutateServerConfig != nil {
+		mutateServerConfig(serverConfig)
+	}
 
 	testMessage := "test"
 
@@ -142,7 +178,8 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 
 		serverAddress := <-listening
 
-		clientSessionCache := utls.NewLRUClientSessionCache(0)
+		clientSessionCache := common.WrapUtlsClientSessionCache(
+			utls.NewLRUClientSessionCache(0), "test")
 
 		for i := 0; i < 2; i++ {
 
@@ -167,26 +204,12 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 			// The first connection will use an obfuscated session ticket and the
 			// second connection will use a real session ticket issued by the server.
 			var clientSessionState *utls.ClientSessionState
-			if i == 0 {
-				obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
-					obfuscatedSessionTicketSharedSecret)
-				if err != nil {
-					report(err)
-					return
-				}
-				clientSessionState = utls.MakeClientSessionState(
-					obfuscatedSessionState.SessionTicket,
-					obfuscatedSessionState.Vers,
-					obfuscatedSessionState.CipherSuite,
-					obfuscatedSessionState.MasterSecret,
-					nil,
-					nil)
-				tlsConn.SetSessionState(clientSessionState)
-			}
 
+			// Generates a randomized TLS profile with the constraint that the
+			// session ticket paramters and the TLS parameters must match between the connections.
 			if protocol.TLSProfileIsRandomized(tlsProfile) {
 				for {
-					err = tlsConn.BuildHandshakeState()
+					err = tlsConn.BuildHandshakeStateWithoutSession()
 					if err != nil {
 						report(err)
 						return
@@ -200,17 +223,97 @@ func runObfuscatedSessionTicket(t *testing.T, tlsProfile string) {
 						}
 					}
 
-					if !isTLS13 && tls.ContainsObfuscatedSessionTicketCipherSuite(
-						tlsConn.HandshakeState.Hello.CipherSuites) {
+					// Checks for the EMS extension manually since
+					// uTLS contains a bug HandshakeState.Hello.Ems is always true.
+					containsEms := false
+					for _, ext := range tlsConn.Extensions {
+						if _, ok := ext.(*utls.ExtendedMasterSecretExtension); ok {
+							containsEms = true
+							break
+						}
+					}
+
+					if !isTLS13 &&
+						containsEms &&
+						tls.ContainsObfuscatedSessionTicketCipherSuite(
+							tlsConn.HandshakeState.Hello.CipherSuites) {
 						break
 					}
 
 					utlsClientHelloID.Seed, _ = utls.NewPRNGSeed()
 					tlsConn = utls.UClient(tcpConn, clientConfig, utlsClientHelloID)
 					tlsConn.SetSessionCache(clientSessionCache)
-					if i == 0 {
-						tlsConn.SetSessionState(clientSessionState)
+				}
+			}
+
+			if i == 0 {
+
+				err := tlsConn.BuildHandshakeStateWithoutSession()
+				if err != nil {
+					report(err)
+					return
+				}
+
+				isTLS13 := false
+				for _, vers := range tlsConn.HandshakeState.Hello.SupportedVersions {
+					if vers == utls.VersionTLS13 {
+						isTLS13 = true
+						break
 					}
+				}
+
+				useEms := tlsConn.HandshakeState.Hello.Ems
+				obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
+					obfuscatedSessionTicketSharedSecret, isTLS13, useEms)
+				if err != nil {
+					report(err)
+					return
+				}
+				clientSessionState = utls.MakeClientSessionState(
+					obfuscatedSessionState.SessionTicket,
+					obfuscatedSessionState.Vers,
+					obfuscatedSessionState.CipherSuite,
+					obfuscatedSessionState.MasterSecret,
+					nil,
+					nil)
+				clientSessionState.SetCreatedAt(obfuscatedSessionState.CreatedAt)
+				clientSessionState.SetEMS(obfuscatedSessionState.ExtMasterSecret)
+
+				// TLS 1.3-only fields
+				clientSessionState.SetAgeAdd(obfuscatedSessionState.AgeAdd)
+				clientSessionState.SetUseBy(obfuscatedSessionState.UseBy)
+
+				containsPSKExt := false
+				for _, ext := range tlsConn.Extensions {
+					if _, ok := ext.(utls.PreSharedKeyExtension); ok {
+						containsPSKExt = true
+					}
+				}
+
+				// Sets session ticket or PSK.
+				if isTLS13 {
+					if containsPSKExt {
+						clientSessionCache.Put("test", clientSessionState)
+					}
+				} else {
+					err = tlsConn.SetSessionState(clientSessionState)
+					if err != nil {
+						report(err)
+						return
+					}
+				}
+
+				// Apply changes to uTLS
+				err = tlsConn.BuildHandshakeState()
+				if err != nil {
+					report(err)
+					return
+				}
+
+				// Check that the PSK extension is not omitted in the ClientHello
+				if containsPSKExt && len(tlsConn.HandshakeState.Hello.PskIdentities) == 0 {
+					report(std_errors.New("missing PSK extension"))
+					return
 				}
 			}
 

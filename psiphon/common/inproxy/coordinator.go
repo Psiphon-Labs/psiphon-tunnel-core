@@ -162,12 +162,21 @@ type BrokerDialCoordinator interface {
 	// after closing its network resources.
 	BrokerClientRoundTripperFailed(roundTripper RoundTripper)
 
+	// BrokerClientNoMatch is called after a Client Offer fails due to no
+	// match. This signal may be used to rotate to a new broker in order to
+	// find a match. In personal pairing mode, clients should rotate on no
+	// match, as the corresponding proxy may be announcing only on another
+	// broker. In common pairing mode, clients may rotate, in case common
+	// proxies are not well balanced across brokers.
+	BrokerClientNoMatch(roundTripper RoundTripper)
+
 	SessionHandshakeRoundTripTimeout() time.Duration
 	AnnounceRequestTimeout() time.Duration
 	AnnounceDelay() time.Duration
 	AnnounceDelayJitter() float64
 	AnswerRequestTimeout() time.Duration
 	OfferRequestTimeout() time.Duration
+	OfferRequestPersonalTimeout() time.Duration
 	OfferRetryDelay() time.Duration
 	OfferRetryJitter() float64
 	RelayedPacketRequestTimeout() time.Duration
@@ -296,6 +305,15 @@ type WebRTCDialCoordinator interface {
 	// re-run port mapping discovery.
 	SetPortMappingTypes(t PortMappingTypes)
 
+	// PortMappingProbe returns any persisted PortMappingProbe for the current
+	// network, which is used to establish port mappings.
+	PortMappingProbe() *PortMappingProbe
+
+	// SetPortMappingProbe receives a PortMappingProbe instance, which caches
+	// complete port mapping service details and is a required input for
+	// subsequent port mapping establishment on the current network.
+	SetPortMappingProbe(p *PortMappingProbe)
+
 	// ResolveAddress resolves a domain and returns its IP address. Clients
 	// and proxies may use this to hook into the Psiphon custom resolver. The
 	// provider adds the custom resolver tactics and network ID parameters
@@ -334,6 +352,8 @@ type WebRTCDialCoordinator interface {
 
 	DiscoverNATTimeout() time.Duration
 	WebRTCAnswerTimeout() time.Duration
+	WebRTCAwaitPortMappingTimeout() time.Duration
 	WebRTCAwaitDataChannelTimeout() time.Duration
 	ProxyDestinationDialTimeout() time.Duration
+	ProxyRelayInactivityTimeout() time.Duration
 }

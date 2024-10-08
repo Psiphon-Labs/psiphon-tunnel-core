@@ -23,17 +23,17 @@ variety of strategies to evade network censorship.
 
 This implementation is entirely based on and is a subset of Geneva:
 
-  Come as You Are: Helping Unmodified Clients Bypass Censorship with
-  Server-side Evasion
-  Kevin Bock, George Hughey, Louis-Henri Merino, Tania Arya, Daniel Liscinsky,
-  Regina Pogosian, Dave Levin
-  ACM SIGCOMM 2020
+	Come as You Are: Helping Unmodified Clients Bypass Censorship with
+	Server-side Evasion
+	Kevin Bock, George Hughey, Louis-Henri Merino, Tania Arya, Daniel Liscinsky,
+	Regina Pogosian, Dave Levin
+	ACM SIGCOMM 2020
 
-  Geneva: Evolving Censorship Evasion Strategies
-  Kevin Bock, George Hughey, Xiao Qiang, Dave Levin
-  ACM CCS 2019 (Conference on Computer and Communications Security)
+	Geneva: Evolving Censorship Evasion Strategies
+	Kevin Bock, George Hughey, Xiao Qiang, Dave Levin
+	ACM CCS 2019 (Conference on Computer and Communications Security)
 
-  https://github.com/Kkevsterrr/geneva
+	https://github.com/Kkevsterrr/geneva
 
 This package implements the equivilent of the Geneva "engine", which can
 execute packet manipulation strategies. It does not implement the genetic
@@ -57,7 +57,6 @@ Security: external parties can induce the server to emit a SYN-ACK, invoking
 the packet manipulation logic. External parties cannot set the transformation
 specs, and, as the input is the server-side generated SYN-ACK packet, cannot
 influence the packet manipulation with any external input parameters.
-
 */
 package packetman
 
@@ -144,11 +143,12 @@ type Config struct {
 // "TCP-payload random|<hex>"
 //
 // For example, this Geneva strategy:
-//   [TCP:flags:SA]-duplicate(tamper{TCP:flags:replace:R},tamper{TCP:flags:replace:S})-| \/
+//
+//	[TCP:flags:SA]-duplicate(tamper{TCP:flags:replace:R},tamper{TCP:flags:replace:S})-| \/
 //
 // is represented as follows (in JSON encoding):
-//   [["TCP-flags R"], ["TCP-flags S"]]
 //
+//	[["TCP-flags R"], ["TCP-flags S"]]
 //
 // Field and option values must be the expected length (see implementation).
 //
@@ -173,7 +173,7 @@ type compiledSpec struct {
 func compileSpec(spec *Spec) (*compiledSpec, error) {
 
 	compiledPacketSpecs := make([][]transformation, len(spec.PacketSpecs))
-	for i, _ := range spec.PacketSpecs {
+	for i := range spec.PacketSpecs {
 		compiledPacketSpecs[i] = make([]transformation, len(spec.PacketSpecs[i]))
 		for j, transformationSpec := range spec.PacketSpecs[i] {
 			transform, err := compileTransformation(transformationSpec)

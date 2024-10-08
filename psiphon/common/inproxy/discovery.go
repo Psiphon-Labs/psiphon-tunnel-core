@@ -66,7 +66,8 @@ func NATDiscover(
 	// mapping discovery are run concurrently.
 
 	discoverCtx, cancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(config.WebRTCDialCoordinator.DiscoverNATTimeout(), discoverNATTimeout))
+		ctx, common.ValueOrDefault(
+			config.WebRTCDialCoordinator.DiscoverNATTimeout(), discoverNATTimeout))
 	defer cancelFunc()
 
 	discoveryWaitGroup := new(sync.WaitGroup)
@@ -102,13 +103,14 @@ func NATDiscover(
 		go func() {
 			defer discoveryWaitGroup.Done()
 
-			portMappingTypes, err := discoverPortMappingTypes(
+			portMappingTypes, portMapperProbe, err := discoverPortMappingTypes(
 				discoverCtx, config.Logger)
 
 			if err == nil {
-				// Deliver the result. The WebRTCDialCoordinator provider may cache
-				// this result, associated wih the current networkID.
+				// Deliver the results. The WebRTCDialCoordinator provider
+				// should cache this data, associated wih the current networkID.
 				config.WebRTCDialCoordinator.SetPortMappingTypes(portMappingTypes)
+				config.WebRTCDialCoordinator.SetPortMappingProbe(portMapperProbe)
 			}
 
 			config.Logger.WithTraceFields(common.LogFields{
@@ -255,12 +257,12 @@ func discoverNATType(
 
 func discoverPortMappingTypes(
 	ctx context.Context,
-	logger common.Logger) (PortMappingTypes, error) {
+	logger common.Logger) (PortMappingTypes, *PortMappingProbe, error) {
 
-	portMappingTypes, err := probePortMapping(ctx, logger)
+	portMappingTypes, portMapperProbe, err := probePortMapping(ctx, logger)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
-	return portMappingTypes, nil
+	return portMappingTypes, portMapperProbe, nil
 }

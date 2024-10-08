@@ -139,7 +139,7 @@ func TestNtlmV1(t *testing.T) {
 	challengeMessageBytes, _ := hex.DecodeString("4e544c4d53535000020000000c000c003800000033820a820123456789abcdef00000000000000000000000000000000060070170000000f530065007200760065007200")
 	challengeMessage, err := ParseChallengeMessage(challengeMessageBytes)
 	if err == nil {
-		challengeMessage.String()
+		_ = challengeMessage.String()
 	} else {
 		t.Errorf("Could not parse challenge message: %s", err)
 	}
@@ -156,7 +156,7 @@ func TestNtlmV1(t *testing.T) {
 	authenticateMessageBytes, err := hex.DecodeString("4e544c4d5353500003000000180018006c00000018001800840000000c000c00480000000800080054000000100010005c000000100010009c000000358280e20501280a0000000f44006f006d00610069006e00550073006500720043004f004d005000550054004500520098def7b87f88aa5dafe2df779688a172def11c7d5ccdef1367c43011f30298a2ad35ece64f16331c44bdbed927841f94518822b1b3f350c8958682ecbb3e3cb7")
 	authenticateMessage, err := ParseAuthenticateMessage(authenticateMessageBytes, 1)
 	if err == nil {
-		authenticateMessage.String()
+		_ = authenticateMessage.String()
 	} else {
 		t.Errorf("Could not parse authenticate message: %s", err)
 	}
@@ -204,7 +204,7 @@ func TestNTLMv1WithClientChallenge(t *testing.T) {
 	challengeMessageBytes, _ := hex.DecodeString("4e544c4d53535000020000000c000c003800000033820a820123456789abcdef00000000000000000000000000000000060070170000000f530065007200760065007200")
 	challengeMessage, err := ParseChallengeMessage(challengeMessageBytes)
 	if err == nil {
-		challengeMessage.String()
+		_ = challengeMessage.String()
 	} else {
 		t.Errorf("Could not parse challenge message: %s", err)
 	}
@@ -223,7 +223,7 @@ func TestNTLMv1WithClientChallenge(t *testing.T) {
 	authenticateMessageBytes, _ := hex.DecodeString("4e544c4d5353500003000000180018006c00000018001800840000000c000c00480000000800080054000000100010005c000000000000009c000000358208820501280a0000000f44006f006d00610069006e00550073006500720043004f004d0050005500540045005200aaaaaaaaaaaaaaaa000000000000000000000000000000007537f803ae367128ca458204bde7caf81e97ed2683267232")
 	authenticateMessage, err := ParseAuthenticateMessage(authenticateMessageBytes, 1)
 	if err == nil {
-		authenticateMessage.String()
+		_ = authenticateMessage.String()
 	} else {
 		t.Errorf("Could not parse authenticate message: %s", err)
 	}

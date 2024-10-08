@@ -31,7 +31,7 @@ type TunnelProtocolPortLists map[string]*common.PortList
 
 // Validate checks that tunnel protocol names are valid.
 func (lists TunnelProtocolPortLists) Validate() error {
-	for tunnelProtocol, _ := range lists {
+	for tunnelProtocol := range lists {
 		if tunnelProtocol != protocol.TUNNEL_PROTOCOLS_ALL &&
 			!common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
 			return errors.TraceNew("invalid tunnel protocol for port list")

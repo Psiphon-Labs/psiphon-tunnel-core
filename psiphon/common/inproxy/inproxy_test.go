@@ -24,7 +24,7 @@ package inproxy
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
+	std_tls "crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -39,6 +39,7 @@ import (
 	"testing"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -101,6 +102,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 	roundTripperSucceded := func(RoundTripper) { atomic.AddInt32(&roundTripperSucceededCount, 1) }
 	roundTripperFailedCount := int32(0)
 	roundTripperFailed := func(RoundTripper) { atomic.AddInt32(&roundTripperFailedCount, 1) }
+	noMatch := func(RoundTripper) {}
 
 	var receivedProxyMustUpgrade chan struct{}
 	var receivedClientMustUpgrade chan struct{}
@@ -250,7 +252,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 			return common.LogFields(params)
 		},
 
-		GetTactics: func(_ common.GeoIPData, _ common.APIParameters) ([]byte, string, error) {
+		GetTacticsPayload: func(_ common.GeoIPData, _ common.APIParameters) ([]byte, string, error) {
 			// Exercise both new and unchanged tactics
 			if prng.FlipCoin() {
 				return testNewTacticsPayload, testNewTacticsTag, nil
@@ -550,7 +552,9 @@ func runTestInproxy(doMustUpgrade bool) error {
 					dialCtx,
 					conn,
 					&net.UDPAddr{Port: 1}, // This address is ignored, but the zero value is not allowed
-					"test", "QUICv1", nil, quicEchoServer.ObfuscationKey(), nil, nil, true)
+					"test", "QUICv1", nil, quicEchoServer.ObfuscationKey(), nil, nil, true,
+					false, false, common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), ""),
+				)
 				if err != nil {
 					return errors.Trace(err)
 				}
@@ -664,6 +668,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 				brokerListener.Addr().String(), "client"),
 			brokerClientRoundTripperSucceeded: roundTripperSucceded,
 			brokerClientRoundTripperFailed:    roundTripperFailed,
+			brokerClientNoMatch:               noMatch,
 		}
 
 		webRTCCoordinator := &testWebRTCDialCoordinator{
@@ -905,7 +910,7 @@ func newHTTPRoundTripper(endpointAddr string, path string) *httpRoundTripper {
 				MaxIdleConns:        2,
 				IdleConnTimeout:     1 * time.Minute,
 				TLSHandshakeTimeout: 10 * time.Second,
-				TLSClientConfig: &tls.Config{
+				TLSClientConfig: &std_tls.Config{
 					InsecureSkipVerify: true,
 				},
 			},

@@ -40,6 +40,7 @@ const (
 	proxyAnnounceLogSamplePeriod = 30 * time.Minute
 	proxyWebRTCAnswerTimeout     = 20 * time.Second
 	proxyDestinationDialTimeout  = 20 * time.Second
+	proxyRelayInactivityTimeout  = 5 * time.Minute
 )
 
 // Proxy is the in-proxy proxying component, which relays traffic from a
@@ -450,6 +451,8 @@ func (p *Proxy) doNetworkDiscovery(
 	if p.networkDiscoveryRunOnce &&
 		p.networkDiscoveryNetworkID == networkID {
 		// Already ran discovery for this network.
+		//
+		// TODO: periodically re-probe for port mapping services?
 		return
 	}
 
@@ -457,11 +460,11 @@ func (p *Proxy) doNetworkDiscovery(
 	// initPortMapper comment.
 	initPortMapper(webRTCCoordinator)
 
-	// Gather local network NAT/port mapping metrics before sending any
-	// announce requests. NAT topology metrics are used by the Broker to
-	// optimize client and in-proxy matching. Unlike the client, we always
-	// perform this synchronous step here, since waiting doesn't necessarily
-	// block a client tunnel dial.
+	// Gather local network NAT/port mapping metrics and configuration before
+	// sending any announce requests. NAT topology metrics are used by the
+	// Broker to optimize client and in-proxy matching. Unlike the client, we
+	// always perform this synchronous step here, since waiting doesn't
+	// necessarily block a client tunnel dial.
 
 	waitGroup := new(sync.WaitGroup)
 	waitGroup.Add(1)
@@ -471,7 +474,6 @@ func (p *Proxy) doNetworkDiscovery(
 		// NATDiscover may use cached NAT type/port mapping values from
 		// DialParameters, based on the network ID. If discovery is not
 		// successful, the proxy still proceeds to announce.
-
 		NATDiscover(
 			ctx,
 			&NATDiscoverConfig{
@@ -716,7 +718,7 @@ func (p *Proxy) proxyOneClient(
 	// included in SDPs.
 	hasPersonalCompartmentIDs := len(personalCompartmentIDs) > 0
 
-	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnWithAnswer(
+	webRTCConn, SDP, sdpMetrics, webRTCErr := newWebRTCConnForAnswer(
 		webRTCAnswerCtx,
 		&webRTCConfig{
 			Logger:                      p.config.Logger,
@@ -794,7 +796,9 @@ func (p *Proxy) proxyOneClient(
 	// dial destination is a Psiphon server.
 
 	destinationDialContext, destinationDialCancelFunc := context.WithTimeout(
-		ctx, common.ValueOrDefault(webRTCCoordinator.ProxyDestinationDialTimeout(), proxyDestinationDialTimeout))
+		ctx,
+		common.ValueOrDefault(
+			webRTCCoordinator.ProxyDestinationDialTimeout(), proxyDestinationDialTimeout))
 	defer destinationDialCancelFunc()
 
 	// Use the custom resolver when resolving destination hostnames, such as
@@ -855,12 +859,21 @@ func (p *Proxy) proxyOneClient(
 
 	// Hook up bytes transferred counting for activity updates.
 
-	// The ActivityMonitoredConn inactivity timeout is not configured, since
-	// the Psiphon server will close its connection to inactive clients on
-	// its own schedule.
+	// The ActivityMonitoredConn inactivity timeout is configured. For
+	// upstream TCP connections, the destinationConn will close when the TCP
+	// connection to the Psiphon server closes. But for upstream UDP flows,
+	// the relay does not know when the upstream "connection" has closed.
+	// Well-behaved clients will close the WebRTC half of the relay when
+	// those clients know the UDP-based tunnel protocol connection is closed;
+	// the inactivity timeout handles the remaining cases.
+
+	inactivityTimeout :=
+		common.ValueOrDefault(
+			webRTCCoordinator.ProxyRelayInactivityTimeout(),
+			proxyRelayInactivityTimeout)
 
 	destinationConn, err = common.NewActivityMonitoredConn(
-		destinationConn, 0, false, nil, p.activityUpdateWrapper)
+		destinationConn, inactivityTimeout, false, nil, p.activityUpdateWrapper)
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}

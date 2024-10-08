@@ -115,7 +115,7 @@ func (b *BrokerClient) ProxyAnnounce(
 		b.coordinator.AnnounceRequestTimeout(),
 		proxyAnnounceRequestTimeout)
 
-	responsePayload, err := b.roundTrip(
+	responsePayload, _, err := b.roundTrip(
 		ctx, requestDelay, requestTimeout, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -132,18 +132,26 @@ func (b *BrokerClient) ProxyAnnounce(
 // ClientOffer sends a ClientOffer request and returns the response.
 func (b *BrokerClient) ClientOffer(
 	ctx context.Context,
-	request *ClientOfferRequest) (*ClientOfferResponse, error) {
+	request *ClientOfferRequest,
+	hasPersonalCompartmentIDs bool) (*ClientOfferResponse, error) {
 
 	requestPayload, err := MarshalClientOfferRequest(request)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
+	var offerRequestTimeout time.Duration
+	if hasPersonalCompartmentIDs {
+		offerRequestTimeout = b.coordinator.OfferRequestPersonalTimeout()
+	} else {
+		offerRequestTimeout = b.coordinator.OfferRequestTimeout()
+	}
+
 	requestTimeout := common.ValueOrDefault(
-		b.coordinator.OfferRequestTimeout(),
+		offerRequestTimeout,
 		clientOfferRequestTimeout)
 
-	responsePayload, err := b.roundTrip(
+	responsePayload, roundTripper, err := b.roundTrip(
 		ctx, 0, requestTimeout, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -152,6 +160,15 @@ func (b *BrokerClient) ClientOffer(
 	response, err := UnmarshalClientOfferResponse(responsePayload)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if response.NoMatch {
+
+		// Signal the no match event, which may trigger broker rotation. As
+		// with BrokerClientRoundTripperSucceeded/Failed callbacks, the
+		// RoundTripper used is passed in to ensure the correct broker client
+		// is reset.
+		b.coordinator.BrokerClientNoMatch(roundTripper)
 	}
 
 	return response, nil
@@ -171,7 +188,7 @@ func (b *BrokerClient) ProxyAnswer(
 		b.coordinator.AnswerRequestTimeout(),
 		proxyAnswerRequestTimeout)
 
-	responsePayload, err := b.roundTrip(
+	responsePayload, _, err := b.roundTrip(
 		ctx, 0, requestTimeout, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -200,7 +217,7 @@ func (b *BrokerClient) ClientRelayedPacket(
 		b.coordinator.RelayedPacketRequestTimeout(),
 		clientRelayedPacketRequestTimeout)
 
-	responsePayload, err := b.roundTrip(
+	responsePayload, _, err := b.roundTrip(
 		ctx, 0, requestTimeout, requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -218,14 +235,14 @@ func (b *BrokerClient) roundTrip(
 	ctx context.Context,
 	requestDelay time.Duration,
 	requestTimeout time.Duration,
-	request []byte) ([]byte, error) {
+	request []byte) ([]byte, RoundTripper, error) {
 
 	// The round tripper may need to establish a transport-level connection;
 	// or this may already be established.
 
 	roundTripper, err := b.coordinator.BrokerClientRoundTripper()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	// InitiatorSessions.RoundTrip may make serveral round trips with
@@ -291,10 +308,10 @@ func (b *BrokerClient) roundTrip(
 			b.coordinator.BrokerClientRoundTripperFailed(roundTripper)
 		}
 
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	b.coordinator.BrokerClientRoundTripperSucceeded(roundTripper)
 
-	return response, nil
+	return response, roundTripper, nil
 }

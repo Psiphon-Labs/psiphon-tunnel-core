@@ -5,6 +5,7 @@
 // Commons "CC0" public domain dedication. See LICENSE or
 // <http://creativecommons.org/publicdomain/zero/1.0/> for full details.
 
+//go:build go1.9
 // +build go1.9
 
 package chacha20

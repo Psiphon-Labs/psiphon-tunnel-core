@@ -423,7 +423,7 @@ func newSSHServer(
 	var inproxyBrokerSessions *inproxy.ServerBrokerSessions
 
 	runningInproxy := false
-	for tunnelProtocol, _ := range support.Config.TunnelProtocolPorts {
+	for tunnelProtocol := range support.Config.TunnelProtocolPorts {
 		if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
 			runningInproxy = true
 			break

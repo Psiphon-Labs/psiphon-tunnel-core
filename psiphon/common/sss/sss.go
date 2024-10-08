@@ -8,19 +8,19 @@
 // random polynomial equations of degree K-1 which have an X-intercept equal to
 // the secret. Given K=3, the following equations might be generated:
 //
-//     f1(x) =  78x^2 +  19x + 42
-//     f2(x) = 128x^2 + 171x + 42
-//     f3(x) = 121x^2 +   3x + 42
-//     f4(x) =  91x^2 +  95x + 42
-//     etc.
+//	f1(x) =  78x^2 +  19x + 42
+//	f2(x) = 128x^2 + 171x + 42
+//	f3(x) = 121x^2 +   3x + 42
+//	f4(x) =  91x^2 +  95x + 42
+//	etc.
 //
 // These polynomials are then evaluated for values of X > 0:
 //
-//     f1(1) =  139
-//     f2(2) =  896
-//     f3(3) = 1140
-//     f4(4) = 1783
-//     etc.
+//	f1(1) =  139
+//	f2(2) =  896
+//	f3(3) = 1140
+//	f4(4) = 1783
+//	etc.
 //
 // These (x, y) pairs are the shares given to the parties. In order to combine
 // shares to recover the secret, these (x, y) pairs are used as the input points
