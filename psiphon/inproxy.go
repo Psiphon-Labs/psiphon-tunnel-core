@@ -37,15 +37,11 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
-	utls "github.com/Psiphon-Labs/utls"
 	"github.com/cespare/xxhash"
-	"golang.org/x/net/bpf"
 )
 
 // InproxyBrokerClientManager manages an InproxyBrokerClientInstance, an
@@ -428,6 +424,8 @@ func NewInproxyBrokerClientInstance(
 				brokerSpecs,
 				func(spec *parameters.InproxyBrokerSpec) string { return spec.BrokerPublicKey },
 				func(spec *parameters.InproxyBrokerSpec, dialParams *InproxyBrokerDialParameters) bool {
+					// Replay the successful broker spec, if present, by
+					// comparing its hash with that of the candidate.
 					return dialParams.LastUsedTimestamp.After(now.Add(-ttl)) &&
 						bytes.Equal(dialParams.LastUsedBrokerSpecHash, hashBrokerSpec(spec))
 				})
@@ -448,6 +446,12 @@ func NewInproxyBrokerClientInstance(
 
 	isReplay := brokerDialParams != nil
 
+	// Handle legacy replay records by discarding replay when required fields
+	// are missing.
+	if isReplay && brokerDialParams.FrontedHTTPDialParameters == nil {
+		isReplay = false
+	}
+
 	if !isReplay {
 		brokerDialParams, err = MakeInproxyBrokerDialParameters(config, p, networkID, brokerSpec)
 		if err != nil {
@@ -455,7 +459,7 @@ func NewInproxyBrokerClientInstance(
 		}
 	} else {
 		brokerDialParams.brokerSpec = brokerSpec
-		err := brokerDialParams.prepareDialConfigs(config, p, networkID, true, nil)
+		err := brokerDialParams.prepareDialConfigs(config, p, true)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -536,7 +540,7 @@ func NewInproxyBrokerClientInstance(
 	// Adjust long-polling request timeouts to respect any maximum request
 	// timeout supported by the provider fronting the request.
 	maxRequestTimeout, ok := p.KeyDurations(
-		parameters.InproxyFrontingProviderClientMaxRequestTimeouts)[brokerDialParams.FrontingProviderID]
+		parameters.InproxyFrontingProviderClientMaxRequestTimeouts)[brokerDialParams.FrontedHTTPDialParameters.FrontingProviderID]
 	if ok && maxRequestTimeout > 0 {
 		if b.announceRequestTimeout > maxRequestTimeout {
 			b.announceRequestTimeout = maxRequestTimeout
@@ -857,7 +861,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 
 	resolver := b.config.GetResolver()
 	if resolver != nil {
-		resolver.VerifyCacheExtension(b.brokerDialParams.FrontingDialAddress)
+		resolver.VerifyCacheExtension(b.brokerDialParams.FrontedHTTPDialParameters.FrontingDialAddress)
 	}
 }
 
@@ -1049,39 +1053,7 @@ type InproxyBrokerDialParameters struct {
 	LastUsedTimestamp      time.Time
 	LastUsedBrokerSpecHash []byte
 
-	NetworkLatencyMultiplier float64
-
-	BrokerTransport string
-
-	DialAddress string
-
-	FrontingProviderID  string
-	FrontingDialAddress string
-	SNIServerName       string
-	TransformedHostName bool
-	VerifyServerName    string
-	VerifyPins          []string
-	HostHeader          string
-	ResolvedIPAddress   atomic.Value `json:"-"`
-
-	TLSProfile               string
-	TLSVersion               string
-	RandomizedTLSProfileSeed *prng.Seed
-	NoDefaultTLSSessionID    bool
-	TLSFragmentClientHello   bool
-
-	SelectedUserAgent bool
-	UserAgent         string
-
-	BPFProgramName         string
-	BPFProgramInstructions []bpf.RawInstruction
-
-	FragmentorSeed *prng.Seed
-
-	ResolveParameters *resolver.ResolveParameters
-
-	dialConfig *DialConfig `json:"-"`
-	meekConfig *MeekConfig `json:"-"`
+	FrontedHTTPDialParameters *FrontedMeekDialParameters
 }
 
 // MakeInproxyBrokerDialParameters creates a new InproxyBrokerDialParameters.
@@ -1090,12 +1062,6 @@ func MakeInproxyBrokerDialParameters(
 	p parameters.ParametersAccessor,
 	networkID string,
 	brokerSpec *parameters.InproxyBrokerSpec) (*InproxyBrokerDialParameters, error) {
-
-	// This function duplicates some code from MakeDialParameters and
-	// makeFrontedHTTPClient. To simplify the logic, the Replay<Component>
-	// tactic flags for individual dial components are ignored.
-	//
-	// TODO: merge common functionality?
 
 	if config.UseUpstreamProxy() {
 		return nil, errors.TraceNew("upstream proxy unsupported")
@@ -1113,141 +1079,36 @@ func MakeInproxyBrokerDialParameters(
 		LastUsedBrokerSpecHash: hashBrokerSpec(brokerSpec),
 	}
 
-	// Network latency multiplier
+	// FrontedMeekDialParameters
+	//
+	// The broker round trips use MeekModeWrappedPlaintextRoundTrip without
+	// meek cookies, so meek obfuscation is not configured. The in-proxy
+	// broker session payloads have their own obfuscation layer.
 
-	brokerDialParams.NetworkLatencyMultiplier = prng.ExpFloat64Range(
-		p.Float(parameters.NetworkLatencyMultiplierMin),
-		p.Float(parameters.NetworkLatencyMultiplierMax),
-		p.Float(parameters.NetworkLatencyMultiplierLambda))
-
-	// Select fronting configuration
+	payloadSecure := true
+	skipVerify := false
 
 	var err error
-
-	brokerDialParams.FrontingProviderID,
-		brokerDialParams.BrokerTransport,
-		brokerDialParams.FrontingDialAddress,
-		brokerDialParams.SNIServerName,
-		brokerDialParams.VerifyServerName,
-		brokerDialParams.VerifyPins,
-		brokerDialParams.HostHeader,
-		err = brokerDialParams.brokerSpec.BrokerFrontingSpecs.SelectParameters()
+	brokerDialParams.FrontedHTTPDialParameters, err = makeFrontedMeekDialParameters(
+		config,
+		p,
+		nil,
+		brokerSpec.BrokerFrontingSpecs,
+		nil,
+		true,
+		skipVerify,
+		config.DisableSystemRootCAs,
+		payloadSecure)
 	if err != nil {
 		return nil, errors.Trace(err)
-	}
-
-	// At this time, the broker client, the transport is limited to fronted
-	// HTTPS.
-	//
-	// As a future enhancement, allow HTTP for the in-proxy broker case, skip
-	// selecting TLS tactics and select HTTP tactics such as
-	// HTTPTransformerParameters.
-
-	if brokerDialParams.BrokerTransport == protocol.FRONTING_TRANSPORT_HTTP {
-		return nil, errors.TraceNew("unsupported fronting transport")
-	}
-
-	// Determine and use the equivilent tunnel protocol for tactics
-	// selections. For example, for the broker transport FRONTED-HTTPS, use
-	// the tactics for FRONTED-MEEK-OSSH.
-
-	equivilentTunnelProtocol, err := protocol.EquivilentTunnelProtocol(brokerDialParams.BrokerTransport)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	// FrontSpec.Addresses may include a port; default to 443 if none.
-
-	if _, _, err := net.SplitHostPort(brokerDialParams.FrontingDialAddress); err == nil {
-		brokerDialParams.DialAddress = brokerDialParams.FrontingDialAddress
-	} else {
-		brokerDialParams.DialAddress = net.JoinHostPort(brokerDialParams.FrontingDialAddress, "443")
-	}
-
-	// SNI configuration
-	//
-	// For a FrontingSpec, an SNI value of "" indicates to disable/omit SNI, so
-	// never transform in that case.
-
-	if brokerDialParams.SNIServerName != "" {
-		if p.WeightedCoinFlip(parameters.TransformHostNameProbability) {
-			brokerDialParams.SNIServerName = selectHostName(equivilentTunnelProtocol, p)
-			brokerDialParams.TransformedHostName = true
-		}
-	}
-
-	// TLS configuration
-	//
-	// The requireTLS13 flag is set to true in order to use only modern TLS
-	// fingerprints which should support HTTP/2 in the ALPN.
-	//
-	// TODO: TLS padding, NoDefaultTLSSessionID
-
-	brokerDialParams.TLSProfile,
-		brokerDialParams.TLSVersion,
-		brokerDialParams.RandomizedTLSProfileSeed,
-		err = SelectTLSProfile(false, true, true, brokerDialParams.FrontingProviderID, p)
-
-	brokerDialParams.NoDefaultTLSSessionID = p.WeightedCoinFlip(
-		parameters.NoDefaultTLSSessionIDProbability)
-
-	if brokerDialParams.SNIServerName != "" && net.ParseIP(brokerDialParams.SNIServerName) == nil {
-		tlsFragmentorLimitProtocols := p.TunnelProtocols(parameters.TLSFragmentClientHelloLimitProtocols)
-		if len(tlsFragmentorLimitProtocols) == 0 || common.Contains(tlsFragmentorLimitProtocols, equivilentTunnelProtocol) {
-			brokerDialParams.TLSFragmentClientHello = p.WeightedCoinFlip(parameters.TLSFragmentClientHelloProbability)
-		}
-	}
-
-	// User Agent configuration
-
-	dialCustomHeaders := makeDialCustomHeaders(config, p)
-	brokerDialParams.SelectedUserAgent, brokerDialParams.UserAgent = selectUserAgentIfUnset(p, dialCustomHeaders)
-
-	// BPF configuration
-
-	if ClientBPFEnabled() &&
-		protocol.TunnelProtocolMayUseClientBPF(equivilentTunnelProtocol) {
-
-		if p.WeightedCoinFlip(parameters.BPFClientTCPProbability) {
-			brokerDialParams.BPFProgramName = ""
-			brokerDialParams.BPFProgramInstructions = nil
-			ok, name, rawInstructions := p.BPFProgram(parameters.BPFClientTCPProgram)
-			if ok {
-				brokerDialParams.BPFProgramName = name
-				brokerDialParams.BPFProgramInstructions = rawInstructions
-			}
-		}
-	}
-
-	// Fragmentor configuration
-
-	brokerDialParams.FragmentorSeed, err = prng.NewSeed()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	// Resolver configuration
-	//
-	// The custom resolcer is wired up only when there is a domain to be
-	// resolved; GetMetrics will log resolver metrics when the resolver is set.
-
-	if net.ParseIP(brokerDialParams.FrontingDialAddress) == nil {
-
-		resolver := config.GetResolver()
-		if resolver == nil {
-			return nil, errors.TraceNew("missing resolver")
-		}
-
-		brokerDialParams.ResolveParameters, err = resolver.MakeResolveParameters(
-			p, brokerDialParams.FrontingProviderID, brokerDialParams.FrontingDialAddress)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
 	}
 
 	// Initialize Dial/MeekConfigs to be passed to the corresponding dialers.
 
-	err = brokerDialParams.prepareDialConfigs(config, p, networkID, false, dialCustomHeaders)
+	err = brokerDialParams.prepareDialConfigs(
+		config,
+		p,
+		false)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1259,107 +1120,26 @@ func MakeInproxyBrokerDialParameters(
 func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 	config *Config,
 	p parameters.ParametersAccessor,
-	networkID string,
-	isReplay bool,
-	dialCustomHeaders http.Header) error {
+	isReplay bool) error {
 
 	brokerDialParams.isReplay = isReplay
 
-	equivilentTunnelProtocol, err := protocol.EquivilentTunnelProtocol(brokerDialParams.BrokerTransport)
-	if err != nil {
-		return errors.Trace(err)
-	}
+	if isReplay {
+		// FrontedHTTPDialParameters
+		//
+		// The broker round trips use MeekModeWrappedPlaintextRoundTrip without
+		// meek cookies, so meek obfuscation is not configured. The in-proxy
+		// broker session payloads have their own obfuscation layer.
 
-	// Custom headers and User Agent
+		payloadSecure := true
+		skipVerify := false
 
-	if dialCustomHeaders == nil {
-		dialCustomHeaders = makeDialCustomHeaders(config, p)
-	}
-	if brokerDialParams.SelectedUserAgent {
-
-		// Limitation: if config.CustomHeaders adds a User-Agent between
-		// replays, it may be ignored due to replaying a selected User-Agent.
-		dialCustomHeaders.Set("User-Agent", brokerDialParams.UserAgent)
-	}
-
-	// Fragmentor
-
-	fragmentorConfig := fragmentor.NewUpstreamConfig(
-		p, equivilentTunnelProtocol, brokerDialParams.FragmentorSeed)
-
-	// Resolver
-	//
-	// DialConfig.ResolveIP is required and called even when the destination
-	// is an IP address.
-
-	resolver := config.GetResolver()
-	if resolver == nil {
-		return errors.TraceNew("missing resolver")
-	}
-
-	resolveIP := func(ctx context.Context, hostname string) ([]net.IP, error) {
-		IPs, err := resolver.ResolveIP(
-			ctx, networkID, brokerDialParams.ResolveParameters, hostname)
-		return IPs, errors.Trace(err)
-	}
-
-	// DialConfig
-
-	brokerDialParams.ResolvedIPAddress.Store("")
-
-	brokerDialParams.dialConfig = &DialConfig{
-		DiagnosticID:                  brokerDialParams.brokerSpec.BrokerPublicKey,
-		CustomHeaders:                 dialCustomHeaders,
-		BPFProgramInstructions:        brokerDialParams.BPFProgramInstructions,
-		DeviceBinder:                  config.deviceBinder,
-		IPv6Synthesizer:               config.IPv6Synthesizer,
-		ResolveIP:                     resolveIP,
-		TrustedCACertificatesFilename: config.TrustedCACertificatesFilename,
-		FragmentorConfig:              fragmentorConfig,
-		ResolvedIPCallback: func(IPAddress string) {
-			brokerDialParams.ResolvedIPAddress.Store(IPAddress)
-		},
-	}
-
-	// MeekDialConfig
-	//
-	// The broker round trips use MeekModeWrappedPlaintextRoundTrip without
-	// meek cookies, so meek obfuscation is not configured. The in-proxy
-	// broker session payloads have their own obfuscation layer.
-
-	addPsiphonFrontingHeader := false
-	if brokerDialParams.FrontingProviderID != "" {
-		addPsiphonFrontingHeader = common.Contains(
-			p.LabeledTunnelProtocols(
-				parameters.AddFrontingProviderPsiphonFrontingHeader,
-				brokerDialParams.FrontingProviderID),
-			equivilentTunnelProtocol)
-	}
-
-	brokerDialParams.meekConfig = &MeekConfig{
-		Mode:                     MeekModeWrappedPlaintextRoundTrip,
-		DiagnosticID:             brokerDialParams.FrontingProviderID,
-		Parameters:               config.GetParameters(),
-		DialAddress:              brokerDialParams.DialAddress,
-		TLSProfile:               brokerDialParams.TLSProfile,
-		NoDefaultTLSSessionID:    brokerDialParams.NoDefaultTLSSessionID,
-		RandomizedTLSProfileSeed: brokerDialParams.RandomizedTLSProfileSeed,
-		SNIServerName:            brokerDialParams.SNIServerName,
-		AddPsiphonFrontingHeader: addPsiphonFrontingHeader,
-		VerifyServerName:         brokerDialParams.VerifyServerName,
-		VerifyPins:               brokerDialParams.VerifyPins,
-		HostHeader:               brokerDialParams.HostHeader,
-		TransformedHostName:      brokerDialParams.TransformedHostName,
-		NetworkLatencyMultiplier: brokerDialParams.NetworkLatencyMultiplier,
-		AdditionalHeaders:        config.MeekAdditionalHeaders,
-		TLSClientSessionCache:    common.WrapUtlsClientSessionCache(utls.NewLRUClientSessionCache(0), brokerDialParams.DialAddress),
-	}
-
-	switch brokerDialParams.BrokerTransport {
-	case protocol.FRONTING_TRANSPORT_HTTPS:
-		brokerDialParams.meekConfig.UseHTTPS = true
-	case protocol.FRONTING_TRANSPORT_QUIC:
-		brokerDialParams.meekConfig.UseQUIC = true
+		err := brokerDialParams.FrontedHTTPDialParameters.prepareDialConfigs(
+			config, p, nil, nil, true, skipVerify,
+			config.DisableSystemRootCAs, payloadSecure)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	return nil
@@ -1375,7 +1155,7 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetBrokerMetrics() common.L
 	// the broker -- as successful parameters might not otherwise by logged
 	// via server_tunnel if the subsequent WebRTC dials fail.
 
-	logFields["fronting_provider_id"] = brokerDialParams.FrontingProviderID
+	logFields["fronting_provider_id"] = brokerDialParams.FrontedHTTPDialParameters.FrontingProviderID
 
 	return logFields
 }
@@ -1386,87 +1166,17 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 
 	logFields := common.LogFields{}
 
-	logFields["inproxy_broker_transport"] = brokerDialParams.BrokerTransport
+	// Add underlying log fields, which must be renamed to be scoped to the
+	// broker.
+	logFields.Add(brokerDialParams.FrontedHTTPDialParameters.GetMetrics("inproxy_broker_"))
+
+	logFields["inproxy_broker_transport"] = brokerDialParams.FrontedHTTPDialParameters.FrontingTransport
 
 	isReplay := "0"
 	if brokerDialParams.isReplay {
 		isReplay = "1"
 	}
 	logFields["inproxy_broker_is_replay"] = isReplay
-
-	// Note: as At the broker client transport is currently limited to domain
-	// fronted HTTPS, the following related parameters are included
-	// unconditionally.
-
-	logFields["inproxy_broker_fronting_provider_id"] = brokerDialParams.FrontingProviderID
-
-	logFields["inproxy_broker_dial_address"] = brokerDialParams.FrontingDialAddress
-
-	resolvedIPAddress := brokerDialParams.ResolvedIPAddress.Load().(string)
-	if resolvedIPAddress != "" {
-		logFields["inproxy_broker_resolved_ip_address"] = resolvedIPAddress
-	}
-
-	if brokerDialParams.SNIServerName != "" {
-		logFields["inproxy_broker_sni_server_name"] = brokerDialParams.SNIServerName
-	}
-
-	logFields["inproxy_broker_host_header"] = brokerDialParams.HostHeader
-
-	transformedHostName := "0"
-	if brokerDialParams.TransformedHostName {
-		transformedHostName = "1"
-	}
-	logFields["inproxy_broker_transformed_host_name"] = transformedHostName
-
-	if brokerDialParams.UserAgent != "" {
-		logFields["inproxy_broker_user_agent"] = brokerDialParams.UserAgent
-	}
-
-	if brokerDialParams.BrokerTransport == protocol.FRONTING_TRANSPORT_HTTPS {
-
-		if brokerDialParams.TLSProfile != "" {
-			logFields["inproxy_broker_tls_profile"] = brokerDialParams.TLSProfile
-		}
-
-		logFields["inproxy_broker_tls_version"] = brokerDialParams.TLSVersion
-
-		tlsFragmented := "0"
-		if brokerDialParams.TLSFragmentClientHello {
-			tlsFragmented = "1"
-		}
-		logFields["inproxy_broker_tls_fragmented"] = tlsFragmented
-	}
-
-	if brokerDialParams.BPFProgramName != "" {
-		logFields["inproxy_broker_client_bpf"] = brokerDialParams.BPFProgramName
-	}
-
-	if brokerDialParams.ResolveParameters != nil {
-
-		// See comment for dialParams.ResolveParameters handling in
-		// getBaseAPIParameters.
-
-		if brokerDialParams.ResolveParameters.PreresolvedIPAddress != "" {
-			dialDomain, _, _ := net.SplitHostPort(brokerDialParams.DialAddress)
-			if brokerDialParams.ResolveParameters.PreresolvedDomain == dialDomain {
-				logFields["inproxy_broker_dns_preresolved"] = brokerDialParams.ResolveParameters.PreresolvedIPAddress
-			}
-		}
-
-		if brokerDialParams.ResolveParameters.PreferAlternateDNSServer {
-			logFields["inproxy_broker_dns_preferred"] = brokerDialParams.ResolveParameters.AlternateDNSServer
-		}
-
-		if brokerDialParams.ResolveParameters.ProtocolTransformName != "" {
-			logFields["inproxy_broker_dns_transform"] = brokerDialParams.ResolveParameters.ProtocolTransformName
-		}
-
-		logFields["inproxy_broker_dns_attempt"] = strconv.Itoa(
-			brokerDialParams.ResolveParameters.GetFirstAttemptWithAnswer())
-	}
-
-	// TODO: get fragmentor metrics, if any, from MeekConn.
 
 	return logFields
 }
@@ -1625,8 +1335,8 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 
 		conn, err := DialMeek(
 			requestCtx,
-			rt.brokerDialParams.meekConfig,
-			rt.brokerDialParams.dialConfig)
+			rt.brokerDialParams.FrontedHTTPDialParameters.meekConfig,
+			rt.brokerDialParams.FrontedHTTPDialParameters.dialConfig)
 
 		if err != nil && ctx.Err() != context.Canceled {
 
@@ -1673,7 +1383,7 @@ func (rt *InproxyBrokerRoundTripper) RoundTrip(
 	// MeekConn in favor of the MeekDialConfig, while the path will be used.
 	url := fmt.Sprintf(
 		"https://%s/%s",
-		rt.brokerDialParams.DialAddress,
+		rt.brokerDialParams.FrontedHTTPDialParameters.DialAddress,
 		inproxy.BrokerEndPointName)
 
 	request, err := http.NewRequestWithContext(

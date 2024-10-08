@@ -372,6 +372,10 @@ const (
 	SteeringIPCacheMaxEntries                          = "SteeringIPCacheMaxEntries"
 	SteeringIPProbability                              = "SteeringIPProbability"
 	ServerDiscoveryStrategy                            = "ServerDiscoveryStrategy"
+	FrontedHTTPClientReplayDialParametersTTL           = "FrontedHTTPClientReplayDialParametersTTL"
+	FrontedHTTPClientReplayUpdateFrequency             = "FrontedHTTPClientReplayUpdateFrequency"
+	FrontedHTTPClientReplayDialParametersProbability   = "FrontedHTTPClientReplayDialParametersProbability"
+	FrontedHTTPClientReplayRetainFailedProbability     = "FrontedHTTPClientReplayRetainFailedProbability"
 	InproxyAllowProxy                                  = "InproxyAllowProxy"
 	InproxyAllowClient                                 = "InproxyAllowClient"
 	InproxyAllowDomainFrontedDestinations              = "InproxyAllowDomainFrontedDestinations"
@@ -875,6 +879,11 @@ var defaultParameters = map[string]struct {
 	SteeringIPProbability:     {value: 1.0, minimum: 0.0},
 
 	ServerDiscoveryStrategy: {value: "", flags: serverSideOnly},
+
+	FrontedHTTPClientReplayDialParametersTTL:         {value: 24 * time.Hour, minimum: time.Duration(0)},
+	FrontedHTTPClientReplayUpdateFrequency:           {value: 5 * time.Minute, minimum: time.Duration(0)},
+	FrontedHTTPClientReplayDialParametersProbability: {value: 1.0, minimum: 0.0},
+	FrontedHTTPClientReplayRetainFailedProbability:   {value: 0.5, minimum: 0.0},
 
 	// For inproxy tactics, there is no proxyOnly flag, since Psiphon apps may
 	// run both clients and inproxy proxies.
