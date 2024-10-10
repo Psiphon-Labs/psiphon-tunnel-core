@@ -565,7 +565,8 @@ func (p *Proxy) proxyOneClient(
 	// returned in the proxy announcment response are associated and stored
 	// with the original network ID.
 
-	metrics, tacticsNetworkID, err := p.getMetrics(webRTCCoordinator)
+	metrics, tacticsNetworkID, err := p.getMetrics(
+		brokerCoordinator, webRTCCoordinator)
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}
@@ -962,7 +963,9 @@ func (p *Proxy) proxyOneClient(
 	return backOff, err
 }
 
-func (p *Proxy) getMetrics(webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetrics, string, error) {
+func (p *Proxy) getMetrics(
+	brokerCoordinator BrokerDialCoordinator,
+	webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetrics, string, error) {
 
 	// tacticsNetworkID records the exact network ID that corresponds to the
 	// tactics tag sent in the base parameters, and is used when applying any
@@ -972,13 +975,17 @@ func (p *Proxy) getMetrics(webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetri
 		return nil, "", errors.Trace(err)
 	}
 
-	packedBaseParams, err := protocol.EncodePackedAPIParameters(baseParams)
+	apiParams := common.APIParameters{}
+	apiParams.Add(baseParams)
+	apiParams.Add(common.APIParameters(brokerCoordinator.MetricsForBrokerRequests()))
+
+	packedParams, err := protocol.EncodePackedAPIParameters(apiParams)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
 
 	return &ProxyMetrics{
-		BaseAPIParameters:             packedBaseParams,
+		BaseAPIParameters:             packedParams,
 		ProxyProtocolVersion:          proxyProtocolVersion,
 		NATType:                       webRTCCoordinator.NATType(),
 		PortMappingTypes:              webRTCCoordinator.PortMappingTypes(),

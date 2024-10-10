@@ -1014,7 +1014,7 @@ func (serverContext *ServerContext) getBaseAPIParameters(
 // included with each Psiphon API request. These common parameters are used
 // for metrics.
 //
-// The input dialPatrams may be nil when the filter has
+// The input dialParams may be nil when the filter has
 // baseParametersNoDialParameters.
 func getBaseAPIParameters(
 	filter baseParametersFilter,

@@ -23,6 +23,8 @@ import (
 	"context"
 	"net"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 )
 
 // RoundTripper provides a request/response round trip network transport with
@@ -169,6 +171,13 @@ type BrokerDialCoordinator interface {
 	// broker. In common pairing mode, clients may rotate, in case common
 	// proxies are not well balanced across brokers.
 	BrokerClientNoMatch(roundTripper RoundTripper)
+
+	// MetricsForBrokerRequests returns the metrics, associated with the
+	// broker client instance, which are to be added to the base API
+	// parameters included in client and proxy requests sent to the broker.
+	// This includes fronting_provider_id, which varies depending on the
+	// broker client dial and isn't a fixed base API parameter value.
+	MetricsForBrokerRequests() common.LogFields
 
 	SessionHandshakeRoundTripTimeout() time.Duration
 	AnnounceRequestTimeout() time.Duration

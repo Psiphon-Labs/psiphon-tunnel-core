@@ -988,6 +988,11 @@ func (b *InproxyBrokerClientInstance) BrokerClientNoMatch(roundTripper inproxy.R
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.
+func (b *InproxyBrokerClientInstance) MetricsForBrokerRequests() common.LogFields {
+	return b.brokerDialParams.GetMetricsForBrokerRequests()
+}
+
+// Implements the inproxy.BrokerDialCoordinator interface.
 func (b *InproxyBrokerClientInstance) AnnounceRequestTimeout() time.Duration {
 	return b.announceRequestTimeout
 }
@@ -1145,9 +1150,9 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 	return nil
 }
 
-// GetBrokerMetrics returns  dial parameter log fields to be reported to a
-// broker.
-func (brokerDialParams *InproxyBrokerDialParameters) GetBrokerMetrics() common.LogFields {
+// GetMetricsForBroker returns broker client dial parameter log fields to be
+// reported to a broker.
+func (brokerDialParams *InproxyBrokerDialParameters) GetMetricsForBrokerRequests() common.LogFields {
 
 	logFields := common.LogFields{}
 

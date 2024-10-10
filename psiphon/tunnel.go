@@ -1550,8 +1550,6 @@ func dialInproxy(
 	params := getBaseAPIParameters(
 		baseParametersNoDialParameters, true, config, nil)
 
-	common.LogFields(params).Add(dialParams.GetInproxyBrokerMetrics())
-
 	// The debugLogging flag is passed to both NoticeCommonLogger and to the
 	// inproxy package as well; skipping debug logs in the inproxy package,
 	// before calling into the notice logger, avoids unnecessary allocations
