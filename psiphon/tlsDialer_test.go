@@ -46,7 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 func TestTLSCertificateVerification(t *testing.T) {
@@ -493,7 +493,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 
 		// Same tls config as psiphon/server/meek.go
 
-		certificate, privateKey, err := common.GenerateWebServerCertificate(values.GetHostName())
+		certificate, privateKey, _, err := common.GenerateWebServerCertificate(values.GetHostName())
 		if err != nil {
 			t.Fatalf("common.GenerateWebServerCertificate failed: %v", err)
 		}
@@ -581,7 +581,7 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 			} else {
 
 				tlsVersion := ""
-				version := conn.(*utls.UConn).ConnectionState().Version
+				version := conn.(*tlsConn).Conn.(*utls.UConn).ConnectionState().Version
 				if version == utls.VersionTLS12 {
 					tlsVersion = "TLS 1.2"
 				} else if version == utls.VersionTLS13 {
@@ -682,8 +682,7 @@ func TestSelectTLSProfile(t *testing.T) {
 
 		var unexpectedClientHelloID, unexpectedClientHelloSpec bool
 
-		// TLS_PROFILE_CHROME_112_PSK profile is a special case. Check getUTLSClientHelloID for details.
-		if i < len(protocol.SupportedTLSProfiles) && profile != protocol.TLS_PROFILE_CHROME_112_PSK {
+		if i < len(protocol.SupportedTLSProfiles) {
 			if utlsClientHelloID == utls.HelloCustom {
 				unexpectedClientHelloID = true
 			}
@@ -935,7 +934,7 @@ func makeCustomTLSProfilesParameters(
 		applyParameters[parameters.DisableFrontingProviderTLSProfiles] = disabledTLSProfiles
 	}
 
-	_, err = params.Set("", false, applyParameters)
+	_, err = params.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}

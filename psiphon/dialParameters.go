@@ -28,13 +28,14 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -43,6 +44,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	utls "github.com/Psiphon-Labs/utls"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/net/bpf"
 )
@@ -109,7 +111,6 @@ type DialParameters struct {
 	MeekVerifyPins            []string
 	MeekHostHeader            string
 	MeekObfuscatorPaddingSeed *prng.Seed
-	MeekTLSPaddingSize        int
 	MeekResolvedIPAddress     atomic.Value `json:"-"`
 
 	TLSOSSHTransformedSNIServerName bool
@@ -131,6 +132,8 @@ type DialParameters struct {
 	QUICClientHelloSeed                      *prng.Seed
 	ObfuscatedQUICPaddingSeed                *prng.Seed
 	ObfuscatedQUICNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
+	QUICDialEarly                            bool
+	QUICUseObfuscatedPSK                     bool
 	QUICDisablePathMTUDiscovery              bool
 
 	ConjureCachedRegistrationTTL        time.Duration
@@ -165,6 +168,18 @@ type DialParameters struct {
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
 
+	quicTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
+	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
+
+	inproxyDialInitialized         bool                         `json:"-"`
+	inproxyBrokerClient            *inproxy.BrokerClient        `json:"-"`
+	inproxyBrokerDialParameters    *InproxyBrokerDialParameters `json:"-"`
+	inproxyPackedSignedServerEntry []byte                       `json:"-"`
+	inproxyNATStateManager         *InproxyNATStateManager      `json:"-"`
+	InproxySTUNDialParameters      *InproxySTUNDialParameters
+	InproxyWebRTCDialParameters    *InproxyWebRTCDialParameters
+	inproxyConn                    atomic.Value `json:"-"`
+
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
 }
@@ -189,13 +204,22 @@ type DialParameters struct {
 func MakeDialParameters(
 	config *Config,
 	steeringIPCache *lrucache.Cache,
+	quicTLSClientSessionCache tls.ClientSessionCache,
+	tlsClientSessionCache utls.ClientSessionCache,
 	upstreamProxyErrorCallback func(error),
 	canReplay func(serverEntry *protocol.ServerEntry, replayProtocol string) bool,
 	selectProtocol func(serverEntry *protocol.ServerEntry) (string, bool),
 	serverEntry *protocol.ServerEntry,
+	inproxyClientBrokerClientManager *InproxyBrokerClientManager,
+	inproxyClientNATStateManager *InproxyNATStateManager,
 	isTactics bool,
 	candidateNumber int,
 	establishedTunnelsCount int) (*DialParameters, error) {
+
+	// Note: a subset of this code is duplicated in
+	// MakeInproxyBrokerDialParameters and makeFrontedHTTPClient, and all
+	// functions need to be updated when, e.g., new TLS obfuscation
+	// parameters are added.
 
 	networkID := config.GetNetworkID()
 
@@ -224,6 +248,8 @@ func MakeDialParameters(
 	replayHTTPTransformerParameters := p.Bool(parameters.ReplayHTTPTransformerParameters)
 	replayOSSHSeedTransformerParameters := p.Bool(parameters.ReplayOSSHSeedTransformerParameters)
 	replayOSSHPrefix := p.Bool(parameters.ReplayOSSHPrefix)
+	replayInproxySTUN := p.Bool(parameters.ReplayInproxySTUN)
+	replayInproxyWebRTC := p.Bool(parameters.ReplayInproxyWebRTC)
 
 	// Check for existing dial parameters for this server/network ID.
 
@@ -280,7 +306,8 @@ func MakeDialParameters(
 			// ReplayIgnoreChangedConfigState is set. One case is the call
 			// below to fragmentor.NewUpstreamConfig, made when initializing
 			// dialParams.dialConfig.
-			(!replayIgnoreChangedConfigState && !bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash)) ||
+			(!replayIgnoreChangedConfigState &&
+				!bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash)) ||
 
 			// Replay is disabled when the server entry has changed.
 			!bytes.Equal(dialParams.LastUsedServerEntryHash, serverEntryHash) ||
@@ -289,6 +316,15 @@ func MakeDialParameters(
 				!common.Contains(protocol.SupportedTLSProfiles, dialParams.TLSProfile)) ||
 			(dialParams.QUICVersion != "" &&
 				!common.Contains(protocol.SupportedQUICVersions, dialParams.QUICVersion)) ||
+
+			// Prioritize adjusting use of 3rd party infrastructure -- public
+			// STUN servers -- over replay, even with IgnoreChangedConfigState set.
+			(dialParams.ConjureSTUNServerAddress != "" &&
+				!common.Contains(
+					p.Strings(parameters.ConjureSTUNServerAddresses),
+					dialParams.ConjureSTUNServerAddress)) ||
+			(dialParams.InproxySTUNDialParameters != nil &&
+				dialParams.InproxySTUNDialParameters.IsValidClientReplay(p)) ||
 
 			// Legacy clients use ConjureAPIRegistrarURL with
 			// gotapdance.tapdance.APIRegistrar and new clients use
@@ -436,6 +472,15 @@ func MakeDialParameters(
 		dialParams.TunnelProtocol = selectedProtocol
 	}
 
+	if isTactics && !protocol.TunnelProtocolSupportsTactics(dialParams.TunnelProtocol) {
+
+		NoticeSkipServerEntry(
+			"protocol does not support tactics request: %s",
+			dialParams.TunnelProtocol)
+
+		return nil, nil
+	}
+
 	// Skip this candidate when the clients tactics restrict usage of the
 	// provider ID. See the corresponding server-side enforcement comments in
 	// server.TacticsListener.accept.
@@ -460,6 +505,9 @@ func MakeDialParameters(
 	// Skip this candidate when the clients tactics restrict usage of the
 	// fronting provider ID. See the corresponding server-side enforcement
 	// comments in server.MeekServer.getSessionOrEndpoint.
+	//
+	// RestrictFrontingProviderIDs applies only to fronted meek tunnels, where
+	// all traffic is relayed through a fronting provider.
 	if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
 		common.Contains(
 			p.Strings(parameters.RestrictFrontingProviderIDs),
@@ -515,7 +563,7 @@ func MakeDialParameters(
 
 	if (!isReplay || !replayBPF) &&
 		ClientBPFEnabled() &&
-		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+		protocol.TunnelProtocolMayUseClientBPF(dialParams.TunnelProtocol) {
 
 		if p.WeightedCoinFlip(parameters.BPFClientTCPProbability) {
 			dialParams.BPFProgramName = ""
@@ -603,7 +651,10 @@ func MakeDialParameters(
 			dialParams.ConjureAPIRegistrarBidirectionalURL = apiURL
 
 			frontingSpecs := p.FrontingSpecs(parameters.ConjureAPIRegistrarFrontingSpecs)
+
+			var frontingTransport string
 			dialParams.FrontingProviderID,
+				frontingTransport,
 				dialParams.MeekFrontingDialAddress,
 				dialParams.MeekSNIServerName,
 				dialParams.MeekVerifyServerName,
@@ -612,6 +663,10 @@ func MakeDialParameters(
 				err = frontingSpecs.SelectParameters()
 			if err != nil {
 				return nil, errors.Trace(err)
+			}
+
+			if frontingTransport != protocol.FRONTING_TRANSPORT_HTTPS {
+				return nil, errors.TraceNew("unsupported fronting transport")
 			}
 
 			if config.DisableSystemRootCAs {
@@ -676,6 +731,20 @@ func MakeDialParameters(
 	usingTLS := protocol.TunnelProtocolUsesMeekHTTPS(dialParams.TunnelProtocol) ||
 		protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration
+
+	if tlsClientSessionCache != nil && usingTLS {
+		sessionKey, err := serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		dialParams.tlsClientSessionCache = common.WrapUtlsClientSessionCache(tlsClientSessionCache, sessionKey)
+
+		if !isReplay {
+			// Remove the cache entry to make a fresh dial when !isReplay.
+			dialParams.tlsClientSessionCache.RemoveCacheEntry()
+		}
+	}
 
 	if (!isReplay || !replayTLSProfile) && usingTLS {
 
@@ -779,7 +848,8 @@ func MakeDialParameters(
 		protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
 		isFronted := protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol)
-		dialParams.QUICVersion = selectQUICVersion(isFronted, serverEntry, p)
+		isInproxy := protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol)
+		dialParams.QUICVersion = selectQUICVersion(isFronted, isInproxy, serverEntry, p)
 
 		// Due to potential tactics configurations, it may be that no QUIC
 		// version is selected. Abort immediately, with no error, as in the
@@ -797,9 +867,34 @@ func MakeDialParameters(
 			}
 		}
 
+		// Coin-flip for obfuscated PSK use for non-fronted QUIC.
+		if !isFronted {
+			dialParams.QUICUseObfuscatedPSK = p.WeightedCoinFlip(parameters.QUICObfuscatedPSKProbability)
+		}
+
+		dialParams.QUICDialEarly = p.WeightedCoinFlip(parameters.QUICDialEarlyProbability)
+
 		dialParams.QUICDisablePathMTUDiscovery =
 			protocol.QUICVersionUsesPathMTUDiscovery(dialParams.QUICVersion) &&
 				p.WeightedCoinFlip(parameters.QUICDisableClientPathMTUDiscoveryProbability)
+	}
+
+	if quicTLSClientSessionCache != nil && protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
+
+		sessionKey, err := serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		dialParams.quicTLSClientSessionCache = common.WrapClientSessionCache(
+			quicTLSClientSessionCache,
+			sessionKey)
+
+		if !isReplay {
+			// Remove the cache entry to make a fresh dial when !isReplay.
+			dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
+		}
+
 	}
 
 	if (!isReplay || !replayObfuscatedQUIC) &&
@@ -859,9 +954,19 @@ func MakeDialParameters(
 	// dialParams.ResolveParameters must be nil when the dial address is an IP
 	// address to ensure that no DNS dial parameters are reported in metrics
 	// or diagnostics when when no domain is resolved.
+	//
+	// No resolve parameters are initialized for in-proxy dials; broker and
+	// STUN domain resolves use distinct ResolveParameters; and the proxy,
+	// not the client, resolves any 2nd hop dial address domain.
+	//
+	// Limitation: DNSResolverPreresolvedIPAddressCIDRs could be applied by
+	// the in-proxy client, and relayed to the proxy, enabling a preresolved
+	// dial by the proxy, but this is currently not compatible with broker
+	// dial destination verification.
 
 	useResolver := (protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration) &&
+		!protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
 		net.ParseIP(dialParams.MeekFrontingDialAddress) == nil
 
 	if (!isReplay || !replayResolveParameters) && useResolver {
@@ -916,7 +1021,12 @@ func MakeDialParameters(
 
 	// OSSH prefix and seed transform are applied only to the OSSH tunnel protocol,
 	// and not to any other protocol layered over OSSH.
-	if dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+	if protocol.TunnelProtocolIsObfuscatedSSH(dialParams.TunnelProtocol) {
+
+		// Limitation: in the case of in-proxy OSSH, the client will get and
+		// apply tactics based on its geolocation, but any OSSH prefix is
+		// visible on the wire only after the 2nd hop. Configuring an OSSH
+		// prefix based on the in-proxy proxy geolocation would be preferable.
 
 		if serverEntry.DisableOSSHTransforms {
 
@@ -988,7 +1098,8 @@ func MakeDialParameters(
 
 			isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
 
-			params, err := makeHTTPTransformerParameters(config.GetParameters().Get(), serverEntry.FrontingProviderID, isFronted)
+			params, err := makeHTTPTransformerParameters(
+				config.GetParameters().Get(), serverEntry.FrontingProviderID, isFronted)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -1001,6 +1112,112 @@ func MakeDialParameters(
 		}
 	}
 
+	// In-proxy dial configuration
+
+	// For untunneled tactics requests, meek servers running in-proxy tunnel
+	// protocols may be used, but the actual in-proxy 1st hop dial is skipped
+	// and the meek server is used directly.
+	if !isTactics && protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
+
+		// Check for incompatible networks, such as running under a
+		// non-Psiphon VPN. While this check could be made before calling
+		// MakeDialParameters, such as in selectProtocol during iteration,
+		// checking here uses the network ID obtained in MakeDialParameters,
+		// and the logged warning is useful for diagnostics.
+		if !IsInproxyCompatibleNetworkType(dialParams.NetworkID) {
+			return nil, errors.TraceNew("inproxy protocols skipped on incompatible network")
+		}
+
+		// inproxyDialInitialized indicates that the inproxy dial was wired
+		// up, and this isn't an untunneled tactics request (isTactics).
+		dialParams.inproxyDialInitialized = true
+
+		// Store a reference to the current, shared in-proxy broker client.
+		//
+		// The broker client has its own, independent replay scheme and its
+		// own dial parameters which are reported for metrics.
+		dialParams.inproxyBrokerClient,
+			dialParams.inproxyBrokerDialParameters,
+			err = inproxyClientBrokerClientManager.GetBrokerClient(networkID)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// Load the signed server entry to be presented to the broker as proof
+		// that the in-proxy destination is a Psiphon server. The original
+		// JSON server entry fields are loaded from the local data store
+		// (or from config.TargetServerEntry), since the signature may
+		// include fields, added after this client version, which are in the
+		// JSON but not in the protocol.ServerEntry.
+
+		var serverEntryFields protocol.ServerEntryFields
+		if serverEntry.LocalSource == protocol.SERVER_ENTRY_SOURCE_TARGET {
+
+			serverEntryFields, err = protocol.DecodeServerEntryFields(
+				config.TargetServerEntry, "", protocol.SERVER_ENTRY_SOURCE_TARGET)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			if serverEntryFields.GetIPAddress() != serverEntry.IpAddress {
+				return nil, errors.TraceNew("unexpected TargetServerEntry")
+			}
+			err = serverEntryFields.ToSignedFields()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+		} else {
+
+			serverEntryFields, err = GetSignedServerEntryFields(serverEntry.IpAddress)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+
+		// Verify the server entry signature locally to avoid a doomed broker
+		// round trip.
+		//
+		// Limitation: the broker still checks signatures, but it won't get to
+		// log an error in this case.
+		err = serverEntryFields.VerifySignature(config.ServerEntrySignaturePublicKey)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		packedServerEntryFields, err := protocol.EncodePackedServerEntryFields(serverEntryFields)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		dialParams.inproxyPackedSignedServerEntry, err = protocol.CBOREncoding.Marshal(packedServerEntryFields)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		dialParams.inproxyNATStateManager = inproxyClientNATStateManager
+
+		if !isReplay || !replayInproxySTUN {
+
+			isProxy := false
+			dialParams.InproxySTUNDialParameters, err = MakeInproxySTUNDialParameters(config, p, isProxy)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		} else if dialParams.InproxySTUNDialParameters != nil {
+			dialParams.InproxySTUNDialParameters.Prepare()
+		}
+
+		if !isReplay || !replayInproxyWebRTC {
+
+			dialParams.InproxyWebRTCDialParameters, err = MakeInproxyWebRTCDialParameters(p)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+
+		// dialParams.inproxyConn is left uninitialized until after the dial,
+		// and until then Load will return nil.
+	}
+
 	// Set dial address fields. This portion of configuration is
 	// deterministic, given the parameters established or replayed so far.
 
@@ -1011,7 +1228,7 @@ func MakeDialParameters(
 
 	dialParams.DialPortNumber = strconv.Itoa(dialPortNumber)
 
-	switch dialParams.TunnelProtocol {
+	switch protocol.TunnelProtocolMinusInproxy(dialParams.TunnelProtocol) {
 
 	case protocol.TUNNEL_PROTOCOL_SSH,
 		protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
@@ -1105,7 +1322,7 @@ func MakeDialParameters(
 		}
 	}
 
-	// Initialize/replay User-Agent header for HTTP upstream proxy and meek protocols.
+	// Initialize upstream proxy.
 
 	if config.UseUpstreamProxy() {
 		// Note: UpstreamProxyURL will be validated in the dial
@@ -1114,6 +1331,8 @@ func MakeDialParameters(
 			dialParams.UpstreamProxyType = proxyURL.Scheme
 		}
 	}
+
+	// Initialize/replay User-Agent header for HTTP upstream proxy and meek protocols.
 
 	dialCustomHeaders := makeDialCustomHeaders(config, p)
 
@@ -1126,6 +1345,9 @@ func MakeDialParameters(
 		}
 
 		if dialParams.SelectedUserAgent {
+
+			// Limitation: if config.CustomHeaders adds a User-Agent between
+			// replays, it may be ignored due to replaying a selected User-Agent.
 			dialCustomHeaders.Set("User-Agent", dialParams.UserAgent)
 		}
 
@@ -1305,6 +1527,9 @@ func MakeDialParameters(
 			UseQUIC:                       protocol.TunnelProtocolUsesFrontedMeekQUIC(dialParams.TunnelProtocol),
 			QUICVersion:                   dialParams.QUICVersion,
 			QUICClientHelloSeed:           dialParams.QUICClientHelloSeed,
+			QUICDialEarly:                 dialParams.QUICDialEarly,
+			QUICTLSClientSessionCache:     dialParams.quicTLSClientSessionCache,
+			TLSClientSessionCache:         dialParams.tlsClientSessionCache,
 			QUICDisablePathMTUDiscovery:   dialParams.QUICDisablePathMTUDiscovery,
 			UseHTTPS:                      usingTLS,
 			TLSProfile:                    dialParams.TLSProfile,
@@ -1347,6 +1572,18 @@ func MakeDialParameters(
 		}
 	}
 
+	if !isTactics &&
+		protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
+		protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+
+		// Set DialConfig.CustomDialer to redirect all underlying TCP dials to use
+		// in-proxy as a 1st hop. Since QUIC doesn't use DialConfig or have its
+		// own CustomDialer, QUIC is handled with an explicit special case in
+		// dialTunnel.
+
+		dialParams.dialConfig.CustomDialer = makeInproxyTCPDialer(config, dialParams)
+	}
+
 	return dialParams, nil
 }
 
@@ -1354,7 +1591,17 @@ func (dialParams *DialParameters) GetDialConfig() *DialConfig {
 	return dialParams.dialConfig
 }
 
+func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
+	return dialParams.meekConfig
+}
+
 func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelConfig {
+
+	p := config.GetParameters().Get()
+	useObfuscatedPSK := p.WeightedCoinFlip(parameters.TLSTunnelObfuscatedPSKProbability)
+
+	// TLSTunnelConfig isn't pre-created in MakeDialParameters to avoid holding a long
+	// term reference to TLSTunnelConfig.Parameters.
 
 	return &TLSTunnelConfig{
 		CustomTLSConfig: &CustomTLSConfig{
@@ -1368,9 +1615,9 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 			NoDefaultTLSSessionID:    &dialParams.NoDefaultTLSSessionID,
 			RandomizedTLSProfileSeed: dialParams.RandomizedTLSProfileSeed,
 			FragmentClientHello:      dialParams.TLSFragmentClientHello,
+			ClientSessionCache:       dialParams.tlsClientSessionCache,
 		},
-		// Obfuscated session tickets are not used because TLS-OSSH uses TLS 1.3.
-		UseObfuscatedSessionTickets: false,
+		UseObfuscatedSessionTickets: useObfuscatedPSK,
 		// Meek obfuscated key used to allow clients with legacy unfronted
 		// meek-https server entries, that have the passthrough capability, to
 		// connect with TLS-OSSH to the servers corresponding to those server
@@ -1381,30 +1628,48 @@ func (dialParams *DialParameters) GetTLSOSSHConfig(config *Config) *TLSTunnelCon
 	}
 }
 
-func (dialParams *DialParameters) GetMeekConfig() *MeekConfig {
-	return dialParams.meekConfig
+func (dialParams *DialParameters) GetNetworkType() string {
+	return GetNetworkType(dialParams.NetworkID)
 }
 
-// GetNetworkType returns a network type name, suitable for metrics, which is
-// derived from the network ID.
-func (dialParams *DialParameters) GetNetworkType() string {
+func (dialParams *DialParameters) GetTLSVersionForMetrics() string {
+	return getTLSVersionForMetrics(dialParams.TLSVersion, dialParams.NoDefaultTLSSessionID)
+}
 
-	// Unlike the logic in loggingNetworkIDGetter.GetNetworkID, we don't take the
-	// arbitrary text before the first "-" since some platforms without network
-	// detection support stub in random values to enable tactics. Instead we
-	// check for and use the common network type prefixes currently used in
-	// NetworkIDGetter implementations.
+func getTLSVersionForMetrics(tlsVersion string, noDefaultTLSSessionID bool) string {
+	version := tlsVersion
+	if noDefaultTLSSessionID {
+		version += "-no_def_id"
+	}
+	return version
+}
 
-	if strings.HasPrefix(dialParams.NetworkID, "VPN") {
-		return "VPN"
+func (dialParams *DialParameters) GetInproxyMetrics() common.LogFields {
+	inproxyMetrics := common.LogFields{}
+
+	if !dialParams.inproxyDialInitialized {
+		// This was an untunneled tactics request using an in-proxy meek
+		// server, no there was no in-proxy dial or dial parameters.
+		return inproxyMetrics
 	}
-	if strings.HasPrefix(dialParams.NetworkID, "WIFI") {
-		return "WIFI"
+
+	inproxyMetrics.Add(dialParams.inproxyBrokerDialParameters.GetMetrics())
+	inproxyMetrics.Add(dialParams.InproxySTUNDialParameters.GetMetrics())
+	inproxyMetrics.Add(dialParams.InproxyWebRTCDialParameters.GetMetrics())
+
+	return inproxyMetrics
+}
+
+func (dialParams *DialParameters) GetInproxyBrokerMetrics() common.LogFields {
+	inproxyMetrics := common.LogFields{}
+
+	if !dialParams.inproxyDialInitialized {
+		return inproxyMetrics
 	}
-	if strings.HasPrefix(dialParams.NetworkID, "MOBILE") {
-		return "MOBILE"
-	}
-	return "UNKNOWN"
+
+	inproxyMetrics.Add(dialParams.inproxyBrokerDialParameters.GetBrokerMetrics())
+
+	return inproxyMetrics
 }
 
 func (dialParams *DialParameters) Succeeded() {
@@ -1455,18 +1720,18 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	if dialParams.steeringIPCacheKey != "" {
 		dialParams.steeringIPCache.Delete(dialParams.steeringIPCacheKey)
 	}
-}
 
-func (dialParams *DialParameters) GetTLSVersionForMetrics() string {
-	return getTLSVersionForMetrics(dialParams.TLSVersion, dialParams.NoDefaultTLSSessionID)
-}
+	// Clear the TLS client session cache to avoid (potentially) reusing failed sessions for
+	// Meek, TLS-OSSH and QUIC connections.
 
-func getTLSVersionForMetrics(tlsVersion string, noDefaultTLSSessionID bool) string {
-	version := tlsVersion
-	if noDefaultTLSSessionID {
-		version += "-no_def_id"
+	if dialParams.quicTLSClientSessionCache != nil {
+		dialParams.quicTLSClientSessionCache.RemoveCacheEntry()
 	}
-	return version
+
+	if dialParams.tlsClientSessionCache != nil {
+		dialParams.tlsClientSessionCache.RemoveCacheEntry()
+	}
+
 }
 
 // ExchangedDialParameters represents the subset of DialParameters that is
@@ -1644,6 +1909,7 @@ func selectFrontingParameters(
 
 func selectQUICVersion(
 	isFronted bool,
+	isInproxy bool,
 	serverEntry *protocol.ServerEntry,
 	p parameters.ParametersAccessor) string {
 
@@ -1670,8 +1936,11 @@ func selectQUICVersion(
 	quicVersions := make([]string, 0)
 
 	// Don't use gQUIC versions when the server entry specifies QUICv1-only.
+	//
+	// SupportedQUICVersions is specific to QUIC-OSSH and does not apply to
+	// in-proxy variants; all in-proxy QUIC is QUICv1-only.
 	supportedQUICVersions := protocol.SupportedQUICVersions
-	if serverEntry.SupportsOnlyQUICv1() {
+	if isInproxy || serverEntry.SupportsOnlyQUICv1() {
 		supportedQUICVersions = protocol.SupportedQUICv1Versions
 	}
 

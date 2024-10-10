@@ -3,7 +3,6 @@
 // license that can be found in the LICENSE file.
 
 //go:build android
-// +build android
 
 /*
 Android Apps are built with -buildmode=c-shared. They are loaded by a
@@ -366,7 +365,7 @@ func runInputQueue(vm, jniEnv, ctx uintptr) error {
 
 	var q *C.AInputQueue
 	for {
-		if C.ALooper_pollAll(-1, nil, nil, nil) == C.ALOOPER_POLL_WAKE {
+		if C.ALooper_pollOnce(-1, nil, nil, nil) == C.ALOOPER_POLL_WAKE {
 			select {
 			default:
 			case p := <-pending:

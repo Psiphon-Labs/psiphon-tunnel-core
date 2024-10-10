@@ -95,7 +95,11 @@ func runMemoryTest(t *testing.T, testMode int) {
 	// Most of these fields _must_ be filled in before calling LoadConfig,
 	// so that they are correctly set into client parameters.
 	var modifyConfig map[string]interface{}
-	json.Unmarshal(configJSON, &modifyConfig)
+	err = json.Unmarshal(configJSON, &modifyConfig)
+	if err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
 	modifyConfig["ClientVersion"] = "999999999"
 	modifyConfig["TunnelPoolSize"] = 1
 	modifyConfig["DataRootDirectory"] = testDataDirName

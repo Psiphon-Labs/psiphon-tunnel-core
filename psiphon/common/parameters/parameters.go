@@ -70,303 +70,392 @@ import (
 )
 
 const (
-	NetworkLatencyMultiplier                         = "NetworkLatencyMultiplier"
-	NetworkLatencyMultiplierMin                      = "NetworkLatencyMultiplierMin"
-	NetworkLatencyMultiplierMax                      = "NetworkLatencyMultiplierMax"
-	NetworkLatencyMultiplierLambda                   = "NetworkLatencyMultiplierLambda"
-	TacticsWaitPeriod                                = "TacticsWaitPeriod"
-	TacticsRetryPeriod                               = "TacticsRetryPeriod"
-	TacticsRetryPeriodJitter                         = "TacticsRetryPeriodJitter"
-	TacticsTimeout                                   = "TacticsTimeout"
-	ConnectionWorkerPoolSize                         = "ConnectionWorkerPoolSize"
-	TunnelPoolSize                                   = "TunnelPoolSize"
-	TunnelConnectTimeout                             = "TunnelConnectTimeout"
-	EstablishTunnelTimeout                           = "EstablishTunnelTimeout"
-	EstablishTunnelWorkTime                          = "EstablishTunnelWorkTime"
-	EstablishTunnelPausePeriod                       = "EstablishTunnelPausePeriod"
-	EstablishTunnelPausePeriodJitter                 = "EstablishTunnelPausePeriodJitter"
-	EstablishTunnelServerAffinityGracePeriod         = "EstablishTunnelServerAffinityGracePeriod"
-	StaggerConnectionWorkersPeriod                   = "StaggerConnectionWorkersPeriod"
-	StaggerConnectionWorkersJitter                   = "StaggerConnectionWorkersJitter"
-	LimitIntensiveConnectionWorkers                  = "LimitIntensiveConnectionWorkers"
-	UpstreamProxyErrorMinWaitDuration                = "UpstreamProxyErrorMinWaitDuration"
-	UpstreamProxyErrorMaxWaitDuration                = "UpstreamProxyErrorMaxWaitDuration"
-	IgnoreHandshakeStatsRegexps                      = "IgnoreHandshakeStatsRegexps"
-	PrioritizeTunnelProtocolsProbability             = "PrioritizeTunnelProtocolsProbability"
-	PrioritizeTunnelProtocols                        = "PrioritizeTunnelProtocols"
-	PrioritizeTunnelProtocolsCandidateCount          = "PrioritizeTunnelProtocolsCandidateCount"
-	InitialLimitTunnelProtocolsProbability           = "InitialLimitTunnelProtocolsProbability"
-	InitialLimitTunnelProtocols                      = "InitialLimitTunnelProtocols"
-	InitialLimitTunnelProtocolsCandidateCount        = "InitialLimitTunnelProtocolsCandidateCount"
-	LimitTunnelProtocolsProbability                  = "LimitTunnelProtocolsProbability"
-	LimitTunnelProtocols                             = "LimitTunnelProtocols"
-	LimitTunnelDialPortNumbersProbability            = "LimitTunnelDialPortNumbersProbability"
-	LimitTunnelDialPortNumbers                       = "LimitTunnelDialPortNumbers"
-	LimitTLSProfilesProbability                      = "LimitTLSProfilesProbability"
-	LimitTLSProfiles                                 = "LimitTLSProfiles"
-	UseOnlyCustomTLSProfiles                         = "UseOnlyCustomTLSProfiles"
-	CustomTLSProfiles                                = "CustomTLSProfiles"
-	SelectRandomizedTLSProfileProbability            = "SelectRandomizedTLSProfileProbability"
-	NoDefaultTLSSessionIDProbability                 = "NoDefaultTLSSessionIDProbability"
-	DisableFrontingProviderTLSProfiles               = "DisableFrontingProviderTLSProfiles"
-	LimitQUICVersionsProbability                     = "LimitQUICVersionsProbability"
-	LimitQUICVersions                                = "LimitQUICVersions"
-	DisableFrontingProviderQUICVersions              = "DisableFrontingProviderQUICVersions"
-	QUICDisableClientPathMTUDiscoveryProbability     = "QUICDisableClientPathMTUDiscoveryProbability"
-	FragmentorProbability                            = "FragmentorProbability"
-	FragmentorLimitProtocols                         = "FragmentorLimitProtocols"
-	FragmentorMinTotalBytes                          = "FragmentorMinTotalBytes"
-	FragmentorMaxTotalBytes                          = "FragmentorMaxTotalBytes"
-	FragmentorMinWriteBytes                          = "FragmentorMinWriteBytes"
-	FragmentorMaxWriteBytes                          = "FragmentorMaxWriteBytes"
-	FragmentorMinDelay                               = "FragmentorMinDelay"
-	FragmentorMaxDelay                               = "FragmentorMaxDelay"
-	FragmentorDownstreamProbability                  = "FragmentorDownstreamProbability"
-	FragmentorDownstreamLimitProtocols               = "FragmentorDownstreamLimitProtocols"
-	FragmentorDownstreamMinTotalBytes                = "FragmentorDownstreamMinTotalBytes"
-	FragmentorDownstreamMaxTotalBytes                = "FragmentorDownstreamMaxTotalBytes"
-	FragmentorDownstreamMinWriteBytes                = "FragmentorDownstreamMinWriteBytes"
-	FragmentorDownstreamMaxWriteBytes                = "FragmentorDownstreamMaxWriteBytes"
-	FragmentorDownstreamMinDelay                     = "FragmentorDownstreamMinDelay"
-	FragmentorDownstreamMaxDelay                     = "FragmentorDownstreamMaxDelay"
-	ObfuscatedSSHMinPadding                          = "ObfuscatedSSHMinPadding"
-	ObfuscatedSSHMaxPadding                          = "ObfuscatedSSHMaxPadding"
-	TunnelOperateShutdownTimeout                     = "TunnelOperateShutdownTimeout"
-	TunnelPortForwardDialTimeout                     = "TunnelPortForwardDialTimeout"
-	PacketTunnelReadTimeout                          = "PacketTunnelReadTimeout"
-	TunnelRateLimits                                 = "TunnelRateLimits"
-	AdditionalCustomHeaders                          = "AdditionalCustomHeaders"
-	SpeedTestPaddingMinBytes                         = "SpeedTestPaddingMinBytes"
-	SpeedTestPaddingMaxBytes                         = "SpeedTestPaddingMaxBytes"
-	SpeedTestMaxSampleCount                          = "SpeedTestMaxSampleCount"
-	SSHKeepAliveSpeedTestSampleProbability           = "SSHKeepAliveSpeedTestSampleProbability"
-	SSHKeepAlivePaddingMinBytes                      = "SSHKeepAlivePaddingMinBytes"
-	SSHKeepAlivePaddingMaxBytes                      = "SSHKeepAlivePaddingMaxBytes"
-	SSHKeepAlivePeriodMin                            = "SSHKeepAlivePeriodMin"
-	SSHKeepAlivePeriodMax                            = "SSHKeepAlivePeriodMax"
-	SSHKeepAlivePeriodicTimeout                      = "SSHKeepAlivePeriodicTimeout"
-	SSHKeepAlivePeriodicInactivePeriod               = "SSHKeepAlivePeriodicInactivePeriod"
-	SSHKeepAliveProbeTimeout                         = "SSHKeepAliveProbeTimeout"
-	SSHKeepAliveProbeInactivePeriod                  = "SSHKeepAliveProbeInactivePeriod"
-	SSHKeepAliveNetworkConnectivityPollingPeriod     = "SSHKeepAliveNetworkConnectivityPollingPeriod"
-	SSHKeepAliveResetOnFailureProbability            = "SSHKeepAliveResetOnFailureProbability"
-	HTTPProxyOriginServerTimeout                     = "HTTPProxyOriginServerTimeout"
-	HTTPProxyMaxIdleConnectionsPerHost               = "HTTPProxyMaxIdleConnectionsPerHost"
-	FetchRemoteServerListTimeout                     = "FetchRemoteServerListTimeout"
-	FetchRemoteServerListRetryPeriod                 = "FetchRemoteServerListRetryPeriod"
-	FetchRemoteServerListStalePeriod                 = "FetchRemoteServerListStalePeriod"
-	RemoteServerListSignaturePublicKey               = "RemoteServerListSignaturePublicKey"
-	RemoteServerListURLs                             = "RemoteServerListURLs"
-	ObfuscatedServerListRootURLs                     = "ObfuscatedServerListRootURLs"
-	PsiphonAPIRequestTimeout                         = "PsiphonAPIRequestTimeout"
-	PsiphonAPIStatusRequestPeriodMin                 = "PsiphonAPIStatusRequestPeriodMin"
-	PsiphonAPIStatusRequestPeriodMax                 = "PsiphonAPIStatusRequestPeriodMax"
-	PsiphonAPIStatusRequestShortPeriodMin            = "PsiphonAPIStatusRequestShortPeriodMin"
-	PsiphonAPIStatusRequestShortPeriodMax            = "PsiphonAPIStatusRequestShortPeriodMax"
-	PsiphonAPIStatusRequestPaddingMinBytes           = "PsiphonAPIStatusRequestPaddingMinBytes"
-	PsiphonAPIStatusRequestPaddingMaxBytes           = "PsiphonAPIStatusRequestPaddingMaxBytes"
-	PsiphonAPIPersistentStatsMaxCount                = "PsiphonAPIPersistentStatsMaxCount"
-	PsiphonAPIConnectedRequestPeriod                 = "PsiphonAPIConnectedRequestPeriod"
-	PsiphonAPIConnectedRequestRetryPeriod            = "PsiphonAPIConnectedRequestRetryPeriod"
-	FetchSplitTunnelRoutesTimeout                    = "FetchSplitTunnelRoutesTimeout"
-	SplitTunnelRoutesURLFormat                       = "SplitTunnelRoutesURLFormat"
-	SplitTunnelRoutesSignaturePublicKey              = "SplitTunnelRoutesSignaturePublicKey"
-	SplitTunnelDNSServer                             = "SplitTunnelDNSServer"
-	SplitTunnelClassificationTTL                     = "SplitTunnelClassificationTTL"
-	SplitTunnelClassificationMaxEntries              = "SplitTunnelClassificationMaxEntries"
-	FetchUpgradeTimeout                              = "FetchUpgradeTimeout"
-	FetchUpgradeRetryPeriod                          = "FetchUpgradeRetryPeriod"
-	FetchUpgradeStalePeriod                          = "FetchUpgradeStalePeriod"
-	UpgradeDownloadURLs                              = "UpgradeDownloadURLs"
-	UpgradeDownloadClientVersionHeader               = "UpgradeDownloadClientVersionHeader"
-	TotalBytesTransferredNoticePeriod                = "TotalBytesTransferredNoticePeriod"
-	TotalBytesTransferredEmitMemoryMetrics           = "TotalBytesTransferredEmitMemoryMetrics"
-	MeekDialDomainsOnly                              = "MeekDialDomainsOnly"
-	MeekLimitBufferSizes                             = "MeekLimitBufferSizes"
-	MeekCookieMaxPadding                             = "MeekCookieMaxPadding"
-	MeekFullReceiveBufferLength                      = "MeekFullReceiveBufferLength"
-	MeekReadPayloadChunkLength                       = "MeekReadPayloadChunkLength"
-	MeekLimitedFullReceiveBufferLength               = "MeekLimitedFullReceiveBufferLength"
-	MeekLimitedReadPayloadChunkLength                = "MeekLimitedReadPayloadChunkLength"
-	MeekMinPollInterval                              = "MeekMinPollInterval"
-	MeekMinPollIntervalJitter                        = "MeekMinPollIntervalJitter"
-	MeekMaxPollInterval                              = "MeekMaxPollInterval"
-	MeekMaxPollIntervalJitter                        = "MeekMaxPollIntervalJitter"
-	MeekPollIntervalMultiplier                       = "MeekPollIntervalMultiplier"
-	MeekPollIntervalJitter                           = "MeekPollIntervalJitter"
-	MeekApplyPollIntervalMultiplierProbability       = "MeekApplyPollIntervalMultiplierProbability"
-	MeekRoundTripRetryDeadline                       = "MeekRoundTripRetryDeadline"
-	MeekRoundTripRetryMinDelay                       = "MeekRoundTripRetryMinDelay"
-	MeekRoundTripRetryMaxDelay                       = "MeekRoundTripRetryMaxDelay"
-	MeekRoundTripRetryMultiplier                     = "MeekRoundTripRetryMultiplier"
-	MeekRoundTripTimeout                             = "MeekRoundTripTimeout"
-	MeekTrafficShapingProbability                    = "MeekTrafficShapingProbability"
-	MeekTrafficShapingLimitProtocols                 = "MeekTrafficShapingLimitProtocols"
-	MeekMinTLSPadding                                = "MeekMinTLSPadding"
-	MeekMaxTLSPadding                                = "MeekMaxTLSPadding"
-	MeekMinLimitRequestPayloadLength                 = "MeekMinLimitRequestPayloadLength"
-	MeekMaxLimitRequestPayloadLength                 = "MeekMaxLimitRequestPayloadLength"
-	MeekRedialTLSProbability                         = "MeekRedialTLSProbability"
-	MeekAlternateCookieNameProbability               = "MeekAlternateCookieNameProbability"
-	MeekAlternateContentTypeProbability              = "MeekAlternateContentTypeProbability"
-	TransformHostNameProbability                     = "TransformHostNameProbability"
-	PickUserAgentProbability                         = "PickUserAgentProbability"
-	LivenessTestMinUpstreamBytes                     = "LivenessTestMinUpstreamBytes"
-	LivenessTestMaxUpstreamBytes                     = "LivenessTestMaxUpstreamBytes"
-	LivenessTestMinDownstreamBytes                   = "LivenessTestMinDownstreamBytes"
-	LivenessTestMaxDownstreamBytes                   = "LivenessTestMaxDownstreamBytes"
-	ReplayCandidateCount                             = "ReplayCandidateCount"
-	ReplayDialParametersTTL                          = "ReplayDialParametersTTL"
-	ReplayTargetUpstreamBytes                        = "ReplayTargetUpstreamBytes"
-	ReplayTargetDownstreamBytes                      = "ReplayTargetDownstreamBytes"
-	ReplayTargetTunnelDuration                       = "ReplayTargetTunnelDuration"
-	ReplayLaterRoundMoveToFrontProbability           = "ReplayLaterRoundMoveToFrontProbability"
-	ReplayRetainFailedProbability                    = "ReplayRetainFailedProbability"
-	ReplayIgnoreChangedConfigState                   = "ReplayIgnoreChangedConfigState"
-	ReplayBPF                                        = "ReplayBPF"
-	ReplaySSH                                        = "ReplaySSH"
-	ReplayObfuscatorPadding                          = "ReplayObfuscatorPadding"
-	ReplayFragmentor                                 = "ReplayFragmentor"
-	ReplayTLSProfile                                 = "ReplayTLSProfile"
-	ReplayFronting                                   = "ReplayFronting"
-	ReplayHostname                                   = "ReplayHostname"
-	ReplayQUICVersion                                = "ReplayQUICVersion"
-	ReplayObfuscatedQUIC                             = "ReplayObfuscatedQUIC"
-	ReplayObfuscatedQUICNonceTransformer             = "ReplayObfuscatedQUICNonceTransformer"
-	ReplayConjureRegistration                        = "ReplayConjureRegistration"
-	ReplayConjureTransport                           = "ReplayConjureTransport"
-	ReplayLivenessTest                               = "ReplayLivenessTest"
-	ReplayUserAgent                                  = "ReplayUserAgent"
-	ReplayAPIRequestPadding                          = "ReplayAPIRequestPadding"
-	ReplayHoldOffTunnel                              = "ReplayHoldOffTunnel"
-	ReplayResolveParameters                          = "ReplayResolveParameters"
-	ReplayHTTPTransformerParameters                  = "ReplayHTTPTransformerParameters"
-	ReplayOSSHSeedTransformerParameters              = "ReplayOSSHSeedTransformerParameters"
-	ReplayOSSHPrefix                                 = "ReplayOSSHPrefix"
-	ReplayTLSFragmentClientHello                     = "ReplayTLSFragmentClientHello"
-	APIRequestUpstreamPaddingMinBytes                = "APIRequestUpstreamPaddingMinBytes"
-	APIRequestUpstreamPaddingMaxBytes                = "APIRequestUpstreamPaddingMaxBytes"
-	APIRequestDownstreamPaddingMinBytes              = "APIRequestDownstreamPaddingMinBytes"
-	APIRequestDownstreamPaddingMaxBytes              = "APIRequestDownstreamPaddingMaxBytes"
-	PersistentStatsMaxStoreRecords                   = "PersistentStatsMaxStoreRecords"
-	PersistentStatsMaxSendBytes                      = "PersistentStatsMaxSendBytes"
-	RecordRemoteServerListPersistentStatsProbability = "RecordRemoteServerListPersistentStatsProbability"
-	RecordFailedTunnelPersistentStatsProbability     = "RecordFailedTunnelPersistentStatsProbability"
-	ServerEntryMinimumAgeForPruning                  = "ServerEntryMinimumAgeForPruning"
-	ApplicationParametersProbability                 = "ApplicationParametersProbability"
-	ApplicationParameters                            = "ApplicationParameters"
-	BPFServerTCPProgram                              = "BPFServerTCPProgram"
-	BPFServerTCPProbability                          = "BPFServerTCPProbability"
-	BPFClientTCPProgram                              = "BPFClientTCPProgram"
-	BPFClientTCPProbability                          = "BPFClientTCPProbability"
-	ServerPacketManipulationSpecs                    = "ServerPacketManipulationSpecs"
-	ServerProtocolPacketManipulations                = "ServerProtocolPacketManipulations"
-	ServerPacketManipulationProbability              = "ServerPacketManipulationProbability"
-	FeedbackUploadURLs                               = "FeedbackUploadURLs"
-	FeedbackEncryptionPublicKey                      = "FeedbackEncryptionPublicKey"
-	FeedbackTacticsWaitPeriod                        = "FeedbackTacticsWaitPeriod"
-	FeedbackUploadMaxAttempts                        = "FeedbackUploadMaxAttempts"
-	FeedbackUploadRetryMinDelaySeconds               = "FeedbackUploadRetryMinDelaySeconds"
-	FeedbackUploadRetryMaxDelaySeconds               = "FeedbackUploadRetryMaxDelaySeconds"
-	FeedbackUploadTimeoutSeconds                     = "FeedbackUploadTimeoutSeconds"
-	ServerReplayPacketManipulation                   = "ServerReplayPacketManipulation"
-	ServerReplayFragmentor                           = "ServerReplayFragmentor"
-	ServerReplayUnknownGeoIP                         = "ServerReplayUnknownGeoIP"
-	ServerReplayTTL                                  = "ServerReplayTTL"
-	ServerReplayTargetWaitDuration                   = "ServerReplayTargetWaitDuration"
-	ServerReplayTargetTunnelDuration                 = "ServerReplayTargetTunnelDuration"
-	ServerReplayTargetUpstreamBytes                  = "ServerReplayTargetUpstreamBytes"
-	ServerReplayTargetDownstreamBytes                = "ServerReplayTargetDownstreamBytes"
-	ServerReplayFailedCountThreshold                 = "ServerReplayFailedCountThreshold"
-	ServerBurstUpstreamDeadline                      = "ServerBurstUpstreamDeadline"
-	ServerBurstUpstreamTargetBytes                   = "ServerBurstUpstreamTargetBytes"
-	ServerBurstDownstreamDeadline                    = "ServerBurstDownstreamDeadline"
-	ServerBurstDownstreamTargetBytes                 = "ServerBurstDownstreamTargetBytes"
-	ClientBurstUpstreamDeadline                      = "ClientBurstUpstreamDeadline"
-	ClientBurstUpstreamTargetBytes                   = "ClientBurstUpstreamTargetBytes"
-	ClientBurstDownstreamDeadline                    = "ClientBurstDownstreamDeadline"
-	ClientBurstDownstreamTargetBytes                 = "ClientBurstDownstreamTargetBytes"
-	ConjureCachedRegistrationTTL                     = "ConjureCachedRegistrationTTL"
-	ConjureAPIRegistrarURL                           = "ConjureAPIRegistrarURL"
-	ConjureAPIRegistrarBidirectionalURL              = "ConjureAPIRegistrarBidirectionalURL"
-	ConjureAPIRegistrarFrontingSpecs                 = "ConjureAPIRegistrarFrontingSpecs"
-	ConjureAPIRegistrarMinDelay                      = "ConjureAPIRegistrarMinDelay"
-	ConjureAPIRegistrarMaxDelay                      = "ConjureAPIRegistrarMaxDelay"
-	ConjureDecoyRegistrarProbability                 = "ConjureDecoyRegistrarProbability"
-	ConjureDecoyRegistrarWidth                       = "ConjureDecoyRegistrarWidth"
-	ConjureDecoyRegistrarMinDelay                    = "ConjureDecoyRegistrarMinDelay"
-	ConjureDecoyRegistrarMaxDelay                    = "ConjureDecoyRegistrarMaxDelay"
-	ConjureEnableIPv6Dials                           = "ConjureEnableIPv6Dials"
-	ConjureEnablePortRandomization                   = "ConjureEnablePortRandomization"
-	ConjureEnableRegistrationOverrides               = "ConjureEnableRegistrationOverrides"
-	ConjureLimitTransportsProbability                = "ConjureLimitTransportsProbability"
-	ConjureLimitTransports                           = "ConjureLimitTransports"
-	ConjureSTUNServerAddresses                       = "ConjureSTUNServerAddresses"
-	ConjureDTLSEmptyInitialPacketProbability         = "ConjureDTLSEmptyInitialPacketProbability"
-	CustomHostNameRegexes                            = "CustomHostNameRegexes"
-	CustomHostNameProbability                        = "CustomHostNameProbability"
-	CustomHostNameLimitProtocols                     = "CustomHostNameLimitProtocols"
-	HoldOffTunnelMinDuration                         = "HoldOffTunnelMinDuration"
-	HoldOffTunnelMaxDuration                         = "HoldOffTunnelMaxDuration"
-	HoldOffTunnelProtocols                           = "HoldOffTunnelProtocols"
-	HoldOffTunnelFrontingProviderIDs                 = "HoldOffTunnelFrontingProviderIDs"
-	HoldOffTunnelProbability                         = "HoldOffTunnelProbability"
-	RestrictFrontingProviderIDs                      = "RestrictFrontingProviderIDs"
-	RestrictFrontingProviderIDsServerProbability     = "RestrictFrontingProviderIDsServerProbability"
-	RestrictFrontingProviderIDsClientProbability     = "RestrictFrontingProviderIDsClientProbability"
-	HoldOffDirectTunnelMinDuration                   = "HoldOffDirectTunnelMinDuration"
-	HoldOffDirectTunnelMaxDuration                   = "HoldOffDirectTunnelMaxDuration"
-	HoldOffDirectTunnelProviderRegions               = "HoldOffDirectTunnelProviderRegions"
-	HoldOffDirectTunnelProbability                   = "HoldOffDirectTunnelProbability"
-	RestrictDirectProviderRegions                    = "RestrictDirectProviderRegions"
-	RestrictDirectProviderIDsServerProbability       = "RestrictDirectProviderIDsServerProbability"
-	RestrictDirectProviderIDsClientProbability       = "RestrictDirectProviderIDsClientProbability"
-	UpstreamProxyAllowAllServerEntrySources          = "UpstreamProxyAllowAllServerEntrySources"
-	DestinationBytesMetricsASN                       = "DestinationBytesMetricsASN"
-	DNSResolverAttemptsPerServer                     = "DNSResolverAttemptsPerServer"
-	DNSResolverAttemptsPerPreferredServer            = "DNSResolverAttemptsPerPreferredServer"
-	DNSResolverRequestTimeout                        = "DNSResolverRequestTimeout"
-	DNSResolverAwaitTimeout                          = "DNSResolverAwaitTimeout"
-	DNSResolverPreresolvedIPAddressCIDRs             = "DNSResolverPreresolvedIPAddressCIDRs"
-	DNSResolverPreresolvedIPAddressProbability       = "DNSResolverPreresolvedIPAddressProbability"
-	DNSResolverAlternateServers                      = "DNSResolverAlternateServers"
-	DNSResolverPreferredAlternateServers             = "DNSResolverPreferredAlternateServers"
-	DNSResolverPreferAlternateServerProbability      = "DNSResolverPreferAlternateServerProbability"
-	DNSResolverProtocolTransformSpecs                = "DNSResolverProtocolTransformSpecs"
-	DNSResolverProtocolTransformScopedSpecNames      = "DNSResolverProtocolTransformScopedSpecNames"
-	DNSResolverProtocolTransformProbability          = "DNSResolverProtocolTransformProbability"
-	DNSResolverIncludeEDNS0Probability               = "DNSResolverIncludeEDNS0Probability"
-	DNSResolverCacheExtensionInitialTTL              = "DNSResolverCacheExtensionInitialTTL"
-	DNSResolverCacheExtensionVerifiedTTL             = "DNSResolverCacheExtensionVerifiedTTL"
-	AddFrontingProviderPsiphonFrontingHeader         = "AddFrontingProviderPsiphonFrontingHeader"
-	DirectHTTPProtocolTransformSpecs                 = "DirectHTTPProtocolTransformSpecs"
-	DirectHTTPProtocolTransformScopedSpecNames       = "DirectHTTPProtocolTransformScopedSpecNames"
-	DirectHTTPProtocolTransformProbability           = "DirectHTTPProtocolTransformProbability"
-	FrontedHTTPProtocolTransformSpecs                = "FrontedHTTPProtocolTransformSpecs"
-	FrontedHTTPProtocolTransformScopedSpecNames      = "FrontedHTTPProtocolTransformScopedSpecNames"
-	FrontedHTTPProtocolTransformProbability          = "FrontedHTTPProtocolTransformProbability"
-	OSSHObfuscatorSeedTransformSpecs                 = "OSSHObfuscatorSeedTransformSpecs"
-	OSSHObfuscatorSeedTransformScopedSpecNames       = "OSSHObfuscatorSeedTransformScopedSpecNames"
-	OSSHObfuscatorSeedTransformProbability           = "OSSHObfuscatorSeedTransformProbability"
-	ObfuscatedQUICNonceTransformSpecs                = "ObfuscatedQUICNonceTransformSpecs"
-	ObfuscatedQUICNonceTransformScopedSpecNames      = "ObfuscatedQUICNonceTransformScopedSpecNames"
-	ObfuscatedQUICNonceTransformProbability          = "ObfuscatedQUICNonceTransformProbability"
-	OSSHPrefixSpecs                                  = "OSSHPrefixSpecs"
-	OSSHPrefixScopedSpecNames                        = "OSSHPrefixScopedSpecNames"
-	OSSHPrefixProbability                            = "OSSHPrefixProbability"
-	OSSHPrefixSplitMinDelay                          = "OSSHPrefixSplitMinDelay"
-	OSSHPrefixSplitMaxDelay                          = "OSSHPrefixSplitMaxDelay"
-	OSSHPrefixEnableFragmentor                       = "OSSHPrefixEnableFragmentor"
-	ServerOSSHPrefixSpecs                            = "ServerOSSHPrefixSpecs"
-	TLSTunnelTrafficShapingProbability               = "TLSTunnelTrafficShapingProbability"
-	TLSTunnelMinTLSPadding                           = "TLSTunnelMinTLSPadding"
-	TLSTunnelMaxTLSPadding                           = "TLSTunnelMaxTLSPadding"
-	TLSFragmentClientHelloProbability                = "TLSFragmentClientHelloProbability"
-	TLSFragmentClientHelloLimitProtocols             = "TLSFragmentClientHelloLimitProtocols"
-	SteeringIPCacheTTL                               = "SteeringIPCacheTTL"
-	SteeringIPCacheMaxEntries                        = "SteeringIPCacheMaxEntries"
-	SteeringIPProbability                            = "SteeringIPProbability"
-	ServerDiscoveryStrategy                          = "ServerDiscoveryStrategy"
+	NetworkLatencyMultiplier                           = "NetworkLatencyMultiplier"
+	NetworkLatencyMultiplierMin                        = "NetworkLatencyMultiplierMin"
+	NetworkLatencyMultiplierMax                        = "NetworkLatencyMultiplierMax"
+	NetworkLatencyMultiplierLambda                     = "NetworkLatencyMultiplierLambda"
+	TacticsWaitPeriod                                  = "TacticsWaitPeriod"
+	TacticsRetryPeriod                                 = "TacticsRetryPeriod"
+	TacticsRetryPeriodJitter                           = "TacticsRetryPeriodJitter"
+	TacticsTimeout                                     = "TacticsTimeout"
+	ConnectionWorkerPoolSize                           = "ConnectionWorkerPoolSize"
+	TunnelPoolSize                                     = "TunnelPoolSize"
+	TunnelConnectTimeout                               = "TunnelConnectTimeout"
+	EstablishTunnelTimeout                             = "EstablishTunnelTimeout"
+	EstablishTunnelWorkTime                            = "EstablishTunnelWorkTime"
+	EstablishTunnelPausePeriod                         = "EstablishTunnelPausePeriod"
+	EstablishTunnelPausePeriodJitter                   = "EstablishTunnelPausePeriodJitter"
+	EstablishTunnelServerAffinityGracePeriod           = "EstablishTunnelServerAffinityGracePeriod"
+	StaggerConnectionWorkersPeriod                     = "StaggerConnectionWorkersPeriod"
+	StaggerConnectionWorkersJitter                     = "StaggerConnectionWorkersJitter"
+	LimitIntensiveConnectionWorkers                    = "LimitIntensiveConnectionWorkers"
+	UpstreamProxyErrorMinWaitDuration                  = "UpstreamProxyErrorMinWaitDuration"
+	UpstreamProxyErrorMaxWaitDuration                  = "UpstreamProxyErrorMaxWaitDuration"
+	IgnoreHandshakeStatsRegexps                        = "IgnoreHandshakeStatsRegexps"
+	PrioritizeTunnelProtocolsProbability               = "PrioritizeTunnelProtocolsProbability"
+	PrioritizeTunnelProtocols                          = "PrioritizeTunnelProtocols"
+	PrioritizeTunnelProtocolsCandidateCount            = "PrioritizeTunnelProtocolsCandidateCount"
+	InitialLimitTunnelProtocolsProbability             = "InitialLimitTunnelProtocolsProbability"
+	InitialLimitTunnelProtocols                        = "InitialLimitTunnelProtocols"
+	InitialLimitTunnelProtocolsCandidateCount          = "InitialLimitTunnelProtocolsCandidateCount"
+	LimitTunnelProtocolsProbability                    = "LimitTunnelProtocolsProbability"
+	LimitTunnelProtocols                               = "LimitTunnelProtocols"
+	LimitTunnelDialPortNumbersProbability              = "LimitTunnelDialPortNumbersProbability"
+	LimitTunnelDialPortNumbers                         = "LimitTunnelDialPortNumbers"
+	LimitTLSProfilesProbability                        = "LimitTLSProfilesProbability"
+	LimitTLSProfiles                                   = "LimitTLSProfiles"
+	UseOnlyCustomTLSProfiles                           = "UseOnlyCustomTLSProfiles"
+	CustomTLSProfiles                                  = "CustomTLSProfiles"
+	SelectRandomizedTLSProfileProbability              = "SelectRandomizedTLSProfileProbability"
+	NoDefaultTLSSessionIDProbability                   = "NoDefaultTLSSessionIDProbability"
+	DisableFrontingProviderTLSProfiles                 = "DisableFrontingProviderTLSProfiles"
+	LimitQUICVersionsProbability                       = "LimitQUICVersionsProbability"
+	LimitQUICVersions                                  = "LimitQUICVersions"
+	DisableFrontingProviderQUICVersions                = "DisableFrontingProviderQUICVersions"
+	QUICDialEarlyProbability                           = "QUICDialEarlyProbability"
+	QUICObfuscatedPSKProbability                       = "QUICObfuscatedPSKProbability"
+	QUICDisableClientPathMTUDiscoveryProbability       = "QUICDisableClientPathMTUDiscoveryProbability"
+	FragmentorProbability                              = "FragmentorProbability"
+	FragmentorLimitProtocols                           = "FragmentorLimitProtocols"
+	FragmentorMinTotalBytes                            = "FragmentorMinTotalBytes"
+	FragmentorMaxTotalBytes                            = "FragmentorMaxTotalBytes"
+	FragmentorMinWriteBytes                            = "FragmentorMinWriteBytes"
+	FragmentorMaxWriteBytes                            = "FragmentorMaxWriteBytes"
+	FragmentorMinDelay                                 = "FragmentorMinDelay"
+	FragmentorMaxDelay                                 = "FragmentorMaxDelay"
+	FragmentorDownstreamProbability                    = "FragmentorDownstreamProbability"
+	FragmentorDownstreamLimitProtocols                 = "FragmentorDownstreamLimitProtocols"
+	FragmentorDownstreamMinTotalBytes                  = "FragmentorDownstreamMinTotalBytes"
+	FragmentorDownstreamMaxTotalBytes                  = "FragmentorDownstreamMaxTotalBytes"
+	FragmentorDownstreamMinWriteBytes                  = "FragmentorDownstreamMinWriteBytes"
+	FragmentorDownstreamMaxWriteBytes                  = "FragmentorDownstreamMaxWriteBytes"
+	FragmentorDownstreamMinDelay                       = "FragmentorDownstreamMinDelay"
+	FragmentorDownstreamMaxDelay                       = "FragmentorDownstreamMaxDelay"
+	ObfuscatedSSHMinPadding                            = "ObfuscatedSSHMinPadding"
+	ObfuscatedSSHMaxPadding                            = "ObfuscatedSSHMaxPadding"
+	TunnelOperateShutdownTimeout                       = "TunnelOperateShutdownTimeout"
+	TunnelPortForwardDialTimeout                       = "TunnelPortForwardDialTimeout"
+	PacketTunnelReadTimeout                            = "PacketTunnelReadTimeout"
+	TunnelRateLimits                                   = "TunnelRateLimits"
+	AdditionalCustomHeaders                            = "AdditionalCustomHeaders"
+	SpeedTestPaddingMinBytes                           = "SpeedTestPaddingMinBytes"
+	SpeedTestPaddingMaxBytes                           = "SpeedTestPaddingMaxBytes"
+	SpeedTestMaxSampleCount                            = "SpeedTestMaxSampleCount"
+	SSHKeepAliveSpeedTestSampleProbability             = "SSHKeepAliveSpeedTestSampleProbability"
+	SSHKeepAlivePaddingMinBytes                        = "SSHKeepAlivePaddingMinBytes"
+	SSHKeepAlivePaddingMaxBytes                        = "SSHKeepAlivePaddingMaxBytes"
+	SSHKeepAlivePeriodMin                              = "SSHKeepAlivePeriodMin"
+	SSHKeepAlivePeriodMax                              = "SSHKeepAlivePeriodMax"
+	SSHKeepAlivePeriodicTimeout                        = "SSHKeepAlivePeriodicTimeout"
+	SSHKeepAlivePeriodicInactivePeriod                 = "SSHKeepAlivePeriodicInactivePeriod"
+	SSHKeepAliveProbeTimeout                           = "SSHKeepAliveProbeTimeout"
+	SSHKeepAliveProbeInactivePeriod                    = "SSHKeepAliveProbeInactivePeriod"
+	SSHKeepAliveNetworkConnectivityPollingPeriod       = "SSHKeepAliveNetworkConnectivityPollingPeriod"
+	SSHKeepAliveResetOnFailureProbability              = "SSHKeepAliveResetOnFailureProbability"
+	HTTPProxyOriginServerTimeout                       = "HTTPProxyOriginServerTimeout"
+	HTTPProxyMaxIdleConnectionsPerHost                 = "HTTPProxyMaxIdleConnectionsPerHost"
+	FetchRemoteServerListTimeout                       = "FetchRemoteServerListTimeout"
+	FetchRemoteServerListRetryPeriod                   = "FetchRemoteServerListRetryPeriod"
+	FetchRemoteServerListStalePeriod                   = "FetchRemoteServerListStalePeriod"
+	RemoteServerListSignaturePublicKey                 = "RemoteServerListSignaturePublicKey"
+	RemoteServerListURLs                               = "RemoteServerListURLs"
+	ObfuscatedServerListRootURLs                       = "ObfuscatedServerListRootURLs"
+	PsiphonAPIRequestTimeout                           = "PsiphonAPIRequestTimeout"
+	PsiphonAPIStatusRequestPeriodMin                   = "PsiphonAPIStatusRequestPeriodMin"
+	PsiphonAPIStatusRequestPeriodMax                   = "PsiphonAPIStatusRequestPeriodMax"
+	PsiphonAPIStatusRequestShortPeriodMin              = "PsiphonAPIStatusRequestShortPeriodMin"
+	PsiphonAPIStatusRequestShortPeriodMax              = "PsiphonAPIStatusRequestShortPeriodMax"
+	PsiphonAPIStatusRequestPaddingMinBytes             = "PsiphonAPIStatusRequestPaddingMinBytes"
+	PsiphonAPIStatusRequestPaddingMaxBytes             = "PsiphonAPIStatusRequestPaddingMaxBytes"
+	PsiphonAPIPersistentStatsMaxCount                  = "PsiphonAPIPersistentStatsMaxCount"
+	PsiphonAPIConnectedRequestPeriod                   = "PsiphonAPIConnectedRequestPeriod"
+	PsiphonAPIConnectedRequestRetryPeriod              = "PsiphonAPIConnectedRequestRetryPeriod"
+	FetchSplitTunnelRoutesTimeout                      = "FetchSplitTunnelRoutesTimeout"
+	SplitTunnelRoutesURLFormat                         = "SplitTunnelRoutesURLFormat"
+	SplitTunnelRoutesSignaturePublicKey                = "SplitTunnelRoutesSignaturePublicKey"
+	SplitTunnelDNSServer                               = "SplitTunnelDNSServer"
+	SplitTunnelClassificationTTL                       = "SplitTunnelClassificationTTL"
+	SplitTunnelClassificationMaxEntries                = "SplitTunnelClassificationMaxEntries"
+	FetchUpgradeTimeout                                = "FetchUpgradeTimeout"
+	FetchUpgradeRetryPeriod                            = "FetchUpgradeRetryPeriod"
+	FetchUpgradeStalePeriod                            = "FetchUpgradeStalePeriod"
+	UpgradeDownloadURLs                                = "UpgradeDownloadURLs"
+	UpgradeDownloadClientVersionHeader                 = "UpgradeDownloadClientVersionHeader"
+	TotalBytesTransferredNoticePeriod                  = "TotalBytesTransferredNoticePeriod"
+	TotalBytesTransferredEmitMemoryMetrics             = "TotalBytesTransferredEmitMemoryMetrics"
+	MeekDialDomainsOnly                                = "MeekDialDomainsOnly"
+	MeekLimitBufferSizes                               = "MeekLimitBufferSizes"
+	MeekCookieMaxPadding                               = "MeekCookieMaxPadding"
+	MeekFullReceiveBufferLength                        = "MeekFullReceiveBufferLength"
+	MeekReadPayloadChunkLength                         = "MeekReadPayloadChunkLength"
+	MeekLimitedFullReceiveBufferLength                 = "MeekLimitedFullReceiveBufferLength"
+	MeekLimitedReadPayloadChunkLength                  = "MeekLimitedReadPayloadChunkLength"
+	MeekMinPollInterval                                = "MeekMinPollInterval"
+	MeekMinPollIntervalJitter                          = "MeekMinPollIntervalJitter"
+	MeekMaxPollInterval                                = "MeekMaxPollInterval"
+	MeekMaxPollIntervalJitter                          = "MeekMaxPollIntervalJitter"
+	MeekPollIntervalMultiplier                         = "MeekPollIntervalMultiplier"
+	MeekPollIntervalJitter                             = "MeekPollIntervalJitter"
+	MeekApplyPollIntervalMultiplierProbability         = "MeekApplyPollIntervalMultiplierProbability"
+	MeekRoundTripRetryDeadline                         = "MeekRoundTripRetryDeadline"
+	MeekRoundTripRetryMinDelay                         = "MeekRoundTripRetryMinDelay"
+	MeekRoundTripRetryMaxDelay                         = "MeekRoundTripRetryMaxDelay"
+	MeekRoundTripRetryMultiplier                       = "MeekRoundTripRetryMultiplier"
+	MeekRoundTripTimeout                               = "MeekRoundTripTimeout"
+	MeekTrafficShapingProbability                      = "MeekTrafficShapingProbability"
+	MeekTrafficShapingLimitProtocols                   = "MeekTrafficShapingLimitProtocols"
+	MeekMinTLSPadding                                  = "MeekMinTLSPadding"
+	MeekMaxTLSPadding                                  = "MeekMaxTLSPadding"
+	MeekMinLimitRequestPayloadLength                   = "MeekMinLimitRequestPayloadLength"
+	MeekMaxLimitRequestPayloadLength                   = "MeekMaxLimitRequestPayloadLength"
+	MeekRedialTLSProbability                           = "MeekRedialTLSProbability"
+	MeekAlternateCookieNameProbability                 = "MeekAlternateCookieNameProbability"
+	MeekAlternateContentTypeProbability                = "MeekAlternateContentTypeProbability"
+	TransformHostNameProbability                       = "TransformHostNameProbability"
+	PickUserAgentProbability                           = "PickUserAgentProbability"
+	LivenessTestMinUpstreamBytes                       = "LivenessTestMinUpstreamBytes"
+	LivenessTestMaxUpstreamBytes                       = "LivenessTestMaxUpstreamBytes"
+	LivenessTestMinDownstreamBytes                     = "LivenessTestMinDownstreamBytes"
+	LivenessTestMaxDownstreamBytes                     = "LivenessTestMaxDownstreamBytes"
+	ReplayCandidateCount                               = "ReplayCandidateCount"
+	ReplayDialParametersTTL                            = "ReplayDialParametersTTL"
+	ReplayTargetUpstreamBytes                          = "ReplayTargetUpstreamBytes"
+	ReplayTargetDownstreamBytes                        = "ReplayTargetDownstreamBytes"
+	ReplayTargetTunnelDuration                         = "ReplayTargetTunnelDuration"
+	ReplayLaterRoundMoveToFrontProbability             = "ReplayLaterRoundMoveToFrontProbability"
+	ReplayRetainFailedProbability                      = "ReplayRetainFailedProbability"
+	ReplayIgnoreChangedConfigState                     = "ReplayIgnoreChangedConfigState"
+	ReplayBPF                                          = "ReplayBPF"
+	ReplaySSH                                          = "ReplaySSH"
+	ReplayObfuscatorPadding                            = "ReplayObfuscatorPadding"
+	ReplayFragmentor                                   = "ReplayFragmentor"
+	ReplayTLSProfile                                   = "ReplayTLSProfile"
+	ReplayFronting                                     = "ReplayFronting"
+	ReplayHostname                                     = "ReplayHostname"
+	ReplayQUICVersion                                  = "ReplayQUICVersion"
+	ReplayObfuscatedQUIC                               = "ReplayObfuscatedQUIC"
+	ReplayObfuscatedQUICNonceTransformer               = "ReplayObfuscatedQUICNonceTransformer"
+	ReplayConjureRegistration                          = "ReplayConjureRegistration"
+	ReplayConjureTransport                             = "ReplayConjureTransport"
+	ReplayLivenessTest                                 = "ReplayLivenessTest"
+	ReplayUserAgent                                    = "ReplayUserAgent"
+	ReplayAPIRequestPadding                            = "ReplayAPIRequestPadding"
+	ReplayHoldOffTunnel                                = "ReplayHoldOffTunnel"
+	ReplayResolveParameters                            = "ReplayResolveParameters"
+	ReplayHTTPTransformerParameters                    = "ReplayHTTPTransformerParameters"
+	ReplayOSSHSeedTransformerParameters                = "ReplayOSSHSeedTransformerParameters"
+	ReplayOSSHPrefix                                   = "ReplayOSSHPrefix"
+	ReplayTLSFragmentClientHello                       = "ReplayTLSFragmentClientHello"
+	ReplayInproxyWebRTC                                = "ReplayInproxyWebRTC"
+	ReplayInproxySTUN                                  = "ReplayInproxySTUN"
+	APIRequestUpstreamPaddingMinBytes                  = "APIRequestUpstreamPaddingMinBytes"
+	APIRequestUpstreamPaddingMaxBytes                  = "APIRequestUpstreamPaddingMaxBytes"
+	APIRequestDownstreamPaddingMinBytes                = "APIRequestDownstreamPaddingMinBytes"
+	APIRequestDownstreamPaddingMaxBytes                = "APIRequestDownstreamPaddingMaxBytes"
+	PersistentStatsMaxStoreRecords                     = "PersistentStatsMaxStoreRecords"
+	PersistentStatsMaxSendBytes                        = "PersistentStatsMaxSendBytes"
+	RecordRemoteServerListPersistentStatsProbability   = "RecordRemoteServerListPersistentStatsProbability"
+	RecordFailedTunnelPersistentStatsProbability       = "RecordFailedTunnelPersistentStatsProbability"
+	ServerEntryMinimumAgeForPruning                    = "ServerEntryMinimumAgeForPruning"
+	ApplicationParametersProbability                   = "ApplicationParametersProbability"
+	ApplicationParameters                              = "ApplicationParameters"
+	BPFServerTCPProgram                                = "BPFServerTCPProgram"
+	BPFServerTCPProbability                            = "BPFServerTCPProbability"
+	BPFClientTCPProgram                                = "BPFClientTCPProgram"
+	BPFClientTCPProbability                            = "BPFClientTCPProbability"
+	ServerPacketManipulationSpecs                      = "ServerPacketManipulationSpecs"
+	ServerProtocolPacketManipulations                  = "ServerProtocolPacketManipulations"
+	ServerPacketManipulationProbability                = "ServerPacketManipulationProbability"
+	FeedbackUploadURLs                                 = "FeedbackUploadURLs"
+	FeedbackEncryptionPublicKey                        = "FeedbackEncryptionPublicKey"
+	FeedbackTacticsWaitPeriod                          = "FeedbackTacticsWaitPeriod"
+	FeedbackUploadMaxAttempts                          = "FeedbackUploadMaxAttempts"
+	FeedbackUploadRetryMinDelaySeconds                 = "FeedbackUploadRetryMinDelaySeconds"
+	FeedbackUploadRetryMaxDelaySeconds                 = "FeedbackUploadRetryMaxDelaySeconds"
+	FeedbackUploadTimeoutSeconds                       = "FeedbackUploadTimeoutSeconds"
+	ServerReplayPacketManipulation                     = "ServerReplayPacketManipulation"
+	ServerReplayFragmentor                             = "ServerReplayFragmentor"
+	ServerReplayUnknownGeoIP                           = "ServerReplayUnknownGeoIP"
+	ServerReplayTTL                                    = "ServerReplayTTL"
+	ServerReplayTargetWaitDuration                     = "ServerReplayTargetWaitDuration"
+	ServerReplayTargetTunnelDuration                   = "ServerReplayTargetTunnelDuration"
+	ServerReplayTargetUpstreamBytes                    = "ServerReplayTargetUpstreamBytes"
+	ServerReplayTargetDownstreamBytes                  = "ServerReplayTargetDownstreamBytes"
+	ServerReplayFailedCountThreshold                   = "ServerReplayFailedCountThreshold"
+	ServerBurstUpstreamDeadline                        = "ServerBurstUpstreamDeadline"
+	ServerBurstUpstreamTargetBytes                     = "ServerBurstUpstreamTargetBytes"
+	ServerBurstDownstreamDeadline                      = "ServerBurstDownstreamDeadline"
+	ServerBurstDownstreamTargetBytes                   = "ServerBurstDownstreamTargetBytes"
+	ClientBurstUpstreamDeadline                        = "ClientBurstUpstreamDeadline"
+	ClientBurstUpstreamTargetBytes                     = "ClientBurstUpstreamTargetBytes"
+	ClientBurstDownstreamDeadline                      = "ClientBurstDownstreamDeadline"
+	ClientBurstDownstreamTargetBytes                   = "ClientBurstDownstreamTargetBytes"
+	ConjureCachedRegistrationTTL                       = "ConjureCachedRegistrationTTL"
+	ConjureAPIRegistrarURL                             = "ConjureAPIRegistrarURL"
+	ConjureAPIRegistrarBidirectionalURL                = "ConjureAPIRegistrarBidirectionalURL"
+	ConjureAPIRegistrarFrontingSpecs                   = "ConjureAPIRegistrarFrontingSpecs"
+	ConjureAPIRegistrarMinDelay                        = "ConjureAPIRegistrarMinDelay"
+	ConjureAPIRegistrarMaxDelay                        = "ConjureAPIRegistrarMaxDelay"
+	ConjureDecoyRegistrarProbability                   = "ConjureDecoyRegistrarProbability"
+	ConjureDecoyRegistrarWidth                         = "ConjureDecoyRegistrarWidth"
+	ConjureDecoyRegistrarMinDelay                      = "ConjureDecoyRegistrarMinDelay"
+	ConjureDecoyRegistrarMaxDelay                      = "ConjureDecoyRegistrarMaxDelay"
+	ConjureEnableIPv6Dials                             = "ConjureEnableIPv6Dials"
+	ConjureEnablePortRandomization                     = "ConjureEnablePortRandomization"
+	ConjureEnableRegistrationOverrides                 = "ConjureEnableRegistrationOverrides"
+	ConjureLimitTransportsProbability                  = "ConjureLimitTransportsProbability"
+	ConjureLimitTransports                             = "ConjureLimitTransports"
+	ConjureSTUNServerAddresses                         = "ConjureSTUNServerAddresses"
+	ConjureDTLSEmptyInitialPacketProbability           = "ConjureDTLSEmptyInitialPacketProbability"
+	CustomHostNameRegexes                              = "CustomHostNameRegexes"
+	CustomHostNameProbability                          = "CustomHostNameProbability"
+	CustomHostNameLimitProtocols                       = "CustomHostNameLimitProtocols"
+	HoldOffTunnelMinDuration                           = "HoldOffTunnelMinDuration"
+	HoldOffTunnelMaxDuration                           = "HoldOffTunnelMaxDuration"
+	HoldOffTunnelProtocols                             = "HoldOffTunnelProtocols"
+	HoldOffTunnelFrontingProviderIDs                   = "HoldOffTunnelFrontingProviderIDs"
+	HoldOffTunnelProbability                           = "HoldOffTunnelProbability"
+	RestrictFrontingProviderIDs                        = "RestrictFrontingProviderIDs"
+	RestrictFrontingProviderIDsServerProbability       = "RestrictFrontingProviderIDsServerProbability"
+	RestrictFrontingProviderIDsClientProbability       = "RestrictFrontingProviderIDsClientProbability"
+	HoldOffDirectTunnelMinDuration                     = "HoldOffDirectTunnelMinDuration"
+	HoldOffDirectTunnelMaxDuration                     = "HoldOffDirectTunnelMaxDuration"
+	HoldOffDirectTunnelProviderRegions                 = "HoldOffDirectTunnelProviderRegions"
+	HoldOffDirectTunnelProbability                     = "HoldOffDirectTunnelProbability"
+	RestrictDirectProviderRegions                      = "RestrictDirectProviderRegions"
+	RestrictDirectProviderIDsServerProbability         = "RestrictDirectProviderIDsServerProbability"
+	RestrictDirectProviderIDsClientProbability         = "RestrictDirectProviderIDsClientProbability"
+	UpstreamProxyAllowAllServerEntrySources            = "UpstreamProxyAllowAllServerEntrySources"
+	DestinationBytesMetricsASN                         = "DestinationBytesMetricsASN"
+	DNSResolverAttemptsPerServer                       = "DNSResolverAttemptsPerServer"
+	DNSResolverAttemptsPerPreferredServer              = "DNSResolverAttemptsPerPreferredServer"
+	DNSResolverRequestTimeout                          = "DNSResolverRequestTimeout"
+	DNSResolverAwaitTimeout                            = "DNSResolverAwaitTimeout"
+	DNSResolverPreresolvedIPAddressCIDRs               = "DNSResolverPreresolvedIPAddressCIDRs"
+	DNSResolverPreresolvedIPAddressProbability         = "DNSResolverPreresolvedIPAddressProbability"
+	DNSResolverAlternateServers                        = "DNSResolverAlternateServers"
+	DNSResolverPreferredAlternateServers               = "DNSResolverPreferredAlternateServers"
+	DNSResolverPreferAlternateServerProbability        = "DNSResolverPreferAlternateServerProbability"
+	DNSResolverProtocolTransformSpecs                  = "DNSResolverProtocolTransformSpecs"
+	DNSResolverProtocolTransformScopedSpecNames        = "DNSResolverProtocolTransformScopedSpecNames"
+	DNSResolverProtocolTransformProbability            = "DNSResolverProtocolTransformProbability"
+	DNSResolverIncludeEDNS0Probability                 = "DNSResolverIncludeEDNS0Probability"
+	DNSResolverCacheExtensionInitialTTL                = "DNSResolverCacheExtensionInitialTTL"
+	DNSResolverCacheExtensionVerifiedTTL               = "DNSResolverCacheExtensionVerifiedTTL"
+	AddFrontingProviderPsiphonFrontingHeader           = "AddFrontingProviderPsiphonFrontingHeader"
+	DirectHTTPProtocolTransformSpecs                   = "DirectHTTPProtocolTransformSpecs"
+	DirectHTTPProtocolTransformScopedSpecNames         = "DirectHTTPProtocolTransformScopedSpecNames"
+	DirectHTTPProtocolTransformProbability             = "DirectHTTPProtocolTransformProbability"
+	FrontedHTTPProtocolTransformSpecs                  = "FrontedHTTPProtocolTransformSpecs"
+	FrontedHTTPProtocolTransformScopedSpecNames        = "FrontedHTTPProtocolTransformScopedSpecNames"
+	FrontedHTTPProtocolTransformProbability            = "FrontedHTTPProtocolTransformProbability"
+	OSSHObfuscatorSeedTransformSpecs                   = "OSSHObfuscatorSeedTransformSpecs"
+	OSSHObfuscatorSeedTransformScopedSpecNames         = "OSSHObfuscatorSeedTransformScopedSpecNames"
+	OSSHObfuscatorSeedTransformProbability             = "OSSHObfuscatorSeedTransformProbability"
+	ObfuscatedQUICNonceTransformSpecs                  = "ObfuscatedQUICNonceTransformSpecs"
+	ObfuscatedQUICNonceTransformScopedSpecNames        = "ObfuscatedQUICNonceTransformScopedSpecNames"
+	ObfuscatedQUICNonceTransformProbability            = "ObfuscatedQUICNonceTransformProbability"
+	OSSHPrefixSpecs                                    = "OSSHPrefixSpecs"
+	OSSHPrefixScopedSpecNames                          = "OSSHPrefixScopedSpecNames"
+	OSSHPrefixProbability                              = "OSSHPrefixProbability"
+	OSSHPrefixSplitMinDelay                            = "OSSHPrefixSplitMinDelay"
+	OSSHPrefixSplitMaxDelay                            = "OSSHPrefixSplitMaxDelay"
+	OSSHPrefixEnableFragmentor                         = "OSSHPrefixEnableFragmentor"
+	ServerOSSHPrefixSpecs                              = "ServerOSSHPrefixSpecs"
+	TLSTunnelObfuscatedPSKProbability                  = "TLSTunnelObfuscatedPSKProbability"
+	TLSTunnelTrafficShapingProbability                 = "TLSTunnelTrafficShapingProbability"
+	TLSTunnelMinTLSPadding                             = "TLSTunnelMinTLSPadding"
+	TLSTunnelMaxTLSPadding                             = "TLSTunnelMaxTLSPadding"
+	TLSFragmentClientHelloProbability                  = "TLSFragmentClientHelloProbability"
+	TLSFragmentClientHelloLimitProtocols               = "TLSFragmentClientHelloLimitProtocols"
+	SteeringIPCacheTTL                                 = "SteeringIPCacheTTL"
+	SteeringIPCacheMaxEntries                          = "SteeringIPCacheMaxEntries"
+	SteeringIPProbability                              = "SteeringIPProbability"
+	ServerDiscoveryStrategy                            = "ServerDiscoveryStrategy"
+	FrontedHTTPClientReplayDialParametersTTL           = "FrontedHTTPClientReplayDialParametersTTL"
+	FrontedHTTPClientReplayUpdateFrequency             = "FrontedHTTPClientReplayUpdateFrequency"
+	FrontedHTTPClientReplayDialParametersProbability   = "FrontedHTTPClientReplayDialParametersProbability"
+	FrontedHTTPClientReplayRetainFailedProbability     = "FrontedHTTPClientReplayRetainFailedProbability"
+	InproxyAllowProxy                                  = "InproxyAllowProxy"
+	InproxyAllowClient                                 = "InproxyAllowClient"
+	InproxyAllowDomainFrontedDestinations              = "InproxyAllowDomainFrontedDestinations"
+	InproxyTunnelProtocolSelectionProbability          = "InproxyTunnelProtocolSelectionProbability"
+	InproxyAllBrokerPublicKeys                         = "InproxyAllBrokerPublicKeys"
+	InproxyBrokerSpecs                                 = "InproxyBrokerSpecs"
+	InproxyPersonalPairingBrokerSpecs                  = "InproxyPersonalPairingBrokerSpecs"
+	InproxyProxyBrokerSpecs                            = "InproxyProxyBrokerSpecs"
+	InproxyProxyPersonalPairingBrokerSpecs             = "InproxyProxyPersonalPairingBrokerSpecs"
+	InproxyClientBrokerSpecs                           = "InproxyClientBrokerSpecs"
+	InproxyClientPersonalPairingBrokerSpecs            = "InproxyClientPersonalPairingBrokerSpecs"
+	InproxyReplayBrokerDialParametersTTL               = "InproxyReplayBrokerDialParametersTTL"
+	InproxyReplayBrokerUpdateFrequency                 = "InproxyReplayBrokerUpdateFrequency"
+	InproxyReplayBrokerDialParametersProbability       = "InproxyReplayBrokerDialParametersProbability"
+	InproxyReplayBrokerRetainFailedProbability         = "InproxyReplayBrokerRetainFailedProbability"
+	InproxyAllCommonCompartmentIDs                     = "InproxyAllCommonCompartmentIDs"
+	InproxyCommonCompartmentIDs                        = "InproxyCommonCompartmentIDs"
+	InproxyMaxCompartmentIDListLength                  = "InproxyMaxCompartmentIDListLength"
+	InproxyBrokerMatcherAnnouncementLimitEntryCount    = "InproxyBrokerMatcherAnnouncementLimitEntryCount"
+	InproxyBrokerMatcherAnnouncementRateLimitQuantity  = "InproxyBrokerMatcherAnnouncementRateLimitQuantity"
+	InproxyBrokerMatcherAnnouncementRateLimitInterval  = "InproxyBrokerMatcherAnnouncementRateLimitInterval"
+	InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs = "InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs"
+	InproxyBrokerMatcherOfferLimitEntryCount           = "InproxyBrokerMatcherOfferLimitEntryCount"
+	InproxyBrokerMatcherOfferRateLimitQuantity         = "InproxyBrokerMatcherOfferRateLimitQuantity"
+	InproxyBrokerMatcherOfferRateLimitInterval         = "InproxyBrokerMatcherOfferRateLimitInterval"
+	InproxyBrokerProxyAnnounceTimeout                  = "InproxyBrokerProxyAnnounceTimeout"
+	InproxyBrokerClientOfferTimeout                    = "InproxyBrokerClientOfferTimeout"
+	InproxyBrokerClientOfferPersonalTimeout            = "InproxyBrokerClientOfferPersonalTimeout"
+	InproxyBrokerPendingServerRequestsTTL              = "InproxyBrokerPendingServerRequestsTTL"
+	InproxySessionHandshakeRoundTripTimeout            = "InproxySessionHandshakeRoundTripTimeout"
+	InproxyProxyAnnounceRequestTimeout                 = "InproxyProxyAnnounceRequestTimeout"
+	InproxyProxyAnnounceDelay                          = "InproxyProxyAnnounceDelay"
+	InproxyProxyAnnounceDelayJitter                    = "InproxyProxyAnnounceDelayJitter"
+	InproxyProxyAnswerRequestTimeout                   = "InproxyProxyAnswerRequestTimeout"
+	InproxyClientOfferRequestTimeout                   = "InproxyClientOfferRequestTimeout"
+	InproxyClientOfferRequestPersonalTimeout           = "InproxyClientOfferRequestPersonalTimeout"
+	InproxyClientOfferRetryDelay                       = "InproxyClientOfferRetryDelay"
+	InproxyClientOfferRetryJitter                      = "InproxyClientOfferRetryJitter"
+	InproxyClientRelayedPacketRequestTimeout           = "InproxyCloientRelayedPacketRequestTimeout"
+	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
+	InproxyDTLSRandomizationProbability                = "InproxyDTLSRandomizationProbability"
+	InproxyDataChannelTrafficShapingProbability        = "InproxyDataChannelTrafficShapingProbability"
+	InproxyDataChannelTrafficShapingParameters         = "InproxyDataChannelTrafficShapingParameters"
+	InproxySTUNServerAddresses                         = "InproxySTUNServerAddresses"
+	InproxySTUNServerAddressesRFC5780                  = "InproxySTUNServerAddressesRFC5780"
+	InproxyProxySTUNServerAddresses                    = "InproxyProxySTUNServerAddresses"
+	InproxyProxySTUNServerAddressesRFC5780             = "InproxyProxySTUNServerAddressesRFC5780"
+	InproxyClientSTUNServerAddresses                   = "InproxyClientSTUNServerAddresses"
+	InproxyClientSTUNServerAddressesRFC5780            = "InproxyClientSTUNServerAddressesRFC5780"
+	InproxyClientDiscoverNATProbability                = "InproxyClientDiscoverNATProbability"
+	InproxyDisableSTUN                                 = "InproxyDisableSTUN"
+	InproxyDisablePortMapping                          = "InproxyDisablePortMapping"
+	InproxyDisableInboundForMobileNetworks             = "InproxyDisableInboundForMobileNetworks"
+	InproxyDisableIPv6ICECandidates                    = "InproxyDisableIPv6ICECandidates"
+	InproxyProxyDisableSTUN                            = "InproxyProxyDisableSTUN"
+	InproxyProxyDisablePortMapping                     = "InproxyProxyDisablePortMapping"
+	InproxyProxyDisableInboundForMobileNetworks        = "InproxyProxyDisableInboundForMobileNetworks"
+	InproxyProxyDisableIPv6ICECandidates               = "InproxyProxyDisableIPv6ICECandidates"
+	InproxyClientDisableSTUN                           = "InproxyClientDisableSTUN"
+	InproxyClientDisablePortMapping                    = "InproxyClientDisablePortMapping"
+	InproxyClientDisableInboundForMobileNetworks       = "InproxyClientDisableInboundForMobileNetworks"
+	InproxyClientDisableIPv6ICECandidates              = "InproxyClientDisableIPv6ICECandidates"
+	InproxyProxyDiscoverNATTimeout                     = "InproxyProxyDiscoverNATTimeout"
+	InproxyClientDiscoverNATTimeout                    = "InproxyClientDiscoverNATTimeout"
+	InproxyWebRTCAnswerTimeout                         = "InproxyWebRTCAnswerTimeout"
+	InproxyWebRTCAwaitPortMappingTimeout               = "InproxyWebRTCAwaitPortMappingTimeout"
+	InproxyProxyWebRTCAwaitDataChannelTimeout          = "InproxyProxyWebRTCAwaitDataChannelTimeout"
+	InproxyClientWebRTCAwaitDataChannelTimeout         = "InproxyClientWebRTCAwaitDataChannelTimeout"
+	InproxyProxyDestinationDialTimeout                 = "InproxyProxyDestinationDialTimeout"
+	InproxyProxyRelayInactivityTimeout                 = "InproxyProxyRelayInactivityTimeout"
+	InproxyPsiphonAPIRequestTimeout                    = "InproxyPsiphonAPIRequestTimeout"
+	InproxyProxyTotalActivityNoticePeriod              = "InproxyProxyTotalActivityNoticePeriod"
+	InproxyPersonalPairingConnectionWorkerPoolSize     = "InproxyPersonalPairingConnectionWorkerPoolSize"
+	InproxyClientDialRateLimitQuantity                 = "InproxyClientDialRateLimitQuantity"
+	InproxyClientDialRateLimitInterval                 = "InproxyClientDialRateLimitInterval"
+	InproxyClientNoMatchFailoverProbability            = "InproxyClientNoMatchFailoverProbability"
+	InproxyClientNoMatchFailoverPersonalProbability    = "InproxyClientNoMatchFailoverPersonalProbability"
+	InproxyFrontingProviderClientMaxRequestTimeouts    = "InproxyFrontingProviderClientMaxRequestTimeouts"
+	InproxyFrontingProviderServerMaxRequestTimeouts    = "InproxyFrontingProviderServerMaxRequestTimeouts"
+	InproxyProxyOnBrokerClientFailedRetryPeriod        = "InproxyProxyOnBrokerClientFailedRetryPeriod"
 
 	// Retired parameters
 
@@ -451,6 +540,8 @@ var defaultParameters = map[string]struct {
 	LimitQUICVersionsProbability:                 {value: 1.0, minimum: 0.0},
 	LimitQUICVersions:                            {value: protocol.QUICVersions{}},
 	DisableFrontingProviderQUICVersions:          {value: protocol.LabeledQUICVersions{}},
+	QUICDialEarlyProbability:                     {value: 1.0, minimum: 0.0},
+	QUICObfuscatedPSKProbability:                 {value: 0.5, minimum: 0.0},
 	QUICDisableClientPathMTUDiscoveryProbability: {value: 0.0, minimum: 0.0},
 
 	FragmentorProbability:              {value: 0.5, minimum: 0.0},
@@ -516,7 +607,7 @@ var defaultParameters = map[string]struct {
 	RemoteServerListURLs:               {value: TransferURLs{}},
 	ObfuscatedServerListRootURLs:       {value: TransferURLs{}},
 
-	PsiphonAPIRequestTimeout: {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	PsiphonAPIRequestTimeout: {value: 10 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 
 	PsiphonAPIStatusRequestPeriodMin:      {value: 5 * time.Minute, minimum: 1 * time.Second},
 	PsiphonAPIStatusRequestPeriodMax:      {value: 10 * time.Minute, minimum: 1 * time.Second},
@@ -630,6 +721,8 @@ var defaultParameters = map[string]struct {
 	ReplayOSSHSeedTransformerParameters:    {value: true},
 	ReplayOSSHPrefix:                       {value: true},
 	ReplayTLSFragmentClientHello:           {value: true},
+	ReplayInproxyWebRTC:                    {value: true},
+	ReplayInproxySTUN:                      {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -773,6 +866,7 @@ var defaultParameters = map[string]struct {
 
 	// TLSTunnelMinTLSPadding/TLSTunnelMaxTLSPadding are subject to TLS server limitations.
 
+	TLSTunnelObfuscatedPSKProbability:  {value: 0.5, minimum: 0.0},
 	TLSTunnelTrafficShapingProbability: {value: 1.0, minimum: 0.0},
 	TLSTunnelMinTLSPadding:             {value: 0, minimum: 0},
 	TLSTunnelMaxTLSPadding:             {value: 0, minimum: 0},
@@ -785,6 +879,98 @@ var defaultParameters = map[string]struct {
 	SteeringIPProbability:     {value: 1.0, minimum: 0.0},
 
 	ServerDiscoveryStrategy: {value: "", flags: serverSideOnly},
+
+	FrontedHTTPClientReplayDialParametersTTL:         {value: 24 * time.Hour, minimum: time.Duration(0)},
+	FrontedHTTPClientReplayUpdateFrequency:           {value: 5 * time.Minute, minimum: time.Duration(0)},
+	FrontedHTTPClientReplayDialParametersProbability: {value: 1.0, minimum: 0.0},
+	FrontedHTTPClientReplayRetainFailedProbability:   {value: 0.5, minimum: 0.0},
+
+	// For inproxy tactics, there is no proxyOnly flag, since Psiphon apps may
+	// run both clients and inproxy proxies.
+	//
+	// Note: useNetworkLatencyMultiplier is not applied to request timeouts
+	// since timeouts are strictly enforced on the broker server-side.
+
+	InproxyAllowProxy:                                  {value: false},
+	InproxyAllowClient:                                 {value: false, flags: serverSideOnly},
+	InproxyAllowDomainFrontedDestinations:              {value: false, flags: serverSideOnly},
+	InproxyTunnelProtocolSelectionProbability:          {value: 0.5, minimum: 0.0},
+	InproxyAllBrokerPublicKeys:                         {value: []string{}, flags: serverSideOnly},
+	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
+	InproxyPersonalPairingBrokerSpecs:                  {value: InproxyBrokerSpecsValue{}},
+	InproxyProxyBrokerSpecs:                            {value: InproxyBrokerSpecsValue{}},
+	InproxyProxyPersonalPairingBrokerSpecs:             {value: InproxyBrokerSpecsValue{}},
+	InproxyClientBrokerSpecs:                           {value: InproxyBrokerSpecsValue{}},
+	InproxyClientPersonalPairingBrokerSpecs:            {value: InproxyBrokerSpecsValue{}},
+	InproxyReplayBrokerDialParametersTTL:               {value: 24 * time.Hour, minimum: time.Duration(0)},
+	InproxyReplayBrokerUpdateFrequency:                 {value: 5 * time.Minute, minimum: time.Duration(0)},
+	InproxyReplayBrokerDialParametersProbability:       {value: 1.0, minimum: 0.0},
+	InproxyReplayBrokerRetainFailedProbability:         {value: 0.5, minimum: 0.0},
+	InproxyAllCommonCompartmentIDs:                     {value: []string{}, flags: serverSideOnly},
+	InproxyCommonCompartmentIDs:                        {value: InproxyCompartmentIDsValue{}},
+	InproxyMaxCompartmentIDListLength:                  {value: 50, minimum: 0},
+	InproxyBrokerMatcherAnnouncementLimitEntryCount:    {value: 50, minimum: 0, flags: serverSideOnly},
+	InproxyBrokerMatcherAnnouncementRateLimitQuantity:  {value: 50, minimum: 0, flags: serverSideOnly},
+	InproxyBrokerMatcherAnnouncementRateLimitInterval:  {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerMatcherAnnouncementNonlimitedProxyIDs: {value: []string{}, flags: serverSideOnly},
+	InproxyBrokerMatcherOfferLimitEntryCount:           {value: 10, minimum: 0, flags: serverSideOnly},
+	InproxyBrokerMatcherOfferRateLimitQuantity:         {value: 50, minimum: 0, flags: serverSideOnly},
+	InproxyBrokerMatcherOfferRateLimitInterval:         {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerProxyAnnounceTimeout:                  {value: 2 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerClientOfferPersonalTimeout:            {value: 5 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerPendingServerRequestsTTL:              {value: 60 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxySessionHandshakeRoundTripTimeout:            {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyProxyAnnounceRequestTimeout:                 {value: 2*time.Minute + 10*time.Second, minimum: time.Duration(0)},
+	InproxyProxyAnnounceDelay:                          {value: 100 * time.Millisecond, minimum: time.Duration(0)},
+	InproxyProxyAnnounceDelayJitter:                    {value: 0.5, minimum: 0.0},
+	InproxyProxyAnswerRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
+	InproxyClientOfferRequestTimeout:                   {value: 10*time.Second + 10*time.Second, minimum: time.Duration(0)},
+	InproxyClientOfferRequestPersonalTimeout:           {value: 5*time.Second + 10*time.Second, minimum: time.Duration(0)},
+	InproxyClientOfferRetryDelay:                       {value: 100 * time.Millisecond, minimum: time.Duration(0)},
+	InproxyClientOfferRetryJitter:                      {value: 0.5, minimum: 0.0},
+	InproxyClientRelayedPacketRequestTimeout:           {value: 10 * time.Second, minimum: time.Duration(0)},
+	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
+	InproxyDataChannelTrafficShapingProbability:        {value: 0.5, minimum: 0.0},
+	InproxyDataChannelTrafficShapingParameters:         {value: InproxyDataChannelTrafficShapingParametersValue{0, 10, 0, 1500, 0, 10, 1, 1500, 0.5}},
+	InproxySTUNServerAddresses:                         {value: []string{}},
+	InproxySTUNServerAddressesRFC5780:                  {value: []string{}},
+	InproxyProxySTUNServerAddresses:                    {value: []string{}},
+	InproxyProxySTUNServerAddressesRFC5780:             {value: []string{}},
+	InproxyClientSTUNServerAddresses:                   {value: []string{}},
+	InproxyClientSTUNServerAddressesRFC5780:            {value: []string{}},
+	InproxyClientDiscoverNATProbability:                {value: 0.0, minimum: 0.0},
+	InproxyDisableSTUN:                                 {value: false},
+	InproxyDisablePortMapping:                          {value: false},
+	InproxyDisableInboundForMobileNetworks:             {value: false},
+	InproxyDisableIPv6ICECandidates:                    {value: false},
+	InproxyProxyDisableSTUN:                            {value: false},
+	InproxyProxyDisablePortMapping:                     {value: false},
+	InproxyProxyDisableInboundForMobileNetworks:        {value: false},
+	InproxyProxyDisableIPv6ICECandidates:               {value: false},
+	InproxyClientDisableSTUN:                           {value: false},
+	InproxyClientDisablePortMapping:                    {value: false},
+	InproxyClientDisableInboundForMobileNetworks:       {value: false},
+	InproxyClientDisableIPv6ICECandidates:              {value: false},
+	InproxyProxyDiscoverNATTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyClientDiscoverNATTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyWebRTCAnswerTimeout:                         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyWebRTCAwaitPortMappingTimeout:               {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyProxyWebRTCAwaitDataChannelTimeout:          {value: 30 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyClientWebRTCAwaitDataChannelTimeout:         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyProxyDestinationDialTimeout:                 {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyProxyRelayInactivityTimeout:                 {value: 5 * time.Minute, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyPsiphonAPIRequestTimeout:                    {value: 10 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
+	InproxyProxyTotalActivityNoticePeriod:              {value: 5 * time.Minute, minimum: 1 * time.Second},
+	InproxyPersonalPairingConnectionWorkerPoolSize:     {value: 2, minimum: 1},
+	InproxyClientDialRateLimitQuantity:                 {value: 10, minimum: 0},
+	InproxyClientDialRateLimitInterval:                 {value: 1 * time.Minute, minimum: time.Duration(0)},
+	InproxyClientNoMatchFailoverProbability:            {value: 0.5, minimum: 0.0},
+	InproxyClientNoMatchFailoverPersonalProbability:    {value: 1.0, minimum: 0.0},
+	InproxyFrontingProviderClientMaxRequestTimeouts:    {value: KeyDurations{}},
+	InproxyFrontingProviderServerMaxRequestTimeouts:    {value: KeyDurations{}, flags: serverSideOnly},
+	InproxyProxyOnBrokerClientFailedRetryPeriod:        {value: 30 * time.Second, minimum: time.Duration(0)},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -813,7 +999,10 @@ func NewParameters(
 		getValueLogger: getValueLogger,
 	}
 
-	_, err := parameters.Set("", false)
+	// Note: validationFlags excludes ValidationServerSide, so the
+	// Parameters.Set checkInproxyLists logic is not invoked; however, all
+	// the relevent lists currently default to empty values.
+	_, err := parameters.Set("", 0)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -848,6 +1037,21 @@ func makeDefaultParameters() (map[string]interface{}, error) {
 	return parameters, nil
 }
 
+const (
+
+	// ValidationSkipOnError indicates whether invalid tactics are to be
+	// skipped/omitted, or if Set should fail on invalid tactics. In some
+	// cases, clients set ValidationSkipOnError as older client code may
+	// download newer tactics which do not validate; while servers perform
+	// strict validation.
+	ValidationSkipOnError = 1
+
+	// ValidationServerSide indicates whether the validation is server-side,
+	// in which case additonal checks referencing serverSideOnly parameters
+	// are performed.
+	ValidationServerSide = 2
+)
+
 // Set replaces the current parameters. First, a set of parameters are
 // initialized using the default values. Then, each applyParameters is applied
 // in turn, with the later instances having precedence.
@@ -865,7 +1069,12 @@ func makeDefaultParameters() (map[string]interface{}, error) {
 // For use in logging, Set returns a count of the number of parameters applied
 // from each applyParameters.
 func (p *Parameters) Set(
-	tag string, skipOnError bool, applyParameters ...map[string]interface{}) ([]int, error) {
+	tag string,
+	validationFlags int,
+	applyParameters ...map[string]interface{}) ([]int, error) {
+
+	skipOnError := (validationFlags & ValidationSkipOnError) != 0
+	serverSide := (validationFlags & ValidationServerSide) != 0
 
 	makeTypedValue := func(templateValue, value interface{}) (interface{}, error) {
 
@@ -1005,6 +1214,27 @@ func (p *Parameters) Set(
 	}
 	osshPrefixSpecs, _ := osshPrefixSpecsValue.(transforms.Specs)
 
+	// Special case: in-proxy broker public keys in InproxyBrokerSpecs must
+	// appear in InproxyAllBrokerPublicKeys; and inproxy common compartment
+	// IDs must appear in InproxyAllCommonCompartmentIDs. This check is
+	// server-side only as the "All" parameters are serverSideOnly.
+
+	checkInproxyLists := !skipOnError && serverSide
+
+	inproxyAllBrokerPublicKeysValue, err := getAppliedValue(
+		InproxyAllBrokerPublicKeys, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	inproxyAllBrokerPublicKeys, _ := inproxyAllBrokerPublicKeysValue.([]string)
+
+	inproxyAllCommonCompartmentIDsValue, err := getAppliedValue(
+		InproxyAllCommonCompartmentIDs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	inproxyAllCommonCompartmentIDs, _ := inproxyAllCommonCompartmentIDsValue.([]string)
+
 	for i := 0; i < len(applyParameters); i++ {
 
 		count := 0
@@ -1120,6 +1350,14 @@ func (p *Parameters) Set(
 					}
 					return nil, errors.Trace(err)
 				}
+			case KeyDurations:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
 			case *BPFProgramSpec:
 				if v != nil {
 					err := v.Validate()
@@ -1161,7 +1399,11 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case FrontingSpecs:
-				err := v.Validate()
+				// By default, FrontingSpecs are not permitted to specify
+				// SkipVerify. This includes the ConjureAPIRegistrarFrontingSpecs
+				// case which uses MeekModePlaintextRoundTrip.
+				allowSkipVerify := false
+				err := v.Validate(allowSkipVerify)
 				if err != nil {
 					if skipOnError {
 						continue
@@ -1228,6 +1470,42 @@ func (p *Parameters) Set(
 					if err != nil {
 						return nil, errors.Trace(err)
 					}
+				}
+			case InproxyBrokerSpecsValue:
+
+				var checkList *[]string
+				if checkInproxyLists && name == InproxyBrokerSpecs {
+					checkList = &inproxyAllBrokerPublicKeys
+				}
+
+				err := v.Validate(checkList)
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case InproxyCompartmentIDsValue:
+
+				var checkList *[]string
+				if checkInproxyLists && name == InproxyCommonCompartmentIDs {
+					checkList = &inproxyAllCommonCompartmentIDs
+				}
+
+				err := v.Validate(checkList)
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+			case InproxyDataChannelTrafficShapingParametersValue:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
 				}
 			}
 
@@ -1376,7 +1654,7 @@ func (p *parametersSnapshot) getValue(name string, target interface{}) {
 	targetValue.Elem().Set(reflect.ValueOf(value))
 }
 
-// ParametersAccessor provides consistent, atomic access to  parameter values.
+// ParametersAccessor provides consistent, atomic access to parameter values.
 // Any customizations are applied transparently.
 type ParametersAccessor struct {
 	snapshot                       *parametersSnapshot
@@ -1421,10 +1699,17 @@ func (p ParametersAccessor) String(name string) string {
 	return value
 }
 
-func (p ParametersAccessor) Strings(name string) []string {
-	value := []string{}
-	p.snapshot.getValue(name, &value)
-	return value
+// Strings returns a []string parameter value. If multiple parameter names are
+// specified, the first name with a non-empty value is used.
+func (p ParametersAccessor) Strings(names ...string) []string {
+	for _, name := range names {
+		value := []string{}
+		p.snapshot.getValue(name, &value)
+		if len(value) > 0 {
+			return value
+		}
+	}
+	return []string{}
 }
 
 // Int returns an int parameter value.
@@ -1654,6 +1939,30 @@ func (p ParametersAccessor) KeyValues(name string) KeyValues {
 	return value
 }
 
+// KeyStrings returns a KeyStrings parameter value.
+func (p ParametersAccessor) KeyStrings(name, key string) []string {
+	value := KeyStrings{}
+	p.snapshot.getValue(name, &value)
+	return value[key]
+}
+
+// KeyDurations returns a KeyDurations parameter value, with string durations
+// converted to time.Duration.
+func (p ParametersAccessor) KeyDurations(name string) map[string]time.Duration {
+	value := KeyDurations{}
+	p.snapshot.getValue(name, &value)
+	durations := make(map[string]time.Duration)
+	for key, duration := range value {
+		d, err := time.ParseDuration(duration)
+		if err != nil {
+			// Skip invalid duration. Not expected with validation.
+			continue
+		}
+		durations[key] = d
+	}
+	return durations
+}
+
 // BPFProgram returns an assembled BPF program corresponding to a
 // BPFProgramSpec parameter value. Returns nil in the case of any empty
 // program.
@@ -1773,6 +2082,37 @@ func (p ParametersAccessor) ConjureTransports(name string) protocol.ConjureTrans
 	}
 
 	value := protocol.ConjureTransports{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// InproxyBrokerSpecs returns a InproxyBrokerSpecs parameter value. If
+// multiple parameter names are specified, the first name with a non-empty
+// value is used.
+func (p ParametersAccessor) InproxyBrokerSpecs(names ...string) InproxyBrokerSpecsValue {
+	for _, name := range names {
+		value := InproxyBrokerSpecsValue{}
+		p.snapshot.getValue(name, &value)
+		if len(value) > 0 {
+			return value
+		}
+	}
+	return InproxyBrokerSpecsValue{}
+}
+
+// InproxyBrokerSpecs returns a InproxyBrokerSpecs parameter value.
+func (p ParametersAccessor) InproxyCompartmentIDs(name string) InproxyCompartmentIDsValue {
+	value := InproxyCompartmentIDsValue{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+// InproxyDataChannelTrafficShapingParameters returns a
+// InproxyDataChannelTrafficShapingParameters parameter value.
+func (p ParametersAccessor) InproxyDataChannelTrafficShapingParameters(
+	name string) InproxyDataChannelTrafficShapingParametersValue {
+
+	value := InproxyDataChannelTrafficShapingParametersValue{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

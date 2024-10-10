@@ -112,12 +112,6 @@ tactics. Each time the tactics changes, this process is repeated so that
 obsolete tactics parameters are not retained in the client's Parameters
 instance.
 
-Tactics has a probability parameter that is used in a weighted coin flip to
-determine if the tactics is to be applied or skipped for the current client
-session. This allows for experimenting with provisional tactics; and obtaining
-non-tactic sample metrics in situations which would otherwise always use a
-tactic.
-
 Speed test data is used in filtered tactics for selection of parameters such as
 timeouts.
 
@@ -217,8 +211,8 @@ var (
 // matching filter are merged into the client tactics.
 //
 // The merge operation replaces any existing item in Parameter with a Parameter specified in
-// the newest matching tactics. The TTL and Probability of the newest matching tactics is taken,
-// although all but the DefaultTactics can omit the TTL and Probability fields.
+// the newest matching tactics. The TTL of the newest matching tactics is taken, although all
+// but the DefaultTactics can omit the TTL field.
 type Server struct {
 	common.ReloadableFile
 
@@ -232,7 +226,7 @@ type Server struct {
 	RequestObfuscatedKey []byte
 
 	// DefaultTactics is the baseline tactics for all clients. It must include a
-	// TTL and Probability.
+	// TTL.
 	DefaultTactics Tactics
 
 	// FilteredTactics is an ordered list of filter/tactics pairs. For a client,
@@ -363,8 +357,10 @@ type Tactics struct {
 	// no tactics data when the tag is unchanged.
 	TTL string
 
-	// Probability specifies the probability [0.0 - 1.0] with which
-	// the client should apply the tactics in a new session.
+	// Probability is an obsolete field which is no longer used, as overall
+	// tactics are now applied unconditionally; but it must be present, and
+	// greater than zero, in marshaled tactics, sent by the server, for
+	// compatibility with legacy client tactics validation.
 	Probability float64
 
 	// Parameters specify client parameters to override. These must
@@ -540,13 +536,6 @@ func (server *Server) Validate() error {
 			tactics.TTL = ""
 		}
 
-		if (validatingDefault && tactics.Probability == 0.0) ||
-			tactics.Probability < 0.0 ||
-			tactics.Probability > 1.0 {
-
-			return errors.TraceNew("invalid probability")
-		}
-
 		params, err := parameters.NewParameters(nil)
 		if err != nil {
 			return errors.Trace(err)
@@ -560,7 +549,8 @@ func (server *Server) Validate() error {
 				applyParameters, filteredTactics.Parameters)
 		}
 
-		_, err = params.Set("", false, applyParameters...)
+		_, err = params.Set(
+			"", parameters.ValidationServerSide, applyParameters...)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -919,6 +909,7 @@ func (server *Server) GetTactics(
 
 			var speedTestSamples []SpeedTestSample
 			err := getJSONRequestParam(apiParams, SPEED_TEST_SAMPLES_PARAMETER_NAME, &speedTestSamples)
+
 			if err != nil {
 				// TODO: log speed test parameter errors?
 				// This API param is not explicitly validated elsewhere.
@@ -958,6 +949,9 @@ func (server *Server) GetTactics(
 		// Continue to apply more matches. Last matching tactics has priority for any field.
 	}
 
+	// See Tactics.Probability doc comment.
+	tactics.Probability = 1.0
+
 	return tactics, nil
 }
 
@@ -980,7 +974,7 @@ func getJSONRequestParam(apiParams common.APIParameters, name string, value inte
 
 	// Remarshal the parameter from common.APIParameters, as the initial API parameter
 	// unmarshal will not have known the correct target type. I.e., instead of doing
-	// unmarhsal-into-struct, common.APIParameters will have an unmarshal-into-interface
+	// unmarshal-into-struct, common.APIParameters will have an unmarshal-into-interface
 	// value as described here: https://golang.org/pkg/encoding/json/#Unmarshal.
 
 	jsonValue, err := json.Marshal(apiParams[name])
@@ -1077,8 +1071,7 @@ func medianSampleRTTMilliseconds(samples []SpeedTestSample) int {
 func (t *Tactics) clone(includeServerSideOnly bool) *Tactics {
 
 	u := &Tactics{
-		TTL:         t.TTL,
-		Probability: t.Probability,
+		TTL: t.TTL,
 	}
 
 	// Note: there is no deep copy of parameter values; the the returned
@@ -1100,10 +1093,6 @@ func (t *Tactics) merge(includeServerSideOnly bool, u *Tactics) {
 
 	if u.TTL != "" {
 		t.TTL = u.TTL
-	}
-
-	if u.Probability != 0.0 {
-		t.Probability = u.Probability
 	}
 
 	// Note: there is no deep copy of parameter values; the the returned
@@ -1304,12 +1293,17 @@ func SetTacticsAPIParameters(
 	return nil
 }
 
-// HandleTacticsPayload updates the stored tactics with the given payload.
-// If the payload has a new tag/tactics, this is stored and a new expiry
-// time is set. If the payload has the same tag, the existing tactics are
-// retained and the exipry is extended using the previous TTL.
-// HandleTacticsPayload is called by the Psiphon client to handle the
-// tactics payload in the handshake response.
+// HandleTacticsPayload updates the stored tactics with the given payload. If
+// the payload has a new tag/tactics, this is stored and a new expiry time is
+// set. If the payload has the same tag, the existing tactics are retained,
+// the expiry is extended using the previous TTL, and a nil record is
+// rerturned.
+//
+// HandleTacticsPayload is called by the Psiphon client to handle the tactics
+// payload in the API handshake and inproxy broker responses. As the Psiphon
+// client has already called UseStoredTactics/FetchTactics and applied
+// tactics, the nil record return value allows the caller to skip an
+// unnecessary tactics parameters application.
 func HandleTacticsPayload(
 	storer Storer,
 	networkID string,
@@ -1338,16 +1332,25 @@ func HandleTacticsPayload(
 		return nil, errors.Trace(err)
 	}
 
-	err = applyTacticsPayload(storer, networkID, record, payload)
+	newTactics, err := applyTacticsPayload(storer, networkID, record, payload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	// TODO: if tags match, just set an expiry record, not the whole tactics record?
+	// Store the tactics record, which may contain new tactics, and always
+	// contains an extended TTL.
+	//
+	// TODO: if tags match, just set an expiry record, not the whole tactics
+	// record?
 
 	err = setStoredTacticsRecord(storer, networkID, record)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if !newTactics {
+		// Don't return a tactics record when the tactics have not changed.
+		record = nil
 	}
 
 	return record, nil
@@ -1515,7 +1518,7 @@ func FetchTactics(
 		return nil, errors.Trace(err)
 	}
 
-	err = applyTacticsPayload(storer, networkID, record, payload)
+	_, err = applyTacticsPayload(storer, networkID, record, payload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1679,41 +1682,61 @@ func applyTacticsPayload(
 	storer Storer,
 	networkID string,
 	record *Record,
-	payload *Payload) error {
+	payload *Payload) (bool, error) {
+
+	newTactics := false
 
 	if payload.Tag == "" {
-		return errors.TraceNew("invalid tag")
+		return newTactics, errors.TraceNew("invalid tag")
 	}
 
 	// Replace the tactics data when the tags differ.
 
 	if payload.Tag != record.Tag {
+
+		// There is a potential race condition that may arise with multiple
+		// concurrent requests which may return tactics, such as in-proxy
+		// proxy announcements. In this scenario, an in-flight request
+		// matches the existing current tactics tag; then a concurrent
+		// request is sent while new tactics become available and its
+		// response returns new tactics and a new tag; the client applies the
+		// new tags and tactics; then, finally, the response for the first
+		// request arrives with a now apparently different tag -- the
+		// original tag -- but no tactics payload. In this case, simply fail
+		// the apply operation.
+
+		// A nil payload.Tactics, of type json.RawMessage, can be serialized
+		// as the JSON "null".
+		if payload.Tactics == nil ||
+			bytes.Equal(payload.Tactics, []byte("null")) {
+			return newTactics, errors.TraceNew("missing tactics")
+		}
+
 		record.Tag = payload.Tag
 		record.Tactics = Tactics{}
 		err := json.Unmarshal(payload.Tactics, &record.Tactics)
 		if err != nil {
-			return errors.Trace(err)
+			return newTactics, errors.Trace(err)
 		}
+
+		newTactics = true
 	}
 
 	// Note: record.Tactics.TTL is validated by server
 	ttl, err := time.ParseDuration(record.Tactics.TTL)
 	if err != nil {
-		return errors.Trace(err)
+		return newTactics, errors.Trace(err)
 	}
 
 	if ttl <= 0 {
-		return errors.TraceNew("invalid TTL")
-	}
-	if record.Tactics.Probability <= 0.0 {
-		return errors.TraceNew("invalid probability")
+		return newTactics, errors.TraceNew("invalid TTL")
 	}
 
 	// Set or extend the expiry.
 
 	record.Expiry = time.Now().UTC().Add(ttl)
 
-	return nil
+	return newTactics, nil
 }
 
 func setStoredTacticsRecord(

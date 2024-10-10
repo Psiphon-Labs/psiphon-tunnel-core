@@ -56,7 +56,6 @@ func TestTactics(t *testing.T) {
       "RequestObfuscatedKey" : "%s",
       "DefaultTactics" : {
         "TTL" : "1s",
-        "Probability" : %0.1f,
         "Parameters" : {
           "NetworkLatencyMultiplier" : %0.1f,
           "ServerPacketManipulationSpecs" : [{"Name": "test-packetman-spec", "PacketSpecs": [["TCP-flags S"]]}]
@@ -126,7 +125,6 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("GenerateKeys failed: %s", err)
 	}
 
-	tacticsProbability := 0.5
 	tacticsNetworkLatencyMultiplier := 2.0
 	tacticsConnectionWorkerPoolSize := 5
 	tacticsLimitTunnelProtocols := protocol.TunnelProtocols{"OSSH", "SSH"}
@@ -139,7 +137,6 @@ func TestTactics(t *testing.T) {
 		encodedRequestPublicKey,
 		encodedRequestPrivateKey,
 		encodedObfuscatedKey,
-		tacticsProbability,
 		tacticsNetworkLatencyMultiplier,
 		tacticsConnectionWorkerPoolSize,
 		jsonTacticsLimitTunnelProtocols,
@@ -300,12 +297,8 @@ func TestTactics(t *testing.T) {
 			t.Fatalf("NewParameters failed: %s", err)
 		}
 
-		if r.Tactics.Probability != tacticsProbability {
-			t.Fatalf("Unexpected probability: %f", r.Tactics.Probability)
-		}
-
-		// skipOnError is true for Psiphon clients
-		counts, err := p.Set(r.Tag, true, r.Tactics.Parameters)
+		// ValidationSkipOnError is set for Psiphon clients
+		counts, err := p.Set(r.Tag, parameters.ValidationSkipOnError, r.Tactics.Parameters)
 		if err != nil {
 			t.Fatalf("Apply failed: %s", err)
 		}
@@ -462,7 +455,6 @@ func TestTactics(t *testing.T) {
 		encodedRequestPublicKey,
 		encodedRequestPrivateKey,
 		encodedObfuscatedKey,
-		tacticsProbability,
 		tacticsNetworkLatencyMultiplier,
 		tacticsConnectionWorkerPoolSize,
 		jsonTacticsLimitTunnelProtocols,
@@ -541,8 +533,19 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("HandleTacticsPayload failed: %s", err)
 	}
 
-	if handshakeTacticsRecord == nil {
-		t.Fatalf("expected tactics record")
+	// When tactic parameters are unchanged, HandleTacticsPayload returns nil,
+	// so that callers do not apply tactics unnecessarily.
+	//
+	// Check that nil is returned, but then directly load the record stored by
+	// HandleTacticsPayload in order to check metadata including the updated
+	// TTL.
+
+	if handshakeTacticsRecord != nil {
+		t.Fatalf("unexpected tactics record")
+	}
+	handshakeTacticsRecord, err = getStoredTacticsRecord(storer, networkID)
+	if err != nil {
+		t.Fatalf("getStoredTacticsRecord failed: %s", err)
 	}
 
 	if fetchTacticsRecord.Tag != handshakeTacticsRecord.Tag {
@@ -678,7 +681,6 @@ func TestTactics(t *testing.T) {
 		"",
 		"",
 		"",
-		tacticsProbability,
 		tacticsNetworkLatencyMultiplier,
 		tacticsConnectionWorkerPoolSize,
 		jsonTacticsLimitTunnelProtocols,
@@ -730,8 +732,7 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
       "RequestPrivateKey" : "%s",
       "RequestObfuscatedKey" : "%s",
       "DefaultTactics" : {
-        "TTL" : "60s",
-        "Probability" : 1.0
+        "TTL" : "60s"
       },
       %%s
     }
@@ -1122,6 +1123,10 @@ func (l *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
 
 func (l *testLogger) LogMetric(metric string, fields common.LogFields) {
 	fmt.Printf("METRIC: %s: fields=%+v\n", metric, fields)
+}
+
+func (l *testLogger) IsLogLevelDebug() bool {
+	return true
 }
 
 type testLoggerTrace struct {

@@ -38,6 +38,9 @@ var errRestrictedProvider = std_errors.New("restricted provider")
 // limited to GeoIP attributes as the client has not yet sent API parameters.
 // GeoIP uses the immediate peer IP, and so TacticsListener is suitable only
 // for tactics that do not require the original client GeoIP when fronted.
+//
+// In the case of inproxy tunnel protocols, the peer IP is the inproxy proxy
+// IP, and the tactics apply to the 2nd hop.
 type TacticsListener struct {
 	net.Listener
 	support        *SupportServices
@@ -155,7 +158,7 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 	replaySeed, doReplay := listener.support.ReplayCache.GetReplayFragmentor(
 		listener.tunnelProtocol, geoIPData)
 
-	if listener.tunnelProtocol == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+	if protocol.TunnelProtocolIsObfuscatedSSH(listener.tunnelProtocol) {
 		replaySeed = nil
 		doReplay = true
 	}

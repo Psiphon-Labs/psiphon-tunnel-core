@@ -47,7 +47,7 @@ func TestDecodeChallenge(t *testing.T) {
 		t.Error("Payload length is not long enough")
 	}
 
-	challenge.String()
+	_ = challenge.String()
 
 	outBytes := challenge.Bytes()
 

@@ -331,11 +331,11 @@ func generateUserAgent() string {
 		}
 
 		userAgentGenerators = []*userAgentGenerator{
-			&userAgentGenerator{chromeVersion, makeGenerator("Mozilla/5\\.0 \\(Macintosh; Intel Mac OS X 1[01]_(1|)[0-5]\\) AppleWebKit/537\\.36 \\(KHTML, like Gecko\\) Chrome/__VER__ Safari/537\\.36")},
-			&userAgentGenerator{chromeVersion, makeGenerator("Mozilla/5\\.0 \\(Windows NT 1(0|0|1)\\.0; (WOW64|Win64)(; x64|; x64|)\\) AppleWebKit/537\\.36 \\(KHTML, like Gecko\\) Chrome/__VER__ Safari/537\\.36")},
-			&userAgentGenerator{chromeVersion, makeGenerator("Mozilla/5\\.0 \\(Linux; Android (9|10|10|11|12); [a-zA-Z0-9_]{5,10}\\) AppleWebKit/537\\.36 \\(KHTML, like Gecko\\) Chrome/__VER__ Mobile Safari/537\\.36")},
-			&userAgentGenerator{safariVersion, makeGenerator("Mozilla/5\\.0 \\(iPhone; CPU iPhone OS 1[3-5]_[1-5] like Mac OS X\\) AppleWebKit/(__VER__|__VER__|600\\.[1-8]\\.[12][0-7]|537\\.36) \\(KHTML, like Gecko\\) Version/1[0-4]\\.[0-7](\\.[1-9][0-7]|) Mobile/[A-Z0-9]{6} Safari/__VER__")},
-			&userAgentGenerator{safariVersion, makeGenerator("Mozilla/5\\.0 \\(Macintosh; Intel Mac OS X 1[01]_(1|)[0-7](_[1-7]|)\\) AppleWebKit/(__VER__|__VER__|600\\.[1-8]\\.[12][0-7]|537\\.36) \\(KHTML, like Gecko\\) Version/1[0-4]\\.[0-7](\\.[1-9][0-7]|) Safari/__VER__")},
+			{chromeVersion, makeGenerator("Mozilla/5\\.0 \\(Macintosh; Intel Mac OS X 1[01]_(1|)[0-5]\\) AppleWebKit/537\\.36 \\(KHTML, like Gecko\\) Chrome/__VER__ Safari/537\\.36")},
+			{chromeVersion, makeGenerator("Mozilla/5\\.0 \\(Windows NT 1(0|0|1)\\.0; (WOW64|Win64)(; x64|; x64|)\\) AppleWebKit/537\\.36 \\(KHTML, like Gecko\\) Chrome/__VER__ Safari/537\\.36")},
+			{chromeVersion, makeGenerator("Mozilla/5\\.0 \\(Linux; Android (9|10|10|11|12); [a-zA-Z0-9_]{5,10}\\) AppleWebKit/537\\.36 \\(KHTML, like Gecko\\) Chrome/__VER__ Mobile Safari/537\\.36")},
+			{safariVersion, makeGenerator("Mozilla/5\\.0 \\(iPhone; CPU iPhone OS 1[3-5]_[1-5] like Mac OS X\\) AppleWebKit/(__VER__|__VER__|600\\.[1-8]\\.[12][0-7]|537\\.36) \\(KHTML, like Gecko\\) Version/1[0-4]\\.[0-7](\\.[1-9][0-7]|) Mobile/[A-Z0-9]{6} Safari/__VER__")},
+			{safariVersion, makeGenerator("Mozilla/5\\.0 \\(Macintosh; Intel Mac OS X 1[01]_(1|)[0-7](_[1-7]|)\\) AppleWebKit/(__VER__|__VER__|600\\.[1-8]\\.[12][0-7]|537\\.36) \\(KHTML, like Gecko\\) Version/1[0-4]\\.[0-7](\\.[1-9][0-7]|) Safari/__VER__")},
 		}
 	}
 

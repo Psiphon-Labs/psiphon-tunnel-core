@@ -461,6 +461,8 @@ func downloadRemoteServerListFile(
 	// MakeDownloadHttpClient will select either a tunneled
 	// or untunneled configuration.
 
+	payloadSecure := true
+	frontingUseDeviceBinder := true
 	httpClient, tunneled, getParams, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
@@ -468,7 +470,9 @@ func downloadRemoteServerListFile(
 		untunneledDialConfig,
 		skipVerify,
 		disableSystemRootCAs,
+		payloadSecure,
 		frontingSpecs,
+		frontingUseDeviceBinder,
 		func(frontingProviderID string) {
 			NoticeInfo(
 				"downloadRemoteServerListFile: selected fronting provider %s for %s",

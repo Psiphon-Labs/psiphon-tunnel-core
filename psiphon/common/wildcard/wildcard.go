@@ -57,7 +57,6 @@
 // BenchmarkPrefixGlob-4                 1000000      1502 ns/op
 // BenchmarkSuffixGlob-4                 1000000      1501 ns/op
 // BenchmarkMultipleGlob-4                300000      5203 ns/op
-//
 package wildcard
 
 import (

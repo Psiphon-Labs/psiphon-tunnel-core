@@ -31,6 +31,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,6 +39,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	inproxy_dtls "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy/dtls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -46,6 +50,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
+	"github.com/fxamacker/cbor/v2"
 )
 
 // Tunneler specifies the interface required by components that use tunnels.
@@ -215,13 +220,24 @@ func (tunnel *Tunnel) Activate(
 		// request. At this point, there is no operateTunnel monitor that will detect
 		// this condition with SSH keep alives.
 
-		timeout := tunnel.getCustomParameters().Duration(
-			parameters.PsiphonAPIRequestTimeout)
+		doInproxy := protocol.TunnelProtocolUsesInproxy(tunnel.dialParams.TunnelProtocol)
 
+		var timeoutParameter string
+		if doInproxy {
+			// Optionally allow more time in case the broker/server relay
+			// requires additional round trips to establish a new session.
+			timeoutParameter = parameters.InproxyPsiphonAPIRequestTimeout
+		} else {
+			timeoutParameter = parameters.PsiphonAPIRequestTimeout
+		}
+		timeout := tunnel.getCustomParameters().Duration(timeoutParameter)
+
+		var handshakeCtx context.Context
+		var cancelFunc context.CancelFunc
 		if timeout > 0 {
-			var cancelFunc context.CancelFunc
-			ctx, cancelFunc = context.WithTimeout(ctx, timeout)
-			defer cancelFunc()
+			handshakeCtx, cancelFunc = context.WithTimeout(ctx, timeout)
+		} else {
+			handshakeCtx, cancelFunc = context.WithCancel(ctx)
 		}
 
 		type newServerContextResult struct {
@@ -231,7 +247,48 @@ func (tunnel *Tunnel) Activate(
 
 		resultChannel := make(chan newServerContextResult)
 
+		wg := new(sync.WaitGroup)
+
+		if doInproxy {
+
+			// Launch a handler to handle broker/server relay SSH requests,
+			// which will occur when the broker needs to establish a new
+			// session with the server.
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				notice := true
+				select {
+				case serverRequest := <-tunnel.sshServerRequests:
+					if serverRequest != nil {
+						if serverRequest.Type == protocol.PSIPHON_API_INPROXY_RELAY_REQUEST_NAME {
+
+							if notice {
+								NoticeInfo(
+									"relaying inproxy broker packets for %s",
+									tunnel.dialParams.ServerEntry.GetDiagnosticID())
+								notice = false
+							}
+							tunnel.relayInproxyPacketRoundTrip(handshakeCtx, serverRequest)
+
+						} else {
+
+							// There's a potential race condition in which
+							// post-handshake SSH requests, such as OSL or
+							// alert requests, arrive to this handler instead
+							// of operateTunnel, so invoke HandleServerRequest here.
+							HandleServerRequest(tunnelOwner, tunnel, serverRequest)
+						}
+					}
+				case <-handshakeCtx.Done():
+					return
+				}
+			}()
+		}
+
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			serverContext, err := NewServerContext(tunnel)
 			resultChannel <- newServerContextResult{
 				serverContext: serverContext,
@@ -243,12 +300,15 @@ func (tunnel *Tunnel) Activate(
 
 		select {
 		case result = <-resultChannel:
-		case <-ctx.Done():
-			result.err = ctx.Err()
+		case <-handshakeCtx.Done():
+			result.err = handshakeCtx.Err()
 			// Interrupt the goroutine
 			tunnel.Close(true)
 			<-resultChannel
 		}
+
+		cancelFunc()
+		wg.Wait()
 
 		if result.err != nil {
 			return errors.Trace(result.err)
@@ -294,6 +354,55 @@ func (tunnel *Tunnel) Activate(
 	go tunnel.operateTunnel(tunnelOwner)
 
 	tunnel.mutex.Unlock()
+
+	return nil
+}
+
+func (tunnel *Tunnel) relayInproxyPacketRoundTrip(
+	ctx context.Context, request *ssh.Request) (retErr error) {
+
+	defer func() {
+		if retErr != nil {
+			request.Reply(false, nil)
+		}
+	}()
+
+	// Continue the broker/server relay started in handshake round trip.
+
+	// server -> broker
+
+	var relayRequest protocol.InproxyRelayRequest
+	err := cbor.Unmarshal(request.Payload, &relayRequest)
+
+	inproxyConn := tunnel.dialParams.inproxyConn.Load().(*inproxy.ClientConn)
+	if inproxyConn == nil {
+		return errors.TraceNew("missing inproxyConn")
+	}
+
+	responsePacket, err := inproxyConn.RelayPacket(ctx, relayRequest.Packet)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// RelayPacket may return a nil packet when the relay is complete.
+	if responsePacket == nil {
+		return nil
+	}
+
+	// broker -> server
+
+	relayResponse := &protocol.InproxyRelayResponse{
+		Packet: responsePacket,
+	}
+	responsePayload, err := protocol.CBOREncoding.Marshal(relayResponse)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = request.Reply(true, responsePayload)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	return nil
 }
@@ -752,20 +861,7 @@ func dialTunnel(
 
 	var dialConn net.Conn
 
-	if protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) {
-
-		dialConn, err = DialTLSTunnel(
-			ctx,
-			dialParams.GetTLSOSSHConfig(config),
-			dialParams.GetDialConfig(),
-			tlsOSSHApplyTrafficShaping,
-			tlsOSSHMinTLSPadding,
-			tlsOSSHMaxTLSPadding)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-	} else if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
 
 		dialConn, err = DialMeek(
 			ctx,
@@ -777,10 +873,54 @@ func dialTunnel(
 
 	} else if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) {
 
-		packetConn, remoteAddr, err := NewUDPConn(
-			ctx, "udp", false, "", dialParams.DirectDialAddress, dialParams.GetDialConfig())
-		if err != nil {
-			return nil, errors.Trace(err)
+		var packetConn net.PacketConn
+		var remoteAddr *net.UDPAddr
+
+		// Special case: explict in-proxy dial. TCP dials wire up in-proxy
+		// dials via DialConfig and its CustomDialer using
+		// makeInproxyTCPDialer. common/quic doesn't have an equivilent to
+		// CustomDialer.
+
+		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
+
+			packetConn, err = dialInproxy(ctx, config, dialParams)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			// Use the actual 2nd hop destination address as the remote
+			// address for correct behavior in
+			// common/quic.getMaxPreDiscoveryPacketSize, which differs for
+			// IPv4 vs. IPv6 destination addresses; and
+			// ObfuscatedPacketConn.RemoteAddr. The 2nd hop destination
+			// address is not actually dialed.
+			//
+			// Limitation: for domain destinations, the in-proxy proxy
+			// resolves the domain, so just assume IPv6, which has lower max
+			// padding(see quic.getMaxPreDiscoveryPacketSize), and use a stub
+			// address.
+
+			host, portStr, err := net.SplitHostPort(dialParams.DirectDialAddress)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			port, err := strconv.Atoi(portStr)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			IP := net.ParseIP(host)
+			if IP == nil {
+				IP = net.ParseIP("fd00::")
+			}
+			remoteAddr = &net.UDPAddr{IP: IP, Port: port}
+
+		} else {
+
+			packetConn, remoteAddr, err = NewUDPConn(
+				ctx, "udp", false, "", dialParams.DirectDialAddress, dialParams.GetDialConfig())
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
 		}
 
 		dialConn, err = quic.Dial(
@@ -793,7 +933,10 @@ func dialTunnel(
 			dialParams.ServerEntry.SshObfuscatedKey,
 			dialParams.ObfuscatedQUICPaddingSeed,
 			dialParams.ObfuscatedQUICNonceTransformerParameters,
-			dialParams.QUICDisablePathMTUDiscovery)
+			dialParams.QUICDisablePathMTUDiscovery,
+			dialParams.QUICDialEarly,
+			dialParams.QUICUseObfuscatedPSK,
+			dialParams.quicTLSClientSessionCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -812,150 +955,36 @@ func dialTunnel(
 
 	} else if protocol.TunnelProtocolUsesConjure(dialParams.TunnelProtocol) {
 
-		// Specify a cache key with a scope that ensures that:
-		//
-		// (a) cached registrations aren't used across different networks, as a
-		// registration requires the client's public IP to match the value at time
-		// of registration;
-		//
-		// (b) cached registrations are associated with specific Psiphon server
-		// candidates, to ensure that replay will use the same phantom IP(s).
-		//
-		// This scheme allows for reuse of cached registrations on network A when a
-		// client roams from network A to network B and back to network A.
-		//
-		// Using the network ID as a proxy for client public IP address is a
-		// heurisitic: it's possible that a clients public IP address changes
-		// without the network ID changing, and it's not guaranteed that the client
-		// will be assigned the original public IP on network A; so there's some
-		// chance the registration cannot be reused.
-
-		diagnosticID := dialParams.ServerEntry.GetDiagnosticID()
-
-		cacheKey := dialParams.NetworkID + "-" + diagnosticID
-
-		conjureConfig := &refraction.ConjureConfig{
-			RegistrationCacheTTL:        dialParams.ConjureCachedRegistrationTTL,
-			RegistrationCacheKey:        cacheKey,
-			EnableIPv6Dials:             conjureEnableIPv6Dials,
-			EnablePortRandomization:     conjureEnablePortRandomization,
-			EnableRegistrationOverrides: conjureEnableRegistrationOverrides,
-			Transport:                   dialParams.ConjureTransport,
-			STUNServerAddress:           dialParams.ConjureSTUNServerAddress,
-			DTLSEmptyInitialPacket:      dialParams.ConjureDTLSEmptyInitialPacket,
-			DiagnosticID:                diagnosticID,
-			Logger:                      NoticeCommonLogger(),
-		}
-
-		// Set extraFailureAction, which is invoked whenever the tunnel fails (i.e.,
-		// where RecordFailedTunnelStat is invoked). The action will remove any
-		// cached registration. When refraction.DialConjure succeeds, the underlying
-		// registration is cached. After refraction.DialConjure returns, it no
-		// longer modifies the cached state of that registration, assuming that it
-		// remains valid and effective. However adversarial impact on a given
-		// phantom IP may not become evident until after the initial TCP connection
-		// establishment and handshake performed by refraction.DialConjure. For
-		// example, it may be that the phantom dial is targeted for severe
-		// throttling which begins or is only evident later in the flow. Scheduling
-		// a call to DeleteCachedConjureRegistration allows us to invalidate the
-		// cached registration for a tunnel that fails later in its lifecycle.
-		//
-		// Note that extraFailureAction will retain a reference to conjureConfig for
-		// the lifetime of the tunnel.
-		extraFailureAction = func() {
-			refraction.DeleteCachedConjureRegistration(conjureConfig)
-		}
-
-		if dialParams.ConjureAPIRegistration {
-
-			// Use MeekConn to domain front Conjure API registration.
-			//
-			// ConjureAPIRegistrarFrontingSpecs are applied via
-			// dialParams.GetMeekConfig, and will be subject to replay.
-			//
-			// Since DialMeek will create a TLS connection immediately, and a cached
-			// registration may be used, we will delay initializing the MeekConn-based
-			// RoundTripper until we know it's needed. This is implemented by passing
-			// in a RoundTripper that establishes a MeekConn when RoundTrip is called.
-			//
-			// In refraction.dial we configure 0 retries for API registration requests,
-			// assuming it's better to let another Psiphon candidate retry, with new
-			// domaing fronting parameters. As such, we expect only one round trip call
-			// per NewHTTPRoundTripper, so, in practise, there's no performance penalty
-			// from establishing a new MeekConn per round trip.
-			//
-			// Performing the full DialMeek/RoundTrip operation here allows us to call
-			// MeekConn.Close and ensure all resources are immediately cleaned up.
-			roundTrip := func(request *http.Request) (*http.Response, error) {
-
-				conn, err := DialMeek(
-					ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
-				if err != nil {
-					return nil, errors.Trace(err)
-				}
-				defer conn.Close()
-
-				response, err := conn.RoundTrip(request)
-				if err != nil {
-					return nil, errors.Trace(err)
-				}
-
-				// Read the response into a buffer and close the response
-				// body, ensuring that MeekConn.Close closes all idle connections.
-				//
-				// Alternatively, we could Clone the request to set
-				// http.Request.Close and avoid keeping any idle connection
-				// open after the response body is read by gotapdance. Since
-				// the response body is small and since gotapdance does not
-				// stream the response body, we're taking this approach which
-				// ensures cleanup.
-
-				body, err := ioutil.ReadAll(response.Body)
-				_ = response.Body.Close()
-				if err != nil {
-					return nil, errors.Trace(err)
-				}
-				response.Body = io.NopCloser(bytes.NewReader(body))
-
-				return response, nil
-			}
-
-			conjureConfig.APIRegistrarHTTPClient = &http.Client{
-				Transport: common.NewHTTPRoundTripper(roundTrip),
-			}
-
-			conjureConfig.APIRegistrarBidirectionalURL =
-				dialParams.ConjureAPIRegistrarBidirectionalURL
-			conjureConfig.APIRegistrarDelay = dialParams.ConjureAPIRegistrarDelay
-
-		} else if dialParams.ConjureDecoyRegistration {
-
-			// The Conjure "phantom" connection is compatible with fragmentation, but
-			// the decoy registrar connection, like Tapdance, is not, so force it off.
-			// Any tunnel fragmentation metrics will refer to the "phantom" connection
-			// only.
-			conjureConfig.DoDecoyRegistration = true
-			conjureConfig.DecoyRegistrarWidth = dialParams.ConjureDecoyRegistrarWidth
-			conjureConfig.DecoyRegistrarDelay = dialParams.ConjureDecoyRegistrarDelay
-		}
-
-		dialConn, err = refraction.DialConjure(
+		dialConn, extraFailureAction, err = dialConjure(
 			ctx,
-			config.EmitRefractionNetworkingLogs,
-			config.GetPsiphonDataDirectory(),
-			NewRefractionNetworkingDialer(dialParams.GetDialConfig()).DialContext,
-			dialParams.DirectDialAddress,
-			conjureConfig)
+			config,
+			dialParams,
+			conjureEnableIPv6Dials,
+			conjureEnablePortRandomization,
+			conjureEnableRegistrationOverrides)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	} else if protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) {
+
+		dialConn, err = DialTLSTunnel(
+			ctx,
+			dialParams.GetTLSOSSHConfig(config),
+			dialParams.GetDialConfig(),
+			tlsOSSHApplyTrafficShaping,
+			tlsOSSHMinTLSPadding,
+			tlsOSSHMaxTLSPadding)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
 	} else {
 
-		dialConn, err = DialTCP(
-			ctx,
-			dialParams.DirectDialAddress,
-			dialParams.GetDialConfig())
+		// Use NewTCPDialer and don't use DialTCP directly, to ensure that
+		// dialParams.GetDialConfig()CustomDialer is applied.
+		tcpDialer := NewTCPDialer(dialParams.GetDialConfig())
+		dialConn, err = tcpDialer(ctx, "tcp", dialParams.DirectDialAddress)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -991,9 +1020,11 @@ func dialTunnel(
 		burstUpstreamTargetBytes, burstUpstreamDeadline,
 		burstDownstreamTargetBytes, burstDownstreamDeadline)
 
-	// Apply throttling (if configured)
+	// Apply throttling (if configured). The underlying dialConn is always a
+	// stream, even when the network conn uses UDP.
 	throttledConn := common.NewThrottledConn(
 		monitoredConn,
+		true,
 		rateLimits)
 
 	// Add obfuscated SSH layer
@@ -1029,6 +1060,13 @@ func dialTunnel(
 			return false
 		},
 		HostKeyFallback: func(addr string, remote net.Addr, publicKey ssh.PublicKey) error {
+
+			// The remote address input isn't checked. In the case of fronted
+			// protocols, the immediate remote peer won't be the Psiphon
+			// server. In direct cases, the client has just dialed the IP
+			// address and expected public key both taken from the same
+			// trusted, signed server entry.
+
 			if !bytes.Equal(expectedPublicKey, publicKey.Marshal()) {
 				return errors.TraceNew("unexpected host public key")
 			}
@@ -1076,7 +1114,7 @@ func dialTunnel(
 	} else {
 		// For TUNNEL_PROTOCOL_SSH only, the server is expected to randomize
 		// its KEX; setting PeerKEXPRNGSeed will ensure successful negotiation
-		// betweem two randomized KEXes.
+		// between two randomized KEXes.
 		if dialParams.ServerEntry.SshObfuscatedKey != "" {
 			sshClientConfig.PeerKEXPRNGSeed, err = protocol.DeriveSSHServerKEXPRNGSeed(
 				dialParams.ServerEntry.SshObfuscatedKey)
@@ -1239,6 +1277,311 @@ func dialTunnel(
 			extraFailureAction:  extraFailureAction,
 		},
 		nil
+}
+
+func dialConjure(
+	ctx context.Context,
+	config *Config,
+	dialParams *DialParameters,
+	enableIPv6Dials bool,
+	enablePortRandomization bool,
+	enableRegistrationOverrides bool) (net.Conn, func(), error) {
+
+	// Specify a cache key with a scope that ensures that:
+	//
+	// (a) cached registrations aren't used across different networks, as a
+	// registration requires the client's public IP to match the value at time
+	// of registration;
+	//
+	// (b) cached registrations are associated with specific Psiphon server
+	// candidates, to ensure that replay will use the same phantom IP(s).
+	//
+	// This scheme allows for reuse of cached registrations on network A when a
+	// client roams from network A to network B and back to network A.
+	//
+	// Using the network ID as a proxy for client public IP address is a
+	// heurisitic: it's possible that a clients public IP address changes
+	// without the network ID changing, and it's not guaranteed that the client
+	// will be assigned the original public IP on network A; so there's some
+	// chance the registration cannot be reused.
+
+	diagnosticID := dialParams.ServerEntry.GetDiagnosticID()
+
+	cacheKey := dialParams.NetworkID + "-" + diagnosticID
+
+	conjureConfig := &refraction.ConjureConfig{
+		RegistrationCacheTTL:        dialParams.ConjureCachedRegistrationTTL,
+		RegistrationCacheKey:        cacheKey,
+		EnableIPv6Dials:             enableIPv6Dials,
+		EnablePortRandomization:     enablePortRandomization,
+		EnableRegistrationOverrides: enableRegistrationOverrides,
+		Transport:                   dialParams.ConjureTransport,
+		STUNServerAddress:           dialParams.ConjureSTUNServerAddress,
+		DTLSEmptyInitialPacket:      dialParams.ConjureDTLSEmptyInitialPacket,
+		DiagnosticID:                diagnosticID,
+		Logger:                      NoticeCommonLogger(false),
+	}
+
+	if dialParams.ConjureAPIRegistration {
+
+		// Use MeekConn to domain front Conjure API registration.
+		//
+		// ConjureAPIRegistrarFrontingSpecs are applied via
+		// dialParams.GetMeekConfig, and will be subject to replay.
+		//
+		// Since DialMeek will create a TLS connection immediately, and a cached
+		// registration may be used, we will delay initializing the MeekConn-based
+		// RoundTripper until we know it's needed. This is implemented by passing
+		// in a RoundTripper that establishes a MeekConn when RoundTrip is called.
+		//
+		// In refraction.dial we configure 0 retries for API registration requests,
+		// assuming it's better to let another Psiphon candidate retry, with new
+		// domaing fronting parameters. As such, we expect only one round trip call
+		// per NewHTTPRoundTripper, so, in practise, there's no performance penalty
+		// from establishing a new MeekConn per round trip.
+		//
+		// Performing the full DialMeek/RoundTrip operation here allows us to call
+		// MeekConn.Close and ensure all resources are immediately cleaned up.
+		roundTrip := func(request *http.Request) (*http.Response, error) {
+
+			conn, err := DialMeek(
+				ctx, dialParams.GetMeekConfig(), dialParams.GetDialConfig())
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			defer conn.Close()
+
+			response, err := conn.RoundTrip(request)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			// Read the response into a buffer and close the response
+			// body, ensuring that MeekConn.Close closes all idle connections.
+			//
+			// Alternatively, we could Clone the request to set
+			// http.Request.Close and avoid keeping any idle connection
+			// open after the response body is read by gotapdance. Since
+			// the response body is small and since gotapdance does not
+			// stream the response body, we're taking this approach which
+			// ensures cleanup.
+
+			body, err := ioutil.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			response.Body = io.NopCloser(bytes.NewReader(body))
+
+			return response, nil
+		}
+
+		conjureConfig.APIRegistrarHTTPClient = &http.Client{
+			Transport: common.NewHTTPRoundTripper(roundTrip),
+		}
+
+		conjureConfig.APIRegistrarBidirectionalURL =
+			dialParams.ConjureAPIRegistrarBidirectionalURL
+		conjureConfig.APIRegistrarDelay = dialParams.ConjureAPIRegistrarDelay
+
+	} else if dialParams.ConjureDecoyRegistration {
+
+		// The Conjure "phantom" connection is compatible with fragmentation, but
+		// the decoy registrar connection, like Tapdance, is not, so force it off.
+		// Any tunnel fragmentation metrics will refer to the "phantom" connection
+		// only.
+		conjureConfig.DoDecoyRegistration = true
+		conjureConfig.DecoyRegistrarWidth = dialParams.ConjureDecoyRegistrarWidth
+		conjureConfig.DecoyRegistrarDelay = dialParams.ConjureDecoyRegistrarDelay
+	}
+
+	// Set extraFailureAction, which is invoked whenever the tunnel fails (i.e.,
+	// where RecordFailedTunnelStat is invoked). The action will remove any
+	// cached registration. When refraction.DialConjure succeeds, the underlying
+	// registration is cached. After refraction.DialConjure returns, it no
+	// longer modifies the cached state of that registration, assuming that it
+	// remains valid and effective. However adversarial impact on a given
+	// phantom IP may not become evident until after the initial TCP connection
+	// establishment and handshake performed by refraction.DialConjure. For
+	// example, it may be that the phantom dial is targeted for severe
+	// throttling which begins or is only evident later in the flow. Scheduling
+	// a call to DeleteCachedConjureRegistration allows us to invalidate the
+	// cached registration for a tunnel that fails later in its lifecycle.
+	//
+	// Note that extraFailureAction will retain a reference to conjureConfig for
+	// the lifetime of the tunnel.
+	extraFailureAction := func() {
+		refraction.DeleteCachedConjureRegistration(conjureConfig)
+	}
+
+	dialCtx := ctx
+	if protocol.ConjureTransportUsesDTLS(dialParams.ConjureTransport) {
+		// Conjure doesn't use the DTLS seed scheme, which supports in-proxy
+		// DTLS randomization. But every DTLS dial expects to find a seed
+		// state, so set the no-seed state.
+		dialCtx = inproxy_dtls.SetNoDTLSSeed(ctx)
+	}
+
+	dialConn, err := refraction.DialConjure(
+		dialCtx,
+		config.EmitRefractionNetworkingLogs,
+		config.GetPsiphonDataDirectory(),
+		NewRefractionNetworkingDialer(dialParams.GetDialConfig()).DialContext,
+		dialParams.DirectDialAddress,
+		conjureConfig)
+	if err != nil {
+
+		// When this function fails, invoke extraFailureAction directly; when it
+		// succeeds, return extraFailureAction to be called later.
+		extraFailureAction()
+
+		return nil, nil, errors.Trace(err)
+	}
+
+	return dialConn, extraFailureAction, nil
+}
+
+// makeInproxyTCPDialer returns a dialer which proxies TCP dials via an
+// in-proxy proxy, as configured in dialParams.
+//
+// Limitation: MeekConn may redial TCP for a single tunnel connection, but
+// that case is not supported by the in-proxy protocol, as the in-proxy proxy
+// closes both its WebRTC DataChannel and the overall client connection when
+// the upstream TCP connection closes. Any new connection from the client to
+// the proxy must be a new tunnel connection with and accompanying
+// broker/server relay. As a future enhancement, consider extending the
+// in-proxy protocol to enable the client and proxy to establish additional
+// WebRTC DataChannels and new upstream TCP connections within the scope of a
+// single proxy/client connection.
+func makeInproxyTCPDialer(
+	config *Config, dialParams *DialParameters) common.Dialer {
+
+	return func(ctx context.Context, _, _ string) (net.Conn, error) {
+
+		if dialParams.inproxyConn.Load() != nil {
+			return nil, errors.TraceNew("redial not supported")
+		}
+
+		var conn net.Conn
+		var err error
+
+		conn, err = dialInproxy(ctx, config, dialParams)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// When the TCP fragmentor is configured for the 2nd hop protocol,
+		// approximate the behavior by applying the fragmentor to the WebRTC
+		// DataChannel writes, which will result in delays and DataChannel
+		// message sizes which will be reflected in the proxy's relay to its
+		// upstream TCP connection.
+		//
+		// This code is copied from DialTCP.
+		//
+		// Limitation: TCP BPF settings are not supported and currently
+		// disabled for all 2nd hop cases in
+		// protocol.TunnelProtocolMayUseClientBPF.
+
+		if dialParams.dialConfig.FragmentorConfig.MayFragment() {
+			conn = fragmentor.NewConn(
+				dialParams.dialConfig.FragmentorConfig,
+				func(message string) {
+					NoticeFragmentor(dialParams.dialConfig.DiagnosticID, message)
+				},
+				conn)
+		}
+
+		return conn, nil
+	}
+}
+
+// dialInproxy performs the in-proxy dial and returns the resulting conn for
+// use as an underlying conn for the 2nd hop protocol. The in-proxy dial
+// first connects to the broker (or reuses an existing connection) to match
+// with a proxy; and then establishes connection to the proxy.
+func dialInproxy(
+	ctx context.Context,
+	config *Config,
+	dialParams *DialParameters) (*inproxy.ClientConn, error) {
+
+	isProxy := false
+	webRTCDialInstance, err := NewInproxyWebRTCDialInstance(
+		config,
+		dialParams.NetworkID,
+		isProxy,
+		dialParams.inproxyNATStateManager,
+		dialParams.InproxySTUNDialParameters,
+		dialParams.InproxyWebRTCDialParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// dialAddress indicates to the broker and proxy how to dial the upstream
+	// Psiphon server, based on the 2nd hop tunnel protocol.
+
+	networkProtocol := inproxy.NetworkProtocolUDP
+	reliableTransport := false
+	if protocol.TunnelProtocolUsesTCP(dialParams.TunnelProtocol) {
+		networkProtocol = inproxy.NetworkProtocolTCP
+		reliableTransport = true
+	}
+
+	dialAddress := dialParams.DirectDialAddress
+	if protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
+		dialAddress = dialParams.MeekDialAddress
+	}
+
+	// Specify the value to be returned by inproxy.ClientConn.RemoteAddr.
+	// Currently, the one caller of RemoteAddr is utls, which uses the
+	// RemoteAddr as a TLS session cache key when there is no SNI.
+	// GetTLSSessionCacheKeyAddress returns a cache key value that is a valid
+	// address and that is also a more appropriate TLS session cache key than
+	// the proxy address.
+
+	remoteAddrOverride, err := dialParams.ServerEntry.GetTLSSessionCacheKeyAddress(
+		dialParams.TunnelProtocol)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Unlike the proxy broker case, clients already actively fetch tactics
+	// during tunnel estalishment, so tactics.SetTacticsAPIParameters are not
+	// sent to the broker and no tactics are returned by the broker.
+	params := getBaseAPIParameters(
+		baseParametersNoDialParameters, true, config, nil)
+
+	common.LogFields(params).Add(dialParams.GetInproxyBrokerMetrics())
+
+	// The debugLogging flag is passed to both NoticeCommonLogger and to the
+	// inproxy package as well; skipping debug logs in the inproxy package,
+	// before calling into the notice logger, avoids unnecessary allocations
+	// and formatting when debug logging is off.
+	debugLogging := config.InproxyEnableWebRTCDebugLogging
+
+	clientConfig := &inproxy.ClientConfig{
+		Logger:                       NoticeCommonLogger(debugLogging),
+		EnableWebRTCDebugLogging:     debugLogging,
+		BaseAPIParameters:            params,
+		BrokerClient:                 dialParams.inproxyBrokerClient,
+		WebRTCDialCoordinator:        webRTCDialInstance,
+		ReliableTransport:            reliableTransport,
+		DialNetworkProtocol:          networkProtocol,
+		DialAddress:                  dialAddress,
+		RemoteAddrOverride:           remoteAddrOverride,
+		PackedDestinationServerEntry: dialParams.inproxyPackedSignedServerEntry,
+		MustUpgrade:                  config.OnInproxyMustUpgrade,
+	}
+
+	conn, err := inproxy.DialClient(ctx, clientConfig)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// The inproxy.ClientConn is stored in dialParams.inproxyConn in order to
+	// later fetch its connection ID and to facilitate broker/client replay.
+	dialParams.inproxyConn.Store(conn)
+
+	return conn, nil
 }
 
 // Fields are exported for JSON encoding in NoticeLivenessTest.
@@ -1600,14 +1943,7 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 
 		case serverRequest := <-tunnel.sshServerRequests:
 			if serverRequest != nil {
-				err := HandleServerRequest(tunnelOwner, tunnel, serverRequest.Type, serverRequest.Payload)
-				if err == nil {
-					serverRequest.Reply(true, nil)
-				} else {
-					NoticeWarning("HandleServerRequest for %s failed: %s", serverRequest.Type, err)
-					serverRequest.Reply(false, nil)
-
-				}
+				HandleServerRequest(tunnelOwner, tunnel, serverRequest)
 			}
 
 		case <-tunnel.operateCtx.Done():

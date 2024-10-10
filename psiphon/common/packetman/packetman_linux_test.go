@@ -1,3 +1,4 @@
+//go:build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
 // +build PSIPHON_RUN_PACKET_MANIPULATOR_TEST
 
 /*
@@ -84,7 +85,7 @@ func testPacketManipulator(useIPv6 bool, t *testing.T) {
 	config := &Config{
 		Logger:        newTestLogger(),
 		ProtocolPorts: []int{listenerPort},
-		Specs:         []*Spec{&Spec{Name: testSpecName, PacketSpecs: [][]string{[]string{"TCP-flags S"}}}},
+		Specs:         []*Spec{{Name: testSpecName, PacketSpecs: [][]string{{"TCP-flags S"}}}},
 		SelectSpecName: func(protocolPort int, _ net.IP) (string, interface{}) {
 			if protocolPort == listenerPort {
 				return testSpecName, extraDataValue
@@ -175,6 +176,10 @@ func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTra
 }
 
 func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
+}
+
+func (logger *testLogger) IsLogLevelDebug() bool {
+	return true
 }
 
 type testLogTrace struct {

@@ -90,8 +90,6 @@ var tunnel *clientlib.PsiphonTunnel
 // Memory managed by PsiphonTunnel which is allocated in Start and freed in Stop
 var managedStartResult *C.char
 
-//export PsiphonTunnelStart
-//
 // ******************************* WARNING ********************************
 // The underlying memory referenced by the return value of Start is managed
 // by PsiphonTunnel and attempting to free it explicitly will cause the
@@ -107,24 +105,27 @@ var managedStartResult *C.char
 // null-terminated buffer of C chars.
 // Start will return,
 // On success:
-//   {
-//     "Code": 0,
-//     "ConnectTimeMS": <milliseconds to establish tunnel>,
-//     "HTTPProxyPort": <http proxy port number>,
-//     "SOCKSProxyPort": <socks proxy port number>
-//   }
+//
+//	{
+//	  "Code": 0,
+//	  "ConnectTimeMS": <milliseconds to establish tunnel>,
+//	  "HTTPProxyPort": <http proxy port number>,
+//	  "SOCKSProxyPort": <socks proxy port number>
+//	}
 //
 // On timeout:
-//   {
-//     "Code": 1,
-//     "Error": <error message>
-//   }
+//
+//	{
+//	  "Code": 1,
+//	  "Error": <error message>
+//	}
 //
 // On other error:
-//   {
-//     "Code": 2,
-//     "Error": <error message>
-//   }
+//
+//	{
+//	  "Code": 2,
+//	  "Error": <error message>
+//	}
 //
 // Parameters.clientPlatform should be of the form OS_OSVersion_BundleIdentifier where
 // both the OSVersion and BundleIdentifier fields are optional. If clientPlatform is set
@@ -132,27 +133,29 @@ var managedStartResult *C.char
 // used instead.
 //
 // Provided below are links to platform specific code which can be used to find some of the above fields:
-//   Android:
-//     - OSVersion: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L573
-//     - BundleIdentifier: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L575
-//   iOS:
-//     - OSVersion: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L612
-//     - BundleIdentifier: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L622
+//
+//	Android:
+//	  - OSVersion: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L573
+//	  - BundleIdentifier: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L575
+//	iOS:
+//	  - OSVersion: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L612
+//	  - BundleIdentifier: https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L622
 //
 // Some examples of valid client platform strings are:
 //
-//   "Android_4.2.2_com.example.exampleApp"
-//   "iOS_11.4_com.example.exampleApp"
-//   "Windows"
+//	"Android_4.2.2_com.example.exampleApp"
+//	"iOS_11.4_com.example.exampleApp"
+//	"Windows"
 //
 // Parameters.networkID must be a non-empty string and follow the format specified by:
 // https://godoc.org/github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon#NetworkIDGetter.
 // Provided below are links to platform specific code which can be used to generate
 // valid network identifier strings:
-//   Android:
-//     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L371
-//   iOS:
-//     - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
+//
+//	Android:
+//	  - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/Android/PsiphonTunnel/PsiphonTunnel.java#L371
+//	iOS:
+//	  - https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/3d344194d21b250e0f18ededa4b4459a373b0690/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m#L1105
 //
 // Parameters.establishTunnelTimeoutSeconds specifies a time limit after which to stop
 // attempting to connect and return an error if an active tunnel has not been established.
@@ -160,6 +163,8 @@ var managedStartResult *C.char
 // establish an active tunnel indefinitely (or until PsiphonTunnelStop is called).
 // Timeout values >= 0 override the optional `EstablishTunnelTimeoutSeconds` config field;
 // null causes the config value to be used.
+//
+//export PsiphonTunnelStart
 func PsiphonTunnelStart(cConfigJSON, cEmbeddedServerEntryList *C.char, cParams *C.struct_Parameters) *C.char {
 	// Stop any active tunnels
 	PsiphonTunnelStop()
@@ -243,13 +248,13 @@ func PsiphonTunnelStart(cConfigJSON, cEmbeddedServerEntryList *C.char, cParams *
 	return managedStartResult
 }
 
-//export PsiphonTunnelStop
-//
 // Stop stops the controller if it is running and waits for it to clean up and exit.
 //
 // Stop should always be called after a successful call to Start to ensure the
 // controller is not left running and memory is released.
 // It is safe to call this function when the tunnel is not running.
+//
+//export PsiphonTunnelStop
 func PsiphonTunnelStop() {
 	freeManagedStartResult()
 	if tunnel != nil {
@@ -277,10 +282,11 @@ func marshalStartResult(result startResult) *C.char {
 // provided error.
 //
 // The JSON will be in the form of:
-// {
-//   "Code": 2,
-//   "Error": <error message>
-// }
+//
+//	{
+//	  "Code": 2,
+//	  "Error": <error message>
+//	}
 func startErrorJSON(err error) *C.char {
 	var result startResult
 	result.Code = startResultCodeOtherError

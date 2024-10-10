@@ -121,6 +121,25 @@ public class PsiphonTunnel {
         default void onApplicationParameters(Object parameters) {}
         default void onServerAlert(String reason, String subject, List<String> actionURLs) {}
         /**
+         * Called when tunnel-core reports that a selected in-proxy mode --
+         * including running a proxy; or running a client in personal pairing
+         * mode -- cannot function without an app upgrade. The receiver
+         * should alert the user to upgrade the app and/or disable the
+         * unsupported mode(s). This callback is followed by a tunnel-core
+         * shutdown.
+         */
+        default void onInproxyMustUpgrade() {}
+        /**
+         * Called when tunnel-core reports proxy usage statistics.
+         * By default onInproxyProxyActivity is disabled. Enable it by setting
+         * EmitInproxyProxyActivity to true in the Psiphon config.
+         * @param connectingClients Number of clients connecting to the proxy.
+         * @param connectedClients Number of clients currently connected to the proxy.
+         * @param bytesUp  Bytes uploaded through the proxy since the last report.
+         * @param bytesDown Bytes downloaded through the proxy since the last report.
+         */
+        default void onInproxyProxyActivity(int connectingClients, int connectedClients,long bytesUp, long bytesDown) {}
+        /**
          * Called when tunnel-core reports connected server region information.
          * @param region The server region received.
          */
@@ -872,9 +891,18 @@ public class PsiphonTunnel {
                     actionURLsList.add(actionURLs.getString(i));
                 }
                 mHostService.onServerAlert(
-                        notice.getJSONObject("data").getString("reason"),
-                        notice.getJSONObject("data").getString("subject"),
-                        actionURLsList);
+                    notice.getJSONObject("data").getString("reason"),
+                    notice.getJSONObject("data").getString("subject"),
+                    actionURLsList);
+            } else if (noticeType.equals("InproxyMustUpgrade")) {
+                mHostService.onInproxyMustUpgrade();
+            } else if (noticeType.equals("InproxyProxyActivity")) {
+                JSONObject data = notice.getJSONObject("data");
+                mHostService.onInproxyProxyActivity(
+                        data.getInt("connectingClients"),
+                        data.getInt("connectedClients"),
+                        data.getLong("bytesUp"),
+                        data.getLong("bytesDown"));
             }
 
             if (diagnostic) {
@@ -1089,22 +1117,24 @@ public class PsiphonTunnel {
             // 40569). hasIPv6Route provides the same functionality via a
             // callback into Java code.
 
-            for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                if (netInterface.isUp() &&
-                        !netInterface.isLoopback() &&
-                        !netInterface.isPointToPoint()) {
-                    for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
+                // Note: don't exclude interfaces with the isPointToPoint
+                // property, which is true for certain mobile networks.
 
-                        // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
-                        // "Java will never return an IPv4-mapped address.
-                        //  These classes can take an IPv4-mapped address as
-                        //  input, both in byte array and text
-                        //  representation. However, it will be converted
-                        //  into an IPv4 address." As such, when the type of
-                        //  the IP address is Inet6Address, this should be
-                        //  an actual IPv6 address.
+                for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                    if (netInterface.isUp() &&
+                        !netInterface.isLoopback()) {
+                        for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
 
-                        if (address instanceof Inet6Address &&
+                            // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
+                            // "Java will never return an IPv4-mapped address.
+                            //  These classes can take an IPv4-mapped address as
+                            //  input, both in byte array and text
+                            //  representation. However, it will be converted
+                            //  into an IPv4 address." As such, when the type of
+                            //  the IP address is Inet6Address, this should be
+                            //  an actual IPv6 address.
+
+                            if (address instanceof Inet6Address &&
                                 !address.isLinkLocalAddress() &&
                                 !address.isSiteLocalAddress() &&
                                 !address.isMulticastAddress ()) {

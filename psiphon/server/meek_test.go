@@ -59,45 +59,54 @@ func TestCachedResponse(t *testing.T) {
 		bufferSize          int
 		extendedBufferSize  int
 		extendedBufferCount int
+		extendedBufferLimit int
 		minBytesPerWrite    int
 		maxBytesPerWrite    int
 		copyPosition        int
 		expectedSuccess     bool
 	}{
-		{1, 16, 16, 0, 0, 1, 1, 0, true},
+		{1, 16, 16, 0, 0, -1, 1, 1, 0, true},
 
-		{1, 31, 16, 0, 0, 1, 1, 15, true},
+		{1, 31, 16, 0, 0, -1, 1, 1, 15, true},
 
-		{1, 16, 2, 2, 7, 1, 1, 0, true},
+		{1, 16, 2, 2, 7, -1, 1, 1, 0, true},
 
-		{1, 31, 15, 3, 5, 1, 1, 1, true},
+		{1, 31, 15, 3, 5, -1, 1, 1, 1, true},
 
-		{1, 16, 16, 0, 0, 1, 1, 16, true},
+		{1, 16, 16, 0, 0, -1, 1, 1, 16, true},
 
-		{1, 64*KB + 1, 64 * KB, 64 * KB, 1, 1, 1 * KB, 64 * KB, true},
+		{1, 64*KB + 1, 64 * KB, 64 * KB, 1, -1, 1, 1 * KB, 64 * KB, true},
 
-		{1, 10 * MB, 64 * KB, 64 * KB, 158, 1, 32 * KB, 0, false},
+		{1, 10 * MB, 64 * KB, 64 * KB, 158, -1, 1, 32 * KB, 0, false},
 
-		{1, 10 * MB, 64 * KB, 64 * KB, 159, 1, 32 * KB, 0, true},
+		{1, 10 * MB, 64 * KB, 64 * KB, 159, -1, 1, 32 * KB, 0, true},
 
-		{1, 10 * MB, 64 * KB, 64 * KB, 160, 1, 32 * KB, 0, true},
+		{1, 10 * MB, 64 * KB, 64 * KB, 160, -1, 1, 32 * KB, 0, true},
 
-		{1, 128 * KB, 64 * KB, 0, 0, 1, 1 * KB, 64 * KB, true},
+		{1, 128 * KB, 64 * KB, 0, 0, -1, 1, 1 * KB, 64 * KB, true},
 
-		{1, 128 * KB, 64 * KB, 0, 0, 1, 1 * KB, 63 * KB, false},
+		{1, 128 * KB, 64 * KB, 0, 0, -1, 1, 1 * KB, 63 * KB, false},
 
-		{1, 200 * KB, 64 * KB, 0, 0, 1, 1 * KB, 136 * KB, true},
+		{1, 200 * KB, 64 * KB, 0, 0, -1, 1, 1 * KB, 136 * KB, true},
 
-		{10, 10 * MB, 64 * KB, 64 * KB, 1589, 1, 32 * KB, 0, false},
+		{10, 10 * MB, 64 * KB, 64 * KB, 1589, -1, 1, 32 * KB, 0, false},
 
-		{10, 10 * MB, 64 * KB, 64 * KB, 1590, 1, 32 * KB, 0, true},
+		{10, 10 * MB, 64 * KB, 64 * KB, 1590, -1, 1, 32 * KB, 0, true},
+
+		{10, 10 * MB, 64 * KB, 64 * KB, 1590, 32, 1, 32 * KB, 0, false},
 	}
 
 	for _, testCase := range testCases {
 		description := fmt.Sprintf("test case: %+v", testCase)
 		t.Run(description, func(t *testing.T) {
 
-			pool := NewCachedResponseBufferPool(testCase.extendedBufferSize, testCase.extendedBufferCount)
+			limit := testCase.extendedBufferCount
+			if testCase.extendedBufferLimit != -1 {
+				limit = testCase.extendedBufferLimit
+			}
+
+			pool := NewCachedResponseBufferPool(
+				testCase.extendedBufferSize, testCase.extendedBufferCount, limit)
 
 			responses := make([]*CachedResponse, testCase.concurrentResponses)
 			for i := 0; i < testCase.concurrentResponses; i++ {

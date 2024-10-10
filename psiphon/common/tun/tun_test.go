@@ -326,7 +326,7 @@ type testServer struct {
 	metricsUpdater MetricsUpdater
 	tunServer      *Server
 	unixListener   net.Listener
-	clientConns    *common.Conns
+	clientConns    *common.Conns[net.Conn]
 	workers        *sync.WaitGroup
 }
 
@@ -376,7 +376,7 @@ func startTestServer(
 		metricsUpdater: metricsUpdater,
 		tunServer:      tunServer,
 		unixListener:   unixListener,
-		clientConns:    common.NewConns(),
+		clientConns:    common.NewConns[net.Conn](),
 		workers:        new(sync.WaitGroup),
 	}
 
@@ -550,7 +550,7 @@ func (client *testClient) stop() {
 type testTCPServer struct {
 	listenerIPAddress string
 	tcpListener       net.Listener
-	clientConns       *common.Conns
+	clientConns       *common.Conns[net.Conn]
 	workers           *sync.WaitGroup
 }
 
@@ -588,7 +588,7 @@ func startTestTCPServer(useIPv6 bool) (*testTCPServer, error) {
 	server := &testTCPServer{
 		listenerIPAddress: hostIPaddress,
 		tcpListener:       tcpListener,
-		clientConns:       common.NewConns(),
+		clientConns:       common.NewConns[net.Conn](),
 		workers:           new(sync.WaitGroup),
 	}
 
@@ -815,6 +815,10 @@ func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
 		default:
 		}
 	}
+}
+
+func (l *testLogger) IsLogLevelDebug() bool {
+	return true
 }
 
 func (logger *testLogger) getLastPacketMetrics() common.LogFields {

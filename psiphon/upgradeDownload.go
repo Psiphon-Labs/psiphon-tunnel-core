@@ -87,6 +87,8 @@ func DownloadUpgrade(
 
 	downloadURL := urls.Select(attempt)
 
+	payloadSecure := true
+	frontingUseDeviceBinder := true
 	httpClient, _, _, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
@@ -94,7 +96,9 @@ func DownloadUpgrade(
 		untunneledDialConfig,
 		downloadURL.SkipVerify,
 		config.DisableSystemRootCAs,
+		payloadSecure,
 		downloadURL.FrontingSpecs,
+		frontingUseDeviceBinder,
 		func(frontingProviderID string) {
 			NoticeInfo(
 				"DownloadUpgrade: selected fronting provider %s for %s",

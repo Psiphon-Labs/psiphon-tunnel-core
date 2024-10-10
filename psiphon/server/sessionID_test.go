@@ -49,10 +49,8 @@ func TestDuplicateSessionID(t *testing.T) {
 	// Configure server
 
 	generateConfigParams := &GenerateConfigParams{
-		ServerIPAddress:      "127.0.0.1",
-		EnableSSHAPIRequests: true,
-		WebServerPort:        8000,
-		TunnelProtocolPorts:  map[string]int{"OSSH": 4000},
+		ServerIPAddress:     "127.0.0.1",
+		TunnelProtocolPorts: map[string]int{"OSSH": 4000},
 	}
 
 	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
@@ -126,8 +124,8 @@ func TestDuplicateSessionID(t *testing.T) {
 	clientConfigJSONTemplate := `
     {
         "DataRootDirectory" : "%s",
-        "SponsorId" : "0",
-        "PropagationChannelId" : "0",
+        "SponsorId" : "0000000000000000",
+        "PropagationChannelId" : "0000000000000000",
         "SessionID" : "00000000000000000000000000000000"
     }`
 
@@ -168,9 +166,13 @@ func TestDuplicateSessionID(t *testing.T) {
 			clientConfig,
 			nil,
 			nil,
+			nil,
+			nil,
 			func(_ *protocol.ServerEntry, _ string) bool { return false },
 			func(_ *protocol.ServerEntry) (string, bool) { return "OSSH", true },
 			serverEntry,
+			nil,
+			nil,
 			false,
 			0,
 			0)

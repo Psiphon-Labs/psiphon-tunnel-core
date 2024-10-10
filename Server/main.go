@@ -166,8 +166,6 @@ func main() {
 				&server.GenerateConfigParams{
 					LogFilename:                generateLogFilename,
 					ServerIPAddress:            serverIPaddress,
-					EnableSSHAPIRequests:       true,
-					WebServerPort:              generateWebServerPort,
 					TunnelProtocolPorts:        tunnelProtocolPorts,
 					TrafficRulesConfigFilename: generateTrafficRulesConfigFilename,
 					OSLConfigFilename:          generateOSLConfigFilename,

@@ -105,6 +105,16 @@ func (c *gQUICConnection) isErrorIndicatingClosed(err error) bool {
 	return false
 }
 
+func (c *gQUICConnection) isEarlyDataRejected(err error) bool {
+	// 0-RTT is not supported by gQUIC.
+	return false
+}
+
+func (c *gQUICConnection) connectionMetrics() quicConnectionMetrics {
+	// Not supported by gQUIC.
+	return quicConnectionMetrics{}
+}
+
 func gQUICDialContext(
 	ctx context.Context,
 	packetConn net.PacketConn,

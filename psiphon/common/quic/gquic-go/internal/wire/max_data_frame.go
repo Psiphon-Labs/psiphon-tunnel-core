@@ -28,7 +28,7 @@ func parseMaxDataFrame(r *bytes.Reader, version protocol.VersionNumber) (*MaxDat
 	return frame, nil
 }
 
-//Write writes a MAX_STREAM_DATA frame
+// Write writes a MAX_STREAM_DATA frame
 func (f *MaxDataFrame) Write(b *bytes.Buffer, version protocol.VersionNumber) error {
 	if !version.UsesIETFFrameFormat() {
 		// write a gQUIC WINDOW_UPDATE frame (with stream ID 0, which means connection-level there)

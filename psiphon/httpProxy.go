@@ -74,7 +74,6 @@ import (
 //
 // Origin URLs must include the scheme prefix ("http://" or "https://") and must be
 // URL encoded.
-//
 type HttpProxy struct {
 	config                 *Config
 	tunneler               Tunneler
@@ -86,7 +85,7 @@ type HttpProxy struct {
 	urlProxyDirectRelay    *http.Transport
 	urlProxyDirectClient   *http.Client
 	responseHeaderTimeout  time.Duration
-	openConns              *common.Conns
+	openConns              *common.Conns[net.Conn]
 	stopListeningBroadcast chan struct{}
 	listenIP               string
 	listenPort             int
@@ -173,7 +172,7 @@ func NewHttpProxy(
 		urlProxyDirectRelay:    urlProxyDirectRelay,
 		urlProxyDirectClient:   urlProxyDirectClient,
 		responseHeaderTimeout:  responseHeaderTimeout,
-		openConns:              common.NewConns(),
+		openConns:              common.NewConns[net.Conn](),
 		stopListeningBroadcast: make(chan struct{}),
 		listenIP:               proxyIP,
 		listenPort:             proxyPort,
@@ -226,7 +225,6 @@ func (proxy *HttpProxy) Close() {
 // Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
-//
 func (proxy *HttpProxy) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
 	if request.Method == "CONNECT" {
 		conn := hijack(responseWriter)

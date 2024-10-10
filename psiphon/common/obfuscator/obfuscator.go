@@ -80,11 +80,14 @@ type OSSHPrefixSplitConfig struct {
 // stream ciphers for:
 // https://github.com/brl/obfuscated-openssh/blob/master/README.obfuscation
 //
-// Limitation: the RC4 cipher is vulnerable to ciphertext malleability and
-// the "magic" value provides only weak authentication due to its small
-// size. Increasing the size of the magic field will break compatibility
-// with legacy clients. New protocols and schemes should not use this
-// obfuscator.
+// Limitations:
+//   - The RC4 cipher is vulnerable to ciphertext malleability and the "magic"
+//     value provides only weak authentication due to its small size.
+//     Increasing the size of the magic field will break compatibility with
+//     legacy clients.
+//   - The RC4 cipher does not provide integrity protection for the client
+//     preamble, particularly the prefix header.
+//   - New protocols and schemes should not use this obfuscator.
 type Obfuscator struct {
 	preamble []byte
 
@@ -120,9 +123,9 @@ type ObfuscatorConfig struct {
 	// SeedHistory and IrregularLogger are optional parameters used only by
 	// server obfuscators.
 
-	SeedHistory       *SeedHistory
-	StrictHistoryMode bool
-	IrregularLogger   func(clientIP string, err error, logFields common.LogFields)
+	SeedHistory              *SeedHistory
+	DisableStrictHistoryMode bool
+	IrregularLogger          func(clientIP string, err error, logFields common.LogFields)
 }
 
 // NewClientObfuscator creates a new Obfuscator, staging a seed message to be
@@ -344,7 +347,7 @@ func deriveKey(obfuscatorSeed, keyword, iv []byte) ([]byte, error) {
 // makeClientPreamble generates the preamble bytes for the Obfuscated SSH protocol.
 //
 // If a prefix is applied, preamble bytes refer to the prefix, prefix terminator,
-// followed by the Obufscted SSH initial client message, followed by the
+// followed by the Obfuscated SSH initial client message, followed by the
 // prefix header.
 //
 // If a prefix is not applied, preamble bytes refer to the Obfuscated SSH
@@ -369,6 +372,13 @@ func deriveKey(obfuscatorSeed, keyword, iv []byte) ([]byte, error) {
 //
 // Returns the preamble, the prefix header if a prefix was generated,
 // and the padding length.
+//
+// Limitation: as the RC4 stream cipher does not provide integrity protection,
+// the prefix header is not protected from manipulation. The prefix header is
+// treated, by the server, as untrusted input, so a corrupt or invalid prefix
+// header will result in a failed connection, as would happen with attempts
+// to corrupt the underlying SSH connection. However, a man-in-the-middle can
+// cause the server to respond with a different prefix.
 func makeClientPreamble(
 	keyword string,
 	prefixSpec *OSSHPrefixSpec,
@@ -431,7 +441,7 @@ func makeClientPreamble(
 
 	preamble := buffer.Bytes()
 
-	// Encryptes what comes after the magic value.
+	// Encrypts what comes after the magic value.
 	clientToServerCipher.XORKeyStream(
 		preamble[magicValueStartIndex:],
 		preamble[magicValueStartIndex:])
@@ -551,7 +561,7 @@ func readPreambleHelper(
 			// Adds the seed to the seed history only if the magic value is valid.
 			// This is to prevent malicious clients from filling up the history cache.
 			ok, duplicateLogFields := config.SeedHistory.AddNew(
-				config.StrictHistoryMode, clientIP, "obfuscator-seed", osshSeed)
+				!config.DisableStrictHistoryMode, clientIP, "obfuscator-seed", osshSeed)
 			errStr := "duplicate obfuscation seed"
 			if duplicateLogFields != nil {
 				if config.IrregularLogger != nil {
@@ -686,7 +696,7 @@ func makeTerminator(keyword string, b []byte, direction string) ([]byte, error) 
 	return terminator, nil
 }
 
-// makeTerminatedPrefixWithPadding generates bytes starting with the prefix bytes defiend
+// makeTerminatedPrefixWithPadding generates bytes starting with the prefix bytes defined
 // by spec and ending with the generated terminator.
 // If the generated prefix is shorter than PREAMBLE_HEADER_LENGTH, it is padded
 // with random bytes.

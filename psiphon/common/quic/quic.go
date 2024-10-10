@@ -43,6 +43,9 @@ package quic
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	std_errors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -144,7 +147,7 @@ func Listen(
 	obfuscationKey string,
 	enableGQUIC bool) (net.Listener, error) {
 
-	certificate, privateKey, err := common.GenerateWebServerCertificate(
+	certificate, privateKey, _, err := common.GenerateWebServerCertificate(
 		values.GetHostName())
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -180,7 +183,7 @@ func Listen(
 	// timely shutdown.
 
 	obfuscatedPacketConn, err := NewServerObfuscatedPacketConn(
-		udpConn, true, false, false, obfuscationKey, seed)
+		udpConn, false, false, obfuscationKey, seed)
 	if err != nil {
 		udpConn.Close()
 		return nil, errors.Trace(err)
@@ -219,8 +222,10 @@ func Listen(
 		// The non-strict case where ok is true and logFields is not nil is
 		// ignored, and nothing is logged in that scenario.
 
+		strictMode := false
+
 		ok, logFields := clientRandomHistory.AddNew(
-			false, remoteAddr.String(), "client-hello-random", clientHelloRandom)
+			strictMode, remoteAddr.String(), "client-hello-random", clientHelloRandom)
 		if !ok && logFields != nil {
 			irregularTunnelLogger(
 				common.IPAddressFromAddr(remoteAddr),
@@ -243,8 +248,13 @@ func Listen(
 		// Skipping muxListener also avoids the additional overhead of
 		// pumping read packets though mux channels.
 
-		tlsConfig, ietfQUICConfig := makeIETFConfig(
-			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate)
+		tlsConfig, ietfQUICConfig, err := makeServerIETFConfig(
+			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate, obfuscationKey)
+
+		if err != nil {
+			obfuscatedPacketConn.Close()
+			return nil, errors.Trace(err)
+		}
 
 		tr := newIETFTransport(obfuscatedPacketConn)
 
@@ -265,7 +275,7 @@ func Listen(
 		// return and caller calls Accept.
 
 		muxListener, err := newMuxListener(
-			logger, verifyClientHelloRandom, obfuscatedPacketConn, tlsCertificate)
+			logger, verifyClientHelloRandom, obfuscatedPacketConn, tlsCertificate, obfuscationKey)
 		if err != nil {
 			obfuscatedPacketConn.Close()
 			return nil, errors.Trace(err)
@@ -281,17 +291,42 @@ func Listen(
 	}, nil
 }
 
-func makeIETFConfig(
+func makeServerIETFConfig(
 	conn *ObfuscatedPacketConn,
 	verifyClientHelloRandom func(net.Addr, []byte) bool,
-	tlsCertificate tls.Certificate) (*tls.Config, *ietf_quic.Config) {
+	tlsCertificate tls.Certificate,
+	sharedSecret string) (*tls.Config, *ietf_quic.Config, error) {
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{tlsCertificate},
 		NextProtos:   []string{getALPN(ietfQUIC1VersionNumber)},
 	}
 
+	if sharedSecret != "" {
+		var obfuscatedSessionTicketKey [32]byte
+		key, err := hex.DecodeString(sharedSecret)
+		if err == nil && len(key) != 32 {
+			err = std_errors.New("invalid obfuscated session key length")
+		}
+		if err != nil {
+			return nil, nil, errors.TraceNew("invalid obfuscated session key length")
+		}
+		copy(obfuscatedSessionTicketKey[:], key)
+
+		var standardSessionTicketKey [32]byte
+		_, err = rand.Read(standardSessionTicketKey[:])
+		if err != nil {
+			panic(err)
+		}
+
+		tlsConfig.SetSessionTicketKeys([][32]byte{
+			standardSessionTicketKey,
+			obfuscatedSessionTicketKey,
+		})
+	}
+
 	ietfQUICConfig := &ietf_quic.Config{
+		Allow0RTT:             true,
 		HandshakeIdleTimeout:  SERVER_HANDSHAKE_TIMEOUT,
 		MaxIdleTimeout:        serverIdleTimeout,
 		MaxIncomingStreams:    1,
@@ -303,7 +338,7 @@ func makeIETFConfig(
 		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
 	}
 
-	return tlsConfig, ietfQUICConfig
+	return tlsConfig, ietfQUICConfig, nil
 }
 
 func newIETFTransport(conn net.PacketConn) *ietf_quic.Transport {
@@ -369,7 +404,10 @@ func Dial(
 	obfuscationKey string,
 	obfuscationPaddingSeed *prng.Seed,
 	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
-	disablePathMTUDiscovery bool) (net.Conn, error) {
+	disablePathMTUDiscovery bool,
+	dialEarly bool,
+	useObfuscatedPSK bool,
+	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (net.Conn, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -437,7 +475,7 @@ func Dial(
 	if isObfuscated(quicVersion) {
 		obfuscatedPacketConn, err := NewClientObfuscatedPacketConn(
 			packetConn,
-			false,
+			remoteAddr,
 			isIETFVersionNumber(versionNumber),
 			isDecoy(quicVersion),
 			obfuscationKey,
@@ -477,6 +515,11 @@ func Dial(
 		}
 	}
 
+	obfuscatedPSKKey := ""
+	if useObfuscatedPSK {
+		obfuscatedPSKKey = obfuscationKey
+	}
+
 	connection, err := dialQUIC(
 		ctx,
 		packetConn,
@@ -488,7 +531,10 @@ func Dial(
 		getClientHelloRandom,
 		maxPacketSizeAdjustment,
 		disablePathMTUDiscovery,
-		false)
+		dialEarly,
+		obfuscatedPSKKey,
+		tlsClientSessionCache)
+
 	if err != nil {
 		packetConn.Close()
 		return nil, errors.Trace(err)
@@ -686,17 +732,63 @@ func (conn *Conn) SetWriteDeadline(t time.Time) error {
 	return conn.stream.SetWriteDeadline(t)
 }
 
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *Conn) GetMetrics() common.LogFields {
+
+	logFields := make(common.LogFields)
+
+	// Include metrics, such as inproxy and fragmentor metrics, from the
+	// underlying dial conn.
+	underlyingMetrics, ok := conn.packetConn.(common.MetricsSource)
+	if ok {
+		logFields.Add(underlyingMetrics.GetMetrics())
+	}
+
+	metrics := conn.connection.connectionMetrics()
+
+	dialEarly := "0"
+	if metrics.dialEarly {
+		dialEarly = "1"
+	}
+	logFields["quic_dial_early"] = dialEarly
+
+	quicSentTicket := "0"
+	if metrics.tlsClientSentTicket {
+		quicSentTicket = "1"
+	}
+	logFields["quic_sent_ticket"] = quicSentTicket
+
+	quicDidResume := "0"
+	if metrics.tlsClientSentTicket {
+		quicDidResume = "1"
+	}
+	logFields["quic_did_resume"] = quicDidResume
+
+	obfuscatedPSK := "0"
+	if metrics.obfuscatedPSK {
+		obfuscatedPSK = "1"
+	}
+	logFields["quic_obfuscated_psk"] = obfuscatedPSK
+
+	return logFields
+}
+
 // QUICTransporter implements the psiphon.transporter interface, used in
 // psiphon.MeekConn for HTTP requests, which requires a RoundTripper and
 // CloseIdleConnections.
 type QUICTransporter struct {
 	quicRoundTripper
+
+	quicConnectionMetrics atomic.Value
+
 	noticeEmitter           func(string)
 	udpDialer               func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
 	quicSNIAddress          string
 	quicVersion             string
 	clientHelloSeed         *prng.Seed
 	disablePathMTUDiscovery bool
+	dialEarly               bool
+	tlsClientSessionCache   *common.TLSClientSessionCacheWrapper
 	packetConn              atomic.Value
 
 	mutex sync.Mutex
@@ -711,7 +803,9 @@ func NewQUICTransporter(
 	quicSNIAddress string,
 	quicVersion string,
 	clientHelloSeed *prng.Seed,
-	disablePathMTUDiscovery bool) (*QUICTransporter, error) {
+	disablePathMTUDiscovery bool,
+	dialEarly bool,
+	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (*QUICTransporter, error) {
 
 	if quicVersion == "" {
 		return nil, errors.TraceNew("missing version")
@@ -733,6 +827,8 @@ func NewQUICTransporter(
 		quicVersion:             quicVersion,
 		clientHelloSeed:         clientHelloSeed,
 		disablePathMTUDiscovery: disablePathMTUDiscovery,
+		dialEarly:               dialEarly,
+		tlsClientSessionCache:   tlsClientSessionCache,
 		ctx:                     ctx,
 	}
 
@@ -775,6 +871,32 @@ func (t *QUICTransporter) closePacketConn() {
 	if p, ok := packetConn.(net.PacketConn); ok {
 		p.Close()
 	}
+}
+
+func (t *QUICTransporter) GetMetrics() common.LogFields {
+	logFields := make(common.LogFields)
+
+	metrics := t.quicConnectionMetrics.Load().(*quicConnectionMetrics)
+
+	dialEarly := "0"
+	if metrics.dialEarly {
+		dialEarly = "1"
+	}
+	logFields["quic_dial_early"] = dialEarly
+
+	quicSentTicket := "0"
+	if metrics.tlsClientSentTicket {
+		quicSentTicket = "1"
+	}
+	logFields["quic_sent_ticket"] = quicSentTicket
+
+	quicDidResume := "0"
+	if metrics.tlsClientSentTicket {
+		quicDidResume = "1"
+	}
+	logFields["quic_did_resume"] = quicDidResume
+
+	return logFields
 }
 
 func (t *QUICTransporter) dialIETFQUIC(
@@ -836,11 +958,17 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 		nil,
 		0,
 		t.disablePathMTUDiscovery,
-		true)
+		t.dialEarly,
+		"", // PSK ticket key is not used for fronted connections.
+		t.tlsClientSessionCache)
+
 	if err != nil {
 		packetConn.Close()
 		return nil, errors.Trace(err)
 	}
+
+	metrics := connection.connectionMetrics()
+	t.quicConnectionMetrics.Store(&metrics)
 
 	// dialQUIC uses quic-go.DialContext as we must create our own UDP sockets to
 	// set properties such as BIND_TO_DEVICE. However, when DialContext is used,
@@ -880,6 +1008,15 @@ type quicListener interface {
 	Accept() (quicConnection, error)
 }
 
+// quicConnectionMetircs provides metrics for a QUIC connection,
+// after a dial has been made.
+type quicConnectionMetrics struct {
+	dialEarly           bool
+	tlsClientSentTicket bool
+	tlsDidResume        bool
+	obfuscatedPSK       bool
+}
+
 type quicConnection interface {
 	io.Closer
 	LocalAddr() net.Addr
@@ -887,6 +1024,8 @@ type quicConnection interface {
 	AcceptStream() (quicStream, error)
 	OpenStream() (quicStream, error)
 	isErrorIndicatingClosed(err error) bool
+	isEarlyDataRejected(err error) bool
+	connectionMetrics() quicConnectionMetrics
 }
 
 type quicStream interface {
@@ -926,6 +1065,7 @@ func (l *ietfQUICListener) Close() error {
 
 type ietfQUICConnection struct {
 	ietf_quic.Connection
+	metrics quicConnectionMetrics
 }
 
 func (c *ietfQUICConnection) AcceptStream() (quicStream, error) {
@@ -960,6 +1100,20 @@ func (c *ietfQUICConnection) isErrorIndicatingClosed(err error) bool {
 		errStr == "timeout: no recent network activity"
 }
 
+// TODO: TLS handshake still completes even if 0-RTT is rejected, but currently we fail the QUIC connection anyway.
+// By checking this error, we can start a new QUIC connection (EarlyConnection.NextConnection)
+// and resend any data already sent in the "early_data".
+func (c *ietfQUICConnection) isEarlyDataRejected(err error) bool {
+	if err == nil {
+		return false
+	}
+	return err == ietf_quic.Err0RTTRejected
+}
+
+func (c *ietfQUICConnection) connectionMetrics() quicConnectionMetrics {
+	return c.metrics
+}
+
 func dialQUIC(
 	ctx context.Context,
 	packetConn net.PacketConn,
@@ -971,7 +1125,13 @@ func dialQUIC(
 	getClientHelloRandom func() ([]byte, error),
 	clientMaxPacketSizeAdjustment int,
 	disablePathMTUDiscovery bool,
-	dialEarly bool) (quicConnection, error) {
+	dialEarly bool,
+	obfuscatedPSKKey string,
+	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (quicConnection, error) {
+
+	if tlsClientSessionCache == nil {
+		return nil, errors.TraceNew("missing TLS client session cache")
+	}
 
 	if isIETFVersionNumber(versionNumber) {
 		quicConfig := &ietf_quic.Config{
@@ -1001,12 +1161,45 @@ func dialQUIC(
 
 		var dialConnection ietf_quic.Connection
 		tlsConfig := &tls.Config{
-			InsecureSkipVerify: true,
-			NextProtos:         []string{getALPN(versionNumber)},
-			ServerName:         sni,
+			InsecureSkipVerify:     true,
+			InsecureSkipTimeVerify: true,
+			NextProtos:             []string{getALPN(versionNumber)},
+			ServerName:             sni,
+			ClientSessionCache:     tlsClientSessionCache,
+		}
+
+		// Creating a session state and storing it in the TLS cache to be used
+		// for PSK (Pre-Shared Key) resumption.
+		if obfuscatedPSKKey != "" {
+			var sharedSecret [32]byte
+			key, err := hex.DecodeString(obfuscatedPSKKey)
+			if err == nil && len(key) != 32 {
+				err = std_errors.New("invalid obfuscated PSK key length")
+			}
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			copy(sharedSecret[:], key)
+
+			obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
+				sharedSecret, true, false)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			ss := tls.MakeClientSessionState(
+				obfuscatedSessionState.SessionTicket,
+				obfuscatedSessionState.Vers,
+				obfuscatedSessionState.CipherSuite,
+				obfuscatedSessionState.MasterSecret,
+				obfuscatedSessionState.CreatedAt,
+				obfuscatedSessionState.AgeAdd,
+				obfuscatedSessionState.UseBy,
+			)
+			tlsClientSessionCache.Put("", ss)
 		}
 
 		if dialEarly {
+			// Attempting 0-RTT if possible.
 			dialConnection, err = ietf_quic.DialEarly(
 				ctx,
 				packetConn,
@@ -1021,11 +1214,22 @@ func dialQUIC(
 				tlsConfig,
 				quicConfig)
 		}
+
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		return &ietfQUICConnection{Connection: dialConnection}, nil
+		metrics := quicConnectionMetrics{
+			dialEarly:           dialEarly,
+			tlsClientSentTicket: dialConnection.ConnectionState().TLS.DidResume,
+			tlsDidResume:        dialConnection.TLSConnectionMetrics().ClientSentTicket,
+			obfuscatedPSK:       obfuscatedPSKKey != "",
+		}
+
+		return &ietfQUICConnection{
+			Connection: dialConnection,
+			metrics:    metrics,
+		}, nil
 
 	} else {
 
@@ -1177,7 +1381,8 @@ func newMuxListener(
 	logger common.Logger,
 	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	conn *ObfuscatedPacketConn,
-	tlsCertificate tls.Certificate) (*muxListener, error) {
+	tlsCertificate tls.Certificate,
+	sharedSecret string) (*muxListener, error) {
 
 	listener := &muxListener{
 		logger:              logger,
@@ -1195,8 +1400,11 @@ func newMuxListener(
 
 	listener.ietfQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
-	tlsConfig, ietfQUICConfig := makeIETFConfig(
-		conn, verifyClientHelloRandom, tlsCertificate)
+	tlsConfig, ietfQUICConfig, err := makeServerIETFConfig(
+		conn, verifyClientHelloRandom, tlsCertificate, sharedSecret)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	tr := newIETFTransport(listener.ietfQUICConn)
 	il, err := tr.Listen(tlsConfig, ietfQUICConfig)

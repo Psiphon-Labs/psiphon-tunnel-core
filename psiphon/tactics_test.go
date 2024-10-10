@@ -47,7 +47,10 @@ func TestStandAloneGetTactics(t *testing.T) {
 	}
 
 	var modifyConfig map[string]interface{}
-	json.Unmarshal(configJSON, &modifyConfig)
+	err = json.Unmarshal(configJSON, &modifyConfig)
+	if err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
 
 	modifyConfig["DataRootDirectory"] = testDataDirName
 
@@ -114,7 +117,7 @@ func TestStandAloneGetTactics(t *testing.T) {
 	// operations in GetTactics.
 	CloseDataStore()
 
-	GetTactics(ctx, config)
+	GetTactics(ctx, config, true)
 
 	if atomic.LoadInt32(&gotTactics) != 1 {
 		t.Fatalf("failed to get tactics")

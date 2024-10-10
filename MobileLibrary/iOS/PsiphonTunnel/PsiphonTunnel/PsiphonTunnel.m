@@ -1174,6 +1174,28 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
             });
         }
     }
+    else if ([noticeType isEqualToString:@"InproxyMustUpgrade"]) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInproxyMustUpgrade)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onInproxyMustUpgrade];
+            });
+        }
+    }
+    else if ([noticeType isEqualToString:@"InproxyProxyActivity"]) {
+        id connectingClients = [notice valueForKeyPath:@"data.connectingClients"];
+        id connectedClients = [notice valueForKeyPath:@"data.connectedClients"];
+        id bytesUp = [notice valueForKeyPath:@"data.bytesUp"];
+        id bytesDown = [notice valueForKeyPath:@"data.bytesDown"];
+        if (![connectingClients isKindOfClass:[NSNumber class]] || ![connectedClients isKindOfClass:[NSNumber class]] || ![bytesUp isKindOfClass:[NSNumber class]] || ![bytesDown isKindOfClass:[NSNumber class]]) {
+            [self logMessage:[NSString stringWithFormat: @"InproxyProxyActivity notice has invalid data types: %@", noticeJSON]];
+            return;
+        }
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInproxyProxyActivity:connectedClients:bytesUp:bytesDown:)]) {
+            dispatch_sync(self->callbackQueue, ^{
+                [self.tunneledAppDelegate onInproxyProxyActivity:[connectingClients intValue] connectedClients:[connectedClients intValue] bytesUp:[bytesUp longValue] bytesDown:[bytesDown longValue]];
+            });
+        }
+    }
     else if ([noticeType isEqualToString:@"ConnectedServerRegion"]) {
         id region = [notice valueForKeyPath:@"data.serverRegion"];
         if (![region isKindOfClass:[NSString class]]) {

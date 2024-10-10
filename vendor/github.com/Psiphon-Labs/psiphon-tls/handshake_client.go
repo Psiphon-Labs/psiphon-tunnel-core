@@ -84,7 +84,6 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, *ecdh.PrivateKey, error) {
 	}
 
 	// [Psiphon]
-	// TODO! is extraConfig check necessary/
 	if c.config != nil {
 		hello.PRNG = c.config.ClientHelloPRNG
 		if c.config.GetClientHelloRandom != nil {
@@ -124,7 +123,6 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, *ecdh.PrivateKey, error) {
 	}
 
 	// [Psiphon]
-	// TODO! is config != nil check necessary?
 	var err error
 	if c.config == nil || c.config.GetClientHelloRandom == nil {
 
@@ -229,6 +227,11 @@ func (c *Conn) clientHandshake(ctx context.Context) (err error) {
 
 	if _, err := c.writeHandshakeRecord(hello, nil); err != nil {
 		return err
+	}
+
+	// [Psiphon]
+	if session != nil {
+		c.clientSentTicket = true
 	}
 
 	if hello.earlyData {
@@ -347,10 +350,13 @@ func (c *Conn) loadSession(hello *clientHelloMsg) (
 	// Check that the cached server certificate is not expired, and that it's
 	// valid for the ServerName. This should be ensured by the cache key, but
 	// protect the application from a faulty ClientSessionCache implementation.
-	if c.config.time().After(session.peerCertificates[0].NotAfter) {
-		// Expired certificate, delete the entry.
-		c.config.ClientSessionCache.Put(cacheKey, nil)
-		return nil, nil, nil, nil
+	// [Psiphon]
+	if !c.config.InsecureSkipTimeVerify {
+		if c.config.time().After(session.peerCertificates[0].NotAfter) {
+			// Expired certificate, delete the entry.
+			c.config.ClientSessionCache.Put(cacheKey, nil)
+			return nil, nil, nil, nil
+		}
 	}
 	if !c.config.InsecureSkipVerify {
 		if len(session.verifiedChains) == 0 {

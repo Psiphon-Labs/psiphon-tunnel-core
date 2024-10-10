@@ -119,13 +119,6 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 	defer resolver.Stop()
 	config.SetResolver(resolver)
 
-	// Get tactics, may update client parameters
-	p := config.GetParameters().Get()
-	timeout := p.Duration(parameters.FeedbackTacticsWaitPeriod)
-	p.Close()
-	getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
-	defer cancelFunc()
-
 	// Limitation: GetTactics will fail silently if the datastore used for
 	// retrieving and storing tactics is opened by another process. This can
 	// be the case on Android and iOS where SendFeedback is invoked by the UI
@@ -142,10 +135,19 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 	//   or a network ID of "VPN" if some other non-Psiphon VPN is running
 	//   (the caller should ensure a network ID of "VPN" in this case).
 
-	GetTactics(getTacticsCtx, config)
+	doTactics := !config.DisableTactics
+	if doTactics {
+		// Get tactics, may update client parameters
+		p := config.GetParameters().Get()
+		timeout := p.Duration(parameters.FeedbackTacticsWaitPeriod)
+		p.Close()
+		getTacticsCtx, cancelFunc := context.WithTimeout(ctx, timeout)
+		GetTactics(getTacticsCtx, config, true)
+		cancelFunc()
+	}
 
 	// Get the latest client parameters
-	p = config.GetParameters().Get()
+	p := config.GetParameters().Get()
 	feedbackUploadMinRetryDelay := p.Duration(parameters.FeedbackUploadRetryMinDelaySeconds)
 	feedbackUploadMaxRetryDelay := p.Duration(parameters.FeedbackUploadRetryMaxDelaySeconds)
 	feedbackUploadTimeout := p.Duration(parameters.FeedbackUploadTimeoutSeconds)
@@ -204,13 +206,26 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			feedbackUploadTimeout)
 		defer cancelFunc()
 
+		var dialConfig *DialConfig
+		if len(uploadURL.FrontingSpecs) == 0 {
+			// Must only set DialConfig if there are no fronting specs.
+			dialConfig = untunneledDialConfig
+		}
+
+		// Do not use device binder when domain fronting is used. See resolver
+		// comment above.
+		frontingUseDeviceBinder := false
+
+		payloadSecure := true
 		client, _, err := MakeUntunneledHTTPClient(
 			feedbackUploadCtx,
 			config,
-			untunneledDialConfig,
+			dialConfig,
 			uploadURL.SkipVerify,
 			config.DisableSystemRootCAs,
+			payloadSecure,
 			uploadURL.FrontingSpecs,
+			frontingUseDeviceBinder,
 			func(frontingProviderID string) {
 				NoticeInfo(
 					"SendFeedback: selected fronting provider %s for %s",

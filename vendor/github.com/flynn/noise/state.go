@@ -86,6 +86,11 @@ func (s *CipherState) Nonce() uint64 {
 	return s.n
 }
 
+// SetNonce sets the current value of n.
+func (s *CipherState) SetNonce(n uint64) {
+	s.n = n
+}
+
 func (s *CipherState) Rekey() {
 	var zeros [32]byte
 	var out []byte

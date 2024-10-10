@@ -63,8 +63,8 @@ func TestServerEntryExchange(t *testing.T) {
 
 	configJSONTemplate := `
 		    {
-                "SponsorId" : "0",
-                "PropagationChannelId" : "0",
+                "SponsorId" : "0000000000000000",
+                "PropagationChannelId" : "0000000000000000",
 		        "ServerEntrySignaturePublicKey" : "%s",
 		        "ExchangeObfuscationKey" : "%s",
 		        "NetworkID" : "%s"
@@ -187,9 +187,13 @@ func TestServerEntryExchange(t *testing.T) {
 				config,
 				nil,
 				nil,
+				nil,
+				nil,
 				canReplay,
 				selectProtocol,
 				serverEntry,
+				nil,
+				nil,
 				false,
 				0,
 				0)

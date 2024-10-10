@@ -33,21 +33,42 @@ import (
 )
 
 func TestRandomizedSSHKEXes(t *testing.T) {
+	err := runTestRandomizedSSHKEXes(false)
+	if err != nil {
+		t.Errorf("runTestRandomizedSSHKEXes failed: %s", err)
+		return
+	}
+}
+
+func TestLegacyRandomizedSSHKEXes(t *testing.T) {
+	err := runTestRandomizedSSHKEXes(true)
+	if err != nil {
+		t.Errorf("runTestRandomizedSSHKEXes failed: %s", err)
+		return
+	}
+}
+
+func runTestRandomizedSSHKEXes(legacyClient bool) error {
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
-		t.Fatalf("rsa.GenerateKey failed: %s", err)
+		return errors.Trace(err)
 	}
 
 	signer, err := NewSignerFromKey(rsaKey)
 	if err != nil {
-		t.Fatalf("NewSignerFromKey failed: %s", err)
+		return errors.Trace(err)
 	}
 
 	publicKey := signer.PublicKey()
 
 	username := "username"
 	password := "password"
+
+	testLegacyClient = legacyClient
+	defer func() {
+		testLegacyClient = false
+	}()
 
 	for _, doPeerKEXPRNGSeed := range []bool{true, false} {
 
@@ -57,17 +78,17 @@ func TestRandomizedSSHKEXes(t *testing.T) {
 
 			clientSeed, err := prng.NewSeed()
 			if err != nil {
-				t.Fatalf("prng.NewSeed failed: %s", err)
+				return errors.Trace(err)
 			}
 
 			serverSeed, err := prng.NewSeed()
 			if err != nil {
-				t.Fatalf("prng.NewSeed failed: %s", err)
+				return errors.Trace(err)
 			}
 
 			clientConn, serverConn, err := netPipe()
 			if err != nil {
-				t.Fatalf("netPipe failed: %s", err)
+				return errors.Trace(err)
 			}
 
 			testGroup, _ := errgroup.WithContext(context.Background())
@@ -100,6 +121,23 @@ func TestRandomizedSSHKEXes(t *testing.T) {
 				clientSSHConn, _, _, err := NewClientConn(clientConn, "", clientConfig)
 				if err != nil {
 					return errors.Trace(err)
+				}
+
+				if !legacyClient {
+					// Ensure weak MAC is not negotiated
+					for _, p := range []packetCipher{
+						clientSSHConn.(*connection).transport.conn.(*transport).reader.packetCipher,
+						clientSSHConn.(*connection).transport.conn.(*transport).writer.packetCipher} {
+						switch c := p.(type) {
+						case *gcmCipher, *chacha20Poly1305Cipher:
+							// No weak MAC.
+						case *streamPacketCipher:
+							// The only weak MAC, "hmac-sha1-96", is also the only truncatingMAC.
+							if _, ok := c.mac.(truncatingMAC); ok {
+								return errors.TraceNew("weak MAC negotiated")
+							}
+						}
+					}
 				}
 
 				clientSSHConn.Close()
@@ -140,8 +178,7 @@ func TestRandomizedSSHKEXes(t *testing.T) {
 
 				// Expect no failure to negotiates when setting PeerKEXPRNGSeed.
 				if doPeerKEXPRNGSeed {
-					t.Fatalf("goroutine failed: %s", err)
-
+					return errors.Tracef("unexpected failure to negotiate: %v", err)
 				} else {
 					failed = true
 					break
@@ -151,7 +188,8 @@ func TestRandomizedSSHKEXes(t *testing.T) {
 
 		// Expect at least one failure to negotiate when not setting PeerKEXPRNGSeed.
 		if !doPeerKEXPRNGSeed && !failed {
-			t.Fatalf("unexpected success")
+			errors.TraceNew("unexpected success")
 		}
 	}
+	return nil
 }

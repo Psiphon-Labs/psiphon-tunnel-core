@@ -20,10 +20,8 @@
 package server
 
 import (
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	std_errors "errors"
 	"net"
 	"regexp"
 	"strconv"
@@ -34,8 +32,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/fragmentor"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/fxamacker/cbor/v2"
 )
 
 const (
@@ -50,18 +50,13 @@ const (
 // sshAPIRequestHandler routes Psiphon API requests transported as
 // JSON objects via the SSH request mechanism.
 //
-// The API request handlers, handshakeAPIRequestHandler, etc., are
-// reused by webServer which offers the Psiphon API via web transport.
-//
 // The API request parameters and event log values follow the legacy
 // psi_web protocol and naming conventions. The API is compatible with
 // all tunnel-core clients but are not backwards compatible with all
 // legacy clients.
 func sshAPIRequestHandler(
 	support *SupportServices,
-	clientAddr string,
-	geoIPData GeoIPData,
-	authorizedAccessTypes []string,
+	sshClient *sshClient,
 	name string,
 	requestPayload []byte) ([]byte, error) {
 
@@ -78,32 +73,22 @@ func sshAPIRequestHandler(
 	//   to a string, not a decoded []byte, as required.
 
 	var params common.APIParameters
-	err := json.Unmarshal(requestPayload, &params)
+
+	// The request payload is either packed CBOR or legacy JSON.
+
+	params, isPacked, err := protocol.GetPackedAPIParametersRequestPayload(requestPayload)
 	if err != nil {
 		return nil, errors.Tracef(
-			"invalid payload for request name: %s: %s", name, err)
+			"invalid packed payload for request name: %s: %s", name, err)
 	}
 
-	return dispatchAPIRequestHandler(
-		support,
-		protocol.PSIPHON_SSH_API_PROTOCOL,
-		clientAddr,
-		geoIPData,
-		authorizedAccessTypes,
-		name,
-		params)
-}
-
-// dispatchAPIRequestHandler is the common dispatch point for both
-// web and SSH API requests.
-func dispatchAPIRequestHandler(
-	support *SupportServices,
-	apiProtocol string,
-	clientAddr string,
-	geoIPData GeoIPData,
-	authorizedAccessTypes []string,
-	name string,
-	params common.APIParameters) (response []byte, reterr error) {
+	if !isPacked {
+		err := json.Unmarshal(requestPayload, &params)
+		if err != nil {
+			return nil, errors.Tracef(
+				"invalid payload for request name: %s: %s", name, err)
+		}
+	}
 
 	// Before invoking the handlers, enforce some preconditions:
 	//
@@ -122,23 +107,7 @@ func dispatchAPIRequestHandler(
 
 	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
 
-		// TODO: same session-ID-lookup TODO in handshakeAPIRequestHandler
-		// applies here.
-		sessionID, err := getStringRequestParam(params, "client_session_id")
-		if err == nil {
-			// Note: follows/duplicates baseParams validation
-			if !isHexDigits(support.Config, sessionID) {
-				err = std_errors.New("invalid param: client_session_id")
-			}
-		}
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		completed, exhausted, err := support.TunnelServer.GetClientHandshaked(sessionID)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+		completed, exhausted := sshClient.getHandshaked()
 		if !completed {
 			return nil, errors.TraceNew("handshake not completed")
 		}
@@ -151,19 +120,19 @@ func dispatchAPIRequestHandler(
 
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
 		return handshakeAPIRequestHandler(
-			support, apiProtocol, clientAddr, geoIPData, params)
+			support, protocol.PSIPHON_API_PROTOCOL_SSH, sshClient, params)
 
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(
-			support, clientAddr, geoIPData, authorizedAccessTypes, params)
+			support, sshClient, params)
 
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
 		return statusAPIRequestHandler(
-			support, clientAddr, geoIPData, authorizedAccessTypes, params)
+			support, sshClient, params)
 
 	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
 		return clientVerificationAPIRequestHandler(
-			support, clientAddr, geoIPData, authorizedAccessTypes, params)
+			support, sshClient, params)
 	}
 
 	return nil, errors.Tracef("invalid request name: %s", name)
@@ -171,14 +140,11 @@ func dispatchAPIRequestHandler(
 
 var handshakeRequestParams = append(
 	append(
-		append(
-			[]requestParamSpec{
-				// Legacy clients may not send "session_id" in handshake
-				{"session_id", isHexDigits, requestParamOptional},
-				{"missing_server_entry_signature", isBase64String, requestParamOptional},
-				{"missing_server_entry_provider_id", isBase64String, requestParamOptional}},
-			baseParams...),
-		baseDialParams...),
+		[]requestParamSpec{
+			{"missing_server_entry_signature", isBase64String, requestParamOptional},
+			{"missing_server_entry_provider_id", isBase64String, requestParamOptional},
+		},
+		baseAndDialParams...),
 	tacticsParams...)
 
 // handshakeAPIRequestHandler implements the "handshake" API request.
@@ -188,9 +154,67 @@ var handshakeRequestParams = append(
 func handshakeAPIRequestHandler(
 	support *SupportServices,
 	apiProtocol string,
-	clientAddr string,
-	geoIPData GeoIPData,
+	sshClient *sshClient,
 	params common.APIParameters) ([]byte, error) {
+
+	var clientGeoIPData GeoIPData
+
+	var inproxyClientIP string
+	var inproxyClientGeoIPData GeoIPData
+	var inproxyRelayLogFields common.LogFields
+
+	if sshClient.isInproxyTunnelProtocol {
+
+		inproxyConnectionID, err := getStringRequestParam(params, "inproxy_connection_id")
+
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// Complete the in-proxy broker/server relay before the rest of
+		// handshake in order to obtain the original client IP and other
+		// inputs sent from the broker.
+		//
+		// In the best and typical case, the broker has already established a
+		// secure session with this server and the inproxy_relay_packet is
+		// the broker report application-level payload. Otherwise, if there
+		// is no session or the session has expired, session handshake
+		// messages will be relayed to the broker via the client, using SSH
+		// requests to the client. These requests/responses happen while the
+		// handshake response remains outstanding, as this handler needs the
+		// original client IP and its geolocation data in order to determine
+		// the correct landing pages, traffic rules, tactics, etc.
+		//
+		// The client should extends its handshake timeout to accommodate
+		// potential relay round trips.
+
+		inproxyRelayPacketStr, err := getStringRequestParam(params, "inproxy_relay_packet")
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		inproxyRelayPacket, err := base64.RawStdEncoding.DecodeString(inproxyRelayPacketStr)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		inproxyClientIP, inproxyRelayLogFields, err = doHandshakeInproxyBrokerRelay(
+			sshClient,
+			inproxyConnectionID,
+			inproxyRelayPacket)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		inproxyClientGeoIPData = support.GeoIPService.Lookup(inproxyClientIP)
+		clientGeoIPData = inproxyClientGeoIPData
+
+	} else {
+
+		clientGeoIPData = sshClient.getClientGeoIPData()
+	}
+
+	// Check input parameters
 
 	// Note: ignoring legacy "known_servers" params
 
@@ -199,7 +223,6 @@ func handshakeAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
-	sessionID, _ := getStringRequestParam(params, "client_session_id")
 	sponsorID, _ := getStringRequestParam(params, "sponsor_id")
 	clientVersion, _ := getStringRequestParam(params, "client_version")
 	clientPlatform, _ := getStringRequestParam(params, "client_platform")
@@ -209,28 +232,6 @@ func handshakeAPIRequestHandler(
 	// establishedTunnelsCount is used in traffic rule selection. When omitted by
 	// the client, a value of 0 will be used.
 	establishedTunnelsCount, _ := getIntStringRequestParam(params, "established_tunnels_count")
-
-	// splitTunnelOwnRegion indicates if the client is requesting split tunnel
-	// mode to be applied to the client's own country. When omitted by the
-	// client, the value will be false.
-	//
-	// When split_tunnel_regions is non-empty, split tunnel mode will be
-	// applied for the specified country codes. When omitted by the client,
-	// the value will be an empty slice.
-	splitTunnelOwnRegion, _ := getBoolStringRequestParam(params, "split_tunnel")
-	splitTunnelOtherRegions, _ := getStringArrayRequestParam(params, "split_tunnel_regions")
-
-	ownRegion := ""
-	if splitTunnelOwnRegion {
-		ownRegion = geoIPData.Country
-	}
-	var splitTunnelLookup *splitTunnelLookup
-	if ownRegion != "" || len(splitTunnelOtherRegions) > 0 {
-		splitTunnelLookup, err = newSplitTunnelLookup(ownRegion, splitTunnelOtherRegions)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-	}
 
 	var authorizations []string
 	if params[protocol.PSIPHON_API_HANDSHAKE_AUTHORIZATIONS] != nil {
@@ -245,66 +246,66 @@ func handshakeAPIRequestHandler(
 		deviceRegion = GEOIP_UNKNOWN_VALUE
 	}
 
+	// splitTunnelOwnRegion indicates if the client is requesting split tunnel
+	// mode to be applied to the client's own country. When omitted by the
+	// client, the value will be false.
+	//
+	// When split_tunnel_regions is non-empty, split tunnel mode will be
+	// applied for the specified country codes. When omitted by the client,
+	// the value will be an empty slice.
+	splitTunnelOwnRegion, _ := getBoolStringRequestParam(params, "split_tunnel")
+	splitTunnelOtherRegions, _ := getStringArrayRequestParam(params, "split_tunnel_regions")
+
+	ownRegion := ""
+	if splitTunnelOwnRegion {
+		ownRegion = clientGeoIPData.Country
+	}
+	var splitTunnelLookup *splitTunnelLookup
+	if ownRegion != "" || len(splitTunnelOtherRegions) > 0 {
+		splitTunnelLookup, err = newSplitTunnelLookup(ownRegion, splitTunnelOtherRegions)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
 	// Note: no guarantee that PsinetDatabase won't reload between database calls
 	db := support.PsinetDatabase
 
 	httpsRequestRegexes, domainBytesChecksum := db.GetHttpsRequestRegexes(sponsorID)
 
+	tacticsPayload, err := support.TacticsServer.GetTacticsPayload(
+		common.GeoIPData(clientGeoIPData), params)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	var newTacticsTag string
+	if tacticsPayload != nil && len(tacticsPayload.Tactics) > 0 {
+		newTacticsTag = tacticsPayload.Tag
+	}
+
 	// Flag the SSH client as having completed its handshake. This
 	// may reselect traffic rules and starts allowing port forwards.
 
-	// TODO: in the case of SSH API requests, the actual sshClient could
-	// be passed in and used here. The session ID lookup is only strictly
-	// necessary to support web API requests.
-	handshakeStateInfo, err := support.TunnelServer.SetClientHandshakeState(
-		sessionID,
+	apiParams := copyBaseAndDialParams(params)
+
+	handshakeStateInfo, err := sshClient.setHandshakeState(
 		handshakeState{
 			completed:               true,
 			apiProtocol:             apiProtocol,
-			apiParams:               copyBaseSessionAndDialParams(params),
+			apiParams:               apiParams,
 			domainBytesChecksum:     domainBytesChecksum,
 			establishedTunnelsCount: establishedTunnelsCount,
 			splitTunnelLookup:       splitTunnelLookup,
 			deviceRegion:            deviceRegion,
+			newTacticsTag:           newTacticsTag,
+			inproxyClientIP:         inproxyClientIP,
+			inproxyClientGeoIPData:  inproxyClientGeoIPData,
+			inproxyRelayLogFields:   inproxyRelayLogFields,
 		},
 		authorizations)
 	if err != nil {
 		return nil, errors.Trace(err)
-	}
-
-	tacticsPayload, err := support.TacticsServer.GetTacticsPayload(
-		common.GeoIPData(geoIPData), params)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	var marshaledTacticsPayload []byte
-
-	if tacticsPayload != nil {
-
-		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		// Log a metric when new tactics are issued. Logging here indicates that
-		// the handshake tactics mechanism is active; but logging for every
-		// handshake creates unneccesary log data.
-
-		if len(tacticsPayload.Tactics) > 0 {
-
-			logFields := getRequestLogFields(
-				tactics.TACTICS_METRIC_EVENT_NAME,
-				geoIPData,
-				handshakeStateInfo.authorizedAccessTypes,
-				params,
-				handshakeRequestParams)
-
-			logFields[tactics.NEW_TACTICS_TAG_LOG_FIELD_NAME] = tacticsPayload.Tag
-			logFields[tactics.IS_TACTICS_REQUEST_LOG_FIELD_NAME] = false
-
-			log.LogRawFieldsWithTimestamp(logFields)
-		}
 	}
 
 	// The log comes _after_ SetClientHandshakeState, in case that call rejects
@@ -315,38 +316,38 @@ func handshakeAPIRequestHandler(
 	// common API parameters and "handshake_completed" flag, this handshake
 	// log is mostly redundant and set to debug level.
 
-	log.WithTraceFields(
-		getRequestLogFields(
+	if IsLogLevelDebug() {
+		logFields := getRequestLogFields(
 			"",
-			geoIPData,
+			sshClient.sessionID,
+			clientGeoIPData,
 			handshakeStateInfo.authorizedAccessTypes,
 			params,
-			handshakeRequestParams)).Debug("handshake")
+			handshakeRequestParams)
+		log.WithTraceFields(logFields).Debug("handshake")
+	}
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
 
 	// Discover new servers
 
-	disableDiscovery, err := support.TunnelServer.GetClientDisableDiscovery(sessionID)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	var encodedServerList []string
+	if !sshClient.getDisableDiscovery() {
 
-	if !disableDiscovery {
+		clientIP := ""
+		if sshClient.isInproxyTunnelProtocol {
+			clientIP = inproxyClientIP
+		} else if sshClient.peerAddr != nil {
+			clientIP, _, _ = net.SplitHostPort(sshClient.peerAddr.String())
 
-		host, _, err := net.SplitHostPort(clientAddr)
-		if err != nil {
-			return nil, errors.Trace(err)
 		}
 
-		clientIP := net.ParseIP(host)
-		if clientIP == nil {
-			return nil, errors.TraceNew("missing client IP")
+		IP := net.ParseIP(clientIP)
+		if IP == nil {
+			return nil, errors.TraceNew("invalid client IP")
 		}
 
-		encodedServerList = support.discovery.DiscoverServers(clientIP)
+		encodedServerList = support.discovery.DiscoverServers(IP)
 	}
 
 	// When the client indicates that it used an out-of-date server entry for
@@ -382,17 +383,47 @@ func handshakeAPIRequestHandler(
 	// clients.
 
 	homepages := db.GetRandomizedHomepages(
-		sponsorID, geoIPData.Country, geoIPData.ASN, deviceRegion, isMobile)
+		sponsorID,
+		clientGeoIPData.Country,
+		clientGeoIPData.ASN,
+		deviceRegion,
+		isMobile)
+
+	clientAddress := ""
+	if sshClient.isInproxyTunnelProtocol {
+
+		// ClientAddress not supported for in-proxy tunnel protocols:
+		//
+		// - We don't want to return the address of the direct peer, the
+		//   in-proxy proxy;
+		// - The known  port number will correspond to the in-proxy proxy
+		//   source address, not the client;
+		// - While we assume that the the original client IP from the broker
+		//   is representative for geolocation, an actual direct connection
+		//   to the Psiphon server from the client may route differently and
+		//   use a different IP address.
+
+		clientAddress = ""
+	} else if sshClient.peerAddr != nil {
+		clientAddress = sshClient.peerAddr.String()
+	}
+
+	var marshaledTacticsPayload []byte
+	if tacticsPayload != nil {
+		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
 
 	handshakeResponse := protocol.HandshakeResponse{
-		SSHSessionID:             sessionID,
 		Homepages:                homepages,
 		UpgradeClientVersion:     db.GetUpgradeClientVersion(clientVersion, normalizedPlatform),
 		PageViewRegexes:          make([]map[string]string, 0),
 		HttpsRequestRegexes:      httpsRequestRegexes,
 		EncodedServerList:        encodedServerList,
-		ClientRegion:             geoIPData.Country,
-		ClientAddress:            clientAddr,
+		ClientRegion:             clientGeoIPData.Country,
+		ClientAddress:            clientAddress,
 		ServerTimestamp:          common.GetCurrentTimestamp(),
 		ActiveAuthorizationIDs:   handshakeStateInfo.activeAuthorizationIDs,
 		TacticsPayload:           marshaledTacticsPayload,
@@ -402,6 +433,9 @@ func handshakeAPIRequestHandler(
 		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
+	// TODO: as a future enhancement, pack and CBOR encode this and other API
+	// responses
+
 	responsePayload, err := json.Marshal(handshakeResponse)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -410,12 +444,110 @@ func handshakeAPIRequestHandler(
 	return responsePayload, nil
 }
 
+func doHandshakeInproxyBrokerRelay(
+	sshClient *sshClient,
+	clientConnectionID string,
+	initialRelayPacket []byte) (string, common.LogFields, error) {
+
+	connectionID, err := inproxy.IDFromString(clientConnectionID)
+	if err != nil {
+		return "", nil, errors.Trace(err)
+	}
+
+	clientIP := ""
+	var logFields common.LogFields
+
+	// This first packet from broker arrives via the client handshake. If
+	// there is an established, non-expired session, this packet will contain
+	// the application-level broker report and the relay will complete
+	// immediately.
+
+	relayPacket := initialRelayPacket
+
+	for i := 0; i < inproxy.MaxRelayRoundTrips; i++ {
+
+		// broker -> server
+
+		relayPacket, err = sshClient.sshServer.inproxyBrokerSessions.HandlePacket(
+			CommonLogger(log),
+			relayPacket,
+			connectionID,
+			func(
+				brokerVerifiedOriginalClientIP string,
+				fields common.LogFields) {
+
+				// Once the broker report is received, this callback is invoked.
+				clientIP = brokerVerifiedOriginalClientIP
+				logFields = fields
+			})
+		if err != nil {
+			if relayPacket == nil {
+
+				// If there is an error and no relay packet, the packet is
+				// invalid. Drop the packet and return an error. Do _not_
+				// reset the session, otherwise a malicious client could
+				// interrupt a valid broker/server session with a malformed packet.
+				return "", nil, errors.Trace(err)
+			}
+
+			// In the case of expired sessions, a reset session token is sent
+			// to the broker, so this is not a failure condition; the error
+			// is for logging only. Continue to ship relayPacket.
+
+			log.WithTraceFields(LogFields{"error": err}).Warning(
+				"HandlePacket returned packet and error")
+		}
+
+		if relayPacket == nil {
+
+			// The relay is complete; the handler recording the clientIP and
+			// logFields was invoked.
+			return clientIP, logFields, nil
+		}
+
+		// server -> broker
+
+		// Send an SSH request back to client with next packet for broker;
+		// then the client relays that to the broker and returns the broker's
+		// next response in the SSH response.
+
+		request := protocol.InproxyRelayRequest{
+			Packet: relayPacket,
+		}
+		requestPayload, err := protocol.CBOREncoding.Marshal(request)
+		if err != nil {
+			return "", nil, errors.Trace(err)
+		}
+
+		ok, responsePayload, err := sshClient.sshConn.SendRequest(
+			protocol.PSIPHON_API_INPROXY_RELAY_REQUEST_NAME,
+			true,
+			requestPayload)
+		if err != nil {
+			return "", nil, errors.Trace(err)
+		}
+		if !ok {
+			return "", nil, errors.TraceNew("client rejected request")
+		}
+
+		var response protocol.InproxyRelayResponse
+		err = cbor.Unmarshal(responsePayload, &response)
+		if err != nil {
+			return "", nil, errors.Trace(err)
+		}
+
+		relayPacket = response.Packet
+	}
+
+	return "", nil, errors.Tracef("exceeded %d relay round trips", inproxy.MaxRelayRoundTrips)
+}
+
 // uniqueUserParams are the connected request parameters which are logged for
 // unique_user events.
 var uniqueUserParams = append(
 	[]requestParamSpec{
 		{"last_connected", isLastConnected, 0}},
-	baseSessionParams...)
+	baseParams...)
 
 var connectedRequestParams = append(
 	[]requestParamSpec{
@@ -440,9 +572,7 @@ var updateOnConnectedParamNames = append(
 // connected_timestamp is truncated as a privacy measure.
 func connectedAPIRequestHandler(
 	support *SupportServices,
-	clientAddr string,
-	geoIPData GeoIPData,
-	authorizedAccessTypes []string,
+	sshClient *sshClient,
 	params common.APIParameters) ([]byte, error) {
 
 	err := validateRequestParams(support.Config, params, connectedRequestParams)
@@ -450,7 +580,13 @@ func connectedAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
-	sessionID, _ := getStringRequestParam(params, "client_session_id")
+	// Note: unlock before use is only safe as long as referenced sshClient data,
+	// such as slices in handshakeState, is read-only after initially set.
+
+	sshClient.Lock()
+	authorizedAccessTypes := sshClient.handshakeState.authorizedAccessTypes
+	sshClient.Unlock()
+
 	lastConnected, _ := getStringRequestParam(params, "last_connected")
 
 	// Update, for server_tunnel logging, upstream fragmentor metrics, as the
@@ -459,13 +595,7 @@ func connectedAPIRequestHandler(
 	// are reported only in the connected request are added to server_tunnel
 	// here.
 
-	// TODO: same session-ID-lookup TODO in handshakeAPIRequestHandler
-	// applies here.
-	err = support.TunnelServer.UpdateClientAPIParameters(
-		sessionID, copyUpdateOnConnectedParams(params))
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	sshClient.updateAPIParameters(copyUpdateOnConnectedParams(params))
 
 	connectedTimestamp := common.TruncateTimestampToHour(common.GetCurrentTimestamp())
 
@@ -495,7 +625,8 @@ func connectedAPIRequestHandler(
 		log.LogRawFieldsWithTimestamp(
 			getRequestLogFields(
 				"unique_user",
-				geoIPData,
+				sshClient.sessionID,
+				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				params,
 				uniqueUserParams))
@@ -516,10 +647,12 @@ func connectedAPIRequestHandler(
 	return responsePayload, nil
 }
 
-var statusRequestParams = baseSessionParams
+var statusRequestParams = baseParams
 
 var remoteServerListStatParams = append(
 	[]requestParamSpec{
+		// Legacy clients don't record the session_id with remote_server_list_stats entries.
+		{"session_id", isHexDigits, requestParamOptional},
 		{"client_download_timestamp", isISO8601Date, 0},
 		{"tunneled", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 		{"url", isAnyString, 0},
@@ -539,7 +672,7 @@ var remoteServerListStatParams = append(
 		{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	},
 
-	baseSessionParams...)
+	baseParams...)
 
 // Backwards compatibility case: legacy clients do not include these fields in
 // the remote_server_list_stats entries. Use the values from the outer status
@@ -548,7 +681,6 @@ var remoteServerListStatParams = append(
 // recording time). Note that all but client_build_rev, device_region, and
 // device_location are required fields.
 var remoteServerListStatBackwardsCompatibilityParamNames = []string{
-	"session_id",
 	"propagation_channel_id",
 	"sponsor_id",
 	"client_version",
@@ -572,7 +704,7 @@ var failedTunnelStatParams = append(
 		{"bytes_up", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"bytes_down", isIntString, requestParamOptional | requestParamLogStringAsInt},
 		{"tunnel_error", isAnyString, 0}},
-	baseSessionAndDialParams...)
+	baseAndDialParams...)
 
 // statusAPIRequestHandler implements the "status" API request.
 // Clients make periodic status requests which deliver client-side
@@ -582,9 +714,7 @@ var failedTunnelStatParams = append(
 // string). Stats processor must handle this input with care.
 func statusAPIRequestHandler(
 	support *SupportServices,
-	clientAddr string,
-	geoIPData GeoIPData,
-	authorizedAccessTypes []string,
+	sshClient *sshClient,
 	params common.APIParameters) ([]byte, error) {
 
 	err := validateRequestParams(support.Config, params, statusRequestParams)
@@ -592,7 +722,9 @@ func statusAPIRequestHandler(
 		return nil, errors.Trace(err)
 	}
 
-	sessionID, _ := getStringRequestParam(params, "client_session_id")
+	sshClient.Lock()
+	authorizedAccessTypes := sshClient.handshakeState.authorizedAccessTypes
+	sshClient.Unlock()
 
 	statusData, err := getJSONObjectRequestParam(params, "statusData")
 	if err != nil {
@@ -613,12 +745,7 @@ func statusAPIRequestHandler(
 	// configured to do so in the handshake reponse. Legacy clients may still
 	// report "(OTHER)" host_bytes when no regexes are set. Drop those stats.
 
-	acceptDomainBytes, err := support.TunnelServer.AcceptClientDomainBytes(sessionID)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	if acceptDomainBytes && statusData["host_bytes"] != nil {
+	if sshClient.acceptDomainBytes() && statusData["host_bytes"] != nil {
 
 		hostBytes, err := getMapStringInt64RequestParam(statusData, "host_bytes")
 		if err != nil {
@@ -628,7 +755,8 @@ func statusAPIRequestHandler(
 
 			domainBytesFields := getRequestLogFields(
 				"domain_bytes",
-				geoIPData,
+				sshClient.sessionID,
+				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				params,
 				statusRequestParams)
@@ -662,11 +790,6 @@ func statusAPIRequestHandler(
 				}
 			}
 
-			// For validation, copy expected fields from the outer
-			// statusRequestParams.
-			remoteServerListStat["server_secret"] = params["server_secret"]
-			remoteServerListStat["client_session_id"] = params["client_session_id"]
-
 			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
 			if err != nil {
 				// Occasionally, clients may send corrupt persistent stat data. Do not
@@ -677,7 +800,8 @@ func statusAPIRequestHandler(
 
 			remoteServerListFields := getRequestLogFields(
 				"remote_server_list",
-				geoIPData,
+				"", // Use the session_id the client recorded with the event
+				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				remoteServerListStat,
 				remoteServerListStatParams)
@@ -704,10 +828,6 @@ func statusAPIRequestHandler(
 		}
 		for _, failedTunnelStat := range failedTunnelStats {
 
-			// failed_tunnel supplies a full set of base params, but the server secret
-			// must use the correct value from the outer statusRequestParams.
-			failedTunnelStat["server_secret"] = params["server_secret"]
-
 			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
 			if err != nil {
 				// Occasionally, clients may send corrupt persistent stat data. Do not
@@ -721,7 +841,8 @@ func statusAPIRequestHandler(
 
 			failedTunnelFields := getRequestLogFields(
 				"failed_tunnel",
-				geoIPData,
+				"", // Use the session_id the client recorded with the event
+				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
 				failedTunnelStat,
 				failedTunnelStatParams)
@@ -806,11 +927,9 @@ func statusAPIRequestHandler(
 // clientVerificationAPIRequestHandler is just a compliance stub
 // for older Android clients that still send verification requests
 func clientVerificationAPIRequestHandler(
-	support *SupportServices,
-	clientAddr string,
-	geoIPData GeoIPData,
-	authorizedAccessTypes []string,
-	params common.APIParameters) ([]byte, error) {
+	_ *SupportServices,
+	_ *sshClient,
+	_ common.APIParameters) ([]byte, error) {
 	return make([]byte, 0), nil
 }
 
@@ -820,8 +939,11 @@ var tacticsParams = []requestParamSpec{
 }
 
 var tacticsRequestParams = append(
-	append([]requestParamSpec(nil), tacticsParams...),
-	baseSessionAndDialParams...)
+	append(
+		[]requestParamSpec{
+			{"session_id", isHexDigits, 0}},
+		tacticsParams...),
+	baseAndDialParams...)
 
 func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidator {
 	return func(params common.APIParameters) error {
@@ -835,10 +957,41 @@ func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormat
 
 		logFields := getRequestLogFields(
 			tactics.TACTICS_METRIC_EVENT_NAME,
+			"", // Use the session_id the client reported
 			GeoIPData(geoIPData),
 			nil, // authorizedAccessTypes are not known yet
 			params,
 			tacticsRequestParams)
+
+		return common.LogFields(logFields)
+	}
+}
+
+var inproxyBrokerRequestParams = append(
+	append(
+		[]requestParamSpec{
+			{"session_id", isHexDigits, 0},
+			{"fronting_provider_id", isAnyString, requestParamOptional}},
+		tacticsParams...),
+	baseParams...)
+
+func getInproxyBrokerAPIParameterValidator(config *Config) common.APIParameterValidator {
+	return func(params common.APIParameters) error {
+		return validateRequestParams(config, params, inproxyBrokerRequestParams)
+	}
+}
+
+func getInproxyBrokerAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+
+	return func(geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
+
+		logFields := getRequestLogFields(
+			"inproxy_broker",
+			"", // Use the session_id the client reported
+			GeoIPData(geoIPData),
+			nil,
+			params,
+			inproxyBrokerRequestParams)
 
 		return common.LogFields(logFields)
 	}
@@ -869,8 +1022,6 @@ const (
 // baseParams are the basic request parameters that are expected for all API
 // requests and log events.
 var baseParams = []requestParamSpec{
-	{"server_secret", isServerSecret, requestParamNotLogged},
-	{"client_session_id", isHexDigits, requestParamNotLogged},
 	{"propagation_channel_id", isHexDigits, 0},
 	{"sponsor_id", isHexDigits, 0},
 	{"client_version", isIntString, requestParamLogStringAsInt},
@@ -879,15 +1030,9 @@ var baseParams = []requestParamSpec{
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"device_region", isAnyString, requestParamOptional},
 	{"device_location", isGeoHashString, requestParamOptional},
+	{"network_type", isAnyString, requestParamOptional},
+	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 }
-
-// baseSessionParams adds to baseParams the required session_id parameter. For
-// all requests except handshake, all existing clients are expected to send
-// session_id. Legacy clients may not send "session_id" in handshake.
-var baseSessionParams = append(
-	[]requestParamSpec{
-		{"session_id", isHexDigits, 0}},
-	baseParams...)
 
 // baseDialParams are the dial parameters, per-tunnel network protocol and
 // obfuscation metrics which are logged with server_tunnel, failed_tunnel, and
@@ -909,7 +1054,6 @@ var baseDialParams = []requestParamSpec{
 	{"server_entry_region", isRegionCode, requestParamOptional},
 	{"server_entry_source", isServerEntrySource, requestParamOptional},
 	{"server_entry_timestamp", isISO8601Date, requestParamOptional},
-	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 	{"dial_port_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"quic_version", isAnyString, requestParamOptional},
 	{"quic_dial_sni_address", isAnyString, requestParamOptional},
@@ -933,7 +1077,6 @@ var baseDialParams = []requestParamSpec{
 	{"meek_tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"network_latency_multiplier", isFloatString, requestParamOptional | requestParamLogStringAsFloat},
 	{"client_bpf", isAnyString, requestParamOptional},
-	{"network_type", isAnyString, requestParamOptional},
 	{"conjure_cached", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"conjure_delay", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"conjure_transport", isAnyString, requestParamOptional},
@@ -956,14 +1099,70 @@ var baseDialParams = []requestParamSpec{
 	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},
 	{"tls_ossh_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"steering_ip", isIPAddress, requestParamOptional | requestParamLogOnlyForFrontedMeekOrConjure},
+	{"tls_sent_ticket", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"tls_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_sent_ticket", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_dial_early", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"quic_obfuscated_psk", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
-// baseSessionAndDialParams adds baseDialParams to baseSessionParams.
-var baseSessionAndDialParams = append(
+var inproxyDialParams = []requestParamSpec{
+
+	// Both the client and broker send inproxy_connection_id, and the values
+	// must be the same. The broker's value is logged, so the client's value
+	// is configured here as requestParamNotLogged.
+	{"inproxy_connection_id", isUnpaddedBase64String, requestParamOptional | requestParamNotLogged},
+	{"inproxy_relay_packet", isUnpaddedBase64String, requestParamOptional | requestParamNotLogged},
+	{"inproxy_broker_is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_transport", isAnyString, requestParamOptional},
+	{"inproxy_broker_fronting_provider_id", isAnyString, requestParamOptional},
+	{"inproxy_broker_dial_address", isAnyString, requestParamOptional},
+	{"inproxy_broker_resolved_ip_address", isAnyString, requestParamOptional},
+	{"inproxy_broker_sni_server_name", isAnyString, requestParamOptional},
+	{"inproxy_broker_host_header", isAnyString, requestParamOptional},
+	{"inproxy_broker_transformed_host_name", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_user_agent", isAnyString, requestParamOptional},
+	{"inproxy_broker_tls_profile", isAnyString, requestParamOptional},
+	{"inproxy_broker_tls_version", isAnyString, requestParamOptional},
+	{"inproxy_broker_tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_client_bpf", isAnyString, requestParamOptional},
+	{"inproxy_broker_upstream_bytes_fragmented", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_broker_http_transform", isAnyString, requestParamOptional},
+	{"inproxy_broker_dns_preresolved", isAnyString, requestParamOptional},
+	{"inproxy_broker_dns_preferred", isAnyString, requestParamOptional},
+	{"inproxy_broker_dns_transform", isAnyString, requestParamOptional},
+	{"inproxy_broker_dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_dns_preresolved", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_dns_preferred", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_dns_transform", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_stun_server", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_stun_server_resolved_ip_address", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_stun_server_RFC5780", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_stun_server_RFC5780_resolved_ip_address", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_randomize_dtls", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_padded_messages_sent", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_padded_messages_received", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_decoy_messages_sent", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_decoy_messages_received", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_local_ice_candidate_type", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_local_ice_candidate_is_initiator", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_local_ice_candidate_is_IPv6", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_local_ice_candidate_port", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_webrtc_remote_ice_candidate_type", isAnyString, requestParamOptional},
+	{"inproxy_webrtc_remote_ice_candidate_is_IPv6", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_remote_ice_candidate_port", isIntString, requestParamOptional | requestParamLogStringAsInt},
+}
+
+// baseAndDialParams adds baseDialParams and inproxyDialParams to baseParams.
+var baseAndDialParams = append(
 	append(
-		[]requestParamSpec{},
-		baseSessionParams...),
-	baseDialParams...)
+		append(
+			[]requestParamSpec{},
+			baseParams...),
+		baseDialParams...),
+	inproxyDialParams...)
 
 func validateRequestParams(
 	config *Config,
@@ -1002,14 +1201,14 @@ func validateRequestParams(
 	return nil
 }
 
-// copyBaseSessionAndDialParams makes a copy of the params which includes only
-// the baseSessionAndDialParams.
-func copyBaseSessionAndDialParams(params common.APIParameters) common.APIParameters {
+// copyBaseAndDialParams makes a copy of the params which includes only
+// the baseAndDialParams.
+func copyBaseAndDialParams(params common.APIParameters) common.APIParameters {
 
 	// Note: not a deep copy; assumes baseSessionAndDialParams values are all
 	// scalar types (int, string, etc.)
 	paramsCopy := make(common.APIParameters)
-	for _, baseParam := range baseSessionAndDialParams {
+	for _, baseParam := range baseAndDialParams {
 		value := params[baseParam.name]
 		if value == nil {
 			continue
@@ -1070,6 +1269,7 @@ func validateStringArrayRequestParam(
 // the legacy psi_web and current ELK naming conventions.
 func getRequestLogFields(
 	eventName string,
+	sessionID string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
 	params common.APIParameters,
@@ -1077,11 +1277,23 @@ func getRequestLogFields(
 
 	logFields := make(LogFields)
 
+	// A sessionID is specified for SSH API requests, where the Psiphon server
+	// has already received a session ID in the SSH auth payload. In this
+	// case, use that session ID.
+	//
+	// sessionID is "" for other, non-SSH server cases including tactics,
+	// in-proxy broker, and client-side store and forward events including
+	// remote server list and failed tunnel.
+
+	if sessionID != "" {
+		logFields["session_id"] = sessionID
+	}
+
 	if eventName != "" {
 		logFields["event_name"] = eventName
 	}
 
-	geoIPData.SetLogFields(logFields)
+	geoIPData.SetClientLogFields(logFields)
 
 	if len(authorizedAccessTypes) > 0 {
 		logFields["authorized_access_types"] = authorizedAccessTypes
@@ -1383,21 +1595,24 @@ func getStringArrayRequestParam(params common.APIParameters, name string) ([]str
 	if params[name] == nil {
 		return nil, errors.Tracef("missing param: %s", name)
 	}
-	value, ok := params[name].([]interface{})
-	if !ok {
+
+	switch value := params[name].(type) {
+	case []string:
+		return value, nil
+	case []interface{}:
+		// JSON unmarshaling may decode the parameter as []interface{}.
+		result := make([]string, len(value))
+		for i, v := range value {
+			strValue, ok := v.(string)
+			if !ok {
+				return nil, errors.Tracef("invalid param: %s", name)
+			}
+			result[i] = strValue
+		}
+		return result, nil
+	default:
 		return nil, errors.Tracef("invalid param: %s", name)
 	}
-
-	result := make([]string, len(value))
-	for i, v := range value {
-		strValue, ok := v.(string)
-		if !ok {
-			return nil, errors.Tracef("invalid param: %s", name)
-		}
-		result[i] = strValue
-	}
-
-	return result, nil
 }
 
 // Normalize reported client platform. Android clients, for example, report
@@ -1426,12 +1641,6 @@ func isMobileClientPlatform(clientPlatform string) bool {
 
 // Input validators follow the legacy validations rules in psi_web.
 
-func isServerSecret(config *Config, value string) bool {
-	return subtle.ConstantTimeCompare(
-		[]byte(value),
-		[]byte(config.WebServerSecret)) == 1
-}
-
 func isHexDigits(_ *Config, value string) bool {
 	// Allows both uppercase in addition to lowercase, for legacy support.
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
@@ -1441,6 +1650,11 @@ func isHexDigits(_ *Config, value string) bool {
 
 func isBase64String(_ *Config, value string) bool {
 	_, err := base64.StdEncoding.DecodeString(value)
+	return err == nil
+}
+
+func isUnpaddedBase64String(_ *Config, value string) bool {
+	_, err := base64.RawStdEncoding.DecodeString(value)
 	return err == nil
 }
 

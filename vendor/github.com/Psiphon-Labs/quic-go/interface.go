@@ -189,6 +189,11 @@ type Connection interface {
 	// Warning: This API should not be considered stable and might change soon.
 	ConnectionState() ConnectionState
 
+	// [Psiphon]
+	// TLSConnectionMetrics returns metrics of interest about the connection
+	// that are not available from ConnectionState.
+	TLSConnectionMetrics() tls.ConnectionMetrics
+
 	// SendDatagram sends a message using a QUIC datagram, as specified in RFC 9221.
 	// There is no delivery guarantee for DATAGRAM frames, they are not retransmitted if lost.
 	// The payload of the datagram needs to fit into a single QUIC packet.
@@ -386,4 +391,7 @@ type ConnectionState struct {
 	Version VersionNumber
 	// GSO says if generic segmentation offload is used
 	GSO bool
+
+	// [Psiphon]
+	TLSMetrics tls.ConnectionMetrics
 }

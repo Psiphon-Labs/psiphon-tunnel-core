@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -49,9 +50,11 @@ var (
 	datastoreTacticsBucket                      = []byte("tactics")
 	datastoreSpeedTestSamplesBucket             = []byte("speedTestSamples")
 	datastoreDialParametersBucket               = []byte("dialParameters")
+	datastoreNetworkReplayParametersBucket      = []byte("networkReplayParameters")
 	datastoreLastConnectedKey                   = "lastConnected"
 	datastoreLastServerEntryFilterKey           = []byte("lastServerEntryFilter")
 	datastoreAffinityServerEntryIDKey           = []byte("affinityServerEntryID")
+	datastoreInproxyCommonCompartmentIDsKey     = []byte("inproxyCommonCompartmentIDs")
 	datastorePersistentStatTypeRemoteServerList = string(datastoreRemoteServerListStatsBucket)
 	datastorePersistentStatTypeFailedTunnel     = string(datastoreFailedTunnelStatsBucket)
 	datastoreServerEntryFetchGCThreshold        = 10
@@ -421,8 +424,6 @@ func StreamingStoreServerEntries(
 			n = 0
 		}
 	}
-
-	return nil
 }
 
 // ImportEmbeddedServerEntries loads, decodes, and stores a list of server
@@ -691,13 +692,14 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 
 		if len(limitTunnelProtocols) > 0 {
 			// At the ServerEntryIterator level, only limitTunnelProtocols is applied;
-			// excludeIntensive is handled higher up.
+			// excludeIntensive and excludeInproxt are handled higher up.
 			if len(serverEntry.GetSupportedProtocols(
 				conditionallyEnabledComponents{},
 				config.UseUpstreamProxy(),
 				limitTunnelProtocols,
 				limitTunnelDialPortNumbers,
 				limitQUICVersions,
+				false,
 				false)) == 0 {
 				return false, nil, errors.Tracef(
 					"TargetServerEntry does not support LimitTunnelProtocols: %v", limitTunnelProtocols)
@@ -1298,7 +1300,7 @@ func deleteServerEntryHelper(
 //
 // ScanServerEntries may be slow to execute, particularly for older devices
 // and/or very large server lists. Callers should avoid blocking on
-// ScanServerEntries where possible; and use the canel option to interrupt
+// ScanServerEntries where possible; and use the cancel option to interrupt
 // scans that are no longer required.
 func ScanServerEntries(callback func(*protocol.ServerEntry) bool) error {
 
@@ -2051,6 +2053,235 @@ func GetAffinityServerEntryAndDialParameters(
 	}
 
 	return serverEntryFields, dialParams, nil
+}
+
+// GetSignedServerEntryFields loads, from the datastore, the raw JSON server
+// entry fields for the specified server entry.
+//
+// The protocol.ServerEntryFields returned by GetSignedServerEntryFields will
+// include all fields required to verify the server entry signature,
+// including new fields added after the current client version, which do not
+// get unmarshaled into protocol.ServerEntry.
+func GetSignedServerEntryFields(ipAddress string) (protocol.ServerEntryFields, error) {
+
+	var serverEntryFields protocol.ServerEntryFields
+
+	err := datastoreView(func(tx *datastoreTx) error {
+
+		serverEntries := tx.bucket(datastoreServerEntriesBucket)
+
+		key := []byte(ipAddress)
+
+		serverEntryRecord := serverEntries.get(key)
+		if serverEntryRecord == nil {
+			return errors.TraceNew("server entry not found")
+		}
+
+		err := json.Unmarshal(
+			serverEntryRecord,
+			&serverEntryFields)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	err = serverEntryFields.ToSignedFields()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return serverEntryFields, nil
+}
+
+// StoreInproxyCommonCompartmentIDs stores a list of in-proxy common
+// compartment IDs. Clients obtain common compartment IDs from tactics;
+// persisting the IDs enables a scheme whereby existing clients may continue
+// to use common compartment IDs, and access the related in-proxy proxy
+// matches, even after the compartment IDs are de-listed from tactics.
+//
+// The caller is responsible for merging new and existing compartment IDs into
+// the input list, and trimming the length of the list appropriately.
+func StoreInproxyCommonCompartmentIDs(compartmentIDs []string) error {
+
+	value, err := json.Marshal(compartmentIDs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = setBucketValue(
+		datastoreKeyValueBucket,
+		datastoreInproxyCommonCompartmentIDsKey,
+		value)
+	return errors.Trace(err)
+}
+
+// LoadInproxyCommonCompartmentIDs returns the list of known, persisted
+// in-proxy common compartment IDs. LoadInproxyCommonCompartmentIDs will
+// return nil, nil when there is no stored list.
+func LoadInproxyCommonCompartmentIDs() ([]string, error) {
+
+	var compartmentIDs []string
+
+	err := getBucketValue(
+		datastoreKeyValueBucket,
+		datastoreInproxyCommonCompartmentIDsKey,
+		func(value []byte) error {
+			if value == nil {
+				return nil
+			}
+
+			// Note: unlike with server entries, this record is not deleted
+			// when the unmarshal fails, as the caller should proceed with
+			// any common compartment IDs available with tactics; and
+			// subsequently call StoreInproxyCommonCompartmentIDs, writing
+			// over this record.
+
+			err := json.Unmarshal(value, &compartmentIDs)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			return nil
+		})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return compartmentIDs, nil
+}
+
+// makeNetworkReplayParametersKey creates a unique key for the replay
+// parameters which reflects the network ID context; the replay data type, R;
+// and the replay ID, which uniquely identifies the object that is replayed
+// (for example, am in-proxy broker public key, uniquely identifying a
+// broker).
+func makeNetworkReplayParametersKey[R any](networkID, replayID string) []byte {
+
+	// A pointer to an R is used instead of stack (or heap) allocating a full
+	// R object. As a result, the %T will include a '*' prefix, and this is
+	// removed by the [1:].
+	//
+	// Fields are delimited using 0 bytes, which aren't expected to occur in
+	// the field string values.
+
+	var t *R
+	key := append(append([]byte(nil), []byte(networkID)...), 0)
+	key = append(append(key, []byte(fmt.Sprintf("%T", t)[1:])...), 0)
+	key = append(key, []byte(replayID)...)
+	return key
+}
+
+// SetNetworkReplayParameters stores replay parameters associated with the
+// specified context and object.
+//
+// Limitation: unlike server dial parameters, the datastore does not prune
+// replay records.
+func SetNetworkReplayParameters[R any](networkID, replayID string, replayParams *R) error {
+
+	key := makeNetworkReplayParametersKey[R](networkID, replayID)
+
+	data, err := json.Marshal(replayParams)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return setBucketValue(datastoreNetworkReplayParametersBucket, key, data)
+}
+
+// SelectCandidateWithNetworkReplayParameters takes a list of candidate
+// objects and selects one. The candidates are considered in the specified
+// order. The first candidate with a valid replay record is returned, along
+// with its replay parameters.
+//
+// The caller provides isValidReplay which should indicate if replay
+// parameters remain valid; the caller should check for expiry and changes to
+// the underlhying tactics.
+//
+// When no candidates with valid replay parameters are found,
+// SelectCandidateWithNetworkReplayParameters returns the first candidate and
+// nil replay parameters.
+//
+// When selectFirstCandidate is specified,
+// SelectCandidateWithNetworkReplayParameters will check for valid replay
+// parameters for the first candidate only, and then select the first
+// candidate.
+func SelectCandidateWithNetworkReplayParameters[C, R any](
+	networkID string,
+	selectFirstCandidate bool,
+	candidates []*C,
+	getReplayID func(*C) string,
+	isValidReplay func(*C, *R) bool) (*C, *R, error) {
+
+	if len(candidates) < 1 {
+		return nil, nil, errors.TraceNew("no candidates")
+	}
+
+	candidate := candidates[0]
+	var replay *R
+
+	err := datastoreUpdate(func(tx *datastoreTx) error {
+
+		bucket := tx.bucket(datastoreNetworkReplayParametersBucket)
+
+		for _, c := range candidates {
+			key := makeNetworkReplayParametersKey[R](networkID, getReplayID(c))
+			value := bucket.get(key)
+			if value == nil {
+				continue
+			}
+			var r *R
+			err := json.Unmarshal(value, &r)
+			if err != nil {
+
+				// Delete the record. This avoids continually checking it.
+				// Note that the deletes performed here won't prune records
+				// for old candidates which are no longer passed in to
+				// SelectCandidateWithNetworkReplayParameters.
+				NoticeWarning(
+					"SelectCandidateWithNetworkReplayParameters: unmarshal failed: %s",
+					errors.Trace(err))
+				_ = bucket.delete(key)
+				continue
+			}
+			if isValidReplay(c, r) {
+				candidate = c
+				replay = r
+				return nil
+			} else if selectFirstCandidate {
+				return nil
+			} else {
+
+				// Delete the record if it's no longer valid due to expiry or
+				// tactics changes. This avoids continually checking it.
+				_ = bucket.delete(key)
+				continue
+			}
+		}
+
+		// No valid replay parameters were found, so candidates[0] and a nil
+		// replay will be returned.
+		return nil
+	})
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
+
+	return candidate, replay, nil
+
+}
+
+// DeleteNetworkReplayParameters deletes the replay record associated with the
+// specified context and object.
+func DeleteNetworkReplayParameters[R any](networkID, replayID string) error {
+
+	key := makeNetworkReplayParametersKey[R](networkID, replayID)
+
+	return deleteBucketValue(datastoreNetworkReplayParametersBucket, key)
 }
 
 func setBucketValue(bucket, key, value []byte) error {

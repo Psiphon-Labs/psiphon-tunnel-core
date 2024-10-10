@@ -41,7 +41,7 @@ func TestAuthenticateNtlmV1(t *testing.T) {
 		t.Error("Could not parse authenticate message")
 	}
 
-	a.String()
+	_ = a.String()
 
 	outBytes := a.Bytes()
 
@@ -92,7 +92,7 @@ func TestAuthenticateNtlmV2(t *testing.T) {
 		t.Errorf("Length of payload is incorrect got: %d, should be %d", len(a.Payload), 356)
 	}
 
-	a.String()
+	_ = a.String()
 
 	// Generate the bytes from the message and reparse it and make sure that works
 	bytes := a.Bytes()

@@ -365,6 +365,12 @@ type udpgwPortForward struct {
 	mux               *udpgwPortForwardMultiplexer
 }
 
+var udpgwBufferPool = &sync.Pool{
+	New: func() any {
+		return make([]byte, udpgwProtocolMaxMessageSize)
+	},
+}
+
 func (portForward *udpgwPortForward) relayDownstream() {
 	defer portForward.relayWaitGroup.Done()
 	defer portForward.mux.relayWaitGroup.Done()
@@ -378,7 +384,13 @@ func (portForward *udpgwPortForward) relayDownstream() {
 	// Note: there is one downstream buffer per UDP port forward,
 	// while for upstream there is one buffer per client.
 	// TODO: is the buffer size larger than necessary?
-	buffer := make([]byte, udpgwProtocolMaxMessageSize)
+
+	// Use a buffer pool to minimize GC churn resulting from frequent,
+	// short-lived UDP flows, including DNS requests.
+	buffer := udpgwBufferPool.Get().([]byte)
+	clear(buffer)
+	defer udpgwBufferPool.Put(buffer)
+
 	packetBuffer := buffer[portForward.preambleSize:udpgwProtocolMaxMessageSize]
 	for {
 		// TODO: if read buffer is too small, excess bytes are discarded?
@@ -389,7 +401,9 @@ func (portForward *udpgwPortForward) relayDownstream() {
 		if err != nil {
 			if err != io.EOF {
 				// Debug since errors such as "use of closed network connection" occur during normal operation
-				log.WithTraceFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
+				if IsLogLevelDebug() {
+					log.WithTraceFields(LogFields{"error": err}).Debug("downstream UDP relay failed")
+				}
 			}
 			break
 		}

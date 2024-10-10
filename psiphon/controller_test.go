@@ -39,6 +39,7 @@ import (
 
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/elazarl/goproxy"
@@ -85,119 +86,64 @@ func TestMain(m *testing.M) {
 func TestUntunneledUpgradeDownload(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    true,
-			protocol:                 "",
-			clientIsLatestVersion:    false,
-			disableUntunneledUpgrade: false,
-			disableEstablishing:      true,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
+			expectNoServerEntries: true,
+			protocol:              "",
+			disableEstablishing:   true,
 		})
 }
 
 func TestUntunneledResumableUpgradeDownload(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    true,
-			protocol:                 "",
-			clientIsLatestVersion:    false,
-			disableUntunneledUpgrade: false,
-			disableEstablishing:      true,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           true,
-			transformHostNames:       false,
-			useFragmentor:            false,
+			expectNoServerEntries: true,
+			protocol:              "",
+			disableEstablishing:   true,
+			disruptNetwork:        true,
 		})
 }
 
 func TestUntunneledUpgradeClientIsLatestVersion(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    true,
-			protocol:                 "",
-			clientIsLatestVersion:    true,
-			disableUntunneledUpgrade: false,
-			disableEstablishing:      true,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
+			expectNoServerEntries: true,
+			protocol:              "",
+			clientIsLatestVersion: true,
+			disableEstablishing:   true,
 		})
 }
 
 func TestUntunneledResumableFetchRemoteServerList(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    true,
-			protocol:                 "",
-			clientIsLatestVersion:    true,
-			disableUntunneledUpgrade: false,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           true,
-			transformHostNames:       false,
-			useFragmentor:            false,
+			expectNoServerEntries: true,
+			protocol:              "",
+			clientIsLatestVersion: true,
+			disruptNetwork:        true,
 		})
 }
 
 func TestTunneledUpgradeClientIsLatestVersion(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 "",
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestSSH(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_SSH,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestObfuscatedSSH(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
@@ -207,102 +153,50 @@ func TestTLS(t *testing.T) {
 
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestUnfrontedMeek(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestUnfrontedMeekWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
-			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
 			transformHostNames:       true,
-			useFragmentor:            false,
 		})
 }
 
 func TestFrontedMeek(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_MEEK,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestFrontedMeekWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_MEEK,
-			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
 			transformHostNames:       true,
-			useFragmentor:            false,
 		})
 }
 
 func TestFrontedMeekHTTP(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP,
-			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
@@ -311,116 +205,62 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 		&controllerRunConfig{
 			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestUnfrontedMeekHTTPSWithTransformer(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
-			protocol:                 protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
-			clientIsLatestVersion:    true,
-			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       true,
-			useFragmentor:            false,
+			protocol:              protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
+			clientIsLatestVersion: true,
+			transformHostNames:    true,
 		})
 }
 
 func TestDisabledApi(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 "",
 			clientIsLatestVersion:    true,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
 			disableApi:               true,
 			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestObfuscatedSSHWithUpstreamProxy(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
 			useUpstreamProxy:         true,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestUnfrontedMeekWithUpstreamProxy(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
 			useUpstreamProxy:         true,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestUnfrontedMeekHTTPSWithUpstreamProxy(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_HTTPS,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
 			useUpstreamProxy:         true,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
 func TestObfuscatedSSHFragmentor(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
 			useFragmentor:            true,
 		})
 }
@@ -428,16 +268,8 @@ func TestObfuscatedSSHFragmentor(t *testing.T) {
 func TestFrontedMeekFragmentor(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_MEEK,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
 			useFragmentor:            true,
 		})
 }
@@ -448,17 +280,8 @@ func TestQUIC(t *testing.T) {
 	}
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
 		})
 }
 
@@ -471,34 +294,79 @@ func TestFrontedQUIC(t *testing.T) {
 	}
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
-			tunnelPoolSize:           1,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
+		})
+}
+
+func TestInproxyOSSH(t *testing.T) {
+
+	if !inproxy.Enabled() {
+		t.Skip("In-proxy is not enabled")
+	}
+
+	controllerRun(t,
+		&controllerRunConfig{
+			protocol:                 "INPROXY-WEBRTC-OSSH",
+			disableUntunneledUpgrade: true,
+			useInproxyDialRateLimit:  true,
+		})
+}
+
+func TestInproxyQUICOSSH(t *testing.T) {
+
+	if !inproxy.Enabled() {
+		t.Skip("In-proxy is not enabled")
+	}
+
+	controllerRun(t,
+		&controllerRunConfig{
+			protocol:                 "INPROXY-WEBRTC-QUIC-OSSH",
+			disableUntunneledUpgrade: true,
+			useInproxyDialRateLimit:  true,
+		})
+}
+
+func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
+
+	if !inproxy.Enabled() {
+		t.Skip("In-proxy is not enabled")
+	}
+
+	controllerRun(t,
+		&controllerRunConfig{
+			protocol:                 "INPROXY-WEBRTC-UNFRONTED-MEEK-HTTPS-OSSH",
+			disableUntunneledUpgrade: true,
+		})
+}
+
+func TestInproxyTLSOSSH(t *testing.T) {
+
+	if !inproxy.Enabled() {
+		t.Skip("In-proxy is not enabled")
+	}
+
+	controllerRun(t,
+		&controllerRunConfig{
+			protocol:                 "INPROXY-WEBRTC-TLS-OSSH",
+			disableUntunneledUpgrade: true,
 		})
 }
 
 func TestTunnelPool(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
-			expectNoServerEntries:    false,
 			protocol:                 protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
-			clientIsLatestVersion:    false,
 			disableUntunneledUpgrade: true,
-			disableEstablishing:      false,
-			disableApi:               false,
 			tunnelPoolSize:           2,
-			useUpstreamProxy:         false,
-			disruptNetwork:           false,
-			transformHostNames:       false,
-			useFragmentor:            false,
+		})
+}
+
+func TestLegacyAPIEncoding(t *testing.T) {
+	controllerRun(t,
+		&controllerRunConfig{
+			protocol:             protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH,
+			useLegacyAPIEncoding: true,
 		})
 }
 
@@ -514,6 +382,8 @@ type controllerRunConfig struct {
 	disruptNetwork           bool
 	transformHostNames       bool
 	useFragmentor            bool
+	useLegacyAPIEncoding     bool
+	useInproxyDialRateLimit  bool
 }
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
@@ -533,7 +403,10 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	// Note: a successful tactics request may modify config parameters.
 
 	var modifyConfig map[string]interface{}
-	json.Unmarshal(configJSON, &modifyConfig)
+	err = json.Unmarshal(configJSON, &modifyConfig)
+	if err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
 
 	modifyConfig["DataRootDirectory"] = testDataDirName
 
@@ -572,6 +445,15 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		modifyConfig["FragmentorMaxDelayMicroseconds"] = 10000
 		modifyConfig["ObfuscatedSSHMinPadding"] = 4096
 		modifyConfig["ObfuscatedSSHMaxPadding"] = 8192
+	}
+
+	if runConfig.useLegacyAPIEncoding {
+		modifyConfig["TargetAPIEncoding"] = protocol.PSIPHON_API_ENCODING_JSON
+	}
+
+	if runConfig.useInproxyDialRateLimit {
+		modifyConfig["InproxyClientDialRateLimitQuantity"] = 2
+		modifyConfig["InproxyClientDialRateLimitIntervalMilliseconds"] = 1000
 	}
 
 	configJSON, _ = json.Marshal(modifyConfig)

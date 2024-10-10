@@ -65,16 +65,35 @@ var (
 	ErrChecksumMismatch            = errors.New("checksum mismatch theirs")
 )
 
-func (p *packet) unmarshal(raw []byte) error {
+func (p *packet) unmarshal(doChecksum bool, raw []byte) error {
 	if len(raw) < packetHeaderSize {
 		return fmt.Errorf("%w: raw only %d bytes, %d is the minimum length", ErrPacketRawTooSmall, len(raw), packetHeaderSize)
+	}
+
+	offset := packetHeaderSize
+
+	// Check if doing CRC32c is required.
+	// Without having SCTP AUTH implemented, this depends only on the type
+	// og the first chunk.
+	if offset+chunkHeaderSize <= len(raw) {
+		switch chunkType(raw[offset]) {
+		case ctInit, ctCookieEcho:
+			doChecksum = true
+		default:
+		}
+	}
+	theirChecksum := binary.LittleEndian.Uint32(raw[8:])
+	if theirChecksum != 0 || doChecksum {
+		ourChecksum := generatePacketChecksum(raw)
+		if theirChecksum != ourChecksum {
+			return fmt.Errorf("%w: %d ours: %d", ErrChecksumMismatch, theirChecksum, ourChecksum)
+		}
 	}
 
 	p.sourcePort = binary.BigEndian.Uint16(raw[0:])
 	p.destinationPort = binary.BigEndian.Uint16(raw[2:])
 	p.verificationTag = binary.BigEndian.Uint32(raw[4:])
 
-	offset := packetHeaderSize
 	for {
 		// Exact match, no more chunks
 		if offset == len(raw) {
@@ -125,15 +144,11 @@ func (p *packet) unmarshal(raw []byte) error {
 		chunkValuePadding := getPadding(c.valueLength())
 		offset += chunkHeaderSize + c.valueLength() + chunkValuePadding
 	}
-	theirChecksum := binary.LittleEndian.Uint32(raw[8:])
-	ourChecksum := generatePacketChecksum(raw)
-	if theirChecksum != ourChecksum {
-		return fmt.Errorf("%w: %d ours: %d", ErrChecksumMismatch, theirChecksum, ourChecksum)
-	}
+
 	return nil
 }
 
-func (p *packet) marshal() ([]byte, error) {
+func (p *packet) marshal(doChecksum bool) ([]byte, error) {
 	raw := make([]byte, packetHeaderSize)
 
 	// Populate static headers
@@ -156,9 +171,16 @@ func (p *packet) marshal() ([]byte, error) {
 		}
 	}
 
-	// Checksum is already in BigEndian
-	// Using LittleEndian.PutUint32 stops it from being flipped
-	binary.LittleEndian.PutUint32(raw[8:], generatePacketChecksum(raw))
+	if doChecksum {
+		// golang CRC32C uses reflected input and reflected output, the
+		// net result of this is to have the bytes flipped compared to
+		// the non reflected variant that the spec expects.
+		//
+		// Use LittleEndian.PutUint32 to avoid flipping the bytes in to
+		// the spec compliant checksum order
+		binary.LittleEndian.PutUint32(raw[8:], generatePacketChecksum(raw))
+	}
+
 	return raw, nil
 }
 

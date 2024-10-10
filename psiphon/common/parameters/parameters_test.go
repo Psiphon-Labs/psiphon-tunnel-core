@@ -128,6 +128,23 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("KeyValues returned %+v expected %+v", g, v)
 			}
+		case KeyStrings:
+			for key, strings := range v {
+				g := p.Get().KeyStrings(name, key)
+				if !reflect.DeepEqual(strings, g) {
+					t.Fatalf("KeyStrings returned %+v expected %+v", g, strings)
+				}
+			}
+		case KeyDurations:
+			g := p.Get().KeyDurations(name)
+			durations := make(map[string]time.Duration)
+			for key, duration := range v {
+				d, _ := time.ParseDuration(duration)
+				durations[key] = d
+			}
+			if !reflect.DeepEqual(durations, g) {
+				t.Fatalf("KeyDurations returned %+v expected %+v", g, durations)
+			}
 		case *BPFProgramSpec:
 			ok, name, rawInstructions := p.Get().BPFProgram(name)
 			if v != nil || ok || name != "" || rawInstructions != nil {
@@ -189,12 +206,20 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
 			}
-		case KeyStrings:
-			for key, strings := range v {
-				g := p.Get().KeyStrings(name, key)
-				if !reflect.DeepEqual(strings, g) {
-					t.Fatalf("KeyStrings returned %+v expected %+v", g, strings)
-				}
+		case InproxyBrokerSpecsValue:
+			g := p.Get().InproxyBrokerSpecs(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
+			}
+		case InproxyCompartmentIDsValue:
+			g := p.Get().InproxyCompartmentIDs(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
+			}
+		case InproxyDataChannelTrafficShapingParametersValue:
+			g := p.Get().InproxyDataChannelTrafficShapingParameters(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
 			}
 		default:
 			t.Fatalf("Unhandled default type: %s (%T)", name, defaults.value)
@@ -245,7 +270,7 @@ func TestOverrides(t *testing.T) {
 
 	// No skip on error; should fail and not apply any changes
 
-	_, err = p.Set(tag, false, applyParameters)
+	_, err = p.Set(tag, 0, applyParameters)
 	if err == nil {
 		t.Fatalf("Set succeeded unexpectedly")
 	}
@@ -266,7 +291,7 @@ func TestOverrides(t *testing.T) {
 
 	// Skip on error; should skip ConnectionWorkerPoolSize and apply InitialLimitTunnelProtocolsCandidateCount
 
-	counts, err := p.Set(tag, true, applyParameters)
+	counts, err := p.Set(tag, ValidationSkipOnError, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
@@ -296,7 +321,7 @@ func TestNetworkLatencyMultiplier(t *testing.T) {
 
 	applyParameters := map[string]interface{}{"NetworkLatencyMultiplier": 2.0}
 
-	_, err = p.Set("", false, applyParameters)
+	_, err = p.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
@@ -318,7 +343,7 @@ func TestCustomNetworkLatencyMultiplier(t *testing.T) {
 
 	applyParameters := map[string]interface{}{"NetworkLatencyMultiplier": 2.0}
 
-	_, err = p.Set("", false, applyParameters)
+	_, err = p.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
@@ -344,7 +369,7 @@ func TestLimitTunnelProtocolProbability(t *testing.T) {
 		"LimitTunnelProtocols": tunnelProtocols,
 	}
 
-	_, err = p.Set("", false, applyParameters)
+	_, err = p.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
@@ -365,7 +390,7 @@ func TestLimitTunnelProtocolProbability(t *testing.T) {
 		"LimitTunnelProtocols":            tunnelProtocols,
 	}
 
-	_, err = p.Set("", false, applyParameters)
+	_, err = p.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
@@ -411,7 +436,7 @@ func TestLabeledLists(t *testing.T) {
 		"DisableFrontingProviderQUICVersions": protocol.LabeledQUICVersions{"validLabel": quicVersions},
 	}
 
-	_, err = p.Set("", false, applyParameters)
+	_, err = p.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
@@ -451,7 +476,7 @@ func TestCustomTLSProfiles(t *testing.T) {
 	applyParameters := map[string]interface{}{
 		"CustomTLSProfiles": customTLSProfiles}
 
-	_, err = p.Set("", false, applyParameters)
+	_, err = p.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
@@ -511,7 +536,7 @@ func TestApplicationParameters(t *testing.T) {
 		t.Fatalf("NewParameters failed: %s", err)
 	}
 
-	_, err = p.Set("", false, applyParameters)
+	_, err = p.Set("", 0, applyParameters)
 	if err != nil {
 		t.Fatalf("Set failed: %s", err)
 	}
