@@ -86,8 +86,9 @@ public class PsiphonTunnel {
     public interface HostService extends HostLogger, HostLibraryLoader {
         Context getContext();
         String getPsiphonConfig();
-        // Optional getter for the VpnService instance to be used by bindToDevice
-        default VpnService getVpnService() {return null;}
+        default void bindToDevice(long fileDescriptor) throws Exception {
+            throw new IllegalStateException("bindToDevice not implemented");
+        }
 
         // Tunnel core notice handler callbacks
         default void onAvailableEgressRegions(List<String> regions) {}
@@ -534,9 +535,7 @@ public class PsiphonTunnel {
     }
 
     private String bindToDevice(long fileDescriptor) throws Exception {
-        if (!mHostService.getVpnService().protect((int)fileDescriptor)) {
-            throw new Exception("protect socket failed");
-        }
+        mHostService.bindToDevice(fileDescriptor);
         return "";
     }
 
