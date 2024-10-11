@@ -122,6 +122,15 @@ type BrokerConfig struct {
 	// clients. Proxies with personal compartment IDs are always allowed.
 	AllowProxy func(common.GeoIPData) bool
 
+	// PrioritizeProxy is a callback which can indicate whether proxy
+	// announcements from proxies with the specified GeoIPData and
+	// APIParameters should be prioritized in the matcher queue. Priority
+	// proxy announcements match ahead of other proxy announcements,
+	// regardless of announcement age/deadline. Priority status takes
+	// precedence over preferred NAT matching. Prioritization applies only to
+	// common compartment IDs and not personal pairing mode.
+	PrioritizeProxy func(common.GeoIPData, common.APIParameters) bool
+
 	// AllowClient is a callback which can indicate whether a client with the
 	// given GeoIP data is allowed to match with common compartment ID
 	// proxies. Clients are always allowed to match based on personal
@@ -548,6 +557,8 @@ func (b *Broker) handleProxyAnnounce(
 		return nil, errors.Trace(err)
 	}
 
+	hasPersonalCompartmentIDs := len(announceRequest.PersonalCompartmentIDs) > 0
+
 	// Return MustUpgrade when the proxy's protocol version is less than the
 	// minimum required.
 	if announceRequest.Metrics.ProxyProtocolVersion < MinimumProxyProtocolVersion {
@@ -596,7 +607,7 @@ func (b *Broker) handleProxyAnnounce(
 	// compartment IDs are always allowed, as they will be used only by
 	// clients specifically configured to use them.
 
-	if len(announceRequest.PersonalCompartmentIDs) == 0 &&
+	if !hasPersonalCompartmentIDs &&
 		!b.config.AllowProxy(geoIPData) {
 
 		return nil, errors.TraceNew("proxy disallowed")
@@ -608,12 +619,34 @@ func (b *Broker) handleProxyAnnounce(
 	// assigned to the same compartment.
 
 	var commonCompartmentIDs []ID
-	if len(announceRequest.PersonalCompartmentIDs) == 0 {
+	if !hasPersonalCompartmentIDs {
 		compartmentID, err := b.selectCommonCompartmentID(proxyID)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		commonCompartmentIDs = []ID{compartmentID}
+	}
+
+	// In the common compartment ID case, invoke the callback to check if the
+	// announcement should be prioritized.
+
+	isPriority := false
+	if b.config.PrioritizeProxy != nil && !hasPersonalCompartmentIDs {
+
+		// Limitation: Of the two return values from
+		// ValidateAndGetParametersAndLogFields, apiParams and logFields,
+		// only logFields contains fields such as max_clients
+		// and *_bytes_per_second, and so these cannot be part of any
+		// filtering performed by the PrioritizeProxy callback.
+		//
+		// TODO: include the additional fields in logFields. Since the
+		// logFields return value is the output of server.getRequestLogFields
+		// processing, it's not safe to use it directly. In addition,
+		// filtering by fields such as max_clients and *_bytes_per_second
+		// calls for range filtering, which is not yet supported in the
+		// psiphon/server.MeekServer PrioritizeProxy provider.
+
+		isPriority = b.config.PrioritizeProxy(geoIPData, apiParams)
 	}
 
 	// Await client offer.
@@ -638,6 +671,7 @@ func (b *Broker) handleProxyAnnounce(
 		proxyIP,
 		&MatchAnnouncement{
 			Properties: MatchProperties{
+				IsPriority:             isPriority,
 				CommonCompartmentIDs:   commonCompartmentIDs,
 				PersonalCompartmentIDs: announceRequest.PersonalCompartmentIDs,
 				GeoIPData:              geoIPData,
@@ -830,6 +864,8 @@ func (b *Broker) handleClientOffer(
 		return nil, errors.Trace(err)
 	}
 
+	hasPersonalCompartmentIDs := len(offerRequest.PersonalCompartmentIDs) > 0
+
 	offerSDP := offerRequest.ClientOfferSDP
 	offerSDP.SDP = string(filteredSDP)
 
@@ -837,16 +873,10 @@ func (b *Broker) handleClientOffer(
 	// from offering. Clients are always allowed to match proxies with shared
 	// personal compartment IDs.
 
-	commonCompartmentIDs := offerRequest.CommonCompartmentIDs
+	if !hasPersonalCompartmentIDs &&
+		!b.config.AllowClient(geoIPData) {
 
-	if !b.config.AllowClient(geoIPData) {
-
-		if len(offerRequest.PersonalCompartmentIDs) == 0 {
-			return nil, errors.TraceNew("client disallowed")
-		}
-
-		// Only match personal compartment IDs.
-		commonCompartmentIDs = nil
+		return nil, errors.TraceNew("client disallowed")
 	}
 
 	// Validate that the proxy destination specified by the client is a valid
@@ -884,7 +914,7 @@ func (b *Broker) handleClientOffer(
 	// personal pairing mode, to facilitate a faster no-match result and
 	// resulting broker rotation.
 	var timeout time.Duration
-	if len(offerRequest.PersonalCompartmentIDs) > 0 {
+	if hasPersonalCompartmentIDs {
 		timeout = time.Duration(atomic.LoadInt64(&b.clientOfferPersonalTimeout))
 	} else {
 		timeout = time.Duration(atomic.LoadInt64(&b.clientOfferTimeout))
@@ -901,7 +931,7 @@ func (b *Broker) handleClientOffer(
 
 	clientMatchOffer = &MatchOffer{
 		Properties: MatchProperties{
-			CommonCompartmentIDs:   commonCompartmentIDs,
+			CommonCompartmentIDs:   offerRequest.CommonCompartmentIDs,
 			PersonalCompartmentIDs: offerRequest.PersonalCompartmentIDs,
 			GeoIPData:              geoIPData,
 			NetworkType:            GetNetworkType(offerRequest.Metrics.BaseAPIParameters),

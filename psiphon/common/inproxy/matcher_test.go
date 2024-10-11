@@ -617,6 +617,31 @@ func runTestMatcher() error {
 		return errors.Trace(err)
 	}
 
+	// Test: priority supercedes preferred NAT match
+
+	go proxyFunc(proxy1ResultChan, proxyIP, proxy1Properties, 10*time.Millisecond, nil, true)
+	time.Sleep(5 * time.Millisecond) // Hack to ensure proxy is enqueued
+	proxy2Properties.IsPriority = true
+	go proxyFunc(proxy2ResultChan, proxyIP, proxy2Properties, 10*time.Millisecond, nil, true)
+	time.Sleep(5 * time.Millisecond) // Hack to ensure proxy is enqueued
+	go clientFunc(clientResultChan, clientIP, client2Properties, 10*time.Millisecond)
+
+	err = <-proxy1ResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// proxy2 should match since it's the priority, but not preferred NAT match
+	err = <-proxy2ResultChan
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = <-clientResultChan
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	// Test: many matches
 
 	// Reduce test log noise for this phase of the test
@@ -675,24 +700,26 @@ func TestMatcherMultiQueue(t *testing.T) {
 
 func runTestMatcherMultiQueue() error {
 
-	q := newAnnouncementMultiQueue()
-
 	// Test: invalid compartment IDs
 
-	err := q.enqueue(&announcementEntry{
-		announcement: &MatchAnnouncement{
-			Properties: MatchProperties{}}})
+	q := newAnnouncementMultiQueue()
+
+	err := q.enqueue(
+		&announcementEntry{
+			announcement: &MatchAnnouncement{
+				Properties: MatchProperties{}}})
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
 
 	compartmentID, _ := MakeID()
-	err = q.enqueue(&announcementEntry{
-		announcement: &MatchAnnouncement{
-			Properties: MatchProperties{
-				CommonCompartmentIDs:   []ID{compartmentID},
-				PersonalCompartmentIDs: []ID{compartmentID},
-			}}})
+	err = q.enqueue(
+		&announcementEntry{
+			announcement: &MatchAnnouncement{
+				Properties: MatchProperties{
+					CommonCompartmentIDs:   []ID{compartmentID},
+					PersonalCompartmentIDs: []ID{compartmentID},
+				}}})
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
@@ -716,25 +743,27 @@ func runTestMatcherMultiQueue() error {
 		ctx, cancel := context.WithDeadline(
 			context.Background(), time.Now().Add(time.Duration(i+1)*time.Minute))
 		defer cancel()
-		err := q.enqueue(&announcementEntry{
-			ctx: ctx,
-			announcement: &MatchAnnouncement{
-				Properties: MatchProperties{
-					CommonCompartmentIDs: []ID{
-						otherCommonCompartmentIDs[i%numOtherCompartmentIDs]},
-					NATType: NATTypeSymmetric,
-				}}})
+		err := q.enqueue(
+			&announcementEntry{
+				ctx: ctx,
+				announcement: &MatchAnnouncement{
+					Properties: MatchProperties{
+						CommonCompartmentIDs: []ID{
+							otherCommonCompartmentIDs[i%numOtherCompartmentIDs]},
+						NATType: NATTypeSymmetric,
+					}}})
 		if err != nil {
 			return errors.Trace(err)
 		}
-		err = q.enqueue(&announcementEntry{
-			ctx: ctx,
-			announcement: &MatchAnnouncement{
-				Properties: MatchProperties{
-					PersonalCompartmentIDs: []ID{
-						otherPersonalCompartmentIDs[i%numOtherCompartmentIDs]},
-					NATType: NATTypeSymmetric,
-				}}})
+		err = q.enqueue(
+			&announcementEntry{
+				ctx: ctx,
+				announcement: &MatchAnnouncement{
+					Properties: MatchProperties{
+						PersonalCompartmentIDs: []ID{
+							otherPersonalCompartmentIDs[i%numOtherCompartmentIDs]},
+						NATType: NATTypeSymmetric,
+					}}})
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -797,7 +826,7 @@ func runTestMatcherMultiQueue() error {
 		return errors.TraceNew("unexpected NAT counts")
 	}
 
-	match := iter.getNext()
+	match, _ := iter.getNext()
 	if match == nil {
 		return errors.TraceNew("unexpected missing match")
 	}
@@ -826,7 +855,7 @@ func runTestMatcherMultiQueue() error {
 		return errors.TraceNew("unexpected NAT counts")
 	}
 
-	match = iter.getNext()
+	match, _ = iter.getNext()
 	if match == nil {
 		return errors.TraceNew("unexpected missing match")
 	}
@@ -844,7 +873,7 @@ func runTestMatcherMultiQueue() error {
 
 	// Test: getNext after dequeue
 
-	match = iter.getNext()
+	match, _ = iter.getNext()
 	if match == nil {
 		return errors.TraceNew("unexpected missing match")
 	}
@@ -856,7 +885,7 @@ func runTestMatcherMultiQueue() error {
 		return errors.TraceNew("unexpected already dequeued")
 	}
 
-	match = iter.getNext()
+	match, _ = iter.getNext()
 	if match == nil {
 		return errors.TraceNew("unexpected missing match")
 	}
@@ -880,6 +909,76 @@ func runTestMatcherMultiQueue() error {
 
 	if len(q.personalCompartmentQueues) != numOtherCompartmentIDs {
 		return errors.TraceNew("unexpected compartment queue count")
+	}
+
+	// Test: priority
+
+	q = newAnnouncementMultiQueue()
+
+	var commonCompartmentIDs []ID
+	numCompartmentIDs := 10
+	for i := 0; i < numCompartmentIDs; i++ {
+		commonCompartmentID, _ := MakeID()
+		commonCompartmentIDs = append(
+			commonCompartmentIDs, commonCompartmentID)
+	}
+
+	priorityProxyID, _ := MakeID()
+	nonPriorityProxyID, _ := MakeID()
+
+	ctx, cancel := context.WithDeadline(
+		context.Background(), time.Now().Add(10*time.Minute))
+	defer cancel()
+
+	numEntries := 10000
+	for i := 0; i < numEntries; i++ {
+		// Enqueue every other announcement as a priority
+		isPriority := i%2 == 0
+		proxyID := priorityProxyID
+		if !isPriority {
+			proxyID = nonPriorityProxyID
+		}
+		err := q.enqueue(
+			&announcementEntry{
+				ctx: ctx,
+				announcement: &MatchAnnouncement{
+					ProxyID: proxyID,
+					Properties: MatchProperties{
+						IsPriority: isPriority,
+						CommonCompartmentIDs: []ID{
+							commonCompartmentIDs[prng.Intn(numCompartmentIDs)]},
+						NATType: NATTypeUnknown,
+					}}})
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	iter = q.startMatching(true, commonCompartmentIDs)
+	for i := 0; i < numEntries; i++ {
+		match, isPriority := iter.getNext()
+		if match == nil {
+			return errors.TraceNew("unexpected missing match")
+		}
+		// First half, and only first half, of matches is priority
+		expectPriority := i < numEntries/2
+		if isPriority != expectPriority {
+			return errors.TraceNew("unexpected isPriority")
+		}
+		expectedProxyID := priorityProxyID
+		if !expectPriority {
+			expectedProxyID = nonPriorityProxyID
+		}
+		if match.announcement.ProxyID != expectedProxyID {
+			return errors.TraceNew("unexpected ProxyID")
+		}
+		if !match.queueReference.dequeue() {
+			return errors.TraceNew("unexpected already dequeued")
+		}
+	}
+	match, _ = iter.getNext()
+	if match != nil {
+		return errors.TraceNew("unexpected  match")
 	}
 
 	return nil

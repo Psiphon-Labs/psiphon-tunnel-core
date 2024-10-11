@@ -114,6 +114,7 @@ type Matcher struct {
 // MatchProperties specifies the compartment, GeoIP, and network topology
 // matching roperties of clients and proxies.
 type MatchProperties struct {
+	IsPriority             bool
 	CommonCompartmentIDs   []ID
 	PersonalCompartmentIDs []ID
 	GeoIPData              common.GeoIPData
@@ -775,13 +776,24 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 
 	var bestMatch *announcementEntry
 	bestMatchIndex := -1
+	bestMatchIsPriority := false
 	bestMatchNAT := false
 
 	candidateIndex := -1
 	for {
 
-		announcementEntry := matchIterator.getNext()
+		announcementEntry, isPriority := matchIterator.getNext()
 		if announcementEntry == nil {
+			break
+		}
+
+		if !isPriority && bestMatchIsPriority {
+
+			// There is a priority match, but it wasn't bestMatchNAT and we
+			// continued to iterate. Now that isPriority is false, we're past the
+			// end of the priority items, so stop looking for any best NAT match
+			// and return the previous priority match. When there are zero
+			// priority items to begin with, this case should not be hit.
 			break
 		}
 
@@ -829,8 +841,8 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 
 			bestMatch = announcementEntry
 			bestMatchIndex = candidateIndex
+			bestMatchIsPriority = isPriority
 			bestMatchNAT = matchNAT
-
 		}
 
 		// Stop as soon as we have the best possible match, or have reached
@@ -1107,9 +1119,10 @@ func getRateLimitIP(strIP string) string {
 // matching a specified list of compartment IDs. announcementMultiQueue and
 // its underlying data structures are not safe for concurrent access.
 type announcementMultiQueue struct {
-	commonCompartmentQueues   map[ID]*announcementCompartmentQueue
-	personalCompartmentQueues map[ID]*announcementCompartmentQueue
-	totalEntries              int
+	priorityCommonCompartmentQueues map[ID]*announcementCompartmentQueue
+	commonCompartmentQueues         map[ID]*announcementCompartmentQueue
+	personalCompartmentQueues       map[ID]*announcementCompartmentQueue
+	totalEntries                    int
 }
 
 // announcementCompartmentQueue is a single compartment queue within an
@@ -1120,6 +1133,7 @@ type announcementMultiQueue struct {
 // matches may be possible.
 type announcementCompartmentQueue struct {
 	isCommonCompartment      bool
+	isPriority               bool
 	compartmentID            ID
 	entries                  *list.List
 	unlimitedNATCount        int
@@ -1131,11 +1145,10 @@ type announcementCompartmentQueue struct {
 // subset of announcementMultiQueue compartment queues. Concurrent
 // announcementMatchIterators are not supported.
 type announcementMatchIterator struct {
-	multiQueue           *announcementMultiQueue
-	isCommonCompartments bool
-	compartmentQueues    []*announcementCompartmentQueue
-	compartmentIDs       []ID
-	nextEntries          []*list.Element
+	multiQueue        *announcementMultiQueue
+	compartmentQueues []*announcementCompartmentQueue
+	compartmentIDs    []ID
+	nextEntries       []*list.Element
 }
 
 // announcementQueueReference represents the queue position for a given
@@ -1148,8 +1161,9 @@ type announcementQueueReference struct {
 
 func newAnnouncementMultiQueue() *announcementMultiQueue {
 	return &announcementMultiQueue{
-		commonCompartmentQueues:   make(map[ID]*announcementCompartmentQueue),
-		personalCompartmentQueues: make(map[ID]*announcementCompartmentQueue),
+		priorityCommonCompartmentQueues: make(map[ID]*announcementCompartmentQueue),
+		commonCompartmentQueues:         make(map[ID]*announcementCompartmentQueue),
+		personalCompartmentQueues:       make(map[ID]*announcementCompartmentQueue),
 	}
 }
 
@@ -1179,22 +1193,31 @@ func (q *announcementMultiQueue) enqueue(announcementEntry *announcementEntry) e
 		return errors.TraceNew("announcement must specify exactly one compartment ID")
 	}
 
+	isPriority := announcementEntry.announcement.Properties.IsPriority
+
 	isCommonCompartment := true
 	var compartmentID ID
 	var compartmentQueues map[ID]*announcementCompartmentQueue
 	if len(commonCompartmentIDs) > 0 {
 		compartmentID = commonCompartmentIDs[0]
 		compartmentQueues = q.commonCompartmentQueues
+		if isPriority {
+			compartmentQueues = q.priorityCommonCompartmentQueues
+		}
 	} else {
 		isCommonCompartment = false
 		compartmentID = personalCompartmentIDs[0]
 		compartmentQueues = q.personalCompartmentQueues
+		if isPriority {
+			return errors.TraceNew("priority not supported for personal compartments")
+		}
 	}
 
 	compartmentQueue, ok := compartmentQueues[compartmentID]
 	if !ok {
 		compartmentQueue = &announcementCompartmentQueue{
 			isCommonCompartment: isCommonCompartment,
+			isPriority:          isPriority,
 			compartmentID:       compartmentID,
 			entries:             list.New(),
 		}
@@ -1250,9 +1273,14 @@ func (r *announcementQueueReference) dequeue() bool {
 
 	if r.compartmentQueue.entries.Len() == 0 {
 		// Remove empty compartment queue.
-		queues := r.multiQueue.commonCompartmentQueues
-		if !r.compartmentQueue.isCommonCompartment {
-			queues = r.multiQueue.personalCompartmentQueues
+		queues := r.multiQueue.personalCompartmentQueues
+		if r.compartmentQueue.isCommonCompartment {
+			if r.compartmentQueue.isPriority {
+				queues = r.multiQueue.priorityCommonCompartmentQueues
+
+			} else {
+				queues = r.multiQueue.commonCompartmentQueues
+			}
 		}
 		delete(queues, r.compartmentQueue.compartmentID)
 	}
@@ -1270,8 +1298,7 @@ func (q *announcementMultiQueue) startMatching(
 	compartmentIDs []ID) *announcementMatchIterator {
 
 	iter := &announcementMatchIterator{
-		multiQueue:           q,
-		isCommonCompartments: isCommonCompartments,
+		multiQueue: q,
 	}
 
 	// Find the matching compartment queues and initialize iteration over
@@ -1280,16 +1307,29 @@ func (q *announcementMultiQueue) startMatching(
 	// maxCompartmentIDs, as enforced in
 	// ClientOfferRequest.ValidateAndGetLogFields).
 
-	compartmentQueues := q.commonCompartmentQueues
-	if !isCommonCompartments {
-		compartmentQueues = q.personalCompartmentQueues
+	// Priority queues, when in use, must all be added to the beginning of
+	// iter.compartmentQueues in order to ensure that the iteration logic in
+	// getNext visits all priority items first.
+
+	var compartmentQueuesList []map[ID]*announcementCompartmentQueue
+	if isCommonCompartments {
+		compartmentQueuesList = append(
+			compartmentQueuesList,
+			q.priorityCommonCompartmentQueues,
+			q.commonCompartmentQueues)
+	} else {
+		compartmentQueuesList = append(
+			compartmentQueuesList,
+			q.personalCompartmentQueues)
 	}
 
-	for _, ID := range compartmentIDs {
-		if compartmentQueue, ok := compartmentQueues[ID]; ok {
-			iter.compartmentQueues = append(iter.compartmentQueues, compartmentQueue)
-			iter.compartmentIDs = append(iter.compartmentIDs, ID)
-			iter.nextEntries = append(iter.nextEntries, compartmentQueue.entries.Front())
+	for _, compartmentQueues := range compartmentQueuesList {
+		for _, ID := range compartmentIDs {
+			if compartmentQueue, ok := compartmentQueues[ID]; ok {
+				iter.compartmentQueues = append(iter.compartmentQueues, compartmentQueue)
+				iter.compartmentIDs = append(iter.compartmentIDs, ID)
+				iter.nextEntries = append(iter.nextEntries, compartmentQueue.entries.Front())
+			}
 		}
 	}
 
@@ -1327,16 +1367,26 @@ func (iter *announcementMatchIterator) getNATCounts() (int, int, int) {
 // are not supported during iteration. Iteration and dequeue should all be
 // performed with a lock over the entire announcementMultiQueue, and with
 // only one concurrent announcementMatchIterator.
-func (iter *announcementMatchIterator) getNext() *announcementEntry {
+//
+// getNext returns a nil *announcementEntry when there are no more items.
+// getNext also returns an isPriority flag, indicating the announcement is a
+// priority candidate. All priority candidates are guaranteed to be returned
+// before any non-priority candidates.
+func (iter *announcementMatchIterator) getNext() (*announcementEntry, bool) {
 
 	// Assumes announcements are enqueued in announcementEntry.ctx.Deadline
-	// order.
+	// order. Also assumes that any priority queues are all at the front of
+	// iter.compartmentQueues.
 
 	// Select the oldest item, by deadline, from all the candidate queue head
 	// items. This operation is linear in the number of matching compartment
 	// ID queues, which is currently bounded by the length of matching
 	// compartment IDs (no more than maxCompartmentIDs, as enforced in
 	// ClientOfferRequest.ValidateAndGetLogFields).
+	//
+	// When there are priority candidates, they are selected first, regardless
+	// of the deadlines of non-priority candidates. Multiple priority
+	// candidates are processed in FIFO deadline order.
 	//
 	// A potential future enhancement is to add more iterator state to track
 	// which queue has the next oldest time to select on the following
@@ -1345,14 +1395,22 @@ func (iter *announcementMatchIterator) getNext() *announcementEntry {
 
 	var selectedCandidate *announcementEntry
 	selectedIndex := -1
+	selectedPriority := false
 
 	for i := 0; i < len(iter.compartmentQueues); i++ {
 		if iter.nextEntries[i] == nil {
 			continue
 		}
+		isPriority := iter.compartmentQueues[i].isPriority
+		if selectedPriority && !isPriority {
+			// Ignore older of non-priority entries when there are priority
+			// candidates.
+			break
+		}
 		if selectedCandidate == nil {
 			selectedCandidate = iter.nextEntries[i].Value.(*announcementEntry)
 			selectedIndex = i
+			selectedPriority = isPriority
 		} else {
 			candidate := iter.nextEntries[i].Value.(*announcementEntry)
 			deadline, deadlineOk := candidate.ctx.Deadline()
@@ -1360,6 +1418,7 @@ func (iter *announcementMatchIterator) getNext() *announcementEntry {
 			if deadlineOk && selectedDeadlineOk && deadline.Before(selectedDeadline) {
 				selectedCandidate = candidate
 				selectedIndex = i
+				selectedPriority = isPriority
 			}
 		}
 	}
@@ -1371,5 +1430,5 @@ func (iter *announcementMatchIterator) getNext() *announcementEntry {
 		iter.nextEntries[selectedIndex] = iter.nextEntries[selectedIndex].Next()
 	}
 
-	return selectedCandidate
+	return selectedCandidate, selectedPriority
 }
