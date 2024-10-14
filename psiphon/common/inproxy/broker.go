@@ -584,22 +584,25 @@ func (b *Broker) handleProxyAnnounce(
 	// proxy can store and apply the new tactics before announcing again.
 
 	var tacticsPayload []byte
-	tacticsPayload, newTacticsTag, err = b.config.GetTacticsPayload(geoIPData, apiParams)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	if tacticsPayload != nil && newTacticsTag != "" {
-		responsePayload, err := MarshalProxyAnnounceResponse(
-			&ProxyAnnounceResponse{
-				TacticsPayload: tacticsPayload,
-				NoMatch:        true,
-			})
+	if announceRequest.CheckTactics {
+		tacticsPayload, newTacticsTag, err =
+			b.config.GetTacticsPayload(geoIPData, apiParams)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		return responsePayload, nil
+		if tacticsPayload != nil && newTacticsTag != "" {
+			responsePayload, err := MarshalProxyAnnounceResponse(
+				&ProxyAnnounceResponse{
+					TacticsPayload: tacticsPayload,
+					NoMatch:        true,
+				})
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			return responsePayload, nil
+		}
 	}
 
 	// AllowProxy may be used to disallow proxies from certain geolocations,

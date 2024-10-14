@@ -157,6 +157,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -164,6 +165,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	lrucache "github.com/cognusion/go-cache-lru"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -189,6 +191,7 @@ const (
 	AGGREGATION_MINIMUM                = "Minimum"
 	AGGREGATION_MAXIMUM                = "Maximum"
 	AGGREGATION_MEDIAN                 = "Median"
+	PAYLOAD_CACHE_SIZE                 = 256
 )
 
 var (
@@ -250,6 +253,9 @@ type Server struct {
 	logger                common.Logger
 	logFieldFormatter     common.APIParameterLogFieldFormatter
 	apiParameterValidator common.APIParameterValidator
+
+	cachedTacticsData *lrucache.Cache
+	filterMatches     []bool
 }
 
 const (
@@ -442,6 +448,8 @@ func NewServer(
 		logger:                logger,
 		logFieldFormatter:     logFieldFormatter,
 		apiParameterValidator: apiParameterValidator,
+		cachedTacticsData: lrucache.NewWithLRU(
+			lrucache.NoExpiration, 1*time.Minute, PAYLOAD_CACHE_SIZE),
 	}
 
 	server.ReloadableFile = common.NewReloadableFile(
@@ -466,6 +474,18 @@ func NewServer(
 			server.RequestObfuscatedKey = newServer.RequestObfuscatedKey
 			server.DefaultTactics = newServer.DefaultTactics
 			server.FilteredTactics = newServer.FilteredTactics
+
+			// Any cached, merged tactics data is flushed when the
+			// configuration changes.
+			//
+			// A single filterMatches, used in getTactics, is allocated here
+			// to avoid allocating a slice per getTactics call.
+			//
+			// Server.ReloadableFile.RLock/RUnlock is the mutex for accessing
+			// these and other Server fields.
+
+			server.cachedTacticsData.Flush()
+			server.filterMatches = make([]bool, len(server.FilteredTactics))
 
 			server.initLookups()
 
@@ -730,6 +750,8 @@ func (server *Server) GetFilterGeoIPScope(geoIPData common.GeoIPData) int {
 //
 // Elements of the returned Payload, e.g., tactics parameters, will point to
 // data in DefaultTactics and FilteredTactics and must not be modifed.
+//
+// Callers must not mutate returned tactics data, which is cached.
 func (server *Server) GetTacticsPayload(
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Payload, error) {
@@ -737,22 +759,17 @@ func (server *Server) GetTacticsPayload(
 	// includeServerSideOnly is false: server-side only parameters are not
 	// used by the client, so including them wastes space and unnecessarily
 	// exposes the values.
-	tactics, err := server.GetTactics(false, geoIPData, apiParams)
+	tacticsData, err := server.getTactics(false, geoIPData, apiParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	if tactics == nil {
+	if tacticsData == nil {
 		return nil, nil
 	}
 
-	marshaledTactics, tag, err := marshalTactics(tactics)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	payload := &Payload{
-		Tag: tag,
+		Tag: tacticsData.tag,
 	}
 
 	// New clients should always send STORED_TACTICS_TAG_PARAMETER_NAME. When they have no
@@ -777,7 +794,7 @@ func (server *Server) GetTacticsPayload(
 	}
 
 	if sendPayloadTactics {
-		payload.Tactics = marshaledTactics
+		payload.Tactics = tacticsData.payload
 	}
 
 	return payload, nil
@@ -797,37 +814,63 @@ func marshalTactics(tactics *Tactics) ([]byte, string, error) {
 }
 
 // GetTacticsWithTag returns a GetTactics value along with the associated tag value.
+//
+// Callers must not mutate returned tactics data, which is cached.
 func (server *Server) GetTacticsWithTag(
 	includeServerSideOnly bool,
 	geoIPData common.GeoIPData,
 	apiParams common.APIParameters) (*Tactics, string, error) {
 
-	tactics, err := server.GetTactics(
+	tacticsData, err := server.getTactics(
 		includeServerSideOnly, geoIPData, apiParams)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
 
-	if tactics == nil {
+	if tacticsData == nil {
 		return nil, "", nil
 	}
 
-	_, tag, err := marshalTactics(tactics)
+	return tacticsData.tactics, tacticsData.tag, nil
+}
+
+// tacticsData is cached tactics data, including the merged Tactics object,
+// the JSON marshaled paylod, and hashed tag.
+type tacticsData struct {
+	tactics *Tactics
+	payload []byte
+	tag     string
+}
+
+func newTacticsData(tactics *Tactics) (*tacticsData, error) {
+
+	payload, err := json.Marshal(tactics)
 	if err != nil {
-		return nil, "", errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
-	return tactics, tag, nil
+	// MD5 hash is used solely as a data checksum and not for any security
+	// purpose.
+	digest := md5.Sum(payload)
+	tag := hex.EncodeToString(digest[:])
+
+	return &tacticsData{
+		tactics: tactics,
+		payload: payload,
+		tag:     tag,
+	}, nil
 }
 
 // GetTactics assembles and returns tactics data for a client with the
 // specified GeoIP, API parameter, and speed test attributes.
 //
 // The tactics return value may be nil.
-func (server *Server) GetTactics(
+//
+// Callers must not mutate returned tactics data, which is cached.
+func (server *Server) getTactics(
 	includeServerSideOnly bool,
 	geoIPData common.GeoIPData,
-	apiParams common.APIParameters) (*Tactics, error) {
+	apiParams common.APIParameters) (*tacticsData, error) {
 
 	server.ReloadableFile.RLock()
 	defer server.ReloadableFile.RUnlock()
@@ -837,11 +880,19 @@ func (server *Server) GetTactics(
 		return nil, nil
 	}
 
-	tactics := server.DefaultTactics.clone(includeServerSideOnly)
+	// Two passes are performed, one to get the list of matching filters, and
+	// then, if no merged tactics data is found for that filter match set,
+	// another pass to merge all the tactics parameters.
 
 	var aggregatedValues map[string]int
+	filterMatchCount := 0
 
-	for _, filteredTactics := range server.FilteredTactics {
+	// Use the preallocated slice to avoid an allocation per getTactics call.
+	filterMatches := server.filterMatches
+
+	for filterIndex, filteredTactics := range server.FilteredTactics {
+
+		filterMatches[filterIndex] = false
 
 		if len(filteredTactics.Filter.Regions) > 0 {
 			if filteredTactics.Filter.regionLookup != nil {
@@ -944,15 +995,63 @@ func (server *Server) GetTactics(
 			}
 		}
 
-		tactics.merge(includeServerSideOnly, &filteredTactics.Tactics)
+		filterMatchCount += 1
+		filterMatches[filterIndex] = true
 
-		// Continue to apply more matches. Last matching tactics has priority for any field.
+		// Continue to check for more matches. Last matching tactics filter
+		// has priority for any field.
+	}
+
+	// For any filter match set, the merged tactics parameters are the same,
+	// so the resulting merge is cached, along with the JSON encoding of the
+	// payload and hash tag. This cache reduces, for repeated tactics
+	// requests, heavy allocations from the JSON marshal and CPU load from
+	// both the marshal and hashing the marshal result.
+	//
+	// getCacheKey still allocates a strings.Builder buffer.
+
+	cacheKey := getCacheKey(filterMatchCount > 0, filterMatches)
+
+	cacheValue, ok := server.cachedTacticsData.Get(cacheKey)
+	if ok {
+		return cacheValue.(*tacticsData), nil
+	}
+
+	tactics := server.DefaultTactics.clone(includeServerSideOnly)
+	if filterMatchCount > 0 {
+		for filterIndex, filteredTactics := range server.FilteredTactics {
+			if filterMatches[filterIndex] {
+				tactics.merge(includeServerSideOnly, &filteredTactics.Tactics)
+			}
+		}
 	}
 
 	// See Tactics.Probability doc comment.
 	tactics.Probability = 1.0
 
-	return tactics, nil
+	tacticsData, err := newTacticsData(tactics)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	server.cachedTacticsData.Set(cacheKey, tacticsData, 0)
+
+	return tacticsData, nil
+}
+
+func getCacheKey(hasFilterMatches bool, filterMatches []bool) string {
+	// When no filters match, the key is "". The input hasFilterMatches allows
+	// for skipping the strings.Builder setup and loop entirely.
+	if !hasFilterMatches {
+		return ""
+	}
+	var b strings.Builder
+	for filterIndex, match := range filterMatches {
+		if match {
+			fmt.Fprintf(&b, "%x-", filterIndex)
+		}
+	}
+	return b.String()
 }
 
 // TODO: refactor this copy of psiphon/server.getStringRequestParam into common?
