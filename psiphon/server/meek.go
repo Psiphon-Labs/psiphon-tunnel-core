@@ -359,6 +359,7 @@ func NewMeekServer(
 				APIParameterLogFieldFormatter:  getInproxyBrokerAPIParameterLogFieldFormatter(),
 				IsValidServerEntryTag:          support.PsinetDatabase.IsValidServerEntryTag,
 				GetTacticsPayload:              meekServer.inproxyBrokerGetTacticsPayload,
+				IsLoadLimiting:                 meekServer.support.TunnelServer.CheckLoadLimiting,
 				PrivateKey:                     sessionPrivateKey,
 				ObfuscationRootSecret:          obfuscationRootSecret,
 				ServerEntrySignaturePublicKey:  support.Config.InproxyBrokerServerEntrySignaturePublicKey,

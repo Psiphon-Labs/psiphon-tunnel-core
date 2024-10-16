@@ -1009,6 +1009,9 @@ func (server *Server) getTactics(
 	// both the marshal and hashing the marshal result.
 	//
 	// getCacheKey still allocates a strings.Builder buffer.
+	//
+	// TODO: log cache metrics; similar to what is done in
+	// psiphon/server.ServerTacticsParametersCache.GetMetrics.
 
 	cacheKey := getCacheKey(filterMatchCount > 0, filterMatches)
 

@@ -210,8 +210,8 @@ func (p *Proxy) Run(ctx context.Context) {
 	//   with a race of MaxClient initial, concurrent announces, for the
 	//   session establisher to be a different worker than the no-delay worker.
 	//
-	// The first worker is only the only proxy worker which sets
-	// ProxyAnnounceRequest.CheckMetrics.
+	// The first worker is the only proxy worker which sets
+	// ProxyAnnounceRequest.CheckTactics.
 
 	signalFirstAnnounceCtx, signalFirstAnnounceDone :=
 		context.WithCancel(context.Background())

@@ -272,7 +272,7 @@ type MatcherConfig struct {
 	// Logger is used to log events.
 	Logger common.Logger
 
-	// Accouncement queue limits.
+	// Announcement queue limits.
 	AnnouncementLimitEntryCount    int
 	AnnouncementRateLimitQuantity  int
 	AnnouncementRateLimitInterval  time.Duration
@@ -282,6 +282,9 @@ type MatcherConfig struct {
 	OfferLimitEntryCount   int
 	OfferRateLimitQuantity int
 	OfferRateLimitInterval time.Duration
+
+	// Broker process load limit state callback. See Broker.Config.
+	IsLoadLimiting func() bool
 }
 
 // NewMatcher creates a new Matcher.
@@ -432,6 +435,12 @@ func (m *Matcher) Announce(
 		return nil, nil, errors.TraceNew("unexpected compartment ID count")
 	}
 
+	isAnnouncement := true
+	err := m.applyLoadLimit(isAnnouncement)
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
+
 	announcementEntry := &announcementEntry{
 		ctx:          ctx,
 		limitIP:      getRateLimitIP(proxyIP),
@@ -439,7 +448,7 @@ func (m *Matcher) Announce(
 		offerChan:    make(chan *MatchOffer, 1),
 	}
 
-	err := m.addAnnouncementEntry(announcementEntry)
+	err = m.addAnnouncementEntry(announcementEntry)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
@@ -486,6 +495,12 @@ func (m *Matcher) Offer(
 		return nil, nil, nil, errors.TraceNew("unexpected missing compartment IDs")
 	}
 
+	isAnnouncement := false
+	err := m.applyLoadLimit(isAnnouncement)
+	if err != nil {
+		return nil, nil, nil, errors.Trace(err)
+	}
+
 	offerEntry := &offerEntry{
 		ctx:        ctx,
 		limitIP:    getRateLimitIP(clientIP),
@@ -493,7 +508,7 @@ func (m *Matcher) Offer(
 		answerChan: make(chan *answerInfo, 1),
 	}
 
-	err := m.addOfferEntry(offerEntry)
+	err = m.addOfferEntry(offerEntry)
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
@@ -859,6 +874,79 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 	return bestMatch, bestMatchIndex
 }
 
+// applyLoadLimit checks if the broker process is in the load limiting state
+// and, in order to reduce load, determines if new proxy announces or client
+// offers should be rejected immediately instead of enqueued.
+func (m *Matcher) applyLoadLimit(isAnnouncement bool) error {
+
+	if m.config.IsLoadLimiting == nil || !m.config.IsLoadLimiting() {
+		return nil
+	}
+
+	// Acquire the queue locks only when in the load limit state, and in the
+	// same order as matchAllOffers.
+
+	m.announcementQueueMutex.Lock()
+	defer m.announcementQueueMutex.Unlock()
+	m.offerQueueMutex.Lock()
+	defer m.offerQueueMutex.Unlock()
+
+	announcementLen := m.announcementQueue.getLen()
+	offerLen := m.offerQueue.Len()
+
+	// When the load limit had been reached, and assuming the broker process
+	// is running only an in-proxy broker, it's likely, in practise, that
+	// only one of the two queues has hundreds of thousands of entries while
+	// the other has few, and there are no matches clearing the queue.
+	//
+	// Instead of simply rejecting all enqueue requests, allow the request
+	// type, announce or offer, that is in shorter supply as these are likely
+	// to match and draw down the larger queue. This attempts to make
+	// productive use of enqueued items, and also attempts to avoid simply
+	// emptying both queues -- as will happen in any case due to timeouts --
+	// and then have the same larger queue refill again after the load limit
+	// state exits.
+	//
+	// This approach assumes some degree of slack in available system memory
+	// and CPU in the load limiting state, similar to how the tunnel server
+	// continues to operate existing tunnels in the same state.
+	//
+	// The heuristic below of allowing when less than half the size of the
+	// larger queue puts a cap on the amount the shorter queue can continue
+	// to grow in the load limiting state, in the worst case.
+	//
+	// Limitation: in some scenarios that are expected to be rare, it can
+	// happen that allowed requests don't result in a match and memory
+	// consumption continues to grow, leading to a broker process OOM kill.
+
+	var allow bool
+	if isAnnouncement {
+		allow = announcementLen < offerLen/2
+	} else {
+		allow = offerLen < announcementLen/2
+	}
+	if allow {
+		return nil
+	}
+
+	// Do not return a MatcherLimitError, as is done in applyIPLimits. A
+	// MatcherLimitError results in a Response.Limited error response, which
+	// causes a proxy to back off and a client to abort its dial; but in
+	// neither case is the broker client reset. The error returned here will
+	// result in a fast 404 response to the proxy or client, which will
+	// instead trigger a broker client reset, and a chance of moving to a
+	// different broker that is not overloaded.
+	//
+	// Limitation: the 404 response won't be distinguishable, in client or
+	// proxy diagnostics, from other error conditions.
+	//
+	// TODO: add a new Response.LoadLimited flag which the proxy/client can
+	// use use log a distinct error and also ensure that it doesn't reselect
+	// the same broker again in the broker client reset random selection.
+
+	return errors.TraceNew("load limited")
+}
+
 // MatcherLimitError is the error type returned by Announce or Offer when the
 // caller has exceeded configured queue entry or rate limits.
 type MatcherLimitError struct {
@@ -873,9 +961,11 @@ func (e MatcherLimitError) Error() string {
 	return e.err.Error()
 }
 
-func (m *Matcher) applyLimits(isAnnouncement bool, limitIP string, proxyID ID) error {
+// applyIPLimits checks per-proxy or per-client -- as determined by peer IP
+// address -- rate limits and queue entry limits.
+func (m *Matcher) applyIPLimits(isAnnouncement bool, limitIP string, proxyID ID) error {
 
-	// Assumes the m.announcementQueueMutex or m.offerQueue mutex is locked.
+	// Assumes m.announcementQueueMutex or m.offerQueueMutex is locked.
 
 	var entryCountByIP map[string]int
 	var queueRateLimiters *lrucache.Cache
@@ -958,7 +1048,7 @@ func (m *Matcher) addAnnouncementEntry(announcementEntry *announcementEntry) err
 	// Ensure no single peer IP can enqueue a large number of entries or
 	// rapidly enqueue beyond the configured rate.
 	isAnnouncement := true
-	err := m.applyLimits(
+	err := m.applyIPLimits(
 		isAnnouncement, announcementEntry.limitIP, announcementEntry.announcement.ProxyID)
 	if err != nil {
 		return errors.Trace(err)
@@ -1041,7 +1131,7 @@ func (m *Matcher) addOfferEntry(offerEntry *offerEntry) error {
 	// Ensure no single peer IP can enqueue a large number of entries or
 	// rapidly enqueue beyond the configured rate.
 	isAnnouncement := false
-	err := m.applyLimits(
+	err := m.applyIPLimits(
 		isAnnouncement, offerEntry.limitIP, ID{})
 	if err != nil {
 		return errors.Trace(err)

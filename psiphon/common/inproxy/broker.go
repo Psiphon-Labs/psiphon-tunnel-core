@@ -164,6 +164,14 @@ type BrokerConfig struct {
 	// entry tags.
 	IsValidServerEntryTag func(serverEntryTag string) bool
 
+	// IsLoadLimiting is a callback which checks if the broker process is in a
+	// load limiting state, where consumed resources, including allocated
+	// system memory and CPU load, exceed determined thresholds. When load
+	// limiting is indicated, the broker will attempt to reduce load by
+	// immediately rejecting either proxy announces or client offers,
+	// depending on the state of the corresponding queues.
+	IsLoadLimiting func() bool
+
 	// PrivateKey is the broker's secure session long term private key.
 	PrivateKey SessionPrivateKey
 
@@ -242,6 +250,8 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 			OfferLimitEntryCount:           config.MatcherOfferLimitEntryCount,
 			OfferRateLimitQuantity:         config.MatcherOfferRateLimitQuantity,
 			OfferRateLimitInterval:         config.MatcherOfferRateLimitInterval,
+
+			IsLoadLimiting: config.IsLoadLimiting,
 		}),
 
 		proxyAnnounceTimeout:       int64(config.ProxyAnnounceTimeout),
