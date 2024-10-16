@@ -167,23 +167,8 @@ public class MainActivity extends AppCompatActivity
     //----------------------------------------------------------------------------------------------
 
     @Override
-    public String getAppName() {
-        return "TunneledWebView Sample";
-    }
-
-    @Override
     public Context getContext() {
         return this;
-    }
-
-    @Override
-    public Object getVpnService() {
-        return null;
-    }
-
-    @Override
-    public Object newVpnServiceBuilder() {
-        return null;
     }
 
     @Override
