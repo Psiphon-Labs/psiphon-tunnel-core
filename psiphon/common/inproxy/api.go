@@ -215,7 +215,7 @@ type ClientMetrics struct {
 // ProxyAnnounceRequest is an API request sent from a proxy to a broker,
 // announcing that it is available for a client connection. Proxies send one
 // ProxyAnnounceRequest for each available client connection. The broker will
-// match the proxy with a a client and return WebRTC connection information
+// match the proxy with a client and return WebRTC connection information
 // in the response.
 //
 // PersonalCompartmentIDs limits the clients to those that supply one of the
@@ -223,11 +223,18 @@ type ClientMetrics struct {
 // proxy operators to client users out-of-band and provide optional access
 // control.
 //
+// When CheckTactics is set, the broker will check for new tactics or indicate
+// that the proxy's cached tactics TTL may be extended. Tactics information
+// is returned in the response TacticsPayload. To minimize broker processing
+// overhead, proxies with multiple workers should designate just one worker
+// to set CheckTactics.
+//
 // The proxy's session public key is an implicit and cryptographically
 // verified proxy ID.
 type ProxyAnnounceRequest struct {
 	PersonalCompartmentIDs []ID          `cbor:"1,keyasint,omitempty"`
 	Metrics                *ProxyMetrics `cbor:"2,keyasint,omitempty"`
+	CheckTactics           bool          `cbor:"3,keyasint,omitempty"`
 }
 
 // WebRTCSessionDescription is compatible with pion/webrtc.SessionDescription

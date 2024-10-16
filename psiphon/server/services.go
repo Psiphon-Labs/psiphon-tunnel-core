@@ -315,10 +315,14 @@ func RunServices(configJSON []byte) (retErr error) {
 	// SIGUSR2 triggers an immediate load log and optional process profile output
 	logServerLoadSignal := makeSIGUSR2Channel()
 
-	// SIGTSTP triggers tunnelServer to stop establishing new tunnels
+	// SIGTSTP triggers tunnelServer to stop establishing new tunnels. The
+	// in-proxy broker, if running, may also stop enqueueing announces or
+	// offers.
 	stopEstablishingTunnelsSignal := makeSIGTSTPChannel()
 
-	// SIGCONT triggers tunnelServer to resume establishing new tunnels
+	// SIGCONT triggers tunnelServer to resume establishing new tunnels. The
+	// in-proxy broker, if running, will resume enqueueing all announces and
+	// offers.
 	resumeEstablishingTunnelsSignal := makeSIGCONTChannel()
 
 	err = nil
@@ -329,6 +333,9 @@ loop:
 		case <-stopEstablishingTunnelsSignal:
 			tunnelServer.SetEstablishTunnels(false)
 
+			// Dump profiles when entering the load limiting state with an
+			// unexpectedly low established client count, as determined by
+			// DumpProfilesOnStopEstablishTunnels.
 			if config.DumpProfilesOnStopEstablishTunnels(
 				tunnelServer.GetEstablishedClientCount()) {
 

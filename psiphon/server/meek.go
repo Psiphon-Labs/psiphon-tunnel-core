@@ -351,6 +351,7 @@ func NewMeekServer(
 			&inproxy.BrokerConfig{
 				Logger:                         CommonLogger(log),
 				AllowProxy:                     meekServer.inproxyBrokerAllowProxy,
+				PrioritizeProxy:                meekServer.inproxyBrokerPrioritizeProxy,
 				AllowClient:                    meekServer.inproxyBrokerAllowClient,
 				AllowDomainFrontedDestinations: meekServer.inproxyBrokerAllowDomainFrontedDestinations,
 				LookupGeoIP:                    lookupGeoIPData,
@@ -358,6 +359,7 @@ func NewMeekServer(
 				APIParameterLogFieldFormatter:  getInproxyBrokerAPIParameterLogFieldFormatter(),
 				IsValidServerEntryTag:          support.PsinetDatabase.IsValidServerEntryTag,
 				GetTacticsPayload:              meekServer.inproxyBrokerGetTacticsPayload,
+				IsLoadLimiting:                 meekServer.support.TunnelServer.CheckLoadLimiting,
 				PrivateKey:                     sessionPrivateKey,
 				ObfuscationRootSecret:          obfuscationRootSecret,
 				ServerEntrySignaturePublicKey:  support.Config.InproxyBrokerServerEntrySignaturePublicKey,
@@ -1825,6 +1827,7 @@ func (server *MeekServer) inproxyReloadTactics() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	defer p.Close()
 	if p.IsNil() {
 		return nil
 	}
@@ -1863,12 +1866,14 @@ func (server *MeekServer) inproxyReloadTactics() error {
 }
 
 func (server *MeekServer) lookupAllowTactic(geoIPData common.GeoIPData, parameterName string) bool {
+
 	// Fallback to not-allow on failure or nil tactics.
 	p, err := server.support.ServerTacticsParametersCache.Get(GeoIPData(geoIPData))
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": err}).Warning("ServerTacticsParametersCache.Get failed")
 		return false
 	}
+	defer p.Close()
 	if p.IsNil() {
 		return false
 	}
@@ -1885,6 +1890,35 @@ func (server *MeekServer) inproxyBrokerAllowClient(clientGeoIPData common.GeoIPD
 
 func (server *MeekServer) inproxyBrokerAllowDomainFrontedDestinations(clientGeoIPData common.GeoIPData) bool {
 	return server.lookupAllowTactic(clientGeoIPData, parameters.InproxyAllowDomainFrontedDestinations)
+}
+
+func (server *MeekServer) inproxyBrokerPrioritizeProxy(
+	proxyGeoIPData common.GeoIPData, proxyAPIParams common.APIParameters) bool {
+
+	// Fallback to not-prioritized on failure or nil tactics.
+	p, err := server.support.ServerTacticsParametersCache.Get(GeoIPData(proxyGeoIPData))
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": err}).Warning("ServerTacticsParametersCache.Get failed")
+		return false
+	}
+	defer p.Close()
+	if p.IsNil() {
+		return false
+	}
+	filter := p.KeyStringsValue(parameters.InproxyBrokerMatcherPrioritizeProxiesFilter)
+	if len(filter) == 0 {
+		return false
+	}
+	for name, values := range filter {
+		proxyValue, err := getStringRequestParam(proxyAPIParams, name)
+		if err != nil || !common.ContainsWildcard(values, proxyValue) {
+			return false
+		}
+	}
+	if !p.WeightedCoinFlip(parameters.InproxyBrokerMatcherPrioritizeProxiesProbability) {
+		return false
+	}
+	return true
 }
 
 // inproxyBrokerGetTacticsPayload is a callback used by the in-proxy broker to

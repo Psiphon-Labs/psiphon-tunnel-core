@@ -324,6 +324,13 @@ func (server *TunnelServer) CheckEstablishTunnels() bool {
 	return server.sshServer.checkEstablishTunnels()
 }
 
+// CheckLoadLimiting returns whether the server is in the load limiting state,
+// which is when EstablishTunnels is false. CheckLoadLimiting is intended to
+// be checked by non-tunnel components; no metrics are updated by this call.
+func (server *TunnelServer) CheckLoadLimiting() bool {
+	return server.sshServer.checkLoadLimiting()
+}
+
 // GetEstablishTunnelsMetrics returns whether tunnel establishment is
 // currently allowed and the number of tunnels rejected since due to not
 // establishing since the last GetEstablishTunnelsMetrics call.
@@ -523,6 +530,14 @@ func (sshServer *sshServer) checkEstablishTunnels() bool {
 		atomic.AddInt64(&sshServer.establishLimitedCount, 1)
 	}
 	return establishTunnels
+}
+
+func (sshServer *sshServer) checkLoadLimiting() bool {
+
+	// The server is in a general load limiting state when
+	// sshServer.establishTunnels is false (0). This check is intended to be
+	// used by non-tunnel components and no metrics are updated by this call.
+	return atomic.LoadInt32(&sshServer.establishTunnels) == 0
 }
 
 func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {

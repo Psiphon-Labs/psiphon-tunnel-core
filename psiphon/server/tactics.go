@@ -135,6 +135,17 @@ func (c *ServerTacticsParametersCache) Get(
 
 	// Construct parameters from tactics.
 
+	// Note: since ServerTacticsParametersCache was implemented,
+	// tactics.Server.cachedTacticsData was added. This new cache is
+	// primarily intended to reduce server allocations and computations
+	// when _clients_ request tactics. cachedTacticsData also impacts
+	// GetTacticsWithTag.
+	//
+	// ServerTacticsParametersCache still optimizes performance for
+	// server-side tactics, since cachedTacticsData doesn't avoid filter
+	// checks, and ServerTacticsParametersCache includes a prepared
+	// parameters.ParametersAccessor.
+
 	tactics, tag, err := c.support.TacticsServer.GetTacticsWithTag(
 		true, common.GeoIPData(geoIPData), make(common.APIParameters))
 	if err != nil {
