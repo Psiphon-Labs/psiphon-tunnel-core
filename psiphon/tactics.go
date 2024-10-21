@@ -79,7 +79,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 			GetTacticsStorer(config),
 			config.GetNetworkID())
 		if err != nil {
-			NoticeWarning("get stored tactics failed: %s", err)
+			NoticeWarning("get stored tactics failed: %s", errors.Trace(err))
 
 			// The error will be due to a local datastore problem.
 			// While we could proceed with the tactics request, this
@@ -97,7 +97,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 
 		iterator, err := NewTacticsServerEntryIterator(config)
 		if err != nil {
-			NoticeWarning("tactics iterator failed: %s", err)
+			NoticeWarning("tactics iterator failed: %s", errors.Trace(err))
 			return
 		}
 		defer iterator.Close()
@@ -113,7 +113,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 
 			serverEntry, err := iterator.Next()
 			if err != nil {
-				NoticeWarning("tactics iterator failed: %s", err)
+				NoticeWarning("tactics iterator failed: %s", errors.Trace(err))
 				return
 			}
 
@@ -126,7 +126,11 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 					return
 				}
 
-				iterator.Reset()
+				err := iterator.Reset()
+				if err != nil {
+					NoticeWarning("tactics iterator failed: %s", errors.Trace(err))
+					return
+				}
 				continue
 			}
 
@@ -159,7 +163,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 				}
 			}
 
-			NoticeWarning("tactics request failed: %s", err)
+			NoticeWarning("tactics request failed: %s", errors.Trace(err))
 
 			// On error, proceed with a retry, as the error is likely
 			// due to a network failure.
@@ -190,7 +194,7 @@ func GetTactics(ctx context.Context, config *Config, useStoredTactics bool) (fet
 		err := config.SetParameters(
 			tacticsRecord.Tag, true, tacticsRecord.Tactics.Parameters)
 		if err != nil {
-			NoticeWarning("apply tactics failed: %s", err)
+			NoticeWarning("apply tactics failed: %s", errors.Trace(err))
 
 			// The error will be due to invalid tactics values from
 			// the server. When SetParameters fails, all
@@ -258,7 +262,7 @@ func fetchTactics(
 		return nil, errors.Tracef(
 			"failed to make dial parameters for %s: %v",
 			serverEntry.GetDiagnosticID(),
-			err)
+			errors.Trace(err))
 	}
 
 	NoticeRequestingTactics(dialParams)

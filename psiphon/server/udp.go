@@ -367,7 +367,8 @@ type udpgwPortForward struct {
 
 var udpgwBufferPool = &sync.Pool{
 	New: func() any {
-		return make([]byte, udpgwProtocolMaxMessageSize)
+		b := make([]byte, udpgwProtocolMaxMessageSize)
+		return &b
 	},
 }
 
@@ -386,10 +387,17 @@ func (portForward *udpgwPortForward) relayDownstream() {
 	// TODO: is the buffer size larger than necessary?
 
 	// Use a buffer pool to minimize GC churn resulting from frequent,
-	// short-lived UDP flows, including DNS requests.
-	buffer := udpgwBufferPool.Get().([]byte)
+	// short-lived UDP flows, including DNS requests. A pointer to a slice is
+	// used with sync.Pool to avoid an allocation on Put, as would happen if
+	// passing in a slice instead of a pointer; see
+	// https://github.com/dominikh/go-tools/issues/1042#issuecomment-869064445
+	// and
+	// https://github.com/dominikh/go-tools/issues/1336#issuecomment-1331206290
+	// (which should not apply here).
+	b := udpgwBufferPool.Get().(*[]byte)
+	buffer := *b
 	clear(buffer)
-	defer udpgwBufferPool.Put(buffer)
+	defer udpgwBufferPool.Put(b)
 
 	packetBuffer := buffer[portForward.preambleSize:udpgwProtocolMaxMessageSize]
 	for {

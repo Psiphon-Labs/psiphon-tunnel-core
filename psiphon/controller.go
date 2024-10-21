@@ -80,8 +80,6 @@ type Controller struct {
 	candidateServerEntries                  chan *candidateServerEntry
 	untunneledDialConfig                    *DialConfig
 	untunneledSplitTunnelClassifications    *lrucache.Cache
-	splitTunnelClassificationTTL            time.Duration
-	splitTunnelClassificationMaxEntries     int
 	signalFetchCommonRemoteServerList       chan struct{}
 	signalFetchObfuscatedServerLists        chan struct{}
 	signalDownloadUpgrade                   chan string
@@ -1171,7 +1169,11 @@ func (controller *Controller) registerTunnel(tunnel *Tunnel) bool {
 	// Connecting to a TargetServerEntry does not change the
 	// ranking.
 	if controller.config.TargetServerEntry == "" {
-		PromoteServerEntry(controller.config, tunnel.dialParams.ServerEntry.IpAddress)
+		err := PromoteServerEntry(controller.config, tunnel.dialParams.ServerEntry.IpAddress)
+		if err != nil {
+			NoticeWarning("PromoteServerEntry failed: %v", errors.Trace(err))
+			// Proceed with using tunnel
+		}
 	}
 
 	return true
@@ -1414,7 +1416,7 @@ func (controller *Controller) Dial(
 		// The server has indicated that the client should make a direct,
 		// untunneled dial. Cache the classification to avoid this round trip in
 		// the immediate future.
-		untunneledCache.Add(remoteAddr, true, lrucache.DefaultExpiration)
+		untunneledCache.Set(remoteAddr, true, lrucache.DefaultExpiration)
 	}
 
 	NoticeUntunneled(remoteAddr)
@@ -2255,7 +2257,7 @@ loop:
 			if err != nil {
 				NoticeError("failed to get next candidate: %v", errors.Trace(err))
 				controller.SignalComponentFailure()
-				break loop
+				return
 			}
 			if serverEntry == nil {
 				// Completed this iteration
@@ -2414,7 +2416,12 @@ loop:
 		}
 		timer.Stop()
 
-		iterator.Reset()
+		err := iterator.Reset()
+		if err != nil {
+			NoticeError("failed to reset iterator: %v", errors.Trace(err))
+			controller.SignalComponentFailure()
+			return
+		}
 	}
 }
 
@@ -2749,6 +2756,9 @@ loop:
 
 			// Clear the reference to this discarded tunnel and immediately run
 			// a garbage collection to reclaim its memory.
+			//
+			// Note: this assignment is flagged by github.com/gordonklaus/ineffassign,
+			// but should still have some effect on garbage collection?
 			tunnel = nil
 			DoGarbageCollection()
 		}
@@ -2829,6 +2839,7 @@ func (controller *Controller) runInproxyProxy() {
 
 	p := controller.config.GetParameters().Get()
 	allowProxy := p.Bool(parameters.InproxyAllowProxy)
+	activityNoticePeriod := p.Duration(parameters.InproxyProxyTotalActivityNoticePeriod)
 	p.Close()
 
 	// Running an upstream proxy is also an incompatible case.
@@ -2867,7 +2878,6 @@ func (controller *Controller) runInproxyProxy() {
 	// and formatting when debug logging is off.
 	debugLogging := controller.config.InproxyEnableWebRTCDebugLogging
 
-	activityNoticePeriod := p.Duration(parameters.InproxyProxyTotalActivityNoticePeriod)
 	var lastActivityNotice time.Time
 	var lastActivityConnectingClients, lastActivityConnectedClients int32
 	var lastActivityConnectingClientsTotal, lastActivityConnectedClientsTotal int32

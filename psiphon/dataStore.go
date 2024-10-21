@@ -975,7 +975,10 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 		}
 
 		if doDeleteServerEntry {
-			deleteServerEntry(iterator.config, serverEntryID)
+			err := deleteServerEntry(iterator.config, serverEntryID)
+			NoticeWarning(
+				"ServerEntryIterator.Next: deleteServerEntry failed: %s",
+				errors.Trace(err))
 			continue
 		}
 
@@ -1039,12 +1042,12 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 					return errors.Trace(err)
 				}
 
-				serverEntries.put(serverEntryID, jsonServerEntryFields)
+				err = serverEntries.put(serverEntryID, jsonServerEntryFields)
 				if err != nil {
 					return errors.Trace(err)
 				}
 
-				serverEntryTags.put([]byte(serverEntryTag), serverEntryID)
+				err = serverEntryTags.put([]byte(serverEntryTag), serverEntryID)
 				if err != nil {
 					return errors.Trace(err)
 				}
@@ -1140,7 +1143,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 		var serverEntry *protocol.ServerEntry
 		err := json.Unmarshal(serverEntryJson, &serverEntry)
 		if err != nil {
-			errors.Trace(err)
+			return errors.Trace(err)
 		}
 
 		// Only prune sufficiently old server entries. This mitigates the case where
@@ -1148,7 +1151,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 		// being invalid/deleted.
 		serverEntryLocalTimestamp, err := time.Parse(time.RFC3339, serverEntry.LocalTimestamp)
 		if err != nil {
-			errors.Trace(err)
+			return errors.Trace(err)
 		}
 		if serverEntryLocalTimestamp.Add(minimumAgeForPruning).After(time.Now()) {
 			return nil
@@ -1162,7 +1165,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 
 		err = serverEntryTags.delete(serverEntryTagBytes)
 		if err != nil {
-			errors.Trace(err)
+			return errors.Trace(err)
 		}
 
 		if doDeleteServerEntry {
@@ -1174,7 +1177,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) error {
 				keyValues,
 				dialParameters)
 			if err != nil {
-				errors.Trace(err)
+				return errors.Trace(err)
 			}
 		}
 
@@ -1231,7 +1234,7 @@ func deleteServerEntry(config *Config, serverEntryID []byte) error {
 			keyValues,
 			dialParameters)
 		if err != nil {
-			errors.Trace(err)
+			return errors.Trace(err)
 		}
 
 		// Remove any tags pointing to the deleted server entry.
@@ -1259,7 +1262,7 @@ func deleteServerEntryHelper(
 
 	err := serverEntries.delete(serverEntryID)
 	if err != nil {
-		errors.Trace(err)
+		return errors.Trace(err)
 	}
 
 	affinityServerEntryID := keyValues.get(datastoreAffinityServerEntryIDKey)
@@ -1608,14 +1611,14 @@ func TakeOutUnreportedPersistentStats(config *Config) (map[string][][]byte, erro
 			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
 
 				// Perform a test JSON unmarshaling. In case of data corruption or a bug,
-				// delete and skip the record.
+				// attempt to delete and skip the record.
 				var jsonData interface{}
 				err := json.Unmarshal(key, &jsonData)
 				if err != nil {
 					NoticeWarning(
 						"Invalid key in TakeOutUnreportedPersistentStats: %s: %s",
 						string(key), err)
-					bucket.delete(key)
+					_ = bucket.delete(key)
 					continue
 				}
 

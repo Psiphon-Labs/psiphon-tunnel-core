@@ -1455,8 +1455,10 @@ func (sshServer *sshServer) reloadTactics() error {
 			// for broker public keys no longer in the known/expected list;
 			// but will retain any existing sessions for broker public keys
 			// that remain in the list.
-			sshServer.inproxyBrokerSessions.SetKnownBrokerPublicKeys(brokerPublicKeys)
-
+			err = sshServer.inproxyBrokerSessions.SetKnownBrokerPublicKeys(brokerPublicKeys)
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 	}
 
@@ -1553,7 +1555,7 @@ func (sshServer *sshServer) handleClient(
 					conn.Close()
 				})
 			}
-			io.Copy(ioutil.Discard, conn)
+			_, _ = io.Copy(ioutil.Discard, conn)
 			conn.Close()
 			afterFunc.Stop()
 
@@ -2316,7 +2318,8 @@ func (sshClient *sshClient) run(
 			// It is recommended to set ServerOSSHPrefixSpecs, etc., in default
 			// tactics.
 
-			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.peerGeoIPData)
+			var p parameters.ParametersAccessor
+			p, err = sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.peerGeoIPData)
 
 			// Log error, but continue. A default prefix spec will be used by the server.
 			if err != nil {
@@ -2655,8 +2658,8 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 // I/O, as newly connecting clients need to await stop completion of any
 // existing connection that shares the same session ID.
 func (sshClient *sshClient) stop() {
-	sshClient.sshConn.Close()
-	sshClient.sshConn.Wait()
+	_ = sshClient.sshConn.Close()
+	_ = sshClient.sshConn.Wait()
 }
 
 // awaitStopped will block until sshClient.run has exited, at which point all
@@ -3677,7 +3680,7 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessa
 	}
 
 	// Note: logMessage is internal, for logging only; just the reject reason is sent to the client.
-	newChannel.Reject(reason, reason.String())
+	_ = newChannel.Reject(reason, reason.String())
 }
 
 // setHandshakeState sets the handshake state -- that it completed and
@@ -4783,7 +4786,7 @@ func (sshClient *sshClient) handleTCPChannel(
 				return
 			}
 
-			newChannel.Reject(protocol.CHANNEL_REJECT_REASON_SPLIT_TUNNEL, "")
+			_ = newChannel.Reject(protocol.CHANNEL_REJECT_REASON_SPLIT_TUNNEL, "")
 			return
 		}
 	}

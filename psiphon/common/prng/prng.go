@@ -198,7 +198,7 @@ func (p *PRNG) Int63() int64 {
 // Uint64 is equivilent to math/rand.Uint64.
 func (p *PRNG) Uint64() uint64 {
 	var b [8]byte
-	p.Read(b[:])
+	_, _ = p.Read(b[:])
 	return binary.BigEndian.Uint64(b[:])
 }
 
@@ -300,7 +300,7 @@ func (p *PRNG) RangeUint32(min, max uint32) uint32 {
 // Bytes returns a new slice containing length random bytes.
 func (p *PRNG) Bytes(length int) []byte {
 	b := make([]byte, length)
-	p.Read(b)
+	_, _ = p.Read(b)
 	return b
 }
 

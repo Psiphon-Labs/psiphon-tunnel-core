@@ -1523,7 +1523,10 @@ func performDNSQuery(
 	startTime := time.Now()
 
 	// Send the DNS request
-	dnsConn.WriteMsg(request)
+	err := dnsConn.WriteMsg(request)
+	if err != nil {
+		return nil, nil, -1, errors.Trace(err)
+	}
 
 	// Read and process the DNS response
 	var IPs []net.IP

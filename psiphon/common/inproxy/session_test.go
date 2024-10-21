@@ -347,7 +347,7 @@ func runTestSessions() error {
 
 	request = roundTripper.MakeRequest()
 
-	response, err = unknownInitiatorSessions.RoundTrip(
+	_, err = unknownInitiatorSessions.RoundTrip(
 		ctx,
 		roundTripper,
 		responderPublicKey,
@@ -674,7 +674,6 @@ func runTestNoise() error {
 		return errors.Trace(err)
 	}
 
-	receivedPayload = nil
 	receivedPayload, _, _, err = initiatorHandshake.ReadMessage(nil, responderMsg)
 	if err != nil {
 		return errors.Trace(err)

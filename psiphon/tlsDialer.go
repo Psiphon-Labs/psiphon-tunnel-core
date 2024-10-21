@@ -485,29 +485,32 @@ func CustomTLSDial(
 			return nil, errors.Trace(err)
 		}
 
-		ss := utls.MakeClientSessionState(
+		sessionState := utls.MakeClientSessionState(
 			obfuscatedSessionState.SessionTicket,
 			obfuscatedSessionState.Vers,
 			obfuscatedSessionState.CipherSuite,
 			obfuscatedSessionState.MasterSecret,
 			nil, nil)
-		ss.SetCreatedAt(obfuscatedSessionState.CreatedAt)
-		ss.SetEMS(obfuscatedSessionState.ExtMasterSecret)
+		sessionState.SetCreatedAt(obfuscatedSessionState.CreatedAt)
+		sessionState.SetEMS(obfuscatedSessionState.ExtMasterSecret)
 		// TLS 1.3-only fields
-		ss.SetAgeAdd(obfuscatedSessionState.AgeAdd)
-		ss.SetUseBy(obfuscatedSessionState.UseBy)
+		sessionState.SetAgeAdd(obfuscatedSessionState.AgeAdd)
+		sessionState.SetUseBy(obfuscatedSessionState.UseBy)
 
 		if isTLS13 {
 			// Sets OOB PSK if required.
 			if containsPSKExt(utlsClientHelloID, utlsClientHelloSpec) {
 				if wrappedCache, ok := clientSessionCache.(*common.UtlsClientSessionCacheWrapper); ok {
-					wrappedCache.Put("", ss)
+					wrappedCache.Put("", sessionState)
 				} else {
 					return nil, errors.TraceNew("unexpected clientSessionCache type")
 				}
 			}
 		} else {
-			conn.SetSessionState(ss)
+			err := conn.SetSessionState(sessionState)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
 		}
 
 		// Apply changes to utls

@@ -229,7 +229,7 @@ func (r *ReplayCache) SetReplayParameters(
 	r.cacheMutex.Lock()
 	defer r.cacheMutex.Unlock()
 
-	r.cache.Add(key, value, TTL)
+	r.cache.Set(key, value, TTL)
 
 	// go-cache-lru is typically safe for concurrent access but explicit
 	// synchronization is required when accessing Items. Items may include

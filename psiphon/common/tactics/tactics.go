@@ -800,19 +800,6 @@ func (server *Server) GetTacticsPayload(
 	return payload, nil
 }
 
-func marshalTactics(tactics *Tactics) ([]byte, string, error) {
-	marshaledTactics, err := json.Marshal(tactics)
-	if err != nil {
-		return nil, "", errors.Trace(err)
-	}
-
-	// MD5 hash is used solely as a data checksum and not for any security purpose.
-	digest := md5.Sum(marshaledTactics)
-	tag := hex.EncodeToString(digest[:])
-
-	return marshaledTactics, tag, nil
-}
-
 // GetTacticsWithTag returns a GetTactics value along with the associated tag value.
 //
 // Callers must not mutate returned tactics data, which is cached.
@@ -1264,7 +1251,13 @@ func (server *Server) handleSpeedTestRequest(
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(response)
+	_, err = w.Write(response)
+	if err != nil {
+		server.logger.WithTraceFields(
+			common.LogFields{"error": err}).Warning("failed to write response")
+		common.TerminateHTTPConnection(w, r)
+		return
+	}
 }
 
 func (server *Server) handleTacticsRequest(
@@ -1336,8 +1329,13 @@ func (server *Server) handleTacticsRequest(
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(boxedResponse)
-
+	_, err = w.Write(boxedResponse)
+	if err != nil {
+		server.logger.WithTraceFields(
+			common.LogFields{"error": err}).Warning("failed to write response")
+		common.TerminateHTTPConnection(w, r)
+		return
+	}
 	// Log a metric.
 
 	logFields := server.logFieldFormatter(geoIPData, apiParams)
