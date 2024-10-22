@@ -1660,18 +1660,6 @@ func (dialParams *DialParameters) GetInproxyMetrics() common.LogFields {
 	return inproxyMetrics
 }
 
-func (dialParams *DialParameters) GetInproxyBrokerMetrics() common.LogFields {
-	inproxyMetrics := common.LogFields{}
-
-	if !dialParams.inproxyDialInitialized {
-		return inproxyMetrics
-	}
-
-	inproxyMetrics.Add(dialParams.inproxyBrokerDialParameters.GetBrokerMetrics())
-
-	return inproxyMetrics
-}
-
 func (dialParams *DialParameters) Succeeded() {
 
 	// When TTL is 0, don't store dial parameters.

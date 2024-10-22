@@ -95,6 +95,16 @@ func TestTactics(t *testing.T) {
         },
         {
           "Filter" : {
+            "APIParameters" : {"client_platform" : ["P2"], "client_version": ["V2"]}
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "ConnectionWorkerPoolSize" : 1
+            }
+          }
+        },
+        {
+          "Filter" : {
             "Regions": ["R2"]
           },
           "Tactics" : {
@@ -323,6 +333,24 @@ func TestTactics(t *testing.T) {
 		}
 	}
 
+	// Helper to check server-side cachedTacticsData state
+
+	checkServerCache := func(cacheEntryFilterMatches ...[]bool) {
+
+		cacheItems := server.cachedTacticsData.Items()
+		if len(cacheItems) != len(cacheEntryFilterMatches) {
+			t.Fatalf("Unexpected cachedTacticsData size: %v", len(cacheItems))
+		}
+
+		for _, filterMatches := range cacheEntryFilterMatches {
+			cacheKey := getCacheKey(true, filterMatches)
+			_, ok := server.cachedTacticsData.Get(cacheKey)
+			if !ok {
+				t.Fatalf("Unexpected missing cachedTacticsData entry: %v", filterMatches)
+			}
+		}
+	}
+
 	// Initial tactics request; will also run a speed test
 
 	// Request should complete in < 1 second
@@ -351,6 +379,10 @@ func TestTactics(t *testing.T) {
 	}
 
 	checkParameters(initialFetchTacticsRecord)
+
+	// Server should be caching tactics data for tactics matching first two
+	// filters.
+	checkServerCache([]bool{true, true, false, false, false})
 
 	// There should now be cached local tactics
 
@@ -434,6 +466,9 @@ func TestTactics(t *testing.T) {
 
 	checkParameters(fetchTacticsRecord)
 
+	// Server cache should be the same
+	checkServerCache([]bool{true, true, false, false, false})
+
 	// Modify tactics configuration to change payload
 
 	tacticsConnectionWorkerPoolSize = 6
@@ -474,6 +509,9 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("Server config failed to reload")
 	}
 
+	// Server cache should be flushed
+	checkServerCache()
+
 	// Next fetch should return a different payload
 
 	fetchTacticsRecord, err = FetchTactics(
@@ -508,6 +546,8 @@ func TestTactics(t *testing.T) {
 	}
 
 	checkParameters(fetchTacticsRecord)
+
+	checkServerCache([]bool{true, true, false, false, false})
 
 	// Exercise handshake transport of tactics
 
@@ -563,6 +603,8 @@ func TestTactics(t *testing.T) {
 
 	checkParameters(handshakeTacticsRecord)
 
+	checkServerCache([]bool{true, true, false, false, false})
+
 	// Now there should be stored tactics
 
 	storedTacticsRecord, err = UseStoredTactics(storer, networkID)
@@ -595,6 +637,35 @@ func TestTactics(t *testing.T) {
 	if storedTacticsRecord != nil {
 		t.Fatalf("unexpected stored tactics record")
 	}
+
+	// Server should cache a new entry for different filter matches
+
+	apiParams2 := common.APIParameters{
+		"client_platform": "P2",
+		"client_version":  "V2"}
+
+	fetchTacticsRecord, err = FetchTactics(
+		context.Background(),
+		params,
+		storer,
+		getNetworkID,
+		apiParams2,
+		endPointProtocol,
+		endPointRegion,
+		encodedRequestPublicKey,
+		encodedObfuscatedKey,
+		obfuscatedRoundTripper)
+	if err != nil {
+		t.Fatalf("FetchTactics failed: %s", err)
+	}
+
+	if fetchTacticsRecord == nil {
+		t.Fatalf("expected tactics record")
+	}
+
+	checkServerCache(
+		[]bool{true, true, false, false, false},
+		[]bool{false, false, true, false, false})
 
 	// Exercise speed test sample truncation
 

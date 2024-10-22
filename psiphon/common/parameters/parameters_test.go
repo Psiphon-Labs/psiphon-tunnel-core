@@ -135,6 +135,10 @@ func TestGetDefaultParameters(t *testing.T) {
 					t.Fatalf("KeyStrings returned %+v expected %+v", g, strings)
 				}
 			}
+			g := p.Get().KeyStringsValue(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("KeyStrings returned %+v expected %+v", g, v)
+			}
 		case KeyDurations:
 			g := p.Get().KeyDurations(name)
 			durations := make(map[string]time.Duration)

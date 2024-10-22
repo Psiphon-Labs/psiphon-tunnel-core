@@ -1199,7 +1199,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     else if ([noticeType isEqualToString:@"ConnectedServerRegion"]) {
         id region = [notice valueForKeyPath:@"data.serverRegion"];
         if (![region isKindOfClass:[NSString class]]) {
-            [self logMessage:[NSString stringWithFormat: @"ActiveTunnel notice missing data.serverRegion: %@", noticeJSON]];
+            [self logMessage:[NSString stringWithFormat: @"ConnectedServerRegion notice missing data.serverRegion: %@", noticeJSON]];
             return;
         }
         if ([self.tunneledAppDelegate respondsToSelector:@selector(onConnectedServerRegion:)]) {

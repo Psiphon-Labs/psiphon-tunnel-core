@@ -202,14 +202,16 @@ func (p *Proxy) Run(ctx context.Context) {
 	// trip is awaited so that:
 	//
 	// - The first announce response will arrive with any new tactics,
-	//   avoiding a start up case where MaxClients initial, concurrent
-	//   announces all return with no-match and a tactics payload.
+	//   which may be applied before launching additions workers.
 	//
 	// - The first worker gets no announcement delay and is also guaranteed to
 	//   be the shared session establisher. Since the announcement delays are
 	//   applied _after_ waitToShareSession, it would otherwise be possible,
 	//   with a race of MaxClient initial, concurrent announces, for the
 	//   session establisher to be a different worker than the no-delay worker.
+	//
+	// The first worker is the only proxy worker which sets
+	// ProxyAnnounceRequest.CheckTactics.
 
 	signalFirstAnnounceCtx, signalFirstAnnounceDone :=
 		context.WithCancel(context.Background())
@@ -565,7 +567,8 @@ func (p *Proxy) proxyOneClient(
 	// returned in the proxy announcment response are associated and stored
 	// with the original network ID.
 
-	metrics, tacticsNetworkID, err := p.getMetrics(webRTCCoordinator)
+	metrics, tacticsNetworkID, err := p.getMetrics(
+		brokerCoordinator, webRTCCoordinator)
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}
@@ -611,6 +614,10 @@ func (p *Proxy) proxyOneClient(
 	}
 	p.nextAnnounceMutex.Unlock()
 
+	// Only the first worker, which has signalAnnounceDone configured, checks
+	// for tactics.
+	checkTactics := signalAnnounceDone != nil
+
 	// A proxy ID is implicitly sent with requests; it's the proxy's session
 	// public key.
 	//
@@ -624,6 +631,7 @@ func (p *Proxy) proxyOneClient(
 		&ProxyAnnounceRequest{
 			PersonalCompartmentIDs: personalCompartmentIDs,
 			Metrics:                metrics,
+			CheckTactics:           checkTactics,
 		})
 	if logAnnounce() {
 		p.config.Logger.WithTraceFields(common.LogFields{
@@ -644,7 +652,9 @@ func (p *Proxy) proxyOneClient(
 		// discovery but proceed with handling the proxy announcement
 		// response as there may still be a match.
 
-		if p.config.HandleTacticsPayload(tacticsNetworkID, announceResponse.TacticsPayload) {
+		if p.config.HandleTacticsPayload(
+			tacticsNetworkID, announceResponse.TacticsPayload) {
+
 			p.resetNetworkDiscovery()
 		}
 	}
@@ -962,7 +972,9 @@ func (p *Proxy) proxyOneClient(
 	return backOff, err
 }
 
-func (p *Proxy) getMetrics(webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetrics, string, error) {
+func (p *Proxy) getMetrics(
+	brokerCoordinator BrokerDialCoordinator,
+	webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetrics, string, error) {
 
 	// tacticsNetworkID records the exact network ID that corresponds to the
 	// tactics tag sent in the base parameters, and is used when applying any
@@ -972,13 +984,17 @@ func (p *Proxy) getMetrics(webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetri
 		return nil, "", errors.Trace(err)
 	}
 
-	packedBaseParams, err := protocol.EncodePackedAPIParameters(baseParams)
+	apiParams := common.APIParameters{}
+	apiParams.Add(baseParams)
+	apiParams.Add(common.APIParameters(brokerCoordinator.MetricsForBrokerRequests()))
+
+	packedParams, err := protocol.EncodePackedAPIParameters(apiParams)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
 
 	return &ProxyMetrics{
-		BaseAPIParameters:             packedBaseParams,
+		BaseAPIParameters:             packedParams,
 		ProxyProtocolVersion:          proxyProtocolVersion,
 		NATType:                       webRTCCoordinator.NATType(),
 		PortMappingTypes:              webRTCCoordinator.PortMappingTypes(),

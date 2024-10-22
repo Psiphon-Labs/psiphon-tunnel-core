@@ -372,6 +372,10 @@ const (
 	SteeringIPCacheMaxEntries                          = "SteeringIPCacheMaxEntries"
 	SteeringIPProbability                              = "SteeringIPProbability"
 	ServerDiscoveryStrategy                            = "ServerDiscoveryStrategy"
+	FrontedHTTPClientReplayDialParametersTTL           = "FrontedHTTPClientReplayDialParametersTTL"
+	FrontedHTTPClientReplayUpdateFrequency             = "FrontedHTTPClientReplayUpdateFrequency"
+	FrontedHTTPClientReplayDialParametersProbability   = "FrontedHTTPClientReplayDialParametersProbability"
+	FrontedHTTPClientReplayRetainFailedProbability     = "FrontedHTTPClientReplayRetainFailedProbability"
 	InproxyAllowProxy                                  = "InproxyAllowProxy"
 	InproxyAllowClient                                 = "InproxyAllowClient"
 	InproxyAllowDomainFrontedDestinations              = "InproxyAllowDomainFrontedDestinations"
@@ -397,6 +401,8 @@ const (
 	InproxyBrokerMatcherOfferLimitEntryCount           = "InproxyBrokerMatcherOfferLimitEntryCount"
 	InproxyBrokerMatcherOfferRateLimitQuantity         = "InproxyBrokerMatcherOfferRateLimitQuantity"
 	InproxyBrokerMatcherOfferRateLimitInterval         = "InproxyBrokerMatcherOfferRateLimitInterval"
+	InproxyBrokerMatcherPrioritizeProxiesProbability   = "InproxyBrokerMatcherPrioritizeProxiesProbability"
+	InproxyBrokerMatcherPrioritizeProxiesFilter        = "InproxyBrokerMatcherPrioritizeProxiesFilter"
 	InproxyBrokerProxyAnnounceTimeout                  = "InproxyBrokerProxyAnnounceTimeout"
 	InproxyBrokerClientOfferTimeout                    = "InproxyBrokerClientOfferTimeout"
 	InproxyBrokerClientOfferPersonalTimeout            = "InproxyBrokerClientOfferPersonalTimeout"
@@ -876,6 +882,11 @@ var defaultParameters = map[string]struct {
 
 	ServerDiscoveryStrategy: {value: "", flags: serverSideOnly},
 
+	FrontedHTTPClientReplayDialParametersTTL:         {value: 24 * time.Hour, minimum: time.Duration(0)},
+	FrontedHTTPClientReplayUpdateFrequency:           {value: 5 * time.Minute, minimum: time.Duration(0)},
+	FrontedHTTPClientReplayDialParametersProbability: {value: 1.0, minimum: 0.0},
+	FrontedHTTPClientReplayRetainFailedProbability:   {value: 0.5, minimum: 0.0},
+
 	// For inproxy tactics, there is no proxyOnly flag, since Psiphon apps may
 	// run both clients and inproxy proxies.
 	//
@@ -907,6 +918,8 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerMatcherOfferLimitEntryCount:           {value: 10, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitQuantity:         {value: 50, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitInterval:         {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerMatcherPrioritizeProxiesProbability:   {value: 1.0, minimum: 0.0},
+	InproxyBrokerMatcherPrioritizeProxiesFilter:        {value: KeyStrings{}},
 	InproxyBrokerProxyAnnounceTimeout:                  {value: 2 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerClientOfferPersonalTimeout:            {value: 5 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
@@ -955,8 +968,8 @@ var defaultParameters = map[string]struct {
 	InproxyPsiphonAPIRequestTimeout:                    {value: 10 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	InproxyProxyTotalActivityNoticePeriod:              {value: 5 * time.Minute, minimum: 1 * time.Second},
 	InproxyPersonalPairingConnectionWorkerPoolSize:     {value: 2, minimum: 1},
-	InproxyClientDialRateLimitQuantity:                 {value: 10, minimum: 0},
-	InproxyClientDialRateLimitInterval:                 {value: 1 * time.Minute, minimum: time.Duration(0)},
+	InproxyClientDialRateLimitQuantity:                 {value: 2, minimum: 0},
+	InproxyClientDialRateLimitInterval:                 {value: 500 * time.Millisecond, minimum: time.Duration(0)},
 	InproxyClientNoMatchFailoverProbability:            {value: 0.5, minimum: 0.0},
 	InproxyClientNoMatchFailoverPersonalProbability:    {value: 1.0, minimum: 0.0},
 	InproxyFrontingProviderClientMaxRequestTimeouts:    {value: KeyDurations{}},
@@ -1935,6 +1948,13 @@ func (p ParametersAccessor) KeyStrings(name, key string) []string {
 	value := KeyStrings{}
 	p.snapshot.getValue(name, &value)
 	return value[key]
+}
+
+// KeyStringsValue returns a complete KeyStrings parameter value.
+func (p ParametersAccessor) KeyStringsValue(name string) KeyStrings {
+	value := KeyStrings{}
+	p.snapshot.getValue(name, &value)
+	return value
 }
 
 // KeyDurations returns a KeyDurations parameter value, with string durations

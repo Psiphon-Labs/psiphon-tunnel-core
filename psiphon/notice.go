@@ -699,12 +699,11 @@ func NoticeRequestedTactics(dialParams *DialParameters) {
 }
 
 // NoticeActiveTunnel is a successful connection that is used as an active tunnel for port forwarding
-func NoticeActiveTunnel(diagnosticID, protocol string, isTCS bool) {
+func NoticeActiveTunnel(diagnosticID, protocol string) {
 	singletonNoticeLogger.outputNotice(
 		"ActiveTunnel", noticeIsDiagnostic,
 		"diagnosticID", diagnosticID,
-		"protocol", protocol,
-		"isTCS", isTCS)
+		"protocol", protocol)
 }
 
 // NoticeConnectedServerRegion reports the region of the connected server
