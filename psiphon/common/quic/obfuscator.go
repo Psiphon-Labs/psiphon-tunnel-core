@@ -270,7 +270,7 @@ func (conn *ObfuscatedPacketConn) Close() error {
 	if conn.isServer {
 
 		// Interrupt any blocked writes.
-		conn.PacketConn.SetWriteDeadline(time.Now())
+		_ = conn.PacketConn.SetWriteDeadline(time.Now())
 
 		close(conn.stopBroadcast)
 		conn.runWaitGroup.Wait()
@@ -568,7 +568,6 @@ func (conn *ObfuscatedPacketConn) readPacket(
 				firstFlowPacket = true
 			} else {
 				isObfuscated = mode.isObfuscated
-				isIETF = mode.isIETF
 			}
 			mode.lastPacketTime = lastPacketTime
 
@@ -636,7 +635,7 @@ func (conn *ObfuscatedPacketConn) readPacket(
 				// There's a possible race condition between the two instances of locking
 				// peerModesMutex: the client might redial in the meantime. Check that the
 				// mode state is unchanged from when the lock was last held.
-				if !ok || mode.isObfuscated != true || mode.isIETF != false ||
+				if !ok || !mode.isObfuscated || mode.isIETF ||
 					mode.lastPacketTime != lastPacketTime {
 					conn.peerModesMutex.Unlock()
 					return n, oobn, flags, addr, true, newTemporaryNetError(
@@ -764,7 +763,7 @@ func (conn *ObfuscatedPacketConn) writePacket(
 			}
 
 			nonce := buffer[0:NONCE_SIZE]
-			conn.noncePRNG.Read(nonce)
+			_, _ = conn.noncePRNG.Read(nonce)
 
 			// This transform may reduce the entropy of the nonce, which increases
 			// the chance of nonce reuse. However, this chacha20 encryption is for
@@ -782,7 +781,7 @@ func (conn *ObfuscatedPacketConn) writePacket(
 			buffer[NONCE_SIZE] = uint8(paddingLen)
 
 			padding := buffer[(NONCE_SIZE + 1) : (NONCE_SIZE+1)+paddingLen]
-			conn.paddingPRNG.Read(padding)
+			_, _ = conn.paddingPRNG.Read(padding)
 
 			copy(buffer[(NONCE_SIZE+1)+paddingLen:], p)
 			dataLen := (NONCE_SIZE + 1) + paddingLen + n

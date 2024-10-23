@@ -1687,7 +1687,10 @@ func (p ParametersAccessor) IsNil() bool {
 // where memory footprint is a concern, and where the ParametersAccessor is
 // not immediately going out of scope. After Close is called, all other
 // ParametersAccessor functions will panic if called.
-func (p ParametersAccessor) Close() {
+//
+// Limitation: since ParametersAccessor is typically passed by value, this
+// Close call only impacts the immediate copy.
+func (p *ParametersAccessor) Close() {
 	p.snapshot = nil
 }
 

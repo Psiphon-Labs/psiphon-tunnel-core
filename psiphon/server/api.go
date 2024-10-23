@@ -1788,7 +1788,7 @@ func isGeoHashString(_ *Config, value string) bool {
 		return false
 	}
 	for _, c := range value {
-		if strings.Index(geohashAlphabet, string(c)) == -1 {
+		if !strings.Contains(geohashAlphabet, string(c)) {
 			return false
 		}
 	}

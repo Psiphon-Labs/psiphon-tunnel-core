@@ -249,12 +249,15 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 		tmpDataOffset := transformedTCP.DataOffset
 		tmpChecksum := transformedTCP.Checksum
 
-		gopacket.SerializeLayers(
+		err = gopacket.SerializeLayers(
 			buffer,
 			options,
 			serializableNetworkLayer,
 			&transformedTCP,
 			payload)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
 
 		// In the first SerializeLayers call, all IP and TCP length and checksums
 		// are recalculated and set to the correct values with transformations
@@ -268,13 +271,19 @@ func (spec *compiledSpec) apply(interceptedPacket gopacket.Packet) ([][]byte, er
 		if setCalculatedField {
 			transformedTCP.DataOffset = tmpDataOffset
 			transformedTCP.Checksum = tmpChecksum
-			buffer.Clear()
-			gopacket.SerializeLayers(
+			err = buffer.Clear()
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			err = gopacket.SerializeLayers(
 				buffer,
 				gopacket.SerializeOptions{FixLengths: fixLengths, ComputeChecksums: computeChecksums},
 				serializableNetworkLayer,
 				&transformedTCP,
 				payload)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
 		}
 
 		packets[i] = buffer.Bytes()
@@ -388,15 +397,15 @@ func (t *transformationTCPFlags) apply(tcp *layers.TCP, _ *gopacket.Payload) {
 		flags = t.flags
 	}
 
-	tcp.FIN = strings.Index(t.flags, "F") != -1
-	tcp.SYN = strings.Index(t.flags, "S") != -1
-	tcp.RST = strings.Index(t.flags, "R") != -1
-	tcp.PSH = strings.Index(t.flags, "P") != -1
-	tcp.ACK = strings.Index(t.flags, "A") != -1
-	tcp.URG = strings.Index(t.flags, "U") != -1
-	tcp.ECE = strings.Index(t.flags, "E") != -1
-	tcp.CWR = strings.Index(t.flags, "C") != -1
-	tcp.NS = strings.Index(t.flags, "N") != -1
+	tcp.FIN = strings.Contains(flags, "F")
+	tcp.SYN = strings.Contains(flags, "S")
+	tcp.RST = strings.Contains(flags, "R")
+	tcp.PSH = strings.Contains(flags, "P")
+	tcp.ACK = strings.Contains(flags, "A")
+	tcp.URG = strings.Contains(flags, "U")
+	tcp.ECE = strings.Contains(flags, "E")
+	tcp.CWR = strings.Contains(flags, "C")
+	tcp.NS = strings.Contains(flags, "N")
 }
 
 type transformationTCPField struct {

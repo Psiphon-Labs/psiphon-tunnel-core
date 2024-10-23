@@ -647,7 +647,7 @@ func runTestResolver() error {
 
 	cancelFunc()
 
-	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	_, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
