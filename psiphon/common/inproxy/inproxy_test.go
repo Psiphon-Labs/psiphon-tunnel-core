@@ -535,7 +535,6 @@ func runTestInproxy(doMustUpgrade bool) error {
 					DialAddress:                  addr,
 					PackedDestinationServerEntry: packedDestinationServerEntry,
 					MustUpgrade: func() {
-						fmt.Printf("HI!\n")
 						close(receivedClientMustUpgrade)
 						cancelDial()
 					},
