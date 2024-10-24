@@ -68,7 +68,11 @@ type protocolClassifier struct {
 // Limitation: the conn is also closed after reading maxBytesToMatch and
 // failing to find a match, which can be a fingerprint for a raw conn with no
 // preceding anti-probing measure, such as TLS passthrough.
-func newProtocolDemux(ctx context.Context, listener net.Listener, classifiers []protocolClassifier, connClassificationTimeout time.Duration) (*protocolDemux, []protoListener) {
+func newProtocolDemux(
+	ctx context.Context,
+	listener net.Listener,
+	classifiers []protocolClassifier,
+	connClassificationTimeout time.Duration) (*protocolDemux, []protoListener) {
 
 	ctx, cancelFunc := context.WithCancel(ctx)
 

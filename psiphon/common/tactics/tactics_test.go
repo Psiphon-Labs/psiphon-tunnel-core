@@ -343,7 +343,9 @@ func TestTactics(t *testing.T) {
 		}
 
 		for _, filterMatches := range cacheEntryFilterMatches {
-			cacheKey := getCacheKey(true, filterMatches)
+			includeServerSizeOnly := false
+			hasFilterMatches := true
+			cacheKey := getCacheKey(includeServerSizeOnly, hasFilterMatches, filterMatches)
 			_, ok := server.cachedTacticsData.Get(cacheKey)
 			if !ok {
 				t.Fatalf("Unexpected missing cachedTacticsData entry: %v", filterMatches)

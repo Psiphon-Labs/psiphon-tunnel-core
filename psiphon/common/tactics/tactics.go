@@ -1000,7 +1000,7 @@ func (server *Server) getTactics(
 	// TODO: log cache metrics; similar to what is done in
 	// psiphon/server.ServerTacticsParametersCache.GetMetrics.
 
-	cacheKey := getCacheKey(filterMatchCount > 0, filterMatches)
+	cacheKey := getCacheKey(includeServerSideOnly, filterMatchCount > 0, filterMatches)
 
 	cacheValue, ok := server.cachedTacticsData.Get(cacheKey)
 	if ok {
@@ -1029,18 +1029,28 @@ func (server *Server) getTactics(
 	return tacticsData, nil
 }
 
-func getCacheKey(hasFilterMatches bool, filterMatches []bool) string {
-	// When no filters match, the key is "". The input hasFilterMatches allows
-	// for skipping the strings.Builder setup and loop entirely.
-	if !hasFilterMatches {
-		return ""
+func getCacheKey(
+	includeServerSideOnly bool, hasFilterMatches bool, filterMatches []bool) string {
+
+	prefix := "0-"
+	if includeServerSideOnly {
+		prefix = "1-"
 	}
+
+	// hasFilterMatches allows for skipping the strings.Builder setup and loop
+	// entirely.
+	if !hasFilterMatches {
+		return prefix
+	}
+
 	var b strings.Builder
+	_, _ = b.WriteString(prefix)
 	for filterIndex, match := range filterMatches {
 		if match {
 			fmt.Fprintf(&b, "%x-", filterIndex)
 		}
 	}
+
 	return b.String()
 }
 
