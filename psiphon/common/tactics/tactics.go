@@ -191,7 +191,7 @@ const (
 	AGGREGATION_MINIMUM                = "Minimum"
 	AGGREGATION_MAXIMUM                = "Maximum"
 	AGGREGATION_MEDIAN                 = "Median"
-	PAYLOAD_CACHE_SIZE                 = 256
+	PAYLOAD_CACHE_SIZE                 = 1024
 )
 
 var (
