@@ -136,8 +136,8 @@ func TruncateTimestampToHour(timestamp string) string {
 func Compress(data []byte) []byte {
 	var compressedData bytes.Buffer
 	writer := zlib.NewWriter(&compressedData)
-	writer.Write(data)
-	writer.Close()
+	_, _ = writer.Write(data)
+	_ = writer.Close()
 	return compressedData.Bytes()
 }
 

@@ -58,6 +58,8 @@ type Proxy struct {
 
 	config                *ProxyConfig
 	activityUpdateWrapper *activityUpdateWrapper
+	lastConnectingClients int32
+	lastConnectedClients  int32
 
 	networkDiscoveryMutex     sync.Mutex
 	networkDiscoveryRunOnce   bool
@@ -242,6 +244,9 @@ func (p *Proxy) Run(ctx context.Context) {
 	// for PeakUp/DownstreamBytesPerSecond. This is also a reasonable
 	// frequency for invoking the ActivityUpdater and updating UI widgets.
 
+	p.lastConnectingClients = 0
+	p.lastConnectedClients = 0
+
 	activityUpdatePeriod := 1 * time.Second
 	ticker := time.NewTicker(activityUpdatePeriod)
 	defer ticker.Stop()
@@ -287,11 +292,16 @@ func (p *Proxy) activityUpdate(period time.Duration) {
 	greaterThanSwapInt64(&p.peakBytesUp, bytesUp)
 	greaterThanSwapInt64(&p.peakBytesDown, bytesDown)
 
-	if connectingClients == 0 &&
-		connectedClients == 0 &&
+	clientsChanged := connectingClients != p.lastConnectingClients ||
+		connectedClients != p.lastConnectedClients
+
+	p.lastConnectingClients = connectingClients
+	p.lastConnectedClients = connectedClients
+
+	if !clientsChanged &&
 		bytesUp == 0 &&
 		bytesDown == 0 {
-		// Skip the activity callback on idle.
+		// Skip the activity callback on idle bytes or no change in client counts.
 		return
 	}
 

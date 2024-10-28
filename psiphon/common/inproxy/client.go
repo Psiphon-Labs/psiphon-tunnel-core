@@ -44,7 +44,6 @@ const (
 // initial dial address.
 type ClientConn struct {
 	config       *ClientConfig
-	brokerClient *BrokerClient
 	webRTCConn   *webRTCConn
 	connectionID ID
 	remoteAddr   net.Addr

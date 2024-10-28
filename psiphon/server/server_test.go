@@ -1965,7 +1965,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		// Access the unexported controller.steeringIPCache
 		controllerStruct := reflect.ValueOf(controller).Elem()
-		steeringIPCacheField := controllerStruct.Field(40)
+		steeringIPCacheField := controllerStruct.FieldByName("steeringIPCache")
 		steeringIPCacheField = reflect.NewAt(
 			steeringIPCacheField.Type(), unsafe.Pointer(steeringIPCacheField.UnsafeAddr())).Elem()
 		steeringIPCache := steeringIPCacheField.Interface().(*lrucache.Cache)

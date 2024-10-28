@@ -136,7 +136,7 @@ func (c *ServerTacticsParametersCache) Get(
 	// Construct parameters from tactics.
 
 	// Note: since ServerTacticsParametersCache was implemented,
-	// tactics.Server.cachedTacticsData was added. This new cache is
+	// tactics.Server.cachedTacticsData was added. That new cache is
 	// primarily intended to reduce server allocations and computations
 	// when _clients_ request tactics. cachedTacticsData also impacts
 	// GetTacticsWithTag.
@@ -156,8 +156,6 @@ func (c *ServerTacticsParametersCache) Get(
 		// This server isn't configured with tactics.
 		return nilAccessor, nil
 	}
-
-	// Tactics.Probability is ignored for server-side tactics.
 
 	params, err := parameters.NewParameters(nil)
 	if err != nil {

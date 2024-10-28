@@ -1074,11 +1074,9 @@ func MakeInproxyBrokerDialParameters(
 
 	currentTimestamp := time.Now()
 
-	var brokerDialParams *InproxyBrokerDialParameters
-
 	// Select new broker dial parameters
 
-	brokerDialParams = &InproxyBrokerDialParameters{
+	brokerDialParams := &InproxyBrokerDialParameters{
 		brokerSpec:             brokerSpec,
 		LastUsedTimestamp:      currentTimestamp,
 		LastUsedBrokerSpecHash: hashBrokerSpec(brokerSpec),
@@ -2315,13 +2313,6 @@ func newInproxyUDPConn(ctx context.Context, config *Config) (net.PacketConn, err
 	}
 
 	return conn, nil
-}
-
-func inproxyUDPAddrFromAddrPort(addrPort netip.AddrPort) *net.UDPAddr {
-	return &net.UDPAddr{
-		IP:   addrPort.Addr().AsSlice(),
-		Port: int(addrPort.Port()),
-	}
 }
 
 func (conn *inproxyUDPConn) ReadFrom(p []byte) (int, net.Addr, error) {

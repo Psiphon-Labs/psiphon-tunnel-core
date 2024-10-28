@@ -258,30 +258,38 @@ func (tunnel *Tunnel) Activate(
 			go func() {
 				defer wg.Done()
 				notice := true
-				select {
-				case serverRequest := <-tunnel.sshServerRequests:
-					if serverRequest != nil {
-						if serverRequest.Type == protocol.PSIPHON_API_INPROXY_RELAY_REQUEST_NAME {
+				for {
+					select {
+					case serverRequest := <-tunnel.sshServerRequests:
+						if serverRequest != nil {
+							if serverRequest.Type == protocol.PSIPHON_API_INPROXY_RELAY_REQUEST_NAME {
 
-							if notice {
-								NoticeInfo(
-									"relaying inproxy broker packets for %s",
-									tunnel.dialParams.ServerEntry.GetDiagnosticID())
-								notice = false
+								if notice {
+									NoticeInfo(
+										"relaying inproxy broker packets for %s",
+										tunnel.dialParams.ServerEntry.GetDiagnosticID())
+									notice = false
+								}
+								err := tunnel.relayInproxyPacketRoundTrip(handshakeCtx, serverRequest)
+								if err != nil {
+									NoticeWarning(
+										"relay inproxy broker packets failed: %v",
+										errors.Trace(err))
+									// Continue
+								}
+
+							} else {
+
+								// There's a potential race condition in which
+								// post-handshake SSH requests, such as OSL or
+								// alert requests, arrive to this handler instead
+								// of operateTunnel, so invoke HandleServerRequest here.
+								HandleServerRequest(tunnelOwner, tunnel, serverRequest)
 							}
-							tunnel.relayInproxyPacketRoundTrip(handshakeCtx, serverRequest)
-
-						} else {
-
-							// There's a potential race condition in which
-							// post-handshake SSH requests, such as OSL or
-							// alert requests, arrive to this handler instead
-							// of operateTunnel, so invoke HandleServerRequest here.
-							HandleServerRequest(tunnelOwner, tunnel, serverRequest)
 						}
+					case <-handshakeCtx.Done():
+						return
 					}
-				case <-handshakeCtx.Done():
-					return
 				}
 			}()
 		}
@@ -363,7 +371,7 @@ func (tunnel *Tunnel) relayInproxyPacketRoundTrip(
 
 	defer func() {
 		if retErr != nil {
-			request.Reply(false, nil)
+			_ = request.Reply(false, nil)
 		}
 	}()
 
@@ -373,6 +381,9 @@ func (tunnel *Tunnel) relayInproxyPacketRoundTrip(
 
 	var relayRequest protocol.InproxyRelayRequest
 	err := cbor.Unmarshal(request.Payload, &relayRequest)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	inproxyConn := tunnel.dialParams.inproxyConn.Load().(*inproxy.ClientConn)
 	if inproxyConn == nil {

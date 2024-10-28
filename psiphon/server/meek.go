@@ -1838,7 +1838,10 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		return errors.Trace(err)
 	}
 
-	server.inproxyBroker.SetCommonCompartmentIDs(commonCompartmentIDs)
+	err = server.inproxyBroker.SetCommonCompartmentIDs(commonCompartmentIDs)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	server.inproxyBroker.SetTimeouts(
 		p.Duration(parameters.InproxyBrokerProxyAnnounceTimeout),

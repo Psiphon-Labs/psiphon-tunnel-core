@@ -191,7 +191,7 @@ const (
 	AGGREGATION_MINIMUM                = "Minimum"
 	AGGREGATION_MAXIMUM                = "Maximum"
 	AGGREGATION_MEDIAN                 = "Median"
-	PAYLOAD_CACHE_SIZE                 = 256
+	PAYLOAD_CACHE_SIZE                 = 1024
 )
 
 var (
@@ -800,19 +800,6 @@ func (server *Server) GetTacticsPayload(
 	return payload, nil
 }
 
-func marshalTactics(tactics *Tactics) ([]byte, string, error) {
-	marshaledTactics, err := json.Marshal(tactics)
-	if err != nil {
-		return nil, "", errors.Trace(err)
-	}
-
-	// MD5 hash is used solely as a data checksum and not for any security purpose.
-	digest := md5.Sum(marshaledTactics)
-	tag := hex.EncodeToString(digest[:])
-
-	return marshaledTactics, tag, nil
-}
-
 // GetTacticsWithTag returns a GetTactics value along with the associated tag value.
 //
 // Callers must not mutate returned tactics data, which is cached.
@@ -1013,7 +1000,7 @@ func (server *Server) getTactics(
 	// TODO: log cache metrics; similar to what is done in
 	// psiphon/server.ServerTacticsParametersCache.GetMetrics.
 
-	cacheKey := getCacheKey(filterMatchCount > 0, filterMatches)
+	cacheKey := getCacheKey(includeServerSideOnly, filterMatchCount > 0, filterMatches)
 
 	cacheValue, ok := server.cachedTacticsData.Get(cacheKey)
 	if ok {
@@ -1042,18 +1029,28 @@ func (server *Server) getTactics(
 	return tacticsData, nil
 }
 
-func getCacheKey(hasFilterMatches bool, filterMatches []bool) string {
-	// When no filters match, the key is "". The input hasFilterMatches allows
-	// for skipping the strings.Builder setup and loop entirely.
-	if !hasFilterMatches {
-		return ""
+func getCacheKey(
+	includeServerSideOnly bool, hasFilterMatches bool, filterMatches []bool) string {
+
+	prefix := "0-"
+	if includeServerSideOnly {
+		prefix = "1-"
 	}
+
+	// hasFilterMatches allows for skipping the strings.Builder setup and loop
+	// entirely.
+	if !hasFilterMatches {
+		return prefix
+	}
+
 	var b strings.Builder
+	_, _ = b.WriteString(prefix)
 	for filterIndex, match := range filterMatches {
 		if match {
 			fmt.Fprintf(&b, "%x-", filterIndex)
 		}
 	}
+
 	return b.String()
 }
 
@@ -1264,7 +1261,13 @@ func (server *Server) handleSpeedTestRequest(
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(response)
+	_, err = w.Write(response)
+	if err != nil {
+		server.logger.WithTraceFields(
+			common.LogFields{"error": err}).Warning("failed to write response")
+		common.TerminateHTTPConnection(w, r)
+		return
+	}
 }
 
 func (server *Server) handleTacticsRequest(
@@ -1336,8 +1339,13 @@ func (server *Server) handleTacticsRequest(
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(boxedResponse)
-
+	_, err = w.Write(boxedResponse)
+	if err != nil {
+		server.logger.WithTraceFields(
+			common.LogFields{"error": err}).Warning("failed to write response")
+		common.TerminateHTTPConnection(w, r)
+		return
+	}
 	// Log a metric.
 
 	logFields := server.logFieldFormatter(geoIPData, apiParams)
