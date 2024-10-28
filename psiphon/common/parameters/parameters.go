@@ -1239,6 +1239,15 @@ func (p *Parameters) Set(
 	}
 	inproxyAllCommonCompartmentIDs, _ := inproxyAllCommonCompartmentIDsValue.([]string)
 
+	// Special case: skip validation of transforms.Specs on the client side,
+	// since the regen operations may be slow. transforms.Specs are still
+	// validated on the server side, before being sent to clients. If a
+	// client's transforms.Spec is somehow corrupted, the tunnel dial
+	// applying the transform will error out -- transforms.Specs.Validate
+	// simply invokes the same apply operations.
+
+	validateTransformSpecs := serverSide
+
 	for i := 0; i < len(applyParameters); i++ {
 
 		count := 0
@@ -1431,6 +1440,11 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case transforms.Specs:
+
+				if !validateTransformSpecs {
+					break
+				}
+
 				prefixMode := false
 				if name == OSSHPrefixSpecs || name == ServerOSSHPrefixSpecs {
 					prefixMode = true
