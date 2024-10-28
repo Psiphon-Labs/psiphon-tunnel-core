@@ -24,6 +24,17 @@ package common
 // values are of varying types: strings, ints, arrays, structs, etc.
 type APIParameters map[string]interface{}
 
+// Add copies API parameters from b to a, skipping parameters which already
+// exist, regardless of value, in a.
+func (a APIParameters) Add(b APIParameters) {
+	for name, value := range b {
+		_, ok := a[name]
+		if !ok {
+			a[name] = value
+		}
+	}
+}
+
 // APIParameterValidator is a function that validates API parameters
 // for a particular request or context.
 type APIParameterValidator func(APIParameters) error

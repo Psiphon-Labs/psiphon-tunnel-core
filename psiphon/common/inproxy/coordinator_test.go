@@ -46,6 +46,7 @@ type testBrokerDialCoordinator struct {
 	brokerClientRoundTripperSucceeded func(RoundTripper)
 	brokerClientRoundTripperFailed    func(RoundTripper)
 	brokerClientNoMatch               func(RoundTripper)
+	metricsForBrokerRequests          common.LogFields
 	sessionHandshakeRoundTripTimeout  time.Duration
 	announceRequestTimeout            time.Duration
 	announceDelay                     time.Duration
@@ -122,6 +123,12 @@ func (t *testBrokerDialCoordinator) BrokerClientNoMatch(roundTripper RoundTrippe
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	t.brokerClientNoMatch(roundTripper)
+}
+
+func (t *testBrokerDialCoordinator) MetricsForBrokerRequests() common.LogFields {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.metricsForBrokerRequests
 }
 
 func (t *testBrokerDialCoordinator) SessionHandshakeRoundTripTimeout() time.Duration {

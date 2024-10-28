@@ -1057,10 +1057,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			if !ok {
 				t.Errorf("missing inproxy_broker.broker_event")
 			}
-			if event == "client_offer" || event == "proxy_announce" {
+			if event == "client-offer" || event == "proxy-announce" {
 				fronting_provider_id, ok := logFields["fronting_provider_id"].(string)
 				if !ok || fronting_provider_id != inproxyTestConfig.brokerFrontingProviderID {
-					t.Errorf("unexpected inproxy_broker.fronting_provider_id")
+					t.Errorf("unexpected inproxy_broker.fronting_provider_id for %s", event)
 				}
 			}
 		}
@@ -1965,7 +1965,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		// Access the unexported controller.steeringIPCache
 		controllerStruct := reflect.ValueOf(controller).Elem()
-		steeringIPCacheField := controllerStruct.Field(40)
+		steeringIPCacheField := controllerStruct.FieldByName("steeringIPCache")
 		steeringIPCacheField = reflect.NewAt(
 			steeringIPCacheField.Type(), unsafe.Pointer(steeringIPCacheField.UnsafeAddr())).Elem()
 		steeringIPCache := steeringIPCacheField.Interface().(*lrucache.Cache)

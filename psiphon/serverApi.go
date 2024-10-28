@@ -1014,7 +1014,7 @@ func (serverContext *ServerContext) getBaseAPIParameters(
 // included with each Psiphon API request. These common parameters are used
 // for metrics.
 //
-// The input dialPatrams may be nil when the filter has
+// The input dialParams may be nil when the filter has
 // baseParametersNoDialParameters.
 func getBaseAPIParameters(
 	filter baseParametersFilter,
@@ -1459,7 +1459,7 @@ func HandleOSLRequest(
 
 	defer func() {
 		if retErr != nil {
-			request.Reply(false, nil)
+			_ = request.Reply(false, nil)
 		}
 	}()
 
@@ -1470,7 +1470,11 @@ func HandleOSLRequest(
 	}
 
 	if oslRequest.ClearLocalSLOKs {
-		DeleteSLOKs()
+		err := DeleteSLOKs()
+		if err != nil {
+			NoticeWarning("DeleteSLOKs failed: %v", errors.Trace(err))
+			// Continue
+		}
 	}
 
 	seededNewSLOK := false
@@ -1479,7 +1483,7 @@ func HandleOSLRequest(
 		duplicate, err := SetSLOK(slok.ID, slok.Key)
 		if err != nil {
 			// TODO: return error to trigger retry?
-			NoticeWarning("SetSLOK failed: %s", errors.Trace(err))
+			NoticeWarning("SetSLOK failed: %v", errors.Trace(err))
 		} else if !duplicate {
 			seededNewSLOK = true
 		}
@@ -1493,7 +1497,10 @@ func HandleOSLRequest(
 		tunnelOwner.SignalSeededNewSLOK()
 	}
 
-	request.Reply(true, nil)
+	err = request.Reply(true, nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	return nil
 }
@@ -1503,7 +1510,7 @@ func HandleAlertRequest(
 
 	defer func() {
 		if retErr != nil {
-			request.Reply(false, nil)
+			_ = request.Reply(false, nil)
 		}
 	}()
 
@@ -1517,7 +1524,10 @@ func HandleAlertRequest(
 		NoticeServerAlert(alertRequest)
 	}
 
-	request.Reply(true, nil)
+	err = request.Reply(true, nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	return nil
 }

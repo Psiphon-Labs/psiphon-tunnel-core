@@ -408,7 +408,11 @@ func (streamer *limitedJSONStreamer) Stream() error {
 
 			case stateJSONSeekingStringValueStart:
 				if b == '"' {
-					state = stateJSONSeekingStringValueEnd
+
+					// Note: this assignment is flagged by github.com/gordonklaus/ineffassign,
+					// but is technically the correct state.
+					//
+					//state = stateJSONSeekingStringValueEnd
 
 					key := keyBuffer.String()
 

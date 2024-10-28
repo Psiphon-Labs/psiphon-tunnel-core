@@ -44,7 +44,6 @@ const (
 // initial dial address.
 type ClientConn struct {
 	config       *ClientConfig
-	brokerClient *BrokerClient
 	webRTCConn   *webRTCConn
 	connectionID ID
 	remoteAddr   net.Addr
@@ -356,7 +355,11 @@ func dialClientWebRTCConn(
 
 	// Send the ClientOffer request to the broker
 
-	packedBaseParams, err := protocol.EncodePackedAPIParameters(config.BaseAPIParameters)
+	apiParams := common.APIParameters{}
+	apiParams.Add(config.BaseAPIParameters)
+	apiParams.Add(common.APIParameters(brokerCoordinator.MetricsForBrokerRequests()))
+
+	packedParams, err := protocol.EncodePackedAPIParameters(apiParams)
 	if err != nil {
 		return nil, false, errors.Trace(err)
 	}
@@ -372,7 +375,7 @@ func dialClientWebRTCConn(
 		ctx,
 		&ClientOfferRequest{
 			Metrics: &ClientMetrics{
-				BaseAPIParameters:    packedBaseParams,
+				BaseAPIParameters:    packedParams,
 				ProxyProtocolVersion: proxyProtocolVersion,
 				NATType:              config.WebRTCDialCoordinator.NATType(),
 				PortMappingTypes:     config.WebRTCDialCoordinator.PortMappingTypes(),

@@ -167,7 +167,11 @@ func FetchObfuscatedServerLists(
 	// the registry, so clear the ETag to ensure that always happens.
 	_, err := os.Stat(cachedFilename)
 	if os.IsNotExist(err) {
-		SetUrlETag(canonicalURL, "")
+		err := SetUrlETag(canonicalURL, "")
+		if err != nil {
+			NoticeWarning("SetUrlETag failed: %v", errors.Trace(err))
+			// Continue
+		}
 	}
 
 	// failed is set if any operation fails and should trigger a retry. When the OSL registry
@@ -462,6 +466,7 @@ func downloadRemoteServerListFile(
 	// or untunneled configuration.
 
 	payloadSecure := true
+	frontingUseDeviceBinder := true
 	httpClient, tunneled, getParams, err := MakeDownloadHTTPClient(
 		ctx,
 		config,
@@ -471,6 +476,7 @@ func downloadRemoteServerListFile(
 		disableSystemRootCAs,
 		payloadSecure,
 		frontingSpecs,
+		frontingUseDeviceBinder,
 		func(frontingProviderID string) {
 			NoticeInfo(
 				"downloadRemoteServerListFile: selected fronting provider %s for %s",

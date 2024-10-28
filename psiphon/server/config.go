@@ -496,11 +496,12 @@ type Config struct {
 	peakUpstreamFailureRateMinimumSampleSize       int
 	periodicGarbageCollection                      time.Duration
 	stopEstablishTunnelsEstablishedClientThreshold int
-	dumpProfilesOnStopEstablishTunnelsDone         int32
+	dumpProfilesOnStopEstablishTunnelsDoneOnce     int32
 	providerID                                     string
 	frontingProviderID                             string
 	region                                         string
 	runningProtocols                               []string
+	runningOnlyInproxyBroker                       bool
 }
 
 // GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
@@ -547,11 +548,18 @@ func (config *Config) DumpProfilesOnStopEstablishTunnels(establishedClientsCount
 	if config.stopEstablishTunnelsEstablishedClientThreshold < 0 {
 		return false
 	}
-	if atomic.LoadInt32(&config.dumpProfilesOnStopEstablishTunnelsDone) != 0 {
+	if config.runningOnlyInproxyBroker {
+		// There will always be zero established clients when running only the
+		// in-proxy broker and no tunnel protocols.
+		return false
+	}
+	if atomic.LoadInt32(&config.dumpProfilesOnStopEstablishTunnelsDoneOnce) != 0 {
 		return false
 	}
 	dump := (establishedClientsCount <= config.stopEstablishTunnelsEstablishedClientThreshold)
-	atomic.StoreInt32(&config.dumpProfilesOnStopEstablishTunnelsDone, 1)
+	if dump {
+		atomic.StoreInt32(&config.dumpProfilesOnStopEstablishTunnelsDoneOnce, 1)
+	}
 	return dump
 }
 
@@ -582,6 +590,12 @@ func (config *Config) GetRegion() string {
 // The caller must not mutate the return value.
 func (config *Config) GetRunningProtocols() []string {
 	return config.runningProtocols
+}
+
+// GetRunningOnlyInproxyBroker indicates if the server is running only the
+// in-proxy broker and no tunnel protocols.
+func (config *Config) GetRunningOnlyInproxyBroker() bool {
+	return config.runningOnlyInproxyBroker
 }
 
 // LoadConfig loads and validates a JSON encoded server config.
@@ -626,6 +640,9 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			return nil, errors.TraceNew("Inproxy Broker-only mode requires MeekServerRunInproxyBroker")
 		}
 	}
+
+	config.runningProtocols = []string{}
+	config.runningOnlyInproxyBroker = config.MeekServerRunInproxyBroker
 
 	for tunnelProtocol := range config.TunnelProtocolPorts {
 		if !common.Contains(protocol.SupportedTunnelProtocols, tunnelProtocol) {
@@ -693,6 +710,9 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 					protocol.TUNNEL_PROTOCOL_FRONTED_MEEK)
 			}
 		}
+
+		config.runningProtocols = append(config.runningProtocols, tunnelProtocol)
+		config.runningOnlyInproxyBroker = false
 	}
 
 	for tunnelProtocol, address := range config.TunnelProtocolPassthroughAddresses {
@@ -794,11 +814,6 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		} else if config.region != serverEntry.Region {
 			return nil, errors.Tracef("unsupported multiple Region values")
 		}
-	}
-
-	config.runningProtocols = []string{}
-	for tunnelProtocol := range config.TunnelProtocolPorts {
-		config.runningProtocols = append(config.runningProtocols, tunnelProtocol)
 	}
 
 	return &config, nil
