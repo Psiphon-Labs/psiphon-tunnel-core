@@ -303,7 +303,8 @@ func WaitForNetworkConnectivity(
 	connectivityChecker NetworkConnectivityChecker,
 	additionalConditionChecker func() bool) bool {
 
-	if connectivityChecker == nil || connectivityChecker.HasNetworkConnectivity() == 1 {
+	if (connectivityChecker == nil || connectivityChecker.HasNetworkConnectivity() == 1) &&
+		(additionalConditionChecker == nil || additionalConditionChecker()) {
 		return true
 	}
 
@@ -313,7 +314,7 @@ func WaitForNetworkConnectivity(
 	defer ticker.Stop()
 
 	for {
-		if connectivityChecker.HasNetworkConnectivity() == 1 &&
+		if (connectivityChecker == nil || connectivityChecker.HasNetworkConnectivity() == 1) &&
 			(additionalConditionChecker == nil || additionalConditionChecker()) {
 			return true
 		}
