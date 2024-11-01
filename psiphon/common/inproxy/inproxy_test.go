@@ -91,6 +91,9 @@ func runTestInproxy(doMustUpgrade bool) error {
 	testNewTacticsTag := "new-tactics-tag"
 	testUnchangedTacticsPayload := []byte(prng.HexString(100))
 
+	currentNetworkCtx, currentNetworkCancelFunc := context.WithCancel(context.Background())
+	defer currentNetworkCancelFunc()
+
 	// TODO: test port mapping
 
 	stunServerAddressSucceededCount := int32(0)
@@ -429,6 +432,10 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 			WaitForNetworkConnectivity: func() bool {
 				return true
+			},
+
+			GetCurrentNetworkContext: func() context.Context {
+				return currentNetworkCtx
 			},
 
 			GetBrokerClient: func() (*BrokerClient, error) {

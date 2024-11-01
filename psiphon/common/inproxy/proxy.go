@@ -87,6 +87,14 @@ type ProxyConfig struct {
 	// there is network connectivity, and false for shutdown.
 	WaitForNetworkConnectivity func() bool
 
+	// GetCurrentNetworkContext is a callback that returns a context tied to
+	// the lifetime of the host's current active network interface. If the
+	// active network changes, the previous context returned by
+	// GetCurrentNetworkContext should cancel. This context is used to
+	// immediately cancel/close individual connections when the active
+	// network changes.
+	GetCurrentNetworkContext func() context.Context
+
 	// GetBrokerClient provides a BrokerClient which the proxy will use for
 	// making broker requests. If GetBrokerClient returns a shared
 	// BrokerClient instance, the BrokerClient must support multiple,
@@ -505,6 +513,14 @@ func (p *Proxy) proxyOneClient(
 	ctx context.Context,
 	logAnnounce func() bool,
 	signalAnnounceDone func()) (bool, error) {
+
+	// Cancel/close this connection immediately if the network changes.
+	if p.config.GetCurrentNetworkContext != nil {
+		var cancelFunc context.CancelFunc
+		ctx, cancelFunc = common.MergeContextCancel(
+			ctx, p.config.GetCurrentNetworkContext())
+		defer cancelFunc()
+	}
 
 	// Do not trigger back-off unless the proxy successfully announces and
 	// only then performs poorly.

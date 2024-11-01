@@ -208,7 +208,9 @@ public class PsiphonTunnel {
             @Override
             public void onChanged() {
                 try {
-                    reconnectPsiphon();
+                    // networkChanged initiates a reset of all open network
+                    // connections, including a tunnel reconnect.
+                    Psi.networkChanged();
                 } catch (Exception e) {
                     mHostService.onDiagnosticMessage("reconnect error: " + e);
                 }
