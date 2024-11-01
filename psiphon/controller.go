@@ -3109,7 +3109,7 @@ func (controller *Controller) inproxyGetProxyBrokerClient() (*inproxy.BrokerClie
 	return brokerClient, nil
 }
 
-func (controller *Controller) inproxyGetProxyAPIParameters() (
+func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParameters bool) (
 	common.APIParameters, string, error) {
 
 	// TODO: include broker fronting dial parameters to be logged by the
@@ -3130,10 +3130,12 @@ func (controller *Controller) inproxyGetProxyAPIParameters() (
 
 	networkID := controller.config.GetNetworkID()
 
-	err := tactics.SetTacticsAPIParameters(
-		GetTacticsStorer(controller.config), networkID, params)
-	if err != nil {
-		return nil, "", errors.Trace(err)
+	if includeTacticsParameters {
+		err := tactics.SetTacticsAPIParameters(
+			GetTacticsStorer(controller.config), networkID, params)
+		if err != nil {
+			return nil, "", errors.Trace(err)
+		}
 	}
 
 	return params, networkID, nil
