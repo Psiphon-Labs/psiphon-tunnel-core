@@ -171,7 +171,7 @@ func obfuscateSessionPacket(
 
 	// Initiators add a timestamp within the obfuscated packet. The responder
 	// uses this value to discard potentially replayed packets which are
-	// outside the time range of the reponder's anti-replay history.
+	// outside the time range of the responder's anti-replay history.
 
 	// TODO: add a consistent (per-session), random offset to timestamps for
 	// privacy?

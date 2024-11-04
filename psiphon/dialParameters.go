@@ -1099,7 +1099,7 @@ func MakeDialParameters(
 			isFronted := protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol)
 
 			params, err := makeHTTPTransformerParameters(
-				config.GetParameters().Get(), serverEntry.FrontingProviderID, isFronted)
+				p, serverEntry.FrontingProviderID, isFronted)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -1124,8 +1124,18 @@ func MakeDialParameters(
 		// MakeDialParameters, such as in selectProtocol during iteration,
 		// checking here uses the network ID obtained in MakeDialParameters,
 		// and the logged warning is useful for diagnostics.
-		if !IsInproxyCompatibleNetworkType(dialParams.NetworkID) {
-			return nil, errors.TraceNew("inproxy protocols skipped on incompatible network")
+		//
+		// This check is skipped when in-proxy protocols must be used.
+		if !config.IsInproxyClientPersonalPairingMode() &&
+			!p.TunnelProtocols(parameters.LimitTunnelProtocols).IsOnlyInproxyTunnelProtocols() {
+
+			incompatibleNetworkTypes := p.Strings(parameters.InproxyClientIncompatibleNetworkTypes)
+			compatibleNetwork := !common.Contains(
+				incompatibleNetworkTypes,
+				GetNetworkType(dialParams.NetworkID))
+			if !compatibleNetwork {
+				return nil, errors.TraceNew("inproxy protocols skipped on incompatible network")
+			}
 		}
 
 		// inproxyDialInitialized indicates that the inproxy dial was wired

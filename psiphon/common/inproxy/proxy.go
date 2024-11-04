@@ -101,7 +101,8 @@ type ProxyConfig struct {
 	// application and build version information. GetBaseAPIParameters also
 	// returns the network ID, corresponding to the parameters, to be used in
 	// tactics logic; the network ID is not sent to the broker.
-	GetBaseAPIParameters func() (common.APIParameters, string, error)
+	GetBaseAPIParameters func(includeTacticsParameters bool) (
+		common.APIParameters, string, error)
 
 	// MakeWebRTCDialCoordinator provides a WebRTCDialCoordinator which
 	// specifies WebRTC-related dial parameters, including selected STUN
@@ -567,6 +568,10 @@ func (p *Proxy) proxyOneClient(
 
 	brokerCoordinator := brokerClient.GetBrokerDialCoordinator()
 
+	// Only the first worker, which has signalAnnounceDone configured, checks
+	// for tactics.
+	checkTactics := signalAnnounceDone != nil
+
 	// Get the base Psiphon API parameters and additional proxy metrics,
 	// including performance information, which is sent to the broker in the
 	// proxy announcment.
@@ -578,7 +583,7 @@ func (p *Proxy) proxyOneClient(
 	// with the original network ID.
 
 	metrics, tacticsNetworkID, err := p.getMetrics(
-		brokerCoordinator, webRTCCoordinator)
+		checkTactics, brokerCoordinator, webRTCCoordinator)
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}
@@ -623,10 +628,6 @@ func (p *Proxy) proxyOneClient(
 		}
 	}
 	p.nextAnnounceMutex.Unlock()
-
-	// Only the first worker, which has signalAnnounceDone configured, checks
-	// for tactics.
-	checkTactics := signalAnnounceDone != nil
 
 	// A proxy ID is implicitly sent with requests; it's the proxy's session
 	// public key.
@@ -983,13 +984,15 @@ func (p *Proxy) proxyOneClient(
 }
 
 func (p *Proxy) getMetrics(
+	includeTacticsParameters bool,
 	brokerCoordinator BrokerDialCoordinator,
 	webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetrics, string, error) {
 
 	// tacticsNetworkID records the exact network ID that corresponds to the
 	// tactics tag sent in the base parameters, and is used when applying any
 	// new tactics returned by the broker.
-	baseParams, tacticsNetworkID, err := p.config.GetBaseAPIParameters()
+	baseParams, tacticsNetworkID, err := p.config.GetBaseAPIParameters(
+		includeTacticsParameters)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}

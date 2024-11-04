@@ -435,7 +435,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 				return brokerClient, nil
 			},
 
-			GetBaseAPIParameters: func() (common.APIParameters, string, error) {
+			GetBaseAPIParameters: func(bool) (common.APIParameters, string, error) {
 				return baseAPIParameters, tacticsNetworkID, nil
 			},
 

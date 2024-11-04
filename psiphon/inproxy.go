@@ -180,7 +180,7 @@ func (b *InproxyBrokerClientManager) resetBrokerClientOnNoMatch(
 	defer p.Close()
 
 	probability := parameters.InproxyClientNoMatchFailoverProbability
-	if b.config.IsInproxyPersonalPairingMode() {
+	if b.config.IsInproxyClientPersonalPairingMode() {
 		probability = parameters.InproxyClientNoMatchFailoverPersonalProbability
 	}
 	if !p.WeightedCoinFlip(probability) {
@@ -531,7 +531,7 @@ func NewInproxyBrokerClientInstance(
 		replayUpdateFrequency:         p.Duration(parameters.InproxyReplayBrokerUpdateFrequency),
 	}
 
-	if isProxy && !config.IsInproxyPersonalPairingMode() {
+	if isProxy && !config.IsInproxyProxyPersonalPairingMode() {
 		// This retry is applied only for proxies and only in common pairing
 		// mode. See comment in BrokerClientRoundTripperFailed.
 		b.retryOnFailedPeriod = p.Duration(parameters.InproxyProxyOnBrokerClientFailedRetryPeriod)
@@ -596,7 +596,7 @@ func getInproxyBrokerSpecs(
 	isProxy bool) parameters.InproxyBrokerSpecsValue {
 
 	if isProxy {
-		if config.IsInproxyPersonalPairingMode() {
+		if config.IsInproxyProxyPersonalPairingMode() {
 			return p.InproxyBrokerSpecs(
 				parameters.InproxyProxyPersonalPairingBrokerSpecs,
 				parameters.InproxyPersonalPairingBrokerSpecs,
@@ -608,7 +608,7 @@ func getInproxyBrokerSpecs(
 				parameters.InproxyBrokerSpecs)
 		}
 	} else {
-		if config.IsInproxyPersonalPairingMode() {
+		if config.IsInproxyClientPersonalPairingMode() {
 			return p.InproxyBrokerSpecs(
 				parameters.InproxyClientPersonalPairingBrokerSpecs,
 				parameters.InproxyPersonalPairingBrokerSpecs,
@@ -915,7 +915,7 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 	// briefly unavailable.
 
 	if b.brokerClientManager.isProxy &&
-		!b.config.IsInproxyPersonalPairingMode() &&
+		!b.config.IsInproxyProxyPersonalPairingMode() &&
 		b.retryOnFailedPeriod > 0 &&
 		!b.lastSuccess.IsZero() &&
 		time.Since(b.lastSuccess) <= b.retryOnFailedPeriod {
