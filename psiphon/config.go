@@ -1039,6 +1039,8 @@ type Config struct {
 	InproxyClientNoMatchFailoverPersonalProbability         *float64
 	InproxyFrontingProviderClientMaxRequestTimeouts         map[string]string
 	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int
+	InproxyProxyIncompatibleNetworkTypes                    []string
+	InproxyClientIncompatibleNetworkTypes                   []string
 
 	InproxySkipAwaitFullyConnected  bool
 	InproxyEnableWebRTCDebugLogging bool
@@ -1805,11 +1807,18 @@ func (config *Config) SetSignalComponentFailure(signalComponentFailure func()) {
 	config.signalComponentFailure.Store(signalComponentFailure)
 }
 
-// IsInproxyPersonalPairingMode indicates that the client is in in-proxy
+// IsInproxyClientPersonalPairingMode indicates that the client is in in-proxy
 // personal pairing mode, where connections are made only through in-proxy
 // proxies with the corresponding personal compartment ID.
-func (config *Config) IsInproxyPersonalPairingMode() bool {
+func (config *Config) IsInproxyClientPersonalPairingMode() bool {
 	return len(config.InproxyClientPersonalCompartmentID) > 0
+}
+
+// IsInproxyProxyPersonalPairingMode indicates that the proxy is in in-proxy
+// personal pairing mode, where connections are made only with in-proxy
+// clients with the corresponding personal compartment ID.
+func (config *Config) IsInproxyProxyPersonalPairingMode() bool {
+	return len(config.InproxyProxyPersonalCompartmentID) > 0
 }
 
 // OnInproxyMustUpgrade is invoked when the in-proxy broker returns the
@@ -1823,7 +1832,7 @@ func (config *Config) OnInproxyMustUpgrade() {
 	// protocols; this is another case where in-proxy functionality is
 	// required.
 
-	if config.InproxyEnableProxy || config.IsInproxyPersonalPairingMode() {
+	if config.InproxyEnableProxy || config.IsInproxyClientPersonalPairingMode() {
 		if atomic.CompareAndSwapInt32(&config.inproxyMustUpgradePosted, 0, 1) {
 			NoticeInproxyMustUpgrade()
 		}
@@ -2690,6 +2699,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds != nil {
 		applyParameters[parameters.InproxyProxyOnBrokerClientFailedRetryPeriod] = fmt.Sprintf("%dms", *config.InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds)
+	}
+
+	if len(config.InproxyProxyIncompatibleNetworkTypes) > 0 {
+		applyParameters[parameters.InproxyProxyIncompatibleNetworkTypes] = config.InproxyProxyIncompatibleNetworkTypes
+	}
+
+	if len(config.InproxyClientIncompatibleNetworkTypes) > 0 {
+		applyParameters[parameters.InproxyClientIncompatibleNetworkTypes] = config.InproxyClientIncompatibleNetworkTypes
 	}
 
 	// When adding new config dial parameters that may override tactics, also

@@ -299,13 +299,3 @@ func GetNetworkType(networkID string) string {
 	}
 	return "UNKNOWN"
 }
-
-// IsInproxyCompatibleNetworkType indicates if the network type for the given
-// network ID is compatible with in-proxy operation.
-func IsInproxyCompatibleNetworkType(networkID string) bool {
-
-	// When the network type is "VPN", the outer client (or MobileLibrary) has
-	// detected that some other, non-Psiphon VPN is active. In this case,
-	// most in-proxy operations are expected to fail.
-	return GetNetworkType(networkID) != "VPN"
-}
