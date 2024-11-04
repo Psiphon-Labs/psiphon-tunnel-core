@@ -1612,7 +1612,7 @@ func (p *protocolSelectionConstraints) selectProtocol(
 	//
 	// TODO: replace token on fast failure that doesn't reach the broker?
 
-	if p.config.IsInproxyPersonalPairingMode() ||
+	if p.config.IsInproxyClientPersonalPairingMode() ||
 		p.getLimitTunnelProtocols(connectTunnelCount).IsOnlyInproxyTunnelProtocols() {
 
 		// Check for missing in-proxy broker request requirements before
@@ -1625,7 +1625,7 @@ func (p *protocolSelectionConstraints) selectProtocol(
 			NoticeInfo("in-proxy protocol selection failed: no broker specs")
 			return "", 0, false
 		}
-		if !p.config.IsInproxyPersonalPairingMode() &&
+		if !p.config.IsInproxyClientPersonalPairingMode() &&
 			!haveInproxyCommonCompartmentIDs(p.config) {
 			NoticeInfo("in-proxy protocol selection failed: no common compartment IDs")
 			return "", 0, false
@@ -1897,7 +1897,7 @@ func (controller *Controller) launchEstablishing() {
 	// corresponding personal compartment ID, so non-in-proxy tunnel
 	// protocols are disabled.
 
-	if controller.config.IsInproxyPersonalPairingMode() {
+	if controller.config.IsInproxyClientPersonalPairingMode() {
 
 		if len(controller.protocolSelectionConstraints.initialLimitTunnelProtocols) > 0 {
 			controller.protocolSelectionConstraints.initialLimitTunnelProtocols =
@@ -1928,7 +1928,7 @@ func (controller *Controller) launchEstablishing() {
 	// announcement consumption for personal proxies.
 
 	var workerPoolSize int
-	if controller.config.IsInproxyPersonalPairingMode() {
+	if controller.config.IsInproxyClientPersonalPairingMode() {
 		workerPoolSize = p.Int(parameters.InproxyPersonalPairingConnectionWorkerPoolSize)
 	} else {
 		workerPoolSize = p.Int(parameters.ConnectionWorkerPoolSize)
@@ -2360,7 +2360,7 @@ loop:
 				controller.establishConnectTunnelCount).IsOnlyInproxyTunnelProtocols()
 			controller.concurrentEstablishTunnelsMutex.Unlock()
 
-			if limitInproxyOnly || controller.config.IsInproxyPersonalPairingMode() {
+			if limitInproxyOnly || controller.config.IsInproxyClientPersonalPairingMode() {
 
 				// Simply sleep and poll for any imported server entries;
 				// perform one sleep after HasServerEntries, in order to give
@@ -2562,7 +2562,7 @@ loop:
 			// tuning/limiting in-proxy usage independent of
 			// LimitTunnelProtocol targeting.
 
-			onlyInproxy := controller.config.IsInproxyPersonalPairingMode()
+			onlyInproxy := controller.config.IsInproxyClientPersonalPairingMode()
 			includeInproxy := onlyInproxy || prng.FlipWeightedCoin(inproxySelectionProbability)
 
 			selectedProtocol, rateLimitDelay, ok := controller.protocolSelectionConstraints.selectProtocol(
@@ -3079,16 +3079,28 @@ func (controller *Controller) inproxyAwaitProxyBrokerSpecs() bool {
 
 func (controller *Controller) inproxyWaitForNetworkConnectivity() bool {
 
-	// Pause announcing proxies when currently running on an incompatible
-	// network, such as a non-Psiphon VPN.
-	emitted := false
-	isCompatibleNetwork := func() bool {
-		compatibleNetwork := IsInproxyCompatibleNetworkType(controller.config.GetNetworkID())
-		if !compatibleNetwork && !emitted {
-			NoticeInfo("inproxy proxy: waiting due to incompatible network")
-			emitted = true
+	var isCompatibleNetwork func() bool
+	emittedIncompatibleNetworkNotice := false
+
+	if !controller.config.IsInproxyProxyPersonalPairingMode() {
+
+		// Pause announcing proxies when currently running on an incompatible
+		// network, such as a non-Psiphon VPN.
+
+		p := controller.config.GetParameters().Get()
+		incompatibleNetworkTypes := p.Strings(parameters.InproxyProxyIncompatibleNetworkTypes)
+		p.Close()
+
+		isCompatibleNetwork = func() bool {
+			compatibleNetwork := !common.Contains(
+				incompatibleNetworkTypes,
+				GetNetworkType(controller.config.GetNetworkID()))
+			if !compatibleNetwork && !emittedIncompatibleNetworkNotice {
+				NoticeInfo("inproxy proxy: waiting due to incompatible network")
+				emittedIncompatibleNetworkNotice = true
+			}
+			return compatibleNetwork
 		}
-		return compatibleNetwork
 	}
 
 	return WaitForNetworkConnectivity(
@@ -3109,7 +3121,7 @@ func (controller *Controller) inproxyGetProxyBrokerClient() (*inproxy.BrokerClie
 	return brokerClient, nil
 }
 
-func (controller *Controller) inproxyGetProxyAPIParameters() (
+func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParameters bool) (
 	common.APIParameters, string, error) {
 
 	// TODO: include broker fronting dial parameters to be logged by the
@@ -3130,10 +3142,12 @@ func (controller *Controller) inproxyGetProxyAPIParameters() (
 
 	networkID := controller.config.GetNetworkID()
 
-	err := tactics.SetTacticsAPIParameters(
-		GetTacticsStorer(controller.config), networkID, params)
-	if err != nil {
-		return nil, "", errors.Trace(err)
+	if includeTacticsParameters {
+		err := tactics.SetTacticsAPIParameters(
+			GetTacticsStorer(controller.config), networkID, params)
+		if err != nil {
+			return nil, "", errors.Trace(err)
+		}
 	}
 
 	return params, networkID, nil
