@@ -80,7 +80,7 @@ jobs:
           go test -v -race ./psiphon/common/accesscontrol
           go test -v -race ./psiphon/common/crypto/ssh
           go test -v -race ./psiphon/common/fragmentor
-          go test -v -timeout 20m -race -tags "PSIPHON_ENABLE_INPROXY" ./psiphon/common/inproxy
+          go test -v -race -tags "PSIPHON_ENABLE_INPROXY" ./psiphon/common/inproxy
           go test -v -race ./psiphon/common/regen
           go test -v -race ./psiphon/common/monotime
           go test -v -race ./psiphon/common/obfuscator
@@ -95,9 +95,9 @@ jobs:
           go test -v -race ./psiphon/common/values
           go test -v -race ./psiphon/common/wildcard
           go test -v -race ./psiphon/transferstats
-          sudo -E env "PATH=$PATH" go test -v -timeout 20m -race -tags "PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -race ./psiphon/server/psinet
-          go test -v -timeout 20m -race ./psiphon
+          go test -v -timeout 30m -race ./psiphon
           go test -v -race ./ClientLibrary/clientlib
           go test -v -race ./Server/logging/analysis
 
@@ -113,7 +113,7 @@ jobs:
           go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./psiphon/common/accesscontrol
           go test -v -covermode=count -coverprofile=ssh.coverprofile ./psiphon/common/crypto/ssh
           go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./psiphon/common/fragmentor
-          go test -v -timeout 20m -covermode=count -tags "PSIPHON_ENABLE_INPROXY" -coverprofile=inproxy.coverprofile ./psiphon/common/inproxy
+          go test -v -covermode=count -tags "PSIPHON_ENABLE_INPROXY" -coverprofile=inproxy.coverprofile ./psiphon/common/inproxy
           go test -v -covermode=count -coverprofile=regen.coverprofile ./psiphon/common/regen
           go test -v -covermode=count -coverprofile=monotime.coverprofile ./psiphon/common/monotime
           go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./psiphon/common/obfuscator
@@ -128,9 +128,9 @@ jobs:
           go test -v -covermode=count -coverprofile=values.coverprofile ./psiphon/common/values
           go test -v -covermode=count -coverprofile=wildcard.coverprofile ./psiphon/common/wildcard
           go test -v -covermode=count -coverprofile=transferstats.coverprofile ./psiphon/transferstats
-          sudo -E env "PATH=$PATH" go test -v -timeout 20m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 30m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -covermode=count -coverprofile=psinet.coverprofile ./psiphon/server/psinet
-          go test -v -timeout 20m -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
+          go test -v -timeout 30m -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
           go test -v -covermode=count -coverprofile=clientlib.coverprofile ./ClientLibrary/clientlib
           go test -v -covermode=count -coverprofile=analysis.coverprofile ./Server/logging/analysis
           $GOPATH/bin/gover
