@@ -681,7 +681,11 @@ var (
 	testUserAgents                       = []string{"ua1", "ua2", "ua3"}
 	testNetworkType                      = "WIFI"
 	testCustomHostNameRegex              = `[a-z0-9]{5,10}\.example\.org`
+	testClientVersion                    = 1
+	testClientPlatform                   = "Android_10_com.test.app"
 	testClientFeatures                   = []string{"feature 1", "feature 2"}
+	testDeviceRegion                     = "US"
+	testDeviceLocation                   = "gzzzz"
 	testDisallowedTrafficAlertActionURLs = []string{"https://example.org/disallowed"}
 
 	// A steering IP must not be a bogon; this address is not dialed.
@@ -1229,13 +1233,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	clientConfigJSON := fmt.Sprintf(`
     {
-        "ClientPlatform" : "Android_10_com.test.app",
-        "ClientVersion" : "0",
+        "ClientVersion" : "%d",
+        "ClientPlatform" : "%s",
         "ClientFeatures" : %s,
         "SponsorId" : "0000000000000000",
         "PropagationChannelId" : "0000000000000000",
-        "DeviceLocation" : "gzzzz",
-        "DeviceRegion" : "US",
+        "DeviceRegion" : "%s",
+        "DeviceLocation" : "%s",
         "DisableRemoteServerListFetcher" : true,
         "EstablishTunnelPausePeriodSeconds" : 1,
         "ConnectionWorkerPoolSize" : %d,
@@ -1243,7 +1247,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
         %s
         %s
     }`,
+		testClientVersion,
+		testClientPlatform,
 		string(testClientFeaturesJSON),
+		testDeviceRegion,
+		testDeviceLocation,
 		numTunnels,
 		clientTunnelProtocol,
 		jsonLimitTLSProfiles,
@@ -1809,6 +1817,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	case logFields := <-serverTunnelLog:
 		err := checkExpectedServerTunnelLogFields(
 			runConfig,
+			propagationChannelID,
+			sponsorID,
 			doClientTactics,
 			expectClientBPFField,
 			expectServerBPFField,
@@ -2064,6 +2074,8 @@ func (c *networkConnectivityChecker) HasNetworkConnectivity() int {
 
 func checkExpectedServerTunnelLogFields(
 	runConfig *runServerConfig,
+	expectPropagationChannelID string,
+	expectSponsorID string,
 	expectAppliedTacticsTag bool,
 	expectClientBPFField bool,
 	expectServerBPFField bool,
@@ -2095,6 +2107,7 @@ func checkExpectedServerTunnelLogFields(
 		"establishment_duration",
 		"propagation_channel_id",
 		"sponsor_id",
+		"client_version",
 		"client_platform",
 		"client_features",
 		"relay_protocol",
@@ -2131,6 +2144,32 @@ func checkExpectedServerTunnelLogFields(
 		return fmt.Errorf("unexpected host_id '%s'", fields["host_id"])
 	}
 
+	if fields["propagation_channel_id"].(string) != expectPropagationChannelID {
+		return fmt.Errorf("unexpected propagation_channel_id '%s'", fields["propagation_channel_id"])
+	}
+
+	if fields["sponsor_id"].(string) != expectSponsorID {
+		return fmt.Errorf("unexpected sponsor_id '%s'", fields["sponsor_id"])
+	}
+
+	if int(fields["client_version"].(float64)) != testClientVersion {
+		return fmt.Errorf("unexpected client_version '%s'", fields["client_version"])
+	}
+
+	if fields["client_platform"].(string) != testClientPlatform {
+		return fmt.Errorf("unexpected client_platform '%s'", fields["client_platform"])
+	}
+
+	clientFeatures := fields["client_features"].([]interface{})
+	if len(clientFeatures) != len(testClientFeatures) {
+		return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
+	}
+	for i, feature := range testClientFeatures {
+		if clientFeatures[i].(string) != feature {
+			return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
+		}
+	}
+
 	tunnelProtocol := runConfig.tunnelProtocol
 	if runConfig.clientTunnelProtocol != "" {
 		// In cases such as UNFRONTED-HTTPS-OSSH/TLS-OSSH demux,
@@ -2145,16 +2184,6 @@ func checkExpectedServerTunnelLogFields(
 
 	if !common.Contains(testSSHClientVersions, fields["ssh_client_version"].(string)) {
 		return fmt.Errorf("unexpected ssh_client_version '%s'", fields["ssh_client_version"])
-	}
-
-	clientFeatures := fields["client_features"].([]interface{})
-	if len(clientFeatures) != len(testClientFeatures) {
-		return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
-	}
-	for i, feature := range testClientFeatures {
-		if clientFeatures[i].(string) != feature {
-			return fmt.Errorf("unexpected client_features '%s'", fields["client_features"])
-		}
 	}
 
 	if fields["network_type"].(string) != testNetworkType {
@@ -2430,8 +2459,29 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_connection_id",
 			"inproxy_proxy_id",
 			"inproxy_matched_common_compartments",
-			"inproxy_proxy_nat_type",
 			"inproxy_client_nat_type",
+
+			"inproxy_proxy_propagation_channel_id",
+			"inproxy_proxy_sponsor_id",
+			"inproxy_proxy_client_version",
+			"inproxy_proxy_client_platform",
+			"inproxy_proxy_client_features",
+			"inproxy_proxy_device_region",
+			"inproxy_proxy_device_location",
+			"inproxy_proxy_network_type",
+			"inproxy_proxy_proxy_protocol_version",
+			"inproxy_proxy_nat_type",
+			"inproxy_proxy_max_clients",
+			"inproxy_proxy_connecting_clients",
+			"inproxy_proxy_connected_clients",
+			"inproxy_proxy_limit_upstream_bytes_per_second",
+			"inproxy_proxy_limit_downstream_bytes_per_second",
+			"inproxy_proxy_peak_upstream_bytes_per_second",
+			"inproxy_proxy_peak_downstream_bytes_per_second",
+
+			// These ProxyMetrics fields are not populated in this test:
+			// "inproxy_proxy_client_build_rev",
+			// "inproxy_proxy_port_mapping_types",
 
 			// Fields sent by the client
 
@@ -2464,6 +2514,52 @@ func checkExpectedServerTunnelLogFields(
 
 		if fields["inproxy_broker_fronting_provider_id"].(string) != inproxyTestConfig.brokerFrontingProviderID {
 			return fmt.Errorf("unexpected inproxy_broker_fronting_provider_id '%s'", fields["inproxy_broker_fronting_provider_id"])
+		}
+
+		// Check some fields from ProxyMetrics. Since the proxy and client are
+		// the same tunnel core instance, fields such as session_id are the
+		// same for both the client and the proxy.
+
+		if fields["inproxy_proxy_session_id"].(string) != fields["session_id"].(string) {
+			return fmt.Errorf("unexpected inproxy_proxy_session_id '%s'", fields["session_id"])
+		}
+
+		if fields["inproxy_proxy_propagation_channel_id"].(string) != expectPropagationChannelID {
+			return fmt.Errorf("unexpected inproxy_proxy_propagation_channel_id '%s'", fields["inproxy_proxy_propagation_channel_id"])
+		}
+
+		if fields["inproxy_proxy_sponsor_id"].(string) != expectSponsorID {
+			return fmt.Errorf("unexpected inproxy_proxy_sponsor_id '%s'", fields["inproxy_proxy_sponsor_id"])
+		}
+
+		if int(fields["inproxy_proxy_client_version"].(float64)) != testClientVersion {
+			return fmt.Errorf("unexpected inproxy_proxy_client_version '%s'", fields["inproxy_proxy_client_version"])
+		}
+
+		if fields["inproxy_proxy_client_platform"].(string) != testClientPlatform {
+			return fmt.Errorf("unexpected inproxy_proxy_client_platform '%s'", fields["inproxy_proxy_client_platform"])
+		}
+
+		clientFeatures := fields["inproxy_proxy_client_features"].([]interface{})
+		if len(clientFeatures) != len(testClientFeatures) {
+			return fmt.Errorf("unexpected inproxy_proxy_client_features '%s'", fields["inproxy_proxy_client_features"])
+		}
+		for i, feature := range testClientFeatures {
+			if clientFeatures[i].(string) != feature {
+				return fmt.Errorf("unexpected inproxy_proxy_client_features '%s'", fields["inproxy_proxy_client_features"])
+			}
+		}
+
+		if fields["inproxy_proxy_device_region"].(string) != testDeviceRegion {
+			return fmt.Errorf("unexpected inproxy_proxy_device_region '%s'", fields["inproxy_proxy_device_region"])
+		}
+
+		if fields["inproxy_proxy_device_location"].(string) != testDeviceLocation {
+			return fmt.Errorf("unexpected inproxy_proxy_device_location '%s'", fields["inproxy_proxy_device_location"])
+		}
+
+		if fields["inproxy_proxy_network_type"].(string) != testNetworkType {
+			return fmt.Errorf("unexpected inproxy_proxy_network_type '%s'", fields["inproxy_proxy_network_type"])
 		}
 	}
 

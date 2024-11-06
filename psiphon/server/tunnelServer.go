@@ -455,7 +455,12 @@ func newSSHServer(
 		// The expected broker public keys are set in reloadTactics directly
 		// below, so none are set here.
 		inproxyBrokerSessions, err = inproxy.NewServerBrokerSessions(
-			inproxyPrivateKey, inproxyObfuscationSecret, nil)
+			inproxyPrivateKey,
+			inproxyObfuscationSecret,
+			nil,
+			getInproxyBrokerAPIParameterValidator(support.Config),
+			getInproxyBrokerAPIParameterLogFieldFormatter(),
+			"inproxy_proxy_") // Prefix for proxy metrics log fields in server_tunnel
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -3304,6 +3309,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	logFields := getRequestLogFields(
 		"server_tunnel",
+		"",
 		sshClient.sessionID,
 		sshClient.clientGeoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
@@ -3472,6 +3478,7 @@ func (sshClient *sshClient) logBlocklistHits(IP net.IP, domain string, tags []Bl
 
 	logFields := getRequestLogFields(
 		"server_blocklist_hit",
+		"",
 		sshClient.sessionID,
 		sshClient.clientGeoIPData,
 		sshClient.handshakeState.authorizedAccessTypes,
