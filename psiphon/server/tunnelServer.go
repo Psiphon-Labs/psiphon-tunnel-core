@@ -3317,7 +3317,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		serverTunnelStatParams)
 
 	if sshClient.isInproxyTunnelProtocol {
-		sshClient.peerGeoIPData.SetLogFieldsWithPrefix("", "proxy", logFields)
+		sshClient.peerGeoIPData.SetLogFieldsWithPrefix("", "inproxy_proxy", logFields)
 		logFields.Add(
 			LogFields(sshClient.handshakeState.inproxyRelayLogFields))
 	}
