@@ -2596,12 +2596,11 @@ func checkExpectedServerTunnelLogFields(
 	}
 
 	for _, name := range []string{
-		"dest_bytes_asn",
-		"dest_bytes_up_tcp",
-		"dest_bytes_down_tcp",
-		"dest_bytes_up_udp",
-		"dest_bytes_down_udp",
-		"dest_bytes",
+		"asn_dest_bytes",
+		"asn_dest_bytes_up_tcp",
+		"asn_dest_bytes_down_tcp",
+		"asn_dest_bytes_up_udp",
+		"asn_dest_bytes_down_udp",
 	} {
 		if expectDestinationBytesFields && fields[name] == nil {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -2612,21 +2611,20 @@ func checkExpectedServerTunnelLogFields(
 	}
 
 	if expectDestinationBytesFields {
-		name := "dest_bytes_asn"
-		if fields[name].(string) != testGeoIPASN {
-			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
-		}
 		for _, pair := range [][]string{
-			{"dest_bytes_up_tcp", "bytes_up_tcp"},
-			{"dest_bytes_down_tcp", "bytes_down_tcp"},
-			{"dest_bytes_up_udp", "bytes_up_udp"},
-			{"dest_bytes_down_udp", "bytes_down_udp"},
-			{"dest_bytes", "bytes"},
+			{"asn_dest_bytes", "bytes"},
+			{"asn_dest_bytes_up_tcp", "bytes_up_tcp"},
+			{"asn_dest_bytes_down_tcp", "bytes_down_tcp"},
+			{"asn_dest_bytes_up_udp", "bytes_up_udp"},
+			{"asn_dest_bytes_down_udp", "bytes_down_udp"},
 		} {
-			value0 := int64(fields[pair[0]].(float64))
+			if _, ok := fields[pair[0]].(map[string]any)[testGeoIPASN].(float64); !ok {
+				return fmt.Errorf("missing field entry %s: '%v'", pair[0], testGeoIPASN)
+			}
+			value0 := int64(fields[pair[0]].(map[string]any)[testGeoIPASN].(float64))
 			value1 := int64(fields[pair[1]].(float64))
 			ok := value0 == value1
-			if pair[0] == "dest_bytes_up_udp" || pair[0] == "dest_bytes_down_udp" || pair[0] == "dest_bytes" {
+			if pair[0] == "asn_dest_bytes_up_udp" || pair[0] == "asn_dest_bytes_down_udp" || pair[0] == "asn_dest_bytes" {
 				// DNS requests are excluded from destination bytes counting
 				ok = value0 > 0 && value0 < value1
 			}
