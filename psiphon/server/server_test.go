@@ -619,7 +619,9 @@ func TestOmitProvider(t *testing.T) {
 func TestSteeringIP(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "FRONTED-MEEK-OSSH",
+			tunnelProtocol: "FRONTED-MEEK-OSSH",
+			// use a TLS profile that offers h2 in the ALPN
+			tlsProfile:           protocol.TLS_PROFILE_CHROME_102,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,

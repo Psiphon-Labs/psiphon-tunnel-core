@@ -158,6 +158,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -255,7 +256,7 @@ type Server struct {
 	apiParameterValidator common.APIParameterValidator
 
 	cachedTacticsData *lrucache.Cache
-	filterMatches     []bool
+	filterMatches     *sync.Pool
 }
 
 const (
@@ -468,6 +469,9 @@ func NewServer(
 				return errors.Trace(err)
 			}
 
+			// Server.ReloadableFile.RWMutex is the mutex for accessing
+			// these and other Server fields.
+
 			// Modify actual traffic rules only after validation
 			server.RequestPublicKey = newServer.RequestPublicKey
 			server.RequestPrivateKey = newServer.RequestPrivateKey
@@ -477,15 +481,23 @@ func NewServer(
 
 			// Any cached, merged tactics data is flushed when the
 			// configuration changes.
-			//
-			// A single filterMatches, used in getTactics, is allocated here
-			// to avoid allocating a slice per getTactics call.
-			//
-			// Server.ReloadableFile.RLock/RUnlock is the mutex for accessing
-			// these and other Server fields.
 
 			server.cachedTacticsData.Flush()
-			server.filterMatches = make([]bool, len(server.FilteredTactics))
+
+			// A pool of filterMatches, used in getTactics, is used to avoid
+			// allocating a slice for every getTactics call.
+			//
+			// A pointer to a slice is used with sync.Pool to avoid an
+			// allocation on Put, as would happen if passing in a slice
+			// instead of a pointer; see
+			// https://github.com/dominikh/go-tools/issues/1042#issuecomment-869064445
+
+			server.filterMatches = &sync.Pool{
+				New: func() any {
+					b := make([]bool, len(server.FilteredTactics))
+					return &b
+				},
+			}
 
 			server.initLookups()
 
@@ -874,8 +886,12 @@ func (server *Server) getTactics(
 	var aggregatedValues map[string]int
 	filterMatchCount := 0
 
-	// Use the preallocated slice to avoid an allocation per getTactics call.
-	filterMatches := server.filterMatches
+	// Use the filterMatches buffer pool to avoid an allocation per getTactics
+	// call.
+	b := server.filterMatches.Get().(*[]bool)
+	filterMatches := *b
+	clear(filterMatches)
+	defer server.filterMatches.Put(b)
 
 	for filterIndex, filteredTactics := range server.FilteredTactics {
 
