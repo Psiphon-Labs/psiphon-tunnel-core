@@ -35,7 +35,7 @@ import (
 const (
 	proxyAnnounceDelay           = 1 * time.Second
 	proxyAnnounceDelayJitter     = 0.5
-	proxyAnnounceMaxBackoffDelay = 1 * time.Hour
+	proxyAnnounceMaxBackoffDelay = 1 * time.Minute
 	proxyAnnounceLogSampleSize   = 2
 	proxyAnnounceLogSamplePeriod = 30 * time.Minute
 	proxyWebRTCAnswerTimeout     = 20 * time.Second
@@ -386,24 +386,6 @@ func (p *Proxy) proxyClients(
 
 		if err != nil && ctx.Err() == nil {
 
-			// Limitation: the lastErrMsg string comparison isn't compatible
-			// with errors with minor variations, such as "unexpected
-			// response status code %d after %v" from
-			// InproxyBrokerRoundTripper.RoundTrip, with a time duration in
-			// the second parameter.
-			errMsg := err.Error()
-			if lastErrMsg != errMsg {
-				logErrorsCount = proxyAnnounceLogSampleSize
-				lastErrMsg = errMsg
-			}
-			if logErrorsCount > 0 {
-				p.config.Logger.WithTraceFields(
-					common.LogFields{
-						"error": errMsg,
-					}).Error("proxy client failed")
-				logErrorsCount -= 1
-			}
-
 			// Apply a simple exponential backoff based on whether
 			// proxyOneClient either relayed client traffic or got no match,
 			// or encountered a failure.
@@ -428,6 +410,28 @@ func (p *Proxy) proxyClients(
 			}
 			if failureDelayFactor < 1<<20 {
 				failureDelayFactor *= 2
+			}
+
+			// Sample error log.
+			//
+			// Limitation: the lastErrMsg string comparison isn't compatible
+			// with errors with minor variations, such as "unexpected
+			// response status code %d after %v" from
+			// InproxyBrokerRoundTripper.RoundTrip, with a time duration in
+			// the second parameter.
+			errMsg := err.Error()
+			if lastErrMsg != errMsg {
+				logErrorsCount = proxyAnnounceLogSampleSize
+				lastErrMsg = errMsg
+			}
+			if logErrorsCount > 0 {
+				p.config.Logger.WithTraceFields(
+					common.LogFields{
+						"error":  errMsg,
+						"delay":  delay,
+						"jitter": jitter,
+					}).Error("proxy client failed")
+				logErrorsCount -= 1
 			}
 
 			common.SleepWithJitter(ctx, delay, jitter)
