@@ -1065,8 +1065,7 @@ func BenchmarkMatcherQueue(b *testing.B) {
 								NATType:                NATTypePortRestrictedCone,
 								PortMappingTypes:       []PortMappingType{},
 							},
-							ProxyID:              ID{},
-							ProxyProtocolVersion: ProxyProtocolVersion1,
+							ProxyID: ID{},
 						},
 						offerChan: make(chan *MatchOffer, 1),
 					}
@@ -1102,8 +1101,7 @@ func BenchmarkMatcherQueue(b *testing.B) {
 								NATType:                NATTypePortRestrictedCone,
 								PortMappingTypes:       []PortMappingType{},
 							},
-							ProxyID:              ID{},
-							ProxyProtocolVersion: ProxyProtocolVersion1,
+							ProxyID: ID{},
 						},
 						offerChan: make(chan *MatchOffer, 1),
 					}

@@ -202,6 +202,29 @@ func runTestInproxy(doMustUpgrade bool) error {
 		return errors.Trace(err)
 	}
 
+	// API parameter handlers
+
+	apiParameterValidator := func(params common.APIParameters) error {
+		if len(params) != len(baseAPIParameters) {
+			return errors.TraceNew("unexpected base API parameter count")
+		}
+		for name, value := range params {
+			if value.(string) != baseAPIParameters[name].(string) {
+				return errors.Tracef(
+					"unexpected base API parameter: %v: %v != %v",
+					name,
+					value.(string),
+					baseAPIParameters[name].(string))
+			}
+		}
+		return nil
+	}
+
+	apiParameterLogFieldFormatter := func(
+		_ string, _ common.GeoIPData, params common.APIParameters) common.LogFields {
+		return common.LogFields(params)
+	}
+
 	// Start broker
 
 	logger.WithTrace().Info("START BROKER")
@@ -231,26 +254,9 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 		CommonCompartmentIDs: testCommonCompartmentIDs,
 
-		APIParameterValidator: func(params common.APIParameters) error {
-			if len(params) != len(baseAPIParameters) {
-				return errors.TraceNew("unexpected base API parameter count")
-			}
-			for name, value := range params {
-				if value.(string) != baseAPIParameters[name].(string) {
-					return errors.Tracef(
-						"unexpected base API parameter: %v: %v != %v",
-						name,
-						value.(string),
-						baseAPIParameters[name].(string))
-				}
-			}
-			return nil
-		},
+		APIParameterValidator: apiParameterValidator,
 
-		APIParameterLogFieldFormatter: func(
-			geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
-			return common.LogFields(params)
-		},
+		APIParameterLogFieldFormatter: apiParameterLogFieldFormatter,
 
 		GetTacticsPayload: func(_ common.GeoIPData, _ common.APIParameters) ([]byte, string, error) {
 			// Exercise both new and unchanged tactics
@@ -297,7 +303,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 	// handler into the destination echo server)
 
 	serverSessions, err := NewServerBrokerSessions(
-		serverPrivateKey, serverRootObfuscationSecret, []SessionPublicKey{brokerPublicKey})
+		serverPrivateKey, serverRootObfuscationSecret, []SessionPublicKey{brokerPublicKey},
+		apiParameterValidator, apiParameterLogFieldFormatter, "")
 	if err != nil {
 		return errors.Trace(err)
 	}
