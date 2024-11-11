@@ -793,7 +793,7 @@ func SelectTLSProfile(
 	frontingProviderID string,
 	p parameters.ParametersAccessor) (tlsProfile, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
 
-	for {
+	for i := 0; i < 1000; i++ {
 		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err = selectTLSProfile(requireTLS12SessionTickets, isFronted, frontingProviderID, p)
 		if err != nil {
 			return "", "", nil, errors.Trace(err)
@@ -809,6 +809,7 @@ func SelectTLSProfile(
 
 		return
 	}
+	return "", "", nil, errors.TraceNew("Failed to select a TLS profile")
 }
 
 // selectTLSProfile is a helper that picks and returns a TLS profile at random
@@ -1011,14 +1012,13 @@ func getClientHelloVersion(
 
 	switch utlsClientHelloID {
 
-	// TODO! missing: iOS-13, iOS-14
-
 	case utls.HelloIOS_11_1, utls.HelloIOS_12_1,
 		utls.HelloChrome_58, utls.HelloChrome_62,
 		utls.HelloFirefox_55, utls.HelloFirefox_56:
 		return protocol.TLS_VERSION_12, nil
 
-	case utls.HelloChrome_70, utls.HelloChrome_72,
+	case utls.HelloIOS_13, utls.HelloIOS_14,
+		utls.HelloChrome_70, utls.HelloChrome_72,
 		utls.HelloChrome_83, utls.HelloChrome_96,
 		utls.HelloChrome_102, utls.HelloChrome_120,
 		utls.HelloChrome_120_PQ, utls.HelloChrome_106_Shuffle,
