@@ -1818,7 +1818,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		err := checkExpectedServerTunnelLogFields(
 			runConfig,
 			propagationChannelID,
-			sponsorID,
+			clientConfig.SponsorId,
 			doClientTactics,
 			expectClientBPFField,
 			expectServerBPFField,
