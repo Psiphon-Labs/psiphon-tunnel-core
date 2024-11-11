@@ -164,10 +164,10 @@ func (p *MatchProperties) IsPreferredNATMatch(
 
 // MatchAnnouncement is a proxy announcement to be queued for matching.
 type MatchAnnouncement struct {
-	Properties           MatchProperties
-	ProxyID              ID
-	ConnectionID         ID
-	ProxyProtocolVersion int32
+	Properties   MatchProperties
+	ProxyID      ID
+	ProxyMetrics *ProxyMetrics
+	ConnectionID ID
 }
 
 // MatchOffer is a client offer to be queued for matching.

@@ -1364,7 +1364,7 @@ func (server *Server) handleTacticsRequest(
 	}
 	// Log a metric.
 
-	logFields := server.logFieldFormatter(geoIPData, apiParams)
+	logFields := server.logFieldFormatter("", geoIPData, apiParams)
 
 	logFields[NEW_TACTICS_TAG_LOG_FIELD_NAME] = tacticsPayload.Tag
 	logFields[IS_TACTICS_REQUEST_LOG_FIELD_NAME] = true

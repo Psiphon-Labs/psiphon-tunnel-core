@@ -191,7 +191,8 @@ func TestTactics(t *testing.T) {
 	}
 
 	formatter := func(
-		geoIPData common.GeoIPData,
+		_ string,
+		_ common.GeoIPData,
 		apiParams common.APIParameters) common.LogFields {
 
 		return common.LogFields(apiParams)

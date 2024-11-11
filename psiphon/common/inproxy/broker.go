@@ -524,7 +524,7 @@ func (b *Broker) handleProxyAnnounce(
 	// Always log the outcome.
 	defer func() {
 		if logFields == nil {
-			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
+			logFields = b.config.APIParameterLogFieldFormatter("", geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-announce"
 		logFields["broker_id"] = b.brokerID
@@ -692,9 +692,9 @@ func (b *Broker) handleProxyAnnounce(
 				NATType:                announceRequest.Metrics.NATType,
 				PortMappingTypes:       announceRequest.Metrics.PortMappingTypes,
 			},
-			ProxyID:              initiatorID,
-			ConnectionID:         connectionID,
-			ProxyProtocolVersion: announceRequest.Metrics.ProxyProtocolVersion,
+			ProxyID:      initiatorID,
+			ProxyMetrics: announceRequest.Metrics,
+			ConnectionID: connectionID,
 		})
 	if err != nil {
 
@@ -813,7 +813,7 @@ func (b *Broker) handleClientOffer(
 	// Always log the outcome.
 	defer func() {
 		if logFields == nil {
-			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
+			logFields = b.config.APIParameterLogFieldFormatter("", geoIPData, nil)
 		}
 		logFields["broker_event"] = "client-offer"
 		logFields["broker_id"] = b.brokerID
@@ -1034,7 +1034,6 @@ func (b *Broker) handleClientOffer(
 	// sent through a secure session established between the broker and the
 	// server, relayed by the client.
 	//
-
 	// The first relay message will be embedded in the Psiphon handshake. The
 	// broker may already have an established session with the server. In
 	// this case, only only that initial message is required. The
@@ -1059,12 +1058,12 @@ func (b *Broker) handleClientOffer(
 			ConnectionID:                proxyAnswer.ConnectionID,
 			MatchedCommonCompartments:   matchedCommonCompartments,
 			MatchedPersonalCompartments: matchedPersonalCompartments,
-			ProxyNATType:                proxyMatchAnnouncement.Properties.NATType,
-			ProxyPortMappingTypes:       proxyMatchAnnouncement.Properties.PortMappingTypes,
 			ClientNATType:               clientMatchOffer.Properties.NATType,
 			ClientPortMappingTypes:      clientMatchOffer.Properties.PortMappingTypes,
 			ClientIP:                    clientIP,
 			ProxyIP:                     proxyAnswer.ProxyIP,
+			ProxyMetrics:                proxyMatchAnnouncement.ProxyMetrics,
+			// ProxyMetrics includes proxy NAT and port mapping types.
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1110,7 +1109,7 @@ func (b *Broker) handleProxyAnswer(
 	// Always log the outcome.
 	defer func() {
 		if logFields == nil {
-			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
+			logFields = b.config.APIParameterLogFieldFormatter("", geoIPData, nil)
 		}
 		logFields["broker_event"] = "proxy-answer"
 		logFields["broker_id"] = b.brokerID
@@ -1233,7 +1232,7 @@ func (b *Broker) handleClientRelayedPacket(
 	// Always log the outcome.
 	defer func() {
 		if logFields == nil {
-			logFields = b.config.APIParameterLogFieldFormatter(geoIPData, nil)
+			logFields = b.config.APIParameterLogFieldFormatter("", geoIPData, nil)
 		}
 		logFields["broker_event"] = "client-relayed-packet"
 		logFields["broker_id"] = b.brokerID
