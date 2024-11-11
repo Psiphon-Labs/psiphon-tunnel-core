@@ -793,7 +793,7 @@ func SelectTLSProfile(
 	frontingProviderID string,
 	p parameters.ParametersAccessor) (tlsProfile, tlsVersion string, randomizedTLSProfileSeed *prng.Seed, err error) {
 
-	for {
+	for i := 0; i < 1000; i++ {
 		tlsProfile, tlsVersion, randomizedTLSProfileSeed, err = selectTLSProfile(requireTLS12SessionTickets, isFronted, frontingProviderID, p)
 		if err != nil {
 			return "", "", nil, errors.Trace(err)
@@ -809,6 +809,7 @@ func SelectTLSProfile(
 
 		return
 	}
+	return "", "", nil, errors.TraceNew("Failed to select a TLS profile")
 }
 
 // selectTLSProfile is a helper that picks and returns a TLS profile at random
