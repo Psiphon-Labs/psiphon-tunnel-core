@@ -36,6 +36,10 @@ const MaxRelayRoundTrips = 10
 // server by the client.
 type ServerBrokerSessions struct {
 	sessions *ResponderSessions
+
+	proxyMetricsValidator common.APIParameterValidator
+	proxyMetricsFormatter common.APIParameterLogFieldFormatter
+	proxyMetricsPrefix    string
 }
 
 // NewServerBrokerSessions create a new ServerBrokerSessions, with the
@@ -44,7 +48,10 @@ type ServerBrokerSessions struct {
 func NewServerBrokerSessions(
 	serverPrivateKey SessionPrivateKey,
 	serverRootObfuscationSecret ObfuscationSecret,
-	brokerPublicKeys []SessionPublicKey) (*ServerBrokerSessions, error) {
+	brokerPublicKeys []SessionPublicKey,
+	proxyMetricsValidator common.APIParameterValidator,
+	proxyMetricsFormatter common.APIParameterLogFieldFormatter,
+	proxyMetricsPrefix string) (*ServerBrokerSessions, error) {
 
 	sessions, err := NewResponderSessionsForKnownInitiators(
 		serverPrivateKey, serverRootObfuscationSecret, brokerPublicKeys)
@@ -54,6 +61,10 @@ func NewServerBrokerSessions(
 
 	return &ServerBrokerSessions{
 		sessions: sessions,
+
+		proxyMetricsValidator: proxyMetricsValidator,
+		proxyMetricsFormatter: proxyMetricsFormatter,
+		proxyMetricsPrefix:    proxyMetricsPrefix,
 	}, nil
 }
 
@@ -125,27 +136,14 @@ func (s *ServerBrokerSessions) HandlePacket(
 			return nil, errors.Trace(err)
 		}
 
-		logFields, err := brokerReport.ValidateAndGetLogFields()
+		logFields, err := brokerReport.ValidateAndGetLogFields(
+			s.proxyMetricsValidator, s.proxyMetricsFormatter, s.proxyMetricsPrefix)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
 		// The initiatorID is the broker's public key.
 		logFields["inproxy_broker_id"] = initiatorID
-
-		logFields["inproxy_connection_id"] = brokerReport.ConnectionID
-		logFields["inproxy_proxy_id"] = brokerReport.ProxyID
-
-		// !matched_common_compartments implies a personal compartment ID match
-		logFields["inproxy_matched_common_compartments"] = brokerReport.MatchedCommonCompartments
-		logFields["inproxy_proxy_nat_type"] = brokerReport.ProxyNATType
-		logFields["inproxy_proxy_port_mapping_types"] = brokerReport.ProxyPortMappingTypes
-		logFields["inproxy_client_nat_type"] = brokerReport.ClientNATType
-		logFields["inproxy_client_port_mapping_types"] = brokerReport.ClientPortMappingTypes
-
-		// TODO:
-		// - log IPv4 vs. IPv6 information
-		// - relay and log broker transport stats, such as meek HTTP version
 
 		ok := true
 

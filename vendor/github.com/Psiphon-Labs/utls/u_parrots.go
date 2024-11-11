@@ -2636,7 +2636,12 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 	} else if kemKey, ok := clientKeySharePrivate.(*kemPrivateKey); ok {
 		uconn.HandshakeState.State13.KEMKey = kemKey.ToPublic()
 	}
-	uconn.HandshakeState.State13.KeySharesParams = NewKeySharesParameters()
+
+	// [Psiphon]
+	if uconn.HandshakeState.State13.KeySharesParams == nil {
+		uconn.HandshakeState.State13.KeySharesParams = NewKeySharesParameters()
+	}
+
 	hello := uconn.HandshakeState.Hello
 
 	switch len(hello.Random) {

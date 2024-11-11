@@ -44,7 +44,7 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/Psiphon-Labs/utls v1.1.1-0.20240821052800-443a34df921f
+# github.com/Psiphon-Labs/utls v1.1.1-0.20241107183331-b18909f8ccaa
 ## explicit; go 1.21
 github.com/Psiphon-Labs/utls
 github.com/Psiphon-Labs/utls/dicttls

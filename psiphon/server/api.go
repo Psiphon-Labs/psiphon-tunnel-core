@@ -319,6 +319,7 @@ func handshakeAPIRequestHandler(
 	if IsLogLevelDebug() {
 		logFields := getRequestLogFields(
 			"",
+			"",
 			sshClient.sessionID,
 			clientGeoIPData,
 			handshakeStateInfo.authorizedAccessTypes,
@@ -625,6 +626,7 @@ func connectedAPIRequestHandler(
 		log.LogRawFieldsWithTimestamp(
 			getRequestLogFields(
 				"unique_user",
+				"",
 				sshClient.sessionID,
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
@@ -755,6 +757,7 @@ func statusAPIRequestHandler(
 
 			domainBytesFields := getRequestLogFields(
 				"domain_bytes",
+				"",
 				sshClient.sessionID,
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
@@ -800,6 +803,7 @@ func statusAPIRequestHandler(
 
 			remoteServerListFields := getRequestLogFields(
 				"remote_server_list",
+				"",
 				"", // Use the session_id the client recorded with the event
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
@@ -841,6 +845,7 @@ func statusAPIRequestHandler(
 
 			failedTunnelFields := getRequestLogFields(
 				"failed_tunnel",
+				"",
 				"", // Use the session_id the client recorded with the event
 				sshClient.getClientGeoIPData(),
 				authorizedAccessTypes,
@@ -953,10 +958,11 @@ func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidato
 
 func getTacticsAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
 
-	return func(geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
+	return func(prefix string, geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
 
 		logFields := getRequestLogFields(
 			tactics.TACTICS_METRIC_EVENT_NAME,
+			prefix,
 			"", // Use the session_id the client reported
 			GeoIPData(geoIPData),
 			nil, // authorizedAccessTypes are not known yet
@@ -983,12 +989,30 @@ func getInproxyBrokerAPIParameterValidator(config *Config) common.APIParameterVa
 
 func getInproxyBrokerAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
 
-	return func(geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
+	return func(prefix string, geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
 
 		logFields := getRequestLogFields(
 			"inproxy_broker",
+			prefix,
 			"", // Use the session_id the client reported
 			GeoIPData(geoIPData),
+			nil,
+			params,
+			inproxyBrokerRequestParams)
+
+		return common.LogFields(logFields)
+	}
+}
+
+func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+
+	return func(prefix string, _ common.GeoIPData, params common.APIParameters) common.LogFields {
+
+		logFields := getRequestLogFields(
+			"",
+			prefix,
+			"",          // Use the session_id in ProxyMetrics
+			GeoIPData{}, // Proxy GeoIP data is added in sshClient.logTunnel
 			nil,
 			params,
 			inproxyBrokerRequestParams)
@@ -1267,8 +1291,10 @@ func validateStringArrayRequestParam(
 
 // getRequestLogFields makes LogFields to log the API event following
 // the legacy psi_web and current ELK naming conventions.
+// When GeoIPData is the zero value, it is omitted.
 func getRequestLogFields(
 	eventName string,
+	logFieldPrefix string,
 	sessionID string,
 	geoIPData GeoIPData,
 	authorizedAccessTypes []string,
@@ -1293,7 +1319,10 @@ func getRequestLogFields(
 		logFields["event_name"] = eventName
 	}
 
-	geoIPData.SetClientLogFields(logFields)
+	zeroGeoIPData := GeoIPData{}
+	if geoIPData != zeroGeoIPData {
+		geoIPData.SetClientLogFields(logFields)
+	}
 
 	if len(authorizedAccessTypes) > 0 {
 		logFields["authorized_access_types"] = authorizedAccessTypes
@@ -1351,6 +1380,11 @@ func getRequestLogFields(
 			}
 		}
 
+		name := expectedParam.name
+		if logFieldPrefix != "" {
+			name = logFieldPrefix + name
+		}
+
 		switch v := value.(type) {
 		case string:
 			strValue := v
@@ -1367,14 +1401,18 @@ func getRequestLogFields(
 			case "meek_dial_address":
 				host, _, _ := net.SplitHostPort(strValue)
 				if isIPAddress(nil, host) {
-					logFields["meek_dial_ip_address"] = host
+					name = "meek_dial_ip_address"
 				} else {
-					logFields["meek_dial_domain"] = host
+					name = "meek_dial_domain"
 				}
+				if logFieldPrefix != "" {
+					name = logFieldPrefix + name
+				}
+				logFields[name] = host
 
 			case "upstream_proxy_type":
 				// Submitted value could be e.g., "SOCKS5" or "socks5"; log lowercase
-				logFields[expectedParam.name] = strings.ToLower(strValue)
+				logFields[name] = strings.ToLower(strValue)
 
 			case tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME:
 				// Due to a client bug, clients may deliever an incorrect ""
@@ -1392,44 +1430,44 @@ func getRequestLogFields(
 				if index != -1 {
 					strValue = strValue[:index+len(target)] + "<redacted>"
 				}
-				logFields[expectedParam.name] = strValue
+				logFields[name] = strValue
 
 			default:
 				if expectedParam.flags&requestParamLogStringAsInt != 0 {
 					intValue, _ := strconv.Atoi(strValue)
-					logFields[expectedParam.name] = intValue
+					logFields[name] = intValue
 
 				} else if expectedParam.flags&requestParamLogStringAsFloat != 0 {
 					floatValue, _ := strconv.ParseFloat(strValue, 64)
-					logFields[expectedParam.name] = floatValue
+					logFields[name] = floatValue
 
 				} else if expectedParam.flags&requestParamLogStringLengthAsInt != 0 {
-					logFields[expectedParam.name] = len(strValue)
+					logFields[name] = len(strValue)
 
 				} else if expectedParam.flags&requestParamLogFlagAsBool != 0 {
 					// Submitted value could be "0" or "1"
 					// "0" and non "0"/"1" values should be transformed to false
 					// "1" should be transformed to true
 					if strValue == "1" {
-						logFields[expectedParam.name] = true
+						logFields[name] = true
 					} else {
-						logFields[expectedParam.name] = false
+						logFields[name] = false
 					}
 
 				} else {
-					logFields[expectedParam.name] = strValue
+					logFields[name] = strValue
 				}
 			}
 
 		case []interface{}:
 			if expectedParam.name == tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME {
-				logFields[expectedParam.name] = makeSpeedTestSamplesLogField(v)
+				logFields[name] = makeSpeedTestSamplesLogField(v)
 			} else {
-				logFields[expectedParam.name] = v
+				logFields[name] = v
 			}
 
 		default:
-			logFields[expectedParam.name] = v
+			logFields[name] = v
 		}
 	}
 

@@ -391,6 +391,7 @@ func TunnelProtocolRequiresTLS12SessionTickets(protocol string) bool {
 }
 
 func TunnelProtocolRequiresTLS13Support(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH
 }
 
