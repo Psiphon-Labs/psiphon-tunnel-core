@@ -429,12 +429,15 @@ type BrokerServerReport struct {
 	ConnectionID                ID               `cbor:"2,keyasint,omitempty"`
 	MatchedCommonCompartments   bool             `cbor:"3,keyasint,omitempty"`
 	MatchedPersonalCompartments bool             `cbor:"4,keyasint,omitempty"`
-	ProxyNATType                NATType          `cbor:"5,keyasint,omitempty"`
-	ProxyPortMappingTypes       PortMappingTypes `cbor:"6,keyasint,omitempty"`
 	ClientNATType               NATType          `cbor:"7,keyasint,omitempty"`
 	ClientPortMappingTypes      PortMappingTypes `cbor:"8,keyasint,omitempty"`
 	ClientIP                    string           `cbor:"9,keyasint,omitempty"`
 	ProxyIP                     string           `cbor:"10,keyasint,omitempty"`
+	ProxyMetrics                *ProxyMetrics    `cbor:"11,keyasint,omitempty"`
+
+	// These legacy fields are now sent in ProxyMetrics.
+	ProxyNATType          NATType          `cbor:"5,keyasint,omitempty"`
+	ProxyPortMappingTypes PortMappingTypes `cbor:"6,keyasint,omitempty"`
 }
 
 // GetNetworkType extracts the network_type from base API metrics and returns
@@ -470,6 +473,7 @@ const (
 func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
+	logFieldPrefix string,
 	geoIPData common.GeoIPData) (common.APIParameters, common.LogFields, error) {
 
 	if metrics.BaseAPIParameters == nil {
@@ -502,18 +506,18 @@ func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 		return nil, nil, errors.Tracef("invalid portmapping types: %v", metrics.PortMappingTypes)
 	}
 
-	logFields := formatter(geoIPData, baseParams)
+	logFields := formatter(logFieldPrefix, geoIPData, baseParams)
 
-	logFields["proxy_protocol_version"] = metrics.ProxyProtocolVersion
-	logFields["nat_type"] = metrics.NATType
-	logFields["port_mapping_types"] = metrics.PortMappingTypes
-	logFields["max_clients"] = metrics.MaxClients
-	logFields["connecting_clients"] = metrics.ConnectingClients
-	logFields["connected_clients"] = metrics.ConnectedClients
-	logFields["limit_upstream_bytes_per_second"] = metrics.LimitUpstreamBytesPerSecond
-	logFields["limit_downstream_bytes_per_second"] = metrics.LimitDownstreamBytesPerSecond
-	logFields["peak_upstream_bytes_per_second"] = metrics.PeakUpstreamBytesPerSecond
-	logFields["peak_downstream_bytes_per_second"] = metrics.PeakDownstreamBytesPerSecond
+	logFields[logFieldPrefix+"proxy_protocol_version"] = metrics.ProxyProtocolVersion
+	logFields[logFieldPrefix+"nat_type"] = metrics.NATType
+	logFields[logFieldPrefix+"port_mapping_types"] = metrics.PortMappingTypes
+	logFields[logFieldPrefix+"max_clients"] = metrics.MaxClients
+	logFields[logFieldPrefix+"connecting_clients"] = metrics.ConnectingClients
+	logFields[logFieldPrefix+"connected_clients"] = metrics.ConnectedClients
+	logFields[logFieldPrefix+"limit_upstream_bytes_per_second"] = metrics.LimitUpstreamBytesPerSecond
+	logFields[logFieldPrefix+"limit_downstream_bytes_per_second"] = metrics.LimitDownstreamBytesPerSecond
+	logFields[logFieldPrefix+"peak_upstream_bytes_per_second"] = metrics.PeakUpstreamBytesPerSecond
+	logFields[logFieldPrefix+"peak_downstream_bytes_per_second"] = metrics.PeakDownstreamBytesPerSecond
 
 	return baseParams, logFields, nil
 }
@@ -555,7 +559,7 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 		return nil, errors.Tracef("invalid portmapping types: %v", metrics.PortMappingTypes)
 	}
 
-	logFields := formatter(geoIPData, baseParams)
+	logFields := formatter("", geoIPData, baseParams)
 
 	logFields["proxy_protocol_version"] = metrics.ProxyProtocolVersion
 	logFields["nat_type"] = metrics.NATType
@@ -586,7 +590,7 @@ func (request *ProxyAnnounceRequest) ValidateAndGetParametersAndLogFields(
 	}
 
 	apiParams, logFields, err := request.Metrics.ValidateAndGetParametersAndLogFields(
-		baseAPIParameterValidator, formatter, geoIPData)
+		baseAPIParameterValidator, formatter, "", geoIPData)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
@@ -772,7 +776,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 			"invalid select proxy protocol version: %v", request.SelectedProxyProtocolVersion)
 	}
 
-	logFields := formatter(geoIPData, common.APIParameters{})
+	logFields := formatter("", geoIPData, common.APIParameters{})
 
 	logFields["connection_id"] = request.ConnectionID
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
@@ -791,7 +795,7 @@ func (request *ClientRelayedPacketRequest) ValidateAndGetLogFields(
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) (common.LogFields, error) {
 
-	logFields := formatter(geoIPData, common.APIParameters{})
+	logFields := formatter("", geoIPData, common.APIParameters{})
 
 	logFields["connection_id"] = request.ConnectionID
 
@@ -800,38 +804,66 @@ func (request *ClientRelayedPacketRequest) ValidateAndGetLogFields(
 
 // ValidateAndGetLogFields validates the BrokerServerReport and returns
 // common.LogFields for logging.
-func (request *BrokerServerReport) ValidateAndGetLogFields() (common.LogFields, error) {
-
-	if !request.ProxyNATType.IsValid() {
-		return nil, errors.Tracef("invalid proxy NAT type: %v", request.ProxyNATType)
-	}
-
-	if !request.ProxyPortMappingTypes.IsValid() {
-		return nil, errors.Tracef("invalid proxy portmapping types: %v", request.ProxyPortMappingTypes)
-	}
-
-	if !request.ClientNATType.IsValid() {
-		return nil, errors.Tracef("invalid client NAT type: %v", request.ClientNATType)
-	}
-
-	if !request.ClientPortMappingTypes.IsValid() {
-		return nil, errors.Tracef("invalid client portmapping types: %v", request.ClientPortMappingTypes)
-	}
+func (report *BrokerServerReport) ValidateAndGetLogFields(
+	baseAPIParameterValidator common.APIParameterValidator,
+	formatter common.APIParameterLogFieldFormatter,
+	proxyMetricsPrefix string) (common.LogFields, error) {
 
 	// Neither ClientIP nor ProxyIP is logged.
 
-	logFields := common.LogFields{}
+	if !report.ClientNATType.IsValid() {
+		return nil, errors.Tracef("invalid client NAT type: %v", report.ClientNATType)
+	}
 
-	logFields["proxy_id"] = request.ProxyID
-	logFields["connection_id"] = request.ConnectionID
-	logFields["matched_common_compartments"] = request.MatchedCommonCompartments
-	logFields["matched_personal_compartments"] = request.MatchedPersonalCompartments
-	logFields["proxy_nat_type"] = request.ProxyNATType
-	logFields["proxy_port_mapping_types"] = request.ProxyPortMappingTypes
-	logFields["client_nat_type"] = request.ClientNATType
-	logFields["client_port_mapping_types"] = request.ClientPortMappingTypes
+	if !report.ClientPortMappingTypes.IsValid() {
+		return nil, errors.Tracef("invalid client portmapping types: %v", report.ClientPortMappingTypes)
+	}
 
-	return common.LogFields{}, nil
+	var logFields common.LogFields
+
+	if report.ProxyMetrics == nil {
+
+		// Backwards compatibility for reports without ProxyMetrics.
+
+		if !report.ProxyNATType.IsValid() {
+			return nil, errors.Tracef("invalid proxy NAT type: %v", report.ProxyNATType)
+		}
+
+		if !report.ProxyPortMappingTypes.IsValid() {
+			return nil, errors.Tracef("invalid proxy portmapping types: %v", report.ProxyPortMappingTypes)
+		}
+
+		logFields := common.LogFields{}
+
+		logFields["proxy_nat_type"] = report.ProxyNATType
+		logFields["proxy_port_mapping_types"] = report.ProxyPortMappingTypes
+
+	} else {
+
+		var err error
+		_, logFields, err = report.ProxyMetrics.ValidateAndGetParametersAndLogFields(
+			baseAPIParameterValidator,
+			formatter,
+			proxyMetricsPrefix,
+			common.GeoIPData{}) // Proxy GeoIP data is added by the caller.
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	}
+
+	logFields["inproxy_proxy_id"] = report.ProxyID
+	logFields["inproxy_connection_id"] = report.ConnectionID
+	logFields["inproxy_matched_common_compartments"] = report.MatchedCommonCompartments
+	logFields["inproxy_matched_personal_compartments"] = report.MatchedPersonalCompartments
+	logFields["inproxy_client_nat_type"] = report.ClientNATType
+	logFields["inproxy_client_port_mapping_types"] = report.ClientPortMappingTypes
+
+	// TODO:
+	// - log IPv4 vs. IPv6 information
+	// - relay and log broker transport stats, such as meek HTTP version
+
+	return logFields, nil
 }
 
 func MarshalProxyAnnounceRequest(request *ProxyAnnounceRequest) ([]byte, error) {

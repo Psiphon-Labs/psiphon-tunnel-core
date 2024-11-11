@@ -49,5 +49,8 @@ type GeoIPData struct {
 }
 
 // APIParameterLogFieldFormatter is a function that returns formatted
-// LogFields containing the given GeoIPData and APIParameters.
-type APIParameterLogFieldFormatter func(GeoIPData, APIParameters) LogFields
+// LogFields containing the given GeoIPData and APIParameters. An optional
+// log field name prefix string, when specified, should be applied to the
+// output LogFields names. When GeoIPData is the zero value, it should be
+// omitted from LogFields.
+type APIParameterLogFieldFormatter func(string, GeoIPData, APIParameters) LogFields
