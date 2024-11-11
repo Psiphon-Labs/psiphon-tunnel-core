@@ -833,7 +833,7 @@ func (report *BrokerServerReport) ValidateAndGetLogFields(
 			return nil, errors.Tracef("invalid proxy portmapping types: %v", report.ProxyPortMappingTypes)
 		}
 
-		logFields := common.LogFields{}
+		logFields = common.LogFields{}
 
 		logFields["proxy_nat_type"] = report.ProxyNATType
 		logFields["proxy_port_mapping_types"] = report.ProxyPortMappingTypes
