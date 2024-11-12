@@ -122,21 +122,21 @@ func newGenerator(regexp *syntax.Regexp, args *GeneratorArgs) (generator *intern
 
 // Generator that does nothing.
 func noop(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenerator, error) {
-	return &internalGenerator{regexp.String(), func() ([]byte, error) {
+	return &internalGenerator{regexpName(regexp, args.Debug), func() ([]byte, error) {
 		return []byte{}, nil
 	}}, nil
 }
 
 func opEmptyMatch(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenerator, error) {
 	enforceOp(regexp, syntax.OpEmptyMatch)
-	return &internalGenerator{regexp.String(), func() ([]byte, error) {
+	return &internalGenerator{regexpName(regexp, args.Debug), func() ([]byte, error) {
 		return []byte{}, nil
 	}}, nil
 }
 
 func opLiteral(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenerator, error) {
 	enforceOp(regexp, syntax.OpLiteral)
-	return &internalGenerator{regexp.String(), func() ([]byte, error) {
+	return &internalGenerator{regexpName(regexp, args.Debug), func() ([]byte, error) {
 		if args.ByteMode {
 			return runesToBytes(regexp.Rune...)
 		} else {
@@ -147,7 +147,7 @@ func opLiteral(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenerator, 
 
 func opAnyChar(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenerator, error) {
 	enforceOp(regexp, syntax.OpAnyChar)
-	return &internalGenerator{regexp.String(), func() ([]byte, error) {
+	return &internalGenerator{regexpName(regexp, args.Debug), func() ([]byte, error) {
 		if args.ByteMode {
 			return runesToBytes(rune(args.rng.Intn(math.MaxUint8 + 1)))
 		} else {
@@ -164,7 +164,7 @@ func opAnyCharNotNl(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenera
 	} else {
 		charClass = newCharClass(1, rune(math.MaxInt32))
 	}
-	return createCharClassGenerator(regexp.String(), charClass, args)
+	return createCharClassGenerator(regexpName(regexp, args.Debug), charClass, args)
 }
 
 func opQuest(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenerator, error) {
@@ -200,7 +200,7 @@ func opCharClass(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenerator
 	} else {
 		charClass = parseCharClass(regexp.Rune)
 	}
-	return createCharClassGenerator(regexp.String(), charClass, args)
+	return createCharClassGenerator(regexpName(regexp, args.Debug), charClass, args)
 }
 
 func opConcat(regexp *syntax.Regexp, genArgs *GeneratorArgs) (*internalGenerator, error) {
@@ -211,7 +211,7 @@ func opConcat(regexp *syntax.Regexp, genArgs *GeneratorArgs) (*internalGenerator
 		return nil, generatorError(err, "error creating generators for concat pattern /%s/", regexp)
 	}
 
-	return &internalGenerator{regexp.String(), func() ([]byte, error) {
+	return &internalGenerator{regexpName(regexp, genArgs.Debug), func() ([]byte, error) {
 		var result bytes.Buffer
 		for _, generator := range generators {
 			gen, err := generator.Generate()
@@ -234,7 +234,7 @@ func opAlternate(regexp *syntax.Regexp, genArgs *GeneratorArgs) (*internalGenera
 
 	numGens := len(generators)
 
-	return &internalGenerator{regexp.String(), func() ([]byte, error) {
+	return &internalGenerator{regexpName(regexp, genArgs.Debug), func() ([]byte, error) {
 		i := genArgs.rng.Intn(numGens)
 		generator := generators[i]
 		return generator.Generate()
@@ -257,7 +257,7 @@ func opCapture(regexp *syntax.Regexp, args *GeneratorArgs) (*internalGenerator, 
 	// Group indices are 0-based, but index 0 is the whole expression.
 	index := regexp.Cap - 1
 
-	return &internalGenerator{regexp.String(), func() ([]byte, error) {
+	return &internalGenerator{regexpName(regexp, args.Debug), func() ([]byte, error) {
 		return args.CaptureGroupHandler(index, regexp.Name, groupRegexp, generator, args)
 	}}, nil
 }
@@ -312,7 +312,7 @@ func createRepeatingGenerator(regexp *syntax.Regexp, genArgs *GeneratorArgs, min
 		max = int(genArgs.MaxUnboundedRepeatCount)
 	}
 
-	return &internalGenerator{regexp.String(), func() ([]byte, error) {
+	return &internalGenerator{regexpName(regexp, genArgs.Debug), func() ([]byte, error) {
 		n := min + genArgs.rng.Intn(max-min+1)
 
 		var result bytes.Buffer
@@ -325,4 +325,12 @@ func createRepeatingGenerator(regexp *syntax.Regexp, genArgs *GeneratorArgs, min
 		}
 		return result.Bytes(), nil
 	}}, nil
+}
+
+// regexpName returns `regexp.String()` only if `debug` is true.
+func regexpName(regexp *syntax.Regexp, debug bool) string {
+	if debug {
+		return regexp.String()
+	}
+	return ""
 }
