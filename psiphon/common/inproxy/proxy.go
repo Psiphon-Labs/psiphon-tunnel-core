@@ -428,7 +428,7 @@ func (p *Proxy) proxyClients(
 				p.config.Logger.WithTraceFields(
 					common.LogFields{
 						"error":  errMsg,
-						"delay":  delay,
+						"delay":  delay.String(),
 						"jitter": jitter,
 					}).Error("proxy client failed")
 				logErrorsCount -= 1
