@@ -835,8 +835,8 @@ func (report *BrokerServerReport) ValidateAndGetLogFields(
 
 		logFields = common.LogFields{}
 
-		logFields["proxy_nat_type"] = report.ProxyNATType
-		logFields["proxy_port_mapping_types"] = report.ProxyPortMappingTypes
+		logFields["inproxy_proxy_nat_type"] = report.ProxyNATType
+		logFields["inproxy_proxy_port_mapping_types"] = report.ProxyPortMappingTypes
 
 	} else {
 

@@ -160,6 +160,33 @@ func flight1Generate(ctx context.Context, c flightConn, state *State, _ *handsha
 		})
 		cipherSuites = cipherSuites[:cut(len(cipherSuites))]
 
+		// At least one ECC cipher suite needs to be retained for compatibilty
+		// with the server's ECC certificate. Select from the ECC cipher suites
+		// currently returned by defaultCipherSuites.
+
+		eccCipherSuites := []uint16{
+			uint16(TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256),
+			uint16(TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA),
+			uint16(TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384),
+		}
+		hasECC := false
+	checkECCLoop:
+		for _, cipherSuite := range cipherSuites {
+			for _, eccCipherSuite := range eccCipherSuites {
+				if cipherSuite == eccCipherSuite {
+					hasECC = true
+					break checkECCLoop
+				}
+			}
+		}
+		if !hasECC {
+			eccCipherSuite := eccCipherSuites[PRNG.Intn(len(eccCipherSuites))]
+			cipherSuites = append(cipherSuites, eccCipherSuite)
+			PRNG.Shuffle(len(cipherSuites), func(i, j int) {
+				cipherSuites[i], cipherSuites[j] = cipherSuites[j], cipherSuites[i]
+			})
+		}
+
 		for _, ext := range extensions {
 			switch e := ext.(type) {
 			case *extension.SupportedSignatureAlgorithms:
