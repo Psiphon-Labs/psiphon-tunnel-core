@@ -275,6 +275,7 @@ type InproxyBrokerClientInstance struct {
 	sessionHandshakeTimeout       time.Duration
 	announceRequestTimeout        time.Duration
 	announceDelay                 time.Duration
+	announceMaxBackoffDelay       time.Duration
 	announceDelayJitter           float64
 	answerRequestTimeout          time.Duration
 	offerRequestTimeout           time.Duration
@@ -520,6 +521,7 @@ func NewInproxyBrokerClientInstance(
 		sessionHandshakeTimeout:       p.Duration(parameters.InproxySessionHandshakeRoundTripTimeout),
 		announceRequestTimeout:        p.Duration(parameters.InproxyProxyAnnounceRequestTimeout),
 		announceDelay:                 p.Duration(parameters.InproxyProxyAnnounceDelay),
+		announceMaxBackoffDelay:       p.Duration(parameters.InproxyProxyAnnounceMaxBackoffDelay),
 		announceDelayJitter:           p.Float(parameters.InproxyProxyAnnounceDelayJitter),
 		answerRequestTimeout:          p.Duration(parameters.InproxyProxyAnswerRequestTimeout),
 		offerRequestTimeout:           p.Duration(parameters.InproxyClientOfferRequestTimeout),
@@ -1005,6 +1007,11 @@ func (b *InproxyBrokerClientInstance) SessionHandshakeRoundTripTimeout() time.Du
 // Implements the inproxy.BrokerDialCoordinator interface.
 func (b *InproxyBrokerClientInstance) AnnounceDelay() time.Duration {
 	return b.announceDelay
+}
+
+// Implements the inproxy.BrokerDialCoordinator interface.
+func (b *InproxyBrokerClientInstance) AnnounceMaxBackoffDelay() time.Duration {
+	return b.announceMaxBackoffDelay
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.

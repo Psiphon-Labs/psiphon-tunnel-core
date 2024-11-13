@@ -156,7 +156,7 @@ type HasIPv6RouteGetter interface {
 // provider, which returns an identifier for the host's current active
 // network.
 //
-// The identifier is a string that should indicate the network type and
+// The identifier is a string that indicates the network type and
 // identity; for example "WIFI-<BSSID>" or "MOBILE-<MCC/MNC>". As this network
 // ID is personally identifying, it is only used locally in the client to
 // determine network context and is not sent to the Psiphon server. The
@@ -164,12 +164,21 @@ type HasIPv6RouteGetter interface {
 // substring before the first "-" is logged, so all PII must appear after the
 // first "-".
 //
-// NetworkIDGetter.GetNetworkID should always return an identifier value, as
+// NetworkIDGetter.GetNetworkID must always return an identifier value, as
 // logic that uses GetNetworkID, including tactics, is intended to proceed
-// regardless of whether an accurate network identifier can be obtained. By
-// convention, the provider should return "UNKNOWN" when an accurate network
+// regardless of whether an accurate network identifier can be obtained. The
+// the provider shall return "UNKNOWN" when an accurate network
 // identifier cannot be obtained. Best-effort is acceptable: e.g., return just
 // "WIFI" when only the type of the network but no details can be determined.
+//
+// The network type is sent to Psiphon servers and logged as
+// server_tunnel.network_type. To ensure consistency in stats, all providers
+// must use the same network type string values, currently consisting of:
+// - "WIFI" for a Wi-Fi network
+// - "MOBILE" for a mobile/cellular network
+// - "WIRED" for a wired network
+// - "VPN" for a VPN network
+// - "UNKNOWN" for when the network type cannot be determined
 type NetworkIDGetter interface {
 	GetNetworkID() string
 }
