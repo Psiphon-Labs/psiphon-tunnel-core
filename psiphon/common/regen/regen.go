@@ -162,6 +162,9 @@ type GeneratorArgs struct {
 	// ByteMode is not compatible with negated character classes (e.g. "[^a]").
 	ByteMode bool
 
+	// Debug is to used by the generator to log extra information.
+	Debug bool
+
 	// Used by generators.
 	rng *rand.Rand
 }
@@ -209,6 +212,9 @@ func (a *GeneratorArgs) Rng() (*rand.Rand, error) {
 // Generator generates random bytes or strings.
 type Generator interface {
 	Generate() ([]byte, error)
+
+	// String returns a string representation of the generator for debugging.
+	// Value is empty string if Debug is false.
 	String() string
 }
 

@@ -996,6 +996,7 @@ type Config struct {
 	InproxyMaxCompartmentIDListLength                       *int
 	InproxyProxyAnnounceRequestTimeoutMilliseconds          *int
 	InproxyProxyAnnounceDelayMilliseconds                   *int
+	InproxyProxyAnnounceMaxBackoffDelayMilliseconds         *int
 	InproxyProxyAnnounceDelayJitter                         *float64
 	InproxyProxyAnswerRequestTimeoutMilliseconds            *int
 	InproxyClientOfferRequestTimeoutMilliseconds            *int
@@ -2527,6 +2528,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.InproxyProxyAnnounceDelayMilliseconds != nil {
 		applyParameters[parameters.InproxyProxyAnnounceDelay] = fmt.Sprintf("%dms", *config.InproxyProxyAnnounceDelayMilliseconds)
+	}
+
+	if config.InproxyProxyAnnounceMaxBackoffDelayMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyAnnounceMaxBackoffDelay] = fmt.Sprintf("%dms", *config.InproxyProxyAnnounceMaxBackoffDelayMilliseconds)
 	}
 
 	if config.InproxyProxyAnnounceDelayJitter != nil {
