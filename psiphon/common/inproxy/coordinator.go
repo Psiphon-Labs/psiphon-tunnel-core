@@ -182,6 +182,7 @@ type BrokerDialCoordinator interface {
 	SessionHandshakeRoundTripTimeout() time.Duration
 	AnnounceRequestTimeout() time.Duration
 	AnnounceDelay() time.Duration
+	AnnounceMaxBackoffDelay() time.Duration
 	AnnounceDelayJitter() float64
 	AnswerRequestTimeout() time.Duration
 	OfferRequestTimeout() time.Duration

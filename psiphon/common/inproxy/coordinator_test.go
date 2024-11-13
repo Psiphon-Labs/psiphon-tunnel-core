@@ -50,6 +50,7 @@ type testBrokerDialCoordinator struct {
 	sessionHandshakeRoundTripTimeout  time.Duration
 	announceRequestTimeout            time.Duration
 	announceDelay                     time.Duration
+	announceMaxBackoffDelay           time.Duration
 	announceDelayJitter               float64
 	answerRequestTimeout              time.Duration
 	offerRequestTimeout               time.Duration
@@ -147,6 +148,12 @@ func (t *testBrokerDialCoordinator) AnnounceDelay() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.announceDelay
+}
+
+func (t *testBrokerDialCoordinator) AnnounceMaxBackoffDelay() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.announceMaxBackoffDelay
 }
 
 func (t *testBrokerDialCoordinator) AnnounceDelayJitter() float64 {
