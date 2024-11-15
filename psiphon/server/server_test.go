@@ -578,17 +578,32 @@ func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 		})
 }
 
+func TestBurstMonitorAndLegacyDestinationBytes(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:           "OSSH",
+			requireAuthorization:     true,
+			doTunneledWebRequest:     true,
+			doTunneledNTPRequest:     true,
+			doDanglingTCPConn:        true,
+			doBurstMonitor:           true,
+			doLegacyDestinationBytes: true,
+			doLogHostProvider:        true,
+		})
+}
+
 func TestChangeBytesConfig(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "OSSH",
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doDestinationBytes:   true,
-			doChangeBytesConfig:  true,
-			doLogHostProvider:    true,
+			tunnelProtocol:           "OSSH",
+			requireAuthorization:     true,
+			doTunneledWebRequest:     true,
+			doTunneledNTPRequest:     true,
+			doDanglingTCPConn:        true,
+			doDestinationBytes:       true,
+			doLegacyDestinationBytes: true,
+			doChangeBytesConfig:      true,
+			doLogHostProvider:        true,
 		})
 }
 
@@ -646,34 +661,35 @@ func TestLegacyAPIEncoding(t *testing.T) {
 }
 
 type runServerConfig struct {
-	tunnelProtocol       string
-	clientTunnelProtocol string
-	passthrough          bool
-	tlsProfile           string
-	doHotReload          bool
-	doDefaultSponsorID   bool
-	denyTrafficRules     bool
-	requireAuthorization bool
-	omitAuthorization    bool
-	doTunneledWebRequest bool
-	doTunneledNTPRequest bool
-	applyPrefix          bool
-	forceFragmenting     bool
-	forceLivenessTest    bool
-	doPruneServerEntries bool
-	doDanglingTCPConn    bool
-	doPacketManipulation bool
-	doBurstMonitor       bool
-	doSplitTunnel        bool
-	limitQUICVersions    bool
-	doDestinationBytes   bool
-	doChangeBytesConfig  bool
-	doLogHostProvider    bool
-	inspectFlows         bool
-	doSteeringIP         bool
-	doTargetBrokerSpecs  bool
-	useLegacyAPIEncoding bool
-	doPersonalPairing    bool
+	tunnelProtocol           string
+	clientTunnelProtocol     string
+	passthrough              bool
+	tlsProfile               string
+	doHotReload              bool
+	doDefaultSponsorID       bool
+	denyTrafficRules         bool
+	requireAuthorization     bool
+	omitAuthorization        bool
+	doTunneledWebRequest     bool
+	doTunneledNTPRequest     bool
+	applyPrefix              bool
+	forceFragmenting         bool
+	forceLivenessTest        bool
+	doPruneServerEntries     bool
+	doDanglingTCPConn        bool
+	doPacketManipulation     bool
+	doBurstMonitor           bool
+	doSplitTunnel            bool
+	limitQUICVersions        bool
+	doDestinationBytes       bool
+	doLegacyDestinationBytes bool
+	doChangeBytesConfig      bool
+	doLogHostProvider        bool
+	inspectFlows             bool
+	doSteeringIP             bool
+	doTargetBrokerSpecs      bool
+	useLegacyAPIEncoding     bool
+	doPersonalPairing        bool
 }
 
 var (
@@ -772,7 +788,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.applyPrefix ||
 		runConfig.forceFragmenting ||
 		runConfig.doBurstMonitor ||
-		runConfig.doDestinationBytes
+		runConfig.doDestinationBytes ||
+		runConfig.doLegacyDestinationBytes
 
 	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
@@ -908,6 +925,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			livenessTestSize,
 			runConfig.doBurstMonitor,
 			runConfig.doDestinationBytes,
+			runConfig.doLegacyDestinationBytes,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"classic",
@@ -1177,6 +1195,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				livenessTestSize,
 				runConfig.doBurstMonitor,
 				runConfig.doDestinationBytes,
+				runConfig.doLegacyDestinationBytes,
 				runConfig.applyPrefix,
 				runConfig.forceFragmenting,
 				"consistent",
@@ -1615,7 +1634,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if runConfig.doChangeBytesConfig {
 
-		if !runConfig.doDestinationBytes {
+		if !runConfig.doDestinationBytes || !runConfig.doLegacyDestinationBytes {
 			t.Fatalf("invalid test configuration")
 		}
 
@@ -1640,6 +1659,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
+			false,
 			false,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
@@ -1788,6 +1808,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		expectQUICVersion = limitQUICVersions[0]
 	}
 	expectDestinationBytesFields := runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig
+	expectLegacyDestinationBytesFields := runConfig.doLegacyDestinationBytes && !runConfig.doChangeBytesConfig
 	expectMeekHTTPVersion := ""
 	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
 		if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
@@ -1819,6 +1840,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectUDPDataTransfer,
 			expectQUICVersion,
 			expectDestinationBytesFields,
+			expectLegacyDestinationBytesFields,
 			passthroughAddress,
 			expectMeekHTTPVersion,
 			inproxyTestConfig,
@@ -2074,6 +2096,7 @@ func checkExpectedServerTunnelLogFields(
 	expectUDPDataTransfer bool,
 	expectQUICVersion string,
 	expectDestinationBytesFields bool,
+	expectLegacyDestinationBytesFields bool,
 	expectPassthroughAddress *string,
 	expectMeekHTTPVersion string,
 	inproxyTestConfig *inproxyTestConfig,
@@ -2625,6 +2648,47 @@ func checkExpectedServerTunnelLogFields(
 			value1 := int64(fields[pair[1]].(float64))
 			ok := value0 == value1
 			if pair[0] == "asn_dest_bytes_up_udp" || pair[0] == "asn_dest_bytes_down_udp" || pair[0] == "asn_dest_bytes" {
+				// DNS requests are excluded from destination bytes counting
+				ok = value0 > 0 && value0 < value1
+			}
+			if !ok {
+				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
+			}
+		}
+	}
+
+	for _, name := range []string{
+		"dest_bytes_asn",
+		"dest_bytes_up_tcp",
+		"dest_bytes_down_tcp",
+		"dest_bytes_up_udp",
+		"dest_bytes_down_udp",
+		"dest_bytes",
+	} {
+		if expectLegacyDestinationBytesFields && fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+
+		} else if !expectLegacyDestinationBytesFields && fields[name] != nil {
+			return fmt.Errorf("unexpected field '%s'", name)
+		}
+	}
+
+	if expectLegacyDestinationBytesFields {
+		name := "dest_bytes_asn"
+		if fields[name].(string) != testGeoIPASN {
+			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+		}
+		for _, pair := range [][]string{
+			{"dest_bytes_up_tcp", "bytes_up_tcp"},
+			{"dest_bytes_down_tcp", "bytes_down_tcp"},
+			{"dest_bytes_up_udp", "bytes_up_udp"},
+			{"dest_bytes_down_udp", "bytes_down_udp"},
+			{"dest_bytes", "bytes"},
+		} {
+			value0 := int64(fields[pair[0]].(float64))
+			value1 := int64(fields[pair[1]].(float64))
+			ok := value0 == value1
+			if pair[0] == "dest_bytes_up_udp" || pair[0] == "dest_bytes_down_udp" || pair[0] == "dest_bytes" {
 				// DNS requests are excluded from destination bytes counting
 				ok = value0 > 0 && value0 < value1
 			}
@@ -3287,6 +3351,7 @@ func paveTacticsConfigFile(
 	livenessTestSize int,
 	doBurstMonitor bool,
 	doDestinationBytes bool,
+	doLegacyDestinationBytes bool,
 	applyOsshPrefix bool,
 	enableOsshPrefixFragmenting bool,
 	discoveryStategy string,
@@ -3304,6 +3369,7 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
+          %s
           %s
           %s
           %s
@@ -3392,6 +3458,13 @@ func paveTacticsConfigFile(
 	destinationBytesParameters := ""
 	if doDestinationBytes {
 		destinationBytesParameters = fmt.Sprintf(`
+          "DestinationBytesMetricsASNs" : ["%s"],
+	`, testGeoIPASN)
+	}
+
+	legacyDestinationBytesParameters := ""
+	if doLegacyDestinationBytes {
+		legacyDestinationBytesParameters = fmt.Sprintf(`
           "DestinationBytesMetricsASN" : "%s",
 	`, testGeoIPASN)
 	}
@@ -3415,6 +3488,7 @@ func paveTacticsConfigFile(
 		tacticsRequestObfuscatedKey,
 		burstParameters,
 		destinationBytesParameters,
+		legacyDestinationBytesParameters,
 		osshPrefix,
 		inproxyParametersJSON,
 		tunnelProtocol,
