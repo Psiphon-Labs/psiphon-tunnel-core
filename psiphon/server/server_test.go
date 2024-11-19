@@ -369,6 +369,17 @@ func TestInproxyOSSH(t *testing.T) {
 		})
 }
 
+func TestRestrictInproxy(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:    "INPROXY-WEBRTC-OSSH",
+			doRestrictInproxy: true,
+		})
+}
+
 func TestInproxyQUICOSSH(t *testing.T) {
 	if !quic.Enabled() {
 		t.Skip("QUIC is not enabled")
@@ -690,6 +701,7 @@ type runServerConfig struct {
 	doTargetBrokerSpecs      bool
 	useLegacyAPIEncoding     bool
 	doPersonalPairing        bool
+	doRestrictInproxy        bool
 }
 
 var (
@@ -933,7 +945,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"classic",
-			inproxyTacticsParametersJSON)
+			inproxyTacticsParametersJSON,
+			runConfig.doRestrictInproxy)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -1203,7 +1216,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				runConfig.applyPrefix,
 				runConfig.forceFragmenting,
 				"consistent",
-				inproxyTacticsParametersJSON)
+				inproxyTacticsParametersJSON,
+				runConfig.doRestrictInproxy)
 		}
 
 		p, _ := os.FindProcess(os.Getpid())
@@ -1510,6 +1524,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	pruneServerEntriesNoticesEmitted := make(chan struct{}, 1)
 	serverAlertDisallowedNoticesEmitted := make(chan struct{}, 1)
 	untunneledPortForward := make(chan struct{}, 1)
+	discardTunnel := make(chan struct{}, 1)
 
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -1581,6 +1596,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				if connectedClients == 1 && bytesUp > 0 && bytesDown > 0 {
 					sendNotificationReceived(inproxyActivity)
 				}
+
+			case "Info":
+				if strings.Contains(payload["message"].(string), "discard tunnel") {
+					sendNotificationReceived(discardTunnel)
+				}
 			}
 
 			if printNotice {
@@ -1633,12 +1653,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		close(timeoutSignal)
 	}()
 
-	waitOnNotification(t, connectedServer, timeoutSignal, "connected server timeout exceeded")
-	if doInproxy {
-		waitOnNotification(t, inproxyActivity, timeoutSignal, "inproxy activity timeout exceeded")
+	expectDiscardTunnel := runConfig.doRestrictInproxy
+
+	if expectDiscardTunnel {
+		waitOnNotification(t, discardTunnel, timeoutSignal, "discard tunnel timeout exceeded")
+		return
+	} else {
+		waitOnNotification(t, connectedServer, timeoutSignal, "connected server timeout exceeded")
+		if doInproxy {
+			waitOnNotification(t, inproxyActivity, timeoutSignal, "inproxy activity timeout exceeded")
+		}
+		waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
+		waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
 	}
-	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
-	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
 
 	if runConfig.doChangeBytesConfig {
 
@@ -1672,7 +1699,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"consistent",
-			inproxyTacticsParametersJSON)
+			inproxyTacticsParametersJSON,
+			runConfig.doRestrictInproxy)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -3451,7 +3479,8 @@ func paveTacticsConfigFile(
 	applyOsshPrefix bool,
 	enableOsshPrefixFragmenting bool,
 	discoveryStategy string,
-	inproxyParametersJSON string) {
+	inproxyParametersJSON string,
+	doRestrictAllInproxyProviderRegions bool) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -3465,6 +3494,7 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
+          %s
           %s
           %s
           %s
@@ -3577,6 +3607,14 @@ func paveTacticsConfigFile(
 	`, strconv.FormatBool(enableOsshPrefixFragmenting))
 	}
 
+	restrictInproxyParameters := ""
+	if doRestrictAllInproxyProviderRegions {
+		restrictInproxyParameters = `
+		"RestrictInproxyProviderRegions": {"" : [""]},
+		"RestrictInproxyProviderIDsServerProbability": 1.0,
+	`
+	}
+
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey,
@@ -3587,6 +3625,7 @@ func paveTacticsConfigFile(
 		legacyDestinationBytesParameters,
 		osshPrefix,
 		inproxyParametersJSON,
+		restrictInproxyParameters,
 		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,

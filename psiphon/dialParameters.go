@@ -503,6 +503,27 @@ func MakeDialParameters(
 	}
 
 	// Skip this candidate when the clients tactics restrict usage of the
+	// provider ID. See the corresponding server-side enforcement comments in
+	// server.sshClient.setHandshakeState.
+	if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
+		common.ContainsAny(
+			p.KeyStrings(parameters.RestrictInproxyProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+		if p.WeightedCoinFlip(
+			parameters.RestrictInproxyProviderIDsClientProbability) {
+
+			// When skipping, return nil/nil as no error should be logged.
+			// NoticeSkipServerEntry emits each skip reason, regardless
+			// of server entry, at most once per session.
+
+			NoticeSkipServerEntry(
+				"restricted provider ID: %s",
+				dialParams.ServerEntry.ProviderID)
+
+			return nil, nil
+		}
+	}
+
+	// Skip this candidate when the clients tactics restrict usage of the
 	// fronting provider ID. See the corresponding server-side enforcement
 	// comments in server.MeekServer.getSessionOrEndpoint.
 	//
@@ -983,6 +1004,7 @@ func MakeDialParameters(
 		var holdOffTunnelDuration time.Duration
 		var holdOffTunnelFrontingDuration time.Duration
 		var holdOffDirectTunnelDuration time.Duration
+		var holdOffInproxyTunnelDuration time.Duration
 
 		if common.Contains(
 			p.TunnelProtocols(parameters.HoldOffTunnelProtocols), dialParams.TunnelProtocol) {
@@ -1020,11 +1042,24 @@ func MakeDialParameters(
 			}
 		}
 
+		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
+			common.ContainsAny(
+				p.KeyStrings(parameters.HoldOffInproxyTunnelProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+
+			if p.WeightedCoinFlip(parameters.HoldOffInproxyTunnelProbability) {
+
+				holdOffInproxyTunnelDuration = prng.Period(
+					p.Duration(parameters.HoldOffInproxyTunnelMinDuration),
+					p.Duration(parameters.HoldOffInproxyTunnelMaxDuration))
+			}
+		}
+
 		// Use the longest hold off duration
 		dialParams.HoldOffTunnelDuration = common.MaxDuration(
 			holdOffTunnelDuration,
 			holdOffTunnelFrontingDuration,
-			holdOffDirectTunnelDuration)
+			holdOffDirectTunnelDuration,
+			holdOffInproxyTunnelDuration)
 	}
 
 	// OSSH prefix and seed transform are applied only to the OSSH tunnel protocol,

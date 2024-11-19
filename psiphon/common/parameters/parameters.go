@@ -328,6 +328,13 @@ const (
 	RestrictDirectProviderRegions                      = "RestrictDirectProviderRegions"
 	RestrictDirectProviderIDsServerProbability         = "RestrictDirectProviderIDsServerProbability"
 	RestrictDirectProviderIDsClientProbability         = "RestrictDirectProviderIDsClientProbability"
+	HoldOffInproxyTunnelMinDuration                    = "HoldOffInproxyTunnelMinDuration"
+	HoldOffInproxyTunnelMaxDuration                    = "HoldOffInproxyTunnelMaxDuration"
+	HoldOffInproxyTunnelProviderRegions                = "HoldOffInproxyTunnelProviderRegions"
+	HoldOffInproxyTunnelProbability                    = "HoldOffInproxyTunnelProbability"
+	RestrictInproxyProviderRegions                     = "RestrictInproxyProviderRegions"
+	RestrictInproxyProviderIDsServerProbability        = "RestrictInproxyProviderIDsServerProbability"
+	RestrictInproxyProviderIDsClientProbability        = "RestrictInproxyProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources            = "UpstreamProxyAllowAllServerEntrySources"
 	DestinationBytesMetricsASN                         = "DestinationBytesMetricsASN"
 	DestinationBytesMetricsASNs                        = "DestinationBytesMetricsASNs"
@@ -831,6 +838,15 @@ var defaultParameters = map[string]struct {
 	RestrictDirectProviderRegions:              {value: KeyStrings{}},
 	RestrictDirectProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	RestrictDirectProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
+
+	HoldOffInproxyTunnelMinDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffInproxyTunnelMaxDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffInproxyTunnelProviderRegions: {value: []string{}},
+	HoldOffInproxyTunnelProbability:     {value: 0.0, minimum: 0.0},
+
+	RestrictInproxyProviderRegions:              {value: KeyStrings{}},
+	RestrictInproxyProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
+	RestrictInproxyProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
 
 	UpstreamProxyAllowAllServerEntrySources: {value: false},
 

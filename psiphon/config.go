@@ -903,6 +903,18 @@ type Config struct {
 	RestrictDirectProviderRegions              map[string][]string
 	RestrictDirectProviderIDsClientProbability *float64
 
+	// HoldOffInproxyTunnelMinDurationMilliseconds and other HoldOffInproxy
+	// fields are for testing purposes.
+	HoldOffInproxyTunnelMinDurationMilliseconds *int
+	HoldOffInproxyTunnelMaxDurationMilliseconds *int
+	HoldOffInproxyTunnelProviderRegions         map[string][]string
+	HoldOffInproxyTunnelProbability             *float64
+
+	// RestrictInproxyProviderRegions and other RestrictInproxy fields are for
+	// testing purposes.
+	RestrictInproxyProviderRegions              map[string][]string
+	RestrictInproxyProviderIDsClientProbability *float64
+
 	// UpstreamProxyAllowAllServerEntrySources is for testing purposes.
 	UpstreamProxyAllowAllServerEntrySources *bool
 
@@ -2272,6 +2284,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.RestrictFrontingProviderIDsClientProbability] = *config.RestrictFrontingProviderIDsClientProbability
 	}
 
+	if config.HoldOffInproxyTunnelMinDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffInproxyTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffInproxyTunnelMinDurationMilliseconds)
+	}
+
+	if config.HoldOffInproxyTunnelMaxDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffInproxyTunnelMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffInproxyTunnelMaxDurationMilliseconds)
+	}
+
+	if len(config.HoldOffInproxyTunnelProviderRegions) > 0 {
+		applyParameters[parameters.HoldOffInproxyTunnelProviderRegions] = parameters.KeyStrings(config.HoldOffInproxyTunnelProviderRegions)
+	}
+
+	if config.HoldOffInproxyTunnelProbability != nil {
+		applyParameters[parameters.HoldOffInproxyTunnelProbability] = *config.HoldOffInproxyTunnelProbability
+	}
+
 	if config.UpstreamProxyAllowAllServerEntrySources != nil {
 		applyParameters[parameters.UpstreamProxyAllowAllServerEntrySources] = *config.UpstreamProxyAllowAllServerEntrySources
 	}
@@ -3117,6 +3145,46 @@ func (config *Config) setDialParametersHash() {
 	if config.RestrictFrontingProviderIDsClientProbability != nil {
 		hash.Write([]byte("RestrictFrontingProviderIDsClientProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.RestrictFrontingProviderIDsClientProbability)
+	}
+
+	if config.HoldOffInproxyTunnelProbability != nil {
+		hash.Write([]byte("HoldOffInproxyTunnelProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.HoldOffInproxyTunnelProbability)
+	}
+
+	if config.HoldOffInproxyTunnelMinDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffInproxyTunnelMinDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffInproxyTunnelMinDurationMilliseconds))
+	}
+
+	if config.HoldOffInproxyTunnelMaxDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffInproxyTunnelMaxDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffInproxyTunnelMaxDurationMilliseconds))
+	}
+
+	if len(config.HoldOffInproxyTunnelProviderRegions) > 0 {
+		hash.Write([]byte("HoldOffInproxyTunnelProviderRegions"))
+		for providerID, regions := range config.HoldOffInproxyTunnelProviderRegions {
+			hash.Write([]byte(providerID))
+			for _, region := range regions {
+				hash.Write([]byte(region))
+			}
+		}
+	}
+
+	if len(config.RestrictInproxyProviderRegions) > 0 {
+		hash.Write([]byte("RestrictInproxyProviderRegions"))
+		for providerID, regions := range config.RestrictInproxyProviderRegions {
+			hash.Write([]byte(providerID))
+			for _, region := range regions {
+				hash.Write([]byte(region))
+			}
+		}
+	}
+
+	if config.RestrictInproxyProviderIDsClientProbability != nil {
+		hash.Write([]byte("RestrictInproxyProviderIDsClientProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.RestrictInproxyProviderIDsClientProbability)
 	}
 
 	if config.UpstreamProxyAllowAllServerEntrySources != nil {
