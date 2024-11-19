@@ -981,21 +981,30 @@ func MakeDialParameters(
 	if !isReplay || !replayHoldOffTunnel {
 
 		var holdOffTunnelDuration time.Duration
+		var holdOffTunnelFrontingDuration time.Duration
 		var holdOffDirectTunnelDuration time.Duration
 
 		if common.Contains(
-			p.TunnelProtocols(parameters.HoldOffTunnelProtocols), dialParams.TunnelProtocol) ||
-
-			(protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
-				common.Contains(
-					p.Strings(parameters.HoldOffTunnelFrontingProviderIDs),
-					dialParams.FrontingProviderID)) {
+			p.TunnelProtocols(parameters.HoldOffTunnelProtocols), dialParams.TunnelProtocol) {
 
 			if p.WeightedCoinFlip(parameters.HoldOffTunnelProbability) {
 
 				holdOffTunnelDuration = prng.Period(
 					p.Duration(parameters.HoldOffTunnelMinDuration),
 					p.Duration(parameters.HoldOffTunnelMaxDuration))
+			}
+		}
+
+		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
+			common.Contains(
+				p.Strings(parameters.HoldOffTunnelFrontingProviderIDs),
+				dialParams.FrontingProviderID) {
+
+			if p.WeightedCoinFlip(parameters.HoldOffTunnelFrontingProbability) {
+
+				holdOffTunnelFrontingDuration = prng.Period(
+					p.Duration(parameters.HoldOffTunnelFrontingMinDuration),
+					p.Duration(parameters.HoldOffTunnelFrontingMaxDuration))
 			}
 		}
 
@@ -1012,11 +1021,10 @@ func MakeDialParameters(
 		}
 
 		// Use the longest hold off duration
-		if holdOffTunnelDuration >= holdOffDirectTunnelDuration {
-			dialParams.HoldOffTunnelDuration = holdOffTunnelDuration
-		} else {
-			dialParams.HoldOffTunnelDuration = holdOffDirectTunnelDuration
-		}
+		dialParams.HoldOffTunnelDuration = common.MaxDuration(
+			holdOffTunnelDuration,
+			holdOffTunnelFrontingDuration,
+			holdOffDirectTunnelDuration)
 	}
 
 	// OSSH prefix and seed transform are applied only to the OSSH tunnel protocol,

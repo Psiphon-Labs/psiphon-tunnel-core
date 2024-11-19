@@ -96,8 +96,11 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.HoldOffTunnelMinDuration] = "1ms"
 	applyParameters[parameters.HoldOffTunnelMaxDuration] = "10ms"
 	applyParameters[parameters.HoldOffTunnelProtocols] = holdOffTunnelProtocols
-	applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = []string{frontingProviderID}
 	applyParameters[parameters.HoldOffTunnelProbability] = 1.0
+	applyParameters[parameters.HoldOffTunnelFrontingMinDuration] = "1ms"
+	applyParameters[parameters.HoldOffTunnelFrontingMaxDuration] = "10ms"
+	applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = []string{frontingProviderID}
+	applyParameters[parameters.HoldOffTunnelFrontingProbability] = 1.0
 	applyParameters[parameters.HoldOffDirectTunnelMinDuration] = "1ms"
 	applyParameters[parameters.HoldOffDirectTunnelMaxDuration] = "10ms"
 	applyParameters[parameters.HoldOffDirectTunnelProviderRegions] = holdOffDirectTunnelProviderRegions

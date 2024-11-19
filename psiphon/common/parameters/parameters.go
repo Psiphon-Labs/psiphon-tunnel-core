@@ -313,8 +313,11 @@ const (
 	HoldOffTunnelMinDuration                           = "HoldOffTunnelMinDuration"
 	HoldOffTunnelMaxDuration                           = "HoldOffTunnelMaxDuration"
 	HoldOffTunnelProtocols                             = "HoldOffTunnelProtocols"
-	HoldOffTunnelFrontingProviderIDs                   = "HoldOffTunnelFrontingProviderIDs"
 	HoldOffTunnelProbability                           = "HoldOffTunnelProbability"
+	HoldOffTunnelFrontingMinDuration                   = "HoldOffTunnelFrontingMinDuration"
+	HoldOffTunnelFrontingMaxDuration                   = "HoldOffTunnelFrontingMaxDuration"
+	HoldOffTunnelFrontingProviderIDs                   = "HoldOffTunnelFrontingProviderIDs"
+	HoldOffTunnelFrontingProbability                   = "HoldOffTunnelFrontingProbability"
 	RestrictFrontingProviderIDs                        = "RestrictFrontingProviderIDs"
 	RestrictFrontingProviderIDsServerProbability       = "RestrictFrontingProviderIDsServerProbability"
 	RestrictFrontingProviderIDsClientProbability       = "RestrictFrontingProviderIDsClientProbability"
@@ -806,11 +809,15 @@ var defaultParameters = map[string]struct {
 	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},
 	CustomHostNameLimitProtocols: {value: protocol.TunnelProtocols{}},
 
-	HoldOffTunnelMinDuration:         {value: time.Duration(0), minimum: time.Duration(0)},
-	HoldOffTunnelMaxDuration:         {value: time.Duration(0), minimum: time.Duration(0)},
-	HoldOffTunnelProtocols:           {value: protocol.TunnelProtocols{}},
+	HoldOffTunnelMinDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelMaxDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelProtocols:   {value: protocol.TunnelProtocols{}},
+	HoldOffTunnelProbability: {value: 0.0, minimum: 0.0},
+
+	HoldOffTunnelFrontingMinDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelFrontingMaxDuration: {value: time.Duration(0), minimum: time.Duration(0)},
 	HoldOffTunnelFrontingProviderIDs: {value: []string{}},
-	HoldOffTunnelProbability:         {value: 0.0, minimum: 0.0},
+	HoldOffTunnelFrontingProbability: {value: 0.0, minimum: 0.0},
 
 	RestrictFrontingProviderIDs:                  {value: []string{}},
 	RestrictFrontingProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
