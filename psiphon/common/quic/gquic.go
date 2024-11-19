@@ -110,9 +110,9 @@ func (c *gQUICConnection) isEarlyDataRejected(err error) bool {
 	return false
 }
 
-func (c *gQUICConnection) connectionMetrics() quicConnectionMetrics {
+func (c *gQUICConnection) getClientConnMetrics() quicClientConnMetrics {
 	// Not supported by gQUIC.
-	return quicConnectionMetrics{}
+	return quicClientConnMetrics{}
 }
 
 func gQUICDialContext(

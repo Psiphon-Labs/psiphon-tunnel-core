@@ -558,6 +558,7 @@ func Dial(
 
 		resultChannel <- dialResult{
 			conn: &Conn{
+				isClient:   true,
 				packetConn: packetConn,
 				connection: connection,
 				stream:     stream,
@@ -587,6 +588,7 @@ func Dial(
 
 // Conn is a net.Conn and psiphon/common.Closer.
 type Conn struct {
+	isClient   bool
 	packetConn net.PacketConn
 	connection quicConnection
 
@@ -744,31 +746,34 @@ func (conn *Conn) GetMetrics() common.LogFields {
 		logFields.Add(underlyingMetrics.GetMetrics())
 	}
 
-	metrics := conn.connection.connectionMetrics()
+	if conn.isClient {
 
-	dialEarly := "0"
-	if metrics.dialEarly {
-		dialEarly = "1"
-	}
-	logFields["quic_dial_early"] = dialEarly
+		metrics := conn.connection.getClientConnMetrics()
 
-	quicSentTicket := "0"
-	if metrics.tlsClientSentTicket {
-		quicSentTicket = "1"
-	}
-	logFields["quic_sent_ticket"] = quicSentTicket
+		dialEarly := "0"
+		if metrics.dialEarly {
+			dialEarly = "1"
+		}
+		logFields["quic_dial_early"] = dialEarly
 
-	quicDidResume := "0"
-	if metrics.tlsClientSentTicket {
-		quicDidResume = "1"
-	}
-	logFields["quic_did_resume"] = quicDidResume
+		quicSentTicket := "0"
+		if metrics.tlsClientSentTicket {
+			quicSentTicket = "1"
+		}
+		logFields["quic_sent_ticket"] = quicSentTicket
 
-	obfuscatedPSK := "0"
-	if metrics.obfuscatedPSK {
-		obfuscatedPSK = "1"
+		quicDidResume := "0"
+		if metrics.tlsClientSentTicket {
+			quicDidResume = "1"
+		}
+		logFields["quic_did_resume"] = quicDidResume
+
+		obfuscatedPSK := "0"
+		if metrics.obfuscatedPSK {
+			obfuscatedPSK = "1"
+		}
+		logFields["quic_obfuscated_psk"] = obfuscatedPSK
 	}
-	logFields["quic_obfuscated_psk"] = obfuscatedPSK
 
 	return logFields
 }
@@ -779,7 +784,7 @@ func (conn *Conn) GetMetrics() common.LogFields {
 type QUICTransporter struct {
 	quicRoundTripper
 
-	quicConnectionMetrics atomic.Value
+	quicClientConnMetrics atomic.Value
 
 	noticeEmitter           func(string)
 	udpDialer               func(ctx context.Context) (net.PacketConn, *net.UDPAddr, error)
@@ -876,7 +881,7 @@ func (t *QUICTransporter) closePacketConn() {
 func (t *QUICTransporter) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
 
-	metrics := t.quicConnectionMetrics.Load().(*quicConnectionMetrics)
+	metrics := t.quicClientConnMetrics.Load().(*quicClientConnMetrics)
 
 	dialEarly := "0"
 	if metrics.dialEarly {
@@ -967,8 +972,8 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 		return nil, errors.Trace(err)
 	}
 
-	metrics := connection.connectionMetrics()
-	t.quicConnectionMetrics.Store(&metrics)
+	metrics := connection.getClientConnMetrics()
+	t.quicClientConnMetrics.Store(&metrics)
 
 	// dialQUIC uses quic-go.DialContext as we must create our own UDP sockets to
 	// set properties such as BIND_TO_DEVICE. However, when DialContext is used,
@@ -1008,9 +1013,9 @@ type quicListener interface {
 	Accept() (quicConnection, error)
 }
 
-// quicConnectionMetircs provides metrics for a QUIC connection,
+// quicClientConnMetrics provides metrics for a QUIC client connection,
 // after a dial has been made.
-type quicConnectionMetrics struct {
+type quicClientConnMetrics struct {
 	dialEarly           bool
 	tlsClientSentTicket bool
 	tlsDidResume        bool
@@ -1025,7 +1030,7 @@ type quicConnection interface {
 	OpenStream() (quicStream, error)
 	isErrorIndicatingClosed(err error) bool
 	isEarlyDataRejected(err error) bool
-	connectionMetrics() quicConnectionMetrics
+	getClientConnMetrics() quicClientConnMetrics
 }
 
 type quicStream interface {
@@ -1065,7 +1070,7 @@ func (l *ietfQUICListener) Close() error {
 
 type ietfQUICConnection struct {
 	ietf_quic.Connection
-	metrics quicConnectionMetrics
+	clientMetrics quicClientConnMetrics
 }
 
 func (c *ietfQUICConnection) AcceptStream() (quicStream, error) {
@@ -1110,8 +1115,8 @@ func (c *ietfQUICConnection) isEarlyDataRejected(err error) bool {
 	return err == ietf_quic.Err0RTTRejected
 }
 
-func (c *ietfQUICConnection) connectionMetrics() quicConnectionMetrics {
-	return c.metrics
+func (c *ietfQUICConnection) getClientConnMetrics() quicClientConnMetrics {
+	return c.clientMetrics
 }
 
 func dialQUIC(
@@ -1219,7 +1224,7 @@ func dialQUIC(
 			return nil, errors.Trace(err)
 		}
 
-		metrics := quicConnectionMetrics{
+		metrics := quicClientConnMetrics{
 			dialEarly:           dialEarly,
 			tlsClientSentTicket: dialConnection.ConnectionState().TLS.DidResume,
 			tlsDidResume:        dialConnection.TLSConnectionMetrics().ClientSentTicket,
@@ -1227,8 +1232,8 @@ func dialQUIC(
 		}
 
 		return &ietfQUICConnection{
-			Connection: dialConnection,
-			metrics:    metrics,
+			Connection:    dialConnection,
+			clientMetrics: metrics,
 		}, nil
 
 	} else {
