@@ -461,8 +461,12 @@ func (controller *Controller) SetDynamicConfig(sponsorID string, authorizations 
 // proxy connections.
 func (controller *Controller) NetworkChanged() {
 
-	// Tunnels don't yet use the current network context.
+	// Explicitly reset components that don't use the current network context.
 	controller.TerminateNextActiveTunnel()
+	if controller.inproxyProxyBrokerClientManager != nil {
+		controller.inproxyProxyBrokerClientManager.NetworkChanged()
+	}
+	controller.inproxyClientBrokerClientManager.NetworkChanged()
 
 	controller.currentNetworkMutex.Lock()
 	defer controller.currentNetworkMutex.Unlock()
