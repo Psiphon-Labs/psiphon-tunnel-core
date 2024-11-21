@@ -327,6 +327,7 @@ const (
 	RestrictDirectProviderIDsClientProbability         = "RestrictDirectProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources            = "UpstreamProxyAllowAllServerEntrySources"
 	DestinationBytesMetricsASN                         = "DestinationBytesMetricsASN"
+	DestinationBytesMetricsASNs                        = "DestinationBytesMetricsASNs"
 	DNSResolverAttemptsPerServer                       = "DNSResolverAttemptsPerServer"
 	DNSResolverAttemptsPerPreferredServer              = "DNSResolverAttemptsPerPreferredServer"
 	DNSResolverRequestTimeout                          = "DNSResolverRequestTimeout"
@@ -826,7 +827,8 @@ var defaultParameters = map[string]struct {
 
 	UpstreamProxyAllowAllServerEntrySources: {value: false},
 
-	DestinationBytesMetricsASN: {value: "", flags: serverSideOnly},
+	DestinationBytesMetricsASN:  {value: "", flags: serverSideOnly},
+	DestinationBytesMetricsASNs: {value: []string{}, flags: serverSideOnly},
 
 	DNSResolverAttemptsPerServer:                {value: 2, minimum: 1},
 	DNSResolverAttemptsPerPreferredServer:       {value: 1, minimum: 1},
