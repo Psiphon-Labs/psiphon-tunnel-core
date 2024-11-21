@@ -207,13 +207,9 @@ public class PsiphonTunnel {
         mNetworkMonitor = new NetworkMonitor(new NetworkMonitor.NetworkChangeListener() {
             @Override
             public void onChanged() {
-                try {
-                    // networkChanged initiates a reset of all open network
-                    // connections, including a tunnel reconnect.
-                    Psi.networkChanged();
-                } catch (Exception e) {
-                    mHostService.onDiagnosticMessage("reconnect error: " + e);
-                }
+                // networkChanged initiates a reset of all open network
+                // connections, including a tunnel reconnect.
+                Psi.networkChanged();
             }
         });
     }
