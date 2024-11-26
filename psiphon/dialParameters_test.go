@@ -80,7 +80,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
-	holdOffTunnelProtocols := protocol.TunnelProtocols{protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH}
+	holdOffTunnelProtocolNames := protocol.TunnelProtocols{protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH}
 
 	providerID := prng.HexString(8)
 	frontingProviderID := prng.HexString(8)
@@ -99,10 +99,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters := make(map[string]interface{})
 	applyParameters[parameters.TransformHostNameProbability] = 1.0
 	applyParameters[parameters.PickUserAgentProbability] = 1.0
-	applyParameters[parameters.HoldOffTunnelMinDuration] = "1ms"
-	applyParameters[parameters.HoldOffTunnelMaxDuration] = "10ms"
-	applyParameters[parameters.HoldOffTunnelProtocols] = holdOffTunnelProtocols
-	applyParameters[parameters.HoldOffTunnelProbability] = 1.0
+	applyParameters[parameters.HoldOffTunnelProtocolMinDuration] = "1ms"
+	applyParameters[parameters.HoldOffTunnelProtocolMaxDuration] = "10ms"
+	applyParameters[parameters.HoldOffTunnelProtocolNames] = holdOffTunnelProtocolNames
+	applyParameters[parameters.HoldOffTunnelProtocolProbability] = 1.0
 	applyParameters[parameters.HoldOffFrontingTunnelMinDuration] = "1ms"
 	applyParameters[parameters.HoldOffFrontingTunnelMaxDuration] = "10ms"
 	applyParameters[parameters.HoldOffFrontingTunnelProviderIDs] = []string{frontingProviderID}
@@ -258,7 +258,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("missing API request fields")
 	}
 
-	expectHoldOffTunnelProtocols := common.Contains(holdOffTunnelProtocols, tunnelProtocol)
+	expectHoldOffTunnelProtocolNames := common.Contains(holdOffTunnelProtocolNames, tunnelProtocol)
 	expectHoldOffFrontingTunnelProviderIDs := protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol)
 	expectHoldOffDirectTunnelProviderRegion := protocol.TunnelProtocolIsDirect(tunnelProtocol) &&
 		common.ContainsAny(
@@ -269,7 +269,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 			holdOffInproxyTunnelProviderRegions[dialParams.ServerEntry.ProviderID],
 			[]string{"", dialParams.ServerEntry.Region})
 
-	if expectHoldOffTunnelProtocols ||
+	if expectHoldOffTunnelProtocolNames ||
 		expectHoldOffFrontingTunnelProviderIDs ||
 		expectHoldOffDirectTunnelProviderRegion ||
 		expectHoldOffInproxyTunnelProviderRegion {

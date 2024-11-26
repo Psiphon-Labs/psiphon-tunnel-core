@@ -872,12 +872,12 @@ type Config struct {
 	ConjureSTUNServerAddresses                []string
 	ConjureDTLSEmptyInitialPacketProbability  *float64
 
-	// HoldOffTunnelMinDurationMilliseconds and other HoldOffTunnel fields are
-	// for testing purposes.
-	HoldOffTunnelMinDurationMilliseconds *int
-	HoldOffTunnelMaxDurationMilliseconds *int
-	HoldOffTunnelProtocols               []string
-	HoldOffTunnelProbability             *float64
+	// HoldOffTunnelProtocolMinDurationMilliseconds and other
+	// HoldOffTunnelProtocol fields are for testing purposes.
+	HoldOffTunnelProtocolMinDurationMilliseconds *int
+	HoldOffTunnelProtocolMaxDurationMilliseconds *int
+	HoldOffTunnelProtocolNames                   []string
+	HoldOffTunnelProtocolProbability             *float64
 
 	// HoldOffFrontingTunnelMinDurationMilliseconds and other
 	// HoldOffFrontingTunnel fields are for testing purposes.
@@ -2220,20 +2220,20 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ConjureDTLSEmptyInitialPacketProbability] = *config.ConjureDTLSEmptyInitialPacketProbability
 	}
 
-	if config.HoldOffTunnelMinDurationMilliseconds != nil {
-		applyParameters[parameters.HoldOffTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelMinDurationMilliseconds)
+	if config.HoldOffTunnelProtocolMinDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffTunnelProtocolMinDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelProtocolMinDurationMilliseconds)
 	}
 
-	if config.HoldOffTunnelMaxDurationMilliseconds != nil {
-		applyParameters[parameters.HoldOffTunnelMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelMaxDurationMilliseconds)
+	if config.HoldOffTunnelProtocolMaxDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffTunnelProtocolMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelProtocolMaxDurationMilliseconds)
 	}
 
-	if len(config.HoldOffTunnelProtocols) > 0 {
-		applyParameters[parameters.HoldOffTunnelProtocols] = protocol.TunnelProtocols(config.HoldOffTunnelProtocols)
+	if len(config.HoldOffTunnelProtocolNames) > 0 {
+		applyParameters[parameters.HoldOffTunnelProtocolNames] = protocol.TunnelProtocols(config.HoldOffTunnelProtocolNames)
 	}
 
-	if config.HoldOffTunnelProbability != nil {
-		applyParameters[parameters.HoldOffTunnelProbability] = *config.HoldOffTunnelProbability
+	if config.HoldOffTunnelProtocolProbability != nil {
+		applyParameters[parameters.HoldOffTunnelProtocolProbability] = *config.HoldOffTunnelProtocolProbability
 	}
 
 	if config.HoldOffFrontingTunnelMinDurationMilliseconds != nil {
@@ -3051,26 +3051,26 @@ func (config *Config) setDialParametersHash() {
 		}
 	}
 
-	if config.HoldOffTunnelMinDurationMilliseconds != nil {
-		hash.Write([]byte("HoldOffTunnelMinDurationMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelMinDurationMilliseconds))
+	if config.HoldOffTunnelProtocolMinDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffTunnelProtocolMinDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelProtocolMinDurationMilliseconds))
 	}
 
-	if config.HoldOffTunnelMaxDurationMilliseconds != nil {
-		hash.Write([]byte("HoldOffTunnelMaxDurationMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelMaxDurationMilliseconds))
+	if config.HoldOffTunnelProtocolMaxDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffTunnelProtocolMaxDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelProtocolMaxDurationMilliseconds))
 	}
 
-	if len(config.HoldOffTunnelProtocols) > 0 {
-		hash.Write([]byte("HoldOffTunnelProtocols"))
-		for _, protocol := range config.HoldOffTunnelProtocols {
+	if len(config.HoldOffTunnelProtocolNames) > 0 {
+		hash.Write([]byte("HoldOffTunnelProtocolNames"))
+		for _, protocol := range config.HoldOffTunnelProtocolNames {
 			hash.Write([]byte(protocol))
 		}
 	}
 
-	if config.HoldOffTunnelProbability != nil {
-		hash.Write([]byte("HoldOffTunnelProbability"))
-		binary.Write(hash, binary.LittleEndian, *config.HoldOffTunnelProbability)
+	if config.HoldOffTunnelProtocolProbability != nil {
+		hash.Write([]byte("HoldOffTunnelProtocolProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.HoldOffTunnelProtocolProbability)
 	}
 
 	if config.HoldOffFrontingTunnelMinDurationMilliseconds != nil {
