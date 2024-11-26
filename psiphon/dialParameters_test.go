@@ -103,10 +103,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.HoldOffTunnelMaxDuration] = "10ms"
 	applyParameters[parameters.HoldOffTunnelProtocols] = holdOffTunnelProtocols
 	applyParameters[parameters.HoldOffTunnelProbability] = 1.0
-	applyParameters[parameters.HoldOffTunnelFrontingMinDuration] = "1ms"
-	applyParameters[parameters.HoldOffTunnelFrontingMaxDuration] = "10ms"
-	applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = []string{frontingProviderID}
-	applyParameters[parameters.HoldOffTunnelFrontingProbability] = 1.0
+	applyParameters[parameters.HoldOffFrontingTunnelMinDuration] = "1ms"
+	applyParameters[parameters.HoldOffFrontingTunnelMaxDuration] = "10ms"
+	applyParameters[parameters.HoldOffFrontingTunnelProviderIDs] = []string{frontingProviderID}
+	applyParameters[parameters.HoldOffFrontingTunnelProbability] = 1.0
 	applyParameters[parameters.HoldOffDirectTunnelMinDuration] = "1ms"
 	applyParameters[parameters.HoldOffDirectTunnelMaxDuration] = "10ms"
 	applyParameters[parameters.HoldOffDirectTunnelProviderRegions] = holdOffDirectTunnelProviderRegions
@@ -259,7 +259,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	}
 
 	expectHoldOffTunnelProtocols := common.Contains(holdOffTunnelProtocols, tunnelProtocol)
-	expectHoldOffTunnelFrontingProviderIDs := protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol)
+	expectHoldOffFrontingTunnelProviderIDs := protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol)
 	expectHoldOffDirectTunnelProviderRegion := protocol.TunnelProtocolIsDirect(tunnelProtocol) &&
 		common.ContainsAny(
 			holdOffDirectTunnelProviderRegions[dialParams.ServerEntry.ProviderID],
@@ -270,7 +270,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 			[]string{"", dialParams.ServerEntry.Region})
 
 	if expectHoldOffTunnelProtocols ||
-		expectHoldOffTunnelFrontingProviderIDs ||
+		expectHoldOffFrontingTunnelProviderIDs ||
 		expectHoldOffDirectTunnelProviderRegion ||
 		expectHoldOffInproxyTunnelProviderRegion {
 		if dialParams.HoldOffTunnelDuration < 1*time.Millisecond ||

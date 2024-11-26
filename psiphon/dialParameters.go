@@ -1002,7 +1002,7 @@ func MakeDialParameters(
 	if !isReplay || !replayHoldOffTunnel {
 
 		var holdOffTunnelDuration time.Duration
-		var holdOffTunnelFrontingDuration time.Duration
+		var HoldOffFrontingTunnelDuration time.Duration
 		var holdOffDirectTunnelDuration time.Duration
 		var holdOffInproxyTunnelDuration time.Duration
 
@@ -1019,14 +1019,14 @@ func MakeDialParameters(
 
 		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
 			common.Contains(
-				p.Strings(parameters.HoldOffTunnelFrontingProviderIDs),
+				p.Strings(parameters.HoldOffFrontingTunnelProviderIDs),
 				dialParams.FrontingProviderID) {
 
-			if p.WeightedCoinFlip(parameters.HoldOffTunnelFrontingProbability) {
+			if p.WeightedCoinFlip(parameters.HoldOffFrontingTunnelProbability) {
 
-				holdOffTunnelFrontingDuration = prng.Period(
-					p.Duration(parameters.HoldOffTunnelFrontingMinDuration),
-					p.Duration(parameters.HoldOffTunnelFrontingMaxDuration))
+				HoldOffFrontingTunnelDuration = prng.Period(
+					p.Duration(parameters.HoldOffFrontingTunnelMinDuration),
+					p.Duration(parameters.HoldOffFrontingTunnelMaxDuration))
 			}
 		}
 
@@ -1057,7 +1057,7 @@ func MakeDialParameters(
 		// Use the longest hold off duration
 		dialParams.HoldOffTunnelDuration = common.MaxDuration(
 			holdOffTunnelDuration,
-			holdOffTunnelFrontingDuration,
+			HoldOffFrontingTunnelDuration,
 			holdOffDirectTunnelDuration,
 			holdOffInproxyTunnelDuration)
 	}

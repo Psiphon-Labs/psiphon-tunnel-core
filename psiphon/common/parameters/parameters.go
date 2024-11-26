@@ -314,10 +314,10 @@ const (
 	HoldOffTunnelMaxDuration                           = "HoldOffTunnelMaxDuration"
 	HoldOffTunnelProtocols                             = "HoldOffTunnelProtocols"
 	HoldOffTunnelProbability                           = "HoldOffTunnelProbability"
-	HoldOffTunnelFrontingMinDuration                   = "HoldOffTunnelFrontingMinDuration"
-	HoldOffTunnelFrontingMaxDuration                   = "HoldOffTunnelFrontingMaxDuration"
-	HoldOffTunnelFrontingProviderIDs                   = "HoldOffTunnelFrontingProviderIDs"
-	HoldOffTunnelFrontingProbability                   = "HoldOffTunnelFrontingProbability"
+	HoldOffFrontingTunnelMinDuration                   = "HoldOffFrontingTunnelMinDuration"
+	HoldOffFrontingTunnelMaxDuration                   = "HoldOffFrontingTunnelMaxDuration"
+	HoldOffFrontingTunnelProviderIDs                   = "HoldOffFrontingTunnelProviderIDs"
+	HoldOffFrontingTunnelProbability                   = "HoldOffFrontingTunnelProbability"
 	RestrictFrontingProviderIDs                        = "RestrictFrontingProviderIDs"
 	RestrictFrontingProviderIDsServerProbability       = "RestrictFrontingProviderIDsServerProbability"
 	RestrictFrontingProviderIDsClientProbability       = "RestrictFrontingProviderIDsClientProbability"
@@ -821,10 +821,10 @@ var defaultParameters = map[string]struct {
 	HoldOffTunnelProtocols:   {value: protocol.TunnelProtocols{}},
 	HoldOffTunnelProbability: {value: 0.0, minimum: 0.0},
 
-	HoldOffTunnelFrontingMinDuration: {value: time.Duration(0), minimum: time.Duration(0)},
-	HoldOffTunnelFrontingMaxDuration: {value: time.Duration(0), minimum: time.Duration(0)},
-	HoldOffTunnelFrontingProviderIDs: {value: []string{}},
-	HoldOffTunnelFrontingProbability: {value: 0.0, minimum: 0.0},
+	HoldOffFrontingTunnelMinDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffFrontingTunnelMaxDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffFrontingTunnelProviderIDs: {value: []string{}},
+	HoldOffFrontingTunnelProbability: {value: 0.0, minimum: 0.0},
 
 	RestrictFrontingProviderIDs:                  {value: []string{}},
 	RestrictFrontingProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},

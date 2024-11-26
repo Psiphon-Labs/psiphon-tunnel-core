@@ -879,12 +879,12 @@ type Config struct {
 	HoldOffTunnelProtocols               []string
 	HoldOffTunnelProbability             *float64
 
-	// HoldOffTunnelFrontingMinDurationMilliseconds and other
-	// HoldOffTunnelFronting fields are for testing purposes.
-	HoldOffTunnelFrontingMinDurationMilliseconds *int
-	HoldOffTunnelFrontingMaxDurationMilliseconds *int
-	HoldOffTunnelFrontingProviderIDs             []string
-	HoldOffTunnelFrontingProbability             *float64
+	// HoldOffFrontingTunnelMinDurationMilliseconds and other
+	// HoldOffFrontingTunnel fields are for testing purposes.
+	HoldOffFrontingTunnelMinDurationMilliseconds *int
+	HoldOffFrontingTunnelMaxDurationMilliseconds *int
+	HoldOffFrontingTunnelProviderIDs             []string
+	HoldOffFrontingTunnelProbability             *float64
 
 	// RestrictFrontingProviderIDs and other RestrictFrontingProviderIDs fields
 	// are for testing purposes.
@@ -2236,20 +2236,20 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.HoldOffTunnelProbability] = *config.HoldOffTunnelProbability
 	}
 
-	if config.HoldOffTunnelFrontingMinDurationMilliseconds != nil {
-		applyParameters[parameters.HoldOffTunnelFrontingMinDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelFrontingMinDurationMilliseconds)
+	if config.HoldOffFrontingTunnelMinDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffFrontingTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffFrontingTunnelMinDurationMilliseconds)
 	}
 
-	if config.HoldOffTunnelFrontingMaxDurationMilliseconds != nil {
-		applyParameters[parameters.HoldOffTunnelFrontingMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelFrontingMaxDurationMilliseconds)
+	if config.HoldOffFrontingTunnelMaxDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffFrontingTunnelMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffFrontingTunnelMaxDurationMilliseconds)
 	}
 
-	if len(config.HoldOffTunnelFrontingProviderIDs) > 0 {
-		applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = config.HoldOffTunnelFrontingProviderIDs
+	if len(config.HoldOffFrontingTunnelProviderIDs) > 0 {
+		applyParameters[parameters.HoldOffFrontingTunnelProviderIDs] = config.HoldOffFrontingTunnelProviderIDs
 	}
 
-	if config.HoldOffTunnelFrontingProbability != nil {
-		applyParameters[parameters.HoldOffTunnelFrontingProbability] = *config.HoldOffTunnelFrontingProbability
+	if config.HoldOffFrontingTunnelProbability != nil {
+		applyParameters[parameters.HoldOffFrontingTunnelProbability] = *config.HoldOffFrontingTunnelProbability
 	}
 
 	if config.HoldOffDirectTunnelMinDurationMilliseconds != nil {
@@ -3073,26 +3073,26 @@ func (config *Config) setDialParametersHash() {
 		binary.Write(hash, binary.LittleEndian, *config.HoldOffTunnelProbability)
 	}
 
-	if config.HoldOffTunnelFrontingMinDurationMilliseconds != nil {
-		hash.Write([]byte("HoldOffTunnelFrontingMinDurationMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelFrontingMinDurationMilliseconds))
+	if config.HoldOffFrontingTunnelMinDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffFrontingTunnelMinDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffFrontingTunnelMinDurationMilliseconds))
 	}
 
-	if config.HoldOffTunnelFrontingMaxDurationMilliseconds != nil {
-		hash.Write([]byte("HoldOffTunnelFrontingMaxDurationMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelFrontingMaxDurationMilliseconds))
+	if config.HoldOffFrontingTunnelMaxDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffFrontingTunnelMaxDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffFrontingTunnelMaxDurationMilliseconds))
 	}
 
-	if len(config.HoldOffTunnelFrontingProviderIDs) > 0 {
-		hash.Write([]byte("HoldOffTunnelFrontingProviderIDs"))
-		for _, providerID := range config.HoldOffTunnelFrontingProviderIDs {
+	if len(config.HoldOffFrontingTunnelProviderIDs) > 0 {
+		hash.Write([]byte("HoldOffFrontingTunnelProviderIDs"))
+		for _, providerID := range config.HoldOffFrontingTunnelProviderIDs {
 			hash.Write([]byte(providerID))
 		}
 	}
 
-	if config.HoldOffTunnelFrontingProbability != nil {
-		hash.Write([]byte("HoldOffTunnelFrontingProbability"))
-		binary.Write(hash, binary.LittleEndian, *config.HoldOffTunnelFrontingProbability)
+	if config.HoldOffFrontingTunnelProbability != nil {
+		hash.Write([]byte("HoldOffFrontingTunnelProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.HoldOffFrontingTunnelProbability)
 	}
 
 	if config.HoldOffDirectTunnelProbability != nil {
