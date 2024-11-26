@@ -310,6 +310,11 @@ const (
 	CustomHostNameRegexes                              = "CustomHostNameRegexes"
 	CustomHostNameProbability                          = "CustomHostNameProbability"
 	CustomHostNameLimitProtocols                       = "CustomHostNameLimitProtocols"
+	HoldOffTunnelMinDuration                           = "HoldOffTunnelMinDuration"
+	HoldOffTunnelMaxDuration                           = "HoldOffTunnelMaxDuration"
+	HoldOffTunnelProtocols                             = "HoldOffTunnelProtocols"
+	HoldOffTunnelFrontingProviderIDs                   = "HoldOffTunnelFrontingProviderIDs"
+	HoldOffTunnelProbability                           = "HoldOffTunnelProbability"
 	HoldOffTunnelProtocolMinDuration                   = "HoldOffTunnelProtocolMinDuration"
 	HoldOffTunnelProtocolMaxDuration                   = "HoldOffTunnelProtocolMaxDuration"
 	HoldOffTunnelProtocolNames                         = "HoldOffTunnelProtocolNames"
@@ -815,6 +820,12 @@ var defaultParameters = map[string]struct {
 	CustomHostNameRegexes:        {value: RegexStrings{}},
 	CustomHostNameProbability:    {value: 0.0, minimum: 0.0},
 	CustomHostNameLimitProtocols: {value: protocol.TunnelProtocols{}},
+
+	HoldOffTunnelMinDuration:         {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelMaxDuration:         {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelProtocols:           {value: protocol.TunnelProtocols{}},
+	HoldOffTunnelFrontingProviderIDs: {value: []string{}},
+	HoldOffTunnelProbability:         {value: 0.0, minimum: 0.0},
 
 	HoldOffTunnelProtocolMinDuration: {value: time.Duration(0), minimum: time.Duration(0)},
 	HoldOffTunnelProtocolMaxDuration: {value: time.Duration(0), minimum: time.Duration(0)},
