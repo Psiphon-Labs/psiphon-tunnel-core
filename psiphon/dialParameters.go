@@ -503,6 +503,27 @@ func MakeDialParameters(
 	}
 
 	// Skip this candidate when the clients tactics restrict usage of the
+	// provider ID. See the corresponding server-side enforcement comments in
+	// server.sshClient.setHandshakeState.
+	if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
+		common.ContainsAny(
+			p.KeyStrings(parameters.RestrictInproxyProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+		if p.WeightedCoinFlip(
+			parameters.RestrictInproxyProviderIDsClientProbability) {
+
+			// When skipping, return nil/nil as no error should be logged.
+			// NoticeSkipServerEntry emits each skip reason, regardless
+			// of server entry, at most once per session.
+
+			NoticeSkipServerEntry(
+				"restricted provider ID: %s",
+				dialParams.ServerEntry.ProviderID)
+
+			return nil, nil
+		}
+	}
+
+	// Skip this candidate when the clients tactics restrict usage of the
 	// fronting provider ID. See the corresponding server-side enforcement
 	// comments in server.MeekServer.getSessionOrEndpoint.
 	//
@@ -980,22 +1001,32 @@ func MakeDialParameters(
 
 	if !isReplay || !replayHoldOffTunnel {
 
-		var holdOffTunnelDuration time.Duration
+		var HoldOffTunnelProtocolDuration time.Duration
+		var HoldOffFrontingTunnelDuration time.Duration
 		var holdOffDirectTunnelDuration time.Duration
+		var holdOffInproxyTunnelDuration time.Duration
 
 		if common.Contains(
-			p.TunnelProtocols(parameters.HoldOffTunnelProtocols), dialParams.TunnelProtocol) ||
+			p.TunnelProtocols(parameters.HoldOffTunnelProtocolNames), dialParams.TunnelProtocol) {
 
-			(protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
-				common.Contains(
-					p.Strings(parameters.HoldOffTunnelFrontingProviderIDs),
-					dialParams.FrontingProviderID)) {
+			if p.WeightedCoinFlip(parameters.HoldOffTunnelProtocolProbability) {
 
-			if p.WeightedCoinFlip(parameters.HoldOffTunnelProbability) {
+				HoldOffTunnelProtocolDuration = prng.Period(
+					p.Duration(parameters.HoldOffTunnelProtocolMinDuration),
+					p.Duration(parameters.HoldOffTunnelProtocolMaxDuration))
+			}
+		}
 
-				holdOffTunnelDuration = prng.Period(
-					p.Duration(parameters.HoldOffTunnelMinDuration),
-					p.Duration(parameters.HoldOffTunnelMaxDuration))
+		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) &&
+			common.Contains(
+				p.Strings(parameters.HoldOffFrontingTunnelProviderIDs),
+				dialParams.FrontingProviderID) {
+
+			if p.WeightedCoinFlip(parameters.HoldOffFrontingTunnelProbability) {
+
+				HoldOffFrontingTunnelDuration = prng.Period(
+					p.Duration(parameters.HoldOffFrontingTunnelMinDuration),
+					p.Duration(parameters.HoldOffFrontingTunnelMaxDuration))
 			}
 		}
 
@@ -1011,12 +1042,24 @@ func MakeDialParameters(
 			}
 		}
 
-		// Use the longest hold off duration
-		if holdOffTunnelDuration >= holdOffDirectTunnelDuration {
-			dialParams.HoldOffTunnelDuration = holdOffTunnelDuration
-		} else {
-			dialParams.HoldOffTunnelDuration = holdOffDirectTunnelDuration
+		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
+			common.ContainsAny(
+				p.KeyStrings(parameters.HoldOffInproxyTunnelProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+
+			if p.WeightedCoinFlip(parameters.HoldOffInproxyTunnelProbability) {
+
+				holdOffInproxyTunnelDuration = prng.Period(
+					p.Duration(parameters.HoldOffInproxyTunnelMinDuration),
+					p.Duration(parameters.HoldOffInproxyTunnelMaxDuration))
+			}
 		}
+
+		// Use the longest hold off duration
+		dialParams.HoldOffTunnelDuration = common.MaxDuration(
+			HoldOffTunnelProtocolDuration,
+			HoldOffFrontingTunnelDuration,
+			holdOffDirectTunnelDuration,
+			holdOffInproxyTunnelDuration)
 	}
 
 	// OSSH prefix and seed transform are applied only to the OSSH tunnel protocol,

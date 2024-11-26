@@ -3784,6 +3784,46 @@ func (sshClient *sshClient) setHandshakeState(
 		return nil, errors.TraceNew("handshake already completed")
 	}
 
+	if sshClient.isInproxyTunnelProtocol {
+
+		p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.clientGeoIPData)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// Skip check if no tactics are configured.
+		//
+		// Disconnect immediately if the tactics for the client restricts usage
+		// of the provider ID with inproxy protocols. The probability may be
+		// used to influence usage of a given provider with inproxy protocols;
+		// but when only that provider works for a given client, and the
+		// probability is less than 1.0, the client can retry until it gets a
+		// successful coin flip.
+		//
+		// Clients will also skip inproxy protocol candidates with restricted
+		// provider IDs.
+		// The client-side probability,
+		// RestrictInproxyProviderIDsClientProbability, is applied
+		// independently of the server-side coin flip here.
+		//
+		// At this stage, GeoIP tactics filters are active, but handshake API
+		// parameters are not.
+		//
+		// See the comment in server.LoadConfig regarding provider ID
+		// limitations.
+		if !p.IsNil() &&
+			common.ContainsAny(
+				p.KeyStrings(parameters.RestrictInproxyProviderRegions,
+					sshClient.sshServer.support.Config.GetProviderID()),
+				[]string{"", sshClient.sshServer.support.Config.GetRegion()}) {
+
+			if p.WeightedCoinFlip(
+				parameters.RestrictInproxyProviderIDsServerProbability) {
+				return nil, errRestrictedProvider
+			}
+		}
+	}
+
 	// Verify the authorizations submitted by the client. Verified, active
 	// (non-expired) access types will be available for traffic rules
 	// filtering.

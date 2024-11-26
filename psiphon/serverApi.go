@@ -142,7 +142,8 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 	// The purpose of this mechanism is to rapidly add provider IDs to the
 	// server entries in client local storage, and to ensure that the client has
 	// a provider ID for its currently connected server as required for the
-	// RestrictDirectProviderRegions, and HoldOffDirectTunnelProviderRegions
+	// RestrictDirectProviderRegions, HoldOffDirectTunnelProviderRegions,
+	// RestrictInproxyProviderRegions, and HoldOffInproxyTunnelProviderRegions
 	// tactics.
 	//
 	// The server entry will be included in handshakeResponse.EncodedServerList,

@@ -80,7 +80,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("error committing configuration file: %s", err)
 	}
 
-	holdOffTunnelProtocols := protocol.TunnelProtocols{protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH}
+	holdOffTunnelProtocolNames := protocol.TunnelProtocols{protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH}
 
 	providerID := prng.HexString(8)
 	frontingProviderID := prng.HexString(8)
@@ -90,17 +90,30 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		holdOffDirectTunnelProviderRegions = map[string][]string{providerID: {""}}
 	}
 
+	var holdOffInproxyTunnelProviderRegions parameters.KeyStrings
+	if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) &&
+		protocol.TunnelProtocolMinusInproxy(tunnelProtocol) == protocol.TUNNEL_PROTOCOL_OBFUSCATED_SSH {
+		holdOffInproxyTunnelProviderRegions = map[string][]string{providerID: {""}}
+	}
+
 	applyParameters := make(map[string]interface{})
 	applyParameters[parameters.TransformHostNameProbability] = 1.0
 	applyParameters[parameters.PickUserAgentProbability] = 1.0
-	applyParameters[parameters.HoldOffTunnelMinDuration] = "1ms"
-	applyParameters[parameters.HoldOffTunnelMaxDuration] = "10ms"
-	applyParameters[parameters.HoldOffTunnelProtocols] = holdOffTunnelProtocols
-	applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = []string{frontingProviderID}
-	applyParameters[parameters.HoldOffTunnelProbability] = 1.0
+	applyParameters[parameters.HoldOffTunnelProtocolMinDuration] = "1ms"
+	applyParameters[parameters.HoldOffTunnelProtocolMaxDuration] = "10ms"
+	applyParameters[parameters.HoldOffTunnelProtocolNames] = holdOffTunnelProtocolNames
+	applyParameters[parameters.HoldOffTunnelProtocolProbability] = 1.0
+	applyParameters[parameters.HoldOffFrontingTunnelMinDuration] = "1ms"
+	applyParameters[parameters.HoldOffFrontingTunnelMaxDuration] = "10ms"
+	applyParameters[parameters.HoldOffFrontingTunnelProviderIDs] = []string{frontingProviderID}
+	applyParameters[parameters.HoldOffFrontingTunnelProbability] = 1.0
 	applyParameters[parameters.HoldOffDirectTunnelMinDuration] = "1ms"
 	applyParameters[parameters.HoldOffDirectTunnelMaxDuration] = "10ms"
 	applyParameters[parameters.HoldOffDirectTunnelProviderRegions] = holdOffDirectTunnelProviderRegions
+	applyParameters[parameters.HoldOffInproxyTunnelProbability] = 1.0
+	applyParameters[parameters.HoldOffInproxyTunnelMinDuration] = "1ms"
+	applyParameters[parameters.HoldOffInproxyTunnelMaxDuration] = "10ms"
+	applyParameters[parameters.HoldOffInproxyTunnelProviderRegions] = holdOffInproxyTunnelProviderRegions
 	applyParameters[parameters.HoldOffDirectTunnelProbability] = 1.0
 	applyParameters[parameters.DNSResolverAlternateServers] = []string{"127.0.0.1", "127.0.0.2", "127.0.0.3"}
 	applyParameters[parameters.DirectHTTPProtocolTransformProbability] = 1.0
@@ -245,16 +258,21 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("missing API request fields")
 	}
 
-	expectHoldOffTunnelProtocols := common.Contains(holdOffTunnelProtocols, tunnelProtocol)
-	expectHoldOffTunnelFrontingProviderIDs := protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol)
+	expectHoldOffTunnelProtocolNames := common.Contains(holdOffTunnelProtocolNames, tunnelProtocol)
+	expectHoldOffFrontingTunnelProviderIDs := protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol)
 	expectHoldOffDirectTunnelProviderRegion := protocol.TunnelProtocolIsDirect(tunnelProtocol) &&
 		common.ContainsAny(
 			holdOffDirectTunnelProviderRegions[dialParams.ServerEntry.ProviderID],
 			[]string{"", dialParams.ServerEntry.Region})
+	expectHoldOffInproxyTunnelProviderRegion := protocol.TunnelProtocolUsesInproxy(tunnelProtocol) &&
+		common.ContainsAny(
+			holdOffInproxyTunnelProviderRegions[dialParams.ServerEntry.ProviderID],
+			[]string{"", dialParams.ServerEntry.Region})
 
-	if expectHoldOffTunnelProtocols ||
-		expectHoldOffTunnelFrontingProviderIDs ||
-		expectHoldOffDirectTunnelProviderRegion {
+	if expectHoldOffTunnelProtocolNames ||
+		expectHoldOffFrontingTunnelProviderIDs ||
+		expectHoldOffDirectTunnelProviderRegion ||
+		expectHoldOffInproxyTunnelProviderRegion {
 		if dialParams.HoldOffTunnelDuration < 1*time.Millisecond ||
 			dialParams.HoldOffTunnelDuration > 10*time.Millisecond {
 			t.Fatalf("unexpected hold-off duration: %v", dialParams.HoldOffTunnelDuration)
@@ -557,7 +575,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("SetParameters failed: %s", err)
 	}
 
-	// Test: client-side restrict provider ID by region
+	// Test: client-side restrict provider ID by region for direct protocols
 
 	applyParameters[parameters.RestrictDirectProviderRegions] = map[string][]string{providerID: {"CA"}}
 	applyParameters[parameters.RestrictDirectProviderIDsClientProbability] = 1.0
@@ -584,6 +602,37 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.RestrictDirectProviderRegions] = map[string][]string{}
 	applyParameters[parameters.RestrictDirectProviderIDsClientProbability] = 0.0
 	err = clientConfig.SetParameters("tag7", false, applyParameters)
+	if err != nil {
+		t.Fatalf("SetParameters failed: %s", err)
+	}
+
+	// Test: client-side restrict provider ID by region for inproxy protocols
+
+	applyParameters[parameters.RestrictInproxyProviderRegions] = map[string][]string{providerID: {"CA"}}
+	applyParameters[parameters.RestrictInproxyProviderIDsClientProbability] = 1.0
+	err = clientConfig.SetParameters("tag8", false, applyParameters)
+	if err != nil {
+		t.Fatalf("SetParameters failed: %s", err)
+	}
+
+	dialParams, err = MakeDialParameters(
+		clientConfig, steeringIPCache, nil, nil, nil, canReplay, selectProtocol, serverEntries[0], nil, nil, false, 0, 0)
+
+	if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
+		if err == nil {
+			if dialParams != nil {
+				t.Fatalf("unexpected MakeDialParameters success")
+			}
+		}
+	} else {
+		if err != nil {
+			t.Fatalf("MakeDialParameters failed: %s", err)
+		}
+	}
+
+	applyParameters[parameters.RestrictInproxyProviderRegions] = map[string][]string{}
+	applyParameters[parameters.RestrictInproxyProviderIDsClientProbability] = 0.0
+	err = clientConfig.SetParameters("tag9", false, applyParameters)
 	if err != nil {
 		t.Fatalf("SetParameters failed: %s", err)
 	}

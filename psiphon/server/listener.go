@@ -117,7 +117,9 @@ func (listener *TacticsListener) accept() (net.Conn, error) {
 	// peer IP is not the original client IP. Indirect protocols must determine
 	// the original client IP before applying GeoIP specific tactics; see the
 	// server-side enforcement of RestrictFrontingProviderIDs for fronted meek
-	// in server.MeekServer.getSessionOrEndpoint.
+	// in server.MeekServer.getSessionOrEndpoint or of
+	// RestrictInproxyProviderRegions for inproxy in
+	// server.sshClient.setHandshakeState.
 	//
 	// At this stage, GeoIP tactics filters are active, but handshake API
 	// parameters are not.
