@@ -841,7 +841,7 @@ var defaultParameters = map[string]struct {
 
 	HoldOffInproxyTunnelMinDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
 	HoldOffInproxyTunnelMaxDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
-	HoldOffInproxyTunnelProviderRegions: {value: []string{}},
+	HoldOffInproxyTunnelProviderRegions: {value: KeyStrings{}},
 	HoldOffInproxyTunnelProbability:     {value: 0.0, minimum: 0.0},
 
 	RestrictInproxyProviderRegions:              {value: KeyStrings{}},
