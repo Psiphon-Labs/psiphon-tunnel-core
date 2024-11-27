@@ -449,6 +449,8 @@ func Dial(
 		// isObfuscated QUIC versions. This mitigates upstream fingerprints;
 		// see ObfuscatedPacketConn.writePacket for the server-side
 		// downstream limitation.
+		//
+		// Update: quic-go now writes ECN bits; see quic-go PR 3999.
 
 		// Ensure blocked packet writes eventually timeout. Note that quic-go
 		// manages read deadlines; we set only the write deadline here.
@@ -940,16 +942,30 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 		return nil, errors.Trace(err)
 	}
 
-	// Check for a *net.UDPConn, as expected, to support OOB operations.
-	udpConn, ok := packetConn.(*net.UDPConn)
-	if !ok {
-		return nil, errors.Tracef("unexpected packetConn type: %T", packetConn)
-	}
+	// See `udpConn, ok := packetConn.(*net.UDPConn)` block and comment in
+	// Dial. The same two cases are implemented here, although there is no
+	// obfuscated fronted QUIC.
+	//
+	// Limitation: for FRONTED-MEEK-QUIC-OSSH, OOB operations to support
+	// reading/writing ECN bits will not be enabled due to the
+	// meekUnderlyingPacketConn wrapping in the provided udpDialer.
 
-	// Ensure blocked packet writes eventually timeout. Note that quic-go
-	// manages read deadlines; we set only the write deadline here.
-	packetConn = &common.WriteTimeoutUDPConn{
-		UDPConn: udpConn,
+	udpConn, ok := packetConn.(*net.UDPConn)
+
+	if !ok {
+
+		// Ensure blocked packet writes eventually timeout. Note that quic-go
+		// manages read deadlines; we set only the write deadline here.
+		packetConn = &common.WriteTimeoutPacketConn{
+			PacketConn: packetConn,
+		}
+
+	} else {
+
+		// Ensure blocked packet writes eventually timeout.
+		packetConn = &common.WriteTimeoutUDPConn{
+			UDPConn: udpConn,
+		}
 	}
 
 	connection, err := dialQUIC(

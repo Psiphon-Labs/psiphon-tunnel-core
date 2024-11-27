@@ -1552,11 +1552,14 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
         previousNetworkStatus = atomic_exchange(&self->currentNetworkStatus, networkStatus);
 
-        // Restart if the network status or interface has changed, unless the previous status was
-        // NetworkReachabilityNotReachable, because the tunnel should be waiting for connectivity in
-        // that case.
+        // Signal when the network status or interface has changed, unless the
+        // previous status was NetworkReachabilityNotReachable, because the
+        // tunnel should be waiting for connectivity in that case.
+        //
+        // GoPsiNetworkChanged initiates a reset of all open network
+        // connections, including a tunnel reconnect.
         if ((networkStatus != previousNetworkStatus || interfaceChanged) && previousNetworkStatus != NetworkReachabilityNotReachable) {
-            GoPsiReconnectTunnel();
+            GoPsiNetworkChanged();
         }
     }
 }

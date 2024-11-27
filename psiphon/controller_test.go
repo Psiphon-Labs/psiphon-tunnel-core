@@ -147,10 +147,7 @@ func TestObfuscatedSSH(t *testing.T) {
 		})
 }
 
-func TestTLS(t *testing.T) {
-
-	t.Skipf("temporarily disabled")
-
+func TestTLSOSSH(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
 			protocol:                 protocol.TUNNEL_PROTOCOL_TLS_OBFUSCATED_SSH,
@@ -286,9 +283,6 @@ func TestQUIC(t *testing.T) {
 }
 
 func TestFrontedQUIC(t *testing.T) {
-
-	t.Skipf("temporarily disabled")
-
 	if !quic.Enabled() {
 		t.Skip("QUIC is not enabled")
 	}

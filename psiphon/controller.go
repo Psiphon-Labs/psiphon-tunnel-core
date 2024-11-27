@@ -101,6 +101,10 @@ type Controller struct {
 	inproxyLastStoredTactics                time.Time
 	establishSignalForceTacticsFetch        chan struct{}
 	inproxyClientDialRateLimiter            *rate.Limiter
+
+	currentNetworkMutex      sync.Mutex
+	currentNetworkCtx        context.Context
+	currentNetworkCancelFunc context.CancelFunc
 }
 
 // NewController initializes a new controller.
@@ -176,6 +180,18 @@ func NewController(config *Config) (controller *Controller, err error) {
 		tlsClientSessionCache:     utls.NewLRUClientSessionCache(0),
 		quicTLSClientSessionCache: tls.NewLRUClientSessionCache(0),
 	}
+
+	// Initialize the current network context. This context represents the
+	// lifetime of the host's current active network interface. When
+	// Controller.NetworkChanged is called (by the Android and iOS platform
+	// code), the previous current network interface is considered to be no
+	// longer active and the corresponding current network context is canceled.
+	// Components may use currentNetworkCtx to cancel and close old network
+	// connections and quickly initiate new connections when the active
+	// interface changes.
+
+	controller.currentNetworkCtx, controller.currentNetworkCancelFunc =
+		context.WithCancel(context.Background())
 
 	// Initialize untunneledDialConfig, used by untunneled dials including
 	// remote server list and upgrade downloads.
@@ -411,6 +427,9 @@ func (controller *Controller) Run(ctx context.Context) {
 		controller.packetTunnelClient.Stop()
 	}
 
+	// Cleanup current network context
+	controller.currentNetworkCancelFunc()
+
 	// All workers -- runTunnels, establishment workers, and auxilliary
 	// workers such as fetch remote server list and untunneled uprade
 	// download -- operate with the controller run context and will all
@@ -435,6 +454,37 @@ func (controller *Controller) SignalComponentFailure() {
 // next tunnel connection.
 func (controller *Controller) SetDynamicConfig(sponsorID string, authorizations []string) {
 	controller.config.SetDynamicConfig(sponsorID, authorizations)
+}
+
+// NetworkChanged initiates a reset of all open network connections, including
+// a tunnel reconnect, if one is running, as well as terminating any in-proxy
+// proxy connections.
+func (controller *Controller) NetworkChanged() {
+
+	// Explicitly reset components that don't use the current network context.
+	controller.TerminateNextActiveTunnel()
+	if controller.inproxyProxyBrokerClientManager != nil {
+		controller.inproxyProxyBrokerClientManager.NetworkChanged()
+	}
+	controller.inproxyClientBrokerClientManager.NetworkChanged()
+
+	controller.currentNetworkMutex.Lock()
+	defer controller.currentNetworkMutex.Unlock()
+
+	// Cancel the previous current network context, which will interrupt any
+	// operations using this context.
+	controller.currentNetworkCancelFunc()
+
+	// Create a new context for the new current network.
+	controller.currentNetworkCtx, controller.currentNetworkCancelFunc =
+		context.WithCancel(context.Background())
+}
+
+func (controller *Controller) getCurrentNetworkContext() context.Context {
+	controller.currentNetworkMutex.Lock()
+	defer controller.currentNetworkMutex.Unlock()
+
+	return controller.currentNetworkCtx
 }
 
 // TerminateNextActiveTunnel terminates the active tunnel, which will initiate
@@ -2936,6 +2986,7 @@ func (controller *Controller) runInproxyProxy() {
 		Logger:                        NoticeCommonLogger(debugLogging),
 		EnableWebRTCDebugLogging:      debugLogging,
 		WaitForNetworkConnectivity:    controller.inproxyWaitForNetworkConnectivity,
+		GetCurrentNetworkContext:      controller.getCurrentNetworkContext,
 		GetBrokerClient:               controller.inproxyGetProxyBrokerClient,
 		GetBaseAPIParameters:          controller.inproxyGetProxyAPIParameters,
 		MakeWebRTCDialCoordinator:     controller.inproxyMakeProxyWebRTCDialCoordinator,

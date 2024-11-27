@@ -119,8 +119,14 @@ func sshAPIRequestHandler(
 	switch name {
 
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(
+		responsePayload, err := handshakeAPIRequestHandler(
 			support, protocol.PSIPHON_API_PROTOCOL_SSH, sshClient, params)
+		if err != nil {
+			// Handshake failed, disconnect the client.
+			sshClient.stop()
+			return nil, errors.Trace(err)
+		}
+		return responsePayload, nil
 
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(

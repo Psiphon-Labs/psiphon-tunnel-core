@@ -276,3 +276,19 @@ func MergeContextCancel(ctx, cancelCtx context.Context) (context.Context, contex
 		cancel(context.Canceled)
 	}
 }
+
+// MaxDuration returns the maximum duration in durations or 0 if durations is
+// empty.
+func MaxDuration(durations ...time.Duration) time.Duration {
+	if len(durations) == 0 {
+		return 0
+	}
+
+	max := durations[0]
+	for _, d := range durations[1:] {
+		if d > max {
+			max = d
+		}
+	}
+	return max
+}

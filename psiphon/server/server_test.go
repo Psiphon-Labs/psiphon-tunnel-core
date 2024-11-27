@@ -369,6 +369,17 @@ func TestInproxyOSSH(t *testing.T) {
 		})
 }
 
+func TestRestrictInproxy(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:    "INPROXY-WEBRTC-OSSH",
+			doRestrictInproxy: true,
+		})
+}
+
 func TestInproxyQUICOSSH(t *testing.T) {
 	if !quic.Enabled() {
 		t.Skip("QUIC is not enabled")
@@ -578,17 +589,32 @@ func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 		})
 }
 
+func TestBurstMonitorAndLegacyDestinationBytes(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:           "OSSH",
+			requireAuthorization:     true,
+			doTunneledWebRequest:     true,
+			doTunneledNTPRequest:     true,
+			doDanglingTCPConn:        true,
+			doBurstMonitor:           true,
+			doLegacyDestinationBytes: true,
+			doLogHostProvider:        true,
+		})
+}
+
 func TestChangeBytesConfig(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "OSSH",
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doDestinationBytes:   true,
-			doChangeBytesConfig:  true,
-			doLogHostProvider:    true,
+			tunnelProtocol:           "OSSH",
+			requireAuthorization:     true,
+			doTunneledWebRequest:     true,
+			doTunneledNTPRequest:     true,
+			doDanglingTCPConn:        true,
+			doDestinationBytes:       true,
+			doLegacyDestinationBytes: true,
+			doChangeBytesConfig:      true,
+			doLogHostProvider:        true,
 		})
 }
 
@@ -646,34 +672,36 @@ func TestLegacyAPIEncoding(t *testing.T) {
 }
 
 type runServerConfig struct {
-	tunnelProtocol       string
-	clientTunnelProtocol string
-	passthrough          bool
-	tlsProfile           string
-	doHotReload          bool
-	doDefaultSponsorID   bool
-	denyTrafficRules     bool
-	requireAuthorization bool
-	omitAuthorization    bool
-	doTunneledWebRequest bool
-	doTunneledNTPRequest bool
-	applyPrefix          bool
-	forceFragmenting     bool
-	forceLivenessTest    bool
-	doPruneServerEntries bool
-	doDanglingTCPConn    bool
-	doPacketManipulation bool
-	doBurstMonitor       bool
-	doSplitTunnel        bool
-	limitQUICVersions    bool
-	doDestinationBytes   bool
-	doChangeBytesConfig  bool
-	doLogHostProvider    bool
-	inspectFlows         bool
-	doSteeringIP         bool
-	doTargetBrokerSpecs  bool
-	useLegacyAPIEncoding bool
-	doPersonalPairing    bool
+	tunnelProtocol           string
+	clientTunnelProtocol     string
+	passthrough              bool
+	tlsProfile               string
+	doHotReload              bool
+	doDefaultSponsorID       bool
+	denyTrafficRules         bool
+	requireAuthorization     bool
+	omitAuthorization        bool
+	doTunneledWebRequest     bool
+	doTunneledNTPRequest     bool
+	applyPrefix              bool
+	forceFragmenting         bool
+	forceLivenessTest        bool
+	doPruneServerEntries     bool
+	doDanglingTCPConn        bool
+	doPacketManipulation     bool
+	doBurstMonitor           bool
+	doSplitTunnel            bool
+	limitQUICVersions        bool
+	doDestinationBytes       bool
+	doLegacyDestinationBytes bool
+	doChangeBytesConfig      bool
+	doLogHostProvider        bool
+	inspectFlows             bool
+	doSteeringIP             bool
+	doTargetBrokerSpecs      bool
+	useLegacyAPIEncoding     bool
+	doPersonalPairing        bool
+	doRestrictInproxy        bool
 }
 
 var (
@@ -776,7 +804,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.applyPrefix ||
 		runConfig.forceFragmenting ||
 		runConfig.doBurstMonitor ||
-		runConfig.doDestinationBytes
+		runConfig.doDestinationBytes ||
+		runConfig.doLegacyDestinationBytes
 
 	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
@@ -912,10 +941,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			livenessTestSize,
 			runConfig.doBurstMonitor,
 			runConfig.doDestinationBytes,
+			runConfig.doLegacyDestinationBytes,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"classic",
-			inproxyTacticsParametersJSON)
+			inproxyTacticsParametersJSON,
+			runConfig.doRestrictInproxy)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -1181,10 +1212,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				livenessTestSize,
 				runConfig.doBurstMonitor,
 				runConfig.doDestinationBytes,
+				runConfig.doLegacyDestinationBytes,
 				runConfig.applyPrefix,
 				runConfig.forceFragmenting,
 				"consistent",
-				inproxyTacticsParametersJSON)
+				inproxyTacticsParametersJSON,
+				runConfig.doRestrictInproxy)
 		}
 
 		p, _ := os.FindProcess(os.Getpid())
@@ -1491,6 +1524,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	pruneServerEntriesNoticesEmitted := make(chan struct{}, 1)
 	serverAlertDisallowedNoticesEmitted := make(chan struct{}, 1)
 	untunneledPortForward := make(chan struct{}, 1)
+	discardTunnel := make(chan struct{}, 1)
 
 	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
@@ -1562,6 +1596,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				if connectedClients == 1 && bytesUp > 0 && bytesDown > 0 {
 					sendNotificationReceived(inproxyActivity)
 				}
+
+			case "Info":
+				if strings.Contains(payload["message"].(string), "discard tunnel") {
+					sendNotificationReceived(discardTunnel)
+				}
 			}
 
 			if printNotice {
@@ -1614,16 +1653,23 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		close(timeoutSignal)
 	}()
 
-	waitOnNotification(t, connectedServer, timeoutSignal, "connected server timeout exceeded")
-	if doInproxy {
-		waitOnNotification(t, inproxyActivity, timeoutSignal, "inproxy activity timeout exceeded")
+	expectDiscardTunnel := runConfig.doRestrictInproxy
+
+	if expectDiscardTunnel {
+		waitOnNotification(t, discardTunnel, timeoutSignal, "discard tunnel timeout exceeded")
+		return
+	} else {
+		waitOnNotification(t, connectedServer, timeoutSignal, "connected server timeout exceeded")
+		if doInproxy {
+			waitOnNotification(t, inproxyActivity, timeoutSignal, "inproxy activity timeout exceeded")
+		}
+		waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
+		waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
 	}
-	waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
-	waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
 
 	if runConfig.doChangeBytesConfig {
 
-		if !runConfig.doDestinationBytes {
+		if !runConfig.doDestinationBytes || !runConfig.doLegacyDestinationBytes {
 			t.Fatalf("invalid test configuration")
 		}
 
@@ -1649,10 +1695,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			livenessTestSize,
 			runConfig.doBurstMonitor,
 			false,
+			false,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"consistent",
-			inproxyTacticsParametersJSON)
+			inproxyTacticsParametersJSON,
+			runConfig.doRestrictInproxy)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -1796,6 +1844,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		expectQUICVersion = limitQUICVersions[0]
 	}
 	expectDestinationBytesFields := runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig
+	expectLegacyDestinationBytesFields := runConfig.doLegacyDestinationBytes && !runConfig.doChangeBytesConfig
 	expectMeekHTTPVersion := ""
 	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
 		if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
@@ -1829,6 +1878,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectUDPDataTransfer,
 			expectQUICVersion,
 			expectDestinationBytesFields,
+			expectLegacyDestinationBytesFields,
 			passthroughAddress,
 			expectMeekHTTPVersion,
 			inproxyTestConfig,
@@ -2086,6 +2136,7 @@ func checkExpectedServerTunnelLogFields(
 	expectUDPDataTransfer bool,
 	expectQUICVersion string,
 	expectDestinationBytesFields bool,
+	expectLegacyDestinationBytesFields bool,
 	expectPassthroughAddress *string,
 	expectMeekHTTPVersion string,
 	inproxyTestConfig *inproxyTestConfig,
@@ -2692,12 +2743,11 @@ func checkExpectedServerTunnelLogFields(
 	}
 
 	for _, name := range []string{
-		"dest_bytes_asn",
-		"dest_bytes_up_tcp",
-		"dest_bytes_down_tcp",
-		"dest_bytes_up_udp",
-		"dest_bytes_down_udp",
-		"dest_bytes",
+		"asn_dest_bytes",
+		"asn_dest_bytes_up_tcp",
+		"asn_dest_bytes_down_tcp",
+		"asn_dest_bytes_up_udp",
+		"asn_dest_bytes_down_udp",
 	} {
 		if expectDestinationBytesFields && fields[name] == nil {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -2708,6 +2758,46 @@ func checkExpectedServerTunnelLogFields(
 	}
 
 	if expectDestinationBytesFields {
+		for _, pair := range [][]string{
+			{"asn_dest_bytes", "bytes"},
+			{"asn_dest_bytes_up_tcp", "bytes_up_tcp"},
+			{"asn_dest_bytes_down_tcp", "bytes_down_tcp"},
+			{"asn_dest_bytes_up_udp", "bytes_up_udp"},
+			{"asn_dest_bytes_down_udp", "bytes_down_udp"},
+		} {
+			if _, ok := fields[pair[0]].(map[string]any)[testGeoIPASN].(float64); !ok {
+				return fmt.Errorf("missing field entry %s: '%v'", pair[0], testGeoIPASN)
+			}
+			value0 := int64(fields[pair[0]].(map[string]any)[testGeoIPASN].(float64))
+			value1 := int64(fields[pair[1]].(float64))
+			ok := value0 == value1
+			if pair[0] == "asn_dest_bytes_up_udp" || pair[0] == "asn_dest_bytes_down_udp" || pair[0] == "asn_dest_bytes" {
+				// DNS requests are excluded from destination bytes counting
+				ok = value0 > 0 && value0 < value1
+			}
+			if !ok {
+				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
+			}
+		}
+	}
+
+	for _, name := range []string{
+		"dest_bytes_asn",
+		"dest_bytes_up_tcp",
+		"dest_bytes_down_tcp",
+		"dest_bytes_up_udp",
+		"dest_bytes_down_udp",
+		"dest_bytes",
+	} {
+		if expectLegacyDestinationBytesFields && fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+
+		} else if !expectLegacyDestinationBytesFields && fields[name] != nil {
+			return fmt.Errorf("unexpected field '%s'", name)
+		}
+	}
+
+	if expectLegacyDestinationBytesFields {
 		name := "dest_bytes_asn"
 		if fields[name].(string) != testGeoIPASN {
 			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
@@ -3385,10 +3475,12 @@ func paveTacticsConfigFile(
 	livenessTestSize int,
 	doBurstMonitor bool,
 	doDestinationBytes bool,
+	doLegacyDestinationBytes bool,
 	applyOsshPrefix bool,
 	enableOsshPrefixFragmenting bool,
 	discoveryStategy string,
-	inproxyParametersJSON string) {
+	inproxyParametersJSON string,
+	doRestrictAllInproxyProviderRegions bool) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -3402,6 +3494,8 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
+          %s
+          %s
           %s
           %s
           %s
@@ -3490,6 +3584,13 @@ func paveTacticsConfigFile(
 	destinationBytesParameters := ""
 	if doDestinationBytes {
 		destinationBytesParameters = fmt.Sprintf(`
+          "DestinationBytesMetricsASNs" : ["%s"],
+	`, testGeoIPASN)
+	}
+
+	legacyDestinationBytesParameters := ""
+	if doLegacyDestinationBytes {
+		legacyDestinationBytesParameters = fmt.Sprintf(`
           "DestinationBytesMetricsASN" : "%s",
 	`, testGeoIPASN)
 	}
@@ -3506,6 +3607,14 @@ func paveTacticsConfigFile(
 	`, strconv.FormatBool(enableOsshPrefixFragmenting))
 	}
 
+	restrictInproxyParameters := ""
+	if doRestrictAllInproxyProviderRegions {
+		restrictInproxyParameters = `
+		"RestrictInproxyProviderRegions": {"" : [""]},
+		"RestrictInproxyProviderIDsServerProbability": 1.0,
+	`
+	}
+
 	tacticsConfigJSON := fmt.Sprintf(
 		tacticsConfigJSONFormat,
 		tacticsRequestPublicKey,
@@ -3513,8 +3622,10 @@ func paveTacticsConfigFile(
 		tacticsRequestObfuscatedKey,
 		burstParameters,
 		destinationBytesParameters,
+		legacyDestinationBytesParameters,
 		osshPrefix,
 		inproxyParametersJSON,
+		restrictInproxyParameters,
 		tunnelProtocol,
 		tunnelProtocol,
 		tunnelProtocol,

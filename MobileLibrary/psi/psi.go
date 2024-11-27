@@ -280,6 +280,18 @@ func ReconnectTunnel() {
 	}
 }
 
+// NetworkChanged initiates a reset of all open network connections, including
+// a tunnel reconnect.
+func NetworkChanged() {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller != nil {
+		controller.NetworkChanged()
+	}
+}
+
 // SetDynamicConfig overrides the sponsor ID and authorizations fields set in
 // the config passed to Start. SetDynamicConfig has no effect if no Controller
 // is started.
