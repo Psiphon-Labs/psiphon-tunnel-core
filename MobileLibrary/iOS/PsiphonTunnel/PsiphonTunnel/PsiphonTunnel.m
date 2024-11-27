@@ -192,17 +192,20 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 
 // See comment in header
 + (NSURL*)homepageFilePath:(NSURL*)dataRootDirectory {
-    return [NSURL URLWithString:GoPsiHomepageFilePath(dataRootDirectory.path)];
+    return [NSURL fileURLWithPath:GoPsiHomepageFilePath(dataRootDirectory.path)
+                      isDirectory:FALSE];
 }
 
 // See comment in header
 + (NSURL*)noticesFilePath:(NSURL*)dataRootDirectory {
-    return [NSURL URLWithString:GoPsiNoticesFilePath(dataRootDirectory.path)];
+    return [NSURL fileURLWithPath:GoPsiNoticesFilePath(dataRootDirectory.path)
+                      isDirectory:FALSE];
 }
 
 // See comment in header
 + (NSURL*)olderNoticesFilePath:(NSURL*)dataRootDirectory {
-    return [NSURL URLWithString:GoPsiOldNoticesFilePath(dataRootDirectory.path)];
+    return [NSURL fileURLWithPath:GoPsiOldNoticesFilePath(dataRootDirectory.path)
+                      isDirectory:FALSE];
 }
 
 // See comment in header
