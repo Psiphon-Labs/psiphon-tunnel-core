@@ -20,7 +20,6 @@
 package networkid
 
 import (
-	"fmt"
 	"net"
 	"net/netip"
 	"runtime"
@@ -48,6 +47,8 @@ func getDefaultLocalAddr() (net.IP, error) {
 	// This approach is described in psiphon/common/inproxy/pionNetwork.Interfaces()
 	// The basic idea is that we initialize a UDP connection and see what local
 	// address the system decides to use.
+	// Note that no actual network request is made by these calls. They can be performed
+	// with no network connectivity at all.
 	// TODO: Use common test IP addresses in that function and this.
 
 	// We'll prefer IPv4 and check it first (both might be available)
@@ -153,14 +154,14 @@ func getInterfaceInfo(index int) (networkID, description string, ifType winipcfg
 			uintptr(unsafe.Pointer(n)),
 			uintptr(unsafe.Pointer(&guid)))
 		if hr != 0 {
-			return "", "", 0, fmt.Errorf("GetNetworkId failed: %08x", hr)
+			return "", "", 0, errors.Tracef("GetNetworkId failed: %08x", hr)
 		}
 
 		networkID = guid.String()
 		return networkID, description, ifType, nil
 	}
 
-	return "", "", 0, fmt.Errorf("network connection not found for interface %d", index)
+	return "", "", 0, errors.Tracef("network connection not found for interface %d", index)
 }
 
 // Get the connection type ("WIRED", "WIFI", "MOBILE", "VPN") of the network with the given
@@ -254,8 +255,13 @@ func Get() (string, error) {
 		workThread.reqs = make(chan (chan<- result))
 
 		go func() {
-			const resultCacheDuration = time.Second
+			const resultCacheDuration = 500 * time.Millisecond
 
+			// Go can switch the execution of a goroutine from one OS thread to another
+			// at (almost) any time. This may or may not be risky to do for our win32
+			// (and especially COM) calls, so we're going to explicitly lock this goroutine
+			// to a single OS thread. This shouldn't have any real impact on performance
+			// and will help protect against difficult-to-reproduce errors.
 			runtime.LockOSThread()
 			defer runtime.UnlockOSThread()
 
