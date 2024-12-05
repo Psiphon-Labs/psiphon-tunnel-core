@@ -243,7 +243,7 @@ var workThread struct {
 
 // Get returns the compound network ID; see [psiphon.NetworkIDGetter] for details.
 // This function is safe to call concurrently from multiple goroutines.
-// Note that if this function is called immediately after a network change (within ~100ms)
+// Note that if this function is called immediately after a network change (within ~2000ms)
 // a transitory Network ID may be returned that will change on the next call. The caller
 // may wish to delay responding to a new Network ID until the value is confirmed.
 func Get() (string, error) {
