@@ -192,7 +192,7 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 	previousBrokerClient := brokerClient
 	previousNetworkID := networkID
 	networkID = "NETWORK2"
-	config.networkIDGetter = newStaticNetworkGetter(networkID)
+	config.networkIDGetter = newCachingNetworkIDGetter(config, newStaticNetworkIDGetter(networkID))
 	config.SetResolver(resolver.NewResolver(&resolver.NetworkConfig{}, networkID))
 
 	brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
@@ -217,7 +217,7 @@ func runInproxyBrokerDialParametersTest(t *testing.T) error {
 	// Test: another replay after switch back to previous network ID
 
 	networkID = previousNetworkID
-	config.networkIDGetter = newStaticNetworkGetter(networkID)
+	config.networkIDGetter = newCachingNetworkIDGetter(config, newStaticNetworkIDGetter(networkID))
 
 	brokerClient, brokerDialParams, err = manager.GetBrokerClient(networkID)
 	if err != nil {
@@ -422,7 +422,7 @@ func runInproxyNATStateTest() error {
 	// Test: reset
 
 	networkID = "NETWORK2"
-	config.networkIDGetter = newStaticNetworkGetter(networkID)
+	config.networkIDGetter = newCachingNetworkIDGetter(config, newStaticNetworkIDGetter(networkID))
 
 	manager.reset()
 

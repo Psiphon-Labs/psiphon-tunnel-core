@@ -26,7 +26,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -236,9 +235,6 @@ var workThread struct {
 	init sync.Once
 	reqs chan (chan<- result)
 	err  error
-
-	cachedResult string
-	cacheExpiry  time.Time
 }
 
 // Get returns the compound network ID; see [psiphon.NetworkIDGetter] for details.
@@ -247,19 +243,14 @@ var workThread struct {
 // a transitory Network ID may be returned that will change on the next call. The caller
 // may wish to delay responding to a new Network ID until the value is confirmed.
 func Get() (string, error) {
-	// It is not clear if the COM NetworkListManager calls are threadsafe. We're using them
-	// read-only and they're probably fine, but we're not sure. Additionally, our networkID
-	// retrieval code is somewhat slow: 3.5ms. This function gets called by each connection
-	// attempt (in the horse race, etc.), so this extra time might add ~10% to a such an
-	// attempt. The value is very unlikely to change in a short amount of time, so it seems
-	// like a good optimization to cache the result. We'll restrict our work to single
-	// thread to achieve both goals.
+
+	// It is not clear if the COM NetworkListManager calls are threadsafe.
+	// We're using them read-only and they're probably fine, but we're not
+	// sure. We'll restrict our work to single thread.
 	workThread.init.Do(func() {
 		workThread.reqs = make(chan (chan<- result))
 
 		go func() {
-			const resultCacheDuration = 500 * time.Millisecond
-
 			// Go can switch the execution of a goroutine from one OS thread to another
 			// at (almost) any time. This may or may not be risky to do for our win32
 			// (and especially COM) calls, so we're going to explicitly lock this goroutine
@@ -276,14 +267,8 @@ func Get() (string, error) {
 			defer windows.CoUninitialize()
 
 			for resCh := range workThread.reqs {
-				if workThread.cachedResult != "" && workThread.cacheExpiry.After(time.Now()) {
-					resCh <- result{workThread.cachedResult, nil}
-				} else {
-					networkID, err := getNetworkID()
-					resCh <- result{networkID, err}
-					workThread.cachedResult = networkID
-					workThread.cacheExpiry = time.Now().Add(resultCacheDuration)
-				}
+				networkID, err := getNetworkID()
+				resCh <- result{networkID, err}
 			}
 		}()
 	})
