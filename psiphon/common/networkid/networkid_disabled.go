@@ -27,6 +27,6 @@ func Enabled() bool {
 	return false
 }
 
-func Get() (compoundID, connectionType string, isVPN bool, err error) {
-	return "", "", false, fmt.Errorf("operation is not enabled")
+func Get() (string, error) {
+	return "", fmt.Errorf("operation is not enabled")
 }
