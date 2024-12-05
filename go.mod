@@ -51,6 +51,7 @@ require (
 	github.com/florianl/go-nfqueue v1.1.1-0.20200829120558-a2f196e98ab0
 	github.com/flynn/noise v1.0.1-0.20220214164934-d803f5c4b0f4
 	github.com/fxamacker/cbor/v2 v2.5.0
+	github.com/go-ole/go-ole v1.3.0
 	github.com/gobwas/glob v0.2.4-0.20180402141543-f00a7392b439
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
 	github.com/google/gopacket v1.1.19
@@ -85,6 +86,7 @@ require (
 	golang.org/x/term v0.19.0
 	golang.org/x/time v0.5.0
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
+	golang.zx2c4.com/wireguard/windows v0.5.3
 	tailscale.com v1.58.2
 )
 
@@ -102,7 +104,6 @@ require (
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
 	github.com/gaukas/godicttls v0.0.4 // indirect
-	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
@@ -152,7 +153,6 @@ require (
 	golang.org/x/mod v0.14.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.15.0 // indirect
-	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

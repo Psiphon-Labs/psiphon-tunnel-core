@@ -688,6 +688,7 @@ tailscale.com/util/vizerror
 tailscale.com/util/winutil
 tailscale.com/version
 tailscale.com/version/distro
+tailscale.com/wgengine/winnet
 # gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-20230725223418-2d2e5b4a16ba
 # github.com/pion/dtls/v2 => ./replace/dtls
 # github.com/pion/ice/v2 => ./replace/ice
