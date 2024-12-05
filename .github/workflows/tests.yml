@@ -100,6 +100,7 @@ jobs:
           go test -v -timeout 30m -race ./psiphon
           go test -v -race ./ClientLibrary/clientlib
           go test -v -race ./Server/logging/analysis
+          go test -v -race ./psiphon/common/networkid
 
       # TODO: fix and re-enable test
       # sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=tun.coverprofile ./psiphon/common/tun
@@ -133,6 +134,7 @@ jobs:
           go test -v -timeout 30m -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
           go test -v -covermode=count -coverprofile=clientlib.coverprofile ./ClientLibrary/clientlib
           go test -v -covermode=count -coverprofile=analysis.coverprofile ./Server/logging/analysis
+          go test -v -covermode=count -coverprofile=networkid.coverprofile ./psiphon/common/networkid
           $GOPATH/bin/gover
           $GOPATH/bin/goveralls -coverprofile=gover.coverprofile -service=github -repotoken "$COVERALLS_TOKEN"
 
