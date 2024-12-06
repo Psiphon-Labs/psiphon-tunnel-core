@@ -35,11 +35,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/networkid"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
@@ -318,7 +320,8 @@ type Config struct {
 
 	// NetworkID, when not blank, is used as the identifier for the host's
 	// current active network.
-	// NetworkID is ignored when NetworkIDGetter is set.
+	// NetworkID is ignored when NetworkIDGetter is set, or when
+	// common/networkid is enabled.
 	NetworkID string
 
 	// DisableTactics disables tactics operations including requests, payload
@@ -1060,9 +1063,10 @@ type Config struct {
 	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int
 	InproxyProxyIncompatibleNetworkTypes                    []string
 	InproxyClientIncompatibleNetworkTypes                   []string
+	InproxySkipAwaitFullyConnected                          bool
+	InproxyEnableWebRTCDebugLogging                         bool
 
-	InproxySkipAwaitFullyConnected  bool
-	InproxyEnableWebRTCDebugLogging bool
+	NetworkIDCacheTTLMilliseconds *int
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -1079,7 +1083,7 @@ type Config struct {
 	authorizations     []string
 
 	deviceBinder    DeviceBinder
-	networkIDGetter NetworkIDGetter
+	networkIDGetter *cachingNetworkIDGetter
 
 	clientFeatures []string
 
@@ -1507,6 +1511,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	// wrap config.DeviceBinder and config.NetworkIDGetter/NetworkID with
 	// loggers.
 	//
+	// The network ID getter is further wrapped with a cache (see
+	// cachingNetworkIDGetter doc).
+	//
 	// New variables are set to avoid mutating input config fields.
 	// Internally, code must use config.deviceBinder and
 	// config.networkIDGetter and not the input/exported fields.
@@ -1518,17 +1525,23 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	networkIDGetter := config.NetworkIDGetter
 
 	if networkIDGetter == nil {
-		// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
-		// this method of network identification is not dynamic and will not reflect
-		// network changes that occur while running.
-		if config.NetworkID != "" {
-			networkIDGetter = newStaticNetworkGetter(config.NetworkID)
+		if networkid.Enabled() {
+			networkIDGetter = newCommonNetworkIDGetter()
 		} else {
-			networkIDGetter = newStaticNetworkGetter("UNKNOWN")
+			// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
+			// this method of network identification is not dynamic and will not reflect
+			// network changes that occur while running.
+			if config.NetworkID != "" {
+				networkIDGetter = newStaticNetworkIDGetter(config.NetworkID)
+			} else {
+				networkIDGetter = newStaticNetworkIDGetter(unknownNetworkID)
+			}
 		}
 	}
 
-	config.networkIDGetter = newLoggingNetworkIDGetter(networkIDGetter)
+	config.networkIDGetter = newCachingNetworkIDGetter(
+		config,
+		newLoggingNetworkIDGetter(networkIDGetter))
 
 	// Initialize config.clientFeatures, which adds feature names on top of
 	// those specified by the host application in config.ClientFeatures.
@@ -2760,6 +2773,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyClientIncompatibleNetworkTypes] = config.InproxyClientIncompatibleNetworkTypes
 	}
 
+	if config.NetworkIDCacheTTLMilliseconds != nil {
+		applyParameters[parameters.NetworkIDCacheTTL] = fmt.Sprintf("%dms", *config.NetworkIDCacheTTLMilliseconds)
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -3655,16 +3672,34 @@ func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
 	return deviceInfo, err
 }
 
-type staticNetworkGetter struct {
+const unknownNetworkID = "UNKNOWN"
+
+type staticNetworkIDGetter struct {
 	networkID string
 }
 
-func newStaticNetworkGetter(networkID string) *staticNetworkGetter {
-	return &staticNetworkGetter{networkID: networkID}
+func newStaticNetworkIDGetter(networkID string) *staticNetworkIDGetter {
+	return &staticNetworkIDGetter{networkID: networkID}
 }
 
-func (n *staticNetworkGetter) GetNetworkID() string {
+func (n *staticNetworkIDGetter) GetNetworkID() string {
 	return n.networkID
+}
+
+type commonNetworkIDGetter struct {
+}
+
+func newCommonNetworkIDGetter() *commonNetworkIDGetter {
+	return &commonNetworkIDGetter{}
+}
+
+func (n *commonNetworkIDGetter) GetNetworkID() string {
+	networkID, err := networkid.Get()
+	if err != nil {
+		NoticeError("networkid.Get failed: %v", errors.Trace(err))
+		return unknownNetworkID
+	}
+	return networkID
 }
 
 type loggingNetworkIDGetter struct {
@@ -3692,6 +3727,60 @@ func (n *loggingNetworkIDGetter) GetNetworkID() string {
 	NoticeNetworkID(logNetworkID)
 
 	return networkID
+}
+
+// cachingNetworkIDGetter caches the GetNetworkID result from the underlying
+// network ID getter. The current GetNetworkID implementations take in the
+// range of 1-7ms (Android); 2-3ms (iOS); ~3.5ms (Windows) to execute, on
+// modern devices. To minimize delaying dials and other operations that start
+// with fetching the current network ID, the return values are cached for a
+// short time. On platforms that invoke NetworkChanged, the cache is flushed
+// immediately upon a network change.
+type cachingNetworkIDGetter struct {
+	config *Config
+	n      NetworkIDGetter
+
+	mutex           sync.Mutex
+	cachedNetworkID string
+	cacheExpiry     time.Time
+}
+
+func newCachingNetworkIDGetter(
+	config *Config, n NetworkIDGetter) *cachingNetworkIDGetter {
+
+	return &cachingNetworkIDGetter{
+		config: config,
+		n:      n,
+	}
+}
+
+func (n *cachingNetworkIDGetter) GetNetworkID() string {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	if n.cachedNetworkID != "" && n.cacheExpiry.After(time.Now()) {
+		return n.cachedNetworkID
+	}
+
+	networkID := n.n.GetNetworkID()
+
+	p := n.config.GetParameters().Get()
+	ttl := p.Duration(parameters.NetworkIDCacheTTL)
+
+	if ttl > 0 {
+		n.cachedNetworkID = networkID
+		n.cacheExpiry = time.Now().Add(ttl)
+	}
+
+	return networkID
+}
+
+func (n *cachingNetworkIDGetter) FlushCache() {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	n.cachedNetworkID = ""
+	n.cacheExpiry = time.Time{}
 }
 
 // migrationsFromLegacyNoticeFilePaths returns the file migrations which must be

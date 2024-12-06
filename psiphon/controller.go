@@ -462,20 +462,25 @@ func (controller *Controller) SetDynamicConfig(sponsorID string, authorizations 
 func (controller *Controller) NetworkChanged() {
 
 	// Explicitly reset components that don't use the current network context.
+
 	controller.TerminateNextActiveTunnel()
+
 	if controller.inproxyProxyBrokerClientManager != nil {
 		controller.inproxyProxyBrokerClientManager.NetworkChanged()
 	}
 	controller.inproxyClientBrokerClientManager.NetworkChanged()
 
+	controller.config.networkIDGetter.FlushCache()
+
+	// Cancel the previous current network context, which will interrupt any
+	// operations using this context. Then create a new context for the new
+	// current network.
+
 	controller.currentNetworkMutex.Lock()
 	defer controller.currentNetworkMutex.Unlock()
 
-	// Cancel the previous current network context, which will interrupt any
-	// operations using this context.
 	controller.currentNetworkCancelFunc()
 
-	// Create a new context for the new current network.
 	controller.currentNetworkCtx, controller.currentNetworkCancelFunc =
 		context.WithCancel(context.Background())
 }
