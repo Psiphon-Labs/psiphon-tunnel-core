@@ -307,6 +307,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	dialParams.Succeeded()
 
 	testNetworkID = prng.HexString(8)
+	clientConfig.networkIDGetter.FlushCache()
 
 	dialParams, err = MakeDialParameters(
 		clientConfig, steeringIPCache, nil, nil, nil, canReplay, selectProtocol, serverEntries[0], nil, nil, false, 0, 0)
