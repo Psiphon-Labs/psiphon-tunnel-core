@@ -1278,6 +1278,14 @@ func getBaseAPIParameters(
 				params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
 			}
 
+			if dialParams.ResolveParameters.RandomQNameCasingSeed != nil {
+				params["dns_qname_random_casing"] = "1"
+			}
+
+			if dialParams.ResolveParameters.ResponseQNameMustMatch {
+				params["dns_qname_must_match"] = "1"
+			}
+
 			params["dns_attempt"] = strconv.Itoa(
 				dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 		}

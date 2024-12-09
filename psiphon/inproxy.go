@@ -2085,6 +2085,14 @@ func (dialParams *InproxySTUNDialParameters) GetMetrics() common.LogFields {
 			logFields["inproxy_webrtc_dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
 		}
 
+		if dialParams.ResolveParameters.RandomQNameCasingSeed != nil {
+			logFields["inproxy_webrtc_dns_qname_random_casing"] = "1"
+		}
+
+		if dialParams.ResolveParameters.ResponseQNameMustMatch {
+			logFields["inproxy_webrtc_dns_qname_must_match"] = "1"
+		}
+
 		logFields["inproxy_webrtc_dns_attempt"] = strconv.Itoa(
 			dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 	}

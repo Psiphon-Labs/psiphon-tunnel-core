@@ -947,6 +947,8 @@ type Config struct {
 	DNSResolverProtocolTransformSpecs                transforms.Specs
 	DNSResolverProtocolTransformScopedSpecNames      transforms.ScopedSpecNames
 	DNSResolverProtocolTransformProbability          *float64
+	DNSResolverQNameRandomizeCasingProbability       *float64
+	DNSResolverQNameMustMatchProbability             *float64
 	DNSResolverIncludeEDNS0Probability               *float64
 	DNSResolverCacheExtensionInitialTTLMilliseconds  *int
 	DNSResolverCacheExtensionVerifiedTTLMilliseconds *int
@@ -2381,6 +2383,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.DNSResolverProtocolTransformProbability] = *config.DNSResolverProtocolTransformProbability
 	}
 
+	if config.DNSResolverQNameRandomizeCasingProbability != nil {
+		applyParameters[parameters.DNSResolverQNameRandomizeCasingProbability] = *config.DNSResolverQNameRandomizeCasingProbability
+	}
+
+	if config.DNSResolverQNameMustMatchProbability != nil {
+		applyParameters[parameters.DNSResolverQNameMustMatchProbability] = *config.DNSResolverQNameMustMatchProbability
+	}
+
 	if config.DNSResolverIncludeEDNS0Probability != nil {
 		applyParameters[parameters.DNSResolverIncludeEDNS0Probability] = *config.DNSResolverIncludeEDNS0Probability
 	}
@@ -3287,6 +3297,16 @@ func (config *Config) setDialParametersHash() {
 	if config.DNSResolverProtocolTransformProbability != nil {
 		hash.Write([]byte("DNSResolverProtocolTransformProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.DNSResolverProtocolTransformProbability)
+	}
+
+	if config.DNSResolverQNameRandomizeCasingProbability != nil {
+		hash.Write([]byte("DNSResolverQNameRandomizeCasingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.DNSResolverQNameRandomizeCasingProbability)
+	}
+
+	if config.DNSResolverQNameMustMatchProbability != nil {
+		hash.Write([]byte("DNSResolverQNameMustMatchProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.DNSResolverQNameMustMatchProbability)
 	}
 
 	if config.DNSResolverIncludeEDNS0Probability != nil {

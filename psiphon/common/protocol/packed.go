@@ -802,7 +802,18 @@ func init() {
 		{149, "quic_dial_early", intConverter},
 		{150, "quic_obfuscated_psk", intConverter},
 
-		// Next key value = 151
+		// Specs:
+		// parameters.DNSResolverQNameRandomizeCasingProbability
+		// parameters.DNSResolverQNameMustMatchProbability
+
+		{151, "dns_qname_random_casing", intConverter},
+		{152, "dns_qname_must_match", intConverter},
+		{153, "inproxy_broker_dns_qname_random_casing", intConverter},
+		{154, "inproxy_broker_dns_qname_must_match", intConverter},
+		{155, "inproxy_webrtc_dns_qname_random_casing", intConverter},
+		{156, "inproxy_webrtc_dns_qname_must_match", intConverter},
+
+		// Next key value = 157
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

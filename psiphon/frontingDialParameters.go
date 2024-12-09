@@ -518,6 +518,14 @@ func (meekDialParameters *FrontedMeekDialParameters) GetMetrics(overridePrefix s
 			logFields[prefix+"dns_transform"] = meekDialParameters.ResolveParameters.ProtocolTransformName
 		}
 
+		if meekDialParameters.ResolveParameters.RandomQNameCasingSeed != nil {
+			logFields[prefix+"dns_qname_random_casing"] = "1"
+		}
+
+		if meekDialParameters.ResolveParameters.ResponseQNameMustMatch {
+			logFields[prefix+"dns_qname_must_match"] = "1"
+		}
+
 		logFields[prefix+"dns_attempt"] = strconv.Itoa(
 			meekDialParameters.ResolveParameters.GetFirstAttemptWithAnswer())
 	}
