@@ -147,12 +147,24 @@ func newPortMapper(
 var portmapperDependencyVersionCheck bool
 
 func init() {
+	expectedDependencyVersion := "v1.58.2"
+
+	// portmapper.Version is a temporary vendor patch, in the dependency, to
+	// accomodate GOPATH builds which cannot use debug.ReadBuildInfo, and go
+	// tests, before Go 1.24, which don't get dependency info in the returned
+	// BuildInfo.
+	//
+	// TODO: replace temporary patch with full fork of portmapper, and remove
+	// this temporary case, if not the entire dependency version check
+	// (see "TODO: fork" in cloneProbe).
+	portmapperDependencyVersionCheck = portmapper.Version == expectedDependencyVersion
+
 	buildInfo, ok := debug.ReadBuildInfo()
 	if !ok {
 		return
 	}
 	for _, dep := range buildInfo.Deps {
-		if dep.Path == "tailscale.com" && dep.Version == "v1.58.2" {
+		if dep.Path == "tailscale.com" && dep.Version == expectedDependencyVersion {
 			portmapperDependencyVersionCheck = true
 			return
 		}
@@ -166,7 +178,7 @@ func (p *portMapper) cloneProbe(probe *PortMappingProbe) error {
 	// The required portmapper.Client fields are not exported by
 	// tailscale/net/portmapper, so unsafe reflection is used to copy the
 	// values. A simple portmapper.Client struct copy can't be performed as
-	// the struct contain a sync.Mutex field.
+	// the struct contains a sync.Mutex field.
 	//
 	// The following is assumed, based on the pinned dependency version:
 	//
