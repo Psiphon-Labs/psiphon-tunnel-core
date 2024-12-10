@@ -74,6 +74,28 @@ import (
 // The return value is a payload that may be exchanged with another client;
 // when "", the export failed and a diagnostic notice has been logged.
 func ExportExchangePayload(config *Config) string {
+
+	// Handle in-proxy limitations. The outer client should not call exchange
+	// in these cases in the first place, but these checks ensure we don't
+	// export invalid payloads.
+	//
+	// If running in proxy-only mode, no payload is exported, since there is
+	// not necessarily any recently successful server entry.
+	//
+	// If running in personal pairing tunnel, no payload is exported, since
+	// the receiving outer client needs to be aware of and configure personal
+	// pairing mode, but the payload is currently opaque to the outer client.
+	if config.DisableTunnels {
+		NoticeWarning(
+			"ExportExchangePayload skipped due to DisableTunnels")
+		return ""
+	}
+	if config.networkIDGetter.config.IsInproxyClientPersonalPairingMode() {
+		NoticeWarning(
+			"ExportExchangePayload skipped due to IsInproxyClientPersonalPairingMode")
+		return ""
+	}
+
 	payload, err := exportExchangePayload(config)
 	if err != nil {
 		NoticeWarning("ExportExchangePayload failed: %s", errors.Trace(err))
