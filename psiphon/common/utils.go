@@ -33,7 +33,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -295,26 +294,24 @@ func MaxDuration(durations ...time.Duration) time.Duration {
 	return max
 }
 
-// ToRandomCasing returns s with each Unicode letter randomly mapped to either
-// its upper or lower case.
-func ToRandomCasing(s string, seed *prng.Seed) string {
+// ToRandomASCIICasing returns s with each ASCII letter randomly mapped to
+// either its upper or lower case.
+func ToRandomASCIICasing(s string, seed *prng.Seed) string {
 
 	PRNG := prng.NewPRNGWithSeed(seed)
 
-	var result strings.Builder
-	result.Grow(len(s))
+	var b strings.Builder
+	b.Grow(len(s))
 
 	for _, r := range s {
-		if unicode.IsLetter(r) {
-			if PRNG.FlipCoin() {
-				result.WriteRune(unicode.ToLower(r))
-			} else {
-				result.WriteRune(unicode.ToUpper(r))
-			}
+		isLower := ('a' <= r && r <= 'z')
+		isUpper := ('A' <= r && r <= 'Z')
+		if (isLower || isUpper) && PRNG.FlipCoin() {
+			b.WriteRune(r ^ 0x20)
 		} else {
-			result.WriteRune(r)
+			b.WriteRune(r)
 		}
 	}
 
-	return result.String()
+	return b.String()
 }

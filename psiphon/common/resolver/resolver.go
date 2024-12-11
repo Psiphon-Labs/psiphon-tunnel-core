@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/miekg/dns"
+	"golang.org/x/net/idna"
 )
 
 const (
@@ -220,7 +221,9 @@ type ResolveParameters struct {
 	//
 	// RFC 1035 does not specify that the question section in the response must
 	// exactly match the question section in the request, but this behavior is
-	// common.
+	// expected [1].
+	//
+	// [1]: https://datatracker.ietf.org/doc/html/draft-vixie-dnsext-dns0x20-00#section-2.2.
 	ResponseQNameMustMatch bool
 
 	// IncludeEDNS0 indicates whether to include the EDNS(0) UDP maximum
@@ -231,6 +234,7 @@ type ResolveParameters struct {
 	IncludeEDNS0 bool
 
 	firstAttemptWithAnswer int32
+	qnameMismatches        int32
 }
 
 // GetFirstAttemptWithAnswer returns the index of the first request attempt
@@ -248,6 +252,26 @@ func (r *ResolveParameters) GetFirstAttemptWithAnswer() int {
 
 func (r *ResolveParameters) setFirstAttemptWithAnswer(attempt int) {
 	atomic.StoreInt32(&r.firstAttemptWithAnswer, int32(attempt))
+}
+
+// GetQNameMismatches returns, for the most recent ResolveIP call using this
+// ResolveParameters, the number of DNS requests where the response's question
+// section either:
+//   - Did not contain exactly one entry; or
+//   - Contained one entry that had a QName (hostname) that did not match the
+//     QName sent in the DNS request.
+//
+// This information is used for logging metrics.
+//
+// The caller is responsible for synchronizing use of a ResolveParameters
+// instance (e.g, use a distinct ResolveParameters per ResolveIP to ensure
+// GetQNameMismatches refers to a specific ResolveIP).
+func (r *ResolveParameters) GetQNameMismatches() int {
+	return int(atomic.LoadInt32(&r.qnameMismatches))
+}
+
+func (r *ResolveParameters) setQNameMismatches(mismatches int) {
+	atomic.StoreInt32(&r.qnameMismatches, int32(mismatches))
 }
 
 // Implementation note: Go's standard net.Resolver supports specifying a
@@ -1525,8 +1549,14 @@ func performDNSQuery(
 		}
 	}
 
+	// Convert to punycode.
+	hostname, err := idna.ToASCII(hostname)
+	if err != nil {
+		return nil, nil, -1, errors.Trace(err)
+	}
+
 	if useRandomQNameCasing {
-		hostname = common.ToRandomCasing(hostname, params.RandomQNameCasingSeed)
+		hostname = common.ToRandomASCIICasing(hostname, params.RandomQNameCasingSeed)
 	}
 
 	// UDPSize sets the receive buffer to > 512, even when we don't include
@@ -1558,7 +1588,7 @@ func performDNSQuery(
 	startTime := time.Now()
 
 	// Send the DNS request
-	err := dnsConn.WriteMsg(request)
+	err = dnsConn.WriteMsg(request)
 	if err != nil {
 		return nil, nil, -1, errors.Trace(err)
 	}
@@ -1566,6 +1596,10 @@ func performDNSQuery(
 	// Read and process the DNS response
 	var IPs []net.IP
 	var TTLs []time.Duration
+	var qnameMismatches int
+	defer func() {
+		params.setQNameMismatches(qnameMismatches)
+	}()
 	var lastErr error
 	RTT := time.Duration(-1)
 	for {
@@ -1606,13 +1640,9 @@ func performDNSQuery(
 			continue
 		}
 
-		if responseQNameMustMatch {
-			if len(response.Question) != 1 {
-				lastErr = errors.Tracef("unexpected QDCount")
-				logWarning(lastErr)
-				continue
-			}
-			if response.Question[0].Name != dns.Fqdn(hostname) {
+		if len(response.Question) != 1 || response.Question[0].Name != dns.Fqdn(hostname) {
+			qnameMismatches++
+			if responseQNameMustMatch {
 				lastErr = errors.Tracef("unexpected QName")
 				logWarning(lastErr)
 				continue

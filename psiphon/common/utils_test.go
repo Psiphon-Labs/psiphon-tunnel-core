@@ -168,16 +168,16 @@ func TestSleepWithContext(t *testing.T) {
 }
 
 func TestToRandomCasing(t *testing.T) {
-	s := "test.to.random.casing.aaaa.bbbb.cccc.dd" // 32 Unicode letters
+	s := "test.to.random.ascii.casing.aaaa.bbbb.c" // 32 Unicode letters
 
 	seed, err := prng.NewSeed()
 	if err != nil {
 		t.Errorf("NewPRNG failed: %s", err)
 	}
 
-	randomized := ToRandomCasing(s, seed)
+	randomized := ToRandomASCIICasing(s, seed)
 
-	// Note: There's a (1/2)^32 chance that the randomized string has the same
+	// Note: there's a (1/2)^32 chance that the randomized string has the same
 	// casing as the input string.
 	if strings.Compare(s, randomized) == 0 {
 		t.Errorf("expected random casing")
@@ -187,7 +187,7 @@ func TestToRandomCasing(t *testing.T) {
 		t.Errorf("expected strings to be identical minus casing")
 	}
 
-	replaySameSeed := ToRandomCasing(s, seed)
+	replaySameSeed := ToRandomASCIICasing(s, seed)
 
 	if strings.Compare(randomized, replaySameSeed) != 0 {
 		t.Errorf("expected randomized string with same seed to be identical")

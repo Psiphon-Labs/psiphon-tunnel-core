@@ -526,6 +526,9 @@ func (meekDialParameters *FrontedMeekDialParameters) GetMetrics(overridePrefix s
 			logFields[prefix+"dns_qname_must_match"] = "1"
 		}
 
+		logFields[prefix+"dns_qname_mismatches"] = strconv.Itoa(
+			meekDialParameters.ResolveParameters.GetQNameMismatches())
+
 		logFields[prefix+"dns_attempt"] = strconv.Itoa(
 			meekDialParameters.ResolveParameters.GetFirstAttemptWithAnswer())
 	}

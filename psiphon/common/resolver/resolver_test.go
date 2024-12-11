@@ -577,7 +577,14 @@ func runTestResolver() error {
 	params.ProtocolTransformSpec = nil
 	params.ProtocolTransformSeed = nil
 
-	// Test: random QName casing
+	// Test: random QName (hostname) casing
+	//
+	// Note: there's a (1/2)^N chance that the QName (hostname) with randomized
+	// casing has the same casing as the input QName, where N is the number of
+	// Unicode letters in the QName. Currently, with the domain "example.com"
+	// there is a (1/2)^10=~0.00098 chance, which means we expect this to happen
+	// every 1/(1/2)^10=1024 runs. In such an event these tests will either
+	// give a false positive or false negative depending on the subtest.
 
 	if randomQNameCasingOkServer.getRequestCount() != 0 {
 		return errors.TraceNew("unexpected random QName casing server request count")
@@ -586,20 +593,30 @@ func runTestResolver() error {
 	resolver.cache.Flush()
 
 	params.AttemptsPerServer = 0
+	params.AttemptsPerPreferredServer = 1
 	params.AlternateDNSServer = randomQNameCasingOkServer.getAddr()
 	params.PreferAlternateDNSServer = true
 	params.RandomQNameCasingSeed = seed
 
-	params.ResponseQNameMustMatch = true
 	_, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
-	if err == nil {
-		errors.TraceNew("unexpected success")
+	if err != nil {
+		return errors.Trace(err)
 	}
 
-	params.ResponseQNameMustMatch = false
-	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	resolver.cache.Flush()
+	params.ResponseQNameMustMatch = true
+
+	_, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
 	if err == nil {
-		errors.TraceNew("unexpected success")
+		return errors.TraceNew("expected QName mismatch")
+	}
+
+	resolver.cache.Flush()
+	params.AlternateDNSServer = okServer.getAddr()
+
+	_, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err == nil {
+		return errors.TraceNew("expected server to not support random QName casing")
 	}
 
 	err = checkResult(IPs)
@@ -849,6 +866,8 @@ func (s *testDNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
+	fmt.Println(s.expectRandomQNameCasing, r.Question[0].Name, dns.Fqdn(exampleDomain))
+
 	if len(r.Question) != 1 ||
 		(!s.expectRandomQNameCasing &&
 			r.Question[0].Name != dns.Fqdn(exampleDomain)) {
@@ -884,6 +903,11 @@ func (s *testDNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 				Ttl:    exampleTTLSeconds},
 			AAAA: IP,
 		}
+	}
+
+	if s.expectRandomQNameCasing {
+		// Simulate a server that does not preserve the casing of the QName.
+		m.Question[0].Name = dns.Fqdn(exampleDomain)
 	}
 
 	w.WriteMsg(m)

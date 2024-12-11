@@ -808,12 +808,15 @@ func init() {
 
 		{151, "dns_qname_random_casing", intConverter},
 		{152, "dns_qname_must_match", intConverter},
-		{153, "inproxy_broker_dns_qname_random_casing", intConverter},
-		{154, "inproxy_broker_dns_qname_must_match", intConverter},
-		{155, "inproxy_webrtc_dns_qname_random_casing", intConverter},
-		{156, "inproxy_webrtc_dns_qname_must_match", intConverter},
+		{153, "dns_qname_mismatches", intConverter},
+		{154, "inproxy_broker_dns_qname_random_casing", intConverter},
+		{155, "inproxy_broker_dns_qname_must_match", intConverter},
+		{156, "inproxy_broker_dns_qname_mismatches", intConverter},
+		{157, "inproxy_webrtc_dns_qname_random_casing", intConverter},
+		{158, "inproxy_webrtc_dns_qname_must_match", intConverter},
+		{159, "inproxy_webrtc_dns_qname_mismatches", intConverter},
 
-		// Next key value = 157
+		// Next key value = 160
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

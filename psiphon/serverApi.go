@@ -1286,6 +1286,9 @@ func getBaseAPIParameters(
 				params["dns_qname_must_match"] = "1"
 			}
 
+			params["dns_qname_mismatches"] = strconv.Itoa(
+				dialParams.ResolveParameters.GetQNameMismatches())
+
 			params["dns_attempt"] = strconv.Itoa(
 				dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 		}

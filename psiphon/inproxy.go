@@ -2093,6 +2093,9 @@ func (dialParams *InproxySTUNDialParameters) GetMetrics() common.LogFields {
 			logFields["inproxy_webrtc_dns_qname_must_match"] = "1"
 		}
 
+		logFields["inproxy_webrtc_dns_qname_mismatches"] = strconv.Itoa(
+			dialParams.ResolveParameters.GetQNameMismatches())
+
 		logFields["inproxy_webrtc_dns_attempt"] = strconv.Itoa(
 			dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 	}
