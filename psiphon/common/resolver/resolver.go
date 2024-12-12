@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/miekg/dns"
+	"golang.org/x/net/idna"
 )
 
 const (
@@ -208,6 +209,23 @@ type ResolveParameters struct {
 	// specify the same seed.
 	ProtocolTransformSeed *prng.Seed
 
+	// RandomQNameCasingSeed specifies the seed for randomizing the casing of
+	// the QName (hostname) in the DNS request. If not set, the QName casing
+	// will remain unchanged. To reproduce the same random casing, use the same
+	// seed.
+	RandomQNameCasingSeed *prng.Seed
+
+	// ResponseQNameMustMatch specifies whether the response's question section
+	// must contain exactly one entry, and that entry's QName (hostname) must
+	// exactly match the QName sent in the DNS request.
+	//
+	// RFC 1035 does not specify that the question section in the response must
+	// exactly match the question section in the request, but this behavior is
+	// expected [1].
+	//
+	// [1]: https://datatracker.ietf.org/doc/html/draft-vixie-dnsext-dns0x20-00#section-2.2.
+	ResponseQNameMustMatch bool
+
 	// IncludeEDNS0 indicates whether to include the EDNS(0) UDP maximum
 	// response size extension in DNS requests. The resolver can handle
 	// responses larger than 512 bytes (RFC 1035 maximum) regardless of
@@ -216,6 +234,7 @@ type ResolveParameters struct {
 	IncludeEDNS0 bool
 
 	firstAttemptWithAnswer int32
+	qnameMismatches        int32
 }
 
 // GetFirstAttemptWithAnswer returns the index of the first request attempt
@@ -233,6 +252,26 @@ func (r *ResolveParameters) GetFirstAttemptWithAnswer() int {
 
 func (r *ResolveParameters) setFirstAttemptWithAnswer(attempt int) {
 	atomic.StoreInt32(&r.firstAttemptWithAnswer, int32(attempt))
+}
+
+// GetQNameMismatches returns, for the most recent ResolveIP call using this
+// ResolveParameters, the number of DNS requests where the response's question
+// section either:
+//   - Did not contain exactly one entry; or
+//   - Contained one entry that had a QName (hostname) that did not match the
+//     QName sent in the DNS request.
+//
+// This information is used for logging metrics.
+//
+// The caller is responsible for synchronizing use of a ResolveParameters
+// instance (e.g, use a distinct ResolveParameters per ResolveIP to ensure
+// GetQNameMismatches refers to a specific ResolveIP).
+func (r *ResolveParameters) GetQNameMismatches() int {
+	return int(atomic.LoadInt32(&r.qnameMismatches))
+}
+
+func (r *ResolveParameters) setQNameMismatches(mismatches int) {
+	atomic.StoreInt32(&r.qnameMismatches, int32(mismatches))
 }
 
 // Implementation note: Go's standard net.Resolver supports specifying a
@@ -442,6 +481,16 @@ func (r *Resolver) MakeResolveParameters(
 			}
 		}
 	}
+
+	if p.WeightedCoinFlip(parameters.DNSResolverQNameRandomizeCasingProbability) {
+		var err error
+		params.RandomQNameCasingSeed, err = prng.NewSeed()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	params.ResponseQNameMustMatch = p.WeightedCoinFlip(parameters.DNSResolverQNameMustMatchProbability)
 
 	if p.WeightedCoinFlip(parameters.DNSResolverIncludeEDNS0Probability) {
 		params.IncludeEDNS0 = true
@@ -728,9 +777,11 @@ func (r *Resolver) ResolveIP(
 
 		server := servers[index]
 
-		// Only the first attempt pair tries transforms, as it's not certain
-		// the transforms will be compatible with DNS servers.
+		// Only the first attempt pair tries techniques that may not be
+		// compatible with all DNS servers.
 		useProtocolTransform := (i == 0 && params.ProtocolTransformSpec != nil)
+		useRandomQNameCasing := (i == 0 && params.RandomQNameCasingSeed != nil)
+		responseQNameMustMatch := (i == 0 && params.ResponseQNameMustMatch)
 
 		// Send A and AAAA requests concurrently.
 		questionTypes := []resolverQuestionType{resolverQuestionTypeA, resolverQuestionTypeAAAA}
@@ -752,7 +803,7 @@ func (r *Resolver) ResolveIP(
 			inFlight += 1
 			r.updateMetricPeakInFlight(inFlight)
 
-			go func(attempt int, questionType resolverQuestionType, useProtocolTransform bool) {
+			go func(attempt int, questionType resolverQuestionType, useProtocolTransform, useRandomQNameCasing, responseQNameMustMatch bool) {
 				defer waitGroup.Done()
 
 				// Always send a result back to the main loop, even if this
@@ -834,9 +885,11 @@ func (r *Resolver) ResolveIP(
 					r.networkConfig.logWarning,
 					params,
 					useProtocolTransform,
+					useRandomQNameCasing,
 					conn,
 					questionType,
-					hostname)
+					hostname,
+					responseQNameMustMatch)
 
 				// Update the min/max RTT metric when reported (>=0) even if
 				// the result is an error; i.e., the even if there was an
@@ -880,7 +933,7 @@ func (r *Resolver) ResolveIP(
 					}
 				}
 
-			}(i+1, questionType, useProtocolTransform)
+			}(i+1, questionType, useProtocolTransform, useRandomQNameCasing, responseQNameMustMatch)
 		}
 
 		resetTimer(requestTimeout)
@@ -1472,9 +1525,11 @@ func performDNSQuery(
 	logWarning func(error),
 	params *ResolveParameters,
 	useProtocolTransform bool,
+	useRandomQNameCasing bool,
 	conn net.Conn,
 	questionType resolverQuestionType,
-	hostname string) ([]net.IP, []time.Duration, time.Duration, error) {
+	hostname string,
+	responseQNameMustMatch bool) ([]net.IP, []time.Duration, time.Duration, error) {
 
 	if useProtocolTransform {
 		if params.ProtocolTransformSpec == nil ||
@@ -1492,6 +1547,16 @@ func performDNSQuery(
 			transform: params.ProtocolTransformSpec,
 			seed:      params.ProtocolTransformSeed,
 		}
+	}
+
+	// Convert to punycode.
+	hostname, err := idna.ToASCII(hostname)
+	if err != nil {
+		return nil, nil, -1, errors.Trace(err)
+	}
+
+	if useRandomQNameCasing {
+		hostname = common.ToRandomASCIICasing(hostname, params.RandomQNameCasingSeed)
 	}
 
 	// UDPSize sets the receive buffer to > 512, even when we don't include
@@ -1523,7 +1588,7 @@ func performDNSQuery(
 	startTime := time.Now()
 
 	// Send the DNS request
-	err := dnsConn.WriteMsg(request)
+	err = dnsConn.WriteMsg(request)
 	if err != nil {
 		return nil, nil, -1, errors.Trace(err)
 	}
@@ -1531,6 +1596,10 @@ func performDNSQuery(
 	// Read and process the DNS response
 	var IPs []net.IP
 	var TTLs []time.Duration
+	var qnameMismatches int
+	defer func() {
+		params.setQNameMismatches(qnameMismatches)
+	}()
 	var lastErr error
 	RTT := time.Duration(-1)
 	for {
@@ -1569,6 +1638,15 @@ func performDNSQuery(
 				logWarning(lastErr)
 			}
 			continue
+		}
+
+		if len(response.Question) != 1 || response.Question[0].Name != dns.Fqdn(hostname) {
+			qnameMismatches++
+			if responseQNameMustMatch {
+				lastErr = errors.Tracef("unexpected QName")
+				logWarning(lastErr)
+				continue
+			}
 		}
 
 		// Check the RCode.

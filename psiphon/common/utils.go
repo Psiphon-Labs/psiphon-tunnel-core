@@ -31,6 +31,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -291,4 +292,26 @@ func MaxDuration(durations ...time.Duration) time.Duration {
 		}
 	}
 	return max
+}
+
+// ToRandomASCIICasing returns s with each ASCII letter randomly mapped to
+// either its upper or lower case.
+func ToRandomASCIICasing(s string, seed *prng.Seed) string {
+
+	PRNG := prng.NewPRNGWithSeed(seed)
+
+	var b strings.Builder
+	b.Grow(len(s))
+
+	for _, r := range s {
+		isLower := ('a' <= r && r <= 'z')
+		isUpper := ('A' <= r && r <= 'Z')
+		if (isLower || isUpper) && PRNG.FlipCoin() {
+			b.WriteRune(r ^ 0x20)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+
+	return b.String()
 }

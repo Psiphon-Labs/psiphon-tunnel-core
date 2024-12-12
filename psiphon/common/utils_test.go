@@ -28,6 +28,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 )
 
 func TestGetStringSlice(t *testing.T) {
@@ -162,5 +164,32 @@ func TestSleepWithContext(t *testing.T) {
 	duration = time.Since(start)
 	if duration/time.Millisecond/10 != 5 {
 		t.Errorf("unexpected duration: %v", duration)
+	}
+}
+
+func TestToRandomCasing(t *testing.T) {
+	s := "test.to.random.ascii.casing.aaaa.bbbb.c" // 32 Unicode letters
+
+	seed, err := prng.NewSeed()
+	if err != nil {
+		t.Errorf("NewPRNG failed: %s", err)
+	}
+
+	randomized := ToRandomASCIICasing(s, seed)
+
+	// Note: there's a (1/2)^32 chance that the randomized string has the same
+	// casing as the input string.
+	if strings.Compare(s, randomized) == 0 {
+		t.Errorf("expected random casing")
+	}
+
+	if strings.Compare(strings.ToLower(s), strings.ToLower(randomized)) != 0 {
+		t.Errorf("expected strings to be identical minus casing")
+	}
+
+	replaySameSeed := ToRandomASCIICasing(s, seed)
+
+	if strings.Compare(randomized, replaySameSeed) != 0 {
+		t.Errorf("expected randomized string with same seed to be identical")
 	}
 }
