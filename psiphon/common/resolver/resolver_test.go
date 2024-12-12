@@ -501,7 +501,7 @@ func runTestResolver() error {
 		return errors.TraceNew("unexpected server count")
 	}
 
-	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleRealDomain)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -581,9 +581,7 @@ func runTestResolver() error {
 	//
 	// Note: there's a (1/2)^N chance that the QName (hostname) with randomized
 	// casing has the same casing as the input QName, where N is the number of
-	// Unicode letters in the QName. Currently, with the domain "example.com"
-	// there is a (1/2)^10=~0.00098 chance, which means we expect this to happen
-	// every 1/(1/2)^10=1024 runs. In such an event these tests will either
+	// Unicode letters in the QName. In such an event these tests will either
 	// give a false positive or false negative depending on the subtest.
 
 	if randomQNameCasingOkServer.getRequestCount() != 0 {
@@ -767,7 +765,7 @@ func runTestPublicDNSServers() ([]net.IP, string, error) {
 	}
 
 	IPs, err := resolver.ResolveIP(
-		context.Background(), networkID, params, exampleDomain)
+		context.Background(), networkID, params, exampleRealDomain)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
@@ -800,8 +798,10 @@ func getPublicDNSServers() []string {
 	return shuffledServers
 }
 
+var exampleDomain = fmt.Sprintf("%s.example.com", prng.Base64String(32))
+
 const (
-	exampleDomain     = "example.com"
+	exampleRealDomain = "example.com"
 	exampleIPv4       = "93.184.216.34"
 	exampleIPv4CIDR   = "93.184.216.0/24"
 	exampleIPv6       = "2606:2800:220:1:248:1893:25c8:1946"
@@ -865,8 +865,6 @@ func (s *testDNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	if s.expectTransform != r.MsgHdr.Zero {
 		return
 	}
-
-	fmt.Println(s.expectRandomQNameCasing, r.Question[0].Name, dns.Fqdn(exampleDomain))
 
 	if len(r.Question) != 1 ||
 		(!s.expectRandomQNameCasing &&
