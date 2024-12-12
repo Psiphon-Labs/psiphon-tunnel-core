@@ -720,11 +720,9 @@ var (
 	testSteeringIP = "1.1.1.1"
 )
 
-var serverRuns = 0
+var lastConnectedUpdateCount = 0
 
 func runServer(t *testing.T, runConfig *runServerConfig) {
-
-	serverRuns += 1
 
 	psiphonServerIPAddress := "127.0.0.1"
 	psiphonServerPort := 4000
@@ -1487,7 +1485,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Test unique user counting cases.
 	var expectUniqueUser bool
-	switch serverRuns % 3 {
+	switch lastConnectedUpdateCount % 3 {
 	case 0:
 		// Mock no last_connected.
 		psiphon.SetKeyValue("lastConnected", "")
@@ -1665,6 +1663,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 		waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
 		waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
+
+		// The tunnel connected, so the local last_connected has been updated.
+		lastConnectedUpdateCount += 1
 	}
 
 	if runConfig.doChangeBytesConfig {
