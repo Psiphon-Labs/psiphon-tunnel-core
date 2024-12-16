@@ -2501,6 +2501,10 @@ func getInproxyNetworkType(networkType string) inproxy.NetworkType {
 		return inproxy.NetworkTypeWiFi
 	case "MOBILE":
 		return inproxy.NetworkTypeMobile
+	case "WIRED":
+		return inproxy.NetworkTypeWired
+	case "VPN":
+		return inproxy.NetworkTypeVPN
 	}
 
 	return inproxy.NetworkTypeUnknown

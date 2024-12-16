@@ -179,6 +179,9 @@ type HasIPv6RouteGetter interface {
 // - "WIRED" for a wired network
 // - "VPN" for a VPN network
 // - "UNKNOWN" for when the network type cannot be determined
+//
+// Note that the functions psiphon.GetNetworkType, psiphon.getInproxyNetworkType,
+// and inproxy.GetNetworkType must all be updated when new network types are added.
 type NetworkIDGetter interface {
 	GetNetworkID() string
 }
