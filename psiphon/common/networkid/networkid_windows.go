@@ -170,7 +170,7 @@ func getConnectionType(ifType winipcfg.IfType, description string) string {
 	var connectionType string
 
 	switch ifType {
-	case winipcfg.IfTypeEthernetCSMACD:
+	case winipcfg.IfTypeEthernetCSMACD, winipcfg.IfTypeEthernet3Mbit, winipcfg.IfTypeFastether, winipcfg.IfTypeFastetherFX, winipcfg.IfTypeGigabitethernet, winipcfg.IfTypeIEEE80212, winipcfg.IfTypeDigitalpowerline:
 		connectionType = "WIRED"
 	case winipcfg.IfTypeIEEE80211:
 		connectionType = "WIFI"
