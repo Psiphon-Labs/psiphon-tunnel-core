@@ -21,6 +21,7 @@ package inproxy
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
 	"sync"
@@ -47,6 +48,7 @@ type ClientConn struct {
 	webRTCConn   *webRTCConn
 	connectionID ID
 	remoteAddr   net.Addr
+	metrics      common.LogFields
 
 	relayMutex         sync.Mutex
 	initialRelayPacket []byte
@@ -126,6 +128,9 @@ func DialClient(
 	ctx context.Context,
 	config *ClientConfig) (retConn *ClientConn, retErr error) {
 
+	startTime := time.Now()
+	metrics := common.LogFields{}
+
 	// Configure the value returned by ClientConn.RemoteAddr. If no
 	// config.RemoteAddrOverride is specified, RemoteAddr will return a
 	// zero-value, non-nil net.Addr. The underlying webRTCConn.RemoteAddr
@@ -193,10 +198,18 @@ func DialClient(
 				Logger:                config.Logger,
 				WebRTCDialCoordinator: config.WebRTCDialCoordinator,
 			})
+
+		duration := time.Since(startTime)
+		metrics["inproxy_dial_nat_discovery_duration"] = fmt.Sprintf("%d", duration/time.Millisecond)
+		config.Logger.WithTraceFields(
+			common.LogFields{"duration": duration.String()}).Info("NAT discovery complete")
+		startTime = time.Now()
 	}
 
 	var result *clientWebRTCDialResult
-	for {
+	for attempt := 0; ; attempt += 1 {
+
+		previousAttemptsDuration := time.Since(startTime)
 
 		// Repeatedly try to establish in-proxy/WebRTC connection until the
 		// dial context is canceled or times out.
@@ -219,6 +232,16 @@ func DialClient(
 		var retry bool
 		result, retry, err = dialClientWebRTCConn(ctx, config)
 		if err == nil {
+
+			if attempt > 0 {
+				// Record the time elapsed in previous attempts.
+				metrics["inproxy_dial_failed_attempts_duration"] =
+					fmt.Sprintf("%d", previousAttemptsDuration/time.Millisecond)
+				config.Logger.WithTraceFields(
+					common.LogFields{
+						"duration": previousAttemptsDuration.String()}).Info("previous failed attempts")
+			}
+
 			break
 		}
 
@@ -241,12 +264,15 @@ func DialClient(
 		return nil, errors.Trace(err)
 	}
 
+	metrics.Add(result.metrics)
+
 	return &ClientConn{
 		config:             config,
 		webRTCConn:         result.conn,
 		connectionID:       result.connectionID,
-		initialRelayPacket: result.relayPacket,
 		remoteAddr:         remoteAddr,
+		metrics:            metrics,
+		initialRelayPacket: result.relayPacket,
 	}, nil
 }
 
@@ -313,11 +339,15 @@ type clientWebRTCDialResult struct {
 	conn         *webRTCConn
 	connectionID ID
 	relayPacket  []byte
+	metrics      common.LogFields
 }
 
 func dialClientWebRTCConn(
 	ctx context.Context,
 	config *ClientConfig) (retResult *clientWebRTCDialResult, retRetry bool, retErr error) {
+
+	startTime := time.Now()
+	metrics := common.LogFields{}
 
 	brokerCoordinator := config.BrokerClient.GetBrokerDialCoordinator()
 	personalCompartmentIDs := brokerCoordinator.PersonalCompartmentIDs()
@@ -352,6 +382,12 @@ func dialClientWebRTCConn(
 			webRTCConn.Close()
 		}
 	}()
+
+	duration := time.Since(startTime)
+	metrics["inproxy_dial_webrtc_ice_gathering_duration"] = fmt.Sprintf("%d", duration/time.Millisecond)
+	config.Logger.WithTraceFields(
+		common.LogFields{"duration": duration.String()}).Info("ICE gathering complete")
+	startTime = time.Now()
 
 	// Send the ClientOffer request to the broker
 
@@ -395,6 +431,12 @@ func dialClientWebRTCConn(
 	if err != nil {
 		return nil, false, errors.Trace(err)
 	}
+
+	duration = time.Since(startTime)
+	metrics["inproxy_dial_broker_offer_duration"] = fmt.Sprintf("%d", duration/time.Millisecond)
+	config.Logger.WithTraceFields(
+		common.LogFields{"duration": duration.String()}).Info("Broker offer complete")
+	startTime = time.Now()
 
 	// MustUpgrade has precedence over other cases to ensure the callback is
 	// invoked. No retry when rate/entry limited or must upgrade; do retry on
@@ -442,16 +484,25 @@ func dialClientWebRTCConn(
 		return nil, true, errors.Trace(err)
 	}
 
+	duration = time.Since(startTime)
+	metrics["inproxy_dial_webrtc_connection_duration"] = fmt.Sprintf("%d", duration/time.Millisecond)
+	config.Logger.WithTraceFields(
+		common.LogFields{"duration": duration.String()}).Info("WebRTC connection complete")
+
 	return &clientWebRTCDialResult{
 		conn:         webRTCConn,
 		connectionID: offerResponse.ConnectionID,
 		relayPacket:  offerResponse.RelayPacketToServer,
+		metrics:      metrics,
 	}, false, nil
 }
 
 // GetMetrics implements the common.MetricsSource interface.
 func (conn *ClientConn) GetMetrics() common.LogFields {
-	return conn.webRTCConn.GetMetrics()
+	metrics := common.LogFields{}
+	metrics.Add(conn.metrics)
+	metrics.Add(conn.webRTCConn.GetMetrics())
+	return metrics
 }
 
 func (conn *ClientConn) Close() error {

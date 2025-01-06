@@ -2546,6 +2546,10 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_webrtc_padded_messages_received",
 			"inproxy_webrtc_decoy_messages_sent",
 			"inproxy_webrtc_decoy_messages_received",
+
+			"inproxy_dial_webrtc_ice_gathering_duration",
+			"inproxy_dial_broker_offer_duration",
+			"inproxy_dial_webrtc_connection_duration",
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)

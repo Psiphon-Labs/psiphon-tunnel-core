@@ -792,8 +792,12 @@ func init() {
 
 		{142, "statusData", rawJSONConverter},
 
+		// Specs: server.inproxyDialParams
+
 		{143, "inproxy_webrtc_local_ice_candidate_is_private_IP", intConverter},
 		{144, "inproxy_webrtc_remote_ice_candidate_is_private_IP", intConverter},
+
+		// Specs: server.baseDialParams
 
 		{145, "tls_sent_ticket", intConverter},
 		{146, "tls_did_resume", intConverter},
@@ -802,13 +806,12 @@ func init() {
 		{149, "quic_dial_early", intConverter},
 		{150, "quic_obfuscated_psk", intConverter},
 
-		// Specs:
-		// parameters.DNSResolverQNameRandomizeCasingProbability
-		// parameters.DNSResolverQNameMustMatchProbability
-
 		{151, "dns_qname_random_casing", intConverter},
 		{152, "dns_qname_must_match", intConverter},
 		{153, "dns_qname_mismatches", intConverter},
+
+		// Specs: server.inproxyDialParams
+
 		{154, "inproxy_broker_dns_qname_random_casing", intConverter},
 		{155, "inproxy_broker_dns_qname_must_match", intConverter},
 		{156, "inproxy_broker_dns_qname_mismatches", intConverter},
@@ -816,7 +819,13 @@ func init() {
 		{158, "inproxy_webrtc_dns_qname_must_match", intConverter},
 		{159, "inproxy_webrtc_dns_qname_mismatches", intConverter},
 
-		// Next key value = 160
+		{160, "inproxy_dial_nat_discovery_duration", intConverter},
+		{161, "inproxy_dial_failed_attempts_duration", intConverter},
+		{162, "inproxy_dial_webrtc_ice_gathering_duration", intConverter},
+		{163, "inproxy_dial_broker_offer_duration", intConverter},
+		{164, "inproxy_dial_webrtc_connection_duration", intConverter},
+
+		// Next key value = 165
 	}
 
 	for _, spec := range packedAPIParameterSpecs {
