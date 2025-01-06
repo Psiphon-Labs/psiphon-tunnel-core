@@ -31,6 +31,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -275,4 +276,42 @@ func MergeContextCancel(ctx, cancelCtx context.Context) (context.Context, contex
 		stop()
 		cancel(context.Canceled)
 	}
+}
+
+// MaxDuration returns the maximum duration in durations or 0 if durations is
+// empty.
+func MaxDuration(durations ...time.Duration) time.Duration {
+	if len(durations) == 0 {
+		return 0
+	}
+
+	max := durations[0]
+	for _, d := range durations[1:] {
+		if d > max {
+			max = d
+		}
+	}
+	return max
+}
+
+// ToRandomASCIICasing returns s with each ASCII letter randomly mapped to
+// either its upper or lower case.
+func ToRandomASCIICasing(s string, seed *prng.Seed) string {
+
+	PRNG := prng.NewPRNGWithSeed(seed)
+
+	var b strings.Builder
+	b.Grow(len(s))
+
+	for _, r := range s {
+		isLower := ('a' <= r && r <= 'z')
+		isUpper := ('A' <= r && r <= 'Z')
+		if (isLower || isUpper) && PRNG.FlipCoin() {
+			b.WriteRune(r ^ 0x20)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+
+	return b.String()
 }

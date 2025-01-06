@@ -616,6 +616,8 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			}
 
 			if postDial {
+				args = append(args, "DNSQNameMismatches", dialParams.ResolveParameters.GetQNameMismatches())
+
 				args = append(args, "DNSAttempt", dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 			}
 		}

@@ -119,8 +119,14 @@ func sshAPIRequestHandler(
 	switch name {
 
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
-		return handshakeAPIRequestHandler(
+		responsePayload, err := handshakeAPIRequestHandler(
 			support, protocol.PSIPHON_API_PROTOCOL_SSH, sshClient, params)
+		if err != nil {
+			// Handshake failed, disconnect the client.
+			sshClient.stop()
+			return nil, errors.Trace(err)
+		}
+		return responsePayload, nil
 
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
 		return connectedAPIRequestHandler(
@@ -1114,6 +1120,9 @@ var baseDialParams = []requestParamSpec{
 	{"dns_preresolved", isAnyString, requestParamOptional},
 	{"dns_preferred", isAnyString, requestParamOptional},
 	{"dns_transform", isAnyString, requestParamOptional},
+	{"dns_qname_random_casing", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"dns_qname_must_match", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"dns_qname_mismatches", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"http_transform", isAnyString, requestParamOptional},
 	{"seed_transform", isAnyString, requestParamOptional},
@@ -1156,10 +1165,16 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_broker_dns_preresolved", isAnyString, requestParamOptional},
 	{"inproxy_broker_dns_preferred", isAnyString, requestParamOptional},
 	{"inproxy_broker_dns_transform", isAnyString, requestParamOptional},
+	{"inproxy_broker_dns_qname_random_casing", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_dns_qname_must_match", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_broker_dns_qname_mismatches", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_broker_dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_dns_preresolved", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_dns_preferred", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_dns_transform", isAnyString, requestParamOptional},
+	{"inproxy_broker_dns_qname_random_casing", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_dns_qname_must_match", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_dns_qname_mismatches", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_dns_attempt", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_webrtc_stun_server", isAnyString, requestParamOptional},
 	{"inproxy_webrtc_stun_server_resolved_ip_address", isAnyString, requestParamOptional},

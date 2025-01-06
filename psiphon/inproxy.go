@@ -114,6 +114,22 @@ func (b *InproxyBrokerClientManager) TacticsApplied() error {
 	return errors.Trace(b.reset(resetBrokerClientReasonTacticsApplied))
 }
 
+// NetworkChanged is called when the active network changes, to trigger a
+// broker client reset.
+func (b *InproxyBrokerClientManager) NetworkChanged() error {
+
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	// Don't reset when not yet initialized; b.brokerClientInstance is
+	// initialized only on demand.
+	if b.brokerClientInstance == nil {
+		return nil
+	}
+
+	return errors.Trace(b.reset(resetBrokerClientReasonNetworkChanged))
+}
+
 // GetBrokerClient returns the current, shared broker client and its
 // corresponding dial parametrers (for metrics logging). If there is no
 // current broker client, if the network ID differs from the network ID
@@ -195,6 +211,7 @@ type resetBrokerClientReason int
 const (
 	resetBrokerClientReasonInit resetBrokerClientReason = iota + 1
 	resetBrokerClientReasonTacticsApplied
+	resetBrokerClientReasonNetworkChanged
 	resetBrokerClientReasonRoundTripperFailed
 	resetBrokerClientReasonRoundNoMatch
 )
@@ -220,7 +237,8 @@ func (b *InproxyBrokerClientManager) reset(reason resetBrokerClientReason) error
 
 	switch reason {
 	case resetBrokerClientReasonInit,
-		resetBrokerClientReasonTacticsApplied:
+		resetBrokerClientReasonTacticsApplied,
+		resetBrokerClientReasonNetworkChanged:
 		b.brokerSelectCount = 0
 
 	case resetBrokerClientReasonRoundTripperFailed,
@@ -2067,6 +2085,17 @@ func (dialParams *InproxySTUNDialParameters) GetMetrics() common.LogFields {
 			logFields["inproxy_webrtc_dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
 		}
 
+		if dialParams.ResolveParameters.RandomQNameCasingSeed != nil {
+			logFields["inproxy_webrtc_dns_qname_random_casing"] = "1"
+		}
+
+		if dialParams.ResolveParameters.ResponseQNameMustMatch {
+			logFields["inproxy_webrtc_dns_qname_must_match"] = "1"
+		}
+
+		logFields["inproxy_webrtc_dns_qname_mismatches"] = strconv.Itoa(
+			dialParams.ResolveParameters.GetQNameMismatches())
+
 		logFields["inproxy_webrtc_dns_attempt"] = strconv.Itoa(
 			dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 	}
@@ -2472,6 +2501,10 @@ func getInproxyNetworkType(networkType string) inproxy.NetworkType {
 		return inproxy.NetworkTypeWiFi
 	case "MOBILE":
 		return inproxy.NetworkTypeMobile
+	case "WIRED":
+		return inproxy.NetworkTypeWired
+	case "VPN":
+		return inproxy.NetworkTypeVPN
 	}
 
 	return inproxy.NetworkTypeUnknown

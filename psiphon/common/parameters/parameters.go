@@ -315,6 +315,14 @@ const (
 	HoldOffTunnelProtocols                             = "HoldOffTunnelProtocols"
 	HoldOffTunnelFrontingProviderIDs                   = "HoldOffTunnelFrontingProviderIDs"
 	HoldOffTunnelProbability                           = "HoldOffTunnelProbability"
+	HoldOffTunnelProtocolMinDuration                   = "HoldOffTunnelProtocolMinDuration"
+	HoldOffTunnelProtocolMaxDuration                   = "HoldOffTunnelProtocolMaxDuration"
+	HoldOffTunnelProtocolNames                         = "HoldOffTunnelProtocolNames"
+	HoldOffTunnelProtocolProbability                   = "HoldOffTunnelProtocolProbability"
+	HoldOffFrontingTunnelMinDuration                   = "HoldOffFrontingTunnelMinDuration"
+	HoldOffFrontingTunnelMaxDuration                   = "HoldOffFrontingTunnelMaxDuration"
+	HoldOffFrontingTunnelProviderIDs                   = "HoldOffFrontingTunnelProviderIDs"
+	HoldOffFrontingTunnelProbability                   = "HoldOffFrontingTunnelProbability"
 	RestrictFrontingProviderIDs                        = "RestrictFrontingProviderIDs"
 	RestrictFrontingProviderIDsServerProbability       = "RestrictFrontingProviderIDsServerProbability"
 	RestrictFrontingProviderIDsClientProbability       = "RestrictFrontingProviderIDsClientProbability"
@@ -325,8 +333,16 @@ const (
 	RestrictDirectProviderRegions                      = "RestrictDirectProviderRegions"
 	RestrictDirectProviderIDsServerProbability         = "RestrictDirectProviderIDsServerProbability"
 	RestrictDirectProviderIDsClientProbability         = "RestrictDirectProviderIDsClientProbability"
+	HoldOffInproxyTunnelMinDuration                    = "HoldOffInproxyTunnelMinDuration"
+	HoldOffInproxyTunnelMaxDuration                    = "HoldOffInproxyTunnelMaxDuration"
+	HoldOffInproxyTunnelProviderRegions                = "HoldOffInproxyTunnelProviderRegions"
+	HoldOffInproxyTunnelProbability                    = "HoldOffInproxyTunnelProbability"
+	RestrictInproxyProviderRegions                     = "RestrictInproxyProviderRegions"
+	RestrictInproxyProviderIDsServerProbability        = "RestrictInproxyProviderIDsServerProbability"
+	RestrictInproxyProviderIDsClientProbability        = "RestrictInproxyProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources            = "UpstreamProxyAllowAllServerEntrySources"
 	DestinationBytesMetricsASN                         = "DestinationBytesMetricsASN"
+	DestinationBytesMetricsASNs                        = "DestinationBytesMetricsASNs"
 	DNSResolverAttemptsPerServer                       = "DNSResolverAttemptsPerServer"
 	DNSResolverAttemptsPerPreferredServer              = "DNSResolverAttemptsPerPreferredServer"
 	DNSResolverRequestTimeout                          = "DNSResolverRequestTimeout"
@@ -342,6 +358,8 @@ const (
 	DNSResolverIncludeEDNS0Probability                 = "DNSResolverIncludeEDNS0Probability"
 	DNSResolverCacheExtensionInitialTTL                = "DNSResolverCacheExtensionInitialTTL"
 	DNSResolverCacheExtensionVerifiedTTL               = "DNSResolverCacheExtensionVerifiedTTL"
+	DNSResolverQNameRandomizeCasingProbability         = "DNSResolverQNameRandomizeCasingProbability"
+	DNSResolverQNameMustMatchProbability               = "DNSResolverQNameMustMatchProbability"
 	AddFrontingProviderPsiphonFrontingHeader           = "AddFrontingProviderPsiphonFrontingHeader"
 	DirectHTTPProtocolTransformSpecs                   = "DirectHTTPProtocolTransformSpecs"
 	DirectHTTPProtocolTransformScopedSpecNames         = "DirectHTTPProtocolTransformScopedSpecNames"
@@ -461,6 +479,7 @@ const (
 	InproxyProxyOnBrokerClientFailedRetryPeriod        = "InproxyProxyOnBrokerClientFailedRetryPeriod"
 	InproxyProxyIncompatibleNetworkTypes               = "InproxyProxyIncompatibleNetworkTypes"
 	InproxyClientIncompatibleNetworkTypes              = "InproxyClientIncompatibleNetworkTypes"
+	NetworkIDCacheTTL                                  = "NetworkIDCacheTTL"
 
 	// Retired parameters
 
@@ -811,6 +830,16 @@ var defaultParameters = map[string]struct {
 	HoldOffTunnelFrontingProviderIDs: {value: []string{}},
 	HoldOffTunnelProbability:         {value: 0.0, minimum: 0.0},
 
+	HoldOffTunnelProtocolMinDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelProtocolMaxDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffTunnelProtocolNames:       {value: protocol.TunnelProtocols{}},
+	HoldOffTunnelProtocolProbability: {value: 0.0, minimum: 0.0},
+
+	HoldOffFrontingTunnelMinDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffFrontingTunnelMaxDuration: {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffFrontingTunnelProviderIDs: {value: []string{}},
+	HoldOffFrontingTunnelProbability: {value: 0.0, minimum: 0.0},
+
 	RestrictFrontingProviderIDs:                  {value: []string{}},
 	RestrictFrontingProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	RestrictFrontingProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
@@ -824,9 +853,19 @@ var defaultParameters = map[string]struct {
 	RestrictDirectProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
 	RestrictDirectProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
 
+	HoldOffInproxyTunnelMinDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffInproxyTunnelMaxDuration:     {value: time.Duration(0), minimum: time.Duration(0)},
+	HoldOffInproxyTunnelProviderRegions: {value: KeyStrings{}},
+	HoldOffInproxyTunnelProbability:     {value: 0.0, minimum: 0.0},
+
+	RestrictInproxyProviderRegions:              {value: KeyStrings{}},
+	RestrictInproxyProviderIDsServerProbability: {value: 0.0, minimum: 0.0, flags: serverSideOnly},
+	RestrictInproxyProviderIDsClientProbability: {value: 0.0, minimum: 0.0},
+
 	UpstreamProxyAllowAllServerEntrySources: {value: false},
 
-	DestinationBytesMetricsASN: {value: "", flags: serverSideOnly},
+	DestinationBytesMetricsASN:  {value: "", flags: serverSideOnly},
+	DestinationBytesMetricsASNs: {value: []string{}, flags: serverSideOnly},
 
 	DNSResolverAttemptsPerServer:                {value: 2, minimum: 1},
 	DNSResolverAttemptsPerPreferredServer:       {value: 1, minimum: 1},
@@ -843,6 +882,8 @@ var defaultParameters = map[string]struct {
 	DNSResolverIncludeEDNS0Probability:          {value: 0.0, minimum: 0.0},
 	DNSResolverCacheExtensionInitialTTL:         {value: time.Duration(0), minimum: time.Duration(0)},
 	DNSResolverCacheExtensionVerifiedTTL:        {value: time.Duration(0), minimum: time.Duration(0)},
+	DNSResolverQNameRandomizeCasingProbability:  {value: 0.0, minimum: 0.0},
+	DNSResolverQNameMustMatchProbability:        {value: 0.0, minimum: 0.0},
 
 	AddFrontingProviderPsiphonFrontingHeader: {value: protocol.LabeledTunnelProtocols{}},
 
@@ -981,6 +1022,8 @@ var defaultParameters = map[string]struct {
 	InproxyProxyOnBrokerClientFailedRetryPeriod:        {value: 30 * time.Second, minimum: time.Duration(0)},
 	InproxyProxyIncompatibleNetworkTypes:               {value: []string{}},
 	InproxyClientIncompatibleNetworkTypes:              {value: []string{}},
+
+	NetworkIDCacheTTL: {value: 500 * time.Millisecond, minimum: time.Duration(0)},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

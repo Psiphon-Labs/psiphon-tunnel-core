@@ -142,7 +142,8 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 	// The purpose of this mechanism is to rapidly add provider IDs to the
 	// server entries in client local storage, and to ensure that the client has
 	// a provider ID for its currently connected server as required for the
-	// RestrictDirectProviderRegions, and HoldOffDirectTunnelProviderRegions
+	// RestrictDirectProviderRegions, HoldOffDirectTunnelProviderRegions,
+	// RestrictInproxyProviderRegions, and HoldOffInproxyTunnelProviderRegions
 	// tactics.
 	//
 	// The server entry will be included in handshakeResponse.EncodedServerList,
@@ -1276,6 +1277,17 @@ func getBaseAPIParameters(
 			if dialParams.ResolveParameters.ProtocolTransformName != "" {
 				params["dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
 			}
+
+			if dialParams.ResolveParameters.RandomQNameCasingSeed != nil {
+				params["dns_qname_random_casing"] = "1"
+			}
+
+			if dialParams.ResolveParameters.ResponseQNameMustMatch {
+				params["dns_qname_must_match"] = "1"
+			}
+
+			params["dns_qname_mismatches"] = strconv.Itoa(
+				dialParams.ResolveParameters.GetQNameMismatches())
 
 			params["dns_attempt"] = strconv.Itoa(
 				dialParams.ResolveParameters.GetFirstAttemptWithAnswer())

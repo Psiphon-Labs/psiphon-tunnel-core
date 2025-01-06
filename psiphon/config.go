@@ -35,11 +35,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/networkid"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
@@ -318,7 +320,8 @@ type Config struct {
 
 	// NetworkID, when not blank, is used as the identifier for the host's
 	// current active network.
-	// NetworkID is ignored when NetworkIDGetter is set.
+	// NetworkID is ignored when NetworkIDGetter is set, or when
+	// common/networkid is enabled.
 	NetworkID string
 
 	// DisableTactics disables tactics operations including requests, payload
@@ -872,13 +875,19 @@ type Config struct {
 	ConjureSTUNServerAddresses                []string
 	ConjureDTLSEmptyInitialPacketProbability  *float64
 
-	// HoldOffTunnelMinDurationMilliseconds and other HoldOffTunnel fields are
-	// for testing purposes.
-	HoldOffTunnelMinDurationMilliseconds *int
-	HoldOffTunnelMaxDurationMilliseconds *int
-	HoldOffTunnelProtocols               []string
-	HoldOffTunnelFrontingProviderIDs     []string
-	HoldOffTunnelProbability             *float64
+	// HoldOffTunnelProtocolMinDurationMilliseconds and other
+	// HoldOffTunnelProtocol fields are for testing purposes.
+	HoldOffTunnelProtocolMinDurationMilliseconds *int
+	HoldOffTunnelProtocolMaxDurationMilliseconds *int
+	HoldOffTunnelProtocolNames                   []string
+	HoldOffTunnelProtocolProbability             *float64
+
+	// HoldOffFrontingTunnelMinDurationMilliseconds and other
+	// HoldOffFrontingTunnel fields are for testing purposes.
+	HoldOffFrontingTunnelMinDurationMilliseconds *int
+	HoldOffFrontingTunnelMaxDurationMilliseconds *int
+	HoldOffFrontingTunnelProviderIDs             []string
+	HoldOffFrontingTunnelProbability             *float64
 
 	// RestrictFrontingProviderIDs and other RestrictFrontingProviderIDs fields
 	// are for testing purposes.
@@ -896,6 +905,18 @@ type Config struct {
 	// testing purposes.
 	RestrictDirectProviderRegions              map[string][]string
 	RestrictDirectProviderIDsClientProbability *float64
+
+	// HoldOffInproxyTunnelMinDurationMilliseconds and other HoldOffInproxy
+	// fields are for testing purposes.
+	HoldOffInproxyTunnelMinDurationMilliseconds *int
+	HoldOffInproxyTunnelMaxDurationMilliseconds *int
+	HoldOffInproxyTunnelProviderRegions         map[string][]string
+	HoldOffInproxyTunnelProbability             *float64
+
+	// RestrictInproxyProviderRegions and other RestrictInproxy fields are for
+	// testing purposes.
+	RestrictInproxyProviderRegions              map[string][]string
+	RestrictInproxyProviderIDsClientProbability *float64
 
 	// UpstreamProxyAllowAllServerEntrySources is for testing purposes.
 	UpstreamProxyAllowAllServerEntrySources *bool
@@ -926,6 +947,8 @@ type Config struct {
 	DNSResolverProtocolTransformSpecs                transforms.Specs
 	DNSResolverProtocolTransformScopedSpecNames      transforms.ScopedSpecNames
 	DNSResolverProtocolTransformProbability          *float64
+	DNSResolverQNameRandomizeCasingProbability       *float64
+	DNSResolverQNameMustMatchProbability             *float64
 	DNSResolverIncludeEDNS0Probability               *float64
 	DNSResolverCacheExtensionInitialTTLMilliseconds  *int
 	DNSResolverCacheExtensionVerifiedTTLMilliseconds *int
@@ -1042,9 +1065,10 @@ type Config struct {
 	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int
 	InproxyProxyIncompatibleNetworkTypes                    []string
 	InproxyClientIncompatibleNetworkTypes                   []string
+	InproxySkipAwaitFullyConnected                          bool
+	InproxyEnableWebRTCDebugLogging                         bool
 
-	InproxySkipAwaitFullyConnected  bool
-	InproxyEnableWebRTCDebugLogging bool
+	NetworkIDCacheTTLMilliseconds *int
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -1061,7 +1085,7 @@ type Config struct {
 	authorizations     []string
 
 	deviceBinder    DeviceBinder
-	networkIDGetter NetworkIDGetter
+	networkIDGetter *cachingNetworkIDGetter
 
 	clientFeatures []string
 
@@ -1489,6 +1513,9 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	// wrap config.DeviceBinder and config.NetworkIDGetter/NetworkID with
 	// loggers.
 	//
+	// The network ID getter is further wrapped with a cache (see
+	// cachingNetworkIDGetter doc).
+	//
 	// New variables are set to avoid mutating input config fields.
 	// Internally, code must use config.deviceBinder and
 	// config.networkIDGetter and not the input/exported fields.
@@ -1500,17 +1527,23 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	networkIDGetter := config.NetworkIDGetter
 
 	if networkIDGetter == nil {
-		// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
-		// this method of network identification is not dynamic and will not reflect
-		// network changes that occur while running.
-		if config.NetworkID != "" {
-			networkIDGetter = newStaticNetworkGetter(config.NetworkID)
+		if networkid.Enabled() {
+			networkIDGetter = newCommonNetworkIDGetter()
 		} else {
-			networkIDGetter = newStaticNetworkGetter("UNKNOWN")
+			// Limitation: unlike NetworkIDGetter, which calls back to platform APIs
+			// this method of network identification is not dynamic and will not reflect
+			// network changes that occur while running.
+			if config.NetworkID != "" {
+				networkIDGetter = newStaticNetworkIDGetter(config.NetworkID)
+			} else {
+				networkIDGetter = newStaticNetworkIDGetter(unknownNetworkID)
+			}
 		}
 	}
 
-	config.networkIDGetter = newLoggingNetworkIDGetter(networkIDGetter)
+	config.networkIDGetter = newCachingNetworkIDGetter(
+		config,
+		newLoggingNetworkIDGetter(networkIDGetter))
 
 	// Initialize config.clientFeatures, which adds feature names on top of
 	// those specified by the host application in config.ClientFeatures.
@@ -2202,24 +2235,36 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ConjureDTLSEmptyInitialPacketProbability] = *config.ConjureDTLSEmptyInitialPacketProbability
 	}
 
-	if config.HoldOffTunnelMinDurationMilliseconds != nil {
-		applyParameters[parameters.HoldOffTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelMinDurationMilliseconds)
+	if config.HoldOffTunnelProtocolMinDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffTunnelProtocolMinDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelProtocolMinDurationMilliseconds)
 	}
 
-	if config.HoldOffTunnelMaxDurationMilliseconds != nil {
-		applyParameters[parameters.HoldOffTunnelMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelMaxDurationMilliseconds)
+	if config.HoldOffTunnelProtocolMaxDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffTunnelProtocolMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffTunnelProtocolMaxDurationMilliseconds)
 	}
 
-	if len(config.HoldOffTunnelProtocols) > 0 {
-		applyParameters[parameters.HoldOffTunnelProtocols] = protocol.TunnelProtocols(config.HoldOffTunnelProtocols)
+	if len(config.HoldOffTunnelProtocolNames) > 0 {
+		applyParameters[parameters.HoldOffTunnelProtocolNames] = protocol.TunnelProtocols(config.HoldOffTunnelProtocolNames)
 	}
 
-	if len(config.HoldOffTunnelFrontingProviderIDs) > 0 {
-		applyParameters[parameters.HoldOffTunnelFrontingProviderIDs] = config.HoldOffTunnelFrontingProviderIDs
+	if config.HoldOffTunnelProtocolProbability != nil {
+		applyParameters[parameters.HoldOffTunnelProtocolProbability] = *config.HoldOffTunnelProtocolProbability
 	}
 
-	if config.HoldOffTunnelProbability != nil {
-		applyParameters[parameters.HoldOffTunnelProbability] = *config.HoldOffTunnelProbability
+	if config.HoldOffFrontingTunnelMinDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffFrontingTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffFrontingTunnelMinDurationMilliseconds)
+	}
+
+	if config.HoldOffFrontingTunnelMaxDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffFrontingTunnelMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffFrontingTunnelMaxDurationMilliseconds)
+	}
+
+	if len(config.HoldOffFrontingTunnelProviderIDs) > 0 {
+		applyParameters[parameters.HoldOffFrontingTunnelProviderIDs] = config.HoldOffFrontingTunnelProviderIDs
+	}
+
+	if config.HoldOffFrontingTunnelProbability != nil {
+		applyParameters[parameters.HoldOffFrontingTunnelProbability] = *config.HoldOffFrontingTunnelProbability
 	}
 
 	if config.HoldOffDirectTunnelMinDurationMilliseconds != nil {
@@ -2252,6 +2297,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.RestrictFrontingProviderIDsClientProbability != nil {
 		applyParameters[parameters.RestrictFrontingProviderIDsClientProbability] = *config.RestrictFrontingProviderIDsClientProbability
+	}
+
+	if config.HoldOffInproxyTunnelMinDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffInproxyTunnelMinDuration] = fmt.Sprintf("%dms", *config.HoldOffInproxyTunnelMinDurationMilliseconds)
+	}
+
+	if config.HoldOffInproxyTunnelMaxDurationMilliseconds != nil {
+		applyParameters[parameters.HoldOffInproxyTunnelMaxDuration] = fmt.Sprintf("%dms", *config.HoldOffInproxyTunnelMaxDurationMilliseconds)
+	}
+
+	if len(config.HoldOffInproxyTunnelProviderRegions) > 0 {
+		applyParameters[parameters.HoldOffInproxyTunnelProviderRegions] = parameters.KeyStrings(config.HoldOffInproxyTunnelProviderRegions)
+	}
+
+	if config.HoldOffInproxyTunnelProbability != nil {
+		applyParameters[parameters.HoldOffInproxyTunnelProbability] = *config.HoldOffInproxyTunnelProbability
 	}
 
 	if config.UpstreamProxyAllowAllServerEntrySources != nil {
@@ -2320,6 +2381,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.DNSResolverProtocolTransformProbability != nil {
 		applyParameters[parameters.DNSResolverProtocolTransformProbability] = *config.DNSResolverProtocolTransformProbability
+	}
+
+	if config.DNSResolverQNameRandomizeCasingProbability != nil {
+		applyParameters[parameters.DNSResolverQNameRandomizeCasingProbability] = *config.DNSResolverQNameRandomizeCasingProbability
+	}
+
+	if config.DNSResolverQNameMustMatchProbability != nil {
+		applyParameters[parameters.DNSResolverQNameMustMatchProbability] = *config.DNSResolverQNameMustMatchProbability
 	}
 
 	if config.DNSResolverIncludeEDNS0Probability != nil {
@@ -2714,6 +2783,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyClientIncompatibleNetworkTypes] = config.InproxyClientIncompatibleNetworkTypes
 	}
 
+	if config.NetworkIDCacheTTLMilliseconds != nil {
+		applyParameters[parameters.NetworkIDCacheTTL] = fmt.Sprintf("%dms", *config.NetworkIDCacheTTLMilliseconds)
+	}
+
 	// When adding new config dial parameters that may override tactics, also
 	// update setDialParametersHash.
 
@@ -3005,28 +3078,48 @@ func (config *Config) setDialParametersHash() {
 		}
 	}
 
-	if config.HoldOffTunnelMinDurationMilliseconds != nil {
-		hash.Write([]byte("HoldOffTunnelMinDurationMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelMinDurationMilliseconds))
+	if config.HoldOffTunnelProtocolMinDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffTunnelProtocolMinDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelProtocolMinDurationMilliseconds))
 	}
 
-	if config.HoldOffTunnelMaxDurationMilliseconds != nil {
-		hash.Write([]byte("HoldOffTunnelMaxDurationMilliseconds"))
-		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelMaxDurationMilliseconds))
+	if config.HoldOffTunnelProtocolMaxDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffTunnelProtocolMaxDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffTunnelProtocolMaxDurationMilliseconds))
 	}
 
-	if len(config.HoldOffTunnelProtocols) > 0 {
-		hash.Write([]byte("HoldOffTunnelProtocols"))
-		for _, protocol := range config.HoldOffTunnelProtocols {
+	if len(config.HoldOffTunnelProtocolNames) > 0 {
+		hash.Write([]byte("HoldOffTunnelProtocolNames"))
+		for _, protocol := range config.HoldOffTunnelProtocolNames {
 			hash.Write([]byte(protocol))
 		}
 	}
 
-	if len(config.HoldOffTunnelFrontingProviderIDs) > 0 {
-		hash.Write([]byte("HoldOffTunnelFrontingProviderIDs"))
-		for _, providerID := range config.HoldOffTunnelFrontingProviderIDs {
+	if config.HoldOffTunnelProtocolProbability != nil {
+		hash.Write([]byte("HoldOffTunnelProtocolProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.HoldOffTunnelProtocolProbability)
+	}
+
+	if config.HoldOffFrontingTunnelMinDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffFrontingTunnelMinDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffFrontingTunnelMinDurationMilliseconds))
+	}
+
+	if config.HoldOffFrontingTunnelMaxDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffFrontingTunnelMaxDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffFrontingTunnelMaxDurationMilliseconds))
+	}
+
+	if len(config.HoldOffFrontingTunnelProviderIDs) > 0 {
+		hash.Write([]byte("HoldOffFrontingTunnelProviderIDs"))
+		for _, providerID := range config.HoldOffFrontingTunnelProviderIDs {
 			hash.Write([]byte(providerID))
 		}
+	}
+
+	if config.HoldOffFrontingTunnelProbability != nil {
+		hash.Write([]byte("HoldOffFrontingTunnelProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.HoldOffFrontingTunnelProbability)
 	}
 
 	if config.HoldOffDirectTunnelProbability != nil {
@@ -3054,11 +3147,6 @@ func (config *Config) setDialParametersHash() {
 		}
 	}
 
-	if config.HoldOffTunnelProbability != nil {
-		hash.Write([]byte("HoldOffTunnelProbability"))
-		binary.Write(hash, binary.LittleEndian, *config.HoldOffTunnelProbability)
-	}
-
 	if len(config.RestrictDirectProviderRegions) > 0 {
 		hash.Write([]byte("RestrictDirectProviderRegions"))
 		for providerID, regions := range config.RestrictDirectProviderRegions {
@@ -3084,6 +3172,46 @@ func (config *Config) setDialParametersHash() {
 	if config.RestrictFrontingProviderIDsClientProbability != nil {
 		hash.Write([]byte("RestrictFrontingProviderIDsClientProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.RestrictFrontingProviderIDsClientProbability)
+	}
+
+	if config.HoldOffInproxyTunnelProbability != nil {
+		hash.Write([]byte("HoldOffInproxyTunnelProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.HoldOffInproxyTunnelProbability)
+	}
+
+	if config.HoldOffInproxyTunnelMinDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffInproxyTunnelMinDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffInproxyTunnelMinDurationMilliseconds))
+	}
+
+	if config.HoldOffInproxyTunnelMaxDurationMilliseconds != nil {
+		hash.Write([]byte("HoldOffInproxyTunnelMaxDurationMilliseconds"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.HoldOffInproxyTunnelMaxDurationMilliseconds))
+	}
+
+	if len(config.HoldOffInproxyTunnelProviderRegions) > 0 {
+		hash.Write([]byte("HoldOffInproxyTunnelProviderRegions"))
+		for providerID, regions := range config.HoldOffInproxyTunnelProviderRegions {
+			hash.Write([]byte(providerID))
+			for _, region := range regions {
+				hash.Write([]byte(region))
+			}
+		}
+	}
+
+	if len(config.RestrictInproxyProviderRegions) > 0 {
+		hash.Write([]byte("RestrictInproxyProviderRegions"))
+		for providerID, regions := range config.RestrictInproxyProviderRegions {
+			hash.Write([]byte(providerID))
+			for _, region := range regions {
+				hash.Write([]byte(region))
+			}
+		}
+	}
+
+	if config.RestrictInproxyProviderIDsClientProbability != nil {
+		hash.Write([]byte("RestrictInproxyProviderIDsClientProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.RestrictInproxyProviderIDsClientProbability)
 	}
 
 	if config.UpstreamProxyAllowAllServerEntrySources != nil {
@@ -3169,6 +3297,16 @@ func (config *Config) setDialParametersHash() {
 	if config.DNSResolverProtocolTransformProbability != nil {
 		hash.Write([]byte("DNSResolverProtocolTransformProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.DNSResolverProtocolTransformProbability)
+	}
+
+	if config.DNSResolverQNameRandomizeCasingProbability != nil {
+		hash.Write([]byte("DNSResolverQNameRandomizeCasingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.DNSResolverQNameRandomizeCasingProbability)
+	}
+
+	if config.DNSResolverQNameMustMatchProbability != nil {
+		hash.Write([]byte("DNSResolverQNameMustMatchProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.DNSResolverQNameMustMatchProbability)
 	}
 
 	if config.DNSResolverIncludeEDNS0Probability != nil {
@@ -3554,16 +3692,34 @@ func (d *loggingDeviceBinder) BindToDevice(fileDescriptor int) (string, error) {
 	return deviceInfo, err
 }
 
-type staticNetworkGetter struct {
+const unknownNetworkID = "UNKNOWN"
+
+type staticNetworkIDGetter struct {
 	networkID string
 }
 
-func newStaticNetworkGetter(networkID string) *staticNetworkGetter {
-	return &staticNetworkGetter{networkID: networkID}
+func newStaticNetworkIDGetter(networkID string) *staticNetworkIDGetter {
+	return &staticNetworkIDGetter{networkID: networkID}
 }
 
-func (n *staticNetworkGetter) GetNetworkID() string {
+func (n *staticNetworkIDGetter) GetNetworkID() string {
 	return n.networkID
+}
+
+type commonNetworkIDGetter struct {
+}
+
+func newCommonNetworkIDGetter() *commonNetworkIDGetter {
+	return &commonNetworkIDGetter{}
+}
+
+func (n *commonNetworkIDGetter) GetNetworkID() string {
+	networkID, err := networkid.Get()
+	if err != nil {
+		NoticeError("networkid.Get failed: %v", errors.Trace(err))
+		return unknownNetworkID
+	}
+	return networkID
 }
 
 type loggingNetworkIDGetter struct {
@@ -3591,6 +3747,60 @@ func (n *loggingNetworkIDGetter) GetNetworkID() string {
 	NoticeNetworkID(logNetworkID)
 
 	return networkID
+}
+
+// cachingNetworkIDGetter caches the GetNetworkID result from the underlying
+// network ID getter. The current GetNetworkID implementations take in the
+// range of 1-7ms (Android); 2-3ms (iOS); ~3.5ms (Windows) to execute, on
+// modern devices. To minimize delaying dials and other operations that start
+// with fetching the current network ID, the return values are cached for a
+// short time. On platforms that invoke NetworkChanged, the cache is flushed
+// immediately upon a network change.
+type cachingNetworkIDGetter struct {
+	config *Config
+	n      NetworkIDGetter
+
+	mutex           sync.Mutex
+	cachedNetworkID string
+	cacheExpiry     time.Time
+}
+
+func newCachingNetworkIDGetter(
+	config *Config, n NetworkIDGetter) *cachingNetworkIDGetter {
+
+	return &cachingNetworkIDGetter{
+		config: config,
+		n:      n,
+	}
+}
+
+func (n *cachingNetworkIDGetter) GetNetworkID() string {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	if n.cachedNetworkID != "" && n.cacheExpiry.After(time.Now()) {
+		return n.cachedNetworkID
+	}
+
+	networkID := n.n.GetNetworkID()
+
+	p := n.config.GetParameters().Get()
+	ttl := p.Duration(parameters.NetworkIDCacheTTL)
+
+	if ttl > 0 {
+		n.cachedNetworkID = networkID
+		n.cacheExpiry = time.Now().Add(ttl)
+	}
+
+	return networkID
+}
+
+func (n *cachingNetworkIDGetter) FlushCache() {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	n.cachedNetworkID = ""
+	n.cacheExpiry = time.Time{}
 }
 
 // migrationsFromLegacyNoticeFilePaths returns the file migrations which must be
