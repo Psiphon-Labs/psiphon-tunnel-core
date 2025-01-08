@@ -824,8 +824,9 @@ func init() {
 		{162, "inproxy_dial_webrtc_ice_gathering_duration", intConverter},
 		{163, "inproxy_dial_broker_offer_duration", intConverter},
 		{164, "inproxy_dial_webrtc_connection_duration", intConverter},
+		{165, "inproxy_broker_is_reuse", intConverter},
 
-		// Next key value = 165
+		// Next key value = 166
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

@@ -1197,6 +1197,7 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_dial_webrtc_ice_gathering_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_broker_offer_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_webrtc_connection_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"inproxy_broker_is_reuse", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 // baseAndDialParams adds baseDialParams and inproxyDialParams to baseParams.

@@ -2537,6 +2537,8 @@ func checkExpectedServerTunnelLogFields(
 
 			// Fields sent by the client
 
+			"inproxy_broker_is_replay",
+			"inproxy_broker_is_reuse",
 			"inproxy_broker_transport",
 			"inproxy_broker_fronting_provider_id",
 			"inproxy_broker_dial_address",
