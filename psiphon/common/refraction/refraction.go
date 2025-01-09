@@ -416,8 +416,15 @@ func dial(
 			refractionDialer.Transport = transport.ID()
 			refractionDialer.TransportConfig = config
 			refractionDialer.DisableRegistrarOverrides = disableOverrides
-			refractionDialer.DialerWithLaddr = newWriteMergeDialer(
-				refractionDialer.DialerWithLaddr, false, 32)
+			if !conjureConfig.DoDecoyRegistration {
+				// Limitation: the writeMergeConn wrapping is skipped when
+				// using decoy registration, since the refraction package
+				// uses DialerWithLaddr for both the decoy registration step
+				// as well as the following phantom dial, and the
+				// writeMergeConn is only appropriate for the phantom dial.
+				refractionDialer.DialerWithLaddr = newWriteMergeDialer(
+					refractionDialer.DialerWithLaddr, false, 32)
+			}
 
 		case protocol.CONJURE_TRANSPORT_PREFIX_OSSH:
 
@@ -442,8 +449,11 @@ func dial(
 			refractionDialer.Transport = transport.ID()
 			refractionDialer.TransportConfig = config
 			refractionDialer.DisableRegistrarOverrides = disableOverrides
-			refractionDialer.DialerWithLaddr = newWriteMergeDialer(
-				refractionDialer.DialerWithLaddr, true, 64)
+			if !conjureConfig.DoDecoyRegistration {
+				// See limitation comment above.
+				refractionDialer.DialerWithLaddr = newWriteMergeDialer(
+					refractionDialer.DialerWithLaddr, true, 64)
+			}
 
 		case protocol.CONJURE_TRANSPORT_DTLS_OSSH:
 

@@ -358,6 +358,8 @@ const (
 	DNSResolverIncludeEDNS0Probability                 = "DNSResolverIncludeEDNS0Probability"
 	DNSResolverCacheExtensionInitialTTL                = "DNSResolverCacheExtensionInitialTTL"
 	DNSResolverCacheExtensionVerifiedTTL               = "DNSResolverCacheExtensionVerifiedTTL"
+	DNSResolverQNameRandomizeCasingProbability         = "DNSResolverQNameRandomizeCasingProbability"
+	DNSResolverQNameMustMatchProbability               = "DNSResolverQNameMustMatchProbability"
 	AddFrontingProviderPsiphonFrontingHeader           = "AddFrontingProviderPsiphonFrontingHeader"
 	DirectHTTPProtocolTransformSpecs                   = "DirectHTTPProtocolTransformSpecs"
 	DirectHTTPProtocolTransformScopedSpecNames         = "DirectHTTPProtocolTransformScopedSpecNames"
@@ -880,6 +882,8 @@ var defaultParameters = map[string]struct {
 	DNSResolverIncludeEDNS0Probability:          {value: 0.0, minimum: 0.0},
 	DNSResolverCacheExtensionInitialTTL:         {value: time.Duration(0), minimum: time.Duration(0)},
 	DNSResolverCacheExtensionVerifiedTTL:        {value: time.Duration(0), minimum: time.Duration(0)},
+	DNSResolverQNameRandomizeCasingProbability:  {value: 0.0, minimum: 0.0},
+	DNSResolverQNameMustMatchProbability:        {value: 0.0, minimum: 0.0},
 
 	AddFrontingProviderPsiphonFrontingHeader: {value: protocol.LabeledTunnelProtocols{}},
 

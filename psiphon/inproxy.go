@@ -148,11 +148,28 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 		}
 	}
 
+	// Set isReuse, which will record a metric indicating if this broker
+	// client has already been used for a successful round trip, a case which
+	// should result in faster overall dials.
+	//
+	// Limitations with HasSuccess, and the resulting isReuse metric: in some
+	// cases, it's possible that the underlying TLS connection is still
+	// redialed by net/http; or it's possible that the Noise session is
+	// invalid/expired and must be reestablished; or it can be the case that
+	// a shared broker client is only partially established at this point in
+	// time.
+	//
+	// Return a shallow copy of the broker dial params in order to record the
+	// correct isReuse, which varies depending on previous use.
+
+	brokerDialParams := *b.brokerClientInstance.brokerDialParams
+	brokerDialParams.isReuse = b.brokerClientInstance.HasSuccess()
+
 	// The b.brokerClientInstance.brokerClient is wired up to refer back to
 	// b.brokerClientInstance.brokerDialParams/roundTripper, etc.
 
 	return b.brokerClientInstance.brokerClient,
-		b.brokerClientInstance.brokerDialParams,
+		&brokerDialParams,
 		nil
 }
 
@@ -286,7 +303,6 @@ type InproxyBrokerClientInstance struct {
 	brokerRootObfuscationSecret   inproxy.ObfuscationSecret
 	brokerDialParams              *InproxyBrokerDialParameters
 	replayEnabled                 bool
-	isReplay                      bool
 	roundTripper                  *InproxyBrokerRoundTripper
 	personalCompartmentIDs        []inproxy.ID
 	commonCompartmentIDs          []inproxy.ID
@@ -531,7 +547,6 @@ func NewInproxyBrokerClientInstance(
 		brokerRootObfuscationSecret: brokerRootObfuscationSecret,
 		brokerDialParams:            brokerDialParams,
 		replayEnabled:               replayEnabled,
-		isReplay:                    isReplay,
 		roundTripper:                roundTripper,
 		personalCompartmentIDs:      personalCompartmentIDs,
 		commonCompartmentIDs:        commonCompartmentIDs,
@@ -782,6 +797,15 @@ func prepareInproxyCompartmentIDs(
 	return commonCompartmentIDs, personalCompartmentIDs, nil
 }
 
+// HasSuccess indicates whether this broker client instance has completed at
+// least one successful round trip.
+func (b *InproxyBrokerClientInstance) HasSuccess() bool {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	return !b.lastSuccess.IsZero()
+}
+
 // Close closes the broker client round tripped, including closing all
 // underlying network connections, which will interrupt any in-flight round
 // trips.
@@ -856,9 +880,9 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperSucceeded(roundTri
 	// Set replay or extend the broker dial parameters replay TTL after a
 	// success. With tunnel dial parameters, the replay TTL is extended after
 	// every successful tunnel connection. Since there are potentially more
-	// and more frequent broker round trips one tunnel dial, the TTL is only
-	// extended after some target duration has elapsed, to avoid excessive
-	// datastore writes.
+	// and more frequent broker round trips compared to tunnel dials, the TTL
+	// is only extended after some target duration has elapsed, to avoid
+	// excessive datastore writes.
 
 	if b.replayEnabled && now.Sub(b.lastStoreReplay) > b.replayUpdateFrequency {
 		b.brokerDialParams.LastUsedTimestamp = time.Now()
@@ -1079,6 +1103,7 @@ func (b *InproxyBrokerClientInstance) RelayedPacketRequestTimeout() time.Duratio
 type InproxyBrokerDialParameters struct {
 	brokerSpec *parameters.InproxyBrokerSpec `json:"-"`
 	isReplay   bool                          `json:"-"`
+	isReuse    bool                          `json:"-"`
 
 	LastUsedTimestamp      time.Time
 	LastUsedBrokerSpecHash []byte
@@ -1152,6 +1177,9 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 
 	brokerDialParams.isReplay = isReplay
 
+	// brokerDialParams.isReuse is set only later, as this is a new broker
+	// client dial.
+
 	if isReplay {
 		// FrontedHTTPDialParameters
 		//
@@ -1205,6 +1233,12 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 		isReplay = "1"
 	}
 	logFields["inproxy_broker_is_replay"] = isReplay
+
+	isReuse := "0"
+	if brokerDialParams.isReuse {
+		isReuse = "1"
+	}
+	logFields["inproxy_broker_is_reuse"] = isReuse
 
 	return logFields
 }
@@ -2085,6 +2119,17 @@ func (dialParams *InproxySTUNDialParameters) GetMetrics() common.LogFields {
 			logFields["inproxy_webrtc_dns_transform"] = dialParams.ResolveParameters.ProtocolTransformName
 		}
 
+		if dialParams.ResolveParameters.RandomQNameCasingSeed != nil {
+			logFields["inproxy_webrtc_dns_qname_random_casing"] = "1"
+		}
+
+		if dialParams.ResolveParameters.ResponseQNameMustMatch {
+			logFields["inproxy_webrtc_dns_qname_must_match"] = "1"
+		}
+
+		logFields["inproxy_webrtc_dns_qname_mismatches"] = strconv.Itoa(
+			dialParams.ResolveParameters.GetQNameMismatches())
+
 		logFields["inproxy_webrtc_dns_attempt"] = strconv.Itoa(
 			dialParams.ResolveParameters.GetFirstAttemptWithAnswer())
 	}
@@ -2490,6 +2535,10 @@ func getInproxyNetworkType(networkType string) inproxy.NetworkType {
 		return inproxy.NetworkTypeWiFi
 	case "MOBILE":
 		return inproxy.NetworkTypeMobile
+	case "WIRED":
+		return inproxy.NetworkTypeWired
+	case "VPN":
+		return inproxy.NetworkTypeVPN
 	}
 
 	return inproxy.NetworkTypeUnknown

@@ -137,6 +137,8 @@ const (
 	NetworkTypeUnknown NetworkType = iota
 	NetworkTypeWiFi
 	NetworkTypeMobile
+	NetworkTypeWired
+	NetworkTypeVPN
 )
 
 // NetworkProtocol is an Internet protocol, such as TCP or UDP. This enum is
@@ -453,6 +455,10 @@ func GetNetworkType(packedBaseParams protocol.PackedAPIParameters) NetworkType {
 		return NetworkTypeWiFi
 	case "MOBILE":
 		return NetworkTypeMobile
+	case "WIRED":
+		return NetworkTypeWired
+	case "VPN":
+		return NetworkTypeVPN
 	}
 	return NetworkTypeUnknown
 }

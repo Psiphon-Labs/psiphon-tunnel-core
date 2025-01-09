@@ -80,6 +80,8 @@ func runTestMakeResolveParameters() error {
 		"DNSResolverProtocolTransformProbability":     1.0,
 		"DNSResolverProtocolTransformSpecs":           transforms.Specs{transformName: exampleTransform},
 		"DNSResolverProtocolTransformScopedSpecNames": transforms.ScopedSpecNames{preferredAlternateDNSServer: []string{transformName}},
+		"DNSResolverQNameRandomizeCasingProbability":  1.0,
+		"DNSResolverQNameMustMatchProbability":        1.0,
 		"DNSResolverIncludeEDNS0Probability":          1.0,
 	}
 
@@ -132,7 +134,7 @@ func runTestMakeResolveParameters() error {
 		}
 	}
 
-	// Test: Preferred/Transform/EDNS(0)
+	// Test: Preferred/Transform/RandomQNameCasing/QNameMustMatch/EDNS(0)
 
 	paramValues["DNSResolverPreresolvedIPAddressProbability"] = 0.0
 
@@ -157,6 +159,8 @@ func runTestMakeResolveParameters() error {
 		resolverParams.PreferAlternateDNSServer != true ||
 		resolverParams.ProtocolTransformName != transformName ||
 		resolverParams.ProtocolTransformSpec == nil ||
+		resolverParams.RandomQNameCasingSeed == nil ||
+		resolverParams.ResponseQNameMustMatch != true ||
 		resolverParams.IncludeEDNS0 != true {
 		return errors.Tracef("unexpected resolver parameters: %+v", resolverParams)
 	}
@@ -165,6 +169,8 @@ func runTestMakeResolveParameters() error {
 
 	paramValues["DNSResolverPreferAlternateServerProbability"] = 0.0
 	paramValues["DNSResolverProtocolTransformProbability"] = 0.0
+	paramValues["DNSResolverQNameRandomizeCasingProbability"] = 0.0
+	paramValues["DNSResolverQNameMustMatchProbability"] = 0.0
 	paramValues["DNSResolverIncludeEDNS0Probability"] = 0.0
 
 	_, err = params.Set("", 0, paramValues)
@@ -188,6 +194,8 @@ func runTestMakeResolveParameters() error {
 		resolverParams.PreferAlternateDNSServer != false ||
 		resolverParams.ProtocolTransformName != "" ||
 		resolverParams.ProtocolTransformSpec != nil ||
+		resolverParams.RandomQNameCasingSeed != nil ||
+		resolverParams.ResponseQNameMustMatch != false ||
 		resolverParams.IncludeEDNS0 != false {
 		return errors.Tracef("unexpected resolver parameters: %+v", resolverParams)
 	}
@@ -198,14 +206,14 @@ func runTestMakeResolveParameters() error {
 func runTestResolver() error {
 
 	// noResponseServer will not respond to requests
-	noResponseServer, err := newTestDNSServer(false, false, false)
+	noResponseServer, err := newTestDNSServer(false, false, false, false)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	defer noResponseServer.stop()
 
 	// invalidIPServer will respond with an invalid IP
-	invalidIPServer, err := newTestDNSServer(true, false, false)
+	invalidIPServer, err := newTestDNSServer(true, false, false, false)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -213,7 +221,7 @@ func runTestResolver() error {
 
 	// okServer will respond to correct requests (expected domain) with the
 	// correct response (expected IPv4 or IPv6 address)
-	okServer, err := newTestDNSServer(true, true, false)
+	okServer, err := newTestDNSServer(true, true, false, false)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -221,7 +229,7 @@ func runTestResolver() error {
 
 	// alternateOkServer behaves like okServer; getRequestCount is used to
 	// confirm that the alternate server was indeed used
-	alternateOkServer, err := newTestDNSServer(true, true, false)
+	alternateOkServer, err := newTestDNSServer(true, true, false, false)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -230,11 +238,17 @@ func runTestResolver() error {
 	// transformOkServer behaves like okServer but only responds if the
 	// transform was applied; other servers do not respond if the transform
 	// is applied
-	transformOkServer, err := newTestDNSServer(true, true, true)
+	transformOkServer, err := newTestDNSServer(true, true, true, false)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	defer transformOkServer.stop()
+
+	randomQNameCasingOkServer, err := newTestDNSServer(true, true, false, true)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer randomQNameCasingOkServer.stop()
 
 	servers := []string{noResponseServer.getAddr(), invalidIPServer.getAddr(), okServer.getAddr()}
 
@@ -487,7 +501,7 @@ func runTestResolver() error {
 		return errors.TraceNew("unexpected server count")
 	}
 
-	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	IPs, err = resolver.ResolveIP(ctx, networkID, params, exampleRealDomain)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -529,6 +543,7 @@ func runTestResolver() error {
 
 	resolver.cache.Flush()
 
+	params.AttemptsPerServer = 0
 	params.AlternateDNSServer = transformOkServer.getAddr()
 	params.PreferAlternateDNSServer = true
 
@@ -555,11 +570,66 @@ func runTestResolver() error {
 		return errors.TraceNew("unexpected transform server request count")
 	}
 
+	params.AttemptsPerServer = 1
 	params.AlternateDNSServer = ""
 	params.PreferAlternateDNSServer = false
 	params.ProtocolTransformName = ""
 	params.ProtocolTransformSpec = nil
 	params.ProtocolTransformSeed = nil
+
+	// Test: random QName (hostname) casing
+	//
+	// Note: there's a (1/2)^N chance that the QName (hostname) with randomized
+	// casing has the same casing as the input QName, where N is the number of
+	// Unicode letters in the QName. In such an event these tests will either
+	// give a false positive or false negative depending on the subtest.
+
+	if randomQNameCasingOkServer.getRequestCount() != 0 {
+		return errors.TraceNew("unexpected random QName casing server request count")
+	}
+
+	resolver.cache.Flush()
+
+	params.AttemptsPerServer = 0
+	params.AttemptsPerPreferredServer = 1
+	params.AlternateDNSServer = randomQNameCasingOkServer.getAddr()
+	params.PreferAlternateDNSServer = true
+	params.RandomQNameCasingSeed = seed
+
+	_, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	resolver.cache.Flush()
+	params.ResponseQNameMustMatch = true
+
+	_, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err == nil {
+		return errors.TraceNew("expected QName mismatch")
+	}
+
+	resolver.cache.Flush()
+	params.AlternateDNSServer = okServer.getAddr()
+
+	_, err = resolver.ResolveIP(ctx, networkID, params, exampleDomain)
+	if err == nil {
+		return errors.TraceNew("expected server to not support random QName casing")
+	}
+
+	err = checkResult(IPs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if randomQNameCasingOkServer.getRequestCount() < 1 {
+		return errors.TraceNew("unexpected random QName casing server request count")
+	}
+
+	params.AttemptsPerServer = 1
+	params.AlternateDNSServer = ""
+	params.PreferAlternateDNSServer = false
+	params.RandomQNameCasingSeed = nil
 
 	// Test: EDNS(0)
 
@@ -695,7 +765,7 @@ func runTestPublicDNSServers() ([]net.IP, string, error) {
 	}
 
 	IPs, err := resolver.ResolveIP(
-		context.Background(), networkID, params, exampleDomain)
+		context.Background(), networkID, params, exampleRealDomain)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
@@ -728,8 +798,10 @@ func getPublicDNSServers() []string {
 	return shuffledServers
 }
 
+var exampleDomain = fmt.Sprintf("%s.example.com", prng.Base64String(32))
+
 const (
-	exampleDomain     = "example.com"
+	exampleRealDomain = "example.com"
 	exampleIPv4       = "93.184.216.34"
 	exampleIPv4CIDR   = "93.184.216.0/24"
 	exampleIPv6       = "2606:2800:220:1:248:1893:25c8:1946"
@@ -741,15 +813,16 @@ const (
 var exampleTransform = transforms.Spec{[2]string{"^([a-f0-9]{4})0100", "\\$\\{1\\}0140"}}
 
 type testDNSServer struct {
-	respond         bool
-	validResponse   bool
-	expectTransform bool
-	addr            string
-	requestCount    int32
-	server          *dns.Server
+	respond                 bool
+	validResponse           bool
+	expectTransform         bool
+	expectRandomQNameCasing bool
+	addr                    string
+	requestCount            int32
+	server                  *dns.Server
 }
 
-func newTestDNSServer(respond, validResponse, expectTransform bool) (*testDNSServer, error) {
+func newTestDNSServer(respond, validResponse, expectTransform, expectRandomQNameCasing bool) (*testDNSServer, error) {
 
 	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
 	if err != nil {
@@ -762,10 +835,11 @@ func newTestDNSServer(respond, validResponse, expectTransform bool) (*testDNSSer
 	}
 
 	s := &testDNSServer{
-		respond:         respond,
-		validResponse:   validResponse,
-		expectTransform: expectTransform,
-		addr:            udpConn.LocalAddr().String(),
+		respond:                 respond,
+		validResponse:           validResponse,
+		expectTransform:         expectTransform,
+		expectRandomQNameCasing: expectRandomQNameCasing,
+		addr:                    udpConn.LocalAddr().String(),
 	}
 
 	server := &dns.Server{
@@ -792,7 +866,9 @@ func (s *testDNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
-	if len(r.Question) != 1 || r.Question[0].Name != dns.Fqdn(exampleDomain) {
+	if len(r.Question) != 1 ||
+		(!s.expectRandomQNameCasing &&
+			r.Question[0].Name != dns.Fqdn(exampleDomain)) {
 		return
 	}
 
@@ -825,6 +901,11 @@ func (s *testDNSServer) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 				Ttl:    exampleTTLSeconds},
 			AAAA: IP,
 		}
+	}
+
+	if s.expectRandomQNameCasing {
+		// Simulate a server that does not preserve the casing of the QName.
+		m.Question[0].Name = dns.Fqdn(exampleDomain)
 	}
 
 	w.WriteMsg(m)

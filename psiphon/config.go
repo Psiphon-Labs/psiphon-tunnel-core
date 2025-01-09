@@ -947,6 +947,8 @@ type Config struct {
 	DNSResolverProtocolTransformSpecs                transforms.Specs
 	DNSResolverProtocolTransformScopedSpecNames      transforms.ScopedSpecNames
 	DNSResolverProtocolTransformProbability          *float64
+	DNSResolverQNameRandomizeCasingProbability       *float64
+	DNSResolverQNameMustMatchProbability             *float64
 	DNSResolverIncludeEDNS0Probability               *float64
 	DNSResolverCacheExtensionInitialTTLMilliseconds  *int
 	DNSResolverCacheExtensionVerifiedTTLMilliseconds *int
@@ -1658,6 +1660,7 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 	// posting notices.
 
 	config.paramsMutex.Lock()
+	tagUnchanged := tag != "" && tag == config.params.Get().Tag()
 	validationFlags := 0
 	if skipOnError {
 		validationFlags |= parameters.ValidationSkipOnError
@@ -1669,6 +1672,20 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 	}
 	p := config.params.Get()
 	config.paramsMutex.Unlock()
+
+	// Skip emitting notices and invoking GetTacticsAppliedReceivers when the
+	// tactics tag is unchanged. The notices are redundant, and the receivers
+	// will unnecessarily reset components such as in-proxy broker clients.
+	//
+	// At this time, the GetTactics call in launchEstablishing can result in
+	// redundant SetParameters calls with an unchanged tag.
+	//
+	// As a fail safe, and since there should not be any unwanted side
+	// effects, the above params.Set is still executed even for unchanged tags.
+
+	if tagUnchanged {
+		return nil
+	}
 
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
 
@@ -2379,6 +2396,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.DNSResolverProtocolTransformProbability != nil {
 		applyParameters[parameters.DNSResolverProtocolTransformProbability] = *config.DNSResolverProtocolTransformProbability
+	}
+
+	if config.DNSResolverQNameRandomizeCasingProbability != nil {
+		applyParameters[parameters.DNSResolverQNameRandomizeCasingProbability] = *config.DNSResolverQNameRandomizeCasingProbability
+	}
+
+	if config.DNSResolverQNameMustMatchProbability != nil {
+		applyParameters[parameters.DNSResolverQNameMustMatchProbability] = *config.DNSResolverQNameMustMatchProbability
 	}
 
 	if config.DNSResolverIncludeEDNS0Probability != nil {
@@ -3287,6 +3312,16 @@ func (config *Config) setDialParametersHash() {
 	if config.DNSResolverProtocolTransformProbability != nil {
 		hash.Write([]byte("DNSResolverProtocolTransformProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.DNSResolverProtocolTransformProbability)
+	}
+
+	if config.DNSResolverQNameRandomizeCasingProbability != nil {
+		hash.Write([]byte("DNSResolverQNameRandomizeCasingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.DNSResolverQNameRandomizeCasingProbability)
+	}
+
+	if config.DNSResolverQNameMustMatchProbability != nil {
+		hash.Write([]byte("DNSResolverQNameMustMatchProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.DNSResolverQNameMustMatchProbability)
 	}
 
 	if config.DNSResolverIncludeEDNS0Probability != nil {

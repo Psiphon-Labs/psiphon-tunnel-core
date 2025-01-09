@@ -288,14 +288,17 @@ func GetNetworkType(networkID string) string {
 	// check for and use the common network type prefixes currently used in
 	// NetworkIDGetter implementations.
 
-	if strings.HasPrefix(networkID, "VPN") {
-		return "VPN"
-	}
 	if strings.HasPrefix(networkID, "WIFI") {
 		return "WIFI"
 	}
 	if strings.HasPrefix(networkID, "MOBILE") {
 		return "MOBILE"
+	}
+	if strings.HasPrefix(networkID, "WIRED") {
+		return "WIRED"
+	}
+	if strings.HasPrefix(networkID, "VPN") {
+		return "VPN"
 	}
 	return "UNKNOWN"
 }
