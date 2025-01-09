@@ -2537,6 +2537,8 @@ func checkExpectedServerTunnelLogFields(
 
 			// Fields sent by the client
 
+			"inproxy_broker_is_replay",
+			"inproxy_broker_is_reuse",
 			"inproxy_broker_transport",
 			"inproxy_broker_fronting_provider_id",
 			"inproxy_broker_dial_address",
@@ -2546,6 +2548,10 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_webrtc_padded_messages_received",
 			"inproxy_webrtc_decoy_messages_sent",
 			"inproxy_webrtc_decoy_messages_received",
+
+			"inproxy_dial_webrtc_ice_gathering_duration",
+			"inproxy_dial_broker_offer_duration",
+			"inproxy_dial_webrtc_connection_duration",
 		} {
 			if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 				return fmt.Errorf("missing expected field '%s'", name)
