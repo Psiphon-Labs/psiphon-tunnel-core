@@ -315,6 +315,7 @@ func newWebRTCConn(
 
 	pionLoggerFactory := newPionLoggerFactory(
 		config.Logger,
+		func() bool { return ctx.Err() != nil },
 		config.EnableDebugLogging)
 
 	pionNetwork := newPionNetwork(
@@ -1535,7 +1536,7 @@ func (conn *webRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"state": state.String(),
-	}).Info("peer connection state changed")
+	}).Debug("peer connection state changed")
 }
 
 func (conn *webRTCConn) onICECandidate(candidate *webrtc.ICECandidate) {
@@ -1545,7 +1546,7 @@ func (conn *webRTCConn) onICECandidate(candidate *webrtc.ICECandidate) {
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"candidate": candidate.String(),
-	}).Info("new ICE candidate")
+	}).Debug("new ICE candidate")
 }
 
 func (conn *webRTCConn) onICEBindingRequest(m *stun.Message, local, remote ice.Candidate, pair *ice.CandidatePair) bool {
@@ -1569,7 +1570,7 @@ func (conn *webRTCConn) onICEBindingRequest(m *stun.Message, local, remote ice.C
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"local_candidate":  local.String(),
 		"remote_candidate": remote.String(),
-	}).Info("new ICE STUN binding request")
+	}).Debug("new ICE STUN binding request")
 
 	return false
 }
@@ -1578,14 +1579,14 @@ func (conn *webRTCConn) onICEConnectionStateChange(state webrtc.ICEConnectionSta
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"state": state.String(),
-	}).Info("ICE connection state changed")
+	}).Debug("ICE connection state changed")
 }
 
 func (conn *webRTCConn) onICEGatheringStateChange(state webrtc.ICEGathererState) {
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"state": state.String(),
-	}).Info("ICE gathering state changed")
+	}).Debug("ICE gathering state changed")
 }
 
 func (conn *webRTCConn) onNegotiationNeeded() {
@@ -1597,7 +1598,7 @@ func (conn *webRTCConn) onSignalingStateChange(state webrtc.SignalingState) {
 
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"state": state.String(),
-	}).Info("signaling state changed")
+	}).Debug("signaling state changed")
 }
 
 func (conn *webRTCConn) onDataChannel(dataChannel *webrtc.DataChannel) {
@@ -1610,7 +1611,7 @@ func (conn *webRTCConn) onDataChannel(dataChannel *webrtc.DataChannel) {
 	conn.config.Logger.WithTraceFields(common.LogFields{
 		"label": dataChannel.Label(),
 		"ID":    dataChannel.ID(),
-	}).Info("new data channel")
+	}).Debug("new data channel")
 }
 
 func (conn *webRTCConn) onDataChannelOpen() {
@@ -1978,18 +1979,22 @@ func processSDPAddresses(
 
 type pionLoggerFactory struct {
 	logger       common.Logger
+	stopLogging  func() bool
 	debugLogging bool
 }
 
-func newPionLoggerFactory(logger common.Logger, debugLogging bool) *pionLoggerFactory {
+func newPionLoggerFactory(
+	logger common.Logger, stopLogging func() bool, debugLogging bool) *pionLoggerFactory {
+
 	return &pionLoggerFactory{
 		logger:       logger,
+		stopLogging:  stopLogging,
 		debugLogging: debugLogging,
 	}
 }
 
 func (f *pionLoggerFactory) NewLogger(scope string) pion_logging.LeveledLogger {
-	return newPionLogger(scope, f.logger, f.debugLogging)
+	return newPionLogger(scope, f.logger, f.stopLogging, f.debugLogging)
 }
 
 // pionLogger wraps common.Logger and implements
@@ -1998,55 +2003,69 @@ func (f *pionLoggerFactory) NewLogger(scope string) pion_logging.LeveledLogger {
 type pionLogger struct {
 	scope        string
 	logger       common.Logger
+	stopLogging  func() bool
 	debugLogging bool
 	warnNoPairs  int32
 }
 
-func newPionLogger(scope string, logger common.Logger, debugLogging bool) *pionLogger {
+func newPionLogger(
+	scope string, logger common.Logger, stopLogging func() bool, debugLogging bool) *pionLogger {
+
 	return &pionLogger{
 		scope:        scope,
 		logger:       logger,
+		stopLogging:  stopLogging,
 		debugLogging: debugLogging,
 	}
 }
 
 func (l *pionLogger) Trace(msg string) {
-	if !l.debugLogging {
+	if l.stopLogging() || !l.debugLogging {
 		return
 	}
 	l.logger.WithTrace().Debug(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Tracef(format string, args ...interface{}) {
-	if !l.debugLogging {
+	if l.stopLogging() || !l.debugLogging {
 		return
 	}
 	l.logger.WithTrace().Debug(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 func (l *pionLogger) Debug(msg string) {
-	if !l.debugLogging {
+	if l.stopLogging() || !l.debugLogging {
 		return
 	}
 	l.logger.WithTrace().Debug(fmt.Sprintf("[webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Debugf(format string, args ...interface{}) {
-	if !l.debugLogging {
+	if l.stopLogging() || !l.debugLogging {
 		return
 	}
 	l.logger.WithTrace().Debug(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 func (l *pionLogger) Info(msg string) {
+	if l.stopLogging() {
+		return
+	}
 	l.logger.WithTrace().Info(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Infof(format string, args ...interface{}) {
+	if l.stopLogging() {
+		return
+	}
 	l.logger.WithTrace().Info(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 func (l *pionLogger) Warn(msg string) {
+
+	if l.stopLogging() {
+		return
+	}
 
 	// To reduce diagnostic log noise, only log this message once per dial attempt.
 	if msg == "Failed to ping without candidate pairs. Connection is not possible yet." &&
@@ -2058,14 +2077,23 @@ func (l *pionLogger) Warn(msg string) {
 }
 
 func (l *pionLogger) Warnf(format string, args ...interface{}) {
+	if l.stopLogging() {
+		return
+	}
 	l.logger.WithTrace().Warning(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 
 func (l *pionLogger) Error(msg string) {
+	if l.stopLogging() {
+		return
+	}
 	l.logger.WithTrace().Error(fmt.Sprintf("webRTC: %s: %s", l.scope, msg))
 }
 
 func (l *pionLogger) Errorf(format string, args ...interface{}) {
+	if l.stopLogging() {
+		return
+	}
 	l.logger.WithTrace().Error(fmt.Sprintf("webRTC: %s: %s", l.scope, fmt.Sprintf(format, args...)))
 }
 

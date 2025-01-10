@@ -1660,6 +1660,7 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 	// posting notices.
 
 	config.paramsMutex.Lock()
+	tagUnchanged := tag != "" && tag == config.params.Get().Tag()
 	validationFlags := 0
 	if skipOnError {
 		validationFlags |= parameters.ValidationSkipOnError
@@ -1671,6 +1672,20 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 	}
 	p := config.params.Get()
 	config.paramsMutex.Unlock()
+
+	// Skip emitting notices and invoking GetTacticsAppliedReceivers when the
+	// tactics tag is unchanged. The notices are redundant, and the receivers
+	// will unnecessarily reset components such as in-proxy broker clients.
+	//
+	// At this time, the GetTactics call in launchEstablishing can result in
+	// redundant SetParameters calls with an unchanged tag.
+	//
+	// As a fail safe, and since there should not be any unwanted side
+	// effects, the above params.Set is still executed even for unchanged tags.
+
+	if tagUnchanged {
+		return nil
+	}
 
 	NoticeInfo("applied %v parameters with tag '%s'", counts, tag)
 
