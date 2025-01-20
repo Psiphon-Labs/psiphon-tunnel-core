@@ -311,8 +311,14 @@ func probePortMapping(
 
 	client := portmapper.NewClient(portMappingLogger, nil, nil, nil, nil)
 
+	// ErrGatewayRange is "skipping portmap; gateway range likely lacks
+	// support". The probe did not fail, and the result fields will all be
+	// false. Drop through and report PortMappingTypeNone in this case.
+	// Currently, this is the only special case; and Probe doesn't wrap this
+	// error with the type NoMappingError.
+
 	result, err := client.Probe(ctx)
-	if err != nil {
+	if err != nil && err != portmapper.ErrGatewayRange {
 		return nil, nil, errors.Trace(err)
 	}
 

@@ -22,6 +22,7 @@
 #import <stdatomic.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
+#import <Contacts/CNContactsUserDefaults.h>
 #import <Psi/Psi.h>
 #import "IPv6Synthesizer.h"
 #import "PsiphonProviderFeedbackHandlerShim.h"
@@ -1577,6 +1578,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     if (@available(iOS 16.0, *)) {
         // CTCarrier deprecated with no replacement as of iOS 16 so there is no alternative API to
         // get the carrier country code; [CTCarrier isoCountryCode] returns @"--" on iOS >=16.
+        
+        return [[[CNContactsUserDefaults sharedDefaults] countryCode] capitalizedString];
+        
     } else {
         CTTelephonyNetworkInfo *networkInfo = nil;
         CTCarrier *carrier = nil;
