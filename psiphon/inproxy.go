@@ -139,14 +139,23 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 	networkID string) (*inproxy.BrokerClient, *InproxyBrokerDialParameters, error) {
 
 	b.mutex.Lock()
-	defer b.mutex.Unlock()
 
 	if b.brokerClientInstance == nil || b.networkID != networkID {
 		err := b.reset(resetBrokerClientReasonInit)
 		if err != nil {
+			b.mutex.Unlock()
 			return nil, nil, errors.Trace(err)
 		}
 	}
+
+	brokerClientInstance := b.brokerClientInstance
+
+	// Release lock before calling brokerClientInstance.HasSuccess. Otherwise,
+	// there's a potential deadlock that would result from this code path
+	// locking InproxyBrokerClientManager.mutex then InproxyBrokerClientInstance.mutex,
+	// while the BrokerClientRoundTripperFailed code path locks in the reverse order.
+
+	b.mutex.Unlock()
 
 	// Set isReuse, which will record a metric indicating if this broker
 	// client has already been used for a successful round trip, a case which
@@ -162,13 +171,13 @@ func (b *InproxyBrokerClientManager) GetBrokerClient(
 	// Return a shallow copy of the broker dial params in order to record the
 	// correct isReuse, which varies depending on previous use.
 
-	brokerDialParams := *b.brokerClientInstance.brokerDialParams
-	brokerDialParams.isReuse = b.brokerClientInstance.HasSuccess()
+	brokerDialParams := *brokerClientInstance.brokerDialParams
+	brokerDialParams.isReuse = brokerClientInstance.HasSuccess()
 
 	// The b.brokerClientInstance.brokerClient is wired up to refer back to
 	// b.brokerClientInstance.brokerDialParams/roundTripper, etc.
 
-	return b.brokerClientInstance.brokerClient,
+	return brokerClientInstance.brokerClient,
 		&brokerDialParams,
 		nil
 }
@@ -806,10 +815,16 @@ func (b *InproxyBrokerClientInstance) HasSuccess() bool {
 	return !b.lastSuccess.IsZero()
 }
 
-// Close closes the broker client round tripped, including closing all
+// Close closes the broker client round tripper, including closing all
 // underlying network connections, which will interrupt any in-flight round
 // trips.
 func (b *InproxyBrokerClientInstance) Close() error {
+
+	// Concurrency note: Close is called from InproxyBrokerClientManager with
+	// its mutex locked. Close must not lock InproxyBrokerClientInstance's
+	// mutex, or else there is a risk of deadlock similar to the HasSuccess
+	// case documented in InproxyBrokerClientManager.GetBrokerClient.
+
 	err := b.roundTripper.Close()
 	return errors.Trace(err)
 }
