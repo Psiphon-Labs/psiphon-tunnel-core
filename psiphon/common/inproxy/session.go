@@ -844,7 +844,7 @@ func (r *InitiatorRoundTrip) Response() ([]byte, error) {
 	return r.response, nil
 }
 
-// ResponderSessions is a set of secure Noise protocol sessions for an
+// ResponderSessions is a set of secure Noise protocol sessions for a
 // responder. For in-proxy, brokers respond to clients and proxies and
 // servers respond to brokers.
 //
@@ -917,6 +917,8 @@ func NewResponderSessionsForKnownInitiators(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	s.applyTTL = false
 
 	s.expectedInitiatorPublicKeys, err = newSessionPublicKeyLookup(initiatorPublicKeys)
 	if err != nil {
