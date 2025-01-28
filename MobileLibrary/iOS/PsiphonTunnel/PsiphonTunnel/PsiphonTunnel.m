@@ -1579,7 +1579,7 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         // CTCarrier deprecated with no replacement as of iOS 16 so there is no alternative API to
         // get the carrier country code; [CTCarrier isoCountryCode] returns @"--" on iOS >=16.
         
-        return [[[CNContactsUserDefaults sharedDefaults] countryCode] capitalizedString];
+        return [[[CNContactsUserDefaults sharedDefaults] countryCode] uppercaseString];
         
     } else {
         CTTelephonyNetworkInfo *networkInfo = nil;
