@@ -86,6 +86,7 @@ type ServerEntry struct {
 	DisableObfuscatedQUICTransforms     bool     `json:"disableObfuscatedQUICTransforms,omitempty"`
 	DisableOSSHTransforms               bool     `json:"disableOSSHTransforms,omitempty"`
 	DisableOSSHPrefix                   bool     `json:"disableOSSHPrefix,omitempty"`
+	DisableShadowsocksPrefix            bool     `json:"disableShadowsocksPrefix,omitempty"`
 	InproxySessionPublicKey             string   `json:"inproxySessionPublicKey,omitempty"`
 	InproxySessionRootObfuscationSecret string   `json:"inproxySessionRootObfuscationSecret,omitempty"`
 	InproxySSHPort                      int      `json:"inproxySSHPort,omitempty"`

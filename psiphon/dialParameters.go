@@ -98,6 +98,8 @@ type DialParameters struct {
 	OSSHPrefixSpec        *obfuscator.OSSHPrefixSpec
 	OSSHPrefixSplitConfig *obfuscator.OSSHPrefixSplitConfig
 
+	ShadowsocksPrefixSpec *ShadowsocksPrefixSpec
+
 	FragmentorSeed *prng.Seed
 
 	FrontingProviderID string
@@ -249,6 +251,7 @@ func MakeDialParameters(
 	replayHTTPTransformerParameters := p.Bool(parameters.ReplayHTTPTransformerParameters)
 	replayOSSHSeedTransformerParameters := p.Bool(parameters.ReplayOSSHSeedTransformerParameters)
 	replayOSSHPrefix := p.Bool(parameters.ReplayOSSHPrefix)
+	replayShadowsocksPrefix := p.Bool(parameters.ReplayShadowsocksPrefix)
 	replayInproxySTUN := p.Bool(parameters.ReplayInproxySTUN)
 	replayInproxyWebRTC := p.Bool(parameters.ReplayInproxyWebRTC)
 
@@ -1132,6 +1135,24 @@ func MakeDialParameters(
 
 	}
 
+	if serverEntry.DisableShadowsocksPrefix {
+
+		dialParams.ShadowsocksPrefixSpec = nil
+
+	} else if !isReplay || !replayShadowsocksPrefix {
+
+		prefixSpec, err := makeShadowsocksPrefixSpecParameters(p)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		if prefixSpec.Spec != nil {
+			dialParams.ShadowsocksPrefixSpec = prefixSpec
+		} else {
+			dialParams.ShadowsocksPrefixSpec = nil
+		}
+	}
+
 	if protocol.TunnelProtocolUsesMeekHTTP(dialParams.TunnelProtocol) {
 
 		if serverEntry.DisableHTTPTransforms {
@@ -1712,6 +1733,7 @@ func (dialParams *DialParameters) GetShadowsocksConfig() *ShadowsockConfig {
 	return &ShadowsockConfig{
 		dialAddr: dialParams.DirectDialAddress,
 		key:      dialParams.ServerEntry.SshShadowsocksKey,
+		prefix:   dialParams.ShadowsocksPrefixSpec,
 	}
 }
 
@@ -2256,6 +2278,33 @@ func makeOSSHPrefixSplitConfig(p parameters.ParametersAccessor) (*obfuscator.OSS
 		MinDelay: minDelay,
 		MaxDelay: maxDelay,
 	}, nil
+}
+
+func makeShadowsocksPrefixSpecParameters(
+	p parameters.ParametersAccessor) (*ShadowsocksPrefixSpec, error) {
+
+	if !p.WeightedCoinFlip(parameters.ShadowsocksPrefixProbability) {
+		return &ShadowsocksPrefixSpec{}, nil
+	}
+
+	specs := p.ProtocolTransformSpecs(parameters.ShadowsocksPrefixSpecs)
+	scopedSpecNames := p.ProtocolTransformScopedSpecNames(parameters.ShadowsocksPrefixScopedSpecNames)
+
+	name, spec := specs.Select(transforms.SCOPE_ANY, scopedSpecNames)
+
+	if spec == nil {
+		return &ShadowsocksPrefixSpec{}, nil
+	} else {
+		seed, err := prng.NewSeed()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return &ShadowsocksPrefixSpec{
+			Name: name,
+			Spec: spec,
+			Seed: seed,
+		}, nil
+	}
 }
 
 func selectConjureTransport(

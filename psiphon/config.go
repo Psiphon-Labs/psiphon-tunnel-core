@@ -977,6 +977,11 @@ type Config struct {
 	OSSHPrefixSplitMaxDelayMilliseconds *int
 	OSSHPrefixEnableFragmentor          *bool
 
+	// ShadowsocksPrefix parameters are for testing purposes only.
+	ShadowsocksPrefixSpecs           transforms.Specs
+	ShadowsocksPrefixScopedSpecNames transforms.ScopedSpecNames
+	ShadowsocksPrefixProbability     *float64
+
 	// TLSTunnelTrafficShapingProbability and associated fields are for testing.
 	TLSTunnelObfuscatedPSKProbability  *float64
 	TLSTunnelTrafficShapingProbability *float64
@@ -2497,6 +2502,18 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.OSSHPrefixEnableFragmentor] = *config.OSSHPrefixEnableFragmentor
 	}
 
+	if config.ShadowsocksPrefixSpecs != nil {
+		applyParameters[parameters.ShadowsocksPrefixSpecs] = config.ShadowsocksPrefixSpecs
+	}
+
+	if config.ShadowsocksPrefixScopedSpecNames != nil {
+		applyParameters[parameters.ShadowsocksPrefixScopedSpecNames] = config.ShadowsocksPrefixScopedSpecNames
+	}
+
+	if config.ShadowsocksPrefixProbability != nil {
+		applyParameters[parameters.ShadowsocksPrefixProbability] = *config.ShadowsocksPrefixProbability
+	}
+
 	if config.TLSTunnelObfuscatedPSKProbability != nil {
 		applyParameters[parameters.TLSTunnelObfuscatedPSKProbability] = *config.TLSTunnelObfuscatedPSKProbability
 	}
@@ -3464,6 +3481,23 @@ func (config *Config) setDialParametersHash() {
 	if config.OSSHPrefixEnableFragmentor != nil {
 		hash.Write([]byte("OSSHPrefixEnableFragmentor"))
 		binary.Write(hash, binary.LittleEndian, *config.OSSHPrefixEnableFragmentor)
+	}
+
+	if config.ShadowsocksPrefixSpecs != nil {
+		hash.Write([]byte("ShadowsocksPrefixSpecs"))
+		encodedShadowsocksPrefixSpecs, _ := json.Marshal(config.ShadowsocksPrefixSpecs)
+		hash.Write(encodedShadowsocksPrefixSpecs)
+	}
+
+	if config.ShadowsocksPrefixScopedSpecNames != nil {
+		hash.Write([]byte("ShadowsocksPrefixScopedSpecNames"))
+		encodedShadowsocksPrefixScopedSpecNames, _ := json.Marshal(config.ShadowsocksPrefixScopedSpecNames)
+		hash.Write(encodedShadowsocksPrefixScopedSpecNames)
+	}
+
+	if config.ShadowsocksPrefixProbability != nil {
+		hash.Write([]byte("ShadowsocksPrefixProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.ShadowsocksPrefixProbability)
 	}
 
 	if config.TLSTunnelObfuscatedPSKProbability != nil {

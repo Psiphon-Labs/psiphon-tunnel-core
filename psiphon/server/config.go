@@ -973,7 +973,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 
 	// Shadowsocks config
 
-	// TODO: double check there are enough bytes of entropy
 	shadowsocksKeyBytes, err := common.MakeSecureRandomBytes(SHADOWSOCKS_KEY_BYTE_LENGTH)
 	if err != nil {
 		return nil, nil, nil, nil, nil, errors.Trace(err)

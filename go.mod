@@ -32,6 +32,7 @@ replace github.com/pion/webrtc/v3 => ./replace/webrtc
 require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/Jigsaw-Code/outline-sdk v0.0.16
+	github.com/Jigsaw-Code/outline-ss-server v1.8.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
@@ -74,7 +75,6 @@ require (
 	github.com/refraction-networking/conjure v0.7.11-0.20240130155008-c8df96195ab2
 	github.com/refraction-networking/gotapdance v1.7.10
 	github.com/ryanuber/go-glob v0.0.0-20170128012129-256dc444b735
-	github.com/shadowsocks/go-shadowsocks2 v0.1.5
 	github.com/shirou/gopsutil/v4 v4.24.5
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
@@ -83,7 +83,7 @@ require (
 	github.com/wlynxg/anet v0.0.1
 	golang.org/x/crypto v0.22.0
 	golang.org/x/net v0.24.0
-	golang.org/x/sync v0.5.0
+	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.20.0
 	golang.org/x/term v0.19.0
 	golang.org/x/time v0.5.0
@@ -138,6 +138,7 @@ require (
 	github.com/refraction-networking/obfs4 v0.1.2 // indirect
 	github.com/refraction-networking/utls v1.3.3 // indirect
 	github.com/sergeyfrolov/bsbuffer v0.0.0-20180903213811-94e85abb8507 // indirect
+	github.com/shadowsocks/go-shadowsocks2 v0.1.5 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/tailscale/goupnp v1.0.1-0.20210804011211-c64d0f06ea05 // indirect
 	github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85 // indirect
@@ -151,10 +152,10 @@ require (
 	go.uber.org/mock v0.4.0 // indirect
 	go4.org/mem v0.0.0-20220726221520-4f986261bf13 // indirect
 	go4.org/netipx v0.0.0-20230824141953-6213f710f925 // indirect
-	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
+	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e // indirect
 	golang.org/x/mod v0.14.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	golang.org/x/tools v0.15.0 // indirect
+	golang.org/x/tools v0.16.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

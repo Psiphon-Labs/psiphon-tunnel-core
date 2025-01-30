@@ -20,10 +20,14 @@
 package server
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"net"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
@@ -31,9 +35,11 @@ import (
 // ShadowsocksServer tunnels TCP traffic (in the case of Psiphon, SSH traffic)
 // over Shadowsocks.
 type ShadowsocksServer struct {
-	support  *SupportServices
-	listener net.Listener
-	key      *shadowsocks.EncryptionKey
+	support       *SupportServices
+	listener      net.Listener
+	key           *shadowsocks.EncryptionKey
+	saltGenerator service.ServerSaltGenerator
+	replayCache   service.ReplayCache
 }
 
 // ListenShadowsocks returns the listener of a new ShadowsocksServer.
@@ -57,16 +63,22 @@ func NewShadowsocksServer(
 	listener net.Listener,
 	ssEncryptionKey string) (*ShadowsocksServer, error) {
 
-	// TODO: consider using other AEAD ciphers; client cipher needs to match.
+	// Note: client must use the same cipher.
 	key, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, ssEncryptionKey)
 	if err != nil {
 		return nil, errors.TraceMsg(err, "shadowsocks.NewEncryptionKey failed")
 	}
 
+	// Note: see comment for service.MaxCapacity for a description of
+	// the expected false positive rate.
+	replayHistory := service.MaxCapacity
+
 	shadowsocksServer := &ShadowsocksServer{
-		support:  support,
-		listener: listener,
-		key:      key,
+		support:       support,
+		listener:      listener,
+		key:           key,
+		saltGenerator: service.NewServerSaltGenerator(ssEncryptionKey),
+		replayCache:   service.NewReplayCache(replayHistory),
 	}
 
 	return shadowsocksServer, nil
@@ -94,11 +106,79 @@ func (l *ShadowsocksListener) Accept() (net.Conn, error) {
 		return nil, errors.Trace(err)
 	}
 
-	ssr := shadowsocks.NewReader(conn, l.server.key)
+	salt, reader, err := l.readSalt(conn)
+	if err != nil {
+		return nil, errors.TraceMsg(err, "failed to read salt")
+	}
+
+	// TODO: code mostly copied from [1]; use NewShadowsocksStreamAuthenticator instead?
+	//
+	// [1] https://github.com/Jigsaw-Code/outline-ss-server/blob/fa651d3e87cc0a94104babb3ae85253471a22ebc/service/tcp.go#L138
+
+	// Hardcode key ID because all clients use the same cipher per server,
+	// which is fine because the underlying SSH connection protects the
+	// confidentiality and integrity of client traffic between the client and
+	// server.
+	keyID := "1"
+
+	isServerSalt := l.server.saltGenerator.IsServerSalt(salt)
+
+	if isServerSalt || !l.server.replayCache.Add(keyID, salt) {
+
+		go drainConn(conn)
+
+		if isServerSalt {
+			return nil, errors.TraceNew("server replay detected")
+		}
+		return nil, errors.TraceNew("client replay detected")
+	}
+
+	ssr := shadowsocks.NewReader(reader, l.server.key)
 	ssw := shadowsocks.NewWriter(conn, l.server.key)
+	ssw.SetSaltGenerator(l.server.saltGenerator)
 	ssClientConn := transport.WrapConn(conn.(*net.TCPConn), ssr, ssw)
 
 	return NewShadowsocksConn(ssClientConn, l.server), nil
+}
+
+func drainConn(conn net.Conn) {
+	_, _ = io.Copy(io.Discard, conn)
+	conn.Close()
+}
+
+func (l *ShadowsocksListener) readSalt(conn net.Conn) ([]byte, io.Reader, error) {
+
+	type result struct {
+		salt []byte
+		err  error
+	}
+
+	resultChannel := make(chan result)
+
+	go func() {
+		saltSize := l.server.key.SaltSize()
+		salt := make([]byte, saltSize)
+		if n, err := io.ReadFull(conn, salt); err != nil {
+			resultChannel <- result{
+				err: fmt.Errorf("reading conn failed after %d bytes: %w", n, err),
+			}
+			return
+		}
+
+		resultChannel <- result{
+			salt: salt,
+		}
+	}()
+
+	select {
+	case result := <-resultChannel:
+		if result.err != nil {
+			return nil, nil, result.err
+		}
+		return result.salt, io.MultiReader(bytes.NewReader(result.salt), conn), nil
+	case <-l.server.support.TunnelServer.shutdownBroadcast:
+		return nil, nil, errors.TraceNew("shutdown broadcast")
+	}
 }
 
 // ShadowsocksConn implements the net.Conn and common.MetricsSource interfaces.

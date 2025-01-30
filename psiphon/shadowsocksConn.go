@@ -25,13 +25,17 @@ import (
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 )
 
 // ShadowsockConfig specifies the behavior of a shadowsocksConn.
 type ShadowsockConfig struct {
 	dialAddr string
 	key      string
+	prefix   *ShadowsocksPrefixSpec
 }
 
 // shadowsocksConn is a network connection that tunnels net.Conn flows over Shadowsocks.
@@ -45,7 +49,7 @@ func DialShadowsocksTunnel(
 	shadowsocksConfig *ShadowsockConfig,
 	dialConfig *DialConfig) (*shadowsocksConn, error) {
 
-	// TODO: consider using other AEAD ciphers; server cipher needs to match.
+	// Note: server must use the same cipher.
 	key, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, shadowsocksConfig.key)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -57,13 +61,58 @@ func DialShadowsocksTunnel(
 	}
 
 	// Based on shadowsocks.DialStream
-	// TODO: explicitly set SaltGenerator?
 	ssw := shadowsocks.NewWriter(conn, key)
 	ssr := shadowsocks.NewReader(conn, key)
+
+	if shadowsocksConfig.prefix != nil {
+
+		prefix, err := makePrefix(shadowsocksConfig.prefix)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		// Prefixes must be <= 16 bytes as longer prefixes risk salt collisions,
+		// which can compromise the security of the connection [1][2].
+		// [1] https://developers.google.com/outline/docs/guides/service-providers/prefixing
+		// [2] See comment for shadowsocks.NewPrefixSaltGenerator
+		//
+		// TODO: consider logging a warning or returning an error if
+		// len(prefix) > 16.
+		if len(prefix) <= 16 {
+			ssw.SetSaltGenerator(shadowsocks.NewPrefixSaltGenerator(prefix))
+		}
+	}
+
 	// TODO: is this cast correct/safe?
 	ssConn := transport.WrapConn(conn.(*TCPConn).Conn.(*net.TCPConn), ssr, ssw)
 
 	return &shadowsocksConn{
 		Conn: ssConn,
 	}, nil
+}
+
+func (conn *shadowsocksConn) IsClosed() bool {
+	closer, ok := conn.Conn.(common.Closer)
+	if !ok {
+		return false
+	}
+	return closer.IsClosed()
+}
+
+type ShadowsocksPrefixSpec struct {
+	Name string
+	Spec transforms.Spec
+	Seed *prng.Seed
+}
+
+func makePrefix(spec *ShadowsocksPrefixSpec) ([]byte, error) {
+
+	minLength := 0
+
+	prefix, _, err := spec.Spec.ApplyPrefix(spec.Seed, minLength)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return prefix, nil
 }

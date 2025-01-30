@@ -213,6 +213,7 @@ func TestShadowsocks(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
+			applyPrefix:          true,
 		})
 }
 
@@ -1478,18 +1479,30 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		if runConfig.applyPrefix {
 
-			applyParameters[parameters.OSSHPrefixSpecs] = transforms.Specs{
-				"TEST": {{"", "\x00{200}"}},
-			}
-			applyParameters[parameters.OSSHPrefixScopedSpecNames] = transforms.ScopedSpecNames{
-				"": {"TEST"},
-			}
-			applyParameters[parameters.OSSHPrefixProbability] = 1.0
-			applyParameters[parameters.OSSHPrefixSplitMinDelay] = "10ms"
-			applyParameters[parameters.OSSHPrefixSplitMaxDelay] = "20ms"
+			if protocol.TunnelProtocolIsObfuscatedSSH(runConfig.tunnelProtocol) {
 
-			applyParameters[parameters.OSSHPrefixEnableFragmentor] = runConfig.forceFragmenting
+				applyParameters[parameters.OSSHPrefixSpecs] = transforms.Specs{
+					"TEST": {{"", "\x00{200}"}},
+				}
+				applyParameters[parameters.OSSHPrefixScopedSpecNames] = transforms.ScopedSpecNames{
+					"": {"TEST"},
+				}
+				applyParameters[parameters.OSSHPrefixProbability] = 1.0
+				applyParameters[parameters.OSSHPrefixSplitMinDelay] = "10ms"
+				applyParameters[parameters.OSSHPrefixSplitMaxDelay] = "20ms"
 
+				applyParameters[parameters.OSSHPrefixEnableFragmentor] = runConfig.forceFragmenting
+
+			} else if protocol.TunnelProtocolUsesShadowsocks(runConfig.tunnelProtocol) {
+
+				applyParameters[parameters.ShadowsocksPrefixSpecs] = transforms.Specs{
+					"TEST": {{"", "\x00{16}"}},
+				}
+				applyParameters[parameters.ShadowsocksPrefixScopedSpecNames] = transforms.ScopedSpecNames{
+					"": {"TEST"},
+				}
+				applyParameters[parameters.ShadowsocksPrefixProbability] = 1.0
+			}
 		}
 
 		if runConfig.forceFragmenting {
@@ -2016,7 +2029,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
 
 	// Inspect OSSH prefix flows, if applicable.
-	if runConfig.inspectFlows && runConfig.applyPrefix {
+	if runConfig.inspectFlows && runConfig.applyPrefix && protocol.TunnelProtocolIsObfuscatedSSH(runConfig.tunnelProtocol) {
 
 		flows := <-flowInspectorProxy.ch
 		serverFlows := flows[0]
@@ -2674,8 +2687,14 @@ func checkExpectedServerTunnelLogFields(
 
 	if runConfig.applyPrefix {
 
-		if fields["ossh_prefix"] == nil || fmt.Sprintf("%s", fields["ossh_prefix"]) == "" {
-			return fmt.Errorf("missing expected field 'ossh_prefix'")
+		if protocol.TunnelProtocolIsObfuscatedSSH(runConfig.tunnelProtocol) {
+			if fields["ossh_prefix"] == nil || fmt.Sprintf("%s", fields["ossh_prefix"]) == "" {
+				return fmt.Errorf("missing expected field 'ossh_prefix'")
+			}
+		} else if protocol.TunnelProtocolUsesShadowsocks(runConfig.tunnelProtocol) {
+			if fields["shadowsocks_prefix"] == nil || fmt.Sprintf("%s", fields["shadowsocks_prefix"]) == "" {
+				return fmt.Errorf("missing expected field 'shadowsocks_prefix'")
+			}
 		}
 	}
 
