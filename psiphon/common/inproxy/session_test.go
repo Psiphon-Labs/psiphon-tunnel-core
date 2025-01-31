@@ -712,11 +712,11 @@ func runTestNoise() error {
 	if receivedPayload == nil {
 		return errors.TraceNew("missing payload")
 	}
-	if bytes.Compare(sendPayload, receivedPayload) != 0 {
+	if !bytes.Equal(sendPayload, receivedPayload) {
 		return errors.TraceNew("incorrect payload")
 	}
 
-	if bytes.Compare(responderHandshake.PeerStatic(), initiatorKeys.Public) != 0 {
+	if !bytes.Equal(responderHandshake.PeerStatic(), initiatorKeys.Public) {
 		return errors.TraceNew("unexpected initiator static public key")
 	}
 
@@ -738,7 +738,7 @@ func runTestNoise() error {
 	if !initiatorReplay.ValidateCounter(nonce, math.MaxUint64) {
 		return errors.TraceNew("replay detected")
 	}
-	if bytes.Compare(sendPayload, receivedPayload) != 0 {
+	if !bytes.Equal(sendPayload, receivedPayload) {
 		return errors.TraceNew("incorrect payload")
 	}
 
@@ -764,7 +764,7 @@ func runTestNoise() error {
 		if !responderReplay.ValidateCounter(nonce, math.MaxUint64) {
 			return errors.TraceNew("replay detected")
 		}
-		if bytes.Compare(sendPayload, receivedPayload) != 0 {
+		if !bytes.Equal(sendPayload, receivedPayload) {
 			return errors.TraceNew("incorrect payload")
 		}
 
@@ -786,7 +786,7 @@ func runTestNoise() error {
 		if !initiatorReplay.ValidateCounter(nonce, math.MaxUint64) {
 			return errors.TraceNew("replay detected")
 		}
-		if bytes.Compare(sendPayload, receivedPayload) != 0 {
+		if !bytes.Equal(sendPayload, receivedPayload) {
 			return errors.TraceNew("incorrect payload")
 		}
 	}

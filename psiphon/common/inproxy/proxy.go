@@ -720,13 +720,15 @@ func (p *Proxy) proxyOneClient(
 
 	}
 
-	if announceResponse.ClientProxyProtocolVersion != ProxyProtocolVersion1 {
-		// This case is currently unexpected, as all clients and proxies use
-		// ProxyProtocolVersion1.
+	if announceResponse.SelectedProtocolVersion < ProtocolVersion1 ||
+		(announceResponse.UseMediaStreams &&
+			announceResponse.SelectedProtocolVersion < ProtocolVersion2) ||
+		announceResponse.SelectedProtocolVersion > LatestProtocolVersion {
+
 		backOff = true
 		return backOff, errors.Tracef(
-			"Unsupported proxy protocol version: %d",
-			announceResponse.ClientProxyProtocolVersion)
+			"unsupported protocol version: %d",
+			announceResponse.SelectedProtocolVersion)
 	}
 
 	// Trigger back-off if the following WebRTC operations fail to establish a
@@ -767,7 +769,16 @@ func (p *Proxy) proxyOneClient(
 			WebRTCDialCoordinator:       webRTCCoordinator,
 			ClientRootObfuscationSecret: announceResponse.ClientRootObfuscationSecret,
 			DoDTLSRandomization:         announceResponse.DoDTLSRandomization,
+			UseMediaStreams:             announceResponse.UseMediaStreams,
 			TrafficShapingParameters:    announceResponse.TrafficShapingParameters,
+
+			// In media stream mode, this flag indicates to the proxy that it
+			// should add the QUIC-based reliability layer wrapping to media
+			// streams. In data channel mode, this flag is ignored, since the
+			// client configures the data channel using
+			// webrtc.DataChannelInit.Ordered, and this configuration is sent
+			// to the proxy in the client's SDP.
+			ReliableTransport: announceResponse.NetworkProtocol == NetworkProtocolTCP,
 		},
 		announceResponse.ClientOfferSDP,
 		hasPersonalCompartmentIDs)
@@ -788,11 +799,10 @@ func (p *Proxy) proxyOneClient(
 	_, err = brokerClient.ProxyAnswer(
 		ctx,
 		&ProxyAnswerRequest{
-			ConnectionID:                 announceResponse.ConnectionID,
-			SelectedProxyProtocolVersion: announceResponse.ClientProxyProtocolVersion,
-			ProxyAnswerSDP:               SDP,
-			ICECandidateTypes:            sdpMetrics.iceCandidateTypes,
-			AnswerError:                  webRTCRequestErr,
+			ConnectionID:      announceResponse.ConnectionID,
+			ProxyAnswerSDP:    SDP,
+			ICECandidateTypes: sdpMetrics.iceCandidateTypes,
+			AnswerError:       webRTCRequestErr,
 		})
 	if err != nil {
 		if webRTCErr != nil {
@@ -818,20 +828,16 @@ func (p *Proxy) proxyOneClient(
 	// create wasted load on destination Psiphon servers, particularly when
 	// WebRTC connections fail.
 
-	awaitDataChannelCtx, awaitDataChannelCancelFunc := context.WithTimeout(
+	awaitReadyToProxyCtx, awaitReadyToProxyCancelFunc := context.WithTimeout(
 		ctx,
 		common.ValueOrDefault(
-			webRTCCoordinator.WebRTCAwaitDataChannelTimeout(), dataChannelAwaitTimeout))
-	defer awaitDataChannelCancelFunc()
+			webRTCCoordinator.WebRTCAwaitReadyToProxyTimeout(), readyToProxyAwaitTimeout))
+	defer awaitReadyToProxyCancelFunc()
 
-	err = webRTCConn.AwaitInitialDataChannel(awaitDataChannelCtx)
+	err = webRTCConn.AwaitReadyToProxy(awaitReadyToProxyCtx, announceResponse.ConnectionID)
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}
-
-	p.config.Logger.WithTraceFields(common.LogFields{
-		"connectionID": announceResponse.ConnectionID,
-	}).Info("WebRTC data channel established")
 
 	// Dial the destination, a Psiphon server. The broker validates that the
 	// dial destination is a Psiphon server.
@@ -1028,7 +1034,7 @@ func (p *Proxy) getMetrics(
 
 	return &ProxyMetrics{
 		BaseAPIParameters:             packedParams,
-		ProxyProtocolVersion:          proxyProtocolVersion,
+		ProtocolVersion:               LatestProtocolVersion,
 		NATType:                       webRTCCoordinator.NATType(),
 		PortMappingTypes:              webRTCCoordinator.PortMappingTypes(),
 		MaxClients:                    int32(p.config.MaxClients),

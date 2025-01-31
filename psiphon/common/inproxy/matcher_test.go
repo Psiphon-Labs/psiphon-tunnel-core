@@ -83,10 +83,10 @@ func runTestMatcher() error {
 		}
 	}
 
-	makeOffer := func(properties *MatchProperties) *MatchOffer {
+	makeOffer := func(properties *MatchProperties, useMediaStreams bool) *MatchOffer {
 		return &MatchOffer{
-			Properties:                 *properties,
-			ClientProxyProtocolVersion: ProxyProtocolVersion1,
+			Properties:      *properties,
+			UseMediaStreams: useMediaStreams,
 		}
 	}
 
@@ -115,12 +115,19 @@ func runTestMatcher() error {
 		if err != nil {
 			resultChan <- errors.Trace(err)
 			return
-		} else {
-			err := checkMatchMetrics(matchMetrics)
-			if err != nil {
-				resultChan <- errors.Trace(err)
-				return
-			}
+		}
+		err = checkMatchMetrics(matchMetrics)
+		if err != nil {
+			resultChan <- errors.Trace(err)
+			return
+		}
+		_, ok := negotiateProtocolVersion(
+			matchProperties.ProtocolVersion,
+			offer.Properties.ProtocolVersion,
+			offer.UseMediaStreams)
+		if !ok {
+			resultChan <- errors.TraceNew("unexpected negotiateProtocolVersion failure")
+			return
 		}
 
 		if waitBeforeAnswer != nil {
@@ -130,9 +137,8 @@ func runTestMatcher() error {
 		if answerSuccess {
 			err = m.Answer(
 				&MatchAnswer{
-					ProxyID:                      announcement.ProxyID,
-					ConnectionID:                 announcement.ConnectionID,
-					SelectedProxyProtocolVersion: offer.ClientProxyProtocolVersion,
+					ProxyID:      announcement.ProxyID,
+					ConnectionID: announcement.ConnectionID,
 				})
 		} else {
 			m.AnswerError(announcement.ProxyID, announcement.ConnectionID)
@@ -142,32 +148,47 @@ func runTestMatcher() error {
 
 	clientIP := randomIPAddress()
 
-	clientFunc := func(
+	baseClientFunc := func(
 		resultChan chan error,
 		clientIP string,
 		matchProperties *MatchProperties,
+		useMediaStreams bool,
 		timeout time.Duration) {
 
 		ctx, cancelFunc := context.WithTimeout(context.Background(), timeout)
 		defer cancelFunc()
 
-		offer := makeOffer(matchProperties)
-		answer, _, matchMetrics, err := m.Offer(ctx, clientIP, offer)
+		offer := makeOffer(matchProperties, useMediaStreams)
+		_, matchAnnouncement, matchMetrics, err := m.Offer(ctx, clientIP, offer)
 		if err != nil {
 			resultChan <- errors.Trace(err)
 			return
 		}
-		if answer.SelectedProxyProtocolVersion != offer.ClientProxyProtocolVersion {
-			resultChan <- errors.TraceNew("unexpected selected proxy protocol version")
+		err = checkMatchMetrics(matchMetrics)
+		if err != nil {
+			resultChan <- errors.Trace(err)
 			return
-		} else {
-			err := checkMatchMetrics(matchMetrics)
-			if err != nil {
-				resultChan <- errors.Trace(err)
-				return
-			}
 		}
+		_, ok := negotiateProtocolVersion(
+			matchAnnouncement.Properties.ProtocolVersion,
+			offer.Properties.ProtocolVersion,
+			offer.UseMediaStreams)
+		if !ok {
+			resultChan <- errors.TraceNew("unexpected negotiateProtocolVersion failure")
+			return
+		}
+
 		resultChan <- nil
+	}
+
+	clientFunc := func(resultChan chan error, clientIP string,
+		matchProperties *MatchProperties, timeout time.Duration) {
+		baseClientFunc(resultChan, clientIP, matchProperties, false, timeout)
+	}
+
+	clientUsingMediaStreamsFunc := func(resultChan chan error, clientIP string,
+		matchProperties *MatchProperties, timeout time.Duration) {
+		baseClientFunc(resultChan, clientIP, matchProperties, true, timeout)
 	}
 
 	// Test: announce timeout
@@ -175,6 +196,7 @@ func runTestMatcher() error {
 	proxyResultChan := make(chan error)
 
 	matchProperties := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		CommonCompartmentIDs: []ID{makeID()},
 	}
 
@@ -373,11 +395,13 @@ func runTestMatcher() error {
 	commonCompartmentIDs := []ID{makeID()}
 
 	geoIPData1 := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		GeoIPData:            common.GeoIPData{Country: "C1", ASN: "A1"},
 		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	geoIPData2 := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		GeoIPData:            common.GeoIPData{Country: "C2", ASN: "A2"},
 		CommonCompartmentIDs: commonCompartmentIDs,
 	}
@@ -432,21 +456,25 @@ func runTestMatcher() error {
 	// Test: no compartment match
 
 	compartment1 := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		GeoIPData:            geoIPData1.GeoIPData,
 		CommonCompartmentIDs: []ID{makeID()},
 	}
 
 	compartment2 := &MatchProperties{
+		ProtocolVersion:        LatestProtocolVersion,
 		GeoIPData:              geoIPData2.GeoIPData,
 		PersonalCompartmentIDs: []ID{makeID()},
 	}
 
 	compartment3 := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		GeoIPData:            geoIPData2.GeoIPData,
 		CommonCompartmentIDs: []ID{makeID()},
 	}
 
 	compartment4 := &MatchProperties{
+		ProtocolVersion:        LatestProtocolVersion,
 		GeoIPData:              geoIPData2.GeoIPData,
 		PersonalCompartmentIDs: []ID{makeID()},
 	}
@@ -484,7 +512,8 @@ func runTestMatcher() error {
 	// Test: common compartment match
 
 	compartment1And3 := &MatchProperties{
-		GeoIPData: geoIPData2.GeoIPData,
+		ProtocolVersion: LatestProtocolVersion,
+		GeoIPData:       geoIPData2.GeoIPData,
 		CommonCompartmentIDs: []ID{
 			compartment1.CommonCompartmentIDs[0],
 			compartment3.CommonCompartmentIDs[0]},
@@ -506,7 +535,8 @@ func runTestMatcher() error {
 	// Test: personal compartment match
 
 	compartment2And4 := &MatchProperties{
-		GeoIPData: geoIPData2.GeoIPData,
+		ProtocolVersion: LatestProtocolVersion,
+		GeoIPData:       geoIPData2.GeoIPData,
 		PersonalCompartmentIDs: []ID{
 			compartment2.PersonalCompartmentIDs[0],
 			compartment4.PersonalCompartmentIDs[0]},
@@ -540,27 +570,75 @@ func runTestMatcher() error {
 		return errors.Tracef("unexpected result: %v", err)
 	}
 
+	// Test: downgrade-compatible protocol version match
+
+	protocolVersion1 := &MatchProperties{
+		ProtocolVersion:      ProtocolVersion1,
+		GeoIPData:            common.GeoIPData{Country: "C1", ASN: "A1"},
+		CommonCompartmentIDs: commonCompartmentIDs,
+	}
+
+	protocolVersion2 := &MatchProperties{
+		ProtocolVersion:      ProtocolVersion2,
+		GeoIPData:            common.GeoIPData{Country: "C2", ASN: "A2"},
+		CommonCompartmentIDs: commonCompartmentIDs,
+	}
+
+	go proxyFunc(proxyResultChan, proxyIP, protocolVersion1, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, protocolVersion2, 10*time.Millisecond)
+
+	err = <-proxyResultChan
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = <-clientResultChan
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Test: no incompatible protocol version match
+
+	go proxyFunc(proxyResultChan, proxyIP, protocolVersion1, 10*time.Millisecond, nil, true)
+	go clientUsingMediaStreamsFunc(clientResultChan, clientIP, protocolVersion2, 10*time.Millisecond)
+
+	err = <-proxyResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	err = <-clientResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// Test: downgrade-compatible protocol version match
+
 	// Test: proxy preferred NAT match
 
 	client1Properties := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		GeoIPData:            common.GeoIPData{Country: "C1", ASN: "A1"},
 		NATType:              NATTypeFullCone,
 		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	client2Properties := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		GeoIPData:            common.GeoIPData{Country: "C2", ASN: "A2"},
 		NATType:              NATTypeSymmetric,
 		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	proxy1Properties := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		GeoIPData:            common.GeoIPData{Country: "C3", ASN: "A3"},
 		NATType:              NATTypeNone,
 		CommonCompartmentIDs: commonCompartmentIDs,
 	}
 
 	proxy2Properties := &MatchProperties{
+		ProtocolVersion:      LatestProtocolVersion,
 		GeoIPData:            common.GeoIPData{Country: "C4", ASN: "A4"},
 		NATType:              NATTypeSymmetric,
 		CommonCompartmentIDs: commonCompartmentIDs,
@@ -1095,6 +1173,7 @@ func BenchmarkMatcherQueue(b *testing.B) {
 						limitIP: "127.0.0.1",
 						announcement: &MatchAnnouncement{
 							Properties: MatchProperties{
+								ProtocolVersion:        LatestProtocolVersion,
 								PersonalCompartmentIDs: []ID{personalCompartmentID},
 								GeoIPData:              common.GeoIPData{},
 								NetworkType:            NetworkTypeWiFi,
@@ -1111,13 +1190,13 @@ func BenchmarkMatcherQueue(b *testing.B) {
 					limitIP: "127.0.0.1",
 					offer: &MatchOffer{
 						Properties: MatchProperties{
+							ProtocolVersion:        LatestProtocolVersion,
 							PersonalCompartmentIDs: []ID{personalCompartmentID},
 							GeoIPData:              common.GeoIPData{},
 							NetworkType:            NetworkTypeWiFi,
 							NATType:                NATTypePortRestrictedCone,
 							PortMappingTypes:       []PortMappingType{},
 						},
-						ClientProxyProtocolVersion: ProxyProtocolVersion1,
 					},
 					answerChan: make(chan *answerInfo, 1),
 				}

@@ -106,6 +106,7 @@ func runQUIC(
 		nil,
 		irregularTunnelLogger,
 		"127.0.0.1:0",
+		0,
 		obfuscationKey,
 		enableGQUIC)
 	if err != nil {
@@ -216,6 +217,7 @@ func runQUIC(
 				obfuscationPaddingSeed,
 				nil,
 				disablePathMTUDiscovery,
+				0,
 				true,
 				useObfuscatedPSK,
 				clientSessionCache)

@@ -123,13 +123,13 @@ type BrokerConfig struct {
 	AllowProxy func(common.GeoIPData) bool
 
 	// PrioritizeProxy is a callback which can indicate whether proxy
-	// announcements from proxies with the specified GeoIPData and
-	// APIParameters should be prioritized in the matcher queue. Priority
-	// proxy announcements match ahead of other proxy announcements,
-	// regardless of announcement age/deadline. Priority status takes
-	// precedence over preferred NAT matching. Prioritization applies only to
-	// common compartment IDs and not personal pairing mode.
-	PrioritizeProxy func(common.GeoIPData, common.APIParameters) bool
+	// announcements from proxies with the specified in-proxy protocol
+	// version, GeoIPData, and APIParameters should be prioritized in the
+	// matcher queue. Priority proxy announcements match ahead of other proxy
+	// announcements, regardless of announcement age/deadline. Priority
+	// status takes precedence over preferred NAT matching. Prioritization
+	// applies only to common compartment IDs and not personal pairing mode.
+	PrioritizeProxy func(int, common.GeoIPData, common.APIParameters) bool
 
 	// AllowClient is a callback which can indicate whether a client with the
 	// given GeoIP data is allowed to match with common compartment ID
@@ -483,6 +483,7 @@ func (b *Broker) handleProxyAnnounce(
 	startTime := time.Now()
 
 	var logFields common.LogFields
+	var isPriority bool
 	var newTacticsTag string
 	var clientOffer *MatchOffer
 	var matchMetrics *MatchMetrics
@@ -529,6 +530,7 @@ func (b *Broker) handleProxyAnnounce(
 		logFields["broker_event"] = "proxy-announce"
 		logFields["broker_id"] = b.brokerID
 		logFields["proxy_id"] = proxyID
+		logFields["is_priority"] = isPriority
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		logFields["connection_id"] = connectionID
 		if newTacticsTag != "" {
@@ -538,6 +540,7 @@ func (b *Broker) handleProxyAnnounce(
 			// Log the target Psiphon server ID (diagnostic ID). The presence
 			// of this field indicates that a match was made.
 			logFields["destination_server_id"] = clientOffer.DestinationServerID
+			logFields["use_media_streams"] = clientOffer.UseMediaStreams
 		}
 		if timedOut {
 			logFields["timed_out"] = true
@@ -571,7 +574,7 @@ func (b *Broker) handleProxyAnnounce(
 
 	// Return MustUpgrade when the proxy's protocol version is less than the
 	// minimum required.
-	if announceRequest.Metrics.ProxyProtocolVersion < MinimumProxyProtocolVersion {
+	if announceRequest.Metrics.ProtocolVersion < minimumProxyProtocolVersion {
 		responsePayload, err := MarshalProxyAnnounceResponse(
 			&ProxyAnnounceResponse{
 				NoMatch:     true,
@@ -643,7 +646,6 @@ func (b *Broker) handleProxyAnnounce(
 	// In the common compartment ID case, invoke the callback to check if the
 	// announcement should be prioritized.
 
-	isPriority := false
 	if b.config.PrioritizeProxy != nil && !hasPersonalCompartmentIDs {
 
 		// Limitation: Of the two return values from
@@ -659,7 +661,8 @@ func (b *Broker) handleProxyAnnounce(
 		// calls for range filtering, which is not yet supported in the
 		// psiphon/server.MeekServer PrioritizeProxy provider.
 
-		isPriority = b.config.PrioritizeProxy(geoIPData, apiParams)
+		isPriority = b.config.PrioritizeProxy(
+			int(announceRequest.Metrics.ProtocolVersion), geoIPData, apiParams)
 	}
 
 	// Await client offer.
@@ -685,6 +688,7 @@ func (b *Broker) handleProxyAnnounce(
 		&MatchAnnouncement{
 			Properties: MatchProperties{
 				IsPriority:             isPriority,
+				ProtocolVersion:        announceRequest.Metrics.ProtocolVersion,
 				CommonCompartmentIDs:   commonCompartmentIDs,
 				PersonalCompartmentIDs: announceRequest.PersonalCompartmentIDs,
 				GeoIPData:              geoIPData,
@@ -746,6 +750,17 @@ func (b *Broker) handleProxyAnnounce(
 		return responsePayload, nil
 	}
 
+	// Select the protocol version. The matcher has already checked
+	// negotiateProtocolVersion, so failure is not expected.
+
+	negotiatedProtocolVersion, ok := negotiateProtocolVersion(
+		announceRequest.Metrics.ProtocolVersion,
+		clientOffer.Properties.ProtocolVersion,
+		clientOffer.UseMediaStreams)
+	if !ok {
+		return nil, errors.TraceNew("unexpected negotiateProtocolVersion failure")
+	}
+
 	// Respond with the client offer. The proxy will follow up with an answer
 	// request, which is relayed to the client, and then the WebRTC dial begins.
 
@@ -760,10 +775,11 @@ func (b *Broker) handleProxyAnnounce(
 		&ProxyAnnounceResponse{
 			TacticsPayload:              tacticsPayload,
 			ConnectionID:                connectionID,
-			ClientProxyProtocolVersion:  clientOffer.ClientProxyProtocolVersion,
+			SelectedProtocolVersion:     negotiatedProtocolVersion,
 			ClientOfferSDP:              clientOffer.ClientOfferSDP,
 			ClientRootObfuscationSecret: clientOffer.ClientRootObfuscationSecret,
 			DoDTLSRandomization:         clientOffer.DoDTLSRandomization,
+			UseMediaStreams:             clientOffer.UseMediaStreams,
 			TrafficShapingParameters:    clientOffer.TrafficShapingParameters,
 			NetworkProtocol:             clientOffer.NetworkProtocol,
 			DestinationAddress:          clientOffer.DestinationAddress,
@@ -907,7 +923,7 @@ func (b *Broker) handleClientOffer(
 
 	// Return MustUpgrade when the client's protocol version is less than the
 	// minimum required.
-	if offerRequest.Metrics.ProxyProtocolVersion < MinimumProxyProtocolVersion {
+	if offerRequest.Metrics.ProtocolVersion < minimumClientProtocolVersion {
 		responsePayload, err := MarshalClientOfferResponse(
 			&ClientOfferResponse{
 				NoMatch:     true,
@@ -944,6 +960,7 @@ func (b *Broker) handleClientOffer(
 
 	clientMatchOffer = &MatchOffer{
 		Properties: MatchProperties{
+			ProtocolVersion:        offerRequest.Metrics.ProtocolVersion,
 			CommonCompartmentIDs:   offerRequest.CommonCompartmentIDs,
 			PersonalCompartmentIDs: offerRequest.PersonalCompartmentIDs,
 			GeoIPData:              geoIPData,
@@ -951,10 +968,10 @@ func (b *Broker) handleClientOffer(
 			NATType:                offerRequest.Metrics.NATType,
 			PortMappingTypes:       offerRequest.Metrics.PortMappingTypes,
 		},
-		ClientProxyProtocolVersion:  offerRequest.Metrics.ProxyProtocolVersion,
 		ClientOfferSDP:              offerSDP,
 		ClientRootObfuscationSecret: offerRequest.ClientRootObfuscationSecret,
 		DoDTLSRandomization:         offerRequest.DoDTLSRandomization,
+		UseMediaStreams:             offerRequest.UseMediaStreams,
 		TrafficShapingParameters:    offerRequest.TrafficShapingParameters,
 		NetworkProtocol:             offerRequest.NetworkProtocol,
 		DestinationAddress:          offerRequest.DestinationAddress,
@@ -1069,14 +1086,25 @@ func (b *Broker) handleClientOffer(
 		return nil, errors.Trace(err)
 	}
 
+	// Select the protocol version. The matcher has already checked
+	// negotiateProtocolVersion, so failure is not expected.
+
+	negotiatedProtocolVersion, ok := negotiateProtocolVersion(
+		proxyMatchAnnouncement.Properties.ProtocolVersion,
+		offerRequest.Metrics.ProtocolVersion,
+		offerRequest.UseMediaStreams)
+	if !ok {
+		return nil, errors.TraceNew("unexpected negotiateProtocolVersion failure")
+	}
+
 	// Respond with the proxy answer and initial broker/server session packet.
 
 	responsePayload, err := MarshalClientOfferResponse(
 		&ClientOfferResponse{
-			ConnectionID:                 proxyAnswer.ConnectionID,
-			SelectedProxyProtocolVersion: proxyAnswer.SelectedProxyProtocolVersion,
-			ProxyAnswerSDP:               proxyAnswer.ProxyAnswerSDP,
-			RelayPacketToServer:          relayPacket,
+			ConnectionID:            proxyAnswer.ConnectionID,
+			SelectedProtocolVersion: negotiatedProtocolVersion,
+			ProxyAnswerSDP:          proxyAnswer.ProxyAnswerSDP,
+			RelayPacketToServer:     relayPacket,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1180,11 +1208,10 @@ func (b *Broker) handleProxyAnswer(
 		// These fields are used internally in the matcher.
 
 		proxyAnswer = &MatchAnswer{
-			ProxyIP:                      proxyIP,
-			ProxyID:                      initiatorID,
-			ConnectionID:                 answerRequest.ConnectionID,
-			SelectedProxyProtocolVersion: answerRequest.SelectedProxyProtocolVersion,
-			ProxyAnswerSDP:               answerSDP,
+			ProxyIP:        proxyIP,
+			ProxyID:        initiatorID,
+			ConnectionID:   answerRequest.ConnectionID,
+			ProxyAnswerSDP: answerSDP,
 		}
 
 		err = b.matcher.Answer(proxyAnswer)

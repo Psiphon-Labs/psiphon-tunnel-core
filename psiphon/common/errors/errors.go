@@ -25,6 +25,7 @@ package errors
 
 import (
 	"fmt"
+	"io"
 	"runtime"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
@@ -64,6 +65,23 @@ func Tracef(format string, args ...interface{}) error {
 func Trace(err error) error {
 	if err == nil {
 		return nil
+	}
+	pc, _, line, ok := runtime.Caller(1)
+	if !ok {
+		return fmt.Errorf("[unknown]: %w", err)
+	}
+	return fmt.Errorf("%s#%d: %w", stacktrace.GetFunctionName(pc), line, err)
+}
+
+// TraceReader wraps the given error with the caller stack frame information,
+// except in the case of io.EOF, which is returned unwrapped. This is used to
+// preserve io.Reader.Read io.EOF error returns.
+func TraceReader(err error) error {
+	if err == nil {
+		return nil
+	}
+	if err == io.EOF {
+		return io.EOF
 	}
 	pc, _, line, ok := runtime.Caller(1)
 	if !ok {

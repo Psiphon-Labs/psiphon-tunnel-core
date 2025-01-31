@@ -30,6 +30,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
@@ -204,7 +205,8 @@ type testWebRTCDialCoordinator struct {
 	networkType                     NetworkType
 	clientRootObfuscationSecret     ObfuscationSecret
 	doDTLSRandomization             bool
-	trafficShapingParameters        *DataChannelTrafficShapingParameters
+	useMediaStreams                 bool
+	trafficShapingParameters        *TrafficShapingParameters
 	stunServerAddress               string
 	stunServerAddressRFC5780        string
 	stunServerAddressSucceeded      func(RFC5780 bool, address string)
@@ -223,7 +225,7 @@ type testWebRTCDialCoordinator struct {
 	discoverNATTimeout              time.Duration
 	webRTCAnswerTimeout             time.Duration
 	webRTCAwaitPortMappingTimeout   time.Duration
-	webRTCAwaitDataChannelTimeout   time.Duration
+	webRTCAwaitReadyToProxyTimeout  time.Duration
 	proxyDestinationDialTimeout     time.Duration
 	proxyRelayInactivityTimeout     time.Duration
 }
@@ -252,7 +254,13 @@ func (t *testWebRTCDialCoordinator) DoDTLSRandomization() bool {
 	return t.doDTLSRandomization
 }
 
-func (t *testWebRTCDialCoordinator) DataChannelTrafficShapingParameters() *DataChannelTrafficShapingParameters {
+func (t *testWebRTCDialCoordinator) UseMediaStreams() bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.useMediaStreams
+}
+
+func (t *testWebRTCDialCoordinator) TrafficShapingParameters() *TrafficShapingParameters {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.trafficShapingParameters
@@ -365,6 +373,35 @@ func (t *testWebRTCDialCoordinator) ResolveAddress(ctx context.Context, network,
 	return net.JoinHostPort(IPs[0].String(), port), nil
 }
 
+// lossyConn randomly drops 1% of packets sent or received.
+type lossyConn struct {
+	net.PacketConn
+}
+
+func (conn *lossyConn) ReadFrom(p []byte) (int, net.Addr, error) {
+	for {
+		n, addr, err := conn.PacketConn.ReadFrom(p)
+		if err != nil {
+			return n, addr, err
+		}
+		if prng.FlipWeightedCoin(0.01) {
+			// Drop packet
+			continue
+		}
+		return n, addr, err
+	}
+}
+
+func (conn *lossyConn) WriteTo(p []byte, addr net.Addr) (int, error) {
+	if prng.FlipWeightedCoin(0.01) {
+		// Drop packet
+		return len(p), nil
+	}
+	return conn.PacketConn.WriteTo(p, addr)
+}
+
+// UDPListen wraps the returned net.PacketConn in lossyConn to simulate packet
+// loss.
 func (t *testWebRTCDialCoordinator) UDPListen(_ context.Context) (net.PacketConn, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -372,9 +409,11 @@ func (t *testWebRTCDialCoordinator) UDPListen(_ context.Context) (net.PacketConn
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return conn, nil
+	return &lossyConn{conn}, nil
 }
 
+// UDPConn wraps the returned net.PacketConn in lossyConn to simulate packet
+// loss.
 func (t *testWebRTCDialCoordinator) UDPConn(_ context.Context, network, remoteAddress string) (net.PacketConn, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -387,7 +426,7 @@ func (t *testWebRTCDialCoordinator) UDPConn(_ context.Context, network, remoteAd
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return conn.(*net.UDPConn), nil
+	return &lossyConn{conn.(*net.UDPConn)}, nil
 }
 
 func (t *testWebRTCDialCoordinator) BindToDevice(fileDescriptor int) error {
@@ -423,10 +462,10 @@ func (t *testWebRTCDialCoordinator) WebRTCAwaitPortMappingTimeout() time.Duratio
 	return t.webRTCAwaitPortMappingTimeout
 }
 
-func (t *testWebRTCDialCoordinator) WebRTCAwaitDataChannelTimeout() time.Duration {
+func (t *testWebRTCDialCoordinator) WebRTCAwaitReadyToProxyTimeout() time.Duration {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-	return t.webRTCAwaitDataChannelTimeout
+	return t.webRTCAwaitReadyToProxyTimeout
 }
 
 func (t *testWebRTCDialCoordinator) ProxyDestinationDialTimeout() time.Duration {
@@ -442,11 +481,21 @@ func (t *testWebRTCDialCoordinator) ProxyRelayInactivityTimeout() time.Duration 
 }
 
 type testLogger struct {
+	component     string
 	logLevelDebug int32
 }
 
 func newTestLogger() *testLogger {
-	return &testLogger{logLevelDebug: 1}
+	return &testLogger{
+		logLevelDebug: 0,
+	}
+}
+
+func newTestLoggerWithComponent(component string) *testLogger {
+	return &testLogger{
+		component:     component,
+		logLevelDebug: 0,
+	}
 }
 
 func (logger *testLogger) WithTrace() common.LogTrace {
@@ -466,9 +515,14 @@ func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTra
 
 func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
 	jsonFields, _ := json.Marshal(fields)
+	var component string
+	if len(logger.component) > 0 {
+		component = fmt.Sprintf("[%s]", logger.component)
+	}
 	fmt.Printf(
-		"[%s] METRIC: %s: %s\n",
+		"[%s]%s METRIC: %s: %s\n",
 		time.Now().UTC().Format(time.RFC3339),
+		component,
 		metric,
 		string(jsonFields))
 }
@@ -493,10 +547,14 @@ type testLoggerTrace struct {
 
 func (logger *testLoggerTrace) log(priority, message string) {
 	now := time.Now().UTC().Format(time.RFC3339)
+	var component string
+	if len(logger.logger.component) > 0 {
+		component = fmt.Sprintf("[%s]", logger.logger.component)
+	}
 	if len(logger.fields) == 0 {
 		fmt.Printf(
-			"[%s] %s: %s: %s\n",
-			now, priority, logger.trace, message)
+			"[%s]%s %s: %s: %s\n",
+			now, component, priority, logger.trace, message)
 	} else {
 		fields := common.LogFields{}
 		for k, v := range logger.fields {
@@ -510,8 +568,8 @@ func (logger *testLoggerTrace) log(priority, message string) {
 		}
 		jsonFields, _ := json.Marshal(fields)
 		fmt.Printf(
-			"[%s] %s: %s: %s %s\n",
-			now, priority, logger.trace, message, string(jsonFields))
+			"[%s]%s %s: %s: %s %s\n",
+			now, component, priority, logger.trace, message, string(jsonFields))
 	}
 }
 

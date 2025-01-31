@@ -27,6 +27,8 @@ import (
 	"encoding/binary"
 	std_errors "errors"
 	"fmt"
+	"io"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -34,15 +36,21 @@ import (
 	"sync/atomic"
 	"time"
 
+	tls "github.com/Psiphon-Labs/psiphon-tls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	inproxy_dtls "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy/dtls"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	quic_go "github.com/Psiphon-Labs/quic-go"
 	"github.com/pion/datachannel"
 	"github.com/pion/dtls/v2"
 	"github.com/pion/ice/v2"
+	"github.com/pion/interceptor"
 	pion_logging "github.com/pion/logging"
+	"github.com/pion/rtp"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/stun"
 	"github.com/pion/transport/v2"
@@ -53,11 +61,17 @@ import (
 const (
 	portMappingAwaitTimeout = 2 * time.Second
 
-	dataChannelAwaitTimeout                      = 20 * time.Second
+	readyToProxyAwaitTimeout = 20 * time.Second
+
 	dataChannelBufferedAmountLowThreshold uint64 = 512 * 1024
 	dataChannelMaxBufferedAmount          uint64 = 1024 * 1024
 	dataChannelMaxMessageSize                    = 65536
-	dataChannelMaxLabelLength                    = 512
+	dataChannelMaxLabelLength                    = 256
+
+	mediaTrackMaxUDPPayloadLength = 1200
+	mediaTrackRTPPacketOverhead   = 12 + 16 + 1 // RTP header, SRTP encryption, and Psiphon padding header
+	mediaTrackMaxRTPPayloadLength = mediaTrackMaxUDPPayloadLength - mediaTrackRTPPacketOverhead
+	mediaTrackMaxIDLength         = 256
 
 	// Psiphon uses a fork of github.com/pion/dtls/v2, selected with go mod
 	// replace, which has an idential API apart from dtls.IsPsiphon. If
@@ -78,36 +92,48 @@ const (
 // used to relay streams or packets between them. WebRTCConn implements the
 // net.Conn interface.
 type webRTCConn struct {
-	config                   *webRTCConfig
-	trafficShapingParameters *DataChannelTrafficShapingParameters
+	config  *webRTCConfig
+	isOffer bool
 
-	mutex                        sync.Mutex
-	udpConn                      net.PacketConn
-	portMapper                   *portMapper
-	isClosed                     bool
-	closedSignal                 chan struct{}
-	peerConnection               *webrtc.PeerConnection
-	dataChannel                  *webrtc.DataChannel
-	dataChannelConn              datachannel.ReadWriteCloser
-	dataChannelOpenedSignal      chan struct{}
-	dataChannelOpenedOnce        sync.Once
-	dataChannelWriteBufferSignal chan struct{}
-	decoyDone                    bool
-	iceCandidatePairMetrics      common.LogFields
+	mutex                         sync.Mutex
+	udpConn                       net.PacketConn
+	portMapper                    *portMapper
+	isClosed                      bool
+	closedSignal                  chan struct{}
+	readyToProxySignal            chan struct{}
+	readyToProxyOnce              sync.Once
+	peerConnection                *webrtc.PeerConnection
+	dataChannel                   *webrtc.DataChannel
+	dataChannelConn               datachannel.ReadWriteCloser
+	dataChannelWriteBufferSignal  chan struct{}
+	sendMediaTrack                *webrtc.TrackLocalStaticRTP
+	sendMediaTrackRTP             *webrtc.RTPTransceiver
+	receiveMediaTrack             *webrtc.TrackRemote
+	receiveMediaTrackOpenedSignal chan struct{}
+	mediaTrackReliabilityLayer    *reliableConn
+	iceCandidatePairMetrics       common.LogFields
 
-	readMutex       sync.Mutex
-	readBuffer      []byte
-	readOffset      int
-	readLength      int
-	readError       error
-	peerPaddingDone bool
+	readMutex               sync.Mutex
+	readBuffer              []byte
+	readOffset              int
+	readLength              int
+	readError               error
+	peerPaddingDone         bool
+	receiveMediaTrackPacket *rtp.Packet
 
-	writeMutex           sync.Mutex
-	trafficShapingPRNG   *prng.PRNG
-	trafficShapingBuffer *bytes.Buffer
-	paddedMessageCount   int
-	decoyMessageCount    int
-	trafficShapingDone   bool
+	writeMutex                       sync.Mutex
+	trafficShapingPRNG               *prng.PRNG
+	trafficShapingBuffer             *bytes.Buffer
+	paddedMessageCount               int
+	decoyMessageCount                int
+	trafficShapingDone               bool
+	sendMediaTrackPacket             *rtp.Packet
+	sendMediaTrackSequencer          rtp.Sequencer
+	sendMediaTrackTimestampTick      int
+	sendMediaTrackFrameSizeRange     [2]int
+	sendMediaTrackRemainingFrameSize int
+
+	decoyDone atomic.Bool
 
 	paddedMessagesSent     int32
 	paddedMessagesReceived int32
@@ -138,8 +164,13 @@ type webRTCConfig struct {
 	// DoDTLSRandomization indicates whether to perform DTLS randomization.
 	DoDTLSRandomization bool
 
-	// TrafficShapingParameters indicates whether and how to perform data channel traffic shaping.
-	TrafficShapingParameters *DataChannelTrafficShapingParameters
+	// UseMediaStreams indicates whether to use WebRTC media streams to tunnel
+	// traffic. When false, a WebRTC data channel is used to tunnel traffic.
+	UseMediaStreams bool
+
+	// TrafficShapingParameters indicates whether and how to perform data
+	// channel or media track traffic shaping.
+	TrafficShapingParameters *TrafficShapingParameters
 
 	// ReliableTransport indicates whether to configure the WebRTC data
 	// channel to use reliable transport. Set ReliableTransport when proxying
@@ -372,12 +403,13 @@ func newWebRTCConn(
 	settingEngine.SetICETimeouts(45*time.Second, 0, prng.JitterDuration(15*time.Second, 0.2))
 	settingEngine.SetICEMaxBindingRequests(10)
 
-	// Initialize data channel obfuscation
+	// Initialize data channel or media streams obfuscation
 
 	config.Logger.WithTraceFields(common.LogFields{
 		"dtls_randomization":           config.DoDTLSRandomization,
 		"data_channel_traffic_shaping": config.TrafficShapingParameters != nil,
-	}).Info("webrtc_data_channel_obfuscation")
+		"use_media_streams":            config.UseMediaStreams,
+	}).Info("webrtc_obfuscation")
 
 	// Facilitate DTLS Client/ServerHello randomization. The client decides
 	// whether to do DTLS randomization and generates and the proxy receives
@@ -420,7 +452,7 @@ func newWebRTCConn(
 	})
 
 	// Configure traffic shaping, which adds random padding and decoy messages
-	// to data channel message flows.
+	// to data channel message or media track packet flows.
 
 	var trafficShapingPRNG *prng.PRNG
 	trafficShapingBuffer := new(bytes.Buffer)
@@ -431,9 +463,9 @@ func newWebRTCConn(
 
 		// TODO: also use pion/dtls.Config.PaddingLengthGenerator?
 
-		trafficShapingContext := "in-proxy-data-channel-traffic-shaping-offer"
+		trafficShapingContext := "in-proxy-traffic-shaping-offer"
 		if !isOffer {
-			trafficShapingContext = "in-proxy-data-channel-traffic-shaping-answer"
+			trafficShapingContext = "in-proxy-traffic-shaping-answer"
 		}
 
 		trafficShapingObfuscationSecret, err := deriveObfuscationSecret(
@@ -525,12 +557,13 @@ func newWebRTCConn(
 	}
 
 	conn := &webRTCConn{
-		config: config,
+		config:  config,
+		isOffer: isOffer,
 
 		udpConn:                      udpConn,
 		portMapper:                   portMapper,
 		closedSignal:                 make(chan struct{}),
-		dataChannelOpenedSignal:      make(chan struct{}),
+		readyToProxySignal:           make(chan struct{}),
 		dataChannelWriteBufferSignal: make(chan struct{}, 1),
 
 		// A data channel uses SCTP and is message oriented. The maximum
@@ -538,7 +571,10 @@ func newWebRTCConn(
 		// https://github.com/pion/webrtc/blob/dce970438344727af9c9965f88d958c55d32e64d/datachannel.go#L19.
 		// This read buffer must be as large as the maximum message size or
 		// else a read may fail with io.ErrShortBuffer.
-		readBuffer: make([]byte, dataChannelMaxMessageSize),
+		//
+		// For media streams, the largest media track RTP packet payload is
+		// no more than mediaTrackMaxRTPPayloadLength.
+		readBuffer: make([]byte, max(dataChannelMaxMessageSize, mediaTrackMaxRTPPayloadLength)),
 
 		trafficShapingPRNG:   trafficShapingPRNG,
 		trafficShapingBuffer: trafficShapingBuffer,
@@ -565,7 +601,47 @@ func newWebRTCConn(
 	settingEngine.SetICEBindingRequestHandler(conn.onICEBindingRequest)
 
 	// All settingEngine configuration must be done before calling NewAPI.
-	webRTCAPI := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+
+	var webRTCAPI *webrtc.API
+
+	if !config.UseMediaStreams {
+
+		webRTCAPI = webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+
+	} else {
+
+		// Additional webRTCAPI setup for media streams support.
+
+		mediaEngine := &webrtc.MediaEngine{}
+		err := mediaEngine.RegisterDefaultCodecs()
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+
+		// pion/webrtc interceptors monitor RTP and send additional traffic
+		// including NACKs and RTCP. Enable interceptors for the potential
+		// obfuscation benefit from exhibiting this additional traffic.
+		// webrtc.RegisterDefaultInterceptors calls ConfigureNack,
+		// ConfigureRTCPReports, ConfigureTWCCSender. At this time we skip
+		// ConfigureNack as this appears to generate excess "duplicated
+		// packet" logs and connection instability. From a connection
+		// reliability stand point, the underlying QUIC layer provides any
+		// necessary resends.
+		interceptors := &interceptor.Registry{}
+		err = webrtc.ConfigureRTCPReports(interceptors)
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+		err = webrtc.ConfigureTWCCSender(mediaEngine, interceptors)
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+
+		webRTCAPI = webrtc.NewAPI(
+			webrtc.WithSettingEngine(settingEngine),
+			webrtc.WithMediaEngine(mediaEngine),
+			webrtc.WithInterceptorRegistry(interceptors))
+	}
 
 	conn.peerConnection, err = webRTCAPI.NewPeerConnection(
 		webrtc.Configuration{
@@ -583,14 +659,10 @@ func newWebRTCConn(
 	conn.peerConnection.OnSignalingStateChange(conn.onSignalingStateChange)
 	conn.peerConnection.OnDataChannel(conn.onDataChannel)
 
-	// As a future enhancement, consider using media channels instead of data
-	// channels, as media channels may be more common. Proxied QUIC would
-	// work over an unreliable media channel. Note that a media channel is
-	// still prefixed with STUN and DTLS exchanges before SRTP begins, so the
-	// first few packets are the same as a data channel.
+	if !config.UseMediaStreams && isOffer {
 
-	// The offer sets the data channel configuration.
-	if isOffer {
+		// Use a data channel to proxy traffic. The client offer sets the data
+		// channel configuration.
 
 		dataChannelInit := &webrtc.DataChannelInit{}
 		if !config.ReliableTransport {
@@ -601,17 +673,8 @@ func newWebRTCConn(
 		}
 
 		// Generate a random length label, to vary the DATA_CHANNEL_OPEN
-		// message length. The label is derived from and replayed via
-		// ClientRootObfuscationSecret.
-		labelObfuscationSecret, err := deriveObfuscationSecret(
-			config.ClientRootObfuscationSecret, "in-proxy-data-channel-label")
-		if err != nil {
-			return nil, nil, nil, errors.Trace(err)
-		}
-		seed := prng.Seed(labelObfuscationSecret)
-		labelPRNG := prng.NewPRNGWithSeed(&seed)
-		dataChannelLabel := labelPRNG.HexString(
-			labelPRNG.Range(1, dataChannelMaxLabelLength/2))
+		// message length. This length/value is not replayed.
+		dataChannelLabel := prng.HexString(prng.Range(1, dataChannelMaxLabelLength))
 
 		dataChannel, err := conn.peerConnection.CreateDataChannel(
 			dataChannelLabel, dataChannelInit)
@@ -620,6 +683,178 @@ func newWebRTCConn(
 		}
 
 		conn.setDataChannel(dataChannel)
+	}
+
+	if config.UseMediaStreams {
+
+		// Use media streams to proxy traffic. Each peer configures one
+		// unidirectional media stream track to send its proxied traffic. In
+		// WebRTC, a media stream consists of a set of tracks. Configure and
+		// use a single video track.
+		//
+		// This implementation is intended to circumvent the WebRTC data
+		// channel blocking described in "Differential Degradation
+		// Vulnerabilities in Censorship Circumvention Systems",
+		// https://arxiv.org/html/2409.06247v1, section 5.2.
+
+		// Select the media track attributes, which are observable, in
+		// plaintext, in the RTP header. Attributes include the payload
+		// type/codec and codec timestamp inputs. Attempt to mimic common
+		// WebRTC media stream traffic by selecting common codecs and video
+		// frame sizes and timestamp ticks. Each peer's track has its own
+		// attributes, which is not unusual. This is a basic effort to avoid
+		// trivial, stateless or minimal state DPI blocking, unlike more
+		// advanced schemes which replace bytes in actual video streams. The
+		// client drives attribute selection and replay by specifying
+		// ClientRootObfuscationSecret.
+
+		propertiesContext := "in-proxy-media-track-properties-offer"
+		if !isOffer {
+			propertiesContext = "in-proxy-media-track-properties-answer"
+		}
+
+		propertiesObfuscationSecret, err := deriveObfuscationSecret(
+			config.ClientRootObfuscationSecret, propertiesContext)
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+
+		seed := prng.Seed(propertiesObfuscationSecret)
+		propertiesPRNG := prng.NewPRNGWithSeed(&seed)
+
+		// Omit webrtc.MimeTypeH265, which results in the error:
+		// "SetRemoteSDP: unable to start track, codec is not supported by remote".
+		mimeTypes := []string{webrtc.MimeTypeH264, webrtc.MimeTypeVP8, webrtc.MimeTypeVP9, webrtc.MimeTypeAV1}
+		clockRate := 90000              // Standard 90kHz
+		frameRates := []int{25, 30, 60} // Common frame rates
+
+		// Select frame sizes from common video modes. Each frame size is
+		// selected at random from the given range, and the codec timestamp
+		// is advanced when the resulting "frame size" number of proxied
+		// bytes is sent.
+		//
+		// - Low-resolution video (e.g., QCIF): 1–10 KB per frame.
+		// - Standard-definition video (480p): 50–200 KB per frame.
+		// - High-definition video (720p): 100–500 KB per frame.
+		// - Full HD video (1080p): 300 KB – 1 MB per frame.
+		// - 4K video: 1–4 MB per frame.
+		KB := 1024
+		MB := 1024 * 1024
+		frameSizeRanges := [][2]int{
+			{1 * KB, 10 * KB},
+			{50 * KB, 200 * KB},
+			{100 * KB, 500 * KB},
+			{300 * KB, 1 * MB},
+			{1 * MB, 4 * MB}}
+
+		mimeType := mimeTypes[propertiesPRNG.Intn(len(mimeTypes))]
+		frameRate := frameRates[propertiesPRNG.Intn(len(frameRates))]
+		frameSizeRange := frameSizeRanges[propertiesPRNG.Intn(len(frameSizeRanges))]
+
+		conn.sendMediaTrackTimestampTick = clockRate / frameRate
+		conn.sendMediaTrackFrameSizeRange = frameSizeRange
+
+		// Initialize the first frame size. The random frame sizes are not
+		// replayed.
+		conn.sendMediaTrackRemainingFrameSize = prng.Range(
+			conn.sendMediaTrackFrameSizeRange[0], conn.sendMediaTrackFrameSizeRange[1])
+
+		// Generate random IDs, to vary the resulting SDP entry size message
+		// length. These lengths/values are not replayed.
+		trackID := prng.HexString(prng.Range(1, mediaTrackMaxIDLength))
+		trackStreamID := prng.HexString(prng.Range(1, mediaTrackMaxIDLength))
+
+		// Initialize a reusable rtp.Packet struct to avoid an allocation per
+		// write. In SRTP, the packet payload is encrypted while the RTP
+		// header remains plaintext.
+		//
+		// Plaintext RTP header fields:
+		//
+		// - Version is always 2.
+		//
+		// - Timestamp is initialized here to a random value, as is common,
+		//   and incremented, after writes, for the next video "frame".
+		//   Limitation: in states of low tunnel traffic, the video frame and
+		//   timestamp progression won't look realistic.
+		//
+		// - PayloadType is the codec and is auto-populated by pion.
+		//
+		// - SequenceNumber is a packet sequence number and populated by
+		//   pion's rtp.NewRandomSequencer, which uses the same logic as
+		//   Chrome's WebRTC implementation.
+		//
+		// - SSRC a random stream identifier, distinct from the track/stream
+		//   ID, and is auto-populated by pion.
+
+		conn.sendMediaTrackPacket = &rtp.Packet{
+			Header: rtp.Header{
+				Version:   2,
+				Timestamp: uint32(prng.Intn(1 << 32)),
+			}}
+		conn.sendMediaTrackSequencer = rtp.NewRandomSequencer()
+
+		// Add the outbound media track to the SDP that is sent to the peer.
+
+		conn.sendMediaTrack, err = webrtc.NewTrackLocalStaticRTP(
+			webrtc.RTPCodecCapability{
+				MimeType:  mimeType,
+				ClockRate: uint32(clockRate),
+			},
+			trackID,
+			trackStreamID)
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+
+		conn.sendMediaTrackRTP, err = conn.peerConnection.AddTransceiverFromTrack(
+			conn.sendMediaTrack,
+			webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv})
+		if err != nil {
+			return nil, nil, nil, errors.Trace(err)
+		}
+		for _, rtpSender := range conn.peerConnection.GetSenders() {
+
+			// Read incoming packets for this outbound RTP stream. Streams are
+			// unidirectional for media payload, but there will be incoming
+			// packets, from the peer, for RTCP, NACK, and other control
+			// mechanisms. Interceptors are implicitly invoked and the
+			// packets are then discarded.
+			go func(rtpSender *webrtc.RTPSender) {
+				var buffer [1500]byte
+				for {
+					_, _, err := conn.sendMediaTrackRTP.Sender().Read(buffer[:])
+					if err != nil {
+						// TODO: log error?
+						select {
+						case <-conn.closedSignal:
+							return
+						default:
+						}
+					}
+				}
+			}(rtpSender)
+		}
+
+		// Initialize the callback that is invoked once we receive an inbound
+		// packet from the peer's media stream.
+		//
+		// Unlike data channels, where webrtc.DataChannel.OnOpen is symmetric
+		// and invoked on both peers for a single, bidirectional channel,
+		// webrtc.PeerConnection.OnTrack is unidirectional. And, unlike
+		// DataChannel.OnOpen, if both peers await OnTrack before proxying,
+		// the tunnel will hang. One side must start sending data in order
+		// for OnTrack to be invoked on the other side.
+		// See: https://github.com/pion/webrtc/issues/989#issuecomment-580424615.
+		//
+		// This has implications for AwaitReadyToProxy: in the media stream
+		// mode, and when not using the media track reliability layer,
+		// AwaitReadyToProxy returns when the DTLS handshake has completed,
+		// but before any SRTP packets have been received from the peer.
+
+		conn.receiveMediaTrackOpenedSignal = make(chan struct{})
+		conn.receiveMediaTrackPacket = &rtp.Packet{}
+
+		conn.peerConnection.OnTrack(conn.onMediaTrack)
 	}
 
 	// Prepare to await full ICE completion, including STUN candidates.
@@ -897,16 +1132,20 @@ func (conn *webRTCConn) SetRemoteSDP(
 	return nil
 }
 
-// AwaitInitialDataChannel returns when the data channel is established, or
-// when an error has occured.
-func (conn *webRTCConn) AwaitInitialDataChannel(ctx context.Context) error {
+// AwaitReadyToProxy returns when the data channel is established, or media
+// streams are ready to send data, or when an error has occured.
+func (conn *webRTCConn) AwaitReadyToProxy(ctx context.Context, connectionID ID) error {
 
 	// Don't lock the mutex, or else necessary operations will deadlock.
 
 	select {
-	case <-conn.dataChannelOpenedSignal:
+	case <-conn.readyToProxySignal:
 
-		// The data channel is connected.
+		// ICE is complete and DTLS is connected. In data channel mode, the
+		// data channel is established using SCTP, which involves a further
+		// handshake. In media stream mode, due to its unidirectional nature,
+		// there is no equivalent to the the data channel establishment step.
+		// See OnTrack comment in newWebRTCConn.
 
 		err := conn.recordSelectedICECandidateStats()
 		if err != nil {
@@ -923,6 +1162,23 @@ func (conn *webRTCConn) AwaitInitialDataChannel(ctx context.Context) error {
 	case <-conn.closedSignal:
 		return errors.TraceNew("connection has closed")
 	}
+
+	if conn.config.UseMediaStreams && conn.config.ReliableTransport {
+
+		// The SRTP protocol used in media stream mode doesn't offer
+		// reliable/ordered transport, so when that transport property is
+		// required, add a reliability layer based on QUIC. This layer is
+		// fully established here before returning read-to-proxy.
+
+		err := conn.addRTPReliabilityLayer(ctx)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"connectionID": connectionID,
+	}).Info("WebRTC tunnel established")
 
 	return nil
 }
@@ -1091,14 +1347,23 @@ func (conn *webRTCConn) Close() error {
 		conn.portMapper.close()
 	}
 
+	// Neither sendMediaTrack nor receiveMediaTrack have a Close operation.
+
+	if conn.sendMediaTrackRTP != nil {
+		_ = conn.sendMediaTrackRTP.Stop()
+	}
+	if conn.mediaTrackReliabilityLayer != nil {
+		_ = conn.mediaTrackReliabilityLayer.Close()
+	}
 	if conn.dataChannelConn != nil {
-		conn.dataChannelConn.Close()
+		_ = conn.dataChannelConn.Close()
 	}
 	if conn.dataChannel != nil {
-		conn.dataChannel.Close()
+		_ = conn.dataChannel.Close()
 	}
 	if conn.peerConnection != nil {
-		conn.peerConnection.Close()
+		// TODO: use PeerConnection.GracefulClose (requires pion/webrtc 3.2.51)?
+		_ = conn.peerConnection.Close()
 	}
 
 	// Close the udpConn to interrupt any blocking DTLS handshake:
@@ -1108,7 +1373,7 @@ func (conn *webRTCConn) Close() error {
 	// before the UDP socket is closed here.
 
 	if conn.udpConn != nil {
-		conn.udpConn.Close()
+		_ = conn.udpConn.Close()
 	}
 
 	close(conn.closedSignal)
@@ -1127,24 +1392,297 @@ func (conn *webRTCConn) IsClosed() bool {
 
 func (conn *webRTCConn) Read(p []byte) (int, error) {
 
+	if !conn.config.UseMediaStreams {
+		// Data channel mode.
+		n, err := conn.readDataChannel(p)
+		return n, errors.TraceReader(err)
+	}
+
+	if conn.mediaTrackReliabilityLayer != nil {
+		// Media stream mode with reliability layer.
+		n, err := conn.mediaTrackReliabilityLayer.Read(p)
+		return n, errors.TraceReader(err)
+	}
+
+	// Media stream mode without reliability layer.
+	n, err := conn.readMediaTrack(p)
+	return n, errors.TraceReader(err)
+}
+
+func (conn *webRTCConn) Write(p []byte) (int, error) {
+
+	if !conn.config.UseMediaStreams {
+		// Data channel mode.
+		n, err := conn.writeDataChannelMessage(p, false)
+		return n, errors.Trace(err)
+	}
+
+	if conn.mediaTrackReliabilityLayer != nil {
+		// Media stream mode with reliability layer.
+		n, err := conn.mediaTrackReliabilityLayer.Write(p)
+		return n, errors.Trace(err)
+	}
+
+	// Media stream mode without reliability layer.
+	n, err := conn.writeMediaTrackPacket(p, false)
+	return n, errors.Trace(err)
+}
+
+func (conn *webRTCConn) LocalAddr() net.Addr {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	// This is the local UDP socket address, not the external, public address.
+	return conn.udpConn.LocalAddr()
+}
+
+func (conn *webRTCConn) RemoteAddr() net.Addr {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	// Not supported.
+	return nil
+}
+
+func (conn *webRTCConn) SetDeadline(t time.Time) error {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	return errors.TraceNew("not supported")
+}
+
+func (conn *webRTCConn) SetReadDeadline(t time.Time) error {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	if conn.isClosed {
+		return errors.TraceNew("closed")
+	}
+
+	if conn.config.UseMediaStreams {
+		// TODO: add support
+		return errors.TraceNew("not supported")
+	}
+
+	readDeadliner, ok := conn.dataChannelConn.(datachannel.ReadDeadliner)
+	if !ok {
+		return errors.TraceNew("no data channel")
+	}
+
+	return readDeadliner.SetReadDeadline(t)
+}
+
+func (conn *webRTCConn) SetWriteDeadline(t time.Time) error {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	return errors.TraceNew("not supported")
+}
+
+// GetMetrics implements the common.MetricsSource interface and returns log
+// fields detailing the WebRTC dial parameters.
+func (conn *webRTCConn) GetMetrics() common.LogFields {
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	logFields := make(common.LogFields)
+
+	logFields.Add(conn.iceCandidatePairMetrics)
+
+	randomizeDTLS := "0"
+	if conn.config.DoDTLSRandomization {
+		randomizeDTLS = "1"
+	}
+	logFields["inproxy_webrtc_randomize_dtls"] = randomizeDTLS
+
+	useMediaStreams := "0"
+	if conn.config.UseMediaStreams {
+		useMediaStreams = "1"
+	}
+	logFields["inproxy_webrtc_use_media_streams"] = useMediaStreams
+
+	logFields["inproxy_webrtc_padded_messages_sent"] = atomic.LoadInt32(&conn.paddedMessagesSent)
+	logFields["inproxy_webrtc_padded_messages_received"] = atomic.LoadInt32(&conn.paddedMessagesReceived)
+	logFields["inproxy_webrtc_decoy_messages_sent"] = atomic.LoadInt32(&conn.decoyMessagesSent)
+	logFields["inproxy_webrtc_decoy_messages_received"] = atomic.LoadInt32(&conn.decoyMessagesReceived)
+
+	return logFields
+}
+
+func (conn *webRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState) {
+
+	switch state {
+	case webrtc.PeerConnectionStateConnected:
+
+		if conn.config.UseMediaStreams {
+
+			// webrtc.PeerConnectionStateConnected is received once the DTLS
+			// connection is established. At this point, media track data may
+			// be sent. In media stream mode, unblock AwaitForReadyToProxy to
+			// allow peers to start sending data. In data channel mode, wait
+			// and signal in onDataChannelOpen.
+
+			conn.readyToProxyOnce.Do(func() { close(conn.readyToProxySignal) })
+		}
+
+	case webrtc.PeerConnectionStateDisconnected,
+		webrtc.PeerConnectionStateFailed,
+		webrtc.PeerConnectionStateClosed:
+
+		// Close the WebRTCConn when the connection is no longer connected. Close
+		// will lock conn.mutex, so do not aquire the lock here.
+		//
+		// Currently, ICE Restart is not used, and there is no transition from
+		// Disconnected back to Connected.
+
+		conn.Close()
+	}
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"state": state.String(),
+	}).Debug("peer connection state changed")
+}
+
+func (conn *webRTCConn) onICECandidate(candidate *webrtc.ICECandidate) {
+	if candidate == nil {
+		return
+	}
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"candidate": candidate.String(),
+	}).Debug("new ICE candidate")
+}
+
+func (conn *webRTCConn) onICEBindingRequest(m *stun.Message, local, remote ice.Candidate, pair *ice.CandidatePair) bool {
+
+	// SetICEBindingRequestHandler is used to hook onICEBindingRequest into
+	// STUN bind events for logging. The return values is always false as
+	// this callback makes no adjustments to ICE candidate selection. When
+	// the data channel or media track tunnel has already opened, skip
+	// logging events, as this callback appears to be invoked for keepalive
+	// pings.
+
+	if local == nil || remote == nil {
+		return false
+	}
+
+	select {
+	case <-conn.readyToProxySignal:
+		return false
+	default:
+	}
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"local_candidate":  local.String(),
+		"remote_candidate": remote.String(),
+	}).Debug("new ICE STUN binding request")
+
+	return false
+}
+
+func (conn *webRTCConn) onICEConnectionStateChange(state webrtc.ICEConnectionState) {
+
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"state": state.String(),
+	}).Debug("ICE connection state changed")
+}
+
+func (conn *webRTCConn) onICEGatheringStateChange(state webrtc.ICEGathererState) {
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"state": state.String(),
+	}).Debug("ICE gathering state changed")
+}
+
+func (conn *webRTCConn) onNegotiationNeeded() {
+
+	conn.config.Logger.WithTrace().Debug("negotiation needed")
+}
+
+func (conn *webRTCConn) onSignalingStateChange(state webrtc.SignalingState) {
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"state": state.String(),
+	}).Debug("signaling state changed")
+}
+
+func (conn *webRTCConn) onDataChannel(dataChannel *webrtc.DataChannel) {
+
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	conn.setDataChannel(dataChannel)
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"label": dataChannel.Label(),
+		"ID":    dataChannel.ID(),
+	}).Debug("new data channel")
+}
+
+func (conn *webRTCConn) onMediaTrack(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	conn.receiveMediaTrack = track
+	close(conn.receiveMediaTrackOpenedSignal)
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"ID":           track.ID(),
+		"payload_type": track.Kind().String(),
+	}).Info("media track open")
+}
+
+func (conn *webRTCConn) onDataChannelOpen() {
+
+	conn.mutex.Lock()
+	defer conn.mutex.Unlock()
+
+	dataChannelConn, err := conn.dataChannel.Detach()
+	if err == nil {
+		conn.dataChannelConn = dataChannelConn
+
+		// TODO: can a data channel be connected, disconnected, and then
+		// reestablished in one session?
+
+		conn.readyToProxyOnce.Do(func() { close(conn.readyToProxySignal) })
+	}
+
+	conn.config.Logger.WithTraceFields(common.LogFields{
+		"detachError": err,
+	}).Info("data channel open")
+}
+
+func (conn *webRTCConn) onDataChannelClose() {
+
+	// Close the WebRTCConn when the data channel is closed. Close will lock
+	// conn.mutex, so do not aquire the lock here.
+	conn.Close()
+
+	conn.config.Logger.WithTrace().Info("data channel closed")
+}
+
+func (conn *webRTCConn) readDataChannel(p []byte) (int, error) {
 	for {
 
-		n, err := conn.readMessage(p)
+		n, err := conn.readDataChannelMessage(p)
 		if err != nil || n > 0 {
-			return n, err
+			return n, errors.TraceReader(err)
 		}
 
 		// A decoy message was read; discard and read again.
 	}
 }
 
-func (conn *webRTCConn) readMessage(p []byte) (int, error) {
+func (conn *webRTCConn) readDataChannelMessage(p []byte) (int, error) {
 
 	// Don't hold this lock, or else concurrent Writes will be blocked.
 	conn.mutex.Lock()
 	isClosed := conn.isClosed
 	dataChannelConn := conn.dataChannelConn
-	decoyDone := conn.decoyDone
 	conn.mutex.Unlock()
 
 	if isClosed {
@@ -1209,31 +1747,27 @@ func (conn *webRTCConn) readMessage(p []byte) (int, error) {
 		err = conn.readError
 	}
 
-	// When decoy messages are enabled, periodically response to an incoming
+	// When decoy messages are enabled, periodically respond to an incoming
 	// messages with an immediate outbound decoy message. This is similar to
 	// the design here:
 	// https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/c4f6a593a645db4479a7032a9e97d3c0b905cdfc/psiphon/common/quic/obfuscator.go#L361-L409
 	//
-	// writeMessage handles conn.decoyMessageCount, which is syncronized with
-	// conn.WriteMutex, as well as other specific logic. Here we just signal
-	// writeMessage based on the read event.
+	// writeDataChannelMessage handles conn.decoyMessageCount, which is
+	// synchronized with conn.WriteMutex, as well as other specific logic.
+	// Here we just signal writeDataChannelMessage based on the read event.
 	//
 	// When the data channel already has buffered writes in excess of a decoy
-	// message size, the writeMessage skips the decoy message and returns
-	// without blocking, so Read calls will not block.
+	// message size, the writeDataChannelMessage skips the decoy message and
+	// returns without blocking, so Read calls will not block.
 
-	if !decoyDone {
-		_, _ = conn.writeMessage(nil, true)
+	if !conn.decoyDone.Load() {
+		_, _ = conn.writeDataChannelMessage(nil, true)
 	}
 
-	return n, errors.Trace(err)
+	return n, errors.TraceReader(err)
 }
 
-func (conn *webRTCConn) Write(p []byte) (int, error) {
-	return conn.writeMessage(p, false)
-}
-
-func (conn *webRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
+func (conn *webRTCConn) writeDataChannelMessage(p []byte, decoy bool) (int, error) {
 
 	if p != nil && decoy {
 		return 0, errors.TraceNew("invalid write parameters")
@@ -1318,9 +1852,7 @@ func (conn *webRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
 			// Set the shared flag that readMessage uses to stop invoking
 			// writeMessage for decoy events.
 
-			conn.mutex.Lock()
-			conn.decoyDone = true
-			conn.mutex.Unlock()
+			conn.decoyDone.Store(true)
 		}
 
 	} else if conn.paddedMessageCount > 0 {
@@ -1449,198 +1981,719 @@ func (conn *webRTCConn) writeMessage(p []byte, decoy bool) (int, error) {
 	return len(p), errors.Trace(err)
 }
 
-func (conn *webRTCConn) LocalAddr() net.Addr {
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
+// GetQUICMaxPacketSizeAdjustment returns the value to be specified in
+// Psiphon's quic-go configuration ClientMaxPacketSizeAdjustment
+// ServerMaxPacketSizeAdjustment fields. Psiphon's quic-go max packet size
+// adjustment reduces the QUIC payload to accomodate overhead from
+// obfuscation, as in Obfuscated QUIC. In the in-proxy case, the same
+// mechanism is used to ensure that QUIC packets fit within the space
+// available for SRTP packet payloads, allowing for the overhead of the RTP
+// packet. Beyond that allowance, the adjustment is tuned to produce SRTP
+// packets that match common SRTP traffic with maximum packet sizes of 1200
+// bytes, excluding IP and UDP headers.
+//
+// INPROXY-QUIC-OSSH must apply GetQUICMaxPacketSizeAdjustment on both the
+// client and server side. In addition, the client must disable
+// DisablePathMTUDiscovery.
+func GetQUICMaxPacketSizeAdjustment(isIPv6 bool) int {
 
-	// This is the local UDP socket address, not the external, public address.
-	return conn.udpConn.LocalAddr()
+	// Limitations:
+	//
+	// - For INPROXY-QUIC-OSSH, the second hop egressing from the proxy is
+	//   identical regardless of whether the 1st hop uses data channel mode
+	//   or media stream mode. Currently, the INPROXY-QUIC-OSSH server won't
+	//   be able to distinguish, early enough, between the modes used by the
+	//   1st hop. In order to conform with the required adustment for media
+	//   stream mode, the server must always apply the adjustment. This
+	//   reduction in QUIC packet size may impact the performance of data
+	//   channel mode. Furthermore, the lower maximum QUIC packet size is
+	//   directly observable on the 2nd hop.
+
+	// common/quic.MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4 = 1252
+	// common/quic.MAX_PRE_DISCOVERY_PACKET_SIZE_IPV6 = 1232
+	quicMTU := 1252
+	if isIPv6 {
+		quicMTU = 1232
+	}
+	targetMTUAdjustment := quicMTU - mediaTrackMaxUDPPayloadLength
+	if targetMTUAdjustment < 0 {
+		targetMTUAdjustment = 0
+	}
+
+	adjustment := targetMTUAdjustment + mediaTrackRTPPacketOverhead
+	if adjustment < 0 {
+		adjustment = 0
+	}
+
+	return adjustment
 }
 
-func (conn *webRTCConn) RemoteAddr() net.Addr {
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
+func (conn *webRTCConn) readMediaTrack(p []byte) (int, error) {
+	for {
 
-	// Not supported.
+		n, err := conn.readMediaTrackPacket(p)
+		if err != nil || n > 0 {
+			return n, errors.TraceReader(err)
+		}
+
+		// A decoy message was read; discard and read again.
+	}
+}
+
+func (conn *webRTCConn) readMediaTrackPacket(p []byte) (int, error) {
+
+	// Await opening the peer's media track, the OnTrack event. This
+	// synchronization is necessary since AwaitReadyToProxy returns before
+	// receiving a media track packet from the peer, which triggers OnTrack.
+
+	select {
+	case <-conn.receiveMediaTrackOpenedSignal:
+	case <-conn.closedSignal:
+		return 0, errors.TraceNew("closed")
+	}
+
+	// Don't hold this lock, or else concurrent Writes will be blocked.
+	conn.mutex.Lock()
+	isClosed := conn.isClosed
+	receiveMediaTrack := conn.receiveMediaTrack
+	conn.mutex.Unlock()
+
+	if isClosed {
+		return 0, errors.TraceNew("closed")
+	}
+
+	if receiveMediaTrack == nil {
+		return 0, errors.TraceNew("no media track")
+	}
+
+	conn.readMutex.Lock()
+	defer conn.readMutex.Unlock()
+
+	// Use the lower-level Read and Unmarshal functions to avoid per-call allocations
+	// performed by the higher-level ReadRTP.
+
+	n, _, err := receiveMediaTrack.Read(conn.readBuffer)
+	if err != nil {
+		return 0, errors.TraceReader(err)
+	}
+	err = conn.receiveMediaTrackPacket.Unmarshal(conn.readBuffer[:n])
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	payload := conn.receiveMediaTrackPacket.Payload
+
+	if len(payload) < 1 {
+		return 0, errors.TraceNew("invalid padding")
+	}
+
+	// Read the padding header byte, which is always present (see comment in
+	// writeMediaTrackPacket).
+
+	paddingSize := int(payload[0])
+
+	if paddingSize == 255 {
+		// When the header is 255, this is a decoy packet with no application
+		// payload. Discard the entire packet. Return n = 0 bytes read, and
+		// the caller will read again.
+		return 0, nil
+	}
+
+	if len(payload) < 1+paddingSize {
+		return 0, errors.Tracef("invalid padding: %d < %d", len(payload), 1+paddingSize)
+	}
+
+	payload = payload[1+paddingSize:]
+
+	// Unlike the data channel case, there is no carry over data left in
+	// conn.readBuffer between readMediaTrackPacket calls: the entire packet
+	// payload must be read in this one call.
+
+	if len(p) < len(payload) {
+		return 0, errors.Tracef("read buffer too short: %d < %d", len(p), len(payload))
+	}
+
+	copy(p, payload)
+
+	// When decoy messages are enabled, periodically respond to an incoming
+	// messages with an immediate outbound decoy message.
+	//
+	// writeMediaTrackPacket handles conn.decoyMessageCount, which is
+	// synchronized with conn.WriteMutex, as well as other specific logic.
+	// Here we just signal writeDataChannelMessage based on the read event.
+
+	if !conn.decoyDone.Load() {
+		_, _ = conn.writeMediaTrackPacket(nil, true)
+	}
+
+	return len(payload), nil
+}
+
+func (conn *webRTCConn) writeMediaTrackPacket(p []byte, decoy bool) (int, error) {
+
+	if p != nil && decoy {
+		return 0, errors.TraceNew("invalid write parameters")
+	}
+
+	// Don't hold this lock, or else concurrent Writes will be blocked.
+	conn.mutex.Lock()
+	isClosed := conn.isClosed
+	sendMediaTrack := conn.sendMediaTrack
+	conn.mutex.Unlock()
+
+	if isClosed {
+		return 0, errors.TraceNew("closed")
+	}
+
+	if sendMediaTrack == nil {
+		return 0, errors.TraceNew("no media track")
+	}
+
+	conn.writeMutex.Lock()
+	defer conn.writeMutex.Unlock()
+
+	// Packet writes can't be split.
+
+	maxRTPPayloadLength := mediaTrackMaxRTPPayloadLength
+	if len(p) > maxRTPPayloadLength {
+		return 0, errors.Tracef("write too large: %d > %d", len(p), maxRTPPayloadLength)
+	}
+
+	// Determine padding size and padding header size.
+
+	// Limitation: unlike data channel padding, the header size is fixed, not
+	// a varint, and is always sent. This is due to the fixed QUIC max packet
+	// size adjustment. To limit the overhead, and because the maximum SRTP
+	// payload size is much smaller than the maximum data channel message
+	// size, the padding is limited to 254 bytes, represented with a 1 byte
+	// header. The value 255 is reserved to signal that the entire packet is
+	// a decoy packet.
+
+	conn.trafficShapingBuffer.Reset()
+
+	if decoy {
+
+		if conn.decoyMessageCount < 1 {
+			return 0, nil
+		}
+
+		if !conn.trafficShapingPRNG.FlipWeightedCoin(
+			conn.config.TrafficShapingParameters.DecoyMessageProbability) {
+			return 0, nil
+		}
+
+		conn.decoyMessageCount -= 1
+
+		// When sending a decoy message, the entire message is padding, and
+		// the padding can be up to the full packet size.
+		//
+		// Note that the actual decoy payload size is decoySize+1, including
+		// the padding header.
+
+		decoySize := conn.trafficShapingPRNG.Range(
+			conn.config.TrafficShapingParameters.MinDecoySize,
+			conn.config.TrafficShapingParameters.MaxDecoySize)
+
+		if decoySize > maxRTPPayloadLength-1 {
+			// Ensure there's space for the 1 byte padding header.
+			decoySize = maxRTPPayloadLength - 1
+		}
+
+		// Set the padding header to 255, which indicates a decoy packet.
+		conn.trafficShapingBuffer.WriteByte(255)
+		if decoySize > 0 {
+			conn.trafficShapingBuffer.Write(prng.Bytes(decoySize))
+		}
+
+		if conn.decoyMessageCount == 0 {
+			// Set the shared flag that readMessage uses to stop invoking
+			// writeMessage for decoy events.
+			conn.decoyDone.Store(true)
+		}
+
+	} else {
+
+		// Add padding to a normal write.
+
+		paddingSize := 0
+
+		if conn.paddedMessageCount > 0 {
+
+			paddingSize = prng.Range(
+				conn.config.TrafficShapingParameters.MinPaddingSize,
+				conn.config.TrafficShapingParameters.MaxPaddingSize)
+
+			if paddingSize > 254 {
+				// The maximum padding size is 254.
+				paddingSize = 254
+			}
+			if len(p)+1+paddingSize > maxRTPPayloadLength {
+				paddingSize -= (len(p) + 1 + paddingSize) - maxRTPPayloadLength
+			}
+			if paddingSize < 0 {
+				paddingSize = 0
+			}
+
+			conn.paddedMessageCount -= 1
+		}
+
+		conn.trafficShapingBuffer.WriteByte(byte(paddingSize))
+		if paddingSize > 0 {
+			conn.trafficShapingBuffer.Write(prng.Bytes(paddingSize))
+		}
+		conn.trafficShapingBuffer.Write(p)
+	}
+
+	paddedPayload := conn.trafficShapingBuffer.Bytes()
+
+	// Sanity check, in case there's a bug in the padding logic above; +1 here
+	// is the padding header.
+	if len(paddedPayload) > maxRTPPayloadLength+1 {
+		return 0, errors.Tracef("write too large: %d > %d", len(paddedPayload), maxRTPPayloadLength)
+	}
+
+	// Send the RTP packet.
+
+	// Dynamic plaintext RTP header values are set here: the sequence number
+	// is set when sending the packet; the timestamp, initialized in
+	// newWebRTCConn, is updated once payload equivalent to a complete
+	// video "frame" has been sent. See the "Plaintext RTP header fields"
+	// comment in newWebRTCConn.
+
+	conn.sendMediaTrackPacket.SequenceNumber = conn.sendMediaTrackSequencer.NextSequenceNumber()
+	conn.sendMediaTrackPacket.Payload = paddedPayload
+	err := sendMediaTrack.WriteRTP(conn.sendMediaTrackPacket)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	conn.sendMediaTrackRemainingFrameSize -= len(paddedPayload)
+	if conn.sendMediaTrackRemainingFrameSize <= 0 {
+		conn.sendMediaTrackPacket.Timestamp += uint32(conn.sendMediaTrackTimestampTick)
+		conn.sendMediaTrackRemainingFrameSize = prng.Range(conn.sendMediaTrackFrameSizeRange[0], conn.sendMediaTrackFrameSizeRange[1])
+	}
+
+	return len(p), nil
+}
+
+func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
+
+	// Add a QUIC layer over the SRTP packet flow to provide reliable delivery
+	// and ordering. The proxy runs a QUIC server and the client runs a QUIC
+	// client that connects to the proxy's server. As all of the QUIC traffic
+	// is encapsulated in the secure SRTP layer.
+
+	// Wrap the RTP track read and write operations in a mediaTrackPacketConn
+	// provides the net.PacketConn interface required by quic-go. There is no
+	// Close-on-error for mediaTrackPacketConn since it doesn't allocate or use
+	// any resources.
+	mediaTrackPacketConn := newMediaTrackPacketConn(conn)
+
+	// Use the Psiphon QUIC obfuscated PSK mechanism to facilitate a faster
+	// QUIC TLS handshake. QUIC client hello randomization is also
+	// initialized, as it will vary the QUIC handshake traffic shape within
+	// the SRTP packet flow.
+
+	var obfuscatedPSKKey [32]byte
+	obfuscationSecret, err := deriveObfuscationSecret(
+		conn.config.ClientRootObfuscationSecret, "in-proxy-RTP-QUIC-reliability-layer")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	obfuscationSeed := prng.Seed(obfuscationSecret)
+	copy(obfuscatedPSKKey[:], prng.NewPRNGWithSeed(&obfuscationSeed).Bytes(len(obfuscatedPSKKey)))
+
+	// To effectively disable them, quic-go's idle timeouts and keep-alives
+	// are initialized to the maximum possible duration. The higher-level
+	// WebRTC connection will provide this functionality.
+	maxDuration := time.Duration(math.MaxInt64)
+
+	// Set the handshake timeout to align with the ctx deadline. Setting
+	// HandshakeIdleTimeout to maxDuration causes the quic-go dial to fail.
+	// Assumes ctx has a deadline.
+	deadline, _ := ctx.Deadline()
+	handshakeIdleTimeout := time.Until(deadline) / 2
+
+	if conn.isOffer {
+
+		// The client is a QUIC client.
+
+		// Initialize the obfuscated PSK.
+		sessionCache := common.WrapClientSessionCache(tls.NewLRUClientSessionCache(1), "")
+		obfuscatedSessionState, err := tls.NewObfuscatedClientSessionState(
+			obfuscatedPSKKey, true, false)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		sessionCache.Put(
+			"", tls.MakeClientSessionState(
+				obfuscatedSessionState.SessionTicket,
+				obfuscatedSessionState.Vers,
+				obfuscatedSessionState.CipherSuite,
+				obfuscatedSessionState.MasterSecret,
+				obfuscatedSessionState.CreatedAt,
+				obfuscatedSessionState.AgeAdd,
+				obfuscatedSessionState.UseBy))
+
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify:     true,
+			InsecureSkipTimeVerify: true,
+			NextProtos:             []string{"h3"},
+			ServerName:             values.GetHostName(),
+			ClientSessionCache:     sessionCache,
+		}
+
+		isIPv6 := true // remote addr is synthetic uniqueIPv6Address
+		maxPacketSizeAdjustment := GetQUICMaxPacketSizeAdjustment(isIPv6)
+
+		// Set ClientMaxPacketSizeAdjustment to so that quic-go will produce
+		// packets with a small enough max size to produce the overall target
+		// packet MTU.
+		quicConfig := &quic_go.Config{
+			HandshakeIdleTimeout:          handshakeIdleTimeout,
+			MaxIdleTimeout:                maxDuration,
+			KeepAlivePeriod:               maxDuration,
+			Versions:                      []quic_go.VersionNumber{0x1},
+			ClientHelloSeed:               &obfuscationSeed,
+			ClientMaxPacketSizeAdjustment: maxPacketSizeAdjustment,
+			DisablePathMTUDiscovery:       true,
+		}
+
+		deadline, ok := ctx.Deadline()
+		if ok {
+			quicConfig.HandshakeIdleTimeout = time.Until(deadline)
+		}
+
+		// Establish the QUIC connection with the server and open a single
+		// data stream for relaying traffic.
+		//
+		// Use DialEarly, in combination with the "established" PSK, for
+		// 0-RTT, which potentially allows data to be sent with the
+		// handshake; this could include the open stream message from the
+		// following OpenStreamSync call. There is no replay concern with
+		// 0-RTT here, as the QUIC traffic is encapsualted in the secure SRTP
+		// flow.
+
+		quicConn, err := quic_go.DialEarly(
+			ctx,
+			mediaTrackPacketConn,
+			mediaTrackPacketConn.remoteAddr,
+			tlsConfig,
+			quicConfig)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		quicStream, err := quicConn.OpenStreamSync(ctx)
+		if err != nil {
+			// Ensure any background quic-go goroutines are stopped.
+			_ = quicConn.CloseWithError(0, "")
+			return errors.Trace(err)
+		}
+
+		conn.mediaTrackReliabilityLayer = &reliableConn{
+			mediaTrackConn: mediaTrackPacketConn,
+			quicConn:       quicConn,
+			quicStream:     quicStream,
+		}
+
+		return nil
+
+	} else {
+
+		// The proxy is a QUIC server.
+
+		// Use an ephemeral, self-signed certificate.
+		certificate, privateKey, _, err := common.GenerateWebServerCertificate(
+			values.GetHostName())
+		if err != nil {
+			return errors.Trace(err)
+		}
+		tlsCertificate, err := tls.X509KeyPair([]byte(certificate), []byte(privateKey))
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{tlsCertificate},
+			NextProtos:   []string{"h3"},
+		}
+		tlsConfig.SetSessionTicketKeys([][32]byte{
+			obfuscatedPSKKey,
+		})
+
+		// Anti-probing via VerifyClientHelloRandom, for passthrough, is not
+		// necessary here and is not initialized.
+		quicConfig := &quic_go.Config{
+			Allow0RTT:               true,
+			HandshakeIdleTimeout:    handshakeIdleTimeout,
+			MaxIdleTimeout:          maxDuration,
+			KeepAlivePeriod:         maxDuration,
+			MaxIncomingStreams:      1,
+			MaxIncomingUniStreams:   -1,
+			VerifyClientHelloRandom: nil,
+			ServerMaxPacketSizeAdjustment: func(addr net.Addr) int {
+				isIPv6 := true // remote addr is synthetic uniqueIPv6Address
+				return GetQUICMaxPacketSizeAdjustment(isIPv6)
+			},
+		}
+
+		quicTransport := &quic_go.Transport{
+			Conn:                             mediaTrackPacketConn,
+			DisableVersionNegotiationPackets: true,
+		}
+
+		quicListener, err := quicTransport.ListenEarly(tlsConfig, quicConfig)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		// Accept the single expected QUIC client and its QUIC data stream.
+
+		quicConn, err := quicListener.Accept(ctx)
+		if err != nil {
+			_ = quicTransport.Close()
+			return errors.Trace(err)
+		}
+
+		quicStream, err := quicConn.AcceptStream(ctx)
+		if err != nil {
+			_ = quicConn.CloseWithError(0, "")
+			_ = quicTransport.Close()
+			return errors.Trace(err)
+		}
+
+		// Closing the quic-go Transport/Listener closes all client
+		// connections, so retain the Transport for the duration of the
+		// overall connection.
+		conn.mediaTrackReliabilityLayer = &reliableConn{
+			mediaTrackConn: mediaTrackPacketConn,
+			quicTransport:  quicTransport,
+			quicConn:       quicConn,
+			quicStream:     quicStream,
+		}
+
+		return nil
+	}
+}
+
+// incrementingIPv6Address provides successive, distinct IPv6 addresses from
+// the 2001:db8::/32 range, reserved for documentation purposes as defined in
+// RFC 3849. It will wrap after 2^96 calls.
+type incrementingIPv6Address struct {
+	mutex sync.Mutex
+	ip    [12]byte
+}
+
+var uniqueIPv6Address incrementingIPv6Address
+
+func (inc *incrementingIPv6Address) next() net.IP {
+	inc.mutex.Lock()
+	defer inc.mutex.Unlock()
+	for i := 11; i >= 0; i-- {
+		inc.ip[i]++
+		if inc.ip[i] != 0 {
+			break
+		}
+	}
+	ip := make([]byte, 16)
+	copy(ip[0:4], []byte{0x20, 0x01, 0x0d, 0xb8})
+	copy(ip[4:16], inc.ip[:])
+	return net.IP(ip)
+}
+
+// mediaTrackPacketConn provides the required net.PacketConn interface for
+// quic-go to use to read and write packets to the RTP media track conn.
+type mediaTrackPacketConn struct {
+	webRTCConn *webRTCConn
+	localAddr  net.Addr
+	remoteAddr net.Addr
+	isClosed   int32
+}
+
+func newMediaTrackPacketConn(conn *webRTCConn) *mediaTrackPacketConn {
+
+	// Create distinct, artificial local/remote addrs for the synthetic
+	// net.PacketConn.
+	//
+	// For its local operations, quic-go references local/remote addrs for the
+	// net.PacketConns it uses. Furthermore, the quic-go server listener
+	// currently uses a singleton multiplexer, connMultiplexer, which panics
+	// if multiple conns with the same local addr are added. Since this is a
+	// singleton, this panic occurs even when using distinct quic-go
+	// listeners per conn.
+	//
+	// No actual network traffic is sent to these artificial addresses.
+
+	ip := uniqueIPv6Address.next()
+	localAddr := &net.UDPAddr{IP: ip, Port: 1}
+	remoteAddr := &net.UDPAddr{IP: ip, Port: 2}
+
+	return &mediaTrackPacketConn{
+		webRTCConn: conn,
+		localAddr:  localAddr,
+		remoteAddr: remoteAddr,
+	}
+}
+
+func (conn *mediaTrackPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
+
+	if atomic.LoadInt32(&conn.isClosed) == 1 {
+		return 0, conn.remoteAddr, errors.TraceNew("closed")
+	}
+
+	n, err := conn.webRTCConn.readMediaTrack(p)
+	return n, conn.remoteAddr, errors.TraceReader(err)
+}
+
+func (conn *mediaTrackPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
+
+	if atomic.LoadInt32(&conn.isClosed) == 1 {
+		return 0, errors.TraceNew("closed")
+	}
+
+	n, err := conn.webRTCConn.writeMediaTrackPacket(p, false)
+	return n, errors.Trace(err)
+}
+
+func (conn *mediaTrackPacketConn) Close() error {
+	if !atomic.CompareAndSwapInt32(&conn.isClosed, 0, 1) {
+		return nil
+	}
 	return nil
 }
 
-func (conn *webRTCConn) SetDeadline(t time.Time) error {
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
+func (conn *mediaTrackPacketConn) LocalAddr() net.Addr {
+	return conn.localAddr
+}
 
+func (conn *mediaTrackPacketConn) SetDeadline(t time.Time) error {
 	return errors.TraceNew("not supported")
 }
 
-func (conn *webRTCConn) SetReadDeadline(t time.Time) error {
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
+func (conn *mediaTrackPacketConn) SetReadDeadline(t time.Time) error {
 
-	if conn.isClosed {
-		return errors.TraceNew("closed")
-	}
-
-	readDeadliner, ok := conn.dataChannelConn.(datachannel.ReadDeadliner)
-	if !ok {
-		return errors.TraceNew("no data channel")
-	}
-
-	return readDeadliner.SetReadDeadline(t)
-}
-
-func (conn *webRTCConn) SetWriteDeadline(t time.Time) error {
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
-
-	return errors.TraceNew("not supported")
-}
-
-// GetMetrics implements the common.MetricsSource interface and returns log
-// fields detailing the WebRTC dial parameters.
-func (conn *webRTCConn) GetMetrics() common.LogFields {
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
-
-	logFields := make(common.LogFields)
-
-	logFields.Add(conn.iceCandidatePairMetrics)
-
-	randomizeDTLS := "0"
-	if conn.config.DoDTLSRandomization {
-		randomizeDTLS = "1"
-	}
-	logFields["inproxy_webrtc_randomize_dtls"] = randomizeDTLS
-
-	logFields["inproxy_webrtc_padded_messages_sent"] = atomic.LoadInt32(&conn.paddedMessagesSent)
-	logFields["inproxy_webrtc_padded_messages_received"] = atomic.LoadInt32(&conn.paddedMessagesReceived)
-	logFields["inproxy_webrtc_decoy_messages_sent"] = atomic.LoadInt32(&conn.decoyMessagesSent)
-	logFields["inproxy_webrtc_decoy_messages_received"] = atomic.LoadInt32(&conn.decoyMessagesReceived)
-
-	return logFields
-}
-
-func (conn *webRTCConn) onConnectionStateChange(state webrtc.PeerConnectionState) {
-
-	// Close the WebRTCConn when the connection is no longer connected. Close
-	// will lock conn.mutex, so do lot aquire the lock here.
+	// When a quic-go DialEarly fails, it invokes Transport.Close. In turn,
+	// Transport.Close calls this SetReadDeadline in order to interrupt any
+	// blocked read. The underlying pion/webrtc.TrackRemote has a
+	// SetReadDeadline. However, at this time webRTCConn.receiveMediaTrack
+	// may be nil, and readMediaTrack may be blocking on
+	// receiveMediaTrackOpenedSignal.
 	//
-	// Currently, ICE Restart is not used, and there is no transition from
-	// Disconnected back to Connected.
+	// Simply calling webRTCConn.Close unblocks both that case and the case
+	// where receiveMediaTrack exists and is blocked on read.
+	//
+	// Invoke in a goroutine to avoid a deadlock that would otherwise occur
+	// when webRTCConn.Close is invoked directly, as it will call down to
+	// mediaTrackPacketConn.SetReadDeadline via reliableConn.Close. The
+	// webRTCConn.Close isClosed check ensures there isn't an endless loop of
+	// calls.
+	//
+	// Assumes that mediaTrackPacketConn.SetReadDeadline is called only in
+	// this terminating quic-go case.
 
-	switch state {
-	case webrtc.PeerConnectionStateDisconnected,
-		webrtc.PeerConnectionStateFailed,
-		webrtc.PeerConnectionStateClosed:
-		conn.Close()
+	go func() {
+		_ = conn.webRTCConn.Close()
+	}()
+
+	return nil
+}
+
+func (conn *mediaTrackPacketConn) SetWriteDeadline(t time.Time) error {
+	return errors.TraceNew("not supported")
+}
+
+// reliableConn provides a reliable/ordered delivery layer on top of the media
+// track RTP conn. This is implemented as a QUIC connection.
+type reliableConn struct {
+	mediaTrackConn *mediaTrackPacketConn
+	quicTransport  *quic_go.Transport
+	quicConn       quic_go.EarlyConnection
+	quicStream     quic_go.Stream
+
+	readMutex  sync.Mutex
+	writeMutex sync.Mutex
+
+	isClosed int32
+}
+
+func (conn *reliableConn) Read(b []byte) (int, error) {
+
+	if atomic.LoadInt32(&conn.isClosed) == 1 {
+		return 0, errors.TraceNew("closed")
 	}
 
-	conn.config.Logger.WithTraceFields(common.LogFields{
-		"state": state.String(),
-	}).Debug("peer connection state changed")
+	// Add mutex to provide full net.Conn concurrency semantics.
+	// https://github.com/lucas-clemente/quic-go/blob/9cc23135d0477baf83aa4715de39ae7070039cb2/stream.go#L64
+	// "Read() and Write() may be called concurrently, but multiple calls to
+	// "Read() or Write() individually must be synchronized manually."
+	conn.readMutex.Lock()
+	defer conn.readMutex.Unlock()
+
+	n, err := conn.quicStream.Read(b)
+	if quic.IsIETFErrorIndicatingClosed(err) {
+		_ = conn.Close()
+		err = io.EOF
+	}
+	return n, errors.TraceReader(err)
 }
 
-func (conn *webRTCConn) onICECandidate(candidate *webrtc.ICECandidate) {
-	if candidate == nil {
-		return
+func (conn *reliableConn) Write(b []byte) (int, error) {
+
+	if atomic.LoadInt32(&conn.isClosed) == 1 {
+		return 0, errors.TraceNew("closed")
 	}
 
-	conn.config.Logger.WithTraceFields(common.LogFields{
-		"candidate": candidate.String(),
-	}).Debug("new ICE candidate")
+	conn.writeMutex.Lock()
+	defer conn.writeMutex.Unlock()
+
+	n, err := conn.quicStream.Write(b)
+	if quic.IsIETFErrorIndicatingClosed(err) {
+		_ = conn.Close()
+		if n == len(b) {
+			err = nil
+		}
+	}
+	return n, errors.Trace(err)
 }
 
-func (conn *webRTCConn) onICEBindingRequest(m *stun.Message, local, remote ice.Candidate, pair *ice.CandidatePair) bool {
-
-	// SetICEBindingRequestHandler is used to hook onICEBindingRequest into
-	// STUN bind events for logging. The return values is always false as
-	// this callback makes no adjustments to ICE candidate selection. When
-	// the data channel has already opened, skip logging events, as this
-	// callback appears to be invoked for keepalive pings.
-
-	if local == nil || remote == nil {
-		return false
+func (conn *reliableConn) Close() error {
+	if !atomic.CompareAndSwapInt32(&conn.isClosed, 0, 1) {
+		return nil
 	}
 
-	select {
-	case <-conn.dataChannelOpenedSignal:
-		return false
-	default:
+	// Close mediaTrackConn first, or else quic-go's Close will attempt to
+	// Write, which leads to deadlock between webRTCConn.writeMediaTrack and
+	// webRTCConn.Close. The graceful QUIC close write will fails, but that's
+	// not an issue.
+
+	_ = conn.mediaTrackConn.Close()
+
+	err := conn.quicConn.CloseWithError(0, "")
+	if conn.quicTransport != nil {
+		conn.quicTransport.Close()
 	}
-
-	conn.config.Logger.WithTraceFields(common.LogFields{
-		"local_candidate":  local.String(),
-		"remote_candidate": remote.String(),
-	}).Debug("new ICE STUN binding request")
-
-	return false
+	return errors.Trace(err)
 }
 
-func (conn *webRTCConn) onICEConnectionStateChange(state webrtc.ICEConnectionState) {
-
-	conn.config.Logger.WithTraceFields(common.LogFields{
-		"state": state.String(),
-	}).Debug("ICE connection state changed")
+func (conn *reliableConn) LocalAddr() net.Addr {
+	return conn.quicConn.LocalAddr()
 }
 
-func (conn *webRTCConn) onICEGatheringStateChange(state webrtc.ICEGathererState) {
-
-	conn.config.Logger.WithTraceFields(common.LogFields{
-		"state": state.String(),
-	}).Debug("ICE gathering state changed")
+func (conn *reliableConn) RemoteAddr() net.Addr {
+	return conn.quicConn.RemoteAddr()
 }
 
-func (conn *webRTCConn) onNegotiationNeeded() {
-
-	conn.config.Logger.WithTrace().Info("negotiation needed")
+func (conn *reliableConn) SetDeadline(t time.Time) error {
+	return conn.quicStream.SetDeadline(t)
 }
 
-func (conn *webRTCConn) onSignalingStateChange(state webrtc.SignalingState) {
-
-	conn.config.Logger.WithTraceFields(common.LogFields{
-		"state": state.String(),
-	}).Debug("signaling state changed")
+func (conn *reliableConn) SetReadDeadline(t time.Time) error {
+	return conn.quicStream.SetReadDeadline(t)
 }
 
-func (conn *webRTCConn) onDataChannel(dataChannel *webrtc.DataChannel) {
-
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
-
-	conn.setDataChannel(dataChannel)
-
-	conn.config.Logger.WithTraceFields(common.LogFields{
-		"label": dataChannel.Label(),
-		"ID":    dataChannel.ID(),
-	}).Debug("new data channel")
-}
-
-func (conn *webRTCConn) onDataChannelOpen() {
-
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
-
-	dataChannelConn, err := conn.dataChannel.Detach()
-	if err == nil {
-		conn.dataChannelConn = dataChannelConn
-
-		// TODO: can a data channel be connected, disconnected, and then
-		// reestablished in one session?
-
-		conn.dataChannelOpenedOnce.Do(func() { close(conn.dataChannelOpenedSignal) })
-	}
-
-	conn.config.Logger.WithTraceFields(common.LogFields{
-		"detachError": err,
-	}).Info("data channel open")
-}
-
-func (conn *webRTCConn) onDataChannelClose() {
-
-	// Close the WebRTCConn when the data channel is closed. Close will lock
-	// conn.mutex, so do lot aquire the lock here.
-	conn.Close()
-
-	conn.config.Logger.WithTrace().Info("data channel closed")
+func (conn *reliableConn) SetWriteDeadline(t time.Time) error {
+	return conn.quicStream.SetWriteDeadline(t)
 }
 
 // prepareSDPAddresses adjusts the SDP, pruning local network addresses and
@@ -2107,7 +3160,7 @@ func hasInterfaceForPrivateIPAddress(IP net.IP) bool {
 	// Android at this time: https://github.com/golang/go/issues/40569.
 	//
 	// Any errors are silently dropped; the caller will proceed without using
-	// the input private IP; and equivilent anet calls are made in
+	// the input private IP; and equivalent anet calls are made in
 	// pionNetwork.Interfaces, with errors logged.
 
 	netInterfaces, err := anet.Interfaces()

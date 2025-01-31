@@ -835,7 +835,7 @@ func ResumeDownload(
 
 	// Not making failure to write ETag file fatal, in case the entire download
 	// succeeds in this one request.
-	ioutil.WriteFile(partialETagFilename, []byte(responseETag), 0600)
+	_ = ioutil.WriteFile(partialETagFilename, []byte(responseETag), 0600)
 
 	// A partial download occurs when this copy is interrupted. The io.Copy
 	// will fail, leaving a partial download in place (.part and .part.etag).

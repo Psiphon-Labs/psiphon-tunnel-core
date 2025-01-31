@@ -142,7 +142,7 @@ func discoverNATFiltering(
 	request = stun.MustBuild(stun.TransactionID, stun.BindingRequest)
 	request.Add(stun.AttrChangeRequest, []byte{0x00, 0x00, 0x00, 0x06})
 
-	response, responseTimeout, err := doSTUNRoundTrip(request, conn, serverAddress)
+	_, responseTimeout, err := doSTUNRoundTrip(request, conn, serverAddress)
 	if err == nil {
 		return NATFilteringEndpointIndependent, nil
 	} else if !responseTimeout {
@@ -154,7 +154,7 @@ func discoverNATFiltering(
 	request = stun.MustBuild(stun.TransactionID, stun.BindingRequest)
 	request.Add(stun.AttrChangeRequest, []byte{0x00, 0x00, 0x00, 0x02})
 
-	response, responseTimeout, err = doSTUNRoundTrip(request, conn, serverAddress)
+	_, responseTimeout, err = doSTUNRoundTrip(request, conn, serverAddress)
 	if err == nil {
 		return NATFilteringAddressDependent, nil
 	} else if !responseTimeout {
@@ -212,7 +212,10 @@ func doSTUNRoundTrip(
 		return nil, false, errors.Trace(err)
 	}
 
-	conn.SetReadDeadline(time.Now().Add(discoverNATRoundTripTimeout))
+	err = conn.SetReadDeadline(time.Now().Add(discoverNATRoundTripTimeout))
+	if err != nil {
+		return nil, false, errors.Trace(err)
+	}
 
 	var buffer [1500]byte
 	n, _, err := conn.ReadFrom(buffer[:])

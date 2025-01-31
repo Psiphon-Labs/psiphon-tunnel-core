@@ -466,9 +466,18 @@ func (controller *Controller) NetworkChanged() {
 	controller.TerminateNextActiveTunnel()
 
 	if controller.inproxyProxyBrokerClientManager != nil {
-		controller.inproxyProxyBrokerClientManager.NetworkChanged()
+		err := controller.inproxyProxyBrokerClientManager.NetworkChanged()
+		if err != nil {
+			NoticeError("NetworkChanged failed: %v", errors.Trace(err))
+			// Log and continue running.
+		}
+
 	}
-	controller.inproxyClientBrokerClientManager.NetworkChanged()
+	err := controller.inproxyClientBrokerClientManager.NetworkChanged()
+	if err != nil {
+		NoticeError("NetworkChanged failed: %v", errors.Trace(err))
+		// Log and continue running.
+	}
 
 	controller.config.networkIDGetter.FlushCache()
 

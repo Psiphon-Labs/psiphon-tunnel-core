@@ -41,6 +41,7 @@ const (
 	matcherPendingAnswersTTL        = 30 * time.Second
 	matcherPendingAnswersMaxSize    = 100000
 	matcherMaxPreferredNATProbe     = 100
+	matcherMaxProbe                 = 1000
 
 	matcherRateLimiterReapHistoryFrequencySeconds = 300
 	matcherRateLimiterMaxCacheEntries             = 1000000
@@ -112,9 +113,10 @@ type Matcher struct {
 }
 
 // MatchProperties specifies the compartment, GeoIP, and network topology
-// matching roperties of clients and proxies.
+// matching properties of clients and proxies.
 type MatchProperties struct {
 	IsPriority             bool
+	ProtocolVersion        int32
 	CommonCompartmentIDs   []ID
 	PersonalCompartmentIDs []ID
 	GeoIPData              common.GeoIPData
@@ -173,11 +175,11 @@ type MatchAnnouncement struct {
 // MatchOffer is a client offer to be queued for matching.
 type MatchOffer struct {
 	Properties                  MatchProperties
-	ClientProxyProtocolVersion  int32
 	ClientOfferSDP              WebRTCSessionDescription
 	ClientRootObfuscationSecret ObfuscationSecret
 	DoDTLSRandomization         bool
-	TrafficShapingParameters    *DataChannelTrafficShapingParameters
+	UseMediaStreams             bool
+	TrafficShapingParameters    *TrafficShapingParameters
 	NetworkProtocol             NetworkProtocol
 	DestinationAddress          string
 	DestinationServerID         string
@@ -186,11 +188,10 @@ type MatchOffer struct {
 // MatchAnswer is a proxy answer, the proxy's follow up to a matched
 // announcement, to be routed to the awaiting client offer.
 type MatchAnswer struct {
-	ProxyIP                      string
-	ProxyID                      ID
-	ConnectionID                 ID
-	SelectedProxyProtocolVersion int32
-	ProxyAnswerSDP               WebRTCSessionDescription
+	ProxyIP        string
+	ProxyID        ID
+	ConnectionID   ID
+	ProxyAnswerSDP WebRTCSessionDescription
 }
 
 // MatchMetrics records statistics about the match queue state at the time a
@@ -740,7 +741,7 @@ func (m *Matcher) matchAllOffers() {
 
 func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 
-	// Assumes the caller has the queue mutexed locked.
+	// Assumes the caller has the queue mutexes locked.
 
 	// Check each candidate announcement in turn, and select a match. There is
 	// an implicit preference for older proxy announcements, sooner to
@@ -755,10 +756,6 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 	// Future matching enhancements could include more sophisticated GeoIP
 	// rules, such as a configuration encoding knowledge of an ASN's NAT
 	// type, or preferred client/proxy country/ASN matches.
-
-	// TODO: match supported protocol versions. Currently, all announces and
-	// offers must specify ProxyProtocolVersion1, so there's no protocol
-	// version match logic.
 
 	offerProperties := &offerEntry.offer.Properties
 
@@ -789,13 +786,28 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 		partiallyLimitedNATCount > 0,
 		strictlyLimitedNATCount > 0)
 
+	// TODO: add an ExistsCompatibleProtocolVersionMatch check?
+	//
+	// Currently, searching for protocol version support that doesn't exist
+	// may be mitigated by limiting, through tactics, client protocol options
+	// selection; using the proxy protocol version in PrioritizeProxy; and,
+	// ultimately, increasing MinimumProxyProtocolVersion.
+
 	var bestMatch *announcementEntry
 	bestMatchIndex := -1
 	bestMatchIsPriority := false
 	bestMatchNAT := false
 
+	// matcherMaxProbe limits the linear search through the announcement queue
+	// to find a match. Currently, the queue implementation provides
+	// constant-time lookup for matching compartment IDs. Other matching
+	// aspects may require iterating over the queue items, including the
+	// strict same-country and ASN constraint and protocol version
+	// compatibility constraint. Best NAT match is not a strict constraint
+	// and uses a shorter search limit, matcherMaxPreferredNATProbe.
+
 	candidateIndex := -1
-	for {
+	for candidateIndex <= matcherMaxProbe {
 
 		announcementEntry, isPriority := matchIterator.getNext()
 		if announcementEntry == nil {
@@ -824,6 +836,18 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 		}
 
 		announcementProperties := &announcementEntry.announcement.Properties
+
+		// Don't match unless the proxy announcement, client offer, and the
+		// client's selected protocol options are compatible. UseMediaStreams
+		// requires at least ProtocolVersion2.
+
+		_, ok := negotiateProtocolVersion(
+			announcementProperties.ProtocolVersion,
+			offerProperties.ProtocolVersion,
+			offerEntry.offer.UseMediaStreams)
+		if !ok {
+			continue
+		}
 
 		// Disallow matching the same country and ASN, except for personal
 		// compartment ID matches.
