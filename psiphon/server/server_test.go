@@ -444,6 +444,39 @@ func TestInproxyPersonalPairing(t *testing.T) {
 		})
 }
 
+func TestInproxyOSSHMediaStreams(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:         "INPROXY-WEBRTC-OSSH",
+			requireAuthorization:   true,
+			doTunneledWebRequest:   true,
+			doTunneledNTPRequest:   true,
+			doDanglingTCPConn:      true,
+			doLogHostProvider:      true,
+			doTargetBrokerSpecs:    true,
+			useInproxyMediaStreams: true,
+		})
+}
+
+func TestInproxyQUICOSSHMediaStreams(t *testing.T) {
+	if !inproxy.Enabled() {
+		t.Skip("inproxy is not enabled")
+	}
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:         "INPROXY-WEBRTC-QUIC-OSSH",
+			requireAuthorization:   true,
+			doTunneledWebRequest:   true,
+			doTunneledNTPRequest:   true,
+			doLogHostProvider:      true,
+			doTargetBrokerSpecs:    true,
+			useInproxyMediaStreams: true,
+		})
+}
+
 func TestHotReload(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
@@ -702,6 +735,7 @@ type runServerConfig struct {
 	useLegacyAPIEncoding     bool
 	doPersonalPairing        bool
 	doRestrictInproxy        bool
+	useInproxyMediaStreams   bool
 }
 
 var (
@@ -758,7 +792,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.doTargetBrokerSpecs,
 			brokerIPAddress,
 			brokerPort,
-			serverEntrySignaturePublicKey)
+			serverEntrySignaturePublicKey,
+			runConfig.useInproxyMediaStreams)
 		if err != nil {
 			t.Fatalf("error generating inproxy test config: %s", err)
 		}
@@ -2521,7 +2556,7 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_proxy_device_region",
 			"inproxy_proxy_device_location",
 			"inproxy_proxy_network_type",
-			"inproxy_proxy_proxy_protocol_version",
+			"inproxy_proxy_protocol_version",
 			"inproxy_proxy_nat_type",
 			"inproxy_proxy_max_clients",
 			"inproxy_proxy_connecting_clients",
@@ -2544,6 +2579,7 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_broker_dial_address",
 			"inproxy_broker_resolved_ip_address",
 			"inproxy_webrtc_randomize_dtls",
+			"inproxy_webrtc_use_media_streams",
 			"inproxy_webrtc_padded_messages_sent",
 			"inproxy_webrtc_padded_messages_received",
 			"inproxy_webrtc_decoy_messages_sent",
@@ -2618,6 +2654,10 @@ func checkExpectedServerTunnelLogFields(
 
 		if fields["inproxy_proxy_network_type"].(string) != testNetworkType {
 			return fmt.Errorf("unexpected inproxy_proxy_network_type '%s'", fields["inproxy_proxy_network_type"])
+		}
+
+		if fields["inproxy_webrtc_use_media_streams"].(bool) != runConfig.useInproxyMediaStreams {
+			return fmt.Errorf("unexpected inproxy_webrtc_use_media_streams '%v'", fields["inproxy_webrtc_use_media_streams"])
 		}
 	}
 
@@ -3690,7 +3730,8 @@ func generateInproxyTestConfig(
 	doTargetBrokerSpecs bool,
 	brokerIPAddress string,
 	brokerPort int,
-	serverEntrySignaturePublicKey string) (*inproxyTestConfig, error) {
+	serverEntrySignaturePublicKey string,
+	useInproxyMediaStreams bool) (*inproxyTestConfig, error) {
 
 	// Generate in-proxy configuration.
 	//
@@ -3869,8 +3910,14 @@ func generateInproxyTestConfig(
             "InproxyDisableSTUN": true,
             "InproxyDisablePortMapping": true,
             "InproxyDisableIPv6ICECandidates": true,
+            "InproxyWebRTCMediaStreamsProbability": %s,
             %s
     `
+
+	mediaStreamsProbability := "0.0"
+	if useInproxyMediaStreams {
+		mediaStreamsProbability = "1.0"
+	}
 
 	tacticsParametersJSON := fmt.Sprintf(
 		tacticsParametersJSONFormat,
@@ -3881,6 +3928,7 @@ func generateInproxyTestConfig(
 		clientBrokerSpecsJSON,
 		commonCompartmentIDStr,
 		commonCompartmentIDStr,
+		mediaStreamsProbability,
 		maxRequestTimeoutsJSON)
 
 	config := &inproxyTestConfig{

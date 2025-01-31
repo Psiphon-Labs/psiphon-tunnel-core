@@ -945,6 +945,7 @@ func dialTunnel(
 			dialParams.ObfuscatedQUICPaddingSeed,
 			dialParams.ObfuscatedQUICNonceTransformerParameters,
 			dialParams.QUICDisablePathMTUDiscovery,
+			dialParams.QUICMaxPacketSizeAdjustment,
 			dialParams.QUICDialEarly,
 			dialParams.QUICUseObfuscatedPSK,
 			dialParams.quicTLSClientSessionCache)

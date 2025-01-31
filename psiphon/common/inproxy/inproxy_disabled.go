@@ -52,7 +52,7 @@ func Enabled() bool {
 var errNotEnabled = std_errors.New("operation not enabled")
 
 const (
-	dataChannelAwaitTimeout = time.Duration(0)
+	readyToProxyAwaitTimeout = time.Duration(0)
 )
 
 type webRTCConn struct {
@@ -64,7 +64,8 @@ type webRTCConfig struct {
 	WebRTCDialCoordinator       WebRTCDialCoordinator
 	ClientRootObfuscationSecret ObfuscationSecret
 	DoDTLSRandomization         bool
-	TrafficShapingParameters    *DataChannelTrafficShapingParameters
+	UseMediaStreams             bool
+	TrafficShapingParameters    *TrafficShapingParameters
 	ReliableTransport           bool
 }
 
@@ -75,9 +76,7 @@ func (conn *webRTCConn) SetRemoteSDP(
 	return errors.Trace(errNotEnabled)
 }
 
-// AwaitInitialDataChannel returns when the data channel is established, or
-// when an error has occured.
-func (conn *webRTCConn) AwaitInitialDataChannel(ctx context.Context) error {
+func (conn *webRTCConn) AwaitReadyToProxy(ctx context.Context, connectionID ID) error {
 	return errors.Trace(errNotEnabled)
 }
 
@@ -119,6 +118,10 @@ func (conn *webRTCConn) SetWriteDeadline(t time.Time) error {
 
 func (conn *webRTCConn) GetMetrics() common.LogFields {
 	return nil
+}
+
+func GetQUICMaxPacketSizeAdjustment(isIPv6 bool) int {
+	return 0
 }
 
 type webRTCSDPMetrics struct {

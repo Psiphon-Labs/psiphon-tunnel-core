@@ -82,9 +82,9 @@ func (IDs InproxyCompartmentIDsValue) Validate(checkCompartmentIDList *[]string)
 	return nil
 }
 
-// InproxyDataChannelTrafficShapingParameters is type-compatible with
-// common/inproxy.DataChannelTrafficShapingParameters.
-type InproxyDataChannelTrafficShapingParametersValue struct {
+// InproxyTrafficShapingParametersValue is type-compatible with
+// common/inproxy.TrafficShapingParameters.
+type InproxyTrafficShapingParametersValue struct {
 	MinPaddedMessages       int
 	MaxPaddedMessages       int
 	MinPaddingSize          int
@@ -96,7 +96,7 @@ type InproxyDataChannelTrafficShapingParametersValue struct {
 	DecoyMessageProbability float64
 }
 
-func (p *InproxyDataChannelTrafficShapingParametersValue) Validate() error {
+func (p *InproxyTrafficShapingParametersValue) Validate() error {
 	if p.MinPaddedMessages < 0 ||
 		p.MaxPaddedMessages < 0 ||
 		p.MinPaddingSize < 0 ||

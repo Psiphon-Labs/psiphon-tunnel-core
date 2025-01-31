@@ -96,3 +96,7 @@ func NewQUICTransporter(
 
 	return nil, errors.TraceNew("operation is not enabled")
 }
+
+func IsIETFErrorIndicatingClosed(_ error) bool {
+	return false
+}

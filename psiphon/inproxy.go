@@ -1548,7 +1548,7 @@ type InproxyWebRTCDialInstance struct {
 	discoverNATTimeout              time.Duration
 	webRTCAnswerTimeout             time.Duration
 	webRTCAwaitPortMappingTimeout   time.Duration
-	awaitDataChannelTimeout         time.Duration
+	awaitReadyToProxyTimeout        time.Duration
 	proxyDestinationDialTimeout     time.Duration
 	proxyRelayInactivityTimeout     time.Duration
 }
@@ -1593,7 +1593,7 @@ func NewInproxyWebRTCDialInstance(
 	disableInboundForMobileNetworks := p.Bool(parameters.InproxyDisableInboundForMobileNetworks)
 	disableIPv6ICECandidates := p.Bool(parameters.InproxyDisableIPv6ICECandidates)
 
-	var discoverNATTimeout, awaitDataChannelTimeout time.Duration
+	var discoverNATTimeout, awaitReadyToProxyTimeout time.Duration
 
 	if isProxy {
 
@@ -1609,7 +1609,7 @@ func NewInproxyWebRTCDialInstance(
 
 		discoverNATTimeout = p.Duration(parameters.InproxyProxyDiscoverNATTimeout)
 
-		awaitDataChannelTimeout = p.Duration(parameters.InproxyProxyWebRTCAwaitDataChannelTimeout)
+		awaitReadyToProxyTimeout = p.Duration(parameters.InproxyProxyWebRTCAwaitReadyToProxyTimeout)
 
 	} else {
 
@@ -1625,7 +1625,7 @@ func NewInproxyWebRTCDialInstance(
 
 		discoverNATTimeout = p.Duration(parameters.InproxyClientDiscoverNATTimeout)
 
-		awaitDataChannelTimeout = p.Duration(parameters.InproxyClientWebRTCAwaitDataChannelTimeout)
+		awaitReadyToProxyTimeout = p.Duration(parameters.InproxyClientWebRTCAwaitReadyToProxyTimeout)
 	}
 
 	// Parameters such as disabling certain operations and operation timeouts
@@ -1652,7 +1652,7 @@ func NewInproxyWebRTCDialInstance(
 		discoverNATTimeout:              discoverNATTimeout,
 		webRTCAnswerTimeout:             p.Duration(parameters.InproxyWebRTCAnswerTimeout),
 		webRTCAwaitPortMappingTimeout:   p.Duration(parameters.InproxyWebRTCAwaitPortMappingTimeout),
-		awaitDataChannelTimeout:         awaitDataChannelTimeout,
+		awaitReadyToProxyTimeout:        awaitReadyToProxyTimeout,
 		proxyDestinationDialTimeout:     p.Duration(parameters.InproxyProxyDestinationDialTimeout),
 		proxyRelayInactivityTimeout:     p.Duration(parameters.InproxyProxyRelayInactivityTimeout),
 	}, nil
@@ -1679,8 +1679,13 @@ func (w *InproxyWebRTCDialInstance) DoDTLSRandomization() bool {
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
-func (w *InproxyWebRTCDialInstance) DataChannelTrafficShapingParameters() *inproxy.DataChannelTrafficShapingParameters {
-	return w.webRTCDialParameters.DataChannelTrafficShapingParameters
+func (w *InproxyWebRTCDialInstance) UseMediaStreams() bool {
+	return w.webRTCDialParameters.UseMediaStreams
+}
+
+// Implements the inproxy.WebRTCDialCoordinator interface.
+func (w *InproxyWebRTCDialInstance) TrafficShapingParameters() *inproxy.TrafficShapingParameters {
+	return w.webRTCDialParameters.TrafficShapingParameters
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -1961,8 +1966,8 @@ func (w *InproxyWebRTCDialInstance) WebRTCAwaitPortMappingTimeout() time.Duratio
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
-func (w *InproxyWebRTCDialInstance) WebRTCAwaitDataChannelTimeout() time.Duration {
-	return w.awaitDataChannelTimeout
+func (w *InproxyWebRTCDialInstance) WebRTCAwaitReadyToProxyTimeout() time.Duration {
+	return w.awaitReadyToProxyTimeout
 }
 
 // Implements the inproxy.WebRTCDialCoordinator interface.
@@ -2156,9 +2161,10 @@ func (dialParams *InproxySTUNDialParameters) GetMetrics() common.LogFields {
 // marshaling. For client in-proxy tunnel dials, DialParameters will manage
 // WebRTC dial parameter selection and replay.
 type InproxyWebRTCDialParameters struct {
-	RootObfuscationSecret               inproxy.ObfuscationSecret
-	DataChannelTrafficShapingParameters *inproxy.DataChannelTrafficShapingParameters
-	DoDTLSRandomization                 bool
+	RootObfuscationSecret    inproxy.ObfuscationSecret
+	UseMediaStreams          bool
+	TrafficShapingParameters *inproxy.TrafficShapingParameters
+	DoDTLSRandomization      bool
 }
 
 // MakeInproxyWebRTCDialParameters generates new InproxyWebRTCDialParameters.
@@ -2170,19 +2176,36 @@ func MakeInproxyWebRTCDialParameters(
 		return nil, errors.Trace(err)
 	}
 
-	var trafficSharingParams inproxy.DataChannelTrafficShapingParameters
-	if p.WeightedCoinFlip(parameters.InproxyDataChannelTrafficShapingProbability) {
-		trafficSharingParams = inproxy.DataChannelTrafficShapingParameters(
-			p.InproxyDataChannelTrafficShapingParameters(
-				parameters.InproxyDataChannelTrafficShapingParameters))
+	useMediaStreams := p.WeightedCoinFlip(parameters.InproxyWebRTCMediaStreamsProbability)
+
+	var trafficSharingParams *inproxy.TrafficShapingParameters
+
+	if useMediaStreams {
+
+		if p.WeightedCoinFlip(parameters.InproxyWebRTCMediaStreamsTrafficShapingProbability) {
+			t := inproxy.TrafficShapingParameters(
+				p.InproxyTrafficShapingParameters(
+					parameters.InproxyWebRTCMediaStreamsTrafficShapingParameters))
+			trafficSharingParams = &t
+		}
+
+	} else {
+
+		if p.WeightedCoinFlip(parameters.InproxyWebRTCDataChannelTrafficShapingProbability) {
+			t := inproxy.TrafficShapingParameters(
+				p.InproxyTrafficShapingParameters(
+					parameters.InproxyWebRTCDataChannelTrafficShapingParameters))
+			trafficSharingParams = &t
+		}
 	}
 
 	doDTLSRandomization := p.WeightedCoinFlip(parameters.InproxyDTLSRandomizationProbability)
 
 	return &InproxyWebRTCDialParameters{
-		RootObfuscationSecret:               rootObfuscationSecret,
-		DataChannelTrafficShapingParameters: &trafficSharingParams,
-		DoDTLSRandomization:                 doDTLSRandomization,
+		RootObfuscationSecret:    rootObfuscationSecret,
+		UseMediaStreams:          useMediaStreams,
+		TrafficShapingParameters: trafficSharingParams,
+		DoDTLSRandomization:      doDTLSRandomization,
 	}, nil
 }
 

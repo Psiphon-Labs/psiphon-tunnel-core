@@ -144,6 +144,7 @@ func Listen(
 	logger common.Logger,
 	irregularTunnelLogger func(string, error, common.LogFields),
 	address string,
+	additionalMaxPacketSizeAdjustment int,
 	obfuscationKey string,
 	enableGQUIC bool) (net.Listener, error) {
 
@@ -249,7 +250,11 @@ func Listen(
 		// pumping read packets though mux channels.
 
 		tlsConfig, ietfQUICConfig, err := makeServerIETFConfig(
-			obfuscatedPacketConn, verifyClientHelloRandom, tlsCertificate, obfuscationKey)
+			obfuscatedPacketConn,
+			additionalMaxPacketSizeAdjustment,
+			verifyClientHelloRandom,
+			tlsCertificate,
+			obfuscationKey)
 
 		if err != nil {
 			obfuscatedPacketConn.Close()
@@ -275,7 +280,12 @@ func Listen(
 		// return and caller calls Accept.
 
 		muxListener, err := newMuxListener(
-			logger, verifyClientHelloRandom, obfuscatedPacketConn, tlsCertificate, obfuscationKey)
+			logger,
+			obfuscatedPacketConn,
+			additionalMaxPacketSizeAdjustment,
+			verifyClientHelloRandom,
+			tlsCertificate,
+			obfuscationKey)
 		if err != nil {
 			obfuscatedPacketConn.Close()
 			return nil, errors.Trace(err)
@@ -293,6 +303,7 @@ func Listen(
 
 func makeServerIETFConfig(
 	conn *ObfuscatedPacketConn,
+	additionalMaxPacketSizeAdjustment int,
 	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	tlsCertificate tls.Certificate,
 	sharedSecret string) (*tls.Config, *ietf_quic.Config, error) {
@@ -325,6 +336,14 @@ func makeServerIETFConfig(
 		})
 	}
 
+	serverMaxPacketSizeAdjustment := conn.serverMaxPacketSizeAdjustment
+	if additionalMaxPacketSizeAdjustment != 0 {
+		serverMaxPacketSizeAdjustment = func(addr net.Addr) int {
+			return conn.serverMaxPacketSizeAdjustment(addr) +
+				additionalMaxPacketSizeAdjustment
+		}
+	}
+
 	ietfQUICConfig := &ietf_quic.Config{
 		Allow0RTT:             true,
 		HandshakeIdleTimeout:  SERVER_HANDSHAKE_TIMEOUT,
@@ -335,7 +354,7 @@ func makeServerIETFConfig(
 		KeepAlivePeriod: CLIENT_IDLE_TIMEOUT / 2,
 
 		VerifyClientHelloRandom:       verifyClientHelloRandom,
-		ServerMaxPacketSizeAdjustment: conn.serverMaxPacketSizeAdjustment,
+		ServerMaxPacketSizeAdjustment: serverMaxPacketSizeAdjustment,
 	}
 
 	return tlsConfig, ietfQUICConfig, nil
@@ -405,6 +424,7 @@ func Dial(
 	obfuscationPaddingSeed *prng.Seed,
 	obfuscationNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters,
 	disablePathMTUDiscovery bool,
+	additionalMaxPacketSizeAdjustment int,
 	dialEarly bool,
 	useObfuscatedPSK bool,
 	tlsClientSessionCache *common.TLSClientSessionCacheWrapper) (net.Conn, error) {
@@ -472,7 +492,7 @@ func Dial(
 		}
 	}
 
-	maxPacketSizeAdjustment := 0
+	maxPacketSizeAdjustment := additionalMaxPacketSizeAdjustment
 
 	if isObfuscated(quicVersion) {
 		obfuscatedPacketConn, err := NewClientObfuscatedPacketConn(
@@ -488,9 +508,9 @@ func Dial(
 		}
 		packetConn = obfuscatedPacketConn
 
-		// Reserve space for packet obfuscation overhead so that quic-go will
-		// continue to produce packets of max size 1280.
-		maxPacketSizeAdjustment = OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT
+		// Reserve additional space for packet obfuscation overhead so that
+		// quic-go will continue to produce packets of max size 1280.
+		maxPacketSizeAdjustment += OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT
 	}
 
 	// As an anti-probing measure, QUIC clients must prove knowledge of the
@@ -525,7 +545,6 @@ func Dial(
 	connection, err := dialQUIC(
 		ctx,
 		packetConn,
-		false,
 		remoteAddr,
 		quicSNIAddress,
 		versionNumber,
@@ -971,7 +990,6 @@ func (t *QUICTransporter) dialQUIC() (retConnection quicConnection, retErr error
 	connection, err := dialQUIC(
 		ctx,
 		packetConn,
-		true,
 		remoteAddr,
 		t.quicSNIAddress,
 		versionNumber,
@@ -1114,6 +1132,13 @@ func (c *ietfQUICConnection) isErrorIndicatingClosed(err error) bool {
 	if err == nil {
 		return false
 	}
+	return IsIETFErrorIndicatingClosed(err)
+}
+
+func IsIETFErrorIndicatingClosed(err error) bool {
+	if err == nil {
+		return false
+	}
 	errStr := err.Error()
 	// The target errors are of type qerr.ApplicationError[Code] and
 	// qerr.IdleTimeoutError, but these are not both exported by quic-go.
@@ -1138,13 +1163,12 @@ func (c *ietfQUICConnection) getClientConnMetrics() quicClientConnMetrics {
 func dialQUIC(
 	ctx context.Context,
 	packetConn net.PacketConn,
-	expectNetUDPConn bool,
 	remoteAddr *net.UDPAddr,
 	quicSNIAddress string,
 	versionNumber uint32,
 	clientHelloSeed *prng.Seed,
 	getClientHelloRandom func() ([]byte, error),
-	clientMaxPacketSizeAdjustment int,
+	maxPacketSizeAdjustment int,
 	disablePathMTUDiscovery bool,
 	dialEarly bool,
 	obfuscatedPSKKey string,
@@ -1164,7 +1188,7 @@ func dialQUIC(
 				ietf_quic.VersionNumber(versionNumber)},
 			ClientHelloSeed:               clientHelloSeed,
 			GetClientHelloRandom:          getClientHelloRandom,
-			ClientMaxPacketSizeAdjustment: clientMaxPacketSizeAdjustment,
+			ClientMaxPacketSizeAdjustment: maxPacketSizeAdjustment,
 			DisablePathMTUDiscovery:       disablePathMTUDiscovery,
 		}
 
@@ -1207,7 +1231,7 @@ func dialQUIC(
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			ss := tls.MakeClientSessionState(
+			sessionState := tls.MakeClientSessionState(
 				obfuscatedSessionState.SessionTicket,
 				obfuscatedSessionState.Vers,
 				obfuscatedSessionState.CipherSuite,
@@ -1216,7 +1240,7 @@ func dialQUIC(
 				obfuscatedSessionState.AgeAdd,
 				obfuscatedSessionState.UseBy,
 			)
-			tlsClientSessionCache.Put("", ss)
+			tlsClientSessionCache.Put("", sessionState)
 		}
 
 		if dialEarly {
@@ -1400,8 +1424,9 @@ type muxListener struct {
 
 func newMuxListener(
 	logger common.Logger,
-	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	conn *ObfuscatedPacketConn,
+	additionalMaxPacketSizeAdjustment int,
+	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	tlsCertificate tls.Certificate,
 	sharedSecret string) (*muxListener, error) {
 
@@ -1422,7 +1447,11 @@ func newMuxListener(
 	listener.ietfQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
 	tlsConfig, ietfQUICConfig, err := makeServerIETFConfig(
-		conn, verifyClientHelloRandom, tlsCertificate, sharedSecret)
+		conn,
+		additionalMaxPacketSizeAdjustment,
+		verifyClientHelloRandom,
+		tlsCertificate,
+		sharedSecret)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

@@ -31,19 +31,81 @@ import (
 
 const (
 
-	// ProxyProtocolVersion1 represents protocol version 1.
-	ProxyProtocolVersion1 = int32(1)
+	// ProtocolVersion1 represents protocol version 1, the initial in-proxy
+	// protocol version number.
+	ProtocolVersion1 = int32(1)
 
-	// MinimumProxyProtocolVersion is the minimum supported version number.
-	MinimumProxyProtocolVersion = ProxyProtocolVersion1
+	// ProtocolVersion2 represents protocol version 2, which adds support for
+	// proxying over WebRTC media streams.
+	ProtocolVersion2 = int32(2)
+
+	// LatestProtocolVersion is the current, default protocol version number.
+	LatestProtocolVersion = ProtocolVersion2
+
+	// MinimumProxyProtocolVersion is the minimum required protocol version
+	// number for proxies.
+	MinimumProxyProtocolVersion = ProtocolVersion1
+
+	// MinimumClientProtocolVersion is the minimum supported protocol version
+	// number for clients.
+	MinimumClientProtocolVersion = ProtocolVersion1
 
 	MaxCompartmentIDs = 10
 )
 
-// proxyProtocolVersion is the current protocol version number.
-// proxyProtocolVersion is variable, to enable overriding the value in tests.
-// This value should not be overridden outside of test cases.
-var proxyProtocolVersion = ProxyProtocolVersion1
+// minimumProxyProtocolVersion and minimumClientProtocolVersion are variable
+// to enable overriding the values in tests. These value should not be
+// overridden outside of test cases.
+var (
+	minimumProxyProtocolVersion  = MinimumProxyProtocolVersion
+	minimumClientProtocolVersion = MinimumClientProtocolVersion
+)
+
+// negotiateProtocolVersion selects the in-proxy protocol version for a new
+// proxy/client match, based on the client's and proxy's reported protocol
+// versions, and the client's selected protocol options. Returns false if no
+// protocol version selection is possible.
+//
+// The broker performs the negotiation on behalf of the proxy and client. Both
+// the proxy and client initially specify the latest protocol version they
+// support. The client specifies the protocol options to use, based on
+// tactics and replay.
+//
+// negotiateProtocolVersion is used by the matcher when searching for
+// potential matches; for this reason, the failure case is expected and
+// returns a simple boolean intead of formating an error message.
+//
+// Existing, legacy proxies have the equivalent of an "if
+// announceResponse.SelectedProtocolVersion != ProtocolVersion1" check, so
+// the SelectedProtocolVersion must be downgraded in that case, if a match is
+// possible.
+func negotiateProtocolVersion(
+	proxyProtocolVersion int32,
+	clientProtocolVersion int32,
+	useMediaStreams bool) (int32, bool) {
+
+	// When not using WebRTC media streams, introduced in ProtocolVersion2,
+	// potentially downgrade if either the proxy or client supports only
+	// ProtocolVersion1.
+
+	if (proxyProtocolVersion == ProtocolVersion1 ||
+		clientProtocolVersion == ProtocolVersion1) &&
+		!useMediaStreams {
+		return ProtocolVersion1, true
+	}
+
+	// Select the client's protocol version.
+
+	if proxyProtocolVersion >= clientProtocolVersion {
+		return clientProtocolVersion, true
+	}
+
+	// No selection is possible. This includes the case where the proxy
+	// supports up to ProtocolVersion1 and the client has specified media
+	// streams.
+
+	return 0, false
+}
 
 // ID is a unique identifier used to identify inproxy connections and actors.
 type ID [32]byte
@@ -192,7 +254,7 @@ func (p NetworkProtocol) IsStream() bool {
 // and clients.
 type ProxyMetrics struct {
 	BaseAPIParameters             protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
-	ProxyProtocolVersion          int32                        `cbor:"2,keyasint,omitempty"`
+	ProtocolVersion               int32                        `cbor:"2,keyasint,omitempty"`
 	NATType                       NATType                      `cbor:"3,keyasint,omitempty"`
 	PortMappingTypes              PortMappingTypes             `cbor:"4,keyasint,omitempty"`
 	MaxClients                    int32                        `cbor:"6,keyasint,omitempty"`
@@ -208,10 +270,10 @@ type ProxyMetrics struct {
 // broker. The broker uses this information when matching proxies and
 // clients.
 type ClientMetrics struct {
-	BaseAPIParameters    protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
-	ProxyProtocolVersion int32                        `cbor:"2,keyasint,omitempty"`
-	NATType              NATType                      `cbor:"3,keyasint,omitempty"`
-	PortMappingTypes     PortMappingTypes             `cbor:"4,keyasint,omitempty"`
+	BaseAPIParameters protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
+	ProtocolVersion   int32                        `cbor:"2,keyasint,omitempty"`
+	NATType           NATType                      `cbor:"3,keyasint,omitempty"`
+	PortMappingTypes  PortMappingTypes             `cbor:"4,keyasint,omitempty"`
 }
 
 // ProxyAnnounceRequest is an API request sent from a proxy to a broker,
@@ -264,24 +326,26 @@ type WebRTCSessionDescription struct {
 // corresponds to a valid Psiphon server.
 //
 // MustUpgrade is an optional flag that is set by the broker, based on the
-// submitted ProxyProtocolVersion, when the proxy app must be upgraded in
-// order to function properly. Potential must-upgrade scenarios include
-// changes to the personal pairing broker rendezvous algorithm, where no
-// protocol backwards compatibility accommodations can ensure a rendezvous
-// and match. When MustUpgrade is set, NoMatch is implied.
+// submitted ProtocolVersion, when the proxy app must be upgraded in order to
+// function properly. Potential must-upgrade scenarios include changes to the
+// personal pairing broker rendezvous algorithm, where no protocol backwards
+// compatibility accommodations can ensure a rendezvous and match. When
+// MustUpgrade is set, NoMatch is implied.
+
 type ProxyAnnounceResponse struct {
-	TacticsPayload              []byte                               `cbor:"2,keyasint,omitempty"`
-	Limited                     bool                                 `cbor:"3,keyasint,omitempty"`
-	NoMatch                     bool                                 `cbor:"4,keyasint,omitempty"`
-	MustUpgrade                 bool                                 `cbor:"13,keyasint,omitempty"`
-	ConnectionID                ID                                   `cbor:"5,keyasint,omitempty"`
-	ClientProxyProtocolVersion  int32                                `cbor:"6,keyasint,omitempty"`
-	ClientOfferSDP              WebRTCSessionDescription             `cbor:"7,keyasint,omitempty"`
-	ClientRootObfuscationSecret ObfuscationSecret                    `cbor:"8,keyasint,omitempty"`
-	DoDTLSRandomization         bool                                 `cbor:"9,keyasint,omitempty"`
-	TrafficShapingParameters    *DataChannelTrafficShapingParameters `cbor:"10,keyasint,omitempty"`
-	NetworkProtocol             NetworkProtocol                      `cbor:"11,keyasint,omitempty"`
-	DestinationAddress          string                               `cbor:"12,keyasint,omitempty"`
+	TacticsPayload              []byte                    `cbor:"2,keyasint,omitempty"`
+	Limited                     bool                      `cbor:"3,keyasint,omitempty"`
+	NoMatch                     bool                      `cbor:"4,keyasint,omitempty"`
+	MustUpgrade                 bool                      `cbor:"13,keyasint,omitempty"`
+	ConnectionID                ID                        `cbor:"5,keyasint,omitempty"`
+	SelectedProtocolVersion     int32                     `cbor:"6,keyasint,omitempty"`
+	ClientOfferSDP              WebRTCSessionDescription  `cbor:"7,keyasint,omitempty"`
+	ClientRootObfuscationSecret ObfuscationSecret         `cbor:"8,keyasint,omitempty"`
+	DoDTLSRandomization         bool                      `cbor:"9,keyasint,omitempty"`
+	UseMediaStreams             bool                      `cbor:"14,keyasint,omitempty"`
+	TrafficShapingParameters    *TrafficShapingParameters `cbor:"10,keyasint,omitempty"`
+	NetworkProtocol             NetworkProtocol           `cbor:"11,keyasint,omitempty"`
+	DestinationAddress          string                    `cbor:"12,keyasint,omitempty"`
 }
 
 // ClientOfferRequest is an API request sent from a client to a broker,
@@ -305,24 +369,25 @@ type ProxyAnnounceResponse struct {
 // domain, and destination port for a valid Psiphon tunnel protocol run by
 // the specified server entry.
 type ClientOfferRequest struct {
-	Metrics                      *ClientMetrics                       `cbor:"1,keyasint,omitempty"`
-	CommonCompartmentIDs         []ID                                 `cbor:"2,keyasint,omitempty"`
-	PersonalCompartmentIDs       []ID                                 `cbor:"3,keyasint,omitempty"`
-	ClientOfferSDP               WebRTCSessionDescription             `cbor:"4,keyasint,omitempty"`
-	ICECandidateTypes            ICECandidateTypes                    `cbor:"5,keyasint,omitempty"`
-	ClientRootObfuscationSecret  ObfuscationSecret                    `cbor:"6,keyasint,omitempty"`
-	DoDTLSRandomization          bool                                 `cbor:"7,keyasint,omitempty"`
-	TrafficShapingParameters     *DataChannelTrafficShapingParameters `cbor:"8,keyasint,omitempty"`
-	PackedDestinationServerEntry []byte                               `cbor:"9,keyasint,omitempty"`
-	NetworkProtocol              NetworkProtocol                      `cbor:"10,keyasint,omitempty"`
-	DestinationAddress           string                               `cbor:"11,keyasint,omitempty"`
+	Metrics                      *ClientMetrics            `cbor:"1,keyasint,omitempty"`
+	CommonCompartmentIDs         []ID                      `cbor:"2,keyasint,omitempty"`
+	PersonalCompartmentIDs       []ID                      `cbor:"3,keyasint,omitempty"`
+	ClientOfferSDP               WebRTCSessionDescription  `cbor:"4,keyasint,omitempty"`
+	ICECandidateTypes            ICECandidateTypes         `cbor:"5,keyasint,omitempty"`
+	ClientRootObfuscationSecret  ObfuscationSecret         `cbor:"6,keyasint,omitempty"`
+	DoDTLSRandomization          bool                      `cbor:"7,keyasint,omitempty"`
+	UseMediaStreams              bool                      `cbor:"12,keyasint,omitempty"`
+	TrafficShapingParameters     *TrafficShapingParameters `cbor:"8,keyasint,omitempty"`
+	PackedDestinationServerEntry []byte                    `cbor:"9,keyasint,omitempty"`
+	NetworkProtocol              NetworkProtocol           `cbor:"10,keyasint,omitempty"`
+	DestinationAddress           string                    `cbor:"11,keyasint,omitempty"`
 }
 
-// DataChannelTrafficShapingParameters specifies a data channel traffic
-// shaping configuration, including random padding and decoy messages.
-// Clients determine their own traffic shaping configuration, and generate
-// and send a configuration for the peer proxy to use.
-type DataChannelTrafficShapingParameters struct {
+// TrafficShapingParameters specifies data channel or media stream traffic
+// shaping configuration, including random padding and decoy messages (or
+// packets). Clients determine their own traffic shaping configuration, and
+// generate and send a configuration for the peer proxy to use.
+type TrafficShapingParameters struct {
 	MinPaddedMessages       int     `cbor:"1,keyasint,omitempty"`
 	MaxPaddedMessages       int     `cbor:"2,keyasint,omitempty"`
 	MinPaddingSize          int     `cbor:"3,keyasint,omitempty"`
@@ -347,19 +412,19 @@ type DataChannelTrafficShapingParameters struct {
 // connection and its relayed BrokerServerReport.
 //
 // MustUpgrade is an optional flag that is set by the broker, based on the
-// submitted ProxyProtocolVersion, when the client app must be upgraded in
-// order to function properly. Potential must-upgrade scenarios include
-// changes to the personal pairing broker rendezvous algorithm, where no
-// protocol backwards compatibility accommodations can ensure a rendezvous
-// and match. When MustUpgrade is set, NoMatch is implied.
+// submitted ProtocolVersion, when the client app must be upgraded in order
+// to function properly. Potential must-upgrade scenarios include changes to
+// the personal pairing broker rendezvous algorithm, where no protocol
+// backwards compatibility accommodations can ensure a rendezvous and match.
+// When MustUpgrade is set, NoMatch is implied.
 type ClientOfferResponse struct {
-	Limited                      bool                     `cbor:"1,keyasint,omitempty"`
-	NoMatch                      bool                     `cbor:"2,keyasint,omitempty"`
-	MustUpgrade                  bool                     `cbor:"7,keyasint,omitempty"`
-	ConnectionID                 ID                       `cbor:"3,keyasint,omitempty"`
-	SelectedProxyProtocolVersion int32                    `cbor:"4,keyasint,omitempty"`
-	ProxyAnswerSDP               WebRTCSessionDescription `cbor:"5,keyasint,omitempty"`
-	RelayPacketToServer          []byte                   `cbor:"6,keyasint,omitempty"`
+	Limited                 bool                     `cbor:"1,keyasint,omitempty"`
+	NoMatch                 bool                     `cbor:"2,keyasint,omitempty"`
+	MustUpgrade             bool                     `cbor:"7,keyasint,omitempty"`
+	ConnectionID            ID                       `cbor:"3,keyasint,omitempty"`
+	SelectedProtocolVersion int32                    `cbor:"4,keyasint,omitempty"`
+	ProxyAnswerSDP          WebRTCSessionDescription `cbor:"5,keyasint,omitempty"`
+	RelayPacketToServer     []byte                   `cbor:"6,keyasint,omitempty"`
 }
 
 // TODO: Encode SDPs using CBOR without field names, simliar to packed metrics?
@@ -373,11 +438,14 @@ type ClientOfferResponse struct {
 // reason, it should still send ProxyAnswerRequest with AnswerError
 // populated; the broker will signal the client to abort this connection.
 type ProxyAnswerRequest struct {
-	ConnectionID                 ID                       `cbor:"1,keyasint,omitempty"`
-	SelectedProxyProtocolVersion int32                    `cbor:"2,keyasint,omitempty"`
-	ProxyAnswerSDP               WebRTCSessionDescription `cbor:"3,keyasint,omitempty"`
-	ICECandidateTypes            ICECandidateTypes        `cbor:"4,keyasint,omitempty"`
-	AnswerError                  string                   `cbor:"5,keyasint,omitempty"`
+	ConnectionID      ID                       `cbor:"1,keyasint,omitempty"`
+	ProxyAnswerSDP    WebRTCSessionDescription `cbor:"3,keyasint,omitempty"`
+	ICECandidateTypes ICECandidateTypes        `cbor:"4,keyasint,omitempty"`
+	AnswerError       string                   `cbor:"5,keyasint,omitempty"`
+
+	// These fields are no longer used.
+	//
+	// SelectedProtocolVersion int32 `cbor:"2,keyasint,omitempty"`
 }
 
 // ProxyAnswerResponse is the acknowledgement for a ProxyAnswerRequest.
@@ -496,8 +564,8 @@ func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 		return nil, nil, errors.Trace(err)
 	}
 
-	if metrics.ProxyProtocolVersion < 0 || metrics.ProxyProtocolVersion > proxyProtocolVersion {
-		return nil, nil, errors.Tracef("invalid proxy protocol version: %v", metrics.ProxyProtocolVersion)
+	if metrics.ProtocolVersion < ProtocolVersion1 || metrics.ProtocolVersion > LatestProtocolVersion {
+		return nil, nil, errors.Tracef("invalid protocol version: %v", metrics.ProtocolVersion)
 	}
 
 	if !metrics.NATType.IsValid() {
@@ -514,7 +582,7 @@ func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 
 	logFields := formatter(logFieldPrefix, geoIPData, baseParams)
 
-	logFields[logFieldPrefix+"proxy_protocol_version"] = metrics.ProxyProtocolVersion
+	logFields[logFieldPrefix+"protocol_version"] = metrics.ProtocolVersion
 	logFields[logFieldPrefix+"nat_type"] = metrics.NATType
 	logFields[logFieldPrefix+"port_mapping_types"] = metrics.PortMappingTypes
 	logFields[logFieldPrefix+"max_clients"] = metrics.MaxClients
@@ -549,8 +617,8 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 		return nil, errors.Trace(err)
 	}
 
-	if metrics.ProxyProtocolVersion < 0 || metrics.ProxyProtocolVersion > proxyProtocolVersion {
-		return nil, errors.Tracef("invalid proxy protocol version: %v", metrics.ProxyProtocolVersion)
+	if metrics.ProtocolVersion < ProtocolVersion1 || metrics.ProtocolVersion > LatestProtocolVersion {
+		return nil, errors.Tracef("invalid protocol version: %v", metrics.ProtocolVersion)
 	}
 
 	if !metrics.NATType.IsValid() {
@@ -567,7 +635,7 @@ func (metrics *ClientMetrics) ValidateAndGetLogFields(
 
 	logFields := formatter("", geoIPData, baseParams)
 
-	logFields["proxy_protocol_version"] = metrics.ProxyProtocolVersion
+	logFields["protocol_version"] = metrics.ProtocolVersion
 	logFields["nat_type"] = metrics.NATType
 	logFields["port_mapping_types"] = metrics.PortMappingTypes
 
@@ -619,6 +687,14 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	baseAPIParameterValidator common.APIParameterValidator,
 	formatter common.APIParameterLogFieldFormatter,
 	geoIPData common.GeoIPData) ([]byte, common.LogFields, error) {
+
+	// UseMediaStreams requires at least ProtocolVersion2.
+	if request.UseMediaStreams &&
+		request.Metrics.ProtocolVersion < ProtocolVersion2 {
+
+		return nil, nil, errors.Tracef(
+			"invalid protocol version: %d", request.Metrics.ProtocolVersion)
+	}
 
 	if len(request.CommonCompartmentIDs) > maxCompartmentIDs {
 		return nil, nil, errors.Tracef(
@@ -700,13 +776,14 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	logFields["has_IPv6"] = sdpMetrics.hasIPv6
 	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
+	logFields["use_media_streams"] = request.UseMediaStreams
 
 	return filteredSDP, logFields, nil
 }
 
 // Validate validates the that client has not specified excess traffic shaping
 // padding or decoy traffic.
-func (params *DataChannelTrafficShapingParameters) Validate() error {
+func (params *TrafficShapingParameters) Validate() error {
 
 	if params.MinPaddedMessages < 0 ||
 		params.MinPaddedMessages > params.MaxPaddedMessages ||
@@ -775,11 +852,6 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	if !request.ICECandidateTypes.IsValid() {
 		return nil, nil, errors.Tracef(
 			"invalid ICE candidate types: %v", request.ICECandidateTypes)
-	}
-
-	if request.SelectedProxyProtocolVersion != ProxyProtocolVersion1 {
-		return nil, nil, errors.Tracef(
-			"invalid select proxy protocol version: %v", request.SelectedProxyProtocolVersion)
 	}
 
 	logFields := formatter("", geoIPData, common.APIParameters{})
