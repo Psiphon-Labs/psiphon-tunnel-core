@@ -46,6 +46,7 @@ func Listen(
 	_ common.Logger,
 	_ func(string, error, common.LogFields),
 	_ string,
+	_ int,
 	_ string,
 	_ bool) (net.Listener, error) {
 
@@ -63,6 +64,7 @@ func Dial(
 	_ *prng.Seed,
 	_ *transforms.ObfuscatorSeedTransformerParameters,
 	_ bool,
+	_ int,
 	_ bool,
 	_ bool,
 	_ *common.TLSClientSessionCacheWrapper) (net.Conn, error) {
