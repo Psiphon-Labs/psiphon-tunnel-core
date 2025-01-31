@@ -232,7 +232,18 @@ func (server *TunnelServer) Run() error {
 					return errors.Trace(err)
 				}
 			} else if protocol.TunnelProtocolUsesShadowsocks(tunnelProtocol) {
-				listener, err = ListenShadowsocks(support, listener, support.Config.ShadowsocksKey)
+
+				logTunnelProtocol := tunnelProtocol
+				listener, err = ListenShadowsocks(
+					support,
+					listener,
+					support.Config.ShadowsocksKey,
+					func(peerAddress string, err error, logFields common.LogFields) {
+						logIrregularTunnel(
+							support, logTunnelProtocol, listenPort, peerAddress,
+							errors.Trace(err), LogFields(logFields))
+					},
+				)
 				if err != nil {
 					return errors.Trace(err)
 				}

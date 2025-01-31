@@ -35,11 +35,12 @@ import (
 // ShadowsocksServer tunnels TCP traffic (in the case of Psiphon, SSH traffic)
 // over Shadowsocks.
 type ShadowsocksServer struct {
-	support       *SupportServices
-	listener      net.Listener
-	key           *shadowsocks.EncryptionKey
-	saltGenerator service.ServerSaltGenerator
-	replayCache   service.ReplayCache
+	support               *SupportServices
+	listener              net.Listener
+	key                   *shadowsocks.EncryptionKey
+	saltGenerator         service.ServerSaltGenerator
+	replayCache           service.ReplayCache
+	irregularTunnelLogger func(string, error, common.LogFields)
 }
 
 // ListenShadowsocks returns the listener of a new ShadowsocksServer.
@@ -47,9 +48,10 @@ func ListenShadowsocks(
 	support *SupportServices,
 	listener net.Listener,
 	ssEncryptionKey string,
+	irregularTunnelLogger func(string, error, common.LogFields),
 ) (net.Listener, error) {
 
-	server, err := NewShadowsocksServer(support, listener, ssEncryptionKey)
+	server, err := NewShadowsocksServer(support, listener, ssEncryptionKey, irregularTunnelLogger)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -61,7 +63,8 @@ func ListenShadowsocks(
 func NewShadowsocksServer(
 	support *SupportServices,
 	listener net.Listener,
-	ssEncryptionKey string) (*ShadowsocksServer, error) {
+	ssEncryptionKey string,
+	irregularTunnelLogger func(string, error, common.LogFields)) (*ShadowsocksServer, error) {
 
 	// Note: client must use the same cipher.
 	key, err := shadowsocks.NewEncryptionKey(shadowsocks.CHACHA20IETFPOLY1305, ssEncryptionKey)
@@ -74,11 +77,12 @@ func NewShadowsocksServer(
 	replayHistory := service.MaxCapacity
 
 	shadowsocksServer := &ShadowsocksServer{
-		support:       support,
-		listener:      listener,
-		key:           key,
-		saltGenerator: service.NewServerSaltGenerator(ssEncryptionKey),
-		replayCache:   service.NewReplayCache(replayHistory),
+		support:               support,
+		listener:              listener,
+		key:                   key,
+		saltGenerator:         service.NewServerSaltGenerator(ssEncryptionKey),
+		replayCache:           service.NewReplayCache(replayHistory),
+		irregularTunnelLogger: irregularTunnelLogger,
 	}
 
 	return shadowsocksServer, nil
@@ -127,10 +131,16 @@ func (l *ShadowsocksListener) Accept() (net.Conn, error) {
 
 		go drainConn(conn)
 
+		var err error
 		if isServerSalt {
-			return nil, errors.TraceNew("server replay detected")
+			err = errors.TraceNew("server replay detected")
+		} else {
+			err = errors.TraceNew("client replay detected")
 		}
-		return nil, errors.TraceNew("client replay detected")
+
+		l.server.irregularTunnelLogger(conn.RemoteAddr().String(), err, nil)
+
+		return nil, err
 	}
 
 	ssr := shadowsocks.NewReader(reader, l.server.key)
@@ -138,7 +148,7 @@ func (l *ShadowsocksListener) Accept() (net.Conn, error) {
 	ssw.SetSaltGenerator(l.server.saltGenerator)
 	ssClientConn := transport.WrapConn(conn.(*net.TCPConn), ssr, ssw)
 
-	return NewShadowsocksConn(ssClientConn, l.server), nil
+	return NewShadowsocksConn(ssClientConn), nil
 }
 
 func drainConn(conn net.Conn) {
@@ -184,14 +194,12 @@ func (l *ShadowsocksListener) readSalt(conn net.Conn) ([]byte, io.Reader, error)
 // ShadowsocksConn implements the net.Conn and common.MetricsSource interfaces.
 type ShadowsocksConn struct {
 	net.Conn
-	server *ShadowsocksServer
 }
 
 // NewShadowsocksConn initializes a new NewShadowsocksConn.
-func NewShadowsocksConn(conn net.Conn, server *ShadowsocksServer) *ShadowsocksConn {
+func NewShadowsocksConn(conn net.Conn) *ShadowsocksConn {
 	return &ShadowsocksConn{
-		Conn:   conn,
-		server: server,
+		Conn: conn,
 	}
 }
 
