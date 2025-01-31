@@ -186,7 +186,6 @@ func (conn *saltReader) init() error {
 	if err != nil {
 		return errors.TraceMsg(err, "failed to read salt")
 	}
-
 	conn.reader = reader
 
 	// Hardcode key ID because all clients use the same cipher per server,
