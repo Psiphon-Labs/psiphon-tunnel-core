@@ -789,7 +789,7 @@ func newWebRTCConn(
 		conn.sendMediaTrackPacket = &rtp.Packet{
 			Header: rtp.Header{
 				Version:   2,
-				Timestamp: uint32(prng.Intn(1 << 32)),
+				Timestamp: uint32(prng.Int63n(int64(1) << 32)),
 			}}
 		conn.sendMediaTrackSequencer = rtp.NewRandomSequencer()
 
