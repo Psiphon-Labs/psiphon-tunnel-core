@@ -24,7 +24,6 @@ import (
 	"io"
 	"net"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Jigsaw-Code/outline-ss-server/service"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -113,20 +112,23 @@ func (l *ShadowsocksListener) Accept() (net.Conn, error) {
 	ssr := shadowsocks.NewReader(reader, l.server.key)
 	ssw := shadowsocks.NewWriter(conn, l.server.key)
 	ssw.SetSaltGenerator(l.server.saltGenerator)
-	ssClientConn := transport.WrapConn(conn.(*net.TCPConn), ssr, ssw)
 
-	return NewShadowsocksConn(ssClientConn), nil
+	return NewShadowsocksConn(conn, ssr, ssw), nil
 }
 
 // ShadowsocksConn implements the net.Conn and common.MetricsSource interfaces.
 type ShadowsocksConn struct {
 	net.Conn
+	ssr io.Reader
+	ssw io.Writer
 }
 
 // NewShadowsocksConn initializes a new NewShadowsocksConn.
-func NewShadowsocksConn(conn net.Conn) *ShadowsocksConn {
+func NewShadowsocksConn(conn net.Conn, ssr io.Reader, ssw io.Writer) *ShadowsocksConn {
 	return &ShadowsocksConn{
 		Conn: conn,
+		ssr:  ssr,
+		ssw:  ssw,
 	}
 }
 
@@ -136,7 +138,11 @@ func (conn *ShadowsocksConn) Read(b []byte) (int, error) {
 	// Requires enumerating the Read errors that correspond to an invalid
 	// message because no exported error types, or values, are returned on
 	// such an error.
-	return conn.Conn.Read(b)
+	return conn.ssr.Read(b)
+}
+
+func (conn *ShadowsocksConn) Write(p []byte) (n int, err error) {
+	return conn.ssw.Write(p)
 }
 
 // GetMetrics implements the common.MetricsSource interface.
