@@ -584,11 +584,17 @@ func runTestInproxy(doMustUpgrade bool) error {
 			relayConn = conn
 
 			if wrapWithQUIC {
+
+				udpAddr, err := net.ResolveUDPAddr("udp", addr)
+				if err != nil {
+					return errors.Trace(err)
+				}
+
 				disablePathMTUDiscovery := true
 				quicConn, err := quic.Dial(
 					dialCtx,
 					conn,
-					&net.UDPAddr{Port: 1}, // This address is ignored, but the zero value is not allowed
+					udpAddr,
 					"test",
 					"QUICv1",
 					nil,

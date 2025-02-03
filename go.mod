@@ -36,7 +36,7 @@ require (
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240824224428-ca6969e315a9
-	github.com/Psiphon-Labs/quic-go v0.0.0-20240821052333-b6316b594e39
+	github.com/Psiphon-Labs/quic-go v0.0.0-20250203210204-a4381c68e52f
 	github.com/Psiphon-Labs/utls v1.1.1-0.20241107183331-b18909f8ccaa
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61

@@ -1268,7 +1268,8 @@ func MakeDialParameters(
 			}
 		}
 
-		if protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) &&
+		if (!isReplay || !replayInproxyWebRTC) &&
+			protocol.TunnelProtocolUsesQUIC(dialParams.TunnelProtocol) &&
 			dialParams.InproxyWebRTCDialParameters.UseMediaStreams {
 
 			// In the in-proxy WebRTC media stream mode, QUIC packets are
@@ -1291,6 +1292,38 @@ func MakeDialParameters(
 
 			dialParams.QUICMaxPacketSizeAdjustment = inproxy.GetQUICMaxPacketSizeAdjustment(isIPv6)
 			dialParams.QUICDisablePathMTUDiscovery = true
+
+			// Select a QUIC variant that is compatible with WebRTC media
+			// stream SRTP constraints. This selection overrides the previous
+			// selectQUICVersion. If a compatible QUIC variant cannot be
+			// selected, abort with no error, as is done in the previous
+			// selectQUICVersion case.
+			//
+			// Previous QUICUseObfuscatedPSK/QUICDialEarly parameter
+			// selections are retained, while parameters tied to the QUIC
+			// variant, including QUICClientHelloSeed and
+			// ObfuscatedQUICPaddingSeed/ObfuscatedQUICNonceTransformerParameters
+			// are set or cleared to match the new selection.
+			//
+			// Limitation: replayQUICVersion is ignored and
+			// replayInproxyWebRTC is used for this case, since
+			// UseMediaStreams is determined in the latter case.
+
+			dialParams.QUICVersion = selectWebRTCMediaStreamQUICVersion(serverEntry, p)
+			if dialParams.QUICVersion == "" {
+				return nil, nil
+			}
+			if protocol.QUICVersionHasRandomizedClientHello(dialParams.QUICVersion) {
+				dialParams.QUICClientHelloSeed, err = prng.NewSeed()
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+			}
+			if protocol.QUICVersionIsObfuscated(dialParams.QUICVersion) {
+				return nil, errors.TraceNew("unexpected obfuscated QUIC version")
+			}
+			dialParams.ObfuscatedQUICPaddingSeed = nil
+			dialParams.ObfuscatedQUICNonceTransformerParameters = nil
 		}
 
 		// dialParams.inproxyConn is left uninitialized until after the dial,
@@ -2039,6 +2072,47 @@ func selectQUICVersion(
 		}
 
 		if common.Contains(disableQUICVersions, quicVersion) {
+			continue
+		}
+
+		quicVersions = append(quicVersions, quicVersion)
+	}
+
+	if len(quicVersions) == 0 {
+		return ""
+	}
+
+	choice := prng.Intn(len(quicVersions))
+
+	return quicVersions[choice]
+}
+
+func selectWebRTCMediaStreamQUICVersion(
+	serverEntry *protocol.ServerEntry,
+	p parameters.ParametersAccessor) string {
+
+	// Based on selectQUICVersion. The only supported QUIC versions are the
+	// non-obfuscated IETF QUICv1 versions. Obfuscated versions do not meet
+	// the packet size constraints required for WebRTC SRTP.
+
+	limitQUICVersions := p.QUICVersions(parameters.LimitQUICVersions)
+
+	quicVersions := make([]string, 0)
+
+	supportedQUICVersions := protocol.QUICVersions{
+		protocol.QUIC_VERSION_V1,
+		protocol.QUIC_VERSION_RANDOMIZED_V1,
+	}
+
+	for _, quicVersion := range supportedQUICVersions {
+
+		if len(limitQUICVersions) > 0 &&
+			!common.Contains(limitQUICVersions, quicVersion) {
+			continue
+		}
+
+		if len(serverEntry.LimitQUICVersions) > 0 &&
+			!common.Contains(serverEntry.LimitQUICVersions, quicVersion) {
 			continue
 		}
 
