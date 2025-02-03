@@ -131,6 +131,11 @@ func NewShadowsocksConn(conn net.Conn) *ShadowsocksConn {
 }
 
 func (conn *ShadowsocksConn) Read(b []byte) (int, error) {
+	// TODO: invoke the irregular tunnel logger if Read fails due to an invalid
+	// message from the client. I.e., client does not know the shadowsocks key.
+	// Requires enumerating the Read errors that correspond to an invalid
+	// message because no exported error types, or values, are returned on
+	// such an error.
 	return conn.Conn.Read(b)
 }
 

@@ -21,6 +21,7 @@ package server
 
 import (
 	"bytes"
+	"crypto/rand"
 	"io"
 	"net"
 	"testing"
@@ -201,6 +202,41 @@ func TestShadowsocksServer(t *testing.T) {
 		t.Fatalf("expected error")
 	}
 
+	if numIrregularTunnels != 2 {
+		t.Fatal("expected 2 irregular tunnels")
+	}
+
+	// Mimic random bytes
+
+	go runListener(listener, recv)
+
+	conn, err = net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("net.Dial failed %v", err)
+	}
+	defer conn.Close()
+
+	randomBytes := make([]byte, clientToServerRecorder.Len())
+
+	_, err = rand.Read(randomBytes)
+	if err != nil {
+		t.Fatalf("rand.Read failed %v", err)
+	}
+
+	_, err = conn.Write(randomBytes)
+	if err != nil {
+		t.Fatalf("conn.Read failed %v", err)
+	}
+
+	r = <-recv
+
+	if r.err == nil {
+		t.Fatalf("expected error")
+	}
+
+	// Note: currently an invalid message from the client is not logged as an
+	// irregular tunnel due to the limitations described in
+	// ShadowsocksConn.Read so do not expect another irregular tunnel.
 	if numIrregularTunnels != 2 {
 		t.Fatal("expected 2 irregular tunnels")
 	}
