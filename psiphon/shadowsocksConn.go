@@ -21,9 +21,9 @@ package psiphon
 
 import (
 	"context"
+	"io"
 	"net"
 
-	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -41,6 +41,8 @@ type ShadowsockConfig struct {
 // shadowsocksConn is a network connection that tunnels net.Conn flows over Shadowsocks.
 type shadowsocksConn struct {
 	net.Conn
+	ssw io.Writer
+	ssr io.Reader
 }
 
 // DialShadowsocksTunnel returns an initialized Shadowsocks connection.
@@ -60,9 +62,7 @@ func DialShadowsocksTunnel(
 		return nil, errors.Trace(err)
 	}
 
-	// Based on shadowsocks.DialStream
 	ssw := shadowsocks.NewWriter(conn, key)
-	ssr := shadowsocks.NewReader(conn, key)
 
 	if shadowsocksConfig.prefix != nil {
 
@@ -75,20 +75,36 @@ func DialShadowsocksTunnel(
 		// which can compromise the security of the connection [1][2].
 		// [1] https://developers.google.com/outline/docs/guides/service-providers/prefixing
 		// [2] See comment for shadowsocks.NewPrefixSaltGenerator
-		//
-		// TODO: consider logging a warning or returning an error if
-		// len(prefix) > 16.
-		if len(prefix) <= 16 {
-			ssw.SetSaltGenerator(shadowsocks.NewPrefixSaltGenerator(prefix))
+		if len(prefix) > 16 {
+			return nil, errors.Tracef("invalid prefix length %d", len(prefix))
 		}
+
+		ssw.SetSaltGenerator(shadowsocks.NewPrefixSaltGenerator(prefix))
 	}
 
-	// TODO: is this cast correct/safe?
-	ssConn := transport.WrapConn(conn.(*TCPConn).Conn.(*net.TCPConn), ssr, ssw)
-
 	return &shadowsocksConn{
-		Conn: ssConn,
+		Conn: conn,
+		ssr:  shadowsocks.NewReader(conn, key),
+		ssw:  ssw,
 	}, nil
+}
+
+func (conn *shadowsocksConn) Read(p []byte) (n int, err error) {
+	return conn.ssr.Read(p)
+}
+
+func (conn *shadowsocksConn) Write(p []byte) (n int, err error) {
+	return conn.ssw.Write(p)
+}
+
+// GetMetrics implements the common.MetricsSource interface.
+func (conn *shadowsocksConn) GetMetrics() common.LogFields {
+	// Relay any metrics from the underlying conn.
+	m, ok := conn.Conn.(common.MetricsSource)
+	if ok {
+		return m.GetMetrics()
+	}
+	return nil
 }
 
 func (conn *shadowsocksConn) IsClosed() bool {

@@ -21,7 +21,6 @@ package server
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net"
 
@@ -219,7 +218,7 @@ func readSalt(conn net.Conn, saltSize int) ([]byte, io.Reader, error) {
 
 	salt := make([]byte, saltSize)
 	if n, err := io.ReadFull(conn, salt); err != nil {
-		return nil, nil, fmt.Errorf("reading conn failed after %d bytes: %w", n, err)
+		return nil, nil, errors.Tracef("reading conn failed after %d bytes: %w", n, err)
 	}
 
 	return salt, io.MultiReader(bytes.NewReader(salt), conn), nil
