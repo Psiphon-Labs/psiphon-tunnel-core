@@ -235,10 +235,14 @@ type WebRTCDialCoordinator interface {
 	// the value.
 	DoDTLSRandomization() bool
 
-	// DataChannelTrafficShapingParameters returns parameters specifying how
-	// to perform data channel traffic shapping -- random padding and decoy
-	// message. Returns nil when no traffic shaping is to be performed.
-	DataChannelTrafficShapingParameters() *DataChannelTrafficShapingParameters
+	// UseMediaStreams indicates whether to use WebRTC media streams to tunnel
+	// traffic. When false, a WebRTC data channel is used to tunnel traffic.
+	UseMediaStreams() bool
+
+	// TrafficShapingParameters returns parameters specifying how to perform
+	// data channel or media stream traffic shapping -- random padding and
+	// decoy messages. Returns nil when no traffic shaping is to be performed.
+	TrafficShapingParameters() *TrafficShapingParameters
 
 	// STUNServerAddress selects a STUN server to use for this dial. When
 	// RFC5780 is true, the STUN server must support RFC5780 NAT discovery;
@@ -363,7 +367,7 @@ type WebRTCDialCoordinator interface {
 	DiscoverNATTimeout() time.Duration
 	WebRTCAnswerTimeout() time.Duration
 	WebRTCAwaitPortMappingTimeout() time.Duration
-	WebRTCAwaitDataChannelTimeout() time.Duration
+	WebRTCAwaitReadyToProxyTimeout() time.Duration
 	ProxyDestinationDialTimeout() time.Duration
 	ProxyRelayInactivityTimeout() time.Duration
 }

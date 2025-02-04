@@ -225,7 +225,6 @@ func discoverNATType(
 		}
 
 		resultChannel <- result{NATType: MakeNATType(mapping, filtering)}
-		return
 	}()
 
 	var r result

@@ -37,7 +37,11 @@ func setSocketBPF(_ []bpf.RawInstruction, _ int) error {
 }
 
 func setAdditionalSocketOptions(socketFd int) {
-	syscall.SetsockoptInt(socketFd, syscall.SOL_SOCKET, syscall.SO_NOSIGPIPE, 1)
+	// TODO: return error
+	err := syscall.SetsockoptInt(socketFd, syscall.SOL_SOCKET, syscall.SO_NOSIGPIPE, 1)
+	if err != nil {
+		NoticeError("SetsockoptInt failed: %v", errors.Trace(err))
+	}
 }
 
 func makeLocalProxyListener(listenIP string, port int) (net.Listener, bool, error) {

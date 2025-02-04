@@ -359,7 +359,8 @@ func dialClientWebRTCConn(
 	// Initialize the WebRTC offer
 
 	doTLSRandomization := config.WebRTCDialCoordinator.DoDTLSRandomization()
-	trafficShapingParameters := config.WebRTCDialCoordinator.DataChannelTrafficShapingParameters()
+	useMediaStreams := config.WebRTCDialCoordinator.UseMediaStreams()
+	trafficShapingParameters := config.WebRTCDialCoordinator.TrafficShapingParameters()
 	clientRootObfuscationSecret := config.WebRTCDialCoordinator.ClientRootObfuscationSecret()
 
 	webRTCConn, SDP, SDPMetrics, err := newWebRTCConnForOffer(
@@ -369,6 +370,7 @@ func dialClientWebRTCConn(
 			WebRTCDialCoordinator:       config.WebRTCDialCoordinator,
 			ClientRootObfuscationSecret: clientRootObfuscationSecret,
 			DoDTLSRandomization:         doTLSRandomization,
+			UseMediaStreams:             useMediaStreams,
 			TrafficShapingParameters:    trafficShapingParameters,
 			ReliableTransport:           config.ReliableTransport,
 		},
@@ -411,10 +413,10 @@ func dialClientWebRTCConn(
 		ctx,
 		&ClientOfferRequest{
 			Metrics: &ClientMetrics{
-				BaseAPIParameters:    packedParams,
-				ProxyProtocolVersion: proxyProtocolVersion,
-				NATType:              config.WebRTCDialCoordinator.NATType(),
-				PortMappingTypes:     config.WebRTCDialCoordinator.PortMappingTypes(),
+				BaseAPIParameters: packedParams,
+				ProtocolVersion:   LatestProtocolVersion,
+				NATType:           config.WebRTCDialCoordinator.NATType(),
+				PortMappingTypes:  config.WebRTCDialCoordinator.PortMappingTypes(),
 			},
 			CommonCompartmentIDs:         brokerCoordinator.CommonCompartmentIDs(),
 			PersonalCompartmentIDs:       personalCompartmentIDs,
@@ -422,6 +424,7 @@ func dialClientWebRTCConn(
 			ICECandidateTypes:            SDPMetrics.iceCandidateTypes,
 			ClientRootObfuscationSecret:  clientRootObfuscationSecret,
 			DoDTLSRandomization:          doTLSRandomization,
+			UseMediaStreams:              useMediaStreams,
 			TrafficShapingParameters:     trafficShapingParameters,
 			PackedDestinationServerEntry: config.PackedDestinationServerEntry,
 			NetworkProtocol:              config.DialNetworkProtocol,
@@ -458,11 +461,13 @@ func dialClientWebRTCConn(
 		return nil, true, errors.TraceNew("no match")
 	}
 
-	if offerResponse.SelectedProxyProtocolVersion < MinimumProxyProtocolVersion ||
-		offerResponse.SelectedProxyProtocolVersion > proxyProtocolVersion {
+	if offerResponse.SelectedProtocolVersion < ProtocolVersion1 ||
+		(useMediaStreams &&
+			offerResponse.SelectedProtocolVersion < ProtocolVersion2) ||
+		offerResponse.SelectedProtocolVersion > LatestProtocolVersion {
 		return nil, false, errors.Tracef(
-			"Unsupported proxy protocol version: %d",
-			offerResponse.SelectedProxyProtocolVersion)
+			"Unsupported protocol version: %d",
+			offerResponse.SelectedProtocolVersion)
 	}
 
 	// Establish the WebRTC DataChannel connection
@@ -473,13 +478,13 @@ func dialClientWebRTCConn(
 		return nil, true, errors.Trace(err)
 	}
 
-	awaitDataChannelCtx, awaitDataChannelCancelFunc := context.WithTimeout(
+	awaitReadyToProxyCtx, awaitReadyToProxyCancelFunc := context.WithTimeout(
 		ctx,
 		common.ValueOrDefault(
-			config.WebRTCDialCoordinator.WebRTCAwaitDataChannelTimeout(), dataChannelAwaitTimeout))
-	defer awaitDataChannelCancelFunc()
+			config.WebRTCDialCoordinator.WebRTCAwaitReadyToProxyTimeout(), readyToProxyAwaitTimeout))
+	defer awaitReadyToProxyCancelFunc()
 
-	err = webRTCConn.AwaitInitialDataChannel(awaitDataChannelCtx)
+	err = webRTCConn.AwaitReadyToProxy(awaitReadyToProxyCtx, offerResponse.ConnectionID)
 	if err != nil {
 		return nil, true, errors.Trace(err)
 	}

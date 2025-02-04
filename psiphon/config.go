@@ -1028,8 +1028,11 @@ type Config struct {
 	InproxyClientOfferRetryJitter                           *float64
 	InproxyClientRelayedPacketRequestTimeoutMilliseconds    *int
 	InproxyDTLSRandomizationProbability                     *float64
-	InproxyDataChannelTrafficShapingProbability             *float64
-	InproxyDataChannelTrafficShapingParameters              *parameters.InproxyDataChannelTrafficShapingParametersValue
+	InproxyWebRTCMediaStreamsProbability                    *float64
+	InproxyWebRTCDataChannelTrafficShapingProbability       *float64
+	InproxyWebRTCDataChannelTrafficShapingParameters        *parameters.InproxyTrafficShapingParametersValue
+	InproxyWebRTCMediaStreamsTrafficShapingProbability      *float64
+	InproxyWebRTCMediaStreamsTrafficShapingParameters       *parameters.InproxyTrafficShapingParametersValue
 	InproxySTUNServerAddresses                              []string
 	InproxySTUNServerAddressesRFC5780                       []string
 	InproxyProxySTUNServerAddresses                         []string
@@ -1052,8 +1055,8 @@ type Config struct {
 	InproxyProxyDiscoverNATTimeoutMilliseconds              *int
 	InproxyClientDiscoverNATTimeoutMilliseconds             *int
 	InproxyWebRTCAnswerTimeoutMilliseconds                  *int
-	InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds   *int
-	InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds  *int
+	InproxyProxyWebRTCAwaitReadyToProxyTimeoutMilliseconds  *int
+	InproxyClientWebRTCAwaitReadyToProxyTimeoutMilliseconds *int
 	InproxyProxyDestinationDialTimeoutMilliseconds          *int
 	InproxyPsiphonAPIRequestTimeoutMilliseconds             *int
 	InproxyProxyTotalActivityNoticePeriodMilliseconds       *int
@@ -1274,11 +1277,14 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 	}
 
 	if config.UseNoticeFiles != nil {
-		setNoticeFiles(
+		err := setNoticeFiles(
 			homepageFilePath,
 			noticesFilePath,
 			config.UseNoticeFiles.RotatingFileSize,
 			config.UseNoticeFiles.RotatingSyncFrequency)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	// Emit notices now that notice files are set if configured
@@ -1713,7 +1719,7 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 	for _, receiver := range config.GetTacticsAppliedReceivers() {
 		err := receiver.TacticsApplied()
 		if err != nil {
-			NoticeError("TacticsApplied failed: %v", err)
+			NoticeError("TacticsApplied failed: %v", errors.Trace(err))
 			// Log and continue running.
 		}
 	}
@@ -2650,12 +2656,24 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyDTLSRandomizationProbability] = *config.InproxyDTLSRandomizationProbability
 	}
 
-	if config.InproxyDataChannelTrafficShapingProbability != nil {
-		applyParameters[parameters.InproxyDataChannelTrafficShapingProbability] = *config.InproxyDataChannelTrafficShapingProbability
+	if config.InproxyWebRTCMediaStreamsProbability != nil {
+		applyParameters[parameters.InproxyWebRTCMediaStreamsProbability] = *config.InproxyWebRTCMediaStreamsProbability
 	}
 
-	if config.InproxyDataChannelTrafficShapingParameters != nil {
-		applyParameters[parameters.InproxyDataChannelTrafficShapingParameters] = *config.InproxyDataChannelTrafficShapingParameters
+	if config.InproxyWebRTCDataChannelTrafficShapingProbability != nil {
+		applyParameters[parameters.InproxyWebRTCDataChannelTrafficShapingProbability] = *config.InproxyWebRTCDataChannelTrafficShapingProbability
+	}
+
+	if config.InproxyWebRTCDataChannelTrafficShapingParameters != nil {
+		applyParameters[parameters.InproxyWebRTCDataChannelTrafficShapingParameters] = *config.InproxyWebRTCDataChannelTrafficShapingParameters
+	}
+
+	if config.InproxyWebRTCMediaStreamsTrafficShapingProbability != nil {
+		applyParameters[parameters.InproxyWebRTCMediaStreamsTrafficShapingProbability] = *config.InproxyWebRTCMediaStreamsTrafficShapingProbability
+	}
+
+	if config.InproxyWebRTCMediaStreamsTrafficShapingParameters != nil {
+		applyParameters[parameters.InproxyWebRTCMediaStreamsTrafficShapingParameters] = *config.InproxyWebRTCMediaStreamsTrafficShapingParameters
 	}
 
 	if len(config.InproxySTUNServerAddresses) > 0 {
@@ -2746,12 +2764,12 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyWebRTCAnswerTimeout] = fmt.Sprintf("%dms", *config.InproxyWebRTCAnswerTimeoutMilliseconds)
 	}
 
-	if config.InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds != nil {
-		applyParameters[parameters.InproxyProxyWebRTCAwaitDataChannelTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyWebRTCAwaitDataChannelTimeoutMilliseconds)
+	if config.InproxyProxyWebRTCAwaitReadyToProxyTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyProxyWebRTCAwaitReadyToProxyTimeout] = fmt.Sprintf("%dms", *config.InproxyProxyWebRTCAwaitReadyToProxyTimeoutMilliseconds)
 	}
 
-	if config.InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds != nil {
-		applyParameters[parameters.InproxyClientWebRTCAwaitDataChannelTimeout] = fmt.Sprintf("%dms", *config.InproxyClientWebRTCAwaitDataChannelTimeoutMilliseconds)
+	if config.InproxyClientWebRTCAwaitReadyToProxyTimeoutMilliseconds != nil {
+		applyParameters[parameters.InproxyClientWebRTCAwaitReadyToProxyTimeout] = fmt.Sprintf("%dms", *config.InproxyClientWebRTCAwaitReadyToProxyTimeoutMilliseconds)
 	}
 
 	if config.InproxyProxyDestinationDialTimeoutMilliseconds != nil {
@@ -3538,13 +3556,25 @@ func (config *Config) setDialParametersHash() {
 		hash.Write([]byte("InproxyDTLSRandomizationProbability"))
 		binary.Write(hash, binary.LittleEndian, *config.InproxyDTLSRandomizationProbability)
 	}
-	if config.InproxyDataChannelTrafficShapingProbability != nil {
-		hash.Write([]byte("InproxyDataChannelTrafficShapingProbability"))
-		binary.Write(hash, binary.LittleEndian, *config.InproxyDataChannelTrafficShapingProbability)
+	if config.InproxyWebRTCMediaStreamsProbability != nil {
+		hash.Write([]byte("InproxyWebRTCMediaStreamsProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyWebRTCMediaStreamsProbability)
 	}
-	if config.InproxyDataChannelTrafficShapingParameters != nil {
-		hash.Write([]byte("InproxyDataChannelTrafficShapingParameters"))
-		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyDataChannelTrafficShapingParameters)))
+	if config.InproxyWebRTCDataChannelTrafficShapingProbability != nil {
+		hash.Write([]byte("InproxyWebRTCDataChannelTrafficShapingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyWebRTCDataChannelTrafficShapingProbability)
+	}
+	if config.InproxyWebRTCDataChannelTrafficShapingParameters != nil {
+		hash.Write([]byte("InproxyWebRTCDataChannelTrafficShapingParameters"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyWebRTCDataChannelTrafficShapingParameters)))
+	}
+	if config.InproxyWebRTCMediaStreamsTrafficShapingProbability != nil {
+		hash.Write([]byte("InproxyWebRTCMediaStreamsTrafficShapingProbability"))
+		binary.Write(hash, binary.LittleEndian, *config.InproxyWebRTCMediaStreamsTrafficShapingProbability)
+	}
+	if config.InproxyWebRTCMediaStreamsTrafficShapingParameters != nil {
+		hash.Write([]byte("InproxyWebRTCMediaStreamsTrafficShapingParameters"))
+		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyWebRTCMediaStreamsTrafficShapingParameters)))
 	}
 	if config.InproxySTUNServerAddresses != nil {
 		hash.Write([]byte("InproxySTUNServerAddresses"))

@@ -427,14 +427,31 @@ func (s *baseServer) handlePacketImpl(p receivedPacket) bool /* is the buffer st
 	}
 
 	// [Psiphon]
-	// To accomodate additional messages, obfuscated QUIC packets may reserve
-	// significant space in the Initial packet and send less that 1200 QUIC
-	// bytes. In this configuration, the obfuscation layer enforces the
-	// anti-amplification 1200 byte rule, but it must be disabled here.
-	isObfuscated := s.config.ServerMaxPacketSizeAdjustment != nil && s.config.ServerMaxPacketSizeAdjustment(p.remoteAddr) > 0
+	// Both Obfuscated QUIC and QUIC over WebRTC SRTP adjust the max
+	// packet size to allow for additional overhead. Enforce a reduced
+	// minimum initial packet size when the adjustment results in a max
+	// packet size less than protocol.MinInitialPacketSize.
+	minInitialPacketSize := protocol.ByteCount(protocol.MinInitialPacketSize)
+	if s.config.ServerMaxPacketSizeAdjustment != nil {
 
-	if !isObfuscated &&
-		hdr.Type == protocol.PacketTypeInitial && p.Size() < protocol.MinInitialPacketSize {
+		maxPacketSize := protocol.ByteCount(protocol.InitialPacketSizeIPv4)
+		if host, _, err := net.SplitHostPort(p.remoteAddr.String()); err == nil {
+			if IP := net.ParseIP(host); IP != nil && IP.To4() == nil {
+				maxPacketSize = protocol.InitialPacketSizeIPv6
+			}
+		}
+		adjustment := protocol.ByteCount(s.config.ServerMaxPacketSizeAdjustment(p.remoteAddr))
+		maxPacketSize -= adjustment
+		if maxPacketSize < 0 {
+			maxPacketSize = 0
+		}
+
+		if maxPacketSize < minInitialPacketSize {
+			minInitialPacketSize = maxPacketSize
+		}
+	}
+
+	if hdr.Type == protocol.PacketTypeInitial && p.Size() < minInitialPacketSize {
 		s.logger.Debugf("Dropping a packet that is too small to be a valid Initial (%d bytes)", p.Size())
 		if s.tracer != nil && s.tracer.DroppedPacket != nil {
 			s.tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeInitial, p.Size(), logging.PacketDropUnexpectedPacket)

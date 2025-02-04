@@ -220,8 +220,8 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
 			}
-		case InproxyDataChannelTrafficShapingParametersValue:
-			g := p.Get().InproxyDataChannelTrafficShapingParameters(name)
+		case InproxyTrafficShapingParametersValue:
+			g := p.Get().InproxyTrafficShapingParameters(name)
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
 			}

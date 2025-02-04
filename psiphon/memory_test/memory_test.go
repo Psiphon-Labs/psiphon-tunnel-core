@@ -108,7 +108,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 	modifyConfig["ConnectionWorkerPoolSize"] = 10
 	modifyConfig["DisableLocalSocksProxy"] = true
 	modifyConfig["DisableLocalHTTPProxy"] = true
-	modifyConfig["LimitIntensiveConnectionWorkers"] = 5
+	modifyConfig["LimitIntensiveConnectionWorkers"] = 2
 	modifyConfig["LimitMeekBufferSizes"] = true
 	modifyConfig["StaggerConnectionWorkersMilliseconds"] = 100
 	modifyConfig["IgnoreHandshakeStatsRegexps"] = true
