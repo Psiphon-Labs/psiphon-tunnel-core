@@ -827,7 +827,11 @@ func init() {
 		{165, "inproxy_broker_is_reuse", intConverter},
 		{166, "inproxy_webrtc_use_media_streams", intConverter},
 
-		// Next key value = 167
+		// Specs: server.baseDialParams
+
+		{167, "shadowsocks_prefix", nil},
+
+		// Next key value = 168
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

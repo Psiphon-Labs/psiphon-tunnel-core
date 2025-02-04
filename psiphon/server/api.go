@@ -1127,6 +1127,7 @@ var baseDialParams = []requestParamSpec{
 	{"http_transform", isAnyString, requestParamOptional},
 	{"seed_transform", isAnyString, requestParamOptional},
 	{"ossh_prefix", isAnyString, requestParamOptional},
+	{"shadowsocks_prefix", isAnyString, requestParamOptional},
 	{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},

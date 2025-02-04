@@ -380,6 +380,10 @@ const (
 	OSSHPrefixSplitMaxDelay                            = "OSSHPrefixSplitMaxDelay"
 	OSSHPrefixEnableFragmentor                         = "OSSHPrefixEnableFragmentor"
 	ServerOSSHPrefixSpecs                              = "ServerOSSHPrefixSpecs"
+	ShadowsocksPrefixSpecs                             = "ShadowsocksPrefixSpecs"
+	ShadowsocksPrefixScopedSpecNames                   = "ShadowsocksPrefixScopedSpecNames"
+	ShadowsocksPrefixProbability                       = "ShadowsocksPrefixProbability"
+	ReplayShadowsocksPrefix                            = "ReplayShadowsocksPrefix"
 	TLSTunnelObfuscatedPSKProbability                  = "TLSTunnelObfuscatedPSKProbability"
 	TLSTunnelTrafficShapingProbability                 = "TLSTunnelTrafficShapingProbability"
 	TLSTunnelMinTLSPadding                             = "TLSTunnelMinTLSPadding"
@@ -748,6 +752,7 @@ var defaultParameters = map[string]struct {
 	ReplayHTTPTransformerParameters:        {value: true},
 	ReplayOSSHSeedTransformerParameters:    {value: true},
 	ReplayOSSHPrefix:                       {value: true},
+	ReplayShadowsocksPrefix:                {value: true},
 	ReplayTLSFragmentClientHello:           {value: true},
 	ReplayInproxyWebRTC:                    {value: true},
 	ReplayInproxySTUN:                      {value: true},
@@ -913,6 +918,10 @@ var defaultParameters = map[string]struct {
 	OSSHPrefixSplitMaxDelay:    {value: time.Duration(0), minimum: time.Duration(0)},
 	OSSHPrefixEnableFragmentor: {value: false},
 	ServerOSSHPrefixSpecs:      {value: transforms.Specs{}, flags: serverSideOnly},
+
+	ShadowsocksPrefixSpecs:           {value: transforms.Specs{}},
+	ShadowsocksPrefixScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	ShadowsocksPrefixProbability:     {value: 0.0, minimum: 0.0},
 
 	// TLSTunnelMinTLSPadding/TLSTunnelMaxTLSPadding are subject to TLS server limitations.
 
@@ -1275,6 +1284,13 @@ func (p *Parameters) Set(
 	}
 	osshPrefixSpecs, _ := osshPrefixSpecsValue.(transforms.Specs)
 
+	shadowsocksPrefixSpecsValue, err := getAppliedValue(
+		ShadowsocksPrefixSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	shadowsocksPrefixSpecs, _ := shadowsocksPrefixSpecsValue.(transforms.Specs)
+
 	// Special case: in-proxy broker public keys in InproxyBrokerSpecs must
 	// appear in InproxyAllBrokerPublicKeys; and inproxy common compartment
 	// IDs must appear in InproxyAllCommonCompartmentIDs. This check is
@@ -1503,7 +1519,7 @@ func (p *Parameters) Set(
 				}
 
 				prefixMode := false
-				if name == OSSHPrefixSpecs || name == ServerOSSHPrefixSpecs {
+				if name == OSSHPrefixSpecs || name == ServerOSSHPrefixSpecs || name == ShadowsocksPrefixSpecs {
 					prefixMode = true
 				}
 				err := v.Validate(prefixMode)
@@ -1528,6 +1544,8 @@ func (p *Parameters) Set(
 					specs = obfuscatedQuicNonceTransformSpecs
 				} else if name == OSSHPrefixScopedSpecNames {
 					specs = osshPrefixSpecs
+				} else if name == ShadowsocksPrefixScopedSpecNames {
+					specs = shadowsocksPrefixSpecs
 				}
 
 				err := v.Validate(specs)

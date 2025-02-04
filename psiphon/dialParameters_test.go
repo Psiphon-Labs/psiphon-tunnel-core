@@ -125,6 +125,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	applyParameters[parameters.ObfuscatedQUICNonceTransformProbability] = 1.0
 	applyParameters[parameters.ObfuscatedQUICNonceTransformSpecs] = transforms.Specs{"spec": transforms.Spec{{"", ""}}}
 	applyParameters[parameters.ObfuscatedQUICNonceTransformScopedSpecNames] = transforms.ScopedSpecNames{"": {"spec"}}
+	applyParameters[parameters.ShadowsocksPrefixProbability] = 1.0
+	applyParameters[parameters.ShadowsocksPrefixSpecs] = transforms.Specs{"spec": transforms.Spec{{"", ""}}}
+	applyParameters[parameters.ShadowsocksPrefixScopedSpecNames] = transforms.ScopedSpecNames{"": {"spec"}}
 
 	err = clientConfig.SetParameters("tag1", false, applyParameters)
 	if err != nil {
@@ -428,6 +431,12 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		(replayDialParams.ObfuscatedQUICNonceTransformerParameters != nil &&
 			!reflect.DeepEqual(replayDialParams.ObfuscatedQUICNonceTransformerParameters, dialParams.ObfuscatedQUICNonceTransformerParameters)) {
 		t.Fatalf("mismatching ObfuscatedQUICNonceTransformerParameters fields")
+	}
+
+	if (replayDialParams.ShadowsocksPrefixSpec == nil) != (dialParams.ShadowsocksPrefixSpec == nil) ||
+		(replayDialParams.ShadowsocksPrefixSpec != nil &&
+			!reflect.DeepEqual(replayDialParams.ShadowsocksPrefixSpec, dialParams.ShadowsocksPrefixSpec)) {
+		t.Fatalf("mismatching ShadowsocksPrefixSpec fields")
 	}
 
 	// Test: replay after change tactics, with ReplayIgnoreChangedClientState = true
@@ -877,7 +886,8 @@ func TestLimitTunnelDialPortNumbers(t *testing.T) {
         "QUIC-OSSH" : [[30,31]],
         "TAPDANCE-OSSH" : [[40,41]],
         "CONJURE-OSSH" : [[50,51]],
-        "All" : [[60,61],80,443]
+        "SHADOWSOCKS-OSSH" : [[60,61]],
+        "All" : [[70,71],80,443]
     }
     `
 
@@ -971,7 +981,8 @@ func makeMockServerEntries(
 			SshObfuscatedQUICPort:      prng.Range(30, 39),
 			SshObfuscatedTapDancePort:  prng.Range(40, 49),
 			SshObfuscatedConjurePort:   prng.Range(50, 59),
-			MeekServerPort:             prng.Range(60, 69),
+			SshShadowsocksPort:         prng.Range(60, 69),
+			MeekServerPort:             prng.Range(70, 79),
 			MeekFrontingHosts:          []string{"www1.example.org", "www2.example.org", "www3.example.org"},
 			MeekFrontingAddressesRegex: "[a-z0-9]{1,64}.example.org",
 			Region:                     region,
