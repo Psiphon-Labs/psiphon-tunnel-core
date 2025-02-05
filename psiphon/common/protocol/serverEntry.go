@@ -62,6 +62,8 @@ type ServerEntry struct {
 	SshObfuscatedTapDancePort           int      `json:"sshObfuscatedTapdancePort,omitempty"`
 	SshObfuscatedConjurePort            int      `json:"sshObfuscatedConjurePort,omitempty"`
 	SshObfuscatedKey                    string   `json:"sshObfuscatedKey,omitempty"`
+	SshShadowsocksPort                  int      `json:"sshShadowsocksPort,omitempty"`
+	SshShadowsocksKey                   string   `json:"sshShadowsocksKey,omitempty"`
 	Capabilities                        []string `json:"capabilities,omitempty"`
 	Region                              string   `json:"region,omitempty"`
 	ProviderID                          string   `json:"providerID,omitempty"`
@@ -84,6 +86,7 @@ type ServerEntry struct {
 	DisableObfuscatedQUICTransforms     bool     `json:"disableObfuscatedQUICTransforms,omitempty"`
 	DisableOSSHTransforms               bool     `json:"disableOSSHTransforms,omitempty"`
 	DisableOSSHPrefix                   bool     `json:"disableOSSHPrefix,omitempty"`
+	DisableShadowsocksPrefix            bool     `json:"disableShadowsocksPrefix,omitempty"`
 	InproxySessionPublicKey             string   `json:"inproxySessionPublicKey,omitempty"`
 	InproxySessionRootObfuscationSecret string   `json:"inproxySessionRootObfuscationSecret,omitempty"`
 	InproxySSHPort                      int      `json:"inproxySSHPort,omitempty"`
@@ -91,6 +94,7 @@ type ServerEntry struct {
 	InproxyQUICPort                     int      `json:"inproxyQUICPort,omitempty"`
 	InproxyMeekPort                     int      `json:"inproxyMeekPort,omitempty"`
 	InproxyTlsOSSHPort                  int      `json:"inproxyTlsOSSHPort,omitempty"`
+	InproxyShadowsocksPort              int      `json:"inproxyShadowsocksPort,omitempty"`
 
 	// These local fields are not expected to be present in downloaded server
 	// entries. They are added by the client to record and report stats about
@@ -750,6 +754,9 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 			TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 			return serverEntry.MeekServerPort, nil
+
+		case TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH:
+			return serverEntry.SshShadowsocksPort, nil
 		}
 
 	} else {
@@ -786,6 +793,9 @@ func (serverEntry *ServerEntry) GetDialPortNumber(tunnelProtocol string) (int, e
 			TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			TUNNEL_PROTOCOL_UNFRONTED_MEEK:
 			return serverEntry.InproxyMeekPort, nil
+
+		case TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH:
+			return serverEntry.InproxyShadowsocksPort, nil
 		}
 
 	}

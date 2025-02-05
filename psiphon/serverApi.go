@@ -1317,6 +1317,12 @@ func getBaseAPIParameters(
 			}
 		}
 
+		if dialParams.ShadowsocksPrefixSpec != nil {
+			if dialParams.ShadowsocksPrefixSpec.Spec != nil {
+				params["shadowsocks_prefix"] = dialParams.ShadowsocksPrefixSpec.Name
+			}
+		}
+
 		if dialParams.DialConnMetrics != nil {
 			metrics := dialParams.DialConnMetrics.GetMetrics()
 			for name, value := range metrics {

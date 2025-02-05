@@ -155,6 +155,17 @@ func TestTLSOSSH(t *testing.T) {
 		})
 }
 
+func TestShadowsocks(t *testing.T) {
+
+	t.Skipf("temporarily disabled")
+
+	controllerRun(t,
+		&controllerRunConfig{
+			protocol:                 protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH,
+			disableUntunneledUpgrade: true,
+		})
+}
+
 func TestUnfrontedMeek(t *testing.T) {
 	controllerRun(t,
 		&controllerRunConfig{
