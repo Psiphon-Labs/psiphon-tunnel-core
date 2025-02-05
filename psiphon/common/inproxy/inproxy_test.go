@@ -86,6 +86,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 	testNATType := NATTypeUnknown
 	testSTUNServerAddress := "stun.nextcloud.com:443"
 	testDisableSTUN := false
+	testDisablePortMapping := false
 
 	testNewTacticsPayload := []byte(prng.HexString(100))
 	testNewTacticsTag := "new-tactics-tag"
@@ -115,13 +116,15 @@ func runTestInproxy(doMustUpgrade bool) error {
 		receivedClientMustUpgrade = make(chan struct{})
 
 		// trigger MustUpgrade
-		proxyProtocolVersion = 0
+		minimumProxyProtocolVersion = LatestProtocolVersion + 1
+		minimumClientProtocolVersion = LatestProtocolVersion + 1
 
 		// Minimize test parameters for MustUpgrade case
 		numProxies = 1
 		proxyMaxClients = 1
 		numClients = 1
 		testDisableSTUN = true
+		testDisablePortMapping = true
 	}
 
 	testCtx, stopTest := context.WithCancel(context.Background())
@@ -225,7 +228,9 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 	apiParameterLogFieldFormatter := func(
 		_ string, _ common.GeoIPData, params common.APIParameters) common.LogFields {
-		return common.LogFields(params)
+		logFields := common.LogFields{}
+		logFields.Add(common.LogFields(params))
+		return logFields
 	}
 
 	// Start broker
@@ -406,6 +411,12 @@ func runTestInproxy(doMustUpgrade bool) error {
 				brokerListener.Addr().String(), "proxy"),
 			brokerClientRoundTripperSucceeded: roundTripperSucceded,
 			brokerClientRoundTripperFailed:    roundTripperFailed,
+
+			// Minimize the delay before proxies reannounce after dial
+			// failures, which may occur.
+			announceDelay:           0,
+			announceMaxBackoffDelay: 0,
+			announceDelayJitter:     0.0,
 		}
 
 		webRTCCoordinator := &testWebRTCDialCoordinator{
@@ -413,6 +424,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 			networkType:                testNetworkType,
 			natType:                    testNATType,
 			disableSTUN:                testDisableSTUN,
+			disablePortMapping:         testDisablePortMapping,
 			stunServerAddress:          testSTUNServerAddress,
 			stunServerAddressRFC5780:   testSTUNServerAddress,
 			stunServerAddressSucceeded: stunServerAddressSucceeded,
@@ -420,6 +432,11 @@ func runTestInproxy(doMustUpgrade bool) error {
 			setNATType:                 func(NATType) {},
 			setPortMappingTypes:        func(PortMappingTypes) {},
 			bindToDevice:               func(int) error { return nil },
+
+			// Minimize the delay before proxies reannounce after failed
+			// connections, which may occur.
+			webRTCAwaitReadyToProxyTimeout: 5 * time.Second,
+			proxyRelayInactivityTimeout:    5 * time.Second,
 		}
 
 		// Each proxy has its own broker client
@@ -433,9 +450,11 @@ func runTestInproxy(doMustUpgrade bool) error {
 		runCtx, cancelRun := context.WithCancel(testCtx)
 		// No deferred cancelRun due to testGroup.Go below
 
+		name := fmt.Sprintf("proxy-%d", i)
+
 		proxy, err := NewProxy(&ProxyConfig{
 
-			Logger: logger,
+			Logger: newTestLoggerWithComponent(name),
 
 			WaitForNetworkConnectivity: func() bool {
 				return true
@@ -466,8 +485,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 			ActivityUpdater: func(connectingClients int32, connectedClients int32,
 				bytesUp int64, bytesDown int64, bytesDuration time.Duration) {
 
-				fmt.Printf("[%s] ACTIVITY: %d connecting, %d connected, %d up, %d down\n",
-					time.Now().UTC().Format(time.RFC3339),
+				fmt.Printf("[%s][%s] ACTIVITY: %d connecting, %d connected, %d up, %d down\n",
+					time.Now().UTC().Format(time.RFC3339), name,
 					connectingClients, connectedClients, bytesUp, bytesDown)
 			},
 
@@ -510,13 +529,15 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 	// Start clients
 
+	var completedClientCount atomic.Int64
+
 	logger.WithTrace().Info("START CLIENTS")
 
 	clientsGroup := new(errgroup.Group)
 
 	makeClientFunc := func(
+		clientNum int,
 		isTCP bool,
-		isMobile bool,
 		brokerClient *BrokerClient,
 		webRTCCoordinator WebRTCDialCoordinator) func() error {
 
@@ -534,13 +555,15 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 		return func() error {
 
+			name := fmt.Sprintf("client-%d", clientNum)
+
 			dialCtx, cancelDial := context.WithTimeout(testCtx, 60*time.Second)
 			defer cancelDial()
 
 			conn, err := DialClient(
 				dialCtx,
 				&ClientConfig{
-					Logger:                       logger,
+					Logger:                       newTestLoggerWithComponent(name),
 					BaseAPIParameters:            baseAPIParameters,
 					BrokerClient:                 brokerClient,
 					WebRTCDialCoordinator:        webRTCCoordinator,
@@ -561,12 +584,28 @@ func runTestInproxy(doMustUpgrade bool) error {
 			relayConn = conn
 
 			if wrapWithQUIC {
+
+				udpAddr, err := net.ResolveUDPAddr("udp", addr)
+				if err != nil {
+					return errors.Trace(err)
+				}
+
+				disablePathMTUDiscovery := true
 				quicConn, err := quic.Dial(
 					dialCtx,
 					conn,
-					&net.UDPAddr{Port: 1}, // This address is ignored, but the zero value is not allowed
-					"test", "QUICv1", nil, quicEchoServer.ObfuscationKey(), nil, nil, true,
-					false, false, common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), ""),
+					udpAddr,
+					"test",
+					"QUICv1",
+					nil,
+					quicEchoServer.ObfuscationKey(),
+					nil,
+					nil,
+					disablePathMTUDiscovery,
+					GetQUICMaxPacketSizeAdjustment(false),
+					false,
+					false,
+					common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), ""),
 				)
 				if err != nil {
 					return errors.Trace(err)
@@ -620,7 +659,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 					}
 					n += m
 				}
-				fmt.Printf("%d bytes sent\n", bytesToSend)
+				fmt.Printf("[%s][%s] %d bytes sent\n",
+					time.Now().UTC().Format(time.RFC3339), name, bytesToSend)
 				return nil
 			})
 
@@ -639,12 +679,20 @@ func runTestInproxy(doMustUpgrade bool) error {
 					}
 					n += m
 				}
-				fmt.Printf("%d bytes received\n", bytesToSend)
+
+				completed := completedClientCount.Add(1)
+
+				fmt.Printf("[%s][%s] %d bytes received; relay complete (%d/%d)\n",
+					time.Now().UTC().Format(time.RFC3339), name,
+					bytesToSend, completed, numClients)
 
 				select {
 				case <-signalRelayComplete:
 				case <-testCtx.Done():
 				}
+
+				fmt.Printf("[%s][%s] closing\n",
+					time.Now().UTC().Format(time.RFC3339), name)
 
 				relayConn.Close()
 				conn.Close()
@@ -656,16 +704,11 @@ func runTestInproxy(doMustUpgrade bool) error {
 		}
 	}
 
-	newClientParams := func(isMobile bool) (*BrokerClient, *testWebRTCDialCoordinator, error) {
+	newClientBrokerClient := func() (*BrokerClient, error) {
 
 		clientPrivateKey, err := GenerateSessionPrivateKey()
 		if err != nil {
-			return nil, nil, errors.Trace(err)
-		}
-
-		clientRootObfuscationSecret, err := GenerateRootObfuscationSecret()
-		if err != nil {
-			return nil, nil, errors.Trace(err)
+			return nil, errors.Trace(err)
 		}
 
 		brokerCoordinator := &testBrokerDialCoordinator{
@@ -684,6 +727,50 @@ func runTestInproxy(doMustUpgrade bool) error {
 			brokerClientNoMatch:               noMatch,
 		}
 
+		brokerClient, err := NewBrokerClient(brokerCoordinator)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return brokerClient, nil
+	}
+
+	newClientWebRTCDialCoordinator := func(
+		isMobile bool,
+		useMediaStreams bool) (*testWebRTCDialCoordinator, error) {
+
+		clientRootObfuscationSecret, err := GenerateRootObfuscationSecret()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		var trafficShapingParameters *TrafficShapingParameters
+		if useMediaStreams {
+			trafficShapingParameters = &TrafficShapingParameters{
+				MinPaddedMessages:       0,
+				MaxPaddedMessages:       10,
+				MinPaddingSize:          0,
+				MaxPaddingSize:          254,
+				MinDecoyMessages:        0,
+				MaxDecoyMessages:        10,
+				MinDecoySize:            1,
+				MaxDecoySize:            1200,
+				DecoyMessageProbability: 0.5,
+			}
+		} else {
+			trafficShapingParameters = &TrafficShapingParameters{
+				MinPaddedMessages:       0,
+				MaxPaddedMessages:       10,
+				MinPaddingSize:          0,
+				MaxPaddingSize:          1500,
+				MinDecoyMessages:        0,
+				MaxDecoyMessages:        10,
+				MinDecoySize:            1,
+				MaxDecoySize:            1500,
+				DecoyMessageProbability: 0.5,
+			}
+		}
+
 		webRTCCoordinator := &testWebRTCDialCoordinator{
 			networkID:   testNetworkID,
 			networkType: testNetworkType,
@@ -697,27 +784,18 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 			clientRootObfuscationSecret: clientRootObfuscationSecret,
 			doDTLSRandomization:         prng.FlipCoin(),
-			trafficShapingParameters: &DataChannelTrafficShapingParameters{
-				MinPaddedMessages:       0,
-				MaxPaddedMessages:       10,
-				MinPaddingSize:          0,
-				MaxPaddingSize:          1500,
-				MinDecoyMessages:        0,
-				MaxDecoyMessages:        10,
-				MinDecoySize:            1,
-				MaxDecoySize:            1500,
-				DecoyMessageProbability: 0.5,
-			},
+			useMediaStreams:             useMediaStreams,
+			trafficShapingParameters:    trafficShapingParameters,
 
 			setNATType:          func(NATType) {},
 			setPortMappingTypes: func(PortMappingTypes) {},
 			bindToDevice:        func(int) error { return nil },
 
 			// With STUN enabled (testDisableSTUN = false), there are cases
-			// where the WebRTC Data Channel is not successfully established.
-			// With a short enough timeout here, clients will redial and
-			// eventually succceed.
-			webRTCAwaitDataChannelTimeout: 5 * time.Second,
+			// where the WebRTC peer connection is not successfully
+			// established. With a short enough timeout here, clients will
+			// redial and eventually succceed.
+			webRTCAwaitReadyToProxyTimeout: 5 * time.Second,
 		}
 
 		if isMobile {
@@ -725,20 +803,10 @@ func runTestInproxy(doMustUpgrade bool) error {
 			webRTCCoordinator.disableInboundForMobileNetworks = true
 		}
 
-		brokerClient, err := NewBrokerClient(brokerCoordinator)
-		if err != nil {
-			return nil, nil, errors.Trace(err)
-		}
-
-		return brokerClient, webRTCCoordinator, nil
+		return webRTCCoordinator, nil
 	}
 
-	clientBrokerClient, clientWebRTCCoordinator, err := newClientParams(false)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	clientMobileBrokerClient, clientMobileWebRTCCoordinator, err := newClientParams(true)
+	sharedBrokerClient, err := newClientBrokerClient()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -750,29 +818,30 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 		isTCP := i%2 == 0
 		isMobile := i%4 == 0
+		useMediaStreams := i%4 < 2
 
 		// Exercise BrokerClients shared by multiple clients, but also create
 		// several broker clients.
-		if i%8 == 0 {
-			clientBrokerClient, clientWebRTCCoordinator, err = newClientParams(false)
-			if err != nil {
-				return errors.Trace(err)
-			}
-
-			clientMobileBrokerClient, clientMobileWebRTCCoordinator, err = newClientParams(true)
+		brokerClient := sharedBrokerClient
+		if i%2 == 0 {
+			brokerClient, err = newClientBrokerClient()
 			if err != nil {
 				return errors.Trace(err)
 			}
 		}
 
-		brokerClient := clientBrokerClient
-		webRTCCoordinator := clientWebRTCCoordinator
-		if isMobile {
-			brokerClient = clientMobileBrokerClient
-			webRTCCoordinator = clientMobileWebRTCCoordinator
+		webRTCCoordinator, err := newClientWebRTCDialCoordinator(
+			isMobile, useMediaStreams)
+		if err != nil {
+			return errors.Trace(err)
 		}
 
-		clientsGroup.Go(makeClientFunc(isTCP, isMobile, brokerClient, webRTCCoordinator))
+		clientsGroup.Go(
+			makeClientFunc(
+				i,
+				isTCP,
+				brokerClient,
+				webRTCCoordinator))
 	}
 
 	if doMustUpgrade {
@@ -1014,6 +1083,7 @@ func newQuicEchoServer() (*quicEchoServer, error) {
 		nil,
 		nil,
 		"127.0.0.1:0",
+		GetQUICMaxPacketSizeAdjustment(false),
 		obfuscationKey,
 		false)
 	if err != nil {

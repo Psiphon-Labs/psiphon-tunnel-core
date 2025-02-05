@@ -1127,6 +1127,7 @@ var baseDialParams = []requestParamSpec{
 	{"http_transform", isAnyString, requestParamOptional},
 	{"seed_transform", isAnyString, requestParamOptional},
 	{"ossh_prefix", isAnyString, requestParamOptional},
+	{"shadowsocks_prefix", isAnyString, requestParamOptional},
 	{"tls_fragmented", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"tls_padding", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"tls_ossh_sni_server_name", isDomain, requestParamOptional},
@@ -1198,6 +1199,7 @@ var inproxyDialParams = []requestParamSpec{
 	{"inproxy_dial_broker_offer_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_dial_webrtc_connection_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"inproxy_broker_is_reuse", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"inproxy_webrtc_use_media_streams", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 }
 
 // baseAndDialParams adds baseDialParams and inproxyDialParams to baseParams.

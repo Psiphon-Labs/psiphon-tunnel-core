@@ -1896,7 +1896,9 @@ func (server *MeekServer) inproxyBrokerAllowDomainFrontedDestinations(clientGeoI
 }
 
 func (server *MeekServer) inproxyBrokerPrioritizeProxy(
-	proxyGeoIPData common.GeoIPData, proxyAPIParams common.APIParameters) bool {
+	proxyInproxyProtocolVersion int,
+	proxyGeoIPData common.GeoIPData,
+	proxyAPIParams common.APIParameters) bool {
 
 	// Fallback to not-prioritized on failure or nil tactics.
 	p, err := server.support.ServerTacticsParametersCache.Get(GeoIPData(proxyGeoIPData))
@@ -1908,6 +1910,14 @@ func (server *MeekServer) inproxyBrokerPrioritizeProxy(
 	if p.IsNil() {
 		return false
 	}
+
+	// As API parameter filtering currently does not support range matching, the minimum version
+	// constraint is specified in a seperate parameter.
+	minProtocolVersion := p.Int(parameters.InproxyBrokerMatcherPrioritizeProxiesMinVersion)
+	if proxyInproxyProtocolVersion < minProtocolVersion {
+		return false
+	}
+
 	filter := p.KeyStringsValue(parameters.InproxyBrokerMatcherPrioritizeProxiesFilter)
 	if len(filter) == 0 {
 		return false
@@ -1918,9 +1928,11 @@ func (server *MeekServer) inproxyBrokerPrioritizeProxy(
 			return false
 		}
 	}
+
 	if !p.WeightedCoinFlip(parameters.InproxyBrokerMatcherPrioritizeProxiesProbability) {
 		return false
 	}
+
 	return true
 }
 

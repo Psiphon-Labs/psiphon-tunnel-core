@@ -945,6 +945,7 @@ func dialTunnel(
 			dialParams.ObfuscatedQUICPaddingSeed,
 			dialParams.ObfuscatedQUICNonceTransformerParameters,
 			dialParams.QUICDisablePathMTUDiscovery,
+			dialParams.QUICMaxPacketSizeAdjustment,
 			dialParams.QUICDialEarly,
 			dialParams.QUICUseObfuscatedPSK,
 			dialParams.quicTLSClientSessionCache)
@@ -986,6 +987,17 @@ func dialTunnel(
 			tlsOSSHApplyTrafficShaping,
 			tlsOSSHMinTLSPadding,
 			tlsOSSHMaxTLSPadding)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+	} else if protocol.TunnelProtocolUsesShadowsocks(dialParams.TunnelProtocol) {
+
+		dialConn, err = DialShadowsocksTunnel(
+			ctx,
+			dialParams.GetShadowsocksConfig(),
+			dialParams.GetDialConfig(),
+		)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

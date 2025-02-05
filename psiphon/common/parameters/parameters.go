@@ -380,6 +380,10 @@ const (
 	OSSHPrefixSplitMaxDelay                            = "OSSHPrefixSplitMaxDelay"
 	OSSHPrefixEnableFragmentor                         = "OSSHPrefixEnableFragmentor"
 	ServerOSSHPrefixSpecs                              = "ServerOSSHPrefixSpecs"
+	ShadowsocksPrefixSpecs                             = "ShadowsocksPrefixSpecs"
+	ShadowsocksPrefixScopedSpecNames                   = "ShadowsocksPrefixScopedSpecNames"
+	ShadowsocksPrefixProbability                       = "ShadowsocksPrefixProbability"
+	ReplayShadowsocksPrefix                            = "ReplayShadowsocksPrefix"
 	TLSTunnelObfuscatedPSKProbability                  = "TLSTunnelObfuscatedPSKProbability"
 	TLSTunnelTrafficShapingProbability                 = "TLSTunnelTrafficShapingProbability"
 	TLSTunnelMinTLSPadding                             = "TLSTunnelMinTLSPadding"
@@ -421,6 +425,7 @@ const (
 	InproxyBrokerMatcherOfferRateLimitInterval         = "InproxyBrokerMatcherOfferRateLimitInterval"
 	InproxyBrokerMatcherPrioritizeProxiesProbability   = "InproxyBrokerMatcherPrioritizeProxiesProbability"
 	InproxyBrokerMatcherPrioritizeProxiesFilter        = "InproxyBrokerMatcherPrioritizeProxiesFilter"
+	InproxyBrokerMatcherPrioritizeProxiesMinVersion    = "InproxyBrokerMatcherPrioritizeProxiesMinVersion"
 	InproxyBrokerProxyAnnounceTimeout                  = "InproxyBrokerProxyAnnounceTimeout"
 	InproxyBrokerClientOfferTimeout                    = "InproxyBrokerClientOfferTimeout"
 	InproxyBrokerClientOfferPersonalTimeout            = "InproxyBrokerClientOfferPersonalTimeout"
@@ -438,8 +443,11 @@ const (
 	InproxyClientRelayedPacketRequestTimeout           = "InproxyCloientRelayedPacketRequestTimeout"
 	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
 	InproxyDTLSRandomizationProbability                = "InproxyDTLSRandomizationProbability"
-	InproxyDataChannelTrafficShapingProbability        = "InproxyDataChannelTrafficShapingProbability"
-	InproxyDataChannelTrafficShapingParameters         = "InproxyDataChannelTrafficShapingParameters"
+	InproxyWebRTCMediaStreamsProbability               = "InproxyWebRTCMediaStreamsProbability"
+	InproxyWebRTCDataChannelTrafficShapingProbability  = "InproxyWebRTCDataChannelTrafficShapingProbability"
+	InproxyWebRTCDataChannelTrafficShapingParameters   = "InproxyWebRTCDataChannelTrafficShapingParameters"
+	InproxyWebRTCMediaStreamsTrafficShapingProbability = "InproxyWebRTCMediaStreamsTrafficShapingProbability"
+	InproxyWebRTCMediaStreamsTrafficShapingParameters  = "InproxyWebRTCMediaStreamsTrafficShapingParameters"
 	InproxySTUNServerAddresses                         = "InproxySTUNServerAddresses"
 	InproxySTUNServerAddressesRFC5780                  = "InproxySTUNServerAddressesRFC5780"
 	InproxyProxySTUNServerAddresses                    = "InproxyProxySTUNServerAddresses"
@@ -463,8 +471,8 @@ const (
 	InproxyClientDiscoverNATTimeout                    = "InproxyClientDiscoverNATTimeout"
 	InproxyWebRTCAnswerTimeout                         = "InproxyWebRTCAnswerTimeout"
 	InproxyWebRTCAwaitPortMappingTimeout               = "InproxyWebRTCAwaitPortMappingTimeout"
-	InproxyProxyWebRTCAwaitDataChannelTimeout          = "InproxyProxyWebRTCAwaitDataChannelTimeout"
-	InproxyClientWebRTCAwaitDataChannelTimeout         = "InproxyClientWebRTCAwaitDataChannelTimeout"
+	InproxyProxyWebRTCAwaitReadyToProxyTimeout         = "InproxyProxyWebRTCAwaitReadyToProxyTimeout"
+	InproxyClientWebRTCAwaitReadyToProxyTimeout        = "InproxyClientWebRTCAwaitReadyToProxyTimeout"
 	InproxyProxyDestinationDialTimeout                 = "InproxyProxyDestinationDialTimeout"
 	InproxyProxyRelayInactivityTimeout                 = "InproxyProxyRelayInactivityTimeout"
 	InproxyPsiphonAPIRequestTimeout                    = "InproxyPsiphonAPIRequestTimeout"
@@ -744,6 +752,7 @@ var defaultParameters = map[string]struct {
 	ReplayHTTPTransformerParameters:        {value: true},
 	ReplayOSSHSeedTransformerParameters:    {value: true},
 	ReplayOSSHPrefix:                       {value: true},
+	ReplayShadowsocksPrefix:                {value: true},
 	ReplayTLSFragmentClientHello:           {value: true},
 	ReplayInproxyWebRTC:                    {value: true},
 	ReplayInproxySTUN:                      {value: true},
@@ -910,6 +919,10 @@ var defaultParameters = map[string]struct {
 	OSSHPrefixEnableFragmentor: {value: false},
 	ServerOSSHPrefixSpecs:      {value: transforms.Specs{}, flags: serverSideOnly},
 
+	ShadowsocksPrefixSpecs:           {value: transforms.Specs{}},
+	ShadowsocksPrefixScopedSpecNames: {value: transforms.ScopedSpecNames{}},
+	ShadowsocksPrefixProbability:     {value: 0.0, minimum: 0.0},
+
 	// TLSTunnelMinTLSPadding/TLSTunnelMaxTLSPadding are subject to TLS server limitations.
 
 	TLSTunnelObfuscatedPSKProbability:  {value: 0.5, minimum: 0.0},
@@ -962,8 +975,9 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerMatcherOfferLimitEntryCount:           {value: 10, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitQuantity:         {value: 50, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitInterval:         {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
-	InproxyBrokerMatcherPrioritizeProxiesProbability:   {value: 1.0, minimum: 0.0},
-	InproxyBrokerMatcherPrioritizeProxiesFilter:        {value: KeyStrings{}},
+	InproxyBrokerMatcherPrioritizeProxiesProbability:   {value: 1.0, minimum: 0.0, flags: serverSideOnly},
+	InproxyBrokerMatcherPrioritizeProxiesFilter:        {value: KeyStrings{}, flags: serverSideOnly},
+	InproxyBrokerMatcherPrioritizeProxiesMinVersion:    {value: 0, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerProxyAnnounceTimeout:                  {value: 2 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerClientOfferPersonalTimeout:            {value: 5 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
@@ -981,8 +995,11 @@ var defaultParameters = map[string]struct {
 	InproxyClientRelayedPacketRequestTimeout:           {value: 10 * time.Second, minimum: time.Duration(0)},
 	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
-	InproxyDataChannelTrafficShapingProbability:        {value: 0.5, minimum: 0.0},
-	InproxyDataChannelTrafficShapingParameters:         {value: InproxyDataChannelTrafficShapingParametersValue{0, 10, 0, 1500, 0, 10, 1, 1500, 0.5}},
+	InproxyWebRTCMediaStreamsProbability:               {value: 0.0, minimum: 0.0},
+	InproxyWebRTCDataChannelTrafficShapingProbability:  {value: 0.5, minimum: 0.0},
+	InproxyWebRTCDataChannelTrafficShapingParameters:   {value: InproxyTrafficShapingParametersValue{0, 10, 0, 1500, 0, 10, 1, 1500, 0.5}},
+	InproxyWebRTCMediaStreamsTrafficShapingProbability: {value: 0.5, minimum: 0.0},
+	InproxyWebRTCMediaStreamsTrafficShapingParameters:  {value: InproxyTrafficShapingParametersValue{0, 10, 0, 254, 0, 10, 1, 1200, 0.5}},
 	InproxySTUNServerAddresses:                         {value: []string{}},
 	InproxySTUNServerAddressesRFC5780:                  {value: []string{}},
 	InproxyProxySTUNServerAddresses:                    {value: []string{}},
@@ -1006,8 +1023,8 @@ var defaultParameters = map[string]struct {
 	InproxyClientDiscoverNATTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyWebRTCAnswerTimeout:                         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyWebRTCAwaitPortMappingTimeout:               {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
-	InproxyProxyWebRTCAwaitDataChannelTimeout:          {value: 30 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
-	InproxyClientWebRTCAwaitDataChannelTimeout:         {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyProxyWebRTCAwaitReadyToProxyTimeout:         {value: 30 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	InproxyClientWebRTCAwaitReadyToProxyTimeout:        {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyDestinationDialTimeout:                 {value: 20 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyRelayInactivityTimeout:                 {value: 5 * time.Minute, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyPsiphonAPIRequestTimeout:                    {value: 10 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
@@ -1267,6 +1284,13 @@ func (p *Parameters) Set(
 	}
 	osshPrefixSpecs, _ := osshPrefixSpecsValue.(transforms.Specs)
 
+	shadowsocksPrefixSpecsValue, err := getAppliedValue(
+		ShadowsocksPrefixSpecs, parameters, applyParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	shadowsocksPrefixSpecs, _ := shadowsocksPrefixSpecsValue.(transforms.Specs)
+
 	// Special case: in-proxy broker public keys in InproxyBrokerSpecs must
 	// appear in InproxyAllBrokerPublicKeys; and inproxy common compartment
 	// IDs must appear in InproxyAllCommonCompartmentIDs. This check is
@@ -1495,7 +1519,7 @@ func (p *Parameters) Set(
 				}
 
 				prefixMode := false
-				if name == OSSHPrefixSpecs || name == ServerOSSHPrefixSpecs {
+				if name == OSSHPrefixSpecs || name == ServerOSSHPrefixSpecs || name == ShadowsocksPrefixSpecs {
 					prefixMode = true
 				}
 				err := v.Validate(prefixMode)
@@ -1520,6 +1544,8 @@ func (p *Parameters) Set(
 					specs = obfuscatedQuicNonceTransformSpecs
 				} else if name == OSSHPrefixScopedSpecNames {
 					specs = osshPrefixSpecs
+				} else if name == ShadowsocksPrefixScopedSpecNames {
+					specs = shadowsocksPrefixSpecs
 				}
 
 				err := v.Validate(specs)
@@ -1566,7 +1592,7 @@ func (p *Parameters) Set(
 					}
 					return nil, errors.Trace(err)
 				}
-			case InproxyDataChannelTrafficShapingParametersValue:
+			case InproxyTrafficShapingParametersValue:
 				err := v.Validate()
 				if err != nil {
 					if skipOnError {
@@ -2184,12 +2210,12 @@ func (p ParametersAccessor) InproxyCompartmentIDs(name string) InproxyCompartmen
 	return value
 }
 
-// InproxyDataChannelTrafficShapingParameters returns a
-// InproxyDataChannelTrafficShapingParameters parameter value.
-func (p ParametersAccessor) InproxyDataChannelTrafficShapingParameters(
-	name string) InproxyDataChannelTrafficShapingParametersValue {
+// InproxyTrafficShapingParameters returns a InproxyTrafficShapingParameters
+// parameter value.
+func (p ParametersAccessor) InproxyTrafficShapingParameters(
+	name string) InproxyTrafficShapingParametersValue {
 
-	value := InproxyDataChannelTrafficShapingParametersValue{}
+	value := InproxyTrafficShapingParametersValue{}
 	p.snapshot.getValue(name, &value)
 	return value
 }

@@ -168,8 +168,36 @@ func (server *TunnelServer) Run() error {
 
 		} else if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
 
+			usesInproxy := protocol.TunnelProtocolUsesInproxy(tunnelProtocol)
+
 			// in-proxy QUIC tunnel protocols don't support gQUIC.
-			enableGQUIC := support.Config.EnableGQUIC && !protocol.TunnelProtocolUsesInproxy(tunnelProtocol)
+			enableGQUIC := support.Config.EnableGQUIC && !usesInproxy
+
+			maxPacketSizeAdjustment := 0
+			if usesInproxy {
+
+				// In the in-proxy WebRTC media stream mode, QUIC packets sent
+				// back to the client, via the proxy, are encapsulated in
+				// SRTP packet payloads, and the maximum QUIC packet size
+				// must be adjusted to fit.
+				//
+				// Limitation: the WebRTC data channel mode does not have the
+				// same QUIC packet size constraint, since data channel
+				// messages can be far larger (up to 65536 bytes). However,
+				// the server, at this point, does not know whether
+				// individual connections are using WebRTC media streams or
+				// data channels on the first hop, and will no know until API
+				// handshake information is delivered after the QUIC, OSSH,
+				// and SSH handshakes are completed. Currently the max packet
+				// size adjustment is set unconditionally. For data channels,
+				// this will result in suboptimal packet sizes (10s of bytes)
+				// and a corresponding different traffic shape on the 2nd hop.
+
+				IPAddress := net.ParseIP(support.Config.ServerIPAddress)
+				isIPv6 := IPAddress != nil && IPAddress.To4() == nil
+
+				maxPacketSizeAdjustment = inproxy.GetQUICMaxPacketSizeAdjustment(isIPv6)
+			}
 
 			logTunnelProtocol := tunnelProtocol
 			listener, err = quic.Listen(
@@ -180,6 +208,7 @@ func (server *TunnelServer) Run() error {
 						errors.Trace(err), LogFields(logFields))
 				},
 				localAddress,
+				maxPacketSizeAdjustment,
 				support.Config.ObfuscatedSSHKey,
 				enableGQUIC)
 
@@ -199,6 +228,22 @@ func (server *TunnelServer) Run() error {
 
 			if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
 				listener, err = ListenTLSTunnel(support, listener, tunnelProtocol, listenPort)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			} else if protocol.TunnelProtocolUsesShadowsocks(tunnelProtocol) {
+
+				logTunnelProtocol := tunnelProtocol
+				listener, err = ListenShadowsocks(
+					support,
+					listener,
+					support.Config.ShadowsocksKey,
+					func(peerAddress string, err error, logFields common.LogFields) {
+						logIrregularTunnel(
+							support, logTunnelProtocol, listenPort, peerAddress,
+							errors.Trace(err), LogFields(logFields))
+					},
+				)
 				if err != nil {
 					return errors.Trace(err)
 				}
