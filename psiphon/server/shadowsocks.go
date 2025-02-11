@@ -208,7 +208,7 @@ func (conn *saltReader) init() error {
 
 	if isServerSalt || !conn.server.replayCache.Add(keyID, salt) {
 
-		go drainConn(conn)
+		drainConn(conn.Conn)
 
 		var err error
 		if isServerSalt {
