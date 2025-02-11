@@ -1709,13 +1709,21 @@ func (conn *webRTCConn) readDataChannelMessage(p []byte) (int, error) {
 		conn.readLength = n
 		conn.readError = err
 
+		if conn.readLength == 0 && conn.readError != nil {
+			// No bytes were read, so return the error immediately.
+			return 0, errors.TraceReader(err)
+		}
+
 		// Skip over padding.
 
-		if n > 0 && !conn.peerPaddingDone {
+		if conn.readLength > 0 && !conn.peerPaddingDone {
 
 			paddingSize, n := binary.Varint(conn.readBuffer[0:conn.readLength])
-			if (paddingSize == 0 && n <= 0) || paddingSize >= int64(conn.readLength) {
-				return 0, errors.TraceNew("invalid padding")
+
+			if (paddingSize == 0 && n <= 0) || paddingSize > int64(conn.readLength-n) {
+				return 0, errors.Tracef(
+					"invalid padding: %d, %d, %d, %w",
+					n, paddingSize, conn.readLength, conn.readError)
 			}
 
 			if paddingSize < 0 {
