@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/Jigsaw-Code/outline-sdk/transport"
 	"github.com/Jigsaw-Code/outline-sdk/transport/shadowsocks"
@@ -65,6 +66,18 @@ func TestShadowsocksServer(t *testing.T) {
 		if err != nil {
 			recv <- &listenerState{
 				err: errors.TraceMsg(err, "listener.Accept failed"),
+			}
+			return
+		}
+
+		// Set a short deadline as Read will block indefinitely if there is
+		// no deadline and a replay is detected because the underlying conn
+		// will be drained synchronously before Read returns and the client
+		// will not hang up until it receives a response from the server.
+		err = conn.SetDeadline(time.Now().Add(1 * time.Second))
+		if err != nil {
+			recv <- &listenerState{
+				err: errors.TraceMsg(err, "conn.SetDeadline failed"),
 			}
 			return
 		}
