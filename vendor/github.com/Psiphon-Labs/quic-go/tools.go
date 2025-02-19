@@ -5,6 +5,8 @@ package quic
 
 // [Psiphon]
 // Avoid vendoring testing dependencies
-//
-//	_ "github.com/onsi/ginkgo/v2/ginkgo"
-//	_ "go.uber.org/mock/mockgen"
+
+// import (
+// 	_ "github.com/onsi/ginkgo/v2/ginkgo"
+// 	_ "go.uber.org/mock/mockgen"
+// )

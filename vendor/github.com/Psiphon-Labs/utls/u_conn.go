@@ -9,11 +9,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/cipher"
-	"crypto/ecdh"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"net"
 	"strconv"
 )
@@ -52,6 +52,11 @@ type UConn struct {
 
 	// ech extension is a shortcut to the ECH extension in the Extensions slice if there is one.
 	ech ECHExtension
+
+	// echContext represents the context for Encrypted ClientHello (ECH) operations.
+	// It holds the necessary state and parameters required to manage ECH during
+	// the TLS handshake process.
+	echContext *echContext
 }
 
 // UClient returns a new uTLS client, with behavior depending on clientHelloID.
@@ -108,20 +113,15 @@ func (uconn *UConn) buildHandshakeState(loadSession bool) error {
 		uAssert(uconn.clientHelloBuildStatus == NotBuilt, "BuildHandshakeState failed: invalid call, client hello has already been built by utls")
 
 		// use default Golang ClientHello.
-		hello, keySharePrivate, err := uconn.makeClientHello()
+		hello, keySharePrivate, ech, err := uconn.makeClientHello()
 		if err != nil {
 			return err
 		}
 
 		uconn.HandshakeState.Hello = hello.getPublicPtr()
-		if ecdheKey, ok := keySharePrivate.(*ecdh.PrivateKey); ok {
-			uconn.HandshakeState.State13.EcdheKey = ecdheKey
-		} else if kemKey, ok := keySharePrivate.(*kemPrivateKey); ok {
-			uconn.HandshakeState.State13.KEMKey = kemKey.ToPublic()
-		} else {
-			return fmt.Errorf("uTLS: unknown keySharePrivate type: %T", keySharePrivate)
-		}
+		uconn.HandshakeState.State13.KeyShareKeys = keySharePrivate.toPublic()
 		uconn.HandshakeState.C = uconn.Conn
+		uconn.echContext = ech
 		uconn.clientHelloBuildStatus = BuildByGoTLS
 	} else {
 		uAssert(uconn.clientHelloBuildStatus == BuildByUtls || uconn.clientHelloBuildStatus == NotBuilt, "BuildHandshakeState failed: invalid call, client hello has already been built by go-tls")
@@ -192,12 +192,12 @@ func (uconn *UConn) uLoadSession() error {
 }
 
 func (uconn *UConn) uApplyPatch() {
-	helloLen := len(uconn.HandshakeState.Hello.Raw)
+	helloLen := len(uconn.HandshakeState.Hello.Original)
 	if uconn.sessionController.shouldUpdateBinders() {
 		uconn.sessionController.updateBinders()
 		uconn.sessionController.setPskToUConn()
 	}
-	uAssert(helloLen == len(uconn.HandshakeState.Hello.Raw), "tls: uApplyPatch Failed: the patch should never change the length of the marshaled clientHello")
+	uAssert(helloLen == len(uconn.HandshakeState.Hello.Original), "tls: uApplyPatch Failed: the patch should never change the length of the marshaled clientHello")
 }
 
 func (uconn *UConn) DidTls12Resume() bool {
@@ -214,7 +214,7 @@ func (uconn *UConn) DidTls12Resume() bool {
 func (uconn *UConn) SetSessionState(session *ClientSessionState) error {
 	sessionTicketExt := &SessionTicketExtension{Initialized: true}
 	if session != nil {
-		sessionTicketExt.Ticket = session.ticket
+		sessionTicketExt.Session.ticket = session.session.ticket
 		sessionTicketExt.Session = session.session
 	}
 	return uconn.SetSessionTicketExtension(sessionTicketExt)
@@ -485,6 +485,7 @@ func (c *UConn) Write(b []byte) (int, error) {
 func (c *UConn) clientHandshake(ctx context.Context) (err error) {
 	// [uTLS section begins]
 	hello := c.HandshakeState.Hello.getPrivatePtr()
+	ech := c.echContext
 	defer func() { c.HandshakeState.Hello = hello.getPublicPtr() }()
 
 	sessionIsLocked := c.utls.sessionController.isSessionLocked()
@@ -561,6 +562,31 @@ func (c *UConn) clientHandshake(ctx context.Context) (err error) {
 		}()
 	}
 
+	if ech != nil {
+		// Split hello into inner and outer
+		ech.innerHello = hello.clone()
+
+		// Overwrite the server name in the outer hello with the public facing
+		// name.
+		hello.serverName = string(ech.config.PublicName)
+		// Generate a new random for the outer hello.
+		hello.random = make([]byte, 32)
+		_, err = io.ReadFull(c.config.rand(), hello.random)
+		if err != nil {
+			return errors.New("tls: short read from Rand: " + err.Error())
+		}
+
+		// NOTE: we don't do PSK GREASE, in line with boringssl, it's meant to
+		// work around _possibly_ broken middleboxes, but there is little-to-no
+		// evidence that this is actually a problem.
+
+		if err := computeAndUpdateOuterECHExtension(hello, ech.innerHello, ech, true); err != nil {
+			return err
+		}
+	}
+
+	c.serverName = hello.serverName
+
 	if _, err := c.writeHandshakeRecord(hello, nil); err != nil {
 		return err
 	}
@@ -601,9 +627,7 @@ func (c *UConn) clientHandshake(ctx context.Context) (err error) {
 		hs13 := c.HandshakeState.toPrivate13()
 		hs13.serverHello = serverHello
 		hs13.hello = hello
-		if hs13.keySharesParams == nil {
-			hs13.keySharesParams = NewKeySharesParameters()
-		}
+		hs13.echContext = ech
 		if !sessionIsLocked {
 			hs13.earlySecret = earlySecret
 			hs13.binderKey = binderKey
@@ -731,7 +755,7 @@ func (uconn *UConn) MarshalClientHelloNoECH() error {
 			". Got: " + strconv.Itoa(helloBuffer.Len()))
 	}
 
-	hello.Raw = helloBuffer.Bytes()
+	hello.Original = helloBuffer.Bytes()
 	return nil
 }
 

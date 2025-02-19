@@ -3,16 +3,13 @@ package protocol
 import "time"
 
 // DesiredReceiveBufferSize is the kernel UDP receive buffer size that we'd like to use.
-const DesiredReceiveBufferSize = (1 << 20) * 2 // 2 MB
+const DesiredReceiveBufferSize = (1 << 20) * 7 // 7 MB
 
 // DesiredSendBufferSize is the kernel UDP send buffer size that we'd like to use.
-const DesiredSendBufferSize = (1 << 20) * 2 // 2 MB
+const DesiredSendBufferSize = (1 << 20) * 7 // 7 MB
 
-// InitialPacketSizeIPv4 is the maximum packet size that we use for sending IPv4 packets.
-const InitialPacketSizeIPv4 = 1252
-
-// InitialPacketSizeIPv6 is the maximum packet size that we use for sending IPv6 packets.
-const InitialPacketSizeIPv6 = 1232
+// InitialPacketSize is the initial (before Path MTU discovery) maximum packet size used.
+const InitialPacketSize = 1280
 
 // MaxCongestionWindowPackets is the maximum congestion window in packet.
 const MaxCongestionWindowPackets = 10000
@@ -105,10 +102,6 @@ const DefaultIdleTimeout = 30 * time.Second
 // DefaultHandshakeIdleTimeout is the default idle timeout used before handshake completion.
 const DefaultHandshakeIdleTimeout = 5 * time.Second
 
-// MaxKeepAliveInterval is the maximum time until we send a packet to keep a connection alive.
-// It should be shorter than the time that NATs clear their mapping.
-const MaxKeepAliveInterval = 20 * time.Second
-
 // RetiredConnectionIDDeleteTimeout is the time we keep closed connections around in order to retransmit the CONNECTION_CLOSE.
 // after this time all information about the old connection will be deleted
 const RetiredConnectionIDDeleteTimeout = 5 * time.Second
@@ -139,9 +132,11 @@ const MaxNumAckRanges = 32
 // Example: For a packet pacing delay of 200μs, we would send 5 packets at once, wait for 1ms, and so forth.
 const MinPacingDelay = time.Millisecond
 
-// [Psiphon]
 // DefaultConnectionIDLength is the connection ID length that is used for multiplexed connections
 // if no other value is configured.
+// const DefaultConnectionIDLength = 4
+
+// [Psiphon]
 const DefaultConnectionIDLength = 8
 
 // MaxActiveConnectionIDs is the number of connection IDs that we're storing.

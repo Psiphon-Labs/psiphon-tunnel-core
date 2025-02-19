@@ -164,8 +164,8 @@ type UtlsPreSharedKeyExtension struct {
 	PreSharedKeyCommon
 	cipherSuite  *cipherSuiteTLS13
 	cachedLength *int
-	// Deprecated: Set OmitEmptyPsk in Config instead.
-	OmitEmptyPsk bool
+
+	omitEmptyPsk bool
 
 	// used only for HRR-based recalculation of binders purpose
 	prevClientHelloHash []byte // used for HRR-based recalculation of binders
@@ -285,11 +285,11 @@ func readPskIntoBytes(b []byte, identities []PskIdentity, binders [][]byte) (int
 }
 
 func (e *UtlsPreSharedKeyExtension) SetOmitEmptyPsk(val bool) {
-	e.OmitEmptyPsk = val
+	e.omitEmptyPsk = val
 }
 
 func (e *UtlsPreSharedKeyExtension) Read(b []byte) (int, error) {
-	if !e.OmitEmptyPsk && e.Len() == 0 {
+	if !e.omitEmptyPsk && e.Len() == 0 {
 		return 0, ErrEmptyPsk
 	}
 	return readPskIntoBytes(b, e.Identities, e.Binders)
@@ -304,7 +304,7 @@ func (e *UtlsPreSharedKeyExtension) PatchBuiltHello(hello *PubClientHelloMsg) er
 	if private == nil {
 		private = hello.getPrivatePtr()
 	}
-	private.raw = hello.Raw
+	private.original = hello.Original
 	private.pskBinders = e.Binders // set the placeholder to the private Hello
 
 	// derived from loadSession() and processHelloRetryRequest() begin //

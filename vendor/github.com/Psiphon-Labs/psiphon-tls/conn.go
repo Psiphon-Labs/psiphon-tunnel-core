@@ -15,6 +15,9 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+
+	// [Psiphon]
+	// "internal/godebug"
 	"io"
 	"net"
 	"sync"
@@ -51,7 +54,9 @@ type Conn struct {
 	clientSentTicket bool // whether the client sent a session ticket or a PSK in the Client Hello successfully.
 
 	didResume        bool // whether this connection was a session resumption
+	didHRR           bool // whether a HelloRetryRequest was sent/received
 	cipherSuite      uint16
+	curveID          CurveID
 	ocspResponse     []byte   // stapled OCSP response
 	scts             [][]byte // signed certificate timestamps from server
 	peerCertificates []*x509.Certificate
@@ -72,6 +77,7 @@ type Conn struct {
 	// resumptionSecret is the resumption_master_secret for handling
 	// or sending NewSessionTicket messages.
 	resumptionSecret []byte
+	echAccepted      bool
 
 	// ticketKeys is the set of active session ticket keys for this
 	// connection. The first one is used to encrypt new tickets and
@@ -140,21 +146,21 @@ func (c *Conn) RemoteAddr() net.Addr {
 }
 
 // SetDeadline sets the read and write deadlines associated with the connection.
-// A zero value for t means Read and Write will not time out.
+// A zero value for t means [Conn.Read] and [Conn.Write] will not time out.
 // After a Write has timed out, the TLS state is corrupt and all future writes will return the same error.
 func (c *Conn) SetDeadline(t time.Time) error {
 	return c.conn.SetDeadline(t)
 }
 
 // SetReadDeadline sets the read deadline on the underlying connection.
-// A zero value for t means Read will not time out.
+// A zero value for t means [Conn.Read] will not time out.
 func (c *Conn) SetReadDeadline(t time.Time) error {
 	return c.conn.SetReadDeadline(t)
 }
 
 // SetWriteDeadline sets the write deadline on the underlying connection.
-// A zero value for t means Write will not time out.
-// After a Write has timed out, the TLS state is corrupt and all future writes will return the same error.
+// A zero value for t means [Conn.Write] will not time out.
+// After a [Conn.Write] has timed out, the TLS state is corrupt and all future writes will return the same error.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
 	return c.conn.SetWriteDeadline(t)
 }
@@ -1057,7 +1063,7 @@ func (c *Conn) writeRecordLocked(typ recordType, data []byte) (int, error) {
 }
 
 // writeHandshakeRecord writes a handshake message to the connection and updates
-// the record layer state. If transcript is non-nil the marshalled message is
+// the record layer state. If transcript is non-nil the marshaled message is
 // written to it.
 func (c *Conn) writeHandshakeRecord(msg handshakeMessage, transcript transcriptHash) (int, error) {
 	c.out.Lock()
@@ -1124,10 +1130,22 @@ func (c *Conn) readHandshake(transcript transcriptHash) (any, error) {
 		return nil, err
 	}
 	data := c.hand.Bytes()
+
+	maxHandshakeSize := maxHandshake
+	// hasVers indicates we're past the first message, forcing someone trying to
+	// make us just allocate a large buffer to at least do the initial part of
+	// the handshake first.
+	if c.haveVers && data[0] == typeCertificate {
+		// Since certificate messages are likely to be the only messages that
+		// can be larger than maxHandshake, we use a special limit for just
+		// those messages.
+		maxHandshakeSize = maxHandshakeCertificateMsg
+	}
+
 	n := int(data[1])<<16 | int(data[2])<<8 | int(data[3])
-	if n > maxHandshake {
+	if n > maxHandshakeSize {
 		c.sendAlertLocked(alertInternalError)
-		return nil, c.in.setErrorLocked(fmt.Errorf("tls: handshake message of length %d bytes exceeds maximum of %d bytes", n, maxHandshake))
+		return nil, c.in.setErrorLocked(fmt.Errorf("tls: handshake message of length %d bytes exceeds maximum of %d bytes", n, maxHandshakeSize))
 	}
 	if err := c.readHandshakeBytes(4 + n); err != nil {
 		return nil, err
@@ -1211,10 +1229,10 @@ var (
 
 // Write writes data to the connection.
 //
-// As Write calls Handshake, in order to prevent indefinite blocking a deadline
-// must be set for both Read and Write before Write is called when the handshake
-// has not yet completed. See SetDeadline, SetReadDeadline, and
-// SetWriteDeadline.
+// As Write calls [Conn.Handshake], in order to prevent indefinite blocking a deadline
+// must be set for both [Conn.Read] and Write before Write is called when the handshake
+// has not yet completed. See [Conn.SetDeadline], [Conn.SetReadDeadline], and
+// [Conn.SetWriteDeadline].
 func (c *Conn) Write(b []byte) (int, error) {
 	// interlock with Close below
 	for {
@@ -1386,10 +1404,10 @@ func (c *Conn) handleKeyUpdate(keyUpdate *keyUpdateMsg) error {
 
 // Read reads data from the connection.
 //
-// As Read calls Handshake, in order to prevent indefinite blocking a deadline
-// must be set for both Read and Write before Read is called when the handshake
-// has not yet completed. See SetDeadline, SetReadDeadline, and
-// SetWriteDeadline.
+// As Read calls [Conn.Handshake], in order to prevent indefinite blocking a deadline
+// must be set for both Read and [Conn.Write] before Read is called when the handshake
+// has not yet completed. See [Conn.SetDeadline], [Conn.SetReadDeadline], and
+// [Conn.SetWriteDeadline].
 func (c *Conn) Read(b []byte) (int, error) {
 	if err := c.Handshake(); err != nil {
 		return 0, err
@@ -1473,7 +1491,7 @@ var errEarlyCloseWrite = errors.New("tls: CloseWrite called before handshake com
 
 // CloseWrite shuts down the writing side of the connection. It should only be
 // called once the handshake has completed and does not call CloseWrite on the
-// underlying connection. Most callers should just use Close.
+// underlying connection. Most callers should just use [Conn.Close].
 func (c *Conn) CloseWrite() error {
 	if !c.isHandshakeComplete.Load() {
 		return errEarlyCloseWrite
@@ -1501,10 +1519,10 @@ func (c *Conn) closeNotify() error {
 // protocol if it has not yet been run.
 //
 // Most uses of this package need not call Handshake explicitly: the
-// first Read or Write will call it automatically.
+// first [Conn.Read] or [Conn.Write] will call it automatically.
 //
 // For control over canceling or setting a timeout on a handshake, use
-// HandshakeContext or the Dialer's DialContext method instead.
+// [Conn.HandshakeContext] or the [Dialer]'s DialContext method instead.
 //
 // In order to avoid denial of service attacks, the maximum RSA key size allowed
 // in certificates sent by either the TLS server or client is limited to 8192
@@ -1523,7 +1541,7 @@ func (c *Conn) Handshake() error {
 // connection.
 //
 // Most uses of this package need not call HandshakeContext explicitly: the
-// first Read or Write will call it automatically.
+// first [Conn.Read] or [Conn.Write] will call it automatically.
 func (c *Conn) HandshakeContext(ctx context.Context) error {
 	// Delegate to unexported method for named return
 	// without confusing documented signature.
@@ -1649,12 +1667,18 @@ func (c *Conn) ConnectionState() ConnectionState {
 	return c.connectionStateLocked()
 }
 
+// [Psiphon]
+// var tlsunsafeekm = godebug.New("tlsunsafeekm")
+
 func (c *Conn) connectionStateLocked() ConnectionState {
 	var state ConnectionState
 	state.HandshakeComplete = c.isHandshakeComplete.Load()
 	state.Version = c.vers
 	state.NegotiatedProtocol = c.clientProtocol
 	state.DidResume = c.didResume
+	state.testingOnlyDidHRR = c.didHRR
+	// c.curveID is not set on TLS 1.0–1.2 resumptions. Fix that before exposing it.
+	state.testingOnlyCurveID = c.curveID
 	state.NegotiatedProtocolIsMutual = true
 	state.ServerName = c.serverName
 	state.CipherSuite = c.cipherSuite
@@ -1670,10 +1694,20 @@ func (c *Conn) connectionStateLocked() ConnectionState {
 		}
 	}
 	if c.config.Renegotiation != RenegotiateNever {
-		state.ekm = noExportedKeyingMaterial
+		state.ekm = noEKMBecauseRenegotiation
+	} else if c.vers != VersionTLS13 && !c.extMasterSecret {
+		state.ekm = func(label string, context []byte, length int) ([]byte, error) {
+			// [Psiphon]
+			// if tlsunsafeekm.Value() == "1" {
+			// 	tlsunsafeekm.IncNonDefault()
+			// 	return c.ekm(label, context, length)
+			// }
+			return noEKMBecauseNoEMS(label, context, length)
+		}
 	} else {
 		state.ekm = c.ekm
 	}
+	state.ECHAccepted = c.echAccepted
 	return state
 }
 

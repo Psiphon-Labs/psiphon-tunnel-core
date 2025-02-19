@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Psiphon-Labs/utls/internal/hpke"
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
 )
@@ -141,6 +142,7 @@ func (hs *clientHandshakeStateTLS13) sendClientEncryptedExtensions() error {
 func (hs *clientHandshakeStateTLS13) utlsReadServerParameters(encryptedExtensions *encryptedExtensionsMsg) error {
 	hs.c.utls.hasApplicationSettings = encryptedExtensions.utls.hasApplicationSettings
 	hs.c.utls.peerApplicationSettings = encryptedExtensions.utls.applicationSettings
+
 	hs.c.utls.echRetryConfigs = encryptedExtensions.utls.echRetryConfigs
 
 	if hs.c.utls.hasApplicationSettings {
@@ -181,10 +183,16 @@ func (hs *clientHandshakeStateTLS13) utlsReadServerParameters(encryptedExtension
 	return nil
 }
 
-func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, clientKeySharePrivate, error) {
+// makeClientHelloForApplyPreset is the UTLS version of handshake_client.go/(*Conn)makeClientHello.
+// This function is constructed by copying makeClientHello (including the UTLS modifications) and
+// disabling key_share value and quic transport parameters.
+func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *echContext, error) {
 	config := c.config
 
 	// [UTLS SECTION START]
+	// if len(config.ServerName) == 0 && !config.InsecureSkipVerify {
+	// 	return nil, nil, nil, errors.New("tls: either ServerName or InsecureSkipVerify must be specified in the tls.Config")
+	// }
 	if len(config.ServerName) == 0 && !config.InsecureSkipVerify && len(config.InsecureServerNameToVerify) == 0 {
 		return nil, nil, errors.New("tls: at least one of ServerName, InsecureSkipVerify or InsecureServerNameToVerify must be specified in the tls.Config")
 	}
@@ -206,27 +214,28 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, clientKeyShareP
 	if len(supportedVersions) == 0 {
 		return nil, nil, errors.New("tls: no supported versions satisfy MinVersion and MaxVersion")
 	}
-
-	clientHelloVersion := config.maxSupportedVersion(roleClient)
-	// The version at the beginning of the ClientHello was capped at TLS 1.2
-	// for compatibility reasons. The supported_versions extension is used
-	// to negotiate versions now. See RFC 8446, Section 4.2.1.
-	if clientHelloVersion > VersionTLS12 {
-		clientHelloVersion = VersionTLS12
-	}
+	maxVersion := config.maxSupportedVersion(roleClient)
 
 	hello := &clientHelloMsg{
-		vers:                         clientHelloVersion,
+		vers:                         maxVersion,
 		compressionMethods:           []uint8{compressionNone},
 		random:                       make([]byte, 32),
+		extendedMasterSecret:         true,
 		ocspStapling:                 true,
 		scts:                         true,
 		serverName:                   hostnameInSNI(config.ServerName),
-		supportedCurves:              config.curvePreferences(),
+		supportedCurves:              config.curvePreferences(maxVersion),
 		supportedPoints:              []uint8{pointFormatUncompressed},
 		secureRenegotiationSupported: true,
 		alpnProtocols:                config.NextProtos,
 		supportedVersions:            supportedVersions,
+	}
+
+	// The version at the beginning of the ClientHello was capped at TLS 1.2
+	// for compatibility reasons. The supported_versions extension is used
+	// to negotiate versions now. See RFC 8446, Section 4.2.1.
+	if hello.vers > VersionTLS12 {
+		hello.vers = VersionTLS12
 	}
 
 	if c.handshakes > 0 {
@@ -247,7 +256,7 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, clientKeyShareP
 		}
 		// Don't advertise TLS 1.2-only cipher suites unless
 		// we're attempting TLS 1.2.
-		if hello.vers < VersionTLS12 && suite.flags&suiteTLS12 != 0 {
+		if maxVersion < VersionTLS12 && suite.flags&suiteTLS12 != 0 {
 			continue
 		}
 		hello.cipherSuites = append(hello.cipherSuites, suiteId)
@@ -270,14 +279,16 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, clientKeyShareP
 		}
 	}
 
-	if hello.vers >= VersionTLS12 {
+	if maxVersion >= VersionTLS12 {
 		hello.supportedSignatureAlgorithms = supportedSignatureAlgorithms()
 	}
 	if testingOnlyForceClientHelloSignatureAlgorithms != nil {
 		hello.supportedSignatureAlgorithms = testingOnlyForceClientHelloSignatureAlgorithms
 	}
 
-	var secret clientKeySharePrivate // [UTLS]
+	// [UTLS]
+	// var keyShareKeys *keySharePrivateKeys
+
 	if hello.supportedVersions[0] == VersionTLS13 {
 		// Reset the list of ciphers when the client only supports TLS 1.3.
 		if len(hello.supportedVersions) == 1 {
@@ -289,45 +300,145 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, clientKeyShareP
 			hello.cipherSuites = append(hello.cipherSuites, defaultCipherSuitesTLS13NoAES...)
 		}
 
-		// curveID := config.curvePreferences()[0]
-		// // [UTLS SECTION BEGINS]
-		// // Ported from cloudflare/go with modifications to preserve crypto/tls compatibility
-		// if scheme := curveIdToCirclScheme(curveID); scheme != nil {
-		// 	pk, sk, err := generateKemKeyPair(scheme, curveID, config.rand())
-		// 	if err != nil {
-		// 		return nil, nil, fmt.Errorf("generateKemKeyPair %s: %w", scheme.Name(), err)
-		// 	}
-		// 	packedPk, err := pk.MarshalBinary()
-		// 	if err != nil {
-		// 		return nil, nil, fmt.Errorf("pack circl public key %s: %w", scheme.Name(), err)
-		// 	}
-		// 	hello.keyShares = []keyShare{{group: curveID, data: packedPk}}
-		// 	secret = sk
-		// } else {
-		// 	if _, ok := curveForCurveID(curveID); !ok {
-		// 		return nil, nil, errors.New("tls: CurvePreferences includes unsupported curve")
-		// 	}
-		// 	key, err := generateECDHEKey(config.rand(), curveID)
-		// 	if err != nil {
-		// 		return nil, nil, err
-		// 	}
-		// 	hello.keyShares = []keyShare{{group: curveID, data: key.PublicKey().Bytes()}}
-		// 	secret = key
-		// }
-		// // [UTLS SECTION ENDS]
+		// [UTLS] Disabled for makeClientHelloForApplyPreset, check u_parrots.go/(*UConn)ApplyPreset for key_share extension values.
+		/*
+			curveID := config.curvePreferences(maxVersion)[0]
+
+			// [UTLS SECTION BEGIN]
+			// keyShareKeys type has been modified to allow for more than one curve.
+			// The (key share) changes to below are to accommodate this change.
+			// keyShareKeys = &keySharePrivateKeys{curveID: curveID}
+			keyShareKeys = NewKeySharePrivateKeys()
+			// [UTLS SECTION END]
+
+			if curveID == x25519Kyber768Draft00 {
+				// [UTLS SECTION BEGIN]
+				// keyShareKeys.ecdhe, err = generateECDHEKey(config.rand(), X25519)
+				ecdheKey, err := generateECDHEKey(config.rand(), X25519)
+				// [UTLS SECTION END]
+				if err != nil {
+					return nil, nil, nil, err
+				}
+
+				// [UTLS SECTION BEGIN]
+				// UTLS changes to keyShareKeys explicitly specify the curveID for the key shares.
+				// Therefore, we need to set the (reused) ecdheKey for both standard X25519
+				// and the hybrid x25519Kyber768Draft00.
+				if err := keyShareKeys.setEcdheKey(X25519, ecdheKey); err != nil {
+					return nil, nil, nil, err
+				}
+				if err := keyShareKeys.setEcdheKey(curveID, ecdheKey); err != nil {
+					return nil, nil, nil, err
+				}
+				// [UTLS SECTION END]
+
+				seed := make([]byte, mlkem768.SeedSize)
+				if _, err := io.ReadFull(config.rand(), seed); err != nil {
+					return nil, nil, nil, err
+				}
+				// [UTLS SECTION BEGIN]
+				// keyShareKeys.kyber, err = mlkem768.NewKeyFromSeed(seed)
+				kyberKey, err := mlkem768.NewKeyFromSeed(seed)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				if err := keyShareKeys.setKyberKey(curveID, kyberKey); err != nil {
+					return nil, nil, nil, err
+				}
+				// [UTLS SECTION END]
+
+				// For draft-tls-westerbaan-xyber768d00-03, we send both a hybrid
+				// and a standard X25519 key share, since most servers will only
+				// support the latter. We reuse the same X25519 ephemeral key for
+				// both, as allowed by draft-ietf-tls-hybrid-design-09, Section 3.2.
+
+				// [UTLS SECTION BEGIN]
+				// hello.keyShares = []keyShare{
+				// 	{group: x25519Kyber768Draft00, data: append(keyShareKeys.ecdhe.PublicKey().Bytes(),
+				// 		keyShareKeys.kyber.EncapsulationKey()...)},
+				// 	{group: X25519, data: keyShareKeys.ecdhe.PublicKey().Bytes()},
+				// }
+				hello.keyShares = []keyShare{
+					{group: x25519Kyber768Draft00, data: append(keyShareKeys.ecdhe[curveID].PublicKey().Bytes(),
+						keyShareKeys.kyber[curveID].EncapsulationKey()...)},
+					{group: X25519, data: keyShareKeys.ecdhe[X25519].PublicKey().Bytes()},
+				}
+				// [UTLS SECTION END]
+			} else {
+				if _, ok := curveForCurveID(curveID); !ok {
+					return nil, nil, nil, errors.New("tls: CurvePreferences includes unsupported curve")
+				}
+
+				// [UTLS SECTION BEGIN]
+				// keyShareKeys.ecdhe, err = generateECDHEKey(config.rand(), curveID)
+				keyShareKeys.ecdhe[curveID], err = generateECDHEKey(config.rand(), curveID)
+				// [UTLS SECTION END]
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				// [UTLS SECTION BEGIN]
+				// hello.keyShares = []keyShare{{group: curveID, data: keyShareKeys.ecdhe.PublicKey().Bytes()}}
+				hello.keyShares = []keyShare{{group: curveID, data: keyShareKeys.ecdhe[curveID].PublicKey().Bytes()}}
+				// [UTLS SECTION END]
+			}
+		*/
 	}
 
-	// [UTLS] We don't need this, since it is not ready yet
-	// if c.quic != nil {
-	// 	p, err := c.quicGetTransportParameters()
-	// 	if err != nil {
-	// 		return nil, nil, err
-	// 	}
-	// 	if p == nil {
-	// 		p = []byte{}
-	// 	}
-	// 	hello.quicTransportParameters = p
-	// }
+	// [UTLS] Disabled for makeClientHelloForApplyPreset, since it is not ready yet.
+	/*
+		if c.quic != nil {
+			p, err := c.quicGetTransportParameters()
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if p == nil {
+				p = []byte{}
+			}
+			hello.quicTransportParameters = p
+		}
+	*/
 
-	return hello, secret, nil
+	var ech *echContext
+	if c.config.EncryptedClientHelloConfigList != nil {
+		if c.config.MinVersion != 0 && c.config.MinVersion < VersionTLS13 {
+			return nil, nil, errors.New("tls: MinVersion must be >= VersionTLS13 if EncryptedClientHelloConfigList is populated")
+		}
+		if c.config.MaxVersion != 0 && c.config.MaxVersion <= VersionTLS12 {
+			return nil, nil, errors.New("tls: MaxVersion must be >= VersionTLS13 if EncryptedClientHelloConfigList is populated")
+		}
+		echConfigs, err := parseECHConfigList(c.config.EncryptedClientHelloConfigList)
+		if err != nil {
+			return nil, nil, err
+		}
+		echConfig := pickECHConfig(echConfigs)
+		if echConfig == nil {
+			return nil, nil, errors.New("tls: EncryptedClientHelloConfigList contains no valid configs")
+		}
+		ech = &echContext{config: echConfig}
+		hello.encryptedClientHello = []byte{1} // indicate inner hello
+		// We need to explicitly set these 1.2 fields to nil, as we do not
+		// marshal them when encoding the inner hello, otherwise transcripts
+		// will later mismatch.
+		hello.supportedPoints = nil
+		hello.ticketSupported = false
+		hello.secureRenegotiationSupported = false
+		hello.extendedMasterSecret = false
+
+		echPK, err := hpke.ParseHPKEPublicKey(ech.config.KemID, ech.config.PublicKey)
+		if err != nil {
+			return nil, nil, err
+		}
+		suite, err := pickECHCipherSuite(ech.config.SymmetricCipherSuite)
+		if err != nil {
+			return nil, nil, err
+		}
+		ech.kdfID, ech.aeadID = suite.KDFID, suite.AEADID
+		info := append([]byte("tls ech\x00"), ech.config.raw...)
+		ech.encapsulatedKey, ech.hpkeContext, err = hpke.SetupSender(ech.config.KemID, suite.KDFID, suite.AEADID, echPK, info)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return hello, ech, nil
 }

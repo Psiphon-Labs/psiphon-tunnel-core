@@ -33,18 +33,21 @@ github.com/Psiphon-Labs/consistent
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240824224428-ca6969e315a9
-## explicit; go 1.21
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250219165059-533f95b512e9
+## explicit; go 1.23
 github.com/Psiphon-Labs/psiphon-tls
-# github.com/Psiphon-Labs/quic-go v0.0.0-20250203210204-a4381c68e52f
-## explicit; go 1.21
+github.com/Psiphon-Labs/psiphon-tls/byteorder
+github.com/Psiphon-Labs/psiphon-tls/internal/boring
+github.com/Psiphon-Labs/psiphon-tls/internal/hpke
+github.com/Psiphon-Labs/psiphon-tls/internal/mlkem768
+# github.com/Psiphon-Labs/quic-go v0.0.0-20250226213529-818b69c11139
+## explicit; go 1.23
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3
 github.com/Psiphon-Labs/quic-go/internal/ackhandler
 github.com/Psiphon-Labs/quic-go/internal/congestion
 github.com/Psiphon-Labs/quic-go/internal/flowcontrol
 github.com/Psiphon-Labs/quic-go/internal/handshake
-github.com/Psiphon-Labs/quic-go/internal/logutils
 github.com/Psiphon-Labs/quic-go/internal/protocol
 github.com/Psiphon-Labs/quic-go/internal/qerr
 github.com/Psiphon-Labs/quic-go/internal/qtls
@@ -54,12 +57,15 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/Psiphon-Labs/utls v1.1.1-0.20241107183331-b18909f8ccaa
-## explicit; go 1.21
+# github.com/Psiphon-Labs/utls v0.0.0-20250228222508-0e6c20273fcc
+## explicit; go 1.23
 github.com/Psiphon-Labs/utls
+github.com/Psiphon-Labs/utls/byteorder
 github.com/Psiphon-Labs/utls/dicttls
 github.com/Psiphon-Labs/utls/internal/boring
 github.com/Psiphon-Labs/utls/internal/helper
+github.com/Psiphon-Labs/utls/internal/hpke
+github.com/Psiphon-Labs/utls/internal/mlkem768
 github.com/Psiphon-Labs/utls/internal/quicvarint
 github.com/Psiphon-Labs/utls/internal/quicvarint/protocol
 # github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa
@@ -67,9 +73,10 @@ github.com/Psiphon-Labs/utls/internal/quicvarint/protocol
 github.com/alexbrainman/sspi
 github.com/alexbrainman/sspi/internal/common
 github.com/alexbrainman/sspi/negotiate
-# github.com/andybalholm/brotli v1.0.6
-## explicit; go 1.12
+# github.com/andybalholm/brotli v1.1.1
+## explicit; go 1.13
 github.com/andybalholm/brotli
+github.com/andybalholm/brotli/matchfinder
 # github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 ## explicit
 github.com/armon/go-proxyproto
@@ -89,48 +96,24 @@ github.com/cespare/xxhash
 # github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 ## explicit
 github.com/cheekybits/genny/generic
-# github.com/cloudflare/circl v1.3.7
-## explicit; go 1.19
+# github.com/cloudflare/circl v1.5.0
+## explicit; go 1.22.0
 github.com/cloudflare/circl/dh/x25519
 github.com/cloudflare/circl/dh/x448
-github.com/cloudflare/circl/ecc/goldilocks
 github.com/cloudflare/circl/ecc/p384
 github.com/cloudflare/circl/hpke
 github.com/cloudflare/circl/internal/conv
 github.com/cloudflare/circl/internal/sha3
 github.com/cloudflare/circl/kem
-github.com/cloudflare/circl/kem/hybrid
-github.com/cloudflare/circl/kem/kyber/kyber1024
-github.com/cloudflare/circl/kem/kyber/kyber512
 github.com/cloudflare/circl/kem/kyber/kyber768
 github.com/cloudflare/circl/math
 github.com/cloudflare/circl/math/fp25519
 github.com/cloudflare/circl/math/fp448
-github.com/cloudflare/circl/math/mlsbset
 github.com/cloudflare/circl/pke/kyber/internal/common
 github.com/cloudflare/circl/pke/kyber/internal/common/params
-github.com/cloudflare/circl/pke/kyber/kyber1024
-github.com/cloudflare/circl/pke/kyber/kyber1024/internal
-github.com/cloudflare/circl/pke/kyber/kyber512
-github.com/cloudflare/circl/pke/kyber/kyber512/internal
 github.com/cloudflare/circl/pke/kyber/kyber768
 github.com/cloudflare/circl/pke/kyber/kyber768/internal
-github.com/cloudflare/circl/pki
-github.com/cloudflare/circl/sign
-github.com/cloudflare/circl/sign/dilithium/internal/common
-github.com/cloudflare/circl/sign/dilithium/internal/common/params
-github.com/cloudflare/circl/sign/dilithium/mode2
-github.com/cloudflare/circl/sign/dilithium/mode2/internal
-github.com/cloudflare/circl/sign/dilithium/mode3
-github.com/cloudflare/circl/sign/dilithium/mode3/internal
-github.com/cloudflare/circl/sign/ed25519
-github.com/cloudflare/circl/sign/ed448
-github.com/cloudflare/circl/sign/eddilithium2
-github.com/cloudflare/circl/sign/eddilithium3
-github.com/cloudflare/circl/sign/schemes
 github.com/cloudflare/circl/simd/keccakf1600
-github.com/cloudflare/circl/xof
-github.com/cloudflare/circl/xof/k12
 # github.com/cognusion/go-cache-lru v0.0.0-20170419142635-f73e2280ecea
 ## explicit
 github.com/cognusion/go-cache-lru
@@ -240,8 +223,8 @@ github.com/jsimonetti/rtnetlink/internal/unix
 # github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 ## explicit
 github.com/kardianos/osext
-# github.com/klauspost/compress v1.17.4
-## explicit; go 1.19
+# github.com/klauspost/compress v1.17.11
+## explicit; go 1.21
 github.com/klauspost/compress
 github.com/klauspost/compress/fse
 github.com/klauspost/compress/huff0
@@ -528,8 +511,8 @@ go4.org/mem
 # go4.org/netipx v0.0.0-20230824141953-6213f710f925
 ## explicit; go 1.18
 go4.org/netipx
-# golang.org/x/crypto v0.22.0
-## explicit; go 1.18
+# golang.org/x/crypto v0.32.0
+## explicit; go 1.20
 golang.org/x/crypto/blake2b
 golang.org/x/crypto/blake2s
 golang.org/x/crypto/blowfish
@@ -538,7 +521,6 @@ golang.org/x/crypto/chacha20poly1305
 golang.org/x/crypto/cryptobyte
 golang.org/x/crypto/cryptobyte/asn1
 golang.org/x/crypto/curve25519
-golang.org/x/crypto/curve25519/internal/field
 golang.org/x/crypto/hkdf
 golang.org/x/crypto/internal/alias
 golang.org/x/crypto/internal/poly1305
@@ -548,12 +530,13 @@ golang.org/x/crypto/salsa20/salsa
 golang.org/x/crypto/sha3
 # golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e
 ## explicit; go 1.20
-golang.org/x/exp/constraints
 golang.org/x/exp/rand
-# golang.org/x/mod v0.14.0
+# golang.org/x/mod v0.17.0
 ## explicit; go 1.18
+golang.org/x/mod/internal/lazyregexp
+golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.24.0
+# golang.org/x/net v0.34.0
 ## explicit; go 1.18
 golang.org/x/net/bpf
 golang.org/x/net/dns/dnsmessage
@@ -571,10 +554,10 @@ golang.org/x/net/ipv6
 golang.org/x/net/proxy
 golang.org/x/net/route
 golang.org/x/net/trace
-# golang.org/x/sync v0.6.0
+# golang.org/x/sync v0.10.0
 ## explicit; go 1.18
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.20.0
+# golang.org/x/sys v0.29.0
 ## explicit; go 1.18
 golang.org/x/sys/cpu
 golang.org/x/sys/plan9
@@ -583,10 +566,10 @@ golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
 golang.org/x/sys/windows/svc
 golang.org/x/sys/windows/svc/mgr
-# golang.org/x/term v0.19.0
+# golang.org/x/term v0.28.0
 ## explicit; go 1.18
 golang.org/x/term
-# golang.org/x/text v0.14.0
+# golang.org/x/text v0.21.0
 ## explicit; go 1.18
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
@@ -595,24 +578,28 @@ golang.org/x/text/unicode/norm
 # golang.org/x/time v0.5.0
 ## explicit; go 1.18
 golang.org/x/time/rate
-# golang.org/x/tools v0.16.0
-## explicit; go 1.18
+# golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d
+## explicit; go 1.19
+golang.org/x/tools/go/ast/astutil
 golang.org/x/tools/go/ast/inspector
 golang.org/x/tools/go/gcexportdata
 golang.org/x/tools/go/internal/packagesdriver
 golang.org/x/tools/go/packages
 golang.org/x/tools/go/types/objectpath
+golang.org/x/tools/imports
+golang.org/x/tools/internal/aliases
 golang.org/x/tools/internal/event
 golang.org/x/tools/internal/event/core
 golang.org/x/tools/internal/event/keys
 golang.org/x/tools/internal/event/label
-golang.org/x/tools/internal/event/tag
 golang.org/x/tools/internal/gcimporter
 golang.org/x/tools/internal/gocommand
+golang.org/x/tools/internal/gopathwalk
+golang.org/x/tools/internal/imports
 golang.org/x/tools/internal/packagesinternal
 golang.org/x/tools/internal/pkgbits
+golang.org/x/tools/internal/stdlib
 golang.org/x/tools/internal/tokeninternal
-golang.org/x/tools/internal/typeparams
 golang.org/x/tools/internal/typesinternal
 golang.org/x/tools/internal/versions
 # golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b

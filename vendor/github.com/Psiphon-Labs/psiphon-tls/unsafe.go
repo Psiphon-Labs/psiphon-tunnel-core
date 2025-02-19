@@ -33,13 +33,15 @@ package tls
 
 import (
 	"crypto/tls"
+	"fmt"
 	"reflect"
 	"unsafe"
 )
 
 func init() {
-	if !structsEqual(&tls.ConnectionState{}, &ConnectionState{}) {
-		panic("tls.ConnectionState doesn't match")
+	err := structsEqual(&tls.ConnectionState{}, &ConnectionState{})
+	if err != nil {
+		panic(fmt.Sprintf("tls: ConnectionState is not equal to tls.ConnectionState: %v", err))
 	}
 }
 
@@ -47,7 +49,11 @@ func UnsafeFromConnectionState(ss *ConnectionState) *tls.ConnectionState {
 	return (*tls.ConnectionState)(unsafe.Pointer(ss))
 }
 
-func structsEqual(a, b interface{}) bool {
+func UnsafeToConnectionState(ss *tls.ConnectionState) *ConnectionState {
+	return (*ConnectionState)(unsafe.Pointer(ss))
+}
+
+func structsEqual(a, b interface{}) error {
 	return compare(reflect.TypeOf(a), reflect.TypeOf(b))
 }
 
@@ -56,14 +62,18 @@ func structsEqual(a, b interface{}) bool {
 // compare does not currently support Maps, Chan, UnsafePointer if reflect.DeepEqual fails.
 // Support for these types can be added if needed.
 // note that field names are still compared.
-func compare(a, b reflect.Type) bool {
+func compare(a, b reflect.Type) error {
 
 	if reflect.DeepEqual(a, b) {
-		return true
+		return nil
+	}
+
+	if isPrimitive(a) && isPrimitive(b) && a.Kind() == b.Kind() {
+		return nil
 	}
 
 	if a.Kind() != b.Kind() {
-		return false
+		return fmt.Errorf("kind mismatch: %s vs %s", a.Kind().String(), b.Kind().String())
 	}
 
 	if a.Kind() == reflect.Pointer || a.Kind() == reflect.Slice {
@@ -72,25 +82,30 @@ func compare(a, b reflect.Type) bool {
 
 	if a.Kind() == reflect.Func {
 		if a.NumIn() != b.NumIn() || a.NumOut() != b.NumOut() {
-			return false
+			return fmt.Errorf(
+				"function signature mismatch: different number of input or output parameters: NumIn: %d vs %d, NumOut: %d vs %d",
+				a.NumIn(), b.NumIn(), a.NumOut(), b.NumOut(),
+			)
 		}
 		for i_in := 0; i_in < a.NumIn(); i_in++ {
-			if !compare(a.In(i_in), b.In(i_in)) {
-				return false
+			err := compare(a.In(i_in), b.In(i_in))
+			if err != nil {
+				return fmt.Errorf("function %s input parameter mismatch at index %d: %v", a.Name(), i_in, err)
 			}
 		}
 		for i_out := 0; i_out < a.NumOut(); i_out++ {
-			if !compare(a.Out(i_out), b.Out(i_out)) {
-				return false
+			err := compare(a.Out(i_out), b.Out(i_out))
+			if err != nil {
+				return fmt.Errorf("function %s output parameter mismatch at index %d: %v", a.Name(), i_out, err)
 			}
 		}
-		return true
+		return nil
 	}
 
 	if a.Kind() == reflect.Struct {
 
 		if a.NumField() != b.NumField() {
-			return false
+			return fmt.Errorf("struct field count mismatch: %d vs %d", a.NumField(), b.NumField())
 		}
 
 		for i := 0; i < a.NumField(); i++ {
@@ -99,19 +114,35 @@ func compare(a, b reflect.Type) bool {
 
 			if !reflect.DeepEqual(fa.Index, fb.Index) || fa.Name != fb.Name ||
 				fa.Anonymous != fb.Anonymous || fa.Offset != fb.Offset {
-				return false
+				return fmt.Errorf("struct field mismatch at index %d: %+v vs %+v", i, fa, fb)
 			}
 
 			if !reflect.DeepEqual(fa.Type, fb.Type) {
-				if !compare(fa.Type, fb.Type) {
-					return false
+				err := compare(fa.Type, fb.Type)
+				if err != nil {
+					return fmt.Errorf("struct %s field type mismatch at index %d with name %s: %v", a.Name(), i, fa.Name, err)
 				}
 			}
 		}
 
-		return true
+		return nil
 	}
 
 	// TODO: add support for missing types
-	return false
+	return fmt.Errorf("unsupported type: %s for field %s", a.Kind().String(), a.Name())
+}
+
+// isPrimitive checks if a reflect.Type represents a primitive type
+func isPrimitive(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128,
+		reflect.String:
+		return true
+	default:
+		return false
+	}
 }
