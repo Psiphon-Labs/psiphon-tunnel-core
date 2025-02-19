@@ -2361,7 +2361,7 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 			HandshakeIdleTimeout:          handshakeIdleTimeout,
 			MaxIdleTimeout:                maxDuration,
 			KeepAlivePeriod:               maxDuration,
-			Versions:                      []quic_go.VersionNumber{0x1},
+			Versions:                      []quic_go.Version{0x1},
 			ClientHelloSeed:               &obfuscationSeed,
 			ClientMaxPacketSizeAdjustment: maxPacketSizeAdjustment,
 			DisablePathMTUDiscovery:       true,

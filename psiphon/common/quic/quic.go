@@ -1184,8 +1184,8 @@ func dialQUIC(
 			MaxIdleTimeout:       CLIENT_IDLE_TIMEOUT,
 			// TODO: add jitter to keep alive period
 			KeepAlivePeriod: CLIENT_IDLE_TIMEOUT / 2,
-			Versions: []ietf_quic.VersionNumber{
-				ietf_quic.VersionNumber(versionNumber)},
+			Versions: []ietf_quic.Version{
+				ietf_quic.Version(versionNumber)},
 			ClientHelloSeed:               clientHelloSeed,
 			GetClientHelloRandom:          getClientHelloRandom,
 			ClientMaxPacketSizeAdjustment: maxPacketSizeAdjustment,
