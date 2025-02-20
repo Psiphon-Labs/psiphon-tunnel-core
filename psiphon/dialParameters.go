@@ -1298,20 +1298,7 @@ func MakeDialParameters(
 			// packet size must be adjusted to fit. In addition, QUIC path
 			// MTU discovery is disabled, to avoid sending oversized packets.
 
-			// isIPv6 indicates whether quic-go will use a max initial packet
-			// size appropriate for IPv6 or IPv4;
-			// GetQUICMaxPacketSizeAdjustment modifies the adjustment
-			// accordingly. quic-go selects based on the RemoteAddr of the
-			// net.PacketConn passed to quic.Dial. In the in-proxy case, that
-			// RemoteAddr, inproxy.ClientConn.RemoteAddr, is synthetic and
-			// can reflect inproxy.ClientConfig.RemoteAddrOverride, which, in
-			// turn, is currently based on serverEntry.IpAddress; see
-			// dialInproxy. Limitation: not compatible with FRONTED-QUIC.
-
-			IPAddress := net.ParseIP(serverEntry.IpAddress)
-			isIPv6 := IPAddress != nil && IPAddress.To4() == nil
-
-			dialParams.QUICMaxPacketSizeAdjustment = inproxy.GetQUICMaxPacketSizeAdjustment(isIPv6)
+			dialParams.QUICMaxPacketSizeAdjustment = inproxy.GetQUICMaxPacketSizeAdjustment()
 			dialParams.QUICDisablePathMTUDiscovery = true
 
 			// Select a QUIC variant that is compatible with WebRTC media

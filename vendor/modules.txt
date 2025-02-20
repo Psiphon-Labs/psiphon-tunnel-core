@@ -40,7 +40,7 @@ github.com/Psiphon-Labs/psiphon-tls/byteorder
 github.com/Psiphon-Labs/psiphon-tls/internal/boring
 github.com/Psiphon-Labs/psiphon-tls/internal/hpke
 github.com/Psiphon-Labs/psiphon-tls/internal/mlkem768
-# github.com/Psiphon-Labs/quic-go v0.0.0-20250226213529-818b69c11139
+# github.com/Psiphon-Labs/quic-go v0.0.0-20250303214000-94770c5d46a0
 ## explicit; go 1.23
 github.com/Psiphon-Labs/quic-go
 github.com/Psiphon-Labs/quic-go/http3

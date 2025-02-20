@@ -120,7 +120,7 @@ func (conn *webRTCConn) GetMetrics() common.LogFields {
 	return nil
 }
 
-func GetQUICMaxPacketSizeAdjustment(isIPv6 bool) int {
+func GetQUICMaxPacketSizeAdjustment() int {
 	return 0
 }
 

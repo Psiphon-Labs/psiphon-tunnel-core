@@ -53,14 +53,10 @@ const (
 
 	MAX_PACKET_SIZE = 1452
 
-	// MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4/IPV6 are the largest packet sizes
-	// quic-go will produce before MTU discovery, 1280 less IP and UDP header
-	// sizes. These values, which match quic-go
-	// internal/protocol.InitialPacketSizeIPv4/IPv6, are used to calculate
-	// maximum padding sizes.
+	// MAX_PRE_DISCOVERY_PACKET_SIZE is the largest packet size quic-go will
+	// produce before MTU discovery.
 
-	MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4 = 1252
-	MAX_PRE_DISCOVERY_PACKET_SIZE_IPV6 = 1232
+	MAX_PRE_DISCOVERY_PACKET_SIZE = 1280
 
 	// OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT is the minimum amount of bytes
 	// required for obfuscation overhead, the nonce and the padding length.
@@ -429,7 +425,7 @@ func (conn *ObfuscatedPacketConn) readPacketWithType(
 				if atomic.CompareAndSwapInt32(&conn.decoyPacketCount, count, count-1) {
 
 					packetSize := conn.paddingPRNG.Range(
-						1, getMaxPreDiscoveryPacketSize(addr))
+						1, MAX_PRE_DISCOVERY_PACKET_SIZE)
 
 					// decoyBuffer is all zeros, so the QUIC Fixed Bit is zero.
 					// Ignore any errors when writing decoy packets.
@@ -775,7 +771,7 @@ func (conn *ObfuscatedPacketConn) writePacket(
 				}
 			}
 
-			maxPadding := getMaxPaddingSize(isIETF, addr, n)
+			maxPadding := getMaxPaddingSize(isIETF, n)
 
 			paddingLen := conn.paddingPRNG.Intn(maxPadding + 1)
 			buffer[NONCE_SIZE] = uint8(paddingLen)
@@ -843,19 +839,9 @@ func (conn *ObfuscatedPacketConn) writePacket(
 	return n, oobn, err
 }
 
-func getMaxPreDiscoveryPacketSize(addr net.Addr) int {
-	maxPacketSize := MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4
-	if udpAddr, ok := addr.(*net.UDPAddr); ok &&
-		udpAddr != nil && udpAddr.IP != nil && udpAddr.IP.To4() == nil {
+func getMaxPaddingSize(isIETF bool, packetSize int) int {
 
-		maxPacketSize = MAX_PRE_DISCOVERY_PACKET_SIZE_IPV6
-	}
-	return maxPacketSize
-}
-
-func getMaxPaddingSize(isIETF bool, addr net.Addr, packetSize int) int {
-
-	maxPacketSize := getMaxPreDiscoveryPacketSize(addr)
+	maxPacketSize := MAX_PRE_DISCOVERY_PACKET_SIZE
 
 	maxPadding := 0
 

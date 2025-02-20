@@ -1863,6 +1863,18 @@ func (s *connection) applyTransportParameters() {
 	}
 
 	// [Psiphon]
+	// Adjust the max packet size to allow for obfuscation overhead.
+	maxPacketSizeAdjustment := 0
+	if s.config.ServerMaxPacketSizeAdjustment != nil {
+		maxPacketSizeAdjustment = s.config.ServerMaxPacketSizeAdjustment(s.conn.RemoteAddr())
+	} else {
+		maxPacketSizeAdjustment = s.config.ClientMaxPacketSizeAdjustment
+	}
+	if maxPacketSize > protocol.ByteCount(maxPacketSizeAdjustment) {
+		maxPacketSize -= protocol.ByteCount(maxPacketSizeAdjustment)
+	}
+
+	// [Psiphon]
 	initialMaxPacketSize := s.maxPacketSize()
 
 	s.mtuDiscoverer = newMTUDiscoverer(
