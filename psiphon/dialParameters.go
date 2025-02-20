@@ -1036,7 +1036,10 @@ func MakeDialParameters(
 
 		if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
 			common.ContainsAny(
-				p.KeyStrings(parameters.HoldOffDirectTunnelProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+				p.KeyStrings(
+					parameters.HoldOffDirectTunnelProviderRegions,
+					dialParams.ServerEntry.ProviderID),
+				[]string{"", serverEntry.Region}) {
 
 			if p.WeightedCoinFlip(parameters.HoldOffDirectTunnelProbability) {
 
@@ -1048,7 +1051,10 @@ func MakeDialParameters(
 
 		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
 			common.ContainsAny(
-				p.KeyStrings(parameters.HoldOffInproxyTunnelProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+				p.KeyStrings(
+					parameters.HoldOffInproxyTunnelProviderRegions,
+					dialParams.ServerEntry.ProviderID),
+				[]string{"", serverEntry.Region}) {
 
 			if p.WeightedCoinFlip(parameters.HoldOffInproxyTunnelProbability) {
 
@@ -1103,11 +1109,13 @@ func MakeDialParameters(
 
 		} else if !isReplay || !replayOSSHPrefix {
 
-			dialPortNumber, err := serverEntry.GetDialPortNumber(dialParams.TunnelProtocol)
+			dialPortNumber, err := serverEntry.GetDialPortNumber(
+				dialParams.TunnelProtocol)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			prefixSpec, err := makeOSSHPrefixSpecParameters(p, strconv.Itoa(dialPortNumber))
+			prefixSpec, err := makeOSSHPrefixSpecParameters(
+				p, strconv.Itoa(dialPortNumber))
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -1141,7 +1149,13 @@ func MakeDialParameters(
 
 	} else if !isReplay || !replayShadowsocksPrefix {
 
-		prefixSpec, err := makeShadowsocksPrefixSpecParameters(p)
+		dialPortNumber, err := serverEntry.GetDialPortNumber(
+			dialParams.TunnelProtocol)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		prefixSpec, err := makeShadowsocksPrefixSpecParameters(
+			p, strconv.Itoa(dialPortNumber))
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -2337,7 +2351,8 @@ func makeOSSHPrefixSpecParameters(
 	}
 }
 
-func makeOSSHPrefixSplitConfig(p parameters.ParametersAccessor) (*obfuscator.OSSHPrefixSplitConfig, error) {
+func makeOSSHPrefixSplitConfig(
+	p parameters.ParametersAccessor) (*obfuscator.OSSHPrefixSplitConfig, error) {
 
 	minDelay := p.Duration(parameters.OSSHPrefixSplitMinDelay)
 	maxDelay := p.Duration(parameters.OSSHPrefixSplitMaxDelay)
@@ -2355,7 +2370,8 @@ func makeOSSHPrefixSplitConfig(p parameters.ParametersAccessor) (*obfuscator.OSS
 }
 
 func makeShadowsocksPrefixSpecParameters(
-	p parameters.ParametersAccessor) (*ShadowsocksPrefixSpec, error) {
+	p parameters.ParametersAccessor,
+	dialPortNumber string) (*ShadowsocksPrefixSpec, error) {
 
 	if !p.WeightedCoinFlip(parameters.ShadowsocksPrefixProbability) {
 		return &ShadowsocksPrefixSpec{}, nil
@@ -2364,7 +2380,7 @@ func makeShadowsocksPrefixSpecParameters(
 	specs := p.ProtocolTransformSpecs(parameters.ShadowsocksPrefixSpecs)
 	scopedSpecNames := p.ProtocolTransformScopedSpecNames(parameters.ShadowsocksPrefixScopedSpecNames)
 
-	name, spec := specs.Select(transforms.SCOPE_ANY, scopedSpecNames)
+	name, spec := specs.Select(dialPortNumber, scopedSpecNames)
 
 	if spec == nil {
 		return &ShadowsocksPrefixSpec{}, nil
