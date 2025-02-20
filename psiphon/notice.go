@@ -673,6 +673,13 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 				args = append(args, name, value)
 			}
 		}
+
+		if dialParams.ShadowsocksPrefixSpec != nil {
+			if dialParams.ShadowsocksPrefixSpec.Spec != nil {
+				args = append(args, "ShadowsocksPrefix", dialParams.ShadowsocksPrefixSpec.Name)
+			}
+		}
+
 	}
 
 	singletonNoticeLogger.outputNotice(
