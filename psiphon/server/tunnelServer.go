@@ -3443,7 +3443,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		if destinationBytesMetricsASN != "" {
 
 			// Log any parameters.DestinationBytesMetricsASN data in the
-			// legacy log field format.
+			// legacy log field format. Zero values are not omitted in this
+			// format.
 
 			destinationBytesMetrics, ok :=
 				sshClient.destinationBytesMetrics[destinationBytesMetricsASN]
@@ -3484,11 +3485,27 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 				bytesUpUDP := destinationBytesMetrics.udpMetrics.getBytesUp()
 				bytesDownUDP := destinationBytesMetrics.udpMetrics.getBytesDown()
 
+				// Zero values are omitted to reduce log size.
+
+				bytes := bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
+				if bytes <= 0 {
+					continue
+				}
+
 				destBytes[ASN] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
-				destBytesUpTCP[ASN] = bytesUpTCP
-				destBytesDownTCP[ASN] = bytesDownTCP
-				destBytesUpUDP[ASN] = bytesUpUDP
-				destBytesDownUDP[ASN] = bytesDownUDP
+
+				if bytesUpTCP > 0 {
+					destBytesUpTCP[ASN] = bytesUpTCP
+				}
+				if bytesDownTCP > 0 {
+					destBytesDownTCP[ASN] = bytesDownTCP
+				}
+				if bytesUpUDP > 0 {
+					destBytesUpUDP[ASN] = bytesUpUDP
+				}
+				if bytesDownUDP > 0 {
+					destBytesDownUDP[ASN] = bytesDownUDP
+				}
 			}
 
 			logFields["asn_dest_bytes"] = destBytes
