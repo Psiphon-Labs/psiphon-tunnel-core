@@ -42,17 +42,17 @@ func TestInproxyComponents(t *testing.T) {
 
 	err := runInproxyBrokerDialParametersTest(t)
 	if err != nil {
-		t.Fatalf(errors.Trace(err).Error())
+		t.Fatal(errors.Trace(err).Error())
 	}
 
 	err = runInproxySTUNDialParametersTest()
 	if err != nil {
-		t.Fatalf(errors.Trace(err).Error())
+		t.Fatal(errors.Trace(err).Error())
 	}
 
 	err = runInproxyNATStateTest()
 	if err != nil {
-		t.Fatalf(errors.Trace(err).Error())
+		t.Fatal(errors.Trace(err).Error())
 	}
 
 	// TODO: test inproxyUDPConn multiplexed IPv6Synthesizer

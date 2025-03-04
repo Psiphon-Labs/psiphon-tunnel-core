@@ -36,7 +36,7 @@ func FuzzSessionPacketDeobfuscation(f *testing.F) {
 
 	rootSecret, err := GenerateRootObfuscationSecret()
 	if err != nil {
-		f.Fatalf(errors.Trace(err).Error())
+		f.Fatal(errors.Trace(err).Error())
 	}
 
 	n := 10
@@ -48,7 +48,7 @@ func FuzzSessionPacketDeobfuscation(f *testing.F) {
 		obfuscatedPacket, err := obfuscateSessionPacket(
 			rootSecret, true, packet, minPadding, maxPadding)
 		if err != nil {
-			f.Fatalf(errors.Trace(err).Error())
+			f.Fatal(errors.Trace(err).Error())
 		}
 
 		originals[i] = obfuscatedPacket
@@ -86,7 +86,7 @@ func FuzzSessionPacketDeobfuscation(f *testing.F) {
 func TestSessionPacketObfuscation(t *testing.T) {
 	err := runTestSessionPacketObfuscation()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 
@@ -349,7 +349,7 @@ func runTestSessionPacketObfuscation() error {
 func TestObfuscationReplayHistory(t *testing.T) {
 	err := runTestObfuscationReplayHistory()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 
