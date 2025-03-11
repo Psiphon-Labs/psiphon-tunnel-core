@@ -211,11 +211,10 @@ func (uconn *UConn) DidTls12Resume() bool {
 //
 // Deprecated: This method is deprecated in favor of SetSessionTicketExtension,
 // as it only handles session override of TLS 1.2
-func (uconn *UConn) SetSessionState(session *ClientSessionState) error {
+func (uconn *UConn) SetSessionState(cs *ClientSessionState) error {
 	sessionTicketExt := &SessionTicketExtension{Initialized: true}
-	if session != nil {
-		sessionTicketExt.Session.ticket = session.session.ticket
-		sessionTicketExt.Session = session.session
+	if cs != nil {
+		sessionTicketExt.Session = cs.session
 	}
 	return uconn.SetSessionTicketExtension(sessionTicketExt)
 }

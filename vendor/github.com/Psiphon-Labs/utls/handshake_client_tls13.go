@@ -766,10 +766,7 @@ func (hs *clientHandshakeStateTLS13) readServerCertificate() error {
 		return nil
 	}
 
-	// [UTLS SECTION BEGIN]
-	// msg, err := c.readHandshake(hs.transcript)
-	msg, err := c.readHandshake(nil) // hold writing to transcript until we know it is not compressed cert
-	// [UTLS SECTION END]
+	msg, err := c.readHandshake(hs.transcript)
 	if err != nil {
 		return err
 	}
@@ -777,24 +774,20 @@ func (hs *clientHandshakeStateTLS13) readServerCertificate() error {
 	certReq, ok := msg.(*certificateRequestMsgTLS13)
 	if ok {
 		hs.certReq = certReq
-		transcriptMsg(certReq, hs.transcript) // [UTLS] if it is certReq (not compressedCert), write to transcript
 
-		// msg, err = c.readHandshake(hs.transcript) // [UTLS]
-		msg, err = c.readHandshake(nil) // [UTLS] we don't write to transcript until make sure it is not compressed cert
+		msg, err = c.readHandshake(hs.transcript)
 		if err != nil {
 			return err
 		}
 	}
 
 	// [UTLS SECTION BEGINS]
-	var skipWritingCertToTranscript bool = false
 	if hs.uconn != nil {
 		processedMsg, err := hs.utlsReadServerCertificate(msg)
 		if err != nil {
 			return err
 		}
 		if processedMsg != nil {
-			skipWritingCertToTranscript = true
 			msg = processedMsg // msg is now a processed-by-extension certificateMsg
 		}
 	}
@@ -809,14 +802,6 @@ func (hs *clientHandshakeStateTLS13) readServerCertificate() error {
 		c.sendAlert(alertDecodeError)
 		return errors.New("tls: received empty certificates message")
 	}
-
-	// [UTLS SECTION BEGINS]
-	if !skipWritingCertToTranscript { // write to transcript only if it is not compressedCert (i.e. if not processed by extension)
-		if err = transcriptMsg(certMsg, hs.transcript); err != nil {
-			return err
-		}
-	}
-	// [UTLS SECTION ENDS]
 
 	c.scts = certMsg.certificate.SignedCertificateTimestamps
 	c.ocspResponse = certMsg.certificate.OCSPStaple

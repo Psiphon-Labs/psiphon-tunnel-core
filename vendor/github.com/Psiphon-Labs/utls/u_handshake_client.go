@@ -26,9 +26,6 @@ func (hs *clientHandshakeStateTLS13) utlsReadServerCertificate(msg any) (process
 			if len(hs.uconn.certCompressionAlgs) > 0 {
 				compressedCertMsg, ok := msg.(*utlsCompressedCertificateMsg)
 				if ok {
-					if err = transcriptMsg(compressedCertMsg, hs.transcript); err != nil {
-						return nil, err
-					}
 					msg, err = hs.decompressCert(*compressedCertMsg)
 					if err != nil {
 						return nil, fmt.Errorf("tls: failed to decompress certificate message: %w", err)

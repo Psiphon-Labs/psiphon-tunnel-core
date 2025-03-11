@@ -57,7 +57,7 @@ github.com/Psiphon-Labs/quic-go/internal/utils/ringbuffer
 github.com/Psiphon-Labs/quic-go/internal/wire
 github.com/Psiphon-Labs/quic-go/logging
 github.com/Psiphon-Labs/quic-go/quicvarint
-# github.com/Psiphon-Labs/utls v0.0.0-20250228222508-0e6c20273fcc
+# github.com/Psiphon-Labs/utls v0.0.0-20250311210446-c1daf1ce55c1
 ## explicit; go 1.23
 github.com/Psiphon-Labs/utls
 github.com/Psiphon-Labs/utls/byteorder
