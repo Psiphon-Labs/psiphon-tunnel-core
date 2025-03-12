@@ -166,6 +166,8 @@ func handshakeAPIRequestHandler(
 	var clientGeoIPData GeoIPData
 
 	var inproxyClientIP string
+	var inproxyProxyID inproxy.ID
+	var inproxyMatchedPersonalCompartments bool
 	var inproxyClientGeoIPData GeoIPData
 	var inproxyRelayLogFields common.LogFields
 
@@ -204,10 +206,15 @@ func handshakeAPIRequestHandler(
 			return nil, errors.Trace(err)
 		}
 
-		inproxyClientIP, inproxyRelayLogFields, err = doHandshakeInproxyBrokerRelay(
-			sshClient,
-			inproxyConnectionID,
-			inproxyRelayPacket)
+		inproxyClientIP,
+			inproxyProxyID,
+			inproxyMatchedPersonalCompartments,
+			inproxyRelayLogFields,
+			err =
+			doHandshakeInproxyBrokerRelay(
+				sshClient,
+				inproxyConnectionID,
+				inproxyRelayPacket)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -307,6 +314,8 @@ func handshakeAPIRequestHandler(
 			newTacticsTag:           newTacticsTag,
 			inproxyClientIP:         inproxyClientIP,
 			inproxyClientGeoIPData:  inproxyClientGeoIPData,
+			inproxyProxyID:          inproxyProxyID,
+			inproxyMatchedPersonal:  inproxyMatchedPersonalCompartments,
 			inproxyRelayLogFields:   inproxyRelayLogFields,
 		},
 		authorizations)
@@ -454,14 +463,16 @@ func handshakeAPIRequestHandler(
 func doHandshakeInproxyBrokerRelay(
 	sshClient *sshClient,
 	clientConnectionID string,
-	initialRelayPacket []byte) (string, common.LogFields, error) {
+	initialRelayPacket []byte) (string, inproxy.ID, bool, common.LogFields, error) {
 
 	connectionID, err := inproxy.IDFromString(clientConnectionID)
 	if err != nil {
-		return "", nil, errors.Trace(err)
+		return "", inproxy.ID{}, false, nil, errors.Trace(err)
 	}
 
 	clientIP := ""
+	var proxyID inproxy.ID
+	var matchedPersonalCompartments bool
 	var logFields common.LogFields
 
 	// This first packet from broker arrives via the client handshake. If
@@ -481,10 +492,14 @@ func doHandshakeInproxyBrokerRelay(
 			connectionID,
 			func(
 				brokerVerifiedOriginalClientIP string,
+				brokerReportedProxyID inproxy.ID,
+				brokerMatchedPersonalCompartments bool,
 				fields common.LogFields) {
 
 				// Once the broker report is received, this callback is invoked.
 				clientIP = brokerVerifiedOriginalClientIP
+				proxyID = brokerReportedProxyID
+				matchedPersonalCompartments = brokerMatchedPersonalCompartments
 				logFields = fields
 			})
 		if err != nil {
@@ -494,7 +509,7 @@ func doHandshakeInproxyBrokerRelay(
 				// invalid. Drop the packet and return an error. Do _not_
 				// reset the session, otherwise a malicious client could
 				// interrupt a valid broker/server session with a malformed packet.
-				return "", nil, errors.Trace(err)
+				return "", inproxy.ID{}, false, nil, errors.Trace(err)
 			}
 
 			// In the case of expired sessions, a reset session token is sent
@@ -509,7 +524,7 @@ func doHandshakeInproxyBrokerRelay(
 
 			// The relay is complete; the handler recording the clientIP and
 			// logFields was invoked.
-			return clientIP, logFields, nil
+			return clientIP, proxyID, matchedPersonalCompartments, logFields, nil
 		}
 
 		// server -> broker
@@ -523,7 +538,7 @@ func doHandshakeInproxyBrokerRelay(
 		}
 		requestPayload, err := protocol.CBOREncoding.Marshal(request)
 		if err != nil {
-			return "", nil, errors.Trace(err)
+			return "", inproxy.ID{}, false, nil, errors.Trace(err)
 		}
 
 		ok, responsePayload, err := sshClient.sshConn.SendRequest(
@@ -531,22 +546,23 @@ func doHandshakeInproxyBrokerRelay(
 			true,
 			requestPayload)
 		if err != nil {
-			return "", nil, errors.Trace(err)
+			return "", inproxy.ID{}, false, nil, errors.Trace(err)
 		}
 		if !ok {
-			return "", nil, errors.TraceNew("client rejected request")
+			return "", inproxy.ID{}, false, nil, errors.TraceNew("client rejected request")
 		}
 
 		var response protocol.InproxyRelayResponse
 		err = cbor.Unmarshal(responsePayload, &response)
 		if err != nil {
-			return "", nil, errors.Trace(err)
+			return "", inproxy.ID{}, false, nil, errors.Trace(err)
 		}
 
 		relayPacket = response.Packet
 	}
 
-	return "", nil, errors.Tracef("exceeded %d relay round trips", inproxy.MaxRelayRoundTrips)
+	return "", inproxy.ID{}, false, nil, errors.Tracef(
+		"exceeded %d relay round trips", inproxy.MaxRelayRoundTrips)
 }
 
 // uniqueUserParams are the connected request parameters which are logged for

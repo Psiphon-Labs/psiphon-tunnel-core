@@ -402,7 +402,7 @@ const (
 	InproxyAllowClient                                 = "InproxyAllowClient"
 	InproxyAllowDomainFrontedDestinations              = "InproxyAllowDomainFrontedDestinations"
 	InproxyTunnelProtocolSelectionProbability          = "InproxyTunnelProtocolSelectionProbability"
-	InproxyAllBrokerPublicKeys                         = "InproxyAllBrokerPublicKeys"
+	InproxyAllBrokerSpecs                              = "InproxyAllBrokerSpecs"
 	InproxyBrokerSpecs                                 = "InproxyBrokerSpecs"
 	InproxyPersonalPairingBrokerSpecs                  = "InproxyPersonalPairingBrokerSpecs"
 	InproxyProxyBrokerSpecs                            = "InproxyProxyBrokerSpecs"
@@ -487,6 +487,20 @@ const (
 	InproxyProxyOnBrokerClientFailedRetryPeriod        = "InproxyProxyOnBrokerClientFailedRetryPeriod"
 	InproxyProxyIncompatibleNetworkTypes               = "InproxyProxyIncompatibleNetworkTypes"
 	InproxyClientIncompatibleNetworkTypes              = "InproxyClientIncompatibleNetworkTypes"
+	InproxyEnableProxyQuality                          = "InproxyEnableProxyQuality"
+	InproxyEnableProxyQualityClientRegions             = "InproxyEnableProxyQualityClientRegions"
+	InproxyProxyQualityTargetUpstreamBytes             = "InproxyProxyQualityTargetUpstreamBytes"
+	InproxyProxyQualityTargetDownstreamBytes           = "InproxyProxyQualityTargetDownstreamBytes"
+	InproxyProxyQualityTargetDuration                  = "InproxyProxyQualityTargetDuration"
+	InproxyProxyQualityReporterTrustedCACertificates   = "InproxyProxyQualityReporterTrustedCACertificates"
+	InproxyProxyQualityReporterAdditionalHeaders       = "InproxyProxyQualityReporterAdditionalHeaders"
+	InproxyProxyQualityReporterMaxRequestEntries       = "InproxyProxyQualityReporterMaxRequestEntries"
+	InproxyProxyQualityReporterRequestDelay            = "InproxyProxyQualityReporterRequestDelay"
+	InproxyProxyQualityReporterRequestTimeout          = "InproxyProxyQualityReporterRequestTimeout"
+	InproxyProxyQualityReporterRequestRetries          = "InproxyProxyQualityReporterRequestRetries"
+	InproxyProxyQualityTTL                             = "InproxyProxyQualityTTL"
+	InproxyProxyQualityPendingFailedMatchDeadline      = "InproxyProxyQualityPendingFailedMatchDeadline"
+	InproxyProxyQualityFailedMatchThreshold            = "InproxyProxyQualityFailedMatchThreshold"
 	NetworkIDCacheTTL                                  = "NetworkIDCacheTTL"
 
 	// Retired parameters
@@ -954,7 +968,7 @@ var defaultParameters = map[string]struct {
 	InproxyAllowClient:                                 {value: false, flags: serverSideOnly},
 	InproxyAllowDomainFrontedDestinations:              {value: false, flags: serverSideOnly},
 	InproxyTunnelProtocolSelectionProbability:          {value: 0.5, minimum: 0.0},
-	InproxyAllBrokerPublicKeys:                         {value: []string{}, flags: serverSideOnly},
+	InproxyAllBrokerSpecs:                              {value: InproxyBrokerSpecsValue{}, flags: serverSideOnly},
 	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
 	InproxyPersonalPairingBrokerSpecs:                  {value: InproxyBrokerSpecsValue{}},
 	InproxyProxyBrokerSpecs:                            {value: InproxyBrokerSpecsValue{}},
@@ -1039,6 +1053,21 @@ var defaultParameters = map[string]struct {
 	InproxyProxyOnBrokerClientFailedRetryPeriod:        {value: 30 * time.Second, minimum: time.Duration(0)},
 	InproxyProxyIncompatibleNetworkTypes:               {value: []string{}},
 	InproxyClientIncompatibleNetworkTypes:              {value: []string{}},
+
+	InproxyEnableProxyQuality:                        {value: false, flags: serverSideOnly},
+	InproxyEnableProxyQualityClientRegions:           {value: []string{}, flags: serverSideOnly},
+	InproxyProxyQualityTargetUpstreamBytes:           {value: 0, minimum: 0, flags: serverSideOnly},
+	InproxyProxyQualityTargetDownstreamBytes:         {value: 0, minimum: 0, flags: serverSideOnly},
+	InproxyProxyQualityTargetDuration:                {value: time.Duration(0), minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyProxyQualityReporterMaxRequestEntries:     {value: 1000, minimum: 1, flags: serverSideOnly},
+	InproxyProxyQualityReporterTrustedCACertificates: {value: "", flags: serverSideOnly},
+	InproxyProxyQualityReporterAdditionalHeaders:     {value: http.Header{}, flags: serverSideOnly},
+	InproxyProxyQualityReporterRequestDelay:          {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyProxyQualityReporterRequestTimeout:        {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyProxyQualityReporterRequestRetries:        {value: 2, minimum: 0, flags: serverSideOnly},
+	InproxyProxyQualityTTL:                           {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyProxyQualityPendingFailedMatchDeadline:    {value: 5 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyProxyQualityFailedMatchThreshold:          {value: 10, minimum: 1, flags: serverSideOnly},
 
 	NetworkIDCacheTTL: {value: 500 * time.Millisecond, minimum: time.Duration(0)},
 }
@@ -1291,19 +1320,19 @@ func (p *Parameters) Set(
 	}
 	shadowsocksPrefixSpecs, _ := shadowsocksPrefixSpecsValue.(transforms.Specs)
 
-	// Special case: in-proxy broker public keys in InproxyBrokerSpecs must
-	// appear in InproxyAllBrokerPublicKeys; and inproxy common compartment
-	// IDs must appear in InproxyAllCommonCompartmentIDs. This check is
+	// Special case: in-proxy broker specs in any InproxyBrokerSpecs must
+	// appear in InproxyAllBrokerSpecs; and in-proxy common compartment IDs
+	// must appear in InproxyAllCommonCompartmentIDs. This check is
 	// server-side only as the "All" parameters are serverSideOnly.
 
 	checkInproxyLists := !skipOnError && serverSide
 
-	inproxyAllBrokerPublicKeysValue, err := getAppliedValue(
-		InproxyAllBrokerPublicKeys, parameters, applyParameters)
+	inproxyAllBrokerSpecsValue, err := getAppliedValue(
+		InproxyAllBrokerSpecs, parameters, applyParameters)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	inproxyAllBrokerPublicKeys, _ := inproxyAllBrokerPublicKeysValue.([]string)
+	inproxyAllBrokerSpecs, _ := inproxyAllBrokerSpecsValue.(InproxyBrokerSpecsValue)
 
 	inproxyAllCommonCompartmentIDsValue, err := getAppliedValue(
 		InproxyAllCommonCompartmentIDs, parameters, applyParameters)
@@ -1566,9 +1595,9 @@ func (p *Parameters) Set(
 				}
 			case InproxyBrokerSpecsValue:
 
-				var checkList *[]string
+				var checkList *InproxyBrokerSpecsValue
 				if checkInproxyLists && name == InproxyBrokerSpecs {
-					checkList = &inproxyAllBrokerPublicKeys
+					checkList = &inproxyAllBrokerSpecs
 				}
 
 				err := v.Validate(checkList)

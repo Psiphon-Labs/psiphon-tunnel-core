@@ -54,9 +54,7 @@ package psiphon
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	std_errors "errors"
@@ -334,7 +332,7 @@ func CustomTLSDial(
 					return errors.TraceNew("unexpected verified chains")
 				}
 				var err error
-				verifiedChains, err = verifyServerCertificate(
+				verifiedChains, err = common.VerifyServerCertificate(
 					tlsConfigRootCAs, rawCerts, verifyServerName)
 				if err != nil {
 					return errors.Trace(err)
@@ -342,7 +340,7 @@ func CustomTLSDial(
 			}
 
 			if len(config.VerifyPins) > 0 {
-				err := verifyCertificatePins(
+				err := common.VerifyCertificatePins(
 					config.VerifyPins, verifiedChains)
 				if err != nil {
 					return errors.Trace(err)
@@ -717,58 +715,6 @@ func verifyLegacyCertificate(rawCerts [][]byte, expectedCertificate *x509.Certif
 		return errors.TraceNew("unexpected certificate")
 	}
 	return nil
-}
-
-// verifyServerCertificate parses and verifies the provided chain. If
-// successful, it returns the verified chains that were built.
-func verifyServerCertificate(
-	rootCAs *x509.CertPool, rawCerts [][]byte, verifyServerName string) ([][]*x509.Certificate, error) {
-
-	// This duplicates the verification logic in utls (and standard crypto/tls).
-
-	certs := make([]*x509.Certificate, len(rawCerts))
-	for i, rawCert := range rawCerts {
-		cert, err := x509.ParseCertificate(rawCert)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		certs[i] = cert
-	}
-
-	opts := x509.VerifyOptions{
-		Roots:         rootCAs,
-		DNSName:       verifyServerName,
-		Intermediates: x509.NewCertPool(),
-	}
-
-	for i, cert := range certs {
-		if i == 0 {
-			continue
-		}
-		opts.Intermediates.AddCert(cert)
-	}
-
-	verifiedChains, err := certs[0].Verify(opts)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return verifiedChains, nil
-}
-
-func verifyCertificatePins(pins []string, verifiedChains [][]*x509.Certificate) error {
-	for _, chain := range verifiedChains {
-		for _, cert := range chain {
-			publicKeyDigest := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
-			expectedPin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
-			if common.Contains(pins, expectedPin) {
-				// Return success on the first match of any certificate public key to any
-				// pin.
-				return nil
-			}
-		}
-	}
-	return errors.TraceNew("no pin found")
 }
 
 func IsTLSConnUsingHTTP2(conn net.Conn) bool {

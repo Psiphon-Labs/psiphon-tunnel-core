@@ -148,3 +148,61 @@ func GenerateWebServerCertificate(hostname string) (string, string, string, erro
 
 	return string(webServerCertificate), string(webServerPrivateKey), pin, nil
 }
+
+// VerifyServerCertificate and VerifyCertificatePins test coverage provided by
+// psiphon/controller_test and psiphon/server/server_test.
+
+// VerifyServerCertificate parses and verifies the provided chain. If
+// successful, it returns the verified chains that were built.
+func VerifyServerCertificate(
+	rootCAs *x509.CertPool, rawCerts [][]byte, verifyServerName string) ([][]*x509.Certificate, error) {
+
+	// This duplicates the verification logic in utls (and standard crypto/tls).
+
+	certs := make([]*x509.Certificate, len(rawCerts))
+	for i, rawCert := range rawCerts {
+		cert, err := x509.ParseCertificate(rawCert)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		certs[i] = cert
+	}
+
+	opts := x509.VerifyOptions{
+		Roots:         rootCAs,
+		DNSName:       verifyServerName,
+		Intermediates: x509.NewCertPool(),
+	}
+
+	for i, cert := range certs {
+		if i == 0 {
+			continue
+		}
+		opts.Intermediates.AddCert(cert)
+	}
+
+	verifiedChains, err := certs[0].Verify(opts)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return verifiedChains, nil
+}
+
+// VerifyCertificatePins checks whether any specified certificate pin -- a
+// SHA-256 hash of a certificate public key -- if found in the given
+// certificate chain.
+func VerifyCertificatePins(pins []string, verifiedChains [][]*x509.Certificate) error {
+	for _, chain := range verifiedChains {
+		for _, cert := range chain {
+			publicKeyDigest := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+			expectedPin := base64.StdEncoding.EncodeToString(publicKeyDigest[:])
+			if Contains(pins, expectedPin) {
+				// Return success on the first match of any certificate public key to any
+				// pin.
+				return nil
+			}
+		}
+	}
+	return errors.TraceNew("no pin found")
+}

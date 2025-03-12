@@ -112,6 +112,30 @@ type Matcher struct {
 	pendingAnswers *lrucache.Cache
 }
 
+// MatcherConfig specifies the configuration for a matcher.
+type MatcherConfig struct {
+
+	// Logger is used to log events.
+	Logger common.Logger
+
+	// Announcement queue limits.
+	AnnouncementLimitEntryCount    int
+	AnnouncementRateLimitQuantity  int
+	AnnouncementRateLimitInterval  time.Duration
+	AnnouncementNonlimitedProxyIDs []ID
+
+	// Offer queue limits.
+	OfferLimitEntryCount   int
+	OfferRateLimitQuantity int
+	OfferRateLimitInterval time.Duration
+
+	// Proxy quality state.
+	ProxyQualityState *ProxyQualityState
+
+	// Broker process load limit state callback. See Broker.Config.
+	IsLoadLimiting func() bool
+}
+
 // MatchProperties specifies the compartment, GeoIP, and network topology
 // matching properties of clients and proxies.
 type MatchProperties struct {
@@ -265,27 +289,6 @@ type answerInfo struct {
 type pendingAnswer struct {
 	announcement *MatchAnnouncement
 	answerChan   chan *answerInfo
-}
-
-// MatcherConfig specifies the configuration for a matcher.
-type MatcherConfig struct {
-
-	// Logger is used to log events.
-	Logger common.Logger
-
-	// Announcement queue limits.
-	AnnouncementLimitEntryCount    int
-	AnnouncementRateLimitQuantity  int
-	AnnouncementRateLimitInterval  time.Duration
-	AnnouncementNonlimitedProxyIDs []ID
-
-	// Offer queue limits.
-	OfferLimitEntryCount   int
-	OfferRateLimitQuantity int
-	OfferRateLimitInterval time.Duration
-
-	// Broker process load limit state callback. See Broker.Config.
-	IsLoadLimiting func() bool
 }
 
 // NewMatcher creates a new Matcher.
@@ -871,6 +874,32 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 		// often skip NAT discovery.
 
 		matchNAT := offerProperties.IsPreferredNATMatch(announcementProperties)
+
+		// Use proxy ASN quality as an alternative to preferred NAT matches.
+		//
+		// The NAT matching logic depends on RFC5780 NAT discovery test
+		// results, which may not be entirely accurate, and may not be
+		// available in the first place, especially if skipped for clients,
+		// which is the default.
+		//
+		// Proxy ASN quality leverages the quality data, provided by servers,
+		// indicating that the particular proxy recently relayed a successful
+		// tunnel for some client in the given ASN. When this quality data is
+		// present, NAT compatibility is assumed, with the caveat that the
+		// client device and immediate router may not be the same.
+		//
+		// Limitations:
+		// - existsPreferredNATMatch doesn't reflect existence of matching
+		//   proxy ASN quality, so the NAT match probe can end prematurely.
+		// - IsPreferredNATMatch currently takes precedence over proxy ASN
+		//   quality.
+
+		if !matchNAT && isPriority {
+			matchNAT = m.config.ProxyQualityState.HasQuality(
+				announcementEntry.announcement.ProxyID,
+				announcementEntry.announcement.Properties.GeoIPData.ASN,
+				offerProperties.GeoIPData.ASN)
+		}
 
 		// At this point, the candidate is a match. Determine if this is a new
 		// best match, either if there was no previous match, or this is a

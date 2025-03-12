@@ -1095,6 +1095,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// 3. hot reload of server tactics (runConfig.doHotReload && doServerTactics)
 	discoveryLog := make(chan map[string]interface{}, 3)
 
+	inproxyProxyAnnounceLog := make(chan map[string]interface{}, 1)
+	inproxyClientOfferLog := make(chan map[string]interface{}, 1)
+	inproxyProxyAnswerLog := make(chan map[string]interface{}, 1)
+	inproxyServerProxyQualityLog := make(chan map[string]interface{}, 1)
+
 	setLogCallback(func(log []byte) {
 
 		logFields := make(map[string]interface{})
@@ -1131,18 +1136,31 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			default:
 			}
 		case "inproxy_broker":
-			// Check that broker receives the correct fronting provider ID.
-			//
-			// TODO: check inproxy_broker logs received when expected and
-			// check more fields
+
 			event, ok := logFields["broker_event"].(string)
 			if !ok {
 				t.Errorf("missing inproxy_broker.broker_event")
 			}
-			if event == "client-offer" || event == "proxy-announce" {
-				fronting_provider_id, ok := logFields["fronting_provider_id"].(string)
-				if !ok || fronting_provider_id != inproxyTestConfig.brokerFrontingProviderID {
-					t.Errorf("unexpected inproxy_broker.fronting_provider_id for %s", event)
+			switch event {
+			case "proxy-announce":
+				select {
+				case inproxyProxyAnnounceLog <- logFields:
+				default:
+				}
+			case "client-offer":
+				select {
+				case inproxyClientOfferLog <- logFields:
+				default:
+				}
+			case "proxy-answer":
+				select {
+				case inproxyProxyAnswerLog <- logFields:
+				default:
+				}
+			case "server-proxy-quality":
+				select {
+				case inproxyServerProxyQualityLog <- logFields:
+				default:
 				}
 			}
 		}
@@ -2022,6 +2040,46 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 		default:
 			t.Fatalf("missing discovery log")
+		}
+	}
+
+	// Check in-proxy broker logs. This check also confirms that the server
+	// proxy quality report request succeeded.
+
+	logChannels := []chan map[string]interface{}{
+		inproxyProxyAnnounceLog,
+		inproxyClientOfferLog,
+		inproxyProxyAnswerLog,
+		inproxyServerProxyQualityLog}
+	for _, logChannel := range logChannels {
+
+		// There's no proxy quality report in personal pairing mode.
+		expectLog := !(logChannel == inproxyServerProxyQualityLog && runConfig.doPersonalPairing)
+
+		if doInproxy && expectLog {
+			select {
+			case logFields := <-logChannel:
+
+				// Check that broker receives the correct fronting provider ID.
+				//
+				// TODO: check more fields
+				if logChannel == inproxyProxyAnnounceLog ||
+					logChannel == inproxyClientOfferLog ||
+					logChannel == inproxyServerProxyQualityLog {
+					fronting_provider_id, ok := logFields["fronting_provider_id"].(string)
+					if !ok || fronting_provider_id != inproxyTestConfig.brokerFrontingProviderID {
+						t.Errorf("unexpected inproxy_broker.fronting_provider_id")
+					}
+				}
+			default:
+				t.Fatalf("missing in-proxy broker log")
+			}
+		} else {
+			select {
+			case <-logChannel:
+				t.Fatalf("unexpected in-proxy broker log")
+			default:
+			}
 		}
 	}
 
@@ -3859,8 +3917,8 @@ func generateInproxyTestConfig(
 		verifyPins = "[]"
 	}
 
-	brokerSpecsJSONFormat := `
-            [{
+	brokerSpecJSONFormat := `
+            {
                 "BrokerPublicKey": "%s",
                 "BrokerRootObfuscationSecret": "%s",
                 "BrokerFrontingSpecs": [{
@@ -3872,11 +3930,11 @@ func generateInproxyTestConfig(
                     "VerifyPins": %s,
                     "Host": "%s"
                 }]
-            }]
+            }
     `
 
-	validBrokerSpecsJSON := fmt.Sprintf(
-		brokerSpecsJSONFormat,
+	validBrokerSpecJSON := fmt.Sprintf(
+		brokerSpecJSONFormat,
 		brokerSessionPublicKeyStr,
 		brokerRootObfuscationSecretStr,
 		brokerFrontingProviderID,
@@ -3890,8 +3948,8 @@ func generateInproxyTestConfig(
 	otherSessionPublicKey, _ := otherSessionPrivateKey.GetPublicKey()
 	otherRootObfuscationSecret, _ := inproxy.GenerateRootObfuscationSecret()
 
-	invalidBrokerSpecsJSON := fmt.Sprintf(
-		brokerSpecsJSONFormat,
+	invalidBrokerSpecJSON := fmt.Sprintf(
+		brokerSpecJSONFormat,
 		otherSessionPublicKey.String(),
 		otherRootObfuscationSecret.String(),
 		prng.HexString(16),
@@ -3900,6 +3958,10 @@ func generateInproxyTestConfig(
 		prng.HexString(16),
 		fmt.Sprintf("[\"%s\"]", prng.HexString(16)),
 		prng.HexString(16))
+
+	validBrokerSpecsJSON := fmt.Sprintf("[%s]", validBrokerSpecJSON)
+	invalidBrokerSpecsJSON := fmt.Sprintf("[%s]", invalidBrokerSpecJSON)
+	allBrokerSpecsJSON := fmt.Sprintf("[%s, %s]", validBrokerSpecJSON, invalidBrokerSpecJSON)
 
 	var brokerSpecsJSON, proxyBrokerSpecsJSON, clientBrokerSpecsJSON string
 	if doTargetBrokerSpecs {
@@ -3913,6 +3975,13 @@ func generateInproxyTestConfig(
 		proxyBrokerSpecsJSON = "[]"
 		clientBrokerSpecsJSON = "[]"
 	}
+
+	additionalHeaders := http.Header{}
+	for name, value := range brokerMeekRequiredHeaders {
+		additionalHeaders[name] = []string{value}
+	}
+	additionalHeadersJSONBytes, _ := json.Marshal(additionalHeaders)
+	additionalHeadersJSON := string(additionalHeadersJSONBytes)
 
 	maxRequestTimeoutsJSON := ""
 	if prng.FlipCoin() {
@@ -3930,7 +3999,7 @@ func generateInproxyTestConfig(
             "InproxyAllowProxy": true,
             "InproxyAllowClient": true,
             "InproxyTunnelProtocolSelectionProbability": 1.0,
-            "InproxyAllBrokerPublicKeys": ["%s", "%s"],
+            "InproxyAllBrokerSpecs": %s,
             "InproxyBrokerSpecs": %s,
             "InproxyProxyBrokerSpecs": %s,
             "InproxyClientBrokerSpecs": %s,
@@ -3941,6 +4010,13 @@ func generateInproxyTestConfig(
             "InproxyDisablePortMapping": true,
             "InproxyDisableIPv6ICECandidates": true,
             "InproxyWebRTCMediaStreamsProbability": %s,
+            "InproxyEnableProxyQuality": true,
+            "InproxyProxyQualityTargetUpstreamBytes": 1,
+            "InproxyProxyQualityTargetDownstreamBytes": 1,
+            "InproxyProxyQualityTargetDuration": "1ns",
+            "InproxyProxyQualityReporterTrustedCACertificates": "%s",
+            "InproxyProxyQualityReporterAdditionalHeaders": %s,
+            "InproxyProxyQualityReporterRequestDelay": 0,
             %s
     `
 
@@ -3951,14 +4027,15 @@ func generateInproxyTestConfig(
 
 	tacticsParametersJSON := fmt.Sprintf(
 		tacticsParametersJSONFormat,
-		brokerSessionPublicKeyStr,
-		otherSessionPublicKey.String(),
+		allBrokerSpecsJSON,
 		brokerSpecsJSON,
 		proxyBrokerSpecsJSON,
 		clientBrokerSpecsJSON,
 		commonCompartmentIDStr,
 		commonCompartmentIDStr,
 		mediaStreamsProbability,
+		strings.ReplaceAll(brokerServerCertificate, "\n", "\\n"),
+		additionalHeadersJSON,
 		maxRequestTimeoutsJSON)
 
 	config := &inproxyTestConfig{

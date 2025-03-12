@@ -20,6 +20,8 @@
 package inproxy
 
 import (
+	"time"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 )
@@ -34,48 +36,155 @@ const MaxRelayRoundTrips = 10
 // maintains a ServerBrokerSessions, with a set of established sessions for
 // each broker. Session messages are relayed between the broker and the
 // server by the client.
+//
+// ServerBrokerSessions runs a ProxyQualityReporter which sends proxy quality
+// reports back to the same brokers.
 type ServerBrokerSessions struct {
-	sessions *ResponderSessions
+	config               *ServerBrokerSessionsConfig
+	sessions             *ResponderSessions
+	proxyQualityReporter *ProxyQualityReporter
+}
 
-	proxyMetricsValidator common.APIParameterValidator
-	proxyMetricsFormatter common.APIParameterLogFieldFormatter
-	proxyMetricsPrefix    string
+// ServerBrokerSessionsConfig specifies the configuration for a
+// ServerBrokerSessions instance.
+type ServerBrokerSessionsConfig struct {
+
+	// Logger provides a logging facility.
+	Logger common.Logger
+
+	// ServerPrivateKey is the server's session private key. It must
+	// correspond to the server session public key that a broker finds in a
+	// signed Psiphon server entry.
+	ServerPrivateKey SessionPrivateKey
+
+	// ServerRootObfuscationSecret is the server's root obfuscation secret, as
+	// found in the server's signed Psiphon server entry.
+	ServerRootObfuscationSecret ObfuscationSecret
+
+	// BrokerPublicKeys specifies the public keys corresponding to known
+	// brokers that are trusted to connect to the server; which are also the
+	// brokers to which the server will send its proxy quality reports.
+	BrokerPublicKeys []SessionPublicKey
+
+	// BrokerRootObfuscationSecrets are the obfuscation secrets corresponding
+	// to the entries in BrokerPublicKeys.
+	BrokerRootObfuscationSecrets []ObfuscationSecret
+
+	// BrokerRoundTripperMaker constructs round trip transports used to send
+	// proxy quality requests to the specified broker.
+	BrokerRoundTripperMaker ProxyQualityBrokerRoundTripperMaker
+
+	// ProxyMetricsValidator is used to further validate the proxy metrics
+	// fields relayed by the broker in broker server reports.
+	ProxyMetricsValidator common.APIParameterValidator
+
+	// ProxyMetricsValidator is used to log-format the proxy metrics fields
+	// relayed by the broker in broker server reports.
+	ProxyMetricsFormatter common.APIParameterLogFieldFormatter
+
+	// ProxyMetricsPrefix specifies an optional prefix to be prepended to
+	// proxy metric fields when logging.
+	ProxyMetricsPrefix string
 }
 
 // NewServerBrokerSessions create a new ServerBrokerSessions, with the
 // specified key material. The expected brokers are authenticated with
 // brokerPublicKeys, an allow list.
 func NewServerBrokerSessions(
-	serverPrivateKey SessionPrivateKey,
-	serverRootObfuscationSecret ObfuscationSecret,
-	brokerPublicKeys []SessionPublicKey,
-	proxyMetricsValidator common.APIParameterValidator,
-	proxyMetricsFormatter common.APIParameterLogFieldFormatter,
-	proxyMetricsPrefix string) (*ServerBrokerSessions, error) {
+	config *ServerBrokerSessionsConfig) (*ServerBrokerSessions, error) {
 
 	sessions, err := NewResponderSessionsForKnownInitiators(
-		serverPrivateKey, serverRootObfuscationSecret, brokerPublicKeys)
+		config.ServerPrivateKey,
+		config.ServerRootObfuscationSecret,
+		config.BrokerPublicKeys)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	return &ServerBrokerSessions{
+	s := &ServerBrokerSessions{
+		config:   config,
 		sessions: sessions,
+	}
 
-		proxyMetricsValidator: proxyMetricsValidator,
-		proxyMetricsFormatter: proxyMetricsFormatter,
-		proxyMetricsPrefix:    proxyMetricsPrefix,
-	}, nil
+	s.proxyQualityReporter, err = NewProxyQualityReporter(
+		config.Logger,
+		s,
+		config.ServerPrivateKey,
+		config.BrokerPublicKeys,
+		config.BrokerRootObfuscationSecrets,
+		config.BrokerRoundTripperMaker)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return s, nil
 }
 
-// SetKnownBrokerPublicKeys updates the set of broker public keys which are
+// Start launches the proxy quality reporter.
+func (s *ServerBrokerSessions) Start() error {
+
+	err := s.proxyQualityReporter.Start()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+// Stop terminates the proxy quality reporter.
+func (s *ServerBrokerSessions) Stop() {
+
+	s.proxyQualityReporter.Stop()
+}
+
+// SetKnownBrokers updates the set of broker public keys which are
 // allowed to establish sessions with the server. Any existing sessions with
 // keys not in the new list are deleted. Existing sessions with keys which
 // remain in the list are retained.
-func (s *ServerBrokerSessions) SetKnownBrokerPublicKeys(
-	brokerPublicKeys []SessionPublicKey) error {
+//
+// The broker public keys also identify those brokers to which the proxy
+// quality reporter will send quality requests. The broker obfuscation
+// secrets are used by the reporter.
+func (s *ServerBrokerSessions) SetKnownBrokers(
+	brokerPublicKeys []SessionPublicKey,
+	brokerRootObfuscationSecrets []ObfuscationSecret) error {
 
-	return errors.Trace(s.sessions.SetKnownInitiatorPublicKeys(brokerPublicKeys))
+	err := s.sessions.SetKnownInitiatorPublicKeys(
+		brokerPublicKeys)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = s.proxyQualityReporter.SetKnownBrokers(
+		brokerPublicKeys, brokerRootObfuscationSecrets)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+// SetProxyQualityRequestParameters overrides default values for proxy quality
+// reporter parameters.
+func (s *ServerBrokerSessions) SetProxyQualityRequestParameters(
+	maxRequestEntries int,
+	requestDelay time.Duration,
+	requestTimeout time.Duration,
+	requestRetries int) {
+
+	s.proxyQualityReporter.SetRequestParameters(
+		maxRequestEntries,
+		requestDelay,
+		requestTimeout,
+		requestRetries)
+}
+
+// ReportQuality enqueues a proxy quality event in the proxy quality reporter.
+// See ProxyQualityReporter.ReportQuality for details.
+func (s *ServerBrokerSessions) ReportQuality(
+	proxyID ID, proxyASN string, clientASN string) {
+
+	s.proxyQualityReporter.ReportQuality(proxyID, proxyASN, clientASN)
 }
 
 // ProxiedConnectionHandler is a callback, provided by the Psiphon server,
@@ -99,6 +208,8 @@ func (s *ServerBrokerSessions) SetKnownBrokerPublicKeys(
 // The fields in logFields should be added to server_tunnel logs.
 type ProxiedConnectionHandler func(
 	brokerVerifiedOriginalClientIP string,
+	brokerReportedProxyID ID,
+	brokerMatchedPersonalCompartments bool,
 	logFields common.LogFields)
 
 // HandlePacket handles a broker/server session packet, which are relayed by
@@ -137,7 +248,9 @@ func (s *ServerBrokerSessions) HandlePacket(
 		}
 
 		logFields, err := brokerReport.ValidateAndGetLogFields(
-			s.proxyMetricsValidator, s.proxyMetricsFormatter, s.proxyMetricsPrefix)
+			s.config.ProxyMetricsValidator,
+			s.config.ProxyMetricsFormatter,
+			s.config.ProxyMetricsPrefix)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -165,8 +278,11 @@ func (s *ServerBrokerSessions) HandlePacket(
 		}
 
 		if ok {
-
-			handler(brokerReport.ClientIP, logFields)
+			handler(
+				brokerReport.ClientIP,
+				brokerReport.ProxyID,
+				brokerReport.MatchedPersonalCompartments,
+				logFields)
 		}
 
 		// Returns nil, as there is no response to the report, and so no

@@ -60,6 +60,8 @@ func runTestMatcher() error {
 			OfferLimitEntryCount:   limitEntryCount,
 			OfferRateLimitQuantity: rateLimitQuantity,
 			OfferRateLimitInterval: rateLimitInterval,
+
+			ProxyQualityState: NewProxyQuality(),
 		})
 	err := m.Start()
 	if err != nil {

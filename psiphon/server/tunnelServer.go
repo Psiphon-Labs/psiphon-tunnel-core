@@ -142,7 +142,6 @@ func NewTunnelServer(
 // comment in sshClient.stop(). TODO: fully synchronized shutdown.
 func (server *TunnelServer) Run() error {
 
-	// TODO: should TunnelServer hold its own support pointer?
 	support := server.sshServer.support
 
 	// First bind all listeners; once all are successful,
@@ -281,6 +280,17 @@ func (server *TunnelServer) Run() error {
 			})
 	}
 
+	if server.sshServer.inproxyBrokerSessions != nil {
+
+		// When running in-proxy tunnels, start the InproxyBrokerSession
+		// background worker, which includes the proxy quality reporter.
+		// Start this before any tunnels can be established.
+		err := server.sshServer.inproxyBrokerSessions.Start()
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
 	for _, listener := range listeners {
 		server.runWaitGroup.Add(1)
 		go func(listener *sshListener) {
@@ -316,6 +326,10 @@ func (server *TunnelServer) Run() error {
 	}
 	server.sshServer.stopClients()
 	server.runWaitGroup.Wait()
+
+	if server.sshServer.inproxyBrokerSessions != nil {
+		server.sshServer.inproxyBrokerSessions.Stop()
+	}
 
 	log.WithTrace().Info("stopped")
 
@@ -466,12 +480,15 @@ func newSSHServer(
 	// original in-proxy client IP and the in-proxy proxy ID.
 	//
 	// Only brokers with public keys configured in the
-	// InproxyAllBrokerPublicKeys tactic parameter are allowed to connect to
+	// InproxyAllBrokerSpecs tactic parameter are allowed to connect to
 	// the server, and brokers verify the server's public key via the
 	// InproxySessionPublicKey server entry field.
 	//
 	// Sessions are initialized and run for all psiphond instances running any
 	// in-proxy tunnel protocol.
+	//
+	// inproxyBrokerSessions also run the server proxy quality reporter, which
+	// makes requests to brokers configured in InproxyAllBrokerSpecs.
 
 	var inproxyBrokerSessions *inproxy.ServerBrokerSessions
 
@@ -497,15 +514,33 @@ func newSSHServer(
 			return nil, errors.Trace(err)
 		}
 
-		// The expected broker public keys are set in reloadTactics directly
-		// below, so none are set here.
-		inproxyBrokerSessions, err = inproxy.NewServerBrokerSessions(
-			inproxyPrivateKey,
-			inproxyObfuscationSecret,
-			nil,
-			getInproxyBrokerAPIParameterValidator(support.Config),
-			getInproxyBrokerAPIParameterLogFieldFormatter(),
-			"inproxy_proxy_") // Prefix for proxy metrics log fields in server_tunnel
+		makeRoundTripper := func(
+			brokerPublicKey inproxy.SessionPublicKey) (
+			inproxy.RoundTripper, common.APIParameters, error) {
+
+			roundTripper, additionalParams, err := MakeInproxyProxyQualityBrokerRoundTripper(
+				support, brokerPublicKey)
+			if err != nil {
+				return nil, nil, errors.Trace(err)
+			}
+			return roundTripper, additionalParams, nil
+		}
+
+		// The expected broker specd and public keys are set in reloadTactics
+		// directly below, so none are set here.
+		config := &inproxy.ServerBrokerSessionsConfig{
+			Logger:                      CommonLogger(log),
+			ServerPrivateKey:            inproxyPrivateKey,
+			ServerRootObfuscationSecret: inproxyObfuscationSecret,
+			BrokerRoundTripperMaker:     makeRoundTripper,
+			ProxyMetricsValidator:       getInproxyBrokerAPIParameterValidator(support.Config),
+			ProxyMetricsFormatter:       getInproxyBrokerAPIParameterLogFieldFormatter(),
+
+			// Prefix for proxy metrics log fields in server_tunnel
+			ProxyMetricsPrefix: "inproxy_proxy_",
+		}
+
+		inproxyBrokerSessions, err = inproxy.NewServerBrokerSessions(config)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1487,9 +1522,9 @@ func (sshServer *sshServer) reloadTactics() error {
 	// in-proxy tunnel protocols.
 	if sshServer.inproxyBrokerSessions != nil {
 
-		// Get InproxyAllBrokerPublicKeys from tactics.
+		// Get InproxyAllBrokerSpecs from tactics.
 		//
-		// Limitation: assumes no GeoIP targeting for InproxyAllBrokerPublicKeys.
+		// Limitation: assumes no GeoIP targeting for InproxyAllBrokerSpecs.
 
 		p, err := sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
 		if err != nil {
@@ -1498,20 +1533,47 @@ func (sshServer *sshServer) reloadTactics() error {
 
 		if !p.IsNil() {
 
-			brokerPublicKeys, err := inproxy.SessionPublicKeysFromStrings(
-				p.Strings(parameters.InproxyAllBrokerPublicKeys))
-			if err != nil {
-				return errors.Trace(err)
+			brokerSpecs := p.InproxyBrokerSpecs(parameters.InproxyAllBrokerSpecs)
+
+			var brokerPublicKeys []inproxy.SessionPublicKey
+			var brokerRootObfuscationSecrets []inproxy.ObfuscationSecret
+
+			for _, brokerSpec := range brokerSpecs {
+
+				brokerPublicKey, err := inproxy.SessionPublicKeyFromString(
+					brokerSpec.BrokerPublicKey)
+				if err != nil {
+					return errors.Trace(err)
+				}
+
+				brokerPublicKeys = append(
+					brokerPublicKeys, brokerPublicKey)
+
+				brokerRootObfuscationSecret, err := inproxy.ObfuscationSecretFromString(
+					brokerSpec.BrokerRootObfuscationSecret)
+				if err != nil {
+					return errors.Trace(err)
+				}
+
+				brokerRootObfuscationSecrets = append(
+					brokerRootObfuscationSecrets, brokerRootObfuscationSecret)
 			}
 
 			// SetKnownBrokerPublicKeys will terminate any existing sessions
 			// for broker public keys no longer in the known/expected list;
 			// but will retain any existing sessions for broker public keys
 			// that remain in the list.
-			err = sshServer.inproxyBrokerSessions.SetKnownBrokerPublicKeys(brokerPublicKeys)
+			err = sshServer.inproxyBrokerSessions.SetKnownBrokers(
+				brokerPublicKeys, brokerRootObfuscationSecrets)
 			if err != nil {
 				return errors.Trace(err)
 			}
+
+			sshServer.inproxyBrokerSessions.SetProxyQualityRequestParameters(
+				p.Int(parameters.InproxyProxyQualityReporterMaxRequestEntries),
+				p.Duration(parameters.InproxyProxyQualityReporterRequestDelay),
+				p.Duration(parameters.InproxyProxyQualityReporterRequestTimeout),
+				p.Int(parameters.InproxyProxyQualityReporterRequestRetries))
 		}
 	}
 
@@ -1855,6 +1917,7 @@ type sshClient struct {
 	sentAlertRequests                    map[string]bool
 	peakMetrics                          peakMetrics
 	destinationBytesMetrics              map[string]*protocolDestinationBytesMetrics
+	inproxyProxyQualityTracker           *inproxyProxyQualityTracker
 }
 
 type trafficState struct {
@@ -1981,6 +2044,8 @@ type handshakeState struct {
 	newTacticsTag           string
 	inproxyClientIP         string
 	inproxyClientGeoIPData  GeoIPData
+	inproxyProxyID          inproxy.ID
+	inproxyMatchedPersonal  bool
 	inproxyRelayLogFields   common.LogFields
 }
 
@@ -2066,6 +2131,73 @@ func (lookup *splitTunnelLookup) lookup(region string) bool {
 		return lookup.regionsLookup[region]
 	} else {
 		return common.Contains(lookup.regions, region)
+	}
+}
+
+type inproxyProxyQualityTracker struct {
+	sshClient       *sshClient
+	targetBytesUp   int64
+	targetBytesDown int64
+	targetDuration  time.Duration
+	startTime       time.Time
+
+	bytesUp         int64
+	bytesDown       int64
+	reportTriggered int32
+}
+
+func newInproxyProxyQualityTracker(
+	sshClient *sshClient,
+	targetBytesUp int64,
+	targetBytesDown int64,
+	targetDuration time.Duration) *inproxyProxyQualityTracker {
+
+	return &inproxyProxyQualityTracker{
+		sshClient:       sshClient,
+		targetBytesUp:   targetBytesUp,
+		targetBytesDown: targetBytesDown,
+		targetDuration:  targetDuration,
+
+		startTime: time.Now(),
+	}
+}
+
+func (t *inproxyProxyQualityTracker) UpdateProgress(
+	downstreamBytes, upstreamBytes, _ int64) {
+
+	// Concurrency: UpdateProgress may be called concurrently; all accesses to
+	// mutated fields use atomic operations.
+
+	if atomic.LoadInt32(&t.reportTriggered) != 0 {
+		// TODO: performance -- remove the updater once the target met,
+		// instead of making this residual, no-op update call per tunnel I/O?
+		return
+	}
+
+	bytesUp := atomic.AddInt64(&t.bytesUp, upstreamBytes)
+	bytesDown := atomic.AddInt64(&t.bytesDown, downstreamBytes)
+
+	if (t.targetBytesUp == 0 || bytesUp >= t.targetBytesUp) &&
+		(t.targetBytesDown == 0 || bytesDown >= t.targetBytesDown) &&
+		(t.targetDuration == 0 || time.Since(t.startTime) >= t.targetDuration) {
+
+		// The tunnel connection is wrapped with the quality tracker just
+		// before the SSH handshake. It's possible that the quality targets
+		// are met before the Psiphon handshake completes, due to sufficient
+		// bytes/duration during the intermediate handshakes, or during the
+		// liveness test. Since the proxy ID isn't known until then Psiphon
+		// handshake completes, delay any report until at least after the
+		// Psiphon handshake is completed.
+
+		handshaked, _ := t.sshClient.getHandshaked()
+		if handshaked {
+
+			if !atomic.CompareAndSwapInt32(&t.reportTriggered, 0, 1) {
+				return
+			}
+
+			t.sshClient.reportProxyQuality()
+		}
 	}
 }
 
@@ -2158,11 +2290,20 @@ func (sshClient *sshClient) run(
 	// the connection active. Writes are not considered reliable activity indicators
 	// due to buffering.
 
+	// getTunnelActivityUpdaters wires up updaters that act on tunnel duration
+	// and bytes transferred, including the in-proxy proxy quality tracker.
+	// The quality tracker will include non-user traffic bytes, so it's not
+	// equivalent to server_tunnel bytes.
+	//
+	// Limitation: wrapping at this point omits some obfuscation layer bytes,
+	// including MEEK and QUIC.
+
 	activityConn, err := common.NewActivityMonitoredConn(
 		conn,
 		SSH_CONNECTION_READ_DEADLINE,
 		false,
-		nil)
+		nil,
+		sshClient.getTunnelActivityUpdaters()...)
 	if err != nil {
 		conn.Close()
 		if !isExpectedTunnelIOError(err) {
@@ -3173,7 +3314,8 @@ func (sshClient *sshClient) handleNewPacketTunnelChannel(
 			trafficType = portForwardTypeUDP
 		}
 
-		activityUpdaters := sshClient.getActivityUpdaters(trafficType, upstreamIPAddress)
+		activityUpdaters := sshClient.getPortForwardActivityUpdaters(
+			trafficType, upstreamIPAddress)
 
 		flowUpdaters := make([]tun.FlowActivityUpdater, len(activityUpdaters))
 		for i, activityUpdater := range activityUpdaters {
@@ -3425,26 +3567,23 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 		destinationBytesMetricsASNs := []string{}
 		destinationBytesMetricsASN := ""
-		if sshClient.sshServer.support.ServerTacticsParametersCache != nil {
 
-			// Target this using the client, not peer, GeoIP. In the case of
-			// in-proxy tunnel protocols, the client GeoIP fields will be None
-			// if the handshake does not complete. In that case, no bytes will
-			// have transferred.
+		// Target this using the client, not peer, GeoIP. In the case of
+		// in-proxy tunnel protocols, the client GeoIP fields will be None
+		// if the handshake does not complete. In that case, no bytes will
+		// have transferred.
 
-			p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.clientGeoIPData)
-			if err == nil && !p.IsNil() {
-				destinationBytesMetricsASNs = p.Strings(parameters.DestinationBytesMetricsASNs)
-				destinationBytesMetricsASN = p.String(parameters.DestinationBytesMetricsASN)
-			}
-			p.Close()
+		p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.clientGeoIPData)
+		if err == nil && !p.IsNil() {
+			destinationBytesMetricsASNs = p.Strings(parameters.DestinationBytesMetricsASNs)
+			destinationBytesMetricsASN = p.String(parameters.DestinationBytesMetricsASN)
 		}
+		p.Close()
 
 		if destinationBytesMetricsASN != "" {
 
 			// Log any parameters.DestinationBytesMetricsASN data in the
-			// legacy log field format. Zero values are not omitted in this
-			// format.
+			// legacy log field format.
 
 			destinationBytesMetrics, ok :=
 				sshClient.destinationBytesMetrics[destinationBytesMetricsASN]
@@ -3485,27 +3624,11 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 				bytesUpUDP := destinationBytesMetrics.udpMetrics.getBytesUp()
 				bytesDownUDP := destinationBytesMetrics.udpMetrics.getBytesDown()
 
-				// Zero values are omitted to reduce log size.
-
-				bytes := bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
-				if bytes <= 0 {
-					continue
-				}
-
 				destBytes[ASN] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
-
-				if bytesUpTCP > 0 {
-					destBytesUpTCP[ASN] = bytesUpTCP
-				}
-				if bytesDownTCP > 0 {
-					destBytesDownTCP[ASN] = bytesDownTCP
-				}
-				if bytesUpUDP > 0 {
-					destBytesUpUDP[ASN] = bytesUpUDP
-				}
-				if bytesDownUDP > 0 {
-					destBytesDownUDP[ASN] = bytesDownUDP
-				}
+				destBytesUpTCP[ASN] = bytesUpTCP
+				destBytesDownTCP[ASN] = bytesDownTCP
+				destBytesUpUDP[ASN] = bytesUpUDP
+				destBytesDownUDP[ASN] = bytesDownUDP
 			}
 
 			logFields["asn_dest_bytes"] = destBytes
@@ -3848,7 +3971,8 @@ func (sshClient *sshClient) setHandshakeState(
 
 	if sshClient.isInproxyTunnelProtocol {
 
-		p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.clientGeoIPData)
+		p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(
+			sshClient.clientGeoIPData)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -4241,17 +4365,13 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 	// of an additional tactics filtering per tunnel. As this cache is
 	// designed for GeoIP filtering only, handshake API parameters are not
 	// applied to tactics filtering in this case.
-
-	tacticsCache := sshClient.sshServer.support.ServerTacticsParametersCache
-	if tacticsCache == nil {
-		return
-	}
-
+	//
 	// Use the client, not peer, GeoIP data. In the case of in-proxy tunnel
 	// protocols, the client GeoIP fields will be populated using the
 	// original client IP already received, from the broker, in the handshake.
 
-	p, err := tacticsCache.Get(sshClient.clientGeoIPData)
+	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(
+		sshClient.clientGeoIPData)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": err}).Warning("get tactics failed")
 		return
@@ -4285,7 +4405,9 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 	}
 }
 
-func (sshClient *sshClient) newDestinationBytesMetricsUpdater(portForwardType int, IPAddress net.IP) *destinationBytesMetrics {
+func (sshClient *sshClient) newDestinationBytesMetricsUpdater(
+	portForwardType int, IPAddress net.IP) *destinationBytesMetrics {
+
 	sshClient.Lock()
 	defer sshClient.Unlock()
 
@@ -4310,7 +4432,9 @@ func (sshClient *sshClient) newDestinationBytesMetricsUpdater(portForwardType in
 	return &metrics.udpMetrics
 }
 
-func (sshClient *sshClient) getActivityUpdaters(portForwardType int, IPAddress net.IP) []common.ActivityUpdater {
+func (sshClient *sshClient) getPortForwardActivityUpdaters(
+	portForwardType int, IPAddress net.IP) []common.ActivityUpdater {
+
 	var updaters []common.ActivityUpdater
 
 	clientSeedPortForward := sshClient.newClientSeedPortForward(IPAddress)
@@ -4321,6 +4445,126 @@ func (sshClient *sshClient) getActivityUpdaters(portForwardType int, IPAddress n
 	destinationBytesMetrics := sshClient.newDestinationBytesMetricsUpdater(portForwardType, IPAddress)
 	if destinationBytesMetrics != nil {
 		updaters = append(updaters, destinationBytesMetrics)
+	}
+
+	return updaters
+}
+
+func (sshClient *sshClient) newInproxyProxyQualityTracker() *inproxyProxyQualityTracker {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	if !protocol.TunnelProtocolUsesInproxy(sshClient.tunnelProtocol) {
+		return nil
+	}
+
+	// Limitation: assumes no GeoIP targeting for in-proxy quality
+	// configuration. The original client GeoIP information is not available
+	// until after the Psiphon handshake completes, and we want to include
+	// earlier tunnel bytes, including any liveness test.
+	//
+	// As a future enhancement, quality tracker targets could be _extended_ in
+	// reportProxyQuality.
+
+	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": err}).Warning("get tactics failed")
+		return nil
+	}
+	if p.IsNil() {
+		return nil
+	}
+
+	// InproxyEnableProxyQuality indicates if proxy quality reporting is
+	// enabled or not.
+	//
+	// Note that flipping InproxyEnableProxyQuality to false in tactics does
+	// not interrupt any tracker already in progress.
+	if !p.Bool(parameters.InproxyEnableProxyQuality) {
+		return nil
+	}
+
+	tracker := newInproxyProxyQualityTracker(
+		sshClient,
+		int64(p.Int(parameters.InproxyProxyQualityTargetUpstreamBytes)),
+		int64(p.Int(parameters.InproxyProxyQualityTargetDownstreamBytes)),
+		p.Duration(parameters.InproxyProxyQualityTargetDuration))
+
+	sshClient.inproxyProxyQualityTracker = tracker
+
+	return tracker
+}
+
+func (sshClient *sshClient) reportProxyQuality() {
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	if !protocol.TunnelProtocolUsesInproxy(sshClient.tunnelProtocol) ||
+		!sshClient.handshakeState.completed {
+		log.Warning("unexpected reportProxyQuality call")
+		return
+	}
+
+	if sshClient.handshakeState.inproxyMatchedPersonal {
+		// Skip quality reporting for personal paired proxies. Brokers don't use
+		// quality data for personal matching, and no quality data from personal
+		// pairing should not influence common matching prioritization.
+		return
+	}
+
+	// Enforce InproxyEnableProxyQualityClientRegions. If set, this is a
+	// restricted list of client regions for which quality is reported.
+	//
+	// Note that it's possible to have an soft client GeoIP limit given that
+	// in-proxy protocols are default disabled and enabled via
+	// LimitTunnelProtocols. However, that parameter is enforced on the
+	// client side.
+	//
+	// Now that that the Psiphon handshake is complete, the original client IP
+	// is known. Here, as in newInproxyProxyQualityTracker, the tactics
+	// filter remains non-region specific, so
+	// InproxyEnableProxyQualityClientRegions should be a global list. This
+	// accommodates a simpler configuration vs., for example, using many
+	// region-specific filters to override InproxyEnableProxyQuality.
+	//
+	// Future enhancement: here, we could extend inproxyProxyQualityTracker
+	// targets with client GeoIP-specific values.
+
+	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
+	if err != nil || p.IsNil() {
+		log.WithTraceFields(LogFields{"error": err}).Warning("get tactics failed")
+		return
+	}
+
+	enabledRegions := p.Strings(parameters.InproxyEnableProxyQualityClientRegions)
+	if len(enabledRegions) > 0 &&
+		!common.Contains(enabledRegions, sshClient.clientGeoIPData.Country) {
+
+		// Quality reporting is restricted to specific regions, and this client's region is not included.
+		return
+	}
+
+	// ReportQuality will enqueue the quality data to be sent to brokers.
+	// There's a delay before making broker requests, in an effort to batch
+	// up data. Requests may be made to only a subset of brokers in
+	// InproxyAllBrokerSpecs, depending on whether the broker is expected to
+	// trust this server's session public key; see ReportQuality.
+
+	sshClient.sshServer.inproxyBrokerSessions.ReportQuality(
+		sshClient.handshakeState.inproxyProxyID,
+		sshClient.peerGeoIPData.ASN,
+		sshClient.clientGeoIPData.ASN)
+}
+
+func (sshClient *sshClient) getTunnelActivityUpdaters() []common.ActivityUpdater {
+
+	var updaters []common.ActivityUpdater
+
+	inproxyProxyQualityTracker := sshClient.newInproxyProxyQualityTracker()
+	if inproxyProxyQualityTracker != nil {
+		updaters = append(updaters, inproxyProxyQualityTracker)
 	}
 
 	return updaters
@@ -5062,7 +5306,7 @@ func (sshClient *sshClient) handleTCPChannel(
 		sshClient.idleTCPPortForwardTimeout(),
 		true,
 		lruEntry,
-		sshClient.getActivityUpdaters(portForwardTypeTCP, IP)...)
+		sshClient.getPortForwardActivityUpdaters(portForwardTypeTCP, IP)...)
 	if err != nil {
 		log.WithTraceFields(LogFields{"error": err}).Error("NewActivityMonitoredConn failed")
 		return
