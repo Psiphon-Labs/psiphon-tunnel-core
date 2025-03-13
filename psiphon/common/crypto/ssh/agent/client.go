@@ -10,7 +10,7 @@
 // References:
 //
 //	[PROTOCOL.agent]: https://tools.ietf.org/html/draft-miller-ssh-agent-00
-package agent // import "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/crypto/ssh/agent"
+package agent
 
 import (
 	"bytes"
