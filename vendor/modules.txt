@@ -33,7 +33,7 @@ github.com/Psiphon-Labs/consistent
 # github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 ## explicit
 github.com/Psiphon-Labs/goptlib
-# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250219165059-533f95b512e9
+# github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378
 ## explicit; go 1.23
 github.com/Psiphon-Labs/psiphon-tls
 github.com/Psiphon-Labs/psiphon-tls/byteorder

@@ -23,10 +23,7 @@ func defaultCurvePreferences() []CurveID {
 	// 	return []CurveID{X25519, CurveP256, CurveP384, CurveP521}
 	// }
 	// For now, x25519Kyber768Draft00 must always be followed by X25519.
-	// return []CurveID{x25519Kyber768Draft00, X25519, CurveP256, CurveP384, CurveP521}
-
-	// [Psiphon] Excluve X22519Kyber768Deaft00 by default
-	return []CurveID{X25519, CurveP256, CurveP384, CurveP521}
+	return []CurveID{x25519Kyber768Draft00, X25519, CurveP256, CurveP384, CurveP521}
 }
 
 // defaultSupportedSignatureAlgorithms contains the signature and hash algorithms that

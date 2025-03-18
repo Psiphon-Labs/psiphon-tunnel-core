@@ -23,6 +23,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/crypto/cryptobyte"
 )
 
 // A Conn represents a secured connection.
@@ -1098,15 +1100,19 @@ func ReadClientHelloRandom(data []byte) ([]byte, error) {
 		return nil, errors.New("tls: unexpected message type")
 	}
 
-	// Unlike readHandshake, m is not retained and so making a copy of the
-	// input data is not necessary.
+	s := cryptobyte.String(data)
+	random := make([]byte, 32)
 
-	var m clientHelloMsg
-	if !m.unmarshal(data) {
-		return nil, errors.New("tls: unexpected message")
+	// Read the ClientHello random.
+	// We don't attempt to unmarshal the data into clientHelloMsg,
+	// since the data might not be a complete ClientHello message.
+	if !s.Skip(4) || // message type and uint24 length field
+		!s.Skip(2) || // protocol version
+		!s.ReadBytes(&random, 32) {
+		return nil, errors.New("tls: failed to read ClientHello random")
 	}
 
-	return m.random, nil
+	return random, nil
 }
 
 // readHandshakeBytes reads handshake data until c.hand contains at least n bytes.

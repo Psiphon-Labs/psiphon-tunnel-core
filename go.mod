@@ -39,7 +39,7 @@ require (
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250219165059-533f95b512e9
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250303214000-94770c5d46a0
 	github.com/Psiphon-Labs/utls v0.0.0-20250311210446-c1daf1ce55c1
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
