@@ -1,6 +1,6 @@
 module github.com/Psiphon-Labs/psiphon-tunnel-core
 
-go 1.23
+go 1.23.0
 
 toolchain go1.23.7
 
@@ -85,11 +85,11 @@ require (
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 	github.com/wlynxg/anet v0.0.1
-	golang.org/x/crypto v0.32.0
-	golang.org/x/net v0.34.0
-	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.29.0
-	golang.org/x/term v0.28.0
+	golang.org/x/crypto v0.35.0
+	golang.org/x/net v0.36.0
+	golang.org/x/sync v0.11.0
+	golang.org/x/sys v0.30.0
+	golang.org/x/term v0.29.0
 	golang.org/x/time v0.5.0
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
 	golang.zx2c4.com/wireguard/windows v0.5.3
@@ -156,7 +156,7 @@ require (
 	go4.org/netipx v0.0.0-20230824141953-6213f710f925 // indirect
 	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e // indirect
 	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

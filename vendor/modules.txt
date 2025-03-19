@@ -511,8 +511,8 @@ go4.org/mem
 # go4.org/netipx v0.0.0-20230824141953-6213f710f925
 ## explicit; go 1.18
 go4.org/netipx
-# golang.org/x/crypto v0.32.0
-## explicit; go 1.20
+# golang.org/x/crypto v0.35.0
+## explicit; go 1.23.0
 golang.org/x/crypto/blake2b
 golang.org/x/crypto/blake2s
 golang.org/x/crypto/blowfish
@@ -536,8 +536,8 @@ golang.org/x/exp/rand
 golang.org/x/mod/internal/lazyregexp
 golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.34.0
-## explicit; go 1.18
+# golang.org/x/net v0.36.0
+## explicit; go 1.23.0
 golang.org/x/net/bpf
 golang.org/x/net/dns/dnsmessage
 golang.org/x/net/http/httpguts
@@ -545,6 +545,7 @@ golang.org/x/net/http/httpproxy
 golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
+golang.org/x/net/internal/httpcommon
 golang.org/x/net/internal/iana
 golang.org/x/net/internal/socket
 golang.org/x/net/internal/socks
@@ -554,10 +555,10 @@ golang.org/x/net/ipv6
 golang.org/x/net/proxy
 golang.org/x/net/route
 golang.org/x/net/trace
-# golang.org/x/sync v0.10.0
+# golang.org/x/sync v0.11.0
 ## explicit; go 1.18
 golang.org/x/sync/errgroup
-# golang.org/x/sys v0.29.0
+# golang.org/x/sys v0.30.0
 ## explicit; go 1.18
 golang.org/x/sys/cpu
 golang.org/x/sys/plan9
@@ -566,10 +567,10 @@ golang.org/x/sys/windows
 golang.org/x/sys/windows/registry
 golang.org/x/sys/windows/svc
 golang.org/x/sys/windows/svc/mgr
-# golang.org/x/term v0.28.0
+# golang.org/x/term v0.29.0
 ## explicit; go 1.18
 golang.org/x/term
-# golang.org/x/text v0.21.0
+# golang.org/x/text v0.22.0
 ## explicit; go 1.18
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
