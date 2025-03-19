@@ -164,8 +164,8 @@ type UtlsPreSharedKeyExtension struct {
 	PreSharedKeyCommon
 	cipherSuite  *cipherSuiteTLS13
 	cachedLength *int
-	// Deprecated: Set OmitEmptyPsk in Config instead.
-	OmitEmptyPsk bool
+
+	omitEmptyPsk bool
 
 	// used only for HRR-based recalculation of binders purpose
 	prevClientHelloHash []byte // used for HRR-based recalculation of binders
@@ -285,11 +285,11 @@ func readPskIntoBytes(b []byte, identities []PskIdentity, binders [][]byte) (int
 }
 
 func (e *UtlsPreSharedKeyExtension) SetOmitEmptyPsk(val bool) {
-	e.OmitEmptyPsk = val
+	e.omitEmptyPsk = val
 }
 
 func (e *UtlsPreSharedKeyExtension) Read(b []byte) (int, error) {
-	if !e.OmitEmptyPsk && e.Len() == 0 {
+	if !e.omitEmptyPsk && e.Len() == 0 {
 		return 0, ErrEmptyPsk
 	}
 	return readPskIntoBytes(b, e.Identities, e.Binders)
@@ -304,7 +304,7 @@ func (e *UtlsPreSharedKeyExtension) PatchBuiltHello(hello *PubClientHelloMsg) er
 	if private == nil {
 		private = hello.getPrivatePtr()
 	}
-	private.raw = hello.Raw
+	private.original = hello.Original
 	private.pskBinders = e.Binders // set the placeholder to the private Hello
 
 	// derived from loadSession() and processHelloRetryRequest() begin //
@@ -329,6 +329,21 @@ func (e *UtlsPreSharedKeyExtension) PatchBuiltHello(hello *PubClientHelloMsg) er
 		return err
 	}
 	// derived end //
+
+	// copied from handshake_messages.go in 1.22
+	lenWithoutBinders := len(helloBytes)
+	b := cryptobyte.NewFixedBuilder(private.original[:lenWithoutBinders])
+	b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
+		for _, binder := range private.pskBinders {
+			b.AddUint8LengthPrefixed(func(b *cryptobyte.Builder) {
+				b.AddBytes(binder)
+			})
+		}
+	})
+	if out, err := b.Bytes(); err != nil || len(out) != len(private.original) {
+		return errors.New("tls: internal error: failed to update binders")
+	}
+
 	e.Binders = pskBinders
 
 	// no need to care about other PSK related fields, they will be handled separately

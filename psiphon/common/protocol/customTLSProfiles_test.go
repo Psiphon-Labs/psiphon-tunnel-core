@@ -175,15 +175,15 @@ func TestCustomTLSProfiles(t *testing.T) {
 		t.Fatalf("BuildHandshakeState failed: %s", err)
 	}
 
-	if len(conn1.HandshakeState.Hello.Raw) == 0 {
+	if len(conn1.HandshakeState.Hello.Original) == 0 {
 		t.Fatalf("Missing raw ClientHello")
 	}
 
-	if len(conn2.HandshakeState.Hello.Raw) == 0 {
+	if len(conn2.HandshakeState.Hello.Original) == 0 {
 		t.Fatalf("Missing raw ClientHello")
 	}
 
-	if !bytes.Equal(conn1.HandshakeState.Hello.Raw, conn2.HandshakeState.Hello.Raw) {
+	if !bytes.Equal(conn1.HandshakeState.Hello.Original, conn2.HandshakeState.Hello.Original) {
 		t.Fatalf("Unidentical raw ClientHellos")
 	}
 }

@@ -18,7 +18,7 @@ import (
 	"io"
 	"time"
 
-	circlSign "github.com/cloudflare/circl/sign"
+	"github.com/Psiphon-Labs/utls/byteorder"
 )
 
 // serverHandshakeState contains details of a server handshake in progress.
@@ -77,7 +77,6 @@ func (hs *serverHandshakeState) handshake() error {
 	}
 	if hs.sessionState != nil {
 		// The client has included a session ticket and so we do an abbreviated handshake.
-		c.didResume = true
 		if err := hs.doResumeHandshake(); err != nil {
 			return err
 		}
@@ -171,9 +170,10 @@ func (c *Conn) readClientHello(ctx context.Context) (*clientHelloMsg, error) {
 	c.in.version = c.vers
 	c.out.version = c.vers
 
-	// [UTLS SECTION BEGIN]
+	// [UTLS SECTION BEGING]
 	// Disable unsupported godebug package
 	// if c.config.MinVersion == 0 && c.vers < VersionTLS12 {
+	// 	tls10server.Value() // ensure godebug is initialized
 	// 	tls10server.IncNonDefault()
 	// }
 	// [UTLS SECTION END]
@@ -252,7 +252,7 @@ func (hs *serverHandshakeState) processClientHello() error {
 		hs.hello.scts = hs.cert.SignedCertificateTimestamps
 	}
 
-	hs.ecdheOk = supportsECDHE(c.config, hs.clientHello.supportedCurves, hs.clientHello.supportedPoints)
+	hs.ecdheOk = supportsECDHE(c.config, c.vers, hs.clientHello.supportedCurves, hs.clientHello.supportedPoints)
 
 	if hs.ecdheOk && len(hs.clientHello.supportedPoints) > 0 {
 		// Although omitting the ec_point_formats extension is permitted, some
@@ -323,10 +323,10 @@ func negotiateALPN(serverProtos, clientProtos []string, quic bool) (string, erro
 
 // supportsECDHE returns whether ECDHE key exchanges can be used with this
 // pre-TLS 1.3 client.
-func supportsECDHE(c *Config, supportedCurves []CurveID, supportedPoints []uint8) bool {
+func supportsECDHE(c *Config, version uint16, supportedCurves []CurveID, supportedPoints []uint8) bool {
 	supportsCurve := false
 	for _, curve := range supportedCurves {
-		if c.supportsCurve(curve) {
+		if c.supportsCurve(version, curve) {
 			supportsCurve = true
 			break
 		}
@@ -378,8 +378,14 @@ func (hs *serverHandshakeState) pickCipherSuite() error {
 
 	// [UTLS SECTION BEGIN]
 	// Disable unsupported godebug package
-	// if c.config.CipherSuites == nil && rsaKexCiphers[hs.suite.id] {
+	// if c.config.CipherSuites == nil && !needFIPS() && rsaKexCiphers[hs.suite.id] {
+	// 	tlsrsakex.Value() // ensure godebug is initialized
 	// 	tlsrsakex.IncNonDefault()
+	// }
+	//
+	// if c.config.CipherSuites == nil && !needFIPS() && tdesCiphers[hs.suite.id] {
+	// 	tls3des.Value() // ensure godebug is initialized
+	// 	tls3des.IncNonDefault()
 	// }
 	// [UTLS SECTION END]
 
@@ -594,6 +600,9 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		return err
 	}
 	if skx != nil {
+		if len(skx.key) >= 3 && skx.key[0] == 3 /* named curve */ {
+			c.curveID = CurveID(byteorder.BeUint16(skx.key[1:]))
+		}
 		if _, err := hs.c.writeHandshakeRecord(skx, &hs.finishedHash); err != nil {
 			return err
 		}
@@ -609,7 +618,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		}
 		if c.vers >= VersionTLS12 {
 			certReq.hasSignatureAlgorithm = true
-			certReq.supportedSignatureAlgorithms = c.config.supportedSignatureAlgorithms() // [UTLS] ported from cloudflare/go
+			certReq.supportedSignatureAlgorithms = supportedSignatureAlgorithms()
 		}
 
 		// An empty list of certificateAuthorities signals to
@@ -812,9 +821,6 @@ func (hs *serverHandshakeState) readFinished(out []byte) error {
 }
 
 func (hs *serverHandshakeState) sendSessionTicket() error {
-	// ticketSupported is set in a resumption handshake if the
-	// ticket from the client was encrypted with an old session
-	// ticket key and thus a refreshed ticket should be sent.
 	if !hs.hello.ticketSupported {
 		return nil
 	}
@@ -822,10 +828,7 @@ func (hs *serverHandshakeState) sendSessionTicket() error {
 	c := hs.c
 	m := new(newSessionTicketMsg)
 
-	state, err := c.sessionState()
-	if err != nil {
-		return err
-	}
+	state := c.sessionState()
 	state.secret = hs.masterSecret
 	if hs.sessionState != nil {
 		// If this is re-wrapping an old key, then keep
@@ -833,6 +836,7 @@ func (hs *serverHandshakeState) sendSessionTicket() error {
 		state.createdAt = hs.sessionState.createdAt
 	}
 	if c.config.WrapSession != nil {
+		var err error
 		m.ticket, err = c.config.WrapSession(c.connectionStateLocked(), state)
 		if err != nil {
 			return err
@@ -936,7 +940,7 @@ func (c *Conn) processCertsFromClient(certificate Certificate) error {
 
 	if len(certs) > 0 {
 		switch certs[0].PublicKey.(type) {
-		case *ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey, circlSign.PublicKey: // [UTLS] ported from cloudflare/go
+		case *ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey:
 		default:
 			c.sendAlert(alertUnsupportedCertificate)
 			return fmt.Errorf("tls: client certificate contains an unsupported public key of type %T", certs[0].PublicKey)

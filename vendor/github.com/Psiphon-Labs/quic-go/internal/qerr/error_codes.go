@@ -1,9 +1,8 @@
 package qerr
 
 import (
-	"fmt"
-
 	tls "github.com/Psiphon-Labs/psiphon-tls"
+	"fmt"
 )
 
 // TransportErrorCode is a QUIC transport error.

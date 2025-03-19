@@ -193,10 +193,7 @@ func (server *TunnelServer) Run() error {
 				// this will result in suboptimal packet sizes (10s of bytes)
 				// and a corresponding different traffic shape on the 2nd hop.
 
-				IPAddress := net.ParseIP(support.Config.ServerIPAddress)
-				isIPv6 := IPAddress != nil && IPAddress.To4() == nil
-
-				maxPacketSizeAdjustment = inproxy.GetQUICMaxPacketSizeAdjustment(isIPv6)
+				maxPacketSizeAdjustment = inproxy.GetQUICMaxPacketSizeAdjustment()
 			}
 
 			logTunnelProtocol := tunnelProtocol

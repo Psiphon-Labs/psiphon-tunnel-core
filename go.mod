@@ -1,6 +1,8 @@
 module github.com/Psiphon-Labs/psiphon-tunnel-core
 
-go 1.21
+go 1.23
+
+toolchain go1.23.6
 
 // The following replace is required only when the build tag
 // PSIPHON_ENABLE_REFRACTION_NETWORKING is specified.
@@ -37,9 +39,9 @@ require (
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
-	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20240824224428-ca6969e315a9
-	github.com/Psiphon-Labs/quic-go v0.0.0-20250203210204-a4381c68e52f
-	github.com/Psiphon-Labs/utls v1.1.1-0.20241107183331-b18909f8ccaa
+	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378
+	github.com/Psiphon-Labs/quic-go v0.0.0-20250318213212-301924cbe026
+	github.com/Psiphon-Labs/utls v0.0.0-20250311210446-c1daf1ce55c1
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/bits-and-blooms/bloom/v3 v3.6.0
@@ -66,7 +68,9 @@ require (
 	github.com/pion/datachannel v1.5.5
 	github.com/pion/dtls/v2 v2.2.7
 	github.com/pion/ice/v2 v2.3.24
+	github.com/pion/interceptor v0.1.25
 	github.com/pion/logging v0.2.2
+	github.com/pion/rtp v1.8.5
 	github.com/pion/sctp v1.8.16
 	github.com/pion/sdp/v3 v3.0.9
 	github.com/pion/stun v0.6.1
@@ -81,11 +85,11 @@ require (
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 	github.com/wlynxg/anet v0.0.1
-	golang.org/x/crypto v0.22.0
-	golang.org/x/net v0.24.0
-	golang.org/x/sync v0.6.0
-	golang.org/x/sys v0.20.0
-	golang.org/x/term v0.19.0
+	golang.org/x/crypto v0.32.0
+	golang.org/x/net v0.34.0
+	golang.org/x/sync v0.10.0
+	golang.org/x/sys v0.29.0
+	golang.org/x/term v0.28.0
 	golang.org/x/time v0.5.0
 	golang.zx2c4.com/wireguard v0.0.0-20230325221338-052af4a8072b
 	golang.zx2c4.com/wireguard/windows v0.5.3
@@ -97,9 +101,9 @@ require (
 	filippo.io/keygen v0.0.0-20230306160926-5201437acf8e // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
-	github.com/andybalholm/brotli v1.0.6 // indirect
+	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
-	github.com/cloudflare/circl v1.3.7 // indirect
+	github.com/cloudflare/circl v1.5.0 // indirect
 	github.com/coreos/go-iptables v0.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dblohm7/wingoes v0.0.0-20230929194252-e994401fc077 // indirect
@@ -115,7 +119,7 @@ require (
 	github.com/josharian/native v1.1.1-0.20230202152459-5c7d0dd6ab86 // indirect
 	github.com/jsimonetti/rtnetlink v1.3.5 // indirect
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0 // indirect
-	github.com/klauspost/compress v1.17.4 // indirect
+	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/libp2p/go-reuseport v0.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mdlayher/netlink v1.7.2 // indirect
@@ -123,11 +127,9 @@ require (
 	github.com/mroth/weightedrand v1.0.0 // indirect
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
-	github.com/pion/interceptor v0.1.25 // indirect
 	github.com/pion/mdns v0.0.12 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.12 // indirect
-	github.com/pion/rtp v1.8.5 // indirect
 	github.com/pion/srtp/v2 v2.0.18 // indirect
 	github.com/pion/turn/v2 v2.1.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -153,9 +155,9 @@ require (
 	go4.org/mem v0.0.0-20220726221520-4f986261bf13 // indirect
 	go4.org/netipx v0.0.0-20230824141953-6213f710f925 // indirect
 	golang.org/x/exp v0.0.0-20240110193028-0dcbfd608b1e // indirect
-	golang.org/x/mod v0.14.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
-	golang.org/x/tools v0.16.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
