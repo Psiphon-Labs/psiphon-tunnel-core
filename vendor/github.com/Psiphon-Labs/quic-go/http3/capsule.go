@@ -6,28 +6,47 @@ import (
 	"github.com/Psiphon-Labs/quic-go/quicvarint"
 )
 
-// CapsuleType is the type of the capsule.
+// CapsuleType is the type of the capsule
 type CapsuleType uint64
 
+// CapsuleProtocolHeader is the header value used to advertise support for the capsule protocol
+const CapsuleProtocolHeader = "Capsule-Protocol"
+
 type exactReader struct {
-	R *io.LimitedReader
+	R io.LimitedReader
 }
 
 func (r *exactReader) Read(b []byte) (int, error) {
 	n, err := r.R.Read(b)
-	if r.R.N > 0 {
+	if err == io.EOF && r.R.N > 0 {
 		return n, io.ErrUnexpectedEOF
 	}
 	return n, err
 }
 
+type countingByteReader struct {
+	io.ByteReader
+	Read int
+}
+
+func (r *countingByteReader) ReadByte() (byte, error) {
+	b, err := r.ByteReader.ReadByte()
+	if err == nil {
+		r.Read++
+	}
+	return b, err
+}
+
 // ParseCapsule parses the header of a Capsule.
-// It returns an io.LimitedReader that can be used to read the Capsule value.
+// It returns an io.Reader that can be used to read the Capsule value.
 // The Capsule value must be read entirely (i.e. until the io.EOF) before using r again.
 func ParseCapsule(r quicvarint.Reader) (CapsuleType, io.Reader, error) {
-	ct, err := quicvarint.Read(r)
+	cbr := countingByteReader{ByteReader: r}
+	ct, err := quicvarint.Read(&cbr)
 	if err != nil {
-		if err == io.EOF {
+		// If an io.EOF is returned without consuming any bytes, return it unmodified.
+		// Otherwise, return an io.ErrUnexpectedEOF.
+		if err == io.EOF && cbr.Read > 0 {
 			return 0, nil, io.ErrUnexpectedEOF
 		}
 		return 0, nil, err
@@ -39,7 +58,7 @@ func ParseCapsule(r quicvarint.Reader) (CapsuleType, io.Reader, error) {
 		}
 		return 0, nil, err
 	}
-	return CapsuleType(ct), &exactReader{R: io.LimitReader(r, int64(l)).(*io.LimitedReader)}, nil
+	return CapsuleType(ct), &exactReader{R: io.LimitedReader{R: r, N: int64(l)}}, nil
 }
 
 // WriteCapsule writes a capsule

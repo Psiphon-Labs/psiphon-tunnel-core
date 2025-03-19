@@ -1709,13 +1709,21 @@ func (conn *webRTCConn) readDataChannelMessage(p []byte) (int, error) {
 		conn.readLength = n
 		conn.readError = err
 
+		if conn.readLength == 0 && conn.readError != nil {
+			// No bytes were read, so return the error immediately.
+			return 0, errors.TraceReader(err)
+		}
+
 		// Skip over padding.
 
-		if n > 0 && !conn.peerPaddingDone {
+		if conn.readLength > 0 && !conn.peerPaddingDone {
 
 			paddingSize, n := binary.Varint(conn.readBuffer[0:conn.readLength])
-			if (paddingSize == 0 && n <= 0) || paddingSize >= int64(conn.readLength) {
-				return 0, errors.TraceNew("invalid padding")
+
+			if (paddingSize == 0 && n <= 0) || paddingSize > int64(conn.readLength-n) {
+				return 0, errors.Tracef(
+					"invalid padding: %d, %d, %d, %w",
+					n, paddingSize, conn.readLength, conn.readError)
 			}
 
 			if paddingSize < 0 {
@@ -1995,7 +2003,7 @@ func (conn *webRTCConn) writeDataChannelMessage(p []byte, decoy bool) (int, erro
 // INPROXY-QUIC-OSSH must apply GetQUICMaxPacketSizeAdjustment on both the
 // client and server side. In addition, the client must disable
 // DisablePathMTUDiscovery.
-func GetQUICMaxPacketSizeAdjustment(isIPv6 bool) int {
+func GetQUICMaxPacketSizeAdjustment() int {
 
 	// Limitations:
 	//
@@ -2009,12 +2017,8 @@ func GetQUICMaxPacketSizeAdjustment(isIPv6 bool) int {
 	//   channel mode. Furthermore, the lower maximum QUIC packet size is
 	//   directly observable on the 2nd hop.
 
-	// common/quic.MAX_PRE_DISCOVERY_PACKET_SIZE_IPV4 = 1252
-	// common/quic.MAX_PRE_DISCOVERY_PACKET_SIZE_IPV6 = 1232
-	quicMTU := 1252
-	if isIPv6 {
-		quicMTU = 1232
-	}
+	// common/quic.MAX_PRE_DISCOVERY_PACKET_SIZE = 1280
+	quicMTU := 1280
 	targetMTUAdjustment := quicMTU - mediaTrackMaxUDPPayloadLength
 	if targetMTUAdjustment < 0 {
 		targetMTUAdjustment = 0
@@ -2343,8 +2347,7 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 			ClientSessionCache:     sessionCache,
 		}
 
-		isIPv6 := true // remote addr is synthetic uniqueIPv6Address
-		maxPacketSizeAdjustment := GetQUICMaxPacketSizeAdjustment(isIPv6)
+		maxPacketSizeAdjustment := GetQUICMaxPacketSizeAdjustment()
 
 		// Set ClientMaxPacketSizeAdjustment to so that quic-go will produce
 		// packets with a small enough max size to produce the overall target
@@ -2353,7 +2356,7 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 			HandshakeIdleTimeout:          handshakeIdleTimeout,
 			MaxIdleTimeout:                maxDuration,
 			KeepAlivePeriod:               maxDuration,
-			Versions:                      []quic_go.VersionNumber{0x1},
+			Versions:                      []quic_go.Version{0x1},
 			ClientHelloSeed:               &obfuscationSeed,
 			ClientMaxPacketSizeAdjustment: maxPacketSizeAdjustment,
 			DisablePathMTUDiscovery:       true,
@@ -2433,8 +2436,7 @@ func (conn *webRTCConn) addRTPReliabilityLayer(ctx context.Context) error {
 			MaxIncomingUniStreams:   -1,
 			VerifyClientHelloRandom: nil,
 			ServerMaxPacketSizeAdjustment: func(addr net.Addr) int {
-				isIPv6 := true // remote addr is synthetic uniqueIPv6Address
-				return GetQUICMaxPacketSizeAdjustment(isIPv6)
+				return GetQUICMaxPacketSizeAdjustment()
 			},
 		}
 
