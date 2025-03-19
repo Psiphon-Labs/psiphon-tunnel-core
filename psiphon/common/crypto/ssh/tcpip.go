@@ -472,7 +472,7 @@ func (c *Client) dial(channelType string, laddr string, lport int, raddr string,
 		return nil, err
 	}
 	go DiscardRequests(in)
-	return ch, err
+	return ch, nil
 }
 
 type tcpChan struct {
