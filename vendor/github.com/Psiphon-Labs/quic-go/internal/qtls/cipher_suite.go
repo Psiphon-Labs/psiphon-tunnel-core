@@ -1,23 +1,11 @@
 package qtls
 
 import (
-	"crypto"
-	"crypto/cipher"
 	"fmt"
 	"unsafe"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
 )
-
-type cipherSuiteTLS13 struct {
-	ID     uint16
-	KeyLen int
-	AEAD   func(key, fixedNonce []byte) cipher.AEAD
-	Hash   crypto.Hash
-}
-
-//go:linkname cipherSuiteTLS13ByID github.com/Psiphon-Labs/psiphon-tls.cipherSuiteTLS13ByID
-func cipherSuiteTLS13ByID(id uint16) *cipherSuiteTLS13
 
 //go:linkname cipherSuitesTLS13 github.com/Psiphon-Labs/psiphon-tls.cipherSuitesTLS13
 var cipherSuitesTLS13 []unsafe.Pointer

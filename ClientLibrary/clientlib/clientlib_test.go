@@ -391,18 +391,18 @@ func TestPsiphonTunnel_Dial(t *testing.T) {
 		tunnelStopped bool
 	}{
 		{
-			name:    "Success: example.com",
-			args:    args{remoteAddr: "example.com:443"},
+			name:    "Success: psiphon.ca",
+			args:    args{remoteAddr: "psiphon.ca:443"},
 			wantErr: false,
 		},
 		{
 			name:    "Failure: invalid address",
-			args:    args{remoteAddr: "example.com:99999"},
+			args:    args{remoteAddr: "psiphon.ca:99999"},
 			wantErr: true,
 		},
 		{
 			name:          "Failure: tunnel not started",
-			args:          args{remoteAddr: "example.com:443"},
+			args:          args{remoteAddr: "psiphon.ca:443"},
 			wantErr:       true,
 			tunnelStopped: true,
 		},

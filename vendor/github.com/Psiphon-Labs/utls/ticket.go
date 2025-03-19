@@ -96,6 +96,7 @@ type SessionState struct {
 	// Client-side TLS 1.3-only fields.
 	useBy  uint64 // seconds since UNIX epoch
 	ageAdd uint32
+	ticket []byte
 }
 
 // Bytes encodes the session, including any private fields, so that it can be
@@ -289,7 +290,7 @@ func ParseSessionState(data []byte) (*SessionState, error) {
 
 // sessionState returns a partially filled-out [SessionState] with information
 // from the current connection.
-func (c *Conn) sessionState() (*SessionState, error) {
+func (c *Conn) sessionState() *SessionState {
 	return &SessionState{
 		version:           c.vers,
 		cipherSuite:       c.cipherSuite,
@@ -302,7 +303,7 @@ func (c *Conn) sessionState() (*SessionState, error) {
 		isClient:          c.isClient,
 		extMasterSecret:   c.extMasterSecret,
 		verifiedChains:    c.verifiedChains,
-	}, nil
+	}
 }
 
 // EncryptTicket encrypts a ticket with the [Config]'s configured (or default)
@@ -396,7 +397,6 @@ func (c *Config) decryptTicket(encrypted []byte, ticketKeys []ticketKey) []byte 
 // ClientSessionState contains the state needed by a client to
 // resume a previous TLS session.
 type ClientSessionState struct {
-	ticket  []byte
 	session *SessionState
 }
 
@@ -406,7 +406,10 @@ type ClientSessionState struct {
 // It can be called by [ClientSessionCache.Put] to serialize (with
 // [SessionState.Bytes]) and store the session.
 func (cs *ClientSessionState) ResumptionState() (ticket []byte, state *SessionState, err error) {
-	return cs.ticket, cs.session, nil
+	if cs == nil || cs.session == nil {
+		return nil, nil, nil
+	}
+	return cs.session.ticket, cs.session, nil
 }
 
 // NewResumptionState returns a state value that can be returned by
@@ -415,23 +418,8 @@ func (cs *ClientSessionState) ResumptionState() (ticket []byte, state *SessionSt
 // state needs to be returned by [ParseSessionState], and the ticket and session
 // state must have been returned by [ClientSessionState.ResumptionState].
 func NewResumptionState(ticket []byte, state *SessionState) (*ClientSessionState, error) {
+	state.ticket = ticket
 	return &ClientSessionState{
-		ticket: ticket, session: state,
+		session: state,
 	}, nil
 }
-
-// // DecryptTicketWith decrypts an encrypted session ticket
-// // using a TicketKeys (ie []TicketKey) struct
-// //
-// // usedOldKey will be true if the key used for decryption is
-// // not the first in the []TicketKey slice
-// //
-// // [uTLS] changed to be made public and take a TicketKeys and use a fake conn receiver
-// func DecryptTicketWith(encrypted []byte, tks TicketKeys) (plaintext []byte, usedOldKey bool) {
-// 	// create fake conn
-// 	c := &Conn{
-// 		ticketKeys: tks.ToPrivate(),
-// 	}
-
-// 	return c.decryptTicket(encrypted)
-// }

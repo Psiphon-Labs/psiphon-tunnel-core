@@ -5,7 +5,6 @@
 package tls
 
 import (
-	"crypto/ecdh"
 	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -19,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/Psiphon-Labs/utls/dicttls"
+	"github.com/Psiphon-Labs/utls/internal/mlkem768"
 )
 
 var ErrUnknownClientHelloID = errors.New("tls: unknown ClientHelloID")
@@ -2626,20 +2626,16 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 		return err
 	}
 
-	privateHello, clientKeySharePrivate, err := uconn.makeClientHelloForApplyPreset()
+	privateHello, ech, err := uconn.makeClientHelloForApplyPreset()
 	if err != nil {
 		return err
 	}
-	uconn.HandshakeState.Hello = privateHello.getPublicPtr()
-	if ecdheKey, ok := clientKeySharePrivate.(*ecdh.PrivateKey); ok {
-		uconn.HandshakeState.State13.EcdheKey = ecdheKey
-	} else if kemKey, ok := clientKeySharePrivate.(*kemPrivateKey); ok {
-		uconn.HandshakeState.State13.KEMKey = kemKey.ToPublic()
-	}
 
-	// [Psiphon]
-	if uconn.HandshakeState.State13.KeySharesParams == nil {
-		uconn.HandshakeState.State13.KeySharesParams = NewKeySharesParameters()
+	uconn.HandshakeState.Hello = privateHello.getPublicPtr()
+	uconn.echContext = ech
+
+	if uconn.HandshakeState.State13.KeyShareKeys == nil {
+		uconn.HandshakeState.State13.KeyShareKeys = NewPubKeySharePrivateKeys()
 	}
 
 	hello := uconn.HandshakeState.Hello
@@ -2685,7 +2681,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 	}
 
 	// A random session ID is used to detect when the server accepted a ticket
-	// and is resuming a session (see RFC 5077). In TLS 1.3, it's always set as
+	// and is resuming a session in TLS 1.2 (see RFC 5077). In TLS 1.3, it's always set as
 	// a compatibility measure (see RFC 8446, Section 4.1.2).
 	//
 	// The session ID is not set for QUIC connections (see RFC 9001, Section 8.4).
@@ -2702,6 +2698,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 	copy(uconn.Extensions, p.Extensions)
 
 	// Check whether NPN extension actually exists
+	// NPN was primarily used to facilitate HTTP/2 adoption before the introduction of ALPN.
 	var haveNPN bool
 
 	// reGrease, and point things to each other
@@ -2729,7 +2726,6 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 				}
 			}
 		case *KeyShareExtension:
-			preferredCurveIsSet := false
 			for i := range ext.KeyShares {
 				curveID := ext.KeyShares[i].Group
 				if isGREASEUint16(uint16(curveID)) { // just in case the user set a GREASE value instead of unGREASEd
@@ -2737,42 +2733,43 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 					continue
 				}
 				if len(ext.KeyShares[i].Data) > 1 {
+					// KeyShares is already calculated.
 					continue
 				}
 
-				if scheme := curveIdToCirclScheme(curveID); scheme != nil {
-					pk, sk, err := generateKemKeyPair(scheme, curveID, uconn.config.rand())
+				// Note that we are in the UTLS code path and handshake_client.go/makeClientHello will not be called,
+				// this section is where key_share extension values are derived.
+				// The logic closely follows handshake_client.go/makeClientHello.
+				if curveID == x25519Kyber768Draft00 {
+					uconn.HandshakeState.State13.KeyShareKeys.Ecdhe[curveID], err = generateECDHEKey(uconn.config.rand(), X25519)
 					if err != nil {
-						return fmt.Errorf("HRR generateKemKeyPair %s: %w",
-							scheme.Name(), err)
+						return fmt.Errorf("generateECDHEKey failed %w", err)
 					}
-					packedPk, err := pk.MarshalBinary()
+					seed := make([]byte, mlkem768.SeedSize)
+					if _, err := io.ReadFull(uconn.config.rand(), seed); err != nil {
+						return fmt.Errorf("read seed failed %w", err)
+					}
+					uconn.HandshakeState.State13.KeyShareKeys.Kyber[curveID], err = mlkem768.NewKeyFromSeed(seed)
 					if err != nil {
-						return fmt.Errorf("HRR pack circl public key %s: %w",
-							scheme.Name(), err)
+						return fmt.Errorf("mlkem768.NewKeyFromSeed failed %w", err)
 					}
-					uconn.HandshakeState.State13.KeySharesParams.AddKemKeypair(curveID, sk.secretKey, pk)
-					ext.KeyShares[i].Data = packedPk
-					if !preferredCurveIsSet {
-						// only do this once for the first non-grease curve
-						uconn.HandshakeState.State13.KEMKey = sk.ToPublic()
-						preferredCurveIsSet = true
-					}
+
+					ext.KeyShares[i].Data = append(uconn.HandshakeState.State13.KeyShareKeys.Ecdhe[curveID].PublicKey().Bytes(),
+						uconn.HandshakeState.State13.KeyShareKeys.Kyber[curveID].EncapsulationKey()...)
+
 				} else {
-					ecdheKey, err := generateECDHEKey(uconn.config.rand(), curveID)
+					if _, ok := curveForCurveID(curveID); !ok {
+						return fmt.Errorf("unsupported Curve in KeyShareExtension: %v", curveID)
+					}
+					uconn.HandshakeState.State13.KeyShareKeys.Ecdhe[curveID], err = generateECDHEKey(uconn.config.rand(), curveID)
 					if err != nil {
-						return fmt.Errorf("unsupported Curve in KeyShareExtension: %v."+
-							"To mimic it, fill the Data(key) field manually", curveID)
+						return fmt.Errorf("generateECDHEKey failed %w", err)
 					}
-					uconn.HandshakeState.State13.KeySharesParams.AddEcdheKeypair(curveID, ecdheKey, ecdheKey.PublicKey())
-					ext.KeyShares[i].Data = ecdheKey.PublicKey().Bytes()
-					if !preferredCurveIsSet {
-						// only do this once for the first non-grease curve
-						uconn.HandshakeState.State13.EcdheKey = ecdheKey
-						preferredCurveIsSet = true
-					}
+
+					ext.KeyShares[i].Data = uconn.HandshakeState.State13.KeyShareKeys.Ecdhe[curveID].PublicKey().Bytes()
 				}
 			}
+
 		case *SupportedVersionsExtension:
 			for i := range ext.Versions {
 				if isGREASEUint16(ext.Versions[i]) { // just in case the user set a GREASE value instead of unGREASEd
@@ -2785,7 +2782,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 	}
 
 	// The default golang behavior in makeClientHello always sets NextProtoNeg if NextProtos is set,
-	// but NextProtos is also used by ALPN and our spec nmay not actually have a NPN extension
+	// but NextProtos is also used by ALPN and our spec may not actually have a NPN extension
 	hello.NextProtoNeg = haveNPN
 
 	err = uconn.sessionController.syncSessionExts()
@@ -2840,8 +2837,9 @@ func generateRandomizedSpec(
 		return p, fmt.Errorf("using non-randomized ClientHelloID %v to generate randomized spec", id.Client)
 	}
 
-	p.CipherSuites = make([]uint16, len(defaultCipherSuites))
-	copy(p.CipherSuites, defaultCipherSuites)
+	cipherSuites := defaultCipherSuites()
+	p.CipherSuites = make([]uint16, len(cipherSuites))
+	copy(p.CipherSuites, cipherSuites)
 	shuffledSuites, err := shuffledCiphers(r)
 	if err != nil {
 		return p, err

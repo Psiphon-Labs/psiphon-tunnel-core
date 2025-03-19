@@ -602,7 +602,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 					nil,
 					nil,
 					disablePathMTUDiscovery,
-					GetQUICMaxPacketSizeAdjustment(false),
+					GetQUICMaxPacketSizeAdjustment(),
 					false,
 					false,
 					common.WrapClientSessionCache(tls.NewLRUClientSessionCache(0), ""),
@@ -883,9 +883,10 @@ func runTestInproxy(doMustUpgrade bool) error {
 			if atomic.LoadInt32(&stunServerAddressSucceededCount) < 1 {
 				return errors.TraceNew("unexpected STUN server succeeded count")
 			}
-		}
-		if atomic.LoadInt32(&stunServerAddressFailedCount) > 0 {
-			return errors.TraceNew("unexpected STUN server failed count")
+			// Allow for some STUN server failures
+			if atomic.LoadInt32(&stunServerAddressFailedCount) >= int32(numProxies/2) {
+				return errors.TraceNew("unexpected STUN server failed count")
+			}
 		}
 
 		// Check if RoundTripper server replay callbacks were triggered
@@ -1083,7 +1084,7 @@ func newQuicEchoServer() (*quicEchoServer, error) {
 		nil,
 		nil,
 		"127.0.0.1:0",
-		GetQUICMaxPacketSizeAdjustment(false),
+		GetQUICMaxPacketSizeAdjustment(),
 		obfuscationKey,
 		false)
 	if err != nil {

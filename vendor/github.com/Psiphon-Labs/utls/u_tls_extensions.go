@@ -31,8 +31,6 @@ func ExtensionFromID(id uint16) TLSExtension {
 		return &SignatureAlgorithmsExtension{}
 	case extensionALPN:
 		return &ALPNExtension{}
-	case extensionStatusRequestV2:
-		return &StatusRequestV2Extension{}
 	case extensionSCT:
 		return &SCTExtension{}
 	case utlsExtensionPadding:
@@ -468,59 +466,6 @@ func (e *SignatureAlgorithmsExtension) writeToUConn(uc *UConn) error {
 	return nil
 }
 
-// StatusRequestV2Extension implements status_request_v2 (17)
-type StatusRequestV2Extension struct {
-}
-
-func (e *StatusRequestV2Extension) writeToUConn(uc *UConn) error {
-	uc.HandshakeState.Hello.OcspStapling = true
-	return nil
-}
-
-func (e *StatusRequestV2Extension) Len() int {
-	return 13
-}
-
-func (e *StatusRequestV2Extension) Read(b []byte) (int, error) {
-	if len(b) < e.Len() {
-		return 0, io.ErrShortBuffer
-	}
-	// RFC 4366, section 3.6
-	b[0] = byte(extensionStatusRequestV2 >> 8)
-	b[1] = byte(extensionStatusRequestV2)
-	b[2] = 0
-	b[3] = 9
-	b[4] = 0
-	b[5] = 7
-	b[6] = 2 // OCSP type
-	b[7] = 0
-	b[8] = 4
-	// Two zero valued uint16s for the two lengths.
-	return e.Len(), io.EOF
-}
-
-// Write is a no-op for StatusRequestV2Extension. No data for this extension.
-func (e *StatusRequestV2Extension) Write(b []byte) (int, error) {
-	fullLen := len(b)
-	extData := cryptobyte.String(b)
-	// RFC 4366, Section 3.6
-	var statusType uint8
-	var ignored cryptobyte.String
-	if !extData.ReadUint16LengthPrefixed(&ignored) || !ignored.ReadUint8(&statusType) {
-		return fullLen, errors.New("unable to read status request v2 extension data")
-	}
-
-	if statusType != statusV2TypeOCSP {
-		return fullLen, errors.New("status request v2 extension statusType is not statusV2TypeOCSP(2)")
-	}
-
-	return fullLen, nil
-}
-
-func (e *StatusRequestV2Extension) UnmarshalJSON(_ []byte) error {
-	return nil // no-op
-}
-
 // SignatureAlgorithmsCertExtension implements signature_algorithms_cert (50)
 type SignatureAlgorithmsCertExtension struct {
 	SupportedSignatureAlgorithms []SignatureScheme
@@ -884,16 +829,6 @@ func (e *ExtendedMasterSecretExtension) UnmarshalJSON(_ []byte) error {
 func (e *ExtendedMasterSecretExtension) Write(_ []byte) (int, error) {
 	// https://tools.ietf.org/html/rfc7627
 	return 0, nil
-}
-
-// var extendedMasterSecretLabel = []byte("extended master secret")
-
-// extendedMasterFromPreMasterSecret generates the master secret from the pre-master
-// secret and session hash. See https://tools.ietf.org/html/rfc7627#section-4
-func extendedMasterFromPreMasterSecret(version uint16, suite *cipherSuite, preMasterSecret []byte, sessionHash []byte) []byte {
-	masterSecret := make([]byte, masterSecretLength)
-	prfForVersion(version, suite)(masterSecret, preMasterSecret, extendedMasterSecretLabel, sessionHash)
-	return masterSecret
 }
 
 // GREASE stinks with dead parrots, have to be super careful, and, if possible, not include GREASE

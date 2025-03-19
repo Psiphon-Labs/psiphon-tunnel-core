@@ -160,6 +160,7 @@ func (conn *ShadowsocksConn) GetMetrics() common.LogFields {
 	return logFields
 }
 
+// Not safe for concurrent use.
 type saltReader struct {
 	net.Conn
 	server *ShadowsocksServer
@@ -173,9 +174,6 @@ func NewSaltReader(conn net.Conn, server *ShadowsocksServer) *saltReader {
 	}
 }
 
-// Note: it is assumed that the underlying transport, net.Conn, is a reliable
-// stream transport, i.e. TCP, therefore it is required that the caller stop
-// calling Read() on an instance of saltReader after an error is returned.
 func (conn *saltReader) Read(b []byte) (int, error) {
 
 	if conn.reader == nil {
@@ -208,7 +206,7 @@ func (conn *saltReader) init() error {
 
 	if isServerSalt || !conn.server.replayCache.Add(keyID, salt) {
 
-		go drainConn(conn)
+		drainConn(conn.Conn)
 
 		var err error
 		if isServerSalt {

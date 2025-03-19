@@ -18,8 +18,8 @@ import (
 // The StreamID is the ID of a QUIC stream.
 type StreamID = protocol.StreamID
 
-// A VersionNumber is a QUIC version number.
-type VersionNumber = protocol.VersionNumber
+// A Version is a QUIC version number.
+type Version = protocol.Version
 
 const (
 	// Version1 is RFC 9000
@@ -55,7 +55,12 @@ var Err0RTTRejected = errors.New("0-RTT rejected")
 // ConnectionTracingKey can be used to associate a ConnectionTracer with a Connection.
 // It is set on the Connection.Context() context,
 // as well as on the context passed to logging.Tracer.NewConnectionTracer.
+// Deprecated: Applications can set their own tracing key using Transport.ConnContext.
 var ConnectionTracingKey = connTracingCtxKey{}
+
+// ConnectionTracingID is the type of the context value saved under the ConnectionTracingKey.
+// Deprecated: Applications can set their own tracing key using Transport.ConnContext.
+type ConnectionTracingID uint64
 
 type connTracingCtxKey struct{}
 
@@ -82,8 +87,8 @@ type ReceiveStream interface {
 	// Read reads data from the stream.
 	// Read can be made to time out and return a net.Error with Timeout() == true
 	// after a fixed time limit; see SetDeadline and SetReadDeadline.
-	// If the stream was canceled by the peer, the error implements the StreamError
-	// interface, and Canceled() == true.
+	// If the stream was canceled by the peer, the error is a StreamError and
+	// Remote == true.
 	// If the connection was closed due to a timeout, the error satisfies
 	// the net.Error interface, and Timeout() will be true.
 	io.Reader
@@ -95,7 +100,6 @@ type ReceiveStream interface {
 	// SetReadDeadline sets the deadline for future Read calls and
 	// any currently-blocked Read call.
 	// A zero value for t means Read will not time out.
-
 	SetReadDeadline(t time.Time) error
 }
 
@@ -106,8 +110,8 @@ type SendStream interface {
 	// Write writes data to the stream.
 	// Write can be made to time out and return a net.Error with Timeout() == true
 	// after a fixed time limit; see SetDeadline and SetWriteDeadline.
-	// If the stream was canceled by the peer, the error implements the StreamError
-	// interface, and Canceled() == true.
+	// If the stream was canceled by the peer, the error is a StreamError and
+	// Remote == true.
 	// If the connection was closed due to a timeout, the error satisfies
 	// the net.Error interface, and Timeout() will be true.
 	io.Writer
@@ -119,7 +123,9 @@ type SendStream interface {
 	// CancelWrite aborts sending on this stream.
 	// Data already written, but not yet delivered to the peer is not guaranteed to be delivered reliably.
 	// Write will unblock immediately, and future calls to Write will fail.
-	// When called multiple times or after closing the stream it is a no-op.
+	// When called multiple times it is a no-op.
+	// When called after Close, it aborts delivery. Note that there is no guarantee if
+	// the peer will receive the FIN or the reset first.
 	CancelWrite(StreamErrorCode)
 	// The Context is canceled as soon as the write-side of the stream is closed.
 	// This happens when Close() or CancelWrite() is called, or when the peer
@@ -141,7 +147,7 @@ type SendStream interface {
 // * TransportError: for errors triggered by the QUIC transport (in many cases a misbehaving peer)
 // * IdleTimeoutError: when the peer goes away unexpectedly (this is a net.Error timeout error)
 // * HandshakeTimeoutError: when the cryptographic handshake takes too long (this is a net.Error timeout error)
-// * StatelessResetError: when we receive a stateless reset (this is a net.Error temporary error)
+// * StatelessResetError: when we receive a stateless reset
 // * VersionNegotiationError: returned by the client, when there's no version overlap between the peers
 type Connection interface {
 	// AcceptStream returns the next stream opened by the peer, blocking until one is available.
@@ -154,25 +160,29 @@ type Connection interface {
 	AcceptUniStream(context.Context) (ReceiveStream, error)
 	// OpenStream opens a new bidirectional QUIC stream.
 	// There is no signaling to the peer about new streams:
-	// The peer can only accept the stream after data has been sent on the stream.
-	// If the error is non-nil, it satisfies the net.Error interface.
-	// When reaching the peer's stream limit, err.Temporary() will be true.
-	// If the connection was closed due to a timeout, Timeout() will be true.
+	// The peer can only accept the stream after data has been sent on the stream,
+	// or the stream has been reset or closed.
+	// When reaching the peer's stream limit, it is not possible to open a new stream until the
+	// peer raises the stream limit. In that case, a StreamLimitReachedError is returned.
 	OpenStream() (Stream, error)
 	// OpenStreamSync opens a new bidirectional QUIC stream.
 	// It blocks until a new stream can be opened.
-	// If the error is non-nil, it satisfies the net.Error interface.
-	// If the connection was closed due to a timeout, Timeout() will be true.
+	// There is no signaling to the peer about new streams:
+	// The peer can only accept the stream after data has been sent on the stream,
+	// or the stream has been reset or closed.
 	OpenStreamSync(context.Context) (Stream, error)
 	// OpenUniStream opens a new outgoing unidirectional QUIC stream.
-	// If the error is non-nil, it satisfies the net.Error interface.
-	// When reaching the peer's stream limit, Temporary() will be true.
-	// If the connection was closed due to a timeout, Timeout() will be true.
+	// There is no signaling to the peer about new streams:
+	// The peer can only accept the stream after data has been sent on the stream,
+	// or the stream has been reset or closed.
+	// When reaching the peer's stream limit, it is not possible to open a new stream until the
+	// peer raises the stream limit. In that case, a StreamLimitReachedError is returned.
 	OpenUniStream() (SendStream, error)
 	// OpenUniStreamSync opens a new outgoing unidirectional QUIC stream.
 	// It blocks until a new stream can be opened.
-	// If the error is non-nil, it satisfies the net.Error interface.
-	// If the connection was closed due to a timeout, Timeout() will be true.
+	// There is no signaling to the peer about new streams:
+	// The peer can only accept the stream after data has been sent on the stream,
+	// or the stream has been reset or closed.
 	OpenUniStreamSync(context.Context) (SendStream, error)
 	// LocalAddr returns the local address.
 	LocalAddr() net.Addr
@@ -217,7 +227,7 @@ type EarlyConnection interface {
 	// however the client's identity is only verified once the handshake completes.
 	HandshakeComplete() <-chan struct{}
 
-	NextConnection() Connection
+	NextConnection(context.Context) (Connection, error)
 }
 
 // StatelessResetKey is a key used to derive stateless reset tokens.
@@ -262,7 +272,7 @@ type Config struct {
 	GetConfigForClient func(info *ClientHelloInfo) (*Config, error)
 	// The QUIC versions that can be negotiated.
 	// If not set, it uses all versions available.
-	Versions []VersionNumber
+	Versions []Version
 	// HandshakeIdleTimeout is the idle timeout before completion of the handshake.
 	// If we don't receive any packet from the peer within this time, the connection attempt is aborted.
 	// Additionally, if the handshake doesn't complete in twice this time, the connection attempt is also aborted.
@@ -274,11 +284,6 @@ type Config struct {
 	// If the timeout is exceeded, the connection is closed.
 	// If this value is zero, the timeout is set to 30 seconds.
 	MaxIdleTimeout time.Duration
-	// RequireAddressValidation determines if a QUIC Retry packet is sent.
-	// This allows the server to verify the client's address, at the cost of increasing the handshake latency by 1 RTT.
-	// See https://datatracker.ietf.org/doc/html/rfc9000#section-8 for details.
-	// If not set, every client is forced to prove its remote address.
-	RequireAddressValidation func(net.Addr) bool
 	// The TokenStore stores tokens received from the server.
 	// Tokens are used to skip address validation on future connection attempts.
 	// The key used to store tokens is the ServerName from the tls.Config, if set
@@ -325,10 +330,15 @@ type Config struct {
 	// If set to 0, then no keep alive is sent. Otherwise, the keep alive is sent on that period (or at most
 	// every half of MaxIdleTimeout, whichever is smaller).
 	KeepAlivePeriod time.Duration
+	// InitialPacketSize is the initial size of packets sent.
+	// It is usually not necessary to manually set this value,
+	// since Path MTU discovery very quickly finds the path's MTU.
+	// If set too high, the path might not support packets that large, leading to a timeout of the QUIC handshake.
+	// Values below 1200 are invalid.
+	InitialPacketSize uint16
 	// DisablePathMTUDiscovery disables Path MTU Discovery (RFC 8899).
 	// This allows the sending of QUIC packets that fully utilize the available MTU of the path.
 	// Path MTU discovery is only available on systems that allow setting of the Don't Fragment (DF) bit.
-	// If unavailable or disabled, packets will be at most 1252 (IPv4) / 1232 (IPv6) bytes in size.
 	DisablePathMTUDiscovery bool
 	// Allow0RTT allows the application to decide if a 0-RTT connection attempt should be accepted.
 	// Only valid for the server.
@@ -372,23 +382,30 @@ type Config struct {
 	ServerMaxPacketSizeAdjustment func(net.Addr) int
 }
 
+// ClientHelloInfo contains information about an incoming connection attempt.
 type ClientHelloInfo struct {
+	// RemoteAddr is the remote address on the Initial packet.
+	// Unless AddrVerified is set, the address is not yet verified, and could be a spoofed IP address.
 	RemoteAddr net.Addr
+	// AddrVerified says if the remote address was verified using QUIC's Retry mechanism.
+	// Note that the Retry mechanism costs one network roundtrip,
+	// and is not performed unless Transport.MaxUnvalidatedHandshakes is surpassed.
+	AddrVerified bool
 }
 
 // ConnectionState records basic details about a QUIC connection
 type ConnectionState struct {
 	// TLS contains information about the TLS connection state, incl. the tls.ConnectionState.
 	TLS tls.ConnectionState
-	// SupportsDatagrams says if support for QUIC datagrams (RFC 9221) was negotiated.
-	// This requires both nodes to support and enable the datagram extensions (via Config.EnableDatagrams).
-	// If datagram support was negotiated, datagrams can be sent and received using the
-	// SendDatagram and ReceiveDatagram methods on the Connection.
+	// SupportsDatagrams indicates whether the peer advertised support for QUIC datagrams (RFC 9221).
+	// When true, datagrams can be sent using the Connection's SendDatagram method.
+	// This is a unilateral declaration by the peer - receiving datagrams is only possible if
+	// datagram support was enabled locally via Config.EnableDatagrams.
 	SupportsDatagrams bool
 	// Used0RTT says if 0-RTT resumption was used.
 	Used0RTT bool
 	// Version is the QUIC version of the QUIC connection.
-	Version VersionNumber
+	Version Version
 	// GSO says if generic segmentation offload is used
 	GSO bool
 

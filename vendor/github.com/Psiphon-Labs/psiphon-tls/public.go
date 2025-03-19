@@ -3,7 +3,7 @@ package tls
 // [Psiphon]
 // ClientSessionState contains the state needed by clients to resume TLS sessions.
 func MakeClientSessionState(
-	Ticket []uint8,
+	Ticket []byte,
 	Vers uint16,
 	CipherSuite uint16,
 	MasterSecret []byte,
@@ -12,7 +12,6 @@ func MakeClientSessionState(
 	UseBy uint64,
 ) *ClientSessionState {
 	css := &ClientSessionState{
-		ticket: Ticket,
 		session: &SessionState{
 			version:     Vers,
 			cipherSuite: CipherSuite,
@@ -20,6 +19,7 @@ func MakeClientSessionState(
 			createdAt:   CreatedAt,
 			ageAdd:      AgeAdd,
 			useBy:       UseBy,
+			ticket:      Ticket,
 		},
 	}
 	return css
