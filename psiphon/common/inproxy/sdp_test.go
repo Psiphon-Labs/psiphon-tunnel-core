@@ -35,7 +35,7 @@ import (
 func TestProcessSDP(t *testing.T) {
 	err := runTestProcessSDP()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 

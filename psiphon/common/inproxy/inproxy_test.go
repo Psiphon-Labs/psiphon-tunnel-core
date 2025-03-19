@@ -51,14 +51,14 @@ import (
 func TestInproxy(t *testing.T) {
 	err := runTestInproxy(false)
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 
 func TestInproxyMustUpgrade(t *testing.T) {
 	err := runTestInproxy(true)
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 
