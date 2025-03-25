@@ -1213,6 +1213,19 @@ func dialQUIC(
 			ClientSessionCache:     tlsClientSessionCache,
 		}
 
+		// Use the default curves here,
+		// https://github.com/Psiphon-Labs/psiphon-tls/blob/2a2fae2d/defaults.go#L26,
+		// except for x25519Kyber768Draft00, since it causes the ClientHello
+		// size to grow beyond one packet. The current Psiphon-Labs/quic-go
+		// server code supports multi-packet ClientHellos, but the
+		// verifyClientHelloRandom in older QUIC servers does not. This
+		// workaround ensures compatibility with servers running older
+		// Psiphon-Labs/quic-go.
+		//
+		// TODO: remove this workaround when no longer required.
+		tlsConfig.CurvePreferences = []tls.CurveID{
+			tls.X25519, tls.CurveP256, tls.CurveP384, tls.CurveP521}
+
 		// Creating a session state and storing it in the TLS cache to be used
 		// for PSK (Pre-Shared Key) resumption.
 		if obfuscatedPSKKey != "" {
