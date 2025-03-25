@@ -2280,6 +2280,18 @@ func (s *connection) sendConnectionClose(e error) ([]byte, error) {
 //			return s.mtuDiscoverer.CurrentSize()
 //		}
 func (s *connection) maxPacketSize() protocol.ByteCount {
+
+	// TODO: internal/congestion.pacer continues to use
+	// initialMaxDatagramSize = protocol.InitialPacketSize.
+	// This seems inconsistent because newCubicSender passes a variable
+	// initialMaxDatagramSize, but newPacer still relies on the global constant.
+	// However, cubicSender has SetMaxDatagramSize, which updates both
+	// cubicSender and newPacer when the max packet size increases (e.g., after MTU discovery).
+	// This could be a minor bug in quic-go, as newPacer should ideally use
+	// the variable initialMaxDatagramSize passed to newCubicSender.
+	// Possible fixes include modifying the newPacer constructor or explicitly
+	// calling c.pacer.SetMaxDatagramSize(initialMaxDatagramSize) in newCubicSender.
+
 	if s.mtuDiscoverer == nil {
 		// Use the configured packet size on the client side.
 		// If the server sends a max_udp_payload_size that's smaller than this size, we can ignore this:
