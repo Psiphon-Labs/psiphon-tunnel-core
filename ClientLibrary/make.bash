@@ -51,20 +51,26 @@ build_for_android () {
 
   prepare_build android
 
+  # Required workaround for an PSIPHON_ENABLE_INPROXY dependency:
+  # https://github.com/wlynxg/anet/tree/5501d401a269290292909e6cc75f105571f97cfa?tab=readme-ov-file#how-to-build-with-go-1230-or-later
+  #
+  # TODO: conditional on PSIPHON_ENABLE_INPROXY build tag?
+  ANDROID_LDFLAGS="-checklinkname=0 $LDFLAGS"
+
   TARGET_ARCH=arm
   ARMV=7
 
   CC="${ANDROID_NDK_TOOLCHAIN_ROOT}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang" \
   CXX="${ANDROID_NDK_TOOLCHAIN_ROOT}/${TARGET_ARCH}/bin/arm-linux-androideabi-clang++" \
   GOARM=${ARMV} \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}${ARMV}/libpsiphontunnel.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$ANDROID_LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}${ARMV}/libpsiphontunnel.so" PsiphonTunnel.go
 
 
   TARGET_ARCH=arm64
 
   CC="${ANDROID_NDK_TOOLCHAIN_ROOT}/${TARGET_ARCH}/bin/aarch64-linux-android-clang" \
   CXX="${ANDROID_NDK_TOOLCHAIN_ROOT}/${TARGET_ARCH}/bin/aarch64-linux-android-clang++" \
-  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
+  GOOS=${TARGET_OS} GOARCH=${TARGET_ARCH} go build -buildmode=c-shared -ldflags "$ANDROID_LDFLAGS" -tags "${BUILD_TAGS}" -o "${OUTPUT_DIR}/${TARGET_ARCH}/libpsiphontunnel.so" PsiphonTunnel.go
 
 }
 

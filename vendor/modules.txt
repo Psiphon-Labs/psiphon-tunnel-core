@@ -491,7 +491,7 @@ github.com/vishvananda/netns
 # github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 ## explicit; go 1.12
 github.com/wader/filtertransport
-# github.com/wlynxg/anet v0.0.1
+# github.com/wlynxg/anet v0.0.5
 ## explicit; go 1.20
 github.com/wlynxg/anet
 # github.com/x448/float16 v0.8.4
