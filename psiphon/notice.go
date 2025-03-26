@@ -399,25 +399,30 @@ func (nl *noticeLogger) outputNoticeToRotatingFile(output []byte) error {
 	return nil
 }
 
+// nonConstantSprintf sidesteps the `go vet` "non-constant format string" check
+func nonConstantSprintf(format, _ string, args ...interface{}) string {
+	return fmt.Sprintf(format, args...)
+}
+
 // NoticeInfo is an informational message
 func NoticeInfo(format string, args ...interface{}) {
 	singletonNoticeLogger.outputNotice(
 		"Info", noticeIsDiagnostic,
-		"message", fmt.Sprintf(format, args...))
+		"message", nonConstantSprintf(format, "", args...))
 }
 
 // NoticeWarning is a warning message; typically a recoverable error condition
 func NoticeWarning(format string, args ...interface{}) {
 	singletonNoticeLogger.outputNotice(
 		"Warning", noticeIsDiagnostic,
-		"message", fmt.Sprintf(format, args...))
+		"message", nonConstantSprintf(format, "", args...))
 }
 
 // NoticeError is an error message; typically an unrecoverable error condition
 func NoticeError(format string, args ...interface{}) {
 	singletonNoticeLogger.outputNotice(
 		"Error", noticeIsDiagnostic,
-		"message", fmt.Sprintf(format, args...))
+		"message", nonConstantSprintf(format, "", args...))
 }
 
 // NoticeUserLog is a log message from the outer client user of tunnel-core

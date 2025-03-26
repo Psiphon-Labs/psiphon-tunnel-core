@@ -20,3 +20,6 @@
 
 - 取消了`NetlinkRIB()`函数中对`Netlink`套接字的`Bind()`操作。
 - 根据`RTM_GETADDR`返回的Index号，使用`ioctl`获取其网卡的名称、MTU和标志位。
+
+## 由于 #40569 导致的其他问题
+- #[68082](https://github.com/golang/go/issues/68082)

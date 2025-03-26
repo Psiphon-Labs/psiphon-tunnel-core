@@ -644,6 +644,13 @@ const (
 // whether gQUIC is enabled. SupportedQUICv1Versions are the supported QUIC
 // versions that are based on QUICv1.
 
+var SupportedGQUICVersions = QUICVersions{
+	QUIC_VERSION_GQUIC39,
+	QUIC_VERSION_GQUIC43,
+	QUIC_VERSION_GQUIC44,
+	QUIC_VERSION_OBFUSCATED,
+}
+
 var SupportedQUICv1Versions = QUICVersions{
 	QUIC_VERSION_V1,
 	QUIC_VERSION_RANDOMIZED_V1,

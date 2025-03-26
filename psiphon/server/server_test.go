@@ -2170,7 +2170,7 @@ func waitOnNotification(t *testing.T, c, timeoutSignal <-chan struct{}, timeoutM
 		select {
 		case <-c:
 		case <-timeoutSignal:
-			t.Fatalf(timeoutMessage)
+			t.Fatal(timeoutMessage)
 		}
 	}
 }

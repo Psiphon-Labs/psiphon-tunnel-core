@@ -607,9 +607,9 @@ func testTLSDialerCompatibility(t *testing.T, address string, fragmentClientHell
 			tlsProfile, success, repeats, tlsVersions)
 
 		if success == repeats {
-			t.Logf(result)
+			t.Log(result)
 		} else {
-			t.Errorf(result)
+			t.Error(result)
 		}
 	}
 }

@@ -25,9 +25,7 @@ The specific fix logic includes:
 Removing the `Bind()` operation on `Netlink` sockets in the `NetlinkRIB()` function.
 Using `ioctl` based on the Index number returned by `RTM_GETADDR` to retrieve the network card's name, MTU, and flags.
 
-
-
-
+There are two implementations of the `net` package: one from the [Go standard library](https://pkg.go.dev/net) and another from the [golang.org/x/net](https://pkg.go.dev/golang.org/x/net) module. Both of these implementations have the same issues in the Android environment. The `anet` package should be compatible with both of them.
 
 ## Test Code
 ### net.Interface()
@@ -116,4 +114,13 @@ result:
 ...
 192.168.6.143/24
 fe80::7e4f:4446:eb3:1eb8/64
+```
+
+## Other issues due to #40569
+- https://github.com/golang/go/issues/68082
+
+## How to build with Go 1.23.0 or later
+The `anet` library internally relies on `//go:linkname` directive. Since the usage of `//go:linkname` has been restricted since Go 1.23.0 ([Go 1.23 Release Notes](https://tip.golang.org/doc/go1.23#linker)), it is necessary to specify the `-checklinkname=0` linker flag when building the `anet` package with Go 1.23.0 or later. Without this flag, the following linker error will occur:
+```
+link: github.com/wlynxg/anet: invalid reference to net.zoneCache
 ```

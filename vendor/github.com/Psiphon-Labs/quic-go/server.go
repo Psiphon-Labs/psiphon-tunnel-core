@@ -730,22 +730,24 @@ func (s *baseServer) handleInitialImpl(p receivedPacket, hdr *wire.Header) error
 		return errors.New("too short connection ID")
 	}
 
-	// [Psiphon]
-	// Drop any Initial packet that fails verifyClientHelloRandom.
-	if s.config.VerifyClientHelloRandom != nil {
-		err := s.verifyClientHelloRandom(p, hdr)
-		if err != nil {
-			p.buffer.Release()
-			return err
-		}
-	}
-
 	// The server queues packets for a while, and we might already have established a connection by now.
 	// This results in a second check in the connection map.
 	// That's ok since it's not the hot path (it's only taken by some Initial and 0-RTT packets).
 	if handler, ok := s.connHandler.Get(hdr.DestConnectionID); ok {
 		handler.handlePacket(p)
 		return nil
+	}
+
+	// [Psiphon]
+	// A new connection is being established.
+	// Assumes the packet contains the first CRYPTO frame with the ClientHello random.
+	// Drops the Initial packet if verifyClientHelloRandom fails.
+	if s.config.VerifyClientHelloRandom != nil {
+		err := s.verifyClientHelloRandom(p, hdr)
+		if err != nil {
+			p.buffer.Release()
+			return err
+		}
 	}
 
 	var (

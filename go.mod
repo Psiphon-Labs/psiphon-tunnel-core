@@ -40,7 +40,7 @@ require (
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378
-	github.com/Psiphon-Labs/quic-go v0.0.0-20250318213212-301924cbe026
+	github.com/Psiphon-Labs/quic-go v0.0.0-20250325201346-c58235406399
 	github.com/Psiphon-Labs/utls v0.0.0-20250311210446-c1daf1ce55c1
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
@@ -84,7 +84,7 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
-	github.com/wlynxg/anet v0.0.1
+	github.com/wlynxg/anet v0.0.5
 	golang.org/x/crypto v0.35.0
 	golang.org/x/net v0.36.0
 	golang.org/x/sync v0.11.0

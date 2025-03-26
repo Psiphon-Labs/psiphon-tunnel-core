@@ -21,7 +21,13 @@ BUILDREPO="https://github.com/Psiphon-Labs/psiphon-tunnel-core.git"
 BUILDREV=$(git rev-parse --short HEAD)
 GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 
+# -checklinkname=0 is a required workaround for an PSIPHON_ENABLE_INPROXY dependency:
+# https://github.com/wlynxg/anet/tree/5501d401a269290292909e6cc75f105571f97cfa?tab=readme-ov-file#how-to-build-with-go-1230-or-later
+#
+# TODO: conditional on PSIPHON_ENABLE_INPROXY build tag?
+
 LDFLAGS="\
+-checklinkname=0 \
 -s \
 -w \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildDate=$BUILDDATE \
