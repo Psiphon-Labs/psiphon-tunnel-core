@@ -38,7 +38,7 @@ import (
 func TestSessions(t *testing.T) {
 	err := runTestSessions()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 
@@ -582,7 +582,7 @@ func (t *testSessionRoundTripper) Close() error {
 func TestNoise(t *testing.T) {
 	err := runTestNoise()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 

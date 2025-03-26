@@ -154,6 +154,44 @@ func TestKeySignWithAlgorithmVerify(t *testing.T) {
 	}
 }
 
+func TestKeySignWithShortSignature(t *testing.T) {
+	signer := testSigners["rsa"].(AlgorithmSigner)
+	pub := signer.PublicKey()
+	// Note: data obtained by empirically trying until a result
+	// starting with 0 appeared
+	tests := []struct {
+		algorithm string
+		data      []byte
+	}{
+		{
+			algorithm: KeyAlgoRSA,
+			data:      []byte("sign me92"),
+		},
+		{
+			algorithm: KeyAlgoRSASHA256,
+			data:      []byte("sign me294"),
+		},
+		{
+			algorithm: KeyAlgoRSASHA512,
+			data:      []byte("sign me60"),
+		},
+	}
+
+	for _, tt := range tests {
+		sig, err := signer.SignWithAlgorithm(rand.Reader, tt.data, tt.algorithm)
+		if err != nil {
+			t.Fatalf("Sign(%T): %v", signer, err)
+		}
+		if sig.Blob[0] != 0 {
+			t.Errorf("%s: Expected signature with a leading 0", tt.algorithm)
+		}
+		sig.Blob = sig.Blob[1:]
+		if err := pub.Verify(tt.data, sig); err != nil {
+			t.Errorf("publicKey.Verify(%s): %v", tt.algorithm, err)
+		}
+	}
+}
+
 func TestParseRSAPrivateKey(t *testing.T) {
 	key := testPrivateKeys["rsa"]
 
@@ -610,7 +648,7 @@ func TestKnownHostsParsing(t *testing.T) {
 func TestFingerprintLegacyMD5(t *testing.T) {
 	pub, _ := getTestKey()
 	fingerprint := FingerprintLegacyMD5(pub)
-	want := "fb:61:6d:1a:e3:f0:95:45:3c:a0:79:be:4a:93:63:66" // ssh-keygen -lf -E md5 rsa
+	want := "b7:ef:d3:d5:89:29:52:96:9f:df:47:41:4d:15:37:f4" // ssh-keygen -lf -E md5 rsa
 	if fingerprint != want {
 		t.Errorf("got fingerprint %q want %q", fingerprint, want)
 	}
@@ -619,7 +657,7 @@ func TestFingerprintLegacyMD5(t *testing.T) {
 func TestFingerprintSHA256(t *testing.T) {
 	pub, _ := getTestKey()
 	fingerprint := FingerprintSHA256(pub)
-	want := "SHA256:Anr3LjZK8YVpjrxu79myrW9Hrb/wpcMNpVvTq/RcBm8" // ssh-keygen -lf rsa
+	want := "SHA256:fi5+D7UmDZDE9Q2sAVvvlpcQSIakN4DERdINgXd2AnE" // ssh-keygen -lf rsa
 	if fingerprint != want {
 		t.Errorf("got fingerprint %q want %q", fingerprint, want)
 	}
@@ -724,5 +762,51 @@ func TestNewSignerWithAlgos(t *testing.T) {
 	_, err = NewSignerWithAlgorithms(mas, []string{KeyAlgoRSA})
 	if err == nil {
 		t.Error("signer with algos created with restricted algorithms")
+	}
+}
+
+func TestCryptoPublicKey(t *testing.T) {
+	for _, priv := range testSigners {
+		p1 := priv.PublicKey()
+		key, ok := p1.(CryptoPublicKey)
+		if !ok {
+			continue
+		}
+		p2, err := NewPublicKey(key.CryptoPublicKey())
+		if err != nil {
+			t.Fatalf("NewPublicKey(CryptoPublicKey) failed for %s, got: %v", p1.Type(), err)
+		}
+		if !reflect.DeepEqual(p1, p2) {
+			t.Errorf("got %#v in NewPublicKey, want %#v", p2, p1)
+		}
+	}
+	for _, d := range testdata.SKData {
+		p1, _, _, _, err := ParseAuthorizedKey(d.PubKey)
+		if err != nil {
+			t.Fatalf("parseAuthorizedKey returned error: %v", err)
+		}
+		k1, ok := p1.(CryptoPublicKey)
+		if !ok {
+			t.Fatalf("%T does not implement CryptoPublicKey", p1)
+		}
+
+		var p2 PublicKey
+		switch pub := k1.CryptoPublicKey().(type) {
+		case *ecdsa.PublicKey:
+			p2 = &skECDSAPublicKey{
+				application: "ssh:",
+				PublicKey:   *pub,
+			}
+		case ed25519.PublicKey:
+			p2 = &skEd25519PublicKey{
+				application: "ssh:",
+				PublicKey:   pub,
+			}
+		default:
+			t.Fatalf("unexpected type %T from CryptoPublicKey()", pub)
+		}
+		if !reflect.DeepEqual(p1, p2) {
+			t.Errorf("got %#v, want %#v", p2, p1)
+		}
 	}
 }

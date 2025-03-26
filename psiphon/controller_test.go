@@ -282,7 +282,22 @@ func TestFrontedMeekFragmentor(t *testing.T) {
 		})
 }
 
-func TestQUIC(t *testing.T) {
+func TestGQUIC(t *testing.T) {
+	if !quic.Enabled() {
+		t.Skip("QUIC is not enabled")
+	}
+	if !quic.GQUICEnabled() {
+		t.Skip("gQUIC is not enabled")
+	}
+	controllerRun(t,
+		&controllerRunConfig{
+			protocol:                 protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
+			disableUntunneledUpgrade: true,
+			quicVersions:             protocol.SupportedGQUICVersions,
+		})
+}
+
+func TestIETFQUIC(t *testing.T) {
 	if !quic.Enabled() {
 		t.Skip("QUIC is not enabled")
 	}
@@ -290,6 +305,7 @@ func TestQUIC(t *testing.T) {
 		&controllerRunConfig{
 			protocol:                 protocol.TUNNEL_PROTOCOL_QUIC_OBFUSCATED_SSH,
 			disableUntunneledUpgrade: true,
+			quicVersions:             protocol.SupportedQUICv1Versions,
 		})
 }
 
@@ -389,6 +405,7 @@ type controllerRunConfig struct {
 	useFragmentor            bool
 	useLegacyAPIEncoding     bool
 	useInproxyDialRateLimit  bool
+	quicVersions             protocol.QUICVersions
 }
 
 func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
@@ -460,6 +477,8 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 		modifyConfig["InproxyClientDialRateLimitQuantity"] = 2
 		modifyConfig["InproxyClientDialRateLimitIntervalMilliseconds"] = 1000
 	}
+
+	modifyConfig["LimitQUICVersions"] = runConfig.quicVersions
 
 	configJSON, _ = json.Marshal(modifyConfig)
 

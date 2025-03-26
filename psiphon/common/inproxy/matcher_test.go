@@ -36,7 +36,7 @@ import (
 func TestMatcher(t *testing.T) {
 	err := runTestMatcher()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 
 }
@@ -772,7 +772,7 @@ func randomIPAddress() string {
 func TestMatcherMultiQueue(t *testing.T) {
 	err := runTestMatcherMultiQueue()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 
@@ -1150,7 +1150,7 @@ func BenchmarkMatcherQueue(b *testing.B) {
 
 					err := m.addAnnouncementEntry(announcementEntry)
 					if err != nil {
-						b.Fatalf(errors.Trace(err).Error())
+						b.Fatal(errors.Trace(err).Error())
 					}
 				}
 			}
@@ -1160,7 +1160,7 @@ func BenchmarkMatcherQueue(b *testing.B) {
 
 			queueSize := m.announcementQueue.getLen()
 			if queueSize != size {
-				b.Fatalf(errors.Tracef("unexpected queue size: %d", queueSize).Error())
+				b.Fatal(errors.Tracef("unexpected queue size: %d", queueSize).Error())
 			}
 
 			for i := 0; i < b.N; i++ {
@@ -1203,12 +1203,12 @@ func BenchmarkMatcherQueue(b *testing.B) {
 
 				err := m.addAnnouncementEntry(announcementEntry)
 				if err != nil {
-					b.Fatalf(errors.Trace(err).Error())
+					b.Fatal(errors.Trace(err).Error())
 				}
 
 				match, _ := m.matchOffer(offerEntry)
 				if match == nil {
-					b.Fatalf(errors.TraceNew("unexpected no match").Error())
+					b.Fatal(errors.TraceNew("unexpected no match").Error())
 				}
 
 				m.removeAnnouncementEntry(false, match)

@@ -29,7 +29,7 @@ RUN curl -L https://storage.googleapis.com/golang/$GOVERSION.linux-amd64.tar.gz 
    && echo $GOVERSION > $GOROOT/VERSION
 
 # Setup Android Environment.
-ENV ANDROID_NDK_VERSION=r17b
+ENV ANDROID_NDK_VERSION=r22b
 ENV ANDROID_NDK_TOOLCHAIN_ROOT=/android-ndk-toolchain
 
 # Setup Android NDK

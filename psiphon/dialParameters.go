@@ -1143,27 +1143,30 @@ func MakeDialParameters(
 
 	}
 
-	if serverEntry.DisableShadowsocksPrefix {
+	if protocol.TunnelProtocolUsesShadowsocks(dialParams.TunnelProtocol) {
 
-		dialParams.ShadowsocksPrefixSpec = nil
+		if serverEntry.DisableShadowsocksPrefix {
 
-	} else if !isReplay || !replayShadowsocksPrefix {
-
-		dialPortNumber, err := serverEntry.GetDialPortNumber(
-			dialParams.TunnelProtocol)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		prefixSpec, err := makeShadowsocksPrefixSpecParameters(
-			p, strconv.Itoa(dialPortNumber))
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		if prefixSpec.Spec != nil {
-			dialParams.ShadowsocksPrefixSpec = prefixSpec
-		} else {
 			dialParams.ShadowsocksPrefixSpec = nil
+
+		} else if !isReplay || !replayShadowsocksPrefix {
+
+			dialPortNumber, err := serverEntry.GetDialPortNumber(
+				dialParams.TunnelProtocol)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			prefixSpec, err := makeShadowsocksPrefixSpecParameters(
+				p, strconv.Itoa(dialPortNumber))
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			if prefixSpec.Spec != nil {
+				dialParams.ShadowsocksPrefixSpec = prefixSpec
+			} else {
+				dialParams.ShadowsocksPrefixSpec = nil
+			}
 		}
 	}
 
