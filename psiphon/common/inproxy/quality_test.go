@@ -161,11 +161,11 @@ func runTestProxyQualityReporter() error {
 
 	for count := 0; count < expectedRequestCount; count++ {
 
-		if !r.hasMoreRequests() {
-			return errors.TraceNew("unexpected hasMoreRequests")
-		}
-
 		requestCounts := r.prepareNextRequest()
+
+		if len(requestCounts) == 0 {
+			return errors.TraceNew("unexpected requestCounts")
+		}
 
 		for i := count * 10; i < count*10+10; i++ {
 			counts, ok := requestCounts[proxyKeys[i]]
@@ -186,8 +186,8 @@ func runTestProxyQualityReporter() error {
 
 	}
 
-	if r.hasMoreRequests() {
-		return errors.TraceNew("unexpected hasMoreRequests")
+	if len(r.prepareNextRequest()) != 0 {
+		return errors.TraceNew("unexpected prepareNextRequest")
 	}
 
 	return nil

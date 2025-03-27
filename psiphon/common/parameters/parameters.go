@@ -506,6 +506,7 @@ const (
 	// Retired parameters
 
 	ReplayRandomizedTLSProfile = "ReplayRandomizedTLSProfile"
+	InproxyAllBrokerPublicKeys = "InproxyAllBrokerPublicKeys"
 )
 
 const (
@@ -968,6 +969,7 @@ var defaultParameters = map[string]struct {
 	InproxyAllowClient:                                 {value: false, flags: serverSideOnly},
 	InproxyAllowDomainFrontedDestinations:              {value: false, flags: serverSideOnly},
 	InproxyTunnelProtocolSelectionProbability:          {value: 0.5, minimum: 0.0},
+	InproxyAllBrokerPublicKeys:                         {value: []string{}, flags: serverSideOnly},
 	InproxyAllBrokerSpecs:                              {value: InproxyBrokerSpecsValue{}, flags: serverSideOnly},
 	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
 	InproxyPersonalPairingBrokerSpecs:                  {value: InproxyBrokerSpecsValue{}},
@@ -1324,6 +1326,13 @@ func (p *Parameters) Set(
 	// appear in InproxyAllBrokerSpecs; and in-proxy common compartment IDs
 	// must appear in InproxyAllCommonCompartmentIDs. This check is
 	// server-side only as the "All" parameters are serverSideOnly.
+
+	// Note that similar validation for InproxyAllBrokerPublicKeys has been
+	// retired, although InproxyAllBrokerPublicKeys is still present in
+	// defaultParameters for backwards compatibility during the transition to
+	// InproxyAllBrokerSpecs.
+	//
+	// TODO: fully retire InproxyAllBrokerPublicKeys.
 
 	checkInproxyLists := !skipOnError && serverSide
 

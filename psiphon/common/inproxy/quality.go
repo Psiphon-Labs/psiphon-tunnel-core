@@ -436,7 +436,7 @@ func (r *ProxyQualityReporter) ReportQuality(
 	// reports are simply dropped. There is no back pressure to slow down the
 	// rate of quality tunnels, since the overall goal is to establish
 	// quality tunnels.
-	if r.reportQueue.Len() > proxyQualityReporterMaxQueueEntries {
+	if r.reportQueue.Len() >= proxyQualityReporterMaxQueueEntries {
 		r.logger.WithTrace().Warning("proxyQualityReporterMaxQueueEntries exceeded")
 		return
 	}
@@ -511,20 +511,16 @@ func (r *ProxyQualityReporter) requestScheduler(ctx context.Context) {
 		//   counts for the same proxy ID and client ASN are TTL extensions
 		//   in the ProxyQualityState.
 
-		for r.hasMoreRequests() {
-
+		for {
 			requestCounts := r.prepareNextRequest()
+
+			if len(requestCounts) == 0 {
+				break
+			}
 
 			r.sendToBrokers(ctx, brokerClients, requestCounts)
 		}
 	}
-}
-
-func (r *ProxyQualityReporter) hasMoreRequests() bool {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
-	return r.reportQueue.Len() > 0
 }
 
 func (r *ProxyQualityReporter) prepareNextRequest() ProxyQualityRequestCounts {
@@ -533,6 +529,10 @@ func (r *ProxyQualityReporter) prepareNextRequest() ProxyQualityRequestCounts {
 
 	// prepareNextRequest should not hold the mutex for a long period, as this
 	// blocks ReportQuality, which in turn could block tunnel I/O operations.
+
+	if r.reportQueue.Len() == 0 {
+		return nil
+	}
 
 	counts := make(ProxyQualityRequestCounts)
 
@@ -704,10 +704,14 @@ func (r *ProxyQualityReporter) sendToBrokers(
 						common.LogFields{"brokerID": brokerClient.publicKey, "error": err.Error()},
 					).Warning("sendBrokerRequest failed")
 					if i < retries {
+						// Try again.
 						continue
 					}
+					// No more retries, and don't retain the brokerClient.
 					return
 				}
+				// Exit the retry loop, and retain the successful brokerClient.
+				break
 			}
 
 			// Retain the successful brokerClient.
