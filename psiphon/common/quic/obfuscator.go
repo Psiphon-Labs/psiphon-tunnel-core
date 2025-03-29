@@ -738,7 +738,17 @@ func (conn *ObfuscatedPacketConn) writePacket(
 
 	if isObfuscated {
 
-		if n > MAX_PACKET_SIZE {
+		// Check that the input packet length doesn't exceed MAX_PACKET_SIZE,
+		// the expected standard max quic-go packet size, adjusted down by
+		// OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT to leave room for the
+		// obfuscation nonce and padding. This adjustment is configured in
+		// Dial and makeServerIETFConfig and should be applied within
+		// Psiphon-Labs/quic-go before it calls through to writePacket.
+		//
+		// There's no special case for legacy gQUIC, even though it lacks
+		// packet size adjustments, since gQUIC has a hard max packet size of
+		// 1280 bytes, less than the limit checked here.
+		if n > MAX_PACKET_SIZE-OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT {
 			return 0, 0, newTemporaryNetError(errors.Tracef(
 				"unexpected QUIC packet length: %d", n))
 		}
@@ -781,6 +791,13 @@ func (conn *ObfuscatedPacketConn) writePacket(
 
 			copy(buffer[(NONCE_SIZE+1)+paddingLen:], p)
 			dataLen := (NONCE_SIZE + 1) + paddingLen + n
+
+			// Sanity check that the addition of the nonce and padding didn't
+			// grow the packet beyond MAX_PACKET_SIZE, the buffer size.
+			if dataLen > MAX_PACKET_SIZE {
+				return 0, 0, newTemporaryNetError(errors.Tracef(
+					"unexpected obfuscated packet length: %d", dataLen))
+			}
 
 			cipher, err := chacha20.NewCipher(conn.obfuscationKey[:], nonce)
 			if err != nil {
