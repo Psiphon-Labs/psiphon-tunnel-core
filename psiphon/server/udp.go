@@ -271,7 +271,8 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 			var activityUpdaters []common.ActivityUpdater
 			// Don't incur activity monitor overhead for DNS requests
 			if !message.forwardDNS {
-				activityUpdaters = mux.sshClient.getActivityUpdaters(portForwardTypeUDP, dialIP)
+				activityUpdaters = mux.sshClient.getPortForwardActivityUpdaters(
+					portForwardTypeUDP, dialIP)
 			}
 
 			conn, err := common.NewActivityMonitoredConn(

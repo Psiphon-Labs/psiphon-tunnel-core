@@ -970,6 +970,43 @@ func (s *ResponderSessions) SetKnownInitiatorPublicKeys(
 	return nil
 }
 
+// GetEstablishedKnownInitiatorIDs returns a list of known initiator IDs, the
+// Curve21559 equivalents of known initiator public keys, with currently
+// established sessions.
+//
+// The return value is a map that may be used for lookups, supporting the
+// ProxyQualityReporter use case of sending server proxy quality requests
+// only to brokers that are expected to already trust the server's session
+// public key.
+//
+// GetEstablishedKnownInitiatorIDs requires KnownInitiators mode, and is
+// intended for use with only a small number of known initiators.
+func (s *ResponderSessions) GetEstablishedKnownInitiatorIDs() map[ID]struct{} {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	initiatorIDs := make(map[ID]struct{})
+
+	if s.expectedInitiatorPublicKeys == nil {
+		// Exit immediately when not in known initiator mode. Don't
+		// accidentally iterator over potentially millions of sessions.
+		return initiatorIDs
+	}
+
+	for _, entry := range s.sessions.Items() {
+		session := entry.Object.(*session)
+		initiatorID, err := session.getPeerID()
+		if err != nil {
+			// When getPeerID fails, the session is not yet established.
+			continue
+		}
+		initiatorIDs[initiatorID] = struct{}{}
+	}
+
+	return initiatorIDs
+}
+
 // RequestHandler is an application-level handler that receives the decrypted
 // request payload and returns a response payload to be encrypted and sent to
 // the initiator. The initiatorID is the authenticated identifier of the

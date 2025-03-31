@@ -309,13 +309,45 @@ func runTestInproxy(doMustUpgrade bool) error {
 	// Stub server broker request handler (in Psiphon, this will be the
 	// destination Psiphon server; here, it's not necessary to build this
 	// handler into the destination echo server)
+	//
+	// The stub server broker request handler also triggers a server proxy
+	// quality request in the other direction.
 
-	serverSessions, err := NewServerBrokerSessions(
-		serverPrivateKey, serverRootObfuscationSecret, []SessionPublicKey{brokerPublicKey},
-		apiParameterValidator, apiParameterLogFieldFormatter, "")
+	makeServerBrokerClientRoundTripper := func(_ SessionPublicKey) (
+		RoundTripper, common.APIParameters, error) {
+
+		return newHTTPRoundTripper(brokerListener.Addr().String(), "server"), nil, nil
+	}
+
+	serverSessionsConfig := &ServerBrokerSessionsConfig{
+		Logger:                       logger,
+		ServerPrivateKey:             serverPrivateKey,
+		ServerRootObfuscationSecret:  serverRootObfuscationSecret,
+		BrokerPublicKeys:             []SessionPublicKey{brokerPublicKey},
+		BrokerRootObfuscationSecrets: []ObfuscationSecret{brokerRootObfuscationSecret},
+		BrokerRoundTripperMaker:      makeServerBrokerClientRoundTripper,
+		ProxyMetricsValidator:        apiParameterValidator,
+		ProxyMetricsFormatter:        apiParameterLogFieldFormatter,
+		ProxyMetricsPrefix:           "",
+	}
+
+	serverSessions, err := NewServerBrokerSessions(serverSessionsConfig)
 	if err != nil {
 		return errors.Trace(err)
 	}
+
+	err = serverSessions.Start()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer serverSessions.Stop()
+
+	// Don't delay reporting quality.
+	serverSessions.SetProxyQualityRequestParameters(
+		proxyQualityReporterMaxRequestEntries,
+		0,
+		proxyQualityReporterRequestTimeout,
+		proxyQualityReporterRequestRetries)
 
 	var pendingBrokerServerReportsMutex sync.Mutex
 	pendingBrokerServerReports := make(map[ID]bool)
@@ -326,20 +358,51 @@ func runTestInproxy(doMustUpgrade bool) error {
 		pendingBrokerServerReports[connectionID] = true
 	}
 
+	removePendingBrokerServerReport := func(connectionID ID) {
+		pendingBrokerServerReportsMutex.Lock()
+		defer pendingBrokerServerReportsMutex.Unlock()
+		delete(pendingBrokerServerReports, connectionID)
+	}
+
 	hasPendingBrokerServerReports := func() bool {
 		pendingBrokerServerReportsMutex.Lock()
 		defer pendingBrokerServerReportsMutex.Unlock()
 		return len(pendingBrokerServerReports) > 0
 	}
 
+	serverQualityGroup := new(errgroup.Group)
+	var serverQualityProxyIDsMutex sync.Mutex
+	serverQualityProxyIDs := make(map[ID]struct{})
+	testProxyASN := "65537"
+	testClientASN := "65538"
+
 	handleBrokerServerReports := func(in []byte, clientConnectionID ID) ([]byte, error) {
 
-		handler := func(brokerVerifiedOriginalClientIP string, logFields common.LogFields) {
-			pendingBrokerServerReportsMutex.Lock()
-			defer pendingBrokerServerReportsMutex.Unlock()
+		handler := func(
+			brokerVerifiedOriginalClientIP string,
+			brokerReportedProxyID ID,
+			brokerMatchedPersonalCompartments bool,
+			logFields common.LogFields) {
 
 			// Mark the report as no longer outstanding
-			delete(pendingBrokerServerReports, clientConnectionID)
+			removePendingBrokerServerReport(clientConnectionID)
+
+			// Trigger an asynchronous proxy quality request to the broker.
+			// This roughly follows the Psiphon server functionality, where a
+			// quality request is made sometime after the Psiphon handshake
+			// completes, once tunnel quality thresholds are achieved.
+
+			serverQualityGroup.Go(func() error {
+				serverSessions.ReportQuality(
+					brokerReportedProxyID, testProxyASN, testClientASN)
+
+				serverQualityProxyIDsMutex.Lock()
+				serverQualityProxyIDs[brokerReportedProxyID] = struct{}{}
+				serverQualityProxyIDsMutex.Unlock()
+
+				return nil
+			})
+
 		}
 
 		out, err := serverSessions.HandlePacket(logger, in, clientConnectionID, handler)
@@ -874,6 +937,29 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 		if hasPendingProxyTacticsCallbacks() {
 			return errors.TraceNew("unexpected pending proxy tactics callback")
+		}
+
+		err = serverQualityGroup.Wait()
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		// Inspect the broker's proxy quality state, to verify that the proxy
+		// quality request was processed.
+		//
+		// Limitation: currently we don't check the priority
+		// announcement _queue_, as announcements may have arrived before the
+		// quality request, and announcements are promoted between queues.
+
+		serverQualityProxyIDsMutex.Lock()
+		defer serverQualityProxyIDsMutex.Unlock()
+		for proxyID, _ := range serverQualityProxyIDs {
+			if !broker.proxyQualityState.HasQuality(proxyID, testProxyASN, "") {
+				return errors.TraceNew("unexpected missing HasQuality (no client ASN)")
+			}
+			if !broker.proxyQualityState.HasQuality(proxyID, testProxyASN, testClientASN) {
+				return errors.TraceNew("unexpected missing HasQuality (with client ASN)")
+			}
 		}
 
 		// TODO: check that elapsed time is consistent with rate limit (+/-)

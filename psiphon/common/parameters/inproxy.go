@@ -20,6 +20,8 @@
 package parameters
 
 import (
+	"reflect"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
@@ -37,14 +39,23 @@ type InproxyBrokerSpec struct {
 }
 
 // Validate checks that the in-proxy broker specs values are well-formed.
-func (specs InproxyBrokerSpecsValue) Validate(checkBrokerPublicKeyList *[]string) error {
+func (specs InproxyBrokerSpecsValue) Validate(checkBrokerSpecsList *InproxyBrokerSpecsValue) error {
 
 	for _, spec := range specs {
 		if _, err := inproxy.SessionPublicKeyFromString(spec.BrokerPublicKey); err != nil {
 			return errors.Tracef("invalid broker public key: %w", err)
 		}
-		if checkBrokerPublicKeyList != nil && !common.Contains(*checkBrokerPublicKeyList, spec.BrokerPublicKey) {
-			return errors.TraceNew("unknown broker public key")
+		if checkBrokerSpecsList != nil {
+			found := false
+			for _, checkBrokerSpec := range *checkBrokerSpecsList {
+				if reflect.DeepEqual(spec, checkBrokerSpec) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return errors.TraceNew("unknown broker spec")
+			}
 		}
 		if _, err := inproxy.ObfuscationSecretFromString(spec.BrokerRootObfuscationSecret); err != nil {
 			return errors.Tracef("invalid broker root obfuscation secret: %w", err)

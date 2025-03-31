@@ -23,6 +23,9 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
+	"math"
+	"strconv"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -510,6 +513,65 @@ type BrokerServerReport struct {
 	ProxyPortMappingTypes PortMappingTypes `cbor:"6,keyasint,omitempty"`
 }
 
+// ProxyQualityKey is the key that proxy quality is indexed on a proxy ID and
+// a proxy ASN. Quality is tracked at a fine-grained level, with the proxy ID
+// representing, typically, an individual device, and the proxy ASN
+// representing the network the device used at the time a quality tunnel was
+// reported.
+type ProxyQualityKey [36]byte
+
+// MakeProxyQualityKey creates a ProxyQualityKey using the given proxy ID and
+// proxy ASN. In the key, the proxy ID remains encoded as-is, and the ASN is
+// encoded in the 4-byte representation (see RFC6793).
+func MakeProxyQualityKey(proxyID ID, proxyASN string) ProxyQualityKey {
+	var key ProxyQualityKey
+	copy(key[0:32], proxyID[:])
+	ASN, err := strconv.Atoi(proxyASN)
+	if err != nil || ASN < 0 || ASN > math.MaxUint32 {
+		// In cases including failed or misconfigured GeoIP lookups -- with
+		// values such as server.GEOIP_UNKNOWN_VALUE or invalid AS numbers --
+		// fall back to a reserved AS number (see RFC5398). This is, effectively, a less
+		// fine-grained key.
+		//
+		// Note that GeoIP lookups are performed server-side and a proxy
+		// itself cannot force this downgrade (to obtain false quality
+		// classification across different networks).
+		ASN = 65536
+	}
+	binary.BigEndian.PutUint32(key[32:36], uint32(ASN))
+	return key
+}
+
+// ProxyQualityASNCounts is tunnel quality data, a map from client ASNs to
+// counts of quality tunnels that a proxy relayed for those client ASNs.
+type ProxyQualityASNCounts map[string]int
+
+// ProxyQualityRequestCounts is ProxyQualityASNCounts for a set of proxies.
+type ProxyQualityRequestCounts map[ProxyQualityKey]ProxyQualityASNCounts
+
+// ServerProxyQualityRequest is an API request sent from a server to a broker,
+// reporting a set of proxy IDs/ASNs that have relayed quality tunnels -- as
+// determined by bytes transferred and duration thresholds -- for clients in
+// the given ASNs. This quality data is used, by brokers, to prioritize
+// well-performing proxies, and to match clients with proxies that worked
+// successfully for the client's ASN.
+//
+// QualityCounts is a map from proxy ID/ASN to ASN quality tunnel counts.
+//
+// DialParameters specifies additional parameters to log with proxy quality
+// broker events, including any relevant server broker dial parameters.
+// Unlike clients and proxies, servers do not send BaseAPIParameters to
+// brokers.
+type ServerProxyQualityRequest struct {
+	QualityCounts  ProxyQualityRequestCounts    `cbor:"1,keyasint,omitempty"`
+	DialParameters protocol.PackedAPIParameters `cbor:"2,keyasint,omitempty"`
+}
+
+// ServerProxyQualityResponse is the acknowledgement for a
+// ServerProxyQualityRequest.
+type ServerProxyQualityResponse struct {
+}
+
 // GetNetworkType extracts the network_type from base API metrics and returns
 // a corresponding NetworkType. This is the one base metric that is used in
 // the broker logic, and not simply logged.
@@ -540,6 +602,8 @@ const (
 	maxPaddingSize    = 16384
 	maxDecoyMessages  = 100
 	maxDecoySize      = 16384
+
+	maxQualityCounts = 10000
 )
 
 // ValidateAndGetParametersAndLogFields validates the ProxyMetrics and returns
@@ -944,6 +1008,40 @@ func (report *BrokerServerReport) ValidateAndGetLogFields(
 	return logFields, nil
 }
 
+// ValidateAndGetLogFields validates the ServerProxyQualityRequest and returns
+// common.LogFields for logging.
+func (request *ServerProxyQualityRequest) ValidateAndGetLogFields() (common.LogFields, error) {
+
+	if len(request.QualityCounts) > maxQualityCounts {
+		return nil, errors.Tracef("invalid quality count length: %d", len(request.QualityCounts))
+	}
+
+	// Currently, there is no custom validator or formatter for
+	// DialParameters, as there is for the BaseAPIParameters sent by clients
+	// and proxies:
+	//
+	// - The DialParameters inputs, used only to annotate logs, are from a
+	//   trusted Psiphon server.
+	//
+	// - Psiphon servers do not send fields required by the existing
+	//   BaseAPIParameters validators, such as sponsor ID.
+	//
+	// - No formatter transforms, such as "0"/"1" to bool, are currently
+	//   expected; and server.getRequestLogFields is inefficient when a
+	//   couple of log fields are expected; for an example for any future
+	//   special case formatter, see
+	//   server.getInproxyBrokerServerReportParameterLogFieldFormatter.
+
+	dialParams, err := protocol.DecodePackedAPIParameters(request.DialParameters)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	logFields := common.LogFields(dialParams)
+
+	return logFields, nil
+}
+
 func MarshalProxyAnnounceRequest(request *ProxyAnnounceRequest) ([]byte, error) {
 	payload, err := marshalRecord(request, recordTypeAPIProxyAnnounceRequest)
 	return payload, errors.Trace(err)
@@ -1041,4 +1139,26 @@ func UnmarshalBrokerServerReport(payload []byte) (*BrokerServerReport, error) {
 	var request *BrokerServerReport
 	err := unmarshalRecord(recordTypeAPIBrokerServerReport, payload, &request)
 	return request, errors.Trace(err)
+}
+
+func MarshalServerProxyQualityRequest(request *ServerProxyQualityRequest) ([]byte, error) {
+	payload, err := marshalRecord(request, recordTypeAPIServerProxyQualityRequest)
+	return payload, errors.Trace(err)
+}
+
+func UnmarshalServerProxyQualityRequest(payload []byte) (*ServerProxyQualityRequest, error) {
+	var request *ServerProxyQualityRequest
+	err := unmarshalRecord(recordTypeAPIServerProxyQualityRequest, payload, &request)
+	return request, errors.Trace(err)
+}
+
+func MarshalServerProxyQualityResponse(response *ServerProxyQualityResponse) ([]byte, error) {
+	payload, err := marshalRecord(response, recordTypeAPIServerProxyQualityResponse)
+	return payload, errors.Trace(err)
+}
+
+func UnmarshalServerProxyQualityResponse(payload []byte) (*ServerProxyQualityResponse, error) {
+	var response *ServerProxyQualityResponse
+	err := unmarshalRecord(recordTypeAPIServerProxyQualityResponse, payload, &response)
+	return response, errors.Trace(err)
 }
