@@ -953,7 +953,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 		serverQualityProxyIDsMutex.Lock()
 		defer serverQualityProxyIDsMutex.Unlock()
-		for proxyID, _ := range serverQualityProxyIDs {
+		for proxyID := range serverQualityProxyIDs {
 			if !broker.proxyQualityState.HasQuality(proxyID, testProxyASN, "") {
 				return errors.TraceNew("unexpected missing HasQuality (no client ASN)")
 			}
