@@ -526,7 +526,7 @@ type ProxyQualityKey [36]byte
 func MakeProxyQualityKey(proxyID ID, proxyASN string) ProxyQualityKey {
 	var key ProxyQualityKey
 	copy(key[0:32], proxyID[:])
-	ASN, err := strconv.Atoi(proxyASN)
+	ASN, err := strconv.ParseInt(proxyASN, 10, 0)
 	if err != nil || ASN < 0 || ASN > math.MaxUint32 {
 		// In cases including failed or misconfigured GeoIP lookups -- with
 		// values such as server.GEOIP_UNKNOWN_VALUE or invalid AS numbers --
