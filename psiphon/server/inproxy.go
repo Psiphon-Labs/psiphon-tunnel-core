@@ -148,6 +148,12 @@ func NewInproxyProxyQualityBrokerRoundTripper(
 	// fingerprints, and TCP and TLS fragmentation, TLS padding, and other
 	// mechanisms.
 
+	// FrontingSpec.Addresses may include a port; default to 443 if none.
+	dialAddress := frontingDialAddress
+	if _, _, err := net.SplitHostPort(dialAddress); err != nil {
+		dialAddress = net.JoinHostPort(frontingDialAddress, "443")
+	}
+
 	var tlsConfigRootCAs *x509.CertPool
 	if trustedCACertificates != "" {
 		tlsConfigRootCAs = x509.NewCertPool()
@@ -160,7 +166,7 @@ func NewInproxyProxyQualityBrokerRoundTripper(
 
 	transport := &http.Transport{
 		DialTLSContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			conn, err := (&net.Dialer{}).DialContext(ctx, network, frontingDialAddress)
+			conn, err := (&net.Dialer{}).DialContext(ctx, network, dialAddress)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
