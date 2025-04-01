@@ -1530,7 +1530,10 @@ func (sshServer *sshServer) reloadTactics() error {
 
 		if !p.IsNil() {
 
-			brokerSpecs := p.InproxyBrokerSpecs(parameters.InproxyAllBrokerSpecs)
+			// Fall back to InproxyBrokerSpecs if InproxyAllBrokerSpecs is not
+			// configured.
+			brokerSpecs := p.InproxyBrokerSpecs(
+				parameters.InproxyAllBrokerSpecs, parameters.InproxyBrokerSpecs)
 
 			var brokerPublicKeys []inproxy.SessionPublicKey
 			var brokerRootObfuscationSecrets []inproxy.ObfuscationSecret
@@ -2188,6 +2191,18 @@ func (t *inproxyProxyQualityTracker) UpdateProgress(
 
 		handshaked, _ := t.sshClient.getHandshaked()
 		if handshaked {
+
+			// Limitation: reporting proxy quality is currently a
+			// once-per-tunnel operation. Since in-proxy brokers apply a
+			// quality data TTL, InproxyProxyQualityTTL, it's possible that a
+			// proxy that continues to relay only one single tunnel for
+			// longer than that TTL will eventually lose its priority
+			// classification even as the tunnel remains connected and relaying
+			// data.
+			//
+			// As a future enhancement, consider reseting the tracker and
+			// triggering a new quality report after the
+			// InproxyProxyQualityTTL period.
 
 			if !atomic.CompareAndSwapInt32(&t.reportTriggered, 0, 1) {
 				return
@@ -4539,7 +4554,8 @@ func (sshClient *sshClient) reportProxyQuality() {
 	if len(enabledRegions) > 0 &&
 		!common.Contains(enabledRegions, sshClient.clientGeoIPData.Country) {
 
-		// Quality reporting is restricted to specific regions, and this client's region is not included.
+		// Quality reporting is restricted to specific regions, and this
+		// client's region is not included.
 		return
 	}
 

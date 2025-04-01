@@ -1343,6 +1343,18 @@ func (p *Parameters) Set(
 	}
 	inproxyAllBrokerSpecs, _ := inproxyAllBrokerSpecsValue.(InproxyBrokerSpecsValue)
 
+	// Fall back to InproxyBrokerSpecs if InproxyAllBrokerSpecs is not
+	// configured.
+	if len(inproxyAllBrokerSpecs) == 0 {
+		inproxyBrokerSpecsValue, err := getAppliedValue(
+			InproxyBrokerSpecs, parameters, applyParameters)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		inproxyAllBrokerSpecs, _ = inproxyBrokerSpecsValue.(InproxyBrokerSpecsValue)
+
+	}
+
 	inproxyAllCommonCompartmentIDsValue, err := getAppliedValue(
 		InproxyAllCommonCompartmentIDs, parameters, applyParameters)
 	if err != nil {

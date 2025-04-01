@@ -59,7 +59,10 @@ func MakeInproxyProxyQualityBrokerRoundTripper(
 		return nil, nil, errors.TraceNew("missing tactics")
 	}
 
-	brokerSpecs := p.InproxyBrokerSpecs(parameters.InproxyAllBrokerSpecs)
+	// Fall back to InproxyBrokerSpecs if InproxyAllBrokerSpecs is not
+	// configured.
+	brokerSpecs := p.InproxyBrokerSpecs(
+		parameters.InproxyAllBrokerSpecs, parameters.InproxyBrokerSpecs)
 
 	// InproxyProxyQualityReporterTrustedCACertificates and
 	// InproxyProxyQualityReporterAdditionalHeaders are intended to support
