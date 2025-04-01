@@ -1357,6 +1357,9 @@ func (b *Broker) handleServerProxyQuality(
 		logFields["broker_id"] = b.brokerID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		logFields["server_id"] = serverID
+		if retErr != nil {
+			logFields["error"] = retErr.Error()
+		}
 		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
 	}()
