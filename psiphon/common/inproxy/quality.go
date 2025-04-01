@@ -601,7 +601,9 @@ func (r *ProxyQualityReporter) sendToBrokers(
 			initiatorID, err := brokerPublicKey.ToCurve25519()
 			if err != nil {
 				r.logger.WithTraceFields(
-					common.LogFields{"brokerID": brokerPublicKey, "error": err.Error()},
+					common.LogFields{
+						"brokerID": brokerPublicKey.String(),
+						"error":    err.Error()},
 				).Warning("ToCurve25519 failed")
 				continue
 			}
@@ -677,7 +679,9 @@ func (r *ProxyQualityReporter) sendToBrokers(
 			roundTripper, dialParams, err := r.roundTripperMaker(brokerPublicKey)
 			if err != nil {
 				r.logger.WithTraceFields(
-					common.LogFields{"brokerID": brokerPublicKey, "error": err.Error()},
+					common.LogFields{
+						"brokerID": brokerPublicKey.String(),
+						"error":    err.Error()},
 				).Warning("roundTripperMaker failed")
 				continue
 			}
@@ -701,7 +705,9 @@ func (r *ProxyQualityReporter) sendToBrokers(
 				err := r.sendBrokerRequest(ctx, brokerClient, requestCounts)
 				if err != nil {
 					r.logger.WithTraceFields(
-						common.LogFields{"brokerID": brokerClient.publicKey, "error": err.Error()},
+						common.LogFields{
+							"brokerID": brokerClient.publicKey.String(),
+							"error":    err.Error()},
 					).Warning("sendBrokerRequest failed")
 					if i < retries {
 						// Try again.
