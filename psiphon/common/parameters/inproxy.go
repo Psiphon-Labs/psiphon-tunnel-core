@@ -20,8 +20,6 @@
 package parameters
 
 import (
-	"reflect"
-
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
@@ -48,7 +46,11 @@ func (specs InproxyBrokerSpecsValue) Validate(checkBrokerSpecsList *InproxyBroke
 		if checkBrokerSpecsList != nil {
 			found := false
 			for _, checkBrokerSpec := range *checkBrokerSpecsList {
-				if reflect.DeepEqual(spec, checkBrokerSpec) {
+				// Verify that the broker public key and root obfuscation
+				// secret match an entry on the check list. The fronting
+				// specs may differ and are not compared.
+				if spec.BrokerPublicKey == checkBrokerSpec.BrokerPublicKey &&
+					spec.BrokerRootObfuscationSecret == checkBrokerSpec.BrokerRootObfuscationSecret {
 					found = true
 					break
 				}
