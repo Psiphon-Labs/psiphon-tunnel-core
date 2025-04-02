@@ -1741,7 +1741,12 @@ func (b *Broker) validateDestination(
 		return nil, errors.Trace(err)
 	}
 
-	b.knownServerInitiatorIDs.Store(ID(serverInitiatorID), serverID)
+	// For hosts running a single psiphond with multiple server entries, there
+	// will be multiple possible serverIDs for one serverInitiatorID. Don't
+	// overwrite any existing entry; keep the first observed serverID for
+	// more stable logging.
+
+	_, _ = b.knownServerInitiatorIDs.LoadOrStore(ID(serverInitiatorID), serverID)
 
 	return params, nil
 }
