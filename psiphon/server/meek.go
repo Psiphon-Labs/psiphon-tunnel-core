@@ -1925,6 +1925,8 @@ func (server *MeekServer) inproxyBrokerPrioritizeProxy(
 
 	filter := p.KeyStringsValue(parameters.InproxyBrokerMatcherPrioritizeProxiesFilter)
 	if len(filter) == 0 {
+		// When InproxyBrokerMatcherPrioritizeProxiesFilter is empty, the
+		// default value, no proxies are prioritized.
 		return false
 	}
 	for name, values := range filter {

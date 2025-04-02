@@ -709,6 +709,12 @@ func (b *Broker) handleProxyAnnounce(
 
 	if isPriority && b.config.PrioritizeProxy != nil {
 
+		// Note that, in the psiphon/server package, inproxyBrokerPrioritizeProxy
+		// is always wired up, and, as currently implemented, the default value for
+		// the InproxyBrokerMatcherPrioritizeProxiesFilter tactics parameter
+		// results in PrioritizeProxy always returning false. Some filter,
+		// even just a wildcard match, must be configured in order to prioritize.
+
 		// Limitation: Of the two return values from
 		// ValidateAndGetParametersAndLogFields, apiParams and logFields,
 		// only logFields contains fields such as max_clients
