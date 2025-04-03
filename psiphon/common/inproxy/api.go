@@ -507,6 +507,7 @@ type BrokerServerReport struct {
 	ClientIP                    string           `cbor:"9,keyasint,omitempty"`
 	ProxyIP                     string           `cbor:"10,keyasint,omitempty"`
 	ProxyMetrics                *ProxyMetrics    `cbor:"11,keyasint,omitempty"`
+	ProxyIsPriority             bool             `cbor:"12,keyasint,omitempty"`
 
 	// These legacy fields are now sent in ProxyMetrics.
 	ProxyNATType          NATType          `cbor:"5,keyasint,omitempty"`
@@ -1000,6 +1001,7 @@ func (report *BrokerServerReport) ValidateAndGetLogFields(
 	logFields["inproxy_matched_personal_compartments"] = report.MatchedPersonalCompartments
 	logFields["inproxy_client_nat_type"] = report.ClientNATType
 	logFields["inproxy_client_port_mapping_types"] = report.ClientPortMappingTypes
+	logFields["inproxy_proxy_is_priority"] = report.ProxyIsPriority
 
 	// TODO:
 	// - log IPv4 vs. IPv6 information

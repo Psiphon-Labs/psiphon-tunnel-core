@@ -1174,8 +1174,9 @@ func (b *Broker) handleClientOffer(
 			ClientPortMappingTypes:      clientMatchOffer.Properties.PortMappingTypes,
 			ClientIP:                    clientIP,
 			ProxyIP:                     proxyAnswer.ProxyIP,
-			ProxyMetrics:                proxyMatchAnnouncement.ProxyMetrics,
 			// ProxyMetrics includes proxy NAT and port mapping types.
+			ProxyMetrics:    proxyMatchAnnouncement.ProxyMetrics,
+			ProxyIsPriority: proxyMatchAnnouncement.Properties.IsPriority,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
