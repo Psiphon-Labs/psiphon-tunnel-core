@@ -32,15 +32,19 @@ import (
 // fronted HTTPS. RoundTripper is used by clients and proxies to make
 // requests to brokers.
 //
-// The round trip implementation must apply any specified delay before the
+// The RoundTrip implementation must apply any specified delay before the
 // network round trip begins; and apply the specified timeout to the network
 // round trip, excluding any delay.
+//
+// Close must interrupt any in-flight requests and close all network
+// resources.
 type RoundTripper interface {
 	RoundTrip(
 		ctx context.Context,
 		roundTripDelay time.Duration,
 		roundTripTimeout time.Duration,
 		requestPayload []byte) (responsePayload []byte, err error)
+	Close() error
 }
 
 // RoundTripperFailedError is an error type that should be returned from

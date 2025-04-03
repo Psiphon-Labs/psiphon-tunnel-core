@@ -1865,6 +1865,11 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval),
 		p.Int(parameters.InproxyMaxCompartmentIDListLength))
 
+	server.inproxyBroker.SetProxyQualityParameters(
+		p.Duration(parameters.InproxyProxyQualityTTL),
+		p.Duration(parameters.InproxyProxyQualityPendingFailedMatchDeadline),
+		p.Int(parameters.InproxyProxyQualityFailedMatchThreshold))
+
 	return nil
 }
 
@@ -1920,6 +1925,8 @@ func (server *MeekServer) inproxyBrokerPrioritizeProxy(
 
 	filter := p.KeyStringsValue(parameters.InproxyBrokerMatcherPrioritizeProxiesFilter)
 	if len(filter) == 0 {
+		// When InproxyBrokerMatcherPrioritizeProxiesFilter is empty, the
+		// default value, no proxies are prioritized.
 		return false
 	}
 	for name, values := range filter {

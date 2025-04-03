@@ -47,7 +47,9 @@ const (
 	recordTypeAPIClientRelayedPacketRequest  = 9
 	recordTypeAPIClientRelayedPacketResponse = 10
 	recordTypeAPIBrokerServerReport          = 11
-	recordTypeLast                           = 11
+	recordTypeAPIServerProxyQualityRequest   = 12
+	recordTypeAPIServerProxyQualityResponse  = 13
+	recordTypeLast                           = 13
 )
 
 func marshalRecord(record interface{}, recordType int) ([]byte, error) {
