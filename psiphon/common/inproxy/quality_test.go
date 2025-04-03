@@ -72,9 +72,13 @@ func runTestProxyQualityState() error {
 
 	q.AddQuality(proxyKey, ProxyQualityASNCounts{testClientASN1: 1, testClientASN2: 2})
 
+	// Test: HasQuality for any client ASN
+
 	if !q.HasQuality(proxyID, testProxyASN, "") {
 		return errors.TraceNew("unexpected HasQuality")
 	}
+
+	// Test: HasQuality for specific client ASN
 
 	if !q.HasQuality(proxyID, testProxyASN, testClientASN1) {
 		return errors.TraceNew("unexpected HasQuality")
@@ -84,16 +88,30 @@ func runTestProxyQualityState() error {
 		return errors.TraceNew("unexpected HasQuality")
 	}
 
+	// Test: TTL expires
+
 	time.Sleep(qualityTTL + 1*time.Millisecond)
 
 	if q.HasQuality(proxyID, testProxyASN, "") {
 		return errors.TraceNew("unexpected HasQuality")
 	}
 
+	// Test: flush
+
 	qualityTTL = proxyQualityTTL
 
 	q.SetParameters(
 		qualityTTL, pendingFailedMatchDeadline, failedMatchThreshold)
+
+	q.AddQuality(proxyKey, ProxyQualityASNCounts{testClientASN1: 1, testClientASN2: 2})
+
+	q.Flush()
+
+	if q.HasQuality(proxyID, testProxyASN, "") {
+		return errors.TraceNew("unexpected HasQuality")
+	}
+
+	// Test: quality removed once failed match threshold reached
 
 	q.AddQuality(proxyKey, ProxyQualityASNCounts{testClientASN1: 1, testClientASN2: 2})
 

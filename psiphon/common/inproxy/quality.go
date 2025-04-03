@@ -76,8 +76,10 @@ func NewProxyQuality() *ProxyQualityState {
 		pendingFailedMatchDeadline: proxyQualityPendingFailedMatchDeadline,
 		failedMatchThreshold:       proxyQualityFailedMatchThreshold,
 
-		entries:              lrucache.NewWithLRU(0, 1*time.Minute, proxyQualityMaxEntries),
-		pendingFailedMatches: lrucache.NewWithLRU(0, 1*time.Minute, proxyQualityMaxPendingFailedMatches),
+		entries: lrucache.NewWithLRU(
+			0, 1*time.Minute, proxyQualityMaxEntries),
+		pendingFailedMatches: lrucache.NewWithLRU(
+			0, 1*time.Minute, proxyQualityMaxPendingFailedMatches),
 	}
 
 	q.pendingFailedMatches.OnEvicted(q.addFailedMatch)
@@ -226,6 +228,19 @@ func (q *ProxyQualityState) Matched(proxyID ID, proxyASN string) {
 
 	q.pendingFailedMatches.Add(
 		strProxyKey, struct{}{}, q.pendingFailedMatchDeadline)
+}
+
+// Flush clears all quality state.
+func (q *ProxyQualityState) Flush() {
+
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	q.entries.Flush()
+
+	q.pendingFailedMatches.OnEvicted(nil)
+	q.pendingFailedMatches.Flush()
+	q.pendingFailedMatches.OnEvicted(q.addFailedMatch)
 }
 
 // addFailedMatch is invoked when a pendingFailedMatches expires, increments

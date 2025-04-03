@@ -4476,8 +4476,11 @@ func (sshClient *sshClient) newInproxyProxyQualityTracker() *inproxyProxyQuality
 	// until after the Psiphon handshake completes, and we want to include
 	// earlier tunnel bytes, including any liveness test.
 	//
-	// As a future enhancement, quality tracker targets could be _extended_ in
-	// reportProxyQuality.
+	// As a future enhancement, quality tracker targets could be _extended_ by
+	// GeoIP in reportProxyQuality.
+	//
+	// Note that the in-proxy broker also enforces InproxyEnableProxyQuality,
+	// and also assumes no GeoIP targetting.
 
 	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
 	if err != nil {

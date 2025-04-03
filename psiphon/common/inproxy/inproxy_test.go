@@ -292,6 +292,15 @@ func runTestInproxy(doMustUpgrade bool) error {
 		return errors.Trace(err)
 	}
 
+	// Enable proxy quality (and otherwise use the default quality parameters)
+
+	enableProxyQuality := true
+	broker.SetProxyQualityParameters(
+		enableProxyQuality,
+		proxyQualityTTL,
+		proxyQualityPendingFailedMatchDeadline,
+		proxyQualityFailedMatchThreshold)
+
 	err = broker.Start()
 	if err != nil {
 		return errors.Trace(err)
