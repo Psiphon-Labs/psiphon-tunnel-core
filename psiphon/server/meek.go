@@ -1820,8 +1820,8 @@ func (server *MeekServer) makeMeekHTTPNormalizerListener() *transforms.HTTPNorma
 
 func (server *MeekServer) inproxyReloadTactics() error {
 
-	// Assumes no GeoIP targeting for InproxyAllCommonCompartmentIDs and other
-	// general broker tactics.
+	// Assumes no GeoIP targeting for InproxyAllCommonCompartmentIDs, in-proxy
+	// quality configuration, and other general broker tactics.
 
 	p, err := server.support.ServerTacticsParametersCache.Get(NewGeoIPData())
 	if err != nil {
@@ -1866,6 +1866,7 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Int(parameters.InproxyMaxCompartmentIDListLength))
 
 	server.inproxyBroker.SetProxyQualityParameters(
+		p.Bool(parameters.InproxyEnableProxyQuality),
 		p.Duration(parameters.InproxyProxyQualityTTL),
 		p.Duration(parameters.InproxyProxyQualityPendingFailedMatchDeadline),
 		p.Int(parameters.InproxyProxyQualityFailedMatchThreshold))

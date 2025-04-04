@@ -94,8 +94,10 @@ type Broker struct {
 	clientOfferPersonalTimeout int64
 	pendingServerReportsTTL    int64
 	maxRequestTimeouts         atomic.Value
+	maxCompartmentIDs          int64
 
-	maxCompartmentIDs int64
+	enableProxyQualityMutex sync.Mutex
+	enableProxyQuality      atomic.Bool
 }
 
 // BrokerConfig specifies the configuration for a Broker.
@@ -357,9 +359,23 @@ func (b *Broker) SetLimits(
 }
 
 func (b *Broker) SetProxyQualityParameters(
+	enable bool,
 	qualityTTL time.Duration,
 	pendingFailedMatchDeadline time.Duration,
 	failedMatchThreshold int) {
+
+	// enableProxyQuality is an atomic for fast lookups in request handlers;
+	// an additional mutex is used here to ensure the Swap/Flush combination
+	// is also atomic.
+	b.enableProxyQualityMutex.Lock()
+	wasEnabled := b.enableProxyQuality.Swap(enable)
+	if wasEnabled && !enable {
+		// Flush quality state, since otherwise the quality TTL can retain
+		// quality data which may be unexpectedly reactivated when enable is
+		// toggled on again.
+		b.proxyQualityState.Flush()
+	}
+	b.enableProxyQualityMutex.Unlock()
 
 	b.proxyQualityState.SetParameters(
 		qualityTTL,
@@ -697,7 +713,7 @@ func (b *Broker) handleProxyAnnounce(
 	// - Consider using the Psiphon server region, as given in the signed
 	//   server entry, as part of the prioritization logic.
 
-	if !hasPersonalCompartmentIDs {
+	if !hasPersonalCompartmentIDs && b.enableProxyQuality.Load() {
 
 		// Here, no specific client ASN is specified for HasQuality. As long
 		// as a proxy has a quality tunnel for any client ASN, it is
@@ -1158,8 +1174,9 @@ func (b *Broker) handleClientOffer(
 			ClientPortMappingTypes:      clientMatchOffer.Properties.PortMappingTypes,
 			ClientIP:                    clientIP,
 			ProxyIP:                     proxyAnswer.ProxyIP,
-			ProxyMetrics:                proxyMatchAnnouncement.ProxyMetrics,
 			// ProxyMetrics includes proxy NAT and port mapping types.
+			ProxyMetrics:    proxyMatchAnnouncement.ProxyMetrics,
+			ProxyIsPriority: proxyMatchAnnouncement.Properties.IsPriority,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1381,8 +1398,14 @@ func (b *Broker) handleServerProxyQuality(
 	}
 
 	// Add the quality counts into the existing proxy quality state.
-	for proxyKey, counts := range qualityRequest.QualityCounts {
-		b.proxyQualityState.AddQuality(proxyKey, counts)
+	//
+	// The counts are ignored when proxy quality is disabled, but an
+	// anknowledgement is still returned to the server.
+
+	if b.enableProxyQuality.Load() {
+		for proxyKey, counts := range qualityRequest.QualityCounts {
+			b.proxyQualityState.AddQuality(proxyKey, counts)
+		}
 	}
 
 	// There is no data in this response, it's simply an acknowledgement that

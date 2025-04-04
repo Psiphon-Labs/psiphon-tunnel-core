@@ -2647,6 +2647,7 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_proxy_limit_downstream_bytes_per_second",
 			"inproxy_proxy_peak_upstream_bytes_per_second",
 			"inproxy_proxy_peak_downstream_bytes_per_second",
+			"inproxy_proxy_is_priority",
 
 			// These ProxyMetrics fields are not populated in this test:
 			// "inproxy_proxy_client_build_rev",
