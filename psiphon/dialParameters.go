@@ -24,6 +24,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/binary"
+	std_errors "errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -1820,7 +1821,7 @@ func (dialParams *DialParameters) Succeeded() {
 	}
 }
 
-func (dialParams *DialParameters) Failed(config *Config) {
+func (dialParams *DialParameters) Failed(config *Config, dialErr error) {
 
 	// When a tunnel fails, and the dial is a replay, clear the stored dial
 	// parameters which are now presumed to be blocked, impaired or otherwise
@@ -1834,9 +1835,30 @@ func (dialParams *DialParameters) Failed(config *Config) {
 	// probability; this is intended to help mitigate false positive failures due
 	// to, e.g., temporary network disruptions or server load limiting.
 
+	// When dialing in-proxy tunnel protocols, replay is retained when the
+	// dial fails in the inproxyDial phase. This phase includes the broker
+	// request and the 1st hop WebRTC connection. The broker client has its
+	// own replay layer. The WebRTC peer is an ephemeral proxy which cannot
+	// be replayed and clearing replay for individual proxy failures unfairly
+	// deprioritizes in-proxy protocol selection overall. Any replay TTL
+	// remains in effect and will eventually clear the replay if there is a
+	// persistent issue with the in-proxy protocol. Replay is still cleared
+	// immediately for post-inproxyDial failures, as these can be due to more
+	// permanent conditions, such as a retired Psiphon server.
+	//
+	// Limitation: with this retention logic, InproxySTUNDialParameters and
+	// InproxyWebRTCDialParameters are retained and replayed, although it may
+	// be more optimal to replay in-proxy protocols while still reselecting
+	// different STUN servers and WebRTC properties.
+
+	p := config.GetParameters().Get()
+
+	var inproxyDialErr *inproxyDialFailedError
+	isInproxyDialErr := std_errors.As(dialErr, &inproxyDialErr)
+
 	if dialParams.IsReplay &&
-		!config.GetParameters().Get().WeightedCoinFlip(
-			parameters.ReplayRetainFailedProbability) {
+		!p.WeightedCoinFlip(parameters.ReplayRetainFailedProbability) &&
+		(!isInproxyDialErr || !p.WeightedCoinFlip(parameters.InproxyReplayRetainFailedProbability)) {
 
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
 		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)

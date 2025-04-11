@@ -185,7 +185,7 @@ func (tunnel *Tunnel) Activate(
 	baseCtx := ctx
 	defer func() {
 		if !activationSucceeded && baseCtx.Err() != context.Canceled {
-			tunnel.dialParams.Failed(tunnel.config)
+			tunnel.dialParams.Failed(tunnel.config, retErr)
 			if tunnel.extraFailureAction != nil {
 				tunnel.extraFailureAction()
 			}
@@ -830,7 +830,7 @@ func dialTunnel(
 	var extraFailureAction func()
 	defer func() {
 		if !dialSucceeded && baseCtx.Err() != context.Canceled {
-			dialParams.Failed(config)
+			dialParams.Failed(config, retErr)
 			if extraFailureAction != nil {
 				extraFailureAction()
 			}
@@ -1518,6 +1518,14 @@ func makeInproxyTCPDialer(
 	}
 }
 
+type inproxyDialFailedError struct {
+	err error
+}
+
+func (e inproxyDialFailedError) Error() string {
+	return e.err.Error()
+}
+
 // dialInproxy performs the in-proxy dial and returns the resulting conn for
 // use as an underlying conn for the 2nd hop protocol. The in-proxy dial
 // first connects to the broker (or reuses an existing connection) to match
@@ -1525,7 +1533,15 @@ func makeInproxyTCPDialer(
 func dialInproxy(
 	ctx context.Context,
 	config *Config,
-	dialParams *DialParameters) (*inproxy.ClientConn, error) {
+	dialParams *DialParameters) (retConn *inproxy.ClientConn, retErr error) {
+
+	defer func() {
+		// Wrap all returned errors with inproxyDialFailedError so callers can
+		// check for dialInproxy failures within nested errors.
+		if retErr != nil {
+			retErr = &inproxyDialFailedError{err: retErr}
+		}
+	}()
 
 	isProxy := false
 	webRTCDialInstance, err := NewInproxyWebRTCDialInstance(

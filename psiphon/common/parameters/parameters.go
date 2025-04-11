@@ -487,6 +487,7 @@ const (
 	InproxyProxyOnBrokerClientFailedRetryPeriod        = "InproxyProxyOnBrokerClientFailedRetryPeriod"
 	InproxyProxyIncompatibleNetworkTypes               = "InproxyProxyIncompatibleNetworkTypes"
 	InproxyClientIncompatibleNetworkTypes              = "InproxyClientIncompatibleNetworkTypes"
+	InproxyReplayRetainFailedProbability               = "InproxyReplayRetainFailedProbability"
 	InproxyEnableProxyQuality                          = "InproxyEnableProxyQuality"
 	InproxyEnableProxyQualityClientRegions             = "InproxyEnableProxyQualityClientRegions"
 	InproxyProxyQualityTargetUpstreamBytes             = "InproxyProxyQualityTargetUpstreamBytes"
@@ -1055,6 +1056,7 @@ var defaultParameters = map[string]struct {
 	InproxyProxyOnBrokerClientFailedRetryPeriod:        {value: 30 * time.Second, minimum: time.Duration(0)},
 	InproxyProxyIncompatibleNetworkTypes:               {value: []string{}},
 	InproxyClientIncompatibleNetworkTypes:              {value: []string{}},
+	InproxyReplayRetainFailedProbability:               {value: 1.0, minimum: 0.0},
 
 	InproxyEnableProxyQuality:                        {value: false, flags: serverSideOnly},
 	InproxyEnableProxyQualityClientRegions:           {value: []string{}, flags: serverSideOnly},
