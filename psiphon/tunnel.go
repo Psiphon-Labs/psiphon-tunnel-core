@@ -2172,6 +2172,19 @@ loop:
 			!isShutdown &&
 			!wasHandled {
 
+			// Note that tunnel.dialParams.Failed is not called in this failed
+			// tunnel case, and any replay parameters are retained.
+			//
+			// The continuousNetworkConnectivity mechanism is an imperfect
+			// best-effort to filter out bad network conditions, and isn't
+			// enabled on platforms without NetworkConnectivityChecker. There
+			// remains a possibility of failure due to innocuous bad network
+			// conditions and perhaps device sleep cycles.
+			//
+			// Furthermore, at this point the tunnel has already passed any
+			// pre-handshake liveness test, which is intended to catch cases
+			// of late-life cycle blocking.
+
 			_ = RecordFailedTunnelStat(
 				tunnel.config,
 				tunnel.dialParams,

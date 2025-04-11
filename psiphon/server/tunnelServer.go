@@ -2717,6 +2717,26 @@ func (sshClient *sshClient) run(
 	replayMetrics["server_replay_packet_manipulation"] = sshClient.replayedServerPacketManipulation
 	additionalMetrics = append(additionalMetrics, replayMetrics)
 
+	// Log the server_tunnel event. This log is only guaranteed to be recorded
+	// after the SSH handshake completes successfully. If the tunnel fails or
+	// is aborted by the client after that point, there will be a server_tunnel
+	// log -- with handshake_completed false, if the failure is during the
+	// liveness test or Psiphon API handshake, and handshake_completed true
+	// otherwise.
+	//
+	// Some scenarios where there is no server_tunnel log, despite a client
+	// initiating a dial, can include:
+	// - Failure during the TCP handshake.
+	// - Connecting to a fronting CDN, but not establishing a full meek session.
+	// - Failure during QUIC, TLS, or Obfuscated OSSH handshakes and all other
+	//   obfuscation layers which come before the SSH handshake.
+	// - The server being in the load limiting state, SetEstablishTunnels(false)
+	//
+	// In the case of the outermost application-level network protocol,
+	// including SSH, we do not necessarly want to log any server_tunnel
+	// event until the client has passed anti-probing checks; otherwise, the
+	// peer may not be a legitimate client.
+
 	// Limitation: there's only one log per tunnel with bytes transferred
 	// metrics, so the byte count can't be attributed to a certain day for
 	// tunnels that remain connected for well over 24h. In practise, most
