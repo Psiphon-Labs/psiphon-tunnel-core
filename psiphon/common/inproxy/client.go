@@ -207,6 +207,8 @@ func DialClient(
 	}
 
 	var result *clientWebRTCDialResult
+	var lastErr error
+
 	for attempt := 0; ; attempt += 1 {
 
 		previousAttemptsDuration := time.Since(startTime)
@@ -226,6 +228,10 @@ func DialClient(
 
 		err := ctx.Err()
 		if err != nil {
+			if lastErr != nil {
+				err = fmt.Errorf(
+					"%w, attempts: %d, lastErr: %w", err, attempt, lastErr)
+			}
 			return nil, errors.Trace(err)
 		}
 
@@ -244,6 +250,8 @@ func DialClient(
 
 			break
 		}
+
+		lastErr = err
 
 		if retry {
 			config.Logger.WithTraceFields(common.LogFields{"error": err}).Warning("dial failed")
