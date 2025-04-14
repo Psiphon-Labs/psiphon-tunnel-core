@@ -185,7 +185,7 @@ func (tunnel *Tunnel) Activate(
 	baseCtx := ctx
 	defer func() {
 		if !activationSucceeded && baseCtx.Err() != context.Canceled {
-			tunnel.dialParams.Failed(tunnel.config)
+			tunnel.dialParams.Failed(tunnel.config, retErr)
 			if tunnel.extraFailureAction != nil {
 				tunnel.extraFailureAction()
 			}
@@ -830,7 +830,7 @@ func dialTunnel(
 	var extraFailureAction func()
 	defer func() {
 		if !dialSucceeded && baseCtx.Err() != context.Canceled {
-			dialParams.Failed(config)
+			dialParams.Failed(config, retErr)
 			if extraFailureAction != nil {
 				extraFailureAction()
 			}
@@ -1518,6 +1518,14 @@ func makeInproxyTCPDialer(
 	}
 }
 
+type inproxyDialFailedError struct {
+	err error
+}
+
+func (e inproxyDialFailedError) Error() string {
+	return e.err.Error()
+}
+
 // dialInproxy performs the in-proxy dial and returns the resulting conn for
 // use as an underlying conn for the 2nd hop protocol. The in-proxy dial
 // first connects to the broker (or reuses an existing connection) to match
@@ -1525,7 +1533,15 @@ func makeInproxyTCPDialer(
 func dialInproxy(
 	ctx context.Context,
 	config *Config,
-	dialParams *DialParameters) (*inproxy.ClientConn, error) {
+	dialParams *DialParameters) (retConn *inproxy.ClientConn, retErr error) {
+
+	defer func() {
+		// Wrap all returned errors with inproxyDialFailedError so callers can
+		// check for dialInproxy failures within nested errors.
+		if retErr != nil {
+			retErr = &inproxyDialFailedError{err: retErr}
+		}
+	}()
 
 	isProxy := false
 	webRTCDialInstance, err := NewInproxyWebRTCDialInstance(
@@ -2171,6 +2187,19 @@ loop:
 		if continuousNetworkConnectivity &&
 			!isShutdown &&
 			!wasHandled {
+
+			// Note that tunnel.dialParams.Failed is not called in this failed
+			// tunnel case, and any replay parameters are retained.
+			//
+			// The continuousNetworkConnectivity mechanism is an imperfect
+			// best-effort to filter out bad network conditions, and isn't
+			// enabled on platforms without NetworkConnectivityChecker. There
+			// remains a possibility of failure due to innocuous bad network
+			// conditions and perhaps device sleep cycles.
+			//
+			// Furthermore, at this point the tunnel has already passed any
+			// pre-handshake liveness test, which is intended to catch cases
+			// of late-life cycle blocking.
 
 			_ = RecordFailedTunnelStat(
 				tunnel.config,

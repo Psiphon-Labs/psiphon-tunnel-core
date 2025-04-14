@@ -77,12 +77,14 @@ type GetTacticsPayload func(
 // runs a Broker and calls Broker.HandleSessionPacket to handle web requests
 // encapsulating secure session packets.
 type Broker struct {
-	config               *BrokerConfig
-	brokerID             ID
-	initiatorSessions    *InitiatorSessions
-	responderSessions    *ResponderSessions
-	matcher              *Matcher
-	pendingServerReports *lrucache.Cache
+	config                  *BrokerConfig
+	brokerID                ID
+	initiatorSessions       *InitiatorSessions
+	responderSessions       *ResponderSessions
+	matcher                 *Matcher
+	pendingServerReports    *lrucache.Cache
+	proxyQualityState       *ProxyQualityState
+	knownServerInitiatorIDs sync.Map
 
 	commonCompartmentsMutex sync.Mutex
 	commonCompartments      *consistent.Consistent
@@ -92,8 +94,10 @@ type Broker struct {
 	clientOfferPersonalTimeout int64
 	pendingServerReportsTTL    int64
 	maxRequestTimeouts         atomic.Value
+	maxCompartmentIDs          int64
 
-	maxCompartmentIDs int64
+	enableProxyQualityMutex sync.Mutex
+	enableProxyQuality      atomic.Bool
 }
 
 // BrokerConfig specifies the configuration for a Broker.
@@ -235,6 +239,8 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 		return nil, errors.Trace(err)
 	}
 
+	proxyQuality := NewProxyQuality()
+
 	b := &Broker{
 		config:            config,
 		brokerID:          ID(brokerID),
@@ -247,12 +253,17 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 			AnnouncementRateLimitQuantity:  config.MatcherAnnouncementRateLimitQuantity,
 			AnnouncementRateLimitInterval:  config.MatcherAnnouncementRateLimitInterval,
 			AnnouncementNonlimitedProxyIDs: config.MatcherAnnouncementNonlimitedProxyIDs,
-			OfferLimitEntryCount:           config.MatcherOfferLimitEntryCount,
-			OfferRateLimitQuantity:         config.MatcherOfferRateLimitQuantity,
-			OfferRateLimitInterval:         config.MatcherOfferRateLimitInterval,
+
+			OfferLimitEntryCount:   config.MatcherOfferLimitEntryCount,
+			OfferRateLimitQuantity: config.MatcherOfferRateLimitQuantity,
+			OfferRateLimitInterval: config.MatcherOfferRateLimitInterval,
+
+			ProxyQualityState: proxyQuality,
 
 			IsLoadLimiting: config.IsLoadLimiting,
 		}),
+
+		proxyQualityState: proxyQuality,
 
 		proxyAnnounceTimeout:       int64(config.ProxyAnnounceTimeout),
 		clientOfferTimeout:         int64(config.ClientOfferTimeout),
@@ -347,6 +358,31 @@ func (b *Broker) SetLimits(
 		int64(common.ValueOrDefault(maxCompartmentIDs, MaxCompartmentIDs)))
 }
 
+func (b *Broker) SetProxyQualityParameters(
+	enable bool,
+	qualityTTL time.Duration,
+	pendingFailedMatchDeadline time.Duration,
+	failedMatchThreshold int) {
+
+	// enableProxyQuality is an atomic for fast lookups in request handlers;
+	// an additional mutex is used here to ensure the Swap/Flush combination
+	// is also atomic.
+	b.enableProxyQualityMutex.Lock()
+	wasEnabled := b.enableProxyQuality.Swap(enable)
+	if wasEnabled && !enable {
+		// Flush quality state, since otherwise the quality TTL can retain
+		// quality data which may be unexpectedly reactivated when enable is
+		// toggled on again.
+		b.proxyQualityState.Flush()
+	}
+	b.enableProxyQualityMutex.Unlock()
+
+	b.proxyQualityState.SetParameters(
+		qualityTTL,
+		pendingFailedMatchDeadline,
+		failedMatchThreshold)
+}
+
 // HandleSessionPacket handles a session packet from a client or proxy and
 // provides a response packet. The packet is part of a secure session and may
 // be a session handshake message, an expired session reset token, or a
@@ -422,6 +458,18 @@ func (b *Broker) HandleSessionPacket(
 			}
 		case recordTypeAPIClientOfferRequest:
 			responsePayload, err = b.handleClientOffer(
+				ctx,
+				extendTransportTimeout,
+				transportLogFields,
+				brokerClientIP,
+				geoIPData,
+				initiatorID,
+				unwrappedRequestPayload)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		case recordTypeAPIServerProxyQualityRequest:
+			responsePayload, err = b.handleServerProxyQuality(
 				ctx,
 				extendTransportTimeout,
 				transportLogFields,
@@ -643,10 +691,45 @@ func (b *Broker) handleProxyAnnounce(
 		commonCompartmentIDs = []ID{compartmentID}
 	}
 
-	// In the common compartment ID case, invoke the callback to check if the
-	// announcement should be prioritized.
+	// Determine whether to enqueue the proxy announcement in the priority
+	// queue. To be prioritized, a proxy, identified by its ID and ASN, must
+	// have a recent quality tunnel recorded in the quality state. In
+	// addition, when the PrioritizeProxy callback is set, invoke this
+	// additional condition, which can filter by proxy geolocation and other
+	// properties.
+	//
+	// There is no prioritization for personal pairing announcements.
 
-	if b.config.PrioritizeProxy != nil && !hasPersonalCompartmentIDs {
+	// Potential future enhancements:
+	//
+	// - For a proxy with unknown quality (neither reported quality tunnels,
+	//   nor known failed matches), prioritize with some low probability to
+	//   give unknown proxies a chance to qualify? This could be limited, for
+	//   example, to proxies in the same ASN as other quality proxies. To
+	//   implement this, ProxyQualityState would need to record proxy IDs
+	//   with failed matches; and proxy ASNs would need to be input to
+	//   ProxyQualityState.
+	//
+	// - Consider using the Psiphon server region, as given in the signed
+	//   server entry, as part of the prioritization logic.
+
+	if !hasPersonalCompartmentIDs && b.enableProxyQuality.Load() {
+
+		// Here, no specific client ASN is specified for HasQuality. As long
+		// as a proxy has a quality tunnel for any client ASN, it is
+		// prioritized. In the matching process, an attempt is made to match
+		// using HasQuality using the client ASN. See Matcher.matchOffer.
+
+		isPriority = b.proxyQualityState.HasQuality(proxyID, geoIPData.ASN, "")
+	}
+
+	if isPriority && b.config.PrioritizeProxy != nil {
+
+		// Note that, in the psiphon/server package, inproxyBrokerPrioritizeProxy
+		// is always wired up, and, as currently implemented, the default value for
+		// the InproxyBrokerMatcherPrioritizeProxiesFilter tactics parameter
+		// results in PrioritizeProxy always returning false. Some filter,
+		// even just a wildcard match, must be configured in order to prioritize.
 
 		// Limitation: Of the two return values from
 		// ValidateAndGetParametersAndLogFields, apiParams and logFields,
@@ -787,6 +870,18 @@ func (b *Broker) handleProxyAnnounce(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	// Set the "failed match" trigger, which will progress towards clearing
+	// the quality state for this proxyID unless quality tunnels are reported
+	// soon enough after matches. This includes failure, by the proxy, to
+	// return an proxy answer, as well as any tunnel failures after that.
+	//
+	// Failures are expected even for good quality proxies, due to cases such
+	// as the in-proxy protocol losing the client tunnel establishment horse
+	// race. There is a threshold number of failed matches that must be
+	// reached before a quality state is cleared.
+
+	b.proxyQualityState.Matched(proxyID, geoIPData.ASN)
 
 	return responsePayload, nil
 }
@@ -1079,8 +1174,9 @@ func (b *Broker) handleClientOffer(
 			ClientPortMappingTypes:      clientMatchOffer.Properties.PortMappingTypes,
 			ClientIP:                    clientIP,
 			ProxyIP:                     proxyAnswer.ProxyIP,
-			ProxyMetrics:                proxyMatchAnnouncement.ProxyMetrics,
 			// ProxyMetrics includes proxy NAT and port mapping types.
+			ProxyMetrics:    proxyMatchAnnouncement.ProxyMetrics,
+			ProxyIsPriority: proxyMatchAnnouncement.Properties.IsPriority,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1226,6 +1322,97 @@ func (b *Broker) handleProxyAnswer(
 
 	responsePayload, err := MarshalProxyAnswerResponse(
 		&ProxyAnswerResponse{})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return responsePayload, nil
+}
+
+// handleServerProxyQuality receives, from servers, proxy tunnel quality and
+// records that in the proxy quality state that is used to prioritize
+// well-performing proxies.
+func (b *Broker) handleServerProxyQuality(
+	ctx context.Context,
+	extendTransportTimeout ExtendTransportTimeout,
+	transportLogFields common.LogFields,
+	proxyIP string,
+	geoIPData common.GeoIPData,
+	initiatorID ID,
+	requestPayload []byte) (retResponse []byte, retErr error) {
+
+	startTime := time.Now()
+
+	var logFields common.LogFields
+
+	// Only known, trusted Psiphon server initiators are allowed to send proxy
+	// quality requests. knownServerInitiatorIDs is populated with the
+	// Curve25519 public keys -- initiator IDs -- corresponding to the
+	// session public keys found in signed Psiphon server entries.
+	//
+	// Currently, knownServerInitiatorIDs is populated with destination server
+	// entries received in client offers, so the broker must first receive a
+	// client offer before a given server is trusted, which means
+	// that "invalid initiator" errors may occur, and some quality requests
+	// may be dropped, in some expected situations, including a broker restart.
+
+	// serverID is the server entry diagnostic ID of the server.
+	serverIDValue, ok := b.knownServerInitiatorIDs.Load(initiatorID)
+	if !ok {
+		return nil, errors.TraceNew("invalid initiator")
+	}
+	serverID := serverIDValue.(string)
+
+	// Always log the outcome.
+	defer func() {
+
+		// Typically, a server will send the same proxy quality request to all
+		// brokers. For the one "broadcast" request, server-proxy-quality is
+		// logged by each broker, as an indication that every server/broker
+		// request pair is successful.
+		//
+		// TODO: log more details from ServerProxyQualityRequest.QualityCounts?
+
+		if logFields == nil {
+			logFields = common.LogFields{}
+		}
+		logFields["broker_event"] = "server-proxy-quality"
+		logFields["broker_id"] = b.brokerID
+		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
+		logFields["server_id"] = serverID
+		if retErr != nil {
+			logFields["error"] = retErr.Error()
+		}
+		logFields.Add(transportLogFields)
+		b.config.Logger.LogMetric(brokerMetricName, logFields)
+	}()
+
+	qualityRequest, err := UnmarshalServerProxyQualityRequest(requestPayload)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	logFields, err = qualityRequest.ValidateAndGetLogFields()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Add the quality counts into the existing proxy quality state.
+	//
+	// The counts are ignored when proxy quality is disabled, but an
+	// anknowledgement is still returned to the server.
+
+	if b.enableProxyQuality.Load() {
+		for proxyKey, counts := range qualityRequest.QualityCounts {
+			b.proxyQualityState.AddQuality(proxyKey, counts)
+		}
+	}
+
+	// There is no data in this response, it's simply an acknowledgement that
+	// the request was received.
+
+	responsePayload, err := MarshalServerProxyQualityResponse(
+		&ServerProxyQualityResponse{})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1557,6 +1744,32 @@ func (b *Broker) validateDestination(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	// Record that this server is known and trusted ServerProxyQualityRequest
+	// sender. The serverID is stored for logging in handleServerProxyQuality.
+	//
+	// There is no expiry for knownServerInitiatorIDs entries, and they will
+	// clear only if the broker is restarted (which is the same lifetime as
+	// ServerEntrySignaturePublicKey).
+	//
+	// Limitation: in time, the above IsValidServerEntryTag check could become
+	// false for a retired server, while its entry remains in
+	// knownServerInitiatorIDs. However, unlike the case of a recycled
+	// Psiphon server IP being used as a proxy destination, it's safer to
+	// assume that a retired server's session private key does not become
+	// exposed.
+
+	serverInitiatorID, err := params.sessionPublicKey.ToCurve25519()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// For hosts running a single psiphond with multiple server entries, there
+	// will be multiple possible serverIDs for one serverInitiatorID. Don't
+	// overwrite any existing entry; keep the first observed serverID for
+	// more stable logging.
+
+	_, _ = b.knownServerInitiatorIDs.LoadOrStore(ID(serverInitiatorID), serverID)
 
 	return params, nil
 }
