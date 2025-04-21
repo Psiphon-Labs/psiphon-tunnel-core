@@ -172,27 +172,30 @@ func (server *TunnelServer) Run() error {
 			// in-proxy QUIC tunnel protocols don't support gQUIC.
 			enableGQUIC := support.Config.EnableGQUIC && !usesInproxy
 
+			disablePathMTUDiscovery := false
 			maxPacketSizeAdjustment := 0
 			if usesInproxy {
 
 				// In the in-proxy WebRTC media stream mode, QUIC packets sent
 				// back to the client, via the proxy, are encapsulated in
 				// SRTP packet payloads, and the maximum QUIC packet size
-				// must be adjusted to fit.
+				// must be adjusted to fit. MTU discovery is disabled so the
+				// maximum packewt size will not grow.
 				//
 				// Limitation: the WebRTC data channel mode does not have the
 				// same QUIC packet size constraint, since data channel
 				// messages can be far larger (up to 65536 bytes). However,
 				// the server, at this point, does not know whether
 				// individual connections are using WebRTC media streams or
-				// data channels on the first hop, and will no know until API
-				// handshake information is delivered after the QUIC, OSSH,
-				// and SSH handshakes are completed. Currently the max packet
-				// size adjustment is set unconditionally. For data channels,
-				// this will result in suboptimal packet sizes (10s of bytes)
-				// and a corresponding different traffic shape on the 2nd hop.
+				// data channels on the first hop, and will not know until
+				// API handshake information is delivered after the QUIC,
+				// OSSH, and SSH handshakes are completed. Currently the max
+				// packet size adjustment is set unconditionally. For data
+				// channels, this will result in suboptimal packet sizes and
+				// a corresponding different traffic shape on the 2nd hop.
 
 				maxPacketSizeAdjustment = inproxy.GetQUICMaxPacketSizeAdjustment()
+				disablePathMTUDiscovery = true
 			}
 
 			logTunnelProtocol := tunnelProtocol
@@ -204,6 +207,7 @@ func (server *TunnelServer) Run() error {
 						errors.Trace(err), LogFields(logFields))
 				},
 				localAddress,
+				disablePathMTUDiscovery,
 				maxPacketSizeAdjustment,
 				support.Config.ObfuscatedSSHKey,
 				enableGQUIC)
