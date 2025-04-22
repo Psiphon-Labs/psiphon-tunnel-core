@@ -100,6 +100,11 @@ func getBPFProgram(support *SupportServices) (bool, string, []bpf.RawInstruction
 		return false, "", nil, nil
 	}
 
+	// Use a consistent seed for the PRNG so that, for a fixed probability
+	// setting, servers consistently select whether to apply the BPF program
+	// or not; this is intended to present a stable server behavior
+	// fingerprint.
+
 	seed, err := protocol.DeriveBPFServerProgramPRNGSeed(support.Config.ObfuscatedSSHKey)
 	if err != nil {
 		return false, "", nil, errors.Trace(err)

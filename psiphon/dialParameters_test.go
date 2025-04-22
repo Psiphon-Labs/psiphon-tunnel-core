@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -293,7 +294,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	// Test: no replay after dial reported to fail
 
-	dialParams.Failed(clientConfig)
+	dialErr := errors.TraceNew("dial error")
+
+	dialParams.Failed(clientConfig, dialErr)
 
 	dialParams, err = MakeDialParameters(
 		clientConfig, steeringIPCache, nil, nil, nil, canReplay, selectProtocol, serverEntries[0], nil, nil, false, 0, 0)
@@ -659,7 +662,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 			t.Fatalf("MakeDialParameters failed: %s", err)
 		}
 
-		dialParams.Failed(clientConfig)
+		dialParams.Failed(clientConfig, dialErr)
 
 		getCacheKey := func() string {
 			return fmt.Sprintf("%s %s %s", testNetworkID, frontingProviderID, tunnelProtocol)
@@ -755,7 +758,7 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 		// Test: steering IP cleared from cache after failure
 
-		dialParams.Failed(clientConfig)
+		dialParams.Failed(clientConfig, dialErr)
 
 		_, ok := steeringIPCache.Get(getCacheKey())
 		if ok {

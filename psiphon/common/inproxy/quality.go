@@ -553,7 +553,8 @@ func (r *ProxyQualityReporter) prepareNextRequest() ProxyQualityRequestCounts {
 
 	queueEntry := r.reportQueue.Front()
 
-	// Limit the size of each request to maxRequestEntries.
+	// Limit the size of each request, capping both the memory overhead and
+	// the amount of data lost in a temporary network disruption.
 	//
 	// Limitation: maxRequestEntries doesn't take into account the number of
 	// different client ASN counts per entry. In practice, there shouldn't be

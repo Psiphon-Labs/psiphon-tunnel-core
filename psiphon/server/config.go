@@ -73,6 +73,8 @@ type Config struct {
 
 	// LogLevel specifies the log level. Valid values are:
 	// panic, fatal, error, warn, info, debug
+	//
+	// Some debug logs can contain user traffic destination address information.
 	LogLevel string
 
 	// LogFilename specifies the path of the file to log

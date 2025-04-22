@@ -1126,8 +1126,8 @@ func NoticeInproxyMustUpgrade() {
 // for activity since the last NoticeInproxyProxyActivity report.
 //
 // This is not a diagnostic notice: the user app has requested this notice
-// with EmitproxyActivity for functionality such as traffic display; and this
-// frequent notice is not intended to be included with feedback.
+// with EmitInproxyProxyActivity for functionality such as traffic display;
+// and this frequent notice is not intended to be included with feedback.
 func NoticeInproxyProxyActivity(
 	connectingClients int32,
 	connectedClients int32,
