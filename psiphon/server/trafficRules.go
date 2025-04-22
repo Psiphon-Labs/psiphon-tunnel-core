@@ -203,11 +203,18 @@ type TrafficRulesFilter struct {
 	// revoked. When omitted or false, this field is ignored.
 	AuthorizationsRevoked bool
 
+	// ProviderIDs specifies a list of server host providers which match this
+	// filter. When ProviderIDs is not empty, the current server will apply
+	// the filter only if its provider ID, from Config.GetProviderID, is in
+	// ProviderIDs.
+	ProviderIDs []string
+
 	regionLookup                map[string]bool
 	ispLookup                   map[string]bool
 	asnLookup                   map[string]bool
 	cityLookup                  map[string]bool
 	activeAuthorizationIDLookup map[string]bool
+	providerIDLookup            map[string]bool
 }
 
 // TrafficRules specify the limits placed on client traffic.
@@ -555,6 +562,13 @@ func (set *TrafficRulesSet) initLookups() {
 				filter.activeAuthorizationIDLookup[ID] = true
 			}
 		}
+
+		if len(filter.ProviderIDs) >= stringLookupThreshold {
+			filter.providerIDLookup = make(map[string]bool)
+			for _, ID := range filter.ProviderIDs {
+				filter.providerIDLookup[ID] = true
+			}
+		}
 	}
 
 	initTrafficRulesLookups(&set.DefaultRules)
@@ -574,6 +588,7 @@ func (set *TrafficRulesSet) initLookups() {
 // For the return value TrafficRules, all pointer and slice fields are initialized,
 // so nil checks are not required. The caller must not modify the returned TrafficRules.
 func (set *TrafficRulesSet) GetTrafficRules(
+	serverProviderID string,
 	isFirstTunnelInSession bool,
 	tunnelProtocol string,
 	geoIPData GeoIPData,
@@ -813,6 +828,18 @@ func (set *TrafficRulesSet) GetTrafficRules(
 				}
 
 				if !common.ContainsAny(filter.AuthorizedAccessTypes, state.authorizedAccessTypes) {
+					return false
+				}
+			}
+		}
+
+		if len(filter.ProviderIDs) > 0 {
+			if filter.providerIDLookup != nil {
+				if !filter.providerIDLookup[serverProviderID] {
+					return false
+				}
+			} else {
+				if !common.Contains(filter.ProviderIDs, serverProviderID) {
 					return false
 				}
 			}

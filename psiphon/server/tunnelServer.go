@@ -4629,6 +4629,7 @@ func (sshClient *sshClient) setTrafficRules() (int64, int64) {
 	// broker.
 
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
+		sshClient.sshServer.support.Config.GetProviderID(),
 		isFirstTunnelInSession,
 		sshClient.tunnelProtocol,
 		sshClient.clientGeoIPData,
