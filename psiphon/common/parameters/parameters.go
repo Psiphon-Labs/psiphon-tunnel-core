@@ -488,6 +488,8 @@ const (
 	InproxyProxyIncompatibleNetworkTypes               = "InproxyProxyIncompatibleNetworkTypes"
 	InproxyClientIncompatibleNetworkTypes              = "InproxyClientIncompatibleNetworkTypes"
 	InproxyReplayRetainFailedProbability               = "InproxyReplayRetainFailedProbability"
+	InproxyProxyDisableWaitToShareSession              = "InproxyProxyDisableWaitToShareSession"
+	InproxyClientDisableWaitToShareSession             = "InproxyClientDisableWaitToShareSession"
 	InproxyEnableProxyQuality                          = "InproxyEnableProxyQuality"
 	InproxyEnableProxyQualityClientRegions             = "InproxyEnableProxyQualityClientRegions"
 	InproxyProxyQualityTargetUpstreamBytes             = "InproxyProxyQualityTargetUpstreamBytes"
@@ -1057,6 +1059,8 @@ var defaultParameters = map[string]struct {
 	InproxyProxyIncompatibleNetworkTypes:               {value: []string{}},
 	InproxyClientIncompatibleNetworkTypes:              {value: []string{}},
 	InproxyReplayRetainFailedProbability:               {value: 1.0, minimum: 0.0},
+	InproxyProxyDisableWaitToShareSession:              {value: false},
+	InproxyClientDisableWaitToShareSession:             {value: true},
 
 	InproxyEnableProxyQuality:                        {value: false, flags: serverSideOnly},
 	InproxyEnableProxyQualityClientRegions:           {value: []string{}, flags: serverSideOnly},

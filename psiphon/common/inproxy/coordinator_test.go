@@ -40,6 +40,7 @@ type testBrokerDialCoordinator struct {
 	networkType                       NetworkType
 	commonCompartmentIDs              []ID
 	personalCompartmentIDs            []ID
+	disableWaitToShareSession         bool
 	brokerClientPrivateKey            SessionPrivateKey
 	brokerPublicKey                   SessionPublicKey
 	brokerRootObfuscationSecret       ObfuscationSecret
@@ -83,6 +84,12 @@ func (t *testBrokerDialCoordinator) PersonalCompartmentIDs() []ID {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.personalCompartmentIDs
+}
+
+func (t *testBrokerDialCoordinator) DisableWaitToShareSession() bool {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.disableWaitToShareSession
 }
 
 func (t *testBrokerDialCoordinator) BrokerClientPrivateKey() SessionPrivateKey {

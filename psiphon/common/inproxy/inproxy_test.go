@@ -776,7 +776,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 		}
 	}
 
-	newClientBrokerClient := func() (*BrokerClient, error) {
+	newClientBrokerClient := func(
+		disableWaitToShareSession bool) (*BrokerClient, error) {
 
 		clientPrivateKey, err := GenerateSessionPrivateKey()
 		if err != nil {
@@ -788,6 +789,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 			networkType: testNetworkType,
 
 			commonCompartmentIDs: testCommonCompartmentIDs,
+
+			disableWaitToShareSession: disableWaitToShareSession,
 
 			brokerClientPrivateKey:      clientPrivateKey,
 			brokerPublicKey:             brokerPublicKey,
@@ -878,7 +881,12 @@ func runTestInproxy(doMustUpgrade bool) error {
 		return webRTCCoordinator, nil
 	}
 
-	sharedBrokerClient, err := newClientBrokerClient()
+	sharedBrokerClient, err := newClientBrokerClient(false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	sharedBrokerClientDisableWait, err := newClientBrokerClient(true)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -894,9 +902,14 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 		// Exercise BrokerClients shared by multiple clients, but also create
 		// several broker clients.
-		brokerClient := sharedBrokerClient
-		if i%2 == 0 {
-			brokerClient, err = newClientBrokerClient()
+		var brokerClient *BrokerClient
+		switch i % 3 {
+		case 0:
+			brokerClient = sharedBrokerClient
+		case 1:
+			brokerClient = sharedBrokerClientDisableWait
+		case 2:
+			brokerClient, err = newClientBrokerClient(true)
 			if err != nil {
 				return errors.Trace(err)
 			}

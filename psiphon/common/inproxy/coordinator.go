@@ -119,6 +119,28 @@ type BrokerDialCoordinator interface {
 	// compartment ID.
 	PersonalCompartmentIDs() []ID
 
+	// DisableWaitToShareSession indicates whether to disable
+	// waitToShareSession, where concurrent broker client requests will wait
+	// for an in-flight Noise session handshake to complete before
+	// proceeding. Without waitToShareSession, multiple Noise session
+	// handshakes may be performed concurrently, with the last session
+	// retained for reuse. See the comment in BrokerClient.roundTrip, which
+	// describes waitToShareSession and its isReadyToShare limitation.
+	//
+	// In general, waitToShareSession will reduce broker Noise session
+	// overhead when there are many concurrent requests and no established
+	// session. In certain conditions, waitToShareSession might be faster, if
+	// a request waits briefly for another in-flight session establishment.
+	//
+	// Due to the isReadyToShare limitation, it is expected to be more optimal
+	// to disable waitToShareSession for in-proxy clients, so that multiple
+	// concurrent INPROXY tunnel protocol dials don't serialize, with all but
+	// the first dial awaiting the completion of the first dial's ClientOffer
+	// round trip, including the ProxyAnswer. For proxies, it remains
+	// preferable to use waitToShareSession, meaning that an initial
+	// ProxyAnnounce must complete before others will launch.
+	DisableWaitToShareSession() bool
+
 	// BrokerClientPrivateKey is the client or proxy's private key to be used
 	// in the secure session established with a broker. Clients should
 	// generate ephemeral keys; this is done automatically when a zero-value
