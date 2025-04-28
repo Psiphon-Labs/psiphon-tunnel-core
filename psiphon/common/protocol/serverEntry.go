@@ -604,8 +604,7 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 	limitTunnelProtocols TunnelProtocols,
 	limitTunnelDialPortNumbers TunnelProtocolPortLists,
 	limitQUICVersions QUICVersions,
-	excludeIntensive bool,
-	excludeInproxy bool) TunnelProtocols {
+	excludeIntensive bool) TunnelProtocols {
 
 	supportedProtocols := make(TunnelProtocols, 0)
 
@@ -630,14 +629,6 @@ func (serverEntry *ServerEntry) GetSupportedProtocols(
 		}
 
 		if excludeIntensive && TunnelProtocolIsResourceIntensive(tunnelProtocol) {
-			continue
-		}
-
-		// While in-proxy protocols are TunnelProtocolIsResourceIntensive,
-		// there's an additional use case for excluding in-proxy protocols as
-		// controlled by InproxyTunnelProtocolSelectionProbability.
-
-		if excludeInproxy && TunnelProtocolUsesInproxy(tunnelProtocol) {
 			continue
 		}
 

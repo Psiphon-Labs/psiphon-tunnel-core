@@ -313,6 +313,52 @@ func TestOverrides(t *testing.T) {
 	if v != newInitialLimitTunnelProtocolsCandidateCount {
 		t.Fatalf("GetInt returned unexpected InitialLimitTunnelProtocolsCandidateCount: %d", v)
 	}
+
+	// Test: unknown tunnel protocol
+
+	applyParameters[InitialLimitTunnelProtocols] = protocol.TunnelProtocols{"UNKNOWN-TUNNEL-PROTOCOL"}
+
+	p, err = NewParameters(nil)
+	if err != nil {
+		t.Fatalf("NewParameters failed: %s", err)
+	}
+
+	_, err = p.Set(tag, 0, applyParameters)
+	if err == nil {
+		t.Fatalf("Set succeeded unexpectedly")
+	}
+
+	_, err = p.Set(tag, ValidationSkipOnError, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	l := p.Get().TunnelProtocols(InitialLimitTunnelProtocols)
+	if len(l) != 0 {
+		t.Fatalf("TunnelProtocols returned unexpected InitialLimitTunnelProtocols: %d", v)
+	}
+
+	applyParameters[InitialLimitTunnelProtocols] = protocol.TunnelProtocols{"UNKNOWN-TUNNEL-PROTOCOL", "OSSH", "SSH"}
+
+	p, err = NewParameters(nil)
+	if err != nil {
+		t.Fatalf("NewParameters failed: %s", err)
+	}
+
+	_, err = p.Set(tag, 0, applyParameters)
+	if err == nil {
+		t.Fatalf("Set succeeded unexpectedly")
+	}
+
+	_, err = p.Set(tag, ValidationSkipOnError, applyParameters)
+	if err != nil {
+		t.Fatalf("Set failed: %s", err)
+	}
+
+	l = p.Get().TunnelProtocols(InitialLimitTunnelProtocols)
+	if len(l) != 2 {
+		t.Fatalf("TunnelProtocols returned unexpected InitialLimitTunnelProtocols: %d", v)
+	}
 }
 
 func TestNetworkLatencyMultiplier(t *testing.T) {
