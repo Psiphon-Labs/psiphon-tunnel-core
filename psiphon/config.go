@@ -1074,8 +1074,14 @@ type Config struct {
 	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int
 	InproxyProxyIncompatibleNetworkTypes                    []string
 	InproxyClientIncompatibleNetworkTypes                   []string
-	InproxySkipAwaitFullyConnected                          bool
-	InproxyEnableWebRTCDebugLogging                         bool
+	InproxyReplayRetainFailedProbability                    *float64
+	InproxyProxyDisableWaitToShareSession                   *bool
+	InproxyClientDisableWaitToShareSession                  *bool
+	InproxyTunnelProtocolPreferProbability                  *float64
+	InproxyTunnelProtocolForceSelectionCount                *int
+
+	InproxySkipAwaitFullyConnected  bool
+	InproxyEnableWebRTCDebugLogging bool
 
 	NetworkIDCacheTTLMilliseconds *int
 
@@ -2832,6 +2838,26 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if len(config.InproxyClientIncompatibleNetworkTypes) > 0 {
 		applyParameters[parameters.InproxyClientIncompatibleNetworkTypes] = config.InproxyClientIncompatibleNetworkTypes
+	}
+
+	if config.InproxyReplayRetainFailedProbability != nil {
+		applyParameters[parameters.InproxyReplayRetainFailedProbability] = *config.InproxyReplayRetainFailedProbability
+	}
+
+	if config.InproxyProxyDisableWaitToShareSession != nil {
+		applyParameters[parameters.InproxyProxyDisableWaitToShareSession] = *config.InproxyProxyDisableWaitToShareSession
+	}
+
+	if config.InproxyClientDisableWaitToShareSession != nil {
+		applyParameters[parameters.InproxyClientDisableWaitToShareSession] = *config.InproxyClientDisableWaitToShareSession
+	}
+
+	if config.InproxyTunnelProtocolPreferProbability != nil {
+		applyParameters[parameters.InproxyTunnelProtocolPreferProbability] = *config.InproxyTunnelProtocolPreferProbability
+	}
+
+	if config.InproxyTunnelProtocolForceSelectionCount != nil {
+		applyParameters[parameters.InproxyTunnelProtocolForceSelectionCount] = *config.InproxyTunnelProtocolForceSelectionCount
 	}
 
 	if config.NetworkIDCacheTTLMilliseconds != nil {

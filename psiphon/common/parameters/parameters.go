@@ -401,7 +401,6 @@ const (
 	InproxyAllowProxy                                  = "InproxyAllowProxy"
 	InproxyAllowClient                                 = "InproxyAllowClient"
 	InproxyAllowDomainFrontedDestinations              = "InproxyAllowDomainFrontedDestinations"
-	InproxyTunnelProtocolSelectionProbability          = "InproxyTunnelProtocolSelectionProbability"
 	InproxyAllBrokerSpecs                              = "InproxyAllBrokerSpecs"
 	InproxyBrokerSpecs                                 = "InproxyBrokerSpecs"
 	InproxyPersonalPairingBrokerSpecs                  = "InproxyPersonalPairingBrokerSpecs"
@@ -490,6 +489,8 @@ const (
 	InproxyReplayRetainFailedProbability               = "InproxyReplayRetainFailedProbability"
 	InproxyProxyDisableWaitToShareSession              = "InproxyProxyDisableWaitToShareSession"
 	InproxyClientDisableWaitToShareSession             = "InproxyClientDisableWaitToShareSession"
+	InproxyTunnelProtocolPreferProbability             = "InproxyTunnelProtocolPreferProbability"
+	InproxyTunnelProtocolForceSelectionCount           = "InproxyTunnelProtocolForceSelectionCount"
 	InproxyEnableProxyQuality                          = "InproxyEnableProxyQuality"
 	InproxyEnableProxyQualityClientRegions             = "InproxyEnableProxyQualityClientRegions"
 	InproxyProxyQualityTargetUpstreamBytes             = "InproxyProxyQualityTargetUpstreamBytes"
@@ -508,8 +509,9 @@ const (
 
 	// Retired parameters
 
-	ReplayRandomizedTLSProfile = "ReplayRandomizedTLSProfile"
-	InproxyAllBrokerPublicKeys = "InproxyAllBrokerPublicKeys"
+	ReplayRandomizedTLSProfile                = "ReplayRandomizedTLSProfile"
+	InproxyAllBrokerPublicKeys                = "InproxyAllBrokerPublicKeys"
+	InproxyTunnelProtocolSelectionProbability = "InproxyTunnelProtocolSelectionProbability"
 )
 
 const (
@@ -971,7 +973,7 @@ var defaultParameters = map[string]struct {
 	InproxyAllowProxy:                                  {value: false},
 	InproxyAllowClient:                                 {value: false, flags: serverSideOnly},
 	InproxyAllowDomainFrontedDestinations:              {value: false, flags: serverSideOnly},
-	InproxyTunnelProtocolSelectionProbability:          {value: 0.5, minimum: 0.0},
+	InproxyTunnelProtocolSelectionProbability:          {value: 1.0, minimum: 0.0},
 	InproxyAllBrokerPublicKeys:                         {value: []string{}, flags: serverSideOnly},
 	InproxyAllBrokerSpecs:                              {value: InproxyBrokerSpecsValue{}, flags: serverSideOnly},
 	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
@@ -1061,6 +1063,8 @@ var defaultParameters = map[string]struct {
 	InproxyReplayRetainFailedProbability:               {value: 1.0, minimum: 0.0},
 	InproxyProxyDisableWaitToShareSession:              {value: false},
 	InproxyClientDisableWaitToShareSession:             {value: true},
+	InproxyTunnelProtocolPreferProbability:             {value: 0.0, minimum: 0.0},
+	InproxyTunnelProtocolForceSelectionCount:           {value: 0, minimum: 0},
 
 	InproxyEnableProxyQuality:                        {value: false, flags: serverSideOnly},
 	InproxyEnableProxyQualityClientRegions:           {value: []string{}, flags: serverSideOnly},
