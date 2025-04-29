@@ -315,6 +315,7 @@ type InproxyBrokerClientInstance struct {
 	roundTripper                  *InproxyBrokerRoundTripper
 	personalCompartmentIDs        []inproxy.ID
 	commonCompartmentIDs          []inproxy.ID
+	disableWaitToShareSession     bool
 	sessionHandshakeTimeout       time.Duration
 	announceRequestTimeout        time.Duration
 	announceDelay                 time.Duration
@@ -579,6 +580,30 @@ func NewInproxyBrokerClientInstance(
 		// This retry is applied only for proxies and only in common pairing
 		// mode. See comment in BrokerClientRoundTripperFailed.
 		b.retryOnFailedPeriod = p.Duration(parameters.InproxyProxyOnBrokerClientFailedRetryPeriod)
+	}
+
+	// Limitation: currently, disableWaitToShareSession is neither replayed
+	// nor is the selected value reported in metrics. The default tactics
+	// parameters are considered to be optimal: the in-proxy clients
+	// disabling wait and proxies using wait. The tactics flag can be used to
+	// enable wait for clients in case performance is poor or load on
+	// brokers -- due to simultaneous sessions -- is unexpectedly high.
+	//
+	// Note that, for broker dial parameter replay, the isValidReplay function
+	// currently invalidates replay only when broker specs change, and not
+	// when tactics in general change; so changes to these
+	// disableWaitToShareSession parameters would not properly invalidate
+	// replays in any case.
+	//
+	// Potential future enhancements for in-proxy client broker clients
+	// include using a pool of broker clients, with each one potentially
+	// using a different broker and/or fronting spec. In this scenario,
+	// waitToShareSession would be less impactful.
+
+	if isProxy {
+		b.disableWaitToShareSession = p.Bool(parameters.InproxyProxyDisableWaitToShareSession)
+	} else {
+		b.disableWaitToShareSession = p.Bool(parameters.InproxyClientDisableWaitToShareSession)
 	}
 
 	// Adjust long-polling request timeouts to respect any maximum request
@@ -847,6 +872,11 @@ func (b *InproxyBrokerClientInstance) CommonCompartmentIDs() []inproxy.ID {
 // Implements the inproxy.BrokerDialCoordinator interface.
 func (b *InproxyBrokerClientInstance) PersonalCompartmentIDs() []inproxy.ID {
 	return b.personalCompartmentIDs
+}
+
+// Implements the inproxy.BrokerDialCoordinator interface.
+func (b *InproxyBrokerClientInstance) DisableWaitToShareSession() bool {
+	return b.disableWaitToShareSession
 }
 
 // Implements the inproxy.BrokerDialCoordinator interface.

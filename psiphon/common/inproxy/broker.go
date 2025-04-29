@@ -1013,7 +1013,20 @@ func (b *Broker) handleClientOffer(
 		offerRequest.NetworkProtocol,
 		offerRequest.DestinationAddress)
 	if err != nil {
-		return nil, errors.Trace(err)
+
+		// Record the specific error in the client-offer broker event.
+		limitedErr = err
+
+		// Return a response. This avoids returning a broker-client-resetting
+		// 404 in cases including "invalid server entry tag", where a
+		// legitimate client submits an unpruned, decommissioned server entry.
+		responsePayload, err := MarshalClientOfferResponse(
+			&ClientOfferResponse{Limited: true})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		return responsePayload, nil
 	}
 
 	// Return MustUpgrade when the client's protocol version is less than the
@@ -1084,33 +1097,49 @@ func (b *Broker) handleClientOffer(
 
 		timeout := offerCtx.Err() == context.DeadlineExceeded
 
-		if !limited && !timeout {
-			return nil, errors.Trace(err)
-		}
-
 		// A no-match response is sent in the case of a timeout awaiting a
 		// match. The faster-failing rate or entry limiting case also results
 		// in a response, rather than an error return from handleClientOffer,
 		// so that the client doesn't receive a 404 and flag its BrokerClient
 		// as having failed.
 		//
-		// When the timeout and limit case coincide, limit takes precedence in
+		// When the timeout and limit cases coincide, limit takes precedence in
 		// the response.
 
-		if timeout && !limited {
+		if timeout {
 
+			// Record the time out outcome in the client-offer broker event.
+			//
 			// Note: the respective client and broker timeouts,
 			// InproxyBrokerClientOfferTimeout and
 			// InproxyClientOfferRequestTimeout in tactics, should be configured
 			// so that the broker will timeout first and have an opportunity to
 			// send this response before the client times out.
-
 			timedOut = true
+		}
 
-		} else {
+		if limited {
 
 			// Record the specific limit error in the client-offer broker event.
+			limitedErr = err
+		}
 
+		if !limited && !timeout {
+
+			// If matcher.Offer failed for some other reason, default to
+			// returning Limited in the response. As currently implemented,
+			// when clients receive the Limited flag, they will fail the
+			// in-proxy dial without retrying, but retain their broker client.
+			//
+			// While the matcher.Offer failure scenarios may include an
+			// internal error, they also include the "no answer" case where a
+			// proxy fails to produce an answer. For the "no answer" case,
+			// Limited is preferred over returning NoMatch, which can trigger
+			// a broker client cycle.
+			//
+			// TODO: add a new flag to signal to the client that it may retry
+			// in the "no answer" case.
+			limited = true
 			limitedErr = err
 		}
 

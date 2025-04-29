@@ -462,6 +462,13 @@ func dialClientWebRTCConn(
 
 	} else if offerResponse.Limited {
 
+		// Note that the Limited return flag is now returned by the broker in
+		// non-rate limiting cases, including invalid server entry tags and
+		// proxy answer failures. The Limited flag has been overloaded these
+		// cases since it's the current best choice, in these scenarios, for
+		// having existing clients abort the in-proxy dial without discarding
+		// the broker client.
+
 		return nil, false, errors.TraceNew("limited")
 
 	} else if offerResponse.NoMatch {

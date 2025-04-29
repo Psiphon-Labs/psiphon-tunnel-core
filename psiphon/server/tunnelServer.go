@@ -3942,10 +3942,13 @@ func (sshClient *sshClient) rejectNewChannel(newChannel ssh.NewChannel, logMessa
 	// - We limit the failure information revealed to the client.
 	reason := ssh.Prohibited
 
-	// Note: Debug level, as logMessage may contain user traffic destination address information
+	// This log is Debug level, as logMessage can contain user traffic
+	// destination address information such as in the "LookupIP failed"
+	// and "DialTimeout failed" cases in handleTCPChannel.
 	if IsLogLevelDebug() {
 		log.WithTraceFields(
 			LogFields{
+				"sessionID":    sshClient.sessionID,
 				"channelType":  newChannel.ChannelType(),
 				"logMessage":   logMessage,
 				"rejectReason": reason.String(),
@@ -4626,6 +4629,7 @@ func (sshClient *sshClient) setTrafficRules() (int64, int64) {
 	// broker.
 
 	sshClient.trafficRules = sshClient.sshServer.support.TrafficRulesSet.GetTrafficRules(
+		sshClient.sshServer.support.Config.GetProviderID(),
 		isFirstTunnelInSession,
 		sshClient.tunnelProtocol,
 		sshClient.clientGeoIPData,
