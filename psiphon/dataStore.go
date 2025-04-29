@@ -699,7 +699,6 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 				limitTunnelProtocols,
 				limitTunnelDialPortNumbers,
 				limitQUICVersions,
-				false,
 				false)) == 0 {
 				return false, nil, errors.Tracef(
 					"TargetServerEntry does not support LimitTunnelProtocols: %v", limitTunnelProtocols)

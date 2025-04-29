@@ -255,7 +255,13 @@ func (b *BrokerClient) roundTrip(
 	// session handshake, InitiatorSessions.RoundTrip will await completion
 	// of that handshake before sending the application-layer request.
 	//
-	// Note the waitToShareSession limitation, documented in
+	// This waitToShareSession functionality may be disabled with
+	// BrokerDialCoordinator.DisableWaitToShareSession, in which case
+	// concurrent Noise session handshakes may proceed; all concurrent
+	// sessions/requests may complete successfully and the last session to be
+	// established is retained by InitiatorSessions for reuse.
+	//
+	// Note the waitToShareSession isReadyToShare limitation, documented in
 	// InitiatorSessions.RoundTrip: a new session must complete a full,
 	// application-level round trip (e.g., ProxyAnnounce/ClientOffer), not
 	// just the session handshake, before a session becomes ready to share.
@@ -276,7 +282,7 @@ func (b *BrokerClient) roundTrip(
 	// Any time spent blocking on waitToShareSession is not included in
 	// requestDelay or requestTimeout.
 
-	waitToShareSession := true
+	waitToShareSession := !b.coordinator.DisableWaitToShareSession()
 
 	sessionHandshakeTimeout := common.ValueOrDefault(
 		b.coordinator.SessionHandshakeRoundTripTimeout(),
