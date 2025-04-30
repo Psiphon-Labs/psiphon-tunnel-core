@@ -5185,7 +5185,9 @@ func (sshClient *sshClient) handleTCPChannel(
 				// and subsequent resolves will try new requests. The "no IP
 				// address" error case in the following IP selection logic
 				// should not be reached when len(IPs) > 0.
-				dnsCache.Add(hostToConnect, IPs, lrucache.DefaultExpiration)
+				if dnsCache != nil {
+					dnsCache.Add(hostToConnect, IPs, lrucache.DefaultExpiration)
+				}
 			}
 
 			// Record DNS request metrics. If LookupIPAddr returns
