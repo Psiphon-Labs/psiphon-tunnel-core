@@ -1095,6 +1095,8 @@ func (sshServer *sshServer) getLoadStats() (
 	// enumeration for zeroing is a best effort.
 	resolverIPs := sshServer.support.DNSResolver.GetAll()
 
+	logDNSServerMetrics := sshServer.support.Config.LogDNSServerLoadMetrics
+
 	// Fields which are primarily concerned with upstream/egress performance.
 	zeroUpstreamStats := func() map[string]interface{} {
 		stats := make(map[string]interface{})
@@ -1121,8 +1123,10 @@ func (sshServer *sshServer) getLoadStats() (
 
 		zeroDNSStats := func() map[string]int64 {
 			m := map[string]int64{"ALL": 0}
-			for _, resolverIP := range resolverIPs {
-				m[resolverIP.String()] = 0
+			if logDNSServerMetrics {
+				for _, resolverIP := range resolverIPs {
+					m[resolverIP.String()] = 0
+				}
 			}
 			return m
 		}
@@ -1282,21 +1286,29 @@ func (sshServer *sshServer) getLoadStats() (
 		totalDNSFailedCount := int64(0)
 
 		for key, value := range client.qualityMetrics.DNSCount {
-			upstreamStats["dns_count"].(map[string]int64)[key] += value
+			if key == "ALL" || logDNSServerMetrics {
+				upstreamStats["dns_count"].(map[string]int64)[key] += value
+			}
 			totalDNSCount += value
 		}
 
 		for key, value := range client.qualityMetrics.DNSDuration {
-			upstreamStats["dns_duration"].(map[string]int64)[key] += int64(value / time.Millisecond)
+			if key == "ALL" || logDNSServerMetrics {
+				upstreamStats["dns_duration"].(map[string]int64)[key] += int64(value / time.Millisecond)
+			}
 		}
 
 		for key, value := range client.qualityMetrics.DNSFailedCount {
-			upstreamStats["dns_failed_count"].(map[string]int64)[key] += value
+			if key == "ALL" || logDNSServerMetrics {
+				upstreamStats["dns_failed_count"].(map[string]int64)[key] += value
+			}
 			totalDNSFailedCount += value
 		}
 
 		for key, value := range client.qualityMetrics.DNSFailedDuration {
-			upstreamStats["dns_failed_duration"].(map[string]int64)[key] += int64(value / time.Millisecond)
+			if key == "ALL" || logDNSServerMetrics {
+				upstreamStats["dns_failed_duration"].(map[string]int64)[key] += int64(value / time.Millisecond)
+			}
 		}
 
 		// Update client peak failure rate metrics, to be recorded in
