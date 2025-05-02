@@ -3558,34 +3558,44 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	if sshClient.serverPacketManipulation != "" {
 		logFields["server_packet_manipulation"] = sshClient.serverPacketManipulation
 	}
+
 	if sshClient.sshListener.BPFProgramName != "" {
 		logFields["server_bpf"] = sshClient.sshListener.BPFProgramName
 	}
-	logFields["is_first_tunnel_in_session"] = sshClient.isFirstTunnelInSession
+
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
-	logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
-	logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
-	logFields["peak_concurrent_dialing_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentDialingPortForwardCount
-	logFields["peak_concurrent_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
-	logFields["total_port_forward_count_tcp"] = sshClient.tcpTrafficState.totalPortForwardCount
-	logFields["bytes_up_udp"] = sshClient.udpTrafficState.bytesUp
-	logFields["bytes_down_udp"] = sshClient.udpTrafficState.bytesDown
-	// sshClient.udpTrafficState.peakConcurrentDialingPortForwardCount isn't meaningful
-	logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
-	logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
-	logFields["total_udpgw_channel_count"] = sshClient.totalUdpgwChannelCount
-	logFields["total_packet_tunnel_channel_count"] = sshClient.totalPacketTunnelChannelCount
+
+	logFields["is_first_tunnel_in_session"] = sshClient.isFirstTunnelInSession
 
 	logFields["pre_handshake_random_stream_count"] = sshClient.preHandshakeRandomStreamMetrics.count
 	logFields["pre_handshake_random_stream_upstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.upstreamBytes
 	logFields["pre_handshake_random_stream_received_upstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.receivedUpstreamBytes
 	logFields["pre_handshake_random_stream_downstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.downstreamBytes
 	logFields["pre_handshake_random_stream_sent_downstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.sentDownstreamBytes
-	logFields["random_stream_count"] = sshClient.postHandshakeRandomStreamMetrics.count
-	logFields["random_stream_upstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.upstreamBytes
-	logFields["random_stream_received_upstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.receivedUpstreamBytes
-	logFields["random_stream_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.downstreamBytes
-	logFields["random_stream_sent_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.sentDownstreamBytes
+
+	if sshClient.handshakeState.completed {
+		// When !handshake_completed, all of these values can be assumed to be zero.
+		logFields["bytes_up_tcp"] = sshClient.tcpTrafficState.bytesUp
+		logFields["bytes_down_tcp"] = sshClient.tcpTrafficState.bytesDown
+		logFields["peak_concurrent_dialing_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentDialingPortForwardCount
+		logFields["peak_concurrent_port_forward_count_tcp"] = sshClient.tcpTrafficState.peakConcurrentPortForwardCount
+		logFields["total_port_forward_count_tcp"] = sshClient.tcpTrafficState.totalPortForwardCount
+		logFields["bytes_up_udp"] = sshClient.udpTrafficState.bytesUp
+		logFields["bytes_down_udp"] = sshClient.udpTrafficState.bytesDown
+		// sshClient.udpTrafficState.peakConcurrentDialingPortForwardCount isn't meaningful
+		logFields["peak_concurrent_port_forward_count_udp"] = sshClient.udpTrafficState.peakConcurrentPortForwardCount
+		logFields["total_port_forward_count_udp"] = sshClient.udpTrafficState.totalPortForwardCount
+		logFields["total_udpgw_channel_count"] = sshClient.totalUdpgwChannelCount
+		logFields["total_packet_tunnel_channel_count"] = sshClient.totalPacketTunnelChannelCount
+	}
+
+	if sshClient.postHandshakeRandomStreamMetrics.count > 0 {
+		logFields["random_stream_count"] = sshClient.postHandshakeRandomStreamMetrics.count
+		logFields["random_stream_upstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.upstreamBytes
+		logFields["random_stream_received_upstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.receivedUpstreamBytes
+		logFields["random_stream_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.downstreamBytes
+		logFields["random_stream_sent_downstream_bytes"] = sshClient.postHandshakeRandomStreamMetrics.sentDownstreamBytes
+	}
 
 	if sshClient.destinationBytesMetrics != nil {
 
@@ -3695,6 +3705,11 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		sshClient.udpTrafficState.bytesUp +
 		sshClient.udpTrafficState.bytesDown
 
+	if sshClient.additionalTransportData != nil &&
+		sshClient.additionalTransportData.steeringIP != "" {
+		logFields["relayed_steering_ip"] = sshClient.additionalTransportData.steeringIP
+	}
+
 	// Merge in additional metrics from the optional metrics source
 	for _, metrics := range additionalMetrics {
 		for name, value := range metrics {
@@ -3703,11 +3718,6 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 				logFields[name] = value
 			}
 		}
-	}
-
-	if sshClient.additionalTransportData != nil &&
-		sshClient.additionalTransportData.steeringIP != "" {
-		logFields["relayed_steering_ip"] = sshClient.additionalTransportData.steeringIP
 	}
 
 	// Retain lock when invoking LogRawFieldsWithTimestamp to block any
