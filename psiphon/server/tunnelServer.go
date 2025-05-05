@@ -55,6 +55,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
+	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/marusama/semaphore"
 	cache "github.com/patrickmn/go-cache"
 )
@@ -1930,6 +1931,8 @@ type sshClient struct {
 	peakMetrics                          peakMetrics
 	destinationBytesMetrics              map[string]*protocolDestinationBytesMetrics
 	inproxyProxyQualityTracker           *inproxyProxyQualityTracker
+	dnsResolver                          *net.Resolver
+	dnsCache                             *lrucache.Cache
 }
 
 type trafficState struct {
@@ -5168,31 +5171,56 @@ func (sshClient *sshClient) handleTCPChannel(
 
 		// Resolve the hostname
 
-		// PreferGo, equivalent to GODEBUG=netdns=go, is specified in order to
-		// avoid any cases where Go's resolver fails over to the cgo-based
-		// resolver (see https://pkg.go.dev/net#hdr-Name_Resolution). Such
-		// cases, if they resolve at all, may be expected to resolve to bogon
-		// IPs that won't be permitted; but the cgo invocation will consume
-		// an OS thread, which is a performance hit we can avoid.
-
 		if IsLogLevelDebug() {
 			log.WithTraceFields(LogFields{"hostToConnect": hostToConnect}).Debug("resolving")
 		}
 
-		ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
-		IPs, err := (&net.Resolver{PreferGo: true}).LookupIPAddr(ctx, hostToConnect)
-		cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
+		// See comments in getDNSResolver regarding DNS cache considerations.
+		// The cached values may be read by concurrent goroutines and must
+		// not be mutated.
 
-		resolveElapsedTime := time.Since(dialStartTime)
+		dnsResolver, dnsCache := sshClient.getDNSResolver()
 
-		// Record DNS metrics. If LookupIPAddr returns net.DNSError.IsNotFound, this
-		// is "no such host" and not a DNS failure. Limitation: the resolver IP is
-		// not known.
+		var IPs []net.IPAddr
 
-		dnsErr, ok := err.(*net.DNSError)
-		dnsNotFound := ok && dnsErr.IsNotFound
-		dnsSuccess := err == nil || dnsNotFound
-		sshClient.updateQualityMetricsWithDNSResult(dnsSuccess, resolveElapsedTime, nil)
+		if dnsCache != nil {
+			cachedIPs, ok := dnsCache.Get(hostToConnect)
+			if ok {
+				IPs = cachedIPs.([]net.IPAddr)
+			}
+		}
+
+		var err error
+		var resolveElapsedTime time.Duration
+
+		if len(IPs) == 0 {
+			ctx, cancelCtx := context.WithTimeout(sshClient.runCtx, remainingDialTimeout)
+			IPs, err = dnsResolver.LookupIPAddr(ctx, hostToConnect)
+			cancelCtx() // "must be called or the new context will remain live until its parent context is cancelled"
+
+			resolveElapsedTime = time.Since(dialStartTime)
+
+			if err == nil && len(IPs) > 0 {
+
+				// Add the successful DNS response to the cache. The cache
+				// won't be updated in the "no such host"/IsNotFound case,
+				// and subsequent resolves will try new requests. The "no IP
+				// address" error case in the following IP selection logic
+				// should not be reached when len(IPs) > 0.
+				if dnsCache != nil {
+					dnsCache.Add(hostToConnect, IPs, lrucache.DefaultExpiration)
+				}
+			}
+
+			// Record DNS request metrics. If LookupIPAddr returns
+			// net.DNSError.IsNotFound, this is "no such host" and not a DNS
+			// request failure. Limitation: the DNS server IP is not known.
+
+			dnsErr, ok := err.(*net.DNSError)
+			dnsNotFound := ok && dnsErr.IsNotFound
+			dnsSuccess := err == nil || dnsNotFound
+			sshClient.updateQualityMetricsWithDNSResult(dnsSuccess, resolveElapsedTime, nil)
+		}
 
 		// IPv4 is preferred in case the host has limited IPv6 routing. IPv6 is
 		// selected and attempted only when there's no IPv4 option.
@@ -5426,4 +5454,83 @@ func (sshClient *sshClient) handleTCPChannel(
 				"bytesUp":    atomic.LoadInt64(&bytesUp),
 				"bytesDown":  atomic.LoadInt64(&bytesDown)}).Debug("exiting")
 	}
+}
+
+func (sshClient *sshClient) getDNSResolver() (*net.Resolver, *lrucache.Cache) {
+
+	// Initialize the DNS resolver and cache used by handleTCPChannel in cases
+	// where the client sends unresolved domains through to psiphond. The
+	// resolver and cache are allocated on demand, to avoid overhead for
+	// clients that don't require this functionality.
+	//
+	// The standard library net.Resolver is used, with one instance per client
+	// to get the advantage of the "singleflight" functionality, where
+	// concurrent DNS lookups for the same domain are coalesced into a single
+	// in-flight DNS request.
+	//
+	// net.Resolver reads its configuration from /etc/resolv.conf, including a
+	// list of DNS servers, the number or retries to attempt, and whether to
+	// rotate the initial DNS server selection.
+	//
+	// In addition, a cache of successful DNS lookups is maintained to avoid
+	// rapid repeats DNS requests for the same domain. Since actual DNS
+	// response TTLs are not exposed by net.Resolver, the cache should be
+	// configured with a conservative TTL -- 10s of seconds.
+	//
+	// Each client has its own singleflight resolver and cache, which avoids
+	// leaking domain access information between clients. The cache should be
+	// configured with a modest max size appropriate for allocating one cache
+	// per client.
+	//
+	// As a potential future enhancement, consider using the custom DNS
+	// resolver, psiphon/common/resolver.Resolver, combined with the existing
+	// DNS server fetcher, SupportServices.DNSResolver. This resolver
+	// includes a cache which will respect the true TTL values in DNS
+	// responses; and randomly distributes load over the available DNS
+	// servers. Note the current limitations documented in
+	// Resolver.ResolveIP, which must be addressed.
+
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	if sshClient.dnsResolver != nil {
+		return sshClient.dnsResolver, sshClient.dnsCache
+	}
+
+	// PreferGo, equivalent to GODEBUG=netdns=go, is specified in order to
+	// avoid any cases where Go's resolver fails over to the cgo-based
+	// resolver (see https://pkg.go.dev/net#hdr-Name_Resolution). Such
+	// cases, if they resolve at all, may be expected to resolve to bogon
+	// IPs that won't be permitted; but the cgo invocation will consume
+	// an OS thread, which is a performance hit we can avoid.
+
+	sshClient.dnsResolver = &net.Resolver{PreferGo: true}
+
+	// Get the server DNS resolver cache parameters from tactics. In the case
+	// of an error, no tactics, or zero values no cache is initialized and
+	// getDNSResolver initializes only the resolver and returns a nil cache.
+	//
+	// Limitations:
+	// - assumes no GeoIP targeting for server DNS resolver cache parameters
+	// - an individual client's cache is not reconfigured on tactics reloads
+
+	p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(NewGeoIPData())
+	if err != nil {
+		log.WithTraceFields(LogFields{"error": err}).Warning("get tactics failed")
+		return sshClient.dnsResolver, nil
+	}
+	if p.IsNil() {
+		return sshClient.dnsResolver, nil
+	}
+
+	maxSize := p.Int(parameters.ServerDNSResolverCacheMaxSize)
+	TTL := p.Duration(parameters.ServerDNSResolverCacheTTL)
+
+	if maxSize == 0 || TTL == 0 {
+		return sshClient.dnsResolver, nil
+	}
+
+	sshClient.dnsCache = lrucache.NewWithLRU(TTL, 1*time.Minute, maxSize)
+
+	return sshClient.dnsResolver, sshClient.dnsCache
 }

@@ -506,6 +506,8 @@ const (
 	InproxyProxyQualityPendingFailedMatchDeadline      = "InproxyProxyQualityPendingFailedMatchDeadline"
 	InproxyProxyQualityFailedMatchThreshold            = "InproxyProxyQualityFailedMatchThreshold"
 	NetworkIDCacheTTL                                  = "NetworkIDCacheTTL"
+	ServerDNSResolverCacheMaxSize                      = "ServerDNSResolverCacheMaxSize"
+	ServerDNSResolverCacheTTL                          = "ServerDNSResolverCacheTTL"
 
 	// Retired parameters
 
@@ -1082,6 +1084,9 @@ var defaultParameters = map[string]struct {
 	InproxyProxyQualityFailedMatchThreshold:          {value: 10, minimum: 1, flags: serverSideOnly},
 
 	NetworkIDCacheTTL: {value: 500 * time.Millisecond, minimum: time.Duration(0)},
+
+	ServerDNSResolverCacheMaxSize: {value: 32, minimum: 0, flags: serverSideOnly},
+	ServerDNSResolverCacheTTL:     {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
