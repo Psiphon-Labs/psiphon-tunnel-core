@@ -180,7 +180,7 @@ func (server *TunnelServer) Run() error {
 				// back to the client, via the proxy, are encapsulated in
 				// SRTP packet payloads, and the maximum QUIC packet size
 				// must be adjusted to fit. MTU discovery is disabled so the
-				// maximum packewt size will not grow.
+				// maximum packet size will not grow.
 				//
 				// Limitation: the WebRTC data channel mode does not have the
 				// same QUIC packet size constraint, since data channel
