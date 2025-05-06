@@ -1287,10 +1287,13 @@ func (sshServer *sshServer) getLoadStats() (
 		totalDNSFailedCount := int64(0)
 
 		for key, value := range client.qualityMetrics.DNSCount {
-			if key == "ALL" || logDNSServerMetrics {
+			all := key == "ALL"
+			if all || logDNSServerMetrics {
 				upstreamStats["dns_count"].(map[string]int64)[key] += value
 			}
-			totalDNSCount += value
+			if all {
+				totalDNSCount += value
+			}
 		}
 
 		for key, value := range client.qualityMetrics.DNSDuration {
@@ -1300,10 +1303,13 @@ func (sshServer *sshServer) getLoadStats() (
 		}
 
 		for key, value := range client.qualityMetrics.DNSFailedCount {
-			if key == "ALL" || logDNSServerMetrics {
+			all := key == "ALL"
+			if all || logDNSServerMetrics {
 				upstreamStats["dns_failed_count"].(map[string]int64)[key] += value
 			}
-			totalDNSFailedCount += value
+			if all {
+				totalDNSFailedCount += value
+			}
 		}
 
 		for key, value := range client.qualityMetrics.DNSFailedDuration {
