@@ -97,6 +97,11 @@ type Config struct {
 	// When omitted, the Psiphon server does not create log files.
 	LogFileCreateMode *int
 
+	// When LogDNSServerLoadMetrics is true, server_load logs will include a
+	// break down of DNS request counts, failure rates, etc. per DNS server.
+	// Otherwise, only the overall DNS metrics are logged.
+	LogDNSServerLoadMetrics bool
+
 	// SkipPanickingLogWriter disables panicking when
 	// unable to write any logs.
 	SkipPanickingLogWriter bool

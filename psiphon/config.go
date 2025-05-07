@@ -127,6 +127,12 @@ type Config struct {
 	// the client reports to the server.
 	ClientPlatform string
 
+	// ClientAPILevel is the client API or SDK level, such as
+	// Build.VERSION.SDK_INT on Android. This value is used for local
+	// configuration, as required, and not reported to the server.
+	// ClientAPILevel is ignored when 0.
+	ClientAPILevel int
+
 	// ClientFeatures is a list of feature names denoting enabled application
 	// features. Clients report enabled features to the server for stats
 	// purposes.

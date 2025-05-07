@@ -716,6 +716,16 @@ func TestLegacyAPIEncoding(t *testing.T) {
 		})
 }
 
+func TestDomainRequest(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:          "SSH",
+			requireAuthorization:    true,
+			doTunneledDomainRequest: true,
+			doLogHostProvider:       true,
+		})
+}
+
 type runServerConfig struct {
 	tunnelProtocol           string
 	clientTunnelProtocol     string
@@ -727,6 +737,7 @@ type runServerConfig struct {
 	requireAuthorization     bool
 	omitAuthorization        bool
 	doTunneledWebRequest     bool
+	doTunneledDomainRequest  bool
 	doTunneledNTPRequest     bool
 	applyPrefix              bool
 	forceFragmenting         bool
@@ -850,7 +861,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.forceFragmenting ||
 		runConfig.doBurstMonitor ||
 		runConfig.doDestinationBytes ||
-		runConfig.doLegacyDestinationBytes
+		runConfig.doLegacyDestinationBytes ||
+		runConfig.doTunneledDomainRequest
 
 	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
@@ -1094,6 +1106,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// 2. hot reload of psinet db (runConfig.doHotReload)
 	// 3. hot reload of server tactics (runConfig.doHotReload && doServerTactics)
 	discoveryLog := make(chan map[string]interface{}, 3)
+	serverLoadLog := make(chan map[string]interface{}, 1)
 
 	inproxyProxyAnnounceLog := make(chan map[string]interface{}, 1)
 	inproxyClientOfferLog := make(chan map[string]interface{}, 1)
@@ -1133,6 +1146,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		case "server_tunnel":
 			select {
 			case serverTunnelLog <- logFields:
+			default:
+			}
+		case "server_load":
+			select {
+			case serverLoadLog <- logFields:
 			default:
 			}
 		case "inproxy_broker":
@@ -1297,6 +1315,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// Exercise server_load logging
 	p, _ := os.FindProcess(os.Getpid())
 	p.Signal(syscall.SIGUSR2)
+
+	timer := time.NewTimer(1 * time.Second)
+	select {
+	case <-serverLoadLog:
+	case <-timer.C:
+		t.Fatalf("missing server load log")
+	}
+	timer.Stop()
 
 	// configure client
 
@@ -1794,7 +1820,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		// Test: tunneled web site fetch
 
 		err = makeTunneledWebRequest(
-			t, localHTTPProxyPort, mockWebServerURL, mockWebServerExpectedResponse)
+			t, localHTTPProxyPort, mockWebServerURL, true, mockWebServerExpectedResponse)
 
 		if err == nil {
 			if expectTrafficFailure {
@@ -1804,6 +1830,28 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			if !expectTrafficFailure {
 				t.Fatalf("tunneled web request failed: %s", err)
 			}
+		}
+	}
+
+	if runConfig.doTunneledDomainRequest && !expectTrafficFailure {
+
+		// Test: tunneled web site fetch exercising the handleTCPChannel DNS
+		// resolver and cache
+
+		err = makeTunneledWebRequest(
+			t, localHTTPProxyPort, "https://psiphon.ca", false, "")
+		if err != nil {
+			t.Fatalf("tunneled web request failed: %s", err)
+		}
+
+		// Establish a second port forward to the same domain. The DNS
+		// resolution is expected to be cached. This is checked below via the
+		// dns_count reported in the server_load log.
+
+		err = makeTunneledWebRequest(
+			t, localHTTPProxyPort, "https://psiphon.ca", false, "")
+		if err != nil {
+			t.Fatalf("tunneled web request failed: %s", err)
 		}
 	}
 
@@ -1913,8 +1961,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	expectServerBPFField := ServerBPFEnabled() && protocol.TunnelProtocolIsDirect(runConfig.tunnelProtocol) && doServerTactics
 	expectServerPacketManipulationField := runConfig.doPacketManipulation
 	expectBurstFields := runConfig.doBurstMonitor
-	expectTCPPortForwardDial := runConfig.doTunneledWebRequest
-	expectTCPDataTransfer := runConfig.doTunneledWebRequest && !expectTrafficFailure && !runConfig.doSplitTunnel
+	expectTCPPortForwardDial := (runConfig.doTunneledWebRequest || runConfig.doTunneledDomainRequest)
+	expectTCPDataTransfer := (runConfig.doTunneledWebRequest || runConfig.doTunneledDomainRequest) && !expectTrafficFailure && !runConfig.doSplitTunnel
+	expectDomainPortForward := runConfig.doTunneledDomainRequest
 	// Even with expectTrafficFailure, DNS port forwards will succeed
 	expectUDPDataTransfer := runConfig.doTunneledNTPRequest
 	expectQUICVersion := ""
@@ -1954,6 +2003,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectTCPPortForwardDial,
 			expectTCPDataTransfer,
 			expectUDPDataTransfer,
+			expectDomainPortForward,
 			expectQUICVersion,
 			expectDestinationBytesFields,
 			expectLegacyDestinationBytesFields,
@@ -2006,6 +2056,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			t.Fatalf("unexpected domain bytes log")
 		default:
 		}
+	}
+
+	select {
+	case logFields := <-serverLoadLog:
+		if expectDomainPortForward {
+			dnsCount := int(logFields["dns_count"].(map[string]any)["ALL"].(float64))
+			if dnsCount != 1 {
+				t.Fatalf("unexpected dns_count: %d", dnsCount)
+			}
+
+		}
+	default:
+		t.Fatalf("missing server load log")
 	}
 
 	// Check logs emitted by discovery.
@@ -2252,6 +2315,7 @@ func checkExpectedServerTunnelLogFields(
 	expectTCPPortForwardDial bool,
 	expectTCPDataTransfer bool,
 	expectUDPDataTransfer bool,
+	expectDomainPortForward bool,
 	expectQUICVersion string,
 	expectDestinationBytesFields bool,
 	expectLegacyDestinationBytesFields bool,
@@ -2413,7 +2477,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if expectUDPDataTransfer {
+	if expectUDPDataTransfer || expectDomainPortForward {
 
 		if fields["peak_dns_failure_rate"] == nil {
 			return fmt.Errorf("missing expected field 'peak_dns_failure_rate'")
@@ -3051,7 +3115,9 @@ func checkExpectedDomainBytesLogFields(
 func makeTunneledWebRequest(
 	t *testing.T,
 	localHTTPProxyPort int,
-	requestURL, expectedResponseBody string) error {
+	requestURL string,
+	checkResponseBody bool,
+	expectedResponseBody string) error {
 
 	roundTripTimeout := 30 * time.Second
 
@@ -3078,7 +3144,7 @@ func makeTunneledWebRequest(
 	}
 	response.Body.Close()
 
-	if string(body) != expectedResponseBody {
+	if checkResponseBody && string(body) != expectedResponseBody {
 		return fmt.Errorf("unexpected proxied HTTP response")
 	}
 
@@ -3426,7 +3492,7 @@ func paveTrafficRulesFile(
 		t.Fatalf("unexpected intLookupThreshold")
 	}
 
-	TCPPorts := mockWebServerPort
+	TCPPorts := fmt.Sprintf("443, %s", mockWebServerPort)
 	UDPPorts := "53, 123, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010"
 
 	allowTCPPorts := TCPPorts
