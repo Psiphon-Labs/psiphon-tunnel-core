@@ -3588,11 +3588,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	logFields["is_first_tunnel_in_session"] = sshClient.isFirstTunnelInSession
 
-	logFields["pre_handshake_random_stream_count"] = sshClient.preHandshakeRandomStreamMetrics.count
-	logFields["pre_handshake_random_stream_upstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.upstreamBytes
-	logFields["pre_handshake_random_stream_received_upstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.receivedUpstreamBytes
-	logFields["pre_handshake_random_stream_downstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.downstreamBytes
-	logFields["pre_handshake_random_stream_sent_downstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.sentDownstreamBytes
+	if sshClient.preHandshakeRandomStreamMetrics.count > 0 {
+		logFields["pre_handshake_random_stream_count"] = sshClient.preHandshakeRandomStreamMetrics.count
+		logFields["pre_handshake_random_stream_upstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.upstreamBytes
+		logFields["pre_handshake_random_stream_received_upstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.receivedUpstreamBytes
+		logFields["pre_handshake_random_stream_downstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.downstreamBytes
+		logFields["pre_handshake_random_stream_sent_downstream_bytes"] = sshClient.preHandshakeRandomStreamMetrics.sentDownstreamBytes
+	}
 
 	if sshClient.handshakeState.completed {
 		// When !handshake_completed, all of these values can be assumed to be zero.
