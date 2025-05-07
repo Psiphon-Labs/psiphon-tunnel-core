@@ -819,6 +819,8 @@ type Config struct {
 
 	// LivenessTestMinUpstreamBytes and other LivenessTest fields are for
 	// testing purposes.
+	InitialLivenessTest            parameters.LivenessTestSpecs
+	LivenessTest                   parameters.LivenessTestSpecs
 	LivenessTestMinUpstreamBytes   *int
 	LivenessTestMaxUpstreamBytes   *int
 	LivenessTestMinDownstreamBytes *int
@@ -2112,6 +2114,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ObfuscatedSSHMaxPadding != nil {
 		applyParameters[parameters.ObfuscatedSSHMaxPadding] = *config.ObfuscatedSSHMaxPadding
+	}
+
+	if len(config.InitialLivenessTest) > 0 {
+		applyParameters[parameters.InitialLivenessTest] = config.InitialLivenessTest
+	}
+
+	if len(config.LivenessTest) > 0 {
+		applyParameters[parameters.LivenessTest] = config.LivenessTest
 	}
 
 	if config.LivenessTestMinUpstreamBytes != nil {

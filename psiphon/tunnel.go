@@ -31,6 +31,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/wildcard"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	"github.com/fxamacker/cbor/v2"
 )
@@ -801,10 +803,7 @@ func dialTunnel(
 	rateLimits := p.RateLimits(parameters.TunnelRateLimits)
 	obfuscatedSSHMinPadding := p.Int(parameters.ObfuscatedSSHMinPadding)
 	obfuscatedSSHMaxPadding := p.Int(parameters.ObfuscatedSSHMaxPadding)
-	livenessTestMinUpstreamBytes := p.Int(parameters.LivenessTestMinUpstreamBytes)
-	livenessTestMaxUpstreamBytes := p.Int(parameters.LivenessTestMaxUpstreamBytes)
-	livenessTestMinDownstreamBytes := p.Int(parameters.LivenessTestMinDownstreamBytes)
-	livenessTestMaxDownstreamBytes := p.Int(parameters.LivenessTestMaxDownstreamBytes)
+	livenessTestSpec := getLivenessTestSpec(p, dialParams.TunnelProtocol, dialParams.EstablishedTunnelsCount)
 	burstUpstreamTargetBytes := int64(p.Int(parameters.ClientBurstUpstreamTargetBytes))
 	burstUpstreamDeadline := p.Duration(parameters.ClientBurstUpstreamDeadline)
 	burstDownstreamTargetBytes := int64(p.Int(parameters.ClientBurstDownstreamTargetBytes))
@@ -1194,7 +1193,7 @@ func dialTunnel(
 
 			sshClient = ssh.NewClient(sshClientConn, sshChannels, noRequests)
 
-			if livenessTestMaxUpstreamBytes > 0 || livenessTestMaxDownstreamBytes > 0 {
+			if livenessTestSpec.MaxUpstreamBytes > 0 || livenessTestSpec.MaxDownstreamBytes > 0 {
 
 				// When configured, perform a liveness test which sends and
 				// receives bytes through the tunnel to ensure the tunnel had
@@ -1208,8 +1207,7 @@ func dialTunnel(
 
 				metrics, err = performLivenessTest(
 					sshClient,
-					livenessTestMinUpstreamBytes, livenessTestMaxUpstreamBytes,
-					livenessTestMinDownstreamBytes, livenessTestMaxDownstreamBytes,
+					livenessTestSpec,
 					dialParams.LivenessTestSeed)
 
 				// Skip notice when cancelling.
@@ -1632,8 +1630,7 @@ type livenessTestMetrics struct {
 
 func performLivenessTest(
 	sshClient *ssh.Client,
-	minUpstreamBytes, maxUpstreamBytes int,
-	minDownstreamBytes, maxDownstreamBytes int,
+	spec *parameters.LivenessTestSpec,
 	livenessTestPRNGSeed *prng.Seed) (*livenessTestMetrics, error) {
 
 	metrics := new(livenessTestMetrics)
@@ -1644,8 +1641,8 @@ func performLivenessTest(
 
 	PRNG := prng.NewPRNGWithSeed(livenessTestPRNGSeed)
 
-	metrics.UpstreamBytes = PRNG.Range(minUpstreamBytes, maxUpstreamBytes)
-	metrics.DownstreamBytes = PRNG.Range(minDownstreamBytes, maxDownstreamBytes)
+	metrics.UpstreamBytes = PRNG.Range(spec.MinUpstreamBytes, spec.MaxUpstreamBytes)
+	metrics.DownstreamBytes = PRNG.Range(spec.MinDownstreamBytes, spec.MaxDownstreamBytes)
 
 	request := &protocol.RandomStreamRequest{
 		UpstreamBytes:   metrics.UpstreamBytes,
@@ -2256,4 +2253,63 @@ func sendStats(tunnel *Tunnel) bool {
 	}
 
 	return err == nil
+}
+
+// getLivenessTestSpec returns the LivenessTestSpec for the given tunnel protocol.
+func getLivenessTestSpec(
+	p parameters.ParametersAccessor,
+	tunnelProtocol string,
+	establishedTunnelsCount int) *parameters.LivenessTestSpec {
+
+	// matchingSpec returns the first matching LivenessTestSpec for the given
+	// tunnelProtocol.
+	matchingSpec := func(
+		spec parameters.LivenessTestSpecs,
+		tunnelProtocol string) *parameters.LivenessTestSpec {
+		if len(spec) != 0 {
+			// Sort the patterns by length, longest first, so that the most specific
+			// match is found first.
+			patterns := make([]string, 0, len(spec))
+			for p := range spec {
+				patterns = append(patterns, p)
+			}
+			slices.SortFunc(patterns, func(i, j string) int {
+				return len(j) - len(i)
+			})
+			// Find the first and longest pattern that matches the tunnel protocol.
+			for _, p := range patterns {
+				if wildcard.Match(p, tunnelProtocol) {
+					return spec[p]
+				}
+			}
+			// Default to LIVENESS_ANY if no pattern matches.
+			if v, ok := spec[parameters.LIVENESS_ANY]; ok {
+				return v
+			}
+		}
+		return nil
+	}
+
+	// If EstablishedTunnelsCount is 0, attempt the InitialLivenessTest specification.
+	// If no match is found, or if this is a subsequent connection, proceed to LivenessTest.
+
+	if establishedTunnelsCount == 0 {
+		spec := matchingSpec(p.LivenessTest(parameters.InitialLivenessTest), tunnelProtocol)
+		if spec != nil {
+			return spec
+		}
+	}
+
+	spec := matchingSpec(p.LivenessTest(parameters.LivenessTest), tunnelProtocol)
+	if spec != nil {
+		return spec
+	}
+
+	// Return legacy values as a last resort.
+	return &parameters.LivenessTestSpec{
+		MinUpstreamBytes:   p.Int(parameters.LivenessTestMinUpstreamBytes),
+		MaxUpstreamBytes:   p.Int(parameters.LivenessTestMaxUpstreamBytes),
+		MinDownstreamBytes: p.Int(parameters.LivenessTestMinDownstreamBytes),
+		MaxDownstreamBytes: p.Int(parameters.LivenessTestMaxDownstreamBytes),
+	}
 }
