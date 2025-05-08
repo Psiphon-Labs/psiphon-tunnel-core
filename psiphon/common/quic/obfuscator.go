@@ -24,11 +24,11 @@ package quic
 
 import (
 	"crypto/sha256"
-	std_errors "errors"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -311,33 +311,11 @@ func (conn *ObfuscatedPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) 
 	return n, err
 }
 
-// ReadMsgUDP, and WriteMsgUDP satisfy the ietf_quic.OOBCapablePacketConn
-// interface. In non-muxListener mode, quic-go will access the
-// ObfuscatedPacketConn directly and use these functions to set ECN bits.
-//
 // ReadBatch implements ietf_quic.batchConn. Providing this implementation
 // effectively disables the quic-go batch packet reading optimization, which
 // would otherwise bypass deobfuscation. Note that ipv4.Message is an alias
 // for x/net/internal/socket.Message and quic-go uses this one type for both
 // IPv4 and IPv6 packets.
-//
-// Read and Write are present to satisfy the net.Conn interface, to which
-// ObfuscatedPacketConn is converted internally, via quic-go, in x/net/ipv
-// [4|6] for OOB manipulation. These functions do not need to be
-// implemented.
-
-func (conn *ObfuscatedPacketConn) ReadMsgUDP(p, oob []byte) (int, int, int, *net.UDPAddr, error) {
-	n, oobn, flags, addr, _, err := conn.readPacketWithType(p, nil)
-	// Do not wrap any I/O err returned by conn.PacketConn
-	return n, oobn, flags, addr, err
-}
-
-func (conn *ObfuscatedPacketConn) WriteMsgUDP(p, oob []byte, addr *net.UDPAddr) (int, int, error) {
-	n, oobn, err := conn.writePacket(p, oob, addr)
-	// Do not wrap any I/O err returned by conn.PacketConn
-	return n, oobn, err
-}
-
 func (conn *ObfuscatedPacketConn) ReadBatch(ms []ipv4.Message, _ int) (int, error) {
 
 	// Read a "batch" of 1 message, with any necessary deobfuscation performed
@@ -359,14 +337,47 @@ func (conn *ObfuscatedPacketConn) ReadBatch(ms []ipv4.Message, _ int) (int, erro
 	return 1, nil
 }
 
-var notSupported = std_errors.New("not supported")
+// SetReadBuffer and SetWriteBuffer are used by quic-go to optimize socket
+// buffer sizes.
+//
+// Unlike SyscallConn, quic-go will not fail on a SetReadBuffer/SetWriteBuffer
+// error, so it's safe to expose these functions even when the underlying
+// functionality is not always supported.
+//
+// When ObfuscatedPacketConn is wrapped in ObfuscatedPacketConnOOB,
+// SyscallConn is provided and quic-go's setReceiveBuffer will check that
+// buffer is set to expected size.
+func (conn *ObfuscatedPacketConn) SetReadBuffer(n int) error {
+	bufferConn, ok := conn.PacketConn.(interface{ SetReadBuffer(int) error })
+	if !ok {
+		return errors.Trace(errNotSupported)
+	}
 
+	// TODO: log errors in diagnostics. In quic-go, wrapConn logs errors from
+	// SetReadBuffer (via setReceiveBuffer) and proceeds; those quic-go logs
+	// are not captured.
+
+	return errors.Trace(bufferConn.SetReadBuffer(n))
+}
+
+func (conn *ObfuscatedPacketConn) SetWriteBuffer(n int) error {
+	bufferConn, ok := conn.PacketConn.(interface{ SetWriteBuffer(int) error })
+	if !ok {
+		return errors.Trace(errNotSupported)
+	}
+	return errors.Trace(bufferConn.SetWriteBuffer(n))
+}
+
+// Read and Write are present to satisfy the net.Conn interface, to which
+// ObfuscatedPacketConn is converted internally, via quic-go, in x/net/ipv
+// [4|6] for OOB manipulation. These functions do not need to be
+// implemented.
 func (conn *ObfuscatedPacketConn) Read(_ []byte) (int, error) {
-	return 0, errors.Trace(notSupported)
+	return 0, errors.Trace(errNotSupported)
 }
 
 func (conn *ObfuscatedPacketConn) Write(_ []byte) (int, error) {
-	return 0, errors.Trace(notSupported)
+	return 0, errors.Trace(errNotSupported)
 }
 
 func (conn *ObfuscatedPacketConn) RemoteAddr() net.Addr {
@@ -992,3 +1003,73 @@ func isIETFQUICClientHello(buffer []byte) bool {
 		buffer[3] == 0 &&
 		buffer[4] == 0x1
 }
+
+// ObfuscatedOOBCapablePacketConn implements quic-go's OOBCapablePacketConn
+// interface by exposing the necessary functionality in the underlying
+// ObfuscatedPacketConn.PacketConn. The packet conn should be a *net.UDPConn
+// and must implement SyscallConn/ReadMsgUDP/WriteMsgUDP.
+//
+// SyscallConn is used to set the DF bit for path MTU discovery, and is
+// required for MTU discovery to function. SyscallConn is also used to verify
+// the buffers set by SetReadBuffer and SetWriteBuffer.
+//
+// ReadMsgUDP and WriteMsgUDP are used to operate on the ECN bit.
+//
+// quic-go's wrapConn assumes SyscallConn works when provided, or else the
+// dial fails, so providing SyscallConn and then returning errNotSupported is
+// fatal.
+type ObfuscatedOOBCapablePacketConn struct {
+	*ObfuscatedPacketConn
+}
+
+func NewObfuscatedOOBCapablePacketConn(
+	conn *ObfuscatedPacketConn) *ObfuscatedOOBCapablePacketConn {
+
+	return &ObfuscatedOOBCapablePacketConn{ObfuscatedPacketConn: conn}
+}
+
+func (conn *ObfuscatedOOBCapablePacketConn) SyscallConn() (syscall.RawConn, error) {
+
+	// quic-go uses SyscallConn to set DF bit for path MTU discovery.
+
+	syscallConn, ok := conn.ObfuscatedPacketConn.PacketConn.(ietf_quic.OOBCapablePacketConn)
+	if !ok {
+		return nil, errors.Trace(errNotSupported)
+	}
+	rawConn, err := syscallConn.SyscallConn()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return rawConn, nil
+}
+
+func (conn *ObfuscatedOOBCapablePacketConn) ReadMsgUDP(
+	p, oob []byte) (int, int, int, *net.UDPAddr, error) {
+
+	// quic-go uses ReadMsgUDP to read ECN bits.
+	//
+	// The underlying readPacketWithType performs its own type assertion and
+	// reads OOB bits when ObfuscatedPacketConn.PacketConn is capable.
+
+	n, oobn, flags, addr, _, err := conn.readPacketWithType(p, nil)
+	// Do not wrap any I/O err returned by conn.PacketConn
+	return n, oobn, flags, addr, err
+}
+
+func (conn *ObfuscatedOOBCapablePacketConn) WriteMsgUDP(
+	p, oob []byte, addr *net.UDPAddr) (int, int, error) {
+
+	// quic-go uses WriteMsgUDP to write ECN bits.
+	//
+	// The underlying readPacketWithType performs its own type assertion and
+	// writes OOB bits when ObfuscatedPacketConn.PacketConn is capable. If
+	// oob is not nil and the type assertion fails, writePacket fails.
+
+	n, oobn, err := conn.writePacket(p, oob, addr)
+	// Do not wrap any I/O err returned by conn.PacketConn
+	return n, oobn, err
+}
+
+var _ ietf_quic.OOBCapablePacketConn = &ObfuscatedOOBCapablePacketConn{}
+
+var _ ietf_quic.OOBCapablePacketConn = &common.WriteTimeoutUDPConn{}
