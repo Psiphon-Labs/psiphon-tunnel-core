@@ -1561,10 +1561,22 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		if runConfig.forceLivenessTest {
-			applyParameters[parameters.LivenessTestMinUpstreamBytes] = livenessTestSize
-			applyParameters[parameters.LivenessTestMaxUpstreamBytes] = livenessTestSize
-			applyParameters[parameters.LivenessTestMinDownstreamBytes] = livenessTestSize
-			applyParameters[parameters.LivenessTestMaxDownstreamBytes] = livenessTestSize
+			applyParameters[parameters.InitialLivenessTest] = parameters.LivenessTestSpecs{
+				"": &parameters.LivenessTestSpec{
+					MinUpstreamBytes:   livenessTestSize,
+					MaxUpstreamBytes:   livenessTestSize,
+					MinDownstreamBytes: livenessTestSize,
+					MaxDownstreamBytes: livenessTestSize,
+				},
+			}
+			applyParameters[parameters.LivenessTest] = parameters.LivenessTestSpecs{
+				"": &parameters.LivenessTestSpec{
+					MinUpstreamBytes:   livenessTestSize,
+					MaxUpstreamBytes:   livenessTestSize,
+					MinDownstreamBytes: livenessTestSize,
+					MaxDownstreamBytes: livenessTestSize,
+				},
+			}
 		}
 
 		if runConfig.doPruneServerEntries {
