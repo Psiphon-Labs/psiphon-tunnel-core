@@ -41,7 +41,7 @@ require (
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250325201346-c58235406399
-	github.com/Psiphon-Labs/utls v0.0.0-20250311210446-c1daf1ce55c1
+	github.com/Psiphon-Labs/utls v0.0.0-20250429162420-6dbd45ae7ceb
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/bits-and-blooms/bloom/v3 v3.6.0

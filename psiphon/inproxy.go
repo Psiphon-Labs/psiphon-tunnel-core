@@ -1658,6 +1658,10 @@ func NewInproxyWebRTCDialInstance(
 		awaitReadyToProxyTimeout = p.Duration(parameters.InproxyClientWebRTCAwaitReadyToProxyTimeout)
 	}
 
+	if clientAPILevelDisableInproxyPortMapping.Load() {
+		disablePortMapping = true
+	}
+
 	// Parameters such as disabling certain operations and operation timeouts
 	// are not replayed, but snapshots are stored in the
 	// InproxyWebRTCDialInstance for efficient lookup.

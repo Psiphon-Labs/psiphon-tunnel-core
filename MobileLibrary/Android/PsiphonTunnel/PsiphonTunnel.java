@@ -795,6 +795,8 @@ public class PsiphonTunnel {
 
         json.put("ClientPlatform", clientPlatform.toString().replaceAll("[^\\w\\-\\.]", "_"));
 
+        json.put("ClientAPILevel", Build.VERSION.SDK_INT);
+
         return json.toString();
     }
 

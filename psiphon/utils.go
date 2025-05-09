@@ -29,6 +29,8 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -40,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/refraction"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
+	"github.com/wlynxg/anet"
 )
 
 // MakePsiphonUserAgent constructs a User-Agent value to use for web service
@@ -301,4 +304,78 @@ func GetNetworkType(networkID string) string {
 		return "VPN"
 	}
 	return "UNKNOWN"
+}
+
+var (
+	clientAPILevelDisableInproxyPortMapping atomic.Bool
+	applyClientAPILevelMutex                sync.Mutex
+)
+
+func applyClientAPILevel(config *Config) {
+
+	applyClientAPILevelMutex.Lock()
+	defer applyClientAPILevelMutex.Unlock()
+
+	if config.ClientAPILevel == 0 {
+		return
+	}
+
+	if runtime.GOOS == "android" {
+
+		// When specified, ClientAPILevel should be Build.VERSION.SDK_INT on
+		// Android.
+		//
+		// Avoid android_get_device_api_level call.
+		//
+		// Use ClientAPILevel to explicitly set the Android API level in the
+		// anet packet, which provides a custom alternative to net.Interfaces
+		// on Android. Applying Build.VERSION.SDK_INT here avoids anet
+		// calling the lic function android_get_device_api_level call, which
+		// may not always be available.
+		//
+		// The Android API level is required in order for anet to select its
+		// custom Interfaces on Android >= 11, where the stock net.Interfaces
+		// doesn't work (see Go issue 40569). The stock net.Interfaces should be
+		// selected on Android < 11, as testing shows that anet.Interfaces fails
+		// to enumerate all interfaces, including wlan, on older Android versions.
+		//
+		// anet.SetAndroidVersion must be called before the Controller starts in
+		// order to ensure the explicit version is applied before any call to
+		// android_get_device_api_level. Note that anet doesn't synchronize
+		// access to its internal anet.customAndroidApiLevel value;
+		// applyClientAPILevelMutex prevents concurrent writes by the following
+		// anet.SetAndroidVersion call, but reads by anet remain unsynchronized
+		// apart from scheduling the applyClientAPILevel call before the
+		// Controller starts.
+		//
+		// anet.SetAndroidVersion takes the Android OS version, not API level, but
+		// internally it has only two states: if the specified Android OS version
+		// is >= 11, customAndroidApiLevel is set to 30 and the custom Interfaces
+		// is enabled; otherwise, the stock net.Interfaces is used.
+
+		if config.ClientAPILevel >= 30 {
+
+			anet.SetAndroidVersion(11)
+
+		} else {
+
+			anet.SetAndroidVersion(10)
+		}
+
+		// Disable the tailscale portmapper on Android < 12.
+		//
+		// On Android < 12, the exec.Command calls in tailscale helper
+		// functions, including likelyHomeRouterIPAndroid, will currently hit
+		// Go issue 70508: on Go 1.23, the standard library implementation of
+		// exec.Command calls pidfd_open, which crashes shared libraries with
+		// SIGSYS, "Cause: seccomp prevented call to disallowed arm64 system
+		// call 434". Note that tailscale currently works around this by
+		// patching out the pidfd calls from its fork of Go; see tailscale
+		// issue 13452.
+
+		if config.ClientAPILevel < 31 {
+
+			clientAPILevelDisableInproxyPortMapping.Store(true)
+		}
+	}
 }

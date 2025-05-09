@@ -127,6 +127,12 @@ type Config struct {
 	// the client reports to the server.
 	ClientPlatform string
 
+	// ClientAPILevel is the client API or SDK level, such as
+	// Build.VERSION.SDK_INT on Android. This value is used for local
+	// configuration, as required, and not reported to the server.
+	// ClientAPILevel is ignored when 0.
+	ClientAPILevel int
+
 	// ClientFeatures is a list of feature names denoting enabled application
 	// features. Clients report enabled features to the server for stats
 	// purposes.
@@ -813,6 +819,8 @@ type Config struct {
 
 	// LivenessTestMinUpstreamBytes and other LivenessTest fields are for
 	// testing purposes.
+	InitialLivenessTest            parameters.LivenessTestSpecs
+	LivenessTest                   parameters.LivenessTestSpecs
 	LivenessTestMinUpstreamBytes   *int
 	LivenessTestMaxUpstreamBytes   *int
 	LivenessTestMinDownstreamBytes *int
@@ -2106,6 +2114,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ObfuscatedSSHMaxPadding != nil {
 		applyParameters[parameters.ObfuscatedSSHMaxPadding] = *config.ObfuscatedSSHMaxPadding
+	}
+
+	if len(config.InitialLivenessTest) > 0 {
+		applyParameters[parameters.InitialLivenessTest] = config.InitialLivenessTest
+	}
+
+	if len(config.LivenessTest) > 0 {
+		applyParameters[parameters.LivenessTest] = config.LivenessTest
 	}
 
 	if config.LivenessTestMinUpstreamBytes != nil {

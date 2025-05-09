@@ -213,6 +213,8 @@ const (
 	MeekAlternateContentTypeProbability                = "MeekAlternateContentTypeProbability"
 	TransformHostNameProbability                       = "TransformHostNameProbability"
 	PickUserAgentProbability                           = "PickUserAgentProbability"
+	InitialLivenessTest                                = "InitialLivenessTest"
+	LivenessTest                                       = "LivenessTest"
 	LivenessTestMinUpstreamBytes                       = "LivenessTestMinUpstreamBytes"
 	LivenessTestMaxUpstreamBytes                       = "LivenessTestMaxUpstreamBytes"
 	LivenessTestMinDownstreamBytes                     = "LivenessTestMinDownstreamBytes"
@@ -506,6 +508,8 @@ const (
 	InproxyProxyQualityPendingFailedMatchDeadline      = "InproxyProxyQualityPendingFailedMatchDeadline"
 	InproxyProxyQualityFailedMatchThreshold            = "InproxyProxyQualityFailedMatchThreshold"
 	NetworkIDCacheTTL                                  = "NetworkIDCacheTTL"
+	ServerDNSResolverCacheMaxSize                      = "ServerDNSResolverCacheMaxSize"
+	ServerDNSResolverCacheTTL                          = "ServerDNSResolverCacheTTL"
 
 	// Retired parameters
 
@@ -739,6 +743,8 @@ var defaultParameters = map[string]struct {
 	TransformHostNameProbability: {value: 0.5, minimum: 0.0},
 	PickUserAgentProbability:     {value: 0.5, minimum: 0.0},
 
+	InitialLivenessTest:            {value: make(LivenessTestSpecs)},
+	LivenessTest:                   {value: make(LivenessTestSpecs)},
 	LivenessTestMinUpstreamBytes:   {value: 0, minimum: 0},
 	LivenessTestMaxUpstreamBytes:   {value: 0, minimum: 0},
 	LivenessTestMinDownstreamBytes: {value: 0, minimum: 0},
@@ -1082,6 +1088,9 @@ var defaultParameters = map[string]struct {
 	InproxyProxyQualityFailedMatchThreshold:          {value: 10, minimum: 1, flags: serverSideOnly},
 
 	NetworkIDCacheTTL: {value: 500 * time.Millisecond, minimum: time.Duration(0)},
+
+	ServerDNSResolverCacheMaxSize: {value: 32, minimum: 0, flags: serverSideOnly},
+	ServerDNSResolverCacheTTL:     {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
@@ -1653,6 +1662,15 @@ func (p *Parameters) Set(
 					return nil, errors.Trace(err)
 				}
 			case InproxyTrafficShapingParametersValue:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
+
+			case LivenessTestSpecs:
 				err := v.Validate()
 				if err != nil {
 					if skipOnError {
@@ -2276,6 +2294,12 @@ func (p ParametersAccessor) InproxyTrafficShapingParameters(
 	name string) InproxyTrafficShapingParametersValue {
 
 	value := InproxyTrafficShapingParametersValue{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+func (p ParametersAccessor) LivenessTest(name string) LivenessTestSpecs {
+	value := make(LivenessTestSpecs)
 	p.snapshot.getValue(name, &value)
 	return value
 }

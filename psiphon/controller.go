@@ -118,6 +118,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 	// Needed by regen, at least
 	rand.Seed(int64(time.Now().Nanosecond()))
 
+	applyClientAPILevel(config)
+
 	// The session ID for the Psiphon server API is used across all
 	// tunnels established by the controller.
 	NoticeSessionId(config.SessionID)
