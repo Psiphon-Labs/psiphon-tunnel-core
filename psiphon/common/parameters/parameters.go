@@ -213,6 +213,8 @@ const (
 	MeekAlternateContentTypeProbability                = "MeekAlternateContentTypeProbability"
 	TransformHostNameProbability                       = "TransformHostNameProbability"
 	PickUserAgentProbability                           = "PickUserAgentProbability"
+	InitialLivenessTest                                = "InitialLivenessTest"
+	LivenessTest                                       = "LivenessTest"
 	LivenessTestMinUpstreamBytes                       = "LivenessTestMinUpstreamBytes"
 	LivenessTestMaxUpstreamBytes                       = "LivenessTestMaxUpstreamBytes"
 	LivenessTestMinDownstreamBytes                     = "LivenessTestMinDownstreamBytes"
@@ -741,6 +743,8 @@ var defaultParameters = map[string]struct {
 	TransformHostNameProbability: {value: 0.5, minimum: 0.0},
 	PickUserAgentProbability:     {value: 0.5, minimum: 0.0},
 
+	InitialLivenessTest:            {value: make(LivenessTestSpecs)},
+	LivenessTest:                   {value: make(LivenessTestSpecs)},
 	LivenessTestMinUpstreamBytes:   {value: 0, minimum: 0},
 	LivenessTestMaxUpstreamBytes:   {value: 0, minimum: 0},
 	LivenessTestMinDownstreamBytes: {value: 0, minimum: 0},
@@ -1665,6 +1669,15 @@ func (p *Parameters) Set(
 					}
 					return nil, errors.Trace(err)
 				}
+
+			case LivenessTestSpecs:
+				err := v.Validate()
+				if err != nil {
+					if skipOnError {
+						continue
+					}
+					return nil, errors.Trace(err)
+				}
 			}
 
 			// Enforce any minimums. Assumes defaultParameters[name]
@@ -2281,6 +2294,12 @@ func (p ParametersAccessor) InproxyTrafficShapingParameters(
 	name string) InproxyTrafficShapingParametersValue {
 
 	value := InproxyTrafficShapingParametersValue{}
+	p.snapshot.getValue(name, &value)
+	return value
+}
+
+func (p ParametersAccessor) LivenessTest(name string) LivenessTestSpecs {
+	value := make(LivenessTestSpecs)
 	p.snapshot.getValue(name, &value)
 	return value
 }

@@ -225,6 +225,11 @@ func TestGetDefaultParameters(t *testing.T) {
 			if !reflect.DeepEqual(v, g) {
 				t.Fatalf("ConjureTransports returned %+v expected %+v", g, v)
 			}
+		case LivenessTestSpecs:
+			g := p.Get().LivenessTest(name)
+			if !reflect.DeepEqual(v, g) {
+				t.Fatalf("LivenessTestSpecs returned %+v expected %+v", g, v)
+			}
 		default:
 			t.Fatalf("Unhandled default type: %s (%T)", name, defaults.value)
 		}
