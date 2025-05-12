@@ -425,6 +425,11 @@ func DialMeek(
 
 		meek.connManager = newMeekUnderlyingConnManager(nil, nil, udpDialer)
 
+		// Limitation: currently, the meekUnderlyingPacketConn wrapping done by
+		// dialPacketConn masks the quic-go.OOBCapablePacketConn capabilities
+		// of the underlying *net.UDPConn. With these capabilities unavailable,
+		// path MTU discovery and UDP socket buffer optimizations will be disabled.
+
 		var err error
 		transport, err = quic.NewQUICTransporter(
 			ctx,
