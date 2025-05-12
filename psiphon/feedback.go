@@ -120,7 +120,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 	config.SetResolver(resolver)
 
 	// Limitation: GetTactics will fail silently if the datastore used for
-	// retrieving and storing tactics is opened by another process. This can
+	// retrieving and storing tactics is locked by another process. This can
 	// be the case on Android and iOS where SendFeedback is invoked by the UI
 	// process while tunneling is run by the VPN process.
 	//
@@ -215,6 +215,16 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 		// Do not use device binder when domain fronting is used. See resolver
 		// comment above.
 		frontingUseDeviceBinder := false
+
+		// Limitation: when SendFeedback is called without the datastore
+		// already open, as is the case in MobileLibrary, for example, then
+		// the following, optional frontedHTTPClientInstance replay use and
+		// storage operations will always fail with "psiphon.datastoreUpdate#242:
+		// database not open": SelectCandidateWithNetworkReplayParameters and
+		// SetNetworkReplayParameters. Unlike GetTactics above, which uses
+		// TacticsStorer and its transparent OpenDataStoreWithoutRetry calls,
+		// the replay operations currently do not attempt to automatically
+		// open and close the datastore.
 
 		payloadSecure := true
 		client, _, err := MakeUntunneledHTTPClient(
