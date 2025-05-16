@@ -30,6 +30,7 @@ import (
 	"math/rand"
 	"net"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -426,6 +427,31 @@ func (controller *Controller) Run(ctx context.Context) {
 	<-controller.runCtx.Done()
 	NoticeInfo("controller stopped")
 
+	// To assist with diagnosing unexpected shutdown hangs, log a goroutine
+	// profile if the wait operation runs over a deadline. This diagnostic
+	// goroutine is intentially not awaited on.
+	signalDoneShutdown := make(chan struct{})
+	go func() {
+		deadlineSeconds := 60
+		if controller.config.ShutdownGoroutineProfileDeadlineSeconds != nil {
+			deadlineSeconds = *controller.config.ShutdownGoroutineProfileDeadlineSeconds
+		}
+		if deadlineSeconds == 0 {
+			return
+		}
+		timer := time.NewTimer(time.Duration(deadlineSeconds) * time.Second)
+		defer timer.Stop()
+		select {
+		case <-signalDoneShutdown:
+			return
+		case <-timer.C:
+		}
+		pprof.Lookup("goroutine").WriteTo(
+			NewNoticeLineWriter("Goroutine"), 1)
+	}()
+
+	// Shutdown
+
 	if controller.packetTunnelClient != nil {
 		controller.packetTunnelClient.Stop()
 	}
@@ -437,8 +463,9 @@ func (controller *Controller) Run(ctx context.Context) {
 	// workers such as fetch remote server list and untunneled uprade
 	// download -- operate with the controller run context and will all
 	// be interrupted when the run context is done.
-
 	controller.runWaitGroup.Wait()
+
+	close(signalDoneShutdown)
 
 	NoticeInfo("exiting controller")
 
