@@ -681,6 +681,12 @@ type Config struct {
 	// showing proxy connection information and bytes transferred.
 	EmitInproxyProxyActivity bool
 
+	// ShutdownGoroutineProfileDeadlineSeconds is the number of seconds to
+	// await shutdown in Controller.Run before dumping a goroutine profile to
+	// diagnostics. Specify 0 to disable. When not specified, the default is
+	// 60 seconds.
+	ShutdownGoroutineProfileDeadlineSeconds *int
+
 	//
 	// The following parameters are deprecated.
 	//

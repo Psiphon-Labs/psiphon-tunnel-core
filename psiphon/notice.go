@@ -1321,6 +1321,43 @@ func (writer *NoticeWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+// NoticeLineWriter implements io.Writer and emits the contents of Write calls
+// as Notices. NoticeLineWriter buffers writes and emits a notice for each
+// complete, newline delimited line. Tab characters are replaced with spaces.
+type NoticeLineWriter struct {
+	noticeType string
+	lineBuffer strings.Builder
+}
+
+// NoticeLineWriter initializes a new NoticeLineWriter
+func NewNoticeLineWriter(noticeType string) *NoticeLineWriter {
+	return &NoticeLineWriter{noticeType: noticeType}
+}
+
+// Write implements io.Writer.
+func (writer *NoticeLineWriter) Write(p []byte) (n int, err error) {
+
+	str := strings.ReplaceAll(string(p), "\t", "    ")
+
+	for {
+		before, after, found := strings.Cut(str, "\n")
+		writer.lineBuffer.WriteString(before)
+		if !found {
+			return len(p), nil
+		}
+		singletonNoticeLogger.outputNotice(
+			writer.noticeType, noticeIsDiagnostic,
+			"message", writer.lineBuffer.String())
+		writer.lineBuffer.Reset()
+		if len(after) == 0 {
+			break
+		}
+		str = after
+	}
+
+	return len(p), nil
+}
+
 // NoticeCommonLogger maps the common.Logger interface to the notice facility.
 // This is used to make the notice facility available to other packages that
 // don't import the "psiphon" package.
