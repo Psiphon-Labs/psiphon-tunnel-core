@@ -21,7 +21,7 @@ import (
 const commentStart = "@"
 const commentStartLen = len(commentStart)
 
-// Identifier is the type for an identifier in an Note argument list.
+// Identifier is the type for an identifier in a Note argument list.
 type Identifier string
 
 // Parse collects all the notes present in a file.
@@ -32,7 +32,7 @@ type Identifier string
 // See the package documentation for details about the syntax of those
 // notes.
 func Parse(fset *token.FileSet, filename string, content []byte) ([]*Note, error) {
-	var src interface{}
+	var src any
 	if content != nil {
 		src = content
 	}
@@ -42,7 +42,7 @@ func Parse(fset *token.FileSet, filename string, content []byte) ([]*Note, error
 		// there are ways you can break the parser such that it will not add all the
 		// comments to the ast, which may result in files where the tests are silently
 		// not run.
-		file, err := parser.ParseFile(fset, filename, src, parser.ParseComments|parser.AllErrors)
+		file, err := parser.ParseFile(fset, filename, src, parser.ParseComments|parser.AllErrors|parser.SkipObjectResolution)
 		if file == nil {
 			return nil, err
 		}
@@ -220,7 +220,7 @@ func (t *tokens) Pos() token.Pos {
 	return t.base + token.Pos(t.scanner.Position.Offset)
 }
 
-func (t *tokens) Errorf(msg string, args ...interface{}) {
+func (t *tokens) Errorf(msg string, args ...any) {
 	if t.err != nil {
 		return
 	}
@@ -280,9 +280,9 @@ func parseNote(t *tokens) *Note {
 	}
 }
 
-func parseArgumentList(t *tokens) []interface{} {
-	args := []interface{}{} // @name() is represented by a non-nil empty slice.
-	t.Consume()             // '('
+func parseArgumentList(t *tokens) []any {
+	args := []any{} // @name() is represented by a non-nil empty slice.
+	t.Consume()     // '('
 	t.Skip('\n')
 	for t.Token() != ')' {
 		args = append(args, parseArgument(t))
@@ -300,7 +300,7 @@ func parseArgumentList(t *tokens) []interface{} {
 	return args
 }
 
-func parseArgument(t *tokens) interface{} {
+func parseArgument(t *tokens) any {
 	switch t.Token() {
 	case scanner.Ident:
 		v := t.Consume()
