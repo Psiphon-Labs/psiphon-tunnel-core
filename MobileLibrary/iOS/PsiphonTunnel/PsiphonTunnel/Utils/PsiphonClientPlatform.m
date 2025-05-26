@@ -36,6 +36,11 @@
     if (@available(iOS 14.0, *)) {
         isiOSAppOnMac = [[NSProcessInfo processInfo] isiOSAppOnMac];
     }
+    
+    BOOL isMacCatalyst = FALSE;
+    if (@available(iOS 13.0, macCatalyst 13.0, *)) {
+        isMacCatalyst = [[NSProcessInfo processInfo] isMacCatalystApp];
+    }
 
     // Like "10.2.1"
     NSString *systemVersion = [[[[UIDevice currentDevice]systemVersion]
@@ -53,7 +58,16 @@
         // iOS app running on ARM Mac.
 
         NSString *systemName = @"mac_iOSAppOnMac";
-
+        
+        return [NSString stringWithFormat:@"%@_%@_%@",
+                systemName,
+                systemVersion,
+                bundleIdentifier];
+        
+    } else if (isMacCatalyst) {
+        
+        NSString *systemName = @"mac_catalyst";
+        
         return [NSString stringWithFormat:@"%@_%@_%@",
                 systemName,
                 systemVersion,

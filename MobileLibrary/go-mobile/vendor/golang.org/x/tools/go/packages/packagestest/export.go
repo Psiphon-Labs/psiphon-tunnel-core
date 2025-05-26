@@ -5,6 +5,10 @@
 /*
 Package packagestest creates temporary projects on disk for testing go tools on.
 
+[Note: there is an open proposal (golang/go#70229) to deprecate, tag,
+and delete this package. If accepted, the last version of the package
+be available indefinitely but will not receive updates.]
+
 By changing the exporter used, you can create projects for multiple build
 systems from the same description, and run the same tests on them in many
 cases.
@@ -97,7 +101,7 @@ type Module struct {
 	// The keys are the file fragment that follows the module name, the value can
 	// be a string or byte slice, in which case it is the contents of the
 	// file, otherwise it must be a Writer function.
-	Files map[string]interface{}
+	Files map[string]any
 
 	// Overlay is the set of source file overlays for the module.
 	// The keys are the file fragment as in the Files configuration.
@@ -155,7 +159,6 @@ var All = []Exporter{GOPATH, Modules}
 func TestAll(t *testing.T, f func(*testing.T, Exporter)) {
 	t.Helper()
 	for _, e := range All {
-		e := e // in case f calls t.Parallel
 		t.Run(e.Name(), func(t *testing.T) {
 			t.Helper()
 			f(t, e)
@@ -169,7 +172,6 @@ func TestAll(t *testing.T, f func(*testing.T, Exporter)) {
 func BenchmarkAll(b *testing.B, f func(*testing.B, Exporter)) {
 	b.Helper()
 	for _, e := range All {
-		e := e // in case f calls t.Parallel
 		b.Run(e.Name(), func(b *testing.B) {
 			b.Helper()
 			f(b, e)
@@ -479,7 +481,7 @@ func GroupFilesByModules(root string) ([]Module, error) {
 
 	primarymod := &Module{
 		Name:    root,
-		Files:   make(map[string]interface{}),
+		Files:   make(map[string]any),
 		Overlay: make(map[string][]byte),
 	}
 	mods := map[string]*Module{
@@ -569,7 +571,7 @@ func GroupFilesByModules(root string) ([]Module, error) {
 		}
 		mods[path] = &Module{
 			Name:    filepath.ToSlash(module),
-			Files:   make(map[string]interface{}),
+			Files:   make(map[string]any),
 			Overlay: make(map[string][]byte),
 		}
 		currentModule = path
@@ -587,8 +589,8 @@ func GroupFilesByModules(root string) ([]Module, error) {
 // This is to enable the common case in tests where you have a full copy of the
 // package in your testdata.
 // This will panic if there is any kind of error trying to walk the file tree.
-func MustCopyFileTree(root string) map[string]interface{} {
-	result := map[string]interface{}{}
+func MustCopyFileTree(root string) map[string]any {
+	result := map[string]any{}
 	if err := filepath.Walk(filepath.FromSlash(root), func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err

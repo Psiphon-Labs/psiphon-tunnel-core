@@ -6,6 +6,10 @@
 Package expect provides support for interpreting structured comments in Go
 source code (including go.mod and go.work files) as test expectations.
 
+[Note: there is an open proposal (golang/go#70229) to deprecate, tag,
+and delete this package. If accepted, the last version of the package
+be available indefinitely but will not receive updates.]
+
 This is primarily intended for writing tests of things that process Go source
 files, although it does not directly depend on the testing package.
 
@@ -62,9 +66,9 @@ import (
 // It knows the position of the start of the comment, and the name and
 // arguments that make up the note.
 type Note struct {
-	Pos  token.Pos     // The position at which the note identifier appears
-	Name string        // the name associated with the note
-	Args []interface{} // the arguments for the note
+	Pos  token.Pos // The position at which the note identifier appears
+	Name string    // the name associated with the note
+	Args []any     // the arguments for the note
 }
 
 // ReadFile is the type of a function that can provide file contents for a
@@ -81,7 +85,7 @@ type ReadFile func(filename string) ([]byte, error)
 // MatchBefore returns the range of the line that matched the pattern, and
 // invalid positions if there was no match, or an error if the line could not be
 // found.
-func MatchBefore(fset *token.FileSet, readFile ReadFile, end token.Pos, pattern interface{}) (token.Pos, token.Pos, error) {
+func MatchBefore(fset *token.FileSet, readFile ReadFile, end token.Pos, pattern any) (token.Pos, token.Pos, error) {
 	f := fset.File(end)
 	content, err := readFile(f.Name())
 	if err != nil {
@@ -115,11 +119,4 @@ func MatchBefore(fset *token.FileSet, readFile ReadFile, end token.Pos, pattern 
 		return token.NoPos, token.NoPos, nil
 	}
 	return f.Pos(startOffset + matchStart), f.Pos(startOffset + matchEnd), nil
-}
-
-func lineEnd(f *token.File, line int) token.Pos {
-	if line >= f.LineCount() {
-		return token.Pos(f.Base() + f.Size())
-	}
-	return f.LineStart(line + 1)
 }
