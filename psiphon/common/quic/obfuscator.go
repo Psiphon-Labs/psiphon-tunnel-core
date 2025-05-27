@@ -759,6 +759,13 @@ func (conn *ObfuscatedPacketConn) writePacket(
 		// There's no special case for legacy gQUIC, even though it lacks
 		// packet size adjustments, since gQUIC has a hard max packet size of
 		// 1280 bytes, less than the limit checked here.
+
+		// Limitation: on Linux, with GSO enabled, standard quic-go can call
+		// WriteTo with oversized packets which are then split in the kernel.
+		// These oversized writes would exceed the MAX_PACKET_SIZE length
+		// check. Furthermore, writePacket doesn't handle obfuscating GSO
+		// writes. Psiphon-Labs/quic-go currently disables GSO.
+
 		if n > MAX_PACKET_SIZE-OBFUSCATED_MAX_PACKET_SIZE_ADJUSTMENT {
 			return 0, 0, newTemporaryNetError(errors.Tracef(
 				"unexpected QUIC packet length: %d", n))

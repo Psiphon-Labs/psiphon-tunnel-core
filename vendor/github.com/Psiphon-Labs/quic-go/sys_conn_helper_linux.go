@@ -64,6 +64,11 @@ func parseIPv4PktInfo(body []byte) (ip netip.Addr, ifIndex uint32, ok bool) {
 // isGSOEnabled tests if the kernel supports GSO.
 // Sending with GSO might still fail later on, if the interface doesn't support it (see isGSOError).
 func isGSOEnabled(conn syscall.RawConn) bool {
+
+	// [Psiphon]
+	// GSO is incompatible with ObfuscatedPacketConn
+	return false
+
 	if kernelVersionMajor < 5 {
 		return false
 	}
