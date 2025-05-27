@@ -102,10 +102,14 @@ func runQUIC(
 
 	obfuscationKey := prng.HexString(32)
 
+	// Disabling MTU discovery is exercised in in-proxy test cases.
+	disablePathMTUDiscovery := false
+
 	listener, err := Listen(
 		nil,
 		irregularTunnelLogger,
 		"127.0.0.1:0",
+		disablePathMTUDiscovery,
 		0,
 		obfuscationKey,
 		enableGQUIC)
