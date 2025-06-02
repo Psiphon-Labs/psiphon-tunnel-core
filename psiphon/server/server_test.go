@@ -2347,6 +2347,7 @@ func checkExpectedServerTunnelLogFields(
 
 	for _, name := range []string{
 		"host_id",
+		"tunnel_id",
 		"start_time",
 		"duration",
 		"session_id",

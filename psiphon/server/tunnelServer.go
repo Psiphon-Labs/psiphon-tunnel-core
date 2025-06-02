@@ -3563,6 +3563,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		sshClient.handshakeState.apiParams,
 		serverTunnelStatParams)
 
+	logFields["tunnel_id"] = base64.RawURLEncoding.EncodeToString(prng.Bytes(protocol.PSIPHON_API_TUNNEL_ID_LENGTH))
+
 	if sshClient.isInproxyTunnelProtocol {
 		sshClient.peerGeoIPData.SetLogFieldsWithPrefix("", "inproxy_proxy", logFields)
 		logFields.Add(
