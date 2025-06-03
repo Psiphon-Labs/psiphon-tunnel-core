@@ -3028,7 +3028,7 @@ func (controller *Controller) runInproxyProxy() {
 		if useUpstreamProxy {
 			NoticeError("inproxy proxy: not run due to upstream proxy configuration")
 		}
-		if haveBrokerSpecs {
+		if !haveBrokerSpecs {
 			NoticeError("inproxy proxy: no proxy broker specs")
 		}
 		if !inproxy.Enabled() {
