@@ -33,10 +33,11 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 type RemoteServerListFetcher func(
-	ctx context.Context, config *Config, attempt int, tunnel *Tunnel, untunneledDialConfig *DialConfig) error
+	ctx context.Context, config *Config, attempt int, tunnel *Tunnel, untunneledDialConfig *DialConfig, tlsCache utls.ClientSessionCache) error
 
 // FetchCommonRemoteServerList downloads the common remote server list from
 // config.RemoteServerListURLs. It validates its digital signature using the
@@ -50,7 +51,8 @@ func FetchCommonRemoteServerList(
 	config *Config,
 	attempt int,
 	tunnel *Tunnel,
-	untunneledDialConfig *DialConfig) error {
+	untunneledDialConfig *DialConfig,
+	tlsCache utls.ClientSessionCache) error {
 
 	NoticeInfo("fetching common remote server list")
 
@@ -68,6 +70,7 @@ func FetchCommonRemoteServerList(
 		config,
 		tunnel,
 		untunneledDialConfig,
+		tlsCache,
 		downloadTimeout,
 		downloadURL.URL,
 		canonicalURL,
@@ -145,7 +148,8 @@ func FetchObfuscatedServerLists(
 	config *Config,
 	attempt int,
 	tunnel *Tunnel,
-	untunneledDialConfig *DialConfig) error {
+	untunneledDialConfig *DialConfig,
+	tlsCache utls.ClientSessionCache) error {
 
 	NoticeInfo("fetching obfuscated remote server lists")
 
@@ -192,6 +196,7 @@ func FetchObfuscatedServerLists(
 		config,
 		tunnel,
 		untunneledDialConfig,
+		tlsCache,
 		downloadTimeout,
 		downloadURL,
 		canonicalURL,
@@ -272,6 +277,7 @@ func FetchObfuscatedServerLists(
 			config,
 			tunnel,
 			untunneledDialConfig,
+			tlsCache,
 			downloadTimeout,
 			rootURL,
 			canonicalRootURL,
@@ -325,6 +331,7 @@ func downloadOSLFileSpec(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
+	tlsCache utls.ClientSessionCache,
 	downloadTimeout time.Duration,
 	rootURL *parameters.TransferURL,
 	canonicalRootURL string,
@@ -349,6 +356,7 @@ func downloadOSLFileSpec(
 		config,
 		tunnel,
 		untunneledDialConfig,
+		tlsCache,
 		downloadTimeout,
 		downloadURL,
 		canonicalURL,
@@ -433,6 +441,7 @@ func downloadRemoteServerListFile(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
+	tlsCache utls.ClientSessionCache,
 	downloadTimeout time.Duration,
 	sourceURL string,
 	canonicalURL string,
@@ -472,6 +481,7 @@ func downloadRemoteServerListFile(
 		config,
 		tunnel,
 		untunneledDialConfig,
+		tlsCache,
 		skipVerify,
 		disableSystemRootCAs,
 		payloadSecure,
