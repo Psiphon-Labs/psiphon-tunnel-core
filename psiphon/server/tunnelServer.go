@@ -1943,6 +1943,9 @@ type sshClient struct {
 	inproxyProxyQualityTracker           *inproxyProxyQualityTracker
 	dnsResolver                          *net.Resolver
 	dnsCache                             *lrucache.Cache
+	requestCheckServerEntryTags          int
+	checkedServerEntryTags               int
+	invalidServerEntryTags               int
 }
 
 type trafficState struct {
@@ -3737,6 +3740,12 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	if sshClient.additionalTransportData != nil &&
 		sshClient.additionalTransportData.steeringIP != "" {
 		logFields["relayed_steering_ip"] = sshClient.additionalTransportData.steeringIP
+	}
+
+	if sshClient.requestCheckServerEntryTags > 0 {
+		logFields["request_check_server_entry_tags"] = sshClient.requestCheckServerEntryTags
+		logFields["checked_server_entry_tags"] = sshClient.checkedServerEntryTags
+		logFields["invalid_server_entry_tags"] = sshClient.invalidServerEntryTags
 	}
 
 	// Merge in additional metrics from the optional metrics source

@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"net"
 	"net/http"
 	"slices"
@@ -89,6 +90,7 @@ type Tunnel struct {
 	mutex                          *sync.Mutex
 	config                         *Config
 	isActivated                    bool
+	isStatusReporter               bool
 	isDiscarded                    bool
 	isClosed                       bool
 	dialParams                     *DialParameters
@@ -178,7 +180,9 @@ func ConnectTunnel(
 // request and starting operateTunnel, the worker that monitors the tunnel
 // and handles periodic management.
 func (tunnel *Tunnel) Activate(
-	ctx context.Context, tunnelOwner TunnelOwner) (retErr error) {
+	ctx context.Context,
+	tunnelOwner TunnelOwner,
+	isStatusReporter bool) (retErr error) {
 
 	// Ensure that, unless the base context is cancelled, any replayed dial
 	// parameters are cleared, no longer to be retried, if the tunnel fails to
@@ -340,6 +344,7 @@ func (tunnel *Tunnel) Activate(
 	}
 
 	tunnel.isActivated = true
+	tunnel.isStatusReporter = isStatusReporter
 	tunnel.serverContext = serverContext
 
 	// establishDuration is the elapsed time between the controller starting tunnel
@@ -1783,16 +1788,31 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 	statsTimer := time.NewTimer(nextStatusRequestPeriod())
 	defer statsTimer.Stop()
 
-	// Schedule an almost-immediate status request to deliver any unreported
-	// persistent stats.
-	unreported := CountUnreportedPersistentStats()
-	if unreported > 0 {
-		NoticeInfo("Unreported persistent stats: %d", unreported)
-		p := tunnel.getCustomParameters()
-		statsTimer.Reset(
-			prng.Period(
-				p.Duration(parameters.PsiphonAPIStatusRequestShortPeriodMin),
-				p.Duration(parameters.PsiphonAPIStatusRequestShortPeriodMax)))
+	// Only one active tunnel should be designated as the status reporter for
+	// sending stats and prune checks. While the stats provide a "take out"
+	// scheme that would allow for multiple, concurrent requesters, the prune
+	// check does not.
+	//
+	// The statsTimer is retained, but set to practically never trigger, in
+	// the !isStatusReporter case to simplify following select statements.
+	if tunnel.isStatusReporter {
+
+		// Schedule an almost-immediate status request to deliver any unreported
+		// persistent stats or perform a server entry prune check.
+		unreported := CountUnreportedPersistentStats()
+		isCheckDue := IsCheckServerEntryTagsDue(tunnel.config)
+		if unreported > 0 || isCheckDue {
+			NoticeInfo(
+				"Unreported persistent stats: %d; server entry check due: %v",
+				unreported, isCheckDue)
+			p := tunnel.getCustomParameters()
+			statsTimer.Reset(
+				prng.Period(
+					p.Duration(parameters.PsiphonAPIStatusRequestShortPeriodMin),
+					p.Duration(parameters.PsiphonAPIStatusRequestShortPeriodMax)))
+		}
+	} else {
+		statsTimer = time.NewTimer(time.Duration(math.MaxInt64))
 	}
 
 	nextSshKeepAlivePeriod := func() time.Duration {
@@ -1922,11 +1942,13 @@ func (tunnel *Tunnel) operateTunnel(tunnelOwner TunnelOwner) {
 			}
 
 		case <-statsTimer.C:
-			select {
-			case signalStatusRequest <- struct{}{}:
-			default:
+			if tunnel.isStatusReporter {
+				select {
+				case signalStatusRequest <- struct{}{}:
+				default:
+				}
+				statsTimer.Reset(nextStatusRequestPeriod())
 			}
-			statsTimer.Reset(nextStatusRequestPeriod())
 
 		case <-sshKeepAliveTimer.C:
 			p := tunnel.getCustomParameters()
@@ -2246,7 +2268,7 @@ func sendStats(tunnel *Tunnel) bool {
 		return true
 	}
 
-	err := tunnel.serverContext.DoStatusRequest(tunnel)
+	err := tunnel.serverContext.DoStatusRequest()
 	if err != nil {
 		NoticeWarning("DoStatusRequest failed for %s: %s",
 			tunnel.dialParams.ServerEntry.GetDiagnosticID(), err)

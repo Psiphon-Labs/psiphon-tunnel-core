@@ -1364,6 +1364,18 @@ func MakeDialParameters(
 		return nil, errors.Trace(err)
 	}
 
+	if dialPortNumber == 0 && p.Bool(parameters.ServerEntryPruneDialPortNumberZero) {
+
+		// Automatically prune any invalid server entry that has produced an
+		// invalid dial port number of 0. This case may arise due to missing
+		// port number fields in server entries. For older clients, this
+		// prune case is enforced in the server's status request
+		// failed_tunnel processing; see server.statusAPIRequestHandler.
+
+		PruneServerEntry(config, serverEntry.IpAddress)
+		return nil, errors.TraceNew("invalid dial port number")
+	}
+
 	dialParams.DialPortNumber = strconv.Itoa(dialPortNumber)
 
 	switch protocol.TunnelProtocolMinusInproxy(dialParams.TunnelProtocol) {

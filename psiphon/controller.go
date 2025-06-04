@@ -1089,7 +1089,15 @@ loop:
 					controller.stopEstablishing()
 				}
 
-				err := connectedTunnel.Activate(controller.runCtx, controller)
+				// In the case of multi-tunnels, only the first tunnel will send status requests,
+				// including transfer stats (domain bytes), persistent stats, and prune checks.
+				// While transfer stats and persistent stats use a "take out" scheme that would
+				// allow for multiple, concurrent requesters, the prune check does not.
+
+				isStatusReporter := isFirstTunnel
+
+				err := connectedTunnel.Activate(
+					controller.runCtx, controller, isStatusReporter)
 
 				if err != nil {
 					NoticeWarning("failed to activate %s: %v",
