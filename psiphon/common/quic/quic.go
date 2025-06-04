@@ -53,7 +53,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	tls "github.com/Psiphon-Labs/psiphon-tls"
@@ -135,8 +134,8 @@ var serverIdleTimeout = SERVER_IDLE_TIMEOUT
 // Listener is a net.Listener.
 type Listener struct {
 	quicListener
-	obfuscatedPacketConn *ObfuscatedPacketConn
-	clientRandomHistory  *obfuscator.SeedHistory
+	packetConn          *ObfuscatedOOBCapablePacketConn
+	clientRandomHistory *obfuscator.SeedHistory
 }
 
 // Listen creates a new Listener.
@@ -144,6 +143,7 @@ func Listen(
 	logger common.Logger,
 	irregularTunnelLogger func(string, error, common.LogFields),
 	address string,
+	disablePathMTUDiscovery bool,
 	additionalMaxPacketSizeAdjustment int,
 	obfuscationKey string,
 	enableGQUIC bool) (net.Listener, error) {
@@ -176,6 +176,27 @@ func Listen(
 		return nil, errors.Trace(err)
 	}
 
+	// On the server side, the QUIC UDP socket is always wrapped with an
+	// ObfuscatedPacketConn, as the single socket will receive and need to
+	// handle both obfuscated and non-obfuscated QUIC protocol variants.
+	//
+	// The server UDP socket is further unconditionally wrapped with
+	// ObfuscatedOOBCapablePacketConn, which enables support for setting the
+	// OOB ECN bit, for congestion control, and the DF bit, required for path
+	// MTU discovery. Both of these IP packet bits will be set by quic-go.
+	//
+	// This unconditional wrapping is a trade-off, since this also causes
+	// quic-go to set the ECN and DF bits for obfuscated IETF QUIC.
+	// This is partially mitigated by the fact that the DF bit is very
+	// common, and that the ECN bit isn't set immediately.
+	//
+	// As a future enhancement, in the Psiphon-Labs/quic-go fork, add support
+	// for per-connection enabling of setting the ECN/DF bits.
+	//
+	// When gQUIC is enabled and the mux listener is used, the
+	// OOBCapablePacketConn features are masked and setting the ECN/DF bits
+	// and path MTU discovery are dissabled.
+
 	// Note that WriteTimeoutUDPConn is not used here in the server case, as
 	// the server UDP conn will have many concurrent writers, and each
 	// SetWriteDeadline call by WriteTimeoutUDPConn would extend the deadline
@@ -189,6 +210,9 @@ func Listen(
 		udpConn.Close()
 		return nil, errors.Trace(err)
 	}
+
+	obfuscatedOOBPacketConn := NewObfuscatedOOBCapablePacketConn(
+		obfuscatedPacketConn)
 
 	// QUIC clients must prove knowledge of the obfuscated key via a message
 	// sent in the TLS ClientHello random field, or receive no UDP packets
@@ -250,18 +274,19 @@ func Listen(
 		// pumping read packets though mux channels.
 
 		tlsConfig, ietfQUICConfig, err := makeServerIETFConfig(
-			obfuscatedPacketConn,
+			obfuscatedOOBPacketConn,
+			disablePathMTUDiscovery,
 			additionalMaxPacketSizeAdjustment,
 			verifyClientHelloRandom,
 			tlsCertificate,
 			obfuscationKey)
 
 		if err != nil {
-			obfuscatedPacketConn.Close()
+			obfuscatedOOBPacketConn.Close()
 			return nil, errors.Trace(err)
 		}
 
-		tr := newIETFTransport(obfuscatedPacketConn)
+		tr := newIETFTransport(obfuscatedOOBPacketConn)
 
 		listener, err := tr.Listen(tlsConfig, ietfQUICConfig)
 		if err != nil {
@@ -281,13 +306,13 @@ func Listen(
 
 		muxListener, err := newMuxListener(
 			logger,
-			obfuscatedPacketConn,
+			obfuscatedOOBPacketConn,
 			additionalMaxPacketSizeAdjustment,
 			verifyClientHelloRandom,
 			tlsCertificate,
 			obfuscationKey)
 		if err != nil {
-			obfuscatedPacketConn.Close()
+			obfuscatedOOBPacketConn.Close()
 			return nil, errors.Trace(err)
 		}
 
@@ -295,14 +320,37 @@ func Listen(
 	}
 
 	return &Listener{
-		quicListener:         quicListener,
-		obfuscatedPacketConn: obfuscatedPacketConn,
-		clientRandomHistory:  clientRandomHistory,
+		quicListener:        quicListener,
+		packetConn:          obfuscatedOOBPacketConn,
+		clientRandomHistory: clientRandomHistory,
 	}, nil
 }
 
+// Accept returns a net.Conn that wraps a single QUIC connection and stream.
+// The stream establishment is deferred until the first Read or Write,
+// allowing Accept to be called in a fast loop while goroutines spawned to
+// handle each net.Conn will perform the blocking AcceptStream.
+func (listener *Listener) Accept() (net.Conn, error) {
+
+	connection, err := listener.quicListener.Accept()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &Conn{
+		connection:           connection,
+		deferredAcceptStream: true,
+	}, nil
+}
+
+func (listener *Listener) Close() error {
+	_ = listener.packetConn.Close()
+	return listener.quicListener.Close()
+}
+
 func makeServerIETFConfig(
-	conn *ObfuscatedPacketConn,
+	conn *ObfuscatedOOBCapablePacketConn,
+	disablePathMTUDiscovery bool,
 	additionalMaxPacketSizeAdjustment int,
 	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	tlsCertificate tls.Certificate,
@@ -336,7 +384,9 @@ func makeServerIETFConfig(
 		})
 	}
 
-	serverMaxPacketSizeAdjustment := conn.serverMaxPacketSizeAdjustment
+	serverMaxPacketSizeAdjustment :=
+		conn.ObfuscatedPacketConn.serverMaxPacketSizeAdjustment
+
 	if additionalMaxPacketSizeAdjustment != 0 {
 		serverMaxPacketSizeAdjustment = func(addr net.Addr) int {
 			return conn.serverMaxPacketSizeAdjustment(addr) +
@@ -355,6 +405,7 @@ func makeServerIETFConfig(
 
 		VerifyClientHelloRandom:       verifyClientHelloRandom,
 		ServerMaxPacketSizeAdjustment: serverMaxPacketSizeAdjustment,
+		DisablePathMTUDiscovery:       disablePathMTUDiscovery,
 	}
 
 	return tlsConfig, ietfQUICConfig, nil
@@ -380,28 +431,6 @@ func newIETFTransport(conn net.PacketConn) *ietf_quic.Transport {
 		// negotiation packet.
 		DisableVersionNegotiationPackets: true,
 	}
-}
-
-// Accept returns a net.Conn that wraps a single QUIC connection and stream.
-// The stream establishment is deferred until the first Read or Write,
-// allowing Accept to be called in a fast loop while goroutines spawned to
-// handle each net.Conn will perform the blocking AcceptStream.
-func (listener *Listener) Accept() (net.Conn, error) {
-
-	connection, err := listener.quicListener.Accept()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return &Conn{
-		connection:           connection,
-		deferredAcceptStream: true,
-	}, nil
-}
-
-func (listener *Listener) Close() error {
-	_ = listener.obfuscatedPacketConn.Close()
-	return listener.quicListener.Close()
 }
 
 // Dial establishes a new QUIC connection and stream to the server specified
@@ -455,40 +484,18 @@ func Dial(
 		return nil, errors.Tracef("invalid destination port: %d", remoteAddr.Port)
 	}
 
-	udpConn, ok := packetConn.(*net.UDPConn)
+	udpConn, isUDPConn := packetConn.(*net.UDPConn)
 
-	if !ok || isObfuscated(quicVersion) {
+	// Ensure blocked packet writes eventually timeout.
+	if isUDPConn {
 
-		// quic-go uses OOB operations to manipulate ECN bits in IP packet
-		// headers. These operations are available only when the packet conn
-		// is a *net.UDPConn. At this time, quic-go reads but does not write
-		// ECN OOB bits; see quic-go PR 2789.
-		//
-		// To guard against future writes to ECN bits, a potential fingerprint
-		// when using obfuscated QUIC, this non-OOB code path is taken for
-		// isObfuscated QUIC versions. This mitigates upstream fingerprints;
-		// see ObfuscatedPacketConn.writePacket for the server-side
-		// downstream limitation.
-		//
-		// Update: quic-go now writes ECN bits; see quic-go PR 3999.
-
-		// Ensure blocked packet writes eventually timeout. Note that quic-go
-		// manages read deadlines; we set only the write deadline here.
-		packetConn = &common.WriteTimeoutPacketConn{
-			PacketConn: packetConn,
-		}
-
-		// Double check that OOB support won't be detected by quic-go.
-		_, ok := packetConn.(ietf_quic.OOBCapablePacketConn)
-		if ok {
-			return nil, errors.TraceNew("unexpected OOBCapablePacketConn")
-		}
-
-	} else {
-
-		// Ensure blocked packet writes eventually timeout.
 		packetConn = &common.WriteTimeoutUDPConn{
 			UDPConn: udpConn,
+		}
+	} else {
+
+		packetConn = &common.WriteTimeoutPacketConn{
+			PacketConn: packetConn,
 		}
 	}
 
@@ -506,7 +513,25 @@ func Dial(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		packetConn = obfuscatedPacketConn
+
+		// When available, expose the required UDP socket functionality to
+		// handle OOB bits, for handling the ECN bit, and the DF bit, for
+		// path MTU discovery.
+		if isUDPConn {
+			packetConn = NewObfuscatedOOBCapablePacketConn(obfuscatedPacketConn)
+		} else {
+			packetConn = obfuscatedPacketConn
+		}
+
+		// Disable path MTU in the client flow. This avoids setting the DF bit
+		// for client obfuscated QUIC packets. The downstream server flow
+		// will still perform MTU discovery.
+		//
+		// As a future enhancement, in the Psiphon-Labs/quic-go fork, consider
+		// enabling a delay for client flow MTU discovery so that early
+		// packets don't include the DF bit.
+
+		disablePathMTUDiscovery = true
 
 		// Reserve additional space for packet obfuscation overhead so that
 		// quic-go will continue to produce packets of max size 1280.
@@ -1368,33 +1393,37 @@ func (conn *muxPacketConn) LocalAddr() net.Addr {
 }
 
 func (conn *muxPacketConn) SetDeadline(t time.Time) error {
-	return errors.TraceNew("not supported")
+	return errors.Trace(errNotSupported)
 }
 
 func (conn *muxPacketConn) SetReadDeadline(t time.Time) error {
-	return errors.TraceNew("not supported")
+	return errors.Trace(errNotSupported)
 }
 
 func (conn *muxPacketConn) SetWriteDeadline(t time.Time) error {
-	return errors.TraceNew("not supported")
+	return errors.Trace(errNotSupported)
 }
 
-// SetReadBuffer, SetWriteBuffer, and SyscallConn provide passthroughs to the
-// underlying net.UDPConn implementations, used to optimize UDP buffer sizes.
-// See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
-// and ietf_quic.setReceive/SendBuffer. Only the IETF stack will access these
+// SetReadBuffer and SetWriteBuffer provide passthroughs to the underlying
+// net.UDPConn implementations, used to optimize UDP buffer sizes. See
+// https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes and
+// ietf_quic.setReceive/SendBuffer. Only the IETF stack will access these
 // functions.
 //
-// Limitation: due to the relayPackets/ReadFrom scheme, this simple
-// passthrough does not suffice to provide access to ReadMsgUDP for
-// https://godoc.org/github.com/lucas-clemente/quic-go#ECNCapablePacketConn.
-
+// Limitations:
+//   - SysconnCall is not passed through as it is not required in
+//     ietf_quic.setReceive/SendBuffer, and it may cause issues if used, by the
+//     IETF stack, to set the DF bit for path MTU discovery. As a result, MTU
+//     discovery is not enabled with the multiplexer.
+//   - Due to the relayPackets/ReadFrom scheme, this simple passthrough does not
+//     suffice to provide access to ReadMsgUDP for
+//     https://godoc.org/github.com/quic-go/quic-go#OOBCapablePacketConn.
 func (conn *muxPacketConn) SetReadBuffer(bytes int) error {
 	c, ok := conn.listener.conn.PacketConn.(interface {
 		SetReadBuffer(int) error
 	})
 	if !ok {
-		return errors.TraceNew("not supported")
+		return errors.Trace(errNotSupported)
 	}
 	return c.SetReadBuffer(bytes)
 }
@@ -1404,19 +1433,9 @@ func (conn *muxPacketConn) SetWriteBuffer(bytes int) error {
 		SetWriteBuffer(int) error
 	})
 	if !ok {
-		return errors.TraceNew("not supported")
+		return errors.Trace(errNotSupported)
 	}
 	return c.SetWriteBuffer(bytes)
-}
-
-func (conn *muxPacketConn) SyscallConn() (syscall.RawConn, error) {
-	c, ok := conn.listener.conn.PacketConn.(interface {
-		SyscallConn() (syscall.RawConn, error)
-	})
-	if !ok {
-		return nil, errors.TraceNew("not supported")
-	}
-	return c.SyscallConn()
 }
 
 // muxListener is a multiplexing packet conn listener which relays packets to
@@ -1426,7 +1445,7 @@ type muxListener struct {
 	isClosed            int32
 	runWaitGroup        *sync.WaitGroup
 	stopBroadcast       chan struct{}
-	conn                *ObfuscatedPacketConn
+	conn                *ObfuscatedOOBCapablePacketConn
 	packets             chan *packet
 	acceptedConnections chan quicConnection
 	ietfQUICConn        *muxPacketConn
@@ -1437,7 +1456,7 @@ type muxListener struct {
 
 func newMuxListener(
 	logger common.Logger,
-	conn *ObfuscatedPacketConn,
+	conn *ObfuscatedOOBCapablePacketConn,
 	additionalMaxPacketSizeAdjustment int,
 	verifyClientHelloRandom func(net.Addr, []byte) bool,
 	tlsCertificate tls.Certificate,
@@ -1459,8 +1478,13 @@ func newMuxListener(
 
 	listener.ietfQUICConn = newMuxPacketConn(conn.LocalAddr(), listener)
 
+	// The muxListener does not expose the quic-go.OOBCapablePacketConn
+	// SyscallConn capability required for MTU discovery.
+	disablePathMTUDiscovery := true
+
 	tlsConfig, ietfQUICConfig, err := makeServerIETFConfig(
 		conn,
+		disablePathMTUDiscovery,
 		additionalMaxPacketSizeAdjustment,
 		verifyClientHelloRandom,
 		tlsCertificate,
@@ -1629,3 +1653,5 @@ func (listener *muxListener) Close() error {
 func (listener *muxListener) Addr() net.Addr {
 	return listener.conn.LocalAddr()
 }
+
+var errNotSupported = std_errors.New("not supported")

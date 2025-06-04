@@ -1361,12 +1361,25 @@ func (conn *webRTCConn) Close() error {
 	udpConn := conn.udpConn
 	conn.mutex.Unlock()
 
-	if portMapper != nil {
-		portMapper.close()
+	// Signal closing, which will unblock some waiting conditions, before
+	// awaiting the close of each component.
+	close(conn.closedSignal)
+
+	// Close the udpConn to interrupt any blocking DTLS handshake:
+	// https://github.com/pion/webrtc/blob/c1467e4871c78ee3f463b50d858d13dc6f2874a4/dtlstransport.go#L334-L340
+	//
+	// Limitation: there is no guarantee that pion sends any closing packets
+	// before the UDP socket is closed here.
+
+	if udpConn != nil {
+		_ = udpConn.Close()
 	}
 
 	// Neither sendMediaTrack nor receiveMediaTrack have a Close operation.
 
+	if portMapper != nil {
+		portMapper.close()
+	}
 	if sendMediaTrackRTP != nil {
 		_ = sendMediaTrackRTP.Stop()
 	}
@@ -1383,18 +1396,6 @@ func (conn *webRTCConn) Close() error {
 		// TODO: use PeerConnection.GracefulClose (requires pion/webrtc 3.2.51)?
 		_ = peerConnection.Close()
 	}
-
-	// Close the udpConn to interrupt any blocking DTLS handshake:
-	// https://github.com/pion/webrtc/blob/c1467e4871c78ee3f463b50d858d13dc6f2874a4/dtlstransport.go#L334-L340
-	//
-	// Limitation: there is no guarantee that pion sends any closing packets
-	// before the UDP socket is closed here.
-
-	if udpConn != nil {
-		_ = udpConn.Close()
-	}
-
-	close(conn.closedSignal)
 
 	return nil
 }
@@ -1473,8 +1474,16 @@ func (conn *webRTCConn) SetReadDeadline(t time.Time) error {
 	}
 
 	if conn.config.UseMediaStreams {
-		// TODO: add support
-		return errors.TraceNew("not supported")
+
+		// This is the same workaround used and documented in
+		// mediaTrackPacketConn.SetReadDeadline.
+		//
+		// As in mediaTrackPacketConn, this assumes that SetReadDeadline is
+		// called only in the terminating quic-go case.
+
+		go func() {
+			_ = conn.Close()
+		}()
 	}
 
 	readDeadliner, ok := conn.dataChannelConn.(datachannel.ReadDeadliner)
@@ -2586,6 +2595,8 @@ func (conn *mediaTrackPacketConn) SetDeadline(t time.Time) error {
 
 func (conn *mediaTrackPacketConn) SetReadDeadline(t time.Time) error {
 
+	// Workaround:
+	//
 	// When a quic-go DialEarly fails, it invokes Transport.Close. In turn,
 	// Transport.Close calls this SetReadDeadline in order to interrupt any
 	// blocked read. The underlying pion/webrtc.TrackRemote has a
@@ -2593,8 +2604,12 @@ func (conn *mediaTrackPacketConn) SetReadDeadline(t time.Time) error {
 	// may be nil, and readMediaTrack may be blocking on
 	// receiveMediaTrackOpenedSignal.
 	//
-	// Simply calling webRTCConn.Close unblocks both that case and the case
-	// where receiveMediaTrack exists and is blocked on read.
+	// In addition, as of v2.2.4, pion/transport/v2/packetio.Buffer.Read,
+	// which underlies receiveMediaTrack.Read, isn't interrupted when
+	// SetReadDeadline is update -- it only checks and applies the read
+	// deadline once before blocking.
+	//
+	// Simply calling webRTCConn.Close unblocks both cases.
 	//
 	// Invoke in a goroutine to avoid a deadlock that would otherwise occur
 	// when webRTCConn.Close is invoked directly, as it will call down to
