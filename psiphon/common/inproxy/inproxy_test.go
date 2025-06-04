@@ -1192,6 +1192,7 @@ func newQuicEchoServer() (*quicEchoServer, error) {
 		nil,
 		nil,
 		"127.0.0.1:0",
+		true,
 		GetQUICMaxPacketSizeAdjustment(),
 		obfuscationKey,
 		false)

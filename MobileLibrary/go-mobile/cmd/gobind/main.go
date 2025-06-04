@@ -1,4 +1,4 @@
-// Copyright 2014 The Go Authors.  All rights reserved.
+// Copyright 2014 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -102,7 +101,7 @@ func run() {
 	if len(classes) > 0 || len(otypes) > 0 {
 		srcDir := *outdir
 		if srcDir == "" {
-			srcDir, err = ioutil.TempDir(os.TempDir(), "gobind-")
+			srcDir, err = os.MkdirTemp(os.TempDir(), "gobind-")
 			if err != nil {
 				log.Fatal(err)
 			}

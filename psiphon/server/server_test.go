@@ -1054,7 +1054,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	serverConfig["RunPacketManipulator"] = runConfig.doPacketManipulation
 
-	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) && quic.GQUICEnabled() {
+	if protocol.TunnelProtocolUsesQUIC(runConfig.tunnelProtocol) &&
+		!runConfig.limitQUICVersions &&
+		quic.GQUICEnabled() {
+
 		// Enable legacy QUIC version support.
 		serverConfig["EnableGQUIC"] = true
 	}
@@ -2344,6 +2347,7 @@ func checkExpectedServerTunnelLogFields(
 
 	for _, name := range []string{
 		"host_id",
+		"tunnel_id",
 		"start_time",
 		"duration",
 		"session_id",

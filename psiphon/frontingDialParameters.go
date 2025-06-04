@@ -134,9 +134,9 @@ func makeFrontedMeekDialParameters(
 	//
 	// As a future enhancement, allow HTTP in certain cases (e.g. the in-proxy
 	// broker case), skip selecting TLS tactics and select HTTP tactics such as
-	// HTTPTransformerParameters.
+	// HTTPTransformerParameters; and allow QUIC and select QUIC tactics.
 
-	if frontedMeekDialParams.FrontingTransport == protocol.FRONTING_TRANSPORT_HTTP {
+	if frontedMeekDialParams.FrontingTransport != protocol.FRONTING_TRANSPORT_HTTPS {
 		return nil, errors.TraceNew("unsupported fronting transport")
 	}
 

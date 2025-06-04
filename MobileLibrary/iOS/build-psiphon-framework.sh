@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 
-# build-psiphon-framework.sh builds a PsiphonTunnel.xcframework bundle
-# to be used by the Objective-C tunnel-core users.
+# build-psiphon-framework.sh builds the PsiphonTunnel.xcframework.
 #
-# The build script performs the following tasks:
-# 1. Creates a new Go environment and installs (vendored) gomobile.
-# 2. Builds Objective-C tunnel-core library (Psi.xcframework) using `gomobile bind`.
-# 3. Copies Psi.xcframework into the PsiphonTunnel Xcode project.
-# 4. Builds PsiphonTunnel.framework for iOS (arm64) and simulators (x86_64 and arm64).
-# 5. Assembles the iOS and simulator PsiphonTunnel.framework packages
-#    into a single PsiphonTunnel.xcframework bundle.
-
+# Key steps:
+# 1. Initializes a temporary Go environment and installs (vendored) `gomobile`.
+# 2. Iteratively builds for different target groups (iOS/Simulator/Mac Catalyst):
+#    a. Generates `Psi.xcframework` (Go bindings) using `gomobile bind` for the current group.
+#    b. Copies this `Psi.xcframework` into the `PsiphonTunnel` Xcode project.
+#    c. Builds the `PsiphonTunnel.framework` for the platform(s) in the current group using `xcodebuild`.
+# 3. Assembles the generated `PsiphonTunnel.framework`s (for iOS, iOS Simulator, Mac Catalyst) into a single `PsiphonTunnel.xcframework`.
+# 4. Creates a zip archive of the final `PsiphonTunnel.xcframework`.
 
 set -e -u -x
 
@@ -81,40 +80,6 @@ if [[ $? != 0 ]]; then
   exit 1
 fi
 
-# Builds Psi.xcframework library for the given platform.
-# Psi.xcframework is the glue code between Go and Objective-C.
-#
-# - Parameter 1: `gomobile bind` -target option value
-# - Parameter 2: Variable name where gomobile output (Psi.xcframework) will be set to.
-function gomobile_build_for_platform() {
-
-  # Possible values are "ios" and "simulator"
-  local TARGETS=$1
-
-  echo "Build library for targets ${TARGETS}"
-
-  local GOBIND_OUT="${BUILD_DIR}/gobind-framework/Psi.xcframework"
-
-  # We're using a generated-code prefix to workaround https://github.com/golang/go/issues/18693
-  # CGO_CFLAGS_ALLOW is to workaround https://github.com/golang/go/issues/23742 in Go 1.9.4
-  CGO_CFLAGS_ALLOW="-fmodules|-fblocks" "${GOPATH}"/bin/gomobile bind -v -x \
-  -target "${TARGETS}" \
-  -iosversion "10.0" \
-  -prefix Go \
-  -tags="${BUILD_TAGS}" \
-  -ldflags="${LDFLAGS}" \
-  -o "${GOBIND_OUT}" github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi
-
-  rc=$?; if [[ $rc != 0 ]]; then
-    echo "FAILURE: gomobile bind failed".
-    exit $rc
-  fi
-
-
-  # Sets parameter $2 to value of GOBIND_OUT.
-  eval "$2=${GOBIND_OUT}"
-}
-
 #
 # Check Go version
 #
@@ -179,77 +144,95 @@ echo ""
 rm -rf "${BUILD_DIR}"
 
 
+# Builds the Psi.xcframework for a specific platform using gomobile.
+# This function encapsulates the gomobile build command.
+function gomobile_build_for_platform() {
+
+  local gomobile_flags_str=$1
+  local gobind_out="${BUILD_DIR}/gobind-framework/Psi.xcframework"
+
+  # We're using a generated-code prefix to workaround https://github.com/golang/go/issues/18693
+  # CGO_CFLAGS_ALLOW is to workaround https://github.com/golang/go/issues/23742 in Go 1.9.4
+
+  local gomobile_cmd=(
+    'CGO_CFLAGS_ALLOW="-fmodules|-fblocks" "${GOPATH}"/bin/gomobile bind -v -x'
+    '-prefix Go'
+    '-tags="${BUILD_TAGS}"'
+    '-ldflags="${LDFLAGS}"'
+    '-o "${gobind_out}"'
+  )
+  gomobile_cmd+=("${gomobile_flags_str}")
+
+  # Append positional arguments last
+  gomobile_cmd+=(
+    'github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi'
+  )
+
+  # Execute the gomobile command
+  eval "${gomobile_cmd[@]}"
+
+  # Copy gobind output Psi.xcframework to the TunnelCore Xcode project
+  rm -rf "${BASE_DIR}/PsiphonTunnel/PsiphonTunnel/Psi.xcframework"
+  cp -r "${gobind_out}" "${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
+
+  echo "${gobind_out}"
+}
+
+# Builds the project for a specific platform using xcodebuild.
+function xcodebuild_for_platform() {
+  local archive_name=$1
+  local other_flags_str=$2
+
+  # Build the xcodebuild command
+  local xcodebuild_cmd=(
+    'xcodebuild clean archive'
+    '-project "${UMBRELLA_FRAMEWORK_XCODE_PROJECT}"'
+    '-configuration "Release"'
+    '-scheme "PsiphonTunnel"'
+    '-archivePath "${BUILD_DIR}/${archive_name}"'
+    'CODE_SIGN_IDENTITY=""'
+    'CODE_SIGNING_REQUIRED="NO"'
+    'CODE_SIGN_ENTITLEMENTS=""'
+    'CODE_SIGNING_ALLOWED="NO"'
+    'STRIP_BITCODE_FROM_COPIED_FILES="NO"'
+    'BUILD_LIBRARY_FOR_DISTRIBUTION="YES"'
+    'ONLY_ACTIVE_ARCH="NO"'
+    'SKIP_INSTALL="NO"'
+    'PRODUCT_NAME="PsiphonTunnel"'
+  )
+
+  # Add the platform-specific flags
+  xcodebuild_cmd+=("${other_flags_str}")
+
+  # Execute xcodebuild command
+  eval "${xcodebuild_cmd[@]}"
+}
+
 #
-# Builds Psi.xcframework
-#
-IOS_PSI_FRAMEWORK=""
-gomobile_build_for_platform "ios" IOS_PSI_FRAMEWORK
-
-echo "$IOS_PSI_FRAMEWORK"
-
-#
-# Copies gobind output Psi.xcframework to the TunnelCore Xcode project
+# Build the PsiphonTunnel.framework for iOS, iOS Simulator, and Mac Catalyst.
 #
 
-rm -rf "${BASE_DIR}/PsiphonTunnel/PsiphonTunnel/Psi.xcframework"
-cp -r "${IOS_PSI_FRAMEWORK}" "${BASE_DIR}/PsiphonTunnel/PsiphonTunnel"
+gomobile_build_for_platform "-target 'ios,iossimulator' -iosversion '10.0'"
+xcodebuild_for_platform "ios.xcarchive" " -destination 'generic/platform=iOS' EXCLUDED_ARCHS='armv7'"  # Excludes 32-bit ARM: EXCLUDED_ARCHS="armv7"
+
+# While Network Extension doesn't work on a simulator, adding the simulator build
+# allows the framework users to build and run on simulators.
+xcodebuild_for_platform "iossimulator.xcarchive" "-sdk iphonesimulator EXCLUDED_ARCHS='i386'" # Excludes 32-bit Intel: EXCLUDED_ARCHS="i386"
+
+gomobile_build_for_platform "-target 'maccatalyst' -iosversion '13.1'"
+xcodebuild_for_platform "maccatalyst.xcarchive" "-destination 'generic/platform=macOS,variant=Mac Catalyst'"
 
 #
-# Build PsiphonTunnel framework for iOS.
-#
-
-IOS_ARCHIVE="${BUILD_DIR}/ios.xcarchive"
-
-xcodebuild clean archive \
--project "${UMBRELLA_FRAMEWORK_XCODE_PROJECT}" \
--scheme "PsiphonTunnel" \
--configuration "Release" \
--sdk iphoneos \
--archivePath "${IOS_ARCHIVE}" \
-CODE_SIGN_IDENTITY="" \
-CODE_SIGNING_REQUIRED="NO" \
-CODE_SIGN_ENTITLEMENTS="" \
-CODE_SIGNING_ALLOWED="NO" \
-STRIP_BITCODE_FROM_COPIED_FILES="NO" \
-BUILD_LIBRARY_FOR_DISTRIBUTION="YES" \
-ONLY_ACTIVE_ARCH="NO" \
-SKIP_INSTALL="NO" \
-EXCLUDED_ARCHS="armv7"
-
-
-# Build PsiphonTunnel framework for simulator.
-#
-# Note:
-# - Excludes 32-bit Intel: EXCLUDED_ARCHS="i386".
-
-SIMULATOR_ARCHIVE="${BUILD_DIR}/simulator.xcarchive"
-
-xcodebuild clean archive \
--project "${UMBRELLA_FRAMEWORK_XCODE_PROJECT}" \
--scheme "PsiphonTunnel" \
--configuration "Release" \
--sdk iphonesimulator \
--archivePath "${SIMULATOR_ARCHIVE}" \
-CODE_SIGN_IDENTITY="" \
-CODE_SIGNING_REQUIRED="NO" \
-CODE_SIGN_ENTITLEMENTS="" \
-CODE_SIGNING_ALLOWED="NO" \
-STRIP_BITCODE_FROM_COPIED_FILES="NO" \
-BUILD_LIBRARY_FOR_DISTRIBUTION="YES" \
-ONLY_ACTIVE_ARCH="NO" \
-SKIP_INSTALL="NO" \
-EXCLUDED_ARCHS="i386"
-
-#
-# Bundles the generated frameworks (for iOS and simulator) into a single PsiphonTunnel.xcframework
+# Bundles the generated frameworks into a single PsiphonTunnel.xcframework
 #
 xcodebuild -create-xcframework \
--framework "${IOS_ARCHIVE}/Products/Library/Frameworks/PsiphonTunnel.framework" \
--debug-symbols "${IOS_ARCHIVE}/dSYMs/PsiphonTunnel.framework.dSYM" \
--framework "${SIMULATOR_ARCHIVE}/Products/Library/Frameworks/PsiphonTunnel.framework" \
--debug-symbols "${SIMULATOR_ARCHIVE}/dSYMs/PsiphonTunnel.framework.dSYM" \
+-framework "${BUILD_DIR}/ios.xcarchive/Products/Library/Frameworks/PsiphonTunnel.framework" \
+-debug-symbols "${BUILD_DIR}/ios.xcarchive/dSYMs/PsiphonTunnel.framework.dSYM" \
+-framework "${BUILD_DIR}/iossimulator.xcarchive/Products/Library/Frameworks/PsiphonTunnel.framework" \
+-debug-symbols "${BUILD_DIR}/iossimulator.xcarchive/dSYMs/PsiphonTunnel.framework.dSYM" \
+-framework "${BUILD_DIR}/maccatalyst.xcarchive/Products/Library/Frameworks/PsiphonTunnel.framework" \
+-debug-symbols "${BUILD_DIR}/maccatalyst.xcarchive/dSYMs/PsiphonTunnel.framework.dSYM" \
 -output "${BUILD_DIR}/PsiphonTunnel.xcframework"
-
 
 # Jenkins loses symlinks from the framework directory, which results in a build
 # artifact that is invalid to use in an App Store app. Instead, we will zip the
