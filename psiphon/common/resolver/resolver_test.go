@@ -39,21 +39,21 @@ import (
 func TestMakeResolveParameters(t *testing.T) {
 	err := runTestMakeResolveParameters()
 	if err != nil {
-		t.Fatalf(errors.Trace(err).Error())
+		t.Fatal(errors.Trace(err).Error())
 	}
 }
 
 func TestResolver(t *testing.T) {
 	err := runTestResolver()
 	if err != nil {
-		t.Fatalf(errors.Trace(err).Error())
+		t.Fatal(errors.Trace(err).Error())
 	}
 }
 
 func TestPublicDNSServers(t *testing.T) {
 	IPs, metrics, err := runTestPublicDNSServers()
 	if err != nil {
-		t.Fatalf(errors.Trace(err).Error())
+		t.Fatal(errors.Trace(err).Error())
 	}
 	t.Logf("IPs: %v", IPs)
 	t.Logf("Metrics: %v", metrics)

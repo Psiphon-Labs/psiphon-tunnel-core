@@ -31,14 +31,14 @@ import (
 func TestProxyQualityState(t *testing.T) {
 	err := runTestProxyQualityState()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 
 func TestProxyQualityReporter(t *testing.T) {
 	err := runTestProxyQualityReporter()
 	if err != nil {
-		t.Errorf(errors.Trace(err).Error())
+		t.Error(errors.Trace(err).Error())
 	}
 }
 

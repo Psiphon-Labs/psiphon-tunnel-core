@@ -94,7 +94,7 @@ func TestFragmentor(t *testing.T) {
 		}
 		fragConn := NewConn(
 			NewDownstreamConfig(params.Get(), tunnelProtocol, nil),
-			func(message string) { t.Logf(message) },
+			func(message string) { t.Log(message) },
 			conn)
 		defer fragConn.Close()
 
@@ -138,7 +138,7 @@ func TestFragmentor(t *testing.T) {
 		}
 		fragConn := NewConn(
 			NewUpstreamConfig(params.Get(), tunnelProtocol, seed),
-			func(message string) { t.Logf(message) },
+			func(message string) { t.Log(message) },
 			conn)
 		defer fragConn.Close()
 

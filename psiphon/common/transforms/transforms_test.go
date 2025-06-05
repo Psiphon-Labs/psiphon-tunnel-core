@@ -31,7 +31,7 @@ import (
 func TestTransforms(t *testing.T) {
 	err := runTestTransforms()
 	if err != nil {
-		t.Fatalf(errors.Trace(err).Error())
+		t.Fatal(errors.Trace(err).Error())
 	}
 }
 

@@ -263,7 +263,7 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 	for i := 0; i < CONCURRENT_CLIENT_COUNT; i++ {
 		result := <-results
 		if result != nil {
-			t.Fatalf(result.Error())
+			t.Fatal(result.Error())
 		}
 	}
 
