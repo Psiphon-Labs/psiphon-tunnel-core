@@ -144,31 +144,29 @@ func newPortMapper(
 	return p, nil
 }
 
-var portmapperDependencyVersionCheck bool
-
 func init() {
 	expectedDependencyVersion := "v1.58.2"
 
-	// portmapper.Version is a temporary vendor patch, in the dependency, to
-	// accomodate GOPATH builds which cannot use debug.ReadBuildInfo, and go
-	// tests, before Go 1.24, which don't get dependency info in the returned
-	// BuildInfo.
-	//
-	// TODO: replace temporary patch with full fork of portmapper, and remove
-	// this temporary case, if not the entire dependency version check
-	// (see "TODO: fork" in cloneProbe).
-	portmapperDependencyVersionCheck = portmapper.Version == expectedDependencyVersion
-
 	buildInfo, ok := debug.ReadBuildInfo()
-	if !ok {
+
+	// In GOPATH builds, BuildInfo is not available; in `go test` runs,
+	// BuildInfo dependency information is not available. In these case, we
+	// skip the check and assume that contemporaneous go module build runs
+	// will catch a check failure.
+	if !ok ||
+		buildInfo.Main.Path == "" ||
+		buildInfo.Main.Path == "command-line-arguments" ||
+		strings.HasSuffix(buildInfo.Path, ".test") {
 		return
 	}
+
 	for _, dep := range buildInfo.Deps {
 		if dep.Path == "tailscale.com" && dep.Version == expectedDependencyVersion {
-			portmapperDependencyVersionCheck = true
 			return
 		}
 	}
+
+	panic("portmapper dependency version check failed")
 }
 
 // cloneProbe copies the port mapping service data gather by Client.Probe from
@@ -195,17 +193,14 @@ func (p *portMapper) cloneProbe(probe *PortMappingProbe) error {
 	// probe, so the probe is idle when cloned
 	// (see Proxy.networkDiscoveryMutex).
 	//
-	// An explicit dependency version pin check is made since potential logic
-	// changes in future versions of the dependency may break the above
+	// An explicit dependency version pin check is made above, since potential
+	// logic changes in future versions of the dependency may break the above
 	// assumptions while the reflect operation might still succeed.
 	//
 	// TODO: fork the dependency to add internal support for shared probe
 	// state, trim additional tailscale dependencies, use Psiphon's custom
-	// dialer, and remove globals (see clientmetric.Metrics below).
-
-	if !portmapperDependencyVersionCheck {
-		return errors.TraceNew("dependency version check failed")
-	}
+	// dialer, remove globals (see clientmetric.Metrics below), and remove
+	// the dependency version check.
 
 	src := reflect.ValueOf(probe.client).Elem()
 	dst := reflect.ValueOf(p.client).Elem()

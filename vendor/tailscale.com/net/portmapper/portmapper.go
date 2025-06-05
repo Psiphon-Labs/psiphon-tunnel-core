@@ -33,14 +33,6 @@ import (
 	"tailscale.com/util/clientmetric"
 )
 
-// [Psiphon]
-// Version is used to check this dependency version in GOPATH builds where
-// debug.ReadBuildInfo is not available, and go tests, before Go 1.24, which
-// don't get dependency info in the returned BuildInfo. This is currently a
-// temporary vendor patch which needs to be restored after any "go mod
-// vendor".
-const Version = "v1.58.2"
-
 // DebugKnobs contains debug configuration that can be provided when creating a
 // Client. The zero value is valid for use.
 type DebugKnobs struct {
