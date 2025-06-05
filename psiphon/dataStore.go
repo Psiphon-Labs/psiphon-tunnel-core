@@ -1817,9 +1817,9 @@ func IsCheckServerEntryTagsDue(config *Config) bool {
 		return false
 	}
 
-	// Whether the next check is due is based time elapsed since the time of
-	// the previous check ending, with the elapsed time set in tactics. The
-	// previous end time, rather the next due time, is stored, to allow
+	// Whether the next check is due is based on time elapsed since the time
+	// of the previous check ending, with the elapsed time set in tactics.
+	// The previous end time, rather the next due time, is stored, to allow
 	// changes to this tactic to have immediate effect.
 
 	p := config.GetParameters().Get()
@@ -1867,7 +1867,7 @@ func UpdateCheckServerEntryTagsEndTime(config *Config, checkCount int, pruneCoun
 	// the _previous_ check operation, don't mark the check as ended. This
 	// will result in the next status request performing another check. It's
 	// assumed that the ratio will decrease over the course of repeated
-	// checks as more server entries are pruned and randomly selection for
+	// checks as more server entries are pruned, and random selection for
 	// checking will include fewer and fewer invalid server entry tags.
 	//
 	// The rate of repeated checking is also limited by the status request
@@ -1950,7 +1950,7 @@ func GetCheckServerEntryTags(config *Config) ([]string, int, error) {
 		// valid. Inspecting replay would also require an additional JSON unmarshal of the
 		// DialParameters, in order to check the replay TTL.
 		//
-		// A potential future enhancement could be to add and check a new index that tracks the how
+		// A potential future enhancement could be to add and check a new index that tracks how
 		// recently a server entry connection got as far as completing the SSH handshake, which
 		// verifies the Psiphon server running at that server entry network address. This would
 		// exclude from prune checking all recently known-valid servers regardless of whether they
