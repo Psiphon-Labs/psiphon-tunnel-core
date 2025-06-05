@@ -1,8 +1,8 @@
 module github.com/Psiphon-Labs/psiphon-tunnel-core
 
-go 1.23.0
+go 1.24.0
 
-toolchain go1.23.7
+toolchain go1.24.3
 
 // The following replace is required only when the build tag
 // PSIPHON_ENABLE_REFRACTION_NETWORKING is specified.
