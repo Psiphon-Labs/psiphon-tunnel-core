@@ -406,12 +406,8 @@ func (f *FrontedMeekDialParameters) prepareDialConfigs(
 		ClientTunnelProtocol:     equivilentTunnelProtocol,
 		NetworkLatencyMultiplier: f.NetworkLatencyMultiplier,
 		AdditionalHeaders:        config.MeekAdditionalHeaders,
-		// TODO: Change hard-coded session key be something like FrontingProviderID + BrokerID.
-		// This is necessary once longer-term TLS caches are added.
-		// The meek dial address, based on the fronting dial address returned by
-		// parameters.FrontingSpecs.SelectParameters has couple of issues. For some providers there's
-		// only a couple or even just one possible value, in other cases there are millions of possible values
-		// and cached values won't be used as often as they ought to be.
+
+		// CustomTLSDial will use the resolved IP address as the session key.
 		TLSClientSessionCache: common.WrapUtlsClientSessionCache(tlsCache, common.TLS_NULL_SESSION_KEY),
 	}
 
