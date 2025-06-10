@@ -710,6 +710,13 @@ type Config struct {
 	// this behavior at their own discretion.
 	OmitEmptyPsk bool // [uTLS]
 
+	// [Psiphon]
+	// AlwaysIncludePSK controls whether the PreSharedKey extension is always
+	// included in the ClientHello if there is a cached session, even if not specified
+	// in the selected ClientHelloSpec. If there are no cached sessions, OmitEmptyPsk
+	// controls whether the extension is omitted.
+	AlwaysIncludePSK bool
+
 	// InsecureServerNameToVerify is used to verify the hostname on the returned
 	// certificates. It is intended to use with spoofed ServerName.
 	// If InsecureServerNameToVerify is "*", crypto/tls will do normal

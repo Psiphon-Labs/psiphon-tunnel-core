@@ -2626,6 +2626,25 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 		return err
 	}
 
+	// [Psiphon] SECTION BEGIN
+	// Add PSK extension if not specified in the spec.
+	if uconn.config.AlwaysIncludePSK {
+		supportsPSK := uconn.config.MaxVersion >= VersionTLS13
+		if supportsPSK {
+			hasPskExt := false
+			for _, ext := range p.Extensions {
+				if _, ok := ext.(PreSharedKeyExtension); ok {
+					hasPskExt = true
+				}
+			}
+			if !hasPskExt {
+				// pre_shared_key must be the last extension (RFC 8446, Section 4.2.11).
+				p.Extensions = append(p.Extensions, &UtlsPreSharedKeyExtension{})
+			}
+		}
+	}
+	// [Psiphon] SECTION END
+
 	privateHello, ech, err := uconn.makeClientHelloForApplyPreset()
 	if err != nil {
 		return err
