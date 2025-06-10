@@ -364,6 +364,7 @@ func CustomTLSDial(
 		ServerName:             tlsConfigServerName,
 		VerifyPeerCertificate:  tlsConfigVerifyPeerCertificate,
 		OmitEmptyPsk:           true,
+		AlwaysIncludePSK:       true,
 	}
 
 	var randomizedTLSProfileSeed *prng.Seed
