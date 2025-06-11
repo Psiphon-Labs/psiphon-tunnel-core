@@ -561,7 +561,7 @@ func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
 }
 
 // DoStatusRequest makes a "status" API request to the server, sending session stats.
-func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
+func (serverContext *ServerContext) DoStatusRequest() error {
 
 	params := serverContext.getBaseAPIParameters(
 		baseParametersNoDialParameters, false)
@@ -571,7 +571,7 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 
 	statusPayload, statusPayloadInfo, err := makeStatusRequestPayload(
 		serverContext.tunnel.config,
-		tunnel.dialParams.ServerEntry.IpAddress)
+		serverContext.tunnel.dialParams.ServerEntry.IpAddress)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -616,6 +616,10 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		return errors.Trace(err)
 	}
 
+	// Confirm the payload now that the server response is received. For
+	// persistentStats and transferStats, this clears the reported data as it
+	// is now delivered and doesn't need to be resent.
+
 	confirmStatusRequestPayload(statusPayloadInfo)
 
 	var statusResponse protocol.StatusResponse
@@ -624,8 +628,41 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 		return errors.Trace(err)
 	}
 
+	// Prune all server entries flagged by either the failed_tunnel mechanism
+	// or the prune check. Note that server entries that are too new, as
+	// determined by ServerEntryMinimumAgeForPruning, are not pruned, and
+	// this is reflected in pruneCount.
+
+	pruneCount := 0
 	for _, serverEntryTag := range statusResponse.InvalidServerEntryTags {
-		PruneServerEntry(serverContext.tunnel.config, serverEntryTag)
+		if PruneServerEntry(serverContext.tunnel.config, serverEntryTag) {
+			pruneCount++
+		}
+	}
+
+	if pruneCount > 0 {
+		NoticeInfo("Pruned server entries: %d", pruneCount)
+	}
+
+	if statusPayloadInfo.checkServerEntryTagCount > 0 {
+
+		// Schedule the next prune check, now that all pruning is complete. By
+		// design, if the process dies before the end of the prune loop, the
+		// previous due time will be retained.
+		//
+		// UpdateCheckServerEntryTagsEndTime may leave the next prune check
+		// due immediately based on the ratio of server entries checked and
+		// server entries pruned: if many checked server entries were invalid
+		// and pruned, check again and prune more.
+		//
+		// Limitation: the prune count may include failed_tunnel prunes which
+		// aren't in the check count; if this occurs, it will increase the
+		// ratio and make an immediate re-check more likely, which makes sense.
+
+		UpdateCheckServerEntryTagsEndTime(
+			serverContext.tunnel.config,
+			statusPayloadInfo.checkServerEntryTagCount,
+			pruneCount)
 	}
 
 	return nil
@@ -635,9 +672,10 @@ func (serverContext *ServerContext) DoStatusRequest(tunnel *Tunnel) error {
 // either "clear" or "put back" status request payload data depending
 // on whether or not the request succeeded.
 type statusRequestPayloadInfo struct {
-	serverId        string
-	transferStats   *transferstats.AccumulatedStats
-	persistentStats map[string][][]byte
+	serverId                 string
+	transferStats            *transferstats.AccumulatedStats
+	persistentStats          map[string][][]byte
+	checkServerEntryTagCount int
 }
 
 func makeStatusRequestPayload(
@@ -650,10 +688,26 @@ func makeStatusRequestPayload(
 	//
 	// TODO: pack and CBOR encode the status request payload.
 
+	// GetCheckServerEntryTags returns a randomly selected set of server entry
+	// tags to be checked for pruning, or an empty list if a check is not yet
+	// due.
+	//
+	// Both persistentStats and prune check data have a max payload size
+	// allowance, and the allowance for persistentStats is reduced by the
+	// size of the prune check data, if any.
+
+	checkServerEntryTags, tagsSize, err := GetCheckServerEntryTags(config)
+	if err != nil {
+		NoticeWarning(
+			"GetCheckServerEntryTags failed: %s", errors.Trace(err))
+		checkServerEntryTags = nil
+		// Proceed with persistentStats/transferStats only
+	}
+
 	transferStats := transferstats.TakeOutStatsForServer(serverId)
 	hostBytes := transferStats.GetStatsForStatusRequest()
 
-	persistentStats, err := TakeOutUnreportedPersistentStats(config)
+	persistentStats, statsSize, err := TakeOutUnreportedPersistentStats(config, tagsSize)
 	if err != nil {
 		NoticeWarning(
 			"TakeOutUnreportedPersistentStats failed: %s", errors.Trace(err))
@@ -661,13 +715,17 @@ func makeStatusRequestPayload(
 		// Proceed with transferStats only
 	}
 
-	if len(hostBytes) == 0 && len(persistentStats) == 0 {
+	if len(checkServerEntryTags) == 0 && len(hostBytes) == 0 && len(persistentStats) == 0 {
 		// There is no payload to send.
 		return nil, nil, nil
 	}
 
 	payloadInfo := &statusRequestPayloadInfo{
-		serverId, transferStats, persistentStats}
+		serverId,
+		transferStats,
+		persistentStats,
+		len(checkServerEntryTags),
+	}
 
 	payload := make(map[string]interface{})
 
@@ -692,6 +750,8 @@ func makeStatusRequestPayload(
 		payload[persistentStatPayloadNames[statType]] = jsonStats
 	}
 
+	payload["check_server_entry_tags"] = checkServerEntryTags
+
 	jsonPayload, err := json.Marshal(payload)
 	if err != nil {
 
@@ -700,6 +760,10 @@ func makeStatusRequestPayload(
 
 		return nil, nil, errors.Trace(err)
 	}
+
+	NoticeInfo(
+		"StatusRequestPayload: %d total bytes, %d stats bytes, %d tag bytes",
+		len(jsonPayload), statsSize, tagsSize)
 
 	return jsonPayload, payloadInfo, nil
 }
