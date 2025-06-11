@@ -759,9 +759,17 @@ func MakeDialParameters(
 		dialParams.ConjureAPIRegistration
 
 	if tlsClientSessionCache != nil && usingTLS {
-		sessionKey, err := serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
-		if err != nil {
-			return nil, errors.Trace(err)
+
+		var sessionKey string
+		if protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+			// UsesMeekHTTPS and UsesFrontedMeek
+			// Special case: the session key is the resolved IP address of the CDN edge at dial time.
+			sessionKey = common.TLS_NULL_SESSION_KEY
+		} else {
+			sessionKey, err = serverEntry.GetTLSSessionCacheKeyAddress(dialParams.TunnelProtocol)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
 		}
 
 		dialParams.tlsClientSessionCache = common.WrapUtlsClientSessionCache(tlsClientSessionCache, sessionKey)

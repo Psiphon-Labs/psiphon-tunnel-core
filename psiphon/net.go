@@ -429,11 +429,12 @@ func makeFrontedHTTPClient(
 	useDeviceBinder,
 	skipVerify,
 	disableSystemRootCAs,
-	payloadSecure bool) (*http.Client, func() common.APIParameters, error) {
+	payloadSecure bool,
+	tlsCache utls.ClientSessionCache) (*http.Client, func() common.APIParameters, error) {
 
 	frontedHTTPClient, err := newFrontedHTTPClientInstance(
 		config, tunnel, frontingSpecs, selectedFrontingProviderID,
-		useDeviceBinder, skipVerify, disableSystemRootCAs, payloadSecure)
+		useDeviceBinder, skipVerify, disableSystemRootCAs, payloadSecure, tlsCache)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
@@ -487,6 +488,7 @@ func MakeUntunneledHTTPClient(
 	ctx context.Context,
 	config *Config,
 	untunneledDialConfig *DialConfig,
+	tlsCache utls.ClientSessionCache,
 	skipVerify bool,
 	disableSystemRootCAs bool,
 	payloadSecure bool,
@@ -511,7 +513,9 @@ func MakeUntunneledHTTPClient(
 			frontingUseDeviceBinder,
 			false,
 			disableSystemRootCAs,
-			payloadSecure)
+			payloadSecure,
+			tlsCache,
+		)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
@@ -528,7 +532,7 @@ func MakeUntunneledHTTPClient(
 		SkipVerify:                    skipVerify,
 		DisableSystemRootCAs:          disableSystemRootCAs,
 		TrustedCACertificatesFilename: untunneledDialConfig.TrustedCACertificatesFilename,
-		ClientSessionCache:            utls.NewLRUClientSessionCache(0),
+		ClientSessionCache:            tlsCache,
 	}
 
 	tlsDialer := NewCustomTLSDialer(tlsConfig)
@@ -557,6 +561,7 @@ func MakeTunneledHTTPClient(
 	ctx context.Context,
 	config *Config,
 	tunnel *Tunnel,
+	tlsCache utls.ClientSessionCache,
 	skipVerify,
 	disableSystemRootCAs,
 	payloadSecure bool,
@@ -578,7 +583,8 @@ func MakeTunneledHTTPClient(
 			false,
 			false,
 			disableSystemRootCAs,
-			payloadSecure)
+			payloadSecure,
+			tlsCache)
 		if err != nil {
 			return nil, nil, errors.Trace(err)
 		}
@@ -627,6 +633,7 @@ func MakeDownloadHTTPClient(
 	config *Config,
 	tunnel *Tunnel,
 	untunneledDialConfig *DialConfig,
+	tlsCache utls.ClientSessionCache,
 	skipVerify,
 	disableSystemRootCAs,
 	payloadSecure bool,
@@ -646,6 +653,7 @@ func MakeDownloadHTTPClient(
 			ctx,
 			config,
 			tunnel,
+			tlsCache,
 			skipVerify || disableSystemRootCAs,
 			disableSystemRootCAs,
 			payloadSecure,
@@ -667,6 +675,7 @@ func MakeDownloadHTTPClient(
 			ctx,
 			config,
 			dialConfig,
+			tlsCache,
 			skipVerify,
 			disableSystemRootCAs,
 			payloadSecure,

@@ -93,7 +93,8 @@ func makeFrontedMeekDialParameters(
 	useDeviceBinder,
 	skipVerify,
 	disableSystemRootCAs,
-	payloadSecure bool) (*FrontedMeekDialParameters, error) {
+	payloadSecure bool,
+	tlsCache utls.ClientSessionCache) (*FrontedMeekDialParameters, error) {
 
 	// This function duplicates some code from MakeDialParameters. To simplify
 	// the logic, the Replay<Component> tactic flags for individual dial
@@ -266,7 +267,7 @@ func makeFrontedMeekDialParameters(
 
 	err = frontedMeekDialParams.prepareDialConfigs(
 		config, p, tunnel, dialCustomHeaders, useDeviceBinder, skipVerify,
-		disableSystemRootCAs, payloadSecure)
+		disableSystemRootCAs, payloadSecure, tlsCache)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -283,7 +284,8 @@ func (f *FrontedMeekDialParameters) prepareDialConfigs(
 	useDeviceBinder,
 	skipVerify,
 	disableSystemRootCAs,
-	payloadSecure bool) error {
+	payloadSecure bool,
+	tlsCache utls.ClientSessionCache) error {
 
 	if !payloadSecure && (skipVerify || disableSystemRootCAs) {
 		return errors.TraceNew("cannot skip certificate verification if payload insecure")
@@ -404,13 +406,9 @@ func (f *FrontedMeekDialParameters) prepareDialConfigs(
 		ClientTunnelProtocol:     equivilentTunnelProtocol,
 		NetworkLatencyMultiplier: f.NetworkLatencyMultiplier,
 		AdditionalHeaders:        config.MeekAdditionalHeaders,
-		// TODO: Change hard-coded session key be something like FrontingProviderID + BrokerID.
-		// This is necessary once longer-term TLS caches are added.
-		// The meek dial address, based on the fronting dial address returned by
-		// parameters.FrontingSpecs.SelectParameters has couple of issues. For some providers there's
-		// only a couple or even just one possible value, in other cases there are millions of possible values
-		// and cached values won't be used as often as they ought to be.
-		TLSClientSessionCache: common.WrapUtlsClientSessionCache(utls.NewLRUClientSessionCache(0), f.DialAddress),
+
+		// CustomTLSDial will use the resolved IP address as the session key.
+		TLSClientSessionCache: common.WrapUtlsClientSessionCache(tlsCache, common.TLS_NULL_SESSION_KEY),
 	}
 
 	if !skipVerify {

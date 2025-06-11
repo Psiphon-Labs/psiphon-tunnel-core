@@ -244,6 +244,12 @@ func CustomTLSDial(
 		return nil, errors.Trace(err)
 	}
 
+	// If the hard-coded session key is not set (e.g. FRONTED-MEEK-OSSH), SetSessionKey must be called.
+	// The session key is set to the resolved IP address.
+	if wrappedCache, ok := config.ClientSessionCache.(*common.UtlsClientSessionCacheWrapper); ok {
+		wrappedCache.SetSessionKey(underlyingConn.RemoteAddr().String())
+	}
+
 	if config.FragmentClientHello {
 		underlyingConn = NewTLSFragmentorConn(underlyingConn)
 	}
@@ -358,6 +364,7 @@ func CustomTLSDial(
 		ServerName:             tlsConfigServerName,
 		VerifyPeerCertificate:  tlsConfigVerifyPeerCertificate,
 		OmitEmptyPsk:           true,
+		AlwaysIncludePSK:       true,
 	}
 
 	var randomizedTLSProfileSeed *prng.Seed

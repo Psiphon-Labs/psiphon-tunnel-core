@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	utls "github.com/Psiphon-Labs/utls"
 	"github.com/cespare/xxhash"
 )
 
@@ -70,6 +71,8 @@ type InproxyBrokerClientManager struct {
 	config  *Config
 	isProxy bool
 
+	tlsCache utls.ClientSessionCache
+
 	mutex                sync.Mutex
 	brokerSelectCount    int
 	networkID            string
@@ -81,11 +84,12 @@ type InproxyBrokerClientManager struct {
 // managed InproxyBrokerClientInstance is initialized when used for a round
 // trip.
 func NewInproxyBrokerClientManager(
-	config *Config, isProxy bool) *InproxyBrokerClientManager {
+	config *Config, isProxy bool, tlsCache utls.ClientSessionCache) *InproxyBrokerClientManager {
 
 	b := &InproxyBrokerClientManager{
-		config:  config,
-		isProxy: isProxy,
+		config:   config,
+		isProxy:  isProxy,
+		tlsCache: tlsCache,
 	}
 
 	// b.brokerClientInstance is initialized on demand, when getBrokerClient
@@ -498,13 +502,13 @@ func NewInproxyBrokerClientInstance(
 	}
 
 	if !isReplay {
-		brokerDialParams, err = MakeInproxyBrokerDialParameters(config, p, networkID, brokerSpec)
+		brokerDialParams, err = MakeInproxyBrokerDialParameters(config, p, networkID, brokerSpec, brokerClientManager.tlsCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 	} else {
 		brokerDialParams.brokerSpec = brokerSpec
-		err := brokerDialParams.prepareDialConfigs(config, p, true)
+		err := brokerDialParams.prepareDialConfigs(config, p, true, brokerClientManager.tlsCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -1161,7 +1165,8 @@ func MakeInproxyBrokerDialParameters(
 	config *Config,
 	p parameters.ParametersAccessor,
 	networkID string,
-	brokerSpec *parameters.InproxyBrokerSpec) (*InproxyBrokerDialParameters, error) {
+	brokerSpec *parameters.InproxyBrokerSpec,
+	tlsCache utls.ClientSessionCache) (*InproxyBrokerDialParameters, error) {
 
 	if config.UseUpstreamProxy() {
 		return nil, errors.TraceNew("upstream proxy unsupported")
@@ -1196,7 +1201,9 @@ func MakeInproxyBrokerDialParameters(
 		true,
 		skipVerify,
 		config.DisableSystemRootCAs,
-		payloadSecure)
+		payloadSecure,
+		tlsCache,
+	)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1206,7 +1213,8 @@ func MakeInproxyBrokerDialParameters(
 	err = brokerDialParams.prepareDialConfigs(
 		config,
 		p,
-		false)
+		false,
+		tlsCache)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1218,7 +1226,8 @@ func MakeInproxyBrokerDialParameters(
 func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 	config *Config,
 	p parameters.ParametersAccessor,
-	isReplay bool) error {
+	isReplay bool,
+	tlsCache utls.ClientSessionCache) error {
 
 	brokerDialParams.isReplay = isReplay
 
@@ -1237,7 +1246,7 @@ func (brokerDialParams *InproxyBrokerDialParameters) prepareDialConfigs(
 
 		err := brokerDialParams.FrontedHTTPDialParameters.prepareDialConfigs(
 			config, p, nil, nil, true, skipVerify,
-			config.DisableSystemRootCAs, payloadSecure)
+			config.DisableSystemRootCAs, payloadSecure, tlsCache)
 		if err != nil {
 			return errors.Trace(err)
 		}

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 func TestStandAloneGetTactics(t *testing.T) {
@@ -108,7 +109,9 @@ func TestStandAloneGetTactics(t *testing.T) {
 		UpstreamProxyURL: config.UpstreamProxyURL,
 	}
 
-	err = FetchCommonRemoteServerList(ctx, config, 0, nil, untunneledDialConfig)
+	tlsCache := utls.NewLRUClientSessionCache(0)
+
+	err = FetchCommonRemoteServerList(ctx, config, 0, nil, untunneledDialConfig, tlsCache)
 	if err != nil {
 		t.Fatalf("error fetching remote server list: %s", err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	utls "github.com/Psiphon-Labs/utls"
 	"github.com/cespare/xxhash"
 )
 
@@ -44,6 +45,7 @@ func newFrontedHTTPClientInstance(
 	skipVerify,
 	disableSystemRootCAs,
 	payloadSecure bool,
+	tlsCache utls.ClientSessionCache,
 ) (*frontedHTTPClientInstance, error) {
 
 	if len(frontingSpecs) == 0 {
@@ -127,7 +129,8 @@ func newFrontedHTTPClientInstance(
 			useDeviceBinder,
 			skipVerify,
 			disableSystemRootCAs,
-			payloadSecure)
+			payloadSecure,
+			tlsCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -140,7 +143,8 @@ func newFrontedHTTPClientInstance(
 			useDeviceBinder,
 			skipVerify,
 			disableSystemRootCAs,
-			payloadSecure)
+			payloadSecure,
+			tlsCache)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -362,7 +366,8 @@ func makeFrontedHTTPDialParameters(
 	useDeviceBinder,
 	skipVerify,
 	disableSystemRootCAs,
-	payloadSecure bool) (*frontedHTTPDialParameters, error) {
+	payloadSecure bool,
+	tlsCache utls.ClientSessionCache) (*frontedHTTPDialParameters, error) {
 
 	currentTimestamp := time.Now()
 
@@ -382,6 +387,7 @@ func makeFrontedHTTPDialParameters(
 		skipVerify,
 		disableSystemRootCAs,
 		payloadSecure,
+		tlsCache,
 	)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -397,7 +403,8 @@ func makeFrontedHTTPDialParameters(
 		skipVerify,
 		disableSystemRootCAs,
 		useDeviceBinder,
-		payloadSecure)
+		payloadSecure,
+		tlsCache)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -414,7 +421,8 @@ func (dialParams *frontedHTTPDialParameters) prepareDialConfigs(
 	useDeviceBinder,
 	skipVerify,
 	disableSystemRootCAs,
-	payloadSecure bool) error {
+	payloadSecure bool,
+	tlsCache utls.ClientSessionCache) error {
 
 	dialParams.isReplay = isReplay
 
@@ -424,7 +432,7 @@ func (dialParams *frontedHTTPDialParameters) prepareDialConfigs(
 
 		err := dialParams.FrontedMeekDialParameters.prepareDialConfigs(
 			config, p, tunnel, nil, useDeviceBinder, skipVerify,
-			disableSystemRootCAs, payloadSecure)
+			disableSystemRootCAs, payloadSecure, tlsCache)
 		if err != nil {
 			return errors.Trace(err)
 		}
