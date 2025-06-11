@@ -72,6 +72,17 @@ func RunServices(configJSON []byte) (retErr error) {
 
 	loggingInitialized = true
 
+	err = addHostConfig(config)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer func() {
+		err := removeHostConfig(config)
+		if err != nil {
+			log.WithTraceFields(LogFields{"error": retErr}).Error("removeHostConfig failed")
+		}
+	}()
+
 	support, err := NewSupportServices(config)
 	if err != nil {
 		return errors.Trace(err)
