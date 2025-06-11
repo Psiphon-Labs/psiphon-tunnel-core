@@ -4,7 +4,7 @@ import (
 	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/elliptic"
+	"crypto/ecdh"
 	_ "crypto/sha256" // Linking sha256.
 	_ "crypto/sha512" // Linking sha512.
 	"fmt"
@@ -13,9 +13,9 @@ import (
 
 	"github.com/cloudflare/circl/dh/x25519"
 	"github.com/cloudflare/circl/dh/x448"
-	"github.com/cloudflare/circl/ecc/p384"
 	"github.com/cloudflare/circl/kem"
 	"github.com/cloudflare/circl/kem/kyber/kyber768"
+	"github.com/cloudflare/circl/kem/xwing"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/hkdf"
 )
@@ -39,6 +39,8 @@ const (
 	// KEM_X25519_KYBER768_DRAFT00 is a hybrid KEM built on DHKEM(X25519, HKDF-SHA256)
 	// and Kyber768Draft00
 	KEM_X25519_KYBER768_DRAFT00 KEM = 0x30
+	// KEM_XWING is a hybrid KEM using X25519 and ML-KEM-768.
+	KEM_XWING KEM = 0x647a
 )
 
 // IsValid returns true if the KEM identifier is supported by the HPKE package.
@@ -49,7 +51,8 @@ func (k KEM) IsValid() bool {
 		KEM_P521_HKDF_SHA512,
 		KEM_X25519_HKDF_SHA256,
 		KEM_X448_HKDF_SHA512,
-		KEM_X25519_KYBER768_DRAFT00:
+		KEM_X25519_KYBER768_DRAFT00,
+		KEM_XWING:
 		return true
 	default:
 		return false
@@ -58,7 +61,7 @@ func (k KEM) IsValid() bool {
 
 // Scheme returns an instance of a KEM that supports authentication. Panics if
 // the KEM identifier is invalid.
-func (k KEM) Scheme() kem.AuthScheme {
+func (k KEM) Scheme() kem.Scheme {
 	switch k {
 	case KEM_P256_HKDF_SHA256:
 		return dhkemp256hkdfsha256
@@ -72,6 +75,8 @@ func (k KEM) Scheme() kem.AuthScheme {
 		return dhkemx448hkdfsha512
 	case KEM_X25519_KYBER768_DRAFT00:
 		return hybridkemX25519Kyber768
+	case KEM_XWING:
+		return kemXwing
 	default:
 		panic(ErrInvalidKEM)
 	}
@@ -237,22 +242,23 @@ var (
 	dhkemp256hkdfsha256, dhkemp384hkdfsha384, dhkemp521hkdfsha512 shortKEM
 	dhkemx25519hkdfsha256, dhkemx448hkdfsha512                    xKEM
 	hybridkemX25519Kyber768                                       hybridKEM
+	kemXwing                                                      genericNoAuthKEM
 )
 
 func init() {
-	dhkemp256hkdfsha256.Curve = elliptic.P256()
+	dhkemp256hkdfsha256.Curve = ecdh.P256()
 	dhkemp256hkdfsha256.dhKemBase.id = KEM_P256_HKDF_SHA256
 	dhkemp256hkdfsha256.dhKemBase.name = "HPKE_KEM_P256_HKDF_SHA256"
 	dhkemp256hkdfsha256.dhKemBase.Hash = crypto.SHA256
 	dhkemp256hkdfsha256.dhKemBase.dhKEM = dhkemp256hkdfsha256
 
-	dhkemp384hkdfsha384.Curve = p384.P384()
+	dhkemp384hkdfsha384.Curve = ecdh.P384()
 	dhkemp384hkdfsha384.dhKemBase.id = KEM_P384_HKDF_SHA384
 	dhkemp384hkdfsha384.dhKemBase.name = "HPKE_KEM_P384_HKDF_SHA384"
 	dhkemp384hkdfsha384.dhKemBase.Hash = crypto.SHA384
 	dhkemp384hkdfsha384.dhKemBase.dhKEM = dhkemp384hkdfsha384
 
-	dhkemp521hkdfsha512.Curve = elliptic.P521()
+	dhkemp521hkdfsha512.Curve = ecdh.P521()
 	dhkemp521hkdfsha512.dhKemBase.id = KEM_P521_HKDF_SHA512
 	dhkemp521hkdfsha512.dhKemBase.name = "HPKE_KEM_P521_HKDF_SHA512"
 	dhkemp521hkdfsha512.dhKemBase.Hash = crypto.SHA512
@@ -275,4 +281,7 @@ func init() {
 	hybridkemX25519Kyber768.kemBase.Hash = crypto.SHA256
 	hybridkemX25519Kyber768.kemA = dhkemx25519hkdfsha256
 	hybridkemX25519Kyber768.kemB = kyber768.Scheme()
+
+	kemXwing.Scheme = xwing.Scheme()
+	kemXwing.name = "HPKE_KEM_XWING"
 }

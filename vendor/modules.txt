@@ -96,17 +96,17 @@ github.com/cespare/xxhash
 # github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 ## explicit
 github.com/cheekybits/genny/generic
-# github.com/cloudflare/circl v1.5.0
+# github.com/cloudflare/circl v1.6.1
 ## explicit; go 1.22.0
 github.com/cloudflare/circl/dh/x25519
 github.com/cloudflare/circl/dh/x448
-github.com/cloudflare/circl/ecc/p384
 github.com/cloudflare/circl/hpke
 github.com/cloudflare/circl/internal/conv
 github.com/cloudflare/circl/internal/sha3
 github.com/cloudflare/circl/kem
 github.com/cloudflare/circl/kem/kyber/kyber768
-github.com/cloudflare/circl/math
+github.com/cloudflare/circl/kem/mlkem/mlkem768
+github.com/cloudflare/circl/kem/xwing
 github.com/cloudflare/circl/math/fp25519
 github.com/cloudflare/circl/math/fp448
 github.com/cloudflare/circl/pke/kyber/internal/common
