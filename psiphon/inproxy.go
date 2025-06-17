@@ -1040,6 +1040,13 @@ func (b *InproxyBrokerClientInstance) BrokerClientRoundTripperFailed(roundTrippe
 		}
 	}
 
+	// Remove the TLS session cache entry for the broker's fronting dial address, if present.
+	// This ensures that the next round trip establishes a new TLS session, avoiding potential issues
+	// caused by session resumption fingerprint that may have contributed to the round tripper failure.
+	if hardcodedCache := b.brokerDialParams.FrontedHTTPDialParameters.meekConfig.TLSClientSessionCache; hardcodedCache != nil {
+		hardcodedCache.RemoveCacheEntry()
+	}
+
 	// Invoke resetBrokerClientOnRoundTripperFailed to signal the
 	// InproxyBrokerClientManager to create a new
 	// InproxyBrokerClientInstance, with new dial parameters and a new round
