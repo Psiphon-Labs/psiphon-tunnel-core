@@ -758,6 +758,7 @@ func MakeDialParameters(
 		protocol.TunnelProtocolUsesTLSOSSH(dialParams.TunnelProtocol) ||
 		dialParams.ConjureAPIRegistration
 
+	// Note that ConjureAPIRegistartion is not wired to use the TLS session cache.
 	if tlsClientSessionCache != nil && usingTLS {
 
 		var sessionKey string
