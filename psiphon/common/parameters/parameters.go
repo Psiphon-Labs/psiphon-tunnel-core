@@ -510,6 +510,13 @@ const (
 	NetworkIDCacheTTL                                  = "NetworkIDCacheTTL"
 	ServerDNSResolverCacheMaxSize                      = "ServerDNSResolverCacheMaxSize"
 	ServerDNSResolverCacheTTL                          = "ServerDNSResolverCacheTTL"
+	CheckServerEntryTagsEnabled                        = "CheckServerEntryTagsEnabled"
+	CheckServerEntryTagsPeriod                         = "CheckServerEntryTagsPeriod"
+	CheckServerEntryTagsRepeatRatio                    = "CheckServerEntryTagsRepeatRatio"
+	CheckServerEntryTagsRepeatMinimum                  = "CheckServerEntryTagsRepeatMinimum"
+	CheckServerEntryTagsMaxSendBytes                   = "CheckServerEntryTagsMaxSendBytes"
+	CheckServerEntryTagsMaxWorkTime                    = "CheckServerEntryTagsMaxWorkTime"
+	ServerEntryPruneDialPortNumberZero                 = "ServerEntryPruneDialPortNumberZero"
 
 	// Retired parameters
 
@@ -1091,6 +1098,14 @@ var defaultParameters = map[string]struct {
 
 	ServerDNSResolverCacheMaxSize: {value: 32, minimum: 0, flags: serverSideOnly},
 	ServerDNSResolverCacheTTL:     {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+
+	CheckServerEntryTagsEnabled:        {value: true},
+	CheckServerEntryTagsPeriod:         {value: 90 * 24 * time.Hour, minimum: time.Duration(0)},
+	CheckServerEntryTagsRepeatRatio:    {value: 0.10, minimum: 0.0},
+	CheckServerEntryTagsRepeatMinimum:  {value: 1, minimum: 0},
+	CheckServerEntryTagsMaxSendBytes:   {value: 65536, minimum: 1},
+	CheckServerEntryTagsMaxWorkTime:    {value: 60 * time.Second, minimum: time.Duration(0)},
+	ServerEntryPruneDialPortNumberZero: {value: true},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used
