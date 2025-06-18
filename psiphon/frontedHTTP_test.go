@@ -31,6 +31,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	utls "github.com/Psiphon-Labs/utls"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -123,13 +124,15 @@ func TestFrontedHTTPClientInstance(t *testing.T) {
 
 	// Make fronted HTTP client instance
 
+	tlsCache := utls.NewLRUClientSessionCache(0)
+
 	// TODO: test that replay is disabled when there is a tunnel
 	var tunnel *Tunnel = nil
 	useDeviceBinder := true
 	skipVerify := false
 	payloadSecure := true
 	client, err := newFrontedHTTPClientInstance(
-		config, tunnel, frontingSpecs, nil, useDeviceBinder, skipVerify, config.DisableSystemRootCAs, payloadSecure)
+		config, tunnel, frontingSpecs, nil, useDeviceBinder, skipVerify, config.DisableSystemRootCAs, payloadSecure, tlsCache)
 	if err != nil {
 		t.Fatalf("newFrontedHTTPClientInstance failed: %s", err)
 	}
@@ -140,7 +143,7 @@ func TestFrontedHTTPClientInstance(t *testing.T) {
 	prevClient := client
 
 	client, err = newFrontedHTTPClientInstance(
-		config, tunnel, frontingSpecs, nil, useDeviceBinder, skipVerify, config.DisableSystemRootCAs, payloadSecure)
+		config, tunnel, frontingSpecs, nil, useDeviceBinder, skipVerify, config.DisableSystemRootCAs, payloadSecure, tlsCache)
 	if err != nil {
 		t.Fatalf("newFrontedHTTPClientInstance failed: %s", err)
 	}
@@ -161,7 +164,7 @@ func TestFrontedHTTPClientInstance(t *testing.T) {
 
 	client, err = newFrontedHTTPClientInstance(
 		config, tunnel, frontingSpecs, nil, useDeviceBinder, skipVerify,
-		config.DisableSystemRootCAs, payloadSecure)
+		config.DisableSystemRootCAs, payloadSecure, tlsCache)
 	if err != nil {
 		t.Fatalf("newFrontedHTTPClientInstance failed: %s", err)
 	}

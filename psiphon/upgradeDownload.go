@@ -28,6 +28,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // DownloadUpgrade performs a resumable download of client upgrade files.
@@ -61,7 +62,8 @@ func DownloadUpgrade(
 	attempt int,
 	handshakeVersion string,
 	tunnel *Tunnel,
-	untunneledDialConfig *DialConfig) error {
+	untunneledDialConfig *DialConfig,
+	tlsCache utls.ClientSessionCache) error {
 
 	// Note: this downloader doesn't use ETags since many client binaries, with
 	// different embedded values, exist for a single version.
@@ -94,6 +96,7 @@ func DownloadUpgrade(
 		config,
 		tunnel,
 		untunneledDialConfig,
+		tlsCache,
 		downloadURL.SkipVerify,
 		config.DisableSystemRootCAs,
 		payloadSecure,

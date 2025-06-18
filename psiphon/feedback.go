@@ -231,6 +231,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			feedbackUploadCtx,
 			config,
 			dialConfig,
+			nil,
 			uploadURL.SkipVerify,
 			config.DisableSystemRootCAs,
 			payloadSecure,
