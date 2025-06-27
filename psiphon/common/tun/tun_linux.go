@@ -23,13 +23,14 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/tailscale/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -157,35 +158,68 @@ func (device *Device) writeTunPacket(packet []byte) error {
 	return nil
 }
 
+// natConntrackFilter is a netlink filter for NATed flows. We determine if a flow
+// is NATed by checking if the original source IP and port are equal to the returned
+// destination IP and port. This meechanism is not perfect. Ideally, we would be able
+// to filter specifically for SNATed flows, but the netlink library does not expose
+// enough information to make that determination with certainty. For example, DNAT,
+// port-only SNAT, and full-cone/symmetric/port-range NAT flows may also match here.
+type natConntrackFilter struct {
+	*netlink.ConntrackFilter
+}
+
+// MatchConntrackFlow implements the netlink.CustomConntrackFilter interface.
+func (f *natConntrackFilter) MatchConntrackFlow(flow *netlink.ConntrackFlow) bool {
+	isNATed := !flow.Forward.SrcIP.Equal(flow.Reverse.DstIP) ||
+		flow.Forward.SrcPort != flow.Reverse.DstPort
+
+	if !isNATed {
+		return false
+	}
+
+	// Still apply the original filters.
+	return f.ConntrackFilter.MatchConntrackFlow(flow)
+}
+
 func resetNATTables(
 	config *ServerConfig,
 	IPAddress net.IP) error {
-
-	// Uses the "conntrack" command, which is often not installed by default.
-
 	// conntrack --delete -src-nat --orig-src <address> will clear NAT tables of existing
 	// connections, making it less likely that traffic for a previous client using the
 	// specified address will be forwarded to a new client using this address. This is in
 	// the already unlikely event that there's still in-flight traffic when the address is
 	// recycled.
 
-	err := common.RunNetworkConfigCommand(
-		config.Logger,
-		config.SudoNetworkConfigCommands,
-		"conntrack",
-		"--delete",
-		"--src-nat",
-		"--orig-src",
-		IPAddress.String())
+	// Despite the limitations described for natConntrackFilter, between knowing it has
+	// been NATed at all, and matching the original source IP, this should be sufficient.
+	var family netlink.InetFamily
+	if IPAddress.To4() != nil {
+		family = unix.AF_INET
+	} else if IPAddress.To16() != nil {
+		family = unix.AF_INET6
+	} else {
+		return errors.TraceNew("invalid IP address family")
+	}
+
+	filter := &natConntrackFilter{}
+	_ = filter.AddIP(netlink.ConntrackOrigSrcIP, IPAddress)
+
+	_, err := netlink.ConntrackDeleteFilter(netlink.ConntrackTable, family, filter)
 	if err != nil {
-
-		// conntrack exits with this error message when there are no flows
-		// to delete, which is not a failure condition.
-		if strings.Contains(err.Error(), "0 flow entries have been deleted") {
-			return nil
-		}
-
 		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+func setSysctl(key, value string) error {
+	err := os.WriteFile(
+		filepath.Join("/proc/sys", strings.ReplaceAll(key, ".", "/")),
+		[]byte(value),
+		0o644,
+	)
+	if err != nil {
+		return errors.Tracef("failed to write sysctl %s=%s: %w", key, value, err)
 	}
 
 	return nil
@@ -197,29 +231,43 @@ func configureServerInterface(
 
 	// Set tun device network addresses and MTU
 
-	IPv4Address, IPv4Netmask, err := splitIPMask(serverIPv4AddressCIDR)
+	link, err := netlink.LinkByName(tunDeviceName)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.Tracef("failed to get interface %s: %w", tunDeviceName, err)
 	}
 
-	err = common.RunNetworkConfigCommand(
-		config.Logger,
-		config.SudoNetworkConfigCommands,
-		"ifconfig",
-		tunDeviceName,
-		IPv4Address, "netmask", IPv4Netmask,
-		"mtu", strconv.Itoa(getMTU(config.MTU)),
-		"up")
+	_, ipv4Net, err := net.ParseCIDR(serverIPv4AddressCIDR)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.Tracef("failed to parse server IPv4 address: %s: %w", serverIPv4AddressCIDR, err)
 	}
 
-	err = common.RunNetworkConfigCommand(
-		config.Logger,
-		config.SudoNetworkConfigCommands,
-		"ifconfig",
-		tunDeviceName,
-		"add", serverIPv6AddressCIDR)
+	ipv4Addr := &netlink.Addr{IPNet: ipv4Net}
+	err = netlink.AddrAdd(link, ipv4Addr)
+	if err != nil {
+		return errors.Tracef("failed to add IPv4 address to interface: %s: %w", ipv4Net.String(), err)
+	}
+
+	err = netlink.LinkSetMTU(link, getMTU(config.MTU))
+	if err != nil {
+		return errors.Tracef("failed to set interface MTU: %d: %w", config.MTU, err)
+	}
+
+	err = netlink.LinkSetUp(link)
+	if err != nil {
+		return errors.Tracef("failed to set interface up: %w", err)
+	}
+
+	_, ipv6Net, err := net.ParseCIDR(serverIPv6AddressCIDR)
+	if err != nil {
+		err = errors.Tracef("failed to parse server IPv6 address: %s: %w", serverIPv4AddressCIDR, err)
+	} else {
+		ipv6Addr := &netlink.Addr{IPNet: ipv6Net}
+		err = netlink.AddrAdd(link, ipv6Addr)
+		if err != nil {
+			err = errors.Tracef("failed to add IPv6 address to interface: %s: %w", ipv6Net.String(), err)
+		}
+	}
+
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
 			config.Logger.WithTraceFields(
@@ -240,20 +288,12 @@ func configureServerInterface(
 
 	// TODO: need only set forwarding for specific interfaces?
 
-	err = common.RunNetworkConfigCommand(
-		config.Logger,
-		config.SudoNetworkConfigCommands,
-		"sysctl",
-		"net.ipv4.conf.all.forwarding=1")
+	err = setSysctl("net.ipv4.conf.all.forwarding", "1")
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	err = common.RunNetworkConfigCommand(
-		config.Logger,
-		config.SudoNetworkConfigCommands,
-		"sysctl",
-		"net.ipv6.conf.all.forwarding=1")
+	err = setSysctl("net.ipv6.conf.all.forwarding", "1")
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
 			config.Logger.WithTraceFields(
@@ -311,31 +351,40 @@ func configureClientInterface(
 	tunDeviceName string) error {
 
 	// Set tun device network addresses and MTU
+	link, err := netlink.LinkByName(tunDeviceName)
+	if err != nil {
+		return errors.Trace(fmt.Errorf("failed to get interface %s: %w", tunDeviceName, err))
+	}
 
-	IPv4Address, IPv4Netmask, err := splitIPMask(config.IPv4AddressCIDR)
+	_, ipv4Net, err := net.ParseCIDR(config.IPv4AddressCIDR)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	err = common.RunNetworkConfigCommand(
-		config.Logger,
-		config.SudoNetworkConfigCommands,
-		"ifconfig",
-		tunDeviceName,
-		IPv4Address,
-		"netmask", IPv4Netmask,
-		"mtu", strconv.Itoa(getMTU(config.MTU)),
-		"up")
-	if err != nil {
+	ipv4Addr := &netlink.Addr{IPNet: ipv4Net}
+	if err := netlink.AddrAdd(link, ipv4Addr); err != nil {
 		return errors.Trace(err)
 	}
 
-	err = common.RunNetworkConfigCommand(
-		config.Logger,
-		config.SudoNetworkConfigCommands,
-		"ifconfig",
-		tunDeviceName,
-		"add", config.IPv6AddressCIDR)
+	if err := netlink.LinkSetMTU(link, getMTU(config.MTU)); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := netlink.LinkSetUp(link); err != nil {
+		return errors.Trace(err)
+	}
+
+	_, ipv6Net, err := net.ParseCIDR(config.IPv6AddressCIDR)
+	if err != nil {
+		err = errors.Trace(err)
+	} else {
+		ipv6Addr := &netlink.Addr{IPNet: ipv6Net}
+		err = netlink.AddrAdd(link, ipv6Addr)
+		if err != nil {
+			err = errors.Trace(err)
+		}
+	}
+
 	if err != nil {
 		if config.AllowNoIPv6NetworkConfiguration {
 			config.Logger.WithTraceFields(
@@ -371,14 +420,27 @@ func configureClientInterface(
 		// Note: use "replace" instead of "add" as route from
 		// previous run (e.g., tun_test case) may not yet be cleared.
 
-		err = common.RunNetworkConfigCommand(
-			config.Logger,
-			config.SudoNetworkConfigCommands,
-			"ip",
-			"-6",
-			"route", "replace",
-			destination,
-			"dev", tunDeviceName)
+		link, err := netlink.LinkByName(tunDeviceName)
+		if err != nil {
+			err = errors.Trace(err)
+		} else {
+			_, destNet, parseErr := net.ParseCIDR(destination)
+			if parseErr != nil {
+				err = errors.Trace(err)
+			} else {
+				route := &netlink.Route{
+					LinkIndex: link.Attrs().Index,
+					Dst:       destNet,
+					Family:    netlink.FAMILY_V6,
+				}
+
+				err = netlink.RouteReplace(route)
+				if err != nil {
+					err = errors.Trace(err)
+				}
+			}
+		}
+
 		if err != nil {
 			if config.AllowNoIPv6NetworkConfiguration {
 				config.Logger.WithTraceFields(
@@ -413,29 +475,17 @@ func fixBindToDevice(logger common.Logger, useSudo bool, tunDeviceName string) e
 	// > https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt and
 	// > RFC3704)
 
-	err := common.RunNetworkConfigCommand(
-		logger,
-		useSudo,
-		"sysctl",
-		"net.ipv4.conf.all.accept_local=1")
+	err := setSysctl("net.ipv4.conf.all.accept_local", "1")
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	err = common.RunNetworkConfigCommand(
-		logger,
-		useSudo,
-		"sysctl",
-		"net.ipv4.conf.all.rp_filter=0")
+	err = setSysctl("net.ipv4.conf.all.rp_filter", "0")
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	err = common.RunNetworkConfigCommand(
-		logger,
-		useSudo,
-		"sysctl",
-		fmt.Sprintf("net.ipv4.conf.%s.rp_filter=0", tunDeviceName))
+	err = setSysctl(fmt.Sprintf("net.ipv4.conf.%s.rp_filter", tunDeviceName), "0")
 	if err != nil {
 		return errors.Trace(err)
 	}
