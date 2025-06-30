@@ -158,29 +158,6 @@ func (device *Device) writeTunPacket(packet []byte) error {
 	return nil
 }
 
-// natConntrackFilter is a netlink filter for NATed flows. We determine if a flow
-// is NATed by checking if the original source IP and port are equal to the returned
-// destination IP and port. This mechanism is not perfect. Ideally, we would be able
-// to filter specifically for SNATed flows, but the netlink library does not expose
-// enough information to make that determination with certainty. For example, DNAT,
-// port-only SNAT, and full-cone/symmetric/port-range NAT flows may also match here.
-type natConntrackFilter struct {
-	*netlink.ConntrackFilter
-}
-
-// MatchConntrackFlow implements the netlink.CustomConntrackFilter interface.
-func (f *natConntrackFilter) MatchConntrackFlow(flow *netlink.ConntrackFlow) bool {
-	isNATed := !flow.Forward.SrcIP.Equal(flow.Reverse.DstIP) ||
-		flow.Forward.SrcPort != flow.Reverse.DstPort
-
-	if !isNATed {
-		return false
-	}
-
-	// Still apply the original filters.
-	return f.ConntrackFilter.MatchConntrackFlow(flow)
-}
-
 func resetNATTables(
 	config *ServerConfig,
 	IPAddress net.IP) error {
@@ -190,8 +167,12 @@ func resetNATTables(
 	// the already unlikely event that there's still in-flight traffic when the address is
 	// recycled.
 
-	// Despite the limitations described for natConntrackFilter, between knowing it has
-	// been NATed at all, and matching the original source IP, this should be sufficient.
+	// The netlink library does not expose the facilities for conclusively determining if
+	// src-nat has been applied to an individual flow, so replacing the previous call to
+	// the conntrack binary (see the comment above) with the code below is not a 1-to-1
+	// replacement. Since no other non-SNAT flows for these IPs that might exist need to
+	// be retained at the time resetNATTables is called, we're now skipping that check.
+
 	var family netlink.InetFamily
 	if IPAddress.To4() != nil {
 		family = unix.AF_INET
@@ -201,7 +182,7 @@ func resetNATTables(
 		return errors.TraceNew("invalid IP address family")
 	}
 
-	filter := &natConntrackFilter{}
+	filter := &netlink.ConntrackFilter{}
 	_ = filter.AddIP(netlink.ConntrackOrigSrcIP, IPAddress)
 
 	_, err := netlink.ConntrackDeleteFilter(netlink.ConntrackTable, family, filter)

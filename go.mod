@@ -83,6 +83,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0
 	github.com/syndtr/gocapability v0.0.0-20170704070218-db04d3cc01c8
+	github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85
 	github.com/wader/filtertransport v0.0.0-20200316221534-bdd9e61eee78
 	github.com/wlynxg/anet v0.0.5
 	golang.org/x/crypto v0.35.0
@@ -143,7 +144,6 @@ require (
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/tailscale/goupnp v1.0.1-0.20210804011211-c64d0f06ea05 // indirect
-	github.com/tailscale/netlink v1.1.1-0.20211101221916-cabfb018fe85 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
 	github.com/tklauser/numcpus v0.6.1 // indirect
 	github.com/vishvananda/netlink v1.2.1-beta.2 // indirect
