@@ -49,6 +49,21 @@
     NSMutableString *networkID = [NSMutableString stringWithString:@"UNKNOWN"];
     if (currentNetworkStatus == NetworkReachabilityReachableViaWiFi) {
         [networkID setString:@"WIFI"];
+#if TARGET_OS_MAC && !TARGET_OS_IPHONE
+        NSError *err;
+        NSString *activeInterfaceAddress =
+            [NetworkInterface getActiveInterfaceAddressWithReachability:reachability
+                                                andCurrentNetworkStatus:currentNetworkStatus
+                                                                  error:&err];
+        if (err != nil) {
+            NSString *localizedDescription = [NSString stringWithFormat:@"error getting active interface address %@", err.localizedDescription];
+            *outWarn = [[NSError alloc] initWithDomain:@"PsiphonTunnelError"
+                                                  code:1
+                                              userInfo:@{NSLocalizedDescriptionKey:localizedDescription}];
+            return networkID;
+        }
+        [networkID appendFormat:@"-%@", activeInterfaceAddress];
+#else
         NSArray *networkInterfaceNames = (__bridge_transfer id)CNCopySupportedInterfaces();
         for (NSString *networkInterfaceName in networkInterfaceNames) {
             NSDictionary *networkInterfaceInfo = (__bridge_transfer id)CNCopyCurrentNetworkInfo((__bridge CFStringRef)networkInterfaceName);
@@ -56,9 +71,11 @@
                 [networkID appendFormat:@"-%@", networkInterfaceInfo[(__bridge NSString*)kCNNetworkInfoKeyBSSID]];
             }
         }
+#endif
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaCellular) {
         [networkID setString:@"MOBILE"];
 
+#if TARGET_OS_IOS
         if (@available(iOS 16.0, *)) {
             // Testing showed that the IP address of the active interface uniquely identified the
             // corresponding network and did not change over long periods of time, which makes it a
@@ -87,6 +104,7 @@
                 [networkID appendFormat:@"-%@-%@", mcc, mnc];
             }
         }
+#endif
     } else if (currentNetworkStatus == NetworkReachabilityReachableViaWired) {
         [networkID setString:@"WIRED"];
 

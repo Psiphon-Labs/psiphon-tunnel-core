@@ -209,11 +209,12 @@ function xcodebuild_for_platform() {
 }
 
 #
-# Build the PsiphonTunnel.framework for iOS, iOS Simulator, and Mac Catalyst.
+# Build the PsiphonTunnel.framework for iOS, iOS Simulator, Mac Catalyst and macOS.
 #
 
-gomobile_build_for_platform "-target 'ios,iossimulator' -iosversion '10.0'"
+gomobile_build_for_platform "-target 'macos,ios,iossimulator' -iosversion '10.0'"
 xcodebuild_for_platform "ios.xcarchive" " -destination 'generic/platform=iOS' EXCLUDED_ARCHS='armv7'"  # Excludes 32-bit ARM: EXCLUDED_ARCHS="armv7"
+xcodebuild_for_platform "macos.xcarchive" "-sdk macosx EXCLUDED_ARCHS='i386'"
 
 # While Network Extension doesn't work on a simulator, adding the simulator build
 # allows the framework users to build and run on simulators.
@@ -232,6 +233,8 @@ xcodebuild -create-xcframework \
 -debug-symbols "${BUILD_DIR}/iossimulator.xcarchive/dSYMs/PsiphonTunnel.framework.dSYM" \
 -framework "${BUILD_DIR}/maccatalyst.xcarchive/Products/Library/Frameworks/PsiphonTunnel.framework" \
 -debug-symbols "${BUILD_DIR}/maccatalyst.xcarchive/dSYMs/PsiphonTunnel.framework.dSYM" \
+-framework "${BUILD_DIR}/macos.xcarchive/Products/Library/Frameworks/PsiphonTunnel.framework" \
+-debug-symbols "${BUILD_DIR}/macos.xcarchive/dSYMs/PsiphonTunnel.framework.dSYM" \
 -output "${BUILD_DIR}/PsiphonTunnel.xcframework"
 
 # Jenkins loses symlinks from the framework directory, which results in a build
