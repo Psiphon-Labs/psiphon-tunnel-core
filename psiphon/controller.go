@@ -275,14 +275,14 @@ func NewController(config *Config) (controller *Controller, err error) {
 	var tacticAppliedReceivers []TacticsAppliedReceiver
 
 	isProxy := false
-	controller.inproxyClientBrokerClientManager = NewInproxyBrokerClientManager(config, isProxy)
+	controller.inproxyClientBrokerClientManager = NewInproxyBrokerClientManager(config, isProxy, controller.tlsClientSessionCache)
 	tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyClientBrokerClientManager)
 	controller.inproxyNATStateManager = NewInproxyNATStateManager(config)
 	tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyNATStateManager)
 
 	if config.InproxyEnableProxy {
 		isProxy = true
-		controller.inproxyProxyBrokerClientManager = NewInproxyBrokerClientManager(config, isProxy)
+		controller.inproxyProxyBrokerClientManager = NewInproxyBrokerClientManager(config, isProxy, controller.tlsClientSessionCache)
 		tacticAppliedReceivers = append(tacticAppliedReceivers, controller.inproxyProxyBrokerClientManager)
 	}
 
@@ -632,7 +632,8 @@ fetcherLoop:
 				controller.config,
 				attempt,
 				tunnel,
-				controller.untunneledDialConfig)
+				controller.untunneledDialConfig,
+				controller.tlsClientSessionCache)
 
 			if err == nil {
 				lastFetchTime = time.Now()
@@ -721,7 +722,8 @@ downloadLoop:
 				attempt,
 				handshakeVersion,
 				tunnel,
-				controller.untunneledDialConfig)
+				controller.untunneledDialConfig,
+				controller.tlsClientSessionCache)
 
 			if err == nil {
 				lastDownloadTime = time.Now()
@@ -1089,7 +1091,15 @@ loop:
 					controller.stopEstablishing()
 				}
 
-				err := connectedTunnel.Activate(controller.runCtx, controller)
+				// In the case of multi-tunnels, only the first tunnel will send status requests,
+				// including transfer stats (domain bytes), persistent stats, and prune checks.
+				// While transfer stats and persistent stats use a "take out" scheme that would
+				// allow for multiple, concurrent requesters, the prune check does not.
+
+				isStatusReporter := isFirstTunnel
+
+				err := connectedTunnel.Activate(
+					controller.runCtx, controller, isStatusReporter)
 
 				if err != nil {
 					NoticeWarning("failed to activate %s: %v",
@@ -3028,7 +3038,7 @@ func (controller *Controller) runInproxyProxy() {
 		if useUpstreamProxy {
 			NoticeError("inproxy proxy: not run due to upstream proxy configuration")
 		}
-		if haveBrokerSpecs {
+		if !haveBrokerSpecs {
 			NoticeError("inproxy proxy: no proxy broker specs")
 		}
 		if !inproxy.Enabled() {

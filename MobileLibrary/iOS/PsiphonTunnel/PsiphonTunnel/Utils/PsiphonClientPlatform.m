@@ -18,7 +18,11 @@
  */
 
 #import "PsiphonClientPlatform.h"
+#if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
+#elif TARGET_OS_OSX
+#import <AppKit/AppKit.h>
+#endif
 #import "JailbreakCheck.h"
 
 @implementation PsiphonClientPlatform
@@ -43,9 +47,20 @@
     }
 
     // Like "10.2.1"
-    NSString *systemVersion = [[[[UIDevice currentDevice]systemVersion]
-                                stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
-                               stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+    NSString *systemVersion;
+#if TARGET_OS_IOS
+    systemVersion = [[[[UIDevice currentDevice]systemVersion]
+                      stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
+                     stringByReplacingOccurrencesOfString:@" " withString:@"-"];
+#elif TARGET_OS_OSX
+    NSOperatingSystemVersion osVersion = [[NSProcessInfo processInfo] operatingSystemVersion];
+    systemVersion = [NSString stringWithFormat:@"%ld.%ld.%ld", 
+                    (long)osVersion.majorVersion, 
+                    (long)osVersion.minorVersion, 
+                    (long)osVersion.patchVersion];
+#else
+    systemVersion = @"unknown";
+#endif
 
     // Like "com.psiphon3.browser"
     NSString *bundleIdentifier = [[[[NSBundle mainBundle] bundleIdentifier]
@@ -76,20 +91,26 @@
 
     } else {
 
+        NSString *systemName;
+#if TARGET_OS_IOS
         // iOS build running on iOS device.
-
         // Like "iOS". Older iOS reports "iPhone OS", which we will convert.
-        NSString *systemName = [[UIDevice currentDevice] systemName];
-
+        systemName = [[UIDevice currentDevice] systemName];
         if ([systemName isEqual: @"iPhone OS"]) {
             systemName = @"iOS";
         }
+#elif TARGET_OS_OSX
+        systemName = @"macOS";
+#else
+        systemName = @"unknown";
+#endif
         systemName = [[systemName
                        stringByReplacingOccurrencesOfString:@"_" withString:@"-"]
                       stringByReplacingOccurrencesOfString:@" " withString:@"-"];
 
         // Note that on Macs, users have root access, unlike iOS, where
         // the user has to jailbreak the device to get root access.
+#if TARGET_OS_IOS
         NSString *jailbroken = nil;
         if ([JailbreakCheck isDeviceJailbroken] == TRUE) {
             jailbroken = @"jailbroken";
@@ -102,6 +123,17 @@
                 systemVersion,
                 jailbroken,
                 bundleIdentifier];
+#elif TARGET_OS_OSX
+        return [NSString stringWithFormat:@"%@_%@_%@",
+                systemName,
+                systemVersion,
+                bundleIdentifier];
+#else
+        return [NSString stringWithFormat:@"%@_%@_%@",
+                systemName,
+                systemVersion,
+                bundleIdentifier];
+#endif
 
     }
 

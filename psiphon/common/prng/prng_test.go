@@ -389,7 +389,7 @@ func TestExpFloat64Range(t *testing.T) {
 				strs = append(strs, fmt.Sprintf("%0.2f: %d", k, buckets[k]))
 			}
 
-			t.Logf(strings.Join(strs, ","))
+			t.Log(strings.Join(strs, ","))
 
 			for i := 0; i < len(keys)-1; i++ {
 				if buckets[keys[i]] <= buckets[keys[i+1]] {

@@ -1641,9 +1641,19 @@ func (sshServer *sshServer) stopClients() {
 	sshServer.clients = make(map[string]*sshClient)
 	sshServer.clientsMutex.Unlock()
 
+	// Stop clients concurrently; if any one client stop hangs, due to a bug,
+	// this ensures that we still stop and record a server_tunnel for all
+	// non-hanging clients.
+
+	waitGroup := new(sync.WaitGroup)
 	for _, client := range clients {
-		client.stop()
+		waitGroup.Add(1)
+		go func(c *sshClient) {
+			defer waitGroup.Done()
+			c.stop()
+		}(client)
 	}
+	waitGroup.Wait()
 }
 
 func (sshServer *sshServer) handleClient(
@@ -1943,6 +1953,9 @@ type sshClient struct {
 	inproxyProxyQualityTracker           *inproxyProxyQualityTracker
 	dnsResolver                          *net.Resolver
 	dnsCache                             *lrucache.Cache
+	requestCheckServerEntryTags          int
+	checkedServerEntryTags               int
+	invalidServerEntryTags               int
 }
 
 type trafficState struct {
@@ -3737,6 +3750,12 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	if sshClient.additionalTransportData != nil &&
 		sshClient.additionalTransportData.steeringIP != "" {
 		logFields["relayed_steering_ip"] = sshClient.additionalTransportData.steeringIP
+	}
+
+	if sshClient.requestCheckServerEntryTags > 0 {
+		logFields["request_check_server_entry_tags"] = sshClient.requestCheckServerEntryTags
+		logFields["checked_server_entry_tags"] = sshClient.checkedServerEntryTags
+		logFields["invalid_server_entry_tags"] = sshClient.invalidServerEntryTags
 	}
 
 	// Merge in additional metrics from the optional metrics source

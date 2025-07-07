@@ -174,6 +174,7 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
         }
     }
 
+#if TARGET_OS_IOS
 	if ((flags & kSCNetworkReachabilityFlagsIsWWAN) == kSCNetworkReachabilityFlagsIsWWAN)
 	{
 		/*
@@ -181,6 +182,7 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
          */
 		returnValue = ReachableViaWWAN;
 	}
+#endif
     
 	return returnValue;
 }
@@ -218,10 +220,17 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 {
 	NSAssert(_reachabilityRef != NULL, @"currentReachabilityFlags called with NULL SCNetworkReachabilityRef");
 	SCNetworkReachabilityFlags flags;
+    
 
 	if (SCNetworkReachabilityGetFlags(_reachabilityRef, &flags)) {
+#if TARGET_OS_IOS
+        BOOL isWWAN = flags & kSCNetworkReachabilityFlagsIsWWAN;
+#else
+        BOOL isWWAN = FALSE;
+#endif
+        
 		return [NSString stringWithFormat:@"%c%c %c%c%c%c%c%c%c",
-				(flags & kSCNetworkReachabilityFlagsIsWWAN)               ? 'W' : '-',
+                (isWWAN)                                                  ? 'W' : '-',
 				(flags & kSCNetworkReachabilityFlagsReachable)            ? 'R' : '-',
 
 				(flags & kSCNetworkReachabilityFlagsTransientConnection)  ? 't' : '-',

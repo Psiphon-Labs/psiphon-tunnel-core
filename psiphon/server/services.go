@@ -72,6 +72,17 @@ func RunServices(configJSON []byte) (retErr error) {
 
 	loggingInitialized = true
 
+	err = addHostConfig(config)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer func() {
+		err := removeHostConfig(config)
+		if err != nil {
+			log.WithTraceFields(LogFields{"error": retErr}).Error("removeHostConfig failed")
+		}
+	}()
+
 	support, err := NewSupportServices(config)
 	if err != nil {
 		return errors.Trace(err)
@@ -374,19 +385,26 @@ loop:
 	// During any delayed or hung shutdown, periodically dump profiles to help
 	// diagnose the cause. Shutdown doesn't wait for any running
 	// outputProcessProfiles to complete.
+	//
+	// Wait 10 seconds before the first profile dump, and at least 10
+	// seconds between profile dumps (longer when
+	// ProcessCPUProfileDurationSeconds is set).
 	signalProfileDumperStop := make(chan struct{})
+	shutdownStartTime := time.Now()
 	go func() {
-		tickSeconds := 10
-		ticker := time.NewTicker(time.Duration(tickSeconds) * time.Second)
-		defer ticker.Stop()
-		for i := tickSeconds; i <= 60; i += tickSeconds {
+		for i := 0; i < 3; i++ {
+			timer := time.NewTimer(10 * time.Second)
 			select {
 			case <-signalProfileDumperStop:
+				timer.Stop()
 				return
-			case <-ticker.C:
-				filenameSuffix := fmt.Sprintf("delayed_shutdown_%ds", i)
-				outputProcessProfiles(support.Config, filenameSuffix)
+			case <-timer.C:
 			}
+			filenameSuffix := fmt.Sprintf(
+				"delayed_shutdown_%ds",
+				time.Since(shutdownStartTime)/time.Second)
+			outputProcessProfiles(support.Config, filenameSuffix)
+
 		}
 	}()
 

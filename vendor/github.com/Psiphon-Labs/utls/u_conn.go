@@ -179,7 +179,21 @@ func (uconn *UConn) uLoadSession() error {
 		if session == nil || err != nil {
 			return err
 		}
+		// [Psiphon] TODO: session should be validated before being used.
 		if session.version == VersionTLS12 {
+			// [Psiphon] SECTION BEGIN
+			// Should not attempt to resume a session ticket if the sessionTicketExt is nil.
+			// In upstream uTLS code, this check is skipped in initSessionTicketExt if
+			// skipResumptionOnNilExtension is true.
+			if uconn.sessionController.sessionTicketExt == nil {
+				return nil
+			}
+			if mutualCipherSuite(uconn.HandshakeState.Hello.CipherSuites, session.cipherSuite) == nil {
+				// The TLS 1.2 cipher suite must match the resumed session.
+				return nil
+			}
+			// [Psiphon] SECTION END
+
 			// We use the session ticket extension for tls 1.2 session resumption
 			uconn.sessionController.initSessionTicketExt(session, hello.sessionTicket)
 			uconn.sessionController.setSessionTicketToUConn()

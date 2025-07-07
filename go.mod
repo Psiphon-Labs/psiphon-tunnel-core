@@ -1,8 +1,8 @@
 module github.com/Psiphon-Labs/psiphon-tunnel-core
 
-go 1.23.0
+go 1.24.0
 
-toolchain go1.23.7
+toolchain go1.24.4
 
 // The following replace is required only when the build tag
 // PSIPHON_ENABLE_REFRACTION_NETWORKING is specified.
@@ -41,7 +41,7 @@ require (
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
-	github.com/Psiphon-Labs/utls v0.0.0-20250429162420-6dbd45ae7ceb
+	github.com/Psiphon-Labs/utls v0.0.0-20250623193530-396869e9cd87
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/bits-and-blooms/bloom/v3 v3.6.0
@@ -103,7 +103,7 @@ require (
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
-	github.com/cloudflare/circl v1.5.0 // indirect
+	github.com/cloudflare/circl v1.6.1 // indirect
 	github.com/coreos/go-iptables v0.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dblohm7/wingoes v0.0.0-20230929194252-e994401fc077 // indirect

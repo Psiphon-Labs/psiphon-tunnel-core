@@ -620,6 +620,20 @@ func TestPruneServerEntries(t *testing.T) {
 		})
 }
 
+func TestCheckPruneServerEntries(t *testing.T) {
+	runServer(t,
+		&runServerConfig{
+			tunnelProtocol:          "OSSH",
+			requireAuthorization:    true,
+			doTunneledWebRequest:    true,
+			doTunneledNTPRequest:    true,
+			forceLivenessTest:       true,
+			doPruneServerEntries:    true,
+			checkPruneServerEntries: true,
+			doLogHostProvider:       true,
+		})
+}
+
 func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
@@ -743,6 +757,7 @@ type runServerConfig struct {
 	forceFragmenting         bool
 	forceLivenessTest        bool
 	doPruneServerEntries     bool
+	checkPruneServerEntries  bool
 	doDanglingTCPConn        bool
 	doPacketManipulation     bool
 	doBurstMonitor           bool
@@ -1583,11 +1598,32 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		if runConfig.doPruneServerEntries {
-			applyParameters[parameters.PsiphonAPIStatusRequestShortPeriodMin] = 1 * time.Millisecond
-			applyParameters[parameters.PsiphonAPIStatusRequestShortPeriodMax] = 1 * time.Millisecond
+			applyParameters[parameters.PsiphonAPIStatusRequestShortPeriodMin] = 1 * time.Second
+			applyParameters[parameters.PsiphonAPIStatusRequestShortPeriodMax] = 1 * time.Second
+
+			if runConfig.checkPruneServerEntries {
+
+				// Set a low MaxSendBytes in order to exercise repeated check
+				// prune requests. Also set a short deadline for the
+				// subsequent status requests, as the default is minutes later.
+
+				applyParameters[parameters.CheckServerEntryTagsRepeatRatio] = 0.0001
+				applyParameters[parameters.CheckServerEntryTagsRepeatMinimum] = 0
+				applyParameters[parameters.CheckServerEntryTagsMaxSendBytes] =
+					(len(pruneServerEntryTestCases) / 2) * 43
+
+				applyParameters[parameters.PsiphonAPIStatusRequestPeriodMin] = 1 * time.Second
+				applyParameters[parameters.PsiphonAPIStatusRequestPeriodMax] = 1 * time.Second
+
+			} else {
+
+				// Force exercising the failed_tunnel prune code path.
+
+				applyParameters[parameters.CheckServerEntryTagsEnabled] = false
+			}
 		}
 
-		err = clientConfig.SetParameters("", true, applyParameters)
+		err = clientConfig.SetParameters("", false, applyParameters)
 		if err != nil {
 			t.Fatalf("SetParameters failed: %s", err)
 		}
@@ -2006,6 +2042,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	select {
 	case logFields := <-serverTunnelLog:
+
+		expectCheckServerEntryPruneCount := 0
+		if runConfig.checkPruneServerEntries {
+			expectCheckServerEntryPruneCount = expectedNumPruneNotices
+		}
 		err := checkExpectedServerTunnelLogFields(
 			runConfig,
 			propagationChannelID,
@@ -2024,6 +2065,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectLegacyDestinationBytesFields,
 			passthroughAddress,
 			expectMeekHTTPVersion,
+			expectCheckServerEntryPruneCount,
 			inproxyTestConfig,
 			logFields)
 		if err != nil {
@@ -2336,6 +2378,7 @@ func checkExpectedServerTunnelLogFields(
 	expectLegacyDestinationBytesFields bool,
 	expectPassthroughAddress *string,
 	expectMeekHTTPVersion string,
+	expectCheckServerEntryPruneCount int,
 	inproxyTestConfig *inproxyTestConfig,
 	fields map[string]interface{}) error {
 
@@ -3073,6 +3116,35 @@ func checkExpectedServerTunnelLogFields(
 		name = "steering_ip"
 		if fields[name] != nil {
 			return fmt.Errorf("unexpected field '%s'", name)
+		}
+	}
+
+	for _, name := range []string{
+		"request_check_server_entry_tags",
+		"checked_server_entry_tags",
+		"invalid_server_entry_tags",
+	} {
+		if expectCheckServerEntryPruneCount > 0 && fields[name] == nil {
+			return fmt.Errorf("missing expected field '%s'", name)
+
+		} else if expectCheckServerEntryPruneCount <= 0 && fields[name] != nil {
+			return fmt.Errorf("unexpected field '%s'", name)
+		}
+	}
+	if expectCheckServerEntryPruneCount > 0 {
+		name := "request_check_server_entry_tags"
+		if fields[name].(float64) < 2 {
+			return fmt.Errorf("unexpected field value %s: %v", name, fields[name])
+		}
+		name = "checked_server_entry_tags"
+		if fields[name].(float64) < 1 {
+			return fmt.Errorf("unexpected field value %s: %v", name, fields[name])
+		}
+		// invalid_server_entry_tags may exceed expectCheckServerEntryPruneCount,
+		// due to repeated requests and min prune age.
+		name = "invalid_server_entry_tags"
+		if int(fields[name].(float64)) < expectCheckServerEntryPruneCount {
+			return fmt.Errorf("unexpected field value %s: %v", name, fields[name])
 		}
 	}
 
@@ -4192,6 +4264,12 @@ func initializePruneServerEntriesTest(
 		{IPAddress: "192.0.2.13", ExplicitTag: true, LocalTimestamp: oldTimeStamp, PsinetValid: true, ExpectPrune: true, IsEmbedded: true, DialPort0: true},
 	}
 
+	if runConfig.checkPruneServerEntries {
+		// Skip the dial port 0 cases, since the prune check doesn't send the
+		// dial port number in its request.
+		pruneServerEntryTestCases = pruneServerEntryTestCases[0:10]
+	}
+
 	for _, testCase := range pruneServerEntryTestCases {
 
 		dialPort := 4000
@@ -4275,6 +4353,11 @@ func storePruneServerEntriesTest(
 		}
 	}
 
+	if runConfig.checkPruneServerEntries {
+		// The prune check case doesn't create failed_tunnel records.
+		return
+	}
+
 	clientConfig := &psiphon.Config{
 		SponsorId:            "0",
 		PropagationChannelId: "0",
@@ -4294,6 +4377,12 @@ func storePruneServerEntriesTest(
 
 	applyParameters := make(map[string]interface{})
 	applyParameters[parameters.RecordFailedTunnelPersistentStatsProbability] = 1.0
+
+	// In order to reach the server-side status request failed_tunnel dial
+	// port 0 handling, disable ServerEntryPruneDialPortNumberZero so that
+	// the following MakeDialParameters will ignore the dial port 0 and not
+	// try to immediately prune the server entry.
+	applyParameters[parameters.ServerEntryPruneDialPortNumberZero] = false
 
 	err = clientConfig.SetParameters("", true, applyParameters)
 	if err != nil {
