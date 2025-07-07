@@ -43,6 +43,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	utls "github.com/Psiphon-Labs/utls"
 )
 
 // Conforms to the format expected by the feedback decryptor.
@@ -181,6 +182,8 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 
 	uploadId := prng.HexString(8)
 
+	tlsCache := utls.NewLRUClientSessionCache(0)
+
 	for i := 0; i < feedbackUploadMaxAttempts; i++ {
 
 		uploadURL := transferURLs.Select(i)
@@ -231,6 +234,7 @@ func SendFeedback(ctx context.Context, config *Config, diagnostics, uploadPath s
 			feedbackUploadCtx,
 			config,
 			dialConfig,
+			tlsCache,
 			uploadURL.SkipVerify,
 			config.DisableSystemRootCAs,
 			payloadSecure,

@@ -388,7 +388,9 @@ type Config struct {
 	PacketTunnelSessionIdleExpirySeconds int
 
 	// PacketTunnelSudoNetworkConfigCommands sets
-	// tun.ServerConfig.SudoNetworkConfigCommands.
+	// tun.ServerConfig.SudoNetworkConfigCommands,
+	// packetman.Config.SudoNetworkConfigCommands, and
+	// SudoNetworkConfigCommands for configureIptablesAcceptRateLimitChain.
 	PacketTunnelSudoNetworkConfigCommands bool
 
 	// RunPacketManipulator specifies whether to run a packet manipulator.
@@ -502,6 +504,20 @@ type Config struct {
 	// session root obfuscation secret used by brokers. This value is
 	// required when running in-proxy tunnel protocols.
 	InproxyServerObfuscationRootSecret string
+
+	// IptablesAcceptRateLimitChainName, when set, enables programmatic
+	// configuration of iptables rules to allow and apply rate limits to
+	// tunnel protocol network ports. The configuration is applied to the
+	// specified chain.
+	//
+	// For details, see configureIptablesAcceptRateLimitChain.
+	IptablesAcceptRateLimitChainName string
+
+	// IptablesAcceptRateLimitTunnelProtocolRateLimits specifies custom
+	// iptables rate limits by tunnel protocol name. See
+	// configureIptablesAcceptRateLimitChain details about the rate limit
+	// values.
+	IptablesAcceptRateLimitTunnelProtocolRateLimits map[string][2]int
 
 	sshBeginHandshakeTimeout                       time.Duration
 	sshHandshakeTimeout                            time.Duration

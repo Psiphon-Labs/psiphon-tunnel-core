@@ -25,14 +25,17 @@
 
 
 #import <Foundation/Foundation.h>
-#import "UIKit/UIKit.h"
-#import <sys/stat.h>
 #import "JailbreakCheck.h"
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#import <sys/stat.h>
+#endif
 
 
 @implementation JailbreakCheck
 
 
+#if TARGET_OS_IPHONE
 BOOL checkReadWritePermissions()
 {
     // UIApplication:sharedApplication is disallowed in an application exetension
@@ -124,13 +127,18 @@ BOOL checkJailbreakFiles()
     
     return FALSE;
 }
+#endif
 
 + (BOOL)isDeviceJailbroken
 {
+#if TARGET_OS_IPHONE
     return
         checkJailbreakSymlinks()
         || checkJailbreakFiles()
         || checkReadWritePermissions();
+#else
+    return FALSE;
+#endif
 }
 
 @end

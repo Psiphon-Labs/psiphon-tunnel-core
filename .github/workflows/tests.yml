@@ -15,8 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.23.7" ]
-        test-type: [ "detector", "coverage", "memory", "custom-build-tags", "code-vetting" ]
+        go: [ "1.24.4" ]
+        test-type: [ "detector", "coverage", "memory", "custom-build-tags", "code-vetting", "dependency-check" ]
 
     runs-on: ${{ matrix.os }}-latest
 
@@ -169,6 +169,13 @@ jobs:
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
           go vet -tags "PSIPHON_ENABLE_INPROXY PSIPHON_ENABLE_REFRACTION_NETWORKING" ./psiphon/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi ./Server/...
+
+      - name: Build and run ConsoleClient to invoke the panic-on-fail, init-time portmapper dependency check (see psiphon/common/inproxy/portmapper.go)
+        if: ${{ matrix.test-type == 'dependency-check' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient
+          go build -a -v -tags "PSIPHON_ENABLE_INPROXY"
+          ./ConsoleClient --version
 
       # License check ignore cases:
       #

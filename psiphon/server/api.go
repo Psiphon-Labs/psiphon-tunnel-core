@@ -805,6 +805,7 @@ func statusAPIRequestHandler(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+
 		for _, remoteServerListStat := range remoteServerListStats {
 
 			for _, name := range remoteServerListStatBackwardsCompatibilityParamNames {
@@ -839,19 +840,18 @@ func statusAPIRequestHandler(
 	// Failed tunnel persistent stats.
 	// Older clients may not submit this data.
 
-	var invalidServerEntryTags map[string]bool
+	// Note: no guarantee that PsinetDatabase won't reload between database calls
+	db := support.PsinetDatabase
+
+	invalidServerEntryTags := make(map[string]bool)
 
 	if statusData["failed_tunnel_stats"] != nil {
-
-		// Note: no guarantee that PsinetDatabase won't reload between database calls
-		db := support.PsinetDatabase
-
-		invalidServerEntryTags = make(map[string]bool)
 
 		failedTunnelStats, err := getJSONObjectArrayRequestParam(statusData, "failed_tunnel_stats")
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+
 		for _, failedTunnelStat := range failedTunnelStats {
 
 			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
@@ -895,7 +895,7 @@ func statusAPIRequestHandler(
 			// historical bugs in various server entry handling implementations. When
 			// missing from a server entry loaded by a client, the port number
 			// evaluates to 0, the zero value, which is not a valid port number even if
-			// were not missing.
+			// it were not missing.
 
 			serverEntryTag, ok := getOptionalStringRequestParam(failedTunnelStat, "server_entry_tag")
 
@@ -922,6 +922,38 @@ func statusAPIRequestHandler(
 
 			logQueue = append(logQueue, failedTunnelFields)
 		}
+	}
+
+	// Handle the prune check, which is an aggressive server entry prune
+	// operation on top of the opportunistic pruning that is triggered by
+	// failed_tunnel reports.
+
+	if statusData["check_server_entry_tags"] != nil {
+
+		checkServerEntryTags, err := getStringArrayRequestParam(statusData, "check_server_entry_tags")
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		invalidCount := 0
+
+		for _, serverEntryTag := range checkServerEntryTags {
+
+			serverEntryValid := db.IsValidServerEntryTag(serverEntryTag)
+			if !serverEntryValid {
+				invalidServerEntryTags[serverEntryTag] = true
+				invalidCount += 1
+			}
+
+		}
+
+		// Prune metrics will be logged in server_tunnel.
+
+		sshClient.Lock()
+		sshClient.requestCheckServerEntryTags += 1
+		sshClient.checkedServerEntryTags += len(checkServerEntryTags)
+		sshClient.invalidServerEntryTags += invalidCount
+		sshClient.Unlock()
 	}
 
 	for _, logItem := range logQueue {

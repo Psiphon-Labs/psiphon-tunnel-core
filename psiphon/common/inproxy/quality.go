@@ -277,10 +277,12 @@ type ProxyQualityReporter struct {
 	serverSessionPrivateKey SessionPrivateKey
 	roundTripperMaker       ProxyQualityBrokerRoundTripperMaker
 
-	mutex             sync.Mutex
-	runContext        context.Context
-	stopRunning       context.CancelFunc
-	waitGroup         *sync.WaitGroup
+	runMutex    sync.Mutex
+	runContext  context.Context
+	stopRunning context.CancelFunc
+	waitGroup   *sync.WaitGroup
+
+	queueMutex        sync.Mutex
 	reportQueue       *list.List
 	proxyIDQueueEntry map[ProxyQualityKey]*list.Element
 
@@ -398,8 +400,9 @@ func (r *ProxyQualityReporter) SetRequestParameters(
 
 // Start launches the request workers.
 func (r *ProxyQualityReporter) Start() error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+
+	r.runMutex.Lock()
+	defer r.runMutex.Unlock()
 
 	if r.runContext != nil {
 		return errors.TraceNew("already running")
@@ -418,8 +421,9 @@ func (r *ProxyQualityReporter) Start() error {
 
 // Stop terminates the request workers.
 func (r *ProxyQualityReporter) Stop() {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+
+	r.runMutex.Lock()
+	defer r.runMutex.Unlock()
 
 	r.stopRunning()
 	r.waitGroup.Wait()
@@ -433,8 +437,8 @@ func (r *ProxyQualityReporter) Stop() {
 func (r *ProxyQualityReporter) ReportQuality(
 	proxyID ID, proxyASN string, clientASN string) {
 
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.queueMutex.Lock()
+	defer r.queueMutex.Unlock()
 
 	proxyKey := MakeProxyQualityKey(proxyID, proxyASN)
 
@@ -539,8 +543,9 @@ func (r *ProxyQualityReporter) requestScheduler(ctx context.Context) {
 }
 
 func (r *ProxyQualityReporter) prepareNextRequest() ProxyQualityRequestCounts {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+
+	r.queueMutex.Lock()
+	defer r.queueMutex.Unlock()
 
 	// prepareNextRequest should not hold the mutex for a long period, as this
 	// blocks ReportQuality, which in turn could block tunnel I/O operations.
