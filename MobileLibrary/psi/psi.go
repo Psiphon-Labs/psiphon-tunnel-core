@@ -196,6 +196,7 @@ func Start(
 
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
+		psiphon.ResetNoticeWriter()
 		return errors.Trace(err)
 	}
 
@@ -238,6 +239,7 @@ func Start(
 		stopController()
 		embeddedServerListWaitGroup.Wait()
 		psiphon.CloseDataStore()
+		psiphon.ResetNoticeWriter()
 		return errors.Trace(err)
 	}
 
@@ -361,7 +363,7 @@ var sendFeedbackMutex sync.Mutex
 var sendFeedbackCtx context.Context
 var stopSendFeedback context.CancelFunc
 var sendFeedbackWaitGroup *sync.WaitGroup
-var sendFeedbackSetNoticeWriter bool
+var sendFeedbackResetNoticeWriter bool
 
 // StartSendFeedback encrypts the provided diagnostics and then attempts to
 // upload the encrypted diagnostics to one of the feedback upload locations
@@ -418,28 +420,20 @@ func StartSendFeedback(
 	sendFeedbackMutex.Lock()
 	defer sendFeedbackMutex.Unlock()
 
-	sendFeedbackCtx, stopSendFeedback = context.WithCancel(context.Background())
-
-	// Unlike in Start, the provider is not wrapped in a newMutexPsiphonProvider
-	// or equivilent, as SendFeedback is not expected to be used in a memory
-	// constrained environment.
-
-	sendFeedbackSetNoticeWriter = noticeHandler != nil
-
-	if sendFeedbackSetNoticeWriter {
-		err := psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
-			func(notice []byte) {
-				noticeHandler.Notice(string(notice))
-			}))
-		if err != nil {
-			return errors.Trace(err)
-		}
+	if stopSendFeedback != nil {
+		// Another goroutine invoked StartSendFeedback before the mutex lock
+		// was acquired.
+		return errors.TraceNew("already started")
 	}
 
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
 		return errors.Trace(err)
 	}
+
+	// Unlike in Start, the provider is not wrapped in a newMutexPsiphonProvider
+	// or equivalent, as SendFeedback is not expected to be used in a memory
+	// constrained environment.
 
 	// Set up callbacks.
 
@@ -469,6 +463,25 @@ func StartSendFeedback(
 		return errors.Trace(err)
 	}
 
+	setNoticeWriter := noticeHandler != nil
+
+	if setNoticeWriter {
+		err := psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+			func(notice []byte) {
+				noticeHandler.Notice(string(notice))
+			}))
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	// Initialize stopSendFeedback, which also serves as the "is started"
+	// flag, only after all early error returns.
+
+	sendFeedbackCtx, stopSendFeedback = context.WithCancel(context.Background())
+
+	sendFeedbackResetNoticeWriter = setNoticeWriter
+
 	sendFeedbackWaitGroup = new(sync.WaitGroup)
 	sendFeedbackWaitGroup.Add(1)
 	go func() {
@@ -496,11 +509,11 @@ func StopSendFeedback() {
 		sendFeedbackCtx = nil
 		stopSendFeedback = nil
 		sendFeedbackWaitGroup = nil
-		if sendFeedbackSetNoticeWriter {
+		if sendFeedbackResetNoticeWriter {
 			// Allow the notice handler to be garbage collected.
 			psiphon.ResetNoticeWriter()
 		}
-		sendFeedbackSetNoticeWriter = false
+		sendFeedbackResetNoticeWriter = false
 	}
 }
 
