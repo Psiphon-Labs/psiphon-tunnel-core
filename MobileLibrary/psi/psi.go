@@ -27,8 +27,6 @@ package psi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -36,6 +34,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
@@ -134,7 +133,7 @@ func Start(
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		return fmt.Errorf("already started")
+		return errors.TraceNew("already started")
 	}
 
 	// Clients may toggle Stop/Start immediately to apply new config settings
@@ -154,7 +153,7 @@ func Start(
 
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
-		return fmt.Errorf("error loading configuration file: %s", err)
+		return errors.Trace(err)
 	}
 
 	// Set up callbacks.
@@ -179,13 +178,16 @@ func Start(
 
 	err = config.Commit(true)
 	if err != nil {
-		return fmt.Errorf("error committing configuration file: %s", err)
+		return errors.Trace(err)
 	}
 
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			wrappedProvider.Notice(string(notice))
 		}))
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	// BuildInfo is a diagnostic notice, so emit only after config.Commit
 	// sets EmitDiagnosticNotices.
@@ -194,7 +196,7 @@ func Start(
 
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
-		return fmt.Errorf("error initializing datastore: %s", err)
+		return errors.Trace(err)
 	}
 
 	controllerCtx, stopController = context.WithCancel(context.Background())
@@ -236,7 +238,7 @@ func Start(
 		stopController()
 		embeddedServerListWaitGroup.Wait()
 		psiphon.CloseDataStore()
-		return fmt.Errorf("error initializing controller: %s", err)
+		return errors.Trace(err)
 	}
 
 	controllerWaitGroup = new(sync.WaitGroup)
@@ -264,7 +266,7 @@ func Stop() {
 		stopController = nil
 		controllerWaitGroup = nil
 		// Allow the provider to be garbage collected.
-		psiphon.SetNoticeWriter(os.Stderr)
+		psiphon.ResetNoticeWriter()
 	}
 }
 
@@ -359,6 +361,7 @@ var sendFeedbackMutex sync.Mutex
 var sendFeedbackCtx context.Context
 var stopSendFeedback context.CancelFunc
 var sendFeedbackWaitGroup *sync.WaitGroup
+var sendFeedbackSetNoticeWriter bool
 
 // StartSendFeedback encrypts the provided diagnostics and then attempts to
 // upload the encrypted diagnostics to one of the feedback upload locations
@@ -372,17 +375,28 @@ var sendFeedbackWaitGroup *sync.WaitGroup
 // Only one active upload is supported at a time. An ongoing upload will be
 // cancelled if this function is called again before it completes.
 //
-// Warnings:
-//   - Should not be used with Start concurrently in the same process
+// If StartSendFeedback is called concurrent with Start:
+//
+//   - noticeHandler MUST be nil, otherwise Start's notice handler and
+//     callbacks can be hijacked.
+//
+//   - configJson EmitDiagnosticNotices and UseNoticeFiles settings SHOULD be
+//     the same as those passed to Start, or else Start's notice logging
+//     configuration can change.
+//
+// Additional warnings:
+//
 //   - An ongoing feedback upload started with StartSendFeedback should be
-//     stopped with StopSendFeedback before the process exists. This ensures that
+//     stopped with StopSendFeedback before the process exits. This ensures that
 //     any underlying resources are cleaned up; failing to do so may result in
 //     data store corruption or other undefined behavior.
+//
 //   - Start and StartSendFeedback both make an attempt to migrate persistent
 //     files from legacy locations in a one-time operation. If these functions
 //     are called in parallel, then there is a chance that the migration attempts
 //     could execute at the same time and result in non-fatal errors in one, or
 //     both, of the migration operations.
+//
 //   - Calling StartSendFeedback or StopSendFeedback on the same call stack
 //     that the PsiphonProviderFeedbackHandler.SendFeedbackCompleted() callback
 //     is delivered on can cause a deadlock. I.E. the callback code must return
@@ -410,14 +424,21 @@ func StartSendFeedback(
 	// or equivilent, as SendFeedback is not expected to be used in a memory
 	// constrained environment.
 
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
-		func(notice []byte) {
-			noticeHandler.Notice(string(notice))
-		}))
+	sendFeedbackSetNoticeWriter = noticeHandler != nil
+
+	if sendFeedbackSetNoticeWriter {
+		err := psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+			func(notice []byte) {
+				noticeHandler.Notice(string(notice))
+			}))
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
 
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
-		return fmt.Errorf("error loading configuration file: %s", err)
+		return errors.Trace(err)
 	}
 
 	// Set up callbacks.
@@ -445,7 +466,7 @@ func StartSendFeedback(
 
 	err = config.Commit(true)
 	if err != nil {
-		return fmt.Errorf("error committing configuration file: %s", err)
+		return errors.Trace(err)
 	}
 
 	sendFeedbackWaitGroup = new(sync.WaitGroup)
@@ -475,8 +496,11 @@ func StopSendFeedback() {
 		sendFeedbackCtx = nil
 		stopSendFeedback = nil
 		sendFeedbackWaitGroup = nil
-		// Allow the notice handler to be garbage collected.
-		psiphon.SetNoticeWriter(os.Stderr)
+		if sendFeedbackSetNoticeWriter {
+			// Allow the notice handler to be garbage collected.
+			psiphon.ResetNoticeWriter()
+		}
+		sendFeedbackSetNoticeWriter = false
 	}
 }
 

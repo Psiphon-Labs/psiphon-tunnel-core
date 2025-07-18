@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	std_errors "errors"
 	"fmt"
-	"io"
 	"net"
 	"path/filepath"
 	"sync"
@@ -154,7 +153,7 @@ func StartTunnel(
 
 	// Set up notice handling. It is important to do this before config operations, as
 	// otherwise they will write notices to stderr.
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+	err := psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			var event NoticeEvent
 			err := json.Unmarshal(notice, &event)
@@ -193,6 +192,9 @@ func StartTunnel(
 				noticeReceiver(event)
 			}
 		}))
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	// Create a cancelable context that will be used for stopping the tunnel
 	tunnelCtx, cancelTunnelCtx := context.WithCancel(ctx)
@@ -212,7 +214,7 @@ func StartTunnel(
 		started.Store(false)
 		// Clear our notice receiver, as it is no longer needed and we should let it be
 		// garbage-collected.
-		psiphon.SetNoticeWriter(io.Discard)
+		psiphon.ResetNoticeWriter()
 	}
 
 	defer func() {

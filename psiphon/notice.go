@@ -112,12 +112,30 @@ func GetEmitNetworkParameters() bool {
 // - "timestamp": UTC timezone, RFC3339Milli format timestamp for notice event
 //
 // See the Notice* functions for details on each notice meaning and payload.
-func SetNoticeWriter(writer io.Writer) {
+//
+// SetNoticeWriter does not replace the writer and returns an error if a
+// non-default writer is already set.
+func SetNoticeWriter(writer io.Writer) error {
 
 	singletonNoticeLogger.mutex.Lock()
 	defer singletonNoticeLogger.mutex.Unlock()
 
+	if f, ok := singletonNoticeLogger.writer.(*os.File); !ok || f != os.Stderr {
+		return errors.TraceNew("notice writer already set")
+	}
+
 	singletonNoticeLogger.writer = writer
+
+	return nil
+}
+
+// ResetNoticeWriter resets the notice write to the default, stderr.
+func ResetNoticeWriter() {
+
+	singletonNoticeLogger.mutex.Lock()
+	defer singletonNoticeLogger.mutex.Unlock()
+
+	singletonNoticeLogger.writer = os.Stderr
 }
 
 // setNoticeFiles configures files for notice writing.

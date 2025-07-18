@@ -485,6 +485,10 @@ Returns the path where the rotated notices file will be created.
  reference; the caller is responsible for holding a strong reference.
  @param feedbackDelegate Delegate which `sendFeedbackCompleted(error)` is called on once when the operation completes; if
  error is non-nil, then the operation failed. Stored as a weak reference; the caller is responsible for holding a strong reference.
+ @warning if `startSendFeedback` is called concurrent with `start`:
+ (a) loggerDelegate MUST be nil, otherwise start's notice handler and callbacks can be hijacked;
+ (b) configJson EmitDiagnosticNotices and UseNoticeFiles settings SHOULD be the same as those passed to start,
+ or else start's notice logging configuration can change.
  @warning Only one active upload is supported at a time. An ongoing upload will be cancelled if this function is called again before it
  completes.
  @warning An ongoing feedback upload started with `startSendFeedback:` should be stopped with `stopSendFeedback` before the

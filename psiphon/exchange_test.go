@@ -22,6 +22,7 @@ package psiphon
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -41,7 +42,11 @@ func TestServerEntryExchange(t *testing.T) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	SetNoticeWriter(ioutil.Discard)
+	err = SetNoticeWriter(io.Discard)
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
 
 	// Generate signing and exchange key material
 

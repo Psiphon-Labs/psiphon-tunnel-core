@@ -449,10 +449,14 @@ func TestPsiphonTunnel_Dial(t *testing.T) {
 func TestStartTunnelNoOutput(t *testing.T) {
 	// Before starting the tunnel, set up a notice receiver. If it receives anything at
 	// all, that means that it would have been printed to stderr.
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+	err := psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			t.Fatalf("Received notice: %v", string(notice))
 		}))
+	if err != nil {
+		t.Fatalf("psiphon.SetNoticeWriter failed: %v", err)
+	}
+	defer psiphon.ResetNoticeWriter()
 
 	configJSON := setupConfig(t, false)
 
@@ -461,6 +465,8 @@ func TestStartTunnelNoOutput(t *testing.T) {
 		t.Fatalf("ioutil.TempDir failed: %v", err)
 	}
 	defer os.RemoveAll(testDataDirName)
+
+	psiphon.ResetNoticeWriter()
 
 	ctx := context.Background()
 
