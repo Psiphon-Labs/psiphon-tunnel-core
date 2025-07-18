@@ -1760,61 +1760,68 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         PsiphonProviderFeedbackHandlerShim *innerFeedbackHandler =
             [[PsiphonProviderFeedbackHandlerShim alloc] initWithHandler:sendFeedbackCompleted];
 
-        // Convert notice to a diagnostic message and then log it.
-        void (^logNotice)(NSString * _Nonnull) = ^void(NSString * _Nonnull noticeJSON) {
-            __strong PsiphonTunnelFeedback *strongSelf = weakSelf;
-            if (strongSelf == nil) {
-                return;
-            }
-            __strong id<PsiphonTunnelLoggerDelegate> strongLogger = weakLogger;
-            if (strongLogger == nil) {
-                return;
-            }
-            if ([strongLogger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+        PsiphonProviderNoticeHandlerShim *noticeHandler = nil;
 
-                __block NSDictionary *notice = nil;
-                id block = ^(id obj, BOOL *ignored) {
-                    if (ignored == nil || *ignored == YES) {
+        if (loggerDelegate != nil) {
+
+            // Convert notice to a diagnostic message and then log it.
+            void (^logNotice)(NSString * _Nonnull) = ^void(NSString * _Nonnull noticeJSON) {
+                __strong PsiphonTunnelFeedback *strongSelf = weakSelf;
+                if (strongSelf == nil) {
+                    return;
+                }
+                __strong id<PsiphonTunnelLoggerDelegate> strongLogger = weakLogger;
+                if (strongLogger == nil) {
+                    return;
+                }
+                if ([strongLogger respondsToSelector:@selector(onDiagnosticMessage:withTimestamp:)]) {
+
+                    __block NSDictionary *notice = nil;
+                    id block = ^(id obj, BOOL *ignored) {
+                        if (ignored == nil || *ignored == YES) {
+                            return;
+                        }
+                        notice = (NSDictionary *)obj;
+                    };
+
+                    id eh = ^(NSError *err) {
+                        notice = nil;
+                        logMessage([NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]);
+                    };
+
+                    id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
+                    [parser parse:[noticeJSON dataUsingEncoding:NSUTF8StringEncoding]];
+
+                    if (notice == nil) {
                         return;
                     }
-                    notice = (NSDictionary *)obj;
-                };
 
-                id eh = ^(NSError *err) {
-                    notice = nil;
-                    logMessage([NSString stringWithFormat: @"Notice JSON parse failed: %@", err.description]);
-                };
+                    NSString *noticeType = notice[@"noticeType"];
+                    if (noticeType == nil) {
+                        logMessage(@"Notice missing noticeType");
+                        return;
+                    }
 
-                id parser = [SBJson4Parser parserWithBlock:block allowMultiRoot:NO unwrapRootArray:NO errorHandler:eh];
-                [parser parse:[noticeJSON dataUsingEncoding:NSUTF8StringEncoding]];
+                    NSDictionary *data = notice[@"data"];
+                    if (data == nil) {
+                        return;
+                    }
 
-                if (notice == nil) {
-                    return;
+                    NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
+                    NSString *timestampStr = notice[@"timestamp"];
+                    if (timestampStr == nil) {
+                        return;
+                    }
+
+                    NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
+                    dispatch_sync(strongSelf->callbackQueue, ^{
+                        [strongLogger onDiagnosticMessage:diagnosticMessage withTimestamp:timestampStr];
+                    });
                 }
+            };
 
-                NSString *noticeType = notice[@"noticeType"];
-                if (noticeType == nil) {
-                    logMessage(@"Notice missing noticeType");
-                    return;
-                }
-
-                NSDictionary *data = notice[@"data"];
-                if (data == nil) {
-                    return;
-                }
-
-                NSString *dataStr = [[[SBJson4Writer alloc] init] stringWithObject:data];
-                NSString *timestampStr = notice[@"timestamp"];
-                if (timestampStr == nil) {
-                    return;
-                }
-
-                NSString *diagnosticMessage = [NSString stringWithFormat:@"%@: %@", noticeType, dataStr];
-                dispatch_sync(strongSelf->callbackQueue, ^{
-                    [strongLogger onDiagnosticMessage:diagnosticMessage withTimestamp:timestampStr];
-                });
-            }
-        };
+            noticeHandler = [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
+        }
 
         NSDateFormatter *rfc3339Formatter = [PsiphonTunnel rfc3339Formatter];
 
@@ -1835,9 +1842,6 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
                 });
             }
         };
-
-        PsiphonProviderNoticeHandlerShim *noticeHandler =
-            [[PsiphonProviderNoticeHandlerShim alloc] initWithLogger:logNotice];
 
         PsiphonProviderNetwork *networkInfoProvider = [[PsiphonProviderNetwork alloc]
                                                        initWithTunnelWholeDevice:tunnelWholeDevice

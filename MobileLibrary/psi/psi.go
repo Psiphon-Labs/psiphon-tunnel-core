@@ -359,6 +359,7 @@ var sendFeedbackMutex sync.Mutex
 var sendFeedbackCtx context.Context
 var stopSendFeedback context.CancelFunc
 var sendFeedbackWaitGroup *sync.WaitGroup
+var sendFeedbackSetNoticeWriter bool
 
 // StartSendFeedback encrypts the provided diagnostics and then attempts to
 // upload the encrypted diagnostics to one of the feedback upload locations
@@ -372,17 +373,28 @@ var sendFeedbackWaitGroup *sync.WaitGroup
 // Only one active upload is supported at a time. An ongoing upload will be
 // cancelled if this function is called again before it completes.
 //
-// Warnings:
-//   - Should not be used with Start concurrently in the same process
+// If StartSendFeedback is called concurrent with Start:
+//
+//   - noticeHandler MUST be nil, otherwise Start's notice handler and
+//     callbacks can be hijacked.
+//
+//   - configJson EmitDiagnosticNotices and UseNoticeFiles settings SHOULD be
+//     the same as those passed to Start, or else Start's notice logging
+//     configuration can change.
+//
+// Additional warnings:
+//
 //   - An ongoing feedback upload started with StartSendFeedback should be
-//     stopped with StopSendFeedback before the process exists. This ensures that
+//     stopped with StopSendFeedback before the process exits. This ensures that
 //     any underlying resources are cleaned up; failing to do so may result in
 //     data store corruption or other undefined behavior.
+//
 //   - Start and StartSendFeedback both make an attempt to migrate persistent
 //     files from legacy locations in a one-time operation. If these functions
 //     are called in parallel, then there is a chance that the migration attempts
 //     could execute at the same time and result in non-fatal errors in one, or
 //     both, of the migration operations.
+//
 //   - Calling StartSendFeedback or StopSendFeedback on the same call stack
 //     that the PsiphonProviderFeedbackHandler.SendFeedbackCompleted() callback
 //     is delivered on can cause a deadlock. I.E. the callback code must return
@@ -410,10 +422,14 @@ func StartSendFeedback(
 	// or equivilent, as SendFeedback is not expected to be used in a memory
 	// constrained environment.
 
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
-		func(notice []byte) {
-			noticeHandler.Notice(string(notice))
-		}))
+	sendFeedbackSetNoticeWriter = noticeHandler != nil
+
+	if sendFeedbackSetNoticeWriter {
+		psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+			func(notice []byte) {
+				noticeHandler.Notice(string(notice))
+			}))
+	}
 
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
@@ -475,8 +491,11 @@ func StopSendFeedback() {
 		sendFeedbackCtx = nil
 		stopSendFeedback = nil
 		sendFeedbackWaitGroup = nil
-		// Allow the notice handler to be garbage collected.
-		psiphon.SetNoticeWriter(os.Stderr)
+		if sendFeedbackSetNoticeWriter {
+			// Allow the notice handler to be garbage collected.
+			psiphon.SetNoticeWriter(os.Stderr)
+		}
+		sendFeedbackSetNoticeWriter = false
 	}
 }
 
