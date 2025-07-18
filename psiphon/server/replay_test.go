@@ -308,7 +308,7 @@ func runServerReplayClient(
 
 	tunnelEstablished := make(chan struct{}, 1)
 
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
@@ -321,6 +321,10 @@ func runServerReplayClient(
 				}
 			}
 		}))
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer psiphon.ResetNoticeWriter()
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	controllerWaitGroup := new(sync.WaitGroup)

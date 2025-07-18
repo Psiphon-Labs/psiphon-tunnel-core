@@ -152,7 +152,7 @@ func runMemoryTest(t *testing.T, testMode int) {
 	memInspectionFrequency := 10 * time.Second
 	maxInuseBytes := uint64(10 * 1024 * 1024)
 
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			noticeType, payload, err := psiphon.GetNotice(notice)
 			if err != nil {
@@ -192,6 +192,10 @@ func runMemoryTest(t *testing.T, testMode int) {
 				}
 			}
 		}))
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer psiphon.ResetNoticeWriter()
 
 	startController := func() {
 		controller, err = psiphon.NewController(config)

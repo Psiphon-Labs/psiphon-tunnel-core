@@ -425,7 +425,7 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 
 	tunnelEstablished := make(chan struct{}, 1)
 
-	SetNoticeWriter(NewNoticeReceiver(
+	err = SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 
 			noticeType, payload, err := GetNotice(notice)
@@ -455,6 +455,10 @@ func testObfuscatedRemoteServerLists(t *testing.T, omitMD5Sums bool) {
 				fmt.Printf("%s\n", string(notice))
 			}
 		}))
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()

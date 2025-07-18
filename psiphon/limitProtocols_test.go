@@ -49,7 +49,7 @@ func TestLimitTunnelProtocols(t *testing.T) {
 	initialConnectingCount := 0
 	connectingCount := 0
 
-	SetNoticeWriter(NewNoticeReceiver(
+	err = SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 			noticeType, payload, err := GetNotice(notice)
 			if err != nil {
@@ -93,6 +93,10 @@ func TestLimitTunnelProtocols(t *testing.T) {
 				}
 			}
 		}))
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
 
 	clientConfigJSON := `
     {

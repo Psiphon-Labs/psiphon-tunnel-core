@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -119,7 +120,11 @@ func TestDuplicateSessionID(t *testing.T) {
 	// Limitation: all tunnels still use one singleton datastore and notice
 	// handler.
 
-	psiphon.SetNoticeWriter(ioutil.Discard)
+	err = psiphon.SetNoticeWriter(io.Discard)
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer psiphon.ResetNoticeWriter()
 
 	clientConfigJSONTemplate := `
     {

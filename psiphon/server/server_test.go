@@ -1398,7 +1398,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		jsonNetworkID)
 
 	// Don't print initial config setup notices
-	psiphon.SetNoticeWriter(io.Discard)
+	err = psiphon.SetNoticeWriter(io.Discard)
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer psiphon.ResetNoticeWriter()
 
 	clientConfig, err := psiphon.LoadConfig([]byte(clientConfigJSON))
 	if err != nil {
@@ -1678,7 +1682,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	untunneledPortForward := make(chan struct{}, 1)
 	discardTunnel := make(chan struct{}, 1)
 
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+	psiphon.ResetNoticeWriter()
+	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 
 			noticeType, payload, err := psiphon.GetNotice(notice)
@@ -1759,6 +1764,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				fmt.Printf("%s\n", string(notice))
 			}
 		}))
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer psiphon.ResetNoticeWriter()
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 

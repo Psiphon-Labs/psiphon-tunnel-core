@@ -482,6 +482,13 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	configJSON, _ = json.Marshal(modifyConfig)
 
+	// Don't print initial config setup notices
+	err = SetNoticeWriter(io.Discard)
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
+
 	config, err := LoadConfig(configJSON)
 	if err != nil {
 		t.Fatalf("error processing configuration file: %s", err)
@@ -559,7 +566,8 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	var clientUpgradeDownloadedBytesCount int32
 	var remoteServerListDownloadedBytesCount int32
 
-	SetNoticeWriter(NewNoticeReceiver(
+	ResetNoticeWriter()
+	err = SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 			// TODO: log notices without logging server IPs:
 			//fmt.Fprintf(os.Stderr, "%s\n", string(notice))
@@ -650,6 +658,10 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 				}
 			}
 		}))
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
 
 	// Run controller, which establishes tunnels
 

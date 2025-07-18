@@ -27,8 +27,6 @@ package psi
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -36,6 +34,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 )
 
@@ -134,7 +133,7 @@ func Start(
 	defer controllerMutex.Unlock()
 
 	if controller != nil {
-		return fmt.Errorf("already started")
+		return errors.TraceNew("already started")
 	}
 
 	// Clients may toggle Stop/Start immediately to apply new config settings
@@ -154,7 +153,7 @@ func Start(
 
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
-		return fmt.Errorf("error loading configuration file: %s", err)
+		return errors.Trace(err)
 	}
 
 	// Set up callbacks.
@@ -179,13 +178,16 @@ func Start(
 
 	err = config.Commit(true)
 	if err != nil {
-		return fmt.Errorf("error committing configuration file: %s", err)
+		return errors.Trace(err)
 	}
 
-	psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 		func(notice []byte) {
 			wrappedProvider.Notice(string(notice))
 		}))
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	// BuildInfo is a diagnostic notice, so emit only after config.Commit
 	// sets EmitDiagnosticNotices.
@@ -194,7 +196,7 @@ func Start(
 
 	err = psiphon.OpenDataStore(config)
 	if err != nil {
-		return fmt.Errorf("error initializing datastore: %s", err)
+		return errors.Trace(err)
 	}
 
 	controllerCtx, stopController = context.WithCancel(context.Background())
@@ -236,7 +238,7 @@ func Start(
 		stopController()
 		embeddedServerListWaitGroup.Wait()
 		psiphon.CloseDataStore()
-		return fmt.Errorf("error initializing controller: %s", err)
+		return errors.Trace(err)
 	}
 
 	controllerWaitGroup = new(sync.WaitGroup)
@@ -264,7 +266,7 @@ func Stop() {
 		stopController = nil
 		controllerWaitGroup = nil
 		// Allow the provider to be garbage collected.
-		psiphon.SetNoticeWriter(os.Stderr)
+		psiphon.ResetNoticeWriter()
 	}
 }
 
@@ -425,15 +427,18 @@ func StartSendFeedback(
 	sendFeedbackSetNoticeWriter = noticeHandler != nil
 
 	if sendFeedbackSetNoticeWriter {
-		psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
+		err := psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
 			func(notice []byte) {
 				noticeHandler.Notice(string(notice))
 			}))
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	config, err := psiphon.LoadConfig([]byte(configJson))
 	if err != nil {
-		return fmt.Errorf("error loading configuration file: %s", err)
+		return errors.Trace(err)
 	}
 
 	// Set up callbacks.
@@ -461,7 +466,7 @@ func StartSendFeedback(
 
 	err = config.Commit(true)
 	if err != nil {
-		return fmt.Errorf("error committing configuration file: %s", err)
+		return errors.Trace(err)
 	}
 
 	sendFeedbackWaitGroup = new(sync.WaitGroup)
@@ -493,7 +498,7 @@ func StopSendFeedback() {
 		sendFeedbackWaitGroup = nil
 		if sendFeedbackSetNoticeWriter {
 			// Allow the notice handler to be garbage collected.
-			psiphon.SetNoticeWriter(os.Stderr)
+			psiphon.ResetNoticeWriter()
 		}
 		sendFeedbackSetNoticeWriter = false
 	}
