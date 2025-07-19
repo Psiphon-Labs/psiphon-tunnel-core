@@ -408,6 +408,8 @@ loop:
 		}
 	}()
 
+	defer metricSocketWriter.Stop()
+
 	close(shutdownBroadcast)
 	waitGroup.Wait()
 

@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message DomainBytes {
+    psiphond.MetadataClient metadata_client = 1;
+    psiphond.MetadataDevice metadata_device = 2;
+    psiphond.MetadataSession metadata_session = 3;
+
+    int64 bytes = 4;
+    string domain = 5; //LowCardinality
+    string authorized_access_types = 6; //LowCardinality
+}

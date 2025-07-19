@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message Tactics {
+    psiphond.MetadataClient metadata_client = 1;
+    psiphond.MetadataDevice metadata_device = 2;
+    psiphond.MetadataSession metadata_session = 3;
+    psiphond.MetadataServerEntry metadata_server_entry = 4;
+
+    string applied_tactics_tag = 5; //LowCardinality
+    uint64 dial_duration = 6;
+    uint64 dial_port_number = 7;
+    string egress_region = 8; //LowCardinality
+    uint64 established_tunnels_count = 9;
+    string fronting_provider_id = 10; //LowCardinality
+    bool is_replay = 11;
+    bool is_tactics_request = 12;
+    string meek_dial_domain = 13; //LowCardinality
+    string meek_dial_ip_address = 14; //LowCardinality
+    string meek_host_header = 15;
+    string meek_resolved_ip_address = 16;
+    string meek_sni_server_name = 17;
+    bool meek_transformed_host_name = 18;
+    double network_latency_multiplier = 19;
+    string network_type = 20; //LowCardinality
+    string new_tactics_tag = 21; //LowCardinality
+    string relay_protocol = 22; //LowCardinality
+    string root_event_id = 23;
+    string ssh_client_version = 24; //LowCardinality
+    string stored_tactics_tag = 25; //LowCardinality
+    string tls_profile = 26; //LowCardinality
+    string tls_version = 27; //LowCardinality
+    string user_agent = 28;
+}

@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message ServerTunnel {
+    psiphond.MetadataClient metadata_client = 1;
+    psiphond.MetadataDevice metadata_device = 2;
+    psiphond.MetadataSession metadata_session = 3;
+    psiphond.MetadataServerEntry metadata_server_entry = 4;
+    psiphond.MetadataMeek metadata_meek = 5;
+
+    string tunnel_id = 6;
+
+    string applied_tactics_tag = 7; //LowCardinality
+    string authorized_access_types = 8; //LowCardinality
+    uint64 burst_downstream_first_bytes = 9;
+    uint64 burst_downstream_first_duration = 10;
+    uint64 burst_downstream_first_offset = 11;
+    uint64 burst_downstream_first_rate = 12;
+    uint64 burst_downstream_last_bytes = 13;
+    uint64 burst_downstream_last_duration = 14;
+    uint64 burst_downstream_last_offset = 15;
+    uint64 burst_downstream_last_rate = 16;
+    uint64 burst_downstream_max_bytes = 17;
+    uint64 burst_downstream_max_duration = 18;
+    uint64 burst_downstream_max_offset = 19;
+    uint64 burst_downstream_max_rate = 20;
+    uint64 burst_downstream_min_bytes = 21;
+    uint64 burst_downstream_min_duration = 22;
+    uint64 burst_downstream_min_offset = 23;
+    uint64 burst_downstream_min_rate = 24;
+    uint64 burst_upstream_first_bytes = 25;
+    uint64 burst_upstream_first_duration = 26;
+    uint64 burst_upstream_first_offset = 27;
+    uint64 burst_upstream_first_rate = 28;
+    uint64 burst_upstream_last_bytes = 29;
+    uint64 burst_upstream_last_duration = 30;
+    uint64 burst_upstream_last_offset = 31;
+    uint64 burst_upstream_last_rate = 32;
+    uint64 burst_upstream_max_bytes = 33;
+    uint64 burst_upstream_max_duration = 34;
+    uint64 burst_upstream_max_offset = 35;
+    uint64 burst_upstream_max_rate = 36;
+    uint64 burst_upstream_min_bytes = 37;
+    uint64 burst_upstream_min_duration = 38;
+    uint64 burst_upstream_min_offset = 39;
+    uint64 burst_upstream_min_rate = 40;
+    int64 bytes = 41;
+    int64 bytes_down_tcp = 42;
+    int64 bytes_down_udp = 43;
+    int64 bytes_up_tcp = 44;
+    int64 bytes_up_udp = 45;
+    uint64 candidate_number = 46;
+    uint64 dial_duration = 47;
+    uint64 dial_port_number = 48;
+    uint64 dns_attempt = 49;
+    string dns_preferred = 50;  //LowCardinality
+    string dns_preresolved = 51;  //LowCardinality
+    uint64 dns_qname_mismatches = 52;
+    bool dns_qname_random_casing = 53;
+    string dns_transform = 54; //LowCardinality
+    uint64 downstream_bytes_fragmented = 55;
+    uint64 downstream_max_bytes_written = 56;
+    uint64 downstream_max_delayed = 57;
+    uint64 downstream_min_bytes_written = 58;
+    uint64 downstream_min_delayed = 59;
+    uint64 downstream_ossh_padding = 60;
+    uint64 duration = 61;
+    string egress_region = 62; //LowCardinality
+    uint64 established_tunnels_count = 63;
+    uint64 establishment_duration = 64;
+    string fronting_provider_id = 65; //LowCardinality
+    bool handshake_completed = 66;
+    string http_transform = 67; //LowCardinality
+    bool is_first_tunnel_in_session = 68;
+    bool is_replay = 69;
+    google.protobuf.Timestamp last_connected = 70;
+    double network_latency_multiplier = 71;
+    string network_type = 72; //LowCardinality
+    string new_tactics_tag = 73; //LowCardinality
+    string ossh_prefix = 74; //LowCardinality
+    uint64 pad_response = 75;
+    uint64 padding = 76;
+    string passthrough_address = 77; //LowCardinality
+    int64 peak_concurrent_dialing_port_forward_count_tcp = 78;
+    int64 peak_concurrent_port_forward_count_tcp = 79;
+    int64 peak_concurrent_port_forward_count_udp = 80;
+    int64 peak_concurrent_proximate_accepted_clients = 81;
+    int64 peak_concurrent_proximate_established_clients = 82;
+    double peak_dns_failure_rate = 83;
+    int64 peak_dns_failure_rate_sample_size = 84;
+    double peak_tcp_port_forward_failure_rate = 85;
+    int64 peak_tcp_port_forward_failure_rate_sample_size = 86;
+    int64 pre_handshake_random_stream_count = 87;
+    int64 pre_handshake_random_stream_downstream_bytes = 88;
+    int64 pre_handshake_random_stream_received_upstream_bytes = 89;
+    int64 pre_handshake_random_stream_sent_downstream_bytes = 90;
+    int64 pre_handshake_random_stream_upstream_bytes = 91;
+    string relay_protocol = 92; //LowCardinality
+    string seed_transform = 93; //LowCardinality
+    string server_bpf = 94; //LowCardinality
+    bool split_tunnel = 95;
+    string ssh_client_version = 96; //LowCardinality
+    google.protobuf.Timestamp start_time = 97;
+    string station_ip_address = 98; //LowCardinality
+    int64 total_packet_tunnel_channel_count = 99;
+    int64 total_port_forward_count_tcp = 100;
+    int64 total_port_forward_count_udp = 101;
+    int64 total_udpgw_channel_count = 102;
+    uint64 upstream_bytes_fragmented = 103;
+    uint64 upstream_max_bytes_written = 104;
+    uint64 upstream_max_delayed = 105;
+    uint64 upstream_min_bytes_written = 106;
+    uint64 upstream_min_delayed = 107;
+    uint64 upstream_ossh_padding = 108;
+    string upstream_proxy_custom_header_names = 109; //LowCardinality
+    string upstream_proxy_type = 110; //LowCardinality
+    string user_agent = 111;
+    
+    // Post-handshake random stream fields
+    int64 random_stream_count = 112;
+    int64 random_stream_upstream_bytes = 113;
+    int64 random_stream_received_upstream_bytes = 114;
+    int64 random_stream_downstream_bytes = 115;
+    int64 random_stream_sent_downstream_bytes = 116;
+    
+    // Destination bytes fields (legacy format)
+    string dest_bytes_asn = 117;
+    int64 dest_bytes = 118;
+    int64 dest_bytes_up_tcp = 119;
+    int64 dest_bytes_down_tcp = 120;
+    int64 dest_bytes_up_udp = 121;
+    int64 dest_bytes_down_udp = 122;
+    
+    // Additional transport and server entry fields
+    string relayed_steering_ip = 123;
+    int64 request_check_server_entry_tags = 124;
+    int64 checked_server_entry_tags = 125;
+    int64 invalid_server_entry_tags = 126;
+}
+
+message ServerTunnelASNDestBytes {
+
+    string tunnel_id = 1;
+
+    string dest_asn = 2;
+
+    int64 dest_bytes = 3;
+    int64 dest_bytes_up_tcp = 4;
+    int64 dest_bytes_down_tcp = 5;
+    int64 dest_bytes_up_udp = 6;
+    int64 dest_bytes_down_udp = 7;
+
+}

@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message RemoteServerList {
+    psiphond.MetadataClient metadata_client = 1;
+    psiphond.MetadataSession metadata_session = 2;
+
+    bool authenticated = 3;
+    string authorized_access_types = 4; //LowCardinality
+    uint64 bytes = 5;
+    string device_location = 6;
+    uint64 duration = 7;
+    string etag = 8; //LowCardinality
+    string fronting_provider_id = 9;  //LowCardinality
+
+    string meek_dial_domain = 10;
+    string meek_host_header = 11; //LowCardinality
+    string meek_resolved_ip_address = 12; //LowCardinality
+    string meek_sni_server_name = 13; //LowCardinality
+    string meek_transformed_host_name = 14; //LowCardinality
+    bool tls_fragmented = 15;
+    string tls_profile = 16; //LowCardinality
+    string tls_version = 17; //LowCardinality
+    bool tunneled = 18;
+    string url = 19; //LowCardinality
+    string user_agent = 20; //LowCardinality
+}

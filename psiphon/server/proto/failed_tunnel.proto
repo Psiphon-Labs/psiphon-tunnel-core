@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message FailedTunnel {
+    psiphond.MetadataClient metadata_client = 1;
+    psiphond.MetadataDevice metadata_device = 2;
+    psiphond.MetadataSession metadata_session = 3;
+    psiphond.MetadataServerEntry metadata_server_entry = 4;
+
+    string tunnel_id = 5;
+    string authorized_access_types = 6; //LowCardinality
+
+    string applied_tactics_tag = 7; //LowCardinality
+    uint64 bytes_down = 8;
+    uint64 bytes_up = 9;
+    google.protobuf.Timestamp client_failed_timestamp = 10;
+    uint64 dial_duration = 11;
+    uint64 dial_port_number = 12;
+    string egress_region = 13; //LowCardinality
+    uint64 established_tunnels_count = 14;
+    string fronting_provider_id = 15; //LowCardinality
+    bool is_replay = 16;
+    google.protobuf.Timestamp last_connected = 17;
+    uint64 liveness_test_downstream_bytes = 18;
+    uint64 liveness_test_received_downstream_bytes = 19;
+    uint64 liveness_test_sent_upstream_bytes = 20;
+    uint64 liveness_test_upstream_bytes = 21;
+    double network_latency_multiplier = 22;
+    string network_type = 23; //LowCardinality
+    string quic_dial_sni_address = 24;
+    bool quic_disable_client_path_mtu_discovery = 25;
+    string quic_version = 26; //LowCardinality
+    double record_probability = 27;
+    string relay_protocol = 28; //LowCardinality
+
+    bool server_entry_valid = 29;
+    string ssh_client_version = 30;  //LowCardinality
+
+    string tunnel_error = 31; //LowCardinality
+    uint64 upstream_bytes_fragmented = 32;
+    uint64 upstream_max_bytes_written = 33;
+    uint64 upstream_max_delayed = 34;
+    uint64 upstream_min_bytes_written = 35;
+    uint64 upstream_min_delayed = 36;
+    uint64 upstream_ossh_padding = 37;
+    string upstream_proxy_custom_header_names = 38; //LowCardinality
+    string upstream_proxy_type = 39; //LowCardinality
+    string user_agent = 40;
+}

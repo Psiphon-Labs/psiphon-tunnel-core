@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package psiphond;
+
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message ServerPacket {
+    uint64 tcp_ipv4_application_bytes_down = 1;
+    uint64 tcp_ipv4_application_bytes_up = 2;
+    uint64 tcp_ipv4_bytes_down = 3;
+    uint64 tcp_ipv4_bytes_up = 4;
+    uint64 tcp_ipv4_packets_down = 5;
+    uint64 tcp_ipv4_packets_up = 6;
+    uint64 tcp_ipv6_application_bytes_down = 7;
+    uint64 tcp_ipv6_application_bytes_up = 8;
+    uint64 tcp_ipv6_bytes_down = 9;
+    uint64 tcp_ipv6_bytes_up = 10;
+    uint64 tcp_ipv6_packets_down = 11;
+    uint64 tcp_ipv6_packets_up = 12;
+
+    uint64 udp_ipv4_application_bytes_down = 13;
+    uint64 udp_ipv4_application_bytes_up = 14;
+    uint64 udp_ipv4_bytes_down = 15;
+    uint64 udp_ipv4_bytes_up = 16;
+    uint64 udp_ipv4_packets_down = 17;
+    uint64 udp_ipv4_packets_up = 18;
+    uint64 udp_ipv6_application_bytes_down = 19;
+    uint64 udp_ipv6_application_bytes_up = 20;
+    uint64 udp_ipv6_bytes_down = 21;
+    uint64 udp_ipv6_bytes_up = 22;
+    uint64 udp_ipv6_packets_down = 23;
+    uint64 udp_ipv6_packets_up = 24;
+}
