@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message RemoteServerList {
+    optional psiphond.MetadataClient metadata_client = 1;
+    optional psiphond.MetadataDevice metadata_device = 2;
+    optional psiphond.MetadataSession metadata_session = 3;
+
+    optional psiphond.MetadataMeek metadata_meek = 4;
+    optional psiphond.MetadataTLS metadata_tls = 5;
+
+    // Fields 1-99 are reserved for metadata.
+
+    optional bool authenticated = 100;
+    repeated string authorized_access_types = 101; //LowCardinality
+    optional int64 bytes = 102;
+    optional google.protobuf.Timestamp client_download_timestamp = 103;
+    optional int64 duration = 104;
+    optional string etag = 105; //LowCardinality
+    optional string fronting_provider_id = 106;  //LowCardinality
+
+    optional bool tunneled = 107;
+    optional string url = 108; //LowCardinality
+    optional string user_agent = 109; //LowCardinality
+}

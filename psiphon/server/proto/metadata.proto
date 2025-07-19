@@ -1,0 +1,201 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message MetadataClient {
+    optional string client_asn = 1; //LowCardinality
+    optional string client_aso = 2; //LowCardinality
+    optional string client_bpf = 3; //LowCardinality
+    optional string client_build_rev = 4; //LowCardinality
+    optional string client_city = 5; //LowCardinality
+    repeated string client_features = 6; //LowCardinality
+    optional string client_isp = 7; //LowCardinality
+    optional string client_platform = 8; //LowCardinality
+    optional string client_region = 9; //LowCardinality
+    optional int64 client_version = 10;
+}
+
+message MetadataDevice {
+    optional string device_location = 1; //device_location uses geohash encoding
+    optional string device_region = 2; //LowCardinality
+}
+
+message MetadataSession {
+    optional string session_id = 1;
+    optional string sponsor_id = 2; //LowCardinality
+    optional string propagation_channel_id = 3; //LowCardinality
+}
+
+message MetadataServerEntry {
+    optional string server_entry_region = 1; //LowCardinality
+    optional string server_entry_source = 2; //LowCardinality
+    optional string server_entry_tag = 3;
+    optional google.protobuf.Timestamp server_entry_timestamp = 4;
+    optional bool server_packet_manipulation = 5; //LowCardinality
+    optional bool server_replay_fragmentation = 6; //LowCardinality
+    optional bool server_replay_packet_manipulation = 7; //LowCardinality
+    optional bool server_entry_valid = 8;
+}
+
+
+message MetadataInproxy {
+    optional string inproxy_broker_client_bpf = 1; //LowCardinality
+    optional string inproxy_broker_dial_address = 2; //LowCardinality
+    optional int64 inproxy_broker_dns_attempt = 3;
+    optional string inproxy_broker_dns_preferred = 4; //LowCardinality
+    optional string inproxy_broker_dns_preresolved = 5; //LowCardinality
+    optional int64 inproxy_broker_dns_qname_mismatches = 6;
+    optional bool inproxy_broker_dns_qname_must_match = 7;
+    optional bool inproxy_broker_dns_qname_random_casing = 8;
+    optional string inproxy_broker_dns_transform = 9; //LowCardinality
+    optional int64 inproxy_broker_downstream_bytes_fragmented = 10;
+    optional string inproxy_broker_fronting_provider_id = 11; //LowCardinality
+    optional string inproxy_broker_host_header = 12; //LowCardinality
+    optional string inproxy_broker_http_transform = 13; //LowCardinality
+    optional string inproxy_broker_id = 14; //LowCardinality
+    optional bool inproxy_broker_is_replay = 15;
+    optional bool inproxy_broker_is_reuse = 16;
+    optional string inproxy_broker_resolved_ip_address = 17; //LowCardinality
+    optional string inproxy_broker_sni_server_name = 18; //LowCardinality
+    optional bool inproxy_broker_tls_fragmented = 19;
+    optional string inproxy_broker_tls_profile = 20; //LowCardinality
+    optional string inproxy_broker_tls_version = 21; //LowCardinality
+    optional bool inproxy_broker_transformed_host_name = 22;
+    optional string inproxy_broker_transport = 23; //LowCardinality
+    optional int64 inproxy_broker_upstream_bytes_fragmented = 24;
+    optional string inproxy_broker_user_agent = 25; //LowCardinality
+    optional string inproxy_client_nat_type = 26; //LowCardinality
+    repeated string inproxy_client_port_mapping_types = 27; //LowCardinality
+    optional string inproxy_connection_id = 28;
+    optional int64 inproxy_dial_broker_offer_duration = 29;
+    optional int64 inproxy_dial_failed_attempts_duration = 30;
+    optional int64 inproxy_dial_nat_disovery_duration = 31;
+    optional int64 inproxy_dial_webrtc_connection_duration = 32;
+    optional int64 inproxy_dial_webrtc_ice_gathering_duration = 33;
+    optional bool inproxy_matched_common_compartments = 34; //LowCardinality
+    optional bool inproxy_matched_personal_compartments = 35;
+    optional string inproxy_proxy_applied_tactics_tag = 36; //LowCardinality
+    optional string inproxy_proxy_asn = 37; //LowCardinality
+    optional string inproxy_proxy_aso = 38; //LowCardinality
+    optional string inproxy_proxy_city = 39; //LowCardinality
+    optional string inproxy_proxy_client_build_rev = 40; //LowCardinality
+    optional string inproxy_proxy_client_platform = 41; //LowCardinality
+    optional int64 inproxy_proxy_client_version = 42; //LowCardinality
+    optional int64 inproxy_proxy_connected_clients = 43;
+    optional int64 inproxy_proxy_connecting_clients = 44;
+    optional string inproxy_proxy_device_location = 45;
+    optional string inproxy_proxy_device_region = 46; //LowCardinality
+    optional string inproxy_proxy_features = 47; //LowCardinality
+    optional string inproxy_proxy_fronting_provider_id = 48; //LowCardinality
+    optional string inproxy_proxy_id = 49;
+    optional bool inproxy_proxy_is_priority = 50;
+    optional string inproxy_proxy_isp = 51; //LowCardinality
+    optional int64 inproxy_proxy_limit_downstream_bytes_per_second = 52;
+    optional int64 inproxy_proxy_limit_upstream_bytes_per_second = 53;
+    optional int64 inproxy_proxy_max_clients = 54;
+    optional string inproxy_proxy_nat_type = 55; //LowCardinality
+    optional string inproxy_proxy_network_type = 56; //LowCardinality
+    optional int64 inproxy_proxy_peak_downstream_bytes_per_second = 57;
+    optional int64 inproxy_proxy_peak_upstream_bytes_per_second = 58;
+    repeated string inproxy_proxy_port_mapping_types = 59; //LowCardinality
+    optional string inproxy_proxy_propagation_channel_id = 60; //LowCardinality
+    optional int64 inproxy_proxy_protocol_version = 61;
+    optional string inproxy_proxy_region = 62; //LowCardinality
+    optional string inproxy_proxy_session_id = 63;
+    optional string inproxy_proxy_sponsor_id = 64; //LowCardinality
+    optional string inproxy_proxy_stored_tactics_tag = 65; //LowCardinality
+    optional int64 inproxy_webrtc_decoy_messages_received = 66;
+    optional int64 inproxy_webrtc_decoy_messages_sent = 67;
+    optional int64 inproxy_webrtc_dns_attempt = 68;
+    optional string inproxy_webrtc_dns_preferred = 69; //LowCardinality
+    optional string inproxy_webrtc_dns_preresolved = 70; //LowCardinality
+    optional int64 inproxy_webrtc_dns_qname_mismatches = 71;
+    optional bool inproxy_webrtc_dns_qname_must_match = 72;
+    optional bool inproxy_webrtc_dns_qname_random_casing = 73;
+    optional string inproxy_webrtc_dns_transform = 74; //LowCardinality
+    optional bool inproxy_webrtc_local_ice_candidate_is_IPv6 = 75;
+    optional bool inproxy_webrtc_local_ice_candidate_is_initiator = 76;
+    optional int64 inproxy_webrtc_local_ice_candidate_port = 77;
+    optional string inproxy_webrtc_local_ice_candidate_type = 78; //LowCardinality
+    optional int64 inproxy_webrtc_padded_messages_received = 79;
+    optional int64 inproxy_webrtc_padded_messages_sent = 80;
+    optional bool inproxy_webrtc_randomize_dtls = 81;
+    optional bool inproxy_webrtc_remote_ice_candidate_is_IPv6 = 82;
+    optional int64 inproxy_webrtc_remote_ice_candidate_port = 83;
+    optional string inproxy_webrtc_remote_ice_candidate_type = 84; //LowCardinality
+    optional string inproxy_webrtc_stun_server = 85; //LowCardinality
+    optional string inproxy_webrtc_stun_server_RFC5780 = 86; //LowCardinality
+    optional string inproxy_webrtc_stun_server_RFC5780_resolved_ip_address = 87; //LowCardinality
+    optional string inproxy_webrtc_stun_server_resolved_ip_address = 88; //LowCardinality
+    optional bool inproxy_webrtc_use_media_streams = 89;
+}
+
+message MetadataConjure {
+    optional bool conjure_cached = 1;
+    optional int64 conjure_delay = 2;
+    optional bool conjure_empty_packet = 3;
+    optional string conjure_network = 4; //LowCardinality
+    optional int64 conjure_port_number = 5;
+    optional string conjure_prefix = 6; //LowCardinality
+    optional string conjure_stun = 7; //LowCardinality
+    optional string conjure_transport = 8; //LowCardinality
+}
+
+message MetadataMeek {
+    optional int64 meek_cached_response_miss_position = 1;
+    optional int64 meek_client_retries = 2;
+    optional int64 meek_cookie_size = 3;
+    optional string meek_dial_domain = 4;  //LowCardinality
+    optional string meek_dial_ip_address = 5;  //LowCardinality
+    optional string meek_host_header = 6;
+    optional int64 meek_limit_request = 7;
+    optional int64 meek_peak_cached_response_hit_size = 8;
+    optional int64 meek_peak_cached_response_size = 9;
+    optional int64 meek_peak_response_size = 10;
+    optional int64 meek_redial_probability = 11;
+    optional string meek_resolved_ip_address = 12; //LowCardinality
+    optional string meek_sni_server_name = 13;
+    optional int64 meek_tls_padding = 14;
+    optional bool meek_transformed_host_name = 15;
+    optional int64 meek_underlying_connection_count = 16;
+}
+
+message MetadataQuic {
+    optional bool quic_dial_early = 1;
+    optional string quic_dial_sni_address = 2;
+    optional bool quic_did_resume = 3;
+    optional bool quic_disable_client_path_mtu_discovery = 4;
+    optional bool quic_obfuscated_psk = 5;
+    optional bool quic_sent_ticket = 6;
+    optional string quic_version = 7; //LowCardinality
+}
+
+message MetadataTLS {
+    optional bool tls_did_resume = 1;
+    optional bool tls_fragmented = 2;
+    optional string tls_ossh_sni_server_name = 3;
+    optional bool tls_ossh_transformed_host_name = 4;
+    optional int64 tls_padding = 5;
+    optional string tls_profile = 6; //LowCardinality
+    optional bool tls_sent_ticket = 7;
+    optional string tls_version = 8; //LowCardinality
+}
+
+message MetadataShadowsocks {
+    optional string shadowsocks_prefix = 1;  //LowCardinality
+}
+
+// Might add pipelime metadata to messages
+// message MetricsPipelineMetadata {
+//     repeated PipelineMetadataEntry pipeline_metadata = 1;
+// }
+
+// message PipelineMetadataEntry {
+//     string pipeline_component = 1;//LowCardinality
+//     int64 ingress_time = 2;
+//     int64 egress_time = 3;
+// }

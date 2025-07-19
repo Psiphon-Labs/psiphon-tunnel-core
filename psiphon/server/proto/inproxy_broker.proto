@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message InproxyBroker {
+    optional psiphond.MetadataClient metadata_client = 1;
+    optional psiphond.MetadataDevice metadata_device = 2;
+    optional psiphond.MetadataSession metadata_session = 3;
+    optional psiphond.MetadataServerEntry metadata_server_entry = 4;
+    
+    optional psiphond.MetadataMeek metadata_meek = 5;
+
+    // Fields 1-99 are reserved for metadata.
+
+    optional string applied_tactics_tag = 100; //LowCardinality
+    optional int64 dial_duration = 101;
+    optional int64 dial_port_number = 102;
+    optional string egress_region = 103; //LowCardinality
+    optional int64 established_tunnels_count = 104;
+    optional string fronting_provider_id = 105; //LowCardinality
+    optional bool is_replay = 106;
+    optional double network_latency_multiplier = 113;
+    optional string network_type = 114; //LowCardinality
+    optional string relay_protocol = 115; //LowCardinality
+    optional string ssh_client_version = 116; //LowCardinality
+    optional string stored_tactics_tag = 117; //LowCardinality
+}

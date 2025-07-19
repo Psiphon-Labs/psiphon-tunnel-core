@@ -77,6 +77,14 @@ type Config struct {
 	// Some debug logs can contain user traffic destination address information.
 	LogLevel string `json:",omitempty"`
 
+	// LogFormat specifies the log format. Valid values are:
+	// json (default), protobuf, both
+	//
+	// In protobuf format, only messages emitted for the stats infrastructure
+	// have been converted, other logs will still be emitted in JSON format
+	// to the specified log file/stdout.
+	LogFormat string `json:",omitempty"`
+
 	// LogFilename specifies the path of the file to log
 	// to. When blank, logs are written to stderr.
 	LogFilename string `json:",omitempty"`
@@ -105,6 +113,11 @@ type Config struct {
 	// SkipPanickingLogWriter disables panicking when
 	// unable to write any logs.
 	SkipPanickingLogWriter bool `json:",omitempty"`
+
+	// MetricSocketPath specifies the path on disk to the UDS socket
+	// that metrics are sent to for storing and forwarding.
+	// This value is only used if LogFormat is "protobuf" or "both".
+	MetricSocketPath string `json:",omitempty"`
 
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
@@ -894,6 +907,8 @@ type GenerateConfigParams struct {
 	LogFilename                        string
 	SkipPanickingLogWriter             bool
 	LogLevel                           string
+	LogFormat                          string
+	MetricSocketPath                   string
 	ServerEntrySignaturePublicKey      string
 	ServerEntrySignaturePrivateKey     string
 	ServerIPAddress                    string
@@ -1098,12 +1113,18 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		logLevel = "info"
 	}
 
+	logFormat := params.LogFormat
+	if logFormat == "" {
+		logFormat = "json"
+	}
+
 	// For testing, set the Psiphon server to create its log files; we do not
 	// expect tests to necessarily run under log managers, such as logrotate.
 	createMode := 0666
 
 	config := &Config{
 		LogLevel:                           logLevel,
+		LogFormat:                          logFormat,
 		LogFilename:                        params.LogFilename,
 		LogFileCreateMode:                  &createMode,
 		SkipPanickingLogWriter:             params.SkipPanickingLogWriter,

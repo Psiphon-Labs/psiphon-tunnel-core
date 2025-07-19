@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "google/protobuf/timestamp.proto";
+import "proto/domain_bytes.proto";
+import "proto/failed_tunnel.proto";
+import "proto/inproxy_broker.proto";
+import "proto/irregular_tunnel.proto";
+import "proto/orphan_packet.proto";
+import "proto/remote_server_list.proto";
+import "proto/server_blocklist.proto";
+import "proto/server_load.proto";
+import "proto/server_panic.proto";
+import "proto/server_packet.proto";
+import "proto/server_tunnel.proto";
+import "proto/tactics.proto";
+import "proto/unique_user.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message PsiphondMetric {
+  // The metric definition is intentionally placed first so that efficient
+  // wire protocol peeking can be used to determine the embedded message
+  // type without complete deserialization (which also entails recursively
+  // deserializing the embedded metric message, which could be quite large).
+  oneof metric {
+    psiphond.DomainBytes domain_bytes = 1;
+    psiphond.FailedTunnel failed_tunnel = 2;
+    psiphond.InproxyBroker inproxy_broker = 3;
+    psiphond.IrregularTunnel irregular_tunnel = 4;
+    psiphond.OrphanPacket orphan_packet = 5;
+    psiphond.RemoteServerList remote_server_list = 6;
+    psiphond.ServerBlocklistHit server_blocklist = 7;
+    psiphond.ServerLoad server_load = 8;
+    psiphond.ServerLoadDNS server_load_dns = 9;
+    psiphond.ServerLoadProtocol server_load_protocol = 10;
+    psiphond.ServerPanic server_panic = 11;
+    psiphond.ServerPacket server_packet = 12;
+    psiphond.ServerTunnel server_tunnel = 13;
+    psiphond.ServerTunnelASNDestBytes server_tunnel_asn_dest_bytes = 14;
+    psiphond.Tactics tactics = 15;
+    psiphond.TacticsSpeedTest tactics_speedtest = 16;
+    psiphond.UniqueUser unique_user = 17;
+  }
+  
+  // Fields 1-99 are reserved for embedded message types.
+
+  optional google.protobuf.Timestamp timestamp = 100;
+
+  optional string host_id = 101; //LowCardinality
+  optional string host_type = 102; //Could probably be removed, LowCardinality
+  optional string host_build_rev = 103; //LowCardinality
+  optional string provider = 104; //Could be removed, LowCardinality
+}
