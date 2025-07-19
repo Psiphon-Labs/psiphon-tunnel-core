@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message ServerBlocklistHit {
+    psiphond.MetadataClient metadata_client = 1;
+    psiphond.MetadataDevice metadata_device = 2;
+    psiphond.MetadataSession metadata_session = 3;
+
+    // Fields 1-99 are reserved for metadata.
+
+    string blocklist_ip_address = 100; //LowCardinality
+    string blocklist_source = 101; //LowCardinality
+    string blocklist_subject = 102; //LowCardinality
+    string egress_region = 103; //LowCardinality
+    google.protobuf.Timestamp last_connected = 104;
+}
