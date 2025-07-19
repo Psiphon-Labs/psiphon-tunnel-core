@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message IrregularTunnel {
+    psiphond.MetadataClient metadata_client = 1;
+
+    // Fields 1-99 are reserved for metadata.
+
+    string duplicate_client_ip = 100; //LowCardinality
+    uint64 duplicate_elapsed_time_ms = 101;
+    string duplicate_seed = 102;
+    string duplicate_seed_type = 103; //LowCardinality
+    uint32 listener_port_number = 104;
+    string listener_protocol = 105; //LowCardinality
+    string tunnel_error = 106; //LowCardinality
+}

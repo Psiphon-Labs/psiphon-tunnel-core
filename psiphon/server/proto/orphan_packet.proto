@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package psiphond;
+
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message OrphanPacket {
+
+    // Fields 1-99 are reserved for metadata.
+
+    uint64 downstream_packet_rejected_disallowed_domain = 100;
+    uint64 downstream_packet_rejected_disallowed_tcp_destination_port = 101;
+    uint64 downstream_packet_rejected_disallowed_udp_destination_port = 102;
+    uint64 downstream_packet_rejected_invalid_destination_address = 103;
+    uint64 downstream_packet_rejected_invalid_dns_message = 104;
+    uint64 downstream_packet_rejected_invalid_ip_header_options = 105;
+    uint64 downstream_packet_rejected_invalid_ip_header_protocol = 106;
+    uint64 downstream_packet_rejected_invalid_ip_header_version = 107;
+    uint64 downstream_packet_rejected_invalid_ip_packet_length = 108;
+    uint64 downstream_packet_rejected_invalid_tcp_packet_length = 109;
+    uint64 downstream_packet_rejected_no_client = 110;
+    uint64 downstream_packet_rejected_no_dns_resolvers = 111;
+    uint64 downstream_packet_rejected_no_original_address = 112;
+    uint64 downstream_packet_rejected_no_session = 113;
+
+    uint64 upstream_packet_rejected_disallowed_domain = 114;
+    uint64 upstream_packet_rejected_disallowed_tcp_destination_port = 115;
+    uint64 upstream_packet_rejected_disallowed_udp_destination_port = 116;
+    uint64 upstream_packet_rejected_invalid_destination_address = 117;
+    uint64 upstream_packet_rejected_invalid_dns_message = 118;
+    uint64 upstream_packet_rejected_invalid_ip_header_options = 119;
+    uint64 upstream_packet_rejected_invalid_ip_header_protocol = 120;
+    uint64 upstream_packet_rejected_invalid_ip_header_version = 121;
+    uint64 upstream_packet_rejected_invalid_ip_packet_length = 122;
+    uint64 upstream_packet_rejected_invalid_tcp_packet_length = 123;
+    uint64 upstream_packet_rejected_no_client = 124;
+    uint64 upstream_packet_rejected_no_dns_resolvers = 125;
+    uint64 upstream_packet_rejected_no_original_address = 126;
+    uint64 upstream_packet_rejected_no_session = 127;
+}
