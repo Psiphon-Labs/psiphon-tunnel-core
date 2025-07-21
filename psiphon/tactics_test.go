@@ -77,7 +77,7 @@ func TestStandAloneGetTactics(t *testing.T) {
 
 	gotTactics := int32(0)
 
-	SetNoticeWriter(NewNoticeReceiver(
+	err = SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 			noticeType, _, err := GetNotice(notice)
 			if err != nil {
@@ -88,6 +88,10 @@ func TestStandAloneGetTactics(t *testing.T) {
 				atomic.StoreInt32(&gotTactics, 1)
 			}
 		}))
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelFunc()

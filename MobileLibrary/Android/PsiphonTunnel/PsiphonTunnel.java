@@ -305,13 +305,24 @@ public class PsiphonTunnel {
         // HostFeedbackHandler. The provided HostLogger will be called to log informational notices,
         // including warnings.
         //
-        // Warnings:
+        // If `startSendFeedback` is called concurrent with `start`:
+        //
+        // - logger MUST be null, otherwise start's notice handler and callbacks can be
+        //   hijacked.
+        //
+        // - configJson EmitDiagnosticNotices and UseNoticeFiles settings SHOULD be the same as
+        //   those passed to start, or else start's notice logging configuration can change.
+        //
+        // Additional warnings:
+        //
         // - Only one active upload is supported at a time. An ongoing upload will be cancelled if
         // this function is called again before it completes.
+        //
         // - An ongoing feedback upload started with startSendFeedback() should be stopped with
         // stopSendFeedback() before the process exits. This ensures that any underlying resources
         // are cleaned up; failing to do so may result in data store corruption or other undefined
         // behavior.
+        //
         // - PsiphonTunnel.startTunneling and startSendFeedback both make an attempt to migrate
         // persistent files from legacy locations in a one-time operation. If these functions are
         // called in parallel, then there is a chance that the migration attempts could execute at
@@ -327,6 +338,44 @@ public class PsiphonTunnel {
                         // Adds fields used in feedback upload, e.g. client platform.
                         String psiphonConfig = buildPsiphonConfig(context, feedbackConfigJson,
                                 clientPlatformPrefix, clientPlatformSuffix, 0);
+
+                        PsiphonProviderNoticeHandler noticeHandler = null;
+                        if (logger != null) {
+                            noticeHandler = new PsiphonProviderNoticeHandler() {
+                                @Override
+                                public void notice(String noticeJSON) {
+
+                                    try {
+                                        JSONObject notice = new JSONObject(noticeJSON);
+
+                                        String noticeType = notice.getString("noticeType");
+
+                                        JSONObject data = notice.getJSONObject("data");
+
+                                        String diagnosticMessage = noticeType + ": " + data;
+                                        try {
+                                            callbackQueue.execute(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    logger.onDiagnosticMessage(diagnosticMessage);
+                                                }
+                                            });
+                                        } catch (RejectedExecutionException ignored) {
+                                        }
+                                    } catch (java.lang.Exception e) {
+                                        try {
+                                            callbackQueue.execute(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    logger.onDiagnosticMessage("Error handling notice " + e);
+                                                }
+                                            });
+                                        } catch (RejectedExecutionException ignored) {
+                                        }
+                                    }
+                                }
+                            };
+                        }
 
                         Psi.startSendFeedback(psiphonConfig, diagnosticsJson, uploadPath,
                                 new PsiphonProviderFeedbackHandler() {
@@ -397,40 +446,7 @@ public class PsiphonTunnel {
                                         return PsiphonTunnel.hasIPv6Route(context, logger);
                                     }
                                 },
-                                new PsiphonProviderNoticeHandler() {
-                                    @Override
-                                    public void notice(String noticeJSON) {
-
-                                        try {
-                                            JSONObject notice = new JSONObject(noticeJSON);
-
-                                            String noticeType = notice.getString("noticeType");
-
-                                            JSONObject data = notice.getJSONObject("data");
-
-                                            String diagnosticMessage = noticeType + ": " + data;
-                                            try {
-                                                callbackQueue.execute(new Runnable() {
-                                                    @Override
-                                                    public void run() {
-                                                        logger.onDiagnosticMessage(diagnosticMessage);
-                                                    }
-                                                });
-                                            } catch (RejectedExecutionException ignored) {
-                                            }
-                                        } catch (java.lang.Exception e) {
-                                            try {
-                                                callbackQueue.execute(new Runnable() {
-                                                    @Override
-                                                    public void run() {
-                                                        logger.onDiagnosticMessage("Error handling notice " + e);
-                                                    }
-                                                });
-                                            } catch (RejectedExecutionException ignored) {
-                                            }
-                                        }
-                                    }
-                                },
+                                noticeHandler,
                                 false,   // Do not use IPv6 synthesizer for Android
                                 true     // Use hasIPv6Route on Android
                         );
@@ -589,7 +605,10 @@ public class PsiphonTunnel {
         try {
             hasRoute = hasIPv6Route(context);
         } catch (Exception e) {
-            logger.onDiagnosticMessage("failed to check IPv6 route: " + e.getMessage());
+            // logger may be null; see startSendFeedback.
+            if (logger != null) {
+                logger.onDiagnosticMessage("failed to check IPv6 route: " + e.getMessage());
+            }
         }
         // TODO: change to bool return value once gobind supports that type
         return hasRoute ? 1 : 0;

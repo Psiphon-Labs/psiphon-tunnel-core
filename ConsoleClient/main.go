@@ -138,7 +138,12 @@ func main() {
 	if formatNotices {
 		noticeWriter = psiphon.NewNoticeConsoleRewriter(noticeWriter)
 	}
-	psiphon.SetNoticeWriter(noticeWriter)
+	err := psiphon.SetNoticeWriter(noticeWriter)
+	if err != nil {
+		fmt.Printf("error setting notice writer: %s\n", err)
+		os.Exit(1)
+	}
+	defer psiphon.ResetNoticeWriter()
 
 	// Handle required config file parameter
 
