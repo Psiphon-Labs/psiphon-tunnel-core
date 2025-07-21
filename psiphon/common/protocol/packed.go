@@ -873,7 +873,7 @@ func init() {
 		{6, "sshPort", nil},
 		{7, "sshUsername", nil},
 		{8, "sshPassword", lowerHexConverter},
-		{9, "sshHostKey", unpaddedBase64Converter},
+		{9, "sshHostKey", base64Converter},
 		{10, "sshObfuscatedPort", nil},
 		{11, "sshObfuscatedQUICPort", nil},
 		{12, "limitQUICVersions", nil},

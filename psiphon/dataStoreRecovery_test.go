@@ -82,7 +82,7 @@ func TestBoltResiliency(t *testing.T) {
 	noticeResetDatastore := make(chan struct{}, 1)
 	noticeDatastoreFailed := make(chan struct{}, 1)
 
-	SetNoticeWriter(NewNoticeReceiver(
+	err = SetNoticeWriter(NewNoticeReceiver(
 		func(notice []byte) {
 
 			noticeType, payload, err := GetNotice(notice)
@@ -127,6 +127,10 @@ func TestBoltResiliency(t *testing.T) {
 				fmt.Printf("%s\n", string(notice))
 			}
 		}))
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
 
 	drainNoticeChannel := func(channel chan struct{}) {
 		for {

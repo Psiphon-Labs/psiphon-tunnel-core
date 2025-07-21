@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"reflect"
@@ -67,7 +68,11 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	SetNoticeWriter(ioutil.Discard)
+	err = SetNoticeWriter(io.Discard)
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
 
 	clientConfig := &Config{
 		PropagationChannelId: "0",
@@ -868,7 +873,11 @@ func TestLimitTunnelDialPortNumbers(t *testing.T) {
 	}
 	defer os.RemoveAll(testDataDirName)
 
-	SetNoticeWriter(ioutil.Discard)
+	err = SetNoticeWriter(io.Discard)
+	if err != nil {
+		t.Fatalf("error setting notice writer: %s", err)
+	}
+	defer ResetNoticeWriter()
 
 	clientConfig := &Config{
 		PropagationChannelId: "0",

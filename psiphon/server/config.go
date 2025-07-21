@@ -669,6 +669,25 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
+	if config.ObfuscatedSSHKey != "" {
+
+		// Any SSHServerVersion selected here will take precedence over a
+		// value specified in the JSON config. Furthermore, the JSON config
+		// may omit SSHServerVersion as long as ObfuscatedSSHKey is specified
+		// and a value is selected.
+
+		seed, err := protocol.DeriveSSHServerVersionPRNGSeed(config.ObfuscatedSSHKey)
+		if err != nil {
+			return nil, errors.Tracef(
+				"DeriveSSHServerVersionPRNGSeed failed: %s", err)
+		}
+
+		serverVersion := values.GetSSHServerVersion(seed)
+		if serverVersion != "" {
+			config.SSHServerVersion = serverVersion
+		}
+	}
+
 	config.runningProtocols = []string{}
 	config.runningOnlyInproxyBroker = config.MeekServerRunInproxyBroker
 
@@ -764,19 +783,6 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	config.sshHandshakeTimeout = SSH_HANDSHAKE_TIMEOUT
 	if config.SSHHandshakeTimeoutMilliseconds != nil {
 		config.sshHandshakeTimeout = time.Duration(*config.SSHHandshakeTimeoutMilliseconds) * time.Millisecond
-	}
-
-	if config.ObfuscatedSSHKey != "" {
-		seed, err := protocol.DeriveSSHServerVersionPRNGSeed(config.ObfuscatedSSHKey)
-		if err != nil {
-			return nil, errors.Tracef(
-				"DeriveSSHServerVersionPRNGSeed failed: %s", err)
-		}
-
-		serverVersion := values.GetSSHServerVersion(seed)
-		if serverVersion != "" {
-			config.SSHServerVersion = serverVersion
-		}
 	}
 
 	if config.UDPInterceptUdpgwServerAddress != "" {
@@ -1298,7 +1304,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		SshPort:                             sshPort,
 		SshUsername:                         sshUserName,
 		SshPassword:                         sshPassword,
-		SshHostKey:                          base64.RawStdEncoding.EncodeToString(sshPublicKey.Marshal()),
+		SshHostKey:                          base64.StdEncoding.EncodeToString(sshPublicKey.Marshal()),
 		SshObfuscatedPort:                   obfuscatedSSHPort,
 		SshObfuscatedQUICPort:               obfuscatedSSHQUICPort,
 		SshShadowsocksKey:                   shadowsocksKey,
