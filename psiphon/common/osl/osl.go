@@ -1009,7 +1009,7 @@ func (config *Config) CurrentOSLIDs(schemeIndex int) (map[string]string, error) 
 // PaveData is the per-OSL data used by Pave, for use in alternative, fileless
 // mechanisms, such as proof-of-knowledge of keys. PaveData.FileSpec is the
 // OSL FileSpec that would be paved into the registry file, and
-// PaveData.FileKey is the key that would be used to encrypted OSL files.
+// PaveData.FileKey is the key that would be used to encrypt OSL files.
 type PaveData struct {
 	FileSpec *OSLFileSpec
 	FileKey  []byte
