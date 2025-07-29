@@ -846,7 +846,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error creating access control key pair: %s", err)
 	}
 
-	accessControlVerificationKeyRing := accesscontrol.VerificationKeyRing{
+	accessControlVerificationKeyRing := &accesscontrol.VerificationKeyRing{
 		Keys: []*accesscontrol.VerificationKey{accessControlVerificationKey},
 	}
 

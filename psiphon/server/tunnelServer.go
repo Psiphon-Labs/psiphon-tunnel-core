@@ -4132,10 +4132,16 @@ func (sshClient *sshClient) setHandshakeState(
 			break
 		}
 
-		verifiedAuthorization, err := accesscontrol.VerifyAuthorization(
-			&sshClient.sshServer.support.Config.AccessControlVerificationKeyRing,
-			authorization)
+		if sshClient.sshServer.support.Config.AccessControlVerificationKeyRing == nil {
+			if i == 0 {
+				log.WithTrace().Warning("authorization not configured")
+			}
+			continue
+		}
 
+		verifiedAuthorization, err := accesscontrol.VerifyAuthorization(
+			sshClient.sshServer.support.Config.AccessControlVerificationKeyRing,
+			authorization)
 		if err != nil {
 			log.WithTraceFields(
 				LogFields{"error": err}).Warning("verify authorization failed")

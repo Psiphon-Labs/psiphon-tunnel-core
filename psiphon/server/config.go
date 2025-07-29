@@ -75,11 +75,11 @@ type Config struct {
 	// panic, fatal, error, warn, info, debug
 	//
 	// Some debug logs can contain user traffic destination address information.
-	LogLevel string
+	LogLevel string `json:",omitempty"`
 
 	// LogFilename specifies the path of the file to log
 	// to. When blank, logs are written to stderr.
-	LogFilename string
+	LogFilename string `json:",omitempty"`
 
 	// LogFileReopenRetries specifies how many retries, each with a 1ms delay,
 	// will be attempted after reopening a rotated log file fails. Retries
@@ -87,7 +87,7 @@ type Config struct {
 	// performed by external log managers, such as logrotate.
 	//
 	// When omitted, DEFAULT_LOG_FILE_REOPEN_RETRIES is used.
-	LogFileReopenRetries *int
+	LogFileReopenRetries *int `json:",omitempty"`
 
 	// LogFileCreateMode specifies that the Psiphon server should create a new
 	// log file when one is not found, such as after rotation with logrotate
@@ -95,20 +95,20 @@ type Config struct {
 	// creating the file.
 	//
 	// When omitted, the Psiphon server does not create log files.
-	LogFileCreateMode *int
+	LogFileCreateMode *int `json:",omitempty"`
 
 	// When LogDNSServerLoadMetrics is true, server_load logs will include a
 	// break down of DNS request counts, failure rates, etc. per DNS server.
 	// Otherwise, only the overall DNS metrics are logged.
-	LogDNSServerLoadMetrics bool
+	LogDNSServerLoadMetrics bool `json:",omitempty"`
 
 	// SkipPanickingLogWriter disables panicking when
 	// unable to write any logs.
-	SkipPanickingLogWriter bool
+	SkipPanickingLogWriter bool `json:",omitempty"`
 
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
-	DiscoveryValueHMACKey string
+	DiscoveryValueHMACKey string `json:",omitempty"`
 
 	// GeoIPDatabaseFilenames are paths of GeoIP2/GeoLite2
 	// MaxMind database files. When empty, no GeoIP lookups are
@@ -116,21 +116,21 @@ type Config struct {
 	// logged fields: country code, city, and ISP. Multiple
 	// file support accommodates the MaxMind distribution where
 	// ISP data in a separate file.
-	GeoIPDatabaseFilenames []string
+	GeoIPDatabaseFilenames []string `json:",omitempty"`
 
 	// PsinetDatabaseFilename is the path of the file containing
 	// psinet.Database data.
-	PsinetDatabaseFilename string
+	PsinetDatabaseFilename string `json:",omitempty"`
 
 	// HostID identifies the server host; this value is included with all logs.
-	HostID string
+	HostID string `json:",omitempty"`
 
 	// HostProvider identifies the server host provider; this value is
 	// included with all logs and logged only when not blank.
-	HostProvider string
+	HostProvider string `json:",omitempty"`
 
 	// ServerIPAddress is the public IP address of the server.
-	ServerIPAddress string
+	ServerIPAddress string `json:",omitempty"`
 
 	// TunnelProtocolPorts specifies which tunnel protocols to run
 	// and which ports to listen on for each protocol. Valid tunnel
@@ -139,7 +139,7 @@ type Config struct {
 	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "FRONTED-MEEK-OSSH",
 	// "FRONTED-MEEK-QUIC-OSSH", "FRONTED-MEEK-HTTP-OSSH", "QUIC-OSSH",
 	// "TAPDANCE-OSSH", "CONJURE-OSSH", and "SHADOWSOCKS-OSSH".
-	TunnelProtocolPorts map[string]int
+	TunnelProtocolPorts map[string]int `json:",omitempty"`
 
 	// TunnelProtocolPassthroughAddresses specifies passthrough addresses to be
 	// used for tunnel protocols configured in TunnelProtocolPorts. Passthrough
@@ -149,61 +149,61 @@ type Config struct {
 	// TunnelProtocolPassthroughAddresses is supported for:
 	// "TLS-OSSH", "UNFRONTED-MEEK-HTTPS-OSSH",
 	// "UNFRONTED-MEEK-SESSION-TICKET-OSSH", "UNFRONTED-MEEK-OSSH".
-	TunnelProtocolPassthroughAddresses map[string]string
+	TunnelProtocolPassthroughAddresses map[string]string `json:",omitempty"`
 
 	// LegacyPassthrough indicates whether to expect legacy passthrough messages
 	// from clients attempting to connect. This should be set for existing/legacy
 	// passthrough servers only.
-	LegacyPassthrough bool
+	LegacyPassthrough bool `json:",omitempty"`
 
 	// EnableGQUIC indicates whether to enable legacy gQUIC QUIC-OSSH
 	// versions, for backwards compatibility with all versions used by older
 	// clients. Enabling gQUIC degrades the anti-probing stance of QUIC-OSSH,
 	// as the legacy gQUIC stack will respond to probing packets.
-	EnableGQUIC bool
+	EnableGQUIC bool `json:",omitempty"`
 
 	// SSHPrivateKey is the SSH host key. The same key is used for
 	// all protocols, run by this server instance, which use SSH.
-	SSHPrivateKey string
+	SSHPrivateKey string `json:",omitempty"`
 
 	// SSHServerVersion is the server version presented in the
 	// identification string. The same value is used for all
 	// protocols, run by this server instance, which use SSH.
-	SSHServerVersion string
+	SSHServerVersion string `json:",omitempty"`
 
 	// SSHUserName is the SSH user name to be presented by the
 	// the tunnel-core client. The same value is used for all
 	// protocols, run by this server instance, which use SSH.
-	SSHUserName string
+	SSHUserName string `json:",omitempty"`
 
 	// SSHPassword is the SSH password to be presented by the
 	// the tunnel-core client. The same value is used for all
 	// protocols, run by this server instance, which use SSH.
-	SSHPassword string
+	SSHPassword string `json:",omitempty"`
 
 	// SSHBeginHandshakeTimeoutMilliseconds specifies the timeout
 	// for clients queueing to begin an SSH handshake. The default
 	// is SSH_BEGIN_HANDSHAKE_TIMEOUT.
-	SSHBeginHandshakeTimeoutMilliseconds *int
+	SSHBeginHandshakeTimeoutMilliseconds *int `json:",omitempty"`
 
 	// SSHHandshakeTimeoutMilliseconds specifies the timeout
 	// before which a client must complete its handshake. The default
 	// is SSH_HANDSHAKE_TIMEOUT.
-	SSHHandshakeTimeoutMilliseconds *int
+	SSHHandshakeTimeoutMilliseconds *int `json:",omitempty"`
 
 	// ObfuscatedSSHKey is the secret key for use in the Obfuscated
 	// SSH protocol. The same secret key is used for all protocols,
 	// run by this server instance, which use Obfuscated SSH.
-	ObfuscatedSSHKey string
+	ObfuscatedSSHKey string `json:",omitempty"`
 
 	// ShadowsocksKey is the secret key for use in the Shadowsocks
 	// protocol.
-	ShadowsocksKey string
+	ShadowsocksKey string `json:",omitempty"`
 
 	// MeekCookieEncryptionPrivateKey is the NaCl private key used
 	// to decrypt meek cookie payload sent from clients. The same
 	// key is used for all meek protocols run by this server instance.
-	MeekCookieEncryptionPrivateKey string
+	MeekCookieEncryptionPrivateKey string `json:",omitempty"`
 
 	// MeekObfuscatedKey is the secret key used for obfuscating
 	// meek cookies sent from clients. The same key is used for all
@@ -214,27 +214,27 @@ type Config struct {
 	// passthrough capability, to connect with TLS-OSSH to the servers
 	// corresponding to those server entries, which now support TLS-OSSH by
 	// demultiplexing meek-https and TLS-OSSH over the meek-https port.
-	MeekObfuscatedKey string
+	MeekObfuscatedKey string `json:",omitempty"`
 
 	// MeekProhibitedHeaders is a list of HTTP headers to check for
 	// in client requests. If one of these headers is found, the
 	// request fails. This is used to defend against abuse.
-	MeekProhibitedHeaders []string
+	MeekProhibitedHeaders []string `json:",omitempty"`
 
 	// MeekRequiredHeaders is a list of HTTP header names and values that must
 	// appear in requests. This is used to defend against abuse.
-	MeekRequiredHeaders map[string]string
+	MeekRequiredHeaders map[string]string `json:",omitempty"`
 
 	// MeekServerCertificate specifies an optional certificate to use for meek
 	// servers, in place of the default, randomly generate certificate. When
 	// specified, the corresponding private key must be supplied in
 	// MeekServerPrivateKey. Any specified certificate is used for all meek
 	// listeners.
-	MeekServerCertificate string
+	MeekServerCertificate string `json:",omitempty"`
 
 	// MeekServerPrivateKey is the private key corresponding to the optional
 	// MeekServerCertificate parameter.
-	MeekServerPrivateKey string
+	MeekServerPrivateKey string `json:",omitempty"`
 
 	// MeekProxyForwardedForHeaders is a list of HTTP headers which
 	// may be added by downstream HTTP proxies or CDNs in front
@@ -247,37 +247,37 @@ type Config struct {
 	// the header if any one is present and the value is a valid
 	// IP address; otherwise the direct connection remote address is
 	// used as the client IP.
-	MeekProxyForwardedForHeaders []string
+	MeekProxyForwardedForHeaders []string `json:",omitempty"`
 
 	// MeekTurnAroundTimeoutMilliseconds specifies the amount of time meek will
 	// wait for downstream bytes before responding to a request. The default is
 	// MEEK_DEFAULT_TURN_AROUND_TIMEOUT.
-	MeekTurnAroundTimeoutMilliseconds *int
+	MeekTurnAroundTimeoutMilliseconds *int `json:",omitempty"`
 
 	// MeekExtendedTurnAroundTimeoutMilliseconds specifies the extended amount of
 	// time meek will wait for downstream bytes, as long as bytes arrive every
 	// MeekTurnAroundTimeoutMilliseconds, before responding to a request. The
 	// default is MEEK_DEFAULT_EXTENDED_TURN_AROUND_TIMEOUT.
-	MeekExtendedTurnAroundTimeoutMilliseconds *int
+	MeekExtendedTurnAroundTimeoutMilliseconds *int `json:",omitempty"`
 
 	// MeekSkipExtendedTurnAroundThresholdBytes specifies when to skip the
 	// extended turn around. When the number of bytes received in the client
 	// request meets the threshold, optimize for upstream flows with quicker
 	// round trip turn arounds.
-	MeekSkipExtendedTurnAroundThresholdBytes *int
+	MeekSkipExtendedTurnAroundThresholdBytes *int `json:",omitempty"`
 
 	// MeekMaxSessionStalenessMilliseconds specifies the TTL for meek sessions.
 	// The default is MEEK_DEFAULT_MAX_SESSION_STALENESS.
-	MeekMaxSessionStalenessMilliseconds *int
+	MeekMaxSessionStalenessMilliseconds *int `json:",omitempty"`
 
 	// MeekHTTPClientIOTimeoutMilliseconds specifies meek HTTP server I/O
 	// timeouts. The default is MEEK_DEFAULT_HTTP_CLIENT_IO_TIMEOUT.
-	MeekHTTPClientIOTimeoutMilliseconds *int
+	MeekHTTPClientIOTimeoutMilliseconds *int `json:",omitempty"`
 
 	// MeekFrontedHTTPClientIOTimeoutMilliseconds specifies meek HTTP server
 	// I/O timeouts for fronted protocols. The default is
 	// MEEK_DEFAULT_FRONTED_HTTP_CLIENT_IO_TIMEOUT.
-	MeekFrontedHTTPClientIOTimeoutMilliseconds *int
+	MeekFrontedHTTPClientIOTimeoutMilliseconds *int `json:",omitempty"`
 
 	// MeekCachedResponseBufferSize is the size of a private,
 	// fixed-size buffer allocated for every meek client. The buffer
@@ -290,7 +290,7 @@ type Config struct {
 	// response payload is a function of client activity, network
 	// throughput and throttling.
 	// A default of 64K is used when MeekCachedResponseBufferSize is 0.
-	MeekCachedResponseBufferSize int
+	MeekCachedResponseBufferSize int `json:",omitempty"`
 
 	// MeekCachedResponsePoolBufferSize is the size of a fixed-size,
 	// shared buffer used to temporarily extend a private buffer when
@@ -299,7 +299,7 @@ type Config struct {
 	// without allocating large buffers for all clients.
 	// A default of 64K is used when MeekCachedResponsePoolBufferSize
 	// is 0.
-	MeekCachedResponsePoolBufferSize int
+	MeekCachedResponsePoolBufferSize int `json:",omitempty"`
 
 	// MeekCachedResponsePoolBufferCount is the number of shared
 	// buffers. Shared buffers are allocated on first use and remain
@@ -307,12 +307,12 @@ type Config struct {
 	// overhead of this facility.
 	// A default of 2048 is used when MeekCachedResponsePoolBufferCount
 	// is 0.
-	MeekCachedResponsePoolBufferCount int
+	MeekCachedResponsePoolBufferCount int `json:",omitempty"`
 
 	// MeekCachedResponsePoolBufferClientLimit is the maximum number of of
 	// shared buffers a single client may consume at once. A default of 32 is
 	// used when MeekCachedResponsePoolBufferClientLimit is 0.
-	MeekCachedResponsePoolBufferClientLimit int
+	MeekCachedResponsePoolBufferClientLimit int `json:",omitempty"`
 
 	// UDPInterceptUdpgwServerAddress specifies the network address of
 	// a udpgw server which clients may be port forwarding to. When
@@ -325,76 +325,76 @@ type Config struct {
 	// validated against SSH_DISALLOWED_PORT_FORWARD_HOSTS and
 	// AllowTCPPorts. So the intercept address may be any otherwise
 	// prohibited destination.
-	UDPInterceptUdpgwServerAddress string
+	UDPInterceptUdpgwServerAddress string `json:",omitempty"`
 
 	// DNSResolverIPAddress specifies the IP address of a DNS server
 	// to be used when "/etc/resolv.conf" doesn't exist or fails to
 	// parse. When blank, "/etc/resolv.conf" must contain a usable
 	// "nameserver" entry.
-	DNSResolverIPAddress string
+	DNSResolverIPAddress string `json:",omitempty"`
 
 	// LoadMonitorPeriodSeconds indicates how frequently to log server
 	// load information (number of connected clients per tunnel protocol,
 	// number of running goroutines, amount of memory allocated, etc.)
 	// The default, 0, disables load logging.
-	LoadMonitorPeriodSeconds int
+	LoadMonitorPeriodSeconds int `json:",omitempty"`
 
 	// PeakUpstreamFailureRateMinimumSampleSize specifies the minimum number
 	// of samples (e.g., upstream port forward attempts) that are required
 	// before taking a failure rate snapshot which may be recorded as
 	// peak_dns_failure_rate/peak_tcp_port_forward_failure_rate.  The default
 	// is PEAK_UPSTREAM_FAILURE_RATE_SAMPLE_SIZE.
-	PeakUpstreamFailureRateMinimumSampleSize *int
+	PeakUpstreamFailureRateMinimumSampleSize *int `json:",omitempty"`
 
 	// ProcessProfileOutputDirectory is the path of a directory to which
 	// process profiles will be written when signaled with SIGUSR2. The
 	// files are overwritten on each invocation. When set to the default
 	// value, blank, no profiles are written on SIGUSR2. Profiles include
 	// the default profiles here: https://golang.org/pkg/runtime/pprof/#Profile.
-	ProcessProfileOutputDirectory string
+	ProcessProfileOutputDirectory string `json:",omitempty"`
 
 	// ProcessBlockProfileDurationSeconds specifies the sample duration for
 	// "block" profiling. For the default, 0, no "block" profile is taken.
-	ProcessBlockProfileDurationSeconds int
+	ProcessBlockProfileDurationSeconds int `json:",omitempty"`
 
 	// ProcessCPUProfileDurationSeconds specifies the sample duration for
 	// CPU profiling. For the default, 0, no CPU profile is taken.
-	ProcessCPUProfileDurationSeconds int
+	ProcessCPUProfileDurationSeconds int `json:",omitempty"`
 
 	// TrafficRulesFilename is the path of a file containing a JSON-encoded
 	// TrafficRulesSet, the traffic rules to apply to Psiphon client tunnels.
-	TrafficRulesFilename string
+	TrafficRulesFilename string `json:",omitempty"`
 
 	// OSLConfigFilename is the path of a file containing a JSON-encoded
 	// OSL Config, the OSL schemes to apply to Psiphon client tunnels.
-	OSLConfigFilename string
+	OSLConfigFilename string `json:",omitempty"`
 
 	// RunPacketTunnel specifies whether to run a packet tunnel.
-	RunPacketTunnel bool
+	RunPacketTunnel bool `json:",omitempty"`
 
 	// PacketTunnelEgressInterface specifies tun.ServerConfig.EgressInterface.
-	PacketTunnelEgressInterface string
+	PacketTunnelEgressInterface string `json:",omitempty"`
 
 	// PacketTunnelEnableDNSFlowTracking sets
 	// tun.ServerConfig.EnableDNSFlowTracking.
-	PacketTunnelEnableDNSFlowTracking bool
+	PacketTunnelEnableDNSFlowTracking bool `json:",omitempty"`
 
 	// PacketTunnelDownstreamPacketQueueSize specifies
 	// tun.ServerConfig.DownStreamPacketQueueSize.
-	PacketTunnelDownstreamPacketQueueSize int
+	PacketTunnelDownstreamPacketQueueSize int `json:",omitempty"`
 
 	// PacketTunnelSessionIdleExpirySeconds specifies
 	// tun.ServerConfig.SessionIdleExpirySeconds.
-	PacketTunnelSessionIdleExpirySeconds int
+	PacketTunnelSessionIdleExpirySeconds int `json:",omitempty"`
 
 	// PacketTunnelSudoNetworkConfigCommands sets
 	// tun.ServerConfig.SudoNetworkConfigCommands,
 	// packetman.Config.SudoNetworkConfigCommands, and
 	// SudoNetworkConfigCommands for configureIptablesAcceptRateLimitChain.
-	PacketTunnelSudoNetworkConfigCommands bool
+	PacketTunnelSudoNetworkConfigCommands bool `json:",omitempty"`
 
 	// RunPacketManipulator specifies whether to run a packet manipulator.
-	RunPacketManipulator bool
+	RunPacketManipulator bool `json:",omitempty"`
 
 	// MaxConcurrentSSHHandshakes specifies a limit on the number of concurrent
 	// SSH handshake negotiations. This is set to mitigate spikes in memory
@@ -404,13 +404,13 @@ type Config struct {
 	// be disconnected after a short wait for the number of concurrent handshakes
 	// to drop below the limit.
 	// The default, 0 is no limit.
-	MaxConcurrentSSHHandshakes int
+	MaxConcurrentSSHHandshakes int `json:",omitempty"`
 
 	// PeriodicGarbageCollectionSeconds turns on periodic calls to
 	// debug.FreeOSMemory, every specified number of seconds, to force garbage
 	// collection and memory scavenging. Specify 0 to disable. The default is
 	// PERIODIC_GARBAGE_COLLECTION.
-	PeriodicGarbageCollectionSeconds *int
+	PeriodicGarbageCollectionSeconds *int `json:",omitempty"`
 
 	// StopEstablishTunnelsEstablishedClientThreshold sets the established client
 	// threshold for dumping profiles when SIGTSTP is signaled. When there are
@@ -419,34 +419,34 @@ type Config struct {
 	// occur when few clients are connected and load should be relatively low. A
 	// profile dump is attempted at most once per process lifetime, the first
 	// time the threshold is met. Disabled when < 0.
-	StopEstablishTunnelsEstablishedClientThreshold *int
+	StopEstablishTunnelsEstablishedClientThreshold *int `json:",omitempty"`
 
 	// AccessControlVerificationKeyRing is the access control authorization
 	// verification key ring used to verify signed authorizations presented
 	// by clients. Verified, active (unexpired) access control types will be
 	// available for matching in the TrafficRulesFilter for the client via
 	// AuthorizedAccessTypes. All other authorizations are ignored.
-	AccessControlVerificationKeyRing accesscontrol.VerificationKeyRing
+	AccessControlVerificationKeyRing *accesscontrol.VerificationKeyRing `json:",omitempty"`
 
 	// TacticsConfigFilename is the path of a file containing a JSON-encoded
 	// tactics server configuration.
-	TacticsConfigFilename string
+	TacticsConfigFilename string `json:",omitempty"`
 
 	// BlocklistFilename is the path of a file containing a CSV-encoded
 	// blocklist configuration. See NewBlocklist for more file format
 	// documentation.
-	BlocklistFilename string
+	BlocklistFilename string `json:",omitempty"`
 
 	// BlocklistActive indicates whether to actively prevent blocklist hits in
 	// addition to logging events.
-	BlocklistActive bool
+	BlocklistActive bool `json:",omitempty"`
 
 	// AllowBogons disables port forward bogon checks. This should be used only
 	// for testing.
-	AllowBogons bool
+	AllowBogons bool `json:",omitempty"`
 
 	// EnableSteeringIPs enables meek server steering IP support.
-	EnableSteeringIPs bool
+	EnableSteeringIPs bool `json:",omitempty"`
 
 	// OwnEncodedServerEntries is a list of the server's own encoded server
 	// entries, idenfified by server entry tag. These values are used in the
@@ -457,53 +457,53 @@ type Config struct {
 	// server entries here; and, besides the discovery server entries, in
 	// psinet.Database, necessary for the discovery feature, no other server
 	// entries are stored on a Psiphon server.
-	OwnEncodedServerEntries map[string]string
+	OwnEncodedServerEntries map[string]string `json:",omitempty"`
 
 	// MeekServerRunInproxyBroker indicates whether to run an in-proxy broker
 	// endpoint and service under the meek server.
-	MeekServerRunInproxyBroker bool
+	MeekServerRunInproxyBroker bool `json:",omitempty"`
 
 	// MeekServerInproxyBrokerOnly indicates whether to run only an in-proxy
 	// broker under the meek server, and not run any meek tunnel protocol. To
 	// run the meek listener, a meek server protocol and port must still be
 	// specified in TunnelProtocolPorts, but no other tunnel protocol
 	// parameters are required.
-	MeekServerInproxyBrokerOnly bool
+	MeekServerInproxyBrokerOnly bool `json:",omitempty"`
 
 	// InproxyBrokerSessionPrivateKey specifies the broker's in-proxy session
 	// private key and derived public key used by in-proxy clients and
 	// proxies. This value is required when running an in-proxy broker.
-	InproxyBrokerSessionPrivateKey string
+	InproxyBrokerSessionPrivateKey string `json:",omitempty"`
 
 	// InproxyBrokerObfuscationRootSecret specifies the broker's in-proxy
 	// session root obfuscation secret used by in-proxy clients and proxies.
 	// This value is required when running an in-proxy broker.
-	InproxyBrokerObfuscationRootSecret string
+	InproxyBrokerObfuscationRootSecret string `json:",omitempty"`
 
 	// InproxyBrokerServerEntrySignaturePublicKey specifies the public key
 	// used to verify Psiphon server entry signature. This value is required
 	// when running an in-proxy broker.
-	InproxyBrokerServerEntrySignaturePublicKey string
+	InproxyBrokerServerEntrySignaturePublicKey string `json:",omitempty"`
 
 	// InproxyBrokerAllowCommonASNMatching overrides the default broker
 	// matching behavior which doesn't match non-personal in-proxy clients
 	// and proxies from the same ASN. This parameter is for testing only.
-	InproxyBrokerAllowCommonASNMatching bool
+	InproxyBrokerAllowCommonASNMatching bool `json:",omitempty"`
 
 	// InproxyBrokerAllowBogonWebRTCConnections overrides the default broker
 	// SDP validation behavior, which doesn't allow private network WebRTC
 	// candidates. This parameter is for testing only.
-	InproxyBrokerAllowBogonWebRTCConnections bool
+	InproxyBrokerAllowBogonWebRTCConnections bool `json:",omitempty"`
 
 	// InproxyServerSessionPrivateKey specifies the server's in-proxy session
 	// private key and derived public key used by brokers. This value is
 	// required when running in-proxy tunnel protocols.
-	InproxyServerSessionPrivateKey string
+	InproxyServerSessionPrivateKey string `json:",omitempty"`
 
 	// InproxyServerObfuscationRootSecret specifies the server's in-proxy
 	// session root obfuscation secret used by brokers. This value is
 	// required when running in-proxy tunnel protocols.
-	InproxyServerObfuscationRootSecret string
+	InproxyServerObfuscationRootSecret string `json:",omitempty"`
 
 	// IptablesAcceptRateLimitChainName, when set, enables programmatic
 	// configuration of iptables rules to allow and apply rate limits to
@@ -511,13 +511,13 @@ type Config struct {
 	// specified chain.
 	//
 	// For details, see configureIptablesAcceptRateLimitChain.
-	IptablesAcceptRateLimitChainName string
+	IptablesAcceptRateLimitChainName string `json:",omitempty"`
 
 	// IptablesAcceptRateLimitTunnelProtocolRateLimits specifies custom
 	// iptables rate limits by tunnel protocol name. See
 	// configureIptablesAcceptRateLimitChain details about the rate limit
 	// values.
-	IptablesAcceptRateLimitTunnelProtocolRateLimits map[string][2]int
+	IptablesAcceptRateLimitTunnelProtocolRateLimits map[string][2]int `json:",omitempty"`
 
 	sshBeginHandshakeTimeout                       time.Duration
 	sshHandshakeTimeout                            time.Duration
@@ -812,10 +812,12 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		config.stopEstablishTunnelsEstablishedClientThreshold = *config.StopEstablishTunnelsEstablishedClientThreshold
 	}
 
-	err = accesscontrol.ValidateVerificationKeyRing(&config.AccessControlVerificationKeyRing)
-	if err != nil {
-		return nil, errors.Tracef(
-			"AccessControlVerificationKeyRing is invalid: %s", err)
+	if config.AccessControlVerificationKeyRing != nil {
+		err = accesscontrol.ValidateVerificationKeyRing(config.AccessControlVerificationKeyRing)
+		if err != nil {
+			return nil, errors.Tracef(
+				"AccessControlVerificationKeyRing is invalid: %s", err)
+		}
 	}
 
 	// Limitation: the following is a shortcut which extracts the server's
