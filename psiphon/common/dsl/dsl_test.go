@@ -628,7 +628,7 @@ func (b *dslBackend) start(tlsConfig *tlsConfig) error {
 		defer func() {
 			if retErr != nil {
 				logger.WithTrace().Warning(fmt.Sprintf("handler failed: %s\n", retErr))
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				http.Error(w, retErr.Error(), http.StatusInternalServerError)
 			}
 		}()
 
@@ -860,7 +860,7 @@ func (b *dslBackend) handleGetOSLFileSpecs(cborRequest []byte) ([]byte, error) {
 			// the requested OSL may no longer be active. For this test, this
 			// case is unexpected.
 
-			return nil, errors.TraceNew("unknown server entry tag")
+			return nil, errors.TraceNew("unknown OSL ID")
 		}
 
 		cborOSLFileSpec, err := protocol.CBOREncoding.Marshal(matchingPaveData.FileSpec)
