@@ -176,7 +176,7 @@ func (r *Relay) SetRequestParameters(
 	}
 }
 
-// SetRequestParameters updates the parameters used for transparent server
+// SetCacheParameters updates the parameters used for transparent server
 // entry caching. When the parameters change, any existing cache is flushed
 // and replaced.
 func (r *Relay) SetCacheParameters(
@@ -355,7 +355,7 @@ func (r *Relay) handleRequest(
 		if len(cborRelayedResponse) > MaxRelayPayloadSize {
 			return nil, errors.Tracef(
 				"response size %d exceeds limit %d",
-				len(cborRelayedRequest), MaxRelayPayloadSize)
+				len(cborRelayedResponse), MaxRelayPayloadSize)
 		}
 
 		return cborRelayedResponse, nil
