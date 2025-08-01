@@ -121,7 +121,13 @@ func TestDSLs(t *testing.T) {
 }
 
 var testClientIP = "192.168.0.1"
-var testClientGeoIPData = common.GeoIPData{"Country", "City", "ISP", "ASN", "ASO"}
+var testClientGeoIPData = common.GeoIPData{
+	Country: "Country",
+	City:    "City",
+	ISP:     "ISP",
+	ASN:     "ASN",
+	ASO:     "ASO",
+}
 
 func testDSLs(testConfig *testConfig) error {
 
@@ -457,7 +463,7 @@ func (c *dslClient) DatastoreKnownOSLIDs() ([]OSLID, error) {
 	defer c.mutex.Unlock()
 
 	var IDs []OSLID
-	for IDStr, _ := range c.oslStates {
+	for IDStr := range c.oslStates {
 		ID, _ := hex.DecodeString(IDStr)
 		IDs = append(IDs, ID)
 	}
@@ -749,7 +755,7 @@ func (b *dslBackend) handleDiscoverServerEntries(cborRequest []byte) ([]byte, er
 	if !missingOSLs {
 
 		count := 0
-		for tag, _ := range b.serverEntries {
+		for tag := range b.serverEntries {
 			if count >= int(request.DiscoverCount) {
 				break
 			}
