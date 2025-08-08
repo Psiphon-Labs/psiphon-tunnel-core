@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message SpeedTest {
+    psiphond.MetadataClient metadata_client = 1;
+    psiphond.MetadataDevice metadata_device = 2;
+    psiphond.MetadataSession metadata_session = 3;
+
+    uint64 round_trip_time_ms = 4;
+    uint64 bytes_down = 5;
+    uint64 bytes_up = 6;
+    string relay_protocol = 7; //LowCardinality
+    string server_region = 8; //LowCardinality
+}

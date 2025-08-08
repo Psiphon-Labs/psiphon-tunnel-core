@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package psiphond;
+
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message ServerPanic {
+    string panic = 1;
+    string recover_value = 2;
+    string stack = 3;
+}

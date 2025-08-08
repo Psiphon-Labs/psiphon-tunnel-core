@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package psiphond;
+
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message OrphanPacket {
+    uint64 downstream_packet_rejected_disallowed_domain = 1;
+    uint64 downstream_packet_rejected_disallowed_tcp_destination_port = 2;
+    uint64 downstream_packet_rejected_disallowed_udp_destination_port = 3;
+    uint64 downstream_packet_rejected_invalid_destination_address = 4;
+    uint64 downstream_packet_rejected_invalid_dns_message = 5;
+    uint64 downstream_packet_rejected_invalid_ip_header_options = 6;
+    uint64 downstream_packet_rejected_invalid_ip_header_protocol = 7;
+    uint64 downstream_packet_rejected_invalid_ip_header_version = 8;
+    uint64 downstream_packet_rejected_invalid_ip_packet_length = 9;
+    uint64 downstream_packet_rejected_invalid_tcp_packet_length = 10;
+    uint64 downstream_packet_rejected_no_client = 11;
+    uint64 downstream_packet_rejected_no_dns_resolvers = 12;
+    uint64 downstream_packet_rejected_no_original_address = 13;
+    uint64 downstream_packet_rejected_no_session = 14;
+
+    uint64 upstream_packet_rejected_disallowed_domain = 15;
+    uint64 upstream_packet_rejected_disallowed_tcp_destination_port = 16;
+    uint64 upstream_packet_rejected_disallowed_udp_destination_port = 17;
+    uint64 upstream_packet_rejected_invalid_destination_address = 18;
+    uint64 upstream_packet_rejected_invalid_dns_message = 19;
+    uint64 upstream_packet_rejected_invalid_ip_header_options = 20;
+    uint64 upstream_packet_rejected_invalid_ip_header_protocol = 21;
+    uint64 upstream_packet_rejected_invalid_ip_header_version = 22;
+    uint64 upstream_packet_rejected_invalid_ip_packet_length = 23;
+    uint64 upstream_packet_rejected_invalid_tcp_packet_length = 24;
+    uint64 upstream_packet_rejected_no_client = 25;
+    uint64 upstream_packet_rejected_no_dns_resolvers = 26;
+    uint64 upstream_packet_rejected_no_original_address = 27;
+    uint64 upstream_packet_rejected_no_session = 28;
+}
