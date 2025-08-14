@@ -408,6 +408,10 @@ loop:
 		}
 	}()
 
+	if ShouldLogProtobuf() {
+		defer metricSocketWriter.Stop()
+	}
+
 	close(shutdownBroadcast)
 	waitGroup.Wait()
 
