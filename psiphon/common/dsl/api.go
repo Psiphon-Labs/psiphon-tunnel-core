@@ -181,8 +181,9 @@ type GetOSLFileSpecsResponse struct {
 const MaxRelayPayloadSize = 65536
 
 const (
-	psiphonClientIPHeader        = "X-Psiphon-Client-Ip"
-	psiphonClientGeoIPDataHeader = "X-Psiphon-Client-Geoipdata"
+	PsiphonClientIPHeader        = "X-Psiphon-Client-Ip"
+	PsiphonClientGeoIPDataHeader = "X-Psiphon-Client-Geoipdata"
+	PsiphonHostIDHeader          = "X-Psiphon-Host-Id"
 
 	requestVersion                   = 1
 	requestTypeDiscoverServerEntries = 1
