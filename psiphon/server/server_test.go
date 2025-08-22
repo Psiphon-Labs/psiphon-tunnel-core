@@ -2439,11 +2439,11 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if !(fields["ssh_protocol_bytes"].(int64) > 0) {
+	if !(fields["ssh_protocol_bytes"].(float64) > 0) {
 		return fmt.Errorf("unexpected zero ssh_protocol_bytes")
 	}
 
-	if !(fields["ssh_protocol_bytes"].(int64) > fields["bytes"].(int64)) {
+	if !(fields["ssh_protocol_bytes"].(float64) > fields["bytes"].(float64)) {
 		return fmt.Errorf("unexpected ssh_protocol_bytes < bytes")
 	}
 
