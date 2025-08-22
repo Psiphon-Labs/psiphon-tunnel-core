@@ -2261,17 +2261,12 @@ type sshProtocolBytesTracker struct {
 	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	totalBytesRead    int64
 	totalBytesWritten int64
-	sshClient         *sshClient
-	startTime         time.Time
 }
 
 func newSSHProtocolBytesTracker(sshClient *sshClient) *sshProtocolBytesTracker {
 	return &sshProtocolBytesTracker{
-		sshClient: sshClient,
-
 		totalBytesRead:    0,
 		totalBytesWritten: 0,
-		startTime:         time.Now(),
 	}
 }
 
