@@ -621,7 +621,10 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 		CommonLogger(log),
 		getTacticsAPIParameterLogFieldFormatter(),
 		getTacticsAPIParameterValidator(config),
-		config.TacticsConfigFilename)
+		config.TacticsConfigFilename,
+		config.TacticsRequestPublicKey,
+		config.TacticsRequestPrivateKey,
+		config.TacticsRequestObfuscatedKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

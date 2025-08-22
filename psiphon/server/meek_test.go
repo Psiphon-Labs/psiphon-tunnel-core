@@ -560,7 +560,7 @@ func runTestMeekAccessControl(t *testing.T, rateLimit, restrictProvider, missing
 	}
 	mockSupport.GeoIPService, _ = NewGeoIPService([]string{})
 
-	tacticsServer, err := tactics.NewServer(nil, nil, nil, tacticsConfigFilename)
+	tacticsServer, err := tactics.NewServer(nil, nil, nil, tacticsConfigFilename, "", "", "")
 	if err != nil {
 		t.Fatalf("tactics.NewServer failed: %s", err)
 	}

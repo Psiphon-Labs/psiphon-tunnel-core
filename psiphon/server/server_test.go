@@ -879,7 +879,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.doLegacyDestinationBytes ||
 		runConfig.doTunneledDomainRequest
 
-	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
 		tactics.GenerateKeys()
 	if err != nil {
@@ -942,6 +941,21 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
 		generateConfigParams.FrontingProviderID = prng.HexString(8)
+	}
+
+	var configTacticsRequestPublicKey, configTacticsRequestPrivateKey, configTacticsRequestObfuscatedKey string
+	if prng.FlipCoin() {
+
+		// Exercise specifying the tactics key parameters in the main server
+		// config file and not in the tactics config file.
+
+		configTacticsRequestPublicKey = tacticsRequestPublicKey
+		configTacticsRequestPrivateKey = tacticsRequestPrivateKey
+		configTacticsRequestObfuscatedKey = tacticsRequestObfuscatedKey
+
+		tacticsRequestPublicKey = ""
+		tacticsRequestPrivateKey = ""
+		tacticsRequestObfuscatedKey = ""
 	}
 
 	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
@@ -1046,6 +1060,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
 	if doServerTactics {
 		serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
+
+		if configTacticsRequestPublicKey != "" {
+			serverConfig["TacticsRequestPublicKey"] = configTacticsRequestPublicKey
+
+		}
+		if configTacticsRequestPrivateKey != "" {
+			serverConfig["TacticsRequestPrivateKey"] = configTacticsRequestPrivateKey
+
+		}
+		if configTacticsRequestObfuscatedKey != "" {
+			serverConfig["TacticsRequestObfuscatedKey"] = configTacticsRequestObfuscatedKey
+
+		}
 	}
 	serverConfig["BlocklistFilename"] = blocklistFilename
 

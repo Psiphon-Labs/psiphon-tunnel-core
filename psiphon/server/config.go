@@ -432,6 +432,21 @@ type Config struct {
 	// tactics server configuration.
 	TacticsConfigFilename string `json:",omitempty"`
 
+	// TacticsRequestPublicKey is an optional, base64 encoded
+	// tactics.Server.RequestPublicKey which overrides the value in the
+	// tactics configuration file.
+	TacticsRequestPublicKey string `json:",omitempty"`
+
+	// TacticsRequestPrivateKey is an optional, base64 encoded
+	// tactics.Server.RequestPrivateKey which overrides the value in the
+	// tactics configuration file.
+	TacticsRequestPrivateKey string `json:",omitempty"`
+
+	// TacticsRequestObfuscatedKey is an optional, base64 encoded
+	// tactics.Server.RequestObfuscatedKey which overrides the value in the
+	// tactics configuration file.
+	TacticsRequestObfuscatedKey string `json:",omitempty"`
+
 	// BlocklistFilename is the path of a file containing a CSV-encoded
 	// blocklist configuration. See NewBlocklist for more file format
 	// documentation.

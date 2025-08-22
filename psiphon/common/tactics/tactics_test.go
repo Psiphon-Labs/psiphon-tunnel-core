@@ -202,7 +202,10 @@ func TestTactics(t *testing.T) {
 		logger,
 		formatter,
 		validator,
-		configFileName)
+		configFileName,
+		"",
+		"",
+		"")
 	if err != nil {
 		t.Fatalf("NewServer failed: %s", err)
 	}
@@ -800,17 +803,16 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 		t.Fatalf("GenerateKeys failed: %s", err)
 	}
 
-	tacticsConfigTemplate := fmt.Sprintf(`
+	// Exercise specifying keys in NewServer instead of config file.
+
+	tacticsConfigTemplate := `
     {
-      "RequestPublicKey" : "%s",
-      "RequestPrivateKey" : "%s",
-      "RequestObfuscatedKey" : "%s",
       "DefaultTactics" : {
         "TTL" : "60s"
       },
-      %%s
+      %s
     }
-    `, encodedRequestPublicKey, encodedRequestPrivateKey, encodedObfuscatedKey)
+    `
 
 	// Test: region-only scope
 
@@ -848,7 +850,10 @@ func TestTacticsFilterGeoIPScope(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		configFileName)
+		configFileName,
+		encodedRequestPublicKey,
+		encodedRequestPrivateKey,
+		encodedObfuscatedKey)
 	if err != nil {
 		t.Fatalf("NewServer failed: %s", err)
 	}
