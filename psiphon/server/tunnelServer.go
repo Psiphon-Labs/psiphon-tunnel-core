@@ -1956,6 +1956,7 @@ type sshClient struct {
 	requestCheckServerEntryTags          int
 	checkedServerEntryTags               int
 	invalidServerEntryTags               int
+	sshProtocolBytesTracker              *sshProtocolBytesTracker
 }
 
 type trafficState struct {
@@ -2173,15 +2174,18 @@ func (lookup *splitTunnelLookup) lookup(region string) bool {
 }
 
 type inproxyProxyQualityTracker struct {
+	// Note: 64-bit ints used with atomic operations are placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	bytesUp         int64
+	bytesDown       int64
+	reportTriggered int32
+
 	sshClient       *sshClient
 	targetBytesUp   int64
 	targetBytesDown int64
 	targetDuration  time.Duration
 	startTime       time.Time
-
-	bytesUp         int64
-	bytesDown       int64
-	reportTriggered int32
 }
 
 func newInproxyProxyQualityTracker(
@@ -2249,6 +2253,31 @@ func (t *inproxyProxyQualityTracker) UpdateProgress(
 			t.sshClient.reportProxyQuality()
 		}
 	}
+}
+
+type sshProtocolBytesTracker struct {
+	// Note: 64-bit ints used with atomic operations are placed
+	// at the start of struct to ensure 64-bit alignment.
+	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	totalBytesRead    int64
+	totalBytesWritten int64
+}
+
+func newSSHProtocolBytesTracker(sshClient *sshClient) *sshProtocolBytesTracker {
+	return &sshProtocolBytesTracker{
+		totalBytesRead:    0,
+		totalBytesWritten: 0,
+	}
+}
+
+func (t *sshProtocolBytesTracker) UpdateProgress(
+	bytesRead, bytesWritten, _ int64) {
+
+	// Concurrency: UpdateProgress may be called concurrently; all accesses to
+	// mutated fields use atomic operations.
+
+	atomic.AddInt64(&t.totalBytesRead, bytesRead)
+	atomic.AddInt64(&t.totalBytesWritten, bytesWritten)
 }
 
 func newSshClient(
@@ -3742,10 +3771,17 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	// Pre-calculate a total-tunneled-bytes field. This total is used
 	// extensively in analytics and is more performant when pre-calculated.
-	logFields["bytes"] = sshClient.tcpTrafficState.bytesUp +
+	bytes := sshClient.tcpTrafficState.bytesUp +
 		sshClient.tcpTrafficState.bytesDown +
 		sshClient.udpTrafficState.bytesUp +
 		sshClient.udpTrafficState.bytesDown
+	logFields["bytes"] = bytes
+
+	// Pre-calculate ssh protocol bytes and overhead.
+	sshProtocolBytes := sshClient.sshProtocolBytesTracker.totalBytesWritten +
+		sshClient.sshProtocolBytesTracker.totalBytesRead
+	logFields["ssh_protocol_bytes"] = sshProtocolBytes
+	logFields["ssh_protocol_bytes_overhead"] = sshProtocolBytes - bytes
 
 	if sshClient.additionalTransportData != nil &&
 		sshClient.additionalTransportData.steeringIP != "" {
@@ -4661,6 +4697,17 @@ func (sshClient *sshClient) reportProxyQuality() {
 		sshClient.clientGeoIPData.ASN)
 }
 
+func (sshClient *sshClient) newSSHProtocolBytesTracker() *sshProtocolBytesTracker {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+
+	tracker := newSSHProtocolBytesTracker(sshClient)
+
+	sshClient.sshProtocolBytesTracker = tracker
+
+	return tracker
+}
+
 func (sshClient *sshClient) getTunnelActivityUpdaters() []common.ActivityUpdater {
 
 	var updaters []common.ActivityUpdater
@@ -4669,6 +4716,9 @@ func (sshClient *sshClient) getTunnelActivityUpdaters() []common.ActivityUpdater
 	if inproxyProxyQualityTracker != nil {
 		updaters = append(updaters, inproxyProxyQualityTracker)
 	}
+
+	sshProtocolBytesTracker := sshClient.newSSHProtocolBytesTracker()
+	updaters = append(updaters, sshProtocolBytesTracker)
 
 	return updaters
 }
