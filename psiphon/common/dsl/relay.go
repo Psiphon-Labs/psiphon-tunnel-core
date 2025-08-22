@@ -52,7 +52,9 @@ const (
 // RelayConfig specifies the configuration for a Relay.
 //
 // The CACertificates and HostCertificate parameters are used for mutually
-// authenticated TLS between the Relay and the DSL backend.
+// authenticated TLS between the Relay and the DSL backend. The HostID value
+// is sent to the DSL backend for logging, and should be populated with the
+// HostID in psiphond.config.
 type RelayConfig struct {
 	Logger common.Logger
 
@@ -60,6 +62,8 @@ type RelayConfig struct {
 	HostCertificate *tls.Certificate
 
 	DynamicServerListServiceURL string
+
+	HostID string
 }
 
 // Relay is an intermediary between a DSL client and the DSL backend which
@@ -311,8 +315,9 @@ func (r *Relay) handleRequest(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		httpRequest.Header.Set(psiphonClientIPHeader, clientIP)
-		httpRequest.Header.Set(psiphonClientGeoIPDataHeader, string(jsonGeoIPData))
+		httpRequest.Header.Set(PsiphonClientIPHeader, clientIP)
+		httpRequest.Header.Set(PsiphonClientGeoIPDataHeader, string(jsonGeoIPData))
+		httpRequest.Header.Set(PsiphonHostIDHeader, r.config.HostID)
 
 		startTime := time.Now()
 		httpResponse, err := r.httpClient.Do(httpRequest)

@@ -120,14 +120,11 @@ func TestDSLs(t *testing.T) {
 	}
 }
 
-var testClientIP = "192.168.0.1"
-var testClientGeoIPData = common.GeoIPData{
-	Country: "Country",
-	City:    "City",
-	ISP:     "ISP",
-	ASN:     "ASN",
-	ASO:     "ASO",
-}
+var (
+	testClientIP        = "192.168.0.1"
+	testClientGeoIPData = common.GeoIPData{"Country", "City", "ISP", "ASN", "ASO"}
+	testHostID          = "host_id"
+)
 
 func testDSLs(testConfig *testConfig) error {
 
@@ -169,6 +166,7 @@ func testDSLs(testConfig *testConfig) error {
 		CACertificates:              []*x509.Certificate{tlsConfig.CACertificate},
 		HostCertificate:             tlsConfig.relayCertificate,
 		DynamicServerListServiceURL: backend.getAddress(),
+		HostID:                      testHostID,
 	}
 
 	relay, err := NewRelay(relayConfig)
@@ -638,23 +636,31 @@ func (b *dslBackend) start(tlsConfig *tlsConfig) error {
 			}
 		}()
 
-		clientIPHeader, ok := r.Header[psiphonClientIPHeader]
+		clientIPHeader, ok := r.Header[PsiphonClientIPHeader]
 		if !ok {
-			return errors.Tracef("missing header: psiphonClientIPHeader")
+			return errors.Tracef("missing header: %s", PsiphonClientIPHeader)
 		}
 		if len(clientIPHeader) != 1 || clientIPHeader[0] != testClientIP {
-			return errors.Tracef("invalid header: psiphonClientIPHeader")
+			return errors.Tracef("invalid header: %s", PsiphonClientIPHeader)
 		}
 
-		clientGeoIPDataHeader, ok := r.Header[psiphonClientGeoIPDataHeader]
+		clientGeoIPDataHeader, ok := r.Header[PsiphonClientGeoIPDataHeader]
 		if !ok {
-			return errors.Tracef("missing header: psiphonClientGeoIPDataHeader")
+			return errors.Tracef("missing header: %s", PsiphonClientGeoIPDataHeader)
 		}
 		var geoIPData common.GeoIPData
 		if len(clientGeoIPDataHeader) != 1 ||
 			json.Unmarshal([]byte(clientGeoIPDataHeader[0]), &geoIPData) != nil ||
 			geoIPData != testClientGeoIPData {
-			return errors.Tracef("invalid header: psiphonClientGeoIPDataHeader")
+			return errors.Tracef("invalid header: %s", PsiphonClientGeoIPDataHeader)
+		}
+
+		hostIDHeader, ok := r.Header[PsiphonHostIDHeader]
+		if !ok {
+			return errors.Tracef("missing header: %s", PsiphonHostIDHeader)
+		}
+		if len(hostIDHeader) != 1 || hostIDHeader[0] != testHostID {
+			return errors.Tracef("invalid header: %s", PsiphonHostIDHeader)
 		}
 
 		request, err := io.ReadAll(r.Body)
