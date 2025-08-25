@@ -72,6 +72,10 @@ func RunServices(configJSON []byte) (retErr error) {
 
 	loggingInitialized = true
 
+	if ShouldLogProtobuf() {
+		defer metricSocketWriter.Stop()
+	}
+
 	err = addHostConfig(config)
 	if err != nil {
 		return errors.Trace(err)
