@@ -209,7 +209,7 @@ func LogFieldsToProtobuf(logFields LogFields) []*pb.PsiphondMetric {
 		wrapper.Metric = &pb.PsiphondMetric_DomainBytes{DomainBytes: msg}
 	case "server_load":
 		if region, hasRegion := logFields["region"]; hasRegion {
-			for _, proto := range protocol.SupportedTunnelProtocols {
+			for _, proto := range append(protocol.SupportedTunnelProtocols, "ALL") {
 				if _, exists := logFields[proto]; exists {
 					protoStats := logFields[proto].(map[string]any)
 
