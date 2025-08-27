@@ -61,6 +61,7 @@ type testConfig struct {
 	repeatBeforeTTL    bool
 	isConnected        bool
 	expectFailure      bool
+	cacheServerEntries bool
 }
 
 func TestDSLs(t *testing.T) {
@@ -107,6 +108,13 @@ func TestDSLs(t *testing.T) {
 			name: "first request is-connected",
 
 			isConnected: true,
+		},
+		{
+			name: "cache server entries",
+
+			interruptDownloads: true,
+			enableRetries:      true,
+			cacheServerEntries: true,
 		},
 	}
 
@@ -161,17 +169,42 @@ func testDSLs(testConfig *testConfig) error {
 
 	// Initialize relay
 
+	expectValidMetric := false
+	metricsValidator := func(metric string, fields common.LogFields) bool { return false }
+	if testConfig.cacheServerEntries {
+		expectValidMetric = true
+		metricsValidator = func(metric string, fields common.LogFields) bool {
+			return metric == "dsl" &&
+				fields["dsl_event"].(string) == "get-server-entries"
+		}
+	}
+
+	relayLogger := newTestLoggerWithMetricValidator("relay", metricsValidator)
+
 	relayConfig := &RelayConfig{
-		Logger:                      newTestLoggerWithComponent("relay"),
+		Logger:                      relayLogger,
 		CACertificates:              []*x509.Certificate{tlsConfig.CACertificate},
 		HostCertificate:             tlsConfig.relayCertificate,
 		DynamicServerListServiceURL: backend.getAddress(),
 		HostID:                      testHostID,
+
+		APIParameterValidator: func(params common.APIParameters) error { return nil },
+
+		APIParameterLogFieldFormatter: func(
+			_ string, _ common.GeoIPData, params common.APIParameters) common.LogFields {
+			logFields := common.LogFields{}
+			logFields.Add(common.LogFields(params))
+			return logFields
+		},
 	}
 
 	relay, err := NewRelay(relayConfig)
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	if !testConfig.cacheServerEntries {
+		relay.SetCacheParameters(0, 0)
 	}
 
 	// Initialize client fetcher
@@ -373,6 +406,11 @@ func testDSLs(testConfig *testConfig) error {
 			return errors.Tracef(
 				"unexpected delete OSL state count: %d", dslClient.deleteOSLStateCount)
 		}
+	}
+
+	err = relayLogger.CheckMetrics(expectValidMetric)
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -1107,8 +1145,11 @@ func initializeTLSConfiguration() (*tlsConfig, error) {
 }
 
 type testLogger struct {
-	component     string
-	logLevelDebug int32
+	component        string
+	metricValidator  func(string, common.LogFields) bool
+	hasValidMetric   int32
+	hasInvalidMetric int32
+	logLevelDebug    int32
 }
 
 func newTestLogger() *testLogger {
@@ -1117,10 +1158,23 @@ func newTestLogger() *testLogger {
 	}
 }
 
-func newTestLoggerWithComponent(component string) *testLogger {
+func newTestLoggerWithComponent(
+	component string) *testLogger {
+
 	return &testLogger{
 		component:     component,
 		logLevelDebug: 0,
+	}
+}
+
+func newTestLoggerWithMetricValidator(
+	component string,
+	metricValidator func(string, common.LogFields) bool) *testLogger {
+
+	return &testLogger{
+		component:       component,
+		metricValidator: metricValidator,
+		logLevelDebug:   0,
 	}
 }
 
@@ -1140,6 +1194,17 @@ func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTra
 }
 
 func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
+
+	if logger.metricValidator != nil {
+		if logger.metricValidator(metric, fields) {
+			atomic.StoreInt32(&logger.hasValidMetric, 1)
+		} else {
+			atomic.StoreInt32(&logger.hasInvalidMetric, 1)
+		}
+		// Don't print log.
+		return
+	}
+
 	jsonFields, _ := json.Marshal(fields)
 	var component string
 	if len(logger.component) > 0 {
@@ -1151,6 +1216,17 @@ func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
 		component,
 		metric,
 		string(jsonFields))
+}
+
+func (logger *testLogger) CheckMetrics(expectValidMetric bool) error {
+
+	if expectValidMetric && atomic.LoadInt32(&logger.hasValidMetric) != 1 {
+		return errors.TraceNew("missing valid metric")
+	}
+	if atomic.LoadInt32(&logger.hasInvalidMetric) == 1 {
+		return errors.TraceNew("has invalid metric")
+	}
+	return nil
 }
 
 func (logger *testLogger) IsLogLevelDebug() bool {
