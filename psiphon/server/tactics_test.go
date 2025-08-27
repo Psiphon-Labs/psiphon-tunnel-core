@@ -142,10 +142,7 @@ func TestServerTacticsParametersCache(t *testing.T) {
 	}
 
 	tacticsServer, err := tactics.NewServer(
-		nil,
-		nil,
-		nil,
-		tacticsConfigFilename)
+		nil, nil, nil, tacticsConfigFilename, "", "", "")
 	if err != nil {
 		t.Fatalf("NewServer failed: %s", err)
 	}

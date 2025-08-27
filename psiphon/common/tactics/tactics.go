@@ -439,11 +439,18 @@ func GenerateKeys() (encodedRequestPublicKey, encodedRequestPrivateKey, encodedO
 // The logger and logFieldFormatter callbacks are used to log errors and
 // metrics. The apiParameterValidator callback is used to validate client
 // API parameters submitted to the tactics request.
+//
+// The optional requestPublicKey, requestPrivateKey, and requestObfuscatedKey
+// base64 encoded string parameters may be used to specify and override the
+// corresponding Server config values.
 func NewServer(
 	logger common.Logger,
 	logFieldFormatter common.APIParameterLogFieldFormatter,
 	apiParameterValidator common.APIParameterValidator,
-	configFilename string) (*Server, error) {
+	configFilename string,
+	requestPublicKey string,
+	requestPrivateKey string,
+	requestObfuscatedKey string) (*Server, error) {
 
 	server := &Server{
 		logger:                logger,
@@ -462,6 +469,30 @@ func NewServer(
 			err := json.Unmarshal(fileContent, &newServer)
 			if err != nil {
 				return errors.Trace(err)
+			}
+
+			if requestPublicKey != "" {
+				newServer.RequestPublicKey, err =
+					base64.StdEncoding.DecodeString(requestPublicKey)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+
+			if requestPrivateKey != "" {
+				newServer.RequestPrivateKey, err =
+					base64.StdEncoding.DecodeString(requestPrivateKey)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+
+			if requestObfuscatedKey != "" {
+				newServer.RequestObfuscatedKey, err =
+					base64.StdEncoding.DecodeString(requestObfuscatedKey)
+				if err != nil {
+					return errors.Trace(err)
+				}
 			}
 
 			err = newServer.Validate()
