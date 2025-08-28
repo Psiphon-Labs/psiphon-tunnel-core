@@ -138,6 +138,7 @@ type MeekServer struct {
 	rateLimitSignalGC               chan struct{}
 	normalizer                      *transforms.HTTPNormalizerListener
 	inproxyBroker                   *inproxy.Broker
+	inproxyCheckAllowMatch          atomic.Value
 }
 
 // NewMeekServer initializes a new meek server.
@@ -1871,6 +1872,62 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Duration(parameters.InproxyProxyQualityPendingFailedMatchDeadline),
 		p.Int(parameters.InproxyProxyQualityFailedMatchThreshold))
 
+	// Configure proxy/client match checklists.
+	//
+	// When an allow list is set, the client GeoIP data must appear in the
+	// proxy's list or the match isn't allowed. When a disallow list is set,
+	// the match isn't allowed if the client GeoIP data appears in the
+	// proxy's list.
+
+	makeCheckListLookup := func(
+		lists map[string][]string,
+		isAllowList bool) func(string, string) bool {
+
+		if len(lists) == 0 {
+			return func(string, string) bool {
+				// Allow when no list
+				return true
+			}
+		}
+		lookup := make(map[string]map[string]struct{})
+		for key, items := range lists {
+			// TODO: use linear search for lists below stringLookupThreshold?
+			itemLookup := make(map[string]struct{})
+			for _, item := range items {
+				itemLookup[item] = struct{}{}
+			}
+			lookup[key] = itemLookup
+		}
+		return func(key, item string) bool {
+			itemLookup := lookup[key]
+			if itemLookup == nil {
+				// Allow when no list
+				return true
+			}
+			_, found := itemLookup[item]
+			// Allow or disallow based on list type
+			return found == isAllowList
+		}
+	}
+
+	inproxyCheckAllowMatchByRegion := makeCheckListLookup(p.KeyStringsValue(
+		parameters.InproxyAllowMatchByRegion), true)
+	inproxyCheckAllowMatchByASN := makeCheckListLookup(p.KeyStringsValue(
+		parameters.InproxyAllowMatchByASN), true)
+	inproxyCheckDisallowMatchByRegion := makeCheckListLookup(p.KeyStringsValue(
+		parameters.InproxyDisallowMatchByRegion), false)
+	inproxyCheckDisallowMatchByRASN := makeCheckListLookup(p.KeyStringsValue(
+		parameters.InproxyDisallowMatchByASN), false)
+
+	checkAllowMatch := func(proxyGeoIPData, clientGeoIPData common.GeoIPData) bool {
+		return inproxyCheckAllowMatchByRegion(proxyGeoIPData.Country, clientGeoIPData.Country) &&
+			inproxyCheckAllowMatchByASN(proxyGeoIPData.ASN, clientGeoIPData.ASN) &&
+			inproxyCheckDisallowMatchByRegion(proxyGeoIPData.Country, clientGeoIPData.Country) &&
+			inproxyCheckDisallowMatchByRASN(proxyGeoIPData.ASN, clientGeoIPData.ASN)
+	}
+
+	server.inproxyCheckAllowMatch.Store(checkAllowMatch)
+
 	return nil
 }
 
@@ -1899,6 +1956,13 @@ func (server *MeekServer) inproxyBrokerAllowClient(clientGeoIPData common.GeoIPD
 
 func (server *MeekServer) inproxyBrokerAllowDomainFrontedDestinations(clientGeoIPData common.GeoIPData) bool {
 	return server.lookupAllowTactic(clientGeoIPData, parameters.InproxyAllowDomainFrontedDestinations)
+}
+
+func (server *MeekServer) inproxyBrokerAllowMatch(
+	proxyGeoIPData common.GeoIPData, clientGeoIPData common.GeoIPData) bool {
+
+	return server.inproxyCheckAllowMatch.Load().(func(proxy, client common.GeoIPData) bool)(
+		proxyGeoIPData, clientGeoIPData)
 }
 
 func (server *MeekServer) inproxyBrokerPrioritizeProxy(

@@ -132,8 +132,11 @@ type MatcherConfig struct {
 	// Proxy quality state.
 	ProxyQualityState *ProxyQualityState
 
-	// Broker process load limit state callback. See Broker.Config.
+	// Broker process load limit state callback. See BrokerConfig.
 	IsLoadLimiting func() bool
+
+	// Proxy/client allow match callback. See BrokerConfig.
+	AllowMatch func(common.GeoIPData, common.GeoIPData) bool
 }
 
 // MatchProperties specifies the compartment, GeoIP, and network topology
@@ -852,20 +855,27 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 			continue
 		}
 
-		// Disallow matching the same country and ASN, except for personal
+		// Disallow matching the same country and ASN, or GeoIP combinations
+		// prohibited by the AllowMatch callback, except for personal
 		// compartment ID matches.
 		//
 		// For common matching, hopping through the same ISP is assumed to
 		// have no circumvention benefit. For personal matching, the user may
 		// wish to hop their their own or their friend's proxy regardless.
 
-		if isCommonCompartments &&
-			!GetAllowCommonASNMatching() &&
-			(offerProperties.GeoIPData.Country ==
-				announcementProperties.GeoIPData.Country &&
-				offerProperties.GeoIPData.ASN ==
-					announcementProperties.GeoIPData.ASN) {
-			continue
+		if isCommonCompartments {
+			if !GetAllowCommonASNMatching() &&
+				(offerProperties.GeoIPData.Country ==
+					announcementProperties.GeoIPData.Country &&
+					offerProperties.GeoIPData.ASN ==
+						announcementProperties.GeoIPData.ASN) {
+				continue
+			}
+			if !m.config.AllowMatch(
+				announcementProperties.GeoIPData,
+				offerProperties.GeoIPData) {
+				continue
+			}
 		}
 
 		// Check if this is a preferred NAT match. Ultimately, a match may be

@@ -151,6 +151,12 @@ type BrokerConfig struct {
 	// adds server-side enforcement.
 	AllowDomainFrontedDestinations func(common.GeoIPData) bool
 
+	// AllowMatch is a callback which can indicate whether a proxy and client
+	// pair, with the given, respective GeoIP data, is allowed to match
+	// together. Pairs are always allowed to match based on personal
+	// compartment ID.
+	AllowMatch func(common.GeoIPData, common.GeoIPData) bool
+
 	// LookupGeoIP provides GeoIP lookup service.
 	LookupGeoIP LookupGeoIP
 
@@ -261,6 +267,8 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 			ProxyQualityState: proxyQuality,
 
 			IsLoadLimiting: config.IsLoadLimiting,
+
+			AllowMatch: config.AllowMatch,
 		}),
 
 		proxyQualityState: proxyQuality,
