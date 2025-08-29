@@ -2038,11 +2038,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Test: all expected server logs were emitted
 
-	// TODO: stops should be fully synchronous, but, intermittently,
-	// server_tunnel fails to appear ("missing server tunnel log")
-	// without this delay.
-	time.Sleep(100 * time.Millisecond)
-
 	// For in-proxy tunnel protocols, client BPF tactics are currently ignored and not applied by the 2nd hop.
 	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics && !protocol.TunnelProtocolUsesInproxy(runConfig.tunnelProtocol)
 	expectServerBPFField := ServerBPFEnabled() && protocol.TunnelProtocolIsDirect(runConfig.tunnelProtocol) && doServerTactics

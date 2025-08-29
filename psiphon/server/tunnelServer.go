@@ -1651,6 +1651,7 @@ func (sshServer *sshServer) stopClients() {
 		go func(c *sshClient) {
 			defer waitGroup.Done()
 			c.stop()
+			c.awaitStopped()
 		}(client)
 	}
 	waitGroup.Wait()
@@ -2729,10 +2730,10 @@ func (sshClient *sshClient) run(
 
 	sshClient.runTunnel(result.channels, result.requests)
 
-	// Note: sshServer.unregisterEstablishedClient calls sshClient.stop(),
-	// which also closes underlying transport Conn.
+	// sshClient.stop closes the underlying transport conn, ensuring all
+	// network trafic is complete before calling logTunnel.
 
-	sshClient.sshServer.unregisterEstablishedClient(sshClient)
+	sshClient.stop()
 
 	// Log tunnel metrics.
 
@@ -2755,7 +2756,7 @@ func (sshClient *sshClient) run(
 
 	if burstConn != nil {
 		// Any outstanding burst should be recorded by burstConn.Close which should
-		// be called by unregisterEstablishedClient.
+		// be called via sshClient.stop.
 		additionalMetrics = append(
 			additionalMetrics, LogFields(burstConn.GetMetrics(activityConn.GetStartTime())))
 	}
@@ -2832,6 +2833,13 @@ func (sshClient *sshClient) run(
 	// disconnects supports first-tunnel-in-session and duplicate
 	// authorization logic.
 	sshClient.sshServer.markGeoIPSessionCacheToExpire(sshClient.sessionID)
+
+	// unregisterEstablishedClient removes the client from sshServer.clients.
+	// This call must come after logTunnel to ensure all logTunnel calls
+	// complete before a sshServer.stopClients returns, in the case of a
+	// server shutdown.
+
+	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 }
 
 func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
