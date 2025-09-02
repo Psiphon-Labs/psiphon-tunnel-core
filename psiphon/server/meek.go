@@ -652,7 +652,17 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 				responseWriter,
 				request)
 			if err != nil {
-				log.WithTraceFields(LogFields{"error": err}).Warning("inproxyBrokerHandler failed")
+
+				var brokerLoggedEvent *inproxy.BrokerLoggedEvent
+				var deobfuscationAnomoly *inproxy.DeobfuscationAnomoly
+				alreadyLogged := std_errors.As(err, &brokerLoggedEvent) ||
+					std_errors.As(err, &deobfuscationAnomoly)
+
+				if !alreadyLogged {
+					log.WithTraceFields(
+						LogFields{"error": err}).Warning("inproxyBrokerHandler failed")
+				}
+
 				server.handleError(responseWriter, request)
 			}
 		}
