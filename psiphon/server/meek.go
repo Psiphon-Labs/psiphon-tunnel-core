@@ -355,6 +355,7 @@ func NewMeekServer(
 				PrioritizeProxy:                meekServer.inproxyBrokerPrioritizeProxy,
 				AllowClient:                    meekServer.inproxyBrokerAllowClient,
 				AllowDomainFrontedDestinations: meekServer.inproxyBrokerAllowDomainFrontedDestinations,
+				AllowMatch:                     meekServer.inproxyBrokerAllowMatch,
 				LookupGeoIP:                    lookupGeoIPData,
 				APIParameterValidator:          getInproxyBrokerAPIParameterValidator(support.Config),
 				APIParameterLogFieldFormatter:  getInproxyBrokerAPIParameterLogFieldFormatter(),
@@ -1916,14 +1917,14 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		parameters.InproxyAllowMatchByASN), true)
 	inproxyCheckDisallowMatchByRegion := makeCheckListLookup(p.KeyStringsValue(
 		parameters.InproxyDisallowMatchByRegion), false)
-	inproxyCheckDisallowMatchByRASN := makeCheckListLookup(p.KeyStringsValue(
+	inproxyCheckDisallowMatchByASN := makeCheckListLookup(p.KeyStringsValue(
 		parameters.InproxyDisallowMatchByASN), false)
 
 	checkAllowMatch := func(proxyGeoIPData, clientGeoIPData common.GeoIPData) bool {
 		return inproxyCheckAllowMatchByRegion(proxyGeoIPData.Country, clientGeoIPData.Country) &&
 			inproxyCheckAllowMatchByASN(proxyGeoIPData.ASN, clientGeoIPData.ASN) &&
 			inproxyCheckDisallowMatchByRegion(proxyGeoIPData.Country, clientGeoIPData.Country) &&
-			inproxyCheckDisallowMatchByRASN(proxyGeoIPData.ASN, clientGeoIPData.ASN)
+			inproxyCheckDisallowMatchByASN(proxyGeoIPData.ASN, clientGeoIPData.ASN)
 	}
 
 	server.inproxyCheckAllowMatch.Store(checkAllowMatch)
