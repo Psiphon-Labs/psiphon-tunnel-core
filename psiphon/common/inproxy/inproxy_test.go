@@ -285,6 +285,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 		AllowProxy:                     func(common.GeoIPData) bool { return true },
 		AllowClient:                    func(common.GeoIPData) bool { return true },
 		AllowDomainFrontedDestinations: func(common.GeoIPData) bool { return true },
+		AllowMatch:                     func(common.GeoIPData, common.GeoIPData) bool { return true },
 	}
 
 	broker, err := NewBroker(brokerConfig)

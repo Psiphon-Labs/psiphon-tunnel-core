@@ -4200,6 +4200,10 @@ func generateInproxyTestConfig(
 	tacticsParametersJSONFormat := `
             "InproxyAllowProxy": true,
             "InproxyAllowClient": true,
+            "InproxyAllowMatchByRegion": {"%s":["%s"]},
+            "InproxyAllowMatchByASN": {"%s":["%s"]},
+            "InproxyDisallowMatchByRegion": {"%s":["%s"]},
+            "InproxyDisallowMatchByASN": {"%s":["%s"]},
             "InproxyTunnelProtocolSelectionProbability": 1.0,
             "InproxyAllBrokerSpecs": %s,
             "InproxyBrokerSpecs": %s,
@@ -4229,6 +4233,10 @@ func generateInproxyTestConfig(
 
 	tacticsParametersJSON := fmt.Sprintf(
 		tacticsParametersJSONFormat,
+		testGeoIPCountry, testGeoIPCountry,
+		testGeoIPASN, testGeoIPASN,
+		testGeoIPCountry, "_"+testGeoIPCountry,
+		testGeoIPASN, "_"+testGeoIPASN,
 		allBrokerSpecsJSON,
 		brokerSpecsJSON,
 		proxyBrokerSpecsJSON,
