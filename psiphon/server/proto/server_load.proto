@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message ServerLoadProtocol {
+
+  // Fields 1-99 are reserved for metadata.
+
+  string region = 100; //LowCardinality
+  string protocol = 101; //LowCardinality
+
+  int64 accepted_clients = 103;
+  int64 established_clients = 104;
+}
+
+message ServerLoadDNS {
+
+  // Fields 1-99 are reserved for metadata.
+
+  string dns_server = 100; //LowCardinality
+  int64 dns_count = 101; 
+  int64 dns_duration = 102;
+  int64 dns_failed_count = 103;
+  int64 dns_failed_duration = 104;
+}
+
+message ServerLoad {
+
+  // Fields 1-99 are reserved for metadata.
+
+  double cpu_percent = 100;
+
+  uint64 heap_alloc = 101;
+  uint64 heap_idle = 102;
+  uint64 heap_inuse = 103;
+  uint64 heap_objects = 104;
+  uint64 heap_released = 105;
+  uint64 heap_sys = 106;
+
+  int64 network_bytes_received = 107;
+  int64 network_bytes_sent = 108;
+
+  bool establish_tunnels = 109;
+  int64 establish_tunnels_limited_count = 110;
+
+  google.protobuf.Timestamp last_gc = 111;
+  uint32 num_forced_gc = 112;
+  uint32 num_gc = 113;
+  uint32 num_goroutine = 114;
+
+  int64 replay_delete_replay_count = 115;
+  int64 replay_failed_replay_count = 116;
+  int64 replay_get_replay_hit_count = 117;
+  int64 replay_get_replay_miss_count = 118;
+  int64 replay_max_cache_entries = 119;
+  int64 replay_set_replay_count = 120;
+
+  int64 server_tactics_cache_hit_count = 121;
+  int64 server_tactics_cache_miss_count = 123;
+  int64 server_tactics_max_cache_entries = 124;
+  int64 server_tactics_max_parameter_references = 125;
+
+  int64 dialing_tcp_port_forwards = 126;
+  int64 tcp_ipv4_port_forward_dialed_count = 127;
+  int64 tcp_ipv4_port_forward_dialed_duration = 128;
+  int64 tcp_ipv4_port_forward_failed_count = 129;
+  int64 tcp_ipv4_port_forward_failed_duration = 130;
+  int64 tcp_ipv6_port_forward_dialed_count = 131;
+  int64 tcp_ipv6_port_forward_dialed_duration = 132;
+  int64 tcp_ipv6_port_forward_failed_count = 133;
+  int64 tcp_ipv6_port_forward_failed_duration = 134;
+  int64 tcp_port_forward_dialed_count = 135;
+  int64 tcp_port_forward_dialed_duration = 136;
+  int64 tcp_port_forward_failed_count = 137;
+  int64 tcp_port_forward_failed_duration = 138;
+  int64 tcp_port_forward_rejected_dialing_limit_count = 139;
+  int64 tcp_port_forward_rejected_disallowed_count = 140;
+  int64 tcp_port_forwards = 141;
+
+  int64 udp_port_forward_rejected_disallowed_count = 142;
+  int64 udp_port_forwards = 143;
+
+  int64 total_tcp_port_forwards = 144;
+  int64 total_udp_port_forwards = 145;
+}

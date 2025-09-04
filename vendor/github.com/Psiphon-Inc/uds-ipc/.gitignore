@@ -1,0 +1,9 @@
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+
+*devenv*
+*direnv*
+.envrc
+
+coverage.*

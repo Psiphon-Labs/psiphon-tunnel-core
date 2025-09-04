@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package psiphond;
+
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message ServerPanic {
+
+    // Fields 1-99 are reserved for metadata.
+
+    string panic = 100;
+    string recover_value = 101;
+    string stack = 102;
+}
