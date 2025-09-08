@@ -62,6 +62,8 @@ func runTestMatcher() error {
 			OfferRateLimitInterval: rateLimitInterval,
 
 			ProxyQualityState: NewProxyQuality(),
+
+			AllowMatch: func(common.GeoIPData, common.GeoIPData) bool { return true },
 		})
 	err := m.Start()
 	if err != nil {
@@ -570,6 +572,48 @@ func runTestMatcher() error {
 	err = <-clientResultChan
 	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
 		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// Test: AllowMatch disallow
+
+	m.config.AllowMatch = func(proxy common.GeoIPData, client common.GeoIPData) bool {
+		return proxy != geoIPData1.GeoIPData && client != geoIPData2.GeoIPData
+	}
+
+	go proxyFunc(proxyResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, compartment1And3, 10*time.Millisecond)
+
+	err = <-proxyResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	err = <-clientResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), "context deadline exceeded") {
+		return errors.Tracef("unexpected result: %v", err)
+	}
+
+	// Test: AllowMatch allow
+
+	m.config.AllowMatch = func(proxy common.GeoIPData, client common.GeoIPData) bool {
+		return proxy == geoIPData1.GeoIPData && client == geoIPData2.GeoIPData
+	}
+
+	go proxyFunc(proxyResultChan, proxyIP, compartment1, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, compartment1And3, 10*time.Millisecond)
+
+	err = <-proxyResultChan
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = <-clientResultChan
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	m.config.AllowMatch = func(proxy common.GeoIPData, client common.GeoIPData) bool {
+		return true
 	}
 
 	// Test: downgrade-compatible protocol version match
@@ -1120,7 +1164,8 @@ func BenchmarkMatcherQueue(b *testing.B) {
 
 				m = NewMatcher(
 					&MatcherConfig{
-						Logger: newTestLogger(),
+						Logger:     newTestLogger(),
+						AllowMatch: func(common.GeoIPData, common.GeoIPData) bool { return true },
 					})
 
 				for j := 0; j < size; j++ {

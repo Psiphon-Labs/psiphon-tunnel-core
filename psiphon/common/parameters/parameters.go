@@ -403,6 +403,10 @@ const (
 	InproxyAllowProxy                                  = "InproxyAllowProxy"
 	InproxyAllowClient                                 = "InproxyAllowClient"
 	InproxyAllowDomainFrontedDestinations              = "InproxyAllowDomainFrontedDestinations"
+	InproxyAllowMatchByRegion                          = "InproxyAllowMatchByRegion"
+	InproxyAllowMatchByASN                             = "InproxyAllowMatchByASN"
+	InproxyDisallowMatchByRegion                       = "InproxyDisallowMatchByRegion"
+	InproxyDisallowMatchByASN                          = "InproxyDisallowMatchByASN"
 	InproxyAllBrokerSpecs                              = "InproxyAllBrokerSpecs"
 	InproxyBrokerSpecs                                 = "InproxyBrokerSpecs"
 	InproxyPersonalPairingBrokerSpecs                  = "InproxyPersonalPairingBrokerSpecs"
@@ -986,6 +990,10 @@ var defaultParameters = map[string]struct {
 	InproxyAllowProxy:                                  {value: false},
 	InproxyAllowClient:                                 {value: false, flags: serverSideOnly},
 	InproxyAllowDomainFrontedDestinations:              {value: false, flags: serverSideOnly},
+	InproxyAllowMatchByRegion:                          {value: KeyStrings{}, flags: serverSideOnly},
+	InproxyAllowMatchByASN:                             {value: KeyStrings{}, flags: serverSideOnly},
+	InproxyDisallowMatchByRegion:                       {value: KeyStrings{}, flags: serverSideOnly},
+	InproxyDisallowMatchByASN:                          {value: KeyStrings{}, flags: serverSideOnly},
 	InproxyTunnelProtocolSelectionProbability:          {value: 1.0, minimum: 0.0},
 	InproxyAllBrokerPublicKeys:                         {value: []string{}, flags: serverSideOnly},
 	InproxyAllBrokerSpecs:                              {value: InproxyBrokerSpecsValue{}, flags: serverSideOnly},

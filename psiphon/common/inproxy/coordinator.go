@@ -60,7 +60,7 @@ func NewRoundTripperFailedError(err error) *RoundTripperFailedError {
 	return &RoundTripperFailedError{err: err}
 }
 
-func (e RoundTripperFailedError) Error() string {
+func (e *RoundTripperFailedError) Error() string {
 	return e.err.Error()
 }
 

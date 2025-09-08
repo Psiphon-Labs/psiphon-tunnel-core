@@ -86,6 +86,10 @@ type Scheme struct {
 	// specified in UTC and must be a multiple of SeedPeriodNanoseconds.
 	Epoch string
 
+	// PaveDataOSLCount indicates how many active OSLs GetPaveData should
+	// return. Must be must be > 0 when using GetPaveData.
+	PaveDataOSLCount int
+
 	// Regions is a list of client country codes this scheme applies to.
 	// If empty, the scheme applies to all regions.
 	Regions []string
@@ -790,10 +794,13 @@ type Registry struct {
 // MD5 is not cryptographically secure and this checksum is not
 // relied upon for OSL verification. MD5 is used for compatibility
 // with out-of-band distribution hosts.
+//
+// OSLFileSpec supports compact CBOR encoding for use in alternative,
+// fileless mechanisms.
 type OSLFileSpec struct {
-	ID        []byte
-	KeyShares *KeyShares
-	MD5Sum    []byte
+	ID        []byte     `cbor:"1,keyasint,omitempty"`
+	KeyShares *KeyShares `cbor:"2,keyasint,omitempty"`
+	MD5Sum    []byte     `cbor:"3,keyasint,omitempty"`
 }
 
 // KeyShares is a tree data structure which describes the
@@ -802,11 +809,14 @@ type OSLFileSpec struct {
 // are required to reconstruct the secret key. The keys for BoxedShares
 // are either SLOKs (referenced by SLOK ID) or random keys that are
 // themselves split as described in child KeyShares.
+//
+// KeyShares supports compact CBOR encoding for use in alternative,
+// fileless mechanisms.
 type KeyShares struct {
-	Threshold   int
-	BoxedShares [][]byte
-	SLOKIDs     [][]byte
-	KeyShares   []*KeyShares
+	Threshold   int          `cbor:"1,keyasint,omitempty"`
+	BoxedShares [][]byte     `cbor:"2,keyasint,omitempty"`
+	SLOKIDs     [][]byte     `cbor:"3,keyasint,omitempty"`
+	KeyShares   []*KeyShares `cbor:"4,keyasint,omitempty"`
 }
 
 type PaveLogInfo struct {
@@ -994,6 +1004,84 @@ func (config *Config) CurrentOSLIDs(schemeIndex int) (map[string]string, error) 
 	}
 
 	return OSLIDs, nil
+}
+
+// PaveData is the per-OSL data used by Pave, for use in alternative, fileless
+// mechanisms, such as proof-of-knowledge of keys. PaveData.FileSpec is the
+// OSL FileSpec that would be paved into the registry file, and
+// PaveData.FileKey is the key that would be used to encrypt OSL files.
+type PaveData struct {
+	FileSpec *OSLFileSpec
+	FileKey  []byte
+}
+
+// GetPaveData returns, for each propagation channel ID in the specified
+// scheme, the list of OSL PaveData for the Config.PaveDataOSLCount most
+// recent OSLs from now. GetPaveData is the equivilent of Pave that is for
+// use in alternative, fileless mechanisms, such as proof-of-knowledge of
+// keys
+func (config *Config) GetPaveData(schemeIndex int) (map[string][]*PaveData, error) {
+
+	config.ReloadableFile.RLock()
+	defer config.ReloadableFile.RUnlock()
+
+	if schemeIndex < 0 || schemeIndex >= len(config.Schemes) {
+		return nil, errors.TraceNew("invalid scheme index")
+	}
+
+	scheme := config.Schemes[schemeIndex]
+
+	oslDuration := scheme.GetOSLDuration()
+
+	// Using PaveDataOSLCount, initialize startTime and EndTime values that
+	// are similar to the Pave inputs. As in Pave, logic in the following
+	// loop will align these time values to actual OSL periods.
+
+	if scheme.PaveDataOSLCount < 1 {
+		return nil, errors.TraceNew("invalid OSL count")
+	}
+	endTime := time.Now()
+	startTime := endTime.Add(-time.Duration(scheme.PaveDataOSLCount) * oslDuration)
+	if startTime.Before(scheme.epoch) {
+		startTime = scheme.epoch
+	}
+
+	allPaveData := make(map[string][]*PaveData)
+
+	for _, propagationChannelID := range scheme.PropagationChannelIDs {
+
+		if !common.Contains(scheme.PropagationChannelIDs, propagationChannelID) {
+			return nil, errors.TraceNew("invalid propagationChannelID")
+		}
+
+		var paveData []*PaveData
+
+		oslTime := scheme.epoch
+
+		if !startTime.IsZero() && !startTime.Before(scheme.epoch) {
+			for oslTime.Before(startTime) {
+				oslTime = oslTime.Add(oslDuration)
+			}
+		}
+
+		for !oslTime.After(endTime) {
+
+			firstSLOKTime := oslTime
+			fileKey, fileSpec, err := makeOSLFileSpec(
+				scheme, propagationChannelID, firstSLOKTime)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+
+			paveData = append(paveData, &PaveData{FileSpec: fileSpec, FileKey: fileKey})
+
+			oslTime = oslTime.Add(oslDuration)
+		}
+
+		allPaveData[propagationChannelID] = paveData
+	}
+
+	return allPaveData, nil
 }
 
 // makeOSLFileSpec creates an OSL file key, splits it according to the
@@ -1485,6 +1573,26 @@ func NewOSLReader(
 	return common.NewAuthenticatedDataPackageReader(
 		unboxer,
 		signingPublicKey)
+}
+
+// ReassembleOSLKey returns a reassembled OSL key, for use in alternative,
+// fileless mechanisms, such as proof-of-knowledge of keys.
+func ReassembleOSLKey(
+	fileSpec *OSLFileSpec,
+	lookup SLOKLookup) (bool, []byte, error) {
+
+	ok, fileKey, err := fileSpec.KeyShares.reassembleKey(lookup, true)
+	if err != nil {
+		return false, nil, errors.Trace(err)
+	}
+	if !ok {
+		return false, nil, nil
+	}
+	if len(fileKey) != KEY_LENGTH_BYTES {
+		return false, nil, errors.TraceNew("invalid key length")
+	}
+
+	return true, fileKey, nil
 }
 
 // zeroReader reads an unlimited stream of zeroes.

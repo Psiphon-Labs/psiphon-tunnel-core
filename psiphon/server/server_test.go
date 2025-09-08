@@ -846,7 +846,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("error creating access control key pair: %s", err)
 	}
 
-	accessControlVerificationKeyRing := accesscontrol.VerificationKeyRing{
+	accessControlVerificationKeyRing := &accesscontrol.VerificationKeyRing{
 		Keys: []*accesscontrol.VerificationKey{accessControlVerificationKey},
 	}
 
@@ -879,7 +879,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.doLegacyDestinationBytes ||
 		runConfig.doTunneledDomainRequest
 
-	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
 		tactics.GenerateKeys()
 	if err != nil {
@@ -942,6 +941,21 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
 		generateConfigParams.FrontingProviderID = prng.HexString(8)
+	}
+
+	var configTacticsRequestPublicKey, configTacticsRequestPrivateKey, configTacticsRequestObfuscatedKey string
+	if prng.FlipCoin() {
+
+		// Exercise specifying the tactics key parameters in the main server
+		// config file and not in the tactics config file.
+
+		configTacticsRequestPublicKey = tacticsRequestPublicKey
+		configTacticsRequestPrivateKey = tacticsRequestPrivateKey
+		configTacticsRequestObfuscatedKey = tacticsRequestObfuscatedKey
+
+		tacticsRequestPublicKey = ""
+		tacticsRequestPrivateKey = ""
+		tacticsRequestObfuscatedKey = ""
 	}
 
 	serverConfigJSON, _, _, _, encodedServerEntry, err := GenerateConfig(generateConfigParams)
@@ -1046,6 +1060,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverConfig["OSLConfigFilename"] = oslConfigFilename
 	if doServerTactics {
 		serverConfig["TacticsConfigFilename"] = tacticsConfigFilename
+
+		if configTacticsRequestPublicKey != "" {
+			serverConfig["TacticsRequestPublicKey"] = configTacticsRequestPublicKey
+
+		}
+		if configTacticsRequestPrivateKey != "" {
+			serverConfig["TacticsRequestPrivateKey"] = configTacticsRequestPrivateKey
+
+		}
+		if configTacticsRequestObfuscatedKey != "" {
+			serverConfig["TacticsRequestObfuscatedKey"] = configTacticsRequestObfuscatedKey
+
+		}
 	}
 	serverConfig["BlocklistFilename"] = blocklistFilename
 
@@ -2011,11 +2038,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Test: all expected server logs were emitted
 
-	// TODO: stops should be fully synchronous, but, intermittently,
-	// server_tunnel fails to appear ("missing server tunnel log")
-	// without this delay.
-	time.Sleep(100 * time.Millisecond)
-
 	// For in-proxy tunnel protocols, client BPF tactics are currently ignored and not applied by the 2nd hop.
 	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics && !protocol.TunnelProtocolUsesInproxy(runConfig.tunnelProtocol)
 	expectServerBPFField := ServerBPFEnabled() && protocol.TunnelProtocolIsDirect(runConfig.tunnelProtocol) && doServerTactics
@@ -2425,6 +2447,9 @@ func checkExpectedServerTunnelLogFields(
 		"established_tunnels_count",
 		"network_latency_multiplier",
 		"network_type",
+		"bytes",
+		"ssh_protocol_bytes",
+		"ssh_protocol_bytes_overhead",
 
 		// The test run ensures that logServerLoad is invoked while the client
 		// is connected, so the following must be logged.
@@ -2434,6 +2459,14 @@ func checkExpectedServerTunnelLogFields(
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
 		}
+	}
+
+	if !(fields["ssh_protocol_bytes"].(float64) > 0) {
+		return fmt.Errorf("unexpected zero ssh_protocol_bytes")
+	}
+
+	if !(fields["ssh_protocol_bytes"].(float64) > fields["bytes"].(float64)) {
+		return fmt.Errorf("unexpected ssh_protocol_bytes < bytes")
 	}
 
 	appliedTacticsTag := len(fields[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME].(string)) > 0
@@ -4162,6 +4195,10 @@ func generateInproxyTestConfig(
 	tacticsParametersJSONFormat := `
             "InproxyAllowProxy": true,
             "InproxyAllowClient": true,
+            "InproxyAllowMatchByRegion": {"%s":["%s"]},
+            "InproxyAllowMatchByASN": {"%s":["%s"]},
+            "InproxyDisallowMatchByRegion": {"%s":["%s"]},
+            "InproxyDisallowMatchByASN": {"%s":["%s"]},
             "InproxyTunnelProtocolSelectionProbability": 1.0,
             "InproxyAllBrokerSpecs": %s,
             "InproxyBrokerSpecs": %s,
@@ -4191,6 +4228,10 @@ func generateInproxyTestConfig(
 
 	tacticsParametersJSON := fmt.Sprintf(
 		tacticsParametersJSONFormat,
+		testGeoIPCountry, testGeoIPCountry,
+		testGeoIPASN, testGeoIPASN,
+		testGeoIPCountry, "_"+testGeoIPCountry,
+		testGeoIPASN, "_"+testGeoIPASN,
 		allBrokerSpecsJSON,
 		brokerSpecsJSON,
 		proxyBrokerSpecsJSON,

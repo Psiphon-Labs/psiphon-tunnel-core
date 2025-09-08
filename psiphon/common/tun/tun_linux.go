@@ -217,15 +217,14 @@ func configureServerInterface(
 		return errors.Tracef("failed to get interface %s: %w", tunDeviceName, err)
 	}
 
-	_, ipv4Net, err := net.ParseCIDR(serverIPv4AddressCIDR)
+	ipv4Addr, err := netlink.ParseAddr(serverIPv4AddressCIDR)
 	if err != nil {
 		return errors.Tracef("failed to parse server IPv4 address: %s: %w", serverIPv4AddressCIDR, err)
 	}
 
-	ipv4Addr := &netlink.Addr{IPNet: ipv4Net}
 	err = netlink.AddrAdd(link, ipv4Addr)
 	if err != nil {
-		return errors.Tracef("failed to add IPv4 address to interface: %s: %w", ipv4Net.String(), err)
+		return errors.Tracef("failed to add IPv4 address to interface: %s: %w", ipv4Addr.String(), err)
 	}
 
 	err = netlink.LinkSetMTU(link, getMTU(config.MTU))
@@ -238,14 +237,13 @@ func configureServerInterface(
 		return errors.Tracef("failed to set interface up: %w", err)
 	}
 
-	_, ipv6Net, err := net.ParseCIDR(serverIPv6AddressCIDR)
+	ipv6Addr, err := netlink.ParseAddr(serverIPv6AddressCIDR)
 	if err != nil {
-		err = errors.Tracef("failed to parse server IPv6 address: %s: %w", serverIPv4AddressCIDR, err)
+		err = errors.Tracef("failed to parse server IPv6 address: %s: %w", serverIPv6AddressCIDR, err)
 	} else {
-		ipv6Addr := &netlink.Addr{IPNet: ipv6Net}
 		err = netlink.AddrAdd(link, ipv6Addr)
 		if err != nil {
-			err = errors.Tracef("failed to add IPv6 address to interface: %s: %w", ipv6Net.String(), err)
+			err = errors.Tracef("failed to add IPv6 address to interface: %s: %w", ipv6Addr.String(), err)
 		}
 	}
 
@@ -334,32 +332,33 @@ func configureClientInterface(
 	// Set tun device network addresses and MTU
 	link, err := netlink.LinkByName(tunDeviceName)
 	if err != nil {
-		return errors.Trace(fmt.Errorf("failed to get interface %s: %w", tunDeviceName, err))
+		return errors.Tracef("failed to get interface %s: %w", tunDeviceName, err)
 	}
 
-	_, ipv4Net, err := net.ParseCIDR(config.IPv4AddressCIDR)
+	ipv4Addr, err := netlink.ParseAddr(config.IPv4AddressCIDR)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	ipv4Addr := &netlink.Addr{IPNet: ipv4Net}
-	if err := netlink.AddrAdd(link, ipv4Addr); err != nil {
+	err = netlink.AddrAdd(link, ipv4Addr)
+	if err != nil {
 		return errors.Trace(err)
 	}
 
-	if err := netlink.LinkSetMTU(link, getMTU(config.MTU)); err != nil {
+	err = netlink.LinkSetMTU(link, getMTU(config.MTU))
+	if err != nil {
 		return errors.Trace(err)
 	}
 
-	if err := netlink.LinkSetUp(link); err != nil {
+	err = netlink.LinkSetUp(link)
+	if err != nil {
 		return errors.Trace(err)
 	}
 
-	_, ipv6Net, err := net.ParseCIDR(config.IPv6AddressCIDR)
+	ipv6Addr, err := netlink.ParseAddr(config.IPv6AddressCIDR)
 	if err != nil {
 		err = errors.Trace(err)
 	} else {
-		ipv6Addr := &netlink.Addr{IPNet: ipv6Net}
 		err = netlink.AddrAdd(link, ipv6Addr)
 		if err != nil {
 			err = errors.Trace(err)

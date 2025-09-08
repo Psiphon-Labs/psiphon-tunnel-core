@@ -32,20 +32,20 @@ type TransferURL struct {
 
 	// URL is the location of the resource. This string is slightly obfuscated
 	// with base64 encoding to mitigate trivial binary executable string scanning.
-	URL string
+	URL string `json:",omitempty"`
 
 	// SkipVerify indicates whether to verify HTTPS certificates. In some
 	// circumvention scenarios, verification is not possible. This must
 	// only be set to true when the resource has its own verification mechanism.
 	// Overridden when a FrontingSpec in FrontingSpecs has verification fields
 	// set.
-	SkipVerify bool
+	SkipVerify bool `json:",omitempty"`
 
 	// OnlyAfterAttempts specifies how to schedule this URL when transferring
 	// the same resource (same entity, same ETag) from multiple different
 	// candidate locations. For a value of N, this URL is only a candidate
 	// after N rounds of attempting the transfer to or from other URLs.
-	OnlyAfterAttempts int
+	OnlyAfterAttempts int `json:",omitempty"`
 
 	// B64EncodedPublicKey is a base64-encoded RSA public key to be used for
 	// encrypting the resource, when uploading, or for verifying a signature of
@@ -59,7 +59,7 @@ type TransferURL struct {
 
 	// FrontingSpecs is an optional set of domain fronting configurations to
 	// apply to any requests made to the destination.
-	FrontingSpecs FrontingSpecs
+	FrontingSpecs FrontingSpecs `json:",omitempty"`
 }
 
 // TransferURLs is a list of transfer URLs.

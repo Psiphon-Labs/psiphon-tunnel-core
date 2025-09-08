@@ -78,7 +78,7 @@ type Config struct {
 	//
 	// Psiphon will assume full control of files under this directory. They may
 	// be deleted, moved or overwritten.
-	DataRootDirectory string
+	DataRootDirectory string `json:",omitempty"`
 
 	// UseNoticeFiles configures notice files for writing. If set, homepages
 	// will be written to a file created at config.GetHomePageFilename()
@@ -97,20 +97,20 @@ type Config struct {
 	// files.
 	//
 	// See comment for setNoticeFiles in notice.go for further details.
-	UseNoticeFiles *UseNoticeFiles
+	UseNoticeFiles *UseNoticeFiles `json:",omitempty"`
 
 	// PropagationChannelId is a string identifier which indicates how the
 	// Psiphon client was distributed. This parameter is required. This value
 	// is supplied by and depends on the Psiphon Network, and is typically
 	// embedded in the client binary.
-	PropagationChannelId string
+	PropagationChannelId string `json:",omitempty"`
 
 	// SponsorId is a string identifier which indicates who is sponsoring this
 	// Psiphon client. One purpose of this value is to determine the home
 	// pages for display. This parameter is required. This value is supplied
 	// by and depends on the Psiphon Network, and is typically embedded in the
 	// client binary.
-	SponsorId string
+	SponsorId string `json:",omitempty"`
 
 	// ClientVersion is the client version number that the client reports to
 	// the server. The version number refers to the host client application,
@@ -121,68 +121,68 @@ type Config struct {
 	// Note that sending a ClientPlatform string which includes "windows"
 	// (case insensitive) and a ClientVersion of <= 44 will cause an error in
 	// processing the response to DoConnectedRequest calls.
-	ClientVersion string
+	ClientVersion string `json:",omitempty"`
 
 	// ClientPlatform is the client platform ("Windows", "Android", etc.) that
 	// the client reports to the server.
-	ClientPlatform string
+	ClientPlatform string `json:",omitempty"`
 
 	// ClientAPILevel is the client API or SDK level, such as
 	// Build.VERSION.SDK_INT on Android. This value is used for local
 	// configuration, as required, and not reported to the server.
 	// ClientAPILevel is ignored when 0.
-	ClientAPILevel int
+	ClientAPILevel int `json:",omitempty"`
 
 	// ClientFeatures is a list of feature names denoting enabled application
 	// features. Clients report enabled features to the server for stats
 	// purposes.
-	ClientFeatures []string
+	ClientFeatures []string `json:",omitempty"`
 
 	// EgressRegion is a ISO 3166-1 alpha-2 country code which indicates which
 	// country to egress from. For the default, "", the best performing server
 	// in any country is selected.
-	EgressRegion string
+	EgressRegion string `json:",omitempty"`
 
 	// SplitTunnelOwnRegion enables split tunnel mode for the client's own
 	// country. When enabled, TCP port forward destinations that resolve to
 	// the same GeoIP country as the client are connected to directly,
 	// untunneled.
-	SplitTunnelOwnRegion bool
+	SplitTunnelOwnRegion bool `json:",omitempty"`
 
 	// SplitTunnelRegions enables selected split tunnel mode in which the
 	// client specifies a list of ISO 3166-1 alpha-2 country codes for which
 	// traffic should be untunneled. TCP port forwards destined to any
 	// country specified in SplitTunnelRegions will be untunneled, regardless
 	// of whether SplitTunnelOwnRegion is on or off.
-	SplitTunnelRegions []string
+	SplitTunnelRegions []string `json:",omitempty"`
 
 	// ListenInterface specifies which interface to listen on.  If no
 	// interface is provided then listen on 127.0.0.1. If 'any' is provided
 	// then use 0.0.0.0. If there are multiple IP addresses on an interface
 	// use the first IPv4 address.
-	ListenInterface string
+	ListenInterface string `json:",omitempty"`
 
 	// DisableLocalSocksProxy disables running the local SOCKS proxy.
-	DisableLocalSocksProxy bool
+	DisableLocalSocksProxy bool `json:",omitempty"`
 
 	// LocalSocksProxyPort specifies a port number for the local SOCKS proxy
 	// running at 127.0.0.1. For the default value, 0, the system selects a
 	// free port (a notice reporting the selected port is emitted).
-	LocalSocksProxyPort int
+	LocalSocksProxyPort int `json:",omitempty"`
 
 	// LocalHttpProxyPort specifies a port number for the local HTTP proxy
 	// running at 127.0.0.1. For the default value, 0, the system selects a
 	// free port (a notice reporting the selected port is emitted).
-	LocalHttpProxyPort int
+	LocalHttpProxyPort int `json:",omitempty"`
 
 	// DisableLocalHTTPProxy disables running the local HTTP proxy.
-	DisableLocalHTTPProxy bool
+	DisableLocalHTTPProxy bool `json:",omitempty"`
 
 	// NetworkLatencyMultiplier is a multiplier that is to be applied to
 	// default network event timeouts. Set this to tune performance for
 	// slow networks.
 	// When set, must be >= 1.0.
-	NetworkLatencyMultiplier float64
+	NetworkLatencyMultiplier float64 `json:",omitempty"`
 
 	// LimitTunnelProtocols indicates which protocols to use. Valid values
 	// include: "SSH", "OSSH", "TLS-OSSH", "UNFRONTED-MEEK-OSSH",
@@ -191,106 +191,106 @@ type Config struct {
 	// "FRONTED-MEEK-QUIC-OSSH", "TAPDANCE-OSSH", "CONJURE-OSSH", and
 	// "SHADOWSOCKS-OSSH".
 	// For the default, an empty list, all protocols are used.
-	LimitTunnelProtocols []string
+	LimitTunnelProtocols []string `json:",omitempty"`
 
 	// InitialLimitTunnelProtocols is an optional initial phase of limited
 	// protocols for the first InitialLimitTunnelProtocolsCandidateCount
 	// candidates; after these candidates, LimitTunnelProtocols applies.
 	//
 	// For the default, an empty list, InitialLimitTunnelProtocols is off.
-	InitialLimitTunnelProtocols []string
+	InitialLimitTunnelProtocols []string `json:",omitempty"`
 
 	// InitialLimitTunnelProtocolsCandidateCount is the number of candidates
 	// to which InitialLimitTunnelProtocols is applied instead of
 	// LimitTunnelProtocols.
 	//
 	// For the default, 0, InitialLimitTunnelProtocols is off.
-	InitialLimitTunnelProtocolsCandidateCount int
+	InitialLimitTunnelProtocolsCandidateCount int `json:",omitempty"`
 
 	// LimitTLSProfiles indicates which TLS profiles to select from. Valid
 	// values are listed in protocols.SupportedTLSProfiles.
 	// For the default, an empty list, all profiles are candidates for
 	// selection.
-	LimitTLSProfiles []string
+	LimitTLSProfiles []string `json:",omitempty"`
 
 	// LimitQUICVersions indicates which QUIC versions to select from. Valid
 	// values are listed in protocols.SupportedQUICVersions.
 	// For the default, an empty list, all versions are candidates for
 	// selection.
-	LimitQUICVersions []string
+	LimitQUICVersions []string `json:",omitempty"`
 
 	// EstablishTunnelTimeoutSeconds specifies a time limit after which to
 	// halt the core tunnel controller if no tunnel has been established. The
 	// default is parameters.EstablishTunnelTimeout.
-	EstablishTunnelTimeoutSeconds *int
+	EstablishTunnelTimeoutSeconds *int `json:",omitempty"`
 
 	// EstablishTunnelPausePeriodSeconds specifies the delay between attempts
 	// to establish tunnels. Briefly pausing allows for network conditions to
 	// improve and for asynchronous operations such as fetch remote server
 	// list to complete. If omitted, a default value is used. This value is
 	// typical overridden for testing.
-	EstablishTunnelPausePeriodSeconds *int
+	EstablishTunnelPausePeriodSeconds *int `json:",omitempty"`
 
 	// EstablishTunnelPausePeriodSeconds specifies the grace period, or head
 	// start, provided to the affinity server candidate when establishing. The
 	// affinity server is the server used for the last established tunnel.
-	EstablishTunnelServerAffinityGracePeriodMilliseconds *int
+	EstablishTunnelServerAffinityGracePeriodMilliseconds *int `json:",omitempty"`
 
 	// ConnectionWorkerPoolSize specifies how many connection attempts to
 	// attempt in parallel. If omitted or when 0, a default is used; this is
 	// recommended.
-	ConnectionWorkerPoolSize int
+	ConnectionWorkerPoolSize int `json:",omitempty"`
 
 	// TunnelPoolSize specifies how many tunnels to run in parallel. Port
 	// forwards are multiplexed over multiple tunnels. If omitted or when 0,
 	// the default is TUNNEL_POOL_SIZE, which is recommended. Any value over
 	// MAX_TUNNEL_POOL_SIZE is treated as MAX_TUNNEL_POOL_SIZE.
-	TunnelPoolSize int
+	TunnelPoolSize int `json:",omitempty"`
 
 	// StaggerConnectionWorkersMilliseconds adds a specified delay before
 	// making each server candidate available to connection workers. This
 	// option is enabled when StaggerConnectionWorkersMilliseconds > 0.
-	StaggerConnectionWorkersMilliseconds int
+	StaggerConnectionWorkersMilliseconds int `json:",omitempty"`
 
 	// LimitIntensiveConnectionWorkers limits the number of concurrent
 	// connection workers attempting connections with resource intensive
 	// protocols. This option is enabled when LimitIntensiveConnectionWorkers
 	// > 0.
-	LimitIntensiveConnectionWorkers int
+	LimitIntensiveConnectionWorkers int `json:",omitempty"`
 
 	// LimitMeekBufferSizes selects smaller buffers for meek protocols.
-	LimitMeekBufferSizes bool
+	LimitMeekBufferSizes bool `json:",omitempty"`
 
 	// LimitCPUThreads minimizes the number of CPU threads -- and associated
 	// overhead -- the are used.
-	LimitCPUThreads bool
+	LimitCPUThreads bool `json:",omitempty"`
 
 	// LimitRelayBufferSizes selects smaller buffers for port forward relaying.
-	LimitRelayBufferSizes bool
+	LimitRelayBufferSizes bool `json:",omitempty"`
 
 	// IgnoreHandshakeStatsRegexps skips compiling and using stats regexes.
-	IgnoreHandshakeStatsRegexps bool
+	IgnoreHandshakeStatsRegexps bool `json:",omitempty"`
 
 	// UpstreamProxyURL is a URL specifying an upstream proxy to use for all
 	// outbound connections. The URL should include proxy type and
 	// authentication information, as required. See example URLs here:
 	// https://github.com/Psiphon-Labs/psiphon-tunnel-core/tree/master/psiphon/upstreamproxy
-	UpstreamProxyURL string
+	UpstreamProxyURL string `json:",omitempty"`
 
 	// CustomHeaders is a set of additional arbitrary HTTP headers that are
 	// added to all plaintext HTTP requests and requests made through an HTTP
 	// upstream proxy when specified by UpstreamProxyURL.
-	CustomHeaders http.Header
+	CustomHeaders http.Header `json:",omitempty"`
 
 	// MeekAdditionalHeaders is a set of additional arbitrary HTTP headers
 	// that are added to all meek HTTP requests. An additional header is
 	// ignored when the header name is already present in a meek request.
-	MeekAdditionalHeaders http.Header
+	MeekAdditionalHeaders http.Header `json:",omitempty"`
 
 	// NetworkConnectivityChecker is an interface that enables tunnel-core to
 	// call into the host application to check for network connectivity. See:
 	// NetworkConnectivityChecker doc.
-	NetworkConnectivityChecker NetworkConnectivityChecker
+	NetworkConnectivityChecker NetworkConnectivityChecker `json:",omitempty"`
 
 	// DeviceBinder is an interface that enables tunnel-core to call into the
 	// host application to bind sockets to specific devices. See: DeviceBinder
@@ -298,57 +298,57 @@ type Config struct {
 	//
 	// When DeviceBinder is set, the "VPN" feature name is automatically added
 	// when reporting ClientFeatures.
-	DeviceBinder DeviceBinder
+	DeviceBinder DeviceBinder `json:",omitempty"`
 
 	// AllowDefaultDNSResolverWithBindToDevice indicates that it's safe to use
 	// the default resolver when DeviceBinder is configured, as the host OS
 	// will automatically exclude DNS requests from the VPN.
-	AllowDefaultDNSResolverWithBindToDevice bool
+	AllowDefaultDNSResolverWithBindToDevice bool `json:",omitempty"`
 
 	// IPv6Synthesizer is an interface that allows tunnel-core to call into
 	// the host application to synthesize IPv6 addresses. See: IPv6Synthesizer
 	// doc.
-	IPv6Synthesizer IPv6Synthesizer
+	IPv6Synthesizer IPv6Synthesizer `json:",omitempty"`
 
 	// HasIPv6RouteGetter is an interface that allows tunnel-core to call into
 	// the host application to determine if the host has an IPv6 route. See:
 	// HasIPv6RouteGetter doc.
-	HasIPv6RouteGetter HasIPv6RouteGetter
+	HasIPv6RouteGetter HasIPv6RouteGetter `json:",omitempty"`
 
 	// DNSServerGetter is an interface that enables tunnel-core to call into
 	// the host application to discover the native network DNS server
 	// settings. See: DNSServerGetter doc.
-	DNSServerGetter DNSServerGetter
+	DNSServerGetter DNSServerGetter `json:",omitempty"`
 
 	// NetworkIDGetter in an interface that enables tunnel-core to call into
 	// the host application to get an identifier for the host's current active
 	// network. See: NetworkIDGetter doc.
-	NetworkIDGetter NetworkIDGetter
+	NetworkIDGetter NetworkIDGetter `json:",omitempty"`
 
 	// NetworkID, when not blank, is used as the identifier for the host's
 	// current active network.
 	// NetworkID is ignored when NetworkIDGetter is set, or when
 	// common/networkid is enabled.
-	NetworkID string
+	NetworkID string `json:",omitempty"`
 
 	// DisableTactics disables tactics operations including requests, payload
 	// handling, and application of parameters.
-	DisableTactics bool
+	DisableTactics bool `json:",omitempty"`
 
 	// DisableReplay causes any persisted dial parameters to be ignored when
 	// they would otherwise be used for replay.
-	DisableReplay bool
+	DisableReplay bool `json:",omitempty"`
 
 	// TargetServerEntry is an encoded server entry. When specified, this
 	// server entry is used exclusively and all other known servers are
 	// ignored; also, when set, ConnectionWorkerPoolSize is ignored and
 	// the pool size is 1.
-	TargetServerEntry string
+	TargetServerEntry string `json:",omitempty"`
 
 	// DisableApi disables Psiphon server API calls including handshake,
 	// connected, status, etc. This is used for special case temporary tunnels
 	// (Windows VPN mode).
-	DisableApi bool
+	DisableApi bool `json:",omitempty"`
 
 	// TargetAPIProtocol specifies whether to force use of "ssh" or "web" API
 	// protocol. When blank, the default, the optimal API protocol is used.
@@ -358,12 +358,12 @@ type Config struct {
 	// This parameter is intended for testing and debugging only. Not all
 	// parameters are supported in the legacy "web" API protocol, including
 	// speed test samples.
-	TargetAPIProtocol string
+	TargetAPIProtocol string `json:",omitempty"`
 
 	// TargetAPIProtocol specifies whether to use "json" or "cbor" API
 	// protocol parameter encodings. When blank, the default is to use "cbor"
 	// where supported.
-	TargetAPIEncoding string
+	TargetAPIEncoding string `json:",omitempty"`
 
 	// RemoteServerListURLs is list of URLs which specify locations to fetch
 	// out-of-band server entries. This facility is used when a tunnel cannot
@@ -371,22 +371,22 @@ type Config struct {
 	// on the Psiphon Network, and is typically embedded in the client binary.
 	// All URLs must point to the same entity with the same ETag. At least one
 	// TransferURL must have OnlyAfterAttempts = 0.
-	RemoteServerListURLs parameters.TransferURLs
+	RemoteServerListURLs parameters.TransferURLs `json:",omitempty"`
 
 	// RemoteServerListSignaturePublicKey specifies a public key that's used
 	// to authenticate the remote server list payload. This value is supplied
 	// by and depends on the Psiphon Network, and is typically embedded in the
 	// client binary.
-	RemoteServerListSignaturePublicKey string
+	RemoteServerListSignaturePublicKey string `json:",omitempty"`
 
 	// DisableRemoteServerListFetcher disables fetching remote server lists.
 	// This is used for special case temporary tunnels.
-	DisableRemoteServerListFetcher bool
+	DisableRemoteServerListFetcher bool `json:",omitempty"`
 
 	// FetchRemoteServerListRetryPeriodMilliseconds specifies the delay before
 	// resuming a remote server list download after a failure. If omitted, a
 	// default value is used. This value is typical overridden for testing.
-	FetchRemoteServerListRetryPeriodMilliseconds *int
+	FetchRemoteServerListRetryPeriodMilliseconds *int `json:",omitempty"`
 
 	// ObfuscatedServerListRootURLs is a list of URLs which specify root
 	// locations from which to fetch obfuscated server list files. This value
@@ -394,13 +394,13 @@ type Config struct {
 	// embedded in the client binary. All URLs must point to the same entity
 	// with the same ETag. At least one DownloadURL must have
 	// OnlyAfterAttempts = 0.
-	ObfuscatedServerListRootURLs parameters.TransferURLs
+	ObfuscatedServerListRootURLs parameters.TransferURLs `json:",omitempty"`
 
 	// EnableUpgradeDownload indicates whether to check for and download
 	// upgrades. When set, UpgradeDownloadURLs and
 	// UpgradeDownloadClientVersionHeader must also be set. ClientPlatform
 	// and ClientVersion should also be set.
-	EnableUpgradeDownload bool
+	EnableUpgradeDownload bool `json:",omitempty"`
 
 	// UpgradeDownloadURLs is list of URLs which specify locations from which
 	// to download a host client upgrade file, when one is available. The core
@@ -410,7 +410,7 @@ type Config struct {
 	// embedded in the client binary. All URLs must point to the same entity
 	// with the same ETag. At least one DownloadURL must have
 	// OnlyAfterAttempts = 0.
-	UpgradeDownloadURLs parameters.TransferURLs
+	UpgradeDownloadURLs parameters.TransferURLs `json:",omitempty"`
 
 	// UpgradeDownloadClientVersionHeader specifies the HTTP header name for
 	// the entity at UpgradeDownloadURLs which specifies the client version
@@ -418,17 +418,17 @@ type Config struct {
 	// number available at UpgradeDownloadURLs.
 	// UpgradeDownloadClientVersionHeader is required when UpgradeDownloadURLs
 	// is specified.
-	UpgradeDownloadClientVersionHeader string
+	UpgradeDownloadClientVersionHeader string `json:",omitempty"`
 
 	// FetchUpgradeRetryPeriodMilliseconds specifies the delay before resuming
 	// a client upgrade download after a failure. If omitted, a default value
 	// is used. This value is typical overridden for testing.
-	FetchUpgradeRetryPeriodMilliseconds *int
+	FetchUpgradeRetryPeriodMilliseconds *int `json:",omitempty"`
 
 	// EnableFeedbackUpload indicates whether to enable uploading feedback
 	// data. When set, FeedbackUploadURLs and FeedbackEncryptionPublicKey
 	// must also be set.
-	EnableFeedbackUpload bool
+	EnableFeedbackUpload bool `json:",omitempty"`
 
 	// FeedbackUploadURLs is a list of SecureTransferURLs which specify
 	// locations where feedback data can be uploaded, pairing with each
@@ -436,13 +436,13 @@ type Config struct {
 	// value is supplied by and depends on the Psiphon Network, and is
 	// typically embedded in the client binary. At least one TransferURL must
 	// have OnlyAfterAttempts = 0.
-	FeedbackUploadURLs parameters.TransferURLs
+	FeedbackUploadURLs parameters.TransferURLs `json:",omitempty"`
 
 	// FeedbackEncryptionPublicKey is a default base64-encoded, RSA public key
 	// value used to encrypt feedback data. Used when uploading feedback with a
 	// TransferURL which has no public key value configured, i.e.
 	// B64EncodedPublicKey = "".
-	FeedbackEncryptionPublicKey string
+	FeedbackEncryptionPublicKey string `json:",omitempty"`
 
 	// TrustedCACertificatesFilename specifies a file containing trusted CA
 	// certs. When set, this toggles use of the trusted CA certs, specified in
@@ -451,7 +451,7 @@ type Config struct {
 	// (currently, only upgrade downloads). This option is used with stock Go
 	// TLS in cases where Go may fail to obtain a list of root CAs from the
 	// operating system.
-	TrustedCACertificatesFilename string
+	TrustedCACertificatesFilename string `json:",omitempty"`
 
 	// DisableSystemRootCAs, when true, disables loading system root CAs when
 	// verifying TLS certificates for all remote server list downloads, upgrade
@@ -461,18 +461,18 @@ type Config struct {
 	// DisableSystemRootCAs only in cases where system root CAs cannot be
 	// loaded; for example, if unsupported (iOS < 12) or insufficient memory
 	// (VPN extension on iOS < 15).
-	DisableSystemRootCAs bool
+	DisableSystemRootCAs bool `json:",omitempty"`
 
 	// DisablePeriodicSshKeepAlive indicates whether to send an SSH keepalive
 	// every 1-2 minutes, when the tunnel is idle. If the SSH keepalive times
 	// out, the tunnel is considered to have failed.
-	DisablePeriodicSshKeepAlive bool
+	DisablePeriodicSshKeepAlive bool `json:",omitempty"`
 
 	// DeviceLocation is the optional, reported location the host device is
 	// running in. This input value should be a string representing location
 	// geohash. The device location is reported to the server in the connected
 	// request and recorded for Psiphon stats.
-	DeviceLocation string
+	DeviceLocation string `json:",omitempty"`
 
 	// DeviceRegion is the optional, reported region the host device is
 	// running in. This input value should be a ISO 3166-1 alpha-2 country
@@ -482,43 +482,43 @@ type Config struct {
 	// When provided, this value may be used, pre-connection, to select
 	// performance or circumvention optimization strategies for the given
 	// region.
-	DeviceRegion string
+	DeviceRegion string `json:",omitempty"`
 
 	// EmitDiagnosticNotices indicates whether to output notices containing
 	// detailed information about the Psiphon session. As these notices may
 	// contain sensitive information, they should not be insecurely distributed
 	// or displayed to users. Default is off.
-	EmitDiagnosticNotices bool
+	EmitDiagnosticNotices bool `json:",omitempty"`
 
 	// EmitDiagnosticNetworkParameters indicates whether to include network
 	// parameters in diagnostic notices. As these parameters are sensitive
 	// circumvention network information, they should not be insecurely
 	// distributed or displayed to users. Default is off.
-	EmitDiagnosticNetworkParameters bool
+	EmitDiagnosticNetworkParameters bool `json:",omitempty"`
 
 	// EmitBytesTransferred indicates whether to emit frequent notices showing
 	// bytes sent and received.
-	EmitBytesTransferred bool
+	EmitBytesTransferred bool `json:",omitempty"`
 
 	// EmitSLOKs indicates whether to emit notices for each seeded SLOK. As
 	// this could reveal user browsing activity, it's intended for debugging
 	// and testing only.
-	EmitSLOKs bool
+	EmitSLOKs bool `json:",omitempty"`
 
 	// EmitRefractionNetworkingLogs indicates whether to emit gotapdance log
 	// messages to stdout. Note that gotapdance log messages do not conform to
 	// the Notice format standard. Default is off.
-	EmitRefractionNetworkingLogs bool
+	EmitRefractionNetworkingLogs bool `json:",omitempty"`
 
 	// EmitServerAlerts indicates whether to emit notices for server alerts.
-	EmitServerAlerts bool
+	EmitServerAlerts bool `json:",omitempty"`
 
 	// EmitClientAddress indicates whether to emit the client's public network
 	// address, IP and port, as seen by the server.
-	EmitClientAddress bool
+	EmitClientAddress bool `json:",omitempty"`
 
 	// RateLimits specify throttling configuration for the tunnel.
-	RateLimits common.RateLimits
+	RateLimits *common.RateLimits `json:",omitempty"`
 
 	// PacketTunnelTunDeviceFileDescriptor specifies a tun device file
 	// descriptor to use for running a packet tunnel. When this value is > 0,
@@ -526,19 +526,19 @@ type Config struct {
 	// relayed via the tun device file descriptor. The file descriptor is
 	// duped in NewController. When PacketTunnelTunDeviceFileDescriptor is
 	// set, TunnelPoolSize must be 1.
-	PacketTunnelTunFileDescriptor int
+	PacketTunnelTunFileDescriptor int `json:",omitempty"`
 
 	// PacketTunnelTransparentDNSIPv4Address is the IPv4 address of the DNS
 	// server configured by a VPN using a packet tunnel. All DNS packets
 	// destined to this DNS server are transparently redirected to the
 	// Psiphon server DNS.
-	PacketTunnelTransparentDNSIPv4Address string
+	PacketTunnelTransparentDNSIPv4Address string `json:",omitempty"`
 
 	// PacketTunnelTransparentDNSIPv6Address is the IPv6 address of the DNS
 	// server configured by a VPN using a packet tunnel. All DNS packets
 	// destined to this DNS server are transparently redirected to the
 	// Psiphon server DNS.
-	PacketTunnelTransparentDNSIPv6Address string
+	PacketTunnelTransparentDNSIPv6Address string `json:",omitempty"`
 
 	// SessionID specifies a client session ID to use in the Psiphon API. The
 	// session ID should be a randomly generated value that is used only for a
@@ -548,23 +548,23 @@ type Config struct {
 	// A session ID must be 32 hex digits (lower case). When blank, a random
 	// session ID is automatically generated. Supply a session ID when a
 	// single client session will cross multiple Controller instances.
-	SessionID string
+	SessionID string `json:",omitempty"`
 
 	// Authorizations is a list of encoded, signed access control
 	// authorizations that the client has obtained and will present to the
 	// server.
-	Authorizations []string
+	Authorizations []string `json:",omitempty"`
 
 	// ServerEntrySignaturePublicKey is a base64-encoded, ed25519 public
 	// key value used to verify individual server entry signatures. This value
 	// is supplied by and depends on the Psiphon Network, and is typically
 	// embedded in the client binary.
-	ServerEntrySignaturePublicKey string
+	ServerEntrySignaturePublicKey string `json:",omitempty"`
 
 	// ExchangeObfuscationKey is a base64-encoded, NaCl secretbox key used to
 	// obfuscate server info exchanges between clients.
 	// Required for the exchange functionality.
-	ExchangeObfuscationKey string
+	ExchangeObfuscationKey string `json:",omitempty"`
 
 	// MigrateHomepageNoticesFilename migrates a homepage file from the path
 	// previously configured with setNoticeFiles to the new path for homepage
@@ -575,7 +575,7 @@ type Config struct {
 	// migrations are performed.
 	//
 	// If not set, no migration operation will be performed.
-	MigrateHomepageNoticesFilename string
+	MigrateHomepageNoticesFilename string `json:",omitempty"`
 
 	// MigrateRotatingNoticesFilename migrates notice files from the path
 	// previously configured with setNoticeFiles to the new path for notice
@@ -591,7 +591,7 @@ type Config struct {
 	// migrations are performed.
 	//
 	// If not set, no migration operation will be performed.
-	MigrateRotatingNoticesFilename string
+	MigrateRotatingNoticesFilename string `json:",omitempty"`
 
 	// MigrateDataStoreDirectory indicates the location of the datastore
 	// directory, as previously configured with the deprecated
@@ -600,7 +600,7 @@ type Config struct {
 	//
 	// Note: see comment for config.Commit() for a description of how file
 	// migrations are performed.
-	MigrateDataStoreDirectory string
+	MigrateDataStoreDirectory string `json:",omitempty"`
 
 	// MigrateRemoteServerListDownloadFilename indicates the location of
 	// remote server list download files. The remote server list files found at
@@ -608,7 +608,7 @@ type Config struct {
 	//
 	// Note: see comment for config.Commit() for a description of how file
 	// migrations are performed.
-	MigrateRemoteServerListDownloadFilename string
+	MigrateRemoteServerListDownloadFilename string `json:",omitempty"`
 
 	// MigrateObfuscatedServerListDownloadDirectory indicates the location of
 	// the obfuscated server list downloads directory, as previously configured
@@ -621,7 +621,7 @@ type Config struct {
 	//
 	// Note: see comment for config.Commit() for a description of how file
 	// migrations are performed.
-	MigrateObfuscatedServerListDownloadDirectory string
+	MigrateObfuscatedServerListDownloadDirectory string `json:",omitempty"`
 
 	// MigrateUpgradeDownloadFilename indicates the location of downloaded
 	// application upgrade files. Downloaded upgrade files found at the
@@ -629,37 +629,37 @@ type Config struct {
 	//
 	// Note: see comment for config.Commit() for a description of how file
 	// migrations are performed.
-	MigrateUpgradeDownloadFilename string
+	MigrateUpgradeDownloadFilename string `json:",omitempty"`
 
 	// DisableTunnels disables establishing a client tunnel. Set
 	// DisableTunnels when running a stand-alone in-proxy proxy.
-	DisableTunnels bool
+	DisableTunnels bool `json:",omitempty"`
 
 	// InproxyEnableProxy enables running an in-proxy proxy.
-	InproxyEnableProxy bool
+	InproxyEnableProxy bool `json:",omitempty"`
 
 	// InproxyProxySessionPrivateKey specifies a long-term in-proxy proxy
 	// private key and corresponding, derived proxy ID to use. If blank, an
 	// ephemeral key will be generated.
-	InproxyProxySessionPrivateKey string
+	InproxyProxySessionPrivateKey string `json:",omitempty"`
 
 	// InproxyMaxClients specifies the maximum number of in-proxy clients to
 	// be proxied concurrently. Must be > 0 when InproxyEnableProxy is set.
-	InproxyMaxClients int
+	InproxyMaxClients int `json:",omitempty"`
 
 	// InproxyLimitUpstreamBytesPerSecond specifies the upstream byte transfer
 	// rate limit for each proxied client. When 0, there is no limit.
-	InproxyLimitUpstreamBytesPerSecond int
+	InproxyLimitUpstreamBytesPerSecond int `json:",omitempty"`
 
 	// InproxyLimitDownstreamBytesPerSecond specifies the downstream byte
 	// transfer rate limit for each proxied client. When 0, there is no limit.
-	InproxyLimitDownstreamBytesPerSecond int
+	InproxyLimitDownstreamBytesPerSecond int `json:",omitempty"`
 
 	// InproxyProxyPersonalCompartmentID specifies the personal compartment
 	// ID used by an in-proxy proxy. Personal compartment IDs are
 	// distributed from proxy operators to client users out-of-band and
 	// provide a mechanism to allow only certain clients to use a proxy.
-	InproxyProxyPersonalCompartmentID string
+	InproxyProxyPersonalCompartmentID string `json:",omitempty"`
 
 	// InproxyClientPersonalCompartmentID specifies the personal compartment
 	// ID used by an in-proxy client. Personal compartment IDs are
@@ -670,22 +670,22 @@ type Config struct {
 	// When an InproxyClientPersonalCompartmentID is set, the client will use
 	// only in-proxy protocols, ensuring that all connections go through the
 	// proxy or proxies with the same personal compartment ID.
-	InproxyClientPersonalCompartmentID string
+	InproxyClientPersonalCompartmentID string `json:",omitempty"`
 
 	// InproxyPersonalPairingConnectionWorkerPoolSize specifies the value for
 	// ConnectionWorkerPoolSize in personal pairing mode. If omitted or when
 	// 0, a default is used; this is recommended.
-	InproxyPersonalPairingConnectionWorkerPoolSize int
+	InproxyPersonalPairingConnectionWorkerPoolSize int `json:",omitempty"`
 
 	// EmitInproxyProxyActivity indicates whether to emit frequent notices
 	// showing proxy connection information and bytes transferred.
-	EmitInproxyProxyActivity bool
+	EmitInproxyProxyActivity bool `json:",omitempty"`
 
 	// ShutdownGoroutineProfileDeadlineSeconds is the number of seconds to
 	// await shutdown in Controller.Run before dumping a goroutine profile to
 	// diagnostics. Specify 0 to disable. When not specified, the default is
 	// 60 seconds.
-	ShutdownGoroutineProfileDeadlineSeconds *int
+	ShutdownGoroutineProfileDeadlineSeconds *int `json:",omitempty"`
 
 	//
 	// The following parameters are deprecated.
@@ -703,7 +703,7 @@ type Config struct {
 	// which is configured with DataRootDirectory. If set, datastore files
 	// found in the specified directory will be moved under the data root
 	// directory.
-	DataStoreDirectory string
+	DataStoreDirectory string `json:",omitempty"`
 
 	// RemoteServerListDownloadFilename specifies a target filename for
 	// storing the remote server list download. Data is stored in co-located
@@ -717,7 +717,7 @@ type Config struct {
 	//
 	// If set, remote server list download files found at the specified path
 	// will be moved under the data root directory.
-	RemoteServerListDownloadFilename string
+	RemoteServerListDownloadFilename string `json:",omitempty"`
 
 	// ObfuscatedServerListDownloadDirectory specifies a target directory for
 	// storing the obfuscated remote server list downloads. Data is stored in
@@ -731,7 +731,7 @@ type Config struct {
 	//
 	// If set, obfuscated server list download files found at the specified path
 	// will be moved under the data root directory.
-	ObfuscatedServerListDownloadDirectory string
+	ObfuscatedServerListDownloadDirectory string `json:",omitempty"`
 
 	// UpgradeDownloadFilename is the local target filename for an upgrade
 	// download. This parameter is required when UpgradeDownloadURLs (or
@@ -744,18 +744,18 @@ type Config struct {
 	//
 	// If set, upgrade download files found at the specified path will be moved
 	// under the data root directory.
-	UpgradeDownloadFilename string
+	UpgradeDownloadFilename string `json:",omitempty"`
 
 	// TunnelProtocol indicates which protocol to use. For the default, "",
 	// all protocols are used.
 	//
 	// Deprecated: Use LimitTunnelProtocols. When LimitTunnelProtocols is not
 	// nil, this parameter is ignored.
-	TunnelProtocol string
+	TunnelProtocol string `json:",omitempty"`
 
 	// Deprecated: Use CustomHeaders. When CustomHeaders is not nil, this
 	// parameter is ignored.
-	UpstreamProxyCustomHeaders http.Header
+	UpstreamProxyCustomHeaders http.Header `json:",omitempty"`
 
 	// RemoteServerListUrl is a URL which specifies a location to fetch out-
 	// of-band server entries. This facility is used when a tunnel cannot be
@@ -764,7 +764,7 @@ type Config struct {
 	//
 	// Deprecated: Use RemoteServerListURLs. When RemoteServerListURLs is not
 	// nil, this parameter is ignored.
-	RemoteServerListUrl string
+	RemoteServerListUrl string `json:",omitempty"`
 
 	// ObfuscatedServerListRootURL is a URL which specifies the root location
 	// from which to fetch obfuscated server list files. This value is
@@ -773,7 +773,7 @@ type Config struct {
 	//
 	// Deprecated: Use ObfuscatedServerListRootURLs. When
 	// ObfuscatedServerListRootURLs is not nil, this parameter is ignored.
-	ObfuscatedServerListRootURL string
+	ObfuscatedServerListRootURL string `json:",omitempty"`
 
 	// UpgradeDownloadUrl specifies a URL from which to download a host client
 	// upgrade file, when one is available. The core tunnel controller
@@ -783,321 +783,321 @@ type Config struct {
 	//
 	// Deprecated: Use UpgradeDownloadURLs. When UpgradeDownloadURLs is not
 	// nil, this parameter is ignored.
-	UpgradeDownloadUrl string
+	UpgradeDownloadUrl string `json:",omitempty"`
 
 	//
 	// The following parameters are for testing purposes.
 	//
 
 	// TransformHostNameProbability is for testing purposes.
-	TransformHostNameProbability *float64
+	TransformHostNameProbability *float64 `json:",omitempty"`
 
 	// FragmentorProbability and associated Fragmentor fields are for testing
 	// purposes.
-	FragmentorProbability          *float64
-	FragmentorLimitProtocols       []string
-	FragmentorMinTotalBytes        *int
-	FragmentorMaxTotalBytes        *int
-	FragmentorMinWriteBytes        *int
-	FragmentorMaxWriteBytes        *int
-	FragmentorMinDelayMicroseconds *int
-	FragmentorMaxDelayMicroseconds *int
+	FragmentorProbability          *float64 `json:",omitempty"`
+	FragmentorLimitProtocols       []string `json:",omitempty"`
+	FragmentorMinTotalBytes        *int     `json:",omitempty"`
+	FragmentorMaxTotalBytes        *int     `json:",omitempty"`
+	FragmentorMinWriteBytes        *int     `json:",omitempty"`
+	FragmentorMaxWriteBytes        *int     `json:",omitempty"`
+	FragmentorMinDelayMicroseconds *int     `json:",omitempty"`
+	FragmentorMaxDelayMicroseconds *int     `json:",omitempty"`
 
 	// MeekTrafficShapingProbability and associated fields are for testing
 	// purposes.
-	MeekTrafficShapingProbability       *float64
-	MeekTrafficShapingLimitProtocols    []string
-	MeekMinTLSPadding                   *int
-	MeekMaxTLSPadding                   *int
-	MeekMinLimitRequestPayloadLength    *int
-	MeekMaxLimitRequestPayloadLength    *int
-	MeekRedialTLSProbability            *float64
-	MeekAlternateCookieNameProbability  *float64
-	MeekAlternateContentTypeProbability *float64
+	MeekTrafficShapingProbability       *float64 `json:",omitempty"`
+	MeekTrafficShapingLimitProtocols    []string `json:",omitempty"`
+	MeekMinTLSPadding                   *int     `json:",omitempty"`
+	MeekMaxTLSPadding                   *int     `json:",omitempty"`
+	MeekMinLimitRequestPayloadLength    *int     `json:",omitempty"`
+	MeekMaxLimitRequestPayloadLength    *int     `json:",omitempty"`
+	MeekRedialTLSProbability            *float64 `json:",omitempty"`
+	MeekAlternateCookieNameProbability  *float64 `json:",omitempty"`
+	MeekAlternateContentTypeProbability *float64 `json:",omitempty"`
 
 	// ObfuscatedSSHAlgorithms and associated ObfuscatedSSH fields are for
 	// testing purposes. If specified, ObfuscatedSSHAlgorithms must have 4 SSH
 	// KEX elements in order: the kex algorithm, cipher, MAC, and server host
 	// key algorithm.
-	ObfuscatedSSHAlgorithms []string
-	ObfuscatedSSHMinPadding *int
-	ObfuscatedSSHMaxPadding *int
+	ObfuscatedSSHAlgorithms []string `json:",omitempty"`
+	ObfuscatedSSHMinPadding *int     `json:",omitempty"`
+	ObfuscatedSSHMaxPadding *int     `json:",omitempty"`
 
 	// LivenessTestMinUpstreamBytes and other LivenessTest fields are for
 	// testing purposes.
-	InitialLivenessTest            parameters.LivenessTestSpecs
-	LivenessTest                   parameters.LivenessTestSpecs
-	LivenessTestMinUpstreamBytes   *int
-	LivenessTestMaxUpstreamBytes   *int
-	LivenessTestMinDownstreamBytes *int
-	LivenessTestMaxDownstreamBytes *int
+	InitialLivenessTest            parameters.LivenessTestSpecs `json:",omitempty"`
+	LivenessTest                   parameters.LivenessTestSpecs `json:",omitempty"`
+	LivenessTestMinUpstreamBytes   *int                         `json:",omitempty"`
+	LivenessTestMaxUpstreamBytes   *int                         `json:",omitempty"`
+	LivenessTestMinDownstreamBytes *int                         `json:",omitempty"`
+	LivenessTestMaxDownstreamBytes *int                         `json:",omitempty"`
 
 	// ReplayCandidateCount and other Replay fields are for testing purposes.
-	ReplayCandidateCount                   *int
-	ReplayDialParametersTTLSeconds         *int
-	ReplayTargetUpstreamBytes              *int
-	ReplayTargetDownstreamBytes            *int
-	ReplayTargetTunnelDurationSeconds      *int
-	ReplayLaterRoundMoveToFrontProbability *float64
-	ReplayRetainFailedProbability          *float64
-	ReplayIgnoreChangedConfigState         *bool
+	ReplayCandidateCount                   *int     `json:",omitempty"`
+	ReplayDialParametersTTLSeconds         *int     `json:",omitempty"`
+	ReplayTargetUpstreamBytes              *int     `json:",omitempty"`
+	ReplayTargetDownstreamBytes            *int     `json:",omitempty"`
+	ReplayTargetTunnelDurationSeconds      *int     `json:",omitempty"`
+	ReplayLaterRoundMoveToFrontProbability *float64 `json:",omitempty"`
+	ReplayRetainFailedProbability          *float64 `json:",omitempty"`
+	ReplayIgnoreChangedConfigState         *bool    `json:",omitempty"`
 
 	// NetworkLatencyMultiplierMin and other NetworkLatencyMultiplier fields are
 	// for testing purposes.
-	NetworkLatencyMultiplierMin    float64
-	NetworkLatencyMultiplierMax    float64
-	NetworkLatencyMultiplierLambda float64
+	NetworkLatencyMultiplierMin    float64 `json:",omitempty"`
+	NetworkLatencyMultiplierMax    float64 `json:",omitempty"`
+	NetworkLatencyMultiplierLambda float64 `json:",omitempty"`
 
 	// UseOnlyCustomTLSProfiles and other TLS configuration fields are for
 	// testing purposes.
-	UseOnlyCustomTLSProfiles              *bool
-	CustomTLSProfiles                     protocol.CustomTLSProfiles
-	SelectRandomizedTLSProfileProbability *float64
-	NoDefaultTLSSessionIDProbability      *float64
-	DisableFrontingProviderTLSProfiles    protocol.LabeledTLSProfiles
+	UseOnlyCustomTLSProfiles              *bool                       `json:",omitempty"`
+	CustomTLSProfiles                     protocol.CustomTLSProfiles  `json:",omitempty"`
+	SelectRandomizedTLSProfileProbability *float64                    `json:",omitempty"`
+	NoDefaultTLSSessionIDProbability      *float64                    `json:",omitempty"`
+	DisableFrontingProviderTLSProfiles    protocol.LabeledTLSProfiles `json:",omitempty"`
 
 	// ClientBurstUpstreamTargetBytes and other burst metric fields are for
 	// testing purposes.
-	ClientBurstUpstreamTargetBytes            *int
-	ClientBurstUpstreamDeadlineMilliseconds   *int
-	ClientBurstDownstreamTargetBytes          *int
-	ClientBurstDownstreamDeadlineMilliseconds *int
+	ClientBurstUpstreamTargetBytes            *int `json:",omitempty"`
+	ClientBurstUpstreamDeadlineMilliseconds   *int `json:",omitempty"`
+	ClientBurstDownstreamTargetBytes          *int `json:",omitempty"`
+	ClientBurstDownstreamDeadlineMilliseconds *int `json:",omitempty"`
 
 	// ApplicationParameters is for testing purposes.
-	ApplicationParameters parameters.KeyValues
+	ApplicationParameters parameters.KeyValues `json:",omitempty"`
 
 	// CustomHostNameRegexes and other custom host name fields are for testing
 	// purposes.
-	CustomHostNameRegexes        []string
-	CustomHostNameProbability    *float64
-	CustomHostNameLimitProtocols []string
+	CustomHostNameRegexes        []string `json:",omitempty"`
+	CustomHostNameProbability    *float64 `json:",omitempty"`
+	CustomHostNameLimitProtocols []string `json:",omitempty"`
 
 	// ConjureCachedRegistrationTTLSeconds and other Conjure fields are for
 	// testing purposes.
-	ConjureCachedRegistrationTTLSeconds       *int
-	ConjureAPIRegistrarBidirectionalURL       string
-	ConjureAPIRegistrarFrontingSpecs          parameters.FrontingSpecs
-	ConjureAPIRegistrarMinDelayMilliseconds   *int
-	ConjureAPIRegistrarMaxDelayMilliseconds   *int
-	ConjureDecoyRegistrarProbability          *float64
-	ConjureDecoyRegistrarWidth                *int
-	ConjureDecoyRegistrarMinDelayMilliseconds *int
-	ConjureDecoyRegistrarMaxDelayMilliseconds *int
-	ConjureEnableIPv6Dials                    *bool
-	ConjureEnablePortRandomization            *bool
-	ConjureEnableRegistrationOverrides        *bool
-	ConjureLimitTransports                    protocol.ConjureTransports
-	ConjureSTUNServerAddresses                []string
-	ConjureDTLSEmptyInitialPacketProbability  *float64
+	ConjureCachedRegistrationTTLSeconds       *int                       `json:",omitempty"`
+	ConjureAPIRegistrarBidirectionalURL       string                     `json:",omitempty"`
+	ConjureAPIRegistrarFrontingSpecs          parameters.FrontingSpecs   `json:",omitempty"`
+	ConjureAPIRegistrarMinDelayMilliseconds   *int                       `json:",omitempty"`
+	ConjureAPIRegistrarMaxDelayMilliseconds   *int                       `json:",omitempty"`
+	ConjureDecoyRegistrarProbability          *float64                   `json:",omitempty"`
+	ConjureDecoyRegistrarWidth                *int                       `json:",omitempty"`
+	ConjureDecoyRegistrarMinDelayMilliseconds *int                       `json:",omitempty"`
+	ConjureDecoyRegistrarMaxDelayMilliseconds *int                       `json:",omitempty"`
+	ConjureEnableIPv6Dials                    *bool                      `json:",omitempty"`
+	ConjureEnablePortRandomization            *bool                      `json:",omitempty"`
+	ConjureEnableRegistrationOverrides        *bool                      `json:",omitempty"`
+	ConjureLimitTransports                    protocol.ConjureTransports `json:",omitempty"`
+	ConjureSTUNServerAddresses                []string                   `json:",omitempty"`
+	ConjureDTLSEmptyInitialPacketProbability  *float64                   `json:",omitempty"`
 
 	// HoldOffTunnelProtocolMinDurationMilliseconds and other
 	// HoldOffTunnelProtocol fields are for testing purposes.
-	HoldOffTunnelProtocolMinDurationMilliseconds *int
-	HoldOffTunnelProtocolMaxDurationMilliseconds *int
-	HoldOffTunnelProtocolNames                   []string
-	HoldOffTunnelProtocolProbability             *float64
+	HoldOffTunnelProtocolMinDurationMilliseconds *int     `json:",omitempty"`
+	HoldOffTunnelProtocolMaxDurationMilliseconds *int     `json:",omitempty"`
+	HoldOffTunnelProtocolNames                   []string `json:",omitempty"`
+	HoldOffTunnelProtocolProbability             *float64 `json:",omitempty"`
 
 	// HoldOffFrontingTunnelMinDurationMilliseconds and other
 	// HoldOffFrontingTunnel fields are for testing purposes.
-	HoldOffFrontingTunnelMinDurationMilliseconds *int
-	HoldOffFrontingTunnelMaxDurationMilliseconds *int
-	HoldOffFrontingTunnelProviderIDs             []string
-	HoldOffFrontingTunnelProbability             *float64
+	HoldOffFrontingTunnelMinDurationMilliseconds *int     `json:",omitempty"`
+	HoldOffFrontingTunnelMaxDurationMilliseconds *int     `json:",omitempty"`
+	HoldOffFrontingTunnelProviderIDs             []string `json:",omitempty"`
+	HoldOffFrontingTunnelProbability             *float64 `json:",omitempty"`
 
 	// RestrictFrontingProviderIDs and other RestrictFrontingProviderIDs fields
 	// are for testing purposes.
-	RestrictFrontingProviderIDs                  []string
-	RestrictFrontingProviderIDsClientProbability *float64
+	RestrictFrontingProviderIDs                  []string `json:",omitempty"`
+	RestrictFrontingProviderIDsClientProbability *float64 `json:",omitempty"`
 
 	// HoldOffDirectTunnelMinDurationMilliseconds and other HoldOffDirect
 	// fields are for testing purposes.
-	HoldOffDirectTunnelMinDurationMilliseconds *int
-	HoldOffDirectTunnelMaxDurationMilliseconds *int
-	HoldOffDirectTunnelProviderRegions         map[string][]string
-	HoldOffDirectTunnelProbability             *float64
+	HoldOffDirectTunnelMinDurationMilliseconds *int                `json:",omitempty"`
+	HoldOffDirectTunnelMaxDurationMilliseconds *int                `json:",omitempty"`
+	HoldOffDirectTunnelProviderRegions         map[string][]string `json:",omitempty"`
+	HoldOffDirectTunnelProbability             *float64            `json:",omitempty"`
 
 	// RestrictDirectProviderRegions and other RestrictDirect fields are for
 	// testing purposes.
-	RestrictDirectProviderRegions              map[string][]string
-	RestrictDirectProviderIDsClientProbability *float64
+	RestrictDirectProviderRegions              map[string][]string `json:",omitempty"`
+	RestrictDirectProviderIDsClientProbability *float64            `json:",omitempty"`
 
 	// HoldOffInproxyTunnelMinDurationMilliseconds and other HoldOffInproxy
 	// fields are for testing purposes.
-	HoldOffInproxyTunnelMinDurationMilliseconds *int
-	HoldOffInproxyTunnelMaxDurationMilliseconds *int
-	HoldOffInproxyTunnelProviderRegions         map[string][]string
-	HoldOffInproxyTunnelProbability             *float64
+	HoldOffInproxyTunnelMinDurationMilliseconds *int                `json:",omitempty"`
+	HoldOffInproxyTunnelMaxDurationMilliseconds *int                `json:",omitempty"`
+	HoldOffInproxyTunnelProviderRegions         map[string][]string `json:",omitempty"`
+	HoldOffInproxyTunnelProbability             *float64            `json:",omitempty"`
 
 	// RestrictInproxyProviderRegions and other RestrictInproxy fields are for
 	// testing purposes.
-	RestrictInproxyProviderRegions              map[string][]string
-	RestrictInproxyProviderIDsClientProbability *float64
+	RestrictInproxyProviderRegions              map[string][]string `json:",omitempty"`
+	RestrictInproxyProviderIDsClientProbability *float64            `json:",omitempty"`
 
 	// UpstreamProxyAllowAllServerEntrySources is for testing purposes.
-	UpstreamProxyAllowAllServerEntrySources *bool
+	UpstreamProxyAllowAllServerEntrySources *bool `json:",omitempty"`
 
 	// LimitTunnelDialPortNumbers is for testing purposes.
-	LimitTunnelDialPortNumbers parameters.TunnelProtocolPortLists
+	LimitTunnelDialPortNumbers parameters.TunnelProtocolPortLists `json:",omitempty"`
 
 	// QUICDialEarlyProbability is for testing purposes.
-	QUICDialEarlyProbability *float64
+	QUICDialEarlyProbability *float64 `json:",omitempty"`
 
 	// QUICObfuscatedPSKProbability is for testing purposes.
-	QUICObfuscatedPSKProbability *float64
+	QUICObfuscatedPSKProbability *float64 `json:",omitempty"`
 
 	// QUICDisablePathMTUDiscoveryProbability is for testing purposes.
-	QUICDisablePathMTUDiscoveryProbability *float64
+	QUICDisablePathMTUDiscoveryProbability *float64 `json:",omitempty"`
 
 	// DNSResolverAttemptsPerServer and other DNSResolver fields are for
 	// testing purposes.
-	DNSResolverAttemptsPerServer                     *int
-	DNSResolverAttemptsPerPreferredServer            *int
-	DNSResolverRequestTimeoutMilliseconds            *int
-	DNSResolverAwaitTimeoutMilliseconds              *int
-	DNSResolverPreresolvedIPAddressCIDRs             parameters.LabeledCIDRs
-	DNSResolverPreresolvedIPAddressProbability       *float64
-	DNSResolverAlternateServers                      []string
-	DNSResolverPreferredAlternateServers             []string
-	DNSResolverPreferAlternateServerProbability      *float64
-	DNSResolverProtocolTransformSpecs                transforms.Specs
-	DNSResolverProtocolTransformScopedSpecNames      transforms.ScopedSpecNames
-	DNSResolverProtocolTransformProbability          *float64
-	DNSResolverQNameRandomizeCasingProbability       *float64
-	DNSResolverQNameMustMatchProbability             *float64
-	DNSResolverIncludeEDNS0Probability               *float64
-	DNSResolverCacheExtensionInitialTTLMilliseconds  *int
-	DNSResolverCacheExtensionVerifiedTTLMilliseconds *int
+	DNSResolverAttemptsPerServer                     *int                       `json:",omitempty"`
+	DNSResolverAttemptsPerPreferredServer            *int                       `json:",omitempty"`
+	DNSResolverRequestTimeoutMilliseconds            *int                       `json:",omitempty"`
+	DNSResolverAwaitTimeoutMilliseconds              *int                       `json:",omitempty"`
+	DNSResolverPreresolvedIPAddressCIDRs             parameters.LabeledCIDRs    `json:",omitempty"`
+	DNSResolverPreresolvedIPAddressProbability       *float64                   `json:",omitempty"`
+	DNSResolverAlternateServers                      []string                   `json:",omitempty"`
+	DNSResolverPreferredAlternateServers             []string                   `json:",omitempty"`
+	DNSResolverPreferAlternateServerProbability      *float64                   `json:",omitempty"`
+	DNSResolverProtocolTransformSpecs                transforms.Specs           `json:",omitempty"`
+	DNSResolverProtocolTransformScopedSpecNames      transforms.ScopedSpecNames `json:",omitempty"`
+	DNSResolverProtocolTransformProbability          *float64                   `json:",omitempty"`
+	DNSResolverQNameRandomizeCasingProbability       *float64                   `json:",omitempty"`
+	DNSResolverQNameMustMatchProbability             *float64                   `json:",omitempty"`
+	DNSResolverIncludeEDNS0Probability               *float64                   `json:",omitempty"`
+	DNSResolverCacheExtensionInitialTTLMilliseconds  *int                       `json:",omitempty"`
+	DNSResolverCacheExtensionVerifiedTTLMilliseconds *int                       `json:",omitempty"`
 
-	DirectHTTPProtocolTransformSpecs            transforms.Specs
-	DirectHTTPProtocolTransformScopedSpecNames  transforms.ScopedSpecNames
-	DirectHTTPProtocolTransformProbability      *float64
-	FrontedHTTPProtocolTransformSpecs           transforms.Specs
-	FrontedHTTPProtocolTransformScopedSpecNames transforms.ScopedSpecNames
-	FrontedHTTPProtocolTransformProbability     *float64
+	DirectHTTPProtocolTransformSpecs            transforms.Specs           `json:",omitempty"`
+	DirectHTTPProtocolTransformScopedSpecNames  transforms.ScopedSpecNames `json:",omitempty"`
+	DirectHTTPProtocolTransformProbability      *float64                   `json:",omitempty"`
+	FrontedHTTPProtocolTransformSpecs           transforms.Specs           `json:",omitempty"`
+	FrontedHTTPProtocolTransformScopedSpecNames transforms.ScopedSpecNames `json:",omitempty"`
+	FrontedHTTPProtocolTransformProbability     *float64                   `json:",omitempty"`
 
-	OSSHObfuscatorSeedTransformSpecs           transforms.Specs
-	OSSHObfuscatorSeedTransformScopedSpecNames transforms.ScopedSpecNames
-	OSSHObfuscatorSeedTransformProbability     *float64
+	OSSHObfuscatorSeedTransformSpecs           transforms.Specs           `json:",omitempty"`
+	OSSHObfuscatorSeedTransformScopedSpecNames transforms.ScopedSpecNames `json:",omitempty"`
+	OSSHObfuscatorSeedTransformProbability     *float64                   `json:",omitempty"`
 
-	ObfuscatedQUICNonceTransformSpecs           transforms.Specs
-	ObfuscatedQUICNonceTransformScopedSpecNames transforms.ScopedSpecNames
-	ObfuscatedQUICNonceTransformProbability     *float64
+	ObfuscatedQUICNonceTransformSpecs           transforms.Specs           `json:",omitempty"`
+	ObfuscatedQUICNonceTransformScopedSpecNames transforms.ScopedSpecNames `json:",omitempty"`
+	ObfuscatedQUICNonceTransformProbability     *float64                   `json:",omitempty"`
 
 	// OSSHPrefix parameters are for testing purposes only.
-	OSSHPrefixSpecs                     transforms.Specs
-	OSSHPrefixScopedSpecNames           transforms.ScopedSpecNames
-	OSSHPrefixProbability               *float64
-	OSSHPrefixSplitMinDelayMilliseconds *int
-	OSSHPrefixSplitMaxDelayMilliseconds *int
-	OSSHPrefixEnableFragmentor          *bool
+	OSSHPrefixSpecs                     transforms.Specs           `json:",omitempty"`
+	OSSHPrefixScopedSpecNames           transforms.ScopedSpecNames `json:",omitempty"`
+	OSSHPrefixProbability               *float64                   `json:",omitempty"`
+	OSSHPrefixSplitMinDelayMilliseconds *int                       `json:",omitempty"`
+	OSSHPrefixSplitMaxDelayMilliseconds *int                       `json:",omitempty"`
+	OSSHPrefixEnableFragmentor          *bool                      `json:",omitempty"`
 
 	// ShadowsocksPrefix parameters are for testing purposes only.
-	ShadowsocksPrefixSpecs           transforms.Specs
-	ShadowsocksPrefixScopedSpecNames transforms.ScopedSpecNames
-	ShadowsocksPrefixProbability     *float64
+	ShadowsocksPrefixSpecs           transforms.Specs           `json:",omitempty"`
+	ShadowsocksPrefixScopedSpecNames transforms.ScopedSpecNames `json:",omitempty"`
+	ShadowsocksPrefixProbability     *float64                   `json:",omitempty"`
 
 	// TLSTunnelTrafficShapingProbability and associated fields are for testing.
-	TLSTunnelObfuscatedPSKProbability  *float64
-	TLSTunnelTrafficShapingProbability *float64
-	TLSTunnelMinTLSPadding             *int
-	TLSTunnelMaxTLSPadding             *int
+	TLSTunnelObfuscatedPSKProbability  *float64 `json:",omitempty"`
+	TLSTunnelTrafficShapingProbability *float64 `json:",omitempty"`
+	TLSTunnelMinTLSPadding             *int     `json:",omitempty"`
+	TLSTunnelMaxTLSPadding             *int     `json:",omitempty"`
 
 	// TLSFragmentClientHello fields are for testing purposes only.
-	TLSFragmentClientHelloProbability    *float64
-	TLSFragmentClientHelloLimitProtocols []string
+	TLSFragmentClientHelloProbability    *float64 `json:",omitempty"`
+	TLSFragmentClientHelloLimitProtocols []string `json:",omitempty"`
 
 	// AdditionalParameters is used for testing.
-	AdditionalParameters string
+	AdditionalParameters string `json:",omitempty"`
 
 	// SteeringIP fields are for testing purposes only.
-	SteeringIPCacheTTLSeconds *int
-	SteeringIPCacheMaxEntries *int
-	SteeringIPProbability     *float64
+	SteeringIPCacheTTLSeconds *int     `json:",omitempty"`
+	SteeringIPCacheMaxEntries *int     `json:",omitempty"`
+	SteeringIPProbability     *float64 `json:",omitempty"`
 
 	// FrontedHTTPClientReplayDialParametersTTL and other FrontedHTTPClient
 	// fields are for testing purposes only.
-	FrontedHTTPClientReplayDialParametersTTLSeconds  *int
-	FrontedHTTPClientReplayUpdateFrequencySeconds    *int
-	FrontedHTTPClientReplayDialParametersProbability *float64
-	FrontedHTTPClientReplayRetainFailedProbability   *float64
+	FrontedHTTPClientReplayDialParametersTTLSeconds  *int     `json:",omitempty"`
+	FrontedHTTPClientReplayUpdateFrequencySeconds    *int     `json:",omitempty"`
+	FrontedHTTPClientReplayDialParametersProbability *float64 `json:",omitempty"`
+	FrontedHTTPClientReplayRetainFailedProbability   *float64 `json:",omitempty"`
 
 	// The following in-proxy fields are for testing purposes only.
-	InproxyAllowProxy                                       *bool
-	InproxyAllowClient                                      *bool
-	InproxyTunnelProtocolSelectionProbability               *float64
-	InproxyBrokerSpecs                                      parameters.InproxyBrokerSpecsValue
-	InproxyPersonalPairingBrokerSpecs                       parameters.InproxyBrokerSpecsValue
-	InproxyProxyBrokerSpecs                                 parameters.InproxyBrokerSpecsValue
-	InproxyProxyPersonalPairingBrokerSpecs                  parameters.InproxyBrokerSpecsValue
-	InproxyClientBrokerSpecs                                parameters.InproxyBrokerSpecsValue
-	InproxyClientPersonalPairingBrokerSpecs                 parameters.InproxyBrokerSpecsValue
-	InproxyReplayBrokerDialParametersTTLSeconds             *int
-	InproxyReplayBrokerUpdateFrequencySeconds               *int
-	InproxyReplayBrokerDialParametersProbability            *float64
-	InproxyReplayBrokerRetainFailedProbability              *float64
-	InproxyCommonCompartmentIDs                             parameters.InproxyCompartmentIDsValue
-	InproxyMaxCompartmentIDListLength                       *int
-	InproxyProxyAnnounceRequestTimeoutMilliseconds          *int
-	InproxyProxyAnnounceDelayMilliseconds                   *int
-	InproxyProxyAnnounceMaxBackoffDelayMilliseconds         *int
-	InproxyProxyAnnounceDelayJitter                         *float64
-	InproxyProxyAnswerRequestTimeoutMilliseconds            *int
-	InproxyClientOfferRequestTimeoutMilliseconds            *int
-	InproxyClientOfferRequestPersonalTimeoutMilliseconds    *int
-	InproxyClientOfferRetryDelayMilliseconds                *int
-	InproxyClientOfferRetryJitter                           *float64
-	InproxyClientRelayedPacketRequestTimeoutMilliseconds    *int
-	InproxyDTLSRandomizationProbability                     *float64
-	InproxyWebRTCMediaStreamsProbability                    *float64
-	InproxyWebRTCDataChannelTrafficShapingProbability       *float64
-	InproxyWebRTCDataChannelTrafficShapingParameters        *parameters.InproxyTrafficShapingParametersValue
-	InproxyWebRTCMediaStreamsTrafficShapingProbability      *float64
-	InproxyWebRTCMediaStreamsTrafficShapingParameters       *parameters.InproxyTrafficShapingParametersValue
-	InproxySTUNServerAddresses                              []string
-	InproxySTUNServerAddressesRFC5780                       []string
-	InproxyProxySTUNServerAddresses                         []string
-	InproxyProxySTUNServerAddressesRFC5780                  []string
-	InproxyClientSTUNServerAddresses                        []string
-	InproxyClientSTUNServerAddressesRFC5780                 []string
-	InproxyClientDiscoverNATProbability                     *float64
-	InproxyDisableSTUN                                      *bool
-	InproxyDisablePortMapping                               *bool
-	InproxyDisableInboundForMobileNetworks                  *bool
-	InproxyDisableIPv6ICECandidates                         *bool
-	InproxyProxyDisableSTUN                                 *bool
-	InproxyProxyDisablePortMapping                          *bool
-	InproxyProxyDisableInboundForMobileNetworks             *bool
-	InproxyProxyDisableIPv6ICECandidates                    *bool
-	InproxyClientDisableSTUN                                *bool
-	InproxyClientDisablePortMapping                         *bool
-	InproxyClientDisableInboundForMobileNetworks            *bool
-	InproxyClientDisableIPv6ICECandidates                   *bool
-	InproxyProxyDiscoverNATTimeoutMilliseconds              *int
-	InproxyClientDiscoverNATTimeoutMilliseconds             *int
-	InproxyWebRTCAnswerTimeoutMilliseconds                  *int
-	InproxyProxyWebRTCAwaitReadyToProxyTimeoutMilliseconds  *int
-	InproxyClientWebRTCAwaitReadyToProxyTimeoutMilliseconds *int
-	InproxyProxyDestinationDialTimeoutMilliseconds          *int
-	InproxyPsiphonAPIRequestTimeoutMilliseconds             *int
-	InproxyProxyTotalActivityNoticePeriodMilliseconds       *int
-	InproxyClientDialRateLimitQuantity                      *int
-	InproxyClientDialRateLimitIntervalMilliseconds          *int
-	InproxyClientNoMatchFailoverProbability                 *float64
-	InproxyClientNoMatchFailoverPersonalProbability         *float64
-	InproxyFrontingProviderClientMaxRequestTimeouts         map[string]string
-	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int
-	InproxyProxyIncompatibleNetworkTypes                    []string
-	InproxyClientIncompatibleNetworkTypes                   []string
-	InproxyReplayRetainFailedProbability                    *float64
-	InproxyProxyDisableWaitToShareSession                   *bool
-	InproxyClientDisableWaitToShareSession                  *bool
-	InproxyTunnelProtocolPreferProbability                  *float64
-	InproxyTunnelProtocolForceSelectionCount                *int
+	InproxyAllowProxy                                       *bool                                            `json:",omitempty"`
+	InproxyAllowClient                                      *bool                                            `json:",omitempty"`
+	InproxyTunnelProtocolSelectionProbability               *float64                                         `json:",omitempty"`
+	InproxyBrokerSpecs                                      parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
+	InproxyPersonalPairingBrokerSpecs                       parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
+	InproxyProxyBrokerSpecs                                 parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
+	InproxyProxyPersonalPairingBrokerSpecs                  parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
+	InproxyClientBrokerSpecs                                parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
+	InproxyClientPersonalPairingBrokerSpecs                 parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
+	InproxyReplayBrokerDialParametersTTLSeconds             *int                                             `json:",omitempty"`
+	InproxyReplayBrokerUpdateFrequencySeconds               *int                                             `json:",omitempty"`
+	InproxyReplayBrokerDialParametersProbability            *float64                                         `json:",omitempty"`
+	InproxyReplayBrokerRetainFailedProbability              *float64                                         `json:",omitempty"`
+	InproxyCommonCompartmentIDs                             parameters.InproxyCompartmentIDsValue            `json:",omitempty"`
+	InproxyMaxCompartmentIDListLength                       *int                                             `json:",omitempty"`
+	InproxyProxyAnnounceRequestTimeoutMilliseconds          *int                                             `json:",omitempty"`
+	InproxyProxyAnnounceDelayMilliseconds                   *int                                             `json:",omitempty"`
+	InproxyProxyAnnounceMaxBackoffDelayMilliseconds         *int                                             `json:",omitempty"`
+	InproxyProxyAnnounceDelayJitter                         *float64                                         `json:",omitempty"`
+	InproxyProxyAnswerRequestTimeoutMilliseconds            *int                                             `json:",omitempty"`
+	InproxyClientOfferRequestTimeoutMilliseconds            *int                                             `json:",omitempty"`
+	InproxyClientOfferRequestPersonalTimeoutMilliseconds    *int                                             `json:",omitempty"`
+	InproxyClientOfferRetryDelayMilliseconds                *int                                             `json:",omitempty"`
+	InproxyClientOfferRetryJitter                           *float64                                         `json:",omitempty"`
+	InproxyClientRelayedPacketRequestTimeoutMilliseconds    *int                                             `json:",omitempty"`
+	InproxyDTLSRandomizationProbability                     *float64                                         `json:",omitempty"`
+	InproxyWebRTCMediaStreamsProbability                    *float64                                         `json:",omitempty"`
+	InproxyWebRTCDataChannelTrafficShapingProbability       *float64                                         `json:",omitempty"`
+	InproxyWebRTCDataChannelTrafficShapingParameters        *parameters.InproxyTrafficShapingParametersValue `json:",omitempty"`
+	InproxyWebRTCMediaStreamsTrafficShapingProbability      *float64                                         `json:",omitempty"`
+	InproxyWebRTCMediaStreamsTrafficShapingParameters       *parameters.InproxyTrafficShapingParametersValue `json:",omitempty"`
+	InproxySTUNServerAddresses                              []string                                         `json:",omitempty"`
+	InproxySTUNServerAddressesRFC5780                       []string                                         `json:",omitempty"`
+	InproxyProxySTUNServerAddresses                         []string                                         `json:",omitempty"`
+	InproxyProxySTUNServerAddressesRFC5780                  []string                                         `json:",omitempty"`
+	InproxyClientSTUNServerAddresses                        []string                                         `json:",omitempty"`
+	InproxyClientSTUNServerAddressesRFC5780                 []string                                         `json:",omitempty"`
+	InproxyClientDiscoverNATProbability                     *float64                                         `json:",omitempty"`
+	InproxyDisableSTUN                                      *bool                                            `json:",omitempty"`
+	InproxyDisablePortMapping                               *bool                                            `json:",omitempty"`
+	InproxyDisableInboundForMobileNetworks                  *bool                                            `json:",omitempty"`
+	InproxyDisableIPv6ICECandidates                         *bool                                            `json:",omitempty"`
+	InproxyProxyDisableSTUN                                 *bool                                            `json:",omitempty"`
+	InproxyProxyDisablePortMapping                          *bool                                            `json:",omitempty"`
+	InproxyProxyDisableInboundForMobileNetworks             *bool                                            `json:",omitempty"`
+	InproxyProxyDisableIPv6ICECandidates                    *bool                                            `json:",omitempty"`
+	InproxyClientDisableSTUN                                *bool                                            `json:",omitempty"`
+	InproxyClientDisablePortMapping                         *bool                                            `json:",omitempty"`
+	InproxyClientDisableInboundForMobileNetworks            *bool                                            `json:",omitempty"`
+	InproxyClientDisableIPv6ICECandidates                   *bool                                            `json:",omitempty"`
+	InproxyProxyDiscoverNATTimeoutMilliseconds              *int                                             `json:",omitempty"`
+	InproxyClientDiscoverNATTimeoutMilliseconds             *int                                             `json:",omitempty"`
+	InproxyWebRTCAnswerTimeoutMilliseconds                  *int                                             `json:",omitempty"`
+	InproxyProxyWebRTCAwaitReadyToProxyTimeoutMilliseconds  *int                                             `json:",omitempty"`
+	InproxyClientWebRTCAwaitReadyToProxyTimeoutMilliseconds *int                                             `json:",omitempty"`
+	InproxyProxyDestinationDialTimeoutMilliseconds          *int                                             `json:",omitempty"`
+	InproxyPsiphonAPIRequestTimeoutMilliseconds             *int                                             `json:",omitempty"`
+	InproxyProxyTotalActivityNoticePeriodMilliseconds       *int                                             `json:",omitempty"`
+	InproxyClientDialRateLimitQuantity                      *int                                             `json:",omitempty"`
+	InproxyClientDialRateLimitIntervalMilliseconds          *int                                             `json:",omitempty"`
+	InproxyClientNoMatchFailoverProbability                 *float64                                         `json:",omitempty"`
+	InproxyClientNoMatchFailoverPersonalProbability         *float64                                         `json:",omitempty"`
+	InproxyFrontingProviderClientMaxRequestTimeouts         map[string]string                                `json:",omitempty"`
+	InproxyProxyOnBrokerClientFailedRetryPeriodMilliseconds *int                                             `json:",omitempty"`
+	InproxyProxyIncompatibleNetworkTypes                    []string                                         `json:",omitempty"`
+	InproxyClientIncompatibleNetworkTypes                   []string                                         `json:",omitempty"`
+	InproxyReplayRetainFailedProbability                    *float64                                         `json:",omitempty"`
+	InproxyProxyDisableWaitToShareSession                   *bool                                            `json:",omitempty"`
+	InproxyClientDisableWaitToShareSession                  *bool                                            `json:",omitempty"`
+	InproxyTunnelProtocolPreferProbability                  *float64                                         `json:",omitempty"`
+	InproxyTunnelProtocolForceSelectionCount                *int                                             `json:",omitempty"`
 
-	InproxySkipAwaitFullyConnected  bool
-	InproxyEnableWebRTCDebugLogging bool
+	InproxySkipAwaitFullyConnected  bool `json:",omitempty"`
+	InproxyEnableWebRTCDebugLogging bool `json:",omitempty"`
 
-	NetworkIDCacheTTLMilliseconds *int
+	NetworkIDCacheTTLMilliseconds *int `json:",omitempty"`
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -2040,7 +2040,9 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.FeedbackEncryptionPublicKey] = config.FeedbackEncryptionPublicKey
 	}
 
-	applyParameters[parameters.TunnelRateLimits] = config.RateLimits
+	if config.RateLimits != nil {
+		applyParameters[parameters.TunnelRateLimits] = *config.RateLimits
+	}
 
 	if config.TransformHostNameProbability != nil {
 		applyParameters[parameters.TransformHostNameProbability] = *config.TransformHostNameProbability

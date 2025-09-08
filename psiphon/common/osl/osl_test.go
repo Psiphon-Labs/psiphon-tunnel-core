@@ -40,6 +40,8 @@ func TestOSL(t *testing.T) {
     {
       "Epoch" : "%s",
 
+      "PaveDataOSLCount" : %d,
+
       "Regions" : ["US", "CA"],
 
       "PropagationChannelIDs" : ["2995DB0C968C59C4F23E87988D9C0D41", "E742C25A6D8BA8C17F37E725FA628569", "B4A780E67695595FA486E9B900EA7335"],
@@ -101,6 +103,8 @@ func TestOSL(t *testing.T) {
     {
       "Epoch" : "%s",
 
+      "PaveDataOSLCount" : %d,
+
       "Regions" : ["US", "CA"],
 
       "PropagationChannelIDs" : ["36F1CF2DF1250BF0C7BA0629CE3DC657", "B4A780E67695595FA486E9B900EA7335"],
@@ -157,11 +161,14 @@ func TestOSL(t *testing.T) {
   ]
 }
 `
+	// Pave sufficient OSLs to cover simulated elapsed time of all test cases.
+	paveOSLCount := 1000
+
 	seedPeriod := 5 * time.Millisecond // "SeedPeriodNanoseconds" : 5000000
 	now := time.Now().UTC()
 	epoch := now.Add(-seedPeriod).Truncate(seedPeriod)
 	epochStr := epoch.Format(time.RFC3339Nano)
-	configJSON := fmt.Sprintf(configJSONTemplate, epochStr, epochStr)
+	configJSON := fmt.Sprintf(configJSONTemplate, epochStr, paveOSLCount, epochStr, paveOSLCount)
 
 	// The first scheme requires sufficient activity within 5/10 5 millisecond
 	// periods and 5/10 50 millisecond longer periods. The second scheme requires
@@ -387,8 +394,7 @@ func TestOSL(t *testing.T) {
 
 	t.Run("pave OSLs", func(t *testing.T) {
 
-		// Pave sufficient OSLs to cover simulated elapsed time of all test cases.
-		endTime := epoch.Add(1000 * seedPeriod)
+		endTime := epoch.Add(time.Duration(paveOSLCount) * seedPeriod)
 
 		// In actual deployment, paved files for each propagation channel ID
 		// are dropped in distinct distribution sites.
@@ -569,6 +575,7 @@ func TestOSL(t *testing.T) {
 			[]int{0},
 			0,
 		},
+
 		{
 			"single split scheme: sufficient SLOKs",
 			singleSplitPropagationChannelID,
@@ -714,6 +721,36 @@ func TestOSL(t *testing.T) {
 			t.Logf("SLOK count: %d", len(slokMap))
 			t.Logf("seeded OSL count: %d", seededOSLCount)
 			t.Logf("elapsed time: %s", time.Since(startTime))
+
+			if seededOSLCount != testCase.expectedOSLCount {
+				t.Fatalf("expected %d OSLs got %d", testCase.expectedOSLCount, seededOSLCount)
+			}
+
+			// Test the alternative, file-less API.
+
+			seededOSLCount = 0
+			for schemeIndex := range len(config.Schemes) {
+				schemePaveData, err := config.GetPaveData(schemeIndex)
+				if err != nil {
+					t.Fatalf("GetPaveData failed: %s", err)
+				}
+				propagationChannelPaveData, ok := schemePaveData[testCase.propagationChannelID]
+				if !ok {
+					continue
+				}
+				for _, paveData := range propagationChannelPaveData {
+					ok, reassembledKey, err := ReassembleOSLKey(paveData.FileSpec, lookupSLOKs)
+					if err != nil {
+						t.Fatalf("ReassembleOSLKey failed: %s", err)
+					}
+					if ok {
+						if !bytes.Equal(reassembledKey, paveData.FileKey) {
+							t.Fatalf("unexpected reassembled key")
+						}
+						seededOSLCount++
+					}
+				}
+			}
 
 			if seededOSLCount != testCase.expectedOSLCount {
 				t.Fatalf("expected %d OSLs got %d", testCase.expectedOSLCount, seededOSLCount)
