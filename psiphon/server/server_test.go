@@ -4409,8 +4409,8 @@ func storePruneServerEntriesTest(
 	}
 
 	clientConfig := &psiphon.Config{
-		SponsorId:            "0",
-		PropagationChannelId: "0",
+		SponsorId:            "0000000000000000",
+		PropagationChannelId: "0000000000000000",
 
 		// DataRootDirectory must to be set to avoid a migration in the current
 		// working directory.
