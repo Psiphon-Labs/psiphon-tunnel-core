@@ -45,6 +45,8 @@ const (
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 	CLIENT_PLATFORM_IOS     = "iOS"
+
+	SPONSOR_ID_LENGTH = 16
 )
 
 // sshAPIRequestHandler routes Psiphon API requests transported as
@@ -1101,7 +1103,7 @@ const (
 // requests and log events.
 var baseParams = []requestParamSpec{
 	{"propagation_channel_id", isHexDigits, 0},
-	{"sponsor_id", isHexDigits, 0},
+	{"sponsor_id", isSponsorID, 0},
 	{"client_version", isIntString, requestParamLogStringAsInt},
 	{"client_platform", isClientPlatform, 0},
 	{"client_features", isAnyString, requestParamOptional | requestParamArray},
@@ -1749,6 +1751,10 @@ func isMobileClientPlatform(clientPlatform string) bool {
 }
 
 // Input validators follow the legacy validations rules in psi_web.
+
+func isSponsorID(config *Config, value string) bool {
+	return len(value) == SPONSOR_ID_LENGTH && isHexDigits(config, value)
+}
 
 func isHexDigits(_ *Config, value string) bool {
 	// Allows both uppercase in addition to lowercase, for legacy support.
