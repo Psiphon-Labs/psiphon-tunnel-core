@@ -1927,6 +1927,7 @@ type sshClient struct {
 	sessionID                            string
 	isFirstTunnelInSession               bool
 	supportsServerRequests               bool
+	sponsorID                            string
 	handshakeState                       handshakeState
 	udpgwChannelHandler                  *udpgwPortForwardMultiplexer
 	totalUdpgwChannelCount               int
@@ -2887,6 +2888,13 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	supportsServerRequests := common.Contains(
 		sshPasswordPayload.ClientCapabilities, protocol.CLIENT_CAPABILITY_SERVER_REQUESTS)
 
+	// This optional, early sponsor ID will be logged with server_tunnel if
+	// the tunnel doesn't reach handshakeState.completed.
+	sponsorID := sshPasswordPayload.SponsorID
+	if sponsorID != "" && !isSponsorID(sshClient.sshServer.support.Config, sponsorID) {
+		return nil, errors.Tracef("invalid sponsor ID")
+	}
+
 	sshClient.Lock()
 
 	// After this point, these values are read-only as they are read
@@ -2894,6 +2902,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	sshClient.sessionID = sessionID
 	sshClient.isFirstTunnelInSession = isFirstTunnelInSession
 	sshClient.supportsServerRequests = supportsServerRequests
+	sshClient.sponsorID = sponsorID
 
 	sshClient.Unlock()
 
@@ -3641,6 +3650,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	}
 
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
+
+	// Use the handshake sponsor ID unless the handshake did not complete.
+	//
+	// TODO: check that the handshake sponsor ID matches the early sponsor ID?
+	if !sshClient.handshakeState.completed {
+		logFields["sponsor_id"] = sshClient.sponsorID
+	}
 
 	logFields["is_first_tunnel_in_session"] = sshClient.isFirstTunnelInSession
 

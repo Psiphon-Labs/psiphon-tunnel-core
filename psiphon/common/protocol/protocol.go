@@ -819,6 +819,7 @@ type SSHPasswordPayload struct {
 	SessionId          string   `json:"SessionId"`
 	SshPassword        string   `json:"SshPassword"`
 	ClientCapabilities []string `json:"ClientCapabilities"`
+	SponsorID          string   `json:"SponsorId"`
 }
 
 type MeekCookieData struct {
