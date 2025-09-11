@@ -162,6 +162,9 @@ func configureIptablesAcceptRateLimitChain(config *Config, add bool) error {
 
 				// Assumes all FRONTED-MEEK is HTTPS over TCP between the edge
 				// and Psiphon server.
+				if protocol.TunnelProtocolUsesFrontedMeekNonHTTPS(tunnelProtocol) {
+					continue
+				}
 
 				protocolRules, err = meekAcceptRateLimitRules(portNumber, rateLimit)
 				if err != nil {

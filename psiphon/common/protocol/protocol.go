@@ -365,6 +365,12 @@ func TunnelProtocolUsesFrontedMeekQUIC(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
 
+func TunnelProtocolUsesFrontedMeekNonHTTPS(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
+	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP ||
+		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
+}
+
 func TunnelProtocolUsesRefractionNetworking(protocol string) bool {
 	return protocol == TUNNEL_PROTOCOL_TAPDANCE_OBFUSCATED_SSH ||
 		protocol == TUNNEL_PROTOCOL_CONJURE_OBFUSCATED_SSH

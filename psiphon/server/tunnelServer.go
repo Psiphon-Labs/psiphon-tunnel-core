@@ -159,11 +159,12 @@ func (server *TunnelServer) Run() error {
 		var BPFProgramName string
 		var err error
 
-		if protocol.TunnelProtocolUsesFrontedMeekQUIC(tunnelProtocol) {
+		if protocol.TunnelProtocolUsesFrontedMeekNonHTTPS(tunnelProtocol) {
 
-			// For FRONTED-MEEK-QUIC-OSSH, no listener implemented. The edge-to-server
-			// hop uses HTTPS and the client tunnel protocol is distinguished using
-			// protocol.MeekCookieData.ClientTunnelProtocol.
+			// For FRONTED-MEEK-QUIC, no listener implemented; for
+			// FRONTED-MEEK-HTTP, no listener is run. The edge-to-server hop
+			// uses HTTPS and the client tunnel protocol is distinguished
+			// using protocol.MeekCookieData.ClientTunnelProtocol.
 			continue
 
 		} else if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
