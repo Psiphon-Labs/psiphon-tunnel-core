@@ -1163,6 +1163,8 @@ public class PsiphonTunnel {
             }
         } catch (SocketException e) {
             throw new Exception("hasIPv6Route failed", e);
+        } catch (NullPointerException e) {
+            throw new Exception("hasIPv6Route failed", e);
         }
 
         return false;
