@@ -40,7 +40,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
 
 ##### Create the build image:
 
-1. While in the `MobileLibrary/Android` directory, run the command: `docker build --no-cache=true -t psiandroid -f Dockerfile ..`
+1. While in the `MobileLibrary/Android` directory, run the command: `docker build --no-cache=true --platform=linux/amd64 -t psiandroid -f Dockerfile ..`
 
 2. Once completed, verify that you see an image named `psiandroid` when running: `docker images`
 
@@ -69,7 +69,7 @@ When that command completes, the compiled `.aar` files (suitable for use in an A
 ##### Prerequisites:
 
  - The `build-essential` package (on Debian based systems - or its equivalent for your platform)
- - Go 1.15 or later
+ - Go (version specified in go.mod)
  - Full JDK
  - Android NDK
  - Android SDK
