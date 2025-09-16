@@ -1210,6 +1210,8 @@ public class PsiphonTunnel {
             // NullPointerException if called in an environment where there is a virtual interface 
             // without a parent interface present."
             throw new Exception("hasIPv6Route failed", e);
+        } catch (IllegalStateException e) {
+            throw new Exception("hasIPv6Route failed", e);
         }
 
         return false;
