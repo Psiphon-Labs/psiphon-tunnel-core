@@ -47,6 +47,7 @@ import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
@@ -670,7 +671,12 @@ public class PsiphonTunnel {
                 WifiInfo wifiInfo = wifiManager.getConnectionInfo();
                 if (wifiInfo != null) {
                     String wifiNetworkID = wifiInfo.getBSSID();
-                    if (wifiNetworkID.equals("02:00:00:00:00:00")) {
+                    if (wifiNetworkID == null) {
+                        // Per
+                        // https://developer.android.com/reference/android/net/wifi/WifiInfo#getBSSID()
+                        // "The BSSID may be null, if there is no network currently connected."
+                        wifiNetworkID = "NOT_CONNECTED";
+                    } else if (wifiNetworkID.equals("02:00:00:00:00:00")) {
                         // "02:00:00:00:00:00" is reported when the app does not have the ACCESS_COARSE_LOCATION permission:
                         // https://developer.android.com/about/versions/marshmallow/android-6.0-changes#behavior-hardware-id
                         // The Psiphon client should allow the user to opt-in to this permission. If they decline, fail over
@@ -1035,8 +1041,12 @@ public class PsiphonTunnel {
                     }
                 } else {
                     // LinkProperties is public in API 21 (and the DNS function signature has changed)
-                    for (InetAddress dns : ((LinkProperties)linkProperties).getDnsServers()) {
-                        dnsAddresses.add(dns);
+                    // The documentation states that getDnsServers cannot be null, see
+                    // https://developer.android.com/reference/android/net/LinkProperties#getDnsServers()
+                    // but we defensively check anyway.
+                    List<InetAddress> dnsList = ((LinkProperties) linkProperties).getDnsServers();
+                    if (dnsList != null) {
+                        dnsAddresses.addAll(dnsList);
                     }
                 }
             }
@@ -1101,8 +1111,18 @@ public class PsiphonTunnel {
                         new ConnectivityManager.NetworkCallback() {
                             @Override
                             public void onLinkPropertiesChanged(Network network, LinkProperties linkProperties) {
-                                synchronized (callbackDnsAddresses) {
-                                    callbackDnsAddresses.addAll(linkProperties.getDnsServers());
+                                // The documentation states that neither linkProperties nor
+                                // getDnsServers can be null, see
+                                // https://developer.android.com/reference/android/net/ConnectivityManager.NetworkCallback#onLinkPropertiesChanged(android.net.Network,%20android.net.LinkProperties)
+                                // https://developer.android.com/reference/android/net/LinkProperties#getDnsServers()
+                                // but we defensively check anyway.
+                                if (linkProperties != null) {
+                                    synchronized (callbackDnsAddresses) {
+                                        Collection<InetAddress> dnsServers = linkProperties.getDnsServers();
+                                        if (dnsServers != null) {
+                                            callbackDnsAddresses.addAll(dnsServers);
+                                        }
+                                    }
                                 }
                                 countDownLatch.countDown();
                             }
@@ -1135,27 +1155,47 @@ public class PsiphonTunnel {
             // 40569). hasIPv6Route provides the same functionality via a
             // callback into Java code.
 
-                // Note: don't exclude interfaces with the isPointToPoint
-                // property, which is true for certain mobile networks.
+            // Note: don't exclude interfaces with the isPointToPoint
+            // property, which is true for certain mobile networks.
 
-                for (NetworkInterface netInterface : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                    if (netInterface.isUp() &&
+            Enumeration<NetworkInterface> enIfs = NetworkInterface.getNetworkInterfaces();
+            if (enIfs == null) {
+                // Abnormal: platform returned null, the documentation states:
+                // "Returns all the interfaces on this machine. The Enumeration contains at least
+                // one element", see
+                // https://developer.android.com/reference/java/net/NetworkInterface#getNetworkInterfaces()
+                // for details.
+                throw new IllegalStateException("no network interfaces found");
+            }
+
+            for (NetworkInterface netInterface : Collections.list(enIfs)) {
+                if (netInterface.isUp() &&
                         !netInterface.isLoopback()) {
-                        for (InetAddress address : Collections.list(netInterface.getInetAddresses())) {
+                    Enumeration<InetAddress> addresses = netInterface.getInetAddresses();
+                    if (addresses == null) {
+                        // Abnormal: platform returned null, we expect at least an empty Enumeration
+                        // if the interface is not passing checkConnect, see
+                        // https://developer.android.com/reference/java/net/NetworkInterface#getInetAddresses()
+                        // for details.
+                        throw new IllegalStateException("no addresses found for network interface " +
+                                netInterface.getName());
+                    }
+                    for (InetAddress address : Collections.list(addresses)) {
 
-                            // Per https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
-                            // "Java will never return an IPv4-mapped address.
-                            //  These classes can take an IPv4-mapped address as
-                            //  input, both in byte array and text
-                            //  representation. However, it will be converted
-                            //  into an IPv4 address." As such, when the type of
-                            //  the IP address is Inet6Address, this should be
-                            //  an actual IPv6 address.
+                        // Per
+                        // https://developer.android.com/reference/java/net/Inet6Address#textual-representation-of-ip-addresses,
+                        // "Java will never return an IPv4-mapped address.
+                        // These classes can take an IPv4-mapped address as
+                        // input, both in byte array and text
+                        // representation. However, it will be converted
+                        // into an IPv4 address." As such, when the type of
+                        // the IP address is Inet6Address, this should be
+                        // an actual IPv6 address.
 
-                            if (address instanceof Inet6Address &&
+                        if (address instanceof Inet6Address &&
                                 !address.isLinkLocalAddress() &&
                                 !address.isSiteLocalAddress() &&
-                                !address.isMulticastAddress ()) {
+                                !address.isMulticastAddress()) {
                             return true;
                         }
                     }
@@ -1164,6 +1204,13 @@ public class PsiphonTunnel {
         } catch (SocketException e) {
             throw new Exception("hasIPv6Route failed", e);
         } catch (NullPointerException e) {
+            // Per
+            // https://developer.android.com/reference/java/net/NetworkInterface#getNetworkInterfaces()
+            // "ANDROID NOTE: On Android versions before S (API level 31), this method may throw a 
+            // NullPointerException if called in an environment where there is a virtual interface 
+            // without a parent interface present."
+            throw new Exception("hasIPv6Route failed", e);
+        } catch (IllegalStateException e) {
             throw new Exception("hasIPv6Route failed", e);
         }
 
