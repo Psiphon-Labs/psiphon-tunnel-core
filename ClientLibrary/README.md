@@ -49,7 +49,7 @@ Note that you may need to use `sudo docker` below, depending on your OS.
 
 ##### Create the build image:
 
-1. While in the `ClientLibrary` directory, run the command: `docker build --no-cache=true -t psiclientlibrary-builder .`
+1. While in the `ClientLibrary` directory, run the command: `docker build --no-cache=true --platform=linux/amd64 -t psiclientlibrary-builder .`
 
 2. Once completed, verify that you see an image named `psiclientlibrary-builder` when running: `docker images`
 
