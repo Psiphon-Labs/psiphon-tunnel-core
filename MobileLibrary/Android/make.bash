@@ -26,6 +26,9 @@ GOVERSION=$(go version | perl -ne '/go version (.*?) / && print $1')
 #
 # TODO: conditional on PSIPHON_ENABLE_INPROXY build tag?
 
+# 16KB page size alignment for Android compatibility
+export CGO_LDFLAGS="${CGO_LDFLAGS:-} -Wl,-z,max-page-size=16384,-z,common-page-size=16384"
+
 LDFLAGS="\
 -checklinkname=0 \
 -s \
@@ -34,6 +37,7 @@ LDFLAGS="\
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRepo=$BUILDREPO \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.buildRev=$BUILDREV \
 -X github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo.goVersion=$GOVERSION \
+-extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384 \
 "
 
 echo -e "${BUILDDATE}\n${BUILDREPO}\n${BUILDREV}\n" > $BUILDINFOFILE

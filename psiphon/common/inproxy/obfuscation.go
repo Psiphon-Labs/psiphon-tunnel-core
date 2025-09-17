@@ -223,7 +223,7 @@ func NewDeobfuscationAnomoly(err error) *DeobfuscationAnomoly {
 	return &DeobfuscationAnomoly{err: err}
 }
 
-func (e DeobfuscationAnomoly) Error() string {
+func (e *DeobfuscationAnomoly) Error() string {
 	return e.err.Error()
 }
 

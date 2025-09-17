@@ -2038,11 +2038,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	// Test: all expected server logs were emitted
 
-	// TODO: stops should be fully synchronous, but, intermittently,
-	// server_tunnel fails to appear ("missing server tunnel log")
-	// without this delay.
-	time.Sleep(100 * time.Millisecond)
-
 	// For in-proxy tunnel protocols, client BPF tactics are currently ignored and not applied by the 2nd hop.
 	expectClientBPFField := psiphon.ClientBPFEnabled() && doClientTactics && !protocol.TunnelProtocolUsesInproxy(runConfig.tunnelProtocol)
 	expectServerBPFField := ServerBPFEnabled() && protocol.TunnelProtocolIsDirect(runConfig.tunnelProtocol) && doServerTactics
@@ -4200,6 +4195,10 @@ func generateInproxyTestConfig(
 	tacticsParametersJSONFormat := `
             "InproxyAllowProxy": true,
             "InproxyAllowClient": true,
+            "InproxyAllowMatchByRegion": {"%s":["%s"]},
+            "InproxyAllowMatchByASN": {"%s":["%s"]},
+            "InproxyDisallowMatchByRegion": {"%s":["%s"]},
+            "InproxyDisallowMatchByASN": {"%s":["%s"]},
             "InproxyTunnelProtocolSelectionProbability": 1.0,
             "InproxyAllBrokerSpecs": %s,
             "InproxyBrokerSpecs": %s,
@@ -4229,6 +4228,10 @@ func generateInproxyTestConfig(
 
 	tacticsParametersJSON := fmt.Sprintf(
 		tacticsParametersJSONFormat,
+		testGeoIPCountry, testGeoIPCountry,
+		testGeoIPASN, testGeoIPASN,
+		testGeoIPCountry, "_"+testGeoIPCountry,
+		testGeoIPASN, "_"+testGeoIPASN,
 		allBrokerSpecsJSON,
 		brokerSpecsJSON,
 		proxyBrokerSpecsJSON,
@@ -4406,8 +4409,8 @@ func storePruneServerEntriesTest(
 	}
 
 	clientConfig := &psiphon.Config{
-		SponsorId:            "0",
-		PropagationChannelId: "0",
+		SponsorId:            "0000000000000000",
+		PropagationChannelId: "0000000000000000",
 
 		// DataRootDirectory must to be set to avoid a migration in the current
 		// working directory.

@@ -151,6 +151,12 @@ type BrokerConfig struct {
 	// adds server-side enforcement.
 	AllowDomainFrontedDestinations func(common.GeoIPData) bool
 
+	// AllowMatch is a callback which can indicate whether a proxy and client
+	// pair, with the given, respective GeoIP data, is allowed to match
+	// together. Pairs are always allowed to match based on personal
+	// compartment ID.
+	AllowMatch func(common.GeoIPData, common.GeoIPData) bool
+
 	// LookupGeoIP provides GeoIP lookup service.
 	LookupGeoIP LookupGeoIP
 
@@ -209,6 +215,22 @@ type BrokerConfig struct {
 	MaxCompartmentIDs int
 }
 
+// BrokerLoggedEvent is an error type which indicates that the broker has
+// already logged an event recording the underlying error. This may be used
+// by the outer server layer to avoid redundant logs for HandleSessionPacket
+// errors.
+type BrokerLoggedEvent struct {
+	err error
+}
+
+func NewBrokerLoggedEvent(err error) *BrokerLoggedEvent {
+	return &BrokerLoggedEvent{err: err}
+}
+
+func (e *BrokerLoggedEvent) Error() string {
+	return e.err.Error()
+}
+
 // NewBroker initializes a new Broker.
 func NewBroker(config *BrokerConfig) (*Broker, error) {
 
@@ -261,6 +283,8 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 			ProxyQualityState: proxyQuality,
 
 			IsLoadLimiting: config.IsLoadLimiting,
+
+			AllowMatch: config.AllowMatch,
 		}),
 
 		proxyQualityState: proxyQuality,
@@ -601,6 +625,9 @@ func (b *Broker) handleProxyAnnounce(
 		logFields.Add(transportLogFields)
 		logFields.Add(matchMetrics.GetMetrics())
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
+		if retErr != nil {
+			retErr = NewBrokerLoggedEvent(retErr)
+		}
 	}()
 
 	announceRequest, err := UnmarshalProxyAnnounceRequest(requestPayload)
@@ -960,6 +987,9 @@ func (b *Broker) handleClientOffer(
 		logFields.Add(transportLogFields)
 		logFields.Add(matchMetrics.GetMetrics())
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
+		if retErr != nil {
+			retErr = NewBrokerLoggedEvent(retErr)
+		}
 	}()
 
 	offerRequest, err := UnmarshalClientOfferRequest(requestPayload)
@@ -1280,6 +1310,9 @@ func (b *Broker) handleProxyAnswer(
 		}
 		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
+		if retErr != nil {
+			retErr = NewBrokerLoggedEvent(retErr)
+		}
 	}()
 
 	answerRequest, err := UnmarshalProxyAnswerRequest(requestPayload)
@@ -1414,6 +1447,9 @@ func (b *Broker) handleServerProxyQuality(
 		}
 		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
+		if retErr != nil {
+			retErr = NewBrokerLoggedEvent(retErr)
+		}
 	}()
 
 	qualityRequest, err := UnmarshalServerProxyQualityRequest(requestPayload)
@@ -1491,6 +1527,9 @@ func (b *Broker) handleClientRelayedPacket(
 		}
 		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
+		if retErr != nil {
+			retErr = NewBrokerLoggedEvent(retErr)
+		}
 	}()
 
 	relayedPacketRequest, err := UnmarshalClientRelayedPacketRequest(requestPayload)

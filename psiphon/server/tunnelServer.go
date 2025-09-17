@@ -159,11 +159,12 @@ func (server *TunnelServer) Run() error {
 		var BPFProgramName string
 		var err error
 
-		if protocol.TunnelProtocolUsesFrontedMeekQUIC(tunnelProtocol) {
+		if protocol.TunnelProtocolUsesFrontedMeekNonHTTPS(tunnelProtocol) {
 
-			// For FRONTED-MEEK-QUIC-OSSH, no listener implemented. The edge-to-server
-			// hop uses HTTPS and the client tunnel protocol is distinguished using
-			// protocol.MeekCookieData.ClientTunnelProtocol.
+			// For FRONTED-MEEK-QUIC, no listener implemented; for
+			// FRONTED-MEEK-HTTP, no listener is run. The edge-to-server hop
+			// uses HTTPS and the client tunnel protocol is distinguished
+			// using protocol.MeekCookieData.ClientTunnelProtocol.
 			continue
 
 		} else if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
@@ -1651,6 +1652,7 @@ func (sshServer *sshServer) stopClients() {
 		go func(c *sshClient) {
 			defer waitGroup.Done()
 			c.stop()
+			c.awaitStopped()
 		}(client)
 	}
 	waitGroup.Wait()
@@ -1926,6 +1928,7 @@ type sshClient struct {
 	sessionID                            string
 	isFirstTunnelInSession               bool
 	supportsServerRequests               bool
+	sponsorID                            string
 	handshakeState                       handshakeState
 	udpgwChannelHandler                  *udpgwPortForwardMultiplexer
 	totalUdpgwChannelCount               int
@@ -2729,10 +2732,10 @@ func (sshClient *sshClient) run(
 
 	sshClient.runTunnel(result.channels, result.requests)
 
-	// Note: sshServer.unregisterEstablishedClient calls sshClient.stop(),
-	// which also closes underlying transport Conn.
+	// sshClient.stop closes the underlying transport conn, ensuring all
+	// network trafic is complete before calling logTunnel.
 
-	sshClient.sshServer.unregisterEstablishedClient(sshClient)
+	sshClient.stop()
 
 	// Log tunnel metrics.
 
@@ -2755,7 +2758,7 @@ func (sshClient *sshClient) run(
 
 	if burstConn != nil {
 		// Any outstanding burst should be recorded by burstConn.Close which should
-		// be called by unregisterEstablishedClient.
+		// be called via sshClient.stop.
 		additionalMetrics = append(
 			additionalMetrics, LogFields(burstConn.GetMetrics(activityConn.GetStartTime())))
 	}
@@ -2832,6 +2835,13 @@ func (sshClient *sshClient) run(
 	// disconnects supports first-tunnel-in-session and duplicate
 	// authorization logic.
 	sshClient.sshServer.markGeoIPSessionCacheToExpire(sshClient.sessionID)
+
+	// unregisterEstablishedClient removes the client from sshServer.clients.
+	// This call must come after logTunnel to ensure all logTunnel calls
+	// complete before a sshServer.stopClients returns, in the case of a
+	// server shutdown.
+
+	sshClient.sshServer.unregisterEstablishedClient(sshClient)
 }
 
 func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
@@ -2879,6 +2889,13 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	supportsServerRequests := common.Contains(
 		sshPasswordPayload.ClientCapabilities, protocol.CLIENT_CAPABILITY_SERVER_REQUESTS)
 
+	// This optional, early sponsor ID will be logged with server_tunnel if
+	// the tunnel doesn't reach handshakeState.completed.
+	sponsorID := sshPasswordPayload.SponsorID
+	if sponsorID != "" && !isSponsorID(sshClient.sshServer.support.Config, sponsorID) {
+		return nil, errors.Tracef("invalid sponsor ID")
+	}
+
 	sshClient.Lock()
 
 	// After this point, these values are read-only as they are read
@@ -2886,6 +2903,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	sshClient.sessionID = sessionID
 	sshClient.isFirstTunnelInSession = isFirstTunnelInSession
 	sshClient.supportsServerRequests = supportsServerRequests
+	sshClient.sponsorID = sponsorID
 
 	sshClient.Unlock()
 
@@ -3633,6 +3651,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	}
 
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
+
+	// Use the handshake sponsor ID unless the handshake did not complete.
+	//
+	// TODO: check that the handshake sponsor ID matches the early sponsor ID?
+	if !sshClient.handshakeState.completed {
+		logFields["sponsor_id"] = sshClient.sponsorID
+	}
 
 	logFields["is_first_tunnel_in_session"] = sshClient.isFirstTunnelInSession
 

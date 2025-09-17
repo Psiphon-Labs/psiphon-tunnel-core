@@ -1105,6 +1105,7 @@ func dialTunnel(
 		SessionId:          config.SessionID,
 		SshPassword:        dialParams.ServerEntry.SshPassword,
 		ClientCapabilities: []string{protocol.CLIENT_CAPABILITY_SERVER_REQUESTS},
+		SponsorID:          config.GetSponsorID(),
 	}
 
 	payload, err := json.Marshal(sshPasswordPayload)
