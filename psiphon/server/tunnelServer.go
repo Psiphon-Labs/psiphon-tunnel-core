@@ -3652,10 +3652,11 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 
-	// Use the handshake sponsor ID unless the handshake did not complete.
+	// Use the handshake sponsor ID unless the handshake did not complete; in
+	// that case, use the early sponsor ID, if one was provided.
 	//
 	// TODO: check that the handshake sponsor ID matches the early sponsor ID?
-	if !sshClient.handshakeState.completed {
+	if !sshClient.handshakeState.completed && sshClient.sponsorID != "" {
 		logFields["sponsor_id"] = sshClient.sponsorID
 	}
 
