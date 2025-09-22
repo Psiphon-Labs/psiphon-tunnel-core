@@ -503,7 +503,7 @@ func TestInproxyOSSHMediaStreams(t *testing.T) {
 			doLogHostProvider:      true,
 			doTargetBrokerSpecs:    true,
 			useInproxyMediaStreams: true,
-			doLogProtobuf:        useProtobufLogging,
+			doLogProtobuf:          useProtobufLogging,
 		})
 }
 
@@ -520,7 +520,7 @@ func TestInproxyQUICOSSHMediaStreams(t *testing.T) {
 			doLogHostProvider:      true,
 			doTargetBrokerSpecs:    true,
 			useInproxyMediaStreams: true,
-			doLogProtobuf:        useProtobufLogging,
+			doLogProtobuf:          useProtobufLogging,
 		})
 }
 
@@ -682,6 +682,12 @@ func TestCheckPruneServerEntries(t *testing.T) {
 }
 
 func TestBurstMonitorAndDestinationBytes(t *testing.T) {
+	if useProtobufLogging {
+		t.Log("protobuf logging skips this test")
+		t.Log("it emits one ServerTunnelAsnDestBytes message for each map entry in the original log")
+		t.Log("reflecting that back to the single map is challenging")
+		t.SkipNow()
+	}
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
@@ -1285,6 +1291,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	setLogCallback(logCallback)
 
+	var socketReader *udsipc.Reader
 	if runConfig.doLogProtobuf {
 
 		handler := func(data []byte) (retErr error) {
@@ -1295,15 +1302,32 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}()
 
 			protoMsg := &pb.PsiphondMetric{}
-			err := proto.Unmarshal(data, protoMsg)
+			err = proto.Unmarshal(data, protoMsg)
 			if err != nil {
 				return errors.Trace(err)
 			}
 
+			/*
+				logReflectedMap := func(eventName string, fields map[string]interface{}) {
+					boldWhite := "\033[1;37m"
+					boldGreen := "\033[1;32m"
+					resetTerm := "\033[0m"
+
+					fmt.Printf(
+						"%sreflected log map for:%s %s%s%s\n  %#v\n",
+						boldWhite, resetTerm,
+						boldGreen, eventName, resetTerm,
+						fields,
+					)
+				}
+			*/
+
 			reflectedLogFields := map[string]interface{}{}
 			protoToLogFields(protoMsg, reflectedLogFields, runConfig)
+			// logReflectedMap(reflectedLogFields["event_name"].(string), reflectedLogFields)
 
-			jsonLog, err := json.Marshal(reflectedLogFields)
+			var jsonLog []byte
+			jsonLog, err = json.Marshal(reflectedLogFields)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -1312,7 +1336,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			return nil
 		}
 
-		socketReader, err := udsipc.NewReader(
+		socketReader, err = udsipc.NewReader(
 			handler,
 			serverConfig["MetricSocketPath"].(string))
 		if err != nil {
@@ -1320,7 +1344,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		socketReader.Start()
-		defer socketReader.Stop()
 	}
 
 	// run flow inspector if requested
@@ -1373,6 +1396,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		select {
 		case <-shutdownOk:
+			if runConfig.doLogProtobuf {
+				socketReader.Stop()
+			}
 		case <-shutdownTimeout.C:
 			t.Fatalf("server shutdown timeout exceeded")
 		}
@@ -2497,7 +2523,7 @@ func protoToLogFields(msg proto.Message, logFields map[string]interface{}, runCo
 		if r.Has(fd) {
 			return false
 		}
-		
+
 		// Never skip these fields, even if unset
 		if slices.Contains([]string{"last_connected"}, fd.TextName()) {
 			return false

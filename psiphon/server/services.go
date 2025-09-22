@@ -24,6 +24,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -49,7 +50,6 @@ import (
 // and then starts the server components and runs them until os.Interrupt or
 // os.Kill signals are received. The config determines which components are run.
 func RunServices(configJSON []byte) (retErr error) {
-
 	loggingInitialized := false
 
 	defer func() {
@@ -73,7 +73,12 @@ func RunServices(configJSON []byte) (retErr error) {
 	loggingInitialized = true
 
 	if ShouldLogProtobuf() {
-		defer metricSocketWriter.Stop()
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			defer cancel()
+
+			metricSocketWriter.Stop(ctx)
+		}()
 	}
 
 	err = addHostConfig(config)
@@ -240,8 +245,7 @@ func RunServices(configJSON []byte) (retErr error) {
 							networkBytesReceived = currentNetworkBytesReceived - previousNetworkBytesReceived
 							networkBytesSent = currentNetworkBytesSent - previousNetworkBytesSent
 
-							previousNetworkBytesReceived, previousNetworkBytesSent =
-								currentNetworkBytesReceived, currentNetworkBytesSent
+							previousNetworkBytesReceived, previousNetworkBytesSent = currentNetworkBytesReceived, currentNetworkBytesSent
 						}
 					}
 
@@ -421,7 +425,6 @@ loop:
 }
 
 func getRuntimeMetrics() LogFields {
-
 	numGoroutine := runtime.NumGoroutine()
 
 	var memStats runtime.MemStats
@@ -447,7 +450,6 @@ func getRuntimeMetrics() LogFields {
 }
 
 func outputProcessProfiles(config *Config, filenameSuffix string) {
-
 	log.WithTraceFields(getRuntimeMetrics()).Info("runtime_metrics")
 
 	if config.ProcessProfileOutputDirectory != "" {
@@ -479,8 +481,8 @@ func logServerLoad(
 	networkBytesReceived int64,
 	networkBytesSent int64,
 	logCPU bool,
-	CPUPercent float64) {
-
+	CPUPercent float64,
+) {
 	serverLoad := getRuntimeMetrics()
 
 	serverLoad["event_name"] = "server_load"
@@ -502,8 +504,7 @@ func logServerLoad(
 		serverLoad["cpu_percent"] = CPUPercent
 	}
 
-	establishTunnels, establishLimitedCount :=
-		support.TunnelServer.GetEstablishTunnelsMetrics()
+	establishTunnels, establishLimitedCount := support.TunnelServer.GetEstablishTunnelsMetrics()
 	serverLoad["establish_tunnels"] = establishTunnels
 	serverLoad["establish_tunnels_limited_count"] = establishLimitedCount
 
@@ -511,8 +512,7 @@ func logServerLoad(
 
 	serverLoad.Add(support.ServerTacticsParametersCache.GetMetrics())
 
-	upstreamStats, protocolStats, regionStats :=
-		support.TunnelServer.GetLoadStats()
+	upstreamStats, protocolStats, regionStats := support.TunnelServer.GetLoadStats()
 
 	for name, value := range upstreamStats {
 		serverLoad[name] = value
@@ -545,8 +545,8 @@ func logIrregularTunnel(
 	listenerPort int,
 	peerIP string,
 	tunnelError error,
-	logFields LogFields) {
-
+	logFields LogFields,
+) {
 	if logFields == nil {
 		logFields = make(LogFields)
 	}
@@ -590,7 +590,6 @@ type SupportServices struct {
 
 // NewSupportServices initializes a new SupportServices.
 func NewSupportServices(config *Config) (*SupportServices, error) {
-
 	trafficRulesSet, err := NewTrafficRulesSet(config.TrafficRulesFilename)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -646,8 +645,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 
 	support.ReplayCache = NewReplayCache(support)
 
-	support.ServerTacticsParametersCache =
-		NewServerTacticsParametersCache(support)
+	support.ServerTacticsParametersCache = NewServerTacticsParametersCache(support)
 
 	return support, nil
 }
@@ -656,14 +654,14 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 // components. If any component fails to reload, an error is logged and
 // Reload proceeds, using the previous state of the component.
 func (support *SupportServices) Reload() {
-
 	reloaders := append(
 		[]common.Reloader{
 			support.TrafficRulesSet,
 			support.OSLConfig,
 			support.PsinetDatabase,
 			support.TacticsServer,
-			support.Blocklist},
+			support.Blocklist,
+		},
 		support.GeoIPService.Reloaders()...)
 
 	reloadDiscovery := func(reloadedTactics bool) {
@@ -681,7 +679,6 @@ func (support *SupportServices) Reload() {
 	// tactics request.
 
 	reloadTactics := func() {
-
 		// Don't use stale tactics.
 		support.ReplayCache.Flush()
 		support.ServerTacticsParametersCache.Flush()
@@ -739,13 +736,15 @@ func (support *SupportServices) Reload() {
 			log.WithTraceFields(
 				LogFields{
 					"reloader": reloader.LogDescription(),
-					"error":    err}).Error("reload failed")
+					"error":    err,
+				}).Error("reload failed")
 			// Keep running with previous state
 		} else {
 			log.WithTraceFields(
 				LogFields{
 					"reloader": reloader.LogDescription(),
-					"reloaded": reloaded}).Info("reload success")
+					"reloaded": reloaded,
+				}).Info("reload success")
 		}
 	}
 }

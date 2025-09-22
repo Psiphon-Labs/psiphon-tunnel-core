@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb"
 	"google.golang.org/protobuf/proto"
@@ -470,7 +471,7 @@ func populateMetadataFields(logFields LogFields, msg proto.Message, config Metad
 			if config.ShadowsocksMetadata {
 				field.Set(reflect.ValueOf(populateShadowsocksMetadata(logFields)))
 			}
-		case "MetadataTLS":
+		case "MetadataTls":
 			if config.TLSMetadata {
 				field.Set(reflect.ValueOf(populateTLSMetadata(logFields)))
 			}
@@ -484,6 +485,8 @@ func populateMessageFromFields(logFields LogFields, msg proto.Message) {
 	if msgReflectValue.Kind() != reflect.Pointer || msgReflectValue.IsNil() {
 		return
 	}
+
+	// fmt.Printf("about to populate protobuf: %v; tls_profile: %v\n", logFields["event_name"], logFields["tls_profile"])
 
 	msgValue := msgReflectValue.Elem()
 	msgType := msgValue.Type()
@@ -766,10 +769,27 @@ func setSliceField(field reflect.Value, fieldType reflect.StructField, logValue 
 			}
 			newSlice = append(newSlice, str)
 		}
+
 		field.Set(reflect.ValueOf(newSlice))
 
 	case []string:
 		field.Set(reflect.ValueOf(sliceValue))
+
+	case inproxy.PortMappingTypes:
+		newSlice := make([]string, 0, len(sliceValue))
+		for _, elem := range sliceValue {
+			newSlice = append(newSlice, inproxy.PortMappingType(elem).String())
+		}
+
+		field.Set(reflect.ValueOf(newSlice))
+
+	case inproxy.ICECandidateTypes:
+		newSlice := make([]string, 0, len(sliceValue))
+		for _, elem := range sliceValue {
+			newSlice = append(newSlice, inproxy.PortMappingType(elem).String())
+		}
+
+		field.Set(reflect.ValueOf(newSlice))
 
 	default:
 		return &ConversionError{
@@ -822,6 +842,9 @@ func convertToInt64(value any) (int64, error) {
 		}
 
 		return 0, fmt.Errorf("float64 %f is not a whole number", v)
+
+	case time.Duration:
+		return int64(v), nil
 
 	default:
 		return 0, fmt.Errorf("cannot convert %T to int64", value)

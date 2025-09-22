@@ -17,6 +17,7 @@ limitations under the License.
 package udsipc
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -65,20 +66,22 @@ var vectoredBufferPool = sync.Pool{
 // fills, new messages will be discarded (instead of blocking).
 // nolint: govet
 type Writer struct {
-	onError         ErrorCallback
-	send            chan []byte
-	conn            net.Conn
-	socketPath      string
-	done            chan struct{}
-	sentCount       uint64 // Successfully sent to consumer.
-	droppedCount    uint64 // Dropped due to queue full.
-	failedCount     uint64 // Failed due to connection issues.
-	writeTimeout    time.Duration
-	dialTimeout     time.Duration
-	maxBackoff      time.Duration
-	wg              sync.WaitGroup
-	closeOnce       sync.Once
-	writeBufferSize uint32 // Size of kernel write buffer (SO_SNDBUF).
+	onError          ErrorCallback
+	send             chan []byte
+	conn             net.Conn
+	socketPath       string
+	shutdownStart    chan struct{} // Signals running→stopping transition.
+	shutdownComplete chan struct{} // Signals stopping→stopped gracefully.
+	shutdownForced   chan struct{} // Signals stopping→stopped forcefully.
+	sentCount        uint64        // Successfully sent to consumer.
+	droppedCount     uint64        // Dropped due to queue full.
+	failedCount      uint64        // Failed due to connection issues.
+	writeTimeout     time.Duration
+	dialTimeout      time.Duration
+	maxBackoff       time.Duration
+	wg               sync.WaitGroup
+	closeOnce        sync.Once
+	writeBufferSize  uint32 // Size of kernel write buffer (SO_SNDBUF).
 }
 
 // NewWriter creates a pointer to a newly initialized Writer.
@@ -93,13 +96,15 @@ func NewWriter(socketPath string, opts ...WriterOption) (*Writer, error) {
 
 	// nolint: mnd // Default values.
 	w := &Writer{
-		writeTimeout:    time.Second,
-		dialTimeout:     time.Second,
-		maxBackoff:      10 * time.Second,
-		socketPath:      socketPath,
-		writeBufferSize: 256 * 1024, // 256KB.
-		send:            make(chan []byte, 10_000),
-		done:            make(chan struct{}),
+		writeTimeout:     time.Second,
+		dialTimeout:      time.Second,
+		maxBackoff:       10 * time.Second,
+		socketPath:       socketPath,
+		writeBufferSize:  256 * 1024, // 256KB.
+		send:             make(chan []byte, 10_000),
+		shutdownStart:    make(chan struct{}),
+		shutdownComplete: make(chan struct{}),
+		shutdownForced:   make(chan struct{}),
 	}
 
 	for _, opt := range opts {
@@ -145,16 +150,30 @@ func (w *Writer) Start() {
 	go w.run()
 }
 
-// Stop shuts down gracefully. Subsequent calls return nil.
-func (w *Writer) Stop() error {
+// Stop attempts to shut down gracefully until it either finishes
+// draining all writes, or the passed context is cancelled.
+// Subsequent calls return nil.
+func (w *Writer) Stop(ctx context.Context) error {
 	var err error
+
 	w.closeOnce.Do(func() {
-		close(w.done)
+		close(w.shutdownStart) // Signal run() to begin shutdown
+
+		// Wait for either graceful completion or context timeout
+		select {
+		case <-w.shutdownComplete: // Clean shutdown - all buffered messages drained
+		case <-ctx.Done(): // Forced shutdown - context expired/cancelled
+			close(w.shutdownForced) // Force run() to exit drain phase immediately
+			err = fmt.Errorf("graceful shutdown timeout, forcing unclean shutdown: %w", ctx.Err())
+		}
+
+		// Always wait for goroutine cleanup regardless of how we exited the select
 		w.wg.Wait()
 
+		// Close connection after goroutine cleanup
 		if w.conn != nil {
-			if err = w.conn.Close(); err != nil {
-				err = fmt.Errorf("failed to close connection: %w", err)
+			if closeErr := w.conn.Close(); closeErr != nil && err == nil {
+				err = fmt.Errorf("failed to close connection: %w", closeErr)
 			}
 		}
 	})
@@ -216,9 +235,22 @@ func (w *Writer) classifyWriteError(err error) error {
 }
 
 // run is the main sender loop.
-// nolint: gocognit
 func (w *Writer) run() {
 	defer w.wg.Done()
+
+	// Signal graceful shutdown completion
+	defer close(w.shutdownComplete)
+
+	// Phase 1: Normal operations.
+	w.processMessages()
+
+	// Phase 2: Graceful drain of remaining buffered messages.
+	w.drainQueuedWrites()
+}
+
+// processMessages handles normal operation including connection management and message processing.
+// nolint: gocognit
+func (w *Writer) processMessages() {
 	backoff := time.Second
 
 	for {
@@ -232,8 +264,8 @@ func (w *Writer) run() {
 				case <-time.After(backoff):
 					backoff = min(backoff*2, w.maxBackoff) //nolint: mnd // Exponential backoff.
 					continue
-				case <-w.done:
-					return
+				case <-w.shutdownStart:
+					return // Move to draining buffered writes phase.
 				}
 			}
 
@@ -255,8 +287,40 @@ func (w *Writer) run() {
 			} else {
 				atomic.AddUint64(&w.sentCount, 1)
 			}
-		case <-w.done:
+		case <-w.shutdownStart:
+			return // Move to draining buffered writes phase.
+		}
+	}
+}
+
+// drainQueuedWrites handles graceful shutdown by draining remaining buffered messages.
+func (w *Writer) drainQueuedWrites() {
+	for {
+		select {
+		case data := <-w.send:
+			// Continue processing buffered messages during drain.
+			if err := w.writeLengthPrefixedData(data); err != nil {
+				atomic.AddUint64(&w.failedCount, 1)
+				if w.onError != nil {
+					w.onError(err, "write failure during drain")
+				}
+				w.closeConn()
+			} else {
+				atomic.AddUint64(&w.sentCount, 1)
+			}
+		case <-w.shutdownForced:
+			// Forced shutdown - exit immediately without draining more.
 			return
+		default:
+			// No more messages to drain - clean shutdown complete.
+			if len(w.send) == 0 {
+				return
+			}
+
+			// While there is a small risk this code could create a short busy loop condition
+			// in the case where data is in the buffered channel but not yet available to be
+			// selected, no explicit sleep or yield is needed since in Go 1.14+ the scheduler
+			// can preempt busy loops itself when needed.
 		}
 	}
 }

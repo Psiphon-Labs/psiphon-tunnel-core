@@ -108,30 +108,31 @@ message MetadataInproxy {
     optional string inproxy_proxy_session_id = 63;
     optional string inproxy_proxy_sponsor_id = 64; //LowCardinality
     optional string inproxy_proxy_stored_tactics_tag = 65; //LowCardinality
-    optional int64 inproxy_webrtc_decoy_messages_received = 66;
-    optional int64 inproxy_webrtc_decoy_messages_sent = 67;
-    optional int64 inproxy_webrtc_dns_attempt = 68;
-    optional string inproxy_webrtc_dns_preferred = 69; //LowCardinality
-    optional string inproxy_webrtc_dns_preresolved = 70; //LowCardinality
-    optional int64 inproxy_webrtc_dns_qname_mismatches = 71;
-    optional bool inproxy_webrtc_dns_qname_must_match = 72;
-    optional bool inproxy_webrtc_dns_qname_random_casing = 73;
-    optional string inproxy_webrtc_dns_transform = 74; //LowCardinality
-    optional bool inproxy_webrtc_local_ice_candidate_is_IPv6 = 75;
-    optional bool inproxy_webrtc_local_ice_candidate_is_initiator = 76;
-    optional int64 inproxy_webrtc_local_ice_candidate_port = 77;
-    optional string inproxy_webrtc_local_ice_candidate_type = 78; //LowCardinality
-    optional int64 inproxy_webrtc_padded_messages_received = 79;
-    optional int64 inproxy_webrtc_padded_messages_sent = 80;
-    optional bool inproxy_webrtc_randomize_dtls = 81;
-    optional bool inproxy_webrtc_remote_ice_candidate_is_IPv6 = 82;
-    optional int64 inproxy_webrtc_remote_ice_candidate_port = 83;
-    optional string inproxy_webrtc_remote_ice_candidate_type = 84; //LowCardinality
-    optional string inproxy_webrtc_stun_server = 85; //LowCardinality
-    optional string inproxy_webrtc_stun_server_RFC5780 = 86; //LowCardinality
-    optional string inproxy_webrtc_stun_server_RFC5780_resolved_ip_address = 87; //LowCardinality
-    optional string inproxy_webrtc_stun_server_resolved_ip_address = 88; //LowCardinality
-    optional bool inproxy_webrtc_use_media_streams = 89;
+    repeated string inproxy_proxy_client_features = 66; //LowCardinality
+    optional int64 inproxy_webrtc_decoy_messages_received = 67;
+    optional int64 inproxy_webrtc_decoy_messages_sent = 68;
+    optional int64 inproxy_webrtc_dns_attempt = 69;
+    optional string inproxy_webrtc_dns_preferred = 70; //LowCardinality
+    optional string inproxy_webrtc_dns_preresolved = 71; //LowCardinality
+    optional int64 inproxy_webrtc_dns_qname_mismatches = 72;
+    optional bool inproxy_webrtc_dns_qname_must_match = 73;
+    optional bool inproxy_webrtc_dns_qname_random_casing = 74;
+    optional string inproxy_webrtc_dns_transform = 75; //LowCardinality
+    optional bool inproxy_webrtc_local_ice_candidate_is_IPv6 = 76;
+    optional bool inproxy_webrtc_local_ice_candidate_is_initiator = 77;
+    optional int64 inproxy_webrtc_local_ice_candidate_port = 78;
+    optional string inproxy_webrtc_local_ice_candidate_type = 79; //LowCardinality
+    optional int64 inproxy_webrtc_padded_messages_received = 80;
+    optional int64 inproxy_webrtc_padded_messages_sent = 81;
+    optional bool inproxy_webrtc_randomize_dtls = 82;
+    optional bool inproxy_webrtc_remote_ice_candidate_is_IPv6 = 83;
+    optional int64 inproxy_webrtc_remote_ice_candidate_port = 84;
+    optional string inproxy_webrtc_remote_ice_candidate_type = 85; //LowCardinality
+    optional string inproxy_webrtc_stun_server = 86; //LowCardinality
+    optional string inproxy_webrtc_stun_server_RFC5780 = 87; //LowCardinality
+    optional string inproxy_webrtc_stun_server_RFC5780_resolved_ip_address = 88; //LowCardinality
+    optional string inproxy_webrtc_stun_server_resolved_ip_address = 89; //LowCardinality
+    optional bool inproxy_webrtc_use_media_streams = 90;
 }
 
 message MetadataConjure {
@@ -162,6 +163,7 @@ message MetadataMeek {
     optional int64 meek_tls_padding = 14;
     optional bool meek_transformed_host_name = 15;
     optional int64 meek_underlying_connection_count = 16;
+    optional string meek_server_http_version = 17; //LowCardinality
 }
 
 message MetadataQuic {
@@ -188,14 +190,3 @@ message MetadataTLS {
 message MetadataShadowsocks {
     optional string shadowsocks_prefix = 1;  //LowCardinality
 }
-
-// Might add pipelime metadata to messages
-// message MetricsPipelineMetadata {
-//     repeated PipelineMetadataEntry pipeline_metadata = 1;
-// }
-
-// message PipelineMetadataEntry {
-//     string pipeline_component = 1;//LowCardinality
-//     int64 ingress_time = 2;
-//     int64 egress_time = 3;
-// }
