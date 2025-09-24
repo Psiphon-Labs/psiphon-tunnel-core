@@ -221,6 +221,10 @@ func handshakeAPIRequestHandler(
 			return nil, errors.Trace(err)
 		}
 
+		if net.ParseIP(inproxyClientIP) == nil {
+			return nil, errors.TraceNew("invalid inproxy client IP")
+		}
+
 		inproxyClientGeoIPData = support.GeoIPService.Lookup(inproxyClientIP)
 		clientGeoIPData = inproxyClientGeoIPData
 
@@ -352,20 +356,8 @@ func handshakeAPIRequestHandler(
 	var encodedServerList []string
 	if !sshClient.getDisableDiscovery() {
 
-		clientIP := ""
-		if sshClient.isInproxyTunnelProtocol {
-			clientIP = inproxyClientIP
-		} else if sshClient.peerAddr != nil {
-			clientIP, _, _ = net.SplitHostPort(sshClient.peerAddr.String())
-
-		}
-
-		IP := net.ParseIP(clientIP)
-		if IP == nil {
-			return nil, errors.TraceNew("invalid client IP")
-		}
-
-		encodedServerList = support.discovery.DiscoverServers(IP)
+		encodedServerList = support.discovery.DiscoverServers(
+			net.ParseIP(sshClient.getClientIP()))
 	}
 
 	// When the client indicates that it used an out-of-date server entry for
@@ -408,22 +400,23 @@ func handshakeAPIRequestHandler(
 		isMobile)
 
 	clientAddress := ""
-	if sshClient.isInproxyTunnelProtocol {
+	if protocol.TunnelProtocolIsDirect(sshClient.tunnelProtocol) {
 
-		// ClientAddress not supported for in-proxy tunnel protocols:
-		//
-		// - We don't want to return the address of the direct peer, the
-		//   in-proxy proxy;
-		// - The known  port number will correspond to the in-proxy proxy
-		//   source address, not the client;
-		// - While we assume that the the original client IP from the broker
-		//   is representative for geolocation, an actual direct connection
-		//   to the Psiphon server from the client may route differently and
-		//   use a different IP address.
-
-		clientAddress = ""
-	} else if sshClient.peerAddr != nil {
 		clientAddress = sshClient.peerAddr.String()
+
+	} else {
+
+		// Limitations for indirect protocols:
+		//
+		// - The peer port number will not correspond to the original client's
+		//   source port; 0 is reported instead.
+		//
+		// - For in-proxy protocols, while we assume that the the original
+		//   client IP from the broker is representative for geolocation, an
+		//   actual direct connection to the Psiphon server from the client
+		//   may route differently and use a different IP address.
+
+		clientAddress = net.JoinHostPort(sshClient.getClientIP(), "0")
 	}
 
 	var marshaledTacticsPayload []byte
