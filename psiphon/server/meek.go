@@ -362,6 +362,7 @@ func NewMeekServer(
 				IsValidServerEntryTag:          support.PsinetDatabase.IsValidServerEntryTag,
 				GetTacticsPayload:              meekServer.inproxyBrokerGetTacticsPayload,
 				IsLoadLimiting:                 meekServer.support.TunnelServer.CheckLoadLimiting,
+				RelayDSLRequest:                meekServer.inproxyBrokerRelayDSLRequest,
 				PrivateKey:                     sessionPrivateKey,
 				ObfuscationRootSecret:          obfuscationRootSecret,
 				ServerEntrySignaturePublicKey:  support.Config.InproxyBrokerServerEntrySignaturePublicKey,
@@ -2052,6 +2053,25 @@ func (server *MeekServer) inproxyBrokerGetTacticsPayload(
 	}
 
 	return marshaledTacticsPayload, newTacticsTag, nil
+}
+
+// inproxyBrokerRelayDSLRequest is a callback used by the in-proxy broker to
+// relay client DSL requests.
+func (server *MeekServer) inproxyBrokerRelayDSLRequest(
+	ctx context.Context,
+	extendTimeout inproxy.ExtendTransportTimeout,
+	clientIP string,
+	clientGeoIPData common.GeoIPData,
+	requestPayload []byte) ([]byte, error) {
+
+	responsePayload, err := dslHandleRequest(
+		ctx,
+		server.support,
+		extendTimeout,
+		clientIP,
+		clientGeoIPData,
+		requestPayload)
+	return responsePayload, errors.Trace(err)
 }
 
 // inproxyBrokerHandler reads an in-proxy broker session protocol message from

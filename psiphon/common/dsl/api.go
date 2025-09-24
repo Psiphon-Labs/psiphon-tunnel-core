@@ -35,7 +35,6 @@ package dsl
 
 import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/fxamacker/cbor/v2"
 )
 
 type OSLID []byte
@@ -202,13 +201,19 @@ var requestTypeToHTTPPath = map[int32]string{
 // RelayedRequest wraps a DSL request to be relayed. RequestType indicates the
 // type of the wrapped request. Version must be 1.
 type RelayedRequest struct {
-	RequestType int32           `cbor:"1,keyasint,omitempty"`
-	Version     int32           `cbor:"2,keyasint,omitempty"`
-	Request     cbor.RawMessage `cbor:"3,keyasint,omitempty"`
+	RequestType int32  `cbor:"1,keyasint,omitempty"`
+	Version     int32  `cbor:"2,keyasint,omitempty"`
+	Request     []byte `cbor:"3,keyasint,omitempty"`
 }
+
+const (
+	relayedResponseNoCompression   = 0
+	relayedResponseZlibCompression = 1
+)
 
 // RelayedResponse wraps a DSL response value or error.
 type RelayedResponse struct {
-	Error    int32           `cbor:"1,keyasint,omitempty"`
-	Response cbor.RawMessage `cbor:"2,keyasint,omitempty"`
+	Error       int32  `cbor:"1,keyasint,omitempty"`
+	Compression int32  `cbor:"2,keyasint,omitempty"`
+	Response    []byte `cbor:"3,keyasint,omitempty"`
 }

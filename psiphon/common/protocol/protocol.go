@@ -73,6 +73,7 @@ const (
 	PSIPHON_API_OSL_REQUEST_NAME           = "psiphon-osl"
 	PSIPHON_API_ALERT_REQUEST_NAME         = "psiphon-alert"
 	PSIPHON_API_INPROXY_RELAY_REQUEST_NAME = "psiphon-inproxy-relay"
+	PSIPHON_API_DSL_REQUEST_NAME           = "psiphon-dsl"
 
 	PSIPHON_API_ALERT_DISALLOWED_TRAFFIC = "disallowed-traffic"
 	PSIPHON_API_ALERT_UNSAFE_TRAFFIC     = "unsafe-traffic"

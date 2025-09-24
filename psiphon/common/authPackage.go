@@ -203,7 +203,8 @@ func NewAuthenticatedDataPackageReader(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		// TODO: need to Close decompressor to ensure zlib checksum is verified?
+		defer decompressor.Close()
+		// TODO: need to check Close error to ensure zlib checksum is verified?
 
 		hash := sha256.New()
 

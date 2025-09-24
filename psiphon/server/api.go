@@ -62,6 +62,42 @@ func sshAPIRequestHandler(
 	name string,
 	requestPayload []byte) ([]byte, error) {
 
+	// Before invoking the handlers, enforce some preconditions:
+	//
+	// - A handshake request must precede any other requests.
+	// - When the handshake results in a traffic rules state where
+	//   the client is immediately exhausted, no requests
+	//   may succeed. This case ensures that blocked clients do
+	//   not log "connected", etc.
+	//
+	// Only one handshake request may be made. There is no check here
+	// to enforce that handshakeAPIRequestHandler will be called at
+	// most once. The SetHandshakeState call in handshakeAPIRequestHandler
+	// enforces that only a single handshake is made; enforcing that there
+	// ensures no race condition even if concurrent requests are
+	// in flight.
+
+	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
+
+		completed, exhausted := sshClient.getHandshaked()
+		if !completed {
+			return nil, errors.TraceNew("handshake not completed")
+		}
+		if exhausted {
+			return nil, errors.TraceNew("exhausted after handshake")
+		}
+	}
+
+	// Here, the DSL request is and opaque payload. The DSL backend (or relay)
+	// will handle the API parameters and this case skips APIParameters
+	// processing.
+
+	if name == protocol.PSIPHON_API_DSL_REQUEST_NAME {
+		responsePayload, err := dslAPIRequestHandler(
+			support, sshClient, requestPayload)
+		return responsePayload, errors.Trace(err)
+	}
+
 	// Notes:
 	//
 	// - For SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
@@ -92,32 +128,6 @@ func sshAPIRequestHandler(
 		}
 	}
 
-	// Before invoking the handlers, enforce some preconditions:
-	//
-	// - A handshake request must precede any other requests.
-	// - When the handshake results in a traffic rules state where
-	//   the client is immediately exhausted, no requests
-	//   may succeed. This case ensures that blocked clients do
-	//   not log "connected", etc.
-	//
-	// Only one handshake request may be made. There is no check here
-	// to enforce that handshakeAPIRequestHandler will be called at
-	// most once. The SetHandshakeState call in handshakeAPIRequestHandler
-	// enforces that only a single handshake is made; enforcing that there
-	// ensures no race condition even if concurrent requests are
-	// in flight.
-
-	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
-
-		completed, exhausted := sshClient.getHandshaked()
-		if !completed {
-			return nil, errors.TraceNew("handshake not completed")
-		}
-		if exhausted {
-			return nil, errors.TraceNew("exhausted after handshake")
-		}
-	}
-
 	switch name {
 
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
@@ -131,16 +141,19 @@ func sshAPIRequestHandler(
 		return responsePayload, nil
 
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(
+		responsePayload, err := connectedAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(
+		responsePayload, err := statusAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 
 	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(
+		responsePayload, err := clientVerificationAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 	}
 
 	return nil, errors.Tracef("invalid request name: %s", name)
@@ -987,6 +1000,23 @@ func clientVerificationAPIRequestHandler(
 	return make([]byte, 0), nil
 }
 
+// dslAPIRequestHandler forwards DSL relay requests. The DSL backend
+// (or relay) will handle API parameter processing and event logging.
+func dslAPIRequestHandler(
+	support *SupportServices,
+	sshClient *sshClient,
+	requestPayload []byte) ([]byte, error) {
+
+	responsePayload, err := dslHandleRequest(
+		sshClient.runCtx,
+		support,
+		nil, // no extendTimeout
+		sshClient.getClientIP(),
+		common.GeoIPData(sshClient.getClientGeoIPData()),
+		requestPayload)
+	return responsePayload, errors.Trace(err)
+}
+
 var tacticsParams = []requestParamSpec{
 	{tactics.STORED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 	{tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME, nil, requestParamOptional | requestParamJSON},
@@ -1065,6 +1095,37 @@ func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParamete
 			nil,
 			params,
 			inproxyBrokerRequestParams)
+
+		return common.LogFields(logFields)
+	}
+}
+
+var dslRequestParams = append(
+	append(
+		[]requestParamSpec{
+			{"session_id", isHexDigits, 0},
+			{"fronting_provider_id", isAnyString, requestParamOptional}},
+		tacticsParams...),
+	baseParams...)
+
+func getDSLAPIParameterValidator(config *Config) common.APIParameterValidator {
+	return func(params common.APIParameters) error {
+		return validateRequestParams(config, params, tacticsRequestParams)
+	}
+}
+
+func getDSLAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+
+	return func(prefix string, geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
+
+		logFields := getRequestLogFields(
+			"dsl_relay",
+			prefix,
+			"", // Use the session_id the client reported
+			GeoIPData(geoIPData),
+			nil,
+			params,
+			dslRequestParams)
 
 		return common.LogFields(logFields)
 	}

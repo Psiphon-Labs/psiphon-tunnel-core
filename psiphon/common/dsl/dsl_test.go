@@ -37,6 +37,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -48,7 +49,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -181,9 +181,12 @@ func testDSLs(testConfig *testConfig) error {
 
 	relayLogger := newTestLoggerWithMetricValidator("relay", metricsValidator)
 
+	certPool := x509.NewCertPool()
+	certPool.AddCert(tlsConfig.CACertificate)
+
 	relayConfig := &RelayConfig{
 		Logger:                      relayLogger,
-		CACertificates:              []*x509.Certificate{tlsConfig.CACertificate},
+		CACertificates:              certPool,
 		HostCertificate:             tlsConfig.relayCertificate,
 		DynamicServerListServiceURL: backend.getAddress(),
 		HostID:                      testHostID,
@@ -198,10 +201,7 @@ func testDSLs(testConfig *testConfig) error {
 		},
 	}
 
-	relay, err := NewRelay(relayConfig)
-	if err != nil {
-		return errors.Trace(err)
-	}
+	relay := NewRelay(relayConfig)
 
 	if !testConfig.cacheServerEntries {
 		relay.SetCacheParameters(0, 0)
@@ -242,11 +242,15 @@ func testDSLs(testConfig *testConfig) error {
 		// blocking resistant first hop. For this test, it's just a stub that
 		// directly invokes the relay.
 
-		responsePayload := relay.HandleRequest(
+		responsePayload, err := relay.HandleRequest(
 			ctx,
+			nil,
 			testClientIP,
 			testClientGeoIPData,
 			requestPayload)
+		if err != nil {
+			return GetRelayGenericErrorResponse(), errors.Trace(err)
+		}
 
 		// Simulate interruption of large response.
 		if interruptLimit > 0 && len(responsePayload) > interruptLimit {
@@ -569,6 +573,8 @@ func initializeDSLBackend(backendOSLPaveData []*osl.PaveData) (*dslBackend, erro
 
 	// Run GenerateConfig concurrently to try to take advantage of multiple
 	// CPU cores.
+	//
+	// Update: no longer using server.GenerateConfig due to import cycle.
 
 	var initMutex sync.Mutex
 	var initGroup sync.WaitGroup
@@ -587,24 +593,24 @@ func initializeDSLBackend(backendOSLPaveData []*osl.PaveData) (*dslBackend, erro
 				}
 			}()
 
-			_, _, _, _, encodedServerEntry, err := server.GenerateConfig(
-				&server.GenerateConfigParams{
-					ServerIPAddress:     fmt.Sprintf("192.0.2.%d", i),
-					TunnelProtocolPorts: map[string]int{"OSSH": 1},
-				})
-			if err != nil {
-				return errors.Trace(err)
+			serverEntry := &protocol.ServerEntry{
+				Tag:                  prng.Base64String(32),
+				IpAddress:            fmt.Sprintf("192.0.2.%d", i),
+				SshUsername:          prng.HexString(8),
+				SshPassword:          prng.HexString(32),
+				SshHostKey:           prng.Base64String(280),
+				SshObfuscatedPort:    prng.Range(1, 65535),
+				SshObfuscatedKey:     prng.HexString(32),
+				Capabilities:         []string{"OSSH"},
+				Region:               prng.HexString(1),
+				ProviderID:           strings.ToUpper(prng.HexString(8)),
+				ConfigurationVersion: 0,
+				Signature:            prng.Base64String(80),
 			}
 
-			serverEntryFields, err := protocol.DecodeServerEntryFields(
-				string(encodedServerEntry), "", "")
+			serverEntryFields, err := serverEntry.GetServerEntryFields()
 			if err != nil {
 				return errors.Trace(err)
-			}
-
-			tag := serverEntryFields.GetTag()
-			if tag == "" {
-				return errors.TraceNew("unexpected tag")
 			}
 
 			packed, err := protocol.EncodePackedServerEntryFields(serverEntryFields)
@@ -616,12 +622,12 @@ func initializeDSLBackend(backendOSLPaveData []*osl.PaveData) (*dslBackend, erro
 
 			initMutex.Lock()
 
-			if backend.serverEntries[tag] != nil {
+			if backend.serverEntries[serverEntry.Tag] != nil {
 				initMutex.Unlock()
 				return errors.TraceNew("duplicate tag")
 			}
 
-			backend.serverEntries[tag] = &SourcedServerEntry{
+			backend.serverEntries[serverEntry.Tag] = &SourcedServerEntry{
 				ServerEntryFields: packed,
 				Source:            source,
 			}

@@ -485,6 +485,28 @@ func GetTacticsCapability(protocol string) string {
 	return GetCapability(protocol) + "-TACTICS"
 }
 
+// GetServerEntryFields converts a ServerEntry to ServerEntryFields.
+//
+// Note that a conversion in this direction doesn't retain unrecognized
+// fields; see ServerEntryFields comment. Clients should only store
+// ServerEntryFields obtained from DecodeServerEntryFields or
+// DecodePackedServerEntryFields.
+func (serverEntry *ServerEntry) GetServerEntryFields() (ServerEntryFields, error) {
+
+	marshaledServerEntry, err := json.Marshal(serverEntry)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	var serverEntryFields ServerEntryFields
+	err = json.Unmarshal(marshaledServerEntry, &serverEntryFields)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return serverEntryFields, nil
+}
+
 // hasCapability indicates if the server entry has the specified capability.
 //
 // Any internal "PASSTHROUGH-v2 or "PASSTHROUGH" component in the server

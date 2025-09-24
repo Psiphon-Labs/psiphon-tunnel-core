@@ -521,6 +521,13 @@ const (
 	CheckServerEntryTagsMaxSendBytes                   = "CheckServerEntryTagsMaxSendBytes"
 	CheckServerEntryTagsMaxWorkTime                    = "CheckServerEntryTagsMaxWorkTime"
 	ServerEntryPruneDialPortNumberZero                 = "ServerEntryPruneDialPortNumberZero"
+	DSLRelayMaxHttpConns                               = "DSLRelayMaxHttpConns"
+	DSLRelayMaxHttpIdleConns                           = "DSLRelayMaxHttpIdleConns"
+	DSLRelayHttpIdleConnTimeout                        = "DSLRelayHttpIdleConnTimeout"
+	DSLRelayRequestTimeout                             = "DSLRelayRequestTimeout"
+	DSLRelayRetryCount                                 = "DSLRelayRetryCount"
+	DSLRelayCacheTTL                                   = "DSLRelayCacheTTL"
+	DSLRelayCacheMaxSize                               = "DSLRelayCacheMaxSize"
 
 	// Retired parameters
 
@@ -1114,6 +1121,14 @@ var defaultParameters = map[string]struct {
 	CheckServerEntryTagsMaxSendBytes:   {value: 65536, minimum: 1},
 	CheckServerEntryTagsMaxWorkTime:    {value: 60 * time.Second, minimum: time.Duration(0)},
 	ServerEntryPruneDialPortNumberZero: {value: true},
+
+	DSLRelayMaxHttpConns:        {value: 100, minimum: 1, flags: serverSideOnly},
+	DSLRelayMaxHttpIdleConns:    {value: 10, minimum: 1, flags: serverSideOnly},
+	DSLRelayHttpIdleConnTimeout: {value: 120 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayRequestTimeout:      {value: 30 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayRetryCount:          {value: 2, minimum: 0, flags: serverSideOnly},
+	DSLRelayCacheTTL:            {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayCacheMaxSize:        {value: 200000, minimum: 0, flags: serverSideOnly},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

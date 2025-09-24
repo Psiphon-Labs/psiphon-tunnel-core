@@ -21,6 +21,7 @@ package dsl
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -41,13 +42,13 @@ import (
 
 const (
 	defaultMaxHttpConns        = 100
-	defaultMaxHttpIdleConns    = 100
+	defaultMaxHttpIdleConns    = 10
 	defaultHttpIdleConnTimeout = 120 * time.Second
 	defaultRequestTimeout      = 30 * time.Second
 	defaultRequestRetryCount   = 2
 
 	defaultServerEntryCacheTTL     = 24 * time.Hour
-	defaultServerEntryCacheMaxSize = 100000
+	defaultServerEntryCacheMaxSize = 200000
 )
 
 // RelayConfig specifies the configuration for a Relay.
@@ -59,7 +60,7 @@ const (
 type RelayConfig struct {
 	Logger common.Logger
 
-	CACertificates []*x509.Certificate
+	CACertificates *x509.CertPool
 
 	HostCertificate *tls.Certificate
 
@@ -86,9 +87,8 @@ type RelayConfig struct {
 // GetServerEntriesRequest requests may be fully or partially served out of
 // the local cache.
 type Relay struct {
-	config        *RelayConfig
-	tlsConfig     *tls.Config
-	errorResponse []byte
+	config    *RelayConfig
+	tlsConfig *tls.Config
 
 	mutex                   sync.Mutex
 	httpClient              *http.Client
@@ -100,32 +100,16 @@ type Relay struct {
 }
 
 // NewRelay creates a new Relay.
-func NewRelay(config *RelayConfig) (*Relay, error) {
-
-	certPool := x509.NewCertPool()
-	for _, cert := range config.CACertificates {
-		certPool.AddCert(cert)
-	}
+func NewRelay(config *RelayConfig) *Relay {
 
 	tlsConfig := &tls.Config{
-		RootCAs:      certPool,
+		RootCAs:      config.CACertificates,
 		Certificates: []tls.Certificate{*config.HostCertificate},
 	}
 
-	// Pre-marshal a generic, non-revealing error code to return on any
-	// upstream failure.
-	cborErrorResponse, err := protocol.CBOREncoding.Marshal(
-		&RelayedResponse{
-			Error: 1,
-		})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	relay := &Relay{
-		config:        config,
-		tlsConfig:     tlsConfig,
-		errorResponse: cborErrorResponse,
+		config:    config,
+		tlsConfig: tlsConfig,
 	}
 
 	relay.SetRequestParameters(
@@ -139,7 +123,7 @@ func NewRelay(config *RelayConfig) (*Relay, error) {
 		defaultServerEntryCacheTTL,
 		defaultServerEntryCacheMaxSize)
 
-	return relay, nil
+	return relay
 }
 
 // SetRequestParameters updates the HTTP request parameters used for upstream
@@ -225,32 +209,17 @@ func (r *Relay) SetCacheParameters(
 
 // HandleRequest relays a DSL request.
 //
-// On request failure, HandleRequest logs to the provided logger. There's
-// always a response to be relayed back to the client.
+// If an extendTimeout callback is specified, it will be called with the
+// expected maximum request timeout, including retries; this callback may be
+// used to customize the response timeout for a transport handler.
+//
+// In the case of an error, the caller must log the error and send
+// dsl.GenericErrorResponse to the client. This generic error response
+// ensures that the client receives a DSL response and doesn't consider the
+// DSL FetcherRoundTripper to have failed.
 func (r *Relay) HandleRequest(
 	ctx context.Context,
-	clientIP string,
-	clientGeoIPData common.GeoIPData,
-	cborRelayedRequest []byte) []byte {
-
-	response, err := r.handleRequest(
-		ctx,
-		clientIP,
-		clientGeoIPData,
-		cborRelayedRequest)
-	if err != nil {
-		r.config.Logger.WithTraceFields(common.LogFields{
-			"error": err.Error(),
-		}).Warning("DSL: handle request failed")
-
-		return r.errorResponse
-	}
-
-	return response
-}
-
-func (r *Relay) handleRequest(
-	ctx context.Context,
+	extendTimeout func(time.Duration),
 	clientIP string,
 	clientGeoIPData common.GeoIPData,
 	cborRelayedRequest []byte) ([]byte, error) {
@@ -260,6 +229,10 @@ func (r *Relay) handleRequest(
 	requestTimeout := r.requestTimeout
 	requestRetryCount := r.requestRetryCount
 	r.mutex.Unlock()
+
+	if extendTimeout != nil {
+		extendTimeout(requestTimeout * time.Duration(requestRetryCount))
+	}
 
 	if httpClient == nil {
 		return nil, errors.TraceNew("missing http client")
@@ -412,9 +385,48 @@ func (r *Relay) handleRequest(
 		return nil, errors.Tracef("all attempts failed")
 	}
 
+	// Compress GetServerEntriesResponse responses.
+	//
+	// The CBOR-encoded SourcedServerEntry/protocol.PackedServerEntryFields
+	// items in GetServerEntriesResponse benefit from compression due to
+	// repeating server entry values. Only this response is compressed, as
+	// other responses almost completely consist of non-repeating random
+	// values.
+	//
+	// Compression is only added at the relay->client hop, to avoid additonal
+	// CPU load on the DSL backend, and avoid relays having to always
+	// decompress the backend response in cacheGetServerEntriesResponse.
+
+	compression := int32(relayedResponseNoCompression)
+	if relayedRequest.RequestType == requestTypeGetServerEntries {
+		compression = relayedResponseZlibCompression
+	}
+
+	var compressedResponse []byte
+
+	switch compression {
+
+	case relayedResponseNoCompression:
+		compressedResponse = response
+
+	case relayedResponseZlibCompression:
+		var b bytes.Buffer
+		w := zlib.NewWriter(&b)
+		_, err := w.Write(response)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		err = w.Close()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		compressedResponse = b.Bytes()
+	}
+
 	cborRelayedResponse, err := protocol.CBOREncoding.Marshal(
 		&RelayedResponse{
-			Response: response,
+			Compression: compression,
+			Response:    compressedResponse,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -560,4 +572,25 @@ func (r *Relay) getCachedGetServerEntriesResponse(
 	r.config.Logger.LogMetric("dsl", logFields)
 
 	return cborResponse, nil
+}
+
+var relayGenericErrorResponse []byte
+
+func init() {
+
+	// Pre-marshal a generic, non-revealing error code to return on any
+	// upstream failure.
+	cborErrorResponse, err := protocol.CBOREncoding.Marshal(
+		&RelayedResponse{
+			Error: 1,
+		})
+	if err != nil {
+		panic(err.Error())
+	}
+
+	relayGenericErrorResponse = cborErrorResponse
+}
+
+func GetRelayGenericErrorResponse() []byte {
+	return relayGenericErrorResponse
 }
