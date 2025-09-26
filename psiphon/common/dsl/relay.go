@@ -21,7 +21,6 @@ package dsl
 
 import (
 	"bytes"
-	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -397,30 +396,14 @@ func (r *Relay) HandleRequest(
 	// CPU load on the DSL backend, and avoid relays having to always
 	// decompress the backend response in cacheGetServerEntriesResponse.
 
-	compression := int32(relayedResponseNoCompression)
+	compression := common.CompressionNone
 	if relayedRequest.RequestType == requestTypeGetServerEntries {
-		compression = relayedResponseZlibCompression
+		compression = common.CompressionZlib
 	}
 
-	var compressedResponse []byte
-
-	switch compression {
-
-	case relayedResponseNoCompression:
-		compressedResponse = response
-
-	case relayedResponseZlibCompression:
-		var b bytes.Buffer
-		w := zlib.NewWriter(&b)
-		_, err := w.Write(response)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		err = w.Close()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		compressedResponse = b.Bytes()
+	compressedResponse, err := common.Compress(compression, response)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	cborRelayedResponse, err := protocol.CBOREncoding.Marshal(

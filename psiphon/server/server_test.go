@@ -298,13 +298,14 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doLogHostProvider:    true,
+			tunnelProtocol:        "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			tlsProfile:            protocol.TLS_PROFILE_CHROME_70,
+			requireAuthorization:  true,
+			doTunneledWebRequest:  true,
+			doTunneledNTPRequest:  true,
+			doDanglingTCPConn:     true,
+			doLogHostProvider:     true,
+			doUncompressedTactics: true,
 		})
 }
 
@@ -430,12 +431,13 @@ func TestInproxyTLSOSSH(t *testing.T) {
 	}
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "INPROXY-WEBRTC-TLS-OSSH",
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doLogHostProvider:    true,
+			tunnelProtocol:        "INPROXY-WEBRTC-TLS-OSSH",
+			requireAuthorization:  true,
+			doTunneledWebRequest:  true,
+			doTunneledNTPRequest:  true,
+			doDanglingTCPConn:     true,
+			doLogHostProvider:     true,
+			doUncompressedTactics: true,
 		})
 }
 
@@ -774,6 +776,7 @@ type runServerConfig struct {
 	doPersonalPairing        bool
 	doRestrictInproxy        bool
 	useInproxyMediaStreams   bool
+	doUncompressedTactics    bool
 }
 
 var (
@@ -1544,6 +1547,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if err != nil {
 			t.Fatalf("WriteFile failed: %s", err)
 		}
+	}
+
+	if runConfig.doUncompressedTactics {
+		compressTactics := false
+		clientConfig.CompressTactics = &compressTactics
 	}
 
 	err = clientConfig.Commit(false)

@@ -60,17 +60,23 @@ func TestGetStringSlice(t *testing.T) {
 
 func TestCompress(t *testing.T) {
 
-	originalData := []byte("test data")
+	for _, compression := range []int32{CompressionNone, CompressionZlib} {
 
-	compressedData := Compress(originalData)
+		originalData := []byte("test data")
 
-	decompressedData, err := Decompress(compressedData)
-	if err != nil {
-		t.Errorf("Uncompress failed: %s", err)
-	}
+		compressedData, err := Compress(compression, originalData)
+		if err != nil {
+			t.Errorf("Compress failed: %s", err)
+		}
 
-	if !bytes.Equal(originalData, decompressedData) {
-		t.Error("decompressed data doesn't match original data")
+		decompressedData, err := Decompress(compression, compressedData)
+		if err != nil {
+			t.Errorf("Decompress failed: %s", err)
+		}
+
+		if !bytes.Equal(originalData, decompressedData) {
+			t.Error("decompressed data doesn't match original data")
+		}
 	}
 }
 

@@ -521,6 +521,7 @@ const (
 	CheckServerEntryTagsMaxSendBytes                   = "CheckServerEntryTagsMaxSendBytes"
 	CheckServerEntryTagsMaxWorkTime                    = "CheckServerEntryTagsMaxWorkTime"
 	ServerEntryPruneDialPortNumberZero                 = "ServerEntryPruneDialPortNumberZero"
+	CompressTactics                                    = "CompressTactics"
 	DSLRelayMaxHttpConns                               = "DSLRelayMaxHttpConns"
 	DSLRelayMaxHttpIdleConns                           = "DSLRelayMaxHttpIdleConns"
 	DSLRelayHttpIdleConnTimeout                        = "DSLRelayHttpIdleConnTimeout"
@@ -1121,6 +1122,8 @@ var defaultParameters = map[string]struct {
 	CheckServerEntryTagsMaxSendBytes:   {value: 65536, minimum: 1},
 	CheckServerEntryTagsMaxWorkTime:    {value: 60 * time.Second, minimum: time.Duration(0)},
 	ServerEntryPruneDialPortNumberZero: {value: true},
+
+	CompressTactics: {value: true},
 
 	DSLRelayMaxHttpConns:        {value: 100, minimum: 1, flags: serverSideOnly},
 	DSLRelayMaxHttpIdleConns:    {value: 10, minimum: 1, flags: serverSideOnly},

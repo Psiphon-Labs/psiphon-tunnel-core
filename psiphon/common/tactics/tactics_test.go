@@ -569,7 +569,10 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("SetTacticsAPIParameters failed: %s", err)
 	}
 
-	tacticsPayload, err := server.GetTacticsPayload(clientGeoIPData, handshakeParams)
+	// FetchTactics will exercise the compression case.
+	compressPayload := false
+
+	tacticsPayload, err := server.GetTacticsPayload(clientGeoIPData, handshakeParams, compressPayload)
 	if err != nil {
 		t.Fatalf("GetTacticsPayload failed: %s", err)
 	}
@@ -777,7 +780,7 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("Server config failed to reload")
 	}
 
-	_, err = server.GetTacticsPayload(clientGeoIPData, handshakeParams)
+	_, err = server.GetTacticsPayload(clientGeoIPData, handshakeParams, compressPayload)
 	if err != nil {
 		t.Fatalf("GetTacticsPayload failed: %s", err)
 	}

@@ -305,8 +305,19 @@ func handshakeAPIRequestHandler(
 
 	httpsRequestRegexes, domainBytesChecksum := db.GetHttpsRequestRegexes(sponsorID)
 
+	// When compressed tactics are requested, use CBOR binary encoding for the
+	// response.
+
+	var responseMarshaler func(any) ([]byte, error)
+	responseMarshaler = json.Marshal
+
+	compressTactics := protocol.GetCompressTactics(params)
+	if compressTactics {
+		responseMarshaler = protocol.CBOREncoding.Marshal
+	}
+
 	tacticsPayload, err := support.TacticsServer.GetTacticsPayload(
-		common.GeoIPData(clientGeoIPData), params)
+		common.GeoIPData(clientGeoIPData), params, compressTactics)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -363,6 +374,9 @@ func handshakeAPIRequestHandler(
 	}
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
+
+	// TODO: as a future enhancement, use the packed, CBOR encoding --
+	// protocol.EncodePackedServerEntryFields -- for server entries.
 
 	// Discover new servers
 
@@ -434,7 +448,7 @@ func handshakeAPIRequestHandler(
 
 	var marshaledTacticsPayload []byte
 	if tacticsPayload != nil {
-		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		marshaledTacticsPayload, err = responseMarshaler(tacticsPayload)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -457,10 +471,7 @@ func handshakeAPIRequestHandler(
 		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
-	// TODO: as a future enhancement, pack and CBOR encode this and other API
-	// responses
-
-	responsePayload, err := json.Marshal(handshakeResponse)
+	responsePayload, err := responseMarshaler(handshakeResponse)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1166,6 +1177,7 @@ var baseParams = []requestParamSpec{
 	{"device_location", isGeoHashString, requestParamOptional},
 	{"network_type", isAnyString, requestParamOptional},
 	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+	{"compress_response", isIntString, requestParamOptional | requestParamNotLogged},
 }
 
 // baseDialParams are the dial parameters, per-tunnel network protocol and

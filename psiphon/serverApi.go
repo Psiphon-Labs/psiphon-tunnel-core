@@ -47,6 +47,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"github.com/fxamacker/cbor/v2"
 )
 
 // ServerContext is a utility struct which holds all of the data associated
@@ -157,6 +158,8 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 
 	doTactics := !serverContext.tunnel.config.DisableTactics
 
+	compressTactics := false
+
 	networkID := ""
 	if doTactics {
 
@@ -180,6 +183,10 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 		if err != nil {
 			return errors.Trace(err)
 		}
+
+		p := serverContext.tunnel.config.GetParameters().Get()
+		compressTactics = p.Bool(parameters.CompressTactics)
+		p.Close()
 	}
 
 	// When split tunnel mode is enabled, indicate this to the server. When
@@ -210,6 +217,17 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 				inproxyConn.(*inproxy.ClientConn).InitialRelayPacket())
 			params["inproxy_relay_packet"] = packet
 		}
+	}
+
+	// When requesting compressed tactics, the response will use CBOR binary
+	// encoding.
+
+	var responseUnmarshaler func([]byte, any) error
+	responseUnmarshaler = json.Unmarshal
+
+	if compressTactics && serverContext.psiphonHttpsClient == nil {
+		protocol.SetCompressTactics(params)
+		responseUnmarshaler = cbor.Unmarshal
 	}
 
 	var response []byte
@@ -262,7 +280,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 	handshakeResponse.UpstreamBytesPerSecond = -1
 	handshakeResponse.DownstreamBytesPerSecond = -1
 
-	err := json.Unmarshal(response, &handshakeResponse)
+	err := responseUnmarshaler(response, &handshakeResponse)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -384,7 +402,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 		networkID == serverContext.tunnel.config.GetNetworkID() {
 
 		var payload *tactics.Payload
-		err := json.Unmarshal(handshakeResponse.TacticsPayload, &payload)
+		err := responseUnmarshaler(handshakeResponse.TacticsPayload, &payload)
 		if err != nil {
 			return errors.Trace(err)
 		}

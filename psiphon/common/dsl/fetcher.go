@@ -21,9 +21,7 @@ package dsl
 
 import (
 	"bytes"
-	"compress/zlib"
 	"context"
-	"io"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -765,29 +763,10 @@ func (f *Fetcher) doRelayedRequest(
 			"RelayedResponse.Error: %d", relayedResponse.Error)
 	}
 
-	var uncompressedResponse []byte
-
-	switch relayedResponse.Compression {
-
-	case relayedResponseNoCompression:
-		uncompressedResponse = relayedResponse.Response
-
-	case relayedResponseZlibCompression:
-		r, err := zlib.NewReader(bytes.NewReader(relayedResponse.Response))
-		if err != nil {
-			return false, errors.Trace(err)
-		}
-		defer r.Close()
-		var b bytes.Buffer
-		_, err = io.Copy(&b, r)
-		if err != nil {
-			return false, errors.Trace(err)
-		}
-		uncompressedResponse = b.Bytes()
-
-	default:
-		return false, errors.Tracef(
-			"unknown RelayedResponse.Compression: %d", relayedResponse.Compression)
+	uncompressedResponse, err := common.Decompress(
+		relayedResponse.Compression, relayedResponse.Response)
+	if err != nil {
+		return false, errors.Trace(err)
 	}
 
 	err = cbor.Unmarshal(uncompressedResponse, response)

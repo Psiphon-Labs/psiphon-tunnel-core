@@ -831,7 +831,11 @@ func init() {
 
 		{167, "shadowsocks_prefix", nil},
 
-		// Next key value = 168
+		// Specs: protocol.PSIPHON_API_RESPONSE_VERSION_FIELD_NAME
+
+		{168, "psiphon_api_response_version", intConverter},
+
+		// Next key value = 169
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

@@ -1101,6 +1101,8 @@ type Config struct {
 
 	NetworkIDCacheTTLMilliseconds *int `json:",omitempty"`
 
+	CompressTactics *bool `json:",omitempty"`
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -2888,6 +2890,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.NetworkIDCacheTTLMilliseconds != nil {
 		applyParameters[parameters.NetworkIDCacheTTL] = fmt.Sprintf("%dms", *config.NetworkIDCacheTTLMilliseconds)
+	}
+
+	if config.CompressTactics != nil {
+		applyParameters[parameters.CompressTactics] = *config.CompressTactics
 	}
 
 	// When adding new config dial parameters that may override tactics, also

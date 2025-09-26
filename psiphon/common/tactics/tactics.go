@@ -166,7 +166,9 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/obfuscator"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"github.com/fxamacker/cbor/v2"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -327,10 +329,13 @@ type Payload struct {
 	// is the same as the stored tag the client specified in its
 	// request, the Tactics will be empty as the client already has the
 	// correct data.
-	Tag string
+	Tag string `cbor:"1,keyasint,omitempty"`
 
-	// Tactics is a JSON-encoded Tactics struct and may be nil.
-	Tactics json.RawMessage
+	// Tactics is a JSON- or CBOR-encoded Tactics struct and may be nil.
+	Tactics []byte `cbor:"2,keyasint,omitempty"`
+
+	// TacticsCompression specifies how Tactics is compressed.
+	TacticsCompression int32 `cbor:"3,keyasint,omitempty"`
 }
 
 // Record is the tactics data persisted by the client. There is one
@@ -797,7 +802,8 @@ func (server *Server) GetFilterGeoIPScope(geoIPData common.GeoIPData) int {
 // Callers must not mutate returned tactics data, which is cached.
 func (server *Server) GetTacticsPayload(
 	geoIPData common.GeoIPData,
-	apiParams common.APIParameters) (*Payload, error) {
+	apiParams common.APIParameters,
+	compressPayload bool) (*Payload, error) {
 
 	// includeServerSideOnly is false: server-side only parameters are not
 	// used by the client, so including them wastes space and unnecessarily
@@ -837,7 +843,21 @@ func (server *Server) GetTacticsPayload(
 	}
 
 	if sendPayloadTactics {
-		payload.Tactics = tacticsData.payload
+
+		tacticsDataPayload := tacticsData.payload
+		compression := common.CompressionNone
+
+		if compressPayload {
+			compression = common.CompressionZlib
+			tacticsDataPayload, err = common.Compress(
+				compression, tacticsDataPayload)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		}
+
+		payload.Tactics = tacticsDataPayload
+		payload.TacticsCompression = compression
 	}
 
 	return payload, nil
@@ -1342,7 +1362,8 @@ func (server *Server) handleTacticsRequest(
 		requestPrivateKey,
 		requestObfuscatedKey,
 		boxedRequest,
-		&apiParams)
+		&apiParams,
+		nil)
 	if err != nil {
 		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to unbox request")
@@ -1358,7 +1379,16 @@ func (server *Server) handleTacticsRequest(
 		return
 	}
 
-	tacticsPayload, err := server.GetTacticsPayload(geoIPData, apiParams)
+	// When compressed tactics are requested, use CBOR binary encoding for the
+	// response.
+
+	compressTactics := protocol.GetCompressTactics(apiParams)
+	var responseMarshaler func(any) ([]byte, error)
+	if compressTactics {
+		responseMarshaler = protocol.CBOREncoding.Marshal
+	}
+
+	tacticsPayload, err := server.GetTacticsPayload(geoIPData, apiParams, compressTactics)
 	if err == nil && tacticsPayload == nil {
 		err = errors.TraceNew("unexpected missing tactics payload")
 	}
@@ -1377,7 +1407,8 @@ func (server *Server) handleTacticsRequest(
 		requestPrivateKey,
 		requestObfuscatedKey,
 		nil,
-		tacticsPayload)
+		tacticsPayload,
+		responseMarshaler)
 	if err != nil {
 		server.logger.WithTraceFields(
 			common.LogFields{"error": err}).Warning("failed to box response")
@@ -1454,7 +1485,7 @@ func SetTacticsAPIParameters(
 // the payload has a new tag/tactics, this is stored and a new expiry time is
 // set. If the payload has the same tag, the existing tactics are retained,
 // the expiry is extended using the previous TTL, and a nil record is
-// rerturned.
+// returned.
 //
 // HandleTacticsPayload is called by the Psiphon client to handle the tactics
 // payload in the API handshake and inproxy broker responses. As the Psiphon
@@ -1566,6 +1597,12 @@ func FetchTactics(
 	encodedRequestObfuscatedKey string,
 	obfuscatedRoundTripper ObfuscatedRoundTripper) (*Record, error) {
 
+	p := params.Get()
+	speedTestPaddingMinBytes := p.Int(parameters.SpeedTestPaddingMinBytes)
+	speedTestPaddingMaxBytes := p.Int(parameters.SpeedTestPaddingMaxBytes)
+	compressTactics := p.Bool(parameters.CompressTactics)
+	p.Close()
+
 	networkID := getNetworkID()
 
 	record, err := getStoredTacticsRecord(storer, networkID)
@@ -1582,10 +1619,7 @@ func FetchTactics(
 
 	if len(speedTestSamples) == 0 {
 
-		p := params.Get()
-		request := prng.Padding(
-			p.Int(parameters.SpeedTestPaddingMinBytes),
-			p.Int(parameters.SpeedTestPaddingMaxBytes))
+		request := prng.Padding(speedTestPaddingMinBytes, speedTestPaddingMaxBytes)
 
 		startTime := time.Now()
 
@@ -1625,6 +1659,15 @@ func FetchTactics(
 	apiParams[STORED_TACTICS_TAG_PARAMETER_NAME] = record.Tag
 	apiParams[SPEED_TEST_SAMPLES_PARAMETER_NAME] = speedTestSamples
 
+	// When requesting compressed tactics, the response will use CBOR binary
+	// encoding.
+
+	var responseUnmarshaler func([]byte, any) error
+	if compressTactics {
+		protocol.SetCompressTactics(apiParams)
+		responseUnmarshaler = cbor.Unmarshal
+	}
+
 	requestPublicKey, err := base64.StdEncoding.DecodeString(encodedRequestPublicKey)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1646,7 +1689,8 @@ func FetchTactics(
 		ephemeralPrivateKey[:],
 		requestObfuscatedKey,
 		ephemeralPublicKey[:],
-		&apiParams)
+		&apiParams,
+		nil)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1670,7 +1714,8 @@ func FetchTactics(
 		ephemeralPrivateKey[:],
 		requestObfuscatedKey,
 		boxedResponse,
-		&payload)
+		&payload,
+		responseUnmarshaler)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1869,9 +1914,15 @@ func applyTacticsPayload(
 			return newTactics, errors.TraceNew("missing tactics")
 		}
 
+		payloadTactics, err := common.Decompress(
+			payload.TacticsCompression, payload.Tactics)
+		if err != nil {
+			return newTactics, errors.Trace(err)
+		}
+
 		record.Tag = payload.Tag
 		record.Tactics = Tactics{}
-		err := json.Unmarshal(payload.Tactics, &record.Tactics)
+		err = json.Unmarshal(payloadTactics, &record.Tactics)
 		if err != nil {
 			return newTactics, errors.Trace(err)
 		}
@@ -1916,7 +1967,8 @@ func setStoredTacticsRecord(
 
 func boxPayload(
 	nonce, peerPublicKey, privateKey, obfuscatedKey, bundlePublicKey []byte,
-	payload interface{}) ([]byte, error) {
+	payload interface{},
+	marshaler func(any) ([]byte, error)) ([]byte, error) {
 
 	if len(nonce) > 24 ||
 		len(peerPublicKey) != 32 ||
@@ -1924,7 +1976,14 @@ func boxPayload(
 		return nil, errors.TraceNew("unexpected box key length")
 	}
 
-	marshaledPayload, err := json.Marshal(payload)
+	var marshaledPayload []byte
+	var err error
+
+	if marshaler == nil {
+		marshaler = json.Marshal
+	}
+
+	marshaledPayload, err = marshaler(payload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -1974,7 +2033,8 @@ func boxPayload(
 // unboxPayload mutates obfuscatedBoxedPayload by deobfuscating in-place.
 func unboxPayload(
 	nonce, peerPublicKey, privateKey, obfuscatedKey, obfuscatedBoxedPayload []byte,
-	payload interface{}) ([]byte, error) {
+	payload interface{},
+	unmarshaler func([]byte, any) error) ([]byte, error) {
 
 	if len(nonce) > 24 ||
 		(peerPublicKey != nil && len(peerPublicKey) != 32) ||
@@ -2024,7 +2084,11 @@ func unboxPayload(
 		return nil, errors.TraceNew("invalid box")
 	}
 
-	err = json.Unmarshal(marshaledPayload, payload)
+	if unmarshaler == nil {
+		unmarshaler = json.Unmarshal
+	}
+
+	err = unmarshaler(marshaledPayload, payload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

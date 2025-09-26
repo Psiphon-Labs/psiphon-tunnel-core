@@ -480,6 +480,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 
 	modifyConfig["LimitQUICVersions"] = runConfig.quicVersions
 
+	// TODO: vary this option
+	modifyConfig["CompressTactics"] = false
+
 	configJSON, _ = json.Marshal(modifyConfig)
 
 	// Don't print initial config setup notices

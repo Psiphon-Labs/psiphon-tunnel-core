@@ -206,11 +206,6 @@ type RelayedRequest struct {
 	Request     []byte `cbor:"3,keyasint,omitempty"`
 }
 
-const (
-	relayedResponseNoCompression   = 0
-	relayedResponseZlibCompression = 1
-)
-
 // RelayedResponse wraps a DSL response value or error.
 type RelayedResponse struct {
 	Error       int32  `cbor:"1,keyasint,omitempty"`

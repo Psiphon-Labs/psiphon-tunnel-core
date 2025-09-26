@@ -2031,8 +2031,19 @@ func (server *MeekServer) inproxyBrokerGetTacticsPayload(
 	geoIPData common.GeoIPData,
 	apiParameters common.APIParameters) ([]byte, string, error) {
 
+	// When compressed tactics are requested, use CBOR binary encoding for the
+	// response.
+
+	var responseMarshaler func(any) ([]byte, error)
+	responseMarshaler = json.Marshal
+
+	compressTactics := protocol.GetCompressTactics(apiParameters)
+	if compressTactics {
+		responseMarshaler = protocol.CBOREncoding.Marshal
+	}
+
 	tacticsPayload, err := server.support.TacticsServer.GetTacticsPayload(
-		geoIPData, apiParameters)
+		geoIPData, apiParameters, compressTactics)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
@@ -2042,7 +2053,7 @@ func (server *MeekServer) inproxyBrokerGetTacticsPayload(
 
 	if tacticsPayload != nil {
 
-		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		marshaledTacticsPayload, err = responseMarshaler(tacticsPayload)
 		if err != nil {
 			return nil, "", errors.Trace(err)
 		}
