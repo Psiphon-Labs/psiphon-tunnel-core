@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message Tactics {
+    optional psiphond.MetadataClient metadata_client = 1;
+    optional psiphond.MetadataDevice metadata_device = 2;
+    optional psiphond.MetadataSession metadata_session = 3;
+    optional psiphond.MetadataServerEntry metadata_server_entry = 4;
+
+    optional psiphond.MetadataMeek metadata_meek = 5;
+    optional psiphond.MetadataTLS metadata_tls = 6;
+
+    // Fields 1-99 are reserved for metadata.
+
+    optional string applied_tactics_tag = 100; //LowCardinality
+    optional int64 dial_duration = 101;
+    optional int64 dial_port_number = 102;
+    optional string egress_region = 103; //LowCardinality
+    optional int64 established_tunnels_count = 104;
+    optional string fronting_provider_id = 105; //LowCardinality
+    optional bool is_replay = 106;
+    optional bool is_tactics_request = 107;
+    optional double network_latency_multiplier = 108;
+    optional string network_type = 109; //LowCardinality
+    optional string new_tactics_tag = 110; //LowCardinality
+    optional string relay_protocol = 111; //LowCardinality
+    optional string root_event_id = 112;
+    optional string ssh_client_version = 113; //LowCardinality
+    optional string stored_tactics_tag = 114; //LowCardinality
+    optional string user_agent = 117;
+}
+
+message TacticsSpeedTest {
+    optional psiphond.MetadataClient metadata_client = 1;
+    optional psiphond.MetadataDevice metadata_device = 2;
+    optional psiphond.MetadataSession metadata_session = 3;
+
+    // Fields 1-99 are reserved for metadata.
+
+    optional int64 round_trip_time_ms = 100;
+    optional int64 bytes_down = 101;
+    optional int64 bytes_up = 102;
+    optional string relay_protocol = 103; //LowCardinality
+    optional string server_region = 104; //LowCardinality
+}

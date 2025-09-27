@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package psiphond;
+
+import "proto/metadata.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb";
+
+message FailedTunnel {
+    optional psiphond.MetadataClient metadata_client = 1;
+    optional psiphond.MetadataDevice metadata_device = 2;
+    optional psiphond.MetadataSession metadata_session = 3;
+    optional psiphond.MetadataServerEntry metadata_server_entry = 4;
+
+    // Protocol Metadata
+    optional psiphond.MetadataConjure metadata_conjure = 5;
+    optional psiphond.MetadataInproxy metadata_inproxy = 6;
+    optional psiphond.MetadataMeek metadata_meek = 7;
+    optional psiphond.MetadataQuic metadata_quic = 8;
+    optional psiphond.MetadataShadowsocks metadata_shadowsocks = 9;
+    optional psiphond.MetadataTLS metadata_tls = 10;
+
+    // Fields 1-99 are reserved for metadata.
+
+    optional int32 candidate_number = 100;
+    optional string tunnel_id = 101;
+    repeated string authorized_access_types = 102; //LowCardinality
+
+    optional string applied_tactics_tag = 103; //LowCardinality
+    optional int64 bytes_down = 104;
+    optional int64 bytes_up = 105;
+    optional google.protobuf.Timestamp client_failed_timestamp = 106;
+    optional int64 dial_duration = 107;
+    optional int64 dial_port_number = 108;
+    optional string egress_region = 109; //LowCardinality
+    optional int64 established_tunnels_count = 110;
+    optional string fronting_provider_id = 111; //LowCardinality
+    optional bool is_replay = 112;
+    optional google.protobuf.Timestamp last_connected = 113;
+    optional int64 liveness_test_downstream_bytes = 114;
+    optional int64 liveness_test_received_downstream_bytes = 115;
+    optional int64 liveness_test_sent_upstream_bytes = 116;
+    optional int64 liveness_test_upstream_bytes = 117;
+    optional double network_latency_multiplier = 118;
+    optional string network_type = 119; //LowCardinality
+    optional double record_probability = 120;
+    optional string relay_protocol = 121; //LowCardinality
+
+    optional string ssh_client_version = 122;  //LowCardinality
+
+    optional string tunnel_error = 123; //LowCardinality
+    optional int64 upstream_bytes_fragmented = 124;
+    optional int64 upstream_max_bytes_written = 125;
+    optional int64 upstream_max_delayed = 126;
+    optional int64 upstream_min_bytes_written = 127;
+    optional int64 upstream_min_delayed = 128;
+    optional int64 upstream_ossh_padding = 129;
+    optional string upstream_proxy_custom_header_names = 130; //LowCardinality
+    optional string upstream_proxy_type = 131; //LowCardinality
+    optional string user_agent = 132;
+}
