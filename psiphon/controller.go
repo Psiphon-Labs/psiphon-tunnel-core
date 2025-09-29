@@ -3016,7 +3016,7 @@ func (controller *Controller) runInproxyProxy() {
 	// load from well-behaved proxies.
 	//
 	// This early check is enforced only when there are tactics, as indicated
-	// by presense of a tactics tag. In the proxy-only case where broker
+	// by presence of a tactics tag. In the proxy-only case where broker
 	// specs are shipped in the proxy config, inproxyAwaitProxyBrokerSpecs
 	// may return before any tactics are fetched, in which case
 	// InproxyAllowProxy will always evaluate to the default, false.
@@ -3448,7 +3448,7 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 	if appliedNewTactics {
 
 		// Shutdown if running in proxy-only and tactics now indicate the
-		// proxy is now allowed.
+		// proxy is not allowed.
 		//
 		// Limitation: does not immediately stop proxy in dual proxy/tunnel mode.
 
