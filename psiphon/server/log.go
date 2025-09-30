@@ -26,16 +26,19 @@ import (
 	"io/ioutil"
 	go_log "log"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Inc/rotate-safe-writer"
+	udsipc "github.com/Psiphon-Inc/uds-ipc"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/proto"
 )
 
 // TraceLogger adds single frame stack trace information to the underlying
@@ -113,22 +116,51 @@ func (logger *TraceLogger) WithTraceFields(fields LogFields) *logrus.Entry {
 // fields identifying this server and build. The stock "msg" and "level"
 // fields are omitted.
 //
-// This log is emitted at the Error level. This function exists to support API
-// logs which have neither a natural message nor severity; and omitting these
-// values here makes it easier to ship these logs to existing API log
-// consumers.
+// If JSON logging is enabled, this log is emitted at the Error level. This
+// function exists to support API logs which have neither a natural message
+// nor severity; and omitting these values here makes it easier to ship these
+// logs to existing API log consumers.
+//
+// If protobuf logging is enabled, the LogFields map will be parsed and used
+// to populate a protobuf message struct pointer which is then serialized and
+// emitted to a local metrics socket.
 //
 // Note that any existing "trace"/"host_id"/"provider"/"build_rev" field will
 // be renamed to "field.<name>".
 func (logger *TraceLogger) LogRawFieldsWithTimestamp(fields LogFields) {
-	renameLogFields(fields)
-	fields["host_id"] = logHostID
-	if logHostProvider != "" {
-		fields["provider"] = logHostProvider
+	if ShouldLogJSON() {
+		renameLogFields(fields)
+		fields["host_id"] = logHostID
+		if logHostProvider != "" {
+			fields["provider"] = logHostProvider
+		}
+		fields["build_rev"] = logBuildRev
+
+		logger.WithFields(logrus.Fields(fields)).Error(
+			customJSONFormatterLogRawFieldsWithTimestamp)
 	}
-	fields["build_rev"] = logBuildRev
-	logger.WithFields(logrus.Fields(fields)).Error(
-		customJSONFormatterLogRawFieldsWithTimestamp)
+
+	if ShouldLogProtobuf() {
+		for _, protoMsg := range LogFieldsToProtobuf(fields) {
+			if protoMsg == nil {
+				logger.WithTrace().Error("failed to populate protobuf message struct")
+				continue
+			}
+
+			serialized, err := proto.Marshal(protoMsg)
+			if err != nil {
+				logger.WithTrace().Errorf("failed to serialize protobuf message: %s", err.Error())
+				continue
+			}
+
+			err = metricSocketWriter.WriteMessage(serialized)
+			if err != nil {
+				// The only error this can be is udsipc.ErrBufferFull
+				logger.WithTrace().Error("metric socket write buffer is full: log dropped")
+				continue
+			}
+		}
+	}
 }
 
 // LogPanicRecover calls LogRawFieldsWithTimestamp with standard fields
@@ -257,7 +289,9 @@ func (f *CustomJSONFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 }
 
 var log *TraceLogger
-var logHostID, logHostProvider, logBuildRev string
+var logFormat, logHostID, logHostProvider, logBuildRev, logDestinationPrefix string
+var metricSocketWriter *udsipc.Writer
+var shouldLogJSON, shouldLogProtobuf bool
 var initLogging sync.Once
 
 // InitLogging configures a logger according to the specified
@@ -274,12 +308,28 @@ func InitLogging(config *Config) (retErr error) {
 		logHostID = config.HostID
 		logHostProvider = config.HostProvider
 		logBuildRev = buildinfo.GetBuildInfo().BuildRev
+		logFormat = config.LogFormat
+		logDestinationPrefix = config.LogDestinationPrefix
 
 		level, err := logrus.ParseLevel(config.LogLevel)
 		if err != nil {
 			retErr = errors.Trace(err)
 			return
 		}
+
+		// To retain backwards compatibility, the zero-value for log format
+		// should retain the existing behavior (JSON logging only).
+		if logFormat == "" {
+			logFormat = "json"
+		}
+
+		if !slices.Contains([]string{"json", "protobuf", "both"}, logFormat) {
+			retErr = errors.Tracef("invalid log format: %s", logFormat)
+			return
+		}
+
+		shouldLogProtobuf = (logFormat == "protobuf" || logFormat == "both")
+		shouldLogJSON = (logFormat == "json" || logFormat == "both")
 
 		var logWriter io.Writer
 
@@ -330,6 +380,26 @@ func InitLogging(config *Config) (retErr error) {
 				Level:     level,
 			},
 		}
+
+		if shouldLogProtobuf {
+			if logDestinationPrefix == "" {
+				retErr = errors.TraceNew("LogDestinationPrefix must be set if protobuf logging is enabled")
+				return
+			}
+
+			if config.MetricSocketPath == "" {
+				retErr = errors.TraceNew("MetricSocketPath must be set if protobuf logging is enabled")
+				return
+			}
+
+			metricSocketWriter, retErr = udsipc.NewWriter(config.MetricSocketPath)
+			if retErr != nil {
+				retErr = errors.Tracef("failed to start metric socket writer: %w", retErr)
+				return
+			}
+
+			metricSocketWriter.Start()
+		}
 	})
 
 	return retErr
@@ -339,12 +409,22 @@ func IsLogLevelDebug() bool {
 	return log.Level == logrus.DebugLevel
 }
 
-func init() {
+func ShouldLogProtobuf() bool {
+	return shouldLogProtobuf
+}
 
+func ShouldLogJSON() bool {
+	return shouldLogJSON
+}
+
+func init() {
 	// Suppress standard "log" package logging performed by other packages.
 	// For example, "net/http" logs messages such as:
 	// "http: TLS handshake error from <client-ip-addr>:<port>: [...]: i/o timeout"
 	go_log.SetOutput(ioutil.Discard)
+
+	// Set default format
+	logFormat = "json"
 
 	log = &TraceLogger{
 		&logrus.Logger{

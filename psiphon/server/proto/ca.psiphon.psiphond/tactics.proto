@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "ca.psiphon.psiphond/base_params.proto";
+import "ca.psiphon.psiphond/dial_params.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message Tactics {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+    optional ca.psiphon.psiphond.DialParams dial_params = 2;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional bool is_tactics_request = 100;
+    optional string new_tactics_tag = 101; //LowCardinality
+    optional string stored_tactics_tag = 102; //LowCardinality
+}
+
+message TacticsSpeedTest {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional int64 round_trip_time_ms = 100;
+    optional int64 bytes_down = 101;
+    optional int64 bytes_up = 102;
+    optional string relay_protocol = 103; //LowCardinality
+    optional string server_region = 104; //LowCardinality
+}
