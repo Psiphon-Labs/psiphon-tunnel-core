@@ -2081,6 +2081,7 @@ func (server *MeekServer) inproxyBrokerRelayDSLRequest(
 		extendTimeout,
 		clientIP,
 		clientGeoIPData,
+		false, // client request is untunneled
 		requestPayload)
 	return responsePayload, errors.Trace(err)
 }

@@ -68,6 +68,7 @@ func dslHandleRequest(
 	extendTimeout func(time.Duration),
 	clientIP string,
 	clientGeoIPData common.GeoIPData,
+	isClientTunneled bool,
 	requestPayload []byte) ([]byte, error) {
 
 	relay := support.dslRelay
@@ -82,6 +83,7 @@ func dslHandleRequest(
 		extendTimeout,
 		clientIP,
 		clientGeoIPData,
+		isClientTunneled,
 		requestPayload)
 	if err != nil {
 		return dsl.GetRelayGenericErrorResponse(),

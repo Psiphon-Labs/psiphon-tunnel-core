@@ -212,6 +212,8 @@ func (r *Relay) SetCacheParameters(
 // expected maximum request timeout, including retries; this callback may be
 // used to customize the response timeout for a transport handler.
 //
+// Set isClientTunneled when the relay uses a connected Psiphon tunnel.
+//
 // In the case of an error, the caller must log the error and send
 // dsl.GenericErrorResponse to the client. This generic error response
 // ensures that the client receives a DSL response and doesn't consider the
@@ -221,6 +223,7 @@ func (r *Relay) HandleRequest(
 	extendTimeout func(time.Duration),
 	clientIP string,
 	clientGeoIPData common.GeoIPData,
+	isClientTunneled bool,
 	cborRelayedRequest []byte) ([]byte, error) {
 
 	r.mutex.Lock()
@@ -339,6 +342,11 @@ func (r *Relay) HandleRequest(
 		}
 		httpRequest.Header.Set(PsiphonClientIPHeader, clientIP)
 		httpRequest.Header.Set(PsiphonClientGeoIPDataHeader, string(jsonGeoIPData))
+		if isClientTunneled {
+			httpRequest.Header.Set(PsiphonClientTunneledHeader, "true")
+		} else {
+			httpRequest.Header.Set(PsiphonClientTunneledHeader, "false")
+		}
 		httpRequest.Header.Set(PsiphonHostIDHeader, r.config.HostID)
 
 		startTime := time.Now()

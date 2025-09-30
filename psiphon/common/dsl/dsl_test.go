@@ -59,7 +59,7 @@ type testConfig struct {
 	interruptDownloads bool
 	enableRetries      bool
 	repeatBeforeTTL    bool
-	isConnected        bool
+	isTunneled         bool
 	expectFailure      bool
 	cacheServerEntries bool
 }
@@ -105,9 +105,9 @@ func TestDSLs(t *testing.T) {
 			alreadyDiscovered: true,
 		},
 		{
-			name: "first request is-connected",
+			name: "first request is-tunneled",
 
-			isConnected: true,
+			isTunneled: true,
 		},
 		{
 			name: "cache server entries",
@@ -227,8 +227,8 @@ func testDSLs(testConfig *testConfig) error {
 	if testConfig.enableRetries {
 		retryCount = 20
 	}
-	isConnected := testConfig.isConnected
-	if isConnected {
+	isTunneled := testConfig.isTunneled
+	if isTunneled {
 		discoverCount = 1
 	}
 
@@ -247,6 +247,7 @@ func testDSLs(testConfig *testConfig) error {
 			nil,
 			testClientIP,
 			testClientGeoIPData,
+			false,
 			requestPayload)
 		if err != nil {
 			return GetRelayGenericErrorResponse(), errors.Trace(err)
@@ -306,7 +307,7 @@ func testDSLs(testConfig *testConfig) error {
 	ctx, cancelFunc := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancelFunc()
 
-	err = fetcher.Run(ctx, isConnected)
+	err = fetcher.Run(ctx)
 	if testConfig.expectFailure && err == nil {
 		err = errors.TraceNew("unexpected success")
 	}
@@ -326,13 +327,13 @@ func testDSLs(testConfig *testConfig) error {
 			return nil, errors.TraceNew("round trip not permitted")
 		}
 
-		err = fetcher.Run(ctx, isConnected)
+		err = fetcher.Run(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}
 	}
 
-	if testConfig.alreadyDiscovered && testConfig.isConnected {
+	if testConfig.alreadyDiscovered && testConfig.isTunneled {
 		return errors.TraceNew("invalid test configuration")
 	}
 
@@ -347,27 +348,32 @@ func testDSLs(testConfig *testConfig) error {
 		dslClient.lastDiscoverTime = time.Time{}
 		dslClient.lastActiveOSLsTime = time.Time{}
 
-		err = fetcher.Run(ctx, isConnected)
+		err = fetcher.Run(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}
 	}
 
-	if testConfig.isConnected {
+	if testConfig.isTunneled {
 
-		// If the first request was isConnected, only one server entry will
-		// have been fetched and the last discover time TTL should not be
-		// set. Do another full fetch, and the
+		if dslClient.serverEntryStoreCount != 1 {
+			return errors.Tracef(
+				"unexpected server entry store count: %d", dslClient.serverEntryStoreCount)
+		}
+
+		// If the first request was isTunneled, only one server entry will
+		// have been fetched. Do another full fetch, and the following
 		// dslClient.serverEntryStoreCount check will demonstrate that all
 		// remaining server entries were downloaded and stored.
 
+		dslClient.lastDiscoverTime = time.Time{}
+
 		discoverCount = 128
-		isConnected = false
 
 		fetcherConfig.DiscoverServerEntriesMinCount = discoverCount
 		fetcherConfig.DiscoverServerEntriesMaxCount = discoverCount
 
-		err = fetcher.Run(ctx, isConnected)
+		err = fetcher.Run(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -396,7 +402,7 @@ func testDSLs(testConfig *testConfig) error {
 
 		backend.oslPaveData = backendOSLPaveData2
 
-		err = fetcher.Run(ctx, isConnected)
+		err = fetcher.Run(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}

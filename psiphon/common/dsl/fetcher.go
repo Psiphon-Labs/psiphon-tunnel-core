@@ -81,6 +81,11 @@ type FetcherConfig struct {
 	GetOSLFileSpecsMinCount       int
 	GetOSLFileSpecsMaxCount       int
 
+	// WaitForNetworkConnectivity is an optional  callback that should block
+	// until there is network connectivity or shutdown. The return value is
+	// true when there is network connectivity, and false for shutdown.
+	WaitForNetworkConnectivity func() bool
+
 	DoGarbageCollection func()
 }
 
@@ -128,15 +133,6 @@ func NewFetcher(config *FetcherConfig) (*Fetcher, error) {
 // Run performs a server entry discovery/download and OSL synchronization
 // sequence.
 //
-// Run supports two modes:
-//   - Frequent, intended for fetching via an established SSH tunnel, and
-//     discovering only a small number of servers. Frequent fetches can be
-//     repeated often.
-//   - Non-frequent, intended for fetching via an untunneled relay, and invoked
-//     after a client is unable to connect with its known servers. This fetch
-//     mode is intended for discovering a larger number of servers, and is
-//     subject to the DiscoverServerEntriesTTL, which skips repeated runs.
-//
 // Each Run may make incremental progress. New OSL state or new server entries
 // may be downloaded and persisted even when Run ultimately fails and returns
 // an error.
@@ -172,18 +168,15 @@ func NewFetcher(config *FetcherConfig) (*Fetcher, error) {
 //     This requirement means that if there's an ongoing untunneled fetcher run
 //     and a tunnel is established, any post-connected, frequent fetcher run
 //     must be skipped or postponed.
-func (f *Fetcher) Run(ctx context.Context, isFrequent bool) error {
+func (f *Fetcher) Run(ctx context.Context) error {
 
-	if !isFrequent {
+	lastTime, err := f.config.DatastoreGetLastDiscoverTime()
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-		lastTime, err := f.config.DatastoreGetLastDiscoverTime()
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		if time.Now().Before(lastTime.Add(f.config.DiscoverServerEntriesTTL)) {
-			return nil
-		}
+	if time.Now().Before(lastTime.Add(f.config.DiscoverServerEntriesTTL)) {
+		return nil
 	}
 
 	// processOSLs will:
@@ -288,21 +281,19 @@ func (f *Fetcher) Run(ctx context.Context, isFrequent bool) error {
 		f.config.DoGarbageCollection()
 	}
 
-	if !isFrequent {
-		err = f.config.DatastoreSetLastDiscoverTime(time.Now())
-		if err != nil {
-			err = errors.Trace(err)
+	err = f.config.DatastoreSetLastDiscoverTime(time.Now())
+	if err != nil {
+		err = errors.Trace(err)
 
-			// Signal a fatal datastore error. The caller should not run any
-			// Fetcher again, for the duration of its process, since the
-			// LastDiscoverTime mechanism won't prevent excess repeats.
+		// Signal a fatal datastore error. The caller should not run any
+		// Fetcher again, for the duration of its process, since the
+		// LastDiscoverTime mechanism won't prevent excess repeats.
 
-			f.config.DatastoreFatalError(err)
-			f.config.Logger.WithTraceFields(common.LogFields{
-				"error": err.Error(),
-			}).Warning("DSL: datastore failed")
-			// Proceed with this one run
-		}
+		f.config.DatastoreFatalError(err)
+		f.config.Logger.WithTraceFields(common.LogFields{
+			"error": err.Error(),
+		}).Warning("DSL: datastore failed")
+		// Proceed with this one run
 	}
 
 	if oslErr != nil {
@@ -708,6 +699,13 @@ func (f *Fetcher) doRelayedRequest(
 	requestType int32,
 	request any,
 	response any) (retRetry bool, retErr error) {
+
+	// Delay attempt to fetch while there is no network connectivity.
+
+	if f.config.WaitForNetworkConnectivity != nil &&
+		!f.config.WaitForNetworkConnectivity() {
+		return false, errors.TraceNew("shutdown")
+	}
 
 	// Add the relay wrapping.
 

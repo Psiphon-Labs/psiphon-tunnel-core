@@ -182,6 +182,7 @@ const MaxRelayPayloadSize = 65536
 const (
 	PsiphonClientIPHeader        = "X-Psiphon-Client-Ip"
 	PsiphonClientGeoIPDataHeader = "X-Psiphon-Client-Geoipdata"
+	PsiphonClientTunneledHeader  = "X-Psiphon-Client-Tunneled"
 	PsiphonHostIDHeader          = "X-Psiphon-Host-Id"
 
 	requestVersion                   = 1

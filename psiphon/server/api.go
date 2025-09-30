@@ -1024,6 +1024,7 @@ func dslAPIRequestHandler(
 		nil, // no extendTimeout
 		sshClient.getClientIP(),
 		common.GeoIPData(sshClient.getClientGeoIPData()),
+		true, // client request is tunneled
 		requestPayload)
 	return responsePayload, errors.Trace(err)
 }
