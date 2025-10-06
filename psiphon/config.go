@@ -689,6 +689,10 @@ type Config struct {
 	// 60 seconds.
 	ShutdownGoroutineProfileDeadlineSeconds *int `json:",omitempty"`
 
+	// EnableDSLFetches specifies whether the client will perform DSL requests
+	// to fetch server entries.
+	EnableDSLFetches *bool `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//
@@ -2894,6 +2898,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.CompressTactics != nil {
 		applyParameters[parameters.CompressTactics] = *config.CompressTactics
+	}
+
+	if config.EnableDSLFetches != nil {
+		applyParameters[parameters.EnableDSLFetches] = *config.EnableDSLFetches
 	}
 
 	// When adding new config dial parameters that may override tactics, also

@@ -1151,7 +1151,7 @@ func ValidateServerEntryFields(serverEntryFields ServerEntryFields) error {
 	// Ensure locally initialized fields have been set.
 
 	source := serverEntryFields.GetLocalSource()
-	if !common.Contains(
+	if !common.ContainsWildcard(
 		SupportedServerEntrySources, source) {
 		return errors.Tracef("server entry has invalid source: %s", source)
 	}

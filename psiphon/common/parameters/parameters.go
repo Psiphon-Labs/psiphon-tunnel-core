@@ -445,7 +445,8 @@ const (
 	InproxyClientOfferRequestPersonalTimeout           = "InproxyClientOfferRequestPersonalTimeout"
 	InproxyClientOfferRetryDelay                       = "InproxyClientOfferRetryDelay"
 	InproxyClientOfferRetryJitter                      = "InproxyClientOfferRetryJitter"
-	InproxyClientRelayedPacketRequestTimeout           = "InproxyCloientRelayedPacketRequestTimeout"
+	InproxyClientRelayedPacketRequestTimeout           = "InproxyClientRelayedPacketRequestTimeout"
+	InproxyClientDSLRequestTimeout                     = "InproxyClientDSLRequestTimeout"
 	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
 	InproxyDTLSRandomizationProbability                = "InproxyDTLSRandomizationProbability"
 	InproxyWebRTCMediaStreamsProbability               = "InproxyWebRTCMediaStreamsProbability"
@@ -522,6 +523,7 @@ const (
 	CheckServerEntryTagsMaxWorkTime                    = "CheckServerEntryTagsMaxWorkTime"
 	ServerEntryPruneDialPortNumberZero                 = "ServerEntryPruneDialPortNumberZero"
 	CompressTactics                                    = "CompressTactics"
+	EnableDSLFetches                                   = "EnableDSLFetches"
 	DSLRelayMaxHttpConns                               = "DSLRelayMaxHttpConns"
 	DSLRelayMaxHttpIdleConns                           = "DSLRelayMaxHttpIdleConns"
 	DSLRelayHttpIdleConnTimeout                        = "DSLRelayHttpIdleConnTimeout"
@@ -529,6 +531,27 @@ const (
 	DSLRelayRetryCount                                 = "DSLRelayRetryCount"
 	DSLRelayCacheTTL                                   = "DSLRelayCacheTTL"
 	DSLRelayCacheMaxSize                               = "DSLRelayCacheMaxSize"
+	DSLFetcherTunneledRequestTimeout                   = "DSLFetcherTunneledRequestTimeout"
+	DSLFetcherTunneledRequestRetryCount                = "DSLFetcherTunneledRequestRetryCount"
+	DSLFetcherTunneledRequestRetryDelay                = "DSLFetcherTunneledRequestRetryDelay"
+	DSLFetcherTunneledRequestRetryDelayJitter          = "DSLFetcherTunneledRequestRetryDelayJitter"
+	DSLFetcherTunneledFetchTTL                         = "DSLFetcherTunneledFetchTTL"
+	DSLFetcherTunneledDiscoverServerEntriesMinCount    = "DSLFetcherTunneledDiscoverServerEntriesMinCount"
+	DSLFetcherTunneledDiscoverServerEntriesMaxCount    = "DSLFetcherTunneledDiscoverServerEntriesMaxCount"
+	DSLFetcherTunneledGetServerEntriesMinCount         = "DSLFetcherTunneledGetServerEntriesMinCount"
+	DSLFetcherTunneledGetServerEntriesMaxCount         = "DSLFetcherTunneledGetServerEntriesMaxCount"
+	DSLFetcherUntunneledRequestTimeout                 = "DSLFetcherUntunneledRequestTimeout"
+	DSLFetcherUntunneledRequestRetryCount              = "DSLFetcherUntunneledRequestRetryCount"
+	DSLFetcherUntunneledRequestRetryDelay              = "DSLFetcherUntunneledRequestRetryDelay"
+	DSLFetcherUntunneledRequestRetryDelayJitter        = "DSLFetcherUntunneledRequestRetryDelayJitter"
+	DSLFetcherUntunneledFetchTTL                       = "DSLFetcherUntunneledFetchTTL"
+	DSLFetcherUntunneledDiscoverServerEntriesMinCount  = "DSLFetcherUntunneledDiscoverServerEntriesMinCount"
+	DSLFetcherUntunneledDiscoverServerEntriesMaxCount  = "DSLFetcherUntunneledDiscoverServerEntriesMaxCount"
+	DSLFetcherUntunneledGetServerEntriesMinCount       = "DSLFetcherUntunneledGetServerEntriesMinCount"
+	DSLFetcherUntunneledGetServerEntriesMaxCount       = "DSLFetcherUntunneledGetServerEntriesMaxCount"
+	DSLFetcherGetLastActiveOSLsTTL                     = "DSLFetcherGetLastActiveOSLsTTL"
+	DSLFetcherGetOSLFileSpecsMinCount                  = "DSLFetcherGetOSLFileSpecsMinCount"
+	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
 
 	// Retired parameters
 
@@ -1042,7 +1065,8 @@ var defaultParameters = map[string]struct {
 	InproxyClientOfferRequestPersonalTimeout:           {value: 5*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRetryDelay:                       {value: 100 * time.Millisecond, minimum: time.Duration(0)},
 	InproxyClientOfferRetryJitter:                      {value: 0.5, minimum: 0.0},
-	InproxyClientRelayedPacketRequestTimeout:           {value: 10 * time.Second, minimum: time.Duration(0)},
+	InproxyClientRelayedPacketRequestTimeout:           {value: 35 * time.Second, minimum: time.Duration(0)},
+	InproxyClientDSLRequestTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0)},
 	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
 	InproxyWebRTCMediaStreamsProbability:               {value: 0.0, minimum: 0.0},
@@ -1125,13 +1149,35 @@ var defaultParameters = map[string]struct {
 
 	CompressTactics: {value: true},
 
-	DSLRelayMaxHttpConns:        {value: 100, minimum: 1, flags: serverSideOnly},
-	DSLRelayMaxHttpIdleConns:    {value: 10, minimum: 1, flags: serverSideOnly},
-	DSLRelayHttpIdleConnTimeout: {value: 120 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
-	DSLRelayRequestTimeout:      {value: 30 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
-	DSLRelayRetryCount:          {value: 2, minimum: 0, flags: serverSideOnly},
-	DSLRelayCacheTTL:            {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
-	DSLRelayCacheMaxSize:        {value: 200000, minimum: 0, flags: serverSideOnly},
+	EnableDSLFetches:                                  {value: false},
+	DSLRelayMaxHttpConns:                              {value: 100, minimum: 1, flags: serverSideOnly},
+	DSLRelayMaxHttpIdleConns:                          {value: 10, minimum: 1, flags: serverSideOnly},
+	DSLRelayHttpIdleConnTimeout:                       {value: 120 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayRequestTimeout:                            {value: 30 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayRetryCount:                                {value: 2, minimum: 0, flags: serverSideOnly},
+	DSLRelayCacheTTL:                                  {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayCacheMaxSize:                              {value: 200000, minimum: 0, flags: serverSideOnly},
+	DSLFetcherTunneledRequestTimeout:                  {value: 5 * time.Second, minimum: 100 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	DSLFetcherTunneledRequestRetryCount:               {value: 0, minimum: 0},
+	DSLFetcherTunneledRequestRetryDelay:               {value: 5 * time.Second, minimum: 1 * time.Millisecond},
+	DSLFetcherTunneledRequestRetryDelayJitter:         {value: 0.3, minimum: 0.0},
+	DSLFetcherTunneledFetchTTL:                        {value: 1 * time.Hour, minimum: 1 * time.Millisecond},
+	DSLFetcherTunneledDiscoverServerEntriesMinCount:   {value: 1, minimum: 0},
+	DSLFetcherTunneledDiscoverServerEntriesMaxCount:   {value: 2, minimum: 0},
+	DSLFetcherTunneledGetServerEntriesMinCount:        {value: 30, minimum: 0},
+	DSLFetcherTunneledGetServerEntriesMaxCount:        {value: 60, minimum: 0},
+	DSLFetcherUntunneledRequestTimeout:                {value: 30 * time.Second, minimum: 100 * time.Millisecond, flags: useNetworkLatencyMultiplier},
+	DSLFetcherUntunneledRequestRetryCount:             {value: 2, minimum: 0},
+	DSLFetcherUntunneledRequestRetryDelay:             {value: 5 * time.Second, minimum: 1 * time.Millisecond},
+	DSLFetcherUntunneledRequestRetryDelayJitter:       {value: 0.3, minimum: 0.0},
+	DSLFetcherUntunneledFetchTTL:                      {value: 6 * time.Hour, minimum: 1 * time.Millisecond},
+	DSLFetcherUntunneledDiscoverServerEntriesMinCount: {value: 200, minimum: 0},
+	DSLFetcherUntunneledDiscoverServerEntriesMaxCount: {value: 400, minimum: 0},
+	DSLFetcherUntunneledGetServerEntriesMinCount:      {value: 30, minimum: 0},
+	DSLFetcherUntunneledGetServerEntriesMaxCount:      {value: 60, minimum: 0},
+	DSLFetcherGetLastActiveOSLsTTL:                    {value: 24 * time.Hour, minimum: 1 * time.Millisecond},
+	DSLFetcherGetOSLFileSpecsMinCount:                 {value: 1, minimum: 0},
+	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

@@ -60,6 +60,7 @@ type testBrokerDialCoordinator struct {
 	offerRetryDelay                   time.Duration
 	offerRetryJitter                  float64
 	relayedPacketRequestTimeout       time.Duration
+	dslRequestTimeout                 time.Duration
 }
 
 func (t *testBrokerDialCoordinator) NetworkID() string {
@@ -204,6 +205,12 @@ func (t *testBrokerDialCoordinator) RelayedPacketRequestTimeout() time.Duration 
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.relayedPacketRequestTimeout
+}
+
+func (t *testBrokerDialCoordinator) DSLRequestTimeout() time.Duration {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.dslRequestTimeout
 }
 
 type testWebRTCDialCoordinator struct {

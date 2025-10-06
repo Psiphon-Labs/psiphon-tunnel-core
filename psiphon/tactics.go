@@ -299,8 +299,11 @@ func fetchTactics(
 	}
 	defer meekConn.Close()
 
+	// No padding is added via the params as this is provided by the tactics
+	// request obfuscation layer.
+	includeSessionID := true
 	apiParams := getBaseAPIParameters(
-		baseParametersAll, true, config, dialParams)
+		baseParametersAll, nil, includeSessionID, config, dialParams)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,

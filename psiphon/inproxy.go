@@ -135,7 +135,7 @@ func (b *InproxyBrokerClientManager) NetworkChanged() error {
 }
 
 // GetBrokerClient returns the current, shared broker client and its
-// corresponding dial parametrers (for metrics logging). If there is no
+// corresponding dial parameters (for metrics logging). If there is no
 // current broker client, if the network ID differs from the network ID
 // associated with the previous broker client, a new broker client is
 // initialized.
@@ -331,6 +331,7 @@ type InproxyBrokerClientInstance struct {
 	offerRetryDelay               time.Duration
 	offerRetryJitter              float64
 	relayedPacketRequestTimeout   time.Duration
+	dslRequestTimeout             time.Duration
 	replayRetainFailedProbability float64
 	replayUpdateFrequency         time.Duration
 	retryOnFailedPeriod           time.Duration
@@ -576,6 +577,7 @@ func NewInproxyBrokerClientInstance(
 		offerRetryDelay:               p.Duration(parameters.InproxyClientOfferRetryDelay),
 		offerRetryJitter:              p.Float(parameters.InproxyClientOfferRetryJitter),
 		relayedPacketRequestTimeout:   p.Duration(parameters.InproxyClientRelayedPacketRequestTimeout),
+		dslRequestTimeout:             p.Duration(parameters.InproxyClientDSLRequestTimeout),
 		replayRetainFailedProbability: p.Float(parameters.InproxyReplayBrokerRetainFailedProbability),
 		replayUpdateFrequency:         p.Duration(parameters.InproxyReplayBrokerUpdateFrequency),
 	}
@@ -1145,6 +1147,11 @@ func (b *InproxyBrokerClientInstance) OfferRetryJitter() float64 {
 // Implements the inproxy.BrokerDialCoordinator interface.
 func (b *InproxyBrokerClientInstance) RelayedPacketRequestTimeout() time.Duration {
 	return b.relayedPacketRequestTimeout
+}
+
+// Implements the inproxy.BrokerDialCoordinator interface.
+func (b *InproxyBrokerClientInstance) DSLRequestTimeout() time.Duration {
+	return b.dslRequestTimeout
 }
 
 // InproxyBrokerDialParameters represents a selected broker transport and dial

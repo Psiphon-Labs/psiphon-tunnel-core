@@ -268,8 +268,8 @@ func testDSLs(testConfig *testConfig) error {
 
 		RoundTripper: clientRelayRoundTripper,
 
-		DatastoreGetLastDiscoverTime:   dslClient.DatastoreGetLastDiscoverTime,
-		DatastoreSetLastDiscoverTime:   dslClient.DatastoreSetLastDiscoverTime,
+		DatastoreGetLastFetchTime:      dslClient.DatastoreGetLastFetchTime,
+		DatastoreSetLastFetchTime:      dslClient.DatastoreSetLastFetchTime,
 		DatastoreGetLastActiveOSLsTime: dslClient.DatastoreGetLastActiveOSLsTime,
 		DatastoreSetLastActiveOSLsTime: dslClient.DatastoreSetLastActiveOSLsTime,
 		DatastoreHasServerEntry:        dslClient.DatastoreHasServerEntry,
@@ -285,7 +285,7 @@ func testDSLs(testConfig *testConfig) error {
 		RequestRetryDelay:       1 * time.Millisecond,
 		RequestRetryDelayJitter: 0.1,
 
-		DiscoverServerEntriesTTL:      1 * time.Hour,
+		FetchTTL:                      1 * time.Hour,
 		DiscoverServerEntriesMinCount: discoverCount,
 		DiscoverServerEntriesMaxCount: discoverCount,
 		GetServerEntriesMinCount:      getCount,
@@ -345,7 +345,7 @@ func testDSLs(testConfig *testConfig) error {
 		// server entries stores, as will be checked via
 		// dslClient.serverEntryStoreCount.
 
-		dslClient.lastDiscoverTime = time.Time{}
+		dslClient.lastFetchTime = time.Time{}
 		dslClient.lastActiveOSLsTime = time.Time{}
 
 		err = fetcher.Run(ctx)
@@ -366,7 +366,7 @@ func testDSLs(testConfig *testConfig) error {
 		// dslClient.serverEntryStoreCount check will demonstrate that all
 		// remaining server entries were downloaded and stored.
 
-		dslClient.lastDiscoverTime = time.Time{}
+		dslClient.lastFetchTime = time.Time{}
 
 		discoverCount = 128
 
@@ -395,7 +395,7 @@ func testDSLs(testConfig *testConfig) error {
 		// fetcher cleans up the old, no longer active OSL state via
 		// dslClient.deleteOSLStateCount.
 
-		dslClient.lastDiscoverTime = time.Time{}
+		dslClient.lastFetchTime = time.Time{}
 		dslClient.lastActiveOSLsTime = time.Time{}
 
 		dslClient.serverEntries = make(map[string]protocol.ServerEntryFields)
@@ -428,7 +428,7 @@ func testDSLs(testConfig *testConfig) error {
 
 type dslClient struct {
 	mutex                 sync.Mutex
-	lastDiscoverTime      time.Time
+	lastFetchTime         time.Time
 	lastActiveOSLsTime    time.Time
 	serverEntries         map[string]protocol.ServerEntryFields
 	serverEntryStoreCount int
@@ -445,18 +445,18 @@ func newDSLClient(SLOKs []*osl.SLOK) *dslClient {
 	}
 }
 
-func (c *dslClient) DatastoreGetLastDiscoverTime() (time.Time, error) {
+func (c *dslClient) DatastoreGetLastFetchTime() (time.Time, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	return c.lastDiscoverTime, nil
+	return c.lastFetchTime, nil
 }
 
-func (c *dslClient) DatastoreSetLastDiscoverTime(time time.Time) error {
+func (c *dslClient) DatastoreSetLastFetchTime(time time.Time) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	c.lastDiscoverTime = time
+	c.lastFetchTime = time
 	return nil
 }
 

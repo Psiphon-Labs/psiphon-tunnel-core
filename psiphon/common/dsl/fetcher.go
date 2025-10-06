@@ -51,10 +51,10 @@ type FetcherConfig struct {
 
 	RoundTripper FetcherRoundTripper
 
-	DatastoreGetLastDiscoverTime func() (time.Time, error)
-	DatastoreSetLastDiscoverTime func(time time.Time) error
-	DatastoreHasServerEntry      func(tag ServerEntryTag, version int) bool
-	DatastoreStoreServerEntry    func(
+	DatastoreGetLastFetchTime func() (time.Time, error)
+	DatastoreSetLastFetchTime func(time time.Time) error
+	DatastoreHasServerEntry   func(tag ServerEntryTag, version int) bool
+	DatastoreStoreServerEntry func(
 		serverEntryFields protocol.PackedServerEntryFields,
 		source string) error
 
@@ -72,7 +72,7 @@ type FetcherConfig struct {
 	RequestRetryDelay       time.Duration
 	RequestRetryDelayJitter float64
 
-	DiscoverServerEntriesTTL      time.Duration
+	FetchTTL                      time.Duration
 	DiscoverServerEntriesMinCount int
 	DiscoverServerEntriesMaxCount int
 	GetServerEntriesMinCount      int
@@ -170,12 +170,12 @@ func NewFetcher(config *FetcherConfig) (*Fetcher, error) {
 //     must be skipped or postponed.
 func (f *Fetcher) Run(ctx context.Context) error {
 
-	lastTime, err := f.config.DatastoreGetLastDiscoverTime()
+	lastTime, err := f.config.DatastoreGetLastFetchTime()
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	if time.Now().Before(lastTime.Add(f.config.DiscoverServerEntriesTTL)) {
+	if time.Now().Before(lastTime.Add(f.config.FetchTTL)) {
 		return nil
 	}
 
@@ -281,7 +281,7 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		f.config.DoGarbageCollection()
 	}
 
-	err = f.config.DatastoreSetLastDiscoverTime(time.Now())
+	err = f.config.DatastoreSetLastFetchTime(time.Now())
 	if err != nil {
 		err = errors.Trace(err)
 
