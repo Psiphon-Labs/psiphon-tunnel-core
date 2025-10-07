@@ -75,7 +75,7 @@ type VersionedServerEntryTag struct {
 // version. For new or updated server entries, the client will proceed to
 // send a GetServerEntriesRequest to fetch the server entries.
 type DiscoverServerEntriesResponse struct {
-	VersionedServerEntryTags []VersionedServerEntryTag `cbor:"1,keyasint,omitempty"`
+	VersionedServerEntryTags []*VersionedServerEntryTag `cbor:"1,keyasint,omitempty"`
 }
 
 // GetServerEntriesRequest is a request from a client to download the
@@ -185,7 +185,12 @@ const (
 	PsiphonClientTunneledHeader  = "X-Psiphon-Client-Tunneled"
 	PsiphonHostIDHeader          = "X-Psiphon-Host-Id"
 
-	requestVersion                   = 1
+	RequestPathDiscoverServerEntries = "/v1/DiscoverServerEntries"
+	RequestPathGetServerEntries      = "/v1/GetServerEntries"
+	RequestPathGetActiveOSLs         = "/v1/GetActiveOSLs"
+	RequestPathGetOSLFileSpecs       = "/v1/GetOSLFileSpecs"
+
+	requestVersion                   = 0
 	requestTypeDiscoverServerEntries = 1
 	requestTypeGetServerEntries      = 2
 	requestTypeGetActiveOSLs         = 3
@@ -193,14 +198,14 @@ const (
 )
 
 var requestTypeToHTTPPath = map[int32]string{
-	requestTypeDiscoverServerEntries: "/v1/DiscoverServerEntries",
-	requestTypeGetServerEntries:      "/v1/GetServerEntries",
-	requestTypeGetActiveOSLs:         "/v1/GetActiveOSLs",
-	requestTypeGetOSLFileSpecs:       "/v1/GetOSLFileSpecs",
+	requestTypeDiscoverServerEntries: RequestPathDiscoverServerEntries,
+	requestTypeGetServerEntries:      RequestPathGetServerEntries,
+	requestTypeGetActiveOSLs:         RequestPathGetActiveOSLs,
+	requestTypeGetOSLFileSpecs:       RequestPathGetOSLFileSpecs,
 }
 
 // RelayedRequest wraps a DSL request to be relayed. RequestType indicates the
-// type of the wrapped request. Version must be 1.
+// type of the wrapped request. Version must be 0.
 type RelayedRequest struct {
 	RequestType int32  `cbor:"1,keyasint,omitempty"`
 	Version     int32  `cbor:"2,keyasint,omitempty"`

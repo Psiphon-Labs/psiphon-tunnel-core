@@ -21,17 +21,13 @@ package inproxy
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
 )
 
 type testBrokerDialCoordinator struct {
@@ -492,116 +488,4 @@ func (t *testWebRTCDialCoordinator) ProxyRelayInactivityTimeout() time.Duration 
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.proxyRelayInactivityTimeout
-}
-
-type testLogger struct {
-	component     string
-	logLevelDebug int32
-}
-
-func newTestLogger() *testLogger {
-	return &testLogger{
-		logLevelDebug: 0,
-	}
-}
-
-func newTestLoggerWithComponent(component string) *testLogger {
-	return &testLogger{
-		component:     component,
-		logLevelDebug: 0,
-	}
-}
-
-func (logger *testLogger) WithTrace() common.LogTrace {
-	return &testLoggerTrace{
-		logger: logger,
-		trace:  stacktrace.GetParentFunctionName(),
-	}
-}
-
-func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
-	return &testLoggerTrace{
-		logger: logger,
-		trace:  stacktrace.GetParentFunctionName(),
-		fields: fields,
-	}
-}
-
-func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
-	jsonFields, _ := json.Marshal(fields)
-	var component string
-	if len(logger.component) > 0 {
-		component = fmt.Sprintf("[%s]", logger.component)
-	}
-	fmt.Printf(
-		"[%s]%s METRIC: %s: %s\n",
-		time.Now().UTC().Format(time.RFC3339),
-		component,
-		metric,
-		string(jsonFields))
-}
-
-func (logger *testLogger) IsLogLevelDebug() bool {
-	return atomic.LoadInt32(&logger.logLevelDebug) == 1
-}
-
-func (logger *testLogger) SetLogLevelDebug(logLevelDebug bool) {
-	value := int32(0)
-	if logLevelDebug {
-		value = 1
-	}
-	atomic.StoreInt32(&logger.logLevelDebug, value)
-}
-
-type testLoggerTrace struct {
-	logger *testLogger
-	trace  string
-	fields common.LogFields
-}
-
-func (logger *testLoggerTrace) log(priority, message string) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	var component string
-	if len(logger.logger.component) > 0 {
-		component = fmt.Sprintf("[%s]", logger.logger.component)
-	}
-	if len(logger.fields) == 0 {
-		fmt.Printf(
-			"[%s]%s %s: %s: %s\n",
-			now, component, priority, logger.trace, message)
-	} else {
-		fields := common.LogFields{}
-		for k, v := range logger.fields {
-			switch v := v.(type) {
-			case error:
-				// Workaround for Go issue 5161: error types marshal to "{}"
-				fields[k] = v.Error()
-			default:
-				fields[k] = v
-			}
-		}
-		jsonFields, _ := json.Marshal(fields)
-		fmt.Printf(
-			"[%s]%s %s: %s: %s %s\n",
-			now, component, priority, logger.trace, message, string(jsonFields))
-	}
-}
-
-func (logger *testLoggerTrace) Debug(args ...interface{}) {
-	if !logger.logger.IsLogLevelDebug() {
-		return
-	}
-	logger.log("DEBUG", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Info(args ...interface{}) {
-	logger.log("INFO", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Warning(args ...interface{}) {
-	logger.log("WARNING", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Error(args ...interface{}) {
-	logger.log("ERROR", fmt.Sprint(args...))
 }

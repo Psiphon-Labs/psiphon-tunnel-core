@@ -514,7 +514,7 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 func (f *Fetcher) doDiscoverServerEntriesRequest(
 	ctx context.Context,
 	keys []OSLKey,
-	discoverCount int) ([]VersionedServerEntryTag, error) {
+	discoverCount int) ([]*VersionedServerEntryTag, error) {
 
 	// Perform the request with retries. On each retry, reduce the requested
 	// response size to mitigate blocking or performance issues with larger

@@ -22,34 +22,19 @@ package dsl
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
-	"encoding/pem"
-	"fmt"
-	"io"
-	"math/big"
-	"net"
-	"net/http"
 	"runtime/debug"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
-	"github.com/fxamacker/cbor/v2"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 )
 
 type testConfig struct {
@@ -143,7 +128,8 @@ func testDSLs(testConfig *testConfig) error {
 	var clientSLOKs []*osl.SLOK
 	if testConfig.requireOSLKeys {
 		var err error
-		backendOSLPaveData1, backendOSLPaveData2, clientSLOKs, err = initializeOSLs()
+		backendOSLPaveData1, backendOSLPaveData2, clientSLOKs, err =
+			testutils.InitializeTestOSLPaveData()
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -151,21 +137,26 @@ func testDSLs(testConfig *testConfig) error {
 
 	// Initialize backend
 
-	tlsConfig, err := initializeTLSConfiguration()
+	tlsConfig, err := testutils.NewTestDSLRelayTLSConfiguration()
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	backend, err := initializeDSLBackend(backendOSLPaveData1)
+	backend, err := testutils.NewTestDSLBackend(
+		NewBackendTestShim(),
+		tlsConfig,
+		testClientIP, &testClientGeoIPData, testHostID,
+		backendOSLPaveData1,
+		nil, nil)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	err = backend.start(tlsConfig)
+	err = backend.Start()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	defer backend.stop()
+	defer backend.Stop()
 
 	// Initialize relay
 
@@ -179,7 +170,7 @@ func testDSLs(testConfig *testConfig) error {
 		}
 	}
 
-	relayLogger := newTestLoggerWithMetricValidator("relay", metricsValidator)
+	relayLogger := testutils.NewTestLoggerWithMetricValidator("relay", metricsValidator)
 
 	certPool := x509.NewCertPool()
 	certPool.AddCert(tlsConfig.CACertificate)
@@ -187,8 +178,8 @@ func testDSLs(testConfig *testConfig) error {
 	relayConfig := &RelayConfig{
 		Logger:                      relayLogger,
 		CACertificates:              certPool,
-		HostCertificate:             tlsConfig.relayCertificate,
-		DynamicServerListServiceURL: backend.getAddress(),
+		HostCertificate:             tlsConfig.RelayCertificate,
+		DynamicServerListServiceURL: backend.GetAddress(),
 		HostID:                      testHostID,
 
 		APIParameterValidator: func(params common.APIParameters) error { return nil },
@@ -213,9 +204,6 @@ func testDSLs(testConfig *testConfig) error {
 	// requiring request size backoff (e.g. see Fetcher.doGetServerEntriesRequest)
 	// to succeed.
 
-	if len(backend.serverEntries) != 128 {
-		return errors.TraceNew("unexpected server entry count")
-	}
 	discoverCount := 128
 	getCount := 64
 	oslCount := 1
@@ -230,6 +218,10 @@ func testDSLs(testConfig *testConfig) error {
 	isTunneled := testConfig.isTunneled
 	if isTunneled {
 		discoverCount = 1
+	}
+
+	if backend.GetServerEntryCount(isTunneled) != 128 {
+		return errors.TraceNew("unexpected server entry count")
 	}
 
 	dslClient := newDSLClient(clientSLOKs)
@@ -247,7 +239,7 @@ func testDSLs(testConfig *testConfig) error {
 			nil,
 			testClientIP,
 			testClientGeoIPData,
-			false,
+			isTunneled,
 			requestPayload)
 		if err != nil {
 			return GetRelayGenericErrorResponse(), errors.Trace(err)
@@ -264,7 +256,7 @@ func testDSLs(testConfig *testConfig) error {
 	// TODO: exercise BaseAPIParameters?
 
 	fetcherConfig := &FetcherConfig{
-		Logger: newTestLoggerWithComponent("fetcher"),
+		Logger: testutils.NewTestLoggerWithComponent("fetcher"),
 
 		RoundTripper: clientRelayRoundTripper,
 
@@ -382,7 +374,7 @@ func testDSLs(testConfig *testConfig) error {
 	// TODO: check "updated" and "known" counters in "DSL: fetched server
 	// entries" logs.
 
-	if dslClient.serverEntryStoreCount != len(backend.serverEntries) {
+	if dslClient.serverEntryStoreCount != backend.GetServerEntryCount(isTunneled) {
 		return errors.Tracef(
 			"unexpected server entry store count: %d", dslClient.serverEntryStoreCount)
 	}
@@ -400,14 +392,14 @@ func testDSLs(testConfig *testConfig) error {
 
 		dslClient.serverEntries = make(map[string]protocol.ServerEntryFields)
 
-		backend.oslPaveData = backendOSLPaveData2
+		backend.SetOSLPaveData(backendOSLPaveData2)
 
 		err = fetcher.Run(ctx)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		if dslClient.serverEntryStoreCount != len(backend.serverEntries) {
+		if dslClient.serverEntryStoreCount != backend.GetServerEntryCount(isTunneled) {
 			return errors.Tracef(
 				"unexpected server entry store count: %d", dslClient.serverEntryStoreCount)
 		}
@@ -558,750 +550,4 @@ func (c *dslClient) DatastoreSLOKLookup(SLOKID []byte) []byte {
 
 func (c *dslClient) DatastoreFatalError(err error) {
 	panic(err.Error())
-}
-
-// TODO: move dslBackend to an internal/testing package to share with an
-// eventual psiphon/server end-to-end test? Also move testLogger to
-// internal/testing to share with common/inproxy and other packages.
-
-type dslBackend struct {
-	serverEntries map[string]*SourcedServerEntry
-	oslPaveData   []*osl.PaveData
-	listener      net.Listener
-}
-
-func initializeDSLBackend(backendOSLPaveData []*osl.PaveData) (*dslBackend, error) {
-
-	backend := &dslBackend{
-		serverEntries: make(map[string]*SourcedServerEntry),
-		oslPaveData:   backendOSLPaveData,
-	}
-
-	// Run GenerateConfig concurrently to try to take advantage of multiple
-	// CPU cores.
-	//
-	// Update: no longer using server.GenerateConfig due to import cycle.
-
-	var initMutex sync.Mutex
-	var initGroup sync.WaitGroup
-	var initErr error
-
-	for i := 1; i <= 128; i++ {
-
-		initGroup.Add(1)
-		go func(i int) (retErr error) {
-			defer initGroup.Done()
-			defer func() {
-				if retErr != nil {
-					initMutex.Lock()
-					initErr = retErr
-					initMutex.Unlock()
-				}
-			}()
-
-			serverEntry := &protocol.ServerEntry{
-				Tag:                  prng.Base64String(32),
-				IpAddress:            fmt.Sprintf("192.0.2.%d", i),
-				SshUsername:          prng.HexString(8),
-				SshPassword:          prng.HexString(32),
-				SshHostKey:           prng.Base64String(280),
-				SshObfuscatedPort:    prng.Range(1, 65535),
-				SshObfuscatedKey:     prng.HexString(32),
-				Capabilities:         []string{"OSSH"},
-				Region:               prng.HexString(1),
-				ProviderID:           strings.ToUpper(prng.HexString(8)),
-				ConfigurationVersion: 0,
-				Signature:            prng.Base64String(80),
-			}
-
-			serverEntryFields, err := serverEntry.GetServerEntryFields()
-			if err != nil {
-				return errors.Trace(err)
-			}
-
-			packed, err := protocol.EncodePackedServerEntryFields(serverEntryFields)
-			if err != nil {
-				return errors.Trace(err)
-			}
-
-			source := fmt.Sprintf("compartment-%d", i)
-
-			initMutex.Lock()
-
-			if backend.serverEntries[serverEntry.Tag] != nil {
-				initMutex.Unlock()
-				return errors.TraceNew("duplicate tag")
-			}
-
-			backend.serverEntries[serverEntry.Tag] = &SourcedServerEntry{
-				ServerEntryFields: packed,
-				Source:            source,
-			}
-
-			initMutex.Unlock()
-
-			return nil
-		}(i)
-	}
-	initGroup.Wait()
-
-	if initErr != nil {
-		return nil, errors.Trace(initErr)
-	}
-
-	return backend, nil
-}
-
-func (b *dslBackend) start(tlsConfig *tlsConfig) error {
-
-	logger := newTestLoggerWithComponent("backend")
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	certificatePool := x509.NewCertPool()
-	certificatePool.AddCert(tlsConfig.CACertificate)
-
-	listener = tls.NewListener(
-		listener,
-		&tls.Config{
-			Certificates: []tls.Certificate{*tlsConfig.backendCertificate},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    certificatePool,
-		})
-
-	mux := http.NewServeMux()
-
-	handlerAdapter := func(
-		w http.ResponseWriter,
-		r *http.Request,
-		handler func([]byte) ([]byte, error)) (retErr error) {
-
-		defer func() {
-			if retErr != nil {
-				logger.WithTrace().Warning(fmt.Sprintf("handler failed: %s\n", retErr))
-				http.Error(w, retErr.Error(), http.StatusInternalServerError)
-			}
-		}()
-
-		clientIPHeader, ok := r.Header[PsiphonClientIPHeader]
-		if !ok {
-			return errors.Tracef("missing header: %s", PsiphonClientIPHeader)
-		}
-		if len(clientIPHeader) != 1 || clientIPHeader[0] != testClientIP {
-			return errors.Tracef("invalid header: %s", PsiphonClientIPHeader)
-		}
-
-		clientGeoIPDataHeader, ok := r.Header[PsiphonClientGeoIPDataHeader]
-		if !ok {
-			return errors.Tracef("missing header: %s", PsiphonClientGeoIPDataHeader)
-		}
-		var geoIPData common.GeoIPData
-		if len(clientGeoIPDataHeader) != 1 ||
-			json.Unmarshal([]byte(clientGeoIPDataHeader[0]), &geoIPData) != nil ||
-			geoIPData != testClientGeoIPData {
-			return errors.Tracef("invalid header: %s", PsiphonClientGeoIPDataHeader)
-		}
-
-		hostIDHeader, ok := r.Header[PsiphonHostIDHeader]
-		if !ok {
-			return errors.Tracef("missing header: %s", PsiphonHostIDHeader)
-		}
-		if len(hostIDHeader) != 1 || hostIDHeader[0] != testHostID {
-			return errors.Tracef("invalid header: %s", PsiphonHostIDHeader)
-		}
-
-		request, err := io.ReadAll(r.Body)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		r.Body.Close()
-
-		response, err := handler(request)
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		_, err = w.Write(response)
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		return nil
-	}
-
-	mux.HandleFunc(requestTypeToHTTPPath[requestTypeDiscoverServerEntries],
-		func(w http.ResponseWriter, r *http.Request) {
-			_ = handlerAdapter(w, r, b.handleDiscoverServerEntries)
-		})
-	mux.HandleFunc(requestTypeToHTTPPath[requestTypeGetServerEntries],
-		func(w http.ResponseWriter, r *http.Request) {
-			_ = handlerAdapter(w, r, b.handleGetServerEntries)
-		})
-	mux.HandleFunc(requestTypeToHTTPPath[requestTypeGetActiveOSLs],
-		func(w http.ResponseWriter, r *http.Request) {
-			_ = handlerAdapter(w, r, b.handleGetActiveOSLs)
-		})
-	mux.HandleFunc(requestTypeToHTTPPath[requestTypeGetOSLFileSpecs],
-		func(w http.ResponseWriter, r *http.Request) {
-			_ = handlerAdapter(w, r, b.handleGetOSLFileSpecs)
-		})
-
-	server := &http.Server{
-		Handler: mux,
-	}
-
-	go func() {
-		_ = server.Serve(listener)
-	}()
-
-	b.listener = listener
-
-	return nil
-}
-
-func (b *dslBackend) getAddress() string {
-	if b.listener == nil {
-		return ""
-	}
-	return b.listener.Addr().String()
-}
-
-func (b *dslBackend) stop() {
-	if b.listener == nil {
-		return
-	}
-	_ = b.listener.Close()
-}
-
-func (b *dslBackend) handleDiscoverServerEntries(cborRequest []byte) ([]byte, error) {
-
-	var request *DiscoverServerEntriesRequest
-	err := cbor.Unmarshal(cborRequest, &request)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	response := &DiscoverServerEntriesResponse{}
-
-	missingOSLs := false
-	if b.oslPaveData != nil {
-
-		// When b.oslPaveData is set, the client must provide the expected OSL
-		// keys in order to discover any server entries.
-
-		for _, oslPaveData := range b.oslPaveData {
-			found := false
-			for _, key := range request.OSLKeys {
-				if bytes.Equal(key, oslPaveData.FileKey) {
-					found = true
-					break
-				}
-
-			}
-			if !found {
-				missingOSLs = true
-				break
-			}
-		}
-	}
-
-	if !missingOSLs {
-
-		count := 0
-		for tag := range b.serverEntries {
-			if count >= int(request.DiscoverCount) {
-				break
-			}
-			count += 1
-
-			// Test server entry tags are base64-encoded random byte strings.
-			serverEntryTag, err := base64.StdEncoding.DecodeString(tag)
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-
-			response.VersionedServerEntryTags = append(
-				response.VersionedServerEntryTags,
-				VersionedServerEntryTag{Tag: serverEntryTag, Version: 1})
-		}
-	}
-
-	cborResponse, err := protocol.CBOREncoding.Marshal(response)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return cborResponse, nil
-}
-
-func (b *dslBackend) handleGetServerEntries(cborRequest []byte) ([]byte, error) {
-
-	var request *GetServerEntriesRequest
-	err := cbor.Unmarshal(cborRequest, &request)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	response := &GetServerEntriesResponse{}
-
-	for _, serverEntryTag := range request.ServerEntryTags {
-
-		tag := base64.StdEncoding.EncodeToString(serverEntryTag)
-
-		sourcedServerEntry, ok := b.serverEntries[tag]
-		if !ok {
-
-			// An actual DSL backend must return empty slot in this case, as
-			// the requested server entry could be pruned or unavailable. For
-			// this test, this case is unexpected.
-
-			return nil, errors.TraceNew("unknown server entry tag")
-		}
-
-		response.SourcedServerEntries = append(
-			response.SourcedServerEntries, sourcedServerEntry)
-	}
-
-	cborResponse, err := protocol.CBOREncoding.Marshal(response)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return cborResponse, nil
-}
-
-func (b *dslBackend) handleGetActiveOSLs(cborRequest []byte) ([]byte, error) {
-
-	var request *GetActiveOSLsRequest
-	err := cbor.Unmarshal(cborRequest, &request)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	response := &GetActiveOSLsResponse{}
-	for _, oslPaveData := range b.oslPaveData {
-		response.ActiveOSLIDs = append(
-			response.ActiveOSLIDs,
-			oslPaveData.FileSpec.ID)
-	}
-
-	cborResponse, err := protocol.CBOREncoding.Marshal(response)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return cborResponse, nil
-}
-
-func (b *dslBackend) handleGetOSLFileSpecs(cborRequest []byte) ([]byte, error) {
-
-	var request *GetOSLFileSpecsRequest
-	err := cbor.Unmarshal(cborRequest, &request)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	response := &GetOSLFileSpecsResponse{}
-
-	for _, oslID := range request.OSLIDs {
-
-		var matchingPaveData *osl.PaveData
-		for _, oslPaveData := range b.oslPaveData {
-			if bytes.Equal(oslID, oslPaveData.FileSpec.ID) {
-				matchingPaveData = oslPaveData
-				break
-			}
-
-		}
-		if matchingPaveData == nil {
-
-			// An actual DSL backend must return empty slot in this case, as
-			// the requested OSL may no longer be active. For this test, this
-			// case is unexpected.
-
-			return nil, errors.TraceNew("unknown OSL ID")
-		}
-
-		cborOSLFileSpec, err := protocol.CBOREncoding.Marshal(matchingPaveData.FileSpec)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		response.OSLFileSpecs = append(
-			response.OSLFileSpecs, cborOSLFileSpec)
-	}
-
-	cborResponse, err := protocol.CBOREncoding.Marshal(response)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return cborResponse, nil
-}
-
-func initializeOSLs() ([]*osl.PaveData, []*osl.PaveData, []*osl.SLOK, error) {
-
-	// Adapted from testObfuscatedRemoteServerLists in psiphon/remoteServerList_test.go
-
-	oslConfigJSONTemplate := `
-    {
-      "Schemes" : [
-        {
-          "Epoch" : "%s",
-          "PaveDataOSLCount" : 2,
-          "Regions" : [],
-          "PropagationChannelIDs" : ["%s"],
-          "MasterKey" : "vwab2WY3eNyMBpyFVPtsivMxF4MOpNHM/T7rHJIXctg=",
-          "SeedSpecs" : [
-            {
-              "ID" : "KuP2V6gLcROIFzb/27fUVu4SxtEfm2omUoISlrWv1mA=",
-              "UpstreamSubnets" : ["0.0.0.0/0"],
-              "Targets" :
-              {
-                  "BytesRead" : 1,
-                  "BytesWritten" : 1,
-                  "PortForwardDurationNanoseconds" : 1
-              }
-            }
-          ],
-          "SeedSpecThreshold" : 1,
-          "SeedPeriodNanoseconds" : %d,
-          "SeedPeriodKeySplits": [
-            {
-              "Total": 1,
-              "Threshold": 1
-            }
-          ]
-        }
-      ]
-    }`
-
-	now := time.Now().UTC()
-	seedPeriod := 1 * time.Second
-	epoch := now.Truncate(seedPeriod)
-	epochStr := epoch.Format(time.RFC3339Nano)
-
-	propagationChannelID := prng.HexString(8)
-
-	oslConfigJSON := fmt.Sprintf(
-		oslConfigJSONTemplate,
-		epochStr,
-		propagationChannelID,
-		seedPeriod)
-
-	oslConfig, err := osl.LoadConfig([]byte(oslConfigJSON))
-	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
-	}
-
-	oslPaveData, err := oslConfig.GetPaveData(0)
-	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
-	}
-
-	backendPaveData1, ok := oslPaveData[propagationChannelID]
-	if !ok {
-		return nil, nil, nil, errors.TraceNew("unexpected missing OSL file data")
-	}
-
-	// Mock seeding SLOKs
-	//
-	// Normally, clients supplying the specified propagation channel ID would
-	// receive SLOKs via the psiphond tunnel connection
-
-	seedState := oslConfig.NewClientSeedState("", propagationChannelID, nil)
-	seedPortForward := seedState.NewClientSeedPortForward(net.ParseIP("0.0.0.0"), nil)
-	seedPortForward.UpdateProgress(1, 1, 1)
-	payload := seedState.GetSeedPayload()
-	if len(payload.SLOKs) != 1 {
-		return nil, nil, nil, errors.Tracef("unexpected SLOK count %d", len(payload.SLOKs))
-	}
-	clientSLOKs := payload.SLOKs
-
-	// Rollover to the next OSL time period and generate a new set of active
-	// OSLs and SLOKs.
-
-	time.Sleep(2 * seedPeriod)
-
-	oslPaveData, err = oslConfig.GetPaveData(0)
-	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
-	}
-
-	backendPaveData2, ok := oslPaveData[propagationChannelID]
-	if !ok {
-		return nil, nil, nil, errors.TraceNew("unexpected missing OSL file data")
-	}
-
-	seedState = oslConfig.NewClientSeedState("", propagationChannelID, nil)
-	seedPortForward = seedState.NewClientSeedPortForward(net.ParseIP("0.0.0.0"), nil)
-	seedPortForward.UpdateProgress(1, 1, 1)
-	payload = seedState.GetSeedPayload()
-	if len(payload.SLOKs) != 1 {
-		return nil, nil, nil, errors.Tracef("unexpected SLOK count %d", len(payload.SLOKs))
-	}
-	clientSLOKs = append(clientSLOKs, payload.SLOKs...)
-
-	// Double check that PaveData periods don't overlap.
-	for _, paveData1 := range backendPaveData1 {
-		for _, paveData2 := range backendPaveData2 {
-			if bytes.Equal(paveData1.FileSpec.ID, paveData2.FileSpec.ID) {
-				return nil, nil, nil, errors.TraceNew("unexpected pave data overlap")
-			}
-		}
-	}
-
-	return backendPaveData1, backendPaveData2, clientSLOKs, nil
-}
-
-type tlsConfig struct {
-	CACertificate      *x509.Certificate
-	backendCertificate *tls.Certificate
-	relayCertificate   *tls.Certificate
-}
-
-func initializeTLSConfiguration() (*tlsConfig, error) {
-
-	CAPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	now := time.Now()
-	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			Organization: []string{"test root CA"},
-		},
-		NotBefore:             now,
-		NotAfter:              now.AddDate(0, 0, 1),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-	}
-
-	CACertificateDER, err := x509.CreateCertificate(
-		rand.Reader, template, template, &CAPrivateKey.PublicKey, CAPrivateKey)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	CACertificate, err := x509.ParseCertificate(CACertificateDER)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	issueCertificate := func(
-		name string, isServer bool) (*tls.Certificate, error) {
-
-		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		now := time.Now()
-		template := &x509.Certificate{
-			SerialNumber: big.NewInt(time.Now().UnixNano()),
-			Subject: pkix.Name{
-				CommonName: name,
-			},
-			NotBefore: now,
-			NotAfter:  now.AddDate(0, 0, 1),
-			KeyUsage:  x509.KeyUsageDigitalSignature,
-		}
-		if isServer {
-			template.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
-			template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-		} else {
-			template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
-		}
-
-		certificateDER, err := x509.CreateCertificate(
-			rand.Reader, template, CACertificate, &privateKey.PublicKey, CAPrivateKey)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		keyPEM := pem.EncodeToMemory(
-			&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
-
-		certPEM := pem.EncodeToMemory(
-			&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})
-
-		tlsCertificate, err := tls.X509KeyPair(certPEM, keyPEM)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		return &tlsCertificate, nil
-	}
-
-	backendCertificate, err := issueCertificate("backend", true)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	relayCertificate, err := issueCertificate("relay", false)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return &tlsConfig{
-		CACertificate:      CACertificate,
-		backendCertificate: backendCertificate,
-		relayCertificate:   relayCertificate,
-	}, nil
-}
-
-type testLogger struct {
-	component        string
-	metricValidator  func(string, common.LogFields) bool
-	hasValidMetric   int32
-	hasInvalidMetric int32
-	logLevelDebug    int32
-}
-
-func newTestLogger() *testLogger {
-	return &testLogger{
-		logLevelDebug: 0,
-	}
-}
-
-func newTestLoggerWithComponent(
-	component string) *testLogger {
-
-	return &testLogger{
-		component:     component,
-		logLevelDebug: 0,
-	}
-}
-
-func newTestLoggerWithMetricValidator(
-	component string,
-	metricValidator func(string, common.LogFields) bool) *testLogger {
-
-	return &testLogger{
-		component:       component,
-		metricValidator: metricValidator,
-		logLevelDebug:   0,
-	}
-}
-
-func (logger *testLogger) WithTrace() common.LogTrace {
-	return &testLoggerTrace{
-		logger: logger,
-		trace:  stacktrace.GetParentFunctionName(),
-	}
-}
-
-func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
-	return &testLoggerTrace{
-		logger: logger,
-		trace:  stacktrace.GetParentFunctionName(),
-		fields: fields,
-	}
-}
-
-func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
-
-	if logger.metricValidator != nil {
-		if logger.metricValidator(metric, fields) {
-			atomic.StoreInt32(&logger.hasValidMetric, 1)
-		} else {
-			atomic.StoreInt32(&logger.hasInvalidMetric, 1)
-		}
-		// Don't print log.
-		return
-	}
-
-	jsonFields, _ := json.Marshal(fields)
-	var component string
-	if len(logger.component) > 0 {
-		component = fmt.Sprintf("[%s]", logger.component)
-	}
-	fmt.Printf(
-		"[%s]%s METRIC: %s: %s\n",
-		time.Now().UTC().Format(time.RFC3339),
-		component,
-		metric,
-		string(jsonFields))
-}
-
-func (logger *testLogger) CheckMetrics(expectValidMetric bool) error {
-
-	if expectValidMetric && atomic.LoadInt32(&logger.hasValidMetric) != 1 {
-		return errors.TraceNew("missing valid metric")
-	}
-	if atomic.LoadInt32(&logger.hasInvalidMetric) == 1 {
-		return errors.TraceNew("has invalid metric")
-	}
-	return nil
-}
-
-func (logger *testLogger) IsLogLevelDebug() bool {
-	return atomic.LoadInt32(&logger.logLevelDebug) == 1
-}
-
-func (logger *testLogger) SetLogLevelDebug(logLevelDebug bool) {
-	value := int32(0)
-	if logLevelDebug {
-		value = 1
-	}
-	atomic.StoreInt32(&logger.logLevelDebug, value)
-}
-
-type testLoggerTrace struct {
-	logger *testLogger
-	trace  string
-	fields common.LogFields
-}
-
-func (logger *testLoggerTrace) log(priority, message string) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	var component string
-	if len(logger.logger.component) > 0 {
-		component = fmt.Sprintf("[%s]", logger.logger.component)
-	}
-	if len(logger.fields) == 0 {
-		fmt.Printf(
-			"[%s]%s %s: %s: %s\n",
-			now, component, priority, logger.trace, message)
-	} else {
-		fields := common.LogFields{}
-		for k, v := range logger.fields {
-			switch v := v.(type) {
-			case error:
-				// Workaround for Go issue 5161: error types marshal to "{}"
-				fields[k] = v.Error()
-			default:
-				fields[k] = v
-			}
-		}
-		jsonFields, _ := json.Marshal(fields)
-		fmt.Printf(
-			"[%s]%s %s: %s: %s %s\n",
-			now, component, priority, logger.trace, message, string(jsonFields))
-	}
-}
-
-func (logger *testLoggerTrace) Debug(args ...interface{}) {
-	if !logger.logger.IsLogLevelDebug() {
-		return
-	}
-	logger.log("DEBUG", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Info(args ...interface{}) {
-	logger.log("INFO", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Warning(args ...interface{}) {
-	logger.log("WARNING", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Error(args ...interface{}) {
-	logger.log("ERROR", fmt.Sprint(args...))
 }

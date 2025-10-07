@@ -45,6 +45,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/quic"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -138,7 +139,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 	// Init logging and profiling
 
-	logger := newTestLogger()
+	logger := testutils.NewTestLogger()
 
 	pprofListener, err := net.Listen("tcp", "127.0.0.1:0")
 	go http.Serve(pprofListener, nil)
@@ -527,7 +528,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 		proxy, err := NewProxy(&ProxyConfig{
 
-			Logger: newTestLoggerWithComponent(name),
+			Logger: testutils.NewTestLoggerWithComponent(name),
 
 			WaitForNetworkConnectivity: func() bool {
 				return true
@@ -636,7 +637,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 			conn, err := DialClient(
 				dialCtx,
 				&ClientConfig{
-					Logger:                       newTestLoggerWithComponent(name),
+					Logger:                       testutils.NewTestLoggerWithComponent(name),
 					BaseAPIParameters:            baseAPIParameters,
 					BrokerClient:                 brokerClient,
 					WebRTCDialCoordinator:        webRTCCoordinator,
