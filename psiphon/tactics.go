@@ -255,8 +255,8 @@ func fetchTactics(
 		true,
 		0,
 		0)
-	if dialParams == nil {
-		return nil, nil
+	if dialParams == nil && err == nil {
+		err = errors.TraceNew("unexpected nil dialParams")
 	}
 	if err != nil {
 		return nil, errors.Tracef(

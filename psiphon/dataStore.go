@@ -1021,9 +1021,11 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 
 		if doDeleteServerEntry {
 			err := deleteServerEntry(iterator.config, serverEntryID)
-			NoticeWarning(
-				"ServerEntryIterator.Next: deleteServerEntry failed: %s",
-				errors.Trace(err))
+			if err != nil {
+				NoticeWarning(
+					"ServerEntryIterator.Next: deleteServerEntry failed: %s",
+					errors.Trace(err))
+			}
 			continue
 		}
 
@@ -2614,6 +2616,7 @@ func DSLHasServerEntry(tag dsl.ServerEntryTag, version int) bool {
 // DSLStoreServerEntry adds the server entry to the datastore using
 // StoreServerEntry and populating LocalSource and LocalTimestamp.
 func DSLStoreServerEntry(
+	serverEntrySignaturePublicKey string,
 	packedServerEntryFields protocol.PackedServerEntryFields,
 	source string) error {
 
@@ -2622,11 +2625,23 @@ func DSLStoreServerEntry(
 		return errors.Trace(err)
 	}
 
+	err = serverEntryFields.VerifySignature(serverEntrySignaturePublicKey)
+	if err != nil {
+		fmt.Printf("VerifySignature: %v!\n", err)
+		return errors.Trace(err)
+	}
+
 	// See protocol.DecodeServerEntryFields and ImportEmbeddedServerEntries
 	// for other code paths that populate SetLocalSource and SetLocalTimestamp.
 
 	serverEntryFields.SetLocalSource(source)
 	serverEntryFields.SetLocalTimestamp(common.TruncateTimestampToHour(common.GetCurrentTimestamp()))
+
+	err = protocol.ValidateServerEntryFields(serverEntryFields)
+	if err != nil {
+		fmt.Printf("ValidateServerEntryFields: %v!\n", err)
+		return errors.Trace(err)
+	}
 
 	err = StoreServerEntry(serverEntryFields, true)
 	if err != nil {
@@ -2666,15 +2681,16 @@ func DSLKnownOSLIDs() ([]dsl.OSLID, error) {
 	return IDs, nil
 }
 
-// DSLGetOSLState gets the current OSL state associated with an active OSL.
-// See dsl.Fetcher for more details on OSL states.
-func DSLGetOSLState(ID dsl.OSLID) ([]byte, bool, error) {
+// DSLGetOSLState gets the current OSL state associated with an active OSL. A
+// nil state is returned when no state is found for the specified ID. See
+// dsl.Fetcher for more details on OSL states.
+func DSLGetOSLState(ID dsl.OSLID) ([]byte, error) {
 	state, err := copyBucketValue(datastoreDSLOSLStatesBucket, ID)
 	if err != nil {
-		return nil, false, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
-	notFound := state == nil
-	return state, notFound, nil
+
+	return state, nil
 }
 
 // DSLStoreOSLState sets the OSL state associated with an active OSL.

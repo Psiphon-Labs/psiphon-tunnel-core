@@ -131,9 +131,7 @@ func NewTestDSLBackend(
 	expectedClientIP string,
 	expectedClientGeoIPData *common.GeoIPData,
 	expectedHostID string,
-	oslPaveData []*osl.PaveData,
-	untunneledServerEntries []protocol.ServerEntryFields,
-	tunneledServerEntries []protocol.ServerEntryFields) (*TestDSLBackend, error) {
+	oslPaveData []*osl.PaveData) (*TestDSLBackend, error) {
 
 	b := &TestDSLBackend{
 		shim:                    shim,
@@ -144,37 +142,7 @@ func NewTestDSLBackend(
 	}
 	b.oslPaveData.Store(oslPaveData)
 
-	prepareServerEntries := func(
-		serverEntries []protocol.ServerEntryFields,
-		source string) map[string]*dslSourcedServerEntry {
-
-		sourcedServerEntries := make(map[string]*dslSourcedServerEntry)
-		for _, serverEntryFields := range untunneledServerEntries {
-			packedServerEntryFields, _ := protocol.EncodePackedServerEntryFields(serverEntryFields)
-			b.untunneledServerEntries[serverEntryFields.GetTag()] = &dslSourcedServerEntry{
-				ServerEntryFields: packedServerEntryFields,
-				Source:            source,
-			}
-		}
-		return sourcedServerEntries
-	}
-
-	if len(untunneledServerEntries) > 0 {
-		b.untunneledServerEntries = prepareServerEntries(
-			untunneledServerEntries, "DSL-untunneled")
-	}
-
-	if len(tunneledServerEntries) > 0 {
-		b.tunneledServerEntries = prepareServerEntries(
-			tunneledServerEntries, "DSL-tunneled")
-	}
-
-	if b.untunneledServerEntries != nil ||
-		b.tunneledServerEntries != nil {
-		return b, nil
-	}
-
-	// Generate mock server entries if none are specified.
+	// Generate mock server entries.
 
 	// Run GenerateConfig concurrently to try to take advantage of multiple
 	// CPU cores.
@@ -401,6 +369,41 @@ func (b *TestDSLBackend) GetServerEntryCount(isTunneled bool) int {
 		return len(b.tunneledServerEntries)
 	}
 	return len(b.untunneledServerEntries)
+}
+
+func (b *TestDSLBackend) SetServerEntries(
+	isTunneled bool, encodedServerEntries []string) error {
+
+	source := "DSL-untunneled"
+	if isTunneled {
+		source = "DSL-tunneled"
+	}
+
+	sourcedServerEntries := make(map[string]*dslSourcedServerEntry)
+	for _, encodedServerEntry := range encodedServerEntries {
+		serverEntryFields, err := protocol.DecodeServerEntryFields(
+			encodedServerEntry, "", "")
+		if err != nil {
+			return errors.Trace(err)
+		}
+		packedServerEntryFields, err :=
+			protocol.EncodePackedServerEntryFields(serverEntryFields)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		sourcedServerEntries[serverEntryFields.GetTag()] = &dslSourcedServerEntry{
+			ServerEntryFields: packedServerEntryFields,
+			Source:            source,
+		}
+	}
+
+	if isTunneled {
+		b.tunneledServerEntries = sourcedServerEntries
+	} else {
+		b.untunneledServerEntries = sourcedServerEntries
+	}
+
+	return nil
 }
 
 func (b *TestDSLBackend) SetOSLPaveData(oslPaveData []*osl.PaveData) {
@@ -722,12 +725,17 @@ func InitializeTestOSLPaveData() ([]*osl.PaveData, []*osl.PaveData, []*osl.SLOK,
 }
 
 type TestDSLRelayTLSConfig struct {
-	CACertificate      *x509.Certificate
-	BackendCertificate *tls.Certificate
-	RelayCertificate   *tls.Certificate
+	CACertificate         *x509.Certificate
+	CACertificatePEM      []byte
+	BackendCertificate    *tls.Certificate
+	BackendCertificatePEM []byte
+	BackendKeyPEM         []byte
+	RelayCertificate      *tls.Certificate
+	RelayCertificatePEM   []byte
+	RelayKeyPEM           []byte
 }
 
-func NewTestDSLRelayTLSConfiguration() (*TestDSLRelayTLSConfig, error) {
+func NewTestDSLRelayTLSConfig() (*TestDSLRelayTLSConfig, error) {
 
 	CAPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -753,17 +761,24 @@ func NewTestDSLRelayTLSConfiguration() (*TestDSLRelayTLSConfig, error) {
 		return nil, errors.Trace(err)
 	}
 
+	CACertificatePEM := pem.EncodeToMemory(
+		&pem.Block{Type: "CERTIFICATE", Bytes: CACertificateDER})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
 	CACertificate, err := x509.ParseCertificate(CACertificateDER)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	issueCertificate := func(
-		name string, isServer bool) (*tls.Certificate, error) {
+		name string, isServer bool) (
+		*tls.Certificate, []byte, []byte, error) {
 
 		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, nil, nil, errors.Trace(err)
 		}
 
 		now := time.Now()
@@ -786,36 +801,43 @@ func NewTestDSLRelayTLSConfiguration() (*TestDSLRelayTLSConfig, error) {
 		certificateDER, err := x509.CreateCertificate(
 			rand.Reader, template, CACertificate, &privateKey.PublicKey, CAPrivateKey)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, nil, nil, errors.Trace(err)
 		}
-
-		keyPEM := pem.EncodeToMemory(
-			&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
 
 		certPEM := pem.EncodeToMemory(
 			&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})
 
+		keyPEM := pem.EncodeToMemory(
+			&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+
 		tlsCertificate, err := tls.X509KeyPair(certPEM, keyPEM)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, nil, nil, errors.Trace(err)
 		}
 
-		return &tlsCertificate, nil
+		return &tlsCertificate, certPEM, keyPEM, nil
 	}
 
-	backendCertificate, err := issueCertificate("backend", true)
+	backendCertificate, backendCertificatePEM, backendKeyPEM, err :=
+		issueCertificate("backend", true)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	relayCertificate, err := issueCertificate("relay", false)
+	relayCertificate, relayCertificatePEM, relayKeyPEM, err :=
+		issueCertificate("relay", false)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	return &TestDSLRelayTLSConfig{
-		CACertificate:      CACertificate,
-		BackendCertificate: backendCertificate,
-		RelayCertificate:   relayCertificate,
+		CACertificate:         CACertificate,
+		CACertificatePEM:      CACertificatePEM,
+		BackendCertificate:    backendCertificate,
+		BackendCertificatePEM: backendCertificatePEM,
+		BackendKeyPEM:         backendKeyPEM,
+		RelayCertificate:      relayCertificate,
+		RelayCertificatePEM:   relayCertificatePEM,
+		RelayKeyPEM:           relayKeyPEM,
 	}, nil
 }

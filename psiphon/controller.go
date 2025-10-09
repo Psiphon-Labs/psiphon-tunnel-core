@@ -319,13 +319,6 @@ func (controller *Controller) Run(ctx context.Context) {
 
 	// Start components
 
-	// Limitation: tactics parameters applied here won't reflect changes in
-	// any initial, untunneled tactics fetch or changes in tunnel handshake
-	// tactics.
-	p := controller.config.GetParameters().Get()
-	enableDSLFetches := p.Bool(parameters.EnableDSLFetches)
-	p.Close()
-
 	// Initialize a single resolver to be used by all dials. Sharing a single
 	// resolver ensures cached results are shared, and that network state
 	// query overhead is amortized over all dials. Multiple dials can resolve
@@ -428,7 +421,7 @@ func (controller *Controller) Run(ctx context.Context) {
 		}
 	}
 
-	if enableDSLFetches {
+	if !controller.config.DisableDSLFetcher {
 
 		controller.runWaitGroup.Add(1)
 		go func() {

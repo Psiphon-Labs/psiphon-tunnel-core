@@ -49,6 +49,7 @@ type FetcherConfig struct {
 
 	BaseAPIParameters common.APIParameters
 
+	Tunneled     bool
 	RoundTripper FetcherRoundTripper
 
 	DatastoreGetLastFetchTime func() (time.Time, error)
@@ -61,7 +62,7 @@ type FetcherConfig struct {
 	DatastoreGetLastActiveOSLsTime func() (time.Time, error)
 	DatastoreSetLastActiveOSLsTime func(time time.Time) error
 	DatastoreKnownOSLIDs           func() (IDs []OSLID, err error)
-	DatastoreGetOSLState           func(ID OSLID) (state []byte, notFound bool, err error)
+	DatastoreGetOSLState           func(ID OSLID) (state []byte, err error)
 	DatastoreStoreOSLState         func(ID OSLID, state []byte) error
 	DatastoreDeleteOSLState        func(ID OSLID) error
 	DatastoreSLOKLookup            osl.SLOKLookup
@@ -189,7 +190,8 @@ func (f *Fetcher) Run(ctx context.Context) error {
 	OSLKeys, oslErr := f.processOSLs(ctx)
 	if oslErr != nil {
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"error": oslErr.Error(),
+			"tunneled": f.config.Tunneled,
+			"error":    oslErr.Error(),
 		}).Warning("DSL: process OSLs failed")
 		// Proceed without OSL keys
 	}
@@ -222,9 +224,10 @@ func (f *Fetcher) Run(ctx context.Context) error {
 	defer func() {
 		// Emit log even if not all fetches succeed.
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"tags":    len(versionedTags),
-			"updated": storeServerEntriesCount,
-			"known":   knownServerEntriesCount,
+			"tunneled": f.config.Tunneled,
+			"tags":     len(versionedTags),
+			"updated":  storeServerEntriesCount,
+			"known":    knownServerEntriesCount,
 		}).Info("DSL: fetched server entries")
 	}()
 
@@ -291,7 +294,8 @@ func (f *Fetcher) Run(ctx context.Context) error {
 
 		f.config.DatastoreFatalError(err)
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"error": err.Error(),
+			"tunneled": f.config.Tunneled,
+			"error":    err.Error(),
 		}).Warning("DSL: datastore failed")
 		// Proceed with this one run
 	}
@@ -382,9 +386,10 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 		f.config.DoGarbageCollection()
 
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"total":   len(activeOSLIDs),
-			"added":   addedCount,
-			"removed": removedCount,
+			"tunneled": f.config.Tunneled,
+			"total":    len(activeOSLIDs),
+			"added":    addedCount,
+			"removed":  removedCount,
 		}).Info("DSL: fetched active OSL IDs")
 
 		err = f.config.DatastoreSetLastActiveOSLsTime(now)
@@ -398,7 +403,8 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 			f.config.DatastoreFatalError(errors.Trace(err))
 
 			f.config.Logger.WithTraceFields(common.LogFields{
-				"error": err.Error(),
+				"tunneled": f.config.Tunneled,
+				"error":    err.Error(),
 			}).Warning("DSL: datastore failed")
 			// Proceed with this one run
 		}
@@ -420,8 +426,9 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 		// Emit log even if not all fetches succeed.
 		if addedSpecCount > 0 || removedSpecCount > 0 {
 			f.config.Logger.WithTraceFields(common.LogFields{
-				"added":   addedSpecCount,
-				"removed": removedSpecCount,
+				"tunneled": f.config.Tunneled,
+				"added":    addedSpecCount,
+				"removed":  removedSpecCount,
 			}).Info("DSL: fetched OSL FileSpecs")
 		}
 	}()
@@ -453,7 +460,6 @@ func (f *Fetcher) processOSLs(ctx context.Context) ([]OSLKey, error) {
 		}
 
 		for i, fileSpec := range fileSpecs {
-
 			if len(fileSpec) > 0 {
 
 				err := f.storeOSLState(
@@ -544,6 +550,7 @@ func (f *Fetcher) doDiscoverServerEntriesRequest(
 		}
 
 		f.config.Logger.WithTraceFields(common.LogFields{
+			"tunneled":      f.config.Tunneled,
 			"discoverCount": discoverCount,
 			"error":         err.Error(),
 		}).Warning("DSL: doDiscoverServerEntriesRequest failed")
@@ -592,6 +599,7 @@ func (f *Fetcher) doGetServerEntriesRequest(
 		}
 
 		f.config.Logger.WithTraceFields(common.LogFields{
+			"tunneled": f.config.Tunneled,
 			"attempt":  i,
 			"tagCount": len(tags),
 			"error":    err.Error(),
@@ -633,8 +641,9 @@ func (f *Fetcher) doGetActiveOSLsRequest(ctx context.Context) ([]OSLID, error) {
 		}
 
 		f.config.Logger.WithTraceFields(common.LogFields{
-			"attempt": i,
-			"error":   err.Error(),
+			"tunneled": f.config.Tunneled,
+			"attempt":  i,
+			"error":    err.Error(),
 		}).Warning("DSL: doGetActiveOSLsRequest attempt failed")
 
 		common.SleepWithContext(
@@ -676,6 +685,7 @@ func (f *Fetcher) doGetOSLFileSpecsRequest(
 		}
 
 		f.config.Logger.WithTraceFields(common.LogFields{
+			"tunneled":   f.config.Tunneled,
 			"attempt":    i,
 			"OSLIDCount": len(IDs),
 			"error":      err.Error(),
@@ -789,14 +799,17 @@ func (f *Fetcher) loadOSLStates(ctx context.Context, reassembleKeys bool) ([]*fe
 
 	for _, ID := range activeIDs {
 
-		cborState, found, err := f.config.DatastoreGetOSLState(ID)
+		cborState, err := f.config.DatastoreGetOSLState(ID)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		if !found {
+		if cborState == nil {
 			// This case is not expected since DatastoreKnownOSLIDs returns
 			// only known IDs.
+			f.config.Logger.WithTraceFields(common.LogFields{
+				"tunneled": f.config.Tunneled,
+			}).Warning("DSL: unexpected unknown OSL ID")
 			continue
 		}
 
@@ -845,7 +858,9 @@ func (f *Fetcher) loadOSLStates(ctx context.Context, reassembleKeys bool) ([]*fe
 						return nil, errors.Trace(err)
 					}
 				}
-				f.config.Logger.WithTrace().Info("DSL: reassembled OSL key")
+				f.config.Logger.WithTraceFields(common.LogFields{
+					"tunneled": f.config.Tunneled,
+				}).Info("DSL: reassembled OSL key")
 			}
 
 			// Allow state.FileSpec to be garbage collected.

@@ -801,12 +801,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if !protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) {
 			return nil, errors.Tracef("Passthrough unsupported tunnel protocol: %s", tunnelProtocol)
 		}
-		if _, _, err := net.SplitHostPort(address); err != nil {
-			if err != nil {
-				return nil, errors.Tracef(
-					"Tunnel protocol %s passthrough address %s invalid: %s",
-					tunnelProtocol, address, err)
-			}
+		_, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, errors.Tracef(
+				"Tunnel protocol %s passthrough address %s invalid: %s",
+				tunnelProtocol, address, err)
 		}
 	}
 
@@ -870,7 +869,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 		dslRelayCACertificates := x509.NewCertPool()
 		if !dslRelayCACertificates.AppendCertsFromPEM(caCertsPEM) {
-			return nil, errors.Trace(err)
+			return nil, errors.TraceNew("AppendCertsFromPEM failed")
 		}
 
 		dslRelayHostCertificate, err := tls.LoadX509KeyPair(

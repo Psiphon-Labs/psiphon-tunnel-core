@@ -158,6 +158,12 @@ func doDSLFetch(
 	isTunneled bool,
 	roundTripper dsl.FetcherRoundTripper) error {
 
+	p := config.GetParameters().Get()
+	if !p.Bool(parameters.EnableDSLFetcher) {
+		p.Close()
+		return nil
+	}
+
 	var paddingPRNG *prng.PRNG
 	if isTunneled {
 
@@ -188,13 +194,24 @@ func doDSLFetch(
 		return key
 	}
 
+	storeServerEntry := func(
+		packedServerEntryFields protocol.PackedServerEntryFields,
+		source string) error {
+		return errors.Trace(DSLStoreServerEntry(
+			config.ServerEntrySignaturePublicKey,
+			packedServerEntryFields,
+			source))
+	}
+
 	c := &dsl.FetcherConfig{
+
 		Logger:            NoticeCommonLogger(false),
 		BaseAPIParameters: baseAPIParams,
+		Tunneled:          isTunneled,
 		RoundTripper:      roundTripper,
 
 		DatastoreHasServerEntry:        DSLHasServerEntry,
-		DatastoreStoreServerEntry:      DSLStoreServerEntry,
+		DatastoreStoreServerEntry:      storeServerEntry,
 		DatastoreGetLastActiveOSLsTime: DSLGetLastActiveOSLsTime,
 		DatastoreSetLastActiveOSLsTime: DSLSetLastActiveOSLsTime,
 		DatastoreKnownOSLIDs:           DSLKnownOSLIDs,
@@ -207,7 +224,6 @@ func doDSLFetch(
 		DoGarbageCollection: DoGarbageCollection,
 	}
 
-	p := config.GetParameters().Get()
 	if isTunneled {
 
 		c.DatastoreGetLastFetchTime = DSLGetLastTunneledFetchTime
@@ -251,6 +267,7 @@ func doDSLFetch(
 	c.GetLastActiveOSLsTTL = p.Duration(parameters.DSLFetcherGetLastActiveOSLsTTL)
 	c.GetOSLFileSpecsMinCount = p.Int(parameters.DSLFetcherGetOSLFileSpecsMinCount)
 	c.GetOSLFileSpecsMaxCount = p.Int(parameters.DSLFetcherGetOSLFileSpecsMaxCount)
+
 	p.Close()
 
 	fetcher, err := dsl.NewFetcher(c)

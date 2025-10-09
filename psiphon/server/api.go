@@ -1947,7 +1947,7 @@ func isHostHeader(_ *Config, value string) bool {
 }
 
 func isServerEntrySource(_ *Config, value string) bool {
-	return common.Contains(protocol.SupportedServerEntrySources, value)
+	return common.ContainsWildcard(protocol.SupportedServerEntrySources, value)
 }
 
 var isISO8601DateRegex = regexp.MustCompile(

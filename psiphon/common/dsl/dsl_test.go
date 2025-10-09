@@ -137,7 +137,7 @@ func testDSLs(testConfig *testConfig) error {
 
 	// Initialize backend
 
-	tlsConfig, err := testutils.NewTestDSLRelayTLSConfiguration()
+	tlsConfig, err := testutils.NewTestDSLRelayTLSConfig()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -146,8 +146,7 @@ func testDSLs(testConfig *testConfig) error {
 		NewBackendTestShim(),
 		tlsConfig,
 		testClientIP, &testClientGeoIPData, testHostID,
-		backendOSLPaveData1,
-		nil, nil)
+		backendOSLPaveData1)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -509,12 +508,15 @@ func (c *dslClient) DatastoreKnownOSLIDs() ([]OSLID, error) {
 	return IDs, nil
 }
 
-func (c *dslClient) DatastoreGetOSLState(ID OSLID) ([]byte, bool, error) {
+func (c *dslClient) DatastoreGetOSLState(ID OSLID) ([]byte, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	state, ok := c.oslStates[hex.EncodeToString(ID)]
-	return state, ok, nil
+	if !ok {
+		return nil, nil
+	}
+	return state, nil
 }
 
 func (c *dslClient) DatastoreStoreOSLState(ID OSLID, state []byte) error {

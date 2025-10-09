@@ -485,6 +485,12 @@ func GetTacticsCapability(protocol string) string {
 	return GetCapability(protocol) + "-TACTICS"
 }
 
+// IsTacticsCapability indicates if the specified capability is a server
+// tactics capability.
+func IsTacticsCapability(protocol string) bool {
+	return strings.HasSuffix(protocol, "-TACTICS")
+}
+
 // GetServerEntryFields converts a ServerEntry to ServerEntryFields.
 //
 // Note that a conversion in this direction doesn't retain unrecognized
@@ -940,6 +946,7 @@ func (serverEntry *ServerEntry) GetSupportedTacticsProtocols() []string {
 		}
 
 		requiredCapability := GetTacticsCapability(protocol)
+
 		if !serverEntry.hasCapability(requiredCapability) {
 			continue
 		}

@@ -358,14 +358,16 @@ func NewInproxyBrokerClientInstance(
 
 	// Select common or personal compartment IDs. Clients must provide at
 	// least on compartment ID.
+	//
+	// A here check for !isProxy && len(commonCompartmentIDs) == 0 && len
+	// (personalCompartmentIDs) == 0 is now deferred until
+	// inproxy.DialClient, to allow broker connections for DSL requests
+	// without in-proxy compartment IDs.
 
 	commonCompartmentIDs, personalCompartmentIDs, err :=
 		prepareInproxyCompartmentIDs(config, p, isProxy)
 	if err != nil {
 		return nil, errors.Trace(err)
-	}
-	if !isProxy && len(commonCompartmentIDs) == 0 && len(personalCompartmentIDs) == 0 {
-		return nil, errors.TraceNew("no compartment IDs")
 	}
 	if len(personalCompartmentIDs) > 1 {
 		return nil, errors.TraceNew("unexpected multiple personal compartment IDs")

@@ -44,7 +44,7 @@ const (
 	defaultMaxHttpIdleConns    = 10
 	defaultHttpIdleConnTimeout = 120 * time.Second
 	defaultRequestTimeout      = 30 * time.Second
-	defaultRequestRetryCount   = 2
+	defaultRequestRetryCount   = 1
 
 	defaultServerEntryCacheTTL     = 24 * time.Hour
 	defaultServerEntryCacheMaxSize = 200000
