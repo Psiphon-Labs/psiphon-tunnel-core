@@ -122,7 +122,40 @@ func TestTrafficRulesFilters(t *testing.T) {
             "AllowTCPPorts" : [5,17],
             "AllowUDPPorts" : [6,18]
           }
+        },
+
+        {
+          "Filter" : {
+            "Regions" : ["R5"],
+            "MinClientVersion" : 30,
+            "MaxClientVersion" : 40
+          },
+          "Rules" : {
+            "RateLimits" : {
+              "WriteBytesPerSecond": 17,
+              "ReadBytesPerSecond": 18
+            },
+            "AllowTCPPorts" : [5,9],
+            "AllowUDPPorts" : [6,10]
+          }
+        },
+
+        {
+          "Filter" : {
+            "Regions" : ["R5"],
+            "MinClientVersion" : 10,
+            "MaxClientVersion" : 20
+          },
+          "Rules" : {
+            "RateLimits" : {
+              "WriteBytesPerSecond": 19,
+              "ReadBytesPerSecond": 20
+            },
+            "AllowTCPPorts" : [7,11],
+            "AllowUDPPorts" : [8,12]
+          }
         }
+
       ]
     }
 	`
@@ -260,6 +293,26 @@ func TestTrafficRulesFilters(t *testing.T) {
 			GeoIPData{Country: "R3", ISP: "I2"},
 			handshakeState{apiParams: map[string]interface{}{"client_version": "1"}, completed: true},
 			1, 2, 3, 4, makePortList("[5]"), makePortList("[6]"),
+		},
+
+		{
+			"don't get 4th filtered rule due to Min/MaxClientVersion",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R3", ISP: "I2"},
+			handshakeState{apiParams: map[string]interface{}{"client_version": "1"}, completed: true},
+			1, 2, 3, 4, makePortList("[5]"), makePortList("[6]"),
+		},
+
+		{
+			"match 2nd Min/MaxClientVersion filtered rule",
+			providerID,
+			true,
+			"P1",
+			GeoIPData{Country: "R5", ISP: "I1"},
+			handshakeState{apiParams: map[string]interface{}{"client_version": "15"}, completed: true},
+			1, 19, 3, 20, makePortList("[7,11]"), makePortList("[8,12]"),
 		},
 	}
 	for _, testCase := range testCases {
