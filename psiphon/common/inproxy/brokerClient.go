@@ -232,8 +232,7 @@ func (b *BrokerClient) ClientRelayedPacket(
 	return response, nil
 }
 
-// ClientRelayedPacket sends a ClientRelayedPacket request and returns the
-// response.
+// ClientDSL sends a DSL request to be relayed by the broker.
 func (b *BrokerClient) ClientDSL(
 	ctx context.Context,
 	request *ClientDSLRequest) (*ClientDSLResponse, error) {

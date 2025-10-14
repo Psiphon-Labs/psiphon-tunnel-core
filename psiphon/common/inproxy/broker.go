@@ -1662,9 +1662,6 @@ func (b *Broker) handleClientDSL(
 		logFields["broker_event"] = "client-dsl"
 		logFields["broker_id"] = b.brokerID
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
-		if retErr != nil {
-			logFields["error"] = retErr.Error()
-		}
 		logFields["request_size"] = requestSize
 		logFields["response_size"] = responseSize
 		if retErr != nil {

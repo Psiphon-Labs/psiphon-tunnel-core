@@ -307,7 +307,10 @@ func (r *Relay) HandleRequest(
 			r.config.Logger.WithTraceFields(common.LogFields{
 				"error": err.Error(),
 			}).Warning("DSL: serve cached response failed")
-			// Proceed with relaying request
+			// Proceed with relaying request, even if the failure was due to
+			// an error in DecodePackedAPIParameters or APIParameterValidator.
+			// This allows the DSL backend to make the authoritative decision
+			// and also log all failure cases.
 		}
 		cachedResponse = err == nil && response != nil
 	}
