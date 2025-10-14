@@ -1398,7 +1398,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		socketReader.Start()
 		readerShutdownCtx, readerShutdownCtxCancel :=
-			context.WithDeadline(context.Background(), time.Now().Add(5 * time.Second))
+			context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
 		defer func() {
 			readerShutdownCtxCancel()
 			socketReader.Stop(readerShutdownCtx)
@@ -2215,7 +2215,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if runConfig.doLogProtobuf {
 		// Ensure logs are drained on the reader side.
 		readerShutdownCtx, readerShutdownCtxCancel :=
-			context.WithDeadline(context.Background(), time.Now().Add(5 * time.Second))
+			context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
 		defer readerShutdownCtxCancel()
 		socketReader.Stop(readerShutdownCtx)
 	}
