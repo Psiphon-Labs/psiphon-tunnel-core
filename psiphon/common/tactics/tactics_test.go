@@ -81,7 +81,9 @@ func TestTactics(t *testing.T) {
           "Filter" : {
             "Regions": ["R1"],
             "ASNs": ["1"],
-            "APIParameters" : {"client_platform" : ["P1"], "client_version": ["V1"]},
+            "APIParameters" : {"client_platform" : ["P1"]},
+            "MinClientVersion" : 4,
+            "MaxClientVersion" : 10,
             "SpeedTestRTTMilliseconds" : {
               "Aggregation" : "Median",
               "AtLeast" : 1
@@ -95,7 +97,19 @@ func TestTactics(t *testing.T) {
         },
         {
           "Filter" : {
-            "APIParameters" : {"client_platform" : ["P2"], "client_version": ["V2"]}
+            "APIParameters" : {"client_platform" : ["P1"]},
+            "MinClientVersion" : 6,
+            "MaxClientVersion" : 10
+          },
+          "Tactics" : {
+            "Parameters" : {
+              "ConnectionWorkerPoolSize" : 1
+            }
+          }
+        },
+        {
+          "Filter" : {
+            "APIParameters" : {"client_platform" : ["P2"], "client_version": ["2"]}
           },
           "Tactics" : {
             "Parameters" : {
@@ -252,7 +266,7 @@ func TestTactics(t *testing.T) {
 
 	apiParams := common.APIParameters{
 		"client_platform": "P1",
-		"client_version":  "V1"}
+		"client_version":  "5"}
 
 	storer := newTestStorer()
 
@@ -388,7 +402,7 @@ func TestTactics(t *testing.T) {
 
 	// Server should be caching tactics data for tactics matching first two
 	// filters.
-	checkServerCache([]bool{true, true, false, false, false})
+	checkServerCache([]bool{true, true, false, false, false, false})
 
 	// There should now be cached local tactics
 
@@ -473,7 +487,7 @@ func TestTactics(t *testing.T) {
 	checkParameters(fetchTacticsRecord)
 
 	// Server cache should be the same
-	checkServerCache([]bool{true, true, false, false, false})
+	checkServerCache([]bool{true, true, false, false, false, false})
 
 	// Modify tactics configuration to change payload
 
@@ -553,7 +567,7 @@ func TestTactics(t *testing.T) {
 
 	checkParameters(fetchTacticsRecord)
 
-	checkServerCache([]bool{true, true, false, false, false})
+	checkServerCache([]bool{true, true, false, false, false, false})
 
 	// Exercise handshake transport of tactics
 
@@ -562,7 +576,7 @@ func TestTactics(t *testing.T) {
 
 	handshakeParams := common.APIParameters{
 		"client_platform": "P1",
-		"client_version":  "V1"}
+		"client_version":  "5"}
 
 	err = SetTacticsAPIParameters(storer, networkID, handshakeParams)
 	if err != nil {
@@ -612,7 +626,7 @@ func TestTactics(t *testing.T) {
 
 	checkParameters(handshakeTacticsRecord)
 
-	checkServerCache([]bool{true, true, false, false, false})
+	checkServerCache([]bool{true, true, false, false, false, false})
 
 	// Now there should be stored tactics
 
@@ -651,7 +665,7 @@ func TestTactics(t *testing.T) {
 
 	apiParams2 := common.APIParameters{
 		"client_platform": "P2",
-		"client_version":  "V2"}
+		"client_version":  "2"}
 
 	fetchTacticsRecord, err = FetchTactics(
 		context.Background(),
@@ -673,8 +687,8 @@ func TestTactics(t *testing.T) {
 	}
 
 	checkServerCache(
-		[]bool{true, true, false, false, false},
-		[]bool{false, false, true, false, false})
+		[]bool{true, true, false, false, false, false},
+		[]bool{false, false, false, true, false, false})
 
 	// Exercise speed test sample truncation
 

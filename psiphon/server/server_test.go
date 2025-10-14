@@ -38,6 +38,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,7 @@ import (
 	"time"
 	"unsafe"
 
+	udsipc "github.com/Psiphon-Inc/uds-ipc"
 	socks "github.com/Psiphon-Labs/goptlib"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
@@ -62,12 +64,19 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
+	pb "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond"
+	pbr "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/router"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/miekg/dns"
+	"golang.org/x/net/nettest"
 	"golang.org/x/net/proxy"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+var useProtobufLogging bool
 var testDataDirName string
 var mockWebServerURL, mockWebServerPort, mockWebServerExpectedResponse string
 
@@ -136,6 +145,7 @@ func TestSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -148,6 +158,7 @@ func TestOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -161,6 +172,7 @@ func TestFragmentedOSSH(t *testing.T) {
 			forceFragmenting:     true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -175,6 +187,7 @@ func TestPrefixedOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			inspectFlows:         true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -190,6 +203,7 @@ func TestFragmentedPrefixedOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			inspectFlows:         true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -205,6 +219,7 @@ func TestTLSOSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -217,6 +232,7 @@ func TestShadowsocks(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			applyPrefix:          true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -229,6 +245,7 @@ func TestUnfrontedMeek(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -242,6 +259,7 @@ func TestFragmentedUnfrontedMeek(t *testing.T) {
 			forceFragmenting:     true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -255,6 +273,7 @@ func TestUnfrontedMeekHTTPS(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -269,6 +288,7 @@ func TestFragmentedUnfrontedMeekHTTPS(t *testing.T) {
 			forceFragmenting:     true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -282,6 +302,7 @@ func TestUnfrontedMeekHTTPSTLS13(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -295,6 +316,7 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -308,6 +330,7 @@ func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 			doTunneledNTPRequest:  true,
 			doDanglingTCPConn:     true,
 			doLogHostProvider:     true,
+			doLogProtobuf:         useProtobufLogging,
 			doUncompressedTactics: true,
 		})
 }
@@ -323,6 +346,7 @@ func TestTLSOSSHOverUnfrontedMeekHTTPSDemux(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -337,6 +361,7 @@ func TestTLSOSSHOverUnfrontedMeekSessionTicketDemux(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -351,6 +376,7 @@ func TestQUICOSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -366,6 +392,7 @@ func TestLimitedQUICOSSH(t *testing.T) {
 			doTunneledNTPRequest: true,
 			limitQUICVersions:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -382,6 +409,7 @@ func TestInproxyOSSH(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			doTargetBrokerSpecs:  true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -393,6 +421,7 @@ func TestRestrictInproxy(t *testing.T) {
 		&runServerConfig{
 			tunnelProtocol:    "INPROXY-WEBRTC-OSSH",
 			doRestrictInproxy: true,
+			doLogProtobuf:     useProtobufLogging,
 		})
 }
 
@@ -410,6 +439,7 @@ func TestInproxyQUICOSSH(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -425,6 +455,7 @@ func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -440,6 +471,7 @@ func TestInproxyTLSOSSH(t *testing.T) {
 			doTunneledNTPRequest:  true,
 			doDanglingTCPConn:     true,
 			doLogHostProvider:     true,
+			doLogProtobuf:         useProtobufLogging,
 			doUncompressedTactics: true,
 		})
 }
@@ -458,6 +490,7 @@ func TestInproxyPersonalPairing(t *testing.T) {
 			doLogHostProvider:    true,
 			doTargetBrokerSpecs:  true,
 			doPersonalPairing:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -475,6 +508,7 @@ func TestInproxyOSSHMediaStreams(t *testing.T) {
 			doLogHostProvider:      true,
 			doTargetBrokerSpecs:    true,
 			useInproxyMediaStreams: true,
+			doLogProtobuf:          useProtobufLogging,
 		})
 }
 
@@ -491,6 +525,7 @@ func TestInproxyQUICOSSHMediaStreams(t *testing.T) {
 			doLogHostProvider:      true,
 			doTargetBrokerSpecs:    true,
 			useInproxyMediaStreams: true,
+			doLogProtobuf:          useProtobufLogging,
 		})
 }
 
@@ -503,6 +538,7 @@ func TestHotReload(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -515,6 +551,7 @@ func TestHotReloadWithTactics(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -528,6 +565,7 @@ func TestDefaultSponsorID(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -541,6 +579,7 @@ func TestDenyTrafficRules(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -554,6 +593,7 @@ func TestOmitAuthorization(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -566,6 +606,7 @@ func TestNoAuthorization(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -577,6 +618,7 @@ func TestUnusedAuthorization(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -587,6 +629,7 @@ func TestTCPOnlySLOK(t *testing.T) {
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -597,6 +640,7 @@ func TestUDPOnlySLOK(t *testing.T) {
 			requireAuthorization: true,
 			doTunneledNTPRequest: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -609,6 +653,7 @@ func TestLivenessTest(t *testing.T) {
 			doTunneledNTPRequest: true,
 			forceLivenessTest:    true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -622,6 +667,7 @@ func TestPruneServerEntries(t *testing.T) {
 			forceLivenessTest:    true,
 			doPruneServerEntries: true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -636,6 +682,7 @@ func TestCheckPruneServerEntries(t *testing.T) {
 			doPruneServerEntries:    true,
 			checkPruneServerEntries: true,
 			doLogHostProvider:       true,
+			doLogProtobuf:           useProtobufLogging,
 		})
 }
 
@@ -650,6 +697,7 @@ func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 			doBurstMonitor:       true,
 			doDestinationBytes:   true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -664,6 +712,7 @@ func TestBurstMonitorAndLegacyDestinationBytes(t *testing.T) {
 			doBurstMonitor:           true,
 			doLegacyDestinationBytes: true,
 			doLogHostProvider:        true,
+			doLogProtobuf:            useProtobufLogging,
 		})
 }
 
@@ -679,6 +728,7 @@ func TestChangeBytesConfig(t *testing.T) {
 			doLegacyDestinationBytes: true,
 			doChangeBytesConfig:      true,
 			doLogHostProvider:        true,
+			doLogProtobuf:            useProtobufLogging,
 		})
 }
 
@@ -692,6 +742,7 @@ func TestSplitTunnel(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doSplitTunnel:        true,
 			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -703,6 +754,7 @@ func TestOmitProvider(t *testing.T) {
 			doTunneledWebRequest: true,
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -719,6 +771,7 @@ func TestSteeringIP(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			doSteeringIP:         true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -732,6 +785,7 @@ func TestLegacyAPIEncoding(t *testing.T) {
 			doDanglingTCPConn:    true,
 			doLogHostProvider:    true,
 			useLegacyAPIEncoding: true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -742,6 +796,7 @@ func TestDomainRequest(t *testing.T) {
 			requireAuthorization:    true,
 			doTunneledDomainRequest: true,
 			doLogHostProvider:       true,
+			doLogProtobuf:           useProtobufLogging,
 		})
 }
 
@@ -780,6 +835,7 @@ type runServerConfig struct {
 	doRestrictInproxy        bool
 	useInproxyMediaStreams   bool
 	doUncompressedTactics    bool
+	doLogProtobuf            bool
 }
 
 var (
@@ -915,6 +971,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.doLegacyDestinationBytes ||
 		runConfig.doTunneledDomainRequest
 
+	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
 		tactics.GenerateKeys()
 	if err != nil {
@@ -1177,6 +1234,16 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		serverConfig["InproxyBrokerAllowBogonWebRTCConnections"] = true
 	}
 
+	if runConfig.doLogProtobuf {
+		serverConfig["LogFormat"] = "protobuf"
+
+		metricSocketPath, _ := nettest.LocalPath()
+		defer os.Remove(metricSocketPath)
+
+		serverConfig["MetricSocketPath"] = metricSocketPath
+		serverConfig["LogDestinationPrefix"] = "testprefix"
+	}
+
 	if doDSL {
 
 		serverConfig["DSLRelayServiceURL"] = dslTestConfig.backend.GetAddress()
@@ -1190,25 +1257,45 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	serverConfigJSON, _ = json.Marshal(serverConfig)
 
+	// Reset server_load log reassembly with the expected number of protocol
+	// log components.
+
+	expectedServerLoadProtocolLogs := len(tunnelProtocolPorts)
+	if runConfig.clientTunnelProtocol != "" {
+		expectedServerLoadProtocolLogs += 1 // Demux case
+	}
+	if runConfig.denyTrafficRules || runConfig.omitAuthorization {
+		expectedServerLoadProtocolLogs = 0
+	}
+	resetReassembleServerLoadLogs(expectedServerLoadProtocolLogs)
+
+	expectedTunnelLogs := 1
+	if runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig {
+		expectedTunnelLogs++ // 1 base + 1 ASN
+	}
+	resetReassembleServerTunnelLogs(expectedTunnelLogs)
+
 	uniqueUserLog := make(chan map[string]interface{}, 1)
 	domainBytesLog := make(chan map[string]interface{}, 1)
 	serverTunnelLog := make(chan map[string]interface{}, 1)
+
 	// Max 3 discovery logs:
 	// 1. server startup
 	// 2. hot reload of psinet db (runConfig.doHotReload)
 	// 3. hot reload of server tactics (runConfig.doHotReload && doServerTactics)
 	discoveryLog := make(chan map[string]interface{}, 3)
-	serverLoadLog := make(chan map[string]interface{}, 1)
+
+	// Up to 3 server_load logs: one without a region on start up, followed by
+	// a pair including a region after the client connects.
+	serverLoadLog := make(chan map[string]interface{}, 3)
 
 	inproxyProxyAnnounceLog := make(chan map[string]interface{}, 1)
 	inproxyClientOfferLog := make(chan map[string]interface{}, 1)
 	inproxyProxyAnswerLog := make(chan map[string]interface{}, 1)
 	inproxyServerProxyQualityLog := make(chan map[string]interface{}, 1)
 
-	setLogCallback(func(log []byte) {
-
+	logCallback := func(log []byte) {
 		logFields := make(map[string]interface{})
-
 		err := json.Unmarshal(log, &logFields)
 		if err != nil {
 			return
@@ -1274,7 +1361,96 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				}
 			}
 		}
-	})
+	}
+
+	// Capture log events in order to check both that events are logged and
+	// verify expected log contents.
+	//
+	// For JSON logging mode, the debug helper setLogCallback directly
+	// captures each log line.
+	//
+	// For protobuf logging mode, exercise the IPC mechanism and capture the
+	// logs via the IPC recipient handler. Protobuf logs are converted to
+	// JSON in order to use the same content checking helpers.
+
+	setLogCallback(logCallback)
+
+	var socketReader *udsipc.Reader
+	if runConfig.doLogProtobuf {
+
+		handler := func(data []byte) (retErr error) {
+			defer func() {
+				if retErr != nil {
+					t.Error(retErr.Error())
+				}
+			}()
+
+			// The Router message is not needed in testing, so we deserialize it to
+			// get the byte slice from the Value field, containing the seriailized
+			// Psiphond message that we want to work with to reconstruct the log map.
+			routedMsg := &pbr.Router{}
+			err := proto.Unmarshal(data, routedMsg)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			protoMsg := &pb.Psiphond{}
+			err = proto.Unmarshal(routedMsg.GetValue(), protoMsg)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			routedMsg = nil
+
+			reflectedLogFields := map[string]interface{}{}
+			protoToLogFields(protoMsg, reflectedLogFields, runConfig)
+
+			eventName, _ := reflectedLogFields["event_name"].(string)
+
+			if strings.HasPrefix(eventName, "server_load") {
+
+				// Multiple protobuf server_load* logs are reassembled into
+				// one JSON server_load log.
+				reflectedLogFields, err = reassembleServerLoadLog(
+					eventName, reflectedLogFields)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			} else if strings.HasPrefix(eventName, "server_tunnel") {
+
+				// Multiple protobuf server_tunnel* logs are reassembled into
+				// one JSON server_tunnel log.
+				reflectedLogFields, err = reassembleServerTunnelLog(
+					eventName, reflectedLogFields)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+
+			if reflectedLogFields != nil {
+				jsonLog, err := json.Marshal(reflectedLogFields)
+				if err != nil {
+					return errors.Trace(err)
+				}
+				logCallback(jsonLog)
+			}
+			return nil
+		}
+
+		socketReader, err = udsipc.NewReader(
+			handler,
+			serverConfig["MetricSocketPath"].(string))
+		if err != nil {
+			t.Fatalf("error creating metric socket reader: %s", err)
+		}
+
+		socketReader.Start()
+		readerShutdownCtx, readerShutdownCtxCancel :=
+			context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
+		defer func() {
+			readerShutdownCtxCancel()
+			socketReader.Stop(readerShutdownCtx)
+		}()
+	}
 
 	// run flow inspector if requested
 	var flowInspectorProxy *flowInspectorProxy
@@ -2126,6 +2302,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	stopServer()
 	stopServer = nil
 
+	if runConfig.doLogProtobuf {
+		// Ensure logs are drained on the reader side.
+		readerShutdownCtx, readerShutdownCtxCancel :=
+			context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
+		defer readerShutdownCtxCancel()
+		socketReader.Stop(readerShutdownCtx)
+	}
+
 	// Test: all expected server logs were emitted
 
 	// For in-proxy tunnel protocols, client BPF tactics are currently ignored and not applied by the 2nd hop.
@@ -2479,6 +2663,286 @@ type networkConnectivityChecker struct {
 
 func (c *networkConnectivityChecker) HasNetworkConnectivity() int {
 	return 1
+}
+
+func protoToLogFields(msg proto.Message, logFields map[string]interface{}, runConfig *runServerConfig) {
+	r := msg.ProtoReflect()
+	md := r.Descriptor()
+	fds := md.Fields()
+
+	getMetricType := func(m *pb.Psiphond) string {
+		md := m.ProtoReflect().Descriptor()
+		populatedMetric := m.ProtoReflect().WhichOneof(
+			md.Oneofs().ByName("metric"),
+		)
+
+		return populatedMetric.TextName()
+	}
+
+	shouldSkipField := func(fd protoreflect.FieldDescriptor) bool {
+		if r.Has(fd) {
+			return false
+		}
+
+		// Never skip these fields, even if unset
+		if slices.Contains([]string{"last_connected"}, fd.TextName()) {
+			return false
+		}
+
+		return true
+	}
+
+	if logFields == nil {
+		logFields = map[string]interface{}{}
+	}
+
+	if _, ok := logFields["event_name"]; !ok {
+		logFields["event_name"] = getMetricType(msg.(*pb.Psiphond))
+	}
+
+	for i := range fds.Len() {
+		fd := fds.Get(i)
+		fieldValue := r.Get(fd)
+
+		if shouldSkipField(fd) {
+			continue
+		}
+
+		switch fd.Kind() {
+		case protoreflect.MessageKind:
+			switch fieldValue.Message().Interface().(type) {
+			case *timestamppb.Timestamp:
+				if fieldValue.Message().IsValid() {
+					ts := fieldValue.Message().Interface().(*timestamppb.Timestamp)
+					logFields[fd.TextName()] = ts.AsTime()
+				} else {
+					logFields[fd.TextName()] = "None"
+				}
+			default:
+				if fieldValue.Message().IsValid() {
+					protoToLogFields(fieldValue.Message().Interface(), logFields, runConfig)
+				} else if fd.ContainingOneof() == nil {
+					protoToLogFields(fieldValue.Message().New().Interface(), logFields, runConfig)
+				}
+			}
+		default:
+			if fd.IsList() {
+				list := fieldValue.List()
+				switch fd.Kind() {
+				case protoreflect.StringKind:
+					result := make([]string, list.Len())
+					for i := 0; i < list.Len(); i++ {
+						result[i] = list.Get(i).String()
+					}
+					logFields[fd.TextName()] = result
+				}
+			} else {
+				logFields[fd.TextName()] = fieldValue.Interface()
+			}
+		}
+	}
+}
+
+var (
+	reassembledServerLoadLogFields   map[string]interface{}
+	serverLoadLogComponentSequence   []int
+	reassembledServerTunnelLogFields map[string]interface{}
+	serverTunnelComponentSequence    []int
+)
+
+func resetReassembleServerLoadLogs(expectedProtocolLogs int) {
+
+	// For each runServer test run, the currently expected sequences are:
+	// - One server_load triggered at "Exercise server_load logging", with no
+	//   server_load_protocol components.
+	// - A pair of server_loads at "Trigger server_load logging once more",
+	//   with multiple server_load_protocol components, including "ALL"; one
+	//   server_load has a region.
+
+	expectedProtocolLogs += 1 // for "ALL"
+
+	serverLoadLogComponentSequence = []int{
+		2,
+		2 + expectedProtocolLogs,
+		2 + expectedProtocolLogs}
+}
+
+func resetReassembleServerTunnelLogs(expectedTunnelLogs int) {
+	serverTunnelComponentSequence = []int{expectedTunnelLogs}
+	reassembledServerTunnelLogFields = nil
+}
+
+func reassembleServerLoadLog(
+	eventName string,
+	reflectedLogFields map[string]interface{}) (map[string]interface{}, error) {
+
+	// Reassemble protobuf server_load components into a single set of fields
+	// compatible with the existing JSON log content checker.
+
+	if !strings.HasPrefix(eventName, "server_load") {
+		return nil, errors.TraceNew("unexpected non-server_load log")
+	}
+
+	i := 0
+	for ; i < len(serverLoadLogComponentSequence); i++ {
+		if serverLoadLogComponentSequence[i] > 0 {
+			break
+		}
+	}
+	if i >= len(serverLoadLogComponentSequence) {
+		return nil, errors.TraceNew("unexpected server_load sequence")
+	}
+
+	serverLoadLogComponentSequence[i] -= 1
+
+	sequenceComplete := serverLoadLogComponentSequence[i] == 0
+
+	if reassembledServerLoadLogFields == nil {
+		reassembledServerLoadLogFields = make(map[string]interface{})
+	}
+
+	serverLoadLogFields := reassembledServerLoadLogFields
+
+	switch eventName {
+	case "server_load":
+		for k, v := range reflectedLogFields {
+			serverLoadLogFields[k] = v
+		}
+
+	case "server_load_dns":
+		if serverLoadLogFields["dns_count"] == nil {
+			serverLoadLogFields["dns_count"] = make(map[string]interface{})
+		}
+		if serverLoadLogFields["dns_failed_count"] == nil {
+			serverLoadLogFields["dns_failed_count"] = make(map[string]interface{})
+		}
+		if serverLoadLogFields["dns_duration"] == nil {
+			serverLoadLogFields["dns_duration"] = make(map[string]interface{})
+		}
+		if serverLoadLogFields["dns_failed_duration"] == nil {
+			serverLoadLogFields["dns_failed_duration"] = make(map[string]interface{})
+		}
+
+		if dnsServer, ok := reflectedLogFields["dns_server"].(string); ok {
+			if dnsCount, ok := reflectedLogFields["dns_count"].(int64); ok {
+				serverLoadLogFields["dns_count"].(map[string]interface{})[dnsServer] = float64(dnsCount)
+			}
+			if dnsFailedCount, ok := reflectedLogFields["dns_failed_count"].(int64); ok {
+				serverLoadLogFields["dns_failed_count"].(map[string]interface{})[dnsServer] = float64(dnsFailedCount)
+			}
+			if dnsDuration, ok := reflectedLogFields["dns_duration"].(int64); ok {
+				serverLoadLogFields["dns_duration"].(map[string]interface{})[dnsServer] = float64(dnsDuration)
+			}
+			if dnsFailedDuration, ok := reflectedLogFields["dns_failed_duration"].(int64); ok {
+				serverLoadLogFields["dns_failed_duration"].(map[string]interface{})[dnsServer] = float64(dnsFailedDuration)
+			}
+		}
+
+	case "server_load_protocol":
+		if protocol, ok := reflectedLogFields["protocol"].(string); ok {
+			if serverLoadLogFields[protocol] == nil {
+				serverLoadLogFields[protocol] = make(map[string]interface{})
+			}
+			protocolMap := serverLoadLogFields[protocol].(map[string]interface{})
+
+			if acceptedClients, ok := reflectedLogFields["accepted_clients"].(int64); ok {
+				protocolMap["accepted_clients"] = acceptedClients
+			}
+			if establishedClients, ok := reflectedLogFields["established_clients"].(int64); ok {
+				protocolMap["established_clients"] = establishedClients
+			}
+		}
+	}
+
+	if sequenceComplete {
+		return serverLoadLogFields, nil
+	}
+
+	return nil, nil
+}
+
+func reassembleServerTunnelLog(
+	eventName string,
+	reflectedLogFields map[string]interface{}) (map[string]interface{}, error) {
+
+	// Reassemble protobuf server_tunnel components into a single set of fields
+	// compatible with the existing JSON log content checker.
+	if !strings.HasPrefix(eventName, "server_tunnel") {
+		return nil, errors.TraceNew("unexpected non-server_tunnel log")
+	}
+
+	i := 0
+	for ; i < len(serverTunnelComponentSequence); i++ {
+		if serverTunnelComponentSequence[i] > 0 {
+			break
+		}
+	}
+	if i >= len(serverTunnelComponentSequence) {
+		return nil, errors.TraceNew("unexpected server_tunnel sequence")
+	}
+
+	serverTunnelComponentSequence[i] -= 1
+	sequenceComplete := serverTunnelComponentSequence[i] == 0
+
+	if reassembledServerTunnelLogFields == nil {
+		reassembledServerTunnelLogFields = make(map[string]interface{})
+	}
+
+	serverTunnelLogFields := reassembledServerTunnelLogFields
+
+	switch eventName {
+	case "server_tunnel":
+		// Base server_tunnel message - copy all fields
+		for k, v := range reflectedLogFields {
+			serverTunnelLogFields[k] = v
+		}
+
+	case "server_tunnel_asn_dest_bytes":
+		// Initialize ASN byte maps if they don't exist
+		if serverTunnelLogFields["asn_dest_bytes"] == nil {
+			serverTunnelLogFields["asn_dest_bytes"] = make(map[string]interface{})
+		}
+		if serverTunnelLogFields["asn_dest_bytes_up_tcp"] == nil {
+			serverTunnelLogFields["asn_dest_bytes_up_tcp"] = make(map[string]interface{})
+		}
+		if serverTunnelLogFields["asn_dest_bytes_down_tcp"] == nil {
+			serverTunnelLogFields["asn_dest_bytes_down_tcp"] = make(map[string]interface{})
+		}
+		if serverTunnelLogFields["asn_dest_bytes_up_udp"] == nil {
+			serverTunnelLogFields["asn_dest_bytes_up_udp"] = make(map[string]interface{})
+		}
+		if serverTunnelLogFields["asn_dest_bytes_down_udp"] == nil {
+			serverTunnelLogFields["asn_dest_bytes_down_udp"] = make(map[string]interface{})
+		}
+
+		// Populate ASN-specific byte counts
+		if destAsn, ok := reflectedLogFields["dest_asn"].(string); ok {
+			if destBytes, ok := reflectedLogFields["dest_bytes"].(int64); ok {
+				serverTunnelLogFields["asn_dest_bytes"].(map[string]interface{})[destAsn] = destBytes
+			}
+			if destBytesUpTcp, ok := reflectedLogFields["dest_bytes_up_tcp"].(int64); ok {
+				serverTunnelLogFields["asn_dest_bytes_up_tcp"].(map[string]interface{})[destAsn] = destBytesUpTcp
+			}
+			if destBytesDownTcp, ok := reflectedLogFields["dest_bytes_down_tcp"].(int64); ok {
+				serverTunnelLogFields["asn_dest_bytes_down_tcp"].(map[string]interface{})[destAsn] = destBytesDownTcp
+			}
+			if destBytesUpUdp, ok := reflectedLogFields["dest_bytes_up_udp"].(int64); ok {
+				serverTunnelLogFields["asn_dest_bytes_up_udp"].(map[string]interface{})[destAsn] = destBytesUpUdp
+			}
+			if destBytesDownUdp, ok := reflectedLogFields["dest_bytes_down_udp"].(int64); ok {
+				serverTunnelLogFields["asn_dest_bytes_down_udp"].(map[string]interface{})[destAsn] = destBytesDownUdp
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unmatched server_tunnel event: %s", eventName)
+	}
+
+	if sequenceComplete {
+		serverTunnelLogFields["event_name"] = "server_tunnel"
+		return serverTunnelLogFields, nil
+	}
+
+	return nil, nil
 }
 
 func checkExpectedServerTunnelLogFields(

@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message DialParams {
+    optional bool conjure_cached = 1;
+    optional int64 conjure_delay = 2;
+    optional bool conjure_empty_packet = 3;
+    optional string conjure_network = 4; //LowCardinality
+    optional int64 conjure_port_number = 5;
+    optional string conjure_prefix = 6; //LowCardinality
+    optional string conjure_stun = 7; //LowCardinality
+    optional string conjure_transport = 8; //LowCardinality
+
+    optional int64 meek_cookie_size = 9;
+    optional string meek_content_type = 10;
+    optional string meek_cookie_name = 11; //LowCardinality
+    optional string meek_dial_domain = 12;  //LowCardinality
+    optional string meek_dial_ip_address = 13;  //LowCardinality
+    optional string meek_host_header = 14;
+    optional int64 meek_limit_request = 15;
+    optional int64 meek_redial_probability = 16;
+    optional string meek_resolved_ip_address = 17; //LowCardinality
+    optional string meek_sni_server_name = 18;
+    optional int64 meek_tls_padding = 19;
+    optional bool meek_transformed_host_name = 20;
+
+    optional bool quic_dial_early = 21;
+    optional string quic_dial_sni_address = 22;
+    optional bool quic_did_resume = 23;
+    optional bool quic_disable_client_path_mtu_discovery = 24;
+    optional bool quic_obfuscated_psk = 25;
+    optional bool quic_sent_ticket = 26;
+    optional string quic_version = 27; //LowCardinality
+
+    optional string shadowsocks_prefix = 28;  //LowCardinality
+
+    optional bool tls_did_resume = 29;
+    optional bool tls_fragmented = 30;
+    optional string tls_ossh_sni_server_name = 31;
+    optional bool tls_ossh_transformed_host_name = 32;
+    optional int64 tls_padding = 33;
+    optional string tls_profile = 34; //LowCardinality
+    optional bool tls_sent_ticket = 35;
+    optional string tls_version = 36; //LowCardinality
+
+    optional string server_entry_region = 37; //LowCardinality
+    optional string server_entry_source = 38; //LowCardinality
+    optional string server_entry_tag = 39;
+    optional google.protobuf.Timestamp server_entry_timestamp = 40;
+    optional bool server_packet_manipulation = 41; //LowCardinality
+    optional bool server_replay_fragmentation = 42; //LowCardinality
+    optional bool server_replay_packet_manipulation = 43; //LowCardinality
+    optional bool server_entry_valid = 44;
+
+    optional int32 candidate_number = 45;
+    optional bool is_replay = 46;
+    optional int64 dial_port_number = 47;
+    optional int64 dial_duration = 48;
+    optional string fronting_provider_id = 49; //LowCardinality
+    optional string network_type = 50; //LowCardinality
+    optional string relay_protocol = 51; //LowCardinality
+    optional string ssh_client_version = 52; //LowCardinality
+    optional string ossh_prefix = 53; //LowCardinality
+    optional string user_agent = 54;
+    optional string http_transform = 55; //LowCardinality
+
+    optional int64 dns_attempt = 56;
+    optional string dns_preferred = 57;  //LowCardinality
+    optional string dns_preresolved = 58;  //LowCardinality
+    optional int64 dns_qname_mismatches = 59;
+    optional bool dns_qname_random_casing = 60;
+    optional string dns_transform = 61; //LowCardinality
+
+    optional int64 downstream_bytes_fragmented = 62;
+    optional int64 downstream_max_bytes_written = 63;
+    optional int64 downstream_max_delayed = 64;
+    optional int64 downstream_min_bytes_written = 65;
+    optional int64 downstream_min_delayed = 66;
+    optional int64 downstream_ossh_padding = 67;
+
+    optional int64 upstream_bytes_fragmented = 68;
+    optional int64 upstream_max_bytes_written = 69;
+    optional int64 upstream_max_delayed = 70;
+    optional int64 upstream_min_bytes_written = 71;
+    optional int64 upstream_min_delayed = 72;
+    optional int64 upstream_ossh_padding = 73;
+    optional string upstream_proxy_custom_header_names = 74; //LowCardinality
+    optional string upstream_proxy_type = 75; //LowCardinality
+
+    optional string passthrough_address = 76; //LowCardinality
+
+    optional int64 pad_response = 77;
+    optional int64 padding = 78;
+
+    optional string client_bpf = 79; //LowCardinality
+    optional string server_bpf = 80; //LowCardinality
+
+    optional int64 established_tunnels_count = 81;
+    optional double network_latency_multiplier = 82;
+    optional string seed_transform = 83; //LowCardinality
+
+}

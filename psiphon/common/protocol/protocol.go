@@ -104,6 +104,7 @@ const (
 	CHANNEL_REJECT_REASON_SPLIT_TUNNEL = 0xFE000000
 
 	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
+	PSIPHON_API_HANDSHAKE_CLIENT_VERSION = "client_version"
 )
 
 var SupportedServerEntrySources = []string{

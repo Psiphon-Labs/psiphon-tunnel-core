@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "ca.psiphon.psiphond/base_params.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message IrregularTunnel {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional string duplicate_authorization_client_asn = 100; //LowCardinality
+    optional string duplicate_authorization_client_aso = 101; //LowCardinality
+    optional string duplicate_authorization_client_city = 102; //LowCardinality
+    optional string duplicate_authorization_client_isp = 103; //LowCardinality
+    optional string duplicate_authorization_client_region = 104; //LowCardinality
+    optional string duplicate_authorization_id = 105;
+    optional string duplicate_client_ip = 106; //LowCardinality
+    optional int64 duplicate_elapsed_time_ms = 107;
+    optional string duplicate_seed = 108;
+    optional string duplicate_seed_type = 109; //LowCardinality
+    optional uint32 listener_port_number = 110;
+    optional string listener_protocol = 111; //LowCardinality
+    optional string tunnel_error = 112; //LowCardinality
+}

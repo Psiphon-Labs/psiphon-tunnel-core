@@ -15,8 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.24.4" ]
-        test-type: [ "detector", "coverage", "memory", "custom-build-tags", "code-vetting", "dependency-check" ]
+        go: [ "1.24.8" ]
+        test-type: [ "detector", "coverage", "protobuf", "memory", "custom-build-tags", "code-vetting", "dependency-check" ]
 
     runs-on: ${{ matrix.os }}-latest
 
@@ -139,6 +139,12 @@ jobs:
           go test -v -covermode=count -coverprofile=networkid.coverprofile ./psiphon/common/networkid
           $GOPATH/bin/gover
           $GOPATH/bin/goveralls -coverprofile=gover.coverprofile -service=github -repotoken "$COVERALLS_TOKEN"
+
+      - name: Run server test with protobuf logging
+        if: ${{ matrix.test-type == 'protobuf' }}
+        run: |
+          cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
+          sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_RUN_PROTOBUF_LOGGING_TEST PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
 
       - name: Run memory tests
         if: ${{ matrix.test-type == 'memory' }}

@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message OrphanPacket {
+    // Fields 1-99 are reserved for field groupings.
+
+    optional int64 downstream_packet_rejected_disallowed_domain = 100;
+    optional int64 downstream_packet_rejected_disallowed_tcp_destination_port = 101;
+    optional int64 downstream_packet_rejected_disallowed_udp_destination_port = 102;
+    optional int64 downstream_packet_rejected_invalid_destination_address = 103;
+    optional int64 downstream_packet_rejected_invalid_dns_message = 104;
+    optional int64 downstream_packet_rejected_invalid_ip_header_options = 105;
+    optional int64 downstream_packet_rejected_invalid_ip_header_protocol = 106;
+    optional int64 downstream_packet_rejected_invalid_ip_header_version = 107;
+    optional int64 downstream_packet_rejected_invalid_ip_packet_length = 108;
+    optional int64 downstream_packet_rejected_invalid_tcp_packet_length = 109;
+    optional int64 downstream_packet_rejected_no_client = 110;
+    optional int64 downstream_packet_rejected_no_dns_resolvers = 111;
+    optional int64 downstream_packet_rejected_no_original_address = 112;
+    optional int64 downstream_packet_rejected_no_session = 113;
+
+    optional int64 upstream_packet_rejected_disallowed_domain = 114;
+    optional int64 upstream_packet_rejected_disallowed_tcp_destination_port = 115;
+    optional int64 upstream_packet_rejected_disallowed_udp_destination_port = 116;
+    optional int64 upstream_packet_rejected_invalid_destination_address = 117;
+    optional int64 upstream_packet_rejected_invalid_dns_message = 118;
+    optional int64 upstream_packet_rejected_invalid_ip_header_options = 119;
+    optional int64 upstream_packet_rejected_invalid_ip_header_protocol = 120;
+    optional int64 upstream_packet_rejected_invalid_ip_header_version = 121;
+    optional int64 upstream_packet_rejected_invalid_ip_packet_length = 122;
+    optional int64 upstream_packet_rejected_invalid_tcp_packet_length = 123;
+    optional int64 upstream_packet_rejected_no_client = 124;
+    optional int64 upstream_packet_rejected_no_dns_resolvers = 125;
+    optional int64 upstream_packet_rejected_no_original_address = 126;
+    optional int64 upstream_packet_rejected_no_session = 127;
+}

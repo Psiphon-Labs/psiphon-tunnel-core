@@ -157,6 +157,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -290,6 +291,10 @@ type Filter struct {
 	// filter. Only scalar string API parameters may be filtered.
 	// Values may be patterns containing the '*' wildcard.
 	APIParameters map[string][]string
+
+	// Min/MaxClientVersion specify version constraints the client must match.
+	MinClientVersion *int
+	MaxClientVersion *int
 
 	// SpeedTestRTTMilliseconds specifies a Range filter field that the
 	// client speed test samples must satisfy.
@@ -1010,6 +1015,26 @@ func (server *Server) getTactics(
 			}
 		}
 
+		if filteredTactics.Filter.MinClientVersion != nil ||
+			filteredTactics.Filter.MaxClientVersion != nil {
+
+			clientVersion, err := getIntStringRequestParam(
+				apiParams, protocol.PSIPHON_API_HANDSHAKE_CLIENT_VERSION)
+			if err != nil {
+				continue
+			}
+
+			if filteredTactics.Filter.MinClientVersion != nil &&
+				clientVersion < *filteredTactics.Filter.MinClientVersion {
+				continue
+			}
+
+			if filteredTactics.Filter.MaxClientVersion != nil &&
+				clientVersion > *filteredTactics.Filter.MaxClientVersion {
+				continue
+			}
+		}
+
 		if filteredTactics.Filter.SpeedTestRTTMilliseconds != nil {
 
 			var speedTestSamples []SpeedTestSample
@@ -1129,6 +1154,22 @@ func getStringRequestParam(apiParams common.APIParameters, name string) (string,
 	value, ok := apiParams[name].(string)
 	if !ok {
 		return "", errors.Tracef("invalid param: %s", name)
+	}
+	return value, nil
+}
+
+// TODO: refactor this copy of psiphon/server.getIntStringRequestParam into common?
+func getIntStringRequestParam(params common.APIParameters, name string) (int, error) {
+	if params[name] == nil {
+		return 0, errors.Tracef("missing param: %s", name)
+	}
+	valueStr, ok := params[name].(string)
+	if !ok {
+		return 0, errors.Tracef("invalid param: %s", name)
+	}
+	value, err := strconv.Atoi(valueStr)
+	if !ok {
+		return 0, errors.Trace(err)
 	}
 	return value, nil
 }
