@@ -63,6 +63,7 @@ const (
 	SHADOWSOCKS_KEY_BYTE_LENGTH                         = 32
 	PEAK_UPSTREAM_FAILURE_RATE_MINIMUM_SAMPLE_SIZE      = 10
 	PERIODIC_GARBAGE_COLLECTION                         = 120 * time.Second
+	METRIC_WRITER_SHUTDOWN_DELAY                        = 10 * time.Second
 	STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD = 20
 	DEFAULT_LOG_FILE_REOPEN_RETRIES                     = 25
 )
@@ -76,6 +77,14 @@ type Config struct {
 	//
 	// Some debug logs can contain user traffic destination address information.
 	LogLevel string `json:",omitempty"`
+
+	// LogFormat specifies the log format. Valid values are:
+	// json (default), protobuf, both
+	//
+	// In protobuf format, only messages emitted for the stats infrastructure
+	// have been converted, other logs will still be emitted in JSON format
+	// to the specified log file/stdout.
+	LogFormat string `json:",omitempty"`
 
 	// LogFilename specifies the path of the file to log
 	// to. When blank, logs are written to stderr.
@@ -105,6 +114,16 @@ type Config struct {
 	// SkipPanickingLogWriter disables panicking when
 	// unable to write any logs.
 	SkipPanickingLogWriter bool `json:",omitempty"`
+
+	// MetricSocketPath specifies the path on disk to the UDS socket
+	// that metrics are sent to for storing and forwarding.
+	// This value is only used if LogFormat is "protobuf" or "both".
+	MetricSocketPath string `json:",omitempty"`
+
+	// LogDestinationPrefix specifies the identifier string that will
+	// be prefixed to the Router protobuf message's Destination field.
+	// This value is only used if LogFormat is "protobuf" or "both".
+	LogDestinationPrefix string `json:",omitempty"`
 
 	// DiscoveryValueHMACKey is the network-wide secret value
 	// used to determine a unique discovery strategy.
@@ -412,6 +431,11 @@ type Config struct {
 	// PERIODIC_GARBAGE_COLLECTION.
 	PeriodicGarbageCollectionSeconds *int `json:",omitempty"`
 
+	// MetricWriterShutdownDelaySeconds specifies the number of seconds to
+	// wait for the metric writer to drain its buffer into the socket before
+	// forcibly stopping. The default is METRIC_WRITER_SHUTDOWN_DELAY.
+	MetricWriterShutdownDelaySeconds *int `json:",omitempty"`
+
 	// StopEstablishTunnelsEstablishedClientThreshold sets the established client
 	// threshold for dumping profiles when SIGTSTP is signaled. When there are
 	// less than or equal to the threshold number of established clients,
@@ -538,6 +562,7 @@ type Config struct {
 	sshHandshakeTimeout                            time.Duration
 	peakUpstreamFailureRateMinimumSampleSize       int
 	periodicGarbageCollection                      time.Duration
+	metricWriterShutdownDelay                      time.Duration
 	stopEstablishTunnelsEstablishedClientThreshold int
 	dumpProfilesOnStopEstablishTunnelsDoneOnce     int32
 	providerID                                     string
@@ -822,6 +847,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		config.periodicGarbageCollection = time.Duration(*config.PeriodicGarbageCollectionSeconds) * time.Second
 	}
 
+	config.metricWriterShutdownDelay = METRIC_WRITER_SHUTDOWN_DELAY
+	if config.MetricWriterShutdownDelaySeconds != nil {
+		config.metricWriterShutdownDelay = time.Duration(*config.MetricWriterShutdownDelaySeconds) * time.Second
+	}
+
 	config.stopEstablishTunnelsEstablishedClientThreshold = STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD
 	if config.StopEstablishTunnelsEstablishedClientThreshold != nil {
 		config.stopEstablishTunnelsEstablishedClientThreshold = *config.StopEstablishTunnelsEstablishedClientThreshold
@@ -894,6 +924,8 @@ type GenerateConfigParams struct {
 	LogFilename                        string
 	SkipPanickingLogWriter             bool
 	LogLevel                           string
+	LogFormat                          string
+	MetricSocketPath                   string
 	ServerEntrySignaturePublicKey      string
 	ServerEntrySignaturePrivateKey     string
 	ServerIPAddress                    string
@@ -1098,12 +1130,18 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		logLevel = "info"
 	}
 
+	logFormat := params.LogFormat
+	if logFormat == "" {
+		logFormat = "json"
+	}
+
 	// For testing, set the Psiphon server to create its log files; we do not
 	// expect tests to necessarily run under log managers, such as logrotate.
 	createMode := 0666
 
 	config := &Config{
 		LogLevel:                           logLevel,
+		LogFormat:                          logFormat,
 		LogFilename:                        params.LogFilename,
 		LogFileCreateMode:                  &createMode,
 		SkipPanickingLogWriter:             params.SkipPanickingLogWriter,

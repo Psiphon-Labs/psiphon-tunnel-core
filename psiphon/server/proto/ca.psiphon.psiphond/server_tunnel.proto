@@ -1,0 +1,139 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "ca.psiphon.psiphond/base_params.proto";
+import "ca.psiphon.psiphond/dial_params.proto";
+import "ca.psiphon.psiphond/inproxy_dial_params.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message ServerTunnel {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+    optional ca.psiphon.psiphond.DialParams dial_params = 2;
+    optional ca.psiphon.psiphond.InproxyDialParams inproxy_dial_params = 3;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional string tunnel_id = 100;
+
+    optional int64 burst_downstream_first_bytes = 101;
+    optional int64 burst_downstream_first_duration = 102;
+    optional int64 burst_downstream_first_offset = 103;
+    optional int64 burst_downstream_first_rate = 104;
+    optional int64 burst_downstream_last_bytes = 105;
+    optional int64 burst_downstream_last_duration = 106;
+    optional int64 burst_downstream_last_offset = 107;
+    optional int64 burst_downstream_last_rate = 108;
+    optional int64 burst_downstream_max_bytes = 109;
+    optional int64 burst_downstream_max_duration = 110;
+    optional int64 burst_downstream_max_offset = 111;
+    optional int64 burst_downstream_max_rate = 112;
+    optional int64 burst_downstream_min_bytes = 113;
+    optional int64 burst_downstream_min_duration = 114;
+    optional int64 burst_downstream_min_offset = 115;
+    optional int64 burst_downstream_min_rate = 116;
+    optional int64 burst_upstream_first_bytes = 117;
+    optional int64 burst_upstream_first_duration = 118;
+    optional int64 burst_upstream_first_offset = 119;
+    optional int64 burst_upstream_first_rate = 120;
+    optional int64 burst_upstream_last_bytes = 121;
+    optional int64 burst_upstream_last_duration = 122;
+    optional int64 burst_upstream_last_offset = 123;
+    optional int64 burst_upstream_last_rate = 124;
+    optional int64 burst_upstream_max_bytes = 125;
+    optional int64 burst_upstream_max_duration = 126;
+    optional int64 burst_upstream_max_offset = 127;
+    optional int64 burst_upstream_max_rate = 128;
+    optional int64 burst_upstream_min_bytes = 129;
+    optional int64 burst_upstream_min_duration = 130;
+    optional int64 burst_upstream_min_offset = 131;
+    optional int64 burst_upstream_min_rate = 132;
+
+    optional int64 bytes = 133;
+    optional int64 bytes_down_tcp = 134;
+    optional int64 bytes_down_udp = 135;
+    optional int64 bytes_up_tcp = 136;
+    optional int64 bytes_up_udp = 137;
+
+    optional int64 duration = 138;
+    optional int64 establishment_duration = 139;
+    optional bool handshake_completed = 140;
+    optional bool is_first_tunnel_in_session = 141;
+
+    optional int64 meek_cached_response_miss_position = 142;
+    optional int64 meek_client_retries = 143;
+    optional int64 meek_peak_cached_response_hit_size = 144;
+    optional int64 meek_peak_cached_response_size = 145;
+    optional int64 meek_peak_response_size = 146;
+    optional int64 meek_underlying_connection_count = 147;
+    optional string meek_server_http_version = 148; //LowCardinality
+
+    optional string new_tactics_tag = 149; //LowCardinality
+
+    optional int64 peak_concurrent_dialing_port_forward_count_tcp = 150;
+    optional int64 peak_concurrent_port_forward_count_tcp = 151;
+    optional int64 peak_concurrent_port_forward_count_udp = 152;
+    optional int64 peak_concurrent_proximate_accepted_clients = 153;
+    optional int64 peak_concurrent_proximate_established_clients = 154;
+    optional double peak_dns_failure_rate = 155;
+    optional int64 peak_dns_failure_rate_sample_size = 156;
+    optional double peak_tcp_port_forward_failure_rate = 157;
+    optional int64 peak_tcp_port_forward_failure_rate_sample_size = 158;
+
+    optional int64 pre_handshake_random_stream_count = 159;
+    optional int64 pre_handshake_random_stream_downstream_bytes = 160;
+    optional int64 pre_handshake_random_stream_received_upstream_bytes = 161;
+    optional int64 pre_handshake_random_stream_sent_downstream_bytes = 162;
+    optional int64 pre_handshake_random_stream_upstream_bytes = 163;
+
+    optional bool split_tunnel = 164;
+    optional google.protobuf.Timestamp start_time = 165;
+    optional string station_ip_address = 166; //LowCardinality
+
+    optional int64 total_packet_tunnel_channel_count = 167;
+    optional int64 total_port_forward_count_tcp = 168;
+    optional int64 total_port_forward_count_udp = 169;
+    optional int64 total_udpgw_channel_count = 170;
+
+    // Post-handshake random stream fields
+    optional int64 random_stream_count = 171;
+    optional int64 random_stream_upstream_bytes = 172;
+    optional int64 random_stream_received_upstream_bytes = 173;
+    optional int64 random_stream_downstream_bytes = 174;
+    optional int64 random_stream_sent_downstream_bytes = 175;
+
+    // Destination bytes fields (legacy format)
+    optional string dest_bytes_asn = 176;
+    optional int64 dest_bytes = 177;
+    optional int64 dest_bytes_up_tcp = 178;
+    optional int64 dest_bytes_down_tcp = 179;
+    optional int64 dest_bytes_up_udp = 180;
+    optional int64 dest_bytes_down_udp = 181;
+
+    // Additional transport and server entry fields
+    optional string relayed_steering_ip = 182;
+    optional int64 request_check_server_entry_tags = 183;
+    optional int64 checked_server_entry_tags = 184;
+    optional int64 invalid_server_entry_tags = 185;
+
+    // Protocol Overhead
+    optional int64 ssh_protocol_bytes = 186;
+    optional int64 ssh_protocol_bytes_overhead = 187;
+}
+
+message ServerTunnelASNDestBytes {
+    // Fields 1-99 are reserved for field groupings.
+
+    optional string tunnel_id = 100;
+
+    optional string dest_asn = 101;
+
+    optional int64 dest_bytes = 102;
+    optional int64 dest_bytes_up_tcp = 103;
+    optional int64 dest_bytes_down_tcp = 104;
+    optional int64 dest_bytes_up_udp = 105;
+    optional int64 dest_bytes_down_udp = 106;
+
+}
