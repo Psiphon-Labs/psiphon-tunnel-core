@@ -2529,6 +2529,14 @@ func (sshClient *sshClient) run(
 			})
 
 		defer func() {
+
+			// When panicking, propagate the panic instead of trying to
+			// acquire the sshClient lock. Intentional panics may arise from
+			// the protobuf code path in logTunnel.
+			if r := recover(); r != nil {
+				panic(r)
+			}
+
 			setReplayAfterFunc.Stop()
 			completed, _ := sshClient.getHandshaked()
 			if !completed {
