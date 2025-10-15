@@ -3747,7 +3747,7 @@ func makeTunneledWebRequest(
 
 func makeTunneledNTPRequest(t *testing.T, localSOCKSProxyPort int, udpgwServerAddress string) error {
 
-	timeout := 20 * time.Second
+	timeout := 10 * time.Second
 	var err error
 
 	testHostnames := []string{"time.google.com", "time.nist.gov", "pool.ntp.org"}
