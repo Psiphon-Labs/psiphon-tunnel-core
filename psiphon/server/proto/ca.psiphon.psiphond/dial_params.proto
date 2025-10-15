@@ -52,7 +52,7 @@ message DialParams {
     optional string server_entry_source = 38; //LowCardinality
     optional string server_entry_tag = 39;
     optional google.protobuf.Timestamp server_entry_timestamp = 40;
-    optional bool server_packet_manipulation = 41; //LowCardinality
+    optional string server_packet_manipulation = 41; //LowCardinality
     optional bool server_replay_fragmentation = 42; //LowCardinality
     optional bool server_replay_packet_manipulation = 43; //LowCardinality
     optional bool server_entry_valid = 44;

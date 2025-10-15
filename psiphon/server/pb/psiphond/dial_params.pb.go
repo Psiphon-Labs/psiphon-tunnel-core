@@ -64,7 +64,7 @@ type DialParams struct {
 	ServerEntrySource                 *string                `protobuf:"bytes,38,opt,name=server_entry_source,json=serverEntrySource,proto3,oneof" json:"server_entry_source,omitempty"` //LowCardinality
 	ServerEntryTag                    *string                `protobuf:"bytes,39,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
 	ServerEntryTimestamp              *timestamppb.Timestamp `protobuf:"bytes,40,opt,name=server_entry_timestamp,json=serverEntryTimestamp,proto3,oneof" json:"server_entry_timestamp,omitempty"`
-	ServerPacketManipulation          *bool                  `protobuf:"varint,41,opt,name=server_packet_manipulation,json=serverPacketManipulation,proto3,oneof" json:"server_packet_manipulation,omitempty"`                     //LowCardinality
+	ServerPacketManipulation          *string                `protobuf:"bytes,41,opt,name=server_packet_manipulation,json=serverPacketManipulation,proto3,oneof" json:"server_packet_manipulation,omitempty"`                      //LowCardinality
 	ServerReplayFragmentation         *bool                  `protobuf:"varint,42,opt,name=server_replay_fragmentation,json=serverReplayFragmentation,proto3,oneof" json:"server_replay_fragmentation,omitempty"`                  //LowCardinality
 	ServerReplayPacketManipulation    *bool                  `protobuf:"varint,43,opt,name=server_replay_packet_manipulation,json=serverReplayPacketManipulation,proto3,oneof" json:"server_replay_packet_manipulation,omitempty"` //LowCardinality
 	ServerEntryValid                  *bool                  `protobuf:"varint,44,opt,name=server_entry_valid,json=serverEntryValid,proto3,oneof" json:"server_entry_valid,omitempty"`
@@ -421,11 +421,11 @@ func (x *DialParams) GetServerEntryTimestamp() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *DialParams) GetServerPacketManipulation() bool {
+func (x *DialParams) GetServerPacketManipulation() string {
 	if x != nil && x.ServerPacketManipulation != nil {
 		return *x.ServerPacketManipulation
 	}
-	return false
+	return ""
 }
 
 func (x *DialParams) GetServerReplayFragmentation() bool {
@@ -774,7 +774,7 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x13server_entry_source\x18& \x01(\tH%R\x11serverEntrySource\x88\x01\x01\x12-\n" +
 	"\x10server_entry_tag\x18' \x01(\tH&R\x0eserverEntryTag\x88\x01\x01\x12U\n" +
 	"\x16server_entry_timestamp\x18( \x01(\v2\x1a.google.protobuf.TimestampH'R\x14serverEntryTimestamp\x88\x01\x01\x12A\n" +
-	"\x1aserver_packet_manipulation\x18) \x01(\bH(R\x18serverPacketManipulation\x88\x01\x01\x12C\n" +
+	"\x1aserver_packet_manipulation\x18) \x01(\tH(R\x18serverPacketManipulation\x88\x01\x01\x12C\n" +
 	"\x1bserver_replay_fragmentation\x18* \x01(\bH)R\x19serverReplayFragmentation\x88\x01\x01\x12N\n" +
 	"!server_replay_packet_manipulation\x18+ \x01(\bH*R\x1eserverReplayPacketManipulation\x88\x01\x01\x121\n" +
 	"\x12server_entry_valid\x18, \x01(\bH+R\x10serverEntryValid\x88\x01\x01\x12.\n" +
