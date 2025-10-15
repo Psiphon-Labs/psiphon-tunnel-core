@@ -1698,7 +1698,8 @@ func (metrics *packetMetrics) checkpoint(
 		}
 	}
 
-	logger.LogMetric(logName, logFields)
+	// Not currently a shipped LogMetric.
+	logger.WithTraceFields(logFields).Info(logName)
 }
 
 // PacketQueue is a fixed-size, preallocated queue of packets.
