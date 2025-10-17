@@ -89,7 +89,7 @@ message DialParams {
     optional int64 upstream_min_bytes_written = 71;
     optional int64 upstream_min_delayed = 72;
     optional int64 upstream_ossh_padding = 73;
-    optional string upstream_proxy_custom_header_names = 74; //LowCardinality
+    repeated string upstream_proxy_custom_header_names = 74; //LowCardinality
     optional string upstream_proxy_type = 75; //LowCardinality
 
     optional string passthrough_address = 76; //LowCardinality
