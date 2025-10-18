@@ -2627,7 +2627,6 @@ func DSLStoreServerEntry(
 
 	err = serverEntryFields.VerifySignature(serverEntrySignaturePublicKey)
 	if err != nil {
-		fmt.Printf("VerifySignature: %v!\n", err)
 		return errors.Trace(err)
 	}
 
@@ -2639,7 +2638,6 @@ func DSLStoreServerEntry(
 
 	err = protocol.ValidateServerEntryFields(serverEntryFields)
 	if err != nil {
-		fmt.Printf("ValidateServerEntryFields: %v!\n", err)
 		return errors.Trace(err)
 	}
 
@@ -2651,7 +2649,7 @@ func DSLStoreServerEntry(
 	return nil
 }
 
-// DSLGetLastUntunneledFetchTime returns the timestamp of the last
+// DSLGetLastActiveOSLsTime returns the timestamp of the last
 // successfully completed active OSL check.
 func DSLGetLastActiveOSLsTime() (time.Time, error) {
 	value, err := getTimeKeyValue(datastoreDSLLastActiveOSLsTimeKey)
