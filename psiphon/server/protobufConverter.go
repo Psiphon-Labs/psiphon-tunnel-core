@@ -35,6 +35,9 @@ var messageFieldGroups = map[string]FieldGroupConfig{
 	"domain_bytes": {
 		BaseParams: true,
 	},
+	"server_blocklist_hit": {
+		BaseParams: true,
+	},
 	"server_load":          {},
 	"server_load_protocol": {},
 	"server_load_dns":      {},
@@ -298,6 +301,10 @@ func LogFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 		msg := &pb.InproxyBroker{}
 		populateProtobufMessage(logFields, msg, eventName)
 		psiphondWrapped.Metric = &pb.Psiphond_InproxyBroker{InproxyBroker: msg}
+	case "server_blocklist_hit":
+		msg := &pb.ServerBlocklistHit{}
+		populateProtobufMessage(logFields, msg, eventName)
+		psiphondWrapped.Metric = &pb.Psiphond_ServerBlocklist{ServerBlocklist: msg}
 	}
 
 	// Single append for all non-special cases.

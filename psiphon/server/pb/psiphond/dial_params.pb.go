@@ -97,9 +97,9 @@ type DialParams struct {
 	UpstreamMinBytesWritten           *int64                 `protobuf:"varint,71,opt,name=upstream_min_bytes_written,json=upstreamMinBytesWritten,proto3,oneof" json:"upstream_min_bytes_written,omitempty"`
 	UpstreamMinDelayed                *int64                 `protobuf:"varint,72,opt,name=upstream_min_delayed,json=upstreamMinDelayed,proto3,oneof" json:"upstream_min_delayed,omitempty"`
 	UpstreamOsshPadding               *int64                 `protobuf:"varint,73,opt,name=upstream_ossh_padding,json=upstreamOsshPadding,proto3,oneof" json:"upstream_ossh_padding,omitempty"`
-	UpstreamProxyCustomHeaderNames    *string                `protobuf:"bytes,74,opt,name=upstream_proxy_custom_header_names,json=upstreamProxyCustomHeaderNames,proto3,oneof" json:"upstream_proxy_custom_header_names,omitempty"` //LowCardinality
-	UpstreamProxyType                 *string                `protobuf:"bytes,75,opt,name=upstream_proxy_type,json=upstreamProxyType,proto3,oneof" json:"upstream_proxy_type,omitempty"`                                            //LowCardinality
-	PassthroughAddress                *string                `protobuf:"bytes,76,opt,name=passthrough_address,json=passthroughAddress,proto3,oneof" json:"passthrough_address,omitempty"`                                           //LowCardinality
+	UpstreamProxyCustomHeaderNames    []string               `protobuf:"bytes,74,rep,name=upstream_proxy_custom_header_names,json=upstreamProxyCustomHeaderNames,proto3" json:"upstream_proxy_custom_header_names,omitempty"` //LowCardinality
+	UpstreamProxyType                 *string                `protobuf:"bytes,75,opt,name=upstream_proxy_type,json=upstreamProxyType,proto3,oneof" json:"upstream_proxy_type,omitempty"`                                      //LowCardinality
+	PassthroughAddress                *string                `protobuf:"bytes,76,opt,name=passthrough_address,json=passthroughAddress,proto3,oneof" json:"passthrough_address,omitempty"`                                     //LowCardinality
 	PadResponse                       *int64                 `protobuf:"varint,77,opt,name=pad_response,json=padResponse,proto3,oneof" json:"pad_response,omitempty"`
 	Padding                           *int64                 `protobuf:"varint,78,opt,name=padding,proto3,oneof" json:"padding,omitempty"`
 	ClientBpf                         *string                `protobuf:"bytes,79,opt,name=client_bpf,json=clientBpf,proto3,oneof" json:"client_bpf,omitempty"` //LowCardinality
@@ -652,11 +652,11 @@ func (x *DialParams) GetUpstreamOsshPadding() int64 {
 	return 0
 }
 
-func (x *DialParams) GetUpstreamProxyCustomHeaderNames() string {
-	if x != nil && x.UpstreamProxyCustomHeaderNames != nil {
-		return *x.UpstreamProxyCustomHeaderNames
+func (x *DialParams) GetUpstreamProxyCustomHeaderNames() []string {
+	if x != nil {
+		return x.UpstreamProxyCustomHeaderNames
 	}
-	return ""
+	return nil
 }
 
 func (x *DialParams) GetUpstreamProxyType() string {
@@ -726,7 +726,7 @@ var File_ca_psiphon_psiphond_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\x971\n" +
+	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xeb0\n" +
 	"\n" +
 	"DialParams\x12*\n" +
 	"\x0econjure_cached\x18\x01 \x01(\bH\x00R\rconjureCached\x88\x01\x01\x12(\n" +
@@ -809,19 +809,19 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x14upstream_max_delayed\x18F \x01(\x03HER\x12upstreamMaxDelayed\x88\x01\x01\x12@\n" +
 	"\x1aupstream_min_bytes_written\x18G \x01(\x03HFR\x17upstreamMinBytesWritten\x88\x01\x01\x125\n" +
 	"\x14upstream_min_delayed\x18H \x01(\x03HGR\x12upstreamMinDelayed\x88\x01\x01\x127\n" +
-	"\x15upstream_ossh_padding\x18I \x01(\x03HHR\x13upstreamOsshPadding\x88\x01\x01\x12O\n" +
-	"\"upstream_proxy_custom_header_names\x18J \x01(\tHIR\x1eupstreamProxyCustomHeaderNames\x88\x01\x01\x123\n" +
-	"\x13upstream_proxy_type\x18K \x01(\tHJR\x11upstreamProxyType\x88\x01\x01\x124\n" +
-	"\x13passthrough_address\x18L \x01(\tHKR\x12passthroughAddress\x88\x01\x01\x12&\n" +
-	"\fpad_response\x18M \x01(\x03HLR\vpadResponse\x88\x01\x01\x12\x1d\n" +
-	"\apadding\x18N \x01(\x03HMR\apadding\x88\x01\x01\x12\"\n" +
+	"\x15upstream_ossh_padding\x18I \x01(\x03HHR\x13upstreamOsshPadding\x88\x01\x01\x12J\n" +
+	"\"upstream_proxy_custom_header_names\x18J \x03(\tR\x1eupstreamProxyCustomHeaderNames\x123\n" +
+	"\x13upstream_proxy_type\x18K \x01(\tHIR\x11upstreamProxyType\x88\x01\x01\x124\n" +
+	"\x13passthrough_address\x18L \x01(\tHJR\x12passthroughAddress\x88\x01\x01\x12&\n" +
+	"\fpad_response\x18M \x01(\x03HKR\vpadResponse\x88\x01\x01\x12\x1d\n" +
+	"\apadding\x18N \x01(\x03HLR\apadding\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"client_bpf\x18O \x01(\tHNR\tclientBpf\x88\x01\x01\x12\"\n" +
+	"client_bpf\x18O \x01(\tHMR\tclientBpf\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"server_bpf\x18P \x01(\tHOR\tserverBpf\x88\x01\x01\x12?\n" +
-	"\x19established_tunnels_count\x18Q \x01(\x03HPR\x17establishedTunnelsCount\x88\x01\x01\x12A\n" +
-	"\x1anetwork_latency_multiplier\x18R \x01(\x01HQR\x18networkLatencyMultiplier\x88\x01\x01\x12*\n" +
-	"\x0eseed_transform\x18S \x01(\tHRR\rseedTransform\x88\x01\x01B\x11\n" +
+	"server_bpf\x18P \x01(\tHNR\tserverBpf\x88\x01\x01\x12?\n" +
+	"\x19established_tunnels_count\x18Q \x01(\x03HOR\x17establishedTunnelsCount\x88\x01\x01\x12A\n" +
+	"\x1anetwork_latency_multiplier\x18R \x01(\x01HPR\x18networkLatencyMultiplier\x88\x01\x01\x12*\n" +
+	"\x0eseed_transform\x18S \x01(\tHQR\rseedTransform\x88\x01\x01B\x11\n" +
 	"\x0f_conjure_cachedB\x10\n" +
 	"\x0e_conjure_delayB\x17\n" +
 	"\x15_conjure_empty_packetB\x12\n" +
@@ -895,8 +895,7 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x15_upstream_max_delayedB\x1d\n" +
 	"\x1b_upstream_min_bytes_writtenB\x17\n" +
 	"\x15_upstream_min_delayedB\x18\n" +
-	"\x16_upstream_ossh_paddingB%\n" +
-	"#_upstream_proxy_custom_header_namesB\x16\n" +
+	"\x16_upstream_ossh_paddingB\x16\n" +
 	"\x14_upstream_proxy_typeB\x16\n" +
 	"\x14_passthrough_addressB\x0f\n" +
 	"\r_pad_responseB\n" +
