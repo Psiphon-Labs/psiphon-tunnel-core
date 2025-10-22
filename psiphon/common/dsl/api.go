@@ -34,6 +34,8 @@
 package dsl
 
 import (
+	"encoding/base64"
+
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
@@ -62,6 +64,18 @@ type DiscoverServerEntriesRequest struct {
 // value. Hex- or base64-encoded tag strings should be converted to binary
 // for compactness.
 type ServerEntryTag []byte
+
+// MarshalText emits server entry tag as base64 with padding.
+// Uses the same string encoding as protocol.GenerateServerEntryTag.
+func (tag ServerEntryTag) MarshalText() ([]byte, error) {
+	return []byte(tag.String()), nil
+}
+
+// String emits server entry tag as base64 with padding.
+// Uses the same string encoding as protocol.GenerateServerEntryTag.
+func (tag ServerEntryTag) String() string {
+	return base64.StdEncoding.EncodeToString(tag)
+}
 
 // VersionedServerEntryTag is a server entry tag and version pair.
 type VersionedServerEntryTag struct {

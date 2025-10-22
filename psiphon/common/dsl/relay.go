@@ -532,9 +532,8 @@ func (r *Relay) getCachedGetServerEntriesResponse(
 		// The cached entry's TTL is not extended on a hit.
 
 		// serverEntryTags are used for logging the request event when served
-		// from the cache. Use the same same string encoding as
-		// protocol.GenerateServerEntryTag.
-		serverEntryTags[i] = base64.StdEncoding.EncodeToString(serverEntryTag)
+		// from the cache.
+		serverEntryTags[i] = serverEntryTag.String()
 
 		response.SourcedServerEntries[i] = cacheEntry.(*SourcedServerEntry)
 	}
