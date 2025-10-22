@@ -1122,7 +1122,7 @@ var dslRequestParams = append(
 
 func getDSLAPIParameterValidator(config *Config) common.APIParameterValidator {
 	return func(params common.APIParameters) error {
-		return validateRequestParams(config, params, tacticsRequestParams)
+		return validateRequestParams(config, params, dslRequestParams)
 	}
 }
 

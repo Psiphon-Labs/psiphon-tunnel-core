@@ -353,7 +353,7 @@ func (r *Relay) HandleRequest(
 		httpRequest.Header.Set(PsiphonHostIDHeader, r.config.HostID)
 
 		startTime := time.Now()
-		httpResponse, err := r.httpClient.Do(httpRequest)
+		httpResponse, err := httpClient.Do(httpRequest)
 		duration := time.Since(startTime)
 
 		if err == nil && httpResponse.StatusCode != http.StatusOK {
