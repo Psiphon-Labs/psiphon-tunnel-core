@@ -558,10 +558,8 @@ func (r *Relay) getCachedGetServerEntriesResponse(
 	}
 
 	logFields := r.config.APIParameterLogFieldFormatter("", clientGeoIPData, baseParams)
-	logFields["dsl_event"] = "get-server-entries"
-	logFields["host_id"] = r.config.HostID
 	logFields["server_entry_tags"] = serverEntryTags
-	r.config.Logger.LogMetric("dsl", logFields)
+	r.config.Logger.LogMetric("dsl_relay_get_server_entries", logFields)
 
 	return cborResponse, nil
 }

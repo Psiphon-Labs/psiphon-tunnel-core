@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "ca.psiphon.psiphond/base_params.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message DSLRelayGetServerEntries {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    repeated string server_entry_tags = 100;
+}
