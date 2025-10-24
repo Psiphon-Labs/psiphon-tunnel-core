@@ -2038,6 +2038,7 @@ func (server *MeekServer) inproxyBrokerGetTacticsPayload(
 	responseMarshaler = json.Marshal
 
 	compressTactics := protocol.GetCompressTactics(apiParameters)
+
 	if compressTactics {
 		responseMarshaler = protocol.CBOREncoding.Marshal
 	}

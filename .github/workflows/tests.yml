@@ -96,7 +96,7 @@ jobs:
           go test -v -race ./psiphon/common/values
           go test -v -race ./psiphon/common/wildcard
           go test -v -race ./psiphon/transferstats
-          sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_ENABLE_INPROXY PSIPHON_ENABLE_DSL_CLIENT PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -race ./psiphon/server/psinet
           go test -v -timeout 30m -race ./psiphon
           go test -v -race ./ClientLibrary/clientlib
@@ -131,7 +131,7 @@ jobs:
           go test -v -covermode=count -coverprofile=values.coverprofile ./psiphon/common/values
           go test -v -covermode=count -coverprofile=wildcard.coverprofile ./psiphon/common/wildcard
           go test -v -covermode=count -coverprofile=transferstats.coverprofile ./psiphon/transferstats
-          sudo -E env "PATH=$PATH" go test -v -timeout 30m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 30m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_ENABLE_INPROXY PSIPHON_ENABLE_DSL_CLIENT PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -covermode=count -coverprofile=psinet.coverprofile ./psiphon/server/psinet
           go test -v -timeout 30m -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
           go test -v -covermode=count -coverprofile=clientlib.coverprofile ./ClientLibrary/clientlib
@@ -158,6 +158,7 @@ jobs:
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient
           go build -a -v -tags ""
+          go build -a -v -tags "PSIPHON_ENABLE_DSL_CLIENT"
           go build -a -v -tags "PSIPHON_ENABLE_INPROXY"
           go build -a -v -tags "PSIPHON_DISABLE_QUIC"
           go build -a -v -tags "PSIPHON_DISABLE_GQUIC"

@@ -21,6 +21,7 @@ package protocol
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -805,7 +806,7 @@ type HandshakeResponse struct {
 	ClientAddress             string              `json:"client_address,omitempty" cbor:"7,keyasint,omitempty"`
 	ServerTimestamp           string              `json:"server_timestamp,omitempty" cbor:"8,keyasint,omitempty"`
 	ActiveAuthorizationIDs    []string            `json:"active_authorization_ids,omitempty" cbor:"9,keyasint,omitempty"`
-	TacticsPayload            []byte              `json:"tactics_payload,omitempty" cbor:"10,keyasint,omitempty"`
+	TacticsPayload            json.RawMessage     `json:"tactics_payload,omitempty" cbor:"10,keyasint,omitempty"`
 	TacticsPayloadCompression int32               `json:"tactics_payload_compression,omitempty" cbor:"11,keyasint,omitempty"`
 	UpstreamBytesPerSecond    int64               `json:"upstream_bytes_per_second,omitempty" cbor:"12,keyasint,omitempty"`
 	DownstreamBytesPerSecond  int64               `json:"downstream_bytes_per_second,omitempty" cbor:"13,keyasint,omitempty"`

@@ -337,7 +337,7 @@ type Payload struct {
 	Tag string `cbor:"1,keyasint,omitempty"`
 
 	// Tactics is a JSON- or CBOR-encoded Tactics struct and may be nil.
-	Tactics []byte `cbor:"2,keyasint,omitempty"`
+	Tactics json.RawMessage `cbor:"2,keyasint,omitempty"`
 
 	// TacticsCompression specifies how Tactics is compressed.
 	TacticsCompression int32 `cbor:"3,keyasint,omitempty"`
@@ -1631,6 +1631,7 @@ func FetchTactics(
 	params *parameters.Parameters,
 	storer Storer,
 	getNetworkID func() string,
+	compressTacticsEnabled bool,
 	apiParams common.APIParameters,
 	endPointRegion string,
 	endPointProtocol string,
@@ -1641,7 +1642,7 @@ func FetchTactics(
 	p := params.Get()
 	speedTestPaddingMinBytes := p.Int(parameters.SpeedTestPaddingMinBytes)
 	speedTestPaddingMaxBytes := p.Int(parameters.SpeedTestPaddingMaxBytes)
-	compressTactics := p.Bool(parameters.CompressTactics)
+	compressTactics := compressTacticsEnabled && p.Bool(parameters.CompressTactics)
 	p.Close()
 
 	networkID := getNetworkID()
@@ -1748,7 +1749,6 @@ func FetchTactics(
 	// Process and store the response payload.
 
 	var payload *Payload
-
 	_, err = unboxPayload(
 		TACTICS_RESPONSE_NONCE,
 		requestPublicKey,

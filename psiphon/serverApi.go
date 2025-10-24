@@ -185,7 +185,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 		}
 
 		p := serverContext.tunnel.config.GetParameters().Get()
-		compressTactics = p.Bool(parameters.CompressTactics)
+		compressTactics = compressTacticsEnabled && p.Bool(parameters.CompressTactics)
 		p.Close()
 	}
 

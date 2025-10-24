@@ -47,6 +47,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	utls "github.com/Psiphon-Labs/utls"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"github.com/fxamacker/cbor/v2"
 	"golang.org/x/time/rate"
 )
 
@@ -3394,6 +3395,14 @@ func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParamet
 		if err != nil {
 			return nil, "", errors.Trace(err)
 		}
+
+		p := controller.config.GetParameters().Get()
+		compressTactics := compressTacticsEnabled && p.Bool(parameters.CompressTactics)
+		p.Close()
+
+		if compressTactics {
+			protocol.SetCompressTactics(params)
+		}
 	}
 
 	return params, networkID, nil
@@ -3429,7 +3438,7 @@ func (controller *Controller) inproxyMakeProxyWebRTCDialCoordinator() (
 // inproxyHandleTacticsPayload duplicates some tactics-handling code from
 // doHandshakeRequest.
 func (controller *Controller) inproxyHandleProxyTacticsPayload(
-	networkID string, tacticsPayload []byte) bool {
+	networkID string, compressTactics bool, tacticsPayload []byte) bool {
 
 	if controller.config.DisableTactics {
 		return false
@@ -3440,8 +3449,14 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 		return false
 	}
 
+	var payloadUnmarshaler func([]byte, any) error
+	payloadUnmarshaler = json.Unmarshal
+	if compressTactics {
+		payloadUnmarshaler = cbor.Unmarshal
+	}
+
 	var payload *tactics.Payload
-	err := json.Unmarshal(tacticsPayload, &payload)
+	err := payloadUnmarshaler(tacticsPayload, &payload)
 	if err != nil {
 		NoticeError("unmarshal tactics payload failed: %v", errors.Trace(err))
 		return false
@@ -3527,3 +3542,5 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 
 	return appliedNewTactics
 }
+
+var compressTacticsEnabled = true
