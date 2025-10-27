@@ -9,8 +9,8 @@ option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/
 message ServerLoadProtocol {
   // Fields 1-99 are reserved for field groupings.
 
-  optional string region = 100; //LowCardinality
-  optional string protocol = 101; //LowCardinality
+  optional string region = 100;
+  optional string protocol = 101;
 
   optional int64 accepted_clients = 102;
   optional int64 established_clients = 103;
@@ -19,7 +19,7 @@ message ServerLoadProtocol {
 message ServerLoadDNS {
   // Fields 1-99 are reserved for field groupings.
 
-  optional string dns_server = 100; //LowCardinality
+  optional string dns_server = 100;
   optional int64 dns_count = 101; 
   optional int64 dns_duration = 102;
   optional int64 dns_failed_count = 103;

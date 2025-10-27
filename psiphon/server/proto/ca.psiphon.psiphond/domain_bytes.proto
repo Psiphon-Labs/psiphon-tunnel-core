@@ -12,5 +12,5 @@ message DomainBytes {
     // Fields 1-99 are reserved for field groupings.
 
     optional int64 bytes = 100;
-    optional string domain = 101; //LowCardinality
+    optional string domain = 101;
 }

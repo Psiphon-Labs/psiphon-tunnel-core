@@ -14,8 +14,8 @@ message Tactics {
     // Fields 1-99 are reserved for field groupings.
 
     optional bool is_tactics_request = 100;
-    optional string new_tactics_tag = 101; //LowCardinality
-    optional string stored_tactics_tag = 102; //LowCardinality
+    optional string new_tactics_tag = 101;
+    optional string stored_tactics_tag = 102;
 }
 
 message TacticsSpeedTest {
@@ -26,6 +26,6 @@ message TacticsSpeedTest {
     optional int64 round_trip_time_ms = 100;
     optional int64 bytes_down = 101;
     optional int64 bytes_up = 102;
-    optional string relay_protocol = 103; //LowCardinality
-    optional string server_region = 104; //LowCardinality
+    optional string relay_protocol = 103;
+    optional string server_region = 104;
 }

@@ -22,10 +22,10 @@ option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/
 message Psiphond {
   optional google.protobuf.Timestamp timestamp = 1;
 
-  optional string host_id = 2; //LowCardinality
-  optional string host_type = 3; //LowCardinality
-  optional string host_build_rev = 4; //LowCardinality
-  optional string provider = 5; //LowCardinality
+  optional string host_id = 2;
+  optional string host_type = 3;
+  optional string host_build_rev = 4;
+  optional string provider = 5;
  
   oneof metric {
     ca.psiphon.psiphond.DomainBytes domain_bytes = 101;
