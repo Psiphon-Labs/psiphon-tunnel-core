@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	pb "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond"
@@ -53,7 +54,6 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 		baseParams: true,
 		dialParams: true,
 	},
-	"panic": {},
 	"tactics": {
 		baseParams: true,
 		dialParams: true,
@@ -63,28 +63,26 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 	},
 }
 
-// newProtobufRoutedMessage returns a new pointer to a populated Router
-// protobuf message. The error paths in this function should never be
-// reached, but in rare cases where they do, instead of returning an error,
-// we panic, and allow the existing recovery and logging message to capture
-// the error.
-func newProtobufRoutedMessage(msg proto.Message) *pbr.Router {
+// NewProtobufRoutedMessage returns a populated Router protobuf message.
+func NewProtobufRoutedMessage(
+	destinationPrefix string, msg proto.Message) (*pbr.Router, error) {
+
 	md := msg.ProtoReflect().Descriptor()
 	metric := md.Oneofs().ByName("metric")
 	if metric == nil {
-		panic("cannot find oneof field: metric")
+		return nil, errors.TraceNew("cannot find oneof field: metric")
 	}
 
 	messageType := string(md.FullName())
 
 	metricType := msg.ProtoReflect().WhichOneof(metric).TextName()
+
 	destination := strings.ToLower(strings.ReplaceAll(
-		fmt.Sprintf("%s-%s-%s", logDestinationPrefix, md.Name(), metricType), "_", "-",
-	))
+		fmt.Sprintf("%s-%s-%s", destinationPrefix, md.Name(), metricType), "_", "-"))
 
 	serialized, err := proto.Marshal(msg)
 	if err != nil {
-		panic(fmt.Errorf("failed to serialize inner protobuf message to bytes: %w", err))
+		return nil, errors.Trace(err)
 	}
 
 	return &pbr.Router{
@@ -92,7 +90,22 @@ func newProtobufRoutedMessage(msg proto.Message) *pbr.Router {
 		MessageType: &messageType,
 		Key:         []byte(logHostID),
 		Value:       serialized,
+	}, nil
+}
+
+// newProtobufRoutedMessage returns a new pointer to a populated Router
+// protobuf message. The error paths in this function should never be
+// reached, but in rare cases where they do, instead of returning an error,
+// we panic, and allow the existing recovery and logging message to capture
+// the error.
+func newProtobufRoutedMessage(msg proto.Message) *pbr.Router {
+
+	routedMsg, err := NewProtobufRoutedMessage(logDestinationPrefix, msg)
+	if err != nil {
+		panic(err.Error())
 	}
+
+	return routedMsg
 }
 
 // newPsiphondProtobufMessageWrapper returns a new pointer to a Psiphond

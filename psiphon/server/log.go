@@ -26,7 +26,6 @@ import (
 	"io/ioutil"
 	go_log "log"
 	"os"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -323,11 +322,6 @@ func InitLogging(config *Config) (retErr error) {
 			logFormat = "json"
 		}
 
-		if !slices.Contains([]string{"json", "protobuf", "both"}, logFormat) {
-			retErr = errors.Tracef("invalid log format: %s", logFormat)
-			return
-		}
-
 		shouldLogProtobuf = (logFormat == "protobuf" || logFormat == "both")
 		shouldLogJSON = (logFormat == "json" || logFormat == "both")
 
@@ -382,15 +376,6 @@ func InitLogging(config *Config) (retErr error) {
 		}
 
 		if shouldLogProtobuf {
-			if logDestinationPrefix == "" {
-				retErr = errors.TraceNew("LogDestinationPrefix must be set if protobuf logging is enabled")
-				return
-			}
-
-			if config.MetricSocketPath == "" {
-				retErr = errors.TraceNew("MetricSocketPath must be set if protobuf logging is enabled")
-				return
-			}
 
 			metricSocketWriter, retErr = udsipc.NewWriter(config.MetricSocketPath)
 			if retErr != nil {

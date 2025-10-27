@@ -8,6 +8,4 @@ message ServerPanic {
     // Fields 1-99 are reserved for field groupings.
 
     optional string panic = 100;
-    optional string recover_value = 101;
-    optional string stack = 102;
 }

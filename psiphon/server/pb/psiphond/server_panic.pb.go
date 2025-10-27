@@ -24,8 +24,6 @@ const (
 type ServerPanic struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Panic         *string                `protobuf:"bytes,100,opt,name=panic,proto3,oneof" json:"panic,omitempty"`
-	RecoverValue  *string                `protobuf:"bytes,101,opt,name=recover_value,json=recoverValue,proto3,oneof" json:"recover_value,omitempty"`
-	Stack         *string                `protobuf:"bytes,102,opt,name=stack,proto3,oneof" json:"stack,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -67,32 +65,14 @@ func (x *ServerPanic) GetPanic() string {
 	return ""
 }
 
-func (x *ServerPanic) GetRecoverValue() string {
-	if x != nil && x.RecoverValue != nil {
-		return *x.RecoverValue
-	}
-	return ""
-}
-
-func (x *ServerPanic) GetStack() string {
-	if x != nil && x.Stack != nil {
-		return *x.Stack
-	}
-	return ""
-}
-
 var File_ca_psiphon_psiphond_server_panic_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_panic_proto_rawDesc = "" +
 	"\n" +
-	"&ca.psiphon.psiphond/server_panic.proto\x12\x13ca.psiphon.psiphond\"\x93\x01\n" +
+	"&ca.psiphon.psiphond/server_panic.proto\x12\x13ca.psiphon.psiphond\"2\n" +
 	"\vServerPanic\x12\x19\n" +
-	"\x05panic\x18d \x01(\tH\x00R\x05panic\x88\x01\x01\x12(\n" +
-	"\rrecover_value\x18e \x01(\tH\x01R\frecoverValue\x88\x01\x01\x12\x19\n" +
-	"\x05stack\x18f \x01(\tH\x02R\x05stack\x88\x01\x01B\b\n" +
-	"\x06_panicB\x10\n" +
-	"\x0e_recover_valueB\b\n" +
-	"\x06_stackBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x05panic\x18d \x01(\tH\x00R\x05panic\x88\x01\x01B\b\n" +
+	"\x06_panicBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_panic_proto_rawDescOnce sync.Once
