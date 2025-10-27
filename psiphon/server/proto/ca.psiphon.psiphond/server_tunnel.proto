@@ -68,9 +68,9 @@ message ServerTunnel {
     optional int64 meek_peak_cached_response_size = 145;
     optional int64 meek_peak_response_size = 146;
     optional int64 meek_underlying_connection_count = 147;
-    optional string meek_server_http_version = 148; //LowCardinality
+    optional string meek_server_http_version = 148;
 
-    optional string new_tactics_tag = 149; //LowCardinality
+    optional string new_tactics_tag = 149;
 
     optional int64 peak_concurrent_dialing_port_forward_count_tcp = 150;
     optional int64 peak_concurrent_port_forward_count_tcp = 151;
@@ -90,7 +90,7 @@ message ServerTunnel {
 
     optional bool split_tunnel = 164;
     optional google.protobuf.Timestamp start_time = 165;
-    optional string station_ip_address = 166; //LowCardinality
+    optional string station_ip_address = 166;
 
     optional int64 total_packet_tunnel_channel_count = 167;
     optional int64 total_port_forward_count_tcp = 168;

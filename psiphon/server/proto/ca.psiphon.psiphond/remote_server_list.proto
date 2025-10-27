@@ -18,7 +18,7 @@ message RemoteServerList {
     optional int64 bytes = 101;
     optional google.protobuf.Timestamp client_download_timestamp = 102;
     optional int64 duration = 103;
-    optional string etag = 104; //LowCardinality
+    optional string etag = 104;
     optional bool tunneled = 105;
-    optional string url = 106; //LowCardinality
+    optional string url = 106;
 }

@@ -29,6 +29,7 @@ import (
 	"encoding/pem"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -673,6 +674,19 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 	err := json.Unmarshal(configJSON, &config)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if !slices.Contains([]string{"", "json", "protobuf", "both"}, config.LogFormat) {
+		return nil, errors.Tracef("invalid log format: %s", logFormat)
+	}
+
+	if config.LogFormat == "protobuf" || config.LogFormat == "both" {
+		if config.LogDestinationPrefix == "" {
+			return nil, errors.TraceNew("LogDestinationPrefix must be set if protobuf logging is enabled")
+		}
+		if config.MetricSocketPath == "" {
+			return nil, errors.TraceNew("MetricSocketPath must be set if protobuf logging is enabled")
+		}
 	}
 
 	if config.ServerIPAddress == "" {

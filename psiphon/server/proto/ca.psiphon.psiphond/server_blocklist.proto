@@ -11,7 +11,7 @@ message ServerBlocklistHit {
 
     // Fields 1-99 are reserved for field groupings.
 
-    optional string blocklist_ip_address = 100; //LowCardinality
-    optional string blocklist_source = 101; //LowCardinality
-    optional string blocklist_subject = 102; //LowCardinality
+    optional string blocklist_ip_address = 100;
+    optional string blocklist_source = 101;
+    optional string blocklist_subject = 102;
 }

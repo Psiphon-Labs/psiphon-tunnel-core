@@ -7,25 +7,25 @@ import "google/protobuf/timestamp.proto";
 option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
 
 message BaseParams {
-    optional string client_asn = 1; //LowCardinality
-    optional string client_aso = 2; //LowCardinality
-    optional string client_build_rev = 3; //LowCardinality
-    optional string client_city = 4; //LowCardinality
-    repeated string client_features = 5; //LowCardinality
-    optional string client_isp = 6; //LowCardinality
-    optional string client_platform = 7; //LowCardinality
-    optional string client_region = 8; //LowCardinality
+    optional string client_asn = 1;
+    optional string client_aso = 2;
+    optional string client_build_rev = 3;
+    optional string client_city = 4;
+    repeated string client_features = 5;
+    optional string client_isp = 6;
+    optional string client_platform = 7;
+    optional string client_region = 8;
     optional int64 client_version = 9;
 
     optional string device_location = 10; //device_location uses geohash encoding
-    optional string device_region = 11; //LowCardinality
+    optional string device_region = 11;
 
     optional string session_id = 12;
-    optional string sponsor_id = 13; //LowCardinality
-    optional string propagation_channel_id = 14; //LowCardinality
+    optional string sponsor_id = 13;
+    optional string propagation_channel_id = 14;
 
-    optional string applied_tactics_tag = 15; //LowCardinality
-    optional string egress_region = 16; //LowCardinality
+    optional string applied_tactics_tag = 15;
+    optional string egress_region = 16;
     optional google.protobuf.Timestamp last_connected = 17;
-    repeated string authorized_access_types = 18; //LowCardinality
+    repeated string authorized_access_types = 18;
 }
