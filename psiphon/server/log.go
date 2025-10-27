@@ -141,7 +141,7 @@ func (logger *TraceLogger) LogRawFieldsWithTimestamp(fields LogFields) {
 	}
 
 	if ShouldLogProtobuf() {
-		for _, protoMsg := range LogFieldsToProtobuf(fields) {
+		for _, protoMsg := range logFieldsToProtobuf(fields) {
 			if protoMsg == nil {
 				logger.WithTrace().Error("failed to populate protobuf message struct")
 				continue
