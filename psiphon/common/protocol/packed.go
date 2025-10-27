@@ -629,6 +629,9 @@ func init() {
 		//
 		// - the `padding` field is not packed since it is intended to pad the
 		//   encoded message to its existing size.
+		//
+		// - egress_region is now in server.baseParams, but its encoding
+		//   remains the same.
 
 		{15, "relay_protocol", nil},
 		{16, "ssh_client_version", nil},

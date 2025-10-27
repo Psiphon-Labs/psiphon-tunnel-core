@@ -1161,6 +1161,10 @@ func getBaseAPIParameters(
 		params["device_location"] = config.DeviceLocation
 	}
 
+	if config.EgressRegion != "" {
+		params["egress_region"] = config.EgressRegion
+	}
+
 	if filter == baseParametersAll {
 
 		if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) {
@@ -1283,10 +1287,6 @@ func getBaseAPIParameters(
 			isReplay = "1"
 		}
 		params["is_replay"] = isReplay
-
-		if config.EgressRegion != "" {
-			params["egress_region"] = config.EgressRegion
-		}
 
 		// dialParams.DialDuration is nanoseconds; report milliseconds
 		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/time.Millisecond)
