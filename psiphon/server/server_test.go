@@ -1593,6 +1593,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	timer.Stop()
 
+	// reset client datastore
+
+	_ = os.RemoveAll(filepath.Join(testDataDirName, psiphon.PsiphonDataDirectoryName))
+
 	// configure client
 
 	values.SetSSHClientVersionsSpec(values.NewPickOneSpec(testSSHClientVersions))
@@ -1917,12 +1921,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			time.Now().UTC().AddDate(0, 0, -1).Truncate(1*time.Hour).Format(time.RFC3339))
 		expectUniqueUser = true
 	case 2:
-		// Leave previous last_connected.
+		// Mock same day last_connected.
+		psiphon.SetKeyValue(
+			"lastConnected",
+			time.Now().UTC().Add(-1*time.Minute).Truncate(1*time.Hour).Format(time.RFC3339))
 		expectUniqueUser = false
 	}
-
-	// Clear SLOKs from previous test runs.
-	psiphon.DeleteSLOKs()
 
 	// Store prune server entry test server entries and failed tunnel records.
 	storePruneServerEntriesTest(
