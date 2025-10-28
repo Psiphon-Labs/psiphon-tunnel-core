@@ -2590,8 +2590,10 @@ func DSLHasServerEntry(tag dsl.ServerEntryTag, version int) bool {
 		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
 
 		serverEntryTagRecord := serverEntryTags.get(tag)
+
 		if serverEntryTagRecord == nil {
-			return errors.TraceNew("server entry tag not found")
+			hasServerEntry = false
+			return nil
 		}
 
 		_, configurationVersion, err := getServerEntryTagRecord(
@@ -2601,7 +2603,6 @@ func DSLHasServerEntry(tag dsl.ServerEntryTag, version int) bool {
 		}
 
 		hasServerEntry = (configurationVersion == version)
-
 		return nil
 	})
 
@@ -2812,6 +2813,7 @@ func setServerEntryTagRecord(
 	var delimiter = [1]byte{0}
 
 	if bytes.Contains(serverEntryID, delimiter[:]) {
+		// Not expected, since serverEntryID is an IP address string.
 		return nil, errors.TraceNew("invalid serverEntryID")
 	}
 
@@ -2835,6 +2837,7 @@ func getServerEntryTagRecord(
 		// Backwards compatibility: assume version 0
 		return record, 0, nil
 	}
+	i += 1
 
 	if len(record)-i != 4 {
 		return nil, 0, errors.TraceNew("invalid configurationVersion")
@@ -2842,5 +2845,5 @@ func getServerEntryTagRecord(
 
 	configurationVersion := binary.LittleEndian.Uint32(record[i:])
 
-	return record[:i], int(configurationVersion), nil
+	return record[:i-1], int(configurationVersion), nil
 }
