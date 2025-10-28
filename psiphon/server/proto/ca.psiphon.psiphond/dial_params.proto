@@ -23,7 +23,7 @@ message DialParams {
     optional string meek_dial_ip_address = 13;
     optional string meek_host_header = 14;
     optional int64 meek_limit_request = 15;
-    optional int64 meek_redial_probability = 16;
+    optional double meek_redial_probability = 16;
     optional string meek_resolved_ip_address = 17;
     optional string meek_sni_server_name = 18;
     optional int64 meek_tls_padding = 19;

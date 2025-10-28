@@ -39,7 +39,7 @@ type DialParams struct {
 	MeekDialIpAddress                 *string                `protobuf:"bytes,13,opt,name=meek_dial_ip_address,json=meekDialIpAddress,proto3,oneof" json:"meek_dial_ip_address,omitempty"`
 	MeekHostHeader                    *string                `protobuf:"bytes,14,opt,name=meek_host_header,json=meekHostHeader,proto3,oneof" json:"meek_host_header,omitempty"`
 	MeekLimitRequest                  *int64                 `protobuf:"varint,15,opt,name=meek_limit_request,json=meekLimitRequest,proto3,oneof" json:"meek_limit_request,omitempty"`
-	MeekRedialProbability             *int64                 `protobuf:"varint,16,opt,name=meek_redial_probability,json=meekRedialProbability,proto3,oneof" json:"meek_redial_probability,omitempty"`
+	MeekRedialProbability             *float64               `protobuf:"fixed64,16,opt,name=meek_redial_probability,json=meekRedialProbability,proto3,oneof" json:"meek_redial_probability,omitempty"`
 	MeekResolvedIpAddress             *string                `protobuf:"bytes,17,opt,name=meek_resolved_ip_address,json=meekResolvedIpAddress,proto3,oneof" json:"meek_resolved_ip_address,omitempty"`
 	MeekSniServerName                 *string                `protobuf:"bytes,18,opt,name=meek_sni_server_name,json=meekSniServerName,proto3,oneof" json:"meek_sni_server_name,omitempty"`
 	MeekTlsPadding                    *int64                 `protobuf:"varint,19,opt,name=meek_tls_padding,json=meekTlsPadding,proto3,oneof" json:"meek_tls_padding,omitempty"`
@@ -246,7 +246,7 @@ func (x *DialParams) GetMeekLimitRequest() int64 {
 	return 0
 }
 
-func (x *DialParams) GetMeekRedialProbability() int64 {
+func (x *DialParams) GetMeekRedialProbability() float64 {
 	if x != nil && x.MeekRedialProbability != nil {
 		return *x.MeekRedialProbability
 	}
@@ -746,7 +746,7 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x14meek_dial_ip_address\x18\r \x01(\tH\fR\x11meekDialIpAddress\x88\x01\x01\x12-\n" +
 	"\x10meek_host_header\x18\x0e \x01(\tH\rR\x0emeekHostHeader\x88\x01\x01\x121\n" +
 	"\x12meek_limit_request\x18\x0f \x01(\x03H\x0eR\x10meekLimitRequest\x88\x01\x01\x12;\n" +
-	"\x17meek_redial_probability\x18\x10 \x01(\x03H\x0fR\x15meekRedialProbability\x88\x01\x01\x12<\n" +
+	"\x17meek_redial_probability\x18\x10 \x01(\x01H\x0fR\x15meekRedialProbability\x88\x01\x01\x12<\n" +
 	"\x18meek_resolved_ip_address\x18\x11 \x01(\tH\x10R\x15meekResolvedIpAddress\x88\x01\x01\x124\n" +
 	"\x14meek_sni_server_name\x18\x12 \x01(\tH\x11R\x11meekSniServerName\x88\x01\x01\x12-\n" +
 	"\x10meek_tls_padding\x18\x13 \x01(\x03H\x12R\x0emeekTlsPadding\x88\x01\x01\x12@\n" +
