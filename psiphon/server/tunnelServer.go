@@ -3108,6 +3108,16 @@ func (sshClient *sshClient) runTunnel(
 			sshClient.sessionID)
 	}
 
+	// Close any remaining port forward upstream connections in order to
+	// interrupt blocked reads.
+	sshClient.Lock()
+	udpgwChannelHandler := sshClient.udpgwChannelHandler
+	sshClient.Unlock()
+	if udpgwChannelHandler != nil {
+		udpgwChannelHandler.portForwardLRU.CloseAll()
+	}
+	sshClient.tcpPortForwardLRU.CloseAll()
+
 	waitGroup.Wait()
 
 	sshClient.cleanupAuthorizations()
