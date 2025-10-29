@@ -3015,11 +3015,16 @@ func (controller *Controller) runInproxyProxy() {
 	// is also enforced on the broker; this client-side check cuts down on
 	// load from well-behaved proxies.
 	//
-	// Limitation: InproxyAllowProxy is only checked on start up, but tactics
-	// may change while running.
+	// This early check is enforced only when there are tactics, as indicated
+	// by presence of a tactics tag. In the proxy-only case where broker
+	// specs are shipped in the proxy config, inproxyAwaitProxyBrokerSpecs
+	// may return before any tactics are fetched, in which case
+	// InproxyAllowProxy will always evaluate to the default, false.
+	// inproxyHandleProxyTacticsPayload will check InproxyAllowProxy again,
+	// after an initial proxy announce returns fresh tactics.
 
 	p := controller.config.GetParameters().Get()
-	allowProxy := p.Bool(parameters.InproxyAllowProxy)
+	disallowProxy := !p.Bool(parameters.InproxyAllowProxy) && p.Tag() != ""
 	activityNoticePeriod := p.Duration(parameters.InproxyProxyTotalActivityNoticePeriod)
 	p.Close()
 
@@ -3031,8 +3036,8 @@ func (controller *Controller) runInproxyProxy() {
 	// recheck.
 	haveBrokerSpecs := haveInproxyProxyBrokerSpecs(controller.config)
 
-	if !allowProxy || useUpstreamProxy || !haveBrokerSpecs || !inproxy.Enabled() {
-		if !allowProxy {
+	if disallowProxy || useUpstreamProxy || !haveBrokerSpecs || !inproxy.Enabled() {
+		if disallowProxy {
 			NoticeError("inproxy proxy: not allowed")
 		}
 		if useUpstreamProxy {
@@ -3170,8 +3175,6 @@ func (controller *Controller) runInproxyProxy() {
 // stopping.
 func (controller *Controller) inproxyAwaitProxyBrokerSpecs() bool {
 
-	NoticeInfo("inproxy proxy: await tactics with proxy broker specs")
-
 	// Check for any broker specs in cached tactics or config parameters
 	// already loaded by NewController or Config.Commit.
 	if haveInproxyProxyBrokerSpecs(controller.config) {
@@ -3184,6 +3187,8 @@ func (controller *Controller) inproxyAwaitProxyBrokerSpecs() bool {
 		NoticeWarning("inproxy proxy: no broker specs and tactics disabled")
 		return true
 	}
+
+	NoticeInfo("inproxy proxy: await tactics with proxy broker specs")
 
 	// Orchestrating fetches roughly follows the same pattern as
 	// establishCandidateGenerator, with a WaitForNetworkConnectivity check,
@@ -3438,6 +3443,27 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 		}
 	} else {
 		appliedNewTactics = false
+	}
+
+	if appliedNewTactics {
+
+		// Shutdown if running in proxy-only and tactics now indicate the
+		// proxy is not allowed.
+		//
+		// Limitation: does not immediately stop proxy in dual proxy/tunnel mode.
+
+		p := controller.config.GetParameters().Get()
+		disallowProxy := !p.Bool(parameters.InproxyAllowProxy)
+		p.Close()
+
+		if disallowProxy {
+			NoticeError("inproxy proxy: not allowed")
+			if controller.config.DisableTunnels {
+				NoticeError("inproxy proxy: shutdown")
+				controller.SignalComponentFailure()
+			}
+
+		}
 	}
 
 	return appliedNewTactics

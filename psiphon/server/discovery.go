@@ -155,6 +155,10 @@ func (d *Discovery) DiscoverServers(clientIP net.IP) []string {
 	d.RLock()
 	defer d.RUnlock()
 
+	if clientIP == nil {
+		return []string{}
+	}
+
 	servers := d.discovery.SelectServers(clientIP)
 
 	encodedServerEntries := make([]string, 0)

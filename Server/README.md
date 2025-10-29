@@ -2,7 +2,7 @@
 
 ### Build
 Prerequisites:
- - Go 1.15 or later
+ - Go (version specified in go.mod)
 
 Build Steps:
  - Build: `go build -o psiphond main.go`

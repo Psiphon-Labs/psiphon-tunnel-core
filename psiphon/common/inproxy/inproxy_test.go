@@ -84,7 +84,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 	testNetworkID := "NETWORK-ID-1"
 	testNetworkType := NetworkTypeUnknown
 	testNATType := NATTypeUnknown
-	testSTUNServerAddress := "stun.nextcloud.com:443"
+	testSTUNServerAddress := "stun.voipgate.com:3478"
 	testDisableSTUN := false
 	testDisablePortMapping := false
 

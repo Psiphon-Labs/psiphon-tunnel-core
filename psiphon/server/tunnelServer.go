@@ -159,11 +159,12 @@ func (server *TunnelServer) Run() error {
 		var BPFProgramName string
 		var err error
 
-		if protocol.TunnelProtocolUsesFrontedMeekQUIC(tunnelProtocol) {
+		if protocol.TunnelProtocolUsesFrontedMeekNonHTTPS(tunnelProtocol) {
 
-			// For FRONTED-MEEK-QUIC-OSSH, no listener implemented. The edge-to-server
-			// hop uses HTTPS and the client tunnel protocol is distinguished using
-			// protocol.MeekCookieData.ClientTunnelProtocol.
+			// For FRONTED-MEEK-QUIC, no listener implemented; for
+			// FRONTED-MEEK-HTTP, no listener is run. The edge-to-server hop
+			// uses HTTPS and the client tunnel protocol is distinguished
+			// using protocol.MeekCookieData.ClientTunnelProtocol.
 			continue
 
 		} else if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
@@ -1810,7 +1811,7 @@ func (sshServer *sshServer) handleClient(
 		}
 	}
 
-	sshClient := newSshClient(
+	sshClient, err := newSshClient(
 		sshServer,
 		sshListener,
 		tunnelProtocol,
@@ -1819,6 +1820,12 @@ func (sshServer *sshServer) handleClient(
 		replayedServerPacketManipulation,
 		peerAddr,
 		peerGeoIPData)
+	if err != nil {
+		conn.Close()
+		log.WithTraceFields(LogFields{"error": err}).Warning(
+			"newSshClient failed")
+		return
+	}
 
 	// sshClient.run _must_ call onSSHHandshakeFinished to release the semaphore:
 	// in any error case; or, as soon as the SSH handshake phase has successfully
@@ -1923,6 +1930,7 @@ type sshClient struct {
 	replayedServerPacketManipulation     bool
 	peerAddr                             net.Addr
 	peerGeoIPData                        GeoIPData
+	clientIP                             string
 	clientGeoIPData                      GeoIPData
 	sessionID                            string
 	isFirstTunnelInSession               bool
@@ -2290,7 +2298,7 @@ func newSshClient(
 	serverPacketManipulation string,
 	replayedServerPacketManipulation bool,
 	peerAddr net.Addr,
-	peerGeoIPData GeoIPData) *sshClient {
+	peerGeoIPData GeoIPData) (*sshClient, error) {
 
 	runCtx, stopRunning := context.WithCancel(context.Background())
 
@@ -2307,6 +2315,7 @@ func newSshClient(
 		serverPacketManipulation:         serverPacketManipulation,
 		replayedServerPacketManipulation: replayedServerPacketManipulation,
 		peerAddr:                         peerAddr,
+		peerGeoIPData:                    peerGeoIPData,
 		isFirstTunnelInSession:           true,
 		qualityMetrics:                   newQualityMetrics(),
 		tcpPortForwardLRU:                common.NewLRUConns(),
@@ -2321,17 +2330,35 @@ func newSshClient(
 	client.tcpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
 	client.udpTrafficState.availablePortForwardCond = sync.NewCond(new(sync.Mutex))
 
-	// In the case of in-proxy tunnel protocols, clientGeoIPData is not set
-	// until the original client IP is relayed from the broker during the
-	// handshake. In other cases, clientGeoIPData is the peerGeoIPData
-	// (this includes fronted meek).
+	if peerAddr == nil {
+		return nil, errors.TraceNew("missing peerAddr")
+	}
+	peerIP, _, err := net.SplitHostPort(peerAddr.String())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if net.ParseIP(peerIP) == nil {
+		return nil, errors.TraceNew("invalid peerIP")
+	}
 
-	client.peerGeoIPData = peerGeoIPData
+	// In the case of in-proxy tunnel protocols, clientIP and clientGeoIPData
+	// are not set until the original client IP is relayed from the broker
+	// during the handshake. In other cases, clientGeoIPData is the
+	// peerGeoIPData (this includes fronted meek).
+
 	if !client.isInproxyTunnelProtocol {
+		client.clientIP = peerIP
 		client.clientGeoIPData = peerGeoIPData
 	}
 
-	return client
+	return client, nil
+}
+
+// getClientP gets sshClient.clientIP. See getClientGeoIPData comment.
+func (sshClient *sshClient) getClientIP() string {
+	sshClient.Lock()
+	defer sshClient.Unlock()
+	return sshClient.clientIP
 }
 
 // getClientGeoIPData gets sshClient.clientGeoIPData. Use this helper when
@@ -2502,6 +2529,14 @@ func (sshClient *sshClient) run(
 			})
 
 		defer func() {
+
+			// When panicking, propagate the panic instead of trying to
+			// acquire the sshClient lock. Intentional panics may arise from
+			// the protobuf code path in logTunnel.
+			if r := recover(); r != nil {
+				panic(r)
+			}
+
 			setReplayAfterFunc.Stop()
 			completed, _ := sshClient.getHandshaked()
 			if !completed {
@@ -3072,6 +3107,16 @@ func (sshClient *sshClient) runTunnel(
 		sshClient.sshServer.support.PacketTunnelServer.ClientDisconnected(
 			sshClient.sessionID)
 	}
+
+	// Close any remaining port forward upstream connections in order to
+	// interrupt blocked reads.
+	sshClient.Lock()
+	udpgwChannelHandler := sshClient.udpgwChannelHandler
+	sshClient.Unlock()
+	if udpgwChannelHandler != nil {
+		udpgwChannelHandler.portForwardLRU.CloseAll()
+	}
+	sshClient.tcpPortForwardLRU.CloseAll()
 
 	waitGroup.Wait()
 
@@ -3651,10 +3696,11 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	logFields["handshake_completed"] = sshClient.handshakeState.completed
 
-	// Use the handshake sponsor ID unless the handshake did not complete.
+	// Use the handshake sponsor ID unless the handshake did not complete; in
+	// that case, use the early sponsor ID, if one was provided.
 	//
 	// TODO: check that the handshake sponsor ID matches the early sponsor ID?
-	if !sshClient.handshakeState.completed {
+	if !sshClient.handshakeState.completed && sshClient.sponsorID != "" {
 		logFields["sponsor_id"] = sshClient.sponsorID
 	}
 
@@ -4104,9 +4150,11 @@ func (sshClient *sshClient) setHandshakeState(
 
 		if sshClient.isInproxyTunnelProtocol {
 
-			// Set the client GeoIP data to the value obtained using the
-			// original client IP, from the broker, in the handshake. Also
-			// update the GeoIP session hash to use the client GeoIP data.
+			// Set the client IP and GeoIP data to the value obtained using
+			// the original client IP, from the broker, in the handshake.
+			// Also update the GeoIP session hash to use the client GeoIP data.
+
+			sshClient.clientIP = sshClient.handshakeState.inproxyClientIP
 
 			sshClient.clientGeoIPData =
 				sshClient.handshakeState.inproxyClientGeoIPData

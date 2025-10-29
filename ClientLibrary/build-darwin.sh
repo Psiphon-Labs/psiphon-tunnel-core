@@ -9,8 +9,8 @@ if [ -z ${2+x} ]; then BUILD_TAGS=""; else BUILD_TAGS="$2"; fi
 # Note:
 #   clangwrap.sh needs to be updated when the Go version changes.
 #   The last version was:
-#   https://github.com/golang/go/blob/go1.24.4/misc/ios/clangwrap.sh
-GO_VERSION_REQUIRED="1.24.4"
+#   https://github.com/golang/go/blob/go1.24.8/misc/ios/clangwrap.sh
+GO_VERSION_REQUIRED="1.24.8"
 
 BASE_DIR=$(cd "$(dirname "$0")" ; pwd -P)
 cd ${BASE_DIR}

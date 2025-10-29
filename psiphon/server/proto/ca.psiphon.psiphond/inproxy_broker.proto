@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "ca.psiphon.psiphond/base_params.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message InproxyBroker {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional int32 announcement_match_index = 100;
+    optional int32 announcement_queue_size = 101;
+    optional string answer_error = 102;
+    optional string broker_event = 103;
+    optional string broker_id = 104;
+    optional int64 connected_clients = 105;
+    optional int64 connecting_clients = 106;
+    optional string connection_id = 107;
+    optional string destination_server_id = 108;
+    optional int64 elapsed_time = 109;
+    optional string error = 110;
+    repeated string filtered_ice_candidates = 111;
+    optional string fronting_provider_id = 112;
+    optional bool has_IPv6 = 113;
+    optional bool has_common_compartment_ids = 114;
+    optional bool has_personal_compartment_ids = 115;
+    optional bool has_private_IP = 116;
+    repeated string ice_candidate_types = 117;
+    optional bool is_priority = 118;
+    optional int64 limit_downstream_bytes_per_second = 119;
+    optional int64 limit_upstream_bytes_per_second = 120;
+    optional int64 max_clients = 121;
+    optional string nat_type = 122;
+    optional string network_type = 123;
+    optional string new_tactics_tag = 124;
+    optional int64 offer_match_index = 125;
+    optional int64 offer_queue_size = 126;
+    optional int64 peak_downstream_bytes_per_second = 127;
+    optional int64 peak_upstream_bytes_per_second = 128;
+    repeated string port_mapping_types = 129;
+    optional bool preferred_nat_match = 130;
+    optional int32 protocol_version = 131;
+    optional string proxy_id = 132;
+    optional string proxy_nat_type = 133;
+    repeated string proxy_port_mapping_types = 134;
+    optional string server_id = 135;
+    optional string stored_tactics_tag = 136;
+    optional bool timed_out = 137;
+    optional string meek_server_http_version = 138;
+}

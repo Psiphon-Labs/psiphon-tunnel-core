@@ -514,7 +514,9 @@ type Config struct {
 	EmitServerAlerts bool `json:",omitempty"`
 
 	// EmitClientAddress indicates whether to emit the client's public network
-	// address, IP and port, as seen by the server.
+	// address, IP and port, as seen by the server. For non-direct protocols,
+	// such as FRONTED and INPROXY, where the client isn't connecting
+	// directly to the server, the reported port number is 0.
 	EmitClientAddress bool `json:",omitempty"`
 
 	// RateLimits specify throttling configuration for the tunnel.

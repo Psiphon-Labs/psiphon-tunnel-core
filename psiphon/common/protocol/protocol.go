@@ -100,6 +100,7 @@ const (
 	CHANNEL_REJECT_REASON_SPLIT_TUNNEL = 0xFE000000
 
 	PSIPHON_API_HANDSHAKE_AUTHORIZATIONS = "authorizations"
+	PSIPHON_API_HANDSHAKE_CLIENT_VERSION = "client_version"
 )
 
 var SupportedServerEntrySources = []string{
@@ -363,6 +364,12 @@ func TunnelProtocolUsesQUIC(protocol string) bool {
 func TunnelProtocolUsesFrontedMeekQUIC(protocol string) bool {
 	protocol = TunnelProtocolMinusInproxy(protocol)
 	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
+}
+
+func TunnelProtocolUsesFrontedMeekNonHTTPS(protocol string) bool {
+	protocol = TunnelProtocolMinusInproxy(protocol)
+	return protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_HTTP ||
+		protocol == TUNNEL_PROTOCOL_FRONTED_MEEK_QUIC_OBFUSCATED_SSH
 }
 
 func TunnelProtocolUsesRefractionNetworking(protocol string) bool {

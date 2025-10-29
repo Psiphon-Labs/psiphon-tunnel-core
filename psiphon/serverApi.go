@@ -267,10 +267,8 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 		return errors.Trace(err)
 	}
 
-	// Limitation: ClientAddress is not supported for in-proxy tunnel
-	// protocols; see comment in server.handshakeAPIRequestHandler.
 	if serverContext.tunnel.config.EmitClientAddress &&
-		!protocol.TunnelProtocolUsesInproxy(serverContext.tunnel.dialParams.TunnelProtocol) {
+		handshakeResponse.ClientAddress != "" {
 
 		NoticeClientAddress(handshakeResponse.ClientAddress)
 	}

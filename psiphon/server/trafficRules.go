@@ -27,6 +27,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
 
 const (
@@ -208,6 +209,10 @@ type TrafficRulesFilter struct {
 	// the filter only if its provider ID, from Config.GetProviderID, is in
 	// ProviderIDs.
 	ProviderIDs []string
+
+	// Min/MaxClientVersion specify version constraints the client must match.
+	MinClientVersion *int
+	MaxClientVersion *int
 
 	regionLookup                map[string]bool
 	ispLookup                   map[string]bool
@@ -842,6 +847,26 @@ func (set *TrafficRulesSet) GetTrafficRules(
 				if !common.Contains(filter.ProviderIDs, serverProviderID) {
 					return false
 				}
+			}
+		}
+
+		if filter.MinClientVersion != nil ||
+			filter.MaxClientVersion != nil {
+
+			clientVersion, err := getIntStringRequestParam(
+				state.apiParams, protocol.PSIPHON_API_HANDSHAKE_CLIENT_VERSION)
+			if err != nil {
+				return false
+			}
+
+			if filter.MinClientVersion != nil &&
+				clientVersion < *filter.MinClientVersion {
+				return false
+			}
+
+			if filter.MaxClientVersion != nil &&
+				clientVersion > *filter.MaxClientVersion {
+				return false
 			}
 		}
 

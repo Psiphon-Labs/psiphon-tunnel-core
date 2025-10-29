@@ -24,6 +24,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -71,6 +72,15 @@ func RunServices(configJSON []byte) (retErr error) {
 	}
 
 	loggingInitialized = true
+
+	if ShouldLogProtobuf() {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), config.metricWriterShutdownDelay)
+			defer cancel()
+
+			metricSocketWriter.Stop(ctx)
+		}()
+	}
 
 	err = addHostConfig(config)
 	if err != nil {

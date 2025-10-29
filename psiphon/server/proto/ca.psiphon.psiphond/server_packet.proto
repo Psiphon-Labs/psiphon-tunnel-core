@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message ServerPacket {
+    // Fields 1-99 are reserved for field groupings.
+
+    optional int64 tcp_ipv4_application_bytes_down = 100;
+    optional int64 tcp_ipv4_application_bytes_up = 101;
+    optional int64 tcp_ipv4_bytes_down = 102;
+    optional int64 tcp_ipv4_bytes_up = 103;
+    optional int64 tcp_ipv4_packets_down = 104;
+    optional int64 tcp_ipv4_packets_up = 105;
+    optional int64 tcp_ipv6_application_bytes_down = 106;
+    optional int64 tcp_ipv6_application_bytes_up = 107;
+    optional int64 tcp_ipv6_bytes_down = 108;
+    optional int64 tcp_ipv6_bytes_up = 109;
+    optional int64 tcp_ipv6_packets_down = 110;
+    optional int64 tcp_ipv6_packets_up = 111;
+
+    optional int64 udp_ipv4_application_bytes_down = 112;
+    optional int64 udp_ipv4_application_bytes_up = 113;
+    optional int64 udp_ipv4_bytes_down = 114;
+    optional int64 udp_ipv4_bytes_up = 115;
+    optional int64 udp_ipv4_packets_down = 116;
+    optional int64 udp_ipv4_packets_up = 117;
+    optional int64 udp_ipv6_application_bytes_down = 118;
+    optional int64 udp_ipv6_application_bytes_up = 119;
+    optional int64 udp_ipv6_bytes_down = 120;
+    optional int64 udp_ipv6_bytes_up = 121;
+    optional int64 udp_ipv6_packets_down = 122;
+    optional int64 udp_ipv6_packets_up = 123;
+}
