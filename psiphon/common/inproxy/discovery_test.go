@@ -32,7 +32,7 @@ func TestNATDiscovery(t *testing.T) {
 	// TODO: run local STUN and port mapping servers to test against, along
 	// with iptables rules to simulate NAT conditions
 
-	stunServerAddress := "stun.nextcloud.com:443"
+	stunServerAddress := "stun.voipgate.com:3478"
 
 	var setNATTypeCallCount,
 		setPortMappingTypesCallCount,

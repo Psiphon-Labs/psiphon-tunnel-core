@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package ca.psiphon.router;
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/router";
+
+message Router {
+  optional string destination = 1;
+  optional string message_type = 2;
+  optional bytes key = 3;
+  optional bytes value = 4;
+  map<string, bytes> metadata = 5;
+}

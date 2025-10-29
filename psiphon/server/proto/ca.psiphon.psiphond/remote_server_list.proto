@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "ca.psiphon.psiphond/base_params.proto";
+import "ca.psiphon.psiphond/dial_params.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message RemoteServerList {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+    optional ca.psiphon.psiphond.DialParams dial_params = 2;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional bool authenticated = 100;
+    optional int64 bytes = 101;
+    optional google.protobuf.Timestamp client_download_timestamp = 102;
+    optional int64 duration = 103;
+    optional string etag = 104;
+    optional bool tunneled = 105;
+    optional string url = 106;
+}

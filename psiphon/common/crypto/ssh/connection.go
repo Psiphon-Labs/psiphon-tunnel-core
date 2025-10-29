@@ -94,6 +94,15 @@ type connection struct {
 }
 
 func (c *connection) Close() error {
+
+	// [Psiphon]
+	// Ensure handshakeTransport.interrupt is invoked.
+	// handshakeTransport.Close also closes the underlying network
+	// connection, so c.sshConn.conn.Close in not necessary in this case.
+	if c.transport != nil {
+		return c.transport.Close()
+	}
+
 	return c.sshConn.conn.Close()
 }
 

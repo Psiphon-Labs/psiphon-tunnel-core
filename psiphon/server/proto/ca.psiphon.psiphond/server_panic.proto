@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message ServerPanic {
+    // Fields 1-99 are reserved for field groupings.
+
+    optional string panic = 100;
+}

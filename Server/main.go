@@ -20,6 +20,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -33,10 +34,15 @@ import (
 	"time"
 
 	"github.com/Psiphon-Inc/rotate-safe-writer"
+	udsipc "github.com/Psiphon-Inc/uds-ipc"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
+	pb "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond"
 	"github.com/mitchellh/panicwrap"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var loadedConfigJSON []byte
@@ -277,56 +283,134 @@ func (list *stringListFlag) Set(flagValue string) error {
 }
 
 func panicHandler(output string) {
-	if len(loadedConfigJSON) > 0 {
-		config, err := server.LoadConfig([]byte(loadedConfigJSON))
-		if err != nil {
-			fmt.Printf("error parsing configuration file: %s\n%s\n", err, output)
-			os.Exit(1)
-		}
 
-		logEvent := make(map[string]string)
-		logEvent["host_id"] = config.HostID
-		logEvent["build_rev"] = buildinfo.GetBuildInfo().BuildRev
-		logEvent["timestamp"] = time.Now().Format(time.RFC3339)
-		logEvent["event_name"] = "server_panic"
+	// As this is the parent panicwrap process, no config or logging is
+	// initialized. Each of the JSON and protobuf panic logging helpers
+	// directly initialize the bare minimum required to emit the single panic
+	// log.
 
-		// ELK has a maximum field length of 32766 UTF8 bytes. Over that length, the
-		// log won't be delivered. Truncate the panic field, as it may be much longer.
-		maxLen := 32766
-		if len(output) > maxLen {
-			output = output[:maxLen]
-		}
-
-		logEvent["panic"] = output
-
-		// Logs are written to the configured file name. If no name is specified, logs are written to stderr
-		var jsonWriter io.Writer
-		if config.LogFilename != "" {
-
-			retries, create, mode := config.GetLogFileReopenConfig()
-			panicLog, err := rotate.NewRotatableFileWriter(
-				config.LogFilename, retries, create, mode)
-			if err != nil {
-				fmt.Printf("unable to set panic log output: %s\n%s\n", err, output)
-				os.Exit(1)
-			}
-			defer panicLog.Close()
-
-			jsonWriter = panicLog
-		} else {
-			jsonWriter = os.Stderr
-		}
-
-		enc := json.NewEncoder(jsonWriter)
-		err = enc.Encode(logEvent)
-		if err != nil {
-			fmt.Printf("unable to serialize panic message to JSON: %s\n%s\n", err, output)
-			os.Exit(1)
-		}
-	} else {
+	if len(loadedConfigJSON) == 0 {
 		fmt.Printf("no configuration JSON was loaded, cannot continue\n%s\n", output)
 		os.Exit(1)
 	}
 
+	config, err := server.LoadConfig([]byte(loadedConfigJSON))
+	if err != nil {
+		fmt.Printf("error parsing configuration file: %s\n%s\n", err, output)
+		os.Exit(1)
+	}
+
+	if config.LogFormat == "protobuf" || config.LogFormat == "both" {
+		err := panicHandlerProtobuf(config, output)
+		if err != nil {
+			fmt.Printf("error logging panic: %s\n%s\n", err, output)
+			// continue
+		}
+	}
+
+	// To maximize the chance of recording a panic log, always emit a classic
+	// log even in "protobuf" mode.
+
+	err = panicHandlerJSON(config, output)
+	if err != nil {
+		fmt.Printf("error logging panic: %s\n%s\n", err, output)
+		// continue
+	}
+
 	os.Exit(1)
+}
+
+func panicHandlerJSON(config *server.Config, output string) error {
+
+	logEvent := make(map[string]string)
+	logEvent["timestamp"] = time.Now().Format(time.RFC3339)
+	logEvent["host_id"] = config.HostID
+	logEvent["build_rev"] = buildinfo.GetBuildInfo().BuildRev
+	if config.HostProvider != "" {
+		logEvent["provider"] = config.HostProvider
+	}
+	logEvent["event_name"] = "server_panic"
+
+	// ELK has a maximum field length of 32766 UTF8 bytes. Over that length, the
+	// log won't be delivered. Truncate the panic field, as it may be much longer.
+	maxLen := 32766
+	if len(output) > maxLen {
+		output = output[:maxLen]
+	}
+
+	logEvent["panic"] = output
+
+	// Logs are written to the configured file name. If no name is specified,
+	// logs are written to stderr.
+	var jsonWriter io.Writer
+	if config.LogFilename != "" {
+
+		retries, create, mode := config.GetLogFileReopenConfig()
+		panicLog, err := rotate.NewRotatableFileWriter(
+			config.LogFilename, retries, create, mode)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		defer panicLog.Close()
+
+		jsonWriter = panicLog
+	} else {
+		jsonWriter = os.Stderr
+	}
+
+	err := json.NewEncoder(jsonWriter).Encode(logEvent)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+func panicHandlerProtobuf(config *server.Config, output string) error {
+
+	metricSocketWriter, err := udsipc.NewWriter(config.MetricSocketPath)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	metricSocketWriter.Start()
+	// No stop deadline; prioritize recording the panic
+	defer metricSocketWriter.Stop(context.Background())
+
+	// Avoid shipping a huge set of panic stacks. The main stack, which is
+	// first, and a selection of other stacks is sufficient.
+	maxLen := 32766
+	if len(output) > maxLen {
+		output = output[:maxLen]
+	}
+
+	psiphondMsg := &pb.Psiphond{
+		Timestamp:    timestamppb.Now(),
+		HostId:       &config.HostID,
+		HostBuildRev: &buildinfo.GetBuildInfo().BuildRev,
+		Provider:     &config.HostProvider,
+		Metric: &pb.Psiphond_ServerPanic{
+			ServerPanic: &pb.ServerPanic{
+				Panic: &output,
+			}},
+	}
+
+	routedMsg, err := server.NewProtobufRoutedMessage(
+		config.LogDestinationPrefix,
+		psiphondMsg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	serialized, err := proto.Marshal(routedMsg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = metricSocketWriter.WriteMessage(serialized)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
 }

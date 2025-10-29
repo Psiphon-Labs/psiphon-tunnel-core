@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "ca.psiphon.psiphond/base_params.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message ServerBlocklistHit {
+    optional ca.psiphon.psiphond.BaseParams base_params = 1;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional string blocklist_ip_address = 100;
+    optional string blocklist_source = 101;
+    optional string blocklist_subject = 102;
+}

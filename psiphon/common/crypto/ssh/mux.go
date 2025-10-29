@@ -190,6 +190,12 @@ func (m *mux) loop() {
 		err = m.onePacket()
 	}
 
+	// [Psiphon]
+	// Interrupt any blocked readers or writers before closing channels.
+	if t, ok := m.conn.(*handshakeTransport); ok {
+		t.interrupt(err)
+	}
+
 	for _, ch := range m.chanList.dropAll() {
 		ch.close()
 	}

@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message ServerLoadProtocol {
+  // Fields 1-99 are reserved for field groupings.
+
+  optional string region = 100;
+  optional string protocol = 101;
+
+  optional int64 accepted_clients = 102;
+  optional int64 established_clients = 103;
+}
+
+message ServerLoadDNS {
+  // Fields 1-99 are reserved for field groupings.
+
+  optional string dns_server = 100;
+  optional int64 dns_count = 101; 
+  optional int64 dns_duration = 102;
+  optional int64 dns_failed_count = 103;
+  optional int64 dns_failed_duration = 104;
+}
+
+message ServerLoad {
+  // Fields 1-99 are reserved for field groupings.
+
+  optional double cpu_percent = 100;
+
+  optional uint64 heap_alloc = 101;
+  optional uint64 heap_idle = 102;
+  optional uint64 heap_inuse = 103;
+  optional uint64 heap_objects = 104;
+  optional uint64 heap_released = 105;
+  optional uint64 heap_sys = 106;
+
+  optional int64 network_bytes_received = 107;
+  optional int64 network_bytes_sent = 108;
+
+  optional bool establish_tunnels = 109;
+  optional int64 establish_tunnels_limited_count = 110;
+
+  optional google.protobuf.Timestamp last_gc = 111;
+  optional uint32 num_forced_gc = 112;
+  optional uint32 num_gc = 113;
+  optional uint32 num_goroutine = 114;
+
+  optional int64 replay_delete_replay_count = 115;
+  optional int64 replay_failed_replay_count = 116;
+  optional int64 replay_get_replay_hit_count = 117;
+  optional int64 replay_get_replay_miss_count = 118;
+  optional int64 replay_max_cache_entries = 119;
+  optional int64 replay_set_replay_count = 120;
+
+  optional int64 server_tactics_cache_hit_count = 121;
+  optional int64 server_tactics_cache_miss_count = 122;
+  optional int64 server_tactics_max_cache_entries = 123;
+  optional int64 server_tactics_max_parameter_references = 124;
+
+  optional int64 dialing_tcp_port_forwards = 125;
+  optional int64 tcp_ipv4_port_forward_dialed_count = 126;
+  optional int64 tcp_ipv4_port_forward_dialed_duration = 127;
+  optional int64 tcp_ipv4_port_forward_failed_count = 128;
+  optional int64 tcp_ipv4_port_forward_failed_duration = 129;
+  optional int64 tcp_ipv6_port_forward_dialed_count = 130;
+  optional int64 tcp_ipv6_port_forward_dialed_duration = 131;
+  optional int64 tcp_ipv6_port_forward_failed_count = 132;
+  optional int64 tcp_ipv6_port_forward_failed_duration = 133;
+  optional int64 tcp_port_forward_dialed_count = 134;
+  optional int64 tcp_port_forward_dialed_duration = 135;
+  optional int64 tcp_port_forward_failed_count = 136;
+  optional int64 tcp_port_forward_failed_duration = 137;
+  optional int64 tcp_port_forward_rejected_dialing_limit_count = 138;
+  optional int64 tcp_port_forward_rejected_disallowed_count = 139;
+  optional int64 tcp_port_forwards = 140;
+
+  optional int64 udp_port_forward_rejected_disallowed_count = 141;
+  optional int64 udp_port_forwards = 142;
+
+  optional int64 total_tcp_port_forwards = 143;
+  optional int64 total_udp_port_forwards = 144;
+}

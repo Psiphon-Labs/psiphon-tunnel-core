@@ -269,6 +269,19 @@ func (conns *LRUConns) CloseOldest() {
 	}
 }
 
+// CloseAll closes all the connections in a
+// LRUConns.
+func (conns *LRUConns) CloseAll() {
+	conns.mutex.Lock()
+	defer conns.mutex.Unlock()
+	for conn := conns.list.Front(); conn != nil; {
+		next := conn.Next()
+		_ = conn.Value.(net.Conn).Close()
+		conns.list.Remove(conn)
+		conn = next
+	}
+}
+
 // LRUConnsEntry is an entry in a LRUConns list.
 type LRUConnsEntry struct {
 	lruConns *LRUConns

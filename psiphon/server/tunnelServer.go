@@ -2529,6 +2529,14 @@ func (sshClient *sshClient) run(
 			})
 
 		defer func() {
+
+			// When panicking, propagate the panic instead of trying to
+			// acquire the sshClient lock. Intentional panics may arise from
+			// the protobuf code path in logTunnel.
+			if r := recover(); r != nil {
+				panic(r)
+			}
+
 			setReplayAfterFunc.Stop()
 			completed, _ := sshClient.getHandshaked()
 			if !completed {
@@ -3099,6 +3107,16 @@ func (sshClient *sshClient) runTunnel(
 		sshClient.sshServer.support.PacketTunnelServer.ClientDisconnected(
 			sshClient.sessionID)
 	}
+
+	// Close any remaining port forward upstream connections in order to
+	// interrupt blocked reads.
+	sshClient.Lock()
+	udpgwChannelHandler := sshClient.udpgwChannelHandler
+	sshClient.Unlock()
+	if udpgwChannelHandler != nil {
+		udpgwChannelHandler.portForwardLRU.CloseAll()
+	}
+	sshClient.tcpPortForwardLRU.CloseAll()
 
 	waitGroup.Wait()
 
