@@ -62,7 +62,7 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 		baseParams: true,
 	},
 	"dsl_relay_get_server_entries": {
-		BaseParams: true,
+		baseParams: true,
 	},
 }
 

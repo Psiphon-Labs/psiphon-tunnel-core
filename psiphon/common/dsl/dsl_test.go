@@ -115,8 +115,14 @@ func TestDSLs(t *testing.T) {
 
 var (
 	testClientIP        = "192.168.0.1"
-	testClientGeoIPData = common.GeoIPData{"Country", "City", "ISP", "ASN", "ASO"}
-	testHostID          = "host_id"
+	testClientGeoIPData = common.GeoIPData{
+		Country: "Country",
+		City:    "City",
+		ISP:     "ISP",
+		ASN:     "ASN",
+		ASO:     "ASO",
+	}
+	testHostID = "host_id"
 )
 
 func testDSLs(testConfig *testConfig) error {
@@ -164,8 +170,7 @@ func testDSLs(testConfig *testConfig) error {
 	if testConfig.cacheServerEntries {
 		expectValidMetric = true
 		metricsValidator = func(metric string, fields common.LogFields) bool {
-			return metric == "dsl" &&
-				fields["dsl_event"].(string) == "get-server-entries"
+			return metric == "dsl_relay_get_server_entries"
 		}
 	}
 

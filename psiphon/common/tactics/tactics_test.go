@@ -156,6 +156,8 @@ func TestTactics(t *testing.T) {
 
 	expectedApplyCount := 3
 
+	compressTacticsEnabled := true
+
 	tacticsConfig := fmt.Sprintf(
 		tacticsConfigTemplate,
 		encodedRequestPublicKey,
@@ -381,6 +383,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -457,6 +460,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -539,6 +543,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -672,6 +677,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams2,
 		endPointProtocol,
 		endPointRegion,
@@ -742,6 +748,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -757,6 +764,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,

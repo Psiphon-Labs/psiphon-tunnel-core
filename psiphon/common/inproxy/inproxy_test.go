@@ -439,9 +439,9 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 	makeHandleTacticsPayload := func(
 		proxyPrivateKey SessionPrivateKey,
-		tacticsNetworkID string) func(_ string, _ []byte) bool {
+		tacticsNetworkID string) func(_ string, _ bool, _ []byte) bool {
 
-		return func(networkID string, tacticsPayload []byte) bool {
+		return func(networkID string, _ bool, tacticsPayload []byte) bool {
 			pendingProxyTacticsCallbacksMutex.Lock()
 			defer pendingProxyTacticsCallbacksMutex.Unlock()
 
