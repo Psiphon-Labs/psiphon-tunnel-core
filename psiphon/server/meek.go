@@ -362,6 +362,7 @@ func NewMeekServer(
 				IsValidServerEntryTag:          support.PsinetDatabase.IsValidServerEntryTag,
 				GetTacticsPayload:              meekServer.inproxyBrokerGetTacticsPayload,
 				IsLoadLimiting:                 meekServer.support.TunnelServer.CheckLoadLimiting,
+				RelayDSLRequest:                meekServer.inproxyBrokerRelayDSLRequest,
 				PrivateKey:                     sessionPrivateKey,
 				ObfuscationRootSecret:          obfuscationRootSecret,
 				ServerEntrySignaturePublicKey:  support.Config.InproxyBrokerServerEntrySignaturePublicKey,
@@ -2030,8 +2031,20 @@ func (server *MeekServer) inproxyBrokerGetTacticsPayload(
 	geoIPData common.GeoIPData,
 	apiParameters common.APIParameters) ([]byte, string, error) {
 
+	// When compressed tactics are requested, use CBOR binary encoding for the
+	// response.
+
+	var responseMarshaler func(any) ([]byte, error)
+	responseMarshaler = json.Marshal
+
+	compressTactics := protocol.GetCompressTactics(apiParameters)
+
+	if compressTactics {
+		responseMarshaler = protocol.CBOREncoding.Marshal
+	}
+
 	tacticsPayload, err := server.support.TacticsServer.GetTacticsPayload(
-		geoIPData, apiParameters)
+		geoIPData, apiParameters, compressTactics)
 	if err != nil {
 		return nil, "", errors.Trace(err)
 	}
@@ -2041,7 +2054,7 @@ func (server *MeekServer) inproxyBrokerGetTacticsPayload(
 
 	if tacticsPayload != nil {
 
-		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		marshaledTacticsPayload, err = responseMarshaler(tacticsPayload)
 		if err != nil {
 			return nil, "", errors.Trace(err)
 		}
@@ -2052,6 +2065,26 @@ func (server *MeekServer) inproxyBrokerGetTacticsPayload(
 	}
 
 	return marshaledTacticsPayload, newTacticsTag, nil
+}
+
+// inproxyBrokerRelayDSLRequest is a callback used by the in-proxy broker to
+// relay client DSL requests.
+func (server *MeekServer) inproxyBrokerRelayDSLRequest(
+	ctx context.Context,
+	extendTimeout inproxy.ExtendTransportTimeout,
+	clientIP string,
+	clientGeoIPData common.GeoIPData,
+	requestPayload []byte) ([]byte, error) {
+
+	responsePayload, err := dslHandleRequest(
+		ctx,
+		server.support,
+		extendTimeout,
+		clientIP,
+		clientGeoIPData,
+		false, // client request is untunneled
+		requestPayload)
+	return responsePayload, errors.Trace(err)
 }
 
 // inproxyBrokerHandler reads an in-proxy broker session protocol message from

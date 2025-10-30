@@ -108,7 +108,12 @@ func WriteAuthenticatedDataPackage(
 		return nil, errors.Trace(err)
 	}
 
-	return Compress(packageJSON), nil
+	compressedPackage, err := Compress(CompressionZlib, packageJSON)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return compressedPackage, nil
 }
 
 // ReadAuthenticatedDataPackage extracts and verifies authenticated
@@ -123,7 +128,7 @@ func ReadAuthenticatedDataPackage(
 	var err error
 
 	if isCompressed {
-		packageJSON, err = Decompress(dataPackage)
+		packageJSON, err = Decompress(CompressionZlib, dataPackage)
 		if err != nil {
 			return "", errors.Trace(err)
 		}
@@ -203,7 +208,8 @@ func NewAuthenticatedDataPackageReader(
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		// TODO: need to Close decompressor to ensure zlib checksum is verified?
+		defer decompressor.Close()
+		// TODO: need to check Close error to ensure zlib checksum is verified?
 
 		hash := sha256.New()
 

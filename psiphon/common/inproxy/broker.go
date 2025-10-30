@@ -65,7 +65,18 @@ type ExtendTransportTimeout func(timeout time.Duration)
 // GetTacticsPayload is a callback which returns the appropriate tactics
 // payload for the specified client/proxy GeoIP data and API parameters.
 type GetTacticsPayload func(
-	common.GeoIPData, common.APIParameters) ([]byte, string, error)
+	geoIPData common.GeoIPData,
+	apiParams common.APIParameters) ([]byte, string, error)
+
+// RelayDSLRequest is a callback that provides DSL request relaying. The
+// callback must always return a response payload, even in the case of an
+// error. See dsl.Relay.HandleRequest.
+type RelayDSLRequest func(
+	ctx context.Context,
+	extendTimeout ExtendTransportTimeout,
+	clientIP string,
+	clientGeoIPData common.GeoIPData,
+	requestPayload []byte) ([]byte, error)
 
 // Broker is the in-proxy broker component, which matches clients and proxies
 // and provides WebRTC signaling functionalty.
@@ -181,6 +192,12 @@ type BrokerConfig struct {
 	// immediately rejecting either proxy announces or client offers,
 	// depending on the state of the corresponding queues.
 	IsLoadLimiting func() bool
+
+	// RelayDSLRequest provides DSL request relay support.
+	//
+	// RelayDSLRequest must be set; return an error if no DSL relay is
+	// configured.
+	RelayDSLRequest RelayDSLRequest
 
 	// PrivateKey is the broker's secure session long term private key.
 	PrivateKey SessionPrivateKey
@@ -509,6 +526,18 @@ func (b *Broker) HandleSessionPacket(
 				ctx,
 				extendTransportTimeout,
 				transportLogFields,
+				geoIPData,
+				initiatorID,
+				unwrappedRequestPayload)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+		case recordTypeAPIClientDSLRequest:
+			responsePayload, err = b.handleClientDSL(
+				ctx,
+				extendTransportTimeout,
+				transportLogFields,
+				brokerClientIP,
 				geoIPData,
 				initiatorID,
 				unwrappedRequestPayload)
@@ -1600,6 +1629,79 @@ func (b *Broker) handleClientRelayedPacket(
 	responsePayload, err := MarshalClientRelayedPacketResponse(
 		&ClientRelayedPacketResponse{
 			PacketToServer: out,
+		})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return responsePayload, nil
+}
+
+// handleClientDSL relays client DSL requests. The broker's role is to provide
+// a blocking resistant hop through to the DSL backend; DSL requests are not
+// direct components of the in-proxy protocol.
+func (b *Broker) handleClientDSL(
+	ctx context.Context,
+	extendTransportTimeout ExtendTransportTimeout,
+	transportLogFields common.LogFields,
+	clientIP string,
+	geoIPData common.GeoIPData,
+	initiatorID ID,
+	requestPayload []byte) (retResponse []byte, retErr error) {
+
+	startTime := time.Now()
+
+	var logFields common.LogFields
+	var requestSize, responseSize int
+
+	// Always log the outcome.
+	defer func() {
+		if logFields == nil {
+			logFields = b.config.APIParameterLogFieldFormatter("", geoIPData, nil)
+		}
+		logFields["broker_event"] = "client-dsl"
+		logFields["broker_id"] = b.brokerID
+		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
+		logFields["request_size"] = requestSize
+		logFields["response_size"] = responseSize
+		if retErr != nil {
+			logFields["error"] = retErr.Error()
+		}
+		logFields.Add(transportLogFields)
+		b.config.Logger.LogMetric(brokerMetricName, logFields)
+		if retErr != nil {
+			retErr = NewBrokerLoggedEvent(retErr)
+		}
+	}()
+
+	dslRequest, err := UnmarshalClientDSLRequest(requestPayload)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	requestSize = len(dslRequest.RequestPayload)
+
+	// There is no ValidateAndGetLogFields call in this handler as the DSL
+	// backend (or relay) validates inputs and logs events.
+
+	dslResponsePayload, err := b.config.RelayDSLRequest(
+		ctx,
+		extendTransportTimeout,
+		clientIP,
+		geoIPData,
+		dslRequest.RequestPayload)
+	if err != nil {
+		// RelayDSLRequest will always return a generic error response payload
+		// to send to the client, to ensure it retains its broker client
+		// round tripper. Any DSL relay errors, including missing
+		// configuration, will be logged to the broker_event.
+		retErr = err
+	}
+
+	responseSize = len(dslResponsePayload)
+
+	responsePayload, err := MarshalClientDSLResponse(
+		&ClientDSLResponse{
+			ResponsePayload: dslResponsePayload,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)

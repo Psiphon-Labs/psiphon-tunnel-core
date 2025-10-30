@@ -689,6 +689,11 @@ type Config struct {
 	// 60 seconds.
 	ShutdownGoroutineProfileDeadlineSeconds *int `json:",omitempty"`
 
+	// DisableDSLFetcher disables DSL fetches. If set, this overrides the
+	// EnableDSLFetcher tactics parameter. This may be used for special case
+	// temporary tunnels.
+	DisableDSLFetcher bool `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//
@@ -1100,6 +1105,10 @@ type Config struct {
 	InproxyEnableWebRTCDebugLogging bool `json:",omitempty"`
 
 	NetworkIDCacheTTLMilliseconds *int `json:",omitempty"`
+
+	CompressTactics *bool `json:",omitempty"`
+
+	EnableDSLFetcher *bool `json:",omitempty"`
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -2888,6 +2897,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.NetworkIDCacheTTLMilliseconds != nil {
 		applyParameters[parameters.NetworkIDCacheTTL] = fmt.Sprintf("%dms", *config.NetworkIDCacheTTLMilliseconds)
+	}
+
+	if config.CompressTactics != nil {
+		applyParameters[parameters.CompressTactics] = *config.CompressTactics
+	}
+
+	if config.EnableDSLFetcher != nil {
+		applyParameters[parameters.EnableDSLFetcher] = *config.EnableDSLFetcher
 	}
 
 	// When adding new config dial parameters that may override tactics, also

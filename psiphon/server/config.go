@@ -22,6 +22,7 @@ package server
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -559,6 +560,23 @@ type Config struct {
 	// values.
 	IptablesAcceptRateLimitTunnelProtocolRateLimits map[string][2]int `json:",omitempty"`
 
+	// DSLRelayServiceURL specifies the DSL backend address to use for
+	// relaying client DSL requests. When specified, the following DSL relay
+	// PKI parameters must also be specified.
+	DSLRelayServiceURL string `json:",omitempty"`
+
+	// DSLRelayCACertificatesFilename is part of the mutual authentication PKI
+	// for DSL relaying.
+	DSLRelayCACertificatesFilename string `json:",omitempty"`
+
+	// DSLRelayHostCertificateFilename is part of the mutual authentication
+	// PKI for DSL relaying.
+	DSLRelayHostCertificateFilename string `json:",omitempty"`
+
+	// DSLRelayHostKeyFilename is part of the mutual authentication PKI for
+	// DSL relaying.
+	DSLRelayHostKeyFilename string `json:",omitempty"`
+
 	sshBeginHandshakeTimeout                       time.Duration
 	sshHandshakeTimeout                            time.Duration
 	peakUpstreamFailureRateMinimumSampleSize       int
@@ -571,6 +589,8 @@ type Config struct {
 	region                                         string
 	runningProtocols                               []string
 	runningOnlyInproxyBroker                       bool
+	dslRelayCACertificates                         *x509.CertPool
+	dslRelayHostCertificate                        *tls.Certificate
 }
 
 // GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
@@ -820,12 +840,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if !protocol.TunnelProtocolSupportsPassthrough(tunnelProtocol) {
 			return nil, errors.Tracef("Passthrough unsupported tunnel protocol: %s", tunnelProtocol)
 		}
-		if _, _, err := net.SplitHostPort(address); err != nil {
-			if err != nil {
-				return nil, errors.Tracef(
-					"Tunnel protocol %s passthrough address %s invalid: %s",
-					tunnelProtocol, address, err)
-			}
+		_, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, errors.Tracef(
+				"Tunnel protocol %s passthrough address %s invalid: %s",
+				tunnelProtocol, address, err)
 		}
 	}
 
@@ -877,6 +896,35 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 			return nil, errors.Tracef(
 				"AccessControlVerificationKeyRing is invalid: %s", err)
 		}
+	}
+
+	if config.DSLRelayServiceURL != "" {
+		if config.DSLRelayCACertificatesFilename == "" ||
+			config.DSLRelayHostCertificateFilename == "" ||
+			config.DSLRelayHostKeyFilename == "" {
+			return nil, errors.TraceNew(
+				"DSL relay requires mutual TLS configuration")
+		}
+
+		caCertsPEM, err := os.ReadFile(config.DSLRelayCACertificatesFilename)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		dslRelayCACertificates := x509.NewCertPool()
+		if !dslRelayCACertificates.AppendCertsFromPEM(caCertsPEM) {
+			return nil, errors.TraceNew("AppendCertsFromPEM failed")
+		}
+
+		dslRelayHostCertificate, err := tls.LoadX509KeyPair(
+			config.DSLRelayHostCertificateFilename,
+			config.DSLRelayHostKeyFilename)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		config.dslRelayCACertificates = dslRelayCACertificates
+		config.dslRelayHostCertificate = &dslRelayHostCertificate
 	}
 
 	// Limitation: the following is a shortcut which extracts the server's
@@ -1392,7 +1440,7 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		MeekFrontingDisableSNI:              false,
 		TacticsRequestPublicKey:             tacticsRequestPublicKey,
 		TacticsRequestObfuscatedKey:         tacticsRequestObfuscatedKey,
-		ConfigurationVersion:                1,
+		ConfigurationVersion:                0,
 		InproxySessionPublicKey:             inproxyServerSessionPublicKey,
 		InproxySessionRootObfuscationSecret: inproxyServerObfuscationRootSecret,
 		InproxySSHPort:                      inproxySSHPort,

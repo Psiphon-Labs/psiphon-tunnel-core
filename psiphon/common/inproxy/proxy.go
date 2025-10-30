@@ -126,7 +126,8 @@ type ProxyConfig struct {
 	// HandleTacticsPayload must return true when the tacticsPayload includes
 	// new tactics, indicating that the proxy should reinitialize components
 	// controlled by tactics parameters.
-	HandleTacticsPayload func(networkID string, tacticsPayload []byte) bool
+	HandleTacticsPayload func(
+		networkID string, compressTactics bool, tacticsPayload []byte) bool
 
 	// MustUpgrade is a callback that is invoked when a MustUpgrade flag is
 	// received from the broker. When MustUpgrade is received, the proxy
@@ -602,7 +603,7 @@ func (p *Proxy) proxyOneClient(
 	// returned in the proxy announcment response are associated and stored
 	// with the original network ID.
 
-	metrics, tacticsNetworkID, err := p.getMetrics(
+	metrics, tacticsNetworkID, compressTactics, err := p.getMetrics(
 		checkTactics, brokerCoordinator, webRTCCoordinator)
 	if err != nil {
 		return backOff, errors.Trace(err)
@@ -684,7 +685,9 @@ func (p *Proxy) proxyOneClient(
 		// response as there may still be a match.
 
 		if p.config.HandleTacticsPayload(
-			tacticsNetworkID, announceResponse.TacticsPayload) {
+			tacticsNetworkID,
+			compressTactics,
+			announceResponse.TacticsPayload) {
 
 			p.resetNetworkDiscovery()
 		}
@@ -1012,7 +1015,8 @@ func (p *Proxy) proxyOneClient(
 func (p *Proxy) getMetrics(
 	includeTacticsParameters bool,
 	brokerCoordinator BrokerDialCoordinator,
-	webRTCCoordinator WebRTCDialCoordinator) (*ProxyMetrics, string, error) {
+	webRTCCoordinator WebRTCDialCoordinator) (
+	*ProxyMetrics, string, bool, error) {
 
 	// tacticsNetworkID records the exact network ID that corresponds to the
 	// tactics tag sent in the base parameters, and is used when applying any
@@ -1020,16 +1024,18 @@ func (p *Proxy) getMetrics(
 	baseParams, tacticsNetworkID, err := p.config.GetBaseAPIParameters(
 		includeTacticsParameters)
 	if err != nil {
-		return nil, "", errors.Trace(err)
+		return nil, "", false, errors.Trace(err)
 	}
 
 	apiParams := common.APIParameters{}
 	apiParams.Add(baseParams)
 	apiParams.Add(common.APIParameters(brokerCoordinator.MetricsForBrokerRequests()))
 
+	compressTactics := protocol.GetCompressTactics(apiParams)
+
 	packedParams, err := protocol.EncodePackedAPIParameters(apiParams)
 	if err != nil {
-		return nil, "", errors.Trace(err)
+		return nil, "", false, errors.Trace(err)
 	}
 
 	return &ProxyMetrics{
@@ -1044,5 +1050,5 @@ func (p *Proxy) getMetrics(
 		LimitDownstreamBytesPerSecond: int64(p.config.LimitDownstreamBytesPerSecond),
 		PeakUpstreamBytesPerSecond:    atomic.LoadInt64(&p.peakBytesUp),
 		PeakDownstreamBytesPerSecond:  atomic.LoadInt64(&p.peakBytesDown),
-	}, tacticsNetworkID, nil
+	}, tacticsNetworkID, compressTactics, nil
 }

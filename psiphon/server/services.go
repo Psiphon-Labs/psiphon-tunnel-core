@@ -37,6 +37,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/packetman"
@@ -146,6 +147,23 @@ func RunServices(configJSON []byte) (retErr error) {
 		}
 
 		support.PacketManipulator = packetManipulator
+	}
+
+	if config.DSLRelayServiceURL != "" {
+		support.dslRelay = dsl.NewRelay(&dsl.RelayConfig{
+			Logger:                        CommonLogger(log),
+			CACertificates:                config.dslRelayCACertificates,
+			HostCertificate:               config.dslRelayHostCertificate,
+			DynamicServerListServiceURL:   config.DSLRelayServiceURL,
+			HostID:                        config.HostID,
+			APIParameterValidator:         getDSLAPIParameterValidator(config),
+			APIParameterLogFieldFormatter: getDSLAPIParameterLogFieldFormatter(),
+		})
+
+		err := dslReloadRelayTactics(support)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	support.discovery = makeDiscovery(support)
@@ -590,8 +608,8 @@ type SupportServices struct {
 	PacketManipulator            *packetman.Manipulator
 	ReplayCache                  *ReplayCache
 	ServerTacticsParametersCache *ServerTacticsParametersCache
-
-	discovery *Discovery
+	dslRelay                     *dsl.Relay
+	discovery                    *Discovery
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -709,6 +727,16 @@ func (support *SupportServices) Reload() {
 		}
 
 		reloadDiscovery(true)
+
+		if support.dslRelay != nil {
+			err := dslReloadRelayTactics(support)
+			if err != nil {
+				log.WithTraceFields(
+					LogFields{"error": errors.Trace(err)}).Warning(
+					"failed to reload DSL relay tactics")
+			}
+
+		}
 	}
 
 	// Take these actions only after the corresponding Reloader has reloaded.

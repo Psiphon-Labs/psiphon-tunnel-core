@@ -485,6 +485,34 @@ func GetTacticsCapability(protocol string) string {
 	return GetCapability(protocol) + "-TACTICS"
 }
 
+// IsTacticsCapability indicates if the specified capability is a server
+// tactics capability.
+func IsTacticsCapability(protocol string) bool {
+	return strings.HasSuffix(protocol, "-TACTICS")
+}
+
+// GetServerEntryFields converts a ServerEntry to ServerEntryFields.
+//
+// Note that a conversion in this direction doesn't retain unrecognized
+// fields; see ServerEntryFields comment. Clients should only store
+// ServerEntryFields obtained from DecodeServerEntryFields or
+// DecodePackedServerEntryFields.
+func (serverEntry *ServerEntry) GetServerEntryFields() (ServerEntryFields, error) {
+
+	marshaledServerEntry, err := json.Marshal(serverEntry)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	var serverEntryFields ServerEntryFields
+	err = json.Unmarshal(marshaledServerEntry, &serverEntryFields)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return serverEntryFields, nil
+}
+
 // hasCapability indicates if the server entry has the specified capability.
 //
 // Any internal "PASSTHROUGH-v2 or "PASSTHROUGH" component in the server
@@ -918,6 +946,7 @@ func (serverEntry *ServerEntry) GetSupportedTacticsProtocols() []string {
 		}
 
 		requiredCapability := GetTacticsCapability(protocol)
+
 		if !serverEntry.hasCapability(requiredCapability) {
 			continue
 		}
@@ -1129,7 +1158,7 @@ func ValidateServerEntryFields(serverEntryFields ServerEntryFields) error {
 	// Ensure locally initialized fields have been set.
 
 	source := serverEntryFields.GetLocalSource()
-	if !common.Contains(
+	if !common.ContainsWildcard(
 		SupportedServerEntrySources, source) {
 		return errors.Tracef("server entry has invalid source: %s", source)
 	}

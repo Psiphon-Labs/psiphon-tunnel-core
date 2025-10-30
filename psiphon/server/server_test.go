@@ -52,8 +52,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -61,6 +63,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 	pb "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond"
 	pbr "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/router"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
@@ -320,14 +323,15 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doLogHostProvider:    true,
-			doLogProtobuf:        useProtobufLogging,
+			tunnelProtocol:        "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			tlsProfile:            protocol.TLS_PROFILE_CHROME_70,
+			requireAuthorization:  true,
+			doTunneledWebRequest:  true,
+			doTunneledNTPRequest:  true,
+			doDanglingTCPConn:     true,
+			doLogHostProvider:     true,
+			doLogProtobuf:         useProtobufLogging,
+			doUncompressedTactics: true,
 		})
 }
 
@@ -461,13 +465,14 @@ func TestInproxyTLSOSSH(t *testing.T) {
 	}
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "INPROXY-WEBRTC-TLS-OSSH",
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doLogHostProvider:    true,
-			doLogProtobuf:        useProtobufLogging,
+			tunnelProtocol:        "INPROXY-WEBRTC-TLS-OSSH",
+			requireAuthorization:  true,
+			doTunneledWebRequest:  true,
+			doTunneledNTPRequest:  true,
+			doDanglingTCPConn:     true,
+			doLogHostProvider:     true,
+			doLogProtobuf:         useProtobufLogging,
+			doUncompressedTactics: true,
 		})
 }
 
@@ -829,6 +834,7 @@ type runServerConfig struct {
 	doPersonalPairing        bool
 	doRestrictInproxy        bool
 	useInproxyMediaStreams   bool
+	doUncompressedTactics    bool
 	doLogProtobuf            bool
 }
 
@@ -843,6 +849,7 @@ var (
 	testDeviceRegion                     = "US"
 	testDeviceLocation                   = "gzzzz"
 	testDisallowedTrafficAlertActionURLs = []string{"https://example.org/disallowed"}
+	testHostID                           = "example-host-id"
 
 	// A steering IP must not be a bogon; this address is not dialed.
 	testSteeringIP = "1.1.1.1"
@@ -891,6 +898,35 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if err != nil {
 			t.Fatalf("error generating inproxy test config: %s", err)
 		}
+	}
+
+	// set up DSL components
+
+	// Add the DSL tests, including an initial untunneled DSL request to get
+	// the primary server entry, when an in-proxy broker is available to be
+	// the DSL relay.
+	//
+	// Limiting this to addMeekServerForBroker ensures the
+	// configureDSLTestServerEntries bootstrap can only perform tactics
+	// requests and not dial a tunnel, so the DSL request must succeed.
+
+	doDSL := psiphon.DSLEnabled() && doInproxy && inproxyTestConfig.addMeekServerForBroker
+
+	var dslTestConfig *dslTestConfig
+	enableDSLFetcher := "false"
+	if doDSL {
+		dslTestConfig, err = generateDSLTestConfig()
+		if err != nil {
+			t.Fatalf("error generating DSL test config: %s", err)
+		}
+
+		err = dslTestConfig.backend.Start()
+		if err != nil {
+			t.Fatalf("error starting DSL backend: %s", err)
+		}
+		defer dslTestConfig.backend.Stop()
+
+		enableDSLFetcher = "true"
 	}
 
 	// configure authorized access
@@ -1088,6 +1124,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"classic",
+			enableDSLFetcher,
 			inproxyTacticsParametersJSON,
 			runConfig.doRestrictInproxy)
 	}
@@ -1097,6 +1134,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
+
+	serverConfig["HostID"] = testHostID
 
 	// The test GeoIP databases map all IPs to a single, non-"None" country
 	// and ASN.
@@ -1203,6 +1242,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		serverConfig["MetricSocketPath"] = metricSocketPath
 		serverConfig["LogDestinationPrefix"] = "testprefix"
+	}
+
+	if doDSL {
+
+		serverConfig["DSLRelayServiceURL"] = dslTestConfig.backend.GetAddress()
+		serverConfig["DSLRelayCACertificatesFilename"] = dslTestConfig.relayCACertificatesFilename
+		serverConfig["DSLRelayHostCertificateFilename"] = dslTestConfig.relayHostCertificateFilename
+		serverConfig["DSLRelayHostKeyFilename"] = dslTestConfig.relayHostKeyFilename
 	}
 
 	// Uncomment to enable SIGUSR2 profile dumps
@@ -1518,6 +1565,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				runConfig.applyPrefix,
 				runConfig.forceFragmenting,
 				"consistent",
+				enableDSLFetcher,
 				inproxyTacticsParametersJSON,
 				runConfig.doRestrictInproxy)
 		}
@@ -1544,6 +1592,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("missing server load log")
 	}
 	timer.Stop()
+
+	// reset client datastore
+
+	_ = os.RemoveAll(filepath.Join(testDataDirName, psiphon.PsiphonDataDirectoryName))
 
 	// configure client
 
@@ -1619,11 +1671,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	clientConfig.PropagationChannelId = propagationChannelID
 	clientConfig.TunnelPoolSize = numTunnels
-	clientConfig.TargetServerEntry = string(encodedServerEntry)
 	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.EmitSLOKs = true
 	clientConfig.EmitServerAlerts = true
+
+	// In the classic test path, TargetServerEntry is used to specify the
+	// server enrty. In the DSL test case, the server entry is fetched from
+	// the mock.DSL backend.
+	if !doDSL {
+		clientConfig.TargetServerEntry = string(encodedServerEntry)
+	}
 
 	// Exercise the WaitForNetworkConnectivity wired-up code path.
 	clientConfig.NetworkConnectivityChecker = &networkConnectivityChecker{}
@@ -1720,6 +1778,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if err != nil {
 			t.Fatalf("WriteFile failed: %s", err)
 		}
+	}
+
+	if runConfig.doUncompressedTactics {
+		compressTactics := false
+		clientConfig.CompressTactics = &compressTactics
 	}
 
 	err = clientConfig.Commit(false)
@@ -1858,16 +1921,30 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			time.Now().UTC().AddDate(0, 0, -1).Truncate(1*time.Hour).Format(time.RFC3339))
 		expectUniqueUser = true
 	case 2:
-		// Leave previous last_connected.
+		// Mock same day last_connected.
+		psiphon.SetKeyValue(
+			"lastConnected",
+			time.Now().UTC().Add(-1*time.Minute).Truncate(1*time.Hour).Format(time.RFC3339))
 		expectUniqueUser = false
 	}
-
-	// Clear SLOKs from previous test runs.
-	psiphon.DeleteSLOKs()
 
 	// Store prune server entry test server entries and failed tunnel records.
 	storePruneServerEntriesTest(
 		t, runConfig, testDataDirName, pruneServerEntryTestCases)
+
+	if doDSL {
+
+		// Set up SLOKs and server entries required for the DSL test.
+
+		err := configureDSLTestServerEntries(
+			dslTestConfig,
+			string(encodedServerEntry),
+			serverEntrySignaturePublicKey,
+			serverEntrySignaturePrivateKey)
+		if err != nil {
+			t.Fatalf("configureDSLTestServerEntries failed: %s", err)
+		}
+	}
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -1884,6 +1961,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverAlertDisallowedNoticesEmitted := make(chan struct{}, 1)
 	untunneledPortForward := make(chan struct{}, 1)
 	discardTunnel := make(chan struct{}, 1)
+	tunneledDSLFetched := make(chan struct{}, 1)
 
 	psiphon.ResetNoticeWriter()
 	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
@@ -1961,6 +2039,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				if strings.Contains(payload["message"].(string), "discard tunnel") {
 					sendNotificationReceived(discardTunnel)
 				}
+				if strings.HasPrefix(payload["message"].(string), "DSL: fetched server entries") {
+					tunneled := payload["tunneled"].(bool)
+					updated := int(payload["updated"].(float64))
+					if tunneled && updated > 0 {
+						sendNotificationReceived(tunneledDSLFetched)
+					}
+				}
 			}
 
 			if printNotice {
@@ -2029,6 +2114,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 		waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
 		waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
+		if doDSL {
+			waitOnNotification(t, tunneledDSLFetched, timeoutSignal, "tunneled DSL timeout exceeded")
+		}
 
 		// The tunnel connected, so the local last_connected has been updated.
 		lastConnectedUpdateCount += 1
@@ -2066,6 +2154,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"consistent",
+			enableDSLFetcher,
 			inproxyTacticsParametersJSON,
 			runConfig.doRestrictInproxy)
 
@@ -2145,8 +2234,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
 
+		expected := expectedNumSLOKs
+		if doDSL {
+			expected += len(dslTestConfig.clientSLOKs)
+		}
+
 		numSLOKs := psiphon.CountSLOKs()
-		if numSLOKs != expectedNumSLOKs {
+		if numSLOKs != expected {
 			t.Fatalf("unexpected number of SLOKs: %d", numSLOKs)
 		}
 
@@ -4275,6 +4369,7 @@ func paveTacticsConfigFile(
 	applyOsshPrefix bool,
 	enableOsshPrefixFragmenting bool,
 	discoveryStategy string,
+	enableDSLFetcher string,
 	inproxyParametersJSON string,
 	doRestrictAllInproxyProviderRegions bool) {
 
@@ -4330,7 +4425,9 @@ func paveTacticsConfigFile(
           "ServerPacketManipulationSpecs" : [{"Name": "test-packetman-spec", "PacketSpecs": [["TCP-flags S"]]}],
           "ServerPacketManipulationProbability" : 1.0,
           "ServerProtocolPacketManipulations": {"All" : ["test-packetman-spec"]},
-          "ServerDiscoveryStrategy": "%s"
+          "ServerDiscoveryStrategy": "%s",
+          "EnableDSLFetcher": %s,
+          "EstablishTunnelWorkTime" : "1s"
         }
       },
       "FilteredTactics" : [
@@ -4430,6 +4527,7 @@ func paveTacticsConfigFile(
 		livenessTestSize,
 		livenessTestSize,
 		discoveryStategy,
+		enableDSLFetcher,
 		propagationChannelID,
 		strings.ReplaceAll(testCustomHostNameRegex, `\`, `\\`),
 		tunnelProtocol)
@@ -4725,6 +4823,83 @@ func generateInproxyTestConfig(
 		proxySessionPublicKeyCurve25519:     proxySessionPublicKeyCurve25519Str,
 		proxySessionPrivateKey:              proxySessionPrivateKeyStr,
 		personalCompartmentID:               personalCompartmentIDStr,
+	}
+
+	return config, nil
+}
+
+type dslTestConfig struct {
+	relayTLSConfig               *testutils.TestDSLRelayTLSConfig
+	relayCACertificatesFilename  string
+	relayHostCertificateFilename string
+	relayHostKeyFilename         string
+	oslPaveData                  []*osl.PaveData
+	clientSLOKs                  []*osl.SLOK
+	backend                      *testutils.TestDSLBackend
+}
+
+func generateDSLTestConfig() (*dslTestConfig, error) {
+
+	relayTLSConfig, err := testutils.NewTestDSLRelayTLSConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	relayCACertificatesFilename := filepath.Join(
+		testDataDirName, "dslRelayCACert.pem")
+	err = os.WriteFile(
+		relayCACertificatesFilename,
+		relayTLSConfig.CACertificatePEM,
+		0644)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	relayHostCertificateFilename := filepath.Join(
+		testDataDirName, "dslRelayHostCert.pem")
+	err = os.WriteFile(
+		relayHostCertificateFilename,
+		relayTLSConfig.RelayCertificatePEM,
+		0644)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	relayHostKeyFilename := filepath.Join(
+		testDataDirName, "dslRelayHostKey.pem")
+	err = os.WriteFile(
+		relayHostKeyFilename,
+		relayTLSConfig.RelayKeyPEM,
+		0644)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	oslPaveData, _, clientSLOKs, err :=
+		testutils.InitializeTestOSLPaveData()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	backend, err := testutils.NewTestDSLBackend(
+		dsl.NewBackendTestShim(),
+		relayTLSConfig,
+		"",
+		nil,
+		testHostID,
+		oslPaveData)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	config := &dslTestConfig{
+		relayTLSConfig:               relayTLSConfig,
+		relayCACertificatesFilename:  relayCACertificatesFilename,
+		relayHostCertificateFilename: relayHostCertificateFilename,
+		relayHostKeyFilename:         relayHostKeyFilename,
+		oslPaveData:                  oslPaveData,
+		clientSLOKs:                  clientSLOKs,
+		backend:                      backend,
 	}
 
 	return config, nil
@@ -5287,4 +5462,85 @@ func newDiscoveryServers(ipAddresses []string) ([]*psinet.DiscoveryServer, error
 		}
 	}
 	return servers, nil
+}
+
+func configureDSLTestServerEntries(
+	dslTestConfig *dslTestConfig,
+	encodedServerEntry string,
+	serverEntrySignaturePublicKey string,
+	serverEntrySignaturePrivateKey string) error {
+
+	// In the DSL test case, the client must get the full tunnel protocol
+	// server entry from an untunneled DSL fetch; a tactics-only copy of
+	// the server entry is stored locally to be used to bootstrap tactics
+	// and get the broker spec required for the untunneled RSL fetch.
+
+	// This sequence requires a low EstablishTunnelWorkTime, set to 1s, since
+	// the triggerFetches condition in Controller establishCandidateGenerator
+	// isn't triggered via candidateServerEntryCount.
+
+	// Store mock SLOKs, which are used to reassemble the OSL key required to
+	// access the DSL server entries.
+
+	for _, slok := range dslTestConfig.clientSLOKs {
+		_, err := psiphon.SetSLOK(slok.ID, slok.Key)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	// Store the full tunnel protocol server entry in the mock DSL backend.
+
+	isTunneled := false
+	dslTestConfig.backend.SetServerEntries(
+		isTunneled,
+		[]string{encodedServerEntry})
+
+	// Add an EMBEDDED tactics-only server entry to the client's datastore.
+
+	serverEntryFields, err := protocol.DecodeServerEntryFields(
+		encodedServerEntry, "", "")
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Strip non-tactics capabilities. Assumes addMeekServerForBroker has
+	// added UNFRONTED-MEEK-HTTPS-OSSH for tactics, and only for tactics.
+	serverEntryFields["capabilities"] = []string{
+		"UNFRONTED-MEEK-HTTPS", "UNFRONTED-MEEK-HTTPS-TACTICS"}
+
+	err = serverEntryFields.AddSignature(
+		serverEntrySignaturePublicKey,
+		serverEntrySignaturePrivateKey)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	serverEntryFields.SetLocalSource(protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+	serverEntryFields.SetLocalTimestamp(
+		common.TruncateTimestampToHour(common.GetCurrentTimestamp()))
+
+	err = psiphon.StoreServerEntry(serverEntryFields, true)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Prepare one additional server entry for the tunneled DSL request.
+
+	dialPort := 4000
+	ipAddress := "192.0.3.1" // Won't conflict with initializePruneServerEntriesTest
+	_, _, _, _, encodedServerEntryBytes, err := GenerateConfig(
+		&GenerateConfigParams{
+			ServerEntrySignaturePublicKey:  serverEntrySignaturePublicKey,
+			ServerEntrySignaturePrivateKey: serverEntrySignaturePrivateKey,
+			ServerIPAddress:                ipAddress,
+			TunnelProtocolPorts:            map[string]int{protocol.TUNNEL_PROTOCOL_SSH: dialPort},
+		})
+
+	isTunneled = true
+	dslTestConfig.backend.SetServerEntries(
+		isTunneled,
+		[]string{string(encodedServerEntryBytes)})
+
+	return nil
 }

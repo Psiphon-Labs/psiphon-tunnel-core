@@ -33,7 +33,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 )
 
 func TestPacketManipulatorIPv4(t *testing.T) {
@@ -83,7 +83,7 @@ func testPacketManipulator(useIPv6 bool, t *testing.T) {
 	testSpecName := "test-spec"
 	extraDataValue := "extra-data"
 	config := &Config{
-		Logger:        newTestLogger(),
+		Logger:        testutils.NewTestLogger(),
 		ProtocolPorts: []int{listenerPort},
 		Specs:         []*Spec{{Name: testSpecName, PacketSpecs: [][]string{{"TCP-flags S"}}}},
 		SelectSpecName: func(protocolPort int, _ net.IP) (string, interface{}) {
@@ -153,62 +153,4 @@ func testPacketManipulator(useIPv6 bool, t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected response code: %d", response.StatusCode)
 	}
-}
-
-func newTestLogger() common.Logger {
-	return &testLogger{}
-}
-
-type testLogger struct {
-}
-
-func (logger *testLogger) WithTrace() common.LogTrace {
-	return &testLogTrace{
-		trace: stacktrace.GetParentFunctionName(),
-	}
-}
-
-func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
-	return &testLogTrace{
-		trace:  stacktrace.GetParentFunctionName(),
-		fields: fields,
-	}
-}
-
-func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
-}
-
-func (logger *testLogger) IsLogLevelDebug() bool {
-	return true
-}
-
-type testLogTrace struct {
-	trace  string
-	fields common.LogFields
-}
-
-func (log *testLogTrace) log(
-	noticeType string, args ...interface{}) {
-
-	fmt.Printf("[%s] %s: %+v: %s\n",
-		noticeType,
-		log.trace,
-		log.fields,
-		fmt.Sprint(args...))
-}
-
-func (log *testLogTrace) Debug(args ...interface{}) {
-	log.log("DEBUG", args...)
-}
-
-func (log *testLogTrace) Info(args ...interface{}) {
-	log.log("INFO", args...)
-}
-
-func (log *testLogTrace) Warning(args ...interface{}) {
-	log.log("ALERT", args...)
-}
-
-func (log *testLogTrace) Error(args ...interface{}) {
-	log.log("ERROR", args...)
 }

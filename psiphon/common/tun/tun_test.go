@@ -36,7 +36,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 	"github.com/miekg/dns"
 )
 
@@ -210,14 +210,17 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 			testClient.stop()
 
 			// Check metrics to ensure traffic was tunneled and metrics reported
+			//
+			// Implicitly asserts that packet metrics will be emitted within
+			// PACKET_METRICS_TIMEOUT; if not, the test will fail.
 
-			// Note: this code does not ensure that the "last" packet metrics was
+			// Note: this code does not ensure that the next packet metrics was
 			// for this very client; but all packet metrics should be the same.
 
-			packetMetricsFields := testServer.logger.getLastPacketMetrics()
+			packetMetricsFields := testServer.logger.GetNextPacketMetrics()
 
 			if packetMetricsFields == nil {
-				results <- fmt.Errorf("testServer.logger.getLastPacketMetrics failed")
+				results <- fmt.Errorf("testServer.logger.GetNextPacketMetrics failed")
 				return
 			}
 
@@ -321,7 +324,7 @@ func (counter *bytesTransferredCounter) Get() (int64, int64, int64) {
 }
 
 type testServer struct {
-	logger         *testLogger
+	logger         *testutils.TestLogger
 	updaterMaker   FlowActivityUpdaterMaker
 	metricsUpdater MetricsUpdater
 	tunServer      *Server
@@ -336,7 +339,9 @@ func startTestServer(
 	updaterMaker FlowActivityUpdaterMaker,
 	metricsUpdater MetricsUpdater) (*testServer, error) {
 
-	logger := newTestLogger(true)
+	logger := testutils.NewTestLoggerWithPacketMetrics(
+		CONCURRENT_CLIENT_COUNT,
+		PACKET_METRICS_TIMEOUT)
 
 	getDNSResolverIPv4Addresses := func() []net.IP {
 		return []net.IP{net.ParseIP("8.8.8.8")}
@@ -480,7 +485,6 @@ func (conn *signalConn) Wait() {
 }
 
 type testClient struct {
-	logger    *testLogger
 	unixConn  net.Conn
 	tunClient *Client
 }
@@ -502,14 +506,12 @@ func startTestClient(
 		return nil, fmt.Errorf("startTestClient(): net.Dial failed: %s", err)
 	}
 
-	logger := newTestLogger(false)
-
 	// Assumes IP addresses are available on test host
 
 	// TODO: assign unique IP to each testClient?
 
 	config := &ClientConfig{
-		Logger:                          logger,
+		Logger:                          testutils.NewTestLogger(),
 		SudoNetworkConfigCommands:       os.Getenv("TUN_TEST_SUDO") != "",
 		AllowNoIPv6NetworkConfiguration: !useIPv6,
 		IPv4AddressCIDR:                 clientIPv4AddressCIDR,
@@ -528,7 +530,7 @@ func startTestClient(
 
 	// Configure kernel to fix issue described in fixBindToDevice
 
-	err = fixBindToDevice(logger, config.SudoNetworkConfigCommands, tunClient.device.Name())
+	err = fixBindToDevice(config.Logger, config.SudoNetworkConfigCommands, tunClient.device.Name())
 	if err != nil {
 		return nil, fmt.Errorf("startTestClient(): fixBindToDevice failed: %s", err)
 	}
@@ -536,7 +538,6 @@ func startTestClient(
 	tunClient.Start()
 
 	return &testClient{
-		logger:    logger,
 		unixConn:  unixConn,
 		tunClient: tunClient,
 	}, nil
@@ -776,97 +777,4 @@ func testDNSClient(useIPv6 bool, tunDeviceName string) error {
 	}
 
 	return nil
-}
-
-type testLogger struct {
-	packetMetrics chan common.LogFields
-}
-
-func newTestLogger(wantLastPacketMetrics bool) *testLogger {
-
-	var packetMetrics chan common.LogFields
-	if wantLastPacketMetrics {
-		packetMetrics = make(chan common.LogFields, CONCURRENT_CLIENT_COUNT)
-	}
-
-	return &testLogger{
-		packetMetrics: packetMetrics,
-	}
-}
-
-func (logger *testLogger) WithTrace() common.LogTrace {
-	return &testLoggerTrace{trace: stacktrace.GetParentFunctionName()}
-}
-
-func (logger *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
-	return &testLoggerTrace{
-		trace:  stacktrace.GetParentFunctionName(),
-		fields: fields,
-	}
-}
-
-func (logger *testLogger) LogMetric(metric string, fields common.LogFields) {
-
-	fmt.Printf("METRIC: %s: %+v\n", metric, fields)
-
-	if metric == "server_packet_metrics" && logger.packetMetrics != nil {
-		select {
-		case logger.packetMetrics <- fields:
-		default:
-		}
-	}
-}
-
-func (l *testLogger) IsLogLevelDebug() bool {
-	return true
-}
-
-func (logger *testLogger) getLastPacketMetrics() common.LogFields {
-	if logger.packetMetrics == nil {
-		return nil
-	}
-
-	// Implicitly asserts that packet metrics will be emitted
-	// within PACKET_METRICS_TIMEOUT; if not, the test will fail.
-
-	select {
-	case fields := <-logger.packetMetrics:
-		return fields
-	case <-time.After(PACKET_METRICS_TIMEOUT):
-		return nil
-	}
-}
-
-type testLoggerTrace struct {
-	trace  string
-	fields common.LogFields
-}
-
-func (logger *testLoggerTrace) log(priority, message string) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	if len(logger.fields) == 0 {
-		fmt.Printf(
-			"[%s] %s: %s: %s\n",
-			now, priority, logger.trace, message)
-	} else {
-		fmt.Printf(
-			"[%s] %s: %s: %s %+v\n",
-			now, priority, logger.trace, message, logger.fields)
-	}
-}
-
-func (logger *testLoggerTrace) Debug(args ...interface{}) {
-	logger.log("DEBUG", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Info(args ...interface{}) {
-	logger.log("INFO", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Warning(args ...interface{}) {
-	logger.log("WARNING", fmt.Sprint(args...))
-}
-
-func (logger *testLoggerTrace) Error(args ...interface{}) {
-	logger.log("ERROR", fmt.Sprint(args...))
 }

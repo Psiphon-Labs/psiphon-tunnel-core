@@ -47,6 +47,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/transferstats"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"github.com/fxamacker/cbor/v2"
 )
 
 // ServerContext is a utility struct which holds all of the data associated
@@ -117,7 +118,7 @@ func NewServerContext(tunnel *Tunnel) (*ServerContext, error) {
 // stored -- and sponsor info (home pages, stat regexes).
 func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) error {
 
-	params := serverContext.getBaseAPIParameters(baseParametersAll, false)
+	params := serverContext.getBaseAPIParameters(baseParametersAll)
 
 	// The server will return a signed copy of its own server entry when the
 	// client specifies this 'missing_server_entry_signature' parameter.
@@ -157,6 +158,8 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 
 	doTactics := !serverContext.tunnel.config.DisableTactics
 
+	compressTactics := false
+
 	networkID := ""
 	if doTactics {
 
@@ -180,6 +183,10 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 		if err != nil {
 			return errors.Trace(err)
 		}
+
+		p := serverContext.tunnel.config.GetParameters().Get()
+		compressTactics = compressTacticsEnabled && p.Bool(parameters.CompressTactics)
+		p.Close()
 	}
 
 	// When split tunnel mode is enabled, indicate this to the server. When
@@ -210,6 +217,17 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 				inproxyConn.(*inproxy.ClientConn).InitialRelayPacket())
 			params["inproxy_relay_packet"] = packet
 		}
+	}
+
+	// When requesting compressed tactics, the response will use CBOR binary
+	// encoding.
+
+	var responseUnmarshaler func([]byte, any) error
+	responseUnmarshaler = json.Unmarshal
+
+	if compressTactics && serverContext.psiphonHttpsClient == nil {
+		protocol.SetCompressTactics(params)
+		responseUnmarshaler = cbor.Unmarshal
 	}
 
 	var response []byte
@@ -262,7 +280,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 	handshakeResponse.UpstreamBytesPerSecond = -1
 	handshakeResponse.DownstreamBytesPerSecond = -1
 
-	err := json.Unmarshal(response, &handshakeResponse)
+	err := responseUnmarshaler(response, &handshakeResponse)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -384,7 +402,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 		networkID == serverContext.tunnel.config.GetNetworkID() {
 
 		var payload *tactics.Payload
-		err := json.Unmarshal(handshakeResponse.TacticsPayload, &payload)
+		err := responseUnmarshaler(handshakeResponse.TacticsPayload, &payload)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -489,7 +507,7 @@ func (serverContext *ServerContext) DoConnectedRequest() error {
 	defer serverContext.tunnel.SetInFlightConnectedRequest(nil)
 
 	params := serverContext.getBaseAPIParameters(
-		baseParametersOnlyUpstreamFragmentorDialParameters, false)
+		baseParametersOnlyUpstreamFragmentorDialParameters)
 
 	lastConnected, err := getLastConnected()
 	if err != nil {
@@ -562,7 +580,7 @@ func (serverContext *ServerContext) StatsRegexps() *transferstats.Regexps {
 func (serverContext *ServerContext) DoStatusRequest() error {
 
 	params := serverContext.getBaseAPIParameters(
-		baseParametersNoDialParameters, false)
+		baseParametersNoDialParameters)
 
 	// Note: ensure putBackStatusRequestPayload is called, to replace
 	// payload for future attempt, in all failure cases.
@@ -910,7 +928,8 @@ func RecordFailedTunnelStat(
 		return errors.Trace(err)
 	}
 
-	params := getBaseAPIParameters(baseParametersAll, true, config, dialParams)
+	includeSessionID := true
+	params := getBaseAPIParameters(baseParametersAll, nil, includeSessionID, config, dialParams)
 
 	delete(params, "server_secret")
 	params["server_entry_tag"] = dialParams.ServerEntry.Tag
@@ -1041,34 +1060,18 @@ const (
 )
 
 func (serverContext *ServerContext) getBaseAPIParameters(
-	filter baseParametersFilter,
-	includeSessionID bool) common.APIParameters {
+	filter baseParametersFilter) common.APIParameters {
 
+	// For tunneled SSH API requests, the session ID is omitted since the
+	// server already has that value; and padding is added via the params
+	// since there's no random padding at the SSH request layer.
+	includeSessionID := false
 	params := getBaseAPIParameters(
 		filter,
+		serverContext.paddingPRNG,
 		includeSessionID,
 		serverContext.tunnel.config,
 		serverContext.tunnel.dialParams)
-
-	// Add a random amount of padding to defend against API call traffic size
-	// fingerprints. The "pad_response" field instructs the server to pad its
-	// response accordingly.
-
-	p := serverContext.tunnel.config.GetParameters().Get()
-	minUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMinBytes)
-	maxUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMaxBytes)
-	minDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMinBytes)
-	maxDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMaxBytes)
-
-	if maxUpstreamPadding > 0 {
-		size := serverContext.paddingPRNG.Range(minUpstreamPadding, maxUpstreamPadding)
-		params["padding"] = strings.Repeat(" ", size)
-	}
-
-	if maxDownstreamPadding > 0 {
-		size := serverContext.paddingPRNG.Range(minDownstreamPadding, maxDownstreamPadding)
-		params["pad_response"] = strconv.Itoa(size)
-	}
 
 	return params
 }
@@ -1081,19 +1084,37 @@ func (serverContext *ServerContext) getBaseAPIParameters(
 // baseParametersNoDialParameters.
 func getBaseAPIParameters(
 	filter baseParametersFilter,
+	paddingPRNG *prng.PRNG,
 	includeSessionID bool,
 	config *Config,
 	dialParams *DialParameters) common.APIParameters {
 
 	params := make(common.APIParameters)
 
-	// Temporary measure: unconditionally include legacy session_id and
-	// client_session_id fields for compatibility with existing servers used
-	// in CI.
-	//
-	// TODO: remove once necessary servers are upgraded
-	params["session_id"] = config.SessionID
-	params["client_session_id"] = config.SessionID
+	if paddingPRNG != nil {
+
+		// Add a random amount of padding to defend against API call traffic size
+		// fingerprints. The "pad_response" field instructs the server to pad its
+		// response accordingly.
+		//
+		// Padding may be omitted if it's already provided at transport layer.
+
+		p := config.GetParameters().Get()
+		minUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMinBytes)
+		maxUpstreamPadding := p.Int(parameters.APIRequestUpstreamPaddingMaxBytes)
+		minDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMinBytes)
+		maxDownstreamPadding := p.Int(parameters.APIRequestDownstreamPaddingMaxBytes)
+
+		if maxUpstreamPadding > 0 {
+			size := paddingPRNG.Range(minUpstreamPadding, maxUpstreamPadding)
+			params["padding"] = strings.Repeat(" ", size)
+		}
+
+		if maxDownstreamPadding > 0 {
+			size := paddingPRNG.Range(minDownstreamPadding, maxDownstreamPadding)
+			params["pad_response"] = strconv.Itoa(size)
+		}
+	}
 
 	if includeSessionID {
 		// The session ID is included in non-SSH API requests only. For SSH
@@ -1138,6 +1159,10 @@ func getBaseAPIParameters(
 	}
 	if config.DeviceLocation != "" {
 		params["device_location"] = config.DeviceLocation
+	}
+
+	if config.EgressRegion != "" {
+		params["egress_region"] = config.EgressRegion
 	}
 
 	if filter == baseParametersAll {
@@ -1262,10 +1287,6 @@ func getBaseAPIParameters(
 			isReplay = "1"
 		}
 		params["is_replay"] = isReplay
-
-		if config.EgressRegion != "" {
-			params["egress_region"] = config.EgressRegion
-		}
 
 		// dialParams.DialDuration is nanoseconds; report milliseconds
 		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/time.Millisecond)

@@ -359,6 +359,11 @@ func dialClientWebRTCConn(
 
 	brokerCoordinator := config.BrokerClient.GetBrokerDialCoordinator()
 	personalCompartmentIDs := brokerCoordinator.PersonalCompartmentIDs()
+	commonCompartmentIDs := brokerCoordinator.CommonCompartmentIDs()
+
+	if len(personalCompartmentIDs) == 0 && len(commonCompartmentIDs) == 0 {
+		return nil, false, errors.TraceNew("no compartment IDs")
+	}
 
 	// In personal pairing mode, RFC 1918/4193 private IP addresses are
 	// included in SDPs.
@@ -426,7 +431,7 @@ func dialClientWebRTCConn(
 				NATType:           config.WebRTCDialCoordinator.NATType(),
 				PortMappingTypes:  config.WebRTCDialCoordinator.PortMappingTypes(),
 			},
-			CommonCompartmentIDs:         brokerCoordinator.CommonCompartmentIDs(),
+			CommonCompartmentIDs:         commonCompartmentIDs,
 			PersonalCompartmentIDs:       personalCompartmentIDs,
 			ClientOfferSDP:               SDP,
 			ICECandidateTypes:            SDPMetrics.iceCandidateTypes,

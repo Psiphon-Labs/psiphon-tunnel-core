@@ -36,6 +36,7 @@ const (
 	proxyAnswerRequestTimeout         = 10 * time.Second
 	clientOfferRequestTimeout         = 10 * time.Second
 	clientRelayedPacketRequestTimeout = 10 * time.Second
+	clientDSLRequestTimeout           = 35 * time.Second
 )
 
 // BrokerClient is used to make requests to a broker.
@@ -224,6 +225,34 @@ func (b *BrokerClient) ClientRelayedPacket(
 	}
 
 	response, err := UnmarshalClientRelayedPacketResponse(responsePayload)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return response, nil
+}
+
+// ClientDSL sends a DSL request to be relayed by the broker.
+func (b *BrokerClient) ClientDSL(
+	ctx context.Context,
+	request *ClientDSLRequest) (*ClientDSLResponse, error) {
+
+	requestPayload, err := MarshalClientDSLRequest(request)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	requestTimeout := common.ValueOrDefault(
+		b.coordinator.DSLRequestTimeout(),
+		clientDSLRequestTimeout)
+
+	responsePayload, _, err := b.roundTrip(
+		ctx, 0, requestTimeout, requestPayload)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	response, err := UnmarshalClientDSLResponse(responsePayload)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

@@ -30,6 +30,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 )
 
 func TestProcessSDP(t *testing.T) {
@@ -42,7 +43,7 @@ func TestProcessSDP(t *testing.T) {
 func runTestProcessSDP() error {
 
 	config := &webRTCConfig{
-		Logger: newTestLogger(),
+		Logger: testutils.NewTestLogger(),
 		WebRTCDialCoordinator: &testWebRTCDialCoordinator{
 			disableSTUN:        true,
 			disablePortMapping: true,

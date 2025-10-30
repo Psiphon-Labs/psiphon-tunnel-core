@@ -61,6 +61,9 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 	"inproxy_broker": {
 		baseParams: true,
 	},
+	"dsl_relay_get_server_entries": {
+		BaseParams: true,
+	},
 }
 
 // NewProtobufRoutedMessage returns a populated Router protobuf message.
