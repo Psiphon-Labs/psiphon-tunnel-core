@@ -446,13 +446,38 @@ func protobufPopulateMessageFromFields(logFields LogFields, msg proto.Message) {
 }
 
 // getProtobufFieldName extracts the field name from protobuf struct tag.
+//
+// Example:
+// - in: "bytes,1,opt,name=host_metadata,json=hostMetadata,proto3"
+// - out: "host_metadata"
 func getProtobufFieldName(protoTag string) string {
-	// Parse protobuf tag like: "bytes,1,opt,name=host_metadata,json=hostMetadata,proto3".
-	parts := strings.SplitSeq(protoTag, ",")
-	for part := range parts {
-		if trimmed, found := strings.CutPrefix(part, "name="); found {
-			return trimmed
+
+	n := len(protoTag)
+
+	// Process the input byte-by-byte to avoid allocations.
+
+	for i := 0; i < n; {
+
+		// Find the end of this comma-delimited part of the tag.
+		j := i
+		for j < n && protoTag[j] != ',' {
+			j++
 		}
+
+		// Check for "name=" at the start of this part.
+		if j-i >= 5 &&
+			protoTag[i] == 'n' &&
+			protoTag[i+1] == 'a' &&
+			protoTag[i+2] == 'm' &&
+			protoTag[i+3] == 'e' &&
+			protoTag[i+4] == '=' {
+
+			// Return the slice after "name=".
+			return protoTag[i+5 : j]
+		}
+
+		// Skip to the start of next part of the tag.
+		i = j + 1
 	}
 
 	return ""
