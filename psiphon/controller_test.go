@@ -433,6 +433,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	modifyConfig["DataRootDirectory"] = testDataDirName
 
 	if runConfig.protocol != "" {
+		modifyConfig["DisableTactics"] = true
 		modifyConfig["LimitTunnelProtocols"] = protocol.TunnelProtocols{runConfig.protocol}
 	}
 
