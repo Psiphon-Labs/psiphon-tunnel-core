@@ -34,6 +34,8 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -110,7 +112,7 @@ type DSLBackendTestShim interface {
 // TestDSLBackend is a mock DSL backend intended only for testing.
 type TestDSLBackend struct {
 	shim                    DSLBackendTestShim
-	tlsConfig               *TestDSLRelayTLSConfig
+	tlsConfig               *TestDSLTLSConfig
 	expectedClientIP        string
 	expectedClientGeoIPData *common.GeoIPData
 	expectedHostID          string
@@ -127,7 +129,7 @@ type dslSourcedServerEntry struct {
 
 func NewTestDSLBackend(
 	shim DSLBackendTestShim,
-	tlsConfig *TestDSLRelayTLSConfig,
+	tlsConfig *TestDSLTLSConfig,
 	expectedClientIP string,
 	expectedClientGeoIPData *common.GeoIPData,
 	expectedHostID string,
@@ -724,7 +726,7 @@ func InitializeTestOSLPaveData() ([]*osl.PaveData, []*osl.PaveData, []*osl.SLOK,
 	return backendPaveData1, backendPaveData2, clientSLOKs, nil
 }
 
-type TestDSLRelayTLSConfig struct {
+type TestDSLTLSConfig struct {
 	CACertificate         *x509.Certificate
 	CACertificatePEM      []byte
 	BackendCertificate    *tls.Certificate
@@ -735,7 +737,7 @@ type TestDSLRelayTLSConfig struct {
 	RelayKeyPEM           []byte
 }
 
-func NewTestDSLRelayTLSConfig() (*TestDSLRelayTLSConfig, error) {
+func NewTestDSLTLSConfig() (*TestDSLTLSConfig, error) {
 
 	CAPrivateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -830,7 +832,7 @@ func NewTestDSLRelayTLSConfig() (*TestDSLRelayTLSConfig, error) {
 		return nil, errors.Trace(err)
 	}
 
-	return &TestDSLRelayTLSConfig{
+	return &TestDSLTLSConfig{
 		CACertificate:         CACertificate,
 		CACertificatePEM:      CACertificatePEM,
 		BackendCertificate:    backendCertificate,
@@ -840,4 +842,43 @@ func NewTestDSLRelayTLSConfig() (*TestDSLRelayTLSConfig, error) {
 		RelayCertificatePEM:   relayCertificatePEM,
 		RelayKeyPEM:           relayKeyPEM,
 	}, nil
+}
+
+func (config *TestDSLTLSConfig) WriteRelayFiles(dirName string) (
+	string, string, string, error) {
+
+	caCertificatesFilename := filepath.Join(
+		dirName, "dslRelayCACert.pem")
+	err := os.WriteFile(
+		caCertificatesFilename,
+		config.CACertificatePEM,
+		0644)
+	if err != nil {
+		return "", "", "", errors.Trace(err)
+	}
+
+	hostCertificateFilename := filepath.Join(
+		dirName, "dslRelayHostCert.pem")
+	err = os.WriteFile(
+		hostCertificateFilename,
+		config.RelayCertificatePEM,
+		0644)
+	if err != nil {
+		return "", "", "", errors.Trace(err)
+	}
+
+	hostKeyFilename := filepath.Join(
+		dirName, "dslRelayHostKey.pem")
+	err = os.WriteFile(
+		hostKeyFilename,
+		config.RelayKeyPEM,
+		0644)
+	if err != nil {
+		return "", "", "", errors.Trace(err)
+	}
+
+	return caCertificatesFilename,
+		hostCertificateFilename,
+		hostKeyFilename,
+		nil
 }

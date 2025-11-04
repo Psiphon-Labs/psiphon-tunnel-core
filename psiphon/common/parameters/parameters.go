@@ -523,6 +523,7 @@ const (
 	CheckServerEntryTagsMaxWorkTime                    = "CheckServerEntryTagsMaxWorkTime"
 	ServerEntryPruneDialPortNumberZero                 = "ServerEntryPruneDialPortNumberZero"
 	CompressTactics                                    = "CompressTactics"
+	DSLRelayServiceAddress                             = "DSLRelayServiceAddress"
 	DSLRelayMaxHttpConns                               = "DSLRelayMaxHttpConns"
 	DSLRelayMaxHttpIdleConns                           = "DSLRelayMaxHttpIdleConns"
 	DSLRelayHttpIdleConnTimeout                        = "DSLRelayHttpIdleConnTimeout"
@@ -1149,6 +1150,7 @@ var defaultParameters = map[string]struct {
 
 	CompressTactics: {value: true},
 
+	DSLRelayServiceAddress:                            {value: "", flags: serverSideOnly},
 	DSLRelayMaxHttpConns:                              {value: 100, minimum: 1, flags: serverSideOnly},
 	DSLRelayMaxHttpIdleConns:                          {value: 10, minimum: 1, flags: serverSideOnly},
 	DSLRelayHttpIdleConnTimeout:                       {value: 120 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},

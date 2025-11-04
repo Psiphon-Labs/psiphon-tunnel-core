@@ -1653,6 +1653,7 @@ func (b *Broker) handleClientDSL(
 
 	var logFields common.LogFields
 	var requestSize, responseSize int
+	var dslRelayErr error
 
 	// Always log the outcome.
 	defer func() {
@@ -1664,12 +1665,17 @@ func (b *Broker) handleClientDSL(
 		logFields["elapsed_time"] = time.Since(startTime) / time.Millisecond
 		logFields["request_size"] = requestSize
 		logFields["response_size"] = responseSize
+		loggedError := false
 		if retErr != nil {
 			logFields["error"] = retErr.Error()
+			loggedError = true
+		} else if dslRelayErr != nil {
+			logFields["error"] = dslRelayErr.Error()
+			loggedError = true
 		}
 		logFields.Add(transportLogFields)
 		b.config.Logger.LogMetric(brokerMetricName, logFields)
-		if retErr != nil {
+		if loggedError {
 			retErr = NewBrokerLoggedEvent(retErr)
 		}
 	}()
@@ -1694,7 +1700,7 @@ func (b *Broker) handleClientDSL(
 		// to send to the client, to ensure it retains its broker client
 		// round tripper. Any DSL relay errors, including missing
 		// configuration, will be logged to the broker_event.
-		retErr = err
+		dslRelayErr = errors.Trace(err)
 	}
 
 	responseSize = len(dslResponsePayload)

@@ -29,6 +29,33 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 )
 
+func dslMakeGetServiceAddress(
+	support *SupportServices) func(common.GeoIPData) (string, error) {
+
+	return func(clientGeoIPData common.GeoIPData) (string, error) {
+
+		// Defaults to the config value, unless a non-blank address is
+		// configured in tactics.
+
+		address := support.Config.DSLRelayServiceAddress
+
+		p, err := support.ServerTacticsParametersCache.Get(GeoIPData(clientGeoIPData))
+		if err != nil {
+			return "", errors.Trace(err)
+		}
+		defer p.Close()
+		if p.IsNil() {
+			return address, nil
+		}
+		tacticsAddress := p.String(parameters.DSLRelayServiceAddress)
+		if tacticsAddress == "" {
+			return address, nil
+		}
+
+		return tacticsAddress, nil
+	}
+}
+
 func dslReloadRelayTactics(support *SupportServices) error {
 
 	// Assumes no GeoIP targeting for DSL relay tactics.

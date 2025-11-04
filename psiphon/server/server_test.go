@@ -1246,7 +1246,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if doDSL {
 
-		serverConfig["DSLRelayServiceURL"] = dslTestConfig.backend.GetAddress()
+		serverConfig["DSLRelayServiceAddress"] = dslTestConfig.backend.GetAddress()
 		serverConfig["DSLRelayCACertificatesFilename"] = dslTestConfig.relayCACertificatesFilename
 		serverConfig["DSLRelayHostCertificateFilename"] = dslTestConfig.relayHostCertificateFilename
 		serverConfig["DSLRelayHostKeyFilename"] = dslTestConfig.relayHostKeyFilename
@@ -4829,7 +4829,7 @@ func generateInproxyTestConfig(
 }
 
 type dslTestConfig struct {
-	relayTLSConfig               *testutils.TestDSLRelayTLSConfig
+	relayTLSConfig               *testutils.TestDSLTLSConfig
 	relayCACertificatesFilename  string
 	relayHostCertificateFilename string
 	relayHostKeyFilename         string
@@ -4840,37 +4840,15 @@ type dslTestConfig struct {
 
 func generateDSLTestConfig() (*dslTestConfig, error) {
 
-	relayTLSConfig, err := testutils.NewTestDSLRelayTLSConfig()
+	relayTLSConfig, err := testutils.NewTestDSLTLSConfig()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	relayCACertificatesFilename := filepath.Join(
-		testDataDirName, "dslRelayCACert.pem")
-	err = os.WriteFile(
-		relayCACertificatesFilename,
-		relayTLSConfig.CACertificatePEM,
-		0644)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	relayHostCertificateFilename := filepath.Join(
-		testDataDirName, "dslRelayHostCert.pem")
-	err = os.WriteFile(
+	relayCACertificatesFilename,
 		relayHostCertificateFilename,
-		relayTLSConfig.RelayCertificatePEM,
-		0644)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	relayHostKeyFilename := filepath.Join(
-		testDataDirName, "dslRelayHostKey.pem")
-	err = os.WriteFile(
 		relayHostKeyFilename,
-		relayTLSConfig.RelayKeyPEM,
-		0644)
+		err := relayTLSConfig.WriteRelayFiles(testDataDirName)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

@@ -149,16 +149,20 @@ func RunServices(configJSON []byte) (retErr error) {
 		support.PacketManipulator = packetManipulator
 	}
 
-	if config.DSLRelayServiceURL != "" {
-		support.dslRelay = dsl.NewRelay(&dsl.RelayConfig{
+	if config.DSLRelayServiceAddress != "" {
+		support.dslRelay, err = dsl.NewRelay(&dsl.RelayConfig{
 			Logger:                        CommonLogger(log),
-			CACertificates:                config.dslRelayCACertificates,
-			HostCertificate:               config.dslRelayHostCertificate,
-			DynamicServerListServiceURL:   config.DSLRelayServiceURL,
+			CACertificatesFilename:        config.DSLRelayCACertificatesFilename,
+			HostCertificateFilename:       config.DSLRelayHostCertificateFilename,
+			HostKeyFilename:               config.DSLRelayHostKeyFilename,
+			GetServiceAddress:             dslMakeGetServiceAddress(support),
 			HostID:                        config.HostID,
 			APIParameterValidator:         getDSLAPIParameterValidator(config),
 			APIParameterLogFieldFormatter: getDSLAPIParameterLogFieldFormatter(),
 		})
+		if err != nil {
+			return errors.Trace(err)
+		}
 
 		err := dslReloadRelayTactics(support)
 		if err != nil {
@@ -690,6 +694,10 @@ func (support *SupportServices) Reload() {
 			support.Blocklist},
 		support.GeoIPService.Reloaders()...)
 
+	if support.dslRelay != nil {
+		reloaders = append(reloaders, support.dslRelay)
+	}
+
 	reloadDiscovery := func(reloadedTactics bool) {
 		err := support.discovery.reload(reloadedTactics)
 		if err != nil {
@@ -772,13 +780,13 @@ func (support *SupportServices) Reload() {
 		if err != nil {
 			log.WithTraceFields(
 				LogFields{
-					"reloader": reloader.LogDescription(),
+					"reloader": reloader.ReloadLogDescription(),
 					"error":    err}).Error("reload failed")
 			// Keep running with previous state
 		} else {
 			log.WithTraceFields(
 				LogFields{
-					"reloader": reloader.LogDescription(),
+					"reloader": reloader.ReloadLogDescription(),
 					"reloaded": reloaded}).Info("reload success")
 		}
 	}

@@ -22,7 +22,6 @@ package server
 import (
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -560,10 +559,10 @@ type Config struct {
 	// values.
 	IptablesAcceptRateLimitTunnelProtocolRateLimits map[string][2]int `json:",omitempty"`
 
-	// DSLRelayServiceURL specifies the DSL backend address to use for
+	// DSLRelayServiceAddress specifies the DSL backend address to use for
 	// relaying client DSL requests. When specified, the following DSL relay
 	// PKI parameters must also be specified.
-	DSLRelayServiceURL string `json:",omitempty"`
+	DSLRelayServiceAddress string `json:",omitempty"`
 
 	// DSLRelayCACertificatesFilename is part of the mutual authentication PKI
 	// for DSL relaying.
@@ -589,8 +588,6 @@ type Config struct {
 	region                                         string
 	runningProtocols                               []string
 	runningOnlyInproxyBroker                       bool
-	dslRelayCACertificates                         *x509.CertPool
-	dslRelayHostCertificate                        *tls.Certificate
 }
 
 // GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
@@ -898,33 +895,13 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		}
 	}
 
-	if config.DSLRelayServiceURL != "" {
+	if config.DSLRelayServiceAddress != "" {
 		if config.DSLRelayCACertificatesFilename == "" ||
 			config.DSLRelayHostCertificateFilename == "" ||
 			config.DSLRelayHostKeyFilename == "" {
 			return nil, errors.TraceNew(
 				"DSL relay requires mutual TLS configuration")
 		}
-
-		caCertsPEM, err := os.ReadFile(config.DSLRelayCACertificatesFilename)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		dslRelayCACertificates := x509.NewCertPool()
-		if !dslRelayCACertificates.AppendCertsFromPEM(caCertsPEM) {
-			return nil, errors.TraceNew("AppendCertsFromPEM failed")
-		}
-
-		dslRelayHostCertificate, err := tls.LoadX509KeyPair(
-			config.DSLRelayHostCertificateFilename,
-			config.DSLRelayHostKeyFilename)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		config.dslRelayCACertificates = dslRelayCACertificates
-		config.dslRelayHostCertificate = &dslRelayHostCertificate
 	}
 
 	// Limitation: the following is a shortcut which extracts the server's

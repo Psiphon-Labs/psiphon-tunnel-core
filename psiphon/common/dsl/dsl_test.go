@@ -22,9 +22,10 @@ package dsl
 import (
 	"bytes"
 	"context"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"io/ioutil"
+	"os"
 	"runtime/debug"
 	"sync"
 	"testing"
@@ -127,6 +128,12 @@ var (
 
 func testDSLs(testConfig *testConfig) error {
 
+	testDataDirName, err := ioutil.TempDir("", "psiphon-dsl-test")
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer os.RemoveAll(testDataDirName)
+
 	// Initialize OSLs
 
 	var backendOSLPaveData1 []*osl.PaveData
@@ -143,7 +150,7 @@ func testDSLs(testConfig *testConfig) error {
 
 	// Initialize backend
 
-	tlsConfig, err := testutils.NewTestDSLRelayTLSConfig()
+	tlsConfig, err := testutils.NewTestDSLTLSConfig()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -176,15 +183,25 @@ func testDSLs(testConfig *testConfig) error {
 
 	relayLogger := testutils.NewTestLoggerWithMetricValidator("relay", metricsValidator)
 
-	certPool := x509.NewCertPool()
-	certPool.AddCert(tlsConfig.CACertificate)
+	relayCACertificatesFilename,
+		relayHostCertificateFilename,
+		relayHostKeyFilename,
+		err := tlsConfig.WriteRelayFiles(testDataDirName)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	relayGetServiceAddress := func(_ common.GeoIPData) (string, error) {
+		return backend.GetAddress(), nil
+	}
 
 	relayConfig := &RelayConfig{
-		Logger:                      relayLogger,
-		CACertificates:              certPool,
-		HostCertificate:             tlsConfig.RelayCertificate,
-		DynamicServerListServiceURL: backend.GetAddress(),
-		HostID:                      testHostID,
+		Logger:                  relayLogger,
+		CACertificatesFilename:  relayCACertificatesFilename,
+		HostCertificateFilename: relayHostCertificateFilename,
+		HostKeyFilename:         relayHostKeyFilename,
+		GetServiceAddress:       relayGetServiceAddress,
+		HostID:                  testHostID,
 
 		APIParameterValidator: func(params common.APIParameters) error { return nil },
 
@@ -196,7 +213,10 @@ func testDSLs(testConfig *testConfig) error {
 		},
 	}
 
-	relay := NewRelay(relayConfig)
+	relay, err := NewRelay(relayConfig)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	if !testConfig.cacheServerEntries {
 		relay.SetCacheParameters(0, 0)
