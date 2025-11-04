@@ -241,6 +241,14 @@ type Config struct {
 	// recommended.
 	ConnectionWorkerPoolSize int `json:",omitempty"`
 
+	// DisableConnectionWorkerPool forces ConnectionWorkerPoolSize to 0; this
+	// may be used to load cached tactics or perform an untunneled tactics
+	// request and then post tactics-related notices, including Application
+	// Parameters, without establishing a tunnel. When
+	// DisableConnectionWorkerPool is set, server list bootstrapping remains
+	// enabled.
+	DisableConnectionWorkerPool bool `json:",omitempty"`
+
 	// TunnelPoolSize specifies how many tunnels to run in parallel. Port
 	// forwards are multiplexed over multiple tunnels. If omitted or when 0,
 	// the default is TUNNEL_POOL_SIZE, which is recommended. Any value over
@@ -869,9 +877,6 @@ type Config struct {
 	ClientBurstUpstreamDeadlineMilliseconds   *int `json:",omitempty"`
 	ClientBurstDownstreamTargetBytes          *int `json:",omitempty"`
 	ClientBurstDownstreamDeadlineMilliseconds *int `json:",omitempty"`
-
-	// ApplicationParameters is for testing purposes.
-	ApplicationParameters parameters.KeyValues `json:",omitempty"`
 
 	// CustomHostNameRegexes and other custom host name fields are for testing
 	// purposes.
@@ -1535,8 +1540,8 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.Trace(err)
 	}
 
-	// parametersParameters.Set will validate the config fields applied to
-	// parametersParameters.
+	// parameters.Parameters.Set will validate the config fields applied to
+	// parameters.Parameters.
 
 	err = config.SetParameters("", false, nil)
 	if err != nil {
@@ -1690,7 +1695,8 @@ func (config *Config) GetParameters() *parameters.Parameters {
 //
 // If there is an error, the existing Config.parameters are left
 // entirely unmodified.
-func (config *Config) SetParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
+func (config *Config) SetParameters(
+	tag string, skipOnError bool, applyParameters map[string]interface{}) error {
 
 	setParameters := []map[string]interface{}{config.makeConfigParameters()}
 	if applyParameters != nil {
@@ -1742,12 +1748,12 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 	// Application Parameters are feature flags/config info, delivered as Client
 	// Parameters via tactics/etc., to be communicated to the outer application.
 	// Emit these now, as notices.
-	if p.WeightedCoinFlip(parameters.ApplicationParametersProbability) {
+	//
+	// Only emit when tactics are received (applyParameters != nil), to avoid
+	// triggering the outer application with empty Application Parameters via
+	// the SetParameters call from Commit.
+	if applyParameters != nil {
 		NoticeApplicationParameters(p.KeyValues(parameters.ApplicationParameters))
-	} else {
-		// The front end may persist Application Parameters, so clear any previously
-		// persisted values.
-		NoticeApplicationParameters(parameters.KeyValues{})
 	}
 
 	// Signal all registered TacticsAppliedReceivers that new tactics have
@@ -2225,10 +2231,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ClientBurstDownstreamDeadlineMilliseconds != nil {
 		applyParameters[parameters.ClientBurstDownstreamDeadline] = fmt.Sprintf("%dms", *config.ClientBurstDownstreamDeadlineMilliseconds)
-	}
-
-	if config.ApplicationParameters != nil {
-		applyParameters[parameters.ApplicationParameters] = config.ApplicationParameters
 	}
 
 	if config.CustomHostNameRegexes != nil {

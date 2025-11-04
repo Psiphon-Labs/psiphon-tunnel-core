@@ -2135,6 +2135,12 @@ func (controller *Controller) launchEstablishing() {
 		workerPoolSize = 1
 	}
 
+	// When DisableConnectionWorkerPool is set, no tunnel establishment
+	// workers are run. See Config.DisableConnectionWorkerPool.
+	if controller.config.DisableConnectionWorkerPool {
+		workerPoolSize = 0
+	}
+
 	// TunnelPoolSize may be set by tactics, subject to local constraints. A pool
 	// size of one is forced in packet tunnel mode or when using a
 	// TargetServerEntry. The tunnel pool size is reduced when there are

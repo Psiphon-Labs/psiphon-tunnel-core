@@ -259,7 +259,6 @@ const (
 	RecordRemoteServerListPersistentStatsProbability   = "RecordRemoteServerListPersistentStatsProbability"
 	RecordFailedTunnelPersistentStatsProbability       = "RecordFailedTunnelPersistentStatsProbability"
 	ServerEntryMinimumAgeForPruning                    = "ServerEntryMinimumAgeForPruning"
-	ApplicationParametersProbability                   = "ApplicationParametersProbability"
 	ApplicationParameters                              = "ApplicationParameters"
 	BPFServerTCPProgram                                = "BPFServerTCPProgram"
 	BPFServerTCPProbability                            = "BPFServerTCPProbability"
@@ -838,8 +837,7 @@ var defaultParameters = map[string]struct {
 
 	ServerEntryMinimumAgeForPruning: {value: 7 * 24 * time.Hour, minimum: 24 * time.Hour},
 
-	ApplicationParametersProbability: {value: 1.0, minimum: 0.0},
-	ApplicationParameters:            {value: KeyValues{}},
+	ApplicationParameters: {value: KeyValues{}},
 
 	BPFServerTCPProgram:     {value: (*BPFProgramSpec)(nil), flags: serverSideOnly},
 	BPFServerTCPProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
