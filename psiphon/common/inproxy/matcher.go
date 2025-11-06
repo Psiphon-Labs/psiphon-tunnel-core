@@ -39,7 +39,7 @@ const (
 	matcherAnnouncementQueueMaxSize = 5000000
 	matcherOfferQueueMaxSize        = 5000000
 	matcherPendingAnswersTTL        = 30 * time.Second
-	matcherPendingAnswersMaxSize    = 100000
+	matcherPendingAnswersMaxSize    = 5000000
 	matcherMaxPreferredNATProbe     = 100
 	matcherMaxProbe                 = 1000
 
