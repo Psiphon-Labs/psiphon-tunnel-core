@@ -491,7 +491,10 @@ func MakeDialParameters(
 	// server.TacticsListener.accept.
 	if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
 		common.ContainsAny(
-			p.KeyStrings(parameters.RestrictDirectProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+			p.KeyStrings(
+				parameters.RestrictDirectProviderRegions,
+				dialParams.ServerEntry.ProviderID),
+			[]string{"", serverEntry.Region}) {
 		if p.WeightedCoinFlip(
 			parameters.RestrictDirectProviderIDsClientProbability) {
 
@@ -512,7 +515,10 @@ func MakeDialParameters(
 	// server.sshClient.setHandshakeState.
 	if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
 		common.ContainsAny(
-			p.KeyStrings(parameters.RestrictInproxyProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+			p.KeyStrings(
+				parameters.RestrictInproxyProviderRegions,
+				dialParams.ServerEntry.ProviderID),
+			[]string{"", serverEntry.Region}) {
 		if p.WeightedCoinFlip(
 			parameters.RestrictInproxyProviderIDsClientProbability) {
 
@@ -521,7 +527,7 @@ func MakeDialParameters(
 			// of server entry, at most once per session.
 
 			NoticeSkipServerEntry(
-				"restricted provider ID: %s",
+				"restricted in-proxy provider ID: %s",
 				dialParams.ServerEntry.ProviderID)
 
 			return nil, nil
