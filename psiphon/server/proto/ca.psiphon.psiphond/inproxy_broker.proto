@@ -50,4 +50,5 @@ message InproxyBroker {
     optional string stored_tactics_tag = 136;
     optional bool timed_out = 137;
     optional string meek_server_http_version = 138;
+    optional int64 pending_answers_size = 139;
 }

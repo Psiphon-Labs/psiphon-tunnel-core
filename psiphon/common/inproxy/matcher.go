@@ -228,6 +228,7 @@ type MatchMetrics struct {
 	OfferQueueSize         int
 	AnnouncementMatchIndex int
 	AnnouncementQueueSize  int
+	PendingAnswersSize     int
 }
 
 // GetMetrics converts MatchMetrics to loggable fields.
@@ -240,6 +241,7 @@ func (metrics *MatchMetrics) GetMetrics() common.LogFields {
 		"offer_queue_size":         metrics.OfferQueueSize,
 		"announcement_match_index": metrics.AnnouncementMatchIndex,
 		"announcement_queue_size":  metrics.AnnouncementQueueSize,
+		"pending_answers_size":     metrics.PendingAnswersSize,
 	}
 }
 
@@ -704,6 +706,7 @@ func (m *Matcher) matchAllOffers() {
 			OfferQueueSize:         m.offerQueue.Len(),
 			AnnouncementMatchIndex: announcementMatchIndex,
 			AnnouncementQueueSize:  m.announcementQueue.getLen(),
+			PendingAnswersSize:     m.pendingAnswers.ItemCount(),
 		}
 
 		offerEntry.matchMetrics.Store(matchMetrics)

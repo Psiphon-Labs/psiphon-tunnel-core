@@ -63,6 +63,7 @@ type InproxyBroker struct {
 	StoredTacticsTag              *string                `protobuf:"bytes,136,opt,name=stored_tactics_tag,json=storedTacticsTag,proto3,oneof" json:"stored_tactics_tag,omitempty"`
 	TimedOut                      *bool                  `protobuf:"varint,137,opt,name=timed_out,json=timedOut,proto3,oneof" json:"timed_out,omitempty"`
 	MeekServerHttpVersion         *string                `protobuf:"bytes,138,opt,name=meek_server_http_version,json=meekServerHttpVersion,proto3,oneof" json:"meek_server_http_version,omitempty"`
+	PendingAnswersSize            *int64                 `protobuf:"varint,139,opt,name=pending_answers_size,json=pendingAnswersSize,proto3,oneof" json:"pending_answers_size,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -377,11 +378,18 @@ func (x *InproxyBroker) GetMeekServerHttpVersion() string {
 	return ""
 }
 
+func (x *InproxyBroker) GetPendingAnswersSize() int64 {
+	if x != nil && x.PendingAnswersSize != nil {
+		return *x.PendingAnswersSize
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_inproxy_broker_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\n" +
-	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xfc\x15\n" +
+	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xcd\x16\n" +
 	"\rInproxyBroker\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12=\n" +
@@ -426,7 +434,8 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\tserver_id\x18\x87\x01 \x01(\tH R\bserverId\x88\x01\x01\x122\n" +
 	"\x12stored_tactics_tag\x18\x88\x01 \x01(\tH!R\x10storedTacticsTag\x88\x01\x01\x12!\n" +
 	"\ttimed_out\x18\x89\x01 \x01(\bH\"R\btimedOut\x88\x01\x01\x12=\n" +
-	"\x18meek_server_http_version\x18\x8a\x01 \x01(\tH#R\x15meekServerHttpVersion\x88\x01\x01B\x0e\n" +
+	"\x18meek_server_http_version\x18\x8a\x01 \x01(\tH#R\x15meekServerHttpVersion\x88\x01\x01\x126\n" +
+	"\x14pending_answers_size\x18\x8b\x01 \x01(\x03H$R\x12pendingAnswersSize\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x1b\n" +
 	"\x19_announcement_match_indexB\x1a\n" +
 	"\x18_announcement_queue_sizeB\x0f\n" +
@@ -465,7 +474,8 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\x13_stored_tactics_tagB\f\n" +
 	"\n" +
 	"_timed_outB\x1b\n" +
-	"\x19_meek_server_http_versionBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x19_meek_server_http_versionB\x17\n" +
+	"\x15_pending_answers_sizeBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_inproxy_broker_proto_rawDescOnce sync.Once
