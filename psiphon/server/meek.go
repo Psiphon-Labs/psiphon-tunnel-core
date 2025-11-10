@@ -503,10 +503,29 @@ func (server *MeekServer) Run() error {
 	return err
 }
 
+func handleServeHTTPPanic() {
+
+	// Disable panic recovery, to ensure panics are captured and logged by
+	// panicwrap.
+	//
+	// The net.http ServeHTTP caller will recover any ServeHTTP panic, so
+	// re-panic in another goroutine after capturing the panicking goroutine
+	// call stack.
+
+	if r := recover(); r != nil {
+		var stack [4096]byte
+		n := runtime.Stack(stack[:], false)
+		err := errors.Tracef("ServeHTTP panic: %v\n%s", r, stack[:n])
+		go panic(err.Error())
+	}
+}
+
 // ServeHTTP handles meek client HTTP requests, where the request body
 // contains upstream traffic and the response will contain downstream
 // traffic.
 func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+
+	defer handleServeHTTPPanic()
 
 	// Note: no longer requiring that the request method is POST
 
