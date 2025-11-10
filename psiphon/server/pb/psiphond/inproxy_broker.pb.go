@@ -24,8 +24,8 @@ const (
 type InproxyBroker struct {
 	state                         protoimpl.MessageState `protogen:"open.v1"`
 	BaseParams                    *BaseParams            `protobuf:"bytes,1,opt,name=base_params,json=baseParams,proto3,oneof" json:"base_params,omitempty"`
-	AnnouncementMatchIndex        *int32                 `protobuf:"varint,100,opt,name=announcement_match_index,json=announcementMatchIndex,proto3,oneof" json:"announcement_match_index,omitempty"`
-	AnnouncementQueueSize         *int32                 `protobuf:"varint,101,opt,name=announcement_queue_size,json=announcementQueueSize,proto3,oneof" json:"announcement_queue_size,omitempty"`
+	AnnouncementMatchIndex        *int64                 `protobuf:"varint,100,opt,name=announcement_match_index,json=announcementMatchIndex,proto3,oneof" json:"announcement_match_index,omitempty"`
+	AnnouncementQueueSize         *int64                 `protobuf:"varint,101,opt,name=announcement_queue_size,json=announcementQueueSize,proto3,oneof" json:"announcement_queue_size,omitempty"`
 	AnswerError                   *string                `protobuf:"bytes,102,opt,name=answer_error,json=answerError,proto3,oneof" json:"answer_error,omitempty"`
 	BrokerEvent                   *string                `protobuf:"bytes,103,opt,name=broker_event,json=brokerEvent,proto3,oneof" json:"broker_event,omitempty"`
 	BrokerId                      *string                `protobuf:"bytes,104,opt,name=broker_id,json=brokerId,proto3,oneof" json:"broker_id,omitempty"`
@@ -55,7 +55,7 @@ type InproxyBroker struct {
 	PeakUpstreamBytesPerSecond    *int64                 `protobuf:"varint,128,opt,name=peak_upstream_bytes_per_second,json=peakUpstreamBytesPerSecond,proto3,oneof" json:"peak_upstream_bytes_per_second,omitempty"`
 	PortMappingTypes              []string               `protobuf:"bytes,129,rep,name=port_mapping_types,json=portMappingTypes,proto3" json:"port_mapping_types,omitempty"`
 	PreferredNatMatch             *bool                  `protobuf:"varint,130,opt,name=preferred_nat_match,json=preferredNatMatch,proto3,oneof" json:"preferred_nat_match,omitempty"`
-	ProtocolVersion               *int32                 `protobuf:"varint,131,opt,name=protocol_version,json=protocolVersion,proto3,oneof" json:"protocol_version,omitempty"`
+	ProtocolVersion               *int64                 `protobuf:"varint,131,opt,name=protocol_version,json=protocolVersion,proto3,oneof" json:"protocol_version,omitempty"`
 	ProxyId                       *string                `protobuf:"bytes,132,opt,name=proxy_id,json=proxyId,proto3,oneof" json:"proxy_id,omitempty"`
 	ProxyNatType                  *string                `protobuf:"bytes,133,opt,name=proxy_nat_type,json=proxyNatType,proto3,oneof" json:"proxy_nat_type,omitempty"`
 	ProxyPortMappingTypes         []string               `protobuf:"bytes,134,rep,name=proxy_port_mapping_types,json=proxyPortMappingTypes,proto3" json:"proxy_port_mapping_types,omitempty"`
@@ -105,14 +105,14 @@ func (x *InproxyBroker) GetBaseParams() *BaseParams {
 	return nil
 }
 
-func (x *InproxyBroker) GetAnnouncementMatchIndex() int32 {
+func (x *InproxyBroker) GetAnnouncementMatchIndex() int64 {
 	if x != nil && x.AnnouncementMatchIndex != nil {
 		return *x.AnnouncementMatchIndex
 	}
 	return 0
 }
 
-func (x *InproxyBroker) GetAnnouncementQueueSize() int32 {
+func (x *InproxyBroker) GetAnnouncementQueueSize() int64 {
 	if x != nil && x.AnnouncementQueueSize != nil {
 		return *x.AnnouncementQueueSize
 	}
@@ -322,7 +322,7 @@ func (x *InproxyBroker) GetPreferredNatMatch() bool {
 	return false
 }
 
-func (x *InproxyBroker) GetProtocolVersion() int32 {
+func (x *InproxyBroker) GetProtocolVersion() int64 {
 	if x != nil && x.ProtocolVersion != nil {
 		return *x.ProtocolVersion
 	}
@@ -393,8 +393,8 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\rInproxyBroker\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12=\n" +
-	"\x18announcement_match_index\x18d \x01(\x05H\x01R\x16announcementMatchIndex\x88\x01\x01\x12;\n" +
-	"\x17announcement_queue_size\x18e \x01(\x05H\x02R\x15announcementQueueSize\x88\x01\x01\x12&\n" +
+	"\x18announcement_match_index\x18d \x01(\x03H\x01R\x16announcementMatchIndex\x88\x01\x01\x12;\n" +
+	"\x17announcement_queue_size\x18e \x01(\x03H\x02R\x15announcementQueueSize\x88\x01\x01\x12&\n" +
 	"\fanswer_error\x18f \x01(\tH\x03R\vanswerError\x88\x01\x01\x12&\n" +
 	"\fbroker_event\x18g \x01(\tH\x04R\vbrokerEvent\x88\x01\x01\x12 \n" +
 	"\tbroker_id\x18h \x01(\tH\x05R\bbrokerId\x88\x01\x01\x120\n" +
@@ -427,7 +427,7 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\x1epeak_upstream_bytes_per_second\x18\x80\x01 \x01(\x03H\x1bR\x1apeakUpstreamBytesPerSecond\x88\x01\x01\x12-\n" +
 	"\x12port_mapping_types\x18\x81\x01 \x03(\tR\x10portMappingTypes\x124\n" +
 	"\x13preferred_nat_match\x18\x82\x01 \x01(\bH\x1cR\x11preferredNatMatch\x88\x01\x01\x12/\n" +
-	"\x10protocol_version\x18\x83\x01 \x01(\x05H\x1dR\x0fprotocolVersion\x88\x01\x01\x12\x1f\n" +
+	"\x10protocol_version\x18\x83\x01 \x01(\x03H\x1dR\x0fprotocolVersion\x88\x01\x01\x12\x1f\n" +
 	"\bproxy_id\x18\x84\x01 \x01(\tH\x1eR\aproxyId\x88\x01\x01\x12*\n" +
 	"\x0eproxy_nat_type\x18\x85\x01 \x01(\tH\x1fR\fproxyNatType\x88\x01\x01\x128\n" +
 	"\x18proxy_port_mapping_types\x18\x86\x01 \x03(\tR\x15proxyPortMappingTypes\x12!\n" +

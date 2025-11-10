@@ -34,7 +34,7 @@ type IrregularTunnel struct {
 	DuplicateElapsedTimeMs             *int64                 `protobuf:"varint,107,opt,name=duplicate_elapsed_time_ms,json=duplicateElapsedTimeMs,proto3,oneof" json:"duplicate_elapsed_time_ms,omitempty"`
 	DuplicateSeed                      *string                `protobuf:"bytes,108,opt,name=duplicate_seed,json=duplicateSeed,proto3,oneof" json:"duplicate_seed,omitempty"`
 	DuplicateSeedType                  *string                `protobuf:"bytes,109,opt,name=duplicate_seed_type,json=duplicateSeedType,proto3,oneof" json:"duplicate_seed_type,omitempty"`
-	ListenerPortNumber                 *uint32                `protobuf:"varint,110,opt,name=listener_port_number,json=listenerPortNumber,proto3,oneof" json:"listener_port_number,omitempty"`
+	ListenerPortNumber                 *int64                 `protobuf:"varint,110,opt,name=listener_port_number,json=listenerPortNumber,proto3,oneof" json:"listener_port_number,omitempty"`
 	ListenerProtocol                   *string                `protobuf:"bytes,111,opt,name=listener_protocol,json=listenerProtocol,proto3,oneof" json:"listener_protocol,omitempty"`
 	TunnelError                        *string                `protobuf:"bytes,112,opt,name=tunnel_error,json=tunnelError,proto3,oneof" json:"tunnel_error,omitempty"`
 	unknownFields                      protoimpl.UnknownFields
@@ -148,7 +148,7 @@ func (x *IrregularTunnel) GetDuplicateSeedType() string {
 	return ""
 }
 
-func (x *IrregularTunnel) GetListenerPortNumber() uint32 {
+func (x *IrregularTunnel) GetListenerPortNumber() int64 {
 	if x != nil && x.ListenerPortNumber != nil {
 		return *x.ListenerPortNumber
 	}
@@ -189,7 +189,7 @@ const file_ca_psiphon_psiphond_irregular_tunnel_proto_rawDesc = "" +
 	"\x0eduplicate_seed\x18l \x01(\tH\tR\rduplicateSeed\x88\x01\x01\x123\n" +
 	"\x13duplicate_seed_type\x18m \x01(\tH\n" +
 	"R\x11duplicateSeedType\x88\x01\x01\x125\n" +
-	"\x14listener_port_number\x18n \x01(\rH\vR\x12listenerPortNumber\x88\x01\x01\x120\n" +
+	"\x14listener_port_number\x18n \x01(\x03H\vR\x12listenerPortNumber\x88\x01\x01\x120\n" +
 	"\x11listener_protocol\x18o \x01(\tH\fR\x10listenerProtocol\x88\x01\x01\x12&\n" +
 	"\ftunnel_error\x18p \x01(\tH\rR\vtunnelError\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB%\n" +
