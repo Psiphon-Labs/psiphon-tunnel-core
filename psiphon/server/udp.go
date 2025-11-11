@@ -296,14 +296,12 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 				dialIP:         dialIP,
 				conn:           conn,
 				lruEntry:       lruEntry,
-				bytesUp:        0,
-				bytesDown:      0,
 				relayWaitGroup: new(sync.WaitGroup),
 				mux:            mux,
 			}
 
 			if message.forwardDNS {
-				portForward.dnsFirstWriteTime = int64(monotime.Now())
+				portForward.dnsFirstWriteTime.Store(int64(monotime.Now()))
 			}
 
 			mux.portForwardsMutex.Lock()
@@ -326,7 +324,7 @@ func (mux *udpgwPortForwardMultiplexer) run() {
 
 		portForward.lruEntry.Touch()
 
-		atomic.AddInt64(&portForward.bytesUp, int64(len(message.packet)))
+		portForward.bytesUp.Add(int64(len(message.packet)))
 	}
 
 	// Cleanup all udpgw port forward workers when exiting
@@ -348,13 +346,10 @@ func (mux *udpgwPortForwardMultiplexer) removePortForward(connID uint16) {
 }
 
 type udpgwPortForward struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	dnsFirstWriteTime int64
-	dnsFirstReadTime  int64
-	bytesUp           int64
-	bytesDown         int64
+	dnsFirstWriteTime atomic.Int64
+	dnsFirstReadTime  atomic.Int64
+	bytesUp           atomic.Int64
+	bytesDown         atomic.Int64
 	connID            uint16
 	preambleSize      int
 	remoteIP          []byte
@@ -417,9 +412,9 @@ func (portForward *udpgwPortForward) relayDownstream() {
 			break
 		}
 
-		if atomic.LoadInt64(&portForward.dnsFirstWriteTime) > 0 &&
-			atomic.LoadInt64(&portForward.dnsFirstReadTime) == 0 { // Check if already set before invoking Now.
-			atomic.CompareAndSwapInt64(&portForward.dnsFirstReadTime, 0, int64(monotime.Now()))
+		if portForward.dnsFirstWriteTime.Load() > 0 &&
+			portForward.dnsFirstReadTime.Load() == 0 { // Check if already set before invoking Now.
+			portForward.dnsFirstReadTime.CompareAndSwap(0, int64(monotime.Now()))
 		}
 
 		err = writeUdpgwPreamble(
@@ -448,7 +443,7 @@ func (portForward *udpgwPortForward) relayDownstream() {
 
 		portForward.lruEntry.Touch()
 
-		atomic.AddInt64(&portForward.bytesDown, int64(packetSize))
+		portForward.bytesDown.Add(int64(packetSize))
 	}
 
 	portForward.mux.removePortForward(portForward.connID)
@@ -457,11 +452,11 @@ func (portForward *udpgwPortForward) relayDownstream() {
 
 	portForward.conn.Close()
 
-	bytesUp := atomic.LoadInt64(&portForward.bytesUp)
-	bytesDown := atomic.LoadInt64(&portForward.bytesDown)
+	bytesUp := portForward.bytesUp.Load()
+	bytesDown := portForward.bytesDown.Load()
 	portForward.mux.sshClient.closedPortForward(portForwardTypeUDP, bytesUp, bytesDown)
 
-	dnsStartTime := monotime.Time(atomic.LoadInt64(&portForward.dnsFirstWriteTime))
+	dnsStartTime := monotime.Time(portForward.dnsFirstWriteTime.Load())
 	if dnsStartTime > 0 {
 
 		// Record DNS metrics using a heuristic: if a UDP packet was written and
@@ -471,7 +466,7 @@ func (portForward *udpgwPortForward) relayDownstream() {
 		// assume a resolver will not respond when, e.g., rate limiting; we ignore
 		// subsequent requests made via the same UDP port forward.
 
-		dnsEndTime := monotime.Time(atomic.LoadInt64(&portForward.dnsFirstReadTime))
+		dnsEndTime := monotime.Time(portForward.dnsFirstReadTime.Load())
 
 		dnsSuccess := true
 		if dnsEndTime == 0 {

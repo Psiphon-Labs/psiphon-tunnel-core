@@ -403,14 +403,11 @@ func (server *TunnelServer) GetEstablishTunnelsMetrics() (bool, int64) {
 }
 
 type sshServer struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastAuthLog             int64
-	authFailedCount         int64
-	establishLimitedCount   int64
 	support                 *SupportServices
 	establishTunnels        int32
+	lastAuthLog             atomic.Int64
+	authFailedCount         atomic.Int64
+	establishLimitedCount   atomic.Int64
 	concurrentSSHHandshakes semaphore.Semaphore
 	shutdownBroadcast       <-chan struct{}
 	sshHostKey              ssh.Signer
@@ -617,7 +614,7 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 func (sshServer *sshServer) checkEstablishTunnels() bool {
 	establishTunnels := atomic.LoadInt32(&sshServer.establishTunnels) == 1
 	if !establishTunnels {
-		atomic.AddInt64(&sshServer.establishLimitedCount, 1)
+		sshServer.establishLimitedCount.Add(1)
 	}
 	return establishTunnels
 }
@@ -632,7 +629,7 @@ func (sshServer *sshServer) checkLoadLimiting() bool {
 
 func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {
 	return atomic.LoadInt32(&sshServer.establishTunnels) == 1,
-		atomic.SwapInt64(&sshServer.establishLimitedCount, 0)
+		sshServer.establishLimitedCount.Swap(0)
 }
 
 // additionalTransportData is additional data gathered at transport level,
@@ -2186,11 +2183,8 @@ func (lookup *splitTunnelLookup) lookup(region string) bool {
 }
 
 type inproxyProxyQualityTracker struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	bytesUp         int64
-	bytesDown       int64
+	bytesUp         atomic.Int64
+	bytesDown       atomic.Int64
 	reportTriggered int32
 
 	sshClient       *sshClient
@@ -2228,8 +2222,8 @@ func (t *inproxyProxyQualityTracker) UpdateProgress(
 		return
 	}
 
-	bytesUp := atomic.AddInt64(&t.bytesUp, upstreamBytes)
-	bytesDown := atomic.AddInt64(&t.bytesDown, downstreamBytes)
+	bytesUp := t.bytesUp.Add(upstreamBytes)
+	bytesDown := t.bytesDown.Add(downstreamBytes)
 
 	if (t.targetBytesUp == 0 || bytesUp >= t.targetBytesUp) &&
 		(t.targetBytesDown == 0 || bytesDown >= t.targetBytesDown) &&
@@ -2268,18 +2262,12 @@ func (t *inproxyProxyQualityTracker) UpdateProgress(
 }
 
 type sshProtocolBytesTracker struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	totalBytesRead    int64
-	totalBytesWritten int64
+	totalBytesRead    atomic.Int64
+	totalBytesWritten atomic.Int64
 }
 
 func newSSHProtocolBytesTracker(sshClient *sshClient) *sshProtocolBytesTracker {
-	return &sshProtocolBytesTracker{
-		totalBytesRead:    0,
-		totalBytesWritten: 0,
-	}
+	return &sshProtocolBytesTracker{}
 }
 
 func (t *sshProtocolBytesTracker) UpdateProgress(
@@ -2288,8 +2276,8 @@ func (t *sshProtocolBytesTracker) UpdateProgress(
 	// Concurrency: UpdateProgress may be called concurrently; all accesses to
 	// mutated fields use atomic operations.
 
-	atomic.AddInt64(&t.totalBytesRead, bytesRead)
-	atomic.AddInt64(&t.totalBytesWritten, bytesWritten)
+	t.totalBytesRead.Add(bytesRead)
+	t.totalBytesWritten.Add(bytesWritten)
 }
 
 func newSshClient(
@@ -2980,13 +2968,13 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 		// retain some record of this activity in case this is relevant to, e.g., a performance
 		// investigation.
 
-		atomic.AddInt64(&sshClient.sshServer.authFailedCount, 1)
+		sshClient.sshServer.authFailedCount.Add(1)
 
-		lastAuthLog := monotime.Time(atomic.LoadInt64(&sshClient.sshServer.lastAuthLog))
+		lastAuthLog := monotime.Time(sshClient.sshServer.lastAuthLog.Load())
 		if monotime.Since(lastAuthLog) > SSH_AUTH_LOG_PERIOD {
 			now := int64(monotime.Now())
-			if atomic.CompareAndSwapInt64(&sshClient.sshServer.lastAuthLog, int64(lastAuthLog), now) {
-				count := atomic.SwapInt64(&sshClient.sshServer.authFailedCount, 0)
+			if sshClient.sshServer.lastAuthLog.CompareAndSwap(int64(lastAuthLog), now) {
+				count := sshClient.sshServer.authFailedCount.Swap(0)
 				log.WithTraceFields(
 					LogFields{"lastError": err, "failedCount": count}).Warning("authentication failures")
 			}
@@ -3850,8 +3838,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	logFields["bytes"] = bytes
 
 	// Pre-calculate ssh protocol bytes and overhead.
-	sshProtocolBytes := sshClient.sshProtocolBytesTracker.totalBytesWritten +
-		sshClient.sshProtocolBytesTracker.totalBytesRead
+	sshProtocolBytes := sshClient.sshProtocolBytesTracker.totalBytesWritten.Load() +
+		sshClient.sshProtocolBytesTracker.totalBytesRead.Load()
 	logFields["ssh_protocol_bytes"] = sshProtocolBytes
 	logFields["ssh_protocol_bytes_overhead"] = sshProtocolBytes - bytes
 

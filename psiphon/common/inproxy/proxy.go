@@ -46,13 +46,10 @@ const (
 // Proxy is the in-proxy proxying component, which relays traffic from a
 // client to a Psiphon server.
 type Proxy struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	bytesUp           int64
-	bytesDown         int64
-	peakBytesUp       int64
-	peakBytesDown     int64
+	bytesUp           atomic.Int64
+	bytesDown         atomic.Int64
+	peakBytesUp       atomic.Int64
+	peakBytesDown     atomic.Int64
 	connectingClients int32
 	connectedClients  int32
 
@@ -189,8 +186,8 @@ type activityUpdateWrapper struct {
 }
 
 func (w *activityUpdateWrapper) UpdateProgress(bytesRead, bytesWritten int64, _ int64) {
-	atomic.AddInt64(&w.p.bytesUp, bytesWritten)
-	atomic.AddInt64(&w.p.bytesDown, bytesRead)
+	w.p.bytesUp.Add(bytesWritten)
+	w.p.bytesDown.Add(bytesRead)
 }
 
 // Run runs the proxy. The proxy sends requests to the Broker announcing its
@@ -297,8 +294,8 @@ func (p *Proxy) activityUpdate(period time.Duration) {
 
 	connectingClients := atomic.LoadInt32(&p.connectingClients)
 	connectedClients := atomic.LoadInt32(&p.connectedClients)
-	bytesUp := atomic.SwapInt64(&p.bytesUp, 0)
-	bytesDown := atomic.SwapInt64(&p.bytesDown, 0)
+	bytesUp := p.bytesUp.Swap(0)
+	bytesDown := p.bytesDown.Swap(0)
 
 	greaterThanSwapInt64(&p.peakBytesUp, bytesUp)
 	greaterThanSwapInt64(&p.peakBytesDown, bytesDown)
@@ -324,14 +321,14 @@ func (p *Proxy) activityUpdate(period time.Duration) {
 		period)
 }
 
-func greaterThanSwapInt64(addr *int64, new int64) bool {
+func greaterThanSwapInt64(addr *atomic.Int64, new int64) bool {
 
 	// Limitation: if there are two concurrent calls, the greater value could
 	// get overwritten.
 
-	old := atomic.LoadInt64(addr)
+	old := addr.Load()
 	if new > old {
-		return atomic.CompareAndSwapInt64(addr, old, new)
+		return addr.CompareAndSwap(old, new)
 	}
 	return false
 }
@@ -1048,7 +1045,7 @@ func (p *Proxy) getMetrics(
 		ConnectedClients:              atomic.LoadInt32(&p.connectedClients),
 		LimitUpstreamBytesPerSecond:   int64(p.config.LimitUpstreamBytesPerSecond),
 		LimitDownstreamBytesPerSecond: int64(p.config.LimitDownstreamBytesPerSecond),
-		PeakUpstreamBytesPerSecond:    atomic.LoadInt64(&p.peakBytesUp),
-		PeakDownstreamBytesPerSecond:  atomic.LoadInt64(&p.peakBytesDown),
+		PeakUpstreamBytesPerSecond:    p.peakBytesUp.Load(),
+		PeakDownstreamBytesPerSecond:  p.peakBytesDown.Load(),
 	}, tacticsNetworkID, compressTactics, nil
 }
