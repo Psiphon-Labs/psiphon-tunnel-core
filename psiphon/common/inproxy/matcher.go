@@ -30,7 +30,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	lrucache "github.com/cognusion/go-cache-lru"
-	"golang.org/x/time/rate"
 )
 
 // TTLs should be aligned with STUN hole punch lifetimes.
@@ -42,9 +41,6 @@ const (
 	matcherPendingAnswersMaxSize    = 5000000
 	matcherMaxPreferredNATProbe     = 100
 	matcherMaxProbe                 = 1000
-
-	matcherRateLimiterReapHistoryFrequencySeconds = 300
-	matcherRateLimiterMaxCacheEntries             = 1000000
 )
 
 // Matcher matches proxy announcements with client offers. Matcher also
@@ -308,15 +304,15 @@ func NewMatcher(config *MatcherConfig) *Matcher {
 		announcementQueueEntryCountByIP: make(map[string]int),
 		announcementQueueRateLimiters: lrucache.NewWithLRU(
 			0,
-			time.Duration(matcherRateLimiterReapHistoryFrequencySeconds)*time.Second,
-			matcherRateLimiterMaxCacheEntries),
+			time.Duration(brokerRateLimiterReapHistoryFrequencySeconds)*time.Second,
+			brokerRateLimiterMaxCacheEntries),
 
 		offerQueue:               list.New(),
 		offerQueueEntryCountByIP: make(map[string]int),
 		offerQueueRateLimiters: lrucache.NewWithLRU(
 			0,
-			time.Duration(matcherRateLimiterReapHistoryFrequencySeconds)*time.Second,
-			matcherRateLimiterMaxCacheEntries),
+			time.Duration(brokerRateLimiterReapHistoryFrequencySeconds)*time.Second,
+			brokerRateLimiterMaxCacheEntries),
 
 		matchSignal: make(chan struct{}, 1),
 
@@ -1064,24 +1060,13 @@ func (m *Matcher) applyIPLimits(isAnnouncement bool, limitIP string, proxyID ID)
 	// that the rate limit state is updated regardless of the max count check
 	// outcome.
 
-	if quantity > 0 && interval > 0 {
-
-		var rateLimiter *rate.Limiter
-
-		entry, ok := queueRateLimiters.Get(limitIP)
-		if ok {
-			rateLimiter = entry.(*rate.Limiter)
-		} else {
-			limit := float64(quantity) / interval.Seconds()
-			rateLimiter = rate.NewLimiter(rate.Limit(limit), quantity)
-			queueRateLimiters.Set(
-				limitIP, rateLimiter, interval)
-		}
-
-		if !rateLimiter.Allow() {
-			return errors.Trace(
-				NewMatcherLimitError(std_errors.New("rate exceeded for IP")))
-		}
+	err := brokerRateLimit(
+		queueRateLimiters,
+		limitIP,
+		quantity,
+		interval)
+	if err != nil {
+		return errors.Trace(NewMatcherLimitError(err))
 	}
 
 	if limitEntryCount > 0 {

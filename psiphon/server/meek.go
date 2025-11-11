@@ -1895,7 +1895,9 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Int(parameters.InproxyBrokerMatcherOfferLimitEntryCount),
 		p.Int(parameters.InproxyBrokerMatcherOfferRateLimitQuantity),
 		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval),
-		p.Int(parameters.InproxyMaxCompartmentIDListLength))
+		p.Int(parameters.InproxyMaxCompartmentIDListLength),
+		p.Int(parameters.InproxyBrokerDSLRequestRateLimitQuantity),
+		p.Duration(parameters.InproxyBrokerDSLRequestRateLimitInterval))
 
 	server.inproxyBroker.SetProxyQualityParameters(
 		p.Bool(parameters.InproxyEnableProxyQuality),
