@@ -57,7 +57,7 @@ message DialParams {
     optional bool server_replay_packet_manipulation = 43;
     optional bool server_entry_valid = 44;
 
-    optional int32 candidate_number = 45;
+    optional int64 candidate_number = 45;
     optional bool is_replay = 46;
     optional int64 dial_port_number = 47;
     optional int64 dial_duration = 48;

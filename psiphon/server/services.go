@@ -461,15 +461,15 @@ func getRuntimeMetrics() LogFields {
 	}
 
 	return LogFields{
-		"num_goroutine": numGoroutine,
-		"heap_alloc":    memStats.HeapAlloc,
-		"heap_sys":      memStats.HeapSys,
-		"heap_idle":     memStats.HeapIdle,
-		"heap_inuse":    memStats.HeapInuse,
-		"heap_released": memStats.HeapReleased,
-		"heap_objects":  memStats.HeapObjects,
-		"num_gc":        memStats.NumGC,
-		"num_forced_gc": memStats.NumForcedGC,
+		"num_goroutine": int64(numGoroutine),
+		"heap_alloc":    int64(memStats.HeapAlloc),
+		"heap_sys":      int64(memStats.HeapSys),
+		"heap_idle":     int64(memStats.HeapIdle),
+		"heap_inuse":    int64(memStats.HeapInuse),
+		"heap_released": int64(memStats.HeapReleased),
+		"heap_objects":  int64(memStats.HeapObjects),
+		"num_gc":        int64(memStats.NumGC),
+		"num_forced_gc": int64(memStats.NumForcedGC),
 		"last_gc":       lastGC,
 	}
 }

@@ -24,11 +24,11 @@ const (
 
 type Psiphond struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
-	Timestamp    *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=timestamp,proto3,oneof" json:"timestamp,omitempty"`
-	HostId       *string                `protobuf:"bytes,2,opt,name=host_id,json=hostId,proto3,oneof" json:"host_id,omitempty"`
-	HostType     *string                `protobuf:"bytes,3,opt,name=host_type,json=hostType,proto3,oneof" json:"host_type,omitempty"`
-	HostBuildRev *string                `protobuf:"bytes,4,opt,name=host_build_rev,json=hostBuildRev,proto3,oneof" json:"host_build_rev,omitempty"`
-	Provider     *string                `protobuf:"bytes,5,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
+	Timestamp    *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	HostId       string                 `protobuf:"bytes,2,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	HostType     string                 `protobuf:"bytes,3,opt,name=host_type,json=hostType,proto3" json:"host_type,omitempty"`
+	HostBuildRev string                 `protobuf:"bytes,4,opt,name=host_build_rev,json=hostBuildRev,proto3" json:"host_build_rev,omitempty"`
+	Provider     string                 `protobuf:"bytes,5,opt,name=provider,proto3" json:"provider,omitempty"`
 	// Types that are valid to be assigned to Metric:
 	//
 	//	*Psiphond_DomainBytes
@@ -91,29 +91,29 @@ func (x *Psiphond) GetTimestamp() *timestamppb.Timestamp {
 }
 
 func (x *Psiphond) GetHostId() string {
-	if x != nil && x.HostId != nil {
-		return *x.HostId
+	if x != nil {
+		return x.HostId
 	}
 	return ""
 }
 
 func (x *Psiphond) GetHostType() string {
-	if x != nil && x.HostType != nil {
-		return *x.HostType
+	if x != nil {
+		return x.HostType
 	}
 	return ""
 }
 
 func (x *Psiphond) GetHostBuildRev() string {
-	if x != nil && x.HostBuildRev != nil {
-		return *x.HostBuildRev
+	if x != nil {
+		return x.HostBuildRev
 	}
 	return ""
 }
 
 func (x *Psiphond) GetProvider() string {
-	if x != nil && x.Provider != nil {
-		return *x.Provider
+	if x != nil {
+		return x.Provider
 	}
 	return ""
 }
@@ -388,13 +388,13 @@ var File_ca_psiphon_psiphond_psiphond_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_psiphond_proto_rawDesc = "" +
 	"\n" +
-	"\"ca.psiphon.psiphond/psiphond.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\x1a&ca.psiphon.psiphond/domain_bytes.proto\x1a'ca.psiphon.psiphond/failed_tunnel.proto\x1a(ca.psiphon.psiphond/inproxy_broker.proto\x1a*ca.psiphon.psiphond/irregular_tunnel.proto\x1a'ca.psiphon.psiphond/orphan_packet.proto\x1a,ca.psiphon.psiphond/remote_server_list.proto\x1a*ca.psiphon.psiphond/server_blocklist.proto\x1a%ca.psiphon.psiphond/server_load.proto\x1a&ca.psiphon.psiphond/server_panic.proto\x1a'ca.psiphon.psiphond/server_packet.proto\x1a'ca.psiphon.psiphond/server_tunnel.proto\x1a!ca.psiphon.psiphond/tactics.proto\x1a%ca.psiphon.psiphond/unique_user.proto\"\xde\f\n" +
-	"\bPsiphond\x12=\n" +
-	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\ttimestamp\x88\x01\x01\x12\x1c\n" +
-	"\ahost_id\x18\x02 \x01(\tH\x02R\x06hostId\x88\x01\x01\x12 \n" +
-	"\thost_type\x18\x03 \x01(\tH\x03R\bhostType\x88\x01\x01\x12)\n" +
-	"\x0ehost_build_rev\x18\x04 \x01(\tH\x04R\fhostBuildRev\x88\x01\x01\x12\x1f\n" +
-	"\bprovider\x18\x05 \x01(\tH\x05R\bprovider\x88\x01\x01\x12E\n" +
+	"\"ca.psiphon.psiphond/psiphond.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\x1a&ca.psiphon.psiphond/domain_bytes.proto\x1a'ca.psiphon.psiphond/failed_tunnel.proto\x1a(ca.psiphon.psiphond/inproxy_broker.proto\x1a*ca.psiphon.psiphond/irregular_tunnel.proto\x1a'ca.psiphon.psiphond/orphan_packet.proto\x1a,ca.psiphon.psiphond/remote_server_list.proto\x1a*ca.psiphon.psiphond/server_blocklist.proto\x1a%ca.psiphon.psiphond/server_load.proto\x1a&ca.psiphon.psiphond/server_panic.proto\x1a'ca.psiphon.psiphond/server_packet.proto\x1a'ca.psiphon.psiphond/server_tunnel.proto\x1a!ca.psiphon.psiphond/tactics.proto\x1a%ca.psiphon.psiphond/unique_user.proto\"\xfd\v\n" +
+	"\bPsiphond\x128\n" +
+	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x17\n" +
+	"\ahost_id\x18\x02 \x01(\tR\x06hostId\x12\x1b\n" +
+	"\thost_type\x18\x03 \x01(\tR\bhostType\x12$\n" +
+	"\x0ehost_build_rev\x18\x04 \x01(\tR\fhostBuildRev\x12\x1a\n" +
+	"\bprovider\x18\x05 \x01(\tR\bprovider\x12E\n" +
 	"\fdomain_bytes\x18e \x01(\v2 .ca.psiphon.psiphond.DomainBytesH\x00R\vdomainBytes\x12H\n" +
 	"\rfailed_tunnel\x18f \x01(\v2!.ca.psiphon.psiphond.FailedTunnelH\x00R\ffailedTunnel\x12K\n" +
 	"\x0einproxy_broker\x18g \x01(\v2\".ca.psiphon.psiphond.InproxyBrokerH\x00R\rinproxyBroker\x12Q\n" +
@@ -414,15 +414,7 @@ const file_ca_psiphon_psiphond_psiphond_proto_rawDesc = "" +
 	"\x11tactics_speedtest\x18t \x01(\v2%.ca.psiphon.psiphond.TacticsSpeedTestH\x00R\x10tacticsSpeedtest\x12B\n" +
 	"\vunique_user\x18u \x01(\v2\x1f.ca.psiphon.psiphond.UniqueUserH\x00R\n" +
 	"uniqueUserB\b\n" +
-	"\x06metricB\f\n" +
-	"\n" +
-	"_timestampB\n" +
-	"\n" +
-	"\b_host_idB\f\n" +
-	"\n" +
-	"_host_typeB\x11\n" +
-	"\x0f_host_build_revB\v\n" +
-	"\t_providerBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x06metricBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_psiphond_proto_rawDescOnce sync.Once

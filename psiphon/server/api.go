@@ -1018,6 +1018,26 @@ func dslAPIRequestHandler(
 	sshClient *sshClient,
 	requestPayload []byte) ([]byte, error) {
 
+	// Sanity check: don't relay more than the modest number of DSL requests
+	// expected in the tunneled case. The DSL backend has its own rate limit
+	// enforcement, but avoiding excess requests here saves on resources
+	// consumed between the relay and backend.
+	//
+	// The equivalent pre-relay check in the in-proxy broker uses an explicit
+	// rate limiter; here a simpler hard limit per tunnel suffices due to the
+	// low limit size and the fact that tunnel dials are themselves rate
+	// limited.
+	ok := false
+	sshClient.Lock()
+	if sshClient.dslRequestCount < SSH_CLIENT_MAX_DSL_REQUEST_COUNT {
+		ok = true
+		sshClient.dslRequestCount += 1
+	}
+	sshClient.Unlock()
+	if !ok {
+		return nil, errors.TraceNew("too many DSL requests")
+	}
+
 	responsePayload, err := dslHandleRequest(
 		sshClient.runCtx,
 		support,

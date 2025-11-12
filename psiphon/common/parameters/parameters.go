@@ -434,6 +434,8 @@ const (
 	InproxyBrokerClientOfferTimeout                    = "InproxyBrokerClientOfferTimeout"
 	InproxyBrokerClientOfferPersonalTimeout            = "InproxyBrokerClientOfferPersonalTimeout"
 	InproxyBrokerPendingServerRequestsTTL              = "InproxyBrokerPendingServerRequestsTTL"
+	InproxyBrokerDSLRequestRateLimitQuantity           = "InproxyBrokerDSLRequestRateLimitQuantity"
+	InproxyBrokerDSLRequestRateLimitInterval           = "InproxyBrokerDSLRequestRateLimitInterval"
 	InproxySessionHandshakeRoundTripTimeout            = "InproxySessionHandshakeRoundTripTimeout"
 	InproxyProxyAnnounceRequestTimeout                 = "InproxyProxyAnnounceRequestTimeout"
 	InproxyProxyAnnounceDelay                          = "InproxyProxyAnnounceDelay"
@@ -1054,6 +1056,8 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerClientOfferPersonalTimeout:            {value: 5 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerPendingServerRequestsTTL:              {value: 60 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerDSLRequestRateLimitQuantity:           {value: 20, minimum: 0, flags: serverSideOnly},
+	InproxyBrokerDSLRequestRateLimitInterval:           {value: 1 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxySessionHandshakeRoundTripTimeout:            {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyAnnounceRequestTimeout:                 {value: 2*time.Minute + 10*time.Second, minimum: time.Duration(0)},
 	InproxyProxyAnnounceDelay:                          {value: 100 * time.Millisecond, minimum: time.Duration(0)},

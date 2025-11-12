@@ -79,10 +79,10 @@ func min(a, b int) int {
 	return b
 }
 
-func greaterThanSwapInt64(addr *int64, new int64) bool {
-	old := atomic.LoadInt64(addr)
+func greaterThanSwapInt64(addr *atomic.Int64, new int64) bool {
+	old := addr.Load()
 	if new > old {
-		return atomic.CompareAndSwapInt64(addr, old, new)
+		return addr.CompareAndSwap(old, new)
 	}
 	return false
 }

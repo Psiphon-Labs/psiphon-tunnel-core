@@ -35,6 +35,7 @@ import (
 	"github.com/cespare/xxhash"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/fxamacker/cbor/v2"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -52,6 +53,9 @@ const (
 	brokerPendingServerReportsTTL     = 60 * time.Second
 	brokerPendingServerReportsMaxSize = 100000
 	brokerMetricName                  = "inproxy_broker"
+
+	brokerRateLimiterReapHistoryFrequencySeconds = 300
+	brokerRateLimiterMaxCacheEntries             = 1000000
 )
 
 // LookupGeoIP is a callback for providing GeoIP lookup service.
@@ -100,15 +104,18 @@ type Broker struct {
 	commonCompartmentsMutex sync.Mutex
 	commonCompartments      *consistent.Consistent
 
-	proxyAnnounceTimeout       int64
-	clientOfferTimeout         int64
-	clientOfferPersonalTimeout int64
-	pendingServerReportsTTL    int64
+	proxyAnnounceTimeout       atomic.Int64
+	clientOfferTimeout         atomic.Int64
+	clientOfferPersonalTimeout atomic.Int64
+	pendingServerReportsTTL    atomic.Int64
 	maxRequestTimeouts         atomic.Value
-	maxCompartmentIDs          int64
+	maxCompartmentIDs          atomic.Int64
 
 	enableProxyQualityMutex sync.Mutex
 	enableProxyQuality      atomic.Bool
+
+	dslRequestRateLimiters    *lrucache.Cache
+	dslRequestRateLimitParams atomic.Value
 }
 
 // BrokerConfig specifies the configuration for a Broker.
@@ -226,6 +233,10 @@ type BrokerConfig struct {
 	MatcherOfferRateLimitQuantity int
 	MatcherOfferRateLimitInterval time.Duration
 
+	// DSL request relay rate limit configuration.
+	DSLRequestRateLimitQuantity int
+	DSLRequestRateLimitInterval time.Duration
+
 	// MaxCompartmentIDs specifies the maximum number of compartment IDs that
 	// can be included, per list, in one request. If 0, the value
 	// MaxCompartmentIDs is used.
@@ -306,18 +317,30 @@ func NewBroker(config *BrokerConfig) (*Broker, error) {
 
 		proxyQualityState: proxyQuality,
 
-		proxyAnnounceTimeout:       int64(config.ProxyAnnounceTimeout),
-		clientOfferTimeout:         int64(config.ClientOfferTimeout),
-		clientOfferPersonalTimeout: int64(config.ClientOfferPersonalTimeout),
-		pendingServerReportsTTL:    int64(config.PendingServerReportsTTL),
-
-		maxCompartmentIDs: int64(common.ValueOrDefault(config.MaxCompartmentIDs, MaxCompartmentIDs)),
+		dslRequestRateLimiters: lrucache.NewWithLRU(
+			0,
+			time.Duration(brokerRateLimiterReapHistoryFrequencySeconds)*time.Second,
+			brokerRateLimiterMaxCacheEntries),
 	}
 
 	b.pendingServerReports = lrucache.NewWithLRU(
 		common.ValueOrDefault(config.PendingServerReportsTTL, brokerPendingServerReportsTTL),
 		1*time.Minute,
 		brokerPendingServerReportsMaxSize)
+
+	b.proxyAnnounceTimeout.Store(int64(config.ProxyAnnounceTimeout))
+	b.clientOfferTimeout.Store(int64(config.ClientOfferTimeout))
+	b.clientOfferPersonalTimeout.Store(int64(config.ClientOfferPersonalTimeout))
+	b.pendingServerReportsTTL.Store(int64(config.PendingServerReportsTTL))
+
+	b.maxCompartmentIDs.Store(
+		int64(common.ValueOrDefault(config.MaxCompartmentIDs, MaxCompartmentIDs)))
+
+	b.dslRequestRateLimitParams.Store(
+		&brokerRateLimitParams{
+			quantity: config.DSLRequestRateLimitQuantity,
+			interval: config.DSLRequestRateLimitInterval,
+		})
 
 	if len(config.CommonCompartmentIDs) > 0 {
 		err = b.initializeCommonCompartmentIDHashing(config.CommonCompartmentIDs)
@@ -365,10 +388,10 @@ func (b *Broker) SetTimeouts(
 	pendingServerReportsTTL time.Duration,
 	maxRequestTimeouts map[string]time.Duration) {
 
-	atomic.StoreInt64(&b.proxyAnnounceTimeout, int64(proxyAnnounceTimeout))
-	atomic.StoreInt64(&b.clientOfferTimeout, int64(clientOfferTimeout))
-	atomic.StoreInt64(&b.clientOfferPersonalTimeout, int64(clientOfferPersonalTimeout))
-	atomic.StoreInt64(&b.pendingServerReportsTTL, int64(pendingServerReportsTTL))
+	b.proxyAnnounceTimeout.Store(int64(proxyAnnounceTimeout))
+	b.clientOfferTimeout.Store(int64(clientOfferTimeout))
+	b.clientOfferPersonalTimeout.Store(int64(clientOfferPersonalTimeout))
+	b.pendingServerReportsTTL.Store(int64(pendingServerReportsTTL))
 	b.maxRequestTimeouts.Store(maxRequestTimeouts)
 }
 
@@ -383,7 +406,9 @@ func (b *Broker) SetLimits(
 	matcherOfferLimitEntryCount int,
 	matcherOfferRateLimitQuantity int,
 	matcherOfferRateLimitInterval time.Duration,
-	maxCompartmentIDs int) {
+	maxCompartmentIDs int,
+	dslRequestRateLimitQuantity int,
+	dslRequestRateLimitInterval time.Duration) {
 
 	b.matcher.SetLimits(
 		matcherAnnouncementLimitEntryCount,
@@ -394,9 +419,14 @@ func (b *Broker) SetLimits(
 		matcherOfferRateLimitQuantity,
 		matcherOfferRateLimitInterval)
 
-	atomic.StoreInt64(
-		&b.maxCompartmentIDs,
+	b.maxCompartmentIDs.Store(
 		int64(common.ValueOrDefault(maxCompartmentIDs, MaxCompartmentIDs)))
+
+	b.dslRequestRateLimitParams.Store(
+		&brokerRateLimitParams{
+			quantity: dslRequestRateLimitQuantity,
+			interval: dslRequestRateLimitInterval,
+		})
 }
 
 func (b *Broker) SetProxyQualityParameters(
@@ -666,7 +696,7 @@ func (b *Broker) handleProxyAnnounce(
 
 	var apiParams common.APIParameters
 	apiParams, logFields, err = announceRequest.ValidateAndGetParametersAndLogFields(
-		int(atomic.LoadInt64(&b.maxCompartmentIDs)),
+		int(b.maxCompartmentIDs.Load()),
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,
 		geoIPData)
@@ -807,7 +837,7 @@ func (b *Broker) handleProxyAnnounce(
 	// Await client offer.
 
 	timeout := common.ValueOrDefault(
-		time.Duration(atomic.LoadInt64(&b.proxyAnnounceTimeout)),
+		time.Duration(b.proxyAnnounceTimeout.Load()),
 		brokerProxyAnnounceTimeout)
 
 	// Adjust the timeout to respect any shorter maximum request timeouts for
@@ -1038,7 +1068,7 @@ func (b *Broker) handleClientOffer(
 
 	var filteredSDP []byte
 	filteredSDP, logFields, err = offerRequest.ValidateAndGetLogFields(
-		int(atomic.LoadInt64(&b.maxCompartmentIDs)),
+		int(b.maxCompartmentIDs.Load()),
 		b.config.LookupGeoIP,
 		b.config.APIParameterValidator,
 		b.config.APIParameterLogFieldFormatter,
@@ -1111,9 +1141,9 @@ func (b *Broker) handleClientOffer(
 	// resulting broker rotation.
 	var timeout time.Duration
 	if hasPersonalCompartmentIDs {
-		timeout = time.Duration(atomic.LoadInt64(&b.clientOfferPersonalTimeout))
+		timeout = time.Duration(b.clientOfferPersonalTimeout.Load())
 	} else {
-		timeout = time.Duration(atomic.LoadInt64(&b.clientOfferTimeout))
+		timeout = time.Duration(b.clientOfferTimeout.Load())
 	}
 	timeout = common.ValueOrDefault(timeout, brokerClientOfferTimeout)
 
@@ -1680,6 +1710,26 @@ func (b *Broker) handleClientDSL(
 		}
 	}()
 
+	// Rate limit the number of relayed DSL requests. The DSL backend has its
+	// own rate limit enforcement, but avoiding excess requests here saves on
+	// resources consumed between the relay and backend.
+	//
+	// Unlike the announce/offer rate limit cases, there's no "limited" error
+	// flag returned to the client in this case, since this rate limiter is
+	// purely for abuse prevention and is expected to be configured with
+	// limits that won't be exceeded by legitimate clients.
+
+	rateLimitParams := b.dslRequestRateLimitParams.Load().(*brokerRateLimitParams)
+	err := brokerRateLimit(
+		b.dslRequestRateLimiters,
+		clientIP,
+		rateLimitParams.quantity,
+		rateLimitParams.interval)
+	if err != nil {
+		return nil, errors.Trace(err)
+
+	}
+
 	dslRequest, err := UnmarshalClientDSLRequest(requestPayload)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1790,7 +1840,7 @@ func (b *Broker) initiateRelayedServerReport(
 			serverReport: serverReport,
 			roundTrip:    roundTrip,
 		},
-		time.Duration(atomic.LoadInt64(&b.pendingServerReportsTTL)))
+		time.Duration(b.pendingServerReportsTTL.Load()))
 
 	return relayPacket, nil
 }
@@ -2037,4 +2087,38 @@ func (b *Broker) selectCommonCompartmentID(proxyID ID) (ID, error) {
 	}
 
 	return compartmentID, nil
+}
+
+type brokerRateLimitParams struct {
+	quantity int
+	interval time.Duration
+}
+
+func brokerRateLimit(
+	rateLimiters *lrucache.Cache,
+	limitIP string,
+	quantity int,
+	interval time.Duration) error {
+
+	if quantity <= 0 || interval <= 0 {
+		return nil
+	}
+
+	var rateLimiter *rate.Limiter
+
+	entry, ok := rateLimiters.Get(limitIP)
+	if ok {
+		rateLimiter = entry.(*rate.Limiter)
+	} else {
+		limit := float64(quantity) / interval.Seconds()
+		rateLimiter = rate.NewLimiter(rate.Limit(limit), quantity)
+		rateLimiters.Set(
+			limitIP, rateLimiter, interval)
+	}
+
+	if !rateLimiter.Allow() {
+		return errors.TraceNew("rate exceeded for IP")
+	}
+
+	return nil
 }

@@ -301,26 +301,23 @@ func testTunneledTCP(t *testing.T, useIPv6 bool) {
 }
 
 type bytesTransferredCounter struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	downstreamBytes     int64
-	upstreamBytes       int64
-	durationNanoseconds int64
+	downstreamBytes     atomic.Int64
+	upstreamBytes       atomic.Int64
+	durationNanoseconds atomic.Int64
 }
 
 func (counter *bytesTransferredCounter) UpdateProgress(
 	downstreamBytes, upstreamBytes int64, durationNanoseconds int64) {
 
-	atomic.AddInt64(&counter.downstreamBytes, downstreamBytes)
-	atomic.AddInt64(&counter.upstreamBytes, upstreamBytes)
-	atomic.AddInt64(&counter.durationNanoseconds, durationNanoseconds)
+	counter.downstreamBytes.Add(downstreamBytes)
+	counter.upstreamBytes.Add(upstreamBytes)
+	counter.durationNanoseconds.Add(durationNanoseconds)
 }
 
 func (counter *bytesTransferredCounter) Get() (int64, int64, int64) {
-	return atomic.LoadInt64(&counter.downstreamBytes),
-		atomic.LoadInt64(&counter.upstreamBytes),
-		atomic.LoadInt64(&counter.durationNanoseconds)
+	return counter.downstreamBytes.Load(),
+		counter.upstreamBytes.Load(),
+		counter.durationNanoseconds.Load()
 }
 
 type testServer struct {

@@ -11,8 +11,8 @@ message InproxyBroker {
 
     // Fields 1-99 are reserved for field groupings.
 
-    optional int32 announcement_match_index = 100;
-    optional int32 announcement_queue_size = 101;
+    optional int64 announcement_match_index = 100;
+    optional int64 announcement_queue_size = 101;
     optional string answer_error = 102;
     optional string broker_event = 103;
     optional string broker_id = 104;
@@ -42,7 +42,7 @@ message InproxyBroker {
     optional int64 peak_upstream_bytes_per_second = 128;
     repeated string port_mapping_types = 129;
     optional bool preferred_nat_match = 130;
-    optional int32 protocol_version = 131;
+    optional int64 protocol_version = 131;
     optional string proxy_id = 132;
     optional string proxy_nat_type = 133;
     repeated string proxy_port_mapping_types = 134;
@@ -50,4 +50,5 @@ message InproxyBroker {
     optional string stored_tactics_tag = 136;
     optional bool timed_out = 137;
     optional string meek_server_http_version = 138;
+    optional int64 pending_answers_size = 139;
 }

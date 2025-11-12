@@ -31,12 +31,12 @@ message ServerLoad {
 
   optional double cpu_percent = 100;
 
-  optional uint64 heap_alloc = 101;
-  optional uint64 heap_idle = 102;
-  optional uint64 heap_inuse = 103;
-  optional uint64 heap_objects = 104;
-  optional uint64 heap_released = 105;
-  optional uint64 heap_sys = 106;
+  optional int64 heap_alloc = 101;
+  optional int64 heap_idle = 102;
+  optional int64 heap_inuse = 103;
+  optional int64 heap_objects = 104;
+  optional int64 heap_released = 105;
+  optional int64 heap_sys = 106;
 
   optional int64 network_bytes_received = 107;
   optional int64 network_bytes_sent = 108;
@@ -45,9 +45,9 @@ message ServerLoad {
   optional int64 establish_tunnels_limited_count = 110;
 
   optional google.protobuf.Timestamp last_gc = 111;
-  optional uint32 num_forced_gc = 112;
-  optional uint32 num_gc = 113;
-  optional uint32 num_goroutine = 114;
+  optional int64 num_forced_gc = 112;
+  optional int64 num_gc = 113;
+  optional int64 num_goroutine = 114;
 
   optional int64 replay_delete_replay_count = 115;
   optional int64 replay_failed_replay_count = 116;

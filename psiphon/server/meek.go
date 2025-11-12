@@ -503,10 +503,29 @@ func (server *MeekServer) Run() error {
 	return err
 }
 
+func handleServeHTTPPanic() {
+
+	// Disable panic recovery, to ensure panics are captured and logged by
+	// panicwrap.
+	//
+	// The net.http ServeHTTP caller will recover any ServeHTTP panic, so
+	// re-panic in another goroutine after capturing the panicking goroutine
+	// call stack.
+
+	if r := recover(); r != nil {
+		var stack [4096]byte
+		n := runtime.Stack(stack[:], false)
+		err := errors.Tracef("ServeHTTP panic: %v\n%s", r, stack[:n])
+		go panic(err.Error())
+	}
+}
+
 // ServeHTTP handles meek client HTTP requests, where the request body
 // contains upstream traffic and the response will contain downstream
 // traffic.
 func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
+
+	defer handleServeHTTPPanic()
 
 	// Note: no longer requiring that the request method is POST
 
@@ -696,7 +715,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// sending data to the cached response, but if that buffer fills, the
 	// session will be lost.
 
-	requestNumber := atomic.AddInt64(&session.requestCount, 1)
+	requestNumber := session.requestCount.Add(1)
 
 	// Wait for the existing request to complete.
 	session.lock.Lock()
@@ -710,7 +729,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// interface which includes a pointer, and the previous value cannot
 	// be garbage collected until session.underlyingConn is updated.
 	if session.underlyingConn != underlyingConn {
-		atomic.AddInt64(&session.metricUnderlyingConnCount, 1)
+		session.metricUnderlyingConnCount.Add(1)
 		session.underlyingConn = underlyingConn
 	}
 
@@ -721,7 +740,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	// discard this request. The session is no longer valid, and the final call
 	// to session.cachedResponse.Reset may have already occured, so any further
 	// session.cachedResponse access may deplete resources (fail to refill the pool).
-	if atomic.LoadInt64(&session.requestCount) > requestNumber || session.deleted {
+	if session.requestCount.Load() > requestNumber || session.deleted {
 		common.TerminateHTTPConnection(responseWriter, request)
 		return
 	}
@@ -790,7 +809,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 
 	position, isRetry := checkRangeHeader(request)
 	if isRetry {
-		atomic.AddInt64(&session.metricClientRetries, 1)
+		session.metricClientRetries.Add(1)
 	}
 
 	hasCompleteCachedResponse := session.cachedResponse.HasPosition(0)
@@ -1876,7 +1895,9 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Int(parameters.InproxyBrokerMatcherOfferLimitEntryCount),
 		p.Int(parameters.InproxyBrokerMatcherOfferRateLimitQuantity),
 		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval),
-		p.Int(parameters.InproxyMaxCompartmentIDListLength))
+		p.Int(parameters.InproxyMaxCompartmentIDListLength),
+		p.Int(parameters.InproxyBrokerDSLRequestRateLimitQuantity),
+		p.Duration(parameters.InproxyBrokerDSLRequestRateLimitInterval))
 
 	server.inproxyBroker.SetProxyQualityParameters(
 		p.Bool(parameters.InproxyEnableProxyQuality),
@@ -2173,17 +2194,14 @@ func (server *MeekServer) inproxyBrokerHandler(
 }
 
 type meekSession struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastActivity                     int64
-	requestCount                     int64
-	metricClientRetries              int64
-	metricPeakResponseSize           int64
-	metricPeakCachedResponseSize     int64
-	metricPeakCachedResponseHitSize  int64
-	metricCachedResponseMissPosition int64
-	metricUnderlyingConnCount        int64
+	lastActivity                     atomic.Int64
+	requestCount                     atomic.Int64
+	metricClientRetries              atomic.Int64
+	metricPeakResponseSize           atomic.Int64
+	metricPeakCachedResponseSize     atomic.Int64
+	metricPeakCachedResponseHitSize  atomic.Int64
+	metricCachedResponseMissPosition atomic.Int64
+	metricUnderlyingConnCount        atomic.Int64
 	lock                             sync.Mutex
 	deleted                          bool
 	underlyingConn                   net.Conn
@@ -2197,7 +2215,7 @@ type meekSession struct {
 }
 
 func (session *meekSession) touch() {
-	atomic.StoreInt64(&session.lastActivity, int64(monotime.Now()))
+	session.lastActivity.Store(int64(monotime.Now()))
 }
 
 func (session *meekSession) expired() bool {
@@ -2206,7 +2224,7 @@ func (session *meekSession) expired() bool {
 		// the session to MeekServer.sessions.
 		return false
 	}
-	lastActivity := monotime.Time(atomic.LoadInt64(&session.lastActivity))
+	lastActivity := monotime.Time(session.lastActivity.Load())
 	return monotime.Since(lastActivity) >
 		session.clientConn.meekServer.maxSessionStaleness
 }
@@ -2256,12 +2274,12 @@ func (session *meekSession) delete(haveLock bool) {
 // GetMetrics implements the common.MetricsSource interface.
 func (session *meekSession) GetMetrics() common.LogFields {
 	logFields := make(common.LogFields)
-	logFields["meek_client_retries"] = atomic.LoadInt64(&session.metricClientRetries)
-	logFields["meek_peak_response_size"] = atomic.LoadInt64(&session.metricPeakResponseSize)
-	logFields["meek_peak_cached_response_size"] = atomic.LoadInt64(&session.metricPeakCachedResponseSize)
-	logFields["meek_peak_cached_response_hit_size"] = atomic.LoadInt64(&session.metricPeakCachedResponseHitSize)
-	logFields["meek_cached_response_miss_position"] = atomic.LoadInt64(&session.metricCachedResponseMissPosition)
-	logFields["meek_underlying_connection_count"] = atomic.LoadInt64(&session.metricUnderlyingConnCount)
+	logFields["meek_client_retries"] = session.metricClientRetries.Load()
+	logFields["meek_peak_response_size"] = session.metricPeakResponseSize.Load()
+	logFields["meek_peak_cached_response_size"] = session.metricPeakCachedResponseSize.Load()
+	logFields["meek_peak_cached_response_hit_size"] = session.metricPeakCachedResponseHitSize.Load()
+	logFields["meek_cached_response_miss_position"] = session.metricCachedResponseMissPosition.Load()
+	logFields["meek_underlying_connection_count"] = session.metricUnderlyingConnCount.Load()
 	logFields["meek_cookie_name"] = session.cookieName
 	logFields["meek_content_type"] = session.contentType
 	logFields["meek_server_http_version"] = session.httpVersion

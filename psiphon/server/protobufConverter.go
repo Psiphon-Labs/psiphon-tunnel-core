@@ -122,14 +122,10 @@ func newPsiphondProtobufMessageWrapper(ts *timestamppb.Timestamp, hostType strin
 	}
 
 	wrapper.Timestamp = ts
-
-	wrapper.HostId = &logHostID
-	wrapper.HostBuildRev = &logBuildRev
-	if logHostProvider != "" {
-		wrapper.Provider = &logHostProvider
-	}
-
-	wrapper.HostType = &hostType
+	wrapper.HostId = logHostID
+	wrapper.HostBuildRev = logBuildRev
+	wrapper.Provider = logHostProvider
+	wrapper.HostType = hostType
 
 	return wrapper
 }

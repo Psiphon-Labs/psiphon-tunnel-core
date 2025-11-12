@@ -68,7 +68,7 @@ type DialParams struct {
 	ServerReplayFragmentation         *bool                  `protobuf:"varint,42,opt,name=server_replay_fragmentation,json=serverReplayFragmentation,proto3,oneof" json:"server_replay_fragmentation,omitempty"`
 	ServerReplayPacketManipulation    *bool                  `protobuf:"varint,43,opt,name=server_replay_packet_manipulation,json=serverReplayPacketManipulation,proto3,oneof" json:"server_replay_packet_manipulation,omitempty"`
 	ServerEntryValid                  *bool                  `protobuf:"varint,44,opt,name=server_entry_valid,json=serverEntryValid,proto3,oneof" json:"server_entry_valid,omitempty"`
-	CandidateNumber                   *int32                 `protobuf:"varint,45,opt,name=candidate_number,json=candidateNumber,proto3,oneof" json:"candidate_number,omitempty"`
+	CandidateNumber                   *int64                 `protobuf:"varint,45,opt,name=candidate_number,json=candidateNumber,proto3,oneof" json:"candidate_number,omitempty"`
 	IsReplay                          *bool                  `protobuf:"varint,46,opt,name=is_replay,json=isReplay,proto3,oneof" json:"is_replay,omitempty"`
 	DialPortNumber                    *int64                 `protobuf:"varint,47,opt,name=dial_port_number,json=dialPortNumber,proto3,oneof" json:"dial_port_number,omitempty"`
 	DialDuration                      *int64                 `protobuf:"varint,48,opt,name=dial_duration,json=dialDuration,proto3,oneof" json:"dial_duration,omitempty"`
@@ -449,7 +449,7 @@ func (x *DialParams) GetServerEntryValid() bool {
 	return false
 }
 
-func (x *DialParams) GetCandidateNumber() int32 {
+func (x *DialParams) GetCandidateNumber() int64 {
 	if x != nil && x.CandidateNumber != nil {
 		return *x.CandidateNumber
 	}
@@ -778,7 +778,7 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x1bserver_replay_fragmentation\x18* \x01(\bH)R\x19serverReplayFragmentation\x88\x01\x01\x12N\n" +
 	"!server_replay_packet_manipulation\x18+ \x01(\bH*R\x1eserverReplayPacketManipulation\x88\x01\x01\x121\n" +
 	"\x12server_entry_valid\x18, \x01(\bH+R\x10serverEntryValid\x88\x01\x01\x12.\n" +
-	"\x10candidate_number\x18- \x01(\x05H,R\x0fcandidateNumber\x88\x01\x01\x12 \n" +
+	"\x10candidate_number\x18- \x01(\x03H,R\x0fcandidateNumber\x88\x01\x01\x12 \n" +
 	"\tis_replay\x18. \x01(\bH-R\bisReplay\x88\x01\x01\x12-\n" +
 	"\x10dial_port_number\x18/ \x01(\x03H.R\x0edialPortNumber\x88\x01\x01\x12(\n" +
 	"\rdial_duration\x180 \x01(\x03H/R\fdialDuration\x88\x01\x01\x125\n" +
