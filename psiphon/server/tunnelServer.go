@@ -151,6 +151,13 @@ func (server *TunnelServer) Run() error {
 
 	var listeners []*sshListener
 
+	defer func() {
+		// Ensure listeners are closed on early error returns.
+		for _, listener := range listeners {
+			listener.Close()
+		}
+	}()
+
 	for tunnelProtocol, listenPort := range support.Config.TunnelProtocolPorts {
 
 		localAddress := net.JoinHostPort(
@@ -214,26 +221,40 @@ func (server *TunnelServer) Run() error {
 				maxPacketSizeAdjustment,
 				support.Config.ObfuscatedSSHKey,
 				enableGQUIC)
+			if err != nil {
+				return errors.Trace(err)
+			}
 
 		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
 
 			listener, err = refraction.Listen(localAddress)
+			if err != nil {
+				return errors.Trace(err)
+			}
 
 		} else if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 
 			listener, err = net.Listen("tcp", localAddress)
+			if err != nil {
+				return errors.Trace(err)
+			}
 
 		} else {
 
 			// Only direct, unfronted protocol listeners use TCP BPF circumvention
 			// programs.
 			listener, BPFProgramName, err = newTCPListenerWithBPF(support, localAddress)
+			if err != nil {
+				return errors.Trace(err)
+			}
 
 			if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+
 				listener, err = ListenTLSTunnel(support, listener, tunnelProtocol, listenPort)
 				if err != nil {
 					return errors.Trace(err)
 				}
+
 			} else if protocol.TunnelProtocolUsesShadowsocks(tunnelProtocol) {
 
 				logTunnelProtocol := tunnelProtocol
@@ -251,13 +272,6 @@ func (server *TunnelServer) Run() error {
 					return errors.Trace(err)
 				}
 			}
-		}
-
-		if err != nil {
-			for _, existingListener := range listeners {
-				existingListener.Listener.Close()
-			}
-			return errors.Trace(err)
 		}
 
 		tacticsListener := NewTacticsListener(
