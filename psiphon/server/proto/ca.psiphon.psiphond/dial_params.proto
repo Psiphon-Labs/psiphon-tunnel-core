@@ -62,7 +62,7 @@ message DialParams {
     optional int64 dial_port_number = 47;
     optional int64 dial_duration = 48;
     optional string fronting_provider_id = 49;
-    optional string network_type = 50;
+    // Retired: optional string network_type = 50;
     optional string relay_protocol = 51;
     optional string ssh_client_version = 52;
     optional string ossh_prefix = 53;
@@ -103,5 +103,4 @@ message DialParams {
     optional int64 established_tunnels_count = 81;
     optional double network_latency_multiplier = 82;
     optional string seed_transform = 83;
-
 }

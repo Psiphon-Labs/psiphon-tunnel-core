@@ -47,25 +47,25 @@ type InproxyBroker struct {
 	LimitUpstreamBytesPerSecond   *int64                 `protobuf:"varint,120,opt,name=limit_upstream_bytes_per_second,json=limitUpstreamBytesPerSecond,proto3,oneof" json:"limit_upstream_bytes_per_second,omitempty"`
 	MaxClients                    *int64                 `protobuf:"varint,121,opt,name=max_clients,json=maxClients,proto3,oneof" json:"max_clients,omitempty"`
 	NatType                       *string                `protobuf:"bytes,122,opt,name=nat_type,json=natType,proto3,oneof" json:"nat_type,omitempty"`
-	NetworkType                   *string                `protobuf:"bytes,123,opt,name=network_type,json=networkType,proto3,oneof" json:"network_type,omitempty"`
-	NewTacticsTag                 *string                `protobuf:"bytes,124,opt,name=new_tactics_tag,json=newTacticsTag,proto3,oneof" json:"new_tactics_tag,omitempty"`
-	OfferMatchIndex               *int64                 `protobuf:"varint,125,opt,name=offer_match_index,json=offerMatchIndex,proto3,oneof" json:"offer_match_index,omitempty"`
-	OfferQueueSize                *int64                 `protobuf:"varint,126,opt,name=offer_queue_size,json=offerQueueSize,proto3,oneof" json:"offer_queue_size,omitempty"`
-	PeakDownstreamBytesPerSecond  *int64                 `protobuf:"varint,127,opt,name=peak_downstream_bytes_per_second,json=peakDownstreamBytesPerSecond,proto3,oneof" json:"peak_downstream_bytes_per_second,omitempty"`
-	PeakUpstreamBytesPerSecond    *int64                 `protobuf:"varint,128,opt,name=peak_upstream_bytes_per_second,json=peakUpstreamBytesPerSecond,proto3,oneof" json:"peak_upstream_bytes_per_second,omitempty"`
-	PortMappingTypes              []string               `protobuf:"bytes,129,rep,name=port_mapping_types,json=portMappingTypes,proto3" json:"port_mapping_types,omitempty"`
-	PreferredNatMatch             *bool                  `protobuf:"varint,130,opt,name=preferred_nat_match,json=preferredNatMatch,proto3,oneof" json:"preferred_nat_match,omitempty"`
-	ProtocolVersion               *int64                 `protobuf:"varint,131,opt,name=protocol_version,json=protocolVersion,proto3,oneof" json:"protocol_version,omitempty"`
-	ProxyId                       *string                `protobuf:"bytes,132,opt,name=proxy_id,json=proxyId,proto3,oneof" json:"proxy_id,omitempty"`
-	ProxyNatType                  *string                `protobuf:"bytes,133,opt,name=proxy_nat_type,json=proxyNatType,proto3,oneof" json:"proxy_nat_type,omitempty"`
-	ProxyPortMappingTypes         []string               `protobuf:"bytes,134,rep,name=proxy_port_mapping_types,json=proxyPortMappingTypes,proto3" json:"proxy_port_mapping_types,omitempty"`
-	ServerId                      *string                `protobuf:"bytes,135,opt,name=server_id,json=serverId,proto3,oneof" json:"server_id,omitempty"`
-	StoredTacticsTag              *string                `protobuf:"bytes,136,opt,name=stored_tactics_tag,json=storedTacticsTag,proto3,oneof" json:"stored_tactics_tag,omitempty"`
-	TimedOut                      *bool                  `protobuf:"varint,137,opt,name=timed_out,json=timedOut,proto3,oneof" json:"timed_out,omitempty"`
-	MeekServerHttpVersion         *string                `protobuf:"bytes,138,opt,name=meek_server_http_version,json=meekServerHttpVersion,proto3,oneof" json:"meek_server_http_version,omitempty"`
-	PendingAnswersSize            *int64                 `protobuf:"varint,139,opt,name=pending_answers_size,json=pendingAnswersSize,proto3,oneof" json:"pending_answers_size,omitempty"`
-	unknownFields                 protoimpl.UnknownFields
-	sizeCache                     protoimpl.SizeCache
+	// Retired: optional string network_type = 123;
+	NewTacticsTag                *string  `protobuf:"bytes,124,opt,name=new_tactics_tag,json=newTacticsTag,proto3,oneof" json:"new_tactics_tag,omitempty"`
+	OfferMatchIndex              *int64   `protobuf:"varint,125,opt,name=offer_match_index,json=offerMatchIndex,proto3,oneof" json:"offer_match_index,omitempty"`
+	OfferQueueSize               *int64   `protobuf:"varint,126,opt,name=offer_queue_size,json=offerQueueSize,proto3,oneof" json:"offer_queue_size,omitempty"`
+	PeakDownstreamBytesPerSecond *int64   `protobuf:"varint,127,opt,name=peak_downstream_bytes_per_second,json=peakDownstreamBytesPerSecond,proto3,oneof" json:"peak_downstream_bytes_per_second,omitempty"`
+	PeakUpstreamBytesPerSecond   *int64   `protobuf:"varint,128,opt,name=peak_upstream_bytes_per_second,json=peakUpstreamBytesPerSecond,proto3,oneof" json:"peak_upstream_bytes_per_second,omitempty"`
+	PortMappingTypes             []string `protobuf:"bytes,129,rep,name=port_mapping_types,json=portMappingTypes,proto3" json:"port_mapping_types,omitempty"`
+	PreferredNatMatch            *bool    `protobuf:"varint,130,opt,name=preferred_nat_match,json=preferredNatMatch,proto3,oneof" json:"preferred_nat_match,omitempty"`
+	ProtocolVersion              *int64   `protobuf:"varint,131,opt,name=protocol_version,json=protocolVersion,proto3,oneof" json:"protocol_version,omitempty"`
+	ProxyId                      *string  `protobuf:"bytes,132,opt,name=proxy_id,json=proxyId,proto3,oneof" json:"proxy_id,omitempty"`
+	ProxyNatType                 *string  `protobuf:"bytes,133,opt,name=proxy_nat_type,json=proxyNatType,proto3,oneof" json:"proxy_nat_type,omitempty"`
+	ProxyPortMappingTypes        []string `protobuf:"bytes,134,rep,name=proxy_port_mapping_types,json=proxyPortMappingTypes,proto3" json:"proxy_port_mapping_types,omitempty"`
+	ServerId                     *string  `protobuf:"bytes,135,opt,name=server_id,json=serverId,proto3,oneof" json:"server_id,omitempty"`
+	StoredTacticsTag             *string  `protobuf:"bytes,136,opt,name=stored_tactics_tag,json=storedTacticsTag,proto3,oneof" json:"stored_tactics_tag,omitempty"`
+	TimedOut                     *bool    `protobuf:"varint,137,opt,name=timed_out,json=timedOut,proto3,oneof" json:"timed_out,omitempty"`
+	MeekServerHttpVersion        *string  `protobuf:"bytes,138,opt,name=meek_server_http_version,json=meekServerHttpVersion,proto3,oneof" json:"meek_server_http_version,omitempty"`
+	PendingAnswersSize           *int64   `protobuf:"varint,139,opt,name=pending_answers_size,json=pendingAnswersSize,proto3,oneof" json:"pending_answers_size,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *InproxyBroker) Reset() {
@@ -266,13 +266,6 @@ func (x *InproxyBroker) GetNatType() string {
 	return ""
 }
 
-func (x *InproxyBroker) GetNetworkType() string {
-	if x != nil && x.NetworkType != nil {
-		return *x.NetworkType
-	}
-	return ""
-}
-
 func (x *InproxyBroker) GetNewTacticsTag() string {
 	if x != nil && x.NewTacticsTag != nil {
 		return *x.NewTacticsTag
@@ -389,7 +382,7 @@ var File_ca_psiphon_psiphond_inproxy_broker_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\n" +
-	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xcd\x16\n" +
+	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\x94\x16\n" +
 	"\rInproxyBroker\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12=\n" +
@@ -418,24 +411,23 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\x1flimit_upstream_bytes_per_second\x18x \x01(\x03H\x13R\x1blimitUpstreamBytesPerSecond\x88\x01\x01\x12$\n" +
 	"\vmax_clients\x18y \x01(\x03H\x14R\n" +
 	"maxClients\x88\x01\x01\x12\x1e\n" +
-	"\bnat_type\x18z \x01(\tH\x15R\anatType\x88\x01\x01\x12&\n" +
-	"\fnetwork_type\x18{ \x01(\tH\x16R\vnetworkType\x88\x01\x01\x12+\n" +
-	"\x0fnew_tactics_tag\x18| \x01(\tH\x17R\rnewTacticsTag\x88\x01\x01\x12/\n" +
-	"\x11offer_match_index\x18} \x01(\x03H\x18R\x0fofferMatchIndex\x88\x01\x01\x12-\n" +
-	"\x10offer_queue_size\x18~ \x01(\x03H\x19R\x0eofferQueueSize\x88\x01\x01\x12K\n" +
-	" peak_downstream_bytes_per_second\x18\x7f \x01(\x03H\x1aR\x1cpeakDownstreamBytesPerSecond\x88\x01\x01\x12H\n" +
-	"\x1epeak_upstream_bytes_per_second\x18\x80\x01 \x01(\x03H\x1bR\x1apeakUpstreamBytesPerSecond\x88\x01\x01\x12-\n" +
+	"\bnat_type\x18z \x01(\tH\x15R\anatType\x88\x01\x01\x12+\n" +
+	"\x0fnew_tactics_tag\x18| \x01(\tH\x16R\rnewTacticsTag\x88\x01\x01\x12/\n" +
+	"\x11offer_match_index\x18} \x01(\x03H\x17R\x0fofferMatchIndex\x88\x01\x01\x12-\n" +
+	"\x10offer_queue_size\x18~ \x01(\x03H\x18R\x0eofferQueueSize\x88\x01\x01\x12K\n" +
+	" peak_downstream_bytes_per_second\x18\x7f \x01(\x03H\x19R\x1cpeakDownstreamBytesPerSecond\x88\x01\x01\x12H\n" +
+	"\x1epeak_upstream_bytes_per_second\x18\x80\x01 \x01(\x03H\x1aR\x1apeakUpstreamBytesPerSecond\x88\x01\x01\x12-\n" +
 	"\x12port_mapping_types\x18\x81\x01 \x03(\tR\x10portMappingTypes\x124\n" +
-	"\x13preferred_nat_match\x18\x82\x01 \x01(\bH\x1cR\x11preferredNatMatch\x88\x01\x01\x12/\n" +
-	"\x10protocol_version\x18\x83\x01 \x01(\x03H\x1dR\x0fprotocolVersion\x88\x01\x01\x12\x1f\n" +
-	"\bproxy_id\x18\x84\x01 \x01(\tH\x1eR\aproxyId\x88\x01\x01\x12*\n" +
-	"\x0eproxy_nat_type\x18\x85\x01 \x01(\tH\x1fR\fproxyNatType\x88\x01\x01\x128\n" +
+	"\x13preferred_nat_match\x18\x82\x01 \x01(\bH\x1bR\x11preferredNatMatch\x88\x01\x01\x12/\n" +
+	"\x10protocol_version\x18\x83\x01 \x01(\x03H\x1cR\x0fprotocolVersion\x88\x01\x01\x12\x1f\n" +
+	"\bproxy_id\x18\x84\x01 \x01(\tH\x1dR\aproxyId\x88\x01\x01\x12*\n" +
+	"\x0eproxy_nat_type\x18\x85\x01 \x01(\tH\x1eR\fproxyNatType\x88\x01\x01\x128\n" +
 	"\x18proxy_port_mapping_types\x18\x86\x01 \x03(\tR\x15proxyPortMappingTypes\x12!\n" +
-	"\tserver_id\x18\x87\x01 \x01(\tH R\bserverId\x88\x01\x01\x122\n" +
-	"\x12stored_tactics_tag\x18\x88\x01 \x01(\tH!R\x10storedTacticsTag\x88\x01\x01\x12!\n" +
-	"\ttimed_out\x18\x89\x01 \x01(\bH\"R\btimedOut\x88\x01\x01\x12=\n" +
-	"\x18meek_server_http_version\x18\x8a\x01 \x01(\tH#R\x15meekServerHttpVersion\x88\x01\x01\x126\n" +
-	"\x14pending_answers_size\x18\x8b\x01 \x01(\x03H$R\x12pendingAnswersSize\x88\x01\x01B\x0e\n" +
+	"\tserver_id\x18\x87\x01 \x01(\tH\x1fR\bserverId\x88\x01\x01\x122\n" +
+	"\x12stored_tactics_tag\x18\x88\x01 \x01(\tH R\x10storedTacticsTag\x88\x01\x01\x12!\n" +
+	"\ttimed_out\x18\x89\x01 \x01(\bH!R\btimedOut\x88\x01\x01\x12=\n" +
+	"\x18meek_server_http_version\x18\x8a\x01 \x01(\tH\"R\x15meekServerHttpVersion\x88\x01\x01\x126\n" +
+	"\x14pending_answers_size\x18\x8b\x01 \x01(\x03H#R\x12pendingAnswersSize\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x1b\n" +
 	"\x19_announcement_match_indexB\x1a\n" +
 	"\x18_announcement_queue_sizeB\x0f\n" +
@@ -458,8 +450,7 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\"_limit_downstream_bytes_per_secondB\"\n" +
 	" _limit_upstream_bytes_per_secondB\x0e\n" +
 	"\f_max_clientsB\v\n" +
-	"\t_nat_typeB\x0f\n" +
-	"\r_network_typeB\x12\n" +
+	"\t_nat_typeB\x12\n" +
 	"\x10_new_tactics_tagB\x14\n" +
 	"\x12_offer_match_indexB\x13\n" +
 	"\x11_offer_queue_sizeB#\n" +
