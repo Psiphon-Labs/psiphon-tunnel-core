@@ -34,7 +34,7 @@ message InproxyBroker {
     optional int64 limit_upstream_bytes_per_second = 120;
     optional int64 max_clients = 121;
     optional string nat_type = 122;
-    // Retired: optional string network_type = 123;
+    // Removed: optional string network_type = 123;
     optional string new_tactics_tag = 124;
     optional int64 offer_match_index = 125;
     optional int64 offer_queue_size = 126;

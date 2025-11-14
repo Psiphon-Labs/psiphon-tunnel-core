@@ -51,7 +51,7 @@ message InproxyDialParams {
     optional int64 inproxy_proxy_connecting_clients = 44;
     optional string inproxy_proxy_device_location = 45;
     optional string inproxy_proxy_device_region = 46;
-    optional string inproxy_proxy_features = 47;
+    // Removed: optional string inproxy_proxy_features = 47;
     optional string inproxy_proxy_fronting_provider_id = 48;
     optional string inproxy_proxy_id = 49;
     optional bool inproxy_proxy_is_priority = 50;

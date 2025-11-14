@@ -47,7 +47,7 @@ type InproxyBroker struct {
 	LimitUpstreamBytesPerSecond   *int64                 `protobuf:"varint,120,opt,name=limit_upstream_bytes_per_second,json=limitUpstreamBytesPerSecond,proto3,oneof" json:"limit_upstream_bytes_per_second,omitempty"`
 	MaxClients                    *int64                 `protobuf:"varint,121,opt,name=max_clients,json=maxClients,proto3,oneof" json:"max_clients,omitempty"`
 	NatType                       *string                `protobuf:"bytes,122,opt,name=nat_type,json=natType,proto3,oneof" json:"nat_type,omitempty"`
-	// Retired: optional string network_type = 123;
+	// Removed: optional string network_type = 123;
 	NewTacticsTag                *string  `protobuf:"bytes,124,opt,name=new_tactics_tag,json=newTacticsTag,proto3,oneof" json:"new_tactics_tag,omitempty"`
 	OfferMatchIndex              *int64   `protobuf:"varint,125,opt,name=offer_match_index,json=offerMatchIndex,proto3,oneof" json:"offer_match_index,omitempty"`
 	OfferQueueSize               *int64   `protobuf:"varint,126,opt,name=offer_queue_size,json=offerQueueSize,proto3,oneof" json:"offer_queue_size,omitempty"`

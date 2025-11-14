@@ -73,7 +73,7 @@ type DialParams struct {
 	DialPortNumber                    *int64                 `protobuf:"varint,47,opt,name=dial_port_number,json=dialPortNumber,proto3,oneof" json:"dial_port_number,omitempty"`
 	DialDuration                      *int64                 `protobuf:"varint,48,opt,name=dial_duration,json=dialDuration,proto3,oneof" json:"dial_duration,omitempty"`
 	FrontingProviderId                *string                `protobuf:"bytes,49,opt,name=fronting_provider_id,json=frontingProviderId,proto3,oneof" json:"fronting_provider_id,omitempty"`
-	// Retired: optional string network_type = 50;
+	// Removed: optional string network_type = 50;
 	RelayProtocol                  *string  `protobuf:"bytes,51,opt,name=relay_protocol,json=relayProtocol,proto3,oneof" json:"relay_protocol,omitempty"`
 	SshClientVersion               *string  `protobuf:"bytes,52,opt,name=ssh_client_version,json=sshClientVersion,proto3,oneof" json:"ssh_client_version,omitempty"`
 	OsshPrefix                     *string  `protobuf:"bytes,53,opt,name=ossh_prefix,json=osshPrefix,proto3,oneof" json:"ossh_prefix,omitempty"`
