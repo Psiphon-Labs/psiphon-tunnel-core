@@ -62,45 +62,44 @@ message DialParams {
     optional int64 dial_port_number = 47;
     optional int64 dial_duration = 48;
     optional string fronting_provider_id = 49;
-    // Removed: optional string network_type = 50;
-    optional string relay_protocol = 51;
-    optional string ssh_client_version = 52;
-    optional string ossh_prefix = 53;
-    optional string user_agent = 54;
-    optional string http_transform = 55;
+    optional string relay_protocol = 50;
+    optional string ssh_client_version = 51;
+    optional string ossh_prefix = 52;
+    optional string user_agent = 53;
+    optional string http_transform = 54;
 
-    optional int64 dns_attempt = 56;
-    optional string dns_preferred = 57;
-    optional string dns_preresolved = 58;
-    optional int64 dns_qname_mismatches = 59;
-    optional bool dns_qname_random_casing = 60;
-    optional string dns_transform = 61;
+    optional int64 dns_attempt = 55;
+    optional string dns_preferred = 56;
+    optional string dns_preresolved = 57;
+    optional int64 dns_qname_mismatches = 58;
+    optional bool dns_qname_random_casing = 59;
+    optional string dns_transform = 60;
 
-    optional int64 downstream_bytes_fragmented = 62;
-    optional int64 downstream_max_bytes_written = 63;
-    optional int64 downstream_max_delayed = 64;
-    optional int64 downstream_min_bytes_written = 65;
-    optional int64 downstream_min_delayed = 66;
-    optional int64 downstream_ossh_padding = 67;
+    optional int64 downstream_bytes_fragmented = 61;
+    optional int64 downstream_max_bytes_written = 62;
+    optional int64 downstream_max_delayed = 63;
+    optional int64 downstream_min_bytes_written = 64;
+    optional int64 downstream_min_delayed = 65;
+    optional int64 downstream_ossh_padding = 66;
 
-    optional int64 upstream_bytes_fragmented = 68;
-    optional int64 upstream_max_bytes_written = 69;
-    optional int64 upstream_max_delayed = 70;
-    optional int64 upstream_min_bytes_written = 71;
-    optional int64 upstream_min_delayed = 72;
-    optional int64 upstream_ossh_padding = 73;
-    repeated string upstream_proxy_custom_header_names = 74;
-    optional string upstream_proxy_type = 75;
+    optional int64 upstream_bytes_fragmented = 67;
+    optional int64 upstream_max_bytes_written = 68;
+    optional int64 upstream_max_delayed = 69;
+    optional int64 upstream_min_bytes_written = 70;
+    optional int64 upstream_min_delayed = 71;
+    optional int64 upstream_ossh_padding = 72;
+    repeated string upstream_proxy_custom_header_names = 73;
+    optional string upstream_proxy_type = 74;
 
-    optional string passthrough_address = 76;
+    optional string passthrough_address = 75;
 
-    optional int64 pad_response = 77;
-    optional int64 padding = 78;
+    optional int64 pad_response = 76;
+    optional int64 padding = 77;
 
-    optional string client_bpf = 79;
-    optional string server_bpf = 80;
+    optional string client_bpf = 78;
+    optional string server_bpf = 79;
 
-    optional int64 established_tunnels_count = 81;
-    optional double network_latency_multiplier = 82;
-    optional string seed_transform = 83;
+    optional int64 established_tunnels_count = 80;
+    optional double network_latency_multiplier = 81;
+    optional string seed_transform = 82;
 }

@@ -73,42 +73,41 @@ type DialParams struct {
 	DialPortNumber                    *int64                 `protobuf:"varint,47,opt,name=dial_port_number,json=dialPortNumber,proto3,oneof" json:"dial_port_number,omitempty"`
 	DialDuration                      *int64                 `protobuf:"varint,48,opt,name=dial_duration,json=dialDuration,proto3,oneof" json:"dial_duration,omitempty"`
 	FrontingProviderId                *string                `protobuf:"bytes,49,opt,name=fronting_provider_id,json=frontingProviderId,proto3,oneof" json:"fronting_provider_id,omitempty"`
-	// Removed: optional string network_type = 50;
-	RelayProtocol                  *string  `protobuf:"bytes,51,opt,name=relay_protocol,json=relayProtocol,proto3,oneof" json:"relay_protocol,omitempty"`
-	SshClientVersion               *string  `protobuf:"bytes,52,opt,name=ssh_client_version,json=sshClientVersion,proto3,oneof" json:"ssh_client_version,omitempty"`
-	OsshPrefix                     *string  `protobuf:"bytes,53,opt,name=ossh_prefix,json=osshPrefix,proto3,oneof" json:"ossh_prefix,omitempty"`
-	UserAgent                      *string  `protobuf:"bytes,54,opt,name=user_agent,json=userAgent,proto3,oneof" json:"user_agent,omitempty"`
-	HttpTransform                  *string  `protobuf:"bytes,55,opt,name=http_transform,json=httpTransform,proto3,oneof" json:"http_transform,omitempty"`
-	DnsAttempt                     *int64   `protobuf:"varint,56,opt,name=dns_attempt,json=dnsAttempt,proto3,oneof" json:"dns_attempt,omitempty"`
-	DnsPreferred                   *string  `protobuf:"bytes,57,opt,name=dns_preferred,json=dnsPreferred,proto3,oneof" json:"dns_preferred,omitempty"`
-	DnsPreresolved                 *string  `protobuf:"bytes,58,opt,name=dns_preresolved,json=dnsPreresolved,proto3,oneof" json:"dns_preresolved,omitempty"`
-	DnsQnameMismatches             *int64   `protobuf:"varint,59,opt,name=dns_qname_mismatches,json=dnsQnameMismatches,proto3,oneof" json:"dns_qname_mismatches,omitempty"`
-	DnsQnameRandomCasing           *bool    `protobuf:"varint,60,opt,name=dns_qname_random_casing,json=dnsQnameRandomCasing,proto3,oneof" json:"dns_qname_random_casing,omitempty"`
-	DnsTransform                   *string  `protobuf:"bytes,61,opt,name=dns_transform,json=dnsTransform,proto3,oneof" json:"dns_transform,omitempty"`
-	DownstreamBytesFragmented      *int64   `protobuf:"varint,62,opt,name=downstream_bytes_fragmented,json=downstreamBytesFragmented,proto3,oneof" json:"downstream_bytes_fragmented,omitempty"`
-	DownstreamMaxBytesWritten      *int64   `protobuf:"varint,63,opt,name=downstream_max_bytes_written,json=downstreamMaxBytesWritten,proto3,oneof" json:"downstream_max_bytes_written,omitempty"`
-	DownstreamMaxDelayed           *int64   `protobuf:"varint,64,opt,name=downstream_max_delayed,json=downstreamMaxDelayed,proto3,oneof" json:"downstream_max_delayed,omitempty"`
-	DownstreamMinBytesWritten      *int64   `protobuf:"varint,65,opt,name=downstream_min_bytes_written,json=downstreamMinBytesWritten,proto3,oneof" json:"downstream_min_bytes_written,omitempty"`
-	DownstreamMinDelayed           *int64   `protobuf:"varint,66,opt,name=downstream_min_delayed,json=downstreamMinDelayed,proto3,oneof" json:"downstream_min_delayed,omitempty"`
-	DownstreamOsshPadding          *int64   `protobuf:"varint,67,opt,name=downstream_ossh_padding,json=downstreamOsshPadding,proto3,oneof" json:"downstream_ossh_padding,omitempty"`
-	UpstreamBytesFragmented        *int64   `protobuf:"varint,68,opt,name=upstream_bytes_fragmented,json=upstreamBytesFragmented,proto3,oneof" json:"upstream_bytes_fragmented,omitempty"`
-	UpstreamMaxBytesWritten        *int64   `protobuf:"varint,69,opt,name=upstream_max_bytes_written,json=upstreamMaxBytesWritten,proto3,oneof" json:"upstream_max_bytes_written,omitempty"`
-	UpstreamMaxDelayed             *int64   `protobuf:"varint,70,opt,name=upstream_max_delayed,json=upstreamMaxDelayed,proto3,oneof" json:"upstream_max_delayed,omitempty"`
-	UpstreamMinBytesWritten        *int64   `protobuf:"varint,71,opt,name=upstream_min_bytes_written,json=upstreamMinBytesWritten,proto3,oneof" json:"upstream_min_bytes_written,omitempty"`
-	UpstreamMinDelayed             *int64   `protobuf:"varint,72,opt,name=upstream_min_delayed,json=upstreamMinDelayed,proto3,oneof" json:"upstream_min_delayed,omitempty"`
-	UpstreamOsshPadding            *int64   `protobuf:"varint,73,opt,name=upstream_ossh_padding,json=upstreamOsshPadding,proto3,oneof" json:"upstream_ossh_padding,omitempty"`
-	UpstreamProxyCustomHeaderNames []string `protobuf:"bytes,74,rep,name=upstream_proxy_custom_header_names,json=upstreamProxyCustomHeaderNames,proto3" json:"upstream_proxy_custom_header_names,omitempty"`
-	UpstreamProxyType              *string  `protobuf:"bytes,75,opt,name=upstream_proxy_type,json=upstreamProxyType,proto3,oneof" json:"upstream_proxy_type,omitempty"`
-	PassthroughAddress             *string  `protobuf:"bytes,76,opt,name=passthrough_address,json=passthroughAddress,proto3,oneof" json:"passthrough_address,omitempty"`
-	PadResponse                    *int64   `protobuf:"varint,77,opt,name=pad_response,json=padResponse,proto3,oneof" json:"pad_response,omitempty"`
-	Padding                        *int64   `protobuf:"varint,78,opt,name=padding,proto3,oneof" json:"padding,omitempty"`
-	ClientBpf                      *string  `protobuf:"bytes,79,opt,name=client_bpf,json=clientBpf,proto3,oneof" json:"client_bpf,omitempty"`
-	ServerBpf                      *string  `protobuf:"bytes,80,opt,name=server_bpf,json=serverBpf,proto3,oneof" json:"server_bpf,omitempty"`
-	EstablishedTunnelsCount        *int64   `protobuf:"varint,81,opt,name=established_tunnels_count,json=establishedTunnelsCount,proto3,oneof" json:"established_tunnels_count,omitempty"`
-	NetworkLatencyMultiplier       *float64 `protobuf:"fixed64,82,opt,name=network_latency_multiplier,json=networkLatencyMultiplier,proto3,oneof" json:"network_latency_multiplier,omitempty"`
-	SeedTransform                  *string  `protobuf:"bytes,83,opt,name=seed_transform,json=seedTransform,proto3,oneof" json:"seed_transform,omitempty"`
-	unknownFields                  protoimpl.UnknownFields
-	sizeCache                      protoimpl.SizeCache
+	RelayProtocol                     *string                `protobuf:"bytes,50,opt,name=relay_protocol,json=relayProtocol,proto3,oneof" json:"relay_protocol,omitempty"`
+	SshClientVersion                  *string                `protobuf:"bytes,51,opt,name=ssh_client_version,json=sshClientVersion,proto3,oneof" json:"ssh_client_version,omitempty"`
+	OsshPrefix                        *string                `protobuf:"bytes,52,opt,name=ossh_prefix,json=osshPrefix,proto3,oneof" json:"ossh_prefix,omitempty"`
+	UserAgent                         *string                `protobuf:"bytes,53,opt,name=user_agent,json=userAgent,proto3,oneof" json:"user_agent,omitempty"`
+	HttpTransform                     *string                `protobuf:"bytes,54,opt,name=http_transform,json=httpTransform,proto3,oneof" json:"http_transform,omitempty"`
+	DnsAttempt                        *int64                 `protobuf:"varint,55,opt,name=dns_attempt,json=dnsAttempt,proto3,oneof" json:"dns_attempt,omitempty"`
+	DnsPreferred                      *string                `protobuf:"bytes,56,opt,name=dns_preferred,json=dnsPreferred,proto3,oneof" json:"dns_preferred,omitempty"`
+	DnsPreresolved                    *string                `protobuf:"bytes,57,opt,name=dns_preresolved,json=dnsPreresolved,proto3,oneof" json:"dns_preresolved,omitempty"`
+	DnsQnameMismatches                *int64                 `protobuf:"varint,58,opt,name=dns_qname_mismatches,json=dnsQnameMismatches,proto3,oneof" json:"dns_qname_mismatches,omitempty"`
+	DnsQnameRandomCasing              *bool                  `protobuf:"varint,59,opt,name=dns_qname_random_casing,json=dnsQnameRandomCasing,proto3,oneof" json:"dns_qname_random_casing,omitempty"`
+	DnsTransform                      *string                `protobuf:"bytes,60,opt,name=dns_transform,json=dnsTransform,proto3,oneof" json:"dns_transform,omitempty"`
+	DownstreamBytesFragmented         *int64                 `protobuf:"varint,61,opt,name=downstream_bytes_fragmented,json=downstreamBytesFragmented,proto3,oneof" json:"downstream_bytes_fragmented,omitempty"`
+	DownstreamMaxBytesWritten         *int64                 `protobuf:"varint,62,opt,name=downstream_max_bytes_written,json=downstreamMaxBytesWritten,proto3,oneof" json:"downstream_max_bytes_written,omitempty"`
+	DownstreamMaxDelayed              *int64                 `protobuf:"varint,63,opt,name=downstream_max_delayed,json=downstreamMaxDelayed,proto3,oneof" json:"downstream_max_delayed,omitempty"`
+	DownstreamMinBytesWritten         *int64                 `protobuf:"varint,64,opt,name=downstream_min_bytes_written,json=downstreamMinBytesWritten,proto3,oneof" json:"downstream_min_bytes_written,omitempty"`
+	DownstreamMinDelayed              *int64                 `protobuf:"varint,65,opt,name=downstream_min_delayed,json=downstreamMinDelayed,proto3,oneof" json:"downstream_min_delayed,omitempty"`
+	DownstreamOsshPadding             *int64                 `protobuf:"varint,66,opt,name=downstream_ossh_padding,json=downstreamOsshPadding,proto3,oneof" json:"downstream_ossh_padding,omitempty"`
+	UpstreamBytesFragmented           *int64                 `protobuf:"varint,67,opt,name=upstream_bytes_fragmented,json=upstreamBytesFragmented,proto3,oneof" json:"upstream_bytes_fragmented,omitempty"`
+	UpstreamMaxBytesWritten           *int64                 `protobuf:"varint,68,opt,name=upstream_max_bytes_written,json=upstreamMaxBytesWritten,proto3,oneof" json:"upstream_max_bytes_written,omitempty"`
+	UpstreamMaxDelayed                *int64                 `protobuf:"varint,69,opt,name=upstream_max_delayed,json=upstreamMaxDelayed,proto3,oneof" json:"upstream_max_delayed,omitempty"`
+	UpstreamMinBytesWritten           *int64                 `protobuf:"varint,70,opt,name=upstream_min_bytes_written,json=upstreamMinBytesWritten,proto3,oneof" json:"upstream_min_bytes_written,omitempty"`
+	UpstreamMinDelayed                *int64                 `protobuf:"varint,71,opt,name=upstream_min_delayed,json=upstreamMinDelayed,proto3,oneof" json:"upstream_min_delayed,omitempty"`
+	UpstreamOsshPadding               *int64                 `protobuf:"varint,72,opt,name=upstream_ossh_padding,json=upstreamOsshPadding,proto3,oneof" json:"upstream_ossh_padding,omitempty"`
+	UpstreamProxyCustomHeaderNames    []string               `protobuf:"bytes,73,rep,name=upstream_proxy_custom_header_names,json=upstreamProxyCustomHeaderNames,proto3" json:"upstream_proxy_custom_header_names,omitempty"`
+	UpstreamProxyType                 *string                `protobuf:"bytes,74,opt,name=upstream_proxy_type,json=upstreamProxyType,proto3,oneof" json:"upstream_proxy_type,omitempty"`
+	PassthroughAddress                *string                `protobuf:"bytes,75,opt,name=passthrough_address,json=passthroughAddress,proto3,oneof" json:"passthrough_address,omitempty"`
+	PadResponse                       *int64                 `protobuf:"varint,76,opt,name=pad_response,json=padResponse,proto3,oneof" json:"pad_response,omitempty"`
+	Padding                           *int64                 `protobuf:"varint,77,opt,name=padding,proto3,oneof" json:"padding,omitempty"`
+	ClientBpf                         *string                `protobuf:"bytes,78,opt,name=client_bpf,json=clientBpf,proto3,oneof" json:"client_bpf,omitempty"`
+	ServerBpf                         *string                `protobuf:"bytes,79,opt,name=server_bpf,json=serverBpf,proto3,oneof" json:"server_bpf,omitempty"`
+	EstablishedTunnelsCount           *int64                 `protobuf:"varint,80,opt,name=established_tunnels_count,json=establishedTunnelsCount,proto3,oneof" json:"established_tunnels_count,omitempty"`
+	NetworkLatencyMultiplier          *float64               `protobuf:"fixed64,81,opt,name=network_latency_multiplier,json=networkLatencyMultiplier,proto3,oneof" json:"network_latency_multiplier,omitempty"`
+	SeedTransform                     *string                `protobuf:"bytes,82,opt,name=seed_transform,json=seedTransform,proto3,oneof" json:"seed_transform,omitempty"`
+	unknownFields                     protoimpl.UnknownFields
+	sizeCache                         protoimpl.SizeCache
 }
 
 func (x *DialParams) Reset() {
@@ -776,44 +775,44 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x10dial_port_number\x18/ \x01(\x03H.R\x0edialPortNumber\x88\x01\x01\x12(\n" +
 	"\rdial_duration\x180 \x01(\x03H/R\fdialDuration\x88\x01\x01\x125\n" +
 	"\x14fronting_provider_id\x181 \x01(\tH0R\x12frontingProviderId\x88\x01\x01\x12*\n" +
-	"\x0erelay_protocol\x183 \x01(\tH1R\rrelayProtocol\x88\x01\x01\x121\n" +
-	"\x12ssh_client_version\x184 \x01(\tH2R\x10sshClientVersion\x88\x01\x01\x12$\n" +
-	"\vossh_prefix\x185 \x01(\tH3R\n" +
+	"\x0erelay_protocol\x182 \x01(\tH1R\rrelayProtocol\x88\x01\x01\x121\n" +
+	"\x12ssh_client_version\x183 \x01(\tH2R\x10sshClientVersion\x88\x01\x01\x12$\n" +
+	"\vossh_prefix\x184 \x01(\tH3R\n" +
 	"osshPrefix\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"user_agent\x186 \x01(\tH4R\tuserAgent\x88\x01\x01\x12*\n" +
-	"\x0ehttp_transform\x187 \x01(\tH5R\rhttpTransform\x88\x01\x01\x12$\n" +
-	"\vdns_attempt\x188 \x01(\x03H6R\n" +
+	"user_agent\x185 \x01(\tH4R\tuserAgent\x88\x01\x01\x12*\n" +
+	"\x0ehttp_transform\x186 \x01(\tH5R\rhttpTransform\x88\x01\x01\x12$\n" +
+	"\vdns_attempt\x187 \x01(\x03H6R\n" +
 	"dnsAttempt\x88\x01\x01\x12(\n" +
-	"\rdns_preferred\x189 \x01(\tH7R\fdnsPreferred\x88\x01\x01\x12,\n" +
-	"\x0fdns_preresolved\x18: \x01(\tH8R\x0ednsPreresolved\x88\x01\x01\x125\n" +
-	"\x14dns_qname_mismatches\x18; \x01(\x03H9R\x12dnsQnameMismatches\x88\x01\x01\x12:\n" +
-	"\x17dns_qname_random_casing\x18< \x01(\bH:R\x14dnsQnameRandomCasing\x88\x01\x01\x12(\n" +
-	"\rdns_transform\x18= \x01(\tH;R\fdnsTransform\x88\x01\x01\x12C\n" +
-	"\x1bdownstream_bytes_fragmented\x18> \x01(\x03H<R\x19downstreamBytesFragmented\x88\x01\x01\x12D\n" +
-	"\x1cdownstream_max_bytes_written\x18? \x01(\x03H=R\x19downstreamMaxBytesWritten\x88\x01\x01\x129\n" +
-	"\x16downstream_max_delayed\x18@ \x01(\x03H>R\x14downstreamMaxDelayed\x88\x01\x01\x12D\n" +
-	"\x1cdownstream_min_bytes_written\x18A \x01(\x03H?R\x19downstreamMinBytesWritten\x88\x01\x01\x129\n" +
-	"\x16downstream_min_delayed\x18B \x01(\x03H@R\x14downstreamMinDelayed\x88\x01\x01\x12;\n" +
-	"\x17downstream_ossh_padding\x18C \x01(\x03HAR\x15downstreamOsshPadding\x88\x01\x01\x12?\n" +
-	"\x19upstream_bytes_fragmented\x18D \x01(\x03HBR\x17upstreamBytesFragmented\x88\x01\x01\x12@\n" +
-	"\x1aupstream_max_bytes_written\x18E \x01(\x03HCR\x17upstreamMaxBytesWritten\x88\x01\x01\x125\n" +
-	"\x14upstream_max_delayed\x18F \x01(\x03HDR\x12upstreamMaxDelayed\x88\x01\x01\x12@\n" +
-	"\x1aupstream_min_bytes_written\x18G \x01(\x03HER\x17upstreamMinBytesWritten\x88\x01\x01\x125\n" +
-	"\x14upstream_min_delayed\x18H \x01(\x03HFR\x12upstreamMinDelayed\x88\x01\x01\x127\n" +
-	"\x15upstream_ossh_padding\x18I \x01(\x03HGR\x13upstreamOsshPadding\x88\x01\x01\x12J\n" +
-	"\"upstream_proxy_custom_header_names\x18J \x03(\tR\x1eupstreamProxyCustomHeaderNames\x123\n" +
-	"\x13upstream_proxy_type\x18K \x01(\tHHR\x11upstreamProxyType\x88\x01\x01\x124\n" +
-	"\x13passthrough_address\x18L \x01(\tHIR\x12passthroughAddress\x88\x01\x01\x12&\n" +
-	"\fpad_response\x18M \x01(\x03HJR\vpadResponse\x88\x01\x01\x12\x1d\n" +
-	"\apadding\x18N \x01(\x03HKR\apadding\x88\x01\x01\x12\"\n" +
+	"\rdns_preferred\x188 \x01(\tH7R\fdnsPreferred\x88\x01\x01\x12,\n" +
+	"\x0fdns_preresolved\x189 \x01(\tH8R\x0ednsPreresolved\x88\x01\x01\x125\n" +
+	"\x14dns_qname_mismatches\x18: \x01(\x03H9R\x12dnsQnameMismatches\x88\x01\x01\x12:\n" +
+	"\x17dns_qname_random_casing\x18; \x01(\bH:R\x14dnsQnameRandomCasing\x88\x01\x01\x12(\n" +
+	"\rdns_transform\x18< \x01(\tH;R\fdnsTransform\x88\x01\x01\x12C\n" +
+	"\x1bdownstream_bytes_fragmented\x18= \x01(\x03H<R\x19downstreamBytesFragmented\x88\x01\x01\x12D\n" +
+	"\x1cdownstream_max_bytes_written\x18> \x01(\x03H=R\x19downstreamMaxBytesWritten\x88\x01\x01\x129\n" +
+	"\x16downstream_max_delayed\x18? \x01(\x03H>R\x14downstreamMaxDelayed\x88\x01\x01\x12D\n" +
+	"\x1cdownstream_min_bytes_written\x18@ \x01(\x03H?R\x19downstreamMinBytesWritten\x88\x01\x01\x129\n" +
+	"\x16downstream_min_delayed\x18A \x01(\x03H@R\x14downstreamMinDelayed\x88\x01\x01\x12;\n" +
+	"\x17downstream_ossh_padding\x18B \x01(\x03HAR\x15downstreamOsshPadding\x88\x01\x01\x12?\n" +
+	"\x19upstream_bytes_fragmented\x18C \x01(\x03HBR\x17upstreamBytesFragmented\x88\x01\x01\x12@\n" +
+	"\x1aupstream_max_bytes_written\x18D \x01(\x03HCR\x17upstreamMaxBytesWritten\x88\x01\x01\x125\n" +
+	"\x14upstream_max_delayed\x18E \x01(\x03HDR\x12upstreamMaxDelayed\x88\x01\x01\x12@\n" +
+	"\x1aupstream_min_bytes_written\x18F \x01(\x03HER\x17upstreamMinBytesWritten\x88\x01\x01\x125\n" +
+	"\x14upstream_min_delayed\x18G \x01(\x03HFR\x12upstreamMinDelayed\x88\x01\x01\x127\n" +
+	"\x15upstream_ossh_padding\x18H \x01(\x03HGR\x13upstreamOsshPadding\x88\x01\x01\x12J\n" +
+	"\"upstream_proxy_custom_header_names\x18I \x03(\tR\x1eupstreamProxyCustomHeaderNames\x123\n" +
+	"\x13upstream_proxy_type\x18J \x01(\tHHR\x11upstreamProxyType\x88\x01\x01\x124\n" +
+	"\x13passthrough_address\x18K \x01(\tHIR\x12passthroughAddress\x88\x01\x01\x12&\n" +
+	"\fpad_response\x18L \x01(\x03HJR\vpadResponse\x88\x01\x01\x12\x1d\n" +
+	"\apadding\x18M \x01(\x03HKR\apadding\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"client_bpf\x18O \x01(\tHLR\tclientBpf\x88\x01\x01\x12\"\n" +
+	"client_bpf\x18N \x01(\tHLR\tclientBpf\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"server_bpf\x18P \x01(\tHMR\tserverBpf\x88\x01\x01\x12?\n" +
-	"\x19established_tunnels_count\x18Q \x01(\x03HNR\x17establishedTunnelsCount\x88\x01\x01\x12A\n" +
-	"\x1anetwork_latency_multiplier\x18R \x01(\x01HOR\x18networkLatencyMultiplier\x88\x01\x01\x12*\n" +
-	"\x0eseed_transform\x18S \x01(\tHPR\rseedTransform\x88\x01\x01B\x11\n" +
+	"server_bpf\x18O \x01(\tHMR\tserverBpf\x88\x01\x01\x12?\n" +
+	"\x19established_tunnels_count\x18P \x01(\x03HNR\x17establishedTunnelsCount\x88\x01\x01\x12A\n" +
+	"\x1anetwork_latency_multiplier\x18Q \x01(\x01HOR\x18networkLatencyMultiplier\x88\x01\x01\x12*\n" +
+	"\x0eseed_transform\x18R \x01(\tHPR\rseedTransform\x88\x01\x01B\x11\n" +
 	"\x0f_conjure_cachedB\x10\n" +
 	"\x0e_conjure_delayB\x17\n" +
 	"\x15_conjure_empty_packetB\x12\n" +
