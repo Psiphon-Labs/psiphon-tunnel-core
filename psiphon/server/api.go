@@ -1183,6 +1183,7 @@ const (
 	requestParamLogFlagAsBool                                 = 1 << 7
 	requestParamLogOnlyForFrontedMeekOrConjure                = 1 << 8
 	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 9
+	requestParamLogOmittedFlagAsFalse                         = 1 << 10
 )
 
 // baseParams are the basic request parameters that are expected for all API
@@ -1233,7 +1234,9 @@ var baseDialParams = []requestParamSpec{
 	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
 	{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
+	{"replay_ignored_change", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
+	{"dsl_prioritized", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
 	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
@@ -1531,9 +1534,10 @@ func getRequestLogFields(
 		value := params[expectedParam.name]
 		if value == nil {
 
-			// Special case: older clients don't send this value,
-			// so log a default.
-			if expectedParam.name == "tunnel_whole_device" {
+			// Provide a "false" default for specified, omitted boolean flag params.
+
+			if expectedParam.flags&requestParamLogFlagAsBool != 0 &&
+				expectedParam.flags&requestParamLogOmittedFlagAsFalse != 0 {
 				value = "0"
 			} else {
 				// Skip omitted, optional params

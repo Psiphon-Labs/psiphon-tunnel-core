@@ -841,8 +841,10 @@ func init() {
 		// Specs: server.baseDialParams
 
 		{169, "server_entry_count", intConverter},
+		{170, "replay_ignored_change", intConverter},
+		{171, "dsl_prioritized", intConverter},
 
-		// Next key value = 170
+		// Next key value = 172
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

@@ -90,4 +90,6 @@ message DialParams {
     optional double network_latency_multiplier = 81;
     optional string seed_transform = 82;
     optional int64 server_entry_count = 83;
+    optional bool replay_ignored_change = 84;
+    optional bool dsl_prioritized = 85;
 }

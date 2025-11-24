@@ -1282,11 +1282,21 @@ func getBaseAPIParameters(
 			params["quic_disable_client_path_mtu_discovery"] = "1"
 		}
 
-		isReplay := "0"
+		// The server will log a default false value for is_replay,
+		// replay_ignored_change, and dsl_prioritized when omitted. Omitting
+		// reduces the handshake parameter size in common cases.
+
 		if dialParams.IsReplay {
-			isReplay = "1"
+			params["is_replay"] = "1"
 		}
-		params["is_replay"] = isReplay
+
+		if dialParams.ReplayIgnoredChange {
+			params["replay_ignored_change"] = "1"
+		}
+
+		if dialParams.DSLPrioritizedDial {
+			params["dsl_prioritized"] = "1"
+		}
 
 		// dialParams.DialDuration is nanoseconds; report milliseconds
 		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/time.Millisecond)

@@ -107,6 +107,8 @@ type DialParams struct {
 	NetworkLatencyMultiplier          *float64               `protobuf:"fixed64,81,opt,name=network_latency_multiplier,json=networkLatencyMultiplier,proto3,oneof" json:"network_latency_multiplier,omitempty"`
 	SeedTransform                     *string                `protobuf:"bytes,82,opt,name=seed_transform,json=seedTransform,proto3,oneof" json:"seed_transform,omitempty"`
 	ServerEntryCount                  *int64                 `protobuf:"varint,83,opt,name=server_entry_count,json=serverEntryCount,proto3,oneof" json:"server_entry_count,omitempty"`
+	ReplayIgnoredChange               *bool                  `protobuf:"varint,84,opt,name=replay_ignored_change,json=replayIgnoredChange,proto3,oneof" json:"replay_ignored_change,omitempty"`
+	DslPrioritized                    *bool                  `protobuf:"varint,85,opt,name=dsl_prioritized,json=dslPrioritized,proto3,oneof" json:"dsl_prioritized,omitempty"`
 	unknownFields                     protoimpl.UnknownFields
 	sizeCache                         protoimpl.SizeCache
 }
@@ -722,11 +724,25 @@ func (x *DialParams) GetServerEntryCount() int64 {
 	return 0
 }
 
+func (x *DialParams) GetReplayIgnoredChange() bool {
+	if x != nil && x.ReplayIgnoredChange != nil {
+		return *x.ReplayIgnoredChange
+	}
+	return false
+}
+
+func (x *DialParams) GetDslPrioritized() bool {
+	if x != nil && x.DslPrioritized != nil {
+		return *x.DslPrioritized
+	}
+	return false
+}
+
 var File_ca_psiphon_psiphond_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xfc0\n" +
+	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\x912\n" +
 	"\n" +
 	"DialParams\x12*\n" +
 	"\x0econjure_cached\x18\x01 \x01(\bH\x00R\rconjureCached\x88\x01\x01\x12(\n" +
@@ -821,7 +837,9 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x19established_tunnels_count\x18P \x01(\x03HNR\x17establishedTunnelsCount\x88\x01\x01\x12A\n" +
 	"\x1anetwork_latency_multiplier\x18Q \x01(\x01HOR\x18networkLatencyMultiplier\x88\x01\x01\x12*\n" +
 	"\x0eseed_transform\x18R \x01(\tHPR\rseedTransform\x88\x01\x01\x121\n" +
-	"\x12server_entry_count\x18S \x01(\x03HQR\x10serverEntryCount\x88\x01\x01B\x11\n" +
+	"\x12server_entry_count\x18S \x01(\x03HQR\x10serverEntryCount\x88\x01\x01\x127\n" +
+	"\x15replay_ignored_change\x18T \x01(\bHRR\x13replayIgnoredChange\x88\x01\x01\x12,\n" +
+	"\x0fdsl_prioritized\x18U \x01(\bHSR\x0edslPrioritized\x88\x01\x01B\x11\n" +
 	"\x0f_conjure_cachedB\x10\n" +
 	"\x0e_conjure_delayB\x17\n" +
 	"\x15_conjure_empty_packetB\x12\n" +
@@ -905,7 +923,9 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x1a_established_tunnels_countB\x1d\n" +
 	"\x1b_network_latency_multiplierB\x11\n" +
 	"\x0f_seed_transformB\x15\n" +
-	"\x13_server_entry_countBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x13_server_entry_countB\x18\n" +
+	"\x16_replay_ignored_changeB\x12\n" +
+	"\x10_dsl_prioritizedBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_dial_params_proto_rawDescOnce sync.Once

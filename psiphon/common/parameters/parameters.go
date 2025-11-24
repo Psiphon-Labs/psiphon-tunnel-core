@@ -226,7 +226,7 @@ const (
 	ReplayTargetTunnelDuration                         = "ReplayTargetTunnelDuration"
 	ReplayLaterRoundMoveToFrontProbability             = "ReplayLaterRoundMoveToFrontProbability"
 	ReplayRetainFailedProbability                      = "ReplayRetainFailedProbability"
-	ReplayIgnoreChangedConfigState                     = "ReplayIgnoreChangedConfigState"
+	ReplayIgnoreChangedConfigStateProbability          = "ReplayIgnoreChangedConfigStateProbability"
 	ReplayBPF                                          = "ReplayBPF"
 	ReplaySSH                                          = "ReplaySSH"
 	ReplayObfuscatorPadding                            = "ReplayObfuscatorPadding"
@@ -554,12 +554,15 @@ const (
 	DSLFetcherGetLastActiveOSLsTTL                     = "DSLFetcherGetLastActiveOSLsTTL"
 	DSLFetcherGetOSLFileSpecsMinCount                  = "DSLFetcherGetOSLFileSpecsMinCount"
 	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
+	DSLPrioritizeDialNewServerEntryProbability         = "DSLPrioritizeDialNewServerEntryProbability"
+	DSLPrioritizeDialExistingServerEntryProbability    = "DSLPrioritizeDialExistingServerEntryProbability"
 
 	// Retired parameters
 
 	ReplayRandomizedTLSProfile                = "ReplayRandomizedTLSProfile"
 	InproxyAllBrokerPublicKeys                = "InproxyAllBrokerPublicKeys"
 	InproxyTunnelProtocolSelectionProbability = "InproxyTunnelProtocolSelectionProbability"
+	ReplayIgnoreChangedConfigState            = "ReplayIgnoreChangedConfigState"
 )
 
 const (
@@ -794,38 +797,39 @@ var defaultParameters = map[string]struct {
 	LivenessTestMinDownstreamBytes: {value: 0, minimum: 0},
 	LivenessTestMaxDownstreamBytes: {value: 0, minimum: 0},
 
-	ReplayCandidateCount:                   {value: 10, minimum: -1},
-	ReplayDialParametersTTL:                {value: 24 * time.Hour, minimum: time.Duration(0)},
-	ReplayTargetUpstreamBytes:              {value: 0, minimum: 0},
-	ReplayTargetDownstreamBytes:            {value: 0, minimum: 0},
-	ReplayTargetTunnelDuration:             {value: 1 * time.Second, minimum: time.Duration(0)},
-	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
-	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
-	ReplayIgnoreChangedConfigState:         {value: false},
-	ReplayBPF:                              {value: true},
-	ReplaySSH:                              {value: true},
-	ReplayObfuscatorPadding:                {value: true},
-	ReplayFragmentor:                       {value: true},
-	ReplayTLSProfile:                       {value: true},
-	ReplayFronting:                         {value: true},
-	ReplayHostname:                         {value: true},
-	ReplayQUICVersion:                      {value: true},
-	ReplayObfuscatedQUIC:                   {value: true},
-	ReplayObfuscatedQUICNonceTransformer:   {value: true},
-	ReplayConjureRegistration:              {value: true},
-	ReplayConjureTransport:                 {value: true},
-	ReplayLivenessTest:                     {value: true},
-	ReplayUserAgent:                        {value: true},
-	ReplayAPIRequestPadding:                {value: true},
-	ReplayHoldOffTunnel:                    {value: true},
-	ReplayResolveParameters:                {value: true},
-	ReplayHTTPTransformerParameters:        {value: true},
-	ReplayOSSHSeedTransformerParameters:    {value: true},
-	ReplayOSSHPrefix:                       {value: true},
-	ReplayShadowsocksPrefix:                {value: true},
-	ReplayTLSFragmentClientHello:           {value: true},
-	ReplayInproxyWebRTC:                    {value: true},
-	ReplayInproxySTUN:                      {value: true},
+	ReplayCandidateCount:                      {value: 10, minimum: -1},
+	ReplayDialParametersTTL:                   {value: 24 * time.Hour, minimum: time.Duration(0)},
+	ReplayTargetUpstreamBytes:                 {value: 0, minimum: 0},
+	ReplayTargetDownstreamBytes:               {value: 0, minimum: 0},
+	ReplayTargetTunnelDuration:                {value: 1 * time.Second, minimum: time.Duration(0)},
+	ReplayLaterRoundMoveToFrontProbability:    {value: 0.0, minimum: 0.0},
+	ReplayRetainFailedProbability:             {value: 0.5, minimum: 0.0},
+	ReplayIgnoreChangedConfigState:            {value: false},
+	ReplayIgnoreChangedConfigStateProbability: {value: 0.0, minimum: 0.0},
+	ReplayBPF:                            {value: true},
+	ReplaySSH:                            {value: true},
+	ReplayObfuscatorPadding:              {value: true},
+	ReplayFragmentor:                     {value: true},
+	ReplayTLSProfile:                     {value: true},
+	ReplayFronting:                       {value: true},
+	ReplayHostname:                       {value: true},
+	ReplayQUICVersion:                    {value: true},
+	ReplayObfuscatedQUIC:                 {value: true},
+	ReplayObfuscatedQUICNonceTransformer: {value: true},
+	ReplayConjureRegistration:            {value: true},
+	ReplayConjureTransport:               {value: true},
+	ReplayLivenessTest:                   {value: true},
+	ReplayUserAgent:                      {value: true},
+	ReplayAPIRequestPadding:              {value: true},
+	ReplayHoldOffTunnel:                  {value: true},
+	ReplayResolveParameters:              {value: true},
+	ReplayHTTPTransformerParameters:      {value: true},
+	ReplayOSSHSeedTransformerParameters:  {value: true},
+	ReplayOSSHPrefix:                     {value: true},
+	ReplayShadowsocksPrefix:              {value: true},
+	ReplayTLSFragmentClientHello:         {value: true},
+	ReplayInproxyWebRTC:                  {value: true},
+	ReplayInproxySTUN:                    {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -1182,6 +1186,8 @@ var defaultParameters = map[string]struct {
 	DSLFetcherGetLastActiveOSLsTTL:                    {value: 24 * time.Hour, minimum: time.Duration(0)},
 	DSLFetcherGetOSLFileSpecsMinCount:                 {value: 1, minimum: 0},
 	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
+	DSLPrioritizeDialNewServerEntryProbability:        {value: 0.5, minimum: 0.0},
+	DSLPrioritizeDialExistingServerEntryProbability:   {value: 0.25, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

@@ -77,10 +77,17 @@ func (tag ServerEntryTag) String() string {
 	return base64.StdEncoding.EncodeToString(tag)
 }
 
-// VersionedServerEntryTag is a server entry tag and version pair.
+// VersionedServerEntryTag is a server entry tag and version pair returned in
+// DiscoverServerEntriesResponse. When the client already has a server entry
+// for the specified tag, the client uses the version field to determine
+// whether the server entry needs to be updated. In addition, this return
+// value includes a PrioritizeDial hint, from the DSL backend, that the
+// server entry is expected to be effective for the client and the client
+// should prioritize the server in establishment scheduling.
 type VersionedServerEntryTag struct {
-	Tag     ServerEntryTag `cbor:"1,keyasint,omitempty"`
-	Version int32          `cbor:"2,keyasint,omitempty"`
+	Tag            ServerEntryTag `cbor:"1,keyasint,omitempty"`
+	Version        int32          `cbor:"2,keyasint,omitempty"`
+	PrioritizeDial bool           `cbor:"3,keyasint,omitempty"`
 }
 
 // DiscoverServerEntriesResponse is the set of server entries revealed to the
@@ -109,8 +116,8 @@ type SourcedServerEntry struct {
 
 // GetServerEntriesResponse includes the list of server entries requested by
 // the client. Each requested tag has a corresponding entry in
-// SourcedServerEntries. When a requested tag is no longer available for
-// distribution, there is a nil/empty entry.
+// SourcedServerEntries, in requested order. When a requested tag is no
+// longer available for distribution, there is a nil/empty entry.
 type GetServerEntriesResponse struct {
 	SourcedServerEntries []*SourcedServerEntry `cbor:"1,keyasint,omitempty"`
 }

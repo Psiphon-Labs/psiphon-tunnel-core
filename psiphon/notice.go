@@ -489,6 +489,8 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 		"region", dialParams.ServerEntry.Region,
 		"protocol", dialParams.TunnelProtocol,
 		"isReplay", dialParams.IsReplay,
+		"replayIgnoredChange", dialParams.ReplayIgnoredChange,
+		"DSLPrioritized", dialParams.DSLPrioritizedDial,
 		"candidateNumber", dialParams.CandidateNumber,
 		"establishedTunnelsCount", dialParams.EstablishedTunnelsCount,
 		"networkType", dialParams.GetNetworkType(),
