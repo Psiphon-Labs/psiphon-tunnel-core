@@ -3671,6 +3671,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		sshClient.handshakeState.apiParams,
 		serverTunnelStatParams)
 
+	sshClient.sshServer.support.Config.AddServerEntryTag(logFields)
+
 	logFields["tunnel_id"] = base64.RawURLEncoding.EncodeToString(prng.Bytes(protocol.PSIPHON_API_TUNNEL_ID_LENGTH))
 
 	if sshClient.isInproxyTunnelProtocol {
@@ -4299,8 +4301,6 @@ func (sshClient *sshClient) setHandshakeState(
 		if ok && sessionID != sshClient.sessionID {
 
 			logFields := LogFields{
-				"event_name":                 "irregular_tunnel",
-				"tunnel_error":               "duplicate active authorization",
 				"duplicate_authorization_id": authorizationID,
 			}
 
@@ -4314,7 +4314,14 @@ func (sshClient *sshClient) setHandshakeState(
 			if duplicateClientGeoIPData != sshClient.getClientGeoIPData() {
 				duplicateClientGeoIPData.SetClientLogFieldsWithPrefix("duplicate_authorization_", logFields)
 			}
-			log.LogRawFieldsWithTimestamp(logFields)
+
+			logIrregularTunnel(
+				sshClient.sshServer.support,
+				"", // tunnel protocol is not relevant to authorizations
+				0,
+				"", // GeoIP data is added above
+				errors.TraceNew("duplicate active authorization"),
+				logFields)
 
 			// Invoke asynchronously to avoid deadlocks.
 			// TODO: invoke only once for each distinct sessionID?

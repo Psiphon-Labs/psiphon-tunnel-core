@@ -31,7 +31,6 @@ import (
 	"os"
 	"slices"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -586,6 +585,7 @@ type Config struct {
 	providerID                                     string
 	frontingProviderID                             string
 	region                                         string
+	serverEntryTag                                 string
 	runningProtocols                               []string
 	runningOnlyInproxyBroker                       bool
 }
@@ -670,6 +670,18 @@ func (config *Config) GetFrontingProviderID() string {
 // GetRegion returns the region associated with the server.
 func (config *Config) GetRegion() string {
 	return config.region
+}
+
+// GetServerEntryTag adds a log field for the server entry tag associated with
+// the server.
+//
+// Limitation: for servers with more than one entry in OwnEncodedServerEntries,
+// the server entry tag for a given tunnel cannot be determined unambiguously
+// and no tag is added to the log fields.
+func (config *Config) AddServerEntryTag(logFields LogFields) {
+	if config.serverEntryTag != "" {
+		logFields["server_entry_tag"] = config.serverEntryTag
+	}
 }
 
 // GetRunningProtocols returns the list of protcols this server is running.
@@ -934,6 +946,9 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		} else if config.region != serverEntry.Region {
 			return nil, errors.Tracef("unsupported multiple Region values")
 		}
+		if len(config.OwnEncodedServerEntries) == 1 {
+			config.serverEntryTag = serverEntry.GetTag()
+		}
 	}
 
 	return &config, nil
@@ -980,6 +995,8 @@ type GenerateConfigParams struct {
 	LimitQUICVersions                  protocol.QUICVersions
 	EnableGQUIC                        bool
 	FrontingProviderID                 string
+	ProviderID                         string
+	Region                             string
 }
 
 // GenerateConfig creates a new Psiphon server config. It returns JSON encoded
@@ -1212,11 +1229,6 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		InproxyServerObfuscationRootSecret: inproxyServerObfuscationRootSecret,
 	}
 
-	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
-	if err != nil {
-		return nil, nil, nil, nil, nil, errors.Trace(err)
-	}
-
 	intPtr := func(i int) *int {
 		return &i
 	}
@@ -1406,8 +1418,8 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 		LimitQUICVersions:                   params.LimitQUICVersions,
 		SshObfuscatedKey:                    obfuscatedSSHKey,
 		Capabilities:                        capabilities,
-		Region:                              "US",
-		ProviderID:                          strings.ToUpper(prng.HexString(8)),
+		Region:                              params.Region,
+		ProviderID:                          params.ProviderID,
 		FrontingProviderID:                  frontingProviderID,
 		MeekServerPort:                      meekPort,
 		MeekCookieEncryptionPublicKey:       meekCookieEncryptionPublicKey,
@@ -1451,6 +1463,17 @@ func GenerateConfig(params *GenerateConfigParams) ([]byte, []byte, []byte, []byt
 	}
 
 	encodedServerEntry, err := protocol.EncodeServerEntry(serverEntry)
+	if err != nil {
+		return nil, nil, nil, nil, nil, errors.Trace(err)
+	}
+
+	// Add encoded server entry to server config
+
+	config.OwnEncodedServerEntries = map[string]string{
+		serverEntry.GetTag(): encodedServerEntry,
+	}
+
+	encodedConfig, err := json.MarshalIndent(config, "\n", "    ")
 	if err != nil {
 		return nil, nil, nil, nil, nil, errors.Trace(err)
 	}

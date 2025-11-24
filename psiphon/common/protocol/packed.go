@@ -838,7 +838,11 @@ func init() {
 
 		{168, "psiphon_api_response_version", intConverter},
 
-		// Next key value = 169
+		// Specs: server.baseDialParams
+
+		{169, "server_entry_count", intConverter},
+
+		// Next key value = 170
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

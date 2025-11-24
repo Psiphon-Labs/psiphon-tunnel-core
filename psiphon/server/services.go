@@ -513,6 +513,8 @@ func logServerLoad(
 
 	serverLoad["event_name"] = "server_load"
 
+	support.Config.AddServerEntryTag(serverLoad)
+
 	if logNetworkBytes {
 
 		// Negative values, which may occur due to counter wrap arounds, are
@@ -580,13 +582,20 @@ func logIrregularTunnel(
 	}
 
 	logFields["event_name"] = "irregular_tunnel"
-	logFields["listener_protocol"] = listenerTunnelProtocol
-	logFields["listener_port_number"] = listenerPort
+	support.Config.AddServerEntryTag(logFields)
+
 	logFields["tunnel_error"] = tunnelError.Error()
 
-	// Note: logging with the "client_" prefix for legacy compatibility; it
-	// would be more correct to use the prefix "peer_".
-	support.GeoIPService.Lookup(peerIP).SetClientLogFields(logFields)
+	if listenerTunnelProtocol != "" {
+		logFields["listener_protocol"] = listenerTunnelProtocol
+		logFields["listener_port_number"] = listenerPort
+	}
+
+	if peerIP != "" {
+		// Note: logging with the "client_" prefix for legacy compatibility; it
+		// would be more correct to use the prefix "peer_".
+		support.GeoIPService.Lookup(peerIP).SetClientLogFields(logFields)
+	}
 
 	log.LogRawFieldsWithTimestamp(logFields)
 }

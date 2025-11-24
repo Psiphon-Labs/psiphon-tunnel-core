@@ -847,6 +847,7 @@ var (
 	testClientPlatform                   = "Android_10_com.test.app"
 	testClientFeatures                   = []string{"feature 1", "feature 2"}
 	testDeviceRegion                     = "US"
+	testServerRegion                     = "US"
 	testDeviceLocation                   = "gzzzz"
 	testDisallowedTrafficAlertActionURLs = []string{"https://example.org/disallowed"}
 	testHostID                           = "example-host-id"
@@ -1025,6 +1026,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		Passthrough:                        runConfig.passthrough,
 		LimitQUICVersions:                  limitQUICVersions,
 		EnableGQUIC:                        !runConfig.limitQUICVersions,
+		ProviderID:                         strings.ToUpper(prng.HexString(8)),
+		Region:                             testServerRegion,
 	}
 
 	if doServerTactics {
@@ -1126,7 +1129,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			"classic",
 			enableDSLFetcher,
 			inproxyTacticsParametersJSON,
-			runConfig.doRestrictInproxy)
+			runConfig.doRestrictInproxy,
+			generateConfigParams.ProviderID)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -1567,7 +1571,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				"consistent",
 				enableDSLFetcher,
 				inproxyTacticsParametersJSON,
-				runConfig.doRestrictInproxy)
+				runConfig.doRestrictInproxy,
+				generateConfigParams.ProviderID)
 		}
 
 		p, _ := os.FindProcess(os.Getpid())
@@ -2156,7 +2161,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			"consistent",
 			enableDSLFetcher,
 			inproxyTacticsParametersJSON,
-			runConfig.doRestrictInproxy)
+			runConfig.doRestrictInproxy,
+			generateConfigParams.ProviderID)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -2340,6 +2346,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectMeekHTTPVersion = "HTTP/1.1"
 		}
 	}
+	expectServerEntryCount := 0
+	if doDSL || runConfig.doPruneServerEntries {
+		expectServerEntryCount = protocol.ServerEntryCountRoundingIncrement
+	}
 
 	// The client still reports zero domain_bytes when no port forwards are
 	// allowed (expectTrafficFailure).
@@ -2375,6 +2385,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			passthroughAddress,
 			expectMeekHTTPVersion,
 			expectCheckServerEntryPruneCount,
+			expectServerEntryCount,
 			inproxyTestConfig,
 			logFields)
 		if err != nil {
@@ -2968,6 +2979,7 @@ func checkExpectedServerTunnelLogFields(
 	expectPassthroughAddress *string,
 	expectMeekHTTPVersion string,
 	expectCheckServerEntryPruneCount int,
+	expectServerEntryCount int,
 	inproxyTestConfig *inproxyTestConfig,
 	fields map[string]interface{}) error {
 
@@ -2979,6 +2991,7 @@ func checkExpectedServerTunnelLogFields(
 
 	for _, name := range []string{
 		"host_id",
+		"server_entry_tag",
 		"tunnel_id",
 		"start_time",
 		"duration",
@@ -3008,6 +3021,7 @@ func checkExpectedServerTunnelLogFields(
 		"bytes",
 		"ssh_protocol_bytes",
 		"ssh_protocol_bytes_overhead",
+		"server_entry_count",
 
 		// The test run ensures that logServerLoad is invoked while the client
 		// is connected, so the following must be logged.
@@ -3017,14 +3031,6 @@ func checkExpectedServerTunnelLogFields(
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
 		}
-	}
-
-	if !(fields["ssh_protocol_bytes"].(float64) > 0) {
-		return fmt.Errorf("unexpected zero ssh_protocol_bytes")
-	}
-
-	if !(fields["ssh_protocol_bytes"].(float64) > fields["bytes"].(float64)) {
-		return fmt.Errorf("unexpected ssh_protocol_bytes < bytes")
 	}
 
 	appliedTacticsTag := len(fields[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME].(string)) > 0
@@ -3080,6 +3086,19 @@ func checkExpectedServerTunnelLogFields(
 
 	if fields["network_type"].(string) != testNetworkType {
 		return fmt.Errorf("unexpected network_type '%s'", fields["network_type"])
+	}
+
+	if !(fields["ssh_protocol_bytes"].(float64) > 0) {
+		return fmt.Errorf("unexpected zero ssh_protocol_bytes")
+	}
+
+	if !(fields["ssh_protocol_bytes"].(float64) > fields["bytes"].(float64)) {
+		return fmt.Errorf("unexpected ssh_protocol_bytes < bytes")
+	}
+
+	if fields["server_entry_count"].(float64) != float64(expectServerEntryCount) {
+		return fmt.Errorf("unexpected server_entry_count: '%d'",
+			int(fields["server_entry_count"].(float64)))
 	}
 
 	// With interruptions, timeouts, and retries in some tests, there may be
@@ -4371,7 +4390,8 @@ func paveTacticsConfigFile(
 	discoveryStategy string,
 	enableDSLFetcher string,
 	inproxyParametersJSON string,
-	doRestrictAllInproxyProviderRegions bool) {
+	doRestrictAllInproxyProviderRegions bool,
+	providerID string) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -4502,10 +4522,10 @@ func paveTacticsConfigFile(
 
 	restrictInproxyParameters := ""
 	if doRestrictAllInproxyProviderRegions {
-		restrictInproxyParameters = `
-		"RestrictInproxyProviderRegions": {"" : [""]},
+		restrictInproxyParameters = fmt.Sprintf(`
+		"RestrictInproxyProviderRegions": {"%s" : ["%s"]},
 		"RestrictInproxyProviderIDsServerProbability": 1.0,
-	`
+	`, providerID, testServerRegion)
 	}
 
 	tacticsConfigJSON := fmt.Sprintf(

@@ -1276,6 +1276,7 @@ var baseDialParams = []requestParamSpec{
 	{"quic_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"quic_dial_early", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"quic_obfuscated_psk", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"server_entry_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 var inproxyDialParams = []requestParamSpec{
