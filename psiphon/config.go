@@ -848,14 +848,14 @@ type Config struct {
 	LivenessTestMaxDownstreamBytes *int                         `json:",omitempty"`
 
 	// ReplayCandidateCount and other Replay fields are for testing purposes.
-	ReplayCandidateCount                   *int     `json:",omitempty"`
-	ReplayDialParametersTTLSeconds         *int     `json:",omitempty"`
-	ReplayTargetUpstreamBytes              *int     `json:",omitempty"`
-	ReplayTargetDownstreamBytes            *int     `json:",omitempty"`
-	ReplayTargetTunnelDurationSeconds      *int     `json:",omitempty"`
-	ReplayLaterRoundMoveToFrontProbability *float64 `json:",omitempty"`
-	ReplayRetainFailedProbability          *float64 `json:",omitempty"`
-	ReplayIgnoreChangedConfigState         *bool    `json:",omitempty"`
+	ReplayCandidateCount                      *int     `json:",omitempty"`
+	ReplayDialParametersTTLSeconds            *int     `json:",omitempty"`
+	ReplayTargetUpstreamBytes                 *int     `json:",omitempty"`
+	ReplayTargetDownstreamBytes               *int     `json:",omitempty"`
+	ReplayTargetTunnelDurationSeconds         *int     `json:",omitempty"`
+	ReplayLaterRoundMoveToFrontProbability    *float64 `json:",omitempty"`
+	ReplayRetainFailedProbability             *float64 `json:",omitempty"`
+	ReplayIgnoreChangedConfigStateProbability *float64 `json:",omitempty"`
 
 	// NetworkLatencyMultiplierMin and other NetworkLatencyMultiplier fields are
 	// for testing purposes.
@@ -2193,8 +2193,8 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ReplayRetainFailedProbability] = *config.ReplayRetainFailedProbability
 	}
 
-	if config.ReplayIgnoreChangedConfigState != nil {
-		applyParameters[parameters.ReplayIgnoreChangedConfigState] = *config.ReplayIgnoreChangedConfigState
+	if config.ReplayIgnoreChangedConfigStateProbability != nil {
+		applyParameters[parameters.ReplayIgnoreChangedConfigStateProbability] = *config.ReplayIgnoreChangedConfigStateProbability
 	}
 
 	if config.UseOnlyCustomTLSProfiles != nil {

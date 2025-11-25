@@ -28,6 +28,7 @@ import (
 	"os"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -279,6 +280,40 @@ func testDSLs(testConfig *testConfig) error {
 
 	// TODO: exercise BaseAPIParameters?
 
+	var unexpectedServerEntrySource atomic.Int32
+	var unexpectedServerEntryPrioritizeDial atomic.Int32
+
+	datastoreHasServerEntryWithCheck := func(
+		tag ServerEntryTag,
+		version int,
+		prioritizeDial bool) bool {
+
+		_, expectedPrioritizeDial, err := backend.GetServerEntryProperties(tag.String())
+		if err != nil || prioritizeDial != expectedPrioritizeDial {
+			unexpectedServerEntryPrioritizeDial.Store(1)
+		}
+		return dslClient.DatastoreHasServerEntry(tag, version)
+	}
+
+	datastoreStoreServerEntryWithCheck := func(
+		packedServerEntryFields protocol.PackedServerEntryFields,
+		source string,
+		prioritizeDial bool) error {
+
+		serverEntryFields, _ := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
+		tag := serverEntryFields.GetTag()
+
+		expectedSource, expectedPrioritizeDial, err := backend.GetServerEntryProperties(tag)
+		if err != nil || prioritizeDial != expectedPrioritizeDial {
+			unexpectedServerEntryPrioritizeDial.Store(1)
+		}
+		if err != nil || source != expectedSource {
+			unexpectedServerEntrySource.Store(1)
+		}
+		return errors.Trace(
+			dslClient.DatastoreStoreServerEntry(packedServerEntryFields, source))
+	}
+
 	fetcherConfig := &FetcherConfig{
 		Logger: testutils.NewTestLoggerWithComponent("fetcher"),
 
@@ -288,8 +323,8 @@ func testDSLs(testConfig *testConfig) error {
 		DatastoreSetLastFetchTime:      dslClient.DatastoreSetLastFetchTime,
 		DatastoreGetLastActiveOSLsTime: dslClient.DatastoreGetLastActiveOSLsTime,
 		DatastoreSetLastActiveOSLsTime: dslClient.DatastoreSetLastActiveOSLsTime,
-		DatastoreHasServerEntry:        dslClient.DatastoreHasServerEntry,
-		DatastoreStoreServerEntry:      dslClient.DatastoreStoreServerEntry,
+		DatastoreHasServerEntry:        datastoreHasServerEntryWithCheck,
+		DatastoreStoreServerEntry:      datastoreStoreServerEntryWithCheck,
 		DatastoreKnownOSLIDs:           dslClient.DatastoreKnownOSLIDs,
 		DatastoreGetOSLState:           dslClient.DatastoreGetOSLState,
 		DatastoreStoreOSLState:         dslClient.DatastoreStoreOSLState,
@@ -437,6 +472,14 @@ func testDSLs(testConfig *testConfig) error {
 	err = relayLogger.CheckMetrics(expectValidMetric)
 	if err != nil {
 		return errors.Trace(err)
+	}
+
+	if unexpectedServerEntrySource.Load() != 0 {
+		return errors.TraceNew("unexpected server entry source")
+	}
+
+	if unexpectedServerEntryPrioritizeDial.Load() != 0 {
+		return errors.TraceNew("unexpected server entry prioritize dial")
 	}
 
 	return nil

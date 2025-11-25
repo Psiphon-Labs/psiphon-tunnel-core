@@ -313,6 +313,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("unexpected replay")
 	}
 
+	if dialParams.ReplayIgnoredChange {
+		t.Fatalf("unexpected replay ignored change")
+	}
+
 	// Test: no replay after network ID changes
 
 	dialParams.Succeeded()
@@ -334,6 +338,9 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("unexpected replay")
 	}
 
+	if dialParams.ReplayIgnoredChange {
+		t.Fatalf("unexpected replay ignored change")
+	}
 	// Test: replay after dial reported to succeed, and replay fields match previous dial parameters
 
 	dialParams.Succeeded()
@@ -346,6 +353,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	if !replayDialParams.IsReplay {
 		t.Fatalf("unexpected non-replay")
+	}
+
+	if replayDialParams.ReplayIgnoredChange {
+		t.Fatalf("unexpected replay ignored change")
 	}
 
 	if !replayDialParams.LastUsedTimestamp.After(dialParams.LastUsedTimestamp) {
@@ -447,10 +458,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("mismatching ShadowsocksPrefixSpec fields")
 	}
 
-	// Test: replay after change tactics, with ReplayIgnoreChangedClientState = true
+	// Test: replay after change tactics, with ReplayIgnoreChangedConfigStateProbability = 1.0
 
 	applyParameters[parameters.ReplayDialParametersTTL] = "1s"
-	applyParameters[parameters.ReplayIgnoreChangedConfigState] = true
+	applyParameters[parameters.ReplayIgnoreChangedConfigStateProbability] = 1.0
 	err = clientConfig.SetParameters("tag2a", false, applyParameters)
 	if err != nil {
 		t.Fatalf("SetParameters failed: %s", err)
@@ -462,14 +473,18 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("MakeDialParameters failed: %s", err)
 	}
 
-	if !replayDialParams.IsReplay {
+	if !dialParams.IsReplay {
 		t.Fatalf("unexpected non-replay")
+	}
+
+	if !dialParams.ReplayIgnoredChange {
+		t.Fatalf("unexpected replay ignored change")
 	}
 
 	// Test: no replay after change tactics
 
 	applyParameters[parameters.ReplayDialParametersTTL] = "1s"
-	applyParameters[parameters.ReplayIgnoreChangedConfigState] = false
+	applyParameters[parameters.ReplayIgnoreChangedConfigStateProbability] = 0.0
 	err = clientConfig.SetParameters("tag2", false, applyParameters)
 	if err != nil {
 		t.Fatalf("SetParameters failed: %s", err)
@@ -483,6 +498,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	if dialParams.IsReplay {
 		t.Fatalf("unexpected replay")
+	}
+
+	if dialParams.ReplayIgnoredChange {
+		t.Fatalf("unexpected replay ignored change")
 	}
 
 	// Test: no replay after dial parameters expired
@@ -501,6 +520,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		t.Fatalf("unexpected replay")
 	}
 
+	if dialParams.ReplayIgnoredChange {
+		t.Fatalf("unexpected replay ignored change")
+	}
+
 	// Test: no replay after server entry changes
 
 	dialParams.Succeeded()
@@ -515,6 +538,10 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 
 	if dialParams.IsReplay {
 		t.Fatalf("unexpected replay")
+	}
+
+	if dialParams.ReplayIgnoredChange {
+		t.Fatalf("unexpected replay ignored change")
 	}
 
 	// Test: disable replay elements (partial coverage)
@@ -769,6 +796,72 @@ func runDialParametersAndReplay(t *testing.T, tunnelProtocol string) {
 		if ok {
 			t.Fatalf("unexpected steering IP cache entry")
 		}
+	}
+
+	// Test: DSLPendingPrioritizeDial placeholder transformed to full dial parameters
+
+	networkID := clientConfig.GetNetworkID()
+
+	err = datastoreUpdate(func(tx *datastoreTx) error {
+		return dslPrioritizeDialServerEntry(
+			tx, networkID, []byte(serverEntries[1].IpAddress))
+	})
+	if err != nil {
+		t.Fatalf("dslPrioritizeDialServerEntry failed: %s", err)
+	}
+
+	dialParams, err = MakeDialParameters(
+		clientConfig, steeringIPCache, nil, nil, nil, canReplay, selectProtocol, serverEntries[1], nil, nil, false, 0, 0)
+	if err != nil {
+		t.Fatalf("MakeDialParameters failed: %s", err)
+	}
+
+	if dialParams.DSLPendingPrioritizeDial || !dialParams.DSLPrioritizedDial {
+		t.Fatalf("unexpected DSL prioritize state")
+	}
+
+	if dialParams.IsReplay {
+		t.Fatalf("unexpected replay")
+	}
+
+	dialParams.Succeeded()
+
+	dialParams, err = MakeDialParameters(
+		clientConfig, steeringIPCache, nil, nil, nil, canReplay, selectProtocol, serverEntries[1], nil, nil, false, 0, 0)
+	if err != nil {
+		t.Fatalf("MakeDialParameters failed: %s", err)
+	}
+
+	if dialParams.DSLPendingPrioritizeDial || !dialParams.DSLPrioritizedDial {
+		t.Fatalf("unexpected DSL prioritize state")
+	}
+
+	if !dialParams.IsReplay {
+		t.Fatalf("unexpected non-replay")
+	}
+
+	// Test: DSLPendingPrioritizeDial placeholder doesn't replace full dial parameters
+
+	err = datastoreUpdate(func(tx *datastoreTx) error {
+		return dslPrioritizeDialServerEntry(
+			tx, networkID, []byte(serverEntries[1].IpAddress))
+	})
+	if err != nil {
+		t.Fatalf("dslPrioritizeDialServerEntry failed: %s", err)
+	}
+
+	dialParams, err = MakeDialParameters(
+		clientConfig, steeringIPCache, nil, nil, nil, canReplay, selectProtocol, serverEntries[1], nil, nil, false, 0, 0)
+	if err != nil {
+		t.Fatalf("MakeDialParameters failed: %s", err)
+	}
+
+	if dialParams.DSLPendingPrioritizeDial || !dialParams.DSLPrioritizedDial {
+		t.Fatalf("unexpected DSL prioritize state")
+	}
+
+	if !dialParams.IsReplay {
+		t.Fatalf("unexpected non-replay")
 	}
 
 	// Test: iterator shuffles

@@ -56,9 +56,12 @@ fetcherLoop:
 
 		isTunneled := false
 
+		// Log the error notice for all errors in this block.
 		err := func() error {
 
-			brokerClient, _, err := brokerClientManager.GetBrokerClient(config.GetNetworkID())
+			networkID := config.GetNetworkID()
+
+			brokerClient, _, err := brokerClientManager.GetBrokerClient(networkID)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -87,7 +90,7 @@ fetcherLoop:
 			// TODO: add a failed_dsl_request log, similar to failed_tunnel,
 			// to record and report failures?
 
-			err = doDSLFetch(ctx, config, isTunneled, roundTripper)
+			err = doDSLFetch(ctx, config, networkID, isTunneled, roundTripper)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -129,6 +132,8 @@ fetcherLoop:
 
 		isTunneled := true
 
+		networkID := config.GetNetworkID()
+
 		roundTripper := func(
 			ctx context.Context,
 			requestPayload []byte) ([]byte, error) {
@@ -147,7 +152,7 @@ fetcherLoop:
 		// Detailed logging, retries, last request times, and
 		// WaitForNetworkConnectivity are all handled inside dsl.Fetcher.
 
-		err := doDSLFetch(ctx, config, isTunneled, roundTripper)
+		err := doDSLFetch(ctx, config, networkID, isTunneled, roundTripper)
 		if err != nil {
 			NoticeError("tunneled DSL fetch failed: %v", errors.Trace(err))
 			// No cooldown pause, since runTunneledDSLFetcher is called only
@@ -161,6 +166,7 @@ fetcherLoop:
 func doDSLFetch(
 	ctx context.Context,
 	config *Config,
+	networkID string,
 	isTunneled bool,
 	roundTripper dsl.FetcherRoundTripper) error {
 
@@ -200,13 +206,72 @@ func doDSLFetch(
 		return key
 	}
 
+	// hasServerEntry and storeServerEntry handle PrioritizeDial hints from
+	// the DSL backend for existing or new server entries respectively.
+	//
+	// In each case, a probability is applied to tune the rate of DSL
+	// prioritization since it impacts the rate of replay. DSL
+	// prioritizations don't _replace_ existing replay dial parameter
+	// records, but new DSLPendingPrioritizeDial dial parameters
+	// can _displace_ regular replays in the move-to-front server entry
+	// iterator shuffle. It's not clear a priori which out of replay or DSL
+	// prioritization is the optimal choice; the intention is to try a mix.
+	//
+	// When there's already an existing replay dial parameters for a server
+	// entry, no DSLPendingPrioritizeDial placeholder is created since any
+	// record suffices to move-to-front, and a non-expired replay dial
+	// parameters record can be more useful. As a result, there's no
+	// dsl_prioritized metric reported for cases where the client is already
+	// going to prioritize selecting a server entry.
+	//
+	// Limitation: For existing server entries, the client could already know
+	// that the server entry is not successful, but that knowledge is not
+	// applied here; instead, DSLPrioritizeDialExistingServerEntryProbability
+	// can merely be tuned lower. There could be failed_tunnel persistent
+	// stats with the server entry tag, but that data is only temporary, is
+	// truncated aggressively, and is expensive to unmarshal and process. A
+	// potential future enhancement would be to store a less ephemeral and
+	// simpler record of recent failures.
+	//
+	// Another potential future enhancement may be to count the number of
+	// existing replay records, including a TTL check, and use that count to
+	// adjust the rate of creating DSLPendingPrioritizeDial records.
+
+	prioritizeDialNewServerEntryProbability :=
+		p.Float(parameters.DSLPrioritizeDialNewServerEntryProbability)
+	prioritizeDialExistingServerEntryProbability :=
+		p.Float(parameters.DSLPrioritizeDialExistingServerEntryProbability)
+
+	hasServerEntry := func(
+		tag dsl.ServerEntryTag,
+		version int,
+		prioritizeDial bool) bool {
+
+		prioritizeDial = prioritizeDial &&
+			prng.FlipWeightedCoin(prioritizeDialExistingServerEntryProbability)
+
+		return DSLHasServerEntry(
+			tag,
+			version,
+			prioritizeDial,
+			networkID)
+	}
+
 	storeServerEntry := func(
 		packedServerEntryFields protocol.PackedServerEntryFields,
-		source string) error {
-		return errors.Trace(DSLStoreServerEntry(
-			config.ServerEntrySignaturePublicKey,
-			packedServerEntryFields,
-			source))
+		source string,
+		prioritizeDial bool) error {
+
+		prioritizeDial = prioritizeDial &&
+			prng.FlipWeightedCoin(prioritizeDialNewServerEntryProbability)
+
+		return errors.Trace(
+			DSLStoreServerEntry(
+				config.ServerEntrySignaturePublicKey,
+				packedServerEntryFields,
+				source,
+				prioritizeDial,
+				networkID))
 	}
 
 	c := &dsl.FetcherConfig{
@@ -216,7 +281,7 @@ func doDSLFetch(
 		Tunneled:          isTunneled,
 		RoundTripper:      roundTripper,
 
-		DatastoreHasServerEntry:        DSLHasServerEntry,
+		DatastoreHasServerEntry:        hasServerEntry,
 		DatastoreStoreServerEntry:      storeServerEntry,
 		DatastoreGetLastActiveOSLsTime: DSLGetLastActiveOSLsTime,
 		DatastoreSetLastActiveOSLsTime: DSLSetLastActiveOSLsTime,

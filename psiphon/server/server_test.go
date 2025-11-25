@@ -916,6 +916,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	var dslTestConfig *dslTestConfig
 	enableDSLFetcher := "false"
 	if doDSL {
+
+		t.Log("testing DSL")
+
 		dslTestConfig, err = generateDSLTestConfig()
 		if err != nil {
 			t.Fatalf("error generating DSL test config: %s", err)
@@ -2048,6 +2051,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 					tunneled := payload["tunneled"].(bool)
 					updated := int(payload["updated"].(float64))
 					if tunneled && updated > 0 {
+						err := checkExpectedDSLPendingPrioritizeDial(clientConfig, networkID)
+						if err != nil {
+							t.Fatalf("checkExpectedDSLPendingPrioritizeDial failed: %v", err)
+						}
 						sendNotificationReceived(tunneledDSLFetched)
 					}
 				}
@@ -2350,6 +2357,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if doDSL || runConfig.doPruneServerEntries {
 		expectServerEntryCount = protocol.ServerEntryCountRoundingIncrement
 	}
+	expectDSLPrioritized := doDSL
 
 	// The client still reports zero domain_bytes when no port forwards are
 	// allowed (expectTrafficFailure).
@@ -2386,6 +2394,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectMeekHTTPVersion,
 			expectCheckServerEntryPruneCount,
 			expectServerEntryCount,
+			expectDSLPrioritized,
 			inproxyTestConfig,
 			logFields)
 		if err != nil {
@@ -2610,47 +2619,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	// Check that the client discovered one of the discovery servers.
-
-	discoveredServers := make(map[string]*protocol.ServerEntry)
-
-	// Otherwise NewServerEntryIterator only returns TargetServerEntry.
-	clientConfig.TargetServerEntry = ""
-
-	_, iterator, err := psiphon.NewServerEntryIterator(clientConfig)
+	err = checkExpectedDiscoveredServer(clientConfig, discoveryServers)
 	if err != nil {
-		t.Fatalf("NewServerEntryIterator failed: %s", err)
-	}
-	defer iterator.Close()
-
-	for {
-		serverEntry, err := iterator.Next()
-		if err != nil {
-			t.Fatalf("ServerIterator.Next failed: %s", err)
-		}
-		if serverEntry == nil {
-			break
-		}
-		discoveredServers[serverEntry.IpAddress] = serverEntry
-	}
-
-	foundOne := false
-	for _, server := range discoveryServers {
-
-		serverEntry, err := protocol.DecodeServerEntry(server.EncodedServerEntry, "", "")
-		if err != nil {
-			t.Fatalf("protocol.DecodeServerEntry failed: %s", err)
-		}
-
-		if v, ok := discoveredServers[serverEntry.IpAddress]; ok {
-			if v.Tag == serverEntry.Tag {
-				foundOne = true
-				break
-			}
-		}
-	}
-	if !foundOne {
-		t.Fatalf("expected client to discover at least one server")
+		t.Fatalf("error checking client discovered server: %v", err)
 	}
 }
 
@@ -2980,6 +2951,7 @@ func checkExpectedServerTunnelLogFields(
 	expectMeekHTTPVersion string,
 	expectCheckServerEntryPruneCount int,
 	expectServerEntryCount int,
+	expectDSLPrioritized bool,
 	inproxyTestConfig *inproxyTestConfig,
 	fields map[string]interface{}) error {
 
@@ -3013,6 +2985,8 @@ func checkExpectedServerTunnelLogFields(
 		"server_entry_timestamp",
 		"dial_port_number",
 		"is_replay",
+		"replay_ignored_change",
+		"dsl_prioritized",
 		"dial_duration",
 		"candidate_number",
 		"established_tunnels_count",
@@ -3767,6 +3741,10 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
+	if fields["dsl_prioritized"] != expectDSLPrioritized {
+		return fmt.Errorf("unexpected dsl_prioritized %v", fields["dsl_prioritized"])
+	}
+
 	return nil
 }
 
@@ -3814,6 +3792,77 @@ func checkExpectedDomainBytesLogFields(
 				return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
 			}
 		}
+	}
+
+	return nil
+}
+
+func checkExpectedDSLPendingPrioritizeDial(
+	clientConfig *psiphon.Config,
+	networkID string) error {
+
+	// The server entry discovered in the tunneled DSL request should have a
+	// DSLPendingPrioritizeDial placeholder.
+
+	dialParams, err := psiphon.GetDialParameters(
+		clientConfig, tunneledDSLServerEntryIPAddress, networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if dialParams == nil ||
+		!dialParams.DSLPendingPrioritizeDial ||
+		dialParams.DSLPrioritizedDial {
+
+		return errors.TraceNew("unexpected server entry state")
+	}
+
+	return nil
+}
+
+func checkExpectedDiscoveredServer(
+	clientConfig *psiphon.Config,
+	discoveryServers []*psinet.DiscoveryServer) error {
+
+	discoveredServers := make(map[string]*protocol.ServerEntry)
+
+	// Otherwise NewServerEntryIterator only returns TargetServerEntry.
+	clientConfig.TargetServerEntry = ""
+
+	_, iterator, err := psiphon.NewServerEntryIterator(clientConfig)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer iterator.Close()
+
+	for {
+		serverEntry, err := iterator.Next()
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if serverEntry == nil {
+			break
+		}
+		discoveredServers[serverEntry.IpAddress] = serverEntry
+	}
+
+	foundOne := false
+	for _, server := range discoveryServers {
+
+		serverEntry, err := protocol.DecodeServerEntry(server.EncodedServerEntry, "", "")
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if v, ok := discoveredServers[serverEntry.IpAddress]; ok {
+			if v.Tag == serverEntry.Tag {
+				foundOne = true
+				break
+			}
+		}
+	}
+	if !foundOne {
+		return errors.TraceNew("expected client to discover at least one server")
 	}
 
 	return nil
@@ -4447,6 +4496,8 @@ func paveTacticsConfigFile(
           "ServerProtocolPacketManipulations": {"All" : ["test-packetman-spec"]},
           "ServerDiscoveryStrategy": "%s",
           "EnableDSLFetcher": %s,
+          "DSLPrioritizeDialNewServerEntryProbability" : 1.0,
+          "DSLPrioritizeDialExistingServerEntryProbability" : 1.0,
           "EstablishTunnelWorkTime" : "1s"
         }
       },
@@ -5462,6 +5513,9 @@ func newDiscoveryServers(ipAddresses []string) ([]*psinet.DiscoveryServer, error
 	return servers, nil
 }
 
+// Won't conflict with initializePruneServerEntriesTest
+var tunneledDSLServerEntryIPAddress = "192.0.3.1"
+
 func configureDSLTestServerEntries(
 	dslTestConfig *dslTestConfig,
 	encodedServerEntry string,
@@ -5489,9 +5543,13 @@ func configureDSLTestServerEntries(
 
 	// Store the full tunnel protocol server entry in the mock DSL backend.
 
+	// TODO: also excersize prioritizeDial = false?
+
 	isTunneled := false
+	prioritizeDial := true
 	dslTestConfig.backend.SetServerEntries(
 		isTunneled,
+		prioritizeDial,
 		[]string{encodedServerEntry})
 
 	// Add an EMBEDDED tactics-only server entry to the client's datastore.
@@ -5526,18 +5584,18 @@ func configureDSLTestServerEntries(
 	// Prepare one additional server entry for the tunneled DSL request.
 
 	dialPort := 4000
-	ipAddress := "192.0.3.1" // Won't conflict with initializePruneServerEntriesTest
 	_, _, _, _, encodedServerEntryBytes, err := GenerateConfig(
 		&GenerateConfigParams{
 			ServerEntrySignaturePublicKey:  serverEntrySignaturePublicKey,
 			ServerEntrySignaturePrivateKey: serverEntrySignaturePrivateKey,
-			ServerIPAddress:                ipAddress,
+			ServerIPAddress:                tunneledDSLServerEntryIPAddress,
 			TunnelProtocolPorts:            map[string]int{protocol.TUNNEL_PROTOCOL_SSH: dialPort},
 		})
 
 	isTunneled = true
 	dslTestConfig.backend.SetServerEntries(
 		isTunneled,
+		prioritizeDial,
 		[]string{string(encodedServerEntryBytes)})
 
 	return nil

@@ -272,7 +272,18 @@ func datastoreUpdate(fn func(tx *datastoreTx) error) error {
 //
 // If the server entry data is malformed, an alert notice is issued and
 // the entry is skipped; no error is returned.
-func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExists bool) error {
+func StoreServerEntry(
+	serverEntryFields protocol.ServerEntryFields,
+	replaceIfExists bool) error {
+
+	return errors.Trace(
+		storeServerEntry(serverEntryFields, replaceIfExists, nil))
+}
+
+func storeServerEntry(
+	serverEntryFields protocol.ServerEntryFields,
+	replaceIfExists bool,
+	additionalUpdates func(tx *datastoreTx, serverEntryID []byte) error) error {
 
 	// TODO: call serverEntryFields.VerifySignature. At this time, we do not do
 	// this as not all server entries have an individual signature field. All
@@ -372,6 +383,13 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 		err = serverEntryTags.put(serverEntryTagBytes, serverEntryTagRecord)
 		if err != nil {
 			return errors.Trace(err)
+		}
+
+		if additionalUpdates != nil {
+			err = additionalUpdates(tx, serverEntryID)
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 
 		NoticeInfo("updated server %s", serverEntryFields.GetDiagnosticID())
@@ -893,12 +911,21 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		// In the first round, or with some probability, move _potential_ replay
 		// candidates to the front of the list (excepting the server affinity slot,
 		// if any). This move is post-shuffle so the order is still randomized. To
-		// save the memory overhead of unmarshalling all dial parameters, this
+		// save the memory overhead of unmarshaling all dial parameters, this
 		// operation just moves any server with a dial parameter record to the
 		// front. Whether the dial parameter remains valid for replay -- TTL,
 		// tactics/config unchanged, etc. --- is checked later.
 		//
 		// TODO: move only up to parameters.ReplayCandidateCount to front?
+
+		// The DSLPendingPrioritizeDial case also implicitly assumes that mere
+		// existence of dial parameters will move server entries to the front
+		// of the list. See MakeDialParameters and doDSLFetch for more
+		// details about the DSLPendingPrioritizeDial scheme.
+		//
+		// Limitation: the move-to-front could be balanced beween
+		// DSLPendingPrioritizeDial and regular replay cases, however that
+		// would require unmarshaling all dial parameters, which we are avoiding.
 
 		p := iterator.config.GetParameters().Get()
 
@@ -2623,33 +2650,131 @@ func DSLSetLastTunneledFetchTime(time time.Time) error {
 	return errors.Trace(err)
 }
 
+// dslLookupServerEntry returns the server entry ID for the specified server
+// entry tag version when there's locally stored server entry for that tag
+// and with the specified version. Otherwise, it returns nil.
+func dslLookupServerEntry(
+	tx *datastoreTx,
+	tag dsl.ServerEntryTag,
+	version int) ([]byte, error) {
+
+	serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
+
+	serverEntryTagRecord := serverEntryTags.get(tag)
+	if serverEntryTagRecord == nil {
+		return nil, nil
+	}
+
+	serverEntryID, configurationVersion, err := getServerEntryTagRecord(
+		serverEntryTagRecord)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if configurationVersion != version {
+		return nil, nil
+	}
+
+	return serverEntryID, nil
+}
+
+// dslPrioritizeDialServerEntry will create a DSLPendingPrioritizeDial
+// placeholder dial parameters for the specified server entry, unless a dial
+// params already exists. Any existing dial param isn't unmarshaled and
+// inspected -- even if it's a replay past its TTL, the existence of the
+// record already suffices to move the server entry to the front in a server
+// entry iterator shuffle.
+//
+// See MakeDialParameters for more details about the DSLPendingPrioritizeDial
+// scheme.
+func dslPrioritizeDialServerEntry(
+	tx *datastoreTx,
+	networkID string,
+	serverEntryID []byte) error {
+
+	dialParamsBucket := tx.bucket(datastoreDialParametersBucket)
+
+	key := makeDialParametersKey(serverEntryID, []byte(networkID))
+
+	if dialParamsBucket.get(key) != nil {
+		return nil
+	}
+
+	dialParams := &DialParameters{
+		DSLPendingPrioritizeDial: true,
+	}
+
+	record, err := json.Marshal(dialParams)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = dialParamsBucket.put(key, record)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
 // DSLHasServerEntry returns whether the datastore contains the server entry
 // with the specified tag and version. DSLHasServerEntry uses a fast lookup
 // which avoids unmarshaling server entries.
-func DSLHasServerEntry(tag dsl.ServerEntryTag, version int) bool {
+func DSLHasServerEntry(
+	tag dsl.ServerEntryTag,
+	version int,
+	prioritizeDial bool,
+	networkID string) bool {
 
 	hasServerEntry := false
+	var err error
 
-	err := datastoreView(func(tx *datastoreTx) error {
+	if !prioritizeDial {
 
-		serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
+		// Use a more concurrency-friendly view transaction when
+		// prioritizeDial is false and there's no possibility of a datastore
+		// update.
 
-		serverEntryTagRecord := serverEntryTags.get(tag)
+		err = datastoreView(func(tx *datastoreTx) error {
 
-		if serverEntryTagRecord == nil {
-			hasServerEntry = false
+			serverEntryID, err := dslLookupServerEntry(tx, tag, version)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			hasServerEntry = (serverEntryID != nil)
+
 			return nil
-		}
+		})
 
-		_, configurationVersion, err := getServerEntryTagRecord(
-			serverEntryTagRecord)
-		if err != nil {
-			return errors.Trace(err)
-		}
+	} else {
 
-		hasServerEntry = (configurationVersion == version)
-		return nil
-	})
+		err = datastoreUpdate(func(tx *datastoreTx) error {
+
+			serverEntryID, err := dslLookupServerEntry(tx, tag, version)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			hasServerEntry = (serverEntryID != nil)
+
+			// If the local datastore contains a server entry for the
+			// specified tag, but the version doesn't match, the
+			// prioritization will be skipped. In this case, the updated
+			// server entry will most likely be downloaded and
+			// DSLStoreServerEntry will apply the prioritization.
+
+			if hasServerEntry {
+				err := dslPrioritizeDialServerEntry(tx, networkID, serverEntryID)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+
+			return nil
+		})
+
+	}
 
 	if err != nil {
 		NoticeWarning("DSLHasServerEntry failed: %s", errors.Trace(err))
@@ -2664,7 +2789,9 @@ func DSLHasServerEntry(tag dsl.ServerEntryTag, version int) bool {
 func DSLStoreServerEntry(
 	serverEntrySignaturePublicKey string,
 	packedServerEntryFields protocol.PackedServerEntryFields,
-	source string) error {
+	source string,
+	prioritizeDial bool,
+	networkID string) error {
 
 	serverEntryFields, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
 	if err != nil {
@@ -2687,7 +2814,18 @@ func DSLStoreServerEntry(
 		return errors.Trace(err)
 	}
 
-	err = StoreServerEntry(serverEntryFields, true)
+	var additionalUpdates func(tx *datastoreTx, serverEntryID []byte) error
+	if prioritizeDial {
+		additionalUpdates = func(tx *datastoreTx, serverEntryID []byte) error {
+			err := dslPrioritizeDialServerEntry(tx, networkID, serverEntryID)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			return nil
+		}
+	}
+
+	err = storeServerEntry(serverEntryFields, true, additionalUpdates)
 	if err != nil {
 		return errors.Trace(err)
 	}

@@ -54,10 +54,14 @@ type FetcherConfig struct {
 
 	DatastoreGetLastFetchTime func() (time.Time, error)
 	DatastoreSetLastFetchTime func(time time.Time) error
-	DatastoreHasServerEntry   func(tag ServerEntryTag, version int) bool
+	DatastoreHasServerEntry   func(
+		tag ServerEntryTag,
+		version int,
+		prioritizeDial bool) bool
 	DatastoreStoreServerEntry func(
 		serverEntryFields protocol.PackedServerEntryFields,
-		source string) error
+		source string,
+		prioritizeDial bool) error
 
 	DatastoreGetLastActiveOSLsTime func() (time.Time, error)
 	DatastoreSetLastActiveOSLsTime func(time time.Time) error
@@ -66,7 +70,8 @@ type FetcherConfig struct {
 	DatastoreStoreOSLState         func(ID OSLID, state []byte) error
 	DatastoreDeleteOSLState        func(ID OSLID) error
 	DatastoreSLOKLookup            osl.SLOKLookup
-	DatastoreFatalError            func(error)
+
+	DatastoreFatalError func(error)
 
 	RequestTimeout          time.Duration
 	RequestRetryCount       int
@@ -221,24 +226,47 @@ func (f *Fetcher) Run(ctx context.Context) error {
 
 	storeServerEntriesCount := 0
 	knownServerEntriesCount := 0
+	tagCount := len(versionedTags)
 	defer func() {
 		// Emit log even if not all fetches succeed.
 		f.config.Logger.WithTraceFields(common.LogFields{
 			"tunneled": f.config.Tunneled,
-			"tags":     len(versionedTags),
+			"tags":     tagCount,
 			"updated":  storeServerEntriesCount,
 			"known":    knownServerEntriesCount,
 		}).Info("DSL: fetched server entries")
 	}()
 
+	// A subset of versionedTags containing both the tag and prioritize flag
+	// could be used here instead of two slices, but the memory impact of two
+	// slices should be less, considering the DoGarbageCollection can reclaim
+	// versionedTags, and we need a slice of tags (slice of getTags) to send
+	// in GetServerEntries.
+	//
+	// As GetServerEntriesResponse will contain an entry (potentially nil) for
+	// every requested server entry tag, in requested order, each index in
+	// prioritizeDials corresponds both to the same index in getTags and the
+	// sourcedServerEntries returned from doGetServerEntriesRequest.
+
 	var getTags []ServerEntryTag
+	var prioritizeDials []bool
 	for _, v := range versionedTags {
-		if f.config.DatastoreHasServerEntry(v.Tag, int(v.Version)) {
+
+		hasServerEntry := f.config.DatastoreHasServerEntry(
+			v.Tag,
+			int(v.Version),
+			v.PrioritizeDial)
+
+		if hasServerEntry {
 			knownServerEntriesCount += 1
 			continue
 		}
 		getTags = append(getTags, v.Tag)
+		prioritizeDials = append(prioritizeDials, v.PrioritizeDial)
 	}
+
+	// Allow garbage collection.
+	versionedTags = nil
 
 	for len(getTags) > 0 {
 
@@ -257,7 +285,7 @@ func (f *Fetcher) Run(ctx context.Context) error {
 			return errors.Trace(err)
 		}
 
-		for _, sourcedEntry := range sourcedServerEntries {
+		for i, sourcedEntry := range sourcedServerEntries {
 
 			if sourcedEntry == nil {
 				// The requested server entry is no longer distributable or
@@ -267,7 +295,8 @@ func (f *Fetcher) Run(ctx context.Context) error {
 
 			err := f.config.DatastoreStoreServerEntry(
 				sourcedEntry.ServerEntryFields,
-				sourcedEntry.Source)
+				sourcedEntry.Source,
+				prioritizeDials[i])
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -280,6 +309,7 @@ func (f *Fetcher) Run(ctx context.Context) error {
 		// Unfetched server entries will be added to the next batch.
 
 		getTags = getTags[len(sourcedServerEntries):]
+		prioritizeDials = prioritizeDials[len(sourcedServerEntries):]
 
 		f.config.DoGarbageCollection()
 	}

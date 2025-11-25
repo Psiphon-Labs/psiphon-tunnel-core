@@ -67,8 +67,9 @@ type DSLBackendTestShim interface {
 
 	MarshalDiscoverServerEntriesResponse(
 		versionedServerEntryTags []*struct {
-			Tag     []byte
-			Version int32
+			Tag            []byte
+			Version        int32
+			PrioritizeDial bool
 		}) (
 		cborResponse []byte,
 		retErr error)
@@ -125,6 +126,7 @@ type TestDSLBackend struct {
 type dslSourcedServerEntry struct {
 	ServerEntryFields protocol.PackedServerEntryFields
 	Source            string
+	PrioritizeDial    bool
 }
 
 func NewTestDSLBackend(
@@ -207,6 +209,7 @@ func NewTestDSLBackend(
 			serverEntries[serverEntry.Tag] = &dslSourcedServerEntry{
 				ServerEntryFields: packed,
 				Source:            source,
+				PrioritizeDial:    prng.FlipCoin(),
 			}
 
 			initMutex.Unlock()
@@ -373,8 +376,24 @@ func (b *TestDSLBackend) GetServerEntryCount(isTunneled bool) int {
 	return len(b.untunneledServerEntries)
 }
 
+func (b *TestDSLBackend) GetServerEntryProperties(
+	serverEntryTag string) (string, bool, error) {
+
+	entry, ok := b.untunneledServerEntries[serverEntryTag]
+	if !ok {
+		entry, ok = b.tunneledServerEntries[serverEntryTag]
+		if !ok {
+			return "", false, errors.TraceNew("unknown server entry tag")
+		}
+	}
+
+	return entry.Source, entry.PrioritizeDial, nil
+}
+
 func (b *TestDSLBackend) SetServerEntries(
-	isTunneled bool, encodedServerEntries []string) error {
+	isTunneled bool,
+	prioritizeDial bool,
+	encodedServerEntries []string) error {
 
 	source := "DSL-untunneled"
 	if isTunneled {
@@ -396,6 +415,7 @@ func (b *TestDSLBackend) SetServerEntries(
 		sourcedServerEntries[serverEntryFields.GetTag()] = &dslSourcedServerEntry{
 			ServerEntryFields: packedServerEntryFields,
 			Source:            source,
+			PrioritizeDial:    prioritizeDial,
 		}
 	}
 
@@ -453,14 +473,15 @@ func (b *TestDSLBackend) handleDiscoverServerEntries(
 	}
 
 	var versionedServerEntryTags []*struct {
-		Tag     []byte
-		Version int32
+		Tag            []byte
+		Version        int32
+		PrioritizeDial bool
 	}
 
 	if !missingOSLs {
 
 		count := 0
-		for tag := range serverEntries {
+		for tag, sourcedServerEntry := range serverEntries {
 			if count >= int(discoverCount) {
 				break
 			}
@@ -475,9 +496,10 @@ func (b *TestDSLBackend) handleDiscoverServerEntries(
 			versionedServerEntryTags = append(
 				versionedServerEntryTags,
 				&struct {
-					Tag     []byte
-					Version int32
-				}{serverEntryTag, 0})
+					Tag            []byte
+					Version        int32
+					PrioritizeDial bool
+				}{serverEntryTag, 0, sourcedServerEntry.PrioritizeDial})
 		}
 	}
 
@@ -765,9 +787,6 @@ func NewTestDSLTLSConfig() (*TestDSLTLSConfig, error) {
 
 	CACertificatePEM := pem.EncodeToMemory(
 		&pem.Block{Type: "CERTIFICATE", Bytes: CACertificateDER})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
 
 	CACertificate, err := x509.ParseCertificate(CACertificateDER)
 	if err != nil {
