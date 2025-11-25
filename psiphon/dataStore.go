@@ -68,12 +68,17 @@ var (
 
 	datastoreServerEntryFetchGCThreshold = 10
 
-	datastoreReferenceCountMutex sync.RWMutex
-	datastoreReferenceCount      int64
-	datastoreMutex               sync.RWMutex
-	activeDatastoreDB            *datastoreDB
-	disableCheckServerEntryTags  atomic.Bool
+	datastoreReferenceCountMutex  sync.RWMutex
+	datastoreReferenceCount       int64
+	datastoreMutex                sync.RWMutex
+	activeDatastoreDB             *datastoreDB
+	disableCheckServerEntryTags   atomic.Bool
+	datastoreLastServerEntryCount atomic.Int64
 )
+
+func init() {
+	datastoreLastServerEntryCount.Store(-1)
+}
 
 // OpenDataStore opens and initializes the singleton datastore instance.
 //
@@ -567,6 +572,25 @@ func DeleteServerEntryAffinity(ipAddress string) error {
 	return nil
 }
 
+// GetLastServerEntryCount returns a generalized number of server entries in
+// the datastore recorded by the last ServerEntryIterator New/Reset call.
+// Similar to last_connected and persistent stats timestamps, the count is
+// rounded to avoid a potentially unique client fingerprint. The return value
+// is -1 if no count has been recorded.
+func GetLastServerEntryCount() int {
+	count := int(datastoreLastServerEntryCount.Load())
+
+	if count <= 0 {
+		// Return -1 (no count) and 0 (no server entries) as-is.
+		return count
+	}
+
+	n := protocol.ServerEntryCountRoundingIncrement
+
+	// Round up to the nearest ServerEntryCountRoundingIncrement.
+	return ((count + (n - 1)) / n) * n
+}
+
 func makeServerEntryFilterValue(config *Config) ([]byte, error) {
 
 	// Currently, only a change of EgressRegion will "break" server affinity.
@@ -749,6 +773,11 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 		targetServerEntry:            serverEntry,
 	}
 
+	err = iterator.reset(true)
+	if err != nil {
+		return false, nil, errors.Trace(err)
+	}
+
 	NoticeInfo("using TargetServerEntry: %s", serverEntry.GetDiagnosticID())
 
 	return false, iterator, nil
@@ -765,6 +794,15 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 
 	if iterator.isTargetServerEntryIterator {
 		iterator.hasNextTargetServerEntry = true
+
+		// Provide the GetLastServerEntryCount implementation. See comment below.
+		count := 0
+		err := getBucketKeys(datastoreServerEntriesBucket, func(_ []byte) { count += 1 })
+		if err != nil {
+			return errors.Trace(err)
+		}
+		datastoreLastServerEntryCount.Store(int64(count))
+
 		return nil
 	}
 
@@ -836,6 +874,13 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 			serverEntryIDs = append(serverEntryIDs, append([]byte(nil), key...))
 		}
 		cursor.close()
+
+		// Provide the GetLastServerEntryCount implementation. This snapshot
+		// of the number of server entries in the datastore is used for
+		// metrics; a snapshot is recorded here to avoid the overhead of
+		// datastore scans or operations when the metric is logged.
+
+		datastoreLastServerEntryCount.Store(int64(len(serverEntryIDs)))
 
 		// Randomly shuffle the entire list of server IDs, excluding the
 		// server affinity candidate.

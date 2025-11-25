@@ -918,3 +918,9 @@ func GetCompressTactics(params common.APIParameters) bool {
 func SetCompressTactics(params common.APIParameters) {
 	params[PSIPHON_API_RESPONSE_VERSION_FIELD_NAME] = PSIPHON_API_RESPONSE_V1
 }
+
+// ServerEntryCountRoundingIncrement specifies the rounding increment for
+// client-reported server_entry_count metrics. Except for the value 0, the
+// metric is rounded up to the nearest increment to avoid a potentially
+// unique client fingerprint.
+var ServerEntryCountRoundingIncrement = 50

@@ -1427,6 +1427,11 @@ func getBaseAPIParameters(
 			}
 		}
 
+		serverEntryCount := GetLastServerEntryCount()
+		if serverEntryCount >= 0 {
+			params["server_entry_count"] = strconv.Itoa(serverEntryCount)
+		}
+
 	} else if filter == baseParametersOnlyUpstreamFragmentorDialParameters {
 
 		if dialParams.DialConnMetrics != nil {

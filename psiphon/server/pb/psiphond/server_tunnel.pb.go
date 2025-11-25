@@ -98,29 +98,25 @@ type ServerTunnel struct {
 	TotalPortForwardCountTcp                      *int64                 `protobuf:"varint,168,opt,name=total_port_forward_count_tcp,json=totalPortForwardCountTcp,proto3,oneof" json:"total_port_forward_count_tcp,omitempty"`
 	TotalPortForwardCountUdp                      *int64                 `protobuf:"varint,169,opt,name=total_port_forward_count_udp,json=totalPortForwardCountUdp,proto3,oneof" json:"total_port_forward_count_udp,omitempty"`
 	TotalUdpgwChannelCount                        *int64                 `protobuf:"varint,170,opt,name=total_udpgw_channel_count,json=totalUdpgwChannelCount,proto3,oneof" json:"total_udpgw_channel_count,omitempty"`
-	// Post-handshake random stream fields
-	RandomStreamCount                 *int64 `protobuf:"varint,171,opt,name=random_stream_count,json=randomStreamCount,proto3,oneof" json:"random_stream_count,omitempty"`
-	RandomStreamUpstreamBytes         *int64 `protobuf:"varint,172,opt,name=random_stream_upstream_bytes,json=randomStreamUpstreamBytes,proto3,oneof" json:"random_stream_upstream_bytes,omitempty"`
-	RandomStreamReceivedUpstreamBytes *int64 `protobuf:"varint,173,opt,name=random_stream_received_upstream_bytes,json=randomStreamReceivedUpstreamBytes,proto3,oneof" json:"random_stream_received_upstream_bytes,omitempty"`
-	RandomStreamDownstreamBytes       *int64 `protobuf:"varint,174,opt,name=random_stream_downstream_bytes,json=randomStreamDownstreamBytes,proto3,oneof" json:"random_stream_downstream_bytes,omitempty"`
-	RandomStreamSentDownstreamBytes   *int64 `protobuf:"varint,175,opt,name=random_stream_sent_downstream_bytes,json=randomStreamSentDownstreamBytes,proto3,oneof" json:"random_stream_sent_downstream_bytes,omitempty"`
-	// Destination bytes fields (legacy format)
-	DestBytesAsn     *string `protobuf:"bytes,176,opt,name=dest_bytes_asn,json=destBytesAsn,proto3,oneof" json:"dest_bytes_asn,omitempty"`
-	DestBytes        *int64  `protobuf:"varint,177,opt,name=dest_bytes,json=destBytes,proto3,oneof" json:"dest_bytes,omitempty"`
-	DestBytesUpTcp   *int64  `protobuf:"varint,178,opt,name=dest_bytes_up_tcp,json=destBytesUpTcp,proto3,oneof" json:"dest_bytes_up_tcp,omitempty"`
-	DestBytesDownTcp *int64  `protobuf:"varint,179,opt,name=dest_bytes_down_tcp,json=destBytesDownTcp,proto3,oneof" json:"dest_bytes_down_tcp,omitempty"`
-	DestBytesUpUdp   *int64  `protobuf:"varint,180,opt,name=dest_bytes_up_udp,json=destBytesUpUdp,proto3,oneof" json:"dest_bytes_up_udp,omitempty"`
-	DestBytesDownUdp *int64  `protobuf:"varint,181,opt,name=dest_bytes_down_udp,json=destBytesDownUdp,proto3,oneof" json:"dest_bytes_down_udp,omitempty"`
-	// Additional transport and server entry fields
-	RelayedSteeringIp           *string `protobuf:"bytes,182,opt,name=relayed_steering_ip,json=relayedSteeringIp,proto3,oneof" json:"relayed_steering_ip,omitempty"`
-	RequestCheckServerEntryTags *int64  `protobuf:"varint,183,opt,name=request_check_server_entry_tags,json=requestCheckServerEntryTags,proto3,oneof" json:"request_check_server_entry_tags,omitempty"`
-	CheckedServerEntryTags      *int64  `protobuf:"varint,184,opt,name=checked_server_entry_tags,json=checkedServerEntryTags,proto3,oneof" json:"checked_server_entry_tags,omitempty"`
-	InvalidServerEntryTags      *int64  `protobuf:"varint,185,opt,name=invalid_server_entry_tags,json=invalidServerEntryTags,proto3,oneof" json:"invalid_server_entry_tags,omitempty"`
-	// Protocol Overhead
-	SshProtocolBytes         *int64 `protobuf:"varint,186,opt,name=ssh_protocol_bytes,json=sshProtocolBytes,proto3,oneof" json:"ssh_protocol_bytes,omitempty"`
-	SshProtocolBytesOverhead *int64 `protobuf:"varint,187,opt,name=ssh_protocol_bytes_overhead,json=sshProtocolBytesOverhead,proto3,oneof" json:"ssh_protocol_bytes_overhead,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	RandomStreamCount                             *int64                 `protobuf:"varint,171,opt,name=random_stream_count,json=randomStreamCount,proto3,oneof" json:"random_stream_count,omitempty"`
+	RandomStreamUpstreamBytes                     *int64                 `protobuf:"varint,172,opt,name=random_stream_upstream_bytes,json=randomStreamUpstreamBytes,proto3,oneof" json:"random_stream_upstream_bytes,omitempty"`
+	RandomStreamReceivedUpstreamBytes             *int64                 `protobuf:"varint,173,opt,name=random_stream_received_upstream_bytes,json=randomStreamReceivedUpstreamBytes,proto3,oneof" json:"random_stream_received_upstream_bytes,omitempty"`
+	RandomStreamDownstreamBytes                   *int64                 `protobuf:"varint,174,opt,name=random_stream_downstream_bytes,json=randomStreamDownstreamBytes,proto3,oneof" json:"random_stream_downstream_bytes,omitempty"`
+	RandomStreamSentDownstreamBytes               *int64                 `protobuf:"varint,175,opt,name=random_stream_sent_downstream_bytes,json=randomStreamSentDownstreamBytes,proto3,oneof" json:"random_stream_sent_downstream_bytes,omitempty"`
+	DestBytesAsn                                  *string                `protobuf:"bytes,176,opt,name=dest_bytes_asn,json=destBytesAsn,proto3,oneof" json:"dest_bytes_asn,omitempty"`
+	DestBytes                                     *int64                 `protobuf:"varint,177,opt,name=dest_bytes,json=destBytes,proto3,oneof" json:"dest_bytes,omitempty"`
+	DestBytesUpTcp                                *int64                 `protobuf:"varint,178,opt,name=dest_bytes_up_tcp,json=destBytesUpTcp,proto3,oneof" json:"dest_bytes_up_tcp,omitempty"`
+	DestBytesDownTcp                              *int64                 `protobuf:"varint,179,opt,name=dest_bytes_down_tcp,json=destBytesDownTcp,proto3,oneof" json:"dest_bytes_down_tcp,omitempty"`
+	DestBytesUpUdp                                *int64                 `protobuf:"varint,180,opt,name=dest_bytes_up_udp,json=destBytesUpUdp,proto3,oneof" json:"dest_bytes_up_udp,omitempty"`
+	DestBytesDownUdp                              *int64                 `protobuf:"varint,181,opt,name=dest_bytes_down_udp,json=destBytesDownUdp,proto3,oneof" json:"dest_bytes_down_udp,omitempty"`
+	RelayedSteeringIp                             *string                `protobuf:"bytes,182,opt,name=relayed_steering_ip,json=relayedSteeringIp,proto3,oneof" json:"relayed_steering_ip,omitempty"`
+	RequestCheckServerEntryTags                   *int64                 `protobuf:"varint,183,opt,name=request_check_server_entry_tags,json=requestCheckServerEntryTags,proto3,oneof" json:"request_check_server_entry_tags,omitempty"`
+	CheckedServerEntryTags                        *int64                 `protobuf:"varint,184,opt,name=checked_server_entry_tags,json=checkedServerEntryTags,proto3,oneof" json:"checked_server_entry_tags,omitempty"`
+	InvalidServerEntryTags                        *int64                 `protobuf:"varint,185,opt,name=invalid_server_entry_tags,json=invalidServerEntryTags,proto3,oneof" json:"invalid_server_entry_tags,omitempty"`
+	SshProtocolBytes                              *int64                 `protobuf:"varint,186,opt,name=ssh_protocol_bytes,json=sshProtocolBytes,proto3,oneof" json:"ssh_protocol_bytes,omitempty"`
+	SshProtocolBytesOverhead                      *int64                 `protobuf:"varint,187,opt,name=ssh_protocol_bytes_overhead,json=sshProtocolBytesOverhead,proto3,oneof" json:"ssh_protocol_bytes_overhead,omitempty"`
+	unknownFields                                 protoimpl.UnknownFields
+	sizeCache                                     protoimpl.SizeCache
 }
 
 func (x *ServerTunnel) Reset() {

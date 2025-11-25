@@ -106,6 +106,7 @@ type DialParams struct {
 	EstablishedTunnelsCount           *int64                 `protobuf:"varint,80,opt,name=established_tunnels_count,json=establishedTunnelsCount,proto3,oneof" json:"established_tunnels_count,omitempty"`
 	NetworkLatencyMultiplier          *float64               `protobuf:"fixed64,81,opt,name=network_latency_multiplier,json=networkLatencyMultiplier,proto3,oneof" json:"network_latency_multiplier,omitempty"`
 	SeedTransform                     *string                `protobuf:"bytes,82,opt,name=seed_transform,json=seedTransform,proto3,oneof" json:"seed_transform,omitempty"`
+	ServerEntryCount                  *int64                 `protobuf:"varint,83,opt,name=server_entry_count,json=serverEntryCount,proto3,oneof" json:"server_entry_count,omitempty"`
 	unknownFields                     protoimpl.UnknownFields
 	sizeCache                         protoimpl.SizeCache
 }
@@ -714,11 +715,18 @@ func (x *DialParams) GetSeedTransform() string {
 	return ""
 }
 
+func (x *DialParams) GetServerEntryCount() int64 {
+	if x != nil && x.ServerEntryCount != nil {
+		return *x.ServerEntryCount
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb20\n" +
+	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xfc0\n" +
 	"\n" +
 	"DialParams\x12*\n" +
 	"\x0econjure_cached\x18\x01 \x01(\bH\x00R\rconjureCached\x88\x01\x01\x12(\n" +
@@ -812,7 +820,8 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"server_bpf\x18O \x01(\tHMR\tserverBpf\x88\x01\x01\x12?\n" +
 	"\x19established_tunnels_count\x18P \x01(\x03HNR\x17establishedTunnelsCount\x88\x01\x01\x12A\n" +
 	"\x1anetwork_latency_multiplier\x18Q \x01(\x01HOR\x18networkLatencyMultiplier\x88\x01\x01\x12*\n" +
-	"\x0eseed_transform\x18R \x01(\tHPR\rseedTransform\x88\x01\x01B\x11\n" +
+	"\x0eseed_transform\x18R \x01(\tHPR\rseedTransform\x88\x01\x01\x121\n" +
+	"\x12server_entry_count\x18S \x01(\x03HQR\x10serverEntryCount\x88\x01\x01B\x11\n" +
 	"\x0f_conjure_cachedB\x10\n" +
 	"\x0e_conjure_delayB\x17\n" +
 	"\x15_conjure_empty_packetB\x12\n" +
@@ -895,7 +904,8 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\v_server_bpfB\x1c\n" +
 	"\x1a_established_tunnels_countB\x1d\n" +
 	"\x1b_network_latency_multiplierB\x11\n" +
-	"\x0f_seed_transformBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x0f_seed_transformB\x15\n" +
+	"\x13_server_entry_countBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_dial_params_proto_rawDescOnce sync.Once

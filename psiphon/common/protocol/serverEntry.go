@@ -971,8 +971,16 @@ func (serverEntry *ServerEntry) HasSignature() bool {
 	return serverEntry.Signature != ""
 }
 
+func (serverEntry *ServerEntry) GetTag() string {
+	if serverEntry.Tag != "" {
+		return serverEntry.Tag
+	}
+	return GenerateServerEntryTag(
+		serverEntry.IpAddress, serverEntry.WebServerSecret)
+}
+
 func (serverEntry *ServerEntry) GetDiagnosticID() string {
-	return TagToDiagnosticID(serverEntry.Tag)
+	return TagToDiagnosticID(serverEntry.GetTag())
 }
 
 // GenerateServerEntryTag creates a server entry tag value that is

@@ -24,4 +24,5 @@ message IrregularTunnel {
     optional int64 listener_port_number = 110;
     optional string listener_protocol = 111;
     optional string tunnel_error = 112;
+    optional string server_entry_tag = 113;
 }

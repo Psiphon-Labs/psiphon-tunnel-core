@@ -213,6 +213,7 @@ type ServerLoad struct {
 	UdpPortForwards                         *int64                 `protobuf:"varint,142,opt,name=udp_port_forwards,json=udpPortForwards,proto3,oneof" json:"udp_port_forwards,omitempty"`
 	TotalTcpPortForwards                    *int64                 `protobuf:"varint,143,opt,name=total_tcp_port_forwards,json=totalTcpPortForwards,proto3,oneof" json:"total_tcp_port_forwards,omitempty"`
 	TotalUdpPortForwards                    *int64                 `protobuf:"varint,144,opt,name=total_udp_port_forwards,json=totalUdpPortForwards,proto3,oneof" json:"total_udp_port_forwards,omitempty"`
+	ServerEntryTag                          *string                `protobuf:"bytes,145,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
 	unknownFields                           protoimpl.UnknownFields
 	sizeCache                               protoimpl.SizeCache
 }
@@ -562,6 +563,13 @@ func (x *ServerLoad) GetTotalUdpPortForwards() int64 {
 	return 0
 }
 
+func (x *ServerLoad) GetServerEntryTag() string {
+	if x != nil && x.ServerEntryTag != nil {
+		return *x.ServerEntryTag
+	}
+	return ""
+}
+
 var File_ca_psiphon_psiphond_server_load_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
@@ -588,7 +596,7 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"_dns_countB\x0f\n" +
 	"\r_dns_durationB\x13\n" +
 	"\x11_dns_failed_countB\x16\n" +
-	"\x14_dns_failed_duration\"\xbc!\n" +
+	"\x14_dns_failed_duration\"\x81\"\n" +
 	"\n" +
 	"ServerLoad\x12$\n" +
 	"\vcpu_percent\x18d \x01(\x01H\x00R\n" +
@@ -639,7 +647,8 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"*udp_port_forward_rejected_disallowed_count\x18\x8d\x01 \x01(\x03H)R%udpPortForwardRejectedDisallowedCount\x88\x01\x01\x120\n" +
 	"\x11udp_port_forwards\x18\x8e\x01 \x01(\x03H*R\x0fudpPortForwards\x88\x01\x01\x12;\n" +
 	"\x17total_tcp_port_forwards\x18\x8f\x01 \x01(\x03H+R\x14totalTcpPortForwards\x88\x01\x01\x12;\n" +
-	"\x17total_udp_port_forwards\x18\x90\x01 \x01(\x03H,R\x14totalUdpPortForwards\x88\x01\x01B\x0e\n" +
+	"\x17total_udp_port_forwards\x18\x90\x01 \x01(\x03H,R\x14totalUdpPortForwards\x88\x01\x01\x12.\n" +
+	"\x10server_entry_tag\x18\x91\x01 \x01(\tH-R\x0eserverEntryTag\x88\x01\x01B\x0e\n" +
 	"\f_cpu_percentB\r\n" +
 	"\v_heap_allocB\f\n" +
 	"\n" +
@@ -686,7 +695,8 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"+_udp_port_forward_rejected_disallowed_countB\x14\n" +
 	"\x12_udp_port_forwardsB\x1a\n" +
 	"\x18_total_tcp_port_forwardsB\x1a\n" +
-	"\x18_total_udp_port_forwardsBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x18_total_udp_port_forwardsB\x13\n" +
+	"\x11_server_entry_tagBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_load_proto_rawDescOnce sync.Once
