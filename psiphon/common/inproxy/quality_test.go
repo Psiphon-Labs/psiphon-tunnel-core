@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 	lrucache "github.com/cognusion/go-cache-lru"
 )
 
@@ -138,7 +139,7 @@ func runTestProxyQualityReporter() error {
 	// exercised in TestInproxy.
 
 	r, err := NewProxyQualityReporter(
-		newTestLogger(),
+		testutils.NewTestLogger(),
 		nil,
 		SessionPrivateKey{},
 		nil,

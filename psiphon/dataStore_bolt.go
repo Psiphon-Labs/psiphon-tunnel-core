@@ -170,6 +170,7 @@ func tryDatastoreOpenDB(
 			datastoreSpeedTestSamplesBucket,
 			datastoreDialParametersBucket,
 			datastoreNetworkReplayParametersBucket,
+			datastoreDSLOSLStatesBucket,
 		}
 		for _, bucket := range requiredBuckets {
 			_, err := tx.CreateBucketIfNotExists(bucket)

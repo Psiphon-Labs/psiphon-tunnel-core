@@ -20,12 +20,12 @@ import "ca.psiphon.psiphond/unique_user.proto";
 option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
 
 message Psiphond {
-  optional google.protobuf.Timestamp timestamp = 1;
+  google.protobuf.Timestamp timestamp = 1;
 
-  optional string host_id = 2;
-  optional string host_type = 3;
-  optional string host_build_rev = 4;
-  optional string provider = 5;
+  string host_id = 2;
+  string host_type = 3;
+  string host_build_rev = 4;
+  string provider = 5;
  
   oneof metric {
     ca.psiphon.psiphond.DomainBytes domain_bytes = 101;

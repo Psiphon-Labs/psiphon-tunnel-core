@@ -514,6 +514,18 @@ type BrokerServerReport struct {
 	ProxyPortMappingTypes PortMappingTypes `cbor:"6,keyasint,omitempty"`
 }
 
+// ClientDSLRequest is a client DSL request that the broker relays to the DSL
+// backend. The broker's role is to provide a blocking resistant initial
+// hop; DSL requests are not direct components of the in-proxy protocol.
+type ClientDSLRequest struct {
+	RequestPayload []byte `cbor:"1,keyasint,omitempty"`
+}
+
+// ClientDSLResponse is a DSL response relayed back to the client.
+type ClientDSLResponse struct {
+	ResponsePayload []byte `cbor:"1,keyasint,omitempty"`
+}
+
 // ProxyQualityKey is the key that proxy quality is indexed on a proxy ID and
 // a proxy ASN. Quality is tracked at a fine-grained level, with the proxy ID
 // representing, typically, an individual device, and the proxy ASN
@@ -1162,5 +1174,27 @@ func MarshalServerProxyQualityResponse(response *ServerProxyQualityResponse) ([]
 func UnmarshalServerProxyQualityResponse(payload []byte) (*ServerProxyQualityResponse, error) {
 	var response *ServerProxyQualityResponse
 	err := unmarshalRecord(recordTypeAPIServerProxyQualityResponse, payload, &response)
+	return response, errors.Trace(err)
+}
+
+func MarshalClientDSLRequest(request *ClientDSLRequest) ([]byte, error) {
+	payload, err := marshalRecord(request, recordTypeAPIClientDSLRequest)
+	return payload, errors.Trace(err)
+}
+
+func UnmarshalClientDSLRequest(payload []byte) (*ClientDSLRequest, error) {
+	var request *ClientDSLRequest
+	err := unmarshalRecord(recordTypeAPIClientDSLRequest, payload, &request)
+	return request, errors.Trace(err)
+}
+
+func MarshalClientDSLResponse(response *ClientDSLResponse) ([]byte, error) {
+	payload, err := marshalRecord(response, recordTypeAPIClientDSLResponse)
+	return payload, errors.Trace(err)
+}
+
+func UnmarshalClientDSLResponse(payload []byte) (*ClientDSLResponse, error) {
+	var response *ClientDSLResponse
+	err := unmarshalRecord(recordTypeAPIClientDSLResponse, payload, &response)
 	return response, errors.Trace(err)
 }

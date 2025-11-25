@@ -241,6 +241,14 @@ type Config struct {
 	// recommended.
 	ConnectionWorkerPoolSize int `json:",omitempty"`
 
+	// DisableConnectionWorkerPool forces ConnectionWorkerPoolSize to 0; this
+	// may be used to load cached tactics or perform an untunneled tactics
+	// request and then post tactics-related notices, including Application
+	// Parameters, without establishing a tunnel. When
+	// DisableConnectionWorkerPool is set, server list bootstrapping remains
+	// enabled.
+	DisableConnectionWorkerPool bool `json:",omitempty"`
+
 	// TunnelPoolSize specifies how many tunnels to run in parallel. Port
 	// forwards are multiplexed over multiple tunnels. If omitted or when 0,
 	// the default is TUNNEL_POOL_SIZE, which is recommended. Any value over
@@ -689,6 +697,11 @@ type Config struct {
 	// 60 seconds.
 	ShutdownGoroutineProfileDeadlineSeconds *int `json:",omitempty"`
 
+	// DisableDSLFetcher disables DSL fetches. If set, this overrides the
+	// EnableDSLFetcher tactics parameter. This may be used for special case
+	// temporary tunnels.
+	DisableDSLFetcher bool `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//
@@ -835,14 +848,14 @@ type Config struct {
 	LivenessTestMaxDownstreamBytes *int                         `json:",omitempty"`
 
 	// ReplayCandidateCount and other Replay fields are for testing purposes.
-	ReplayCandidateCount                   *int     `json:",omitempty"`
-	ReplayDialParametersTTLSeconds         *int     `json:",omitempty"`
-	ReplayTargetUpstreamBytes              *int     `json:",omitempty"`
-	ReplayTargetDownstreamBytes            *int     `json:",omitempty"`
-	ReplayTargetTunnelDurationSeconds      *int     `json:",omitempty"`
-	ReplayLaterRoundMoveToFrontProbability *float64 `json:",omitempty"`
-	ReplayRetainFailedProbability          *float64 `json:",omitempty"`
-	ReplayIgnoreChangedConfigState         *bool    `json:",omitempty"`
+	ReplayCandidateCount                      *int     `json:",omitempty"`
+	ReplayDialParametersTTLSeconds            *int     `json:",omitempty"`
+	ReplayTargetUpstreamBytes                 *int     `json:",omitempty"`
+	ReplayTargetDownstreamBytes               *int     `json:",omitempty"`
+	ReplayTargetTunnelDurationSeconds         *int     `json:",omitempty"`
+	ReplayLaterRoundMoveToFrontProbability    *float64 `json:",omitempty"`
+	ReplayRetainFailedProbability             *float64 `json:",omitempty"`
+	ReplayIgnoreChangedConfigStateProbability *float64 `json:",omitempty"`
 
 	// NetworkLatencyMultiplierMin and other NetworkLatencyMultiplier fields are
 	// for testing purposes.
@@ -864,9 +877,6 @@ type Config struct {
 	ClientBurstUpstreamDeadlineMilliseconds   *int `json:",omitempty"`
 	ClientBurstDownstreamTargetBytes          *int `json:",omitempty"`
 	ClientBurstDownstreamDeadlineMilliseconds *int `json:",omitempty"`
-
-	// ApplicationParameters is for testing purposes.
-	ApplicationParameters parameters.KeyValues `json:",omitempty"`
 
 	// CustomHostNameRegexes and other custom host name fields are for testing
 	// purposes.
@@ -1100,6 +1110,10 @@ type Config struct {
 	InproxyEnableWebRTCDebugLogging bool `json:",omitempty"`
 
 	NetworkIDCacheTTLMilliseconds *int `json:",omitempty"`
+
+	CompressTactics *bool `json:",omitempty"`
+
+	EnableDSLFetcher *bool `json:",omitempty"`
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -1526,8 +1540,8 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.Trace(err)
 	}
 
-	// parametersParameters.Set will validate the config fields applied to
-	// parametersParameters.
+	// parameters.Parameters.Set will validate the config fields applied to
+	// parameters.Parameters.
 
 	err = config.SetParameters("", false, nil)
 	if err != nil {
@@ -1681,7 +1695,8 @@ func (config *Config) GetParameters() *parameters.Parameters {
 //
 // If there is an error, the existing Config.parameters are left
 // entirely unmodified.
-func (config *Config) SetParameters(tag string, skipOnError bool, applyParameters map[string]interface{}) error {
+func (config *Config) SetParameters(
+	tag string, skipOnError bool, applyParameters map[string]interface{}) error {
 
 	setParameters := []map[string]interface{}{config.makeConfigParameters()}
 	if applyParameters != nil {
@@ -1733,12 +1748,12 @@ func (config *Config) SetParameters(tag string, skipOnError bool, applyParameter
 	// Application Parameters are feature flags/config info, delivered as Client
 	// Parameters via tactics/etc., to be communicated to the outer application.
 	// Emit these now, as notices.
-	if p.WeightedCoinFlip(parameters.ApplicationParametersProbability) {
+	//
+	// Only emit when tactics are received (applyParameters != nil), to avoid
+	// triggering the outer application with empty Application Parameters via
+	// the SetParameters call from Commit.
+	if applyParameters != nil {
 		NoticeApplicationParameters(p.KeyValues(parameters.ApplicationParameters))
-	} else {
-		// The front end may persist Application Parameters, so clear any previously
-		// persisted values.
-		NoticeApplicationParameters(parameters.KeyValues{})
 	}
 
 	// Signal all registered TacticsAppliedReceivers that new tactics have
@@ -2178,8 +2193,8 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.ReplayRetainFailedProbability] = *config.ReplayRetainFailedProbability
 	}
 
-	if config.ReplayIgnoreChangedConfigState != nil {
-		applyParameters[parameters.ReplayIgnoreChangedConfigState] = *config.ReplayIgnoreChangedConfigState
+	if config.ReplayIgnoreChangedConfigStateProbability != nil {
+		applyParameters[parameters.ReplayIgnoreChangedConfigStateProbability] = *config.ReplayIgnoreChangedConfigStateProbability
 	}
 
 	if config.UseOnlyCustomTLSProfiles != nil {
@@ -2216,10 +2231,6 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.ClientBurstDownstreamDeadlineMilliseconds != nil {
 		applyParameters[parameters.ClientBurstDownstreamDeadline] = fmt.Sprintf("%dms", *config.ClientBurstDownstreamDeadlineMilliseconds)
-	}
-
-	if config.ApplicationParameters != nil {
-		applyParameters[parameters.ApplicationParameters] = config.ApplicationParameters
 	}
 
 	if config.CustomHostNameRegexes != nil {
@@ -2888,6 +2899,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.NetworkIDCacheTTLMilliseconds != nil {
 		applyParameters[parameters.NetworkIDCacheTTL] = fmt.Sprintf("%dms", *config.NetworkIDCacheTTLMilliseconds)
+	}
+
+	if config.CompressTactics != nil {
+		applyParameters[parameters.CompressTactics] = *config.CompressTactics
+	}
+
+	if config.EnableDSLFetcher != nil {
+		applyParameters[parameters.EnableDSLFetcher] = *config.EnableDSLFetcher
 	}
 
 	// When adding new config dial parameters that may override tactics, also

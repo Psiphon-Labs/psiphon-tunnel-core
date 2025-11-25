@@ -35,7 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
-	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 )
 
 func TestTactics(t *testing.T) {
@@ -156,6 +156,8 @@ func TestTactics(t *testing.T) {
 
 	expectedApplyCount := 3
 
+	compressTacticsEnabled := true
+
 	tacticsConfig := fmt.Sprintf(
 		tacticsConfigTemplate,
 		encodedRequestPublicKey,
@@ -185,7 +187,7 @@ func TestTactics(t *testing.T) {
 
 	clientGeoIPData := common.GeoIPData{Country: "R1", ASN: "1"}
 
-	logger := newTestLogger()
+	logger := testutils.NewTestLogger()
 
 	validator := func(
 		apiParams common.APIParameters) error {
@@ -381,6 +383,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -457,6 +460,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -539,6 +543,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -583,7 +588,10 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("SetTacticsAPIParameters failed: %s", err)
 	}
 
-	tacticsPayload, err := server.GetTacticsPayload(clientGeoIPData, handshakeParams)
+	// FetchTactics will exercise the compression case.
+	compressPayload := false
+
+	tacticsPayload, err := server.GetTacticsPayload(clientGeoIPData, handshakeParams, compressPayload)
 	if err != nil {
 		t.Fatalf("GetTacticsPayload failed: %s", err)
 	}
@@ -669,6 +677,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams2,
 		endPointProtocol,
 		endPointRegion,
@@ -739,6 +748,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -754,6 +764,7 @@ func TestTactics(t *testing.T) {
 		params,
 		storer,
 		getNetworkID,
+		compressTacticsEnabled,
 		apiParams,
 		endPointProtocol,
 		endPointRegion,
@@ -791,7 +802,7 @@ func TestTactics(t *testing.T) {
 		t.Fatalf("Server config failed to reload")
 	}
 
-	_, err = server.GetTacticsPayload(clientGeoIPData, handshakeParams)
+	_, err = server.GetTacticsPayload(clientGeoIPData, handshakeParams, compressPayload)
 	if err != nil {
 		t.Fatalf("GetTacticsPayload failed: %s", err)
 	}
@@ -1194,55 +1205,4 @@ func (s *testStorer) SetSpeedTestSamplesRecord(networkID string, record []byte) 
 
 func (s *testStorer) GetSpeedTestSamplesRecord(networkID string) ([]byte, error) {
 	return s.speedTestSampleRecords[networkID], nil
-}
-
-type testLogger struct {
-}
-
-func newTestLogger() *testLogger {
-	return &testLogger{}
-}
-
-func (l *testLogger) WithTrace() common.LogTrace {
-	return &testLoggerTrace{trace: stacktrace.GetParentFunctionName()}
-}
-
-func (l *testLogger) WithTraceFields(fields common.LogFields) common.LogTrace {
-	return &testLoggerTrace{
-		trace:  stacktrace.GetParentFunctionName(),
-		fields: fields,
-	}
-}
-
-func (l *testLogger) LogMetric(metric string, fields common.LogFields) {
-	fmt.Printf("METRIC: %s: fields=%+v\n", metric, fields)
-}
-
-func (l *testLogger) IsLogLevelDebug() bool {
-	return true
-}
-
-type testLoggerTrace struct {
-	trace  string
-	fields common.LogFields
-}
-
-func (l *testLoggerTrace) log(priority, message string) {
-	fmt.Printf("%s: %s: %s fields=%+v\n", priority, l.trace, message, l.fields)
-}
-
-func (l *testLoggerTrace) Debug(args ...interface{}) {
-	l.log("DEBUG", fmt.Sprint(args...))
-}
-
-func (l *testLoggerTrace) Info(args ...interface{}) {
-	l.log("INFO", fmt.Sprint(args...))
-}
-
-func (l *testLoggerTrace) Warning(args ...interface{}) {
-	l.log("WARNING", fmt.Sprint(args...))
-}
-
-func (l *testLoggerTrace) Error(args ...interface{}) {
-	l.log("ERROR", fmt.Sprint(args...))
 }

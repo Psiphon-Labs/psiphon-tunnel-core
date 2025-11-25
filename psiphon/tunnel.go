@@ -1588,10 +1588,14 @@ func dialInproxy(
 	}
 
 	// Unlike the proxy broker case, clients already actively fetch tactics
-	// during tunnel estalishment, so tactics.SetTacticsAPIParameters are not
+	// during tunnel establishment, so tactics.SetTacticsAPIParameters are not
 	// sent to the broker and no tactics are returned by the broker.
+	//
+	// No padding is added via the params as this is provided by the broker
+	// request obfuscation layer.
+	includeSessionID := true
 	params := getBaseAPIParameters(
-		baseParametersNoDialParameters, true, config, nil)
+		baseParametersNoDialParameters, nil, includeSessionID, config, nil)
 
 	// The debugLogging flag is passed to both NoticeCommonLogger and to the
 	// inproxy package as well; skipping debug logs in the inproxy package,

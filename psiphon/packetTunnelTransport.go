@@ -35,11 +35,8 @@ import (
 // disconnect from and reconnect to the same or different Psiphon servers. PacketTunnelTransport
 // allows the Psiphon client to substitute new transport channels on-the-fly.
 type PacketTunnelTransport struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	readTimeout   int64
-	readDeadline  int64
+	readTimeout   atomic.Int64
+	readDeadline  atomic.Int64
 	closed        int32
 	workers       *sync.WaitGroup
 	readMutex     sync.Mutex
@@ -88,7 +85,7 @@ func (p *PacketTunnelTransport) Read(data []byte) (int, error) {
 
 		// Clear the read deadline now that a read has succeeded.
 		// See read deadline comment in Write.
-		atomic.StoreInt64(&p.readDeadline, 0)
+		p.readDeadline.Store(0)
 	}
 
 	return n, errors.Trace(err)
@@ -148,7 +145,7 @@ func (p *PacketTunnelTransport) Write(data []byte) (int, error) {
 		// Access to readDeadline/readTimeout is not intended to be completely
 		// atomic.
 
-		readDeadline := monotime.Time(atomic.LoadInt64(&p.readDeadline))
+		readDeadline := monotime.Time(p.readDeadline.Load())
 
 		if readDeadline > 0 {
 
@@ -160,7 +157,7 @@ func (p *PacketTunnelTransport) Write(data []byte) (int, error) {
 				}
 
 				// Clear the deadline now that a probe is triggered.
-				atomic.StoreInt64(&p.readDeadline, 0)
+				p.readDeadline.Store(0)
 			}
 
 			// Keep an existing deadline as set: subsequent writes attempts shouldn't
@@ -168,9 +165,9 @@ func (p *PacketTunnelTransport) Write(data []byte) (int, error) {
 
 		} else {
 
-			readTimeout := time.Duration(atomic.LoadInt64(&p.readTimeout))
+			readTimeout := time.Duration(p.readTimeout.Load())
 			readDeadline := monotime.Now().Add(readTimeout)
-			atomic.StoreInt64(&p.readDeadline, int64(readDeadline))
+			p.readDeadline.Store(int64(readDeadline))
 		}
 	}
 
@@ -273,8 +270,8 @@ func (p *PacketTunnelTransport) setChannel(
 		GetParameters().
 		GetCustom(channelTunnel.dialParams.NetworkLatencyMultiplier).
 		Duration(parameters.PacketTunnelReadTimeout)
-	atomic.StoreInt64(&p.readTimeout, int64(timeout))
-	atomic.StoreInt64(&p.readDeadline, 0)
+	p.readTimeout.Store(int64(timeout))
+	p.readDeadline.Store(0)
 
 	p.channelReady.Broadcast()
 }

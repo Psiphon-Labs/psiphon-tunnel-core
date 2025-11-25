@@ -31,6 +31,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 )
 
 func TestMatcher(t *testing.T) {
@@ -47,7 +48,7 @@ func runTestMatcher() error {
 	rateLimitQuantity := 100
 	rateLimitInterval := 1000 * time.Millisecond
 
-	logger := newTestLogger()
+	logger := testutils.NewTestLogger()
 
 	m := NewMatcher(
 		&MatcherConfig{
@@ -1164,7 +1165,7 @@ func BenchmarkMatcherQueue(b *testing.B) {
 
 				m = NewMatcher(
 					&MatcherConfig{
-						Logger:     newTestLogger(),
+						Logger:     testutils.NewTestLogger(),
 						AllowMatch: func(common.GeoIPData, common.GeoIPData) bool { return true },
 					})
 

@@ -48,17 +48,14 @@ import (
 // durationNanoseconds, which is the time since the last read, is reported
 // only on reads.
 type ActivityMonitoredConn struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	monotonicStartTime   int64
-	lastReadActivityTime int64
-	realStartTime        time.Time
 	net.Conn
-	inactivityTimeout time.Duration
-	activeOnWrite     bool
-	activityUpdaters  []ActivityUpdater
-	lruEntry          *LRUConnsEntry
+	monotonicStartTime   int64
+	lastReadActivityTime atomic.Int64
+	realStartTime        time.Time
+	inactivityTimeout    time.Duration
+	activeOnWrite        bool
+	activityUpdaters     []ActivityUpdater
+	lruEntry             *LRUConnsEntry
 }
 
 // ActivityUpdater defines an interface for receiving updates for
@@ -88,16 +85,17 @@ func NewActivityMonitoredConn(
 
 	now := int64(monotime.Now())
 
-	return &ActivityMonitoredConn{
-		Conn:                 conn,
-		inactivityTimeout:    inactivityTimeout,
-		activeOnWrite:        activeOnWrite,
-		realStartTime:        time.Now(),
-		monotonicStartTime:   now,
-		lastReadActivityTime: now,
-		lruEntry:             lruEntry,
-		activityUpdaters:     activityUpdaters,
-	}, nil
+	activityConn := &ActivityMonitoredConn{
+		Conn:               conn,
+		inactivityTimeout:  inactivityTimeout,
+		activeOnWrite:      activeOnWrite,
+		realStartTime:      time.Now(),
+		monotonicStartTime: now,
+		lruEntry:           lruEntry,
+		activityUpdaters:   activityUpdaters,
+	}
+	activityConn.lastReadActivityTime.Store(now)
+	return activityConn, nil
 }
 
 // GetStartTime gets the time when the ActivityMonitoredConn was initialized.
@@ -110,7 +108,7 @@ func (conn *ActivityMonitoredConn) GetStartTime() time.Time {
 // the ActivityMonitoredConn and the last Read. Only reads are used for this
 // calculation since writes may succeed locally due to buffering.
 func (conn *ActivityMonitoredConn) GetActiveDuration() time.Duration {
-	return time.Duration(atomic.LoadInt64(&conn.lastReadActivityTime) - conn.monotonicStartTime)
+	return time.Duration(conn.lastReadActivityTime.Load() - conn.monotonicStartTime)
 }
 
 func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
@@ -124,10 +122,10 @@ func (conn *ActivityMonitoredConn) Read(buffer []byte) (int, error) {
 			}
 		}
 
-		lastReadActivityTime := atomic.LoadInt64(&conn.lastReadActivityTime)
+		lastReadActivityTime := conn.lastReadActivityTime.Load()
 		readActivityTime := int64(monotime.Now())
 
-		atomic.StoreInt64(&conn.lastReadActivityTime, readActivityTime)
+		conn.lastReadActivityTime.Store(readActivityTime)
 
 		for _, activityUpdater := range conn.activityUpdaters {
 			activityUpdater.UpdateProgress(

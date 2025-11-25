@@ -186,6 +186,34 @@ type TrafficValues struct {
 	PortForwardDurationNanoseconds int64
 }
 
+type trafficCounters struct {
+	bytesRead                      atomic.Int64
+	bytesWritten                   atomic.Int64
+	portForwardDurationNanoseconds atomic.Int64
+}
+
+func newTrafficCounters() *trafficCounters {
+	return &trafficCounters{}
+}
+
+func (c *trafficCounters) add(bytesRead, bytesWritten, durationNanoseconds int64) {
+	c.bytesRead.Add(bytesRead)
+	c.bytesWritten.Add(bytesWritten)
+	c.portForwardDurationNanoseconds.Add(durationNanoseconds)
+}
+
+func (c *trafficCounters) exceeds(target *TrafficValues) bool {
+	return c.bytesRead.Load() >= target.BytesRead &&
+		c.bytesWritten.Load() >= target.BytesWritten &&
+		c.portForwardDurationNanoseconds.Load() >= target.PortForwardDurationNanoseconds
+}
+
+func (c *trafficCounters) reset() {
+	c.bytesRead.Store(0)
+	c.bytesWritten.Store(0)
+	c.portForwardDurationNanoseconds.Store(0)
+}
+
 // KeySplit defines a secret key splitting scheme where the secret is split
 // into n (total) shares and any K (threshold) of N shares must be known
 // to recostruct the split secret.
@@ -208,12 +236,9 @@ type ClientSeedState struct {
 // ClientSeedProgress tracks client progress towards seeding SLOKs for
 // a particular scheme.
 type ClientSeedProgress struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	progressSLOKTime int64
+	progressSLOKTime atomic.Int64
 	scheme           *Scheme
-	trafficProgress  []*TrafficValues
+	trafficProgress  []*trafficCounters
 }
 
 // ClientSeedPortForward map a client port forward, which is relaying
@@ -413,17 +438,17 @@ func (config *Config) NewClientSeedState(
 
 			// Empty progress is initialized up front for all seed specs. Once
 			// created, the progress structure is read-only (the slice, not the
-			// TrafficValue fields); this permits lock-free operation.
-			trafficProgress := make([]*TrafficValues, len(scheme.SeedSpecs))
+			// counter fields); this permits lock-free operation.
+			trafficProgress := make([]*trafficCounters, len(scheme.SeedSpecs))
 			for index := 0; index < len(scheme.SeedSpecs); index++ {
-				trafficProgress[index] = &TrafficValues{}
+				trafficProgress[index] = newTrafficCounters()
 			}
 
 			seedProgress := &ClientSeedProgress{
-				scheme:           scheme,
-				progressSLOKTime: getSLOKTime(scheme.SeedPeriodNanoseconds),
-				trafficProgress:  trafficProgress,
+				scheme:          scheme,
+				trafficProgress: trafficProgress,
 			}
+			seedProgress.progressSLOKTime.Store(getSLOKTime(scheme.SeedPeriodNanoseconds))
 
 			state.seedProgress = append(state.seedProgress, seedProgress)
 		}
@@ -585,7 +610,7 @@ func (portForward *ClientSeedPortForward) UpdateProgress(
 		// As it acquires the state mutex, issueSLOKs may stall other port
 		// forwards for this client. The delay is minimized by SLOK caching,
 		// which avoids redundant crypto operations.
-		if slokTime != atomic.LoadInt64(&seedProgress.progressSLOKTime) {
+		if slokTime != seedProgress.progressSLOKTime.Load() {
 			portForward.state.mutex.Lock()
 			portForward.state.issueSLOKs()
 			portForward.state.mutex.Unlock()
@@ -608,9 +633,7 @@ func (portForward *ClientSeedPortForward) UpdateProgress(
 
 		alreadyExceedsTargets := trafficProgress.exceeds(&seedSpec.Targets)
 
-		atomic.AddInt64(&trafficProgress.BytesRead, bytesRead)
-		atomic.AddInt64(&trafficProgress.BytesWritten, bytesWritten)
-		atomic.AddInt64(&trafficProgress.PortForwardDurationNanoseconds, durationNanoseconds)
+		trafficProgress.add(bytesRead, bytesWritten, durationNanoseconds)
 
 		// With the target newly met for a SeedSpec, a new
 		// SLOK *may* be issued.
@@ -618,13 +641,6 @@ func (portForward *ClientSeedPortForward) UpdateProgress(
 			portForward.state.sendIssueSLOKsSignal()
 		}
 	}
-}
-
-func (lhs *TrafficValues) exceeds(rhs *TrafficValues) bool {
-	return atomic.LoadInt64(&lhs.BytesRead) >= atomic.LoadInt64(&rhs.BytesRead) &&
-		atomic.LoadInt64(&lhs.BytesWritten) >= atomic.LoadInt64(&rhs.BytesWritten) &&
-		atomic.LoadInt64(&lhs.PortForwardDurationNanoseconds) >=
-			atomic.LoadInt64(&rhs.PortForwardDurationNanoseconds)
 }
 
 // issueSLOKs checks client progress against each candidate seed spec
@@ -645,7 +661,7 @@ func (state *ClientSeedState) issueSLOKs() {
 
 	for _, seedProgress := range state.seedProgress {
 
-		progressSLOKTime := time.Unix(0, seedProgress.progressSLOKTime)
+		progressSLOKTime := time.Unix(0, seedProgress.progressSLOKTime.Load())
 
 		for index, trafficProgress := range seedProgress.trafficProgress {
 
@@ -680,15 +696,13 @@ func (state *ClientSeedState) issueSLOKs() {
 
 		slokTime := getSLOKTime(seedProgress.scheme.SeedPeriodNanoseconds)
 
-		if slokTime != atomic.LoadInt64(&seedProgress.progressSLOKTime) {
-			atomic.StoreInt64(&seedProgress.progressSLOKTime, slokTime)
+		if slokTime != seedProgress.progressSLOKTime.Load() {
+			seedProgress.progressSLOKTime.Store(slokTime)
 			// The progress map structure is not reset or modifed; instead
 			// the mapped accumulator values are zeroed. Concurrently, port
 			// forward relay goroutines continue to add to these accumulators.
 			for _, trafficProgress := range seedProgress.trafficProgress {
-				atomic.StoreInt64(&trafficProgress.BytesRead, 0)
-				atomic.StoreInt64(&trafficProgress.BytesWritten, 0)
-				atomic.StoreInt64(&trafficProgress.PortForwardDurationNanoseconds, 0)
+				trafficProgress.reset()
 			}
 		}
 	}

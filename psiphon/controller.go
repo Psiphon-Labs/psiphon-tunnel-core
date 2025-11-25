@@ -47,6 +47,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	utls "github.com/Psiphon-Labs/utls"
 	lrucache "github.com/cognusion/go-cache-lru"
+	"github.com/fxamacker/cbor/v2"
 	"golang.org/x/time/rate"
 )
 
@@ -84,6 +85,8 @@ type Controller struct {
 	untunneledSplitTunnelClassifications    *lrucache.Cache
 	signalFetchCommonRemoteServerList       chan struct{}
 	signalFetchObfuscatedServerLists        chan struct{}
+	signalUntunneledDSLFetch                chan struct{}
+	signalTunneledDSLFetch                  chan struct{}
 	signalDownloadUpgrade                   chan string
 	signalReportServerEntries               chan *serverEntriesReportRequest
 	signalReportConnected                   chan struct{}
@@ -163,6 +166,8 @@ func NewController(config *Config) (controller *Controller, err error) {
 		// establish will eventually signal another fetch remote.
 		signalFetchCommonRemoteServerList: make(chan struct{}),
 		signalFetchObfuscatedServerLists:  make(chan struct{}),
+		signalUntunneledDSLFetch:          make(chan struct{}),
+		signalTunneledDSLFetch:            make(chan struct{}),
 		signalDownloadUpgrade:             make(chan string),
 		signalReportConnected:             make(chan struct{}),
 
@@ -415,6 +420,29 @@ func (controller *Controller) Run(ctx context.Context) {
 				FetchObfuscatedServerLists,
 				controller.signalFetchObfuscatedServerLists)
 		}
+	}
+
+	if !controller.config.DisableDSLFetcher {
+
+		controller.runWaitGroup.Add(1)
+		go func() {
+			defer controller.runWaitGroup.Done()
+			runUntunneledDSLFetcher(
+				controller.runCtx,
+				controller.config,
+				controller.inproxyClientBrokerClientManager,
+				controller.signalUntunneledDSLFetch)
+		}()
+
+		controller.runWaitGroup.Add(1)
+		go func() {
+			defer controller.runWaitGroup.Done()
+			runTunneledDSLFetcher(
+				controller.runCtx,
+				controller.config,
+				controller.getNextActiveTunnel,
+				controller.signalTunneledDSLFetch)
+		}()
 	}
 
 	if controller.config.InproxyEnableProxy {
@@ -1152,6 +1180,15 @@ loop:
 				// tunnel is established.
 				controller.signalConnectedReporter()
 
+				// Signal a tunneled DSL fetch. The tunneled fetch is similar
+				// to the handshake API discovery mechanism:
+				// opportunistically distribute a small number of new server
+				// entries to clients that are already able to connect.
+				select {
+				case controller.signalTunneledDSLFetch <- struct{}{}:
+				default:
+				}
+
 				// If the handshake indicated that a new client version is available,
 				// trigger an upgrade download.
 				// Note: serverContext is nil when DisableApi is set
@@ -1217,6 +1254,20 @@ func (controller *Controller) SignalSeededNewSLOK() {
 	case controller.signalFetchObfuscatedServerLists <- struct{}{}:
 	default:
 	}
+
+	// Reset any delay for the next tunneled DSL request. The next time a
+	// tunnel connects, the DSL request will launch, and the fetcher will
+	// attempt to reassemble OSLs, now with this new SLOK.
+	//
+	// The delay for the next untunneled DSL request is not reset since that
+	// request typically fetches many more server entries, which is more
+	// appropriate for when a client is unable to connect. Receiving a new
+	// SLOK implies the client is currently connected and is likely to
+	// reconnect again and arrive at the tunneled DSL request.
+	//
+	// TODO: launch an immediate tunneled DSL request?
+
+	_ = DSLSetLastTunneledFetchTime(time.Time{})
 }
 
 // SignalTunnelFailure implements the TunnelOwner interface. This function
@@ -1538,10 +1589,10 @@ func (controller *Controller) DirectDial(remoteAddr string) (conn net.Conn, err 
 	return DialTCP(controller.runCtx, remoteAddr, controller.untunneledDialConfig)
 }
 
-// triggerFetches signals RSL, OSL, and upgrade download fetchers to begin, if
-// not already running. triggerFetches is called when tunnel establishment
-// fails to complete within a deadline and in other cases where local
-// circumvention capabilities are lacking and we may require new server
+// triggerFetches signals RSL, OSL, DSL, and upgrade download fetchers to
+// begin, if not already running. triggerFetches is called when tunnel
+// establishment fails to complete within a deadline and in other cases where
+// local circumvention capabilities are lacking and we may require new server
 // entries or client versions with new capabilities.
 func (controller *Controller) triggerFetches() {
 
@@ -1557,11 +1608,19 @@ func (controller *Controller) triggerFetches() {
 	default:
 	}
 
-	// Trigger an OSL fetch in parallel. Both fetches are run in parallel
-	// so that if one out of the common RLS and OSL set is large, it doesn't
-	// doesn't entirely block fetching the other.
+	// Trigger an OSL fetch in parallel. Server list fetches are run in
+	// parallel so that if one fetch is large or slow, it doesn't doesn't
+	// entirely block fetching the others.
 	select {
 	case controller.signalFetchObfuscatedServerLists <- struct{}{}:
+	default:
+	}
+
+	// Trigger the untunneled DSL fetch. The untunneled DSL fetch is similar
+	// to the classic RSL and OSL fetches in that it will attempt to download
+	// a larger, diverse selection of servers.
+	select {
+	case controller.signalUntunneledDSLFetch <- struct{}{}:
 	default:
 	}
 
@@ -2074,6 +2133,12 @@ func (controller *Controller) launchEstablishing() {
 	// same server will trigger rate limiting.
 	if controller.config.TargetServerEntry != "" {
 		workerPoolSize = 1
+	}
+
+	// When DisableConnectionWorkerPool is set, no tunnel establishment
+	// workers are run. See Config.DisableConnectionWorkerPool.
+	if controller.config.DisableConnectionWorkerPool {
+		workerPoolSize = 0
 	}
 
 	// TunnelPoolSize may be set by tactics, subject to local constraints. A pool
@@ -3313,8 +3378,9 @@ func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParamet
 
 	// TODO: include broker fronting dial parameters to be logged by the
 	// broker.
+	includeSessionID := true
 	params := getBaseAPIParameters(
-		baseParametersNoDialParameters, true, controller.config, nil)
+		baseParametersNoDialParameters, nil, includeSessionID, controller.config, nil)
 
 	if controller.config.DisableTactics {
 		return params, "", nil
@@ -3334,6 +3400,14 @@ func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParamet
 			GetTacticsStorer(controller.config), networkID, params)
 		if err != nil {
 			return nil, "", errors.Trace(err)
+		}
+
+		p := controller.config.GetParameters().Get()
+		compressTactics := compressTacticsEnabled && p.Bool(parameters.CompressTactics)
+		p.Close()
+
+		if compressTactics {
+			protocol.SetCompressTactics(params)
 		}
 	}
 
@@ -3370,7 +3444,7 @@ func (controller *Controller) inproxyMakeProxyWebRTCDialCoordinator() (
 // inproxyHandleTacticsPayload duplicates some tactics-handling code from
 // doHandshakeRequest.
 func (controller *Controller) inproxyHandleProxyTacticsPayload(
-	networkID string, tacticsPayload []byte) bool {
+	networkID string, compressTactics bool, tacticsPayload []byte) bool {
 
 	if controller.config.DisableTactics {
 		return false
@@ -3381,8 +3455,14 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 		return false
 	}
 
+	var payloadUnmarshaler func([]byte, any) error
+	payloadUnmarshaler = json.Unmarshal
+	if compressTactics {
+		payloadUnmarshaler = cbor.Unmarshal
+	}
+
 	var payload *tactics.Payload
-	err := json.Unmarshal(tacticsPayload, &payload)
+	err := payloadUnmarshaler(tacticsPayload, &payload)
 	if err != nil {
 		NoticeError("unmarshal tactics payload failed: %v", errors.Trace(err))
 		return false
@@ -3468,3 +3548,5 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 
 	return appliedNewTactics
 }
+
+var compressTacticsEnabled = true

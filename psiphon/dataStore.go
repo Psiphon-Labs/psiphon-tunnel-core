@@ -22,6 +22,7 @@ package psiphon
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
@@ -52,6 +54,7 @@ var (
 	datastoreSpeedTestSamplesBucket             = []byte("speedTestSamples")
 	datastoreDialParametersBucket               = []byte("dialParameters")
 	datastoreNetworkReplayParametersBucket      = []byte("networkReplayParameters")
+	datastoreDSLOSLStatesBucket                 = []byte("dslOSLStates")
 	datastoreLastConnectedKey                   = "lastConnected"
 	datastoreLastServerEntryFilterKey           = []byte("lastServerEntryFilter")
 	datastoreAffinityServerEntryIDKey           = []byte("affinityServerEntryID")
@@ -59,14 +62,23 @@ var (
 	datastorePersistentStatTypeRemoteServerList = string(datastoreRemoteServerListStatsBucket)
 	datastorePersistentStatTypeFailedTunnel     = string(datastoreFailedTunnelStatsBucket)
 	datastoreCheckServerEntryTagsEndTimeKey     = "checkServerEntryTagsEndTime"
-	datastoreServerEntryFetchGCThreshold        = 10
+	datastoreDSLLastUntunneledFetchTimeKey      = "dslLastUntunneledDiscoverTime"
+	datastoreDSLLastTunneledFetchTimeKey        = "dslLastTunneledDiscoverTime"
+	datastoreDSLLastActiveOSLsTimeKey           = "dslLastActiveOSLsTime"
 
-	datastoreReferenceCountMutex sync.RWMutex
-	datastoreReferenceCount      int64
-	datastoreMutex               sync.RWMutex
-	activeDatastoreDB            *datastoreDB
-	disableCheckServerEntryTags  atomic.Bool
+	datastoreServerEntryFetchGCThreshold = 10
+
+	datastoreReferenceCountMutex  sync.RWMutex
+	datastoreReferenceCount       int64
+	datastoreMutex                sync.RWMutex
+	activeDatastoreDB             *datastoreDB
+	disableCheckServerEntryTags   atomic.Bool
+	datastoreLastServerEntryCount atomic.Int64
 )
+
+func init() {
+	datastoreLastServerEntryCount.Store(-1)
+}
 
 // OpenDataStore opens and initializes the singleton datastore instance.
 //
@@ -260,7 +272,18 @@ func datastoreUpdate(fn func(tx *datastoreTx) error) error {
 //
 // If the server entry data is malformed, an alert notice is issued and
 // the entry is skipped; no error is returned.
-func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExists bool) error {
+func StoreServerEntry(
+	serverEntryFields protocol.ServerEntryFields,
+	replaceIfExists bool) error {
+
+	return errors.Trace(
+		storeServerEntry(serverEntryFields, replaceIfExists, nil))
+}
+
+func storeServerEntry(
+	serverEntryFields protocol.ServerEntryFields,
+	replaceIfExists bool,
+	additionalUpdates func(tx *datastoreTx, serverEntryID []byte) error) error {
 
 	// TODO: call serverEntryFields.VerifySignature. At this time, we do not do
 	// this as not all server entries have an individual signature field. All
@@ -303,8 +326,10 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 			}
 		}
 
+		configurationVersion := serverEntryFields.GetConfigurationVersion()
+
 		exists := existingConfigurationVersion > -1
-		newer := exists && existingConfigurationVersion < serverEntryFields.GetConfigurationVersion()
+		newer := exists && existingConfigurationVersion < configurationVersion
 		update := !exists || replaceIfExists || newer
 
 		if !update {
@@ -349,9 +374,22 @@ func StoreServerEntry(serverEntryFields protocol.ServerEntryFields, replaceIfExi
 			return errors.Trace(err)
 		}
 
-		err = serverEntryTags.put(serverEntryTagBytes, serverEntryID)
+		serverEntryTagRecord, err := setServerEntryTagRecord(
+			serverEntryID, configurationVersion)
 		if err != nil {
 			return errors.Trace(err)
+		}
+
+		err = serverEntryTags.put(serverEntryTagBytes, serverEntryTagRecord)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if additionalUpdates != nil {
+			err = additionalUpdates(tx, serverEntryID)
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 
 		NoticeInfo("updated server %s", serverEntryFields.GetDiagnosticID())
@@ -552,6 +590,25 @@ func DeleteServerEntryAffinity(ipAddress string) error {
 	return nil
 }
 
+// GetLastServerEntryCount returns a generalized number of server entries in
+// the datastore recorded by the last ServerEntryIterator New/Reset call.
+// Similar to last_connected and persistent stats timestamps, the count is
+// rounded to avoid a potentially unique client fingerprint. The return value
+// is -1 if no count has been recorded.
+func GetLastServerEntryCount() int {
+	count := int(datastoreLastServerEntryCount.Load())
+
+	if count <= 0 {
+		// Return -1 (no count) and 0 (no server entries) as-is.
+		return count
+	}
+
+	n := protocol.ServerEntryCountRoundingIncrement
+
+	// Round up to the nearest ServerEntryCountRoundingIncrement.
+	return ((count + (n - 1)) / n) * n
+}
+
 func makeServerEntryFilterValue(config *Config) ([]byte, error) {
 
 	// Currently, only a change of EgressRegion will "break" server affinity.
@@ -734,6 +791,11 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 		targetServerEntry:            serverEntry,
 	}
 
+	err = iterator.reset(true)
+	if err != nil {
+		return false, nil, errors.Trace(err)
+	}
+
 	NoticeInfo("using TargetServerEntry: %s", serverEntry.GetDiagnosticID())
 
 	return false, iterator, nil
@@ -750,6 +812,15 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 
 	if iterator.isTargetServerEntryIterator {
 		iterator.hasNextTargetServerEntry = true
+
+		// Provide the GetLastServerEntryCount implementation. See comment below.
+		count := 0
+		err := getBucketKeys(datastoreServerEntriesBucket, func(_ []byte) { count += 1 })
+		if err != nil {
+			return errors.Trace(err)
+		}
+		datastoreLastServerEntryCount.Store(int64(count))
+
 		return nil
 	}
 
@@ -822,6 +893,13 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		}
 		cursor.close()
 
+		// Provide the GetLastServerEntryCount implementation. This snapshot
+		// of the number of server entries in the datastore is used for
+		// metrics; a snapshot is recorded here to avoid the overhead of
+		// datastore scans or operations when the metric is logged.
+
+		datastoreLastServerEntryCount.Store(int64(len(serverEntryIDs)))
+
 		// Randomly shuffle the entire list of server IDs, excluding the
 		// server affinity candidate.
 
@@ -833,12 +911,21 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		// In the first round, or with some probability, move _potential_ replay
 		// candidates to the front of the list (excepting the server affinity slot,
 		// if any). This move is post-shuffle so the order is still randomized. To
-		// save the memory overhead of unmarshalling all dial parameters, this
+		// save the memory overhead of unmarshaling all dial parameters, this
 		// operation just moves any server with a dial parameter record to the
 		// front. Whether the dial parameter remains valid for replay -- TTL,
 		// tactics/config unchanged, etc. --- is checked later.
 		//
 		// TODO: move only up to parameters.ReplayCandidateCount to front?
+
+		// The DSLPendingPrioritizeDial case also implicitly assumes that mere
+		// existence of dial parameters will move server entries to the front
+		// of the list. See MakeDialParameters and doDSLFetch for more
+		// details about the DSLPendingPrioritizeDial scheme.
+		//
+		// Limitation: the move-to-front could be balanced beween
+		// DSLPendingPrioritizeDial and regular replay cases, however that
+		// would require unmarshaling all dial parameters, which we are avoiding.
 
 		p := iterator.config.GetParameters().Get()
 
@@ -1006,9 +1093,11 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 
 		if doDeleteServerEntry {
 			err := deleteServerEntry(iterator.config, serverEntryID)
-			NoticeWarning(
-				"ServerEntryIterator.Next: deleteServerEntry failed: %s",
-				errors.Trace(err))
+			if err != nil {
+				NoticeWarning(
+					"ServerEntryIterator.Next: deleteServerEntry failed: %s",
+					errors.Trace(err))
+			}
 			continue
 		}
 
@@ -1077,7 +1166,14 @@ func (iterator *ServerEntryIterator) Next() (*protocol.ServerEntry, error) {
 					return errors.Trace(err)
 				}
 
-				err = serverEntryTags.put([]byte(serverEntryTag), serverEntryID)
+				serverEntryTagRecord, err := setServerEntryTagRecord(
+					[]byte(serverEntryTag),
+					serverEntryFields.GetConfigurationVersion())
+				if err != nil {
+					return errors.Trace(err)
+				}
+
+				err = serverEntryTags.put([]byte(serverEntryTag), serverEntryTagRecord)
 				if err != nil {
 					return errors.Trace(err)
 				}
@@ -1169,9 +1265,14 @@ func pruneServerEntry(config *Config, serverEntryTag string) (bool, error) {
 
 		serverEntryTagBytes := []byte(serverEntryTag)
 
-		serverEntryID := serverEntryTags.get(serverEntryTagBytes)
-		if serverEntryID == nil {
+		serverEntryTagRecord := serverEntryTags.get(serverEntryTagBytes)
+		if serverEntryTagRecord == nil {
 			return errors.TraceNew("server entry tag not found")
+		}
+
+		serverEntryID, _, err := getServerEntryTagRecord(serverEntryTagRecord)
+		if err != nil {
+			return errors.Trace(err)
 		}
 
 		serverEntryJson := serverEntries.get(serverEntryID)
@@ -1180,7 +1281,7 @@ func pruneServerEntry(config *Config, serverEntryTag string) (bool, error) {
 		}
 
 		var serverEntry *protocol.ServerEntry
-		err := json.Unmarshal(serverEntryJson, &serverEntry)
+		err = json.Unmarshal(serverEntryJson, &serverEntry)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -1281,14 +1382,23 @@ func deleteServerEntry(config *Config, serverEntryID []byte) error {
 		}
 
 		// Remove any tags pointing to the deleted server entry.
+		var deleteKeys [][]byte
 		cursor := serverEntryTags.cursor()
-		defer cursor.close()
 		for key, value := cursor.first(); key != nil; key, value = cursor.next() {
 			if bytes.Equal(value, serverEntryID) {
-				err := serverEntryTags.delete(key)
-				if err != nil {
-					return errors.Trace(err)
-				}
+				deleteKeys = append(deleteKeys, key)
+			}
+		}
+		cursor.close()
+
+		// Mutate bucket only after cursor is closed.
+		//
+		// TODO: expose boltdb Cursor.Delete to allow for safe mutation
+		// within cursor loop.
+		for _, deleteKey := range deleteKeys {
+			err := serverEntryTags.delete(deleteKey)
+			if err != nil {
+				return errors.Trace(err)
 			}
 		}
 
@@ -1320,20 +1430,33 @@ func deleteServerEntryHelper(
 		}
 	}
 
-	// TODO: expose boltdb Seek functionality to skip to first matching record.
-	cursor := dialParameters.cursor()
-	defer cursor.close()
+	// Each dial parameters key has serverID as a prefix; see
+	// makeDialParametersKey. There may be multiple keys with the
+	// serverEntryID prefix; they will be grouped together, so the loop can
+	// exit as soon as a previously found prefix is no longer found.
 	foundFirstMatch := false
+
+	// TODO: expose boltdb Seek functionality to skip to first matching record.
+	var deleteKeys [][]byte
+	cursor := dialParameters.cursor()
 	for key, _ := cursor.first(); key != nil; key, _ = cursor.next() {
-		// Dial parameters key has serverID as a prefix; see makeDialParametersKey.
 		if bytes.HasPrefix(key, serverEntryID) {
 			foundFirstMatch = true
-			err := dialParameters.delete(key)
-			if err != nil {
-				return errors.Trace(err)
-			}
+			deleteKeys = append(deleteKeys, key)
 		} else if foundFirstMatch {
 			break
+		}
+	}
+	cursor.close()
+
+	// Mutate bucket only after cursor is closed.
+	//
+	// TODO: expose boltdb Cursor.Delete to allow for safe mutation
+	// within cursor loop.
+	for _, deleteKey := range deleteKeys {
+		err := dialParameters.delete(deleteKey)
+		if err != nil {
+			return errors.Trace(err)
 		}
 	}
 
@@ -1660,6 +1783,8 @@ func TakeOutUnreportedPersistentStats(
 		for _, statType := range persistentStatTypes {
 
 			bucket := tx.bucket([]byte(statType))
+
+			var deleteKeys [][]byte
 			cursor := bucket.cursor()
 			for key, value := cursor.first(); key != nil; key, value = cursor.next() {
 
@@ -1671,7 +1796,7 @@ func TakeOutUnreportedPersistentStats(
 					NoticeWarning(
 						"Invalid key in TakeOutUnreportedPersistentStats: %s: %s",
 						string(key), err)
-					_ = bucket.delete(key)
+					deleteKeys = append(deleteKeys, key)
 					continue
 				}
 
@@ -1694,6 +1819,11 @@ func TakeOutUnreportedPersistentStats(
 
 			}
 			cursor.close()
+
+			// Mutate bucket only after cursor is closed.
+			for _, deleteKey := range deleteKeys {
+				_ = bucket.delete(deleteKey)
+			}
 
 			for _, key := range stats[statType] {
 				err := bucket.put(key, persistentStatStateReporting)
@@ -1831,25 +1961,14 @@ func IsCheckServerEntryTagsDue(config *Config) bool {
 		return false
 	}
 
-	lastEndTimeValue, err := GetKeyValue(datastoreCheckServerEntryTagsEndTimeKey)
+	lastEndTime, err := getTimeKeyValue(datastoreCheckServerEntryTagsEndTimeKey)
 	if err != nil {
-		NoticeWarning("IsCheckServerEntryTagsDue GetKeyValue failed: %s", errors.Trace(err))
+		NoticeWarning("IsCheckServerEntryTagsDue getTimeKeyValue failed: %s", errors.Trace(err))
 		disableCheckServerEntryTags.Store(true)
 		return false
 	}
 
-	if lastEndTimeValue == "" {
-		return true
-	}
-
-	lastEndTime, err := time.Parse(time.RFC3339, lastEndTimeValue)
-	if err != nil {
-		NoticeWarning("IsCheckServerEntryTagsDue time.Parse failed: %s", errors.Trace(err))
-		disableCheckServerEntryTags.Store(true)
-		return false
-	}
-
-	return time.Now().After(lastEndTime.Add(checkPeriod))
+	return lastEndTime.IsZero() || time.Now().After(lastEndTime.Add(checkPeriod))
 }
 
 // UpdateCheckServerEntryTagsEndTime should be called after a prune check is
@@ -1879,11 +1998,9 @@ func UpdateCheckServerEntryTagsEndTime(config *Config, checkCount int, pruneCoun
 		return
 	}
 
-	err := SetKeyValue(
-		datastoreCheckServerEntryTagsEndTimeKey,
-		time.Now().Format(time.RFC3339))
+	err := setTimeKeyValue(datastoreCheckServerEntryTagsEndTimeKey, time.Now())
 	if err != nil {
-		NoticeWarning("UpdateCheckServerEntryTagsEndTime SetKeyValue failed: %s", errors.Trace(err))
+		NoticeWarning("UpdateCheckServerEntryTagsEndTime setTimeKeyValue failed: %s", errors.Trace(err))
 		disableCheckServerEntryTags.Store(true)
 		return
 	}
@@ -2505,6 +2622,295 @@ func DeleteNetworkReplayParameters[R any](networkID, replayID string) error {
 	return deleteBucketValue(datastoreNetworkReplayParametersBucket, key)
 }
 
+// DSLGetLastUntunneledFetchTime returns the timestamp of the last
+// successfully completed untunneled DSL fetch.
+func DSLGetLastUntunneledFetchTime() (time.Time, error) {
+	value, err := getTimeKeyValue(datastoreDSLLastUntunneledFetchTimeKey)
+	return value, errors.Trace(err)
+}
+
+// DSLSetLastUntunneledFetchTime sets the timestamp of the most recent
+// successfully completed untunneled DSL fetch.
+func DSLSetLastUntunneledFetchTime(time time.Time) error {
+	err := setTimeKeyValue(datastoreDSLLastUntunneledFetchTimeKey, time)
+	return errors.Trace(err)
+}
+
+// DSLGetLastUntunneledFetchTime returns the timestamp of the last
+// successfully completed tunneled DSL fetch.
+func DSLGetLastTunneledFetchTime() (time.Time, error) {
+	value, err := getTimeKeyValue(datastoreDSLLastTunneledFetchTimeKey)
+	return value, errors.Trace(err)
+}
+
+// DSLSetLastTunneledFetchTime sets the timestamp of the most recent
+// successfully completed untunneled DSL fetch.
+func DSLSetLastTunneledFetchTime(time time.Time) error {
+	err := setTimeKeyValue(datastoreDSLLastTunneledFetchTimeKey, time)
+	return errors.Trace(err)
+}
+
+// dslLookupServerEntry returns the server entry ID for the specified server
+// entry tag version when there's locally stored server entry for that tag
+// and with the specified version. Otherwise, it returns nil.
+func dslLookupServerEntry(
+	tx *datastoreTx,
+	tag dsl.ServerEntryTag,
+	version int) ([]byte, error) {
+
+	serverEntryTags := tx.bucket(datastoreServerEntryTagsBucket)
+
+	serverEntryTagRecord := serverEntryTags.get(tag)
+	if serverEntryTagRecord == nil {
+		return nil, nil
+	}
+
+	serverEntryID, configurationVersion, err := getServerEntryTagRecord(
+		serverEntryTagRecord)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if configurationVersion != version {
+		return nil, nil
+	}
+
+	return serverEntryID, nil
+}
+
+// dslPrioritizeDialServerEntry will create a DSLPendingPrioritizeDial
+// placeholder dial parameters for the specified server entry, unless a dial
+// params already exists. Any existing dial param isn't unmarshaled and
+// inspected -- even if it's a replay past its TTL, the existence of the
+// record already suffices to move the server entry to the front in a server
+// entry iterator shuffle.
+//
+// See MakeDialParameters for more details about the DSLPendingPrioritizeDial
+// scheme.
+func dslPrioritizeDialServerEntry(
+	tx *datastoreTx,
+	networkID string,
+	serverEntryID []byte) error {
+
+	dialParamsBucket := tx.bucket(datastoreDialParametersBucket)
+
+	key := makeDialParametersKey(serverEntryID, []byte(networkID))
+
+	if dialParamsBucket.get(key) != nil {
+		return nil
+	}
+
+	dialParams := &DialParameters{
+		DSLPendingPrioritizeDial: true,
+	}
+
+	record, err := json.Marshal(dialParams)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = dialParamsBucket.put(key, record)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+// DSLHasServerEntry returns whether the datastore contains the server entry
+// with the specified tag and version. DSLHasServerEntry uses a fast lookup
+// which avoids unmarshaling server entries.
+func DSLHasServerEntry(
+	tag dsl.ServerEntryTag,
+	version int,
+	prioritizeDial bool,
+	networkID string) bool {
+
+	hasServerEntry := false
+	var err error
+
+	if !prioritizeDial {
+
+		// Use a more concurrency-friendly view transaction when
+		// prioritizeDial is false and there's no possibility of a datastore
+		// update.
+
+		err = datastoreView(func(tx *datastoreTx) error {
+
+			serverEntryID, err := dslLookupServerEntry(tx, tag, version)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			hasServerEntry = (serverEntryID != nil)
+
+			return nil
+		})
+
+	} else {
+
+		err = datastoreUpdate(func(tx *datastoreTx) error {
+
+			serverEntryID, err := dslLookupServerEntry(tx, tag, version)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			hasServerEntry = (serverEntryID != nil)
+
+			// If the local datastore contains a server entry for the
+			// specified tag, but the version doesn't match, the
+			// prioritization will be skipped. In this case, the updated
+			// server entry will most likely be downloaded and
+			// DSLStoreServerEntry will apply the prioritization.
+
+			if hasServerEntry {
+				err := dslPrioritizeDialServerEntry(tx, networkID, serverEntryID)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+
+			return nil
+		})
+
+	}
+
+	if err != nil {
+		NoticeWarning("DSLHasServerEntry failed: %s", errors.Trace(err))
+		return false
+	}
+
+	return hasServerEntry
+}
+
+// DSLStoreServerEntry adds the server entry to the datastore using
+// StoreServerEntry and populating LocalSource and LocalTimestamp.
+func DSLStoreServerEntry(
+	serverEntrySignaturePublicKey string,
+	packedServerEntryFields protocol.PackedServerEntryFields,
+	source string,
+	prioritizeDial bool,
+	networkID string) error {
+
+	serverEntryFields, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	err = serverEntryFields.VerifySignature(serverEntrySignaturePublicKey)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// See protocol.DecodeServerEntryFields and ImportEmbeddedServerEntries
+	// for other code paths that populate SetLocalSource and SetLocalTimestamp.
+
+	serverEntryFields.SetLocalSource(source)
+	serverEntryFields.SetLocalTimestamp(common.TruncateTimestampToHour(common.GetCurrentTimestamp()))
+
+	err = protocol.ValidateServerEntryFields(serverEntryFields)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	var additionalUpdates func(tx *datastoreTx, serverEntryID []byte) error
+	if prioritizeDial {
+		additionalUpdates = func(tx *datastoreTx, serverEntryID []byte) error {
+			err := dslPrioritizeDialServerEntry(tx, networkID, serverEntryID)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			return nil
+		}
+	}
+
+	err = storeServerEntry(serverEntryFields, true, additionalUpdates)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+// DSLGetLastActiveOSLsTime returns the timestamp of the last
+// successfully completed active OSL check.
+func DSLGetLastActiveOSLsTime() (time.Time, error) {
+	value, err := getTimeKeyValue(datastoreDSLLastActiveOSLsTimeKey)
+	return value, errors.Trace(err)
+}
+
+// DSLSetLastActiveOSLsTime sets the timestamp of the most recent
+// successfully completed active OSL check.
+func DSLSetLastActiveOSLsTime(time time.Time) error {
+	err := setTimeKeyValue(datastoreDSLLastActiveOSLsTimeKey, time)
+	return errors.Trace(err)
+}
+
+// DSLKnownOSLIDs returns the set of known OSL IDs retrieved from the active
+// OSL DSL request.
+func DSLKnownOSLIDs() ([]dsl.OSLID, error) {
+
+	IDs := []dsl.OSLID{}
+
+	err := getBucketKeys(datastoreDSLOSLStatesBucket, func(key []byte) {
+		// Must make a copy as slice is only valid within transaction.
+		IDs = append(IDs, append([]byte(nil), key...))
+	})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return IDs, nil
+}
+
+// DSLGetOSLState gets the current OSL state associated with an active OSL. A
+// nil state is returned when no state is found for the specified ID. See
+// dsl.Fetcher for more details on OSL states.
+func DSLGetOSLState(ID dsl.OSLID) ([]byte, error) {
+	state, err := copyBucketValue(datastoreDSLOSLStatesBucket, ID)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return state, nil
+}
+
+// DSLStoreOSLState sets the OSL state associated with an active OSL.
+func DSLStoreOSLState(ID dsl.OSLID, state []byte) error {
+	err := setBucketValue(datastoreDSLOSLStatesBucket, ID, state)
+	return errors.Trace(err)
+}
+
+// DSLDeleteOSLState deletes the specified OSL state.
+func DSLDeleteOSLState(ID dsl.OSLID) error {
+	err := deleteBucketValue(datastoreDSLOSLStatesBucket, ID)
+	return errors.Trace(err)
+}
+
+func setTimeKeyValue(key string, timevalue time.Time) error {
+	err := SetKeyValue(key, timevalue.Format(time.RFC3339))
+	return errors.Trace(err)
+}
+
+func getTimeKeyValue(key string) (time.Time, error) {
+
+	value, err := GetKeyValue(key)
+	if err != nil {
+		return time.Time{}, errors.Trace(err)
+	}
+
+	if value == "" {
+		return time.Time{}, nil
+	}
+
+	timeValue, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, errors.Trace(err)
+	}
+
+	return timeValue, nil
+}
+
 func setBucketValue(bucket, key, value []byte) error {
 
 	err := datastoreUpdate(func(tx *datastoreTx) error {
@@ -2563,4 +2969,64 @@ func copyBucketValue(bucket, key []byte) ([]byte, error) {
 		return nil
 	})
 	return valueCopy, err
+}
+
+func getBucketKeys(bucket []byte, keyCallback func([]byte)) error {
+
+	err := datastoreView(func(tx *datastoreTx) error {
+		bucket := tx.bucket(bucket)
+		cursor := bucket.cursor()
+		for key := cursor.firstKey(); key != nil; key = cursor.nextKey() {
+			keyCallback(key)
+		}
+		cursor.close()
+		return nil
+	})
+
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+func setServerEntryTagRecord(
+	serverEntryID []byte, configurationVersion int) ([]byte, error) {
+
+	var delimiter = [1]byte{0}
+
+	if bytes.Contains(serverEntryID, delimiter[:]) {
+		// Not expected, since serverEntryID is an IP address string.
+		return nil, errors.TraceNew("invalid serverEntryID")
+	}
+
+	if configurationVersion < 0 || configurationVersion >= math.MaxInt32 {
+		return nil, errors.TraceNew("invalid configurationVersion")
+	}
+
+	var version [4]byte
+	binary.LittleEndian.PutUint32(version[:], uint32(configurationVersion))
+
+	return append(append(serverEntryID, delimiter[:]...), version[:]...), nil
+}
+
+func getServerEntryTagRecord(
+	record []byte) ([]byte, int, error) {
+
+	var delimiter = [1]byte{0}
+
+	i := bytes.Index(record, delimiter[:])
+	if i == -1 {
+		// Backwards compatibility: assume version 0
+		return record, 0, nil
+	}
+	i += 1
+
+	if len(record)-i != 4 {
+		return nil, 0, errors.TraceNew("invalid configurationVersion")
+	}
+
+	configurationVersion := binary.LittleEndian.Uint32(record[i:])
+
+	return record[:i-1], int(configurationVersion), nil
 }

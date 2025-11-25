@@ -62,6 +62,42 @@ func sshAPIRequestHandler(
 	name string,
 	requestPayload []byte) ([]byte, error) {
 
+	// Before invoking the handlers, enforce some preconditions:
+	//
+	// - A handshake request must precede any other requests.
+	// - When the handshake results in a traffic rules state where
+	//   the client is immediately exhausted, no requests
+	//   may succeed. This case ensures that blocked clients do
+	//   not log "connected", etc.
+	//
+	// Only one handshake request may be made. There is no check here
+	// to enforce that handshakeAPIRequestHandler will be called at
+	// most once. The SetHandshakeState call in handshakeAPIRequestHandler
+	// enforces that only a single handshake is made; enforcing that there
+	// ensures no race condition even if concurrent requests are
+	// in flight.
+
+	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
+
+		completed, exhausted := sshClient.getHandshaked()
+		if !completed {
+			return nil, errors.TraceNew("handshake not completed")
+		}
+		if exhausted {
+			return nil, errors.TraceNew("exhausted after handshake")
+		}
+	}
+
+	// Here, the DSL request is and opaque payload. The DSL backend (or relay)
+	// will handle the API parameters and this case skips APIParameters
+	// processing.
+
+	if name == protocol.PSIPHON_API_DSL_REQUEST_NAME {
+		responsePayload, err := dslAPIRequestHandler(
+			support, sshClient, requestPayload)
+		return responsePayload, errors.Trace(err)
+	}
+
 	// Notes:
 	//
 	// - For SSH requests, MAX_API_PARAMS_SIZE is implicitly enforced
@@ -92,32 +128,6 @@ func sshAPIRequestHandler(
 		}
 	}
 
-	// Before invoking the handlers, enforce some preconditions:
-	//
-	// - A handshake request must precede any other requests.
-	// - When the handshake results in a traffic rules state where
-	//   the client is immediately exhausted, no requests
-	//   may succeed. This case ensures that blocked clients do
-	//   not log "connected", etc.
-	//
-	// Only one handshake request may be made. There is no check here
-	// to enforce that handshakeAPIRequestHandler will be called at
-	// most once. The SetHandshakeState call in handshakeAPIRequestHandler
-	// enforces that only a single handshake is made; enforcing that there
-	// ensures no race condition even if concurrent requests are
-	// in flight.
-
-	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
-
-		completed, exhausted := sshClient.getHandshaked()
-		if !completed {
-			return nil, errors.TraceNew("handshake not completed")
-		}
-		if exhausted {
-			return nil, errors.TraceNew("exhausted after handshake")
-		}
-	}
-
 	switch name {
 
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
@@ -131,16 +141,19 @@ func sshAPIRequestHandler(
 		return responsePayload, nil
 
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(
+		responsePayload, err := connectedAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(
+		responsePayload, err := statusAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 
 	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(
+		responsePayload, err := clientVerificationAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 	}
 
 	return nil, errors.Tracef("invalid request name: %s", name)
@@ -292,8 +305,19 @@ func handshakeAPIRequestHandler(
 
 	httpsRequestRegexes, domainBytesChecksum := db.GetHttpsRequestRegexes(sponsorID)
 
+	// When compressed tactics are requested, use CBOR binary encoding for the
+	// response.
+
+	var responseMarshaler func(any) ([]byte, error)
+	responseMarshaler = json.Marshal
+
+	compressTactics := protocol.GetCompressTactics(params)
+	if compressTactics {
+		responseMarshaler = protocol.CBOREncoding.Marshal
+	}
+
 	tacticsPayload, err := support.TacticsServer.GetTacticsPayload(
-		common.GeoIPData(clientGeoIPData), params)
+		common.GeoIPData(clientGeoIPData), params, compressTactics)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -350,6 +374,9 @@ func handshakeAPIRequestHandler(
 	}
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
+
+	// TODO: as a future enhancement, use the packed, CBOR encoding --
+	// protocol.EncodePackedServerEntryFields -- for server entries.
 
 	// Discover new servers
 
@@ -421,7 +448,7 @@ func handshakeAPIRequestHandler(
 
 	var marshaledTacticsPayload []byte
 	if tacticsPayload != nil {
-		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		marshaledTacticsPayload, err = responseMarshaler(tacticsPayload)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -444,10 +471,7 @@ func handshakeAPIRequestHandler(
 		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
-	// TODO: as a future enhancement, pack and CBOR encode this and other API
-	// responses
-
-	responsePayload, err := json.Marshal(handshakeResponse)
+	responsePayload, err := responseMarshaler(handshakeResponse)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -987,6 +1011,44 @@ func clientVerificationAPIRequestHandler(
 	return make([]byte, 0), nil
 }
 
+// dslAPIRequestHandler forwards DSL relay requests. The DSL backend
+// (or relay) will handle API parameter processing and event logging.
+func dslAPIRequestHandler(
+	support *SupportServices,
+	sshClient *sshClient,
+	requestPayload []byte) ([]byte, error) {
+
+	// Sanity check: don't relay more than the modest number of DSL requests
+	// expected in the tunneled case. The DSL backend has its own rate limit
+	// enforcement, but avoiding excess requests here saves on resources
+	// consumed between the relay and backend.
+	//
+	// The equivalent pre-relay check in the in-proxy broker uses an explicit
+	// rate limiter; here a simpler hard limit per tunnel suffices due to the
+	// low limit size and the fact that tunnel dials are themselves rate
+	// limited.
+	ok := false
+	sshClient.Lock()
+	if sshClient.dslRequestCount < SSH_CLIENT_MAX_DSL_REQUEST_COUNT {
+		ok = true
+		sshClient.dslRequestCount += 1
+	}
+	sshClient.Unlock()
+	if !ok {
+		return nil, errors.TraceNew("too many DSL requests")
+	}
+
+	responsePayload, err := dslHandleRequest(
+		sshClient.runCtx,
+		support,
+		nil, // no extendTimeout
+		sshClient.getClientIP(),
+		common.GeoIPData(sshClient.getClientGeoIPData()),
+		true, // client request is tunneled
+		requestPayload)
+	return responsePayload, errors.Trace(err)
+}
+
 var tacticsParams = []requestParamSpec{
 	{tactics.STORED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 	{tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME, nil, requestParamOptional | requestParamJSON},
@@ -1070,6 +1132,37 @@ func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParamete
 	}
 }
 
+var dslRequestParams = append(
+	append(
+		[]requestParamSpec{
+			{"session_id", isHexDigits, 0},
+			{"fronting_provider_id", isAnyString, requestParamOptional}},
+		tacticsParams...),
+	baseParams...)
+
+func getDSLAPIParameterValidator(config *Config) common.APIParameterValidator {
+	return func(params common.APIParameters) error {
+		return validateRequestParams(config, params, dslRequestParams)
+	}
+}
+
+func getDSLAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+
+	return func(prefix string, geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
+
+		logFields := getRequestLogFields(
+			"dsl_relay",
+			prefix,
+			"", // Use the session_id the client reported
+			GeoIPData(geoIPData),
+			nil,
+			params,
+			dslRequestParams)
+
+		return common.LogFields(logFields)
+	}
+}
+
 // requestParamSpec defines a request parameter. Each param is expected to be
 // a string, unless requestParamArray is specified, in which case an array of
 // strings is expected.
@@ -1090,6 +1183,7 @@ const (
 	requestParamLogFlagAsBool                                 = 1 << 7
 	requestParamLogOnlyForFrontedMeekOrConjure                = 1 << 8
 	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 9
+	requestParamLogOmittedFlagAsFalse                         = 1 << 10
 )
 
 // baseParams are the basic request parameters that are expected for all API
@@ -1103,8 +1197,10 @@ var baseParams = []requestParamSpec{
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"device_region", isAnyString, requestParamOptional},
 	{"device_location", isGeoHashString, requestParamOptional},
+	{"egress_region", isRegionCode, requestParamOptional},
 	{"network_type", isAnyString, requestParamOptional},
 	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+	{"compress_response", isIntString, requestParamOptional | requestParamNotLogged},
 }
 
 // baseDialParams are the dial parameters, per-tunnel network protocol and
@@ -1138,8 +1234,9 @@ var baseDialParams = []requestParamSpec{
 	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
 	{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-	{"egress_region", isRegionCode, requestParamOptional},
+	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
+	{"replay_ignored_change", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
+	{"dsl_prioritized", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
 	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
@@ -1182,6 +1279,7 @@ var baseDialParams = []requestParamSpec{
 	{"quic_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"quic_dial_early", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"quic_obfuscated_psk", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"server_entry_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 var inproxyDialParams = []requestParamSpec{
@@ -1436,9 +1534,10 @@ func getRequestLogFields(
 		value := params[expectedParam.name]
 		if value == nil {
 
-			// Special case: older clients don't send this value,
-			// so log a default.
-			if expectedParam.name == "tunnel_whole_device" {
+			// Provide a "false" default for specified, omitted boolean flag params.
+
+			if expectedParam.flags&requestParamLogFlagAsBool != 0 &&
+				expectedParam.flags&requestParamLogOmittedFlagAsFalse != 0 {
 				value = "0"
 			} else {
 				// Skip omitted, optional params
@@ -1873,7 +1972,7 @@ func isHostHeader(_ *Config, value string) bool {
 }
 
 func isServerEntrySource(_ *Config, value string) bool {
-	return common.Contains(protocol.SupportedServerEntrySources, value)
+	return common.ContainsWildcard(protocol.SupportedServerEntrySources, value)
 }
 
 var isISO8601DateRegex = regexp.MustCompile(

@@ -61,6 +61,7 @@ const (
 	SERVER_ENTRY_SOURCE_TARGET     = "TARGET"
 	SERVER_ENTRY_SOURCE_OBFUSCATED = "OBFUSCATED"
 	SERVER_ENTRY_SOURCE_EXCHANGED  = "EXCHANGED"
+	SERVER_ENTRY_SOURCE_DSL        = "DSL-*"
 
 	CAPABILITY_SSH_API_REQUESTS            = "ssh-api-requests"
 	CAPABILITY_UNTUNNELED_WEB_API_REQUESTS = "handshake"
@@ -73,6 +74,7 @@ const (
 	PSIPHON_API_OSL_REQUEST_NAME           = "psiphon-osl"
 	PSIPHON_API_ALERT_REQUEST_NAME         = "psiphon-alert"
 	PSIPHON_API_INPROXY_RELAY_REQUEST_NAME = "psiphon-inproxy-relay"
+	PSIPHON_API_DSL_REQUEST_NAME           = "psiphon-dsl"
 
 	PSIPHON_API_ALERT_DISALLOWED_TRAFFIC = "disallowed-traffic"
 	PSIPHON_API_ALERT_UNSAFE_TRAFFIC     = "unsafe-traffic"
@@ -88,6 +90,9 @@ const (
 	PSIPHON_API_PROTOCOL_WEB  = "web"
 	PSIPHON_API_ENCODING_CBOR = "cbor"
 	PSIPHON_API_ENCODING_JSON = "json"
+
+	PSIPHON_API_RESPONSE_VERSION_FIELD_NAME = "psiphon_api_response_version"
+	PSIPHON_API_RESPONSE_V1                 = "1"
 
 	PACKET_TUNNEL_CHANNEL_TYPE            = "tun@psiphon.ca"
 	RANDOM_STREAM_CHANNEL_TYPE            = "random@psiphon.ca"
@@ -110,6 +115,7 @@ var SupportedServerEntrySources = []string{
 	SERVER_ENTRY_SOURCE_TARGET,
 	SERVER_ENTRY_SOURCE_OBFUSCATED,
 	SERVER_ENTRY_SOURCE_EXCHANGED,
+	SERVER_ENTRY_SOURCE_DSL,
 }
 
 func AllowServerEntrySourceWithUpstreamProxy(source string) bool {
@@ -791,59 +797,60 @@ func (transports ConjureTransports) PruneInvalid() ConjureTransports {
 }
 
 type HandshakeResponse struct {
-	Homepages                []string            `json:"homepages"`
-	UpgradeClientVersion     string              `json:"upgrade_client_version"`
-	PageViewRegexes          []map[string]string `json:"page_view_regexes"`
-	HttpsRequestRegexes      []map[string]string `json:"https_request_regexes"`
-	EncodedServerList        []string            `json:"encoded_server_list"`
-	ClientRegion             string              `json:"client_region"`
-	ClientAddress            string              `json:"client_address"`
-	ServerTimestamp          string              `json:"server_timestamp"`
-	ActiveAuthorizationIDs   []string            `json:"active_authorization_ids"`
-	TacticsPayload           json.RawMessage     `json:"tactics_payload"`
-	UpstreamBytesPerSecond   int64               `json:"upstream_bytes_per_second"`
-	DownstreamBytesPerSecond int64               `json:"downstream_bytes_per_second"`
-	SteeringIP               string              `json:"steering_ip"`
-	Padding                  string              `json:"padding"`
+	Homepages                 []string            `json:"homepages,omitempty" cbor:"1,keyasint,omitempty"`
+	UpgradeClientVersion      string              `json:"upgrade_client_version,omitempty" cbor:"2,keyasint,omitempty"`
+	PageViewRegexes           []map[string]string `json:"page_view_regexes,omitempty" cbor:"3,keyasint,omitempty"`
+	HttpsRequestRegexes       []map[string]string `json:"https_request_regexes,omitempty" cbor:"4,keyasint,omitempty"`
+	EncodedServerList         []string            `json:"encoded_server_list,omitempty" cbor:"5,keyasint,omitempty"`
+	ClientRegion              string              `json:"client_region,omitempty" cbor:"6,keyasint,omitempty"`
+	ClientAddress             string              `json:"client_address,omitempty" cbor:"7,keyasint,omitempty"`
+	ServerTimestamp           string              `json:"server_timestamp,omitempty" cbor:"8,keyasint,omitempty"`
+	ActiveAuthorizationIDs    []string            `json:"active_authorization_ids,omitempty" cbor:"9,keyasint,omitempty"`
+	TacticsPayload            json.RawMessage     `json:"tactics_payload,omitempty" cbor:"10,keyasint,omitempty"`
+	TacticsPayloadCompression int32               `json:"tactics_payload_compression,omitempty" cbor:"11,keyasint,omitempty"`
+	UpstreamBytesPerSecond    int64               `json:"upstream_bytes_per_second,omitempty" cbor:"12,keyasint,omitempty"`
+	DownstreamBytesPerSecond  int64               `json:"downstream_bytes_per_second,omitempty" cbor:"13,keyasint,omitempty"`
+	SteeringIP                string              `json:"steering_ip,omitempty" cbor:"14,keyasint,omitempty"`
+	Padding                   string              `json:"padding,omitempty" cbor:"15,keyasint,omitempty"`
 }
 
 type ConnectedResponse struct {
-	ConnectedTimestamp string `json:"connected_timestamp"`
-	Padding            string `json:"padding"`
+	ConnectedTimestamp string `json:"connected_timestamp,omitempty"`
+	Padding            string `json:"padding,omitempty"`
 }
 
 type StatusResponse struct {
-	InvalidServerEntryTags []string `json:"invalid_server_entry_tags"`
-	Padding                string   `json:"padding"`
+	InvalidServerEntryTags []string `json:"invalid_server_entry_tags,omitempty"`
+	Padding                string   `json:"padding,omitempty"`
 }
 
 type OSLRequest struct {
-	ClearLocalSLOKs bool             `json:"clear_local_sloks"`
-	SeedPayload     *osl.SeedPayload `json:"seed_payload"`
+	ClearLocalSLOKs bool             `json:"clear_local_sloks,omitempty"`
+	SeedPayload     *osl.SeedPayload `json:"seed_payload,omitempty"`
 }
 
 type SSHPasswordPayload struct {
-	SessionId          string   `json:"SessionId"`
-	SshPassword        string   `json:"SshPassword"`
-	ClientCapabilities []string `json:"ClientCapabilities"`
-	SponsorID          string   `json:"SponsorId"`
+	SessionId          string   `json:"SessionId,omitempty"`
+	SshPassword        string   `json:"SshPassword,omitempty"`
+	ClientCapabilities []string `json:"ClientCapabilities,omitempty"`
+	SponsorID          string   `json:"SponsorId,omitempty"`
 }
 
 type MeekCookieData struct {
-	MeekProtocolVersion  int    `json:"v"`
-	ClientTunnelProtocol string `json:"t"`
-	EndPoint             string `json:"e"`
+	MeekProtocolVersion  int    `json:"v,omitempty"`
+	ClientTunnelProtocol string `json:"t,omitempty"`
+	EndPoint             string `json:"e,omitempty"`
 }
 
 type RandomStreamRequest struct {
-	UpstreamBytes   int `json:"u"`
-	DownstreamBytes int `json:"d"`
+	UpstreamBytes   int `json:"u,omitempty"`
+	DownstreamBytes int `json:"d,omitempty"`
 }
 
 type AlertRequest struct {
-	Reason     string   `json:"reason"`
-	Subject    string   `json:"subject"`
-	ActionURLs []string `json:"action"`
+	Reason     string   `json:"reason,omitempty"`
+	Subject    string   `json:"subject,omitempty"`
+	ActionURLs []string `json:"action,omitempty"`
 }
 
 // CBOREncoding defines the specific CBDR encoding used for all Psiphon CBOR
@@ -885,3 +892,35 @@ func DeriveBPFServerProgramPRNGSeed(obfuscatedKey string) (*prng.Seed, error) {
 	seed := prng.Seed(sha256.Sum256([]byte(obfuscatedKey)))
 	return prng.NewSaltedSeed(&seed, "bpf-server-program")
 }
+
+// GetCompressTactics checks for the parameter field indicating that
+// compressed tactics are supported and requested.
+func GetCompressTactics(params common.APIParameters) bool {
+
+	// The generic, versioned psiphon_api_response_version field allows for
+	// future enhancements and upgrades to other responses and response values.
+	//
+	// Version 1 adds compressed tactics payloads, and CBOR binary encoding of
+	// responses containing compressed tactics payloads.
+
+	if params[PSIPHON_API_RESPONSE_VERSION_FIELD_NAME] == nil {
+		return false
+	}
+	value, ok := params[PSIPHON_API_RESPONSE_VERSION_FIELD_NAME].(string)
+	if !ok {
+		return false
+	}
+	return value == PSIPHON_API_RESPONSE_V1
+}
+
+// SetCompressTactics adds a field to params indicating that compressed
+// tactics are support and requested.
+func SetCompressTactics(params common.APIParameters) {
+	params[PSIPHON_API_RESPONSE_VERSION_FIELD_NAME] = PSIPHON_API_RESPONSE_V1
+}
+
+// ServerEntryCountRoundingIncrement specifies the rounding increment for
+// client-reported server_entry_count metrics. Except for the value 0, the
+// metric is rounded up to the nearest increment to avoid a potentially
+// unique client fingerprint.
+var ServerEntryCountRoundingIncrement = 50

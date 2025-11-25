@@ -386,9 +386,9 @@ func panicHandlerProtobuf(config *server.Config, output string) error {
 
 	psiphondMsg := &pb.Psiphond{
 		Timestamp:    timestamppb.Now(),
-		HostId:       &config.HostID,
-		HostBuildRev: &buildinfo.GetBuildInfo().BuildRev,
-		Provider:     &config.HostProvider,
+		HostId:       config.HostID,
+		HostBuildRev: buildinfo.GetBuildInfo().BuildRev,
+		Provider:     config.HostProvider,
 		Metric: &pb.Psiphond_ServerPanic{
 			ServerPanic: &pb.ServerPanic{
 				Panic: &output,

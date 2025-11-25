@@ -226,7 +226,7 @@ const (
 	ReplayTargetTunnelDuration                         = "ReplayTargetTunnelDuration"
 	ReplayLaterRoundMoveToFrontProbability             = "ReplayLaterRoundMoveToFrontProbability"
 	ReplayRetainFailedProbability                      = "ReplayRetainFailedProbability"
-	ReplayIgnoreChangedConfigState                     = "ReplayIgnoreChangedConfigState"
+	ReplayIgnoreChangedConfigStateProbability          = "ReplayIgnoreChangedConfigStateProbability"
 	ReplayBPF                                          = "ReplayBPF"
 	ReplaySSH                                          = "ReplaySSH"
 	ReplayObfuscatorPadding                            = "ReplayObfuscatorPadding"
@@ -259,7 +259,6 @@ const (
 	RecordRemoteServerListPersistentStatsProbability   = "RecordRemoteServerListPersistentStatsProbability"
 	RecordFailedTunnelPersistentStatsProbability       = "RecordFailedTunnelPersistentStatsProbability"
 	ServerEntryMinimumAgeForPruning                    = "ServerEntryMinimumAgeForPruning"
-	ApplicationParametersProbability                   = "ApplicationParametersProbability"
 	ApplicationParameters                              = "ApplicationParameters"
 	BPFServerTCPProgram                                = "BPFServerTCPProgram"
 	BPFServerTCPProbability                            = "BPFServerTCPProbability"
@@ -435,6 +434,8 @@ const (
 	InproxyBrokerClientOfferTimeout                    = "InproxyBrokerClientOfferTimeout"
 	InproxyBrokerClientOfferPersonalTimeout            = "InproxyBrokerClientOfferPersonalTimeout"
 	InproxyBrokerPendingServerRequestsTTL              = "InproxyBrokerPendingServerRequestsTTL"
+	InproxyBrokerDSLRequestRateLimitQuantity           = "InproxyBrokerDSLRequestRateLimitQuantity"
+	InproxyBrokerDSLRequestRateLimitInterval           = "InproxyBrokerDSLRequestRateLimitInterval"
 	InproxySessionHandshakeRoundTripTimeout            = "InproxySessionHandshakeRoundTripTimeout"
 	InproxyProxyAnnounceRequestTimeout                 = "InproxyProxyAnnounceRequestTimeout"
 	InproxyProxyAnnounceDelay                          = "InproxyProxyAnnounceDelay"
@@ -445,7 +446,8 @@ const (
 	InproxyClientOfferRequestPersonalTimeout           = "InproxyClientOfferRequestPersonalTimeout"
 	InproxyClientOfferRetryDelay                       = "InproxyClientOfferRetryDelay"
 	InproxyClientOfferRetryJitter                      = "InproxyClientOfferRetryJitter"
-	InproxyClientRelayedPacketRequestTimeout           = "InproxyCloientRelayedPacketRequestTimeout"
+	InproxyClientRelayedPacketRequestTimeout           = "InproxyClientRelayedPacketRequestTimeout"
+	InproxyClientDSLRequestTimeout                     = "InproxyClientDSLRequestTimeout"
 	InproxyBrokerRoundTripStatusCodeFailureThreshold   = "InproxyBrokerRoundTripStatusCodeFailureThreshold"
 	InproxyDTLSRandomizationProbability                = "InproxyDTLSRandomizationProbability"
 	InproxyWebRTCMediaStreamsProbability               = "InproxyWebRTCMediaStreamsProbability"
@@ -521,12 +523,46 @@ const (
 	CheckServerEntryTagsMaxSendBytes                   = "CheckServerEntryTagsMaxSendBytes"
 	CheckServerEntryTagsMaxWorkTime                    = "CheckServerEntryTagsMaxWorkTime"
 	ServerEntryPruneDialPortNumberZero                 = "ServerEntryPruneDialPortNumberZero"
+	CompressTactics                                    = "CompressTactics"
+	DSLRelayServiceAddress                             = "DSLRelayServiceAddress"
+	DSLRelayMaxHttpConns                               = "DSLRelayMaxHttpConns"
+	DSLRelayMaxHttpIdleConns                           = "DSLRelayMaxHttpIdleConns"
+	DSLRelayHttpIdleConnTimeout                        = "DSLRelayHttpIdleConnTimeout"
+	DSLRelayRequestTimeout                             = "DSLRelayRequestTimeout"
+	DSLRelayRetryCount                                 = "DSLRelayRetryCount"
+	DSLRelayCacheTTL                                   = "DSLRelayCacheTTL"
+	DSLRelayCacheMaxSize                               = "DSLRelayCacheMaxSize"
+	EnableDSLFetcher                                   = "EnableDSLFetcher"
+	DSLFetcherTunneledRequestTimeout                   = "DSLFetcherTunneledRequestTimeout"
+	DSLFetcherTunneledRequestRetryCount                = "DSLFetcherTunneledRequestRetryCount"
+	DSLFetcherTunneledRequestRetryDelay                = "DSLFetcherTunneledRequestRetryDelay"
+	DSLFetcherTunneledRequestRetryDelayJitter          = "DSLFetcherTunneledRequestRetryDelayJitter"
+	DSLFetcherTunneledFetchTTL                         = "DSLFetcherTunneledFetchTTL"
+	DSLFetcherTunneledDiscoverServerEntriesMinCount    = "DSLFetcherTunneledDiscoverServerEntriesMinCount"
+	DSLFetcherTunneledDiscoverServerEntriesMaxCount    = "DSLFetcherTunneledDiscoverServerEntriesMaxCount"
+	DSLFetcherTunneledGetServerEntriesMinCount         = "DSLFetcherTunneledGetServerEntriesMinCount"
+	DSLFetcherTunneledGetServerEntriesMaxCount         = "DSLFetcherTunneledGetServerEntriesMaxCount"
+	DSLFetcherUntunneledRequestTimeout                 = "DSLFetcherUntunneledRequestTimeout"
+	DSLFetcherUntunneledRequestRetryCount              = "DSLFetcherUntunneledRequestRetryCount"
+	DSLFetcherUntunneledRequestRetryDelay              = "DSLFetcherUntunneledRequestRetryDelay"
+	DSLFetcherUntunneledRequestRetryDelayJitter        = "DSLFetcherUntunneledRequestRetryDelayJitter"
+	DSLFetcherUntunneledFetchTTL                       = "DSLFetcherUntunneledFetchTTL"
+	DSLFetcherUntunneledDiscoverServerEntriesMinCount  = "DSLFetcherUntunneledDiscoverServerEntriesMinCount"
+	DSLFetcherUntunneledDiscoverServerEntriesMaxCount  = "DSLFetcherUntunneledDiscoverServerEntriesMaxCount"
+	DSLFetcherUntunneledGetServerEntriesMinCount       = "DSLFetcherUntunneledGetServerEntriesMinCount"
+	DSLFetcherUntunneledGetServerEntriesMaxCount       = "DSLFetcherUntunneledGetServerEntriesMaxCount"
+	DSLFetcherGetLastActiveOSLsTTL                     = "DSLFetcherGetLastActiveOSLsTTL"
+	DSLFetcherGetOSLFileSpecsMinCount                  = "DSLFetcherGetOSLFileSpecsMinCount"
+	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
+	DSLPrioritizeDialNewServerEntryProbability         = "DSLPrioritizeDialNewServerEntryProbability"
+	DSLPrioritizeDialExistingServerEntryProbability    = "DSLPrioritizeDialExistingServerEntryProbability"
 
 	// Retired parameters
 
 	ReplayRandomizedTLSProfile                = "ReplayRandomizedTLSProfile"
 	InproxyAllBrokerPublicKeys                = "InproxyAllBrokerPublicKeys"
 	InproxyTunnelProtocolSelectionProbability = "InproxyTunnelProtocolSelectionProbability"
+	ReplayIgnoreChangedConfigState            = "ReplayIgnoreChangedConfigState"
 )
 
 const (
@@ -761,38 +797,39 @@ var defaultParameters = map[string]struct {
 	LivenessTestMinDownstreamBytes: {value: 0, minimum: 0},
 	LivenessTestMaxDownstreamBytes: {value: 0, minimum: 0},
 
-	ReplayCandidateCount:                   {value: 10, minimum: -1},
-	ReplayDialParametersTTL:                {value: 24 * time.Hour, minimum: time.Duration(0)},
-	ReplayTargetUpstreamBytes:              {value: 0, minimum: 0},
-	ReplayTargetDownstreamBytes:            {value: 0, minimum: 0},
-	ReplayTargetTunnelDuration:             {value: 1 * time.Second, minimum: time.Duration(0)},
-	ReplayLaterRoundMoveToFrontProbability: {value: 0.0, minimum: 0.0},
-	ReplayRetainFailedProbability:          {value: 0.5, minimum: 0.0},
-	ReplayIgnoreChangedConfigState:         {value: false},
-	ReplayBPF:                              {value: true},
-	ReplaySSH:                              {value: true},
-	ReplayObfuscatorPadding:                {value: true},
-	ReplayFragmentor:                       {value: true},
-	ReplayTLSProfile:                       {value: true},
-	ReplayFronting:                         {value: true},
-	ReplayHostname:                         {value: true},
-	ReplayQUICVersion:                      {value: true},
-	ReplayObfuscatedQUIC:                   {value: true},
-	ReplayObfuscatedQUICNonceTransformer:   {value: true},
-	ReplayConjureRegistration:              {value: true},
-	ReplayConjureTransport:                 {value: true},
-	ReplayLivenessTest:                     {value: true},
-	ReplayUserAgent:                        {value: true},
-	ReplayAPIRequestPadding:                {value: true},
-	ReplayHoldOffTunnel:                    {value: true},
-	ReplayResolveParameters:                {value: true},
-	ReplayHTTPTransformerParameters:        {value: true},
-	ReplayOSSHSeedTransformerParameters:    {value: true},
-	ReplayOSSHPrefix:                       {value: true},
-	ReplayShadowsocksPrefix:                {value: true},
-	ReplayTLSFragmentClientHello:           {value: true},
-	ReplayInproxyWebRTC:                    {value: true},
-	ReplayInproxySTUN:                      {value: true},
+	ReplayCandidateCount:                      {value: 10, minimum: -1},
+	ReplayDialParametersTTL:                   {value: 24 * time.Hour, minimum: time.Duration(0)},
+	ReplayTargetUpstreamBytes:                 {value: 0, minimum: 0},
+	ReplayTargetDownstreamBytes:               {value: 0, minimum: 0},
+	ReplayTargetTunnelDuration:                {value: 1 * time.Second, minimum: time.Duration(0)},
+	ReplayLaterRoundMoveToFrontProbability:    {value: 0.0, minimum: 0.0},
+	ReplayRetainFailedProbability:             {value: 0.5, minimum: 0.0},
+	ReplayIgnoreChangedConfigState:            {value: false},
+	ReplayIgnoreChangedConfigStateProbability: {value: 0.0, minimum: 0.0},
+	ReplayBPF:                            {value: true},
+	ReplaySSH:                            {value: true},
+	ReplayObfuscatorPadding:              {value: true},
+	ReplayFragmentor:                     {value: true},
+	ReplayTLSProfile:                     {value: true},
+	ReplayFronting:                       {value: true},
+	ReplayHostname:                       {value: true},
+	ReplayQUICVersion:                    {value: true},
+	ReplayObfuscatedQUIC:                 {value: true},
+	ReplayObfuscatedQUICNonceTransformer: {value: true},
+	ReplayConjureRegistration:            {value: true},
+	ReplayConjureTransport:               {value: true},
+	ReplayLivenessTest:                   {value: true},
+	ReplayUserAgent:                      {value: true},
+	ReplayAPIRequestPadding:              {value: true},
+	ReplayHoldOffTunnel:                  {value: true},
+	ReplayResolveParameters:              {value: true},
+	ReplayHTTPTransformerParameters:      {value: true},
+	ReplayOSSHSeedTransformerParameters:  {value: true},
+	ReplayOSSHPrefix:                     {value: true},
+	ReplayShadowsocksPrefix:              {value: true},
+	ReplayTLSFragmentClientHello:         {value: true},
+	ReplayInproxyWebRTC:                  {value: true},
+	ReplayInproxySTUN:                    {value: true},
 
 	APIRequestUpstreamPaddingMinBytes:   {value: 0, minimum: 0},
 	APIRequestUpstreamPaddingMaxBytes:   {value: 1024, minimum: 0},
@@ -806,8 +843,7 @@ var defaultParameters = map[string]struct {
 
 	ServerEntryMinimumAgeForPruning: {value: 7 * 24 * time.Hour, minimum: 24 * time.Hour},
 
-	ApplicationParametersProbability: {value: 1.0, minimum: 0.0},
-	ApplicationParameters:            {value: KeyValues{}},
+	ApplicationParameters: {value: KeyValues{}},
 
 	BPFServerTCPProgram:     {value: (*BPFProgramSpec)(nil), flags: serverSideOnly},
 	BPFServerTCPProbability: {value: 0.5, minimum: 0.0, flags: serverSideOnly},
@@ -1024,6 +1060,8 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerClientOfferTimeout:                    {value: 10 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerClientOfferPersonalTimeout:            {value: 5 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerPendingServerRequestsTTL:              {value: 60 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerDSLRequestRateLimitQuantity:           {value: 20, minimum: 0, flags: serverSideOnly},
+	InproxyBrokerDSLRequestRateLimitInterval:           {value: 1 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxySessionHandshakeRoundTripTimeout:            {value: 10 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyProxyAnnounceRequestTimeout:                 {value: 2*time.Minute + 10*time.Second, minimum: time.Duration(0)},
 	InproxyProxyAnnounceDelay:                          {value: 100 * time.Millisecond, minimum: time.Duration(0)},
@@ -1034,7 +1072,8 @@ var defaultParameters = map[string]struct {
 	InproxyClientOfferRequestPersonalTimeout:           {value: 5*time.Second + 10*time.Second, minimum: time.Duration(0)},
 	InproxyClientOfferRetryDelay:                       {value: 100 * time.Millisecond, minimum: time.Duration(0)},
 	InproxyClientOfferRetryJitter:                      {value: 0.5, minimum: 0.0},
-	InproxyClientRelayedPacketRequestTimeout:           {value: 10 * time.Second, minimum: time.Duration(0)},
+	InproxyClientRelayedPacketRequestTimeout:           {value: 35 * time.Second, minimum: time.Duration(0)},
+	InproxyClientDSLRequestTimeout:                     {value: 10 * time.Second, minimum: time.Duration(0)},
 	InproxyBrokerRoundTripStatusCodeFailureThreshold:   {value: 2 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	InproxyDTLSRandomizationProbability:                {value: 0.5, minimum: 0.0},
 	InproxyWebRTCMediaStreamsProbability:               {value: 0.0, minimum: 0.0},
@@ -1114,6 +1153,41 @@ var defaultParameters = map[string]struct {
 	CheckServerEntryTagsMaxSendBytes:   {value: 65536, minimum: 1},
 	CheckServerEntryTagsMaxWorkTime:    {value: 60 * time.Second, minimum: time.Duration(0)},
 	ServerEntryPruneDialPortNumberZero: {value: true},
+
+	CompressTactics: {value: true},
+
+	DSLRelayServiceAddress:                            {value: "", flags: serverSideOnly},
+	DSLRelayMaxHttpConns:                              {value: 100, minimum: 1, flags: serverSideOnly},
+	DSLRelayMaxHttpIdleConns:                          {value: 10, minimum: 1, flags: serverSideOnly},
+	DSLRelayHttpIdleConnTimeout:                       {value: 120 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayRequestTimeout:                            {value: 30 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayRetryCount:                                {value: 1, minimum: 0, flags: serverSideOnly},
+	DSLRelayCacheTTL:                                  {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayCacheMaxSize:                              {value: 200000, minimum: 0, flags: serverSideOnly},
+	EnableDSLFetcher:                                  {value: false},
+	DSLFetcherTunneledRequestTimeout:                  {value: 5 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	DSLFetcherTunneledRequestRetryCount:               {value: 0, minimum: 0},
+	DSLFetcherTunneledRequestRetryDelay:               {value: 5 * time.Second, minimum: time.Duration(0)},
+	DSLFetcherTunneledRequestRetryDelayJitter:         {value: 0.3, minimum: 0.0},
+	DSLFetcherTunneledFetchTTL:                        {value: 1 * time.Hour, minimum: time.Duration(0)},
+	DSLFetcherTunneledDiscoverServerEntriesMinCount:   {value: 1, minimum: 0},
+	DSLFetcherTunneledDiscoverServerEntriesMaxCount:   {value: 2, minimum: 0},
+	DSLFetcherTunneledGetServerEntriesMinCount:        {value: 30, minimum: 0},
+	DSLFetcherTunneledGetServerEntriesMaxCount:        {value: 60, minimum: 0},
+	DSLFetcherUntunneledRequestTimeout:                {value: 30 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
+	DSLFetcherUntunneledRequestRetryCount:             {value: 2, minimum: 0},
+	DSLFetcherUntunneledRequestRetryDelay:             {value: 5 * time.Second, minimum: time.Duration(0)},
+	DSLFetcherUntunneledRequestRetryDelayJitter:       {value: 0.3, minimum: 0.0},
+	DSLFetcherUntunneledFetchTTL:                      {value: 6 * time.Hour, minimum: time.Duration(0)},
+	DSLFetcherUntunneledDiscoverServerEntriesMinCount: {value: 200, minimum: 0},
+	DSLFetcherUntunneledDiscoverServerEntriesMaxCount: {value: 400, minimum: 0},
+	DSLFetcherUntunneledGetServerEntriesMinCount:      {value: 30, minimum: 0},
+	DSLFetcherUntunneledGetServerEntriesMaxCount:      {value: 60, minimum: 0},
+	DSLFetcherGetLastActiveOSLsTTL:                    {value: 24 * time.Hour, minimum: time.Duration(0)},
+	DSLFetcherGetOSLFileSpecsMinCount:                 {value: 1, minimum: 0},
+	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
+	DSLPrioritizeDialNewServerEntryProbability:        {value: 0.5, minimum: 0.0},
+	DSLPrioritizeDialExistingServerEntryProbability:   {value: 0.25, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

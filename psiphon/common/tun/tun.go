@@ -460,7 +460,6 @@ func (server *Server) ClientConnected(
 
 		clientSession = &session{
 			allowBogons:              server.config.AllowBogons,
-			lastActivity:             int64(monotime.Now()),
 			sessionID:                sessionID,
 			metrics:                  new(packetMetrics),
 			enableDNSFlowTracking:    server.config.EnableDNSFlowTracking,
@@ -468,6 +467,7 @@ func (server *Server) ClientConnected(
 			DNSResolverIPv6Addresses: append([]net.IP(nil), server.config.GetDNSResolverIPv6Addresses()...),
 			workers:                  new(sync.WaitGroup),
 		}
+		clientSession.lastActivity.Store(int64(monotime.Now()))
 
 		// One-time, for this session, random resolver selection for TCP transparent
 		// DNS forwarding. See comment in processPacket.
@@ -1104,11 +1104,8 @@ func (server *Server) convertIndexToIPv6Address(index int32) net.IP {
 }
 
 type session struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastActivity             int64
-	lastFlowReapIndex        int64
+	lastActivity             atomic.Int64
+	lastFlowReapIndex        atomic.Int64
 	downstreamPackets        unsafe.Pointer
 	checkAllowedTCPPortFunc  unsafe.Pointer
 	checkAllowedUDPPortFunc  unsafe.Pointer
@@ -1141,11 +1138,11 @@ type session struct {
 }
 
 func (session *session) touch() {
-	atomic.StoreInt64(&session.lastActivity, int64(monotime.Now()))
+	session.lastActivity.Store(int64(monotime.Now()))
 }
 
 func (session *session) expired(idleExpiry time.Duration) bool {
-	lastActivity := monotime.Time(atomic.LoadInt64(&session.lastActivity))
+	lastActivity := monotime.Time(session.lastActivity.Load())
 	return monotime.Since(lastActivity) > idleExpiry
 }
 
@@ -1300,13 +1297,10 @@ func (f *flowID) set(
 }
 
 type flowState struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	firstUpstreamPacketTime   int64
-	lastUpstreamPacketTime    int64
-	firstDownstreamPacketTime int64
-	lastDownstreamPacketTime  int64
+	firstUpstreamPacketTime   atomic.Int64
+	lastUpstreamPacketTime    atomic.Int64
+	firstDownstreamPacketTime atomic.Int64
+	lastDownstreamPacketTime  atomic.Int64
 	isDNS                     bool
 	dnsQualityReporter        DNSQualityReporter
 	activityUpdaters          []FlowActivityUpdater
@@ -1319,8 +1313,8 @@ func (flowState *flowState) expired(idleExpiry time.Duration) bool {
 	// lastUpstreamPacketTime or lastDownstreamPacketTime will be set by
 	// startTrackingFlow, and the other value will be 0 and evaluate as expired.
 
-	return (now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastUpstreamPacketTime))) > idleExpiry) &&
-		(now.Sub(monotime.Time(atomic.LoadInt64(&flowState.lastDownstreamPacketTime))) > idleExpiry)
+	return (now.Sub(monotime.Time(flowState.lastUpstreamPacketTime.Load())) > idleExpiry) &&
+		(now.Sub(monotime.Time(flowState.lastDownstreamPacketTime.Load())) > idleExpiry)
 }
 
 // isTrackingFlow checks if a flow is being tracked.
@@ -1378,9 +1372,9 @@ func (session *session) startTrackingFlow(
 
 	// Once every period, iterate over flows and reap expired entries.
 	reapIndex := now / int64(monotime.Time(FLOW_IDLE_EXPIRY/2))
-	previousReapIndex := atomic.LoadInt64(&session.lastFlowReapIndex)
+	previousReapIndex := session.lastFlowReapIndex.Load()
 	if reapIndex != previousReapIndex &&
-		atomic.CompareAndSwapInt64(&session.lastFlowReapIndex, previousReapIndex, reapIndex) {
+		session.lastFlowReapIndex.CompareAndSwap(previousReapIndex, reapIndex) {
 		session.reapFlows()
 	}
 
@@ -1412,11 +1406,11 @@ func (session *session) startTrackingFlow(
 	}
 
 	if direction == packetDirectionServerUpstream {
-		flowState.firstUpstreamPacketTime = now
-		flowState.lastUpstreamPacketTime = now
+		flowState.firstUpstreamPacketTime.Store(now)
+		flowState.lastUpstreamPacketTime.Store(now)
 	} else {
-		flowState.firstDownstreamPacketTime = now
-		flowState.lastDownstreamPacketTime = now
+		flowState.firstDownstreamPacketTime.Store(now)
+		flowState.lastDownstreamPacketTime.Store(now)
 	}
 
 	// LoadOrStore will retain any existing entry
@@ -1445,14 +1439,14 @@ func (session *session) updateFlow(
 	if direction == packetDirectionServerUpstream {
 		upstreamBytes = int64(len(applicationData))
 
-		atomic.CompareAndSwapInt64(&flowState.firstUpstreamPacketTime, 0, now)
+		flowState.firstUpstreamPacketTime.CompareAndSwap(0, now)
 
-		atomic.StoreInt64(&flowState.lastUpstreamPacketTime, now)
+		flowState.lastUpstreamPacketTime.Store(now)
 
 	} else {
 		downstreamBytes = int64(len(applicationData))
 
-		atomic.CompareAndSwapInt64(&flowState.firstDownstreamPacketTime, 0, now)
+		flowState.firstDownstreamPacketTime.CompareAndSwap(0, now)
 
 		// Follows common.ActivityMonitoredConn semantics, where
 		// duration is updated only for downstream activity. This
@@ -1460,7 +1454,7 @@ func (session *session) updateFlow(
 		// forward clients (tracked with ActivityUpdaters) and
 		// packet tunnel clients (tracked with FlowActivityUpdaters).
 
-		durationNanoseconds = now - atomic.SwapInt64(&flowState.lastDownstreamPacketTime, now)
+		durationNanoseconds = now - flowState.lastDownstreamPacketTime.Swap(now)
 	}
 
 	for _, updater := range flowState.activityUpdaters {
@@ -1476,7 +1470,7 @@ func (session *session) deleteFlow(ID flowID, flowState *flowState) {
 	if flowState.isDNS {
 
 		dnsStartTime := monotime.Time(
-			atomic.LoadInt64(&flowState.firstUpstreamPacketTime))
+			flowState.firstUpstreamPacketTime.Load())
 
 		if dnsStartTime > 0 {
 
@@ -1490,7 +1484,7 @@ func (session *session) deleteFlow(ID flowID, flowState *flowState) {
 			// recording of the DNS metric.
 
 			dnsEndTime := monotime.Time(
-				atomic.LoadInt64(&flowState.firstDownstreamPacketTime))
+				flowState.firstDownstreamPacketTime.Load())
 
 			dnsSuccess := true
 			if dnsEndTime == 0 {
@@ -1532,8 +1526,8 @@ func (session *session) deleteFlows() {
 }
 
 type packetMetrics struct {
-	upstreamRejectReasons   [packetRejectReasonCount]int64
-	downstreamRejectReasons [packetRejectReasonCount]int64
+	upstreamRejectReasons   [packetRejectReasonCount]atomic.Int64
+	downstreamRejectReasons [packetRejectReasonCount]atomic.Int64
 	TCPIPv4                 relayedPacketMetrics
 	TCPIPv6                 relayedPacketMetrics
 	UDPIPv4                 relayedPacketMetrics
@@ -1541,12 +1535,12 @@ type packetMetrics struct {
 }
 
 type relayedPacketMetrics struct {
-	packetsUp            int64
-	packetsDown          int64
-	bytesUp              int64
-	bytesDown            int64
-	applicationBytesUp   int64
-	applicationBytesDown int64
+	packetsUp            atomic.Int64
+	packetsDown          atomic.Int64
+	bytesUp              atomic.Int64
+	bytesDown            atomic.Int64
+	applicationBytesUp   atomic.Int64
+	applicationBytesDown atomic.Int64
 }
 
 func (metrics *packetMetrics) rejectedPacket(
@@ -1556,11 +1550,11 @@ func (metrics *packetMetrics) rejectedPacket(
 	if direction == packetDirectionServerUpstream ||
 		direction == packetDirectionClientUpstream {
 
-		atomic.AddInt64(&metrics.upstreamRejectReasons[reason], 1)
+		metrics.upstreamRejectReasons[reason].Add(1)
 
 	} else { // packetDirectionDownstream
 
-		atomic.AddInt64(&metrics.downstreamRejectReasons[reason], 1)
+		metrics.downstreamRejectReasons[reason].Add(1)
 
 	}
 }
@@ -1571,7 +1565,7 @@ func (metrics *packetMetrics) relayedPacket(
 	protocol internetProtocol,
 	packetLength, applicationDataLength int) {
 
-	var packetsMetric, bytesMetric, applicationBytesMetric *int64
+	var packetsMetric, bytesMetric, applicationBytesMetric *atomic.Int64
 
 	if direction == packetDirectionServerUpstream ||
 		direction == packetDirectionClientUpstream {
@@ -1629,9 +1623,9 @@ func (metrics *packetMetrics) relayedPacket(
 		}
 	}
 
-	atomic.AddInt64(packetsMetric, 1)
-	atomic.AddInt64(bytesMetric, int64(packetLength))
-	atomic.AddInt64(applicationBytesMetric, int64(applicationDataLength))
+	packetsMetric.Add(1)
+	bytesMetric.Add(int64(packetLength))
+	applicationBytesMetric.Add(int64(applicationDataLength))
 }
 
 const (
@@ -1652,9 +1646,9 @@ func (metrics *packetMetrics) checkpoint(
 
 		for i := 0; i < packetRejectReasonCount; i++ {
 			logFields["upstream_packet_rejected_"+packetRejectReasonDescription(packetRejectReason(i))] =
-				atomic.SwapInt64(&metrics.upstreamRejectReasons[i], 0)
+				metrics.upstreamRejectReasons[i].Swap(0)
 			logFields["downstream_packet_rejected_"+packetRejectReasonDescription(packetRejectReason(i))] =
-				atomic.SwapInt64(&metrics.downstreamRejectReasons[i], 0)
+				metrics.downstreamRejectReasons[i].Swap(0)
 		}
 	}
 
@@ -1677,16 +1671,16 @@ func (metrics *packetMetrics) checkpoint(
 
 		for _, r := range relayedMetrics {
 
-			applicationBytesUp := atomic.SwapInt64(&r.metrics.applicationBytesUp, 0)
-			applicationBytesDown := atomic.SwapInt64(&r.metrics.applicationBytesDown, 0)
+			applicationBytesUp := r.metrics.applicationBytesUp.Swap(0)
+			applicationBytesDown := r.metrics.applicationBytesDown.Swap(0)
 
 			*r.updaterBytesUp += applicationBytesUp
 			*r.updaterBytesDown += applicationBytesDown
 
-			logFields[r.prefix+"packets_up"] = atomic.SwapInt64(&r.metrics.packetsUp, 0)
-			logFields[r.prefix+"packets_down"] = atomic.SwapInt64(&r.metrics.packetsDown, 0)
-			logFields[r.prefix+"bytes_up"] = atomic.SwapInt64(&r.metrics.bytesUp, 0)
-			logFields[r.prefix+"bytes_down"] = atomic.SwapInt64(&r.metrics.bytesDown, 0)
+			logFields[r.prefix+"packets_up"] = r.metrics.packetsUp.Swap(0)
+			logFields[r.prefix+"packets_down"] = r.metrics.packetsDown.Swap(0)
+			logFields[r.prefix+"bytes_up"] = r.metrics.bytesUp.Swap(0)
+			logFields[r.prefix+"bytes_down"] = r.metrics.bytesDown.Swap(0)
 			logFields[r.prefix+"application_bytes_up"] = applicationBytesUp
 			logFields[r.prefix+"application_bytes_down"] = applicationBytesDown
 		}

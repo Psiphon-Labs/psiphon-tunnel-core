@@ -37,6 +37,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/packetman"
@@ -146,6 +147,27 @@ func RunServices(configJSON []byte) (retErr error) {
 		}
 
 		support.PacketManipulator = packetManipulator
+	}
+
+	if config.DSLRelayServiceAddress != "" {
+		support.dslRelay, err = dsl.NewRelay(&dsl.RelayConfig{
+			Logger:                        CommonLogger(log),
+			CACertificatesFilename:        config.DSLRelayCACertificatesFilename,
+			HostCertificateFilename:       config.DSLRelayHostCertificateFilename,
+			HostKeyFilename:               config.DSLRelayHostKeyFilename,
+			GetServiceAddress:             dslMakeGetServiceAddress(support),
+			HostID:                        config.HostID,
+			APIParameterValidator:         getDSLAPIParameterValidator(config),
+			APIParameterLogFieldFormatter: getDSLAPIParameterLogFieldFormatter(),
+		})
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		err := dslReloadRelayTactics(support)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	support.discovery = makeDiscovery(support)
@@ -439,15 +461,15 @@ func getRuntimeMetrics() LogFields {
 	}
 
 	return LogFields{
-		"num_goroutine": numGoroutine,
-		"heap_alloc":    memStats.HeapAlloc,
-		"heap_sys":      memStats.HeapSys,
-		"heap_idle":     memStats.HeapIdle,
-		"heap_inuse":    memStats.HeapInuse,
-		"heap_released": memStats.HeapReleased,
-		"heap_objects":  memStats.HeapObjects,
-		"num_gc":        memStats.NumGC,
-		"num_forced_gc": memStats.NumForcedGC,
+		"num_goroutine": int64(numGoroutine),
+		"heap_alloc":    int64(memStats.HeapAlloc),
+		"heap_sys":      int64(memStats.HeapSys),
+		"heap_idle":     int64(memStats.HeapIdle),
+		"heap_inuse":    int64(memStats.HeapInuse),
+		"heap_released": int64(memStats.HeapReleased),
+		"heap_objects":  int64(memStats.HeapObjects),
+		"num_gc":        int64(memStats.NumGC),
+		"num_forced_gc": int64(memStats.NumForcedGC),
 		"last_gc":       lastGC,
 	}
 }
@@ -490,6 +512,8 @@ func logServerLoad(
 	serverLoad := getRuntimeMetrics()
 
 	serverLoad["event_name"] = "server_load"
+
+	support.Config.AddServerEntryTag(serverLoad)
 
 	if logNetworkBytes {
 
@@ -558,13 +582,20 @@ func logIrregularTunnel(
 	}
 
 	logFields["event_name"] = "irregular_tunnel"
-	logFields["listener_protocol"] = listenerTunnelProtocol
-	logFields["listener_port_number"] = listenerPort
+	support.Config.AddServerEntryTag(logFields)
+
 	logFields["tunnel_error"] = tunnelError.Error()
 
-	// Note: logging with the "client_" prefix for legacy compatibility; it
-	// would be more correct to use the prefix "peer_".
-	support.GeoIPService.Lookup(peerIP).SetClientLogFields(logFields)
+	if listenerTunnelProtocol != "" {
+		logFields["listener_protocol"] = listenerTunnelProtocol
+		logFields["listener_port_number"] = listenerPort
+	}
+
+	if peerIP != "" {
+		// Note: logging with the "client_" prefix for legacy compatibility; it
+		// would be more correct to use the prefix "peer_".
+		support.GeoIPService.Lookup(peerIP).SetClientLogFields(logFields)
+	}
 
 	log.LogRawFieldsWithTimestamp(logFields)
 }
@@ -590,8 +621,8 @@ type SupportServices struct {
 	PacketManipulator            *packetman.Manipulator
 	ReplayCache                  *ReplayCache
 	ServerTacticsParametersCache *ServerTacticsParametersCache
-
-	discovery *Discovery
+	dslRelay                     *dsl.Relay
+	discovery                    *Discovery
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -672,6 +703,10 @@ func (support *SupportServices) Reload() {
 			support.Blocklist},
 		support.GeoIPService.Reloaders()...)
 
+	if support.dslRelay != nil {
+		reloaders = append(reloaders, support.dslRelay)
+	}
+
 	reloadDiscovery := func(reloadedTactics bool) {
 		err := support.discovery.reload(reloadedTactics)
 		if err != nil {
@@ -709,6 +744,16 @@ func (support *SupportServices) Reload() {
 		}
 
 		reloadDiscovery(true)
+
+		if support.dslRelay != nil {
+			err := dslReloadRelayTactics(support)
+			if err != nil {
+				log.WithTraceFields(
+					LogFields{"error": errors.Trace(err)}).Warning(
+					"failed to reload DSL relay tactics")
+			}
+
+		}
 	}
 
 	// Take these actions only after the corresponding Reloader has reloaded.
@@ -744,13 +789,13 @@ func (support *SupportServices) Reload() {
 		if err != nil {
 			log.WithTraceFields(
 				LogFields{
-					"reloader": reloader.LogDescription(),
+					"reloader": reloader.ReloadLogDescription(),
 					"error":    err}).Error("reload failed")
 			// Keep running with previous state
 		} else {
 			log.WithTraceFields(
 				LogFields{
-					"reloader": reloader.LogDescription(),
+					"reloader": reloader.ReloadLogDescription(),
 					"reloaded": reloaded}).Info("reload success")
 		}
 	}
