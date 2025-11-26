@@ -561,6 +561,8 @@ func logServerLoad(
 			"region":     region,
 		}
 
+		support.Config.AddServerEntryTag(serverLoad)
+
 		for protocol, stats := range regionProtocolStats {
 			serverLoad[protocol] = stats
 		}

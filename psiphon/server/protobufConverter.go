@@ -226,6 +226,10 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 						Region:   &regionString,
 					}
 
+					if value, exists := protoStats["server_entry_tag"].(string); exists {
+						msg.ServerEntryTag = &value
+					}
+
 					if value, exists := protoStats["accepted_clients"].(int64); exists {
 						msg.AcceptedClients = &value
 					}
@@ -263,6 +267,10 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 				msg := &pb.ServerLoadDNS{
 					DnsServer: &dns,
 					DnsCount:  &count,
+				}
+
+				if value, exists := logFields["server_entry_tag"].(string); exists {
+					msg.ServerEntryTag = &value
 				}
 
 				if value, exists := logFields["dns_failed_count"].(map[string]int64)[dns]; exists {
