@@ -28,6 +28,7 @@ type ServerLoadProtocol struct {
 	Protocol           *string                `protobuf:"bytes,101,opt,name=protocol,proto3,oneof" json:"protocol,omitempty"`
 	AcceptedClients    *int64                 `protobuf:"varint,102,opt,name=accepted_clients,json=acceptedClients,proto3,oneof" json:"accepted_clients,omitempty"`
 	EstablishedClients *int64                 `protobuf:"varint,103,opt,name=established_clients,json=establishedClients,proto3,oneof" json:"established_clients,omitempty"`
+	ServerEntryTag     *string                `protobuf:"bytes,104,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -90,6 +91,13 @@ func (x *ServerLoadProtocol) GetEstablishedClients() int64 {
 	return 0
 }
 
+func (x *ServerLoadProtocol) GetServerEntryTag() string {
+	if x != nil && x.ServerEntryTag != nil {
+		return *x.ServerEntryTag
+	}
+	return ""
+}
+
 type ServerLoadDNS struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	DnsServer         *string                `protobuf:"bytes,100,opt,name=dns_server,json=dnsServer,proto3,oneof" json:"dns_server,omitempty"`
@@ -97,6 +105,7 @@ type ServerLoadDNS struct {
 	DnsDuration       *int64                 `protobuf:"varint,102,opt,name=dns_duration,json=dnsDuration,proto3,oneof" json:"dns_duration,omitempty"`
 	DnsFailedCount    *int64                 `protobuf:"varint,103,opt,name=dns_failed_count,json=dnsFailedCount,proto3,oneof" json:"dns_failed_count,omitempty"`
 	DnsFailedDuration *int64                 `protobuf:"varint,104,opt,name=dns_failed_duration,json=dnsFailedDuration,proto3,oneof" json:"dns_failed_duration,omitempty"`
+	ServerEntryTag    *string                `protobuf:"bytes,105,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -164,6 +173,13 @@ func (x *ServerLoadDNS) GetDnsFailedDuration() int64 {
 		return *x.DnsFailedDuration
 	}
 	return 0
+}
+
+func (x *ServerLoadDNS) GetServerEntryTag() string {
+	if x != nil && x.ServerEntryTag != nil {
+		return *x.ServerEntryTag
+	}
+	return ""
 }
 
 type ServerLoad struct {
@@ -574,29 +590,33 @@ var File_ca_psiphon_psiphond_server_load_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/server_load.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xfd\x01\n" +
+	"%ca.psiphon.psiphond/server_load.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc1\x02\n" +
 	"\x12ServerLoadProtocol\x12\x1b\n" +
 	"\x06region\x18d \x01(\tH\x00R\x06region\x88\x01\x01\x12\x1f\n" +
 	"\bprotocol\x18e \x01(\tH\x01R\bprotocol\x88\x01\x01\x12.\n" +
 	"\x10accepted_clients\x18f \x01(\x03H\x02R\x0facceptedClients\x88\x01\x01\x124\n" +
-	"\x13established_clients\x18g \x01(\x03H\x03R\x12establishedClients\x88\x01\x01B\t\n" +
+	"\x13established_clients\x18g \x01(\x03H\x03R\x12establishedClients\x88\x01\x01\x12-\n" +
+	"\x10server_entry_tag\x18h \x01(\tH\x04R\x0eserverEntryTag\x88\x01\x01B\t\n" +
 	"\a_regionB\v\n" +
 	"\t_protocolB\x13\n" +
 	"\x11_accepted_clientsB\x16\n" +
-	"\x14_established_clients\"\xbc\x02\n" +
+	"\x14_established_clientsB\x13\n" +
+	"\x11_server_entry_tag\"\x80\x03\n" +
 	"\rServerLoadDNS\x12\"\n" +
 	"\n" +
 	"dns_server\x18d \x01(\tH\x00R\tdnsServer\x88\x01\x01\x12 \n" +
 	"\tdns_count\x18e \x01(\x03H\x01R\bdnsCount\x88\x01\x01\x12&\n" +
 	"\fdns_duration\x18f \x01(\x03H\x02R\vdnsDuration\x88\x01\x01\x12-\n" +
 	"\x10dns_failed_count\x18g \x01(\x03H\x03R\x0ednsFailedCount\x88\x01\x01\x123\n" +
-	"\x13dns_failed_duration\x18h \x01(\x03H\x04R\x11dnsFailedDuration\x88\x01\x01B\r\n" +
+	"\x13dns_failed_duration\x18h \x01(\x03H\x04R\x11dnsFailedDuration\x88\x01\x01\x12-\n" +
+	"\x10server_entry_tag\x18i \x01(\tH\x05R\x0eserverEntryTag\x88\x01\x01B\r\n" +
 	"\v_dns_serverB\f\n" +
 	"\n" +
 	"_dns_countB\x0f\n" +
 	"\r_dns_durationB\x13\n" +
 	"\x11_dns_failed_countB\x16\n" +
-	"\x14_dns_failed_duration\"\x81\"\n" +
+	"\x14_dns_failed_durationB\x13\n" +
+	"\x11_server_entry_tag\"\x81\"\n" +
 	"\n" +
 	"ServerLoad\x12$\n" +
 	"\vcpu_percent\x18d \x01(\x01H\x00R\n" +

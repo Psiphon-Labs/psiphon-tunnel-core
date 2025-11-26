@@ -2446,12 +2446,15 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	select {
 	case logFields := <-serverLoadLog:
+		if logFields["server_entry_tag"] == nil ||
+			fmt.Sprintf("%s", logFields["server_entry_tag"]) == "" {
+			t.Fatalf("missing server_entry_tag")
+		}
 		if expectDomainPortForward {
 			dnsCount := int(logFields["dns_count"].(map[string]any)["ALL"].(float64))
 			if dnsCount != 1 {
 				t.Fatalf("unexpected dns_count: %d", dnsCount)
 			}
-
 		}
 	default:
 		t.Fatalf("missing server load log")
