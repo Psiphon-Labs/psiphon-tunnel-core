@@ -84,6 +84,7 @@ const (
 	EstablishTunnelTimeout                             = "EstablishTunnelTimeout"
 	EstablishTunnelWorkTime                            = "EstablishTunnelWorkTime"
 	EstablishTunnelPausePeriod                         = "EstablishTunnelPausePeriod"
+	EstablishTunnelNoServersPausePeriod                = "EstablishTunnelNoServersPausePeriod"
 	EstablishTunnelPausePeriodJitter                   = "EstablishTunnelPausePeriodJitter"
 	EstablishTunnelServerAffinityGracePeriod           = "EstablishTunnelServerAffinityGracePeriod"
 	StaggerConnectionWorkersPeriod                     = "StaggerConnectionWorkersPeriod"
@@ -603,6 +604,7 @@ var defaultParameters = map[string]struct {
 	EstablishTunnelTimeout:                   {value: 300 * time.Second, minimum: time.Duration(0)},
 	EstablishTunnelWorkTime:                  {value: 60 * time.Second, minimum: 1 * time.Second},
 	EstablishTunnelPausePeriod:               {value: 5 * time.Second, minimum: 1 * time.Millisecond},
+	EstablishTunnelNoServersPausePeriod:      {value: 500 * time.Millisecond, minimum: 1 * time.Millisecond},
 	EstablishTunnelPausePeriodJitter:         {value: 0.1, minimum: 0.0},
 	EstablishTunnelServerAffinityGracePeriod: {value: 1 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	StaggerConnectionWorkersPeriod:           {value: time.Duration(0), minimum: time.Duration(0)},

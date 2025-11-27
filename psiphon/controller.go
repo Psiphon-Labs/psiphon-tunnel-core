@@ -2599,8 +2599,26 @@ loop:
 		// be more rounds if required).
 
 		p := controller.config.GetParameters().Get()
+
+		pausePeriod := p.Duration(parameters.EstablishTunnelPausePeriod)
+		if controller.config.TargetServerEntry == "" &&
+			GetLastServerEntryCount() == 0 &&
+			((!controller.config.DisableRemoteServerListFetcher &&
+				(controller.config.RemoteServerListURLs != nil ||
+					controller.config.ObfuscatedServerListRootURLs != nil)) ||
+				!controller.config.DisableDSLFetcher) {
+
+			// Reduce/alter the wait time if the client has no server entries
+			// and at least one type of server list fetch is configured.
+			//
+			// As a future enhancement, check for an in-flight server list fetch,
+			// and stop waiting as soon as it's finished.
+
+			pausePeriod = p.Duration(parameters.EstablishTunnelNoServersPausePeriod)
+		}
+
 		timeout := prng.JitterDuration(
-			p.Duration(parameters.EstablishTunnelPausePeriod),
+			pausePeriod,
 			p.Float(parameters.EstablishTunnelPausePeriodJitter))
 		p.Close()
 
