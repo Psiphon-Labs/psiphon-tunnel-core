@@ -1002,8 +1002,7 @@ func NoticeActiveAuthorizationIDs(diagnosticID string, activeAuthorizationIDs []
 
 // NoticeTrafficRateLimits reports the tunnel traffic rate limits in place for
 // this client, as reported by the server at the start of the tunnel. Values
-// of 0 indicate no limit. Values of -1 indicate that the server did not
-// report rate limits.
+// of 0 indicate no limit.
 //
 // Limitation: any rate limit changes during the lifetime of the tunnel are
 // not reported.

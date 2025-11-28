@@ -257,11 +257,6 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 
 	var handshakeResponse protocol.HandshakeResponse
 
-	// Initialize these fields to distinguish between psiphond omitting values in
-	// the response and the zero value, which means unlimited rate.
-	handshakeResponse.UpstreamBytesPerSecond = -1
-	handshakeResponse.DownstreamBytesPerSecond = -1
-
 	err := json.Unmarshal(response, &handshakeResponse)
 	if err != nil {
 		return errors.Trace(err)
