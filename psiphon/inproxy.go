@@ -1310,6 +1310,9 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 	}
 	logFields["inproxy_broker_is_reuse"] = isReuse
 
+	// TODO: include tlsConn.GetMetrics tls_did_resume/tls_sent_ticket.
+	// Requires a reference to the InproxyBrokerRoundTripper.
+
 	return logFields
 }
 
