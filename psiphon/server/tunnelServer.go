@@ -548,7 +548,7 @@ func newSSHServer(
 			ServerPrivateKey:            inproxyPrivateKey,
 			ServerRootObfuscationSecret: inproxyObfuscationSecret,
 			BrokerRoundTripperMaker:     makeRoundTripper,
-			ProxyMetricsValidator:       getInproxyBrokerAPIParameterValidator(support.Config),
+			ProxyMetricsValidator:       getInproxyBrokerAPIParameterValidator(),
 			ProxyMetricsFormatter:       getInproxyBrokerAPIParameterLogFieldFormatter(),
 
 			// Prefix for proxy metrics log fields in server_tunnel
@@ -2903,7 +2903,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		}
 	}
 
-	if !isHexDigits(sshClient.sshServer.support.Config, sshPasswordPayload.SessionId) ||
+	if !isHexDigits(sshPasswordPayload.SessionId) ||
 		len(sshPasswordPayload.SessionId) != expectedSessionIDLength {
 		return nil, errors.Tracef("invalid session ID for %q", conn.User())
 	}
@@ -2930,7 +2930,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	// This optional, early sponsor ID will be logged with server_tunnel if
 	// the tunnel doesn't reach handshakeState.completed.
 	sponsorID := sshPasswordPayload.SponsorID
-	if sponsorID != "" && !isSponsorID(sshClient.sshServer.support.Config, sponsorID) {
+	if sponsorID != "" && !isSponsorID(sponsorID) {
 		return nil, errors.Tracef("invalid sponsor ID")
 	}
 

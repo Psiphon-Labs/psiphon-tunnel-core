@@ -157,7 +157,7 @@ func RunServices(configJSON []byte) (retErr error) {
 			HostKeyFilename:               config.DSLRelayHostKeyFilename,
 			GetServiceAddress:             dslMakeGetServiceAddress(support),
 			HostID:                        config.HostID,
-			APIParameterValidator:         getDSLAPIParameterValidator(config),
+			APIParameterValidator:         getDSLAPIParameterValidator(),
 			APIParameterLogFieldFormatter: getDSLAPIParameterLogFieldFormatter(),
 		})
 		if err != nil {
@@ -663,7 +663,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 	tacticsServer, err := tactics.NewServer(
 		CommonLogger(log),
 		getTacticsAPIParameterLogFieldFormatter(),
-		getTacticsAPIParameterValidator(config),
+		getTacticsAPIParameterValidator(),
 		config.TacticsConfigFilename,
 		config.TacticsRequestPublicKey,
 		config.TacticsRequestPrivateKey,
