@@ -907,7 +907,7 @@ func protobufConvertToTimestamp(value any) (*timestamppb.Timestamp, error) {
 		var t time.Time
 		for _, format := range []string{
 			time.RFC3339Nano,
-			"2006-01-02T15:04:05.999999999Z0700", // ISO8601 w/ optional TZ offset; up to nanosecond precision.
+			iso8601Date,
 		} {
 			if t, err = time.Parse(format, v); err == nil {
 				break

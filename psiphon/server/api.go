@@ -2014,11 +2014,12 @@ func isServerEntrySource(value string) bool {
 	return common.ContainsWildcard(protocol.SupportedServerEntrySources, value)
 }
 
-var isISO8601DateRegex = regexp.MustCompile(
-	`(?P<year>[0-9]{4})-(?P<month>[0-9]{1,2})-(?P<day>[0-9]{1,2})T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})(\.(?P<fraction>[0-9]+))?(?P<timezone>Z|(([-+])([0-9]{2}):([0-9]{2})))`)
+// ISO8601 with optional TZ offset; up to nanosecond precision.
+const iso8601Date = "2006-01-02T15:04:05.999999999Z0700"
 
 func isISO8601Date(value string) bool {
-	return isISO8601DateRegex.Match([]byte(value))
+	_, err := time.Parse(iso8601Date, value)
+	return err == nil
 }
 
 func isLastConnected(value string) bool {
