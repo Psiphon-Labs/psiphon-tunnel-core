@@ -447,7 +447,7 @@ func protobufPopulateMessageFromFields(logFields LogFields, msg proto.Message) {
 
 		// Handle special field names that might be mapped differently.
 		if err := setProtobufFieldValue(field, fieldType, logValue); err != nil {
-			panic(fmt.Errorf("failed to set field value: %w", err))
+			panic(errors.Tracef("failed to set field value: %w", err))
 		}
 	}
 }
@@ -490,32 +490,32 @@ func getProtobufFieldName(protoTag string) string {
 	return ""
 }
 
-// protobufConversionError represents an error during type conversion
-type protobufConversionError struct {
-	fieldName string
-	fromType  string
-	toType    string
-	value     any
-	err       error
-}
-
-func (e *protobufConversionError) Error() string {
-	return fmt.Sprintf("failed to convert field %s from %s to %s (value: %v): %v",
-		e.fieldName, e.fromType, e.toType, e.value, e.err)
-}
-
 // setProtobufFieldValue sets a protobuf field value from a LogFields value.
 func setProtobufFieldValue(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	if logValue == nil {
 		return nil // Don't set anything for nil values
 	}
 
+	var err error
+
 	// Handle pointers by creating a new instance and setting recursively
 	if field.Kind() == reflect.Ptr {
-		return setProtobufPointerField(field, fieldType, logValue)
+		err = setProtobufPointerField(field, fieldType, logValue)
+	} else {
+		err = setProtobufPrimitiveField(field, fieldType, logValue)
 	}
 
-	return setProtobufPrimitiveField(field, fieldType, logValue)
+	if err != nil {
+		err = errors.Tracef(
+			"failed to convert field %s value `%v` type %T to %s : %w",
+			fieldType.Name,
+			logValue,
+			logValue,
+			fieldType.Type.String(),
+			errors.Trace(err))
+	}
+
+	return nil
 }
 
 // setProtobufPointerField handles pointer fields by creating new instances
@@ -526,7 +526,7 @@ func setProtobufPointerField(field reflect.Value, fieldType reflect.StructField,
 	if elemType == reflect.TypeOf(timestamppb.Timestamp{}) {
 		ts, err := protobufConvertToTimestamp(logValue)
 		if err != nil {
-			return err
+			return errors.Trace(err)
 		}
 
 		if ts != nil {
@@ -540,7 +540,7 @@ func setProtobufPointerField(field reflect.Value, fieldType reflect.StructField,
 	newVal := reflect.New(elemType)
 	err := setProtobufPrimitiveField(newVal.Elem(), fieldType, logValue)
 	if err != nil {
-		return err
+		return errors.Trace(err)
 	}
 
 	field.Set(newVal)
@@ -550,42 +550,32 @@ func setProtobufPointerField(field reflect.Value, fieldType reflect.StructField,
 
 // setProtobufPrimitiveField handles non-pointer fields
 func setProtobufPrimitiveField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
+	var err error
 	switch field.Kind() {
 	case reflect.String:
-		return setProtobufStringField(field, fieldType, logValue)
+		err = setProtobufStringField(field, fieldType, logValue)
 	case reflect.Int, reflect.Int32, reflect.Int64:
-		return setProtobufIntField(field, fieldType, logValue)
+		err = setProtobufIntField(field, fieldType, logValue)
 	case reflect.Uint, reflect.Uint32, reflect.Uint64:
-		return setProtobufUintField(field, fieldType, logValue)
+		err = setProtobufUintField(field, fieldType, logValue)
 	case reflect.Float64:
-		return setProtobufFloat64Field(field, fieldType, logValue)
+		err = setProtobufFloat64Field(field, fieldType, logValue)
 	case reflect.Bool:
-		return setProtobufBoolField(field, fieldType, logValue)
+		err = setProtobufBoolField(field, fieldType, logValue)
 	case reflect.Map:
-		return setProtobufMapField(field, fieldType, logValue)
+		err = setProtobufMapField(field, fieldType, logValue)
 	case reflect.Slice:
-		return setProtobufSliceField(field, fieldType, logValue)
+		err = setProtobufSliceField(field, fieldType, logValue)
 	default:
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    field.Kind().String(),
-			value:     logValue,
-			err:       fmt.Errorf("unsupported field kind"),
-		}
+		err = errors.TraceNew("unsupported field kind")
 	}
+	return errors.Trace(err)
 }
 
 func setProtobufStringField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	str, err := protobufConvertToString(logValue)
 	if err != nil {
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "string",
-			value:     logValue,
-			err:       err,
-		}
+		return errors.Trace(err)
 	}
 
 	// Handle special cases for string fields
@@ -600,26 +590,14 @@ func setProtobufStringField(field reflect.Value, fieldType reflect.StructField, 
 }
 
 func setProtobufIntField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
-	convErr := &protobufConversionError{
-		fieldName: fieldType.Name,
-		fromType:  fmt.Sprintf("%T", logValue),
-		value:     logValue,
-	}
 
-	switch field.Kind() {
-	case reflect.Int, reflect.Int64:
-		// Because we extensively run on 64-bit architectures and protobuf
-		// doesn't have the architecture switching int type, for consistency,
-		// we always use int64 in our protos to represent int in go.
-		convErr.toType = "int64"
-	case reflect.Int32:
-		convErr.toType = "int32"
-	}
+	// Because we extensively run on 64-bit architectures and protobuf
+	// doesn't have the architecture switching int type, for consistency,
+	// we always use int64 in our protos to represent int in go.
 
 	val, err := protobufConvertToInt64(logValue)
 	if err != nil {
-		convErr.err = err
-		return convErr
+		return errors.Trace(err)
 	}
 
 	field.SetInt(val)
@@ -627,26 +605,14 @@ func setProtobufIntField(field reflect.Value, fieldType reflect.StructField, log
 }
 
 func setProtobufUintField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
-	convErr := &protobufConversionError{
-		fieldName: fieldType.Name,
-		fromType:  fmt.Sprintf("%T", logValue),
-		value:     logValue,
-	}
 
-	switch field.Kind() {
-	case reflect.Uint, reflect.Uint64:
-		// Because we extensively run on 64-bit architectures and protobuf
-		// doesn't have the architecture switching int type, for consistency,
-		// we always use uint64 in our protos to represent uint in go.
-		convErr.toType = "uint64"
-	case reflect.Uint32:
-		convErr.toType = "uint32"
-	}
+	// Because we extensively run on 64-bit architectures and protobuf
+	// doesn't have the architecture switching int type, for consistency,
+	// we always use uint64 in our protos to represent uint in go.
 
 	val, err := protobufConvertToUint64(logValue)
 	if err != nil {
-		convErr.err = err
-		return convErr
+		return errors.Trace(err)
 	}
 
 	field.SetUint(val)
@@ -656,13 +622,7 @@ func setProtobufUintField(field reflect.Value, fieldType reflect.StructField, lo
 func setProtobufFloat64Field(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	val, err := protobufConvertToFloat64(logValue)
 	if err != nil {
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "float64",
-			value:     logValue,
-			err:       err,
-		}
+		return errors.Trace(err)
 	}
 
 	field.SetFloat(val)
@@ -672,13 +632,7 @@ func setProtobufFloat64Field(field reflect.Value, fieldType reflect.StructField,
 func setProtobufBoolField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	val, err := protobufConvertToBool(logValue)
 	if err != nil {
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "bool",
-			value:     logValue,
-			err:       err,
-		}
+		return errors.Trace(err)
 	}
 
 	field.SetBool(val)
@@ -688,13 +642,7 @@ func setProtobufBoolField(field reflect.Value, fieldType reflect.StructField, lo
 func setProtobufMapField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	mapValue, ok := logValue.(map[string]int64)
 	if !ok {
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "map[string]int64",
-			value:     logValue,
-			err:       fmt.Errorf("expected map[string]int64"),
-		}
+		return errors.TraceNew("expected map[string]int64")
 	}
 
 	newMap := reflect.MakeMap(field.Type())
@@ -714,13 +662,7 @@ func setProtobufSliceField(field reflect.Value, fieldType reflect.StructField, l
 		for i, elem := range sliceValue {
 			str, ok := elem.(string)
 			if !ok {
-				return &protobufConversionError{
-					fieldName: fieldType.Name,
-					fromType:  fmt.Sprintf("%T", elem),
-					toType:    "string",
-					value:     elem,
-					err:       fmt.Errorf("slice element at index %d is not a string", i),
-				}
+				return errors.Tracef("slice element at index %d is not a string", i)
 			}
 			newSlice = append(newSlice, str)
 		}
@@ -747,13 +689,7 @@ func setProtobufSliceField(field reflect.Value, fieldType reflect.StructField, l
 		field.Set(reflect.ValueOf(newSlice))
 
 	default:
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "[]string",
-			value:     logValue,
-			err:       fmt.Errorf("expected []any or []string"),
-		}
+		return errors.TraceNew("unexpected slice type")
 	}
 
 	return nil
@@ -768,7 +704,7 @@ func protobufConvertToString(value any) (string, error) {
 		return v.String(), nil
 
 	default:
-		return "", fmt.Errorf("cannot convert %T to string", value)
+		return "", errors.Tracef("cannot convert %T to string", value)
 	}
 }
 
@@ -785,7 +721,7 @@ func protobufConvertToInt64(value any) (int64, error) {
 
 	case string:
 		if v == "" {
-			return 0, fmt.Errorf("cannot convert empty string to int64")
+			return 0, errors.TraceNew("cannot convert empty string to int64")
 		}
 
 		return strconv.ParseInt(v, 10, 64)
@@ -796,13 +732,13 @@ func protobufConvertToInt64(value any) (int64, error) {
 			return int64(v), nil
 		}
 
-		return 0, fmt.Errorf("float64 %f is not a whole number", v)
+		return 0, errors.Tracef("float64 %f is not a whole number", v)
 
 	case time.Duration:
 		return int64(v), nil
 
 	default:
-		return 0, fmt.Errorf("cannot convert %T to int64", value)
+		return 0, errors.Tracef("cannot convert %T to int64", value)
 	}
 }
 
@@ -819,27 +755,27 @@ func protobufConvertToUint64(value any) (uint64, error) {
 
 	case int:
 		if v < 0 {
-			return 0, fmt.Errorf("cannot convert negative int %d to uint64", v)
+			return 0, errors.Tracef("cannot convert negative int %d to uint64", v)
 		}
 
 		return uint64(v), nil
 
 	case int64:
 		if v < 0 {
-			return 0, fmt.Errorf("cannot convert negative int64 %d to uint64", v)
+			return 0, errors.Tracef("cannot convert negative int64 %d to uint64", v)
 		}
 
 		return uint64(v), nil
 
 	case string:
 		if v == "" {
-			return 0, fmt.Errorf("cannot convert empty string to uint64")
+			return 0, errors.TraceNew("cannot convert empty string to uint64")
 		}
 
 		return strconv.ParseUint(v, 10, 64)
 
 	default:
-		return 0, fmt.Errorf("cannot convert %T to uint64", value)
+		return 0, errors.Tracef("cannot convert %T to uint64", value)
 	}
 }
 
@@ -859,13 +795,13 @@ func protobufConvertToFloat64(value any) (float64, error) {
 
 	case string:
 		if v == "" {
-			return 0, fmt.Errorf("cannot convert empty string to float64")
+			return 0, errors.TraceNew("cannot convert empty string to float64")
 		}
 
 		return strconv.ParseFloat(v, 64)
 
 	default:
-		return 0, fmt.Errorf("cannot convert %T to float64", value)
+		return 0, errors.Tracef("cannot convert %T to float64", value)
 	}
 }
 
@@ -883,7 +819,7 @@ func protobufConvertToBool(value any) (bool, error) {
 			return false, nil
 
 		default:
-			return false, fmt.Errorf("cannot convert string %q to bool", v)
+			return false, errors.Tracef("cannot convert string %q to bool", v)
 		}
 	case int:
 		return v != 0, nil
@@ -914,7 +850,7 @@ func protobufConvertToTimestamp(value any) (*timestamppb.Timestamp, error) {
 			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("cannot parse timestamp string %q", v)
+			return nil, errors.Tracef("cannot parse timestamp string %q", v)
 		}
 
 		return timestamppb.New(t), nil
@@ -934,6 +870,6 @@ func protobufConvertToTimestamp(value any) (*timestamppb.Timestamp, error) {
 		return timestamppb.New(*v), nil
 
 	default:
-		return nil, fmt.Errorf("cannot convert %T to timestamp", value)
+		return nil, errors.Tracef("cannot convert %T to timestamp", value)
 	}
 }
