@@ -221,7 +221,7 @@ func RunServices(configJSON []byte) (retErr error) {
 	if config.RunLoadMonitor() {
 		waitGroup.Add(1)
 		go func() {
-			waitGroup.Done()
+			defer waitGroup.Done()
 			ticker := time.NewTicker(time.Duration(config.LoadMonitorPeriodSeconds) * time.Second)
 			defer ticker.Stop()
 
@@ -301,7 +301,7 @@ func RunServices(configJSON []byte) (retErr error) {
 	if config.RunPeriodicGarbageCollection() {
 		waitGroup.Add(1)
 		go func() {
-			waitGroup.Done()
+			defer waitGroup.Done()
 			ticker := time.NewTicker(config.periodicGarbageCollection)
 			defer ticker.Stop()
 			for {
