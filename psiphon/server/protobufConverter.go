@@ -696,16 +696,17 @@ func setProtobufSliceField(field reflect.Value, fieldType reflect.StructField, l
 }
 
 func protobufConvertToString(value any) (string, error) {
+	var s string
 	switch v := value.(type) {
 	case string:
-		return v, nil
-
+		s = v
 	case fmt.Stringer:
-		return v.String(), nil
-
+		s = v.String()
 	default:
 		return "", errors.Tracef("cannot convert %T to string", value)
 	}
+	// Ensure the string is UTF-8, as required by proto.Marshal.
+	return strings.ToValidUTF8(s, "\uFFFD"), nil
 }
 
 func protobufConvertToInt64(value any) (int64, error) {
