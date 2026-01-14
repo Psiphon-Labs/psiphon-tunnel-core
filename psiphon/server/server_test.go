@@ -911,7 +911,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// configureDSLTestServerEntries bootstrap can only perform tactics
 	// requests and not dial a tunnel, so the DSL request must succeed.
 
-	doDSL := psiphon.DSLEnabled() && doInproxy && inproxyTestConfig.addMeekServerForBroker
+	doDSL := doInproxy && inproxyTestConfig.addMeekServerForBroker
 
 	var dslTestConfig *dslTestConfig
 	enableDSLFetcher := "false"
