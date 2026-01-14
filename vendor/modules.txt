@@ -24,7 +24,7 @@ github.com/Jigsaw-Code/outline-ss-server/service/metrics
 # github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 ## explicit
 github.com/Psiphon-Inc/rotate-safe-writer
-# github.com/Psiphon-Inc/uds-ipc v0.0.0-20251007150957-166e89b034be
+# github.com/Psiphon-Inc/uds-ipc v1.0.1
 ## explicit; go 1.24.0
 github.com/Psiphon-Inc/uds-ipc
 # github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7

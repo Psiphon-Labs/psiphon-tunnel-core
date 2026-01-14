@@ -3673,8 +3673,6 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 	sshClient.sshServer.support.Config.AddServerEntryTag(logFields)
 
-	logFields["tunnel_id"] = base64.RawURLEncoding.EncodeToString(prng.Bytes(protocol.PSIPHON_API_TUNNEL_ID_LENGTH))
-
 	if sshClient.isInproxyTunnelProtocol {
 		sshClient.peerGeoIPData.SetLogFieldsWithPrefix("", "inproxy_proxy", logFields)
 		logFields.Add(
@@ -3748,14 +3746,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 		// Only log destination bytes for ASNs that remain enabled in tactics.
 		//
-		// Any counts accumulated before DestinationBytesMetricsASN[s] changes
+		// Any counts accumulated before DestinationBytesMetricsASNs changes
 		// are lost. At this time we can't change destination byte counting
 		// dynamically, after a tactics hot reload, as there may be
 		// destination bytes port forwards that were in place before the
 		// change, which will continue to count.
 
 		destinationBytesMetricsASNs := []string{}
-		destinationBytesMetricsASN := ""
 
 		// Target this using the client, not peer, GeoIP. In the case of
 		// in-proxy tunnel protocols, the client GeoIP fields will be None
@@ -3765,66 +3762,27 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.clientGeoIPData)
 		if err == nil && !p.IsNil() {
 			destinationBytesMetricsASNs = p.Strings(parameters.DestinationBytesMetricsASNs)
-			destinationBytesMetricsASN = p.String(parameters.DestinationBytesMetricsASN)
 		}
 		p.Close()
 
-		if destinationBytesMetricsASN != "" {
-
-			// Log any parameters.DestinationBytesMetricsASN data in the
-			// legacy log field format.
-
-			destinationBytesMetrics, ok :=
-				sshClient.destinationBytesMetrics[destinationBytesMetricsASN]
-
-			if ok {
-				bytesUpTCP := destinationBytesMetrics.tcpMetrics.getBytesUp()
-				bytesDownTCP := destinationBytesMetrics.tcpMetrics.getBytesDown()
-				bytesUpUDP := destinationBytesMetrics.udpMetrics.getBytesUp()
-				bytesDownUDP := destinationBytesMetrics.udpMetrics.getBytesDown()
-
-				logFields["dest_bytes_asn"] = destinationBytesMetricsASN
-				logFields["dest_bytes"] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
-				logFields["dest_bytes_up_tcp"] = bytesUpTCP
-				logFields["dest_bytes_down_tcp"] = bytesDownTCP
-				logFields["dest_bytes_up_udp"] = bytesUpUDP
-				logFields["dest_bytes_down_udp"] = bytesDownUDP
-			}
-		}
-
 		if len(destinationBytesMetricsASNs) > 0 {
-
-			destBytes := make(map[string]int64)
-			destBytesUpTCP := make(map[string]int64)
-			destBytesDownTCP := make(map[string]int64)
-			destBytesUpUDP := make(map[string]int64)
-			destBytesDownUDP := make(map[string]int64)
 
 			for _, ASN := range destinationBytesMetricsASNs {
 
-				destinationBytesMetrics, ok :=
-					sshClient.destinationBytesMetrics[ASN]
+				destinationBytesMetrics, ok := sshClient.destinationBytesMetrics[ASN]
 				if !ok {
 					continue
 				}
 
-				bytesUpTCP := destinationBytesMetrics.tcpMetrics.getBytesUp()
-				bytesDownTCP := destinationBytesMetrics.tcpMetrics.getBytesDown()
-				bytesUpUDP := destinationBytesMetrics.udpMetrics.getBytesUp()
-				bytesDownUDP := destinationBytesMetrics.udpMetrics.getBytesDown()
-
-				destBytes[ASN] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
-				destBytesUpTCP[ASN] = bytesUpTCP
-				destBytesDownTCP[ASN] = bytesDownTCP
-				destBytesUpUDP[ASN] = bytesUpUDP
-				destBytesDownUDP[ASN] = bytesDownUDP
+				sshClient.sshServer.support.destBytesLogger.AddASNBytes(
+					ASN,
+					sshClient.clientGeoIPData,
+					sshClient.handshakeState.apiParams,
+					destinationBytesMetrics.tcpMetrics.getBytesUp()+
+						destinationBytesMetrics.tcpMetrics.getBytesDown(),
+					destinationBytesMetrics.udpMetrics.getBytesUp()+
+						destinationBytesMetrics.udpMetrics.getBytesDown())
 			}
-
-			logFields["asn_dest_bytes"] = destBytes
-			logFields["asn_dest_bytes_up_tcp"] = destBytesUpTCP
-			logFields["asn_dest_bytes_down_tcp"] = destBytesDownTCP
-			logFields["asn_dest_bytes_up_udp"] = destBytesUpUDP
-			logFields["asn_dest_bytes_down_udp"] = destBytesDownUDP
 		}
 	}
 
@@ -4600,13 +4558,7 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 
 	ASNs := p.Strings(parameters.DestinationBytesMetricsASNs)
 
-	// Merge in any legacy parameters.DestinationBytesMetricsASN
-	// configuration. Data for this target will be logged using the legacy
-	// log field format; see logTunnel. If an ASN is in _both_ configuration
-	// parameters, its data will be logged in both log field formats.
-	ASN := p.String(parameters.DestinationBytesMetricsASN)
-
-	if len(ASNs) == 0 && ASN == "" {
+	if len(ASNs) == 0 {
 		return
 	}
 
@@ -4616,10 +4568,6 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 		if ASN != "" {
 			sshClient.destinationBytesMetrics[ASN] = &protocolDestinationBytesMetrics{}
 		}
-	}
-
-	if ASN != "" {
-		sshClient.destinationBytesMetrics[ASN] = &protocolDestinationBytesMetrics{}
 	}
 }
 

@@ -22,6 +22,8 @@ github.com/Psiphon-Inc/uds-ipc v0.0.0-20251003212312-ed8477de04f5 h1:ZR+pf49zi/7
 github.com/Psiphon-Inc/uds-ipc v0.0.0-20251003212312-ed8477de04f5/go.mod h1:R8TGG+OXumorJdpAcSFE4SVTT2frMFEGY43Zc/44sNk=
 github.com/Psiphon-Inc/uds-ipc v0.0.0-20251007150957-166e89b034be h1:TDXrQ1eVlmc/eB3WofOXgYfDKYeiY19+ZCQCkH/6PcU=
 github.com/Psiphon-Inc/uds-ipc v0.0.0-20251007150957-166e89b034be/go.mod h1:R8TGG+OXumorJdpAcSFE4SVTT2frMFEGY43Zc/44sNk=
+github.com/Psiphon-Inc/uds-ipc v1.0.1 h1:K3Z0cS1XfzDdhxWTIwh/hiLrkRR83ZxUo2bqgBOGuZE=
+github.com/Psiphon-Inc/uds-ipc v1.0.1/go.mod h1:R8TGG+OXumorJdpAcSFE4SVTT2frMFEGY43Zc/44sNk=
 github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7 h1:Hx/NCZTnvoKZuIBwSmxE58KKoNLXIGG6hBJYN7pj9Ag=
 github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7/go.mod h1:alTtZBo3j4AWFvUrAH6F5ZaHcTj4G5Y01nHz8dkU6vU=
 github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737 h1:QTMy7Uc2Xc7fz6O/Khy1xi0VBND13GqzLUE2mHw6HUU=

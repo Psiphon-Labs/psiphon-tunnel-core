@@ -3,7 +3,8 @@ syntax = "proto3";
 package ca.psiphon.psiphond;
 
 import "google/protobuf/timestamp.proto";
-import "ca.psiphon.psiphond/domain_bytes.proto";
+import "ca.psiphon.psiphond/asn_dest_bytes.proto";
+import "ca.psiphon.psiphond/domain_dest_bytes.proto";
 import "ca.psiphon.psiphond/failed_tunnel.proto";
 import "ca.psiphon.psiphond/inproxy_broker.proto";
 import "ca.psiphon.psiphond/irregular_tunnel.proto";
@@ -26,9 +27,10 @@ message Psiphond {
   string host_type = 3;
   string host_build_rev = 4;
   string provider = 5;
+
+  reserved 101, 114; // retired fields
  
   oneof metric {
-    ca.psiphon.psiphond.DomainBytes domain_bytes = 101;
     ca.psiphon.psiphond.FailedTunnel failed_tunnel = 102;
     ca.psiphon.psiphond.InproxyBroker inproxy_broker = 103;
     ca.psiphon.psiphond.IrregularTunnel irregular_tunnel = 104;
@@ -41,9 +43,10 @@ message Psiphond {
     ca.psiphon.psiphond.ServerPanic server_panic = 111;
     ca.psiphon.psiphond.ServerPacket server_packet = 112;
     ca.psiphon.psiphond.ServerTunnel server_tunnel = 113;
-    ca.psiphon.psiphond.ServerTunnelASNDestBytes server_tunnel_asn_dest_bytes = 114;
     ca.psiphon.psiphond.Tactics tactics = 115;
     ca.psiphon.psiphond.TacticsSpeedTest tactics_speedtest = 116;
     ca.psiphon.psiphond.UniqueUser unique_user = 117;
+    ca.psiphon.psiphond.AsnDestBytes asn_dest_bytes = 118;
+    ca.psiphon.psiphond.DomainDestBytes domain_dest_bytes = 119;
   }
 }

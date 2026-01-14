@@ -343,7 +343,6 @@ const (
 	RestrictInproxyProviderIDsServerProbability        = "RestrictInproxyProviderIDsServerProbability"
 	RestrictInproxyProviderIDsClientProbability        = "RestrictInproxyProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources            = "UpstreamProxyAllowAllServerEntrySources"
-	DestinationBytesMetricsASN                         = "DestinationBytesMetricsASN"
 	DestinationBytesMetricsASNs                        = "DestinationBytesMetricsASNs"
 	DNSResolverAttemptsPerServer                       = "DNSResolverAttemptsPerServer"
 	DNSResolverAttemptsPerPreferredServer              = "DNSResolverAttemptsPerPreferredServer"
@@ -564,6 +563,7 @@ const (
 	InproxyAllBrokerPublicKeys                = "InproxyAllBrokerPublicKeys"
 	InproxyTunnelProtocolSelectionProbability = "InproxyTunnelProtocolSelectionProbability"
 	ReplayIgnoreChangedConfigState            = "ReplayIgnoreChangedConfigState"
+	DestinationBytesMetricsASN                = "DestinationBytesMetricsASN"
 )
 
 const (

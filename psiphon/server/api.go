@@ -46,6 +46,7 @@ const (
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 	CLIENT_PLATFORM_IOS     = "iOS"
+	CLIENT_PLATFORM_OTHER   = "Other"
 
 	SPONSOR_ID_LENGTH = 16
 )
@@ -796,20 +797,13 @@ func statusAPIRequestHandler(
 			return nil, errors.Trace(err)
 		}
 		for domain, bytes := range hostBytes {
-
-			domainBytesFields := getRequestLogFields(
-				"domain_bytes",
-				"",
-				sshClient.sessionID,
+			// Limitation: only TCP bytes are reported.
+			support.destBytesLogger.AddDomainBytes(
+				domain,
 				sshClient.getClientGeoIPData(),
-				authorizedAccessTypes,
-				params,
-				statusRequestParams)
-
-			domainBytesFields["domain"] = domain
-			domainBytesFields["bytes"] = bytes
-
-			logQueue = append(logQueue, domainBytesFields)
+				sshClient.handshakeState.apiParams,
+				bytes,
+				0)
 		}
 	}
 
@@ -1866,9 +1860,11 @@ func normalizeClientPlatform(clientPlatform string) string {
 		return CLIENT_PLATFORM_ANDROID
 	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_IOS) {
 		return CLIENT_PLATFORM_IOS
+	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_WINDOWS) {
+		return CLIENT_PLATFORM_WINDOWS
 	}
 
-	return CLIENT_PLATFORM_WINDOWS
+	return CLIENT_PLATFORM_OTHER
 }
 
 func isMobileClientPlatform(clientPlatform string) bool {

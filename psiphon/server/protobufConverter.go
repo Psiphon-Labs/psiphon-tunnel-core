@@ -21,6 +21,7 @@ type protobufFieldGroupConfig struct {
 	baseParams        bool
 	dialParams        bool
 	inproxyDialParams bool
+	destParams        bool
 }
 
 // protobufMessageFieldGroups defines field group requirements for each message type
@@ -33,8 +34,11 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 	"unique_user": {
 		baseParams: true,
 	},
-	"domain_bytes": {
-		baseParams: true,
+	"asn_dest_bytes": {
+		destParams: true,
+	},
+	"domain_dest_bytes": {
+		destParams: true,
 	},
 	"server_blocklist_hit": {
 		baseParams: true,
@@ -160,60 +164,19 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 	case "server_tunnel":
 		msg := &pb.ServerTunnel{}
 		protobufPopulateMessage(logFields, msg, eventName)
-
-		// Capture the tunnel ID once here to avoid looking it up for every sub-message.
-		tunnelID := msg.TunnelId
-
-		// Populate and append the initial server tunnel protobuf message.
 		psiphondWrapped.Metric = &pb.Psiphond_ServerTunnel{ServerTunnel: msg}
-
-		out = append(out, newProtobufRoutedMessage(psiphondWrapped))
-
-		// If this message includes asn_dest_bytes_* maps, emit
-		// one protobuf ServerTunnelASNDestBytes per ASN.
-		if asnBytes, hasASNBytes := logFields["asn_dest_bytes"]; hasASNBytes {
-			for asn, totalBytes := range asnBytes.(map[string]int64) {
-				msg := &pb.ServerTunnelASNDestBytes{
-					TunnelId:  tunnelID,
-					DestAsn:   &asn,
-					DestBytes: &totalBytes,
-				}
-
-				if value, exists := logFields["asn_dest_bytes_up_tcp"].(map[string]int64)[asn]; exists {
-					msg.DestBytesUpTcp = &value
-				}
-
-				if value, exists := logFields["asn_dest_bytes_down_tcp"].(map[string]int64)[asn]; exists {
-					msg.DestBytesDownTcp = &value
-				}
-
-				if value, exists := logFields["asn_dest_bytes_up_udp"].(map[string]int64)[asn]; exists {
-					msg.DestBytesUpUdp = &value
-				}
-
-				if value, exists := logFields["asn_dest_bytes_down_udp"].(map[string]int64)[asn]; exists {
-					msg.DestBytesDownUdp = &value
-				}
-
-				psiphondWrapped = newPsiphondProtobufMessageWrapper(pbTimestamp, hostType)
-				psiphondWrapped.Metric = &pb.Psiphond_ServerTunnelAsnDestBytes{ServerTunnelAsnDestBytes: msg}
-
-				out = append(out, newProtobufRoutedMessage(psiphondWrapped))
-			}
-		}
-
-		// Return early with the slice of wrapped messages here to skip
-		// extra append attempts at the end of this switch, since we've
-		// manually appended all of the wrapper messages ourselves.
-		return out
 	case "unique_user":
 		msg := &pb.UniqueUser{}
 		protobufPopulateMessage(logFields, msg, eventName)
 		psiphondWrapped.Metric = &pb.Psiphond_UniqueUser{UniqueUser: msg}
-	case "domain_bytes":
-		msg := &pb.DomainBytes{}
+	case "asn_dest_bytes":
+		msg := &pb.AsnDestBytes{}
 		protobufPopulateMessage(logFields, msg, eventName)
-		psiphondWrapped.Metric = &pb.Psiphond_DomainBytes{DomainBytes: msg}
+		psiphondWrapped.Metric = &pb.Psiphond_AsnDestBytes{AsnDestBytes: msg}
+	case "domain_dest_bytes":
+		msg := &pb.DomainDestBytes{}
+		protobufPopulateMessage(logFields, msg, eventName)
+		psiphondWrapped.Metric = &pb.Psiphond_DomainDestBytes{DomainDestBytes: msg}
 	case "server_load":
 		if region, hasRegion := logFields["region"]; hasRegion {
 			for _, proto := range append(protocol.SupportedTunnelProtocols, "ALL") {
@@ -361,6 +324,14 @@ func protobufPopulateInproxyDialParams(logFields LogFields) *pb.InproxyDialParam
 	return msg
 }
 
+// protobufPopulateDestParams populates DestParams from LogFields.
+func protobufPopulateDestParams(logFields LogFields) *pb.DestParams {
+	msg := &pb.DestParams{}
+	protobufPopulateMessageFromFields(logFields, msg)
+
+	return msg
+}
+
 // protobufPopulateMessage is the single function that handles all protobuf message types.
 func protobufPopulateMessage(logFields LogFields, msg proto.Message, eventName string) {
 	config, exists := protobufMessageFieldGroups[eventName]
@@ -407,6 +378,10 @@ func protobufPopulateFieldGroups(logFields LogFields, msg proto.Message, config 
 		case "InproxyDialParams":
 			if config.inproxyDialParams {
 				field.Set(reflect.ValueOf(protobufPopulateInproxyDialParams(logFields)))
+			}
+		case "DestParams":
+			if config.destParams {
+				field.Set(reflect.ValueOf(protobufPopulateDestParams(logFields)))
 			}
 		}
 	}

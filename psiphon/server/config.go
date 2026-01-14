@@ -66,6 +66,7 @@ const (
 	METRIC_WRITER_SHUTDOWN_DELAY                        = 10 * time.Second
 	STOP_ESTABLISH_TUNNELS_ESTABLISHED_CLIENT_THRESHOLD = 20
 	DEFAULT_LOG_FILE_REOPEN_RETRIES                     = 25
+	DEFAULT_DESTINATION_BYTES_PERIOD                    = 5 * time.Minute
 )
 
 // Config specifies the configuration and behavior of a Psiphon
@@ -358,6 +359,11 @@ type Config struct {
 	// The default, 0, disables load logging.
 	LoadMonitorPeriodSeconds int `json:",omitempty"`
 
+	// DestinationBytesPeriodSeconds indicates how frequently to log
+	// aggregated destination bytes metrics. Set to 0 to disable. When not
+	// specified, the default period DEFAULT_DESTINATION_BYTES_PERIOD is used.
+	DestinationBytesPeriodSeconds *int `json:",omitempty"`
+
 	// PeakUpstreamFailureRateMinimumSampleSize specifies the minimum number
 	// of samples (e.g., upstream port forward attempts) that are required
 	// before taking a failure rate snapshot which may be recorded as
@@ -588,6 +594,7 @@ type Config struct {
 	serverEntryTag                                 string
 	runningProtocols                               []string
 	runningOnlyInproxyBroker                       bool
+	destinationBytesPeriod                         time.Duration
 }
 
 // GetLogFileReopenConfig gets the reopen retries, and create/mode inputs for
@@ -626,6 +633,11 @@ func (config *Config) RunLoadMonitor() bool {
 // RunPeriodicGarbageCollection indicates whether to run periodic garbage collection.
 func (config *Config) RunPeriodicGarbageCollection() bool {
 	return config.periodicGarbageCollection > 0
+}
+
+// RunDestBytesLogger indicates whether aggregate and log destination bytes.
+func (config *Config) RunDestBytesLogger() bool {
+	return config.destinationBytesPeriod > 0
 }
 
 // DumpProfilesOnStopEstablishTunnels indicates whether dump profiles due to
@@ -949,6 +961,11 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 		if len(config.OwnEncodedServerEntries) == 1 {
 			config.serverEntryTag = serverEntry.GetTag()
 		}
+	}
+
+	config.destinationBytesPeriod = DEFAULT_DESTINATION_BYTES_PERIOD
+	if config.DestinationBytesPeriodSeconds != nil {
+		config.destinationBytesPeriod = time.Duration(*config.DestinationBytesPeriodSeconds) * time.Second
 	}
 
 	return &config, nil

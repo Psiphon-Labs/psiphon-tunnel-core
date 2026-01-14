@@ -351,10 +351,16 @@ func (r *Reader) handleConnection(conn net.Conn) {
 
 		// Set read deadline based on shutdown state.
 		// Potential errors are ignored because there is nothing to do with them.
-		deadline := time.Now()
+		var deadline time.Time
+
 		if !draining {
 			// Normal operation - set inactivity timeout to close idle connections.
-			deadline = deadline.Add(r.inactivityTimeout)
+			deadline = time.Now().Add(r.inactivityTimeout)
+		} else {
+			// Draining - add a short inactivity timeout to allow continued reading of
+			// data from the socket while draining (using time.Now() is too fast).
+			// nolint: mnd
+			deadline = time.Now().Add(time.Millisecond)
 		}
 
 		_ = conn.SetReadDeadline(deadline)
