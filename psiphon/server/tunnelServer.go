@@ -78,7 +78,7 @@ const (
 	RANDOM_STREAM_MAX_BYTES               = 10485760
 	ALERT_REQUEST_QUEUE_BUFFER_SIZE       = 16
 	SSH_MAX_CLIENT_COUNT                  = 500000
-	SSH_CLIENT_MAX_DSL_REQUEST_COUNT      = 32
+	SSH_CLIENT_MAX_DSL_REQUEST_COUNT      = 128
 )
 
 // TunnelServer is the main server that accepts Psiphon client
