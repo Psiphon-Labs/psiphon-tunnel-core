@@ -16,6 +16,7 @@ import "ca.psiphon.psiphond/server_packet.proto";
 import "ca.psiphon.psiphond/server_tunnel.proto";
 import "ca.psiphon.psiphond/tactics.proto";
 import "ca.psiphon.psiphond/unique_user.proto";
+import "ca.psiphon.psiphond/dsl_relay.proto";
 
 option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
 
@@ -45,5 +46,6 @@ message Psiphond {
     ca.psiphon.psiphond.Tactics tactics = 115;
     ca.psiphon.psiphond.TacticsSpeedTest tactics_speedtest = 116;
     ca.psiphon.psiphond.UniqueUser unique_user = 117;
+    ca.psiphon.psiphond.DslRelayGetServerEntries dsl_relay_get_server_entries = 120;
   }
 }
