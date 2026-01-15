@@ -21,7 +21,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type DSLRelayGetServerEntries struct {
+type DslRelayGetServerEntries struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	BaseParams      *BaseParams            `protobuf:"bytes,1,opt,name=base_params,json=baseParams,proto3,oneof" json:"base_params,omitempty"`
 	ServerEntryTags []string               `protobuf:"bytes,100,rep,name=server_entry_tags,json=serverEntryTags,proto3" json:"server_entry_tags,omitempty"`
@@ -29,20 +29,20 @@ type DSLRelayGetServerEntries struct {
 	sizeCache       protoimpl.SizeCache
 }
 
-func (x *DSLRelayGetServerEntries) Reset() {
-	*x = DSLRelayGetServerEntries{}
+func (x *DslRelayGetServerEntries) Reset() {
+	*x = DslRelayGetServerEntries{}
 	mi := &file_ca_psiphon_psiphond_dsl_relay_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DSLRelayGetServerEntries) String() string {
+func (x *DslRelayGetServerEntries) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DSLRelayGetServerEntries) ProtoMessage() {}
+func (*DslRelayGetServerEntries) ProtoMessage() {}
 
-func (x *DSLRelayGetServerEntries) ProtoReflect() protoreflect.Message {
+func (x *DslRelayGetServerEntries) ProtoReflect() protoreflect.Message {
 	mi := &file_ca_psiphon_psiphond_dsl_relay_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -54,19 +54,19 @@ func (x *DSLRelayGetServerEntries) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DSLRelayGetServerEntries.ProtoReflect.Descriptor instead.
-func (*DSLRelayGetServerEntries) Descriptor() ([]byte, []int) {
+// Deprecated: Use DslRelayGetServerEntries.ProtoReflect.Descriptor instead.
+func (*DslRelayGetServerEntries) Descriptor() ([]byte, []int) {
 	return file_ca_psiphon_psiphond_dsl_relay_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *DSLRelayGetServerEntries) GetBaseParams() *BaseParams {
+func (x *DslRelayGetServerEntries) GetBaseParams() *BaseParams {
 	if x != nil {
 		return x.BaseParams
 	}
 	return nil
 }
 
-func (x *DSLRelayGetServerEntries) GetServerEntryTags() []string {
+func (x *DslRelayGetServerEntries) GetServerEntryTags() []string {
 	if x != nil {
 		return x.ServerEntryTags
 	}
@@ -78,7 +78,7 @@ var File_ca_psiphon_psiphond_dsl_relay_proto protoreflect.FileDescriptor
 const file_ca_psiphon_psiphond_dsl_relay_proto_rawDesc = "" +
 	"\n" +
 	"#ca.psiphon.psiphond/dsl_relay.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\x9d\x01\n" +
-	"\x18DSLRelayGetServerEntries\x12E\n" +
+	"\x18DslRelayGetServerEntries\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12*\n" +
 	"\x11server_entry_tags\x18d \x03(\tR\x0fserverEntryTagsB\x0e\n" +
@@ -98,11 +98,11 @@ func file_ca_psiphon_psiphond_dsl_relay_proto_rawDescGZIP() []byte {
 
 var file_ca_psiphon_psiphond_dsl_relay_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_ca_psiphon_psiphond_dsl_relay_proto_goTypes = []any{
-	(*DSLRelayGetServerEntries)(nil), // 0: ca.psiphon.psiphond.DSLRelayGetServerEntries
+	(*DslRelayGetServerEntries)(nil), // 0: ca.psiphon.psiphond.DslRelayGetServerEntries
 	(*BaseParams)(nil),               // 1: ca.psiphon.psiphond.BaseParams
 }
 var file_ca_psiphon_psiphond_dsl_relay_proto_depIdxs = []int32{
-	1, // 0: ca.psiphon.psiphond.DSLRelayGetServerEntries.base_params:type_name -> ca.psiphon.psiphond.BaseParams
+	1, // 0: ca.psiphon.psiphond.DslRelayGetServerEntries.base_params:type_name -> ca.psiphon.psiphond.BaseParams
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name

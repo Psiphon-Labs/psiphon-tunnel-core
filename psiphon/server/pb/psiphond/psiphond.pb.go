@@ -48,6 +48,7 @@ type Psiphond struct {
 	//	*Psiphond_Tactics
 	//	*Psiphond_TacticsSpeedtest
 	//	*Psiphond_UniqueUser
+	//	*Psiphond_DslRelayGetServerEntries
 	Metric        isPsiphond_Metric `protobuf_oneof:"metric"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -278,6 +279,15 @@ func (x *Psiphond) GetUniqueUser() *UniqueUser {
 	return nil
 }
 
+func (x *Psiphond) GetDslRelayGetServerEntries() *DslRelayGetServerEntries {
+	if x != nil {
+		if x, ok := x.Metric.(*Psiphond_DslRelayGetServerEntries); ok {
+			return x.DslRelayGetServerEntries
+		}
+	}
+	return nil
+}
+
 type isPsiphond_Metric interface {
 	isPsiphond_Metric()
 }
@@ -350,6 +360,10 @@ type Psiphond_UniqueUser struct {
 	UniqueUser *UniqueUser `protobuf:"bytes,117,opt,name=unique_user,json=uniqueUser,proto3,oneof"`
 }
 
+type Psiphond_DslRelayGetServerEntries struct {
+	DslRelayGetServerEntries *DslRelayGetServerEntries `protobuf:"bytes,120,opt,name=dsl_relay_get_server_entries,json=dslRelayGetServerEntries,proto3,oneof"`
+}
+
 func (*Psiphond_DomainBytes) isPsiphond_Metric() {}
 
 func (*Psiphond_FailedTunnel) isPsiphond_Metric() {}
@@ -384,11 +398,13 @@ func (*Psiphond_TacticsSpeedtest) isPsiphond_Metric() {}
 
 func (*Psiphond_UniqueUser) isPsiphond_Metric() {}
 
+func (*Psiphond_DslRelayGetServerEntries) isPsiphond_Metric() {}
+
 var File_ca_psiphon_psiphond_psiphond_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_psiphond_proto_rawDesc = "" +
 	"\n" +
-	"\"ca.psiphon.psiphond/psiphond.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\x1a&ca.psiphon.psiphond/domain_bytes.proto\x1a'ca.psiphon.psiphond/failed_tunnel.proto\x1a(ca.psiphon.psiphond/inproxy_broker.proto\x1a*ca.psiphon.psiphond/irregular_tunnel.proto\x1a'ca.psiphon.psiphond/orphan_packet.proto\x1a,ca.psiphon.psiphond/remote_server_list.proto\x1a*ca.psiphon.psiphond/server_blocklist.proto\x1a%ca.psiphon.psiphond/server_load.proto\x1a&ca.psiphon.psiphond/server_panic.proto\x1a'ca.psiphon.psiphond/server_packet.proto\x1a'ca.psiphon.psiphond/server_tunnel.proto\x1a!ca.psiphon.psiphond/tactics.proto\x1a%ca.psiphon.psiphond/unique_user.proto\"\xfd\v\n" +
+	"\"ca.psiphon.psiphond/psiphond.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\x1a&ca.psiphon.psiphond/domain_bytes.proto\x1a'ca.psiphon.psiphond/failed_tunnel.proto\x1a(ca.psiphon.psiphond/inproxy_broker.proto\x1a*ca.psiphon.psiphond/irregular_tunnel.proto\x1a'ca.psiphon.psiphond/orphan_packet.proto\x1a,ca.psiphon.psiphond/remote_server_list.proto\x1a*ca.psiphon.psiphond/server_blocklist.proto\x1a%ca.psiphon.psiphond/server_load.proto\x1a&ca.psiphon.psiphond/server_panic.proto\x1a'ca.psiphon.psiphond/server_packet.proto\x1a'ca.psiphon.psiphond/server_tunnel.proto\x1a!ca.psiphon.psiphond/tactics.proto\x1a%ca.psiphon.psiphond/unique_user.proto\x1a#ca.psiphon.psiphond/dsl_relay.proto\"\xee\f\n" +
 	"\bPsiphond\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x17\n" +
 	"\ahost_id\x18\x02 \x01(\tR\x06hostId\x12\x1b\n" +
@@ -413,7 +429,8 @@ const file_ca_psiphon_psiphond_psiphond_proto_rawDesc = "" +
 	"\atactics\x18s \x01(\v2\x1c.ca.psiphon.psiphond.TacticsH\x00R\atactics\x12T\n" +
 	"\x11tactics_speedtest\x18t \x01(\v2%.ca.psiphon.psiphond.TacticsSpeedTestH\x00R\x10tacticsSpeedtest\x12B\n" +
 	"\vunique_user\x18u \x01(\v2\x1f.ca.psiphon.psiphond.UniqueUserH\x00R\n" +
-	"uniqueUserB\b\n" +
+	"uniqueUser\x12o\n" +
+	"\x1cdsl_relay_get_server_entries\x18x \x01(\v2-.ca.psiphon.psiphond.DslRelayGetServerEntriesH\x00R\x18dslRelayGetServerEntriesB\b\n" +
 	"\x06metricBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
@@ -449,6 +466,7 @@ var file_ca_psiphon_psiphond_psiphond_proto_goTypes = []any{
 	(*Tactics)(nil),                  // 16: ca.psiphon.psiphond.Tactics
 	(*TacticsSpeedTest)(nil),         // 17: ca.psiphon.psiphond.TacticsSpeedTest
 	(*UniqueUser)(nil),               // 18: ca.psiphon.psiphond.UniqueUser
+	(*DslRelayGetServerEntries)(nil), // 19: ca.psiphon.psiphond.DslRelayGetServerEntries
 }
 var file_ca_psiphon_psiphond_psiphond_proto_depIdxs = []int32{
 	1,  // 0: ca.psiphon.psiphond.Psiphond.timestamp:type_name -> google.protobuf.Timestamp
@@ -469,11 +487,12 @@ var file_ca_psiphon_psiphond_psiphond_proto_depIdxs = []int32{
 	16, // 15: ca.psiphon.psiphond.Psiphond.tactics:type_name -> ca.psiphon.psiphond.Tactics
 	17, // 16: ca.psiphon.psiphond.Psiphond.tactics_speedtest:type_name -> ca.psiphon.psiphond.TacticsSpeedTest
 	18, // 17: ca.psiphon.psiphond.Psiphond.unique_user:type_name -> ca.psiphon.psiphond.UniqueUser
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	19, // 18: ca.psiphon.psiphond.Psiphond.dsl_relay_get_server_entries:type_name -> ca.psiphon.psiphond.DslRelayGetServerEntries
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_ca_psiphon_psiphond_psiphond_proto_init() }
@@ -494,6 +513,7 @@ func file_ca_psiphon_psiphond_psiphond_proto_init() {
 	file_ca_psiphon_psiphond_server_tunnel_proto_init()
 	file_ca_psiphon_psiphond_tactics_proto_init()
 	file_ca_psiphon_psiphond_unique_user_proto_init()
+	file_ca_psiphon_psiphond_dsl_relay_proto_init()
 	file_ca_psiphon_psiphond_psiphond_proto_msgTypes[0].OneofWrappers = []any{
 		(*Psiphond_DomainBytes)(nil),
 		(*Psiphond_FailedTunnel)(nil),
@@ -512,6 +532,7 @@ func file_ca_psiphon_psiphond_psiphond_proto_init() {
 		(*Psiphond_Tactics)(nil),
 		(*Psiphond_TacticsSpeedtest)(nil),
 		(*Psiphond_UniqueUser)(nil),
+		(*Psiphond_DslRelayGetServerEntries)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
