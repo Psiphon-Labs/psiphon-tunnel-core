@@ -894,7 +894,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// configureDSLTestServerEntries bootstrap can only perform tactics
 	// requests and not dial a tunnel, so the DSL request must succeed.
 
-	doDSL := psiphon.DSLEnabled() && doInproxy && inproxyTestConfig.addMeekServerForBroker
+	doDSL := doInproxy && inproxyTestConfig.addMeekServerForBroker
 
 	var dslTestConfig *dslTestConfig
 	enableDSLFetcher := "false"
@@ -2521,6 +2521,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 		}
 	}
+
+	// Emit a dummy DSL relay cached request log to check that the event is
+	// properly wired up in protobuf mode.
+	//
+	// Currently the DSL test here doesn't exercise relay cached requests; see
+	// common/dsl/dsl_test.go for unit test coverage.
+
+	CommonLogger(log).LogMetric("dsl_relay_get_server_entries", common.LogFields{})
 
 	// Check that datastore had retained/pruned server entries as expected.
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)

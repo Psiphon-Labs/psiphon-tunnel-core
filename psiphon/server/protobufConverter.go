@@ -290,6 +290,10 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 		msg := &pb.ServerBlocklistHit{}
 		protobufPopulateMessage(logFields, msg, eventName)
 		psiphondWrapped.Metric = &pb.Psiphond_ServerBlocklist{ServerBlocklist: msg}
+	case "dsl_relay_get_server_entries":
+		msg := &pb.DslRelayGetServerEntries{}
+		protobufPopulateMessage(logFields, msg, eventName)
+		psiphondWrapped.Metric = &pb.Psiphond_DslRelayGetServerEntries{DslRelayGetServerEntries: msg}
 	}
 
 	// Single append for all non-special cases.

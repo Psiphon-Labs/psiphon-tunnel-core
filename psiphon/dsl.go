@@ -1,5 +1,3 @@
-//go:build PSIPHON_ENABLE_DSL_CLIENT
-
 /*
  * Copyright (c) 2025, Psiphon Inc.
  * All rights reserved.
@@ -32,10 +30,6 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 )
-
-func DSLEnabled() bool {
-	return true
-}
 
 func runUntunneledDSLFetcher(
 	ctx context.Context,

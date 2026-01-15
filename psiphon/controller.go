@@ -3421,7 +3421,7 @@ func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParamet
 		}
 
 		p := controller.config.GetParameters().Get()
-		compressTactics := compressTacticsEnabled && p.Bool(parameters.CompressTactics)
+		compressTactics := p.Bool(parameters.CompressTactics)
 		p.Close()
 
 		if compressTactics {
@@ -3566,5 +3566,3 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 
 	return appliedNewTactics
 }
-
-var compressTacticsEnabled = true
