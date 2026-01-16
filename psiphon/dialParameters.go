@@ -1733,13 +1733,12 @@ func MakeDialParameters(
 		// For tactics requests, AddPsiphonFrontingHeader is set when set for
 		// the related tunnel protocol. E.g., FRONTED-OSSH-MEEK for
 		// FRONTED-MEEK-TACTICS. AddPsiphonFrontingHeader is not replayed.
-		addPsiphonFrontingHeader := false
-		if dialParams.FrontingProviderID != "" {
-			addPsiphonFrontingHeader = common.Contains(
-				p.LabeledTunnelProtocols(
-					parameters.AddFrontingProviderPsiphonFrontingHeader, dialParams.FrontingProviderID),
-				dialParams.TunnelProtocol)
-		}
+		addFrontingHeader := addPsiphonFrontingHeader(
+			p,
+			dialParams.FrontingProviderID,
+			dialParams.TunnelProtocol,
+			dialParams.MeekDialAddress,
+			dialParams.ResolveParameters)
 
 		dialParams.meekConfig = &MeekConfig{
 			DiagnosticID:                  serverEntry.GetDiagnosticID(),
@@ -1760,7 +1759,7 @@ func MakeDialParameters(
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
 			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			SNIServerName:                 dialParams.MeekSNIServerName,
-			AddPsiphonFrontingHeader:      addPsiphonFrontingHeader,
+			AddPsiphonFrontingHeader:      addFrontingHeader,
 			VerifyServerName:              dialParams.MeekVerifyServerName,
 			VerifyPins:                    dialParams.MeekVerifyPins,
 			DisableSystemRootCAs:          config.DisableSystemRootCAs,
@@ -2515,4 +2514,30 @@ func selectConjureTransport(
 	choice := prng.Intn(len(transports))
 
 	return transports[choice]
+}
+
+func addPsiphonFrontingHeader(
+	p parameters.ParametersAccessor,
+	frontingProviderID string,
+	tunnelProtocol string,
+	dialAddress string,
+	resolveParams *resolver.ResolveParameters) bool {
+
+	if frontingProviderID == "" {
+		return false
+	}
+
+	if resolveParams != nil &&
+		resolveParams.PreresolvedIPAddress != "" {
+		meekDialDomain, _, _ := net.SplitHostPort(dialAddress)
+		if resolveParams.PreresolvedDomain == meekDialDomain {
+			return false
+		}
+	}
+
+	return common.Contains(
+		p.LabeledTunnelProtocols(
+			parameters.AddFrontingProviderPsiphonFrontingHeader,
+			frontingProviderID),
+		tunnelProtocol)
 }
