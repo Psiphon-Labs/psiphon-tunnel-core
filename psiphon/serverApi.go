@@ -1298,6 +1298,14 @@ func getBaseAPIParameters(
 
 		params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
 
+		params["unique_candidate_estimate"] = strconv.Itoa(dialParams.ServerEntryIterationUniqueCandidateEstimate)
+
+		params["candidates_moved_to_front"] = strconv.Itoa(dialParams.ServerEntryIterationMovedToFrontCount)
+
+		if dialParams.ServerEntryIterationFirstFrontedMeekCandidate >= 0 {
+			params["first_fronted_meek_candidate"] = strconv.Itoa(dialParams.ServerEntryIterationFirstFrontedMeekCandidate)
+		}
+
 		params["established_tunnels_count"] = strconv.Itoa(dialParams.EstablishedTunnelsCount)
 
 		if dialParams.NetworkLatencyMultiplier != 0.0 {

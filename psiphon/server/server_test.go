@@ -2354,8 +2354,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 	expectServerEntryCount := 0
-	if doDSL || runConfig.doPruneServerEntries {
+	if doDSL || runConfig.checkPruneServerEntries {
 		expectServerEntryCount = protocol.ServerEntryCountRoundingIncrement
+	} else if runConfig.doPruneServerEntries {
+		expectServerEntryCount = 2 * protocol.ServerEntryCountRoundingIncrement
 	}
 	expectDSLPrioritized := doDSL
 
@@ -3007,6 +3009,8 @@ func checkExpectedServerTunnelLogFields(
 		"ssh_protocol_bytes",
 		"ssh_protocol_bytes_overhead",
 		"server_entry_count",
+		"unique_candidate_estimate",
+		"candidates_moved_to_front",
 
 		// The test run ensures that logServerLoad is invoked while the client
 		// is connected, so the following must be logged.
@@ -3276,6 +3280,17 @@ func checkExpectedServerTunnelLogFields(
 					return fmt.Errorf("unexpected field '%s'", name)
 				}
 			}
+		}
+	}
+
+	name := "first_fronted_meek_candidate"
+	if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected %s", name)
+		}
+	} else {
+		if fields[name] != nil {
+			return fmt.Errorf("unexpected %s", name)
 		}
 	}
 

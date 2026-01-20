@@ -72,6 +72,10 @@ type DialParameters struct {
 	CandidateNumber         int                   `json:"-"`
 	EstablishedTunnelsCount int                   `json:"-"`
 
+	ServerEntryIterationUniqueCandidateEstimate   int `json:"-"`
+	ServerEntryIterationMovedToFrontCount         int `json:"-"`
+	ServerEntryIterationFirstFrontedMeekCandidate int `json:"-"`
+
 	IsExchanged bool `json:",omitempty"`
 
 	LastUsedTimestamp       time.Time `json:",omitempty"`

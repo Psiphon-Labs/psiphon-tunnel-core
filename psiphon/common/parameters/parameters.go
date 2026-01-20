@@ -557,6 +557,8 @@ const (
 	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
 	DSLPrioritizeDialNewServerEntryProbability         = "DSLPrioritizeDialNewServerEntryProbability"
 	DSLPrioritizeDialExistingServerEntryProbability    = "DSLPrioritizeDialExistingServerEntryProbability"
+	ServerEntryIteratorMaxMoveToFront                  = "ServerEntryIteratorMaxMoveToFront"
+	ServerEntryIteratorResetProbability                = "ServerEntryIteratorResetProbability"
 
 	// Retired parameters
 
@@ -1190,6 +1192,9 @@ var defaultParameters = map[string]struct {
 	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
 	DSLPrioritizeDialNewServerEntryProbability:        {value: 0.5, minimum: 0.0},
 	DSLPrioritizeDialExistingServerEntryProbability:   {value: 0.25, minimum: 0.0},
+
+	ServerEntryIteratorMaxMoveToFront:   {value: -1, minimum: -1},
+	ServerEntryIteratorResetProbability: {value: 1.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

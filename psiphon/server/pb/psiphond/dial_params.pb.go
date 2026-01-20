@@ -109,6 +109,9 @@ type DialParams struct {
 	ServerEntryCount                  *int64                 `protobuf:"varint,83,opt,name=server_entry_count,json=serverEntryCount,proto3,oneof" json:"server_entry_count,omitempty"`
 	ReplayIgnoredChange               *bool                  `protobuf:"varint,84,opt,name=replay_ignored_change,json=replayIgnoredChange,proto3,oneof" json:"replay_ignored_change,omitempty"`
 	DslPrioritized                    *bool                  `protobuf:"varint,85,opt,name=dsl_prioritized,json=dslPrioritized,proto3,oneof" json:"dsl_prioritized,omitempty"`
+	UniqueCandidateEstimate           *int64                 `protobuf:"varint,86,opt,name=unique_candidate_estimate,json=uniqueCandidateEstimate,proto3,oneof" json:"unique_candidate_estimate,omitempty"`
+	CandidatesMovedToFront            *int64                 `protobuf:"varint,87,opt,name=candidates_moved_to_front,json=candidatesMovedToFront,proto3,oneof" json:"candidates_moved_to_front,omitempty"`
+	FirstFrontedMeekCandidate         *int64                 `protobuf:"varint,88,opt,name=first_fronted_meek_candidate,json=firstFrontedMeekCandidate,proto3,oneof" json:"first_fronted_meek_candidate,omitempty"`
 	unknownFields                     protoimpl.UnknownFields
 	sizeCache                         protoimpl.SizeCache
 }
@@ -738,11 +741,32 @@ func (x *DialParams) GetDslPrioritized() bool {
 	return false
 }
 
+func (x *DialParams) GetUniqueCandidateEstimate() int64 {
+	if x != nil && x.UniqueCandidateEstimate != nil {
+		return *x.UniqueCandidateEstimate
+	}
+	return 0
+}
+
+func (x *DialParams) GetCandidatesMovedToFront() int64 {
+	if x != nil && x.CandidatesMovedToFront != nil {
+		return *x.CandidatesMovedToFront
+	}
+	return 0
+}
+
+func (x *DialParams) GetFirstFrontedMeekCandidate() int64 {
+	if x != nil && x.FirstFrontedMeekCandidate != nil {
+		return *x.FirstFrontedMeekCandidate
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\x912\n" +
+	"%ca.psiphon.psiphond/dial_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb54\n" +
 	"\n" +
 	"DialParams\x12*\n" +
 	"\x0econjure_cached\x18\x01 \x01(\bH\x00R\rconjureCached\x88\x01\x01\x12(\n" +
@@ -839,7 +863,10 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x0eseed_transform\x18R \x01(\tHPR\rseedTransform\x88\x01\x01\x121\n" +
 	"\x12server_entry_count\x18S \x01(\x03HQR\x10serverEntryCount\x88\x01\x01\x127\n" +
 	"\x15replay_ignored_change\x18T \x01(\bHRR\x13replayIgnoredChange\x88\x01\x01\x12,\n" +
-	"\x0fdsl_prioritized\x18U \x01(\bHSR\x0edslPrioritized\x88\x01\x01B\x11\n" +
+	"\x0fdsl_prioritized\x18U \x01(\bHSR\x0edslPrioritized\x88\x01\x01\x12?\n" +
+	"\x19unique_candidate_estimate\x18V \x01(\x03HTR\x17uniqueCandidateEstimate\x88\x01\x01\x12>\n" +
+	"\x19candidates_moved_to_front\x18W \x01(\x03HUR\x16candidatesMovedToFront\x88\x01\x01\x12D\n" +
+	"\x1cfirst_fronted_meek_candidate\x18X \x01(\x03HVR\x19firstFrontedMeekCandidate\x88\x01\x01B\x11\n" +
 	"\x0f_conjure_cachedB\x10\n" +
 	"\x0e_conjure_delayB\x17\n" +
 	"\x15_conjure_empty_packetB\x12\n" +
@@ -925,7 +952,10 @@ const file_ca_psiphon_psiphond_dial_params_proto_rawDesc = "" +
 	"\x0f_seed_transformB\x15\n" +
 	"\x13_server_entry_countB\x18\n" +
 	"\x16_replay_ignored_changeB\x12\n" +
-	"\x10_dsl_prioritizedBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x10_dsl_prioritizedB\x1c\n" +
+	"\x1a_unique_candidate_estimateB\x1c\n" +
+	"\x1a_candidates_moved_to_frontB\x1f\n" +
+	"\x1d_first_fronted_meek_candidateBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_dial_params_proto_rawDescOnce sync.Once

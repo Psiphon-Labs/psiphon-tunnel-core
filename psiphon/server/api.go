@@ -1322,6 +1322,9 @@ var baseDialParams = []requestParamSpec{
 	{"quic_dial_early", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"quic_obfuscated_psk", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"server_entry_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"unique_candidate_estimate", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"candidates_moved_to_front", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"first_fronted_meek_candidate", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 var inproxyDialParams = []requestParamSpec{

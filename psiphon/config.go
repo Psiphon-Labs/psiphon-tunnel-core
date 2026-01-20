@@ -1113,7 +1113,12 @@ type Config struct {
 
 	CompressTactics *bool `json:",omitempty"`
 
-	EnableDSLFetcher *bool `json:",omitempty"`
+	EnableDSLFetcher                                *bool    `json:",omitempty"`
+	DSLPrioritizeDialNewServerEntryProbability      *float64 `json:",omitempty"`
+	DSLPrioritizeDialExistingServerEntryProbability *float64 `json:",omitempty"`
+
+	ServerEntryIteratorMaxMoveToFront   *int     `json:",omitempty"`
+	ServerEntryIteratorResetProbability *float64 `json:",omitempty"`
 
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
@@ -1147,6 +1152,8 @@ type Config struct {
 	signalComponentFailure atomic.Value
 
 	inproxyMustUpgradePosted int32
+
+	serverEntryIterationMetricsUpdater atomic.Value
 }
 
 // TacticsAppliedReceiver specifies the interface for a component that is
@@ -1189,6 +1196,7 @@ func LoadConfig(configJson []byte) (*Config, error) {
 		common.GetCurrentTimestamp())
 
 	config.signalComponentFailure.Store(func() {})
+	config.serverEntryIterationMetricsUpdater.Store(func(int) {})
 
 	return &config, nil
 }
@@ -1936,6 +1944,20 @@ func (config *Config) OnInproxyMustUpgrade() {
 		}
 		config.signalComponentFailure.Load().(func())()
 	}
+}
+
+func (config *Config) SetServerEntryIterationMetricsUpdater(
+	updater func(movedToFront int)) {
+
+	config.serverEntryIterationMetricsUpdater.Store(updater)
+}
+
+func (config *Config) GetServerEntryIterationMetricsUpdater() func(movedToFront int) {
+	updater := config.serverEntryIterationMetricsUpdater.Load()
+	if updater != nil {
+		return updater.(func(int))
+	}
+	return nil
 }
 
 func (config *Config) makeConfigParameters() map[string]interface{} {
@@ -2903,6 +2925,22 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.CompressTactics != nil {
 		applyParameters[parameters.CompressTactics] = *config.CompressTactics
+	}
+
+	if config.EnableDSLFetcher != nil {
+		applyParameters[parameters.EnableDSLFetcher] = *config.EnableDSLFetcher
+	}
+
+	if config.DSLPrioritizeDialNewServerEntryProbability != nil {
+		applyParameters[parameters.DSLPrioritizeDialNewServerEntryProbability] = *config.DSLPrioritizeDialNewServerEntryProbability
+	}
+
+	if config.DSLPrioritizeDialExistingServerEntryProbability != nil {
+		applyParameters[parameters.DSLPrioritizeDialExistingServerEntryProbability] = *config.DSLPrioritizeDialExistingServerEntryProbability
+	}
+
+	if config.ServerEntryIteratorMaxMoveToFront != nil {
+		applyParameters[parameters.ServerEntryIteratorResetProbability] = *config.ServerEntryIteratorResetProbability
 	}
 
 	if config.EnableDSLFetcher != nil {
