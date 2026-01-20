@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message DestParams {
+    optional string client_asn = 1;
+    optional string client_platform = 2;
+    optional string client_region = 3;
+    optional string device_region = 4;
+    optional string sponsor_id = 5;
+}

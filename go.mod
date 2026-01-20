@@ -36,7 +36,7 @@ require (
 	github.com/Jigsaw-Code/outline-sdk v0.0.16
 	github.com/Jigsaw-Code/outline-ss-server v1.8.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
-	github.com/Psiphon-Inc/uds-ipc v0.0.0-20251007150957-166e89b034be
+	github.com/Psiphon-Inc/uds-ipc v1.0.1
 	github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
 	github.com/Psiphon-Labs/consistent v0.0.0-20240322131436-20aaa4e05737
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
