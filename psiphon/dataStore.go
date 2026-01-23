@@ -2701,7 +2701,7 @@ func dslLookupServerEntry(
 	return serverEntryID, nil
 }
 
-// dslPrioritizeDialServerEntry will create a DSLPendingPrioritizeDial
+// dslPrioritizeDialServerEntry will create a DSLPendingPrioritizeDialTimestamp
 // placeholder dial parameters for the specified server entry, unless a dial
 // params already exists. Any existing dial param isn't unmarshaled and
 // inspected -- even if it's a replay past its TTL, the existence of the
@@ -2724,7 +2724,7 @@ func dslPrioritizeDialServerEntry(
 	}
 
 	dialParams := &DialParameters{
-		DSLPendingPrioritizeDial: true,
+		DSLPendingPrioritizeDialTimestamp: time.Now(),
 	}
 
 	record, err := json.Marshal(dialParams)

@@ -1116,6 +1116,8 @@ type Config struct {
 	EnableDSLFetcher                                *bool    `json:",omitempty"`
 	DSLPrioritizeDialNewServerEntryProbability      *float64 `json:",omitempty"`
 	DSLPrioritizeDialExistingServerEntryProbability *float64 `json:",omitempty"`
+	DSLPrioritizeDialRetainFailedProbability        *float64 `json:",omitempty"`
+	DSLPrioritizeDialPlaceholderTTLSeconds          *int     `json:",omitempty"`
 
 	ServerEntryIteratorMaxMoveToFront   *int     `json:",omitempty"`
 	ServerEntryIteratorResetProbability *float64 `json:",omitempty"`
@@ -2937,6 +2939,14 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.DSLPrioritizeDialExistingServerEntryProbability != nil {
 		applyParameters[parameters.DSLPrioritizeDialExistingServerEntryProbability] = *config.DSLPrioritizeDialExistingServerEntryProbability
+	}
+
+	if config.DSLPrioritizeDialRetainFailedProbability != nil {
+		applyParameters[parameters.DSLPrioritizeDialRetainFailedProbability] = *config.DSLPrioritizeDialRetainFailedProbability
+	}
+
+	if config.DSLPrioritizeDialPlaceholderTTLSeconds != nil {
+		applyParameters[parameters.DSLPrioritizeDialPlaceholderTTL] = fmt.Sprintf("%ds", *config.DSLPrioritizeDialPlaceholderTTLSeconds)
 	}
 
 	if config.ServerEntryIteratorMaxMoveToFront != nil {

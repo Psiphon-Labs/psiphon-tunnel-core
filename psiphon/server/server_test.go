@@ -3686,7 +3686,7 @@ func checkExpectedDSLPendingPrioritizeDial(
 	}
 
 	if dialParams == nil ||
-		!dialParams.DSLPendingPrioritizeDial ||
+		dialParams.DSLPendingPrioritizeDialTimestamp.IsZero() ||
 		dialParams.DSLPrioritizedDial {
 
 		return errors.TraceNew("unexpected server entry state")

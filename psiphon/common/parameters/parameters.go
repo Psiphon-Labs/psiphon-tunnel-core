@@ -556,6 +556,8 @@ const (
 	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
 	DSLPrioritizeDialNewServerEntryProbability         = "DSLPrioritizeDialNewServerEntryProbability"
 	DSLPrioritizeDialExistingServerEntryProbability    = "DSLPrioritizeDialExistingServerEntryProbability"
+	DSLPrioritizeDialRetainFailedProbability           = "DSLPrioritizeDialRetainFailedProbability"
+	DSLPrioritizeDialPlaceholderTTL                    = "DSLPrioritizeDialPlaceholderTTL"
 	ServerEntryIteratorMaxMoveToFront                  = "ServerEntryIteratorMaxMoveToFront"
 	ServerEntryIteratorResetProbability                = "ServerEntryIteratorResetProbability"
 
@@ -1192,6 +1194,8 @@ var defaultParameters = map[string]struct {
 	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
 	DSLPrioritizeDialNewServerEntryProbability:        {value: 0.5, minimum: 0.0},
 	DSLPrioritizeDialExistingServerEntryProbability:   {value: 0.25, minimum: 0.0},
+	DSLPrioritizeDialRetainFailedProbability:          {value: 0.0, minimum: 0.0},
+	DSLPrioritizeDialPlaceholderTTL:                   {value: 24 * time.Hour, minimum: time.Duration(0)},
 
 	ServerEntryIteratorMaxMoveToFront:   {value: -1, minimum: -1},
 	ServerEntryIteratorResetProbability: {value: 1.0, minimum: 0.0},
