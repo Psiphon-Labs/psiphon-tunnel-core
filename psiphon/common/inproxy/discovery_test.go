@@ -25,6 +25,8 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 )
 
 func TestNATDiscovery(t *testing.T) {
@@ -97,7 +99,7 @@ func TestNATDiscovery(t *testing.T) {
 	}
 
 	config := &NATDiscoverConfig{
-		Logger:                newTestLogger(),
+		Logger:                testutils.NewTestLogger(),
 		WebRTCDialCoordinator: coordinator,
 	}
 

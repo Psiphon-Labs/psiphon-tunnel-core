@@ -27,7 +27,6 @@ type ServerTunnel struct {
 	BaseParams                                    *BaseParams            `protobuf:"bytes,1,opt,name=base_params,json=baseParams,proto3,oneof" json:"base_params,omitempty"`
 	DialParams                                    *DialParams            `protobuf:"bytes,2,opt,name=dial_params,json=dialParams,proto3,oneof" json:"dial_params,omitempty"`
 	InproxyDialParams                             *InproxyDialParams     `protobuf:"bytes,3,opt,name=inproxy_dial_params,json=inproxyDialParams,proto3,oneof" json:"inproxy_dial_params,omitempty"`
-	TunnelId                                      *string                `protobuf:"bytes,100,opt,name=tunnel_id,json=tunnelId,proto3,oneof" json:"tunnel_id,omitempty"`
 	BurstDownstreamFirstBytes                     *int64                 `protobuf:"varint,101,opt,name=burst_downstream_first_bytes,json=burstDownstreamFirstBytes,proto3,oneof" json:"burst_downstream_first_bytes,omitempty"`
 	BurstDownstreamFirstDuration                  *int64                 `protobuf:"varint,102,opt,name=burst_downstream_first_duration,json=burstDownstreamFirstDuration,proto3,oneof" json:"burst_downstream_first_duration,omitempty"`
 	BurstDownstreamFirstOffset                    *int64                 `protobuf:"varint,103,opt,name=burst_downstream_first_offset,json=burstDownstreamFirstOffset,proto3,oneof" json:"burst_downstream_first_offset,omitempty"`
@@ -98,29 +97,19 @@ type ServerTunnel struct {
 	TotalPortForwardCountTcp                      *int64                 `protobuf:"varint,168,opt,name=total_port_forward_count_tcp,json=totalPortForwardCountTcp,proto3,oneof" json:"total_port_forward_count_tcp,omitempty"`
 	TotalPortForwardCountUdp                      *int64                 `protobuf:"varint,169,opt,name=total_port_forward_count_udp,json=totalPortForwardCountUdp,proto3,oneof" json:"total_port_forward_count_udp,omitempty"`
 	TotalUdpgwChannelCount                        *int64                 `protobuf:"varint,170,opt,name=total_udpgw_channel_count,json=totalUdpgwChannelCount,proto3,oneof" json:"total_udpgw_channel_count,omitempty"`
-	// Post-handshake random stream fields
-	RandomStreamCount                 *int64 `protobuf:"varint,171,opt,name=random_stream_count,json=randomStreamCount,proto3,oneof" json:"random_stream_count,omitempty"`
-	RandomStreamUpstreamBytes         *int64 `protobuf:"varint,172,opt,name=random_stream_upstream_bytes,json=randomStreamUpstreamBytes,proto3,oneof" json:"random_stream_upstream_bytes,omitempty"`
-	RandomStreamReceivedUpstreamBytes *int64 `protobuf:"varint,173,opt,name=random_stream_received_upstream_bytes,json=randomStreamReceivedUpstreamBytes,proto3,oneof" json:"random_stream_received_upstream_bytes,omitempty"`
-	RandomStreamDownstreamBytes       *int64 `protobuf:"varint,174,opt,name=random_stream_downstream_bytes,json=randomStreamDownstreamBytes,proto3,oneof" json:"random_stream_downstream_bytes,omitempty"`
-	RandomStreamSentDownstreamBytes   *int64 `protobuf:"varint,175,opt,name=random_stream_sent_downstream_bytes,json=randomStreamSentDownstreamBytes,proto3,oneof" json:"random_stream_sent_downstream_bytes,omitempty"`
-	// Destination bytes fields (legacy format)
-	DestBytesAsn     *string `protobuf:"bytes,176,opt,name=dest_bytes_asn,json=destBytesAsn,proto3,oneof" json:"dest_bytes_asn,omitempty"`
-	DestBytes        *int64  `protobuf:"varint,177,opt,name=dest_bytes,json=destBytes,proto3,oneof" json:"dest_bytes,omitempty"`
-	DestBytesUpTcp   *int64  `protobuf:"varint,178,opt,name=dest_bytes_up_tcp,json=destBytesUpTcp,proto3,oneof" json:"dest_bytes_up_tcp,omitempty"`
-	DestBytesDownTcp *int64  `protobuf:"varint,179,opt,name=dest_bytes_down_tcp,json=destBytesDownTcp,proto3,oneof" json:"dest_bytes_down_tcp,omitempty"`
-	DestBytesUpUdp   *int64  `protobuf:"varint,180,opt,name=dest_bytes_up_udp,json=destBytesUpUdp,proto3,oneof" json:"dest_bytes_up_udp,omitempty"`
-	DestBytesDownUdp *int64  `protobuf:"varint,181,opt,name=dest_bytes_down_udp,json=destBytesDownUdp,proto3,oneof" json:"dest_bytes_down_udp,omitempty"`
-	// Additional transport and server entry fields
-	RelayedSteeringIp           *string `protobuf:"bytes,182,opt,name=relayed_steering_ip,json=relayedSteeringIp,proto3,oneof" json:"relayed_steering_ip,omitempty"`
-	RequestCheckServerEntryTags *int64  `protobuf:"varint,183,opt,name=request_check_server_entry_tags,json=requestCheckServerEntryTags,proto3,oneof" json:"request_check_server_entry_tags,omitempty"`
-	CheckedServerEntryTags      *int64  `protobuf:"varint,184,opt,name=checked_server_entry_tags,json=checkedServerEntryTags,proto3,oneof" json:"checked_server_entry_tags,omitempty"`
-	InvalidServerEntryTags      *int64  `protobuf:"varint,185,opt,name=invalid_server_entry_tags,json=invalidServerEntryTags,proto3,oneof" json:"invalid_server_entry_tags,omitempty"`
-	// Protocol Overhead
-	SshProtocolBytes         *int64 `protobuf:"varint,186,opt,name=ssh_protocol_bytes,json=sshProtocolBytes,proto3,oneof" json:"ssh_protocol_bytes,omitempty"`
-	SshProtocolBytesOverhead *int64 `protobuf:"varint,187,opt,name=ssh_protocol_bytes_overhead,json=sshProtocolBytesOverhead,proto3,oneof" json:"ssh_protocol_bytes_overhead,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	RandomStreamCount                             *int64                 `protobuf:"varint,171,opt,name=random_stream_count,json=randomStreamCount,proto3,oneof" json:"random_stream_count,omitempty"`
+	RandomStreamUpstreamBytes                     *int64                 `protobuf:"varint,172,opt,name=random_stream_upstream_bytes,json=randomStreamUpstreamBytes,proto3,oneof" json:"random_stream_upstream_bytes,omitempty"`
+	RandomStreamReceivedUpstreamBytes             *int64                 `protobuf:"varint,173,opt,name=random_stream_received_upstream_bytes,json=randomStreamReceivedUpstreamBytes,proto3,oneof" json:"random_stream_received_upstream_bytes,omitempty"`
+	RandomStreamDownstreamBytes                   *int64                 `protobuf:"varint,174,opt,name=random_stream_downstream_bytes,json=randomStreamDownstreamBytes,proto3,oneof" json:"random_stream_downstream_bytes,omitempty"`
+	RandomStreamSentDownstreamBytes               *int64                 `protobuf:"varint,175,opt,name=random_stream_sent_downstream_bytes,json=randomStreamSentDownstreamBytes,proto3,oneof" json:"random_stream_sent_downstream_bytes,omitempty"`
+	RelayedSteeringIp                             *string                `protobuf:"bytes,182,opt,name=relayed_steering_ip,json=relayedSteeringIp,proto3,oneof" json:"relayed_steering_ip,omitempty"`
+	RequestCheckServerEntryTags                   *int64                 `protobuf:"varint,183,opt,name=request_check_server_entry_tags,json=requestCheckServerEntryTags,proto3,oneof" json:"request_check_server_entry_tags,omitempty"`
+	CheckedServerEntryTags                        *int64                 `protobuf:"varint,184,opt,name=checked_server_entry_tags,json=checkedServerEntryTags,proto3,oneof" json:"checked_server_entry_tags,omitempty"`
+	InvalidServerEntryTags                        *int64                 `protobuf:"varint,185,opt,name=invalid_server_entry_tags,json=invalidServerEntryTags,proto3,oneof" json:"invalid_server_entry_tags,omitempty"`
+	SshProtocolBytes                              *int64                 `protobuf:"varint,186,opt,name=ssh_protocol_bytes,json=sshProtocolBytes,proto3,oneof" json:"ssh_protocol_bytes,omitempty"`
+	SshProtocolBytesOverhead                      *int64                 `protobuf:"varint,187,opt,name=ssh_protocol_bytes_overhead,json=sshProtocolBytesOverhead,proto3,oneof" json:"ssh_protocol_bytes_overhead,omitempty"`
+	unknownFields                                 protoimpl.UnknownFields
+	sizeCache                                     protoimpl.SizeCache
 }
 
 func (x *ServerTunnel) Reset() {
@@ -172,13 +161,6 @@ func (x *ServerTunnel) GetInproxyDialParams() *InproxyDialParams {
 		return x.InproxyDialParams
 	}
 	return nil
-}
-
-func (x *ServerTunnel) GetTunnelId() string {
-	if x != nil && x.TunnelId != nil {
-		return *x.TunnelId
-	}
-	return ""
 }
 
 func (x *ServerTunnel) GetBurstDownstreamFirstBytes() int64 {
@@ -706,48 +688,6 @@ func (x *ServerTunnel) GetRandomStreamSentDownstreamBytes() int64 {
 	return 0
 }
 
-func (x *ServerTunnel) GetDestBytesAsn() string {
-	if x != nil && x.DestBytesAsn != nil {
-		return *x.DestBytesAsn
-	}
-	return ""
-}
-
-func (x *ServerTunnel) GetDestBytes() int64 {
-	if x != nil && x.DestBytes != nil {
-		return *x.DestBytes
-	}
-	return 0
-}
-
-func (x *ServerTunnel) GetDestBytesUpTcp() int64 {
-	if x != nil && x.DestBytesUpTcp != nil {
-		return *x.DestBytesUpTcp
-	}
-	return 0
-}
-
-func (x *ServerTunnel) GetDestBytesDownTcp() int64 {
-	if x != nil && x.DestBytesDownTcp != nil {
-		return *x.DestBytesDownTcp
-	}
-	return 0
-}
-
-func (x *ServerTunnel) GetDestBytesUpUdp() int64 {
-	if x != nil && x.DestBytesUpUdp != nil {
-		return *x.DestBytesUpUdp
-	}
-	return 0
-}
-
-func (x *ServerTunnel) GetDestBytesDownUdp() int64 {
-	if x != nil && x.DestBytesDownUdp != nil {
-		return *x.DestBytesDownUdp
-	}
-	return 0
-}
-
 func (x *ServerTunnel) GetRelayedSteeringIp() string {
 	if x != nil && x.RelayedSteeringIp != nil {
 		return *x.RelayedSteeringIp
@@ -790,207 +730,105 @@ func (x *ServerTunnel) GetSshProtocolBytesOverhead() int64 {
 	return 0
 }
 
-type ServerTunnelASNDestBytes struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	TunnelId         *string                `protobuf:"bytes,100,opt,name=tunnel_id,json=tunnelId,proto3,oneof" json:"tunnel_id,omitempty"`
-	DestAsn          *string                `protobuf:"bytes,101,opt,name=dest_asn,json=destAsn,proto3,oneof" json:"dest_asn,omitempty"`
-	DestBytes        *int64                 `protobuf:"varint,102,opt,name=dest_bytes,json=destBytes,proto3,oneof" json:"dest_bytes,omitempty"`
-	DestBytesUpTcp   *int64                 `protobuf:"varint,103,opt,name=dest_bytes_up_tcp,json=destBytesUpTcp,proto3,oneof" json:"dest_bytes_up_tcp,omitempty"`
-	DestBytesDownTcp *int64                 `protobuf:"varint,104,opt,name=dest_bytes_down_tcp,json=destBytesDownTcp,proto3,oneof" json:"dest_bytes_down_tcp,omitempty"`
-	DestBytesUpUdp   *int64                 `protobuf:"varint,105,opt,name=dest_bytes_up_udp,json=destBytesUpUdp,proto3,oneof" json:"dest_bytes_up_udp,omitempty"`
-	DestBytesDownUdp *int64                 `protobuf:"varint,106,opt,name=dest_bytes_down_udp,json=destBytesDownUdp,proto3,oneof" json:"dest_bytes_down_udp,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *ServerTunnelASNDestBytes) Reset() {
-	*x = ServerTunnelASNDestBytes{}
-	mi := &file_ca_psiphon_psiphond_server_tunnel_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ServerTunnelASNDestBytes) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ServerTunnelASNDestBytes) ProtoMessage() {}
-
-func (x *ServerTunnelASNDestBytes) ProtoReflect() protoreflect.Message {
-	mi := &file_ca_psiphon_psiphond_server_tunnel_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ServerTunnelASNDestBytes.ProtoReflect.Descriptor instead.
-func (*ServerTunnelASNDestBytes) Descriptor() ([]byte, []int) {
-	return file_ca_psiphon_psiphond_server_tunnel_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *ServerTunnelASNDestBytes) GetTunnelId() string {
-	if x != nil && x.TunnelId != nil {
-		return *x.TunnelId
-	}
-	return ""
-}
-
-func (x *ServerTunnelASNDestBytes) GetDestAsn() string {
-	if x != nil && x.DestAsn != nil {
-		return *x.DestAsn
-	}
-	return ""
-}
-
-func (x *ServerTunnelASNDestBytes) GetDestBytes() int64 {
-	if x != nil && x.DestBytes != nil {
-		return *x.DestBytes
-	}
-	return 0
-}
-
-func (x *ServerTunnelASNDestBytes) GetDestBytesUpTcp() int64 {
-	if x != nil && x.DestBytesUpTcp != nil {
-		return *x.DestBytesUpTcp
-	}
-	return 0
-}
-
-func (x *ServerTunnelASNDestBytes) GetDestBytesDownTcp() int64 {
-	if x != nil && x.DestBytesDownTcp != nil {
-		return *x.DestBytesDownTcp
-	}
-	return 0
-}
-
-func (x *ServerTunnelASNDestBytes) GetDestBytesUpUdp() int64 {
-	if x != nil && x.DestBytesUpUdp != nil {
-		return *x.DestBytesUpUdp
-	}
-	return 0
-}
-
-func (x *ServerTunnelASNDestBytes) GetDestBytesDownUdp() int64 {
-	if x != nil && x.DestBytesDownUdp != nil {
-		return *x.DestBytesDownUdp
-	}
-	return 0
-}
-
 var File_ca_psiphon_psiphond_server_tunnel_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\n" +
-	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8dF\n" +
+	"'ca.psiphon.psiphond/server_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\x1a%ca.psiphon.psiphond/dial_params.proto\x1a-ca.psiphon.psiphond/inproxy_dial_params.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd0B\n" +
 	"\fServerTunnel\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12E\n" +
 	"\vdial_params\x18\x02 \x01(\v2\x1f.ca.psiphon.psiphond.DialParamsH\x01R\n" +
 	"dialParams\x88\x01\x01\x12[\n" +
-	"\x13inproxy_dial_params\x18\x03 \x01(\v2&.ca.psiphon.psiphond.InproxyDialParamsH\x02R\x11inproxyDialParams\x88\x01\x01\x12 \n" +
-	"\ttunnel_id\x18d \x01(\tH\x03R\btunnelId\x88\x01\x01\x12D\n" +
-	"\x1cburst_downstream_first_bytes\x18e \x01(\x03H\x04R\x19burstDownstreamFirstBytes\x88\x01\x01\x12J\n" +
-	"\x1fburst_downstream_first_duration\x18f \x01(\x03H\x05R\x1cburstDownstreamFirstDuration\x88\x01\x01\x12F\n" +
-	"\x1dburst_downstream_first_offset\x18g \x01(\x03H\x06R\x1aburstDownstreamFirstOffset\x88\x01\x01\x12B\n" +
-	"\x1bburst_downstream_first_rate\x18h \x01(\x03H\aR\x18burstDownstreamFirstRate\x88\x01\x01\x12B\n" +
-	"\x1bburst_downstream_last_bytes\x18i \x01(\x03H\bR\x18burstDownstreamLastBytes\x88\x01\x01\x12H\n" +
-	"\x1eburst_downstream_last_duration\x18j \x01(\x03H\tR\x1bburstDownstreamLastDuration\x88\x01\x01\x12D\n" +
-	"\x1cburst_downstream_last_offset\x18k \x01(\x03H\n" +
-	"R\x19burstDownstreamLastOffset\x88\x01\x01\x12@\n" +
-	"\x1aburst_downstream_last_rate\x18l \x01(\x03H\vR\x17burstDownstreamLastRate\x88\x01\x01\x12@\n" +
-	"\x1aburst_downstream_max_bytes\x18m \x01(\x03H\fR\x17burstDownstreamMaxBytes\x88\x01\x01\x12F\n" +
-	"\x1dburst_downstream_max_duration\x18n \x01(\x03H\rR\x1aburstDownstreamMaxDuration\x88\x01\x01\x12B\n" +
-	"\x1bburst_downstream_max_offset\x18o \x01(\x03H\x0eR\x18burstDownstreamMaxOffset\x88\x01\x01\x12>\n" +
-	"\x19burst_downstream_max_rate\x18p \x01(\x03H\x0fR\x16burstDownstreamMaxRate\x88\x01\x01\x12@\n" +
-	"\x1aburst_downstream_min_bytes\x18q \x01(\x03H\x10R\x17burstDownstreamMinBytes\x88\x01\x01\x12F\n" +
-	"\x1dburst_downstream_min_duration\x18r \x01(\x03H\x11R\x1aburstDownstreamMinDuration\x88\x01\x01\x12B\n" +
-	"\x1bburst_downstream_min_offset\x18s \x01(\x03H\x12R\x18burstDownstreamMinOffset\x88\x01\x01\x12>\n" +
-	"\x19burst_downstream_min_rate\x18t \x01(\x03H\x13R\x16burstDownstreamMinRate\x88\x01\x01\x12@\n" +
-	"\x1aburst_upstream_first_bytes\x18u \x01(\x03H\x14R\x17burstUpstreamFirstBytes\x88\x01\x01\x12F\n" +
-	"\x1dburst_upstream_first_duration\x18v \x01(\x03H\x15R\x1aburstUpstreamFirstDuration\x88\x01\x01\x12B\n" +
-	"\x1bburst_upstream_first_offset\x18w \x01(\x03H\x16R\x18burstUpstreamFirstOffset\x88\x01\x01\x12>\n" +
-	"\x19burst_upstream_first_rate\x18x \x01(\x03H\x17R\x16burstUpstreamFirstRate\x88\x01\x01\x12>\n" +
-	"\x19burst_upstream_last_bytes\x18y \x01(\x03H\x18R\x16burstUpstreamLastBytes\x88\x01\x01\x12D\n" +
-	"\x1cburst_upstream_last_duration\x18z \x01(\x03H\x19R\x19burstUpstreamLastDuration\x88\x01\x01\x12@\n" +
-	"\x1aburst_upstream_last_offset\x18{ \x01(\x03H\x1aR\x17burstUpstreamLastOffset\x88\x01\x01\x12<\n" +
-	"\x18burst_upstream_last_rate\x18| \x01(\x03H\x1bR\x15burstUpstreamLastRate\x88\x01\x01\x12<\n" +
-	"\x18burst_upstream_max_bytes\x18} \x01(\x03H\x1cR\x15burstUpstreamMaxBytes\x88\x01\x01\x12B\n" +
-	"\x1bburst_upstream_max_duration\x18~ \x01(\x03H\x1dR\x18burstUpstreamMaxDuration\x88\x01\x01\x12>\n" +
-	"\x19burst_upstream_max_offset\x18\x7f \x01(\x03H\x1eR\x16burstUpstreamMaxOffset\x88\x01\x01\x12;\n" +
-	"\x17burst_upstream_max_rate\x18\x80\x01 \x01(\x03H\x1fR\x14burstUpstreamMaxRate\x88\x01\x01\x12=\n" +
-	"\x18burst_upstream_min_bytes\x18\x81\x01 \x01(\x03H R\x15burstUpstreamMinBytes\x88\x01\x01\x12C\n" +
-	"\x1bburst_upstream_min_duration\x18\x82\x01 \x01(\x03H!R\x18burstUpstreamMinDuration\x88\x01\x01\x12?\n" +
-	"\x19burst_upstream_min_offset\x18\x83\x01 \x01(\x03H\"R\x16burstUpstreamMinOffset\x88\x01\x01\x12;\n" +
-	"\x17burst_upstream_min_rate\x18\x84\x01 \x01(\x03H#R\x14burstUpstreamMinRate\x88\x01\x01\x12\x1a\n" +
-	"\x05bytes\x18\x85\x01 \x01(\x03H$R\x05bytes\x88\x01\x01\x12*\n" +
-	"\x0ebytes_down_tcp\x18\x86\x01 \x01(\x03H%R\fbytesDownTcp\x88\x01\x01\x12*\n" +
-	"\x0ebytes_down_udp\x18\x87\x01 \x01(\x03H&R\fbytesDownUdp\x88\x01\x01\x12&\n" +
-	"\fbytes_up_tcp\x18\x88\x01 \x01(\x03H'R\n" +
+	"\x13inproxy_dial_params\x18\x03 \x01(\v2&.ca.psiphon.psiphond.InproxyDialParamsH\x02R\x11inproxyDialParams\x88\x01\x01\x12D\n" +
+	"\x1cburst_downstream_first_bytes\x18e \x01(\x03H\x03R\x19burstDownstreamFirstBytes\x88\x01\x01\x12J\n" +
+	"\x1fburst_downstream_first_duration\x18f \x01(\x03H\x04R\x1cburstDownstreamFirstDuration\x88\x01\x01\x12F\n" +
+	"\x1dburst_downstream_first_offset\x18g \x01(\x03H\x05R\x1aburstDownstreamFirstOffset\x88\x01\x01\x12B\n" +
+	"\x1bburst_downstream_first_rate\x18h \x01(\x03H\x06R\x18burstDownstreamFirstRate\x88\x01\x01\x12B\n" +
+	"\x1bburst_downstream_last_bytes\x18i \x01(\x03H\aR\x18burstDownstreamLastBytes\x88\x01\x01\x12H\n" +
+	"\x1eburst_downstream_last_duration\x18j \x01(\x03H\bR\x1bburstDownstreamLastDuration\x88\x01\x01\x12D\n" +
+	"\x1cburst_downstream_last_offset\x18k \x01(\x03H\tR\x19burstDownstreamLastOffset\x88\x01\x01\x12@\n" +
+	"\x1aburst_downstream_last_rate\x18l \x01(\x03H\n" +
+	"R\x17burstDownstreamLastRate\x88\x01\x01\x12@\n" +
+	"\x1aburst_downstream_max_bytes\x18m \x01(\x03H\vR\x17burstDownstreamMaxBytes\x88\x01\x01\x12F\n" +
+	"\x1dburst_downstream_max_duration\x18n \x01(\x03H\fR\x1aburstDownstreamMaxDuration\x88\x01\x01\x12B\n" +
+	"\x1bburst_downstream_max_offset\x18o \x01(\x03H\rR\x18burstDownstreamMaxOffset\x88\x01\x01\x12>\n" +
+	"\x19burst_downstream_max_rate\x18p \x01(\x03H\x0eR\x16burstDownstreamMaxRate\x88\x01\x01\x12@\n" +
+	"\x1aburst_downstream_min_bytes\x18q \x01(\x03H\x0fR\x17burstDownstreamMinBytes\x88\x01\x01\x12F\n" +
+	"\x1dburst_downstream_min_duration\x18r \x01(\x03H\x10R\x1aburstDownstreamMinDuration\x88\x01\x01\x12B\n" +
+	"\x1bburst_downstream_min_offset\x18s \x01(\x03H\x11R\x18burstDownstreamMinOffset\x88\x01\x01\x12>\n" +
+	"\x19burst_downstream_min_rate\x18t \x01(\x03H\x12R\x16burstDownstreamMinRate\x88\x01\x01\x12@\n" +
+	"\x1aburst_upstream_first_bytes\x18u \x01(\x03H\x13R\x17burstUpstreamFirstBytes\x88\x01\x01\x12F\n" +
+	"\x1dburst_upstream_first_duration\x18v \x01(\x03H\x14R\x1aburstUpstreamFirstDuration\x88\x01\x01\x12B\n" +
+	"\x1bburst_upstream_first_offset\x18w \x01(\x03H\x15R\x18burstUpstreamFirstOffset\x88\x01\x01\x12>\n" +
+	"\x19burst_upstream_first_rate\x18x \x01(\x03H\x16R\x16burstUpstreamFirstRate\x88\x01\x01\x12>\n" +
+	"\x19burst_upstream_last_bytes\x18y \x01(\x03H\x17R\x16burstUpstreamLastBytes\x88\x01\x01\x12D\n" +
+	"\x1cburst_upstream_last_duration\x18z \x01(\x03H\x18R\x19burstUpstreamLastDuration\x88\x01\x01\x12@\n" +
+	"\x1aburst_upstream_last_offset\x18{ \x01(\x03H\x19R\x17burstUpstreamLastOffset\x88\x01\x01\x12<\n" +
+	"\x18burst_upstream_last_rate\x18| \x01(\x03H\x1aR\x15burstUpstreamLastRate\x88\x01\x01\x12<\n" +
+	"\x18burst_upstream_max_bytes\x18} \x01(\x03H\x1bR\x15burstUpstreamMaxBytes\x88\x01\x01\x12B\n" +
+	"\x1bburst_upstream_max_duration\x18~ \x01(\x03H\x1cR\x18burstUpstreamMaxDuration\x88\x01\x01\x12>\n" +
+	"\x19burst_upstream_max_offset\x18\x7f \x01(\x03H\x1dR\x16burstUpstreamMaxOffset\x88\x01\x01\x12;\n" +
+	"\x17burst_upstream_max_rate\x18\x80\x01 \x01(\x03H\x1eR\x14burstUpstreamMaxRate\x88\x01\x01\x12=\n" +
+	"\x18burst_upstream_min_bytes\x18\x81\x01 \x01(\x03H\x1fR\x15burstUpstreamMinBytes\x88\x01\x01\x12C\n" +
+	"\x1bburst_upstream_min_duration\x18\x82\x01 \x01(\x03H R\x18burstUpstreamMinDuration\x88\x01\x01\x12?\n" +
+	"\x19burst_upstream_min_offset\x18\x83\x01 \x01(\x03H!R\x16burstUpstreamMinOffset\x88\x01\x01\x12;\n" +
+	"\x17burst_upstream_min_rate\x18\x84\x01 \x01(\x03H\"R\x14burstUpstreamMinRate\x88\x01\x01\x12\x1a\n" +
+	"\x05bytes\x18\x85\x01 \x01(\x03H#R\x05bytes\x88\x01\x01\x12*\n" +
+	"\x0ebytes_down_tcp\x18\x86\x01 \x01(\x03H$R\fbytesDownTcp\x88\x01\x01\x12*\n" +
+	"\x0ebytes_down_udp\x18\x87\x01 \x01(\x03H%R\fbytesDownUdp\x88\x01\x01\x12&\n" +
+	"\fbytes_up_tcp\x18\x88\x01 \x01(\x03H&R\n" +
 	"bytesUpTcp\x88\x01\x01\x12&\n" +
-	"\fbytes_up_udp\x18\x89\x01 \x01(\x03H(R\n" +
+	"\fbytes_up_udp\x18\x89\x01 \x01(\x03H'R\n" +
 	"bytesUpUdp\x88\x01\x01\x12 \n" +
-	"\bduration\x18\x8a\x01 \x01(\x03H)R\bduration\x88\x01\x01\x12;\n" +
-	"\x16establishment_duration\x18\x8b\x01 \x01(\x03H*R\x15establishmentDuration\x88\x01\x01\x125\n" +
-	"\x13handshake_completed\x18\x8c\x01 \x01(\bH+R\x12handshakeCompleted\x88\x01\x01\x12@\n" +
-	"\x1ais_first_tunnel_in_session\x18\x8d\x01 \x01(\bH,R\x16isFirstTunnelInSession\x88\x01\x01\x12P\n" +
-	"\"meek_cached_response_miss_position\x18\x8e\x01 \x01(\x03H-R\x1emeekCachedResponseMissPosition\x88\x01\x01\x124\n" +
-	"\x13meek_client_retries\x18\x8f\x01 \x01(\x03H.R\x11meekClientRetries\x88\x01\x01\x12O\n" +
-	"\"meek_peak_cached_response_hit_size\x18\x90\x01 \x01(\x03H/R\x1dmeekPeakCachedResponseHitSize\x88\x01\x01\x12H\n" +
-	"\x1emeek_peak_cached_response_size\x18\x91\x01 \x01(\x03H0R\x1ameekPeakCachedResponseSize\x88\x01\x01\x12;\n" +
-	"\x17meek_peak_response_size\x18\x92\x01 \x01(\x03H1R\x14meekPeakResponseSize\x88\x01\x01\x12M\n" +
-	" meek_underlying_connection_count\x18\x93\x01 \x01(\x03H2R\x1dmeekUnderlyingConnectionCount\x88\x01\x01\x12=\n" +
-	"\x18meek_server_http_version\x18\x94\x01 \x01(\tH3R\x15meekServerHttpVersion\x88\x01\x01\x12,\n" +
-	"\x0fnew_tactics_tag\x18\x95\x01 \x01(\tH4R\rnewTacticsTag\x88\x01\x01\x12f\n" +
-	".peak_concurrent_dialing_port_forward_count_tcp\x18\x96\x01 \x01(\x03H5R(peakConcurrentDialingPortForwardCountTcp\x88\x01\x01\x12W\n" +
-	"&peak_concurrent_port_forward_count_tcp\x18\x97\x01 \x01(\x03H6R!peakConcurrentPortForwardCountTcp\x88\x01\x01\x12W\n" +
-	"&peak_concurrent_port_forward_count_udp\x18\x98\x01 \x01(\x03H7R!peakConcurrentPortForwardCountUdp\x88\x01\x01\x12`\n" +
-	"*peak_concurrent_proximate_accepted_clients\x18\x99\x01 \x01(\x03H8R&peakConcurrentProximateAcceptedClients\x88\x01\x01\x12f\n" +
-	"-peak_concurrent_proximate_established_clients\x18\x9a\x01 \x01(\x03H9R)peakConcurrentProximateEstablishedClients\x88\x01\x01\x127\n" +
-	"\x15peak_dns_failure_rate\x18\x9b\x01 \x01(\x01H:R\x12peakDnsFailureRate\x88\x01\x01\x12M\n" +
-	"!peak_dns_failure_rate_sample_size\x18\x9c\x01 \x01(\x03H;R\x1cpeakDnsFailureRateSampleSize\x88\x01\x01\x12O\n" +
-	"\"peak_tcp_port_forward_failure_rate\x18\x9d\x01 \x01(\x01H<R\x1dpeakTcpPortForwardFailureRate\x88\x01\x01\x12e\n" +
-	".peak_tcp_port_forward_failure_rate_sample_size\x18\x9e\x01 \x01(\x03H=R'peakTcpPortForwardFailureRateSampleSize\x88\x01\x01\x12N\n" +
-	"!pre_handshake_random_stream_count\x18\x9f\x01 \x01(\x03H>R\x1dpreHandshakeRandomStreamCount\x88\x01\x01\x12c\n" +
-	",pre_handshake_random_stream_downstream_bytes\x18\xa0\x01 \x01(\x03H?R'preHandshakeRandomStreamDownstreamBytes\x88\x01\x01\x12p\n" +
-	"3pre_handshake_random_stream_received_upstream_bytes\x18\xa1\x01 \x01(\x03H@R-preHandshakeRandomStreamReceivedUpstreamBytes\x88\x01\x01\x12l\n" +
-	"1pre_handshake_random_stream_sent_downstream_bytes\x18\xa2\x01 \x01(\x03HAR+preHandshakeRandomStreamSentDownstreamBytes\x88\x01\x01\x12_\n" +
-	"*pre_handshake_random_stream_upstream_bytes\x18\xa3\x01 \x01(\x03HBR%preHandshakeRandomStreamUpstreamBytes\x88\x01\x01\x12'\n" +
-	"\fsplit_tunnel\x18\xa4\x01 \x01(\bHCR\vsplitTunnel\x88\x01\x01\x12?\n" +
+	"\bduration\x18\x8a\x01 \x01(\x03H(R\bduration\x88\x01\x01\x12;\n" +
+	"\x16establishment_duration\x18\x8b\x01 \x01(\x03H)R\x15establishmentDuration\x88\x01\x01\x125\n" +
+	"\x13handshake_completed\x18\x8c\x01 \x01(\bH*R\x12handshakeCompleted\x88\x01\x01\x12@\n" +
+	"\x1ais_first_tunnel_in_session\x18\x8d\x01 \x01(\bH+R\x16isFirstTunnelInSession\x88\x01\x01\x12P\n" +
+	"\"meek_cached_response_miss_position\x18\x8e\x01 \x01(\x03H,R\x1emeekCachedResponseMissPosition\x88\x01\x01\x124\n" +
+	"\x13meek_client_retries\x18\x8f\x01 \x01(\x03H-R\x11meekClientRetries\x88\x01\x01\x12O\n" +
+	"\"meek_peak_cached_response_hit_size\x18\x90\x01 \x01(\x03H.R\x1dmeekPeakCachedResponseHitSize\x88\x01\x01\x12H\n" +
+	"\x1emeek_peak_cached_response_size\x18\x91\x01 \x01(\x03H/R\x1ameekPeakCachedResponseSize\x88\x01\x01\x12;\n" +
+	"\x17meek_peak_response_size\x18\x92\x01 \x01(\x03H0R\x14meekPeakResponseSize\x88\x01\x01\x12M\n" +
+	" meek_underlying_connection_count\x18\x93\x01 \x01(\x03H1R\x1dmeekUnderlyingConnectionCount\x88\x01\x01\x12=\n" +
+	"\x18meek_server_http_version\x18\x94\x01 \x01(\tH2R\x15meekServerHttpVersion\x88\x01\x01\x12,\n" +
+	"\x0fnew_tactics_tag\x18\x95\x01 \x01(\tH3R\rnewTacticsTag\x88\x01\x01\x12f\n" +
+	".peak_concurrent_dialing_port_forward_count_tcp\x18\x96\x01 \x01(\x03H4R(peakConcurrentDialingPortForwardCountTcp\x88\x01\x01\x12W\n" +
+	"&peak_concurrent_port_forward_count_tcp\x18\x97\x01 \x01(\x03H5R!peakConcurrentPortForwardCountTcp\x88\x01\x01\x12W\n" +
+	"&peak_concurrent_port_forward_count_udp\x18\x98\x01 \x01(\x03H6R!peakConcurrentPortForwardCountUdp\x88\x01\x01\x12`\n" +
+	"*peak_concurrent_proximate_accepted_clients\x18\x99\x01 \x01(\x03H7R&peakConcurrentProximateAcceptedClients\x88\x01\x01\x12f\n" +
+	"-peak_concurrent_proximate_established_clients\x18\x9a\x01 \x01(\x03H8R)peakConcurrentProximateEstablishedClients\x88\x01\x01\x127\n" +
+	"\x15peak_dns_failure_rate\x18\x9b\x01 \x01(\x01H9R\x12peakDnsFailureRate\x88\x01\x01\x12M\n" +
+	"!peak_dns_failure_rate_sample_size\x18\x9c\x01 \x01(\x03H:R\x1cpeakDnsFailureRateSampleSize\x88\x01\x01\x12O\n" +
+	"\"peak_tcp_port_forward_failure_rate\x18\x9d\x01 \x01(\x01H;R\x1dpeakTcpPortForwardFailureRate\x88\x01\x01\x12e\n" +
+	".peak_tcp_port_forward_failure_rate_sample_size\x18\x9e\x01 \x01(\x03H<R'peakTcpPortForwardFailureRateSampleSize\x88\x01\x01\x12N\n" +
+	"!pre_handshake_random_stream_count\x18\x9f\x01 \x01(\x03H=R\x1dpreHandshakeRandomStreamCount\x88\x01\x01\x12c\n" +
+	",pre_handshake_random_stream_downstream_bytes\x18\xa0\x01 \x01(\x03H>R'preHandshakeRandomStreamDownstreamBytes\x88\x01\x01\x12p\n" +
+	"3pre_handshake_random_stream_received_upstream_bytes\x18\xa1\x01 \x01(\x03H?R-preHandshakeRandomStreamReceivedUpstreamBytes\x88\x01\x01\x12l\n" +
+	"1pre_handshake_random_stream_sent_downstream_bytes\x18\xa2\x01 \x01(\x03H@R+preHandshakeRandomStreamSentDownstreamBytes\x88\x01\x01\x12_\n" +
+	"*pre_handshake_random_stream_upstream_bytes\x18\xa3\x01 \x01(\x03HAR%preHandshakeRandomStreamUpstreamBytes\x88\x01\x01\x12'\n" +
+	"\fsplit_tunnel\x18\xa4\x01 \x01(\bHBR\vsplitTunnel\x88\x01\x01\x12?\n" +
 	"\n" +
-	"start_time\x18\xa5\x01 \x01(\v2\x1a.google.protobuf.TimestampHDR\tstartTime\x88\x01\x01\x122\n" +
-	"\x12station_ip_address\x18\xa6\x01 \x01(\tHER\x10stationIpAddress\x88\x01\x01\x12N\n" +
-	"!total_packet_tunnel_channel_count\x18\xa7\x01 \x01(\x03HFR\x1dtotalPacketTunnelChannelCount\x88\x01\x01\x12D\n" +
-	"\x1ctotal_port_forward_count_tcp\x18\xa8\x01 \x01(\x03HGR\x18totalPortForwardCountTcp\x88\x01\x01\x12D\n" +
-	"\x1ctotal_port_forward_count_udp\x18\xa9\x01 \x01(\x03HHR\x18totalPortForwardCountUdp\x88\x01\x01\x12?\n" +
-	"\x19total_udpgw_channel_count\x18\xaa\x01 \x01(\x03HIR\x16totalUdpgwChannelCount\x88\x01\x01\x124\n" +
-	"\x13random_stream_count\x18\xab\x01 \x01(\x03HJR\x11randomStreamCount\x88\x01\x01\x12E\n" +
-	"\x1crandom_stream_upstream_bytes\x18\xac\x01 \x01(\x03HKR\x19randomStreamUpstreamBytes\x88\x01\x01\x12V\n" +
-	"%random_stream_received_upstream_bytes\x18\xad\x01 \x01(\x03HLR!randomStreamReceivedUpstreamBytes\x88\x01\x01\x12I\n" +
-	"\x1erandom_stream_downstream_bytes\x18\xae\x01 \x01(\x03HMR\x1brandomStreamDownstreamBytes\x88\x01\x01\x12R\n" +
-	"#random_stream_sent_downstream_bytes\x18\xaf\x01 \x01(\x03HNR\x1frandomStreamSentDownstreamBytes\x88\x01\x01\x12*\n" +
-	"\x0edest_bytes_asn\x18\xb0\x01 \x01(\tHOR\fdestBytesAsn\x88\x01\x01\x12#\n" +
-	"\n" +
-	"dest_bytes\x18\xb1\x01 \x01(\x03HPR\tdestBytes\x88\x01\x01\x12/\n" +
-	"\x11dest_bytes_up_tcp\x18\xb2\x01 \x01(\x03HQR\x0edestBytesUpTcp\x88\x01\x01\x123\n" +
-	"\x13dest_bytes_down_tcp\x18\xb3\x01 \x01(\x03HRR\x10destBytesDownTcp\x88\x01\x01\x12/\n" +
-	"\x11dest_bytes_up_udp\x18\xb4\x01 \x01(\x03HSR\x0edestBytesUpUdp\x88\x01\x01\x123\n" +
-	"\x13dest_bytes_down_udp\x18\xb5\x01 \x01(\x03HTR\x10destBytesDownUdp\x88\x01\x01\x124\n" +
-	"\x13relayed_steering_ip\x18\xb6\x01 \x01(\tHUR\x11relayedSteeringIp\x88\x01\x01\x12J\n" +
-	"\x1frequest_check_server_entry_tags\x18\xb7\x01 \x01(\x03HVR\x1brequestCheckServerEntryTags\x88\x01\x01\x12?\n" +
-	"\x19checked_server_entry_tags\x18\xb8\x01 \x01(\x03HWR\x16checkedServerEntryTags\x88\x01\x01\x12?\n" +
-	"\x19invalid_server_entry_tags\x18\xb9\x01 \x01(\x03HXR\x16invalidServerEntryTags\x88\x01\x01\x122\n" +
-	"\x12ssh_protocol_bytes\x18\xba\x01 \x01(\x03HYR\x10sshProtocolBytes\x88\x01\x01\x12C\n" +
-	"\x1bssh_protocol_bytes_overhead\x18\xbb\x01 \x01(\x03HZR\x18sshProtocolBytesOverhead\x88\x01\x01B\x0e\n" +
+	"start_time\x18\xa5\x01 \x01(\v2\x1a.google.protobuf.TimestampHCR\tstartTime\x88\x01\x01\x122\n" +
+	"\x12station_ip_address\x18\xa6\x01 \x01(\tHDR\x10stationIpAddress\x88\x01\x01\x12N\n" +
+	"!total_packet_tunnel_channel_count\x18\xa7\x01 \x01(\x03HER\x1dtotalPacketTunnelChannelCount\x88\x01\x01\x12D\n" +
+	"\x1ctotal_port_forward_count_tcp\x18\xa8\x01 \x01(\x03HFR\x18totalPortForwardCountTcp\x88\x01\x01\x12D\n" +
+	"\x1ctotal_port_forward_count_udp\x18\xa9\x01 \x01(\x03HGR\x18totalPortForwardCountUdp\x88\x01\x01\x12?\n" +
+	"\x19total_udpgw_channel_count\x18\xaa\x01 \x01(\x03HHR\x16totalUdpgwChannelCount\x88\x01\x01\x124\n" +
+	"\x13random_stream_count\x18\xab\x01 \x01(\x03HIR\x11randomStreamCount\x88\x01\x01\x12E\n" +
+	"\x1crandom_stream_upstream_bytes\x18\xac\x01 \x01(\x03HJR\x19randomStreamUpstreamBytes\x88\x01\x01\x12V\n" +
+	"%random_stream_received_upstream_bytes\x18\xad\x01 \x01(\x03HKR!randomStreamReceivedUpstreamBytes\x88\x01\x01\x12I\n" +
+	"\x1erandom_stream_downstream_bytes\x18\xae\x01 \x01(\x03HLR\x1brandomStreamDownstreamBytes\x88\x01\x01\x12R\n" +
+	"#random_stream_sent_downstream_bytes\x18\xaf\x01 \x01(\x03HMR\x1frandomStreamSentDownstreamBytes\x88\x01\x01\x124\n" +
+	"\x13relayed_steering_ip\x18\xb6\x01 \x01(\tHNR\x11relayedSteeringIp\x88\x01\x01\x12J\n" +
+	"\x1frequest_check_server_entry_tags\x18\xb7\x01 \x01(\x03HOR\x1brequestCheckServerEntryTags\x88\x01\x01\x12?\n" +
+	"\x19checked_server_entry_tags\x18\xb8\x01 \x01(\x03HPR\x16checkedServerEntryTags\x88\x01\x01\x12?\n" +
+	"\x19invalid_server_entry_tags\x18\xb9\x01 \x01(\x03HQR\x16invalidServerEntryTags\x88\x01\x01\x122\n" +
+	"\x12ssh_protocol_bytes\x18\xba\x01 \x01(\x03HRR\x10sshProtocolBytes\x88\x01\x01\x12C\n" +
+	"\x1bssh_protocol_bytes_overhead\x18\xbb\x01 \x01(\x03HSR\x18sshProtocolBytesOverhead\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x0e\n" +
 	"\f_dial_paramsB\x16\n" +
-	"\x14_inproxy_dial_paramsB\f\n" +
-	"\n" +
-	"_tunnel_idB\x1f\n" +
+	"\x14_inproxy_dial_paramsB\x1f\n" +
 	"\x1d_burst_downstream_first_bytesB\"\n" +
 	" _burst_downstream_first_durationB \n" +
 	"\x1e_burst_downstream_first_offsetB\x1e\n" +
@@ -1065,36 +903,13 @@ const file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc = "" +
 	"\x1d_random_stream_upstream_bytesB(\n" +
 	"&_random_stream_received_upstream_bytesB!\n" +
 	"\x1f_random_stream_downstream_bytesB&\n" +
-	"$_random_stream_sent_downstream_bytesB\x11\n" +
-	"\x0f_dest_bytes_asnB\r\n" +
-	"\v_dest_bytesB\x14\n" +
-	"\x12_dest_bytes_up_tcpB\x16\n" +
-	"\x14_dest_bytes_down_tcpB\x14\n" +
-	"\x12_dest_bytes_up_udpB\x16\n" +
-	"\x14_dest_bytes_down_udpB\x16\n" +
+	"$_random_stream_sent_downstream_bytesB\x16\n" +
 	"\x14_relayed_steering_ipB\"\n" +
 	" _request_check_server_entry_tagsB\x1c\n" +
 	"\x1a_checked_server_entry_tagsB\x1c\n" +
 	"\x1a_invalid_server_entry_tagsB\x15\n" +
 	"\x13_ssh_protocol_bytesB\x1e\n" +
-	"\x1c_ssh_protocol_bytes_overhead\"\xce\x03\n" +
-	"\x18ServerTunnelASNDestBytes\x12 \n" +
-	"\ttunnel_id\x18d \x01(\tH\x00R\btunnelId\x88\x01\x01\x12\x1e\n" +
-	"\bdest_asn\x18e \x01(\tH\x01R\adestAsn\x88\x01\x01\x12\"\n" +
-	"\n" +
-	"dest_bytes\x18f \x01(\x03H\x02R\tdestBytes\x88\x01\x01\x12.\n" +
-	"\x11dest_bytes_up_tcp\x18g \x01(\x03H\x03R\x0edestBytesUpTcp\x88\x01\x01\x122\n" +
-	"\x13dest_bytes_down_tcp\x18h \x01(\x03H\x04R\x10destBytesDownTcp\x88\x01\x01\x12.\n" +
-	"\x11dest_bytes_up_udp\x18i \x01(\x03H\x05R\x0edestBytesUpUdp\x88\x01\x01\x122\n" +
-	"\x13dest_bytes_down_udp\x18j \x01(\x03H\x06R\x10destBytesDownUdp\x88\x01\x01B\f\n" +
-	"\n" +
-	"_tunnel_idB\v\n" +
-	"\t_dest_asnB\r\n" +
-	"\v_dest_bytesB\x14\n" +
-	"\x12_dest_bytes_up_tcpB\x16\n" +
-	"\x14_dest_bytes_down_tcpB\x14\n" +
-	"\x12_dest_bytes_up_udpB\x16\n" +
-	"\x14_dest_bytes_down_udpBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x1c_ssh_protocol_bytes_overheadJ\x04\bd\x10eJ\x06\b\xb0\x01\x10\xb6\x01BHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_tunnel_proto_rawDescOnce sync.Once
@@ -1108,20 +923,19 @@ func file_ca_psiphon_psiphond_server_tunnel_proto_rawDescGZIP() []byte {
 	return file_ca_psiphon_psiphond_server_tunnel_proto_rawDescData
 }
 
-var file_ca_psiphon_psiphond_server_tunnel_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_ca_psiphon_psiphond_server_tunnel_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_ca_psiphon_psiphond_server_tunnel_proto_goTypes = []any{
-	(*ServerTunnel)(nil),             // 0: ca.psiphon.psiphond.ServerTunnel
-	(*ServerTunnelASNDestBytes)(nil), // 1: ca.psiphon.psiphond.ServerTunnelASNDestBytes
-	(*BaseParams)(nil),               // 2: ca.psiphon.psiphond.BaseParams
-	(*DialParams)(nil),               // 3: ca.psiphon.psiphond.DialParams
-	(*InproxyDialParams)(nil),        // 4: ca.psiphon.psiphond.InproxyDialParams
-	(*timestamppb.Timestamp)(nil),    // 5: google.protobuf.Timestamp
+	(*ServerTunnel)(nil),          // 0: ca.psiphon.psiphond.ServerTunnel
+	(*BaseParams)(nil),            // 1: ca.psiphon.psiphond.BaseParams
+	(*DialParams)(nil),            // 2: ca.psiphon.psiphond.DialParams
+	(*InproxyDialParams)(nil),     // 3: ca.psiphon.psiphond.InproxyDialParams
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
 }
 var file_ca_psiphon_psiphond_server_tunnel_proto_depIdxs = []int32{
-	2, // 0: ca.psiphon.psiphond.ServerTunnel.base_params:type_name -> ca.psiphon.psiphond.BaseParams
-	3, // 1: ca.psiphon.psiphond.ServerTunnel.dial_params:type_name -> ca.psiphon.psiphond.DialParams
-	4, // 2: ca.psiphon.psiphond.ServerTunnel.inproxy_dial_params:type_name -> ca.psiphon.psiphond.InproxyDialParams
-	5, // 3: ca.psiphon.psiphond.ServerTunnel.start_time:type_name -> google.protobuf.Timestamp
+	1, // 0: ca.psiphon.psiphond.ServerTunnel.base_params:type_name -> ca.psiphon.psiphond.BaseParams
+	2, // 1: ca.psiphon.psiphond.ServerTunnel.dial_params:type_name -> ca.psiphon.psiphond.DialParams
+	3, // 2: ca.psiphon.psiphond.ServerTunnel.inproxy_dial_params:type_name -> ca.psiphon.psiphond.InproxyDialParams
+	4, // 3: ca.psiphon.psiphond.ServerTunnel.start_time:type_name -> google.protobuf.Timestamp
 	4, // [4:4] is the sub-list for method output_type
 	4, // [4:4] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name
@@ -1138,14 +952,13 @@ func file_ca_psiphon_psiphond_server_tunnel_proto_init() {
 	file_ca_psiphon_psiphond_dial_params_proto_init()
 	file_ca_psiphon_psiphond_inproxy_dial_params_proto_init()
 	file_ca_psiphon_psiphond_server_tunnel_proto_msgTypes[0].OneofWrappers = []any{}
-	file_ca_psiphon_psiphond_server_tunnel_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc), len(file_ca_psiphon_psiphond_server_tunnel_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

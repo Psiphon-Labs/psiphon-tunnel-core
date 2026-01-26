@@ -34,9 +34,10 @@ type IrregularTunnel struct {
 	DuplicateElapsedTimeMs             *int64                 `protobuf:"varint,107,opt,name=duplicate_elapsed_time_ms,json=duplicateElapsedTimeMs,proto3,oneof" json:"duplicate_elapsed_time_ms,omitempty"`
 	DuplicateSeed                      *string                `protobuf:"bytes,108,opt,name=duplicate_seed,json=duplicateSeed,proto3,oneof" json:"duplicate_seed,omitempty"`
 	DuplicateSeedType                  *string                `protobuf:"bytes,109,opt,name=duplicate_seed_type,json=duplicateSeedType,proto3,oneof" json:"duplicate_seed_type,omitempty"`
-	ListenerPortNumber                 *uint32                `protobuf:"varint,110,opt,name=listener_port_number,json=listenerPortNumber,proto3,oneof" json:"listener_port_number,omitempty"`
+	ListenerPortNumber                 *int64                 `protobuf:"varint,110,opt,name=listener_port_number,json=listenerPortNumber,proto3,oneof" json:"listener_port_number,omitempty"`
 	ListenerProtocol                   *string                `protobuf:"bytes,111,opt,name=listener_protocol,json=listenerProtocol,proto3,oneof" json:"listener_protocol,omitempty"`
 	TunnelError                        *string                `protobuf:"bytes,112,opt,name=tunnel_error,json=tunnelError,proto3,oneof" json:"tunnel_error,omitempty"`
+	ServerEntryTag                     *string                `protobuf:"bytes,113,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
 	unknownFields                      protoimpl.UnknownFields
 	sizeCache                          protoimpl.SizeCache
 }
@@ -148,7 +149,7 @@ func (x *IrregularTunnel) GetDuplicateSeedType() string {
 	return ""
 }
 
-func (x *IrregularTunnel) GetListenerPortNumber() uint32 {
+func (x *IrregularTunnel) GetListenerPortNumber() int64 {
 	if x != nil && x.ListenerPortNumber != nil {
 		return *x.ListenerPortNumber
 	}
@@ -169,11 +170,18 @@ func (x *IrregularTunnel) GetTunnelError() string {
 	return ""
 }
 
+func (x *IrregularTunnel) GetServerEntryTag() string {
+	if x != nil && x.ServerEntryTag != nil {
+		return *x.ServerEntryTag
+	}
+	return ""
+}
+
 var File_ca_psiphon_psiphond_irregular_tunnel_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_irregular_tunnel_proto_rawDesc = "" +
 	"\n" +
-	"*ca.psiphon.psiphond/irregular_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xbb\n" +
+	"*ca.psiphon.psiphond/irregular_tunnel.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xff\n" +
 	"\n" +
 	"\x0fIrregularTunnel\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
@@ -189,9 +197,10 @@ const file_ca_psiphon_psiphond_irregular_tunnel_proto_rawDesc = "" +
 	"\x0eduplicate_seed\x18l \x01(\tH\tR\rduplicateSeed\x88\x01\x01\x123\n" +
 	"\x13duplicate_seed_type\x18m \x01(\tH\n" +
 	"R\x11duplicateSeedType\x88\x01\x01\x125\n" +
-	"\x14listener_port_number\x18n \x01(\rH\vR\x12listenerPortNumber\x88\x01\x01\x120\n" +
+	"\x14listener_port_number\x18n \x01(\x03H\vR\x12listenerPortNumber\x88\x01\x01\x120\n" +
 	"\x11listener_protocol\x18o \x01(\tH\fR\x10listenerProtocol\x88\x01\x01\x12&\n" +
-	"\ftunnel_error\x18p \x01(\tH\rR\vtunnelError\x88\x01\x01B\x0e\n" +
+	"\ftunnel_error\x18p \x01(\tH\rR\vtunnelError\x88\x01\x01\x12-\n" +
+	"\x10server_entry_tag\x18q \x01(\tH\x0eR\x0eserverEntryTag\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB%\n" +
 	"#_duplicate_authorization_client_asnB%\n" +
 	"#_duplicate_authorization_client_asoB&\n" +
@@ -205,7 +214,8 @@ const file_ca_psiphon_psiphond_irregular_tunnel_proto_rawDesc = "" +
 	"\x14_duplicate_seed_typeB\x17\n" +
 	"\x15_listener_port_numberB\x14\n" +
 	"\x12_listener_protocolB\x0f\n" +
-	"\r_tunnel_errorBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\r_tunnel_errorB\x13\n" +
+	"\x11_server_entry_tagBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_irregular_tunnel_proto_rawDescOnce sync.Once

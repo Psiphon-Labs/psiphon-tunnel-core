@@ -242,7 +242,7 @@ func importExchangePayload(config *Config, encodedPayload string) error {
 
 	// The following sequence of datastore calls -- StoreServerEntry,
 	// PromoteServerEntry, SetDialParameters -- is not an atomic transaction but
-	// the  datastore will end up in a consistent state in case of failure to
+	// the datastore will end up in a consistent state in case of failure to
 	// complete the sequence. The existing calls are reused to avoid redundant
 	// code.
 	//

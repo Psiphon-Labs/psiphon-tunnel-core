@@ -474,6 +474,9 @@ func downloadRemoteServerListFile(
 	// MakeDownloadHttpClient will select either a tunneled
 	// or untunneled configuration.
 
+	// TODO: remove TLS cache entries on failure? Wrap tlsCache with
+	// TLSClientSessionCacheWrapper and invoke RemoveCacheEntry.
+
 	payloadSecure := true
 	frontingUseDeviceBinder := true
 	httpClient, tunneled, getParams, err := MakeDownloadHTTPClient(

@@ -16,16 +16,14 @@ message BaseParams {
     optional string client_platform = 7;
     optional string client_region = 8;
     optional int64 client_version = 9;
-
     optional string device_location = 10; //device_location uses geohash encoding
     optional string device_region = 11;
-
     optional string session_id = 12;
     optional string sponsor_id = 13;
     optional string propagation_channel_id = 14;
-
     optional string applied_tactics_tag = 15;
     optional string egress_region = 16;
     optional google.protobuf.Timestamp last_connected = 17;
     repeated string authorized_access_types = 18;
+    optional string network_type = 19;
 }

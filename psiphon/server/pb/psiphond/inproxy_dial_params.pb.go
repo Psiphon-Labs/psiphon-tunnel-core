@@ -69,50 +69,49 @@ type InproxyDialParams struct {
 	InproxyProxyConnectingClients                    *int64                 `protobuf:"varint,44,opt,name=inproxy_proxy_connecting_clients,json=inproxyProxyConnectingClients,proto3,oneof" json:"inproxy_proxy_connecting_clients,omitempty"`
 	InproxyProxyDeviceLocation                       *string                `protobuf:"bytes,45,opt,name=inproxy_proxy_device_location,json=inproxyProxyDeviceLocation,proto3,oneof" json:"inproxy_proxy_device_location,omitempty"`
 	InproxyProxyDeviceRegion                         *string                `protobuf:"bytes,46,opt,name=inproxy_proxy_device_region,json=inproxyProxyDeviceRegion,proto3,oneof" json:"inproxy_proxy_device_region,omitempty"`
-	InproxyProxyFeatures                             *string                `protobuf:"bytes,47,opt,name=inproxy_proxy_features,json=inproxyProxyFeatures,proto3,oneof" json:"inproxy_proxy_features,omitempty"`
-	InproxyProxyFrontingProviderId                   *string                `protobuf:"bytes,48,opt,name=inproxy_proxy_fronting_provider_id,json=inproxyProxyFrontingProviderId,proto3,oneof" json:"inproxy_proxy_fronting_provider_id,omitempty"`
-	InproxyProxyId                                   *string                `protobuf:"bytes,49,opt,name=inproxy_proxy_id,json=inproxyProxyId,proto3,oneof" json:"inproxy_proxy_id,omitempty"`
-	InproxyProxyIsPriority                           *bool                  `protobuf:"varint,50,opt,name=inproxy_proxy_is_priority,json=inproxyProxyIsPriority,proto3,oneof" json:"inproxy_proxy_is_priority,omitempty"`
-	InproxyProxyIsp                                  *string                `protobuf:"bytes,51,opt,name=inproxy_proxy_isp,json=inproxyProxyIsp,proto3,oneof" json:"inproxy_proxy_isp,omitempty"`
-	InproxyProxyLimitDownstreamBytesPerSecond        *int64                 `protobuf:"varint,52,opt,name=inproxy_proxy_limit_downstream_bytes_per_second,json=inproxyProxyLimitDownstreamBytesPerSecond,proto3,oneof" json:"inproxy_proxy_limit_downstream_bytes_per_second,omitempty"`
-	InproxyProxyLimitUpstreamBytesPerSecond          *int64                 `protobuf:"varint,53,opt,name=inproxy_proxy_limit_upstream_bytes_per_second,json=inproxyProxyLimitUpstreamBytesPerSecond,proto3,oneof" json:"inproxy_proxy_limit_upstream_bytes_per_second,omitempty"`
-	InproxyProxyMaxClients                           *int64                 `protobuf:"varint,54,opt,name=inproxy_proxy_max_clients,json=inproxyProxyMaxClients,proto3,oneof" json:"inproxy_proxy_max_clients,omitempty"`
-	InproxyProxyNatType                              *string                `protobuf:"bytes,55,opt,name=inproxy_proxy_nat_type,json=inproxyProxyNatType,proto3,oneof" json:"inproxy_proxy_nat_type,omitempty"`
-	InproxyProxyNetworkType                          *string                `protobuf:"bytes,56,opt,name=inproxy_proxy_network_type,json=inproxyProxyNetworkType,proto3,oneof" json:"inproxy_proxy_network_type,omitempty"`
-	InproxyProxyPeakDownstreamBytesPerSecond         *int64                 `protobuf:"varint,57,opt,name=inproxy_proxy_peak_downstream_bytes_per_second,json=inproxyProxyPeakDownstreamBytesPerSecond,proto3,oneof" json:"inproxy_proxy_peak_downstream_bytes_per_second,omitempty"`
-	InproxyProxyPeakUpstreamBytesPerSecond           *int64                 `protobuf:"varint,58,opt,name=inproxy_proxy_peak_upstream_bytes_per_second,json=inproxyProxyPeakUpstreamBytesPerSecond,proto3,oneof" json:"inproxy_proxy_peak_upstream_bytes_per_second,omitempty"`
-	InproxyProxyPortMappingTypes                     []string               `protobuf:"bytes,59,rep,name=inproxy_proxy_port_mapping_types,json=inproxyProxyPortMappingTypes,proto3" json:"inproxy_proxy_port_mapping_types,omitempty"`
-	InproxyProxyPropagationChannelId                 *string                `protobuf:"bytes,60,opt,name=inproxy_proxy_propagation_channel_id,json=inproxyProxyPropagationChannelId,proto3,oneof" json:"inproxy_proxy_propagation_channel_id,omitempty"`
-	InproxyProxyProtocolVersion                      *int64                 `protobuf:"varint,61,opt,name=inproxy_proxy_protocol_version,json=inproxyProxyProtocolVersion,proto3,oneof" json:"inproxy_proxy_protocol_version,omitempty"`
-	InproxyProxyRegion                               *string                `protobuf:"bytes,62,opt,name=inproxy_proxy_region,json=inproxyProxyRegion,proto3,oneof" json:"inproxy_proxy_region,omitempty"`
-	InproxyProxySessionId                            *string                `protobuf:"bytes,63,opt,name=inproxy_proxy_session_id,json=inproxyProxySessionId,proto3,oneof" json:"inproxy_proxy_session_id,omitempty"`
-	InproxyProxySponsorId                            *string                `protobuf:"bytes,64,opt,name=inproxy_proxy_sponsor_id,json=inproxyProxySponsorId,proto3,oneof" json:"inproxy_proxy_sponsor_id,omitempty"`
-	InproxyProxyStoredTacticsTag                     *string                `protobuf:"bytes,65,opt,name=inproxy_proxy_stored_tactics_tag,json=inproxyProxyStoredTacticsTag,proto3,oneof" json:"inproxy_proxy_stored_tactics_tag,omitempty"`
-	InproxyProxyClientFeatures                       []string               `protobuf:"bytes,66,rep,name=inproxy_proxy_client_features,json=inproxyProxyClientFeatures,proto3" json:"inproxy_proxy_client_features,omitempty"`
-	InproxyWebrtcDecoyMessagesReceived               *int64                 `protobuf:"varint,67,opt,name=inproxy_webrtc_decoy_messages_received,json=inproxyWebrtcDecoyMessagesReceived,proto3,oneof" json:"inproxy_webrtc_decoy_messages_received,omitempty"`
-	InproxyWebrtcDecoyMessagesSent                   *int64                 `protobuf:"varint,68,opt,name=inproxy_webrtc_decoy_messages_sent,json=inproxyWebrtcDecoyMessagesSent,proto3,oneof" json:"inproxy_webrtc_decoy_messages_sent,omitempty"`
-	InproxyWebrtcDnsAttempt                          *int64                 `protobuf:"varint,69,opt,name=inproxy_webrtc_dns_attempt,json=inproxyWebrtcDnsAttempt,proto3,oneof" json:"inproxy_webrtc_dns_attempt,omitempty"`
-	InproxyWebrtcDnsPreferred                        *string                `protobuf:"bytes,70,opt,name=inproxy_webrtc_dns_preferred,json=inproxyWebrtcDnsPreferred,proto3,oneof" json:"inproxy_webrtc_dns_preferred,omitempty"`
-	InproxyWebrtcDnsPreresolved                      *string                `protobuf:"bytes,71,opt,name=inproxy_webrtc_dns_preresolved,json=inproxyWebrtcDnsPreresolved,proto3,oneof" json:"inproxy_webrtc_dns_preresolved,omitempty"`
-	InproxyWebrtcDnsQnameMismatches                  *int64                 `protobuf:"varint,72,opt,name=inproxy_webrtc_dns_qname_mismatches,json=inproxyWebrtcDnsQnameMismatches,proto3,oneof" json:"inproxy_webrtc_dns_qname_mismatches,omitempty"`
-	InproxyWebrtcDnsQnameMustMatch                   *bool                  `protobuf:"varint,73,opt,name=inproxy_webrtc_dns_qname_must_match,json=inproxyWebrtcDnsQnameMustMatch,proto3,oneof" json:"inproxy_webrtc_dns_qname_must_match,omitempty"`
-	InproxyWebrtcDnsQnameRandomCasing                *bool                  `protobuf:"varint,74,opt,name=inproxy_webrtc_dns_qname_random_casing,json=inproxyWebrtcDnsQnameRandomCasing,proto3,oneof" json:"inproxy_webrtc_dns_qname_random_casing,omitempty"`
-	InproxyWebrtcDnsTransform                        *string                `protobuf:"bytes,75,opt,name=inproxy_webrtc_dns_transform,json=inproxyWebrtcDnsTransform,proto3,oneof" json:"inproxy_webrtc_dns_transform,omitempty"`
-	InproxyWebrtcLocalIceCandidateIs_IPv6            *bool                  `protobuf:"varint,76,opt,name=inproxy_webrtc_local_ice_candidate_is_IPv6,json=inproxyWebrtcLocalIceCandidateIsIPv6,proto3,oneof" json:"inproxy_webrtc_local_ice_candidate_is_IPv6,omitempty"`
-	InproxyWebrtcLocalIceCandidateIsInitiator        *bool                  `protobuf:"varint,77,opt,name=inproxy_webrtc_local_ice_candidate_is_initiator,json=inproxyWebrtcLocalIceCandidateIsInitiator,proto3,oneof" json:"inproxy_webrtc_local_ice_candidate_is_initiator,omitempty"`
-	InproxyWebrtcLocalIceCandidatePort               *int64                 `protobuf:"varint,78,opt,name=inproxy_webrtc_local_ice_candidate_port,json=inproxyWebrtcLocalIceCandidatePort,proto3,oneof" json:"inproxy_webrtc_local_ice_candidate_port,omitempty"`
-	InproxyWebrtcLocalIceCandidateType               *string                `protobuf:"bytes,79,opt,name=inproxy_webrtc_local_ice_candidate_type,json=inproxyWebrtcLocalIceCandidateType,proto3,oneof" json:"inproxy_webrtc_local_ice_candidate_type,omitempty"`
-	InproxyWebrtcPaddedMessagesReceived              *int64                 `protobuf:"varint,80,opt,name=inproxy_webrtc_padded_messages_received,json=inproxyWebrtcPaddedMessagesReceived,proto3,oneof" json:"inproxy_webrtc_padded_messages_received,omitempty"`
-	InproxyWebrtcPaddedMessagesSent                  *int64                 `protobuf:"varint,81,opt,name=inproxy_webrtc_padded_messages_sent,json=inproxyWebrtcPaddedMessagesSent,proto3,oneof" json:"inproxy_webrtc_padded_messages_sent,omitempty"`
-	InproxyWebrtcRandomizeDtls                       *bool                  `protobuf:"varint,82,opt,name=inproxy_webrtc_randomize_dtls,json=inproxyWebrtcRandomizeDtls,proto3,oneof" json:"inproxy_webrtc_randomize_dtls,omitempty"`
-	InproxyWebrtcRemoteIceCandidateIs_IPv6           *bool                  `protobuf:"varint,83,opt,name=inproxy_webrtc_remote_ice_candidate_is_IPv6,json=inproxyWebrtcRemoteIceCandidateIsIPv6,proto3,oneof" json:"inproxy_webrtc_remote_ice_candidate_is_IPv6,omitempty"`
-	InproxyWebrtcRemoteIceCandidatePort              *int64                 `protobuf:"varint,84,opt,name=inproxy_webrtc_remote_ice_candidate_port,json=inproxyWebrtcRemoteIceCandidatePort,proto3,oneof" json:"inproxy_webrtc_remote_ice_candidate_port,omitempty"`
-	InproxyWebrtcRemoteIceCandidateType              *string                `protobuf:"bytes,85,opt,name=inproxy_webrtc_remote_ice_candidate_type,json=inproxyWebrtcRemoteIceCandidateType,proto3,oneof" json:"inproxy_webrtc_remote_ice_candidate_type,omitempty"`
-	InproxyWebrtcStunServer                          *string                `protobuf:"bytes,86,opt,name=inproxy_webrtc_stun_server,json=inproxyWebrtcStunServer,proto3,oneof" json:"inproxy_webrtc_stun_server,omitempty"`
-	InproxyWebrtcStunServer_RFC5780                  *string                `protobuf:"bytes,87,opt,name=inproxy_webrtc_stun_server_RFC5780,json=inproxyWebrtcStunServerRFC5780,proto3,oneof" json:"inproxy_webrtc_stun_server_RFC5780,omitempty"`
-	InproxyWebrtcStunServer_RFC5780ResolvedIpAddress *string                `protobuf:"bytes,88,opt,name=inproxy_webrtc_stun_server_RFC5780_resolved_ip_address,json=inproxyWebrtcStunServerRFC5780ResolvedIpAddress,proto3,oneof" json:"inproxy_webrtc_stun_server_RFC5780_resolved_ip_address,omitempty"`
-	InproxyWebrtcStunServerResolvedIpAddress         *string                `protobuf:"bytes,89,opt,name=inproxy_webrtc_stun_server_resolved_ip_address,json=inproxyWebrtcStunServerResolvedIpAddress,proto3,oneof" json:"inproxy_webrtc_stun_server_resolved_ip_address,omitempty"`
-	InproxyWebrtcUseMediaStreams                     *bool                  `protobuf:"varint,90,opt,name=inproxy_webrtc_use_media_streams,json=inproxyWebrtcUseMediaStreams,proto3,oneof" json:"inproxy_webrtc_use_media_streams,omitempty"`
+	InproxyProxyFrontingProviderId                   *string                `protobuf:"bytes,47,opt,name=inproxy_proxy_fronting_provider_id,json=inproxyProxyFrontingProviderId,proto3,oneof" json:"inproxy_proxy_fronting_provider_id,omitempty"`
+	InproxyProxyId                                   *string                `protobuf:"bytes,48,opt,name=inproxy_proxy_id,json=inproxyProxyId,proto3,oneof" json:"inproxy_proxy_id,omitempty"`
+	InproxyProxyIsPriority                           *bool                  `protobuf:"varint,49,opt,name=inproxy_proxy_is_priority,json=inproxyProxyIsPriority,proto3,oneof" json:"inproxy_proxy_is_priority,omitempty"`
+	InproxyProxyIsp                                  *string                `protobuf:"bytes,50,opt,name=inproxy_proxy_isp,json=inproxyProxyIsp,proto3,oneof" json:"inproxy_proxy_isp,omitempty"`
+	InproxyProxyLimitDownstreamBytesPerSecond        *int64                 `protobuf:"varint,51,opt,name=inproxy_proxy_limit_downstream_bytes_per_second,json=inproxyProxyLimitDownstreamBytesPerSecond,proto3,oneof" json:"inproxy_proxy_limit_downstream_bytes_per_second,omitempty"`
+	InproxyProxyLimitUpstreamBytesPerSecond          *int64                 `protobuf:"varint,52,opt,name=inproxy_proxy_limit_upstream_bytes_per_second,json=inproxyProxyLimitUpstreamBytesPerSecond,proto3,oneof" json:"inproxy_proxy_limit_upstream_bytes_per_second,omitempty"`
+	InproxyProxyMaxClients                           *int64                 `protobuf:"varint,53,opt,name=inproxy_proxy_max_clients,json=inproxyProxyMaxClients,proto3,oneof" json:"inproxy_proxy_max_clients,omitempty"`
+	InproxyProxyNatType                              *string                `protobuf:"bytes,54,opt,name=inproxy_proxy_nat_type,json=inproxyProxyNatType,proto3,oneof" json:"inproxy_proxy_nat_type,omitempty"`
+	InproxyProxyNetworkType                          *string                `protobuf:"bytes,55,opt,name=inproxy_proxy_network_type,json=inproxyProxyNetworkType,proto3,oneof" json:"inproxy_proxy_network_type,omitempty"`
+	InproxyProxyPeakDownstreamBytesPerSecond         *int64                 `protobuf:"varint,56,opt,name=inproxy_proxy_peak_downstream_bytes_per_second,json=inproxyProxyPeakDownstreamBytesPerSecond,proto3,oneof" json:"inproxy_proxy_peak_downstream_bytes_per_second,omitempty"`
+	InproxyProxyPeakUpstreamBytesPerSecond           *int64                 `protobuf:"varint,57,opt,name=inproxy_proxy_peak_upstream_bytes_per_second,json=inproxyProxyPeakUpstreamBytesPerSecond,proto3,oneof" json:"inproxy_proxy_peak_upstream_bytes_per_second,omitempty"`
+	InproxyProxyPortMappingTypes                     []string               `protobuf:"bytes,58,rep,name=inproxy_proxy_port_mapping_types,json=inproxyProxyPortMappingTypes,proto3" json:"inproxy_proxy_port_mapping_types,omitempty"`
+	InproxyProxyPropagationChannelId                 *string                `protobuf:"bytes,59,opt,name=inproxy_proxy_propagation_channel_id,json=inproxyProxyPropagationChannelId,proto3,oneof" json:"inproxy_proxy_propagation_channel_id,omitempty"`
+	InproxyProxyProtocolVersion                      *int64                 `protobuf:"varint,60,opt,name=inproxy_proxy_protocol_version,json=inproxyProxyProtocolVersion,proto3,oneof" json:"inproxy_proxy_protocol_version,omitempty"`
+	InproxyProxyRegion                               *string                `protobuf:"bytes,61,opt,name=inproxy_proxy_region,json=inproxyProxyRegion,proto3,oneof" json:"inproxy_proxy_region,omitempty"`
+	InproxyProxySessionId                            *string                `protobuf:"bytes,62,opt,name=inproxy_proxy_session_id,json=inproxyProxySessionId,proto3,oneof" json:"inproxy_proxy_session_id,omitempty"`
+	InproxyProxySponsorId                            *string                `protobuf:"bytes,63,opt,name=inproxy_proxy_sponsor_id,json=inproxyProxySponsorId,proto3,oneof" json:"inproxy_proxy_sponsor_id,omitempty"`
+	InproxyProxyStoredTacticsTag                     *string                `protobuf:"bytes,64,opt,name=inproxy_proxy_stored_tactics_tag,json=inproxyProxyStoredTacticsTag,proto3,oneof" json:"inproxy_proxy_stored_tactics_tag,omitempty"`
+	InproxyProxyClientFeatures                       []string               `protobuf:"bytes,65,rep,name=inproxy_proxy_client_features,json=inproxyProxyClientFeatures,proto3" json:"inproxy_proxy_client_features,omitempty"`
+	InproxyWebrtcDecoyMessagesReceived               *int64                 `protobuf:"varint,66,opt,name=inproxy_webrtc_decoy_messages_received,json=inproxyWebrtcDecoyMessagesReceived,proto3,oneof" json:"inproxy_webrtc_decoy_messages_received,omitempty"`
+	InproxyWebrtcDecoyMessagesSent                   *int64                 `protobuf:"varint,67,opt,name=inproxy_webrtc_decoy_messages_sent,json=inproxyWebrtcDecoyMessagesSent,proto3,oneof" json:"inproxy_webrtc_decoy_messages_sent,omitempty"`
+	InproxyWebrtcDnsAttempt                          *int64                 `protobuf:"varint,68,opt,name=inproxy_webrtc_dns_attempt,json=inproxyWebrtcDnsAttempt,proto3,oneof" json:"inproxy_webrtc_dns_attempt,omitempty"`
+	InproxyWebrtcDnsPreferred                        *string                `protobuf:"bytes,69,opt,name=inproxy_webrtc_dns_preferred,json=inproxyWebrtcDnsPreferred,proto3,oneof" json:"inproxy_webrtc_dns_preferred,omitempty"`
+	InproxyWebrtcDnsPreresolved                      *string                `protobuf:"bytes,70,opt,name=inproxy_webrtc_dns_preresolved,json=inproxyWebrtcDnsPreresolved,proto3,oneof" json:"inproxy_webrtc_dns_preresolved,omitempty"`
+	InproxyWebrtcDnsQnameMismatches                  *int64                 `protobuf:"varint,71,opt,name=inproxy_webrtc_dns_qname_mismatches,json=inproxyWebrtcDnsQnameMismatches,proto3,oneof" json:"inproxy_webrtc_dns_qname_mismatches,omitempty"`
+	InproxyWebrtcDnsQnameMustMatch                   *bool                  `protobuf:"varint,72,opt,name=inproxy_webrtc_dns_qname_must_match,json=inproxyWebrtcDnsQnameMustMatch,proto3,oneof" json:"inproxy_webrtc_dns_qname_must_match,omitempty"`
+	InproxyWebrtcDnsQnameRandomCasing                *bool                  `protobuf:"varint,73,opt,name=inproxy_webrtc_dns_qname_random_casing,json=inproxyWebrtcDnsQnameRandomCasing,proto3,oneof" json:"inproxy_webrtc_dns_qname_random_casing,omitempty"`
+	InproxyWebrtcDnsTransform                        *string                `protobuf:"bytes,74,opt,name=inproxy_webrtc_dns_transform,json=inproxyWebrtcDnsTransform,proto3,oneof" json:"inproxy_webrtc_dns_transform,omitempty"`
+	InproxyWebrtcLocalIceCandidateIs_IPv6            *bool                  `protobuf:"varint,75,opt,name=inproxy_webrtc_local_ice_candidate_is_IPv6,json=inproxyWebrtcLocalIceCandidateIsIPv6,proto3,oneof" json:"inproxy_webrtc_local_ice_candidate_is_IPv6,omitempty"`
+	InproxyWebrtcLocalIceCandidateIsInitiator        *bool                  `protobuf:"varint,76,opt,name=inproxy_webrtc_local_ice_candidate_is_initiator,json=inproxyWebrtcLocalIceCandidateIsInitiator,proto3,oneof" json:"inproxy_webrtc_local_ice_candidate_is_initiator,omitempty"`
+	InproxyWebrtcLocalIceCandidatePort               *int64                 `protobuf:"varint,77,opt,name=inproxy_webrtc_local_ice_candidate_port,json=inproxyWebrtcLocalIceCandidatePort,proto3,oneof" json:"inproxy_webrtc_local_ice_candidate_port,omitempty"`
+	InproxyWebrtcLocalIceCandidateType               *string                `protobuf:"bytes,78,opt,name=inproxy_webrtc_local_ice_candidate_type,json=inproxyWebrtcLocalIceCandidateType,proto3,oneof" json:"inproxy_webrtc_local_ice_candidate_type,omitempty"`
+	InproxyWebrtcPaddedMessagesReceived              *int64                 `protobuf:"varint,79,opt,name=inproxy_webrtc_padded_messages_received,json=inproxyWebrtcPaddedMessagesReceived,proto3,oneof" json:"inproxy_webrtc_padded_messages_received,omitempty"`
+	InproxyWebrtcPaddedMessagesSent                  *int64                 `protobuf:"varint,80,opt,name=inproxy_webrtc_padded_messages_sent,json=inproxyWebrtcPaddedMessagesSent,proto3,oneof" json:"inproxy_webrtc_padded_messages_sent,omitempty"`
+	InproxyWebrtcRandomizeDtls                       *bool                  `protobuf:"varint,81,opt,name=inproxy_webrtc_randomize_dtls,json=inproxyWebrtcRandomizeDtls,proto3,oneof" json:"inproxy_webrtc_randomize_dtls,omitempty"`
+	InproxyWebrtcRemoteIceCandidateIs_IPv6           *bool                  `protobuf:"varint,82,opt,name=inproxy_webrtc_remote_ice_candidate_is_IPv6,json=inproxyWebrtcRemoteIceCandidateIsIPv6,proto3,oneof" json:"inproxy_webrtc_remote_ice_candidate_is_IPv6,omitempty"`
+	InproxyWebrtcRemoteIceCandidatePort              *int64                 `protobuf:"varint,83,opt,name=inproxy_webrtc_remote_ice_candidate_port,json=inproxyWebrtcRemoteIceCandidatePort,proto3,oneof" json:"inproxy_webrtc_remote_ice_candidate_port,omitempty"`
+	InproxyWebrtcRemoteIceCandidateType              *string                `protobuf:"bytes,84,opt,name=inproxy_webrtc_remote_ice_candidate_type,json=inproxyWebrtcRemoteIceCandidateType,proto3,oneof" json:"inproxy_webrtc_remote_ice_candidate_type,omitempty"`
+	InproxyWebrtcStunServer                          *string                `protobuf:"bytes,85,opt,name=inproxy_webrtc_stun_server,json=inproxyWebrtcStunServer,proto3,oneof" json:"inproxy_webrtc_stun_server,omitempty"`
+	InproxyWebrtcStunServer_RFC5780                  *string                `protobuf:"bytes,86,opt,name=inproxy_webrtc_stun_server_RFC5780,json=inproxyWebrtcStunServerRFC5780,proto3,oneof" json:"inproxy_webrtc_stun_server_RFC5780,omitempty"`
+	InproxyWebrtcStunServer_RFC5780ResolvedIpAddress *string                `protobuf:"bytes,87,opt,name=inproxy_webrtc_stun_server_RFC5780_resolved_ip_address,json=inproxyWebrtcStunServerRFC5780ResolvedIpAddress,proto3,oneof" json:"inproxy_webrtc_stun_server_RFC5780_resolved_ip_address,omitempty"`
+	InproxyWebrtcStunServerResolvedIpAddress         *string                `protobuf:"bytes,88,opt,name=inproxy_webrtc_stun_server_resolved_ip_address,json=inproxyWebrtcStunServerResolvedIpAddress,proto3,oneof" json:"inproxy_webrtc_stun_server_resolved_ip_address,omitempty"`
+	InproxyWebrtcUseMediaStreams                     *bool                  `protobuf:"varint,89,opt,name=inproxy_webrtc_use_media_streams,json=inproxyWebrtcUseMediaStreams,proto3,oneof" json:"inproxy_webrtc_use_media_streams,omitempty"`
 	unknownFields                                    protoimpl.UnknownFields
 	sizeCache                                        protoimpl.SizeCache
 }
@@ -469,13 +468,6 @@ func (x *InproxyDialParams) GetInproxyProxyDeviceRegion() string {
 	return ""
 }
 
-func (x *InproxyDialParams) GetInproxyProxyFeatures() string {
-	if x != nil && x.InproxyProxyFeatures != nil {
-		return *x.InproxyProxyFeatures
-	}
-	return ""
-}
-
 func (x *InproxyDialParams) GetInproxyProxyFrontingProviderId() string {
 	if x != nil && x.InproxyProxyFrontingProviderId != nil {
 		return *x.InproxyProxyFrontingProviderId
@@ -781,7 +773,7 @@ var File_ca_psiphon_psiphond_inproxy_dial_params_proto protoreflect.FileDescript
 
 const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"-ca.psiphon.psiphond/inproxy_dial_params.proto\x12\x13ca.psiphon.psiphond\"\xc7N\n" +
+	"-ca.psiphon.psiphond/inproxy_dial_params.proto\x12\x13ca.psiphon.psiphond\"\xf1M\n" +
 	"\x11InproxyDialParams\x12>\n" +
 	"\x19inproxy_broker_client_bpf\x18\x01 \x01(\tH\x00R\x16inproxyBrokerClientBpf\x88\x01\x01\x12B\n" +
 	"\x1binproxy_broker_dial_address\x18\x02 \x01(\tH\x01R\x18inproxyBrokerDialAddress\x88\x01\x01\x12@\n" +
@@ -830,51 +822,50 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\x1finproxy_proxy_connected_clients\x18+ \x01(\x03H)R\x1cinproxyProxyConnectedClients\x88\x01\x01\x12L\n" +
 	" inproxy_proxy_connecting_clients\x18, \x01(\x03H*R\x1dinproxyProxyConnectingClients\x88\x01\x01\x12F\n" +
 	"\x1dinproxy_proxy_device_location\x18- \x01(\tH+R\x1ainproxyProxyDeviceLocation\x88\x01\x01\x12B\n" +
-	"\x1binproxy_proxy_device_region\x18. \x01(\tH,R\x18inproxyProxyDeviceRegion\x88\x01\x01\x129\n" +
-	"\x16inproxy_proxy_features\x18/ \x01(\tH-R\x14inproxyProxyFeatures\x88\x01\x01\x12O\n" +
-	"\"inproxy_proxy_fronting_provider_id\x180 \x01(\tH.R\x1einproxyProxyFrontingProviderId\x88\x01\x01\x12-\n" +
-	"\x10inproxy_proxy_id\x181 \x01(\tH/R\x0einproxyProxyId\x88\x01\x01\x12>\n" +
-	"\x19inproxy_proxy_is_priority\x182 \x01(\bH0R\x16inproxyProxyIsPriority\x88\x01\x01\x12/\n" +
-	"\x11inproxy_proxy_isp\x183 \x01(\tH1R\x0finproxyProxyIsp\x88\x01\x01\x12g\n" +
-	"/inproxy_proxy_limit_downstream_bytes_per_second\x184 \x01(\x03H2R)inproxyProxyLimitDownstreamBytesPerSecond\x88\x01\x01\x12c\n" +
-	"-inproxy_proxy_limit_upstream_bytes_per_second\x185 \x01(\x03H3R'inproxyProxyLimitUpstreamBytesPerSecond\x88\x01\x01\x12>\n" +
-	"\x19inproxy_proxy_max_clients\x186 \x01(\x03H4R\x16inproxyProxyMaxClients\x88\x01\x01\x128\n" +
-	"\x16inproxy_proxy_nat_type\x187 \x01(\tH5R\x13inproxyProxyNatType\x88\x01\x01\x12@\n" +
-	"\x1ainproxy_proxy_network_type\x188 \x01(\tH6R\x17inproxyProxyNetworkType\x88\x01\x01\x12e\n" +
-	".inproxy_proxy_peak_downstream_bytes_per_second\x189 \x01(\x03H7R(inproxyProxyPeakDownstreamBytesPerSecond\x88\x01\x01\x12a\n" +
-	",inproxy_proxy_peak_upstream_bytes_per_second\x18: \x01(\x03H8R&inproxyProxyPeakUpstreamBytesPerSecond\x88\x01\x01\x12F\n" +
-	" inproxy_proxy_port_mapping_types\x18; \x03(\tR\x1cinproxyProxyPortMappingTypes\x12S\n" +
-	"$inproxy_proxy_propagation_channel_id\x18< \x01(\tH9R inproxyProxyPropagationChannelId\x88\x01\x01\x12H\n" +
-	"\x1einproxy_proxy_protocol_version\x18= \x01(\x03H:R\x1binproxyProxyProtocolVersion\x88\x01\x01\x125\n" +
-	"\x14inproxy_proxy_region\x18> \x01(\tH;R\x12inproxyProxyRegion\x88\x01\x01\x12<\n" +
-	"\x18inproxy_proxy_session_id\x18? \x01(\tH<R\x15inproxyProxySessionId\x88\x01\x01\x12<\n" +
-	"\x18inproxy_proxy_sponsor_id\x18@ \x01(\tH=R\x15inproxyProxySponsorId\x88\x01\x01\x12K\n" +
-	" inproxy_proxy_stored_tactics_tag\x18A \x01(\tH>R\x1cinproxyProxyStoredTacticsTag\x88\x01\x01\x12A\n" +
-	"\x1dinproxy_proxy_client_features\x18B \x03(\tR\x1ainproxyProxyClientFeatures\x12W\n" +
-	"&inproxy_webrtc_decoy_messages_received\x18C \x01(\x03H?R\"inproxyWebrtcDecoyMessagesReceived\x88\x01\x01\x12O\n" +
-	"\"inproxy_webrtc_decoy_messages_sent\x18D \x01(\x03H@R\x1einproxyWebrtcDecoyMessagesSent\x88\x01\x01\x12@\n" +
-	"\x1ainproxy_webrtc_dns_attempt\x18E \x01(\x03HAR\x17inproxyWebrtcDnsAttempt\x88\x01\x01\x12D\n" +
-	"\x1cinproxy_webrtc_dns_preferred\x18F \x01(\tHBR\x19inproxyWebrtcDnsPreferred\x88\x01\x01\x12H\n" +
-	"\x1einproxy_webrtc_dns_preresolved\x18G \x01(\tHCR\x1binproxyWebrtcDnsPreresolved\x88\x01\x01\x12Q\n" +
-	"#inproxy_webrtc_dns_qname_mismatches\x18H \x01(\x03HDR\x1finproxyWebrtcDnsQnameMismatches\x88\x01\x01\x12P\n" +
-	"#inproxy_webrtc_dns_qname_must_match\x18I \x01(\bHER\x1einproxyWebrtcDnsQnameMustMatch\x88\x01\x01\x12V\n" +
-	"&inproxy_webrtc_dns_qname_random_casing\x18J \x01(\bHFR!inproxyWebrtcDnsQnameRandomCasing\x88\x01\x01\x12D\n" +
-	"\x1cinproxy_webrtc_dns_transform\x18K \x01(\tHGR\x19inproxyWebrtcDnsTransform\x88\x01\x01\x12]\n" +
-	"*inproxy_webrtc_local_ice_candidate_is_IPv6\x18L \x01(\bHHR$inproxyWebrtcLocalIceCandidateIsIPv6\x88\x01\x01\x12g\n" +
-	"/inproxy_webrtc_local_ice_candidate_is_initiator\x18M \x01(\bHIR)inproxyWebrtcLocalIceCandidateIsInitiator\x88\x01\x01\x12X\n" +
-	"'inproxy_webrtc_local_ice_candidate_port\x18N \x01(\x03HJR\"inproxyWebrtcLocalIceCandidatePort\x88\x01\x01\x12X\n" +
-	"'inproxy_webrtc_local_ice_candidate_type\x18O \x01(\tHKR\"inproxyWebrtcLocalIceCandidateType\x88\x01\x01\x12Y\n" +
-	"'inproxy_webrtc_padded_messages_received\x18P \x01(\x03HLR#inproxyWebrtcPaddedMessagesReceived\x88\x01\x01\x12Q\n" +
-	"#inproxy_webrtc_padded_messages_sent\x18Q \x01(\x03HMR\x1finproxyWebrtcPaddedMessagesSent\x88\x01\x01\x12F\n" +
-	"\x1dinproxy_webrtc_randomize_dtls\x18R \x01(\bHNR\x1ainproxyWebrtcRandomizeDtls\x88\x01\x01\x12_\n" +
-	"+inproxy_webrtc_remote_ice_candidate_is_IPv6\x18S \x01(\bHOR%inproxyWebrtcRemoteIceCandidateIsIPv6\x88\x01\x01\x12Z\n" +
-	"(inproxy_webrtc_remote_ice_candidate_port\x18T \x01(\x03HPR#inproxyWebrtcRemoteIceCandidatePort\x88\x01\x01\x12Z\n" +
-	"(inproxy_webrtc_remote_ice_candidate_type\x18U \x01(\tHQR#inproxyWebrtcRemoteIceCandidateType\x88\x01\x01\x12@\n" +
-	"\x1ainproxy_webrtc_stun_server\x18V \x01(\tHRR\x17inproxyWebrtcStunServer\x88\x01\x01\x12O\n" +
-	"\"inproxy_webrtc_stun_server_RFC5780\x18W \x01(\tHSR\x1einproxyWebrtcStunServerRFC5780\x88\x01\x01\x12t\n" +
-	"6inproxy_webrtc_stun_server_RFC5780_resolved_ip_address\x18X \x01(\tHTR/inproxyWebrtcStunServerRFC5780ResolvedIpAddress\x88\x01\x01\x12e\n" +
-	".inproxy_webrtc_stun_server_resolved_ip_address\x18Y \x01(\tHUR(inproxyWebrtcStunServerResolvedIpAddress\x88\x01\x01\x12K\n" +
-	" inproxy_webrtc_use_media_streams\x18Z \x01(\bHVR\x1cinproxyWebrtcUseMediaStreams\x88\x01\x01B\x1c\n" +
+	"\x1binproxy_proxy_device_region\x18. \x01(\tH,R\x18inproxyProxyDeviceRegion\x88\x01\x01\x12O\n" +
+	"\"inproxy_proxy_fronting_provider_id\x18/ \x01(\tH-R\x1einproxyProxyFrontingProviderId\x88\x01\x01\x12-\n" +
+	"\x10inproxy_proxy_id\x180 \x01(\tH.R\x0einproxyProxyId\x88\x01\x01\x12>\n" +
+	"\x19inproxy_proxy_is_priority\x181 \x01(\bH/R\x16inproxyProxyIsPriority\x88\x01\x01\x12/\n" +
+	"\x11inproxy_proxy_isp\x182 \x01(\tH0R\x0finproxyProxyIsp\x88\x01\x01\x12g\n" +
+	"/inproxy_proxy_limit_downstream_bytes_per_second\x183 \x01(\x03H1R)inproxyProxyLimitDownstreamBytesPerSecond\x88\x01\x01\x12c\n" +
+	"-inproxy_proxy_limit_upstream_bytes_per_second\x184 \x01(\x03H2R'inproxyProxyLimitUpstreamBytesPerSecond\x88\x01\x01\x12>\n" +
+	"\x19inproxy_proxy_max_clients\x185 \x01(\x03H3R\x16inproxyProxyMaxClients\x88\x01\x01\x128\n" +
+	"\x16inproxy_proxy_nat_type\x186 \x01(\tH4R\x13inproxyProxyNatType\x88\x01\x01\x12@\n" +
+	"\x1ainproxy_proxy_network_type\x187 \x01(\tH5R\x17inproxyProxyNetworkType\x88\x01\x01\x12e\n" +
+	".inproxy_proxy_peak_downstream_bytes_per_second\x188 \x01(\x03H6R(inproxyProxyPeakDownstreamBytesPerSecond\x88\x01\x01\x12a\n" +
+	",inproxy_proxy_peak_upstream_bytes_per_second\x189 \x01(\x03H7R&inproxyProxyPeakUpstreamBytesPerSecond\x88\x01\x01\x12F\n" +
+	" inproxy_proxy_port_mapping_types\x18: \x03(\tR\x1cinproxyProxyPortMappingTypes\x12S\n" +
+	"$inproxy_proxy_propagation_channel_id\x18; \x01(\tH8R inproxyProxyPropagationChannelId\x88\x01\x01\x12H\n" +
+	"\x1einproxy_proxy_protocol_version\x18< \x01(\x03H9R\x1binproxyProxyProtocolVersion\x88\x01\x01\x125\n" +
+	"\x14inproxy_proxy_region\x18= \x01(\tH:R\x12inproxyProxyRegion\x88\x01\x01\x12<\n" +
+	"\x18inproxy_proxy_session_id\x18> \x01(\tH;R\x15inproxyProxySessionId\x88\x01\x01\x12<\n" +
+	"\x18inproxy_proxy_sponsor_id\x18? \x01(\tH<R\x15inproxyProxySponsorId\x88\x01\x01\x12K\n" +
+	" inproxy_proxy_stored_tactics_tag\x18@ \x01(\tH=R\x1cinproxyProxyStoredTacticsTag\x88\x01\x01\x12A\n" +
+	"\x1dinproxy_proxy_client_features\x18A \x03(\tR\x1ainproxyProxyClientFeatures\x12W\n" +
+	"&inproxy_webrtc_decoy_messages_received\x18B \x01(\x03H>R\"inproxyWebrtcDecoyMessagesReceived\x88\x01\x01\x12O\n" +
+	"\"inproxy_webrtc_decoy_messages_sent\x18C \x01(\x03H?R\x1einproxyWebrtcDecoyMessagesSent\x88\x01\x01\x12@\n" +
+	"\x1ainproxy_webrtc_dns_attempt\x18D \x01(\x03H@R\x17inproxyWebrtcDnsAttempt\x88\x01\x01\x12D\n" +
+	"\x1cinproxy_webrtc_dns_preferred\x18E \x01(\tHAR\x19inproxyWebrtcDnsPreferred\x88\x01\x01\x12H\n" +
+	"\x1einproxy_webrtc_dns_preresolved\x18F \x01(\tHBR\x1binproxyWebrtcDnsPreresolved\x88\x01\x01\x12Q\n" +
+	"#inproxy_webrtc_dns_qname_mismatches\x18G \x01(\x03HCR\x1finproxyWebrtcDnsQnameMismatches\x88\x01\x01\x12P\n" +
+	"#inproxy_webrtc_dns_qname_must_match\x18H \x01(\bHDR\x1einproxyWebrtcDnsQnameMustMatch\x88\x01\x01\x12V\n" +
+	"&inproxy_webrtc_dns_qname_random_casing\x18I \x01(\bHER!inproxyWebrtcDnsQnameRandomCasing\x88\x01\x01\x12D\n" +
+	"\x1cinproxy_webrtc_dns_transform\x18J \x01(\tHFR\x19inproxyWebrtcDnsTransform\x88\x01\x01\x12]\n" +
+	"*inproxy_webrtc_local_ice_candidate_is_IPv6\x18K \x01(\bHGR$inproxyWebrtcLocalIceCandidateIsIPv6\x88\x01\x01\x12g\n" +
+	"/inproxy_webrtc_local_ice_candidate_is_initiator\x18L \x01(\bHHR)inproxyWebrtcLocalIceCandidateIsInitiator\x88\x01\x01\x12X\n" +
+	"'inproxy_webrtc_local_ice_candidate_port\x18M \x01(\x03HIR\"inproxyWebrtcLocalIceCandidatePort\x88\x01\x01\x12X\n" +
+	"'inproxy_webrtc_local_ice_candidate_type\x18N \x01(\tHJR\"inproxyWebrtcLocalIceCandidateType\x88\x01\x01\x12Y\n" +
+	"'inproxy_webrtc_padded_messages_received\x18O \x01(\x03HKR#inproxyWebrtcPaddedMessagesReceived\x88\x01\x01\x12Q\n" +
+	"#inproxy_webrtc_padded_messages_sent\x18P \x01(\x03HLR\x1finproxyWebrtcPaddedMessagesSent\x88\x01\x01\x12F\n" +
+	"\x1dinproxy_webrtc_randomize_dtls\x18Q \x01(\bHMR\x1ainproxyWebrtcRandomizeDtls\x88\x01\x01\x12_\n" +
+	"+inproxy_webrtc_remote_ice_candidate_is_IPv6\x18R \x01(\bHNR%inproxyWebrtcRemoteIceCandidateIsIPv6\x88\x01\x01\x12Z\n" +
+	"(inproxy_webrtc_remote_ice_candidate_port\x18S \x01(\x03HOR#inproxyWebrtcRemoteIceCandidatePort\x88\x01\x01\x12Z\n" +
+	"(inproxy_webrtc_remote_ice_candidate_type\x18T \x01(\tHPR#inproxyWebrtcRemoteIceCandidateType\x88\x01\x01\x12@\n" +
+	"\x1ainproxy_webrtc_stun_server\x18U \x01(\tHQR\x17inproxyWebrtcStunServer\x88\x01\x01\x12O\n" +
+	"\"inproxy_webrtc_stun_server_RFC5780\x18V \x01(\tHRR\x1einproxyWebrtcStunServerRFC5780\x88\x01\x01\x12t\n" +
+	"6inproxy_webrtc_stun_server_RFC5780_resolved_ip_address\x18W \x01(\tHSR/inproxyWebrtcStunServerRFC5780ResolvedIpAddress\x88\x01\x01\x12e\n" +
+	".inproxy_webrtc_stun_server_resolved_ip_address\x18X \x01(\tHTR(inproxyWebrtcStunServerResolvedIpAddress\x88\x01\x01\x12K\n" +
+	" inproxy_webrtc_use_media_streams\x18Y \x01(\bHUR\x1cinproxyWebrtcUseMediaStreams\x88\x01\x01B\x1c\n" +
 	"\x1a_inproxy_broker_client_bpfB\x1e\n" +
 	"\x1c_inproxy_broker_dial_addressB\x1d\n" +
 	"\x1b_inproxy_broker_dns_attemptB\x1f\n" +
@@ -919,8 +910,7 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	" _inproxy_proxy_connected_clientsB#\n" +
 	"!_inproxy_proxy_connecting_clientsB \n" +
 	"\x1e_inproxy_proxy_device_locationB\x1e\n" +
-	"\x1c_inproxy_proxy_device_regionB\x19\n" +
-	"\x17_inproxy_proxy_featuresB%\n" +
+	"\x1c_inproxy_proxy_device_regionB%\n" +
 	"#_inproxy_proxy_fronting_provider_idB\x13\n" +
 	"\x11_inproxy_proxy_idB\x1c\n" +
 	"\x1a_inproxy_proxy_is_priorityB\x14\n" +

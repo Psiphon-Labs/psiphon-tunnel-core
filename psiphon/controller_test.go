@@ -433,6 +433,7 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	modifyConfig["DataRootDirectory"] = testDataDirName
 
 	if runConfig.protocol != "" {
+		modifyConfig["DisableTactics"] = true
 		modifyConfig["LimitTunnelProtocols"] = protocol.TunnelProtocols{runConfig.protocol}
 	}
 
@@ -479,6 +480,9 @@ func controllerRun(t *testing.T, runConfig *controllerRunConfig) {
 	}
 
 	modifyConfig["LimitQUICVersions"] = runConfig.quicVersions
+
+	// TODO: vary this option
+	modifyConfig["CompressTactics"] = false
 
 	configJSON, _ = json.Marshal(modifyConfig)
 

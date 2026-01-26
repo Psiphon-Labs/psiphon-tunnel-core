@@ -24,7 +24,7 @@ github.com/Jigsaw-Code/outline-ss-server/service/metrics
 # github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e
 ## explicit
 github.com/Psiphon-Inc/rotate-safe-writer
-# github.com/Psiphon-Inc/uds-ipc v0.0.0-20251007150957-166e89b034be
+# github.com/Psiphon-Inc/uds-ipc v1.0.1
 ## explicit; go 1.24.0
 github.com/Psiphon-Inc/uds-ipc
 # github.com/Psiphon-Labs/bolt v0.0.0-20200624191537-23cedaef7ad7
@@ -83,6 +83,9 @@ github.com/andybalholm/brotli/matchfinder
 # github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
 ## explicit
 github.com/armon/go-proxyproto
+# github.com/axiomhq/hyperloglog v0.2.6
+## explicit; go 1.23
+github.com/axiomhq/hyperloglog
 # github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 ## explicit
 github.com/bifurcation/mint
@@ -148,6 +151,9 @@ github.com/dgraph-io/badger/y
 # github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da
 ## explicit
 github.com/dgryski/go-farm
+# github.com/dgryski/go-metro v0.0.0-20250106013310-edb8663e5e33
+## explicit
+github.com/dgryski/go-metro
 # github.com/elazarl/goproxy v0.0.0-20200809112317-0581fc3aee2d
 ## explicit
 github.com/elazarl/goproxy
@@ -227,6 +233,9 @@ github.com/josharian/native
 ## explicit; go 1.18
 github.com/jsimonetti/rtnetlink
 github.com/jsimonetti/rtnetlink/internal/unix
+# github.com/kamstrup/intmap v0.5.2
+## explicit; go 1.23
+github.com/kamstrup/intmap
 # github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 ## explicit
 github.com/kardianos/osext

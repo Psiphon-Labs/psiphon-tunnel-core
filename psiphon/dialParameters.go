@@ -68,94 +68,99 @@ type DialParameters struct {
 	ServerEntry             *protocol.ServerEntry `json:"-"`
 	NetworkID               string                `json:"-"`
 	IsReplay                bool                  `json:"-"`
+	ReplayIgnoredChange     bool                  `json:"-"`
 	CandidateNumber         int                   `json:"-"`
 	EstablishedTunnelsCount int                   `json:"-"`
 
-	IsExchanged bool
+	ServerEntryIterationUniqueCandidateEstimate   int `json:"-"`
+	ServerEntryIterationMovedToFrontCount         int `json:"-"`
+	ServerEntryIterationFirstFrontedMeekCandidate int `json:"-"`
 
-	LastUsedTimestamp       time.Time
-	LastUsedConfigStateHash []byte
-	LastUsedServerEntryHash []byte
+	IsExchanged bool `json:",omitempty"`
 
-	NetworkLatencyMultiplier float64
+	LastUsedTimestamp       time.Time `json:",omitempty"`
+	LastUsedConfigStateHash []byte    `json:",omitempty"`
+	LastUsedServerEntryHash []byte    `json:",omitempty"`
 
-	TunnelProtocol string
+	NetworkLatencyMultiplier float64 `json:",omitempty"`
 
-	DirectDialAddress              string
-	DialPortNumber                 string
+	TunnelProtocol string `json:",omitempty"`
+
+	DirectDialAddress              string   `json:",omitempty"`
+	DialPortNumber                 string   `json:",omitempty"`
 	UpstreamProxyType              string   `json:"-"`
 	UpstreamProxyCustomHeaderNames []string `json:"-"`
 
-	BPFProgramName         string
-	BPFProgramInstructions []bpf.RawInstruction
+	BPFProgramName         string               `json:",omitempty"`
+	BPFProgramInstructions []bpf.RawInstruction `json:",omitempty"`
 
-	SelectedSSHClientVersion bool
-	SSHClientVersion         string
-	SSHKEXSeed               *prng.Seed
+	SelectedSSHClientVersion bool       `json:",omitempty"`
+	SSHClientVersion         string     `json:",omitempty"`
+	SSHKEXSeed               *prng.Seed `json:",omitempty"`
 
-	ObfuscatorPaddingSeed                   *prng.Seed
-	OSSHObfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
+	ObfuscatorPaddingSeed                   *prng.Seed                                      `json:",omitempty"`
+	OSSHObfuscatorSeedTransformerParameters *transforms.ObfuscatorSeedTransformerParameters `json:",omitempty"`
 
-	OSSHPrefixSpec        *obfuscator.OSSHPrefixSpec
-	OSSHPrefixSplitConfig *obfuscator.OSSHPrefixSplitConfig
+	OSSHPrefixSpec        *obfuscator.OSSHPrefixSpec        `json:",omitempty"`
+	OSSHPrefixSplitConfig *obfuscator.OSSHPrefixSplitConfig `json:",omitempty"`
 
-	ShadowsocksPrefixSpec *ShadowsocksPrefixSpec
+	ShadowsocksPrefixSpec *ShadowsocksPrefixSpec `json:",omitempty"`
 
-	FragmentorSeed *prng.Seed
+	FragmentorSeed *prng.Seed `json:",omitempty"`
 
-	FrontingProviderID string
+	FrontingProviderID string `json:",omitempty"`
 
-	MeekFrontingDialAddress   string
-	MeekFrontingHost          string
-	MeekDialAddress           string
-	MeekTransformedHostName   bool
-	MeekSNIServerName         string
-	MeekVerifyServerName      string
-	MeekVerifyPins            []string
-	MeekHostHeader            string
-	MeekObfuscatorPaddingSeed *prng.Seed
+	MeekFrontingDialAddress   string       `json:",omitempty"`
+	MeekFrontingHost          string       `json:",omitempty"`
+	MeekDialAddress           string       `json:",omitempty"`
+	MeekTransformedHostName   bool         `json:",omitempty"`
+	MeekSNIServerName         string       `json:",omitempty"`
+	MeekVerifyServerName      string       `json:",omitempty"`
+	MeekVerifyPins            []string     `json:",omitempty"`
+	MeekHostHeader            string       `json:",omitempty"`
+	MeekObfuscatorPaddingSeed *prng.Seed   `json:",omitempty"`
 	MeekResolvedIPAddress     atomic.Value `json:"-"`
 
-	TLSOSSHTransformedSNIServerName bool
-	TLSOSSHSNIServerName            string
-	TLSOSSHObfuscatorPaddingSeed    *prng.Seed
+	TLSOSSHTransformedSNIServerName bool       `json:",omitempty"`
+	TLSOSSHSNIServerName            string     `json:",omitempty"`
+	TLSOSSHObfuscatorPaddingSeed    *prng.Seed `json:",omitempty"`
 
-	SelectedUserAgent bool
-	UserAgent         string
+	SelectedUserAgent bool   `json:",omitempty"`
+	UserAgent         string `json:",omitempty"`
 
-	SelectedTLSProfile       bool
-	TLSProfile               string
-	NoDefaultTLSSessionID    bool
-	TLSVersion               string
-	RandomizedTLSProfileSeed *prng.Seed
-	TLSFragmentClientHello   bool
+	SelectedTLSProfile       bool       `json:",omitempty"`
+	TLSProfile               string     `json:",omitempty"`
+	NoDefaultTLSSessionID    bool       `json:",omitempty"`
+	TLSVersion               string     `json:",omitempty"`
+	RandomizedTLSProfileSeed *prng.Seed `json:",omitempty"`
+	TLSFragmentClientHello   bool       `json:",omitempty"`
 
-	QUICVersion                              string
-	QUICDialSNIAddress                       string
-	QUICClientHelloSeed                      *prng.Seed
-	ObfuscatedQUICPaddingSeed                *prng.Seed
-	ObfuscatedQUICNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters
-	QUICDialEarly                            bool
-	QUICUseObfuscatedPSK                     bool
-	QUICDisablePathMTUDiscovery              bool
-	QUICMaxPacketSizeAdjustment              int
+	QUICVersion                              string                                          `json:",omitempty"`
+	QUICDialSNIAddress                       string                                          `json:",omitempty"`
+	QUICClientHelloSeed                      *prng.Seed                                      `json:",omitempty"`
+	ObfuscatedQUICPaddingSeed                *prng.Seed                                      `json:",omitempty"`
+	ObfuscatedQUICNonceTransformerParameters *transforms.ObfuscatorSeedTransformerParameters `json:",omitempty"`
+	QUICDialEarly                            bool                                            `json:",omitempty"`
+	QUICUseObfuscatedPSK                     bool                                            `json:",omitempty"`
+	QUICDisablePathMTUDiscovery              bool                                            `json:",omitempty"`
+	QUICMaxPacketSizeAdjustment              int                                             `json:",omitempty"`
 
-	ConjureCachedRegistrationTTL        time.Duration
-	ConjureAPIRegistration              bool
-	ConjureAPIRegistrarBidirectionalURL string
-	ConjureAPIRegistrarDelay            time.Duration
-	ConjureDecoyRegistration            bool
-	ConjureDecoyRegistrarDelay          time.Duration
-	ConjureDecoyRegistrarWidth          int
-	ConjureTransport                    string
-	ConjureSTUNServerAddress            string
-	ConjureDTLSEmptyInitialPacket       bool
+	ConjureCachedRegistrationTTL        time.Duration `json:",omitempty"`
+	ConjureAPIRegistration              bool          `json:",omitempty"`
+	ConjureAPIRegistrarBidirectionalURL string        `json:",omitempty"`
+	ConjureAPIRegistrarDelay            time.Duration `json:",omitempty"`
+	ConjureDecoyRegistration            bool          `json:",omitempty"`
+	ConjureDecoyRegistrarDelay          time.Duration `json:",omitempty"`
+	ConjureDecoyRegistrarWidth          int           `json:",omitempty"`
+	ConjureTransport                    string        `json:",omitempty"`
+	ConjureSTUNServerAddress            string        `json:",omitempty"`
+	ConjureDTLSEmptyInitialPacket       bool          `json:",omitempty"`
 
-	LivenessTestSeed *prng.Seed
+	LivenessTestSeed *prng.Seed `json:",omitempty"`
 
-	APIRequestPaddingSeed *prng.Seed
+	APIRequestPaddingSeed *prng.Seed `json:",omitempty"`
 
-	HoldOffTunnelDuration time.Duration
+	HoldOffTunnelDuration time.Duration `json:",omitempty"`
 
 	DialConnMetrics          common.MetricsSource       `json:"-"`
 	DialConnNoticeMetrics    common.NoticeMetricsSource `json:"-"`
@@ -163,14 +168,17 @@ type DialParameters struct {
 
 	DialDuration time.Duration `json:"-"`
 
-	resolver          *resolver.Resolver `json:"-"`
-	ResolveParameters *resolver.ResolveParameters
+	resolver          *resolver.Resolver          `json:"-"`
+	ResolveParameters *resolver.ResolveParameters `json:",omitempty"`
 
-	HTTPTransformerParameters *transforms.HTTPTransformerParameters
+	HTTPTransformerParameters *transforms.HTTPTransformerParameters `json:",omitempty"`
 
-	SteeringIP         string
+	SteeringIP         string          `json:",omitempty"`
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
+
+	DSLPendingPrioritizeDialTimestamp time.Time `json:",omitempty"`
+	DSLPrioritizedDial                bool      `json:",omitempty"`
 
 	quicTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
 	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
@@ -180,9 +188,9 @@ type DialParameters struct {
 	inproxyBrokerDialParameters    *InproxyBrokerDialParameters `json:"-"`
 	inproxyPackedSignedServerEntry []byte                       `json:"-"`
 	inproxyNATStateManager         *InproxyNATStateManager      `json:"-"`
-	InproxySTUNDialParameters      *InproxySTUNDialParameters
-	InproxyWebRTCDialParameters    *InproxyWebRTCDialParameters
-	inproxyConn                    atomic.Value `json:"-"`
+	InproxySTUNDialParameters      *InproxySTUNDialParameters   `json:",omitempty"`
+	InproxyWebRTCDialParameters    *InproxyWebRTCDialParameters `json:",omitempty"`
+	inproxyConn                    atomic.Value                 `json:"-"`
 
 	dialConfig *DialConfig `json:"-"`
 	meekConfig *MeekConfig `json:"-"`
@@ -225,12 +233,20 @@ func MakeDialParameters(
 	// functions need to be updated when, e.g., new TLS obfuscation
 	// parameters are added.
 
+	currentTimestamp := time.Now()
+
 	networkID := config.GetNetworkID()
 
 	p := config.GetParameters().Get()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
-	replayIgnoreChangedConfigState := p.Bool(parameters.ReplayIgnoreChangedConfigState)
+	dslPlaceholderTTL := p.Duration(parameters.DSLPrioritizeDialPlaceholderTTL)
+
+	// Replay ignoring tactics changes with a probability allows for a mix of
+	// sticking with replay and exploring use of new tactics.
+	replayIgnoreChangedConfigState := p.WeightedCoinFlip(
+		parameters.ReplayIgnoreChangedConfigStateProbability)
+
 	replayBPF := p.Bool(parameters.ReplayBPF)
 	replaySSH := p.Bool(parameters.ReplaySSH)
 	replayObfuscatorPadding := p.Bool(parameters.ReplayObfuscatorPadding)
@@ -266,6 +282,56 @@ func MakeDialParameters(
 		// Proceed, without existing dial parameters.
 	}
 
+	// DSLPendingPrioritizeDial is a placeholder which indicates that the
+	// server entry was prioritized for selection due to a hint from the DSL
+	// backend. No other dial parameters are set in the placeholder.
+	// Prioritized selection is implemented by storing a
+	// DSLPendingPrioritizeDial dial parameters record, and relying on the
+	// move-to-front logic in the server entry iterator shuffle.
+	//
+	// The DSLPendingPrioritizeDial placeholder remains valid until it exceeds
+	// the configured TTL or is removed in Failed. When the placeholder is
+	// selected and attempted, new dial parameters are selected.
+	//
+	// The DSLPrioritizedDial field is set and used to record dsl_prioritized
+	// metrics indicating that the dial was DSL prioritized. The
+	// DSLPrioritizedDial flag is retained, and dsl_prioritized reported, as
+	// long as the dial parameters are successfully replayed. Once the replay
+	// ends, the DSLPrioritizedDial/dsl_prioritized state is dropped.
+	//
+	// The isTactics case is not excluded from this DSLPrioritizedDial logic,
+	// since a DSLPendingPrioritizeDial placeholder may be created for a
+	// TACTICS-capable server entry. Note that tactics doesn't invoke
+	// DialParameters.Succeed to replay, and will only replay if the same
+	// server entry happens to have been used for a tunnel protocol. See
+	// fetchTactics.
+
+	dslPendingPrioritizeDial :=
+		dialParams != nil && !dialParams.DSLPendingPrioritizeDialTimestamp.IsZero()
+
+	if dslPendingPrioritizeDial {
+
+		if dslPlaceholderTTL > 0 &&
+			dialParams.DSLPendingPrioritizeDialTimestamp.
+				Before(currentTimestamp.Add(-dslPlaceholderTTL)) {
+
+			// If the DSLPendingPrioritizeDial placeholder is expired, delete it.
+			//
+			// Limitation: at this point, the expired placeholder has already
+			// resulted in a server entry iterator move-to-front for one last
+			// round. For this reason, dslPendingPrioritizeDial isn't reset
+			// to false and dialParams.DSLPrioritizedDial will still be set to true.
+
+			err = DeleteDialParameters(serverEntry.IpAddress, networkID)
+			if err != nil {
+				NoticeWarning("DeleteDialParameters failed: %s", err)
+			}
+		}
+
+		// Replace the placeholder with new dial parameters.
+		dialParams = nil
+	}
+
 	// Check if replay is permitted:
 	// - TTL must be > 0 and existing dial parameters must not have expired
 	//   as indicated by LastUsedTimestamp + TTL.
@@ -279,16 +345,18 @@ func MakeDialParameters(
 	// When existing dial parameters don't meet these conditions, dialParams
 	// is reset to nil and new dial parameters will be generated.
 
-	var currentTimestamp time.Time
 	var configStateHash []byte
 	var serverEntryHash []byte
+	var configChanged bool
 
 	// When TTL is 0, replay is disabled; the timestamp remains 0 and the
 	// output DialParameters will not be stored by Success.
 
 	if ttl > 0 {
-		currentTimestamp = time.Now()
 		configStateHash, serverEntryHash = getDialStateHashes(config, p, serverEntry)
+
+		configChanged = dialParams != nil && !bytes.Equal(
+			dialParams.LastUsedConfigStateHash, configStateHash)
 	}
 
 	if dialParams != nil &&
@@ -302,17 +370,16 @@ func MakeDialParameters(
 			// changed in tactics.
 			//
 			// Because of this, frequent tactics changes may degrade replay
-			// effectiveness. When ReplayIgnoreChangedConfigState is set,
+			// effectiveness. When replayIgnoreChangedConfigState is set,
 			// differences in the config state hash are ignored.
 			//
 			// Limitation: some code which previously assumed that replay
 			// always implied unchanged tactics parameters may now use newer
 			// tactics parameters in replay cases when
-			// ReplayIgnoreChangedConfigState is set. One case is the call
+			// replayIgnoreChangedConfigState is set. One case is the call
 			// below to fragmentor.NewUpstreamConfig, made when initializing
 			// dialParams.dialConfig.
-			(!replayIgnoreChangedConfigState &&
-				!bytes.Equal(dialParams.LastUsedConfigStateHash, configStateHash)) ||
+			(!replayIgnoreChangedConfigState && configChanged) ||
 
 			// Replay is disabled when the server entry has changed.
 			!bytes.Equal(dialParams.LastUsedServerEntryHash, serverEntryHash) ||
@@ -343,11 +410,12 @@ func MakeDialParameters(
 
 		// In these cases, existing dial parameters are expired or no longer
 		// match the config state and so are cleared to avoid rechecking them.
-
 		err = DeleteDialParameters(serverEntry.IpAddress, networkID)
 		if err != nil {
 			NoticeWarning("DeleteDialParameters failed: %s", err)
 		}
+
+		// Reselect new dial parameters.
 		dialParams = nil
 	}
 
@@ -406,14 +474,25 @@ func MakeDialParameters(
 	dialParams.ServerEntry = serverEntry
 	dialParams.NetworkID = networkID
 	dialParams.IsReplay = isReplay
+	dialParams.ReplayIgnoredChange = isReplay && configChanged
 	dialParams.CandidateNumber = candidateNumber
 	dialParams.EstablishedTunnelsCount = establishedTunnelsCount
+
+	// Set the DSLPrioritizedDial flag for metrics. The flag is set after
+	// replacing the pending placholder and retained as long as the dial
+	// parameters are replayed.
+	dialParams.DSLPrioritizedDial =
+		dslPendingPrioritizeDial || (isReplay && dialParams.DSLPrioritizedDial)
 
 	// Even when replaying, LastUsedTimestamp is updated to extend the TTL of
 	// replayed dial parameters which will be updated in the datastore upon
 	// success.
 
-	dialParams.LastUsedTimestamp = currentTimestamp
+	if ttl > 0 {
+		dialParams.LastUsedTimestamp = currentTimestamp
+	} else {
+		dialParams.LastUsedTimestamp = time.Time{}
+	}
 	dialParams.LastUsedConfigStateHash = configStateHash
 	dialParams.LastUsedServerEntryHash = serverEntryHash
 
@@ -491,7 +570,10 @@ func MakeDialParameters(
 	// server.TacticsListener.accept.
 	if protocol.TunnelProtocolIsDirect(dialParams.TunnelProtocol) &&
 		common.ContainsAny(
-			p.KeyStrings(parameters.RestrictDirectProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+			p.KeyStrings(
+				parameters.RestrictDirectProviderRegions,
+				dialParams.ServerEntry.ProviderID),
+			[]string{"", serverEntry.Region}) {
 		if p.WeightedCoinFlip(
 			parameters.RestrictDirectProviderIDsClientProbability) {
 
@@ -512,7 +594,10 @@ func MakeDialParameters(
 	// server.sshClient.setHandshakeState.
 	if protocol.TunnelProtocolUsesInproxy(dialParams.TunnelProtocol) &&
 		common.ContainsAny(
-			p.KeyStrings(parameters.RestrictInproxyProviderRegions, dialParams.ServerEntry.ProviderID), []string{"", serverEntry.Region}) {
+			p.KeyStrings(
+				parameters.RestrictInproxyProviderRegions,
+				dialParams.ServerEntry.ProviderID),
+			[]string{"", serverEntry.Region}) {
 		if p.WeightedCoinFlip(
 			parameters.RestrictInproxyProviderIDsClientProbability) {
 
@@ -521,7 +606,7 @@ func MakeDialParameters(
 			// of server entry, at most once per session.
 
 			NoticeSkipServerEntry(
-				"restricted provider ID: %s",
+				"restricted in-proxy provider ID: %s",
 				dialParams.ServerEntry.ProviderID)
 
 			return nil, nil
@@ -1641,7 +1726,7 @@ func MakeDialParameters(
 	// Fragmentor configuration.
 	// Note: fragmentorConfig is nil if fragmentor is disabled for prefixed OSSH.
 	//
-	// Limitation: when replaying and with ReplayIgnoreChangedConfigState set,
+	// Limitation: when replaying and with replayIgnoreChangedConfigState set,
 	// fragmentor.NewUpstreamConfig may select a config using newer tactics
 	// parameters.
 	fragmentorConfig := fragmentor.NewUpstreamConfig(p, dialParams.TunnelProtocol, dialParams.FragmentorSeed)
@@ -1672,13 +1757,12 @@ func MakeDialParameters(
 		// For tactics requests, AddPsiphonFrontingHeader is set when set for
 		// the related tunnel protocol. E.g., FRONTED-OSSH-MEEK for
 		// FRONTED-MEEK-TACTICS. AddPsiphonFrontingHeader is not replayed.
-		addPsiphonFrontingHeader := false
-		if dialParams.FrontingProviderID != "" {
-			addPsiphonFrontingHeader = common.Contains(
-				p.LabeledTunnelProtocols(
-					parameters.AddFrontingProviderPsiphonFrontingHeader, dialParams.FrontingProviderID),
-				dialParams.TunnelProtocol)
-		}
+		addFrontingHeader := addPsiphonFrontingHeader(
+			p,
+			dialParams.FrontingProviderID,
+			dialParams.TunnelProtocol,
+			dialParams.MeekDialAddress,
+			dialParams.ResolveParameters)
 
 		dialParams.meekConfig = &MeekConfig{
 			DiagnosticID:                  serverEntry.GetDiagnosticID(),
@@ -1699,7 +1783,7 @@ func MakeDialParameters(
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
 			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			SNIServerName:                 dialParams.MeekSNIServerName,
-			AddPsiphonFrontingHeader:      addPsiphonFrontingHeader,
+			AddPsiphonFrontingHeader:      addFrontingHeader,
 			VerifyServerName:              dialParams.MeekVerifyServerName,
 			VerifyPins:                    dialParams.MeekVerifyPins,
 			DisableSystemRootCAs:          config.DisableSystemRootCAs,
@@ -1882,6 +1966,19 @@ func (dialParams *DialParameters) Failed(config *Config, dialErr error) {
 		(!isInproxyDialErr || !p.WeightedCoinFlip(parameters.InproxyReplayRetainFailedProbability)) {
 
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
+		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
+		if err != nil {
+			NoticeWarning("DeleteDialParameters failed: %s", err)
+		}
+	}
+
+	// Also clear the DSLPendingPrioritizeDial placeholder, to prevent
+	// subsequent move-to-front, with a configurable probability to retain it.
+
+	if dialParams.DSLPrioritizedDial && !dialParams.IsReplay &&
+		!p.WeightedCoinFlip(parameters.DSLPrioritizeDialRetainFailedProbability) {
+
+		NoticeInfo("Delete DSL prioritize dial for %s", dialParams.ServerEntry.GetDiagnosticID())
 		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
 		if err != nil {
 			NoticeWarning("DeleteDialParameters failed: %s", err)
@@ -2454,4 +2551,30 @@ func selectConjureTransport(
 	choice := prng.Intn(len(transports))
 
 	return transports[choice]
+}
+
+func addPsiphonFrontingHeader(
+	p parameters.ParametersAccessor,
+	frontingProviderID string,
+	tunnelProtocol string,
+	dialAddress string,
+	resolveParams *resolver.ResolveParameters) bool {
+
+	if frontingProviderID == "" {
+		return false
+	}
+
+	if resolveParams != nil &&
+		resolveParams.PreresolvedIPAddress != "" {
+		meekDialDomain, _, _ := net.SplitHostPort(dialAddress)
+		if resolveParams.PreresolvedDomain == meekDialDomain {
+			return false
+		}
+	}
+
+	return common.Contains(
+		p.LabeledTunnelProtocols(
+			parameters.AddFrontingProviderPsiphonFrontingHeader,
+			frontingProviderID),
+		tunnelProtocol)
 }

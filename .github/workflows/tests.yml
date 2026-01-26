@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ "ubuntu" ]
-        go: [ "1.24.8" ]
+        go: [ "1.24.12" ]
         test-type: [ "detector", "coverage", "protobuf", "memory", "custom-build-tags", "code-vetting", "dependency-check" ]
 
     runs-on: ${{ matrix.os }}-latest
@@ -79,6 +79,7 @@ jobs:
           go test -v -race ./psiphon/common
           go test -v -race ./psiphon/common/accesscontrol
           go test -v -race ./psiphon/common/crypto/ssh
+          go test -v -race ./psiphon/common/dsl
           go test -v -race ./psiphon/common/fragmentor
           go test -v -race -tags "PSIPHON_ENABLE_INPROXY" ./psiphon/common/inproxy
           go test -v -race ./psiphon/common/regen
@@ -114,6 +115,7 @@ jobs:
           go test -v -covermode=count -coverprofile=accesscontrol.coverprofile ./psiphon/common/accesscontrol
           go test -v -covermode=count -coverprofile=ssh.coverprofile ./psiphon/common/crypto/ssh
           go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./psiphon/common/fragmentor
+          go test -v -covermode=count -coverprofile=dsl.coverprofile ./psiphon/common/dsl
           go test -v -covermode=count -tags "PSIPHON_ENABLE_INPROXY" -coverprofile=inproxy.coverprofile ./psiphon/common/inproxy
           go test -v -covermode=count -coverprofile=regen.coverprofile ./psiphon/common/regen
           go test -v -covermode=count -coverprofile=monotime.coverprofile ./psiphon/common/monotime

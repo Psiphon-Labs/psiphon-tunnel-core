@@ -21,7 +21,8 @@ message IrregularTunnel {
     optional int64 duplicate_elapsed_time_ms = 107;
     optional string duplicate_seed = 108;
     optional string duplicate_seed_type = 109;
-    optional uint32 listener_port_number = 110;
+    optional int64 listener_port_number = 110;
     optional string listener_protocol = 111;
     optional string tunnel_error = 112;
+    optional string server_entry_tag = 113;
 }

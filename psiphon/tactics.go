@@ -255,8 +255,8 @@ func fetchTactics(
 		true,
 		0,
 		0)
-	if dialParams == nil {
-		return nil, nil
+	if dialParams == nil && err == nil {
+		err = errors.TraceNew("unexpected nil dialParams")
 	}
 	if err != nil {
 		return nil, errors.Tracef(
@@ -299,8 +299,11 @@ func fetchTactics(
 	}
 	defer meekConn.Close()
 
+	// No padding is added via the params as this is provided by the tactics
+	// request obfuscation layer.
+	includeSessionID := true
 	apiParams := getBaseAPIParameters(
-		baseParametersAll, true, config, dialParams)
+		baseParametersAll, nil, includeSessionID, config, dialParams)
 
 	tacticsRecord, err := tactics.FetchTactics(
 		ctx,

@@ -45,9 +45,9 @@ type Reloader interface {
 	// WillReload indicates if the data object is capable of reloading.
 	WillReload() bool
 
-	// LogDescription returns a description to be used for logging
+	// ReloadLogDescription returns a description to be used for logging
 	// events related to the Reloader.
-	LogDescription() string
+	ReloadLogDescription() string
 }
 
 // ReloadableFile is a file-backed Reloader. This type is intended to be embedded
@@ -77,6 +77,9 @@ type ReloadableFile struct {
 // reloadAction; otherwise, reloadAction receives a nil argument and is
 // responsible for loading the file. The latter option allows for cases where
 // the file contents must be streamed, memory mapped, etc.
+//
+// The returned ReloadableFile contains a sync.RWMutex and must not be copied
+// after first use.
 func NewReloadableFile(
 	filename string,
 	loadFileContent bool,
@@ -177,9 +180,11 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	reloadable.Lock()
 	defer reloadable.Unlock()
 
-	err = reloadable.reloadAction(content, fileModTime)
-	if err != nil {
-		return false, errors.Trace(err)
+	if reloadable.reloadAction != nil {
+		err := reloadable.reloadAction(content, fileModTime)
+		if err != nil {
+			return false, errors.Trace(err)
+		}
 	}
 
 	reloadable.hasLoaded = true
@@ -188,6 +193,6 @@ func (reloadable *ReloadableFile) Reload() (bool, error) {
 	return true, nil
 }
 
-func (reloadable *ReloadableFile) LogDescription() string {
+func (reloadable *ReloadableFile) ReloadLogDescription() string {
 	return reloadable.filename
 }

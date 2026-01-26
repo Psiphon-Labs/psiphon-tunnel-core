@@ -28,6 +28,7 @@ type ServerLoadProtocol struct {
 	Protocol           *string                `protobuf:"bytes,101,opt,name=protocol,proto3,oneof" json:"protocol,omitempty"`
 	AcceptedClients    *int64                 `protobuf:"varint,102,opt,name=accepted_clients,json=acceptedClients,proto3,oneof" json:"accepted_clients,omitempty"`
 	EstablishedClients *int64                 `protobuf:"varint,103,opt,name=established_clients,json=establishedClients,proto3,oneof" json:"established_clients,omitempty"`
+	ServerEntryTag     *string                `protobuf:"bytes,104,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -90,6 +91,13 @@ func (x *ServerLoadProtocol) GetEstablishedClients() int64 {
 	return 0
 }
 
+func (x *ServerLoadProtocol) GetServerEntryTag() string {
+	if x != nil && x.ServerEntryTag != nil {
+		return *x.ServerEntryTag
+	}
+	return ""
+}
+
 type ServerLoadDNS struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	DnsServer         *string                `protobuf:"bytes,100,opt,name=dns_server,json=dnsServer,proto3,oneof" json:"dns_server,omitempty"`
@@ -97,6 +105,7 @@ type ServerLoadDNS struct {
 	DnsDuration       *int64                 `protobuf:"varint,102,opt,name=dns_duration,json=dnsDuration,proto3,oneof" json:"dns_duration,omitempty"`
 	DnsFailedCount    *int64                 `protobuf:"varint,103,opt,name=dns_failed_count,json=dnsFailedCount,proto3,oneof" json:"dns_failed_count,omitempty"`
 	DnsFailedDuration *int64                 `protobuf:"varint,104,opt,name=dns_failed_duration,json=dnsFailedDuration,proto3,oneof" json:"dns_failed_duration,omitempty"`
+	ServerEntryTag    *string                `protobuf:"bytes,105,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -166,23 +175,30 @@ func (x *ServerLoadDNS) GetDnsFailedDuration() int64 {
 	return 0
 }
 
+func (x *ServerLoadDNS) GetServerEntryTag() string {
+	if x != nil && x.ServerEntryTag != nil {
+		return *x.ServerEntryTag
+	}
+	return ""
+}
+
 type ServerLoad struct {
 	state                                   protoimpl.MessageState `protogen:"open.v1"`
 	CpuPercent                              *float64               `protobuf:"fixed64,100,opt,name=cpu_percent,json=cpuPercent,proto3,oneof" json:"cpu_percent,omitempty"`
-	HeapAlloc                               *uint64                `protobuf:"varint,101,opt,name=heap_alloc,json=heapAlloc,proto3,oneof" json:"heap_alloc,omitempty"`
-	HeapIdle                                *uint64                `protobuf:"varint,102,opt,name=heap_idle,json=heapIdle,proto3,oneof" json:"heap_idle,omitempty"`
-	HeapInuse                               *uint64                `protobuf:"varint,103,opt,name=heap_inuse,json=heapInuse,proto3,oneof" json:"heap_inuse,omitempty"`
-	HeapObjects                             *uint64                `protobuf:"varint,104,opt,name=heap_objects,json=heapObjects,proto3,oneof" json:"heap_objects,omitempty"`
-	HeapReleased                            *uint64                `protobuf:"varint,105,opt,name=heap_released,json=heapReleased,proto3,oneof" json:"heap_released,omitempty"`
-	HeapSys                                 *uint64                `protobuf:"varint,106,opt,name=heap_sys,json=heapSys,proto3,oneof" json:"heap_sys,omitempty"`
+	HeapAlloc                               *int64                 `protobuf:"varint,101,opt,name=heap_alloc,json=heapAlloc,proto3,oneof" json:"heap_alloc,omitempty"`
+	HeapIdle                                *int64                 `protobuf:"varint,102,opt,name=heap_idle,json=heapIdle,proto3,oneof" json:"heap_idle,omitempty"`
+	HeapInuse                               *int64                 `protobuf:"varint,103,opt,name=heap_inuse,json=heapInuse,proto3,oneof" json:"heap_inuse,omitempty"`
+	HeapObjects                             *int64                 `protobuf:"varint,104,opt,name=heap_objects,json=heapObjects,proto3,oneof" json:"heap_objects,omitempty"`
+	HeapReleased                            *int64                 `protobuf:"varint,105,opt,name=heap_released,json=heapReleased,proto3,oneof" json:"heap_released,omitempty"`
+	HeapSys                                 *int64                 `protobuf:"varint,106,opt,name=heap_sys,json=heapSys,proto3,oneof" json:"heap_sys,omitempty"`
 	NetworkBytesReceived                    *int64                 `protobuf:"varint,107,opt,name=network_bytes_received,json=networkBytesReceived,proto3,oneof" json:"network_bytes_received,omitempty"`
 	NetworkBytesSent                        *int64                 `protobuf:"varint,108,opt,name=network_bytes_sent,json=networkBytesSent,proto3,oneof" json:"network_bytes_sent,omitempty"`
 	EstablishTunnels                        *bool                  `protobuf:"varint,109,opt,name=establish_tunnels,json=establishTunnels,proto3,oneof" json:"establish_tunnels,omitempty"`
 	EstablishTunnelsLimitedCount            *int64                 `protobuf:"varint,110,opt,name=establish_tunnels_limited_count,json=establishTunnelsLimitedCount,proto3,oneof" json:"establish_tunnels_limited_count,omitempty"`
 	LastGc                                  *timestamppb.Timestamp `protobuf:"bytes,111,opt,name=last_gc,json=lastGc,proto3,oneof" json:"last_gc,omitempty"`
-	NumForcedGc                             *uint32                `protobuf:"varint,112,opt,name=num_forced_gc,json=numForcedGc,proto3,oneof" json:"num_forced_gc,omitempty"`
-	NumGc                                   *uint32                `protobuf:"varint,113,opt,name=num_gc,json=numGc,proto3,oneof" json:"num_gc,omitempty"`
-	NumGoroutine                            *uint32                `protobuf:"varint,114,opt,name=num_goroutine,json=numGoroutine,proto3,oneof" json:"num_goroutine,omitempty"`
+	NumForcedGc                             *int64                 `protobuf:"varint,112,opt,name=num_forced_gc,json=numForcedGc,proto3,oneof" json:"num_forced_gc,omitempty"`
+	NumGc                                   *int64                 `protobuf:"varint,113,opt,name=num_gc,json=numGc,proto3,oneof" json:"num_gc,omitempty"`
+	NumGoroutine                            *int64                 `protobuf:"varint,114,opt,name=num_goroutine,json=numGoroutine,proto3,oneof" json:"num_goroutine,omitempty"`
 	ReplayDeleteReplayCount                 *int64                 `protobuf:"varint,115,opt,name=replay_delete_replay_count,json=replayDeleteReplayCount,proto3,oneof" json:"replay_delete_replay_count,omitempty"`
 	ReplayFailedReplayCount                 *int64                 `protobuf:"varint,116,opt,name=replay_failed_replay_count,json=replayFailedReplayCount,proto3,oneof" json:"replay_failed_replay_count,omitempty"`
 	ReplayGetReplayHitCount                 *int64                 `protobuf:"varint,117,opt,name=replay_get_replay_hit_count,json=replayGetReplayHitCount,proto3,oneof" json:"replay_get_replay_hit_count,omitempty"`
@@ -213,6 +229,7 @@ type ServerLoad struct {
 	UdpPortForwards                         *int64                 `protobuf:"varint,142,opt,name=udp_port_forwards,json=udpPortForwards,proto3,oneof" json:"udp_port_forwards,omitempty"`
 	TotalTcpPortForwards                    *int64                 `protobuf:"varint,143,opt,name=total_tcp_port_forwards,json=totalTcpPortForwards,proto3,oneof" json:"total_tcp_port_forwards,omitempty"`
 	TotalUdpPortForwards                    *int64                 `protobuf:"varint,144,opt,name=total_udp_port_forwards,json=totalUdpPortForwards,proto3,oneof" json:"total_udp_port_forwards,omitempty"`
+	ServerEntryTag                          *string                `protobuf:"bytes,145,opt,name=server_entry_tag,json=serverEntryTag,proto3,oneof" json:"server_entry_tag,omitempty"`
 	unknownFields                           protoimpl.UnknownFields
 	sizeCache                               protoimpl.SizeCache
 }
@@ -254,42 +271,42 @@ func (x *ServerLoad) GetCpuPercent() float64 {
 	return 0
 }
 
-func (x *ServerLoad) GetHeapAlloc() uint64 {
+func (x *ServerLoad) GetHeapAlloc() int64 {
 	if x != nil && x.HeapAlloc != nil {
 		return *x.HeapAlloc
 	}
 	return 0
 }
 
-func (x *ServerLoad) GetHeapIdle() uint64 {
+func (x *ServerLoad) GetHeapIdle() int64 {
 	if x != nil && x.HeapIdle != nil {
 		return *x.HeapIdle
 	}
 	return 0
 }
 
-func (x *ServerLoad) GetHeapInuse() uint64 {
+func (x *ServerLoad) GetHeapInuse() int64 {
 	if x != nil && x.HeapInuse != nil {
 		return *x.HeapInuse
 	}
 	return 0
 }
 
-func (x *ServerLoad) GetHeapObjects() uint64 {
+func (x *ServerLoad) GetHeapObjects() int64 {
 	if x != nil && x.HeapObjects != nil {
 		return *x.HeapObjects
 	}
 	return 0
 }
 
-func (x *ServerLoad) GetHeapReleased() uint64 {
+func (x *ServerLoad) GetHeapReleased() int64 {
 	if x != nil && x.HeapReleased != nil {
 		return *x.HeapReleased
 	}
 	return 0
 }
 
-func (x *ServerLoad) GetHeapSys() uint64 {
+func (x *ServerLoad) GetHeapSys() int64 {
 	if x != nil && x.HeapSys != nil {
 		return *x.HeapSys
 	}
@@ -331,21 +348,21 @@ func (x *ServerLoad) GetLastGc() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *ServerLoad) GetNumForcedGc() uint32 {
+func (x *ServerLoad) GetNumForcedGc() int64 {
 	if x != nil && x.NumForcedGc != nil {
 		return *x.NumForcedGc
 	}
 	return 0
 }
 
-func (x *ServerLoad) GetNumGc() uint32 {
+func (x *ServerLoad) GetNumGc() int64 {
 	if x != nil && x.NumGc != nil {
 		return *x.NumGc
 	}
 	return 0
 }
 
-func (x *ServerLoad) GetNumGoroutine() uint32 {
+func (x *ServerLoad) GetNumGoroutine() int64 {
 	if x != nil && x.NumGoroutine != nil {
 		return *x.NumGoroutine
 	}
@@ -562,54 +579,65 @@ func (x *ServerLoad) GetTotalUdpPortForwards() int64 {
 	return 0
 }
 
+func (x *ServerLoad) GetServerEntryTag() string {
+	if x != nil && x.ServerEntryTag != nil {
+		return *x.ServerEntryTag
+	}
+	return ""
+}
+
 var File_ca_psiphon_psiphond_server_load_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/server_load.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xfd\x01\n" +
+	"%ca.psiphon.psiphond/server_load.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc1\x02\n" +
 	"\x12ServerLoadProtocol\x12\x1b\n" +
 	"\x06region\x18d \x01(\tH\x00R\x06region\x88\x01\x01\x12\x1f\n" +
 	"\bprotocol\x18e \x01(\tH\x01R\bprotocol\x88\x01\x01\x12.\n" +
 	"\x10accepted_clients\x18f \x01(\x03H\x02R\x0facceptedClients\x88\x01\x01\x124\n" +
-	"\x13established_clients\x18g \x01(\x03H\x03R\x12establishedClients\x88\x01\x01B\t\n" +
+	"\x13established_clients\x18g \x01(\x03H\x03R\x12establishedClients\x88\x01\x01\x12-\n" +
+	"\x10server_entry_tag\x18h \x01(\tH\x04R\x0eserverEntryTag\x88\x01\x01B\t\n" +
 	"\a_regionB\v\n" +
 	"\t_protocolB\x13\n" +
 	"\x11_accepted_clientsB\x16\n" +
-	"\x14_established_clients\"\xbc\x02\n" +
+	"\x14_established_clientsB\x13\n" +
+	"\x11_server_entry_tag\"\x80\x03\n" +
 	"\rServerLoadDNS\x12\"\n" +
 	"\n" +
 	"dns_server\x18d \x01(\tH\x00R\tdnsServer\x88\x01\x01\x12 \n" +
 	"\tdns_count\x18e \x01(\x03H\x01R\bdnsCount\x88\x01\x01\x12&\n" +
 	"\fdns_duration\x18f \x01(\x03H\x02R\vdnsDuration\x88\x01\x01\x12-\n" +
 	"\x10dns_failed_count\x18g \x01(\x03H\x03R\x0ednsFailedCount\x88\x01\x01\x123\n" +
-	"\x13dns_failed_duration\x18h \x01(\x03H\x04R\x11dnsFailedDuration\x88\x01\x01B\r\n" +
+	"\x13dns_failed_duration\x18h \x01(\x03H\x04R\x11dnsFailedDuration\x88\x01\x01\x12-\n" +
+	"\x10server_entry_tag\x18i \x01(\tH\x05R\x0eserverEntryTag\x88\x01\x01B\r\n" +
 	"\v_dns_serverB\f\n" +
 	"\n" +
 	"_dns_countB\x0f\n" +
 	"\r_dns_durationB\x13\n" +
 	"\x11_dns_failed_countB\x16\n" +
-	"\x14_dns_failed_duration\"\xbc!\n" +
+	"\x14_dns_failed_durationB\x13\n" +
+	"\x11_server_entry_tag\"\x81\"\n" +
 	"\n" +
 	"ServerLoad\x12$\n" +
 	"\vcpu_percent\x18d \x01(\x01H\x00R\n" +
 	"cpuPercent\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"heap_alloc\x18e \x01(\x04H\x01R\theapAlloc\x88\x01\x01\x12 \n" +
-	"\theap_idle\x18f \x01(\x04H\x02R\bheapIdle\x88\x01\x01\x12\"\n" +
+	"heap_alloc\x18e \x01(\x03H\x01R\theapAlloc\x88\x01\x01\x12 \n" +
+	"\theap_idle\x18f \x01(\x03H\x02R\bheapIdle\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"heap_inuse\x18g \x01(\x04H\x03R\theapInuse\x88\x01\x01\x12&\n" +
-	"\fheap_objects\x18h \x01(\x04H\x04R\vheapObjects\x88\x01\x01\x12(\n" +
-	"\rheap_released\x18i \x01(\x04H\x05R\fheapReleased\x88\x01\x01\x12\x1e\n" +
-	"\bheap_sys\x18j \x01(\x04H\x06R\aheapSys\x88\x01\x01\x129\n" +
+	"heap_inuse\x18g \x01(\x03H\x03R\theapInuse\x88\x01\x01\x12&\n" +
+	"\fheap_objects\x18h \x01(\x03H\x04R\vheapObjects\x88\x01\x01\x12(\n" +
+	"\rheap_released\x18i \x01(\x03H\x05R\fheapReleased\x88\x01\x01\x12\x1e\n" +
+	"\bheap_sys\x18j \x01(\x03H\x06R\aheapSys\x88\x01\x01\x129\n" +
 	"\x16network_bytes_received\x18k \x01(\x03H\aR\x14networkBytesReceived\x88\x01\x01\x121\n" +
 	"\x12network_bytes_sent\x18l \x01(\x03H\bR\x10networkBytesSent\x88\x01\x01\x120\n" +
 	"\x11establish_tunnels\x18m \x01(\bH\tR\x10establishTunnels\x88\x01\x01\x12J\n" +
 	"\x1festablish_tunnels_limited_count\x18n \x01(\x03H\n" +
 	"R\x1cestablishTunnelsLimitedCount\x88\x01\x01\x128\n" +
 	"\alast_gc\x18o \x01(\v2\x1a.google.protobuf.TimestampH\vR\x06lastGc\x88\x01\x01\x12'\n" +
-	"\rnum_forced_gc\x18p \x01(\rH\fR\vnumForcedGc\x88\x01\x01\x12\x1a\n" +
-	"\x06num_gc\x18q \x01(\rH\rR\x05numGc\x88\x01\x01\x12(\n" +
-	"\rnum_goroutine\x18r \x01(\rH\x0eR\fnumGoroutine\x88\x01\x01\x12@\n" +
+	"\rnum_forced_gc\x18p \x01(\x03H\fR\vnumForcedGc\x88\x01\x01\x12\x1a\n" +
+	"\x06num_gc\x18q \x01(\x03H\rR\x05numGc\x88\x01\x01\x12(\n" +
+	"\rnum_goroutine\x18r \x01(\x03H\x0eR\fnumGoroutine\x88\x01\x01\x12@\n" +
 	"\x1areplay_delete_replay_count\x18s \x01(\x03H\x0fR\x17replayDeleteReplayCount\x88\x01\x01\x12@\n" +
 	"\x1areplay_failed_replay_count\x18t \x01(\x03H\x10R\x17replayFailedReplayCount\x88\x01\x01\x12A\n" +
 	"\x1breplay_get_replay_hit_count\x18u \x01(\x03H\x11R\x17replayGetReplayHitCount\x88\x01\x01\x12C\n" +
@@ -639,7 +667,8 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"*udp_port_forward_rejected_disallowed_count\x18\x8d\x01 \x01(\x03H)R%udpPortForwardRejectedDisallowedCount\x88\x01\x01\x120\n" +
 	"\x11udp_port_forwards\x18\x8e\x01 \x01(\x03H*R\x0fudpPortForwards\x88\x01\x01\x12;\n" +
 	"\x17total_tcp_port_forwards\x18\x8f\x01 \x01(\x03H+R\x14totalTcpPortForwards\x88\x01\x01\x12;\n" +
-	"\x17total_udp_port_forwards\x18\x90\x01 \x01(\x03H,R\x14totalUdpPortForwards\x88\x01\x01B\x0e\n" +
+	"\x17total_udp_port_forwards\x18\x90\x01 \x01(\x03H,R\x14totalUdpPortForwards\x88\x01\x01\x12.\n" +
+	"\x10server_entry_tag\x18\x91\x01 \x01(\tH-R\x0eserverEntryTag\x88\x01\x01B\x0e\n" +
 	"\f_cpu_percentB\r\n" +
 	"\v_heap_allocB\f\n" +
 	"\n" +
@@ -686,7 +715,8 @@ const file_ca_psiphon_psiphond_server_load_proto_rawDesc = "" +
 	"+_udp_port_forward_rejected_disallowed_countB\x14\n" +
 	"\x12_udp_port_forwardsB\x1a\n" +
 	"\x18_total_tcp_port_forwardsB\x1a\n" +
-	"\x18_total_udp_port_forwardsBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x18_total_udp_port_forwardsB\x13\n" +
+	"\x11_server_entry_tagBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_server_load_proto_rawDescOnce sync.Once

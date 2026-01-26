@@ -21,6 +21,7 @@ type protobufFieldGroupConfig struct {
 	baseParams        bool
 	dialParams        bool
 	inproxyDialParams bool
+	destParams        bool
 }
 
 // protobufMessageFieldGroups defines field group requirements for each message type
@@ -33,8 +34,11 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 	"unique_user": {
 		baseParams: true,
 	},
-	"domain_bytes": {
-		baseParams: true,
+	"asn_dest_bytes": {
+		destParams: true,
+	},
+	"domain_dest_bytes": {
+		destParams: true,
 	},
 	"server_blocklist_hit": {
 		baseParams: true,
@@ -59,6 +63,9 @@ var protobufMessageFieldGroups = map[string]protobufFieldGroupConfig{
 		dialParams: true,
 	},
 	"inproxy_broker": {
+		baseParams: true,
+	},
+	"dsl_relay_get_server_entries": {
 		baseParams: true,
 	},
 }
@@ -119,14 +126,10 @@ func newPsiphondProtobufMessageWrapper(ts *timestamppb.Timestamp, hostType strin
 	}
 
 	wrapper.Timestamp = ts
-
-	wrapper.HostId = &logHostID
-	wrapper.HostBuildRev = &logBuildRev
-	if logHostProvider != "" {
-		wrapper.Provider = &logHostProvider
-	}
-
-	wrapper.HostType = &hostType
+	wrapper.HostId = logHostID
+	wrapper.HostBuildRev = logBuildRev
+	wrapper.Provider = logHostProvider
+	wrapper.HostType = hostType
 
 	return wrapper
 }
@@ -161,60 +164,19 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 	case "server_tunnel":
 		msg := &pb.ServerTunnel{}
 		protobufPopulateMessage(logFields, msg, eventName)
-
-		// Capture the tunnel ID once here to avoid looking it up for every sub-message.
-		tunnelID := msg.TunnelId
-
-		// Populate and append the initial server tunnel protobuf message.
 		psiphondWrapped.Metric = &pb.Psiphond_ServerTunnel{ServerTunnel: msg}
-
-		out = append(out, newProtobufRoutedMessage(psiphondWrapped))
-
-		// If this message includes asn_dest_bytes_* maps, emit
-		// one protobuf ServerTunnelASNDestBytes per ASN.
-		if asnBytes, hasASNBytes := logFields["asn_dest_bytes"]; hasASNBytes {
-			for asn, totalBytes := range asnBytes.(map[string]int64) {
-				msg := &pb.ServerTunnelASNDestBytes{
-					TunnelId:  tunnelID,
-					DestAsn:   &asn,
-					DestBytes: &totalBytes,
-				}
-
-				if value, exists := logFields["asn_dest_bytes_up_tcp"].(map[string]int64)[asn]; exists {
-					msg.DestBytesUpTcp = &value
-				}
-
-				if value, exists := logFields["asn_dest_bytes_down_tcp"].(map[string]int64)[asn]; exists {
-					msg.DestBytesDownTcp = &value
-				}
-
-				if value, exists := logFields["asn_dest_bytes_up_udp"].(map[string]int64)[asn]; exists {
-					msg.DestBytesUpUdp = &value
-				}
-
-				if value, exists := logFields["asn_dest_bytes_down_udp"].(map[string]int64)[asn]; exists {
-					msg.DestBytesDownUdp = &value
-				}
-
-				psiphondWrapped = newPsiphondProtobufMessageWrapper(pbTimestamp, hostType)
-				psiphondWrapped.Metric = &pb.Psiphond_ServerTunnelAsnDestBytes{ServerTunnelAsnDestBytes: msg}
-
-				out = append(out, newProtobufRoutedMessage(psiphondWrapped))
-			}
-		}
-
-		// Return early with the slice of wrapped messages here to skip
-		// extra append attempts at the end of this switch, since we've
-		// manually appended all of the wrapper messages ourselves.
-		return out
 	case "unique_user":
 		msg := &pb.UniqueUser{}
 		protobufPopulateMessage(logFields, msg, eventName)
 		psiphondWrapped.Metric = &pb.Psiphond_UniqueUser{UniqueUser: msg}
-	case "domain_bytes":
-		msg := &pb.DomainBytes{}
+	case "asn_dest_bytes":
+		msg := &pb.AsnDestBytes{}
 		protobufPopulateMessage(logFields, msg, eventName)
-		psiphondWrapped.Metric = &pb.Psiphond_DomainBytes{DomainBytes: msg}
+		psiphondWrapped.Metric = &pb.Psiphond_AsnDestBytes{AsnDestBytes: msg}
+	case "domain_dest_bytes":
+		msg := &pb.DomainDestBytes{}
+		protobufPopulateMessage(logFields, msg, eventName)
+		psiphondWrapped.Metric = &pb.Psiphond_DomainDestBytes{DomainDestBytes: msg}
 	case "server_load":
 		if region, hasRegion := logFields["region"]; hasRegion {
 			for _, proto := range append(protocol.SupportedTunnelProtocols, "ALL") {
@@ -225,6 +187,10 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 					msg := &pb.ServerLoadProtocol{
 						Protocol: &proto,
 						Region:   &regionString,
+					}
+
+					if value, exists := protoStats["server_entry_tag"].(string); exists {
+						msg.ServerEntryTag = &value
 					}
 
 					if value, exists := protoStats["accepted_clients"].(int64); exists {
@@ -264,6 +230,10 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 				msg := &pb.ServerLoadDNS{
 					DnsServer: &dns,
 					DnsCount:  &count,
+				}
+
+				if value, exists := logFields["server_entry_tag"].(string); exists {
+					msg.ServerEntryTag = &value
 				}
 
 				if value, exists := logFields["dns_failed_count"].(map[string]int64)[dns]; exists {
@@ -320,6 +290,10 @@ func logFieldsToProtobuf(logFields LogFields) []*pbr.Router {
 		msg := &pb.ServerBlocklistHit{}
 		protobufPopulateMessage(logFields, msg, eventName)
 		psiphondWrapped.Metric = &pb.Psiphond_ServerBlocklist{ServerBlocklist: msg}
+	case "dsl_relay_get_server_entries":
+		msg := &pb.DslRelayGetServerEntries{}
+		protobufPopulateMessage(logFields, msg, eventName)
+		psiphondWrapped.Metric = &pb.Psiphond_DslRelayGetServerEntries{DslRelayGetServerEntries: msg}
 	}
 
 	// Single append for all non-special cases.
@@ -349,6 +323,14 @@ func protobufPopulateDialParams(logFields LogFields) *pb.DialParams {
 // protobufPopulateInproxyDialParams populates InproxyDialParams from LogFields.
 func protobufPopulateInproxyDialParams(logFields LogFields) *pb.InproxyDialParams {
 	msg := &pb.InproxyDialParams{}
+	protobufPopulateMessageFromFields(logFields, msg)
+
+	return msg
+}
+
+// protobufPopulateDestParams populates DestParams from LogFields.
+func protobufPopulateDestParams(logFields LogFields) *pb.DestParams {
+	msg := &pb.DestParams{}
 	protobufPopulateMessageFromFields(logFields, msg)
 
 	return msg
@@ -401,6 +383,10 @@ func protobufPopulateFieldGroups(logFields LogFields, msg proto.Message, config 
 			if config.inproxyDialParams {
 				field.Set(reflect.ValueOf(protobufPopulateInproxyDialParams(logFields)))
 			}
+		case "DestParams":
+			if config.destParams {
+				field.Set(reflect.ValueOf(protobufPopulateDestParams(logFields)))
+			}
 		}
 	}
 }
@@ -440,36 +426,47 @@ func protobufPopulateMessageFromFields(logFields LogFields, msg proto.Message) {
 
 		// Handle special field names that might be mapped differently.
 		if err := setProtobufFieldValue(field, fieldType, logValue); err != nil {
-			panic(fmt.Errorf("failed to set field value: %w", err))
+			panic(errors.Tracef("failed to set field value: %w", err))
 		}
 	}
 }
 
 // getProtobufFieldName extracts the field name from protobuf struct tag.
+//
+// Example:
+// - in: "bytes,1,opt,name=host_metadata,json=hostMetadata,proto3"
+// - out: "host_metadata"
 func getProtobufFieldName(protoTag string) string {
-	// Parse protobuf tag like: "bytes,1,opt,name=host_metadata,json=hostMetadata,proto3".
-	parts := strings.SplitSeq(protoTag, ",")
-	for part := range parts {
-		if trimmed, found := strings.CutPrefix(part, "name="); found {
-			return trimmed
+
+	n := len(protoTag)
+
+	// Process the input byte-by-byte to avoid allocations.
+
+	for i := 0; i < n; {
+
+		// Find the end of this comma-delimited part of the tag.
+		j := i
+		for j < n && protoTag[j] != ',' {
+			j++
 		}
+
+		// Check for "name=" at the start of this part.
+		if j-i >= 5 &&
+			protoTag[i] == 'n' &&
+			protoTag[i+1] == 'a' &&
+			protoTag[i+2] == 'm' &&
+			protoTag[i+3] == 'e' &&
+			protoTag[i+4] == '=' {
+
+			// Return the slice after "name=".
+			return protoTag[i+5 : j]
+		}
+
+		// Skip to the start of next part of the tag.
+		i = j + 1
 	}
 
 	return ""
-}
-
-// protobufConversionError represents an error during type conversion
-type protobufConversionError struct {
-	fieldName string
-	fromType  string
-	toType    string
-	value     any
-	err       error
-}
-
-func (e *protobufConversionError) Error() string {
-	return fmt.Sprintf("failed to convert field %s from %s to %s (value: %v): %v",
-		e.fieldName, e.fromType, e.toType, e.value, e.err)
 }
 
 // setProtobufFieldValue sets a protobuf field value from a LogFields value.
@@ -478,12 +475,26 @@ func setProtobufFieldValue(field reflect.Value, fieldType reflect.StructField, l
 		return nil // Don't set anything for nil values
 	}
 
+	var err error
+
 	// Handle pointers by creating a new instance and setting recursively
 	if field.Kind() == reflect.Ptr {
-		return setProtobufPointerField(field, fieldType, logValue)
+		err = setProtobufPointerField(field, fieldType, logValue)
+	} else {
+		err = setProtobufPrimitiveField(field, fieldType, logValue)
 	}
 
-	return setProtobufPrimitiveField(field, fieldType, logValue)
+	if err != nil {
+		err = errors.Tracef(
+			"failed to convert field %s value `%v` type %T to %s : %w",
+			fieldType.Name,
+			logValue,
+			logValue,
+			fieldType.Type.String(),
+			errors.Trace(err))
+	}
+
+	return nil
 }
 
 // setProtobufPointerField handles pointer fields by creating new instances
@@ -494,7 +505,7 @@ func setProtobufPointerField(field reflect.Value, fieldType reflect.StructField,
 	if elemType == reflect.TypeOf(timestamppb.Timestamp{}) {
 		ts, err := protobufConvertToTimestamp(logValue)
 		if err != nil {
-			return err
+			return errors.Trace(err)
 		}
 
 		if ts != nil {
@@ -508,7 +519,7 @@ func setProtobufPointerField(field reflect.Value, fieldType reflect.StructField,
 	newVal := reflect.New(elemType)
 	err := setProtobufPrimitiveField(newVal.Elem(), fieldType, logValue)
 	if err != nil {
-		return err
+		return errors.Trace(err)
 	}
 
 	field.Set(newVal)
@@ -518,42 +529,32 @@ func setProtobufPointerField(field reflect.Value, fieldType reflect.StructField,
 
 // setProtobufPrimitiveField handles non-pointer fields
 func setProtobufPrimitiveField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
+	var err error
 	switch field.Kind() {
 	case reflect.String:
-		return setProtobufStringField(field, fieldType, logValue)
+		err = setProtobufStringField(field, fieldType, logValue)
 	case reflect.Int, reflect.Int32, reflect.Int64:
-		return setProtobufIntField(field, fieldType, logValue)
+		err = setProtobufIntField(field, fieldType, logValue)
 	case reflect.Uint, reflect.Uint32, reflect.Uint64:
-		return setProtobufUintField(field, fieldType, logValue)
+		err = setProtobufUintField(field, fieldType, logValue)
 	case reflect.Float64:
-		return setProtobufFloat64Field(field, fieldType, logValue)
+		err = setProtobufFloat64Field(field, fieldType, logValue)
 	case reflect.Bool:
-		return setProtobufBoolField(field, fieldType, logValue)
+		err = setProtobufBoolField(field, fieldType, logValue)
 	case reflect.Map:
-		return setProtobufMapField(field, fieldType, logValue)
+		err = setProtobufMapField(field, fieldType, logValue)
 	case reflect.Slice:
-		return setProtobufSliceField(field, fieldType, logValue)
+		err = setProtobufSliceField(field, fieldType, logValue)
 	default:
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    field.Kind().String(),
-			value:     logValue,
-			err:       fmt.Errorf("unsupported field kind"),
-		}
+		err = errors.TraceNew("unsupported field kind")
 	}
+	return errors.Trace(err)
 }
 
 func setProtobufStringField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	str, err := protobufConvertToString(logValue)
 	if err != nil {
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "string",
-			value:     logValue,
-			err:       err,
-		}
+		return errors.Trace(err)
 	}
 
 	// Handle special cases for string fields
@@ -568,26 +569,14 @@ func setProtobufStringField(field reflect.Value, fieldType reflect.StructField, 
 }
 
 func setProtobufIntField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
-	convErr := &protobufConversionError{
-		fieldName: fieldType.Name,
-		fromType:  fmt.Sprintf("%T", logValue),
-		value:     logValue,
-	}
 
-	switch field.Kind() {
-	case reflect.Int, reflect.Int64:
-		// Because we extensively run on 64-bit architectures and protobuf
-		// doesn't have the architecture switching int type, for consistency,
-		// we always use int64 in our protos to represent int in go.
-		convErr.toType = "int64"
-	case reflect.Int32:
-		convErr.toType = "int32"
-	}
+	// Because we extensively run on 64-bit architectures and protobuf
+	// doesn't have the architecture switching int type, for consistency,
+	// we always use int64 in our protos to represent int in go.
 
 	val, err := protobufConvertToInt64(logValue)
 	if err != nil {
-		convErr.err = err
-		return convErr
+		return errors.Trace(err)
 	}
 
 	field.SetInt(val)
@@ -595,26 +584,14 @@ func setProtobufIntField(field reflect.Value, fieldType reflect.StructField, log
 }
 
 func setProtobufUintField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
-	convErr := &protobufConversionError{
-		fieldName: fieldType.Name,
-		fromType:  fmt.Sprintf("%T", logValue),
-		value:     logValue,
-	}
 
-	switch field.Kind() {
-	case reflect.Uint, reflect.Uint64:
-		// Because we extensively run on 64-bit architectures and protobuf
-		// doesn't have the architecture switching int type, for consistency,
-		// we always use uint64 in our protos to represent uint in go.
-		convErr.toType = "uint64"
-	case reflect.Uint32:
-		convErr.toType = "uint32"
-	}
+	// Because we extensively run on 64-bit architectures and protobuf
+	// doesn't have the architecture switching int type, for consistency,
+	// we always use uint64 in our protos to represent uint in go.
 
 	val, err := protobufConvertToUint64(logValue)
 	if err != nil {
-		convErr.err = err
-		return convErr
+		return errors.Trace(err)
 	}
 
 	field.SetUint(val)
@@ -624,13 +601,7 @@ func setProtobufUintField(field reflect.Value, fieldType reflect.StructField, lo
 func setProtobufFloat64Field(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	val, err := protobufConvertToFloat64(logValue)
 	if err != nil {
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "float64",
-			value:     logValue,
-			err:       err,
-		}
+		return errors.Trace(err)
 	}
 
 	field.SetFloat(val)
@@ -640,13 +611,7 @@ func setProtobufFloat64Field(field reflect.Value, fieldType reflect.StructField,
 func setProtobufBoolField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	val, err := protobufConvertToBool(logValue)
 	if err != nil {
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "bool",
-			value:     logValue,
-			err:       err,
-		}
+		return errors.Trace(err)
 	}
 
 	field.SetBool(val)
@@ -656,13 +621,7 @@ func setProtobufBoolField(field reflect.Value, fieldType reflect.StructField, lo
 func setProtobufMapField(field reflect.Value, fieldType reflect.StructField, logValue any) error {
 	mapValue, ok := logValue.(map[string]int64)
 	if !ok {
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "map[string]int64",
-			value:     logValue,
-			err:       fmt.Errorf("expected map[string]int64"),
-		}
+		return errors.TraceNew("expected map[string]int64")
 	}
 
 	newMap := reflect.MakeMap(field.Type())
@@ -682,13 +641,7 @@ func setProtobufSliceField(field reflect.Value, fieldType reflect.StructField, l
 		for i, elem := range sliceValue {
 			str, ok := elem.(string)
 			if !ok {
-				return &protobufConversionError{
-					fieldName: fieldType.Name,
-					fromType:  fmt.Sprintf("%T", elem),
-					toType:    "string",
-					value:     elem,
-					err:       fmt.Errorf("slice element at index %d is not a string", i),
-				}
+				return errors.Tracef("slice element at index %d is not a string", i)
 			}
 			newSlice = append(newSlice, str)
 		}
@@ -715,29 +668,24 @@ func setProtobufSliceField(field reflect.Value, fieldType reflect.StructField, l
 		field.Set(reflect.ValueOf(newSlice))
 
 	default:
-		return &protobufConversionError{
-			fieldName: fieldType.Name,
-			fromType:  fmt.Sprintf("%T", logValue),
-			toType:    "[]string",
-			value:     logValue,
-			err:       fmt.Errorf("expected []any or []string"),
-		}
+		return errors.TraceNew("unexpected slice type")
 	}
 
 	return nil
 }
 
 func protobufConvertToString(value any) (string, error) {
+	var s string
 	switch v := value.(type) {
 	case string:
-		return v, nil
-
+		s = v
 	case fmt.Stringer:
-		return v.String(), nil
-
+		s = v.String()
 	default:
-		return "", fmt.Errorf("cannot convert %T to string", value)
+		return "", errors.Tracef("cannot convert %T to string", value)
 	}
+	// Ensure the string is UTF-8, as required by proto.Marshal.
+	return strings.ToValidUTF8(s, "\uFFFD"), nil
 }
 
 func protobufConvertToInt64(value any) (int64, error) {
@@ -753,7 +701,7 @@ func protobufConvertToInt64(value any) (int64, error) {
 
 	case string:
 		if v == "" {
-			return 0, fmt.Errorf("cannot convert empty string to int64")
+			return 0, errors.TraceNew("cannot convert empty string to int64")
 		}
 
 		return strconv.ParseInt(v, 10, 64)
@@ -764,13 +712,13 @@ func protobufConvertToInt64(value any) (int64, error) {
 			return int64(v), nil
 		}
 
-		return 0, fmt.Errorf("float64 %f is not a whole number", v)
+		return 0, errors.Tracef("float64 %f is not a whole number", v)
 
 	case time.Duration:
 		return int64(v), nil
 
 	default:
-		return 0, fmt.Errorf("cannot convert %T to int64", value)
+		return 0, errors.Tracef("cannot convert %T to int64", value)
 	}
 }
 
@@ -787,27 +735,27 @@ func protobufConvertToUint64(value any) (uint64, error) {
 
 	case int:
 		if v < 0 {
-			return 0, fmt.Errorf("cannot convert negative int %d to uint64", v)
+			return 0, errors.Tracef("cannot convert negative int %d to uint64", v)
 		}
 
 		return uint64(v), nil
 
 	case int64:
 		if v < 0 {
-			return 0, fmt.Errorf("cannot convert negative int64 %d to uint64", v)
+			return 0, errors.Tracef("cannot convert negative int64 %d to uint64", v)
 		}
 
 		return uint64(v), nil
 
 	case string:
 		if v == "" {
-			return 0, fmt.Errorf("cannot convert empty string to uint64")
+			return 0, errors.TraceNew("cannot convert empty string to uint64")
 		}
 
 		return strconv.ParseUint(v, 10, 64)
 
 	default:
-		return 0, fmt.Errorf("cannot convert %T to uint64", value)
+		return 0, errors.Tracef("cannot convert %T to uint64", value)
 	}
 }
 
@@ -827,13 +775,13 @@ func protobufConvertToFloat64(value any) (float64, error) {
 
 	case string:
 		if v == "" {
-			return 0, fmt.Errorf("cannot convert empty string to float64")
+			return 0, errors.TraceNew("cannot convert empty string to float64")
 		}
 
 		return strconv.ParseFloat(v, 64)
 
 	default:
-		return 0, fmt.Errorf("cannot convert %T to float64", value)
+		return 0, errors.Tracef("cannot convert %T to float64", value)
 	}
 }
 
@@ -851,7 +799,7 @@ func protobufConvertToBool(value any) (bool, error) {
 			return false, nil
 
 		default:
-			return false, fmt.Errorf("cannot convert string %q to bool", v)
+			return false, errors.Tracef("cannot convert string %q to bool", v)
 		}
 	case int:
 		return v != 0, nil
@@ -875,14 +823,14 @@ func protobufConvertToTimestamp(value any) (*timestamppb.Timestamp, error) {
 		var t time.Time
 		for _, format := range []string{
 			time.RFC3339Nano,
-			"2006-01-02T15:04:05.999999999Z0700", // ISO8601 w/ optional TZ offset; up to nanosecond precision.
+			iso8601Date,
 		} {
 			if t, err = time.Parse(format, v); err == nil {
 				break
 			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("cannot parse timestamp string %q", v)
+			return nil, errors.Tracef("cannot parse timestamp string %q", v)
 		}
 
 		return timestamppb.New(t), nil
@@ -902,6 +850,6 @@ func protobufConvertToTimestamp(value any) (*timestamppb.Timestamp, error) {
 		return timestamppb.New(*v), nil
 
 	default:
-		return nil, fmt.Errorf("cannot convert %T to timestamp", value)
+		return nil, errors.Tracef("cannot convert %T to timestamp", value)
 	}
 }

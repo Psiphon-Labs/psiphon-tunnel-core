@@ -135,7 +135,7 @@ func (b *InproxyBrokerClientManager) NetworkChanged() error {
 }
 
 // GetBrokerClient returns the current, shared broker client and its
-// corresponding dial parametrers (for metrics logging). If there is no
+// corresponding dial parameters (for metrics logging). If there is no
 // current broker client, if the network ID differs from the network ID
 // associated with the previous broker client, a new broker client is
 // initialized.
@@ -331,6 +331,7 @@ type InproxyBrokerClientInstance struct {
 	offerRetryDelay               time.Duration
 	offerRetryJitter              float64
 	relayedPacketRequestTimeout   time.Duration
+	dslRequestTimeout             time.Duration
 	replayRetainFailedProbability float64
 	replayUpdateFrequency         time.Duration
 	retryOnFailedPeriod           time.Duration
@@ -357,14 +358,16 @@ func NewInproxyBrokerClientInstance(
 
 	// Select common or personal compartment IDs. Clients must provide at
 	// least on compartment ID.
+	//
+	// A here check for !isProxy && len(commonCompartmentIDs) == 0 && len
+	// (personalCompartmentIDs) == 0 is now deferred until
+	// inproxy.DialClient, to allow broker connections for DSL requests
+	// without in-proxy compartment IDs.
 
 	commonCompartmentIDs, personalCompartmentIDs, err :=
 		prepareInproxyCompartmentIDs(config, p, isProxy)
 	if err != nil {
 		return nil, errors.Trace(err)
-	}
-	if !isProxy && len(commonCompartmentIDs) == 0 && len(personalCompartmentIDs) == 0 {
-		return nil, errors.TraceNew("no compartment IDs")
 	}
 	if len(personalCompartmentIDs) > 1 {
 		return nil, errors.TraceNew("unexpected multiple personal compartment IDs")
@@ -576,6 +579,7 @@ func NewInproxyBrokerClientInstance(
 		offerRetryDelay:               p.Duration(parameters.InproxyClientOfferRetryDelay),
 		offerRetryJitter:              p.Float(parameters.InproxyClientOfferRetryJitter),
 		relayedPacketRequestTimeout:   p.Duration(parameters.InproxyClientRelayedPacketRequestTimeout),
+		dslRequestTimeout:             p.Duration(parameters.InproxyClientDSLRequestTimeout),
 		replayRetainFailedProbability: p.Float(parameters.InproxyReplayBrokerRetainFailedProbability),
 		replayUpdateFrequency:         p.Duration(parameters.InproxyReplayBrokerUpdateFrequency),
 	}
@@ -1147,6 +1151,11 @@ func (b *InproxyBrokerClientInstance) RelayedPacketRequestTimeout() time.Duratio
 	return b.relayedPacketRequestTimeout
 }
 
+// Implements the inproxy.BrokerDialCoordinator interface.
+func (b *InproxyBrokerClientInstance) DSLRequestTimeout() time.Duration {
+	return b.dslRequestTimeout
+}
+
 // InproxyBrokerDialParameters represents a selected broker transport and dial
 // paramaters.
 //
@@ -1300,6 +1309,9 @@ func (brokerDialParams *InproxyBrokerDialParameters) GetMetrics() common.LogFiel
 		isReuse = "1"
 	}
 	logFields["inproxy_broker_is_reuse"] = isReuse
+
+	// TODO: include tlsConn.GetMetrics tls_did_resume/tls_sent_ticket.
+	// Requires a reference to the InproxyBrokerRoundTripper.
 
 	return logFields
 }

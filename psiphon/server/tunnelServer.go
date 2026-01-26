@@ -77,7 +77,8 @@ const (
 	PRE_HANDSHAKE_RANDOM_STREAM_MAX_COUNT = 1
 	RANDOM_STREAM_MAX_BYTES               = 10485760
 	ALERT_REQUEST_QUEUE_BUFFER_SIZE       = 16
-	SSH_MAX_CLIENT_COUNT                  = 100000
+	SSH_MAX_CLIENT_COUNT                  = 500000
+	SSH_CLIENT_MAX_DSL_REQUEST_COUNT      = 128
 )
 
 // TunnelServer is the main server that accepts Psiphon client
@@ -150,6 +151,13 @@ func (server *TunnelServer) Run() error {
 
 	var listeners []*sshListener
 
+	defer func() {
+		// Ensure listeners are closed on early error returns.
+		for _, listener := range listeners {
+			listener.Close()
+		}
+	}()
+
 	for tunnelProtocol, listenPort := range support.Config.TunnelProtocolPorts {
 
 		localAddress := net.JoinHostPort(
@@ -213,26 +221,40 @@ func (server *TunnelServer) Run() error {
 				maxPacketSizeAdjustment,
 				support.Config.ObfuscatedSSHKey,
 				enableGQUIC)
+			if err != nil {
+				return errors.Trace(err)
+			}
 
 		} else if protocol.TunnelProtocolUsesRefractionNetworking(tunnelProtocol) {
 
 			listener, err = refraction.Listen(localAddress)
+			if err != nil {
+				return errors.Trace(err)
+			}
 
 		} else if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
 
 			listener, err = net.Listen("tcp", localAddress)
+			if err != nil {
+				return errors.Trace(err)
+			}
 
 		} else {
 
 			// Only direct, unfronted protocol listeners use TCP BPF circumvention
 			// programs.
 			listener, BPFProgramName, err = newTCPListenerWithBPF(support, localAddress)
+			if err != nil {
+				return errors.Trace(err)
+			}
 
 			if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+
 				listener, err = ListenTLSTunnel(support, listener, tunnelProtocol, listenPort)
 				if err != nil {
 					return errors.Trace(err)
 				}
+
 			} else if protocol.TunnelProtocolUsesShadowsocks(tunnelProtocol) {
 
 				logTunnelProtocol := tunnelProtocol
@@ -250,13 +272,6 @@ func (server *TunnelServer) Run() error {
 					return errors.Trace(err)
 				}
 			}
-		}
-
-		if err != nil {
-			for _, existingListener := range listeners {
-				existingListener.Listener.Close()
-			}
-			return errors.Trace(err)
 		}
 
 		tacticsListener := NewTacticsListener(
@@ -402,14 +417,11 @@ func (server *TunnelServer) GetEstablishTunnelsMetrics() (bool, int64) {
 }
 
 type sshServer struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastAuthLog             int64
-	authFailedCount         int64
-	establishLimitedCount   int64
 	support                 *SupportServices
 	establishTunnels        int32
+	lastAuthLog             atomic.Int64
+	authFailedCount         atomic.Int64
+	establishLimitedCount   atomic.Int64
 	concurrentSSHHandshakes semaphore.Semaphore
 	shutdownBroadcast       <-chan struct{}
 	sshHostKey              ssh.Signer
@@ -536,7 +548,7 @@ func newSSHServer(
 			ServerPrivateKey:            inproxyPrivateKey,
 			ServerRootObfuscationSecret: inproxyObfuscationSecret,
 			BrokerRoundTripperMaker:     makeRoundTripper,
-			ProxyMetricsValidator:       getInproxyBrokerAPIParameterValidator(support.Config),
+			ProxyMetricsValidator:       getInproxyBrokerAPIParameterValidator(),
 			ProxyMetricsFormatter:       getInproxyBrokerAPIParameterLogFieldFormatter(),
 
 			// Prefix for proxy metrics log fields in server_tunnel
@@ -616,7 +628,7 @@ func (sshServer *sshServer) setEstablishTunnels(establish bool) {
 func (sshServer *sshServer) checkEstablishTunnels() bool {
 	establishTunnels := atomic.LoadInt32(&sshServer.establishTunnels) == 1
 	if !establishTunnels {
-		atomic.AddInt64(&sshServer.establishLimitedCount, 1)
+		sshServer.establishLimitedCount.Add(1)
 	}
 	return establishTunnels
 }
@@ -631,7 +643,7 @@ func (sshServer *sshServer) checkLoadLimiting() bool {
 
 func (sshServer *sshServer) getEstablishTunnelsMetrics() (bool, int64) {
 	return atomic.LoadInt32(&sshServer.establishTunnels) == 1,
-		atomic.SwapInt64(&sshServer.establishLimitedCount, 0)
+		sshServer.establishLimitedCount.Swap(0)
 }
 
 // additionalTransportData is additional data gathered at transport level,
@@ -1967,6 +1979,7 @@ type sshClient struct {
 	checkedServerEntryTags               int
 	invalidServerEntryTags               int
 	sshProtocolBytesTracker              *sshProtocolBytesTracker
+	dslRequestCount                      int
 }
 
 type trafficState struct {
@@ -2184,11 +2197,8 @@ func (lookup *splitTunnelLookup) lookup(region string) bool {
 }
 
 type inproxyProxyQualityTracker struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	bytesUp         int64
-	bytesDown       int64
+	bytesUp         atomic.Int64
+	bytesDown       atomic.Int64
 	reportTriggered int32
 
 	sshClient       *sshClient
@@ -2226,8 +2236,8 @@ func (t *inproxyProxyQualityTracker) UpdateProgress(
 		return
 	}
 
-	bytesUp := atomic.AddInt64(&t.bytesUp, upstreamBytes)
-	bytesDown := atomic.AddInt64(&t.bytesDown, downstreamBytes)
+	bytesUp := t.bytesUp.Add(upstreamBytes)
+	bytesDown := t.bytesDown.Add(downstreamBytes)
 
 	if (t.targetBytesUp == 0 || bytesUp >= t.targetBytesUp) &&
 		(t.targetBytesDown == 0 || bytesDown >= t.targetBytesDown) &&
@@ -2266,18 +2276,12 @@ func (t *inproxyProxyQualityTracker) UpdateProgress(
 }
 
 type sshProtocolBytesTracker struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	totalBytesRead    int64
-	totalBytesWritten int64
+	totalBytesRead    atomic.Int64
+	totalBytesWritten atomic.Int64
 }
 
 func newSSHProtocolBytesTracker(sshClient *sshClient) *sshProtocolBytesTracker {
-	return &sshProtocolBytesTracker{
-		totalBytesRead:    0,
-		totalBytesWritten: 0,
-	}
+	return &sshProtocolBytesTracker{}
 }
 
 func (t *sshProtocolBytesTracker) UpdateProgress(
@@ -2286,8 +2290,8 @@ func (t *sshProtocolBytesTracker) UpdateProgress(
 	// Concurrency: UpdateProgress may be called concurrently; all accesses to
 	// mutated fields use atomic operations.
 
-	atomic.AddInt64(&t.totalBytesRead, bytesRead)
-	atomic.AddInt64(&t.totalBytesWritten, bytesWritten)
+	t.totalBytesRead.Add(bytesRead)
+	t.totalBytesWritten.Add(bytesWritten)
 }
 
 func newSshClient(
@@ -2899,7 +2903,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 		}
 	}
 
-	if !isHexDigits(sshClient.sshServer.support.Config, sshPasswordPayload.SessionId) ||
+	if !isHexDigits(sshPasswordPayload.SessionId) ||
 		len(sshPasswordPayload.SessionId) != expectedSessionIDLength {
 		return nil, errors.Tracef("invalid session ID for %q", conn.User())
 	}
@@ -2926,7 +2930,7 @@ func (sshClient *sshClient) passwordCallback(conn ssh.ConnMetadata, password []b
 	// This optional, early sponsor ID will be logged with server_tunnel if
 	// the tunnel doesn't reach handshakeState.completed.
 	sponsorID := sshPasswordPayload.SponsorID
-	if sponsorID != "" && !isSponsorID(sshClient.sshServer.support.Config, sponsorID) {
+	if sponsorID != "" && !isSponsorID(sponsorID) {
 		return nil, errors.Tracef("invalid sponsor ID")
 	}
 
@@ -2978,13 +2982,13 @@ func (sshClient *sshClient) authLogCallback(conn ssh.ConnMetadata, method string
 		// retain some record of this activity in case this is relevant to, e.g., a performance
 		// investigation.
 
-		atomic.AddInt64(&sshClient.sshServer.authFailedCount, 1)
+		sshClient.sshServer.authFailedCount.Add(1)
 
-		lastAuthLog := monotime.Time(atomic.LoadInt64(&sshClient.sshServer.lastAuthLog))
+		lastAuthLog := monotime.Time(sshClient.sshServer.lastAuthLog.Load())
 		if monotime.Since(lastAuthLog) > SSH_AUTH_LOG_PERIOD {
 			now := int64(monotime.Now())
-			if atomic.CompareAndSwapInt64(&sshClient.sshServer.lastAuthLog, int64(lastAuthLog), now) {
-				count := atomic.SwapInt64(&sshClient.sshServer.authFailedCount, 0)
+			if sshClient.sshServer.lastAuthLog.CompareAndSwap(int64(lastAuthLog), now) {
+				count := sshClient.sshServer.authFailedCount.Swap(0)
 				log.WithTraceFields(
 					LogFields{"lastError": err, "failedCount": count}).Warning("authentication failures")
 			}
@@ -3667,7 +3671,7 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		sshClient.handshakeState.apiParams,
 		serverTunnelStatParams)
 
-	logFields["tunnel_id"] = base64.RawURLEncoding.EncodeToString(prng.Bytes(protocol.PSIPHON_API_TUNNEL_ID_LENGTH))
+	sshClient.sshServer.support.Config.AddServerEntryTag(logFields)
 
 	if sshClient.isInproxyTunnelProtocol {
 		sshClient.peerGeoIPData.SetLogFieldsWithPrefix("", "inproxy_proxy", logFields)
@@ -3742,14 +3746,13 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 
 		// Only log destination bytes for ASNs that remain enabled in tactics.
 		//
-		// Any counts accumulated before DestinationBytesMetricsASN[s] changes
+		// Any counts accumulated before DestinationBytesMetricsASNs changes
 		// are lost. At this time we can't change destination byte counting
 		// dynamically, after a tactics hot reload, as there may be
 		// destination bytes port forwards that were in place before the
 		// change, which will continue to count.
 
 		destinationBytesMetricsASNs := []string{}
-		destinationBytesMetricsASN := ""
 
 		// Target this using the client, not peer, GeoIP. In the case of
 		// in-proxy tunnel protocols, the client GeoIP fields will be None
@@ -3759,66 +3762,27 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 		p, err := sshClient.sshServer.support.ServerTacticsParametersCache.Get(sshClient.clientGeoIPData)
 		if err == nil && !p.IsNil() {
 			destinationBytesMetricsASNs = p.Strings(parameters.DestinationBytesMetricsASNs)
-			destinationBytesMetricsASN = p.String(parameters.DestinationBytesMetricsASN)
 		}
 		p.Close()
 
-		if destinationBytesMetricsASN != "" {
-
-			// Log any parameters.DestinationBytesMetricsASN data in the
-			// legacy log field format.
-
-			destinationBytesMetrics, ok :=
-				sshClient.destinationBytesMetrics[destinationBytesMetricsASN]
-
-			if ok {
-				bytesUpTCP := destinationBytesMetrics.tcpMetrics.getBytesUp()
-				bytesDownTCP := destinationBytesMetrics.tcpMetrics.getBytesDown()
-				bytesUpUDP := destinationBytesMetrics.udpMetrics.getBytesUp()
-				bytesDownUDP := destinationBytesMetrics.udpMetrics.getBytesDown()
-
-				logFields["dest_bytes_asn"] = destinationBytesMetricsASN
-				logFields["dest_bytes"] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
-				logFields["dest_bytes_up_tcp"] = bytesUpTCP
-				logFields["dest_bytes_down_tcp"] = bytesDownTCP
-				logFields["dest_bytes_up_udp"] = bytesUpUDP
-				logFields["dest_bytes_down_udp"] = bytesDownUDP
-			}
-		}
-
 		if len(destinationBytesMetricsASNs) > 0 {
-
-			destBytes := make(map[string]int64)
-			destBytesUpTCP := make(map[string]int64)
-			destBytesDownTCP := make(map[string]int64)
-			destBytesUpUDP := make(map[string]int64)
-			destBytesDownUDP := make(map[string]int64)
 
 			for _, ASN := range destinationBytesMetricsASNs {
 
-				destinationBytesMetrics, ok :=
-					sshClient.destinationBytesMetrics[ASN]
+				destinationBytesMetrics, ok := sshClient.destinationBytesMetrics[ASN]
 				if !ok {
 					continue
 				}
 
-				bytesUpTCP := destinationBytesMetrics.tcpMetrics.getBytesUp()
-				bytesDownTCP := destinationBytesMetrics.tcpMetrics.getBytesDown()
-				bytesUpUDP := destinationBytesMetrics.udpMetrics.getBytesUp()
-				bytesDownUDP := destinationBytesMetrics.udpMetrics.getBytesDown()
-
-				destBytes[ASN] = bytesUpTCP + bytesDownTCP + bytesUpUDP + bytesDownUDP
-				destBytesUpTCP[ASN] = bytesUpTCP
-				destBytesDownTCP[ASN] = bytesDownTCP
-				destBytesUpUDP[ASN] = bytesUpUDP
-				destBytesDownUDP[ASN] = bytesDownUDP
+				sshClient.sshServer.support.destBytesLogger.AddASNBytes(
+					ASN,
+					sshClient.clientGeoIPData,
+					sshClient.handshakeState.apiParams,
+					destinationBytesMetrics.tcpMetrics.getBytesUp()+
+						destinationBytesMetrics.tcpMetrics.getBytesDown(),
+					destinationBytesMetrics.udpMetrics.getBytesUp()+
+						destinationBytesMetrics.udpMetrics.getBytesDown())
 			}
-
-			logFields["asn_dest_bytes"] = destBytes
-			logFields["asn_dest_bytes_up_tcp"] = destBytesUpTCP
-			logFields["asn_dest_bytes_down_tcp"] = destBytesDownTCP
-			logFields["asn_dest_bytes_up_udp"] = destBytesUpUDP
-			logFields["asn_dest_bytes_down_udp"] = destBytesDownUDP
 		}
 	}
 
@@ -3848,8 +3812,8 @@ func (sshClient *sshClient) logTunnel(additionalMetrics []LogFields) {
 	logFields["bytes"] = bytes
 
 	// Pre-calculate ssh protocol bytes and overhead.
-	sshProtocolBytes := sshClient.sshProtocolBytesTracker.totalBytesWritten +
-		sshClient.sshProtocolBytesTracker.totalBytesRead
+	sshProtocolBytes := sshClient.sshProtocolBytesTracker.totalBytesWritten.Load() +
+		sshClient.sshProtocolBytesTracker.totalBytesRead.Load()
 	logFields["ssh_protocol_bytes"] = sshProtocolBytes
 	logFields["ssh_protocol_bytes_overhead"] = sshProtocolBytes - bytes
 
@@ -4295,8 +4259,6 @@ func (sshClient *sshClient) setHandshakeState(
 		if ok && sessionID != sshClient.sessionID {
 
 			logFields := LogFields{
-				"event_name":                 "irregular_tunnel",
-				"tunnel_error":               "duplicate active authorization",
 				"duplicate_authorization_id": authorizationID,
 			}
 
@@ -4310,7 +4272,14 @@ func (sshClient *sshClient) setHandshakeState(
 			if duplicateClientGeoIPData != sshClient.getClientGeoIPData() {
 				duplicateClientGeoIPData.SetClientLogFieldsWithPrefix("duplicate_authorization_", logFields)
 			}
-			log.LogRawFieldsWithTimestamp(logFields)
+
+			logIrregularTunnel(
+				sshClient.sshServer.support,
+				"", // tunnel protocol is not relevant to authorizations
+				0,
+				"", // GeoIP data is added above
+				errors.TraceNew("duplicate active authorization"),
+				logFields)
 
 			// Invoke asynchronously to avoid deadlocks.
 			// TODO: invoke only once for each distinct sessionID?
@@ -4589,13 +4558,7 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 
 	ASNs := p.Strings(parameters.DestinationBytesMetricsASNs)
 
-	// Merge in any legacy parameters.DestinationBytesMetricsASN
-	// configuration. Data for this target will be logged using the legacy
-	// log field format; see logTunnel. If an ASN is in _both_ configuration
-	// parameters, its data will be logged in both log field formats.
-	ASN := p.String(parameters.DestinationBytesMetricsASN)
-
-	if len(ASNs) == 0 && ASN == "" {
+	if len(ASNs) == 0 {
 		return
 	}
 
@@ -4605,10 +4568,6 @@ func (sshClient *sshClient) setDestinationBytesMetrics() {
 		if ASN != "" {
 			sshClient.destinationBytesMetrics[ASN] = &protocolDestinationBytesMetrics{}
 		}
-	}
-
-	if ASN != "" {
-		sshClient.destinationBytesMetrics[ASN] = &protocolDestinationBytesMetrics{}
 	}
 }
 

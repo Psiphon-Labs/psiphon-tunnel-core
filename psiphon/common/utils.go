@@ -133,23 +133,43 @@ func TruncateTimestampToHour(timestamp string) string {
 	return t.Truncate(1 * time.Hour).Format(time.RFC3339)
 }
 
-// Compress returns zlib compressed data
-func Compress(data []byte) []byte {
+const (
+	CompressionNone = int32(0)
+	CompressionZlib = int32(1)
+)
+
+// Compress compresses data with the specified algorithm.
+func Compress(compression int32, data []byte) ([]byte, error) {
+	if compression == CompressionNone {
+		return data, nil
+	}
+	if compression != CompressionZlib {
+		return nil, errors.TraceNew("unknown compression algorithm")
+	}
 	var compressedData bytes.Buffer
 	writer := zlib.NewWriter(&compressedData)
-	_, _ = writer.Write(data)
+	_, err := writer.Write(data)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 	_ = writer.Close()
-	return compressedData.Bytes()
+	return compressedData.Bytes(), nil
 }
 
-// Decompress returns zlib decompressed data
-func Decompress(data []byte) ([]byte, error) {
+// Decompress decompresses data with the specified algorithm.
+func Decompress(compression int32, data []byte) ([]byte, error) {
+	if compression == CompressionNone {
+		return data, nil
+	}
+	if compression != CompressionZlib {
+		return nil, errors.TraceNew("unknown compression algorithm")
+	}
 	reader, err := zlib.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	uncompressedData, err := ioutil.ReadAll(reader)
-	reader.Close()
+	_ = reader.Close()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

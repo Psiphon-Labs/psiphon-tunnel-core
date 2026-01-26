@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
+	pb "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond"
 	"github.com/fxamacker/cbor/v2"
 )
 
@@ -45,6 +46,7 @@ const (
 	CLIENT_PLATFORM_ANDROID = "Android"
 	CLIENT_PLATFORM_WINDOWS = "Windows"
 	CLIENT_PLATFORM_IOS     = "iOS"
+	CLIENT_PLATFORM_OTHER   = "Other"
 
 	SPONSOR_ID_LENGTH = 16
 )
@@ -61,6 +63,42 @@ func sshAPIRequestHandler(
 	sshClient *sshClient,
 	name string,
 	requestPayload []byte) ([]byte, error) {
+
+	// Before invoking the handlers, enforce some preconditions:
+	//
+	// - A handshake request must precede any other requests.
+	// - When the handshake results in a traffic rules state where
+	//   the client is immediately exhausted, no requests
+	//   may succeed. This case ensures that blocked clients do
+	//   not log "connected", etc.
+	//
+	// Only one handshake request may be made. There is no check here
+	// to enforce that handshakeAPIRequestHandler will be called at
+	// most once. The SetHandshakeState call in handshakeAPIRequestHandler
+	// enforces that only a single handshake is made; enforcing that there
+	// ensures no race condition even if concurrent requests are
+	// in flight.
+
+	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
+
+		completed, exhausted := sshClient.getHandshaked()
+		if !completed {
+			return nil, errors.TraceNew("handshake not completed")
+		}
+		if exhausted {
+			return nil, errors.TraceNew("exhausted after handshake")
+		}
+	}
+
+	// Here, the DSL request is and opaque payload. The DSL backend (or relay)
+	// will handle the API parameters and this case skips APIParameters
+	// processing.
+
+	if name == protocol.PSIPHON_API_DSL_REQUEST_NAME {
+		responsePayload, err := dslAPIRequestHandler(
+			support, sshClient, requestPayload)
+		return responsePayload, errors.Trace(err)
+	}
 
 	// Notes:
 	//
@@ -92,32 +130,6 @@ func sshAPIRequestHandler(
 		}
 	}
 
-	// Before invoking the handlers, enforce some preconditions:
-	//
-	// - A handshake request must precede any other requests.
-	// - When the handshake results in a traffic rules state where
-	//   the client is immediately exhausted, no requests
-	//   may succeed. This case ensures that blocked clients do
-	//   not log "connected", etc.
-	//
-	// Only one handshake request may be made. There is no check here
-	// to enforce that handshakeAPIRequestHandler will be called at
-	// most once. The SetHandshakeState call in handshakeAPIRequestHandler
-	// enforces that only a single handshake is made; enforcing that there
-	// ensures no race condition even if concurrent requests are
-	// in flight.
-
-	if name != protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME {
-
-		completed, exhausted := sshClient.getHandshaked()
-		if !completed {
-			return nil, errors.TraceNew("handshake not completed")
-		}
-		if exhausted {
-			return nil, errors.TraceNew("exhausted after handshake")
-		}
-	}
-
 	switch name {
 
 	case protocol.PSIPHON_API_HANDSHAKE_REQUEST_NAME:
@@ -131,16 +143,19 @@ func sshAPIRequestHandler(
 		return responsePayload, nil
 
 	case protocol.PSIPHON_API_CONNECTED_REQUEST_NAME:
-		return connectedAPIRequestHandler(
+		responsePayload, err := connectedAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 
 	case protocol.PSIPHON_API_STATUS_REQUEST_NAME:
-		return statusAPIRequestHandler(
+		responsePayload, err := statusAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 
 	case protocol.PSIPHON_API_CLIENT_VERIFICATION_REQUEST_NAME:
-		return clientVerificationAPIRequestHandler(
+		responsePayload, err := clientVerificationAPIRequestHandler(
 			support, sshClient, params)
+		return responsePayload, errors.Trace(err)
 	}
 
 	return nil, errors.Tracef("invalid request name: %s", name)
@@ -237,7 +252,7 @@ func handshakeAPIRequestHandler(
 
 	// Note: ignoring legacy "known_servers" params
 
-	err := validateRequestParams(support.Config, params, handshakeRequestParams)
+	err := validateRequestParams(params, handshakeRequestParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -292,8 +307,19 @@ func handshakeAPIRequestHandler(
 
 	httpsRequestRegexes, domainBytesChecksum := db.GetHttpsRequestRegexes(sponsorID)
 
+	// When compressed tactics are requested, use CBOR binary encoding for the
+	// response.
+
+	var responseMarshaler func(any) ([]byte, error)
+	responseMarshaler = json.Marshal
+
+	compressTactics := protocol.GetCompressTactics(params)
+	if compressTactics {
+		responseMarshaler = protocol.CBOREncoding.Marshal
+	}
+
 	tacticsPayload, err := support.TacticsServer.GetTacticsPayload(
-		common.GeoIPData(clientGeoIPData), params)
+		common.GeoIPData(clientGeoIPData), params, compressTactics)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -350,6 +376,9 @@ func handshakeAPIRequestHandler(
 	}
 
 	pad_response, _ := getPaddingSizeRequestParam(params, "pad_response")
+
+	// TODO: as a future enhancement, use the packed, CBOR encoding --
+	// protocol.EncodePackedServerEntryFields -- for server entries.
 
 	// Discover new servers
 
@@ -421,7 +450,7 @@ func handshakeAPIRequestHandler(
 
 	var marshaledTacticsPayload []byte
 	if tacticsPayload != nil {
-		marshaledTacticsPayload, err = json.Marshal(tacticsPayload)
+		marshaledTacticsPayload, err = responseMarshaler(tacticsPayload)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -444,10 +473,7 @@ func handshakeAPIRequestHandler(
 		Padding:                  strings.Repeat(" ", pad_response),
 	}
 
-	// TODO: as a future enhancement, pack and CBOR encode this and other API
-	// responses
-
-	responsePayload, err := json.Marshal(handshakeResponse)
+	responsePayload, err := responseMarshaler(handshakeResponse)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -593,7 +619,7 @@ func connectedAPIRequestHandler(
 	sshClient *sshClient,
 	params common.APIParameters) ([]byte, error) {
 
-	err := validateRequestParams(support.Config, params, connectedRequestParams)
+	err := validateRequestParams(params, connectedRequestParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -736,7 +762,7 @@ func statusAPIRequestHandler(
 	sshClient *sshClient,
 	params common.APIParameters) ([]byte, error) {
 
-	err := validateRequestParams(support.Config, params, statusRequestParams)
+	err := validateRequestParams(params, statusRequestParams)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -771,20 +797,13 @@ func statusAPIRequestHandler(
 			return nil, errors.Trace(err)
 		}
 		for domain, bytes := range hostBytes {
-
-			domainBytesFields := getRequestLogFields(
-				"domain_bytes",
-				"",
-				sshClient.sessionID,
+			// Limitation: only TCP bytes are reported.
+			support.destBytesLogger.AddDomainBytes(
+				domain,
 				sshClient.getClientGeoIPData(),
-				authorizedAccessTypes,
-				params,
-				statusRequestParams)
-
-			domainBytesFields["domain"] = domain
-			domainBytesFields["bytes"] = bytes
-
-			logQueue = append(logQueue, domainBytesFields)
+				sshClient.handshakeState.apiParams,
+				bytes,
+				0)
 		}
 	}
 
@@ -811,7 +830,7 @@ func statusAPIRequestHandler(
 				}
 			}
 
-			err := validateRequestParams(support.Config, remoteServerListStat, remoteServerListStatParams)
+			err := validateRequestParams(remoteServerListStat, remoteServerListStatParams)
 			if err != nil {
 				// Occasionally, clients may send corrupt persistent stat data. Do not
 				// fail the status request, as this will lead to endless retries.
@@ -849,7 +868,7 @@ func statusAPIRequestHandler(
 
 		for _, failedTunnelStat := range failedTunnelStats {
 
-			err := validateRequestParams(support.Config, failedTunnelStat, failedTunnelStatParams)
+			err := validateRequestParams(failedTunnelStat, failedTunnelStatParams)
 			if err != nil {
 				// Occasionally, clients may send corrupt persistent stat data. Do not
 				// fail the status request, as this will lead to endless retries.
@@ -987,6 +1006,44 @@ func clientVerificationAPIRequestHandler(
 	return make([]byte, 0), nil
 }
 
+// dslAPIRequestHandler forwards DSL relay requests. The DSL backend
+// (or relay) will handle API parameter processing and event logging.
+func dslAPIRequestHandler(
+	support *SupportServices,
+	sshClient *sshClient,
+	requestPayload []byte) ([]byte, error) {
+
+	// Sanity check: don't relay more than the modest number of DSL requests
+	// expected in the tunneled case. The DSL backend has its own rate limit
+	// enforcement, but avoiding excess requests here saves on resources
+	// consumed between the relay and backend.
+	//
+	// The equivalent pre-relay check in the in-proxy broker uses an explicit
+	// rate limiter; here a simpler hard limit per tunnel suffices due to the
+	// low limit size and the fact that tunnel dials are themselves rate
+	// limited.
+	ok := false
+	sshClient.Lock()
+	if sshClient.dslRequestCount < SSH_CLIENT_MAX_DSL_REQUEST_COUNT {
+		ok = true
+		sshClient.dslRequestCount += 1
+	}
+	sshClient.Unlock()
+	if !ok {
+		return nil, errors.TraceNew("too many DSL requests")
+	}
+
+	responsePayload, err := dslHandleRequest(
+		sshClient.runCtx,
+		support,
+		nil, // no extendTimeout
+		sshClient.getClientIP(),
+		common.GeoIPData(sshClient.getClientGeoIPData()),
+		true, // client request is tunneled
+		requestPayload)
+	return responsePayload, errors.Trace(err)
+}
+
 var tacticsParams = []requestParamSpec{
 	{tactics.STORED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
 	{tactics.SPEED_TEST_SAMPLES_PARAMETER_NAME, nil, requestParamOptional | requestParamJSON},
@@ -999,9 +1056,9 @@ var tacticsRequestParams = append(
 		tacticsParams...),
 	baseAndDialParams...)
 
-func getTacticsAPIParameterValidator(config *Config) common.APIParameterValidator {
+func getTacticsAPIParameterValidator() common.APIParameterValidator {
 	return func(params common.APIParameters) error {
-		return validateRequestParams(config, params, tacticsRequestParams)
+		return validateRequestParams(params, tacticsRequestParams)
 	}
 }
 
@@ -1030,9 +1087,9 @@ var inproxyBrokerRequestParams = append(
 		tacticsParams...),
 	baseParams...)
 
-func getInproxyBrokerAPIParameterValidator(config *Config) common.APIParameterValidator {
+func getInproxyBrokerAPIParameterValidator() common.APIParameterValidator {
 	return func(params common.APIParameters) error {
-		return validateRequestParams(config, params, inproxyBrokerRequestParams)
+		return validateRequestParams(params, inproxyBrokerRequestParams)
 	}
 }
 
@@ -1070,12 +1127,84 @@ func getInproxyBrokerServerReportParameterLogFieldFormatter() common.APIParamete
 	}
 }
 
+var dslRequestParams = append(
+	append(
+		[]requestParamSpec{
+			{"session_id", isHexDigits, 0},
+			{"fronting_provider_id", isAnyString, requestParamOptional}},
+		tacticsParams...),
+	baseParams...)
+
+func getDSLAPIParameterValidator() common.APIParameterValidator {
+	return func(params common.APIParameters) error {
+		return validateRequestParams(params, dslRequestParams)
+	}
+}
+
+func getDSLAPIParameterLogFieldFormatter() common.APIParameterLogFieldFormatter {
+
+	return func(prefix string, geoIPData common.GeoIPData, params common.APIParameters) common.LogFields {
+
+		logFields := getRequestLogFields(
+			"dsl_relay",
+			prefix,
+			"", // Use the session_id the client reported
+			GeoIPData(geoIPData),
+			nil,
+			params,
+			dslRequestParams)
+
+		return common.LogFields(logFields)
+	}
+}
+
+// TODO: add session_id to baseParams?
+var sessionBaseParams = append(
+	[]requestParamSpec{
+		{"session_id", isHexDigits, 0}},
+	baseParams...)
+
+// ValidateAndGetProtobufBaseParams unpacks and validates the input base API
+// parameters and returns the parameters in a pb/psiphond.BaseParams struct.
+//
+// Not all fields in pb/psiphond.BaseParams are populated; some fields, such
+// as GeoIP fields and authorized_access_types, are not accepted from clients
+// and are populated by the server; other fields, such as last_connected, are
+// only sent by the client for certain API requests.
+//
+// Note that the underlying protobuf converter code may intentionally panic in
+// unexpected cases such as a mismatch in log field and protobuf struct field
+// types.
+func ValidateAndGetProtobufBaseParams(
+	packedParams protocol.PackedAPIParameters) (*pb.BaseParams, error) {
+
+	params, err := protocol.DecodePackedAPIParameters(packedParams)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	expectedParams := sessionBaseParams
+
+	err = validateRequestParams(
+		params, expectedParams)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	logFields := getRequestLogFields(
+		"", "", "", GeoIPData{}, nil, params, expectedParams)
+
+	baseParams := protobufPopulateBaseParams(logFields)
+
+	return baseParams, nil
+}
+
 // requestParamSpec defines a request parameter. Each param is expected to be
 // a string, unless requestParamArray is specified, in which case an array of
 // strings is expected.
 type requestParamSpec struct {
 	name      string
-	validator func(*Config, string) bool
+	validator func(string) bool
 	flags     uint32
 }
 
@@ -1090,6 +1219,7 @@ const (
 	requestParamLogFlagAsBool                                 = 1 << 7
 	requestParamLogOnlyForFrontedMeekOrConjure                = 1 << 8
 	requestParamNotLoggedForUnfrontedMeekNonTransformedHeader = 1 << 9
+	requestParamLogOmittedFlagAsFalse                         = 1 << 10
 )
 
 // baseParams are the basic request parameters that are expected for all API
@@ -1103,8 +1233,10 @@ var baseParams = []requestParamSpec{
 	{"client_build_rev", isHexDigits, requestParamOptional},
 	{"device_region", isAnyString, requestParamOptional},
 	{"device_location", isGeoHashString, requestParamOptional},
+	{"egress_region", isRegionCode, requestParamOptional},
 	{"network_type", isAnyString, requestParamOptional},
 	{tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME, isAnyString, requestParamOptional},
+	{"compress_response", isIntString, requestParamOptional | requestParamNotLogged},
 }
 
 // baseDialParams are the dial parameters, per-tunnel network protocol and
@@ -1138,8 +1270,9 @@ var baseDialParams = []requestParamSpec{
 	{"upstream_max_delayed", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"padding", isAnyString, requestParamOptional | requestParamLogStringLengthAsInt},
 	{"pad_response", isIntString, requestParamOptional | requestParamLogStringAsInt},
-	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
-	{"egress_region", isRegionCode, requestParamOptional},
+	{"is_replay", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
+	{"replay_ignored_change", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
+	{"dsl_prioritized", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool | requestParamLogOmittedFlagAsFalse},
 	{"dial_duration", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"candidate_number", isIntString, requestParamOptional | requestParamLogStringAsInt},
 	{"established_tunnels_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
@@ -1182,6 +1315,10 @@ var baseDialParams = []requestParamSpec{
 	{"quic_did_resume", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"quic_dial_early", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
 	{"quic_obfuscated_psk", isBooleanFlag, requestParamOptional | requestParamLogFlagAsBool},
+	{"server_entry_count", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"unique_candidate_estimate", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"candidates_moved_to_front", isIntString, requestParamOptional | requestParamLogStringAsInt},
+	{"first_fronted_meek_candidate", isIntString, requestParamOptional | requestParamLogStringAsInt},
 }
 
 var inproxyDialParams = []requestParamSpec{
@@ -1255,7 +1392,6 @@ var baseAndDialParams = append(
 	inproxyDialParams...)
 
 func validateRequestParams(
-	config *Config,
 	params common.APIParameters,
 	expectedParams []requestParamSpec) error {
 
@@ -1270,7 +1406,7 @@ func validateRequestParams(
 		var err error
 		switch {
 		case expectedParam.flags&requestParamArray != 0:
-			err = validateStringArrayRequestParam(config, expectedParam, value)
+			err = validateStringArrayRequestParam(expectedParam, value)
 		case expectedParam.flags&requestParamJSON != 0:
 			// No validation: the JSON already unmarshalled; the parameter
 			// user will validate that the JSON contains the expected
@@ -1281,7 +1417,7 @@ func validateRequestParams(
 			// and rejects the parameter.
 
 		default:
-			err = validateStringRequestParam(config, expectedParam, value)
+			err = validateStringRequestParam(expectedParam, value)
 		}
 		if err != nil {
 			return errors.Trace(err)
@@ -1323,7 +1459,6 @@ func copyUpdateOnConnectedParams(params common.APIParameters) common.APIParamete
 }
 
 func validateStringRequestParam(
-	config *Config,
 	expectedParam requestParamSpec,
 	value interface{}) error {
 
@@ -1331,14 +1466,13 @@ func validateStringRequestParam(
 	if !ok {
 		return errors.Tracef("unexpected string param type: %s", expectedParam.name)
 	}
-	if !expectedParam.validator(config, strValue) {
+	if !expectedParam.validator(strValue) {
 		return errors.Tracef("invalid param: %s: %s", expectedParam.name, strValue)
 	}
 	return nil
 }
 
 func validateStringArrayRequestParam(
-	config *Config,
 	expectedParam requestParamSpec,
 	value interface{}) error {
 
@@ -1347,7 +1481,7 @@ func validateStringArrayRequestParam(
 		return errors.Tracef("unexpected array param type: %s", expectedParam.name)
 	}
 	for _, value := range arrayValue {
-		err := validateStringRequestParam(config, expectedParam, value)
+		err := validateStringRequestParam(expectedParam, value)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -1436,9 +1570,10 @@ func getRequestLogFields(
 		value := params[expectedParam.name]
 		if value == nil {
 
-			// Special case: older clients don't send this value,
-			// so log a default.
-			if expectedParam.name == "tunnel_whole_device" {
+			// Provide a "false" default for specified, omitted boolean flag params.
+
+			if expectedParam.flags&requestParamLogFlagAsBool != 0 &&
+				expectedParam.flags&requestParamLogOmittedFlagAsFalse != 0 {
 				value = "0"
 			} else {
 				// Skip omitted, optional params
@@ -1466,7 +1601,7 @@ func getRequestLogFields(
 
 			case "meek_dial_address":
 				host, _, _ := net.SplitHostPort(strValue)
-				if isIPAddress(nil, host) {
+				if isIPAddress(host) {
 					name = "meek_dial_ip_address"
 				} else {
 					name = "meek_dial_domain"
@@ -1728,13 +1863,11 @@ func normalizeClientPlatform(clientPlatform string) string {
 		return CLIENT_PLATFORM_ANDROID
 	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_IOS) {
 		return CLIENT_PLATFORM_IOS
+	} else if strings.HasPrefix(clientPlatform, CLIENT_PLATFORM_WINDOWS) {
+		return CLIENT_PLATFORM_WINDOWS
 	}
 
-	return CLIENT_PLATFORM_WINDOWS
-}
-
-func isAnyString(config *Config, value string) bool {
-	return true
+	return CLIENT_PLATFORM_OTHER
 }
 
 func isMobileClientPlatform(clientPlatform string) bool {
@@ -1743,66 +1876,70 @@ func isMobileClientPlatform(clientPlatform string) bool {
 		normalizedClientPlatform == CLIENT_PLATFORM_IOS
 }
 
-// Input validators follow the legacy validations rules in psi_web.
-
-func isSponsorID(config *Config, value string) bool {
-	return len(value) == SPONSOR_ID_LENGTH && isHexDigits(config, value)
+func isAnyString(value string) bool {
+	return true
 }
 
-func isHexDigits(_ *Config, value string) bool {
+// Input validators follow the legacy validations rules in psi_web.
+
+func isSponsorID(value string) bool {
+	return len(value) == SPONSOR_ID_LENGTH && isHexDigits(value)
+}
+
+func isHexDigits(value string) bool {
 	// Allows both uppercase in addition to lowercase, for legacy support.
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return !unicode.Is(unicode.ASCII_Hex_Digit, c)
 	})
 }
 
-func isBase64String(_ *Config, value string) bool {
+func isBase64String(value string) bool {
 	_, err := base64.StdEncoding.DecodeString(value)
 	return err == nil
 }
 
-func isUnpaddedBase64String(_ *Config, value string) bool {
+func isUnpaddedBase64String(value string) bool {
 	_, err := base64.RawStdEncoding.DecodeString(value)
 	return err == nil
 }
 
-func isDigits(_ *Config, value string) bool {
+func isDigits(value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		return c < '0' || c > '9'
 	})
 }
 
-func isIntString(_ *Config, value string) bool {
+func isIntString(value string) bool {
 	_, err := strconv.Atoi(value)
 	return err == nil
 }
 
-func isFloatString(_ *Config, value string) bool {
+func isFloatString(value string) bool {
 	_, err := strconv.ParseFloat(value, 64)
 	return err == nil
 }
 
-func isClientPlatform(_ *Config, value string) bool {
+func isClientPlatform(value string) bool {
 	return -1 == strings.IndexFunc(value, func(c rune) bool {
 		// Note: stricter than psi_web's Python string.whitespace
 		return unicode.Is(unicode.White_Space, c)
 	})
 }
 
-func isRelayProtocol(_ *Config, value string) bool {
+func isRelayProtocol(value string) bool {
 	return common.Contains(protocol.SupportedTunnelProtocols, value)
 }
 
-func isBooleanFlag(_ *Config, value string) bool {
+func isBooleanFlag(value string) bool {
 	return value == "0" || value == "1"
 }
 
-func isUpstreamProxyType(_ *Config, value string) bool {
+func isUpstreamProxyType(value string) bool {
 	value = strings.ToLower(value)
 	return value == "http" || value == "socks5" || value == "socks4a"
 }
 
-func isRegionCode(_ *Config, value string) bool {
+func isRegionCode(value string) bool {
 	if len(value) != 2 {
 		return false
 	}
@@ -1811,16 +1948,16 @@ func isRegionCode(_ *Config, value string) bool {
 	})
 }
 
-func isDialAddress(_ *Config, value string) bool {
+func isDialAddress(value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
 		return false
 	}
-	if !isIPAddress(nil, parts[0]) && !isDomain(nil, parts[0]) {
+	if !isIPAddress(parts[0]) && !isDomain(parts[0]) {
 		return false
 	}
-	if !isDigits(nil, parts[1]) {
+	if !isDigits(parts[1]) {
 		return false
 	}
 	_, err := strconv.Atoi(parts[1])
@@ -1831,13 +1968,13 @@ func isDialAddress(_ *Config, value string) bool {
 	return true
 }
 
-func isIPAddress(_ *Config, value string) bool {
+func isIPAddress(value string) bool {
 	return net.ParseIP(value) != nil
 }
 
 var isDomainRegex = regexp.MustCompile(`[a-zA-Z\d-]{1,63}$`)
 
-func isDomain(_ *Config, value string) bool {
+func isDomain(value string) bool {
 
 	// From: http://stackoverflow.com/questions/2532053/validate-a-hostname-string
 	//
@@ -1864,32 +2001,33 @@ func isDomain(_ *Config, value string) bool {
 	return true
 }
 
-func isHostHeader(_ *Config, value string) bool {
+func isHostHeader(value string) bool {
 	// "<host>:<port>", where <host> is a domain or IP address and ":<port>" is optional
 	if strings.Contains(value, ":") {
-		return isDialAddress(nil, value)
+		return isDialAddress(value)
 	}
-	return isIPAddress(nil, value) || isDomain(nil, value)
+	return isIPAddress(value) || isDomain(value)
 }
 
-func isServerEntrySource(_ *Config, value string) bool {
-	return common.Contains(protocol.SupportedServerEntrySources, value)
+func isServerEntrySource(value string) bool {
+	return common.ContainsWildcard(protocol.SupportedServerEntrySources, value)
 }
 
-var isISO8601DateRegex = regexp.MustCompile(
-	`(?P<year>[0-9]{4})-(?P<month>[0-9]{1,2})-(?P<day>[0-9]{1,2})T(?P<hour>[0-9]{2}):(?P<minute>[0-9]{2}):(?P<second>[0-9]{2})(\.(?P<fraction>[0-9]+))?(?P<timezone>Z|(([-+])([0-9]{2}):([0-9]{2})))`)
+// ISO8601 with optional TZ offset; up to nanosecond precision.
+const iso8601Date = "2006-01-02T15:04:05.999999999Z0700"
 
-func isISO8601Date(_ *Config, value string) bool {
-	return isISO8601DateRegex.Match([]byte(value))
+func isISO8601Date(value string) bool {
+	_, err := time.Parse(iso8601Date, value)
+	return err == nil
 }
 
-func isLastConnected(_ *Config, value string) bool {
-	return value == "None" || isISO8601Date(nil, value)
+func isLastConnected(value string) bool {
+	return value == "None" || isISO8601Date(value)
 }
 
 const geohashAlphabet = "0123456789bcdefghjkmnpqrstuvwxyz"
 
-func isGeoHashString(_ *Config, value string) bool {
+func isGeoHashString(value string) bool {
 	// Verify that the string is between 1 and 12 characters long
 	// and contains only characters from the geohash alphabet.
 	if len(value) < 1 || len(value) > 12 {

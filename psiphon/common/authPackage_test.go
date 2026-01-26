@@ -59,7 +59,7 @@ func TestAuthenticatedPackage(t *testing.T) {
 		t.Fatalf("GenerateAuthenticatedDataPackageKeys failed: %s", err)
 	}
 
-	packageJSON, err := Decompress(packagePayload)
+	packageJSON, err := Decompress(CompressionZlib, packagePayload)
 	if err != nil {
 		t.Fatalf("Uncompress failed: %s", err)
 	}
@@ -76,7 +76,10 @@ func TestAuthenticatedPackage(t *testing.T) {
 		t.Fatalf("Marshal failed: %s", err)
 	}
 
-	tamperedPackagePayload := Compress(tamperedPackageJSON)
+	tamperedPackagePayload, err := Compress(CompressionZlib, tamperedPackageJSON)
+	if err != nil {
+		t.Fatalf("Compress failed: %s", err)
+	}
 
 	tamperedTempFileName, err := makeTempFile(tamperedPackagePayload)
 	if err != nil {

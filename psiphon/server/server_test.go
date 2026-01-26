@@ -52,8 +52,10 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/accesscontrol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
@@ -61,6 +63,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/transforms"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/values"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/internal/testutils"
 	pb "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond"
 	pbr "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/router"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/psinet"
@@ -320,14 +323,15 @@ func TestUnfrontedMeekSessionTicket(t *testing.T) {
 func TestUnfrontedMeekSessionTicketTLS13(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
-			tlsProfile:           protocol.TLS_PROFILE_CHROME_70,
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doLogHostProvider:    true,
-			doLogProtobuf:        useProtobufLogging,
+			tunnelProtocol:        "UNFRONTED-MEEK-SESSION-TICKET-OSSH",
+			tlsProfile:            protocol.TLS_PROFILE_CHROME_70,
+			requireAuthorization:  true,
+			doTunneledWebRequest:  true,
+			doTunneledNTPRequest:  true,
+			doDanglingTCPConn:     true,
+			doLogHostProvider:     true,
+			doLogProtobuf:         useProtobufLogging,
+			doUncompressedTactics: true,
 		})
 }
 
@@ -461,13 +465,14 @@ func TestInproxyTLSOSSH(t *testing.T) {
 	}
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "INPROXY-WEBRTC-TLS-OSSH",
-			requireAuthorization: true,
-			doTunneledWebRequest: true,
-			doTunneledNTPRequest: true,
-			doDanglingTCPConn:    true,
-			doLogHostProvider:    true,
-			doLogProtobuf:        useProtobufLogging,
+			tunnelProtocol:        "INPROXY-WEBRTC-TLS-OSSH",
+			requireAuthorization:  true,
+			doTunneledWebRequest:  true,
+			doTunneledNTPRequest:  true,
+			doDanglingTCPConn:     true,
+			doLogHostProvider:     true,
+			doLogProtobuf:         useProtobufLogging,
+			doUncompressedTactics: true,
 		})
 }
 
@@ -681,7 +686,7 @@ func TestCheckPruneServerEntries(t *testing.T) {
 		})
 }
 
-func TestBurstMonitorAndDestinationBytes(t *testing.T) {
+func TestBurstMonitorAndASNDestBytes(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
@@ -690,40 +695,24 @@ func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doBurstMonitor:       true,
-			doDestinationBytes:   true,
+			doASNDestBytes:       true,
 			doLogHostProvider:    true,
 			doLogProtobuf:        useProtobufLogging,
-		})
-}
-
-func TestBurstMonitorAndLegacyDestinationBytes(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:           "OSSH",
-			requireAuthorization:     true,
-			doTunneledWebRequest:     true,
-			doTunneledNTPRequest:     true,
-			doDanglingTCPConn:        true,
-			doBurstMonitor:           true,
-			doLegacyDestinationBytes: true,
-			doLogHostProvider:        true,
-			doLogProtobuf:            useProtobufLogging,
 		})
 }
 
 func TestChangeBytesConfig(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:           "OSSH",
-			requireAuthorization:     true,
-			doTunneledWebRequest:     true,
-			doTunneledNTPRequest:     true,
-			doDanglingTCPConn:        true,
-			doDestinationBytes:       true,
-			doLegacyDestinationBytes: true,
-			doChangeBytesConfig:      true,
-			doLogHostProvider:        true,
-			doLogProtobuf:            useProtobufLogging,
+			tunnelProtocol:       "OSSH",
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+			doASNDestBytes:       true,
+			doChangeBytesConfig:  true,
+			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -796,40 +785,40 @@ func TestDomainRequest(t *testing.T) {
 }
 
 type runServerConfig struct {
-	tunnelProtocol           string
-	clientTunnelProtocol     string
-	passthrough              bool
-	tlsProfile               string
-	doHotReload              bool
-	doDefaultSponsorID       bool
-	denyTrafficRules         bool
-	requireAuthorization     bool
-	omitAuthorization        bool
-	doTunneledWebRequest     bool
-	doTunneledDomainRequest  bool
-	doTunneledNTPRequest     bool
-	applyPrefix              bool
-	forceFragmenting         bool
-	forceLivenessTest        bool
-	doPruneServerEntries     bool
-	checkPruneServerEntries  bool
-	doDanglingTCPConn        bool
-	doPacketManipulation     bool
-	doBurstMonitor           bool
-	doSplitTunnel            bool
-	limitQUICVersions        bool
-	doDestinationBytes       bool
-	doLegacyDestinationBytes bool
-	doChangeBytesConfig      bool
-	doLogHostProvider        bool
-	inspectFlows             bool
-	doSteeringIP             bool
-	doTargetBrokerSpecs      bool
-	useLegacyAPIEncoding     bool
-	doPersonalPairing        bool
-	doRestrictInproxy        bool
-	useInproxyMediaStreams   bool
-	doLogProtobuf            bool
+	tunnelProtocol          string
+	clientTunnelProtocol    string
+	passthrough             bool
+	tlsProfile              string
+	doHotReload             bool
+	doDefaultSponsorID      bool
+	denyTrafficRules        bool
+	requireAuthorization    bool
+	omitAuthorization       bool
+	doTunneledWebRequest    bool
+	doTunneledDomainRequest bool
+	doTunneledNTPRequest    bool
+	applyPrefix             bool
+	forceFragmenting        bool
+	forceLivenessTest       bool
+	doPruneServerEntries    bool
+	checkPruneServerEntries bool
+	doDanglingTCPConn       bool
+	doPacketManipulation    bool
+	doBurstMonitor          bool
+	doSplitTunnel           bool
+	limitQUICVersions       bool
+	doASNDestBytes          bool
+	doChangeBytesConfig     bool
+	doLogHostProvider       bool
+	inspectFlows            bool
+	doSteeringIP            bool
+	doTargetBrokerSpecs     bool
+	useLegacyAPIEncoding    bool
+	doPersonalPairing       bool
+	doRestrictInproxy       bool
+	useInproxyMediaStreams  bool
+	doUncompressedTactics   bool
+	doLogProtobuf           bool
 }
 
 var (
@@ -841,8 +830,10 @@ var (
 	testClientPlatform                   = "Android_10_com.test.app"
 	testClientFeatures                   = []string{"feature 1", "feature 2"}
 	testDeviceRegion                     = "US"
+	testServerRegion                     = "US"
 	testDeviceLocation                   = "gzzzz"
 	testDisallowedTrafficAlertActionURLs = []string{"https://example.org/disallowed"}
+	testHostID                           = "example-host-id"
 
 	// A steering IP must not be a bogon; this address is not dialed.
 	testSteeringIP = "1.1.1.1"
@@ -893,6 +884,38 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
+	// set up DSL components
+
+	// Add the DSL tests, including an initial untunneled DSL request to get
+	// the primary server entry, when an in-proxy broker is available to be
+	// the DSL relay.
+	//
+	// Limiting this to addMeekServerForBroker ensures the
+	// configureDSLTestServerEntries bootstrap can only perform tactics
+	// requests and not dial a tunnel, so the DSL request must succeed.
+
+	doDSL := doInproxy && inproxyTestConfig.addMeekServerForBroker
+
+	var dslTestConfig *dslTestConfig
+	enableDSLFetcher := "false"
+	if doDSL {
+
+		t.Log("testing DSL")
+
+		dslTestConfig, err = generateDSLTestConfig()
+		if err != nil {
+			t.Fatalf("error generating DSL test config: %s", err)
+		}
+
+		err = dslTestConfig.backend.Start()
+		if err != nil {
+			t.Fatalf("error starting DSL backend: %s", err)
+		}
+		defer dslTestConfig.backend.Stop()
+
+		enableDSLFetcher = "true"
+	}
+
 	// configure authorized access
 
 	accessType := "test-access-type"
@@ -931,8 +954,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.applyPrefix ||
 		runConfig.forceFragmenting ||
 		runConfig.doBurstMonitor ||
-		runConfig.doDestinationBytes ||
-		runConfig.doLegacyDestinationBytes ||
+		runConfig.doASNDestBytes ||
 		runConfig.doTunneledDomainRequest
 
 	// All servers require a tactics config with valid keys.
@@ -989,6 +1011,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		Passthrough:                        runConfig.passthrough,
 		LimitQUICVersions:                  limitQUICVersions,
 		EnableGQUIC:                        !runConfig.limitQUICVersions,
+		ProviderID:                         strings.ToUpper(prng.HexString(8)),
+		Region:                             testServerRegion,
 	}
 
 	if doServerTactics {
@@ -1083,13 +1107,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
-			runConfig.doDestinationBytes,
-			runConfig.doLegacyDestinationBytes,
+			runConfig.doASNDestBytes,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"classic",
+			enableDSLFetcher,
 			inproxyTacticsParametersJSON,
-			runConfig.doRestrictInproxy)
+			runConfig.doRestrictInproxy,
+			generateConfigParams.ProviderID)
 	}
 
 	blocklistFilename := filepath.Join(testDataDirName, "blocklist.csv")
@@ -1097,6 +1122,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	var serverConfig map[string]interface{}
 	json.Unmarshal(serverConfigJSON, &serverConfig)
+
+	serverConfig["HostID"] = testHostID
 
 	// The test GeoIP databases map all IPs to a single, non-"None" country
 	// and ASN.
@@ -1205,6 +1232,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		serverConfig["LogDestinationPrefix"] = "testprefix"
 	}
 
+	if doDSL {
+
+		serverConfig["DSLRelayServiceAddress"] = dslTestConfig.backend.GetAddress()
+		serverConfig["DSLRelayCACertificatesFilename"] = dslTestConfig.relayCACertificatesFilename
+		serverConfig["DSLRelayHostCertificateFilename"] = dslTestConfig.relayHostCertificateFilename
+		serverConfig["DSLRelayHostKeyFilename"] = dslTestConfig.relayHostKeyFilename
+	}
+
 	// Uncomment to enable SIGUSR2 profile dumps
 	//serverConfig["ProcessProfileOutputDirectory"] = "/tmp"
 
@@ -1222,15 +1257,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	resetReassembleServerLoadLogs(expectedServerLoadProtocolLogs)
 
-	expectedTunnelLogs := 1
-	if runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig {
-		expectedTunnelLogs++ // 1 base + 1 ASN
-	}
-	resetReassembleServerTunnelLogs(expectedTunnelLogs)
-
-	uniqueUserLog := make(chan map[string]interface{}, 1)
-	domainBytesLog := make(chan map[string]interface{}, 1)
 	serverTunnelLog := make(chan map[string]interface{}, 1)
+	uniqueUserLog := make(chan map[string]interface{}, 1)
+	asnDestBytesLog := make(chan map[string]interface{}, 1)
+	domainDestBytesLog := make(chan map[string]interface{}, 1)
 
 	// Max 3 discovery logs:
 	// 1. server startup
@@ -1270,9 +1300,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			case uniqueUserLog <- logFields:
 			default:
 			}
-		case "domain_bytes":
+		case "asn_dest_bytes":
 			select {
-			case domainBytesLog <- logFields:
+			case asnDestBytesLog <- logFields:
+			default:
+			}
+		case "domain_dest_bytes":
+			select {
+			case domainDestBytesLog <- logFields:
 			default:
 			}
 		case "server_tunnel":
@@ -1368,15 +1403,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				if err != nil {
 					return errors.Trace(err)
 				}
-			} else if strings.HasPrefix(eventName, "server_tunnel") {
-
-				// Multiple protobuf server_tunnel* logs are reassembled into
-				// one JSON server_tunnel log.
-				reflectedLogFields, err = reassembleServerTunnelLog(
-					eventName, reflectedLogFields)
-				if err != nil {
-					return errors.Trace(err)
-				}
 			}
 
 			if reflectedLogFields != nil {
@@ -1397,9 +1423,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		socketReader.Start()
-		readerShutdownCtx, readerShutdownCtxCancel :=
-			context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
 		defer func() {
+			readerShutdownCtx, readerShutdownCtxCancel :=
+				context.WithDeadline(context.Background(), time.Now())
 			readerShutdownCtxCancel()
 			socketReader.Stop(readerShutdownCtx)
 		}()
@@ -1513,13 +1539,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				propagationChannelID,
 				livenessTestSize,
 				runConfig.doBurstMonitor,
-				runConfig.doDestinationBytes,
-				runConfig.doLegacyDestinationBytes,
+				runConfig.doASNDestBytes,
 				runConfig.applyPrefix,
 				runConfig.forceFragmenting,
 				"consistent",
+				enableDSLFetcher,
 				inproxyTacticsParametersJSON,
-				runConfig.doRestrictInproxy)
+				runConfig.doRestrictInproxy,
+				generateConfigParams.ProviderID)
 		}
 
 		p, _ := os.FindProcess(os.Getpid())
@@ -1544,6 +1571,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		t.Fatalf("missing server load log")
 	}
 	timer.Stop()
+
+	// reset client datastore
+
+	_ = os.RemoveAll(filepath.Join(testDataDirName, psiphon.PsiphonDataDirectoryName))
 
 	// configure client
 
@@ -1619,11 +1650,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	clientConfig.PropagationChannelId = propagationChannelID
 	clientConfig.TunnelPoolSize = numTunnels
-	clientConfig.TargetServerEntry = string(encodedServerEntry)
 	clientConfig.LocalSocksProxyPort = localSOCKSProxyPort
 	clientConfig.LocalHttpProxyPort = localHTTPProxyPort
 	clientConfig.EmitSLOKs = true
 	clientConfig.EmitServerAlerts = true
+
+	// In the classic test path, TargetServerEntry is used to specify the
+	// server enrty. In the DSL test case, the server entry is fetched from
+	// the mock.DSL backend.
+	if !doDSL {
+		clientConfig.TargetServerEntry = string(encodedServerEntry)
+	}
 
 	// Exercise the WaitForNetworkConnectivity wired-up code path.
 	clientConfig.NetworkConnectivityChecker = &networkConnectivityChecker{}
@@ -1720,6 +1757,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		if err != nil {
 			t.Fatalf("WriteFile failed: %s", err)
 		}
+	}
+
+	if runConfig.doUncompressedTactics {
+		compressTactics := false
+		clientConfig.CompressTactics = &compressTactics
 	}
 
 	err = clientConfig.Commit(false)
@@ -1858,16 +1900,30 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			time.Now().UTC().AddDate(0, 0, -1).Truncate(1*time.Hour).Format(time.RFC3339))
 		expectUniqueUser = true
 	case 2:
-		// Leave previous last_connected.
+		// Mock same day last_connected.
+		psiphon.SetKeyValue(
+			"lastConnected",
+			time.Now().UTC().Add(-1*time.Minute).Truncate(1*time.Hour).Format(time.RFC3339))
 		expectUniqueUser = false
 	}
-
-	// Clear SLOKs from previous test runs.
-	psiphon.DeleteSLOKs()
 
 	// Store prune server entry test server entries and failed tunnel records.
 	storePruneServerEntriesTest(
 		t, runConfig, testDataDirName, pruneServerEntryTestCases)
+
+	if doDSL {
+
+		// Set up SLOKs and server entries required for the DSL test.
+
+		err := configureDSLTestServerEntries(
+			dslTestConfig,
+			string(encodedServerEntry),
+			serverEntrySignaturePublicKey,
+			serverEntrySignaturePrivateKey)
+		if err != nil {
+			t.Fatalf("configureDSLTestServerEntries failed: %s", err)
+		}
+	}
 
 	controller, err := psiphon.NewController(clientConfig)
 	if err != nil {
@@ -1884,6 +1940,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	serverAlertDisallowedNoticesEmitted := make(chan struct{}, 1)
 	untunneledPortForward := make(chan struct{}, 1)
 	discardTunnel := make(chan struct{}, 1)
+	tunneledDSLFetched := make(chan struct{}, 1)
 
 	psiphon.ResetNoticeWriter()
 	err = psiphon.SetNoticeWriter(psiphon.NewNoticeReceiver(
@@ -1961,6 +2018,17 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				if strings.Contains(payload["message"].(string), "discard tunnel") {
 					sendNotificationReceived(discardTunnel)
 				}
+				if strings.HasPrefix(payload["message"].(string), "DSL: fetched server entries") {
+					tunneled := payload["tunneled"].(bool)
+					updated := int(payload["updated"].(float64))
+					if tunneled && updated > 0 {
+						err := checkExpectedDSLPendingPrioritizeDial(clientConfig, networkID)
+						if err != nil {
+							t.Fatalf("checkExpectedDSLPendingPrioritizeDial failed: %v", err)
+						}
+						sendNotificationReceived(tunneledDSLFetched)
+					}
+				}
 			}
 
 			if printNotice {
@@ -2029,6 +2097,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 		waitOnNotification(t, tunnelsEstablished, timeoutSignal, "tunnel established timeout exceeded")
 		waitOnNotification(t, homepageReceived, timeoutSignal, "homepage received timeout exceeded")
+		if doDSL {
+			waitOnNotification(t, tunneledDSLFetched, timeoutSignal, "tunneled DSL timeout exceeded")
+		}
 
 		// The tunnel connected, so the local last_connected has been updated.
 		lastConnectedUpdateCount += 1
@@ -2036,7 +2107,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if runConfig.doChangeBytesConfig {
 
-		if !runConfig.doDestinationBytes || !runConfig.doLegacyDestinationBytes {
+		if !runConfig.doASNDestBytes {
 			t.Fatalf("invalid test configuration")
 		}
 
@@ -2062,12 +2133,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			livenessTestSize,
 			runConfig.doBurstMonitor,
 			false,
-			false,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"consistent",
+			enableDSLFetcher,
 			inproxyTacticsParametersJSON,
-			runConfig.doRestrictInproxy)
+			runConfig.doRestrictInproxy,
+			generateConfigParams.ProviderID)
 
 		p, _ := os.FindProcess(os.Getpid())
 		p.Signal(syscall.SIGUSR1)
@@ -2145,8 +2217,13 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 		waitOnNotification(t, slokSeeded, timeoutSignal, "SLOK seeded timeout exceeded")
 
+		expected := expectedNumSLOKs
+		if doDSL {
+			expected += len(dslTestConfig.clientSLOKs)
+		}
+
 		numSLOKs := psiphon.CountSLOKs()
-		if numSLOKs != expectedNumSLOKs {
+		if numSLOKs != expected {
 			t.Fatalf("unexpected number of SLOKs: %d", numSLOKs)
 		}
 
@@ -2236,8 +2313,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if runConfig.limitQUICVersions {
 		expectQUICVersion = limitQUICVersions[0]
 	}
-	expectDestinationBytesFields := runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig
-	expectLegacyDestinationBytesFields := runConfig.doLegacyDestinationBytes && !runConfig.doChangeBytesConfig
+	expectASNDestBytes := runConfig.doASNDestBytes && !runConfig.doChangeBytesConfig
 	expectMeekHTTPVersion := ""
 	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
 		if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
@@ -2246,14 +2322,21 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectMeekHTTPVersion = "HTTP/1.1"
 		}
 	}
+	expectServerEntryCount := 0
+	if doDSL || runConfig.checkPruneServerEntries {
+		expectServerEntryCount = protocol.ServerEntryCountRoundingIncrement
+	} else if runConfig.doPruneServerEntries {
+		expectServerEntryCount = 2 * protocol.ServerEntryCountRoundingIncrement
+	}
+	expectDSLPrioritized := doDSL
 
-	// The client still reports zero domain_bytes when no port forwards are
+	// The client still reports domain_bytes up when no port forwards are
 	// allowed (expectTrafficFailure).
 	//
 	// Limitation: this check is disabled in the in-proxy case since, in the
 	// self-proxy scheme, the proxy shuts down before the client can send its
 	// final status request.
-	expectDomainBytes := !runConfig.doChangeBytesConfig && !doInproxy
+	expectDomainDestBytes := !runConfig.doChangeBytesConfig && !doInproxy
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -2276,11 +2359,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectUDPDataTransfer,
 			expectDomainPortForward,
 			expectQUICVersion,
-			expectDestinationBytesFields,
-			expectLegacyDestinationBytesFields,
 			passthroughAddress,
 			expectMeekHTTPVersion,
 			expectCheckServerEntryPruneCount,
+			expectServerEntryCount,
+			expectDSLPrioritized,
 			inproxyTestConfig,
 			logFields)
 		if err != nil {
@@ -2310,34 +2393,57 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	if expectDomainBytes {
+	if expectASNDestBytes {
 		select {
-		case logFields := <-domainBytesLog:
-			err := checkExpectedDomainBytesLogFields(
+		case logFields := <-asnDestBytesLog:
+			err := checkExpectedASNDestBytesLogFields(
 				runConfig,
 				logFields)
 			if err != nil {
-				t.Fatalf("invalid domain bytes log fields: %s", err)
+				t.Fatalf("invalid ASN dest bytes log fields: %s", err)
+			}
+		default:
+			t.Fatalf("missing ASN bytes log")
+		}
+	} else {
+		select {
+		case <-asnDestBytesLog:
+			t.Fatalf("unexpected ASN dest bytes log")
+		default:
+		}
+	}
+
+	if expectDomainDestBytes {
+		select {
+		case logFields := <-domainDestBytesLog:
+			err := checkExpectedDomainDestBytesLogFields(
+				runConfig,
+				logFields)
+			if err != nil {
+				t.Fatalf("invalid domain dest bytes log fields: %s", err)
 			}
 		default:
 			t.Fatalf("missing domain bytes log")
 		}
 	} else {
 		select {
-		case <-domainBytesLog:
-			t.Fatalf("unexpected domain bytes log")
+		case <-domainDestBytesLog:
+			t.Fatalf("unexpected domain dest bytes log")
 		default:
 		}
 	}
 
 	select {
 	case logFields := <-serverLoadLog:
+		if logFields["server_entry_tag"] == nil ||
+			fmt.Sprintf("%s", logFields["server_entry_tag"]) == "" {
+			t.Fatalf("missing server_entry_tag")
+		}
 		if expectDomainPortForward {
 			dnsCount := int(logFields["dns_count"].(map[string]any)["ALL"].(float64))
 			if dnsCount != 1 {
 				t.Fatalf("unexpected dns_count: %d", dnsCount)
 			}
-
 		}
 	default:
 		t.Fatalf("missing server load log")
@@ -2417,6 +2523,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			}
 		}
 	}
+
+	// Emit a dummy DSL relay cached request log to check that the event is
+	// properly wired up in protobuf mode.
+	//
+	// Currently the DSL test here doesn't exercise relay cached requests; see
+	// common/dsl/dsl_test.go for unit test coverage.
+
+	CommonLogger(log).LogMetric("dsl_relay_get_server_entries", common.LogFields{})
 
 	// Check that datastore had retained/pruned server entries as expected.
 	checkPruneServerEntriesTest(t, runConfig, testDataDirName, pruneServerEntryTestCases)
@@ -2505,47 +2619,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	// Check that the client discovered one of the discovery servers.
-
-	discoveredServers := make(map[string]*protocol.ServerEntry)
-
-	// Otherwise NewServerEntryIterator only returns TargetServerEntry.
-	clientConfig.TargetServerEntry = ""
-
-	_, iterator, err := psiphon.NewServerEntryIterator(clientConfig)
+	err = checkExpectedDiscoveredServer(clientConfig, discoveryServers)
 	if err != nil {
-		t.Fatalf("NewServerEntryIterator failed: %s", err)
-	}
-	defer iterator.Close()
-
-	for {
-		serverEntry, err := iterator.Next()
-		if err != nil {
-			t.Fatalf("ServerIterator.Next failed: %s", err)
-		}
-		if serverEntry == nil {
-			break
-		}
-		discoveredServers[serverEntry.IpAddress] = serverEntry
-	}
-
-	foundOne := false
-	for _, server := range discoveryServers {
-
-		serverEntry, err := protocol.DecodeServerEntry(server.EncodedServerEntry, "", "")
-		if err != nil {
-			t.Fatalf("protocol.DecodeServerEntry failed: %s", err)
-		}
-
-		if v, ok := discoveredServers[serverEntry.IpAddress]; ok {
-			if v.Tag == serverEntry.Tag {
-				foundOne = true
-				break
-			}
-		}
-	}
-	if !foundOne {
-		t.Fatalf("expected client to discover at least one server")
+		t.Fatalf("error checking client discovered server: %v", err)
 	}
 }
 
@@ -2654,10 +2730,8 @@ func protoToLogFields(msg proto.Message, logFields map[string]interface{}, runCo
 }
 
 var (
-	reassembledServerLoadLogFields   map[string]interface{}
-	serverLoadLogComponentSequence   []int
-	reassembledServerTunnelLogFields map[string]interface{}
-	serverTunnelComponentSequence    []int
+	reassembledServerLoadLogFields map[string]interface{}
+	serverLoadLogComponentSequence []int
 )
 
 func resetReassembleServerLoadLogs(expectedProtocolLogs int) {
@@ -2675,11 +2749,6 @@ func resetReassembleServerLoadLogs(expectedProtocolLogs int) {
 		2,
 		2 + expectedProtocolLogs,
 		2 + expectedProtocolLogs}
-}
-
-func resetReassembleServerTunnelLogs(expectedTunnelLogs int) {
-	serverTunnelComponentSequence = []int{expectedTunnelLogs}
-	reassembledServerTunnelLogFields = nil
 }
 
 func reassembleServerLoadLog(
@@ -2771,90 +2840,6 @@ func reassembleServerLoadLog(
 	return nil, nil
 }
 
-func reassembleServerTunnelLog(
-	eventName string,
-	reflectedLogFields map[string]interface{}) (map[string]interface{}, error) {
-
-	// Reassemble protobuf server_tunnel components into a single set of fields
-	// compatible with the existing JSON log content checker.
-	if !strings.HasPrefix(eventName, "server_tunnel") {
-		return nil, errors.TraceNew("unexpected non-server_tunnel log")
-	}
-
-	i := 0
-	for ; i < len(serverTunnelComponentSequence); i++ {
-		if serverTunnelComponentSequence[i] > 0 {
-			break
-		}
-	}
-	if i >= len(serverTunnelComponentSequence) {
-		return nil, errors.TraceNew("unexpected server_tunnel sequence")
-	}
-
-	serverTunnelComponentSequence[i] -= 1
-	sequenceComplete := serverTunnelComponentSequence[i] == 0
-
-	if reassembledServerTunnelLogFields == nil {
-		reassembledServerTunnelLogFields = make(map[string]interface{})
-	}
-
-	serverTunnelLogFields := reassembledServerTunnelLogFields
-
-	switch eventName {
-	case "server_tunnel":
-		// Base server_tunnel message - copy all fields
-		for k, v := range reflectedLogFields {
-			serverTunnelLogFields[k] = v
-		}
-
-	case "server_tunnel_asn_dest_bytes":
-		// Initialize ASN byte maps if they don't exist
-		if serverTunnelLogFields["asn_dest_bytes"] == nil {
-			serverTunnelLogFields["asn_dest_bytes"] = make(map[string]interface{})
-		}
-		if serverTunnelLogFields["asn_dest_bytes_up_tcp"] == nil {
-			serverTunnelLogFields["asn_dest_bytes_up_tcp"] = make(map[string]interface{})
-		}
-		if serverTunnelLogFields["asn_dest_bytes_down_tcp"] == nil {
-			serverTunnelLogFields["asn_dest_bytes_down_tcp"] = make(map[string]interface{})
-		}
-		if serverTunnelLogFields["asn_dest_bytes_up_udp"] == nil {
-			serverTunnelLogFields["asn_dest_bytes_up_udp"] = make(map[string]interface{})
-		}
-		if serverTunnelLogFields["asn_dest_bytes_down_udp"] == nil {
-			serverTunnelLogFields["asn_dest_bytes_down_udp"] = make(map[string]interface{})
-		}
-
-		// Populate ASN-specific byte counts
-		if destAsn, ok := reflectedLogFields["dest_asn"].(string); ok {
-			if destBytes, ok := reflectedLogFields["dest_bytes"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes"].(map[string]interface{})[destAsn] = destBytes
-			}
-			if destBytesUpTcp, ok := reflectedLogFields["dest_bytes_up_tcp"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes_up_tcp"].(map[string]interface{})[destAsn] = destBytesUpTcp
-			}
-			if destBytesDownTcp, ok := reflectedLogFields["dest_bytes_down_tcp"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes_down_tcp"].(map[string]interface{})[destAsn] = destBytesDownTcp
-			}
-			if destBytesUpUdp, ok := reflectedLogFields["dest_bytes_up_udp"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes_up_udp"].(map[string]interface{})[destAsn] = destBytesUpUdp
-			}
-			if destBytesDownUdp, ok := reflectedLogFields["dest_bytes_down_udp"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes_down_udp"].(map[string]interface{})[destAsn] = destBytesDownUdp
-			}
-		}
-	default:
-		return nil, fmt.Errorf("unmatched server_tunnel event: %s", eventName)
-	}
-
-	if sequenceComplete {
-		serverTunnelLogFields["event_name"] = "server_tunnel"
-		return serverTunnelLogFields, nil
-	}
-
-	return nil, nil
-}
-
 func checkExpectedServerTunnelLogFields(
 	runConfig *runServerConfig,
 	expectPropagationChannelID string,
@@ -2869,11 +2854,11 @@ func checkExpectedServerTunnelLogFields(
 	expectUDPDataTransfer bool,
 	expectDomainPortForward bool,
 	expectQUICVersion string,
-	expectDestinationBytesFields bool,
-	expectLegacyDestinationBytesFields bool,
 	expectPassthroughAddress *string,
 	expectMeekHTTPVersion string,
 	expectCheckServerEntryPruneCount int,
+	expectServerEntryCount int,
+	expectDSLPrioritized bool,
 	inproxyTestConfig *inproxyTestConfig,
 	fields map[string]interface{}) error {
 
@@ -2885,7 +2870,7 @@ func checkExpectedServerTunnelLogFields(
 
 	for _, name := range []string{
 		"host_id",
-		"tunnel_id",
+		"server_entry_tag",
 		"start_time",
 		"duration",
 		"session_id",
@@ -2906,6 +2891,8 @@ func checkExpectedServerTunnelLogFields(
 		"server_entry_timestamp",
 		"dial_port_number",
 		"is_replay",
+		"replay_ignored_change",
+		"dsl_prioritized",
 		"dial_duration",
 		"candidate_number",
 		"established_tunnels_count",
@@ -2914,6 +2901,9 @@ func checkExpectedServerTunnelLogFields(
 		"bytes",
 		"ssh_protocol_bytes",
 		"ssh_protocol_bytes_overhead",
+		"server_entry_count",
+		"unique_candidate_estimate",
+		"candidates_moved_to_front",
 
 		// The test run ensures that logServerLoad is invoked while the client
 		// is connected, so the following must be logged.
@@ -2923,14 +2913,6 @@ func checkExpectedServerTunnelLogFields(
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
 		}
-	}
-
-	if !(fields["ssh_protocol_bytes"].(float64) > 0) {
-		return fmt.Errorf("unexpected zero ssh_protocol_bytes")
-	}
-
-	if !(fields["ssh_protocol_bytes"].(float64) > fields["bytes"].(float64)) {
-		return fmt.Errorf("unexpected ssh_protocol_bytes < bytes")
 	}
 
 	appliedTacticsTag := len(fields[tactics.APPLIED_TACTICS_TAG_PARAMETER_NAME].(string)) > 0
@@ -2986,6 +2968,19 @@ func checkExpectedServerTunnelLogFields(
 
 	if fields["network_type"].(string) != testNetworkType {
 		return fmt.Errorf("unexpected network_type '%s'", fields["network_type"])
+	}
+
+	if !(fields["ssh_protocol_bytes"].(float64) > 0) {
+		return fmt.Errorf("unexpected zero ssh_protocol_bytes")
+	}
+
+	if !(fields["ssh_protocol_bytes"].(float64) > fields["bytes"].(float64)) {
+		return fmt.Errorf("unexpected ssh_protocol_bytes < bytes")
+	}
+
+	if fields["server_entry_count"].(float64) != float64(expectServerEntryCount) {
+		return fmt.Errorf("unexpected server_entry_count: '%d'",
+			int(fields["server_entry_count"].(float64)))
 	}
 
 	// With interruptions, timeouts, and retries in some tests, there may be
@@ -3178,6 +3173,17 @@ func checkExpectedServerTunnelLogFields(
 					return fmt.Errorf("unexpected field '%s'", name)
 				}
 			}
+		}
+	}
+
+	name := "first_fronted_meek_candidate"
+	if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected %s", name)
+		}
+	} else {
+		if fields[name] != nil {
+			return fmt.Errorf("unexpected %s", name)
 		}
 	}
 
@@ -3507,86 +3513,6 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	for _, name := range []string{
-		"asn_dest_bytes",
-		"asn_dest_bytes_up_tcp",
-		"asn_dest_bytes_down_tcp",
-		"asn_dest_bytes_up_udp",
-		"asn_dest_bytes_down_udp",
-	} {
-		if expectDestinationBytesFields && fields[name] == nil {
-			return fmt.Errorf("missing expected field '%s'", name)
-
-		} else if !expectDestinationBytesFields && fields[name] != nil {
-			return fmt.Errorf("unexpected field '%s'", name)
-		}
-	}
-
-	if expectDestinationBytesFields {
-		for _, pair := range [][]string{
-			{"asn_dest_bytes", "bytes"},
-			{"asn_dest_bytes_up_tcp", "bytes_up_tcp"},
-			{"asn_dest_bytes_down_tcp", "bytes_down_tcp"},
-			{"asn_dest_bytes_up_udp", "bytes_up_udp"},
-			{"asn_dest_bytes_down_udp", "bytes_down_udp"},
-		} {
-			if _, ok := fields[pair[0]].(map[string]any)[testGeoIPASN].(float64); !ok {
-				return fmt.Errorf("missing field entry %s: '%v'", pair[0], testGeoIPASN)
-			}
-			value0 := int64(fields[pair[0]].(map[string]any)[testGeoIPASN].(float64))
-			value1 := int64(fields[pair[1]].(float64))
-			ok := value0 == value1
-			if pair[0] == "asn_dest_bytes_up_udp" || pair[0] == "asn_dest_bytes_down_udp" || pair[0] == "asn_dest_bytes" {
-				// DNS requests are excluded from destination bytes counting
-				ok = value0 > 0 && value0 < value1
-			}
-			if !ok {
-				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
-			}
-		}
-	}
-
-	for _, name := range []string{
-		"dest_bytes_asn",
-		"dest_bytes_up_tcp",
-		"dest_bytes_down_tcp",
-		"dest_bytes_up_udp",
-		"dest_bytes_down_udp",
-		"dest_bytes",
-	} {
-		if expectLegacyDestinationBytesFields && fields[name] == nil {
-			return fmt.Errorf("missing expected field '%s'", name)
-
-		} else if !expectLegacyDestinationBytesFields && fields[name] != nil {
-			return fmt.Errorf("unexpected field '%s'", name)
-		}
-	}
-
-	if expectLegacyDestinationBytesFields {
-		name := "dest_bytes_asn"
-		if fields[name].(string) != testGeoIPASN {
-			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
-		}
-		for _, pair := range [][]string{
-			{"dest_bytes_up_tcp", "bytes_up_tcp"},
-			{"dest_bytes_down_tcp", "bytes_down_tcp"},
-			{"dest_bytes_up_udp", "bytes_up_udp"},
-			{"dest_bytes_down_udp", "bytes_down_udp"},
-			{"dest_bytes", "bytes"},
-		} {
-			value0 := int64(fields[pair[0]].(float64))
-			value1 := int64(fields[pair[1]].(float64))
-			ok := value0 == value1
-			if pair[0] == "dest_bytes_up_udp" || pair[0] == "dest_bytes_down_udp" || pair[0] == "dest_bytes" {
-				// DNS requests are excluded from destination bytes counting
-				ok = value0 > 0 && value0 < value1
-			}
-			if !ok {
-				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
-			}
-		}
-	}
-
 	if expectPassthroughAddress != nil {
 		name := "passthrough_address"
 		if fields[name] == nil {
@@ -3654,6 +3580,10 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
+	if fields["dsl_prioritized"] != expectDSLPrioritized {
+		return fmt.Errorf("unexpected dsl_prioritized %v", fields["dsl_prioritized"])
+	}
+
 	return nil
 }
 
@@ -3678,19 +3608,20 @@ func checkExpectedUniqueUserLogFields(
 	return nil
 }
 
-func checkExpectedDomainBytesLogFields(
+func checkExpectedDomainDestBytesLogFields(
 	runConfig *runServerConfig,
 	fields map[string]interface{}) error {
 
 	for _, name := range []string{
-		"session_id",
-		"propagation_channel_id",
-		"sponsor_id",
+		"client_asn",
 		"client_platform",
+		"client_region",
 		"device_region",
-		"device_location",
+		"sponsor_id",
 		"domain",
 		"bytes",
+		"bytes_tcp",
+		"bytes_udp",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -3701,6 +3632,112 @@ func checkExpectedDomainBytesLogFields(
 				return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
 			}
 		}
+	}
+
+	return nil
+}
+
+func checkExpectedASNDestBytesLogFields(
+	runConfig *runServerConfig,
+	fields map[string]interface{}) error {
+
+	for _, name := range []string{
+		"client_asn",
+		"client_platform",
+		"client_region",
+		"device_region",
+		"sponsor_id",
+		"asn",
+		"bytes",
+		"bytes_tcp",
+		"bytes_udp",
+	} {
+		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
+
+		if name == "asn" {
+			if fields[name].(string) != testGeoIPASN {
+				return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+			}
+		}
+		for _, name := range []string{"bytes_tcp", "bytes_udp", "bytes"} {
+			value := int64(fields[name].(float64))
+			if value <= 0 {
+				return fmt.Errorf("unexpected field value %s: %v", name, fields[name])
+			}
+		}
+	}
+
+	return nil
+}
+
+func checkExpectedDSLPendingPrioritizeDial(
+	clientConfig *psiphon.Config,
+	networkID string) error {
+
+	// The server entry discovered in the tunneled DSL request should have a
+	// DSLPendingPrioritizeDial placeholder.
+
+	dialParams, err := psiphon.GetDialParameters(
+		clientConfig, tunneledDSLServerEntryIPAddress, networkID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if dialParams == nil ||
+		dialParams.DSLPendingPrioritizeDialTimestamp.IsZero() ||
+		dialParams.DSLPrioritizedDial {
+
+		return errors.TraceNew("unexpected server entry state")
+	}
+
+	return nil
+}
+
+func checkExpectedDiscoveredServer(
+	clientConfig *psiphon.Config,
+	discoveryServers []*psinet.DiscoveryServer) error {
+
+	discoveredServers := make(map[string]*protocol.ServerEntry)
+
+	// Otherwise NewServerEntryIterator only returns TargetServerEntry.
+	clientConfig.TargetServerEntry = ""
+
+	_, iterator, err := psiphon.NewServerEntryIterator(clientConfig)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	defer iterator.Close()
+
+	for {
+		serverEntry, err := iterator.Next()
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if serverEntry == nil {
+			break
+		}
+		discoveredServers[serverEntry.IpAddress] = serverEntry
+	}
+
+	foundOne := false
+	for _, server := range discoveryServers {
+
+		serverEntry, err := protocol.DecodeServerEntry(server.EncodedServerEntry, "", "")
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if v, ok := discoveredServers[serverEntry.IpAddress]; ok {
+			if v.Tag == serverEntry.Tag {
+				foundOne = true
+				break
+			}
+		}
+	}
+	if !foundOne {
+		return errors.TraceNew("expected client to discover at least one server")
 	}
 
 	return nil
@@ -4270,13 +4307,14 @@ func paveTacticsConfigFile(
 	propagationChannelID string,
 	livenessTestSize int,
 	doBurstMonitor bool,
-	doDestinationBytes bool,
-	doLegacyDestinationBytes bool,
+	doASNDestBytes bool,
 	applyOsshPrefix bool,
 	enableOsshPrefixFragmenting bool,
 	discoveryStategy string,
+	enableDSLFetcher string,
 	inproxyParametersJSON string,
-	doRestrictAllInproxyProviderRegions bool) {
+	doRestrictAllInproxyProviderRegions bool,
+	providerID string) {
 
 	// Setting LimitTunnelProtocols passively exercises the
 	// server-side LimitTunnelProtocols enforcement.
@@ -4290,7 +4328,6 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
-          %s
           %s
           %s
           %s
@@ -4330,7 +4367,11 @@ func paveTacticsConfigFile(
           "ServerPacketManipulationSpecs" : [{"Name": "test-packetman-spec", "PacketSpecs": [["TCP-flags S"]]}],
           "ServerPacketManipulationProbability" : 1.0,
           "ServerProtocolPacketManipulations": {"All" : ["test-packetman-spec"]},
-          "ServerDiscoveryStrategy": "%s"
+          "ServerDiscoveryStrategy": "%s",
+          "EnableDSLFetcher": %s,
+          "DSLPrioritizeDialNewServerEntryProbability" : 1.0,
+          "DSLPrioritizeDialExistingServerEntryProbability" : 1.0,
+          "EstablishTunnelWorkTime" : "1s"
         }
       },
       "FilteredTactics" : [
@@ -4377,17 +4418,10 @@ func paveTacticsConfigFile(
 	`
 	}
 
-	destinationBytesParameters := ""
-	if doDestinationBytes {
-		destinationBytesParameters = fmt.Sprintf(`
+	asnDestBytesParameters := ""
+	if doASNDestBytes {
+		asnDestBytesParameters = fmt.Sprintf(`
           "DestinationBytesMetricsASNs" : ["%s"],
-	`, testGeoIPASN)
-	}
-
-	legacyDestinationBytesParameters := ""
-	if doLegacyDestinationBytes {
-		legacyDestinationBytesParameters = fmt.Sprintf(`
-          "DestinationBytesMetricsASN" : "%s",
 	`, testGeoIPASN)
 	}
 
@@ -4405,10 +4439,10 @@ func paveTacticsConfigFile(
 
 	restrictInproxyParameters := ""
 	if doRestrictAllInproxyProviderRegions {
-		restrictInproxyParameters = `
-		"RestrictInproxyProviderRegions": {"" : [""]},
+		restrictInproxyParameters = fmt.Sprintf(`
+		"RestrictInproxyProviderRegions": {"%s" : ["%s"]},
 		"RestrictInproxyProviderIDsServerProbability": 1.0,
-	`
+	`, providerID, testServerRegion)
 	}
 
 	tacticsConfigJSON := fmt.Sprintf(
@@ -4417,8 +4451,7 @@ func paveTacticsConfigFile(
 		tacticsRequestPrivateKey,
 		tacticsRequestObfuscatedKey,
 		burstParameters,
-		destinationBytesParameters,
-		legacyDestinationBytesParameters,
+		asnDestBytesParameters,
 		osshPrefix,
 		inproxyParametersJSON,
 		restrictInproxyParameters,
@@ -4430,6 +4463,7 @@ func paveTacticsConfigFile(
 		livenessTestSize,
 		livenessTestSize,
 		discoveryStategy,
+		enableDSLFetcher,
 		propagationChannelID,
 		strings.ReplaceAll(testCustomHostNameRegex, `\`, `\\`),
 		tunnelProtocol)
@@ -4725,6 +4759,61 @@ func generateInproxyTestConfig(
 		proxySessionPublicKeyCurve25519:     proxySessionPublicKeyCurve25519Str,
 		proxySessionPrivateKey:              proxySessionPrivateKeyStr,
 		personalCompartmentID:               personalCompartmentIDStr,
+	}
+
+	return config, nil
+}
+
+type dslTestConfig struct {
+	relayTLSConfig               *testutils.TestDSLTLSConfig
+	relayCACertificatesFilename  string
+	relayHostCertificateFilename string
+	relayHostKeyFilename         string
+	oslPaveData                  []*osl.PaveData
+	clientSLOKs                  []*osl.SLOK
+	backend                      *testutils.TestDSLBackend
+}
+
+func generateDSLTestConfig() (*dslTestConfig, error) {
+
+	relayTLSConfig, err := testutils.NewTestDSLTLSConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	relayCACertificatesFilename,
+		relayHostCertificateFilename,
+		relayHostKeyFilename,
+		err := relayTLSConfig.WriteRelayFiles(testDataDirName)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	oslPaveData, _, clientSLOKs, err :=
+		testutils.InitializeTestOSLPaveData()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	backend, err := testutils.NewTestDSLBackend(
+		dsl.NewBackendTestShim(),
+		relayTLSConfig,
+		"",
+		nil,
+		testHostID,
+		oslPaveData)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	config := &dslTestConfig{
+		relayTLSConfig:               relayTLSConfig,
+		relayCACertificatesFilename:  relayCACertificatesFilename,
+		relayHostCertificateFilename: relayHostCertificateFilename,
+		relayHostKeyFilename:         relayHostKeyFilename,
+		oslPaveData:                  oslPaveData,
+		clientSLOKs:                  clientSLOKs,
+		backend:                      backend,
 	}
 
 	return config, nil
@@ -5287,4 +5376,92 @@ func newDiscoveryServers(ipAddresses []string) ([]*psinet.DiscoveryServer, error
 		}
 	}
 	return servers, nil
+}
+
+// Won't conflict with initializePruneServerEntriesTest
+var tunneledDSLServerEntryIPAddress = "192.0.3.1"
+
+func configureDSLTestServerEntries(
+	dslTestConfig *dslTestConfig,
+	encodedServerEntry string,
+	serverEntrySignaturePublicKey string,
+	serverEntrySignaturePrivateKey string) error {
+
+	// In the DSL test case, the client must get the full tunnel protocol
+	// server entry from an untunneled DSL fetch; a tactics-only copy of
+	// the server entry is stored locally to be used to bootstrap tactics
+	// and get the broker spec required for the untunneled RSL fetch.
+
+	// This sequence requires a low EstablishTunnelWorkTime, set to 1s, since
+	// the triggerFetches condition in Controller establishCandidateGenerator
+	// isn't triggered via candidateServerEntryCount.
+
+	// Store mock SLOKs, which are used to reassemble the OSL key required to
+	// access the DSL server entries.
+
+	for _, slok := range dslTestConfig.clientSLOKs {
+		_, err := psiphon.SetSLOK(slok.ID, slok.Key)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
+	// Store the full tunnel protocol server entry in the mock DSL backend.
+
+	// TODO: also excersize prioritizeDial = false?
+
+	isTunneled := false
+	prioritizeDial := true
+	dslTestConfig.backend.SetServerEntries(
+		isTunneled,
+		prioritizeDial,
+		[]string{encodedServerEntry})
+
+	// Add an EMBEDDED tactics-only server entry to the client's datastore.
+
+	serverEntryFields, err := protocol.DecodeServerEntryFields(
+		encodedServerEntry, "", "")
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Strip non-tactics capabilities. Assumes addMeekServerForBroker has
+	// added UNFRONTED-MEEK-HTTPS-OSSH for tactics, and only for tactics.
+	serverEntryFields["capabilities"] = []string{
+		"UNFRONTED-MEEK-HTTPS", "UNFRONTED-MEEK-HTTPS-TACTICS"}
+
+	err = serverEntryFields.AddSignature(
+		serverEntrySignaturePublicKey,
+		serverEntrySignaturePrivateKey)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	serverEntryFields.SetLocalSource(protocol.SERVER_ENTRY_SOURCE_EMBEDDED)
+	serverEntryFields.SetLocalTimestamp(
+		common.TruncateTimestampToHour(common.GetCurrentTimestamp()))
+
+	err = psiphon.StoreServerEntry(serverEntryFields, true)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Prepare one additional server entry for the tunneled DSL request.
+
+	dialPort := 4000
+	_, _, _, _, encodedServerEntryBytes, err := GenerateConfig(
+		&GenerateConfigParams{
+			ServerEntrySignaturePublicKey:  serverEntrySignaturePublicKey,
+			ServerEntrySignaturePrivateKey: serverEntrySignaturePrivateKey,
+			ServerIPAddress:                tunneledDSLServerEntryIPAddress,
+			TunnelProtocolPorts:            map[string]int{protocol.TUNNEL_PROTOCOL_SSH: dialPort},
+		})
+
+	isTunneled = true
+	dslTestConfig.backend.SetServerEntries(
+		isTunneled,
+		prioritizeDial,
+		[]string{string(encodedServerEntryBytes)})
+
+	return nil
 }

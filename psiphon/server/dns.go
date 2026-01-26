@@ -43,13 +43,10 @@ const (
 // "/etc/resolv.conf" on platforms where it is available; and
 // otherwise using a default value.
 type DNSResolver struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	lastReloadTime int64
 	common.ReloadableFile
-	isReloading int32
-	resolvers   []net.IP
+	isReloading    int32
+	lastReloadTime atomic.Int64
+	resolvers      []net.IP
 }
 
 // NewDNSResolver initializes a new DNSResolver, loading it with
@@ -71,9 +68,8 @@ type DNSResolver struct {
 //     maybe_update_dns: 2 seconds
 func NewDNSResolver(defaultResolver string) (*DNSResolver, error) {
 
-	dns := &DNSResolver{
-		lastReloadTime: int64(monotime.Now()),
-	}
+	dns := &DNSResolver{}
+	dns.lastReloadTime.Store(int64(monotime.Now()))
 
 	dns.ReloadableFile = common.NewReloadableFile(
 		DNS_SYSTEM_CONFIG_FILENAME,
@@ -146,7 +142,7 @@ func (dns *DNSResolver) reloadWhenStale() {
 	// write lock, we only incur write lock blocking when "/etc/resolv.conf"
 	// has actually changed.
 
-	lastReloadTime := monotime.Time(atomic.LoadInt64(&dns.lastReloadTime))
+	lastReloadTime := monotime.Time(dns.lastReloadTime.Load())
 	stale := monotime.Now().After(lastReloadTime.Add(DNS_SYSTEM_CONFIG_RELOAD_PERIOD))
 
 	if stale {
@@ -157,7 +153,7 @@ func (dns *DNSResolver) reloadWhenStale() {
 
 			// Unconditionally set last reload time. Even on failure only
 			// want to retry after another DNS_SYSTEM_CONFIG_RELOAD_PERIOD.
-			atomic.StoreInt64(&dns.lastReloadTime, int64(monotime.Now()))
+			dns.lastReloadTime.Store(int64(monotime.Now()))
 
 			_, err := dns.Reload()
 			if err != nil {

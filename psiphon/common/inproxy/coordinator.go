@@ -216,6 +216,7 @@ type BrokerDialCoordinator interface {
 	OfferRetryDelay() time.Duration
 	OfferRetryJitter() float64
 	RelayedPacketRequestTimeout() time.Duration
+	DSLRequestTimeout() time.Duration
 }
 
 // WebRTCDialCoordinator provides in-proxy dial parameters and configuration,

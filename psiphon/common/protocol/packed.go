@@ -629,6 +629,9 @@ func init() {
 		//
 		// - the `padding` field is not packed since it is intended to pad the
 		//   encoded message to its existing size.
+		//
+		// - egress_region is now in server.baseParams, but its encoding
+		//   remains the same.
 
 		{15, "relay_protocol", nil},
 		{16, "ssh_client_version", nil},
@@ -831,7 +834,20 @@ func init() {
 
 		{167, "shadowsocks_prefix", nil},
 
-		// Next key value = 168
+		// Specs: protocol.PSIPHON_API_RESPONSE_VERSION_FIELD_NAME
+
+		{168, "psiphon_api_response_version", intConverter},
+
+		// Specs: server.baseDialParams
+
+		{169, "server_entry_count", intConverter},
+		{170, "replay_ignored_change", intConverter},
+		{171, "dsl_prioritized", intConverter},
+		{172, "unique_candidate_estimate", intConverter},
+		{173, "candidates_moved_to_front", intConverter},
+		{174, "first_fronted_meek_candidate", intConverter},
+
+		// Next key value = 175
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

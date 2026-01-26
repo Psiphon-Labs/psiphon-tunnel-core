@@ -288,10 +288,10 @@ type ProxyQualityReporter struct {
 
 	brokerPublicKeys             atomic.Value
 	brokerRootObfuscationSecrets atomic.Value
-	requestDelay                 int64
-	maxRequestEntries            int64
-	requestTimeout               int64
-	requestRetries               int64
+	requestDelay                 atomic.Int64
+	maxRequestEntries            atomic.Int64
+	requestTimeout               atomic.Int64
+	requestRetries               atomic.Int64
 
 	signalReport chan struct{}
 }
@@ -351,11 +351,6 @@ func NewProxyQualityReporter(
 
 		waitGroup: new(sync.WaitGroup),
 
-		requestDelay:      int64(proxyQualityReporterRequestDelay),
-		maxRequestEntries: proxyQualityReporterMaxRequestEntries,
-		requestTimeout:    int64(proxyQualityReporterRequestTimeout),
-		requestRetries:    proxyQualityReporterRequestRetries,
-
 		reportQueue:       list.New(),
 		proxyIDQueueEntry: make(map[ProxyQualityKey]*list.Element),
 
@@ -366,6 +361,11 @@ func NewProxyQualityReporter(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	r.requestDelay.Store(int64(proxyQualityReporterRequestDelay))
+	r.maxRequestEntries.Store(int64(proxyQualityReporterMaxRequestEntries))
+	r.requestTimeout.Store(int64(proxyQualityReporterRequestTimeout))
+	r.requestRetries.Store(int64(proxyQualityReporterRequestRetries))
 
 	return r, nil
 }
@@ -392,10 +392,10 @@ func (r *ProxyQualityReporter) SetRequestParameters(
 	requestTimeout time.Duration,
 	requestRetries int) {
 
-	atomic.StoreInt64(&r.requestDelay, int64(requestDelay))
-	atomic.StoreInt64(&r.maxRequestEntries, int64(maxRequestEntries))
-	atomic.StoreInt64(&r.requestTimeout, int64(requestTimeout))
-	atomic.StoreInt64(&r.requestRetries, int64(requestRetries))
+	r.requestDelay.Store(int64(requestDelay))
+	r.maxRequestEntries.Store(int64(maxRequestEntries))
+	r.requestTimeout.Store(int64(requestTimeout))
+	r.requestRetries.Store(int64(requestRetries))
 }
 
 // Start launches the request workers.
@@ -499,7 +499,7 @@ func (r *ProxyQualityReporter) requestScheduler(ctx context.Context) {
 		// Delay, for a brief moment, sending requests in an effort to batch
 		// up more data for the requests.
 
-		requestDelay := time.Duration(atomic.LoadInt64(&r.requestDelay))
+		requestDelay := time.Duration(r.requestDelay.Load())
 		if requestDelay > 0 {
 
 			// TODO: SleepWithContext creates and discards a timer per call;
@@ -565,7 +565,7 @@ func (r *ProxyQualityReporter) prepareNextRequest() ProxyQualityRequestCounts {
 	// different client ASN counts per entry. In practice, there shouldn't be
 	// an excessive number of client ASNs.
 
-	for queueEntry != nil && int64(len(counts)) < atomic.LoadInt64(&r.maxRequestEntries) {
+	for queueEntry != nil && int64(len(counts)) < r.maxRequestEntries.Load() {
 
 		entry := queueEntry.Value.(proxyQualityReportQueueEntry)
 
@@ -721,7 +721,7 @@ func (r *ProxyQualityReporter) sendToBrokers(
 		go func(brokerClient *serverBrokerClient) {
 			defer sendWaitGroup.Done()
 
-			retries := int(atomic.LoadInt64(&r.requestRetries))
+			retries := int(r.requestRetries.Load())
 			for i := 0; i <= retries; i++ {
 				err := r.sendBrokerRequest(ctx, brokerClient, requestCounts)
 				if err != nil {
@@ -778,7 +778,7 @@ func (r *ProxyQualityReporter) sendBrokerRequest(
 	brokerClient *serverBrokerClient,
 	requestCounts ProxyQualityRequestCounts) error {
 
-	requestTimeout := time.Duration(atomic.LoadInt64(&r.requestTimeout))
+	requestTimeout := time.Duration(r.requestTimeout.Load())
 
 	// While the request payload, requestCounts, is the same for every broker,
 	// each broker round tripper may have different dial parameters, so each

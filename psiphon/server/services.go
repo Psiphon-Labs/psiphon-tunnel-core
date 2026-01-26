@@ -37,6 +37,7 @@ import (
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/dsl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/osl"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/packetman"
@@ -148,7 +149,32 @@ func RunServices(configJSON []byte) (retErr error) {
 		support.PacketManipulator = packetManipulator
 	}
 
+	if config.DSLRelayServiceAddress != "" {
+		support.dslRelay, err = dsl.NewRelay(&dsl.RelayConfig{
+			Logger:                        CommonLogger(log),
+			CACertificatesFilename:        config.DSLRelayCACertificatesFilename,
+			HostCertificateFilename:       config.DSLRelayHostCertificateFilename,
+			HostKeyFilename:               config.DSLRelayHostKeyFilename,
+			GetServiceAddress:             dslMakeGetServiceAddress(support),
+			HostID:                        config.HostID,
+			APIParameterValidator:         getDSLAPIParameterValidator(),
+			APIParameterLogFieldFormatter: getDSLAPIParameterLogFieldFormatter(),
+		})
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		err := dslReloadRelayTactics(support)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	}
+
 	support.discovery = makeDiscovery(support)
+
+	if config.RunDestBytesLogger() {
+		support.destBytesLogger = newDestBytesLogger(support)
+	}
 
 	// After this point, errors should be delivered to the errors channel and
 	// orderly shutdown should flow through to the end of the function to ensure
@@ -199,7 +225,7 @@ func RunServices(configJSON []byte) (retErr error) {
 	if config.RunLoadMonitor() {
 		waitGroup.Add(1)
 		go func() {
-			waitGroup.Done()
+			defer waitGroup.Done()
 			ticker := time.NewTicker(time.Duration(config.LoadMonitorPeriodSeconds) * time.Second)
 			defer ticker.Stop()
 
@@ -279,7 +305,7 @@ func RunServices(configJSON []byte) (retErr error) {
 	if config.RunPeriodicGarbageCollection() {
 		waitGroup.Add(1)
 		go func() {
-			waitGroup.Done()
+			defer waitGroup.Done()
 			ticker := time.NewTicker(config.periodicGarbageCollection)
 			defer ticker.Stop()
 			for {
@@ -291,6 +317,23 @@ func RunServices(configJSON []byte) (retErr error) {
 				}
 			}
 		}()
+	}
+
+	if config.RunDestBytesLogger() {
+		err = support.destBytesLogger.Start()
+		if err != nil {
+			select {
+			case errorChannel <- err:
+			default:
+			}
+		} else {
+			waitGroup.Add(1)
+			go func() {
+				defer waitGroup.Done()
+				<-shutdownBroadcast
+				support.destBytesLogger.Stop()
+			}()
+		}
 	}
 
 	// The tunnel server is always run; it launches multiple
@@ -439,15 +482,15 @@ func getRuntimeMetrics() LogFields {
 	}
 
 	return LogFields{
-		"num_goroutine": numGoroutine,
-		"heap_alloc":    memStats.HeapAlloc,
-		"heap_sys":      memStats.HeapSys,
-		"heap_idle":     memStats.HeapIdle,
-		"heap_inuse":    memStats.HeapInuse,
-		"heap_released": memStats.HeapReleased,
-		"heap_objects":  memStats.HeapObjects,
-		"num_gc":        memStats.NumGC,
-		"num_forced_gc": memStats.NumForcedGC,
+		"num_goroutine": int64(numGoroutine),
+		"heap_alloc":    int64(memStats.HeapAlloc),
+		"heap_sys":      int64(memStats.HeapSys),
+		"heap_idle":     int64(memStats.HeapIdle),
+		"heap_inuse":    int64(memStats.HeapInuse),
+		"heap_released": int64(memStats.HeapReleased),
+		"heap_objects":  int64(memStats.HeapObjects),
+		"num_gc":        int64(memStats.NumGC),
+		"num_forced_gc": int64(memStats.NumForcedGC),
 		"last_gc":       lastGC,
 	}
 }
@@ -490,6 +533,8 @@ func logServerLoad(
 	serverLoad := getRuntimeMetrics()
 
 	serverLoad["event_name"] = "server_load"
+
+	support.Config.AddServerEntryTag(serverLoad)
 
 	if logNetworkBytes {
 
@@ -537,6 +582,8 @@ func logServerLoad(
 			"region":     region,
 		}
 
+		support.Config.AddServerEntryTag(serverLoad)
+
 		for protocol, stats := range regionProtocolStats {
 			serverLoad[protocol] = stats
 		}
@@ -558,13 +605,20 @@ func logIrregularTunnel(
 	}
 
 	logFields["event_name"] = "irregular_tunnel"
-	logFields["listener_protocol"] = listenerTunnelProtocol
-	logFields["listener_port_number"] = listenerPort
+	support.Config.AddServerEntryTag(logFields)
+
 	logFields["tunnel_error"] = tunnelError.Error()
 
-	// Note: logging with the "client_" prefix for legacy compatibility; it
-	// would be more correct to use the prefix "peer_".
-	support.GeoIPService.Lookup(peerIP).SetClientLogFields(logFields)
+	if listenerTunnelProtocol != "" {
+		logFields["listener_protocol"] = listenerTunnelProtocol
+		logFields["listener_port_number"] = listenerPort
+	}
+
+	if peerIP != "" {
+		// Note: logging with the "client_" prefix for legacy compatibility; it
+		// would be more correct to use the prefix "peer_".
+		support.GeoIPService.Lookup(peerIP).SetClientLogFields(logFields)
+	}
 
 	log.LogRawFieldsWithTimestamp(logFields)
 }
@@ -590,8 +644,9 @@ type SupportServices struct {
 	PacketManipulator            *packetman.Manipulator
 	ReplayCache                  *ReplayCache
 	ServerTacticsParametersCache *ServerTacticsParametersCache
-
-	discovery *Discovery
+	dslRelay                     *dsl.Relay
+	discovery                    *Discovery
+	destBytesLogger              *destBytesLogger
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -630,7 +685,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 	tacticsServer, err := tactics.NewServer(
 		CommonLogger(log),
 		getTacticsAPIParameterLogFieldFormatter(),
-		getTacticsAPIParameterValidator(config),
+		getTacticsAPIParameterValidator(),
 		config.TacticsConfigFilename,
 		config.TacticsRequestPublicKey,
 		config.TacticsRequestPrivateKey,
@@ -672,6 +727,10 @@ func (support *SupportServices) Reload() {
 			support.Blocklist},
 		support.GeoIPService.Reloaders()...)
 
+	if support.dslRelay != nil {
+		reloaders = append(reloaders, support.dslRelay)
+	}
+
 	reloadDiscovery := func(reloadedTactics bool) {
 		err := support.discovery.reload(reloadedTactics)
 		if err != nil {
@@ -709,6 +768,16 @@ func (support *SupportServices) Reload() {
 		}
 
 		reloadDiscovery(true)
+
+		if support.dslRelay != nil {
+			err := dslReloadRelayTactics(support)
+			if err != nil {
+				log.WithTraceFields(
+					LogFields{"error": errors.Trace(err)}).Warning(
+					"failed to reload DSL relay tactics")
+			}
+
+		}
 	}
 
 	// Take these actions only after the corresponding Reloader has reloaded.
@@ -744,13 +813,13 @@ func (support *SupportServices) Reload() {
 		if err != nil {
 			log.WithTraceFields(
 				LogFields{
-					"reloader": reloader.LogDescription(),
+					"reloader": reloader.ReloadLogDescription(),
 					"error":    err}).Error("reload failed")
 			// Keep running with previous state
 		} else {
 			log.WithTraceFields(
 				LogFields{
-					"reloader": reloader.LogDescription(),
+					"reloader": reloader.ReloadLogDescription(),
 					"reloaded": reloaded}).Info("reload success")
 		}
 	}

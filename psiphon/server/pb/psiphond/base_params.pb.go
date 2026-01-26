@@ -42,6 +42,7 @@ type BaseParams struct {
 	EgressRegion          *string                `protobuf:"bytes,16,opt,name=egress_region,json=egressRegion,proto3,oneof" json:"egress_region,omitempty"`
 	LastConnected         *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=last_connected,json=lastConnected,proto3,oneof" json:"last_connected,omitempty"`
 	AuthorizedAccessTypes []string               `protobuf:"bytes,18,rep,name=authorized_access_types,json=authorizedAccessTypes,proto3" json:"authorized_access_types,omitempty"`
+	NetworkType           *string                `protobuf:"bytes,19,opt,name=network_type,json=networkType,proto3,oneof" json:"network_type,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -202,11 +203,18 @@ func (x *BaseParams) GetAuthorizedAccessTypes() []string {
 	return nil
 }
 
+func (x *BaseParams) GetNetworkType() string {
+	if x != nil && x.NetworkType != nil {
+		return *x.NetworkType
+	}
+	return ""
+}
+
 var File_ca_psiphon_psiphond_base_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_base_params_proto_rawDesc = "" +
 	"\n" +
-	"%ca.psiphon.psiphond/base_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdb\b\n" +
+	"%ca.psiphon.psiphond/base_params.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\"\x94\t\n" +
 	"\n" +
 	"BaseParams\x12\"\n" +
 	"\n" +
@@ -234,7 +242,8 @@ const file_ca_psiphon_psiphond_base_params_proto_rawDesc = "" +
 	"\x13applied_tactics_tag\x18\x0f \x01(\tH\rR\x11appliedTacticsTag\x88\x01\x01\x12(\n" +
 	"\regress_region\x18\x10 \x01(\tH\x0eR\fegressRegion\x88\x01\x01\x12F\n" +
 	"\x0elast_connected\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampH\x0fR\rlastConnected\x88\x01\x01\x126\n" +
-	"\x17authorized_access_types\x18\x12 \x03(\tR\x15authorizedAccessTypesB\r\n" +
+	"\x17authorized_access_types\x18\x12 \x03(\tR\x15authorizedAccessTypes\x12&\n" +
+	"\fnetwork_type\x18\x13 \x01(\tH\x10R\vnetworkType\x88\x01\x01B\r\n" +
 	"\v_client_asnB\r\n" +
 	"\v_client_asoB\x13\n" +
 	"\x11_client_build_revB\x0e\n" +
@@ -250,7 +259,8 @@ const file_ca_psiphon_psiphond_base_params_proto_rawDesc = "" +
 	"\x17_propagation_channel_idB\x16\n" +
 	"\x14_applied_tactics_tagB\x10\n" +
 	"\x0e_egress_regionB\x11\n" +
-	"\x0f_last_connectedBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x0f_last_connectedB\x0f\n" +
+	"\r_network_typeBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_base_params_proto_rawDescOnce sync.Once

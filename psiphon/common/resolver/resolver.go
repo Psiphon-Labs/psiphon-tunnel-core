@@ -1036,8 +1036,11 @@ func (r *Resolver) ResolveIP(
 	conns.CloseAll()
 	waitGroup.Wait()
 
-	// When there's no answer, return the last error.
-	if result == nil {
+	// When there's no answer, or when there's only an empty IPv6 answer,
+	// return the last error.
+	if result == nil ||
+		(result.questionType == resolverQuestionTypeAAAA && len(result.IPs) == 0) {
+
 		err := lastErr.Load()
 		if err == nil {
 			err = context.Cause(resolveCtx)

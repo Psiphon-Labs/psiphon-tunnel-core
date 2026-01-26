@@ -63,13 +63,11 @@ type RateLimits struct {
 // The underlying rate limiter uses the token bucket algorithm to
 // calculate delay times for read and write operations.
 type ThrottledConn struct {
-	// Note: 64-bit ints used with atomic operations are placed
-	// at the start of struct to ensure 64-bit alignment.
-	// (https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
-	readUnthrottledBytes  int64
-	readBytesPerSecond    int64
-	writeUnthrottledBytes int64
-	writeBytesPerSecond   int64
+	net.Conn
+	readUnthrottledBytes  atomic.Int64
+	readBytesPerSecond    atomic.Int64
+	writeUnthrottledBytes atomic.Int64
+	writeBytesPerSecond   atomic.Int64
 	closeAfterExhausted   int32
 	readLock              sync.Mutex
 	readRateLimiter       *rate.Limiter
@@ -80,7 +78,6 @@ type ThrottledConn struct {
 	isClosed              int32
 	stopBroadcast         chan struct{}
 	isStream              bool
-	net.Conn
 }
 
 // NewThrottledConn initializes a new ThrottledConn.
@@ -120,15 +117,15 @@ func (conn *ThrottledConn) SetLimits(limits RateLimits) {
 	if rate < 0 {
 		rate = 0
 	}
-	atomic.StoreInt64(&conn.readBytesPerSecond, rate)
-	atomic.StoreInt64(&conn.readUnthrottledBytes, limits.ReadUnthrottledBytes)
+	conn.readBytesPerSecond.Store(rate)
+	conn.readUnthrottledBytes.Store(limits.ReadUnthrottledBytes)
 
 	rate = limits.WriteBytesPerSecond
 	if rate < 0 {
 		rate = 0
 	}
-	atomic.StoreInt64(&conn.writeBytesPerSecond, rate)
-	atomic.StoreInt64(&conn.writeUnthrottledBytes, limits.WriteUnthrottledBytes)
+	conn.writeBytesPerSecond.Store(rate)
+	conn.writeUnthrottledBytes.Store(limits.WriteUnthrottledBytes)
 
 	closeAfterExhausted := int32(0)
 	if limits.CloseAfterExhausted {
@@ -153,9 +150,9 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 	// exhausted. This is only an approximate enforcement
 	// since this read, or concurrent reads, could exceed
 	// the remaining count.
-	if atomic.LoadInt64(&conn.readUnthrottledBytes) > 0 {
+	if conn.readUnthrottledBytes.Load() > 0 {
 		n, err := conn.Conn.Read(buffer)
-		atomic.AddInt64(&conn.readUnthrottledBytes, -int64(n))
+		conn.readUnthrottledBytes.Add(-int64(n))
 		return n, err
 	}
 
@@ -164,7 +161,7 @@ func (conn *ThrottledConn) Read(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
-	readRate := atomic.SwapInt64(&conn.readBytesPerSecond, -1)
+	readRate := conn.readBytesPerSecond.Swap(-1)
 
 	if readRate != -1 {
 		// SetLimits has been called and a new rate limiter
@@ -257,9 +254,9 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn closed")
 	}
 
-	if atomic.LoadInt64(&conn.writeUnthrottledBytes) > 0 {
+	if conn.writeUnthrottledBytes.Load() > 0 {
 		n, err := conn.Conn.Write(buffer)
-		atomic.AddInt64(&conn.writeUnthrottledBytes, -int64(n))
+		conn.writeUnthrottledBytes.Add(-int64(n))
 		return n, err
 	}
 
@@ -268,7 +265,7 @@ func (conn *ThrottledConn) Write(buffer []byte) (int, error) {
 		return 0, errors.TraceNew("throttled conn exhausted")
 	}
 
-	writeRate := atomic.SwapInt64(&conn.writeBytesPerSecond, -1)
+	writeRate := conn.writeBytesPerSecond.Swap(-1)
 
 	if writeRate != -1 {
 		if writeRate == 0 {
