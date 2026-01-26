@@ -185,7 +185,7 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 		}
 
 		p := serverContext.tunnel.config.GetParameters().Get()
-		compressTactics = compressTacticsEnabled && p.Bool(parameters.CompressTactics)
+		compressTactics = p.Bool(parameters.CompressTactics)
 		p.Close()
 	}
 
@@ -274,11 +274,6 @@ func (serverContext *ServerContext) doHandshakeRequest(ignoreStatsRegexps bool) 
 	// - 'ssh_session_id' is ignored; client session ID is used instead
 
 	var handshakeResponse protocol.HandshakeResponse
-
-	// Initialize these fields to distinguish between psiphond omitting values in
-	// the response and the zero value, which means unlimited rate.
-	handshakeResponse.UpstreamBytesPerSecond = -1
-	handshakeResponse.DownstreamBytesPerSecond = -1
 
 	err := responseUnmarshaler(response, &handshakeResponse)
 	if err != nil {
@@ -1302,6 +1297,14 @@ func getBaseAPIParameters(
 		params["dial_duration"] = fmt.Sprintf("%d", dialParams.DialDuration/time.Millisecond)
 
 		params["candidate_number"] = strconv.Itoa(dialParams.CandidateNumber)
+
+		params["unique_candidate_estimate"] = strconv.Itoa(dialParams.ServerEntryIterationUniqueCandidateEstimate)
+
+		params["candidates_moved_to_front"] = strconv.Itoa(dialParams.ServerEntryIterationMovedToFrontCount)
+
+		if dialParams.ServerEntryIterationFirstFrontedMeekCandidate >= 0 {
+			params["first_fronted_meek_candidate"] = strconv.Itoa(dialParams.ServerEntryIterationFirstFrontedMeekCandidate)
+		}
 
 		params["established_tunnels_count"] = strconv.Itoa(dialParams.EstablishedTunnelsCount)
 

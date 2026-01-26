@@ -16,7 +16,7 @@ message ServerTunnel {
 
     // Fields 1-99 are reserved for field groupings.
 
-    optional string tunnel_id = 100;
+    reserved 100, 176 to 181; // retired fields
 
     optional int64 burst_downstream_first_bytes = 101;
     optional int64 burst_downstream_first_duration = 102;
@@ -93,29 +93,10 @@ message ServerTunnel {
     optional int64 random_stream_received_upstream_bytes = 173;
     optional int64 random_stream_downstream_bytes = 174;
     optional int64 random_stream_sent_downstream_bytes = 175;
-    optional string dest_bytes_asn = 176;
-    optional int64 dest_bytes = 177;
-    optional int64 dest_bytes_up_tcp = 178;
-    optional int64 dest_bytes_down_tcp = 179;
-    optional int64 dest_bytes_up_udp = 180;
-    optional int64 dest_bytes_down_udp = 181;
     optional string relayed_steering_ip = 182;
     optional int64 request_check_server_entry_tags = 183;
     optional int64 checked_server_entry_tags = 184;
     optional int64 invalid_server_entry_tags = 185;
     optional int64 ssh_protocol_bytes = 186;
     optional int64 ssh_protocol_bytes_overhead = 187;
-}
-
-message ServerTunnelASNDestBytes {
-    // Fields 1-99 are reserved for field groupings.
-
-    optional string tunnel_id = 100;
-    optional string dest_asn = 101;
-    optional int64 dest_bytes = 102;
-    optional int64 dest_bytes_up_tcp = 103;
-    optional int64 dest_bytes_down_tcp = 104;
-    optional int64 dest_bytes_up_udp = 105;
-    optional int64 dest_bytes_down_udp = 106;
-
 }

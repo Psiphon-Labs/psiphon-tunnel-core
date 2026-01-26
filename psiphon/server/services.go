@@ -157,7 +157,7 @@ func RunServices(configJSON []byte) (retErr error) {
 			HostKeyFilename:               config.DSLRelayHostKeyFilename,
 			GetServiceAddress:             dslMakeGetServiceAddress(support),
 			HostID:                        config.HostID,
-			APIParameterValidator:         getDSLAPIParameterValidator(config),
+			APIParameterValidator:         getDSLAPIParameterValidator(),
 			APIParameterLogFieldFormatter: getDSLAPIParameterLogFieldFormatter(),
 		})
 		if err != nil {
@@ -171,6 +171,10 @@ func RunServices(configJSON []byte) (retErr error) {
 	}
 
 	support.discovery = makeDiscovery(support)
+
+	if config.RunDestBytesLogger() {
+		support.destBytesLogger = newDestBytesLogger(support)
+	}
 
 	// After this point, errors should be delivered to the errors channel and
 	// orderly shutdown should flow through to the end of the function to ensure
@@ -221,7 +225,7 @@ func RunServices(configJSON []byte) (retErr error) {
 	if config.RunLoadMonitor() {
 		waitGroup.Add(1)
 		go func() {
-			waitGroup.Done()
+			defer waitGroup.Done()
 			ticker := time.NewTicker(time.Duration(config.LoadMonitorPeriodSeconds) * time.Second)
 			defer ticker.Stop()
 
@@ -301,7 +305,7 @@ func RunServices(configJSON []byte) (retErr error) {
 	if config.RunPeriodicGarbageCollection() {
 		waitGroup.Add(1)
 		go func() {
-			waitGroup.Done()
+			defer waitGroup.Done()
 			ticker := time.NewTicker(config.periodicGarbageCollection)
 			defer ticker.Stop()
 			for {
@@ -313,6 +317,23 @@ func RunServices(configJSON []byte) (retErr error) {
 				}
 			}
 		}()
+	}
+
+	if config.RunDestBytesLogger() {
+		err = support.destBytesLogger.Start()
+		if err != nil {
+			select {
+			case errorChannel <- err:
+			default:
+			}
+		} else {
+			waitGroup.Add(1)
+			go func() {
+				defer waitGroup.Done()
+				<-shutdownBroadcast
+				support.destBytesLogger.Stop()
+			}()
+		}
 	}
 
 	// The tunnel server is always run; it launches multiple
@@ -625,6 +646,7 @@ type SupportServices struct {
 	ServerTacticsParametersCache *ServerTacticsParametersCache
 	dslRelay                     *dsl.Relay
 	discovery                    *Discovery
+	destBytesLogger              *destBytesLogger
 }
 
 // NewSupportServices initializes a new SupportServices.
@@ -663,7 +685,7 @@ func NewSupportServices(config *Config) (*SupportServices, error) {
 	tacticsServer, err := tactics.NewServer(
 		CommonLogger(log),
 		getTacticsAPIParameterLogFieldFormatter(),
-		getTacticsAPIParameterValidator(config),
+		getTacticsAPIParameterValidator(),
 		config.TacticsConfigFilename,
 		config.TacticsRequestPublicKey,
 		config.TacticsRequestPrivateKey,

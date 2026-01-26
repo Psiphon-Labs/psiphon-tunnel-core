@@ -46,6 +46,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	utls "github.com/Psiphon-Labs/utls"
+	"github.com/axiomhq/hyperloglog"
 	lrucache "github.com/cognusion/go-cache-lru"
 	"github.com/fxamacker/cbor/v2"
 	"golang.org/x/time/rate"
@@ -106,6 +107,11 @@ type Controller struct {
 	inproxyLastStoredTactics                time.Time
 	establishSignalForceTacticsFetch        chan struct{}
 	inproxyClientDialRateLimiter            *rate.Limiter
+
+	serverEntryIterationMetricsMutex                    sync.Mutex
+	serverEntryIterationUniqueCandidates                *hyperloglog.Sketch
+	serverEntryIterationFirstFrontedMeekCandidateNumber int
+	serverEntryIterationMovedToFrontCount               int
 
 	currentNetworkMutex      sync.Mutex
 	currentNetworkCtx        context.Context
@@ -293,6 +299,7 @@ func NewController(config *Config) (controller *Controller, err error) {
 
 	controller.config.SetTacticsAppliedReceivers(tacticAppliedReceivers)
 	controller.config.SetSignalComponentFailure(controller.SignalComponentFailure)
+	controller.config.SetServerEntryIterationMetricsUpdater(controller.updateServerEntryIterationResetMetrics)
 
 	return controller, nil
 }
@@ -2216,6 +2223,8 @@ func (controller *Controller) launchEstablishing() {
 		controller.doConstraintsScan()
 	}
 
+	controller.resetServerEntryIterationMetrics()
+
 	for i := 0; i < workerPoolSize; i++ {
 		controller.establishWaitGroup.Add(1)
 		go controller.establishTunnelWorker()
@@ -2373,6 +2382,50 @@ func (controller *Controller) stopEstablishing() {
 	emitDNSMetrics(controller.resolver)
 }
 
+func (controller *Controller) resetServerEntryIterationMetrics() {
+	controller.serverEntryIterationMetricsMutex.Lock()
+	defer controller.serverEntryIterationMetricsMutex.Unlock()
+
+	controller.serverEntryIterationUniqueCandidates = hyperloglog.New()
+	controller.serverEntryIterationFirstFrontedMeekCandidateNumber = -1
+	controller.serverEntryIterationMovedToFrontCount = 0
+}
+
+func (controller *Controller) updateServerEntryIterationDialMetrics(dialParams *DialParameters) {
+	controller.serverEntryIterationMetricsMutex.Lock()
+	defer controller.serverEntryIterationMetricsMutex.Unlock()
+
+	// Unique candidate counting track the number of different server entries
+	// attempted. To avoid the memory overhead of a large map, we use a
+	// probabilistic HyperLogLog with a fixed overhead of 16KB. As a result,
+	// the count is an estimate with on the order of ~1% relative error.
+
+	controller.serverEntryIterationUniqueCandidates.Insert([]byte(dialParams.ServerEntry.IpAddress))
+
+	if controller.serverEntryIterationFirstFrontedMeekCandidateNumber == -1 &&
+		protocol.TunnelProtocolUsesFrontedMeek(dialParams.TunnelProtocol) {
+		controller.serverEntryIterationFirstFrontedMeekCandidateNumber = dialParams.CandidateNumber
+	}
+
+	// Capture a snapshot of server entry iteration metrics to be recorded
+	// with the server_tunnel or failed_tunnel for this candidate.
+	//
+	// See rounding comment in GetLastServerEntryCount.
+
+	estimate := roundServerEntryCount(int(controller.serverEntryIterationUniqueCandidates.Estimate()))
+
+	dialParams.ServerEntryIterationUniqueCandidateEstimate = estimate
+	dialParams.ServerEntryIterationMovedToFrontCount = controller.serverEntryIterationMovedToFrontCount
+	dialParams.ServerEntryIterationFirstFrontedMeekCandidate = controller.serverEntryIterationFirstFrontedMeekCandidateNumber
+}
+
+func (controller *Controller) updateServerEntryIterationResetMetrics(movedToFront int) {
+	controller.serverEntryIterationMetricsMutex.Lock()
+	defer controller.serverEntryIterationMetricsMutex.Unlock()
+
+	controller.serverEntryIterationMovedToFrontCount += movedToFront
+}
+
 // establishCandidateGenerator populates the candidate queue with server entries
 // from the data store. Server entries are iterated in rank order, so that promoted
 // servers with higher rank are priority candidates.
@@ -2429,6 +2482,8 @@ loop:
 		// establishing loop. Clients typically re-establish often enough that we
 		// will see the effect of the remote server list fetch in diagnostics.
 
+		completedServerEntryIteration := false
+
 		roundStartTime := time.Now()
 		var roundNetworkWaitDuration time.Duration
 
@@ -2460,6 +2515,7 @@ loop:
 			if serverEntry == nil {
 				// Completed this iteration
 				NoticeInfo("completed server entry iteration")
+				completedServerEntryIteration = true
 				break
 			}
 
@@ -2525,9 +2581,6 @@ loop:
 			}
 		}
 
-		// Free up resources now, but don't reset until after the pause.
-		iterator.Close()
-
 		// Trigger RSL, OSL, and upgrade checks after failing to establish a
 		// tunnel within parameters.EstablishTunnelWorkTime, or if there are
 		// no server entries present.
@@ -2592,16 +2645,49 @@ loop:
 			}
 		}
 
-		// After a complete iteration of candidate servers, pause before iterating again.
-		// This helps avoid some busy wait loop conditions, and also allows some time for
-		// network conditions to change. Also allows for fetch remote to complete,
-		// in typical conditions (it isn't strictly necessary to wait for this, there will
-		// be more rounds if required).
+		// If the round ended without exhausting the server entry iterator,
+		// decide whether to keep iterating in order, or to perform a reset.
+		// Resets perform a new random shuffle, move replay and prioritized
+		// dial server entries to the front, and incorporate any newly
+		// download server entries.
 
 		p := controller.config.GetParameters().Get()
+
+		resetIterator := completedServerEntryIteration ||
+			p.WeightedCoinFlip(parameters.ServerEntryIteratorResetProbability)
+
+		if resetIterator {
+			// Free up resources now, but don't reset until after the pause.
+			iterator.Close()
+		}
+
+		// After a round, pause before iterating again. This helps avoid some
+		// busy wait loop conditions, and also allows some time for network
+		// conditions to change. Also allows for fetch remote to complete, in
+		// typical conditions (it isn't strictly necessary to wait for this,
+		// there will be more rounds if required).
+
+		pausePeriod := p.Duration(parameters.EstablishTunnelPausePeriod)
+		if controller.config.TargetServerEntry == "" &&
+			GetLastServerEntryCount() == 0 &&
+			((!controller.config.DisableRemoteServerListFetcher &&
+				(controller.config.RemoteServerListURLs != nil ||
+					controller.config.ObfuscatedServerListRootURLs != nil)) ||
+				!controller.config.DisableDSLFetcher) {
+
+			// Reduce/alter the wait time if the client has no server entries
+			// and at least one type of server list fetch is configured.
+			//
+			// As a future enhancement, check for an in-flight server list fetch,
+			// and stop waiting as soon as it's finished.
+
+			pausePeriod = p.Duration(parameters.EstablishTunnelNoServersPausePeriod)
+		}
+
 		timeout := prng.JitterDuration(
-			p.Duration(parameters.EstablishTunnelPausePeriod),
+			pausePeriod,
 			p.Float(parameters.EstablishTunnelPausePeriodJitter))
+
 		p.Close()
 
 		timer := time.NewTimer(timeout)
@@ -2614,11 +2700,13 @@ loop:
 		}
 		timer.Stop()
 
-		err := iterator.Reset()
-		if err != nil {
-			NoticeError("failed to reset iterator: %v", errors.Trace(err))
-			controller.SignalComponentFailure()
-			return
+		if resetIterator {
+			err := iterator.Reset()
+			if err != nil {
+				NoticeError("failed to reset iterator: %v", errors.Trace(err))
+				controller.SignalComponentFailure()
+				return
+			}
 		}
 	}
 }
@@ -2937,6 +3025,12 @@ loop:
 		if dialRateLimitDelay > 0 {
 			common.SleepWithContext(controller.establishCtx, dialRateLimitDelay)
 		}
+
+		// Now that this candidate will be dialed, update the server entry
+		// iteration metrics to reflect this dial. This call also populates
+		// dialParams with a snapshot of the current iteration metrics.
+
+		controller.updateServerEntryIterationDialMetrics(dialParams)
 
 		// ConnectTunnel will allocate significant memory, so first attempt to
 		// reclaim as much as possible.
@@ -3403,7 +3497,7 @@ func (controller *Controller) inproxyGetProxyAPIParameters(includeTacticsParamet
 		}
 
 		p := controller.config.GetParameters().Get()
-		compressTactics := compressTacticsEnabled && p.Bool(parameters.CompressTactics)
+		compressTactics := p.Bool(parameters.CompressTactics)
 		p.Close()
 
 		if compressTactics {
@@ -3548,5 +3642,3 @@ func (controller *Controller) inproxyHandleProxyTacticsPayload(
 
 	return appliedNewTactics
 }
-
-var compressTacticsEnabled = true

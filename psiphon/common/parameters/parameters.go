@@ -84,6 +84,7 @@ const (
 	EstablishTunnelTimeout                             = "EstablishTunnelTimeout"
 	EstablishTunnelWorkTime                            = "EstablishTunnelWorkTime"
 	EstablishTunnelPausePeriod                         = "EstablishTunnelPausePeriod"
+	EstablishTunnelNoServersPausePeriod                = "EstablishTunnelNoServersPausePeriod"
 	EstablishTunnelPausePeriodJitter                   = "EstablishTunnelPausePeriodJitter"
 	EstablishTunnelServerAffinityGracePeriod           = "EstablishTunnelServerAffinityGracePeriod"
 	StaggerConnectionWorkersPeriod                     = "StaggerConnectionWorkersPeriod"
@@ -342,7 +343,6 @@ const (
 	RestrictInproxyProviderIDsServerProbability        = "RestrictInproxyProviderIDsServerProbability"
 	RestrictInproxyProviderIDsClientProbability        = "RestrictInproxyProviderIDsClientProbability"
 	UpstreamProxyAllowAllServerEntrySources            = "UpstreamProxyAllowAllServerEntrySources"
-	DestinationBytesMetricsASN                         = "DestinationBytesMetricsASN"
 	DestinationBytesMetricsASNs                        = "DestinationBytesMetricsASNs"
 	DNSResolverAttemptsPerServer                       = "DNSResolverAttemptsPerServer"
 	DNSResolverAttemptsPerPreferredServer              = "DNSResolverAttemptsPerPreferredServer"
@@ -556,6 +556,10 @@ const (
 	DSLFetcherGetOSLFileSpecsMaxCount                  = "DSLFetcherGetOSLFileSpecsMaxCount"
 	DSLPrioritizeDialNewServerEntryProbability         = "DSLPrioritizeDialNewServerEntryProbability"
 	DSLPrioritizeDialExistingServerEntryProbability    = "DSLPrioritizeDialExistingServerEntryProbability"
+	DSLPrioritizeDialRetainFailedProbability           = "DSLPrioritizeDialRetainFailedProbability"
+	DSLPrioritizeDialPlaceholderTTL                    = "DSLPrioritizeDialPlaceholderTTL"
+	ServerEntryIteratorMaxMoveToFront                  = "ServerEntryIteratorMaxMoveToFront"
+	ServerEntryIteratorResetProbability                = "ServerEntryIteratorResetProbability"
 
 	// Retired parameters
 
@@ -563,6 +567,7 @@ const (
 	InproxyAllBrokerPublicKeys                = "InproxyAllBrokerPublicKeys"
 	InproxyTunnelProtocolSelectionProbability = "InproxyTunnelProtocolSelectionProbability"
 	ReplayIgnoreChangedConfigState            = "ReplayIgnoreChangedConfigState"
+	DestinationBytesMetricsASN                = "DestinationBytesMetricsASN"
 )
 
 const (
@@ -602,7 +607,8 @@ var defaultParameters = map[string]struct {
 	TunnelConnectTimeout:                     {value: 20 * time.Second, minimum: 1 * time.Second, flags: useNetworkLatencyMultiplier},
 	EstablishTunnelTimeout:                   {value: 300 * time.Second, minimum: time.Duration(0)},
 	EstablishTunnelWorkTime:                  {value: 60 * time.Second, minimum: 1 * time.Second},
-	EstablishTunnelPausePeriod:               {value: 5 * time.Second, minimum: 1 * time.Millisecond},
+	EstablishTunnelPausePeriod:               {value: 2 * time.Second, minimum: 1 * time.Millisecond},
+	EstablishTunnelNoServersPausePeriod:      {value: 250 * time.Millisecond, minimum: 1 * time.Millisecond},
 	EstablishTunnelPausePeriodJitter:         {value: 0.1, minimum: 0.0},
 	EstablishTunnelServerAffinityGracePeriod: {value: 1 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	StaggerConnectionWorkersPeriod:           {value: time.Duration(0), minimum: time.Duration(0)},
@@ -1188,6 +1194,11 @@ var defaultParameters = map[string]struct {
 	DSLFetcherGetOSLFileSpecsMaxCount:                 {value: 1, minimum: 0},
 	DSLPrioritizeDialNewServerEntryProbability:        {value: 0.5, minimum: 0.0},
 	DSLPrioritizeDialExistingServerEntryProbability:   {value: 0.25, minimum: 0.0},
+	DSLPrioritizeDialRetainFailedProbability:          {value: 0.0, minimum: 0.0},
+	DSLPrioritizeDialPlaceholderTTL:                   {value: 24 * time.Hour, minimum: time.Duration(0)},
+
+	ServerEntryIteratorMaxMoveToFront:   {value: -1, minimum: -1},
+	ServerEntryIteratorResetProbability: {value: 1.0, minimum: 0.0},
 }
 
 // IsServerSideOnly indicates if the parameter specified by name is used

@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package ca.psiphon.psiphond;
+
+import "ca.psiphon.psiphond/dest_params.proto";
+
+option go_package = "github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphond";
+
+message DomainDestBytes {
+    optional ca.psiphon.psiphond.DestParams dest_params = 1;
+
+    // Fields 1-99 are reserved for field groupings.
+
+    optional string domain = 100;
+    optional int64 bytes_tcp = 101;
+    optional int64 bytes_udp = 102;
+    optional int64 bytes = 103;
+}

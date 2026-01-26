@@ -596,8 +596,10 @@ func DeleteServerEntryAffinity(ipAddress string) error {
 // rounded to avoid a potentially unique client fingerprint. The return value
 // is -1 if no count has been recorded.
 func GetLastServerEntryCount() int {
-	count := int(datastoreLastServerEntryCount.Load())
+	return roundServerEntryCount(int(datastoreLastServerEntryCount.Load()))
+}
 
+func roundServerEntryCount(count int) int {
 	if count <= 0 {
 		// Return -1 (no count) and 0 (no server entries) as-is.
 		return count
@@ -658,6 +660,7 @@ type ServerEntryIterator struct {
 	isPruneServerEntryIterator   bool
 	hasNextTargetServerEntry     bool
 	targetServerEntry            *protocol.ServerEntry
+	updateMoveToFrontMetrics     bool
 }
 
 // NewServerEntryIterator creates a new ServerEntryIterator.
@@ -686,8 +689,9 @@ func NewServerEntryIterator(config *Config) (bool, *ServerEntryIterator, error) 
 	applyServerAffinity := !filterChanged
 
 	iterator := &ServerEntryIterator{
-		config:              config,
-		applyServerAffinity: applyServerAffinity,
+		config:                   config,
+		applyServerAffinity:      applyServerAffinity,
+		updateMoveToFrontMetrics: true,
 	}
 
 	err = iterator.reset(true)
@@ -789,6 +793,7 @@ func newTargetServerEntryIterator(config *Config, isTactics bool) (bool, *Server
 		isTargetServerEntryIterator:  true,
 		hasNextTargetServerEntry:     true,
 		targetServerEntry:            serverEntry,
+		updateMoveToFrontMetrics:     !isTactics,
 	}
 
 	err = iterator.reset(true)
@@ -849,6 +854,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 	// list is built.
 
 	var serverEntryIDs [][]byte
+	movedToFront := 0
 
 	err := datastoreView(func(tx *datastoreTx) error {
 
@@ -928,10 +934,15 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 		// would require unmarshaling all dial parameters, which we are avoiding.
 
 		p := iterator.config.GetParameters().Get()
+		replayCandidateCount := p.Int(parameters.ReplayCandidateCount)
+		moveToFrontProbability := p.Float(parameters.ReplayLaterRoundMoveToFrontProbability)
+		maxMoveToFront := p.Int(parameters.ServerEntryIteratorMaxMoveToFront)
+		p.Close()
 
 		if !iterator.isPruneServerEntryIterator &&
-			(isInitialRound || p.WeightedCoinFlip(parameters.ReplayLaterRoundMoveToFrontProbability)) &&
-			p.Int(parameters.ReplayCandidateCount) != 0 {
+			(isInitialRound || prng.FlipWeightedCoin(moveToFrontProbability)) &&
+			replayCandidateCount != 0 &&
+			maxMoveToFront != 0 {
 
 			networkID := []byte(iterator.config.GetNetworkID())
 
@@ -939,6 +950,9 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 			i := shuffleHead
 			j := len(serverEntryIDs) - 1
 			for {
+				if maxMoveToFront >= 0 && movedToFront >= maxMoveToFront {
+					break
+				}
 				for ; i < j; i++ {
 					key := makeDialParametersKey(serverEntryIDs[i], networkID)
 					if dialParamsBucket.get(key) == nil {
@@ -953,6 +967,7 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 				}
 				if i < j {
 					serverEntryIDs[i], serverEntryIDs[j] = serverEntryIDs[j], serverEntryIDs[i]
+					movedToFront += 1
 					i++
 					j--
 				} else {
@@ -969,6 +984,14 @@ func (iterator *ServerEntryIterator) reset(isInitialRound bool) error {
 
 	iterator.serverEntryIDs = serverEntryIDs
 	iterator.serverEntryIndex = 0
+
+	if iterator.updateMoveToFrontMetrics {
+
+		updater := iterator.config.GetServerEntryIterationMetricsUpdater()
+		if updater != nil {
+			updater(movedToFront)
+		}
+	}
 
 	return nil
 }
@@ -2678,7 +2701,7 @@ func dslLookupServerEntry(
 	return serverEntryID, nil
 }
 
-// dslPrioritizeDialServerEntry will create a DSLPendingPrioritizeDial
+// dslPrioritizeDialServerEntry will create a DSLPendingPrioritizeDialTimestamp
 // placeholder dial parameters for the specified server entry, unless a dial
 // params already exists. Any existing dial param isn't unmarshaled and
 // inspected -- even if it's a replay past its TTL, the existence of the
@@ -2701,7 +2724,7 @@ func dslPrioritizeDialServerEntry(
 	}
 
 	dialParams := &DialParameters{
-		DSLPendingPrioritizeDial: true,
+		DSLPendingPrioritizeDialTimestamp: time.Now(),
 	}
 
 	record, err := json.Marshal(dialParams)

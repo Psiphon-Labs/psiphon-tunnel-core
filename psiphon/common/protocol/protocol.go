@@ -923,4 +923,4 @@ func SetCompressTactics(params common.APIParameters) {
 // client-reported server_entry_count metrics. Except for the value 0, the
 // metric is rounded up to the nearest increment to avoid a potentially
 // unique client fingerprint.
-var ServerEntryCountRoundingIncrement = 50
+var ServerEntryCountRoundingIncrement = 10

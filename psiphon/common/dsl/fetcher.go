@@ -887,10 +887,11 @@ func (f *Fetcher) loadOSLStates(ctx context.Context, reassembleKeys bool) ([]*fe
 					if err != nil {
 						return nil, errors.Trace(err)
 					}
+
+					f.config.Logger.WithTraceFields(common.LogFields{
+						"tunneled": f.config.Tunneled,
+					}).Info("DSL: reassembled OSL key")
 				}
-				f.config.Logger.WithTraceFields(common.LogFields{
-					"tunneled": f.config.Tunneled,
-				}).Info("DSL: reassembled OSL key")
 			}
 
 			// Allow state.FileSpec to be garbage collected.

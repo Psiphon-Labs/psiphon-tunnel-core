@@ -686,7 +686,7 @@ func TestCheckPruneServerEntries(t *testing.T) {
 		})
 }
 
-func TestBurstMonitorAndDestinationBytes(t *testing.T) {
+func TestBurstMonitorAndASNDestBytes(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
 			tunnelProtocol:       "OSSH",
@@ -695,40 +695,24 @@ func TestBurstMonitorAndDestinationBytes(t *testing.T) {
 			doTunneledNTPRequest: true,
 			doDanglingTCPConn:    true,
 			doBurstMonitor:       true,
-			doDestinationBytes:   true,
+			doASNDestBytes:       true,
 			doLogHostProvider:    true,
 			doLogProtobuf:        useProtobufLogging,
-		})
-}
-
-func TestBurstMonitorAndLegacyDestinationBytes(t *testing.T) {
-	runServer(t,
-		&runServerConfig{
-			tunnelProtocol:           "OSSH",
-			requireAuthorization:     true,
-			doTunneledWebRequest:     true,
-			doTunneledNTPRequest:     true,
-			doDanglingTCPConn:        true,
-			doBurstMonitor:           true,
-			doLegacyDestinationBytes: true,
-			doLogHostProvider:        true,
-			doLogProtobuf:            useProtobufLogging,
 		})
 }
 
 func TestChangeBytesConfig(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:           "OSSH",
-			requireAuthorization:     true,
-			doTunneledWebRequest:     true,
-			doTunneledNTPRequest:     true,
-			doDanglingTCPConn:        true,
-			doDestinationBytes:       true,
-			doLegacyDestinationBytes: true,
-			doChangeBytesConfig:      true,
-			doLogHostProvider:        true,
-			doLogProtobuf:            useProtobufLogging,
+			tunnelProtocol:       "OSSH",
+			requireAuthorization: true,
+			doTunneledWebRequest: true,
+			doTunneledNTPRequest: true,
+			doDanglingTCPConn:    true,
+			doASNDestBytes:       true,
+			doChangeBytesConfig:  true,
+			doLogHostProvider:    true,
+			doLogProtobuf:        useProtobufLogging,
 		})
 }
 
@@ -801,41 +785,40 @@ func TestDomainRequest(t *testing.T) {
 }
 
 type runServerConfig struct {
-	tunnelProtocol           string
-	clientTunnelProtocol     string
-	passthrough              bool
-	tlsProfile               string
-	doHotReload              bool
-	doDefaultSponsorID       bool
-	denyTrafficRules         bool
-	requireAuthorization     bool
-	omitAuthorization        bool
-	doTunneledWebRequest     bool
-	doTunneledDomainRequest  bool
-	doTunneledNTPRequest     bool
-	applyPrefix              bool
-	forceFragmenting         bool
-	forceLivenessTest        bool
-	doPruneServerEntries     bool
-	checkPruneServerEntries  bool
-	doDanglingTCPConn        bool
-	doPacketManipulation     bool
-	doBurstMonitor           bool
-	doSplitTunnel            bool
-	limitQUICVersions        bool
-	doDestinationBytes       bool
-	doLegacyDestinationBytes bool
-	doChangeBytesConfig      bool
-	doLogHostProvider        bool
-	inspectFlows             bool
-	doSteeringIP             bool
-	doTargetBrokerSpecs      bool
-	useLegacyAPIEncoding     bool
-	doPersonalPairing        bool
-	doRestrictInproxy        bool
-	useInproxyMediaStreams   bool
-	doUncompressedTactics    bool
-	doLogProtobuf            bool
+	tunnelProtocol          string
+	clientTunnelProtocol    string
+	passthrough             bool
+	tlsProfile              string
+	doHotReload             bool
+	doDefaultSponsorID      bool
+	denyTrafficRules        bool
+	requireAuthorization    bool
+	omitAuthorization       bool
+	doTunneledWebRequest    bool
+	doTunneledDomainRequest bool
+	doTunneledNTPRequest    bool
+	applyPrefix             bool
+	forceFragmenting        bool
+	forceLivenessTest       bool
+	doPruneServerEntries    bool
+	checkPruneServerEntries bool
+	doDanglingTCPConn       bool
+	doPacketManipulation    bool
+	doBurstMonitor          bool
+	doSplitTunnel           bool
+	limitQUICVersions       bool
+	doASNDestBytes          bool
+	doChangeBytesConfig     bool
+	doLogHostProvider       bool
+	inspectFlows            bool
+	doSteeringIP            bool
+	doTargetBrokerSpecs     bool
+	useLegacyAPIEncoding    bool
+	doPersonalPairing       bool
+	doRestrictInproxy       bool
+	useInproxyMediaStreams  bool
+	doUncompressedTactics   bool
+	doLogProtobuf           bool
 }
 
 var (
@@ -911,7 +894,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// configureDSLTestServerEntries bootstrap can only perform tactics
 	// requests and not dial a tunnel, so the DSL request must succeed.
 
-	doDSL := psiphon.DSLEnabled() && doInproxy && inproxyTestConfig.addMeekServerForBroker
+	doDSL := doInproxy && inproxyTestConfig.addMeekServerForBroker
 
 	var dslTestConfig *dslTestConfig
 	enableDSLFetcher := "false"
@@ -971,8 +954,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.applyPrefix ||
 		runConfig.forceFragmenting ||
 		runConfig.doBurstMonitor ||
-		runConfig.doDestinationBytes ||
-		runConfig.doLegacyDestinationBytes ||
+		runConfig.doASNDestBytes ||
 		runConfig.doTunneledDomainRequest
 
 	// All servers require a tactics config with valid keys.
@@ -1125,8 +1107,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
-			runConfig.doDestinationBytes,
-			runConfig.doLegacyDestinationBytes,
+			runConfig.doASNDestBytes,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
 			"classic",
@@ -1276,15 +1257,10 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 	resetReassembleServerLoadLogs(expectedServerLoadProtocolLogs)
 
-	expectedTunnelLogs := 1
-	if runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig {
-		expectedTunnelLogs++ // 1 base + 1 ASN
-	}
-	resetReassembleServerTunnelLogs(expectedTunnelLogs)
-
-	uniqueUserLog := make(chan map[string]interface{}, 1)
-	domainBytesLog := make(chan map[string]interface{}, 1)
 	serverTunnelLog := make(chan map[string]interface{}, 1)
+	uniqueUserLog := make(chan map[string]interface{}, 1)
+	asnDestBytesLog := make(chan map[string]interface{}, 1)
+	domainDestBytesLog := make(chan map[string]interface{}, 1)
 
 	// Max 3 discovery logs:
 	// 1. server startup
@@ -1324,9 +1300,14 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			case uniqueUserLog <- logFields:
 			default:
 			}
-		case "domain_bytes":
+		case "asn_dest_bytes":
 			select {
-			case domainBytesLog <- logFields:
+			case asnDestBytesLog <- logFields:
+			default:
+			}
+		case "domain_dest_bytes":
+			select {
+			case domainDestBytesLog <- logFields:
 			default:
 			}
 		case "server_tunnel":
@@ -1422,15 +1403,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				if err != nil {
 					return errors.Trace(err)
 				}
-			} else if strings.HasPrefix(eventName, "server_tunnel") {
-
-				// Multiple protobuf server_tunnel* logs are reassembled into
-				// one JSON server_tunnel log.
-				reflectedLogFields, err = reassembleServerTunnelLog(
-					eventName, reflectedLogFields)
-				if err != nil {
-					return errors.Trace(err)
-				}
 			}
 
 			if reflectedLogFields != nil {
@@ -1451,9 +1423,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 
 		socketReader.Start()
-		readerShutdownCtx, readerShutdownCtxCancel :=
-			context.WithDeadline(context.Background(), time.Now().Add(5*time.Second))
 		defer func() {
+			readerShutdownCtx, readerShutdownCtxCancel :=
+				context.WithDeadline(context.Background(), time.Now())
 			readerShutdownCtxCancel()
 			socketReader.Stop(readerShutdownCtx)
 		}()
@@ -1567,8 +1539,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				propagationChannelID,
 				livenessTestSize,
 				runConfig.doBurstMonitor,
-				runConfig.doDestinationBytes,
-				runConfig.doLegacyDestinationBytes,
+				runConfig.doASNDestBytes,
 				runConfig.applyPrefix,
 				runConfig.forceFragmenting,
 				"consistent",
@@ -2136,7 +2107,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	if runConfig.doChangeBytesConfig {
 
-		if !runConfig.doDestinationBytes || !runConfig.doLegacyDestinationBytes {
+		if !runConfig.doASNDestBytes {
 			t.Fatalf("invalid test configuration")
 		}
 
@@ -2161,7 +2132,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
-			false,
 			false,
 			runConfig.applyPrefix,
 			runConfig.forceFragmenting,
@@ -2343,8 +2313,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if runConfig.limitQUICVersions {
 		expectQUICVersion = limitQUICVersions[0]
 	}
-	expectDestinationBytesFields := runConfig.doDestinationBytes && !runConfig.doChangeBytesConfig
-	expectLegacyDestinationBytesFields := runConfig.doLegacyDestinationBytes && !runConfig.doChangeBytesConfig
+	expectASNDestBytes := runConfig.doASNDestBytes && !runConfig.doChangeBytesConfig
 	expectMeekHTTPVersion := ""
 	if protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) {
 		if protocol.TunnelProtocolUsesFrontedMeek(runConfig.tunnelProtocol) {
@@ -2354,18 +2323,20 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 	expectServerEntryCount := 0
-	if doDSL || runConfig.doPruneServerEntries {
+	if doDSL || runConfig.checkPruneServerEntries {
 		expectServerEntryCount = protocol.ServerEntryCountRoundingIncrement
+	} else if runConfig.doPruneServerEntries {
+		expectServerEntryCount = 2 * protocol.ServerEntryCountRoundingIncrement
 	}
 	expectDSLPrioritized := doDSL
 
-	// The client still reports zero domain_bytes when no port forwards are
+	// The client still reports domain_bytes up when no port forwards are
 	// allowed (expectTrafficFailure).
 	//
 	// Limitation: this check is disabled in the in-proxy case since, in the
 	// self-proxy scheme, the proxy shuts down before the client can send its
 	// final status request.
-	expectDomainBytes := !runConfig.doChangeBytesConfig && !doInproxy
+	expectDomainDestBytes := !runConfig.doChangeBytesConfig && !doInproxy
 
 	select {
 	case logFields := <-serverTunnelLog:
@@ -2388,8 +2359,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectUDPDataTransfer,
 			expectDomainPortForward,
 			expectQUICVersion,
-			expectDestinationBytesFields,
-			expectLegacyDestinationBytesFields,
 			passthroughAddress,
 			expectMeekHTTPVersion,
 			expectCheckServerEntryPruneCount,
@@ -2424,22 +2393,42 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		}
 	}
 
-	if expectDomainBytes {
+	if expectASNDestBytes {
 		select {
-		case logFields := <-domainBytesLog:
-			err := checkExpectedDomainBytesLogFields(
+		case logFields := <-asnDestBytesLog:
+			err := checkExpectedASNDestBytesLogFields(
 				runConfig,
 				logFields)
 			if err != nil {
-				t.Fatalf("invalid domain bytes log fields: %s", err)
+				t.Fatalf("invalid ASN dest bytes log fields: %s", err)
+			}
+		default:
+			t.Fatalf("missing ASN bytes log")
+		}
+	} else {
+		select {
+		case <-asnDestBytesLog:
+			t.Fatalf("unexpected ASN dest bytes log")
+		default:
+		}
+	}
+
+	if expectDomainDestBytes {
+		select {
+		case logFields := <-domainDestBytesLog:
+			err := checkExpectedDomainDestBytesLogFields(
+				runConfig,
+				logFields)
+			if err != nil {
+				t.Fatalf("invalid domain dest bytes log fields: %s", err)
 			}
 		default:
 			t.Fatalf("missing domain bytes log")
 		}
 	} else {
 		select {
-		case <-domainBytesLog:
-			t.Fatalf("unexpected domain bytes log")
+		case <-domainDestBytesLog:
+			t.Fatalf("unexpected domain dest bytes log")
 		default:
 		}
 	}
@@ -2741,10 +2730,8 @@ func protoToLogFields(msg proto.Message, logFields map[string]interface{}, runCo
 }
 
 var (
-	reassembledServerLoadLogFields   map[string]interface{}
-	serverLoadLogComponentSequence   []int
-	reassembledServerTunnelLogFields map[string]interface{}
-	serverTunnelComponentSequence    []int
+	reassembledServerLoadLogFields map[string]interface{}
+	serverLoadLogComponentSequence []int
 )
 
 func resetReassembleServerLoadLogs(expectedProtocolLogs int) {
@@ -2762,11 +2749,6 @@ func resetReassembleServerLoadLogs(expectedProtocolLogs int) {
 		2,
 		2 + expectedProtocolLogs,
 		2 + expectedProtocolLogs}
-}
-
-func resetReassembleServerTunnelLogs(expectedTunnelLogs int) {
-	serverTunnelComponentSequence = []int{expectedTunnelLogs}
-	reassembledServerTunnelLogFields = nil
 }
 
 func reassembleServerLoadLog(
@@ -2858,90 +2840,6 @@ func reassembleServerLoadLog(
 	return nil, nil
 }
 
-func reassembleServerTunnelLog(
-	eventName string,
-	reflectedLogFields map[string]interface{}) (map[string]interface{}, error) {
-
-	// Reassemble protobuf server_tunnel components into a single set of fields
-	// compatible with the existing JSON log content checker.
-	if !strings.HasPrefix(eventName, "server_tunnel") {
-		return nil, errors.TraceNew("unexpected non-server_tunnel log")
-	}
-
-	i := 0
-	for ; i < len(serverTunnelComponentSequence); i++ {
-		if serverTunnelComponentSequence[i] > 0 {
-			break
-		}
-	}
-	if i >= len(serverTunnelComponentSequence) {
-		return nil, errors.TraceNew("unexpected server_tunnel sequence")
-	}
-
-	serverTunnelComponentSequence[i] -= 1
-	sequenceComplete := serverTunnelComponentSequence[i] == 0
-
-	if reassembledServerTunnelLogFields == nil {
-		reassembledServerTunnelLogFields = make(map[string]interface{})
-	}
-
-	serverTunnelLogFields := reassembledServerTunnelLogFields
-
-	switch eventName {
-	case "server_tunnel":
-		// Base server_tunnel message - copy all fields
-		for k, v := range reflectedLogFields {
-			serverTunnelLogFields[k] = v
-		}
-
-	case "server_tunnel_asn_dest_bytes":
-		// Initialize ASN byte maps if they don't exist
-		if serverTunnelLogFields["asn_dest_bytes"] == nil {
-			serverTunnelLogFields["asn_dest_bytes"] = make(map[string]interface{})
-		}
-		if serverTunnelLogFields["asn_dest_bytes_up_tcp"] == nil {
-			serverTunnelLogFields["asn_dest_bytes_up_tcp"] = make(map[string]interface{})
-		}
-		if serverTunnelLogFields["asn_dest_bytes_down_tcp"] == nil {
-			serverTunnelLogFields["asn_dest_bytes_down_tcp"] = make(map[string]interface{})
-		}
-		if serverTunnelLogFields["asn_dest_bytes_up_udp"] == nil {
-			serverTunnelLogFields["asn_dest_bytes_up_udp"] = make(map[string]interface{})
-		}
-		if serverTunnelLogFields["asn_dest_bytes_down_udp"] == nil {
-			serverTunnelLogFields["asn_dest_bytes_down_udp"] = make(map[string]interface{})
-		}
-
-		// Populate ASN-specific byte counts
-		if destAsn, ok := reflectedLogFields["dest_asn"].(string); ok {
-			if destBytes, ok := reflectedLogFields["dest_bytes"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes"].(map[string]interface{})[destAsn] = destBytes
-			}
-			if destBytesUpTcp, ok := reflectedLogFields["dest_bytes_up_tcp"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes_up_tcp"].(map[string]interface{})[destAsn] = destBytesUpTcp
-			}
-			if destBytesDownTcp, ok := reflectedLogFields["dest_bytes_down_tcp"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes_down_tcp"].(map[string]interface{})[destAsn] = destBytesDownTcp
-			}
-			if destBytesUpUdp, ok := reflectedLogFields["dest_bytes_up_udp"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes_up_udp"].(map[string]interface{})[destAsn] = destBytesUpUdp
-			}
-			if destBytesDownUdp, ok := reflectedLogFields["dest_bytes_down_udp"].(int64); ok {
-				serverTunnelLogFields["asn_dest_bytes_down_udp"].(map[string]interface{})[destAsn] = destBytesDownUdp
-			}
-		}
-	default:
-		return nil, fmt.Errorf("unmatched server_tunnel event: %s", eventName)
-	}
-
-	if sequenceComplete {
-		serverTunnelLogFields["event_name"] = "server_tunnel"
-		return serverTunnelLogFields, nil
-	}
-
-	return nil, nil
-}
-
 func checkExpectedServerTunnelLogFields(
 	runConfig *runServerConfig,
 	expectPropagationChannelID string,
@@ -2956,8 +2854,6 @@ func checkExpectedServerTunnelLogFields(
 	expectUDPDataTransfer bool,
 	expectDomainPortForward bool,
 	expectQUICVersion string,
-	expectDestinationBytesFields bool,
-	expectLegacyDestinationBytesFields bool,
 	expectPassthroughAddress *string,
 	expectMeekHTTPVersion string,
 	expectCheckServerEntryPruneCount int,
@@ -2975,7 +2871,6 @@ func checkExpectedServerTunnelLogFields(
 	for _, name := range []string{
 		"host_id",
 		"server_entry_tag",
-		"tunnel_id",
 		"start_time",
 		"duration",
 		"session_id",
@@ -3007,6 +2902,8 @@ func checkExpectedServerTunnelLogFields(
 		"ssh_protocol_bytes",
 		"ssh_protocol_bytes_overhead",
 		"server_entry_count",
+		"unique_candidate_estimate",
+		"candidates_moved_to_front",
 
 		// The test run ensures that logServerLoad is invoked while the client
 		// is connected, so the following must be logged.
@@ -3276,6 +3173,17 @@ func checkExpectedServerTunnelLogFields(
 					return fmt.Errorf("unexpected field '%s'", name)
 				}
 			}
+		}
+	}
+
+	name := "first_fronted_meek_candidate"
+	if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		if fields[name] == nil {
+			return fmt.Errorf("missing expected %s", name)
+		}
+	} else {
+		if fields[name] != nil {
+			return fmt.Errorf("unexpected %s", name)
 		}
 	}
 
@@ -3605,86 +3513,6 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	for _, name := range []string{
-		"asn_dest_bytes",
-		"asn_dest_bytes_up_tcp",
-		"asn_dest_bytes_down_tcp",
-		"asn_dest_bytes_up_udp",
-		"asn_dest_bytes_down_udp",
-	} {
-		if expectDestinationBytesFields && fields[name] == nil {
-			return fmt.Errorf("missing expected field '%s'", name)
-
-		} else if !expectDestinationBytesFields && fields[name] != nil {
-			return fmt.Errorf("unexpected field '%s'", name)
-		}
-	}
-
-	if expectDestinationBytesFields {
-		for _, pair := range [][]string{
-			{"asn_dest_bytes", "bytes"},
-			{"asn_dest_bytes_up_tcp", "bytes_up_tcp"},
-			{"asn_dest_bytes_down_tcp", "bytes_down_tcp"},
-			{"asn_dest_bytes_up_udp", "bytes_up_udp"},
-			{"asn_dest_bytes_down_udp", "bytes_down_udp"},
-		} {
-			if _, ok := fields[pair[0]].(map[string]any)[testGeoIPASN].(float64); !ok {
-				return fmt.Errorf("missing field entry %s: '%v'", pair[0], testGeoIPASN)
-			}
-			value0 := int64(fields[pair[0]].(map[string]any)[testGeoIPASN].(float64))
-			value1 := int64(fields[pair[1]].(float64))
-			ok := value0 == value1
-			if pair[0] == "asn_dest_bytes_up_udp" || pair[0] == "asn_dest_bytes_down_udp" || pair[0] == "asn_dest_bytes" {
-				// DNS requests are excluded from destination bytes counting
-				ok = value0 > 0 && value0 < value1
-			}
-			if !ok {
-				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
-			}
-		}
-	}
-
-	for _, name := range []string{
-		"dest_bytes_asn",
-		"dest_bytes_up_tcp",
-		"dest_bytes_down_tcp",
-		"dest_bytes_up_udp",
-		"dest_bytes_down_udp",
-		"dest_bytes",
-	} {
-		if expectLegacyDestinationBytesFields && fields[name] == nil {
-			return fmt.Errorf("missing expected field '%s'", name)
-
-		} else if !expectLegacyDestinationBytesFields && fields[name] != nil {
-			return fmt.Errorf("unexpected field '%s'", name)
-		}
-	}
-
-	if expectLegacyDestinationBytesFields {
-		name := "dest_bytes_asn"
-		if fields[name].(string) != testGeoIPASN {
-			return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
-		}
-		for _, pair := range [][]string{
-			{"dest_bytes_up_tcp", "bytes_up_tcp"},
-			{"dest_bytes_down_tcp", "bytes_down_tcp"},
-			{"dest_bytes_up_udp", "bytes_up_udp"},
-			{"dest_bytes_down_udp", "bytes_down_udp"},
-			{"dest_bytes", "bytes"},
-		} {
-			value0 := int64(fields[pair[0]].(float64))
-			value1 := int64(fields[pair[1]].(float64))
-			ok := value0 == value1
-			if pair[0] == "dest_bytes_up_udp" || pair[0] == "dest_bytes_down_udp" || pair[0] == "dest_bytes" {
-				// DNS requests are excluded from destination bytes counting
-				ok = value0 > 0 && value0 < value1
-			}
-			if !ok {
-				return fmt.Errorf("unexpected field value %s: %v != %v", pair[0], fields[pair[0]], fields[pair[1]])
-			}
-		}
-	}
-
 	if expectPassthroughAddress != nil {
 		name := "passthrough_address"
 		if fields[name] == nil {
@@ -3780,19 +3608,20 @@ func checkExpectedUniqueUserLogFields(
 	return nil
 }
 
-func checkExpectedDomainBytesLogFields(
+func checkExpectedDomainDestBytesLogFields(
 	runConfig *runServerConfig,
 	fields map[string]interface{}) error {
 
 	for _, name := range []string{
-		"session_id",
-		"propagation_channel_id",
-		"sponsor_id",
+		"client_asn",
 		"client_platform",
+		"client_region",
 		"device_region",
-		"device_location",
+		"sponsor_id",
 		"domain",
 		"bytes",
+		"bytes_tcp",
+		"bytes_udp",
 	} {
 		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
 			return fmt.Errorf("missing expected field '%s'", name)
@@ -3801,6 +3630,41 @@ func checkExpectedDomainBytesLogFields(
 		if name == "domain" {
 			if fields[name].(string) != "ALL" && fields[name].(string) != "(OTHER)" {
 				return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+			}
+		}
+	}
+
+	return nil
+}
+
+func checkExpectedASNDestBytesLogFields(
+	runConfig *runServerConfig,
+	fields map[string]interface{}) error {
+
+	for _, name := range []string{
+		"client_asn",
+		"client_platform",
+		"client_region",
+		"device_region",
+		"sponsor_id",
+		"asn",
+		"bytes",
+		"bytes_tcp",
+		"bytes_udp",
+	} {
+		if fields[name] == nil || fmt.Sprintf("%s", fields[name]) == "" {
+			return fmt.Errorf("missing expected field '%s'", name)
+		}
+
+		if name == "asn" {
+			if fields[name].(string) != testGeoIPASN {
+				return fmt.Errorf("unexpected field value %s: '%v'", name, fields[name])
+			}
+		}
+		for _, name := range []string{"bytes_tcp", "bytes_udp", "bytes"} {
+			value := int64(fields[name].(float64))
+			if value <= 0 {
+				return fmt.Errorf("unexpected field value %s: %v", name, fields[name])
 			}
 		}
 	}
@@ -3822,7 +3686,7 @@ func checkExpectedDSLPendingPrioritizeDial(
 	}
 
 	if dialParams == nil ||
-		!dialParams.DSLPendingPrioritizeDial ||
+		dialParams.DSLPendingPrioritizeDialTimestamp.IsZero() ||
 		dialParams.DSLPrioritizedDial {
 
 		return errors.TraceNew("unexpected server entry state")
@@ -4443,8 +4307,7 @@ func paveTacticsConfigFile(
 	propagationChannelID string,
 	livenessTestSize int,
 	doBurstMonitor bool,
-	doDestinationBytes bool,
-	doLegacyDestinationBytes bool,
+	doASNDestBytes bool,
 	applyOsshPrefix bool,
 	enableOsshPrefixFragmenting bool,
 	discoveryStategy string,
@@ -4465,7 +4328,6 @@ func paveTacticsConfigFile(
         "TTL" : "60s",
         "Probability" : 1.0,
         "Parameters" : {
-          %s
           %s
           %s
           %s
@@ -4556,17 +4418,10 @@ func paveTacticsConfigFile(
 	`
 	}
 
-	destinationBytesParameters := ""
-	if doDestinationBytes {
-		destinationBytesParameters = fmt.Sprintf(`
+	asnDestBytesParameters := ""
+	if doASNDestBytes {
+		asnDestBytesParameters = fmt.Sprintf(`
           "DestinationBytesMetricsASNs" : ["%s"],
-	`, testGeoIPASN)
-	}
-
-	legacyDestinationBytesParameters := ""
-	if doLegacyDestinationBytes {
-		legacyDestinationBytesParameters = fmt.Sprintf(`
-          "DestinationBytesMetricsASN" : "%s",
 	`, testGeoIPASN)
 	}
 
@@ -4596,8 +4451,7 @@ func paveTacticsConfigFile(
 		tacticsRequestPrivateKey,
 		tacticsRequestObfuscatedKey,
 		burstParameters,
-		destinationBytesParameters,
-		legacyDestinationBytesParameters,
+		asnDestBytesParameters,
 		osshPrefix,
 		inproxyParametersJSON,
 		restrictInproxyParameters,

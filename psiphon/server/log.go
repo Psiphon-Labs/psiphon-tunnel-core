@@ -127,6 +127,7 @@ func (logger *TraceLogger) WithTraceFields(fields LogFields) *logrus.Entry {
 // Note that any existing "trace"/"host_id"/"provider"/"build_rev" field will
 // be renamed to "field.<name>".
 func (logger *TraceLogger) LogRawFieldsWithTimestamp(fields LogFields) {
+
 	if ShouldLogJSON() {
 		renameLogFields(fields)
 		fields["host_id"] = logHostID
@@ -410,6 +411,7 @@ func init() {
 
 	// Set default format
 	logFormat = "json"
+	shouldLogJSON = true
 
 	log = &TraceLogger{
 		&logrus.Logger{

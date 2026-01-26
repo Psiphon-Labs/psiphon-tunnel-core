@@ -310,7 +310,6 @@ func fetchTactics(
 		config.GetParameters(),
 		GetTacticsStorer(config),
 		config.GetNetworkID,
-		compressTacticsEnabled,
 		apiParams,
 		serverEntry.Region,
 		dialParams.TunnelProtocol,

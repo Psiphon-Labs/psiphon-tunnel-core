@@ -379,14 +379,12 @@ func (f *FrontedMeekDialParameters) prepareDialConfigs(
 		meekMode = MeekModeWrappedPlaintextRoundTrip
 	}
 
-	addPsiphonFrontingHeader := false
-	if f.FrontingProviderID != "" {
-		addPsiphonFrontingHeader = common.Contains(
-			p.LabeledTunnelProtocols(
-				parameters.AddFrontingProviderPsiphonFrontingHeader,
-				f.FrontingProviderID),
-			equivilentTunnelProtocol)
-	}
+	addFrontingHeader := addPsiphonFrontingHeader(
+		p,
+		f.FrontingProviderID,
+		equivilentTunnelProtocol,
+		f.DialAddress,
+		f.ResolveParameters)
 
 	f.meekConfig = &MeekConfig{
 		DiagnosticID:             f.FrontingProviderID,
@@ -400,7 +398,7 @@ func (f *FrontedMeekDialParameters) prepareDialConfigs(
 		SNIServerName:            f.SNIServerName,
 		HostHeader:               f.HostHeader,
 		TransformedHostName:      f.TransformedHostName,
-		AddPsiphonFrontingHeader: addPsiphonFrontingHeader,
+		AddPsiphonFrontingHeader: addFrontingHeader,
 		VerifyServerName:         f.VerifyServerName,
 		VerifyPins:               f.VerifyPins,
 		ClientTunnelProtocol:     equivilentTunnelProtocol,

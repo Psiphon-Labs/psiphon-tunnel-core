@@ -357,7 +357,7 @@ func NewMeekServer(
 				AllowDomainFrontedDestinations: meekServer.inproxyBrokerAllowDomainFrontedDestinations,
 				AllowMatch:                     meekServer.inproxyBrokerAllowMatch,
 				LookupGeoIP:                    lookupGeoIPData,
-				APIParameterValidator:          getInproxyBrokerAPIParameterValidator(support.Config),
+				APIParameterValidator:          getInproxyBrokerAPIParameterValidator(),
 				APIParameterLogFieldFormatter:  getInproxyBrokerAPIParameterLogFieldFormatter(),
 				IsValidServerEntryTag:          support.PsinetDatabase.IsValidServerEntryTag,
 				GetTacticsPayload:              meekServer.inproxyBrokerGetTacticsPayload,

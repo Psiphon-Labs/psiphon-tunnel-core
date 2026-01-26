@@ -843,8 +843,11 @@ func init() {
 		{169, "server_entry_count", intConverter},
 		{170, "replay_ignored_change", intConverter},
 		{171, "dsl_prioritized", intConverter},
+		{172, "unique_candidate_estimate", intConverter},
+		{173, "candidates_moved_to_front", intConverter},
+		{174, "first_fronted_meek_candidate", intConverter},
 
-		// Next key value = 172
+		// Next key value = 175
 	}
 
 	for _, spec := range packedAPIParameterSpecs {

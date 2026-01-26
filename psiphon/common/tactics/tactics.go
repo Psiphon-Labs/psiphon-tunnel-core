@@ -1631,7 +1631,6 @@ func FetchTactics(
 	params *parameters.Parameters,
 	storer Storer,
 	getNetworkID func() string,
-	compressTacticsEnabled bool,
 	apiParams common.APIParameters,
 	endPointRegion string,
 	endPointProtocol string,
@@ -1642,7 +1641,7 @@ func FetchTactics(
 	p := params.Get()
 	speedTestPaddingMinBytes := p.Int(parameters.SpeedTestPaddingMinBytes)
 	speedTestPaddingMaxBytes := p.Int(parameters.SpeedTestPaddingMaxBytes)
-	compressTactics := compressTacticsEnabled && p.Bool(parameters.CompressTactics)
+	compressTactics := p.Bool(parameters.CompressTactics)
 	p.Close()
 
 	networkID := getNetworkID()

@@ -1742,6 +1742,10 @@ func (conn *webRTCConn) readDataChannelMessage(p []byte) (int, error) {
 			paddingSize, n := binary.Varint(conn.readBuffer[0:conn.readLength])
 
 			if (paddingSize == 0 && n <= 0) || paddingSize > int64(conn.readLength-n) {
+				if conn.readError == nil {
+					return 0, errors.Tracef(
+						"invalid padding: %d, %d, %d,", n, paddingSize, conn.readLength)
+				}
 				return 0, errors.Tracef(
 					"invalid padding: %d, %d, %d, %w",
 					n, paddingSize, conn.readLength, conn.readError)

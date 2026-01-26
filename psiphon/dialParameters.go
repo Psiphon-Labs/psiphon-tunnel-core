@@ -72,6 +72,10 @@ type DialParameters struct {
 	CandidateNumber         int                   `json:"-"`
 	EstablishedTunnelsCount int                   `json:"-"`
 
+	ServerEntryIterationUniqueCandidateEstimate   int `json:"-"`
+	ServerEntryIterationMovedToFrontCount         int `json:"-"`
+	ServerEntryIterationFirstFrontedMeekCandidate int `json:"-"`
+
 	IsExchanged bool `json:",omitempty"`
 
 	LastUsedTimestamp       time.Time `json:",omitempty"`
@@ -173,8 +177,8 @@ type DialParameters struct {
 	steeringIPCache    *lrucache.Cache `json:"-"`
 	steeringIPCacheKey string          `json:"-"`
 
-	DSLPendingPrioritizeDial bool `json:",omitempty"`
-	DSLPrioritizedDial       bool `json:",omitempty"`
+	DSLPendingPrioritizeDialTimestamp time.Time `json:",omitempty"`
+	DSLPrioritizedDial                bool      `json:",omitempty"`
 
 	quicTLSClientSessionCache *common.TLSClientSessionCacheWrapper  `json:"-"`
 	tlsClientSessionCache     *common.UtlsClientSessionCacheWrapper `json:"-"`
@@ -229,11 +233,14 @@ func MakeDialParameters(
 	// functions need to be updated when, e.g., new TLS obfuscation
 	// parameters are added.
 
+	currentTimestamp := time.Now()
+
 	networkID := config.GetNetworkID()
 
 	p := config.GetParameters().Get()
 
 	ttl := p.Duration(parameters.ReplayDialParametersTTL)
+	dslPlaceholderTTL := p.Duration(parameters.DSLPrioritizeDialPlaceholderTTL)
 
 	// Replay ignoring tactics changes with a probability allows for a mix of
 	// sticking with replay and exploring use of new tactics.
@@ -282,17 +289,15 @@ func MakeDialParameters(
 	// DSLPendingPrioritizeDial dial parameters record, and relying on the
 	// move-to-front logic in the server entry iterator shuffle.
 	//
-	// Once selected, reset the DSLPendingPrioritizeDial placeholder and
-	// select new dial parameters. The DSLPrioritizedDial field is set and
-	// used to record dsl_prioritized metrics indicating that the dial was
-	// DSL prioritized. The DSLPrioritizedDial flag is retained, and
-	// dsl_prioritized reported, as long as the dial parameters are
-	// successfully replayed. Once the replay ends, the
-	// DSLPrioritizedDial/dsl_prioritized state is dropped.
+	// The DSLPendingPrioritizeDial placeholder remains valid until it exceeds
+	// the configured TTL or is removed in Failed. When the placeholder is
+	// selected and attempted, new dial parameters are selected.
 	//
-	// Currently there is no specific TTL for a DSLPendingPrioritizeDial
-	// placeholder, since the iterator shuffle move-to-front has taken place
-	// already, before the dial parameters is unmarshaled.
+	// The DSLPrioritizedDial field is set and used to record dsl_prioritized
+	// metrics indicating that the dial was DSL prioritized. The
+	// DSLPrioritizedDial flag is retained, and dsl_prioritized reported, as
+	// long as the dial parameters are successfully replayed. Once the replay
+	// ends, the DSLPrioritizedDial/dsl_prioritized state is dropped.
 	//
 	// The isTactics case is not excluded from this DSLPrioritizedDial logic,
 	// since a DSLPendingPrioritizeDial placeholder may be created for a
@@ -301,11 +306,30 @@ func MakeDialParameters(
 	// server entry happens to have been used for a tunnel protocol. See
 	// fetchTactics.
 
-	DSLPendingPrioritizeDial := false
-	DSLPrioritizedDial := false
-	if dialParams != nil {
-		DSLPendingPrioritizeDial = dialParams.DSLPendingPrioritizeDial
-		DSLPrioritizedDial = dialParams.DSLPrioritizedDial
+	dslPendingPrioritizeDial :=
+		dialParams != nil && !dialParams.DSLPendingPrioritizeDialTimestamp.IsZero()
+
+	if dslPendingPrioritizeDial {
+
+		if dslPlaceholderTTL > 0 &&
+			dialParams.DSLPendingPrioritizeDialTimestamp.
+				Before(currentTimestamp.Add(-dslPlaceholderTTL)) {
+
+			// If the DSLPendingPrioritizeDial placeholder is expired, delete it.
+			//
+			// Limitation: at this point, the expired placeholder has already
+			// resulted in a server entry iterator move-to-front for one last
+			// round. For this reason, dslPendingPrioritizeDial isn't reset
+			// to false and dialParams.DSLPrioritizedDial will still be set to true.
+
+			err = DeleteDialParameters(serverEntry.IpAddress, networkID)
+			if err != nil {
+				NoticeWarning("DeleteDialParameters failed: %s", err)
+			}
+		}
+
+		// Replace the placeholder with new dial parameters.
+		dialParams = nil
 	}
 
 	// Check if replay is permitted:
@@ -321,7 +345,6 @@ func MakeDialParameters(
 	// When existing dial parameters don't meet these conditions, dialParams
 	// is reset to nil and new dial parameters will be generated.
 
-	var currentTimestamp time.Time
 	var configStateHash []byte
 	var serverEntryHash []byte
 	var configChanged bool
@@ -330,7 +353,6 @@ func MakeDialParameters(
 	// output DialParameters will not be stored by Success.
 
 	if ttl > 0 {
-		currentTimestamp = time.Now()
 		configStateHash, serverEntryHash = getDialStateHashes(config, p, serverEntry)
 
 		configChanged = dialParams != nil && !bytes.Equal(
@@ -340,9 +362,6 @@ func MakeDialParameters(
 	if dialParams != nil &&
 		(ttl <= 0 ||
 			dialParams.LastUsedTimestamp.Before(currentTimestamp.Add(-ttl)) ||
-
-			// Replace DSL prioritize placeholder.
-			dialParams.DSLPendingPrioritizeDial ||
 
 			// Replay is disabled when the current config state hash -- config
 			// dial parameters and the current tactics tag -- have changed
@@ -391,11 +410,12 @@ func MakeDialParameters(
 
 		// In these cases, existing dial parameters are expired or no longer
 		// match the config state and so are cleared to avoid rechecking them.
-
 		err = DeleteDialParameters(serverEntry.IpAddress, networkID)
 		if err != nil {
 			NoticeWarning("DeleteDialParameters failed: %s", err)
 		}
+
+		// Reselect new dial parameters.
 		dialParams = nil
 	}
 
@@ -462,13 +482,17 @@ func MakeDialParameters(
 	// replacing the pending placholder and retained as long as the dial
 	// parameters are replayed.
 	dialParams.DSLPrioritizedDial =
-		DSLPendingPrioritizeDial || (isReplay && DSLPrioritizedDial)
+		dslPendingPrioritizeDial || (isReplay && dialParams.DSLPrioritizedDial)
 
 	// Even when replaying, LastUsedTimestamp is updated to extend the TTL of
 	// replayed dial parameters which will be updated in the datastore upon
 	// success.
 
-	dialParams.LastUsedTimestamp = currentTimestamp
+	if ttl > 0 {
+		dialParams.LastUsedTimestamp = currentTimestamp
+	} else {
+		dialParams.LastUsedTimestamp = time.Time{}
+	}
 	dialParams.LastUsedConfigStateHash = configStateHash
 	dialParams.LastUsedServerEntryHash = serverEntryHash
 
@@ -1733,13 +1757,12 @@ func MakeDialParameters(
 		// For tactics requests, AddPsiphonFrontingHeader is set when set for
 		// the related tunnel protocol. E.g., FRONTED-OSSH-MEEK for
 		// FRONTED-MEEK-TACTICS. AddPsiphonFrontingHeader is not replayed.
-		addPsiphonFrontingHeader := false
-		if dialParams.FrontingProviderID != "" {
-			addPsiphonFrontingHeader = common.Contains(
-				p.LabeledTunnelProtocols(
-					parameters.AddFrontingProviderPsiphonFrontingHeader, dialParams.FrontingProviderID),
-				dialParams.TunnelProtocol)
-		}
+		addFrontingHeader := addPsiphonFrontingHeader(
+			p,
+			dialParams.FrontingProviderID,
+			dialParams.TunnelProtocol,
+			dialParams.MeekDialAddress,
+			dialParams.ResolveParameters)
 
 		dialParams.meekConfig = &MeekConfig{
 			DiagnosticID:                  serverEntry.GetDiagnosticID(),
@@ -1760,7 +1783,7 @@ func MakeDialParameters(
 			RandomizedTLSProfileSeed:      dialParams.RandomizedTLSProfileSeed,
 			UseObfuscatedSessionTickets:   dialParams.TunnelProtocol == protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK_SESSION_TICKET,
 			SNIServerName:                 dialParams.MeekSNIServerName,
-			AddPsiphonFrontingHeader:      addPsiphonFrontingHeader,
+			AddPsiphonFrontingHeader:      addFrontingHeader,
 			VerifyServerName:              dialParams.MeekVerifyServerName,
 			VerifyPins:                    dialParams.MeekVerifyPins,
 			DisableSystemRootCAs:          config.DisableSystemRootCAs,
@@ -1943,6 +1966,19 @@ func (dialParams *DialParameters) Failed(config *Config, dialErr error) {
 		(!isInproxyDialErr || !p.WeightedCoinFlip(parameters.InproxyReplayRetainFailedProbability)) {
 
 		NoticeInfo("Delete dial parameters for %s", dialParams.ServerEntry.GetDiagnosticID())
+		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
+		if err != nil {
+			NoticeWarning("DeleteDialParameters failed: %s", err)
+		}
+	}
+
+	// Also clear the DSLPendingPrioritizeDial placeholder, to prevent
+	// subsequent move-to-front, with a configurable probability to retain it.
+
+	if dialParams.DSLPrioritizedDial && !dialParams.IsReplay &&
+		!p.WeightedCoinFlip(parameters.DSLPrioritizeDialRetainFailedProbability) {
+
+		NoticeInfo("Delete DSL prioritize dial for %s", dialParams.ServerEntry.GetDiagnosticID())
 		err := DeleteDialParameters(dialParams.ServerEntry.IpAddress, dialParams.NetworkID)
 		if err != nil {
 			NoticeWarning("DeleteDialParameters failed: %s", err)
@@ -2515,4 +2551,30 @@ func selectConjureTransport(
 	choice := prng.Intn(len(transports))
 
 	return transports[choice]
+}
+
+func addPsiphonFrontingHeader(
+	p parameters.ParametersAccessor,
+	frontingProviderID string,
+	tunnelProtocol string,
+	dialAddress string,
+	resolveParams *resolver.ResolveParameters) bool {
+
+	if frontingProviderID == "" {
+		return false
+	}
+
+	if resolveParams != nil &&
+		resolveParams.PreresolvedIPAddress != "" {
+		meekDialDomain, _, _ := net.SplitHostPort(dialAddress)
+		if resolveParams.PreresolvedDomain == meekDialDomain {
+			return false
+		}
+	}
+
+	return common.Contains(
+		p.LabeledTunnelProtocols(
+			parameters.AddFrontingProviderPsiphonFrontingHeader,
+			frontingProviderID),
+		tunnelProtocol)
 }

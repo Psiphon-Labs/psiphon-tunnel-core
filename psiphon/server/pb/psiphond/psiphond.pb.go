@@ -31,7 +31,6 @@ type Psiphond struct {
 	Provider     string                 `protobuf:"bytes,5,opt,name=provider,proto3" json:"provider,omitempty"`
 	// Types that are valid to be assigned to Metric:
 	//
-	//	*Psiphond_DomainBytes
 	//	*Psiphond_FailedTunnel
 	//	*Psiphond_InproxyBroker
 	//	*Psiphond_IrregularTunnel
@@ -44,10 +43,11 @@ type Psiphond struct {
 	//	*Psiphond_ServerPanic
 	//	*Psiphond_ServerPacket
 	//	*Psiphond_ServerTunnel
-	//	*Psiphond_ServerTunnelAsnDestBytes
 	//	*Psiphond_Tactics
 	//	*Psiphond_TacticsSpeedtest
 	//	*Psiphond_UniqueUser
+	//	*Psiphond_AsnDestBytes
+	//	*Psiphond_DomainDestBytes
 	//	*Psiphond_DslRelayGetServerEntries
 	Metric        isPsiphond_Metric `protobuf_oneof:"metric"`
 	unknownFields protoimpl.UnknownFields
@@ -122,15 +122,6 @@ func (x *Psiphond) GetProvider() string {
 func (x *Psiphond) GetMetric() isPsiphond_Metric {
 	if x != nil {
 		return x.Metric
-	}
-	return nil
-}
-
-func (x *Psiphond) GetDomainBytes() *DomainBytes {
-	if x != nil {
-		if x, ok := x.Metric.(*Psiphond_DomainBytes); ok {
-			return x.DomainBytes
-		}
 	}
 	return nil
 }
@@ -243,15 +234,6 @@ func (x *Psiphond) GetServerTunnel() *ServerTunnel {
 	return nil
 }
 
-func (x *Psiphond) GetServerTunnelAsnDestBytes() *ServerTunnelASNDestBytes {
-	if x != nil {
-		if x, ok := x.Metric.(*Psiphond_ServerTunnelAsnDestBytes); ok {
-			return x.ServerTunnelAsnDestBytes
-		}
-	}
-	return nil
-}
-
 func (x *Psiphond) GetTactics() *Tactics {
 	if x != nil {
 		if x, ok := x.Metric.(*Psiphond_Tactics); ok {
@@ -279,6 +261,24 @@ func (x *Psiphond) GetUniqueUser() *UniqueUser {
 	return nil
 }
 
+func (x *Psiphond) GetAsnDestBytes() *AsnDestBytes {
+	if x != nil {
+		if x, ok := x.Metric.(*Psiphond_AsnDestBytes); ok {
+			return x.AsnDestBytes
+		}
+	}
+	return nil
+}
+
+func (x *Psiphond) GetDomainDestBytes() *DomainDestBytes {
+	if x != nil {
+		if x, ok := x.Metric.(*Psiphond_DomainDestBytes); ok {
+			return x.DomainDestBytes
+		}
+	}
+	return nil
+}
+
 func (x *Psiphond) GetDslRelayGetServerEntries() *DslRelayGetServerEntries {
 	if x != nil {
 		if x, ok := x.Metric.(*Psiphond_DslRelayGetServerEntries); ok {
@@ -290,10 +290,6 @@ func (x *Psiphond) GetDslRelayGetServerEntries() *DslRelayGetServerEntries {
 
 type isPsiphond_Metric interface {
 	isPsiphond_Metric()
-}
-
-type Psiphond_DomainBytes struct {
-	DomainBytes *DomainBytes `protobuf:"bytes,101,opt,name=domain_bytes,json=domainBytes,proto3,oneof"`
 }
 
 type Psiphond_FailedTunnel struct {
@@ -344,10 +340,6 @@ type Psiphond_ServerTunnel struct {
 	ServerTunnel *ServerTunnel `protobuf:"bytes,113,opt,name=server_tunnel,json=serverTunnel,proto3,oneof"`
 }
 
-type Psiphond_ServerTunnelAsnDestBytes struct {
-	ServerTunnelAsnDestBytes *ServerTunnelASNDestBytes `protobuf:"bytes,114,opt,name=server_tunnel_asn_dest_bytes,json=serverTunnelAsnDestBytes,proto3,oneof"`
-}
-
 type Psiphond_Tactics struct {
 	Tactics *Tactics `protobuf:"bytes,115,opt,name=tactics,proto3,oneof"`
 }
@@ -360,11 +352,17 @@ type Psiphond_UniqueUser struct {
 	UniqueUser *UniqueUser `protobuf:"bytes,117,opt,name=unique_user,json=uniqueUser,proto3,oneof"`
 }
 
+type Psiphond_AsnDestBytes struct {
+	AsnDestBytes *AsnDestBytes `protobuf:"bytes,118,opt,name=asn_dest_bytes,json=asnDestBytes,proto3,oneof"`
+}
+
+type Psiphond_DomainDestBytes struct {
+	DomainDestBytes *DomainDestBytes `protobuf:"bytes,119,opt,name=domain_dest_bytes,json=domainDestBytes,proto3,oneof"`
+}
+
 type Psiphond_DslRelayGetServerEntries struct {
 	DslRelayGetServerEntries *DslRelayGetServerEntries `protobuf:"bytes,120,opt,name=dsl_relay_get_server_entries,json=dslRelayGetServerEntries,proto3,oneof"`
 }
-
-func (*Psiphond_DomainBytes) isPsiphond_Metric() {}
 
 func (*Psiphond_FailedTunnel) isPsiphond_Metric() {}
 
@@ -390,13 +388,15 @@ func (*Psiphond_ServerPacket) isPsiphond_Metric() {}
 
 func (*Psiphond_ServerTunnel) isPsiphond_Metric() {}
 
-func (*Psiphond_ServerTunnelAsnDestBytes) isPsiphond_Metric() {}
-
 func (*Psiphond_Tactics) isPsiphond_Metric() {}
 
 func (*Psiphond_TacticsSpeedtest) isPsiphond_Metric() {}
 
 func (*Psiphond_UniqueUser) isPsiphond_Metric() {}
+
+func (*Psiphond_AsnDestBytes) isPsiphond_Metric() {}
+
+func (*Psiphond_DomainDestBytes) isPsiphond_Metric() {}
 
 func (*Psiphond_DslRelayGetServerEntries) isPsiphond_Metric() {}
 
@@ -404,14 +404,13 @@ var File_ca_psiphon_psiphond_psiphond_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_psiphond_proto_rawDesc = "" +
 	"\n" +
-	"\"ca.psiphon.psiphond/psiphond.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\x1a&ca.psiphon.psiphond/domain_bytes.proto\x1a'ca.psiphon.psiphond/failed_tunnel.proto\x1a(ca.psiphon.psiphond/inproxy_broker.proto\x1a*ca.psiphon.psiphond/irregular_tunnel.proto\x1a'ca.psiphon.psiphond/orphan_packet.proto\x1a,ca.psiphon.psiphond/remote_server_list.proto\x1a*ca.psiphon.psiphond/server_blocklist.proto\x1a%ca.psiphon.psiphond/server_load.proto\x1a&ca.psiphon.psiphond/server_panic.proto\x1a'ca.psiphon.psiphond/server_packet.proto\x1a'ca.psiphon.psiphond/server_tunnel.proto\x1a!ca.psiphon.psiphond/tactics.proto\x1a%ca.psiphon.psiphond/unique_user.proto\x1a#ca.psiphon.psiphond/dsl_relay.proto\"\xee\f\n" +
+	"\"ca.psiphon.psiphond/psiphond.proto\x12\x13ca.psiphon.psiphond\x1a\x1fgoogle/protobuf/timestamp.proto\x1a(ca.psiphon.psiphond/asn_dest_bytes.proto\x1a+ca.psiphon.psiphond/domain_dest_bytes.proto\x1a'ca.psiphon.psiphond/failed_tunnel.proto\x1a(ca.psiphon.psiphond/inproxy_broker.proto\x1a*ca.psiphon.psiphond/irregular_tunnel.proto\x1a'ca.psiphon.psiphond/orphan_packet.proto\x1a,ca.psiphon.psiphond/remote_server_list.proto\x1a*ca.psiphon.psiphond/server_blocklist.proto\x1a%ca.psiphon.psiphond/server_load.proto\x1a&ca.psiphon.psiphond/server_panic.proto\x1a'ca.psiphon.psiphond/server_packet.proto\x1a'ca.psiphon.psiphond/server_tunnel.proto\x1a!ca.psiphon.psiphond/tactics.proto\x1a%ca.psiphon.psiphond/unique_user.proto\x1a#ca.psiphon.psiphond/dsl_relay.proto\"\xe1\f\n" +
 	"\bPsiphond\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12\x17\n" +
 	"\ahost_id\x18\x02 \x01(\tR\x06hostId\x12\x1b\n" +
 	"\thost_type\x18\x03 \x01(\tR\bhostType\x12$\n" +
 	"\x0ehost_build_rev\x18\x04 \x01(\tR\fhostBuildRev\x12\x1a\n" +
-	"\bprovider\x18\x05 \x01(\tR\bprovider\x12E\n" +
-	"\fdomain_bytes\x18e \x01(\v2 .ca.psiphon.psiphond.DomainBytesH\x00R\vdomainBytes\x12H\n" +
+	"\bprovider\x18\x05 \x01(\tR\bprovider\x12H\n" +
 	"\rfailed_tunnel\x18f \x01(\v2!.ca.psiphon.psiphond.FailedTunnelH\x00R\ffailedTunnel\x12K\n" +
 	"\x0einproxy_broker\x18g \x01(\v2\".ca.psiphon.psiphond.InproxyBrokerH\x00R\rinproxyBroker\x12Q\n" +
 	"\x10irregular_tunnel\x18h \x01(\v2$.ca.psiphon.psiphond.IrregularTunnelH\x00R\x0firregularTunnel\x12H\n" +
@@ -424,14 +423,15 @@ const file_ca_psiphon_psiphond_psiphond_proto_rawDesc = "" +
 	"\x14server_load_protocol\x18n \x01(\v2'.ca.psiphon.psiphond.ServerLoadProtocolH\x00R\x12serverLoadProtocol\x12E\n" +
 	"\fserver_panic\x18o \x01(\v2 .ca.psiphon.psiphond.ServerPanicH\x00R\vserverPanic\x12H\n" +
 	"\rserver_packet\x18p \x01(\v2!.ca.psiphon.psiphond.ServerPacketH\x00R\fserverPacket\x12H\n" +
-	"\rserver_tunnel\x18q \x01(\v2!.ca.psiphon.psiphond.ServerTunnelH\x00R\fserverTunnel\x12o\n" +
-	"\x1cserver_tunnel_asn_dest_bytes\x18r \x01(\v2-.ca.psiphon.psiphond.ServerTunnelASNDestBytesH\x00R\x18serverTunnelAsnDestBytes\x128\n" +
+	"\rserver_tunnel\x18q \x01(\v2!.ca.psiphon.psiphond.ServerTunnelH\x00R\fserverTunnel\x128\n" +
 	"\atactics\x18s \x01(\v2\x1c.ca.psiphon.psiphond.TacticsH\x00R\atactics\x12T\n" +
 	"\x11tactics_speedtest\x18t \x01(\v2%.ca.psiphon.psiphond.TacticsSpeedTestH\x00R\x10tacticsSpeedtest\x12B\n" +
 	"\vunique_user\x18u \x01(\v2\x1f.ca.psiphon.psiphond.UniqueUserH\x00R\n" +
-	"uniqueUser\x12o\n" +
+	"uniqueUser\x12I\n" +
+	"\x0easn_dest_bytes\x18v \x01(\v2!.ca.psiphon.psiphond.AsnDestBytesH\x00R\fasnDestBytes\x12R\n" +
+	"\x11domain_dest_bytes\x18w \x01(\v2$.ca.psiphon.psiphond.DomainDestBytesH\x00R\x0fdomainDestBytes\x12o\n" +
 	"\x1cdsl_relay_get_server_entries\x18x \x01(\v2-.ca.psiphon.psiphond.DslRelayGetServerEntriesH\x00R\x18dslRelayGetServerEntriesB\b\n" +
-	"\x06metricBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x06metricJ\x04\be\x10fJ\x04\br\x10sBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_psiphond_proto_rawDescOnce sync.Once
@@ -449,44 +449,44 @@ var file_ca_psiphon_psiphond_psiphond_proto_msgTypes = make([]protoimpl.MessageI
 var file_ca_psiphon_psiphond_psiphond_proto_goTypes = []any{
 	(*Psiphond)(nil),                 // 0: ca.psiphon.psiphond.Psiphond
 	(*timestamppb.Timestamp)(nil),    // 1: google.protobuf.Timestamp
-	(*DomainBytes)(nil),              // 2: ca.psiphon.psiphond.DomainBytes
-	(*FailedTunnel)(nil),             // 3: ca.psiphon.psiphond.FailedTunnel
-	(*InproxyBroker)(nil),            // 4: ca.psiphon.psiphond.InproxyBroker
-	(*IrregularTunnel)(nil),          // 5: ca.psiphon.psiphond.IrregularTunnel
-	(*OrphanPacket)(nil),             // 6: ca.psiphon.psiphond.OrphanPacket
-	(*RemoteServerList)(nil),         // 7: ca.psiphon.psiphond.RemoteServerList
-	(*ServerBlocklistHit)(nil),       // 8: ca.psiphon.psiphond.ServerBlocklistHit
-	(*ServerLoad)(nil),               // 9: ca.psiphon.psiphond.ServerLoad
-	(*ServerLoadDNS)(nil),            // 10: ca.psiphon.psiphond.ServerLoadDNS
-	(*ServerLoadProtocol)(nil),       // 11: ca.psiphon.psiphond.ServerLoadProtocol
-	(*ServerPanic)(nil),              // 12: ca.psiphon.psiphond.ServerPanic
-	(*ServerPacket)(nil),             // 13: ca.psiphon.psiphond.ServerPacket
-	(*ServerTunnel)(nil),             // 14: ca.psiphon.psiphond.ServerTunnel
-	(*ServerTunnelASNDestBytes)(nil), // 15: ca.psiphon.psiphond.ServerTunnelASNDestBytes
-	(*Tactics)(nil),                  // 16: ca.psiphon.psiphond.Tactics
-	(*TacticsSpeedTest)(nil),         // 17: ca.psiphon.psiphond.TacticsSpeedTest
-	(*UniqueUser)(nil),               // 18: ca.psiphon.psiphond.UniqueUser
+	(*FailedTunnel)(nil),             // 2: ca.psiphon.psiphond.FailedTunnel
+	(*InproxyBroker)(nil),            // 3: ca.psiphon.psiphond.InproxyBroker
+	(*IrregularTunnel)(nil),          // 4: ca.psiphon.psiphond.IrregularTunnel
+	(*OrphanPacket)(nil),             // 5: ca.psiphon.psiphond.OrphanPacket
+	(*RemoteServerList)(nil),         // 6: ca.psiphon.psiphond.RemoteServerList
+	(*ServerBlocklistHit)(nil),       // 7: ca.psiphon.psiphond.ServerBlocklistHit
+	(*ServerLoad)(nil),               // 8: ca.psiphon.psiphond.ServerLoad
+	(*ServerLoadDNS)(nil),            // 9: ca.psiphon.psiphond.ServerLoadDNS
+	(*ServerLoadProtocol)(nil),       // 10: ca.psiphon.psiphond.ServerLoadProtocol
+	(*ServerPanic)(nil),              // 11: ca.psiphon.psiphond.ServerPanic
+	(*ServerPacket)(nil),             // 12: ca.psiphon.psiphond.ServerPacket
+	(*ServerTunnel)(nil),             // 13: ca.psiphon.psiphond.ServerTunnel
+	(*Tactics)(nil),                  // 14: ca.psiphon.psiphond.Tactics
+	(*TacticsSpeedTest)(nil),         // 15: ca.psiphon.psiphond.TacticsSpeedTest
+	(*UniqueUser)(nil),               // 16: ca.psiphon.psiphond.UniqueUser
+	(*AsnDestBytes)(nil),             // 17: ca.psiphon.psiphond.AsnDestBytes
+	(*DomainDestBytes)(nil),          // 18: ca.psiphon.psiphond.DomainDestBytes
 	(*DslRelayGetServerEntries)(nil), // 19: ca.psiphon.psiphond.DslRelayGetServerEntries
 }
 var file_ca_psiphon_psiphond_psiphond_proto_depIdxs = []int32{
 	1,  // 0: ca.psiphon.psiphond.Psiphond.timestamp:type_name -> google.protobuf.Timestamp
-	2,  // 1: ca.psiphon.psiphond.Psiphond.domain_bytes:type_name -> ca.psiphon.psiphond.DomainBytes
-	3,  // 2: ca.psiphon.psiphond.Psiphond.failed_tunnel:type_name -> ca.psiphon.psiphond.FailedTunnel
-	4,  // 3: ca.psiphon.psiphond.Psiphond.inproxy_broker:type_name -> ca.psiphon.psiphond.InproxyBroker
-	5,  // 4: ca.psiphon.psiphond.Psiphond.irregular_tunnel:type_name -> ca.psiphon.psiphond.IrregularTunnel
-	6,  // 5: ca.psiphon.psiphond.Psiphond.orphan_packet:type_name -> ca.psiphon.psiphond.OrphanPacket
-	7,  // 6: ca.psiphon.psiphond.Psiphond.remote_server_list:type_name -> ca.psiphon.psiphond.RemoteServerList
-	8,  // 7: ca.psiphon.psiphond.Psiphond.server_blocklist:type_name -> ca.psiphon.psiphond.ServerBlocklistHit
-	9,  // 8: ca.psiphon.psiphond.Psiphond.server_load:type_name -> ca.psiphon.psiphond.ServerLoad
-	10, // 9: ca.psiphon.psiphond.Psiphond.server_load_dns:type_name -> ca.psiphon.psiphond.ServerLoadDNS
-	11, // 10: ca.psiphon.psiphond.Psiphond.server_load_protocol:type_name -> ca.psiphon.psiphond.ServerLoadProtocol
-	12, // 11: ca.psiphon.psiphond.Psiphond.server_panic:type_name -> ca.psiphon.psiphond.ServerPanic
-	13, // 12: ca.psiphon.psiphond.Psiphond.server_packet:type_name -> ca.psiphon.psiphond.ServerPacket
-	14, // 13: ca.psiphon.psiphond.Psiphond.server_tunnel:type_name -> ca.psiphon.psiphond.ServerTunnel
-	15, // 14: ca.psiphon.psiphond.Psiphond.server_tunnel_asn_dest_bytes:type_name -> ca.psiphon.psiphond.ServerTunnelASNDestBytes
-	16, // 15: ca.psiphon.psiphond.Psiphond.tactics:type_name -> ca.psiphon.psiphond.Tactics
-	17, // 16: ca.psiphon.psiphond.Psiphond.tactics_speedtest:type_name -> ca.psiphon.psiphond.TacticsSpeedTest
-	18, // 17: ca.psiphon.psiphond.Psiphond.unique_user:type_name -> ca.psiphon.psiphond.UniqueUser
+	2,  // 1: ca.psiphon.psiphond.Psiphond.failed_tunnel:type_name -> ca.psiphon.psiphond.FailedTunnel
+	3,  // 2: ca.psiphon.psiphond.Psiphond.inproxy_broker:type_name -> ca.psiphon.psiphond.InproxyBroker
+	4,  // 3: ca.psiphon.psiphond.Psiphond.irregular_tunnel:type_name -> ca.psiphon.psiphond.IrregularTunnel
+	5,  // 4: ca.psiphon.psiphond.Psiphond.orphan_packet:type_name -> ca.psiphon.psiphond.OrphanPacket
+	6,  // 5: ca.psiphon.psiphond.Psiphond.remote_server_list:type_name -> ca.psiphon.psiphond.RemoteServerList
+	7,  // 6: ca.psiphon.psiphond.Psiphond.server_blocklist:type_name -> ca.psiphon.psiphond.ServerBlocklistHit
+	8,  // 7: ca.psiphon.psiphond.Psiphond.server_load:type_name -> ca.psiphon.psiphond.ServerLoad
+	9,  // 8: ca.psiphon.psiphond.Psiphond.server_load_dns:type_name -> ca.psiphon.psiphond.ServerLoadDNS
+	10, // 9: ca.psiphon.psiphond.Psiphond.server_load_protocol:type_name -> ca.psiphon.psiphond.ServerLoadProtocol
+	11, // 10: ca.psiphon.psiphond.Psiphond.server_panic:type_name -> ca.psiphon.psiphond.ServerPanic
+	12, // 11: ca.psiphon.psiphond.Psiphond.server_packet:type_name -> ca.psiphon.psiphond.ServerPacket
+	13, // 12: ca.psiphon.psiphond.Psiphond.server_tunnel:type_name -> ca.psiphon.psiphond.ServerTunnel
+	14, // 13: ca.psiphon.psiphond.Psiphond.tactics:type_name -> ca.psiphon.psiphond.Tactics
+	15, // 14: ca.psiphon.psiphond.Psiphond.tactics_speedtest:type_name -> ca.psiphon.psiphond.TacticsSpeedTest
+	16, // 15: ca.psiphon.psiphond.Psiphond.unique_user:type_name -> ca.psiphon.psiphond.UniqueUser
+	17, // 16: ca.psiphon.psiphond.Psiphond.asn_dest_bytes:type_name -> ca.psiphon.psiphond.AsnDestBytes
+	18, // 17: ca.psiphon.psiphond.Psiphond.domain_dest_bytes:type_name -> ca.psiphon.psiphond.DomainDestBytes
 	19, // 18: ca.psiphon.psiphond.Psiphond.dsl_relay_get_server_entries:type_name -> ca.psiphon.psiphond.DslRelayGetServerEntries
 	19, // [19:19] is the sub-list for method output_type
 	19, // [19:19] is the sub-list for method input_type
@@ -500,7 +500,8 @@ func file_ca_psiphon_psiphond_psiphond_proto_init() {
 	if File_ca_psiphon_psiphond_psiphond_proto != nil {
 		return
 	}
-	file_ca_psiphon_psiphond_domain_bytes_proto_init()
+	file_ca_psiphon_psiphond_asn_dest_bytes_proto_init()
+	file_ca_psiphon_psiphond_domain_dest_bytes_proto_init()
 	file_ca_psiphon_psiphond_failed_tunnel_proto_init()
 	file_ca_psiphon_psiphond_inproxy_broker_proto_init()
 	file_ca_psiphon_psiphond_irregular_tunnel_proto_init()
@@ -515,7 +516,6 @@ func file_ca_psiphon_psiphond_psiphond_proto_init() {
 	file_ca_psiphon_psiphond_unique_user_proto_init()
 	file_ca_psiphon_psiphond_dsl_relay_proto_init()
 	file_ca_psiphon_psiphond_psiphond_proto_msgTypes[0].OneofWrappers = []any{
-		(*Psiphond_DomainBytes)(nil),
 		(*Psiphond_FailedTunnel)(nil),
 		(*Psiphond_InproxyBroker)(nil),
 		(*Psiphond_IrregularTunnel)(nil),
@@ -528,10 +528,11 @@ func file_ca_psiphon_psiphond_psiphond_proto_init() {
 		(*Psiphond_ServerPanic)(nil),
 		(*Psiphond_ServerPacket)(nil),
 		(*Psiphond_ServerTunnel)(nil),
-		(*Psiphond_ServerTunnelAsnDestBytes)(nil),
 		(*Psiphond_Tactics)(nil),
 		(*Psiphond_TacticsSpeedtest)(nil),
 		(*Psiphond_UniqueUser)(nil),
+		(*Psiphond_AsnDestBytes)(nil),
+		(*Psiphond_DomainDestBytes)(nil),
 		(*Psiphond_DslRelayGetServerEntries)(nil),
 	}
 	type x struct{}
