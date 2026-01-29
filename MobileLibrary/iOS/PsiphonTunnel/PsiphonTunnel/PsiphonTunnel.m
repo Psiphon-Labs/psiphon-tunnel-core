@@ -749,7 +749,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     
     // If RemoteServerListUrl/RemoteServerListURLs and RemoteServerListSignaturePublicKey
     // are absent, we'll just leave them out, but we'll log about it.
-    if ((config[@"RemoteServerListUrl"] == nil && config[@"RemoteServerListURLs"] == nil) ||
+    if ((config[@"RemoteServerListUrl"] == nil &&
+         config[@"RemoteServerListURLs"] == nil &&
+         config[@"AdditionalParameters"] == nil) ||
         config[@"RemoteServerListSignaturePublicKey"] == nil) {
         logMessage(@"Remote server list functionality will be disabled");
     }
@@ -780,7 +782,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     
     // If ObfuscatedServerListRootURL/ObfuscatedServerListRootURLs is absent,
     // we'll leave it out, but log the absence.
-    if (config[@"ObfuscatedServerListRootURL"] == nil && config[@"ObfuscatedServerListRootURLs"] == nil) {
+    if (config[@"ObfuscatedServerListRootURL"] == nil &&
+        config[@"ObfuscatedServerListRootURLs"] == nil &&
+        config[@"AdditionalParameters"] == nil) {
+
         logMessage(@"Obfuscated server list functionality will be disabled");
     }
 
