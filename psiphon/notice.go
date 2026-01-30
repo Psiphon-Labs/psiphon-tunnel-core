@@ -1151,6 +1151,7 @@ func NoticeInproxyMustUpgrade() {
 // with EmitInproxyProxyActivity for functionality such as traffic display;
 // and this frequent notice is not intended to be included with feedback.
 func NoticeInproxyProxyActivity(
+	announcing int32,
 	connectingClients int32,
 	connectedClients int32,
 	bytesUp int64,
@@ -1158,6 +1159,7 @@ func NoticeInproxyProxyActivity(
 
 	singletonNoticeLogger.outputNotice(
 		"InproxyProxyActivity", noticeIsNotDiagnostic,
+		"announcing", announcing,
 		"connectingClients", connectingClients,
 		"connectedClients", connectedClients,
 		"bytesUp", bytesUp,
@@ -1168,6 +1170,7 @@ func NoticeInproxyProxyActivity(
 // transferred in total up to this point; in addition to current connection
 // status. This is a diagnostic notice.
 func NoticeInproxyProxyTotalActivity(
+	announcing int32,
 	connectingClients int32,
 	connectedClients int32,
 	totalBytesUp int64,
@@ -1175,6 +1178,7 @@ func NoticeInproxyProxyTotalActivity(
 
 	singletonNoticeLogger.outputNotice(
 		"InproxyProxyTotalActivity", noticeIsDiagnostic,
+		"announcing", announcing,
 		"connectingClients", connectingClients,
 		"connectedClients", connectedClients,
 		"totalBytesUp", totalBytesUp,
