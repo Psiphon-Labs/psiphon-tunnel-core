@@ -556,12 +556,14 @@ func runTestInproxy(doMustUpgrade bool) error {
 			LimitUpstreamBytesPerSecond:   bytesToSend / targetElapsedSeconds,
 			LimitDownstreamBytesPerSecond: bytesToSend / targetElapsedSeconds,
 
-			ActivityUpdater: func(connectingClients int32, connectedClients int32,
+			ActivityUpdater: func(
+				announcing int32,
+				connectingClients int32, connectedClients int32,
 				bytesUp int64, bytesDown int64, bytesDuration time.Duration) {
 
-				fmt.Printf("[%s][%s] ACTIVITY: %d connecting, %d connected, %d up, %d down\n",
+				fmt.Printf("[%s][%s] ACTIVITY: %d announcing, %d connecting, %d connected, %d up, %d down\n",
 					time.Now().UTC().Format(time.RFC3339), name,
-					connectingClients, connectedClients, bytesUp, bytesDown)
+					announcing, connectingClients, connectedClients, bytesUp, bytesDown)
 			},
 
 			MustUpgrade: func() {

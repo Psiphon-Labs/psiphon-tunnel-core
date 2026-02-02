@@ -3224,10 +3224,12 @@ func (controller *Controller) runInproxyProxy() {
 	debugLogging := controller.config.InproxyEnableWebRTCDebugLogging
 
 	var lastActivityNotice time.Time
+	var lastAnnouncing int32
 	var lastActivityConnectingClients, lastActivityConnectedClients int32
 	var lastActivityConnectingClientsTotal, lastActivityConnectedClientsTotal int32
 	var activityTotalBytesUp, activityTotalBytesDown int64
 	activityUpdater := func(
+		announcing int32,
 		connectingClients int32,
 		connectedClients int32,
 		bytesUp int64,
@@ -3244,13 +3246,15 @@ func (controller *Controller) runInproxyProxy() {
 		// activity display.
 
 		if controller.config.EmitInproxyProxyActivity &&
-			(bytesUp > 0 || bytesDown > 0) ||
-			connectingClients != lastActivityConnectingClients ||
-			connectedClients != lastActivityConnectedClients {
+			(bytesUp > 0 || bytesDown > 0 ||
+				announcing != lastAnnouncing ||
+				connectingClients != lastActivityConnectingClients ||
+				connectedClients != lastActivityConnectedClients) {
 
 			NoticeInproxyProxyActivity(
-				connectingClients, connectedClients, bytesUp, bytesDown)
+				announcing, connectingClients, connectedClients, bytesUp, bytesDown)
 
+			lastAnnouncing = announcing
 			lastActivityConnectingClients = connectingClients
 			lastActivityConnectedClients = connectedClients
 		}
@@ -3262,13 +3266,17 @@ func (controller *Controller) runInproxyProxy() {
 		// transferred since starting; in addition to the current number of
 		// connecting and connected clients, whenever that changes. This
 		// notice is for diagnostics.
+		//
+		// Changes in announcing count are frequent and don't trigger
+		// InproxyProxyTotalActivity; the current announcing count is
+		// recorded as a snapshot.
 
 		if lastActivityNotice.Add(activityNoticePeriod).Before(time.Now()) ||
 			connectingClients != lastActivityConnectingClientsTotal ||
 			connectedClients != lastActivityConnectedClientsTotal {
 
 			NoticeInproxyProxyTotalActivity(
-				connectingClients, connectedClients,
+				announcing, connectingClients, connectedClients,
 				activityTotalBytesUp, activityTotalBytesDown)
 			lastActivityNotice = time.Now()
 
@@ -3278,19 +3286,24 @@ func (controller *Controller) runInproxyProxy() {
 	}
 
 	config := &inproxy.ProxyConfig{
-		Logger:                        NoticeCommonLogger(debugLogging),
-		EnableWebRTCDebugLogging:      debugLogging,
-		WaitForNetworkConnectivity:    controller.inproxyWaitForNetworkConnectivity,
-		GetCurrentNetworkContext:      controller.getCurrentNetworkContext,
-		GetBrokerClient:               controller.inproxyGetProxyBrokerClient,
-		GetBaseAPIParameters:          controller.inproxyGetProxyAPIParameters,
-		MakeWebRTCDialCoordinator:     controller.inproxyMakeProxyWebRTCDialCoordinator,
-		HandleTacticsPayload:          controller.inproxyHandleProxyTacticsPayload,
-		MaxClients:                    controller.config.InproxyMaxClients,
-		LimitUpstreamBytesPerSecond:   controller.config.InproxyLimitUpstreamBytesPerSecond,
-		LimitDownstreamBytesPerSecond: controller.config.InproxyLimitDownstreamBytesPerSecond,
-		MustUpgrade:                   controller.config.OnInproxyMustUpgrade,
-		ActivityUpdater:               activityUpdater,
+		Logger:                               NoticeCommonLogger(debugLogging),
+		EnableWebRTCDebugLogging:             debugLogging,
+		WaitForNetworkConnectivity:           controller.inproxyWaitForNetworkConnectivity,
+		GetCurrentNetworkContext:             controller.getCurrentNetworkContext,
+		GetBrokerClient:                      controller.inproxyGetProxyBrokerClient,
+		GetBaseAPIParameters:                 controller.inproxyGetProxyAPIParameters,
+		MakeWebRTCDialCoordinator:            controller.inproxyMakeProxyWebRTCDialCoordinator,
+		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
+		MaxClients:                           controller.config.InproxyMaxClients,
+		LimitUpstreamBytesPerSecond:          controller.config.InproxyLimitUpstreamBytesPerSecond,
+		LimitDownstreamBytesPerSecond:        controller.config.InproxyLimitDownstreamBytesPerSecond,
+		ReducedStartTime:                     controller.config.InproxyReducedStartTime,
+		ReducedEndTime:                       controller.config.InproxyReducedEndTime,
+		ReducedMaxClients:                    controller.config.InproxyReducedMaxClients,
+		ReducedLimitUpstreamBytesPerSecond:   controller.config.InproxyReducedLimitUpstreamBytesPerSecond,
+		ReducedLimitDownstreamBytesPerSecond: controller.config.InproxyReducedLimitDownstreamBytesPerSecond,
+		MustUpgrade:                          controller.config.OnInproxyMustUpgrade,
+		ActivityUpdater:                      activityUpdater,
 	}
 
 	proxy, err := inproxy.NewProxy(config)
@@ -3306,7 +3319,7 @@ func (controller *Controller) runInproxyProxy() {
 
 	// Emit one last NoticeInproxyProxyTotalActivity with the final byte counts.
 	NoticeInproxyProxyTotalActivity(
-		lastActivityConnectingClients, lastActivityConnectedClients,
+		lastAnnouncing, lastActivityConnectingClients, lastActivityConnectedClients,
 		activityTotalBytesUp, activityTotalBytesDown)
 
 	NoticeInfo("inproxy proxy: stopped")

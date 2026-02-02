@@ -665,6 +665,38 @@ type Config struct {
 	// transfer rate limit for each proxied client. When 0, there is no limit.
 	InproxyLimitDownstreamBytesPerSecond int `json:",omitempty"`
 
+	// InproxyReducedStartTime specifies the local time of day(HH:MM, 24-hour,
+	// UTC) at which reduced in-proxy settings begin.
+	InproxyReducedStartTime string `json:",omitempty"`
+
+	// InproxyReducedEndTime specifies the local time of day (HH:MM, 24-hour,
+	// UTC) at which reduced in-proxy settings end.
+	InproxyReducedEndTime string `json:",omitempty"`
+
+	// InproxyReducedMaxClients specifies the maximum number of in-proxy
+	// clients to be proxied concurrently during the reduced time range.
+	// When set, must be > 0 and <= InproxyMaxClients.
+	//
+	// Clients connected when the reduced settings begin will not be
+	// disconnected, so InproxyReducedMaxClients is a soft limit.
+	InproxyReducedMaxClients int `json:",omitempty"`
+
+	// InproxyReducedLimitUpstreamBytesPerSecond specifies the upstream byte
+	// transfer rate limit for each proxied client during the reduced time
+	// range. When 0, InproxyLimitUpstreamBytesPerSecond is the limit.
+	//
+	// Rates for clients already connected when the reduced settings begin or
+	// end will not change.
+	InproxyReducedLimitUpstreamBytesPerSecond int `json:",omitempty"`
+
+	// InproxyReducedLimitDownstreamBytesPerSecond specifies the downstream byte
+	// transfer rate limit for each proxied client during the reduced time
+	// range. When 0, InproxyLimitDownstreamBytesPerSecond is the limit.
+	//
+	// Rates for clients already connected when the reduced settings begin or
+	// end will not change.
+	InproxyReducedLimitDownstreamBytesPerSecond int `json:",omitempty"`
+
 	// InproxyProxyPersonalCompartmentID specifies the personal compartment
 	// ID used by an in-proxy proxy. Personal compartment IDs are
 	// distributed from proxy operators to client users out-of-band and
@@ -1490,8 +1522,46 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
-	if config.InproxyEnableProxy && config.InproxyMaxClients <= 0 {
-		return errors.TraceNew("invalid InproxyMaxClients")
+	if config.InproxyEnableProxy {
+
+		if config.InproxyMaxClients <= 0 {
+			return errors.TraceNew("invalid InproxyMaxClients")
+		}
+
+		if config.InproxyReducedStartTime != "" ||
+			config.InproxyReducedEndTime != "" ||
+			config.InproxyReducedMaxClients > 0 {
+
+			startMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedStartTime)
+			if err != nil {
+				return errors.Tracef("invalid InproxyReducedStartTime: %v", err)
+			}
+
+			endMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedEndTime)
+			if err != nil {
+				return errors.Tracef("invalid InproxyReducedEndTime: %v", err)
+			}
+
+			// Reduced all day is not a valid configuration.
+			if startMinute == endMinute {
+				return errors.TraceNew("invalid InproxyReducedStartTime/InproxyReducedEndTime")
+			}
+
+			if config.InproxyReducedMaxClients <= 0 ||
+				config.InproxyReducedMaxClients > config.InproxyMaxClients {
+				return errors.TraceNew("invalid InproxyReducedMaxClients")
+			}
+
+			// InproxyReducedLimitUpstream/DownstreamBytesPerSecond don't necessarily
+			// need to be less than InproxyLimitUpstream/DownstreamBytesPerSecond.
+
+			if config.InproxyReducedLimitUpstreamBytesPerSecond == 0 {
+				config.InproxyReducedLimitUpstreamBytesPerSecond = config.InproxyLimitUpstreamBytesPerSecond
+			}
+			if config.InproxyReducedLimitDownstreamBytesPerSecond == 0 {
+				config.InproxyReducedLimitDownstreamBytesPerSecond = config.InproxyLimitDownstreamBytesPerSecond
+			}
+		}
 	}
 
 	if !config.DisableTunnels &&
