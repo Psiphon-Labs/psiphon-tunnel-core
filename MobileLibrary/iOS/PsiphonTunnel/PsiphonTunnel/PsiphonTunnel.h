@@ -312,12 +312,14 @@ followed by a tunnel-core shutdown.
  Called when tunnel-core reports in-proxy usage statistics
  By default onInproxyProxyActivity is disabled. Enable it by setting
  EmitInproxyProxyActivity to true in the Psiphon config.
+ @param announcing Number of new clients the proxy is accepting.
  @param connectingClients Number of clients connecting to the proxy.
  @param connectedClients Number of clients currently connected to the proxy.
  @param bytesUp Bytes uploaded through the proxy since the last report.
  @param bytesDown Bytes downloaded through the proxy since the last report.
  */
-- (void)onInproxyProxyActivity:(int)connectingClients
+- (void)onInproxyProxyActivity:(int)announcing
+              connectingClients:(int)connectingClients
               connectedClients:(int)connectedClients
                        bytesUp:(long)bytesUp
                      bytesDown:(long)bytesDown;

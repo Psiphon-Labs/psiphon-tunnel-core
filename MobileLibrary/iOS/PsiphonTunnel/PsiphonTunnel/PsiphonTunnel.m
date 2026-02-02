@@ -1191,17 +1191,24 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         }
     }
     else if ([noticeType isEqualToString:@"InproxyProxyActivity"]) {
+        id announcing = [notice valueForKeyPath:@"data.announcing"];
         id connectingClients = [notice valueForKeyPath:@"data.connectingClients"];
         id connectedClients = [notice valueForKeyPath:@"data.connectedClients"];
         id bytesUp = [notice valueForKeyPath:@"data.bytesUp"];
         id bytesDown = [notice valueForKeyPath:@"data.bytesDown"];
-        if (![connectingClients isKindOfClass:[NSNumber class]] || ![connectedClients isKindOfClass:[NSNumber class]] || ![bytesUp isKindOfClass:[NSNumber class]] || ![bytesDown isKindOfClass:[NSNumber class]]) {
+        if (![announcing isKindOfClass:[NSNumber class]] ||
+            ![connectingClients isKindOfClass:[NSNumber class]] ||
+            ![connectedClients isKindOfClass:[NSNumber class]] ||
+            ![bytesUp isKindOfClass:[NSNumber class]] ||
+            ![bytesDown isKindOfClass:[NSNumber class]]) {
             [self logMessage:[NSString stringWithFormat: @"InproxyProxyActivity notice has invalid data types: %@", noticeJSON]];
             return;
         }
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInproxyProxyActivity:connectedClients:bytesUp:bytesDown:)]) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInproxyProxyActivity:connectingClients:connectedClients:bytesUp:bytesDown:)]) {
             dispatch_sync(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onInproxyProxyActivity:[connectingClients intValue] connectedClients:[connectedClients intValue] bytesUp:[bytesUp longValue] bytesDown:[bytesDown longValue]];
+                [self.tunneledAppDelegate onInproxyProxyActivity: [announcing intValue]
+                    connectingClients:[connectingClients intValue] connectedClients:[connectedClients intValue]
+                    bytesUp:[bytesUp longValue] bytesDown:[bytesDown longValue]];
             });
         }
     }

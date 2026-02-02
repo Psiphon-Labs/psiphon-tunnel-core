@@ -133,6 +133,16 @@ func TruncateTimestampToHour(timestamp string) string {
 	return t.Truncate(1 * time.Hour).Format(time.RFC3339)
 }
 
+// ParseTimeOfDayMinutes parses a time of day in HH:MM 24-hour format and
+// returns the number of minutes since midnight.
+func ParseTimeOfDayMinutes(value string) (int, error) {
+	t, err := time.Parse("15:04", value)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	return t.Hour()*60 + t.Minute(), nil
+}
+
 const (
 	CompressionNone = int32(0)
 	CompressionZlib = int32(1)
