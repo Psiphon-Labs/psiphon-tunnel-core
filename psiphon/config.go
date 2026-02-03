@@ -734,6 +734,16 @@ type Config struct {
 	// temporary tunnels.
 	DisableDSLFetcher bool `json:",omitempty"`
 
+	// PushPayloadObfuscationKey is a base64-encoded, secret key value used to
+	// deobfuscate push payloads. This value is supplied by the Psiphon
+	// Network. Required for push payload imports.
+	PushPayloadObfuscationKey string `json:",omitempty"`
+
+	// PushPayloadSignaturePublicKey is a base64-encoded, public key value
+	// used to verify push payloads. This value is supplied by the Psiphon
+	// Network. Required for push payload imports.
+	PushPayloadSignaturePublicKey string `json:",omitempty"`
+
 	//
 	// The following parameters are deprecated.
 	//

@@ -462,6 +462,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 // See comment in header.
+- (BOOL)importPushPayload:(NSData * _Nonnull)payload {
+    return GoPsiImportPushPayload(payload);
+}
+
+// See comment in header.
 + (NSString * _Nonnull)getBuildInfo {
     return GoPsiGetBuildInfo();
 }
