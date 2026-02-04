@@ -2120,33 +2120,10 @@ func (controller *Controller) launchEstablishing() {
 	controller.establishInproxyForceSelectionCount =
 		p.Int(parameters.InproxyTunnelProtocolForceSelectionCount)
 
-	// ConnectionWorkerPoolSize may be set by tactics.
-	//
-	// In-proxy personal pairing mode uses a distinct parameter which is
-	// typically configured to a lower number, limiting concurrent load and
-	// announcement consumption for personal proxies.
+	// workerPoolSize is the number of concurrent establishTunnelWorkers, each
+	// dialing tunnels.
 
-	var workerPoolSize int
-	if controller.config.IsInproxyClientPersonalPairingMode() {
-		workerPoolSize = p.Int(parameters.InproxyPersonalPairingConnectionWorkerPoolSize)
-	} else {
-		workerPoolSize = p.Int(parameters.ConnectionWorkerPoolSize)
-	}
-
-	// When TargetServerEntry is used, override any worker pool size config or
-	// tactic parameter and use a pool size of 1. The typical use case for
-	// TargetServerEntry is to test a specific server with a single connection
-	// attempt. Furthermore, too many concurrent attempts to connect to the
-	// same server will trigger rate limiting.
-	if controller.config.TargetServerEntry != "" {
-		workerPoolSize = 1
-	}
-
-	// When DisableConnectionWorkerPool is set, no tunnel establishment
-	// workers are run. See Config.DisableConnectionWorkerPool.
-	if controller.config.DisableConnectionWorkerPool {
-		workerPoolSize = 0
-	}
+	workerPoolSize := controller.getConnectionWorkerPoolSize(p)
 
 	// TunnelPoolSize may be set by tactics, subject to local constraints. A pool
 	// size of one is forced in packet tunnel mode or when using a
@@ -2232,6 +2209,49 @@ func (controller *Controller) launchEstablishing() {
 
 	controller.establishWaitGroup.Add(1)
 	go controller.establishCandidateGenerator()
+}
+
+func (controller *Controller) getConnectionWorkerPoolSize(
+	p parameters.ParametersAccessor) int {
+
+	// ConnectionWorkerPoolSize may be set by tactics.
+	//
+	// In-proxy personal pairing mode uses a distinct parameter which is
+	// typically configured to a lower number, limiting concurrent load and
+	// announcement consumption for personal proxies.
+	//
+	// ConnectionWorkerPoolMaxSize is a config-only cap on the worker pool
+	// size which may be set in low memory environments.
+
+	var workerPoolSize int
+	if controller.config.IsInproxyClientPersonalPairingMode() {
+		workerPoolSize = p.Int(parameters.InproxyPersonalPairingConnectionWorkerPoolSize)
+	} else {
+		workerPoolSize = p.Int(parameters.ConnectionWorkerPoolSize)
+	}
+
+	if controller.config.ConnectionWorkerPoolMaxSize > 0 &&
+		workerPoolSize > controller.config.ConnectionWorkerPoolMaxSize {
+
+		workerPoolSize = controller.config.ConnectionWorkerPoolMaxSize
+	}
+
+	// When TargetServerEntry is used, override any worker pool size config or
+	// tactic parameter and use a pool size of 1. The typical use case for
+	// TargetServerEntry is to test a specific server with a single connection
+	// attempt. Furthermore, too many concurrent attempts to connect to the
+	// same server will trigger rate limiting.
+	if controller.config.TargetServerEntry != "" {
+		workerPoolSize = 1
+	}
+
+	// When DisableConnectionWorkerPool is set, no tunnel establishment
+	// workers are run. See Config.DisableConnectionWorkerPool.
+	if controller.config.DisableConnectionWorkerPool {
+		workerPoolSize = 0
+	}
+
+	return workerPoolSize
 }
 
 func (controller *Controller) doConstraintsScan() {
@@ -2768,7 +2788,7 @@ loop:
 			// broken, the error should persist and eventually get posted.
 
 			p := controller.config.GetParameters().Get()
-			workerPoolSize := p.Int(parameters.ConnectionWorkerPoolSize)
+			workerPoolSize := controller.getConnectionWorkerPoolSize(p)
 			minWaitDuration := p.Duration(parameters.UpstreamProxyErrorMinWaitDuration)
 			maxWaitDuration := p.Duration(parameters.UpstreamProxyErrorMaxWaitDuration)
 			p.Close()
