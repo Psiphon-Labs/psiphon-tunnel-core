@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/push"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
@@ -587,7 +588,7 @@ func (controller *Controller) ExportExchangePayload() string {
 // See the comment for psiphon.ImportExchangePayload for more details about
 // the import.
 //
-// When the import is successful, a signal is set to trigger a restart any
+// When the import is successful, a signal is set to trigger a restart of any
 // establishment in progress. This will cause the newly imported server entry
 // to be prioritized, which it otherwise would not be in later establishment
 // rounds. The establishment process continues after ImportExchangePayload
@@ -613,6 +614,58 @@ func (controller *Controller) ImportExchangePayload(payload string) bool {
 	}
 
 	return true
+}
+
+// ImportPushPayload imports a server entry push payload.
+//
+// When the import is successful, a signal is set to trigger a restart of any
+// establishment in progress. This will cause imported server entries to be
+// prioritized as indicated in the payload. The establishment process
+// continues after ImportPushPayload returns.
+//
+// If the client already has a connected tunnel, or a tunnel connection is
+// established concurrently with the import, the signal has no effect as the
+// overall goal is establish _any_ connection.
+func (controller *Controller) ImportPushPayload(payload []byte) bool {
+
+	importer := func(
+		packedServerEntryFields protocol.PackedServerEntryFields,
+		source string,
+		prioritizeDial bool) error {
+
+		err := DSLStoreServerEntry(
+			controller.config.ServerEntrySignaturePublicKey,
+			packedServerEntryFields,
+			protocol.PushServerEntrySource(source),
+			prioritizeDial,
+			controller.config.GetNetworkID())
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		return nil
+	}
+
+	n, err := push.ImportPushPayload(
+		controller.config.PushPayloadObfuscationKey,
+		controller.config.PushPayloadSignaturePublicKey,
+		payload,
+		importer)
+
+	if err != nil {
+		NoticeWarning("push payload: %d imported, %v", n, err)
+	} else {
+		NoticeInfo("push payload: %d imported", n)
+	}
+
+	if n > 0 {
+		select {
+		case controller.signalRestartEstablishing <- struct{}{}:
+		default:
+		}
+	}
+
+	return err == nil
 }
 
 // remoteServerListFetcher fetches an out-of-band list of server entries

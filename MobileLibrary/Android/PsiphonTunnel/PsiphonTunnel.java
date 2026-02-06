@@ -266,6 +266,19 @@ public class PsiphonTunnel {
         return Psi.importExchangePayload(payload);
     }
 
+    // importPushPayload imports a server entry push payload. If no tunnel is
+    // currently connected, this operation will reset tunnel establishment
+    // with imported server entries prioritized appropriately. The push
+    // payload parameters must be set in the Psiphon config, and Psiphon must
+    // be started.
+    //
+    // Returns true if the import succeeded and false on any error. Error
+    // details are logged to diagnostics. If an import is partially
+    // successful, the imported server entries are retained and prioritized.
+    public boolean importPushPayload(byte[] payload) {
+        return Psi.importPushPayload(payload);
+    }
+
     // Writes Go runtime profile information to a set of files in the specifiec output directory.
     // cpuSampleDurationSeconds and blockSampleDurationSeconds determines how to long to wait and
     // sample profiles that require active sampling. When set to 0, these profiles are skipped.

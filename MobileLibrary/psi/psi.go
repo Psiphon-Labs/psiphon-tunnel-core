@@ -345,7 +345,7 @@ func ExportExchangePayload() string {
 // If an import occurs when Psiphon is working to establsh a tunnel, the newly
 // imported server entry is prioritized.
 //
-// The return value indicates a successful import. If the import failed, a a
+// The return value indicates a successful import. If the import failed, a
 // diagnostic notice has been logged.
 func ImportExchangePayload(payload string) bool {
 
@@ -357,6 +357,26 @@ func ImportExchangePayload(payload string) bool {
 	}
 
 	return controller.ImportExchangePayload(payload)
+}
+
+// ImportPushPayload imports a server entry push payload.
+//
+// If an import occurs when Psiphon is working to establsh a tunnel, the
+// imported server entries are prioritized as indicated in the payload.
+//
+// Returns true if the import succeeded and false on any error. Error
+// details are logged to diagnostics. If an import is partially
+// successful, the imported server entries are retained and prioritized.
+func ImportPushPayload(payload []byte) bool {
+
+	controllerMutex.Lock()
+	defer controllerMutex.Unlock()
+
+	if controller == nil {
+		return false
+	}
+
+	return controller.ImportPushPayload(payload)
 }
 
 var sendFeedbackMutex sync.Mutex

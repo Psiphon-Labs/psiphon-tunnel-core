@@ -89,6 +89,7 @@ jobs:
           sudo -E env "PATH=$PATH" go test -v -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/common/packetman
           go test -v -race ./psiphon/common/parameters
           go test -v -race ./psiphon/common/protocol
+          go test -v -race ./psiphon/common/push
           go test -v -race ./psiphon/common/quic
           go test -v -race ./psiphon/common/resolver
           go test -v -race ./psiphon/common/tactics
@@ -124,6 +125,7 @@ jobs:
           sudo -E env "PATH=$PATH" go test -v -covermode=count -coverprofile=packetman.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/common/packetman
           go test -v -covermode=count -coverprofile=parameters.coverprofile ./psiphon/common/parameters
           go test -v -covermode=count -coverprofile=protocol.coverprofile ./psiphon/common/protocol
+          go test -v -covermode=count -coverprofile=push.coverprofile ./psiphon/common/push
           go test -v -covermode=count -coverprofile=quic.coverprofile ./psiphon/common/quic
           go test -v -covermode=count -coverprofile=resolver.coverprofile ./psiphon/common/resolver
           go test -v -covermode=count -coverprofile=tactics.coverprofile ./psiphon/common/tactics

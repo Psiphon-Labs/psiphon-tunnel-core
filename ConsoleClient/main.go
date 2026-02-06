@@ -51,6 +51,9 @@ func main() {
 	var embeddedServerEntryListFilename string
 	flag.StringVar(&embeddedServerEntryListFilename, "serverList", "", "embedded server entry list input file")
 
+	var pushPayloadFilename string
+	flag.StringVar(&pushPayloadFilename, "pushPayload", "", "server entry push payload input file")
+
 	var formatNotices bool
 	flag.BoolVar(&formatNotices, "formatNotices", false, "emit notices in human-readable format")
 
@@ -224,6 +227,7 @@ func main() {
 		// Tunnel mode
 		worker = &TunnelWorker{
 			embeddedServerEntryListFilename: embeddedServerEntryListFilename,
+			pushPayloadFilename:             pushPayloadFilename,
 		}
 	}
 
@@ -336,6 +340,7 @@ type Worker interface {
 // TunnelWorker is the Worker protocol implementation used for tunnel mode.
 type TunnelWorker struct {
 	embeddedServerEntryListFilename string
+	pushPayloadFilename             string
 	embeddedServerListWaitGroup     *sync.WaitGroup
 	controller                      *psiphon.Controller
 }
@@ -347,8 +352,7 @@ func (w *TunnelWorker) Init(ctx context.Context, config *psiphon.Config) error {
 
 	err := psiphon.OpenDataStore(config)
 	if err != nil {
-		psiphon.NoticeError("error initializing datastore: %s", err)
-		os.Exit(1)
+		return errors.Trace(err)
 	}
 
 	// If specified, the embedded server list is loaded and stored. When there
@@ -389,10 +393,22 @@ func (w *TunnelWorker) Init(ctx context.Context, config *psiphon.Config) error {
 
 	controller, err := psiphon.NewController(config)
 	if err != nil {
-		psiphon.NoticeError("error creating controller: %s", err)
 		return errors.Trace(err)
 	}
 	w.controller = controller
+
+	// Import a server entry push payload. This is primarily for testing and
+	// is always executed synchronously.
+	if w.pushPayloadFilename != "" {
+		payload, err := os.ReadFile(w.pushPayloadFilename)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if !controller.ImportPushPayload(payload) {
+			// Error details emitted as notices
+			return errors.TraceNew("import push payload failed")
+		}
+	}
 
 	return nil
 }

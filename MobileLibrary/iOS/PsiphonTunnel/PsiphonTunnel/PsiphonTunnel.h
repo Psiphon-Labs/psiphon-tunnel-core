@@ -439,6 +439,19 @@ Returns the path where the rotated notices file will be created.
 - (long)getPacketTunnelMTU;
 
 /*!
+ importPushPayload imports a server entry push payload. If no tunnel is
+ currently connected, this operation will reset tunnel establishment
+ with imported server entries prioritized appropriately. The push
+ payload parameters must be set in the Psiphon config, and Psiphon must
+ be started.
+
+ Returns true if the import succeeded and false on any error. Error
+ details are logged to diagnostics. If an import is partially
+ successful, the imported server entries are retained and prioritized.
+ */
+- (BOOL)importPushPayload:(NSData * _Nonnull)payload;
+
+/*!
  Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.
  @return  The build info json as a string.
  */
