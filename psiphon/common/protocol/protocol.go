@@ -62,6 +62,7 @@ const (
 	SERVER_ENTRY_SOURCE_OBFUSCATED = "OBFUSCATED"
 	SERVER_ENTRY_SOURCE_EXCHANGED  = "EXCHANGED"
 	SERVER_ENTRY_SOURCE_DSL        = "DSL-*"
+	SERVER_ENTRY_SOURCE_PUSH       = "PUSH-*"
 
 	CAPABILITY_SSH_API_REQUESTS            = "ssh-api-requests"
 	CAPABILITY_UNTUNNELED_WEB_API_REQUESTS = "handshake"
@@ -116,6 +117,11 @@ var SupportedServerEntrySources = []string{
 	SERVER_ENTRY_SOURCE_OBFUSCATED,
 	SERVER_ENTRY_SOURCE_EXCHANGED,
 	SERVER_ENTRY_SOURCE_DSL,
+	SERVER_ENTRY_SOURCE_PUSH,
+}
+
+func PushServerEntrySource(source string) string {
+	return "PUSH-" + source
 }
 
 func AllowServerEntrySourceWithUpstreamProxy(source string) bool {

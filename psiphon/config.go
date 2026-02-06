@@ -241,6 +241,11 @@ type Config struct {
 	// recommended.
 	ConnectionWorkerPoolSize int `json:",omitempty"`
 
+	// ConnectionWorkerPoolMaxSize specifies a cap for ConnectionWorkerPoolSize
+	// that will not be exceeded by any tactics setting. This is intended for
+	// use in low memory environments. If omitted or when 0, it has no effect.
+	ConnectionWorkerPoolMaxSize int `json:",omitempty"`
+
 	// DisableConnectionWorkerPool forces ConnectionWorkerPoolSize to 0; this
 	// may be used to load cached tactics or perform an untunneled tactics
 	// request and then post tactics-related notices, including Application
@@ -733,6 +738,16 @@ type Config struct {
 	// EnableDSLFetcher tactics parameter. This may be used for special case
 	// temporary tunnels.
 	DisableDSLFetcher bool `json:",omitempty"`
+
+	// PushPayloadObfuscationKey is a base64-encoded, secret key value used to
+	// deobfuscate push payloads. This value is supplied by the Psiphon
+	// Network. Required for push payload imports.
+	PushPayloadObfuscationKey string `json:",omitempty"`
+
+	// PushPayloadSignaturePublicKey is a base64-encoded, public key value
+	// used to verify push payloads. This value is supplied by the Psiphon
+	// Network. Required for push payload imports.
+	PushPayloadSignaturePublicKey string `json:",omitempty"`
 
 	//
 	// The following parameters are deprecated.
