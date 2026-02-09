@@ -760,7 +760,14 @@ func (b *Broker) handleProxyAnnounce(
 	if !hasPersonalCompartmentIDs &&
 		!b.config.AllowProxy(geoIPData) {
 
-		return nil, errors.TraceNew("proxy disallowed")
+		// Send a "limited" response so the proxy backs off.
+		limitedErr = errors.TraceNew("proxy disallowed")
+		responsePayload, err := MarshalProxyAnnounceResponse(
+			&ProxyAnnounceResponse{Limited: true})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return responsePayload, nil
 	}
 
 	// Assign this proxy to a common compartment ID, unless it has specified a
@@ -1089,7 +1096,15 @@ func (b *Broker) handleClientOffer(
 	if !hasPersonalCompartmentIDs &&
 		!b.config.AllowClient(geoIPData) {
 
-		return nil, errors.TraceNew("client disallowed")
+		// Send a "limited" response so the client retains its broker client
+		// and doesn't retry the offer.
+		limitedErr = errors.TraceNew("client disallowed")
+		responsePayload, err := MarshalClientOfferResponse(
+			&ClientOfferResponse{Limited: true})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return responsePayload, nil
 	}
 
 	// Validate that the proxy destination specified by the client is a valid
