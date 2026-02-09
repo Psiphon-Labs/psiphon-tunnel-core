@@ -1,4 +1,4 @@
-//go:build PSIPHON_ENABLE_INPROXY
+//go:build !PSIPHON_DISABLE_INPROXY
 
 /*
  * Copyright (c) 2024, Psiphon Inc.

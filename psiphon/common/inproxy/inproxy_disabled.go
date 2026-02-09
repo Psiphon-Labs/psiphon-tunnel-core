@@ -1,4 +1,4 @@
-//go:build !PSIPHON_ENABLE_INPROXY
+//go:build PSIPHON_DISABLE_INPROXY
 
 /*
  * Copyright (c) 2024, Psiphon Inc.
@@ -34,7 +34,7 @@ import (
 // The inproxy package has a broad API that referenced throughout the psiphon
 // and psiphon/server packages.
 //
-// When PSIPHON_ENABLE_INPROXY is not specified, inproxy components are
+// When PSIPHON_DISABLE_INPROXY is specified, inproxy components are
 // disabled and large dependencies, including pion and tailscale, are not
 // referenced and excluded from builds. The stub types and functions here are
 // sufficient to omit all pion and tailscale references. The remaining, broad

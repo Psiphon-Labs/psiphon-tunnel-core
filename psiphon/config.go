@@ -1594,7 +1594,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		!inproxy.Enabled() {
 
 		// When in-proxy personal pairing mode is on, fail if the build was
-		// made without the PSIPHON_ENABLE_INPROXY build tag.
+		// made with the PSIPHON_DISABLE_INPROXY build tag.
 		//
 		// Note that this check could also be enforced in the case of a
 		// LimitTunnelProtocols.IsOnlyInproxyTunnelProtocols configuration,

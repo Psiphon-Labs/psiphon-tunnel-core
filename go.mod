@@ -21,9 +21,9 @@ replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-2023072
 // respectively, containing Psiphon customizations. See comments in
 // psiphon/common/inproxy/newWebRTCConn for details.
 //
-// The following replaces are required only when the build tags
-// PSIPHON_ENABLE_REFRACTION_NETWORKING (dtls/v2 only) or
-// PSIPHON_ENABLE_INPROXY are specified.
+// The following replaces are required only when the build tag
+// PSIPHON_ENABLE_REFRACTION_NETWORKING is specified (dtls/v2 only) or
+// PSIPHON_DISABLE_INPROXY is not specified.
 
 replace github.com/pion/dtls/v2 => ./replace/dtls
 

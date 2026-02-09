@@ -305,7 +305,7 @@ type ProxyAnnounceRequest struct {
 }
 
 // WebRTCSessionDescription is compatible with pion/webrtc.SessionDescription
-// and facilitates the PSIPHON_ENABLE_INPROXY build tag exclusion of pion
+// and facilitates the PSIPHON_DISABLE_INPROXY build tag exclusion of pion
 // dependencies.
 type WebRTCSessionDescription struct {
 	Type int    `cbor:"1,keyasint,omitempty"`
