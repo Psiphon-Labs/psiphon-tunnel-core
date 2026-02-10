@@ -380,21 +380,21 @@ func (p *Proxy) Run(ctx context.Context) {
 
 	commonProxiesToCreate, personalProxiesToCreate := p.config.MaxCommonClients, p.config.MaxPersonalClients
 
+	// Doing this outside of the go routine to avoid race conditions
+	firstWorkerIsPersonal := p.config.MaxCommonClients <= 0
+	if firstWorkerIsPersonal {
+		personalProxiesToCreate -= 1
+	} else {
+		commonProxiesToCreate -= 1
+	}
+
 	signalFirstAnnounceCtx, signalFirstAnnounceDone :=
 		context.WithCancel(context.Background())
 
 	proxyWaitGroup.Add(1)
 	go func() {
 		defer proxyWaitGroup.Done()
-		if p.config.MaxCommonClients <= 0 {
-			// Create personal if no common clients are allowed
-			p.proxyClients(ctx, signalFirstAnnounceDone, false, true)
-			personalProxiesToCreate -= 1
-		} else {
-			// Create common
-			p.proxyClients(ctx, signalFirstAnnounceDone, false, false)
-			commonProxiesToCreate -= 1
-		}
+		p.proxyClients(ctx, signalFirstAnnounceDone, false, firstWorkerIsPersonal)
 	}()
 
 	select {
