@@ -52,8 +52,8 @@ func runTestReduced() error {
 	end := addMinutes(minuteOfDay, 60)
 
 	config := &ProxyConfig{
-		MaxClients:                           10,
-		ReducedMaxClients:                    5,
+		MaxCommonClients:                     10,
+		ReducedMaxCommonClients:              5,
 		LimitUpstreamBytesPerSecond:          100,
 		LimitDownstreamBytesPerSecond:        200,
 		ReducedLimitUpstreamBytesPerSecond:   10,
@@ -69,7 +69,7 @@ func runTestReduced() error {
 	}
 
 	maxClients1, until := p.isReducedUntil()
-	maxClients2, limits := p.getLimits()
+	maxClients2, _, limits := p.getLimits()
 
 	if maxClients1 != 5 || maxClients2 != 5 {
 		return errors.TraceNew("unexpected maxClients")
@@ -95,7 +95,7 @@ func runTestReduced() error {
 	}
 
 	maxClients1, until = p.isReducedUntil()
-	maxClients2, limits = p.getLimits()
+	maxClients2, _, limits = p.getLimits()
 
 	if maxClients1 != 10 || maxClients2 != 10 {
 		return errors.TraceNew("unexpected maxClients")

@@ -81,6 +81,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 	testCompartmentID, _ := MakeID()
 	testCommonCompartmentIDs := []ID{testCompartmentID}
+	personalCompartmentID, _ := MakeID()
+	testPersonalCompartmentIDs := []ID{personalCompartmentID}
 
 	testNetworkID := "NETWORK-ID-1"
 	testNetworkType := NetworkTypeUnknown
@@ -108,6 +110,13 @@ func runTestInproxy(doMustUpgrade bool) error {
 	roundTripperFailedCount := int32(0)
 	roundTripperFailed := func(RoundTripper) { atomic.AddInt32(&roundTripperFailedCount, 1) }
 	noMatch := func(RoundTripper) {}
+
+	// Per-region activity tracking for testing the region activity feature.
+	var regionTrackingMutex sync.Mutex
+	seenCommonRegions := make(map[string]bool)
+	seenPersonalRegions := make(map[string]bool)
+	var totalCommonRegionBytesUp, totalCommonRegionBytesDown int64
+	var totalPersonalRegionBytesUp, totalPersonalRegionBytesDown int64
 
 	var receivedProxyMustUpgrade chan struct{}
 	var receivedClientMustUpgrade chan struct{}
@@ -481,6 +490,7 @@ func runTestInproxy(doMustUpgrade bool) error {
 			brokerClientPrivateKey:      proxyPrivateKey,
 			brokerPublicKey:             brokerPublicKey,
 			brokerRootObfuscationSecret: brokerRootObfuscationSecret,
+			personalCompartmentIDs:      testPersonalCompartmentIDs,
 			brokerClientRoundTripper: newHTTPRoundTripper(
 				brokerListener.Addr().String(), "proxy"),
 			brokerClientRoundTripperSucceeded: roundTripperSucceded,
@@ -552,18 +562,40 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 			HandleTacticsPayload: makeHandleTacticsPayload(proxyPrivateKey, tacticsNetworkID),
 
-			MaxClients:                    proxyMaxClients,
+			MaxCommonClients:              proxyMaxClients,
+			MaxPersonalClients:            proxyMaxClients,
 			LimitUpstreamBytesPerSecond:   bytesToSend / targetElapsedSeconds,
 			LimitDownstreamBytesPerSecond: bytesToSend / targetElapsedSeconds,
 
 			ActivityUpdater: func(
 				announcing int32,
 				connectingClients int32, connectedClients int32,
-				bytesUp int64, bytesDown int64, bytesDuration time.Duration) {
+				bytesUp int64, bytesDown int64, bytesDuration time.Duration,
+				personalRegionActivity map[string]RegionActivitySnapshot,
+				commonRegionActivity map[string]RegionActivitySnapshot) {
 
 				fmt.Printf("[%s][%s] ACTIVITY: %d announcing, %d connecting, %d connected, %d up, %d down\n",
 					time.Now().UTC().Format(time.RFC3339), name,
 					announcing, connectingClients, connectedClients, bytesUp, bytesDown)
+
+				regionTrackingMutex.Lock()
+				for region, stats := range commonRegionActivity {
+					seenCommonRegions[region] = true
+					totalCommonRegionBytesUp += stats.BytesUp
+					totalCommonRegionBytesDown += stats.BytesDown
+					fmt.Printf("[%s][%s] COMMON REGION %s: connecting=%d, connected=%d, up=%d, down=%d\n",
+						time.Now().UTC().Format(time.RFC3339), name, region,
+						stats.ConnectingClients, stats.ConnectedClients, stats.BytesUp, stats.BytesDown)
+				}
+				for region, stats := range personalRegionActivity {
+					seenPersonalRegions[region] = true
+					totalPersonalRegionBytesUp += stats.BytesUp
+					totalPersonalRegionBytesDown += stats.BytesDown
+					fmt.Printf("[%s][%s] PERSONAL REGION %s: connecting=%d, connected=%d, up=%d, down=%d\n",
+						time.Now().UTC().Format(time.RFC3339), name, region,
+						stats.ConnectingClients, stats.ConnectedClients, stats.BytesUp, stats.BytesDown)
+				}
+				regionTrackingMutex.Unlock()
 			},
 
 			MustUpgrade: func() {
@@ -781,7 +813,9 @@ func runTestInproxy(doMustUpgrade bool) error {
 	}
 
 	newClientBrokerClient := func(
-		disableWaitToShareSession bool) (*BrokerClient, error) {
+		disableWaitToShareSession bool,
+		commonCompartmentIDs []ID,
+		personalCompartmentIDs []ID) (*BrokerClient, error) {
 
 		clientPrivateKey, err := GenerateSessionPrivateKey()
 		if err != nil {
@@ -792,7 +826,8 @@ func runTestInproxy(doMustUpgrade bool) error {
 			networkID:   testNetworkID,
 			networkType: testNetworkType,
 
-			commonCompartmentIDs: testCommonCompartmentIDs,
+			commonCompartmentIDs:   commonCompartmentIDs,
+			personalCompartmentIDs: personalCompartmentIDs,
 
 			disableWaitToShareSession: disableWaitToShareSession,
 
@@ -885,12 +920,22 @@ func runTestInproxy(doMustUpgrade bool) error {
 		return webRTCCoordinator, nil
 	}
 
-	sharedBrokerClient, err := newClientBrokerClient(false)
+	sharedCommonBrokerClient, err := newClientBrokerClient(false, testCommonCompartmentIDs, nil)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	sharedBrokerClientDisableWait, err := newClientBrokerClient(true)
+	sharedCommonBrokerClientDisableWait, err := newClientBrokerClient(true, testCommonCompartmentIDs, nil)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	sharedPersonalBrokerClient, err := newClientBrokerClient(false, nil, testPersonalCompartmentIDs)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	sharedPersonalBrokerClientDisableWait, err := newClientBrokerClient(true, nil, testPersonalCompartmentIDs)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -904,16 +949,34 @@ func runTestInproxy(doMustUpgrade bool) error {
 		isMobile := i%4 == 0
 		useMediaStreams := i%4 < 2
 
+		// First half of clients are personal, second half are common.
+		isPersonalClient := i < numClients/2
+
 		// Exercise BrokerClients shared by multiple clients, but also create
 		// several broker clients.
+		//
+		// Per-region testing is handled by the HTTP server alternating regions
+		// based on request count.
 		var brokerClient *BrokerClient
 		switch i % 3 {
 		case 0:
-			brokerClient = sharedBrokerClient
+			if isPersonalClient {
+				brokerClient = sharedPersonalBrokerClient
+			} else {
+				brokerClient = sharedCommonBrokerClient
+			}
 		case 1:
-			brokerClient = sharedBrokerClientDisableWait
+			if isPersonalClient {
+				brokerClient = sharedPersonalBrokerClientDisableWait
+			} else {
+				brokerClient = sharedCommonBrokerClientDisableWait
+			}
 		case 2:
-			brokerClient, err = newClientBrokerClient(true)
+			if isPersonalClient {
+				brokerClient, err = newClientBrokerClient(true, nil, testPersonalCompartmentIDs)
+			} else {
+				brokerClient, err = newClientBrokerClient(true, testCommonCompartmentIDs, nil)
+			}
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -1008,6 +1071,40 @@ func runTestInproxy(doMustUpgrade bool) error {
 		if atomic.LoadInt32(&roundTripperFailedCount) > 0 {
 			return errors.TraceNew("unexpected round tripper failed count")
 		}
+
+		// Check per-region activity tracking
+		regionTrackingMutex.Lock()
+		if !seenCommonRegions["REGION-A"] {
+			regionTrackingMutex.Unlock()
+			return errors.TraceNew("expected to see REGION-A in common region activity")
+		}
+		if !seenCommonRegions["REGION-B"] {
+			regionTrackingMutex.Unlock()
+			return errors.TraceNew("expected to see REGION-B in common region activity")
+		}
+		if totalCommonRegionBytesUp == 0 {
+			regionTrackingMutex.Unlock()
+			return errors.TraceNew("expected non-zero per-region bytes up")
+		}
+		if totalCommonRegionBytesDown == 0 {
+			regionTrackingMutex.Unlock()
+			return errors.TraceNew("expected non-zero per-region bytes down")
+		}
+		if !seenPersonalRegions["REGION-A"] && !seenPersonalRegions["REGION-B"] {
+			regionTrackingMutex.Unlock()
+			return errors.TraceNew("expected to see personal region activity")
+		}
+		if totalPersonalRegionBytesUp == 0 {
+			regionTrackingMutex.Unlock()
+			return errors.TraceNew("expected non-zero personal per-region bytes up")
+		}
+		if totalPersonalRegionBytesDown == 0 {
+			regionTrackingMutex.Unlock()
+			return errors.TraceNew("expected non-zero personal per-region bytes down")
+		}
+		fmt.Printf("Per-region test passed: seen regions %v, total bytes up=%d, down=%d\n",
+			seenCommonRegions, totalCommonRegionBytesUp, totalCommonRegionBytesDown)
+		regionTrackingMutex.Unlock()
 	}
 
 	// Await shutdowns
@@ -1025,13 +1122,39 @@ func runTestInproxy(doMustUpgrade bool) error {
 
 func runHTTPServer(listener net.Listener, broker *Broker) error {
 
+	// Track client regions by RemoteAddr
+	var clientRegionsMutex sync.Mutex
+	clientRegions := make(map[string]string)
+	var clientRegionCount atomic.Int32
+
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		// For this test, clients set the path to "/client" and proxies
 		// set the path to "/proxy" and we use that to create stub GeoIP
 		// data to pass the not-same-ASN condition.
+		//
+		// For per-region testing, each client gets an alternating sticky region
+		// (REGION-A or REGION-B) based on its RemoteAddr
 		var geoIPData common.GeoIPData
 		geoIPData.ASN = r.URL.Path
+
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/client") {
+			clientRegionsMutex.Lock()
+			clientRegion, ok := clientRegions[r.RemoteAddr]
+			if !ok {
+				if clientRegionCount.Add(1)%2 == 0 {
+					clientRegion = "REGION-A"
+				} else {
+					clientRegion = "REGION-B"
+				}
+				clientRegions[r.RemoteAddr] = clientRegion
+			}
+			clientRegionsMutex.Unlock()
+			geoIPData.Country = clientRegion
+		} else if strings.HasPrefix(path, "/proxy") {
+			geoIPData.Country = "PROXY-REGION"
+		}
 
 		requestPayload, err := ioutil.ReadAll(
 			http.MaxBytesReader(w, r.Body, BrokerMaxRequestBodySize))

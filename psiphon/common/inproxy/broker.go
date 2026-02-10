@@ -952,6 +952,7 @@ func (b *Broker) handleProxyAnnounce(
 			TrafficShapingParameters:    clientOffer.TrafficShapingParameters,
 			NetworkProtocol:             clientOffer.NetworkProtocol,
 			DestinationAddress:          clientOffer.DestinationAddress,
+			ClientRegion:                clientOffer.Properties.GeoIPData.Country,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
