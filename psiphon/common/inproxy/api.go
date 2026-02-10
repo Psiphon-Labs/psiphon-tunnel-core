@@ -255,18 +255,21 @@ func (p NetworkProtocol) IsStream() bool {
 // ProxyMetrics are network topolology and resource metrics provided by a
 // proxy to a broker. The broker uses this information when matching proxies
 // and clients.
+// Limitation: Currently, there is no MaxReducedPersonalClients config, as
+// We assumed that users would not want the personal connections to be reduced.
 type ProxyMetrics struct {
 	BaseAPIParameters             protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
 	ProtocolVersion               int32                        `cbor:"2,keyasint,omitempty"`
 	NATType                       NATType                      `cbor:"3,keyasint,omitempty"`
 	PortMappingTypes              PortMappingTypes             `cbor:"4,keyasint,omitempty"`
-	MaxClients                    int32                        `cbor:"6,keyasint,omitempty"`
+	MaxCommonClients              int32                        `cbor:"6,keyasint,omitempty"`
 	ConnectingClients             int32                        `cbor:"7,keyasint,omitempty"`
 	ConnectedClients              int32                        `cbor:"8,keyasint,omitempty"`
 	LimitUpstreamBytesPerSecond   int64                        `cbor:"9,keyasint,omitempty"`
 	LimitDownstreamBytesPerSecond int64                        `cbor:"10,keyasint,omitempty"`
 	PeakUpstreamBytesPerSecond    int64                        `cbor:"11,keyasint,omitempty"`
 	PeakDownstreamBytesPerSecond  int64                        `cbor:"12,keyasint,omitempty"`
+	MaxPersonalClients            int32                        `cbor:"13,keyasint,omitempty"`
 }
 
 // ClientMetrics are network topolology metrics provided by a client to a
@@ -349,6 +352,7 @@ type ProxyAnnounceResponse struct {
 	TrafficShapingParameters    *TrafficShapingParameters `cbor:"10,keyasint,omitempty"`
 	NetworkProtocol             NetworkProtocol           `cbor:"11,keyasint,omitempty"`
 	DestinationAddress          string                    `cbor:"12,keyasint,omitempty"`
+	ClientRegion                string                    `cbor:"15,keyasint,omitempty"`
 }
 
 // ClientOfferRequest is an API request sent from a client to a broker,
@@ -662,7 +666,9 @@ func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 	logFields[logFieldPrefix+"protocol_version"] = metrics.ProtocolVersion
 	logFields[logFieldPrefix+"nat_type"] = metrics.NATType
 	logFields[logFieldPrefix+"port_mapping_types"] = metrics.PortMappingTypes
-	logFields[logFieldPrefix+"max_clients"] = metrics.MaxClients
+	logFields[logFieldPrefix+"max_common_clients"] = metrics.MaxCommonClients
+	logFields[logFieldPrefix+"max_personal_clients"] = metrics.MaxPersonalClients
+	logFields[logFieldPrefix+"max_clients"] = metrics.MaxCommonClients + metrics.MaxPersonalClients
 	logFields[logFieldPrefix+"connecting_clients"] = metrics.ConnectingClients
 	logFields[logFieldPrefix+"connected_clients"] = metrics.ConnectedClients
 	logFields[logFieldPrefix+"limit_upstream_bytes_per_second"] = metrics.LimitUpstreamBytesPerSecond

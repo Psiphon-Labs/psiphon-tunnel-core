@@ -1726,7 +1726,9 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		clientConfig.InproxySkipAwaitFullyConnected = true
 
 		clientConfig.InproxyProxySessionPrivateKey = inproxyTestConfig.proxySessionPrivateKey
-		clientConfig.InproxyMaxClients = 1
+		clientConfig.InproxyMaxClients = 1 // Deprecated; kept to make sure nothing breaks.
+		clientConfig.InproxyMaxCommonClients = 1
+		clientConfig.InproxyMaxPersonalClients = 0
 		clientConfig.InproxyLimitUpstreamBytesPerSecond = 0
 		clientConfig.InproxyLimitDownstreamBytesPerSecond = 0
 		clientConfig.ServerEntrySignaturePublicKey = inproxyTestConfig.brokerServerEntrySignaturePublicKey
@@ -1738,6 +1740,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 			clientConfig.InproxyClientPersonalCompartmentID = inproxyTestConfig.personalCompartmentID
 			clientConfig.InproxyProxyPersonalCompartmentID = inproxyTestConfig.personalCompartmentID
+			clientConfig.InproxyMaxPersonalClients = 1
 		}
 
 		// Simulate a CDN adding required HTTP headers by injecting them at

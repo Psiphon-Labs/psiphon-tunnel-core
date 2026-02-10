@@ -1196,6 +1196,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         }
     }
     else if ([noticeType isEqualToString:@"InproxyProxyActivity"]) {
+        // TODO: Parse and forward personalRegionActivity and
+        // commonRegionActivity. This should be done when the conduit iOS app
+        // supports the tunnel functionality correctly
         id announcing = [notice valueForKeyPath:@"data.announcing"];
         id connectingClients = [notice valueForKeyPath:@"data.connectingClients"];
         id connectedClients = [notice valueForKeyPath:@"data.connectedClients"];
