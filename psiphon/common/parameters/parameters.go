@@ -409,6 +409,7 @@ const (
 	InproxyAllBrokerSpecs                              = "InproxyAllBrokerSpecs"
 	InproxyBrokerSpecs                                 = "InproxyBrokerSpecs"
 	InproxyPersonalPairingBrokerSpecs                  = "InproxyPersonalPairingBrokerSpecs"
+	InproxyPersonalPairingMaxBrokerSpecCount           = "InproxyPersonalPairingMaxBrokerSpecCount"
 	InproxyProxyBrokerSpecs                            = "InproxyProxyBrokerSpecs"
 	InproxyProxyPersonalPairingBrokerSpecs             = "InproxyProxyPersonalPairingBrokerSpecs"
 	InproxyClientBrokerSpecs                           = "InproxyClientBrokerSpecs"
@@ -1041,6 +1042,7 @@ var defaultParameters = map[string]struct {
 	InproxyAllBrokerSpecs:                              {value: InproxyBrokerSpecsValue{}, flags: serverSideOnly},
 	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
 	InproxyPersonalPairingBrokerSpecs:                  {value: InproxyBrokerSpecsValue{}},
+	InproxyPersonalPairingMaxBrokerSpecCount:           {value: 3, minimum: 1},
 	InproxyProxyBrokerSpecs:                            {value: InproxyBrokerSpecsValue{}},
 	InproxyProxyPersonalPairingBrokerSpecs:             {value: InproxyBrokerSpecsValue{}},
 	InproxyClientBrokerSpecs:                           {value: InproxyBrokerSpecsValue{}},

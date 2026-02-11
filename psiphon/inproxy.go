@@ -434,6 +434,28 @@ func NewInproxyBrokerClientInstance(
 		PRNG := prng.NewPRNGWithSeed(&seed)
 
 		permutedIndexes := PRNG.Perm(len(brokerSpecs))
+
+		// Minimize rendezvous time by reducing the number of brokers this
+		// personal compartment ID maps over to. With a reduced number of
+		// possible brokers, the client and proxy have fewer brokers to check
+		// after fail overs.
+		//
+		// Given that permutedIndexes is a randomized shuffle, each personal
+		// compartment ID will map to a different set of reduced brokers,
+		// preserving overall broker load balancing.
+		//
+		// InproxyPersonalPairingMaxBrokerSpecCount will be configured high
+		// enough to also preserve reasonable availability when brokers fail.
+		// When InproxyPersonalPairingMaxBrokerSpecCount is 0, there is no max.
+		//
+		// This scheme depends on the len(personalCompartmentIDs) <= 1
+		// constraint checked above.
+
+		maxBrokerSpecs := p.Int(parameters.InproxyPersonalPairingMaxBrokerSpecCount)
+		if maxBrokerSpecs > 0 && len(permutedIndexes) > maxBrokerSpecs {
+			permutedIndexes = permutedIndexes[:maxBrokerSpecs]
+		}
+
 		selectedIndex := permutedIndexes[brokerSelectCount%len(permutedIndexes)]
 		brokerSpecs = brokerSpecs[selectedIndex : selectedIndex+1]
 
