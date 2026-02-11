@@ -79,7 +79,12 @@ func runTestDestBytes() error {
 	setLogCallback(logCallback)
 	defer setLogCallback(nil)
 
-	const logPeriod = 250 * time.Millisecond
+	// Test can fail if the following addBytes/Sleep loop isn't synchronzied
+	// with the destBytesLogger timer.
+	//
+	// TODO: use time/synctest in Go 1.25+
+
+	const logPeriod = 500 * time.Millisecond
 
 	destBytesLogger := newDestBytesLogger(&SupportServices{
 		Config: &Config{
@@ -236,7 +241,7 @@ func runTestDestBytes() error {
 		return nil
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 
 		addBytes()
 
