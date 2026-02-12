@@ -2122,13 +2122,17 @@ type destinationBytesMetrics struct {
 }
 
 func (d *destinationBytesMetrics) UpdateProgress(
-	downstreamBytes, upstreamBytes, _ int64) {
+	bytesRead, bytesWritten, _ int64) {
 
 	// Concurrency: UpdateProgress may be called without holding the sshClient
-	// lock; all accesses to bytesUp/bytesDown must use atomic operations.
+	// lock; all accesses to d.bytesUp/bytesDown must use atomic operations.
 
-	atomic.AddInt64(&d.bytesUp, upstreamBytes)
-	atomic.AddInt64(&d.bytesDown, downstreamBytes)
+	// Bytes read from the egress destination become bytes sent down to the
+	// client and bytes written to the egress destination are bytes up from
+	// the client.
+
+	atomic.AddInt64(&d.bytesUp, bytesWritten)
+	atomic.AddInt64(&d.bytesDown, bytesRead)
 }
 
 func (d *destinationBytesMetrics) getBytesUp() int64 {
@@ -2225,7 +2229,7 @@ func newInproxyProxyQualityTracker(
 }
 
 func (t *inproxyProxyQualityTracker) UpdateProgress(
-	downstreamBytes, upstreamBytes, _ int64) {
+	bytesRead, bytesWritten, _ int64) {
 
 	// Concurrency: UpdateProgress may be called concurrently; all accesses to
 	// mutated fields use atomic operations.
@@ -2236,8 +2240,11 @@ func (t *inproxyProxyQualityTracker) UpdateProgress(
 		return
 	}
 
-	bytesUp := t.bytesUp.Add(upstreamBytes)
-	bytesDown := t.bytesDown.Add(downstreamBytes)
+	// Bytes read from the proxied tunnel are upstream and bytes written to
+	// the proxied tunnel are downstream.
+
+	bytesUp := t.bytesUp.Add(bytesRead)
+	bytesDown := t.bytesDown.Add(bytesWritten)
 
 	if (t.targetBytesUp == 0 || bytesUp >= t.targetBytesUp) &&
 		(t.targetBytesDown == 0 || bytesDown >= t.targetBytesDown) &&
