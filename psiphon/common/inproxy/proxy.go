@@ -371,14 +371,13 @@ func (p *Proxy) Run(ctx context.Context) {
 	//   session establisher to be a different worker than the no-delay worker.
 	//
 	// The first worker is the only proxy worker which sets
-	// ProxyAnnounceRequest.CheckTactics.
-	//
-	// Limitation: currently, the first proxy is always common (unless
-	// MaxCommonClients == 0). We might want to change this later
-	// so that the first message is just an announcement, and not a full
-	// proxy, so we don't have to decide its type.
+	// ProxyAnnounceRequest.CheckTactics/PreCheckTactics. PreCheckTactics is
+	// used on the first announcement so the request returns immediately
+	// without awaiting a match. This allows all workers to be launched
+	// quickly.
 
-	commonProxiesToCreate, personalProxiesToCreate := p.config.MaxCommonClients, p.config.MaxPersonalClients
+	commonProxiesToCreate, personalProxiesToCreate :=
+		p.config.MaxCommonClients, p.config.MaxPersonalClients
 
 	// Doing this outside of the go routine to avoid race conditions
 	firstWorkerIsPersonal := p.config.MaxCommonClients <= 0
@@ -450,8 +449,11 @@ func (p *Proxy) activityUpdate(period time.Duration) {
 	greaterThanSwapInt64(&p.peakBytesUp, bytesUp)
 	greaterThanSwapInt64(&p.peakBytesDown, bytesDown)
 
-	personalRegionActivity := p.snapshotAndResetRegionActivity(&p.personalStatsMutex, p.personalRegionActivity)
-	commonRegionActivity := p.snapshotAndResetRegionActivity(&p.commonStatsMutex, p.commonRegionActivity)
+	personalRegionActivity := p.snapshotAndResetRegionActivity(
+		&p.personalStatsMutex, p.personalRegionActivity)
+
+	commonRegionActivity := p.snapshotAndResetRegionActivity(
+		&p.commonStatsMutex, p.commonRegionActivity)
 
 	stateChanged := announcing != p.lastAnnouncing ||
 		connectingClients != p.lastConnectingClients ||
@@ -675,6 +677,8 @@ func (p *Proxy) proxyClients(
 		return false
 	}
 
+	preCheckTacticsDone := false
+
 	for ctx.Err() == nil {
 
 		if !p.config.WaitForNetworkConnectivity() {
@@ -714,7 +718,7 @@ func (p *Proxy) proxyClients(
 		}
 
 		backOff, err := p.proxyOneClient(
-			ctx, logAnnounce, signalAnnounceDone, isPersonal)
+			ctx, logAnnounce, &preCheckTacticsDone, signalAnnounceDone, isPersonal)
 
 		if !backOff || err == nil {
 			failureDelayFactor = 1
@@ -839,6 +843,7 @@ func (p *Proxy) doNetworkDiscovery(
 func (p *Proxy) proxyOneClient(
 	ctx context.Context,
 	logAnnounce func() bool,
+	preCheckTacticsDone *bool,
 	signalAnnounceDone func(),
 	isPersonal bool) (bool, error) {
 
@@ -914,7 +919,8 @@ func (p *Proxy) proxyOneClient(
 
 	// Only the first worker, which has signalAnnounceDone configured, checks
 	// for tactics.
-	checkTactics := signalAnnounceDone != nil
+	checkTactics := signalAnnounceDone != nil && *preCheckTacticsDone
+	preCheckTactics := signalAnnounceDone != nil && !*preCheckTacticsDone
 
 	maxCommonClients, maxPersonalClients, rateLimits := p.getLimits()
 
@@ -929,7 +935,12 @@ func (p *Proxy) proxyOneClient(
 	// with the original network ID.
 
 	metrics, tacticsNetworkID, compressTactics, err := p.getMetrics(
-		checkTactics, brokerCoordinator, webRTCCoordinator, maxCommonClients, maxPersonalClients, rateLimits)
+		checkTactics || preCheckTactics,
+		brokerCoordinator,
+		webRTCCoordinator,
+		maxCommonClients,
+		maxPersonalClients,
+		rateLimits)
 	if err != nil {
 		return backOff, errors.Trace(err)
 	}
@@ -997,6 +1008,7 @@ func (p *Proxy) proxyOneClient(
 			PersonalCompartmentIDs: personalCompartmentIDs,
 			Metrics:                metrics,
 			CheckTactics:           checkTactics,
+			PreCheckTactics:        preCheckTactics,
 		})
 	if logAnnounce() {
 		p.config.Logger.WithTraceFields(common.LogFields{
@@ -1029,11 +1041,15 @@ func (p *Proxy) proxyOneClient(
 		}
 	}
 
-	// Signal that the announce round trip is complete. At this point, the
-	// broker Noise session should be established and any fresh tactics
-	// applied.
+	// Signal that the announce round trip is complete, allowing other workers
+	// to launch. At this point, the broker Noise session should be established
+	// and any fresh tactics applied. Also toggle preCheckTacticsDone since
+	// there's no need to retry PreCheckTactics once a round trip succeeds.
 	if signalAnnounceDone != nil {
 		signalAnnounceDone()
+	}
+	if preCheckTactics {
+		*preCheckTacticsDone = true
 	}
 
 	// MustUpgrade has precedence over other cases, to ensure the callback is
@@ -1055,8 +1071,22 @@ func (p *Proxy) proxyOneClient(
 
 	} else if announceResponse.NoMatch {
 
+		// No backoff for no-match.
+		//
+		// This is also the expected response for CheckTactics with a tactics
+		// payload and PreCheckTactics with or without a tactics payload,
+		// distinct cases which should not back off.
+
 		return backOff, errors.TraceNew("no match")
 
+	}
+
+	if preCheckTactics && !announceResponse.NoMatch {
+
+		// Sanity check: the broker should always respond with no-match for
+		// PreCheckTactics.
+
+		return backOff, errors.TraceNew("unexpected PreCheckTactics response")
 	}
 
 	if announceResponse.SelectedProtocolVersion < ProtocolVersion1 ||

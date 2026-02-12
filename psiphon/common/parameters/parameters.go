@@ -1042,7 +1042,7 @@ var defaultParameters = map[string]struct {
 	InproxyAllBrokerSpecs:                              {value: InproxyBrokerSpecsValue{}, flags: serverSideOnly},
 	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
 	InproxyPersonalPairingBrokerSpecs:                  {value: InproxyBrokerSpecsValue{}},
-	InproxyPersonalPairingMaxBrokerSpecCount:           {value: 3, minimum: 1},
+	InproxyPersonalPairingMaxBrokerSpecCount:           {value: 3, minimum: 0},
 	InproxyProxyBrokerSpecs:                            {value: InproxyBrokerSpecsValue{}},
 	InproxyProxyPersonalPairingBrokerSpecs:             {value: InproxyBrokerSpecsValue{}},
 	InproxyClientBrokerSpecs:                           {value: InproxyBrokerSpecsValue{}},

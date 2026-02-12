@@ -729,16 +729,21 @@ func (b *Broker) handleProxyAnnounce(
 	// existing, cached tactics. In the case where tactics have changed,
 	// don't enqueue the proxy announcement and return no-match so that the
 	// proxy can store and apply the new tactics before announcing again.
+	//
+	// For PreCheckTactics requests, an immediate no-match response is
+	// returned even when there are no new tactics.
 
 	var tacticsPayload []byte
-	if announceRequest.CheckTactics {
+	if announceRequest.CheckTactics || announceRequest.PreCheckTactics {
 		tacticsPayload, newTacticsTag, err =
 			b.config.GetTacticsPayload(geoIPData, apiParams)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		if tacticsPayload != nil && newTacticsTag != "" {
+		if (tacticsPayload != nil && newTacticsTag != "") ||
+			announceRequest.PreCheckTactics {
+
 			responsePayload, err := MarshalProxyAnnounceResponse(
 				&ProxyAnnounceResponse{
 					TacticsPayload: tacticsPayload,
@@ -756,6 +761,11 @@ func (b *Broker) handleProxyAnnounce(
 	// such as censored locations, from announcing. Proxies with personal
 	// compartment IDs are always allowed, as they will be used only by
 	// clients specifically configured to use them.
+	//
+	// AllowProxy is not enforced until after CheckTactics/PreCheckTactics
+	// cases, which may return an immediate response. This allows proxies to
+	// download new tactics that may set AllowProxy, which well-behaved
+	// proxies can enforce locally as well.
 
 	if !hasPersonalCompartmentIDs &&
 		!b.config.AllowProxy(geoIPData) {
