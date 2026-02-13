@@ -1114,6 +1114,7 @@ type Config struct {
 	InproxyPersonalPairingBrokerSpecs                       parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
 	InproxyProxyBrokerSpecs                                 parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
 	InproxyProxyPersonalPairingBrokerSpecs                  parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
+	InproxyPersonalPairingMaxBrokerSpecCount                *int                                             `json:",omitempty"`
 	InproxyClientBrokerSpecs                                parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
 	InproxyClientPersonalPairingBrokerSpecs                 parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
 	InproxyReplayBrokerDialParametersTTLSeconds             *int                                             `json:",omitempty"`
@@ -2788,6 +2789,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyProxyPersonalPairingBrokerSpecs] = config.InproxyProxyPersonalPairingBrokerSpecs
 	}
 
+	if config.InproxyPersonalPairingMaxBrokerSpecCount != nil {
+		applyParameters[parameters.InproxyPersonalPairingMaxBrokerSpecCount] = *config.InproxyPersonalPairingMaxBrokerSpecCount
+	}
+
 	if len(config.InproxyClientBrokerSpecs) > 0 {
 		applyParameters[parameters.InproxyClientBrokerSpecs] = config.InproxyClientBrokerSpecs
 	}
@@ -3796,6 +3801,10 @@ func (config *Config) setDialParametersHash() {
 	if len(config.InproxyProxyPersonalPairingBrokerSpecs) > 0 {
 		hash.Write([]byte("InproxyProxyPersonalPairingBrokerSpecs"))
 		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxyPersonalPairingBrokerSpecs)))
+	}
+	if config.InproxyPersonalPairingMaxBrokerSpecCount != nil {
+		hash.Write([]byte("InproxyPersonalPairingMaxBrokerSpecCount"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyPersonalPairingMaxBrokerSpecCount))
 	}
 	if len(config.InproxyClientBrokerSpecs) > 0 {
 		hash.Write([]byte("InproxyClientBrokerSpecs"))

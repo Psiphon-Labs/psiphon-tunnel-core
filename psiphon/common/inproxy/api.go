@@ -299,12 +299,18 @@ type ClientMetrics struct {
 // overhead, proxies with multiple workers should designate just one worker
 // to set CheckTactics.
 //
+// When PreCheckTactics is set, the broker checks tactics as with
+// CheckTactics, but responds immediately without awaiting a match. This
+// option enables the proxy to quickly establish the shared Noise protocol
+// session and launch all workers.
+//
 // The proxy's session public key is an implicit and cryptographically
 // verified proxy ID.
 type ProxyAnnounceRequest struct {
 	PersonalCompartmentIDs []ID          `cbor:"1,keyasint,omitempty"`
 	Metrics                *ProxyMetrics `cbor:"2,keyasint,omitempty"`
 	CheckTactics           bool          `cbor:"3,keyasint,omitempty"`
+	PreCheckTactics        bool          `cbor:"4,keyasint,omitempty"`
 }
 
 // WebRTCSessionDescription is compatible with pion/webrtc.SessionDescription
