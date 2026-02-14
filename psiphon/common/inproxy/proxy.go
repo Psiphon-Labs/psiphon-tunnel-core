@@ -1114,11 +1114,6 @@ func (p *Proxy) proxyOneClient(
 
 	// Trigger back-off if the following WebRTC operations fail to establish a
 	// connections.
-	//
-	// Limitation: the proxy answer request to the broker may fail due to the
-	// non-back-off reasons documented above for the proxy announcment request;
-	// however, these should be unlikely assuming that the broker client is
-	// using a persistent transport connection.
 
 	backOff = true
 
@@ -1183,7 +1178,7 @@ func (p *Proxy) proxyOneClient(
 
 	// Send answer request with SDP or error.
 
-	_, err = brokerClient.ProxyAnswer(
+	answerResponse, err := brokerClient.ProxyAnswer(
 		ctx,
 		&ProxyAnswerRequest{
 			ConnectionID:      announceResponse.ConnectionID,
@@ -1196,6 +1191,11 @@ func (p *Proxy) proxyOneClient(
 			// Prioritize returning any WebRTC error for logging.
 			return backOff, webRTCErr
 		}
+
+		// Don't backoff if the answer request fails due to possible transient
+		// request transport errors.
+
+		backOff = false
 		return backOff, errors.Trace(err)
 	}
 
@@ -1203,6 +1203,22 @@ func (p *Proxy) proxyOneClient(
 
 	if webRTCErr != nil {
 		return backOff, webRTCErr
+	}
+
+	// Exit if the client was no longer awaiting the answer. There is no
+	// backoff in this case, and there's no error, as the proxy did not fail
+	// as it's not an unexpected outcome.
+	//
+	// Limitation: it's possible that the announce request responds quickly
+	// and the matched client offer is already close to timing out. The
+	// answer request will also respond quickly. There's an increased chance
+	// of hitting rate limits in this fast turn around scenario. This outcome
+	// is mitigated by InproxyBrokerMatcherOfferMinimumDeadline.
+
+	if answerResponse.NoAwaitingClient {
+
+		backOff = false
+		return backOff, nil
 	}
 
 	// Await the WebRTC connection.

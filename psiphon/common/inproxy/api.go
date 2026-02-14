@@ -461,8 +461,11 @@ type ProxyAnswerRequest struct {
 	// SelectedProtocolVersion int32 `cbor:"2,keyasint,omitempty"`
 }
 
-// ProxyAnswerResponse is the acknowledgement for a ProxyAnswerRequest.
+// ProxyAnswerResponse is the acknowledgement for a ProxyAnswerRequest. If
+// NoAwaitingClient is indicated, then the client was no longer awaiting the
+// answer and the proxy should abandon the connection attempt.
 type ProxyAnswerResponse struct {
+	NoAwaitingClient bool `cbor:"1,keyasint,omitempty"`
 }
 
 // ClientRelayedPacketRequest is an API request sent from a client to a

@@ -50,4 +50,5 @@ message InproxyBroker {
     optional bool timed_out = 136;
     optional string meek_server_http_version = 137;
     optional int64 pending_answers_size = 138;
+    optional int64 offer_deadline = 139;
 }

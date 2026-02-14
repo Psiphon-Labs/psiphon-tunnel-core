@@ -406,6 +406,7 @@ func (b *Broker) SetLimits(
 	matcherOfferLimitEntryCount int,
 	matcherOfferRateLimitQuantity int,
 	matcherOfferRateLimitInterval time.Duration,
+	matcherOfferMinimumDeadline time.Duration,
 	maxCompartmentIDs int,
 	dslRequestRateLimitQuantity int,
 	dslRequestRateLimitInterval time.Duration) {
@@ -417,7 +418,8 @@ func (b *Broker) SetLimits(
 		matcherAnnouncementNonlimitedProxyIDs,
 		matcherOfferLimitEntryCount,
 		matcherOfferRateLimitQuantity,
-		matcherOfferRateLimitInterval)
+		matcherOfferRateLimitInterval,
+		matcherOfferMinimumDeadline)
 
 	b.maxCompartmentIDs.Store(
 		int64(common.ValueOrDefault(maxCompartmentIDs, MaxCompartmentIDs)))
@@ -1210,7 +1212,8 @@ func (b *Broker) handleClientOffer(
 		var limitError *MatcherLimitError
 		limited := std_errors.As(err, &limitError)
 
-		timeout := offerCtx.Err() == context.DeadlineExceeded
+		timeout := offerCtx.Err() == context.DeadlineExceeded ||
+			std_errors.Is(err, errOfferDropped)
 
 		// A no-match response is sent in the case of a timeout awaiting a
 		// match. The faster-failing rate or entry limiting case also results
@@ -1230,6 +1233,13 @@ func (b *Broker) handleClientOffer(
 			// InproxyClientOfferRequestTimeout in tactics, should be configured
 			// so that the broker will timeout first and have an opportunity to
 			// send this response before the client times out.
+			//
+			// In the errOfferDropped case, the matcher dropped the offer due
+			// to age. While this is distinct from a timeout after a
+			// completed match, the same timed_out log field is set. The
+			// cases can be distinguished based on elapsed_time, as the
+			// dropped cases will have an elapsed_time less than
+			// InproxyBrokerClientOfferTimeout.
 			timedOut = true
 		}
 
@@ -1418,6 +1428,18 @@ func (b *Broker) handleProxyAnswer(
 	hasPersonalCompartmentIDs, err := b.matcher.AnnouncementHasPersonalCompartmentIDs(
 		initiatorID, answerRequest.ConnectionID)
 	if err != nil {
+
+		if std_errors.Is(err, errNoPendingAnswer) {
+			// Return a response. This avoids returning a
+			// broker-client-resetting 404 in this case.
+			responsePayload, err := MarshalProxyAnswerResponse(
+				&ProxyAnswerResponse{NoAwaitingClient: true})
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return responsePayload, nil
+		}
+
 		return nil, errors.Trace(err)
 	}
 
@@ -1459,6 +1481,18 @@ func (b *Broker) handleProxyAnswer(
 
 		err = b.matcher.Answer(proxyAnswer)
 		if err != nil {
+
+			if std_errors.Is(err, errNoPendingAnswer) {
+				// Return a response. This avoids returning a
+				// broker-client-resetting 404 in this case.
+				responsePayload, err := MarshalProxyAnswerResponse(
+					&ProxyAnswerResponse{NoAwaitingClient: true})
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				return responsePayload, nil
+			}
+
 			return nil, errors.Trace(err)
 		}
 	}
