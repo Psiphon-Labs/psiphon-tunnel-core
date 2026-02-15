@@ -22,6 +22,7 @@ package inproxy
 import (
 	"context"
 	std_errors "errors"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -1399,8 +1400,10 @@ func (b *Broker) handleProxyAnswer(
 		if answerError != "" {
 			// This is a proxy-reported error that occurred while creating the answer.
 			logFields["answer_error"] = answerError
+			logFields["error"] = fmt.Sprintf("proxy answer error: %s", answerError)
 		}
 		if retErr != nil {
+			// For the error field, retErr takes precedence over answerError
 			logFields["error"] = retErr.Error()
 		}
 		logFields.Add(transportLogFields)
@@ -1454,9 +1457,6 @@ func (b *Broker) handleProxyAnswer(
 		return nil, errors.Trace(err)
 	}
 
-	answerSDP := answerRequest.ProxyAnswerSDP
-	answerSDP.SDP = string(filteredSDP)
-
 	if answerRequest.AnswerError != "" {
 
 		// The proxy failed to create an answer.
@@ -1471,6 +1471,9 @@ func (b *Broker) handleProxyAnswer(
 
 		// Note that neither ProxyID nor ProxyIP is returned to the client.
 		// These fields are used internally in the matcher.
+
+		answerSDP := answerRequest.ProxyAnswerSDP
+		answerSDP.SDP = string(filteredSDP)
 
 		proxyAnswer = &MatchAnswer{
 			ProxyIP:        proxyIP,

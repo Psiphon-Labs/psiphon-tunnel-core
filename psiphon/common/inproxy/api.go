@@ -905,7 +905,8 @@ func (params *TrafficShapingParameters) Validate() error {
 }
 
 // ValidateAndGetLogFields validates the ProxyAnswerRequest and returns
-// common.LogFields for logging.
+// common.LogFields for logging. A nil filteredSDP is returned when
+// ProxyAnswerRequest.AnswerError is set.
 func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
 	baseAPIParameterValidator common.APIParameterValidator,
@@ -913,27 +914,34 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	geoIPData common.GeoIPData,
 	proxyAnnouncementHasPersonalCompartmentIDs bool) ([]byte, common.LogFields, error) {
 
-	// The proxy answer SDP must contain at least one ICE candidate.
-	errorOnNoCandidates := true
+	var filteredSDP []byte
+	var sdpMetrics *webRTCSDPMetrics
+	var err error
 
-	// The proxy answer SDP may include RFC 1918/4193 private IP addresses in
-	// personal pairing mode. filterSDPAddresses should not filter out
-	// private IP addresses based on the broker's local interfaces; this
-	// filtering occurs on the client that receives the SDP.
-	allowPrivateIPAddressCandidates := proxyAnnouncementHasPersonalCompartmentIDs
-	filterPrivateIPAddressCandidates := false
+	if request.AnswerError == "" {
 
-	// Proxy answer SDP candidate addresses must match the country and ASN of
-	// the proxy. Don't facilitate connections to arbitrary destinations.
-	filteredSDP, sdpMetrics, err := filterSDPAddresses(
-		[]byte(request.ProxyAnswerSDP.SDP),
-		errorOnNoCandidates,
-		lookupGeoIP,
-		geoIPData,
-		allowPrivateIPAddressCandidates,
-		filterPrivateIPAddressCandidates)
-	if err != nil {
-		return nil, nil, errors.Trace(err)
+		// The proxy answer SDP must contain at least one ICE candidate.
+		errorOnNoCandidates := true
+
+		// The proxy answer SDP may include RFC 1918/4193 private IP addresses in
+		// personal pairing mode. filterSDPAddresses should not filter out
+		// private IP addresses based on the broker's local interfaces; this
+		// filtering occurs on the client that receives the SDP.
+		allowPrivateIPAddressCandidates := proxyAnnouncementHasPersonalCompartmentIDs
+		filterPrivateIPAddressCandidates := false
+
+		// Proxy answer SDP candidate addresses must match the country and ASN of
+		// the proxy. Don't facilitate connections to arbitrary destinations.
+		filteredSDP, sdpMetrics, err = filterSDPAddresses(
+			[]byte(request.ProxyAnswerSDP.SDP),
+			errorOnNoCandidates,
+			lookupGeoIP,
+			geoIPData,
+			allowPrivateIPAddressCandidates,
+			filterPrivateIPAddressCandidates)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
 	}
 
 	// The proxy's self-reported ICECandidateTypes are used instead of the
@@ -950,10 +958,12 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 
 	logFields["connection_id"] = request.ConnectionID
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
-	logFields["has_IPv6"] = sdpMetrics.hasIPv6
-	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
-	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
 	logFields["answer_error"] = request.AnswerError
+	if sdpMetrics != nil {
+		logFields["has_IPv6"] = sdpMetrics.hasIPv6
+		logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
+		logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
+	}
 
 	return filteredSDP, logFields, nil
 }
