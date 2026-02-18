@@ -95,4 +95,5 @@ message DialParams {
     optional int64 unique_candidate_estimate = 86;
     optional int64 candidates_moved_to_front = 87;
     optional int64 first_fronted_meek_candidate = 88;
+    optional bool meek_payload_padding = 89;
 }

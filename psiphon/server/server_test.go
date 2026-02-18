@@ -545,7 +545,7 @@ func TestHotReload(t *testing.T) {
 func TestHotReloadWithTactics(t *testing.T) {
 	runServer(t,
 		&runServerConfig{
-			tunnelProtocol:       "UNFRONTED-MEEK-OSSH",
+			tunnelProtocol:       "UNFRONTED-MEEK-HTTPS-OSSH",
 			doHotReload:          true,
 			requireAuthorization: true,
 			doTunneledWebRequest: true,
@@ -846,6 +846,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	psiphonServerIPAddress := "127.0.0.1"
 	psiphonServerPort := 4000
 
+	clientTunnelProtocol := runConfig.tunnelProtocol
+	if runConfig.clientTunnelProtocol != "" {
+		clientTunnelProtocol = runConfig.clientTunnelProtocol
+	}
+
 	// initialize server entry signing
 
 	serverEntrySignaturePublicKey,
@@ -941,13 +946,19 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 
 	authorizationIDStr := base64.StdEncoding.EncodeToString(authorizationID)
 
+	// Flip a coin to exercise meek payload padding. With many Test*Meek
+	// cases, both padding enabled and not enabled will get exercised.
+
+	doMeekPayloadPadding := protocol.TunnelProtocolUsesMeek(clientTunnelProtocol) &&
+		prng.FlipCoin()
+
 	// Enable tactics when the test protocol is meek or uses inproxy. Both the
 	// client and the server will be configured to support tactics. The
 	// client config will be set with a nonfunctional config so that the
 	// tactics request must succeed, overriding the nonfunctional values, for
 	// the tunnel to establish.
 
-	doClientTactics := protocol.TunnelProtocolUsesMeek(runConfig.tunnelProtocol) ||
+	doClientTactics := protocol.TunnelProtocolSupportsTactics(clientTunnelProtocol) ||
 		doInproxy
 
 	doServerTactics := doClientTactics ||
@@ -955,7 +966,8 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		runConfig.forceFragmenting ||
 		runConfig.doBurstMonitor ||
 		runConfig.doASNDestBytes ||
-		runConfig.doTunneledDomainRequest
+		runConfig.doTunneledDomainRequest ||
+		doMeekPayloadPadding
 
 	// All servers require a tactics config with valid keys.
 	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
@@ -1079,19 +1091,12 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		livenessTestSize)
 
 	var tacticsConfigFilename string
-	var tacticsTunnelProtocol string
 	var inproxyTacticsParametersJSON string
 
 	// Only pave the tactics config when tactics are required. This exercises the
 	// case where the tactics config is omitted.
 	if doServerTactics {
 		tacticsConfigFilename = filepath.Join(testDataDirName, "tactics_config.json")
-
-		if runConfig.clientTunnelProtocol != "" {
-			tacticsTunnelProtocol = runConfig.clientTunnelProtocol
-		} else {
-			tacticsTunnelProtocol = runConfig.tunnelProtocol
-		}
 
 		if doInproxy {
 			inproxyTacticsParametersJSON = inproxyTestConfig.tacticsParametersJSON
@@ -1103,7 +1108,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			tacticsRequestPublicKey,
 			tacticsRequestPrivateKey,
 			tacticsRequestObfuscatedKey,
-			tacticsTunnelProtocol,
+			clientTunnelProtocol,
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
@@ -1535,7 +1540,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 				tacticsRequestPublicKey,
 				tacticsRequestPrivateKey,
 				tacticsRequestObfuscatedKey,
-				tacticsTunnelProtocol,
+				clientTunnelProtocol,
 				propagationChannelID,
 				livenessTestSize,
 				runConfig.doBurstMonitor,
@@ -1599,11 +1604,6 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	}
 
 	testClientFeaturesJSON, _ := json.Marshal(testClientFeatures)
-
-	clientTunnelProtocol := runConfig.tunnelProtocol
-	if runConfig.clientTunnelProtocol != "" {
-		clientTunnelProtocol = runConfig.clientTunnelProtocol
-	}
 
 	clientConfigJSON := fmt.Sprintf(`
     {
@@ -1682,13 +1682,23 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	// When using TLS-OSSH the test expects the server to log the fields
 	// tls_ossh_sni_server_name and tls_ossh_transformed_host_name, which are
 	// only shipped by the client when the host name is transformed.
-	if protocol.TunnelProtocolUsesTLSOSSH(clientTunnelProtocol) {
+	//
+	// Also a workaround for UNFRONTED-MEEK-HTTP not supporting tactics requests.
+	// See limitation documented in protocol.TunnelProtocolSupportsTactics.
+	if protocol.TunnelProtocolUsesTLSOSSH(clientTunnelProtocol) ||
+		protocol.TunnelProtocolUsesMeekHTTPNormalizer(clientTunnelProtocol) {
+
 		transformHostNameProbability := 1.0
 		clientConfig.TransformHostNameProbability = &transformHostNameProbability
 		clientConfig.CustomHostNameRegexes = []string{testCustomHostNameRegex}
 		customHostNameProbability := 1.0
 		clientConfig.CustomHostNameProbability = &customHostNameProbability
 		clientConfig.CustomHostNameLimitProtocols = []string{clientTunnelProtocol}
+
+		if protocol.TunnelProtocolUsesMeekHTTPNormalizer(clientTunnelProtocol) {
+			pickUserAgentProbability := 1.0
+			clientConfig.PickUserAgentProbability = &pickUserAgentProbability
+		}
 	}
 
 	if runConfig.doSteeringIP {
@@ -1765,6 +1775,11 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 	if runConfig.doUncompressedTactics {
 		compressTactics := false
 		clientConfig.CompressTactics = &compressTactics
+	}
+
+	if doMeekPayloadPadding {
+		payloadPaddingProbability := 1.0
+		clientConfig.MeekPayloadPaddingProbability = &payloadPaddingProbability
 	}
 
 	err = clientConfig.Commit(false)
@@ -2130,7 +2145,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			tacticsRequestPublicKey,
 			tacticsRequestPrivateKey,
 			tacticsRequestObfuscatedKey,
-			tacticsTunnelProtocol,
+			clientTunnelProtocol,
 			propagationChannelID,
 			livenessTestSize,
 			runConfig.doBurstMonitor,
@@ -2331,6 +2346,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 		expectServerEntryCount = 2 * protocol.ServerEntryCountRoundingIncrement
 	}
 	expectDSLPrioritized := doDSL
+	expectMeekPayloadPadding := doMeekPayloadPadding
 
 	// The client still reports domain_bytes up when no port forwards are
 	// allowed (expectTrafficFailure).
@@ -2366,6 +2382,7 @@ func runServer(t *testing.T, runConfig *runServerConfig) {
 			expectCheckServerEntryPruneCount,
 			expectServerEntryCount,
 			expectDSLPrioritized,
+			expectMeekPayloadPadding,
 			inproxyTestConfig,
 			logFields)
 		if err != nil {
@@ -2861,6 +2878,7 @@ func checkExpectedServerTunnelLogFields(
 	expectCheckServerEntryPruneCount int,
 	expectServerEntryCount int,
 	expectDSLPrioritized bool,
+	expectMeekPayloadPadding bool,
 	inproxyTestConfig *inproxyTestConfig,
 	fields map[string]interface{}) error {
 
@@ -2952,15 +2970,15 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	tunnelProtocol := runConfig.tunnelProtocol
+	clientTunnelProtocol := runConfig.tunnelProtocol
 	if runConfig.clientTunnelProtocol != "" {
 		// In cases such as UNFRONTED-HTTPS-OSSH/TLS-OSSH demux,
 		// runConfig.tunnelProtocol is the server listening protocol and
 		// runConfig.clientTunnelProtocol is the actual tunnel protocol.
-		tunnelProtocol = runConfig.clientTunnelProtocol
+		clientTunnelProtocol = runConfig.clientTunnelProtocol
 	}
 
-	if fields["relay_protocol"].(string) != tunnelProtocol {
+	if fields["relay_protocol"].(string) != clientTunnelProtocol {
 		return fmt.Errorf("unexpected relay_protocol '%s'", fields["relay_protocol"])
 	}
 
@@ -3082,7 +3100,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesObfuscatedSSH(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesObfuscatedSSH(clientTunnelProtocol) {
 
 		for _, name := range []string{
 			"padding",
@@ -3094,7 +3112,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeek(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeek(clientTunnelProtocol) {
 
 		for _, name := range []string{
 			"user_agent",
@@ -3118,7 +3136,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTP(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTP(clientTunnelProtocol) {
 
 		for _, name := range []string{
 			"meek_host_header",
@@ -3137,7 +3155,7 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected meek_host_header '%s'", fields["meek_host_header"])
 		}
 
-		if !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		if !protocol.TunnelProtocolUsesFrontedMeek(clientTunnelProtocol) {
 			for _, name := range []string{
 				"meek_dial_ip_address",
 				"meek_resolved_ip_address",
@@ -3149,7 +3167,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTPS(clientTunnelProtocol) {
 
 		for _, name := range []string{
 			"meek_tls_padding",
@@ -3165,7 +3183,7 @@ func checkExpectedServerTunnelLogFields(
 			return fmt.Errorf("unexpected meek_sni_server_name '%s'", fields["meek_sni_server_name"])
 		}
 
-		if !protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+		if !protocol.TunnelProtocolUsesFrontedMeek(clientTunnelProtocol) {
 			for _, name := range []string{
 				"meek_dial_ip_address",
 				"meek_resolved_ip_address",
@@ -3179,7 +3197,7 @@ func checkExpectedServerTunnelLogFields(
 	}
 
 	name := "first_fronted_meek_candidate"
-	if protocol.TunnelProtocolUsesFrontedMeek(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesFrontedMeek(clientTunnelProtocol) {
 		if fields[name] == nil {
 			return fmt.Errorf("missing expected %s", name)
 		}
@@ -3189,8 +3207,8 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesMeekHTTPS(tunnelProtocol) ||
-		protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesMeekHTTPS(clientTunnelProtocol) ||
+		protocol.TunnelProtocolUsesTLSOSSH(clientTunnelProtocol) {
 
 		for _, name := range []string{
 			"tls_profile",
@@ -3214,7 +3232,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesTLSOSSH(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesTLSOSSH(clientTunnelProtocol) {
 		for _, name := range []string{
 			"tls_padding",
 			"tls_ossh_sni_server_name",
@@ -3231,7 +3249,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesQUIC(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesQUIC(clientTunnelProtocol) {
 
 		for _, name := range []string{
 			"quic_version",
@@ -3254,7 +3272,7 @@ func checkExpectedServerTunnelLogFields(
 		}
 	}
 
-	if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) {
+	if protocol.TunnelProtocolUsesInproxy(clientTunnelProtocol) {
 
 		for _, name := range []string{
 
@@ -3383,11 +3401,11 @@ func checkExpectedServerTunnelLogFields(
 
 	if runConfig.applyPrefix {
 
-		if protocol.TunnelProtocolIsObfuscatedSSH(runConfig.tunnelProtocol) {
+		if protocol.TunnelProtocolIsObfuscatedSSH(clientTunnelProtocol) {
 			if fields["ossh_prefix"] == nil || fmt.Sprintf("%s", fields["ossh_prefix"]) == "" {
 				return fmt.Errorf("missing expected field 'ossh_prefix'")
 			}
-		} else if protocol.TunnelProtocolUsesShadowsocks(runConfig.tunnelProtocol) {
+		} else if protocol.TunnelProtocolUsesShadowsocks(clientTunnelProtocol) {
 			if fields["shadowsocks_prefix"] == nil || fmt.Sprintf("%s", fields["shadowsocks_prefix"]) == "" {
 				return fmt.Errorf("missing expected field 'shadowsocks_prefix'")
 			}
@@ -3584,6 +3602,17 @@ func checkExpectedServerTunnelLogFields(
 
 	if fields["dsl_prioritized"] != expectDSLPrioritized {
 		return fmt.Errorf("unexpected dsl_prioritized %v", fields["dsl_prioritized"])
+	}
+
+	if protocol.TunnelProtocolUsesMeek(clientTunnelProtocol) {
+		if fields["meek_payload_padding"] != expectMeekPayloadPadding {
+			return fmt.Errorf("unexpected meek_payload_padding %v", fields["meek_payload_padding"])
+		}
+	} else {
+		name := "meek_payload_padding"
+		if fields[name] != nil {
+			return fmt.Errorf("unexpected field '%s'", name)
+		}
 	}
 
 	return nil
@@ -4373,6 +4402,8 @@ func paveTacticsConfigFile(
           "EnableDSLFetcher": %s,
           "DSLPrioritizeDialNewServerEntryProbability" : 1.0,
           "DSLPrioritizeDialExistingServerEntryProbability" : 1.0,
+          "MeekPayloadPaddingClientOmitProbability" : 0.5,
+          "MeekPayloadPaddingServerOmitProbability" : 0.5,
           "EstablishTunnelWorkTime" : "1s"
         }
       },

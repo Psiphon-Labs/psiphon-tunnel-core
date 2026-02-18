@@ -1212,14 +1212,17 @@ func getBaseAPIParameters(
 			params["meek_host_header"] = dialParams.MeekHostHeader
 		}
 
-		// MeekTransformedHostName is meaningful when meek is used, which is when
+		// These fields are meaningful when meek is used, which is when
 		// MeekDialAddress != ""
 		if dialParams.MeekDialAddress != "" {
+
 			transformedHostName := "0"
 			if dialParams.MeekTransformedHostName {
 				transformedHostName = "1"
 			}
 			params["meek_transformed_host_name"] = transformedHostName
+
+			// meek_payload_padding is logged by the server
 		}
 
 		if dialParams.TLSOSSHSNIServerName != "" {

@@ -249,6 +249,9 @@ github.com/klauspost/compress/internal/le
 github.com/klauspost/compress/internal/snapref
 github.com/klauspost/compress/zstd
 github.com/klauspost/compress/zstd/internal/xxhash
+# github.com/klauspost/cpuid/v2 v2.2.9
+## explicit; go 1.20
+github.com/klauspost/cpuid/v2
 # github.com/libp2p/go-reuseport v0.4.0
 ## explicit; go 1.20
 github.com/libp2p/go-reuseport
@@ -269,6 +272,9 @@ github.com/mdlayher/socket
 # github.com/miekg/dns v1.1.56
 ## explicit; go 1.19
 github.com/miekg/dns
+# github.com/minio/crc64nvme v1.1.1
+## explicit; go 1.22
+github.com/minio/crc64nvme
 # github.com/mitchellh/panicwrap v0.0.0-20170106182340-fce601fe5557
 ## explicit
 github.com/mitchellh/panicwrap

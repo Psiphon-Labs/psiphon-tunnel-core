@@ -458,6 +458,18 @@ func TunnelProtocolSupportsUpstreamProxy(protocol string) bool {
 }
 
 func TunnelProtocolSupportsTactics(protocol string) bool {
+
+	if TunnelProtocolUsesMeekHTTPNormalizer(protocol) {
+
+		// Limitation: the HTTP normalizer code path has special logic to
+		// extract the meek cookie from the normalized data stream. See
+		// common/transforms.HTTPNormalizer.Read. This logic only supports
+		// one meek cookie per TCP flow, while the untunneled tactics
+		// requests may require up to two meek cookies, one for a speed test
+		// request and one for the tactics request.
+		return false
+	}
+
 	return TunnelProtocolUsesMeek(protocol)
 }
 
@@ -844,6 +856,7 @@ type SSHPasswordPayload struct {
 
 type MeekCookieData struct {
 	MeekProtocolVersion  int    `json:"v,omitempty"`
+	EnablePayloadPadding bool   `json:"p,omitempty"`
 	ClientTunnelProtocol string `json:"t,omitempty"`
 	EndPoint             string `json:"e,omitempty"`
 }
