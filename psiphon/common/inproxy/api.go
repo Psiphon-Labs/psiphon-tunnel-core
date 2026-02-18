@@ -255,18 +255,21 @@ func (p NetworkProtocol) IsStream() bool {
 // ProxyMetrics are network topolology and resource metrics provided by a
 // proxy to a broker. The broker uses this information when matching proxies
 // and clients.
+// Limitation: Currently, there is no MaxReducedPersonalClients config, as
+// We assumed that users would not want the personal connections to be reduced.
 type ProxyMetrics struct {
 	BaseAPIParameters             protocol.PackedAPIParameters `cbor:"1,keyasint,omitempty"`
 	ProtocolVersion               int32                        `cbor:"2,keyasint,omitempty"`
 	NATType                       NATType                      `cbor:"3,keyasint,omitempty"`
 	PortMappingTypes              PortMappingTypes             `cbor:"4,keyasint,omitempty"`
-	MaxClients                    int32                        `cbor:"6,keyasint,omitempty"`
+	MaxCommonClients              int32                        `cbor:"6,keyasint,omitempty"`
 	ConnectingClients             int32                        `cbor:"7,keyasint,omitempty"`
 	ConnectedClients              int32                        `cbor:"8,keyasint,omitempty"`
 	LimitUpstreamBytesPerSecond   int64                        `cbor:"9,keyasint,omitempty"`
 	LimitDownstreamBytesPerSecond int64                        `cbor:"10,keyasint,omitempty"`
 	PeakUpstreamBytesPerSecond    int64                        `cbor:"11,keyasint,omitempty"`
 	PeakDownstreamBytesPerSecond  int64                        `cbor:"12,keyasint,omitempty"`
+	MaxPersonalClients            int32                        `cbor:"13,keyasint,omitempty"`
 }
 
 // ClientMetrics are network topolology metrics provided by a client to a
@@ -296,16 +299,22 @@ type ClientMetrics struct {
 // overhead, proxies with multiple workers should designate just one worker
 // to set CheckTactics.
 //
+// When PreCheckTactics is set, the broker checks tactics as with
+// CheckTactics, but responds immediately without awaiting a match. This
+// option enables the proxy to quickly establish the shared Noise protocol
+// session and launch all workers.
+//
 // The proxy's session public key is an implicit and cryptographically
 // verified proxy ID.
 type ProxyAnnounceRequest struct {
 	PersonalCompartmentIDs []ID          `cbor:"1,keyasint,omitempty"`
 	Metrics                *ProxyMetrics `cbor:"2,keyasint,omitempty"`
 	CheckTactics           bool          `cbor:"3,keyasint,omitempty"`
+	PreCheckTactics        bool          `cbor:"4,keyasint,omitempty"`
 }
 
 // WebRTCSessionDescription is compatible with pion/webrtc.SessionDescription
-// and facilitates the PSIPHON_ENABLE_INPROXY build tag exclusion of pion
+// and facilitates the PSIPHON_DISABLE_INPROXY build tag exclusion of pion
 // dependencies.
 type WebRTCSessionDescription struct {
 	Type int    `cbor:"1,keyasint,omitempty"`
@@ -349,6 +358,7 @@ type ProxyAnnounceResponse struct {
 	TrafficShapingParameters    *TrafficShapingParameters `cbor:"10,keyasint,omitempty"`
 	NetworkProtocol             NetworkProtocol           `cbor:"11,keyasint,omitempty"`
 	DestinationAddress          string                    `cbor:"12,keyasint,omitempty"`
+	ClientRegion                string                    `cbor:"15,keyasint,omitempty"`
 }
 
 // ClientOfferRequest is an API request sent from a client to a broker,
@@ -451,8 +461,11 @@ type ProxyAnswerRequest struct {
 	// SelectedProtocolVersion int32 `cbor:"2,keyasint,omitempty"`
 }
 
-// ProxyAnswerResponse is the acknowledgement for a ProxyAnswerRequest.
+// ProxyAnswerResponse is the acknowledgement for a ProxyAnswerRequest. If
+// NoAwaitingClient is indicated, then the client was no longer awaiting the
+// answer and the proxy should abandon the connection attempt.
 type ProxyAnswerResponse struct {
+	NoAwaitingClient bool `cbor:"1,keyasint,omitempty"`
 }
 
 // ClientRelayedPacketRequest is an API request sent from a client to a
@@ -662,7 +675,9 @@ func (metrics *ProxyMetrics) ValidateAndGetParametersAndLogFields(
 	logFields[logFieldPrefix+"protocol_version"] = metrics.ProtocolVersion
 	logFields[logFieldPrefix+"nat_type"] = metrics.NATType
 	logFields[logFieldPrefix+"port_mapping_types"] = metrics.PortMappingTypes
-	logFields[logFieldPrefix+"max_clients"] = metrics.MaxClients
+	logFields[logFieldPrefix+"max_common_clients"] = metrics.MaxCommonClients
+	logFields[logFieldPrefix+"max_personal_clients"] = metrics.MaxPersonalClients
+	logFields[logFieldPrefix+"max_clients"] = metrics.MaxCommonClients + metrics.MaxPersonalClients
 	logFields[logFieldPrefix+"connecting_clients"] = metrics.ConnectingClients
 	logFields[logFieldPrefix+"connected_clients"] = metrics.ConnectedClients
 	logFields[logFieldPrefix+"limit_upstream_bytes_per_second"] = metrics.LimitUpstreamBytesPerSecond
@@ -890,7 +905,8 @@ func (params *TrafficShapingParameters) Validate() error {
 }
 
 // ValidateAndGetLogFields validates the ProxyAnswerRequest and returns
-// common.LogFields for logging.
+// common.LogFields for logging. A nil filteredSDP is returned when
+// ProxyAnswerRequest.AnswerError is set.
 func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	lookupGeoIP LookupGeoIP,
 	baseAPIParameterValidator common.APIParameterValidator,
@@ -898,27 +914,34 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	geoIPData common.GeoIPData,
 	proxyAnnouncementHasPersonalCompartmentIDs bool) ([]byte, common.LogFields, error) {
 
-	// The proxy answer SDP must contain at least one ICE candidate.
-	errorOnNoCandidates := true
+	var filteredSDP []byte
+	var sdpMetrics *webRTCSDPMetrics
+	var err error
 
-	// The proxy answer SDP may include RFC 1918/4193 private IP addresses in
-	// personal pairing mode. filterSDPAddresses should not filter out
-	// private IP addresses based on the broker's local interfaces; this
-	// filtering occurs on the client that receives the SDP.
-	allowPrivateIPAddressCandidates := proxyAnnouncementHasPersonalCompartmentIDs
-	filterPrivateIPAddressCandidates := false
+	if request.AnswerError == "" {
 
-	// Proxy answer SDP candidate addresses must match the country and ASN of
-	// the proxy. Don't facilitate connections to arbitrary destinations.
-	filteredSDP, sdpMetrics, err := filterSDPAddresses(
-		[]byte(request.ProxyAnswerSDP.SDP),
-		errorOnNoCandidates,
-		lookupGeoIP,
-		geoIPData,
-		allowPrivateIPAddressCandidates,
-		filterPrivateIPAddressCandidates)
-	if err != nil {
-		return nil, nil, errors.Trace(err)
+		// The proxy answer SDP must contain at least one ICE candidate.
+		errorOnNoCandidates := true
+
+		// The proxy answer SDP may include RFC 1918/4193 private IP addresses in
+		// personal pairing mode. filterSDPAddresses should not filter out
+		// private IP addresses based on the broker's local interfaces; this
+		// filtering occurs on the client that receives the SDP.
+		allowPrivateIPAddressCandidates := proxyAnnouncementHasPersonalCompartmentIDs
+		filterPrivateIPAddressCandidates := false
+
+		// Proxy answer SDP candidate addresses must match the country and ASN of
+		// the proxy. Don't facilitate connections to arbitrary destinations.
+		filteredSDP, sdpMetrics, err = filterSDPAddresses(
+			[]byte(request.ProxyAnswerSDP.SDP),
+			errorOnNoCandidates,
+			lookupGeoIP,
+			geoIPData,
+			allowPrivateIPAddressCandidates,
+			filterPrivateIPAddressCandidates)
+		if err != nil {
+			return nil, nil, errors.Trace(err)
+		}
 	}
 
 	// The proxy's self-reported ICECandidateTypes are used instead of the
@@ -935,10 +958,12 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 
 	logFields["connection_id"] = request.ConnectionID
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
-	logFields["has_IPv6"] = sdpMetrics.hasIPv6
-	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
-	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
 	logFields["answer_error"] = request.AnswerError
+	if sdpMetrics != nil {
+		logFields["has_IPv6"] = sdpMetrics.hasIPv6
+		logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
+		logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
+	}
 
 	return filteredSDP, logFields, nil
 }

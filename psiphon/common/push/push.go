@@ -251,7 +251,7 @@ func MakePushPayloads(
 	expires := time.Now().Add(TTL).UTC()
 
 	maxPaddingLimit := 65535
-	if minPadding > maxPadding || maxPadding > 65535 {
+	if minPadding > maxPadding || maxPadding > maxPaddingLimit {
 		return nil, errors.TraceNew("invalid min/max padding")
 	}
 

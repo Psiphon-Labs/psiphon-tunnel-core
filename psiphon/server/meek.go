@@ -319,7 +319,7 @@ func NewMeekServer(
 
 		if !inproxy.Enabled() {
 			// Note that, technically, it may be possible to allow this case,
-			// since PSIPHON_ENABLE_INPROXY is currently required only for
+			// since !PSIPHON_DISABLE_INPROXY is currently required only for
 			// client/proxy-side WebRTC functionality, although that could change.
 			return nil, errors.TraceNew("inproxy implementation is not enabled")
 		}
@@ -1895,6 +1895,7 @@ func (server *MeekServer) inproxyReloadTactics() error {
 		p.Int(parameters.InproxyBrokerMatcherOfferLimitEntryCount),
 		p.Int(parameters.InproxyBrokerMatcherOfferRateLimitQuantity),
 		p.Duration(parameters.InproxyBrokerMatcherOfferRateLimitInterval),
+		p.Duration(parameters.InproxyBrokerMatcherOfferMinimumDeadline),
 		p.Int(parameters.InproxyMaxCompartmentIDListLength),
 		p.Int(parameters.InproxyBrokerDSLRequestRateLimitQuantity),
 		p.Duration(parameters.InproxyBrokerDSLRequestRateLimitInterval))

@@ -47,6 +47,7 @@ func runTestMatcher() error {
 	limitEntryCount := 50
 	rateLimitQuantity := 100
 	rateLimitInterval := 1000 * time.Millisecond
+	minimumDeadline := 1 * time.Hour
 
 	logger := testutils.NewTestLogger()
 
@@ -338,7 +339,7 @@ func runTestMatcher() error {
 
 	m.SetLimits(
 		0, rateLimitQuantity, rateLimitInterval, []ID{},
-		0, rateLimitQuantity, rateLimitInterval)
+		0, rateLimitQuantity, rateLimitInterval, 0)
 
 	time.Sleep(rateLimitInterval)
 
@@ -389,11 +390,29 @@ func runTestMatcher() error {
 		return errors.Tracef("unexpected result: %v", err)
 	}
 
+	// Test: offer dropped due to minimum deadline
+
+	m.SetLimits(
+		0, rateLimitQuantity, rateLimitInterval, []ID{},
+		0, rateLimitQuantity, rateLimitInterval, minimumDeadline)
+
 	time.Sleep(rateLimitInterval)
+
+	go proxyFunc(proxyResultChan, proxyIP, matchProperties, 10*time.Millisecond, nil, true)
+	go clientFunc(clientResultChan, clientIP, matchProperties, 10*time.Millisecond)
+
+	err = <-proxyResultChan
+
+	err = <-clientResultChan
+	if err == nil || !strings.HasSuffix(err.Error(), errOfferDropped.Error()) {
+		return errors.Tracef("unexpected result: %v", err)
+	}
 
 	m.SetLimits(
 		limitEntryCount, rateLimitQuantity, rateLimitInterval, []ID{},
-		limitEntryCount, rateLimitQuantity, rateLimitInterval)
+		limitEntryCount, rateLimitQuantity, rateLimitInterval, 0)
+
+	time.Sleep(rateLimitInterval)
 
 	// Test: basic match
 

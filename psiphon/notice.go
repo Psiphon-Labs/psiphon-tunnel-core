@@ -35,6 +35,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/buildinfo"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/inproxy"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/stacktrace"
@@ -1155,7 +1156,9 @@ func NoticeInproxyProxyActivity(
 	connectingClients int32,
 	connectedClients int32,
 	bytesUp int64,
-	bytesDown int64) {
+	bytesDown int64,
+	personalRegionActivity map[string]inproxy.RegionActivitySnapshot,
+	commonRegionActivity map[string]inproxy.RegionActivitySnapshot) {
 
 	singletonNoticeLogger.outputNotice(
 		"InproxyProxyActivity", noticeIsNotDiagnostic,
@@ -1163,7 +1166,9 @@ func NoticeInproxyProxyActivity(
 		"connectingClients", connectingClients,
 		"connectedClients", connectedClients,
 		"bytesUp", bytesUp,
-		"bytesDown", bytesDown)
+		"bytesDown", bytesDown,
+		"personalRegionActivity", personalRegionActivity,
+		"commonRegionActivity", commonRegionActivity)
 }
 
 // NoticeInproxyProxyTotalActivity reports how many proxied bytes have been

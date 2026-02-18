@@ -81,7 +81,7 @@ jobs:
           go test -v -race ./psiphon/common/crypto/ssh
           go test -v -race ./psiphon/common/dsl
           go test -v -race ./psiphon/common/fragmentor
-          go test -v -race -tags "PSIPHON_ENABLE_INPROXY" ./psiphon/common/inproxy
+          go test -v -race ./psiphon/common/inproxy
           go test -v -race ./psiphon/common/regen
           go test -v -race ./psiphon/common/monotime
           go test -v -race ./psiphon/common/obfuscator
@@ -97,7 +97,7 @@ jobs:
           go test -v -race ./psiphon/common/values
           go test -v -race ./psiphon/common/wildcard
           go test -v -race ./psiphon/transferstats
-          sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -race ./psiphon/server/psinet
           go test -v -timeout 30m -race ./psiphon
           go test -v -race ./ClientLibrary/clientlib
@@ -117,7 +117,7 @@ jobs:
           go test -v -covermode=count -coverprofile=ssh.coverprofile ./psiphon/common/crypto/ssh
           go test -v -covermode=count -coverprofile=fragmentor.coverprofile ./psiphon/common/fragmentor
           go test -v -covermode=count -coverprofile=dsl.coverprofile ./psiphon/common/dsl
-          go test -v -covermode=count -tags "PSIPHON_ENABLE_INPROXY" -coverprofile=inproxy.coverprofile ./psiphon/common/inproxy
+          go test -v -covermode=count -coverprofile=inproxy.coverprofile ./psiphon/common/inproxy
           go test -v -covermode=count -coverprofile=regen.coverprofile ./psiphon/common/regen
           go test -v -covermode=count -coverprofile=monotime.coverprofile ./psiphon/common/monotime
           go test -v -covermode=count -coverprofile=obfuscator.coverprofile ./psiphon/common/obfuscator
@@ -133,7 +133,7 @@ jobs:
           go test -v -covermode=count -coverprofile=values.coverprofile ./psiphon/common/values
           go test -v -covermode=count -coverprofile=wildcard.coverprofile ./psiphon/common/wildcard
           go test -v -covermode=count -coverprofile=transferstats.coverprofile ./psiphon/transferstats
-          sudo -E env "PATH=$PATH" go test -v -timeout 30m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 30m -covermode=count -coverprofile=server.coverprofile -tags "PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
           go test -v -covermode=count -coverprofile=psinet.coverprofile ./psiphon/server/psinet
           go test -v -timeout 30m -covermode=count -coverprofile=psiphon.coverprofile ./psiphon
           go test -v -covermode=count -coverprofile=clientlib.coverprofile ./ClientLibrary/clientlib
@@ -146,7 +146,7 @@ jobs:
         if: ${{ matrix.test-type == 'protobuf' }}
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
-          sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_RUN_PROTOBUF_LOGGING_TEST PSIPHON_ENABLE_INPROXY PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
+          sudo -E env "PATH=$PATH" go test -v -timeout 30m -race -tags "PSIPHON_RUN_PROTOBUF_LOGGING_TEST PSIPHON_RUN_PACKET_MANIPULATOR_TEST" ./psiphon/server
 
       - name: Run memory tests
         if: ${{ matrix.test-type == 'memory' }}
@@ -160,7 +160,7 @@ jobs:
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient
           go build -a -v -tags ""
-          go build -a -v -tags "PSIPHON_ENABLE_INPROXY"
+          go build -a -v -tags "PSIPHON_DISABLE_INPROXY"
           go build -a -v -tags "PSIPHON_DISABLE_QUIC"
           go build -a -v -tags "PSIPHON_DISABLE_GQUIC"
           go build -a -v -tags "PSIPHON_ENABLE_REFRACTION_NETWORKING"
@@ -178,13 +178,13 @@ jobs:
         if: ${{ matrix.test-type == 'code-vetting' }}
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
-          go vet -tags "PSIPHON_ENABLE_INPROXY PSIPHON_ENABLE_REFRACTION_NETWORKING" ./psiphon/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi ./Server/...
+          go vet -tags "PSIPHON_ENABLE_REFRACTION_NETWORKING" ./psiphon/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi ./Server/...
 
       - name: Build and run ConsoleClient to invoke the panic-on-fail, init-time portmapper dependency check (see psiphon/common/inproxy/portmapper.go)
         if: ${{ matrix.test-type == 'dependency-check' }}
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core/ConsoleClient
-          go build -a -v -tags "PSIPHON_ENABLE_INPROXY"
+          go build -a -v
           ./ConsoleClient --version
 
       # License check ignore cases:
@@ -204,5 +204,5 @@ jobs:
         if: ${{ matrix.test-type == 'code-vetting' }}
         run: |
           cd ${{ github.workspace }}/go/src/github.com/Psiphon-Labs/psiphon-tunnel-core
-          GOFLAGS="-tags=PSIPHON_ENABLE_INPROXY,PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses@latest check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
-          GOFLAGS="-tags=PSIPHON_ENABLE_INPROXY,PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses@latest check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./psiphon ./psiphon/common/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi
+          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses@latest check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/oschwald/maxminddb-golang,github.com/shoenig/go-m1cpu,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./...
+          GOFLAGS="-tags=PSIPHON_ENABLE_REFRACTION_NETWORKING" go run github.com/google/go-licenses@latest check --ignore=github.com/Psiphon-Labs,github.com/Psiphon-Inc,github.com/sergeyfrolov/bsbuffer --allowed_licenses=Apache-2.0,Apache-3,BSD-2-Clause,BSD-3-Clause,BSD-4-Clause,CC0-1.0,ISC,MIT ./psiphon ./psiphon/common/... ./ClientLibrary/... ./ConsoleClient/... ./MobileLibrary/psi

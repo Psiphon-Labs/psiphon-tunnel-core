@@ -51,10 +51,10 @@ build_for_android () {
 
   prepare_build android
 
-  # Required workaround for an PSIPHON_ENABLE_INPROXY dependency:
+  # Required workaround for a !PSIPHON_DISABLE_INPROXY dependency:
   # https://github.com/wlynxg/anet/tree/5501d401a269290292909e6cc75f105571f97cfa?tab=readme-ov-file#how-to-build-with-go-1230-or-later
   #
-  # TODO: conditional on PSIPHON_ENABLE_INPROXY build tag?
+  # TODO: conditional on !PSIPHON_DISABLE_INPROXY build tag?
   ANDROID_LDFLAGS="-checklinkname=0 $LDFLAGS"
 
   TARGET_ARCH=arm

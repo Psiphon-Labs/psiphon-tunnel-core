@@ -318,6 +318,8 @@ followed by a tunnel-core shutdown.
  @param bytesUp Bytes uploaded through the proxy since the last report.
  @param bytesDown Bytes downloaded through the proxy since the last report.
  */
+// TODO: Add personalRegionActivity and commonRegionActivity parameters
+// to match the new fields in the InproxyProxyActivity notice.
 - (void)onInproxyProxyActivity:(int)announcing
               connectingClients:(int)connectingClients
               connectedClients:(int)connectedClients

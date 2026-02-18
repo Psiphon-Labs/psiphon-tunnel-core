@@ -142,9 +142,5 @@ optionally, and integrated with its tactics, data store, and logging. The
 broker is designed to be bundled with the Psiphon server, psiphond, and, like
 tactics requests, run under MeekServer; and use the tactics, psinet database,
 GeoIP services, and logging services provided by psiphond.
-
-The build tag PSIPHON_ENABLE_INPROXY must be specified in order to enable
-in-proxy components. Without this build tag, the components are disabled and
-larger dependencies are not referenced and excluded from builds.
 */
 package inproxy

@@ -3307,7 +3307,9 @@ func (controller *Controller) runInproxyProxy() {
 		connectedClients int32,
 		bytesUp int64,
 		bytesDown int64,
-		_ time.Duration) {
+		_ time.Duration,
+		personalRegionActivity map[string]inproxy.RegionActivitySnapshot,
+		commonRegionActivity map[string]inproxy.RegionActivitySnapshot) {
 
 		// This emit logic mirrors the logic for NoticeBytesTransferred and
 		// NoticeTotalBytesTransferred in tunnel.operateTunnel.
@@ -3325,7 +3327,7 @@ func (controller *Controller) runInproxyProxy() {
 				connectedClients != lastActivityConnectedClients) {
 
 			NoticeInproxyProxyActivity(
-				announcing, connectingClients, connectedClients, bytesUp, bytesDown)
+				announcing, connectingClients, connectedClients, bytesUp, bytesDown, personalRegionActivity, commonRegionActivity)
 
 			lastAnnouncing = announcing
 			lastActivityConnectingClients = connectingClients
@@ -3367,12 +3369,13 @@ func (controller *Controller) runInproxyProxy() {
 		GetBaseAPIParameters:                 controller.inproxyGetProxyAPIParameters,
 		MakeWebRTCDialCoordinator:            controller.inproxyMakeProxyWebRTCDialCoordinator,
 		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
-		MaxClients:                           controller.config.InproxyMaxClients,
+		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
+		MaxPersonalClients:                   controller.config.InproxyMaxPersonalClients,
 		LimitUpstreamBytesPerSecond:          controller.config.InproxyLimitUpstreamBytesPerSecond,
 		LimitDownstreamBytesPerSecond:        controller.config.InproxyLimitDownstreamBytesPerSecond,
 		ReducedStartTime:                     controller.config.InproxyReducedStartTime,
 		ReducedEndTime:                       controller.config.InproxyReducedEndTime,
-		ReducedMaxClients:                    controller.config.InproxyReducedMaxClients,
+		ReducedMaxCommonClients:              controller.config.InproxyReducedMaxCommonClients,
 		ReducedLimitUpstreamBytesPerSecond:   controller.config.InproxyReducedLimitUpstreamBytesPerSecond,
 		ReducedLimitDownstreamBytesPerSecond: controller.config.InproxyReducedLimitDownstreamBytesPerSecond,
 		MustUpgrade:                          controller.config.OnInproxyMustUpgrade,
