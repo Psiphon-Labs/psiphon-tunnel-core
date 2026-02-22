@@ -58,8 +58,10 @@ func TestBoltResiliency(t *testing.T) {
         "ClientVersion" : "0000000000000000",
         "SponsorId" : "0000000000000000",
         "PropagationChannelId" : "0",
-        "ConnectionWorkerPoolSize" : 10,
-        "EstablishTunnelTimeoutSeconds" : 1,
+        "DisableTactics" : true,
+        "ConnectionWorkerPoolSize" : 1,
+        "TunnelConnectTimeoutSeconds" : 1,
+        "EstablishTunnelTimeoutSeconds" : 0,
         "EstablishTunnelPausePeriodSeconds" : 1
     }`
 
@@ -107,7 +109,7 @@ func TestBoltResiliency(t *testing.T) {
 				case noticeExiting <- struct{}{}:
 				default:
 				}
-			case "Alert":
+			case "Warning":
 				message := payload["message"].(string)
 				var channel chan struct{}
 				if strings.Contains(message, "tryDatastoreOpenDB: reset") {
@@ -135,7 +137,7 @@ func TestBoltResiliency(t *testing.T) {
 	drainNoticeChannel := func(channel chan struct{}) {
 		for {
 			select {
-			case channel <- struct{}{}:
+			case <-channel:
 			default:
 				return
 			}

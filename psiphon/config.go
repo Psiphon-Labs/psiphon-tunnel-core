@@ -1196,6 +1196,8 @@ type Config struct {
 	ServerEntryIteratorMaxMoveToFront   *int     `json:",omitempty"`
 	ServerEntryIteratorResetProbability *float64 `json:",omitempty"`
 
+	TunnelConnectTimeoutSeconds *int `json:",omitempty"`
+
 	// params is the active parameters.Parameters with defaults, config values,
 	// and, optionally, tactics applied.
 	//
@@ -3083,6 +3085,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 
 	if config.EnableDSLFetcher != nil {
 		applyParameters[parameters.EnableDSLFetcher] = *config.EnableDSLFetcher
+	}
+
+	if config.TunnelConnectTimeoutSeconds != nil {
+		applyParameters[parameters.TunnelConnectTimeout] = fmt.Sprintf("%ds", *config.TunnelConnectTimeoutSeconds)
 	}
 
 	// When adding new config dial parameters that may override tactics, also
