@@ -462,6 +462,11 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
 }
 
 // See comment in header.
+- (BOOL)importPushPayload:(NSData * _Nonnull)payload {
+    return GoPsiImportPushPayload(payload);
+}
+
+// See comment in header.
 + (NSString * _Nonnull)getBuildInfo {
     return GoPsiGetBuildInfo();
 }
@@ -749,7 +754,9 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     
     // If RemoteServerListUrl/RemoteServerListURLs and RemoteServerListSignaturePublicKey
     // are absent, we'll just leave them out, but we'll log about it.
-    if ((config[@"RemoteServerListUrl"] == nil && config[@"RemoteServerListURLs"] == nil) ||
+    if ((config[@"RemoteServerListUrl"] == nil &&
+         config[@"RemoteServerListURLs"] == nil &&
+         config[@"AdditionalParameters"] == nil) ||
         config[@"RemoteServerListSignaturePublicKey"] == nil) {
         logMessage(@"Remote server list functionality will be disabled");
     }
@@ -780,7 +787,10 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
     
     // If ObfuscatedServerListRootURL/ObfuscatedServerListRootURLs is absent,
     // we'll leave it out, but log the absence.
-    if (config[@"ObfuscatedServerListRootURL"] == nil && config[@"ObfuscatedServerListRootURLs"] == nil) {
+    if (config[@"ObfuscatedServerListRootURL"] == nil &&
+        config[@"ObfuscatedServerListRootURLs"] == nil &&
+        config[@"AdditionalParameters"] == nil) {
+
         logMessage(@"Obfuscated server list functionality will be disabled");
     }
 
@@ -1186,17 +1196,27 @@ typedef NS_ERROR_ENUM(PsiphonTunnelErrorDomain, PsiphonTunnelErrorCode) {
         }
     }
     else if ([noticeType isEqualToString:@"InproxyProxyActivity"]) {
+        // TODO: Parse and forward personalRegionActivity and
+        // commonRegionActivity. This should be done when the conduit iOS app
+        // supports the tunnel functionality correctly
+        id announcing = [notice valueForKeyPath:@"data.announcing"];
         id connectingClients = [notice valueForKeyPath:@"data.connectingClients"];
         id connectedClients = [notice valueForKeyPath:@"data.connectedClients"];
         id bytesUp = [notice valueForKeyPath:@"data.bytesUp"];
         id bytesDown = [notice valueForKeyPath:@"data.bytesDown"];
-        if (![connectingClients isKindOfClass:[NSNumber class]] || ![connectedClients isKindOfClass:[NSNumber class]] || ![bytesUp isKindOfClass:[NSNumber class]] || ![bytesDown isKindOfClass:[NSNumber class]]) {
+        if (![announcing isKindOfClass:[NSNumber class]] ||
+            ![connectingClients isKindOfClass:[NSNumber class]] ||
+            ![connectedClients isKindOfClass:[NSNumber class]] ||
+            ![bytesUp isKindOfClass:[NSNumber class]] ||
+            ![bytesDown isKindOfClass:[NSNumber class]]) {
             [self logMessage:[NSString stringWithFormat: @"InproxyProxyActivity notice has invalid data types: %@", noticeJSON]];
             return;
         }
-        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInproxyProxyActivity:connectedClients:bytesUp:bytesDown:)]) {
+        if ([self.tunneledAppDelegate respondsToSelector:@selector(onInproxyProxyActivity:connectingClients:connectedClients:bytesUp:bytesDown:)]) {
             dispatch_sync(self->callbackQueue, ^{
-                [self.tunneledAppDelegate onInproxyProxyActivity:[connectingClients intValue] connectedClients:[connectedClients intValue] bytesUp:[bytesUp longValue] bytesDown:[bytesDown longValue]];
+                [self.tunneledAppDelegate onInproxyProxyActivity: [announcing intValue]
+                    connectingClients:[connectingClients intValue] connectedClients:[connectedClients intValue]
+                    bytesUp:[bytesUp longValue] bytesDown:[bytesDown longValue]];
             });
         }
     }

@@ -42,6 +42,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/protocol"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/push"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tactics"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
@@ -587,7 +588,7 @@ func (controller *Controller) ExportExchangePayload() string {
 // See the comment for psiphon.ImportExchangePayload for more details about
 // the import.
 //
-// When the import is successful, a signal is set to trigger a restart any
+// When the import is successful, a signal is set to trigger a restart of any
 // establishment in progress. This will cause the newly imported server entry
 // to be prioritized, which it otherwise would not be in later establishment
 // rounds. The establishment process continues after ImportExchangePayload
@@ -613,6 +614,58 @@ func (controller *Controller) ImportExchangePayload(payload string) bool {
 	}
 
 	return true
+}
+
+// ImportPushPayload imports a server entry push payload.
+//
+// When the import is successful, a signal is set to trigger a restart of any
+// establishment in progress. This will cause imported server entries to be
+// prioritized as indicated in the payload. The establishment process
+// continues after ImportPushPayload returns.
+//
+// If the client already has a connected tunnel, or a tunnel connection is
+// established concurrently with the import, the signal has no effect as the
+// overall goal is establish _any_ connection.
+func (controller *Controller) ImportPushPayload(payload []byte) bool {
+
+	importer := func(
+		packedServerEntryFields protocol.PackedServerEntryFields,
+		source string,
+		prioritizeDial bool) error {
+
+		err := DSLStoreServerEntry(
+			controller.config.ServerEntrySignaturePublicKey,
+			packedServerEntryFields,
+			protocol.PushServerEntrySource(source),
+			prioritizeDial,
+			controller.config.GetNetworkID())
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		return nil
+	}
+
+	n, err := push.ImportPushPayload(
+		controller.config.PushPayloadObfuscationKey,
+		controller.config.PushPayloadSignaturePublicKey,
+		payload,
+		importer)
+
+	if err != nil {
+		NoticeWarning("push payload: %d imported, %v", n, err)
+	} else {
+		NoticeInfo("push payload: %d imported", n)
+	}
+
+	if n > 0 {
+		select {
+		case controller.signalRestartEstablishing <- struct{}{}:
+		default:
+		}
+	}
+
+	return err == nil
 }
 
 // remoteServerListFetcher fetches an out-of-band list of server entries
@@ -2120,33 +2173,10 @@ func (controller *Controller) launchEstablishing() {
 	controller.establishInproxyForceSelectionCount =
 		p.Int(parameters.InproxyTunnelProtocolForceSelectionCount)
 
-	// ConnectionWorkerPoolSize may be set by tactics.
-	//
-	// In-proxy personal pairing mode uses a distinct parameter which is
-	// typically configured to a lower number, limiting concurrent load and
-	// announcement consumption for personal proxies.
+	// workerPoolSize is the number of concurrent establishTunnelWorkers, each
+	// dialing tunnels.
 
-	var workerPoolSize int
-	if controller.config.IsInproxyClientPersonalPairingMode() {
-		workerPoolSize = p.Int(parameters.InproxyPersonalPairingConnectionWorkerPoolSize)
-	} else {
-		workerPoolSize = p.Int(parameters.ConnectionWorkerPoolSize)
-	}
-
-	// When TargetServerEntry is used, override any worker pool size config or
-	// tactic parameter and use a pool size of 1. The typical use case for
-	// TargetServerEntry is to test a specific server with a single connection
-	// attempt. Furthermore, too many concurrent attempts to connect to the
-	// same server will trigger rate limiting.
-	if controller.config.TargetServerEntry != "" {
-		workerPoolSize = 1
-	}
-
-	// When DisableConnectionWorkerPool is set, no tunnel establishment
-	// workers are run. See Config.DisableConnectionWorkerPool.
-	if controller.config.DisableConnectionWorkerPool {
-		workerPoolSize = 0
-	}
+	workerPoolSize := controller.getConnectionWorkerPoolSize(p)
 
 	// TunnelPoolSize may be set by tactics, subject to local constraints. A pool
 	// size of one is forced in packet tunnel mode or when using a
@@ -2232,6 +2262,49 @@ func (controller *Controller) launchEstablishing() {
 
 	controller.establishWaitGroup.Add(1)
 	go controller.establishCandidateGenerator()
+}
+
+func (controller *Controller) getConnectionWorkerPoolSize(
+	p parameters.ParametersAccessor) int {
+
+	// ConnectionWorkerPoolSize may be set by tactics.
+	//
+	// In-proxy personal pairing mode uses a distinct parameter which is
+	// typically configured to a lower number, limiting concurrent load and
+	// announcement consumption for personal proxies.
+	//
+	// ConnectionWorkerPoolMaxSize is a config-only cap on the worker pool
+	// size which may be set in low memory environments.
+
+	var workerPoolSize int
+	if controller.config.IsInproxyClientPersonalPairingMode() {
+		workerPoolSize = p.Int(parameters.InproxyPersonalPairingConnectionWorkerPoolSize)
+	} else {
+		workerPoolSize = p.Int(parameters.ConnectionWorkerPoolSize)
+	}
+
+	if controller.config.ConnectionWorkerPoolMaxSize > 0 &&
+		workerPoolSize > controller.config.ConnectionWorkerPoolMaxSize {
+
+		workerPoolSize = controller.config.ConnectionWorkerPoolMaxSize
+	}
+
+	// When TargetServerEntry is used, override any worker pool size config or
+	// tactic parameter and use a pool size of 1. The typical use case for
+	// TargetServerEntry is to test a specific server with a single connection
+	// attempt. Furthermore, too many concurrent attempts to connect to the
+	// same server will trigger rate limiting.
+	if controller.config.TargetServerEntry != "" {
+		workerPoolSize = 1
+	}
+
+	// When DisableConnectionWorkerPool is set, no tunnel establishment
+	// workers are run. See Config.DisableConnectionWorkerPool.
+	if controller.config.DisableConnectionWorkerPool {
+		workerPoolSize = 0
+	}
+
+	return workerPoolSize
 }
 
 func (controller *Controller) doConstraintsScan() {
@@ -2768,7 +2841,7 @@ loop:
 			// broken, the error should persist and eventually get posted.
 
 			p := controller.config.GetParameters().Get()
-			workerPoolSize := p.Int(parameters.ConnectionWorkerPoolSize)
+			workerPoolSize := controller.getConnectionWorkerPoolSize(p)
 			minWaitDuration := p.Duration(parameters.UpstreamProxyErrorMinWaitDuration)
 			maxWaitDuration := p.Duration(parameters.UpstreamProxyErrorMaxWaitDuration)
 			p.Close()
@@ -3224,15 +3297,19 @@ func (controller *Controller) runInproxyProxy() {
 	debugLogging := controller.config.InproxyEnableWebRTCDebugLogging
 
 	var lastActivityNotice time.Time
+	var lastAnnouncing int32
 	var lastActivityConnectingClients, lastActivityConnectedClients int32
 	var lastActivityConnectingClientsTotal, lastActivityConnectedClientsTotal int32
 	var activityTotalBytesUp, activityTotalBytesDown int64
 	activityUpdater := func(
+		announcing int32,
 		connectingClients int32,
 		connectedClients int32,
 		bytesUp int64,
 		bytesDown int64,
-		_ time.Duration) {
+		_ time.Duration,
+		personalRegionActivity map[string]inproxy.RegionActivitySnapshot,
+		commonRegionActivity map[string]inproxy.RegionActivitySnapshot) {
 
 		// This emit logic mirrors the logic for NoticeBytesTransferred and
 		// NoticeTotalBytesTransferred in tunnel.operateTunnel.
@@ -3244,13 +3321,15 @@ func (controller *Controller) runInproxyProxy() {
 		// activity display.
 
 		if controller.config.EmitInproxyProxyActivity &&
-			(bytesUp > 0 || bytesDown > 0) ||
-			connectingClients != lastActivityConnectingClients ||
-			connectedClients != lastActivityConnectedClients {
+			(bytesUp > 0 || bytesDown > 0 ||
+				announcing != lastAnnouncing ||
+				connectingClients != lastActivityConnectingClients ||
+				connectedClients != lastActivityConnectedClients) {
 
 			NoticeInproxyProxyActivity(
-				connectingClients, connectedClients, bytesUp, bytesDown)
+				announcing, connectingClients, connectedClients, bytesUp, bytesDown, personalRegionActivity, commonRegionActivity)
 
+			lastAnnouncing = announcing
 			lastActivityConnectingClients = connectingClients
 			lastActivityConnectedClients = connectedClients
 		}
@@ -3262,13 +3341,17 @@ func (controller *Controller) runInproxyProxy() {
 		// transferred since starting; in addition to the current number of
 		// connecting and connected clients, whenever that changes. This
 		// notice is for diagnostics.
+		//
+		// Changes in announcing count are frequent and don't trigger
+		// InproxyProxyTotalActivity; the current announcing count is
+		// recorded as a snapshot.
 
 		if lastActivityNotice.Add(activityNoticePeriod).Before(time.Now()) ||
 			connectingClients != lastActivityConnectingClientsTotal ||
 			connectedClients != lastActivityConnectedClientsTotal {
 
 			NoticeInproxyProxyTotalActivity(
-				connectingClients, connectedClients,
+				announcing, connectingClients, connectedClients,
 				activityTotalBytesUp, activityTotalBytesDown)
 			lastActivityNotice = time.Now()
 
@@ -3278,19 +3361,25 @@ func (controller *Controller) runInproxyProxy() {
 	}
 
 	config := &inproxy.ProxyConfig{
-		Logger:                        NoticeCommonLogger(debugLogging),
-		EnableWebRTCDebugLogging:      debugLogging,
-		WaitForNetworkConnectivity:    controller.inproxyWaitForNetworkConnectivity,
-		GetCurrentNetworkContext:      controller.getCurrentNetworkContext,
-		GetBrokerClient:               controller.inproxyGetProxyBrokerClient,
-		GetBaseAPIParameters:          controller.inproxyGetProxyAPIParameters,
-		MakeWebRTCDialCoordinator:     controller.inproxyMakeProxyWebRTCDialCoordinator,
-		HandleTacticsPayload:          controller.inproxyHandleProxyTacticsPayload,
-		MaxClients:                    controller.config.InproxyMaxClients,
-		LimitUpstreamBytesPerSecond:   controller.config.InproxyLimitUpstreamBytesPerSecond,
-		LimitDownstreamBytesPerSecond: controller.config.InproxyLimitDownstreamBytesPerSecond,
-		MustUpgrade:                   controller.config.OnInproxyMustUpgrade,
-		ActivityUpdater:               activityUpdater,
+		Logger:                               NoticeCommonLogger(debugLogging),
+		EnableWebRTCDebugLogging:             debugLogging,
+		WaitForNetworkConnectivity:           controller.inproxyWaitForNetworkConnectivity,
+		GetCurrentNetworkContext:             controller.getCurrentNetworkContext,
+		GetBrokerClient:                      controller.inproxyGetProxyBrokerClient,
+		GetBaseAPIParameters:                 controller.inproxyGetProxyAPIParameters,
+		MakeWebRTCDialCoordinator:            controller.inproxyMakeProxyWebRTCDialCoordinator,
+		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
+		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
+		MaxPersonalClients:                   controller.config.InproxyMaxPersonalClients,
+		LimitUpstreamBytesPerSecond:          controller.config.InproxyLimitUpstreamBytesPerSecond,
+		LimitDownstreamBytesPerSecond:        controller.config.InproxyLimitDownstreamBytesPerSecond,
+		ReducedStartTime:                     controller.config.InproxyReducedStartTime,
+		ReducedEndTime:                       controller.config.InproxyReducedEndTime,
+		ReducedMaxCommonClients:              controller.config.InproxyReducedMaxCommonClients,
+		ReducedLimitUpstreamBytesPerSecond:   controller.config.InproxyReducedLimitUpstreamBytesPerSecond,
+		ReducedLimitDownstreamBytesPerSecond: controller.config.InproxyReducedLimitDownstreamBytesPerSecond,
+		MustUpgrade:                          controller.config.OnInproxyMustUpgrade,
+		ActivityUpdater:                      activityUpdater,
 	}
 
 	proxy, err := inproxy.NewProxy(config)
@@ -3306,7 +3395,7 @@ func (controller *Controller) runInproxyProxy() {
 
 	// Emit one last NoticeInproxyProxyTotalActivity with the final byte counts.
 	NoticeInproxyProxyTotalActivity(
-		lastActivityConnectingClients, lastActivityConnectedClients,
+		lastAnnouncing, lastActivityConnectingClients, lastActivityConnectedClients,
 		activityTotalBytesUp, activityTotalBytesDown)
 
 	NoticeInfo("inproxy proxy: stopped")

@@ -22,6 +22,7 @@ package inproxy
 import (
 	"context"
 	std_errors "errors"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -406,6 +407,7 @@ func (b *Broker) SetLimits(
 	matcherOfferLimitEntryCount int,
 	matcherOfferRateLimitQuantity int,
 	matcherOfferRateLimitInterval time.Duration,
+	matcherOfferMinimumDeadline time.Duration,
 	maxCompartmentIDs int,
 	dslRequestRateLimitQuantity int,
 	dslRequestRateLimitInterval time.Duration) {
@@ -417,7 +419,8 @@ func (b *Broker) SetLimits(
 		matcherAnnouncementNonlimitedProxyIDs,
 		matcherOfferLimitEntryCount,
 		matcherOfferRateLimitQuantity,
-		matcherOfferRateLimitInterval)
+		matcherOfferRateLimitInterval,
+		matcherOfferMinimumDeadline)
 
 	b.maxCompartmentIDs.Store(
 		int64(common.ValueOrDefault(maxCompartmentIDs, MaxCompartmentIDs)))
@@ -729,16 +732,21 @@ func (b *Broker) handleProxyAnnounce(
 	// existing, cached tactics. In the case where tactics have changed,
 	// don't enqueue the proxy announcement and return no-match so that the
 	// proxy can store and apply the new tactics before announcing again.
+	//
+	// For PreCheckTactics requests, an immediate no-match response is
+	// returned even when there are no new tactics.
 
 	var tacticsPayload []byte
-	if announceRequest.CheckTactics {
+	if announceRequest.CheckTactics || announceRequest.PreCheckTactics {
 		tacticsPayload, newTacticsTag, err =
 			b.config.GetTacticsPayload(geoIPData, apiParams)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 
-		if tacticsPayload != nil && newTacticsTag != "" {
+		if (tacticsPayload != nil && newTacticsTag != "") ||
+			announceRequest.PreCheckTactics {
+
 			responsePayload, err := MarshalProxyAnnounceResponse(
 				&ProxyAnnounceResponse{
 					TacticsPayload: tacticsPayload,
@@ -756,11 +764,23 @@ func (b *Broker) handleProxyAnnounce(
 	// such as censored locations, from announcing. Proxies with personal
 	// compartment IDs are always allowed, as they will be used only by
 	// clients specifically configured to use them.
+	//
+	// AllowProxy is not enforced until after CheckTactics/PreCheckTactics
+	// cases, which may return an immediate response. This allows proxies to
+	// download new tactics that may set AllowProxy, which well-behaved
+	// proxies can enforce locally as well.
 
 	if !hasPersonalCompartmentIDs &&
 		!b.config.AllowProxy(geoIPData) {
 
-		return nil, errors.TraceNew("proxy disallowed")
+		// Send a "limited" response so the proxy backs off.
+		limitedErr = errors.TraceNew("proxy disallowed")
+		responsePayload, err := MarshalProxyAnnounceResponse(
+			&ProxyAnnounceResponse{Limited: true})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return responsePayload, nil
 	}
 
 	// Assign this proxy to a common compartment ID, unless it has specified a
@@ -952,6 +972,7 @@ func (b *Broker) handleProxyAnnounce(
 			TrafficShapingParameters:    clientOffer.TrafficShapingParameters,
 			NetworkProtocol:             clientOffer.NetworkProtocol,
 			DestinationAddress:          clientOffer.DestinationAddress,
+			ClientRegion:                clientOffer.Properties.GeoIPData.Country,
 		})
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -1089,7 +1110,15 @@ func (b *Broker) handleClientOffer(
 	if !hasPersonalCompartmentIDs &&
 		!b.config.AllowClient(geoIPData) {
 
-		return nil, errors.TraceNew("client disallowed")
+		// Send a "limited" response so the client retains its broker client
+		// and doesn't retry the offer.
+		limitedErr = errors.TraceNew("client disallowed")
+		responsePayload, err := MarshalClientOfferResponse(
+			&ClientOfferResponse{Limited: true})
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return responsePayload, nil
 	}
 
 	// Validate that the proxy destination specified by the client is a valid
@@ -1184,7 +1213,8 @@ func (b *Broker) handleClientOffer(
 		var limitError *MatcherLimitError
 		limited := std_errors.As(err, &limitError)
 
-		timeout := offerCtx.Err() == context.DeadlineExceeded
+		timeout := offerCtx.Err() == context.DeadlineExceeded ||
+			std_errors.Is(err, errOfferDropped)
 
 		// A no-match response is sent in the case of a timeout awaiting a
 		// match. The faster-failing rate or entry limiting case also results
@@ -1204,6 +1234,13 @@ func (b *Broker) handleClientOffer(
 			// InproxyClientOfferRequestTimeout in tactics, should be configured
 			// so that the broker will timeout first and have an opportunity to
 			// send this response before the client times out.
+			//
+			// In the errOfferDropped case, the matcher dropped the offer due
+			// to age. While this is distinct from a timeout after a
+			// completed match, the same timed_out log field is set. The
+			// cases can be distinguished based on elapsed_time, as the
+			// dropped cases will have an elapsed_time less than
+			// InproxyBrokerClientOfferTimeout.
 			timedOut = true
 		}
 
@@ -1363,8 +1400,10 @@ func (b *Broker) handleProxyAnswer(
 		if answerError != "" {
 			// This is a proxy-reported error that occurred while creating the answer.
 			logFields["answer_error"] = answerError
+			logFields["error"] = fmt.Sprintf("proxy answer error: %s", answerError)
 		}
 		if retErr != nil {
+			// For the error field, retErr takes precedence over answerError
 			logFields["error"] = retErr.Error()
 		}
 		logFields.Add(transportLogFields)
@@ -1392,6 +1431,18 @@ func (b *Broker) handleProxyAnswer(
 	hasPersonalCompartmentIDs, err := b.matcher.AnnouncementHasPersonalCompartmentIDs(
 		initiatorID, answerRequest.ConnectionID)
 	if err != nil {
+
+		if std_errors.Is(err, errNoPendingAnswer) {
+			// Return a response. This avoids returning a
+			// broker-client-resetting 404 in this case.
+			responsePayload, err := MarshalProxyAnswerResponse(
+				&ProxyAnswerResponse{NoAwaitingClient: true})
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return responsePayload, nil
+		}
+
 		return nil, errors.Trace(err)
 	}
 
@@ -1405,9 +1456,6 @@ func (b *Broker) handleProxyAnswer(
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	answerSDP := answerRequest.ProxyAnswerSDP
-	answerSDP.SDP = string(filteredSDP)
 
 	if answerRequest.AnswerError != "" {
 
@@ -1424,6 +1472,9 @@ func (b *Broker) handleProxyAnswer(
 		// Note that neither ProxyID nor ProxyIP is returned to the client.
 		// These fields are used internally in the matcher.
 
+		answerSDP := answerRequest.ProxyAnswerSDP
+		answerSDP.SDP = string(filteredSDP)
+
 		proxyAnswer = &MatchAnswer{
 			ProxyIP:        proxyIP,
 			ProxyID:        initiatorID,
@@ -1433,6 +1484,18 @@ func (b *Broker) handleProxyAnswer(
 
 		err = b.matcher.Answer(proxyAnswer)
 		if err != nil {
+
+			if std_errors.Is(err, errNoPendingAnswer) {
+				// Return a response. This avoids returning a
+				// broker-client-resetting 404 in this case.
+				responsePayload, err := MarshalProxyAnswerResponse(
+					&ProxyAnswerResponse{NoAwaitingClient: true})
+				if err != nil {
+					return nil, errors.Trace(err)
+				}
+				return responsePayload, nil
+			}
+
 			return nil, errors.Trace(err)
 		}
 	}

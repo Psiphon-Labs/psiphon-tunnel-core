@@ -241,6 +241,11 @@ type Config struct {
 	// recommended.
 	ConnectionWorkerPoolSize int `json:",omitempty"`
 
+	// ConnectionWorkerPoolMaxSize specifies a cap for ConnectionWorkerPoolSize
+	// that will not be exceeded by any tactics setting. This is intended for
+	// use in low memory environments. If omitted or when 0, it has no effect.
+	ConnectionWorkerPoolMaxSize int `json:",omitempty"`
+
 	// DisableConnectionWorkerPool forces ConnectionWorkerPoolSize to 0; this
 	// may be used to load cached tactics or perform an untunneled tactics
 	// request and then post tactics-related notices, including Application
@@ -653,9 +658,23 @@ type Config struct {
 	// ephemeral key will be generated.
 	InproxyProxySessionPrivateKey string `json:",omitempty"`
 
-	// InproxyMaxClients specifies the maximum number of in-proxy clients to
-	// be proxied concurrently. Must be > 0 when InproxyEnableProxy is set.
+	// InproxyMaxClients specifies the maximum number of common in-proxy
+	// clients to be proxied concurrently. When InproxyEnableProxy is set,
+	// it can only be 0 when InProxyMaxPersonalClients is > 0.
+	//
+	// Deprecated: Use InproxyMaxCommonClients. When InproxyMaxCommonClients
+	// is not nil, this parameter is ignored.
 	InproxyMaxClients int `json:",omitempty"`
+
+	// InproxyMaxCommonClients specifies the maximum number of common
+	// in-proxy clients to be proxied concurrently. When InproxyEnableProxy
+	// is set, it can only be 0 when InProxyMaxPersonalClients is > 0.
+	InproxyMaxCommonClients int `json:",omitempty"`
+
+	// InproxyMaxPersonalClients specifies the maximum number of personal
+	// in-proxy clients to be proxied concurrently. When InproxyEnableProxy
+	// is set, it can only be 0 when InProxyMaxCommonClients is > 0.
+	InproxyMaxPersonalClients int `json:",omitempty"`
 
 	// InproxyLimitUpstreamBytesPerSecond specifies the upstream byte transfer
 	// rate limit for each proxied client. When 0, there is no limit.
@@ -664,6 +683,50 @@ type Config struct {
 	// InproxyLimitDownstreamBytesPerSecond specifies the downstream byte
 	// transfer rate limit for each proxied client. When 0, there is no limit.
 	InproxyLimitDownstreamBytesPerSecond int `json:",omitempty"`
+
+	// InproxyReducedStartTime specifies the local time of day(HH:MM, 24-hour,
+	// UTC) at which reduced in-proxy settings begin.
+	InproxyReducedStartTime string `json:",omitempty"`
+
+	// InproxyReducedEndTime specifies the local time of day (HH:MM, 24-hour,
+	// UTC) at which reduced in-proxy settings end.
+	InproxyReducedEndTime string `json:",omitempty"`
+
+	// InproxyReducedMaxClients specifies the maximum number of common
+	// in-proxy clients to be proxied concurrently during the reduced
+	// time range. When set, must be > 0 and <= InproxyMaxCommonClients.
+	//
+	// Clients connected when the reduced settings begin will not be
+	// disconnected, so InproxyReducedMaxClients is a soft limit.
+	//
+	// Deprecated: Use InproxyReducedMaxCommon Clients. When
+	// InproxyMaxCommonClients is not nil, this parameter is ignored.
+	InproxyReducedMaxClients int `json:",omitempty"`
+
+	// InproxyReducedMaxCommonClients specifies the maximum number of
+	// common in-proxy clients to be proxied concurrently during the
+	// reduced time range. When set, must be > 0 and
+	// <= InproxyMaxCommonClients.
+	//
+	// Clients connected when the reduced settings begin will not be
+	// disconnected, so InproxyReducedMaxCommonClients is a soft limit.
+	InproxyReducedMaxCommonClients int `json:",omitempty"`
+
+	// InproxyReducedLimitUpstreamBytesPerSecond specifies the upstream byte
+	// transfer rate limit for each proxied client during the reduced time
+	// range. When 0, InproxyLimitUpstreamBytesPerSecond is the limit.
+	//
+	// Rates for clients already connected when the reduced settings begin or
+	// end will not change.
+	InproxyReducedLimitUpstreamBytesPerSecond int `json:",omitempty"`
+
+	// InproxyReducedLimitDownstreamBytesPerSecond specifies the downstream byte
+	// transfer rate limit for each proxied client during the reduced time
+	// range. When 0, InproxyLimitDownstreamBytesPerSecond is the limit.
+	//
+	// Rates for clients already connected when the reduced settings begin or
+	// end will not change.
+	InproxyReducedLimitDownstreamBytesPerSecond int `json:",omitempty"`
 
 	// InproxyProxyPersonalCompartmentID specifies the personal compartment
 	// ID used by an in-proxy proxy. Personal compartment IDs are
@@ -701,6 +764,16 @@ type Config struct {
 	// EnableDSLFetcher tactics parameter. This may be used for special case
 	// temporary tunnels.
 	DisableDSLFetcher bool `json:",omitempty"`
+
+	// PushPayloadObfuscationKey is a base64-encoded, secret key value used to
+	// deobfuscate push payloads. This value is supplied by the Psiphon
+	// Network. Required for push payload imports.
+	PushPayloadObfuscationKey string `json:",omitempty"`
+
+	// PushPayloadSignaturePublicKey is a base64-encoded, public key value
+	// used to verify push payloads. This value is supplied by the Psiphon
+	// Network. Required for push payload imports.
+	PushPayloadSignaturePublicKey string `json:",omitempty"`
 
 	//
 	// The following parameters are deprecated.
@@ -1041,6 +1114,7 @@ type Config struct {
 	InproxyPersonalPairingBrokerSpecs                       parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
 	InproxyProxyBrokerSpecs                                 parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
 	InproxyProxyPersonalPairingBrokerSpecs                  parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
+	InproxyPersonalPairingMaxBrokerSpecCount                *int                                             `json:",omitempty"`
 	InproxyClientBrokerSpecs                                parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
 	InproxyClientPersonalPairingBrokerSpecs                 parameters.InproxyBrokerSpecsValue               `json:",omitempty"`
 	InproxyReplayBrokerDialParametersTTLSeconds             *int                                             `json:",omitempty"`
@@ -1389,6 +1463,14 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		config.MigrateUpgradeDownloadFilename = config.UpgradeDownloadFilename
 	}
 
+	if config.InproxyMaxClients != 0 && config.InproxyMaxCommonClients == 0 {
+		config.InproxyMaxCommonClients = config.InproxyMaxClients
+	}
+
+	if config.InproxyReducedMaxClients != 0 && config.InproxyReducedMaxCommonClients == 0 {
+		config.InproxyReducedMaxCommonClients = config.InproxyReducedMaxClients
+	}
+
 	// Supply default values.
 
 	// Create datastore directory.
@@ -1490,8 +1572,50 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
 	}
 
-	if config.InproxyEnableProxy && config.InproxyMaxClients <= 0 {
-		return errors.TraceNew("invalid InproxyMaxClients")
+	if config.InproxyEnableProxy {
+
+		if config.InproxyMaxCommonClients+config.InproxyMaxPersonalClients <= 0 {
+			return errors.TraceNew("invalid InproxyMaxCommonClients and InproxyMaxPersonalClients")
+		}
+
+		if len(config.InproxyProxyPersonalCompartmentID) > 0 && config.InproxyMaxPersonalClients <= 0 {
+			return errors.TraceNew("invalid InproxyMaxPersonalClients when personal compartment IDs are provided")
+		}
+
+		if config.InproxyReducedStartTime != "" ||
+			config.InproxyReducedEndTime != "" ||
+			config.InproxyReducedMaxCommonClients > 0 {
+
+			startMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedStartTime)
+			if err != nil {
+				return errors.Tracef("invalid InproxyReducedStartTime: %v", err)
+			}
+
+			endMinute, err := common.ParseTimeOfDayMinutes(config.InproxyReducedEndTime)
+			if err != nil {
+				return errors.Tracef("invalid InproxyReducedEndTime: %v", err)
+			}
+
+			// Reduced all day is not a valid configuration.
+			if startMinute == endMinute {
+				return errors.TraceNew("invalid InproxyReducedStartTime/InproxyReducedEndTime")
+			}
+
+			if config.InproxyReducedMaxCommonClients <= 0 ||
+				config.InproxyReducedMaxCommonClients > config.InproxyMaxCommonClients {
+				return errors.TraceNew("invalid InproxyReducedMaxCommonClients")
+			}
+
+			// InproxyReducedLimitUpstream/DownstreamBytesPerSecond don't necessarily
+			// need to be less than InproxyLimitUpstream/DownstreamBytesPerSecond.
+
+			if config.InproxyReducedLimitUpstreamBytesPerSecond == 0 {
+				config.InproxyReducedLimitUpstreamBytesPerSecond = config.InproxyLimitUpstreamBytesPerSecond
+			}
+			if config.InproxyReducedLimitDownstreamBytesPerSecond == 0 {
+				config.InproxyReducedLimitDownstreamBytesPerSecond = config.InproxyLimitDownstreamBytesPerSecond
+			}
+		}
 	}
 
 	if !config.DisableTunnels &&
@@ -1509,7 +1633,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		!inproxy.Enabled() {
 
 		// When in-proxy personal pairing mode is on, fail if the build was
-		// made without the PSIPHON_ENABLE_INPROXY build tag.
+		// made with the PSIPHON_DISABLE_INPROXY build tag.
 		//
 		// Note that this check could also be enforced in the case of a
 		// LimitTunnelProtocols.IsOnlyInproxyTunnelProtocols configuration,
@@ -2665,6 +2789,10 @@ func (config *Config) makeConfigParameters() map[string]interface{} {
 		applyParameters[parameters.InproxyProxyPersonalPairingBrokerSpecs] = config.InproxyProxyPersonalPairingBrokerSpecs
 	}
 
+	if config.InproxyPersonalPairingMaxBrokerSpecCount != nil {
+		applyParameters[parameters.InproxyPersonalPairingMaxBrokerSpecCount] = *config.InproxyPersonalPairingMaxBrokerSpecCount
+	}
+
 	if len(config.InproxyClientBrokerSpecs) > 0 {
 		applyParameters[parameters.InproxyClientBrokerSpecs] = config.InproxyClientBrokerSpecs
 	}
@@ -3673,6 +3801,10 @@ func (config *Config) setDialParametersHash() {
 	if len(config.InproxyProxyPersonalPairingBrokerSpecs) > 0 {
 		hash.Write([]byte("InproxyProxyPersonalPairingBrokerSpecs"))
 		hash.Write([]byte(fmt.Sprintf("%+v", config.InproxyProxyPersonalPairingBrokerSpecs)))
+	}
+	if config.InproxyPersonalPairingMaxBrokerSpecCount != nil {
+		hash.Write([]byte("InproxyPersonalPairingMaxBrokerSpecCount"))
+		binary.Write(hash, binary.LittleEndian, int64(*config.InproxyPersonalPairingMaxBrokerSpecCount))
 	}
 	if len(config.InproxyClientBrokerSpecs) > 0 {
 		hash.Write([]byte("InproxyClientBrokerSpecs"))

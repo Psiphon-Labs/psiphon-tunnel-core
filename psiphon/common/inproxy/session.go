@@ -1237,7 +1237,7 @@ func (s *ResponderSessions) touchSession(sessionID ID, session *session) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if !session.hasUnexpectedInitiatorPublicKey() {
+	if session.hasUnexpectedInitiatorPublicKey() {
 
 		// In this case, SetKnownInitiatorPublicKeys was called concurrent to
 		// HandlePacket, after HandlePacket's getSession, and now the known
@@ -1306,9 +1306,14 @@ func (s *ResponderSessions) getSession(sessionID ID) (*session, error) {
 		return nil, errors.Trace(err)
 	}
 
+	TTL := lrucache.DefaultExpiration
+	if !s.applyTTL {
+		TTL = lrucache.NoExpiration
+	}
+
 	s.mutex.Lock()
 	err = s.sessions.Add(
-		strSessionID, session, lrucache.DefaultExpiration)
+		strSessionID, session, TTL)
 	s.mutex.Unlock()
 
 	if err != nil {

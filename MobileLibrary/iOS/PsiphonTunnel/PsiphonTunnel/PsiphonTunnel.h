@@ -312,12 +312,16 @@ followed by a tunnel-core shutdown.
  Called when tunnel-core reports in-proxy usage statistics
  By default onInproxyProxyActivity is disabled. Enable it by setting
  EmitInproxyProxyActivity to true in the Psiphon config.
+ @param announcing Number of new clients the proxy is accepting.
  @param connectingClients Number of clients connecting to the proxy.
  @param connectedClients Number of clients currently connected to the proxy.
  @param bytesUp Bytes uploaded through the proxy since the last report.
  @param bytesDown Bytes downloaded through the proxy since the last report.
  */
-- (void)onInproxyProxyActivity:(int)connectingClients
+// TODO: Add personalRegionActivity and commonRegionActivity parameters
+// to match the new fields in the InproxyProxyActivity notice.
+- (void)onInproxyProxyActivity:(int)announcing
+              connectingClients:(int)connectingClients
               connectedClients:(int)connectedClients
                        bytesUp:(long)bytesUp
                      bytesDown:(long)bytesDown;
@@ -435,6 +439,19 @@ Returns the path where the rotated notices file will be created.
  @return  The MTU size.
  */
 - (long)getPacketTunnelMTU;
+
+/*!
+ importPushPayload imports a server entry push payload. If no tunnel is
+ currently connected, this operation will reset tunnel establishment
+ with imported server entries prioritized appropriately. The push
+ payload parameters must be set in the Psiphon config, and Psiphon must
+ be started.
+
+ Returns true if the import succeeded and false on any error. Error
+ details are logged to diagnostics. If an import is partially
+ successful, the imported server entries are retained and prioritized.
+ */
+- (BOOL)importPushPayload:(NSData * _Nonnull)payload;
 
 /*!
  Provides the tunnel-core build info json as a string. See the tunnel-core build info code for details https://github.com/Psiphon-Labs/psiphon-tunnel-core/blob/master/psiphon/common/buildinfo.go.

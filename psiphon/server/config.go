@@ -800,7 +800,7 @@ func LoadConfig(configJSON []byte) (*Config, error) {
 
 		if protocol.TunnelProtocolUsesInproxy(tunnelProtocol) && !inproxy.Enabled() {
 			// Note that, technically, it may be possible to allow this case,
-			// since PSIPHON_ENABLE_INPROXY is currently required only for
+			// since !PSIPHON_DISABLE_INPROXY is currently required only for
 			// client/proxy-side WebRTC functionality, although that could change.
 			return nil, errors.TraceNew("inproxy implementation is not enabled")
 		}

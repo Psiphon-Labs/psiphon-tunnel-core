@@ -21,9 +21,9 @@ replace gitlab.com/yawning/obfs4.git => github.com/jmwample/obfs4 v0.0.0-2023072
 // respectively, containing Psiphon customizations. See comments in
 // psiphon/common/inproxy/newWebRTCConn for details.
 //
-// The following replaces are required only when the build tags
-// PSIPHON_ENABLE_REFRACTION_NETWORKING (dtls/v2 only) or
-// PSIPHON_ENABLE_INPROXY are specified.
+// The following replaces are required only when the build tag
+// PSIPHON_ENABLE_REFRACTION_NETWORKING is specified (dtls/v2 only) or
+// PSIPHON_DISABLE_INPROXY is not specified.
 
 replace github.com/pion/dtls/v2 => ./replace/dtls
 
@@ -42,8 +42,9 @@ require (
 	github.com/Psiphon-Labs/goptlib v0.0.0-20200406165125-c0e32a7a3464
 	github.com/Psiphon-Labs/psiphon-tls v0.0.0-20250318183125-2a2fae2db378
 	github.com/Psiphon-Labs/quic-go v0.0.0-20250527153145-79fe45fb83b1
-	github.com/Psiphon-Labs/utls v0.0.0-20250623193530-396869e9cd87
+	github.com/Psiphon-Labs/utls v0.0.0-20260129182755-24497d415a8d
 	github.com/armon/go-proxyproto v0.0.0-20180202201750-5b7edb60ff5f
+	github.com/axiomhq/hyperloglog v0.2.6
 	github.com/bifurcation/mint v0.0.0-20180306135233-198357931e61
 	github.com/bits-and-blooms/bloom/v3 v3.6.0
 	github.com/cespare/xxhash v1.1.0
@@ -105,7 +106,6 @@ require (
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
-	github.com/axiomhq/hyperloglog v0.2.6 // indirect
 	github.com/bits-and-blooms/bitset v1.10.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect

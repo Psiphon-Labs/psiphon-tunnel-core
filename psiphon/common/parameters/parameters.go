@@ -409,6 +409,7 @@ const (
 	InproxyAllBrokerSpecs                              = "InproxyAllBrokerSpecs"
 	InproxyBrokerSpecs                                 = "InproxyBrokerSpecs"
 	InproxyPersonalPairingBrokerSpecs                  = "InproxyPersonalPairingBrokerSpecs"
+	InproxyPersonalPairingMaxBrokerSpecCount           = "InproxyPersonalPairingMaxBrokerSpecCount"
 	InproxyProxyBrokerSpecs                            = "InproxyProxyBrokerSpecs"
 	InproxyProxyPersonalPairingBrokerSpecs             = "InproxyProxyPersonalPairingBrokerSpecs"
 	InproxyClientBrokerSpecs                           = "InproxyClientBrokerSpecs"
@@ -427,6 +428,7 @@ const (
 	InproxyBrokerMatcherOfferLimitEntryCount           = "InproxyBrokerMatcherOfferLimitEntryCount"
 	InproxyBrokerMatcherOfferRateLimitQuantity         = "InproxyBrokerMatcherOfferRateLimitQuantity"
 	InproxyBrokerMatcherOfferRateLimitInterval         = "InproxyBrokerMatcherOfferRateLimitInterval"
+	InproxyBrokerMatcherOfferMinimumDeadline           = "InproxyBrokerMatcherOfferMinimumDeadline"
 	InproxyBrokerMatcherPrioritizeProxiesProbability   = "InproxyBrokerMatcherPrioritizeProxiesProbability"
 	InproxyBrokerMatcherPrioritizeProxiesFilter        = "InproxyBrokerMatcherPrioritizeProxiesFilter"
 	InproxyBrokerMatcherPrioritizeProxiesMinVersion    = "InproxyBrokerMatcherPrioritizeProxiesMinVersion"
@@ -1041,6 +1043,7 @@ var defaultParameters = map[string]struct {
 	InproxyAllBrokerSpecs:                              {value: InproxyBrokerSpecsValue{}, flags: serverSideOnly},
 	InproxyBrokerSpecs:                                 {value: InproxyBrokerSpecsValue{}},
 	InproxyPersonalPairingBrokerSpecs:                  {value: InproxyBrokerSpecsValue{}},
+	InproxyPersonalPairingMaxBrokerSpecCount:           {value: 3, minimum: 0},
 	InproxyProxyBrokerSpecs:                            {value: InproxyBrokerSpecsValue{}},
 	InproxyProxyPersonalPairingBrokerSpecs:             {value: InproxyBrokerSpecsValue{}},
 	InproxyClientBrokerSpecs:                           {value: InproxyBrokerSpecsValue{}},
@@ -1059,6 +1062,7 @@ var defaultParameters = map[string]struct {
 	InproxyBrokerMatcherOfferLimitEntryCount:           {value: 10, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitQuantity:         {value: 50, minimum: 0, flags: serverSideOnly},
 	InproxyBrokerMatcherOfferRateLimitInterval:         {value: 1 * time.Minute, minimum: time.Duration(0), flags: serverSideOnly},
+	InproxyBrokerMatcherOfferMinimumDeadline:           {value: 1 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	InproxyBrokerMatcherPrioritizeProxiesProbability:   {value: 1.0, minimum: 0.0, flags: serverSideOnly},
 	InproxyBrokerMatcherPrioritizeProxiesFilter:        {value: KeyStrings{}, flags: serverSideOnly},
 	InproxyBrokerMatcherPrioritizeProxiesMinVersion:    {value: 0, minimum: 0, flags: serverSideOnly},

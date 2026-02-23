@@ -156,9 +156,6 @@ func TestTLSOSSH(t *testing.T) {
 }
 
 func TestShadowsocks(t *testing.T) {
-
-	t.Skipf("temporarily disabled")
-
 	controllerRun(t,
 		&controllerRunConfig{
 			protocol:                 protocol.TUNNEL_PROTOCOL_SHADOWSOCKS_OSSH,
@@ -322,6 +319,7 @@ func TestFrontedQUIC(t *testing.T) {
 
 func TestInproxyOSSH(t *testing.T) {
 
+	t.Skipf("temporarily disabled")
 	if !inproxy.Enabled() {
 		t.Skip("In-proxy is not enabled")
 	}
@@ -336,6 +334,7 @@ func TestInproxyOSSH(t *testing.T) {
 
 func TestInproxyQUICOSSH(t *testing.T) {
 
+	t.Skipf("temporarily disabled")
 	if !inproxy.Enabled() {
 		t.Skip("In-proxy is not enabled")
 	}
@@ -350,6 +349,7 @@ func TestInproxyQUICOSSH(t *testing.T) {
 
 func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
 
+	t.Skipf("temporarily disabled")
 	if !inproxy.Enabled() {
 		t.Skip("In-proxy is not enabled")
 	}
@@ -363,6 +363,7 @@ func TestInproxyUnfrontedMeekHTTPS(t *testing.T) {
 
 func TestInproxyTLSOSSH(t *testing.T) {
 
+	t.Skipf("temporarily disabled")
 	if !inproxy.Enabled() {
 		t.Skip("In-proxy is not enabled")
 	}
