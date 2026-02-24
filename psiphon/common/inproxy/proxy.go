@@ -138,6 +138,10 @@ type ProxyConfig struct {
 	// and the provider can select new parameters per connection as reqired.
 	MakeWebRTCDialCoordinator func() (WebRTCDialCoordinator, error)
 
+	// ExcludeInterfaceName specifies the network interface to omit from
+	// proxy WebRTC ICE interface enumeration.
+	ExcludeInterfaceName string
+
 	// HandleTacticsPayload is a callback that receives any tactics payload,
 	// provided by the broker in proxy announcement request responses.
 	// HandleTacticsPayload must return true when the tacticsPayload includes
@@ -1148,6 +1152,7 @@ func (p *Proxy) proxyOneClient(
 		&webRTCConfig{
 			Logger:                      p.config.Logger,
 			EnableDebugLogging:          p.config.EnableWebRTCDebugLogging,
+			ExcludeInterfaceName:        p.config.ExcludeInterfaceName,
 			WebRTCDialCoordinator:       webRTCCoordinator,
 			ClientRootObfuscationSecret: announceResponse.ClientRootObfuscationSecret,
 			DoDTLSRandomization:         announceResponse.DoDTLSRandomization,

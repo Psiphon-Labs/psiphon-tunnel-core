@@ -61,6 +61,7 @@ type webRTCConn struct {
 type webRTCConfig struct {
 	Logger                      common.Logger
 	EnableDebugLogging          bool
+	ExcludeInterfaceName        string
 	WebRTCDialCoordinator       WebRTCDialCoordinator
 	ClientRootObfuscationSecret ObfuscationSecret
 	DoDTLSRandomization         bool
