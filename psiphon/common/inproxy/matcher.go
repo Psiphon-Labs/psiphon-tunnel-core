@@ -228,6 +228,7 @@ type MatchMetrics struct {
 	AnnouncementMatchIndex int
 	AnnouncementQueueSize  int
 	PendingAnswersSize     int
+	MatchDuration          time.Duration
 }
 
 // GetMetrics converts MatchMetrics to loggable fields.
@@ -235,6 +236,11 @@ func (metrics *MatchMetrics) GetMetrics() common.LogFields {
 	if metrics == nil {
 		return nil
 	}
+
+	// match_duration, the time between matchAllOffers starting and a match
+	// being made, is reported in microseconds. The common millisecond
+	// duration resolution is expected to be too coarse.
+
 	return common.LogFields{
 		"offer_deadline":           int64(metrics.OfferDeadline / time.Millisecond),
 		"offer_match_index":        metrics.OfferMatchIndex,
@@ -242,6 +248,7 @@ func (metrics *MatchMetrics) GetMetrics() common.LogFields {
 		"announcement_match_index": metrics.AnnouncementMatchIndex,
 		"announcement_queue_size":  metrics.AnnouncementQueueSize,
 		"pending_answers_size":     metrics.PendingAnswersSize,
+		"match_duration":           int64(metrics.MatchDuration / time.Microsecond),
 	}
 }
 
@@ -672,6 +679,9 @@ func (m *Matcher) matchWorker(ctx context.Context) {
 // matchAllOffers iterates over the queues, making all possible matches.
 func (m *Matcher) matchAllOffers() {
 
+	// Include lock acquisition time in MatchDuration metric.
+	startTime := time.Now()
+
 	m.announcementQueueMutex.Lock()
 	defer m.announcementQueueMutex.Unlock()
 	m.offerQueueMutex.Lock()
@@ -732,6 +742,12 @@ func (m *Matcher) matchAllOffers() {
 		// The index metrics predate the announcement multi-queue; now, with
 		// the multi-queue, announcement_index is how many announce entries
 		// were inspected before matching.
+		//
+		// MatchDuration is intended to capture a sample of matchAllOffer
+		// processing time without resorting to new log events.
+		// Limitation: MatchDuration does not fully represent matchAllOffer
+		// elapsed time since it doesn't include passes with no matches or
+		// time spent failing to match after the last match in the pass.
 
 		matchMetrics := &MatchMetrics{
 			OfferDeadline:          untilOfferDeadline,
@@ -740,6 +756,7 @@ func (m *Matcher) matchAllOffers() {
 			AnnouncementMatchIndex: announcementMatchIndex,
 			AnnouncementQueueSize:  m.announcementQueue.getLen(),
 			PendingAnswersSize:     m.pendingAnswers.ItemCount(),
+			MatchDuration:          time.Since(startTime),
 		}
 
 		offerEntry.matchMetrics.Store(matchMetrics)
@@ -913,6 +930,12 @@ func (m *Matcher) matchOffer(offerEntry *offerEntry) (*announcementEntry, int) {
 				continue
 			}
 		}
+
+		// Currently, there is no check or preference that the offer and
+		// announce have at least one of hasIPv4 or hasIPv6 in common, as
+		// clients are allowed to offer with no candidates and IPv6
+		// transition mechanisms such as 4in6/6in4/464XLAT/Teredo/etc. may be
+		// available.
 
 		// Check if this is a preferred NAT match. Ultimately, a match may be
 		// made with potentially incompatible NATs, but the client/proxy
@@ -1301,6 +1324,7 @@ type announcementMultiQueue struct {
 	commonCompartmentQueues         map[ID]*announcementCompartmentQueue
 	personalCompartmentQueues       map[ID]*announcementCompartmentQueue
 	totalEntries                    int
+	iterator                        *announcementMatchIterator
 }
 
 // announcementCompartmentQueue is a single compartment queue within an
@@ -1325,7 +1349,6 @@ type announcementCompartmentQueue struct {
 type announcementMatchIterator struct {
 	multiQueue        *announcementMultiQueue
 	compartmentQueues []*announcementCompartmentQueue
-	compartmentIDs    []ID
 	nextEntries       []*list.Element
 }
 
@@ -1338,11 +1361,15 @@ type announcementQueueReference struct {
 }
 
 func newAnnouncementMultiQueue() *announcementMultiQueue {
-	return &announcementMultiQueue{
+	q := &announcementMultiQueue{
 		priorityCommonCompartmentQueues: make(map[ID]*announcementCompartmentQueue),
 		commonCompartmentQueues:         make(map[ID]*announcementCompartmentQueue),
 		personalCompartmentQueues:       make(map[ID]*announcementCompartmentQueue),
 	}
+	q.iterator = &announcementMatchIterator{
+		multiQueue: q,
+	}
+	return q
 }
 
 func (q *announcementMultiQueue) getLen() int {
@@ -1471,13 +1498,27 @@ func (r *announcementQueueReference) dequeue() bool {
 	return true
 }
 
+// startMatching returns a newly initialized announcementMatchIterator for
+// queues corresponding to the specified compartment IDs.
+//
+// In order to reduce allocation and garbage collection churn from
+// matchAllOffers/matchOffer repeatedly calling startMatching, a single
+// announcementMatchIterator instance is retained and reused by all
+// startMatching calls. It is not safe to concurrently call startMatching or
+// concurrently use the returned announcementMatchIterator or retain the
+// returned announcementMatchIterator between startMatching calls.
 func (q *announcementMultiQueue) startMatching(
 	isCommonCompartments bool,
 	compartmentIDs []ID) *announcementMatchIterator {
 
-	iter := &announcementMatchIterator{
-		multiQueue: q,
-	}
+	// Reset the reused announcementMatchIterator fields, including clearing
+	// any references, while retaining the allocated slice capacity.
+
+	iter := q.iterator
+	clear(iter.compartmentQueues)
+	iter.compartmentQueues = iter.compartmentQueues[:0]
+	clear(iter.nextEntries)
+	iter.nextEntries = iter.nextEntries[:0]
 
 	// Find the matching compartment queues and initialize iteration over
 	// those queues. Building the set of matching queues is a linear time
@@ -1505,7 +1546,6 @@ func (q *announcementMultiQueue) startMatching(
 		for _, ID := range compartmentIDs {
 			if compartmentQueue, ok := compartmentQueues[ID]; ok {
 				iter.compartmentQueues = append(iter.compartmentQueues, compartmentQueue)
-				iter.compartmentIDs = append(iter.compartmentIDs, ID)
 				iter.nextEntries = append(iter.nextEntries, compartmentQueue.entries.Front())
 			}
 		}
@@ -1569,7 +1609,7 @@ func (iter *announcementMatchIterator) getNext() (*announcementEntry, bool) {
 	// A potential future enhancement is to add more iterator state to track
 	// which queue has the next oldest time to select on the following
 	// getNext call. Another potential enhancement is to remove fully
-	// consumed queues from compartmentQueues/compartmentIDs/nextEntries.
+	// consumed queues from compartmentQueues/nextEntries.
 
 	var selectedCandidate *announcementEntry
 	selectedIndex := -1

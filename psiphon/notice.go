@@ -1465,7 +1465,7 @@ func (log *commonLogTrace) Info(args ...interface{}) {
 }
 
 func (log *commonLogTrace) Warning(args ...interface{}) {
-	log.outputNotice("Alert", args...)
+	log.outputNotice("Warning", args...)
 }
 
 func (log *commonLogTrace) Error(args ...interface{}) {
