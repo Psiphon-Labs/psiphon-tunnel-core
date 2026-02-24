@@ -2776,6 +2776,7 @@ func filterSDPAddresses(
 // webRTCSDPMetrics are network capability metrics values for an SDP.
 type webRTCSDPMetrics struct {
 	iceCandidateTypes     []ICECandidateType
+	hasIPv4               bool
 	hasIPv6               bool
 	hasPrivateIP          bool
 	filteredICECandidates []string
@@ -2835,6 +2836,7 @@ func processSDPAddresses(
 	}
 
 	candidateTypes := map[ICECandidateType]bool{}
+	hasIPv4 := false
 	hasIPv6 := false
 	hasPrivateIP := false
 	filteredCandidateReasons := make(map[string]int)
@@ -2921,8 +2923,11 @@ func processSDPAddresses(
 					return nil, nil, errors.TraceNew("unexpected non-IP")
 				}
 
+				candidateIsIPv4 := false
 				candidateIsIPv6 := false
-				if candidateIP.To4() == nil {
+				if candidateIP.To4() != nil {
+					candidateIsIPv4 = true
+				} else {
 					if disableIPv6Candidates {
 						reason := fmt.Sprintf("disabled %s IPv6",
 							candidate.Type().String())
@@ -2979,6 +2984,9 @@ func processSDPAddresses(
 				// address, as there could be a mix of IPv4 and IPv6, as well
 				// as potentially different NAT paths.
 				//
+				// For IPv6, only the ASN must match as IPv6 GeoIP country
+				// data appears less reliable in practise.
+				//
 				// In some cases, legitimate clients and proxies may
 				// unintentionally submit candidates with mismatching GeoIP.
 				// This can occur, for example, when a STUN candidate is only
@@ -2992,8 +3000,15 @@ func processSDPAddresses(
 				if lookupGeoIP != nil {
 					candidateGeoIPData := lookupGeoIP(candidate.Address())
 
-					if candidateGeoIPData.Country != expectedGeoIPData.Country ||
-						candidateGeoIPData.ASN != expectedGeoIPData.ASN {
+					mismatch := false
+					if candidateIsIPv6 {
+						mismatch = candidateGeoIPData.ASN != expectedGeoIPData.ASN
+					} else {
+						mismatch = candidateGeoIPData.Country != expectedGeoIPData.Country ||
+							candidateGeoIPData.ASN != expectedGeoIPData.ASN
+					}
+
+					if mismatch {
 
 						version := "IPv4"
 						if candidateIsIPv6 {
@@ -3010,6 +3025,9 @@ func processSDPAddresses(
 					}
 				}
 
+				if candidateIsIPv4 {
+					hasIPv4 = true
+				}
 				if candidateIsIPv6 {
 					hasIPv6 = true
 				}
@@ -3048,6 +3066,7 @@ func processSDPAddresses(
 	}
 
 	metrics := &webRTCSDPMetrics{
+		hasIPv4:      hasIPv4,
 		hasIPv6:      hasIPv6,
 		hasPrivateIP: hasPrivateIP,
 	}

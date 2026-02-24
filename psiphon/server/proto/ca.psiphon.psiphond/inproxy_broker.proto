@@ -53,4 +53,6 @@ message InproxyBroker {
     optional int64 offer_deadline = 139;
     optional int64 max_common_clients = 140;
     optional int64 max_personal_clients = 141;
+    optional bool has_IPv4 = 142;
+    optional int64 match_duration = 143;
 }

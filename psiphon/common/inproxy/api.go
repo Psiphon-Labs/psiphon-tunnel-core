@@ -865,6 +865,7 @@ func (request *ClientOfferRequest) ValidateAndGetLogFields(
 	logFields["has_common_compartment_ids"] = hasCommonCompartmentIDs
 	logFields["has_personal_compartment_ids"] = hasPersonalCompartmentIDs
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
+	logFields["has_IPv4"] = sdpMetrics.hasIPv4
 	logFields["has_IPv6"] = sdpMetrics.hasIPv6
 	logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 	logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates
@@ -960,6 +961,7 @@ func (request *ProxyAnswerRequest) ValidateAndGetLogFields(
 	logFields["ice_candidate_types"] = request.ICECandidateTypes
 	logFields["answer_error"] = request.AnswerError
 	if sdpMetrics != nil {
+		logFields["has_IPv4"] = sdpMetrics.hasIPv4
 		logFields["has_IPv6"] = sdpMetrics.hasIPv6
 		logFields["has_private_IP"] = sdpMetrics.hasPrivateIP
 		logFields["filtered_ice_candidates"] = sdpMetrics.filteredICECandidates

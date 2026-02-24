@@ -66,6 +66,8 @@ type InproxyBroker struct {
 	OfferDeadline                 *int64                 `protobuf:"varint,139,opt,name=offer_deadline,json=offerDeadline,proto3,oneof" json:"offer_deadline,omitempty"`
 	MaxCommonClients              *int64                 `protobuf:"varint,140,opt,name=max_common_clients,json=maxCommonClients,proto3,oneof" json:"max_common_clients,omitempty"`
 	MaxPersonalClients            *int64                 `protobuf:"varint,141,opt,name=max_personal_clients,json=maxPersonalClients,proto3,oneof" json:"max_personal_clients,omitempty"`
+	Has_IPv4                      *bool                  `protobuf:"varint,142,opt,name=has_IPv4,json=hasIPv4,proto3,oneof" json:"has_IPv4,omitempty"`
+	MatchDuration                 *int64                 `protobuf:"varint,143,opt,name=match_duration,json=matchDuration,proto3,oneof" json:"match_duration,omitempty"`
 	unknownFields                 protoimpl.UnknownFields
 	sizeCache                     protoimpl.SizeCache
 }
@@ -401,11 +403,25 @@ func (x *InproxyBroker) GetMaxPersonalClients() int64 {
 	return 0
 }
 
+func (x *InproxyBroker) GetHas_IPv4() bool {
+	if x != nil && x.Has_IPv4 != nil {
+		return *x.Has_IPv4
+	}
+	return false
+}
+
+func (x *InproxyBroker) GetMatchDuration() int64 {
+	if x != nil && x.MatchDuration != nil {
+		return *x.MatchDuration
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_inproxy_broker_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\n" +
-	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xef\x17\n" +
+	"(ca.psiphon.psiphond/inproxy_broker.proto\x12\x13ca.psiphon.psiphond\x1a%ca.psiphon.psiphond/base_params.proto\"\xdd\x18\n" +
 	"\rInproxyBroker\x12E\n" +
 	"\vbase_params\x18\x01 \x01(\v2\x1f.ca.psiphon.psiphond.BaseParamsH\x00R\n" +
 	"baseParams\x88\x01\x01\x12=\n" +
@@ -453,7 +469,9 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\x14pending_answers_size\x18\x8a\x01 \x01(\x03H#R\x12pendingAnswersSize\x88\x01\x01\x12+\n" +
 	"\x0eoffer_deadline\x18\x8b\x01 \x01(\x03H$R\rofferDeadline\x88\x01\x01\x122\n" +
 	"\x12max_common_clients\x18\x8c\x01 \x01(\x03H%R\x10maxCommonClients\x88\x01\x01\x126\n" +
-	"\x14max_personal_clients\x18\x8d\x01 \x01(\x03H&R\x12maxPersonalClients\x88\x01\x01B\x0e\n" +
+	"\x14max_personal_clients\x18\x8d\x01 \x01(\x03H&R\x12maxPersonalClients\x88\x01\x01\x12\x1f\n" +
+	"\bhas_IPv4\x18\x8e\x01 \x01(\bH'R\ahasIPv4\x88\x01\x01\x12+\n" +
+	"\x0ematch_duration\x18\x8f\x01 \x01(\x03H(R\rmatchDuration\x88\x01\x01B\x0e\n" +
 	"\f_base_paramsB\x1b\n" +
 	"\x19_announcement_match_indexB\x1a\n" +
 	"\x18_announcement_queue_sizeB\x0f\n" +
@@ -495,7 +513,9 @@ const file_ca_psiphon_psiphond_inproxy_broker_proto_rawDesc = "" +
 	"\x15_pending_answers_sizeB\x11\n" +
 	"\x0f_offer_deadlineB\x15\n" +
 	"\x13_max_common_clientsB\x17\n" +
-	"\x15_max_personal_clientsBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"\x15_max_personal_clientsB\v\n" +
+	"\t_has_IPv4B\x11\n" +
+	"\x0f_match_durationBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_inproxy_broker_proto_rawDescOnce sync.Once

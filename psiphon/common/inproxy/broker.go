@@ -1053,7 +1053,7 @@ func (b *Broker) handleClientOffer(
 			logFields["preferred_nat_match"] =
 				clientMatchOffer.Properties.IsPreferredNATMatch(&proxyMatchAnnouncement.Properties)
 
-			// TODO: also log proxy ice_candidate_types and has_IPv6; for the
+			// TODO: also log proxy ice_candidate_types and has_IPv4/6; for the
 			// client, these values are added by ValidateAndGetLogFields.
 		}
 		if timedOut {
