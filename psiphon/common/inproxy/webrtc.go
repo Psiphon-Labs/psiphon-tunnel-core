@@ -152,6 +152,10 @@ type webRTCConfig struct {
 	// Logger at a Debug log level.
 	EnableDebugLogging bool
 
+	// ExcludeInterfaceName specifies the interface name to omit from ICE
+	// interface enumeration.
+	ExcludeInterfaceName string
+
 	// WebRTCDialCoordinator specifies specific WebRTC dial strategies and
 	// settings; WebRTCDialCoordinator also facilities dial replay by
 	// receiving callbacks when individual dial steps succeed or fail.
@@ -350,7 +354,10 @@ func newWebRTCConn(
 		config.EnableDebugLogging)
 
 	pionNetwork := newPionNetwork(
-		ctx, pionLoggerFactory.NewLogger("net"), config.WebRTCDialCoordinator)
+		ctx,
+		pionLoggerFactory.NewLogger("net"),
+		config.WebRTCDialCoordinator,
+		config.ExcludeInterfaceName)
 
 	udpMux := webrtc.NewICEUniversalUDPMux(
 		pionLoggerFactory.NewLogger("mux"), udpConn, TTL, pionNetwork)
@@ -3236,17 +3243,20 @@ type pionNetwork struct {
 	dialCtx               context.Context
 	logger                pion_logging.LeveledLogger
 	webRTCDialCoordinator WebRTCDialCoordinator
+	excludeInterfaceName  string
 }
 
 func newPionNetwork(
 	dialCtx context.Context,
 	logger pion_logging.LeveledLogger,
-	webRTCDialCoordinator WebRTCDialCoordinator) *pionNetwork {
+	webRTCDialCoordinator WebRTCDialCoordinator,
+	excludeInterfaceName string) *pionNetwork {
 
 	return &pionNetwork{
 		dialCtx:               dialCtx,
 		logger:                logger,
 		webRTCDialCoordinator: webRTCDialCoordinator,
+		excludeInterfaceName:  excludeInterfaceName,
 	}
 }
 
@@ -3308,6 +3318,10 @@ func (p *pionNetwork) Interfaces() ([]*transport.Interface, error) {
 	}
 
 	for _, netInterface := range netInterfaces {
+		if p.excludeInterfaceName != "" && netInterface.Name == p.excludeInterfaceName {
+			continue
+		}
+
 		// Note: don't exclude interfaces with the net.FlagPointToPoint flag,
 		// which is set for certain mobile networks
 		if (netInterface.Flags&net.FlagUp == 0) ||

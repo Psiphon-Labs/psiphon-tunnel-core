@@ -41,6 +41,7 @@ import (
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/parameters"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/prng"
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/resolver"
+	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/tun"
 	utls "github.com/Psiphon-Labs/utls"
 	"github.com/cespare/xxhash"
 )
@@ -2003,6 +2004,8 @@ func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
 	// DNSResolverPreresolvedIPAddressCIDRs proxy tactics. In addition,
 	// replay the selected upstream dial tactics parameters.
 
+	splitUpstreamInterfaceName := w.config.InproxyProxySplitUpstreamInterfaceName
+
 	dialer := net.Dialer{
 		Control: func(_, _ string, c syscall.RawConn) error {
 			var controlErr error
@@ -2014,6 +2017,12 @@ func (w *InproxyWebRTCDialInstance) ProxyUpstreamDial(
 
 				if w.config.deviceBinder != nil {
 					_, err := w.config.deviceBinder.BindToDevice(socketFD)
+					if err != nil {
+						controlErr = errors.Tracef("BindToDevice failed: %s", err)
+						return
+					}
+				} else if splitUpstreamInterfaceName != "" {
+					err := tun.BindToDevice(socketFD, splitUpstreamInterfaceName)
 					if err != nil {
 						controlErr = errors.Tracef("BindToDevice failed: %s", err)
 						return

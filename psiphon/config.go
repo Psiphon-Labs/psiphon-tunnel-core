@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -657,6 +658,16 @@ type Config struct {
 	// private key and corresponding, derived proxy ID to use. If blank, an
 	// ephemeral key will be generated.
 	InproxyProxySessionPrivateKey string `json:",omitempty"`
+
+	// InproxyProxySplitUpstreamInterfaceName specifies a network interface
+	// that the in-proxy proxy will use for upstream destination dialing. The
+	// specified interface is also excluded from proxy ICE gathering. This is
+	// intended to support split interface setups with the proxy/client
+	// connection on the default interface and the proxy/server connection on
+	// the designated interface.
+	//
+	// Only supported on Linux,  and cannot be used with DeviceBinder.
+	InproxyProxySplitUpstreamInterfaceName string `json:",omitempty"`
 
 	// InproxyMaxClients specifies the maximum number of common in-proxy
 	// clients to be proxied concurrently. When InproxyEnableProxy is set,
@@ -1570,6 +1581,13 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
 		len(config.ObfuscatedSSHAlgorithms) != 4 {
 		// TODO: validate each algorithm?
 		return errors.TraceNew("invalid ObfuscatedSSHAlgorithms")
+	}
+
+	if config.InproxyProxySplitUpstreamInterfaceName != "" && runtime.GOOS != "linux" {
+		return errors.TraceNew("InproxyProxySplitUpstreamInterfaceName is only supported on Linux")
+	}
+	if config.InproxyProxySplitUpstreamInterfaceName != "" && config.DeviceBinder != nil {
+		return errors.TraceNew("InproxyProxySplitUpstreamInterfaceName cannot be used with DeviceBinder")
 	}
 
 	if config.InproxyEnableProxy {
