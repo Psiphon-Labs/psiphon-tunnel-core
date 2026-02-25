@@ -39,6 +39,122 @@ func TestMeekPayloadPadding(t *testing.T) {
 
 func runTestMeekPayloadPadding() error {
 
+	key := prng.HexString(16)
+	cookie := prng.HexString(16)
+
+	// Test: invalid configurations
+
+	_, err := NewMeekRequestPayloadPaddingState(key, cookie, 0.0, -1, 0)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	_, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 2, 1)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	_, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 0, 65534)
+	if err == nil {
+		return errors.TraceNew("unexpected success")
+	}
+
+	// Test: immediate EOF
+
+	receiver, err := NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 0, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	bytesRead, morePadding, err := receiver.ReceiverConsumePadding(
+		bytes.NewReader(nil))
+	if bytesRead != 0 || morePadding || err != ErrMeekPaddingStateImmediateEOF {
+		return errors.TraceNew("unexpected consume return values")
+	}
+
+	// Test: unknown prefix
+
+	sender, err := NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 1, 1)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	receiver, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 0, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	paddingHeader, err := sender.SenderGetNextPadding(false)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if len(paddingHeader) != 1 {
+		return errors.TraceNew("unexpected padding header length")
+	}
+
+	corrupt := append([]byte(nil), paddingHeader...)
+	corrupt[0] ^= 0x02 // flips decrypted prefix from 0 to 2
+
+	bytesRead, morePadding, err = receiver.ReceiverConsumePadding(
+		bytes.NewReader(corrupt))
+	if bytesRead != 1 || morePadding || err == nil {
+		return errors.TraceNew("unexpected consume return values")
+	}
+
+	// Test: incomplete padding size
+
+	sender, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 1, 1)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	receiver, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 0, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	paddingHeader, err = sender.SenderGetNextPadding(true)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if len(paddingHeader) < 3 {
+		return errors.TraceNew("unexpected padding header length")
+	}
+
+	bytesRead, morePadding, err = receiver.ReceiverConsumePadding(
+		bytes.NewReader(paddingHeader[:1]))
+	if bytesRead != 1 || !morePadding || err == nil {
+		return errors.TraceNew("unexpected consume return values")
+	}
+
+	// Test: incomplete padding
+
+	sender, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 1, 1)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	receiver, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 0, 0)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	paddingHeader, err = sender.SenderGetNextPadding(true)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if len(paddingHeader) < 4 {
+		return errors.TraceNew("unexpected padded header length")
+	}
+
+	bytesRead, morePadding, err = receiver.ReceiverConsumePadding(
+		bytes.NewReader(paddingHeader[:3]))
+	if bytesRead != 3 || !morePadding || err == nil {
+		return errors.TraceNew("unexpected consume return values")
+	}
+
+	// Test: round trips
+
 	const (
 		roundTrips = 1000
 
@@ -55,10 +171,6 @@ func runTestMeekPayloadPadding() error {
 		minPaddingSize = 1
 		maxPaddingSize = 65533
 	)
-
-	key := prng.HexString(16)
-
-	cookie := prng.HexString(16)
 
 	clientRequestPaddingState, err := NewMeekRequestPayloadPaddingState(
 		key, cookie, omitPaddingProbability, minPaddingSize, maxPaddingSize)
@@ -216,6 +328,74 @@ func runTestMeekPayloadPadding() error {
 		if err != nil {
 			return errors.Trace(err)
 		}
+	}
+
+	return nil
+}
+
+func FuzzMeekPayloadPaddingReceiverConsume(f *testing.F) {
+
+	// Test: ReceiverConsumePadding handles fuzzed inputs without panicking.
+
+	f.Add(true, 0, 0)
+	f.Add(false, 0, 0)
+	f.Add(true, 255, 3)
+	f.Fuzz(func(t *testing.T, addPadding bool, mutate int, truncate int) {
+		err := runFuzzMeekPayloadPaddingReceiverConsume(addPadding, mutate, truncate)
+		if err != nil {
+			t.Fatal(err.Error())
+			return
+		}
+	})
+}
+
+func runFuzzMeekPayloadPaddingReceiverConsume(
+	addPadding bool, mutate int, truncate int) error {
+
+	key := prng.HexString(16)
+	cookie := prng.HexString(16)
+
+	for i := 0; i < 2; i++ {
+
+		var sender, receiver *MeekPayloadPaddingState
+		var err error
+
+		if i == 0 {
+			sender, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 1, 256)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			receiver, err = NewMeekRequestPayloadPaddingState(key, cookie, 0.0, 0, 0)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		} else {
+			sender, err = NewMeekResponsePayloadPaddingState(key, cookie, 0.0, 1, 256)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			receiver, err = NewMeekResponsePayloadPaddingState(key, cookie, 0.0, 0, 0)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+
+		payload, err := sender.SenderGetNextPadding(addPadding)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		input := append([]byte(nil), payload...)
+
+		if len(input) > 0 {
+			cut := uint(truncate) % uint(len(input)+1)
+			input = input[:cut]
+		}
+		if len(input) > 0 && mutate != 0 {
+			input[prng.Intn(len(input))] ^= byte(mutate)
+		}
+
+		_, _, _ = receiver.ReceiverConsumePadding(bytes.NewReader(input))
 	}
 
 	return nil
