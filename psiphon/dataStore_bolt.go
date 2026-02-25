@@ -222,7 +222,7 @@ func (db *datastoreDB) isDatastoreFailed() bool {
 
 func (db *datastoreDB) setDatastoreFailed(r interface{}) {
 	atomic.StoreInt32(&db.isFailed, 1)
-	NoticeWarning("Datastore failed: %s", errors.Tracef("panic: %v", r))
+	NoticeWarning("%s: %s", errDatastoreFailed.Error(), errors.Tracef("panic: %v", r))
 }
 
 func (db *datastoreDB) close() error {

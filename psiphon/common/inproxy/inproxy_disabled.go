@@ -61,6 +61,7 @@ type webRTCConn struct {
 type webRTCConfig struct {
 	Logger                      common.Logger
 	EnableDebugLogging          bool
+	ExcludeInterfaceName        string
 	WebRTCDialCoordinator       WebRTCDialCoordinator
 	ClientRootObfuscationSecret ObfuscationSecret
 	DoDTLSRandomization         bool
@@ -126,6 +127,7 @@ func GetQUICMaxPacketSizeAdjustment() int {
 
 type webRTCSDPMetrics struct {
 	iceCandidateTypes     []ICECandidateType
+	hasIPv4               bool
 	hasIPv6               bool
 	hasPrivateIP          bool
 	filteredICECandidates []string

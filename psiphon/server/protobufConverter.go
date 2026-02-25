@@ -95,7 +95,6 @@ func NewProtobufRoutedMessage(
 	return &pbr.Router{
 		Destination: &destination,
 		MessageType: &messageType,
-		Key:         []byte(logHostID),
 		Value:       serialized,
 	}, nil
 }

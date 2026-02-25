@@ -3368,6 +3368,7 @@ func (controller *Controller) runInproxyProxy() {
 		GetBrokerClient:                      controller.inproxyGetProxyBrokerClient,
 		GetBaseAPIParameters:                 controller.inproxyGetProxyAPIParameters,
 		MakeWebRTCDialCoordinator:            controller.inproxyMakeProxyWebRTCDialCoordinator,
+		ExcludeInterfaceName:                 controller.config.InproxyProxySplitUpstreamInterfaceName,
 		HandleTacticsPayload:                 controller.inproxyHandleProxyTacticsPayload,
 		MaxCommonClients:                     controller.config.InproxyMaxCommonClients,
 		MaxPersonalClients:                   controller.config.InproxyMaxPersonalClients,

@@ -112,6 +112,8 @@ type InproxyDialParams struct {
 	InproxyWebrtcStunServer_RFC5780ResolvedIpAddress *string                `protobuf:"bytes,87,opt,name=inproxy_webrtc_stun_server_RFC5780_resolved_ip_address,json=inproxyWebrtcStunServerRFC5780ResolvedIpAddress,proto3,oneof" json:"inproxy_webrtc_stun_server_RFC5780_resolved_ip_address,omitempty"`
 	InproxyWebrtcStunServerResolvedIpAddress         *string                `protobuf:"bytes,88,opt,name=inproxy_webrtc_stun_server_resolved_ip_address,json=inproxyWebrtcStunServerResolvedIpAddress,proto3,oneof" json:"inproxy_webrtc_stun_server_resolved_ip_address,omitempty"`
 	InproxyWebrtcUseMediaStreams                     *bool                  `protobuf:"varint,89,opt,name=inproxy_webrtc_use_media_streams,json=inproxyWebrtcUseMediaStreams,proto3,oneof" json:"inproxy_webrtc_use_media_streams,omitempty"`
+	InproxyProxyMaxCommonClients                     *int64                 `protobuf:"varint,90,opt,name=inproxy_proxy_max_common_clients,json=inproxyProxyMaxCommonClients,proto3,oneof" json:"inproxy_proxy_max_common_clients,omitempty"`
+	InproxyProxyMaxPersonalClients                   *int64                 `protobuf:"varint,91,opt,name=inproxy_proxy_max_personal_clients,json=inproxyProxyMaxPersonalClients,proto3,oneof" json:"inproxy_proxy_max_personal_clients,omitempty"`
 	unknownFields                                    protoimpl.UnknownFields
 	sizeCache                                        protoimpl.SizeCache
 }
@@ -769,11 +771,25 @@ func (x *InproxyDialParams) GetInproxyWebrtcUseMediaStreams() bool {
 	return false
 }
 
+func (x *InproxyDialParams) GetInproxyProxyMaxCommonClients() int64 {
+	if x != nil && x.InproxyProxyMaxCommonClients != nil {
+		return *x.InproxyProxyMaxCommonClients
+	}
+	return 0
+}
+
+func (x *InproxyDialParams) GetInproxyProxyMaxPersonalClients() int64 {
+	if x != nil && x.InproxyProxyMaxPersonalClients != nil {
+		return *x.InproxyProxyMaxPersonalClients
+	}
+	return 0
+}
+
 var File_ca_psiphon_psiphond_inproxy_dial_params_proto protoreflect.FileDescriptor
 
 const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\n" +
-	"-ca.psiphon.psiphond/inproxy_dial_params.proto\x12\x13ca.psiphon.psiphond\"\xf1M\n" +
+	"-ca.psiphon.psiphond/inproxy_dial_params.proto\x12\x13ca.psiphon.psiphond\"\xdbO\n" +
 	"\x11InproxyDialParams\x12>\n" +
 	"\x19inproxy_broker_client_bpf\x18\x01 \x01(\tH\x00R\x16inproxyBrokerClientBpf\x88\x01\x01\x12B\n" +
 	"\x1binproxy_broker_dial_address\x18\x02 \x01(\tH\x01R\x18inproxyBrokerDialAddress\x88\x01\x01\x12@\n" +
@@ -865,7 +881,9 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"\"inproxy_webrtc_stun_server_RFC5780\x18V \x01(\tHRR\x1einproxyWebrtcStunServerRFC5780\x88\x01\x01\x12t\n" +
 	"6inproxy_webrtc_stun_server_RFC5780_resolved_ip_address\x18W \x01(\tHSR/inproxyWebrtcStunServerRFC5780ResolvedIpAddress\x88\x01\x01\x12e\n" +
 	".inproxy_webrtc_stun_server_resolved_ip_address\x18X \x01(\tHTR(inproxyWebrtcStunServerResolvedIpAddress\x88\x01\x01\x12K\n" +
-	" inproxy_webrtc_use_media_streams\x18Y \x01(\bHUR\x1cinproxyWebrtcUseMediaStreams\x88\x01\x01B\x1c\n" +
+	" inproxy_webrtc_use_media_streams\x18Y \x01(\bHUR\x1cinproxyWebrtcUseMediaStreams\x88\x01\x01\x12K\n" +
+	" inproxy_proxy_max_common_clients\x18Z \x01(\x03HVR\x1cinproxyProxyMaxCommonClients\x88\x01\x01\x12O\n" +
+	"\"inproxy_proxy_max_personal_clients\x18[ \x01(\x03HWR\x1einproxyProxyMaxPersonalClients\x88\x01\x01B\x1c\n" +
 	"\x1a_inproxy_broker_client_bpfB\x1e\n" +
 	"\x1c_inproxy_broker_dial_addressB\x1d\n" +
 	"\x1b_inproxy_broker_dns_attemptB\x1f\n" +
@@ -951,7 +969,9 @@ const file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDesc = "" +
 	"#_inproxy_webrtc_stun_server_RFC5780B9\n" +
 	"7_inproxy_webrtc_stun_server_RFC5780_resolved_ip_addressB1\n" +
 	"/_inproxy_webrtc_stun_server_resolved_ip_addressB#\n" +
-	"!_inproxy_webrtc_use_media_streamsBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
+	"!_inproxy_webrtc_use_media_streamsB#\n" +
+	"!_inproxy_proxy_max_common_clientsB%\n" +
+	"#_inproxy_proxy_max_personal_clientsBHZFgithub.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/psiphondb\x06proto3"
 
 var (
 	file_ca_psiphon_psiphond_inproxy_dial_params_proto_rawDescOnce sync.Once
