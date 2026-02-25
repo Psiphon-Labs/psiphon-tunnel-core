@@ -549,9 +549,11 @@ func noticeWithDialParameters(noticeType string, dialParams *DialParameters, pos
 			args = append(args, "meekHostHeader", dialParams.MeekHostHeader)
 		}
 
-		// MeekTransformedHostName is meaningful when meek is used, which is when MeekDialAddress != ""
+		// These fields are meaningful when meek is used, which is when
+		// MeekDialAddress != ""
 		if dialParams.MeekDialAddress != "" {
 			args = append(args, "meekTransformedHostName", dialParams.MeekTransformedHostName)
+			args = append(args, "meekPayloadPadding", dialParams.MeekEnablePayloadPadding)
 		}
 
 		if dialParams.TLSOSSHSNIServerName != "" {

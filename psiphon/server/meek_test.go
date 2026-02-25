@@ -183,10 +183,24 @@ func TestCachedResponse(t *testing.T) {
 }
 
 func TestMeekResiliency(t *testing.T) {
-	testMeekResiliency(t, nil, false)
+	testMeekResiliency(t, nil, false, false)
+}
+
+func TestMeekResiliencyWithPayloadPadding(t *testing.T) {
+	testMeekResiliency(t, nil, false, true)
 }
 
 func TestMeekHTTPNormalizerResiliency(t *testing.T) {
+	testMeekHTTPNormalizerResiliency(t, false)
+}
+
+func TestMeekHTTPNormalizerResiliencyWithPayloadPadding(t *testing.T) {
+	testMeekHTTPNormalizerResiliency(t, true)
+}
+
+func testMeekHTTPNormalizerResiliency(
+	t *testing.T,
+	enablePayloadPadding bool) {
 
 	seed, err := prng.NewSeed()
 	if err != nil {
@@ -199,10 +213,14 @@ func TestMeekHTTPNormalizerResiliency(t *testing.T) {
 		ProtocolTransformSeed: seed,
 	}
 
-	testMeekResiliency(t, spec, true)
+	testMeekResiliency(t, spec, true, enablePayloadPadding)
 }
 
-func testMeekResiliency(t *testing.T, spec *transforms.HTTPTransformerParameters, useHTTPNormalizer bool) {
+func testMeekResiliency(
+	t *testing.T,
+	spec *transforms.HTTPTransformerParameters,
+	useHTTPNormalizer bool,
+	enablePayloadPadding bool) {
 
 	upstreamData := make([]byte, 5*MB)
 	_, _ = rand.Read(upstreamData)
@@ -284,6 +302,45 @@ func testMeekResiliency(t *testing.T, spec *transforms.HTTPTransformerParameters
 		TrafficRulesSet: &TrafficRulesSet{},
 	}
 	mockSupport.GeoIPService, _ = NewGeoIPService([]string{})
+
+	// MeekServer requires a wired-up ServerTacticsParametersCache for
+	// meek payload padding. The default parameter values are used.
+
+	tacticsConfigFilename := filepath.Join(testDataDirName, "tactics_config.json")
+
+	tacticsConfigJSON := `
+    {
+      "DefaultTactics" : {
+        "TTL" : "60s",
+        "Probability" : 1.0,
+        "Parameters" : {
+        }
+      }
+    }
+    `
+	err = ioutil.WriteFile(tacticsConfigFilename, []byte(tacticsConfigJSON), 0600)
+	if err != nil {
+		t.Fatalf("error paving tactics config file: %s", err)
+	}
+
+	tacticsRequestPublicKey, tacticsRequestPrivateKey, tacticsRequestObfuscatedKey, err :=
+		tactics.GenerateKeys()
+	if err != nil {
+		t.Fatalf("error generating tactics keys: %s", err)
+	}
+
+	tacticsServer, err := tactics.NewServer(
+		nil, nil, nil,
+		tacticsConfigFilename,
+		tacticsRequestPublicKey,
+		tacticsRequestPrivateKey,
+		tacticsRequestObfuscatedKey)
+	if err != nil {
+		t.Fatalf("tactics.NewServer failed: %s", err)
+	}
+
+	mockSupport.TacticsServer = tacticsServer
+	mockSupport.ServerTacticsParametersCache = NewServerTacticsParametersCache(mockSupport)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -378,6 +435,22 @@ func testMeekResiliency(t *testing.T, spec *transforms.HTTPTransformerParameters
 		MeekObfuscatorPaddingSeed:     meekObfuscatorPaddingSeed,
 		ClientTunnelProtocol:          protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK,
 		HTTPTransformerParameters:     spec,
+	}
+
+	if enablePayloadPadding {
+
+		p, err := mockSupport.ServerTacticsParametersCache.Get(GeoIPData{})
+		if err != nil {
+			t.Fatalf("ServerTacticsParametersCache.Get failed: %s", err)
+		}
+
+		meekConfig.EnablePayloadPadding = true
+		meekConfig.PayloadPaddingOmitProbability =
+			p.Float(parameters.MeekPayloadPaddingClientOmitProbability)
+		meekConfig.PayloadPaddingMinSize =
+			p.Int(parameters.MeekPayloadPaddingClientMinSize)
+		meekConfig.PayloadPaddingMaxSize =
+			p.Int(parameters.MeekPayloadPaddingClientMaxSize)
 	}
 
 	ctx, cancelFunc := context.WithTimeout(

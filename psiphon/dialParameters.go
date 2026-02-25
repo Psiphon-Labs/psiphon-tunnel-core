@@ -121,6 +121,11 @@ type DialParameters struct {
 	MeekObfuscatorPaddingSeed *prng.Seed   `json:",omitempty"`
 	MeekResolvedIPAddress     atomic.Value `json:"-"`
 
+	MeekEnablePayloadPadding          bool    `json:",omitempty"`
+	MeekPayloadPaddingMinSize         int     `json:",omitempty"`
+	MeekPayloadPaddingMaxSize         int     `json:",omitempty"`
+	MeekPayloadPaddingOmitProbability float64 `json:",omitempty"`
+
 	TLSOSSHTransformedSNIServerName bool       `json:",omitempty"`
 	TLSOSSHSNIServerName            string     `json:",omitempty"`
 	TLSOSSHObfuscatorPaddingSeed    *prng.Seed `json:",omitempty"`
@@ -271,6 +276,7 @@ func MakeDialParameters(
 	replayShadowsocksPrefix := p.Bool(parameters.ReplayShadowsocksPrefix)
 	replayInproxySTUN := p.Bool(parameters.ReplayInproxySTUN)
 	replayInproxyWebRTC := p.Bool(parameters.ReplayInproxyWebRTC)
+	replayMeekPayloadPadding := p.Bool(parameters.ReplayMeekPayloadPadding)
 
 	// Check for existing dial parameters for this server/network ID.
 
@@ -1067,6 +1073,28 @@ func MakeDialParameters(
 		}
 	}
 
+	if (!isReplay || !replayMeekPayloadPadding) &&
+		protocol.TunnelProtocolUsesMeek(dialParams.TunnelProtocol) {
+
+		limitTunnelProtocols := p.TunnelProtocols(
+			parameters.MeekPayloadPaddingLimitTunnelProtocols)
+
+		if len(limitTunnelProtocols) == 0 ||
+			common.Contains(limitTunnelProtocols, dialParams.TunnelProtocol) {
+
+			if p.WeightedCoinFlip(parameters.MeekPayloadPaddingProbability) {
+
+				dialParams.MeekEnablePayloadPadding = true
+				dialParams.MeekPayloadPaddingOmitProbability =
+					p.Float(parameters.MeekPayloadPaddingClientOmitProbability)
+				dialParams.MeekPayloadPaddingMinSize =
+					p.Int(parameters.MeekPayloadPaddingClientMinSize)
+				dialParams.MeekPayloadPaddingMaxSize =
+					p.Int(parameters.MeekPayloadPaddingClientMaxSize)
+			}
+		}
+	}
+
 	// Initialize dialParams.ResolveParameters for dials that will resolve
 	// domain names, which currently includes fronted meek and Conjure API
 	// registration, where the dial address is not an IP address.
@@ -1793,6 +1821,10 @@ func MakeDialParameters(
 			MeekCookieEncryptionPublicKey: serverEntry.MeekCookieEncryptionPublicKey,
 			MeekObfuscatedKey:             serverEntry.MeekObfuscatedKey,
 			MeekObfuscatorPaddingSeed:     dialParams.MeekObfuscatorPaddingSeed,
+			EnablePayloadPadding:          dialParams.MeekEnablePayloadPadding,
+			PayloadPaddingMinSize:         dialParams.MeekPayloadPaddingMinSize,
+			PayloadPaddingMaxSize:         dialParams.MeekPayloadPaddingMaxSize,
+			PayloadPaddingOmitProbability: dialParams.MeekPayloadPaddingOmitProbability,
 			NetworkLatencyMultiplier:      dialParams.NetworkLatencyMultiplier,
 			HTTPTransformerParameters:     dialParams.HTTPTransformerParameters,
 			AdditionalHeaders:             config.MeekAdditionalHeaders,

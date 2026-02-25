@@ -56,7 +56,7 @@ import (
 // CC0 1.0 Universal
 
 const (
-	MEEK_PROTOCOL_VERSION           = 3
+	MEEK_PROTOCOL_VERSION           = 4
 	MEEK_MAX_REQUEST_PAYLOAD_LENGTH = 65536
 )
 
@@ -234,6 +234,13 @@ type MeekConfig struct {
 	// are added to all meek HTTP requests. An additional header is ignored
 	// when the header name is already present in a meek request.
 	AdditionalHeaders http.Header
+
+	// EnablePayloadPadding and PayloadPadding fields enable and configure
+	// optional padding of empty meek payloads.
+	EnablePayloadPadding          bool
+	PayloadPaddingMinSize         int
+	PayloadPaddingMaxSize         int
+	PayloadPaddingOmitProbability float64
 }
 
 // MeekConn is a network connection that tunnels net.Conn flows over HTTP and supports
@@ -287,6 +294,10 @@ type MeekConn struct {
 	emptySendBuffer         chan *bytes.Buffer
 	partialSendBuffer       chan *bytes.Buffer
 	fullSendBuffer          chan *bytes.Buffer
+
+	requestPaddingState  *protocol.MeekPayloadPaddingState
+	responsePaddingState *protocol.MeekPayloadPaddingState
+	requestPaddingBuffer *bytes.Buffer
 }
 
 func (conn *MeekConn) getCustomParameters() parameters.ParametersAccessor {
@@ -388,6 +399,7 @@ func DialMeek(
 				meekConfig.MeekCookieEncryptionPublicKey,
 				meekConfig.MeekObfuscatedKey,
 				meekConfig.MeekObfuscatorPaddingSeed,
+				meekConfig.EnablePayloadPadding,
 				meekConfig.ClientTunnelProtocol,
 				"")
 		if err != nil {
@@ -739,6 +751,32 @@ func DialMeek(
 	// go routine, only when running in relay mode.
 	if meek.mode == MeekModeRelay {
 
+		if meekConfig.EnablePayloadPadding {
+
+			// Initialize payload padding mode. The meek server will be
+			// signaled, via the meek cookie, to expect request padding and
+			// perform response padding.
+
+			var err error
+			meek.requestPaddingState, err = protocol.NewMeekRequestPayloadPaddingState(
+				meekConfig.MeekObfuscatedKey,
+				meek.cookie.Value,
+				meekConfig.PayloadPaddingOmitProbability,
+				meekConfig.PayloadPaddingMinSize,
+				meekConfig.PayloadPaddingMaxSize)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			meek.responsePaddingState, err = protocol.NewMeekResponsePayloadPaddingState(
+				meekConfig.MeekObfuscatedKey,
+				meek.cookie.Value,
+				0.0, 0, 0)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			meek.requestPaddingBuffer = new(bytes.Buffer)
+		}
+
 		// The main loop of a MeekConn is run in the relay() goroutine.
 		// A MeekConn implements net.Conn concurrency semantics:
 		// "Multiple goroutines may invoke methods on a Conn simultaneously."
@@ -772,8 +810,11 @@ func DialMeek(
 		meek.partialSendBuffer = make(chan *bytes.Buffer, 1)
 		meek.fullSendBuffer = make(chan *bytes.Buffer, 1)
 
-		meek.emptyReceiveBuffer <- new(bytes.Buffer)
-		meek.emptySendBuffer <- new(bytes.Buffer)
+		meek.replaceReceiveBuffer(new(bytes.Buffer))
+
+		// In payload padding mode, a padding prefix placeholder is added to
+		// empty send buffers. This is handled by truncateAndReplaceSendBuffer.
+		meek.truncateAndReplaceSendBuffer(new(bytes.Buffer))
 
 		meek.relayWaitGroup.Add(1)
 		go meek.relay()
@@ -1054,6 +1095,7 @@ func (meek *MeekConn) ObfuscatedRoundTrip(
 		meek.meekCookieEncryptionPublicKey,
 		meek.meekObfuscatedKey,
 		meek.meekObfuscatorPaddingSeed,
+		false,
 		meek.clientTunnelProtocol,
 		endPoint)
 	if err != nil {
@@ -1166,6 +1208,7 @@ func (meek *MeekConn) Write(buffer []byte) (n int, err error) {
 			_, err = sendBuffer.Write(buffer[:writeLen])
 			buffer = buffer[writeLen:]
 		}
+
 		meek.replaceSendBuffer(sendBuffer)
 	}
 	return n, err
@@ -1218,14 +1261,42 @@ func (meek *MeekConn) replaceSendBuffer(sendBuffer *bytes.Buffer) {
 	}
 }
 
+func (meek *MeekConn) truncateAndReplaceSendBuffer(sendBuffer *bytes.Buffer) {
+	sendBuffer.Truncate(0)
+
+	// In payload padding mode, add a placeholder for the payload padding
+	// prefix that's required at the start of all payload request bodies.
+	// Adding a placeholder avoids any memory shifts later.
+
+	if meek.requestPaddingState != nil {
+		for i := 0; i < protocol.MeekPayloadPaddingPrefixSize; i++ {
+			sendBuffer.WriteByte(0)
+		}
+	}
+
+	meek.emptySendBuffer <- sendBuffer
+}
+
 // relay sends and receives tunneled traffic (payload). An HTTP request is
 // triggered when data is in the write queue or at a polling interval.
 // There's a geometric increase, up to a maximum, in the polling interval when
 // no data is exchanged. Only one HTTP request is in flight at a time.
-func (meek *MeekConn) relay() {
+func (meek *MeekConn) relay() (retErr error) {
 	// Note: meek.Close() calls here in relay() are made asynchronously
 	// (using goroutines) since Close() will wait on this WaitGroup.
 	defer meek.relayWaitGroup.Done()
+
+	defer func() {
+
+		// Since MeekConn.relay is invoked as a goroutine, log any error
+		// returns in a notice. On error, close the MeekConn
+		// (asynchronously due to the relayWaitGroup synchronization).
+
+		if retErr != nil {
+			NoticeWarning("%v", errors.Trace(retErr))
+			go meek.Close()
+		}
+	}()
 
 	p := meek.getCustomParameters()
 	interval := prng.JitterDuration(
@@ -1259,7 +1330,76 @@ func (meek *MeekConn) relay() {
 
 		sendPayloadSize := 0
 		if sendBuffer != nil {
+			// In payload padding mode, sendPayloadSize will include the
+			// placeholder padding prefix.
 			sendPayloadSize = sendBuffer.Len()
+		}
+
+		// Send buffers are exchanged back and forth between MeekConn.Write
+		// and MeekConn.relay as the request payload is assembled.
+		//
+		// In the polling case, there is no send buffer, and in payload
+		// padding mode, meek.requestPaddingBuffer is instead used as a
+		// temporary buffer to construct a padded payload. Don't replace
+		// meek.requestPaddingBuffer back into the buffer exchange channels.
+
+		replaceSendBuffer := sendBuffer != nil
+
+		if meek.requestPaddingState != nil {
+
+			// In payload padding mode, set a padding prefix and, for empty
+			// payloads, add a full padding header and padding to empty payloads.
+			//
+			// Retries, if any, are performed in relayRoundTrip using the same
+			// padding bytes; the padding cipher stream state is advanced
+			// only once per payload, here.
+
+			addPadding := sendBuffer == nil
+
+			paddingHeader, err := meek.requestPaddingState.SenderGetNextPadding(
+				addPadding)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			if addPadding {
+
+				if len(paddingHeader) == 0 {
+
+					// SenderGetNextPadding may indicate no padding, including
+					// prefix, at all, so revert to the no-sendBuffer empty
+					// body polling case.
+					sendBuffer = nil
+
+				} else {
+
+					// Full padding case.
+
+					meek.requestPaddingBuffer.Truncate(0)
+					meek.requestPaddingBuffer.Write(paddingHeader)
+
+					sendBuffer = meek.requestPaddingBuffer
+					replaceSendBuffer = false
+				}
+
+			} else {
+
+				// Update the padding prefix placeholder at the start of the payload.
+
+				var err error
+				if len(paddingHeader) != protocol.MeekPayloadPaddingPrefixSize {
+					err = errors.TraceNew("unexpected meek payload padding header size")
+				}
+				if sendBuffer.Len() < protocol.MeekPayloadPaddingPrefixSize+1 {
+					err = errors.TraceNew("unexpected meek send buffer size")
+				}
+				if err != nil {
+					return errors.Trace(err)
+				}
+				for i := 0; i < protocol.MeekPayloadPaddingPrefixSize; i++ {
+					sendBuffer.Bytes()[i] = paddingHeader[i]
+				}
+			}
 		}
 
 		// relayRoundTrip will replace sendBuffer (by calling replaceSendBuffer). This
@@ -1271,8 +1411,8 @@ func (meek *MeekConn) relay() {
 		// still allows meekConn.Write() to unblock before the round trip response is
 		// read.
 
-		receivedPayloadSize, err := meek.relayRoundTrip(sendBuffer)
-
+		receivedPayloadSize, paddingOnly, err := meek.relayRoundTrip(
+			sendBuffer, replaceSendBuffer)
 		if err != nil {
 			select {
 			case <-meek.runCtx.Done():
@@ -1281,9 +1421,7 @@ func (meek *MeekConn) relay() {
 				return
 			default:
 			}
-			NoticeWarning("%s", errors.Trace(err))
-			go meek.Close()
-			return
+			return errors.Trace(err)
 		}
 
 		// Periodically re-dial the underlying TLS/TCP connection
@@ -1293,15 +1431,14 @@ func (meek *MeekConn) relay() {
 			meek.transport.CloseIdleConnections()
 		}
 
-		// Calculate polling interval. When data is received,
-		// immediately request more. Otherwise, schedule next
-		// poll with exponential back off. Jitter and coin
-		// flips are used to avoid trivial, static traffic
-		// timing patterns.
+		// Calculate polling interval. When non-padding data is received,
+		// immediately request more. Otherwise, schedule next poll with
+		// exponential back off. Jitter and coin flips are used to avoid
+		// trivial, static traffic timing patterns.
 
 		p := meek.getCustomParameters()
 
-		if receivedPayloadSize > 0 || sendPayloadSize > 0 {
+		if (receivedPayloadSize > 0 && !paddingOnly) || sendPayloadSize > 0 {
 
 			interval = 0
 
@@ -1432,7 +1569,9 @@ func (meek *MeekConn) scheduleQUICCloseIdle(request *http.Request) {
 }
 
 // relayRoundTrip configures and makes the actual HTTP POST request
-func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
+func (meek *MeekConn) relayRoundTrip(
+	sendBuffer *bytes.Buffer,
+	replaceSendBuffer bool) (int64, bool, error) {
 
 	// Retries are made when the round trip fails. This adds resiliency
 	// to connection interruption and intermittent failures.
@@ -1469,9 +1608,8 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 	defer func() {
 		// Ensure sendBuffer is replaced, even in error code paths.
-		if sendBuffer != nil {
-			sendBuffer.Truncate(0)
-			meek.replaceSendBuffer(sendBuffer)
+		if sendBuffer != nil && replaceSendBuffer {
+			meek.truncateAndReplaceSendBuffer(sendBuffer)
 		}
 	}()
 
@@ -1487,6 +1625,9 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 	serverAcknowledgedRequestPayload := false
 
 	receivedPayloadSize := int64(0)
+	totalPaddingSize := int64(0)
+
+	morePadding := meek.responsePaddingState != nil
 
 	for try := 0; ; try++ {
 
@@ -1524,7 +1665,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			contentLength)
 		if err != nil {
 			// Don't retry when can't initialize a Request
-			return 0, errors.Trace(err)
+			return 0, false, errors.Trace(err)
 		}
 
 		expectedStatusCode := http.StatusOK
@@ -1550,7 +1691,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 				// done with it. MeekConn.Write will exit on Done and not hang
 				// awaiting sendBuffer.
 				sendBuffer = nil
-				return 0, errors.TraceNew("meek connection has closed")
+				return 0, false, errors.TraceNew("meek connection has closed")
 			}
 		}
 
@@ -1558,7 +1699,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			select {
 			case <-meek.runCtx.Done():
 				// Exit without retrying and without logging error.
-				return 0, errors.Trace(err)
+				return 0, false, errors.Trace(err)
 			default:
 			}
 			NoticeWarning("meek round trip failed: %s", err)
@@ -1568,12 +1709,14 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		if err == nil {
 
 			if response.StatusCode != expectedStatusCode &&
-				// Certain http servers return 200 OK where we expect 206, so accept that.
-				!(expectedStatusCode == http.StatusPartialContent && response.StatusCode == http.StatusOK) {
+				// Certain http servers return 200 OK where we expect 206, so
+				// accept that.
+				!(expectedStatusCode == http.StatusPartialContent &&
+					response.StatusCode == http.StatusOK) {
 
 				// Don't retry when the status code is incorrect
 				response.Body.Close()
-				return 0, errors.Tracef(
+				return 0, false, errors.Tracef(
 					"unexpected status code: %d instead of %d",
 					response.StatusCode, expectedStatusCode)
 			}
@@ -1594,12 +1737,53 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			// buffer may be replaced; this allows meekConn.Write() to unblock
 			// and start buffering data for the next round trip while still
 			// reading the current round trip response.
-			if sendBuffer != nil {
+			if sendBuffer != nil && replaceSendBuffer {
 				// Assumes signaller.AwaitClosed is called above, so
 				// sendBuffer will no longer be accessed by RoundTrip.
-				sendBuffer.Truncate(0)
-				meek.replaceSendBuffer(sendBuffer)
+				meek.truncateAndReplaceSendBuffer(sendBuffer)
 				sendBuffer = nil
+			}
+
+			if meek.responsePaddingState != nil && morePadding {
+
+				// With retries, the response payload may be read in
+				// increments. In payload padding mode, the start of the
+				// payload contains at least a padding prefix, and
+				// potentially a full padding and padding itself. morePadding
+				// remains true as long as ReceiverConsumePadding indicates
+				// that more padding bytes need to be read and consumed.
+				//
+				// ErrMeekPaddingStateImmediateEOF supports the special case
+				// where an empty payload was left empty with no padding
+				// prefix or padding at all.
+
+				readPaddingSize, more, err := meek.responsePaddingState.
+					ReceiverConsumePadding(response.Body)
+
+				if err == protocol.ErrMeekPaddingStateImmediateEOF {
+
+					// A 0 byte payload with no padding.
+
+					response.Body.Close()
+					// Round trip completed successfully
+					break
+				}
+
+				morePadding = more
+
+				// Add padding bytes read, required for the correct Range
+				// header in case of retry.
+				receivedPayloadSize += readPaddingSize
+
+				totalPaddingSize += readPaddingSize
+
+				if err != nil {
+					NoticeWarning("meek read padding failed: %v", err)
+					response.Body.Close()
+					// ...continue to retry
+					continue
+
+				}
 			}
 
 			readPayloadSize, err := meek.readPayload(response.Body)
@@ -1611,7 +1795,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 			receivedPayloadSize += readPayloadSize
 
 			if err != nil {
-				NoticeWarning("meek read payload failed: %s", err)
+				NoticeWarning("meek read payload failed: %v", err)
 				// ...continue to retry
 			} else {
 				// Round trip completed successfully
@@ -1631,7 +1815,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 
 		if retries >= 1 &&
 			(now.After(retryDeadline) || retryDeadline.Sub(now) <= retryDelay) {
-			return 0, errors.Trace(err)
+			return 0, false, errors.Trace(err)
 		}
 		retries += 1
 
@@ -1641,7 +1825,7 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		case <-delayTimer.C:
 		case <-meek.runCtx.Done():
 			delayTimer.Stop()
-			return 0, errors.Trace(err)
+			return 0, false, errors.Trace(err)
 		}
 
 		// Increase the next delay, to back off and avoid excessive
@@ -1654,7 +1838,10 @@ func (meek *MeekConn) relayRoundTrip(sendBuffer *bytes.Buffer) (int64, error) {
 		}
 	}
 
-	return receivedPayloadSize, nil
+	paddingOnly := totalPaddingSize > 0 &&
+		receivedPayloadSize <= totalPaddingSize
+
+	return receivedPayloadSize, paddingOnly, nil
 }
 
 // Add additional headers to the HTTP request using the same method we use for adding
@@ -1731,6 +1918,7 @@ func makeMeekObfuscationValues(
 	meekCookieEncryptionPublicKey string,
 	meekObfuscatedKey string,
 	meekObfuscatorPaddingPRNGSeed *prng.Seed,
+	enablePayloadPadding bool,
 	clientTunnelProtocol string,
 	endPoint string,
 
@@ -1747,6 +1935,7 @@ func makeMeekObfuscationValues(
 
 	cookieData := &protocol.MeekCookieData{
 		MeekProtocolVersion:  MEEK_PROTOCOL_VERSION,
+		EnablePayloadPadding: enablePayloadPadding,
 		ClientTunnelProtocol: clientTunnelProtocol,
 		EndPoint:             endPoint,
 	}
@@ -1852,6 +2041,15 @@ func makeMeekObfuscationValues(
 
 		limitRequestPayloadLength = limitRequestPayloadLengthPRNG.Range(
 			minLength, maxLength)
+
+		// In payload padding mode, the maximum request payload size is
+		// adjusted to allow for the padding prefix and at least one real
+		// payload byte.
+		if enablePayloadPadding &&
+			limitRequestPayloadLength == protocol.MeekPayloadPaddingPrefixSize {
+
+			limitRequestPayloadLength += 1
+		}
 
 		minPadding := p.Int(parameters.MeekMinTLSPadding)
 		maxPadding := p.Int(parameters.MeekMaxTLSPadding)
