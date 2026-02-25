@@ -14,5 +14,5 @@ find . -mindepth 1 -maxdepth 1 -type d -name 'ca.psiphon.*' | sed -e 's|^\./||' 
   pkg="${src##*.}"
 
   mkdir -p "../pb/${pkg}" || fatal "failed to create compiled protobuf directory: ../pb/${pkg}"
-  protoc --go_out="../pb/${pkg}/" --go_opt="module=github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/${pkg}" "${src}/"*.proto
+  protoc --go_out="../pb/${pkg}/" --go_opt="module=github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server/pb/${pkg}" --descriptor_set_out="../pb/${pkg}/${pkg}.desc" --include_imports "${src}/"*.proto
 done
