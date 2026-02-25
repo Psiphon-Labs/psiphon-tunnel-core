@@ -51,4 +51,8 @@ message InproxyBroker {
     optional string meek_server_http_version = 137;
     optional int64 pending_answers_size = 138;
     optional int64 offer_deadline = 139;
+    optional int64 max_common_clients = 140;
+    optional int64 max_personal_clients = 141;
+    optional bool has_IPv4 = 142;
+    optional int64 match_duration = 143;
 }

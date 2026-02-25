@@ -32,7 +32,7 @@ replace github.com/pion/ice/v2 => ./replace/ice
 replace github.com/pion/webrtc/v3 => ./replace/webrtc
 
 require (
-	filippo.io/edwards25519 v1.1.0
+	filippo.io/edwards25519 v1.2.0
 	github.com/Jigsaw-Code/outline-sdk v0.0.16
 	github.com/Jigsaw-Code/outline-ss-server v1.8.0
 	github.com/Psiphon-Inc/rotate-safe-writer v0.0.0-20210303140923-464a7a37606e

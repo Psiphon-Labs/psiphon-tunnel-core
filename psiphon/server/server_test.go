@@ -3277,6 +3277,8 @@ func checkExpectedServerTunnelLogFields(
 			"inproxy_proxy_network_type",
 			"inproxy_proxy_protocol_version",
 			"inproxy_proxy_nat_type",
+			"inproxy_proxy_max_common_clients",
+			"inproxy_proxy_max_personal_clients",
 			"inproxy_proxy_max_clients",
 			"inproxy_proxy_connecting_clients",
 			"inproxy_proxy_connected_clients",

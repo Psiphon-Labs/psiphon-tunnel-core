@@ -94,5 +94,6 @@ message InproxyDialParams {
     optional string inproxy_webrtc_stun_server_RFC5780_resolved_ip_address = 87;
     optional string inproxy_webrtc_stun_server_resolved_ip_address = 88;
     optional bool inproxy_webrtc_use_media_streams = 89;
+    optional int64 inproxy_proxy_max_common_clients = 90;
+    optional int64 inproxy_proxy_max_personal_clients = 91;
 }
-
