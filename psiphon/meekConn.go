@@ -1778,11 +1778,18 @@ func (meek *MeekConn) relayRoundTrip(
 				totalPaddingSize += readPaddingSize
 
 				if err != nil {
-					NoticeWarning("meek read padding failed: %v", err)
 					response.Body.Close()
+
+					if more == false {
+						// Fail on unexpected errors including
+						// "unknown padding prefix".
+						return 0, false, errors.Trace(err)
+					}
+
+					NoticeWarning("meek read padding failed: %v", err)
+
 					// ...continue to retry
 					continue
-
 				}
 			}
 

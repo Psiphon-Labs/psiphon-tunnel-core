@@ -222,10 +222,12 @@ func testMeekResiliency(
 	useHTTPNormalizer bool,
 	enablePayloadPadding bool) {
 
-	upstreamData := make([]byte, 5*MB)
+	totalSize := 5 * MB
+
+	upstreamData := make([]byte, totalSize)
 	_, _ = rand.Read(upstreamData)
 
-	downstreamData := make([]byte, 5*MB)
+	downstreamData := make([]byte, totalSize)
 	_, _ = rand.Read(downstreamData)
 
 	minWrite, maxWrite := 1, 128*KB
@@ -298,6 +300,11 @@ func testMeekResiliency(
 				protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK: 0,
 			},
 			runningProtocols: []string{protocol.TUNNEL_PROTOCOL_UNFRONTED_MEEK},
+
+			// Default MeekCachedResponsePoolBufferSize, 64K, may be
+			// insufficient for total downstream. Leave private pool at
+			// default size but add sufficiently large shared buffers.
+			MeekCachedResponsePoolBufferSize: totalSize,
 		},
 		TrafficRulesSet: &TrafficRulesSet{},
 	}
