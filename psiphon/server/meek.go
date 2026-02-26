@@ -839,8 +839,7 @@ func (server *MeekServer) ServeHTTP(responseWriter http.ResponseWriter, request 
 	var responseError error
 
 	if isRetry &&
-		(hasCompleteCachedResponse || position > 0) &&
-		allowCachedResponse {
+		(position > 0 || (hasCompleteCachedResponse && allowCachedResponse)) {
 
 		if !session.cachedResponse.HasPosition(position) {
 			greaterThanSwapInt64(&session.metricCachedResponseMissPosition, int64(position))
