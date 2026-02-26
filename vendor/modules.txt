@@ -104,7 +104,7 @@ github.com/cespare/xxhash
 # github.com/cheekybits/genny v0.0.0-20170328200008-9127e812e1e9
 ## explicit
 github.com/cheekybits/genny/generic
-# github.com/cloudflare/circl v1.6.1
+# github.com/cloudflare/circl v1.6.3
 ## explicit; go 1.22.0
 github.com/cloudflare/circl/dh/x25519
 github.com/cloudflare/circl/dh/x448
