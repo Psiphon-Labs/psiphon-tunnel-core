@@ -38,6 +38,271 @@ func TestPush(t *testing.T) {
 	}
 }
 
+func TestMakePushPayloads_FFD_RespectsMaxSize(t *testing.T) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := makeTestPrioritizedServerEntries(40, func(i int) int {
+		return (i % 7) * 32
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	maxSinglePayloadSize := 0
+	for _, entry := range entries {
+		result, err := MakePushPayloads(
+			obfuscationKey,
+			0,
+			0,
+			publicKey,
+			privateKey,
+			1*time.Hour,
+			[]*PrioritizedServerEntry{entry},
+			0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Payloads) != 1 {
+			t.Fatalf("unexpected single-entry payload count: %d", len(result.Payloads))
+		}
+		if len(result.Payloads[0]) > maxSinglePayloadSize {
+			maxSinglePayloadSize = len(result.Payloads[0])
+		}
+	}
+
+	maxPayloadSizeBytes := maxSinglePayloadSize * 4
+
+	result, err := MakePushPayloads(
+		obfuscationKey,
+		0,
+		0,
+		publicKey,
+		privateKey,
+		1*time.Hour,
+		entries,
+		maxPayloadSizeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.SkippedIndexes) != 0 {
+		t.Fatalf("unexpected skipped entries: %d", len(result.SkippedIndexes))
+	}
+
+	if len(result.Payloads) <= 1 {
+		t.Fatalf("expected multiple payloads, got %d", len(result.Payloads))
+	}
+
+	for i, payload := range result.Payloads {
+		if len(payload) > maxPayloadSizeBytes {
+			t.Fatalf("payload %d exceeded max size: %d > %d", i, len(payload), maxPayloadSizeBytes)
+		}
+	}
+
+	importedSources, err := importPayloadsAndCountSources(
+		obfuscationKey,
+		publicKey,
+		result.Payloads)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(importedSources) != len(entries) {
+		t.Fatalf("unexpected unique import count: %d", len(importedSources))
+	}
+	for source, count := range importedSources {
+		if count != 1 {
+			t.Fatalf("source %s imported %d times", source, count)
+		}
+	}
+}
+
+func TestMakePushPayloads_FFD_SkipsOversizeEntry(t *testing.T) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := makeTestPrioritizedServerEntries(12, func(_ int) int {
+		return 0
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oversizeEntry, err := makeTestPrioritizedServerEntry(1000000, 300000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oversizeIndex := len(entries)
+	entries = append(entries, oversizeEntry)
+
+	maxPayloadSizeBytes := 4096
+	result, err := MakePushPayloads(
+		obfuscationKey,
+		0,
+		0,
+		publicKey,
+		privateKey,
+		1*time.Hour,
+		entries,
+		maxPayloadSizeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.SkippedIndexes) != 1 {
+		t.Fatalf("unexpected skipped index count: %d", len(result.SkippedIndexes))
+	}
+	if result.SkippedIndexes[0] != oversizeIndex {
+		t.Fatalf("unexpected skipped index: %d", result.SkippedIndexes[0])
+	}
+
+	for i, payload := range result.Payloads {
+		if len(payload) > maxPayloadSizeBytes {
+			t.Fatalf("payload %d exceeded max size: %d > %d", i, len(payload), maxPayloadSizeBytes)
+		}
+	}
+
+	importedSources, err := importPayloadsAndCountSources(
+		obfuscationKey,
+		publicKey,
+		result.Payloads)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(importedSources) != len(entries)-1 {
+		t.Fatalf("unexpected import count: %d", len(importedSources))
+	}
+	if _, ok := importedSources[oversizeEntry.Source]; ok {
+		t.Fatalf("oversize entry was imported")
+	}
+}
+
+func TestMakePushPayloads_FFD_StrictCapWithPadding(t *testing.T) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := makeTestPrioritizedServerEntries(30, func(i int) int {
+		return (i % 5) * 16
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	minPadding := 1024
+	maxPadding := 1024
+	maxSinglePayloadSize := 0
+	for _, entry := range entries {
+		result, err := MakePushPayloads(
+			obfuscationKey,
+			minPadding,
+			maxPadding,
+			publicKey,
+			privateKey,
+			1*time.Hour,
+			[]*PrioritizedServerEntry{entry},
+			0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Payloads[0]) > maxSinglePayloadSize {
+			maxSinglePayloadSize = len(result.Payloads[0])
+		}
+	}
+
+	maxPayloadSizeBytes := maxSinglePayloadSize * 3
+	result, err := MakePushPayloads(
+		obfuscationKey,
+		minPadding,
+		maxPadding,
+		publicKey,
+		privateKey,
+		1*time.Hour,
+		entries,
+		maxPayloadSizeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.SkippedIndexes) != 0 {
+		t.Fatalf("unexpected skipped entries: %d", len(result.SkippedIndexes))
+	}
+
+	for i, payload := range result.Payloads {
+		if len(payload) > maxPayloadSizeBytes {
+			t.Fatalf("payload %d exceeded max size: %d > %d", i, len(payload), maxPayloadSizeBytes)
+		}
+	}
+}
+
+func TestMakePushPayloads_MetadataIntegrity(t *testing.T) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := makeTestPrioritizedServerEntries(16, func(_ int) int {
+		return 0
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oversizeEntry, err := makeTestPrioritizedServerEntry(2000000, 300000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries = append(entries, oversizeEntry)
+
+	result, err := MakePushPayloads(
+		obfuscationKey,
+		0,
+		0,
+		publicKey,
+		privateKey,
+		1*time.Hour,
+		entries,
+		4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.Payloads) != len(result.PayloadEntryCounts) {
+		t.Fatalf("payload/entry-count mismatch: %d vs %d", len(result.Payloads), len(result.PayloadEntryCounts))
+	}
+
+	totalPayloadEntries := 0
+	for _, payloadEntryCount := range result.PayloadEntryCounts {
+		totalPayloadEntries += payloadEntryCount
+	}
+
+	if totalPayloadEntries+len(result.SkippedIndexes) != len(entries) {
+		t.Fatalf("metadata does not account for all entries")
+	}
+
+	seenSkippedIndexes := make(map[int]bool)
+	for _, skippedIndex := range result.SkippedIndexes {
+		if skippedIndex < 0 || skippedIndex >= len(entries) {
+			t.Fatalf("invalid skipped index: %d", skippedIndex)
+		}
+		if seenSkippedIndexes[skippedIndex] {
+			t.Fatalf("duplicate skipped index: %d", skippedIndex)
+		}
+		seenSkippedIndexes[skippedIndex] = true
+	}
+}
+
 func runTestPush() error {
 
 	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
@@ -53,67 +318,41 @@ func runTestPush() error {
 		return errors.Trace(err)
 	}
 
-	var serverEntries []*PrioritizedServerEntry
+	serverEntries, err := makeTestPrioritizedServerEntries(128, func(_ int) int {
+		return 0
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-	for i := 0; i < 128; i++ {
-
-		serverEntry := &protocol.ServerEntry{
-			Tag:                  prng.Base64String(32),
-			IpAddress:            fmt.Sprintf("192.0.2.%d", i),
-			SshUsername:          prng.HexString(8),
-			SshPassword:          prng.HexString(32),
-			SshHostKey:           prng.Base64String(280),
-			SshObfuscatedPort:    prng.Range(1, 65535),
-			SshObfuscatedKey:     prng.HexString(32),
-			Capabilities:         []string{"OSSH"},
-			Region:               prng.HexString(1),
-			ProviderID:           strings.ToUpper(prng.HexString(8)),
-			ConfigurationVersion: 0,
-			Signature:            prng.Base64String(80),
-		}
-
-		serverEntryFields, err := serverEntry.GetServerEntryFields()
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		packed, err := protocol.EncodePackedServerEntryFields(serverEntryFields)
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		serverEntries = append(serverEntries, &PrioritizedServerEntry{
-			ServerEntryFields: packed,
-			Source:            fmt.Sprintf("source-%d", i),
-			PrioritizeDial:    i < 32 || i >= 96,
-		})
+	expectPrioritizeDial := make(map[string]bool)
+	for _, serverEntry := range serverEntries {
+		expectPrioritizeDial[serverEntry.Source] = serverEntry.PrioritizeDial
 	}
 
 	// Test: successful import
 
-	pushServerEntries := [][]*PrioritizedServerEntry{
-		serverEntries[0:32], serverEntries[32:64],
-		serverEntries[64:96], serverEntries[96:128],
-	}
-
-	payloads, err := MakePushPayloads(
+	result, err := MakePushPayloads(
 		obfuscationKey,
 		minPadding,
 		maxPadding,
 		publicKey,
 		privateKey,
 		1*time.Hour,
-		pushServerEntries)
+		serverEntries,
+		0)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	if len(payloads) != len(pushServerEntries) {
+	if len(result.Payloads) != 1 {
 		return errors.TraceNew("unexpected payload count")
 	}
+	if len(result.PayloadEntryCounts) != 1 || result.PayloadEntryCounts[0] != len(serverEntries) {
+		return errors.TraceNew("unexpected payload entry counts")
+	}
 
-	expectPrioritizeDial := true
-
+	seenSources := make(map[string]int)
 	importer := func(
 		packedServerEntryFields protocol.PackedServerEntryFields,
 		source string,
@@ -126,16 +365,19 @@ func runTestPush() error {
 		if !strings.HasPrefix(serverEntryFields["ipAddress"].(string), "192.0.2") {
 			return errors.TraceNew("unexpected server entry IP address")
 		}
-		if prioritizeDial != expectPrioritizeDial {
+		expect, ok := expectPrioritizeDial[source]
+		if !ok {
+			return errors.TraceNew("unexpected source")
+		}
+		if prioritizeDial != expect {
 			return errors.TraceNew("unexpected prioritize dial")
 		}
+		seenSources[source] += 1
 		return nil
 	}
 
-	for i, payload := range payloads {
-
-		expectPrioritizeDial = i == 0 || i == 3
-
+	totalImported := 0
+	for _, payload := range result.Payloads {
 		n, err := ImportPushPayload(
 			obfuscationKey,
 			publicKey,
@@ -144,22 +386,29 @@ func runTestPush() error {
 		if err != nil {
 			return errors.Trace(err)
 		}
+		totalImported += n
+	}
 
-		if n != 32 {
-			return errors.TraceNew("unexpected import count")
+	if totalImported != len(serverEntries) {
+		return errors.TraceNew("unexpected import count")
+	}
+	for source, count := range seenSources {
+		if count != 1 {
+			return errors.Tracef("source imported unexpected number of times: %s=%d", source, count)
 		}
 	}
 
 	// Test: expired
 
-	payloads, err = MakePushPayloads(
+	result, err = MakePushPayloads(
 		obfuscationKey,
 		minPadding,
 		maxPadding,
 		publicKey,
 		privateKey,
 		1*time.Microsecond,
-		pushServerEntries)
+		serverEntries,
+		0)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -169,7 +418,7 @@ func runTestPush() error {
 	_, err = ImportPushPayload(
 		obfuscationKey,
 		publicKey,
-		payloads[0],
+		result.Payloads[0],
 		importer)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
@@ -177,14 +426,15 @@ func runTestPush() error {
 
 	// Test: invalid signature
 
-	payloads, err = MakePushPayloads(
+	result, err = MakePushPayloads(
 		obfuscationKey,
 		minPadding,
 		maxPadding,
 		publicKey,
 		incorrectPrivateKey,
 		1*time.Hour,
-		pushServerEntries)
+		serverEntries,
+		0)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -192,7 +442,7 @@ func runTestPush() error {
 	_, err = ImportPushPayload(
 		obfuscationKey,
 		publicKey,
-		payloads[0],
+		result.Payloads[0],
 		importer)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
@@ -200,14 +450,15 @@ func runTestPush() error {
 
 	// Test: wrong signature key
 
-	payloads, err = MakePushPayloads(
+	result, err = MakePushPayloads(
 		obfuscationKey,
 		minPadding,
 		maxPadding,
 		publicKey,
 		privateKey,
 		1*time.Hour,
-		pushServerEntries)
+		serverEntries,
+		0)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -215,7 +466,7 @@ func runTestPush() error {
 	_, err = ImportPushPayload(
 		obfuscationKey,
 		incorrectPublicKey,
-		payloads[0],
+		result.Payloads[0],
 		importer)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
@@ -223,28 +474,158 @@ func runTestPush() error {
 
 	// Test: mutate obfuscation layer
 
-	payloads, err = MakePushPayloads(
+	result, err = MakePushPayloads(
 		obfuscationKey,
 		minPadding,
 		maxPadding,
 		publicKey,
 		privateKey,
 		1*time.Hour,
-		pushServerEntries)
+		serverEntries,
+		0)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	payloads[0][0] = ^payloads[0][0]
+	result.Payloads[0][0] = ^result.Payloads[0][0]
 
 	_, err = ImportPushPayload(
 		obfuscationKey,
 		publicKey,
-		payloads[0],
+		result.Payloads[0],
 		importer)
 	if err == nil {
 		return errors.TraceNew("unexpected success")
 	}
 
 	return nil
+}
+
+func makeTestPrioritizedServerEntries(
+	count int,
+	sourceExtraBytes func(index int) int) ([]*PrioritizedServerEntry, error) {
+
+	serverEntries := make([]*PrioritizedServerEntry, 0, count)
+	for i := range count {
+		entry, err := makeTestPrioritizedServerEntry(i, sourceExtraBytes(i))
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		serverEntries = append(serverEntries, entry)
+	}
+
+	return serverEntries, nil
+}
+
+func makeTestPrioritizedServerEntry(
+	index int,
+	sourceExtraBytes int) (*PrioritizedServerEntry, error) {
+
+	serverEntry := &protocol.ServerEntry{
+		Tag:                  prng.Base64String(32),
+		IpAddress:            fmt.Sprintf("192.0.2.%d", index%255),
+		SshUsername:          prng.HexString(8),
+		SshPassword:          prng.HexString(32),
+		SshHostKey:           prng.Base64String(280),
+		SshObfuscatedPort:    prng.Range(1, 65535),
+		SshObfuscatedKey:     prng.HexString(32),
+		Capabilities:         []string{"OSSH"},
+		Region:               prng.HexString(1),
+		ProviderID:           strings.ToUpper(prng.HexString(8)),
+		ConfigurationVersion: 0,
+		Signature:            prng.Base64String(80),
+	}
+
+	serverEntryFields, err := serverEntry.GetServerEntryFields()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	packed, err := protocol.EncodePackedServerEntryFields(serverEntryFields)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	source := fmt.Sprintf("source-%d", index)
+	if sourceExtraBytes > 0 {
+		source = source + strings.Repeat("s", sourceExtraBytes)
+	}
+
+	return &PrioritizedServerEntry{
+		ServerEntryFields: packed,
+		Source:            source,
+		PrioritizeDial:    index < 32 || index >= 96,
+	}, nil
+}
+
+func importPayloadsAndCountSources(
+	obfuscationKey string,
+	signaturePublicKey string,
+	payloads [][]byte) (map[string]int, error) {
+
+	sourceCounts := make(map[string]int)
+	importer := func(
+		packedServerEntryFields protocol.PackedServerEntryFields,
+		source string,
+		_ bool) error {
+
+		_, err := protocol.DecodePackedServerEntryFields(packedServerEntryFields)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		sourceCounts[source] += 1
+		return nil
+	}
+
+	for _, payload := range payloads {
+		_, err := ImportPushPayload(
+			obfuscationKey,
+			signaturePublicKey,
+			payload,
+			importer)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	return sourceCounts, nil
+}
+
+// BenchmarkMakePushPayloads-16    	   19814	     59170 ns/op	   70691 B/op	     248 allocs/op
+// BenchmarkMakePushPayloads-16    	    1027	   1226358 ns/op	  374154 B/op	    2311 allocs/op
+
+func BenchmarkMakePushPayloads(b *testing.B) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// Create 10 server entries with sizes ranging from ~700 to ~2500 bytes.
+	// Base entry is ~500-700 bytes, so add 0-2000 extra bytes to source field.
+	entries, err := makeTestPrioritizedServerEntries(10, func(i int) int {
+		// Vary size from 0 to 2000 bytes across the 10 entries
+		return i * 200
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	maxPayloadSizeBytes := 4096
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := MakePushPayloads(
+			obfuscationKey,
+			0,
+			0,
+			publicKey,
+			privateKey,
+			1*time.Hour,
+			entries,
+			maxPayloadSizeBytes)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

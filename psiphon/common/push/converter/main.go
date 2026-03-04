@@ -135,20 +135,20 @@ func convert(
 				})
 		}
 
-		payloads, err := push.MakePushPayloads(
+		result, err := push.MakePushPayloads(
 			obfuscationKey,
 			minPadding,
 			maxPadding,
 			signaturePublicKey,
 			signaturePrivateKey,
 			ttl,
-			[][]*push.PrioritizedServerEntry{
-				prioritizedServerEntries})
+			prioritizedServerEntries,
+			0)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		os.Stdout.Write(payloads[0])
+		os.Stdout.Write(result.Payloads[0])
 		return nil
 	}
 

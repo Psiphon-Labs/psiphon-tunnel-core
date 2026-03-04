@@ -37,6 +37,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"sort"
 	"time"
 
 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common/errors"
@@ -48,6 +49,7 @@ import (
 const (
 	obfuscationKeySize           = 32
 	signaturePublicKeyDigestSize = 8
+	maxPaddingLimit              = 65535
 )
 
 // Payload is a push payload, consisting of a list of server entries. To
@@ -72,6 +74,39 @@ type PrioritizedServerEntry struct {
 	ServerEntryFields protocol.PackedServerEntryFields `cbor:"1,keyasint,omitempty"`
 	Source            string                           `cbor:"2,keyasint,omitempty"`
 	PrioritizeDial    bool                             `cbor:"3,keyasint,omitempty"`
+}
+
+// MakePushPayloadsResult is the output from MakePushPayloads.
+type MakePushPayloadsResult struct {
+	// Payloads contains generated obfuscated push payloads.
+	Payloads [][]byte
+	// PayloadEntryCounts contains the number of entries in each payload, aligned
+	// by index with Payloads.
+	PayloadEntryCounts []int
+	// SkippedIndexes contains original input indexes for entries that could not
+	// fit into a payload when max payload size is enforced.
+	SkippedIndexes []int
+}
+
+type payloadEncoder struct {
+	aead              cipher.AEAD
+	privateKey        ed25519.PrivateKey
+	publicKeyID       []byte
+	nonceBuffer       []byte
+	signatureBuffer   []byte
+	obfuscationBuffer []byte
+	paddingBuffer     []byte
+}
+
+type sortablePrioritizedServerEntry struct {
+	entry         *PrioritizedServerEntry
+	originalIndex int
+	sizeEstimate  int
+}
+
+type payloadBin struct {
+	entries     []*PrioritizedServerEntry
+	paddingSize int
 }
 
 // ServerEntryImporter is a callback that is invoked for each server entry in
@@ -211,7 +246,15 @@ func ImportPushPayload(
 	return imported, nil
 }
 
-// MakePushPayloads generates batches of push payloads.
+// MakePushPayloads generates obfuscated push payloads from prioritized server
+// entries.
+//
+// When maxPayloadSizeBytes <= 0, all entries are encoded into a single payload.
+//
+// When maxPayloadSizeBytes > 0, entries are packed into multiple payloads using
+// a FFD (first-fit decreasing) strategy based on measured encoded payload sizes.
+// Entries that cannot fit by themselves under maxPayloadSizeBytes are skipped
+// and reported in the returned result metadata.
 func MakePushPayloads(
 	payloadObfuscationKey string,
 	minPadding int,
@@ -219,7 +262,10 @@ func MakePushPayloads(
 	payloadSignaturePublicKey string,
 	payloadSignaturePrivateKey string,
 	TTL time.Duration,
-	prioritizedServerEntries [][]*PrioritizedServerEntry) ([][]byte, error) {
+	prioritizedServerEntries []*PrioritizedServerEntry,
+	maxPayloadSizeBytes int) (MakePushPayloadsResult, error) {
+
+	result := MakePushPayloadsResult{}
 
 	obfuscationKey, err := base64.StdEncoding.DecodeString(
 		payloadObfuscationKey)
@@ -227,7 +273,7 @@ func MakePushPayloads(
 		err = errors.TraceNew("unexpected obfuscation key size")
 	}
 	if err != nil {
-		return nil, errors.Trace(err)
+		return result, errors.Trace(err)
 	}
 
 	publicKey, err := base64.StdEncoding.DecodeString(
@@ -236,7 +282,7 @@ func MakePushPayloads(
 		err = errors.TraceNew("unexpected signature public key size")
 	}
 	if err != nil {
-		return nil, errors.Trace(err)
+		return result, errors.Trace(err)
 	}
 
 	privateKey, err := base64.StdEncoding.DecodeString(
@@ -245,15 +291,135 @@ func MakePushPayloads(
 		err = errors.TraceNew("unexpected signature private key size")
 	}
 	if err != nil {
-		return nil, errors.Trace(err)
+		return result, errors.Trace(err)
+	}
+
+	if minPadding > maxPadding || maxPadding > maxPaddingLimit {
+		return result, errors.TraceNew("invalid min/max padding")
+	}
+
+	encoder, err := newPayloadEncoder(obfuscationKey, publicKey, privateKey)
+	if err != nil {
+		return result, errors.Trace(err)
 	}
 
 	expires := time.Now().Add(TTL).UTC()
 
-	maxPaddingLimit := 65535
-	if minPadding > maxPadding || maxPadding > maxPaddingLimit {
-		return nil, errors.TraceNew("invalid min/max padding")
+	// maxPayloadSizeBytes <= 0 means no payload size cap is enforced.
+	if maxPayloadSizeBytes <= 0 {
+		paddingSize := prng.Range(minPadding, maxPadding)
+		payload, err := encoder.buildObfuscatedPayload(
+			prioritizedServerEntries, expires, paddingSize)
+		if err != nil {
+			return result, errors.Trace(err)
+		}
+		result.Payloads = append(result.Payloads, payload)
+		result.PayloadEntryCounts = append(
+			result.PayloadEntryCounts, len(prioritizedServerEntries))
+		return result, nil
 	}
+
+	if len(prioritizedServerEntries) == 0 {
+		return result, nil
+	}
+
+	// Estimate the payload size for each PriotizedServerEntry.
+	entries := make(
+		[]sortablePrioritizedServerEntry, 0, len(prioritizedServerEntries))
+	for i, entry := range prioritizedServerEntries {
+		sizeEstimate, err := encoder.measureObfuscatedPayloadSize(
+			[]*PrioritizedServerEntry{entry}, expires, 0)
+		if err != nil {
+			return result, errors.Trace(err)
+		}
+		entries = append(entries, sortablePrioritizedServerEntry{
+			entry:         entry,
+			originalIndex: i,
+			sizeEstimate:  sizeEstimate,
+		})
+	}
+
+	// Sort by decreasing size
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].sizeEstimate == entries[j].sizeEstimate {
+			return entries[i].originalIndex < entries[j].originalIndex
+		}
+		return entries[i].sizeEstimate > entries[j].sizeEstimate
+	})
+
+	// Worst-case each PrioritizedServerEntry gets it's own bin.
+	bins := make([]payloadBin, 0, len(entries))
+
+	for _, sortableEntry := range entries {
+
+		// Try to fit server entry into the first bin that has space.
+		// Note that there are no bins on the first loop.
+		placed := false
+		for i := range bins {
+			candidateEntries := append(
+				append([]*PrioritizedServerEntry(nil), bins[i].entries...),
+				sortableEntry.entry)
+			size, err := encoder.measureObfuscatedPayloadSize(
+				candidateEntries, expires, bins[i].paddingSize)
+			if err != nil {
+				return result, errors.Trace(err)
+			}
+			if size <= maxPayloadSizeBytes {
+				bins[i].entries = append(bins[i].entries, sortableEntry.entry)
+				placed = true
+				break
+			}
+		}
+
+		if placed {
+			continue
+		}
+
+		// server entry did not fit into existing bins,
+		// create a new bin with a random padding.
+		paddingSize := prng.Range(minPadding, maxPadding)
+		size, err := encoder.measureObfuscatedPayloadSize(
+			[]*PrioritizedServerEntry{sortableEntry.entry}, expires, paddingSize)
+		if err != nil {
+			return result, errors.Trace(err)
+		}
+		if size > maxPayloadSizeBytes {
+			result.SkippedIndexes = append(
+				result.SkippedIndexes, sortableEntry.originalIndex)
+			continue
+		}
+
+		bins = append(bins, payloadBin{
+			entries:     []*PrioritizedServerEntry{sortableEntry.entry},
+			paddingSize: paddingSize,
+		})
+	}
+
+	result.Payloads = make([][]byte, 0, len(bins))
+	result.PayloadEntryCounts = make([]int, 0, len(bins))
+
+	for _, bin := range bins {
+		payload, err := encoder.buildObfuscatedPayload(
+			bin.entries, expires, bin.paddingSize)
+		if err != nil {
+			return result, errors.Trace(err)
+		}
+		if len(payload) > maxPayloadSizeBytes {
+			return result, errors.TraceNew(
+				"internal error: payload size exceeds max")
+		}
+		result.Payloads = append(result.Payloads, payload)
+		result.PayloadEntryCounts = append(
+			result.PayloadEntryCounts, len(bin.entries))
+	}
+
+	return result, nil
+}
+
+func newPayloadEncoder(
+	obfuscationKey []byte,
+	publicKey []byte,
+	privateKey []byte) (*payloadEncoder, error) {
 
 	blockCipher, err := aes.NewCipher(obfuscationKey)
 	if err != nil {
@@ -266,67 +432,96 @@ func MakePushPayloads(
 	}
 
 	publicKeyDigest := sha256.Sum256(publicKey)
-	publicKeyID := publicKeyDigest[:signaturePublicKeyDigestSize]
 
-	// Reuse buffers to reduce some allocations.
-	var signatureBuffer []byte
-	var obfuscationBuffer []byte
-	nonceBuffer := make([]byte, aead.NonceSize())
-	var paddingBuffer []byte
+	return &payloadEncoder{
+		aead:        aead,
+		privateKey:  privateKey,
+		publicKeyID: publicKeyDigest[:signaturePublicKeyDigestSize],
+		nonceBuffer: make([]byte, aead.NonceSize()),
+	}, nil
+}
 
-	obfuscatedPayloads := [][]byte{}
+func (encoder *payloadEncoder) buildObfuscatedPayload(
+	prioritizedServerEntries []*PrioritizedServerEntry,
+	expires time.Time,
+	paddingSize int) ([]byte, error) {
 
-	for _, p := range prioritizedServerEntries {
-
-		payload := Payload{
-			Expires:                  expires,
-			PrioritizedServerEntries: p,
-		}
-
-		cborPayload, err := protocol.CBOREncoding.Marshal(&payload)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		signature := ed25519.Sign(privateKey, cborPayload)
-
-		signatureBuffer = signatureBuffer[:0]
-		signatureBuffer = append(signatureBuffer, publicKeyID...)
-		signatureBuffer = append(signatureBuffer, signature...)
-
-		signedPayload := SignedPayload{
-			Signature: signatureBuffer,
-			Payload:   cborPayload,
-		}
-
-		// Padding is an optional part of the obfuscation layer.
-		if maxPadding > 0 {
-			paddingSize := prng.Range(minPadding, maxPadding)
-			if paddingBuffer == nil {
-				paddingBuffer = make([]byte, maxPaddingLimit)
-			}
-			if paddingSize > 0 {
-				signedPayload.Padding = paddingBuffer[0:paddingSize]
-			}
-		}
-
-		cborSignedPayload, err := protocol.CBOREncoding.
-			Marshal(&signedPayload)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-
-		// The faster common/prng is appropriate for obfuscation.
-		prng.Read(nonceBuffer[:])
-
-		obfuscationBuffer = obfuscationBuffer[:0]
-		obfuscationBuffer = append(obfuscationBuffer, nonceBuffer...)
-		obfuscationBuffer = aead.Seal(
-			obfuscationBuffer, nonceBuffer[:], cborSignedPayload, nil)
-
-		obfuscatedPayloads = append(
-			obfuscatedPayloads, append([]byte(nil), obfuscationBuffer...))
+	obfuscatedPayload, err := encoder.makeObfuscatedPayload(
+		prioritizedServerEntries, expires, paddingSize)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
-	return obfuscatedPayloads, nil
+	return append([]byte(nil), obfuscatedPayload...), nil
+}
+
+func (encoder *payloadEncoder) measureObfuscatedPayloadSize(
+	prioritizedServerEntries []*PrioritizedServerEntry,
+	expires time.Time,
+	paddingSize int) (int, error) {
+
+	obfuscatedPayload, err := encoder.makeObfuscatedPayload(
+		prioritizedServerEntries, expires, paddingSize)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	return len(obfuscatedPayload), nil
+}
+
+func (encoder *payloadEncoder) makeObfuscatedPayload(
+	prioritizedServerEntries []*PrioritizedServerEntry,
+	expires time.Time,
+	paddingSize int) ([]byte, error) {
+
+	payload := Payload{
+		Expires:                  expires,
+		PrioritizedServerEntries: prioritizedServerEntries,
+	}
+
+	cborPayload, err := protocol.CBOREncoding.Marshal(&payload)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	signature := ed25519.Sign(encoder.privateKey, cborPayload)
+
+	encoder.signatureBuffer = encoder.signatureBuffer[:0]
+	encoder.signatureBuffer = append(
+		encoder.signatureBuffer, encoder.publicKeyID...)
+	encoder.signatureBuffer = append(encoder.signatureBuffer, signature...)
+
+	signedPayload := SignedPayload{
+		Signature: encoder.signatureBuffer,
+		Payload:   cborPayload,
+	}
+
+	if paddingSize < 0 || paddingSize > maxPaddingLimit {
+		return nil, errors.TraceNew("invalid padding size")
+	}
+	if paddingSize > 0 {
+		if encoder.paddingBuffer == nil {
+			encoder.paddingBuffer = make([]byte, maxPaddingLimit)
+		}
+		signedPayload.Padding = encoder.paddingBuffer[:paddingSize]
+	}
+
+	cborSignedPayload, err := protocol.CBOREncoding.Marshal(&signedPayload)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// The faster common/prng is appropriate for obfuscation.
+	prng.Read(encoder.nonceBuffer[:])
+
+	encoder.obfuscationBuffer = encoder.obfuscationBuffer[:0]
+	encoder.obfuscationBuffer = append(
+		encoder.obfuscationBuffer, encoder.nonceBuffer...)
+	encoder.obfuscationBuffer = encoder.aead.Seal(
+		encoder.obfuscationBuffer,
+		encoder.nonceBuffer[:],
+		cborSignedPayload,
+		nil)
+
+	return encoder.obfuscationBuffer, nil
 }
