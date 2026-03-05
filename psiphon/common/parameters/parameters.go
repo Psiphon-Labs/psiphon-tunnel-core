@@ -533,8 +533,10 @@ const (
 	DSLRelayHttpIdleConnTimeout                        = "DSLRelayHttpIdleConnTimeout"
 	DSLRelayRequestTimeout                             = "DSLRelayRequestTimeout"
 	DSLRelayRetryCount                                 = "DSLRelayRetryCount"
-	DSLRelayCacheTTL                                   = "DSLRelayCacheTTL"
-	DSLRelayCacheMaxSize                               = "DSLRelayCacheMaxSize"
+	DSLRelayServerEntryCacheTTL                        = "DSLRelayServerEntryCacheTTL"
+	DSLRelayServerEntryCacheMaxSize                    = "DSLRelayServerEntryCacheMaxSize"
+	DSLRelayOSLFileSpecCacheTTL                        = "DSLRelayOSLFileSpecCacheTTL"
+	DSLRelayOSLFileSpecCacheMaxSize                    = "DSLRelayOSLFileSpecCacheMaxSize"
 	EnableDSLFetcher                                   = "EnableDSLFetcher"
 	DSLFetcherTunneledRequestTimeout                   = "DSLFetcherTunneledRequestTimeout"
 	DSLFetcherTunneledRequestRetryCount                = "DSLFetcherTunneledRequestRetryCount"
@@ -1182,8 +1184,10 @@ var defaultParameters = map[string]struct {
 	DSLRelayHttpIdleConnTimeout:                       {value: 120 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	DSLRelayRequestTimeout:                            {value: 30 * time.Second, minimum: time.Duration(0), flags: serverSideOnly},
 	DSLRelayRetryCount:                                {value: 1, minimum: 0, flags: serverSideOnly},
-	DSLRelayCacheTTL:                                  {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
-	DSLRelayCacheMaxSize:                              {value: 200000, minimum: 0, flags: serverSideOnly},
+	DSLRelayServerEntryCacheTTL:                       {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayServerEntryCacheMaxSize:                   {value: 250000, minimum: 0, flags: serverSideOnly},
+	DSLRelayOSLFileSpecCacheTTL:                       {value: 24 * time.Hour, minimum: time.Duration(0), flags: serverSideOnly},
+	DSLRelayOSLFileSpecCacheMaxSize:                   {value: 250000, minimum: 0, flags: serverSideOnly},
 	EnableDSLFetcher:                                  {value: false},
 	DSLFetcherTunneledRequestTimeout:                  {value: 5 * time.Second, minimum: time.Duration(0), flags: useNetworkLatencyMultiplier},
 	DSLFetcherTunneledRequestRetryCount:               {value: 0, minimum: 0},
