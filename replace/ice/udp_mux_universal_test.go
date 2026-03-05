@@ -7,6 +7,7 @@
 package ice
 
 import (
+	"context"
 	"net"
 	"sync"
 	"testing"
@@ -66,7 +67,7 @@ func testMuxSrflxConnection(t *testing.T, udpMux *UniversalUDPMuxDefault, ufrag 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		address, e := udpMux.GetXORMappedAddr(remoteConn.LocalAddr(), time.Second)
+		address, e := udpMux.GetXORMappedAddr(context.Background(), remoteConn.LocalAddr(), time.Second)
 		require.NoError(t, e)
 		require.NotNil(t, address)
 		require.True(t, address.IP.Equal(testXORIP))
@@ -109,7 +110,7 @@ func testMuxSrflxConnection(t *testing.T, udpMux *UniversalUDPMuxDefault, ufrag 
 	wg.Wait()
 
 	// We should get address immediately from the cached map
-	address, err := udpMux.GetXORMappedAddr(remoteConn.LocalAddr(), time.Second)
+	address, err := udpMux.GetXORMappedAddr(context.Background(), remoteConn.LocalAddr(), time.Second)
 	require.NoError(t, err)
 	require.NotNil(t, address)
 
@@ -124,7 +125,7 @@ func testMuxSrflxConnection(t *testing.T, udpMux *UniversalUDPMuxDefault, ufrag 
 
 	// After expire, we send STUN request again
 	// but we not receive response in 5 milliseconds and should get error here
-	address, err = udpMux.GetXORMappedAddr(remoteConn.LocalAddr(), time.Millisecond*5)
+	address, err = udpMux.GetXORMappedAddr(context.Background(), remoteConn.LocalAddr(), time.Millisecond*5)
 	require.NotNil(t, err)
 	require.Nil(t, address)
 }
