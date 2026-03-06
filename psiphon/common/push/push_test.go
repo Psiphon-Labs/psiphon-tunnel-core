@@ -246,6 +246,70 @@ func TestMakePushPayloads_FFD_StrictCapWithPadding(t *testing.T) {
 	}
 }
 
+// BenchmarkMakePushPayloads_FFD_AverageBucketUtilization-16    	    5072	    246849 ns/op	         0.9204 avg_utilization	         4.000 payloads/op	   97190 B/op	     652 allocs/op
+func BenchmarkMakePushPayloads_FFD_AverageBucketUtilization(b *testing.B) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// Create 10 server entries with sizes ranging from ~700 to ~2500 bytes.
+	// Base entry is ~500-700 bytes, so add 0-2000 extra bytes to source field.
+	entries, err := makeTestPrioritizedServerEntries(10, func(i int) int {
+		// Vary size from 0 to 2000 bytes across the 10 entries.
+		return i * 200
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	maxPayloadSizeBytes := 4096
+
+	totalUtilization := 0.0
+	totalPayloadCount := 0.0
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := MakePushPayloads(
+			obfuscationKey,
+			0,
+			0,
+			publicKey,
+			privateKey,
+			1*time.Hour,
+			entries,
+			maxPayloadSizeBytes)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if len(result.SkippedIndexes) != 0 {
+			b.Fatalf("unexpected skipped entries: %d", len(result.SkippedIndexes))
+		}
+		if len(result.Payloads) == 0 {
+			b.Fatal("no payloads generated")
+		}
+
+		totalPayloadBytes := 0
+		for payloadIndex, payload := range result.Payloads {
+			if len(payload) > maxPayloadSizeBytes {
+				b.Fatalf("payload %d exceeded max size: %d > %d", payloadIndex, len(payload), maxPayloadSizeBytes)
+			}
+			totalPayloadBytes += len(payload)
+		}
+
+		averageBucketUtilization := float64(totalPayloadBytes) /
+			float64(len(result.Payloads)*maxPayloadSizeBytes)
+		totalUtilization += averageBucketUtilization
+		totalPayloadCount += float64(len(result.Payloads))
+	}
+	b.StopTimer()
+
+	b.ReportMetric(totalUtilization/float64(b.N), "avg_utilization")
+	b.ReportMetric(totalPayloadCount/float64(b.N), "payloads/op")
+}
+
 func TestMakePushPayloads_MetadataIntegrity(t *testing.T) {
 
 	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
@@ -676,6 +740,10 @@ func importPayloadsAndCountSources(
 	return sourceCounts, nil
 }
 
+// Baseline without bin packing:
+// BenchmarkMakePushPayloads-16    	   19984	     57353 ns/op	   70697 B/op	     248 allocs/op
+//
+// With bin packing:
 // BenchmarkMakePushPayloads-16    	    1027	   1226358 ns/op	  374154 B/op	    2311 allocs/op
 // BenchmarkMakePushPayloads-16    	    1328	    766850 ns/op	  176738 B/op	    1154 allocs/op
 // BenchmarkMakePushPayloads-16    	    4557	    244667 ns/op	   97168 B/op	     652 allocs/op
