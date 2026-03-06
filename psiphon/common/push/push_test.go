@@ -20,6 +20,7 @@
 package push
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
@@ -300,6 +301,94 @@ func TestMakePushPayloads_MetadataIntegrity(t *testing.T) {
 			t.Fatalf("duplicate skipped index: %d", skippedIndex)
 		}
 		seenSkippedIndexes[skippedIndex] = true
+	}
+}
+
+func TestMakePushPayloads_SizeDeltaBounds(t *testing.T) {
+
+	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	obfuscationKeyBytes, err := base64.StdEncoding.DecodeString(obfuscationKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKeyBytes, err := base64.StdEncoding.DecodeString(publicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKeyBytes, err := base64.StdEncoding.DecodeString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	encoder, err := newPayloadEncoder(
+		obfuscationKeyBytes,
+		publicKeyBytes,
+		privateKeyBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := makeTestPrioritizedServerEntries(12, func(i int) int {
+		return (i % 4) * 128
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expires := time.Now().Add(1 * time.Hour).UTC()
+
+	for entryIndex, entry := range entries {
+		lowerBoundDelta, err := estimatePrioritizedServerEntrySizeLowerBound(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		upperBoundDelta, err := encoder.measureObfuscatedPayloadSize(
+			[]*PrioritizedServerEntry{entry}, expires, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for _, paddingSize := range []int{0, 1024} {
+			for baseSize := 0; baseSize < 4; baseSize++ {
+				baseEntries := make([]*PrioritizedServerEntry, 0, baseSize)
+				for i := 0; i < baseSize; i++ {
+					baseEntries = append(baseEntries, entries[(entryIndex+i+1)%len(entries)])
+				}
+
+				basePayloadSize, err := encoder.measureObfuscatedPayloadSize(
+					baseEntries, expires, paddingSize)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				candidateEntries := append(append(
+					[]*PrioritizedServerEntry(nil), baseEntries...), entry)
+				candidatePayloadSize, err := encoder.measureObfuscatedPayloadSize(
+					candidateEntries, expires, paddingSize)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				actualDelta := candidatePayloadSize - basePayloadSize
+				if actualDelta < lowerBoundDelta {
+					t.Fatalf(
+						"actual delta below lower bound: actual=%d lower=%d",
+						actualDelta,
+						lowerBoundDelta)
+				}
+				if actualDelta > upperBoundDelta {
+					t.Fatalf(
+						"actual delta above upper bound: actual=%d upper=%d padding=%d",
+						actualDelta,
+						upperBoundDelta,
+						paddingSize)
+				}
+			}
+		}
 	}
 }
 
@@ -593,7 +682,7 @@ func importPayloadsAndCountSources(
 
 // BenchmarkMakePushPayloads-16    	   19814	     59170 ns/op	   70691 B/op	     248 allocs/op
 // BenchmarkMakePushPayloads-16    	    1027	   1226358 ns/op	  374154 B/op	    2311 allocs/op
-
+// BenchmarkMakePushPayloads-16    	    1328	    766850 ns/op	  176738 B/op	    1154 allocs/op
 func BenchmarkMakePushPayloads(b *testing.B) {
 
 	obfuscationKey, publicKey, privateKey, err := GenerateKeys()

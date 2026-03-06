@@ -99,14 +99,18 @@ type payloadEncoder struct {
 }
 
 type sortablePrioritizedServerEntry struct {
-	entry         *PrioritizedServerEntry
-	originalIndex int
-	sizeEstimate  int
+	entry               *PrioritizedServerEntry
+	originalIndex       int
+	sortWeight          int
+	sizeDeltaLowerBound int
+	sizeDeltaUpperBound int
 }
 
 type payloadBin struct {
-	entries     []*PrioritizedServerEntry
-	paddingSize int
+	entries        []*PrioritizedServerEntry
+	paddingSize    int
+	sizeLowerBound int
+	sizeUpperBound int
 }
 
 // ServerEntryImporter is a callback that is invoked for each server entry in
@@ -323,28 +327,47 @@ func MakePushPayloads(
 		return result, nil
 	}
 
-	// Estimate the payload size for each PriotizedServerEntry.
+	emptyPayloadSize, err := encoder.measureObfuscatedPayloadSize(
+		[]*PrioritizedServerEntry{}, expires, 0)
+	if err != nil {
+		return result, errors.Trace(err)
+	}
+
+	// Estimate size bounds for each PrioritizedServerEntry.
 	entries := make(
 		[]sortablePrioritizedServerEntry, 0, len(prioritizedServerEntries))
 	for i, entry := range prioritizedServerEntries {
-		sizeEstimate, err := encoder.measureObfuscatedPayloadSize(
+		singleEntryPayloadSize, err := encoder.measureObfuscatedPayloadSize(
 			[]*PrioritizedServerEntry{entry}, expires, 0)
 		if err != nil {
 			return result, errors.Trace(err)
 		}
+
+		entrySizeLowerBound, err := estimatePrioritizedServerEntrySizeLowerBound(entry)
+		if err != nil {
+			return result, errors.Trace(err)
+		}
+
+		// Sort by marginal size instead of total single-entry payload size.
+		// This removes the fixed per-payload overhead (signature + AEAD wrappers)
+		// from the FFD sort key.
+		sortWeight := singleEntryPayloadSize - emptyPayloadSize
+
 		entries = append(entries, sortablePrioritizedServerEntry{
-			entry:         entry,
-			originalIndex: i,
-			sizeEstimate:  sizeEstimate,
+			entry:               entry,
+			originalIndex:       i,
+			sortWeight:          sortWeight,
+			sizeDeltaLowerBound: entrySizeLowerBound,
+			sizeDeltaUpperBound: singleEntryPayloadSize,
 		})
 	}
 
 	// Sort by decreasing size
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].sizeEstimate == entries[j].sizeEstimate {
+		if entries[i].sortWeight == entries[j].sortWeight {
 			return entries[i].originalIndex < entries[j].originalIndex
 		}
-		return entries[i].sizeEstimate > entries[j].sizeEstimate
+		return entries[i].sortWeight > entries[j].sortWeight
 	})
 
 	// Worst-case each PrioritizedServerEntry gets it's own bin.
@@ -356,6 +379,25 @@ func MakePushPayloads(
 		// Note that there are no bins on the first loop.
 		placed := false
 		for i := range bins {
+			candidateSizeLowerBound :=
+				bins[i].sizeLowerBound + sortableEntry.sizeDeltaLowerBound
+			if candidateSizeLowerBound > maxPayloadSizeBytes {
+				// Fast path: guaranteed not to fit, skip this bin.
+				continue
+			}
+
+			candidateSizeUpperBound :=
+				bins[i].sizeUpperBound + sortableEntry.sizeDeltaUpperBound
+			if candidateSizeUpperBound <= maxPayloadSizeBytes {
+				// Fast path: upper bound fits, so exact size must fit as well.
+				bins[i].entries = append(bins[i].entries, sortableEntry.entry)
+				bins[i].sizeLowerBound = candidateSizeLowerBound
+				bins[i].sizeUpperBound = candidateSizeUpperBound
+				placed = true
+				break
+			}
+
+			// Ambiguous case: do exact measurement
 			candidateEntries := append(
 				append([]*PrioritizedServerEntry(nil), bins[i].entries...),
 				sortableEntry.entry)
@@ -366,6 +408,8 @@ func MakePushPayloads(
 			}
 			if size <= maxPayloadSizeBytes {
 				bins[i].entries = append(bins[i].entries, sortableEntry.entry)
+				bins[i].sizeLowerBound = size
+				bins[i].sizeUpperBound = size
 				placed = true
 				break
 			}
@@ -375,7 +419,7 @@ func MakePushPayloads(
 			continue
 		}
 
-		// server entry did not fit into existing bins,
+		// Server entry did not fit into existing bins,
 		// create a new bin with a random padding.
 		paddingSize := prng.Range(minPadding, maxPadding)
 		size, err := encoder.measureObfuscatedPayloadSize(
@@ -390,8 +434,10 @@ func MakePushPayloads(
 		}
 
 		bins = append(bins, payloadBin{
-			entries:     []*PrioritizedServerEntry{sortableEntry.entry},
-			paddingSize: paddingSize,
+			entries:        []*PrioritizedServerEntry{sortableEntry.entry},
+			paddingSize:    paddingSize,
+			sizeLowerBound: size,
+			sizeUpperBound: size,
 		})
 	}
 
@@ -404,6 +450,7 @@ func MakePushPayloads(
 		if err != nil {
 			return result, errors.Trace(err)
 		}
+		// Apply a hard correctness check.
 		if len(payload) > maxPayloadSizeBytes {
 			return result, errors.TraceNew(
 				"internal error: payload size exceeds max")
@@ -467,6 +514,19 @@ func (encoder *payloadEncoder) measureObfuscatedPayloadSize(
 	}
 
 	return len(obfuscatedPayload), nil
+}
+
+func estimatePrioritizedServerEntrySizeLowerBound(
+	prioritizedServerEntry *PrioritizedServerEntry) (int, error) {
+
+	// In the final payload, each entry appears as a CBOR array element; at
+	// minimum, this contributes exactly its own CBOR element length.
+	encodedEntry, err := protocol.CBOREncoding.Marshal(prioritizedServerEntry)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	return len(encodedEntry), nil
 }
 
 func (encoder *payloadEncoder) makeObfuscatedPayload(
