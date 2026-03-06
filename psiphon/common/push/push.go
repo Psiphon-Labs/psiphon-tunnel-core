@@ -50,6 +50,11 @@ const (
 	obfuscationKeySize           = 32
 	signaturePublicKeyDigestSize = 8
 	maxPaddingLimit              = 65535
+	// Each server entry can increase up to two CBOR length headers:
+	// - Payload.PrioritizedServerEntries array length
+	// - SignedPayload.Payload byte-string length
+	// Each header can grow by up to 8 bytes, so 16 is a safe global bound.
+	serverEntryCBORSizeOverhead = 16
 )
 
 // Payload is a push payload, consisting of a list of server entries. To
@@ -256,9 +261,10 @@ func ImportPushPayload(
 // When maxPayloadSizeBytes <= 0, all entries are encoded into a single payload.
 //
 // When maxPayloadSizeBytes > 0, entries are packed into multiple payloads using
-// a FFD (first-fit decreasing) strategy based on measured encoded payload sizes.
-// Entries that cannot fit by themselves under maxPayloadSizeBytes are skipped
-// and reported in the returned result metadata.
+// a FFD (first-fit decreasing) strategy based on estimated encoded entry sizes
+// with exact payload-size checks as fallback. Entries that cannot fit by
+// themselves under maxPayloadSizeBytes are skipped and reported in the returned
+// result metadata.
 func MakePushPayloads(
 	payloadObfuscationKey string,
 	minPadding int,
@@ -327,38 +333,26 @@ func MakePushPayloads(
 		return result, nil
 	}
 
-	emptyPayloadSize, err := encoder.measureObfuscatedPayloadSize(
-		[]*PrioritizedServerEntry{}, expires, 0)
-	if err != nil {
-		return result, errors.Trace(err)
-	}
-
 	// Estimate size bounds for each PrioritizedServerEntry.
 	entries := make(
 		[]sortablePrioritizedServerEntry, 0, len(prioritizedServerEntries))
 	for i, entry := range prioritizedServerEntries {
-		singleEntryPayloadSize, err := encoder.measureObfuscatedPayloadSize(
-			[]*PrioritizedServerEntry{entry}, expires, 0)
-		if err != nil {
-			return result, errors.Trace(err)
-		}
-
 		entrySizeLowerBound, err := estimatePrioritizedServerEntrySizeLowerBound(entry)
 		if err != nil {
 			return result, errors.Trace(err)
 		}
+		entrySizeUpperBound := estimatePrioritizedServerEntrySizeUpperBound(
+			entrySizeLowerBound)
 
-		// Sort by marginal size instead of total single-entry payload size.
-		// This removes the fixed per-payload overhead (signature + AEAD wrappers)
-		// from the FFD sort key.
-		sortWeight := singleEntryPayloadSize - emptyPayloadSize
+		// Sort by estimated marginal size.
+		sortWeight := entrySizeLowerBound
 
 		entries = append(entries, sortablePrioritizedServerEntry{
 			entry:               entry,
 			originalIndex:       i,
 			sortWeight:          sortWeight,
 			sizeDeltaLowerBound: entrySizeLowerBound,
-			sizeDeltaUpperBound: singleEntryPayloadSize,
+			sizeDeltaUpperBound: entrySizeUpperBound,
 		})
 	}
 
@@ -527,6 +521,10 @@ func estimatePrioritizedServerEntrySizeLowerBound(
 	}
 
 	return len(encodedEntry), nil
+}
+
+func estimatePrioritizedServerEntrySizeUpperBound(lowerBound int) int {
+	return lowerBound + serverEntryCBORSizeOverhead
 }
 
 func (encoder *payloadEncoder) makeObfuscatedPayload(

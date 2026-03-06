@@ -346,11 +346,7 @@ func TestMakePushPayloads_SizeDeltaBounds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		upperBoundDelta, err := encoder.measureObfuscatedPayloadSize(
-			[]*PrioritizedServerEntry{entry}, expires, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		upperBoundDelta := estimatePrioritizedServerEntrySizeUpperBound(lowerBoundDelta)
 
 		for _, paddingSize := range []int{0, 1024} {
 			for baseSize := 0; baseSize < 4; baseSize++ {
@@ -680,9 +676,9 @@ func importPayloadsAndCountSources(
 	return sourceCounts, nil
 }
 
-// BenchmarkMakePushPayloads-16    	   19814	     59170 ns/op	   70691 B/op	     248 allocs/op
 // BenchmarkMakePushPayloads-16    	    1027	   1226358 ns/op	  374154 B/op	    2311 allocs/op
 // BenchmarkMakePushPayloads-16    	    1328	    766850 ns/op	  176738 B/op	    1154 allocs/op
+// BenchmarkMakePushPayloads-16    	    4557	    244667 ns/op	   97168 B/op	     652 allocs/op
 func BenchmarkMakePushPayloads(b *testing.B) {
 
 	obfuscationKey, publicKey, privateKey, err := GenerateKeys()
